@@ -1,0 +1,46 @@
+# Caddy config for the signaling node. Caddy auto-obtains + renews a Let's Encrypt cert
+# for SIGNALING_DOMAIN and reverse-proxies wss:// to the broker (WebSocket upgrades pass
+# through transparently). Values come from the container environment (set in the compose).
+{
+	email {$ACME_EMAIL}
+}
+
+{$SIGNALING_DOMAIN} {
+	# Any WebSocket upgrade -> the signaling broker, regardless of path. Phones pair to
+	# wss://<domain>/signal, but pairings issued before the /signal move use wss://<domain>
+	# (path "/"); routing by the Upgrade header makes BOTH work, while normal GET "/" still
+	# serves the static shell below.
+	@ws {
+		header Connection *Upgrade*
+		header Upgrade websocket
+	}
+	handle @ws {
+		reverse_proxy signaling:8089
+	}
+	# /api and /mcp are served by the Desktop over the WebRTC DataChannel, NEVER by this
+	# node. Return 404 so the SPA's direct-reachability probe fails and it uses the remote
+	# (WebRTC) path. (Without this, the SPA fallback below would answer 200 and mislead it.)
+	handle /api* {
+		respond 404
+	}
+	handle /mcp* {
+		respond 404
+	}
+	# The service worker must never be served stale: a cached SW script means iOS Safari
+	# keeps running the OLD worker after a deploy. no-cache forces revalidation on every
+	# load (the ETag still allows a cheap 304 when truly unchanged), so a new SW is picked
+	# up immediately -> install -> skipWaiting.
+	@swupdate path /service-worker.js /manifest.webmanifest
+	handle @swupdate {
+		header Cache-Control "no-cache"
+		root * /srv/web
+		file_server
+	}
+	# The data-free PWA shell (static files), so a phone loads the app from this
+	# always-reachable origin. SPA fallback to index.html for client-side routes.
+	handle {
+		root * /srv/web
+		try_files {path} /index.html
+		file_server
+	}
+}

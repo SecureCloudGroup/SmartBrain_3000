@@ -1,0 +1,45 @@
+# Remote-access overlay — WireGuard (OFF by default; opt-in).
+#
+# Lets your phone reach SmartBrain when it's NOT on your home Wi-Fi, over an
+# encrypted WireGuard tunnel. Use it WITH the base + LAN overlays (the app must be
+# LAN-exposed so the tunnel can route to it), via the installer:
+#   python3 installer/install.py wireguard up
+#
+# How it works: this runs a WireGuard server (linuxserver/wireguard) that
+# auto-generates the server keys AND a ready-to-scan phone config (QR). Your phone
+# connects with the WireGuard app, then opens the SAME url it uses on Wi-Fi
+# (https://<your-LAN-IP>:33000) — the tunnel routes it home. Full-tunnel by default
+# so it "just works"; set SMARTBRAIN_WG_ALLOWEDIPS to your LAN subnet for split.
+#
+# ONE manual step (unavoidable for a home server behind NAT): forward UDP 51820 on
+# your router to this computer. See docs/07-remote-access (in-app Help).
+services:
+  wireguard:
+    image: lscr.io/linuxserver/wireguard:1.0.20210914
+    container_name: smartbrain_wireguard
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Etc/UTC
+      # Public address peers dial in on. "auto" asks an IP-echo service for your
+      # public IP; set SMARTBRAIN_WG_ENDPOINT to a dynamic-DNS name if you have one.
+      - SERVERURL=${SMARTBRAIN_WG_ENDPOINT:-auto}
+      - SERVERPORT=51820
+      # One device named "phone" — linuxserver writes its config + QR under
+      # data/wireguard/peer_phone/. Add more (comma-separated) for more devices.
+      - PEERS=${SMARTBRAIN_WG_PEERS:-phone}
+      - PEERDNS=auto
+      - INTERNAL_SUBNET=10.13.13.0
+      # Full tunnel (reaches your home LAN, incl. the app). Set to your LAN subnet
+      # (e.g. 192.168.1.0/24) for a split tunnel that only routes home traffic.
+      - ALLOWEDIPS=${SMARTBRAIN_WG_ALLOWEDIPS:-0.0.0.0/0}
+    ports:
+      - "51820:51820/udp"
+    volumes:
+      - ../data/wireguard:/config
+    sysctls:
+      - net.ipv4.conf.all.src_valid_mark=1
+    restart: unless-stopped

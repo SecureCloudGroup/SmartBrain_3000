@@ -1,0 +1,13 @@
+# CODEOWNERS — default reviewers for pull requests.
+#
+# Owners MUST be GitHub accounts with WRITE access to this repo. To enforce, enable
+# "Require review from Code Owners" in branch protection for `main`.
+
+*                               @SecureCloudGroup
+/app/smartbrain_3000/keyvault.py    @SecureCloudGroup
+/app/smartbrain_3000/secrets.py     @SecureCloudGroup
+/app/smartbrain_3000/tools.py       @SecureCloudGroup
+/app/smartbrain_3000/approvals.py   @SecureCloudGroup
+/app/smartbrain_3000/netguard.py    @SecureCloudGroup
+/app/smartbrain_3000/email_oauth.py @SecureCloudGroup
+LICENSE                             @SecureCloudGroup

@@ -1,0 +1,70 @@
+# SmartBrain_3000 — local stack.
+#
+# Services:
+#   smartbrain — FastAPI app + embedded DuckDB + (later) SvelteKit UI
+#   bifrost    — LLM gateway (OpenAI-compatible) the app routes all models through
+#
+# Build context is the repo root (one level up from this file). All host data
+# lives under the repo-root ./data directory, which is git-ignored.
+services:
+  smartbrain:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: smartbrain_3000:dev
+    container_name: smartbrain_3000
+    restart: unless-stopped
+    # Loopback-only: NOT exposed to the LAN. Desktop reaches it at
+    # http://localhost:33000. Mobile/LAN access is added later (mkcert + mDNS).
+    ports:
+      - "127.0.0.1:33000:33000"
+    environment:
+      SMARTBRAIN_DB_PATH: /app/data/smartbrain.duckdb
+      # Bind all interfaces INSIDE the container so the loopback-only host port
+      # mapping above can reach it. serve.py defaults to 127.0.0.1 otherwise.
+      SMARTBRAIN_HOST: 0.0.0.0
+      # Where the app reaches the LLM gateway (used from C2 onward).
+      SMARTBRAIN_LLM_GATEWAY_URL: http://bifrost:8080
+      # Embedding model for semantic KB search, routed to Ollama via Bifrost.
+      # Must match a model pulled in Ollama (exact tag matters). The default is
+      # LOCAL — keep it local to keep your knowledge on-box. Pointing this at a
+      # cloud provider (e.g. openai/...) sends your KB content to that provider
+      # on every reindex; only do that if you accept that tradeoff.
+      SMARTBRAIN_EMBED_MODEL: ${SMARTBRAIN_EMBED_MODEL:-ollama/nomic-embed-text:v1.5}
+    volumes:
+      - ../data:/app/data
+    # The app probes host-run local model servers (Ollama/MLX) at
+    # host.docker.internal for the Local Models status panel.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      bifrost:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:33000/api/health', timeout=2).status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  bifrost:
+    image: maximhq/bifrost:latest
+    container_name: smartbrain_bifrost
+    restart: unless-stopped
+    # The app reaches Bifrost in-cluster at http://bifrost:8080. The host
+    # mapping below is loopback-only and OPTIONAL — it only lets an advanced
+    # user open the Bifrost admin UI at http://localhost:38080.
+    ports:
+      - "127.0.0.1:38080:8080"
+    # Lets Bifrost reach host-run local model servers (Ollama / Apple MLX)
+    # at host.docker.internal — wired up in C3.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ../data/bifrost:/app/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/api/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 15s

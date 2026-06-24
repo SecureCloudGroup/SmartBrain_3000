@@ -1,0 +1,106 @@
+# ============================================================================
+# SmartBrain_3000 — .gitignore
+#
+# Secrets and local user data must NEVER be committed. The patterns below are
+# intentionally broad. (Our predecessor leaked an `.env.local.bak` because only
+# `.env.local` was ignored — hence the explicit `*.bak` and `.env.*` coverage.)
+# ============================================================================
+
+# ---- Secrets, env files, backups -------------------------------------------
+.env
+.env.*
+!.env.example
+*.bak
+*.backup
+*~
+*.secret
+*.secrets
+secrets/
+
+# ---- Keys & certificates (mkcert local CA, WireGuard, TLS) ------------------
+*.pem
+*.key
+*.crt
+*.cer
+*.p12
+*.pfx
+rootCA*
+mkcert*/
+certs/
+wireguard/
+wg*.conf
+*.wg
+
+# ---- Recovery / Emergency Kit (user-held, offline only) --------------------
+emergency-kit*
+recovery-key*
+*.recoverykit
+
+# ---- Local user data: embedded DuckDB, sqlite, runtime state ---------------
+data/
+runtime/
+*.duckdb
+*.duckdb.wal
+*.wal
+*.sqlite
+*.sqlite3
+*.db
+
+# ---- LLM gateway (Bifrost) runtime config — may contain provider keys ------
+bifrost-config.json
+bifrost-config.*.json
+
+# ---- Python -----------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+.venv/
+venv/
+env/
+ENV/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# ---- Node / SvelteKit / Vite ------------------------------------------------
+node_modules/
+.svelte-kit/
+.vite/
+*.tsbuildinfo
+
+# Generated at build time from /docs by web/scripts/build-docs.mjs (derived).
+web/src/lib/docs.generated.ts
+npm-debug.log*
+pnpm-debug.log*
+yarn-error.log*
+
+# ---- Docker local overrides -------------------------------------------------
+docker-compose.override.yml
+docker-compose.*.override.yml
+
+# ---- Logs -------------------------------------------------------------------
+*.log
+logs/
+
+# ---- Benchmark output (machine-specific results; never committed) -----------
+bench/llm_shootout/results/
+
+# ---- OS / editor ------------------------------------------------------------
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# ---- AI assistant local files ----------------------------------------------
+.claude/

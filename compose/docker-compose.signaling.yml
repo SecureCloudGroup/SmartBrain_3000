@@ -1,0 +1,111 @@
+# Operator-run PUBLIC node: Caddy (auto-TLS) + WebRTC signaling broker + coturn (STUN/TURN).
+#
+# This is the ONLY public, operator-run piece of the remote-access path, and it is
+# content-blind: the broker sees only SDP (setup metadata), and coturn relays only DTLS
+# ciphertext. Caddy terminates TLS and reverse-proxies wss:// to the broker, auto-obtaining
+# and renewing a Let's Encrypt cert for SIGNALING_DOMAIN.
+#
+# Deploy on a small VPS (NOT the home machine). First: point SIGNALING_DOMAIN's DNS A record
+# at this VPS (DNS-only, no CDN proxy) and open inbound 80/443 (TCP) + 3478 (TCP+UDP) +
+# 49160-49260 (UDP). Then put the secrets in a .env file beside this compose file and run:
+#   docker compose -f compose/docker-compose.signaling.yml up -d
+#
+# Required env (.env): SIGNALING_DOMAIN, ACME_EMAIL, SIGNALING_TOKEN, TURN_USER, TURN_PASSWORD,
+#                      TURN_PUBLIC_IP (the VPS public IPv4)
+#
+# TURN uses long-term static credentials (lt-cred-mech): they don't expire (no refresh dance)
+# and relay abuse is bounded by the quotas below. They grant ONLY relay bandwidth — never app
+# access, which is gated by the device credential + channel-auth. Use the SAME TURN_USER/
+# TURN_PASSWORD in the home overlay (SMARTBRAIN_TURN_USERNAME/_CREDENTIAL).
+# NOTE: coturn's --user is "name:password", so TURN_PASSWORD must NOT contain a colon (:).
+services:
+  caddy:
+    image: caddy:2
+    container_name: sb_caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"     # ACME HTTP-01 challenge + HTTP->HTTPS redirect
+      - "443:443"   # wss:// signaling (TLS terminated here)
+    environment:
+      - SIGNALING_DOMAIN=${SIGNALING_DOMAIN:?set the signaling subdomain, e.g. connect.example.com}
+      - ACME_EMAIL=${ACME_EMAIL:?set an email for Let's Encrypt notices}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./web:/srv/web:ro       # data-free PWA shell served at / (built from app/smartbrain_3000/web)
+      - caddy_data:/data        # persists issued certs across restarts (don't lose this)
+      - caddy_config:/config
+    depends_on:
+      - signaling
+
+  signaling:
+    build: ../signaling
+    container_name: sb_signaling
+    environment:
+      - SIGNALING_HOST=0.0.0.0
+      - SIGNALING_PORT=8089
+      # Shared desktop-registration secret (stops open abuse / desktop-slot squatting).
+      - SIGNALING_TOKEN=${SIGNALING_TOKEN:?set a desktop registration secret}
+      # ICE handed to pairing-by-code clients (the installed app has no TURN creds until it
+      # has the payload). Reuses coturn's creds; relay bandwidth only, quota-bounded.
+      # turn ?transport=tcp is the fallback when a network (some cellular carriers) blocks
+      # UDP — coturn already listens on TCP 3478. Without it such clients can't relay and
+      # "don't connect at all" while Wi-Fi works.
+      - SMARTBRAIN_PAIR_ICE_URLS=stun:${SIGNALING_DOMAIN}:3478,turn:${SIGNALING_DOMAIN}:3478,turn:${SIGNALING_DOMAIN}:3478?transport=tcp
+      - SMARTBRAIN_PAIR_TURN_USERNAME=${TURN_USER:-}
+      - SMARTBRAIN_PAIR_TURN_CREDENTIAL=${TURN_PASSWORD:-}
+    # No published port — Caddy reaches it on the internal network as signaling:8089.
+    restart: unless-stopped
+
+  coturn:
+    image: coturn/coturn:4.6
+    container_name: sb_coturn
+    # coturn needs a wide UDP relay-port range reachable from clients; host networking
+    # is the simplest correct setup on a dedicated VPS.
+    network_mode: host
+    # --no-tls/--no-dtls: no cert here (plain TURN on 3478; add TURNS later if needed).
+    # --log-file=stdout: log to the container console so `docker compose logs coturn` works
+    # (coturn otherwise logs to a file inside the container, which hides startup + errors).
+    # --listening-ip/--relay-ip pin STUN/TURN + relay allocations to the VPS public IP. With
+    # host networking coturn otherwise auto-discovers the docker0/bridge IPs (172.x) and ::1
+    # and can hand a client an unreachable relay address; pinning to the public IP avoids that.
+    # Loopback is denied via the 127/8 range below (coturn has no --no-loopback-peers flag).
+    # IPv6 denies are omitted because this VPS has no IPv6 assigned; re-add RFC1918-equivalent
+    # IPv6 ranges (fc00::/7 ULA, fe80::/10 link-local, ::1) if you enable IPv6 on the host.
+    # List form (not a folded ">" block): each arg is exactly one argv element — robust against
+    # whitespace-splitting surprises. NOTE: coturn 4.6 logs one benign "ERROR: CONFIG: Unknown
+    # argument:" (empty value) at startup regardless of the arguments given (reproducible with a
+    # minimal command) — it's an image quirk with no functional impact (coturn starts + relays
+    # normally). Don't chase it.
+    command:
+      - "-n"
+      - "--no-cli"
+      - "--no-tls"
+      - "--no-dtls"
+      - "--log-file=stdout"
+      - "--listening-port=3478"
+      - "--listening-ip=${TURN_PUBLIC_IP:?set the VPS public IPv4, e.g. 203.0.113.10}"
+      - "--relay-ip=${TURN_PUBLIC_IP}"
+      - "--min-port=49160"
+      - "--max-port=49260"
+      - "--lt-cred-mech"
+      - "--user=${TURN_USER:?set a TURN username}:${TURN_PASSWORD:?set a TURN password}"
+      - "--realm=smartbrain"
+      - "--fingerprint"
+      - "--no-multicast-peers"
+      - "--no-tcp-relay"
+      - "--stale-nonce=600"
+      - "--user-quota=12"
+      - "--total-quota=1200"
+      - "--max-bps=2000000"
+      - "--denied-peer-ip=0.0.0.0-0.255.255.255"
+      - "--denied-peer-ip=10.0.0.0-10.255.255.255"
+      - "--denied-peer-ip=100.64.0.0-100.127.255.255"
+      - "--denied-peer-ip=127.0.0.0-127.255.255.255"
+      - "--denied-peer-ip=169.254.0.0-169.254.255.255"
+      - "--denied-peer-ip=172.16.0.0-172.31.255.255"
+      - "--denied-peer-ip=192.168.0.0-192.168.255.255"
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:

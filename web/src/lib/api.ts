@@ -1,0 +1,523 @@
+// Thin same-origin client for the SmartBrain backend. Every call returns parsed
+// JSON or throws ApiError(status, detail) so callers can branch on status. The
+// backend never returns secret values — only names. A 423 (vault locked) is
+// handled centrally here (redirect to /unlock) so no page can forget it.
+
+import { goto } from "$app/navigation";
+
+import { remoteReady } from "$lib/remote/sw-bridge";
+
+export class ApiError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+    this.name = "ApiError";
+  }
+}
+
+async function req<T>(path: string, opts: RequestInit = {}): Promise<T> {
+  await remoteReady; // off-LAN, ensure the /api->WebRTC fetch override is installed first
+  const res = await fetch(path, {
+    ...opts,
+    headers: { "content-type": "application/json", ...(opts.headers ?? {}) },
+  });
+  const data = res.status === 204 ? null : await res.json().catch(() => null);
+  if (!res.ok) {
+    const detail = (data && (data as { detail?: string }).detail) || `request failed (${res.status})`;
+    if (res.status === 423) {
+      goto("/unlock"); // vault locked mid-session — bounce to unlock
+    }
+    throw new ApiError(res.status, detail);
+  }
+  return data as T;
+}
+
+export interface AccountStatus {
+  initialized: boolean;
+  unlocked: boolean;
+  has_recovery: boolean;
+}
+
+export interface EmergencyKit {
+  recovery_key: string;
+  emergency_kit: string;
+}
+
+export interface ModelProvider {
+  configured: boolean;
+  reachable: boolean;
+  models: string[];
+  url: string; // configured server URL (host.docker.internal:<port>); "" if unset
+  detected: boolean; // not configured, but a server answered on the default port — offer 1-tap connect
+  default_url: string; // the default host URL the server was detected on
+}
+
+export interface LocalModels {
+  ollama: ModelProvider;
+  mlx: ModelProvider;
+}
+
+export interface DiscoveredModel {
+  id: string; // "provider/model"
+  name: string;
+  provider: string; // gateway provider name (e.g. "gemini", "ollama")
+  context_length: number | null;
+  pricing: { prompt: number; completion: number } | null; // per-token; null = local/free
+  chat: boolean; // chat-capable (vs embedding/image/audio)
+  embed: boolean; // embedding-capable (for semantic search)
+}
+
+export interface UsageRow {
+  model: string;
+  calls: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  cost: number; // USD, computed from live catalog pricing
+  local: boolean; // local provider (no cost)
+}
+
+export interface ChatMessage {
+  role: "user" | "assistant" | "system";
+  content: string;
+}
+
+export interface ChatResponse {
+  choices: { message: ChatMessage }[];
+}
+
+export interface Conversation {
+  id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface StoredMessage {
+  id: string;
+  role: "user" | "assistant" | "system";
+  content: string;
+  created_at: string;
+}
+
+export interface ConversationFull extends Conversation {
+  messages: StoredMessage[];
+}
+
+export interface AgentResult {
+  status: "complete" | "awaiting_approval" | "max_steps" | "error";
+  message?: string;
+  detail?: string; // present on a scheduled-run error
+  turn_id?: string;
+  pending?: { id: string; tool: string; tier: string }[];
+  degraded?: boolean;
+}
+
+export interface Memory {
+  id: string;
+  text: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Profile {
+  assistant_name: string;
+  user_name: string;
+  instructions: string;
+}
+
+export type TaskPriority = "low" | "medium" | "high";
+export type TaskRecur = "none" | "daily" | "weekly";
+
+export interface Task {
+  id: string;
+  title: string;
+  notes: string;
+  tags: string[];
+  status: "open" | "done";
+  due_date: string | null;
+  due_time: string | null;
+  priority: TaskPriority;
+  recur: TaskRecur;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TaskInput {
+  title: string;
+  notes: string;
+  due_date: string | null;
+  due_time: string | null;
+  priority: TaskPriority;
+  recur: TaskRecur;
+  tags: string[];
+}
+
+export interface PendingAction {
+  id: string;
+  tool: string;
+  tier: string;
+  created_at: string;
+  args: Record<string, unknown>;
+}
+
+export interface Schedule {
+  id: string;
+  title: string;
+  prompt: string;
+  model: string | null;
+  enabled: boolean;
+  interval_minutes: number;
+  next_run: string;
+  last_run: string | null;
+}
+
+export interface ScheduleInput {
+  title: string;
+  prompt: string;
+  interval_minutes: number;
+  start_in_minutes: number;
+  model: string | null;
+}
+
+export interface ScheduleRun {
+  id: string;
+  ran_at: string;
+  status: string;
+  message: string;
+  error: string | null;
+}
+
+export interface AuditEntry {
+  id: string;
+  ts: string;
+  actor: string;
+  tool: string;
+  tier: string;
+  decision: string;
+  ok: boolean;
+  conversation_id: string | null;
+  args_summary: string;
+  result_summary: string;
+  error: string;
+}
+
+export interface EmailStatus {
+  connected: boolean;
+  address: string | null;
+  has_creds: boolean;
+  redirect_uri: string;
+}
+
+export interface EmailMessage {
+  id: string;
+  thread_id: string;
+  from: string;
+  subject: string;
+  date: string;
+  snippet?: string;
+  body?: string;
+}
+
+export interface KbDoc {
+  id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface KbDocFull extends KbDoc {
+  content: string;
+}
+
+export interface KbHit {
+  id: string;
+  title: string;
+  score: number;
+  snippet: string;
+}
+
+export interface DeviceInfo {
+  device_id: string;
+  label: string;
+  created_at: string;
+}
+
+// POST /api/devices response = the full pairing payload (shown once, encoded into the QR).
+export interface PairingResponse extends DeviceInfo {
+  credential: string;
+  desktop_pubkey: string;
+  signaling_url: string;
+  desktop_id: string;
+  ice_servers: RTCIceServer[];
+}
+
+export const api = {
+  health: () => req<{ status: string; version: string }>("/api/health"),
+  accountStatus: () => req<AccountStatus>("/api/account/status"),
+  setup: (passphrase: string) =>
+    req<EmergencyKit>("/api/account/setup", { method: "POST", body: JSON.stringify({ passphrase }) }),
+  unlock: (body: { passphrase?: string; recovery_key?: string }) =>
+    req<{ unlocked: boolean }>("/api/account/unlock", { method: "POST", body: JSON.stringify(body) }),
+  lock: () => req<{ unlocked: boolean }>("/api/account/lock", { method: "POST" }),
+  changePassphrase: (current_passphrase: string, new_passphrase: string) =>
+    req<{ ok: boolean }>("/api/account/passphrase", {
+      method: "POST",
+      body: JSON.stringify({ current_passphrase, new_passphrase }),
+    }),
+  resetPassphrase: (new_passphrase: string) =>
+    req<{ ok: boolean }>("/api/account/passphrase/reset", {
+      method: "POST",
+      // X-SB-Local marks a Desktop-local request; the WebRTC bridge strips it, so a
+      // remote/paired device cannot reset the passphrase (Security B8/F7).
+      headers: { "x-sb-local": "1" },
+      body: JSON.stringify({ new_passphrase }),
+    }),
+
+  // data portability (export JSON, download an encrypted backup, restore one)
+  exportData: () => req<Record<string, unknown>>("/api/export"),
+  backup: async (): Promise<Blob> => {
+    await remoteReady;
+    const res = await fetch("/api/backup");
+    if (!res.ok) throw new ApiError(res.status, `backup failed (${res.status})`);
+    return res.blob();
+  },
+  restore: async (file: File): Promise<{ ok: boolean; message: string }> => {
+    await remoteReady;
+    // X-SB-Local: Desktop-local only — the WebRTC bridge strips it so a remote device
+    // cannot replace the vault (Security B8/F7).
+    const res = await fetch("/api/restore", { method: "POST", headers: { "x-sb-local": "1" }, body: file });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) throw new ApiError(res.status, (data as { detail?: string })?.detail || `restore failed (${res.status})`);
+    return data as { ok: boolean; message: string };
+  },
+
+  // secrets (provider API keys are named provider:<name>:api_key)
+  listSecrets: () => req<{ keys: string[] }>("/api/secrets"),
+  putSecret: (key: string, value: string) =>
+    req<{ ok: boolean; gateway_synced?: boolean }>(`/api/secrets/${encodeURIComponent(key)}`, {
+      method: "PUT",
+      body: JSON.stringify({ value }),
+    }),
+  deleteSecret: (key: string) =>
+    req<{ ok: boolean }>(`/api/secrets/${encodeURIComponent(key)}`, { method: "DELETE" }),
+
+  // local models (Ollama / MLX, run on the host, fronted by Bifrost)
+  localModels: () => req<LocalModels>("/api/local-models"),
+  listModels: () => req<{ models: DiscoveredModel[] }>("/api/models"),
+  getRoutes: () => req<{ routes: Record<string, string>; labels: Record<string, string> }>("/api/routes"),
+  putRoutes: (routes: Record<string, string>) =>
+    req<{ ok: boolean; routes: Record<string, string> }>("/api/routes", {
+      method: "PUT",
+      body: JSON.stringify({ routes }),
+    }),
+  getUsage: (range?: { since?: string; until?: string }) => {
+    const q = new URLSearchParams();
+    if (range?.since) q.set("since", range.since);
+    if (range?.until) q.set("until", range.until);
+    const qs = q.toString();
+    return req<{ usage: UsageRow[]; total_cost: number }>(`/api/usage${qs ? `?${qs}` : ""}`);
+  },
+  putOllama: (url: string) =>
+    req<{ ok: boolean; gateway_synced?: boolean }>("/api/local-models/ollama", { method: "PUT", body: JSON.stringify({ url }) }),
+  putMlx: (url: string, api_key: string) =>
+    req<{ ok: boolean; gateway_synced?: boolean }>("/api/local-models/mlx", {
+      method: "PUT",
+      body: JSON.stringify({ url, api_key }),
+    }),
+  deleteLocalModel: (name: "ollama" | "mlx") =>
+    req<{ ok: boolean; gateway_synced?: boolean }>(`/api/local-models/${name}`, { method: "DELETE" }),
+
+  // chat (stateless on the server today — the client sends the full transcript)
+  chat: (body: { messages: ChatMessage[]; model?: string; capability?: string }) =>
+    req<ChatResponse>("/api/chat", { method: "POST", body: JSON.stringify(body) }),
+
+  // agentic tool-calling turn (OBSERVE auto-runs; dangerous tools park for approval)
+  agentTurn: (body: { messages: ChatMessage[]; model?: string; capability?: string; conversation_id?: string | null }) =>
+    req<AgentResult>("/api/agent/turn", { method: "POST", body: JSON.stringify(body) }),
+  agentResume: (turnId: string) =>
+    req<AgentResult>(`/api/agent/resume/${encodeURIComponent(turnId)}`, { method: "POST" }),
+  // SSE token streaming for a turn (Desktop/local only — the WebRTC relay buffers, so
+  // callers fall back to agentTurn over a remote session). Returns the raw Response;
+  // the caller reads the text/event-stream body. 423/4xx still surface as ApiError.
+  agentTurnStream: async (body: {
+    messages: ChatMessage[];
+    model?: string;
+    capability?: string;
+    conversation_id?: string | null;
+  }): Promise<Response> => {
+    await remoteReady;
+    const res = await fetch("/api/agent/turn/stream", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const detail = (await res.json().catch(() => null) as { detail?: string } | null)?.detail;
+      if (res.status === 423) goto("/unlock");
+      throw new ApiError(res.status, detail || `stream failed (${res.status})`);
+    }
+    return res;
+  },
+
+  // chat history (encrypted conversations + messages; keyset pagination via before/limit)
+  listConversations: (opts: { before?: string; limit?: number } = {}) => {
+    const qs = new URLSearchParams();
+    if (opts.before) qs.set("before", opts.before);
+    if (opts.limit) qs.set("limit", String(opts.limit));
+    const q = qs.toString();
+    return req<{ conversations: Conversation[]; next_cursor?: string | null; has_more?: boolean }>(
+      `/api/conversations${q ? `?${q}` : ""}`,
+    );
+  },
+  createConversation: (title?: string) =>
+    req<{ id: string }>("/api/conversations", { method: "POST", body: JSON.stringify({ title }) }),
+  getConversation: (id: string, opts: { before?: string; limit?: number } = {}) => {
+    const qs = new URLSearchParams();
+    if (opts.before) qs.set("before", opts.before);
+    if (opts.limit) qs.set("limit", String(opts.limit));
+    const q = qs.toString();
+    return req<ConversationFull & { next_cursor?: string | null; has_more?: boolean }>(
+      `/api/conversations/${encodeURIComponent(id)}${q ? `?${q}` : ""}`,
+    );
+  },
+  renameConversation: (id: string, title: string) =>
+    req<{ ok: boolean }>(`/api/conversations/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ title }),
+    }),
+  deleteConversation: (id: string) =>
+    req<{ ok: boolean }>(`/api/conversations/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  addMessage: (id: string, role: "user" | "assistant" | "system", content: string) =>
+    req<{ id: string }>(`/api/conversations/${encodeURIComponent(id)}/messages`, {
+      method: "POST",
+      body: JSON.stringify({ role, content }),
+    }),
+
+  // tools + audit (H4)
+  listToolDefs: () => req<{ tools: { name: string; description: string; tier: string }[] }>("/api/tools"),
+  invokeTool: (name: string, args: Record<string, unknown>) =>
+    req<{ result: unknown }>("/api/tools/invoke", { method: "POST", body: JSON.stringify({ name, args }) }),
+  getAudit: (limit = 100) => req<{ entries: AuditEntry[] }>(`/api/audit?limit=${limit}`),
+  listPending: () => req<{ pending: PendingAction[] }>("/api/agent/pending"),
+  approveAction: (id: string, confirmTool: string | null = null, remember = false) =>
+    req<{ status: string; result: unknown }>(`/api/agent/pending/${encodeURIComponent(id)}/approve`, {
+      method: "POST",
+      body: JSON.stringify({ confirm_tool: confirmTool, remember }),
+    }),
+  denyAction: (id: string) =>
+    req<{ ok: boolean }>(`/api/agent/pending/${encodeURIComponent(id)}/deny`, { method: "POST" }),
+  listRemembered: () => req<{ tools: string[] }>("/api/agent/remembered"),
+  forgetRemembered: (name: string) =>
+    req<{ ok: boolean }>(`/api/agent/remembered/${encodeURIComponent(name)}`, { method: "DELETE" }),
+
+  // planner tasks (encrypted; status + due_date plaintext)
+  listTasks: () => req<{ tasks: Task[] }>("/api/tasks"),
+  addTask: (body: TaskInput) =>
+    req<{ id: string }>("/api/tasks", { method: "POST", body: JSON.stringify(body) }),
+  updateTask: (id: string, body: TaskInput) =>
+    req<{ ok: boolean }>(`/api/tasks/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  setTaskStatus: (id: string, status: "open" | "done") =>
+    req<{ ok: boolean }>(`/api/tasks/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ status }),
+    }),
+  deleteTask: (id: string) =>
+    req<{ ok: boolean }>(`/api/tasks/${encodeURIComponent(id)}`, { method: "DELETE" }),
+
+  // schedules (encrypted prompt; fires an agent turn while unlocked)
+  listSchedules: () => req<{ schedules: Schedule[] }>("/api/schedules"),
+  addSchedule: (body: ScheduleInput) =>
+    req<{ id: string }>("/api/schedules", { method: "POST", body: JSON.stringify(body) }),
+  updateSchedule: (id: string, body: ScheduleInput) =>
+    req<{ ok: boolean }>(`/api/schedules/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  setScheduleEnabled: (id: string, enabled: boolean) =>
+    req<{ ok: boolean }>(`/api/schedules/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ enabled }),
+    }),
+  deleteSchedule: (id: string) =>
+    req<{ ok: boolean }>(`/api/schedules/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  runSchedule: (id: string) =>
+    req<AgentResult>(`/api/schedules/${encodeURIComponent(id)}/run`, { method: "POST" }),
+  listScheduleRuns: (id: string) =>
+    req<{ runs: ScheduleRun[] }>(`/api/schedules/${encodeURIComponent(id)}/runs`),
+
+  // memory + identity (facts injected into chat server-side)
+  listMemories: () => req<{ memories: Memory[] }>("/api/memories"),
+  addMemory: (text: string) =>
+    req<{ id: string }>("/api/memories", { method: "POST", body: JSON.stringify({ text }) }),
+  deleteMemory: (id: string) =>
+    req<{ ok: boolean }>(`/api/memories/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  getProfile: () => req<Profile>("/api/profile"),
+  setProfile: (p: Profile) => req<{ ok: boolean }>("/api/profile", { method: "PUT", body: JSON.stringify(p) }),
+
+  // knowledge base (encrypted at rest; lexical + semantic search)
+  listDocs: () => req<{ documents: KbDoc[] }>("/api/kb"),
+  addDoc: (title: string, content: string) =>
+    req<{ id: string }>("/api/kb", { method: "POST", body: JSON.stringify({ title, content }) }),
+  ingestUrl: (url: string) =>
+    req<{ id: string; title: string; chars: number }>("/api/kb/ingest-url", {
+      method: "POST",
+      body: JSON.stringify({ url }),
+    }),
+  uploadDoc: (file: File) =>
+    req<{ id: string; title: string; chars: number }>(
+      `/api/kb/upload?filename=${encodeURIComponent(file.name)}`,
+      { method: "POST", body: file, headers: { "content-type": "application/octet-stream" } },
+    ),
+  getDoc: (id: string) => req<KbDocFull>(`/api/kb/${encodeURIComponent(id)}`),
+  renameDoc: (id: string, title: string) =>
+    req<{ ok: boolean }>(`/api/kb/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ title }),
+    }),
+  deleteDoc: (id: string) =>
+    req<{ ok: boolean }>(`/api/kb/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  searchKb: (q: string, mode: "lexical" | "semantic") =>
+    req<{ results: KbHit[]; degraded?: boolean }>(
+      `/api/kb/search?${new URLSearchParams({ q, mode }).toString()}`,
+    ),
+  reindexKb: () =>
+    req<{ embedded: number; skipped: number; failed: number; error: string }>("/api/kb/reindex", { method: "POST" }),
+
+  // email (Gmail via loopback OAuth; reads + user-initiated send; agent send is gated)
+  emailStatus: () => req<EmailStatus>("/api/email/status"),
+  emailConnect: (client_id: string, client_secret: string) =>
+    req<{ auth_url: string }>("/api/email/connect", {
+      method: "POST",
+      body: JSON.stringify({ client_id, client_secret }),
+    }),
+  emailReconnect: () => req<{ auth_url: string }>("/api/email/reconnect", { method: "POST" }),
+  emailDisconnect: () => req<{ ok: boolean }>("/api/email/disconnect", { method: "DELETE" }),
+  emailMessages: (limit = 10) => req<{ messages: EmailMessage[] }>(`/api/email/messages?limit=${limit}`),
+  emailMessage: (id: string) => req<EmailMessage>(`/api/email/messages/${encodeURIComponent(id)}`),
+  emailSend: (to: string, subject: string, body: string) =>
+    req<{ id: string; thread_id: string }>("/api/email/send", {
+      method: "POST",
+      body: JSON.stringify({ to, subject, body }),
+    }),
+
+  // MCP access token (read-only Knowledge for external tools)
+  mcpInfo: () => req<{ endpoint: string; enabled: boolean }>("/api/mcp"),
+  mcpToken: () => req<{ token: string | null }>("/api/mcp/token"),
+  mcpNewToken: () => req<{ token: string }>("/api/mcp/token", { method: "POST" }),
+  mcpRevokeToken: () => req<{ ok: boolean }>("/api/mcp/token", { method: "DELETE" }),
+
+  // device pairing (remote access via WebRTC)
+  listDevices: () => req<{ devices: DeviceInfo[] }>("/api/devices"),
+  createDevice: (label: string) =>
+    req<PairingResponse>("/api/devices", { method: "POST", body: JSON.stringify({ label }) }),
+  deleteDevice: (id: string) =>
+    req<{ ok: boolean }>(`/api/devices/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  startPairCode: (label: string) =>
+    req<{ code: string; expires_in: number }>("/api/devices/pair-code", { method: "POST", body: JSON.stringify({ label }) }),
+  cancelPairCode: () => req<{ ok: boolean }>("/api/devices/pair-code", { method: "DELETE" }),
+  pairCodeStatus: () => req<{ state: "none" | "waiting" | "paired" | "expired" }>("/api/devices/pair-code"),
+};

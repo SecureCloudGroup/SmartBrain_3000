@@ -1,0 +1,31 @@
+# LAN / mobile-access overlay for the smartbrain service.
+#
+# Use it WITH the base file (the order matters):
+#   docker compose -f compose/docker-compose.yml -f compose/docker-compose.lan.yml up -d
+#
+# Prerequisites:
+#   1. Generate certs:   python3 installer/install.py certs smartbrain.local <your-LAN-IP>
+#      (writes data/certs/, mounted read-only below). mkcert's CA must be trusted
+#      on each device — install its rootCA.pem on your phone.
+#   2. Allow the hostname: TrustedHostMiddleware rejects unknown Host headers, so
+#      set SMARTBRAIN_ALLOWED_HOSTS to include your LAN name/IP, e.g.:
+#        SMARTBRAIN_ALLOWED_HOSTS=localhost,127.0.0.1,smartbrain.local docker compose \
+#          -f compose/docker-compose.yml -f compose/docker-compose.lan.yml up -d
+#
+# This exposes the app to your LAN — HTTPS only, Host-validated. Off by default
+# (you opt in by using this overlay).
+services:
+  smartbrain:
+    # Replace (not append to) the base loopback mapping — bind all interfaces.
+    ports: !override
+      - "0.0.0.0:33000:33000"
+    environment:
+      SMARTBRAIN_TLS_CERT: /app/certs/cert.pem
+      SMARTBRAIN_TLS_KEY: /app/certs/key.pem
+      # Default keeps loopback only; override on the CLI to add your LAN host.
+      SMARTBRAIN_ALLOWED_HOSTS: ${SMARTBRAIN_ALLOWED_HOSTS:-localhost,127.0.0.1}
+    volumes:
+      - ../data/certs:/app/certs:ro
+    # The base healthcheck probes http://127.0.0.1:33000; with TLS on, probe https.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,ssl,sys; ctx=ssl._create_unverified_context(); sys.exit(0 if urllib.request.urlopen('https://127.0.0.1:33000/api/health', timeout=2, context=ctx).status==200 else 1)"]

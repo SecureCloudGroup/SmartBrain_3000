@@ -1,0 +1,30 @@
+# Remote-access overlay (WebRTC) for the smartbrain service — OFF by default, opt-in.
+#
+# Unlike the WireGuard overlay, this needs NO router port-forward and publishes NO
+# port: the Desktop dials OUT to your signaling node, and a phone reaches the app over
+# an end-to-end-encrypted WebRTC DataChannel (browser/PWA only — nothing to install).
+# The app itself stays loopback-only on the host; the WebRTC channel is the only path in.
+#
+# Use WITH the base file (no LAN/TLS overlay needed — the phone<->Desktop hop is DTLS,
+# the Desktop<->app hop is in-container loopback):
+#   docker compose -f compose/docker-compose.yml -f compose/docker-compose.webrtc.yml up -d
+#
+# Point these at the public node you run (see docker-compose.signaling.yml); set them
+# in your environment / .env first:
+#   SMARTBRAIN_SIGNALING_URL      e.g. wss://connect.example.org
+#   SMARTBRAIN_SIGNALING_TOKEN    the broker's SIGNALING_TOKEN
+#   SMARTBRAIN_ICE_URLS           e.g. stun:connect.example.org:3478,turn:connect.example.org:3478
+#   SMARTBRAIN_TURN_USERNAME / SMARTBRAIN_TURN_CREDENTIAL   the static TURN user:password
+#       (same TURN_USER/TURN_PASSWORD as the coturn node; shared across devices, not per-device).
+#       These grant ONLY relay bandwidth (never app access) and are baked into each pairing QR;
+#       rotate by changing them on both sides. They are embedded in the pairing payload, so keep
+#       the QR private. (Per-pairing short-lived TURN creds are a possible future improvement.)
+services:
+  smartbrain:
+    environment:
+      SMARTBRAIN_WEBRTC_ENABLED: "1"
+      SMARTBRAIN_SIGNALING_URL: ${SMARTBRAIN_SIGNALING_URL:?set your signaling wss URL}
+      SMARTBRAIN_SIGNALING_TOKEN: ${SMARTBRAIN_SIGNALING_TOKEN:-}
+      SMARTBRAIN_ICE_URLS: ${SMARTBRAIN_ICE_URLS:-}
+      SMARTBRAIN_TURN_USERNAME: ${SMARTBRAIN_TURN_USERNAME:-}
+      SMARTBRAIN_TURN_CREDENTIAL: ${SMARTBRAIN_TURN_CREDENTIAL:-}

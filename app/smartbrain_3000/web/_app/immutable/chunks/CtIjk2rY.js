@@ -1,0 +1,1 @@
+import{t as b}from"./BKuqSeVd.js";import{C as l,al as A}from"./DSyNeLMP.js";function S(i,h,t,C,f,r){var a=i[l];if(A||a!==t||a===void 0){var o=b(t,C,r);(!A||o!==i.getAttribute("class"))&&(o==null?i.removeAttribute("class"):i.className=o),i[l]=t}else if(r&&f!==r)for(var u in r){var g=!!r[u];(f==null||g!==!!f[u])&&i.classList.toggle(u,g)}return r}export{S as s};
