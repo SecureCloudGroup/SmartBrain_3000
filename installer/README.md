@@ -50,7 +50,7 @@ phone on your network you need HTTPS with a cert your phone trusts:
    ```
 
 mDNS (`.local` discovery), QR pairing, and remote access (WireGuard) are the next
-steps — see [`docs/dev/mobile-and-remote.md`](../docs/dev/mobile-and-remote.md).
+steps — see [`docs/07-remote-access.md`](../docs/07-remote-access.md).
 
 **Updating:** `git pull` for newer code, then `install.py update` (rebuilds the
 image and restarts). Back up first in the app — Settings → Account & Data →

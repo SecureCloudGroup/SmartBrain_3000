@@ -403,7 +403,7 @@ def cmd_certs(hostnames: list[str]) -> int:
     caroot = _probe(["mkcert", "-CAROOT"], env=mkcert_env)[1].strip()
     print(note(f"Install this CA on your phone to trust the app: {caroot}/rootCA.pem"))
     print(note("Then start the LAN profile and set SMARTBRAIN_ALLOWED_HOSTS —"))
-    print("      see docs/dev/mobile-and-remote.md.")
+    print("      see docs/07-remote-access.md.")
     return 0
 
 
