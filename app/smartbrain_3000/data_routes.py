@@ -1,14 +1,16 @@
 """Data portability: export, encrypted backup, and restore (requires unlock).
 
-* GET  /api/export  — the user's data as plaintext JSON (their own data, theirs
+* POST /api/export  — the user's data as plaintext JSON (their own data, theirs
   to take). Decrypted in-memory; never leaves the machine unless the user saves it.
-* GET  /api/backup  — the raw encrypted DuckDB file (a complete, portable backup;
+* POST /api/backup  — the raw encrypted DuckDB file (a complete, portable backup;
   it already contains the wrapped keys, so it restores with the same passphrase).
 * POST /api/restore — stage an uploaded backup; it is validated then applied at
   the NEXT startup (swapping the live DB at runtime is unsafe).
 
-Restore is allowed only when unlocked, or onto a fresh (uninitialized) install —
-never onto an initialized-but-locked vault (that would let anyone overwrite it).
+Export and backup are sensitive egress (whole-vault file / decrypted plaintext), so
+both are Desktop-local only (the WebRTC bridge can't reach them) AND require the
+passphrase (or Recovery Key) to be re-entered. Restore is allowed only when unlocked,
+or onto a fresh (uninitialized) install — never onto an initialized-but-locked vault.
 """
 
 from __future__ import annotations
@@ -19,11 +21,19 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 from starlette.background import BackgroundTask
 
 from . import db, keyvault
 
 router = APIRouter()
+
+
+class ReauthRequest(BaseModel):
+    """Credential re-entered to authorize a sensitive data egress (backup/export)."""
+
+    passphrase: str | None = None
+    recovery_key: str | None = None
 
 _RESTORE_MAX = 1024 * 1024 * 1024  # 1 GiB cap on an uploaded restore (bounded)
 _RESTORE_CHUNK = 1024 * 1024  # 1 MiB read chunk while streaming an upload to disk
@@ -52,10 +62,39 @@ def _stores(request: Request):
     return state
 
 
-@router.get("/api/export")
-def export_data(request: Request) -> dict:
-    """Return all user data as plaintext JSON (knowledge, chats, tasks, memory)."""
+def _reauthorize(request: Request, body: ReauthRequest) -> None:
+    """Re-verify the user's passphrase (or Recovery Key) before a sensitive egress.
+
+    Backup hands out the whole vault file and export hands out DECRYPTED plaintext,
+    so — beyond being Desktop-local and unlocked — both require re-entering the
+    passphrase. This blocks a passer-by at an unattended-but-unlocked Desktop and
+    a stale paired session from silently exfiltrating everything in one click. A
+    Recovery Key is accepted too, so a user who unlocked via the Kit isn't stranded.
+    """
+    conn = request.app.state.dbx  # per-thread cursor facade (thread-safe under the pool)
+    try:
+        if body.passphrase:
+            keyvault.unlock(conn, body.passphrase)
+        elif body.recovery_key:
+            keyvault.unlock_with_recovery(conn, body.recovery_key)
+        else:
+            raise HTTPException(status_code=400, detail="passphrase required")
+    except HTTPException:
+        raise
+    except Exception:  # wrong passphrase / bad recovery key / malformed wrap
+        raise HTTPException(status_code=401, detail="incorrect passphrase") from None
+
+
+@router.post("/api/export")
+def export_data(request: Request, body: ReauthRequest) -> dict:
+    """Return all user data as plaintext JSON (knowledge, chats, tasks, memory).
+
+    Desktop-local + unlocked + passphrase re-entry (see ``_reauthorize``): this is
+    the single most sensitive read in the app — every authored value, decrypted.
+    """
+    _require_desktop_local(request)  # never expose decrypted data to a bridged remote device
     state = _stores(request)
+    _reauthorize(request, body)
     knowledge = []
     for doc in state.kb.list_docs():  # bounded by the store's list limit
         full = state.kb.get(doc["id"])
@@ -93,9 +132,13 @@ def _cleanup_backup_temp(tmp: Path) -> None:
                 pass  # best-effort cleanup; a leftover does not corrupt state
 
 
-@router.get("/api/backup")
-def backup_db(request: Request) -> FileResponse:
+@router.post("/api/backup")
+def backup_db(request: Request, body: ReauthRequest) -> FileResponse:
     """Download a complete, portable copy of the encrypted DuckDB as a backup.
+
+    Desktop-local + unlocked + passphrase re-entry (see ``_reauthorize``): the
+    backup file carries the wrapped keys + all ciphertext, so handing it out is a
+    whole-vault egress and must be re-authorized just like export.
 
     Uses COPY FROM DATABASE into a fresh file rather than CHECKPOINT+copy: it
     reads the committed snapshot without needing the (idle) per-thread cursors'
@@ -103,7 +146,9 @@ def backup_db(request: Request) -> FileResponse:
     file is streamed from disk via FileResponse and removed after the response
     is sent (or on abort), so the whole DB is never held in memory.
     """
+    _require_desktop_local(request)  # never hand the whole vault file to a bridged remote device
     _stores(request)  # require unlock
+    _reauthorize(request, body)
     dbx = request.app.state.dbx
     source = dbx.execute("SELECT current_database();").fetchone()[0]
     assert source, "could not resolve the source database name"
@@ -124,7 +169,7 @@ def backup_db(request: Request) -> FileResponse:
     tmp.unlink()  # DuckDB ATTACH refuses to overwrite an existing file
     tmp_lit = str(tmp).replace("'", "''")
     try:
-        with db.write_lock:  # quiesce other threads during the snapshot
+        with db.write_lock:  # serialize concurrent backups; COPY reads a consistent MVCC snapshot
             dbx.execute(f"ATTACH '{tmp_lit}' AS {alias};")
             try:
                 dbx.execute(f"COPY FROM DATABASE {source_id} TO {alias};")
@@ -210,5 +255,11 @@ async def restore_db(request: Request) -> dict:
     if not db.is_smartbrain_db(tmp):  # reject anything that isn't a real backup
         tmp.unlink(missing_ok=True)
         raise HTTPException(status_code=400, detail="not a valid SmartBrain backup file")
+    if db.is_future_schema_db(tmp):  # reject a backup from a NEWER app version (forward-compat guard)
+        tmp.unlink(missing_ok=True)
+        raise HTTPException(
+            status_code=400,
+            detail="this backup is from a newer version of SmartBrain — upgrade this app, then restore",
+        )
     tmp.replace(staged)  # atomic promotion to the staged path (same volume)
     return {"ok": True, "message": "Backup staged — restart SmartBrain to apply it."}

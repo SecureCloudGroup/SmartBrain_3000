@@ -274,12 +274,27 @@ export const api = {
       body: JSON.stringify({ new_passphrase }),
     }),
 
-  // data portability (export JSON, download an encrypted backup, restore one)
-  exportData: () => req<Record<string, unknown>>("/api/export"),
-  backup: async (): Promise<Blob> => {
+  // data portability (export JSON, download an encrypted backup, restore one).
+  // Export + backup are sensitive egress (decrypted plaintext / whole-vault file), so both
+  // are Desktop-local only (x-sb-local; the WebRTC bridge strips it) AND re-require the
+  // passphrase — passed in the POST body and re-verified server-side (Security B8/F7).
+  exportData: (passphrase: string) =>
+    req<Record<string, unknown>>("/api/export", {
+      method: "POST",
+      headers: { "x-sb-local": "1" },
+      body: JSON.stringify({ passphrase }),
+    }),
+  backup: async (passphrase: string): Promise<Blob> => {
     await remoteReady;
-    const res = await fetch("/api/backup");
-    if (!res.ok) throw new ApiError(res.status, `backup failed (${res.status})`);
+    const res = await fetch("/api/backup", {
+      method: "POST",
+      headers: { "x-sb-local": "1", "content-type": "application/json" },
+      body: JSON.stringify({ passphrase }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => null);
+      throw new ApiError(res.status, (data as { detail?: string })?.detail || `backup failed (${res.status})`);
+    }
     return res.blob();
   },
   restore: async (file: File): Promise<{ ok: boolean; message: string }> => {
