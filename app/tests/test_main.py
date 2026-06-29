@@ -118,7 +118,7 @@ def test_lifespan_applies_staged_restore_and_logs(tmp_path, monkeypatch, caplog)
         with TestClient(main.create_app()) as client:
             assert client.get("/api/health").status_code == 200
 
-    assert (tmp_path / "live.duckdb.pre-restore").exists()  # old DB displaced
+    assert list(tmp_path.glob("live.duckdb.pre-restore-*"))  # old DB displaced (unique timestamped name)
     assert not dbmod.staged_restore_path(db_path).exists()  # staged file consumed
     assert any("staged database restore" in rec.message for rec in caplog.records)
 

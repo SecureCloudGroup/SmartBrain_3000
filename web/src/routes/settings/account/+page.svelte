@@ -10,6 +10,7 @@
   let pwMsg = $state("");
   let error = $state("");
   let dataMsg = $state("");
+  let egressPass = $state(""); // re-entered to authorize export/backup (sensitive egress)
   let restoreFile = $state<FileList | null>(null);
   let showReset = $state(false);
   let resetNext = $state("");
@@ -90,9 +91,10 @@
     error = "";
     busy = true;
     try {
-      const data = await api.exportData();
+      const data = await api.exportData(egressPass);
       saveBlob(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }), "smartbrain-export.json");
       dataMsg = "Exported your data as JSON.";
+      egressPass = "";
     } catch (err) {
       error = describeError(err);
     } finally {
@@ -105,8 +107,9 @@
     error = "";
     busy = true;
     try {
-      saveBlob(await api.backup(), "smartbrain-backup.duckdb");
+      saveBlob(await api.backup(egressPass), "smartbrain-backup.duckdb");
       dataMsg = "Downloaded an encrypted backup. Keep it safe — it unlocks with your passphrase.";
+      egressPass = "";
     } catch (err) {
       error = describeError(err);
     } finally {
@@ -177,9 +180,20 @@
     <strong>Export</strong> downloads your content as readable JSON. <strong>Backup</strong> downloads the
     full encrypted database — a complete, portable copy that restores with your passphrase.
   </p>
-  <p style="display:flex; gap:0.5rem; flex-wrap:wrap">
-    <button class="secondary" disabled={busy} onclick={exportData}>Export data (JSON)</button>
-    <button disabled={busy} onclick={downloadBackup}>Download encrypted backup</button>
+  <p class="muted">
+    These hand out your decrypted data and the whole vault, so re-enter your passphrase to authorize.
+    They work on this Desktop only — never from a paired phone.
+  </p>
+  <p style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center">
+    <input
+      type="password"
+      bind:value={egressPass}
+      placeholder="Your passphrase"
+      autocomplete="current-password"
+      style="max-width:16rem"
+    />
+    <button class="secondary" disabled={busy || !egressPass} onclick={exportData}>Export data (JSON)</button>
+    <button disabled={busy || !egressPass} onclick={downloadBackup}>Download encrypted backup</button>
   </p>
 </div>
 

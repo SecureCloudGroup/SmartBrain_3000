@@ -157,6 +157,12 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
     ),
 )
 
+# The newest migration this build knows how to apply. A database recording a
+# migration id beyond this was written by a NEWER app version; opening it with
+# this (older) code could silently drop/corrupt columns it doesn't know about,
+# so we refuse rather than risk it (see run_migrations / is_future_schema_db).
+NEWEST_MIGRATION = max(mid for mid, _ in _MIGRATIONS)
+
 
 def resolve_db_path() -> Path:
     """Return the DuckDB file path from the environment (with a default)."""
@@ -246,11 +252,11 @@ class ThreadLocalConn:
         self._root.close()
 
 
-# Process-wide write lock for operations that must see a quiescent DB
-# (e.g. the backup ATTACH/COPY in data_routes.backup_db). Per-thread cursors
-# still serialize their own writes inside DuckDB; this lock additionally
-# blocks other Python threads from issuing writes/reads while a snapshot is
-# being taken, so the copy reflects a stable view.
+# Process-wide lock that SERIALIZES backup snapshots against each other — only
+# data_routes.backup_db acquires it. It does NOT quiesce store writes (those
+# paths never take it); DuckDB's MVCC gives ``COPY FROM DATABASE`` a consistent
+# committed snapshot on its own. The lock exists so two concurrent /api/backup
+# calls can't race on the ATTACH alias / temp file, not for write consistency.
 write_lock = threading.Lock()
 
 
@@ -284,22 +290,68 @@ def is_smartbrain_db(path: Path) -> bool:
         probe.close()
 
 
+def is_future_schema_db(path: Path) -> bool:
+    """True if the DuckDB at `path` records a migration newer than this build knows.
+
+    Used to reject a backup taken on a NEWER app version at restore time (and as
+    defense-in-depth alongside run_migrations' boot guard), so a forward-version
+    vault is never opened by older code that could corrupt it. Unreadable / no
+    schema_migrations -> False (is_smartbrain_db handles the not-a-backup case).
+    """
+    assert isinstance(path, Path), "path must be a Path"
+    if not path.exists() or path.stat().st_size == 0:
+        return False
+    try:
+        probe = duckdb.connect(str(path), read_only=True)
+    except Exception:  # not a DuckDB file / unreadable
+        return False
+    try:
+        has = probe.execute(
+            "SELECT 1 FROM information_schema.tables WHERE table_name = 'schema_migrations';"
+        ).fetchone()
+        if has is None:
+            return False
+        row = probe.execute("SELECT MAX(id) FROM schema_migrations;").fetchone()
+        seen_max = int(row[0]) if row is not None and row[0] is not None else 0
+        return seen_max > NEWEST_MIGRATION
+    except Exception:
+        return False
+    finally:
+        probe.close()
+
+
+def _unique_sibling(path: Path, suffix: str) -> Path:
+    """A unique sibling ``<name><suffix>-<UTC stamp>`` — never clobbers a prior copy.
+
+    Restore safety copies (the displaced live DB, a quarantined bad upload) used to
+    reuse a fixed name, so a second restore overwrote the first one's copy. Stamping
+    each with a microsecond UTC timestamp keeps every copy, so no recoverable data is
+    silently discarded by a rapid or repeated restore (they accumulate; an operator
+    can delete them once a restore is confirmed good).
+    """
+    assert isinstance(path, Path), "path must be a Path"
+    assert suffix, "suffix required"
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f")
+    return path.parent / (path.name + suffix + "-" + stamp)
+
+
 def apply_pending_restore(db_path: Path) -> bool:
     """If a valid restore is staged, swap it in before the DB is opened.
 
     The currently-open DB must NOT be in use when this runs (call it at startup
-    before ``open_db``). The displaced DB is kept at ``*.pre-restore`` so the
-    operation is reversible; an invalid staged file is quarantined, never applied.
+    before ``open_db``). The displaced DB is kept at ``*.pre-restore-<stamp>`` so the
+    operation is reversible (and a second restore never overwrites an earlier copy);
+    an invalid staged file is quarantined to ``*.invalid-<stamp>``, never applied.
     """
     assert isinstance(db_path, Path), "path must be a Path"
     staged = staged_restore_path(db_path)
     if not staged.exists():
         return False
     if not is_smartbrain_db(staged):
-        staged.replace(staged.parent / (staged.name + ".invalid"))  # quarantine, don't brick
+        staged.replace(_unique_sibling(staged, ".invalid"))  # quarantine, don't brick
         return False
     if db_path.exists():
-        db_path.replace(db_path.parent / (db_path.name + _PRERESTORE_SUFFIX))
+        db_path.replace(_unique_sibling(db_path, _PRERESTORE_SUFFIX))
     wal = db_path.parent / (db_path.name + ".wal")
     if wal.exists():
         wal.unlink()
@@ -314,6 +366,17 @@ def run_migrations(conn: duckdb.DuckDBPyConnection) -> int:
         "CREATE TABLE IF NOT EXISTS schema_migrations "
         "(id INTEGER PRIMARY KEY, applied_at TIMESTAMP DEFAULT current_timestamp);"
     )
+    # Forward-compat guard: refuse to open a database written by a NEWER app
+    # version (a migration id beyond what this build knows). Applying this older
+    # code to a future schema could drop/corrupt columns it has never heard of,
+    # so fail loudly — prompting an app upgrade — instead of silently risking data.
+    row = conn.execute("SELECT MAX(id) FROM schema_migrations;").fetchone()
+    seen_max = int(row[0]) if row is not None and row[0] is not None else 0
+    if seen_max > NEWEST_MIGRATION:
+        raise RuntimeError(
+            f"database schema v{seen_max} is newer than this app (v{NEWEST_MIGRATION}); "
+            "upgrade SmartBrain_3000 — refusing to open to avoid data loss"
+        )
     applied = 0
     for migration_id, sql in _MIGRATIONS:  # fixed, bounded list
         seen = conn.execute(
