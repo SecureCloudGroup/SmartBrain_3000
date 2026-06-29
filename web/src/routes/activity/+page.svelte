@@ -50,6 +50,7 @@
       await load();
     } catch (err) {
       error = describeError(err);
+      await load(); // refresh: a stale/expired item (e.g. orphaned by a Desktop restart) drops off
     } finally {
       busy = "";
     }
@@ -63,6 +64,7 @@
       await load();
     } catch (err) {
       error = describeError(err);
+      await load(); // refresh: a stale/expired item (e.g. orphaned by a Desktop restart) drops off
     } finally {
       busy = "";
     }
@@ -76,6 +78,7 @@
       await load();
     } catch (err) {
       error = describeError(err);
+      await load(); // refresh: a stale/expired item (e.g. orphaned by a Desktop restart) drops off
     } finally {
       busy = "";
     }

@@ -1,4 +1,4 @@
-import{b as f,a as b,f as R}from"../chunks/CD5zTj3j.js";import{b9 as O,al as g,a_ as S,af as c,aj as T,J as D,aN as q,ak as A,c as x,ag as _,an as N,l as B,Z as L,s as E,r as K,aK as U,aH as M,V as k,b2 as C,aQ as u,ac as i,bc as G}from"../chunks/DSyNeLMP.js";import{s as W}from"../chunks/CVD7czyh.js";import{e as H}from"../chunks/blDM2rQR.js";import{s as I}from"../chunks/CxL3veOo.js";import{s as Y}from"../chunks/CtIjk2rY.js";import{p as F}from"../chunks/BIkT57We.js";function j(d,y,l=!1,r=!1,s=!1,w=!1){var a=d,e="";if(l){var o=d;g&&(a=S(c(o)))}O(()=>{var n=D;if(e===(e=y()??"")){g&&T();return}if(l&&!g){n.nodes=null,o.innerHTML=e,e!==""&&f(c(o),o.lastChild);return}if(n.nodes!==null&&(q(n.nodes.start,n.nodes.end),n.nodes=null),e!==""){if(g){A.data;for(var t=T(),p=t;t!==null&&(t.nodeType!==x||t.data!=="");)p=t,t=_(t);if(t===null)throw N(),B;f(A,p),a=S(t);return}var P=r?E:s?K:void 0,m=L(r?"svg":s?"math":"template",P);m.innerHTML=e;var h=r||s?m:m.content;if(f(c(h),h.lastChild),r||s)for(;c(h);)a.before(c(h));else a.before(h)}})}const v=[{slug:"getting-started",title:"Getting started",html:`<h1>Getting started</h1>
+import{b as f,a as b,f as O}from"../chunks/CD5zTj3j.js";import{b9 as R,al as g,a_ as S,af as d,aj as T,J as q,aN as D,ak as A,c as x,ag as _,an as L,l as N,Z as B,s as E,r as K,aK as U,aH as M,V as k,b2 as C,aQ as u,ac as i,bc as G}from"../chunks/DSyNeLMP.js";import{s as W}from"../chunks/CVD7czyh.js";import{e as H}from"../chunks/blDM2rQR.js";import{s as I}from"../chunks/CxL3veOo.js";import{s as Y}from"../chunks/CtIjk2rY.js";import{p as F}from"../chunks/BILU87AR.js";function j(c,y,l=!1,r=!1,s=!1,w=!1){var a=c,e="";if(l){var o=c;g&&(a=S(d(o)))}R(()=>{var n=q;if(e===(e=y()??"")){g&&T();return}if(l&&!g){n.nodes=null,o.innerHTML=e,e!==""&&f(d(o),o.lastChild);return}if(n.nodes!==null&&(D(n.nodes.start,n.nodes.end),n.nodes=null),e!==""){if(g){A.data;for(var t=T(),p=t;t!==null&&(t.nodeType!==x||t.data!=="");)p=t,t=_(t);if(t===null)throw L(),N;f(A,p),a=S(t);return}var P=r?E:s?K:void 0,m=B(r?"svg":s?"math":"template",P);m.innerHTML=e;var h=r||s?m:m.content;if(f(d(h),h.lastChild),r||s)for(;d(h);)a.before(d(h));else a.before(h)}})}const v=[{slug:"getting-started",title:"Getting started",html:`<h1>Getting started</h1>
 <p>SmartBrain_3000 is a <strong>local-first, single-user AI assistant</strong> that runs entirely
 on your own machine within a container (Docker). Your data and credentials stay on-box, encrypted
 at rest. The only outbound calls it makes are to services you explicitly opt into:
@@ -218,18 +218,16 @@ or act — there&#39;s no background access to your data).</li>
 loopback-only — the authorization happens on your machine and nothing leaves it except
 the calls to Google. SmartBrain asks for just two scopes: <strong>read</strong> and <strong>send</strong> (no
 archive, delete, or label changes). It&#39;s optional; most people run SmartBrain without it.</p>
-<p><strong>One-time setup</strong> (the in-app <strong>Email</strong> page shows these steps with a Copy button for
-your exact redirect URI):</p>
+<p><strong>One-time setup</strong> (the in-app <strong>Email</strong> page walks you through these):</p>
 <ol>
-<li>Open <a href="https://console.cloud.google.com/apis/credentials">Google Cloud Console → Credentials</a>
-and create an <strong>OAuth client ID</strong> (type: <strong>Desktop app</strong>, or <strong>Web application</strong>).</li>
-<li>Add this exact <strong>redirect URI</strong> to the client:
-<code>http://localhost:33000/api/email/oauth/callback</code>
-(if you changed the port, use the URI the app shows you).</li>
-<li>On the <strong>OAuth consent screen</strong>, set <strong>Publishing status</strong> to <strong>In production</strong> —
-otherwise Google expires the connection after 7 days and you&#39;d have to reconnect.</li>
-<li>In the app&#39;s <strong>Email</strong> page, paste the client <strong>ID</strong> and <strong>secret</strong> and click
-<strong>Connect Gmail</strong>. A Google sign-in opens; approve the two scopes.</li>
+<li>Open <a href="https://console.cloud.google.com/apis/credentials">Google Cloud Console → Credentials</a>,
+then <strong>Create credentials → OAuth client ID</strong>, and choose type <strong>Desktop app</strong>. A Desktop-app
+client needs <strong>no redirect URL</strong> — Google handles loopback automatically.</li>
+<li>On the <strong>OAuth consent screen</strong>, add the <code>gmail.readonly</code> and <code>gmail.send</code> scopes and set
+<strong>Publishing status</strong> to <strong>In production</strong> — otherwise Google signs you out every 7 days.</li>
+<li>In the app&#39;s <strong>Email</strong> page, paste the client <strong>ID</strong> and <strong>secret</strong> and click <strong>Connect Gmail</strong>.
+A Google sign-in opens; if it warns the app is &quot;unverified&quot; (it&#39;s your own client), choose
+<strong>Advanced → Continue</strong>, then approve the two scopes.</li>
 </ol>
 <p>Once connected you can read recent mail and compose/send:</p>
 <ul>
@@ -571,4 +569,4 @@ bandwidth.</p>
 real world limits.</li>
 <li>Back to the <a href="#README">documentation index</a>.</li>
 </ul>
-`}];var z=R("<a> </a>"),Q=R('<div class="help svelte-1vby5nc"><nav class="help-nav svelte-1vby5nc" aria-label="Help sections"><h2 class="svelte-1vby5nc">Help</h2> <!></nav> <article class="help-body card svelte-1vby5nc"></article></div>');function te(d,y){U(y,!0);const l=G(()=>v.find(e=>e.slug===F.url.hash.replace(/^#/,""))??v[0]);var r=Q(),s=k(r),w=C(k(s),2);H(w,17,()=>v,e=>e.slug,(e,o)=>{var n=z();let t;var p=k(n,!0);u(n),O(()=>{t=Y(n,1,"help-link svelte-1vby5nc",null,t,{active:i(o).slug===i(l).slug}),I(n,"aria-current",i(o).slug===i(l).slug?"page":void 0),I(n,"href",`#${i(o).slug}`),W(p,i(o).title)}),b(e,n)}),u(s);var a=C(s,2);j(a,()=>i(l).html,!0),u(a),u(r),b(d,r),M()}export{te as component};
+`}];var z=O("<a> </a>"),Q=O('<div class="help svelte-1vby5nc"><nav class="help-nav svelte-1vby5nc" aria-label="Help sections"><h2 class="svelte-1vby5nc">Help</h2> <!></nav> <article class="help-body card svelte-1vby5nc"></article></div>');function te(c,y){U(y,!0);const l=G(()=>v.find(e=>e.slug===F.url.hash.replace(/^#/,""))??v[0]);var r=Q(),s=k(r),w=C(k(s),2);H(w,17,()=>v,e=>e.slug,(e,o)=>{var n=z();let t;var p=k(n,!0);u(n),R(()=>{t=Y(n,1,"help-link svelte-1vby5nc",null,t,{active:i(o).slug===i(l).slug}),I(n,"aria-current",i(o).slug===i(l).slug?"page":void 0),I(n,"href",`#${i(o).slug}`),W(p,i(o).title)}),b(e,n)}),u(s);var a=C(s,2);j(a,()=>i(l).html,!0),u(a),u(r),b(c,r),M()}export{te as component};

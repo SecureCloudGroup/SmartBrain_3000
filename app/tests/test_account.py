@@ -63,6 +63,18 @@ def test_secret_roundtrip_when_unlocked(client: TestClient) -> None:
     assert "provider:openai:api_key" in client.get("/api/secrets").json()["keys"]
 
 
+def test_secret_api_rejects_non_provider_keys(client: TestClient) -> None:
+    # The generic secrets API manages provider:*:api_key ONLY — it must not be able to clobber or
+    # delete the Gmail / device / MCP / WebRTC creds that live in the same encrypted store.
+    client.post("/api/account/setup", json={"passphrase": "correct-horse"})
+    for key in ("device:abc123", "mcp:access_token", "webrtc:identity_ed25519", "provider:openai:not_api_key"):
+        assert client.put(f"/api/secrets/{key}", json={"value": "x"}).status_code == 403, key
+        assert client.delete(f"/api/secrets/{key}").status_code == 403, key
+    # A real provider key still works.
+    assert client.put("/api/secrets/provider:openai:api_key", json={"value": "sk-1"}).status_code == 200
+    assert client.delete("/api/secrets/provider:openai:api_key").status_code == 200
+
+
 def test_unlock_with_passphrase(client: TestClient) -> None:
     client.post("/api/account/setup", json={"passphrase": "correct-horse"})
     client.post("/api/account/lock")
@@ -83,7 +95,7 @@ def test_unlock_with_recovery_key(client: TestClient) -> None:
     client.post("/api/account/lock")
     r = client.post("/api/account/unlock", json={"recovery_key": recovery_key})
     assert r.status_code == 200
-    assert client.put("/api/secrets/k", json={"value": "v"}).status_code == 200
+    assert client.put("/api/secrets/provider:openai:api_key", json={"value": "v"}).status_code == 200
 
 
 def test_secret_values_never_returned(client: TestClient) -> None:
@@ -126,11 +138,12 @@ def test_put_provider_secret_reports_gateway_synced_false_on_failure(
     assert "provider:openai:api_key" in client.get("/api/secrets").json()["keys"]
 
 
-def test_put_non_provider_secret_reports_gateway_synced_false(client: TestClient) -> None:
-    # B6: storing a non-provider secret (e.g. an MCP access token) does not
-    # touch Bifrost, so gateway_synced is false — no sync was attempted.
+def test_put_unknown_provider_reports_gateway_synced_false(client: TestClient) -> None:
+    # B6: a provider key whose provider isn't wired to Bifrost is stored but not synced, so
+    # gateway_synced is false. (Non-provider keys like mcp:/device:/email/gmail are now rejected
+    # by the namespace guard and have their own dedicated routes.)
     client.post("/api/account/setup", json={"passphrase": "correct-horse"})
-    r = client.put("/api/secrets/mcp:access_token", json={"value": "tok-1"})
+    r = client.put("/api/secrets/provider:notarealprovider:api_key", json={"value": "tok-1"})
     assert r.status_code == 200
     assert r.json() == {"ok": True, "gateway_synced": False}
 

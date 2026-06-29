@@ -38,7 +38,10 @@ class EmailOAuthError(RuntimeError):
 def redirect_uri() -> str:
     """The loopback redirect URI the user must register on their OAuth client."""
     uri = os.environ.get("SMARTBRAIN_OAUTH_REDIRECT", _DEFAULT_REDIRECT)
-    assert uri.startswith("http://localhost") or uri.startswith("http://127.0.0.1"), "redirect must be loopback"
+    # Hard raise, NOT assert (asserts are stripped under `python -O`): the loopback redirect is the
+    # local-first guarantee that Google delivers the auth code only to the user's own machine.
+    if not (uri.startswith("http://localhost") or uri.startswith("http://127.0.0.1")):
+        raise EmailOAuthError("SMARTBRAIN_OAUTH_REDIRECT must be a loopback URI (http://localhost or http://127.0.0.1)")
     return uri
 
 

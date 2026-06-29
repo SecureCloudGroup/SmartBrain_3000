@@ -71,18 +71,16 @@ loopback-only — the authorization happens on your machine and nothing leaves i
 the calls to Google. SmartBrain asks for just two scopes: **read** and **send** (no
 archive, delete, or label changes). It's optional; most people run SmartBrain without it.
 
-**One-time setup** (the in-app **Email** page shows these steps with a Copy button for
-your exact redirect URI):
+**One-time setup** (the in-app **Email** page walks you through these):
 
-1. Open [Google Cloud Console → Credentials](https://console.cloud.google.com/apis/credentials)
-   and create an **OAuth client ID** (type: **Desktop app**, or **Web application**).
-2. Add this exact **redirect URI** to the client:
-   `http://localhost:33000/api/email/oauth/callback`
-   (if you changed the port, use the URI the app shows you).
-3. On the **OAuth consent screen**, set **Publishing status** to **In production** —
-   otherwise Google expires the connection after 7 days and you'd have to reconnect.
-4. In the app's **Email** page, paste the client **ID** and **secret** and click
-   **Connect Gmail**. A Google sign-in opens; approve the two scopes.
+1. Open [Google Cloud Console → Credentials](https://console.cloud.google.com/apis/credentials),
+   then **Create credentials → OAuth client ID**, and choose type **Desktop app**. A Desktop-app
+   client needs **no redirect URL** — Google handles loopback automatically.
+2. On the **OAuth consent screen**, add the `gmail.readonly` and `gmail.send` scopes and set
+   **Publishing status** to **In production** — otherwise Google signs you out every 7 days.
+3. In the app's **Email** page, paste the client **ID** and **secret** and click **Connect Gmail**.
+   A Google sign-in opens; if it warns the app is "unverified" (it's your own client), choose
+   **Advanced → Continue**, then approve the two scopes.
 
 Once connected you can read recent mail and compose/send:
 

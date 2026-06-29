@@ -241,6 +241,15 @@ def reset_passphrase(request: Request, body: PassphraseReset) -> dict[str, bool]
     return {"ok": True}
 
 
+def _require_provider_key(key: str) -> None:
+    """The generic secrets API manages ONLY provider API keys (the Providers page; named
+    ``provider:<name>:api_key``). Refuse every other namespace so an unlocked-session bug or a
+    confused-deputy through the local API can't clobber/delete the Gmail refresh token, device
+    pairing records, or the MCP/WebRTC creds — those are written only by their own code paths."""
+    if not (key.startswith("provider:") and key.endswith(":api_key")):
+        raise HTTPException(status_code=403, detail="this endpoint manages provider keys only")
+
+
 @router.put("/api/secrets/{key}")
 def put_secret(request: Request, key: str, body: SecretValue) -> dict[str, bool]:
     """Store a secret (requires unlock); sync provider keys to Bifrost live.
@@ -252,6 +261,7 @@ def put_secret(request: Request, key: str, body: SecretValue) -> dict[str, bool]
     """
     assert key, "secret key must be non-empty"
     assert body.value, "secret value must be non-empty"
+    _require_provider_key(key)
     _require_store(request).put(key, body.value)
     bifrost_name = gateway.provider_for_secret_key(key)
     gateway_synced = False
@@ -284,6 +294,7 @@ def list_secrets(request: Request) -> dict[str, list[str]]:
 def delete_secret(request: Request, key: str) -> dict[str, bool]:
     """Delete a secret (requires unlock); remove provider keys from Bifrost."""
     assert key, "secret key must be non-empty"
+    _require_provider_key(key)
     _require_store(request).delete(key)
     bifrost_name = gateway.provider_for_secret_key(key)
     if bifrost_name:

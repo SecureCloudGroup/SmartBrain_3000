@@ -18,7 +18,6 @@
   let busy = $state(false);
   let error = $state("");
   let notice = $state("");
-  let uriCopied = $state(false);
   let needsReconnect = $state(false); // refresh token died (401) — show a Reconnect banner
 
   // Element refs for focus management on failed submits + the open-email overlay (U3/U4).
@@ -41,22 +40,12 @@
       return "Gmail connection failed — your OAuth client ID or secret looks wrong. Double-check them and try again.";
     }
     if (code === "redirect_uri_mismatch") {
-      return "Gmail connection failed — the redirect URI on your OAuth client doesn't match. Copy the URI shown here into the Google Cloud Console and try again.";
+      return "Gmail connection failed — your OAuth client's redirect settings don't match. Make sure you created a Desktop app client (it needs no redirect URL), then try again.";
     }
     if (code === "admin_policy_enforced" || code === "disallowed_useragent") {
       return "Gmail connection blocked by a Google policy on this account. Try a personal Google account, or check with your admin.";
     }
     return "Couldn't connect Gmail. Please try again.";
-  }
-
-  async function copyUri() {
-    if (!status?.redirect_uri) return;
-    try {
-      await navigator.clipboard.writeText(status.redirect_uri);
-      uriCopied = true;
-    } catch {
-      /* clipboard unavailable — the user can select the text */
-    }
   }
 
   async function load() {
@@ -216,37 +205,30 @@
   {#if notice}<p class="notice">{notice}</p>{/if}
 
   {#if status && !status.connected && remote.status !== "idle"}
-    <div class="card"><p class="muted">Email isn&rsquo;t set up yet — connect it from SmartBrain on your Desktop, then it&rsquo;ll show up here.</p></div>
+    <div class="card"><p class="muted">Email isn&rsquo;t connected yet. Gmail signs in through your computer, so set it up once on <strong>SmartBrain on your Desktop</strong> — after that, your mail shows up here automatically.</p></div>
   {/if}
 
   {#if status && !status.connected && remote.status === "idle"}
     <div class="card">
       <h2>Connect Gmail <span class="muted" style="font-weight:400; font-size:0.85rem">· optional</span></h2>
-      <p class="muted">Gmail needs a one-time Google OAuth client. Your credentials are encrypted on this device.</p>
-      <p class="muted" style="font-size:0.85rem; margin:0 0 0.5rem">Most people skip this and use SmartBrain without email.</p>
+      <p class="muted">Read and send mail from SmartBrain. Your Google account stays on this device — nothing routes through us. Most people skip this and use SmartBrain without email.</p>
       <details style="margin-top:0.25rem">
-        <summary class="muted" style="font-size:0.9rem; cursor:pointer">Set up Gmail (advanced)</summary>
+        <summary class="muted" style="font-size:0.9rem; cursor:pointer">Set up Gmail</summary>
+        <p class="muted" style="font-size:0.85rem; margin:0.5rem 0">A one-time Google setup (~3 min). SmartBrain asks for two permissions only — <strong>read your inbox</strong> and <strong>send mail as you</strong>; no deleting, archiving, or labels.</p>
         <ol class="muted" style="padding-left:1.25rem; line-height:1.7; margin:0.5rem 0">
           <li>
             Open
-            <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noreferrer">Google Cloud Console → Credentials</a>
-            and create an <strong>OAuth client ID</strong> (type: Desktop app, or Web application).
+            <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noreferrer">Google Cloud Console → Credentials</a>,
+            then <strong>Create credentials → OAuth client ID</strong> and choose type <strong>Desktop app</strong>.
+            <span style="display:block; font-size:0.85rem">A Desktop-app client needs no redirect URL — Google handles it.</span>
           </li>
           <li>
-            Add this exact <strong>redirect URI</strong> to the client:
-            <span class="row" style="gap:0.4rem; margin-top:0.25rem; flex-wrap:wrap">
-              <code style="word-break:break-all">{status.redirect_uri}</code>
-              <button class="link" type="button" onclick={copyUri}>{uriCopied ? "Copied ✓" : "Copy"}</button>
-            </span>
-          </li>
-          <li>
-            On the <strong>OAuth consent screen</strong>, set <strong>Publishing status</strong> to
-            <strong>In production</strong> — otherwise Google expires your connection after 7 days and
-            you&rsquo;d have to reconnect.
+            On the <strong>OAuth consent screen</strong>, add the <code>gmail.readonly</code> and <code>gmail.send</code> scopes
+            and set <strong>Publishing status</strong> to <strong>In production</strong> (otherwise Google signs you out every 7 days).
           </li>
           <li>Paste the client <strong>ID</strong> and <strong>secret</strong> below and connect.</li>
         </ol>
-        <p class="muted" style="font-size:0.85rem; margin:0 0 0.5rem"><a href="/help#features">More on email setup</a></p>
+        <p class="muted" style="font-size:0.8rem; margin:0 0 0.5rem">When you connect, Google may say the app is &ldquo;unverified&rdquo; — it&rsquo;s your own client, so tap <strong>Advanced → Continue</strong>. <a href="/help#features">More on email setup</a>.</p>
         <form onsubmit={connect} style="display:flex; flex-direction:column; gap:0.5rem">
           <input bind:value={clientId} bind:this={clientIdEl} placeholder="Client ID" />
           <input bind:value={clientSecret} bind:this={clientSecretEl} type="password" placeholder="Client secret" />
@@ -261,16 +243,15 @@
   {#if status?.connected}
     {#if needsReconnect}
       <div class="card" style="border-color:var(--warn,#b9770e)">
-        <h2 style="margin-top:0">Gmail connection expired</h2>
+        <h2 style="margin-top:0">Gmail needs reconnecting</h2>
         <p class="muted">
-          Your Gmail sign-in is no longer valid (Google expires it after 7 days unless the
-          OAuth consent screen is set to <strong>In production</strong>). Reconnect to restore it —
-          you won&rsquo;t need to re-enter your client ID or secret.
+          Google signed SmartBrain out of your mail. Reconnect to restore it — one click, and you
+          won&rsquo;t need to re-enter your client ID or secret.
         </p>
         {#if remote.status === "idle"}
           <button disabled={busy} onclick={reconnect}>{busy ? "Redirecting…" : "Reconnect Gmail"}</button>
         {:else}
-          <p class="muted">Reconnect from SmartBrain on your Desktop, then refresh here.</p>
+          <p class="muted">Reconnect once from SmartBrain on your Desktop — it&rsquo;ll start working here again automatically.</p>
         {/if}
       </div>
     {/if}

@@ -100,12 +100,25 @@ def _remember_fact(ctx: ToolContext, args: dict) -> dict:
 
 
 def _add_task(ctx: ToolContext, args: dict) -> dict:
-    """REVIEWED: add a planner task (reversible). Forwards due_time/priority/recur too."""
+    """REVIEWED: add a planner task (reversible). Forwards due_time/priority/recur too.
+
+    Idempotent: a flaky local model sometimes emits add_task twice (in one step or by re-running
+    it on a follow-up). If an OPEN task with the same title + due already exists, return THAT
+    instead of creating a duplicate row.
+    """
     assert ctx.planner is not None, "planner unavailable"
-    assert args.get("title"), "title required"
+    title = args.get("title")
+    assert title, "title required"
+    due_date = args.get("due_date") or None
+    due_time = args.get("due_time") or None
+    norm = title.strip().lower()
+    for t in ctx.planner.list_tasks():
+        if (t["status"] != "done" and t["title"].strip().lower() == norm
+                and t["due_date"] == due_date and t["due_time"] == due_time):
+            return {"id": t["id"], "duplicate": True}  # no-op: identical open task already exists
     return {"id": ctx.planner.add_task(
-        args["title"], args.get("notes", ""), args.get("due_date") or None,
-        due_time=args.get("due_time") or None,
+        title, args.get("notes", ""), due_date,
+        due_time=due_time,
         priority=args.get("priority", "medium"),
         recur=args.get("recur", "none"),
     )}

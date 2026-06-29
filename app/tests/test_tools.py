@@ -167,6 +167,21 @@ def test_add_task_tool_forwards_time_priority_recur() -> None:
     assert t["due_time"] == "09:00" and t["priority"] == "high" and t["recur"] == "daily"
 
 
+def test_add_task_tool_dedupes_identical_open_task() -> None:
+    # A flaky local model can emit add_task twice (in one step, or re-running it on a follow-up).
+    # The second identical call must NOT create a second row — it returns the existing open task.
+    ctx, planner = _planner_ctx()
+    tool = tools.get_tool("add_task")
+    args = tools.validate_args(tool, {"title": "Call Bob", "due_date": "2026-06-30", "due_time": "09:00"})
+    first = tool.handler(ctx, args)
+    second = tool.handler(ctx, dict(args))  # identical args again
+    assert second["id"] == first["id"] and second.get("duplicate") is True
+    assert len([t for t in planner.list_tasks() if t["title"] == "Call Bob"]) == 1
+    # A genuinely different due still creates a new task (dedup is exact title+due only).
+    other = tool.handler(ctx, tools.validate_args(tool, {"title": "Call Bob", "due_date": "2026-07-01"}))
+    assert other["id"] != first["id"]
+
+
 class _FakeMail:
     def list_recent(self, max_results: int = 10) -> list[dict]:
         return [{"id": "m1", "from": "a@b.com", "subject": "Hi", "date": "", "snippet": "yo"}][:max_results]

@@ -67,6 +67,14 @@ def test_build_auth_url_has_pkce_and_offline() -> None:
     assert q["redirect_uri"][0].startswith("http://localhost")
 
 
+def test_redirect_uri_rejects_non_loopback(monkeypatch) -> None:
+    # The loopback redirect is the local-first guarantee; a non-loopback override must HARD-raise
+    # (a bare assert would be stripped under `python -O`).
+    monkeypatch.setenv("SMARTBRAIN_OAUTH_REDIRECT", "https://evil.example/callback")
+    with pytest.raises(email_oauth.EmailOAuthError):
+        email_oauth.redirect_uri()
+
+
 def test_exchange_code_requires_refresh_token(monkeypatch) -> None:
     _patch_httpx(monkeypatch, email_oauth, _Resp(200, {"access_token": "a", "expires_in": 3600}))
     with pytest.raises(email_oauth.EmailOAuthError):  # no refresh_token -> error
