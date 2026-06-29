@@ -1,18 +1,16 @@
 <script lang="ts">
   import { onDestroy, onMount } from "svelte";
   import QRCode from "qrcode";
-  import { api, type DeviceInfo, type PairingResponse } from "$lib/api";
-  import { encodePairingFragment, type PairingPayload } from "$lib/remote/pairing";
+  import { api, type DeviceInfo } from "$lib/api";
   import { confirmDialog } from "$lib/confirm.svelte";
   import { describeError } from "$lib/errors";
 
   let devices = $state<DeviceInfo[]>([]);
   let label = $state("My phone");
-  let busy = $state(false);
   let error = $state("");
-  let qr = $state(""); // data URL of the latest pairing QR (shown once)
-  let notConfigured = $state(false);
-  let pairCode = $state(""); // 6-char code for the installed (home-screen) app pairing path
+  let originQr = $state(""); // data URL of the node-origin QR (just opens the site on the phone)
+  let originHost = $state(""); // host shown in step (1) as a fallback for typing
+  let pairCode = $state(""); // 6-char code entered in the installed PWA
   let codeBusy = $state(false);
   let pairState = $state<"idle" | "waiting" | "paired" | "expired">("idle");
   let pairRemaining = $state(0); // seconds until the code expires
@@ -43,60 +41,29 @@
   }
   onMount(load);
 
-  function toPayload(r: PairingResponse): PairingPayload {
-    return {
-      v: 1,
-      deviceId: r.device_id,
-      credential: r.credential,
-      desktopPubkey: r.desktop_pubkey,
-      signalingUrl: r.signaling_url,
-      desktopId: r.desktop_id,
-      iceServers: r.ice_servers ?? [],
-    };
-  }
-
-  async function mint() {
-    busy = true;
-    error = "";
-    qr = "";
-    notConfigured = false; // clear any stale "not configured" card from a prior attempt
-    try {
-      const r = await api.createDevice(label.trim() || "device");
-      if (!r.signaling_url) {
-        notConfigured = true;
-        await load();
-        return;
-      }
-      // Pair-link origin = the NODE that serves the shell (https form of the signaling
-      // host), not wherever the operator views this page. Lets the QR be generated from
-      // localhost while the phone loads the app from the always-reachable node.
-      const shellOrigin = (() => {
-        try {
-          return `https://${new URL(r.signaling_url).host}`;
-        } catch {
-          return window.location.origin;
-        }
-      })();
-      const url = `${shellOrigin}/pair#${encodePairingFragment(toPayload(r))}`;
-      qr = await QRCode.toDataURL(url, { width: 240, margin: 1 });
-      await load();
-    } catch (e) {
-      error = describeError(e);
-    } finally {
-      busy = false;
-    }
-  }
-
-  async function pairViaCode() {
+  async function startPairing() {
     codeBusy = true;
     error = "";
     pairCode = "";
+    originQr = "";
+    originHost = "";
     stopPairPolling();
     try {
       const r = await api.startPairCode(label.trim() || "device");
       pairCode = r.code;
       pairState = "waiting";
       pairRemaining = r.expires_in;
+      // The QR encodes ONLY the node origin (bare https URL). Its sole job is to open the
+      // site on the phone so the user can install the PWA; pairing itself happens by code.
+      const host = (() => {
+        try {
+          return new URL(r.signaling_url).host;
+        } catch {
+          return window.location.host;
+        }
+      })();
+      originHost = host;
+      originQr = await QRCode.toDataURL(`https://${host}`, { width: 240, margin: 1 });
       // Live feedback: count the code down + poll for the phone connecting (every 2s).
       let tick = 0;
       pairTimer = setInterval(async () => {
@@ -141,7 +108,6 @@
       return;
     try {
       await api.deleteDevice(id);
-      qr = "";
       await load();
     } catch (e) {
       error = describeError(e);
@@ -155,15 +121,6 @@
   connection — nothing to install beyond the web app, and no router setup.
   <a href="/help#remote-access">Learn more</a>.
 </p>
-
-{#if notConfigured}
-  <div class="card">
-    <p class="error">
-      Remote access isn&rsquo;t configured yet. Start the stack with the WebRTC overlay and a
-      signaling node (Help &rarr; Remote access), then pair a device.
-    </p>
-  </div>
-{/if}
 
 {#if devices.length}
   <div class="card">
@@ -186,25 +143,32 @@
   <label for="dev-label">Device name</label>
   <input id="dev-label" bind:value={label} placeholder="My phone" />
   <p style="margin-top:0.75rem">
-    <button disabled={busy} onclick={mint}>{busy ? "Creating…" : "Pair a new phone"}</button>
+    <button disabled={codeBusy} onclick={startPairing}>{codeBusy ? "Starting…" : "Pair a new phone"}</button>
   </p>
-  {#if qr}
-    <p class="muted">On the phone, scan this with the camera — it opens the app from your node, so it works from anywhere:</p>
-    <img src={qr} alt="Pairing QR code" width="240" height="240" />
-    <p class="muted" style="font-size:0.8rem">Shows the device credential once — close it after the phone is paired.</p>
-  {/if}
-  <hr style="margin:1rem 0;border:none;border-top:1px solid var(--border)" />
-  <p class="muted" style="font-size:0.9rem">Installed (Home Screen) app? It can&rsquo;t scan the QR, so pair it with a code:</p>
-  <p><button class="secondary" disabled={codeBusy} onclick={pairViaCode}>{codeBusy ? "Starting…" : "Pair via code"}</button></p>
   {#if pairCode}
-    <p class="muted">In the installed app tap <b>Pair with a code</b> and enter this, on the same Wi-Fi as this Desktop:</p>
-    <p style="font:700 2rem/1.2 ui-monospace,monospace;letter-spacing:0.25em">{pairCode}</p>
+    <div style="display:flex; gap:1.5rem; align-items:flex-start; flex-wrap:wrap; margin-top:0.5rem">
+      <div>
+        {#if originQr}
+          <img src={originQr} alt="QR code to open SmartBrain on your phone" width="240" height="240" />
+          <p class="muted" style="font-size:0.85rem; max-width:240px">Scan to open SmartBrain on your phone.</p>
+        {/if}
+      </div>
+      <ol style="line-height:1.7; margin:0; padding-left:1.25rem; flex:1; min-width:16rem">
+        <li>Scan this — or go to <b>{originHost}</b> — on your phone.</li>
+        <li><b>Add to Home Screen</b>, then open the app.</li>
+        <li>
+          Enter this code:
+          <div style="font:700 2rem/1.2 ui-monospace,monospace; letter-spacing:0.25em; margin-top:0.25rem">{pairCode}</div>
+          <span class="muted">expires in {fmtRemaining(pairRemaining)}</span>
+        </li>
+      </ol>
+    </div>
     {#if pairState === "waiting"}
-      <p class="muted">&#8987; Waiting for your phone&hellip; (expires in {fmtRemaining(pairRemaining)})</p>
+      <p class="muted" style="margin-top:0.75rem">&#8987; Waiting for your phone&hellip;</p>
     {:else if pairState === "paired"}
-      <p style="color:var(--ok); font-weight:600">&check; Your phone connected.</p>
+      <p style="color:var(--ok); font-weight:600; margin-top:0.75rem">&check; Your phone connected.</p>
     {:else if pairState === "expired"}
-      <p class="muted">Code expired &mdash; tap &ldquo;Pair via code&rdquo; for a new one.</p>
+      <p class="muted" style="margin-top:0.75rem">Code expired &mdash; tap &ldquo;Pair a new phone&rdquo; for a new one.</p>
     {/if}
   {/if}
 </div>

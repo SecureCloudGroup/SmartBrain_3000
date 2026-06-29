@@ -32,6 +32,14 @@ def _pairing_payload(store, app, label: str) -> dict:
     }
 
 
+def _activate_remote(app) -> None:
+    """Open remote access now that the user has opted in by pairing (lazy-start; see main._webrtc_loop).
+    Idempotent: the loop waits on this event, then dials the broker and stays connected."""
+    ev = getattr(app.state, "webrtc_active", None)
+    if ev is not None:
+        ev.set()
+
+
 def _cancel_pair_session(app) -> None:
     """Stop any in-progress pairing-by-code session (one active at a time)."""
     sess = getattr(app.state, "pair_session", None)
@@ -67,6 +75,7 @@ def create_device(request: Request, body: DeviceCreate) -> dict:
     """
     store = _store(request)
     rec = devices.create_device(store, body.label)
+    _activate_remote(request.app)  # pairing is the opt-in -> open the broker link (lazy-start)
     return {
         **rec,
         "desktop_pubkey": identity.public_key_b64(store),
@@ -85,8 +94,9 @@ async def start_pair_code(request: Request, body: DeviceCreate) -> dict:
     Requires unlock + a configured signaling broker. One session at a time.
     """
     store = _store(request)
-    signaling, token = remote_config.signaling_url(), os.environ.get("SMARTBRAIN_SIGNALING_TOKEN", "")
-    if not signaling or not token:
+    signaling = remote_config.signaling_url()
+    token = os.environ.get("SMARTBRAIN_SIGNALING_TOKEN", "")  # empty in hosted (tokenless) mode
+    if not signaling:
         raise HTTPException(status_code=503, detail="remote access (signaling broker) is not configured")
     payload = _pairing_payload(store, request.app, body.label)
     code = pairing_code.generate_code()
@@ -99,7 +109,10 @@ async def start_pair_code(request: Request, body: DeviceCreate) -> dict:
         )
     )
     request.app.state.pair_session = {"stop": stop, "task": task}
-    return {"code": code, "expires_in": 300}
+    _activate_remote(request.app)  # pairing is the opt-in -> open the broker link (lazy-start)
+    # signaling_url lets the Desktop render a "scan to open the app on your phone" QR (the bare
+    # node origin — NOT a pairing payload), so the phone installs the PWA then enters the code.
+    return {"code": code, "expires_in": 300, "signaling_url": signaling}
 
 
 @router.delete("/api/devices/pair-code")

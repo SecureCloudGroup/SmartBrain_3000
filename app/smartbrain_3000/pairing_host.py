@@ -16,7 +16,7 @@ import json
 import logging
 import os
 
-from . import pairing_code, webrtc_peer
+from . import pairing_code, remote_config, webrtc_peer
 
 log = logging.getLogger(__name__)
 
@@ -116,7 +116,7 @@ async def run_pairing_host(
     paired, else False (expired / too many wrong attempts / stopped / link error)."""
     import websockets  # lazy: only when a session runs
 
-    assert signaling_url and token and code, "signaling url + token + code required"
+    assert signaling_url and code, "signaling url + code required"  # token empty in hosted (tokenless) mode
     assert isinstance(payload, dict), "payload must be a dict (PairingPayload)"
     room_id, code_key = pairing_code.derive(code)
     state: dict = {"done": asyncio.Event(), "ok": False, "guesses": 0}
@@ -143,14 +143,25 @@ async def run_pairing_host(
         async with websockets.connect(signaling_url, max_size=_MAX_MSG) as ws:
             await ws.send(json.dumps({"role": "desktop", "desktop_id": room_id, "token": token}))
             closer = asyncio.ensure_future(_close_ws_on_done(ws))
+            # Broker-pushed ephemeral ICE (STUN/TURN, fresh creds) overrides the static ice_servers
+            # param — without it the pairing peer has no relay candidate and never connects.
+            node_ice = None
             try:
                 async for raw in ws:
                     if state["done"].is_set():
                         break
                     msg = json.loads(raw)
-                    if msg.get("type") != "offer":
+                    mtype = msg.get("type")
+                    if mtype == "ice":
+                        node_ice = msg.get("iceServers")
                         continue
-                    pc, answer_sdp = await _answer(str(msg.get("sdp") or ""), ice_servers, code_key, payload, state)
+                    if mtype != "offer":
+                        continue
+                    # Reorder pushed ICE by live UDP reachability (TCP TURN first when UDP is
+                    # blocked) so the relay works from Docker / UDP-blocking networks.
+                    ice = (remote_config.adapt_pushed_ice(node_ice)
+                           if node_ice is not None else ice_servers)
+                    pc, answer_sdp = await _answer(str(msg.get("sdp") or ""), ice, code_key, payload, state)
                     peers.append(pc)
                     await ws.send(json.dumps({"type": "answer", "to": msg.get("from"), "sdp": answer_sdp}))
             finally:

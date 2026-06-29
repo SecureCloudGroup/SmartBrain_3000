@@ -111,18 +111,21 @@ async def _scheduler_loop(application: FastAPI) -> None:
 
 
 async def _webrtc_loop(application: FastAPI) -> None:
-    """Remote-access link: hold an outbound WSS to the signaling broker and answer
-    phone offers. Off unless SMARTBRAIN_WEBRTC_ENABLED; needs SMARTBRAIN_SIGNALING_URL.
+    """Remote-access link: hold an outbound WSS to the signaling broker and answer phone offers.
 
-    Lazy-imports webrtc_signaling (and thus aiortc/websockets) so the feature's deps
-    are only loaded when remote access is turned on.
+    Dials the broker only AFTER the user opts in by pairing a device (``webrtc_active``), so a
+    fresh, never-paired install makes no outbound connection. Lazy-imports webrtc_signaling (and
+    thus aiortc/websockets) so those deps load only once remote access is actually used.
     """
     assert application is not None, "application required"
-    from . import remote_config, webrtc_signaling  # lazy
+    from . import remote_config  # light (no aiortc)
     url = remote_config.signaling_url()
     if not url:
-        log.warning("SMARTBRAIN_WEBRTC_ENABLED set but SMARTBRAIN_SIGNALING_URL is unset; remote access off")
+        log.warning("SMARTBRAIN_SIGNALING_URL is empty; remote access off")
         return
+    if not await _await_webrtc_active(application):
+        return  # shutting down before the user ever paired
+    from . import webrtc_signaling  # lazy: aiortc/websockets only once remote is used
     await webrtc_signaling.run_signaling(
         signaling_url=url,
         desktop_id=remote_config.desktop_id(application.state.boot),
@@ -133,6 +136,25 @@ async def _webrtc_loop(application: FastAPI) -> None:
         ice_servers=remote_config.ice_servers_adaptive,
         stop=application.state.webrtc_stop,
     )
+
+
+async def _await_webrtc_active(application: FastAPI) -> bool:
+    """Block until remote access is activated (the user paired a device) or shutdown fires.
+
+    Returns True if activated, False if shutting down. Keeps a fresh, never-paired install from
+    ever dialing the broker — the connection is the user's opt-in (pairing), not a default.
+    """
+    active = application.state.webrtc_active
+    if active.is_set():
+        return True
+    waiter = asyncio.ensure_future(active.wait())
+    stopper = asyncio.ensure_future(application.state.webrtc_stop.wait())
+    try:
+        await asyncio.wait({waiter, stopper}, return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        waiter.cancel()
+        stopper.cancel()
+    return active.is_set()
 
 
 _GW_POOL_TIMEOUT = 60.0  # default per-request timeout for the pooled gateway client (B22)
@@ -198,10 +220,16 @@ def _make_lifespan(mcp):
             base_url=gateway.gateway_url(), timeout=_GW_POOL_TIMEOUT
         )
         gateway.set_pool(application.state.gw_client)
+        # Remote access dials out only once the user opts in by pairing a device (keeps
+        # SECURITY.md's "off by default" true). SMARTBRAIN_WEBRTC_ENABLED overrides: "1" = always
+        # on (activate now), "0" = fully disabled (no task); unset = lazy (waits for a pairing).
+        application.state.webrtc_active = asyncio.Event()
+        _webrtc_mode = os.environ.get("SMARTBRAIN_WEBRTC_ENABLED", "")
+        if _webrtc_mode == "1":
+            application.state.webrtc_active.set()
         async with mcp.session_manager.run():  # drive the MCP transport for this app
             runner = asyncio.create_task(_scheduler_loop(application))  # background scheduler
-            webrtc = (asyncio.create_task(_webrtc_loop(application))   # remote access (opt-in)
-                      if os.environ.get("SMARTBRAIN_WEBRTC_ENABLED") else None)
+            webrtc = asyncio.create_task(_webrtc_loop(application)) if _webrtc_mode != "0" else None
             try:
                 yield
             finally:

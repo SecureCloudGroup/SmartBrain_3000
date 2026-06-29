@@ -13,9 +13,16 @@ import struct
 import time
 
 
+# SecureCloudGroup's hosted, content-blind signaling node — the default so a fresh install can pair
+# a phone with zero configuration. Self-hosters override with SMARTBRAIN_SIGNALING_URL=wss://<node>.
+# Pre-wiring the URL exposes nothing on its own: remote access still reaches the broker only once the
+# user pairs a device (the opt-in), and nothing is reachable until a device credential authenticates.
+_DEFAULT_SIGNALING_URL = "wss://rtc.securecloudgroup.com"
+
+
 def signaling_url() -> str:
-    """The wss:// signaling broker URL (empty if remote access isn't configured)."""
-    return os.environ.get("SMARTBRAIN_SIGNALING_URL", "")
+    """The wss:// signaling broker URL — defaults to the hosted node; env-overridable for self-host."""
+    return os.environ.get("SMARTBRAIN_SIGNALING_URL", _DEFAULT_SIGNALING_URL)
 
 
 def desktop_id(boot: dict | None = None) -> str:
@@ -100,6 +107,24 @@ def ice_servers_adaptive() -> list[dict]:
     servers[0]["urls"].sort(key=lambda u: _ice_priority(u, prefer_udp))
     assert servers[0]["urls"], "ice server must carry at least one url"
     return servers
+
+
+def adapt_pushed_ice(servers: list) -> list:
+    """Reorder broker-pushed ICE urls by LIVE UDP reachability so the relay works even when UDP
+    egress is blocked (Docker Desktop on macOS, UDP-blocking networks): aiortc consumes only the
+    FIRST turn url, so we put TCP/TLS TURN first when UDP can't reach the node, UDP TURN first when
+    it can. The minted username/credential are preserved untouched."""
+    assert isinstance(servers, list), "servers must be a list"
+    adapted: list = []
+    for s in servers:
+        if not isinstance(s, dict):
+            continue
+        urls = [u for u in (s.get("urls") or []) if u]
+        if urls:
+            prefer_udp = _udp_egress_ok(urls)
+            urls = sorted(urls, key=lambda u: _ice_priority(u, prefer_udp))
+        adapted.append({**s, "urls": urls})
+    return adapted
 
 
 def ice_servers() -> list[dict]:

@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { channelBinding, randomNonceB64, sdpFingerprint, verifyDesktopIdentity } from "./crypto";
 import { decodePairingFragment, encodePairingFragment, parsePairingPayload } from "./pairing";
 import { asResponse, b64ToBytes, bytesToB64, concatBytes, encodeRequest, parseMessage } from "./protocol";
+import { classifyCandidatePair } from "./candidate-pair";
 
 const SDP_A = "v=0\r\na=fingerprint:sha-256 AA:BB:CC\r\na=setup:actpass\r\n";
 const SDP_B = "v=0\na=fingerprint:SHA-256 dd:ee:ff\na=setup:active\n";
@@ -91,6 +92,33 @@ describe("pairing payload", () => {
   it("rejects payloads missing required fields", () => {
     expect(() => parsePairingPayload(JSON.stringify({ deviceId: "x" }))).toThrow();
     expect(() => decodePairingFragment("#")).toThrow();
+  });
+});
+
+describe("connectionKind classifies the nominated candidate pair", () => {
+  // RTCStatsReport-shaped fixtures: id + type + nominated/state on the pair, candidateType
+  // on the candidate rows. classifyCandidatePair must read BOTH local and remote types.
+  const pair = (local: string, remote: string) => [
+    { id: "pair1", type: "candidate-pair", nominated: true, localCandidateId: "L", remoteCandidateId: "R" },
+    { id: "L", type: "local-candidate", candidateType: local },
+    { id: "R", type: "remote-candidate", candidateType: remote },
+  ];
+
+  it("returns 'relay' when the REMOTE candidate is a relay (local srflx) — the bug we fixed", () => {
+    expect(classifyCandidatePair(pair("srflx", "relay"))).toBe("relay");
+  });
+
+  it("returns 'relay' when the LOCAL candidate is a relay", () => {
+    expect(classifyCandidatePair(pair("relay", "host"))).toBe("relay");
+  });
+
+  it("returns 'direct' only when neither side is a relay", () => {
+    expect(classifyCandidatePair(pair("host", "host"))).toBe("direct");
+    expect(classifyCandidatePair(pair("srflx", "srflx"))).toBe("direct");
+  });
+
+  it("returns 'unknown' when there's no nominated/succeeded pair", () => {
+    expect(classifyCandidatePair([])).toBe("unknown");
   });
 });
 

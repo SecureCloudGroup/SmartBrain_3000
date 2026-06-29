@@ -517,7 +517,7 @@ export const api = {
   deleteDevice: (id: string) =>
     req<{ ok: boolean }>(`/api/devices/${encodeURIComponent(id)}`, { method: "DELETE" }),
   startPairCode: (label: string) =>
-    req<{ code: string; expires_in: number }>("/api/devices/pair-code", { method: "POST", body: JSON.stringify({ label }) }),
+    req<{ code: string; expires_in: number; signaling_url: string }>("/api/devices/pair-code", { method: "POST", body: JSON.stringify({ label }) }),
   cancelPairCode: () => req<{ ok: boolean }>("/api/devices/pair-code", { method: "DELETE" }),
   pairCodeStatus: () => req<{ state: "none" | "waiting" | "paired" | "expired" }>("/api/devices/pair-code"),
 };

@@ -316,3 +316,130 @@ def test_broker_caps_read_from_env(monkeypatch) -> None:
     assert broker._max_phones_per_desktop == 3
     assert broker._rate_limit == 5
     assert broker._rate_window == 11.5
+
+
+# --- ephemeral TURN + open (tokenless) mode -------------------------------------------------
+
+def _verify_ephemeral(ice: list, secret: str, urls: list) -> None:
+    """A pushed ICE server must carry the exact urls + a coturn use-auth-secret credential."""
+    import base64
+    import hashlib
+    import hmac
+
+    assert ice and ice[0]["urls"] == urls, "ephemeral ICE must echo the node TURN urls"
+    user, cred = ice[0]["username"], ice[0]["credential"]
+    expected = base64.b64encode(hmac.new(secret.encode(), user.encode(), hashlib.sha1).digest()).decode()
+    assert cred == expected, "credential must be base64(HMAC-SHA1(secret, username))"
+    assert user.split(":")[0].isdigit(), "username must start with a unix expiry"
+
+
+def test_mint_turn_credentials_matches_coturn_scheme() -> None:
+    import base64
+    import hashlib
+    import hmac
+
+    user, cred = broker_mod.mint_turn_credentials("s3cr3t", ttl=3600, name="sb")
+    assert user.endswith(":sb") and user.split(":")[0].isdigit()
+    expected = base64.b64encode(hmac.new(b"s3cr3t", user.encode(), hashlib.sha1).digest()).decode()
+    assert cred == expected
+
+
+def test_open_mode_admits_desktop_without_token() -> None:
+    async def run() -> None:
+        broker = broker_mod.Broker("", open_mode=True)
+        server = await websockets.serve(broker.handle, "127.0.0.1", 0)
+        url = f"ws://127.0.0.1:{server.sockets[0].getsockname()[1]}"
+        try:
+            async with websockets.connect(url) as desk:
+                await desk.send(json.dumps({"role": "desktop", "desktop_id": "d-open"}))  # NO token
+                assert json.loads(await asyncio.wait_for(desk.recv(), 5))["type"] == "registered"
+        finally:
+            server.close()
+            await server.wait_closed()
+
+    asyncio.run(run())
+
+
+def test_ephemeral_ice_pushed_to_desktop_and_phone() -> None:
+    secret, urls = "turnsecret", ["turn:rtc.example:3478", "turn:rtc.example:3478?transport=tcp"]
+
+    async def run() -> None:
+        broker = broker_mod.Broker("", open_mode=True, turn_urls=urls, turn_secret=secret)
+        server = await websockets.serve(broker.handle, "127.0.0.1", 0)
+        url = f"ws://127.0.0.1:{server.sockets[0].getsockname()[1]}"
+        try:
+            async with websockets.connect(url) as desk:
+                await desk.send(json.dumps({"role": "desktop", "desktop_id": "d1"}))
+                assert json.loads(await asyncio.wait_for(desk.recv(), 5))["type"] == "registered"
+                ice_msg = json.loads(await asyncio.wait_for(desk.recv(), 5))
+                assert ice_msg["type"] == "ice"
+                _verify_ephemeral(ice_msg["iceServers"], secret, urls)
+                async with websockets.connect(url) as phone:
+                    await phone.send(json.dumps({"role": "phone", "desktop_id": "d1"}))
+                    pmsg = json.loads(await asyncio.wait_for(phone.recv(), 5))
+                    assert pmsg["type"] == "ice"
+                    _verify_ephemeral(pmsg["iceServers"], secret, urls)
+        finally:
+            server.close()
+            await server.wait_closed()
+
+    asyncio.run(run())
+
+
+def test_static_mode_regular_phone_gets_no_ice() -> None:
+    # No TURN secret + a non-pairing desktop_id -> the broker must NOT push ICE (back-compat:
+    # regular phones use the static creds from their stored payload). First frame is the offline ack.
+    async def run() -> None:
+        broker = broker_mod.Broker("secret", pair_ice=[{"urls": ["stun:x:3478"]}])
+        server = await websockets.serve(broker.handle, "127.0.0.1", 0)
+        url = f"ws://127.0.0.1:{server.sockets[0].getsockname()[1]}"
+        try:
+            async with websockets.connect(url) as phone:
+                await phone.send(json.dumps({"role": "phone", "desktop_id": "d1"}))
+                await phone.send(json.dumps({"type": "offer", "sdp": "x"}))
+                msg = json.loads(await asyncio.wait_for(phone.recv(), 5))
+                assert msg["type"] == "error" and "offline" in msg["detail"]
+        finally:
+            server.close()
+            await server.wait_closed()
+
+    asyncio.run(run())
+
+
+def test_static_mode_paircode_phone_gets_pair_ice() -> None:
+    # sbpair-* rooms still get the static pair ICE in non-ephemeral mode (unchanged behavior).
+    async def run() -> None:
+        broker = broker_mod.Broker("secret", pair_ice=[{"urls": ["stun:x:3478"]}])
+        server = await websockets.serve(broker.handle, "127.0.0.1", 0)
+        url = f"ws://127.0.0.1:{server.sockets[0].getsockname()[1]}"
+        try:
+            async with websockets.connect(url) as phone:
+                await phone.send(json.dumps({"role": "phone", "desktop_id": "sbpair-abc"}))
+                msg = json.loads(await asyncio.wait_for(phone.recv(), 5))
+                assert msg["type"] == "ice" and msg["iceServers"][0]["urls"] == ["stun:x:3478"]
+        finally:
+            server.close()
+            await server.wait_closed()
+
+    asyncio.run(run())
+
+
+def test_open_mode_desktop_registration_rate_limited() -> None:
+    async def run() -> None:
+        broker = broker_mod.Broker("", open_mode=True, reg_rate_limit=2, reg_rate_window_secs=60.0)
+        server = await websockets.serve(broker.handle, "127.0.0.1", 0)
+        url = f"ws://127.0.0.1:{server.sockets[0].getsockname()[1]}"
+        try:
+            for i in range(2):  # two registrations allowed (connect-and-close frees the slot)
+                async with websockets.connect(url) as d:
+                    await d.send(json.dumps({"role": "desktop", "desktop_id": f"d{i}"}))
+                    assert json.loads(await asyncio.wait_for(d.recv(), 5))["type"] == "registered"
+            async with websockets.connect(url) as d:  # third within the window -> rate-limited
+                await d.send(json.dumps({"role": "desktop", "desktop_id": "d3"}))
+                m = json.loads(await asyncio.wait_for(d.recv(), 5))
+                assert m["type"] == "error" and m["detail"] == "rate_limited"
+        finally:
+            server.close()
+            await server.wait_closed()
+
+    asyncio.run(run())

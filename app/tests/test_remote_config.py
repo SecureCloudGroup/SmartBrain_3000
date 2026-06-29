@@ -11,9 +11,13 @@ from smartbrain_3000 import remote_config
 
 # --- signaling_url --------------------------------------------------------
 
-def test_signaling_url_empty_by_default(monkeypatch) -> None:
+def test_signaling_url_defaults_to_hosted_node(monkeypatch) -> None:
+    # Zero-config: a fresh install points at SecureCloudGroup's hosted broker so a phone can pair
+    # with no setup. (Pre-wiring the URL exposes nothing until the user pairs a device.)
     monkeypatch.delenv("SMARTBRAIN_SIGNALING_URL", raising=False)
-    assert remote_config.signaling_url() == ""
+    url = remote_config.signaling_url()
+    assert url == "wss://rtc.securecloudgroup.com"
+    assert url.startswith("wss://")  # the broker is wss-only (invariant for the loop)
 
 
 def test_signaling_url_reads_env(monkeypatch) -> None:
@@ -151,3 +155,36 @@ def test_ice_servers_partial_turn_credentials_ignored(monkeypatch) -> None:
     out = remote_config.ice_servers()
     assert len(out) == 1
     assert "username" not in out[0] and "credential" not in out[0]
+
+
+# --- adapt_pushed_ice (broker-pushed ephemeral ICE -> UDP-resilient ordering) ----------
+
+_PUSHED = [{
+    "urls": ["stun:n:3478", "turn:n:3478", "turn:n:3478?transport=tcp"],
+    "username": "1700000000:sb",
+    "credential": "abc123",
+}]
+
+
+def test_adapt_pushed_ice_tcp_turn_first_when_udp_blocked(monkeypatch) -> None:
+    # UDP egress blocked (Docker on macOS, UDP-blocking nets): aiortc uses the FIRST turn url, so
+    # TCP TURN must come before UDP TURN or the Desktop never gets a usable relay candidate.
+    monkeypatch.setattr(remote_config, "_udp_egress_ok", lambda urls: False)
+    out = remote_config.adapt_pushed_ice(_PUSHED)
+    urls = out[0]["urls"]
+    assert urls[0].startswith("stun")  # STUN stays first
+    first_turn = next(u for u in urls if u.startswith("turn"))
+    assert "transport=tcp" in first_turn, urls
+    # credentials preserved untouched
+    assert out[0]["username"] == "1700000000:sb" and out[0]["credential"] == "abc123"
+
+
+def test_adapt_pushed_ice_udp_turn_first_when_reachable(monkeypatch) -> None:
+    monkeypatch.setattr(remote_config, "_udp_egress_ok", lambda urls: True)
+    out = remote_config.adapt_pushed_ice(_PUSHED)
+    first_turn = next(u for u in out[0]["urls"] if u.startswith("turn"))
+    assert "transport=tcp" not in first_turn, out[0]["urls"]  # UDP relay preferred when UDP works
+
+
+def test_adapt_pushed_ice_empty_is_safe() -> None:
+    assert remote_config.adapt_pushed_ice([]) == []

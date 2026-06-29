@@ -80,8 +80,8 @@
     <p style="margin-top:1rem"><button onclick={confirm}>Pair this phone</button></p>
   {:else if phase === "code"}
     <h1>Pair this device</h1>
-    <p>On your Desktop, open <b>Settings &rarr; Remote access</b> and tap <b>Pair via code</b>, then
-      enter the 6-character code shown. Do this while on the same network as your Desktop.</p>
+    <p>On your Desktop, open <b>Settings &rarr; Remote access &rarr; Pair a new phone</b>, then enter
+      the 6-character code shown.</p>
     <p style="margin-top:1rem">
       <input
         bind:value={code}

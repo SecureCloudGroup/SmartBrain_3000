@@ -10,14 +10,17 @@
 # 49160-49260 (UDP). Then put the secrets in a .env file beside this compose file and run:
 #   docker compose -f compose/docker-compose.signaling.yml up -d
 #
-# Required env (.env): SIGNALING_DOMAIN, ACME_EMAIL, SIGNALING_TOKEN, TURN_USER, TURN_PASSWORD,
-#                      TURN_PUBLIC_IP (the VPS public IPv4)
+# Required env (.env): SIGNALING_DOMAIN, ACME_EMAIL, TURN_SECRET, TURN_PUBLIC_IP (the VPS public IPv4).
+# Registration auth — set exactly one:
+#   SIGNALING_OPEN=1            hosted/public: tokenless registration (the public app ships NO secret),
+#                              bounded by a desktop cap + registration rate-limit.
+#   SIGNALING_TOKEN=<secret>   self-host: a shared registration secret (then set SIGNALING_OPEN=0).
 #
-# TURN uses long-term static credentials (lt-cred-mech): they don't expire (no refresh dance)
-# and relay abuse is bounded by the quotas below. They grant ONLY relay bandwidth — never app
-# access, which is gated by the device credential + channel-auth. Use the SAME TURN_USER/
-# TURN_PASSWORD in the home overlay (SMARTBRAIN_TURN_USERNAME/_CREDENTIAL).
-# NOTE: coturn's --user is "name:password", so TURN_PASSWORD must NOT contain a colon (:).
+# TURN uses EPHEMERAL credentials (coturn use-auth-secret): the broker mints short-lived creds from
+# TURN_SECRET per connection and pushes them over signaling, so no TURN secret is ever baked into a
+# client or QR — a leaked credential expires instead of becoming an open relay. Relay grants ONLY
+# bandwidth, never app access (gated by the device credential + channel-auth). TURN_SECRET stays on
+# the node; clients never see it.
 services:
   caddy:
     image: caddy:2
@@ -43,16 +46,16 @@ services:
     environment:
       - SIGNALING_HOST=0.0.0.0
       - SIGNALING_PORT=8089
-      # Shared desktop-registration secret (stops open abuse / desktop-slot squatting).
-      - SIGNALING_TOKEN=${SIGNALING_TOKEN:?set a desktop registration secret}
-      # ICE handed to pairing-by-code clients (the installed app has no TURN creds until it
-      # has the payload). Reuses coturn's creds; relay bandwidth only, quota-bounded.
-      # turn ?transport=tcp is the fallback when a network (some cellular carriers) blocks
-      # UDP — coturn already listens on TCP 3478. Without it such clients can't relay and
-      # "don't connect at all" while Wi-Fi works.
-      - SMARTBRAIN_PAIR_ICE_URLS=stun:${SIGNALING_DOMAIN}:3478,turn:${SIGNALING_DOMAIN}:3478,turn:${SIGNALING_DOMAIN}:3478?transport=tcp
-      - SMARTBRAIN_PAIR_TURN_USERNAME=${TURN_USER:-}
-      - SMARTBRAIN_PAIR_TURN_CREDENTIAL=${TURN_PASSWORD:-}
+      # Registration auth: hosted tokenless (default) OR a shared token for self-host.
+      - SIGNALING_OPEN=${SIGNALING_OPEN:-1}
+      - SIGNALING_TOKEN=${SIGNALING_TOKEN:-}
+      # Ephemeral TURN: the broker mints short-lived coturn creds from this secret and pushes them
+      # to desktops + phones over signaling — no static creds in any client or QR. SAME value as
+      # coturn's --static-auth-secret below.
+      - SIGNALING_TURN_SECRET=${TURN_SECRET:?set a TURN auth secret (shared with coturn)}
+      # STUN/TURN urls the node hands clients. ?transport=tcp is the fallback when a network (some
+      # cellular carriers) blocks UDP — coturn also listens on TCP 3478.
+      - SIGNALING_ICE_URLS=stun:${SIGNALING_DOMAIN}:3478,turn:${SIGNALING_DOMAIN}:3478,turn:${SIGNALING_DOMAIN}:3478?transport=tcp
     # No published port — Caddy reaches it on the internal network as signaling:8089.
     restart: unless-stopped
 
@@ -87,8 +90,8 @@ services:
       - "--relay-ip=${TURN_PUBLIC_IP}"
       - "--min-port=49160"
       - "--max-port=49260"
-      - "--lt-cred-mech"
-      - "--user=${TURN_USER:?set a TURN username}:${TURN_PASSWORD:?set a TURN password}"
+      - "--use-auth-secret"
+      - "--static-auth-secret=${TURN_SECRET:?set a TURN auth secret (shared with the broker)}"
       - "--realm=smartbrain"
       - "--fingerprint"
       - "--no-multicast-peers"

@@ -92,6 +92,16 @@ def _set_unlocked(request: Request, master_key: bytes) -> None:
         gateway.provision_local_from_store(request.app.state.secret_store)
     except Exception as exc:  # gateway unreachable — best effort
         log.warning("local provisioning skipped: %s", exc)
+    # Resume remote access if the user has already paired a device — a fresh, never-paired vault
+    # stays fully offline. Pairing is the opt-in; this just reconnects the broker link across
+    # restarts (see main._webrtc_loop / lazy-start).
+    try:
+        from . import devices, remote_config
+        ev = getattr(request.app.state, "webrtc_active", None)
+        if ev is not None and remote_config.signaling_url() and devices.list_devices(request.app.state.secret_store):
+            ev.set()
+    except Exception as exc:  # never block unlock on the remote-access check
+        log.warning("remote-access resume check skipped: %s", exc)
     # NOTE: the one-shot eager embeddings backfill (after the destructive 13->14
     # migration) runs on the scheduler's first tick (scheduler.eager_reindex), not a
     # per-unlock daemon thread — so it can't leak a DB cursor past teardown.

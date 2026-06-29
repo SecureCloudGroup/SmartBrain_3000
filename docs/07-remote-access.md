@@ -11,43 +11,33 @@ Your **Desktop** is where you set everything up. To use SmartBrain on your phone
 direct, **end-to-end-encrypted** connection (DTLS). When a direct link isn't possible,
 traffic falls back to an encrypted **relay** that still can't read your data.
 
-This needs a small **signaling node** running on a cheap public server (not your home
-machine). Your Desktop dials **out** to it, so nothing on your home network is ever
-exposed. The node only helps your phone find your Desktop — it is content-blind and
-never sees your data. Your operator runs this node; if SmartBrain was set up for you,
-remote access may already be configured.
+This uses a small **signaling node** on a public server (not your home machine) that helps your
+phone find your Desktop. SmartBrain is **preconfigured to use one**, so there's nothing to set
+up — your Desktop dials **out** to it, so nothing on your home network is ever exposed. The node
+is **content-blind**: it only relays the encrypted connection setup, never your data. (Prefer your
+own node? See *Self-hosting the signaling node* at the end.)
 
 ## Pair your phone
 
 ![Settings → Remote access: name a phone and pair it](assets/06-remote-access.png)
 
-There are two ways to pair, depending on how you open the app on the phone.
+On the **Desktop**, open **Settings → Remote access**, give the phone a name, and tap
+**Pair a new phone**. You'll see a QR code, three short steps, and a **6-character code**.
 
-### Option A — Scan a QR code (phone browser / Safari)
+On the **phone**:
 
-1. On the **Desktop**, open **Settings → Remote access**.
-2. Give the phone a name (e.g. "My phone") and tap **Pair a new phone**.
-3. On the phone, **scan the QR code with the camera**. It opens the app from the node,
-   so this works from anywhere with internet.
-4. Tap **Pair this phone** to confirm. You're connected.
-5. (Recommended) **Add to Home Screen** so you can reopen it with one tap.
+1. **Scan the QR** (or open the address shown) to load SmartBrain in your browser.
+2. **Add it to your Home Screen**, then open the installed app:
+   - **iPhone/iPad:** the **Share** button → *Add to Home Screen*.
+   - **Android:** the **⋮** menu → *Install app*.
+3. In the installed app, **enter the 6-character code** and tap **Pair**.
 
-The QR is shown **once** and carries a one-time credential — close it after pairing.
+That's it — the phone connects, from Wi-Fi or cellular. The code lasts a few minutes; if it
+expires, tap **Pair a new phone** for a fresh one.
 
-### Option B — Enter a 6-character code (installed Home-Screen app)
-
-On iPhone/iPad, an app you've **added to the Home Screen** keeps its own storage,
-separate from Safari. So the installed app **can't** inherit a QR you scanned in
-Safari — it has to be paired on its own, with a code.
-
-1. Open the **installed (Home Screen) app**. On the pairing screen, it asks for a code.
-2. On the **Desktop**, open **Settings → Remote access**, name the device, and tap
-   **Pair via code**. A **6-character code** appears.
-3. In the installed app, type that code and tap **Pair**. Do this **within 5 minutes**
-   and **on the same Wi-Fi as your Desktop**.
-
-> In short: Safari and the installed Home-Screen app each pair **once, separately** —
-> that's why the code path exists.
+> Why install first? On iPhone, an app on the Home Screen has its own private storage, separate
+> from Safari — so pairing happens *in the installed app*. The QR's only job is to open the site
+> so you can install it; it carries no secret.
 
 ## Using it on your phone
 
@@ -71,8 +61,8 @@ at any time. A revoked device can no longer connect.
   relay only ever see scrambled bytes, never your data.
 - **Identity-checked.** Before sending anything, your phone verifies your Desktop's
   identity (a key pinned at pairing), so a compromised node can't impersonate it.
-- **One-time credentials.** A QR or code carries a single-use pairing secret — close
-  the QR after pairing, and don't share a code.
+- **One-time code.** The 6-character pairing code is single-use and short-lived — don't share
+  it. (The QR only opens the site; it carries no secret.)
 
 This changes *where you can reach the app from*, not what protects your data. See
 [Privacy &amp; security](06-privacy-security.md).
@@ -104,33 +94,33 @@ uses a local certificate so your phone trusts the connection.
 This path is **same-network only**. To reach the Desktop from cellular or another
 network, use the WebRTC pairing above.
 
-## Setup for operators (one-time)
+## Self-hosting the signaling node (advanced)
 
-Remote access needs the signaling node and the WebRTC overlay running. If you're setting
-this up yourself:
+SmartBrain ships pointed at a hosted, content-blind node, so **most people need none of this.**
+To run your own node instead:
 
-1. **Run the signaling node** on a small public server (not your home machine):
+1. **Run the node** on a small public server with a domain (open ports 80/443 TCP, 3478
+   TCP+UDP, 49160-49260 UDP):
 
    ```sh
-   SIGNALING_TOKEN=<a-secret>  TURN_USER=<user>  TURN_PASSWORD=<pass> \
+   SIGNALING_DOMAIN=<your-domain>  ACME_EMAIL=<you@example.com>  SIGNALING_OPEN=1 \
+   TURN_SECRET=$(openssl rand -hex 32)  TURN_PUBLIC_IP=<vps-ipv4> \
      docker compose -f compose/docker-compose.signaling.yml up -d
    ```
 
-   Put a TLS proxy in front so phones can reach it at `wss://<your-node-domain>`.
-2. **Point your Desktop at it** — set these in your environment / `.env`:
+   The node mints **ephemeral TURN credentials** per connection (coturn `use-auth-secret`),
+   so no secret is ever baked into the app or a QR.
+2. **Point your Desktop at it** — set in your environment / `.env`:
 
    ```sh
-   SMARTBRAIN_SIGNALING_URL=wss://<your-node-domain>
-   SMARTBRAIN_SIGNALING_TOKEN=<the same SIGNALING_TOKEN>
-   SMARTBRAIN_ICE_URLS=stun:<your-node-domain>:3478,turn:<your-node-domain>:3478
-   SMARTBRAIN_TURN_USERNAME=<user>   SMARTBRAIN_TURN_CREDENTIAL=<pass>
+   SMARTBRAIN_SIGNALING_URL=wss://<your-domain>
    ```
-3. **Turn it on:** `python3 installer/install.py webrtc up` (outbound only — no
-   port-forward). Turn it off with `python3 installer/install.py webrtc down`.
 
-Then pair devices as above. (A WireGuard VPN overlay also exists as a CLI-only
-alternative — `python3 installer/install.py wireguard up` — but WebRTC is the
-recommended path and needs no router changes.)
+   The Desktop fetches STUN/TURN from the node automatically; there's nothing else to set.
+   Then pair devices as above.
+
+(A WireGuard VPN overlay also exists as a CLI-only alternative —
+`python3 installer/install.py wireguard up` — but WebRTC is the recommended path.)
 
 ## Next
 

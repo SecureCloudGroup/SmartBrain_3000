@@ -18,7 +18,7 @@ import asyncio
 import json
 import logging
 
-from . import webrtc_bridge, webrtc_peer
+from . import remote_config, webrtc_bridge, webrtc_peer
 
 log = logging.getLogger(__name__)
 
@@ -139,11 +139,22 @@ async def run_signaling(
                     watcher = (
                         _track(asyncio.ensure_future(_close_on_stop(ws, stop))) if stop is not None else None
                     )
+                    # Broker-pushed ephemeral ICE (STUN/TURN with short-lived creds). When present
+                    # it overrides the static env config, so no TURN secret is baked into the app;
+                    # re-pushed on every (re)register, so creds stay fresh.
+                    node_ice = None
                     try:
                         async for raw in ws:
                             msg = json.loads(raw)
-                            if msg.get("type") == "offer":
-                                await _on_offer(ws, msg, get_store, http_client, ice_servers, peers)
+                            mtype = msg.get("type")
+                            if mtype == "ice":
+                                node_ice = msg.get("iceServers")
+                            elif mtype == "offer":
+                                # Reorder pushed ICE by live UDP reachability (TCP TURN first when UDP
+                                # is blocked) so the relay works from Docker / UDP-blocking networks.
+                                ice = (remote_config.adapt_pushed_ice(node_ice)
+                                       if node_ice is not None else ice_servers)
+                                await _on_offer(ws, msg, get_store, http_client, ice, peers)
                     finally:
                         if watcher is not None:
                             watcher.cancel()

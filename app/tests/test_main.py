@@ -142,11 +142,13 @@ def test_lifespan_enters_and_exits_cleanly(tmp_path, monkeypatch) -> None:
 
 
 def test_lifespan_webrtc_enabled_no_url_logs_and_skips(tmp_path, monkeypatch, caplog) -> None:
-    # SMARTBRAIN_WEBRTC_ENABLED set but no signaling URL: the webrtc task must
-    # exit immediately (logging a warning) and shutdown must still complete fast.
+    # SMARTBRAIN_WEBRTC_ENABLED set but the signaling URL explicitly emptied (a self-hoster opting
+    # OUT of the hosted default): the webrtc task must exit immediately (logging a warning) and
+    # shutdown must still complete fast. NOTE: an ABSENT URL now defaults to the hosted node, so we
+    # set it empty here — both to exercise the skip path AND to avoid a real network connect in tests.
     monkeypatch.setenv("SMARTBRAIN_DB_PATH", str(tmp_path / "webrtc.duckdb"))
     monkeypatch.setenv("SMARTBRAIN_WEBRTC_ENABLED", "1")
-    monkeypatch.delenv("SMARTBRAIN_SIGNALING_URL", raising=False)
+    monkeypatch.setenv("SMARTBRAIN_SIGNALING_URL", "")
 
     with caplog.at_level("WARNING"):
         with TestClient(main.create_app()) as client:
@@ -154,3 +156,19 @@ def test_lifespan_webrtc_enabled_no_url_logs_and_skips(tmp_path, monkeypatch, ca
 
     msgs = " ".join(rec.message for rec in caplog.records)
     assert "SIGNALING_URL is unset" in msgs or "remote access off" in msgs
+
+
+def test_remote_access_lazy_activates_on_pairing(tmp_path, monkeypatch) -> None:
+    # Lazy-start (default, no SMARTBRAIN_WEBRTC_ENABLED): a fresh, never-paired vault must NOT
+    # activate remote access; pairing a device (the opt-in) must. SIGNALING_URL is emptied so the
+    # activated loop doesn't dial a real node during the test.
+    monkeypatch.setenv("SMARTBRAIN_DB_PATH", str(tmp_path / "lazy.duckdb"))
+    monkeypatch.delenv("SMARTBRAIN_WEBRTC_ENABLED", raising=False)
+    monkeypatch.setenv("SMARTBRAIN_SIGNALING_URL", "")
+    app = main.create_app()
+    with TestClient(app) as client:
+        assert not app.state.webrtc_active.is_set()  # fresh + locked -> no opt-in
+        assert client.post("/api/account/setup", json={"passphrase": "Passw0rd"}).status_code == 200
+        assert not app.state.webrtc_active.is_set()  # unlocked, no devices -> still off
+        assert client.post("/api/devices", json={"label": "phone"}).status_code == 200
+        assert app.state.webrtc_active.is_set()  # pairing is the opt-in -> remote activates

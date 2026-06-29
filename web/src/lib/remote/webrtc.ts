@@ -10,6 +10,7 @@
 import { channelBinding, randomNonceB64, verifyDesktopIdentity } from "./crypto";
 import type { PairingPayload } from "./pairing";
 import { asResponse, encodeAuth, encodeHello, encodeRequest, type ParsedResponse, parseMessage } from "./protocol";
+import { classifyCandidatePair } from "./candidate-pair";
 import { setRemoteStatus } from "./connection.svelte";
 
 const _ICE_GATHER_TIMEOUT = 3000;
@@ -18,6 +19,9 @@ const _RECONNECT_BASE_MS = 1000; // capped exponential backoff + jitter (mirrors
 const _RECONNECT_MAX_MS = 30000;
 const _CONNECT_TIMEOUT_MS = 15000; // wall-clock per attempt: ICE can stall forever without this
 const _MAX_RECONNECTS = 3; // after this many failures, stop and tell the user (don't spin forever)
+// After registering, wait briefly for the broker to push ephemeral STUN/TURN before gathering ICE
+// candidates; if none arrives (a static-mode node), fall back to the payload's ICE and offer anyway.
+const _ICE_PUSH_WAIT_MS = 800;
 // Shown when the connection can't be established. The #1 real-world cause (a VPN on the
 // Desktop blocking the UDP relay path) is hard to detect, so we surface it as the first thing
 // to try rather than spinning on "connecting…" indefinitely.
@@ -39,11 +43,14 @@ export class RemoteConnection {
   private closed = false;
   private reconnects = 0;
   private connectTimer: ReturnType<typeof setTimeout> | null = null;
+  private offerSent = false; // one offer per attempt (the ICE push and the wait-timeout both trigger it)
+  private iceWaitTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private readonly pairing: PairingPayload) {}
 
   connect(): void {
     this.closed = false;
+    this.offerSent = false;
     this.ready = new Promise<void>((resolve, reject) => {
       this.markReady = resolve;
       this.failReady = reject;
@@ -67,14 +74,18 @@ export class RemoteConnection {
     this.ws = ws;
     ws.onopen = () => {
       ws.send(JSON.stringify({ role: "phone", desktop_id: this.pairing.desktopId }));
-      void this.makeOffer(); // register first, then offer (both go out on the open socket)
+      // Register first; give the broker a moment to push ephemeral ICE before offering, so the
+      // PC gathers relay candidates with fresh creds. Fall back to the payload ICE if none comes.
+      this.iceWaitTimer = setTimeout(() => void this.makeOffer(), _ICE_PUSH_WAIT_MS);
     };
     ws.onerror = () => setRemoteStatus("offline", "can't reach the signaling service");
     ws.onmessage = (e) => this.onSignal(String(e.data));
   }
 
   private async makeOffer(): Promise<void> {
-    if (!this.pc) return;
+    if (!this.pc || this.offerSent) return; // once per attempt — ICE-push and the fallback timer both call here
+    this.offerSent = true;
+    if (this.iceWaitTimer) { clearTimeout(this.iceWaitTimer); this.iceWaitTimer = null; }
     await this.pc.setLocalDescription(await this.pc.createOffer());
     await this.iceGatheringDone();
     const sdp = this.pc.localDescription?.sdp ?? "";
@@ -99,13 +110,20 @@ export class RemoteConnection {
   }
 
   private async onSignal(text: string): Promise<void> {
-    let msg: { type?: string; sdp?: string; detail?: string };
+    let msg: { type?: string; sdp?: string; detail?: string; iceServers?: RTCIceServer[] };
     try {
       msg = JSON.parse(text);
     } catch {
       return;
     }
-    if (msg.type === "answer" && msg.sdp && this.pc) {
+    if (msg.type === "ice" && Array.isArray(msg.iceServers)) {
+      // Broker-pushed ephemeral STUN/TURN — apply to the not-yet-gathered PC, then offer. No TURN
+      // secret is ever shipped in the app/QR; a leaked credential expires instead of being an open relay.
+      if (this.pc && !this.offerSent) {
+        try { this.pc.setConfiguration({ iceServers: msg.iceServers }); } catch { /* unsupported -> payload ICE */ }
+      }
+      void this.makeOffer();
+    } else if (msg.type === "answer" && msg.sdp && this.pc) {
       await this.pc.setRemoteDescription({ type: "answer", sdp: msg.sdp });
     } else if (msg.type === "error") {
       setRemoteStatus("offline", msg.detail || "the Desktop isn't reachable");
@@ -168,17 +186,7 @@ export class RemoteConnection {
   private async connectionKind(): Promise<"direct" | "relay" | "unknown"> {
     if (!this.pc) return "unknown";
     try {
-      const stats = await this.pc.getStats();
-      let localId = "";
-      stats.forEach((r) => {
-        if (r.type === "candidate-pair" && (r.nominated || r.state === "succeeded")) localId = r.localCandidateId;
-      });
-      if (!localId) return "unknown";
-      let kind: "direct" | "relay" | "unknown" = "unknown";
-      stats.forEach((r) => {
-        if (r.id === localId) kind = r.candidateType === "relay" ? "relay" : "direct";
-      });
-      return kind;
+      return classifyCandidatePair(await this.pc.getStats());
     } catch {
       return "unknown";
     }
@@ -261,6 +269,7 @@ export class RemoteConnection {
 
   private teardown(): void {
     if (this.connectTimer) { clearTimeout(this.connectTimer); this.connectTimer = null; }
+    if (this.iceWaitTimer) { clearTimeout(this.iceWaitTimer); this.iceWaitTimer = null; }
     for (const [, p] of this.pending) {
       clearTimeout(p.timer); // fail in-flight requests fast instead of hanging to the timeout
       p.reject(new Error("connection dropped"));

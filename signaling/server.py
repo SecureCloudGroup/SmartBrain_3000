@@ -17,17 +17,33 @@ Wire (JSON text):
   phone  ->desk : {"type":"offer","sdp":<sdp>}            (broker adds "from":<phone_id>)
   desk  ->phone : {"type":"answer","to":<phone_id>,"sdp":<sdp>}  (phone gets {"type":"answer","sdp"})
   broker->phone : {"type":"error","detail":...}           (desktop offline, etc.)
-  broker->phone : {"type":"ice","iceServers":[...]}        (pairing rooms only: node STUN+TURN)
+  broker->*     : {"type":"ice","iceServers":[...]}        (node STUN/TURN; with a TURN secret the
+                                                            creds are EPHEMERAL and pushed to both
+                                                            desktops and phones, otherwise the static
+                                                            pair-room ICE goes to sbpair-* phones only)
 
-SECURITY NOTE: ``SIGNALING_TOKEN`` is a shared desktop registration secret for this
-MVP — it stops open abuse / desktop-slot squatting. The cryptographic guarantee that
-a phone is talking to the RIGHT Desktop is the client's DTLS-fingerprint pin (set at
-pairing), not this token. A multi-tenant deployment should issue per-desktop tokens.
+AUTH MODES:
+  * Token mode (default, self-host): ``SIGNALING_TOKEN`` is a shared desktop registration
+    secret — it stops open abuse / desktop-slot squatting.
+  * Open mode (``SIGNALING_OPEN=1``, hosted/public): NO shared secret — so the public app can
+    register without shipping a secret. Mass-registration is bounded by a global desktop cap +
+    registration rate-limit; desktop_ids are unguessable random, so targeted slot-hijack isn't a
+    concern; and the cryptographic guarantee that a phone reaches the RIGHT Desktop is the client's
+    DTLS-fingerprint pin (set at pairing), NOT this token.
+
+TURN credentials:
+  * Static (default): coturn ``--lt-cred-mech`` long-term creds, shared in the pairing payload.
+  * Ephemeral (``SIGNALING_TURN_SECRET`` set, coturn ``--use-auth-secret``): the broker MINTS
+    short-lived creds per connection and pushes them over the signaling channel, so no TURN secret
+    ever ships in a client / public repo and a leaked credential expires instead of being an open relay.
 """
 
 from __future__ import annotations
 
 import asyncio
+import base64
+import hashlib
+import hmac
 import json
 import logging
 import os
@@ -49,6 +65,25 @@ _DEFAULT_PHONE_RATE_WINDOW_SECS = 60.0   # ...per this sliding window.
 # Hard cap on rate-limit map keys (distinct desktop_ids tracked) so the prune map can
 # never grow unbounded under a churn-of-ids attack.
 _RATE_MAP_MAX_KEYS = 1024
+# Open-mode (tokenless) desktop-registration backstops + ephemeral TURN defaults.
+_DEFAULT_TURN_TTL = 86400                # ephemeral TURN credential lifetime (seconds)
+_DEFAULT_MAX_DESKTOPS = 5000             # global cap on concurrently-registered desktops
+_DEFAULT_REG_RATE_LIMIT = 120            # new desktop registrations...
+_DEFAULT_REG_RATE_WINDOW_SECS = 60.0     # ...per this global sliding window.
+
+
+def mint_turn_credentials(secret: str, ttl: int = _DEFAULT_TURN_TTL, name: str = "sb") -> tuple[str, str]:
+    """coturn ``use-auth-secret`` (TURN REST API) ephemeral credential.
+
+    username = ``"<unix_expiry>:<name>"``; password = base64(HMAC-SHA1(secret, username)). The
+    secret stays on the node; clients receive only short-lived creds, so a leaked credential
+    expires instead of turning the relay into an open proxy. coturn validates this exact scheme.
+    """
+    assert secret, "TURN secret required to mint credentials"
+    expiry = int(time.time()) + int(ttl)
+    username = f"{expiry}:{name}"
+    mac = hmac.new(secret.encode("utf-8"), username.encode("utf-8"), hashlib.sha1).digest()
+    return username, base64.b64encode(mac).decode("ascii")
 
 
 class Broker:
@@ -62,6 +97,14 @@ class Broker:
         max_phones_per_desktop: int = _DEFAULT_MAX_PHONES_PER_DESKTOP,
         rate_limit: int = _DEFAULT_PHONE_RATE_LIMIT,
         rate_window_secs: float = _DEFAULT_PHONE_RATE_WINDOW_SECS,
+        *,
+        open_mode: bool = False,
+        turn_urls: list | None = None,
+        turn_secret: str = "",
+        turn_ttl: int = _DEFAULT_TURN_TTL,
+        max_desktops: int = _DEFAULT_MAX_DESKTOPS,
+        reg_rate_limit: int = _DEFAULT_REG_RATE_LIMIT,
+        reg_rate_window_secs: float = _DEFAULT_REG_RATE_WINDOW_SECS,
     ) -> None:
         assert isinstance(token, str), "token must be a string"
         assert pair_ice is None or isinstance(pair_ice, list), "pair_ice must be a list"
@@ -69,6 +112,10 @@ class Broker:
         assert max_phones_per_desktop > 0, "max_phones_per_desktop must be positive"
         assert rate_limit > 0, "rate_limit must be positive"
         assert rate_window_secs > 0, "rate_window_secs must be positive"
+        assert turn_urls is None or isinstance(turn_urls, list), "turn_urls must be a list"
+        assert max_desktops > 0, "max_desktops must be positive"
+        assert reg_rate_limit > 0, "reg_rate_limit must be positive"
+        assert reg_rate_window_secs > 0, "reg_rate_window_secs must be positive"
         self._token = token
         self._pair_ice = pair_ice or []
         self._desktops: dict[str, object] = {}
@@ -77,6 +124,15 @@ class Broker:
         self._max_phones_per_desktop = int(max_phones_per_desktop)
         self._rate_limit = int(rate_limit)
         self._rate_window = float(rate_window_secs)
+        # Open mode (tokenless hosted) + ephemeral TURN config.
+        self._open_mode = bool(open_mode)
+        self._turn_urls = list(turn_urls or [])
+        self._turn_secret = str(turn_secret or "")
+        self._turn_ttl = int(turn_ttl)
+        self._max_desktops = int(max_desktops)
+        self._reg_rate_limit = int(reg_rate_limit)
+        self._reg_rate_window = float(reg_rate_window_secs)
+        self._desktop_regs: list[float] = []  # global registration timestamps (open mode rate-limit)
         # Per-desktop concurrent-phone counts (incremented on admit, decremented on disconnect).
         self._phones_per_desktop: dict[str, int] = {}
         # Per-desktop monotonic timestamps of recent phone connects (pruned each admit).
@@ -95,12 +151,17 @@ class Broker:
                 await _send(ws, {"type": "error", "detail": "missing desktop_id"})
                 return
             if role == "desktop":
-                if not self._token or hello.get("token") != self._token:
-                    await _send(ws, {"type": "error", "detail": "unauthorized"})
+                reject = self._admit_desktop(hello.get("token"))
+                if reject is not None:
+                    await _send(ws, {"type": "error", "detail": reject})
                     return
                 ident = desktop_id
                 self._desktops[desktop_id] = ws
                 await _send(ws, {"type": "registered"})
+                # Ephemeral mode: hand the Desktop fresh node ICE so its peers can relay without
+                # any TURN secret baked into the app (in static mode it uses its own env creds).
+                if self._turn_secret:
+                    await _send(ws, {"type": "ice", "iceServers": self._ice_for_client()})
                 await self._desktop_loop(ws)
             elif role == "phone":
                 reject = self._admit_phone(desktop_id)
@@ -110,10 +171,13 @@ class Broker:
                 ident = "phone:" + secrets.token_urlsafe(8)
                 phone_desktop_id = desktop_id
                 self._phones[ident] = ws
-                # Pairing-by-code rooms get the node's ICE (STUN+TURN) so the phone can relay
-                # even on cellular — it has no TURN creds of its own until it has the payload.
-                if self._pair_ice and desktop_id.startswith("sbpair-"):
-                    await _send(ws, {"type": "ice", "iceServers": self._pair_ice})
+                # Node ICE (STUN+TURN) so the phone can relay even on cellular. Pairing-by-code
+                # rooms always need it (they have no payload creds yet); in ephemeral mode EVERY
+                # phone gets fresh, short-lived creds pushed here instead of static payload creds.
+                if self._turn_secret or desktop_id.startswith("sbpair-"):
+                    ice = self._ice_for_client()
+                    if ice:
+                        await _send(ws, {"type": "ice", "iceServers": ice})
                 await self._phone_loop(ws, ident, desktop_id)
             else:
                 await _send(ws, {"type": "error", "detail": "bad role"})
@@ -125,6 +189,34 @@ class Broker:
             elif role == "phone" and ident:
                 self._phones.pop(ident, None)
                 self._release_phone(phone_desktop_id)
+
+    def _admit_desktop(self, token) -> str | None:
+        """Authorize a desktop registration. Returns ``None`` to admit, else an error ``detail``.
+
+        Token mode (default): require a matching shared token (fail-closed if none configured).
+        Open mode: no token; bound mass-registration with a global desktop cap + rate-limit.
+        """
+        if self._open_mode:
+            now = time.monotonic()
+            if len(self._desktops) >= self._max_desktops:
+                return "busy"
+            cutoff = now - self._reg_rate_window
+            self._desktop_regs = [t for t in self._desktop_regs if t > cutoff][-self._reg_rate_limit:]
+            if len(self._desktop_regs) >= self._reg_rate_limit:
+                return "rate_limited"
+            self._desktop_regs.append(now)
+            return None
+        if not self._token or token != self._token:
+            return "unauthorized"
+        return None
+
+    def _ice_for_client(self) -> list:
+        """ICE servers to hand a client right now: freshly-minted ephemeral creds when a TURN
+        secret is configured, otherwise the static pair-room ICE (back-compat)."""
+        if self._turn_secret and self._turn_urls:
+            user, cred = mint_turn_credentials(self._turn_secret, self._turn_ttl)
+            return [{"urls": list(self._turn_urls), "username": user, "credential": cred}]
+        return self._pair_ice
 
     async def _phone_loop(self, ws, phone_id: str, desktop_id: str) -> None:
         async for raw in ws:
@@ -210,11 +302,20 @@ async def _send(ws, obj: dict) -> None:
     await ws.send(json.dumps(obj))
 
 
+def _ice_urls_from_env() -> list:
+    """STUN/TURN urls the node hands clients (shared by static + ephemeral modes)."""
+    raw = os.environ.get("SIGNALING_ICE_URLS") or os.environ.get("SMARTBRAIN_PAIR_ICE_URLS", "")
+    return [u.strip() for u in raw.split(",") if u.strip()]
+
+
 def _pair_ice_from_env() -> list:
     """ICE servers (STUN+TURN) handed to pairing-by-code clients, built from env. The TURN
     creds are the node's static, bandwidth-only, quota-bounded creds (the same ones already
-    baked into every pairing QR) — they grant relay bandwidth only, never app access."""
-    urls = [u.strip() for u in os.environ.get("SMARTBRAIN_PAIR_ICE_URLS", "").split(",") if u.strip()]
+    baked into every pairing QR) — they grant relay bandwidth only, never app access. Empty when
+    a TURN secret is configured (ephemeral creds are minted per connection instead)."""
+    if os.environ.get("SIGNALING_TURN_SECRET"):
+        return []
+    urls = _ice_urls_from_env()
     if not urls:
         return []
     server: dict = {"urls": urls}
@@ -225,8 +326,8 @@ def _pair_ice_from_env() -> list:
     return [server]
 
 
-def _broker_from_env(token: str, pair_ice: list) -> Broker:
-    """Build a Broker with caps + rate-limit read from env (defaults if unset)."""
+def _broker_from_env(token: str, pair_ice: list, open_mode: bool = False) -> Broker:
+    """Build a Broker with caps + rate-limit + TURN/open-mode config read from env (defaults if unset)."""
     assert isinstance(token, str), "token must be a string"
     assert isinstance(pair_ice, list), "pair_ice must be a list"
     return Broker(
@@ -238,6 +339,14 @@ def _broker_from_env(token: str, pair_ice: list) -> Broker:
         rate_limit=int(os.environ.get("SIGNALING_PHONE_RATE_LIMIT", _DEFAULT_PHONE_RATE_LIMIT)),
         rate_window_secs=float(os.environ.get(
             "SIGNALING_PHONE_RATE_WINDOW_SECS", _DEFAULT_PHONE_RATE_WINDOW_SECS)),
+        open_mode=open_mode,
+        turn_urls=_ice_urls_from_env(),
+        turn_secret=os.environ.get("SIGNALING_TURN_SECRET", ""),
+        turn_ttl=int(os.environ.get("SIGNALING_TURN_TTL", _DEFAULT_TURN_TTL)),
+        max_desktops=int(os.environ.get("SIGNALING_MAX_DESKTOPS", _DEFAULT_MAX_DESKTOPS)),
+        reg_rate_limit=int(os.environ.get("SIGNALING_REG_RATE_LIMIT", _DEFAULT_REG_RATE_LIMIT)),
+        reg_rate_window_secs=float(os.environ.get(
+            "SIGNALING_REG_RATE_WINDOW_SECS", _DEFAULT_REG_RATE_WINDOW_SECS)),
     )
 
 
@@ -246,10 +355,17 @@ async def main() -> None:
     host = os.environ.get("SIGNALING_HOST", "0.0.0.0")
     port = int(os.environ.get("SIGNALING_PORT", "8089"))
     token = os.environ.get("SIGNALING_TOKEN", "")
-    if not token:  # fail-fast: never run an open broker (Broker() also rejects desktops if empty)
-        raise SystemExit("SIGNALING_TOKEN must be set to a non-empty desktop registration secret")
-    broker = _broker_from_env(token, _pair_ice_from_env())
-    log.info("signaling broker listening on %s:%d", host, port)
+    open_mode = os.environ.get("SIGNALING_OPEN", "").strip() not in ("", "0", "false", "False")
+    if not token and not open_mode:
+        # Fail-fast: never run an open broker by accident. Set SIGNALING_TOKEN (self-host) OR
+        # SIGNALING_OPEN=1 (hosted: tokenless registration, bounded by caps + ephemeral TURN).
+        raise SystemExit(
+            "SIGNALING_TOKEN must be set to a non-empty desktop registration secret "
+            "(or set SIGNALING_OPEN=1 for hosted tokenless mode)")
+    broker = _broker_from_env(token, _pair_ice_from_env(), open_mode=open_mode)
+    log.info("signaling broker listening on %s:%d (mode=%s, ice=%s)",
+             host, port, "open" if open_mode else "token",
+             "ephemeral" if os.environ.get("SIGNALING_TURN_SECRET") else "static")
     async with websockets.serve(broker.handle, host, port, max_size=_MAX_MSG):
         await asyncio.Future()  # run forever
 

@@ -8,10 +8,8 @@
   import { savePairing } from "$lib/remote/store";
 
   const installed = isInstalledApp();
-  const phoneBrowser = isMobile() && !installed;
 
   let acked = $state(typeof localStorage !== "undefined" && localStorage.getItem("sb-installed") === "1");
-  let pairHere = $state(false); // escape hatch: pair in this browser anyway
   let code = $state("");
   let pairing = $state(false);
   let error = $state("");
@@ -25,9 +23,10 @@
     acked = true;
   }
 
-  // Show the pairing form when we're in the installed app, on a non-phone browser, or the
-  // user explicitly chose to pair in this browser.
-  const showPairForm = $derived(installed || !phoneBrowser || pairHere);
+  // Show the pairing form only in the installed app or a desktop browser. Mobile browsers
+  // (Safari/Chrome on a phone) ALWAYS get install-first guidance — their storage is isolated
+  // from the installed PWA, so pairing in the browser would be lost.
+  const showPairForm = $derived(installed || !isMobile());
 
   async function submit() {
     if (pairing) return;
@@ -48,8 +47,8 @@
   {#if showPairForm}
     <h1>Pair this device</h1>
     <p class="muted">
-      On your Desktop, open <b>Settings &rarr; Remote access &rarr; Pair via code</b> and enter the
-      6-character code here. Do this on the same Wi-Fi as your Desktop.
+      On your Desktop: <b>Settings &rarr; Remote access &rarr; Pair a new phone</b>, then enter the
+      6-character code here.
     </p>
     <p style="margin-top:1rem">
       <input
@@ -70,15 +69,11 @@
   {:else if !acked}
     <h1>Set up SmartBrain on your phone</h1>
     <p>For a reliable, one-tap app that works from anywhere, add SmartBrain to your Home Screen first:</p>
-    <ol style="line-height:1.8">
-      <li>Tap the <b>Share</b> button (the square with an arrow).</li>
-      <li>Choose <b>Add to Home Screen</b>.</li>
-      <li>Open the new <b>SmartBrain</b> icon to finish.</li>
-    </ol>
+    <ul style="line-height:1.8">
+      <li><b>iOS:</b> tap the <b>Share</b> button &rarr; <b>Add to Home Screen</b>.</li>
+      <li><b>Android:</b> tap the <b>&vellip;</b> menu &rarr; <b>Install app</b> (or <b>Add to Home screen</b>).</li>
+    </ul>
     <p style="margin-top:1rem"><button onclick={ackInstalled}>I&rsquo;ve added it to my Home Screen</button></p>
-    <p class="muted" style="font-size:0.85rem; margin-top:0.75rem">
-      Prefer this browser? <button class="link" onclick={() => (pairHere = true)}>Pair here instead.</button>
-    </p>
   {:else}
     <h1>Almost there</h1>
     <p>Open the <b>SmartBrain</b> icon from your Home Screen to finish setting up — you&rsquo;ll enter a code there.</p>
