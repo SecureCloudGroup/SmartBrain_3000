@@ -1,11 +1,15 @@
 # Security Policy
 
 SmartBrain_3000 is a **local-first** application: your data and credentials stay
-on your own machine, and secrets are encrypted at rest. Its only outbound calls
-are to services you explicitly opt into — the AI providers you configure, Google's
-APIs if you connect Gmail, and (if you enable remote phone access, off by default)
-a signaling node you run, which sees connection metadata only. We take security
-seriously and welcome responsible disclosure.
+on your own machine, and secrets are encrypted at rest. Outbound calls happen only
+for: the AI providers you configure; Google's APIs if you connect Gmail; the
+web-research tools (web search via DuckDuckGo, fetch a page, ingest a URL) **when
+the assistant proposes them and you approve each call** — these are blocked by an
+SSRF guard from reaching private/internal addresses; and, if you enable remote phone
+access (**off by default**), a content-blind signaling node — the SecureCloudGroup-hosted
+broker (`rtc.securecloudgroup.com`) by default, or your own via `SMARTBRAIN_SIGNALING_URL`
+— which sees connection metadata only. We take security seriously and welcome
+responsible disclosure.
 
 ## Reporting a vulnerability
 

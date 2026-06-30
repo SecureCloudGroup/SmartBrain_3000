@@ -100,8 +100,9 @@ A running estimate of what your **cloud** models cost. **Usage** shows estimated
 spend per model over a date range (today, last 5/10/30 days, or a custom range),
 computed from each provider's live pricing, with a total. **Local models (Ollama,
 MLX) are free** and show as such. Usage appears here after you chat with a model;
-nothing is sent anywhere to produce it — it's computed on your machine from local
-token counts.
+none of your usage or token data leaves your machine — it's computed locally from your
+token counts (the only network call is a local fetch of the model price list from the
+on-device gateway).
 
 ## Activity
 

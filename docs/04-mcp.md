@@ -9,7 +9,7 @@ tool reads your knowledge to ground its answers; it can't change anything.
 Open **Settings → MCP** and **generate an access token**. MCP is **off until a
 token exists** — generating one enables it; revoking it turns access off again.
 
-The endpoint is loopback-only:
+By default the endpoint is loopback-only:
 
 ```
 http://localhost:33000/mcp/
@@ -44,8 +44,9 @@ The client can then call the read-only Knowledge tools (search and read your doc
 
 - **Can:** search and read your Knowledge base.
 - **Can't:** see your credentials, write or delete anything, or reach other
-  features — and it's reachable only from your own machine (loopback). The token
-  is stored encrypted at rest; revoke any time in Settings → MCP.
+  features — and by default it's reachable only from your own machine (loopback); it
+  follows the app's host binding, so a LAN/HTTPS setup that exposes the app exposes it
+  too. The token is stored encrypted at rest; revoke any time in Settings → MCP.
 
 ## Next
 

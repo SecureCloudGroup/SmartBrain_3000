@@ -5,8 +5,9 @@ control. Here's the model in plain terms, including the real world limits.
 
 ## What protects your data
 
-- **Local-first.** Everything runs in Docker on your machine. There's no SmartBrain
-  cloud, no account server, and no telemetry.
+- **Local-first.** Everything runs in Docker on your machine: no account server and
+  no telemetry. The only SmartBrain-operated service is the optional, content-blind
+  signaling node for remote phone access — off by default (see below).
 - **Encrypted at rest.** Your knowledge, chats, tasks, memories, email
   credentials, and provider keys are encrypted (AES-256-GCM) in the local
   database. The encryption key is derived from your passphrase (a slow, modern
@@ -32,9 +33,10 @@ control. Here's the model in plain terms, including the real world limits.
 - **Email.** If you connect Gmail, the app talks to Google's APIs to read/send your
   mail — over a loopback OAuth flow, with your own OAuth client.
 - **Remote access (only if you enable it).** Phone access is **off by default**. When
-  you turn it on, your Desktop dials out to a signaling node you run to broker the
-  connection; it carries only connection metadata, never your data (the link is
-  end-to-end encrypted). See [Remote access](07-remote-access.md).
+  you turn it on, your Desktop dials out to a content-blind signaling node to broker the
+  connection — the SecureCloudGroup-hosted node (`rtc.securecloudgroup.com`) by default,
+  or your own via `SMARTBRAIN_SIGNALING_URL`. It carries only connection metadata, never
+  your data (the link is end-to-end encrypted). See [Remote access](07-remote-access.md).
 - **Nothing else.** Beyond the above, the app makes no outbound calls.
 
 ## Honest limits
