@@ -15,6 +15,8 @@ Open **Settings → Providers** and add a key for any of:
 
 ![Settings → Cloud providers, with key fields for OpenAI, Anthropic, and Google](assets/02-providers.png)
 
+![Connect a model — one-tap local Ollama, or an encrypted cloud key](assets/gifs/02-connect-a-model.gif)
+
 Keys are stored **encrypted on your machine** and pushed to the local gateway
 while you're unlocked; locking removes them from the gateway again. The app never
 returns a stored key over its API — only the fact that one is set.
