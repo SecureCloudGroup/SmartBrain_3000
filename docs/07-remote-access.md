@@ -21,6 +21,8 @@ own node? See *Self-hosting the signaling node* at the end.)
 
 ![Settings → Remote access: name a phone and pair it](assets/06-remote-access.png)
 
+![Pair a phone — QR + 6-character code over end-to-end-encrypted WebRTC](assets/gifs/08-pair-a-phone.gif)
+
 On the **Desktop**, open **Settings → Remote access**, give the phone a name, and tap
 **Pair a new phone**. You'll see a QR code, three short steps, and a **6-character code**.
 

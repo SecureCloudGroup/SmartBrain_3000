@@ -41,6 +41,8 @@ then search them two ways:
 
 ![The Knowledge page: add a document, then search it](assets/05-knowledge.png)
 
+![Add a note, Reindex, search by meaning, then ask Chat](assets/gifs/04-add-knowledge.gif)
+
 > Semantic search needs the embedding model pulled (the installer does this for you).
 > If results say *"degraded"*, run `ollama pull nomic-embed-text:v1.5` on the Desktop
 > and Reindex — see [Embeddings](02-models.md#embeddings-for-knowledge-search).
@@ -49,10 +51,14 @@ Your knowledge is also what external tools can read over [MCP](04-mcp.md).
 
 ## Planner
 
+![Planner — tasks grouped Today / This week / by due date](assets/gifs/06-planner.gif)
+
 Simple task tracking — add tasks with optional due dates; they group into Today /
 This week / Later. The assistant can propose new tasks (which you approve).
 
 ## Schedules
+
+![Schedules — run a prompt on a timer, then Run now](assets/gifs/07-schedule-a-prompt.gif)
 
 Run a prompt on a timer — e.g. "every morning, summarize my open tasks." A
 schedule fires an assistant turn on its cadence. Two things to know:
@@ -98,6 +104,8 @@ nothing is sent anywhere to produce it — it's computed on your machine from lo
 token counts.
 
 ## Activity
+
+![The safety loop — the assistant proposes, you approve in Activity](assets/gifs/05-approve-an-action.gif)
 
 Your audit + approvals view:
 

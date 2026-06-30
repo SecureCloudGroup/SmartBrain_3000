@@ -1,5 +1,7 @@
 # Backup & recovery
 
+![Download an encrypted backup, then unlock with your Recovery Key](assets/gifs/09-backup-recovery.gif)
+
 Everything lives in one encrypted database on your machine. These tools, under
 **Settings → Account & Data**, let you take it with you, restore it, and change
 your passphrase — plus how to get back in if you forget it.

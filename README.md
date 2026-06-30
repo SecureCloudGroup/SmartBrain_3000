@@ -8,6 +8,11 @@ A personal AI assistant that runs **entirely on your own machine** — your
 knowledge, your AI models, and your credentials stay on your hardware, encrypted
 at rest under a passphrase only you hold. Nothing is sent to us, ever.
 
+<p align="center">
+  <img src="docs/assets/gifs/01-install-to-unlocked.gif" alt="One command installs SmartBrain; set a passphrase, save your Emergency Kit, and land on an unlocked Chat" width="760" />
+  <br/><em>From one command to your unlocked Chat.</em>
+</p>
+
 ## What it is
 
 SmartBrain_3000 is a **fully local, single-user** AI assistant you run in Docker
@@ -57,6 +62,19 @@ builds the image, so it takes a few minutes** (quick after that). In the app:
 
 If anything looks off later, run `python3 installer/install.py doctor` — it can
 restart the stack and pull the embedding model for you.
+
+### See it in action
+
+Short, silent clips (~15s each) for every step — the five **Quickstart** clips take you
+from install to fully working; the rest are optional power-ups:
+
+| Quickstart | Then |
+| --- | --- |
+| [1 · Install → unlocked](docs/assets/gifs/01-install-to-unlocked.gif) | [6 · Planner](docs/assets/gifs/06-planner.gif) |
+| [2 · Connect a model](docs/assets/gifs/02-connect-a-model.gif) | [7 · Schedules](docs/assets/gifs/07-schedule-a-prompt.gif) |
+| [3 · Your first chat](docs/assets/gifs/03-first-chat.gif) | [8 · Pair a phone](docs/assets/gifs/08-pair-a-phone.gif) |
+| [4 · Add knowledge & search](docs/assets/gifs/04-add-knowledge.gif) | [9 · Backup & recovery](docs/assets/gifs/09-backup-recovery.gif) |
+| [5 · Approve an action](docs/assets/gifs/05-approve-an-action.gif) | |
 
 ### Updating
 

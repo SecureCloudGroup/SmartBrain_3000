@@ -72,6 +72,8 @@ A quick path from zero to seeing what SmartBrain does:
    (`ollama pull llama3.1:8b`). See [Connect a model](02-models.md).
 
    ![Chat offering a one-tap connect for a detected Ollama server](assets/01-chat-connect.png)
+
+![Your first chat — tap a suggestion, get a reply](assets/gifs/03-first-chat.gif)
 2. **Send your first message.** Ask it anything — e.g. *"What can you help me with?"*
 3. **Add something to Knowledge.** Open **Knowledge**, add a note or drop in a PDF,
    then **Reindex** so semantic search can find it. Now ask Chat about it.
