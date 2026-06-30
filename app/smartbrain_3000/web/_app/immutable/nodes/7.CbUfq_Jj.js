@@ -1,4 +1,4 @@
-import{b as f,a as b,f as R}from"../chunks/CD5zTj3j.js";import{b9 as O,al as g,a_ as S,af as c,aj as T,J as D,aN as q,ak as A,c as x,ag as _,an as L,l as N,Z as B,s as E,r as K,aK as U,aH as M,V as k,b2 as C,aQ as u,ac as i,bc as G}from"../chunks/DSyNeLMP.js";import{s as W}from"../chunks/CVD7czyh.js";import{e as H}from"../chunks/blDM2rQR.js";import{s as I}from"../chunks/CxL3veOo.js";import{s as Y}from"../chunks/CtIjk2rY.js";import{p as F}from"../chunks/aA6utJ-8.js";function j(d,y,l=!1,r=!1,s=!1,w=!1){var a=d,e="";if(l){var o=d;g&&(a=S(c(o)))}O(()=>{var n=D;if(e===(e=y()??"")){g&&T();return}if(l&&!g){n.nodes=null,o.innerHTML=e,e!==""&&f(c(o),o.lastChild);return}if(n.nodes!==null&&(q(n.nodes.start,n.nodes.end),n.nodes=null),e!==""){if(g){A.data;for(var t=T(),p=t;t!==null&&(t.nodeType!==x||t.data!=="");)p=t,t=_(t);if(t===null)throw L(),N;f(A,p),a=S(t);return}var P=r?E:s?K:void 0,m=B(r?"svg":s?"math":"template",P);m.innerHTML=e;var h=r||s?m:m.content;if(f(c(h),h.lastChild),r||s)for(;c(h);)a.before(c(h));else a.before(h)}})}const v=[{slug:"getting-started",title:"Getting started",html:`<h1>Getting started</h1>
+import{b as f,a as b,f as R}from"../chunks/CD5zTj3j.js";import{b9 as P,al as g,a_ as S,af as d,aj as T,J as D,aN as q,ak as A,c as x,ag as _,an as N,l as L,Z as B,s as E,r as K,aK as G,aH as U,V as k,b2 as C,aQ as u,ac as i,bc as M}from"../chunks/DSyNeLMP.js";import{s as W}from"../chunks/CVD7czyh.js";import{e as H}from"../chunks/blDM2rQR.js";import{s as I}from"../chunks/CxL3veOo.js";import{s as Y}from"../chunks/CtIjk2rY.js";import{p as F}from"../chunks/DghHPm71.js";function j(h,y,l=!1,r=!1,s=!1,w=!1){var a=h,e="";if(l){var o=h;g&&(a=S(d(o)))}P(()=>{var n=D;if(e===(e=y()??"")){g&&T();return}if(l&&!g){n.nodes=null,o.innerHTML=e,e!==""&&f(d(o),o.lastChild);return}if(n.nodes!==null&&(q(n.nodes.start,n.nodes.end),n.nodes=null),e!==""){if(g){A.data;for(var t=T(),p=t;t!==null&&(t.nodeType!==x||t.data!=="");)p=t,t=_(t);if(t===null)throw N(),L;f(A,p),a=S(t);return}var O=r?E:s?K:void 0,m=B(r?"svg":s?"math":"template",O);m.innerHTML=e;var c=r||s?m:m.content;if(f(d(c),c.lastChild),r||s)for(;d(c);)a.before(d(c));else a.before(c)}})}const v=[{slug:"getting-started",title:"Getting started",html:`<h1>Getting started</h1>
 <p>SmartBrain_3000 is a <strong>local-first, single-user AI assistant</strong> that runs entirely
 on your own machine within a container (Docker). Your data and credentials stay on-box, encrypted
 at rest. The only outbound calls it makes are to services you explicitly opt into:
@@ -241,8 +241,9 @@ for your approval first. It can draft; you approve the send.</li>
 spend per model over a date range (today, last 5/10/30 days, or a custom range),
 computed from each provider&#39;s live pricing, with a total. <strong>Local models (Ollama,
 MLX) are free</strong> and show as such. Usage appears here after you chat with a model;
-nothing is sent anywhere to produce it — it&#39;s computed on your machine from local
-token counts.</p>
+none of your usage or token data leaves your machine — it&#39;s computed locally from your
+token counts (the only network call is a local fetch of the model price list from the
+on-device gateway).</p>
 <h2>Activity</h2>
 <p><img src="assets/gifs/05-approve-an-action.gif" alt="The safety loop — the assistant proposes, you approve in Activity"></p>
 <p>Your audit + approvals view:</p>
@@ -262,7 +263,7 @@ tool reads your knowledge to ground its answers; it can&#39;t change anything.</
 <h2>Turn it on</h2>
 <p>Open <strong>Settings → MCP</strong> and <strong>generate an access token</strong>. MCP is <strong>off until a
 token exists</strong> — generating one enables it; revoking it turns access off again.</p>
-<p>The endpoint is loopback-only:</p>
+<p>By default the endpoint is loopback-only:</p>
 <pre><code>http://localhost:33000/mcp/
 </code></pre>
 <p>Every request must include the token as a bearer header:</p>
@@ -286,8 +287,9 @@ server as JSON, it looks like this (paste your token):</p>
 <ul>
 <li><strong>Can:</strong> search and read your Knowledge base.</li>
 <li><strong>Can&#39;t:</strong> see your credentials, write or delete anything, or reach other
-features — and it&#39;s reachable only from your own machine (loopback). The token
-is stored encrypted at rest; revoke any time in Settings → MCP.</li>
+features — and by default it&#39;s reachable only from your own machine (loopback); it
+follows the app&#39;s host binding, so a LAN/HTTPS setup that exposes the app exposes it
+too. The token is stored encrypted at rest; revoke any time in Settings → MCP.</li>
 </ul>
 <h2>Next</h2>
 <ul>
@@ -345,8 +347,9 @@ recovered — that&#39;s the cost of having no backdoor. Keep the Emergency Kit 
 control. Here&#39;s the model in plain terms, including the real world limits.</p>
 <h2>What protects your data</h2>
 <ul>
-<li><strong>Local-first.</strong> Everything runs in Docker on your machine. There&#39;s no SmartBrain
-cloud, no account server, and no telemetry.</li>
+<li><strong>Local-first.</strong> Everything runs in Docker on your machine: no account server and
+no telemetry. The only SmartBrain-operated service is the optional, content-blind
+signaling node for remote phone access — off by default (see below).</li>
 <li><strong>Encrypted at rest.</strong> Your knowledge, chats, tasks, memories, email
 credentials, and provider keys are encrypted (AES-256-GCM) in the local
 database. The encryption key is derived from your passphrase (a slow, modern
@@ -372,9 +375,10 @@ to keep everything on-box.</li>
 <li><strong>Email.</strong> If you connect Gmail, the app talks to Google&#39;s APIs to read/send your
 mail — over a loopback OAuth flow, with your own OAuth client.</li>
 <li><strong>Remote access (only if you enable it).</strong> Phone access is <strong>off by default</strong>. When
-you turn it on, your Desktop dials out to a signaling node you run to broker the
-connection; it carries only connection metadata, never your data (the link is
-end-to-end encrypted). See <a href="#remote-access">Remote access</a>.</li>
+you turn it on, your Desktop dials out to a content-blind signaling node to broker the
+connection — the SecureCloudGroup-hosted node (<code>rtc.securecloudgroup.com</code>) by default,
+or your own via <code>SMARTBRAIN_SIGNALING_URL</code>. It carries only connection metadata, never
+your data (the link is end-to-end encrypted). See <a href="#remote-access">Remote access</a>.</li>
 <li><strong>Nothing else.</strong> Beyond the above, the app makes no outbound calls.</li>
 </ul>
 <h2>Honest limits</h2>
@@ -573,4 +577,4 @@ bandwidth.</p>
 real world limits.</li>
 <li>Back to the <a href="#README">documentation index</a>.</li>
 </ul>
-`}];var z=R("<a> </a>"),Q=R('<div class="help svelte-1vby5nc"><nav class="help-nav svelte-1vby5nc" aria-label="Help sections"><h2 class="svelte-1vby5nc">Help</h2> <!></nav> <article class="help-body card svelte-1vby5nc"></article></div>');function te(d,y){U(y,!0);const l=G(()=>v.find(e=>e.slug===F.url.hash.replace(/^#/,""))??v[0]);var r=Q(),s=k(r),w=C(k(s),2);H(w,17,()=>v,e=>e.slug,(e,o)=>{var n=z();let t;var p=k(n,!0);u(n),O(()=>{t=Y(n,1,"help-link svelte-1vby5nc",null,t,{active:i(o).slug===i(l).slug}),I(n,"aria-current",i(o).slug===i(l).slug?"page":void 0),I(n,"href",`#${i(o).slug}`),W(p,i(o).title)}),b(e,n)}),u(s);var a=C(s,2);j(a,()=>i(l).html,!0),u(a),u(r),b(d,r),M()}export{te as component};
+`}];var z=R("<a> </a>"),Q=R('<div class="help svelte-1vby5nc"><nav class="help-nav svelte-1vby5nc" aria-label="Help sections"><h2 class="svelte-1vby5nc">Help</h2> <!></nav> <article class="help-body card svelte-1vby5nc"></article></div>');function te(h,y){G(y,!0);const l=M(()=>v.find(e=>e.slug===F.url.hash.replace(/^#/,""))??v[0]);var r=Q(),s=k(r),w=C(k(s),2);H(w,17,()=>v,e=>e.slug,(e,o)=>{var n=z();let t;var p=k(n,!0);u(n),P(()=>{t=Y(n,1,"help-link svelte-1vby5nc",null,t,{active:i(o).slug===i(l).slug}),I(n,"aria-current",i(o).slug===i(l).slug?"page":void 0),I(n,"href",`#${i(o).slug}`),W(p,i(o).title)}),b(e,n)}),u(s);var a=C(s,2);j(a,()=>i(l).html,!0),u(a),u(r),b(h,r),U()}export{te as component};

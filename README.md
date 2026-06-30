@@ -6,7 +6,12 @@
 
 A personal AI assistant that runs **entirely on your own machine** — your
 knowledge, your AI models, and your credentials stay on your hardware, encrypted
-at rest under a passphrase only you hold. Nothing is sent to us, ever.
+at rest under a passphrase only you hold. Your data never leaves your hardware — the
+one exception is **optional** remote phone access: if you turn it on, your Desktop
+connects to a **content-blind** signaling node to set up an end-to-end-encrypted link
+to your phone (the SecureCloudGroup-hosted `rtc.securecloudgroup.com` by default, or
+your own via `SMARTBRAIN_SIGNALING_URL`). It only ever relays encrypted connection
+setup — it cannot read your data.
 
 <p align="center">
   <img src="docs/assets/gifs/01-install-to-unlocked.gif" alt="One command installs SmartBrain; set a passphrase, save your Emergency Kit, and land on an unlocked Chat" width="760" />

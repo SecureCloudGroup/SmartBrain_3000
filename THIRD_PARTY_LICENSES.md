@@ -5,23 +5,82 @@ SmartBrain_3000 itself is licensed under the Elastic License 2.0 (see
 property of its respective authors and is used under its own license. This file
 is a summary — the authoritative license text ships with each package.
 
-## Runtime (Python — `app/pyproject.toml`)
+## Runtime (Python — shipped in the Docker image; pinned in `app/requirements.lock`)
+
+The complete runtime set (67 packages) is exact-version pinned in [`app/requirements.lock`](app/requirements.lock). All are permissive (MIT / BSD / Apache-2.0 / ISC / PSF) **except** the two weak/file-level-copyleft components called out below; their notices ship unmodified inside each package.
 
 | Component | Purpose | License |
 |-----------|---------|---------|
-| [FastAPI](https://github.com/fastapi/fastapi) | HTTP framework | MIT |
-| [Starlette](https://github.com/encode/starlette) | ASGI toolkit (via FastAPI) | BSD-3-Clause |
-| [Uvicorn](https://github.com/encode/uvicorn) | ASGI server | BSD-3-Clause |
-| [DuckDB](https://github.com/duckdb/duckdb) | Embedded database | MIT |
-| [cryptography](https://github.com/pyca/cryptography) | AES-GCM at rest | Apache-2.0 OR BSD-3-Clause |
-| [argon2-cffi](https://github.com/hynek/argon2-cffi) | Passphrase KDF | MIT |
-| [httpx](https://github.com/encode/httpx) | HTTP client (gateway, OAuth, Gmail) | BSD-3-Clause |
-| [MCP SDK](https://github.com/modelcontextprotocol/python-sdk) | Model Context Protocol server | MIT |
-| [Pydantic](https://github.com/pydantic/pydantic) | Request validation (via FastAPI) | MIT |
-| [pypdf](https://github.com/py-pdf/pypdf) | PDF text extraction (Knowledge ingest) | BSD-3-Clause |
-| [trafilatura](https://github.com/adbar/trafilatura) | HTML article extraction (Knowledge ingest) | Apache-2.0 |
-| [aiortc](https://github.com/aiortc/aiortc) | WebRTC peer (remote access) | BSD-3-Clause |
-| [websockets](https://github.com/python-websockets/websockets) | WebSocket client (remote signaling) | BSD-3-Clause |
+| aioice | transitive dependency | BSD-3-Clause |
+| aiortc | WebRTC peer (remote access) | BSD-3-Clause |
+| annotated-doc | transitive dependency | MIT |
+| annotated-types | transitive dependency | MIT |
+| anyio | transitive dependency | MIT |
+| argon2-cffi | Passphrase KDF | MIT |
+| argon2-cffi-bindings | transitive dependency | MIT |
+| attrs | transitive dependency | MIT |
+| av | transitive dependency | BSD-3-Clause |
+| babel | transitive dependency | BSD-3-Clause |
+| certifi | CA trust store (HTTPS) | MPL-2.0 |
+| cffi | transitive dependency | MIT |
+| charset-normalizer | transitive dependency | MIT |
+| click | transitive dependency | BSD-3-Clause |
+| courlan | transitive dependency | Apache-2.0 |
+| cryptography | AES-GCM at rest | Apache-2.0 OR BSD-3-Clause |
+| dateparser | transitive dependency | BSD-3-Clause |
+| dnspython | transitive dependency | ISC |
+| duckdb | Embedded DB | MIT |
+| fastapi | HTTP framework | MIT |
+| google-crc32c | transitive dependency | Apache-2.0 |
+| h11 | transitive dependency | MIT |
+| htmldate | transitive dependency | Apache-2.0 |
+| httpcore | transitive dependency | BSD-3-Clause |
+| httptools | transitive dependency | MIT |
+| httpx | HTTP client (gateway/OAuth/Gmail) | BSD-3-Clause |
+| httpx-sse | transitive dependency | MIT |
+| idna | transitive dependency | BSD-3-Clause |
+| ifaddr | transitive dependency | MIT |
+| jsonschema | transitive dependency | MIT |
+| jsonschema-specifications | transitive dependency | MIT |
+| jusText | transitive dependency | BSD-2-Clause |
+| lxml | transitive dependency | BSD-3-Clause |
+| lxml_html_clean | transitive dependency | BSD-3-Clause |
+| mcp | Model Context Protocol server | MIT |
+| pycparser | transitive dependency | BSD-2-Clause |
+| pydantic | Request validation | MIT |
+| pydantic-settings | transitive dependency | MIT |
+| pydantic_core | transitive dependency | MIT |
+| pyee | transitive dependency | MIT |
+| PyJWT | transitive dependency | MIT |
+| pylibsrtp | transitive dependency | BSD-3-Clause |
+| pyOpenSSL | DTLS (via aiortc) | Apache-2.0 |
+| pypdf | PDF text extraction | BSD-3-Clause |
+| python-dateutil | transitive dependency | Apache-2.0 OR BSD-3-Clause |
+| python-dotenv | transitive dependency | BSD-3-Clause |
+| python-multipart | transitive dependency | Apache-2.0 |
+| pytz | transitive dependency | MIT |
+| PyYAML | transitive dependency | MIT |
+| referencing | transitive dependency | MIT |
+| regex | transitive dependency | Apache-2.0 |
+| rpds-py | transitive dependency | MIT |
+| six | transitive dependency | MIT |
+| sse-starlette | transitive dependency | BSD-3-Clause |
+| starlette | ASGI toolkit | BSD-3-Clause |
+| tld | TLD parsing (via trafilatura/courlan) | MPL-1.1 / GPL-2.0 / LGPL-2.1 (tri-license — used under MPL-1.1) |
+| trafilatura | HTML article extraction | Apache-2.0 |
+| typing-inspection | transitive dependency | MIT |
+| typing_extensions | transitive dependency | PSF-2.0 |
+| tzlocal | transitive dependency | MIT |
+| urllib3 | transitive dependency | MIT |
+| uvicorn | ASGI server | BSD-3-Clause |
+| uvloop | transitive dependency | MIT OR Apache-2.0 |
+| watchfiles | transitive dependency | MIT |
+| websockets | WebSocket client (signaling) | BSD-3-Clause |
+
+> **certifi (MPL-2.0)** — Mozilla's CA bundle, shipped **unmodified**. MPL-2.0 is file-level (weak) copyleft: it is not viral against SmartBrain's own code; we retain certifi's MPL-2.0 notice in the image.
+>
+> **tld** is tri-licensed **MPL-1.1 / GPL-2.0-only / LGPL-2.1-or-later**; SmartBrain elects and relies on it under the **MPL-1.1** arm (NOT GPL-2.0). It arrives transitively via `trafilatura → courlan`. (Legal review should confirm this election.)
+
 
 ## Frontend (built into the served SPA — `web/package.json`)
 
