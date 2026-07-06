@@ -150,9 +150,9 @@
   <h2>Change passphrase</h2>
   <p class="muted">Re-wraps your master key under a new passphrase. Your data and Recovery Key stay valid.</p>
   <form onsubmit={changePassphrase} style="display:flex; flex-direction:column; gap:0.5rem; max-width:28rem">
-    <input id="pw-current" type="password" bind:value={current} placeholder="Current passphrase" autocomplete="current-password" />
-    <input id="pw-next" type="password" bind:value={next} placeholder="New passphrase (min 8)" autocomplete="new-password" />
-    <input id="pw-confirm" type="password" bind:value={confirm} placeholder="Confirm new passphrase" autocomplete="new-password" />
+    <input id="pw-current" type="password" bind:value={current} placeholder="Current passphrase" aria-label="Current passphrase" autocomplete="current-password" />
+    <input id="pw-next" type="password" bind:value={next} placeholder="New passphrase (min 8)" aria-label="New passphrase" autocomplete="new-password" />
+    <input id="pw-confirm" type="password" bind:value={confirm} placeholder="Confirm new passphrase" aria-label="Confirm new passphrase" autocomplete="new-password" />
     <button disabled={busy || !current || !next} type="submit">Change passphrase</button>
   </form>
   {#if pwMsg}<p class="notice">{pwMsg}</p>{/if}
@@ -166,8 +166,8 @@
   {:else}
     <form onsubmit={resetPassphrase} style="display:flex; flex-direction:column; gap:0.5rem; max-width:28rem; margin-top:0.75rem">
       <p class="muted" style="margin:0">Set a new passphrase using your current unlocked session — no current passphrase needed.</p>
-      <input id="pw-reset-next" type="password" bind:value={resetNext} placeholder="New passphrase (min 8)" autocomplete="new-password" />
-      <input id="pw-reset-confirm" type="password" bind:value={resetConfirm} placeholder="Confirm new passphrase" autocomplete="new-password" />
+      <input id="pw-reset-next" type="password" bind:value={resetNext} placeholder="New passphrase (min 8)" aria-label="New passphrase" autocomplete="new-password" />
+      <input id="pw-reset-confirm" type="password" bind:value={resetConfirm} placeholder="Confirm new passphrase" aria-label="Confirm new passphrase" autocomplete="new-password" />
       <button disabled={busy || !resetNext} type="submit">Set new passphrase</button>
     </form>
   {/if}
@@ -186,9 +186,11 @@
   </p>
   <p style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center">
     <input
+      id="egress-pass"
       type="password"
       bind:value={egressPass}
       placeholder="Your passphrase"
+      aria-label="Your passphrase"
       autocomplete="current-password"
       style="max-width:16rem"
     />
@@ -201,7 +203,13 @@
   <h2>Restore</h2>
   <p class="muted">
     Replace all current data with a backup file. It is validated, then applied the next time
-    SmartBrain restarts. The current database is kept as <code>*.pre-restore</code> so this is reversible.
+    SmartBrain restarts. The current database is kept as <code>*.pre-restore-&lt;timestamp&gt;</code>
+    so this is reversible.
+  </p>
+  <p class="muted">
+    To apply it, restart the app:
+    <code>docker compose -f compose/docker-compose.yml restart smartbrain</code>
+    (or restart Docker Desktop).
   </p>
   <p style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center">
     <input type="file" accept=".duckdb" bind:files={restoreFile} />

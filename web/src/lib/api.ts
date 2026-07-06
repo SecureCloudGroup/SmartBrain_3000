@@ -158,6 +158,8 @@ export interface PendingAction {
   tool: string;
   tier: string;
   created_at: string;
+  turn_id: string | null; // the parked agent turn this approval belongs to (lets chat re-find its banner)
+  conversation_id: string | null;
   args: Record<string, unknown>;
 }
 
@@ -521,18 +523,24 @@ export const api = {
 
   // MCP access token (read-only Knowledge for external tools)
   mcpInfo: () => req<{ endpoint: string; enabled: boolean }>("/api/mcp"),
-  mcpToken: () => req<{ token: string | null }>("/api/mcp/token"),
-  mcpNewToken: () => req<{ token: string }>("/api/mcp/token", { method: "POST" }),
-  mcpRevokeToken: () => req<{ ok: boolean }>("/api/mcp/token", { method: "DELETE" }),
+  // The whole MCP-token verb-set is Desktop-local only (x-sb-local; the WebRTC bridge strips it):
+  // read + mint return the raw bearer token in the body, and revoke would let a paired phone rotate
+  // away the operator's token — so a phone can neither exfiltrate nor DoS it (Security B8).
+  mcpToken: () => req<{ token: string | null }>("/api/mcp/token", { headers: { "x-sb-local": "1" } }),
+  mcpNewToken: () => req<{ token: string }>("/api/mcp/token", { method: "POST", headers: { "x-sb-local": "1" } }),
+  mcpRevokeToken: () => req<{ ok: boolean }>("/api/mcp/token", { method: "DELETE", headers: { "x-sb-local": "1" } }),
 
   // device pairing (remote access via WebRTC)
+  // Enrolling/revoking devices + hosting a pairing session are Desktop-local only (x-sb-local;
+  // the WebRTC bridge strips it), so a paired phone can't self-mint a credential or revoke the
+  // Desktop's devices (Security B8). The metadata reads (listDevices, pairCodeStatus) stay open.
   listDevices: () => req<{ devices: DeviceInfo[] }>("/api/devices"),
   createDevice: (label: string) =>
-    req<PairingResponse>("/api/devices", { method: "POST", body: JSON.stringify({ label }) }),
+    req<PairingResponse>("/api/devices", { method: "POST", headers: { "x-sb-local": "1" }, body: JSON.stringify({ label }) }),
   deleteDevice: (id: string) =>
-    req<{ ok: boolean }>(`/api/devices/${encodeURIComponent(id)}`, { method: "DELETE" }),
+    req<{ ok: boolean }>(`/api/devices/${encodeURIComponent(id)}`, { method: "DELETE", headers: { "x-sb-local": "1" } }),
   startPairCode: (label: string) =>
-    req<{ code: string; expires_in: number; signaling_url: string }>("/api/devices/pair-code", { method: "POST", body: JSON.stringify({ label }) }),
-  cancelPairCode: () => req<{ ok: boolean }>("/api/devices/pair-code", { method: "DELETE" }),
+    req<{ code: string; expires_in: number; signaling_url: string }>("/api/devices/pair-code", { method: "POST", headers: { "x-sb-local": "1" }, body: JSON.stringify({ label }) }),
+  cancelPairCode: () => req<{ ok: boolean }>("/api/devices/pair-code", { method: "DELETE", headers: { "x-sb-local": "1" } }),
   pairCodeStatus: () => req<{ state: "none" | "waiting" | "paired" | "expired" }>("/api/devices/pair-code"),
 };

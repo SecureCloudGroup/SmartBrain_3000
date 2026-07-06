@@ -99,6 +99,15 @@
   }
 </script>
 
+<!-- Dismiss the mobile ⋯ overflow menu on Escape or an outside click (a11y: it otherwise
+     trapped focus with no keyboard/pointer way out). Clicks inside .appbar-overflow — including
+     the toggle — are ignored so the toggle still opens/closes it. -->
+<svelte:window
+  onkeydown={(e) => { if (e.key === "Escape") overflowOpen = false; }}
+  onclick={(e) => {
+    if (overflowOpen && !(e.target as HTMLElement).closest(".appbar-overflow")) overflowOpen = false;
+  }}
+/>
 
 {#if remote.status === "untrusted"}
   <!-- Possible MITM — render a full-width blocking banner so a phone user can't miss it. -->

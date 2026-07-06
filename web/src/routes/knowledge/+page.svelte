@@ -300,7 +300,7 @@
   <div class="card">
     <h2>Search</h2>
     <form onsubmit={search} style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap">
-      <input style="flex:1; min-width:12rem" bind:value={query} placeholder="Search your knowledge…" />
+      <input style="flex:1; min-width:12rem" bind:value={query} placeholder="Search your knowledge…" aria-label="Search your knowledge" />
       <select bind:value={mode} style="width:auto">
         <option value="lexical">Keyword</option>
         <option value="semantic">Meaning</option>

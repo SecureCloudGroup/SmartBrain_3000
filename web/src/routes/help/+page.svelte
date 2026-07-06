@@ -8,6 +8,31 @@
   const current = $derived(
     docs.find((d) => d.slug === page.url.hash.replace(/^#/, "")) ?? docs[0],
   );
+
+  // Reduced motion: the help GIFs auto-play and loop past 5s (WCAG 2.2.2). When the user
+  // prefers reduced motion, freeze each GIF to its first-frame poster — a CSS rule can't stop
+  // a GIF, only swapping the src does. Re-applies whenever the rendered section changes.
+  let article: HTMLElement | undefined = $state();
+  $effect(() => {
+    current; // re-run after {@html} swaps in a new section
+    if (typeof window === "undefined" || !article) return;
+    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const apply = () => {
+      for (const img of article!.querySelectorAll("img")) {
+        const src = img.getAttribute("src") ?? "";
+        if (mq.matches && src.endsWith(".gif")) {
+          img.dataset.gif = src;
+          img.setAttribute("src", src.replace(/\.gif$/, ".poster.png"));
+        } else if (!mq.matches && img.dataset.gif) {
+          img.setAttribute("src", img.dataset.gif);
+          delete img.dataset.gif;
+        }
+      }
+    };
+    apply();
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
+  });
 </script>
 
 <div class="help">
@@ -26,7 +51,7 @@
   </nav>
 
   <!-- Doc HTML is rendered from our own Markdown at build time (no scripts); CSP-safe. -->
-  <article class="help-body card">
+  <article class="help-body card" bind:this={article}>
     {@html current.html}
   </article>
 </div>
@@ -79,6 +104,12 @@
   .help-body :global(code) {
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     overflow-wrap: anywhere;
+  }
+  /* Screenshots/GIFs are ~2760px wide; without this they clip (don't scale) on a phone —
+     and /help is the no-unlock onboarding page a paired phone lands on. */
+  .help-body :global(img) {
+    max-width: 100%;
+    height: auto;
   }
   .help-body :global(h1):first-child {
     margin-top: 0;

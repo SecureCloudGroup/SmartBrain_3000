@@ -265,9 +265,9 @@
     <div class="card">
       <h2>Compose</h2>
       <form onsubmit={send} style="display:flex; flex-direction:column; gap:0.5rem">
-        <input bind:value={to} bind:this={toEl} placeholder="To (email address)" />
-        <input bind:value={subject} placeholder="Subject" />
-        <textarea bind:value={body} rows="4" placeholder="Message…"></textarea>
+        <input bind:value={to} bind:this={toEl} placeholder="To (email address)" aria-label="To (email address)" />
+        <input bind:value={subject} placeholder="Subject" aria-label="Subject" />
+        <textarea bind:value={body} rows="4" placeholder="Message…" aria-label="Message body"></textarea>
         <button disabled={busy || !to.includes('@')} type="submit">Send</button>
       </form>
     </div>

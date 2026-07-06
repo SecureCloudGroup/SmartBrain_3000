@@ -11,9 +11,10 @@
   let prompt = $state("");
   let repeat = $state(1440); // minutes; 0 = once
   let startIn = $state(0); // minutes from now until the first run
-  let busy = $state(false);
+  let busy = $state(false); // global: the Add form
+  let busyId = $state<string | null>(null); // per-card: the schedule currently running or saving
   let error = $state("");
-  let notice = $state("");
+  let runNotice = $state<{ id: string; text: string } | null>(null); // run result, shown in the acting card
   // Inline edit of an existing schedule (title/prompt/repeat) — backend updateSchedule.
   let editId = $state<string | null>(null);
   let editTitle = $state("");
@@ -134,7 +135,7 @@
   }
   async function saveEdit(s: Schedule) {
     if (!editTitle.trim() || !editPrompt.trim()) return;
-    busy = true;
+    busyId = s.id;
     error = "";
     try {
       // start_in_minutes is irrelevant for an existing schedule (first run already set);
@@ -151,7 +152,7 @@
     } catch (err) {
       error = describeError(err);
     } finally {
-      busy = false;
+      busyId = null;
     }
   }
 
@@ -189,13 +190,15 @@
 
   async function runNow(s: Schedule) {
     error = "";
-    notice = "";
-    busy = true;
+    runNotice = null;
+    busyId = s.id;
     try {
       const r = await api.runSchedule(s.id);
-      if (r.status === "awaiting_approval") notice = `“${s.title}” needs approval — see Activity.`;
-      else if (r.status === "error") notice = `“${s.title}” failed — see results below.`;
-      else notice = `“${s.title}” ran — see results below.`;
+      const text =
+        r.status === "awaiting_approval" ? `“${s.title}” needs approval — see Activity.`
+        : r.status === "error" ? `“${s.title}” failed — see results below.`
+        : `“${s.title}” ran — see results below.`;
+      runNotice = { id: s.id, text };
       // Open + refresh the results panel so the output is readable (not a vanishing toast).
       runs = (await api.listScheduleRuns(s.id)).runs;
       runsFor = s.id;
@@ -203,7 +206,7 @@
     } catch (err) {
       error = describeError(err);
     } finally {
-      busy = false;
+      busyId = null;
     }
   }
 </script>
@@ -243,8 +246,6 @@
     </form>
   </div>
 
-  {#if notice}<p class="notice">{notice}</p>{/if}
-
   {#if schedules.length === 0}
     <p class="muted">No schedules yet.</p>
   {/if}
@@ -262,8 +263,8 @@
               </select>
             </label>
             <span class="spacer"></span>
-            <button disabled={busy || !editTitle.trim() || !editPrompt.trim()} onclick={() => saveEdit(s)}>Save</button>
-            <button class="secondary" disabled={busy} onclick={cancelEdit}>Cancel</button>
+            <button disabled={busyId === s.id || !editTitle.trim() || !editPrompt.trim()} onclick={() => saveEdit(s)}>Save</button>
+            <button class="secondary" disabled={busyId === s.id} onclick={cancelEdit}>Cancel</button>
           </div>
         </div>
       {:else}
@@ -271,17 +272,18 @@
           <input type="checkbox" style="width:auto" checked={s.enabled} onchange={() => toggle(s)} />
           <strong style="flex:1; {s.enabled ? '' : 'opacity:0.55'}">{s.title}</strong>
           <span class="muted">{repeatLabel(s.interval_minutes)}</span>
-          <button class="secondary" disabled={busy} onclick={() => startEdit(s)}>Edit</button>
-          <button class="secondary" disabled={busy} onclick={() => showRuns(s)}>
+          <button class="secondary" disabled={busyId === s.id} onclick={() => startEdit(s)}>Edit</button>
+          <button class="secondary" disabled={busyId === s.id} onclick={() => showRuns(s)}>
             {runsFor === s.id ? "Hide results" : "Results"}
           </button>
-          <button disabled={busy} onclick={() => runNow(s)}>Run now</button>
+          <button disabled={busyId === s.id} onclick={() => runNow(s)}>{busyId === s.id ? "Running…" : "Run now"}</button>
           <button class="del" title="Delete" aria-label="Delete schedule" onclick={() => remove(s.id)}>✕</button>
         </div>
         <p class="muted" style="margin:0.4rem 0 0">{s.prompt}</p>
         <p class="muted" style="margin:0.2rem 0 0; font-size:0.85em">
           Next: {localTs(s.next_run)}{#if s.last_run} · Last: {localTs(s.last_run)}{/if}
         </p>
+        {#if runNotice?.id === s.id}<p class="notice" style="margin:0.4rem 0 0">{runNotice.text}</p>{/if}
         {#if runsFor === s.id}
           <div class="runs">
             {#if runs.length === 0}

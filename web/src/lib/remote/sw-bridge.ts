@@ -29,6 +29,18 @@ async function directReachable(): Promise<boolean> {
   }
 }
 
+// Same probe with a larger budget: retry a few times with a short warm-up delay. Used ONLY
+// on the no-pairing decision, where a fresh Desktop whose backend is still cold-starting can
+// fail the single 2s probe and get wrongly shown the phone "pair this device" welcome. A real
+// off-LAN phone still (correctly) falls through after the extra few seconds.
+async function directReachableWithRetry(): Promise<boolean> {
+  for (let i = 0; i < 3; i++) {
+    await new Promise((r) => setTimeout(r, 700));
+    if (await directReachable()) return true;
+  }
+  return false;
+}
+
 // Minimal relay seam used by both installFetchRelay() (the production wiring) and the
 // unit tests. The `conn` arg is the page-held RemoteConnection (or null); `realFetch` is
 // the original window.fetch. Pure: no module-level reads, so it's testable in plain Node.
@@ -93,12 +105,14 @@ async function _initRemote(): Promise<void> {
     return;
   }
   const pairing = await loadPairing().catch(() => null);
-  const onLan = await directReachable();
   if (!pairing) {
-    remote.needsPairing = !onLan; // off the LAN + no pairing -> show the "pair this device" welcome
+    // No stored pairing: retry the probe with a larger budget so a slow Desktop cold-start
+    // isn't misread as off-LAN and shown the phone "pair this device" welcome.
+    const onLan = (await directReachable()) || (await directReachableWithRetry());
+    remote.needsPairing = !onLan;
     return;
   }
-  if (onLan) {
+  if (await directReachable()) {
     return; // on the LAN — use /api directly, no relay
   }
   startRemote(pairing);
