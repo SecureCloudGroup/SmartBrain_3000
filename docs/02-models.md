@@ -7,7 +7,7 @@ provider unless you configure it and use it.
 
 ## Cloud providers (your API keys)
 
-Open **Settings → Providers** and add a key for any of:
+Open **Settings → Cloud providers** and add a key for any of:
 
 - **OpenAI**
 - **Anthropic**

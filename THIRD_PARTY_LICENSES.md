@@ -46,11 +46,13 @@ The complete runtime set (67 packages) is exact-version pinned in [`app/requirem
 | lxml | transitive dependency | BSD-3-Clause |
 | lxml_html_clean | transitive dependency | BSD-3-Clause |
 | mcp | Model Context Protocol server | MIT |
+| packaging | transitive dependency | Apache-2.0 OR BSD-2-Clause |
 | pycparser | transitive dependency | BSD-2-Clause |
 | pydantic | Request validation | MIT |
 | pydantic-settings | transitive dependency | MIT |
 | pydantic_core | transitive dependency | MIT |
 | pyee | transitive dependency | MIT |
+| Pygments | transitive dependency | BSD-2-Clause |
 | PyJWT | transitive dependency | MIT |
 | pylibsrtp | transitive dependency | BSD-3-Clause |
 | pyOpenSSL | DTLS (via aiortc) | Apache-2.0 |

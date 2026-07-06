@@ -67,18 +67,20 @@ encrypted is worth more here than index-speed search.
 ## WebRTC signaling broker is single-operator
 
 [Remote access](07-remote-access.md) uses a signaling broker that is
-**single-operator** by design: devices register with a **shared registration
-token**, and the cryptographic guarantee that your phone is really talking to
-**your** Desktop is the **DTLS-fingerprint pin** captured at pairing — not the
-broker. TURN relay uses **static credentials** bounded by quotas; those
-credentials grant **relay bandwidth only**, never access to the app or your
-data.
+**single-operator** by design. The hosted broker is **tokenless** (open
+registration, bounded by a desktop-count cap and per-registration rate limits),
+and the cryptographic guarantee that your phone is really talking to **your**
+Desktop is the **DTLS-fingerprint pin** captured at pairing — not the broker.
+TURN relay uses **ephemeral credentials** (coturn `use-auth-secret`, minted per
+connection and short-lived); those credentials grant **relay bandwidth only**,
+never access to the app or your data. A **self-hosted** node may instead run with
+a shared registration token and static, quota-bounded TURN creds.
 
 **Why:** the broker is content-blind — it only helps devices find each other.
 The end-to-end security comes from the pinned fingerprint, so the broker doesn't
-need per-user accounts to be safe. Static, quota-bounded TURN creds keep the
+need per-user accounts to be safe. Ephemeral, per-connection TURN creds keep the
 relay simple while ensuring a leaked credential can, at worst, consume some relay
-bandwidth.
+bandwidth before it expires.
 
 ## Next
 
