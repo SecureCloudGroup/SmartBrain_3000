@@ -17,9 +17,13 @@ services:
     # Loopback-only: NOT exposed to the LAN. Desktop reaches it at
     # http://localhost:33000. Mobile/LAN access is added later (mkcert + mDNS).
     ports:
-      - "127.0.0.1:33000:33000"
+      # Loopback-only mapping. SMARTBRAIN_PORT (from compose/.env) sets both sides and the
+      # in-container listen port below; defaults to 33000 so an unset value is unchanged.
+      - "127.0.0.1:${SMARTBRAIN_PORT:-33000}:${SMARTBRAIN_PORT:-33000}"
     environment:
       SMARTBRAIN_DB_PATH: /app/data/smartbrain.duckdb
+      # Port the app serves on inside the container (must match the mapping + healthcheck).
+      SMARTBRAIN_PORT: ${SMARTBRAIN_PORT:-33000}
       # Bind all interfaces INSIDE the container so the loopback-only host port
       # mapping above can reach it. serve.py defaults to 127.0.0.1 otherwise.
       SMARTBRAIN_HOST: 0.0.0.0
@@ -41,7 +45,7 @@ services:
       bifrost:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:33000/api/health', timeout=2).status==200 else 1)"]
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:${SMARTBRAIN_PORT:-33000}/api/health', timeout=2).status==200 else 1)"]
       interval: 30s
       timeout: 5s
       retries: 3
