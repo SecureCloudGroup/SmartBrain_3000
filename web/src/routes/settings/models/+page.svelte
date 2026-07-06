@@ -130,7 +130,13 @@
   {#if models?.ollama.configured && !models.ollama.reachable}
     <p class="muted" style="margin-top:0.5rem">
       Can&rsquo;t reach Ollama. Install + start it (<a href="https://ollama.com/download" target="_blank" rel="noreferrer">ollama.com/download</a>),
-      then pull a model: <code>ollama pull llama3.1:8b</code> and (for semantic search) <code>ollama pull nomic-embed-text</code>.
+      then pull a model: <code>ollama pull llama3.1:8b</code> and (for semantic search) <code>ollama pull nomic-embed-text:v1.5</code>.
+    </p>
+  {/if}
+  {#if models && !models.ollama.configured && !models.ollama.detected}
+    <p class="muted" style="margin-top:0.5rem">
+      New to local models? Install + start Ollama (<a href="https://ollama.com/download" target="_blank" rel="noreferrer">ollama.com/download</a>),
+      then pull a model: <code>ollama pull llama3.1:8b</code> and (for semantic search) <code>ollama pull nomic-embed-text:v1.5</code>.
     </p>
   {/if}
   <details bind:open={showOllamaAdv} style="margin-top:0.5rem">

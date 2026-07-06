@@ -45,17 +45,18 @@
     border: 1px solid var(--border, #4444);
     white-space: nowrap;
   }
+  /* Theme tokens (not hardcoded hex): the light-theme --ok/--warn meet 4.5:1 contrast. */
   .remote-chip.ok {
-    color: #16a34a;
-    border-color: #16a34a66;
+    color: var(--ok);
+    border-color: color-mix(in srgb, var(--ok) 40%, transparent);
   }
   .remote-chip.warn {
-    color: #d97706;
-    border-color: #d9770666;
+    color: var(--warn);
+    border-color: color-mix(in srgb, var(--warn) 40%, transparent);
   }
   .remote-chip.bad {
-    color: #dc2626;
-    border-color: #dc262666;
+    color: var(--danger);
+    border-color: color-mix(in srgb, var(--danger) 40%, transparent);
     font-weight: 600;
   }
   .remote-chip.muted {

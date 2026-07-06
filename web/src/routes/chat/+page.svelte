@@ -29,6 +29,7 @@
     "This model can't use tools, so it answered from its own knowledge only — " +
     "web search, tasks, knowledge, and email actions won't run. Pick a tool-capable model above for those.";
   let pendingTurnId = $state<string | null>(null);
+  let resumeNotice = $state(""); // transient: shown if Resume is clicked before the action is approved
 
   // Stable client-side ids for entries we just appended (server-issued ids are used
   // for messages loaded from history). Monotonic counter; bounded by user actions.
@@ -42,7 +43,7 @@
   // a clicked chip drops straight into the composer.
   const STARTERS = [
     "What can you do?",
-    "Summarize my newest email.",
+    "Save a note to my knowledge base.",
     "Add 'buy milk' to my tasks.",
   ];
 
@@ -81,10 +82,25 @@
       // resumeChat returns the newest page's messages (server default); if there are older
       // ones, re-fetch through getConversation to capture next_cursor/has_more.
       if (chatSession.currentId) await refreshOpenCursor(chatSession.currentId);
+      await restorePendingBanner(chatSession.currentId); // re-show Resume if a parked turn survived a nav away
     } catch (err) {
       error = describeError(err);
     }
   });
+
+  // Re-derive the approval banner from the server (pendingTurnId is component-local and is
+  // lost when the user follows "Open Activity" and returns): if the open conversation has a
+  // parked turn awaiting approval, restore its Resume affordance. Best-effort — the server's
+  // pending list is the source of truth, so this also survives a full reload.
+  async function restorePendingBanner(cid: string | null): Promise<void> {
+    if (!cid) return;
+    try {
+      const { pending } = await api.listPending();
+      pendingTurnId = pending.find((p) => p.conversation_id === cid && p.turn_id)?.turn_id ?? null;
+    } catch {
+      // a transient failure just leaves the banner absent (Activity still lists the approval)
+    }
+  }
 
   // Pull next_cursor/has_more for the open conversation without disturbing `log`
   // (resumeChat itself doesn't expose pagination metadata).
@@ -216,12 +232,14 @@
   async function select(id: string) {
     error = "";
     pendingTurnId = null; // never carry a parked turn across a conversation switch
+    resumeNotice = "";
     try {
       const convo = await api.getConversation(id);
       chatSession.currentId = id;
       log = convo.messages.map((m) => ({ id: m.id, role: m.role, content: m.content }));
       msgCursor = convo.next_cursor ?? null;
       msgHasMore = !!convo.has_more;
+      await restorePendingBanner(id); // this conversation may have a parked turn awaiting approval
     } catch (err) {
       // Gone (deleted) -> drop it so it can't error forever; transient -> keep it for next visit.
       if (err instanceof ApiError && err.status === 404) chatSession.currentId = null;
@@ -235,6 +253,7 @@
     msgCursor = null;
     msgHasMore = false;
     pendingTurnId = null;
+    resumeNotice = "";
     error = "";
   }
 
@@ -503,8 +522,13 @@
     if (!pendingTurnId || busy || chatSession.currentId === null) return;
     busy = true;
     error = "";
+    resumeNotice = "";
     try {
       const res = await api.agentResume(pendingTurnId);
+      if (res.status === "awaiting_approval") {
+        // Clicked Resume before approving in Activity — say so, don't silently no-op.
+        resumeNotice = "Still waiting on your approval — open Activity, approve the action, then Resume.";
+      }
       await handleAgentResult(res, chatSession.currentId);
       await loadConversations();
     } catch (err) {
@@ -620,6 +644,7 @@
       <a class="approval-link" href="/activity">Open Activity</a>
       <button class="secondary" disabled={busy} onclick={resume}>Resume after approval</button>
     </div>
+    {#if resumeNotice}<p class="muted" style="margin:0.35rem 0 0; font-size:0.85rem">{resumeNotice}</p>{/if}
   {/if}
 
   <div class="composer">
@@ -627,6 +652,7 @@
       bind:value={input}
       onkeydown={onKey}
       placeholder="Message…  (Enter to send, Shift+Enter for a newline)"
+      aria-label="Message"
     ></textarea>
     <button disabled={busy || !input.trim() || !modelId} title={!modelId ? "Select a model first" : ""} onclick={send}>Send</button>
   </div>

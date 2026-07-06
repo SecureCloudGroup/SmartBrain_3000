@@ -86,6 +86,7 @@
       <input
         bind:value={code}
         placeholder="e.g. ABC234"
+        aria-label="Pairing code"
         autocapitalize="characters"
         autocomplete="off"
         autocorrect="off"
@@ -95,7 +96,7 @@
       />
     </p>
     <p style="margin-top:1rem"><button onclick={submitCode} disabled={pairing}>{pairing ? "Pairing…" : "Pair"}</button></p>
-    {#if error}<p class="error">{error}</p>{/if}
+    {#if error}<p class="error" role="alert">{error}</p>{/if}
   {:else if phase === "done"}
     <h1>Paired &check;</h1>
     <p>You're set. Open SmartBrain to start using it from anywhere:</p>
@@ -104,7 +105,7 @@
     <p style="margin-top:1rem"><button onclick={() => window.location.assign("/")}>Open SmartBrain</button></p>
   {:else}
     <h1>Pairing failed</h1>
-    <p class="error">{error}</p>
+    <p class="error" role="alert">{error}</p>
     <p class="muted">Open your Desktop&rsquo;s <b>Settings &rarr; Remote access</b> and try again.</p>
   {/if}
 </div>

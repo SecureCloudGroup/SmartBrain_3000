@@ -184,7 +184,7 @@
 
   <div class="card">
     <form onsubmit={add} style="display:flex; flex-direction:column; gap:0.5rem">
-      <input bind:value={title} placeholder="New task…" />
+      <input bind:value={title} placeholder="New task…" aria-label="New task" />
       <div style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center">
         <label>Due <input type="date" bind:value={due} style="width:auto" /></label>
         <label>Time <input type="time" bind:value={dueTime} style="width:auto" /></label>
