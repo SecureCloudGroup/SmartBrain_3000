@@ -13,7 +13,7 @@ import os
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from . import devices, identity, pairing_code, pairing_host, remote_config
+from . import account, devices, identity, pairing_code, pairing_host, remote_config
 
 router = APIRouter()
 
@@ -73,6 +73,7 @@ def create_device(request: Request, body: DeviceCreate) -> dict:
     The returned payload is what the phone stores at pairing: it pins ``desktop_pubkey``
     to verify the Desktop over the channel before ever sending its credential.
     """
+    account._require_desktop_local(request)  # enrolling a device is Desktop-only (a bridged phone must not self-mint)
     store = _store(request)
     rec = devices.create_device(store, body.label)
     _activate_remote(request.app)  # pairing is the opt-in -> open the broker link (lazy-start)
@@ -93,6 +94,7 @@ async def start_pair_code(request: Request, body: DeviceCreate) -> dict:
     app enters the code to fetch the pairing over an encrypted channel (see pairing_code.py).
     Requires unlock + a configured signaling broker. One session at a time.
     """
+    account._require_desktop_local(request)  # hosting a pairing session is Desktop-only
     store = _store(request)
     signaling = remote_config.signaling_url()
     token = os.environ.get("SMARTBRAIN_SIGNALING_TOKEN", "")  # empty in hosted (tokenless) mode
@@ -118,6 +120,7 @@ async def start_pair_code(request: Request, body: DeviceCreate) -> dict:
 @router.delete("/api/devices/pair-code")
 def cancel_pair_code(request: Request) -> dict[str, bool]:
     """Cancel an in-progress pairing-by-code session (e.g. the operator closed the dialog)."""
+    account._require_desktop_local(request)  # Desktop-only, like the rest of pairing enrollment
     _cancel_pair_session(request.app)
     return {"ok": True}
 
@@ -141,5 +144,6 @@ def pair_code_status(request: Request) -> dict[str, str]:
 @router.delete("/api/devices/{device_id}")
 def delete_device(request: Request, device_id: str) -> dict[str, bool]:
     """Revoke a device so it can no longer connect."""
+    account._require_desktop_local(request)  # revoking devices is Desktop-only (a bridged phone must not deny-access the Desktop)
     devices.revoke_device(_store(request), device_id)
     return {"ok": True}
