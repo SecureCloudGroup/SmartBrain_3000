@@ -44,7 +44,10 @@ def list_conversations(
 ) -> dict:
     """List one (newest-first) page of conversations; cursor + has_more page older."""
     assert request is not None, "request required"
-    page = _hist(request).list_conversations_page(before=before, limit=limit)
+    try:
+        page = _hist(request).list_conversations_page(before=before, limit=limit)
+    except ValueError:  # malformed/legacy pagination cursor -> 400, not a bare 500
+        raise HTTPException(status_code=400, detail="invalid pagination cursor") from None
     assert isinstance(page, dict), "paginated result must be a dict"
     return {
         "conversations": page["items"],
@@ -73,7 +76,10 @@ def get_conversation(
     convo = history.get_conversation(cid)
     if convo is None:
         raise HTTPException(status_code=404, detail="conversation not found")
-    page = history.get_messages_page(cid, before=before, limit=limit)
+    try:
+        page = history.get_messages_page(cid, before=before, limit=limit)
+    except ValueError:  # malformed/legacy pagination cursor -> 400, not a bare 500
+        raise HTTPException(status_code=400, detail="invalid pagination cursor") from None
     assert isinstance(page, dict), "paginated result must be a dict"
     return {
         **convo,

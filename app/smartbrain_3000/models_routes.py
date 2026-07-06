@@ -62,13 +62,22 @@ def get_routes(request: Request) -> dict:
 
 @router.put("/api/routes")
 def put_routes(request: Request, body: RoutesBody) -> dict:
-    """Persist routing for known capabilities only; ignore unknown keys."""
+    """Persist routing for known capabilities only; ignore unknown keys.
+
+    Each model must be a 'provider/model' id (the shape every gateway model uses). Without
+    this, a typo like 'gpt4' would persist silently and make every later /api/chat resolve
+    to it and 502 — with no feedback at save time. The '/' check is gateway-independent, so
+    saving still works while the gateway is briefly unreachable.
+    """
     _require_unlocked(request)
     clean = {
         cap: model
         for cap, model in body.routes.items()
         if cap in CAPABILITY_LABELS and isinstance(model, str) and model
     }
+    for cap, model in clean.items():
+        if "/" not in model:
+            raise HTTPException(status_code=400, detail=f"model for '{cap}' must be a 'provider/model' id, got {model!r}")
     gateway.save_routes(request.app.state.dbx, clean)
     return {"ok": True, "routes": gateway.load_routes(request.app.state.dbx)}
 

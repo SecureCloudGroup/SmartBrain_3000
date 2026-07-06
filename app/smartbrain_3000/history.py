@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import os
 import uuid
+from datetime import datetime
 
 import duckdb
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -43,13 +44,25 @@ def _clamp_page(limit: int | None, default: int, hard_max: int) -> int:
 
 
 def _split_cursor(cursor: str | None) -> tuple[str, str] | None:
-    """Parse a ``"<timestamp>|<id>"`` keyset cursor; return ``None`` if absent."""
+    """Parse a ``"<timestamp>|<id>"`` keyset cursor; ``None`` if absent. Raise ValueError if malformed.
+
+    Both cursor kinds (messages, conversations) lead with a ``str(datetime)`` timestamp, so a
+    well-formed cursor always round-trips through ``fromisoformat``. A hand-crafted/stale cursor
+    (no pipe, leading pipe, or an unparseable timestamp) is rejected here as a ValueError — the
+    route maps it to HTTP 400 — instead of blowing up the keyset query as a bare 500.
+    """
     assert cursor is None or isinstance(cursor, str), "cursor must be a string or None"
     if cursor is None or not cursor:
         return None
     sep = cursor.find("|")
-    assert sep > 0, "cursor must be '<timestamp>|<id>'"
-    return cursor[:sep], cursor[sep + 1 :]
+    if sep <= 0:
+        raise ValueError("invalid cursor: expected '<timestamp>|<id>'")
+    ts, ident = cursor[:sep], cursor[sep + 1 :]
+    try:
+        datetime.fromisoformat(ts)  # guards the CAST(... AS TIMESTAMP) in the keyset query
+    except ValueError:
+        raise ValueError("invalid cursor: bad timestamp") from None
+    return ts, ident
 
 
 class ChatHistory:
@@ -191,8 +204,10 @@ class ChatHistory:
         """Return a conversation's messages in order (oldest first)."""
         assert cid, "conversation id required"
         rows = self._conn.execute(
+            # Tie-break on rowid (insertion order), NOT id: id is a random UUID, so two messages
+            # sharing a created_at tick would otherwise come back in arbitrary order (flaky).
             "SELECT id, nonce, ciphertext, created_at FROM messages WHERE conversation_id = ? "
-            "ORDER BY created_at ASC, id ASC LIMIT ?;",
+            "ORDER BY created_at ASC, rowid ASC LIMIT ?;",
             [cid, _MSG_LIMIT],
         ).fetchall()
         assert isinstance(rows, list), "fetchall must return a list"
@@ -225,17 +240,25 @@ class ChatHistory:
         page = _clamp_page(limit, _DEFAULT_MSG_PAGE, _MAX_MSG_PAGE)
         assert 1 <= page <= _MAX_MSG_PAGE, "page size out of bounds"
         cursor = _split_cursor(before)
+        if cursor is not None:
+            try:
+                int(cursor[1])  # rowid part must be an integer; a stale/legacy cursor is rejected cleanly (400), not a 500
+            except ValueError:
+                raise ValueError("invalid pagination cursor") from None
+        # Keyset on (created_at, rowid), NOT (created_at, id): id is a random UUID, so same-tick
+        # messages would page in arbitrary order. rowid is insertion order and stable within a
+        # browsing session (created_at is the primary key, so rowid only breaks exact ties).
         if cursor is None:
             rows = self._conn.execute(
-                "SELECT id, nonce, ciphertext, created_at FROM messages WHERE conversation_id = ? "
-                "ORDER BY created_at DESC, id DESC LIMIT ?;",
+                "SELECT id, nonce, ciphertext, created_at, rowid FROM messages WHERE conversation_id = ? "
+                "ORDER BY created_at DESC, rowid DESC LIMIT ?;",
                 [cid, page + 1],
             ).fetchall()
         else:
             rows = self._conn.execute(
-                "SELECT id, nonce, ciphertext, created_at FROM messages WHERE conversation_id = ? "
-                "AND (created_at, id) < (CAST(? AS TIMESTAMP), ?) "
-                "ORDER BY created_at DESC, id DESC LIMIT ?;",
+                "SELECT id, nonce, ciphertext, created_at, rowid FROM messages WHERE conversation_id = ? "
+                "AND (created_at, rowid) < (CAST(? AS TIMESTAMP), CAST(? AS BIGINT)) "
+                "ORDER BY created_at DESC, rowid DESC LIMIT ?;",
                 [cid, cursor[0], cursor[1], page + 1],
             ).fetchall()
         assert isinstance(rows, list), "fetchall must return a list"
@@ -252,11 +275,12 @@ class ChatHistory:
                     "created_at": str(row[3]),
                 }
             )
-        # Cursor points at the OLDEST item on this page (the next page is older still).
+        # Cursor points at the OLDEST item on this page (the next page is older still). Built from
+        # the raw row so it carries rowid (kept out of the client-facing item shape).
         next_cursor: str | None = None
-        if has_more and items:
-            oldest = items[-1]
-            next_cursor = f"{oldest['created_at']}|{oldest['id']}"
+        if has_more and rows:
+            oldest = rows[-1]  # rows are newest-first here, so the last is the oldest
+            next_cursor = f"{oldest[3]}|{oldest[4]}"  # created_at|rowid
         items.reverse()  # return oldest-first within the page for natural rendering
         return {"items": items, "next_cursor": next_cursor, "has_more": has_more}
 

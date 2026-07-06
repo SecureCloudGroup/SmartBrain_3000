@@ -135,6 +135,15 @@ def test_routes_put_persists_known_caps_only(client: TestClient) -> None:
     assert g.json()["routes"]["chat"] == "gemini/gemini-2.5-flash" and "chat" in g.json()["labels"]
 
 
+def test_routes_put_rejects_model_without_provider(client: TestClient) -> None:
+    # A value lacking 'provider/model' shape (e.g. a typo) would persist and make every
+    # later /api/chat resolve to it and 502; reject it at save time with a 400 instead.
+    client.post("/api/account/setup", json={"passphrase": "correct-horse"})
+    r = client.put("/api/routes", json={"routes": {"chat": "gpt4"}})
+    assert r.status_code == 400
+    assert client.get("/api/routes").json()["routes"].get("chat") != "gpt4"  # not persisted
+
+
 def test_routes_endpoint_exposes_and_persists_embedding(client: TestClient) -> None:
     client.post("/api/account/setup", json={"passphrase": "correct-horse"})
     g = client.get("/api/routes").json()

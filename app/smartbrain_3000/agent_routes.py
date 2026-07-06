@@ -100,7 +100,9 @@ def list_pending(request: Request) -> dict:
     """List actions awaiting approval (args redacted for the tile)."""
     approvals = _approvals(request)
     pending = [
-        {"id": p["id"], "tool": p["tool"], "tier": p["tier"], "created_at": p["created_at"], "args": tools.redact(p["args"])}
+        {"id": p["id"], "tool": p["tool"], "tier": p["tier"], "created_at": p["created_at"],
+         "turn_id": p.get("turn_id"), "conversation_id": p.get("conversation_id"),
+         "args": tools.redact(p["args"])}
         for p in approvals.list_pending()
     ]
     return {"pending": pending}

@@ -78,19 +78,22 @@ class ApprovalStore:
     def list_pending(self) -> list[dict]:
         """Return pending rows for THIS session (args preview is the caller's job)."""
         rows = self._conn.execute(
-            "SELECT id, tool_name, tier, created_at, nonce, ciphertext FROM pending_actions "
+            "SELECT id, tool_name, tier, created_at, turn_id, conversation_id, nonce, ciphertext FROM pending_actions "
             "WHERE status = 'pending' ORDER BY created_at DESC LIMIT ?;",
             [_LIST_LIMIT],
         ).fetchall()
         assert isinstance(rows, list), "fetchall must return a list"
         out: list[dict] = []
         for row in rows:  # bounded by _LIST_LIMIT
-            body = self._open(str(row[0]), bytes(row[4]), bytes(row[5]))
+            body = self._open(str(row[0]), bytes(row[6]), bytes(row[7]))
             if body["session"] != self._session:
                 continue  # a prior unlock session — invisible now
-            out.append(
-                {"id": str(row[0]), "tool": str(row[1]), "tier": str(row[2]), "created_at": str(row[3]), "args": body["args"]}
-            )
+            out.append({
+                "id": str(row[0]), "tool": str(row[1]), "tier": str(row[2]), "created_at": str(row[3]),
+                "turn_id": None if row[4] is None else str(row[4]),  # lets a returning chat page re-find its parked turn
+                "conversation_id": None if row[5] is None else str(row[5]),
+                "args": body["args"],
+            })
         return out
 
     def get(self, pid: str) -> dict | None:

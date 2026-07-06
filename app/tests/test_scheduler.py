@@ -58,6 +58,19 @@ def test_update_and_set_enabled_and_delete() -> None:
     assert store.get_schedule(sid) is None
 
 
+def test_delete_schedule_cascades_run_history() -> None:
+    # schedule_runs has no DB-level FK, so delete must cascade in code — otherwise orphaned
+    # encrypted run rows accumulate forever and ride into every backup.
+    store, conn, _ = _store()
+    sid = store.add_schedule("o", "p", interval_minutes=0, start_in_minutes=0, model=None)
+    store.record_run(sid, "complete", message="run body", error=None)
+    store.record_run(sid, "error", message="", error="boom")
+    assert conn.execute("SELECT COUNT(*) FROM schedule_runs WHERE schedule_id = ?;", [sid]).fetchone()[0] == 2
+    store.delete_schedule(sid)
+    assert store.get_schedule(sid) is None
+    assert conn.execute("SELECT COUNT(*) FROM schedule_runs WHERE schedule_id = ?;", [sid]).fetchone()[0] == 0
+
+
 def test_content_encrypted_at_rest() -> None:
     store, conn, _ = _store()
     store.add_schedule("secret-title", "secret-prompt", interval_minutes=0, start_in_minutes=0, model=None)
@@ -446,6 +459,21 @@ def test_breaker_warning_is_debounced(caplog) -> None:
         scheduler._breaker_record(success=False)
     tripped = [r for r in caplog.records if "tripped" in r.getMessage()]
     assert len(tripped) == 1, f"expected 1 trip-warning, saw {len(tripped)}"
+
+
+def test_breaker_record_no_lost_increments_under_parallel_failures(caplog) -> None:
+    # The tick runs up to _SCHEDULE_WORKERS agent turns in parallel, each calling
+    # _breaker_record OUTSIDE _RUN_LOCK. Without _BREAKER_LOCK the read-modify-write
+    # races: increments are lost (late trip) and the debounced warning double-fires.
+    caplog.set_level("WARNING", logger=scheduler.log.name)
+    from concurrent.futures import ThreadPoolExecutor
+
+    n = 200
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        list(ex.map(lambda _: scheduler._breaker_record(success=False), range(n)))
+    assert scheduler._BREAKER.fails == n  # every failure counted; none lost to the race
+    tripped = [r for r in caplog.records if "tripped" in r.getMessage()]
+    assert len(tripped) == 1, f"expected exactly 1 trip-warning, saw {len(tripped)}"
 
 
 # --- B18: ScheduleStore.conn property ------------------------------------
