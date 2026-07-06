@@ -64,12 +64,16 @@ class _Breaker:
     __slots__ = ("fails", "until", "warned")
 
     def __init__(self) -> None:
-        self.fails = 0           # consecutive failure count (tick is single-threaded)
+        self.fails = 0           # consecutive failure count (mutated under _BREAKER_LOCK; the tick runs workers in parallel)
         self.until = 0.0         # monotonic-time when the breaker stops suppressing
         self.warned = False      # debounce: only log the "tripped" warning once per trip
 
 
 _BREAKER = _Breaker()
+# Guards the breaker's read-modify-write: run_schedule calls _breaker_record OUTSIDE
+# _RUN_LOCK, and a tick runs up to _SCHEDULE_WORKERS turns in parallel, so without this
+# lock failure increments race (breaker trips late) and the debounced warning can double-fire.
+_BREAKER_LOCK = threading.Lock()
 # Serializes the claim-and-advance step across the background tick and a manual
 # /run (both run in the same process, on different threads) so a schedule can
 # never fire twice. The long agent turn runs OUTSIDE this lock.
@@ -156,8 +160,14 @@ class ScheduleStore:
         self._conn.execute("UPDATE schedules SET enabled = ? WHERE id = ?;", [enabled, sid])
 
     def delete_schedule(self, sid: str) -> None:
-        """Delete a schedule (no error if absent)."""
+        """Delete a schedule and its run history (no error if absent).
+
+        schedule_runs has no DB-level FK to schedules, so cascade in code (children
+        first) — matching kb.delete / history.delete_conversation — otherwise orphaned
+        encrypted run rows accumulate forever and ride into every backup.
+        """
         assert sid, "schedule id required"
+        self._conn.execute("DELETE FROM schedule_runs WHERE schedule_id = ?;", [sid])
         self._conn.execute("DELETE FROM schedules WHERE id = ?;", [sid])
 
     def mark_ran(self, sid: str, interval_minutes: int) -> None:
@@ -315,23 +325,29 @@ def _breaker_open() -> bool:
 
 
 def _breaker_record(success: bool) -> None:
-    """B11: count failures; trip + warn (debounced) once threshold is hit; reset on success."""
+    """B11: count failures; trip + warn (debounced) once threshold is hit; reset on success.
+
+    Parallel tick workers call this concurrently, so the whole read-modify-write runs
+    under _BREAKER_LOCK — otherwise increments are lost (late trip) and the debounced
+    warning can fire more than once.
+    """
     assert isinstance(success, bool), "success must be bool"
     assert _BREAKER_TRIP_AFTER > 0, "trip threshold must be positive"
-    if success:
-        if _BREAKER.fails or _BREAKER.warned:
-            log.info("gateway breaker reset")
-        _BREAKER.fails = 0
-        _BREAKER.until = 0.0
-        _BREAKER.warned = False
-        return
-    _BREAKER.fails += 1
-    if _BREAKER.fails >= _BREAKER_TRIP_AFTER:
-        _BREAKER.until = time.monotonic() + _BREAKER_COOLDOWN_SECS
-        if not _BREAKER.warned:  # debounce: one warning per trip
-            log.warning("gateway breaker tripped after %d failures; suppressing for %ds",
-                        _BREAKER.fails, _BREAKER_COOLDOWN_SECS)
-            _BREAKER.warned = True
+    with _BREAKER_LOCK:
+        if success:
+            if _BREAKER.fails or _BREAKER.warned:
+                log.info("gateway breaker reset")
+            _BREAKER.fails = 0
+            _BREAKER.until = 0.0
+            _BREAKER.warned = False
+            return
+        _BREAKER.fails += 1
+        if _BREAKER.fails >= _BREAKER_TRIP_AFTER:
+            _BREAKER.until = time.monotonic() + _BREAKER_COOLDOWN_SECS
+            if not _BREAKER.warned:  # debounce: one warning per trip
+                log.warning("gateway breaker tripped after %d failures; suppressing for %ds",
+                            _BREAKER.fails, _BREAKER_COOLDOWN_SECS)
+                _BREAKER.warned = True
 
 
 def _auto_reindex(cursor, key: bytes) -> None:

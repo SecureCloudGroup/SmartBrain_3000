@@ -46,12 +46,12 @@ _LOCAL_HEADER = "x-sb-local"
 
 
 def _require_desktop_local(request: Request) -> None:
-    """Refuse restore requests that arrived via the WebRTC bridge (remote device)."""
+    """Refuse requests that arrived via the WebRTC bridge (guards export/backup/restore)."""
     assert request is not None, "request required"
     marker = request.headers.get(_LOCAL_HEADER)
     assert isinstance(marker, str) or marker is None, "header must be a string or absent"
     if marker != "1":
-        raise HTTPException(status_code=403, detail="restore is Desktop-local only")
+        raise HTTPException(status_code=403, detail="this endpoint is Desktop-local only")
 
 
 def _stores(request: Request):
@@ -212,7 +212,7 @@ async def _stream_restore_to_disk(request: Request, dest: Path) -> int:
                     continue  # empty keep-alive chunk; the loop bound still terminates us
                 total += len(chunk)
                 if total > _RESTORE_MAX:
-                    raise HTTPException(status_code=400, detail="empty or oversized restore file")
+                    raise HTTPException(status_code=413, detail="restore file too large (max 1 GiB)")
                 out.write(chunk)
     except Exception:
         dest.unlink(missing_ok=True)
@@ -251,7 +251,7 @@ async def restore_db(request: Request) -> dict:
     written = await _stream_restore_to_disk(request, tmp)
     if written == 0:
         tmp.unlink(missing_ok=True)
-        raise HTTPException(status_code=400, detail="empty or oversized restore file")
+        raise HTTPException(status_code=400, detail="empty restore file")
     if not db.is_smartbrain_db(tmp):  # reject anything that isn't a real backup
         tmp.unlink(missing_ok=True)
         raise HTTPException(status_code=400, detail="not a valid SmartBrain backup file")

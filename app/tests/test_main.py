@@ -170,5 +170,5 @@ def test_remote_access_lazy_activates_on_pairing(tmp_path, monkeypatch) -> None:
         assert not app.state.webrtc_active.is_set()  # fresh + locked -> no opt-in
         assert client.post("/api/account/setup", json={"passphrase": "Passw0rd"}).status_code == 200
         assert not app.state.webrtc_active.is_set()  # unlocked, no devices -> still off
-        assert client.post("/api/devices", json={"label": "phone"}).status_code == 200
+        assert client.post("/api/devices", json={"label": "phone"}, headers={"X-SB-Local": "1"}).status_code == 200
         assert app.state.webrtc_active.is_set()  # pairing is the opt-in -> remote activates

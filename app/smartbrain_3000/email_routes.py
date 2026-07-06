@@ -119,7 +119,9 @@ def email_callback(request: Request, code: str | None = None, state: str | None 
         raise HTTPException(status_code=400, detail="authorization expired; reconnect")
     if not hmac.compare_digest(state, pending["state"]):
         raise HTTPException(status_code=400, detail="state mismatch")
-    store = _store(request)
+    store = getattr(request.app.state, "secret_store", None)
+    if store is None:  # vault auto-locked mid-flow: redirect like every other branch, not a raw 423
+        return RedirectResponse("/email?error=locked", status_code=303)
     client_id, client_secret = pending["client_id"], pending["client_secret"]
     try:
         tokens = email_oauth.exchange_code(client_id, client_secret, code, pending["verifier"])

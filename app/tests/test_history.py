@@ -243,6 +243,49 @@ def test_get_messages_page_cursor_no_overlap_no_gap() -> None:
     assert third["next_cursor"] is None
 
 
+def test_message_order_deterministic_under_created_at_ties() -> None:
+    # Regression: messages that share a created_at tick must still come back in INSERTION order,
+    # not random-UUID order. add_message stamps DEFAULT current_timestamp, which a fast clock can
+    # collide (the source of the old flake); force the tie explicitly and assert both paths.
+    h = _hist()
+    cid = h.create_conversation("c")
+    ids = _seed_messages(h, cid, 6)
+    h._conn.execute(
+        "UPDATE messages SET created_at = TIMESTAMP '2026-01-01 00:00:00' WHERE conversation_id = ?;", [cid]
+    )
+    # full list (export path via get_messages)
+    assert [m["id"] for m in h.get_messages(cid)] == ids
+    # paginated (UI path): stitch oldest-first pages with no gap/overlap, in insertion order
+    p1 = h.get_messages_page(cid, limit=2)
+    p2 = h.get_messages_page(cid, before=p1["next_cursor"], limit=2)
+    p3 = h.get_messages_page(cid, before=p2["next_cursor"], limit=2)
+    assert [m["id"] for m in p3["items"] + p2["items"] + p1["items"]] == ids
+    assert p3["has_more"] is False and p3["next_cursor"] is None
+
+
+def test_get_messages_page_rejects_malformed_cursor() -> None:
+    # A stale/legacy 'created_at|<uuid>' cursor (rowid part not an int) must be rejected as a
+    # ValueError, not blow up the keyset query with a DuckDB cast error.
+    h = _hist()
+    cid = h.create_conversation("c")
+    _seed_messages(h, cid, 2)
+    with pytest.raises(ValueError):
+        h.get_messages_page(cid, before="2026-01-01 00:00:00|deadbeef-not-a-rowid")
+
+
+def test_pagination_rejects_malformed_cursors_with_400(client: TestClient) -> None:
+    # Every malformed cursor shape maps to 400, not a bare 500 — on BOTH paginated routes.
+    client.post("/api/account/setup", json={"passphrase": "correct-horse"})
+    cid = client.post("/api/conversations", json={"title": "c"}).json()["id"]
+    # Malformed for both cursor kinds (no pipe / leading pipe / unparseable timestamp).
+    for cur in ("nopipe", "|only-id", "not-a-timestamp|5"):
+        assert client.get(f"/api/conversations/{cid}", params={"before": cur}).status_code == 400, cur
+        assert client.get("/api/conversations", params={"before": cur}).status_code == 400, cur
+    # A non-integer rowid is malformed for the MESSAGES cursor specifically (rowid must be int);
+    # for the conversations cursor the id part is an opaque string, so it is not rejected there.
+    assert client.get(f"/api/conversations/{cid}", params={"before": "2026-01-01 00:00:00|x"}).status_code == 400
+
+
 def test_get_messages_page_clamps_to_max() -> None:
     from smartbrain_3000.history import _MAX_MSG_PAGE
 

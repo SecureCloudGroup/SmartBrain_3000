@@ -341,7 +341,8 @@ def apply_pending_restore(db_path: Path) -> bool:
     The currently-open DB must NOT be in use when this runs (call it at startup
     before ``open_db``). The displaced DB is kept at ``*.pre-restore-<stamp>`` so the
     operation is reversible (and a second restore never overwrites an earlier copy);
-    an invalid staged file is quarantined to ``*.invalid-<stamp>``, never applied.
+    an invalid staged file is quarantined to ``*.invalid-<stamp>``, a future-schema
+    one to ``*.future-<stamp>`` — neither is ever applied.
     """
     assert isinstance(db_path, Path), "path must be a Path"
     staged = staged_restore_path(db_path)
@@ -350,11 +351,29 @@ def apply_pending_restore(db_path: Path) -> bool:
     if not is_smartbrain_db(staged):
         staged.replace(_unique_sibling(staged, ".invalid"))  # quarantine, don't brick
         return False
+    if is_future_schema_db(staged):
+        # A backup from a NEWER app version: swapping it in would displace the original
+        # and then brick boot at run_migrations (the forward-compat guard). Quarantine it
+        # and leave the live DB untouched — the /api/restore endpoint refuses these too;
+        # this is the defense for one staged on a newer build then opened by an older image.
+        staged.replace(_unique_sibling(staged, ".future"))
+        return False
     if db_path.exists():
-        db_path.replace(_unique_sibling(db_path, _PRERESTORE_SUFFIX))
-    wal = db_path.parent / (db_path.name + ".wal")
-    if wal.exists():
-        wal.unlink()
+        pre = _unique_sibling(db_path, _PRERESTORE_SUFFIX)
+        db_path.replace(pre)
+        # Keep the displaced original's WAL WITH its rollback copy: it may hold
+        # committed-but-not-checkpointed transactions (likely if the prior process
+        # exited uncleanly — the exact case a user reaches for restore), so the
+        # pre-restore snapshot must travel with it to stay complete and reversible.
+        orig_wal = db_path.parent / (db_path.name + ".wal")
+        if orig_wal.exists():
+            orig_wal.replace(pre.parent / (pre.name + ".wal"))
+    # Any WAL still at db_path.wal belongs to nothing being swapped in (a
+    # COPY-FROM-DATABASE backup is a single file, no WAL); drop it so it can't be
+    # mis-applied to the freshly restored DB.
+    stray_wal = db_path.parent / (db_path.name + ".wal")
+    if stray_wal.exists():
+        stray_wal.unlink()
     staged.replace(db_path)
     return True
 

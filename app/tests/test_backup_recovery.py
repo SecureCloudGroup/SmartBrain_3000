@@ -385,6 +385,46 @@ def test_pre_restore_holds_recoverable_original(tmp_path) -> None:
     conn.close()
 
 
+def test_pre_restore_keeps_displaced_wal(tmp_path) -> None:
+    # The displaced original's WAL holds any committed-but-not-checkpointed transactions
+    # (the exact case a user reaches for restore: a prior unclean exit). It must travel WITH
+    # the *.pre-restore rollback copy, not be discarded, or the rollback snapshot is incomplete.
+    main = tmp_path / "db.duckdb"
+    _make_real_db(main, "pass-orig", "ORIGINAL-DATA")
+    wal = tmp_path / "db.duckdb.wal"
+    wal.write_bytes(b"ORIGINAL-WAL-BYTES")  # stand-in for the original's uncheckpointed WAL
+    staged = dbmod.staged_restore_path(main)
+    _make_real_db(staged, "pass-new", "NEW-DATA")
+
+    assert dbmod.apply_pending_restore(main) is True
+    pre_copies = [p for p in tmp_path.glob("db.duckdb.pre-restore-*") if not p.name.endswith(".wal")]
+    assert len(pre_copies) == 1
+    pre_wal = pre_copies[0].parent / (pre_copies[0].name + ".wal")
+    assert pre_wal.exists() and pre_wal.read_bytes() == b"ORIGINAL-WAL-BYTES"  # moved, not dropped
+    assert not wal.exists()  # no stale WAL left to be mis-applied to the freshly restored DB
+
+
+def test_apply_pending_restore_quarantines_future_schema(tmp_path) -> None:
+    # A staged backup from a NEWER app version must NOT be swapped in (it would displace the
+    # original then brick boot at the forward-compat guard). Quarantine it; leave the live DB.
+    main = tmp_path / "db.duckdb"
+    _make_real_db(main, "pass-orig", "ORIGINAL-DATA")
+    staged = dbmod.staged_restore_path(main)
+    _make_real_db(staged, "pass-new", "NEW-DATA")
+    conn = dbmod.open_db(staged)  # fabricate a schema newer than this build knows
+    conn.execute("INSERT INTO schema_migrations (id) VALUES (?);", [dbmod.NEWEST_MIGRATION + 1])
+    conn.close()
+    assert dbmod.is_future_schema_db(staged) is True
+
+    assert dbmod.apply_pending_restore(main) is False  # refused, not applied
+    assert list(tmp_path.glob("db.duckdb.restore.future-*"))  # quarantined
+    assert not dbmod.staged_restore_path(main).exists()  # staged file consumed into quarantine
+    conn2 = dbmod.open_db(main)  # the live original is untouched and still opens
+    dbmod.run_migrations(conn2)
+    assert _first_doc_body(conn2, keyvault.unlock(conn2, "pass-orig")) == "ORIGINAL-DATA"
+    conn2.close()
+
+
 def test_truncated_backup_rejected_live_db_intact(client: TestClient) -> None:
     # A torn upload (DuckDB header may survive, catalog does not) must be rejected and
     # must never displace the live vault.

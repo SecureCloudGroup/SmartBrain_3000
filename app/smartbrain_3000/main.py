@@ -235,7 +235,11 @@ def _make_lifespan(mcp):
             finally:
                 application.state.scheduler_stop.set()  # let an in-flight tick drain
                 application.state.webrtc_stop.set()
-                await _drain_startup_tasks((runner, webrtc))
+                pair = getattr(application.state, "pair_session", None)
+                if pair is not None:  # end an in-flight pairing-by-code session cooperatively
+                    pair["stop"].set()
+                    application.state.pair_session = None
+                await _drain_startup_tasks((runner, webrtc, pair["task"] if pair else None))
                 gateway.set_pool(None)  # clear before closing so gateway funcs never see a closed pool
                 application.state.gw_client.close()
                 conn.close()
