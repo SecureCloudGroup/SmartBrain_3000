@@ -60,6 +60,31 @@ def _remote_enabled() -> bool:
     return False
 
 
+# Remote-access settings the installer persists to compose/.env so `webrtc up` survives an
+# `update`/restart — compose loads compose/.env, NOT the shell that happened to run `up`.
+_WEBRTC_ENV_KEYS = (
+    "SMARTBRAIN_SIGNALING_URL", "SMARTBRAIN_SIGNALING_TOKEN", "SMARTBRAIN_ICE_URLS",
+    "SMARTBRAIN_TURN_SECRET", "SMARTBRAIN_TURN_USERNAME", "SMARTBRAIN_TURN_PASSWORD",
+)
+
+
+def _persist_compose_env(keys: tuple[str, ...]) -> None:
+    """Upsert the given env vars (those set in this process) into compose/.env so compose
+    reloads them on every up/restart. Mode 600 — the values can include a signaling token."""
+    present = {k: os.environ[k] for k in keys if os.environ.get(k)}
+    if not present:
+        return
+    env_path = REPO_ROOT / "compose" / ".env"
+    lines = env_path.read_text(encoding="utf-8").splitlines() if env_path.exists() else []
+    kept = [ln for ln in lines if not any(ln.startswith(k + "=") for k in present)]  # drop old copies
+    kept += [f"{k}={v}" for k, v in present.items()]
+    env_path.write_text("\n".join(kept) + "\n", encoding="utf-8")
+    try:
+        env_path.chmod(0o600)  # may include a signaling token
+    except OSError:
+        pass  # best-effort (e.g. exotic filesystem) — content is still written
+
+
 def _active_overlays() -> list[str]:
     """Compose overlays inferred from local setup, so install/update/restart preserve the
     operator's mode instead of silently dropping it: LAN/TLS (certs present) + WebRTC
@@ -359,7 +384,13 @@ def cmd_update() -> int:
         if pulled != 0:
             print(note("Couldn't fast-forward (local changes or diverged) — rebuilding the current source."))
     if _compose(["up", "-d", "--build"]) != 0:
-        print(fail("Rebuild/restart failed."))
+        # _backup_db already stopped the stack, so the app is currently DOWN. Try to bring the
+        # PREVIOUS image back up (no --build) so a failed update doesn't leave the user offline.
+        print(fail("Rebuild/restart failed. Trying to restart the previous version…"))
+        if _compose(["up", "-d"]) == 0:
+            print(ok("The previous version is running again — the update did not apply. Fix the error, then retry."))
+        else:
+            print(fail("The app is currently STOPPED. Fix the build error, then run: install.py update"))
         return 1
     healthy = wait_healthy()
     assert isinstance(healthy, bool), "health result must be a bool"
@@ -433,6 +464,13 @@ def cmd_wireguard(action: str) -> int:
         return 0
 
     # up
+    if not _tls_enabled():
+        # The LAN overlay points uvicorn at data/certs/cert.pem; with no cert the app
+        # raises FileNotFoundError at boot and restart:unless-stopped crash-loops it.
+        # Fail early (like webrtc up gates on its prerequisite) instead of a silent loop.
+        print(fail("No TLS certificate yet — bringing up the LAN/HTTPS overlay now would crash-loop the app."))
+        print("      Run first:  install.py certs <name>.local <LAN-IP>   (then set SMARTBRAIN_ALLOWED_HOSTS), and retry.")
+        return 2
     print(note("Bringing up the app (LAN/HTTPS) + WireGuard. First, make sure you have run"))
     print("      'install.py certs <name>.local <LAN-IP>' and set SMARTBRAIN_ALLOWED_HOSTS to your LAN IP.")
     if subprocess.run([*base, *files, "up", "-d"], check=False).returncode != 0:
@@ -464,7 +502,8 @@ def cmd_webrtc(action: str) -> int:
 
     if action == "status":
         subprocess.run([*base, "-f", str(COMPOSE_FILE), "ps", "smartbrain"], check=False)
-        on = bool(os.environ.get("SMARTBRAIN_SIGNALING_URL"))
+        # compose loads compose/.env, so treat it as authoritative (a shell export also counts).
+        on = _remote_enabled() or bool(os.environ.get("SMARTBRAIN_SIGNALING_URL"))
         print(ok("Signaling URL is set; pair a phone at Settings -> Remote access.") if on
               else note("SMARTBRAIN_SIGNALING_URL is unset — remote access is off."))
         return 0
@@ -476,10 +515,14 @@ def cmd_webrtc(action: str) -> int:
         return code
 
     # up
-    if not os.environ.get("SMARTBRAIN_SIGNALING_URL"):
+    if not (_remote_enabled() or os.environ.get("SMARTBRAIN_SIGNALING_URL")):
         print(fail("Set SMARTBRAIN_SIGNALING_URL (and _TOKEN / SMARTBRAIN_ICE_URLS) first —"))
         print("      point them at the public node you run (compose/docker-compose.signaling.yml).")
         return 2
+    # Persist the shell-set vars into compose/.env so _remote_enabled() sees them and the
+    # overlay survives the next update/restart (base `up` has no :? guard, so it would
+    # otherwise come up overlay-less and silently fall back to the hosted node).
+    _persist_compose_env(_WEBRTC_ENV_KEYS)
     files = ["-f", str(COMPOSE_FILE), "-f", str(WEBRTC_FILE)]
     if subprocess.run([*base, *files, "up", "-d"], check=False).returncode != 0:
         print(fail("Failed to start the app with the WebRTC overlay."))
