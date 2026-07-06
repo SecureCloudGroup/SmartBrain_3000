@@ -11,25 +11,30 @@ your passphrase — plus how to get back in if you forget it.
 **Export data (JSON)** downloads your content — knowledge, chats, tasks,
 memories, profile — as readable JSON. It's decrypted (it's yours), so keep the
 file somewhere safe. Good for reading your data elsewhere or migrating out.
+Because it hands out decrypted data, it runs on the **Desktop only** (never from a
+paired phone) and **re-prompts for your passphrase** to authorize.
 
 ## Encrypted backup
 
 **Download encrypted backup** gives you a complete, portable copy of the database
 (a `.duckdb` file). It's still encrypted — it includes your wrapped keys — so it
 restores with the **same passphrase**. This is the one to keep for disaster
-recovery and to move your install to a new machine.
+recovery and to move your install to a new machine. Like Export, it's
+**Desktop-only** and **re-prompts for your passphrase** before it hands over the vault.
 
 ## Restore
 
 **Stage restore** takes a backup file, validates it, and applies it the **next
 time SmartBrain_3000 restarts** (swapping the live database while it's running
-isn't safe). Your current database is kept alongside as `*.pre-restore`, so a
-restore is reversible.
+isn't safe). Your current database is kept alongside as `*.pre-restore-<timestamp>`,
+so a restore is reversible.
 
 - Allowed when you're **unlocked**, or onto a **fresh install** (moving to a new
   machine) — never over a locked, initialized vault.
 - After staging, restart the stack (`python3 installer/install.py update`, or
   restart the container) and unlock with that backup's passphrase.
+- A backup from a **newer version** of SmartBrain_3000 is **refused on purpose**
+  (it would risk data loss under older code): upgrade this app first, then restore.
 
 ## Change your passphrase
 

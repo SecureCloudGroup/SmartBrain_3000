@@ -121,6 +121,10 @@ Most first-run problems are one of these:
   `doctor` try to do this for you), then **Reindex** in Knowledge.
 - **The browser warns about the certificate** (only if you set up LAN/HTTPS). Trust
   the local mkcert CA — see [Remote access](07-remote-access.md).
+- **"Database is newer than this app" / a restore is refused.** Pointing an older build
+  at a newer data directory, or restoring a backup from a newer version, is refused on
+  purpose to prevent data loss. Upgrade SmartBrain_3000 first (`install.py update`), then
+  reopen or retry the restore.
 
 ## Next
 
