@@ -11,10 +11,19 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-07-09
+
+First tagged public release. SmartBrain_3000 is a local-first, single-user, self-hosted
+encrypted AI assistant that runs in Docker on your own machine.
+
 ### Added
-- CI (GitHub Actions): backend ruff + pytest, hermetic installer tests, and web
-  svelte-check + vitest + build on every PR — the required status check for `main`.
+- CI (GitHub Actions): backend ruff + pytest, hermetic installer tests, web
+  svelte-check + vitest + build, and a build + test of the shipped Docker image on
+  every PR — the required status checks that guard `main`.
 - Dependabot: grouped weekly updates for pip, npm, GitHub Actions, and Docker.
+
+### Changed
+- Base image bumped to `python:3.14-slim`; web dev toolchain upgraded to Vite 7.
 
 ### Security
 - Desktop-local fence extended to device-enrollment and MCP-token endpoints so a

@@ -4,4 +4,4 @@ Foundation package. Features are added one component at a time; this module
 exposes only the version string for now.
 """
 
-__version__ = "0.0.1"
+__version__ = "0.1.0"
