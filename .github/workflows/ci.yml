@@ -22,8 +22,8 @@ jobs:
     name: backend (ruff + pytest)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - name: Install the app at its pinned versions
@@ -45,8 +45,8 @@ jobs:
     name: web (svelte-check + vitest + build)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
         with:
           node-version: "20"
           cache: npm
@@ -68,7 +68,7 @@ jobs:
     name: docker image (build + test)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Build the release image
         # Validates the Dockerfile end-to-end: the base image + `pip install -c
         # requirements.lock` of every pinned (native) dep, on whatever Python the Dockerfile
