@@ -1,0 +1,1 @@
+import{e as o}from"./CgJqcz4Q.js";const n=o({current:null});function c(r){return new Promise(e=>{n.current={title:r.title??"Please confirm",body:r.body,confirmLabel:r.confirmLabel??"Confirm",danger:r.danger??!0,resolve:e}})}function i(r){const e=n.current;n.current=null,e&&e.resolve(r)}export{n as a,c,i as s};

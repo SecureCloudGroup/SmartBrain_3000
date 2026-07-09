@@ -1,1 +1,0 @@
-import{aK as o}from"./DRDg0sf4.js";const e=o({current:null});function c(r){return new Promise(n=>{e.current={title:r.title??"Please confirm",body:r.body,confirmLabel:r.confirmLabel??"Confirm",danger:r.danger??!0,resolve:n}})}function i(r){const n=e.current;e.current=null,n&&n.resolve(r)}export{e as a,c,i as s};
