@@ -1,6 +1,6 @@
 # SmartBrain_3000 — backend image (foundation).
 # Builds the FastAPI app and runs it with uvicorn on the internal port 33000.
-FROM python:3.12-slim
+FROM python:3.14-slim
 
 # Least privilege: run as a dedicated non-root user.
 RUN useradd --create-home --uid 10001 smartbrain
