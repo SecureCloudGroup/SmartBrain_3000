@@ -63,3 +63,24 @@ jobs:
       - name: Build the SPA (smoke)
         working-directory: web
         run: npm run build
+
+  docker-image:
+    name: docker image (build + test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the release image
+        # Validates the Dockerfile end-to-end: the base image + `pip install -c
+        # requirements.lock` of every pinned (native) dep, on whatever Python the Dockerfile
+        # pins. This is the gap the host `backend` job can't see — a base-image or dependency
+        # bump that breaks the *shipped* image is caught here, not by users running install.py.
+        run: docker build -t smartbrain_3000:ci .
+      - name: Ruff + pytest inside the shipped image
+        # No mount: exercise the code baked into the image, on the image's own Python.
+        run: |
+          docker run --rm --entrypoint /bin/sh smartbrain_3000:ci -c '
+            pip install --quiet pytest ruff
+            cd /app
+            python -m ruff check smartbrain_3000
+            python -m pytest -q
+          '
