@@ -5,9 +5,13 @@
   // Public page: no unlock guard — new users need setup help before they have a vault.
   // The selected section follows the URL hash (#slug), so both the sidebar and
   // inter-doc links are plain anchors: keyboard-accessible, no click handlers.
-  const current = $derived(
-    docs.find((d) => d.slug === page.url.hash.replace(/^#/, "")) ?? docs[0],
-  );
+  // The URL hash selects the section. A plain "#slug" (or "#"/unknown) picks a top-level
+  // doc; a cross-doc deep link arrives as "#slug__heading-id" — split it so we switch to
+  // the section AND scroll to the heading. (No same-doc "#anchor" links exist in /docs, so a
+  // hash without "__" is always a section slug.)
+  const hashParts = $derived(page.url.hash.replace(/^#/, "").split("__"));
+  const current = $derived(docs.find((d) => d.slug === hashParts[0]) ?? docs[0]);
+  const headingId = $derived(hashParts[1]);
 
   // Reduced motion: the help GIFs auto-play and loop past 5s (WCAG 2.2.2). When the user
   // prefers reduced motion, freeze each GIF to its first-frame poster — a CSS rule can't stop
@@ -32,6 +36,15 @@
     apply();
     mq.addEventListener("change", apply);
     return () => mq.removeEventListener("change", apply);
+  });
+
+  // Deep link to a sub-heading (#slug__heading-id): once the section has rendered, bring the
+  // target heading into view. Guarded to a slug shape so a crafted hash can't break the query.
+  $effect(() => {
+    current; // re-run when the section swaps in
+    const id = headingId;
+    if (typeof window === "undefined" || !article || !id || !/^[\w-]+$/.test(id)) return;
+    article.querySelector(`[id="${id}"]`)?.scrollIntoView();
   });
 </script>
 
