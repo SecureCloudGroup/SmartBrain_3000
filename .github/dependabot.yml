@@ -27,6 +27,15 @@ updates:
     groups:
       web:
         patterns: ["*"]
+    # Hold two majors that outpace our pinned toolchain (they broke PR #13 with ERESOLVE):
+    #   typescript >=7 — @sveltejs/kit@2.69 peer-requires ^5.3.3 || ^6.0.0
+    #   vite >=8       — needs node >=20.19 + Rolldown native bindings (also broke PR #7)
+    # Minor/patch bumps of both still flow; drop the matching rule once the toolchain moves.
+    ignore:
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "vite"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: github-actions
     directory: /
