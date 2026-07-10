@@ -27,14 +27,26 @@ updates:
     groups:
       web:
         patterns: ["*"]
-    # Hold two majors that outpace our pinned toolchain (they broke PR #13 with ERESOLVE):
-    #   typescript >=7 — @sveltejs/kit@2.69 peer-requires ^5.3.3 || ^6.0.0
-    #   vite >=8       — needs node >=20.19 + Rolldown native bindings (also broke PR #7)
-    # Minor/patch bumps of both still flow; drop the matching rule once the toolchain moves.
+    # The Vite/SvelteKit dev toolchain is COUPLED — vite, its Svelte plugin, kit, vitest and
+    # svelte-check share peer ranges and must move together in one coordinated upgrade (as the
+    # manual vite 5->7 bump did). Freezing only `vite` isn't enough: a sibling major jumps the
+    # generation and its vite peer can't be satisfied -> npm ERESOLVE (this broke #13, and #16
+    # via @sveltejs/vite-plugin-svelte@7 requiring vite 8, and #7). The real gate is node
+    # >=20.19 for vite 8; until we bump node and do a coordinated upgrade, freeze every
+    # toolchain MAJOR here. Minor/patch bumps still flow; runtime deps (@noble/ed25519,
+    # qrcode) are unaffected. Remove an entry when doing the coordinated major upgrade.
     ignore:
-      - dependency-name: "typescript"
-        update-types: ["version-update:semver-major"]
       - dependency-name: "vite"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "vitest"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@sveltejs/*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "svelte"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "svelte-check"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "typescript"
         update-types: ["version-update:semver-major"]
 
   - package-ecosystem: github-actions
