@@ -61,10 +61,11 @@ def test_service_worker_never_caches_secrets(client: TestClient) -> None:
     assert r.headers.get("Service-Worker-Allowed") == "/"
     assert r.headers.get("cache-control") == "no-cache"
     body = r.text
-    # The built SW is minified and comment-free, so these startsWith() calls can
-    # only come from the fetch-handler bypass — the SW must skip /api and /mcp.
-    assert re.search(r"""startsWith\(\s*["']/api["']\s*\)""", body)
-    assert re.search(r"""startsWith\(\s*["']/mcp["']\s*\)""", body)
+    # The built SW is minified and comment-free, so these startsWith() calls can only
+    # come from the fetch-handler bypass — the SW must skip /api and /mcp. The quote char
+    # depends on the minifier: esbuild/rollup emit "/', vite 8's Rolldown emits backticks.
+    assert re.search(r"""startsWith\(\s*["'`]/api["'`]\s*\)""", body)
+    assert re.search(r"""startsWith\(\s*["'`]/mcp["'`]\s*\)""", body)
 
 
 def test_icon_served(client: TestClient) -> None:

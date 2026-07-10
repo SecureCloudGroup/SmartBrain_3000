@@ -28,13 +28,14 @@ updates:
       web:
         patterns: ["*"]
     # The Vite/SvelteKit dev toolchain is COUPLED — vite, its Svelte plugin, kit, vitest and
-    # svelte-check share peer ranges and must move together in one coordinated upgrade (as the
-    # manual vite 5->7 bump did). Freezing only `vite` isn't enough: a sibling major jumps the
-    # generation and its vite peer can't be satisfied -> npm ERESOLVE (this broke #13, and #16
-    # via @sveltejs/vite-plugin-svelte@7 requiring vite 8, and #7). The real gate is node
-    # >=20.19 for vite 8; until we bump node and do a coordinated upgrade, freeze every
-    # toolchain MAJOR here. Minor/patch bumps still flow; runtime deps (@noble/ed25519,
-    # qrcode) are unaffected. Remove an entry when doing the coordinated major upgrade.
+    # svelte-check share peer ranges and must move together in one COORDINATED manual upgrade
+    # (as the vite 5->7 and 7->8 bumps did). A lone Dependabot major jumps the generation and
+    # its vite peer can't be satisfied -> npm ERESOLVE (this broke #13, #16, #7). This freeze is
+    # STANDING policy, not temporary: currently on vite 8 / node 22, it guards the NEXT
+    # generation jump (e.g. vite 9) so that too is deliberate. Minor/patch bumps still flow;
+    # runtime deps (@noble/ed25519, qrcode) are unaffected. To do the next coordinated upgrade:
+    # bump node if the new vite needs it, move the whole set together, rebuild, verify — the
+    # freeze then continues to guard the following jump.
     ignore:
       - dependency-name: "vite"
         update-types: ["version-update:semver-major"]
