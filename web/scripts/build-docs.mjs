@@ -18,15 +18,32 @@ const files = readdirSync(docsDir)
   .filter((f) => f.endsWith(".md") && f.toLowerCase() !== "readme.md")
   .sort(); // numeric filename prefixes (01-, 02-, …) drive ordering
 
-// Inter-doc links are written as relative ".md" (correct on GitHub). In the app
-// these become same-page "#slug" anchors so they switch sections client-side and
-// stay keyboard-accessible (no JS click handler needed). The negative lookahead
-// keeps ABSOLUTE links (https:, /, mailto:, existing #) untouched — e.g. a link
-// to the GitHub SECURITY.md must not collapse to "#SECURITY".
+// GitHub-style heading slug. Fed PLAIN heading text from marked's lexer (never rendered
+// HTML), so it needs no tag-stripping or entity-decoding — just lowercase, drop
+// punctuation, spaces -> hyphens. A fragment written in the Markdown resolves to the same
+// slug on GitHub and in-app.
+const slugify = (text) =>
+  text
+    .toLowerCase()
+    .trim()
+    .replace(/[^\w\s-]/g, "")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-");
+
+// Inter-doc links are written as relative ".md" (correct on GitHub). In the app these
+// become same-page "#slug" anchors so they switch sections client-side and stay
+// keyboard-accessible (no JS click handler needed). A "file.md#heading" deep link keeps
+// its fragment as "#slug__heading" so /help can switch to that section AND scroll to the
+// heading; a link to the docs index (README.md, which the app doesn't render as a section)
+// becomes "#" = the Help home. The negative lookahead keeps ABSOLUTE links (https:, /,
+// mailto:, existing #) untouched — e.g. a link to the GitHub SECURITY.md must not collapse.
 const toHashLink = (html) =>
   html.replace(
-    /href="(?!https?:|\/|#|mailto:)[^"]*?(?:\d+[-_])?([a-z0-9-]+)\.md(?:#[^"]*)?"/gi,
-    'href="#$1"',
+    /href="(?!https?:|\/|#|mailto:)[^"]*?(?:\d+[-_])?([a-z0-9-]+)\.md(#[^"]*)?"/gi,
+    (_m, name, frag) =>
+      name.toLowerCase() === "readme"
+        ? 'href="#"'
+        : `href="#${name.toLowerCase()}${frag ? "__" + frag.slice(1) : ""}"`,
   );
 
 const sections = files.map((file) => {
@@ -34,7 +51,24 @@ const sections = files.map((file) => {
   const h1 = md.match(/^#\s+(.+)$/m);
   const title = (h1 ? h1[1] : file.replace(/\.md$/, "")).trim();
   const slug = file.replace(/^\d+[-_]?/, "").replace(/\.md$/, "");
-  return { slug, title, html: toHashLink(marked.parse(md)) };
+
+  // Heading ids: take the slug from each heading TOKEN (plain text; the lexer skips
+  // '#'-comment lines inside code fences) and inject it into the matching rendered <hN>
+  // tag in document order — so a "#slug__heading" deep link has a scroll target. The count
+  // guard fails the build if the two ever diverge (e.g. a heading nested in a blockquote),
+  // rather than silently misaligning the ids.
+  const rendered = marked.parse(md);
+  const headingSlugs = marked
+    .lexer(md)
+    .filter((t) => t.type === "heading")
+    .map((t) => slugify(t.text));
+  const tagCount = (rendered.match(/<h[1-6]>/g) || []).length;
+  if (headingSlugs.length !== tagCount) {
+    throw new Error(`docs: heading id mismatch in ${file} (${headingSlugs.length} tokens vs ${tagCount} tags)`);
+  }
+  let i = 0;
+  const html = toHashLink(rendered.replace(/<h([1-6])>/g, (_m, level) => `<h${level} id="${headingSlugs[i++]}">`));
+  return { slug, title, html };
 });
 
 // Fail the build on an empty docs set (the /help page assumes >=1 section) and
