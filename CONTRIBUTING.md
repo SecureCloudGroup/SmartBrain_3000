@@ -31,8 +31,11 @@ secrets.
 
 ## Local development
 
-There is **no CI**; everything is built and verified locally before pushing.
-You only need Docker (no host Python/Node required).
+CI (GitHub Actions) runs on every PR and on pushes to `main` — backend (ruff +
+pytest), web (svelte-check + vitest + build), and a build + test of the shipped
+Docker image; all three are **required checks** and must pass before a PR can merge.
+Still build and verify locally first — you only need Docker (no host Python/Node
+required).
 
 **Backend — tests + lint** (throwaway container):
 

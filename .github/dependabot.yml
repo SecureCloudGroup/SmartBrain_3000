@@ -37,8 +37,20 @@ updates:
       actions:
         patterns: ["*"]
 
+  # Docker base images across every Dockerfile AND docker-compose file in the repo:
+  # / (root app image), /signaling (the broker), and /compose (caddy, coturn, wireguard
+  # — the operator-run public node's internet-facing images). The docker ecosystem reads
+  # both Dockerfiles and compose `image:` refs; unresolvable local/`:latest` tags are
+  # skipped automatically.
   - package-ecosystem: docker
-    directory: /
+    directories:
+      - "/"
+      - "/signaling"
+      - "/compose"
     schedule:
       interval: weekly
       day: monday
+    open-pull-requests-limit: 5
+    groups:
+      docker:
+        patterns: ["*"]
