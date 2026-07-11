@@ -27,7 +27,7 @@ SCOPES = (
     "https://www.googleapis.com/auth/gmail.readonly",
     "https://www.googleapis.com/auth/gmail.send",
 )
-_DEFAULT_REDIRECT = "http://localhost:33000/api/email/oauth/callback"
+_CALLBACK_PATH = "/api/email/oauth/callback"
 _TIMEOUT = 15.0
 
 
@@ -36,8 +36,22 @@ class EmailOAuthError(RuntimeError):
 
 
 def redirect_uri() -> str:
-    """The loopback redirect URI the user must register on their OAuth client."""
-    uri = os.environ.get("SMARTBRAIN_OAUTH_REDIRECT", _DEFAULT_REDIRECT)
+    """The loopback redirect URI to register on the Google OAuth client.
+
+    Google's installed-app flow requires an http:// loopback redirect. In plain-HTTP mode the
+    app serves the callback itself (``http://localhost:<port>``). In TLS mode the app has no
+    HTTP listener, so we point Google at the loopback redirect helper (``oauth_loopback`` on
+    ``http://localhost:<helper-port>``), which 302-forwards the callback — with its ?code&state
+    — to the https app. The redirect stays on loopback either way, so the auth code never
+    leaves the user's machine. ``SMARTBRAIN_OAUTH_REDIRECT`` overrides the whole computation.
+    """
+    override = os.environ.get("SMARTBRAIN_OAUTH_REDIRECT")
+    if override:
+        uri = override
+    elif os.environ.get("SMARTBRAIN_TLS_CERT"):  # TLS: no HTTP listener → use the redirect helper
+        uri = f"http://localhost:{os.environ.get('SMARTBRAIN_OAUTH_HELPER_PORT', '33001')}{_CALLBACK_PATH}"
+    else:  # plain HTTP: the app serves the callback directly
+        uri = f"http://localhost:{os.environ.get('SMARTBRAIN_PORT', '33000')}{_CALLBACK_PATH}"
     # Hard raise, NOT assert (asserts are stripped under `python -O`): the loopback redirect is the
     # local-first guarantee that Google delivers the auth code only to the user's own machine.
     if not (uri.startswith("http://localhost") or uri.startswith("http://127.0.0.1")):
