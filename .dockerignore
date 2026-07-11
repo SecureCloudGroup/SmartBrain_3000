@@ -1,0 +1,46 @@
+# .dockerignore — trims the Docker build context and, above all, keeps runtime state
+# and secrets OUT of the built image. The Dockerfile bakes only `app/`, but the whole
+# repo is otherwise sent to the daemon, and `app/` can accrue local runtime files
+# (e.g. a dev vault at app/data/smartbrain.duckdb) that must never land in an image layer.
+# NOTE: bare patterns are root-relative — `web/` excludes the SOURCE tree at the repo root,
+# NOT the built SPA at app/smartbrain_3000/web (which the image needs and keeps).
+
+# --- Databases, runtime data & secrets: must NEVER be baked into an image ---
+app/data/
+data/
+**/*.duckdb
+**/*.duckdb.wal
+**/*.sqlite
+**/*.db
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+**/*.crt
+certs/
+wireguard/
+bifrost-config.json
+emergency-kit*/
+recovery-key*
+
+# --- Build artifacts & caches (regenerated cleanly inside the image) ---
+**/__pycache__/
+**/*.py[cod]
+**/*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# --- Not needed to build or run the app image ---
+.git/
+.github/
+.gitignore
+.dockerignore
+docs/
+tools/
+signaling/
+installer/
+compose/
+web/
+*.md
