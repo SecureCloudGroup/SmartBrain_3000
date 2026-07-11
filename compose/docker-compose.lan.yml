@@ -20,9 +20,16 @@ services:
     # Track the same SMARTBRAIN_PORT knob as the base so a custom port stays in sync.
     ports: !override
       - "0.0.0.0:${SMARTBRAIN_PORT:-33000}:${SMARTBRAIN_PORT:-33000}"
+      # Gmail OAuth redirect helper: Google's installed-app flow needs an http:// loopback
+      # redirect, which TLS mode can't serve. This loopback-ONLY port runs the http->https
+      # redirect helper (serve.py / oauth_loopback) so OAuth completes over https. Desktop
+      # only — never bound to 0.0.0.0, never exposed to the LAN.
+      - "127.0.0.1:${SMARTBRAIN_OAUTH_HELPER_PORT:-33001}:${SMARTBRAIN_OAUTH_HELPER_PORT:-33001}"
     environment:
       SMARTBRAIN_TLS_CERT: /app/certs/cert.pem
       SMARTBRAIN_TLS_KEY: /app/certs/key.pem
+      # Loopback port for the Gmail OAuth http->https redirect helper (see the port note above).
+      SMARTBRAIN_OAUTH_HELPER_PORT: ${SMARTBRAIN_OAUTH_HELPER_PORT:-33001}
       # Default keeps loopback only; override on the CLI to add your LAN host.
       SMARTBRAIN_ALLOWED_HOSTS: ${SMARTBRAIN_ALLOWED_HOSTS:-localhost,127.0.0.1}
     volumes:

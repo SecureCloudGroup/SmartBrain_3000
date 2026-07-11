@@ -93,6 +93,12 @@ uses a local certificate so your phone trusts the connection.
    automatically serves HTTPS on your LAN.
 4. **On the phone (same Wi-Fi)** open `https://192.168.1.50:33000`.
 
+> **Connecting Gmail over HTTPS.** Google's loopback OAuth redirect is `http://`, which the
+> HTTPS app can't serve directly. In HTTPS mode the app therefore also runs a tiny
+> **loopback-only** helper (on `127.0.0.1:33001`; set `SMARTBRAIN_OAUTH_HELPER_PORT` to change
+> it — it must differ from the app port) that forwards the OAuth callback to HTTPS. Connecting
+> Gmail then works exactly as on plain HTTP, and the helper is **never** exposed to the LAN.
+
 This path is **same-network only**. To reach the Desktop from cellular or another
 network, use the WebRTC pairing above.
 
