@@ -11,8 +11,10 @@ from __future__ import annotations
 import json
 import math
 import os
+import threading
 import time
 from collections.abc import Iterator
+from contextlib import contextmanager
 
 import httpx
 
@@ -86,6 +88,50 @@ def resolve_model(capability: str, routes: dict[str, str] | None = None) -> str 
 
 
 _LOCAL_PROVIDER_NAMES = frozenset(("ollama", "mlx"))
+
+# A local model server (Ollama / MLX / oMLX) serves ONE request at a time: a second overlapping
+# request errors with "model is busy; cannot reload runtime settings variant until active requests
+# finish". The app has several potential concurrent callers — foreground chat, the background
+# auto-reindex embedding (every tick), and parallel scheduled turns — so serialize EVERY
+# local-provider call process-wide, and oMLX never sees overlap. Cloud providers are exempt (they
+# parallelize fine).
+#
+# A Semaphore (NOT a Lock/RLock): the streaming path holds this across the SSE generator, which
+# Starlette drives across DIFFERENT threadpool workers (one anyio to_thread per chunk, no thread
+# affinity). A Lock/RLock raises RuntimeError on a cross-thread release and would leave the lock
+# wedged forever; a Semaphore's release is not owner-bound, so acquire-on-A / release-on-B is fine.
+# Bounded, so an accidental double-release fails loud instead of silently allowing two callers.
+# Every local call is one acquire + one release (no nesting), so re-entrancy isn't needed.
+_LOCAL_SEM = threading.BoundedSemaphore(1)
+
+
+def _is_local(model: str) -> bool:
+    """True if ``model`` ('provider/id') is served by a local, single-request-at-a-time server."""
+    return bool(model) and model.split("/", 1)[0] in _LOCAL_PROVIDER_NAMES
+
+
+@contextmanager
+def _serialized(model: str) -> Iterator[None]:
+    """Hold the local-model semaphore for a call to a local provider; a no-op for cloud models."""
+    if _is_local(model):
+        _LOCAL_SEM.acquire()
+        try:
+            yield
+        finally:
+            _LOCAL_SEM.release()
+    else:
+        yield
+
+
+def local_available() -> bool:
+    """Non-blocking peek: True if no local-model call is in flight right now. Advisory only — a
+    background task (auto-reindex) uses it to skip cleanly when a foreground chat holds the model,
+    rather than blocking the scheduler tick behind the user's request. Racy by nature, which is
+    fine: any embed it then issues still serializes through ``_serialized``, so it can never collide."""
+    if _LOCAL_SEM.acquire(blocking=False):
+        _LOCAL_SEM.release()
+        return True
+    return False
 
 
 def default_chat_for(catalog: list[dict]) -> str | None:
@@ -326,7 +372,9 @@ def chat_stream(
         payload["tools"] = tools_spec
         payload["tool_choice"] = "auto"
     try:
-        with client.stream("POST", "/v1/chat/completions", json=payload) as resp:
+        # Hold the local-model lock for the whole stream so a background embed / retry can't
+        # overlap this generation on a single-request-at-a-time server (no-op for cloud).
+        with _serialized(model), client.stream("POST", "/v1/chat/completions", json=payload) as resp:
             if resp.status_code >= 400:
                 body = resp.read()
                 try:
@@ -353,6 +401,8 @@ def chat_stream(
                 if not text and tool_calls is None and finish is None:
                     continue
                 yield {"delta": text, "tool_calls": tool_calls, "finish_reason": finish}
+    except httpx.TimeoutException:  # cold local model slow to first token — surface it clearly
+        raise GatewayError(504, _TIMEOUT_MESSAGE) from None
     finally:
         if owns_client:
             client.close()
@@ -374,9 +424,10 @@ def chat(
     assert model, "model must be specified"
     client, owns_client = _resolve_client(client, timeout)
     try:
-        resp = client.post(
-            "/v1/chat/completions", json={"model": model, "messages": messages}, timeout=timeout
-        )
+        with _serialized(model):  # serialize local-provider calls (no-op for cloud)
+            resp = client.post(
+                "/v1/chat/completions", json={"model": model, "messages": messages}, timeout=timeout
+            )
         try:
             data = resp.json()
         except ValueError:
@@ -424,12 +475,13 @@ def chat_with_tools(
     try:
         # Pass timeout per-request: the pooled client (always installed in prod) has a
         # fixed default, so only a per-call override lets the agent/scheduled path wait
-        # out a cold local-model load.
-        resp = client.post(
-            "/v1/chat/completions",
-            json={"model": model, "messages": messages, "tools": tools_spec, "tool_choice": "auto"},
-            timeout=timeout,
-        )
+        # out a cold local-model load. Serialize local-provider calls (no-op for cloud).
+        with _serialized(model):
+            resp = client.post(
+                "/v1/chat/completions",
+                json={"model": model, "messages": messages, "tools": tools_spec, "tool_choice": "auto"},
+                timeout=timeout,
+            )
         try:
             data = resp.json()
         except ValueError:
@@ -481,8 +533,10 @@ def embed(
     client, owns_client = _resolve_client(client, timeout)
     try:
         # Per-request timeout: a cold local embed model can take ~50s to load on its first call,
-        # far past a pooled/short client default — only the per-call value lets a backfill wait it out.
-        resp = client.post("/v1/embeddings", json={"model": model, "input": input_text}, timeout=timeout)
+        # far past a pooled/short client default — only the per-call value lets a backfill wait it
+        # out. Serialize local-provider calls so a background embed can't overlap a foreground chat.
+        with _serialized(model):
+            resp = client.post("/v1/embeddings", json={"model": model, "input": input_text}, timeout=timeout)
         try:
             data = resp.json()
         except ValueError:

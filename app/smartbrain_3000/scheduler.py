@@ -413,6 +413,14 @@ def _auto_reindex(cursor, key: bytes) -> None:
         return
     try:
         model = gateway.embed_model(cursor)
+        # Yield to any in-flight foreground chat: a local model server serves one request at a
+        # time, so starting a backfill while the user is chatting would make them wait behind the
+        # embed. Skip this tick if a chat holds the model — a later tick (or a manual Reindex)
+        # backfills. (Each embed below still serializes through gateway._serialized, so even if a
+        # chat starts mid-backfill nothing collides; this peek just avoids the common-case wait.)
+        if not gateway.local_available():
+            log.debug("auto-reindex skipped: local model busy with a foreground request")
+            return
         embedded, _skipped, failed, _err = ingest.reindex_pending(
             KnowledgeBase(cursor, key), model, limit=_AUTO_REINDEX_PER_TICK
         )

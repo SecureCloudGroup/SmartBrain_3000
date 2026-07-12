@@ -216,7 +216,7 @@ def run_turn(ctx, audit, approvals, *, messages, model, conversation_id, turn_id
     return {"status": "max_steps", "message": "step budget exhausted", "steps": _MAX_STEPS}
 
 
-def resume_turn(ctx, audit, approvals, turn_id: str, *, usage_sink=None, auto_approve=frozenset()) -> dict | None:
+def resume_turn(ctx, audit, approvals, turn_id: str, *, usage_sink=None, auto_approve=frozenset(), timeout=60.0) -> dict | None:
     """Resume a parked turn once its approvals are resolved; None if unknown turn."""
     assert audit is not None and approvals is not None, "unlocked stores required"
     assert turn_id, "turn id required"
@@ -248,5 +248,5 @@ def resume_turn(ctx, audit, approvals, turn_id: str, *, usage_sink=None, auto_ap
         ctx, audit, approvals, messages=messages, model=turn_state["model"],
         conversation_id=turn_state.get("conversation_id"), turn_id=turn_id,
         start_step=turn_state["step"] + 1, start_calls=turn_state["calls"], usage_sink=usage_sink,
-        auto_approve=auto_approve,
+        auto_approve=auto_approve, timeout=timeout,
     )
