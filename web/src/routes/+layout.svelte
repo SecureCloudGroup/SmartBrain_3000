@@ -26,7 +26,7 @@
     { href: "/chat", label: "Chat", remote: true },
     { href: "/knowledge", label: "Knowledge", remote: true },
     { href: "/planner", label: "Planner", remote: true },
-    { href: "/schedules", label: "Schedules", remote: false },
+    { href: "/schedules", label: "Schedules", remote: true },
     { href: "/email", label: "Email", remote: true },
     { href: "/activity", label: "Activity", remote: true },
     { href: "/usage", label: "Usage", remote: false },

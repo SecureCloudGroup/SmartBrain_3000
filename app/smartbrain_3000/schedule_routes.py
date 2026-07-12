@@ -44,6 +44,14 @@ def list_schedules(request: Request) -> dict:
     return {"schedules": _store(request).list_schedules()}
 
 
+# Literal path — declared before the /{sid}/... routes so it isn't shadowed by them.
+@router.get("/api/schedules/runs/recent")
+def recent_runs(request: Request, limit: int = 50) -> dict:
+    """Recent runs across ALL schedules (newest first), each tagged with its schedule title —
+    the data behind the Schedules 'Output' tab. Bounded; deleted-schedule runs are excluded."""
+    return {"runs": _store(request).recent_runs(limit)}
+
+
 @router.post("/api/schedules")
 def add_schedule(request: Request, body: ScheduleIn) -> dict[str, str]:
     """Create a schedule; return its id."""

@@ -215,6 +215,31 @@ class ScheduleStore:
                         "message": body.get("message", ""), "error": body.get("error")})
         return out
 
+    def recent_runs(self, limit: int = 50) -> list[dict]:
+        """Recent runs across ALL schedules (decrypted), newest first, each tagged with its
+        schedule title — the feed behind the Schedules 'Output' tab. The JOIN drops any orphaned
+        run whose schedule was deleted (delete_schedule cascades, so orphans shouldn't exist;
+        the JOIN is the belt-and-suspenders and also supplies the still-encrypted title)."""
+        capped = min(max(int(limit), 1), 200)
+        rows = self._conn.execute(
+            "SELECT r.id, r.ran_at, r.status, r.nonce, r.ciphertext, r.schedule_id, s.nonce, s.ciphertext "
+            "FROM schedule_runs r JOIN schedules s ON s.id = r.schedule_id "
+            "ORDER BY r.ran_at DESC LIMIT ?;",
+            [capped],
+        ).fetchall()
+        assert isinstance(rows, list), "fetchall must return a list"
+        out: list[dict] = []
+        for r in rows:  # bounded by capped
+            rid, sid = str(r[0]), str(r[5])
+            run = json.loads(
+                self._aes.decrypt(bytes(r[3]), bytes(r[4]), b"schedule_run:" + rid.encode("utf-8")).decode("utf-8")
+            )
+            sched = self._open(sid, bytes(r[6]), bytes(r[7]))
+            out.append({"id": rid, "schedule_id": sid, "schedule_title": sched["title"],
+                        "ran_at": str(r[1]), "status": str(r[2]),
+                        "message": run.get("message", ""), "error": run.get("error")})
+        return out
+
     def _row(self, row: tuple) -> dict:
         body = self._open(str(row[0]), bytes(row[1]), bytes(row[2]))
         return {
