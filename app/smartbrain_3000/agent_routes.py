@@ -26,6 +26,11 @@ router = APIRouter()
 log = logging.getLogger(__name__)
 
 _STREAM_DELTA_BUDGET = 20000  # max delta chunks forwarded per SSE response (P10 #2)
+# Interactive turns get a longer per-request budget than the old 60s: a big LOCAL model (e.g. MLX
+# gemma-4 26B) can take well over a minute to cold-load + generate a detailed answer. Cutting it
+# short made the app abandon the request while the model kept running, so a retry then collided
+# with it ("model is busy…"). Cloud models answer in seconds and never approach this ceiling.
+_INTERACTIVE_TIMEOUT = 180.0
 
 
 class InvokeIn(BaseModel):
@@ -194,7 +199,7 @@ def agent_turn(request: Request, body: TurnIn) -> dict:
         return agent.run_turn(
             ctx, audit, approvals, messages=messages, model=model,
             conversation_id=body.conversation_id, turn_id=uuid.uuid4().hex, usage_sink=sink,
-            auto_approve=consent.remembered(conn),
+            auto_approve=consent.remembered(conn), timeout=_INTERACTIVE_TIMEOUT,
         )
     except gateway.GatewayError as exc:
         raise HTTPException(status_code=502, detail=exc.message) from None
@@ -299,7 +304,7 @@ def agent_turn_stream(request: Request, body: TurnIn) -> StreamingResponse:
     # Streaming uses its OWN httpx.Client (not the gateway pool): a long-lived SSE
     # stream holds a connection for the whole response, so reusing the shared pool
     # would block sibling /api/chat calls behind the stream's connection.
-    stream_client = httpx.Client(base_url=gateway.gateway_url(), timeout=60.0)
+    stream_client = httpx.Client(base_url=gateway.gateway_url(), timeout=_INTERACTIVE_TIMEOUT)
     return StreamingResponse(
         _stream_first_response(messages, model, body.conversation_id, stream_client, tools.openai_tools_spec()),
         media_type="text/event-stream",
@@ -317,7 +322,7 @@ def agent_resume(request: Request, turn_id: str) -> dict:
         usage.record_response(conn, used_model, response)
 
     try:
-        result = agent.resume_turn(ctx, audit, approvals, turn_id, usage_sink=sink, auto_approve=consent.remembered(conn))
+        result = agent.resume_turn(ctx, audit, approvals, turn_id, usage_sink=sink, auto_approve=consent.remembered(conn), timeout=_INTERACTIVE_TIMEOUT)
     except gateway.GatewayError as exc:
         raise HTTPException(status_code=502, detail=exc.message) from None
     except Exception as exc:  # gateway unreachable
