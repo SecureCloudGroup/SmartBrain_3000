@@ -7,6 +7,7 @@
   import { api } from "$lib/api";
   import { theme, initTheme, cycleTheme } from "$lib/theme.svelte";
   import { pending, refreshPending } from "$lib/pending.svelte";
+  import { scheduleUpdates, refreshScheduleUpdates } from "$lib/scheduleUpdates.svelte";
   import { initRemote, watchForSWUpdate } from "$lib/remote/sw-bridge";
   import { clearPairing } from "$lib/remote/store";
   import { remote } from "$lib/remote/connection.svelte"; // nav gating + remote status
@@ -67,8 +68,14 @@
   // Keep the Activity badge fresh: refresh the pending count on each route change
   // while unlocked (cheap, no timer; Chat + Activity also nudge it directly).
   $effect(() => {
-    page.url.pathname; // track navigation
-    if (account.status?.unlocked) refreshPending();
+    const path = page.url.pathname; // track navigation
+    if (account.status?.unlocked) {
+      refreshPending();
+      // The Scheduled updates feed owns its badge while open (it marks runs seen + zeroes the
+      // count), so skip the refresh there — otherwise a stale in-flight unseen-count response
+      // could land after the page cleared it and wrongly re-light the badge.
+      if (!path.startsWith("/chat/updates")) refreshScheduleUpdates();
+    }
   });
 
   async function unpairDevice() {
@@ -123,7 +130,7 @@
     <nav class="appnav">
       {#each nav as n (n.href)}
         <a href={n.href} class:active={isActive(n.href)} aria-current={isActive(n.href) ? "page" : undefined}>
-          {n.label}{#if n.href === "/activity" && pending.count > 0}<span class="nav-badge" title="{pending.count} awaiting approval">{pending.count}</span>{/if}
+          {n.label}{#if n.href === "/activity" && pending.count > 0}<span class="nav-badge" title="{pending.count} awaiting approval">{pending.count}</span>{/if}{#if n.href === "/chat" && scheduleUpdates.count > 0}<span class="nav-badge" title="{scheduleUpdates.count} new scheduled updates">{scheduleUpdates.count}</span>{/if}
         </a>
       {/each}
     </nav>

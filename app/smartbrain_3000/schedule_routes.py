@@ -52,6 +52,20 @@ def recent_runs(request: Request, limit: int = 50) -> dict:
     return {"runs": _store(request).recent_runs(limit)}
 
 
+# Literal paths — also declared before /{sid}/... so "updates" isn't captured as a schedule id.
+@router.get("/api/schedules/updates/unseen-count")
+def unseen_updates_count(request: Request) -> dict:
+    """Count of scheduled-run outputs the user hasn't opened yet — drives the Chat nav badge.
+    Cheap (plaintext count, no decrypt); polled on route changes."""
+    return {"count": _store(request).unseen_count()}
+
+
+@router.post("/api/schedules/updates/seen")
+def mark_updates_seen(request: Request) -> dict:
+    """Mark all scheduled updates as seen — called when the user opens the Scheduled updates feed."""
+    return {"ok": True, "marked": _store(request).mark_all_seen()}
+
+
 @router.post("/api/schedules")
 def add_schedule(request: Request, body: ScheduleIn) -> dict[str, str]:
     """Create a schedule; return its id."""

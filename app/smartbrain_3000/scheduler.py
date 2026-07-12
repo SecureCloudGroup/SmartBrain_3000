@@ -195,7 +195,8 @@ class ScheduleStore:
         plaintext = json.dumps({"message": message or "", "error": error}).encode("utf-8")
         ciphertext = self._aes.encrypt(nonce, plaintext, b"schedule_run:" + rid.encode("utf-8"))
         self._conn.execute(
-            "INSERT INTO schedule_runs (id, schedule_id, status, nonce, ciphertext) VALUES (?, ?, ?, ?, ?);",
+            # seen=false: a freshly-fired run is unseen until the user opens the Scheduled updates feed.
+            "INSERT INTO schedule_runs (id, schedule_id, status, nonce, ciphertext, seen) VALUES (?, ?, ?, ?, ?, false);",
             [rid, sid, status, nonce, ciphertext],
         )
         return rid
@@ -226,7 +227,7 @@ class ScheduleStore:
         the JOIN is the belt-and-suspenders and also supplies the still-encrypted title)."""
         capped = min(max(int(limit), 1), 200)
         rows = self._conn.execute(
-            "SELECT r.id, r.ran_at, r.status, r.nonce, r.ciphertext, r.schedule_id, s.nonce, s.ciphertext "
+            "SELECT r.id, r.ran_at, r.status, r.nonce, r.ciphertext, r.schedule_id, s.nonce, s.ciphertext, r.seen "
             "FROM schedule_runs r JOIN schedules s ON s.id = r.schedule_id "
             "ORDER BY r.ran_at DESC LIMIT ?;",
             [capped],
@@ -241,8 +242,25 @@ class ScheduleStore:
             sched = self._open(sid, bytes(r[6]), bytes(r[7]))
             out.append({"id": rid, "schedule_id": sid, "schedule_title": sched["title"],
                         "ran_at": str(r[1]), "status": str(r[2]),
-                        "message": run.get("message", ""), "error": run.get("error")})
+                        "message": run.get("message", ""), "error": run.get("error"), "seen": bool(r[8])})
         return out
+
+    def unseen_count(self) -> int:
+        """Count run outputs the user hasn't opened in the Scheduled-updates feed (nav badge).
+
+        Plaintext-only query (no decrypt). JOINs to schedules so a cascade-deleted schedule's
+        orphan runs (which shouldn't exist) can never inflate the badge — mirrors recent_runs.
+        """
+        row = self._conn.execute(
+            "SELECT COUNT(*) FROM schedule_runs r JOIN schedules s ON s.id = r.schedule_id WHERE NOT r.seen;"
+        ).fetchone()
+        return 0 if row is None else int(row[0])
+
+    def mark_all_seen(self) -> int:
+        """Mark every unseen run as seen (the user opened the feed). Returns how many were unseen."""
+        n = self.unseen_count()
+        self._conn.execute("UPDATE schedule_runs SET seen = true WHERE NOT seen;")
+        return n
 
     def _row(self, row: tuple) -> dict:
         body = self._open(str(row[0]), bytes(row[1]), bytes(row[2]))

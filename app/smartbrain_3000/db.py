@@ -155,6 +155,11 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
         "ran_at TIMESTAMP DEFAULT current_timestamp, status TEXT NOT NULL, "
         "nonce BLOB NOT NULL, ciphertext BLOB NOT NULL);",
     ),
+    # "Seen" flag driving the Scheduled-updates chat feed + nav badge. Plaintext metadata
+    # (like status/ran_at) so the unseen COUNT is queryable without decryption. DEFAULT true
+    # so pre-existing run history doesn't spam the badge on upgrade; record_run inserts new
+    # runs as seen=false explicitly, so only genuinely-new output is counted as unseen.
+    (19, "ALTER TABLE schedule_runs ADD COLUMN seen BOOLEAN DEFAULT true;"),
 )
 
 # The newest migration this build knows how to apply. A database recording a
