@@ -51,6 +51,7 @@ class ToolContext:
     planner: object | None = None
     memory: object | None = None
     email: object | None = None
+    schedules: object | None = None
 
 
 @dataclass(frozen=True)
@@ -68,6 +69,7 @@ class Tool:
 _MAX_STR = 8000  # cap on any string arg
 _MAX_ARGS = 32  # cap on number of args (bounds validation loop)
 _SUMMARY_CAP = 2000  # cap on an audited summary string
+_MAX_SCHEDULE_MINUTES = 525600  # one year — mirrors schedule_routes._MAX_INTERVAL (clamp, don't 500)
 # Argument key names whose values are redacted before reaching the model / a
 # tile / the audit body (defense-in-depth on top of the structural firewall).
 _REDACT_KEYS = ("api_key", "apikey", "token", "password", "passphrase", "secret", "recovery_key", "authorization")
@@ -211,6 +213,83 @@ def _email_send(ctx: ToolContext, args: dict) -> dict:
     assert args.get("to") and "@" in args["to"], "a valid recipient is required"
     assert "subject" in args and "body" in args, "subject + body required"
     return ctx.email.send(args["to"], args["subject"], args["body"])
+
+
+def _clamp_minutes(value: object) -> int:
+    """Clamp a minutes arg into [0, one year] so a bad value can't 500 add/update_schedule."""
+    return min(max(int(value), 0), _MAX_SCHEDULE_MINUTES)
+
+
+def _list_schedules(ctx: ToolContext, args: dict) -> dict:
+    """OBSERVE: read-only list of the user's recurring schedules (id/title/prompt/cadence/enabled)."""
+    assert ctx.schedules is not None, "schedules unavailable"
+    assert isinstance(args, dict), "args must be a dict"
+    return {"schedules": ctx.schedules.list_schedules()}
+
+
+def _read_schedule_output(ctx: ToolContext, args: dict) -> dict:
+    """OBSERVE: recent scheduled-run output (newest first). ``schedule_id`` filters to one schedule."""
+    assert ctx.schedules is not None, "schedules unavailable"
+    limit = min(max(int(args.get("limit", 10)), 1), 50)
+    sid = args.get("schedule_id")
+    if sid:
+        if ctx.schedules.get_schedule(sid) is None:
+            raise ValueError("schedule not found")
+        return {"runs": ctx.schedules.list_runs(sid, limit=limit)}
+    return {"runs": ctx.schedules.recent_runs(limit)}
+
+
+def _create_schedule(ctx: ToolContext, args: dict) -> dict:
+    """REVIEWED: create a recurring schedule (reversible — can be disabled or deleted)."""
+    assert ctx.schedules is not None, "schedules unavailable"
+    title, prompt = args.get("title"), args.get("prompt")
+    assert title and prompt, "title + prompt required"
+    sid = ctx.schedules.add_schedule(
+        title.strip(), prompt,
+        _clamp_minutes(args.get("interval_minutes", 0)),
+        _clamp_minutes(args.get("start_in_minutes", 0)),
+        args.get("model") or None,
+    )
+    return {"id": sid}
+
+
+def _update_schedule(ctx: ToolContext, args: dict) -> dict:
+    """REVIEWED: edit an existing schedule by id; omitted fields are left unchanged."""
+    assert ctx.schedules is not None, "schedules unavailable"
+    sid = args.get("schedule_id")
+    assert sid, "schedule_id required"
+    existing = ctx.schedules.get_schedule(sid)
+    if existing is None:
+        raise ValueError("schedule not found")
+    title = args.get("title", existing["title"]).strip()
+    prompt = args.get("prompt", existing["prompt"])
+    if not title or not prompt:  # clean ValueError, not the store's AssertionError (would 502)
+        raise ValueError("title and prompt cannot be empty")
+    interval = _clamp_minutes(args["interval_minutes"]) if "interval_minutes" in args else existing["interval_minutes"]
+    model = args.get("model", existing.get("model")) or None  # explicit "" clears it
+    ctx.schedules.update_schedule(sid, title, prompt, interval, model)
+    return {"ok": True, "id": sid}
+
+
+def _set_schedule_enabled(ctx: ToolContext, args: dict) -> dict:
+    """REVIEWED: enable or disable a schedule by id (reversible)."""
+    assert ctx.schedules is not None, "schedules unavailable"
+    sid = args.get("schedule_id")
+    assert sid, "schedule_id required"
+    assert "enabled" in args, "enabled required"
+    if ctx.schedules.get_schedule(sid) is None:
+        raise ValueError("schedule not found")
+    ctx.schedules.set_enabled(sid, bool(args["enabled"]))
+    return {"ok": True, "id": sid, "enabled": bool(args["enabled"])}
+
+
+def _delete_schedule(ctx: ToolContext, args: dict) -> dict:
+    """IRREVERSIBLE: permanently delete a schedule and its run history."""
+    assert ctx.schedules is not None, "schedules unavailable"
+    sid = args.get("schedule_id")
+    assert sid, "schedule_id required"
+    ctx.schedules.delete_schedule(sid)
+    return {"ok": True}
 
 
 _TOOLS: tuple[Tool, ...] = (
@@ -409,11 +488,113 @@ _TOOLS: tuple[Tool, ...] = (
         handler=_email_read,
         egress=True,
     ),
+    Tool(
+        name="list_schedules",
+        description="List the user's recurring SCHEDULES (automated tasks that run on a timer), each "
+                    "with id/title/prompt/interval_minutes/enabled/next_run. Use THIS for questions about "
+                    "scheduled or recurring/automated items — not list_tasks (one-off to-dos) or kb_search.",
+        params_schema={"type": "object", "additionalProperties": False, "properties": {}},
+        tier=Tier.OBSERVE,
+        handler=_list_schedules,
+        egress=False,
+    ),
+    Tool(
+        name="read_schedule_output",
+        description="Read recent OUTPUT from scheduled runs (what the schedules produced), newest first. "
+                    "Pass schedule_id (from list_schedules) to see one schedule's runs, or omit it for the "
+                    "combined feed across all schedules. Use to answer 'what did my schedules find/report'.",
+        params_schema={
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {"schedule_id": {"type": "string"}, "limit": {"type": "integer"}},
+        },
+        tier=Tier.OBSERVE,
+        handler=_read_schedule_output,
+        egress=False,
+    ),
+    Tool(
+        name="create_schedule",
+        description="Create a recurring SCHEDULE that runs a prompt on a timer. interval_minutes is the "
+                    "cadence (0 = run once); start_in_minutes delays the first run (0 = next tick); model is "
+                    "optional. Reversible (can be disabled or deleted). Use for 'every morning…' / 'each week…'.",
+        params_schema={
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "title": {"type": "string"},
+                "prompt": {"type": "string"},
+                "interval_minutes": {"type": "integer"},
+                "start_in_minutes": {"type": "integer"},
+                "model": {"type": "string"},
+            },
+            "required": ["title", "prompt"],
+        },
+        tier=Tier.REVIEWED,
+        handler=_create_schedule,
+        egress=False,
+    ),
+    Tool(
+        name="update_schedule",
+        description="Edit an existing schedule by id (from list_schedules): change title, prompt, "
+                    "interval_minutes, or model. Omitted fields are left unchanged. Use to retitle, reword, "
+                    "or change how often a schedule runs — not to enable/disable it (use set_schedule_enabled).",
+        params_schema={
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "schedule_id": {"type": "string"},
+                "title": {"type": "string"},
+                "prompt": {"type": "string"},
+                "interval_minutes": {"type": "integer"},
+                "model": {"type": "string"},
+            },
+            "required": ["schedule_id"],
+        },
+        tier=Tier.REVIEWED,
+        handler=_update_schedule,
+        egress=False,
+    ),
+    Tool(
+        name="set_schedule_enabled",
+        description="Enable or disable a schedule by id (from list_schedules). Set enabled=false to PAUSE it "
+                    "(keeps it, stops it running) or enabled=true to resume. Reversible. Prefer this over "
+                    "delete_schedule when the user wants to pause/stop rather than permanently remove.",
+        params_schema={
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {"schedule_id": {"type": "string"}, "enabled": {"type": "boolean"}},
+            "required": ["schedule_id", "enabled"],
+        },
+        tier=Tier.REVIEWED,
+        handler=_set_schedule_enabled,
+        egress=False,
+    ),
+    Tool(
+        name="delete_schedule",
+        description="Permanently delete a schedule (and its run history) by id. Cannot be undone. To just "
+                    "pause a schedule, use set_schedule_enabled with enabled=false instead.",
+        params_schema={
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {"schedule_id": {"type": "string"}},
+            "required": ["schedule_id"],
+        },
+        tier=Tier.IRREVERSIBLE,
+        handler=_delete_schedule,
+        egress=False,
+    ),
 )
 
 # OBSERVE tools must be read-only + no egress; this allowlist is the structural
 # safety invariant checked at import.
-_OBSERVE_READONLY = frozenset({"kb_search", "list_tasks"})
+_OBSERVE_READONLY = frozenset({"kb_search", "list_tasks", "list_schedules", "read_schedule_output"})
+
+# REVIEWED tools that MUTATE schedules. A schedule creates/rewrites/re-enables an autonomous
+# agent turn, so these must NEVER auto-run (via remembered consent) inside a schedule-executed
+# turn — that would let an injected background prompt spawn self-perpetuating schedules with no
+# human at the tile. The scheduler strips these from its auto_approve set so they always park.
+# (delete_schedule is IRREVERSIBLE and already always parks, so it isn't needed here.)
+SCHEDULE_WRITE_TOOLS = frozenset({"create_schedule", "update_schedule", "set_schedule_enabled"})
 
 
 def _build_registry(tools: tuple[Tool, ...]) -> dict[str, Tool]:

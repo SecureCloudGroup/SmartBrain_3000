@@ -337,7 +337,10 @@ def run_schedule(ctx, audit, approvals, store: ScheduleStore, schedule: dict, *,
             ctx, audit, approvals,
             messages=_grounded_messages(ctx, fresh["prompt"]),
             model=model, conversation_id=None, turn_id=uuid.uuid4().hex, usage_sink=sink,
-            auto_approve=consent.remembered(conn),  # honor remembered writes (no user at the tile)
+            # Honor remembered writes (no user at the tile) — EXCEPT schedule-mutating tools,
+            # which must never auto-run in an autonomous turn (they'd let an injected prompt
+            # spawn/rewrite self-perpetuating schedules); those always park for human approval.
+            auto_approve=consent.remembered(conn) - tools.SCHEDULE_WRITE_TOOLS,
             timeout=_AGENT_TURN_TIMEOUT,  # tolerate a cold local-model load (see constant)
         )
         _breaker_record(success=True)  # B11: a successful turn resets the breaker
@@ -447,6 +450,7 @@ def _run_one(app, key: bytes, session: str, schedule: dict) -> dict:
         ctx = tools.ToolContext(
             kb=KnowledgeBase(cursor, key), planner=Planner(cursor, key),
             memory=MemoryStore(cursor, key), email=getattr(app.state, "email", None),
+            schedules=store,  # same per-thread cursor as the other stores (turn-cursor invariant)
         )
         audit = AuditLog(cursor, key)
         approvals = ApprovalStore(cursor, key, session)

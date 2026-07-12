@@ -52,7 +52,10 @@ def _context(request: Request) -> tuple[tools.ToolContext, object]:
     if audit is None:
         raise HTTPException(status_code=423, detail="locked: unlock first")
     state = request.app.state
-    return tools.ToolContext(kb=state.kb, planner=state.planner, memory=state.memory, email=getattr(state, "email", None)), audit
+    return tools.ToolContext(
+        kb=state.kb, planner=state.planner, memory=state.memory,
+        email=getattr(state, "email", None), schedules=getattr(state, "schedules", None),
+    ), audit
 
 
 def _approvals(request: Request):

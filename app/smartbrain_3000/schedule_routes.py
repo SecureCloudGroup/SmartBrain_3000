@@ -100,7 +100,7 @@ def run_now(request: Request, sid: str) -> dict:
     # that sends email fails with "no email account connected" while the timer works.
     ctx = tools.ToolContext(
         kb=state.kb, planner=state.planner, memory=state.memory,
-        email=getattr(state, "email", None),
+        email=getattr(state, "email", None), schedules=store,
     )
     return scheduler.run_schedule(ctx, state.audit, state.approvals, store, schedule)
 
