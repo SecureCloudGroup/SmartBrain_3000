@@ -175,7 +175,7 @@ def test_degrades_when_tools_unsupported(monkeypatch) -> None:
         raise err
 
     monkeypatch.setattr(gateway, "chat_with_tools", _raise)
-    monkeypatch.setattr(gateway, "chat", lambda messages, model: _text("plain answer"))
+    monkeypatch.setattr(gateway, "chat", lambda messages, model, **k: _text("plain answer"))
     r = _run(ctx, audit, approvals)
     assert r["status"] == "complete" and r["degraded"] is True and r["message"] == "plain answer"
 
@@ -201,7 +201,7 @@ def test_degrades_on_any_first_step_error_when_plain_succeeds(monkeypatch) -> No
         raise gateway.GatewayError(500, "upstream rejected the request")  # flag NOT set
 
     monkeypatch.setattr(gateway, "chat_with_tools", _raise)
-    monkeypatch.setattr(gateway, "chat", lambda messages, model: _text("plain ok"))
+    monkeypatch.setattr(gateway, "chat", lambda messages, model, **k: _text("plain ok"))
     r = _run(ctx, audit, approvals)
     assert r["status"] == "complete" and r["degraded"] is True and r["message"] == "plain ok"
 
@@ -526,7 +526,7 @@ def test_turn_route_degrades_when_tools_unsupported(http_client: TestClient, mon
         raise err
 
     monkeypatch.setattr(gateway, "chat_with_tools", tools_die)
-    monkeypatch.setattr(gateway, "chat", lambda messages, model: _text("plain answer"))
+    monkeypatch.setattr(gateway, "chat", lambda messages, model, **k: _text("plain answer"))
     r = http_client.post(
         "/api/agent/turn",
         json={"messages": [{"role": "user", "content": "hi"}], "capability": "fast_chat"},

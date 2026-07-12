@@ -167,24 +167,26 @@ def _emit_usage(usage_sink, model, response) -> None:
         usage_sink(model, response)
 
 
-def run_turn(ctx, audit, approvals, *, messages, model, conversation_id, turn_id, start_step=0, start_calls=0, usage_sink=None, auto_approve=frozenset()) -> dict:
+def run_turn(ctx, audit, approvals, *, messages, model, conversation_id, turn_id, start_step=0, start_calls=0, usage_sink=None, auto_approve=frozenset(), timeout=60.0) -> dict:
     """Run the bounded loop from ``start_step``; return a terminal/awaiting result.
 
     ``auto_approve`` is the set of REVIEWED tool names the user has remembered;
-    those run inline instead of parking. IRREVERSIBLE tools always park.
+    those run inline instead of parking. IRREVERSIBLE tools always park. ``timeout``
+    is the per-gateway-call budget — the scheduled path raises it so a cold local-model
+    load doesn't fail the turn.
     """
     assert audit is not None and approvals is not None, "unlocked stores required"
     assert messages and model, "messages + model required"
     calls = start_calls
     for step in range(start_step, _MAX_STEPS):  # fixed upper bound (P10 #2)
         try:
-            data = gateway.chat_with_tools(messages, model, tools.openai_tools_spec())
+            data = gateway.chat_with_tools(messages, model, tools.openai_tools_spec(), timeout=timeout)
             _emit_usage(usage_sink, model, data)
         except gateway.GatewayError as exc:
             if calls == 0:  # nothing ran yet: a model that can't use tools can still answer plainly
                 log.warning("tools call failed (%s); trying a plain answer: %s", exc.status_code, exc.message)
                 try:
-                    plain = gateway.chat(messages, model)
+                    plain = gateway.chat(messages, model, timeout=timeout)
                 except Exception:
                     raise exc from None  # plain also failed -> a real error; surface the original
                 _emit_usage(usage_sink, model, plain)

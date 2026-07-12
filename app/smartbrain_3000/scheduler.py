@@ -40,6 +40,10 @@ _MAX_PER_TICK = 10  # max schedules fired per tick (verifiable bound)
 _AUTO_REINDEX_PER_TICK = 5  # embeddings backfilled per tick (converges over ticks; bounds tick time)
 _EAGER_REINDEX_MAX = 50_000  # one-shot post-unlock backfill cap (matches kb._REINDEX_SCAN_LIMIT)
 _SCHEDULE_WORKERS = 4  # H1: parallel agent turns per tick (bounded thread pool)
+# Background turns get a generous per-request budget: a scheduled turn is often the first
+# request to hit a local model since boot, so it eats the cold-load time. Matched to the
+# gateway's local-provider timeout so bifrost — not the app — decides the final deadline.
+_AGENT_TURN_TIMEOUT = 300.0
 # Gateway circuit breaker (B11): when embeddings or scheduled turns repeatedly
 # fail (Ollama/Bifrost down), suppress further attempts for a cooldown window
 # instead of retrying every 30s tick and flooding the logs.
@@ -317,7 +321,10 @@ def run_schedule(ctx, audit, approvals, store: ScheduleStore, schedule: dict, *,
         if require_due and not store.is_due(sid):
             return {"status": "skipped", "detail": "no longer due"}
         store.mark_ran(sid, fresh["interval_minutes"])  # advance with the FRESH interval
-    model = fresh.get("model") or gateway.resolve_model("chat", gateway.load_routes(store.conn))
+    routes = gateway.load_routes(store.conn)
+    # Prefer the "agent" route (a user may point background tasks at a tool-capable local
+    # model, e.g. MLX gemma-4); fall back to the Chat model when it's unset.
+    model = fresh.get("model") or gateway.resolve_model("agent", routes) or gateway.resolve_model("chat", routes)
     if not model:
         return {"status": "error", "detail": "no model configured for scheduled run"}
     conn = store.conn
@@ -331,6 +338,7 @@ def run_schedule(ctx, audit, approvals, store: ScheduleStore, schedule: dict, *,
             messages=_grounded_messages(ctx, fresh["prompt"]),
             model=model, conversation_id=None, turn_id=uuid.uuid4().hex, usage_sink=sink,
             auto_approve=consent.remembered(conn),  # honor remembered writes (no user at the tile)
+            timeout=_AGENT_TURN_TIMEOUT,  # tolerate a cold local-model load (see constant)
         )
         _breaker_record(success=True)  # B11: a successful turn resets the breaker
         _record_run_safe(store, sid, str(result.get("status", "complete")), str(result.get("message", "")), None)

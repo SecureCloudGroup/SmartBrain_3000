@@ -31,7 +31,11 @@ def test_register_ollama_payload() -> None:
     create = next(b for (m, p, b) in record if m == "POST" and p == "/api/providers")
     assert create == {
         "provider": "ollama",
-        "network_config": {"base_url": "http://host.docker.internal:11434"},
+        "network_config": {
+            "base_url": "http://host.docker.internal:11434",
+            # generous per-provider timeout so a cold local-model load isn't cut at bifrost's 30s default
+            "default_request_timeout_in_seconds": 300,
+        },
     }
     key = next(b for (m, p, b) in record if p == "/api/providers/ollama/keys")
     assert key["name"] == "smartbrain-ollama"
@@ -45,6 +49,7 @@ def test_register_mlx_payload() -> None:
     create = next(b for (m, p, b) in record if m == "POST" and p == "/api/providers")
     assert create["provider"] == "mlx"
     assert create["network_config"]["base_url"] == "http://host.docker.internal:8888"
+    assert create["network_config"]["default_request_timeout_in_seconds"] == 300  # cold MLX loads
     assert create["custom_provider_config"]["base_provider_type"] == "openai"
     # list_models must be enabled, or Bifrost never enumerates MLX into /v1/models
     # and the models go missing from the chat/routing dropdowns.
