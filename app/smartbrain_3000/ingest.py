@@ -22,6 +22,11 @@ log = logging.getLogger(__name__)
 
 _MAX_TEXT = 1_000_000  # cap on stored text per document (chars)
 _MAX_PDF_PAGES = 1000  # bounded page loop
+_EMBED_TIMEOUT = 15.0  # interactive embed-on-add / rename: fail fast (best-effort; backfilled later)
+# A cold local embed model (e.g. MLX/oMLX loading bge-m3) can take ~50s on its FIRST request.
+# The backfill path waits it out so a single reindex succeeds instead of timing out at 15s (then
+# working on the 2nd try). Bifrost's per-provider timeout (300s) is the real upstream ceiling.
+_REINDEX_EMBED_TIMEOUT = 120.0
 _TEXT_EXT = frozenset({".txt", ".md", ".markdown", ".csv", ".json", ".log", ".rst", ".text"})
 _HTML_EXT = frozenset({".html", ".htm"})
 # Document extensions that mark an extracted title as "filename-shaped" rather than a real title —
@@ -167,22 +172,25 @@ def from_file(filename: str, data: bytes) -> tuple[str, str]:
     return _resolve_title(title, os.path.basename(filename)), text[:_MAX_TEXT]
 
 
-def embed_doc(knowledge, doc_id: str, title: str, content: str, model: str) -> None:
+def embed_doc(knowledge, doc_id: str, title: str, content: str, model: str, *, timeout: float = _EMBED_TIMEOUT) -> None:
     """Chunk title+content, embed each chunk, and store the per-chunk vectors so a
-    long document is fully searchable (not just its head)."""
+    long document is fully searchable (not just its head). ``timeout`` is per embed request —
+    the backfill path raises it so a cold local model's first load doesn't fail the embed."""
     assert doc_id and title and model, "doc id, title, model required"
     assert knowledge is not None, "knowledge base required"
     chunks = kb.chunk_text(title, content)  # bounded by _MAX_CHUNKS
-    with httpx.Client(base_url=gateway.gateway_url(), timeout=15.0) as client:
-        vectors = [gateway.embed(c, model, client=client) for c in chunks]
+    with httpx.Client(base_url=gateway.gateway_url(), timeout=timeout) as client:
+        vectors = [gateway.embed(c, model, client=client, timeout=timeout) for c in chunks]
     knowledge.put_embeddings(doc_id, vectors, model)
 
 
-def reindex_pending(knowledge, model: str, *, limit: int = 1000) -> tuple[int, int, int, str]:
+def reindex_pending(knowledge, model: str, *, limit: int = 1000, timeout: float = _REINDEX_EMBED_TIMEOUT) -> tuple[int, int, int, str]:
     """Backfill embeddings for docs missing one or on a stale model (best-effort, bounded).
 
-    Returns (embedded, skipped, failed, first_error). Shared by the manual /api/kb/reindex
-    route and the scheduler's automated backfill."""
+    Uses a generous per-embed ``timeout`` so a COLD local embed model (which can take ~50s to
+    load on its first request) is waited out rather than cut short — otherwise the first reindex
+    fails and only the second (warm) one works. Returns (embedded, skipped, failed, first_error).
+    Shared by the manual /api/kb/reindex route and the scheduler's automated backfill."""
     assert knowledge is not None and model, "knowledge + model required"
     pending = knowledge.docs_needing_embedding(model)[:limit]
     embedded = skipped = failed = 0
@@ -193,7 +201,7 @@ def reindex_pending(knowledge, model: str, *, limit: int = 1000) -> tuple[int, i
             skipped += 1
             continue
         try:
-            embed_doc(knowledge, doc_id, doc["title"], doc["content"], model)
+            embed_doc(knowledge, doc_id, doc["title"], doc["content"], model, timeout=timeout)
             embedded += 1
         except Exception as exc:  # keep going on a single failure
             failed += 1

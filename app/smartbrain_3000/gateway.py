@@ -480,7 +480,9 @@ def embed(
     input_text = input_text[:_MAX_EMBED_CHARS]  # fit the embed context; long docs embed on their head
     client, owns_client = _resolve_client(client, timeout)
     try:
-        resp = client.post("/v1/embeddings", json={"model": model, "input": input_text})
+        # Per-request timeout: a cold local embed model can take ~50s to load on its first call,
+        # far past a pooled/short client default — only the per-call value lets a backfill wait it out.
+        resp = client.post("/v1/embeddings", json={"model": model, "input": input_text}, timeout=timeout)
         try:
             data = resp.json()
         except ValueError:
@@ -489,6 +491,8 @@ def embed(
         if resp.status_code >= 400 or message:
             status = resp.status_code if resp.status_code >= 400 else 502
             raise GatewayError(status, message or f"gateway error ({resp.status_code})")
+    except httpx.TimeoutException:
+        raise GatewayError(504, _TIMEOUT_MESSAGE) from None
     finally:
         if owns_client:
             client.close()
