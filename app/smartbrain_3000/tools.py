@@ -70,6 +70,9 @@ _MAX_STR = 8000  # cap on any string arg
 _MAX_ARGS = 32  # cap on number of args (bounds validation loop)
 _SUMMARY_CAP = 2000  # cap on an audited summary string
 _MAX_SCHEDULE_MINUTES = 525600  # one year — mirrors schedule_routes._MAX_INTERVAL (clamp, don't 500)
+# Cap on the full-document text read_document returns — kept under agent._RESULT_CAP so it isn't
+# re-truncated after JSON encoding. Enough to read/summarize a typical doc; longer docs flag truncated.
+_READ_DOC_CHARS = 16000
 # Argument key names whose values are redacted before reaching the model / a
 # tile / the audit body (defense-in-depth on top of the structural firewall).
 _REDACT_KEYS = ("api_key", "apikey", "token", "password", "passphrase", "secret", "recovery_key", "authorization")
@@ -110,6 +113,31 @@ def _merge_hits(primary: list[dict], extra: list[dict], limit: int) -> list[dict
             merged.append(h)
             seen.add(h["id"])
     return merged[:limit]
+
+
+def _read_document(ctx: ToolContext, args: dict) -> dict:
+    """OBSERVE: return the FULL text of one saved document (kb_search only returns short snippets).
+
+    Give ``doc_id`` (from kb_search) for an exact read, or ``query``/``title`` to look the document
+    up by name. Long documents are truncated to ``_READ_DOC_CHARS`` with ``truncated: true`` set.
+    """
+    assert ctx.kb is not None, "knowledge base unavailable"
+    doc_id = args.get("doc_id")
+    if not doc_id:  # no id — find the document by name/query (keyword scan reaches any doc)
+        query = args.get("query") or args.get("title")
+        assert query, "doc_id or query required"
+        hits = ctx.kb.search(query, limit=1)
+        if not hits:
+            return {"found": False, "detail": f"no document found matching {query!r} — try kb_search"}
+        doc_id = hits[0]["id"]
+    doc = ctx.kb.get(doc_id)
+    if doc is None:
+        return {"found": False, "detail": "document not found — use kb_search to find the right one"}
+    content = doc["content"]
+    return {
+        "found": True, "id": doc_id, "title": doc["title"],
+        "content": content[:_READ_DOC_CHARS], "truncated": len(content) > _READ_DOC_CHARS,
+    }
 
 
 def _remember_fact(ctx: ToolContext, args: dict) -> dict:
@@ -314,8 +342,9 @@ _TOOLS: tuple[Tool, ...] = (
     Tool(
         name="kb_search",
         description="Search the user's saved documents (knowledge base) by keyword AND meaning; finds "
-                    "any stored document whose title or content matches. Use to look up, quote, or "
-                    "answer from something the user saved.",
+                    "any stored document whose title or content matches, returning short snippets. Use "
+                    "to LOCATE relevant documents; to read or summarize a whole document, use "
+                    "read_document (snippets are not the full text).",
         params_schema={
             "type": "object",
             "additionalProperties": False,
@@ -327,6 +356,25 @@ _TOOLS: tuple[Tool, ...] = (
         },
         tier=Tier.OBSERVE,
         handler=_kb_search,
+        egress=False,
+    ),
+    Tool(
+        name="read_document",
+        description="Read the FULL text of one saved document — use this to summarize, quote, or answer "
+                    "questions about a document (kb_search only returns short snippets). Pass doc_id (from "
+                    "kb_search) for an exact read, or query/title to look it up by name. Very long documents "
+                    "come back truncated (truncated=true).",
+        params_schema={
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "doc_id": {"type": "string"},
+                "query": {"type": "string"},
+                "title": {"type": "string"},
+            },
+        },
+        tier=Tier.OBSERVE,
+        handler=_read_document,
         egress=False,
     ),
     Tool(
@@ -607,7 +655,7 @@ _TOOLS: tuple[Tool, ...] = (
 
 # OBSERVE tools must be read-only + no egress; this allowlist is the structural
 # safety invariant checked at import.
-_OBSERVE_READONLY = frozenset({"kb_search", "list_tasks", "list_schedules", "read_schedule_output"})
+_OBSERVE_READONLY = frozenset({"kb_search", "read_document", "list_tasks", "list_schedules", "read_schedule_output"})
 
 # REVIEWED tools that MUTATE schedules. A schedule creates/rewrites/re-enables an autonomous
 # agent turn, so these must NEVER auto-run (via remembered consent) inside a schedule-executed
