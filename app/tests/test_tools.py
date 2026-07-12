@@ -207,6 +207,136 @@ def test_email_tools_require_connection() -> None:
         tools.get_tool("email_read").handler(ctx, {"message_id": "x"})
 
 
+# --- schedule tools (Phase 2) ---------------------------------------------
+
+def _schedule_ctx() -> tuple[tools.ToolContext, object]:
+    from smartbrain_3000.scheduler import ScheduleStore
+
+    conn = duckdb.connect(":memory:")
+    dbmod.run_migrations(conn)
+    store = ScheduleStore(conn, gen_master_key())
+    return tools.ToolContext(schedules=store), store
+
+
+def _call(name: str, ctx: tools.ToolContext, args: dict) -> dict:
+    tool = tools.get_tool(name)
+    return tool.handler(ctx, tools.validate_args(tool, args))
+
+
+def test_schedule_read_tools_are_observe() -> None:
+    # OBSERVE = auto-runs without approval; the import-time invariant also requires them in
+    # _OBSERVE_READONLY with egress False (registry build would fail loudly otherwise).
+    for name in ("list_schedules", "read_schedule_output"):
+        assert tools.get_tool(name).tier is tools.Tier.OBSERVE
+        assert tools.get_tool(name).egress is False
+
+
+def test_schedule_write_tool_tiers() -> None:
+    # Reversible edits are REVIEWED (may use remembered consent); delete always re-asks.
+    assert tools.get_tool("create_schedule").tier is tools.Tier.REVIEWED
+    assert tools.get_tool("update_schedule").tier is tools.Tier.REVIEWED
+    assert tools.get_tool("set_schedule_enabled").tier is tools.Tier.REVIEWED
+    assert tools.get_tool("delete_schedule").tier is tools.Tier.IRREVERSIBLE
+
+
+def test_create_and_list_schedules_tool_roundtrip() -> None:
+    ctx, _ = _schedule_ctx()
+    sid = _call("create_schedule", ctx, {"title": "News", "prompt": "summarize headlines", "interval_minutes": 1440})["id"]
+    listed = _call("list_schedules", ctx, {})["schedules"]
+    assert [s["id"] for s in listed] == [sid]
+    assert listed[0]["title"] == "News" and listed[0]["interval_minutes"] == 1440
+
+
+def test_update_schedule_tool_preserves_unset_fields() -> None:
+    # "reword my News schedule" — change one field; the rest (prompt/interval/model) must survive.
+    ctx, store = _schedule_ctx()
+    sid = store.add_schedule("Old", "do it", 60, 0, "ollama/x")
+    _call("update_schedule", ctx, {"schedule_id": sid, "title": "New"})
+    s = store.get_schedule(sid)
+    assert s["title"] == "New"  # changed
+    assert s["prompt"] == "do it" and s["interval_minutes"] == 60 and s["model"] == "ollama/x"  # preserved
+
+
+def test_update_schedule_tool_unknown_id_raises() -> None:
+    ctx, _ = _schedule_ctx()
+    with pytest.raises(ValueError):
+        _call("update_schedule", ctx, {"schedule_id": "nope", "title": "x"})
+
+
+def test_update_schedule_tool_empty_title_raises_valueerror() -> None:
+    # A whitespace-only title (or empty prompt) must raise a clean ValueError, not reach the
+    # store's assert (which would surface as a 502 on the approve path).
+    ctx, store = _schedule_ctx()
+    sid = store.add_schedule("Keep", "keep", 60, 0, None)
+    with pytest.raises(ValueError):
+        _call("update_schedule", ctx, {"schedule_id": sid, "title": "   "})
+    assert store.get_schedule(sid)["title"] == "Keep"  # unchanged (assert fired before UPDATE)
+
+
+def test_update_schedule_tool_clears_model_with_empty_string() -> None:
+    ctx, store = _schedule_ctx()
+    sid = store.add_schedule("S", "p", 60, 0, "ollama/x")
+    _call("update_schedule", ctx, {"schedule_id": sid, "model": ""})
+    assert store.get_schedule(sid)["model"] is None  # explicit "" clears the routed model
+
+
+def test_create_schedule_tool_clamps_out_of_range_minutes() -> None:
+    # _clamp_minutes must fold a negative / absurd cadence into [0, one year] rather than let it
+    # trip ScheduleStore.add_schedule's non-negative assert (a 502).
+    ctx, store = _schedule_ctx()
+    sid = _call("create_schedule", ctx, {"title": "T", "prompt": "p", "interval_minutes": -5, "start_in_minutes": 10 ** 9})["id"]
+    assert store.get_schedule(sid)["interval_minutes"] == 0  # negative clamped to 0
+
+
+def test_set_schedule_enabled_tool_toggles() -> None:
+    ctx, store = _schedule_ctx()
+    sid = store.add_schedule("S", "p", 60, 0, None)
+    _call("set_schedule_enabled", ctx, {"schedule_id": sid, "enabled": False})
+    assert store.get_schedule(sid)["enabled"] is False
+    _call("set_schedule_enabled", ctx, {"schedule_id": sid, "enabled": True})
+    assert store.get_schedule(sid)["enabled"] is True
+
+
+def test_set_schedule_enabled_tool_unknown_id_raises() -> None:
+    ctx, _ = _schedule_ctx()
+    with pytest.raises(ValueError):
+        _call("set_schedule_enabled", ctx, {"schedule_id": "nope", "enabled": True})
+
+
+def test_delete_schedule_tool_removes() -> None:
+    ctx, store = _schedule_ctx()
+    sid = store.add_schedule("Doomed", "p", 60, 0, None)
+    _call("delete_schedule", ctx, {"schedule_id": sid})
+    assert store.get_schedule(sid) is None
+
+
+def test_read_schedule_output_tool_filters_and_aggregates() -> None:
+    ctx, store = _schedule_ctx()
+    a = store.add_schedule("Alpha", "p", 60, 0, None)
+    b = store.add_schedule("Beta", "p", 60, 0, None)
+    store.record_run(a, "complete", "alpha-out")
+    store.record_run(b, "complete", "beta-out")
+    both = _call("read_schedule_output", ctx, {})["runs"]
+    assert {r["schedule_title"] for r in both} == {"Alpha", "Beta"}  # combined feed, decrypted + titled
+    just_a = _call("read_schedule_output", ctx, {"schedule_id": a})["runs"]
+    assert [r["message"] for r in just_a] == ["alpha-out"]
+
+
+def test_read_schedule_output_tool_unknown_id_raises() -> None:
+    ctx, _ = _schedule_ctx()
+    with pytest.raises(ValueError):
+        _call("read_schedule_output", ctx, {"schedule_id": "nope"})
+
+
+def test_schedule_tools_require_store() -> None:
+    # With no schedules store wired (locked/unavailable), every schedule tool refuses.
+    ctx = tools.ToolContext(schedules=None)
+    for name in ("list_schedules", "read_schedule_output", "create_schedule", "update_schedule",
+                 "set_schedule_enabled", "delete_schedule"):
+        with pytest.raises(AssertionError):
+            tools.get_tool(name).handler(ctx, {})
+
+
 def test_kb_search_degrades_to_lexical_when_embed_unavailable(monkeypatch) -> None:
     # Agent kb_search is now semantic; if the embed model is unreachable it must fall back to
     # lexical and FLAG degraded (never silently return nothing).
@@ -305,3 +435,17 @@ def test_invoke_observe_tool_and_audit(client: TestClient) -> None:
 def test_invoke_unknown_tool_404(client: TestClient) -> None:
     client.post("/api/account/setup", json={"passphrase": "correct-horse"})
     assert client.post("/api/tools/invoke", json={"name": "rm_rf", "args": {}}).status_code == 404
+
+
+def test_schedule_tools_wired_into_agent_context(client: TestClient) -> None:
+    # End-to-end proof the schedules store reaches the ToolContext used by the agent/approval
+    # path: the OBSERVE read auto-runs (no missing-store 500) and the REVIEWED write parks.
+    client.post("/api/account/setup", json={"passphrase": "correct-horse"})
+    r = client.post("/api/tools/invoke", json={"name": "list_schedules", "args": {}})
+    assert r.status_code == 200 and r.json()["result"]["schedules"] == []
+    w = client.post(
+        "/api/tools/invoke",
+        json={"name": "create_schedule", "args": {"title": "N", "prompt": "p", "interval_minutes": 1440}},
+    )
+    assert w.status_code == 200 and w.json()["status"] == "awaiting_approval"  # parked, not executed
+    assert client.get("/api/schedules").json()["schedules"] == []  # write did NOT run inline

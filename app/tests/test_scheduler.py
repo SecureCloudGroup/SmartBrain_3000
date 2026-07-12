@@ -160,6 +160,23 @@ def test_run_schedule_honors_remembered_consent(monkeypatch) -> None:
     assert "remember_fact" in seen["ran"]["auto_approve"]
 
 
+def test_run_schedule_never_auto_approves_schedule_writes(monkeypatch) -> None:
+    # Security: even if the user remembered create/update/set_enabled in interactive chat, an
+    # AUTONOMOUS scheduled turn must NOT auto-run them (an injected prompt could otherwise spawn
+    # self-perpetuating schedules). They're stripped from auto_approve so they always park; other
+    # remembered writes (remember_fact) still auto-run.
+    store, conn, _ = _store()
+    for name in ("remember_fact", "create_schedule", "update_schedule", "set_schedule_enabled"):
+        consent.remember(conn, name)
+    sid = store.add_schedule("o", "do it", interval_minutes=0, start_in_minutes=0, model="m")
+    seen = {}
+    monkeypatch.setattr(agent, "run_turn", lambda *a, **k: seen.update(k) or {"status": "complete"})
+    scheduler.run_schedule(tools.ToolContext(), None, None, store, store.get_schedule(sid))
+    auto = seen["auto_approve"]
+    assert "remember_fact" in auto  # ordinary remembered write still honored
+    assert auto.isdisjoint(tools.SCHEDULE_WRITE_TOOLS)  # every schedule-mutating tool stripped
+
+
 def test_run_schedule_no_model_errors(monkeypatch) -> None:
     store, _, _ = _store()
     sid = store.add_schedule("o", "p", interval_minutes=0, start_in_minutes=0, model=None)
