@@ -71,10 +71,10 @@
     const path = page.url.pathname; // track navigation
     if (account.status?.unlocked) {
       refreshPending();
-      // The Scheduled updates feed owns its badge while open (it marks runs seen + zeroes the
-      // count), so skip the refresh there — otherwise a stale in-flight unseen-count response
-      // could land after the page cleared it and wrongly re-light the badge.
-      if (!path.startsWith("/chat/updates")) refreshScheduleUpdates();
+      // The Chat page pulls unseen updates into the conversation + clears the badge itself, so
+      // skip the refresh on /chat — otherwise a stale in-flight unseen-count response could land
+      // after the page cleared it and wrongly re-light the badge.
+      if (!path.startsWith("/chat")) refreshScheduleUpdates();
     }
   });
 

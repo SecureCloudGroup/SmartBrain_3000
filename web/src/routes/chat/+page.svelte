@@ -1,18 +1,19 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, onDestroy } from "svelte";
   import { goto } from "$app/navigation";
   import { account } from "$lib/account.svelte";
   import { chatSession } from "$lib/chat.svelte";
   import { resumeChat } from "$lib/chat-resume";
   import { refreshPending } from "$lib/pending.svelte";
-  import { scheduleUpdates } from "$lib/scheduleUpdates.svelte";
-  import { api, ApiError, type AgentResult, type ChatMessage, type Conversation, type DiscoveredModel } from "$lib/api";
+  import { api, ApiError, type AgentResult, type ChatMessage, type Conversation, type DiscoveredModel, type RecentScheduleRun } from "$lib/api";
   import { describeError } from "$lib/errors";
   import { remote } from "$lib/remote/connection.svelte";
+  import { scheduleUpdates } from "$lib/scheduleUpdates.svelte";
 
   // Entry carries a stable id so {#each} can key on it (U16) — re-renders no longer
-  // jump when a streaming assistant message mutates in place.
-  type Entry = ChatMessage & { id: string; err?: boolean };
+  // jump when a streaming assistant message mutates in place. `schedule` marks a fired
+  // scheduled-run update injected into the view (display-only; excluded from the transcript).
+  type Entry = ChatMessage & { id: string; err?: boolean; schedule?: boolean };
 
   let conversations = $state<Conversation[]>([]);
   let convosCursor = $state<string | null>(null); // next-older page cursor for the saved list
@@ -39,6 +40,47 @@
     entrySeq += 1;
     return `c-${kind}-${entrySeq}`;
   };
+
+  // Scheduled-run updates surface right in the open chat, each wrapped in a
+  // "### Scheduled Item … ###" header/footer so it reads as a distinct, just-ran notice rather
+  // than a normal reply. Display-only: never persisted or sent back to the model (buildTranscript
+  // drops schedule entries), so they can't pollute a conversation's saved thread. Opening chat
+  // pulls anything unseen; a light poll surfaces new ones live while you sit here. Marking them
+  // seen clears the Chat nav badge. The durable copy always lives on the Schedules → Output tab.
+  let pulling = false; // guards against overlapping pulls (mount + interval)
+  let updatesTimer: ReturnType<typeof setInterval> | null = null;
+
+  function wrapScheduleUpdate(run: RecentScheduleRun): string {
+    const body = run.error
+      ? run.error
+      : run.status === "awaiting_approval"
+        ? "Awaiting your approval — open Activity to review."
+        : run.message || "(no output)";
+    return `### Scheduled Item ${run.schedule_title} ###\n\n${body}\n\n### End of Scheduled Item ${run.schedule_title} ###`;
+  }
+
+  async function pullScheduleUpdates(): Promise<void> {
+    if (pulling || busy || !account.status?.unlocked) return; // don't interleave with a live turn
+    pulling = true;
+    try {
+      const { count } = await api.unseenScheduleUpdates(); // cheap plaintext count first
+      if (count === 0) {
+        scheduleUpdates.count = 0;
+        return;
+      }
+      const fresh = (await api.recentScheduleRuns()).runs.filter((r) => !r.seen);
+      // recentScheduleRuns is newest-first; append oldest-first so they read in order at the bottom.
+      for (const run of fresh.reverse()) {
+        log.push({ id: `sched-${run.id}`, role: "assistant", schedule: true, content: wrapScheduleUpdate(run) });
+      }
+      await api.markScheduleUpdatesSeen(); // one-time notice; also clears the badge
+      scheduleUpdates.count = 0;
+    } catch {
+      /* locked / offline — leave the badge as-is and try again on the next tick */
+    } finally {
+      pulling = false;
+    }
+  }
 
   // Starter prompts shown when the chat log is empty (U6). Kept short + concrete so
   // a clicked chip drops straight into the composer.
@@ -87,6 +129,12 @@
     } catch (err) {
       error = describeError(err);
     }
+    await pullScheduleUpdates(); // surface anything that fired while away, right here in the chat
+    updatesTimer = setInterval(pullScheduleUpdates, 25000); // keep new ones arriving live while viewing Chat
+  });
+
+  onDestroy(() => {
+    if (updatesTimer) clearInterval(updatesTimer);
   });
 
   // Re-derive the approval banner from the server (pendingTurnId is component-local and is
@@ -281,7 +329,9 @@
   // they were never persisted server-side either).
   function buildTranscript(): ChatMessage[] {
     console.assert(Array.isArray(log), "log must be an array");
-    const out = log.filter((e) => !e.err).map(({ role, content }) => ({ role, content }));
+    // Exclude errored bubbles AND injected scheduled-update notices — neither was persisted
+    // server-side, and a scheduled update is a display-only notice, not part of this chat's thread.
+    const out = log.filter((e) => !e.err && !e.schedule).map(({ role, content }) => ({ role, content }));
     console.assert(out.length >= 1, "transcript must contain at least the user's new turn");
     return out;
   }
@@ -553,11 +603,6 @@
 
   <div class="chat-toolbar">
     <button class="secondary" disabled={busy} onclick={newChat}>+ New chat</button>
-    <button
-      class="secondary"
-      title="Output from your scheduled items"
-      onclick={() => goto("/chat/updates")}
-    >🔔 Scheduled updates{#if scheduleUpdates.count > 0}<span class="nav-badge">{scheduleUpdates.count}</span>{/if}</button>
     {#if conversations.length}
       <select
         aria-label="Saved chats"
