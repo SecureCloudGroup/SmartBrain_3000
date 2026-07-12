@@ -190,6 +190,12 @@ export interface ScheduleRun {
   error: string | null;
 }
 
+// A run tagged with its parent schedule — the aggregate "Output" feed across all schedules.
+export interface RecentScheduleRun extends ScheduleRun {
+  schedule_id: string;
+  schedule_title: string;
+}
+
 export interface AuditEntry {
   id: string;
   ts: string;
@@ -465,6 +471,7 @@ export const api = {
     req<AgentResult>(`/api/schedules/${encodeURIComponent(id)}/run`, { method: "POST" }),
   listScheduleRuns: (id: string) =>
     req<{ runs: ScheduleRun[] }>(`/api/schedules/${encodeURIComponent(id)}/runs`),
+  recentScheduleRuns: () => req<{ runs: RecentScheduleRun[] }>("/api/schedules/runs/recent"),
 
   // memory + identity (facts injected into chat server-side)
   listMemories: () => req<{ memories: Memory[] }>("/api/memories"),
