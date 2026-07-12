@@ -142,6 +142,69 @@ def test_store_survives_embed_failure(monkeypatch) -> None:
     assert out["id"] == "d0" and "d0" in kb.docs and kb.embeds == {}  # stored, not embedded
 
 
+class _ReindexKB(_StubKB):
+    """_StubKB plus the read side reindex_pending needs."""
+
+    def __init__(self, pending: list[str]) -> None:
+        super().__init__()
+        self._pending = pending
+        for pid in pending:
+            self.docs[pid] = (pid, f"content of {pid}")
+
+    def docs_needing_embedding(self, model: str) -> list[str]:
+        return list(self._pending)
+
+    def get(self, doc_id: str) -> dict | None:
+        if doc_id not in self.docs:
+            return None
+        title, content = self.docs[doc_id]
+        return {"id": doc_id, "title": title, "content": content}
+
+
+def test_embed_doc_forwards_timeout_to_gateway(monkeypatch) -> None:
+    # The per-embed timeout must reach gateway.embed — interactive default, or the long backfill value.
+    seen: list[float] = []
+    monkeypatch.setattr(gateway, "embed", lambda text, model, *, client=None, timeout=None: seen.append(timeout) or [0.1, 0.2, 0.3])
+    kb = _StubKB()
+    ingest.embed_doc(kb, "d0", "Title", "body", "m")  # interactive default
+    ingest.embed_doc(kb, "d0", "Title", "body", "m", timeout=ingest._REINDEX_EMBED_TIMEOUT)
+    assert seen == [ingest._EMBED_TIMEOUT, ingest._REINDEX_EMBED_TIMEOUT]
+
+
+def test_reindex_pending_waits_out_a_cold_model(monkeypatch) -> None:
+    # Regression: a cold local embed model (~50s to load) must not fail the FIRST reindex. The
+    # backfill embeds with a generous timeout so oMLX/bifrost can finish loading rather than being
+    # cut at the interactive 15s (which caused "failed first, worked on the second try").
+    seen: list[float] = []
+    monkeypatch.setattr(gateway, "embed", lambda text, model, *, client=None, timeout=None: seen.append(timeout) or [0.1, 0.2, 0.3])
+    embedded, _skipped, failed, _err = ingest.reindex_pending(_ReindexKB(["doc-a"]), "m")
+    assert embedded == 1 and failed == 0
+    assert seen and all(t == ingest._REINDEX_EMBED_TIMEOUT for t in seen)  # long timeout, not 15s
+    assert ingest._REINDEX_EMBED_TIMEOUT > ingest._EMBED_TIMEOUT  # backfill is more patient than upload
+
+
+def test_embed_on_add_stays_fast(monkeypatch) -> None:
+    # Interactive upload must NOT block on a cold model — it embeds fast (best-effort) and is
+    # backfilled later by reindex if the model was cold.
+    seen: list[float] = []
+    monkeypatch.setattr(gateway, "embed_model", lambda conn=None: "m")
+    monkeypatch.setattr(gateway, "embed", lambda text, model, *, client=None, timeout=None: seen.append(timeout) or [0.1, 0.2, 0.3])
+    ingest.store(_StubKB(), "Title", "Body text")
+    assert seen == [ingest._EMBED_TIMEOUT]
+
+
+def test_gateway_embed_wraps_timeout_as_504() -> None:
+    import httpx
+
+    class _Timeouts:
+        def post(self, *_a, **_k):
+            raise httpx.ReadTimeout("model still loading")
+
+    with pytest.raises(gateway.GatewayError) as ei:
+        gateway.embed("some text", "m", client=_Timeouts())
+    assert ei.value.status_code == 504  # a cold-load timeout surfaces cleanly, not as a raw httpx error
+
+
 def test_kb_ingest_url_tool_is_reviewed_egress() -> None:
     tool = tools.get_tool("kb_ingest_url")
     assert tool is not None
