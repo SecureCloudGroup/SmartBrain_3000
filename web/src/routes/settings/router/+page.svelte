@@ -15,6 +15,9 @@
     try {
       const [m, r] = await Promise.all([api.listModels(), api.getRoutes()]);
       models = m.models;
+      // "agent" has no server-side default — seed "" so its selector shows "Same as Chat"
+      // (an empty value persists nothing, so the scheduler falls back to the Chat model).
+      if (r.routes.agent === undefined) r.routes.agent = "";
       routes = r.routes;
       labels = r.labels;
     } catch (err) {
@@ -61,6 +64,7 @@
     {#each capabilities as cap (cap)}
       <label for={`route-${cap}`}>{labels[cap]}</label>
       <select id={`route-${cap}`} bind:value={routes[cap]}>
+        {#if cap === "agent"}<option value="">Same as Chat</option>{/if}
         {#each providersFor(cap) as p (p)}
           <optgroup label={p}>
             {#each modelsFor(cap).filter((m) => m.provider === p) as m (m.id)}
@@ -72,6 +76,13 @@
           <option value={routes[cap]}>{routes[cap]} (unavailable)</option>
         {/if}
       </select>
+      {#if cap === "agent"}
+        <p class="muted" style="font-size:0.85rem; margin:0.25rem 0 0">
+          Runs your schedules and background tasks. Leave as &ldquo;Same as Chat&rdquo; unless you want a
+          different model there. Agent tasks call tools — pick a model that reliably tool-calls (most
+          instruct/chat models do; very small or embedding/coder-only models often don&rsquo;t).
+        </p>
+      {/if}
       {#if cap === "embedding"}
         <p class="muted" style="font-size:0.85rem; margin:0.25rem 0 0">
           Used for semantic (Meaning) search. Changing it only affects new items — run

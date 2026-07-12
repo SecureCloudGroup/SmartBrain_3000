@@ -1,0 +1,1 @@
+import{E as e,O as t,Q as n,Z as r,o as i,r as a}from"../chunks/DWX88Ymn.js";import{t as o}from"../chunks/D5w8qYB2.js";import"../chunks/xihTtKlq.js";import"../chunks/hc3Sh94b.js";import"../chunks/CEdnTrbq.js";var s=t(`<p class="muted">Loading&hellip;</p>`);function c(t,c){n(c,!1),a(()=>o(`/settings/providers`)),i(),e(t,s()),r()}export{c as component};

@@ -35,6 +35,10 @@ DEFAULT_ROUTES: dict[str, str] = {
     "reasoning": "anthropic/claude-3-5-sonnet-latest",
 }
 
+# Shown (as a GatewayError) when a request exceeds its timeout — usually a cold local
+# model still loading. Clearer than a raw httpx timeout or bifrost's generic wording.
+_TIMEOUT_MESSAGE = "the model didn't respond in time — a local model may still be loading; try again in a moment"
+
 
 def gateway_url() -> str:
     """Return the Bifrost base URL from the environment."""
@@ -371,7 +375,7 @@ def chat(
     client, owns_client = _resolve_client(client, timeout)
     try:
         resp = client.post(
-            "/v1/chat/completions", json={"model": model, "messages": messages}
+            "/v1/chat/completions", json={"model": model, "messages": messages}, timeout=timeout
         )
         try:
             data = resp.json()
@@ -381,6 +385,8 @@ def chat(
         if resp.status_code >= 400 or message:
             status = resp.status_code if resp.status_code >= 400 else 502
             raise GatewayError(status, message or f"gateway error ({resp.status_code})")
+    except httpx.TimeoutException:
+        raise GatewayError(504, _TIMEOUT_MESSAGE) from None
     finally:
         if owns_client:
             client.close()
@@ -416,9 +422,13 @@ def chat_with_tools(
     assert tools_spec, "tools spec must be non-empty"
     client, owns_client = _resolve_client(client, timeout)
     try:
+        # Pass timeout per-request: the pooled client (always installed in prod) has a
+        # fixed default, so only a per-call override lets the agent/scheduled path wait
+        # out a cold local-model load.
         resp = client.post(
             "/v1/chat/completions",
             json={"model": model, "messages": messages, "tools": tools_spec, "tool_choice": "auto"},
+            timeout=timeout,
         )
         try:
             data = resp.json()
@@ -430,6 +440,8 @@ def chat_with_tools(
             error = GatewayError(status, message or f"gateway error ({resp.status_code})")
             error.tools_unsupported = _looks_tools_unsupported(status, message or "")
             raise error
+    except httpx.TimeoutException:
+        raise GatewayError(504, _TIMEOUT_MESSAGE) from None
     finally:
         if owns_client:
             client.close()
@@ -640,6 +652,12 @@ def remove_provider(bifrost_name: str, *, client: httpx.Client | None = None) ->
 # Local servers run on the host and must bind 0.0.0.0; the gateway reaches them
 # at host.docker.internal. Config lives in the secret store under these keys.
 LOCAL_PROVIDERS = ("ollama", "mlx")
+# Bifrost's per-provider request timeout defaults to 30s — too short for a COLD local
+# model load (an agent/scheduled turn can be the first request after boot, and loading a
+# large MLX/Ollama model into memory takes well over 30s). Give local providers a generous
+# budget so a cold load completes instead of 504-ing the turn. Cloud providers keep the
+# default. The app-side agent timeout (scheduler._AGENT_TURN_TIMEOUT) is matched to this.
+_LOCAL_PROVIDER_TIMEOUT_SECS = 300
 OLLAMA_URL_KEY = "local:ollama:url"
 MLX_URL_KEY = "local:mlx:url"
 MLX_KEY_KEY = "local:mlx:api_key"
@@ -657,7 +675,10 @@ def register_ollama(url: str, *, client: httpx.Client | None = None) -> None:
     must carry ``ollama_key_config.url``.
     """
     assert url, "ollama url required"
-    create_body = {"provider": "ollama", "network_config": {"base_url": url}}
+    create_body = {
+        "provider": "ollama",
+        "network_config": {"base_url": url, "default_request_timeout_in_seconds": _LOCAL_PROVIDER_TIMEOUT_SECS},
+    }
     key_payload = {
         "name": "smartbrain-ollama",
         "value": "ollama",
@@ -679,7 +700,7 @@ def register_mlx(url: str, api_key: str = "", *, client: httpx.Client | None = N
     assert isinstance(api_key, str), "mlx api key must be a string"
     create_body = {
         "provider": "mlx",
-        "network_config": {"base_url": url},
+        "network_config": {"base_url": url, "default_request_timeout_in_seconds": _LOCAL_PROVIDER_TIMEOUT_SECS},
         "custom_provider_config": {
             "base_provider_type": "openai",
             # list_models lets Bifrost enumerate the server's /v1/models into its own

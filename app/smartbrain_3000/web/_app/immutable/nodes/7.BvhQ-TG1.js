@@ -1,4 +1,4 @@
-import{C as e,E as t,H as n,J as r,K as i,L as a,N as o,O as s,Q as c,R as l,S as u,T as d,W as f,Z as p,c as m,p as h,q as g,rt as _,y as v}from"../chunks/DWX88Ymn.js";import"../chunks/xihTtKlq.js";import{t as y}from"../chunks/B6qbL587.js";var b=[{slug:`getting-started`,title:`Getting started`,html:`<h1 id="getting-started">Getting started</h1>
+import{C as e,E as t,H as n,J as r,K as i,L as a,N as o,O as s,Q as c,R as l,S as u,T as d,W as f,Z as p,c as m,p as h,q as g,rt as _,y as v}from"../chunks/DWX88Ymn.js";import"../chunks/xihTtKlq.js";import{t as y}from"../chunks/BVHeOKcg.js";var b=[{slug:`getting-started`,title:`Getting started`,html:`<h1 id="getting-started">Getting started</h1>
 <p>SmartBrain_3000 is a <strong>local-first, single-user AI assistant</strong> that runs entirely
 on your own machine within a container (Docker). Your data and credentials stay on-box, encrypted
 at rest. The only outbound calls it makes are to services you explicitly opt into:

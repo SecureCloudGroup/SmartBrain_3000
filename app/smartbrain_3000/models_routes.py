@@ -19,11 +19,14 @@ router = APIRouter()
 
 _LOCAL_PROVIDERS = ("ollama", "mlx")
 
-# Capability -> human label for the routing UI. Keys mirror gateway.DEFAULT_ROUTES.
+# Capability -> human label for the routing UI. Keys mirror gateway.DEFAULT_ROUTES,
+# plus "agent" — a background/scheduled-turn override with NO built-in default (so it
+# stays absent from DEFAULT_ROUTES); when unset the agent path falls back to "chat".
 CAPABILITY_LABELS = {
     "chat": "Chat",
     "fast_chat": "Fast chat",
     "reasoning": "Reasoning",
+    "agent": "Agent tasks (schedules)",
     "embedding": "Embedding (semantic search)",
 }
 

@@ -92,6 +92,29 @@ def test_recent_runs_aggregates_across_schedules_with_titles(client: TestClient,
     assert runs[0]["ran_at"] >= runs[1]["ran_at"]  # newest first
 
 
+def test_scheduled_run_prefers_agent_route_then_chat_with_long_timeout(client: TestClient, monkeypatch) -> None:
+    _unlock(client)
+    captured: dict = {}
+
+    def fake_run_turn(*_a, **k):
+        captured["model"] = k.get("model")
+        captured["timeout"] = k.get("timeout")
+        return {"status": "complete", "message": "ok"}
+
+    monkeypatch.setattr(agent, "run_turn", fake_run_turn)
+    sid = _add(client, model=None)  # no per-schedule model -> resolve via routes
+
+    # No "agent" route set: falls back to the Chat default; background gets a generous timeout.
+    client.post(f"/api/schedules/{sid}/run")
+    assert captured["model"] == "openai/gpt-4o-mini"  # DEFAULT_ROUTES["chat"]
+    assert captured["timeout"] > 60  # cold local-model loads must not be cut at the interactive default
+
+    # Setting an "agent" route wins over Chat for background/scheduled turns.
+    client.put("/api/routes", json={"routes": {"agent": "ollama/qwen2.5:7b-instruct"}})
+    client.post(f"/api/schedules/{sid}/run")
+    assert captured["model"] == "ollama/qwen2.5:7b-instruct"
+
+
 def test_recent_runs_excludes_deleted_schedule_runs(client: TestClient, monkeypatch) -> None:
     _unlock(client)
     sid = _add(client, title="Gone")
