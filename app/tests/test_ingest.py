@@ -64,6 +64,22 @@ def test_malformed_pdf_raises_ingest_error() -> None:
         ingest.from_file("broken.pdf", b"%PDF-1.4 totally not a real pdf body")
 
 
+def test_from_file_pdf_ignores_filename_shaped_metadata_title(monkeypatch) -> None:
+    # A PDF exported from Word keeps the original ".DOCX" name in its /Title metadata; using that
+    # would wrongly title a .pdf upload "…​.DOCX". Fall back to the actual uploaded filename instead.
+    monkeypatch.setattr(ingest, "_extract_pdf", lambda data: ("Perenial Value SPAC (01665749).DOCX", "body"))
+    title, text = ingest.from_file("Perenial Value SPAC (01665749).pdf", b"%PDF-1.4 fake")
+    assert title == "Perenial Value SPAC (01665749).pdf"  # the real uploaded name, not the stale .DOCX
+    assert text == "body"
+
+
+def test_from_file_pdf_keeps_real_metadata_title(monkeypatch) -> None:
+    # A genuine PDF title (not filename-shaped) is still preferred over the raw filename.
+    monkeypatch.setattr(ingest, "_extract_pdf", lambda data: ("Q3 Earnings Report", "body"))
+    title, _ = ingest.from_file("download (3).pdf", b"%PDF-1.4 fake")
+    assert title == "Q3 Earnings Report"
+
+
 def test_from_url_octet_stream_binary_rejected(monkeypatch) -> None:
     monkeypatch.setattr(netguard, "safe_fetch_bytes", lambda url: {
         "final_url": "https://example.com/blob", "status": 200,

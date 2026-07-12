@@ -24,10 +24,29 @@ _MAX_TEXT = 1_000_000  # cap on stored text per document (chars)
 _MAX_PDF_PAGES = 1000  # bounded page loop
 _TEXT_EXT = frozenset({".txt", ".md", ".markdown", ".csv", ".json", ".log", ".rst", ".text"})
 _HTML_EXT = frozenset({".html", ".htm"})
+# Document extensions that mark an extracted title as "filename-shaped" rather than a real title —
+# e.g. a PDF exported from Word whose embedded /Title metadata is still the original "Report.DOCX".
+# When the extracted title ends in one of these we distrust it and use the real uploaded filename
+# / URL tail instead, so the KB never shows a wrong/stale extension (like .DOCX on a .pdf).
+_FILENAME_EXTS = frozenset({
+    ".pdf", ".docx", ".doc", ".pptx", ".ppt", ".xlsx", ".xls", ".rtf", ".odt", ".ods", ".odp",
+    ".pages", ".key", ".numbers", ".epub", ".txt", ".md", ".markdown", ".html", ".htm", ".csv", ".json",
+})
 
 
 class IngestError(Exception):
     """Content could not be fetched or extracted into usable text."""
+
+
+def _resolve_title(extracted: str, fallback: str) -> str:
+    """Prefer the extractor's title, but use ``fallback`` (the uploaded filename / URL tail) when
+    the extracted title is empty OR looks like a filename ending in a document extension — e.g. a
+    PDF whose /Title metadata is still the original 'Report.DOCX'. This keeps a wrong/stale
+    extension out of the KB name. Splitext removes only the last segment, so a real title like
+    'v1.2 spec' (ext '.2 spec', not a doc ext) is kept."""
+    t = extracted.strip()
+    _, ext = os.path.splitext(t)
+    return t if (t and ext.lower() not in _FILENAME_EXTS) else fallback
 
 
 def _title_from_url(url: str) -> str:
@@ -125,7 +144,7 @@ def from_url(url: str) -> tuple[str, str]:
     title, text = _dispatch(got["content"], got["content_type"], got["final_url"])
     if not text:
         raise IngestError("no readable text found at that URL")
-    return (title or _title_from_url(got["final_url"])), text[:_MAX_TEXT]
+    return _resolve_title(title, _title_from_url(got["final_url"])), text[:_MAX_TEXT]
 
 
 def from_file(filename: str, data: bytes) -> tuple[str, str]:
@@ -145,7 +164,7 @@ def from_file(filename: str, data: bytes) -> tuple[str, str]:
         raise IngestError(f"unsupported file type: {ext or 'unknown'}")
     if not text:
         raise IngestError("no readable text found in that file")
-    return (title or os.path.basename(filename)), text[:_MAX_TEXT]
+    return _resolve_title(title, os.path.basename(filename)), text[:_MAX_TEXT]
 
 
 def embed_doc(knowledge, doc_id: str, title: str, content: str, model: str) -> None:
