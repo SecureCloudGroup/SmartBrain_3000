@@ -417,7 +417,7 @@ def test_upgrade_from_v12_preserves_all_client_data(tmp_path) -> None:
     }
 
     applied = dbmod.run_migrations(conn)
-    assert applied == 6  # exactly ids 13..18
+    assert applied == 7  # exactly ids 13..19
 
     # Every user-data row count is unchanged across the upgrade.
     for t, n in counts.items():
@@ -458,7 +458,7 @@ def test_upgrade_from_v2_preserves_documents(tmp_path) -> None:
     master_key = keyvault.set_passphrase(conn, _UP_PASS)
     doc_id = KnowledgeBase(conn, master_key).add("Ancient", "note from the v2 era")
 
-    assert dbmod.run_migrations(conn) == 16  # ids 3..18
+    assert dbmod.run_migrations(conn) == 17  # ids 3..19
     assert KnowledgeBase(conn, master_key).get(doc_id)["content"] == "note from the v2 era"
     assert conn.execute("SELECT COUNT(*) FROM documents;").fetchone()[0] == 1
     assert conn.execute("SELECT COUNT(*) FROM embeddings;").fetchone()[0] == 0  # fresh, empty
@@ -479,8 +479,8 @@ def test_upgrade_from_v17_preserves_embeddings_and_tasks(tmp_path) -> None:
     planner = Planner(conn, master_key)
     tid = planner.add_task("file taxes", priority="high", due_time="09:00", recur="weekly")
 
-    assert dbmod.run_migrations(conn) == 1  # only id 18
-    # Chunked embedding preserved (migration 18 only adds schedule_runs).
+    assert dbmod.run_migrations(conn) == 2  # ids 18, 19
+    # Chunked embedding preserved (migrations 18-19 only add schedule_runs + its seen column).
     assert conn.execute("SELECT COUNT(*) FROM embeddings;").fetchone()[0] == 1
     t = planner.get_task(tid)
     assert t["title"] == "file taxes" and t["priority"] == "high"
@@ -488,6 +488,24 @@ def test_upgrade_from_v17_preserves_embeddings_and_tasks(tmp_path) -> None:
     assert kb.get(doc_id)["content"] == "note from the v17 era"
     assert _table_exists(conn, "schedule_runs")
     assert dbmod.run_migrations(conn) == 0
+    conn.close()
+
+
+def test_migration_19_marks_preexisting_runs_seen(tmp_path) -> None:
+    # Upgrade safety: run history recorded BEFORE the "seen" column existed must become seen=true
+    # (the ALTER's DEFAULT), so the new Scheduled-updates badge doesn't light up with the user's
+    # entire back-catalog the moment they upgrade.
+    conn = dbmod.open_db(tmp_path / "pre19.duckdb")
+    _apply_through(conn, 18)  # schedule_runs exists, but WITHOUT the seen column
+    master_key = keyvault.set_passphrase(conn, _UP_PASS)
+    store = ScheduleStore(conn, master_key)
+    sid = store.add_schedule("old", "p", 0, 0, None)
+    conn.execute(  # a run recorded the pre-19 way (no seen column in the INSERT)
+        "INSERT INTO schedule_runs (id, schedule_id, status, nonce, ciphertext) VALUES (?, ?, ?, ?, ?);",
+        ["run-old", sid, "complete", b"\x00" * 12, b"x"],
+    )
+    assert dbmod.run_migrations(conn) == 1  # migration 19 adds seen BOOLEAN DEFAULT true
+    assert store.unseen_count() == 0  # the back-catalog is seen -> badge stays quiet on upgrade
     conn.close()
 
 
@@ -499,7 +517,7 @@ def test_app_boots_and_serves_data_after_v12_upgrade(tmp_path, monkeypatch) -> N
     _apply_through(conn, 12)
     master_key = keyvault.set_passphrase(conn, _UP_PASS)
     _seed_v12(conn, master_key)
-    assert dbmod.run_migrations(conn) == 6
+    assert dbmod.run_migrations(conn) == 7
     conn.close()  # release the file before the app opens it
 
     monkeypatch.setenv("SMARTBRAIN_DB_PATH", str(path))

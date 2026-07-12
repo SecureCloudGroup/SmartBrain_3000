@@ -183,6 +183,49 @@ def test_run_schedule_swallows_agent_error(monkeypatch) -> None:
 
 # --- run history (results visibility) -------------------------------------
 
+def test_new_run_is_unseen_and_recent_runs_reports_it() -> None:
+    # A freshly-fired run is unseen (drives the Chat nav badge); recent_runs surfaces the flag.
+    store, _, _ = _store()
+    sid = store.add_schedule("o", "p", interval_minutes=0, start_in_minutes=0, model="m")
+    store.record_run(sid, "complete", message="out")
+    assert store.unseen_count() == 1
+    assert store.recent_runs()[0]["seen"] is False
+
+
+def test_mark_all_seen_clears_unseen_count() -> None:
+    store, _, _ = _store()
+    a = store.add_schedule("a", "p", interval_minutes=0, start_in_minutes=0, model="m")
+    b = store.add_schedule("b", "p", interval_minutes=0, start_in_minutes=0, model="m")
+    store.record_run(a, "complete", message="x")
+    store.record_run(b, "error", error="boom")
+    assert store.unseen_count() == 2
+    assert store.mark_all_seen() == 2  # returns how many were unseen
+    assert store.unseen_count() == 0
+    assert all(r["seen"] for r in store.recent_runs())
+    assert store.mark_all_seen() == 0  # idempotent — nothing left to mark
+
+
+def test_new_run_after_mark_seen_re_raises_the_badge() -> None:
+    # The core feed loop: opening the feed clears the badge, then the NEXT scheduled run lights it again.
+    store, _, _ = _store()
+    sid = store.add_schedule("o", "p", interval_minutes=0, start_in_minutes=0, model="m")
+    store.record_run(sid, "complete", message="first")
+    store.mark_all_seen()
+    assert store.unseen_count() == 0
+    store.record_run(sid, "complete", message="second")  # a fresh run fires after the user caught up
+    assert store.unseen_count() == 1  # badge re-appears for the new output only
+
+
+def test_unseen_count_excludes_deleted_schedule_runs() -> None:
+    # delete_schedule cascades its runs; the JOIN keeps a deleted schedule's runs out of the badge.
+    store, _, _ = _store()
+    sid = store.add_schedule("gone", "p", interval_minutes=0, start_in_minutes=0, model="m")
+    store.record_run(sid, "complete", message="x")
+    assert store.unseen_count() == 1
+    store.delete_schedule(sid)
+    assert store.unseen_count() == 0
+
+
 def test_record_run_roundtrip_and_encrypted_at_rest() -> None:
     store, conn, _ = _store()
     sid = store.add_schedule("o", "p", interval_minutes=0, start_in_minutes=0, model="m")

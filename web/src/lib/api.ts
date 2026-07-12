@@ -191,9 +191,11 @@ export interface ScheduleRun {
 }
 
 // A run tagged with its parent schedule — the aggregate "Output" feed across all schedules.
+// `seen` drives the Scheduled-updates chat feed's "New" marker + the nav badge.
 export interface RecentScheduleRun extends ScheduleRun {
   schedule_id: string;
   schedule_title: string;
+  seen: boolean;
 }
 
 export interface AuditEntry {
@@ -472,6 +474,10 @@ export const api = {
   listScheduleRuns: (id: string) =>
     req<{ runs: ScheduleRun[] }>(`/api/schedules/${encodeURIComponent(id)}/runs`),
   recentScheduleRuns: () => req<{ runs: RecentScheduleRun[] }>("/api/schedules/runs/recent"),
+  // Scheduled-updates feed (Chat): unseen count drives the nav badge; POST marks all seen.
+  unseenScheduleUpdates: () => req<{ count: number }>("/api/schedules/updates/unseen-count"),
+  markScheduleUpdatesSeen: () =>
+    req<{ ok: boolean; marked: number }>("/api/schedules/updates/seen", { method: "POST" }),
 
   // memory + identity (facts injected into chat server-side)
   listMemories: () => req<{ memories: Memory[] }>("/api/memories"),

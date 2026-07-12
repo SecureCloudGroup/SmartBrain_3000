@@ -115,6 +115,24 @@ def test_scheduled_run_prefers_agent_route_then_chat_with_long_timeout(client: T
     assert captured["model"] == "ollama/qwen2.5:7b-instruct"
 
 
+def test_unseen_count_requires_unlock(client: TestClient) -> None:
+    assert client.get("/api/schedules/updates/unseen-count").status_code == 423
+    assert client.post("/api/schedules/updates/seen").status_code == 423
+
+
+def test_unseen_count_and_mark_seen_endpoints(client: TestClient, monkeypatch) -> None:
+    _unlock(client)
+    sid = _add(client)
+    monkeypatch.setattr(agent, "run_turn", lambda *_a, **_k: {"status": "complete", "message": "out"})
+    client.post(f"/api/schedules/{sid}/run")
+    assert client.get("/api/schedules/updates/unseen-count").json()["count"] == 1  # new run is unseen
+    assert client.get("/api/schedules/runs/recent").json()["runs"][0]["seen"] is False
+    marked = client.post("/api/schedules/updates/seen").json()
+    assert marked["ok"] is True and marked["marked"] == 1
+    assert client.get("/api/schedules/updates/unseen-count").json()["count"] == 0  # cleared
+    assert client.get("/api/schedules/runs/recent").json()["runs"][0]["seen"] is True
+
+
 def test_recent_runs_excludes_deleted_schedule_runs(client: TestClient, monkeypatch) -> None:
     _unlock(client)
     sid = _add(client, title="Gone")

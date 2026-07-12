@@ -5,6 +5,7 @@
   import { chatSession } from "$lib/chat.svelte";
   import { resumeChat } from "$lib/chat-resume";
   import { refreshPending } from "$lib/pending.svelte";
+  import { scheduleUpdates } from "$lib/scheduleUpdates.svelte";
   import { api, ApiError, type AgentResult, type ChatMessage, type Conversation, type DiscoveredModel } from "$lib/api";
   import { describeError } from "$lib/errors";
   import { remote } from "$lib/remote/connection.svelte";
@@ -552,6 +553,11 @@
 
   <div class="chat-toolbar">
     <button class="secondary" disabled={busy} onclick={newChat}>+ New chat</button>
+    <button
+      class="secondary"
+      title="Output from your scheduled items"
+      onclick={() => goto("/chat/updates")}
+    >🔔 Scheduled updates{#if scheduleUpdates.count > 0}<span class="nav-badge">{scheduleUpdates.count}</span>{/if}</button>
     {#if conversations.length}
       <select
         aria-label="Saved chats"
