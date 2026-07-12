@@ -76,22 +76,40 @@ _REDACT_KEYS = ("api_key", "apikey", "token", "password", "passphrase", "secret"
 
 
 def _kb_search(ctx: ToolContext, args: dict) -> dict:
-    """OBSERVE: search the knowledge base by MEANING (semantic), lexical fallback.
+    """OBSERVE: search the knowledge base for documents matching the query.
 
-    Embeds the query through the same internal gateway the chat turn already uses
-    (so this is not external egress), then ranks by cosine. If no embedding model
-    is reachable it degrades to keyword search and flags ``degraded`` — never silent.
+    ALWAYS runs a keyword (lexical) scan over every stored document's content, so a quick
+    search reaches ANY saved document — even one not yet in the semantic index (reindex is a
+    trickle, or the doc predates configuring an embed model). When an embedding model is
+    reachable it ALSO ranks by MEANING (cosine) and merges those hits in for extra recall.
+    Embedding runs through the same internal gateway the chat turn uses (not external egress).
+    Degrades to keyword-only and flags ``degraded`` when no embed model is reachable — never silent.
     """
     assert ctx.kb is not None, "knowledge base unavailable"
     assert args.get("query"), "query required"
     limit = min(max(int(args.get("limit", 5)), 1), 20)
+    lexical = ctx.kb.search(args["query"], limit=limit)  # keyword scan of full content — reaches every doc
     model = gateway.embed_model(getattr(ctx.kb, "conn", None))
     try:
         vector = gateway.embed(args["query"], model)
-    except Exception as exc:  # embed model unavailable — degrade to lexical, observably
-        log.warning("kb_search fell back to lexical: %s", exc)
-        return {"results": ctx.kb.search(args["query"], limit=limit), "degraded": True}
-    return {"results": ctx.kb.semantic_search(vector, model, limit=limit), "degraded": False}
+    except Exception as exc:  # embed model unavailable — keyword-only, observably
+        log.warning("kb_search: semantic unavailable, keyword-only: %s", exc)
+        return {"results": lexical, "degraded": True}
+    semantic = ctx.kb.semantic_search(vector, model, limit=limit)
+    return {"results": _merge_hits(lexical, semantic, limit), "degraded": False}
+
+
+def _merge_hits(primary: list[dict], extra: list[dict], limit: int) -> list[dict]:
+    """Union two KB hit lists by doc id (``primary`` first), so meaning-based hits augment the
+    keyword hits without hiding them. Keeps a keyword match the semantic index missed (an
+    un-embedded doc) visible. Bounded by ``limit``."""
+    seen = {h["id"] for h in primary}
+    merged = list(primary)
+    for h in extra:  # bounded by len(extra) <= limit
+        if h["id"] not in seen:
+            merged.append(h)
+            seen.add(h["id"])
+    return merged[:limit]
 
 
 def _remember_fact(ctx: ToolContext, args: dict) -> dict:
@@ -295,7 +313,9 @@ def _delete_schedule(ctx: ToolContext, args: dict) -> dict:
 _TOOLS: tuple[Tool, ...] = (
     Tool(
         name="kb_search",
-        description="Search the user's knowledge base; returns matching documents.",
+        description="Search the user's saved documents (knowledge base) by keyword AND meaning; finds "
+                    "any stored document whose title or content matches. Use to look up, quote, or "
+                    "answer from something the user saved.",
         params_schema={
             "type": "object",
             "additionalProperties": False,

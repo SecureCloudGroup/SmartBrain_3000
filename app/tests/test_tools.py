@@ -357,6 +357,18 @@ def test_kb_search_uses_semantic_when_embed_available(monkeypatch) -> None:
     assert result["degraded"] is False  # semantic branch ran (ranking quality covered in test_kb)
 
 
+def test_kb_search_finds_unindexed_doc_when_semantic_available(monkeypatch) -> None:
+    # The bug: with an embed model configured, kb_search searched ONLY the semantic index, so a
+    # document not yet embedded (reindex is a trickle) was invisible to Chat. A quick search must
+    # reach ANY stored document — the keyword scan of content now always runs and merges with
+    # semantic. _wired() adds a "Tea" doc with NO embeddings stored.
+    ctx, audit, _ = _wired()
+    monkeypatch.setattr(gateway, "embed", lambda *_a, **_k: [1.0, 0.0, 0.0])  # semantic IS available
+    result = tools.run(ctx, audit, "kb_search", {"query": "oolong"}, actor="user")
+    assert result["degraded"] is False  # not a fallback — semantic was reachable
+    assert [r["title"] for r in result["results"]] == ["Tea"]  # ...yet the un-embedded doc is still found
+
+
 def test_run_non_observe_without_approval_refuses() -> None:
     # Even if a non-OBSERVE tool existed, run() refuses without an approved_row.
     # Simulate by asserting the guard via a fabricated reviewed tool path:
