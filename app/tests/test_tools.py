@@ -357,6 +357,51 @@ def test_kb_search_uses_semantic_when_embed_available(monkeypatch) -> None:
     assert result["degraded"] is False  # semantic branch ran (ranking quality covered in test_kb)
 
 
+def test_read_document_returns_full_content_not_a_snippet() -> None:
+    # The reported bug: "read/summarize the document" only got a 160-char kb_search snippet. The
+    # read_document tool returns the WHOLE document text so the agent can actually summarize it.
+    ctx, audit, _ = _wired()  # kb has a "Tea" doc: "oolong steeps at 90C"
+    doc_id = ctx.kb.list_docs()[0]["id"]
+    result = tools.run(ctx, audit, "read_document", {"doc_id": doc_id}, actor="user")
+    assert result["found"] is True and result["title"] == "Tea"
+    assert result["content"] == "oolong steeps at 90C" and result["truncated"] is False
+
+
+def test_read_document_looks_up_by_query_when_no_id() -> None:
+    ctx, audit, _ = _wired()
+    result = tools.run(ctx, audit, "read_document", {"query": "oolong"}, actor="assistant")
+    assert result["found"] is True and result["title"] == "Tea" and "oolong" in result["content"]
+
+
+def test_read_document_truncates_a_long_document() -> None:
+    conn = duckdb.connect(":memory:")
+    dbmod.run_migrations(conn)
+    key = gen_master_key()
+    kb = KnowledgeBase(conn, key)
+    did = kb.add("Big", "A" * (tools._READ_DOC_CHARS + 5000))
+    result = tools.run(tools.ToolContext(kb=kb), AuditLog(conn, key), "read_document", {"doc_id": did}, actor="user")
+    assert result["truncated"] is True and len(result["content"]) == tools._READ_DOC_CHARS
+
+
+def test_read_document_unknown_returns_not_found() -> None:
+    ctx, audit, _ = _wired()
+    assert tools.run(ctx, audit, "read_document", {"doc_id": "nope"}, actor="user")["found"] is False
+    assert tools.run(ctx, audit, "read_document", {"query": "nothingmatches"}, actor="user")["found"] is False
+
+
+def test_read_document_is_observe_and_readonly() -> None:
+    tool = tools.get_tool("read_document")
+    assert tool.tier is tools.Tier.OBSERVE and tool.egress is False
+
+
+def test_read_document_result_fits_the_agent_result_cap() -> None:
+    # read_document's content cap must stay under the agent's _RESULT_CAP so a full read isn't
+    # re-truncated (as JSON) before it reaches the model.
+    from smartbrain_3000 import agent
+
+    assert tools._READ_DOC_CHARS < agent._RESULT_CAP
+
+
 def test_kb_search_finds_unindexed_doc_when_semantic_available(monkeypatch) -> None:
     # The bug: with an embed model configured, kb_search searched ONLY the semantic index, so a
     # document not yet embedded (reindex is a trickle) was invisible to Chat. A quick search must
