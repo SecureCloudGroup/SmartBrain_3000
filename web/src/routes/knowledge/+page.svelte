@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onDestroy, onMount } from "svelte";
   import { goto } from "$app/navigation";
   import { account } from "$lib/account.svelte";
   import { api, type KbDoc, type KbDocFull, type KbHit, type SearchMode } from "$lib/api";
@@ -30,11 +30,12 @@
   let busy = $state("");
   let renameId = $state<string | null>(null); // inline rename of a document
   let renameValue = $state("");
+  let failures = $state<string[]>([]); // per-file errors from a bulk drop
   let scoreHelpOpen = $state(false); // U12: visible score-meaning popover, no hover needed
   let docOverlay = $state<HTMLDivElement | null>(null); // U4: focus target for opened doc
 
   const ACCEPT = ".pdf,.docx,.pptx,.xlsx,.txt,.md,.markdown,.html,.htm,.csv,.json,.log,.rst";
-  const _MAX_FILES = 20; // bounded per drop
+  const _MAX_FILES = 200; // bounded per drop (uploads no longer block on embedding, so this can be generous)
 
   async function loadDocs() {
     try {
@@ -50,6 +51,7 @@
     if (s && !s.initialized) return goto("/setup");
     if (s && !s.unlocked) return goto("/unlock");
     await loadDocs();
+    refreshIndexStatus();
   });
 
   async function addUrl() {
@@ -60,9 +62,12 @@
     status = `Fetching ${u}…`;
     try {
       const r = await api.ingestUrl(u);
-      status = `Added “${r.title}” (${r.chars.toLocaleString()} chars).`;
+      status = r.duplicate
+        ? `“${r.title}” is already in your knowledge — not added again.`
+        : `Added “${r.title}” (${r.chars.toLocaleString()} chars).`;
       url = "";
       await loadDocs();
+      refreshIndexStatus();
     } catch (err) {
       error = describeError(err);
       status = "";
@@ -75,21 +80,56 @@
     if (busy) return;
     busy = "upload";
     error = "";
+    failures = [];
     const files = Array.from(list).slice(0, _MAX_FILES);
     let added = 0;
-    for (const file of files) {
-      status = `Reading ${file.name}…`;
+    let duplicates = 0;
+    for (const [i, file] of files.entries()) {
+      status = `Adding ${i + 1} of ${files.length} — ${file.name}…`;
       try {
-        await api.uploadDoc(file);
-        added += 1;
+        const r = await api.uploadDoc(file);
+        if (r.duplicate) duplicates += 1;
+        else added += 1;
       } catch (err) {
-        error = `${file.name}: ${describeError(err)}`;
+        // One bad file must not abandon the rest of the drop, and the user needs to know WHICH.
+        failures.push(`${file.name}: ${describeError(err)}`);
       }
     }
-    status = added ? `Added ${added} file${added > 1 ? "s" : ""} to your knowledge.` : "";
+    const parts: string[] = [];
+    if (added) parts.push(`Added ${added} file${added > 1 ? "s" : ""}`);
+    if (duplicates) parts.push(`${duplicates} already in your knowledge`);
+    if (failures.length) parts.push(`${failures.length} couldn't be read`);
+    status = parts.join(" · ");
     busy = "";
     if (added) await loadDocs();
+    refreshIndexStatus(); // uploads don't embed inline any more — show the indexing catch-up
   }
+
+  // Uploaded documents are keyword-searchable at once, but their vectors are added by the background
+  // indexer. Poll while there's a backlog so the page can say so instead of looking finished.
+  let indexPending = $state(0);
+  let indexTotal = $state(0);
+  let indexTimer: ReturnType<typeof setInterval> | null = null;
+
+  async function refreshIndexStatus() {
+    try {
+      const s = await api.indexStatus();
+      indexPending = s.pending;
+      indexTotal = s.total;
+      if (s.pending > 0 && indexTimer === null) {
+        indexTimer = setInterval(refreshIndexStatus, 4000);
+      } else if (s.pending === 0 && indexTimer !== null) {
+        clearInterval(indexTimer);
+        indexTimer = null;
+      }
+    } catch {
+      /* locked / offline — leave the last known state alone */
+    }
+  }
+
+  onDestroy(() => {
+    if (indexTimer) clearInterval(indexTimer);
+  });
 
   function onDrop(event: DragEvent) {
     event.preventDefault();
@@ -251,11 +291,16 @@
       if (r.failed) {
         notice = `Reindexed ${r.embedded}; ${r.failed} failed${r.error ? ` (${r.error})` : ""}. ` +
           "Check the embedding model is loaded and selected under Settings → Model routing.";
-      } else if (r.embedded === 0) {
+      } else if (r.embedded === 0 && r.pending === 0) {
         notice = "Knowledge is already up to date — nothing needed reindexing.";
+      } else if (r.pending > 0) {
+        // The request is time-boxed so it always returns; the background indexer finishes the rest.
+        notice = `Indexed ${r.embedded} document${r.embedded === 1 ? "" : "s"} — ${r.pending} still ` +
+          "to go, continuing in the background.";
       } else {
         notice = `Reindexed ${r.embedded} document${r.embedded === 1 ? "" : "s"} for semantic search.`;
       }
+      refreshIndexStatus();
     } catch (err) {
       error = describeError(err);
     } finally {
@@ -324,6 +369,21 @@
     </details>
 
     {#if status}<p class="muted" style="margin-top:0.75rem">{status}</p>{/if}
+    {#if failures.length}
+      <!-- One unreadable file must not silently swallow the rest of a drop — name the ones that failed. -->
+      <ul class="muted" style="margin:0.35rem 0 0; padding-left:1.1rem; font-size:0.85rem">
+        {#each failures.slice(0, 5) as f (f)}<li>{f}</li>{/each}
+        {#if failures.length > 5}<li>…and {failures.length - 5} more</li>{/if}
+      </ul>
+    {/if}
+    {#if indexPending > 0}
+      <!-- Uploads return as soon as the document is stored; the vectors follow. Say so, rather than
+           looking finished while semantic search still can't see the new documents. -->
+      <p class="muted" style="margin-top:0.5rem; font-size:0.85rem">
+        Indexing for meaning search — {indexTotal - indexPending} of {indexTotal} done. Keyword
+        search already finds them.
+      </p>
+    {/if}
     <p class="muted" style="margin-top:0.5rem; font-size:0.85rem">
       You can also ask in Chat: <em>“add this PDF to my knowledge: &lt;url&gt;”</em>.
     </p>

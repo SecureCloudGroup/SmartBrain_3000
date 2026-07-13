@@ -26,6 +26,7 @@ document that is ~30 MB per 1,000 documents. The first search after unlock pays 
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import math
 import re
@@ -49,6 +50,16 @@ def tokenize(text: str) -> list[str]:
     """Lowercase word tokens. Shared by indexing and querying so they cannot drift apart."""
     assert text is not None, "text required"
     return _TOKEN.findall(text.lower())
+
+
+def content_hash(content: str) -> str:
+    """Fingerprint a document's text, for duplicate detection.
+
+    Held only in memory (the index), never written to disk — a stored hash would be a plaintext
+    fingerprint of encrypted content, which is exactly what we don't keep. The index already
+    decrypts the whole corpus once per unlock, so hashing it there is free.
+    """
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
 class _VecBlock:
@@ -148,6 +159,7 @@ class SearchIndex:
         self._postings: dict[str, dict[str, int]] = {}  # token -> {doc_id: term frequency}
         self._doc_len: dict[str, int] = {}  # doc_id -> token count (BM25 length normalisation)
         self._titles: dict[str, str] = {}  # kept in RAM: small, and lets us rank/label without a decrypt
+        self._by_hash: dict[str, str] = {}  # content hash -> doc_id, for duplicate detection
         self._vecs: dict[tuple[str, int], _VecBlock] = {}  # (model, dim) -> vectors
         self.truncated = False  # True if the corpus exceeded _MAX_INDEXED_DOCS
 
@@ -183,6 +195,13 @@ class SearchIndex:
             self._postings.setdefault(tok, {})[doc_id] = tf
         self._doc_len[doc_id] = len(tokens)
         self._titles[doc_id] = title
+        self._by_hash.setdefault(content_hash(content), doc_id)  # first one wins; a dupe maps to the original
+
+    def find_by_content(self, content: str) -> str | None:
+        """The id of an existing document with identical text, if any. Powers duplicate detection."""
+        self.ensure_built()
+        with self._lock:
+            return self._by_hash.get(content_hash(content))
 
     def add_document(self, doc_id: str, title: str, content: str) -> None:
         """Index a new/updated document. No-op before the first build (the build will pick it up)."""
@@ -202,6 +221,9 @@ class SearchIndex:
                     del self._postings[tok]
             self._doc_len.pop(doc_id, None)
             self._titles.pop(doc_id, None)
+            for h, did in list(self._by_hash.items()):  # bounded by the corpus
+                if did == doc_id:
+                    del self._by_hash[h]
             for block in self._vecs.values():
                 block.remove(doc_id)
 

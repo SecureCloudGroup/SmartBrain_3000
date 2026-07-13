@@ -32,6 +32,13 @@ class _StubKB:
         self.meta[doc_id] = meta or {}
         return doc_id
 
+    def find_duplicate(self, content: str) -> str | None:
+        """Dedupe: store() asks this before adding, so identical text isn't stored twice."""
+        for doc_id, (_title, existing) in self.docs.items():
+            if existing == content:
+                return doc_id
+        return None
+
     def put_embedding(self, doc_id: str, vector, model: str) -> None:
         self.embeds[doc_id] = (vector, model)
 
@@ -129,8 +136,10 @@ def test_store_embeds_best_effort(monkeypatch) -> None:
     monkeypatch.setattr(gateway, "embed", lambda text, model, **k: [0.1, 0.2, 0.3])
     kb = _StubKB()
     out = ingest.store(kb, "Title", "Body text")
-    assert out == {"id": "d0", "title": "Title", "chars": len("Body text")}
-    assert kb.embeds["d0"][1] == "ollama/test"  # embedded on add
+    # `duplicate` reports whether identical text was already stored (in which case the EXISTING
+    # document is returned instead of a second copy).
+    assert out == {"id": "d0", "title": "Title", "chars": len("Body text"), "duplicate": False}
+    assert kb.embeds["d0"][1] == "ollama/test"  # embedded on add (the inline path is still there)
 
 
 def test_store_survives_embed_failure(monkeypatch) -> None:

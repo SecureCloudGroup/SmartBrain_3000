@@ -192,7 +192,7 @@ def test_reindex_backfills_and_enables_semantic(client: TestClient, monkeypatch)
     client.post("/api/account/setup", json={"passphrase": "correct-horse"})
     client.post("/api/kb", json={"title": "Notes", "content": "buy milk"})
     monkeypatch.setattr(gateway, "embed", lambda input_text, model, **k: [1.0, 0.0, 0.0])
-    assert client.post("/api/kb/reindex").json() == {"embedded": 1, "skipped": 0, "failed": 0, "error": ""}
+    assert client.post("/api/kb/reindex").json() == {"embedded": 1, "skipped": 0, "failed": 0, "error": "", "pending": 0}
     r = client.get("/api/kb/search", params={"q": "anything", "mode": "semantic"})
     assert r.json()["degraded"] is False
     assert r.json()["results"][0]["title"] == "Notes"  # now semantically findable
@@ -210,15 +210,17 @@ def test_reindex_best_effort_continues_on_failure(client: TestClient, monkeypatc
 
     monkeypatch.setattr(gateway, "embed", maybe)
     out = client.post("/api/kb/reindex").json()
-    assert out == {"embedded": 1, "skipped": 0, "failed": 1, "error": "nope"}
+    # `pending` is the document whose embed failed: it is still un-indexed, and reindex must say so
+    # rather than report a clean finish.
+    assert out == {"embedded": 1, "skipped": 0, "failed": 1, "error": "nope", "pending": 1}
 
 
 def test_reindex_idempotent(client: TestClient, monkeypatch) -> None:
     client.post("/api/account/setup", json={"passphrase": "correct-horse"})
     client.post("/api/kb", json={"title": "N", "content": "c"})
     monkeypatch.setattr(gateway, "embed", lambda input_text, model, **k: [1.0, 0.0, 0.0])
-    assert client.post("/api/kb/reindex").json() == {"embedded": 1, "skipped": 0, "failed": 0, "error": ""}
-    assert client.post("/api/kb/reindex").json() == {"embedded": 0, "skipped": 0, "failed": 0, "error": ""}
+    assert client.post("/api/kb/reindex").json() == {"embedded": 1, "skipped": 0, "failed": 0, "error": "", "pending": 0}
+    assert client.post("/api/kb/reindex").json() == {"embedded": 0, "skipped": 0, "failed": 0, "error": "", "pending": 0}
 
 
 def test_reindex_embeds_title(client: TestClient, monkeypatch) -> None:

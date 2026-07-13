@@ -256,7 +256,11 @@ def client(tmp_path, monkeypatch) -> Iterator[TestClient]:
 
 
 def test_http_upload_pdf_then_lexical_and_semantic_search(client: TestClient, monkeypatch) -> None:
-    _use_fake_embed(monkeypatch)  # embed-on-add succeeds, so both modes work immediately
+    # Uploads no longer embed inline (that blocked the request on dozens of serialized model calls),
+    # so a fresh upload is KEYWORD-searchable immediately and becomes semantically searchable once
+    # the indexer runs. This test drives the indexer via the reindex route instead of waiting for a
+    # scheduler tick.
+    _use_fake_embed(monkeypatch)
     pdf = make_pdf([
         "ZORBLAX opening statement and QUUXFROB terms.",
         "GRIZZNAK obligations continue on the second page.",
@@ -274,12 +278,19 @@ def test_http_upload_pdf_then_lexical_and_semantic_search(client: TestClient, mo
     got = client.get(f"/api/kb/{doc_id}").json()
     assert "ZORBLAX" in got["content"] and "SNORTLE" in got["content"]
 
-    # Lexical finds tokens from every page (incl. the last).
+    # Keyword search works the moment the upload returns — no waiting on the indexer.
     for token in ("ZORBLAX", "GRIZZNAK", "SNORTLE"):
         r = client.get("/api/kb/search", params={"q": token, "mode": "lexical"}).json()
         assert [h["id"] for h in r["results"]] == [doc_id], f"lexical missed {token}"
 
-    # Semantic finds it too (embedded on add), not degraded.
+    # ...and the document is reported as still awaiting its vectors, rather than looking finished.
+    assert client.get("/api/kb/index-status").json() == {
+        "total": 1, "pending": 1, "indexed": 0, "model": gateway.embed_model(None),
+    }
+
+    # Once the indexer has run, semantic finds it too — not degraded.
+    client.post("/api/kb/reindex")
+    assert client.get("/api/kb/index-status").json()["pending"] == 0
     r = client.get("/api/kb/search", params={"q": "SNORTLE", "mode": "semantic"}).json()
     assert r["degraded"] is False and [h["id"] for h in r["results"]] == [doc_id]
 

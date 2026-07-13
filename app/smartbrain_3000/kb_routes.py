@@ -107,17 +107,46 @@ def search_docs(request: Request, q: str, mode: str = "hybrid", limit: int = 10)
     return {"results": knowledge.hybrid_search(q, vector, model, limit=limit), "degraded": False}
 
 
+_REINDEX_BUDGET_SECONDS = 25.0  # a request must RETURN; the background indexer finishes the rest
+
+
 @router.post("/api/kb/reindex")
 def reindex(request: Request) -> dict:
     """Backfill embeddings for docs missing one or using a stale model.
 
-    Best-effort and bounded: one gateway hiccup is logged and counted, not
-    fatal. Re-runnable to converge the corpus once Ollama is available.
+    Bounded by a wall-clock budget so the request always returns. It used to run the whole backlog
+    synchronously (default limit 1000 documents, each up to 64 sequential embeds), which on a large
+    corpus is an HTTP request that runs for hours. Whatever isn't finished here is drained by the
+    background indexer, so `pending` tells the caller how much is left rather than pretending it's done.
+
+    Best-effort: one gateway hiccup is logged and counted, not fatal.
     """
     knowledge = _kb(request)
     model = gateway.embed_model(request.app.state.dbx)
-    embedded, skipped, failed, error = ingest.reindex_pending(knowledge, model)
-    return {"embedded": embedded, "skipped": skipped, "failed": failed, "error": error}
+    embedded, skipped, failed, error = ingest.reindex_pending(
+        knowledge, model, budget_seconds=_REINDEX_BUDGET_SECONDS
+    )
+    return {
+        "embedded": embedded,
+        "skipped": skipped,
+        "failed": failed,
+        "error": error,
+        "pending": knowledge.docs_pending_embedding(model),  # still to do; the indexer will get it
+    }
+
+
+@router.get("/api/kb/index-status")
+def index_status(request: Request) -> dict:
+    """How much of the knowledge base is semantically indexed.
+
+    Uploads no longer block on embedding, so the UI needs to be able to say "indexing 12 of 40"
+    instead of silently looking finished while semantic search can't yet see the new documents.
+    """
+    knowledge = _kb(request)
+    model = gateway.embed_model(request.app.state.dbx)
+    total = knowledge.count_docs()
+    pending = knowledge.docs_pending_embedding(model)
+    return {"total": total, "pending": pending, "indexed": max(0, total - pending), "model": model}
 
 
 @router.post("/api/kb/ingest-url")
@@ -146,7 +175,12 @@ async def upload_doc(request: Request, filename: str) -> dict:
         raise HTTPException(status_code=413, detail="file too large")
     try:
         title, text, meta = ingest.from_file(filename, data)
-        return ingest.store(knowledge, title, text, meta)  # meta carries the filename + page map
+        # embed=False: return as soon as the document is STORED. Embedding a long document is dozens
+        # of sequential model calls that serialize on a local model, so embedding inline held each
+        # upload's HTTP request open for as long as it took — a multi-file drop was minutes of
+        # blocking. The document is keyword-searchable immediately; the background indexer adds the
+        # vectors within seconds, and /api/kb/index-status reports the progress.
+        return ingest.store(knowledge, title, text, meta, embed=False)
     except ingest.IngestError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from None
 

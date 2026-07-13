@@ -240,6 +240,15 @@ export interface KbDocFull extends KbDoc {
   content: string;
 }
 
+// `duplicate` = the text was already in the knowledge base, so the EXISTING document is returned
+// instead of a second copy (which would then turn up in every search forever).
+export interface IngestResult {
+  id: string;
+  title: string;
+  chars: number;
+  duplicate: boolean;
+}
+
 // Keyword and vector search miss in opposite directions, so "hybrid" (rank-fused) is the default.
 export type SearchMode = "hybrid" | "lexical" | "semantic";
 
@@ -512,15 +521,17 @@ export const api = {
   addDoc: (title: string, content: string) =>
     req<{ id: string }>("/api/kb", { method: "POST", body: JSON.stringify({ title, content }) }),
   ingestUrl: (url: string) =>
-    req<{ id: string; title: string; chars: number }>("/api/kb/ingest-url", {
-      method: "POST",
-      body: JSON.stringify({ url }),
-    }),
+    req<IngestResult>("/api/kb/ingest-url", { method: "POST", body: JSON.stringify({ url }) }),
   uploadDoc: (file: File) =>
-    req<{ id: string; title: string; chars: number }>(
+    req<IngestResult>(
       `/api/kb/upload?filename=${encodeURIComponent(file.name)}`,
       { method: "POST", body: file, headers: { "content-type": "application/octet-stream" } },
     ),
+  // How much of the knowledge base is semantically indexed. Uploads no longer block on embedding,
+  // so the UI polls this to say "indexing 12 of 40" instead of looking done while semantic search
+  // still can't see the new documents.
+  indexStatus: () =>
+    req<{ total: number; pending: number; indexed: number; model: string }>("/api/kb/index-status"),
   getDoc: (id: string) => req<KbDocFull>(`/api/kb/${encodeURIComponent(id)}`),
   renameDoc: (id: string, title: string) =>
     req<{ ok: boolean }>(`/api/kb/${encodeURIComponent(id)}`, {
@@ -533,8 +544,13 @@ export const api = {
     req<{ results: KbHit[]; degraded?: boolean }>(
       `/api/kb/search?${new URLSearchParams({ q, mode, limit: String(limit) }).toString()}`,
     ),
+  // Bounded by a wall-clock budget server-side, so it always returns; `pending` says what's left
+  // (the background indexer finishes it) rather than pretending the whole backlog is done.
   reindexKb: () =>
-    req<{ embedded: number; skipped: number; failed: number; error: string }>("/api/kb/reindex", { method: "POST" }),
+    req<{ embedded: number; skipped: number; failed: number; error: string; pending: number }>(
+      "/api/kb/reindex",
+      { method: "POST" },
+    ),
 
   // email (Gmail via loopback OAuth; reads + user-initiated send; agent send is gated)
   emailStatus: () => req<EmailStatus>("/api/email/status"),

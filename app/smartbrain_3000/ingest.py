@@ -17,6 +17,7 @@ from __future__ import annotations
 import io
 import logging
 import os
+import time
 from collections.abc import Iterable
 from urllib.parse import urlparse
 
@@ -336,18 +337,37 @@ def embed_doc(knowledge, doc_id: str, title: str, content: str, model: str, *, t
     knowledge.put_embeddings(doc_id, vectors, model)
 
 
-def reindex_pending(knowledge, model: str, *, limit: int = 1000, timeout: float = _REINDEX_EMBED_TIMEOUT) -> tuple[int, int, int, str]:
+def reindex_pending(
+    knowledge,
+    model: str,
+    *,
+    limit: int = 1000,
+    timeout: float = _REINDEX_EMBED_TIMEOUT,
+    budget_seconds: float | None = None,
+) -> tuple[int, int, int, str]:
     """Backfill embeddings for docs missing one or on a stale model (best-effort, bounded).
 
     Uses a generous per-embed ``timeout`` so a COLD local embed model (which can take ~50s to
     load on its first request) is waited out rather than cut short — otherwise the first reindex
-    fails and only the second (warm) one works. Returns (embedded, skipped, failed, first_error).
-    Shared by the manual /api/kb/reindex route and the scheduler's automated backfill."""
+    fails and only the second (warm) one works.
+
+    ``budget_seconds`` stops the run once that much wall-clock has been spent, mid-backlog. Two
+    things need it: the background indexer (which must drain a backlog steadily WITHOUT holding the
+    single-threaded local model away from chat all tick), and the manual reindex route (which was a
+    synchronous request that could run for hours on a large corpus). Whatever is left is simply
+    picked up on the next pass — the work is idempotent.
+
+    Returns (embedded, skipped, failed, first_error). Shared by /api/kb/reindex and the scheduler.
+    """
     assert knowledge is not None and model, "knowledge + model required"
+    assert budget_seconds is None or budget_seconds > 0, "budget must be positive"
     pending = knowledge.docs_needing_embedding(model)[:limit]
+    deadline = (time.monotonic() + budget_seconds) if budget_seconds else None
     embedded = skipped = failed = 0
     error = ""
     for doc_id in pending:  # bounded by limit
+        if deadline is not None and time.monotonic() >= deadline:
+            break  # out of budget — the rest is picked up next pass
         doc = knowledge.get(doc_id)
         if doc is None:
             skipped += 1
@@ -362,24 +382,36 @@ def reindex_pending(knowledge, model: str, *, limit: int = 1000, timeout: float 
     return embedded, skipped, failed, error
 
 
-def store(knowledge, title: str, content: str, meta: dict | None = None) -> dict:
-    """Add a document to the KB (with provenance ``meta``) and embed it best-effort.
+def store(knowledge, title: str, content: str, meta: dict | None = None, *, embed: bool = True) -> dict:
+    """Add a document to the KB (with provenance ``meta``); return {id, title, chars, duplicate}.
 
-    Embedding failure (e.g. Ollama down) never fails the add — the doc is stored
-    and a later reindex backfills the vector.
+    DEDUPE: text identical to an existing document returns THAT document instead of adding a second
+    copy. Ingesting the same URL or file twice used to create two independent documents, which then
+    both turned up in every search forever.
+
+    ``embed=False`` defers embedding to the background indexer. The bulk-upload path uses it: a file
+    upload used to embed inline, and embedding a long document is dozens of sequential model calls
+    that SERIALIZE on a local model — so a multi-file drop held its HTTP requests open for minutes.
+    A deferred document is still keyword-searchable immediately (the in-memory index is updated on
+    add); semantic search catches up within seconds.
     """
     assert knowledge is not None, "knowledge base required"
     assert title and content, "title + content required"
+    existing = knowledge.find_duplicate(content)
+    if existing is not None:
+        log.info("ingest: identical content already stored as %s — not adding a duplicate", existing)
+        return {"id": existing, "title": title, "chars": len(content), "duplicate": True}
     doc_id = knowledge.add(title, content, meta)
-    try:  # best-effort: make it immediately semantic-searchable
-        model = gateway.embed_model(getattr(knowledge, "conn", None))  # routed embedding model
-        embed_doc(knowledge, doc_id, title, content, model)
-    except Exception as exc:  # embeddings optional; /api/kb/reindex can backfill
-        log.info("embed-on-add skipped for %s: %s", doc_id, exc)
-    return {"id": doc_id, "title": title, "chars": len(content)}
+    if embed:
+        try:  # best-effort: make it immediately semantic-searchable
+            model = gateway.embed_model(getattr(knowledge, "conn", None))  # routed embedding model
+            embed_doc(knowledge, doc_id, title, content, model)
+        except Exception as exc:  # embeddings optional; the background indexer backfills
+            log.info("embed-on-add skipped for %s: %s", doc_id, exc)
+    return {"id": doc_id, "title": title, "chars": len(content), "duplicate": False}
 
 
 def ingest_url(knowledge, url: str) -> dict:
-    """Fetch + extract + store a URL. Returns {id, title, chars}."""
+    """Fetch + extract + store a URL. Returns {id, title, chars, duplicate}."""
     title, text, meta = from_url(url)
     return store(knowledge, title, text, meta)

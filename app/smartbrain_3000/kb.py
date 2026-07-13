@@ -180,6 +180,30 @@ class KnowledgeBase:
         self.index.add_document(doc_id, title, doc["content"])  # title is indexed, so re-index it
         return True
 
+    def find_duplicate(self, content: str) -> str | None:
+        """The id of an existing document with identical text, if any.
+
+        Ingesting the same URL or file twice used to create two independent documents, which then
+        both turn up in every search. Answered from the in-memory index, so it costs nothing.
+        """
+        assert content is not None, "content required"
+        return self.index.find_by_content(content)
+
+    def docs_pending_embedding(self, model: str) -> int:
+        """How many documents still need an embedding for ``model`` — the indexing backlog."""
+        assert model, "model required"
+        row = self._conn.execute(
+            "SELECT COUNT(*) FROM documents d "
+            "WHERE NOT EXISTS (SELECT 1 FROM embeddings e WHERE e.doc_id = d.id AND e.model = ?);",
+            [model],
+        ).fetchone()
+        return int(row[0]) if row else 0
+
+    def count_docs(self) -> int:
+        """Total documents (cheap: no decryption)."""
+        row = self._conn.execute("SELECT COUNT(*) FROM documents;").fetchone()
+        return int(row[0]) if row else 0
+
     def get(self, doc_id: str) -> dict | None:
         """Return the decrypted document, or None if absent."""
         assert doc_id, "doc id required"
