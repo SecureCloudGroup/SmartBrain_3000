@@ -22,7 +22,8 @@ log = logging.getLogger(__name__)
 
 _MAX_STEPS = 6  # model round-trips per turn
 _MAX_TOOL_CALLS = 8  # tool executions per turn (carried across a pause)
-_RESULT_CAP = 8000  # cap on a tool-result string fed back to the model
+_RESULT_CAP = 20000  # fallback cap on a tool-result string; the routes/scheduler override it per-turn
+                     # with gateway.result_cap_for(model) (context-sized). Only direct callers use this.
 # A ```json {"name": ..., "arguments": {...}} ``` fenced block (some local models/runtimes
 # print tool calls as text instead of structured tool_calls). DOTALL so args span lines.
 _TOOL_CALL_FENCE = re.compile(r"```(?:json|tool_call|tool)?\s*(\{.*?\})\s*```", re.DOTALL)

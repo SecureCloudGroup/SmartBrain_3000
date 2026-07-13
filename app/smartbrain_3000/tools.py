@@ -417,8 +417,10 @@ _TOOLS: tuple[Tool, ...] = (
     Tool(
         name="kb_search",
         description="Search the user's saved documents (knowledge base) by keyword AND meaning; finds "
-                    "any stored document whose title or content matches. Use to look up, quote, or "
-                    "answer from something the user saved.",
+                    "any stored document whose title or content matches, returning short SNIPPETS. Use "
+                    "to LOCATE the right document, then read_document (its full text), summarize_document "
+                    "(an overview of any length), or list_documents (the whole catalog) — a snippet is "
+                    "not the full text.",
         params_schema={
             "type": "object",
             "additionalProperties": False,
