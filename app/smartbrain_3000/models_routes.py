@@ -35,6 +35,10 @@ class RoutesBody(BaseModel):
     routes: dict[str, str]
 
 
+class ContextLengthsBody(BaseModel):
+    lengths: dict[str, int]  # 'provider/model' -> context-length tokens (<=0 resets to the default)
+
+
 def _require_unlocked(request: Request) -> None:
     """Raise 423 unless the app has been unlocked (secret store loaded)."""
     if getattr(request.app.state, "secret_store", None) is None:
@@ -83,6 +87,36 @@ def put_routes(request: Request, body: RoutesBody) -> dict:
             raise HTTPException(status_code=400, detail=f"model for '{cap}' must be a 'provider/model' id, got {model!r}")
     gateway.save_routes(request.app.state.dbx, clean)
     return {"ok": True, "routes": gateway.load_routes(request.app.state.dbx)}
+
+
+@router.get("/api/model-context-lengths")
+def get_context_lengths(request: Request) -> dict:
+    """Per-model context length overrides (tokens) + the fallback default used when unset.
+
+    The dynamic tool-result cap sizes to a model's context length; MLX registration auto-detects it,
+    and this lets a user set/correct it for any model (e.g. Ollama, which isn't auto-detected)."""
+    _require_unlocked(request)
+    return {"lengths": gateway.load_context_lengths(request.app.state.dbx), "default": gateway._DEFAULT_CONTEXT_TOKENS}
+
+
+@router.put("/api/model-context-lengths")
+def put_context_lengths(request: Request, body: ContextLengthsBody) -> dict:
+    """Merge per-model context-length overrides into the store (a <=0 value removes an override).
+
+    Merges (rather than replaces) so editing one model never wipes another's auto-detected length.
+    Keys must be 'provider/model' ids — the shape every gateway model uses."""
+    _require_unlocked(request)
+    conn = request.app.state.dbx
+    merged = dict(gateway.load_context_lengths(conn))
+    for model, tokens in body.lengths.items():
+        if "/" not in model:
+            raise HTTPException(status_code=400, detail=f"context-length key must be a 'provider/model' id, got {model!r}")
+        if tokens <= 0:
+            merged.pop(model, None)  # reset this model to the default
+        else:
+            merged[model] = tokens
+    gateway.save_context_lengths(conn, merged)
+    return {"ok": True, "lengths": gateway.load_context_lengths(conn)}
 
 
 def _pricing_map() -> dict[str, dict]:

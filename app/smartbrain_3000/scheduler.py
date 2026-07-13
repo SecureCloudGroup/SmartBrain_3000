@@ -360,6 +360,7 @@ def run_schedule(ctx, audit, approvals, store: ScheduleStore, schedule: dict, *,
             # spawn/rewrite self-perpetuating schedules); those always park for human approval.
             auto_approve=consent.remembered(conn) - tools.SCHEDULE_WRITE_TOOLS,
             timeout=_AGENT_TURN_TIMEOUT,  # tolerate a cold local-model load (see constant)
+            result_cap=gateway.result_cap_for(conn, model),
         )
         _breaker_record(success=True)  # B11: a successful turn resets the breaker
         _record_run_safe(store, sid, str(result.get("status", "complete")), str(result.get("message", "")), None)

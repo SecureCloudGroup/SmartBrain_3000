@@ -10,6 +10,7 @@ chokepoint); this module never calls a handler directly.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import logging
 import re
@@ -102,7 +103,7 @@ def _args_valid(tool: tools.Tool, args: dict) -> bool:
         return False
 
 
-def _execute_inline(ctx: tools.ToolContext, audit, tc: dict, conversation_id: str | None, auto_approve) -> dict:
+def _execute_inline(ctx: tools.ToolContext, audit, tc: dict, conversation_id: str | None, auto_approve, result_cap: int = _RESULT_CAP) -> dict:
     """Run a non-parked tool call (OBSERVE / remembered write / unknown / invalid)."""
     name, args, tcid = _tool_call_parts(tc)
     tool = tools.get_tool(name) if name else None
@@ -122,7 +123,7 @@ def _execute_inline(ctx: tools.ToolContext, audit, tc: dict, conversation_id: st
             content = json.dumps(result, default=str)
         except Exception as exc:  # never crash the turn — feed the error back
             content = json.dumps({"error": str(exc)})
-    return {"role": "tool", "tool_call_id": tcid, "content": content[:_RESULT_CAP]}
+    return {"role": "tool", "tool_call_id": tcid, "content": content[:result_cap]}
 
 
 def _classify(tool_calls: list[dict], auto_approve) -> tuple[list[dict], list[dict]]:
@@ -167,16 +168,18 @@ def _emit_usage(usage_sink, model, response) -> None:
         usage_sink(model, response)
 
 
-def run_turn(ctx, audit, approvals, *, messages, model, conversation_id, turn_id, start_step=0, start_calls=0, usage_sink=None, auto_approve=frozenset(), timeout=60.0) -> dict:
+def run_turn(ctx, audit, approvals, *, messages, model, conversation_id, turn_id, start_step=0, start_calls=0, usage_sink=None, auto_approve=frozenset(), timeout=60.0, result_cap=_RESULT_CAP) -> dict:
     """Run the bounded loop from ``start_step``; return a terminal/awaiting result.
 
     ``auto_approve`` is the set of REVIEWED tool names the user has remembered;
     those run inline instead of parking. IRREVERSIBLE tools always park. ``timeout``
     is the per-gateway-call budget — the scheduled path raises it so a cold local-model
-    load doesn't fail the turn.
+    load doesn't fail the turn. ``result_cap`` caps each tool-result string fed back to the
+    model; the route sizes it to the model's context so a big-context model can read more.
     """
     assert audit is not None and approvals is not None, "unlocked stores required"
     assert messages and model, "messages + model required"
+    ctx = dataclasses.replace(ctx, model=model)  # a handler (summarize) calls the gateway with THIS model
     calls = start_calls
     for step in range(start_step, _MAX_STEPS):  # fixed upper bound (P10 #2)
         try:
@@ -209,15 +212,19 @@ def run_turn(ctx, audit, approvals, *, messages, model, conversation_id, turn_id
         messages.append({"role": "assistant", "content": content, "tool_calls": tool_calls})
         parked, inline = _classify(tool_calls, auto_approve)
         for tc in inline:  # bounded by _MAX_TOOL_CALLS
-            messages.append(_execute_inline(ctx, audit, tc, conversation_id, auto_approve))
+            messages.append(_execute_inline(ctx, audit, tc, conversation_id, auto_approve, result_cap))
         if parked:
             turn_state = {"model": model, "messages": messages, "step": step, "calls": calls, "conversation_id": conversation_id}
             return {"status": "awaiting_approval", "turn_id": turn_id, "pending": _park(approvals, audit, parked, conversation_id, turn_id, turn_state)}
     return {"status": "max_steps", "message": "step budget exhausted", "steps": _MAX_STEPS}
 
 
-def resume_turn(ctx, audit, approvals, turn_id: str, *, usage_sink=None, auto_approve=frozenset(), timeout=60.0) -> dict | None:
-    """Resume a parked turn once its approvals are resolved; None if unknown turn."""
+def resume_turn(ctx, audit, approvals, turn_id: str, *, conn=None, usage_sink=None, auto_approve=frozenset(), timeout=60.0, result_cap=_RESULT_CAP) -> dict | None:
+    """Resume a parked turn once its approvals are resolved; None if unknown turn.
+
+    ``conn`` (when given) sizes ``result_cap`` to the resumed turn's model — the route can't know that
+    model until the parked turn_state is loaded here. ``ctx.model`` is set by the ``run_turn`` call below.
+    """
     assert audit is not None and approvals is not None, "unlocked stores required"
     assert turn_id, "turn id required"
     rows = approvals.list_for_turn(turn_id)
@@ -236,6 +243,8 @@ def resume_turn(ctx, audit, approvals, turn_id: str, *, usage_sink=None, auto_ap
     batch = [r for r in stated if r["turn_state"]["step"] == latest_step]
     turn_state = batch[0]["turn_state"]
     messages = turn_state["messages"]
+    if conn is not None:  # size the cap to the resumed turn's model (known only now, from turn_state)
+        result_cap = gateway.result_cap_for(conn, turn_state["model"])
     for r in batch:  # one tool-result message per call in the latest park (server-reconstructed)
         if r["status"] == "executed" and r["result"] is not None:
             content = json.dumps(r["result"], default=str)
@@ -243,10 +252,10 @@ def resume_turn(ctx, audit, approvals, turn_id: str, *, usage_sink=None, auto_ap
             content = json.dumps({"error": "tool execution failed"})  # never claim a forged success
         else:
             content = json.dumps({"error": "action was not approved"})
-        messages.append({"role": "tool", "tool_call_id": r["tool_call_id"], "content": content[:_RESULT_CAP]})
+        messages.append({"role": "tool", "tool_call_id": r["tool_call_id"], "content": content[:result_cap]})
     return run_turn(
         ctx, audit, approvals, messages=messages, model=turn_state["model"],
         conversation_id=turn_state.get("conversation_id"), turn_id=turn_id,
         start_step=turn_state["step"] + 1, start_calls=turn_state["calls"], usage_sink=usage_sink,
-        auto_approve=auto_approve, timeout=timeout,
+        auto_approve=auto_approve, timeout=timeout, result_cap=result_cap,
     )

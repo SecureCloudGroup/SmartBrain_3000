@@ -96,7 +96,23 @@ def put_mlx(request: Request, body: MLXConfig) -> dict[str, bool]:
     except Exception as exc:  # saved, but the gateway is unreachable — surface it
         log.warning("mlx register skipped: %s", exc)
         synced = False
+    _detect_mlx_context_lengths(request, body.url, body.api_key)
     return {"ok": True, "gateway_synced": synced}
+
+
+def _detect_mlx_context_lengths(request: Request, url: str, api_key: str) -> None:
+    """Persist each MLX model's server-reported max_model_len (bifrost strips it) so the dynamic
+    result cap can size to it. Keyed 'mlx/<id>' to match catalog ids. A user override for a model
+    already in the store WINS (never silently clobbered); best-effort — a probe failure is ignored."""
+    try:
+        detected = gateway.probe_mlx(url, api_key).get("context_lengths", {})
+        if not detected:
+            return
+        conn = request.app.state.dbx
+        prefixed = {f"mlx/{mid}": tokens for mid, tokens in detected.items()}
+        gateway.save_context_lengths(conn, {**prefixed, **gateway.load_context_lengths(conn)})
+    except Exception as exc:  # detection is best-effort; the manual override always remains available
+        log.warning("mlx context-length detection skipped: %s", exc)
 
 
 @router.delete("/api/local-models/{name}")

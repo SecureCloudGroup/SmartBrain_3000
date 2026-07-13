@@ -106,6 +106,93 @@ def test_run_observe_executes_and_audits() -> None:
     assert row["tool"] == "kb_search" and row["decision"] == "auto" and row["ok"] is True
 
 
+def _wired_doc(title: str, content: str) -> tuple[tools.ToolContext, str]:
+    conn = duckdb.connect(":memory:")
+    dbmod.run_migrations(conn)
+    kb = KnowledgeBase(conn, gen_master_key())
+    doc_id = kb.add(title, content)
+    return tools.ToolContext(kb=kb), doc_id  # model=None -> read_document uses the default (floor) cap
+
+
+def test_read_document_and_summarize_are_observe() -> None:
+    # Both auto-run (no approval) and must be in the import-time OBSERVE allowlist with no egress.
+    for name in ("read_document", "summarize_document"):
+        tool = tools.get_tool(name)
+        assert tool.tier is tools.Tier.OBSERVE and tool.egress is False
+        assert name in tools._OBSERVE_READONLY
+
+
+def test_read_document_resolves_by_query_and_returns_full_text() -> None:
+    ctx, _ = _wired_doc("Perennial", "the whole body of the document, not a snippet")
+    out = _call("read_document", ctx, {"query": "Perennial"})
+    assert out["title"] == "Perennial"
+    assert out["content"] == "the whole body of the document, not a snippet"
+    assert out["offset"] == 0 and out["truncated"] is False and out["next_offset"] is None
+
+
+def test_read_document_pages_by_offset() -> None:
+    ctx, doc_id = _wired_doc("Doc", "0123456789ABCDEF")
+    first = _call("read_document", ctx, {"doc_id": doc_id, "offset": 0, "max_chars": 10})
+    assert first["content"] == "0123456789" and first["returned_chars"] == 10
+    assert first["total_chars"] == 16 and first["next_offset"] == 10 and first["truncated"] is True
+    second = _call("read_document", ctx, {"doc_id": doc_id, "offset": first["next_offset"], "max_chars": 10})
+    assert second["content"] == "ABCDEF" and second["next_offset"] is None and second["truncated"] is False
+
+
+def test_read_document_clamps_window_to_result_cap() -> None:
+    # A doc bigger than the default (floor) cap: an unbounded max_chars is clamped so the window +
+    # metadata stay under the model's result cap, and the rest is reachable by paging.
+    cap = gateway.result_cap_for(None, "")  # the default/floor cap read_document clamps to
+    ctx, doc_id = _wired_doc("Big", "z" * (cap + 5000))
+    out = _call("read_document", ctx, {"doc_id": doc_id, "max_chars": 10_000_000})
+    assert out["returned_chars"] < cap  # clamped below the cap (leaves the JSON-envelope margin)
+    assert out["truncated"] is True and out["next_offset"] == out["returned_chars"]
+
+
+def test_read_document_missing_doc_raises() -> None:
+    ctx, _ = _wired_doc("Doc", "body")
+    with pytest.raises(AssertionError):
+        _call("read_document", ctx, {"doc_id": "no-such-id"})
+    with pytest.raises(AssertionError):
+        _call("read_document", ctx, {"query": "nothing matches this at all"})
+
+
+def test_summarize_document_requires_a_resolved_model() -> None:
+    # ctx.model is None (no turn model) -> the handler refuses BEFORE any gateway call.
+    ctx, doc_id = _wired_doc("Doc", "body text")
+    with pytest.raises(AssertionError):
+        tools._summarize_document(ctx, {"doc_id": doc_id})
+
+
+def test_list_documents_returns_all_titles_and_ids() -> None:
+    # The catalog listing: answers "what documents do I have?" with id+title so the agent can then
+    # open one by id. OBSERVE (auto-runs, like list_tasks) and in the import-time allowlist.
+    conn = duckdb.connect(":memory:")
+    dbmod.run_migrations(conn)
+    kb = KnowledgeBase(conn, gen_master_key())
+    kb.add("Lease", "body one")
+    kb.add("Perennial", "body two")
+    out = _call("list_documents", tools.ToolContext(kb=kb), {})
+    assert {d["title"] for d in out["documents"]} == {"Lease", "Perennial"}
+    assert out["total"] == 2 and out["count"] == 2 and out["truncated"] is False
+    assert all(d["id"] for d in out["documents"])  # ids present for chaining into read/summarize
+    assert all(d["created_at"] and d["updated_at"] for d in out["documents"])  # dates included
+    assert tools.get_tool("list_documents").tier is tools.Tier.OBSERVE
+    assert "list_documents" in tools._OBSERVE_READONLY
+
+
+def test_list_documents_bounds_and_reports_true_total(monkeypatch) -> None:
+    conn = duckdb.connect(":memory:")
+    dbmod.run_migrations(conn)
+    kb = KnowledgeBase(conn, gen_master_key())
+    for i in range(4):
+        kb.add(f"Doc {i}", "x")
+    monkeypatch.setattr(tools, "_MAX_LIST_DOCUMENTS", 2)  # force the cap without adding 500 docs
+    out = _call("list_documents", tools.ToolContext(kb=kb), {})
+    assert out["total"] == 4 and out["count"] == 2 and out["truncated"] is True
+    assert len(out["documents"]) == 2
+
+
 def test_list_tasks_tool_reads_planner() -> None:
     # The morning-briefing bug: with no read-tasks tool the agent misused kb_search and
     # reported saved DOCUMENTS as "tasks". list_tasks must read the planner directly and

@@ -336,6 +336,14 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ routes }),
     }),
+  // per-model context length (tokens). Sizes the dynamic tool-result cap so a big-context model can
+  // read/summarize far more per step; MLX auto-detects, others fall back to `default` until overridden.
+  getContextLengths: () => req<{ lengths: Record<string, number>; default: number }>("/api/model-context-lengths"),
+  putContextLengths: (lengths: Record<string, number>) =>
+    req<{ ok: boolean; lengths: Record<string, number> }>("/api/model-context-lengths", {
+      method: "PUT",
+      body: JSON.stringify({ lengths }),
+    }),
   getUsage: (range?: { since?: string; until?: string }) => {
     const q = new URLSearchParams();
     if (range?.since) q.set("since", range.since);

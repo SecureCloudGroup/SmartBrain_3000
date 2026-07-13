@@ -136,7 +136,23 @@ def test_probe_mlx_ok() -> None:
 
     with httpx.Client(transport=httpx.MockTransport(handler)) as client:
         out = gateway.probe_mlx("http://host.docker.internal:8888", "1234", client=client)
-    assert out == {"reachable": True, "models": ["Qwen2.5-7B-Instruct-4bit"]}
+    assert out == {"reachable": True, "models": ["Qwen2.5-7B-Instruct-4bit"], "context_lengths": {}}
+
+
+def test_probe_mlx_captures_context_length() -> None:
+    # The MLX server reports max_model_len (the context length bifrost strips from its own catalog);
+    # probe_mlx surfaces it per model so the dynamic result cap can size to it.
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"data": [
+            {"id": "gemma-4", "max_model_len": 262144},
+            {"id": "no-len-model"},  # a model without the field is simply omitted from context_lengths
+        ]})
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        out = gateway.probe_mlx("http://host:8888", "", client=client)
+    assert out["reachable"] is True
+    assert out["models"] == ["gemma-4", "no-len-model"]
+    assert out["context_lengths"] == {"gemma-4": 262144}
 
 
 @pytest.fixture()
@@ -166,12 +182,33 @@ def test_put_mlx_stores_and_registers(client: TestClient, monkeypatch) -> None:
     client.post("/api/account/setup", json={"passphrase": "correct-horse"})
     seen: list = []
     monkeypatch.setattr(gateway, "register_mlx", lambda url, key: seen.append((url, key)))
+    monkeypatch.setattr(gateway, "probe_mlx", lambda url, key, **k: {"reachable": True, "models": [], "context_lengths": {}})
     r = client.put(
         "/api/local-models/mlx",
         json={"url": "http://host.docker.internal:8888", "api_key": "1234"},
     )
     assert r.status_code == 200
     assert seen == [("http://host.docker.internal:8888", "1234")]
+
+
+def test_put_mlx_persists_detected_context_lengths(client: TestClient, monkeypatch) -> None:
+    # Registration auto-detects each MLX model's context length (bifrost strips it) and stores it,
+    # keyed mlx/<id> to match catalog ids, so the dynamic result cap can size to it.
+    client.post("/api/account/setup", json={"passphrase": "correct-horse"})
+    monkeypatch.setattr(gateway, "register_mlx", lambda url, key: None)
+    monkeypatch.setattr(gateway, "probe_mlx", lambda url, key, **k: {"reachable": True, "models": ["gemma-4"], "context_lengths": {"gemma-4": 262144}})
+    client.put("/api/local-models/mlx", json={"url": "http://host:8888", "api_key": ""})
+    assert client.get("/api/model-context-lengths").json()["lengths"] == {"mlx/gemma-4": 262144}
+
+
+def test_put_mlx_detection_preserves_existing_override(client: TestClient, monkeypatch) -> None:
+    # A user's manual override for a model must NOT be silently clobbered by re-detection on save.
+    client.post("/api/account/setup", json={"passphrase": "correct-horse"})
+    client.put("/api/model-context-lengths", json={"lengths": {"mlx/gemma-4": 100000}})  # user override
+    monkeypatch.setattr(gateway, "register_mlx", lambda url, key: None)
+    monkeypatch.setattr(gateway, "probe_mlx", lambda url, key, **k: {"reachable": True, "models": ["gemma-4"], "context_lengths": {"gemma-4": 262144}})
+    client.put("/api/local-models/mlx", json={"url": "http://host:8888", "api_key": ""})
+    assert client.get("/api/model-context-lengths").json()["lengths"] == {"mlx/gemma-4": 100000}  # override wins
 
 
 def test_local_status_reports_configured_and_models(client: TestClient, monkeypatch) -> None:
