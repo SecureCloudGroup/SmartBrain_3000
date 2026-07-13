@@ -7,6 +7,7 @@
   import { refreshPending } from "$lib/pending.svelte";
   import { api, ApiError, type AgentResult, type ChatMessage, type Conversation, type DiscoveredModel, type RecentScheduleRun } from "$lib/api";
   import { describeError } from "$lib/errors";
+  import Markdown from "$lib/Markdown.svelte";
   import { remote } from "$lib/remote/connection.svelte";
   import { scheduleUpdates } from "$lib/scheduleUpdates.svelte";
 
@@ -672,7 +673,12 @@
       </p>
     {/if}
     {#each log as entry (entry.id)}
-      <div class="bubble {entry.err ? 'err' : entry.role}">{entry.content}</div>
+      {#if entry.role === "assistant" && !entry.err}
+        <!-- Models answer in markdown; render it. User text + errors stay verbatim. -->
+        <Markdown content={entry.content} />
+      {:else}
+        <div class="bubble {entry.err ? 'err' : entry.role}">{entry.content}</div>
+      {/if}
     {/each}
     {#if busy}<div class="bubble assistant muted">…</div>{/if}
     {#if log.length === 0}
