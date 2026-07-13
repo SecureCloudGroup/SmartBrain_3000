@@ -15,6 +15,7 @@ column on the document.
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import uuid
@@ -33,6 +34,11 @@ _MAX_DESCRIPTION = 2000
 LOCAL = "local"  # you authored it: yours to edit and export
 IMPORTED = "imported"  # it came from someone else: an update from source may replace its documents
 _KINDS = (LOCAL, IMPORTED)
+
+# Who owns a MEMBER of a vault (vs. who owns the vault).
+OWNER = "owner"  # the user's own document, which merely also sits in this vault — never clobber it
+IMPORT = "import"  # came from a vault: vault-owned, and a later update may replace it
+_ORIGINS = (OWNER, IMPORT)
 
 
 class VaultStore:
@@ -123,6 +129,9 @@ class VaultStore:
         body = {"name": name[:_MAX_NAME], "description": description[:_MAX_DESCRIPTION]}
         if current.get("source"):
             body["source"] = current["source"]  # never lose where an imported vault came from
+        stored = self.get_key(vault_id)
+        if stored:
+            body["key"] = base64.b64encode(stored).decode("ascii")  # nor the key already sent out
         nonce, ciphertext = self._seal(vault_id, body)
         self._conn.execute(
             "UPDATE vaults SET nonce = ?, ciphertext = ?, updated_at = now() WHERE id = ?;",
@@ -151,9 +160,15 @@ class VaultStore:
 
     # --- membership -----------------------------------------------------------------------------
 
-    def add_documents(self, vault_id: str, doc_ids: list[str]) -> int:
-        """Add documents to a vault (idempotent); return how many were newly added."""
+    def add_documents(self, vault_id: str, doc_ids: list[str], origin: str = OWNER) -> int:
+        """Add documents to a vault (idempotent); return how many were newly added.
+
+        ``origin`` records WHO owns the member. 'import' = it came from someone else's vault, so a
+        later update from that vault may replace it. 'owner' = the user's own document, which merely
+        also sits in this vault — a vault update must NEVER clobber it.
+        """
         assert vault_id, "vault id required"
+        assert origin in _ORIGINS, "unknown membership origin"
         assert len(doc_ids) <= _MAX_DOCS_PER_VAULT, "too many documents in one call"
         added = 0
         for doc_id in doc_ids:  # bounded by _MAX_DOCS_PER_VAULT
@@ -165,10 +180,45 @@ class VaultStore:
             if existing is not None:
                 continue  # already a member — adding twice is a no-op, not an error
             self._conn.execute(
-                "INSERT INTO vault_documents (vault_id, doc_id) VALUES (?, ?);", [vault_id, doc_id]
+                "INSERT INTO vault_documents (vault_id, doc_id, origin) VALUES (?, ?, ?);",
+                [vault_id, doc_id, origin],
             )
             added += 1
         return added
+
+    def origin_of(self, vault_id: str, doc_id: str) -> str | None:
+        """Who owns this membership — 'import' (vault-owned) or 'owner' (the user's own document)."""
+        row = self._conn.execute(
+            "SELECT origin FROM vault_documents WHERE vault_id = ? AND doc_id = ?;", [vault_id, doc_id]
+        ).fetchone()
+        return str(row[0]) if row else None
+
+    def remember_key(self, vault_id: str, key: bytes) -> None:
+        """Store the Vault Key of a vault we exported, so the user can re-show it to a friend
+        without re-exporting (which would mint a NEW key and orphan the file already sent)."""
+        assert len(key) == 32, "vault key must be 32 bytes"
+        current = self.get(vault_id)
+        assert current is not None, "vault must exist"
+        body = {"name": current["name"], "description": current["description"],
+                "key": base64.b64encode(key).decode("ascii")}
+        if current.get("source"):
+            body["source"] = current["source"]
+        nonce, ciphertext = self._seal(vault_id, body)
+        self._conn.execute(
+            "UPDATE vaults SET nonce = ?, ciphertext = ?, updated_at = now() WHERE id = ?;",
+            [nonce, ciphertext, vault_id],
+        )
+
+    def get_key(self, vault_id: str) -> bytes | None:
+        """The stored Vault Key, or None if this vault has never been exported."""
+        row = self._conn.execute(
+            "SELECT nonce, ciphertext FROM vaults WHERE id = ?;", [vault_id]
+        ).fetchone()
+        if row is None:
+            return None
+        body = self._open(vault_id, bytes(row[0]), bytes(row[1]))
+        raw = body.get("key")
+        return base64.b64decode(raw) if raw else None
 
     def remove_documents(self, vault_id: str, doc_ids: list[str]) -> int:
         """Remove documents from a vault. The documents themselves are NOT deleted."""

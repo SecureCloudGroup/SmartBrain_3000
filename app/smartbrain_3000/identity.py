@@ -21,34 +21,42 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 
 _PRIVKEY_SECRET = "webrtc:identity_ed25519"
+# A SECOND, separate signing identity, used to sign published vaults. Deliberately not the WebRTC
+# key: that one is pinned by every paired phone and must never change, while a publisher identity is
+# public and may one day need rotating. Rotating one must not break the other, and compromise of a
+# published identity must not let anyone impersonate this Desktop to its own phone.
+VAULT_PUBLISHER_SECRET = "vault:publisher_ed25519"
 _RAW = serialization.Encoding.Raw
 _RAW_PRIV = serialization.PrivateFormat.Raw
 _RAW_PUB = serialization.PublicFormat.Raw
 
 
-def _load_or_create(store) -> Ed25519PrivateKey:
-    """Return the Desktop's Ed25519 private key, generating + persisting it once."""
+def _load_or_create(store, secret_key: str = _PRIVKEY_SECRET) -> Ed25519PrivateKey:
+    """Return an Ed25519 private key from the secret store, generating + persisting it once.
+
+    ``secret_key`` selects WHICH identity: the WebRTC one (default) or the vault publisher one."""
     assert store is not None, "unlocked secret store required"
-    raw = store.get(_PRIVKEY_SECRET)
+    assert secret_key, "secret key name required"
+    raw = store.get(secret_key)
     if raw is not None:
         return Ed25519PrivateKey.from_private_bytes(base64.b64decode(raw))
     key = Ed25519PrivateKey.generate()
     secret = key.private_bytes(_RAW, _RAW_PRIV, serialization.NoEncryption())
-    store.put(_PRIVKEY_SECRET, base64.b64encode(secret).decode("ascii"))
-    assert store.get(_PRIVKEY_SECRET) is not None, "identity key must persist"
+    store.put(secret_key, base64.b64encode(secret).decode("ascii"))
+    assert store.get(secret_key) is not None, "identity key must persist"
     return key
 
 
-def public_key_b64(store) -> str:
-    """Return the Desktop's public key (base64) — pinned by the phone at pairing."""
-    pub = _load_or_create(store).public_key().public_bytes(_RAW, _RAW_PUB)
+def public_key_b64(store, secret_key: str = _PRIVKEY_SECRET) -> str:
+    """Return a public key (base64) — the WebRTC one is pinned by the phone at pairing."""
+    pub = _load_or_create(store, secret_key).public_key().public_bytes(_RAW, _RAW_PUB)
     return base64.b64encode(pub).decode("ascii")
 
 
-def sign(store, data: bytes) -> str:
-    """Sign ``data`` with the Desktop's identity key; return a base64 signature."""
+def sign(store, data: bytes, secret_key: str = _PRIVKEY_SECRET) -> str:
+    """Sign ``data`` with one of this Desktop's identities; return a base64 signature."""
     assert isinstance(data, (bytes, bytearray)), "data to sign must be bytes"
-    return base64.b64encode(_load_or_create(store).sign(bytes(data))).decode("ascii")
+    return base64.b64encode(_load_or_create(store, secret_key).sign(bytes(data))).decode("ascii")
 
 
 def verify(public_key_b64_str: str, data: bytes, signature_b64: str) -> bool:

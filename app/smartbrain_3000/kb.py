@@ -107,6 +107,16 @@ class KnowledgeBase:
             self._index = kbindex.SearchIndex(self)
         return self._index
 
+    def reset_index(self) -> None:
+        """Drop the in-memory index so the next search rebuilds it in one pass.
+
+        A bulk import writes many documents and their vectors. Doing that through the incremental
+        path walks straight into the O(n^2) build kbindex warns about (each _VecBlock.add vstacks the
+        growing matrix and rescans every row — 19 seconds for 10k documents). Import writes the rows,
+        then drops the index once: the next search does a single bulk_load.
+        """
+        self._index = None
+
     # --- index data sources (each decrypts the corpus exactly ONCE, at build time) --------------
 
     def iter_documents(self, limit: int) -> list[tuple[str, str, str]]:
@@ -374,6 +384,25 @@ class KnowledgeBase:
         assert len(row) == 4, "unexpected embeddings row shape"
         vector = self._open_embedding(doc_id, 0, bytes(row[0]), bytes(row[1]), int(row[2]), str(row[3]))
         return vector, str(row[3])
+
+    def vectors_for(self, doc_id: str, model: str) -> list[list[float]]:
+        """A document's chunk vectors for ``model``, in chunk order ([] if it has none).
+
+        Used by vault export: shipping the vectors is what makes an imported vault searchable the
+        moment it lands, instead of after the recipient's machine has re-embedded the whole thing.
+        """
+        assert doc_id and model, "doc id + model required"
+        rows = self._conn.execute(
+            "SELECT chunk_idx, nonce, ciphertext, dim, model FROM embeddings "
+            f"WHERE doc_id = ? AND model = ? ORDER BY chunk_idx LIMIT {_MAX_CHUNKS};",
+            [doc_id, model],
+        ).fetchall()
+        out: list[list[float]] = []
+        for row in rows:  # bounded by _MAX_CHUNKS
+            out.append(self._open_embedding(
+                doc_id, int(row[0]), bytes(row[1]), bytes(row[2]), int(row[3]), str(row[4])
+            ))
+        return out
 
     def docs_needing_embedding(self, model: str) -> list[str]:
         """Return ids of docs with no embedding or one from a different model."""

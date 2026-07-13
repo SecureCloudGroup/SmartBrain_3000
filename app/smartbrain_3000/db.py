@@ -185,6 +185,11 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
         "added_at TIMESTAMP DEFAULT current_timestamp, "
         "PRIMARY KEY (vault_id, doc_id));",
     ),
+    # Who OWNS a vault member. 'import' = the document came from someone else's vault, so a later
+    # update from that vault may replace it. 'owner' = the user's own document (it merely also sits
+    # in this vault), so a vault update must NEVER clobber it. Plaintext because it is a permission
+    # bit the API must check on every rename/delete, and it says nothing about content.
+    (22, "ALTER TABLE vault_documents ADD COLUMN origin TEXT DEFAULT 'owner';"),
 )
 
 # The newest migration this build knows how to apply. A database recording a
