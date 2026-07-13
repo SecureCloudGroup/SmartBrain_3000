@@ -296,8 +296,8 @@ class KnowledgeBase:
         start = max(0, offset - 40)
         return content[start : start + _SNIPPET_CHARS]
 
-    def search(self, query: str, limit: int = 10) -> list[dict]:
-        """Lexical search over the WHOLE corpus, ranked by BM25.
+    def search(self, query: str, limit: int = 10, scope: set[str] | None = None) -> list[dict]:
+        """Lexical search over the corpus, ranked by BM25. ``scope`` restricts it to a vault.
 
         Was: raw term-frequency over only the 500 newest documents (older ones silently unfindable).
         Now: BM25 (which normalises for length, so a long document can't win on size alone) served
@@ -307,11 +307,14 @@ class KnowledgeBase:
         assert 1 <= limit <= _SEARCH_SCAN_LIMIT, "limit out of range"
         terms = kbindex.tokenize(query)
         assert terms, "query must contain at least one term"
-        ranked = self.index.lexical(query, limit)
+        ranked = self.index.lexical(query, limit, scope)
         hits = [self._hit(doc_id, score, None, terms) for doc_id, score in ranked]
         return [h for h in hits if h is not None]
 
-    def hybrid_search(self, query: str, query_vector: list[float] | None, model: str, limit: int = 10) -> list[dict]:
+    def hybrid_search(
+        self, query: str, query_vector: list[float] | None, model: str, limit: int = 10,
+        scope: set[str] | None = None,
+    ) -> list[dict]:
         """Lexical AND semantic, fused by rank (RRF) — the default for the app and the agent.
 
         Keyword search finds exact names/numbers; vector search finds meaning. Fusing them beats
@@ -323,9 +326,10 @@ class KnowledgeBase:
         terms = kbindex.tokenize(query)
         assert terms, "query must contain at least one term"
         depth = min(limit * 2, _SEARCH_SCAN_LIMIT)  # look deeper than we return, so fusion can re-rank
-        lexical = self.index.lexical(query, depth)
+        lexical = self.index.lexical(query, depth, scope)
         semantic = (
-            self.index.semantic(query_vector, model, depth, _SEMANTIC_MIN_SCORE) if query_vector else []
+            self.index.semantic(query_vector, model, depth, _SEMANTIC_MIN_SCORE, scope)
+            if query_vector else []
         )
         chunk_of = {doc_id: chunk_idx for doc_id, _, chunk_idx in semantic}
         fused = kbindex.fuse_rrf([[d for d, _ in lexical], [d for d, _, _ in semantic]])
@@ -383,7 +387,9 @@ class KnowledgeBase:
         assert isinstance(rows, list), "fetchall must return a list"
         return [str(r[0]) for r in rows]
 
-    def semantic_search(self, query_vector: list[float], model: str, limit: int = 10) -> list[dict]:
+    def semantic_search(
+        self, query_vector: list[float], model: str, limit: int = 10, scope: set[str] | None = None,
+    ) -> list[dict]:
         """Rank docs by cosine similarity to ``query_vector``; return top hits.
 
         A document scores as its best-matching chunk, and we KEEP which chunk that was — so the
@@ -396,7 +402,7 @@ class KnowledgeBase:
         assert query_vector, "query vector must be non-empty"
         assert model, "model required"
         assert 1 <= limit <= _SEARCH_SCAN_LIMIT, "limit out of range"
-        ranked = self.index.semantic(query_vector, model, limit, _SEMANTIC_MIN_SCORE)
+        ranked = self.index.semantic(query_vector, model, limit, _SEMANTIC_MIN_SCORE, scope)
         hits = [self._hit(doc_id, score, chunk_idx, []) for doc_id, score, chunk_idx in ranked]
         return [h for h in hits if h is not None]
 

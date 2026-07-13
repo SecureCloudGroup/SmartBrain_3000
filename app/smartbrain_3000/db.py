@@ -160,6 +160,31 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
     # so pre-existing run history doesn't spam the badge on upgrade; record_run inserts new
     # runs as seen=false explicitly, so only genuinely-new output is counted as unseen.
     (19, "ALTER TABLE schedule_runs ADD COLUMN seen BOOLEAN DEFAULT true;"),
+    # Vaults: a named, selectable SUBSET of the knowledge base — the unit you scope a search to,
+    # and (next) the unit you export and share. A vault's name and description are encrypted,
+    # because what you called a collection ("Divorce", "Cancer treatment") reveals as much as the
+    # documents in it. `kind` and `version` stay plaintext: they are low-sensitivity and the UI
+    # filters/sorts on them without decrypting, exactly like tasks.status and schedule_runs.seen.
+    #   kind='local'    — you authored it (yours to edit and export)
+    #   kind='imported' — it came from someone else's vault (replaceable by an update from source)
+    (
+        20,
+        "CREATE TABLE IF NOT EXISTS vaults ("
+        "id TEXT PRIMARY KEY, kind TEXT NOT NULL DEFAULT 'local', "
+        "version INTEGER NOT NULL DEFAULT 1, "
+        "nonce BLOB NOT NULL, ciphertext BLOB NOT NULL, "
+        "created_at TIMESTAMP DEFAULT current_timestamp, "
+        "updated_at TIMESTAMP DEFAULT current_timestamp);",
+    ),
+    # Membership is MANY-TO-MANY: one document can belong to several vaults (a lease belongs in
+    # both "Property" and "2026 taxes"), so membership cannot be a column on documents.
+    (
+        21,
+        "CREATE TABLE IF NOT EXISTS vault_documents ("
+        "vault_id TEXT NOT NULL, doc_id TEXT NOT NULL, "
+        "added_at TIMESTAMP DEFAULT current_timestamp, "
+        "PRIMARY KEY (vault_id, doc_id));",
+    ),
 )
 
 # The newest migration this build knows how to apply. A database recording a

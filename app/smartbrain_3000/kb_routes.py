@@ -76,8 +76,24 @@ _SEARCH_MODES = ("hybrid", "lexical", "semantic")
 _MAX_SEARCH_LIMIT = 50
 
 
+def _scope(request: Request, vault_id: str | None) -> set[str] | None:
+    """Restrict a search to one vault's documents. None = search everything.
+
+    An EMPTY vault must scope to an empty set, not to "no scope" — otherwise searching an empty
+    vault would silently search the whole library, which is the opposite of what was asked.
+    """
+    if not vault_id:
+        return None
+    store = getattr(request.app.state, "vaults", None)
+    if store is None:
+        raise HTTPException(status_code=423, detail="locked: unlock first")
+    if store.get(vault_id) is None:
+        raise HTTPException(status_code=404, detail="vault not found")
+    return set(store.document_ids(vault_id))
+
+
 @router.get("/api/kb/search")
-def search_docs(request: Request, q: str, mode: str = "hybrid", limit: int = 10) -> dict:
+def search_docs(request: Request, q: str, mode: str = "hybrid", limit: int = 10, vault: str | None = None) -> dict:
     """Search the KB. mode=hybrid (default), lexical, or semantic.
 
     HYBRID is the default because keyword and vector search fail in opposite directions: keyword
@@ -87,6 +103,8 @@ def search_docs(request: Request, q: str, mode: str = "hybrid", limit: int = 10)
 
     Semantic/hybrid embed ``q`` via the gateway; if the gateway is unavailable they fall back to
     lexical and set ``degraded: true`` so the switch is observable, never silent.
+
+    ``vault`` restricts the search to one vault's documents.
     """
     knowledge = _kb(request)
     if not q.strip():
@@ -94,17 +112,18 @@ def search_docs(request: Request, q: str, mode: str = "hybrid", limit: int = 10)
     if mode not in _SEARCH_MODES:
         raise HTTPException(status_code=400, detail=f"mode must be one of {', '.join(_SEARCH_MODES)}")
     limit = min(max(limit, 1), _MAX_SEARCH_LIMIT)
+    scope = _scope(request, vault)
     if mode == "lexical":
-        return {"results": knowledge.search(q, limit=limit), "degraded": False}
+        return {"results": knowledge.search(q, limit=limit, scope=scope), "degraded": False}
     model = gateway.embed_model(request.app.state.dbx)
     try:
         vector = gateway.embed(q, model)
     except Exception as exc:  # gateway/embed model unavailable — degrade, but say so
         log.warning("%s search fell back to lexical: %s", mode, exc)
-        return {"results": knowledge.search(q, limit=limit), "degraded": True}
+        return {"results": knowledge.search(q, limit=limit, scope=scope), "degraded": True}
     if mode == "semantic":
-        return {"results": knowledge.semantic_search(vector, model, limit=limit), "degraded": False}
-    return {"results": knowledge.hybrid_search(q, vector, model, limit=limit), "degraded": False}
+        return {"results": knowledge.semantic_search(vector, model, limit=limit, scope=scope), "degraded": False}
+    return {"results": knowledge.hybrid_search(q, vector, model, limit=limit, scope=scope), "degraded": False}
 
 
 _REINDEX_BUDGET_SECONDS = 25.0  # a request must RETURN; the background indexer finishes the rest
@@ -196,6 +215,13 @@ def get_doc(request: Request, doc_id: str) -> dict:
 
 @router.delete("/api/kb/{doc_id}")
 def delete_doc(request: Request, doc_id: str) -> dict[str, bool]:
-    """Delete a document."""
+    """Delete a document, and drop it from every vault that held it.
+
+    Without the second step a vault would keep pointing at a document that no longer exists — a
+    ghost member that inflates its count and would be exported as a missing file.
+    """
     _kb(request).delete(doc_id)
+    store = getattr(request.app.state, "vaults", None)
+    if store is not None:
+        store.forget_document(doc_id)
     return {"ok": True}

@@ -241,8 +241,14 @@ class SearchIndex:
     def _avg_len(self) -> float:
         return (sum(self._doc_len.values()) / len(self._doc_len)) if self._doc_len else 0.0
 
-    def lexical(self, query: str, limit: int) -> list[tuple[str, float]]:
-        """BM25-ranked (doc_id, score), best first. Covers the WHOLE corpus, not the newest 500."""
+    def lexical(self, query: str, limit: int, scope: set[str] | None = None) -> list[tuple[str, float]]:
+        """BM25-ranked (doc_id, score), best first. Covers the WHOLE corpus, not the newest 500.
+
+        ``scope`` restricts results to those document ids (a vault). Note that IDF is still computed
+        over the WHOLE corpus, not the scope: a word's rarity is a property of the library, and
+        recomputing it per-scope would make the same document rank differently depending on which
+        vault you happened to search — surprising, and no more correct.
+        """
         assert limit >= 1, "limit must be positive"
         self.ensure_built()
         with self._lock:
@@ -259,13 +265,22 @@ class SearchIndex:
                 df = len(postings)
                 idf = math.log(1.0 + (n - df + 0.5) / (df + 0.5))  # always positive; no negative IDF
                 for doc_id, tf in postings.items():  # bounded by the corpus
+                    if scope is not None and doc_id not in scope:
+                        continue
                     norm = 1.0 - _B + _B * (self._doc_len.get(doc_id, 0) / avg)
                     scores[doc_id] = scores.get(doc_id, 0.0) + idf * (tf * (_K1 + 1.0)) / (tf + _K1 * norm)
             ranked = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
             return ranked[:limit]
 
-    def semantic(self, query_vector: list[float], model: str, limit: int, min_score: float) -> list[tuple[str, float, int]]:
-        """Cosine-ranked (doc_id, score, matched chunk_idx), best first."""
+    def semantic(
+        self, query_vector: list[float], model: str, limit: int, min_score: float,
+        scope: set[str] | None = None,
+    ) -> list[tuple[str, float, int]]:
+        """Cosine-ranked (doc_id, score, matched chunk_idx), best first. ``scope`` restricts to a vault.
+
+        Scoping filters BEFORE the top-k cut, so a scoped search returns the best `limit` documents
+        IN the vault — not whatever survives from the best `limit` of the whole corpus.
+        """
         assert query_vector, "query vector required"
         assert model, "model required"
         assert limit >= 1, "limit must be positive"
@@ -275,6 +290,8 @@ class SearchIndex:
             if block is None:
                 return []  # nothing embedded with this model/dim (e.g. the routed model just changed)
             best = block.best_by_doc(query_vector, min_score)
+        if scope is not None:
+            best = {d: v for d, v in best.items() if d in scope}
         ranked = sorted(best.items(), key=lambda kv: kv[1][0], reverse=True)
         return [(doc_id, score, chunk_idx) for doc_id, (score, chunk_idx) in ranked[:limit]]
 
