@@ -134,8 +134,11 @@ def test_semantic_search_ranks_by_similarity() -> None:
     assert [r["id"] for r in results] == [near, far]
     assert results[0]["score"] > results[1]["score"]
     # A hit is now a CITATION: chunk_idx records WHICH chunk matched (so the snippet quotes that
-    # passage), and source/page/offset say where it came from and where to open the document.
-    assert set(results[0]) == {"id", "title", "score", "snippet", "chunk_idx", "source", "page", "offset"}
+    # passage), and source/page/page_label/offset say where it came from, what a "page" is called in
+    # that format (page / slide / sheet), and where to open the document.
+    assert set(results[0]) == {
+        "id", "title", "score", "snippet", "chunk_idx", "source", "page", "page_label", "offset",
+    }
 
 
 def test_chunk_text_splits_long_doc_with_title_prefix() -> None:

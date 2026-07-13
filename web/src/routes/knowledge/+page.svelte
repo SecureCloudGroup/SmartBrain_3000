@@ -33,7 +33,7 @@
   let scoreHelpOpen = $state(false); // U12: visible score-meaning popover, no hover needed
   let docOverlay = $state<HTMLDivElement | null>(null); // U4: focus target for opened doc
 
-  const ACCEPT = ".pdf,.txt,.md,.markdown,.html,.htm,.csv,.json,.log,.rst";
+  const ACCEPT = ".pdf,.docx,.pptx,.xlsx,.txt,.md,.markdown,.html,.htm,.csv,.json,.log,.rst";
   const _MAX_FILES = 20; // bounded per drop
 
   async function loadDocs() {
@@ -123,6 +123,12 @@
     } finally {
       busy = "";
     }
+  }
+
+  // A section means different things per format, so cite it by its real name: a deck has slides and
+  // a spreadsheet has sheets. Calling a slide "p.3" is just wrong.
+  function locator(r: KbHit): string {
+    return r.page_label && r.page_label !== "page" ? `${r.page_label} ${r.page}` : `p.${r.page}`;
   }
 
   // `offset` opens the document AT the passage that matched instead of at the top — the whole point
@@ -380,7 +386,7 @@
           <!-- The citation: which file, which page. Clicking opens the document AT the passage. -->
           {#if r.source || r.page !== null}
             <button class="cite" onclick={() => open(r.id, r.offset)} title="Open at this passage">
-              {r.source}{#if r.source && r.page !== null}&nbsp;·&nbsp;{/if}{#if r.page !== null}p.{r.page}{/if}
+              {r.source}{#if r.source && r.page !== null}&nbsp;·&nbsp;{/if}{#if r.page !== null}{locator(r)}{/if}
             </button>
           {/if}
           <p class="snippet">

@@ -1,10 +1,15 @@
 """Extract text from a URL or uploaded file and store it in the Knowledge base.
 
-URL fetches go through the SSRF guard (netguard.safe_fetch_bytes). PDFs are
-parsed with pypdf, HTML with trafilatura, and text-family files are decoded
-directly. Stored documents are embedded best-effort on add so they are
-immediately searchable. Heavy parsers are imported lazily (only on the ingest
-path) to keep app startup fast.
+URL fetches go through the SSRF guard (netguard.safe_fetch_bytes). PDFs are parsed with pypdf,
+Word/PowerPoint/Excel with python-docx / python-pptx / openpyxl, HTML with trafilatura, and
+text-family files are decoded directly. Stored documents are embedded best-effort on add so they
+are immediately searchable. Heavy parsers are imported lazily (only on the ingest path) to keep app
+startup fast.
+
+Formats that HAVE natural sections record where each one starts, so a search hit can be cited to it:
+PDF pages, PowerPoint slides, Excel sheets. Word does NOT: its pagination is decided by the renderer
+(fonts, margins, printer), so the file itself doesn't know where its pages break — we report no page
+map rather than invent page numbers.
 """
 
 from __future__ import annotations
@@ -12,6 +17,7 @@ from __future__ import annotations
 import io
 import logging
 import os
+from collections.abc import Iterable
 from urllib.parse import urlparse
 
 import httpx
@@ -21,7 +27,9 @@ from . import gateway, kb, netguard
 log = logging.getLogger(__name__)
 
 _MAX_TEXT = 1_000_000  # cap on stored text per document (chars)
-_MAX_PDF_PAGES = 1000  # bounded page loop
+_MAX_SECTIONS = 1000  # bounded loop over pages / slides / sheets
+_MAX_PARTS = 100_000  # bounded loop over paragraphs + table rows in a Word document
+_MAX_ROWS = 10_000  # bounded rows per spreadsheet sheet (a sheet can claim a million)
 _EMBED_TIMEOUT = 15.0  # interactive embed-on-add / rename: fail fast (best-effort; backfilled later)
 # A cold local embed model (e.g. MLX/oMLX loading bge-m3) can take ~50s on its FIRST request.
 # The backfill path waits it out so a single reindex succeeds instead of timing out at 15s (then
@@ -69,17 +77,51 @@ def _looks_binary(data: bytes) -> bool:
     return b"\x00" in data[:1024]
 
 
+def _bounded_sections(pieces: Iterable[str], limit: int) -> list[str]:
+    """Take section texts until the cumulative _MAX_TEXT cap, bounded by ``limit`` sections.
+
+    Capping DURING extraction (not after) is what stops a single text-bomb page/slide/sheet from
+    blowing memory before _MAX_TEXT can be applied.
+    """
+    assert limit >= 1, "limit must be positive"
+    out: list[str] = []
+    total = 0
+    for i, piece in enumerate(pieces):
+        if i >= limit:
+            break
+        if total + len(piece) >= _MAX_TEXT:
+            out.append(piece[: _MAX_TEXT - total])
+            break
+        out.append(piece)
+        total += len(piece)
+    return out
+
+
+def _join_sections(sections: list[str]) -> tuple[str, list[int]]:
+    """Join per-page/slide/sheet text and record where each section STARTS in the result.
+
+    This is the one and only place the offset arithmetic lives, because it is the arithmetic a
+    citation depends on: get it wrong and "page 12" points at page 11. Offsets stay exact across the
+    single separator char that join inserts, and across the leading strip.
+    """
+    starts: list[int] = []
+    pos = 0
+    for piece in sections:  # bounded by the caller
+        starts.append(pos)
+        pos += len(piece) + 1  # +1 for the "\n" the join inserts below
+    text = "\n".join(sections)
+    lead = len(text) - len(text.lstrip())  # the strip shifts every offset left by this much
+    return text.strip(), [max(0, p - lead) for p in starts]
+
+
 def _extract_pdf(data: bytes) -> tuple[str, str, list[int]]:
     """Return (title, text, page_starts) from PDF bytes via pypdf (bounded pages + cumulative cap).
 
-    ``page_starts[i]`` is the character offset in ``text`` where page i+1 begins. This is what makes
-    "page 12" possible in a citation: the page boundaries are known here and NOWHERE else, and used
-    to be flattened away by the join. Offsets are kept exact through the join (which inserts one
-    separator char) and through the leading strip.
+    ``page_starts[i]`` is the character offset in ``text`` where page i+1 begins — the page
+    boundaries are known HERE and nowhere else, and used to be flattened away by the join.
 
-    Caps cumulative text DURING extraction so a single text-bomb page can't blow memory before
-    _MAX_TEXT is applied. All pypdf access (incl. metadata) is inside the try so any parser error
-    surfaces as IngestError, not a 500.
+    All pypdf access (incl. metadata) is inside the try so any parser error surfaces as IngestError,
+    not a 500.
     """
     from pypdf import PdfReader  # lazy: heavy dep, only on the ingest path
 
@@ -87,26 +129,74 @@ def _extract_pdf(data: bytes) -> tuple[str, str, list[int]]:
     assert data, "data is empty"
     try:
         reader = PdfReader(io.BytesIO(data))
-        parts: list[str] = []
-        page_starts: list[int] = []
-        pos = 0
-        for page in reader.pages[:_MAX_PDF_PAGES]:  # bounded page loop
-            piece = page.extract_text() or ""
-            if pos + len(piece) >= _MAX_TEXT:  # cumulative cap = true memory ceiling
-                page_starts.append(pos)
-                parts.append(piece[: _MAX_TEXT - pos])
-                break
-            page_starts.append(pos)
-            parts.append(piece)
-            pos += len(piece) + 1  # +1 for the "\n" that the join below inserts
+        sections = _bounded_sections((p.extract_text() or "" for p in reader.pages), _MAX_SECTIONS)
         title = (reader.metadata.title if reader.metadata and reader.metadata.title else "") or ""
     except Exception as exc:  # malformed / encrypted PDF
         raise IngestError(f"could not read PDF: {exc}") from None
-    text = "\n".join(parts)
-    lead = len(text) - len(text.lstrip())  # the strip below shifts every offset left by this much
-    text = text.strip()
-    starts = [max(0, p - lead) for p in page_starts]
+    text, starts = _join_sections(sections)
     return title.strip(), text, starts
+
+
+def _extract_docx(data: bytes) -> tuple[str, str, list[int]]:
+    """Return (title, text, []) from a Word .docx — paragraphs plus table cells.
+
+    No page map: Word pagination is decided by the renderer (fonts, margins, printer), so the file
+    itself does not know where its pages break. We say so honestly rather than invent page numbers.
+    """
+    import docx  # lazy: only on the ingest path
+
+    assert data, "data is empty"
+    try:
+        doc = docx.Document(io.BytesIO(data))
+        parts = [p.text for p in doc.paragraphs]
+        for table in doc.tables:  # tables carry real content (fee schedules, terms) — don't skip them
+            for row in table.rows:
+                parts.append("\t".join(c.text for c in row.cells))
+        title = (doc.core_properties.title or "") if doc.core_properties else ""
+    except Exception as exc:  # not a real docx / corrupt zip
+        raise IngestError(f"could not read Word document: {exc}") from None
+    text, _ = _join_sections(_bounded_sections(parts, _MAX_PARTS))
+    return title.strip(), text, []
+
+
+def _extract_pptx(data: bytes) -> tuple[str, str, list[int]]:
+    """Return (title, text, slide_starts) from a PowerPoint .pptx — one section per SLIDE."""
+    from pptx import Presentation  # lazy
+
+    assert data, "data is empty"
+    try:
+        prs = Presentation(io.BytesIO(data))
+        slides = [
+            "\n".join(s.text_frame.text for s in slide.shapes if s.has_text_frame)
+            for slide in prs.slides
+        ]
+        title = (prs.core_properties.title or "") if prs.core_properties else ""
+    except Exception as exc:
+        raise IngestError(f"could not read PowerPoint file: {exc}") from None
+    text, starts = _join_sections(_bounded_sections(slides, _MAX_SECTIONS))
+    return title.strip(), text, starts  # a slide is this format's "page" — cited as "slide 5"
+
+
+def _extract_xlsx(data: bytes) -> tuple[str, str, list[int]]:
+    """Return (title, text, sheet_starts) from an Excel .xlsx — one section per SHEET, rows as TSV."""
+    import openpyxl  # lazy
+
+    assert data, "data is empty"
+    try:
+        wb = openpyxl.load_workbook(io.BytesIO(data), read_only=True, data_only=True)
+        sheets: list[str] = []
+        for ws in wb.worksheets[:_MAX_SECTIONS]:  # bounded
+            rows: list[str] = []
+            for i, row in enumerate(ws.iter_rows(values_only=True)):
+                if i >= _MAX_ROWS:  # bounded: a spreadsheet can claim a million rows
+                    break
+                rows.append("\t".join("" if v is None else str(v) for v in row))
+            sheets.append(f"{ws.title}\n" + "\n".join(rows))
+        wb.close()
+    except Exception as exc:
+        raise IngestError(f"could not read Excel file: {exc}") from None
+    text, starts = _join_sections(_bounded_sections(sheets, _MAX_SECTIONS))
+    return "", text, starts  # a sheet is this format's "page" — cited as "sheet 2"
 
 
 def _extract_html(html: str, url: str) -> tuple[str, str]:
@@ -129,33 +219,55 @@ def _clamp_pages(page_starts: list[int], text_len: int) -> list[int]:
     return [p for p in page_starts if p < text_len]
 
 
-def _dispatch(data: bytes, content_type: str, hint_url: str) -> tuple[str, str, list[int]]:
+# Extension -> (extractor, what one section is called in a citation). Office files are ZIPs, so they
+# all share the same magic bytes and can only be told apart by extension / content-type.
+_OFFICE = {
+    ".docx": (_extract_docx, ""),
+    ".pptx": (_extract_pptx, "slide"),
+    ".xlsx": (_extract_xlsx, "sheet"),
+}
+_OFFICE_CTYPE = {
+    "wordprocessingml": (_extract_docx, ""),
+    "presentationml": (_extract_pptx, "slide"),
+    "spreadsheetml": (_extract_xlsx, "sheet"),
+}
+
+
+def _dispatch(data: bytes, content_type: str, hint_url: str) -> tuple[str, str, list[int], str]:
     """Pick an extractor by magic bytes / content-type, falling back to the URL hint.
 
-    Returns (title, text, page_starts) — page_starts is empty for anything that has no pages.
+    Returns (title, text, section_starts, page_label). ``section_starts`` is empty for formats with
+    no natural sections, and ``page_label`` names what a section IS ("page", "slide", "sheet").
 
-    Magic bytes and content-type are authoritative; the ``.pdf`` URL hint is only
-    consulted when the content-type is generic (so an HTML page served at a
-    ``.pdf`` URL is never handed to the PDF parser).
+    Magic bytes and content-type are authoritative; the ``.pdf`` URL hint is only consulted when the
+    content-type is generic (so an HTML page served at a ``.pdf`` URL is never handed to the PDF
+    parser).
     """
     assert isinstance(data, (bytes, bytearray)), "data must be bytes"
     assert data, "data is empty"
     ctl = content_type.lower()
     if data[:5] == b"%PDF-" or "pdf" in ctl:
-        return _extract_pdf(data)
+        return (*_extract_pdf(data), "page")
+    for marker, (extract, label) in _OFFICE_CTYPE.items():
+        if marker in ctl:
+            return (*extract(data), label)
     if "html" in ctl or "xml" in ctl:
-        return (*_extract_html(data.decode("utf-8", "replace"), hint_url), [])
+        return (*_extract_html(data.decode("utf-8", "replace"), hint_url), [], "")
     generic = ctl.startswith("application/octet-stream") or not ctl
     if generic and hint_url.lower().endswith(".pdf"):
-        return _extract_pdf(data)
+        return (*_extract_pdf(data), "page")
+    ext = os.path.splitext(urlparse(hint_url).path)[1].lower()
+    if generic and ext in _OFFICE:
+        extract, label = _OFFICE[ext]
+        return (*extract(data), label)
     if hint_url.lower().endswith((".html", ".htm")):
-        return (*_extract_html(data.decode("utf-8", "replace"), hint_url), [])
+        return (*_extract_html(data.decode("utf-8", "replace"), hint_url), [], "")
     if _looks_binary(data):  # don't store an unrecognized binary blob as garbled text
         raise IngestError(
-            "unsupported file type — supported: PDF, HTML, and text (.txt, .md, .csv, .json). "
-            "Word/Office (.docx, .pptx, .xlsx), images, and other binaries aren't supported."
+            "unsupported file type — supported: PDF, Word/PowerPoint/Excel (.docx, .pptx, .xlsx), "
+            "HTML, and text (.txt, .md, .csv, .json). Images and other binaries aren't supported."
         )
-    return "", data.decode("utf-8", "replace").strip(), []  # text/* or json — store as-is
+    return "", data.decode("utf-8", "replace").strip(), [], ""  # text/* or json — store as-is
 
 
 def from_url(url: str) -> tuple[str, str, dict]:
@@ -165,11 +277,16 @@ def from_url(url: str) -> tuple[str, str, dict]:
         got = netguard.safe_fetch_bytes(url)
     except netguard.FetchError as exc:
         raise IngestError(str(exc)) from None
-    title, text, pages = _dispatch(got["content"], got["content_type"], got["final_url"])
+    title, text, pages, label = _dispatch(got["content"], got["content_type"], got["final_url"])
     if not text:
         raise IngestError("no readable text found at that URL")
     text = text[:_MAX_TEXT]
-    meta = {"source_url": got["final_url"], "mime": got["content_type"], "pages": _clamp_pages(pages, len(text))}
+    meta = {
+        "source_url": got["final_url"],
+        "mime": got["content_type"],
+        "pages": _clamp_pages(pages, len(text)),
+        "page_label": label,
+    }
     return _resolve_title(title, _title_from_url(got["final_url"])), text, meta
 
 
@@ -179,8 +296,13 @@ def from_file(filename: str, data: bytes) -> tuple[str, str, dict]:
     assert data, "file is empty"
     ext = os.path.splitext(filename)[1].lower()
     pages: list[int] = []
+    label = ""
     if ext == ".pdf" or data[:5] == b"%PDF-":
         title, text, pages = _extract_pdf(data)
+        label = "page"
+    elif ext in _OFFICE:  # Office files are ZIPs — only the extension tells them apart
+        extract, label = _OFFICE[ext]
+        title, text, pages = extract(data)
     elif ext in _HTML_EXT:
         title, text = _extract_html(data.decode("utf-8", "replace"), "")
     elif ext in _TEXT_EXT or ext == "":
@@ -194,7 +316,11 @@ def from_file(filename: str, data: bytes) -> tuple[str, str, dict]:
     text = text[:_MAX_TEXT]
     # The filename is what a citation actually shows the user ("Lease.pdf, p.12"), and it used to be
     # consumed to derive a title and then dropped.
-    meta = {"filename": os.path.basename(filename), "pages": _clamp_pages(pages, len(text))}
+    meta = {
+        "filename": os.path.basename(filename),
+        "pages": _clamp_pages(pages, len(text)),
+        "page_label": label,
+    }
     return _resolve_title(title, os.path.basename(filename)), text, meta
 
 

@@ -253,6 +253,9 @@ class KnowledgeBase:
             # --- citation ---
             "source": meta.get("filename") or meta.get("source_url") or "",
             "page": page_for(meta, start),
+            # What a "page" IS in this format: a PDF page, a PowerPoint slide, an Excel sheet. So a
+            # citation can say "slide 5" instead of miscalling it "p.5".
+            "page_label": meta.get("page_label") or "page",
             "offset": start,  # lets the viewer open the document AT the passage that matched
         }
 

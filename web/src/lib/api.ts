@@ -254,6 +254,7 @@ export interface KbHit {
   chunk_idx: number | null;
   source: string;
   page: number | null;
+  page_label: string; // what a "page" is in this format: page | slide | sheet
   offset: number;
 }
 
