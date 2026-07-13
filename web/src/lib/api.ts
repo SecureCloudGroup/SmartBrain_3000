@@ -240,11 +240,21 @@ export interface KbDocFull extends KbDoc {
   content: string;
 }
 
+// Keyword and vector search miss in opposite directions, so "hybrid" (rank-fused) is the default.
+export type SearchMode = "hybrid" | "lexical" | "semantic";
+
 export interface KbHit {
   id: string;
   title: string;
   score: number;
   snippet: string;
+  // Citation: WHERE the match came from. `source` is the original filename or URL, `page` the
+  // 1-based page (null when the document has no pages), and `offset` the character position of the
+  // matched passage — which is what lets the viewer open the document AT the match.
+  chunk_idx: number | null;
+  source: string;
+  page: number | null;
+  offset: number;
 }
 
 export interface DeviceInfo {
@@ -518,9 +528,9 @@ export const api = {
     }),
   deleteDoc: (id: string) =>
     req<{ ok: boolean }>(`/api/kb/${encodeURIComponent(id)}`, { method: "DELETE" }),
-  searchKb: (q: string, mode: "lexical" | "semantic") =>
+  searchKb: (q: string, mode: SearchMode = "hybrid", limit = 10) =>
     req<{ results: KbHit[]; degraded?: boolean }>(
-      `/api/kb/search?${new URLSearchParams({ q, mode }).toString()}`,
+      `/api/kb/search?${new URLSearchParams({ q, mode, limit: String(limit) }).toString()}`,
     ),
   reindexKb: () =>
     req<{ embedded: number; skipped: number; failed: number; error: string }>("/api/kb/reindex", { method: "POST" }),

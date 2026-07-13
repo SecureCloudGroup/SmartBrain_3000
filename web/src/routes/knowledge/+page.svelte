@@ -2,17 +2,23 @@
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
   import { account } from "$lib/account.svelte";
-  import { api, type KbDoc, type KbDocFull, type KbHit } from "$lib/api";
+  import { api, type KbDoc, type KbDocFull, type KbHit, type SearchMode } from "$lib/api";
   import { describeError } from "$lib/errors";
+  import { highlight, queryTerms } from "$lib/highlight";
   import { remote } from "$lib/remote/connection.svelte";
   import { confirmDialog } from "$lib/confirm.svelte";
 
   let docs = $state<KbDoc[]>([]);
   let query = $state("");
-  let mode = $state<"lexical" | "semantic">("lexical");
+  let mode = $state<SearchMode>("hybrid");
   let results = $state<KbHit[] | null>(null);
   let degraded = $state(false);
   let selected = $state<KbDocFull | null>(null);
+  // The terms that produced the current results (frozen at search time, so editing the box doesn't
+  // re-highlight against a query that wasn't run) + where in the open document the match sits.
+  let hitTerms = $state<string[]>([]);
+  let hitOffset = $state<number | null>(null);
+  let markEl = $state<HTMLElement | null>(null);
   let newTitle = $state("");
   let newContent = $state("");
   let url = $state("");
@@ -111,6 +117,7 @@
       const r = await api.searchKb(q, mode);
       results = r.results;
       degraded = Boolean(r.degraded);
+      hitTerms = queryTerms(q);
     } catch (err) {
       error = describeError(err);
     } finally {
@@ -118,10 +125,13 @@
     }
   }
 
-  async function open(id: string) {
+  // `offset` opens the document AT the passage that matched instead of at the top — the whole point
+  // of tracking provenance. Opening from the "All documents" list passes no offset.
+  async function open(id: string, offset: number | null = null) {
     console.assert(typeof id === "string" && id.length > 0, "open: id required");
     console.assert(typeof api.getDoc === "function", "open: api.getDoc must exist");
     error = "";
+    hitOffset = offset;
     try {
       selected = await api.getDoc(id);
     } catch (err) {
@@ -129,9 +139,26 @@
     }
   }
 
+  // Split the open document around the matched passage so it can be marked and scrolled to.
+  const MARK_CHARS = 320;
+  const docParts = $derived.by(() => {
+    if (!selected) return null;
+    const text = selected.content;
+    if (hitOffset === null) return { before: text, mark: "", after: "" };
+    const start = Math.max(0, Math.min(hitOffset, text.length));
+    const end = Math.min(start + MARK_CHARS, text.length);
+    return { before: text.slice(0, start), mark: text.slice(start, end), after: text.slice(end) };
+  });
+
   // U4: when the doc overlay opens, move focus into it for keyboard/SR users.
   $effect(() => {
     if (selected) docOverlay?.focus();
+  });
+
+  // Bring the matched passage into view once it's rendered (a long document opens at the top
+  // otherwise, which defeats the citation).
+  $effect(() => {
+    if (selected && markEl) markEl.scrollIntoView({ block: "center" });
   });
 
   // U4: Escape closes the opened-doc overlay.
@@ -302,14 +329,15 @@
     <form onsubmit={search} style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap">
       <input style="flex:1; min-width:12rem" bind:value={query} placeholder="Search your knowledge…" aria-label="Search your knowledge" />
       <select bind:value={mode} style="width:auto">
+        <option value="hybrid">Best</option>
         <option value="lexical">Keyword</option>
         <option value="semantic">Meaning</option>
       </select>
       <button disabled={busy === "search"} type="submit">Search</button>
     </form>
-    {#if mode === "semantic"}
+    {#if mode !== "lexical"}
       <p class="muted" style="margin-top:0.4rem; font-size:0.85rem">
-        Meaning search ranks by similarity. It needs a local embedding model — pull the exact tag
+        {mode === "hybrid" ? "Best" : "Meaning"} search uses a local embedding model — pull the exact tag
         <code>ollama pull nomic-embed-text:v1.5</code> (the bare name won't resolve). Without one it
         falls back to keyword. New uploads are indexed automatically — use <em>Reindex</em> below if
         a result is missing.
@@ -318,7 +346,7 @@
     {#if results}
       {#if degraded}
         <p class="muted" style="margin-top:0.5rem">
-          Semantic search needs the embedding model — showing keyword results. On the Desktop, run
+          Meaning search needs the embedding model — showing keyword results. On the Desktop, run
           <code>ollama pull nomic-embed-text:v1.5</code>, then Reindex.
         </p>
       {/if}
@@ -327,31 +355,37 @@
       {/if}
       {#if results.length > 0}
         <p class="muted" style="margin-top:0.5rem; font-size:0.85rem; display:flex; gap:0.4rem; align-items:center; flex-wrap:wrap">
-          <span>
-            {mode === "semantic" && !degraded
-              ? "Meaning match (0–1): higher = closer in meaning."
-              : "Keyword score: how many times your terms appear."}
-          </span>
+          <span>Click a result to open the document at the matching passage.</span>
           <button
             class="qhelp"
             type="button"
             aria-expanded={scoreHelpOpen}
-            aria-label="More about search scores"
+            aria-label="More about search modes"
             onclick={() => (scoreHelpOpen = !scoreHelpOpen)}
           >?</button>
         </p>
         {#if scoreHelpOpen}
           <p class="muted" style="margin:0.25rem 0 0; font-size:0.85rem">
-            <strong>Keyword</strong> counts term occurrences in each document.
-            <strong>Meaning</strong> uses local embeddings (0–1) to rank by semantic similarity to your query.
+            <strong>Best</strong> combines both, and is what you usually want — keyword search nails an
+            exact name or number, meaning search finds a paraphrase, and each misses what the other catches.
+            <strong>Keyword</strong> ranks by relevance (rare words count for more, and a long document
+            can't win just by being long). <strong>Meaning</strong> uses local embeddings to match by
+            sense rather than wording.
           </p>
         {/if}
       {/if}
       {#each results as r (r.id)}
-        <div style="margin-top:0.75rem">
-          <button class="linklike" onclick={() => open(r.id)}>{r.title}</button>
-          <span class="muted"> · {mode === "semantic" && !degraded ? r.score.toFixed(3) : r.score}</span>
-          <p class="muted" style="margin:0.15rem 0 0">{r.snippet}</p>
+        <div class="hit">
+          <button class="linklike" onclick={() => open(r.id, r.offset)}>{r.title}</button>
+          <!-- The citation: which file, which page. Clicking opens the document AT the passage. -->
+          {#if r.source || r.page !== null}
+            <button class="cite" onclick={() => open(r.id, r.offset)} title="Open at this passage">
+              {r.source}{#if r.source && r.page !== null}&nbsp;·&nbsp;{/if}{#if r.page !== null}p.{r.page}{/if}
+            </button>
+          {/if}
+          <p class="snippet">
+            {#each highlight(r.snippet, hitTerms) as seg}{#if seg.hit}<mark>{seg.t}</mark>{:else}{seg.t}{/if}{/each}
+          </p>
         </div>
       {/each}
     {/if}
@@ -368,7 +402,14 @@
       onkeydown={onDocKey}
     >
       <h2>{selected.title}</h2>
-      <div class="kit">{selected.content}</div>
+      {#if hitOffset !== null}
+        <p class="muted" style="margin:0 0 0.5rem; font-size:0.85rem">Opened at the matching passage.</p>
+      {/if}
+      <div class="kit">
+        {#if docParts}
+          {docParts.before}{#if docParts.mark}<mark class="passage" bind:this={markEl}>{docParts.mark}</mark>{/if}{docParts.after}
+        {/if}
+      </div>
       <p class="doc-actions">
         <button class="secondary" onclick={() => (selected = null)}>Close</button>
         <button class="secondary" disabled={busy === selected.id} onclick={() => remove(selected!.id)}>Delete</button>
@@ -415,6 +456,49 @@
 {/if}
 
 <style>
+  /* --- search hits as citations --------------------------------------------------------- */
+  .hit {
+    margin-top: 0.9rem;
+  }
+
+  /* "Lease.pdf · p.12" — the citation. A button, because clicking it opens the document at the
+     matching passage rather than at the top. */
+  .cite {
+    margin-left: 0.4rem;
+    padding: 0.05rem 0.45rem;
+    font-size: 0.75rem;
+    font-weight: 500;
+    line-height: 1.5;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--field);
+    color: var(--muted);
+    cursor: pointer;
+  }
+  .cite:hover {
+    color: var(--text);
+    border-color: var(--accent);
+  }
+
+  .snippet {
+    margin: 0.2rem 0 0;
+    color: var(--muted);
+    line-height: 1.45;
+  }
+
+  /* Matched terms in a snippet, and the matched passage inside an opened document. */
+  .snippet mark,
+  .kit mark {
+    background: color-mix(in srgb, var(--warn) 35%, transparent);
+    color: var(--text);
+    border-radius: 3px;
+    padding: 0 0.1em;
+  }
+  .kit mark.passage {
+    background: color-mix(in srgb, var(--warn) 22%, transparent);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--warn) 22%, transparent);
+  }
+
   .drop {
     border: 2px dashed var(--border);
     border-radius: 12px;
