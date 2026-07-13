@@ -193,6 +193,53 @@ def test_list_documents_bounds_and_reports_true_total(monkeypatch) -> None:
     assert len(out["documents"]) == 2
 
 
+def test_save_note_is_a_reviewed_write() -> None:
+    # Writing to knowledge is a mutation -> REVIEWED (parks for approval), never OBSERVE, no egress.
+    tool = tools.get_tool("save_note")
+    assert tool.tier is tools.Tier.REVIEWED and tool.egress is False
+    assert "save_note" not in tools._OBSERVE_READONLY
+
+
+def test_save_note_creates_a_knowledge_document() -> None:
+    # End-to-end through the audited chokepoint (REVIEWED needs a claim): the note becomes a real,
+    # findable document — closing the loop with list_documents / read_document / kb_search.
+    conn = duckdb.connect(":memory:")
+    dbmod.run_migrations(conn)
+    key = gen_master_key()
+    kb = KnowledgeBase(conn, key)
+    ctx = tools.ToolContext(kb=kb)
+    out = tools.run(ctx, AuditLog(conn, key), "save_note",
+                    {"title": "Perennial_EGS_Summary", "content": "EGS legal engagement summary…"},
+                    actor="assistant", claim=lambda: True)
+    assert out["title"] == "Perennial_EGS_Summary" and out["id"]
+    doc = kb.get(out["id"])
+    assert doc["title"] == "Perennial_EGS_Summary" and doc["content"] == "EGS legal engagement summary…"
+    assert kb.search("EGS", limit=5)  # immediately keyword-searchable
+
+
+def test_save_note_requires_title_and_content() -> None:
+    ctx = tools.ToolContext(kb=KnowledgeBase(duckdb.connect(":memory:"), gen_master_key()))
+    dbmod.run_migrations(ctx.kb.conn)
+    with pytest.raises(ValueError):  # validate_args rejects the missing required field
+        _call("save_note", ctx, {"title": "T"})
+    with pytest.raises(ValueError):
+        _call("save_note", ctx, {"content": "body"})
+
+
+def test_save_note_allows_a_long_body_beyond_the_default_arg_cap() -> None:
+    # A summary of a big document can exceed the 8000-char default arg cap; save_note's content field
+    # raises its own maxLength so a real note isn't rejected, while a truly enormous body is.
+    conn = duckdb.connect(":memory:")
+    dbmod.run_migrations(conn)
+    kb = KnowledgeBase(conn, gen_master_key())
+    ctx = tools.ToolContext(kb=kb)
+    big = "x" * (tools._MAX_STR + 5000)  # over the default 8000 cap, under _MAX_NOTE_CHARS
+    out = _call("save_note", ctx, {"title": "Big note", "content": big})
+    assert kb.get(out["id"])["content"] == big
+    with pytest.raises(ValueError):  # past the note cap -> rejected, not silently truncated
+        _call("save_note", ctx, {"title": "Too big", "content": "y" * (tools._MAX_NOTE_CHARS + 1)})
+
+
 def test_list_tasks_tool_reads_planner() -> None:
     # The morning-briefing bug: with no read-tasks tool the agent misused kb_search and
     # reported saved DOCUMENTS as "tasks". list_tasks must read the planner directly and

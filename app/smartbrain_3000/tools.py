@@ -72,10 +72,11 @@ class Tool:
     egress: bool = False
 
 
-_MAX_STR = 8000  # cap on any string arg
+_MAX_STR = 8000  # default cap on any string arg (a property may raise its own via schema "maxLength")
 _MAX_ARGS = 32  # cap on number of args (bounds validation loop)
 _SUMMARY_CAP = 2000  # cap on an audited summary string
 _MAX_SCHEDULE_MINUTES = 525600  # one year — mirrors schedule_routes._MAX_INTERVAL (clamp, don't 500)
+_MAX_NOTE_CHARS = 100000  # a saved note may be much longer than a normal arg (e.g. a document summary)
 # Argument key names whose values are redacted before reaching the model / a
 # tile / the audit body (defense-in-depth on top of the structural firewall).
 _REDACT_KEYS = ("api_key", "apikey", "token", "password", "passphrase", "secret", "recovery_key", "authorization")
@@ -213,6 +214,21 @@ def _list_documents(ctx: ToolContext, args: dict) -> dict:
             for d in shown
         ],
     }
+
+
+def _save_note(ctx: ToolContext, args: dict) -> dict:
+    """REVIEWED: save a note (a new text document the assistant writes) into the knowledge base.
+
+    Use this to store a summary, notes, or any text the user asks to keep in knowledge — it becomes a
+    document like any other (found by kb_search / list_documents, opened by read_document). Reversible
+    (the document can be deleted). It is immediately keyword-searchable; the background reindex adds it
+    to semantic search shortly after."""
+    assert ctx.kb is not None, "knowledge base unavailable"
+    title = args.get("title")
+    content = args.get("content")
+    assert title, "title required"
+    assert content, "content required"
+    return {"id": ctx.kb.add(title, content), "title": title}
 
 
 def _remember_fact(ctx: ToolContext, args: dict) -> dict:
@@ -485,6 +501,25 @@ _TOOLS: tuple[Tool, ...] = (
         params_schema={"type": "object", "additionalProperties": False, "properties": {}},
         tier=Tier.OBSERVE,
         handler=_list_documents,
+        egress=False,
+    ),
+    Tool(
+        name="save_note",
+        description="Save a note — a new text document YOU write — into the user's knowledge base. Use "
+                    "when the user asks to save/remember a summary, notes, or any text as a document in "
+                    "knowledge. Provide a short title and the full content. It then behaves like any "
+                    "saved document (searchable, readable). For a web page or PDF, use kb_ingest_url.",
+        params_schema={
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "title": {"type": "string", "maxLength": 200},
+                "content": {"type": "string", "maxLength": _MAX_NOTE_CHARS},
+            },
+            "required": ["title", "content"],
+        },
+        tier=Tier.REVIEWED,
+        handler=_save_note,
         egress=False,
     ),
     Tool(
@@ -868,7 +903,8 @@ def validate_args(tool: Tool, args: dict) -> dict:
         value = _coerce_scalar(props[key]["type"], value)  # tolerate stringified ints/bools
         if not _type_ok(props[key]["type"], value):
             raise ValueError(f"argument '{key}' must be {props[key]['type']}")
-        if isinstance(value, str) and len(value) > _MAX_STR:
+        max_len = props[key].get("maxLength", _MAX_STR)  # a field may raise its own cap (e.g. a note body)
+        if isinstance(value, str) and len(value) > max_len:
             raise ValueError(f"argument '{key}' too long")
         out[key] = value
     return out
