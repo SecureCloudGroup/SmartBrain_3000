@@ -72,3 +72,55 @@ describe("req wrapper (via api.health)", () => {
     expect(gotoSpy).not.toHaveBeenCalled();
   });
 });
+
+// Vault calls that do NOT go through req<T>: export/import hand-roll fetch (a Blob body, a raw
+// upload), so they carry their own headers and their own error path. Both are worth pinning —
+// a dropped x-sb-local header is a 403, and a dropped `vault` param silently searches EVERYTHING
+// instead of the one vault the user scoped to.
+describe("vault client calls", () => {
+  // Typed params, so `mock.calls` is a real tuple rather than [] and the assertions below type-check.
+  function captureFetch(status = 200, body: unknown = {}) {
+    const spy = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) =>
+      jsonResponse(status, body),
+    );
+    globalThis.fetch = spy as unknown as typeof globalThis.fetch;
+    return spy;
+  }
+
+  it("omits `vault` from a search when nothing is scoped", async () => {
+    const spy = captureFetch(200, { results: [] });
+    await api.searchKb("lease");
+    expect(String(spy.mock.calls[0][0])).not.toContain("vault");
+  });
+
+  it("passes the vault id when the search is scoped to one", async () => {
+    const spy = captureFetch(200, { results: [] });
+    await api.searchKb("lease", "hybrid", 10, "v-123");
+    expect(String(spy.mock.calls[0][0])).toContain("vault=v-123");
+  });
+
+  it("marks an export Desktop-local (x-sb-local), so the phone bridge cannot forward it", async () => {
+    const spy = captureFetch(200, {});
+    await api.exportVault("v-1", "pw");
+    const init = spy.mock.calls[0][1]!;
+    expect((init.headers as Record<string, string>)["x-sb-local"]).toBe("1");
+    expect(init.method).toBe("POST");
+  });
+
+  it("surfaces the server's detail when an export is refused", async () => {
+    captureFetch(403, { detail: "desktop only" });
+    await expect(api.exportVault("v-1", "pw")).rejects.toMatchObject({
+      name: "ApiError",
+      status: 403,
+      message: "desktop only",
+    });
+  });
+
+  it("sends the vault key in the query and the file as the raw body on import", async () => {
+    const spy = captureFetch(200, { id: "v-2", name: "Shared", publisher: "SB-AAAA" });
+    const file = new File(["sealed-bytes"], "expert.sbvault");
+    await api.importVault(file, "SBVK1-abc");
+    expect(String(spy.mock.calls[0][0])).toContain("key=SBVK1-abc");
+    expect(spy.mock.calls[0][1]!.body).toBe(file);
+  });
+});

@@ -267,6 +267,30 @@ export interface KbHit {
   offset: number;
 }
 
+// A Vault: a named, selectable subset of your knowledge. The unit you scope a search to, and the
+// unit you export and share. `kind` is "local" (you made it) or "imported" (it came from someone).
+export interface Vault {
+  id: string;
+  kind: "local" | "imported";
+  version: number;
+  name: string;
+  description: string;
+  // Where an imported vault came from — pinned at import time. null for a vault you made yourself.
+  source: { vault_id?: string; publisher_pubkey?: string; seq?: number } | null;
+  doc_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface VaultImportResult {
+  id: string;
+  name: string;
+  publisher: string; // the publisher FINGERPRINT (SB-...) — what the user is actually asked to trust
+  added: number;
+  duplicates: number;
+  vectors_used: boolean;
+}
+
 export interface DeviceInfo {
   device_id: string;
   label: string;
@@ -540,9 +564,15 @@ export const api = {
     }),
   deleteDoc: (id: string) =>
     req<{ ok: boolean }>(`/api/kb/${encodeURIComponent(id)}`, { method: "DELETE" }),
-  searchKb: (q: string, mode: SearchMode = "hybrid", limit = 10) =>
+  // `vault` scopes the search to one vault's documents ("" = all knowledge).
+  searchKb: (q: string, mode: SearchMode = "hybrid", limit = 10, vault = "") =>
     req<{ results: KbHit[]; degraded?: boolean }>(
-      `/api/kb/search?${new URLSearchParams({ q, mode, limit: String(limit) }).toString()}`,
+      `/api/kb/search?${new URLSearchParams({
+        q,
+        mode,
+        limit: String(limit),
+        ...(vault ? { vault } : {}),
+      }).toString()}`,
     ),
   // Bounded by a wall-clock budget server-side, so it always returns; `pending` says what's left
   // (the background indexer finishes it) rather than pretending the whole backlog is done.
@@ -551,6 +581,57 @@ export const api = {
       "/api/kb/reindex",
       { method: "POST" },
     ),
+
+  // vaults — a named subset of knowledge you can scope a search to, export, and share
+  listVaults: () => req<{ vaults: Vault[] }>("/api/vaults"),
+  createVault: (name: string, description = "") =>
+    req<Vault>("/api/vaults", { method: "POST", body: JSON.stringify({ name, description }) }),
+  deleteVault: (id: string) =>
+    req<{ ok: boolean }>(`/api/vaults/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  addToVault: (id: string, doc_ids: string[]) =>
+    req<{ added: number; doc_count: number }>(`/api/vaults/${encodeURIComponent(id)}/documents`, {
+      method: "POST",
+      body: JSON.stringify({ doc_ids }),
+    }),
+
+  // Export hands out content that is plaintext-equivalent to whoever holds the key, so — like
+  // backup — it is Desktop-local (x-sb-local, which the WebRTC bridge cannot forward) and requires
+  // the passphrase again. Returns the .sbvault file itself.
+  exportVault: async (id: string, passphrase: string): Promise<Blob> => {
+    await remoteReady;
+    const res = await fetch(`/api/vaults/${encodeURIComponent(id)}/export`, {
+      method: "POST",
+      headers: { "x-sb-local": "1", "content-type": "application/json" },
+      body: JSON.stringify({ passphrase }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => null);
+      throw new ApiError(res.status, (data as { detail?: string })?.detail || `export failed (${res.status})`);
+    }
+    return res.blob();
+  },
+  vaultKey: async (id: string, passphrase: string): Promise<string> => {
+    await remoteReady;
+    const res = await fetch(`/api/vaults/${encodeURIComponent(id)}/key`, {
+      method: "POST",
+      headers: { "x-sb-local": "1", "content-type": "application/json" },
+      body: JSON.stringify({ passphrase }),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) throw new ApiError(res.status, (data as { detail?: string })?.detail || "could not read the key");
+    return (data as { key: string }).key;
+  },
+  importVault: async (file: File, key: string): Promise<VaultImportResult> => {
+    await remoteReady;
+    const res = await fetch(`/api/vaults/import?key=${encodeURIComponent(key)}`, {
+      method: "POST",
+      body: file,
+      headers: { "content-type": "application/octet-stream" },
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) throw new ApiError(res.status, (data as { detail?: string })?.detail || "import failed");
+    return data as VaultImportResult;
+  },
 
   // email (Gmail via loopback OAuth; reads + user-initiated send; agent send is gated)
   emailStatus: () => req<EmailStatus>("/api/email/status"),
