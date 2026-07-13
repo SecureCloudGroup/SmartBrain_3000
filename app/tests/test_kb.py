@@ -131,18 +131,32 @@ def test_kb_search_route_not_shadowed_by_id(client: TestClient) -> None:
     assert r.status_code == 200 and "results" in r.json()
 
 
-def test_search_lexical_default_never_calls_gateway(client: TestClient, monkeypatch) -> None:
+def test_explicit_lexical_mode_never_calls_the_gateway(client: TestClient, monkeypatch) -> None:
+    # The default is now hybrid (better results), but a pure-keyword search must stay available and
+    # gateway-free: it is the fast path, and it works with no embed model configured at all.
     client.post("/api/account/setup", json={"passphrase": "correct-horse"})
     client.post("/api/kb", json={"title": "Notes", "content": "buy milk"})
 
-    def boom(*a, **k):  # lexical mode must not reach the gateway
+    def boom(*a, **k):
         raise AssertionError("gateway must not be called in lexical mode")
 
     monkeypatch.setattr(gateway, "embed", boom)
-    r = client.get("/api/kb/search", params={"q": "milk"})
+    r = client.get("/api/kb/search", params={"q": "milk", "mode": "lexical"})
     assert r.status_code == 200
     assert r.json()["results"][0]["title"] == "Notes"
-    assert "degraded" not in r.json()
+    assert r.json()["degraded"] is False
+
+
+def test_default_search_is_hybrid_and_still_works_with_no_gateway(client: TestClient, monkeypatch) -> None:
+    # Hybrid is the default because keyword and vector search miss in opposite directions. It must
+    # degrade to keyword-only (and SAY so) when no embed model is reachable — never just fail.
+    client.post("/api/account/setup", json={"passphrase": "correct-horse"})
+    client.post("/api/kb", json={"title": "Notes", "content": "buy milk"})
+    monkeypatch.setattr(gateway, "embed", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("no model")))
+    r = client.get("/api/kb/search", params={"q": "milk"})  # no mode -> hybrid
+    assert r.status_code == 200
+    assert r.json()["results"][0]["title"] == "Notes"
+    assert r.json()["degraded"] is True
 
 
 def test_search_semantic_falls_back_when_gateway_unreachable(client: TestClient, monkeypatch) -> None:

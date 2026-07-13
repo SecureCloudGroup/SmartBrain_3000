@@ -71,18 +71,41 @@ def test_gateway_embed_raises_on_malformed_200() -> None:
                 gateway.embed("hi", "ollama/x", client=client)
 
 
-# --- cosine ---------------------------------------------------------------
+# --- cosine (now a vectorised mat-vec inside the search index) -------------
 
-def test_cosine_basic() -> None:
-    assert KnowledgeBase._cosine([1.0, 0.0], [1.0, 0.0]) == pytest.approx(1.0)
-    assert KnowledgeBase._cosine([1.0, 0.0], [0.0, 1.0]) == pytest.approx(0.0)
-    assert KnowledgeBase._cosine([1.0, 0.0], [-1.0, 0.0]) == pytest.approx(-1.0)
+def test_index_cosine_scores_identical_and_orthogonal() -> None:
+    from smartbrain_3000.kbindex import _VecBlock
+
+    block = _VecBlock(2)
+    block.add("same", [[1.0, 0.0]])
+    block.add("orth", [[0.0, 1.0]])
+    block.add("opposite", [[-1.0, 0.0]])
+    best = block.best_by_doc([1.0, 0.0], min_score=-2.0)  # below -1 so even an opposite vector is scored
+    assert best["same"][0] == pytest.approx(1.0)
+    assert best["orth"][0] == pytest.approx(0.0, abs=1e-6)
+    assert best["opposite"][0] == pytest.approx(-1.0)
+    # In production min_score is 0.0, so a negatively-correlated document is never surfaced.
+    assert set(block.best_by_doc([1.0, 0.0], min_score=0.0)) == {"same"}
 
 
-def test_cosine_zero_and_nonfinite_return_zero() -> None:
-    assert KnowledgeBase._cosine([0.0, 0.0], [1.0, 1.0]) == 0.0
-    huge = 1e200  # squares overflow to inf -> non-finite cosine -> pinned to exactly 0.0
-    assert KnowledgeBase._cosine([huge, huge], [huge, huge]) == 0.0
+def test_index_cosine_zero_and_nonfinite_query_score_nothing() -> None:
+    # Degenerate input must yield no scores rather than NaN ranking the corpus at random.
+    from smartbrain_3000.kbindex import _VecBlock
+
+    block = _VecBlock(2)
+    block.add("d", [[1.0, 1.0]])
+    assert block.best_by_doc([0.0, 0.0], min_score=-1.0) == {}
+    huge = 1e200  # overflows float32 -> inf norm -> non-finite
+    assert block.best_by_doc([huge, huge], min_score=-1.0) == {}
+
+
+def test_index_zero_stored_vector_does_not_become_nan() -> None:
+    from smartbrain_3000.kbindex import _VecBlock
+
+    block = _VecBlock(2)
+    block.add("zero", [[0.0, 0.0]])
+    best = block.best_by_doc([1.0, 0.0], min_score=-1.0)
+    assert best["zero"][0] == pytest.approx(0.0)  # not NaN
 
 
 # --- embedding storage ----------------------------------------------------
@@ -110,7 +133,9 @@ def test_semantic_search_ranks_by_similarity() -> None:
     results = kb.semantic_search([1.0, 1.0, 0.0], m)
     assert [r["id"] for r in results] == [near, far]
     assert results[0]["score"] > results[1]["score"]
-    assert set(results[0]) == {"id", "title", "score", "snippet"}
+    # chunk_idx is new: it records WHICH chunk matched, so the snippet can quote that passage
+    # (and, later, cite it) instead of blindly showing the head of the document.
+    assert set(results[0]) == {"id", "title", "score", "snippet", "chunk_idx"}
 
 
 def test_chunk_text_splits_long_doc_with_title_prefix() -> None:
@@ -329,12 +354,14 @@ def test_delete_clears_orphan_embedding() -> None:
     assert kb.get_embedding(doc_id) is None
 
 
-def test_search_scan_bounds_decoupled() -> None:
-    # R2 regression guard: semantic scan must cover many CHUNKS (not be capped at the
-    # 500-row search-result limit, which after chunking hid all but ~10 docs); reindex
-    # must surface more than the search-result cap; lexical has its own bound.
+def test_index_bounds_are_sized_for_a_real_corpus() -> None:
+    # Search is now answered from the in-memory index, so the old per-query scan caps are gone. What
+    # remains must be a REAL ceiling, not the old `LIMIT 500` that silently hid older documents:
+    # the index must hold far more documents than a single page of results, and cover enough chunks
+    # that a fully-chunked corpus still fits.
     from smartbrain_3000 import kb as kbmod
+    from smartbrain_3000 import kbindex
 
-    assert kbmod._EMBED_SCAN_LIMIT >= kbmod._SEARCH_SCAN_LIMIT * kbmod._MAX_CHUNKS
+    assert kbindex._MAX_INDEXED_DOCS >= 100 * kbmod._SEARCH_SCAN_LIMIT
+    assert kbmod._MAX_INDEXED_VECTORS >= kbmod._SEARCH_SCAN_LIMIT * kbmod._MAX_CHUNKS
     assert kbmod._REINDEX_SCAN_LIMIT > kbmod._SEARCH_SCAN_LIMIT
-    assert kbmod._LEXICAL_SCAN_LIMIT >= 1

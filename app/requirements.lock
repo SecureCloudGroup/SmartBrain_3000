@@ -38,6 +38,7 @@ jusText==3.0.2
 lxml==6.1.1
 lxml_html_clean==0.4.5
 mcp==1.28.0
+numpy==2.5.1
 packaging==26.2
 pyOpenSSL==26.3.0
 pycparser==3.0
