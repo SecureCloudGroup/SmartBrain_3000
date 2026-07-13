@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 from . import gateway, ingest, netguard, search
+from . import summarize as docsum  # aliased: this module already defines a summarize() helper (line ~845)
 
 log = logging.getLogger(__name__)
 
@@ -52,6 +53,11 @@ class ToolContext:
     memory: object | None = None
     email: object | None = None
     schedules: object | None = None
+    # The chat model resolved for this turn. Not a credential (a model id) — carried so a handler
+    # can call the gateway with the SAME model the turn uses and size results to its context. Set via
+    # ``dataclasses.replace(ctx, model=...)`` once the model is known; None in contexts that never
+    # summarize (tests, some scheduled paths) — summarize_document asserts it is present.
+    model: str | None = None
 
 
 @dataclass(frozen=True)
@@ -70,9 +76,6 @@ _MAX_STR = 8000  # cap on any string arg
 _MAX_ARGS = 32  # cap on number of args (bounds validation loop)
 _SUMMARY_CAP = 2000  # cap on an audited summary string
 _MAX_SCHEDULE_MINUTES = 525600  # one year — mirrors schedule_routes._MAX_INTERVAL (clamp, don't 500)
-# Cap on the full-document text read_document returns — kept under agent._RESULT_CAP so it isn't
-# re-truncated after JSON encoding. Enough to read/summarize a typical doc; longer docs flag truncated.
-_READ_DOC_CHARS = 16000
 # Argument key names whose values are redacted before reaching the model / a
 # tile / the audit body (defense-in-depth on top of the structural firewall).
 _REDACT_KEYS = ("api_key", "apikey", "token", "password", "passphrase", "secret", "recovery_key", "authorization")
@@ -115,28 +118,100 @@ def _merge_hits(primary: list[dict], extra: list[dict], limit: int) -> list[dict
     return merged[:limit]
 
 
-def _read_document(ctx: ToolContext, args: dict) -> dict:
-    """OBSERVE: return the FULL text of one saved document (kb_search only returns short snippets).
+_READ_ENVELOPE_MARGIN = 512  # leave room under the result cap for JSON keys/escaping around the window
+_READ_TITLE_CAP = 200  # bound the echoed title so the fixed envelope margin holds even for a huge title
 
-    Give ``doc_id`` (from kb_search) for an exact read, or ``query``/``title`` to look the document
-    up by name. Long documents are truncated to ``_READ_DOC_CHARS`` with ``truncated: true`` set.
-    """
+
+def _resolve_doc(ctx: ToolContext, args: dict) -> dict:
+    """Resolve one KB document from an explicit ``doc_id`` or the best lexical match for ``query``/``title``.
+
+    Shared by read_document and summarize_document so both accept the same addressing. Asserts a hit
+    (the OBSERVE handlers surface "no such document" to the model rather than returning empty text)."""
     assert ctx.kb is not None, "knowledge base unavailable"
     doc_id = args.get("doc_id")
-    if not doc_id:  # no id — find the document by name/query (keyword scan reaches any doc)
-        query = args.get("query") or args.get("title")
-        assert query, "doc_id or query required"
-        hits = ctx.kb.search(query, limit=1)
-        if not hits:
-            return {"found": False, "detail": f"no document found matching {query!r} — try kb_search"}
-        doc_id = hits[0]["id"]
-    doc = ctx.kb.get(doc_id)
-    if doc is None:
-        return {"found": False, "detail": "document not found — use kb_search to find the right one"}
-    content = doc["content"]
+    if doc_id:
+        doc = ctx.kb.get(str(doc_id))
+        assert doc is not None, f"no document with id {doc_id}"
+        return doc
+    query = args.get("query") or args.get("title")
+    assert query, "doc_id or query required"
+    hits = ctx.kb.search(str(query), limit=1)
+    assert hits, f"no document matches {query!r}"
+    doc = ctx.kb.get(hits[0]["id"])
+    assert doc is not None, "matched document vanished"
+    return doc
+
+
+def _read_document(ctx: ToolContext, args: dict) -> dict:
+    """OBSERVE: read a window of a saved document's FULL text, paged by ``offset``/``max_chars``.
+
+    Resolve by ``doc_id`` or ``query``/``title``, then return up to ``max_chars`` characters starting
+    at ``offset`` (default 0 = the head). ``max_chars`` is clamped to the model's dynamic result cap so
+    the window always fits the context; ``next_offset`` (or null at end) pages through a large document.
+    Use this to read/quote an exact passage; use summarize_document for an overview of the whole thing."""
+    doc = _resolve_doc(ctx, args)
+    content = doc.get("content") or ""
+    total = len(content)
+    cap = gateway.result_cap_for(getattr(ctx.kb, "conn", None), ctx.model or "")
+    window_cap = max(1, cap - _READ_ENVELOPE_MARGIN)  # keep the serialized {window + metadata} under the cap
+    offset = min(max(0, int(args.get("offset", 0))), total)
+    max_chars = min(max(1, int(args.get("max_chars", window_cap))), window_cap)
+    window = content[offset:offset + max_chars]
+    next_offset = offset + len(window)
+    return {  # content LAST so the cap-truncation net (if ever hit) eats window-tail, never metadata
+        "id": doc["id"],
+        "title": (doc.get("title") or "")[:_READ_TITLE_CAP],
+        "offset": offset,
+        "returned_chars": len(window),
+        "total_chars": total,
+        "next_offset": next_offset if next_offset < total else None,
+        "truncated": next_offset < total,
+        "content": window,
+    }
+
+
+def _summarize_document(ctx: ToolContext, args: dict) -> dict:
+    """OBSERVE: summarize a saved document of ANY length via server-side map-reduce (one tool call).
+
+    Resolve by ``doc_id`` or ``query``/``title``, load the full text, split it, summarize each part, and
+    merge — so it handles hundreds of pages a single context could never hold. On a very large document
+    with a slow model it may hit an internal time budget and summarize only the covered head, returning
+    ``truncated: true`` with ``chars_covered``. Optional ``focus`` steers the summary toward a topic."""
+    assert ctx.model, "summarize requires a resolved model"
+    doc = _resolve_doc(ctx, args)
+    cap = gateway.result_cap_for(getattr(ctx.kb, "conn", None), ctx.model)
+    result = docsum.summarize_document(
+        ctx.model,
+        doc.get("title", ""),
+        doc.get("content") or "",
+        focus=str(args.get("focus", "") or ""),
+        chunk_chars=docsum.chunk_chars_for(cap),
+    )
+    return {k: result[k] for k in ("title", "chunks", "chars_covered", "total_chars", "truncated", "passes", "summary")}
+
+
+_MAX_LIST_DOCUMENTS = 500  # bound the catalog listing (P10 #2); `total` still reports the true count
+
+
+def _list_documents(ctx: ToolContext, args: dict) -> dict:
+    """OBSERVE: list the title, id, and dates of the user's saved documents (newest first).
+
+    Answers "what documents/files do I have in knowledge?" — the whole catalog, NOT a content search
+    (use kb_search for that). Each entry carries the id (so the agent can then read_document or
+    summarize_document that one) and created_at/updated_at (so it can answer when a doc was added or
+    last changed). Bounded to the newest ``_MAX_LIST_DOCUMENTS``; ``total`` reports the true count so
+    the agent can tell the user to narrow with kb_search when ``truncated`` is set."""
+    assert ctx.kb is not None, "knowledge base unavailable"
+    docs = ctx.kb.list_docs()  # id/title/timestamps, newest first
+    shown = docs[:_MAX_LIST_DOCUMENTS]
     return {
-        "found": True, "id": doc_id, "title": doc["title"],
-        "content": content[:_READ_DOC_CHARS], "truncated": len(content) > _READ_DOC_CHARS,
+        "total": len(docs),
+        "count": len(shown),
+        "truncated": len(docs) > len(shown),
+        "documents": [
+            {"id": d["id"], "title": d["title"], "created_at": d["created_at"], "updated_at": d["updated_at"]}
+            for d in shown
+        ],
     }
 
 
@@ -342,9 +417,10 @@ _TOOLS: tuple[Tool, ...] = (
     Tool(
         name="kb_search",
         description="Search the user's saved documents (knowledge base) by keyword AND meaning; finds "
-                    "any stored document whose title or content matches, returning short snippets. Use "
-                    "to LOCATE relevant documents; to read or summarize a whole document, use "
-                    "read_document (snippets are not the full text).",
+                    "any stored document whose title or content matches, returning short SNIPPETS. Use "
+                    "to LOCATE the right document, then read_document (its full text), summarize_document "
+                    "(an overview of any length), or list_documents (the whole catalog) — a snippet is "
+                    "not the full text.",
         params_schema={
             "type": "object",
             "additionalProperties": False,
@@ -360,10 +436,10 @@ _TOOLS: tuple[Tool, ...] = (
     ),
     Tool(
         name="read_document",
-        description="Read the FULL text of one saved document — use this to summarize, quote, or answer "
-                    "questions about a document (kb_search only returns short snippets). Pass doc_id (from "
-                    "kb_search) for an exact read, or query/title to look it up by name. Very long documents "
-                    "come back truncated (truncated=true).",
+        description="Read the FULL text of one saved document (not just a snippet), a page at a time. "
+                    "Identify it by doc_id (from kb_search) or by query/title. Returns a window of up to "
+                    "max_chars characters from offset (default 0); use the returned next_offset to read "
+                    "the next page. Use this to read or quote an exact passage of a long document.",
         params_schema={
             "type": "object",
             "additionalProperties": False,
@@ -371,10 +447,44 @@ _TOOLS: tuple[Tool, ...] = (
                 "doc_id": {"type": "string"},
                 "query": {"type": "string"},
                 "title": {"type": "string"},
+                "offset": {"type": "integer"},
+                "max_chars": {"type": "integer"},
             },
         },
         tier=Tier.OBSERVE,
         handler=_read_document,
+        egress=False,
+    ),
+    Tool(
+        name="summarize_document",
+        description="Summarize a saved document of ANY length — including hundreds of pages a single "
+                    "reply could never hold. Identify it by doc_id (from kb_search) or by query/title. "
+                    "Optional focus steers the summary toward a topic or question. Use this to overview "
+                    "or summarize a whole document; use read_document to quote an exact passage.",
+        params_schema={
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "doc_id": {"type": "string"},
+                "query": {"type": "string"},
+                "title": {"type": "string"},
+                "focus": {"type": "string"},
+            },
+        },
+        tier=Tier.OBSERVE,
+        handler=_summarize_document,
+        egress=False,
+    ),
+    Tool(
+        name="list_documents",
+        description="List ALL the user's saved documents in the knowledge base — the whole catalog, "
+                    "newest first, each with its title, id, and created/updated dates. Use THIS to "
+                    "answer what documents or files the user has saved (or when one was added). Use "
+                    "kb_search to find one by content, and read_document or summarize_document (by id) "
+                    "to open one.",
+        params_schema={"type": "object", "additionalProperties": False, "properties": {}},
+        tier=Tier.OBSERVE,
+        handler=_list_documents,
         egress=False,
     ),
     Tool(
@@ -655,7 +765,7 @@ _TOOLS: tuple[Tool, ...] = (
 
 # OBSERVE tools must be read-only + no egress; this allowlist is the structural
 # safety invariant checked at import.
-_OBSERVE_READONLY = frozenset({"kb_search", "read_document", "list_tasks", "list_schedules", "read_schedule_output"})
+_OBSERVE_READONLY = frozenset({"kb_search", "read_document", "summarize_document", "list_documents", "list_tasks", "list_schedules", "read_schedule_output"})
 
 # REVIEWED tools that MUTATE schedules. A schedule creates/rewrites/re-enables an autonomous
 # agent turn, so these must NEVER auto-run (via remembered consent) inside a schedule-executed

@@ -96,6 +96,48 @@ def test_load_routes_corrupt_json_falls_back(tmp_path) -> None:
     assert gateway.load_routes(conn) == gateway.DEFAULT_ROUTES
 
 
+def test_context_lengths_roundtrip_and_validate(tmp_path) -> None:
+    conn = db.open_db(tmp_path / "c.duckdb")
+    db.run_migrations(conn)
+    assert gateway.load_context_lengths(conn) == {}  # empty when unset
+    # only 'provider/model' keys with a positive int survive (garbage is dropped, not stored);
+    # a bool is NOT accepted as an int (isinstance(True, int) is True in Python — guard against it)
+    gateway.save_context_lengths(conn, {"mlx/gemma-4": 262144, "bad": 8000, "mlx/z": 0, "mlx/n": "x", "mlx/b": True})
+    assert gateway.load_context_lengths(conn) == {"mlx/gemma-4": 262144}
+
+
+def test_context_lengths_corrupt_json_falls_back(tmp_path) -> None:
+    conn = db.open_db(tmp_path / "c2.duckdb")
+    db.run_migrations(conn)
+    db.meta_set(conn, "model_context_lengths", "{not valid json")
+    assert gateway.load_context_lengths(conn) == {}
+
+
+def test_resolve_context_length_precedence(tmp_path) -> None:
+    conn = db.open_db(tmp_path / "c3.duckdb")
+    db.run_migrations(conn)
+    assert gateway.resolve_context_length(conn, "mlx/gemma-4") == gateway._DEFAULT_CONTEXT_TOKENS  # unknown -> default
+    assert gateway.resolve_context_length(None, "mlx/gemma-4") == gateway._DEFAULT_CONTEXT_TOKENS  # no conn -> default
+    assert gateway.resolve_context_length(conn, "") == gateway._DEFAULT_CONTEXT_TOKENS  # unspecified -> default
+    gateway.save_context_lengths(conn, {"mlx/gemma-4": 262144})
+    assert gateway.resolve_context_length(conn, "mlx/gemma-4") == 262144  # stored override wins
+
+
+def test_result_cap_for_scales_and_clamps(tmp_path) -> None:
+    conn = db.open_db(tmp_path / "c4.duckdb")
+    db.run_migrations(conn)
+    default_cap = int(gateway._DEFAULT_CONTEXT_TOKENS * gateway._RESULT_FRACTION * gateway._CHARS_PER_TOKEN)
+    assert gateway.result_cap_for(conn, "unknown/model") == max(gateway._RESULT_CAP_FLOOR, default_cap)  # unknown -> default
+    gateway.save_context_lengths(conn, {"mlx/tiny": 1024})  # tiny context clamps UP to the floor
+    assert gateway.result_cap_for(conn, "mlx/tiny") == gateway._RESULT_CAP_FLOOR
+    gateway.save_context_lengths(conn, {"mlx/gemma-4": 262144})  # huge context clamps DOWN to the ceiling
+    assert gateway.result_cap_for(conn, "mlx/gemma-4") == gateway._RESULT_CAP_CEILING
+    gateway.save_context_lengths(conn, {"mlx/mid": 32768})  # a mid context scales linearly
+    cap = gateway.result_cap_for(conn, "mlx/mid")
+    assert cap == int(32768 * gateway._RESULT_FRACTION * gateway._CHARS_PER_TOKEN)
+    assert gateway._RESULT_CAP_FLOOR < cap < gateway._RESULT_CAP_CEILING
+
+
 def test_embed_model_uses_routed_embedding(tmp_path) -> None:
     conn = db.open_db(tmp_path / "e.duckdb")
     db.run_migrations(conn)
@@ -133,6 +175,29 @@ def test_routes_put_persists_known_caps_only(client: TestClient) -> None:
     assert "bogus" not in r.json()["routes"]  # unknown capability rejected
     g = client.get("/api/routes")
     assert g.json()["routes"]["chat"] == "gemini/gemini-2.5-flash" and "chat" in g.json()["labels"]
+
+
+def test_context_lengths_endpoint_merge_and_reset(client: TestClient) -> None:
+    client.post("/api/account/setup", json={"passphrase": "correct-horse"})
+    assert client.get("/api/model-context-lengths").json() == {"lengths": {}, "default": gateway._DEFAULT_CONTEXT_TOKENS}
+    r = client.put("/api/model-context-lengths", json={"lengths": {"mlx/gemma-4": 262144}})
+    assert r.status_code == 200 and r.json()["lengths"] == {"mlx/gemma-4": 262144}
+    # a second PUT MERGES (doesn't wipe the first model's detected/override value)
+    r = client.put("/api/model-context-lengths", json={"lengths": {"ollama/llama3.1": 8192}})
+    assert r.json()["lengths"] == {"mlx/gemma-4": 262144, "ollama/llama3.1": 8192}
+    # a <=0 value resets (removes) that model's override
+    r = client.put("/api/model-context-lengths", json={"lengths": {"mlx/gemma-4": 0}})
+    assert r.json()["lengths"] == {"ollama/llama3.1": 8192}
+
+
+def test_context_lengths_endpoint_requires_unlock(client: TestClient) -> None:
+    assert client.get("/api/model-context-lengths").status_code == 423
+    assert client.put("/api/model-context-lengths", json={"lengths": {}}).status_code == 423
+
+
+def test_context_lengths_endpoint_rejects_bad_key(client: TestClient) -> None:
+    client.post("/api/account/setup", json={"passphrase": "correct-horse"})
+    assert client.put("/api/model-context-lengths", json={"lengths": {"gemma4": 8192}}).status_code == 400
 
 
 def test_routes_put_rejects_model_without_provider(client: TestClient) -> None:

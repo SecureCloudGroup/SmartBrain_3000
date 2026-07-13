@@ -193,6 +193,58 @@ def save_routes(conn, routes: dict[str, str]) -> None:
     db.meta_set(conn, _ROUTES_META_KEY, json.dumps(clean))
 
 
+_CTX_META_KEY = "model_context_lengths"  # persisted 'provider/model' -> context-length-in-tokens
+_DEFAULT_CONTEXT_TOKENS = 8192   # conservative fallback when a model's context length is unknown
+_CHARS_PER_TOKEN = 3.5           # conservative (real English ~4): UNDER-estimate so we never overflow
+_RESULT_FRACTION = 0.30          # a single tool result may occupy ~this share of the context window
+_RESULT_CAP_FLOOR = 8000         # a tiny-context model must still return a usable amount of text
+_RESULT_CAP_CEILING = 200000     # absolute upper bound on one tool result (bounds transcript memory)
+
+
+def load_context_lengths(conn) -> dict[str, int]:
+    """Return the persisted 'provider/model' -> context-length (tokens) map. Corrupt JSON -> {}."""
+    from . import db
+
+    assert conn is not None, "conn required"
+    raw = db.meta_get(conn, _CTX_META_KEY)
+    if not raw:
+        return {}
+    try:
+        stored = json.loads(raw)
+    except (ValueError, TypeError):
+        return {}  # corrupt config — behave as if unset (fall back to the default)
+    return {m: n for m, n in stored.items() if isinstance(m, str) and isinstance(n, int) and not isinstance(n, bool) and n > 0} if isinstance(stored, dict) else {}
+
+
+def save_context_lengths(conn, lengths: dict[str, int]) -> None:
+    """Persist a validated 'provider/model' -> positive-int-tokens map to the meta table."""
+    from . import db
+
+    assert conn is not None, "conn required"
+    assert isinstance(lengths, dict), "lengths must be a mapping"
+    clean = {m: n for m, n in lengths.items() if isinstance(m, str) and "/" in m and isinstance(n, int) and not isinstance(n, bool) and n > 0}
+    db.meta_set(conn, _CTX_META_KEY, json.dumps(clean))
+
+
+def resolve_context_length(conn, model: str) -> int:
+    """Context length (tokens) for a model: stored override -> conservative default. No network call.
+
+    The override is populated by local-model registration (probe captures max_model_len) or the
+    Settings field; an unknown or unspecified model falls back to ``_DEFAULT_CONTEXT_TOKENS``."""
+    if not model or conn is None:
+        return _DEFAULT_CONTEXT_TOKENS
+    override = load_context_lengths(conn).get(model)
+    return override if isinstance(override, int) and override > 0 else _DEFAULT_CONTEXT_TOKENS
+
+
+def result_cap_for(conn, model: str) -> int:
+    """Dynamic cap (chars) on a tool result fed back to ``model`` — scaled to its context length so a
+    big-context model can read/return much more than a small one, clamped to a safe [floor, ceiling]."""
+    tokens = resolve_context_length(conn, model)
+    cap = int(tokens * _RESULT_FRACTION * _CHARS_PER_TOKEN)
+    return max(_RESULT_CAP_FLOOR, min(cap, _RESULT_CAP_CEILING))
+
+
 class GatewayError(Exception):
     """An LLM gateway/provider error carrying an upstream status + message."""
 
@@ -443,6 +495,19 @@ def chat(
             client.close()
     assert isinstance(data, dict), "gateway response must be a JSON object"
     return data
+
+
+def completion_text(data: dict) -> str:
+    """Extract the assistant message text from a ``chat`` response (choices[0].message.content).
+
+    Returns "" for a malformed/empty completion rather than raising, so a summarization loop can
+    degrade a bad chunk gracefully. Shared by callers that need the plain text (not the raw JSON)."""
+    choices = data.get("choices") if isinstance(data, dict) else None
+    if not choices or not isinstance(choices, list):
+        return ""
+    message = choices[0].get("message") if isinstance(choices[0], dict) else None
+    content = message.get("content") if isinstance(message, dict) else None
+    return content if isinstance(content, str) else ""
 
 
 def _looks_tools_unsupported(status: int, message: str) -> bool:
@@ -833,8 +898,10 @@ def probe_ollama(url: str, *, client: httpx.Client | None = None, timeout: float
 
 
 def probe_mlx(url: str, api_key: str, *, client: httpx.Client | None = None, timeout: float = 4.0) -> dict:
-    """Return ``{reachable, models}`` for an MLX OpenAI server (best-effort).
+    """Return ``{reachable, models, context_lengths}`` for an MLX OpenAI server (best-effort).
 
+    The MLX server's /v1/models reports ``max_model_len`` per model — the context length bifrost
+    strips from its own catalog — so ``context_lengths`` maps each model id to it (when present).
     ``timeout`` is short for unconfigured auto-detection (see ``probe_ollama``).
     """
     assert url, "url required"
@@ -845,10 +912,13 @@ def probe_mlx(url: str, api_key: str, *, client: httpx.Client | None = None, tim
         headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
         resp = client.get(f"{url.rstrip('/')}/v1/models", headers=headers)
         resp.raise_for_status()
-        ids = [m.get("id") for m in resp.json().get("data", []) if m.get("id")]
-        return {"reachable": True, "models": ids}
+        data = resp.json().get("data", [])
+        ids = [m.get("id") for m in data if m.get("id")]
+        ctx = {m["id"]: int(m["max_model_len"]) for m in data
+               if m.get("id") and isinstance(m.get("max_model_len"), int) and m["max_model_len"] > 0}
+        return {"reachable": True, "models": ids, "context_lengths": ctx}
     except Exception:
-        return {"reachable": False, "models": []}
+        return {"reachable": False, "models": [], "context_lengths": {}}
     finally:
         if owns_client:
             client.close()

@@ -9,6 +9,7 @@ dangerous tool can run at most once and never without approval.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import logging
 import uuid
@@ -86,6 +87,10 @@ def invoke_tool(request: Request, body: InvokeIn) -> dict:
     if tool is None:
         raise HTTPException(status_code=404, detail="unknown tool")
     if tool.tier is tools.Tier.OBSERVE:
+        # summarize_document/read_document size to the model's context — give the direct-invoke path the
+        # chat model so ctx.model is set (the agent loop sets it per turn; here there's no turn model).
+        chat_model = gateway.resolve_model("chat", gateway.load_routes(request.app.state.dbx))
+        ctx = dataclasses.replace(ctx, model=chat_model)
         try:
             return {"status": "done", "result": tools.run(ctx, audit, body.name, body.args, actor="user", conversation_id=body.conversation_id)}
         except ValueError as exc:
@@ -200,6 +205,7 @@ def agent_turn(request: Request, body: TurnIn) -> dict:
             ctx, audit, approvals, messages=messages, model=model,
             conversation_id=body.conversation_id, turn_id=uuid.uuid4().hex, usage_sink=sink,
             auto_approve=consent.remembered(conn), timeout=_INTERACTIVE_TIMEOUT,
+            result_cap=gateway.result_cap_for(conn, model),
         )
     except gateway.GatewayError as exc:
         raise HTTPException(status_code=502, detail=exc.message) from None
@@ -322,7 +328,7 @@ def agent_resume(request: Request, turn_id: str) -> dict:
         usage.record_response(conn, used_model, response)
 
     try:
-        result = agent.resume_turn(ctx, audit, approvals, turn_id, usage_sink=sink, auto_approve=consent.remembered(conn), timeout=_INTERACTIVE_TIMEOUT)
+        result = agent.resume_turn(ctx, audit, approvals, turn_id, conn=conn, usage_sink=sink, auto_approve=consent.remembered(conn), timeout=_INTERACTIVE_TIMEOUT)
     except gateway.GatewayError as exc:
         raise HTTPException(status_code=502, detail=exc.message) from None
     except Exception as exc:  # gateway unreachable

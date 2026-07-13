@@ -127,6 +127,28 @@ def test_max_steps_bound(monkeypatch) -> None:
     assert r["status"] == "max_steps"  # never loops forever
 
 
+def test_result_cap_truncates_tool_result_fed_back(monkeypatch) -> None:
+    # A big OBSERVE result (a full document) is truncated to result_cap before it's fed to the model,
+    # so a big-context model can be given a bigger cap than a small one.
+    ctx, audit, approvals = _wired()
+    ctx.kb.add("Long", "L" * 5000)
+    calls = _recorder(monkeypatch, [_toolcalls(("read_document", {"query": "Long"})), _text("done")])
+    agent.run_turn(ctx, audit, approvals, messages=[{"role": "user", "content": "hi"}],
+                   model="m", conversation_id=None, turn_id="cap", result_cap=100)
+    tool_msg = next(m for m in calls[1] if m.get("role") == "tool")
+    assert len(tool_msg["content"]) == 100  # honored the passed cap
+
+
+def test_result_cap_defaults_to_no_extra_truncation(monkeypatch) -> None:
+    # Omitting result_cap keeps the historical default (_RESULT_CAP), so existing callers are unaffected.
+    ctx, audit, approvals = _wired()
+    ctx.kb.add("Long", "L" * 5000)
+    calls = _recorder(monkeypatch, [_toolcalls(("read_document", {"query": "Long"})), _text("done")])
+    _run(ctx, audit, approvals)  # no result_cap -> default 8000, well above this ~5KB result
+    tool_msg = next(m for m in calls[1] if m.get("role") == "tool")
+    assert 5000 < len(tool_msg["content"]) <= agent._RESULT_CAP  # full result, not clipped to 100
+
+
 # --- text-emitted tool calls (local models / runtimes that don't parse tool syntax) -------
 
 def test_text_emitted_tool_call_is_recovered_and_parks(monkeypatch) -> None:
