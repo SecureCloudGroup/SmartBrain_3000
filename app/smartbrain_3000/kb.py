@@ -12,6 +12,7 @@ unfindable), decrypt the whole corpus on every keystroke, and rank by raw term f
 
 from __future__ import annotations
 
+import bisect
 import json
 import logging
 import math
@@ -50,6 +51,20 @@ def chunk_text(title: str, content: str) -> list[str]:
         return [title]
     chunks = [f"{title}\n{body[i : i + _CHUNK_CHARS]}" for i in range(0, len(body), _CHUNK_CHARS)]
     return chunks[:_MAX_CHUNKS]
+
+
+def page_for(meta: dict, offset: int) -> int | None:
+    """1-based page number containing character ``offset``, or None if the document has no pages.
+
+    ``meta["pages"]`` is the character offset at which each page STARTS (recorded at ingest, see
+    ingest._extract_pdf). A binary search over it turns any character position — e.g. the start of
+    the chunk that matched a search — into "page 12", which is what a citation has to say.
+    """
+    assert offset >= 0, "offset must be non-negative"
+    pages = meta.get("pages") if isinstance(meta, dict) else None
+    if not pages:
+        return None
+    return bisect.bisect_right(pages, offset)  # pages[0] == 0, so the first page is 1
 
 
 def chunk_span(content: str, chunk_idx: int) -> tuple[int, int]:
@@ -137,12 +152,12 @@ class KnowledgeBase:
             grouped.setdefault((model, dim), {}).setdefault(doc_id, []).append(vector)
         return [(model, dim, per_doc) for (model, dim), per_doc in grouped.items()]
 
-    def add(self, title: str, content: str) -> str:
-        """Encrypt and store a document; return its new id."""
+    def add(self, title: str, content: str, meta: dict | None = None) -> str:
+        """Encrypt and store a document (with optional provenance ``meta``); return its new id."""
         assert title, "title must be non-empty"
         assert content is not None, "content must not be None"
         doc_id = str(uuid.uuid4())
-        nonce, ciphertext = self._seal(doc_id, title, content)
+        nonce, ciphertext = self._seal(doc_id, title, content, meta)
         self._conn.execute(
             "INSERT INTO documents (id, nonce, ciphertext) VALUES (?, ?, ?);",
             [doc_id, nonce, ciphertext],
@@ -157,7 +172,7 @@ class KnowledgeBase:
         doc = self.get(doc_id)
         if doc is None:
             return False
-        nonce, ciphertext = self._seal(doc_id, title, doc["content"])
+        nonce, ciphertext = self._seal(doc_id, title, doc["content"], doc.get("meta"))  # keep provenance
         self._conn.execute(
             "UPDATE documents SET nonce = ?, ciphertext = ?, updated_at = now() WHERE id = ?;",
             [nonce, ciphertext, doc_id],
@@ -208,27 +223,51 @@ class KnowledgeBase:
         return out
 
     def _hit(self, doc_id: str, score: float, chunk_idx: int | None, terms: list[str]) -> dict | None:
-        """Build one result row. Decrypts THIS document — only the handful we actually return.
+        """Build one result row — a CITATION, not just a title.
 
-        The snippet is cut from the matched chunk when we know which one it was (a semantic hit), so
-        it quotes the passage that caused the match instead of the head of the document.
+        Decrypts THIS document (only the handful we actually return) and reports where the match
+        came from: which file/URL, which page, and which character range. The snippet is cut from
+        the matched chunk when we know which one it was, so it quotes the passage that caused the
+        match instead of the head of the document.
         """
         doc = self.get(doc_id)
         if doc is None:
             return None  # raced with a delete, or an orphan vector
-        content = doc["content"]
+        content, meta = doc["content"], doc.get("meta") or {}
         if chunk_idx is not None:
-            start, end = chunk_span(content, chunk_idx)
-            snippet = self._snippet(content[start:end], terms)
+            # Locate the query term INSIDE the matched chunk. A 4000-char chunk can straddle a page
+            # boundary, so citing "the page the chunk starts on" would be off by a page whenever the
+            # real match sits later in the chunk. With no terms (a pure vector hit) the chunk's start
+            # is the best we honestly know.
+            cstart, cend = chunk_span(content, chunk_idx)
+            start = cstart + self._locate(content[cstart:cend], terms)
         else:
-            snippet = self._snippet(content, terms)
+            start = self._locate(content, terms)
+        snippet = self._window(content, start)
         return {
             "id": doc_id,
             "title": doc["title"],
             "score": score,
             "snippet": snippet,
             "chunk_idx": chunk_idx,
+            # --- citation ---
+            "source": meta.get("filename") or meta.get("source_url") or "",
+            "page": page_for(meta, start),
+            "offset": start,  # lets the viewer open the document AT the passage that matched
         }
+
+    @staticmethod
+    def _locate(text: str, terms: list[str]) -> int:
+        """Offset of the earliest query term in ``text``; 0 when none of them appear."""
+        lowered = text.lower()
+        positions = [p for p in (lowered.find(t) for t in terms) if p >= 0]
+        return min(positions) if positions else 0
+
+    @staticmethod
+    def _window(content: str, offset: int) -> str:
+        """A snippet centred on ``offset`` (a little lead-in, so the match isn't flush at the edge)."""
+        start = max(0, offset - 40)
+        return content[start : start + _SNIPPET_CHARS]
 
     def search(self, query: str, limit: int = 10) -> list[dict]:
         """Lexical search over the WHOLE corpus, ranked by BM25.
@@ -357,21 +396,31 @@ class KnowledgeBase:
         assert len(plaintext) == dim * 4, "embedding blob length mismatch"
         return list(struct.unpack(f"<{dim}f", plaintext))
 
-    def _seal(self, doc_id: str, title: str, content: str) -> tuple[bytes, bytes]:
-        """Encrypt {title, content} bound to doc_id; return (nonce, ciphertext)."""
+    def _seal(self, doc_id: str, title: str, content: str, meta: dict | None = None) -> tuple[bytes, bytes]:
+        """Encrypt {title, content, meta} bound to doc_id; return (nonce, ciphertext).
+
+        Provenance (filename, source URL, page map) lives INSIDE the ciphertext rather than in a
+        plaintext column: where a document came from is exactly as sensitive as what it says.
+        """
         assert doc_id, "doc id required"
         assert title, "title required"
         nonce = os.urandom(_NONCE_BYTES)
-        plaintext = json.dumps({"title": title, "content": content}).encode("utf-8")
+        body = {"title": title, "content": content, "meta": meta or {}}
+        plaintext = json.dumps(body).encode("utf-8")
         return nonce, self._aes.encrypt(nonce, plaintext, doc_id.encode("utf-8"))
 
     def _open(self, doc_id: str, nonce: bytes, ciphertext: bytes) -> dict:
-        """Decrypt a stored document body for ``doc_id``."""
+        """Decrypt a stored document body for ``doc_id``.
+
+        ``meta`` is defaulted, not asserted: documents sealed before provenance existed have no meta
+        key, and they must keep opening (and searching) exactly as before.
+        """
         assert doc_id, "doc id required"
         assert len(nonce) == _NONCE_BYTES, "nonce must be 12 bytes"
         plaintext = self._aes.decrypt(nonce, ciphertext, doc_id.encode("utf-8"))
         body = json.loads(plaintext.decode("utf-8"))
         assert "title" in body and "content" in body, "document body malformed"
+        body.setdefault("meta", {})  # pre-provenance document
         return body
 
     @staticmethod

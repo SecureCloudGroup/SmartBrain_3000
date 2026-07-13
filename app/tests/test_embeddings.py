@@ -133,9 +133,9 @@ def test_semantic_search_ranks_by_similarity() -> None:
     results = kb.semantic_search([1.0, 1.0, 0.0], m)
     assert [r["id"] for r in results] == [near, far]
     assert results[0]["score"] > results[1]["score"]
-    # chunk_idx is new: it records WHICH chunk matched, so the snippet can quote that passage
-    # (and, later, cite it) instead of blindly showing the head of the document.
-    assert set(results[0]) == {"id", "title", "score", "snippet", "chunk_idx"}
+    # A hit is now a CITATION: chunk_idx records WHICH chunk matched (so the snippet quotes that
+    # passage), and source/page/offset say where it came from and where to open the document.
+    assert set(results[0]) == {"id", "title", "score", "snippet", "chunk_idx", "source", "page", "offset"}
 
 
 def test_chunk_text_splits_long_doc_with_title_prefix() -> None:

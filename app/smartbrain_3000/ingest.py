@@ -69,12 +69,17 @@ def _looks_binary(data: bytes) -> bool:
     return b"\x00" in data[:1024]
 
 
-def _extract_pdf(data: bytes) -> tuple[str, str]:
-    """Return (title, text) from PDF bytes via pypdf (bounded pages + cumulative cap).
+def _extract_pdf(data: bytes) -> tuple[str, str, list[int]]:
+    """Return (title, text, page_starts) from PDF bytes via pypdf (bounded pages + cumulative cap).
 
-    Caps cumulative text DURING extraction so a single text-bomb page can't blow
-    memory before _MAX_TEXT is applied. All pypdf access (incl. metadata) is inside
-    the try so any parser error surfaces as IngestError, not a 500.
+    ``page_starts[i]`` is the character offset in ``text`` where page i+1 begins. This is what makes
+    "page 12" possible in a citation: the page boundaries are known here and NOWHERE else, and used
+    to be flattened away by the join. Offsets are kept exact through the join (which inserts one
+    separator char) and through the leading strip.
+
+    Caps cumulative text DURING extraction so a single text-bomb page can't blow memory before
+    _MAX_TEXT is applied. All pypdf access (incl. metadata) is inside the try so any parser error
+    surfaces as IngestError, not a 500.
     """
     from pypdf import PdfReader  # lazy: heavy dep, only on the ingest path
 
@@ -83,18 +88,25 @@ def _extract_pdf(data: bytes) -> tuple[str, str]:
     try:
         reader = PdfReader(io.BytesIO(data))
         parts: list[str] = []
-        total = 0
+        page_starts: list[int] = []
+        pos = 0
         for page in reader.pages[:_MAX_PDF_PAGES]:  # bounded page loop
             piece = page.extract_text() or ""
-            if total + len(piece) >= _MAX_TEXT:  # cumulative cap = true memory ceiling
-                parts.append(piece[: _MAX_TEXT - total])
+            if pos + len(piece) >= _MAX_TEXT:  # cumulative cap = true memory ceiling
+                page_starts.append(pos)
+                parts.append(piece[: _MAX_TEXT - pos])
                 break
+            page_starts.append(pos)
             parts.append(piece)
-            total += len(piece)
+            pos += len(piece) + 1  # +1 for the "\n" that the join below inserts
         title = (reader.metadata.title if reader.metadata and reader.metadata.title else "") or ""
     except Exception as exc:  # malformed / encrypted PDF
         raise IngestError(f"could not read PDF: {exc}") from None
-    return title.strip(), "\n".join(parts).strip()
+    text = "\n".join(parts)
+    lead = len(text) - len(text.lstrip())  # the strip below shifts every offset left by this much
+    text = text.strip()
+    starts = [max(0, p - lead) for p in page_starts]
+    return title.strip(), text, starts
 
 
 def _extract_html(html: str, url: str) -> tuple[str, str]:
@@ -112,8 +124,15 @@ def _extract_html(html: str, url: str) -> tuple[str, str]:
     return (title or "").strip(), text.strip()
 
 
-def _dispatch(data: bytes, content_type: str, hint_url: str) -> tuple[str, str]:
+def _clamp_pages(page_starts: list[int], text_len: int) -> list[int]:
+    """Drop page starts that fall past the (possibly truncated) text, so no citation points nowhere."""
+    return [p for p in page_starts if p < text_len]
+
+
+def _dispatch(data: bytes, content_type: str, hint_url: str) -> tuple[str, str, list[int]]:
     """Pick an extractor by magic bytes / content-type, falling back to the URL hint.
+
+    Returns (title, text, page_starts) — page_starts is empty for anything that has no pages.
 
     Magic bytes and content-type are authoritative; the ``.pdf`` URL hint is only
     consulted when the content-type is generic (so an HTML page served at a
@@ -125,40 +144,43 @@ def _dispatch(data: bytes, content_type: str, hint_url: str) -> tuple[str, str]:
     if data[:5] == b"%PDF-" or "pdf" in ctl:
         return _extract_pdf(data)
     if "html" in ctl or "xml" in ctl:
-        return _extract_html(data.decode("utf-8", "replace"), hint_url)
+        return (*_extract_html(data.decode("utf-8", "replace"), hint_url), [])
     generic = ctl.startswith("application/octet-stream") or not ctl
     if generic and hint_url.lower().endswith(".pdf"):
         return _extract_pdf(data)
     if hint_url.lower().endswith((".html", ".htm")):
-        return _extract_html(data.decode("utf-8", "replace"), hint_url)
+        return (*_extract_html(data.decode("utf-8", "replace"), hint_url), [])
     if _looks_binary(data):  # don't store an unrecognized binary blob as garbled text
         raise IngestError(
             "unsupported file type — supported: PDF, HTML, and text (.txt, .md, .csv, .json). "
             "Word/Office (.docx, .pptx, .xlsx), images, and other binaries aren't supported."
         )
-    return "", data.decode("utf-8", "replace").strip()  # text/* or json — store as-is
+    return "", data.decode("utf-8", "replace").strip(), []  # text/* or json — store as-is
 
 
-def from_url(url: str) -> tuple[str, str]:
-    """Fetch a URL (SSRF-guarded) and extract (title, text). Raises IngestError."""
+def from_url(url: str) -> tuple[str, str, dict]:
+    """Fetch a URL (SSRF-guarded) and extract (title, text, meta). Raises IngestError."""
     assert url, "url required"
     try:
         got = netguard.safe_fetch_bytes(url)
     except netguard.FetchError as exc:
         raise IngestError(str(exc)) from None
-    title, text = _dispatch(got["content"], got["content_type"], got["final_url"])
+    title, text, pages = _dispatch(got["content"], got["content_type"], got["final_url"])
     if not text:
         raise IngestError("no readable text found at that URL")
-    return _resolve_title(title, _title_from_url(got["final_url"])), text[:_MAX_TEXT]
+    text = text[:_MAX_TEXT]
+    meta = {"source_url": got["final_url"], "mime": got["content_type"], "pages": _clamp_pages(pages, len(text))}
+    return _resolve_title(title, _title_from_url(got["final_url"])), text, meta
 
 
-def from_file(filename: str, data: bytes) -> tuple[str, str]:
-    """Extract (title, text) from uploaded file bytes by extension/sniff."""
+def from_file(filename: str, data: bytes) -> tuple[str, str, dict]:
+    """Extract (title, text, meta) from uploaded file bytes by extension/sniff."""
     assert filename, "filename required"
     assert data, "file is empty"
     ext = os.path.splitext(filename)[1].lower()
+    pages: list[int] = []
     if ext == ".pdf" or data[:5] == b"%PDF-":
-        title, text = _extract_pdf(data)
+        title, text, pages = _extract_pdf(data)
     elif ext in _HTML_EXT:
         title, text = _extract_html(data.decode("utf-8", "replace"), "")
     elif ext in _TEXT_EXT or ext == "":
@@ -169,7 +191,11 @@ def from_file(filename: str, data: bytes) -> tuple[str, str]:
         raise IngestError(f"unsupported file type: {ext or 'unknown'}")
     if not text:
         raise IngestError("no readable text found in that file")
-    return _resolve_title(title, os.path.basename(filename)), text[:_MAX_TEXT]
+    text = text[:_MAX_TEXT]
+    # The filename is what a citation actually shows the user ("Lease.pdf, p.12"), and it used to be
+    # consumed to derive a title and then dropped.
+    meta = {"filename": os.path.basename(filename), "pages": _clamp_pages(pages, len(text))}
+    return _resolve_title(title, os.path.basename(filename)), text, meta
 
 
 def embed_doc(knowledge, doc_id: str, title: str, content: str, model: str, *, timeout: float = _EMBED_TIMEOUT) -> None:
@@ -210,15 +236,15 @@ def reindex_pending(knowledge, model: str, *, limit: int = 1000, timeout: float 
     return embedded, skipped, failed, error
 
 
-def store(knowledge, title: str, content: str) -> dict:
-    """Add a document to the KB and embed it best-effort; return {id, title, chars}.
+def store(knowledge, title: str, content: str, meta: dict | None = None) -> dict:
+    """Add a document to the KB (with provenance ``meta``) and embed it best-effort.
 
     Embedding failure (e.g. Ollama down) never fails the add — the doc is stored
     and a later reindex backfills the vector.
     """
     assert knowledge is not None, "knowledge base required"
     assert title and content, "title + content required"
-    doc_id = knowledge.add(title, content)
+    doc_id = knowledge.add(title, content, meta)
     try:  # best-effort: make it immediately semantic-searchable
         model = gateway.embed_model(getattr(knowledge, "conn", None))  # routed embedding model
         embed_doc(knowledge, doc_id, title, content, model)
@@ -229,5 +255,5 @@ def store(knowledge, title: str, content: str) -> dict:
 
 def ingest_url(knowledge, url: str) -> dict:
     """Fetch + extract + store a URL. Returns {id, title, chars}."""
-    title, text = from_url(url)
-    return store(knowledge, title, text)
+    title, text, meta = from_url(url)
+    return store(knowledge, title, text, meta)

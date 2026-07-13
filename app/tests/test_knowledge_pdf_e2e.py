@@ -76,7 +76,7 @@ def test_pdf_ingest_extracts_text_from_every_page() -> None:
         "Section two covers GRIZZNAK compliance obligations in full.",
         "Deep on the third page: the SNORTLE provision is binding forever.",
     ])
-    title, text = ingest.from_file("Perenial Value SPAC (01665749).pdf", pdf)
+    title, text, _meta = ingest.from_file("Perenial Value SPAC (01665749).pdf", pdf)
     # No /Title metadata in our PDF -> title is the real uploaded filename (the #30 fix).
     assert title == "Perenial Value SPAC (01665749).pdf"
     for token in ("ZORBLAX", "QUUXFROB", "GRIZZNAK", "SNORTLE"):
@@ -94,7 +94,7 @@ def test_pdf_ingest_rejects_non_pdf_binary() -> None:
 
 def test_pdf_content_encrypted_at_rest() -> None:
     kb, conn, _ = _kb()
-    _, text = ingest.from_file("secret.pdf", make_pdf(["The FIZZLEWICK clause is confidential."]))
+    _, text, _meta = ingest.from_file("secret.pdf", make_pdf(["The FIZZLEWICK clause is confidential."]))
     kb.add("secret.pdf", text)
     raw = b"".join(bytes(r[0]) for r in conn.execute("SELECT ciphertext FROM documents;").fetchall())
     assert b"FIZZLEWICK" not in raw and b"confidential" not in raw  # plaintext never on disk
@@ -105,7 +105,7 @@ def test_pdf_content_encrypted_at_rest() -> None:
 # ============================================================================================
 
 def _store_three_page_doc(kb: KnowledgeBase) -> str:
-    _, text = ingest.from_file("brief.pdf", make_pdf([
+    _, text, _meta = ingest.from_file("brief.pdf", make_pdf([
         "Opening ZORBLAX and QUUXFROB overview.",
         "Middle GRIZZNAK section with detail.",
         "Closing SNORTLE provision on the last page.",
@@ -184,7 +184,7 @@ def test_multichunk_pdf_late_token_is_embedded_and_found(monkeypatch) -> None:
     # lands only in a late chunk must still be semantically findable.
     _use_fake_embed(monkeypatch)
     kb, conn, _ = _kb()
-    _, text = ingest.from_file("long.pdf", make_pdf(long_pages("MUNGWANGLE")))
+    _, text, _meta = ingest.from_file("long.pdf", make_pdf(long_pages("MUNGWANGLE")))
     assert len(text) > 4000, "doc must exceed one chunk to exercise multi-chunk embedding"
     did = kb.add("Long Record", text)  # title has no test token, so only a late chunk holds MUNGWANGLE
     ingest.embed_doc(kb, did, "Long Record", text, _FAKE_MODEL)
@@ -200,7 +200,7 @@ def test_multichunk_pdf_late_token_is_embedded_and_found(monkeypatch) -> None:
 
 def test_reindex_backfills_pdf_embeddings_then_semantic_finds(monkeypatch) -> None:
     kb, _, _ = _kb()
-    _, text = ingest.from_file("late.pdf", make_pdf(["the CRUMBDIDDLE disclosure"]))
+    _, text, _meta = ingest.from_file("late.pdf", make_pdf(["the CRUMBDIDDLE disclosure"]))
     did = kb.add("Late Doc", text)  # stored WITHOUT embeddings (gateway was down)
     assert kb.docs_needing_embedding(_FAKE_MODEL) == [did]
     _use_fake_embed(monkeypatch)  # gateway back
@@ -222,7 +222,7 @@ def _tool_ctx() -> tuple[tools.ToolContext, AuditLog]:
 def test_kb_search_tool_finds_pdf_by_meaning(monkeypatch) -> None:
     _use_fake_embed(monkeypatch)
     ctx, audit = _tool_ctx()
-    _, text = ingest.from_file("f.pdf", make_pdf(["the SPLONKTASTIC ruling applies"]))
+    _, text, _meta = ingest.from_file("f.pdf", make_pdf(["the SPLONKTASTIC ruling applies"]))
     did = ctx.kb.add("Ruling", text)
     ingest.embed_doc(ctx.kb, did, "Ruling", text, _FAKE_MODEL)
     result = tools.run(ctx, audit, "kb_search", {"query": "SPLONKTASTIC"}, actor="assistant")
@@ -234,7 +234,7 @@ def test_kb_search_tool_finds_unindexed_pdf_by_keyword(monkeypatch) -> None:
     # semantic index must still be found by keyword. Real PDF, no embeddings stored.
     _use_fake_embed(monkeypatch)  # semantic IS available...
     ctx, audit = _tool_ctx()
-    _, text = ingest.from_file("g.pdf", make_pdf(["the BEGURFLED memorandum is filed"]))
+    _, text, _meta = ingest.from_file("g.pdf", make_pdf(["the BEGURFLED memorandum is filed"]))
     ctx.kb.add("Memo", text)  # ...but the doc is never embedded (reindex pending)
     result = tools.run(ctx, audit, "kb_search", {"query": "BEGURFLED"}, actor="assistant")
     assert result["degraded"] is False  # not a fallback — semantic was reachable

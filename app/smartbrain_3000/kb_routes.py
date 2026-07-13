@@ -145,8 +145,8 @@ async def upload_doc(request: Request, filename: str) -> dict:
     if len(data) > _MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail="file too large")
     try:
-        title, text = ingest.from_file(filename, data)
-        return ingest.store(knowledge, title, text)
+        title, text, meta = ingest.from_file(filename, data)
+        return ingest.store(knowledge, title, text, meta)  # meta carries the filename + page map
     except ingest.IngestError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from None
 
