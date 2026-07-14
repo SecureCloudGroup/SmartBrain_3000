@@ -124,3 +124,74 @@ jobs:
         run: |
           gh release create "${{ github.ref_name }}" --generate-notes || true
           gh release upload "${{ github.ref_name }}" launcher/build/SmartBrain-windows.zip --clobber
+
+  packages:
+    name: bump package managers (tags only)
+    needs: [macos, windows] # the built zips are what we hash
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # push the packaging-bump branch
+      pull-requests: write # open the housekeeping PR into main
+    env:
+      # Lifted to a job env so the tap/bucket steps can gate on its presence — the `secrets` context
+      # can't be used directly in a step `if:`.
+      PACKAGES_TOKEN: ${{ secrets.PACKAGES_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+      # Hash the SAME zips that were just published, so the manifests can never point at a stale build.
+      - uses: actions/download-artifact@v4
+        with: { name: SmartBrain-macos, path: dist }
+      - uses: actions/download-artifact@v4
+        with: { name: SmartBrain-windows, path: dist }
+
+      - name: Rewrite manifests for this version
+        run: |
+          python3 packaging/refresh.py --version "${{ github.ref_name }}" \
+            --macos dist/SmartBrain-macos.zip --windows dist/SmartBrain-windows.zip
+
+      # The tap and bucket are SEPARATE repos, so the default GITHUB_TOKEN can't reach them. They only
+      # update if a PACKAGES_TOKEN secret (a PAT with write to homebrew-tap + scoop-bucket) is set —
+      # otherwise these steps are skipped and only the in-repo PR below is opened.
+      - name: Push the cask to the Homebrew tap
+        if: env.PACKAGES_TOKEN != ''
+        run: |
+          git clone --depth 1 "https://x-access-token:${PACKAGES_TOKEN}@github.com/SecureCloudGroup/homebrew-tap" tap
+          cp packaging/homebrew/Casks/smartbrain.rb tap/Casks/smartbrain.rb
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Casks/smartbrain.rb
+          git diff --cached --quiet || git commit -m "SmartBrain ${{ github.ref_name }}"
+          git push
+
+      - name: Push the manifest to the Scoop bucket
+        if: env.PACKAGES_TOKEN != ''
+        run: |
+          git clone --depth 1 "https://x-access-token:${PACKAGES_TOKEN}@github.com/SecureCloudGroup/scoop-bucket" bucket
+          cp packaging/scoop/smartbrain.json bucket/bucket/smartbrain.json
+          cd bucket
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add bucket/smartbrain.json
+          git diff --cached --quiet || git commit -m "SmartBrain ${{ github.ref_name }}"
+          git push
+
+      # Keep packaging/ in the repo honest too — as a PR, because main is branch-protected. winget is
+      # NOT auto-submitted (that goes through Microsoft's review); this just keeps the source manifests
+      # current for the next manual winget bump.
+      - name: Open a PR bumping packaging/ in main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if git diff --quiet packaging/; then echo "packaging already at this version"; exit 0; fi
+          BR="bump-packaging-${{ github.ref_name }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BR"
+          git add packaging/
+          git commit -m "build(packaging): bump manifests to ${{ github.ref_name }}"
+          git push -u origin "$BR"
+          gh pr create --base main --head "$BR" \
+            --title "build(packaging): bump manifests to ${{ github.ref_name }}" \
+            --body "Automated: regenerated the cask, winget, and Scoop manifests for ${{ github.ref_name }} from the release assets. The live Homebrew tap and Scoop bucket were already updated by this run; winget is submitted separately."

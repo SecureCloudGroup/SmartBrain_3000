@@ -33,17 +33,33 @@ a maintainer merges. No code-signing is required for a `.zip`/`.exe` — only MS
 **Scoop** — create a public repo `SecureCloudGroup/scoop-bucket` with `smartbrain.json` at
 `bucket/smartbrain.json`. Users add it with `scoop bucket add securecloudgroup https://github.com/SecureCloudGroup/scoop-bucket`.
 
-## Updating for a new release
+## Updating for a new release — automatic
 
-Each release changes the version and the asset hashes. Get the new hashes:
+Pushing a `v*` tag now updates everything on its own. The `packages` job in
+`.github/workflows/launcher.yml` runs after the app builds, hashes the two release zips, rewrites all
+five manifests here with `refresh.py`, and then:
+
+- **pushes** the new cask to `SecureCloudGroup/homebrew-tap` and the new manifest to
+  `SecureCloudGroup/scoop-bucket` — so `brew`/`scoop` users get the update immediately;
+- **opens a PR** bumping the manifests in this `packaging/` folder (main is branch-protected, so it
+  can't push directly) — merge it to keep the source current.
+
+**winget is not auto-submitted** (that PR goes through Microsoft's review) — the winget files here are
+kept current so the next `wingetcreate submit packaging/winget` is a one-liner.
+
+### One-time setup: the `PACKAGES_TOKEN` secret
+The tap and bucket are separate repos, so the workflow's default token can't write to them. Create a
+**fine-grained PAT** with **Contents: read/write** on `homebrew-tap` and `scoop-bucket`, and add it as
+an Actions secret named `PACKAGES_TOKEN` in the `SmartBrain_3000` repo. Until that secret exists, the
+tap/bucket push steps are skipped and only the in-repo PR is opened (so nothing breaks).
+
+### Doing it by hand
 ```
 gh release download vX.Y.Z -R SecureCloudGroup/SmartBrain_3000 -D /tmp/rel
-shasum -a 256 /tmp/rel/SmartBrain-macos.zip /tmp/rel/SmartBrain-windows.zip
+python3 packaging/refresh.py --version X.Y.Z \
+    --macos /tmp/rel/SmartBrain-macos.zip --windows /tmp/rel/SmartBrain-windows.zip
 ```
-then bump `version`/`PackageVersion` and the `sha256`/`InstallerSha256`/`hash` in each file. Scoop's
-`autoupdate` + `checkver` mean its bucket can self-bump; `wingetcreate update` does the same for
-winget. Automating the tap + winget bump from a release workflow is a reasonable follow-up (it needs
-a token with access to the tap repo).
+Then copy `homebrew/Casks/smartbrain.rb` to the tap and `scoop/smartbrain.json` to the bucket.
 
 > The winget `PackageIdentifier` (`SecureCloudGroup.SmartBrain`) is effectively permanent once
 > published — worth confirming the product name before the first winget submission.
