@@ -41,17 +41,27 @@ five manifests here with `refresh.py`, and then:
 
 - **pushes** the new cask to `SecureCloudGroup/homebrew-tap` and the new manifest to
   `SecureCloudGroup/scoop-bucket` — so `brew`/`scoop` users get the update immediately;
+- **submits the winget update** — opens a PR to `microsoft/winget-pkgs` via `winget-releaser`. It bases
+  the update on the previous version already in winget-pkgs, so it starts working from the release
+  AFTER v0.4.0 lands there; their bot validates and a maintainer merges;
 - **opens a PR** bumping the manifests in this `packaging/` folder (main is branch-protected, so it
   can't push directly) — merge it to keep the source current.
 
-**winget is not auto-submitted** (that PR goes through Microsoft's review) — the winget files here are
-kept current so the next `wingetcreate submit packaging/winget` is a one-liner.
-
 ### One-time setup: the `PACKAGES_TOKEN` secret
-The tap and bucket are separate repos, so the workflow's default token can't write to them. Create a
-**fine-grained PAT** with **Contents: read/write** on `homebrew-tap` and `scoop-bucket`, and add it as
-an Actions secret named `PACKAGES_TOKEN` in the `SmartBrain_3000` repo. Until that secret exists, the
-tap/bucket push steps are skipped and only the in-repo PR is opened (so nothing breaks).
+The tap, the bucket, and winget-pkgs are all separate repos, so the workflow's default token can't
+reach them. Create **one classic PAT** and it covers all three:
+
+1. GitHub → **Settings → Developer settings → Personal access tokens → Tokens (classic) → Generate new
+   token (classic)**. (`winget-releaser` does **not** accept fine-grained tokens, which is why this is
+   a classic one.)
+2. Give it a name (e.g. `smartbrain-packages`), an expiry, and check the single scope **`public_repo`**.
+   That's enough — the tap, bucket, and winget-pkgs are all public.
+3. Generate it and **copy the token** (you only see it once).
+4. In the **`SmartBrain_3000`** repo → **Settings → Secrets and variables → Actions → New repository
+   secret**. Name it exactly **`PACKAGES_TOKEN`**, paste the token, save.
+
+Until that secret exists, the tap/bucket/winget steps are skipped and only the in-repo PR is opened
+(so nothing breaks).
 
 ### Doing it by hand
 ```
