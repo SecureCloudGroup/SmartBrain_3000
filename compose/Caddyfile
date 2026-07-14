@@ -44,3 +44,8 @@
 		file_server
 	}
 }
+
+# Optional extra sites (e.g. the marketing/download landing page on its own subdomain), added by an
+# overlay that mounts files here. A no-op when nothing is mounted — the glob simply matches nothing,
+# so a plain signaling deploy is unaffected.
+import /etc/caddy/conf.d/*.caddy

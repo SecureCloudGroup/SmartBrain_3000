@@ -1,0 +1,11 @@
+# The download/landing page on its own subdomain (e.g. get.securecloudgroup.com). Static files only,
+# auto-TLS via the parent Caddyfile's ACME config. Served here because the signaling domain's "/" is
+# the phone PWA — the landing page needs its own hostname.
+#
+# Activated by the docker-compose.landing.yml overlay, which mounts this file and the landing content
+# and sets LANDING_DOMAIN. Point LANDING_DOMAIN's DNS A record at this VPS first.
+{$LANDING_DOMAIN} {
+	root * /srv/landing
+	encode gzip
+	file_server
+}
