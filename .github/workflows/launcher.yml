@@ -177,9 +177,21 @@ jobs:
           git diff --cached --quiet || git commit -m "SmartBrain ${{ github.ref_name }}"
           git push
 
-      # Keep packaging/ in the repo honest too — as a PR, because main is branch-protected. winget is
-      # NOT auto-submitted (that goes through Microsoft's review); this just keeps the source manifests
-      # current for the next manual winget bump.
+      # Submit the winget update to microsoft/winget-pkgs (opens a PR their bot validates + a
+      # maintainer merges). komac bases the update on the PREVIOUS version already in winget-pkgs, so
+      # this only works once v0.4.0 has merged there — i.e. it kicks in from the next release onward.
+      # winget-releaser requires a CLASSIC PAT (public_repo); the same PACKAGES_TOKEN drives it.
+      - name: Submit the winget update
+        if: env.PACKAGES_TOKEN != ''
+        uses: vedantmgoyal9/winget-releaser@v2
+        with:
+          identifier: SecureCloudGroup.SmartBrain
+          installers-regex: 'SmartBrain-windows\.zip$'
+          release-tag: ${{ github.ref_name }}
+          fork-user: SecureCloudGroup
+          token: ${{ secrets.PACKAGES_TOKEN }}
+
+      # Keep packaging/ in the repo honest too — as a PR, because main is branch-protected.
       - name: Open a PR bumping packaging/ in main
         env:
           GH_TOKEN: ${{ github.token }}
@@ -194,4 +206,4 @@ jobs:
           git push -u origin "$BR"
           gh pr create --base main --head "$BR" \
             --title "build(packaging): bump manifests to ${{ github.ref_name }}" \
-            --body "Automated: regenerated the cask, winget, and Scoop manifests for ${{ github.ref_name }} from the release assets. The live Homebrew tap and Scoop bucket were already updated by this run; winget is submitted separately."
+            --body "Automated: regenerated the cask, winget, and Scoop manifests for ${{ github.ref_name }} from the release assets. This run already updated the live Homebrew tap + Scoop bucket and opened the winget-pkgs PR; this PR just keeps packaging/ in sync."
