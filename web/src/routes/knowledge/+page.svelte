@@ -1,18 +1,24 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onDestroy, onMount } from "svelte";
   import { goto } from "$app/navigation";
   import { account } from "$lib/account.svelte";
-  import { api, type KbDoc, type KbDocFull, type KbHit } from "$lib/api";
+  import { api, type KbDoc, type KbDocFull, type KbHit, type SearchMode, type Vault } from "$lib/api";
   import { describeError } from "$lib/errors";
+  import { highlight, queryTerms } from "$lib/highlight";
   import { remote } from "$lib/remote/connection.svelte";
   import { confirmDialog } from "$lib/confirm.svelte";
 
   let docs = $state<KbDoc[]>([]);
   let query = $state("");
-  let mode = $state<"lexical" | "semantic">("lexical");
+  let mode = $state<SearchMode>("hybrid");
   let results = $state<KbHit[] | null>(null);
   let degraded = $state(false);
   let selected = $state<KbDocFull | null>(null);
+  // The terms that produced the current results (frozen at search time, so editing the box doesn't
+  // re-highlight against a query that wasn't run) + where in the open document the match sits.
+  let hitTerms = $state<string[]>([]);
+  let hitOffset = $state<number | null>(null);
+  let markEl = $state<HTMLElement | null>(null);
   let newTitle = $state("");
   let newContent = $state("");
   let url = $state("");
@@ -24,15 +30,37 @@
   let busy = $state("");
   let renameId = $state<string | null>(null); // inline rename of a document
   let renameValue = $state("");
+  let failures = $state<string[]>([]); // per-file errors from a bulk drop
   let scoreHelpOpen = $state(false); // U12: visible score-meaning popover, no hover needed
   let docOverlay = $state<HTMLDivElement | null>(null); // U4: focus target for opened doc
 
-  const ACCEPT = ".pdf,.txt,.md,.markdown,.html,.htm,.csv,.json,.log,.rst";
-  const _MAX_FILES = 20; // bounded per drop
+  // --- vaults: a named subset of knowledge you can search inside, and share -------------------
+  let vaults = $state<Vault[]>([]);
+  let scope = $state(""); // the vault the search is restricted to; "" = all knowledge
+  let picked = $state<string[]>([]); // multi-selected document ids, for "add to vault"
+  let addTarget = $state(""); // which vault the selection goes into
+  let newVaultName = $state("");
+  let exportId = $state<string | null>(null); // the vault whose export row is open
+  let exportPass = $state(""); // re-auth: an export hands out plaintext-equivalent content
+  let shownKey = $state(""); // the SBVK1- key, revealed after an export
+  let importInput = $state<HTMLInputElement | null>(null);
+  let importKey = $state("");
+  let vaultBusy = $state("");
+
+  const ACCEPT = ".pdf,.docx,.pptx,.xlsx,.txt,.md,.markdown,.html,.htm,.csv,.json,.log,.rst";
+  const _MAX_FILES = 200; // bounded per drop (uploads no longer block on embedding, so this can be generous)
 
   async function loadDocs() {
     try {
       docs = (await api.listDocs()).documents;
+    } catch (err) {
+      error = describeError(err);
+    }
+  }
+
+  async function loadVaults() {
+    try {
+      vaults = (await api.listVaults()).vaults;
     } catch (err) {
       error = describeError(err);
     }
@@ -43,7 +71,8 @@
     const s = account.status;
     if (s && !s.initialized) return goto("/setup");
     if (s && !s.unlocked) return goto("/unlock");
-    await loadDocs();
+    await Promise.all([loadDocs(), loadVaults()]);
+    refreshIndexStatus();
   });
 
   async function addUrl() {
@@ -54,9 +83,12 @@
     status = `Fetching ${u}…`;
     try {
       const r = await api.ingestUrl(u);
-      status = `Added “${r.title}” (${r.chars.toLocaleString()} chars).`;
+      status = r.duplicate
+        ? `“${r.title}” is already in your knowledge — not added again.`
+        : `Added “${r.title}” (${r.chars.toLocaleString()} chars).`;
       url = "";
       await loadDocs();
+      refreshIndexStatus();
     } catch (err) {
       error = describeError(err);
       status = "";
@@ -69,21 +101,56 @@
     if (busy) return;
     busy = "upload";
     error = "";
+    failures = [];
     const files = Array.from(list).slice(0, _MAX_FILES);
     let added = 0;
-    for (const file of files) {
-      status = `Reading ${file.name}…`;
+    let duplicates = 0;
+    for (const [i, file] of files.entries()) {
+      status = `Adding ${i + 1} of ${files.length} — ${file.name}…`;
       try {
-        await api.uploadDoc(file);
-        added += 1;
+        const r = await api.uploadDoc(file);
+        if (r.duplicate) duplicates += 1;
+        else added += 1;
       } catch (err) {
-        error = `${file.name}: ${describeError(err)}`;
+        // One bad file must not abandon the rest of the drop, and the user needs to know WHICH.
+        failures.push(`${file.name}: ${describeError(err)}`);
       }
     }
-    status = added ? `Added ${added} file${added > 1 ? "s" : ""} to your knowledge.` : "";
+    const parts: string[] = [];
+    if (added) parts.push(`Added ${added} file${added > 1 ? "s" : ""}`);
+    if (duplicates) parts.push(`${duplicates} already in your knowledge`);
+    if (failures.length) parts.push(`${failures.length} couldn't be read`);
+    status = parts.join(" · ");
     busy = "";
     if (added) await loadDocs();
+    refreshIndexStatus(); // uploads don't embed inline any more — show the indexing catch-up
   }
+
+  // Uploaded documents are keyword-searchable at once, but their vectors are added by the background
+  // indexer. Poll while there's a backlog so the page can say so instead of looking finished.
+  let indexPending = $state(0);
+  let indexTotal = $state(0);
+  let indexTimer: ReturnType<typeof setInterval> | null = null;
+
+  async function refreshIndexStatus() {
+    try {
+      const s = await api.indexStatus();
+      indexPending = s.pending;
+      indexTotal = s.total;
+      if (s.pending > 0 && indexTimer === null) {
+        indexTimer = setInterval(refreshIndexStatus, 4000);
+      } else if (s.pending === 0 && indexTimer !== null) {
+        clearInterval(indexTimer);
+        indexTimer = null;
+      }
+    } catch {
+      /* locked / offline — leave the last known state alone */
+    }
+  }
+
+  onDestroy(() => {
+    if (indexTimer) clearInterval(indexTimer);
+  });
 
   function onDrop(event: DragEvent) {
     event.preventDefault();
@@ -108,9 +175,10 @@
     busy = "search";
     error = "";
     try {
-      const r = await api.searchKb(q, mode);
+      const r = await api.searchKb(q, mode, 10, scope);
       results = r.results;
       degraded = Boolean(r.degraded);
+      hitTerms = queryTerms(q);
     } catch (err) {
       error = describeError(err);
     } finally {
@@ -118,10 +186,19 @@
     }
   }
 
-  async function open(id: string) {
+  // A section means different things per format, so cite it by its real name: a deck has slides and
+  // a spreadsheet has sheets. Calling a slide "p.3" is just wrong.
+  function locator(r: KbHit): string {
+    return r.page_label && r.page_label !== "page" ? `${r.page_label} ${r.page}` : `p.${r.page}`;
+  }
+
+  // `offset` opens the document AT the passage that matched instead of at the top — the whole point
+  // of tracking provenance. Opening from the "All documents" list passes no offset.
+  async function open(id: string, offset: number | null = null) {
     console.assert(typeof id === "string" && id.length > 0, "open: id required");
     console.assert(typeof api.getDoc === "function", "open: api.getDoc must exist");
     error = "";
+    hitOffset = offset;
     try {
       selected = await api.getDoc(id);
     } catch (err) {
@@ -129,9 +206,26 @@
     }
   }
 
+  // Split the open document around the matched passage so it can be marked and scrolled to.
+  const MARK_CHARS = 320;
+  const docParts = $derived.by(() => {
+    if (!selected) return null;
+    const text = selected.content;
+    if (hitOffset === null) return { before: text, mark: "", after: "" };
+    const start = Math.max(0, Math.min(hitOffset, text.length));
+    const end = Math.min(start + MARK_CHARS, text.length);
+    return { before: text.slice(0, start), mark: text.slice(start, end), after: text.slice(end) };
+  });
+
   // U4: when the doc overlay opens, move focus into it for keyboard/SR users.
   $effect(() => {
     if (selected) docOverlay?.focus();
+  });
+
+  // Bring the matched passage into view once it's rendered (a long document opens at the top
+  // otherwise, which defeats the citation).
+  $effect(() => {
+    if (selected && markEl) markEl.scrollIntoView({ block: "center" });
   });
 
   // U4: Escape closes the opened-doc overlay.
@@ -175,7 +269,9 @@
       await api.deleteDoc(id);
       if (selected?.id === id) selected = null;
       results = results?.filter((r) => r.id !== id) ?? null;
-      await loadDocs();
+      picked = picked.filter((p) => p !== id);
+      // The backend drops the document from every vault that held it, so the counts have moved.
+      await Promise.all([loadDocs(), loadVaults()]);
     } catch (err) {
       error = describeError(err);
     } finally {
@@ -218,15 +314,151 @@
       if (r.failed) {
         notice = `Reindexed ${r.embedded}; ${r.failed} failed${r.error ? ` (${r.error})` : ""}. ` +
           "Check the embedding model is loaded and selected under Settings → Model routing.";
-      } else if (r.embedded === 0) {
+      } else if (r.embedded === 0 && r.pending === 0) {
         notice = "Knowledge is already up to date — nothing needed reindexing.";
+      } else if (r.pending > 0) {
+        // The request is time-boxed so it always returns; the background indexer finishes the rest.
+        notice = `Indexed ${r.embedded} document${r.embedded === 1 ? "" : "s"} — ${r.pending} still ` +
+          "to go, continuing in the background.";
       } else {
         notice = `Reindexed ${r.embedded} document${r.embedded === 1 ? "" : "s"} for semantic search.`;
       }
+      refreshIndexStatus();
     } catch (err) {
       error = describeError(err);
     } finally {
       busy = "";
+    }
+  }
+
+  // --- vaults -----------------------------------------------------------------------------------
+
+  function togglePick(id: string) {
+    picked = picked.includes(id) ? picked.filter((p) => p !== id) : [...picked, id];
+  }
+
+  async function addToVault() {
+    console.assert(picked.length > 0, "addToVault: nothing selected");
+    if (!addTarget || picked.length === 0) return;
+    vaultBusy = "add";
+    error = "";
+    notice = "";
+    try {
+      const r = await api.addToVault(addTarget, picked);
+      const name = vaults.find((v) => v.id === addTarget)?.name ?? "the vault";
+      // Adding a document twice is a no-op, so say what actually landed rather than what was clicked.
+      notice = `Added ${r.added} of ${picked.length} to “${name}” — it now holds ${r.doc_count}.`;
+      picked = [];
+      await loadVaults();
+    } catch (err) {
+      error = describeError(err);
+    } finally {
+      vaultBusy = "";
+    }
+  }
+
+  async function createVault() {
+    const name = newVaultName.trim();
+    if (!name) return;
+    vaultBusy = "create";
+    error = "";
+    notice = "";
+    const count = picked.length;
+    try {
+      const v = await api.createVault(name);
+      newVaultName = ""; // the vault exists now — never leave a name sitting there to be created twice
+      if (count > 0) {
+        // If THIS fails the vault still exists, empty. Leave the selection alone so the error is
+        // recoverable with "Add to vault" — and so a retry can't mint a second empty vault.
+        await api.addToVault(v.id, picked);
+        picked = [];
+        notice = `Created “${name}” with ${count} document${count === 1 ? "" : "s"}.`;
+      } else {
+        notice = `Created “${name}”. Tick documents above to add them.`;
+      }
+    } catch (err) {
+      error = describeError(err);
+    } finally {
+      await loadVaults(); // whatever happened, show what actually exists
+      vaultBusy = "";
+    }
+  }
+
+  async function removeVault(v: Vault) {
+    const ok = await confirmDialog({
+      title: `Delete “${v.name}”`,
+      // The distinction that matters: this removes a grouping, not the files in it.
+      body: "The documents in it stay in your knowledge — only the vault is removed.",
+      confirmLabel: "Delete vault",
+    });
+    if (!ok) return;
+    vaultBusy = v.id;
+    error = "";
+    try {
+      await api.deleteVault(v.id);
+      if (scope === v.id) scope = "";
+      if (addTarget === v.id) addTarget = "";
+      await loadVaults();
+    } catch (err) {
+      error = describeError(err);
+    } finally {
+      vaultBusy = "";
+    }
+  }
+
+  function saveBlob(blob: Blob, filename: string) {
+    const href = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = href;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(href);
+  }
+
+  // Export downloads the sealed .sbvault AND then shows its key. The two must travel separately —
+  // whoever holds both holds the contents — so the UI hands them over one at a time and says so.
+  async function exportVault(v: Vault) {
+    if (!exportPass) return;
+    vaultBusy = v.id;
+    error = "";
+    notice = "";
+    shownKey = "";
+    try {
+      const blob = await api.exportVault(v.id, exportPass);
+      saveBlob(blob, `${v.name.replace(/[^\w -]/g, "") || "vault"}.sbvault`);
+      shownKey = await api.vaultKey(v.id, exportPass);
+      exportPass = "";
+      await loadVaults();
+    } catch (err) {
+      error = describeError(err);
+    } finally {
+      vaultBusy = "";
+    }
+  }
+
+  async function importVault() {
+    const file = importInput?.files?.[0];
+    if (!file || !importKey.trim()) return;
+    vaultBusy = "import";
+    error = "";
+    notice = "";
+    try {
+      const r = await api.importVault(file, importKey.trim());
+      // Name the publisher fingerprint: it is the only thing that says WHO this knowledge came from.
+      notice =
+        `Imported “${r.name}” from publisher ${r.publisher} — ${r.added} new document` +
+        `${r.added === 1 ? "" : "s"}${r.duplicates ? `, ${r.duplicates} you already had` : ""}. ` +
+        (r.vectors_used
+          ? "It is searchable now."
+          : "Meaning search needs a reindex (the vault was built with a different embedding model).");
+      importKey = "";
+      if (importInput) importInput.value = "";
+      await Promise.all([loadDocs(), loadVaults()]);
+      refreshIndexStatus();
+    } catch (err) {
+      error = describeError(err);
+    } finally {
+      vaultBusy = "";
     }
   }
 </script>
@@ -291,6 +523,21 @@
     </details>
 
     {#if status}<p class="muted" style="margin-top:0.75rem">{status}</p>{/if}
+    {#if failures.length}
+      <!-- One unreadable file must not silently swallow the rest of a drop — name the ones that failed. -->
+      <ul class="muted" style="margin:0.35rem 0 0; padding-left:1.1rem; font-size:0.85rem">
+        {#each failures.slice(0, 5) as f (f)}<li>{f}</li>{/each}
+        {#if failures.length > 5}<li>…and {failures.length - 5} more</li>{/if}
+      </ul>
+    {/if}
+    {#if indexPending > 0}
+      <!-- Uploads return as soon as the document is stored; the vectors follow. Say so, rather than
+           looking finished while semantic search still can't see the new documents. -->
+      <p class="muted" style="margin-top:0.5rem; font-size:0.85rem">
+        Indexing for meaning search — {indexTotal - indexPending} of {indexTotal} done. Keyword
+        search already finds them.
+      </p>
+    {/if}
     <p class="muted" style="margin-top:0.5rem; font-size:0.85rem">
       You can also ask in Chat: <em>“add this PDF to my knowledge: &lt;url&gt;”</em>.
     </p>
@@ -301,15 +548,31 @@
     <h2>Search</h2>
     <form onsubmit={search} style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap">
       <input style="flex:1; min-width:12rem" bind:value={query} placeholder="Search your knowledge…" aria-label="Search your knowledge" />
-      <select bind:value={mode} style="width:auto">
+      {#if vaults.length > 0}
+        <!-- Scope: search everything, or only inside one vault. -->
+        <select bind:value={scope} style="width:auto" aria-label="Search in">
+          <option value="">All knowledge</option>
+          {#each vaults as v (v.id)}
+            <option value={v.id}>{v.name}</option>
+          {/each}
+        </select>
+      {/if}
+      <select bind:value={mode} style="width:auto" aria-label="Search mode">
+        <option value="hybrid">Best</option>
         <option value="lexical">Keyword</option>
         <option value="semantic">Meaning</option>
       </select>
       <button disabled={busy === "search"} type="submit">Search</button>
     </form>
-    {#if mode === "semantic"}
+    {#if scope}
       <p class="muted" style="margin-top:0.4rem; font-size:0.85rem">
-        Meaning search ranks by similarity. It needs a local embedding model — pull the exact tag
+        Searching only inside <strong>{vaults.find((v) => v.id === scope)?.name}</strong>.
+        <button class="linklike" type="button" onclick={() => (scope = "")}>Search everything instead</button>
+      </p>
+    {/if}
+    {#if mode !== "lexical"}
+      <p class="muted" style="margin-top:0.4rem; font-size:0.85rem">
+        {mode === "hybrid" ? "Best" : "Meaning"} search uses a local embedding model — pull the exact tag
         <code>ollama pull nomic-embed-text:v1.5</code> (the bare name won't resolve). Without one it
         falls back to keyword. New uploads are indexed automatically — use <em>Reindex</em> below if
         a result is missing.
@@ -318,7 +581,7 @@
     {#if results}
       {#if degraded}
         <p class="muted" style="margin-top:0.5rem">
-          Semantic search needs the embedding model — showing keyword results. On the Desktop, run
+          Meaning search needs the embedding model — showing keyword results. On the Desktop, run
           <code>ollama pull nomic-embed-text:v1.5</code>, then Reindex.
         </p>
       {/if}
@@ -327,31 +590,37 @@
       {/if}
       {#if results.length > 0}
         <p class="muted" style="margin-top:0.5rem; font-size:0.85rem; display:flex; gap:0.4rem; align-items:center; flex-wrap:wrap">
-          <span>
-            {mode === "semantic" && !degraded
-              ? "Meaning match (0–1): higher = closer in meaning."
-              : "Keyword score: how many times your terms appear."}
-          </span>
+          <span>Click a result to open the document at the matching passage.</span>
           <button
             class="qhelp"
             type="button"
             aria-expanded={scoreHelpOpen}
-            aria-label="More about search scores"
+            aria-label="More about search modes"
             onclick={() => (scoreHelpOpen = !scoreHelpOpen)}
           >?</button>
         </p>
         {#if scoreHelpOpen}
           <p class="muted" style="margin:0.25rem 0 0; font-size:0.85rem">
-            <strong>Keyword</strong> counts term occurrences in each document.
-            <strong>Meaning</strong> uses local embeddings (0–1) to rank by semantic similarity to your query.
+            <strong>Best</strong> combines both, and is what you usually want — keyword search nails an
+            exact name or number, meaning search finds a paraphrase, and each misses what the other catches.
+            <strong>Keyword</strong> ranks by relevance (rare words count for more, and a long document
+            can't win just by being long). <strong>Meaning</strong> uses local embeddings to match by
+            sense rather than wording.
           </p>
         {/if}
       {/if}
       {#each results as r (r.id)}
-        <div style="margin-top:0.75rem">
-          <button class="linklike" onclick={() => open(r.id)}>{r.title}</button>
-          <span class="muted"> · {mode === "semantic" && !degraded ? r.score.toFixed(3) : r.score}</span>
-          <p class="muted" style="margin:0.15rem 0 0">{r.snippet}</p>
+        <div class="hit">
+          <button class="linklike" onclick={() => open(r.id, r.offset)}>{r.title}</button>
+          <!-- The citation: which file, which page. Clicking opens the document AT the passage. -->
+          {#if r.source || r.page !== null}
+            <button class="cite" onclick={() => open(r.id, r.offset)} title="Open at this passage">
+              {r.source}{#if r.source && r.page !== null}&nbsp;·&nbsp;{/if}{#if r.page !== null}{locator(r)}{/if}
+            </button>
+          {/if}
+          <p class="snippet">
+            {#each highlight(r.snippet, hitTerms) as seg}{#if seg.hit}<mark>{seg.t}</mark>{:else}{seg.t}{/if}{/each}
+          </p>
         </div>
       {/each}
     {/if}
@@ -368,7 +637,14 @@
       onkeydown={onDocKey}
     >
       <h2>{selected.title}</h2>
-      <div class="kit">{selected.content}</div>
+      {#if hitOffset !== null}
+        <p class="muted" style="margin:0 0 0.5rem; font-size:0.85rem">Opened at the matching passage.</p>
+      {/if}
+      <div class="kit">
+        {#if docParts}
+          {docParts.before}{#if docParts.mark}<mark class="passage" bind:this={markEl}>{docParts.mark}</mark>{/if}{docParts.after}
+        {/if}
+      </div>
       <p class="doc-actions">
         <button class="secondary" onclick={() => (selected = null)}>Close</button>
         <button class="secondary" disabled={busy === selected.id} onclick={() => remove(selected!.id)}>Delete</button>
@@ -387,6 +663,30 @@
     {#if docs.length === 0}
       <p class="muted">No documents yet — drop a file or paste a URL above.</p>
     {/if}
+
+    {#if picked.length > 0}
+      <!-- The selection only means something in terms of vaults, so the bar that appears offers
+           exactly that: put these in a vault. -->
+      <div class="pickbar">
+        <strong>{picked.length} selected</strong>
+        {#if vaults.length > 0}
+          <select bind:value={addTarget} aria-label="Vault to add to">
+            <option value="">Choose a vault…</option>
+            {#each vaults as v (v.id)}
+              <option value={v.id}>{v.name}</option>
+            {/each}
+          </select>
+          <button disabled={vaultBusy === "add" || !addTarget} onclick={addToVault}>
+            {vaultBusy === "add" ? "Adding…" : "Add to vault"}
+          </button>
+        {:else}
+          <span class="muted">Name a vault below to create one with these.</span>
+        {/if}
+        <span class="spacer"></span>
+        <button class="secondary" onclick={() => (picked = [])}>Clear</button>
+      </div>
+    {/if}
+
     {#each docs as d (d.id)}
       {#if renameId === d.id}
         <div style="display:flex; gap:0.5rem; align-items:center; margin-top:0.5rem">
@@ -400,12 +700,128 @@
         </div>
       {:else}
         <div style="display:flex; gap:0.5rem; align-items:center; margin-top:0.5rem">
+          <input
+            type="checkbox"
+            checked={picked.includes(d.id)}
+            onchange={() => togglePick(d.id)}
+            aria-label="Select {d.title}"
+          />
           <button class="secondary" style="flex:1; text-align:left; padding:0.4rem 0.6rem" onclick={() => open(d.id)}>{d.title}</button>
           <button class="secondary" disabled={busy === d.id} onclick={() => startRename(d)}>Rename</button>
           <button class="secondary" disabled={busy === d.id} onclick={() => remove(d.id)}>Delete</button>
         </div>
       {/if}
     {/each}
+  </div>
+
+  <div class="card">
+    <h2>Vaults <span class="muted" style="font-weight:400">· {vaults.length}</span></h2>
+    <p class="muted" style="margin:0 0 0.75rem; font-size:0.9rem">
+      A vault is a named set of your documents. Search inside just that set — or seal the whole thing
+      into one file and share it with someone, who can import it and search it themselves.
+    </p>
+
+    {#if vaults.length === 0}
+      <p class="muted">No vaults yet. Tick some documents above, then name a vault below.</p>
+    {/if}
+
+    {#each vaults as v (v.id)}
+      <div class="vault">
+        <div class="vrow">
+          <strong>{v.name}</strong>
+          {#if v.kind === "imported"}<span class="badge">Imported</span>{/if}
+          <span class="muted">{v.doc_count} document{v.doc_count === 1 ? "" : "s"}</span>
+          <span class="spacer"></span>
+          <button class="secondary" onclick={() => (scope = v.id)} disabled={scope === v.id}>
+            {scope === v.id ? "Searching this" : "Search this"}
+          </button>
+          {#if remote.status === "idle"}
+            <button
+              class="secondary"
+              onclick={() => {
+                exportId = exportId === v.id ? null : v.id;
+                exportPass = "";
+                shownKey = "";
+              }}
+            >Share…</button>
+          {/if}
+          <button class="secondary" disabled={vaultBusy === v.id} onclick={() => removeVault(v)}>Delete</button>
+        </div>
+        {#if v.description}<p class="muted vdesc">{v.description}</p>{/if}
+
+        {#if exportId === v.id}
+          <div class="share">
+            <p class="muted" style="margin:0 0 0.5rem; font-size:0.85rem">
+              This seals the vault into a single <code>.sbvault</code> file. The file and its key must
+              travel <strong>separately</strong> — together they are the contents in the clear. Send the
+              file however you like, then read the key out over a different channel.
+            </p>
+            <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap">
+              <input
+                type="password"
+                style="flex:1; min-width:10rem"
+                bind:value={exportPass}
+                placeholder="Your passphrase"
+                aria-label="Your passphrase"
+                autocomplete="current-password"
+              />
+              <button disabled={vaultBusy === v.id || !exportPass} onclick={() => exportVault(v)}>
+                {vaultBusy === v.id ? "Sealing…" : "Export"}
+              </button>
+            </div>
+            {#if shownKey}
+              <p style="margin:0.75rem 0 0.25rem; font-size:0.9rem">
+                <strong>Vault key.</strong> Send this to them <em>separately</em> from the file:
+              </p>
+              <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap">
+                <code class="key">{shownKey}</code>
+                <button class="secondary" onclick={() => navigator.clipboard?.writeText(shownKey)}>Copy key</button>
+              </div>
+            {/if}
+          </div>
+        {/if}
+      </div>
+    {/each}
+
+    <!-- Organising (create / add / search a vault) works everywhere, phone included — it is not
+         egress. Only export and import are Desktop-only, below. -->
+    <div style="display:flex; gap:0.5rem; align-items:center; margin-top:1rem; flex-wrap:wrap">
+      <input
+        style="flex:1; min-width:10rem"
+        bind:value={newVaultName}
+        placeholder="New vault name…"
+        aria-label="New vault name"
+        onkeydown={(e) => e.key === "Enter" && createVault()}
+      />
+      <button disabled={vaultBusy === "create" || !newVaultName.trim()} onclick={createVault}>
+        {#if vaultBusy === "create"}Creating…{:else if picked.length > 0}Create with {picked.length} selected{:else}Create vault{/if}
+      </button>
+    </div>
+
+    <!-- Import is ingestion and export is plaintext-equivalent egress (the backend refuses it from a
+         paired phone), so both are Desktop work — same rule as the "Add to Knowledge" card. -->
+    {#if remote.status === "idle"}
+      <details style="margin-top:1rem">
+        <summary>Import a vault someone shared with you</summary>
+        <p class="muted" style="margin:0.5rem 0; font-size:0.85rem">
+          Pick the <code>.sbvault</code> file and paste the key they sent you. Its documents are
+          re-encrypted under <em>your</em> passphrase as they land, and anything you already have is
+          kept as-is rather than overwritten.
+        </p>
+        <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap">
+          <input bind:this={importInput} type="file" accept=".sbvault" aria-label="Vault file" />
+          <input
+            style="flex:1; min-width:10rem"
+            bind:value={importKey}
+            placeholder="SBVK1-…"
+            aria-label="Vault key"
+          />
+          <button disabled={vaultBusy === "import" || !importKey.trim()} onclick={importVault}>
+            {vaultBusy === "import" ? "Importing…" : "Import"}
+          </button>
+        </div>
+      </details>
+    {/if}
   </div>
 
   {#if notice}<p class="muted">{notice}</p>{/if}
@@ -415,6 +831,107 @@
 {/if}
 
 <style>
+  /* --- vaults ---------------------------------------------------------------------------- */
+  .pickbar {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-top: 0.75rem;
+    padding: 0.5rem 0.6rem;
+    border: 1px solid var(--accent);
+    border-radius: 6px;
+    background: var(--field);
+  }
+
+  .vault {
+    margin-top: 0.6rem;
+    padding: 0.6rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+  }
+  .vrow {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .vdesc {
+    margin: 0.35rem 0 0;
+    font-size: 0.85rem;
+  }
+
+  /* "Imported" — this vault came from someone else, so it can be replaced by an update from them. */
+  .badge {
+    padding: 0.05rem 0.45rem;
+    font-size: 0.7rem;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    color: var(--muted);
+  }
+
+  .share {
+    margin-top: 0.6rem;
+    padding-top: 0.6rem;
+    border-top: 1px solid var(--border);
+  }
+
+  /* The vault key. Monospace and wrapping: it gets read aloud or copied, and a clipped key is a
+     key the recipient cannot use. */
+  .key {
+    flex: 1;
+    min-width: 12rem;
+    padding: 0.35rem 0.5rem;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--field);
+    font-size: 0.8rem;
+    word-break: break-all;
+  }
+
+  /* --- search hits as citations --------------------------------------------------------- */
+  .hit {
+    margin-top: 0.9rem;
+  }
+
+  /* "Lease.pdf · p.12" — the citation. A button, because clicking it opens the document at the
+     matching passage rather than at the top. */
+  .cite {
+    margin-left: 0.4rem;
+    padding: 0.05rem 0.45rem;
+    font-size: 0.75rem;
+    font-weight: 500;
+    line-height: 1.5;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--field);
+    color: var(--muted);
+    cursor: pointer;
+  }
+  .cite:hover {
+    color: var(--text);
+    border-color: var(--accent);
+  }
+
+  .snippet {
+    margin: 0.2rem 0 0;
+    color: var(--muted);
+    line-height: 1.45;
+  }
+
+  /* Matched terms in a snippet, and the matched passage inside an opened document. */
+  .snippet mark,
+  .kit mark {
+    background: color-mix(in srgb, var(--warn) 35%, transparent);
+    color: var(--text);
+    border-radius: 3px;
+    padding: 0 0.1em;
+  }
+  .kit mark.passage {
+    background: color-mix(in srgb, var(--warn) 22%, transparent);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--warn) 22%, transparent);
+  }
+
   .drop {
     border: 2px dashed var(--border);
     border-radius: 12px;

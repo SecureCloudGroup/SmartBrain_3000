@@ -91,7 +91,7 @@ def test_real_model_paraphrase_semantic_retrieval(monkeypatch) -> None:
     dbmod.run_migrations(conn)
     kb = KnowledgeBase(conn, gen_master_key())
     for topic, passage in _DOCS.items():
-        _, text = ingest.from_file(f"{topic}.pdf", make_pdf([passage]))
+        _, text, _meta = ingest.from_file(f"{topic}.pdf", make_pdf([passage]))
         did = kb.add(topic, text)
         ingest.embed_doc(kb, did, topic, text, _MODEL)  # chunk + embed + store (real code)
 

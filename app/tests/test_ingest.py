@@ -23,12 +23,21 @@ class _StubKB:
 
     def __init__(self) -> None:
         self.docs: dict = {}
+        self.meta: dict = {}
         self.embeds: dict = {}
 
-    def add(self, title: str, content: str) -> str:
+    def add(self, title: str, content: str, meta: dict | None = None) -> str:
         doc_id = f"d{len(self.docs)}"
         self.docs[doc_id] = (title, content)
+        self.meta[doc_id] = meta or {}
         return doc_id
+
+    def find_duplicate(self, content: str) -> str | None:
+        """Dedupe: store() asks this before adding, so identical text isn't stored twice."""
+        for doc_id, (_title, existing) in self.docs.items():
+            if existing == content:
+                return doc_id
+        return None
 
     def put_embedding(self, doc_id: str, vector, model: str) -> None:
         self.embeds[doc_id] = (vector, model)
@@ -38,7 +47,7 @@ class _StubKB:
 
 
 def test_from_file_text() -> None:
-    title, text = ingest.from_file("notes.md", b"# Hello\nworld")
+    title, text, _meta = ingest.from_file("notes.md", b"# Hello\nworld")
     assert title == "notes.md" and text == "# Hello\nworld"
 
 
@@ -67,16 +76,16 @@ def test_malformed_pdf_raises_ingest_error() -> None:
 def test_from_file_pdf_ignores_filename_shaped_metadata_title(monkeypatch) -> None:
     # A PDF exported from Word keeps the original ".DOCX" name in its /Title metadata; using that
     # would wrongly title a .pdf upload "…​.DOCX". Fall back to the actual uploaded filename instead.
-    monkeypatch.setattr(ingest, "_extract_pdf", lambda data: ("Perenial Value SPAC (01665749).DOCX", "body"))
-    title, text = ingest.from_file("Perenial Value SPAC (01665749).pdf", b"%PDF-1.4 fake")
+    monkeypatch.setattr(ingest, "_extract_pdf", lambda data: ("Perenial Value SPAC (01665749).DOCX", "body", []))
+    title, text, _meta = ingest.from_file("Perenial Value SPAC (01665749).pdf", b"%PDF-1.4 fake")
     assert title == "Perenial Value SPAC (01665749).pdf"  # the real uploaded name, not the stale .DOCX
     assert text == "body"
 
 
 def test_from_file_pdf_keeps_real_metadata_title(monkeypatch) -> None:
     # A genuine PDF title (not filename-shaped) is still preferred over the raw filename.
-    monkeypatch.setattr(ingest, "_extract_pdf", lambda data: ("Q3 Earnings Report", "body"))
-    title, _ = ingest.from_file("download (3).pdf", b"%PDF-1.4 fake")
+    monkeypatch.setattr(ingest, "_extract_pdf", lambda data: ("Q3 Earnings Report", "body", []))
+    title, _, _meta = ingest.from_file("download (3).pdf", b"%PDF-1.4 fake")
     assert title == "Q3 Earnings Report"
 
 
@@ -90,7 +99,7 @@ def test_from_url_octet_stream_binary_rejected(monkeypatch) -> None:
 
 
 def test_from_file_html_extracts_article() -> None:
-    title, text = ingest.from_file("about.html", _HTML)
+    title, text, _meta = ingest.from_file("about.html", _HTML)
     assert "widget" in text.lower() and len(text) > 80  # trafilatura pulled the body
 
 
@@ -99,7 +108,7 @@ def test_from_url_html(monkeypatch) -> None:
         "final_url": "https://example.com/widgets", "status": 200,
         "content_type": "text/html", "content": _HTML,
     })
-    title, text = ingest.from_url("https://example.com/widgets")
+    title, text, _meta = ingest.from_url("https://example.com/widgets")
     assert "widget" in text.lower()
 
 
@@ -108,8 +117,8 @@ def test_from_url_pdf_dispatch(monkeypatch) -> None:
         "final_url": "https://example.com/doc.pdf", "status": 200,
         "content_type": "application/pdf", "content": b"%PDF-1.4 fake",
     })
-    monkeypatch.setattr(ingest, "_extract_pdf", lambda data: ("Paper Title", "extracted pdf text"))
-    title, text = ingest.from_url("https://example.com/doc.pdf")
+    monkeypatch.setattr(ingest, "_extract_pdf", lambda data: ("Paper Title", "extracted pdf text", []))
+    title, text, _meta = ingest.from_url("https://example.com/doc.pdf")
     assert title == "Paper Title" and text == "extracted pdf text"
 
 
@@ -127,8 +136,10 @@ def test_store_embeds_best_effort(monkeypatch) -> None:
     monkeypatch.setattr(gateway, "embed", lambda text, model, **k: [0.1, 0.2, 0.3])
     kb = _StubKB()
     out = ingest.store(kb, "Title", "Body text")
-    assert out == {"id": "d0", "title": "Title", "chars": len("Body text")}
-    assert kb.embeds["d0"][1] == "ollama/test"  # embedded on add
+    # `duplicate` reports whether identical text was already stored (in which case the EXISTING
+    # document is returned instead of a second copy).
+    assert out == {"id": "d0", "title": "Title", "chars": len("Body text"), "duplicate": False}
+    assert kb.embeds["d0"][1] == "ollama/test"  # embedded on add (the inline path is still there)
 
 
 def test_store_survives_embed_failure(monkeypatch) -> None:

@@ -28,16 +28,26 @@ Activity and approve (Irreversible, with an extra confirm).
 
 ## Knowledge
 
-A private, encrypted knowledge base. Add documents (notes, references, anything),
-then search them two ways:
+A private, encrypted knowledge base. Drag in **PDFs, Word (.docx), PowerPoint (.pptx),
+Excel (.xlsx), HTML and text files**, paste a URL, or write a note — then search them
+three ways:
 
-- **Lexical** — fast keyword match.
-- **Semantic** — meaning-based, using an [embedding model](02-models.md). Use
-  **Reindex** after adding content so semantic search can find it.
+- **Best** (default) — combines both of the below. Keyword search nails an exact name
+  or invoice number; meaning search finds a paraphrase. Each misses what the other
+  catches, so fusing them beats either alone.
+- **Keyword** — ranks by relevance: rare words count for more, and a long document
+  can't win just by being long. Needs no model at all.
+- **Meaning** — matches by sense rather than wording, using an
+  [embedding model](02-models.md).
 
-**Try it:** open **Knowledge**, drag in a PDF (or paste a note), and click
-**Reindex**. Then switch search to **Semantic** and ask in your own words — or ask
-**Chat** *"what does my knowledge say about …"* and the assistant searches it for you.
+**Results are citations.** Every hit shows where it came from — *"Lease.pdf · p.12"*
+(a slide deck cites *slide 3*, a spreadsheet *sheet 2*) — and clicking it opens the
+document **at the passage that matched**, highlighted, rather than at the top. Chat
+cites its sources the same way, so you can check any claim against the original.
+
+**Try it:** open **Knowledge**, drag in a document, and search it. Then ask **Chat**
+*"what does my knowledge say about …"* — the assistant searches it for you and tells you
+which file and page it got the answer from.
 
 ![The Knowledge page: add a document, then search it](assets/05-knowledge.png)
 

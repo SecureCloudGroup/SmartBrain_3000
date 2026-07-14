@@ -12,6 +12,7 @@ unfindable), decrypt the whole corpus on every keystroke, and rank by raw term f
 
 from __future__ import annotations
 
+import bisect
 import json
 import logging
 import math
@@ -50,6 +51,20 @@ def chunk_text(title: str, content: str) -> list[str]:
         return [title]
     chunks = [f"{title}\n{body[i : i + _CHUNK_CHARS]}" for i in range(0, len(body), _CHUNK_CHARS)]
     return chunks[:_MAX_CHUNKS]
+
+
+def page_for(meta: dict, offset: int) -> int | None:
+    """1-based page number containing character ``offset``, or None if the document has no pages.
+
+    ``meta["pages"]`` is the character offset at which each page STARTS (recorded at ingest, see
+    ingest._extract_pdf). A binary search over it turns any character position — e.g. the start of
+    the chunk that matched a search — into "page 12", which is what a citation has to say.
+    """
+    assert offset >= 0, "offset must be non-negative"
+    pages = meta.get("pages") if isinstance(meta, dict) else None
+    if not pages:
+        return None
+    return bisect.bisect_right(pages, offset)  # pages[0] == 0, so the first page is 1
 
 
 def chunk_span(content: str, chunk_idx: int) -> tuple[int, int]:
@@ -91,6 +106,16 @@ class KnowledgeBase:
         if self._index is None:
             self._index = kbindex.SearchIndex(self)
         return self._index
+
+    def reset_index(self) -> None:
+        """Drop the in-memory index so the next search rebuilds it in one pass.
+
+        A bulk import writes many documents and their vectors. Doing that through the incremental
+        path walks straight into the O(n^2) build kbindex warns about (each _VecBlock.add vstacks the
+        growing matrix and rescans every row — 19 seconds for 10k documents). Import writes the rows,
+        then drops the index once: the next search does a single bulk_load.
+        """
+        self._index = None
 
     # --- index data sources (each decrypts the corpus exactly ONCE, at build time) --------------
 
@@ -137,12 +162,12 @@ class KnowledgeBase:
             grouped.setdefault((model, dim), {}).setdefault(doc_id, []).append(vector)
         return [(model, dim, per_doc) for (model, dim), per_doc in grouped.items()]
 
-    def add(self, title: str, content: str) -> str:
-        """Encrypt and store a document; return its new id."""
+    def add(self, title: str, content: str, meta: dict | None = None) -> str:
+        """Encrypt and store a document (with optional provenance ``meta``); return its new id."""
         assert title, "title must be non-empty"
         assert content is not None, "content must not be None"
         doc_id = str(uuid.uuid4())
-        nonce, ciphertext = self._seal(doc_id, title, content)
+        nonce, ciphertext = self._seal(doc_id, title, content, meta)
         self._conn.execute(
             "INSERT INTO documents (id, nonce, ciphertext) VALUES (?, ?, ?);",
             [doc_id, nonce, ciphertext],
@@ -157,13 +182,37 @@ class KnowledgeBase:
         doc = self.get(doc_id)
         if doc is None:
             return False
-        nonce, ciphertext = self._seal(doc_id, title, doc["content"])
+        nonce, ciphertext = self._seal(doc_id, title, doc["content"], doc.get("meta"))  # keep provenance
         self._conn.execute(
             "UPDATE documents SET nonce = ?, ciphertext = ?, updated_at = now() WHERE id = ?;",
             [nonce, ciphertext, doc_id],
         )
         self.index.add_document(doc_id, title, doc["content"])  # title is indexed, so re-index it
         return True
+
+    def find_duplicate(self, content: str) -> str | None:
+        """The id of an existing document with identical text, if any.
+
+        Ingesting the same URL or file twice used to create two independent documents, which then
+        both turn up in every search. Answered from the in-memory index, so it costs nothing.
+        """
+        assert content is not None, "content required"
+        return self.index.find_by_content(content)
+
+    def docs_pending_embedding(self, model: str) -> int:
+        """How many documents still need an embedding for ``model`` — the indexing backlog."""
+        assert model, "model required"
+        row = self._conn.execute(
+            "SELECT COUNT(*) FROM documents d "
+            "WHERE NOT EXISTS (SELECT 1 FROM embeddings e WHERE e.doc_id = d.id AND e.model = ?);",
+            [model],
+        ).fetchone()
+        return int(row[0]) if row else 0
+
+    def count_docs(self) -> int:
+        """Total documents (cheap: no decryption)."""
+        row = self._conn.execute("SELECT COUNT(*) FROM documents;").fetchone()
+        return int(row[0]) if row else 0
 
     def get(self, doc_id: str) -> dict | None:
         """Return the decrypted document, or None if absent."""
@@ -208,30 +257,57 @@ class KnowledgeBase:
         return out
 
     def _hit(self, doc_id: str, score: float, chunk_idx: int | None, terms: list[str]) -> dict | None:
-        """Build one result row. Decrypts THIS document — only the handful we actually return.
+        """Build one result row — a CITATION, not just a title.
 
-        The snippet is cut from the matched chunk when we know which one it was (a semantic hit), so
-        it quotes the passage that caused the match instead of the head of the document.
+        Decrypts THIS document (only the handful we actually return) and reports where the match
+        came from: which file/URL, which page, and which character range. The snippet is cut from
+        the matched chunk when we know which one it was, so it quotes the passage that caused the
+        match instead of the head of the document.
         """
         doc = self.get(doc_id)
         if doc is None:
             return None  # raced with a delete, or an orphan vector
-        content = doc["content"]
+        content, meta = doc["content"], doc.get("meta") or {}
         if chunk_idx is not None:
-            start, end = chunk_span(content, chunk_idx)
-            snippet = self._snippet(content[start:end], terms)
+            # Locate the query term INSIDE the matched chunk. A 4000-char chunk can straddle a page
+            # boundary, so citing "the page the chunk starts on" would be off by a page whenever the
+            # real match sits later in the chunk. With no terms (a pure vector hit) the chunk's start
+            # is the best we honestly know.
+            cstart, cend = chunk_span(content, chunk_idx)
+            start = cstart + self._locate(content[cstart:cend], terms)
         else:
-            snippet = self._snippet(content, terms)
+            start = self._locate(content, terms)
+        snippet = self._window(content, start)
         return {
             "id": doc_id,
             "title": doc["title"],
             "score": score,
             "snippet": snippet,
             "chunk_idx": chunk_idx,
+            # --- citation ---
+            "source": meta.get("filename") or meta.get("source_url") or "",
+            "page": page_for(meta, start),
+            # What a "page" IS in this format: a PDF page, a PowerPoint slide, an Excel sheet. So a
+            # citation can say "slide 5" instead of miscalling it "p.5".
+            "page_label": meta.get("page_label") or "page",
+            "offset": start,  # lets the viewer open the document AT the passage that matched
         }
 
-    def search(self, query: str, limit: int = 10) -> list[dict]:
-        """Lexical search over the WHOLE corpus, ranked by BM25.
+    @staticmethod
+    def _locate(text: str, terms: list[str]) -> int:
+        """Offset of the earliest query term in ``text``; 0 when none of them appear."""
+        lowered = text.lower()
+        positions = [p for p in (lowered.find(t) for t in terms) if p >= 0]
+        return min(positions) if positions else 0
+
+    @staticmethod
+    def _window(content: str, offset: int) -> str:
+        """A snippet centred on ``offset`` (a little lead-in, so the match isn't flush at the edge)."""
+        start = max(0, offset - 40)
+        return content[start : start + _SNIPPET_CHARS]
+
+    def search(self, query: str, limit: int = 10, scope: set[str] | None = None) -> list[dict]:
+        """Lexical search over the corpus, ranked by BM25. ``scope`` restricts it to a vault.
 
         Was: raw term-frequency over only the 500 newest documents (older ones silently unfindable).
         Now: BM25 (which normalises for length, so a long document can't win on size alone) served
@@ -241,11 +317,14 @@ class KnowledgeBase:
         assert 1 <= limit <= _SEARCH_SCAN_LIMIT, "limit out of range"
         terms = kbindex.tokenize(query)
         assert terms, "query must contain at least one term"
-        ranked = self.index.lexical(query, limit)
+        ranked = self.index.lexical(query, limit, scope)
         hits = [self._hit(doc_id, score, None, terms) for doc_id, score in ranked]
         return [h for h in hits if h is not None]
 
-    def hybrid_search(self, query: str, query_vector: list[float] | None, model: str, limit: int = 10) -> list[dict]:
+    def hybrid_search(
+        self, query: str, query_vector: list[float] | None, model: str, limit: int = 10,
+        scope: set[str] | None = None,
+    ) -> list[dict]:
         """Lexical AND semantic, fused by rank (RRF) — the default for the app and the agent.
 
         Keyword search finds exact names/numbers; vector search finds meaning. Fusing them beats
@@ -257,9 +336,10 @@ class KnowledgeBase:
         terms = kbindex.tokenize(query)
         assert terms, "query must contain at least one term"
         depth = min(limit * 2, _SEARCH_SCAN_LIMIT)  # look deeper than we return, so fusion can re-rank
-        lexical = self.index.lexical(query, depth)
+        lexical = self.index.lexical(query, depth, scope)
         semantic = (
-            self.index.semantic(query_vector, model, depth, _SEMANTIC_MIN_SCORE) if query_vector else []
+            self.index.semantic(query_vector, model, depth, _SEMANTIC_MIN_SCORE, scope)
+            if query_vector else []
         )
         chunk_of = {doc_id: chunk_idx for doc_id, _, chunk_idx in semantic}
         fused = kbindex.fuse_rrf([[d for d, _ in lexical], [d for d, _, _ in semantic]])
@@ -305,6 +385,25 @@ class KnowledgeBase:
         vector = self._open_embedding(doc_id, 0, bytes(row[0]), bytes(row[1]), int(row[2]), str(row[3]))
         return vector, str(row[3])
 
+    def vectors_for(self, doc_id: str, model: str) -> list[list[float]]:
+        """A document's chunk vectors for ``model``, in chunk order ([] if it has none).
+
+        Used by vault export: shipping the vectors is what makes an imported vault searchable the
+        moment it lands, instead of after the recipient's machine has re-embedded the whole thing.
+        """
+        assert doc_id and model, "doc id + model required"
+        rows = self._conn.execute(
+            "SELECT chunk_idx, nonce, ciphertext, dim, model FROM embeddings "
+            f"WHERE doc_id = ? AND model = ? ORDER BY chunk_idx LIMIT {_MAX_CHUNKS};",
+            [doc_id, model],
+        ).fetchall()
+        out: list[list[float]] = []
+        for row in rows:  # bounded by _MAX_CHUNKS
+            out.append(self._open_embedding(
+                doc_id, int(row[0]), bytes(row[1]), bytes(row[2]), int(row[3]), str(row[4])
+            ))
+        return out
+
     def docs_needing_embedding(self, model: str) -> list[str]:
         """Return ids of docs with no embedding or one from a different model."""
         assert model, "model required"
@@ -317,7 +416,9 @@ class KnowledgeBase:
         assert isinstance(rows, list), "fetchall must return a list"
         return [str(r[0]) for r in rows]
 
-    def semantic_search(self, query_vector: list[float], model: str, limit: int = 10) -> list[dict]:
+    def semantic_search(
+        self, query_vector: list[float], model: str, limit: int = 10, scope: set[str] | None = None,
+    ) -> list[dict]:
         """Rank docs by cosine similarity to ``query_vector``; return top hits.
 
         A document scores as its best-matching chunk, and we KEEP which chunk that was — so the
@@ -330,7 +431,7 @@ class KnowledgeBase:
         assert query_vector, "query vector must be non-empty"
         assert model, "model required"
         assert 1 <= limit <= _SEARCH_SCAN_LIMIT, "limit out of range"
-        ranked = self.index.semantic(query_vector, model, limit, _SEMANTIC_MIN_SCORE)
+        ranked = self.index.semantic(query_vector, model, limit, _SEMANTIC_MIN_SCORE, scope)
         hits = [self._hit(doc_id, score, chunk_idx, []) for doc_id, score, chunk_idx in ranked]
         return [h for h in hits if h is not None]
 
@@ -357,21 +458,31 @@ class KnowledgeBase:
         assert len(plaintext) == dim * 4, "embedding blob length mismatch"
         return list(struct.unpack(f"<{dim}f", plaintext))
 
-    def _seal(self, doc_id: str, title: str, content: str) -> tuple[bytes, bytes]:
-        """Encrypt {title, content} bound to doc_id; return (nonce, ciphertext)."""
+    def _seal(self, doc_id: str, title: str, content: str, meta: dict | None = None) -> tuple[bytes, bytes]:
+        """Encrypt {title, content, meta} bound to doc_id; return (nonce, ciphertext).
+
+        Provenance (filename, source URL, page map) lives INSIDE the ciphertext rather than in a
+        plaintext column: where a document came from is exactly as sensitive as what it says.
+        """
         assert doc_id, "doc id required"
         assert title, "title required"
         nonce = os.urandom(_NONCE_BYTES)
-        plaintext = json.dumps({"title": title, "content": content}).encode("utf-8")
+        body = {"title": title, "content": content, "meta": meta or {}}
+        plaintext = json.dumps(body).encode("utf-8")
         return nonce, self._aes.encrypt(nonce, plaintext, doc_id.encode("utf-8"))
 
     def _open(self, doc_id: str, nonce: bytes, ciphertext: bytes) -> dict:
-        """Decrypt a stored document body for ``doc_id``."""
+        """Decrypt a stored document body for ``doc_id``.
+
+        ``meta`` is defaulted, not asserted: documents sealed before provenance existed have no meta
+        key, and they must keep opening (and searching) exactly as before.
+        """
         assert doc_id, "doc id required"
         assert len(nonce) == _NONCE_BYTES, "nonce must be 12 bytes"
         plaintext = self._aes.decrypt(nonce, ciphertext, doc_id.encode("utf-8"))
         body = json.loads(plaintext.decode("utf-8"))
         assert "title" in body and "content" in body, "document body malformed"
+        body.setdefault("meta", {})  # pre-provenance document
         return body
 
     @staticmethod

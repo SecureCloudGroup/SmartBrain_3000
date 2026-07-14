@@ -133,9 +133,12 @@ def test_semantic_search_ranks_by_similarity() -> None:
     results = kb.semantic_search([1.0, 1.0, 0.0], m)
     assert [r["id"] for r in results] == [near, far]
     assert results[0]["score"] > results[1]["score"]
-    # chunk_idx is new: it records WHICH chunk matched, so the snippet can quote that passage
-    # (and, later, cite it) instead of blindly showing the head of the document.
-    assert set(results[0]) == {"id", "title", "score", "snippet", "chunk_idx"}
+    # A hit is now a CITATION: chunk_idx records WHICH chunk matched (so the snippet quotes that
+    # passage), and source/page/page_label/offset say where it came from, what a "page" is called in
+    # that format (page / slide / sheet), and where to open the document.
+    assert set(results[0]) == {
+        "id", "title", "score", "snippet", "chunk_idx", "source", "page", "page_label", "offset",
+    }
 
 
 def test_chunk_text_splits_long_doc_with_title_prefix() -> None:
@@ -262,7 +265,7 @@ def test_embedding_encrypted_at_rest() -> None:
 def test_migrations_create_chunked_embeddings_table() -> None:
     conn = duckdb.connect(":memory:")
     applied = dbmod.run_migrations(conn)
-    assert applied == 19  # ... + planner priority/due_time/recur + schedule_runs history + seen col
+    assert applied == 22  # ... + planner cols + schedule_runs + seen col + vaults/membership/origin
     cols = {r[1] for r in conn.execute("PRAGMA table_info('embeddings');").fetchall()}
     assert {"doc_id", "chunk_idx", "nonce", "ciphertext", "dim", "model", "created_at"} <= cols
     assert dbmod.run_migrations(conn) == 0  # idempotent

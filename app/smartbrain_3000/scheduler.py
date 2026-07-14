@@ -37,7 +37,11 @@ log = logging.getLogger(__name__)
 _NONCE_BYTES = 12
 _LIST_LIMIT = 200  # max schedules listed (verifiable bound)
 _MAX_PER_TICK = 10  # max schedules fired per tick (verifiable bound)
-_AUTO_REINDEX_PER_TICK = 5  # embeddings backfilled per tick (converges over ticks; bounds tick time)
+# The background indexer works to a TIME budget, not a document count: 5-per-tick meant a 100-file
+# drop took ~10 minutes to index. 20s of a 30s tick drains a backlog steadily while still leaving
+# the single-threaded local model free most of the time (and it yields entirely to a live chat).
+_AUTO_REINDEX_SECONDS = 20.0
+_AUTO_REINDEX_MAX_DOCS = 500  # verifiable per-tick ceiling (P10 #2); the budget usually binds first
 _EAGER_REINDEX_MAX = 50_000  # one-shot post-unlock backfill cap (matches kb._REINDEX_SCAN_LIMIT)
 _SCHEDULE_WORKERS = 4  # H1: parallel agent turns per tick (bounded thread pool)
 # Background turns get a generous per-request budget: a scheduled turn is often the first
@@ -406,9 +410,15 @@ def _breaker_record(success: bool) -> None:
 
 
 def _auto_reindex(cursor, key: bytes) -> None:
-    """Best-effort: backfill a few pending embeddings each tick so new or previously-failed
-    documents become semantically searchable without a manual Reindex. Bounded; never raises.
-    Honors the B11 breaker: when tripped, skip the attempt instead of retrying every tick."""
+    """Background indexer: drain the embedding backlog so uploaded documents become semantically
+    searchable on their own. Bounded; never raises. Honors the B11 breaker.
+
+    Works to a TIME budget rather than a document count. It used to do 5 documents per 30-second
+    tick, so a 100-file drop took ~10 minutes to finish indexing and 1,000 files took over an hour —
+    while the upload path embedded inline and blocked. Now uploads return immediately and this
+    drains steadily, spending at most ``_AUTO_REINDEX_SECONDS`` of each tick so the single-threaded
+    local model is never held away from chat for long.
+    """
     if _breaker_open():
         log.debug("auto-reindex skipped: breaker open")
         return
@@ -423,7 +433,8 @@ def _auto_reindex(cursor, key: bytes) -> None:
             log.debug("auto-reindex skipped: local model busy with a foreground request")
             return
         embedded, _skipped, failed, _err = ingest.reindex_pending(
-            KnowledgeBase(cursor, key), model, limit=_AUTO_REINDEX_PER_TICK
+            KnowledgeBase(cursor, key), model,
+            limit=_AUTO_REINDEX_MAX_DOCS, budget_seconds=_AUTO_REINDEX_SECONDS,
         )
         if embedded or failed:
             log.info("auto-reindex: %d embedded, %d failed", embedded, failed)

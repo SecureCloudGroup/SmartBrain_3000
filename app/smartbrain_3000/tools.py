@@ -422,7 +422,9 @@ _TOOLS: tuple[Tool, ...] = (
                     "any stored document whose title or content matches, returning short SNIPPETS. Use "
                     "to LOCATE the right document, then read_document (its full text), summarize_document "
                     "(an overview of any length), or list_documents (the whole catalog) — a snippet is "
-                    "not the full text.",
+                    "not the full text. Each result carries 'source' (the original file or URL) and "
+                    "'page'. CITE them when you answer from a document — e.g. \"(Lease.pdf, p.12)\" — so "
+                    "the user can check the claim against the original.",
         params_schema={
             "type": "object",
             "additionalProperties": False,

@@ -28,6 +28,7 @@ from .memory import MemoryStore
 from .planner import Planner
 from .scheduler import ScheduleStore
 from .secrets import MASTER_KEY_BYTES, SecretStore
+from .vaults import VaultStore
 
 router = APIRouter()
 log = logging.getLogger(__name__)
@@ -83,6 +84,7 @@ def _set_unlocked(request: Request, master_key: bytes) -> None:
     request.app.state.session_id = session_id
     request.app.state.approvals = ApprovalStore(_conn(request), master_key, session_id)
     request.app.state.schedules = ScheduleStore(_conn(request), master_key)
+    request.app.state.vaults = VaultStore(_conn(request), master_key)
     request.app.state.email = email_account.build_client(request.app.state.secret_store)  # None until connected
     try:
         gateway.provision_from_store(request.app.state.secret_store)
@@ -206,6 +208,7 @@ def account_lock(request: Request) -> dict[str, bool]:
     request.app.state.approvals = None
     request.app.state.session_id = None
     request.app.state.schedules = None
+    request.app.state.vaults = None
     request.app.state.email = None
     request.app.state.email_oauth_pending = None
     return {"unlocked": False}
