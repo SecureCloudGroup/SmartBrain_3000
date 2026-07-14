@@ -125,6 +125,8 @@ const CLIPS = {
     const h = await open(); const { page, R } = h;
     await nav(page, "Schedules").click(); await page.waitForTimeout(800); await R.ensure();
     await R.cap("Optional: run a prompt on a timer", "1/3"); await R.dwell(1500);
+    // Schedules opens on the Output tab now; the Create form lives under the Create subtab.
+    await R.click('button[role="tab"]:has-text("Create")'); await page.waitForTimeout(500); await R.ensure();
     await R.type('input[placeholder^="Name"]', "Morning task summary");
     await R.type('textarea[placeholder^="What should it do"]', "Summarize my open tasks"); await R.dwell(400);
     await page.locator("select").nth(0).selectOption({ label: "Daily" }).catch(() => {});

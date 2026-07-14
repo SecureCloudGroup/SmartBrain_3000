@@ -1,5 +1,10 @@
 # Installer
 
+> **This is the from-source path, for contributors.** Most people should install the prebuilt app
+> via **Homebrew** or **Scoop**, or run the release compose — see the main
+> [README](../README.md#quickstart) or **https://smartbrain.securecloudgroup.com**. This installer
+> builds the image locally from the repo (slower), and is what you want when developing on the code.
+
 A small, dependency-free installer that gets SmartBrain_3000 running on your
 machine. It only needs **Docker** and **Python 3** — everything else is built
 locally from this repo (no GitHub or registry account required).

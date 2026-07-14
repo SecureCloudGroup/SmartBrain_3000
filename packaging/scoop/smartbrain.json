@@ -2,7 +2,7 @@
   "version": "0.4.0",
   "description": "Local-first personal AI assistant — your data stays on your machine.",
   "homepage": "https://github.com/SecureCloudGroup/SmartBrain_3000",
-  "license": "Proprietary",
+  "license": "Elastic-2.0",
   "notes": [
     "SmartBrain needs Docker (Desktop, Colima, or Engine).",
     "Run 'smartbrain' or use the Start-menu shortcut; first run downloads the app image and opens it in your browser."

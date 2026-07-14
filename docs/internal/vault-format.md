@@ -1,8 +1,9 @@
-# SmartBrain Vault Format (`.sbvault`) v1 — proposed spec
+# SmartBrain Vault Format (`.sbvault`) v1 — spec
 
-> **Status: proposed, not yet implemented.** The *collections primitive* (vaults, membership, scoped
-> search) exists; the portable artifact described here does not. Written against `kb.py`, `kbindex.py`,
-> `keyvault.py`, `identity.py`, `db.py`, `data_routes.py`, `netguard.py` — read them before implementing.
+> **Status: implemented and shipped** (v0.4.0). The collections primitive (vaults, membership, scoped
+> search) and the portable `.sbvault` artifact (export/import) both exist — see `vaults.py`,
+> `vault_format.py`, `vault_routes.py`, and the Knowledge UI. Written against `kb.py`, `kbindex.py`,
+> `keyvault.py`, `identity.py`, `db.py`, `data_routes.py`, `netguard.py`.
 >
 > **Why `docs/internal/`:** `web/scripts/build-docs.mjs` renders every top-level `docs/*.md` into the
 > in-app **Help** page. It is not recursive, so a subdirectory stays out of the shipped app. A dense
