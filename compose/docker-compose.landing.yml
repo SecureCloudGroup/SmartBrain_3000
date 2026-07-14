@@ -1,0 +1,18 @@
+# Overlay: serve the download/landing page from the signaling node's existing Caddy (which already
+# holds :80/:443 and does auto-TLS). Runs ALONGSIDE the signaling stack — same Caddy, one more site.
+#
+#   1. Point LANDING_DOMAIN's DNS A record at this VPS (DNS-only), e.g. get.securecloudgroup.com.
+#   2. Add LANDING_DOMAIN=get.securecloudgroup.com to the .env beside the signaling compose.
+#   3. Bring the stack up WITH this overlay:
+#        docker compose -f docker-compose.signaling.yml -f docker-compose.landing.yml up -d
+#
+# It mounts the landing content and the site block into the same Caddy container; the parent
+# Caddyfile already imports conf.d/*.caddy, so the new site activates on reload. Without this overlay,
+# the signaling deploy is completely unchanged.
+services:
+  caddy:
+    environment:
+      - LANDING_DOMAIN=${LANDING_DOMAIN:?set the landing subdomain, e.g. get.example.com}
+    volumes:
+      - ./conf.d:/etc/caddy/conf.d:ro
+      - ../landing:/srv/landing:ro

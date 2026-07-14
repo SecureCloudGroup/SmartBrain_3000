@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SmartBrain — your own private AI, on your own machine</title>
+    <meta
+      name="description"
+      content="A fully local, single-user AI assistant you run on your own computer. Your knowledge, models, and credentials stay on your hardware, encrypted under a passphrase only you hold."
+    />
+    <!-- Self-contained on purpose: no external fonts, scripts, or trackers. What the page promises
+         (nothing leaves your machine) starts with the page itself. -->
+    <style>
+      :root {
+        --bg: #f7f8fa;
+        --panel: #ffffff;
+        --ink: #16181d;
+        --muted: #5b6270;
+        --line: #e4e7ec;
+        --accent: #2f6df6;
+        --accent-ink: #ffffff;
+        --code-bg: #0f1220;
+        --code-ink: #e7ecf5;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #0d0f14;
+          --panel: #14171f;
+          --ink: #eef1f6;
+          --muted: #9aa3b2;
+          --line: #242a36;
+          --accent: #5b8bff;
+          --accent-ink: #0b0d12;
+          --code-bg: #090b12;
+          --code-ink: #e7ecf5;
+        }
+      }
+      * { box-sizing: border-box; }
+      html { -webkit-text-size-adjust: 100%; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      }
+      a { color: var(--accent); }
+      .wrap { max-width: 960px; margin: 0 auto; padding: 0 1.25rem; }
+
+      header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 1.1rem 0;
+      }
+      .brand { display: flex; align-items: center; gap: 0.55rem; font-weight: 700; letter-spacing: -0.01em; }
+      .brand .mark {
+        width: 26px; height: 26px; border-radius: 7px;
+        background: linear-gradient(150deg, var(--accent), #8a5bff);
+      }
+      header nav a { margin-left: 1.25rem; color: var(--muted); text-decoration: none; font-weight: 500; }
+      header nav a:hover { color: var(--ink); }
+
+      .hero { padding: 3.5rem 0 2.5rem; text-align: center; }
+      .hero h1 { font-size: clamp(2rem, 5vw, 3.2rem); line-height: 1.08; letter-spacing: -0.02em; margin: 0 0 1rem; }
+      .hero p.lead { font-size: clamp(1.05rem, 2.4vw, 1.3rem); color: var(--muted); max-width: 40rem; margin: 0 auto 2rem; }
+
+      /* The one command, chosen for the visitor's OS by the tiny script below. */
+      .install {
+        display: inline-flex; align-items: stretch; gap: 0;
+        background: var(--code-bg); border-radius: 10px; overflow: hidden;
+        max-width: 100%; text-align: left; box-shadow: 0 8px 30px rgba(0,0,0,0.12);
+      }
+      .install code {
+        color: var(--code-ink); font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        font-size: 0.95rem; padding: 0.9rem 1.1rem; white-space: nowrap; overflow-x: auto;
+      }
+      .install button {
+        border: 0; border-left: 1px solid rgba(255,255,255,0.12);
+        background: transparent; color: var(--code-ink); cursor: pointer;
+        padding: 0 1.1rem; font-weight: 600; font-size: 0.85rem;
+      }
+      .install button:hover { background: rgba(255,255,255,0.08); }
+      .hero .sub { margin-top: 0.9rem; font-size: 0.9rem; color: var(--muted); }
+      .hero .sub a { color: var(--muted); }
+
+      .pillars { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; padding: 1rem 0 2.5rem; }
+      .pillar { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1.25rem; }
+      .pillar h3 { margin: 0.2rem 0 0.4rem; font-size: 1.05rem; }
+      .pillar p { margin: 0; color: var(--muted); font-size: 0.92rem; }
+      .pillar .ico { font-size: 1.4rem; }
+      @media (max-width: 720px) { .pillars { grid-template-columns: 1fr; } }
+
+      section.block { padding: 2.5rem 0; border-top: 1px solid var(--line); }
+      section.block h2 { font-size: 1.5rem; letter-spacing: -0.01em; margin: 0 0 0.4rem; }
+      section.block > .wrap > p.intro { color: var(--muted); margin: 0 0 1.5rem; }
+
+      .os { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
+      @media (max-width: 720px) { .os { grid-template-columns: 1fr; } }
+      .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1.1rem; }
+      .card h3 { margin: 0 0 0.2rem; display: flex; align-items: center; gap: 0.5rem; font-size: 1rem; }
+      .card .tag { font-size: 0.72rem; font-weight: 600; color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); padding: 0.1rem 0.45rem; border-radius: 999px; }
+      .card p { color: var(--muted); font-size: 0.86rem; margin: 0.4rem 0 0.75rem; }
+      .cmd { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; background: var(--code-bg); border-radius: 8px; padding: 0.5rem 0.7rem; }
+      .cmd code { color: var(--code-ink); font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 0.82rem; overflow-x: auto; white-space: nowrap; }
+      .cmd button { border: 0; background: transparent; color: var(--muted); cursor: pointer; font-size: 0.78rem; font-weight: 600; flex: none; }
+      .cmd button:hover { color: var(--code-ink); }
+
+      .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; counter-reset: step; }
+      @media (max-width: 720px) { .steps { grid-template-columns: 1fr; } }
+      .step { position: relative; padding-left: 2.4rem; }
+      .step::before {
+        counter-increment: step; content: counter(step);
+        position: absolute; left: 0; top: 0; width: 1.7rem; height: 1.7rem;
+        background: var(--accent); color: var(--accent-ink); border-radius: 50%;
+        display: grid; place-items: center; font-weight: 700; font-size: 0.9rem;
+      }
+      .step h4 { margin: 0.1rem 0 0.2rem; font-size: 0.98rem; }
+      .step p { margin: 0; color: var(--muted); font-size: 0.88rem; }
+
+      footer { border-top: 1px solid var(--line); padding: 2rem 0 3rem; color: var(--muted); font-size: 0.88rem; }
+      footer .wrap { display: flex; flex-wrap: wrap; gap: 0.75rem 1.5rem; align-items: center; justify-content: space-between; }
+      footer a { color: var(--muted); text-decoration: none; }
+      footer a:hover { color: var(--ink); }
+      .note { font-size: 0.82rem; color: var(--muted); }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <header>
+        <div class="brand"><span class="mark"></span> SmartBrain</div>
+        <nav>
+          <a href="https://github.com/SecureCloudGroup/SmartBrain_3000">GitHub</a>
+          <a href="https://github.com/SecureCloudGroup/SmartBrain_3000#quickstart">Docs</a>
+        </nav>
+      </header>
+    </div>
+
+    <div class="wrap hero">
+      <h1>Your own private AI,<br />on your own machine.</h1>
+      <p class="lead">
+        A personal AI assistant that runs entirely on your computer. Your knowledge, your models, and
+        your credentials never leave your hardware — encrypted under a passphrase only you hold.
+      </p>
+
+      <div class="install">
+        <code id="cmd">brew install --cask securecloudgroup/tap/smartbrain</code>
+        <button type="button" data-copy="#cmd">Copy</button>
+      </div>
+      <p class="sub" id="os-note">Detecting your system…</p>
+    </div>
+
+    <div class="wrap">
+      <div class="pillars">
+        <div class="pillar">
+          <div class="ico">🔒</div>
+          <h3>Fully local</h3>
+          <p>Runs in Docker on your machine. There is no SmartBrain server — nothing is sent to us, ever.</p>
+        </div>
+        <div class="pillar">
+          <div class="ico">🗝️</div>
+          <h3>You own your data</h3>
+          <p>Your knowledge base, notes, and secrets live in a local database, encrypted at rest under your passphrase.</p>
+        </div>
+        <div class="pillar">
+          <div class="ico">🧠</div>
+          <h3>Your choice of AI</h3>
+          <p>Bring your own API keys, or run fully local models with Ollama or Apple MLX. A built-in gateway routes between them.</p>
+        </div>
+      </div>
+    </div>
+
+    <section class="block">
+      <div class="wrap">
+        <h2>Install</h2>
+        <p class="intro">
+          Pick your system. These install with no security warning — the app is delivered through
+          package managers that vouch for the download, so you never hit an “unidentified developer”
+          wall.
+        </p>
+        <div class="os">
+          <div class="card">
+            <h3>🍎 macOS <span class="tag">Homebrew</span></h3>
+            <p>Installs to your Applications folder. Opens on first click.</p>
+            <div class="cmd">
+              <code>brew install --cask securecloudgroup/tap/smartbrain</code>
+              <button type="button" data-copy-text="brew install --cask securecloudgroup/tap/smartbrain">Copy</button>
+            </div>
+          </div>
+          <div class="card">
+            <h3>🪟 Windows <span class="tag">winget</span></h3>
+            <p>One command in Terminal or PowerShell. No SmartScreen prompt.</p>
+            <div class="cmd">
+              <code>winget install SecureCloudGroup.SmartBrain</code>
+              <button type="button" data-copy-text="winget install SecureCloudGroup.SmartBrain">Copy</button>
+            </div>
+          </div>
+          <div class="card">
+            <h3>🐧 Linux <span class="tag">Docker</span></h3>
+            <p>Pulls the prebuilt image — no build, no clone.</p>
+            <div class="cmd">
+              <code>docker compose -f docker-compose.release.yml up -d</code>
+              <button type="button" data-copy-text="docker compose -f docker-compose.release.yml up -d">Copy</button>
+            </div>
+          </div>
+        </div>
+        <p class="note" style="margin-top:1rem">
+          Prefer a direct download? Grab the
+          <a href="https://github.com/SecureCloudGroup/SmartBrain_3000/releases/latest">latest release</a>.
+          SmartBrain needs <a href="https://docs.docker.com/get-docker/">Docker</a> (Desktop, Colima, OrbStack, or Engine).
+        </p>
+      </div>
+    </section>
+
+    <section class="block">
+      <div class="wrap">
+        <h2>Running in three steps</h2>
+        <p class="intro">From install to your first answer in a few minutes.</p>
+        <div class="steps">
+          <div class="step">
+            <h4>Install &amp; open</h4>
+            <p>One command above. First launch downloads the app and opens it in your browser.</p>
+          </div>
+          <div class="step">
+            <h4>Set a passphrase</h4>
+            <p>It encrypts everything on your machine. Save your Emergency Kit — it's the only way back in.</p>
+          </div>
+          <div class="step">
+            <h4>Connect a model &amp; chat</h4>
+            <p>Add an API key or a local Ollama model, then start building your private knowledge base.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <footer>
+      <div class="wrap">
+        <span>© 2026 The Frels Holdings LLC · No accounts, no telemetry.</span>
+        <span>
+          <a href="https://github.com/SecureCloudGroup/SmartBrain_3000">Source</a> ·
+          <a href="https://github.com/SecureCloudGroup/SmartBrain_3000#quickstart">Docs</a> ·
+          <a href="https://github.com/SecureCloudGroup/SmartBrain_3000/releases/latest">Releases</a>
+        </span>
+      </div>
+    </footer>
+
+    <script>
+      // OS detection picks the headline command. Kept tiny and dependency-free — like everything else
+      // here, it runs entirely in your browser.
+      (function () {
+        var ua = navigator.userAgent || "";
+        var plat = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || "";
+        var mac = /Mac/i.test(plat) || /Mac OS X/i.test(ua);
+        var win = /Win/i.test(plat) || /Windows/i.test(ua);
+        var cmdEl = document.getElementById("cmd");
+        var noteEl = document.getElementById("os-note");
+        if (win) {
+          cmdEl.textContent = "winget install SecureCloudGroup.SmartBrain";
+          noteEl.innerHTML = "for Windows · <a href='#'>other systems below</a>";
+        } else if (mac) {
+          cmdEl.textContent = "brew install --cask securecloudgroup/tap/smartbrain";
+          noteEl.innerHTML = "for macOS · <a href='#'>other systems below</a>";
+        } else {
+          cmdEl.textContent = "docker compose -f docker-compose.release.yml up -d";
+          noteEl.innerHTML = "for Linux · <a href='#'>other systems below</a>";
+        }
+      })();
+
+      // Copy buttons: either the referenced element's text, or a literal data-copy-text.
+      document.addEventListener("click", function (e) {
+        var b = e.target.closest("[data-copy],[data-copy-text]");
+        if (!b) return;
+        var text = b.hasAttribute("data-copy-text")
+          ? b.getAttribute("data-copy-text")
+          : document.querySelector(b.getAttribute("data-copy")).textContent;
+        navigator.clipboard && navigator.clipboard.writeText(text.trim());
+        var old = b.textContent;
+        b.textContent = "Copied";
+        setTimeout(function () { b.textContent = old; }, 1200);
+      });
+    </script>
+  </body>
+</html>
