@@ -240,11 +240,55 @@ export interface KbDocFull extends KbDoc {
   content: string;
 }
 
+// `duplicate` = the text was already in the knowledge base, so the EXISTING document is returned
+// instead of a second copy (which would then turn up in every search forever).
+export interface IngestResult {
+  id: string;
+  title: string;
+  chars: number;
+  duplicate: boolean;
+}
+
+// Keyword and vector search miss in opposite directions, so "hybrid" (rank-fused) is the default.
+export type SearchMode = "hybrid" | "lexical" | "semantic";
+
 export interface KbHit {
   id: string;
   title: string;
   score: number;
   snippet: string;
+  // Citation: WHERE the match came from. `source` is the original filename or URL, `page` the
+  // 1-based page (null when the document has no pages), and `offset` the character position of the
+  // matched passage — which is what lets the viewer open the document AT the match.
+  chunk_idx: number | null;
+  source: string;
+  page: number | null;
+  page_label: string; // what a "page" is in this format: page | slide | sheet
+  offset: number;
+}
+
+// A Vault: a named, selectable subset of your knowledge. The unit you scope a search to, and the
+// unit you export and share. `kind` is "local" (you made it) or "imported" (it came from someone).
+export interface Vault {
+  id: string;
+  kind: "local" | "imported";
+  version: number;
+  name: string;
+  description: string;
+  // Where an imported vault came from — pinned at import time. null for a vault you made yourself.
+  source: { vault_id?: string; publisher_pubkey?: string; seq?: number } | null;
+  doc_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface VaultImportResult {
+  id: string;
+  name: string;
+  publisher: string; // the publisher FINGERPRINT (SB-...) — what the user is actually asked to trust
+  added: number;
+  duplicates: number;
+  vectors_used: boolean;
 }
 
 export interface DeviceInfo {
@@ -501,15 +545,17 @@ export const api = {
   addDoc: (title: string, content: string) =>
     req<{ id: string }>("/api/kb", { method: "POST", body: JSON.stringify({ title, content }) }),
   ingestUrl: (url: string) =>
-    req<{ id: string; title: string; chars: number }>("/api/kb/ingest-url", {
-      method: "POST",
-      body: JSON.stringify({ url }),
-    }),
+    req<IngestResult>("/api/kb/ingest-url", { method: "POST", body: JSON.stringify({ url }) }),
   uploadDoc: (file: File) =>
-    req<{ id: string; title: string; chars: number }>(
+    req<IngestResult>(
       `/api/kb/upload?filename=${encodeURIComponent(file.name)}`,
       { method: "POST", body: file, headers: { "content-type": "application/octet-stream" } },
     ),
+  // How much of the knowledge base is semantically indexed. Uploads no longer block on embedding,
+  // so the UI polls this to say "indexing 12 of 40" instead of looking done while semantic search
+  // still can't see the new documents.
+  indexStatus: () =>
+    req<{ total: number; pending: number; indexed: number; model: string }>("/api/kb/index-status"),
   getDoc: (id: string) => req<KbDocFull>(`/api/kb/${encodeURIComponent(id)}`),
   renameDoc: (id: string, title: string) =>
     req<{ ok: boolean }>(`/api/kb/${encodeURIComponent(id)}`, {
@@ -518,12 +564,74 @@ export const api = {
     }),
   deleteDoc: (id: string) =>
     req<{ ok: boolean }>(`/api/kb/${encodeURIComponent(id)}`, { method: "DELETE" }),
-  searchKb: (q: string, mode: "lexical" | "semantic") =>
+  // `vault` scopes the search to one vault's documents ("" = all knowledge).
+  searchKb: (q: string, mode: SearchMode = "hybrid", limit = 10, vault = "") =>
     req<{ results: KbHit[]; degraded?: boolean }>(
-      `/api/kb/search?${new URLSearchParams({ q, mode }).toString()}`,
+      `/api/kb/search?${new URLSearchParams({
+        q,
+        mode,
+        limit: String(limit),
+        ...(vault ? { vault } : {}),
+      }).toString()}`,
     ),
+  // Bounded by a wall-clock budget server-side, so it always returns; `pending` says what's left
+  // (the background indexer finishes it) rather than pretending the whole backlog is done.
   reindexKb: () =>
-    req<{ embedded: number; skipped: number; failed: number; error: string }>("/api/kb/reindex", { method: "POST" }),
+    req<{ embedded: number; skipped: number; failed: number; error: string; pending: number }>(
+      "/api/kb/reindex",
+      { method: "POST" },
+    ),
+
+  // vaults — a named subset of knowledge you can scope a search to, export, and share
+  listVaults: () => req<{ vaults: Vault[] }>("/api/vaults"),
+  createVault: (name: string, description = "") =>
+    req<Vault>("/api/vaults", { method: "POST", body: JSON.stringify({ name, description }) }),
+  deleteVault: (id: string) =>
+    req<{ ok: boolean }>(`/api/vaults/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  addToVault: (id: string, doc_ids: string[]) =>
+    req<{ added: number; doc_count: number }>(`/api/vaults/${encodeURIComponent(id)}/documents`, {
+      method: "POST",
+      body: JSON.stringify({ doc_ids }),
+    }),
+
+  // Export hands out content that is plaintext-equivalent to whoever holds the key, so — like
+  // backup — it is Desktop-local (x-sb-local, which the WebRTC bridge cannot forward) and requires
+  // the passphrase again. Returns the .sbvault file itself.
+  exportVault: async (id: string, passphrase: string): Promise<Blob> => {
+    await remoteReady;
+    const res = await fetch(`/api/vaults/${encodeURIComponent(id)}/export`, {
+      method: "POST",
+      headers: { "x-sb-local": "1", "content-type": "application/json" },
+      body: JSON.stringify({ passphrase }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => null);
+      throw new ApiError(res.status, (data as { detail?: string })?.detail || `export failed (${res.status})`);
+    }
+    return res.blob();
+  },
+  vaultKey: async (id: string, passphrase: string): Promise<string> => {
+    await remoteReady;
+    const res = await fetch(`/api/vaults/${encodeURIComponent(id)}/key`, {
+      method: "POST",
+      headers: { "x-sb-local": "1", "content-type": "application/json" },
+      body: JSON.stringify({ passphrase }),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) throw new ApiError(res.status, (data as { detail?: string })?.detail || "could not read the key");
+    return (data as { key: string }).key;
+  },
+  importVault: async (file: File, key: string): Promise<VaultImportResult> => {
+    await remoteReady;
+    const res = await fetch(`/api/vaults/import?key=${encodeURIComponent(key)}`, {
+      method: "POST",
+      body: file,
+      headers: { "content-type": "application/octet-stream" },
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) throw new ApiError(res.status, (data as { detail?: string })?.detail || "import failed");
+    return data as VaultImportResult;
+  },
 
   // email (Gmail via loopback OAuth; reads + user-initiated send; agent send is gated)
   emailStatus: () => req<EmailStatus>("/api/email/status"),
