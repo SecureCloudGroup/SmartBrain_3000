@@ -1,0 +1,68 @@
+# SmartBrain_3000 — release stack (PULL prebuilt images; do not build).
+#
+# This is the fast path. Where docker-compose.yml builds the backend image from source (minutes to
+# tens of minutes, and needs the whole repo), this file pulls a ready-made multi-arch image that CI
+# already built and pushed to ghcr.io — so first run is a download, not a compile.
+#
+# It is a COMPLETE, standalone stack: it references no build context and no other file in the repo,
+# so it can be shipped on its own (the desktop launcher and the one-line install both hand a user
+# just this file). Your data lives in ./data beside this file — back that up and you've backed up
+# everything.
+#
+#   docker compose -f docker-compose.release.yml up -d
+#
+# Pin a specific release by exporting SMARTBRAIN_VERSION=0.4.0; the default tracks :latest.
+services:
+  smartbrain:
+    image: ghcr.io/securecloudgroup/smartbrain_3000:${SMARTBRAIN_VERSION:-latest}
+    # Always check for a newer :latest on `up`, so an update is just "restart". A pinned version tag
+    # is immutable, so this is a cheap no-op in that case.
+    pull_policy: always
+    container_name: smartbrain_3000
+    restart: unless-stopped
+    ports:
+      # Loopback-only: the app is reachable at http://localhost:33000 on THIS machine and nowhere
+      # else. Mobile/LAN access is a deliberate, separate opt-in (the WebRTC overlay), never this port.
+      - "127.0.0.1:${SMARTBRAIN_PORT:-33000}:${SMARTBRAIN_PORT:-33000}"
+    environment:
+      SMARTBRAIN_DB_PATH: /app/data/smartbrain.duckdb
+      SMARTBRAIN_PORT: ${SMARTBRAIN_PORT:-33000}
+      # Bind all interfaces INSIDE the container so the loopback-only host mapping can reach it.
+      SMARTBRAIN_HOST: 0.0.0.0
+      SMARTBRAIN_LLM_GATEWAY_URL: http://bifrost:8080
+      # Embedding model for semantic search. LOCAL by default — keep it local to keep your knowledge
+      # on-box. Pointing this at a cloud provider sends KB content there on every reindex.
+      SMARTBRAIN_EMBED_MODEL: ${SMARTBRAIN_EMBED_MODEL:-ollama/nomic-embed-text:v1.5}
+    volumes:
+      - ./data:/app/data
+    # Probe host-run local model servers (Ollama / Apple MLX) for the Local Models panel.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      bifrost:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:${SMARTBRAIN_PORT:-33000}/api/health', timeout=2).status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  bifrost:
+    image: maximhq/bifrost:latest
+    container_name: smartbrain_bifrost
+    restart: unless-stopped
+    # Loopback-only and OPTIONAL — only lets an advanced user open the Bifrost admin UI at
+    # http://localhost:38080. The app itself reaches Bifrost in-cluster at http://bifrost:8080.
+    ports:
+      - "127.0.0.1:38080:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./data/bifrost:/app/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/api/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 15s

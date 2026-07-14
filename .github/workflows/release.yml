@@ -25,6 +25,11 @@ jobs:
   image:
     name: build + push (amd64, arm64)
     runs-on: ubuntu-latest
+    env:
+      # ghcr rejects upper-case names, and github.repository is mixed-case (SecureCloudGroup/…).
+      # Pin the lower-cased path once and use it for BOTH the tags and the build cache — the cache
+      # refs are hand-written (metadata-action only lower-cases the tags), so they need this too.
+      IMAGE: ghcr.io/securecloudgroup/smartbrain_3000
     steps:
       - uses: actions/checkout@v7
 
@@ -47,7 +52,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository }}
+          images: ${{ env.IMAGE }}
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
@@ -62,5 +67,5 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           # Cache layers in the registry so a re-tag of the same source is near-instant.
-          cache-from: type=registry,ref=ghcr.io/${{ github.repository }}:buildcache
-          cache-to: type=registry,ref=ghcr.io/${{ github.repository }}:buildcache,mode=max
+          cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache
+          cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache,mode=max
