@@ -327,6 +327,110 @@ header.appbar .help-link:hover {
   color: var(--danger);
 }
 
+/* --- Rendered assistant markdown (see lib/Markdown.svelte) -----------------------------------
+   .bubble uses white-space: pre-wrap so plain text keeps its newlines. Rendered HTML carries its
+   own block structure, so that MUST be reset here or every paragraph gains a phantom blank line. */
+.bubble.md {
+  white-space: normal;
+}
+.bubble.md > :first-child {
+  margin-top: 0;
+}
+.bubble.md > :last-child {
+  margin-bottom: 0;
+}
+.bubble.md h1,
+.bubble.md h2,
+.bubble.md h3,
+.bubble.md h4 {
+  margin: 0.9rem 0 0.4rem;
+  line-height: 1.25;
+}
+.bubble.md h1 { font-size: 1.28rem; }
+.bubble.md h2 { font-size: 1.14rem; }
+.bubble.md h3 { font-size: 1.02rem; }
+.bubble.md h4 { font-size: 0.97rem; }
+.bubble.md p { margin: 0.5rem 0; }
+.bubble.md ul,
+.bubble.md ol {
+  margin: 0.5rem 0;
+  padding-left: 1.4rem;
+}
+.bubble.md li { margin: 0.2rem 0; }
+.bubble.md li > p { margin: 0.2rem 0; }
+.bubble.md a { color: var(--accent); }
+.bubble.md blockquote {
+  margin: 0.5rem 0;
+  padding: 0.1rem 0.8rem;
+  border-left: 3px solid var(--border);
+  color: var(--muted);
+}
+.bubble.md hr {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: 0.8rem 0;
+}
+.bubble.md code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.88em;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.05rem 0.3rem;
+}
+.bubble.md pre {
+  position: relative; /* anchors the copy button */
+  margin: 0.6rem 0;
+  padding: 0.7rem 0.8rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow-x: auto; /* long lines scroll INSIDE the block; the page never scrolls sideways */
+}
+.bubble.md pre code {
+  background: none;
+  border: 0;
+  padding: 0;
+  font-size: 0.85rem;
+}
+.bubble.md table {
+  display: block; /* with overflow-x, keeps a wide table inside the bubble */
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  margin: 0.6rem 0;
+}
+.bubble.md th,
+.bubble.md td {
+  border: 1px solid var(--border);
+  padding: 0.3rem 0.55rem;
+  text-align: left;
+}
+.bubble.md th { background: var(--bg); }
+.bubble.md img { max-width: 100%; height: auto; }
+
+/* Copy button injected into each code block by lib/Markdown.svelte. Hidden until hover/focus so it
+   doesn't clutter the reply, but always reachable by keyboard. */
+.bubble.md pre .copy-code {
+  position: absolute;
+  top: 0.35rem;
+  right: 0.35rem;
+  padding: 0.15rem 0.45rem;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.bubble.md pre:hover .copy-code,
+.bubble.md pre .copy-code:focus-visible {
+  opacity: 1;
+}
+
 .composer {
   display: flex;
   gap: 0.5rem;
