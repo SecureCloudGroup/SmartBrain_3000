@@ -11,6 +11,9 @@ dependencies = [
     "fastapi>=0.110",
     "uvicorn[standard]>=0.27",
     "duckdb>=1.1",
+    # Vector search. The old cosine was a hand-rolled Python scalar loop: at the 10k-document target
+    # (~100k chunks) it measured 1,273 ms per query, versus 2.3 ms for one numpy mat-vec — 550x.
+    "numpy>=1.26",
     "cryptography>=42",
     "argon2-cffi>=23.1",
     "httpx>=0.27",

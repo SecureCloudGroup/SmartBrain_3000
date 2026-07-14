@@ -72,28 +72,39 @@ def rename_doc(request: Request, doc_id: str, body: RenameIn) -> dict[str, bool]
     return {"ok": True}
 
 
-@router.get("/api/kb/search")
-def search_docs(request: Request, q: str, mode: str = "lexical") -> dict:
-    """Search the KB. mode=lexical (default, no gateway) or semantic.
+_SEARCH_MODES = ("hybrid", "lexical", "semantic")
+_MAX_SEARCH_LIMIT = 50
 
-    Semantic mode embeds ``q`` via the gateway and ranks by cosine similarity;
-    if the gateway/Ollama is unavailable it falls back to lexical and sets
-    ``degraded: true`` so the switch is observable, never silent.
+
+@router.get("/api/kb/search")
+def search_docs(request: Request, q: str, mode: str = "hybrid", limit: int = 10) -> dict:
+    """Search the KB. mode=hybrid (default), lexical, or semantic.
+
+    HYBRID is the default because keyword and vector search fail in opposite directions: keyword
+    nails an exact name or invoice number but misses a paraphrase, vectors do the reverse. Fusing
+    them beats either alone, which is why the agent's tool has always merged both — the HTTP API
+    just never did.
+
+    Semantic/hybrid embed ``q`` via the gateway; if the gateway is unavailable they fall back to
+    lexical and set ``degraded: true`` so the switch is observable, never silent.
     """
     knowledge = _kb(request)
     if not q.strip():
         raise HTTPException(status_code=400, detail="query 'q' is required")
-    if mode not in ("lexical", "semantic"):
-        raise HTTPException(status_code=400, detail="mode must be 'lexical' or 'semantic'")
+    if mode not in _SEARCH_MODES:
+        raise HTTPException(status_code=400, detail=f"mode must be one of {', '.join(_SEARCH_MODES)}")
+    limit = min(max(limit, 1), _MAX_SEARCH_LIMIT)
     if mode == "lexical":
-        return {"results": knowledge.search(q)}
+        return {"results": knowledge.search(q, limit=limit), "degraded": False}
     model = gateway.embed_model(request.app.state.dbx)
     try:
         vector = gateway.embed(q, model)
-    except Exception as exc:  # gateway/Ollama unavailable — degrade to lexical
-        log.warning("semantic search fell back to lexical: %s", exc)
-        return {"results": knowledge.search(q), "degraded": True}
-    return {"results": knowledge.semantic_search(vector, model), "degraded": False}
+    except Exception as exc:  # gateway/embed model unavailable — degrade, but say so
+        log.warning("%s search fell back to lexical: %s", mode, exc)
+        return {"results": knowledge.search(q, limit=limit), "degraded": True}
+    if mode == "semantic":
+        return {"results": knowledge.semantic_search(vector, model, limit=limit), "degraded": False}
+    return {"results": knowledge.hybrid_search(q, vector, model, limit=limit), "degraded": False}
 
 
 @router.post("/api/kb/reindex")

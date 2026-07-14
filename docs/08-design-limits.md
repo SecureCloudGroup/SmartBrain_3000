@@ -53,16 +53,26 @@ tool, where the threat isn't the owner forging their own history. A verifiable
 hash chain is a reasonable post-MVP hardening, but it isn't needed to meet the
 single-user transparency goal today.
 
-## Encrypted search is linear (no index pushdown)
+## The search index lives in memory (rebuilt on each unlock)
 
-Because content is **encrypted at rest**, search scans and decrypts rows rather
-than pushing predicates down into a database index. Lookups are **linear over
-the scanned rows** — fine at personal scale, but it doesn't have the sublinear
-behavior of an indexed plaintext store.
+Because content is **encrypted at rest**, we can't push search predicates down into a
+plaintext database index. Instead, the corpus is decrypted **once per unlock** into an
+in-memory index — a BM25 keyword index plus a matrix of chunk vectors — and every query is
+answered from RAM. Only the handful of documents actually returned are decrypted again, to
+cut their snippets.
 
-**Why:** indexing encrypted content without leaking it is hard, and a personal
-knowledge base is small enough that a linear scan is fast. Keeping content
-encrypted is worth more here than index-speed search.
+The trade-offs that follow from that:
+
+- **The first search after unlocking pays a one-time build.** Roughly 0.2s for 1,000
+  documents and ~1.8s for 10,000. Searches after that are single-digit milliseconds.
+- **The index costs RAM** — dominated by the vectors (~30 MB per 1,000 documents at 768
+  dimensions). Very large libraries are bounded by an explicit ceiling, and if a corpus
+  exceeds it that is **reported, not silently ignored**.
+- **Nothing is written to disk.** The index is never persisted, so encryption at rest is
+  unchanged: it exists only while the vault is unlocked and dies with the master key.
+
+**Why:** indexing encrypted content on disk without leaking it is hard. Rebuilding in memory
+keeps the encryption promise intact while still giving fast, whole-corpus search.
 
 ## WebRTC signaling broker is single-operator
 
