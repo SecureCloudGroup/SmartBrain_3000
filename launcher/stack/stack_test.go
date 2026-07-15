@@ -1,11 +1,40 @@
 package stack
 
 import (
+	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
 )
+
+func TestMissingPathDirs(t *testing.T) {
+	sep := string(os.PathListSeparator)
+	// /usr/local/bin already present → not returned; the others returned, in order.
+	pathEnv := "/usr/bin" + sep + "/bin" + sep + "/usr/local/bin"
+	got := missingPathDirs(pathEnv, []string{"/usr/local/bin", "/opt/homebrew/bin", "/h/.docker/bin"})
+	want := []string{"/opt/homebrew/bin", "/h/.docker/bin"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("missingPathDirs = %v, want %v", got, want)
+	}
+	if got := missingPathDirs("/a"+sep+"/b", []string{"/a", "/b"}); len(got) != 0 {
+		t.Errorf("all present should return none, got %v", got)
+	}
+}
+
+func TestDockerPathDirs(t *testing.T) {
+	dirs := dockerPathDirs("/Users/x")
+	joined := strings.Join(dirs, ":")
+	// /usr/local/bin (Docker Desktop's symlink) is the #1 dir a GUI PATH omits — it must be here.
+	if !strings.Contains(joined, "/usr/local/bin") {
+		t.Errorf("must include /usr/local/bin, got %v", dirs)
+	}
+	// HOME-relative entries must be expanded against the given home.
+	if !strings.Contains(joined, "/Users/x/.docker/bin") {
+		t.Errorf("~/.docker/bin should expand under home, got %v", dirs)
+	}
+}
 
 func TestComposeArgs(t *testing.T) {
 	s := Stack{Dir: "/tmp/sb", Port: DefaultPort}

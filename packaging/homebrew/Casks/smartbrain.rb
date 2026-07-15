@@ -27,8 +27,12 @@ cask "smartbrain" do
   # as a dependency, because plenty of this audience run Colima / OrbStack / Engine instead — the
   # launcher detects Docker and guides the user if it's missing.
   caveats <<~EOS
-    SmartBrain needs Docker (Desktop, Colima, OrbStack, or Engine). Open SmartBrain from your
-    Applications folder; on first run it downloads the app image and opens it in your browser.
+    SmartBrain runs on Docker. If you don't have it yet, install Docker Desktop first and start it:
+      https://docs.docker.com/get-docker/
+
+    Then open SmartBrain from your Applications folder. It's a menu-bar app — look for its icon at the
+    top-right of your screen, click it, and choose "Open SmartBrain". The first run downloads the app
+    image (a minute or two), then opens it in your browser at http://localhost:33000.
   EOS
 
   # "zap" is what `brew uninstall --zap` removes. Your knowledge lives here — a plain uninstall keeps
