@@ -37,6 +37,7 @@ from . import identity
 FORMAT = "sbvault"
 FORMAT_VERSION = 1
 SEALED = "sealed"
+OPEN = "open"
 
 # --- bounds (all explicit, all verifiable; exceeding one is reported, never silent) -------------
 MAX_VAULT_DOCS = 10_000  # 10k docs x ~10 chunks = 100k vectors = exactly kb._MAX_INDEXED_VECTORS
@@ -267,21 +268,38 @@ def pack(
     description: str,
     seq: int,
     docs: list[dict],
-    vault_key: bytes,
+    vault_key: bytes | None = None,
+    name_key: bytes | None = None,
+    mode: str = SEALED,
     embed_model: str = "",
     label: str = "",
 ) -> bytes:
-    """Build a SEALED .sbvault. ``docs`` = [{uid, title, content, meta, vectors?}].
+    """Build a .sbvault. ``docs`` = [{uid, title, content, meta, vectors?}].
 
-    Objects and the index are encrypted under keys derived from the Vault Key; the manifest is
-    plaintext (it is what a reader parses before it has any key) and SIGNED by the publisher.
+    SEALED (default): objects and the index are AES-GCM encrypted under keys derived from
+    ``vault_key``; the manifest carries the encryption params and, by the §2 metadata rule, no topic.
+
+    OPEN: there is no Vault Key, so the index is raw canonical JSON and each object is its plaintext
+    body — but the manifest is signed exactly as in sealed mode, and object names stay
+    HMAC(K_name, ...). The caller passes ``name_key`` = the very K_name sealed mode derives from the
+    Vault Key (and it is then published in the open manifest), so a sealed->open flip of the same
+    vault yields byte-identical uids, content hashes, and object names: publishing is an UNLOCK, not a
+    rewrite. A born-open vault instead supplies a persisted random ``name_key`` (else every republish
+    would look like a full rewrite).
     """
+    if mode not in (SEALED, OPEN):
+        raise VaultError(f"unknown vault mode: {mode!r}")
     if len(docs) > MAX_VAULT_DOCS:
         raise VaultError(f"a vault holds at most {MAX_VAULT_DOCS} documents")
-    cek = _derive(vault_key, vault_id, b"sbvault/v1/content")
-    k_name = _derive(vault_key, vault_id, b"sbvault/v1/objname")
-    k_nonce = _derive(vault_key, vault_id, b"sbvault/v1/nonce")
-    aes = AESGCM(cek)
+    if mode == SEALED:
+        assert vault_key is not None, "sealed pack requires a vault key"
+        cek = _derive(vault_key, vault_id, b"sbvault/v1/content")
+        k_name = _derive(vault_key, vault_id, b"sbvault/v1/objname")
+        k_nonce = _derive(vault_key, vault_id, b"sbvault/v1/nonce")
+        aes = AESGCM(cek)
+    else:
+        assert name_key is not None and len(name_key) == 32, "open pack requires a 32-byte name_key"
+        k_name = name_key
 
     entries: dict[str, bytes] = {}
     index_docs: list[dict] = []
@@ -291,10 +309,12 @@ def pack(
         body = _doc_object(title, doc["content"], doc.get("meta") or {})
         digest = hashlib.sha256(body).hexdigest()
         obj = _obj_name(k_name, b"doc", uid, digest)
-        entries[f"objects/{obj}.bin"] = aes.encrypt(
-            _nonce(k_nonce, b"doc", uid, digest), body,
-            b"sbvault:doc:v1|" + vault_id.encode() + b"|" + uid.encode(),
-        )
+        # Hashes and object names are over PLAINTEXT in both modes (only the stored body changes from
+        # ciphertext to plaintext), which is what makes the sealed->open flip an unlock.
+        entries[f"objects/{obj}.bin"] = (
+            aes.encrypt(_nonce(k_nonce, b"doc", uid, digest), body,
+                        b"sbvault:doc:v1|" + vault_id.encode() + b"|" + uid.encode())
+            if mode == SEALED else body)
         row = {"uid": uid, "title": title, "hash": digest, "obj": obj, "bytes": len(body),
                "chunks": int(doc.get("chunks") or 1)}
         vectors = doc.get("vectors")
@@ -302,20 +322,22 @@ def pack(
             vbody = _vec_object(vectors)
             vdigest = hashlib.sha256(vbody).hexdigest()
             vobj = _obj_name(k_name, b"vec", uid, vdigest)
-            entries[f"objects/{vobj}.bin"] = aes.encrypt(
-                _nonce(k_nonce, b"vec", uid, vdigest), vbody,
-                b"sbvault:vec:v1|" + vault_id.encode() + b"|" + uid.encode(),
-            )
+            entries[f"objects/{vobj}.bin"] = (
+                aes.encrypt(_nonce(k_nonce, b"vec", uid, vdigest), vbody,
+                            b"sbvault:vec:v1|" + vault_id.encode() + b"|" + uid.encode())
+                if mode == SEALED else vbody)
             row["vec"] = {"obj": vobj, "hash": vdigest, "bytes": len(vbody)}
             dims.add(len(vectors[0]))
         index_docs.append(row)
 
+    # The index plaintext is identical in both modes (so a flip leaves index.hash unchanged); sealed
+    # encrypts it, open stores it raw — it is the one file a keyless reader must be able to read.
     index_raw = canonical({"format_version": FORMAT_VERSION, "vault_id": vault_id, "seq": seq,
                            "name": name, "description": description, "docs": index_docs})
-    entries[_INDEX] = aes.encrypt(
-        _nonce(k_nonce, b"index", vault_id, hashlib.sha256(index_raw).hexdigest()), index_raw,
-        b"sbvault:index:v1|" + vault_id.encode(),
-    )
+    entries[_INDEX] = (
+        aes.encrypt(_nonce(k_nonce, b"index", vault_id, hashlib.sha256(index_raw).hexdigest()),
+                    index_raw, b"sbvault:index:v1|" + vault_id.encode())
+        if mode == SEALED else index_raw)
 
     payload = {
         "format": FORMAT,
@@ -323,7 +345,7 @@ def pack(
         "requires": [],
         "vault_id": vault_id,
         "seq": seq,
-        "mode": SEALED,
+        "mode": mode,
         "publisher": {
             "alg": "ed25519",
             "pubkey": identity.public_key_b64(store, identity.VAULT_PUBLISHER_SECRET),
@@ -331,15 +353,23 @@ def pack(
         },
         "doc_count": len(index_docs),
         "index": {"hash": hashlib.sha256(index_raw).hexdigest(), "bytes": len(index_raw)},
-        # A sealed manifest carries NO name/description: a host storing your private vault should
-        # learn its size and your public key, not its topic.
-        "crypto": {"alg": "AES-256-GCM", "kdf": "hkdf-sha256", "key_epoch": 1,
-                   "key_wraps": [{"type": "direct"}]},
         "embeddings": ({"model": embed_model, "dim": sorted(dims)[0],
                         "chunking": {"scheme": "sb-chunk-v1", "chunk_chars": 4000,
                                      "max_chunks": MAX_CHUNKS, "title_prefix": True}}
                        if dims and embed_model else None),
     }
+    if mode == SEALED:
+        # A sealed manifest carries NO name/description: a host storing your private vault should
+        # learn its size and your public key, not its topic. The crypto block holds only wrap params.
+        payload["crypto"] = {"alg": "AES-256-GCM", "kdf": "hkdf-sha256", "key_epoch": 1,
+                             "key_wraps": [{"type": "direct"}]}
+    else:
+        # Open == "there is no Vault Key": the topic is public anyway, and K_name is published so
+        # anyone can recompute (and thus verify) every object name.
+        payload["name"] = name
+        payload["description"] = description
+        payload["name_key"] = base64.b64encode(name_key).decode("ascii")
+
     manifest_raw = canonical(payload)
     sig = identity.sign(store, _SIG_PREFIX + manifest_raw, identity.VAULT_PUBLISHER_SECRET)
     entries[_MANIFEST] = canonical({"sbvault": payload, "sig": {"alg": "ed25519", "value": sig}})
@@ -377,7 +407,10 @@ def _entry(zf: zipfile.ZipFile, name: str, limit: int) -> bytes:
 
 def read_manifest(data: bytes) -> dict:
     """Verify the container shape and the publisher SIGNATURE. No key needed — this is what a
-    recipient can check before deciding whether to trust the publisher at all."""
+    recipient can check before deciding whether to trust the publisher at all.
+
+    The signature is checked in BOTH modes; the ``mode`` field (itself signed) then selects which
+    mode-specific fields must be present and, just as strictly, which must be ABSENT."""
     if len(data) > MAX_VAULT_BYTES:
         raise VaultError("that vault file is too large")
     try:
@@ -407,32 +440,70 @@ def read_manifest(data: bytes) -> dict:
     pubkey = (payload.get("publisher") or {}).get("pubkey")
     if not isinstance(pubkey, str) or not identity.verify(pubkey, _SIG_PREFIX + canonical(payload), sig["value"]):
         raise VaultError("this vault's signature is invalid — it may have been tampered with")
-    if payload.get("mode") != SEALED:
-        raise VaultError("only sealed vaults can be opened by this version")
+    mode = payload.get("mode")
+    if mode == SEALED:
+        # Sealed carries the wrap params and, by the §2 metadata rule, no topic: a host storing your
+        # private vault must learn its size and your key, never its name.
+        if not isinstance(payload.get("crypto"), dict):
+            raise VaultError("this sealed vault is missing its encryption parameters")
+        if any(k in payload for k in ("name", "description", "name_key")):
+            raise VaultError("a sealed vault must not carry its name in the plaintext manifest")
+    elif mode == OPEN:
+        # Open == no Vault Key: the topic is public and K_name is published so anyone can recompute
+        # every object name. There is nothing to encrypt, so a crypto block here is a contradiction —
+        # refuse rather than guess which half of a mode-confused file to believe.
+        if "crypto" in payload:
+            raise VaultError("an open vault must not carry encryption parameters")
+        name_key = payload.get("name_key")
+        if not isinstance(name_key, str):
+            raise VaultError("this open vault is missing its object-naming key")
+        try:
+            raw_name_key = base64.b64decode(name_key, validate=True)
+        except Exception:
+            raise VaultError("this open vault's object-naming key is not valid base64") from None
+        if len(raw_name_key) != 32:
+            raise VaultError("this open vault's object-naming key is the wrong length")
+    else:
+        raise VaultError("this vault uses a mode this version doesn't understand")
     return payload
 
 
-def open_vault(data: bytes, vault_key: bytes) -> tuple[dict, list[dict]]:
-    """Verify, decrypt, and validate a vault. Returns (manifest payload, documents).
+def open_vault(data: bytes, vault_key: bytes | None = None) -> tuple[dict, list[dict]]:
+    """Verify and validate a vault, decrypting it in sealed mode. Returns (manifest payload, docs).
 
-    Every document is checked against a hash that the signature transitively commits to, so a host
-    that swapped an object cannot go unnoticed.
+    Every document is checked against a hash the signature transitively commits to, so a host that
+    swapped, renamed, injected, or removed an object cannot go unnoticed — in BOTH modes. Open mode
+    only drops the AES-GCM layer: the hash chain (manifest sig -> index hash -> per-doc hash) plus the
+    object-name recomputation still catch tampering with no key at all. ``vault_key`` is therefore
+    required for sealed and ignored for open.
     """
     payload = read_manifest(data)
+    mode = payload["mode"]
     vault_id = payload["vault_id"]
-    cek = _derive(vault_key, vault_id, b"sbvault/v1/content")
-    aes = AESGCM(cek)
     zf = zipfile.ZipFile(io.BytesIO(data))
 
+    if mode == SEALED:
+        if vault_key is None:
+            raise VaultError("this vault is sealed — it needs a key to open")
+        cek = _derive(vault_key, vault_id, b"sbvault/v1/content")
+        aes = AESGCM(cek)
+        k_name = _derive(vault_key, vault_id, b"sbvault/v1/objname")
+        k_nonce = _derive(vault_key, vault_id, b"sbvault/v1/nonce")
+    else:  # OPEN — no key; K_name is published in the manifest (base64-validated by read_manifest).
+        aes = k_nonce = None
+        k_name = base64.b64decode(payload["name_key"])
+
     index_ct = _entry(zf, _INDEX, MAX_INDEX_BYTES)
-    k_nonce = _derive(vault_key, vault_id, b"sbvault/v1/nonce")
-    try:
-        index_raw = aes.decrypt(
-            _nonce(k_nonce, b"index", vault_id, payload["index"]["hash"]), index_ct,
-            b"sbvault:index:v1|" + vault_id.encode(),
-        )
-    except Exception:
-        raise VaultError("that key doesn't open this vault") from None
+    if mode == SEALED:
+        try:
+            index_raw = aes.decrypt(
+                _nonce(k_nonce, b"index", vault_id, payload["index"]["hash"]), index_ct,
+                b"sbvault:index:v1|" + vault_id.encode(),
+            )
+        except Exception:
+            raise VaultError("that key doesn't open this vault") from None
+    else:
+        index_raw = index_ct  # raw canonical JSON; a mode-confused ciphertext fails parse_canonical below
     if hashlib.sha256(index_raw).hexdigest() != payload["index"]["hash"]:
         raise VaultError("vault index does not match its signed hash")
     index = parse_canonical(index_raw)
@@ -443,31 +514,46 @@ def open_vault(data: bytes, vault_key: bytes) -> tuple[dict, list[dict]]:
     if not isinstance(rows, list) or len(rows) > MAX_VAULT_DOCS or len(rows) != payload["doc_count"]:
         raise VaultError("vault index is malformed")
 
-    # Surface the vault's real name/description — they live ONLY in the encrypted index (the sealed
-    # manifest deliberately carries no topic), and the index hash is signed, so these are as trusted
-    # as the documents. Namespaced under "_sealed" so they can't be confused with plaintext fields.
-    name = index.get("name")
-    description = index.get("description")
+    # Surface the vault's real name/description. In sealed mode they live ONLY in the encrypted index
+    # (the manifest carries no topic); in open mode they ride the plaintext manifest. Either source is
+    # signed, so both are as trusted as the documents. Namespaced under "_sealed" so the importer
+    # reads them the same way regardless of mode.
+    src = payload if mode == OPEN else index
+    name, description = src.get("name"), src.get("description")
     payload["_sealed"] = {
         "name": name[:MAX_TITLE] if isinstance(name, str) else "",
         "description": description[:MAX_TITLE] if isinstance(description, str) else "",
     }
 
     docs: list[dict] = []
+    seen_uids: set[str] = set()
+    referenced: set[str] = set()
     for row in rows:  # bounded by MAX_VAULT_DOCS
         uid, digest, obj = row.get("uid"), row.get("hash"), row.get("obj")
         if not (isinstance(uid, str) and isinstance(digest, str) and isinstance(obj, str)):
             raise VaultError("vault index entry is malformed")
-        try:
-            body = aes.decrypt(
-                _nonce(k_nonce, b"doc", uid, digest),
-                _entry(zf, f"objects/{obj}.bin", MAX_DOC_OBJECT_BYTES),
-                b"sbvault:doc:v1|" + vault_id.encode() + b"|" + uid.encode(),
-            )
-        except VaultError:
-            raise
-        except Exception:  # tampered ciphertext / wrong key -> a clean 400, never a raw InvalidTag
-            raise VaultError("a vault document failed its integrity check — it may have been tampered with") from None
+        # A uid IS the update key (§3), so two rows sharing one would double-import and make a later
+        # update ambiguous. Refuse rather than silently pick one — this also hardens sealed mode.
+        if uid in seen_uids:
+            raise VaultError("vault index names the same document twice")
+        seen_uids.add(uid)
+        # Recompute the object name from K_name and refuse a mismatch. In open mode the body is
+        # plaintext, so this — not GCM — is what stops a hostile file from parking a well-formed but
+        # wrong object under a legitimate name; in sealed mode it is a cheap extra guard.
+        if _obj_name(k_name, b"doc", uid, digest) != obj:
+            raise VaultError("a vault object is misnamed")
+        referenced.add(f"objects/{obj}.bin")
+        raw_obj = _entry(zf, f"objects/{obj}.bin", MAX_DOC_OBJECT_BYTES)
+        if mode == SEALED:
+            try:
+                body = aes.decrypt(
+                    _nonce(k_nonce, b"doc", uid, digest), raw_obj,
+                    b"sbvault:doc:v1|" + vault_id.encode() + b"|" + uid.encode(),
+                )
+            except Exception:  # tampered ciphertext / wrong key -> a clean 400, never a raw InvalidTag
+                raise VaultError("a vault document failed its integrity check — it may have been tampered with") from None
+        else:
+            body = raw_obj
         if hashlib.sha256(body).hexdigest() != digest:
             raise VaultError("a vault document does not match its signed hash")
         doc_obj = parse_canonical(body)
@@ -478,18 +564,29 @@ def open_vault(data: bytes, vault_key: bytes) -> tuple[dict, list[dict]]:
                "content": content, "meta": _clean_meta(doc_obj.get("meta"))}
         vec = row.get("vec")
         if isinstance(vec, dict) and isinstance(vec.get("obj"), str):
-            try:
-                vbody = aes.decrypt(
-                    _nonce(k_nonce, b"vec", uid, vec["hash"]),
-                    _entry(zf, f"objects/{vec['obj']}.bin", MAX_VEC_OBJECT_BYTES),
-                    b"sbvault:vec:v1|" + vault_id.encode() + b"|" + uid.encode(),
-                )
-            except VaultError:
-                raise
-            except Exception:
-                raise VaultError("a vault's vectors failed their integrity check") from None
-            if hashlib.sha256(vbody).hexdigest() != vec["hash"]:
+            vobj, vhash = vec["obj"], vec.get("hash")
+            if not isinstance(vhash, str) or _obj_name(k_name, b"vec", uid, vhash) != vobj:
+                raise VaultError("a vault's vectors are misnamed")
+            referenced.add(f"objects/{vobj}.bin")
+            raw_vec = _entry(zf, f"objects/{vobj}.bin", MAX_VEC_OBJECT_BYTES)
+            if mode == SEALED:
+                try:
+                    vbody = aes.decrypt(
+                        _nonce(k_nonce, b"vec", uid, vhash), raw_vec,
+                        b"sbvault:vec:v1|" + vault_id.encode() + b"|" + uid.encode(),
+                    )
+                except Exception:
+                    raise VaultError("a vault's vectors failed their integrity check") from None
+            else:
+                vbody = raw_vec
+            if hashlib.sha256(vbody).hexdigest() != vhash:
                 raise VaultError("a vault's vectors do not match their signed hash")
             out["vectors"] = _read_vec_object(vbody)
         docs.append(out)
+
+    # Every objects/* entry must be referenced by the index (§1): an unreferenced object is either a
+    # smuggling channel or a sign the file was rebuilt by something that should not have been.
+    stray = {n for n in zf.namelist() if n.startswith("objects/")} - referenced
+    if stray:
+        raise VaultError("vault contains an object its index does not reference")
     return payload, docs
