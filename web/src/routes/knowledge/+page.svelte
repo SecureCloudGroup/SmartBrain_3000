@@ -44,6 +44,7 @@
   let exportPass = $state(""); // re-auth: an export hands out plaintext-equivalent content
   let shownKey = $state(""); // the SBVK1- key, revealed after an export
   let importInput = $state<HTMLInputElement | null>(null);
+  let docsCard = $state<HTMLDivElement | null>(null); // scroll target for "Add documents" on a vault
   let importKey = $state("");
   let vaultBusy = $state("");
 
@@ -337,6 +338,50 @@
     picked = picked.includes(id) ? picked.filter((p) => p !== id) : [...picked, id];
   }
 
+  // "Add documents" on a vault row. The checkboxes live up in the documents list, which is
+  // invisible when you're looking at the vault itself — a real tester got stuck exactly here. Arm
+  // the selection for THIS vault and take the user to where the ticking happens.
+  function startAdding(v: Vault) {
+    addTarget = v.id;
+    picked = [];
+    docsCard?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  // Which vault's member list is expanded, and its document ids. A count alone ("2 documents")
+  // tells the user nothing about WHAT they're about to share or search — a real tester was confused
+  // by exactly that, so the count itself opens the list.
+  let openVaultId = $state<string | null>(null);
+  let memberIds = $state<string[]>([]);
+
+  async function toggleMembers(v: Vault) {
+    if (openVaultId === v.id) {
+      openVaultId = null;
+      return;
+    }
+    error = "";
+    try {
+      memberIds = (await api.getVault(v.id)).doc_ids;
+      openVaultId = v.id;
+    } catch (err) {
+      error = describeError(err);
+    }
+  }
+
+  function titleOf(id: string): string {
+    return docs.find((d) => d.id === id)?.title ?? "(deleted document)";
+  }
+
+  async function removeFromVault(v: Vault, docId: string) {
+    error = "";
+    try {
+      await api.removeFromVault(v.id, docId);
+      memberIds = memberIds.filter((x) => x !== docId);
+      await loadVaults(); // the count on the row just changed
+    } catch (err) {
+      error = describeError(err);
+    }
+  }
+
   async function addToVault() {
     console.assert(picked.length > 0, "addToVault: nothing selected");
     if (!addTarget || picked.length === 0) return;
@@ -349,6 +394,7 @@
       // Adding a document twice is a no-op, so say what actually landed rather than what was clicked.
       notice = `Added ${r.added} of ${picked.length} to “${name}” — it now holds ${r.doc_count}.`;
       picked = [];
+      addTarget = "";
       await loadVaults();
     } catch (err) {
       error = describeError(err);
@@ -652,7 +698,7 @@
     </div>
   {/if}
 
-  <div class="card">
+  <div class="card" bind:this={docsCard}>
     <h2 class="row">
       <span>All documents <span class="muted" style="font-weight:400">· {docs.length}</span></span>
       <span class="spacer"></span>
@@ -664,10 +710,16 @@
       <p class="muted">No documents yet — drop a file or paste a URL above.</p>
     {/if}
 
-    {#if picked.length > 0}
+    {#if picked.length > 0 || addTarget}
       <!-- The selection only means something in terms of vaults, so the bar that appears offers
-           exactly that: put these in a vault. -->
+           exactly that: put these in a vault. It also shows while a vault's "Add documents" is
+           armed but nothing is ticked yet — that state must TELL the user what to do next. -->
       <div class="pickbar">
+        {#if picked.length === 0}
+          <strong>Tick documents below to add them to “{vaults.find((v) => v.id === addTarget)?.name}”</strong>
+          <span class="spacer"></span>
+          <button class="secondary" onclick={() => (addTarget = "")}>Cancel</button>
+        {:else}
         <strong>{picked.length} selected</strong>
         {#if vaults.length > 0}
           <select bind:value={addTarget} aria-label="Vault to add to">
@@ -683,7 +735,8 @@
           <span class="muted">Name a vault below to create one with these.</span>
         {/if}
         <span class="spacer"></span>
-        <button class="secondary" onclick={() => (picked = [])}>Clear</button>
+        <button class="secondary" onclick={() => { picked = []; addTarget = ""; }}>Clear</button>
+        {/if}
       </div>
     {/if}
 
@@ -730,8 +783,11 @@
         <div class="vrow">
           <strong>{v.name}</strong>
           {#if v.kind === "imported"}<span class="badge">Imported</span>{/if}
-          <span class="muted">{v.doc_count} document{v.doc_count === 1 ? "" : "s"}</span>
+          <button class="linklike" onclick={() => toggleMembers(v)} aria-expanded={openVaultId === v.id}>
+            {v.doc_count} document{v.doc_count === 1 ? "" : "s"} {openVaultId === v.id ? "▾" : "▸"}
+          </button>
           <span class="spacer"></span>
+          <button class="secondary" onclick={() => startAdding(v)}>Add documents</button>
           <button class="secondary" onclick={() => (scope = v.id)} disabled={scope === v.id}>
             {scope === v.id ? "Searching this" : "Search this"}
           </button>
@@ -748,6 +804,25 @@
           <button class="secondary" disabled={vaultBusy === v.id} onclick={() => removeVault(v)}>Delete</button>
         </div>
         {#if v.description}<p class="muted vdesc">{v.description}</p>{/if}
+
+        {#if openVaultId === v.id}
+          <!-- The vault's contents: what you'd be sharing or searching. Removing takes the document
+               out of the GROUPING only — the document itself stays in your knowledge. -->
+          <ul class="vmembers">
+            {#each memberIds as id (id)}
+              <li>
+                <button class="linklike" onclick={() => open(id)}>{titleOf(id)}</button>
+                <button
+                  class="secondary vremove"
+                  title="Remove from this vault (the document itself is kept)"
+                  onclick={() => removeFromVault(v, id)}
+                >Remove</button>
+              </li>
+            {:else}
+              <li class="muted">No documents yet — click “Add documents”.</li>
+            {/each}
+          </ul>
+        {/if}
 
         {#if exportId === v.id}
           <div class="share">
@@ -859,6 +934,23 @@
   .vdesc {
     margin: 0.35rem 0 0;
     font-size: 0.85rem;
+  }
+
+  /* The expanded "what's inside" list — compact, one document per row. */
+  .vmembers {
+    margin: 0.5rem 0 0;
+    padding-left: 1.1rem;
+    font-size: 0.9rem;
+  }
+  .vmembers li {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin-top: 0.25rem;
+  }
+  .vremove {
+    padding: 0 0.45rem;
+    font-size: 0.75rem;
   }
 
   /* "Imported" — this vault came from someone else, so it can be replaced by an update from them. */
