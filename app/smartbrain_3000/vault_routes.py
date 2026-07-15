@@ -174,10 +174,13 @@ def export_vault(request: Request, vault_id: str, body: ExportIn) -> Response:
     key = vault_format.new_vault_key()
     vaults.remember_key(vault_id, key)  # so the user can re-show it without re-exporting
     try:
+        # No `label`: the publisher label sits in the PLAINTEXT manifest, and a vault's name ("Divorce
+        # filings", "Acme acquisition") can reveal as much as its contents. The real name travels in
+        # the ENCRYPTED index (pack's `name=`) and the importer restores it from there.
         blob = vault_format.pack(
             store=secrets, vault_id=vault_id, name=vault["name"],
             description=vault["description"], seq=seq, docs=docs, vault_key=key,
-            embed_model=embed_model, label=vault["name"],
+            embed_model=embed_model,
         )
     except vault_format.VaultError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from None
@@ -223,8 +226,11 @@ async def import_vault(request: Request, key: str) -> dict:
         raise HTTPException(status_code=400, detail=str(exc)) from None
 
     publisher = manifest["publisher"]
+    # The vault's real name comes from the ENCRYPTED index (surfaced by open_vault as _sealed) — the
+    # plaintext manifest deliberately carries no topic, so a host never learns what a vault is about.
+    sealed = manifest.get("_sealed") or {}
     local_id = vaults.create(
-        (manifest.get("label") or "Imported vault")[:200],
+        (sealed.get("name") or "Imported vault")[:200],
         f"Imported vault · publisher {vault_format.fingerprint(publisher['pubkey'])}",
         kind=IMPORTED,
         source={"vault_id": manifest["vault_id"], "publisher_pubkey": publisher["pubkey"],
