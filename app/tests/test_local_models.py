@@ -35,6 +35,9 @@ def test_register_ollama_payload() -> None:
             "base_url": "http://host.docker.internal:11434",
             # generous per-provider timeout so a cold local-model load isn't cut at bifrost's 30s default
             "default_request_timeout_in_seconds": 300,
+            # REQUIRED on bifrost >= v1.6.4: its SSRF guard refuses private IPs by default, and
+            # host.docker.internal is one — without this flag every local-provider registration 400s.
+            "allow_private_network": True,
         },
     }
     key = next(b for (m, p, b) in record if p == "/api/providers/ollama/keys")
@@ -50,6 +53,8 @@ def test_register_mlx_payload() -> None:
     assert create["provider"] == "mlx"
     assert create["network_config"]["base_url"] == "http://host.docker.internal:8888"
     assert create["network_config"]["default_request_timeout_in_seconds"] == 300  # cold MLX loads
+    # bifrost >= v1.6.4 SSRF-guards provider URLs; local providers must opt in to private IPs
+    assert create["network_config"]["allow_private_network"] is True
     assert create["custom_provider_config"]["base_provider_type"] == "openai"
     # list_models must be enabled, or Bifrost never enumerates MLX into /v1/models
     # and the models go missing from the chat/routing dropdowns.
