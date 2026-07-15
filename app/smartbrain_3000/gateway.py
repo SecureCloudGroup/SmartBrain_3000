@@ -800,7 +800,11 @@ def register_ollama(url: str, *, client: httpx.Client | None = None) -> None:
     assert url, "ollama url required"
     create_body = {
         "provider": "ollama",
-        "network_config": {"base_url": url, "default_request_timeout_in_seconds": _LOCAL_PROVIDER_TIMEOUT_SECS},
+        # allow_private_network: bifrost >= v1.6.4 SSRF-guards provider URLs and refuses private IPs
+        # by default — but host.docker.internal IS a private IP, and reaching host-local model
+        # servers is this provider's entire job. Scoped per-provider; link-local stays blocked.
+        "network_config": {"base_url": url, "default_request_timeout_in_seconds": _LOCAL_PROVIDER_TIMEOUT_SECS,
+                           "allow_private_network": True},
     }
     key_payload = {
         "name": "smartbrain-ollama",
@@ -823,7 +827,11 @@ def register_mlx(url: str, api_key: str = "", *, client: httpx.Client | None = N
     assert isinstance(api_key, str), "mlx api key must be a string"
     create_body = {
         "provider": "mlx",
-        "network_config": {"base_url": url, "default_request_timeout_in_seconds": _LOCAL_PROVIDER_TIMEOUT_SECS},
+        # allow_private_network: bifrost >= v1.6.4 SSRF-guards provider URLs and refuses private IPs
+        # by default — but host.docker.internal IS a private IP, and reaching host-local model
+        # servers is this provider's entire job. Scoped per-provider; link-local stays blocked.
+        "network_config": {"base_url": url, "default_request_timeout_in_seconds": _LOCAL_PROVIDER_TIMEOUT_SECS,
+                           "allow_private_network": True},
         "custom_provider_config": {
             "base_provider_type": "openai",
             # list_models lets Bifrost enumerate the server's /v1/models into its own
