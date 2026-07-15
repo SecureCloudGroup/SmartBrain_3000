@@ -193,6 +193,50 @@ class VaultStore:
         ).fetchone()
         return str(row[0]) if row else None
 
+    def detach(self, vault_id: str, doc_id: str) -> bool:
+        """Flip one import-origin membership to 'owner' — the user claims this copy as theirs.
+
+        After a detach the document behaves like anything the user authored: rename/delete work
+        again, and a future vault update must skip it instead of replacing it. Only the ONE
+        membership named here flips; the same document's rows in other vaults are untouched.
+        Returns False when there was no import-origin membership to flip (idempotent, like add).
+        """
+        assert vault_id and doc_id, "vault id + doc id required"
+        if self.origin_of(vault_id, doc_id) != IMPORT:
+            return False
+        self._conn.execute(
+            "UPDATE vault_documents SET origin = ? WHERE vault_id = ? AND doc_id = ?;",
+            [OWNER, vault_id, doc_id],
+        )
+        return True
+
+    def import_provenance(self, doc_id: str) -> dict | None:
+        """Where this document CAME FROM, if any of its memberships is import-origin; else None.
+
+        Returns {vault_id, name, publisher_pubkey|None}. This runs on every rename/delete attempt
+        and on every tool read of a document, so it is one bounded indexed lookup plus at most one
+        vault-body decrypt — never a scan.
+        """
+        assert doc_id, "doc id required"
+        # ORDER BY so the SAME vault is named every time a doc sits import-origin in several
+        # vaults — an unordered LIMIT 1 would let the 409 detail / provenance line flip between calls.
+        row = self._conn.execute(
+            "SELECT vault_id FROM vault_documents WHERE doc_id = ? AND origin = ? "
+            "ORDER BY added_at ASC LIMIT 1;",
+            [doc_id, IMPORT],
+        ).fetchone()
+        if row is None:
+            return None
+        vault = self.get(str(row[0]))
+        if vault is None:
+            return None  # membership outlived its vault (delete() clears rows, so only a race)
+        source = vault.get("source") or {}
+        return {
+            "vault_id": vault["id"],
+            "name": vault["name"],
+            "publisher_pubkey": source.get("publisher_pubkey"),
+        }
+
     def remember_key(self, vault_id: str, key: bytes) -> None:
         """Store the Vault Key of a vault we exported, so the user can re-show it to a friend
         without re-exporting (which would mint a NEW key and orphan the file already sent)."""
@@ -240,6 +284,20 @@ class VaultStore:
             [vault_id],
         ).fetchall()
         return [str(r[0]) for r in rows]
+
+    def members(self, vault_id: str) -> list[dict]:
+        """The documents in a vault WITH each membership's origin.
+
+        The UI needs the origin per row to show Detach only on vault-owned (import-origin) members
+        — an owner-origin document has nothing to detach from.
+        """
+        assert vault_id, "vault id required"
+        rows = self._conn.execute(
+            "SELECT doc_id, origin FROM vault_documents WHERE vault_id = ? "
+            f"ORDER BY added_at DESC LIMIT {_MAX_DOCS_PER_VAULT};",
+            [vault_id],
+        ).fetchall()
+        return [{"id": str(r[0]), "origin": str(r[1])} for r in rows]
 
     def count_documents(self, vault_id: str) -> int:
         row = self._conn.execute(

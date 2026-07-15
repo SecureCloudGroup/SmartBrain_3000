@@ -15,7 +15,7 @@ import uuid
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
-from . import gateway, kb as kbmod, vault_format
+from . import gateway, kb as kbmod, tools, vault_format
 from .data_routes import _reauthorize, _require_desktop_local
 from .vaults import IMPORTED
 
@@ -77,10 +77,15 @@ def create_vault(request: Request, body: VaultIn) -> dict:
 
 @router.get("/api/vaults/{vault_id}")
 def get_vault(request: Request, vault_id: str) -> dict:
-    """One vault, plus the ids of the documents in it."""
+    """One vault, plus the documents in it (with each membership's origin).
+
+    ``members`` carries {id, origin} so the UI can offer Detach only on vault-owned
+    (import-origin) rows; ``doc_ids`` stays for existing callers.
+    """
     store = _vaults(request)
     vault = _require(store, vault_id)
-    return {**vault, "doc_ids": store.document_ids(vault_id)}
+    members = store.members(vault_id)
+    return {**vault, "doc_ids": [m["id"] for m in members], "members": members}
 
 
 @router.patch("/api/vaults/{vault_id}")
@@ -119,6 +124,23 @@ def remove_document(request: Request, vault_id: str, doc_id: str) -> dict:
     _require(store, vault_id)
     store.remove_documents(vault_id, [doc_id])
     return {"ok": True, "doc_count": store.count_documents(vault_id)}
+
+
+@router.post("/api/vaults/{vault_id}/documents/{doc_id}/detach")
+def detach_document(request: Request, vault_id: str, doc_id: str) -> dict:
+    """Make an imported copy the user's own: flip this membership's origin to 'owner'.
+
+    A vault-owned (import-origin) document is read-only and a vault update may replace it.
+    Detaching is the user saying "this copy is mine now" — rename/delete work again and any
+    future update from the publisher skips it. Idempotent on an already-owner membership,
+    matching add_documents' no-op philosophy.
+    """
+    store = _vaults(request)
+    _require(store, vault_id)
+    if store.origin_of(vault_id, doc_id) is None:
+        raise HTTPException(status_code=404, detail="document is not in this vault")
+    store.detach(vault_id, doc_id)
+    return {"ok": True, "origin": "owner"}
 
 
 # --- export / import ----------------------------------------------------------------------------
@@ -206,6 +228,20 @@ def vault_key(request: Request, vault_id: str, body: ExportIn) -> dict:
     return {"key": vault_format.encode_vault_key(key)}
 
 
+def _audit_import(request: Request, name: str, fp: str, seq: int, added: int, duplicates: int) -> None:
+    """Audit one vault import — INGRESS of someone else's content into the knowledge base.
+
+    As security-relevant as any tool action, so it gets a row: what arrived (name), who signed it
+    (fingerprint — the identity a human is asked to trust), and how much landed. Same
+    user-initiated pattern as email_routes' send: the click is the consent, the row is the record.
+    """
+    request.app.state.audit.append(
+        "user", "vault_import", "reviewed", "executed", True,
+        args_summary=tools.summarize({"vault": name, "publisher": fp, "seq": seq}),
+        result_summary=tools.summarize({"added": added, "duplicates": duplicates}),
+    )
+
+
 @router.post("/api/vaults/import")
 async def import_vault(request: Request, key: str) -> dict:
     """Import a .sbvault (raw body) with its SBVK1- key. Verifies, decrypts, and RE-SEALS locally.
@@ -266,10 +302,13 @@ async def import_vault(request: Request, key: str) -> dict:
     knowledge.reset_index()
 
     log.info("imported vault %s: %d added, %d already present", manifest["vault_id"], added, duplicates)
+    imported_name = vaults.get(local_id)["name"]
+    fp = vault_format.fingerprint(publisher["pubkey"])
+    _audit_import(request, imported_name, fp, manifest["seq"], added, duplicates)
     return {
         "id": local_id,
-        "name": vaults.get(local_id)["name"],
-        "publisher": vault_format.fingerprint(publisher["pubkey"]),
+        "name": imported_name,
+        "publisher": fp,
         "added": added,
         "duplicates": duplicates,
         "vectors_used": bool(shipped.get("model") == embed_model),

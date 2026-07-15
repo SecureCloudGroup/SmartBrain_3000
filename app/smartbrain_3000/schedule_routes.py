@@ -115,6 +115,7 @@ def run_now(request: Request, sid: str) -> dict:
     ctx = tools.ToolContext(
         kb=state.kb, planner=state.planner, memory=state.memory,
         email=getattr(state, "email", None), schedules=store,
+        vaults=getattr(state, "vaults", None),  # so KB tools can tag imported-vault content
     )
     return scheduler.run_schedule(ctx, state.audit, state.approvals, store, schedule)
 

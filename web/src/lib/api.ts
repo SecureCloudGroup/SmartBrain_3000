@@ -296,6 +296,13 @@ export interface Vault {
   updated_at: string;
 }
 
+// One document's membership in a vault. `origin` says who owns the COPY: "import" = it came with
+// the vault (read-only; a vault update may replace it — Detach to claim it), "owner" = the user's.
+export interface VaultMember {
+  id: string;
+  origin: "owner" | "import";
+}
+
 export interface VaultImportResult {
   id: string;
   name: string;
@@ -604,13 +611,23 @@ export const api = {
     req<Vault>("/api/vaults", { method: "POST", body: JSON.stringify({ name, description }) }),
   deleteVault: (id: string) =>
     req<{ ok: boolean }>(`/api/vaults/${encodeURIComponent(id)}`, { method: "DELETE" }),
-  // One vault plus WHICH documents are in it — the list view only carries a count.
+  // One vault plus WHICH documents are in it — the list view only carries a count. `members`
+  // carries each membership's origin so the UI shows Detach only on imported rows.
   getVault: (id: string) =>
-    req<Vault & { doc_ids: string[] }>(`/api/vaults/${encodeURIComponent(id)}`),
+    req<Vault & { doc_ids: string[]; members: VaultMember[] }>(
+      `/api/vaults/${encodeURIComponent(id)}`,
+    ),
   removeFromVault: (id: string, docId: string) =>
     req<{ ok: boolean; doc_count: number }>(
       `/api/vaults/${encodeURIComponent(id)}/documents/${encodeURIComponent(docId)}`,
       { method: "DELETE" },
+    ),
+  // Make an imported copy the user's own: rename/delete work again, and a future update from the
+  // vault's publisher will skip it instead of replacing it.
+  detachFromVault: (id: string, docId: string) =>
+    req<{ ok: boolean; origin: string }>(
+      `/api/vaults/${encodeURIComponent(id)}/documents/${encodeURIComponent(docId)}/detach`,
+      { method: "POST" },
     ),
   addToVault: (id: string, doc_ids: string[]) =>
     req<{ added: number; doc_count: number }>(`/api/vaults/${encodeURIComponent(id)}/documents`, {

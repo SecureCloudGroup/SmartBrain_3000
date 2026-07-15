@@ -120,6 +120,47 @@ def test_bump_version_is_monotonic() -> None:
     assert vs.bump_version(vid) == 3
 
 
+# --- imported-document protections (C0: must predate any update path) ---------------------------
+
+def test_detach_flips_only_the_named_membership() -> None:
+    # The same document imported via two vaults: detaching from one must not claim the other.
+    kb, vs = _stores()
+    doc = kb.add("Doc", "body")
+    a = vs.create("Pack A", kind=IMPORTED)
+    b = vs.create("Pack B", kind=IMPORTED)
+    vs.add_documents(a, [doc], origin="import")
+    vs.add_documents(b, [doc], origin="import")
+
+    assert vs.detach(a, doc) is True
+    assert vs.origin_of(a, doc) == "owner"
+    assert vs.origin_of(b, doc) == "import", "the other vault's membership must be untouched"
+    assert vs.detach(a, doc) is False, "already owner — nothing left to flip"
+
+
+def test_import_provenance_names_the_vault_and_publisher() -> None:
+    kb, vs = _stores()
+    imported_doc = kb.add("Theirs", "someone else's words")
+    own_doc = kb.add("Mine", "my own words")
+    vid = vs.create("Expert pack", kind=IMPORTED, source={"publisher_pubkey": "cHVia2V5"})
+    vs.add_documents(vid, [imported_doc], origin="import")
+    vs.add_documents(vid, [own_doc], origin="owner")
+
+    info = vs.import_provenance(imported_doc)
+    assert info["name"] == "Expert pack" and info["publisher_pubkey"] == "cHVia2V5"
+    assert vs.import_provenance(own_doc) is None, "an owner-origin membership never blocks or tags"
+    assert vs.import_provenance("no-such-doc") is None
+
+
+def test_members_reports_each_documents_origin() -> None:
+    kb, vs = _stores()
+    theirs, mine = kb.add("Theirs", "a"), kb.add("Mine", "b")
+    vid = vs.create("Pack", kind=IMPORTED)
+    vs.add_documents(vid, [theirs], origin="import")
+    vs.add_documents(vid, [mine], origin="owner")
+    by_id = {m["id"]: m["origin"] for m in vs.members(vid)}
+    assert by_id == {theirs: "import", mine: "owner"}
+
+
 # --- scoped search -----------------------------------------------------------------------------
 
 def test_search_scoped_to_a_vault_ignores_documents_outside_it() -> None:
@@ -220,3 +261,20 @@ def test_deleting_a_document_removes_it_from_its_vaults(client: TestClient) -> N
     client.post(f"/api/vaults/{vid}/documents", json={"doc_ids": [doc]})
     client.delete(f"/api/kb/{doc}")
     assert client.get(f"/api/vaults/{vid}").json()["doc_count"] == 0, "no ghost members"
+
+
+def test_vault_members_carry_origin_via_api(client: TestClient) -> None:
+    # The UI shows Detach only on import-origin rows, so the listing must say which is which.
+    doc = client.post("/api/kb", json={"title": "Doc", "content": "body"}).json()["id"]
+    vid = client.post("/api/vaults", json={"name": "V"}).json()["id"]
+    client.post(f"/api/vaults/{vid}/documents", json={"doc_ids": [doc]})
+    got = client.get(f"/api/vaults/{vid}").json()
+    assert got["members"] == [{"id": doc, "origin": "owner"}]
+    assert got["doc_ids"] == [doc], "doc_ids stays for existing callers"
+
+
+def test_detach_of_a_document_not_in_the_vault_is_404(client: TestClient) -> None:
+    doc = client.post("/api/kb", json={"title": "Doc", "content": "body"}).json()["id"]
+    vid = client.post("/api/vaults", json={"name": "V"}).json()["id"]
+    r = client.post(f"/api/vaults/{vid}/documents/{doc}/detach")
+    assert r.status_code == 404
