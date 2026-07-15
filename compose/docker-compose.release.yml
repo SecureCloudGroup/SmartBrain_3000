@@ -52,7 +52,9 @@ services:
       start_period: 10s
 
   bifrost:
-    image: maximhq/bifrost:latest
+    # Mirrored + PINNED (see .github/workflows/mirror-bifrost.yml): one registry for the whole
+    # install (Docker Hub rate-limits anonymous pulls), and :latest changed behavior under us once.
+    image: ghcr.io/securecloudgroup/bifrost:v1.6.4
     container_name: smartbrain_bifrost
     restart: unless-stopped
     # Loopback-only and OPTIONAL — only lets an advanced user open the Bifrost admin UI at
