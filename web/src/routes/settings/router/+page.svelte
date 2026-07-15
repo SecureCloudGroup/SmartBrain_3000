@@ -128,6 +128,8 @@
     {/each}
     <p style="margin-top:1rem">
       <button disabled={busy} onclick={save}>{busy ? "Saving…" : "Save routing"}</button>
+      <!-- Inline so the confirmation lands where the user is looking (was page-bottom, off-screen). -->
+      {#if notice}<span class="muted" style="margin-left:0.75rem">{notice}</span>{/if}
     </p>
   </div>
 
@@ -155,11 +157,10 @@
       {/each}
       <p style="margin-top:1rem">
         <button disabled={ctxBusy} onclick={saveContextLengths}>{ctxBusy ? "Saving…" : "Save context lengths"}</button>
+        {#if ctxNotice}<span class="muted" style="margin-left:0.75rem">{ctxNotice}</span>{/if}
       </p>
     {/if}
   </div>
 {/if}
 
-{#if notice}<p class="muted">{notice}</p>{/if}
-{#if ctxNotice}<p class="muted">{ctxNotice}</p>{/if}
 {#if error}<p class="error">{error}</p>{/if}
