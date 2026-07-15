@@ -43,6 +43,10 @@
   let exportId = $state<string | null>(null); // the vault whose export row is open
   let exportPass = $state(""); // re-auth: an export hands out plaintext-equivalent content
   let shownKey = $state(""); // the SBVK1- key, revealed after an export
+  // Panel-local errors: "incorrect passphrase" must appear NEXT TO the passphrase field, not at the
+  // bottom of a long page (a live tester read it as a broken page, not a wrong password).
+  let shareError = $state("");
+  let importError = $state("");
   let importInput = $state<HTMLInputElement | null>(null);
   let docsCard = $state<HTMLDivElement | null>(null); // scroll target for "Add documents" on a vault
   let importKey = $state("");
@@ -466,7 +470,7 @@
   async function exportVault(v: Vault) {
     if (!exportPass) return;
     vaultBusy = v.id;
-    error = "";
+    shareError = "";
     notice = "";
     shownKey = "";
     try {
@@ -476,7 +480,7 @@
       exportPass = "";
       await loadVaults();
     } catch (err) {
-      error = describeError(err);
+      shareError = describeError(err);
     } finally {
       vaultBusy = "";
     }
@@ -486,7 +490,7 @@
     const file = importInput?.files?.[0];
     if (!file || !importKey.trim()) return;
     vaultBusy = "import";
-    error = "";
+    importError = "";
     notice = "";
     try {
       const r = await api.importVault(file, importKey.trim());
@@ -502,7 +506,7 @@
       await Promise.all([loadDocs(), loadVaults()]);
       refreshIndexStatus();
     } catch (err) {
-      error = describeError(err);
+      importError = describeError(err);
     } finally {
       vaultBusy = "";
     }
@@ -798,6 +802,7 @@
                 exportId = exportId === v.id ? null : v.id;
                 exportPass = "";
                 shownKey = "";
+                shareError = "";
               }}
             >Share…</button>
           {/if}
@@ -831,19 +836,25 @@
               travel <strong>separately</strong> — together they are the contents in the clear. Send the
               file however you like, then read the key out over a different channel.
             </p>
+            <label for="share-pass-{v.id}" style="display:block; margin-bottom:0.25rem; font-size:0.85rem">
+              Confirm it's you — enter your <strong>SmartBrain passphrase</strong> (exporting hands
+              out everything in this vault):
+            </label>
             <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap">
               <input
+                id="share-pass-{v.id}"
                 type="password"
                 style="flex:1; min-width:10rem"
                 bind:value={exportPass}
                 placeholder="Your passphrase"
-                aria-label="Your passphrase"
                 autocomplete="current-password"
+                onkeydown={(e) => e.key === "Enter" && exportPass && exportVault(v)}
               />
               <button disabled={vaultBusy === v.id || !exportPass} onclick={() => exportVault(v)}>
                 {vaultBusy === v.id ? "Sealing…" : "Export"}
               </button>
             </div>
+            {#if shareError}<p class="error" style="margin:0.4rem 0 0">{shareError}</p>{/if}
             {#if shownKey}
               <p style="margin:0.75rem 0 0.25rem; font-size:0.9rem">
                 <strong>Vault key.</strong> Send this to them <em>separately</em> from the file:
@@ -895,6 +906,7 @@
             {vaultBusy === "import" ? "Importing…" : "Import"}
           </button>
         </div>
+        {#if importError}<p class="error" style="margin:0.4rem 0 0">{importError}</p>{/if}
       </details>
     {/if}
   </div>
