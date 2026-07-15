@@ -197,6 +197,7 @@ jobs:
         if: env.PACKAGES_TOKEN != ''
         # Non-fatal: until v0.4.0 is merged into winget-pkgs, komac has no prior version to base an
         # update on and this errors — that must NOT fail the release or block the tap/bucket/packaging steps.
+        # TODO: drop continue-on-error once v0.4.0 is live in winget, so a real regression can't hide here.
         continue-on-error: true
         uses: vedantmgoyal9/winget-releaser@v2
         with:

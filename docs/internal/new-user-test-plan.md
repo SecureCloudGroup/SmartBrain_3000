@@ -153,9 +153,10 @@ docker compose -f compose/docker-compose.yml down          # removes the contain
 docker rmi smartbrain_3000:dev 2>/dev/null                 # the locally-built image
 docker rmi ghcr.io/securecloudgroup/smartbrain_3000:latest 2>/dev/null  # any pulled release image
 
-# 2. Remove the data (BOTH possible locations)
+# 2. Remove the data (ALL possible locations)
 rm -rf ./data                                              # dev/compose data (bind mount)
-rm -rf ~/Library/Application\ Support/SmartBrain           # launcher / installed-app data
+rm -rf ~/Library/Application\ Support/SmartBrain           # launcher config dir
+docker volume ls -q | grep -i -E "smartbrain|bifrost" | xargs docker volume rm 2>/dev/null  # release-stack data (named volumes)
 
 # 3. If you installed via Homebrew, remove that too
 brew uninstall --cask smartbrain 2>/dev/null

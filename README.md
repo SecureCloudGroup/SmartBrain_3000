@@ -96,7 +96,7 @@ from install to fully working; the rest are optional power-ups:
 - **Release compose / launcher:** it pulls the latest image on start, so updating is just a **restart** (the launcher's **Restart**, or re-run the compose command).
 - **From source:** `python3 installer/install.py update` backs up your encrypted data first, then rebuilds, restarts, and verifies — prompting before changes, on the host, never inside the container.
 
-Your data lives in a folder on your machine and is left untouched by an update.
+Your data is kept in Docker volumes on your machine and is left untouched by an update.
 
 ## Going further (optional)
 

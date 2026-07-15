@@ -4,7 +4,7 @@ Everything here runs locally and is encrypted at rest. Here's what each area doe
 
 The **Desktop** is the main surface and shows everything below. On a **paired phone**
 ([Remote access](07-remote-access.md)) you get a trimmed set for use on the go — Chat,
-Knowledge, Planner, Email, and Activity — while Settings and setup stay on the Desktop.
+Knowledge, Planner, Schedules, Email, and Activity — while Settings and setup stay on the Desktop.
 
 ## Chat
 
@@ -31,7 +31,7 @@ Activity and approve (Irreversible, with an extra confirm).
 ## Knowledge
 
 A private, encrypted knowledge base. Drag in **PDFs, Word (.docx), PowerPoint (.pptx),
-Excel (.xlsx), HTML and text files** — a whole folder at once if you like — paste a URL,
+Excel (.xlsx), HTML and text files** — many files in one drop if you like — paste a URL,
 or write a note. Uploads don't block: they land right away and a background indexer makes
 them searchable within seconds. Adding the same content twice is a no-op — SmartBrain
 recognises it and keeps the one copy rather than cluttering your results with duplicates.
