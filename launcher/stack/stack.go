@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 )
 
@@ -119,7 +120,53 @@ func (s Stack) WaitHealthy(ctx context.Context, deadline time.Duration) bool {
 	}
 }
 
-// DockerInstalled reports whether the docker CLI is on PATH.
+// dockerPathDirs are the usual places the docker CLI lives on macOS. `home` is $HOME.
+func dockerPathDirs(home string) []string {
+	return []string{
+		"/usr/local/bin",                                  // Docker Desktop's `docker` symlink; Intel Homebrew
+		"/opt/homebrew/bin",                               // Apple Silicon Homebrew (docker, colima)
+		filepath.Join(home, ".docker/bin"),                // newer Docker Desktop
+		filepath.Join(home, ".orbstack/bin"),              // OrbStack
+		"/Applications/Docker.app/Contents/Resources/bin", // Docker Desktop's bundled CLI
+	}
+}
+
+// missingPathDirs returns which of dirs are not already present in the colon/semicolon-separated
+// pathEnv, preserving order. Pure, so it's unit-testable without touching the process environment.
+func missingPathDirs(pathEnv string, dirs []string) []string {
+	seen := map[string]bool{}
+	for _, d := range strings.Split(pathEnv, string(os.PathListSeparator)) {
+		if d != "" {
+			seen[d] = true
+		}
+	}
+	var add []string
+	for _, d := range dirs {
+		if d != "" && !seen[d] {
+			add = append(add, d)
+		}
+	}
+	return add
+}
+
+// EnsureDockerPath makes `docker` findable from a GUI-launched app. On macOS, a .app opened from the
+// Finder inherits launchd's minimal PATH (roughly /usr/bin:/bin:/usr/sbin:/sbin), which EXCLUDES
+// /usr/local/bin and Homebrew — so `exec.LookPath("docker")` fails and Docker looks "not installed"
+// even when Docker Desktop is right there. Prepending the usual locations fixes that for every
+// subsequent docker/compose call in this process. No-op off macOS, where GUI apps inherit a full PATH.
+func EnsureDockerPath() {
+	if runtime.GOOS != "darwin" {
+		return
+	}
+	add := missingPathDirs(os.Getenv("PATH"), dockerPathDirs(os.Getenv("HOME")))
+	if len(add) == 0 {
+		return
+	}
+	sep := string(os.PathListSeparator)
+	os.Setenv("PATH", strings.Join(add, sep)+sep+os.Getenv("PATH"))
+}
+
+// DockerInstalled reports whether the docker CLI is on PATH. Call EnsureDockerPath first.
 func DockerInstalled() bool {
 	_, err := exec.LookPath("docker")
 	return err == nil

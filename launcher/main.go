@@ -39,6 +39,9 @@ var (
 )
 
 func main() {
+	// A Finder-launched .app on macOS gets launchd's minimal PATH, which hides /usr/local/bin and
+	// Homebrew — so `docker` would look "not installed". Fix PATH before any Docker check runs.
+	stack.EnsureDockerPath()
 	systray.Run(onReady, func() {})
 }
 
