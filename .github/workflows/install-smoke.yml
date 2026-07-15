@@ -1,0 +1,58 @@
+# Install smoke test — the documented Linux install, exactly as a stranger runs it, on a fresh
+# runner: download ONE file, `docker compose up`, expect healthy. This is the test that would have
+# caught the named-volumes crash (root-owned bind mounts) and the bifrost:latest drift BEFORE a user
+# did. Docker Desktop's permissive file sharing hides Linux-only failures on every dev Mac, so this
+# is the one honest, automatable check of the real cold start.
+#
+# Runs after each release publishes its image (workflow_run), on demand, and weekly (catches drift
+# in things we don't pin — base images, registries — even when we haven't shipped).
+name: Install smoke (Linux)
+
+on:
+  workflow_run:
+    workflows: ["Release image"]
+    types: [completed]
+  workflow_dispatch:
+  schedule:
+    - cron: "17 6 * * 1" # Mondays 06:17 UTC — weekly drift canary
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    # For workflow_run, only bother when the release actually succeeded.
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install exactly like the docs say
+        run: |
+          set -eux
+          mkdir smoke && cd smoke
+          curl -fsSLO https://raw.githubusercontent.com/SecureCloudGroup/SmartBrain_3000/main/compose/docker-compose.release.yml
+          docker compose -f docker-compose.release.yml up -d
+      - name: Wait for health (the promise is "a minute or two")
+        run: |
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:33000/api/health >/dev/null; then
+              echo "HEALTHY after ~$((i*5))s"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::App not healthy after 300s — a fresh Linux install is broken"
+          cd smoke
+          docker compose -f docker-compose.release.yml ps
+          docker compose -f docker-compose.release.yml logs --tail 40
+          exit 1
+      - name: First-run setup actually works (not just a 200 on /health)
+        run: |
+          set -eux
+          curl -sf -c /tmp/cj -X POST http://localhost:33000/api/account/setup \
+            -H 'content-type: application/json' -d '{"passphrase":"smoke-test-passphrase"}' \
+            | grep -q recovery_key
+          curl -sf -b /tmp/cj -X POST http://localhost:33000/api/kb \
+            -H 'content-type: application/json' -d '{"title":"Smoke","content":"the CANARY sentence"}' >/dev/null
+          curl -sf -b /tmp/cj "http://localhost:33000/api/kb/search?q=canary&mode=lexical" \
+            | grep -q '"Smoke"'
+          echo "setup + ingest + search all work on a fresh install"
