@@ -47,6 +47,17 @@
   // bottom of a long page (a live tester read it as a broken page, not a wrong password).
   let shareError = $state("");
   let importError = $state("");
+  let keyCopied = $state(false); // "Copied ✓" feedback — every other copy button in the app has it
+
+  async function copyKey() {
+    try {
+      await navigator.clipboard.writeText(shownKey);
+      keyCopied = true;
+      setTimeout(() => (keyCopied = false), 1500);
+    } catch {
+      /* clipboard unavailable — the key text is selectable */
+    }
+  }
   let importInput = $state<HTMLInputElement | null>(null);
   let docsCard = $state<HTMLDivElement | null>(null); // scroll target for "Add documents" on a vault
   let importKey = $state("");
@@ -861,7 +872,7 @@
               </p>
               <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap">
                 <code class="key">{shownKey}</code>
-                <button class="secondary" onclick={() => navigator.clipboard?.writeText(shownKey)}>Copy key</button>
+                <button class="secondary" onclick={copyKey}>{keyCopied ? "Copied ✓" : "Copy key"}</button>
               </div>
             {/if}
           </div>
