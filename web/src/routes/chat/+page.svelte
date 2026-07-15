@@ -5,7 +5,7 @@
   import { chatSession } from "$lib/chat.svelte";
   import { resumeChat } from "$lib/chat-resume";
   import { refreshPending } from "$lib/pending.svelte";
-  import { api, ApiError, type AgentResult, type ChatMessage, type Conversation, type DiscoveredModel, type RecentScheduleRun } from "$lib/api";
+  import { api, ApiError, type AgentResult, type ChatMessage, type Conversation, type DiscoveredModel, type RecentScheduleRun, type Source } from "$lib/api";
   import { describeError } from "$lib/errors";
   import Markdown from "$lib/Markdown.svelte";
   import { remote } from "$lib/remote/connection.svelte";
@@ -14,7 +14,8 @@
   // Entry carries a stable id so {#each} can key on it (U16) — re-renders no longer
   // jump when a streaming assistant message mutates in place. `schedule` marks a fired
   // scheduled-run update injected into the view (display-only; excluded from the transcript).
-  type Entry = ChatMessage & { id: string; err?: boolean; schedule?: boolean };
+  // `sources` = the turn's deterministic citations (from tool results), rendered as chips.
+  type Entry = ChatMessage & { id: string; err?: boolean; schedule?: boolean; sources?: Source[] };
 
   let conversations = $state<Conversation[]>([]);
   let convosCursor = $state<string | null>(null); // next-older page cursor for the saved list
@@ -125,7 +126,7 @@
     // a transient error keeps it so the next visit retries (regression #11).
     try {
       const msgs = await resumeChat(chatSession, api.getConversation, (e) => e instanceof ApiError && e.status === 404);
-      log = msgs.map((m) => ({ id: m.id, role: m.role, content: m.content }));
+      log = msgs.map((m) => ({ id: m.id, role: m.role, content: m.content, sources: m.sources }));
       // resumeChat returns the newest page's messages (server default); if there are older
       // ones, re-fetch through getConversation to capture next_cursor/has_more.
       if (chatSession.currentId) await refreshOpenCursor(chatSession.currentId);
@@ -275,7 +276,7 @@
     if (!msgHasMore || !msgCursor || chatSession.currentId === null) return;
     try {
       const page = await api.getConversation(chatSession.currentId, { before: msgCursor });
-      const older = page.messages.map((m) => ({ id: m.id, role: m.role, content: m.content }));
+      const older = page.messages.map((m) => ({ id: m.id, role: m.role, content: m.content, sources: m.sources }));
       log = [...older, ...log];
       msgCursor = page.next_cursor ?? null;
       msgHasMore = !!page.has_more;
@@ -291,7 +292,7 @@
     try {
       const convo = await api.getConversation(id);
       chatSession.currentId = id;
-      log = convo.messages.map((m) => ({ id: m.id, role: m.role, content: m.content }));
+      log = convo.messages.map((m) => ({ id: m.id, role: m.role, content: m.content, sources: m.sources }));
       msgCursor = convo.next_cursor ?? null;
       msgHasMore = !!convo.has_more;
       await restorePendingBanner(id); // this conversation may have a parked turn awaiting approval
@@ -570,9 +571,26 @@
       pendingTurnId = null;
       if (res.degraded) modelNotice = DEGRADED_NOTICE;
       const reply = res.message || "I didn't get a response — try again.";
-      log.push({ id: nextEntryId("asst"), role: "assistant", content: reply });
-      await api.addMessage(cid, "assistant", reply);
+      // Citations came from the turn's TOOL RESULTS (server-side, deterministic) — keep
+      // them on the live entry and persist them with the message so a reload shows the
+      // same chips.
+      const sources = res.sources?.length ? res.sources : undefined;
+      log.push({ id: nextEntryId("asst"), role: "assistant", content: reply, sources });
+      await api.addMessage(cid, "assistant", reply, sources);
     }
+  }
+
+  // Same rule as Knowledge's locator(): name the section by what it IS in this format —
+  // a deck has slides and a spreadsheet has sheets, so "p.3" would miscall a slide.
+  function locator(s: Source): string {
+    return s.page_label && s.page_label !== "page" ? `${s.page_label} ${s.page}` : `p.${s.page}`;
+  }
+
+  // A chip opens the cited document in Knowledge AT the cited passage (offset); a
+  // read/summary citation has no offset and opens the document at the top.
+  function openSource(s: Source): void {
+    console.assert(typeof s.id === "string" && s.id.length > 0, "openSource needs a document id");
+    goto(`/knowledge?doc=${encodeURIComponent(s.id)}&offset=${s.offset ?? ""}`);
   }
 
   async function resume() {
@@ -681,6 +699,17 @@
       {#if entry.role === "assistant" && !entry.err}
         <!-- Models answer in markdown; render it. User text + errors stay verbatim. -->
         <Markdown content={entry.content} />
+        {#if entry.sources?.length}
+          <!-- Citation chips (same idiom as Knowledge's .cite): where the answer's knowledge
+               came from, straight from the tool results. Click = open the document there. -->
+          <div class="cites">
+            {#each entry.sources as s (`${s.id}:${s.offset ?? ""}`)}
+              <button class="cite" title="Open in Knowledge at this passage" onclick={() => openSource(s)}>
+                {s.source || s.title || "document"}{#if s.page != null}&nbsp;·&nbsp;{locator(s)}{/if}
+              </button>
+            {/each}
+          </div>
+        {/if}
       {:else}
         <div class="bubble {entry.err ? 'err' : entry.role}">{entry.content}</div>
       {/if}
@@ -725,6 +754,34 @@
 {/if}
 
 <style>
+  /* Citation chips under an assistant bubble — the same pill idiom as the Knowledge
+     page's .cite, so "where this came from" looks identical in both places. The row is
+     a flex sibling of the bubble in .chat-log, tucked up against it (the log's gap
+     would otherwise read as a separate message). */
+  .cites {
+    align-self: flex-start;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin-top: -0.45rem;
+    max-width: min(46rem, 85%); /* track the bubble width so chips never outdent it */
+  }
+  .cite {
+    padding: 0.05rem 0.45rem;
+    font-size: 0.75rem;
+    font-weight: 500;
+    line-height: 1.5;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--field);
+    color: var(--muted);
+    cursor: pointer;
+  }
+  .cite:hover {
+    color: var(--text);
+    border-color: var(--accent);
+  }
+
   /* Starter prompt chips — only visible on an empty chat log (U6). Match the existing
      .secondary button look but a touch smaller so a row of three reads as suggestions. */
   .starter {

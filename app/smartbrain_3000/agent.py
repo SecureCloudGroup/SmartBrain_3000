@@ -22,6 +22,13 @@ log = logging.getLogger(__name__)
 
 _MAX_STEPS = 6  # model round-trips per turn
 _MAX_TOOL_CALLS = 8  # tool executions per turn (carried across a pause)
+_MAX_SOURCES = 20  # citations per turn (P10 #2 — a runaway hit list must not flood the UI)
+# The citation fields a knowledge-tool result may carry (mirrors kb.KnowledgeBase._hit).
+_SOURCE_KEYS = ("id", "title", "source", "page", "page_label", "offset")
+# Only this turn's appended messages can hold tool results (the client transcript is
+# plain role/content), and a turn appends at most _MAX_STEPS assistant + _MAX_TOOL_CALLS
+# tool messages — so scanning this tail window always covers them, with slack.
+_SOURCE_SCAN_WINDOW = 64
 _RESULT_CAP = 20000  # fallback cap on a tool-result string; the routes/scheduler override it per-turn
                      # with gateway.result_cap_for(model) (context-sized). Only direct callers use this.
 # A ```json {"name": ..., "arguments": {...}} ``` fenced block (some local models/runtimes
@@ -170,6 +177,74 @@ def _execute_inline(ctx: tools.ToolContext, audit, tc: dict, conversation_id: st
     return {"role": "tool", "tool_call_id": tcid, "content": content[:result_cap]}
 
 
+def _citations_from(tool_name: str, result_str: str) -> list[dict]:
+    """Citations carried by ONE tool result, or [] — extracted from the result JSON,
+    never from model prose, so they are deterministic and work with any model (a model
+    can neither fabricate nor omit them). Malformed/error results yield [] rather than
+    raising: a failed tool already fed its error back to the model.
+    """
+    assert isinstance(tool_name, str) and isinstance(result_str, str), "tool name + result string required"
+    try:
+        result = json.loads(result_str)
+    except (ValueError, TypeError):
+        return []
+    if not isinstance(result, dict):
+        return []
+    if tool_name == "kb_search":
+        hits = result.get("results")
+        if not isinstance(hits, list):
+            return []  # error/degraded-to-nothing result — nothing to cite
+        out: list[dict] = []
+        for hit in hits[:_MAX_SOURCES]:  # bounded (P10 #2)
+            if isinstance(hit, dict) and hit.get("id"):
+                out.append({k: hit.get(k) for k in _SOURCE_KEYS})
+        return out
+    if tool_name in ("read_document", "summarize_document"):
+        if not result.get("id"):
+            return []
+        # One citation for the whole document (offset None -> Knowledge opens it at the
+        # top): a read/summary is grounded in the document, not one matched passage —
+        # and a fixed offset lets multiple reads of the same document dedupe to one chip.
+        return [{"id": result["id"], "title": result.get("title") or "", "offset": None}]
+    return []  # other tools (tasks, email, web…) ground nothing in the knowledge base
+
+
+def _collect_sources(messages: list[dict]) -> list[dict]:
+    """Citations for every knowledge-tool result in this turn, deduped by (id, offset).
+
+    Scanned from the MESSAGES (the deterministic record of what actually ran) rather
+    than accumulated in loop state, so a turn that parked for approval still cites the
+    searches that ran before the pause — turn_state carries the messages across it.
+    Tool messages only say WHICH call answered (tool_call_id); the assistant messages'
+    tool_calls provide the name, so the scan joins the two.
+    """
+    assert isinstance(messages, list), "messages must be a list"
+    names: dict[str, str] = {}  # tool_call_id -> tool name
+    sources: list[dict] = []
+    seen: set[tuple] = set()
+    for msg in messages[-_SOURCE_SCAN_WINDOW:]:  # bounded (P10 #2); this turn's appends sit at the tail
+        if not isinstance(msg, dict):
+            continue
+        if msg.get("role") == "assistant":
+            for tc in (msg.get("tool_calls") or [])[:_MAX_TOOL_CALLS]:  # bounded (P10 #2)
+                if not isinstance(tc, dict):
+                    continue
+                fn = tc.get("function") or {}
+                if tc.get("id") and isinstance(fn, dict) and fn.get("name"):
+                    names[tc["id"]] = fn["name"]
+        elif msg.get("role") == "tool":
+            name = names.get(msg.get("tool_call_id") or "")
+            if not name:
+                continue  # a result we can't attribute to a tool can't be cited safely
+            for cite in _citations_from(name, msg.get("content") or ""):
+                key = (cite.get("id"), cite.get("offset"))
+                if key in seen or len(sources) >= _MAX_SOURCES:
+                    continue
+                seen.add(key)
+                sources.append(cite)
+    return sources
+
+
 def _classify(tool_calls: list[dict], auto_approve) -> tuple[list[dict], list[dict]]:
     """Split tool_calls into (parked = valid non-OBSERVE & not remembered, inline = rest)."""
     assert isinstance(tool_calls, list), "tool_calls must be a list"
@@ -237,7 +312,8 @@ def run_turn(ctx, audit, approvals, *, messages, model, conversation_id, turn_id
                 except Exception:
                     raise exc from None  # plain also failed -> a real error; surface the original
                 _emit_usage(usage_sink, model, plain)
-                return {"status": "complete", "message": _first_message(plain).get("content") or "", "degraded": True}
+                # sources is always [] here: this path only exists when NO tool ran.
+                return {"status": "complete", "message": _first_message(plain).get("content") or "", "degraded": True, "sources": []}
             raise  # a tool already ran -> fail closed, surface the error
         choice = _first_message(data)
         tool_calls = choice.get("tool_calls") or []
@@ -251,7 +327,10 @@ def run_turn(ctx, audit, approvals, *, messages, model, conversation_id, turn_id
             elif _looks_like_tool_attempt(content):
                 content += _TOOL_TEXT_NOTICE  # keep the reply, but explain the odd JSON blob
         if not tool_calls:
-            return {"status": "complete", "message": content, "degraded": False, "steps": step + 1}
+            # Citations ship with every completed answer (possibly []) so the UI can
+            # always trust the field — extracted from tool results, never model prose.
+            return {"status": "complete", "message": content, "degraded": False, "steps": step + 1,
+                    "sources": _collect_sources(messages)}
         if calls + len(tool_calls) > _MAX_TOOL_CALLS:
             return {"status": "max_steps", "message": "tool-call budget exceeded", "steps": step + 1}
         calls += len(tool_calls)

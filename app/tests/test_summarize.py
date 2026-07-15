@@ -162,5 +162,7 @@ def test_summarize_document_tool_end_to_end(fake: FakeGateway) -> None:
     out = tools.run(ctx, AuditLog(conn, key), "summarize_document", {"query": "Perennial"}, actor="assistant")
     assert out["title"] == "Perennial" and out["summary"] == "MERGED SUMMARY"
     assert out["total_chars"] == 60 and out["chars_covered"] == 60 and out["truncated"] is False
-    assert set(out) == {"title", "chunks", "chars_covered", "total_chars", "truncated", "passes", "summary"}
+    # `id` rides along so the chat citation built from this result can deep-link the document.
+    assert set(out) == {"id", "title", "chunks", "chars_covered", "total_chars", "truncated", "passes", "summary"}
+    assert out["id"] and kb.get(out["id"])["title"] == "Perennial"
     assert _maps(fake)  # it actually called the model to map at least one chunk

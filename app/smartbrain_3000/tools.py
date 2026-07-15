@@ -174,7 +174,9 @@ def _summarize_document(ctx: ToolContext, args: dict) -> dict:
         focus=str(args.get("focus", "") or ""),
         chunk_chars=docsum.chunk_chars_for(cap),
     )
-    return {k: result[k] for k in ("title", "chunks", "chars_covered", "total_chars", "truncated", "passes", "summary")}
+    # `id` rides along so the chat citation built from this result can deep-link the
+    # document in Knowledge (a title alone can't address it).
+    return {"id": doc["id"], **{k: result[k] for k in ("title", "chunks", "chars_covered", "total_chars", "truncated", "passes", "summary")}}
 
 
 _MAX_LIST_DOCUMENTS = 500  # bound the catalog listing (P10 #2); `total` still reports the true count

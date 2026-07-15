@@ -89,6 +89,18 @@
     if (s && !s.unlocked) return goto("/unlock");
     await Promise.all([loadDocs(), loadVaults()]);
     refreshIndexStatus();
+    // Deep link from a chat citation chip: /knowledge?doc=<id>&offset=<n> opens the
+    // document at the cited passage (no offset -> at the top). Plain window.location —
+    // the same idiom the email page uses; goto() mounts this page fresh.
+    const params = new URLSearchParams(window.location.search);
+    const doc = params.get("doc");
+    if (doc) {
+      // "offset=" (a citation with no passage) must open at the top — but Number("") is 0,
+      // so an empty/garbled offset maps to null rather than a phantom mark at position 0.
+      const raw = params.get("offset");
+      const off = raw ? Number(raw) : NaN;
+      await open(doc, Number.isFinite(off) ? off : null);
+    }
   });
 
   async function addUrl() {

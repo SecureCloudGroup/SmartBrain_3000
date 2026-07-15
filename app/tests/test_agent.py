@@ -617,3 +617,69 @@ def test_turn_route_unknown_capability_400(http_client: TestClient) -> None:
     )
     assert r.status_code == 400
     assert "bogus" in r.json().get("detail", "")
+
+
+# --- deterministic chat citations: sources come from TOOL RESULTS, never model prose ---
+
+def test_kb_search_result_yields_sources(monkeypatch) -> None:
+    ctx, audit, approvals = _wired()
+    _script(monkeypatch, [_toolcalls(("kb_search", {"query": "tea"})), _text("found it")])
+    r = _run(ctx, audit, approvals)
+    assert r["status"] == "complete"
+    (src,) = r["sources"]
+    assert src["id"] and src["title"] == "Doc"
+    assert set(src) == {"id", "title", "source", "page", "page_label", "offset"}
+
+
+def test_read_document_result_yields_one_document_source(monkeypatch) -> None:
+    ctx, audit, approvals = _wired()
+    _script(monkeypatch, [_toolcalls(("read_document", {"query": "Doc"})), _text("done")])
+    r = _run(ctx, audit, approvals)
+    assert r["status"] == "complete"
+    (src,) = r["sources"]
+    # One citation for the whole document; offset None -> Knowledge opens it at the top.
+    assert src["id"] and src["title"] == "Doc" and src["offset"] is None
+
+
+def test_plain_answer_completes_with_empty_sources(monkeypatch) -> None:
+    ctx, audit, approvals = _wired()
+    _script(monkeypatch, [_text("just an answer")])
+    r = _run(ctx, audit, approvals)
+    assert r["status"] == "complete" and r["sources"] == []
+
+
+def test_sources_survive_a_park_and_resume(monkeypatch) -> None:
+    # kb_search runs inline, remember_fact parks. After approval, the resumed turn must
+    # still cite the search that ran BEFORE the pause (turn_state carries the messages).
+    ctx, audit, approvals = _wired()
+    _script(monkeypatch, [_toolcalls(("kb_search", {"query": "tea"}), ("remember_fact", {"text": "likes tea"}))])
+    r = _run(ctx, audit, approvals, turn_id="t-cite")
+    assert r["status"] == "awaiting_approval"
+    _approve_and_execute(ctx, audit, approvals, r["pending"][0]["id"], "remember_fact")
+    _script(monkeypatch, [_text("done — noted")])
+    r2 = agent.resume_turn(ctx, audit, approvals, "t-cite")
+    assert r2["status"] == "complete"
+    assert [s["title"] for s in r2["sources"]] == ["Doc"]
+
+
+def test_citations_from_malformed_or_foreign_results_are_empty() -> None:
+    assert agent._citations_from("kb_search", "not json") == []
+    assert agent._citations_from("kb_search", json.dumps({"error": "boom"})) == []
+    assert agent._citations_from("kb_search", json.dumps(["not", "a", "dict"])) == []
+    assert agent._citations_from("read_document", json.dumps({"title": "no id"})) == []
+    assert agent._citations_from("add_task", json.dumps({"id": "x", "title": "t"})) == []
+
+
+def test_collect_sources_dedupes_and_bounds() -> None:
+    hits = [{"id": f"d{i}", "title": f"T{i}", "source": "", "page": None, "page_label": "page", "offset": i}
+            for i in range(30)]
+    call = {"id": "c1", "type": "function", "function": {"name": "kb_search", "arguments": "{}"}}
+    messages = [
+        {"role": "assistant", "content": "", "tool_calls": [call]},
+        {"role": "tool", "tool_call_id": "c1", "content": json.dumps({"results": hits, "degraded": False})},
+        # The same result fed back twice (e.g. a repeated search) must not double the chips.
+        {"role": "tool", "tool_call_id": "c1", "content": json.dumps({"results": hits[:2], "degraded": False})},
+    ]
+    out = agent._collect_sources(messages)
+    assert len(out) == agent._MAX_SOURCES  # bounded (30 hits offered)
+    assert len({(s["id"], s["offset"]) for s in out}) == len(out)  # deduped by (id, offset)

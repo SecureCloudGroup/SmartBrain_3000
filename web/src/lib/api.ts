@@ -93,11 +93,24 @@ export interface Conversation {
   updated_at: string;
 }
 
+// A citation extracted server-side from a knowledge tool's RESULT during an agent turn —
+// deterministic (never parsed out of model prose), so it exists with any model. Field
+// meanings mirror KbHit's citation block; `offset` deep-links Knowledge to the passage.
+export interface Source {
+  id: string;
+  title?: string | null;
+  source?: string | null;
+  page?: number | null;
+  page_label?: string | null;
+  offset?: number | null;
+}
+
 export interface StoredMessage {
   id: string;
   role: "user" | "assistant" | "system";
   content: string;
   created_at: string;
+  sources?: Source[]; // present only on assistant messages that cited knowledge
 }
 
 export interface ConversationFull extends Conversation {
@@ -111,6 +124,7 @@ export interface AgentResult {
   turn_id?: string;
   pending?: { id: string; tool: string; tier: string }[];
   degraded?: boolean;
+  sources?: Source[]; // citations from the turn's tool results ([] when no knowledge was used)
 }
 
 export interface Memory {
@@ -465,10 +479,12 @@ export const api = {
     }),
   deleteConversation: (id: string) =>
     req<{ ok: boolean }>(`/api/conversations/${encodeURIComponent(id)}`, { method: "DELETE" }),
-  addMessage: (id: string, role: "user" | "assistant" | "system", content: string) =>
+  // `sources` (citations from the agent turn's tool results) persist with the assistant
+  // message so a reloaded conversation shows the same chips as the live one.
+  addMessage: (id: string, role: "user" | "assistant" | "system", content: string, sources?: Source[]) =>
     req<{ id: string }>(`/api/conversations/${encodeURIComponent(id)}/messages`, {
       method: "POST",
-      body: JSON.stringify({ role, content }),
+      body: JSON.stringify(sources?.length ? { role, content, sources } : { role, content }),
     }),
 
   // tools + audit (H4)

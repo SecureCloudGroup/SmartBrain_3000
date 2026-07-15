@@ -26,6 +26,8 @@ class RenameIn(BaseModel):
 class MessageIn(BaseModel):
     role: str = Field(pattern="^(user|assistant|system)$")
     content: str = Field(min_length=1)
+    # Citations from the agent turn's tool results; validated/bounded in ChatHistory.
+    sources: list[dict] | None = None
 
 
 def _hist(request: Request) -> ChatHistory:
@@ -111,6 +113,6 @@ def add_message(request: Request, cid: str, body: MessageIn) -> dict[str, str]:
     """Append a message to a conversation."""
     history = _hist(request)
     try:
-        return {"id": history.add_message(cid, body.role, body.content)}
+        return {"id": history.add_message(cid, body.role, body.content, sources=body.sources)}
     except ValueError:
         raise HTTPException(status_code=404, detail="conversation not found") from None
