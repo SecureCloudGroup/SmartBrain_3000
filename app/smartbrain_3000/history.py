@@ -27,6 +27,30 @@ _MAX_LIST_PAGE = 200       # hard max page size (mirrors _LIST_LIMIT)
 _DEFAULT_MSG_PAGE = 100    # default page size for paginated message listing
 _MAX_MSG_PAGE = 500        # hard max page size for messages
 _ROLES = ("user", "assistant", "system")
+_MAX_SOURCES = 20  # citations per message (mirrors agent._MAX_SOURCES)
+# The only citation fields a message may carry (mirrors agent._SOURCE_KEYS).
+_SOURCE_KEYS = ("id", "title", "source", "page", "page_label", "offset")
+
+
+def _clean_sources(sources: list | None) -> list[dict]:
+    """Validate + bound client-supplied citations; silently drop anything malformed.
+
+    This is client data headed into the sealed store, and it is decrypted and re-served
+    verbatim later — so keep the store clean: known keys only, scalar (str/int/None)
+    values only, at most ``_MAX_SOURCES`` items. Dropping (not raising) because a bad
+    citation must never lose the message it rides on.
+    """
+    if not isinstance(sources, list):
+        return []
+    out: list[dict] = []
+    for item in sources[:_MAX_SOURCES]:  # bounded (P10 #2)
+        if not isinstance(item, dict):
+            continue
+        cleaned = {k: v for k, v in item.items()
+                   if k in _SOURCE_KEYS and (v is None or isinstance(v, (str, int)))}
+        if cleaned.get("id") or cleaned.get("title"):  # a chip needs something to show/open
+            out.append(cleaned)
+    return out
 
 
 def _clamp_page(limit: int | None, default: int, hard_max: int) -> int:
@@ -184,15 +208,24 @@ class ChatHistory:
         self._conn.execute("DELETE FROM conversations WHERE id = ?;", [cid])
         assert self.get_conversation(cid) is None, "conversation must be absent after delete"
 
-    def add_message(self, cid: str, role: str, content: str) -> str:
-        """Append an encrypted message to a conversation; bump its updated_at."""
+    def add_message(self, cid: str, role: str, content: str, sources: list[dict] | None = None) -> str:
+        """Append an encrypted message to a conversation; bump its updated_at.
+
+        ``sources`` (citations from the agent turn's tool results) travel INSIDE the
+        sealed body: a citation names documents (titles/filenames), which are exactly
+        as private as the message text itself.
+        """
         assert cid, "conversation id required"
         assert role in _ROLES, "role must be user/assistant/system"
         assert content is not None, "content must not be None"
         if self.get_conversation(cid) is None:
             raise ValueError("conversation not found")
         mid = str(uuid.uuid4())
-        nonce, ciphertext = self._seal(b"message:", mid, {"role": role, "content": content})
+        body: dict = {"role": role, "content": content}
+        cleaned = _clean_sources(sources)
+        if cleaned:
+            body["sources"] = cleaned
+        nonce, ciphertext = self._seal(b"message:", mid, body)
         self._conn.execute(
             "INSERT INTO messages (id, conversation_id, nonce, ciphertext) VALUES (?, ?, ?, ?);",
             [mid, cid, nonce, ciphertext],
@@ -214,14 +247,15 @@ class ChatHistory:
         out: list[dict] = []
         for row in rows:  # bounded by _MSG_LIMIT
             body = self._open(b"message:", str(row[0]), bytes(row[1]), bytes(row[2]))
-            out.append(
-                {
-                    "id": str(row[0]),
-                    "role": body["role"],
-                    "content": body["content"],
-                    "created_at": str(row[3]),
-                }
-            )
+            item = {
+                "id": str(row[0]),
+                "role": body["role"],
+                "content": body["content"],
+                "created_at": str(row[3]),
+            }
+            if body.get("sources"):  # only messages that carried citations surface the key
+                item["sources"] = body["sources"]
+            out.append(item)
         return out
 
     def get_messages_page(
@@ -267,14 +301,15 @@ class ChatHistory:
         items: list[dict] = []
         for row in rows:  # bounded by page (<= _MAX_MSG_PAGE)
             body = self._open(b"message:", str(row[0]), bytes(row[1]), bytes(row[2]))
-            items.append(
-                {
-                    "id": str(row[0]),
-                    "role": body["role"],
-                    "content": body["content"],
-                    "created_at": str(row[3]),
-                }
-            )
+            item = {
+                "id": str(row[0]),
+                "role": body["role"],
+                "content": body["content"],
+                "created_at": str(row[3]),
+            }
+            if body.get("sources"):  # only messages that carried citations surface the key
+                item["sources"] = body["sources"]
+            items.append(item)
         # Cursor points at the OLDEST item on this page (the next page is older still). Built from
         # the raw row so it carries rowid (kept out of the client-facing item shape).
         next_cursor: str | None = None

@@ -49,7 +49,10 @@ Search your knowledge three ways:
 **Results are citations.** Every hit shows where it came from — *"Lease.pdf · p.12"*
 (a slide deck cites *slide 3*, a spreadsheet *sheet 2*) — and clicking it opens the
 document **at the passage that matched**, highlighted, rather than at the top. Chat
-cites its sources the same way, so you can check any claim against the original.
+answers that used your knowledge show the same source chips underneath the reply —
+click one to open the document at the cited passage. The chips come from what the
+assistant actually searched and read, not from what it *says* it did, so you can
+check any claim against the original.
 
 **Try it:** open **Knowledge**, drag in a document, and search it. Then ask **Chat**
 *"what does my knowledge say about …"* — the assistant searches it for you and tells you

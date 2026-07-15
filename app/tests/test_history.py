@@ -350,3 +350,56 @@ def test_http_messages_pagination_via_cursor(client: TestClient) -> None:
     assert [m["content"] for m in third["messages"]] == sent[:-4]
     assert third["has_more"] is False
     assert third["next_cursor"] is None
+
+
+# --- message citations (sources ride inside the sealed body) ----------------
+
+def test_message_sources_roundtrip() -> None:
+    h = _hist()
+    cid = h.create_conversation("Cited")
+    src = [{"id": "d1", "title": "Lease.pdf", "source": "Lease.pdf", "page": 12, "page_label": "page", "offset": 340}]
+    h.add_message(cid, "assistant", "the rent is due on the 1st", sources=src)
+    h.add_message(cid, "user", "thanks")
+    msgs = h.get_messages(cid)
+    assert msgs[0]["sources"] == src
+    assert "sources" not in msgs[1]  # only cited messages carry the key
+    page = h.get_messages_page(cid)
+    assert page["items"][0]["sources"] == src and "sources" not in page["items"][1]
+
+
+def test_message_sources_validated_and_bounded() -> None:
+    h = _hist()
+    cid = h.create_conversation("Junk")
+    junk = [
+        "not a dict",                                             # dropped: not a dict
+        {"snippet": "no id or title"},                            # dropped: nothing to show/open
+        {"id": "ok", "title": None, "evil": {"x": 1}, "page": 3}, # kept, unknown key stripped
+    ] + [{"id": f"d{i}", "title": f"T{i}"} for i in range(25)]     # bounded to the cap
+    h.add_message(cid, "assistant", "reply", sources=junk)
+    (msg,) = h.get_messages(cid)
+    stored = msg["sources"]
+    assert len(stored) <= 20  # never more than the cap
+    assert stored[0] == {"id": "ok", "title": None, "page": 3}  # "evil" stripped
+    allowed = {"id", "title", "source", "page", "page_label", "offset"}
+    assert all(set(s) <= allowed for s in stored)
+
+
+def test_message_all_invalid_sources_stores_none() -> None:
+    h = _hist()
+    cid = h.create_conversation("None")
+    h.add_message(cid, "assistant", "reply", sources=[{"bogus": 1}, "junk"])
+    (msg,) = h.get_messages(cid)
+    assert "sources" not in msg  # nothing valid survived -> the key is simply absent
+
+
+def test_message_sources_via_api(client: TestClient) -> None:
+    client.post("/api/account/setup", json={"passphrase": "correct-horse"})
+    cid = client.post("/api/conversations", json={"title": "Cited"}).json()["id"]
+    src = [{"id": "d1", "title": "Lease.pdf", "offset": 42}]
+    r = client.post(
+        f"/api/conversations/{cid}/messages",
+        json={"role": "assistant", "content": "answer", "sources": src},
+    )
+    assert r.status_code == 200
+    convo = client.get(f"/api/conversations/{cid}").json()
+    assert convo["messages"][0]["sources"] == src
