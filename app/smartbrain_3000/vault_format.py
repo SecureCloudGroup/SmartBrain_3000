@@ -367,7 +367,12 @@ def _entry(zf: zipfile.ZipFile, name: str, limit: int) -> bytes:
         raise VaultError(f"{name} is larger than allowed")
     if info.compress_size and info.file_size > info.compress_size * MAX_ZIP_EXPANSION:
         raise VaultError(f"{name} expands suspiciously (possible zip bomb)")
-    return zf.read(name)
+    try:
+        return zf.read(name)
+    except Exception:
+        # zipfile CRC-checks DURING read: a corrupted entry raises BadZipFile here, mid-extraction.
+        # Hostile/damaged input must be a clean refusal (400), never an unhandled 500.
+        raise VaultError(f"vault entry {name} is corrupted") from None
 
 
 def read_manifest(data: bytes) -> dict:

@@ -178,6 +178,18 @@ def test_a_tampered_vault_is_refused(alice: TestClient, bob: TestClient) -> None
     assert bob.get("/api/kb").json()["documents"] == [], "nothing may be imported from a bad vault"
 
 
+def test_a_corrupted_container_is_refused_cleanly(alice: TestClient, bob: TestClient) -> None:
+    # Different from the tampered-OBJECT test above: this damages the ZIP container itself, so
+    # zipfile's CRC check raises DURING extraction. Found live — it escaped as a 500. Any byte of a
+    # hostile file must produce a clean 400, never an unhandled exception.
+    vid = _make_vault(alice, [("Doc", "the QUOKKA clause")])
+    blob, key = _export(alice, vid, _PASS_A)
+    damaged = bytearray(blob)
+    damaged[len(damaged) // 2] ^= 0xFF
+    r = bob.post(f"/api/vaults/import?key={key}", content=bytes(damaged))
+    assert r.status_code == 400, f"expected clean 400, got {r.status_code}"
+
+
 def test_a_forged_manifest_is_refused(alice: TestClient, bob: TestClient) -> None:
     # Rewrite the manifest payload (e.g. bump doc_count) without the publisher's private key.
     vid = _make_vault(alice, [("Doc", "body")])
