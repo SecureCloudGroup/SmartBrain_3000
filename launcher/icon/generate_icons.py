@@ -6,8 +6,9 @@ Outputs:
                   *template* icon so the bar tints it for light/dark). A ring, not a filled box, so it
                   reads as an icon rather than a black blob.
   icon_win.ico  — the same ring in mid-blue for the Windows system tray (visible on light + dark bars).
-  icon_app.png  — 512px COLOURED app icon (a blue rounded tile with a white ring). CI turns this into
-                  SmartBrain.icns so the .app shows a real icon in Finder instead of a blank sheet.
+  icon_app.png is NOT generated here: it is the brand asset (assets/SmartBrain_Avatar.png, resized
+  to 512px) — regenerate it with `sips -z 512 512 ../../assets/SmartBrain_Avatar.png --out icon_app.png`.
+  CI turns it into SmartBrain.icns for the Finder icon.
 
 Run from this directory:  python3 generate_icons.py
 """
@@ -105,8 +106,7 @@ def main() -> None:
     here = Path(__file__).resolve().parent
     (here / "icon_mac.png").write_bytes(png_bytes(44, render(44, "ring", (0, 0, 0))))
     (here / "icon_win.ico").write_bytes(ico_bytes(png_bytes(32, render(32, "ring", (74, 144, 217))), 32))
-    (here / "icon_app.png").write_bytes(png_bytes(512, render(512, "app")))
-    print("wrote icon_mac.png, icon_win.ico, icon_app.png")
+    print("wrote icon_mac.png and icon_win.ico (icon_app.png is the brand asset — see docstring)")
 
 
 if __name__ == "__main__":

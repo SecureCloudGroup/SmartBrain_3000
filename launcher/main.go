@@ -42,6 +42,8 @@ var (
 	// Auto-open the Docker download page ONCE when Docker is missing — a helping hand, not a popup
 	// storm on every Restart while the user is mid-install.
 	openedDockerPage bool
+	// One "downloading…" desktop notification per launch, not one per Restart click.
+	notifiedStart bool
 )
 
 func main() {
@@ -150,6 +152,11 @@ func start() {
 	}
 
 	setStatus("Starting… (first run downloads the app)")
+	if !notifiedStart {
+		notifiedStart = true
+		// One heads-up per launch: the download can take minutes and this app has no window.
+		stack.Notify("SmartBrain is starting", "Downloading the app — your browser will open when it's ready.")
+	}
 	// Bounded: a wedged pull must not hold the operation lock forever. 15 min covers a slow first
 	// download; after that the user gets an honest failure instead of a frozen "Starting…".
 	upCtx, cancel := context.WithTimeout(ctx, 15*time.Minute)
