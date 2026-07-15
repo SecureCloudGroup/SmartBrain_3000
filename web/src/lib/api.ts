@@ -588,6 +588,14 @@ export const api = {
     req<Vault>("/api/vaults", { method: "POST", body: JSON.stringify({ name, description }) }),
   deleteVault: (id: string) =>
     req<{ ok: boolean }>(`/api/vaults/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  // One vault plus WHICH documents are in it — the list view only carries a count.
+  getVault: (id: string) =>
+    req<Vault & { doc_ids: string[] }>(`/api/vaults/${encodeURIComponent(id)}`),
+  removeFromVault: (id: string, docId: string) =>
+    req<{ ok: boolean; doc_count: number }>(
+      `/api/vaults/${encodeURIComponent(id)}/documents/${encodeURIComponent(docId)}`,
+      { method: "DELETE" },
+    ),
   addToVault: (id: string, doc_ids: string[]) =>
     req<{ added: number; doc_count: number }>(`/api/vaults/${encodeURIComponent(id)}/documents`, {
       method: "POST",

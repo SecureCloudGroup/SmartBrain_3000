@@ -71,9 +71,11 @@ A **vault** is a named set of your knowledge documents — the unit you scope a 
 and the unit you share. Vaults live on the Knowledge page.
 
 - **Create one and add documents.** Tick documents in your list, then add them to a new or
-  existing vault. A document can belong to several vaults; adding it to a vault never moves
+  existing vault — or click **Add documents** on the vault itself and it walks you to the list. A document can belong to several vaults; adding it to a vault never moves
   or copies the file, and deleting a vault never deletes its documents — it only removes the
   grouping.
+- **See what's inside.** Click the document count on a vault to list its contents — open any of
+  them, or remove one from the vault (the document itself is kept).
 - **Search inside one.** Pick a vault next to the search box to search *only* its documents
   — e.g. keep a "Work" vault and a "Home" vault and ask each separately.
 - **Share it.** **Export** a vault and SmartBrain seals it into a single `.sbvault` file and
