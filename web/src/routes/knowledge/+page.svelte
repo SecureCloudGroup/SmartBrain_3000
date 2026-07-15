@@ -492,7 +492,7 @@
     >
       <input bind:this={fileInput} type="file" multiple accept={ACCEPT} style="display:none" onchange={onPick} />
       <strong>Drop a file here</strong> or click to choose
-      <p class="muted">PDF, text, Markdown, HTML, CSV, JSON</p>
+      <p class="muted">PDF, Word, PowerPoint, Excel, text, Markdown, HTML, CSV, JSON</p>
     </div>
 
     <label for="kburl" style="margin-top:1rem">…or add a web page / PDF by URL</label>

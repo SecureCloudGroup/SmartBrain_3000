@@ -32,10 +32,16 @@ var iconMac []byte
 //go:embed icon/icon_win.ico
 var iconWin []byte
 
+const dockerGetURL = "https://docs.docker.com/get-docker/"
+
 var (
-	sb      stack.Stack
-	mu      sync.Mutex // serialize compose ops so two quick menu clicks can't race
-	mStatus *systray.MenuItem
+	sb         stack.Stack
+	mu         sync.Mutex // serialize compose ops so two quick menu clicks can't race
+	mStatus    *systray.MenuItem
+	mGetDocker *systray.MenuItem
+	// Auto-open the Docker download page ONCE when Docker is missing — a helping hand, not a popup
+	// storm on every Restart while the user is mid-install.
+	openedDockerPage bool
 )
 
 func main() {
@@ -56,6 +62,8 @@ func onReady() {
 	mOpen := systray.AddMenuItem("Open SmartBrain", "Open the app in your browser")
 	mStatus = systray.AddMenuItem("Starting…", "")
 	mStatus.Disable() // a label, not a button
+	mGetDocker = systray.AddMenuItem("Get Docker…", "Open the Docker download page")
+	mGetDocker.Hide() // only shown when Docker is actually missing
 	systray.AddSeparator()
 	mStop := systray.AddMenuItem("Stop", "Stop SmartBrain (your data is kept)")
 	mRestart := systray.AddMenuItem("Restart", "Restart SmartBrain")
@@ -79,6 +87,12 @@ func onReady() {
 			select {
 			case <-mOpen.ClickedCh:
 				go openOrStart()
+			case <-mGetDocker.ClickedCh:
+				go func() {
+					if err := stack.OpenBrowser(dockerGetURL); err != nil {
+						log.Println("open docker page:", err)
+					}
+				}()
 			case <-mStop.ClickedCh:
 				go stop()
 			case <-mRestart.ClickedCh:
@@ -93,18 +107,32 @@ func onReady() {
 
 func setStatus(s string) { mStatus.SetTitle(s) }
 
-// start ensures Docker is up, starts the stack, waits for health, and opens the browser. Held under
-// mu so a Restart mid-start queues behind the start instead of racing it.
+// start ensures Docker is up, starts the stack, waits for health, and opens the browser. TryLock:
+// while one operation is in flight, further clicks are DROPPED, not queued — five impatient Restart
+// clicks during a first pull must not replay five ups and open five browser tabs. The status line
+// already says what's happening.
 func start() {
-	mu.Lock()
+	if !mu.TryLock() {
+		return
+	}
 	defer mu.Unlock()
 	ctx := context.Background()
 
 	if !stack.DockerRunning(ctx) {
 		if !stack.DockerInstalled() {
-			setStatus("Docker isn't installed — install Docker Desktop, then Restart")
+			// Don't dead-end a newcomer on a grey status line: take them to the fix. Open the
+			// download page once, and leave a "Get Docker…" menu item for later.
+			mGetDocker.Show()
+			if !openedDockerPage {
+				openedDockerPage = true
+				if err := stack.OpenBrowser(dockerGetURL); err != nil {
+					log.Println("open docker page:", err)
+				}
+			}
+			setStatus("Docker is required — install it, start it, then click Restart")
 			return
 		}
+		mGetDocker.Hide()
 		setStatus("Starting Docker…")
 		stack.TryStartDocker(ctx)
 		if !waitDocker(ctx, 90*time.Second) {
@@ -112,10 +140,22 @@ func start() {
 			return
 		}
 	}
+	mGetDocker.Hide()
+
+	// `docker` on PATH does not imply the compose PLUGIN exists (e.g. `brew install docker` without
+	// it). Catch that here with an honest message instead of blaming the network later.
+	if !stack.ComposeAvailable(ctx) {
+		setStatus("Docker Compose is missing — update Docker Desktop, or install the compose plugin")
+		return
+	}
 
 	setStatus("Starting… (first run downloads the app)")
-	if err := sb.Up(ctx); err != nil {
-		setStatus("Couldn't start — check Docker has disk space")
+	// Bounded: a wedged pull must not hold the operation lock forever. 15 min covers a slow first
+	// download; after that the user gets an honest failure instead of a frozen "Starting…".
+	upCtx, cancel := context.WithTimeout(ctx, 15*time.Minute)
+	defer cancel()
+	if err := sb.Up(upCtx); err != nil {
+		setStatus("Couldn't start — check your internet connection and Docker's disk space")
 		log.Println("up:", err)
 		return
 	}
@@ -132,7 +172,10 @@ func start() {
 
 // openOrStart opens the browser if the app is already up, otherwise starts it first.
 func openOrStart() {
-	if sb.Healthy(context.Background()) {
+	// Deadline: a wedged localhost read (docker-proxy after a sleep/wake) must not hang the click.
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if sb.Healthy(ctx) {
 		if err := stack.OpenBrowser(sb.URL()); err != nil {
 			log.Println("open browser:", err)
 		}
@@ -142,10 +185,15 @@ func openOrStart() {
 }
 
 func stop() {
-	mu.Lock()
+	if !mu.TryLock() {
+		return // an operation is in flight — see start()
+	}
 	defer mu.Unlock()
 	setStatus("Stopping…")
-	if err := sb.Down(context.Background()); err != nil {
+	// Bounded like Up: never hold the lock forever on a wedged daemon.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	if err := sb.Down(ctx); err != nil {
 		setStatus("Couldn't stop")
 		log.Println("down:", err)
 		return

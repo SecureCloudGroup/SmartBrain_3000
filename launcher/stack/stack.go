@@ -8,6 +8,7 @@
 package stack
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net/http"
@@ -50,12 +51,17 @@ func (s Stack) ComposePath() string { return filepath.Join(s.Dir, composeName) }
 // URL is where the app is reachable in a browser.
 func (s Stack) URL() string { return fmt.Sprintf("http://localhost:%d", s.Port) }
 
-// Install writes the compose file (and creates ./data) so `docker compose` has something to run.
-// It is idempotent and always rewrites the file, so a launcher upgrade that ships a newer compose
-// definition takes effect on next start. The user's data in ./data is never touched.
+// Install writes the compose file so `docker compose` has something to run (user data lives in
+// named Docker volumes, not under this directory). Idempotent: a launcher upgrade that ships a newer
+// compose definition takes effect on next start, but an UNCHANGED file is left alone — rewriting it
+// every launch would make `up -d` recreate the containers mid-session (dropping the user's open
+// browser session) for no reason.
 func (s Stack) Install(compose []byte) error {
-	if err := os.MkdirAll(filepath.Join(s.Dir, "data"), 0o700); err != nil {
-		return fmt.Errorf("create data dir: %w", err)
+	if err := os.MkdirAll(s.Dir, 0o700); err != nil {
+		return fmt.Errorf("create app dir: %w", err)
+	}
+	if cur, err := os.ReadFile(s.ComposePath()); err == nil && bytes.Equal(cur, compose) {
+		return nil
 	}
 	if err := os.WriteFile(s.ComposePath(), compose, 0o600); err != nil {
 		return fmt.Errorf("write compose file: %w", err)
@@ -71,7 +77,7 @@ func (s Stack) composeArgs(args ...string) []string {
 
 func (s Stack) compose(ctx context.Context, args ...string) error {
 	cmd := exec.CommandContext(ctx, "docker", s.composeArgs(args...)...)
-	cmd.Dir = s.Dir // relative ./data in the compose file resolves under the app-data dir
+	cmd.Dir = s.Dir // stable project name (compose derives it from the working dir's basename)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("docker %v: %w: %s", args, err, out)
@@ -127,6 +133,7 @@ func dockerPathDirs(home string) []string {
 		"/opt/homebrew/bin",                               // Apple Silicon Homebrew (docker, colima)
 		filepath.Join(home, ".docker/bin"),                // newer Docker Desktop
 		filepath.Join(home, ".orbstack/bin"),              // OrbStack
+		filepath.Join(home, ".rd/bin"),                    // Rancher Desktop
 		"/Applications/Docker.app/Contents/Resources/bin", // Docker Desktop's bundled CLI
 	}
 }
@@ -173,12 +180,26 @@ func DockerInstalled() bool {
 }
 
 // DockerRunning reports whether the daemon is actually up (installed-but-not-started is the common
-// case on Desktop). `docker info` succeeds only when the daemon answers.
+// case on Desktop). `docker info` succeeds only when the daemon answers. Bounded to 5s per call:
+// a half-booted daemon (or wedged credential helper) can make `docker info` block indefinitely,
+// which would hold the launcher's operation lock forever and freeze every menu item.
 func DockerRunning(ctx context.Context) bool {
 	if !DockerInstalled() {
 		return false
 	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
 	return exec.CommandContext(ctx, "docker", "info").Run() == nil
+}
+
+// ComposeAvailable reports whether the `docker compose` plugin answers. Finding `docker` on PATH is
+// NOT enough: compose is a plugin discovered from its own directories, and a minimalist install
+// (e.g. `brew install docker` without the compose plugin) has the CLI but not compose — which would
+// otherwise fail later with an opaque error blamed on the network.
+func ComposeAvailable(ctx context.Context) bool {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	return exec.CommandContext(ctx, "docker", "compose", "version").Run() == nil
 }
 
 // startDockerArgs is the platform command to launch Docker Desktop, or nil where there's nothing to
@@ -188,7 +209,17 @@ func startDockerArgs() []string {
 	case "darwin":
 		return []string{"open", "-a", "Docker"}
 	case "windows":
-		return []string{"cmd", "/c", "start", "", "Docker Desktop"}
+		// `start "" "Docker Desktop"` needs an App Paths entry that doesn't exist under that name,
+		// so it silently no-ops on a default install. Launch the real executable.
+		pf := os.Getenv("ProgramFiles")
+		if pf == "" {
+			pf = `C:\Program Files`
+		}
+		exe := filepath.Join(pf, "Docker", "Docker", "Docker Desktop.exe")
+		if _, err := os.Stat(exe); err == nil {
+			return []string{exe}
+		}
+		return []string{"cmd", "/c", "start", "", "Docker Desktop.exe"}
 	default:
 		return nil
 	}

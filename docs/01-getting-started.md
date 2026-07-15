@@ -100,7 +100,7 @@ A quick path from zero to seeing what SmartBrain does:
 
 - Use **Lock** (top right) to drop the key from memory — your data is sealed until
   you unlock again. Locking also clears your provider keys from the gateway.
-- **Unlock** with your passphrase. Forgot it? Choose **Unlock with Recovery Key**
+- **Unlock** with your passphrase. Forgot it? Choose **Use recovery key**
   and enter the key from your Emergency Kit (dashes and letter case don't matter).
 
 ## Updating
@@ -116,7 +116,7 @@ How you update depends on how you installed:
   first**, pulls the latest code, rebuilds the image, restarts the stack, and verifies it's
   healthy. It prompts before making changes and runs on the host, never inside the container.
 
-Your data lives in a folder on your machine and is left untouched by an update. (More on
+Your data is kept in Docker volumes on your machine and is left untouched by an update. (More on
 backups: [Backup &amp; recovery](05-backup-recovery.md).)
 
 ## Troubleshooting
@@ -124,11 +124,14 @@ backups: [Backup &amp; recovery](05-backup-recovery.md).)
 Most first-run problems are one of these:
 
 - **"Docker daemon not reachable" / it fails immediately.** Docker isn't running. Start
-  Docker Desktop (or `colima start`), then reopen the app (or re-run the command).
+  Docker Desktop (or `colima start`), then click **Restart** in the menu (or reopen the app).
+  Note: Docker Desktop's very first launch asks you to accept its terms — do that first.
 - **The page won't load at http://localhost:33000.** Give a first run another minute (it's
-  downloading the image), then try again. Still stuck? Check the logs: `docker compose -f
-  docker-compose.release.yml logs smartbrain` (from source, use `compose/docker-compose.yml`).
-- **Chat says "No models available."** You haven't connected a model yet. If Ollama
+  downloading the image) — the menu's status line says what it's doing. If it reads *"Still
+  warming up"*, click **Open SmartBrain** again in a moment. Still stuck? Check the logs:
+  `docker compose -f docker-compose.release.yml logs smartbrain` (from source, use
+  `compose/docker-compose.yml`).
+- **Chat says "No models available yet."** You haven't connected a model. If Ollama
   is running, the Chat screen offers a one-tap **Connect**; otherwise add a cloud key
   under **Settings → Cloud providers**. See [Connect a model](02-models.md).
 - **Semantic search returns keyword results ("degraded").** The embedding model isn't

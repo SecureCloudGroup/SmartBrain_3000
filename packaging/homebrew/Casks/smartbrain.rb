@@ -27,15 +27,19 @@ cask "smartbrain" do
   # as a dependency, because plenty of this audience run Colima / OrbStack / Engine instead — the
   # launcher detects Docker and guides the user if it's missing.
   caveats <<~EOS
-    SmartBrain runs on Docker. If you don't have it yet, install Docker Desktop first and start it:
-      https://docs.docker.com/get-docker/
+    SmartBrain runs on Docker. If you don't have it yet, install Docker first (Docker Desktop is the
+    easiest; Colima/OrbStack also work) and start it: https://docs.docker.com/get-docker/
+    Note: Docker Desktop's own first launch asks you to accept its terms — do that before continuing.
 
     Then open SmartBrain from your Applications folder. It's a menu-bar app — look for its icon at the
     top-right of your screen, click it, and choose "Open SmartBrain". The first run downloads the app
     image (a minute or two), then opens it in your browser at http://localhost:33000.
+
+    Your data lives in Docker volumes and survives uninstalls; back it up in-app (Settings).
   EOS
 
-  # "zap" is what `brew uninstall --zap` removes. Your knowledge lives here — a plain uninstall keeps
-  # it; only an explicit zap clears it.
+  # "zap" removes the launcher's config dir. The user's DATA is in Docker volumes (smartbrain_data /
+  # bifrost_data), which Homebrew cannot remove — deliberate: uninstalling an app should not silently
+  # shred a knowledge base. Removing the data is an explicit `docker volume rm` by the user.
   zap trash: "~/Library/Application Support/SmartBrain"
 end

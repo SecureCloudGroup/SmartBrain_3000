@@ -16,12 +16,15 @@ leaves SmartBrain running, like Docker Desktop's own tray).
 The target user won't clone a repo or run a build. This gives them an app icon that Just Works, while
 keeping the honest, transparent core: the launcher owns no hidden state. It writes **one** file — the
 release `docker-compose.release.yml` — into a per-user folder and shells out to `docker compose`
-exactly as you would by hand. Your knowledge lives in `./data` beside that file:
+exactly as you would by hand:
 
 - macOS: `~/Library/Application Support/SmartBrain/`
 - Windows: `%APPDATA%\SmartBrain\`
 
-Back up that folder and you've backed up everything.
+Your knowledge lives in named Docker volumes (`smartbrain_data`, `bifrost_data`) — not bind mounts,
+deliberately: on Linux a compose-created bind directory is root-owned and the non-root containers
+can't write to it. Back up with the in-app encrypted backup (Settings → Account & Data); uninstalling
+the launcher never touches the volumes.
 
 ## No code-signing certificate (on purpose)
 

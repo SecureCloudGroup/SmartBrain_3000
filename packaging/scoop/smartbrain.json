@@ -4,7 +4,7 @@
   "homepage": "https://github.com/SecureCloudGroup/SmartBrain_3000",
   "license": "Elastic-2.0",
   "notes": [
-    "SmartBrain needs Docker (Desktop, Colima, or Engine).",
+    "SmartBrain needs Docker (Docker Desktop, or Engine under WSL2).",
     "Run 'smartbrain' or use the Start-menu shortcut; first run downloads the app image and opens it in your browser."
   ],
   "architecture": {
