@@ -175,6 +175,23 @@ brew list --cask 2>/dev/null | grep -i smartbrain   # (no output)
 curl -sI http://localhost:33000            # connection refused
 ```
 
+## Appendix B½ · A free, genuine fresh-Windows machine (the untested platform)
+
+Windows is the platform no one has tested, and no container can stand in for it (Docker on Windows
+runs Linux VMs; Scoop, the tray exe, Docker Desktop startup and SmartScreen only exist on real
+Windows). Microsoft gives away ready-made evaluation VMs:
+
+1. Download the **Windows 11 development environment** VM from
+   https://developer.microsoft.com/windows/downloads/virtual-machines/ — pick the image for your
+   hypervisor (VMware/VirtualBox/Hyper-V; on an Apple Silicon Mac use the ARM64 ISO with **UTM**
+   instead, or run it on a spare PC). ~90-day license, completely clean.
+2. Boot it, and do **nothing else first** — the point is the virgin state.
+3. Run the walkthrough from Stage 0 with the **Windows/Scoop** column: `smartbrain.securecloudgroup.com`
+   → the Scoop card → watch for SmartScreen (there should be none), the tray icon, Docker Desktop
+   detection (install Docker Desktop *when the launcher tells you to* — that exercises the no-Docker
+   cold start on this platform), first-run, and the vault share against your Mac as environment B.
+4. Log per-stage results in the table above; the Windows rows are still empty.
+
 ## Appendix B · Automating Stage 0 (regression guard)
 
 Stage 0 for Linux can be automated so it never silently regresses: a CI job on a fresh Ubuntu runner
