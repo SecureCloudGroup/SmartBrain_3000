@@ -39,7 +39,7 @@ jobs:
       - name: Copy the multi-arch image
         run: |
           docker buildx imagetools create \
-            --tag ghcr.io/securecloudgroup/bifrost:${{ inputs.tag }} \
-            docker.io/maximhq/bifrost:${{ inputs.tag }}
+            --tag ghcr.io/securecloudgroup/bifrost:${{ inputs.tag || 'v1.6.4' }} \
+            docker.io/maximhq/bifrost:${{ inputs.tag || 'v1.6.4' }}
       - name: Verify
-        run: docker buildx imagetools inspect ghcr.io/securecloudgroup/bifrost:${{ inputs.tag }}
+        run: docker buildx imagetools inspect ghcr.io/securecloudgroup/bifrost:${{ inputs.tag || 'v1.6.4' }}
