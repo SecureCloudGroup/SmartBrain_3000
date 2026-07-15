@@ -188,6 +188,38 @@ def test_extract_text_tool_call_preserves_url_arg() -> None:
     assert len(out) == 1 and json.loads(out[0]["function"]["arguments"])["url"] == "https://example.com/page"
 
 
+def test_function_keyed_tool_blob_gets_guidance_notice(monkeypatch) -> None:
+    # Qwen2.5-Coder-style leak: a {"function": ..., "arguments": ...} blob ("function"
+    # instead of "name", so unrecoverable). The reply is kept but a guidance notice is
+    # appended so the user blames the model, not the app.
+    ctx, audit, approvals = _wired()
+    blob = '```json\n{"function": "read_document", "arguments": {"doc_id": "1"}}\n```'
+    _script(monkeypatch, [_text(blob)])
+    r = _run(ctx, audit, approvals)
+    assert r["status"] == "complete"
+    assert r["message"].startswith(blob)  # original reply preserved
+    assert "Settings → Model routing" in r["message"]  # guidance appended
+
+
+def test_normal_prose_gets_no_tool_notice(monkeypatch) -> None:
+    # Prose that merely talks about tools/functions/arguments must NOT trip the probe.
+    ctx, audit, approvals = _wired()
+    prose = 'The "arguments" of a function are its parameters; a tool call names both.'
+    _script(monkeypatch, [_text(prose)])
+    r = _run(ctx, audit, approvals)
+    assert r["status"] == "complete" and r["message"] == prose
+
+
+def test_looks_like_tool_attempt_shapes() -> None:
+    assert agent._looks_like_tool_attempt('{"function": "read_document", "arguments": {"doc_id": "1"}}')
+    assert agent._looks_like_tool_attempt('```json\n{"tool": "search", "parameters": {"q": "tea"}}\n```')
+    assert agent._looks_like_tool_attempt('{"tool_call": {"name": "x", "arguments": {}}}')  # one envelope deep
+    assert agent._looks_like_tool_attempt('{"name": "not_a_tool", "arguments": {}}')  # unknown tool still flagged
+    assert not agent._looks_like_tool_attempt("a normal answer, no tools here")
+    assert not agent._looks_like_tool_attempt('use the "arguments" keyword when calling a function')  # prose, not JSON
+    assert not agent._looks_like_tool_attempt('{"function": "read_document"}')  # no arguments-ish key
+
+
 def test_degrades_when_tools_unsupported(monkeypatch) -> None:
     ctx, audit, approvals = _wired()
 

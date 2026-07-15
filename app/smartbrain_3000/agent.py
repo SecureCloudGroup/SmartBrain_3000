@@ -34,6 +34,18 @@ _TOOL_LEAK_MESSAGE = (
     "happen with smaller local models. Please try again, or switch to a model with reliable tool "
     "calling under Settings → Model routing."
 )
+# Key spellings models use in a text-emitted call: the callee and its arguments. Used only by
+# the strict JSON probe below — prose that merely contains these words never matches.
+_CALLEE_KEYS = ("function", "tool", "tool_call", "name")
+_ARGS_KEYS = ("arguments", "parameters", "args")
+# APPENDED (not replacing — this shape is too loose to safely hide the reply) when the model
+# printed a tool-call-shaped blob we can neither run nor attribute to a known tool. Without it
+# the user sees raw JSON and assumes the app is broken rather than the model.
+_TOOL_TEXT_NOTICE = (
+    "\n\n> ⚠️ This model tried to use a tool as plain text — it likely doesn't support tool "
+    "calling. For document/task requests, pick a tool-capable Chat model under "
+    "Settings → Model routing (coder-tuned models often can't)."
+)
 
 
 def _extract_text_tool_calls(content: str) -> list[dict]:
@@ -73,6 +85,37 @@ def _looks_like_tool_call(content: str) -> bool:
         return False
     match = _TOOL_NAME_IN_TEXT.search(content)
     return bool(match and tools.get_tool(match.group(1)) is not None)
+
+
+def _looks_like_tool_attempt(content: str) -> bool:
+    """True if content carries a tool-call-shaped JSON blob we can't run or attribute.
+
+    Catches the shapes the recovery paths above miss — e.g. Qwen2.5-Coder's
+    ``{"function": "read_document", "arguments": {...}}`` (a "function"/"tool" key instead
+    of "name"), or an unknown tool name — so the reply gets a guidance note instead of
+    looking like a broken app. Strict ``json.loads`` on fenced/whole-message blobs only;
+    a normal prose answer (even one discussing tools) never matches.
+    """
+    assert isinstance(content, str), "content must be a string"
+    if not any(f'"{k}"' in content for k in _ARGS_KEYS):
+        return False  # cheap gate: a call blob always carries a quoted arguments-ish key
+    candidates = _TOOL_CALL_FENCE.findall(content)
+    stripped = content.strip()
+    if stripped.startswith("{"):
+        candidates.append(stripped)
+    for raw in candidates[:_MAX_TOOL_CALLS]:  # bounded (P10 #2)
+        try:
+            obj = json.loads(raw)
+        except (ValueError, TypeError):
+            continue
+        if isinstance(obj, dict):
+            inner = obj.get("tool_call") or obj.get("function")
+            if isinstance(inner, dict):  # one envelope deep only, no recursion (P10 #1):
+                obj = inner              # e.g. {"tool_call": {"name": ..., "arguments": ...}}
+            if (any(isinstance(obj.get(k), str) for k in _CALLEE_KEYS)
+                    and any(k in obj for k in _ARGS_KEYS)):
+                return True
+    return False
 
 
 def _first_message(data: dict) -> dict:
@@ -205,6 +248,8 @@ def run_turn(ctx, audit, approvals, *, messages, model, conversation_id, turn_id
                 tool_calls, content = recovered, ""  # the JSON WAS the call — never surface it
             elif _looks_like_tool_call(content):
                 content = _TOOL_LEAK_MESSAGE  # leaked an unrunnable tool blob — hide the raw JSON
+            elif _looks_like_tool_attempt(content):
+                content += _TOOL_TEXT_NOTICE  # keep the reply, but explain the odd JSON blob
         if not tool_calls:
             return {"status": "complete", "message": content, "degraded": False, "steps": step + 1}
         if calls + len(tool_calls) > _MAX_TOOL_CALLS:

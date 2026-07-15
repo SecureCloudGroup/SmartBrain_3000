@@ -107,7 +107,7 @@ A quick path from zero to seeing what SmartBrain does:
 
 How you update depends on how you installed:
 
-- **Homebrew (macOS):** `brew upgrade --cask smartbrain`, then reopen the app.
+- **Homebrew (macOS):** `brew update && brew upgrade --cask smartbrain`, then reopen the app.
 - **Scoop (Windows):** `scoop update smartbrain`, then reopen the app.
 - **Release compose / desktop app:** it pulls the latest image on start, so updating is just a
   **restart** — use the launcher's **Restart**, or run `docker compose -f

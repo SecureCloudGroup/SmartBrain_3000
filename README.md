@@ -92,7 +92,7 @@ from install to fully working; the rest are optional power-ups:
 
 ### Updating
 
-- **Homebrew:** `brew upgrade --cask smartbrain` · **Scoop:** `scoop update smartbrain` — then reopen the app.
+- **Homebrew:** `brew update && brew upgrade --cask smartbrain` · **Scoop:** `scoop update smartbrain` — then reopen the app.
 - **Release compose / launcher:** it pulls the latest image on start, so updating is just a **restart** (the launcher's **Restart**, or re-run the compose command).
 - **From source:** `python3 installer/install.py update` backs up your encrypted data first, then rebuilds, restarts, and verifies — prompting before changes, on the host, never inside the container.
 
