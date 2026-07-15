@@ -10,11 +10,6 @@
 name: Mirror bifrost
 
 on:
-  # TEMPORARY bootstrap trigger: v0.4.1 was tagged before this workflow reached main, so it cannot be
-  # dispatched yet — but the tag's launcher already references the ghcr image. Push-run it from this
-  # branch once to create the image; remove this trigger before merge.
-  push:
-    branches: [feat-mirror-bifrost]
   workflow_dispatch:
     inputs:
       tag:
