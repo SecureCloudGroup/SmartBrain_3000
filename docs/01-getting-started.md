@@ -123,6 +123,8 @@ backups: [Backup &amp; recovery](05-backup-recovery.md).)
 
 Most first-run problems are one of these:
 
+- **macOS asks if SmartBrain may "access data from other apps."** Click **Allow** — that's the
+  launcher locating your Docker installation; it reads nothing else.
 - **"Docker daemon not reachable" / it fails immediately.** Docker isn't running. Start
   Docker Desktop (or `colima start`), then click **Restart** in the menu (or reopen the app).
   Note: Docker Desktop's very first launch asks you to accept its terms — do that first.
