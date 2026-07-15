@@ -175,8 +175,8 @@
       const r = await api.runSchedule(s.id);
       notice =
         r.status === "awaiting_approval" ? `“${s.title}” needs approval — see Activity.`
-        : r.status === "error" ? `“${s.title}” failed — see the Output tab.`
-        : `“${s.title}” ran — see the Output tab.`;
+        : r.status === "error" ? `“${s.title}” failed — details below.`
+        : `“${s.title}” ran — output below.`;
       await Promise.all([load(), loadOutput()]);
       tab = "output"; // the result now shows at the top of Output
     } catch (err) {

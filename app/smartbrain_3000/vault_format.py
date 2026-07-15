@@ -438,6 +438,16 @@ def open_vault(data: bytes, vault_key: bytes) -> tuple[dict, list[dict]]:
     if not isinstance(rows, list) or len(rows) > MAX_VAULT_DOCS or len(rows) != payload["doc_count"]:
         raise VaultError("vault index is malformed")
 
+    # Surface the vault's real name/description — they live ONLY in the encrypted index (the sealed
+    # manifest deliberately carries no topic), and the index hash is signed, so these are as trusted
+    # as the documents. Namespaced under "_sealed" so they can't be confused with plaintext fields.
+    name = index.get("name")
+    description = index.get("description")
+    payload["_sealed"] = {
+        "name": name[:MAX_TITLE] if isinstance(name, str) else "",
+        "description": description[:MAX_TITLE] if isinstance(description, str) else "",
+    }
+
     docs: list[dict] = []
     for row in rows:  # bounded by MAX_VAULT_DOCS
         uid, digest, obj = row.get("uid"), row.get("hash"), row.get("obj")

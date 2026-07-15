@@ -104,6 +104,9 @@
   // one-tap connect right here instead of sending the user off to Settings (the all-local
   // first-run cliff). null = nothing detected.
   let detected = $state<{ provider: "ollama" | "mlx"; url: string } | null>(null);
+  // Until the probe answers, show NOTHING rather than "add a cloud key" guidance that a detected
+  // Ollama will contradict a second later — first-run is the worst moment for conflicting advice.
+  let probed = $state(false);
   let connecting = $state(false);
   const providers = $derived([...new Set(models.map((m) => m.provider))].sort());
   const providerModels = $derived(models.filter((m) => m.provider === provider));
@@ -179,6 +182,8 @@
       else detected = null;
     } catch {
       detected = null; // locked / gateway not ready — fall back to the Settings guidance
+    } finally {
+      probed = true;
     }
   }
 
@@ -640,7 +645,7 @@
     </span>
   </div>
 
-  {#if models.length === 0}
+  {#if models.length === 0 && (detected || probed)}
     <div class="card">
       {#if detected}
         {@const name = detected.provider === "ollama" ? "Ollama" : "MLX"}

@@ -84,12 +84,28 @@ def test_two_separate_users_can_share_a_vault(alice: TestClient, bob: TestClient
     hits = bob.get("/api/kb/search", params={"q": "quokka", "mode": "lexical"}).json()["results"]
     assert [h["title"] for h in hits] == ["Regulations"]
 
-    # ...and it landed in a vault marked as imported, scoped and searchable on its own.
+    # ...and it landed in a vault marked as imported, scoped and searchable on its own — carrying the
+    # REAL name Alice gave it (recovered from the encrypted index, not a plaintext label).
     vaults = bob.get("/api/vaults").json()["vaults"]
     assert len(vaults) == 1 and vaults[0]["kind"] == "imported" and vaults[0]["doc_count"] == 2
+    assert vaults[0]["name"] == "Expert pack"
     scoped = bob.get("/api/kb/search", params={"q": "wombat", "mode": "lexical",
                                                "vault": vaults[0]["id"]}).json()["results"]
     assert [h["title"] for h in scoped] == ["Guidance"]
+
+
+def test_the_vault_name_never_appears_in_plaintext(alice: TestClient) -> None:
+    # The name is the topic ("Divorce filings" says plenty). It must live ONLY inside the encrypted
+    # index: anyone holding the FILE but not the key — a cloud host, a mail relay — learns the vault's
+    # size and publisher, never what it's about.
+    vid = _make_vault(alice, [("Doc", "contents here")], name="Divorce filings ZEBRA77")
+    blob, key = _export(alice, vid, _PASS_A)
+    assert b"ZEBRA77" not in blob, "vault name leaked into the artifact's plaintext"
+    manifest = vault_format.read_manifest(blob)
+    assert manifest["publisher"]["label"] == ""
+    # ...and the importer still recovers the real name, because it rides the encrypted index.
+    opened, _docs = vault_format.open_vault(blob, vault_format.decode_vault_key(key))
+    assert opened["_sealed"]["name"] == "Divorce filings ZEBRA77"
 
 
 def test_bobs_copy_is_re_sealed_not_a_copied_ciphertext(alice: TestClient, bob: TestClient) -> None:
