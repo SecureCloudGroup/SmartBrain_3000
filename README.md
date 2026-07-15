@@ -36,26 +36,34 @@ on your own computer — macOS, Linux, or Windows.
 
 ## Quickstart
 
-You need **Docker** (Desktop, Engine, or Colima), **Python 3** (just to run the
-installer), and **git** (to clone the repo).
+The only prerequisite is **[Docker](https://docs.docker.com/get-docker/)**, running. Then
+install the SmartBrain app from **https://smartbrain.securecloudgroup.com**, or with one command:
 
-**One line** (macOS / Linux) — clones and installs:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/SecureCloudGroup/SmartBrain_3000/main/installer/bootstrap.sh | sh
-```
-
-**Or do it by hand** (any OS, including Windows PowerShell):
+**macOS** — in the Terminal app:
 
 ```sh
-git clone https://github.com/SecureCloudGroup/SmartBrain_3000.git
-cd SmartBrain_3000
-python3 installer/install.py install
+brew install --cask securecloudgroup/tap/smartbrain
 ```
 
-The installer checks prerequisites, builds the image locally, starts the stack,
-and waits until the app is healthy — then opens it for you. The **first run
-builds the image, so it takes a few minutes** (quick after that). In the app:
+**Windows** — in Terminal or PowerShell, via [Scoop](https://scoop.sh):
+
+```powershell
+scoop bucket add securecloudgroup https://github.com/SecureCloudGroup/scoop-bucket
+scoop install securecloudgroup/smartbrain
+```
+
+_(`winget install SecureCloudGroup.SmartBrain` is coming soon.)_
+
+**Any OS, straight from Docker** — download the release compose file and run it (no app, no clone):
+
+```sh
+curl -fsSLO https://raw.githubusercontent.com/SecureCloudGroup/SmartBrain_3000/main/compose/docker-compose.release.yml
+docker compose -f docker-compose.release.yml up -d
+```
+
+Homebrew and Scoop install a small **desktop launcher** (a menu-bar / tray app) that starts the
+stack and opens the app for you. The app runs at **http://localhost:33000** — the first run
+**downloads a prebuilt image** (a minute or two), then starts instantly. In the app:
 
 1. **Set a passphrase** and **save your Emergency Kit** (a one-time Recovery
    Key). There is no password reset — the Recovery Key is the only way back in
@@ -65,8 +73,9 @@ builds the image, so it takes a few minutes** (quick after that). In the app:
    **detects it and offers a one-tap connect** right on the Chat screen.
 3. **Start chatting.**
 
-If anything looks off later, run `python3 installer/install.py doctor` — it can
-restart the stack and pull the embedding model for you.
+> **Building from source?** Contributors can `git clone` the repo and run
+> `python3 installer/install.py install` (this also needs git + Python, and compiles the image
+> locally). See [Install from source](docs/01-getting-started.md#install-from-source-for-contributors).
 
 ### See it in action
 
@@ -83,10 +92,11 @@ from install to fully working; the rest are optional power-ups:
 
 ### Updating
 
-`python3 installer/install.py update` backs up your encrypted data, pulls the
-latest version, rebuilds the image, restarts the stack, and verifies it's
-healthy. It prompts before making changes, and runs from your machine (the
-host), never from inside the container.
+- **Homebrew:** `brew upgrade --cask smartbrain` · **Scoop:** `scoop update smartbrain` — then reopen the app.
+- **Release compose / launcher:** it pulls the latest image on start, so updating is just a **restart** (the launcher's **Restart**, or re-run the compose command).
+- **From source:** `python3 installer/install.py update` backs up your encrypted data first, then rebuilds, restarts, and verifies — prompting before changes, on the host, never inside the container.
+
+Your data lives in a folder on your machine and is left untouched by an update.
 
 ## Going further (optional)
 

@@ -9,7 +9,9 @@ Knowledge, Planner, Email, and Activity — while Settings and setup stay on the
 ## Chat
 
 Talk to your assistant. Chat can optionally **use tools** to act on your behalf —
-search your knowledge, add a task, fetch a public web page, send an email, etc.
+search your knowledge, **read or summarize a whole document**, **save a note back to
+your knowledge**, add a task, fetch a public web page, send an email, and more. Replies
+are formatted (headings, lists, tables, and code blocks render properly).
 
 Tools are **risk-tiered**, and this is the core safety idea:
 
@@ -29,8 +31,12 @@ Activity and approve (Irreversible, with an extra confirm).
 ## Knowledge
 
 A private, encrypted knowledge base. Drag in **PDFs, Word (.docx), PowerPoint (.pptx),
-Excel (.xlsx), HTML and text files**, paste a URL, or write a note — then search them
-three ways:
+Excel (.xlsx), HTML and text files** — a whole folder at once if you like — paste a URL,
+or write a note. Uploads don't block: they land right away and a background indexer makes
+them searchable within seconds. Adding the same content twice is a no-op — SmartBrain
+recognises it and keeps the one copy rather than cluttering your results with duplicates.
+
+Search your knowledge three ways:
 
 - **Best** (default) — combines both of the below. Keyword search nails an exact name
   or invoice number; meaning search finds a paraphrase. Each misses what the other
@@ -51,13 +57,38 @@ which file and page it got the answer from.
 
 ![The Knowledge page: add a document, then search it](assets/05-knowledge.png)
 
-![Add a note, Reindex, search by meaning, then ask Chat](assets/gifs/04-add-knowledge.gif)
+![Add a document, then search your knowledge and ask Chat about it](assets/gifs/04-add-knowledge.gif)
 
 > Semantic search needs the embedding model pulled (the installer does this for you).
 > If results say *"degraded"*, run `ollama pull nomic-embed-text:v1.5` on the Desktop
 > and Reindex — see [Embeddings](02-models.md#embeddings-for-knowledge-search).
 
 Your knowledge is also what external tools can read over [MCP](04-mcp.md).
+
+## Vaults
+
+A **vault** is a named set of your knowledge documents — the unit you scope a search to,
+and the unit you share. Vaults live on the Knowledge page.
+
+- **Create one and add documents.** Tick documents in your list, then add them to a new or
+  existing vault. A document can belong to several vaults; adding it to a vault never moves
+  or copies the file, and deleting a vault never deletes its documents — it only removes the
+  grouping.
+- **Search inside one.** Pick a vault next to the search box to search *only* its documents
+  — e.g. keep a "Work" vault and a "Home" vault and ask each separately.
+- **Share it.** **Export** a vault and SmartBrain seals it into a single `.sbvault` file and
+  shows you a one-time key (starting `SBVK1-`). Send the file however you like, then give the
+  person the key over a **different** channel — together they are the contents in the clear,
+  so keep them apart.
+- **Import someone else's.** Pick the `.sbvault` file and paste the key. Its documents are
+  **re-encrypted under your own passphrase** as they land (nothing you import can read or
+  weaken your data), and anything you already have is kept as-is rather than overwritten. The
+  result shows the publisher's fingerprint — the one thing that says *who* the knowledge came
+  from.
+
+Creating, adding, and searching a vault work everywhere, including a paired phone. **Exporting and
+importing a vault are done on the Desktop** — sharing a vault's contents, or bringing new ones in, is
+sensitive, so those actions live in the Desktop app.
 
 ## Planner
 
