@@ -220,6 +220,10 @@ jobs:
           git add packaging/
           git commit -m "build(packaging): bump manifests to ${{ github.ref_name }}"
           git push -u origin "$BR"
+          # The repo may forbid Actions from creating PRs ("Allow GitHub Actions to create and
+          # approve pull requests" unchecked). The branch is pushed either way — a human can open the
+          # PR from it — and the RELEASE itself already succeeded, so never fail the job over this.
           gh pr create --base main --head "$BR" \
             --title "build(packaging): bump manifests to ${{ github.ref_name }}" \
-            --body "Automated: regenerated the cask, winget, and Scoop manifests for ${{ github.ref_name }} from the release assets. This run already updated the live Homebrew tap + Scoop bucket and opened the winget-pkgs PR; this PR just keeps packaging/ in sync."
+            --body "Automated: regenerated the cask, winget, and Scoop manifests for ${{ github.ref_name }} from the release assets. This run already updated the live Homebrew tap + Scoop bucket and opened the winget-pkgs PR; this PR just keeps packaging/ in sync." \
+            || echo "::warning::Could not open the packaging-bump PR (Actions may lack PR-creation permission). Branch $BR is pushed — open the PR manually, or enable 'Allow GitHub Actions to create and approve pull requests' in Settings → Actions → General."
