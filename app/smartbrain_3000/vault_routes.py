@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field
 
 from . import gateway, identity, kb as kbmod, netguard, tools, vault_format
 from .data_routes import _reauthorize, _require_desktop_local
-from .vaults import IMPORTED
+from .vaults import IMPORT, IMPORTED
 
 router = APIRouter()
 log = logging.getLogger(__name__)
@@ -483,7 +483,23 @@ def subscribe_vault(request: Request, body: SubscribeIn) -> dict:
                 "added_at": datetime.now(timezone.utc).date().isoformat(),
                 "last_checked": None},
     )
-    applied = _apply_docs(request, vaults, knowledge, local_id, manifest, docs)
+    try:
+        applied = _apply_docs(request, vaults, knowledge, local_id, manifest, docs)
+    except Exception:
+        # All-or-nothing, for real: the vault row + pin land BEFORE the documents, so a mid-apply
+        # failure (KB write, embed, disk) would otherwise strand a partial vault whose pin makes
+        # every RETRY hit the duplicate-409 above — self-blocking until a manual delete. Roll back
+        # everything this call minted: the vault row and its memberships, then the import-origin
+        # documents (a deduped member is the USER's own doc, origin owner — kept).
+        minted = [m["id"] for m in vaults.members(local_id) if m["origin"] == IMPORT]
+        vaults.delete(local_id)
+        for doc_id in minted:  # bounded by _MAX_DOCS_PER_VAULT
+            knowledge.delete(doc_id)
+        # Traceback for the bug report; vault_id + host only — never the URL (its path names the topic).
+        log.exception("subscribe failed applying vault %s (host %s); rolled back",
+                      manifest["vault_id"], host)
+        raise HTTPException(status_code=500, detail=(
+            "subscribe failed part-way — nothing was kept; try again")) from None
 
     log.info("subscribed to vault %s (host %s): %d added, %d already present",
              manifest["vault_id"], host, applied["added"], applied["duplicates"])

@@ -180,6 +180,10 @@ def _guarded_get(url: str, allowed_ct: tuple[str, ...], max_bytes: int) -> dict:
             host = parsed.hostname
             if not host:
                 raise FetchError("no host in URL")
+            try:
+                parsed.port  # urlparse validates the port lazily, on ACCESS: a malformed one
+            except ValueError:  # (":abc", ":99999") must be a refusal like any other, not a 500
+                raise FetchError("invalid port in URL") from None
             ip = _validated_ip(host)  # re-validated on every hop
             # httpx.Response (from send(stream=True)) is NOT a context manager — close
             # it explicitly in finally, or the body/connection leaks (and `with` raises).

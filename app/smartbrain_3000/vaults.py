@@ -28,6 +28,7 @@ from .secrets import MASTER_KEY_BYTES
 _NONCE_BYTES = 12
 _MAX_VAULTS = 500  # verifiable bound on the vault list (P10 #2)
 _MAX_DOCS_PER_VAULT = 10_000  # bound on one vault's membership
+_MAX_SOURCES_PER_MEMBER = 32  # bound on upstream {uid, hash} entries sharing one deduped doc
 _MAX_NAME = 200
 _MAX_DESCRIPTION = 2000
 
@@ -235,19 +236,44 @@ class VaultStore:
         assert vault_id and doc_id, "vault id + doc id required"
         return b"vault_doc:" + vault_id.encode("utf-8") + b":" + doc_id.encode("utf-8")
 
+    def _open_member(self, vault_id: str, doc_id: str, nonce: bytes, ciphertext: bytes) -> list[dict]:
+        """Decrypt one membership body as a LIST of {uid, hash} entries.
+
+        Backward compat: a body written before multi-source support is a single dict — read it as
+        a one-entry list (the AAD is unchanged, so old rows decrypt as-is).
+        """
+        body = json.loads(
+            self._aes.decrypt(nonce, ciphertext, self._member_aad(vault_id, doc_id)).decode("utf-8"))
+        return [body] if isinstance(body, dict) else body
+
     def note_member_source(self, vault_id: str, doc_id: str, uid: str, content_hash: str) -> None:
         """Record where a member CAME FROM: the publisher's ``uid`` (the update key — which local
         document is upstream's X?) and the SIGNED content ``hash`` (does the local copy still match
         what the publisher shipped?). Set by import/subscribe; owner-added rows never get one.
+
+        The body is a LIST of {uid, hash} entries, appended-or-replaced by uid: two upstream docs
+        with identical content dedupe to ONE local doc, and BOTH uids must survive on that shared
+        row — overwriting would silently lose the first, and a future update (Stage D) would
+        re-add it as "new" or mis-diff. Bounded by _MAX_SOURCES_PER_MEMBER.
 
         Encrypted, not plaintext columns: a stored content hash is a plaintext fingerprint of
         encrypted content — exactly what we don't keep (kbindex.content_hash's rule) — and where a
         document came from is as sensitive as what it says (kb._seal's rule).
         """
         assert vault_id and doc_id and uid and content_hash, "vault/doc/uid/hash required"
+        row = self._conn.execute(
+            "SELECT nonce, ciphertext FROM vault_documents WHERE vault_id = ? AND doc_id = ?;",
+            [vault_id, doc_id],
+        ).fetchone()
+        entries: list[dict] = []
+        if row is not None and row[0] is not None and row[1] is not None:
+            entries = self._open_member(vault_id, doc_id, bytes(row[0]), bytes(row[1]))
+        entries = [e for e in entries if e["uid"] != uid]  # replace-by-uid: re-noting updates the hash
+        entries.append({"uid": uid, "hash": content_hash})
+        assert len(entries) <= _MAX_SOURCES_PER_MEMBER, "too many upstream sources for one member"
         nonce = os.urandom(_NONCE_BYTES)
-        plaintext = json.dumps({"uid": uid, "hash": content_hash}).encode("utf-8")
-        ciphertext = self._aes.encrypt(nonce, plaintext, self._member_aad(vault_id, doc_id))
+        ciphertext = self._aes.encrypt(
+            nonce, json.dumps(entries).encode("utf-8"), self._member_aad(vault_id, doc_id))
         self._conn.execute(
             "UPDATE vault_documents SET nonce = ?, ciphertext = ? WHERE vault_id = ? AND doc_id = ?;",
             [nonce, ciphertext, vault_id, doc_id],
@@ -257,8 +283,10 @@ class VaultStore:
         """{uid: {doc_id, hash, origin}} for every member with a recorded upstream source.
 
         The lookup table a vault update applies against: uid present -> update/skip decision;
-        uid absent -> a new document. Bounded decrypt-scan (<= _MAX_DOCS_PER_VAULT). Rows without
-        a body — documents the user added to the vault themselves — have no upstream uid and are
+        uid absent -> a new document. Each row's entries fan out to their own uid keys — several
+        uids mapping to the SAME doc_id is the dedupe case, not an error. Bounded decrypt-scan
+        (<= _MAX_DOCS_PER_VAULT rows x _MAX_SOURCES_PER_MEMBER entries). Rows without a body —
+        documents the user added to the vault themselves — have no upstream uid and are
         skipped: they are not errors, they are simply not the publisher's to touch.
         """
         assert vault_id, "vault id required"
@@ -272,10 +300,8 @@ class VaultStore:
             if row[2] is None or row[3] is None:
                 continue  # owner-added row: no upstream source to map
             doc_id = str(row[0])
-            body = json.loads(
-                self._aes.decrypt(bytes(row[2]), bytes(row[3]), self._member_aad(vault_id, doc_id))
-                .decode("utf-8"))
-            out[body["uid"]] = {"doc_id": doc_id, "hash": body["hash"], "origin": str(row[1])}
+            for entry in self._open_member(vault_id, doc_id, bytes(row[2]), bytes(row[3])):
+                out[entry["uid"]] = {"doc_id": doc_id, "hash": entry["hash"], "origin": str(row[1])}
         return out
 
     def import_provenance(self, doc_id: str) -> dict | None:

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import zipfile
 from collections.abc import Iterator
 
@@ -229,6 +230,54 @@ def test_localhost_is_refused_by_the_real_netguard(bob: TestClient) -> None:
     assert bob.get("/api/vaults").json()["vaults"] == []
 
 
+def test_a_malformed_port_is_a_clean_400_not_a_500(bob: TestClient) -> None:
+    # urlparse validates the port lazily, on attribute ACCESS: a malformed port used to raise
+    # ValueError inside the guard — past the connect-error except tuple — and surface as a 500
+    # whose log line carries the full URL. It must be the same clean 400 as every other refusal.
+    # No monkeypatch: the port check precedes DNS, so this is deterministic offline.
+    for url in ("https://vaults.example.com:99999/pack.sbvault",
+                "https://vaults.example.com:abc/pack.sbvault"):
+        r = bob.post("/api/vaults/subscribe", json={"url": url})
+        assert r.status_code == 400, r.text
+        detail = r.json()["detail"]
+        assert "port" in detail
+        assert "pack.sbvault" not in detail and "vaults.example.com" not in detail, \
+            "the URL must not echo into the error"
+    assert bob.get("/api/vaults").json()["vaults"] == []
+
+
+def test_a_mid_apply_failure_keeps_nothing_and_a_retry_succeeds(alice: TestClient, bob: TestClient,
+                                                                monkeypatch) -> None:
+    # The vault row + pin land BEFORE the documents. A mid-apply failure (KB write, embed, disk)
+    # used to strand a partial vault whose pin made every RETRY hit the duplicate-409 —
+    # self-blocking until a manual delete. It must be all-or-nothing: a clean error, nothing kept
+    # (no vault, no half-landed documents), and the retry succeeds.
+    vid = _make_vault(alice, _DOCS)
+    _serve(monkeypatch, _export(alice, vid, _PASS_A))
+
+    knowledge = bob.app.state.kb
+    real_add = knowledge.add
+    calls = {"n": 0}
+
+    def flaky_add(title, content, meta=None):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise RuntimeError("disk full")
+        return real_add(title, content, meta)
+
+    monkeypatch.setattr(knowledge, "add", flaky_add)
+    r = bob.post("/api/vaults/subscribe", json={"url": _URL})
+    assert r.status_code == 500
+    assert "nothing was kept" in r.json()["detail"]
+    assert "expert-pack" not in r.json()["detail"], "the URL must not echo into the error"
+    assert bob.get("/api/vaults").json()["vaults"] == [], "no partial vault may remain"
+    assert bob.get("/api/kb").json()["documents"] == [], "no half-landed documents either"
+
+    r = bob.post("/api/vaults/subscribe", json={"url": _URL})
+    assert r.status_code == 200, "a retry must not be blocked by the failed attempt"
+    assert r.json()["added"] == 2 and r.json()["duplicates"] == 0
+
+
 def test_a_dead_host_is_a_clean_refusal_not_a_500(bob: TestClient, monkeypatch) -> None:
     # Transport failures (refused, timeout, TLS) are ordinary fates for a user-typed URL. They must
     # surface as a clean 400 — an unhandled exception would 500 AND put the full URL in a log line,
@@ -284,6 +333,53 @@ def test_file_import_also_records_member_provenance(alice: TestClient, bob: Test
     assert {m["hash"] for m in mm.values()} == {d["hash"] for d in docs}
     origins = sorted(m["origin"] for m in mm.values())
     assert origins == ["import", "owner"], "the kept-yours duplicate maps as owner (update: skip)"
+
+
+def test_two_upstream_uids_with_identical_content_both_survive_dedupe(alice: TestClient, bob: TestClient,
+                                                                      monkeypatch) -> None:
+    # Upstream ships the SAME text under two docs: distinct uids, distinct signed hashes (the hash
+    # covers the title). Dedupe lands ONE local doc — and BOTH uids must map to it, each with its
+    # own hash. Overwriting would silently lose the first uid, and a future update (Stage D) would
+    # re-add it as "new" or mis-diff against the wrong hash.
+    vid = _make_vault(alice, [("Alpha", "identical body text"), ("Beta", "identical body text")])
+    blob = _export(alice, vid, _PASS_A)
+    _serve(monkeypatch, blob)
+
+    body = bob.post("/api/vaults/subscribe", json={"url": _URL}).json()
+    assert body["added"] == 1 and body["duplicates"] == 1
+
+    store: VaultStore = bob.app.state.vaults
+    mm = store.member_map(body["id"])
+    expected = {row["uid"]: row["hash"] for row in _index_rows(blob)}
+    assert len(expected) == 2, "the export really shipped two distinct uids"
+    assert {uid: m["hash"] for uid, m in mm.items()} == expected
+    assert len({m["doc_id"] for m in mm.values()}) == 1, "both uids point at the ONE deduped doc"
+
+
+def test_a_pre_multi_source_member_body_still_reads_and_appends(bob: TestClient) -> None:
+    # Backward compat: a body written before multi-source support is a single {uid, hash} dict
+    # (same AAD). It must read as a one-entry list, a new note must APPEND to it — not clobber it —
+    # and re-noting an existing uid must update its hash in place, not duplicate the entry.
+    vid = _make_vault(bob, [("Mine", "shared body")])
+    store: VaultStore = bob.app.state.vaults
+    doc_id = store.document_ids(vid)[0]
+    nonce = os.urandom(12)
+    ciphertext = store._aes.encrypt(
+        nonce, json.dumps({"uid": "u-old", "hash": "a" * 64}).encode("utf-8"),
+        store._member_aad(vid, doc_id))
+    store._conn.execute(
+        "UPDATE vault_documents SET nonce = ?, ciphertext = ? WHERE vault_id = ? AND doc_id = ?;",
+        [nonce, ciphertext, vid, doc_id])
+    assert store.member_map(vid)["u-old"]["hash"] == "a" * 64
+
+    store.note_member_source(vid, doc_id, "u-new", "b" * 64)
+    mm = store.member_map(vid)
+    assert set(mm) == {"u-old", "u-new"}, "the old single-dict body survives as the first entry"
+    assert mm["u-old"]["doc_id"] == mm["u-new"]["doc_id"] == doc_id
+
+    store.note_member_source(vid, doc_id, "u-new", "c" * 64)  # replace-by-uid, no duplicate
+    mm = store.member_map(vid)
+    assert set(mm) == {"u-old", "u-new"} and mm["u-new"]["hash"] == "c" * 64
 
 
 def test_member_map_skips_rows_the_user_added_themselves(bob: TestClient) -> None:
