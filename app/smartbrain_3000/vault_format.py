@@ -490,7 +490,13 @@ def read_manifest_bytes(raw: bytes) -> dict:
         raise VaultError("this vault was made by a newer version of SmartBrain — please update")
     if payload.get("requires"):
         raise VaultError("this vault needs features this version doesn't support — please update")
-    pubkey = (payload.get("publisher") or {}).get("pubkey")
+    # ``publisher`` may be any signed-but-hostile value: a truthy NON-dict (string/int/list) would
+    # make the ``.get`` below an AttributeError -> 500, breaking this module's own contract that a
+    # signed-but-malformed file is a clean VaultError. Reject the non-dict case, then read pubkey.
+    publisher = payload.get("publisher")
+    if publisher is not None and not isinstance(publisher, dict):
+        raise VaultError("vault manifest is malformed (publisher)")
+    pubkey = (publisher or {}).get("pubkey")
     if not isinstance(pubkey, str) or not identity.verify(pubkey, _SIG_PREFIX + canonical(payload), sig["value"]):
         raise VaultError("this vault's signature is invalid — it may have been tampered with")
     # A valid signature proves WHO wrote the manifest, not that it is well-formed: a hostile
@@ -560,6 +566,11 @@ def read_index(payload: dict, index_raw: bytes, k_name: bytes) -> list[dict]:
 
     seen_uids: set[str] = set()
     for row in rows:  # bounded by MAX_VAULT_DOCS
+        # A signed index whose ``docs`` holds a non-dict element (e.g. ``["x"]`` with a matching
+        # doc_count) would make the ``.get`` calls below an AttributeError -> 500. The row's SHAPE is
+        # as untrusted as its contents, so check it first: a malformed row is a clean VaultError.
+        if not isinstance(row, dict):
+            raise VaultError("vault index entry is malformed")
         uid, digest, obj = row.get("uid"), row.get("hash"), row.get("obj")
         if not (isinstance(uid, str) and isinstance(digest, str) and isinstance(obj, str)):
             raise VaultError("vault index entry is malformed")

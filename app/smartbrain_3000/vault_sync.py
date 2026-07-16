@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import base64
 import logging
+import time
 from datetime import datetime, timezone
 
 from . import kb as kbmod
@@ -38,6 +39,13 @@ from .vaults import IMPORT, OWNER
 log = logging.getLogger(__name__)
 
 _TREE_SUFFIX = "/manifest.json"
+
+# A tree update fetches objects one at a time, each with its own 8s timeout: the byte cap alone
+# lets a host serving thousands of small-but-slow objects wedge an /update (and, under Stage E, the
+# scheduler tick) for hours. This overall wall-clock budget on the fetch phase caps that — checked
+# between fetches, so the update is refused BEFORE the write transaction and nothing lands.
+_MAX_UPDATE_SECONDS = 120
+_monotonic = time.monotonic  # module attribute so a test can drive the deadline deterministically
 
 
 class SyncError(Exception):
@@ -256,6 +264,7 @@ def _plan_tree(pin: dict, manifest: dict, member_map: dict, embed_model: str
     want_vectors = (manifest.get("embeddings") or {}).get("model") == embed_model
     new_docs, changed = [], []
     count = total = 0
+    deadline = _monotonic() + _MAX_UPDATE_SECONDS
     for uid, row in remote.items():  # bounded by MAX_VAULT_DOCS
         known = member_map.get(uid)
         if known is not None and known["hash"] == row["hash"]:
@@ -263,6 +272,11 @@ def _plan_tree(pin: dict, manifest: dict, member_map: dict, embed_model: str
         if known is not None and known["origin"] != IMPORT:
             changed.append((uid, None))  # the user's copy: skipped later, so never fetched
             continue
+        # An overall budget on top of each fetch's own 8s timeout: a host drip-feeding thousands of
+        # slow objects would otherwise stay under the byte cap yet run for hours. Checked BEFORE the
+        # fetch, so tripping it means nothing is written (planning precedes the write transaction).
+        if _monotonic() > deadline:
+            raise SyncError("this update took too long — the host may be unreachable; try again")
         doc, fetched = _tree_fetch_doc(pin["url"], row, want_vectors=want_vectors)
         count += 1
         total = _bounded_total(total, fetched)
@@ -273,6 +287,14 @@ def _plan_tree(pin: dict, manifest: dict, member_map: dict, embed_model: str
     log.info("tree update for vault %s: %d of %d objects fetched",
              manifest["vault_id"], count, len(rows))
     return new_docs, changed, set(remote)
+
+
+def _landed_hash(doc: dict) -> str:
+    """The hash of a LOCAL doc dict {title, content, meta} — recorded beside the publisher's SIGNED
+    hash as the owner-edit baseline. read_doc_object and kb.get produce the same normalized fields,
+    so this equals what _apply_changes recomputes from kb.get on the next update: the value that
+    lets normalization-on-landing stop masquerading as a user edit."""
+    return vault_format.doc_hash(doc["title"], doc["content"], doc.get("meta"))
 
 
 def _maybe_vectors(knowledge, doc_id: str, doc: dict, vectors_ok: bool, embed_model: str) -> None:
@@ -296,13 +318,15 @@ def _land_new(vaults, knowledge, local_id: str, new_docs: list[dict], vectors_ok
     for doc in new_docs:  # bounded by MAX_VAULT_DOCS
         existing = knowledge.find_duplicate(doc["content"])
         if existing is not None:
+            # Dedupe kept the USER's copy — the landed baseline is THAT doc, not the publisher's.
             vaults.add_documents(local_id, [existing], origin=OWNER)
-            vaults.note_member_source(local_id, existing, doc["uid"], doc["hash"])
+            vaults.note_member_source(local_id, existing, doc["uid"], doc["hash"],
+                                      _landed_hash(knowledge.get(existing)))
             kept += 1
             continue
         doc_id = knowledge.add(doc["title"], doc["content"], doc["meta"])
         vaults.add_documents(local_id, [doc_id], origin=IMPORT)
-        vaults.note_member_source(local_id, doc_id, doc["uid"], doc["hash"])
+        vaults.note_member_source(local_id, doc_id, doc["uid"], doc["hash"], _landed_hash(doc))
         _maybe_vectors(knowledge, doc_id, doc, vectors_ok, embed_model)
         added += 1
     return added, kept
@@ -313,9 +337,12 @@ def _apply_changes(vaults, knowledge, local_id: str, member_map: dict, changed: 
     """Changed uids -> kb.replace IN PLACE (the doc_id survives); returns (updated, kept).
 
     The owner-edit guard (plan decision #1): before replacing, the LOCAL copy must still hash to
-    the OLD pinned member hash. A mismatch means the user edited it (an edit predating the C0
-    read-only guard, a restored backup) — it is THEIRS now, so it is skipped and its origin flips
-    to owner, which makes every future update skip it too.
+    what we LANDED (member.landed_hash), not to the publisher's signed hash. Those two differ for
+    any doc that normalized on the way in (a >2048-char source_url, an empty title, an extra meta
+    key) — comparing against the signed hash would misread such a doc as user-edited and detach it,
+    silently suppressing every future update for it. A genuine mismatch means the user really edited
+    it — it is THEIRS now, so it is skipped and its origin flips to owner, which makes every future
+    update skip it too.
     """
     updated = kept = 0
     for uid, doc in changed:  # bounded by MAX_VAULT_DOCS
@@ -327,13 +354,20 @@ def _apply_changes(vaults, knowledge, local_id: str, member_map: dict, changed: 
         local = knowledge.get(member["doc_id"])
         if local is None:
             continue  # the membership outlived its document — nothing to replace
-        if vault_format.doc_hash(local["title"], local["content"], local.get("meta")) \
-                != member["hash"]:
+        current = vault_format.doc_hash(local["title"], local["content"], local.get("meta"))
+        landed = member.get("landed_hash")
+        # Back-compat: members pinned before landed_hash existed (#77, already on main) have none.
+        # Recomputing against the signed hash would false-detach every normalized doc, so give a
+        # legacy member the benefit of the doubt: treat its current local doc AS the baseline
+        # (adopt it), and note_member_source below records a real landed_hash going forward.
+        if landed is None:
+            landed = current
+        if current != landed:
             vaults.detach(local_id, member["doc_id"])
             kept += 1
             continue
         knowledge.replace(member["doc_id"], doc["title"], doc["content"], doc["meta"])
-        vaults.note_member_source(local_id, member["doc_id"], uid, doc["hash"])
+        vaults.note_member_source(local_id, member["doc_id"], uid, doc["hash"], _landed_hash(doc))
         _maybe_vectors(knowledge, member["doc_id"], doc, vectors_ok, embed_model)
         updated += 1
     return updated, kept

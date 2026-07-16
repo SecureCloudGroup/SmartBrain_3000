@@ -246,21 +246,31 @@ class VaultStore:
             self._aes.decrypt(nonce, ciphertext, self._member_aad(vault_id, doc_id)).decode("utf-8"))
         return [body] if isinstance(body, dict) else body
 
-    def note_member_source(self, vault_id: str, doc_id: str, uid: str, content_hash: str) -> None:
+    def note_member_source(self, vault_id: str, doc_id: str, uid: str, content_hash: str,
+                           landed_hash: str) -> None:
         """Record where a member CAME FROM: the publisher's ``uid`` (the update key — which local
-        document is upstream's X?) and the SIGNED content ``hash`` (does the local copy still match
-        what the publisher shipped?). Set by import/subscribe; owner-added rows never get one.
+        document is upstream's X?), the SIGNED content ``hash`` (tree-delta detection: did the
+        publisher change this doc?), and the ``landed_hash`` (owner-edit detection: did the USER
+        change their local copy?). Set by import/subscribe/update; owner-added rows never get one.
 
-        The body is a LIST of {uid, hash} entries, appended-or-replaced by uid: two upstream docs
-        with identical content dedupe to ONE local doc, and BOTH uids must survive on that shared
-        row — overwriting would silently lose the first, and a future update (Stage D) would
+        Why TWO hashes: the signed ``hash`` covers the publisher's RAW title/meta, but landing
+        NORMALIZES (title[:MAX_TITLE] or "Untitled", _clean_meta drops unknown keys / clips a long
+        source_url), so the local copy legitimately hashes differently. Comparing a normalized-on-
+        landing doc against the signed hash would misread it as a user edit and detach it — killing
+        every future update for a class of real docs. ``landed_hash`` records what we ACTUALLY
+        landed, so the owner-edit guard compares like with like.
+
+        The body is a LIST of {uid, hash, landed_hash} entries, appended-or-replaced by uid: two
+        upstream docs with identical content dedupe to ONE local doc, and BOTH uids must survive on
+        that shared row — overwriting would silently lose the first, and a future update would
         re-add it as "new" or mis-diff. Bounded by _MAX_SOURCES_PER_MEMBER.
 
         Encrypted, not plaintext columns: a stored content hash is a plaintext fingerprint of
         encrypted content — exactly what we don't keep (kbindex.content_hash's rule) — and where a
         document came from is as sensitive as what it says (kb._seal's rule).
         """
-        assert vault_id and doc_id and uid and content_hash, "vault/doc/uid/hash required"
+        assert vault_id and doc_id and uid and content_hash and landed_hash, \
+            "vault/doc/uid/hash/landed_hash required"
         row = self._conn.execute(
             "SELECT nonce, ciphertext FROM vault_documents WHERE vault_id = ? AND doc_id = ?;",
             [vault_id, doc_id],
@@ -268,9 +278,12 @@ class VaultStore:
         entries: list[dict] = []
         if row is not None and row[0] is not None and row[1] is not None:
             entries = self._open_member(vault_id, doc_id, bytes(row[0]), bytes(row[1]))
-        entries = [e for e in entries if e["uid"] != uid]  # replace-by-uid: re-noting updates the hash
-        entries.append({"uid": uid, "hash": content_hash})
-        assert len(entries) <= _MAX_SOURCES_PER_MEMBER, "too many upstream sources for one member"
+        entries = [e for e in entries if e["uid"] != uid]  # replace-by-uid: re-noting updates the hashes
+        entries.append({"uid": uid, "hash": content_hash, "landed_hash": landed_hash})
+        # A real refusal, not an assert: asserts vanish under `python -O`, so a publisher shipping
+        # >32 identical-content docs would otherwise grow this list unbounded instead of refusing.
+        if len(entries) > _MAX_SOURCES_PER_MEMBER:
+            raise ValueError("too many upstream sources for one member")
         nonce = os.urandom(_NONCE_BYTES)
         ciphertext = self._aes.encrypt(
             nonce, json.dumps(entries).encode("utf-8"), self._member_aad(vault_id, doc_id))
@@ -280,7 +293,9 @@ class VaultStore:
         )
 
     def member_map(self, vault_id: str) -> dict[str, dict]:
-        """{uid: {doc_id, hash, origin}} for every member with a recorded upstream source.
+        """{uid: {doc_id, hash, landed_hash, origin}} for every member with a recorded upstream
+        source. ``landed_hash`` is None for entries written before it existed (#77) — the caller
+        gives those the benefit of the doubt rather than a false-positive detach.
 
         The lookup table a vault update applies against: uid present -> update/skip decision;
         uid absent -> a new document. Each row's entries fan out to their own uid keys — several
@@ -301,7 +316,8 @@ class VaultStore:
                 continue  # owner-added row: no upstream source to map
             doc_id = str(row[0])
             for entry in self._open_member(vault_id, doc_id, bytes(row[2]), bytes(row[3])):
-                out[entry["uid"]] = {"doc_id": doc_id, "hash": entry["hash"], "origin": str(row[1])}
+                out[entry["uid"]] = {"doc_id": doc_id, "hash": entry["hash"],
+                                     "landed_hash": entry.get("landed_hash"), "origin": str(row[1])}
         return out
 
     def import_provenance(self, doc_id: str) -> dict | None:

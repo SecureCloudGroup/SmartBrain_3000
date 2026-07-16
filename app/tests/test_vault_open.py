@@ -279,6 +279,26 @@ def test_a_duplicate_uid_in_the_index_is_refused() -> None:
         vault_format.open_vault(_repack(entries))
 
 
+def test_a_signed_index_with_a_non_dict_row_is_a_clean_refusal() -> None:
+    # A hostile publisher signs an index whose ``docs`` holds a bare string where a row object
+    # belongs (doc_count made to match, so the length check can't mask it). read_index does
+    # row.get(...) — without a row-shape guard that is an AttributeError -> HTTP 500; it must be the
+    # module's clean VaultError instead. Found by adversarial review; newly reachable via remote input.
+    store = _store()
+    blob = _pack_open(store, docs=[_DOCS[0]])
+    index = _index(blob)
+    index["docs"] = ["not-a-dict-row"]
+    index_raw = vault_format.canonical(index)
+    payload = _manifest(blob)
+    payload["index"] = {"hash": hashlib.sha256(index_raw).hexdigest(), "bytes": len(index_raw)}
+    payload["doc_count"] = 1
+    entries = {k: v for k, v in _entries(blob).items() if not k.startswith("objects/")}
+    entries["index.bin"] = index_raw
+    entries["manifest.json"] = _sign(store, payload)
+    with pytest.raises(vault_format.VaultError, match="index entry is malformed"):
+        vault_format.open_vault(_repack(entries))
+
+
 # --- open exports are byte-reproducible too (incremental publish uploads only real changes) -------
 
 def test_open_export_is_byte_reproducible() -> None:
@@ -304,6 +324,9 @@ def test_open_export_is_byte_reproducible() -> None:
     lambda p: p.update(index=["h"]),             # wrong type -> was a TypeError
     lambda p: p.update(index={"hash": 3}),
     lambda p: p.update(index={"hash": "ab"}),    # not a sha256 hexdigest
+    lambda p: p.update(publisher="a-string"),    # truthy non-dict -> was (str).get() AttributeError
+    lambda p: p.update(publisher=7),
+    lambda p: p.update(publisher=["k"]),
 ])
 def test_a_signed_but_malformed_manifest_is_a_clean_refusal(mutate) -> None:
     # A valid signature only proves WHO wrote the manifest — a hostile publisher signs whatever

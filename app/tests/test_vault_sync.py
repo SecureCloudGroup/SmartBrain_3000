@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import zipfile
 from collections.abc import Iterator
 
@@ -26,7 +27,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from smartbrain_3000 import db as dbmod
-from smartbrain_3000 import netguard, vault_format
+from smartbrain_3000 import netguard, vault_format, vault_sync
 from smartbrain_3000.secrets import SecretStore, gen_master_key
 from smartbrain_3000.vaults import VaultStore
 
@@ -316,6 +317,40 @@ def test_tampered_tree_object_aborts_the_whole_update(alice: TestClient, bob: Te
         assert bob.get(f"/api/kb/{doc_id}").json()["content"] == content, "documents untouched"
 
 
+def test_a_slow_tree_host_trips_the_update_time_budget_and_applies_nothing(
+        alice: TestClient, bob: TestClient, monkeypatch) -> None:
+    # A tree host can serve each object just under its 8s timeout while every object stays under the
+    # byte cap — an update would run for hours. The wall-clock budget stops it BETWEEN fetches: a
+    # clean SyncError (400), and because planning precedes the write transaction, nothing lands and
+    # the pin holds. The clock is injected so the deadline trips deterministically, with no waiting.
+    vid, ids, local_id, blob1 = _subscribed(alice, bob, monkeypatch, url=_TREE_URL)
+    store: VaultStore = bob.app.state.vaults
+    mm_before = store.member_map(local_id)
+    docs_before = {d["id"]: bob.get(f"/api/kb/{d['id']}").json()["content"]
+                   for d in bob.get("/api/kb").json()["documents"]}
+
+    for i, did in enumerate(ids):  # the publisher changes every doc, so the update fetches several
+        alice.app.state.kb.replace(did, _DOCS[i][0], _DOCS[i][1] + " (revised)", {})
+    _serve_tree(monkeypatch, _export(alice, vid, _PASS_A))
+
+    # The deadline is set on the first _monotonic() call; from the second check on we are past it, so
+    # the budget trips after exactly one object is fetched.
+    calls = {"n": 0}
+
+    def fake_clock() -> float:
+        calls["n"] += 1
+        return 0.0 if calls["n"] <= 2 else float(vault_sync._MAX_UPDATE_SECONDS) + 10_000.0
+
+    monkeypatch.setattr(vault_sync, "_monotonic", fake_clock)
+
+    r = bob.post(f"/api/vaults/{local_id}/update")
+    assert r.status_code == 400 and "took too long" in r.json()["detail"]
+    assert store.member_map(local_id) == mm_before, "nothing applied — member provenance untouched"
+    assert _pin(bob, local_id)["source"]["seq"] == 2, "pin unchanged"
+    for doc_id, content in docs_before.items():
+        assert bob.get(f"/api/kb/{doc_id}").json()["content"] == content, "documents untouched"
+
+
 # --- the pin's authority: key substitution, blocking, and trusting a new key -----------------------
 
 def test_key_substitution_blocks_and_trust_publisher_unblocks(alice: TestClient, bob: TestClient,
@@ -424,6 +459,73 @@ def test_owner_edited_doc_is_kept_and_flipped_not_clobbered(alice: TestClient, b
     # And the origin flip means the NEXT update counts it kept without even fetching a hash match.
     _serve(monkeypatch, _export(alice, vid, _PASS_A))
     assert bob.post(f"/api/vaults/{local_id}/update").json()["kept_yours"] == 1
+
+
+def test_a_doc_that_normalizes_on_landing_updates_instead_of_false_detaching(
+        alice: TestClient, bob: TestClient, monkeypatch) -> None:
+    # THE Stage-D correctness bug. The publisher's SIGNED hash covers the RAW source_url, but landing
+    # clips it to 2048 (kb stores the normalized copy). Compared against the signed hash, this
+    # untouched doc would be judged "edited" on its very first real update — skipped and detached,
+    # silently killing every future update for it. landed_hash records what we actually landed, so it
+    # updates normally. Realistic trigger: a genuinely long ingested source_url.
+    long_url = "https://example.com/s?q=" + "a" * 3000  # > 2048 -> _clean_meta clips it on landing
+    vid = alice.post("/api/vaults", json={"name": "Expert pack"}).json()["id"]
+    doc_id = alice.app.state.kb.add(
+        "Regulations", "the QUOKKA clause governs all filings", {"source_url": long_url})
+    alice.post(f"/api/vaults/{vid}/documents", json={"doc_ids": [doc_id]})
+    blob1 = _export(alice, vid, _PASS_A)
+    _serve(monkeypatch, blob1)
+    local_id = bob.post("/api/vaults/subscribe", json={"url": _ZIP_URL}).json()["id"]
+
+    store: VaultStore = bob.app.state.vaults
+    uid = _row(blob1, "Regulations")["uid"]
+    member = store.member_map(local_id)[uid]
+    assert len(bob.get(f"/api/kb/{member['doc_id']}").json()["meta"]["source_url"]) == 2048, \
+        "the url really was normalized on landing"
+    assert member["landed_hash"] != member["hash"], \
+        "landed (normalized) and signed (raw) hashes legitimately differ — the whole trap"
+
+    # The publisher edits the CONTENT (bumping the signed hash) but Bob NEVER touched his copy.
+    alice.app.state.kb.replace(
+        doc_id, "Regulations", "the QUOKKA clause was AMENDED", {"source_url": long_url})
+    _serve(monkeypatch, _export(alice, vid, _PASS_A))
+    r = bob.post(f"/api/vaults/{local_id}/update")
+    assert r.status_code == 200, r.text
+    assert r.json()["updated"] == 1 and r.json()["kept_yours"] == 0, "updated, NOT false-detached"
+    assert bob.get(f"/api/kb/{member['doc_id']}").json()["content"].endswith("AMENDED")
+    assert store.origin_of(local_id, member["doc_id"]) == "import", "still the publisher's to update"
+
+
+def test_a_legacy_member_without_landed_hash_updates_rather_than_detaching(
+        alice: TestClient, bob: TestClient, monkeypatch) -> None:
+    # A subscription pinned by #77 (before landed_hash existed) has member bodies of {uid, hash}
+    # only. On the next update the guard finds landed_hash absent — it must give the doc the benefit
+    # of the doubt (adopt the current local doc as the baseline) and UPDATE it, never detach on a
+    # missing field. It also adopts a real landed_hash going forward.
+    vid, ids, local_id, blob1 = _subscribed(alice, bob, monkeypatch)
+    store: VaultStore = bob.app.state.vaults
+    uid_b = _row(blob1, "Guidance")["uid"]
+    member = store.member_map(local_id)[uid_b]
+    doc_b = member["doc_id"]
+
+    # Rewrite that member body the #77 way: a single {uid, hash} dict with NO landed_hash.
+    nonce = os.urandom(12)
+    ciphertext = store._aes.encrypt(
+        nonce, json.dumps({"uid": uid_b, "hash": member["hash"]}).encode("utf-8"),
+        store._member_aad(local_id, doc_b))
+    store._conn.execute(
+        "UPDATE vault_documents SET nonce = ?, ciphertext = ? WHERE vault_id = ? AND doc_id = ?;",
+        [nonce, ciphertext, local_id, doc_b])
+    assert store.member_map(local_id)[uid_b]["landed_hash"] is None
+
+    alice.app.state.kb.replace(ids[1], "Guidance", "for a WOMBAT exemption, file form 99X", {})
+    _serve(monkeypatch, _export(alice, vid, _PASS_A))
+    r = bob.post(f"/api/vaults/{local_id}/update")
+    assert r.status_code == 200, r.text
+    assert r.json()["updated"] == 1 and r.json()["kept_yours"] == 0, "legacy member updates, not detached"
+    assert bob.get(f"/api/kb/{doc_b}").json()["content"].endswith("99X")
+    assert store.origin_of(local_id, doc_b) == "import"
+    assert store.member_map(local_id)[uid_b]["landed_hash"] is not None, "adopted lazily on update"
 
 
 def test_upstream_delete_of_an_owner_origin_member_keeps_the_doc(alice: TestClient, bob: TestClient,

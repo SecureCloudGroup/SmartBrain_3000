@@ -358,8 +358,9 @@ def test_two_upstream_uids_with_identical_content_both_survive_dedupe(alice: Tes
 
 def test_a_pre_multi_source_member_body_still_reads_and_appends(bob: TestClient) -> None:
     # Backward compat: a body written before multi-source support is a single {uid, hash} dict
-    # (same AAD). It must read as a one-entry list, a new note must APPEND to it — not clobber it —
-    # and re-noting an existing uid must update its hash in place, not duplicate the entry.
+    # (same AAD) — and, from #77, one with no landed_hash. It must read as a one-entry list (with a
+    # None landed_hash the update guard reads as "benefit of the doubt"), a new note must APPEND to
+    # it — not clobber it — and re-noting an existing uid must update its hashes in place.
     vid = _make_vault(bob, [("Mine", "shared body")])
     store: VaultStore = bob.app.state.vaults
     doc_id = store.document_ids(vid)[0]
@@ -370,16 +371,31 @@ def test_a_pre_multi_source_member_body_still_reads_and_appends(bob: TestClient)
     store._conn.execute(
         "UPDATE vault_documents SET nonce = ?, ciphertext = ? WHERE vault_id = ? AND doc_id = ?;",
         [nonce, ciphertext, vid, doc_id])
-    assert store.member_map(vid)["u-old"]["hash"] == "a" * 64
+    old = store.member_map(vid)["u-old"]
+    assert old["hash"] == "a" * 64 and old["landed_hash"] is None, "a legacy body has no landed_hash"
 
-    store.note_member_source(vid, doc_id, "u-new", "b" * 64)
+    store.note_member_source(vid, doc_id, "u-new", "b" * 64, "d" * 64)
     mm = store.member_map(vid)
     assert set(mm) == {"u-old", "u-new"}, "the old single-dict body survives as the first entry"
     assert mm["u-old"]["doc_id"] == mm["u-new"]["doc_id"] == doc_id
+    assert mm["u-old"]["landed_hash"] is None and mm["u-new"]["landed_hash"] == "d" * 64
 
-    store.note_member_source(vid, doc_id, "u-new", "c" * 64)  # replace-by-uid, no duplicate
+    store.note_member_source(vid, doc_id, "u-new", "c" * 64, "e" * 64)  # replace-by-uid, no duplicate
     mm = store.member_map(vid)
     assert set(mm) == {"u-old", "u-new"} and mm["u-new"]["hash"] == "c" * 64
+    assert mm["u-new"]["landed_hash"] == "e" * 64, "re-noting updates the landed_hash too"
+
+
+def test_too_many_upstream_sources_for_one_member_is_refused(bob: TestClient) -> None:
+    # >32 identical-content docs all dedupe onto ONE local member. The bound is a REAL refusal now,
+    # not an assert that vanishes under `python -O` and lets the entries list grow unbounded.
+    vid = _make_vault(bob, [("Mine", "shared body")])
+    store: VaultStore = bob.app.state.vaults
+    doc_id = store.document_ids(vid)[0]
+    for i in range(32):  # fill the member up to its bound
+        store.note_member_source(vid, doc_id, f"u{i}", "a" * 64, "b" * 64)
+    with pytest.raises(ValueError, match="too many upstream sources"):
+        store.note_member_source(vid, doc_id, "u32", "a" * 64, "b" * 64)
 
 
 def test_member_map_skips_rows_the_user_added_themselves(bob: TestClient) -> None:
@@ -422,7 +438,8 @@ def test_migration_23_preserves_membership_rows(tmp_path) -> None:
     assert store.member_map(vid) == {}  # NULL-body rows are skipped, not errors
 
     # The upgraded row can take provenance and round-trip it through the encrypted body.
-    store.note_member_source(vid, "doc-1", "u1", "h" * 64)
-    assert store.member_map(vid) == {"u1": {"doc_id": "doc-1", "hash": "h" * 64, "origin": "owner"}}
+    store.note_member_source(vid, "doc-1", "u1", "h" * 64, "j" * 64)
+    assert store.member_map(vid) == {
+        "u1": {"doc_id": "doc-1", "hash": "h" * 64, "landed_hash": "j" * 64, "origin": "owner"}}
     assert dbmod.run_migrations(conn) == 0  # idempotent
     conn.close()

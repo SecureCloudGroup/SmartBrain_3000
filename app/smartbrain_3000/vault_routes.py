@@ -359,14 +359,19 @@ def _apply_docs(request: Request, vaults, knowledge, local_id: str, manifest: di
         existing = knowledge.find_duplicate(doc["content"])
         if existing is not None:
             # The user already has this text. Keep THEIR document and just note the membership —
-            # never overwrite something they authored with a stranger's copy.
+            # never overwrite something they authored with a stranger's copy. The landed baseline
+            # is that existing (user's) doc, so an update never mistakes it for the publisher's.
             vaults.add_documents(local_id, [existing], origin="owner")
-            vaults.note_member_source(local_id, existing, doc["uid"], doc["hash"])
+            vaults.note_member_source(local_id, existing, doc["uid"], doc["hash"],
+                                      vault_sync._landed_hash(knowledge.get(existing)))
             duplicates += 1
             continue
         doc_id = knowledge.add(doc["title"], doc["content"], doc["meta"])
         vaults.add_documents(local_id, [doc_id], origin="import")
-        vaults.note_member_source(local_id, doc_id, doc["uid"], doc["hash"])
+        # landed_hash = the doc AS STORED locally (normalized) — separate from the publisher's signed
+        # hash, so a doc that normalized on the way in isn't later misread as a user edit.
+        vaults.note_member_source(local_id, doc_id, doc["uid"], doc["hash"],
+                                  vault_sync._landed_hash(doc))
         added += 1
         vectors = doc.get("vectors")
         # Use the shipped vectors ONLY if they were made by the same model, at the same dim, with
