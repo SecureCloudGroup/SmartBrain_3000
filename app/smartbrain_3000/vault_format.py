@@ -440,6 +440,22 @@ def read_manifest(data: bytes) -> dict:
     pubkey = (payload.get("publisher") or {}).get("pubkey")
     if not isinstance(pubkey, str) or not identity.verify(pubkey, _SIG_PREFIX + canonical(payload), sig["value"]):
         raise VaultError("this vault's signature is invalid — it may have been tampered with")
+    # A valid signature proves WHO wrote the manifest, not that it is well-formed: a hostile
+    # publisher can sign anything. Guard every field open_vault dereferences, so a signed-but-
+    # malformed file is a clean refusal, never a KeyError/TypeError escaping as a 500.
+    vault_id = payload.get("vault_id")
+    if not isinstance(vault_id, str) or not vault_id or len(vault_id) > 100:
+        raise VaultError("vault manifest is malformed (vault_id)")
+    seq = payload.get("seq")
+    if not isinstance(seq, int) or isinstance(seq, bool) or seq < 0:
+        raise VaultError("vault manifest is malformed (seq)")
+    doc_count = payload.get("doc_count")
+    if not isinstance(doc_count, int) or isinstance(doc_count, bool) or doc_count < 0:
+        raise VaultError("vault manifest is malformed (doc_count)")
+    index_meta = payload.get("index")
+    if not isinstance(index_meta, dict) or not isinstance(index_meta.get("hash"), str) \
+            or len(index_meta["hash"]) != 64:
+        raise VaultError("vault manifest is malformed (index)")
     mode = payload.get("mode")
     if mode == SEALED:
         # Sealed carries the wrap params and, by the §2 metadata rule, no topic: a host storing your

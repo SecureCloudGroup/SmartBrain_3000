@@ -288,3 +288,33 @@ def test_open_export_is_byte_reproducible() -> None:
                   docs=[{"uid": "u1", "title": "T", "content": "body", "meta": {}, "chunks": 1}],
                   name_key=name_key, mode=vault_format.OPEN)
     assert vault_format.pack(**kwargs) == vault_format.pack(**kwargs)
+
+
+@pytest.mark.parametrize("mutate", [
+    lambda p: p.pop("vault_id"),                 # missing entirely -> was a KeyError
+    lambda p: p.update(vault_id=7),              # wrong type -> was an AttributeError (.encode())
+    lambda p: p.update(vault_id="x" * 101),      # unbounded id
+    lambda p: p.pop("seq"),
+    lambda p: p.update(seq="1"),
+    lambda p: p.update(seq=True),                # bool sneaks past a bare isinstance(int) check
+    lambda p: p.update(seq=-1),
+    lambda p: p.pop("doc_count"),
+    lambda p: p.update(doc_count=-2),
+    lambda p: p.pop("index"),
+    lambda p: p.update(index=["h"]),             # wrong type -> was a TypeError
+    lambda p: p.update(index={"hash": 3}),
+    lambda p: p.update(index={"hash": "ab"}),    # not a sha256 hexdigest
+])
+def test_a_signed_but_malformed_manifest_is_a_clean_refusal(mutate) -> None:
+    # A valid signature only proves WHO wrote the manifest — a hostile publisher signs whatever
+    # they like. Every field open_vault dereferences must be guarded, or a signed-but-malformed
+    # file escapes as a KeyError/TypeError (an HTTP 500) instead of the module's clean VaultError.
+    # Found by adversarial review; the gap predated open mode (sealed had it too).
+    store = _store()
+    entries = _entries(_pack_open(store, docs=[_DOCS[0]]))
+    # take the signed payload, mutate one field, re-sign as the publisher, repack
+    payload = json.loads(entries["manifest.json"].decode())["sbvault"]
+    mutate(payload)
+    entries["manifest.json"] = _sign(store, payload)
+    with pytest.raises(vault_format.VaultError, match="malformed"):
+        vault_format.open_vault(_repack(entries))
