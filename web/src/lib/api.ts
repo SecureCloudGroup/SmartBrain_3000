@@ -438,17 +438,19 @@ export const api = {
   // SSE token streaming for a turn (Desktop/local only — the WebRTC relay buffers, so
   // callers fall back to agentTurn over a remote session). Returns the raw Response;
   // the caller reads the text/event-stream body. 423/4xx still surface as ApiError.
+  // `signal` lets the caller abort mid-stream (chat's Stop button).
   agentTurnStream: async (body: {
     messages: ChatMessage[];
     model?: string;
     capability?: string;
     conversation_id?: string | null;
-  }): Promise<Response> => {
+  }, signal?: AbortSignal): Promise<Response> => {
     await remoteReady;
     const res = await fetch("/api/agent/turn/stream", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
+      signal,
     });
     if (!res.ok) {
       const detail = (await res.json().catch(() => null) as { detail?: string } | null)?.detail;

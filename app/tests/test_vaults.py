@@ -113,6 +113,64 @@ def test_imported_vaults_are_marked_and_keep_their_source() -> None:
     assert vs.get(vid)["source"] == source, "a rename must not lose where an import came from"
 
 
+# --- body preservation (read-modify-write) ------------------------------------------------------
+# Every write to an existing vault body must preserve fields it doesn't know about. A rebuild from
+# known fields would destroy a future writer's data (e.g. a publisher pin) silently, inside the
+# ciphertext — and a dropped TOFU pin turns the next vault update into first-contact trust again.
+
+def _plant_body_field(vs: VaultStore, vault_id: str, field: str, value: object) -> None:
+    # Simulate a FUTURE writer storing state in the encrypted body, via the store's own seal path.
+    row = vs._conn.execute(
+        "SELECT nonce, ciphertext FROM vaults WHERE id = ?;", [vault_id]
+    ).fetchone()
+    body = vs._open(vault_id, bytes(row[0]), bytes(row[1]))
+    body[field] = value
+    nonce, ciphertext = vs._seal(vault_id, body)
+    vs._conn.execute(
+        "UPDATE vaults SET nonce = ?, ciphertext = ? WHERE id = ?;", [nonce, ciphertext, vault_id]
+    )
+
+
+def _body_of(vs: VaultStore, vault_id: str) -> dict:
+    row = vs._conn.execute(
+        "SELECT nonce, ciphertext FROM vaults WHERE id = ?;", [vault_id]
+    ).fetchone()
+    return vs._open(vault_id, bytes(row[0]), bytes(row[1]))
+
+
+def test_update_preserves_body_fields_it_does_not_know_about() -> None:
+    _, vs = _stores()
+    vid = vs.create("Subscribed pack")
+    pin = {"pubkey": "ed25519:abc", "seq": 7}
+    _plant_body_field(vs, vid, "publisher_pin", pin)
+
+    assert vs.update(vid, "Renamed pack", "new blurb")
+    body = _body_of(vs, vid)
+    assert body["publisher_pin"] == pin, "a rename must not drop fields owned by future writers"
+    assert body["name"] == "Renamed pack" and body["description"] == "new blurb"
+
+
+def test_remember_key_preserves_body_fields_it_does_not_know_about() -> None:
+    _, vs = _stores()
+    vid = vs.create("Exported pack")
+    pin = {"pubkey": "ed25519:abc", "seq": 7}
+    _plant_body_field(vs, vid, "publisher_pin", pin)
+
+    vs.remember_key(vid, b"k" * 32)
+    assert _body_of(vs, vid)["publisher_pin"] == pin, "storing the key must not drop other fields"
+    assert vs.get_key(vid) == b"k" * 32, "and the key itself still round-trips"
+
+
+def test_rename_still_keeps_the_remembered_key() -> None:
+    # The field update() used to copy by hand — must survive the read-modify-write refactor.
+    _, vs = _stores()
+    vid = vs.create("Pack")
+    vs.remember_key(vid, b"\x01" * 32)
+    vs.update(vid, "Renamed")
+    assert vs.get(vid)["name"] == "Renamed"
+    assert vs.get_key(vid) == b"\x01" * 32
+
+
 def test_bump_version_is_monotonic() -> None:
     _, vs = _stores()
     vid = vs.create("V")

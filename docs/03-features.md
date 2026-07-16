@@ -11,7 +11,9 @@ Knowledge, Planner, Schedules, Email, and Activity — while Settings and setup 
 Talk to your assistant. Chat can optionally **use tools** to act on your behalf —
 search your knowledge, **read or summarize a whole document**, **save a note back to
 your knowledge**, add a task, fetch a public web page, send an email, and more. Replies
-are formatted (headings, lists, tables, and code blocks render properly).
+are formatted (headings, lists, tables, and code blocks render properly). You can
+**Stop** an answer mid-stream, **Copy** any reply, **Regenerate** the latest one, and
+**Rename** a saved chat.
 
 Tools are **risk-tiered**, and this is the core safety idea:
 
@@ -60,7 +62,7 @@ which file and page it got the answer from.
 
 ![The Knowledge page: add a document, then search it](assets/05-knowledge.png)
 
-![Add a document, then search your knowledge and ask Chat about it](assets/gifs/04-add-knowledge.gif)
+![Drop in a file, search it, open the cited passage, then ask Chat — answers cite their sources](assets/gifs/04-add-knowledge.gif)
 
 > Semantic search needs the embedding model pulled (the installer does this for you).
 > If results say *"degraded"*, run `ollama pull nomic-embed-text:v1.5` on the Desktop
@@ -69,6 +71,8 @@ which file and page it got the answer from.
 Your knowledge is also what external tools can read over [MCP](04-mcp.md).
 
 ## Vaults
+
+![Vaults — tick documents into a vault, search inside it, then export it with a separate key](assets/gifs/10-vaults.gif)
 
 A **vault** is a named set of your knowledge documents — the unit you scope a search to,
 and the unit you share. Vaults live on the Knowledge page.
