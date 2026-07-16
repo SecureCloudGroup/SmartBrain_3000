@@ -89,6 +89,13 @@ and the unit you share. Vaults live on the Knowledge page.
   shows you a one-time key (starting `SBVK1-`). Send the file however you like, then give the
   person the key over a **different** channel — together they are the contents in the clear,
   so keep them apart.
+- **Share it publicly.** Choose **Public** in the share panel instead: the export is the same
+  `.sbvault` file with **no key at all** — anyone with the link can read everything in this
+  vault, and there is **no taking it back**. Upload the file anywhere (Drive, S3, any web host)
+  and share the link — or unzip it and upload the folder to a static host so future updates only
+  re-upload what changed. Once published, the vault card shows a **Public** badge beside your
+  publisher fingerprint (`SB-…`) — the identity readers will see. The file is still signed, so
+  nobody else can publish an "update" to your vault in your name.
 - **Import someone else's.** Pick the `.sbvault` file and paste the key. Its documents are
   **re-encrypted under your own passphrase** as they land (nothing you import can read or
   weaken your data), and anything you already have is kept as-is rather than overwritten. The

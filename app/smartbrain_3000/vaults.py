@@ -136,6 +136,9 @@ class VaultStore:
             "name": body["name"],
             "description": body.get("description", ""),
             "source": body.get("source"),
+            # Once true, forever true: an open publish put the plaintext in the world, and no later
+            # action can take it back — the UI badge must outlive re-seals, renames, everything.
+            "published_open": bool(body.get("published_open", False)),
             "doc_count": self.count_documents(vault_id),
             "created_at": str(row[5]),
             "updated_at": str(row[6]),
@@ -268,6 +271,32 @@ class VaultStore:
         if body is None:
             return None
         raw = body.get("key")
+        return base64.b64decode(raw) if raw else None
+
+    def note_open_publish(self, vault_id: str, name_key: bytes) -> None:
+        """Record an OPEN publish in the encrypted body: the ``published_open`` marker (drives the
+        UI's "Public" badge — publishing is irreversible, so the flag never clears) and, on the
+        FIRST open publish only, the object-naming key.
+
+        K_name must be fixed once and persisted: object names are HMAC(K_name, ...), so a
+        republish under a fresh key would rename every object and turn a tree-host delta update
+        into a full re-download (plan decision #6). A later publish never overwrites it — the
+        first publish is the one subscribers pinned their tree against.
+        """
+        assert len(name_key) == 32, "name key must be 32 bytes"
+        body = self._load_body(vault_id)
+        assert body is not None, "vault must exist"
+        body["published_open"] = True
+        if "name_key" not in body:
+            body["name_key"] = base64.b64encode(name_key).decode("ascii")
+        self._store_body(vault_id, body)
+
+    def get_name_key(self, vault_id: str) -> bytes | None:
+        """The persisted object-naming key, or None if this vault was never published open."""
+        body = self._load_body(vault_id)
+        if body is None:
+            return None
+        raw = body.get("name_key")
         return base64.b64decode(raw) if raw else None
 
     def remove_documents(self, vault_id: str, doc_ids: list[str]) -> int:

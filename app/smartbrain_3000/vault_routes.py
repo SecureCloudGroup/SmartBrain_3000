@@ -10,12 +10,14 @@ Deleting a vault never deletes its documents: the same document may sit in other
 from __future__ import annotations
 
 import logging
+import os
 import uuid
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
-from . import gateway, kb as kbmod, tools, vault_format
+from . import gateway, identity, kb as kbmod, tools, vault_format
 from .data_routes import _reauthorize, _require_desktop_local
 from .vaults import IMPORTED
 
@@ -36,10 +38,11 @@ class DocIdsIn(BaseModel):
 
 class ExportIn(BaseModel):
     # Re-auth, exactly as /api/backup and /api/export require: a vault export hands out content that
-    # is plaintext-equivalent to whoever holds the key.
+    # is plaintext-equivalent to whoever holds the key — and in open mode IS the plaintext.
     passphrase: str | None = None
     recovery_key: str | None = None
     include_vectors: bool = True
+    mode: Literal["sealed", "open"] = "sealed"  # private share stays the default
 
 
 class ImportIn(BaseModel):
@@ -61,10 +64,28 @@ def _require(store, vault_id: str) -> dict:
     return vault
 
 
+def _attach_publisher_fp(request: Request, vaults: list[dict]) -> None:
+    """Attach the publisher fingerprint (in place) to every published-open vault.
+
+    Hard UI rule: a "Public" label never appears without the identity behind it — the fingerprint
+    is what a subscriber actually pins. Every open publish from this Desktop is signed by the same
+    vault:publisher_ed25519 key, so one derivation covers the whole list.
+    """
+    if not any(v.get("published_open") for v in vaults):
+        return  # don't touch (or lazily create) the publisher key for users who never publish
+    fp = vault_format.fingerprint(
+        identity.public_key_b64(_secrets(request), identity.VAULT_PUBLISHER_SECRET))
+    for vault in vaults:  # bounded by vaults._MAX_VAULTS
+        if vault.get("published_open"):
+            vault["publisher_fingerprint"] = fp
+
+
 @router.get("/api/vaults")
 def list_vaults(request: Request) -> dict:
     """All vaults, with how many documents each holds."""
-    return {"vaults": _vaults(request).list_vaults()}
+    vaults = _vaults(request).list_vaults()
+    _attach_publisher_fp(request, vaults)
+    return {"vaults": vaults}
 
 
 @router.post("/api/vaults")
@@ -84,6 +105,7 @@ def get_vault(request: Request, vault_id: str) -> dict:
     """
     store = _vaults(request)
     vault = _require(store, vault_id)
+    _attach_publisher_fp(request, [vault])
     members = store.members(vault_id)
     return {**vault, "doc_ids": [m["id"] for m in members], "members": members}
 
@@ -161,12 +183,13 @@ def _secrets(request: Request):
 
 @router.post("/api/vaults/{vault_id}/export")
 def export_vault(request: Request, vault_id: str, body: ExportIn) -> Response:
-    """Export a vault as a SEALED .sbvault file. Returns the file; the KEY is fetched separately.
+    """Export a vault as a .sbvault file — SEALED (default; the KEY is fetched separately) or OPEN.
 
-    Desktop-local AND re-authenticated, exactly like /api/backup: whoever holds the file and its key
-    holds the plaintext, so this is a sensitive egress. (Reusing data_routes' helpers verbatim —
-    "blocks a passer-by at an unattended-but-unlocked Desktop and a stale paired session from
-    silently exfiltrating everything in one click".)
+    Desktop-local AND re-authenticated in BOTH modes, exactly like /api/backup: a sealed file plus
+    its key is plaintext-equivalent, and an open file IS the decrypted plaintext — the most
+    sensitive egress in the app. (Reusing data_routes' helpers verbatim — "blocks a passer-by at an
+    unattended-but-unlocked Desktop and a stale paired session from silently exfiltrating
+    everything in one click".)
     """
     _require_desktop_local(request)
     _reauthorize(request, body)
@@ -192,17 +215,35 @@ def export_vault(request: Request, vault_id: str, body: ExportIn) -> Response:
                 entry["vectors"] = vectors  # so the recipient can search it the moment it lands
         docs.append(entry)
 
-    seq = vaults.bump_version(vault_id)  # a publish IS a version
-    key = vault_format.new_vault_key()
-    vaults.remember_key(vault_id, key)  # so the user can re-show it without re-exporting
+    seq = vaults.bump_version(vault_id)  # a publish IS a version (both modes share the counter)
+    if body.mode == vault_format.OPEN:
+        # Public == "there is no Vault Key": nothing is minted, nothing is remembered. The FIRST
+        # open publish fixes K_name for the life of the vault (decision #6): seeded from the stored
+        # Vault Key when one exists — the exact K_name every sealed export derived, so a
+        # sealed->open flip keeps every uid/hash/object name and subscribers see an in-place mode
+        # change — otherwise minted fresh for a born-open vault.
+        name_key = vaults.get_name_key(vault_id)
+        if name_key is None:
+            stored = vaults.get_key(vault_id)
+            name_key = (vault_format.derive_name_key(stored, vault_id)
+                        if stored is not None else os.urandom(32))
+        # Persist BEFORE packing: a file shipped under an unrecorded K_name would make the next
+        # republish rename every object — a full re-download for every tree-host subscriber. The
+        # inverse failure (recorded, never shipped) is harmless: the next export just reuses it.
+        vaults.note_open_publish(vault_id, name_key)
+        pack_args: dict = {"mode": vault_format.OPEN, "name_key": name_key}
+    else:
+        key = vault_format.new_vault_key()
+        vaults.remember_key(vault_id, key)  # so the user can re-show it without re-exporting
+        pack_args = {"vault_key": key}
     try:
         # No `label`: the publisher label sits in the PLAINTEXT manifest, and a vault's name ("Divorce
-        # filings", "Acme acquisition") can reveal as much as its contents. The real name travels in
-        # the ENCRYPTED index (pack's `name=`) and the importer restores it from there.
+        # filings", "Acme acquisition") can reveal as much as its contents. Sealed keeps the real name
+        # in the ENCRYPTED index; open publishes it in the manifest — the topic is public anyway.
         blob = vault_format.pack(
             store=secrets, vault_id=vault_id, name=vault["name"],
-            description=vault["description"], seq=seq, docs=docs, vault_key=key,
-            embed_model=embed_model,
+            description=vault["description"], seq=seq, docs=docs,
+            embed_model=embed_model, **pack_args,
         )
     except vault_format.VaultError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from None
@@ -221,9 +262,15 @@ def vault_key(request: Request, vault_id: str, body: ExportIn) -> dict:
     _require_desktop_local(request)
     _reauthorize(request, body)
     vaults = _vaults(request)
-    _require(vaults, vault_id)
+    vault = _require(vaults, vault_id)
     key = vaults.get_key(vault_id)
     if key is None:
+        if vault.get("published_open"):
+            # Not "try again": an open publish deliberately has no key, and saying so plainly is
+            # part of making the irreversibility impossible to miss.
+            raise HTTPException(status_code=409, detail=(
+                "this vault has only been published open — there is no key; "
+                "anyone with the file can read it"))
         raise HTTPException(status_code=409, detail="export this vault first — it has no key yet")
     return {"key": vault_format.encode_vault_key(key)}
 

@@ -50,7 +50,9 @@
   let newVaultName = $state("");
   let exportId = $state<string | null>(null); // the vault whose export row is open
   let exportPass = $state(""); // re-auth: an export hands out plaintext-equivalent content
+  let exportMode = $state<"sealed" | "open">("sealed"); // private (sealed) is ALWAYS the default
   let shownKey = $state(""); // the SBVK1- key, revealed after an export
+  let publishedOpen = $state(false); // a public export just finished — show the hosting hint
   // Panel-local errors: "incorrect passphrase" must appear NEXT TO the passphrase field, not at the
   // bottom of a long page (a live tester read it as a broken page, not a wrong password).
   let shareError = $state("");
@@ -509,20 +511,26 @@
     URL.revokeObjectURL(href);
   }
 
-  // Export downloads the sealed .sbvault AND then shows its key. The two must travel separately —
-  // whoever holds both holds the contents — so the UI hands them over one at a time and says so.
+  // Export downloads the .sbvault. Sealed: then shows its key — the two must travel separately,
+  // whoever holds both holds the contents. Public/open: there IS no key, so the follow-up is a
+  // hosting hint instead of a key row.
   async function exportVault(v: Vault) {
     if (!exportPass) return;
     vaultBusy = v.id;
     shareError = "";
     notice = "";
     shownKey = "";
+    publishedOpen = false;
     try {
-      const blob = await api.exportVault(v.id, exportPass);
+      const blob = await api.exportVault(v.id, exportPass, exportMode);
       saveBlob(blob, `${v.name.replace(/[^\w -]/g, "") || "vault"}.sbvault`);
-      shownKey = await api.vaultKey(v.id, exportPass);
+      if (exportMode === "sealed") {
+        shownKey = await api.vaultKey(v.id, exportPass);
+      } else {
+        publishedOpen = true;
+      }
       exportPass = "";
-      await loadVaults();
+      await loadVaults(); // the card's Public badge may have just appeared
     } catch (err) {
       shareError = describeError(err);
     } finally {
@@ -831,6 +839,12 @@
         <div class="vrow">
           <strong>{v.name}</strong>
           {#if v.kind === "imported"}<span class="badge">Imported</span>{/if}
+          {#if v.published_open}
+            <!-- Published open = irreversibly public. NEVER the label without the identity behind
+                 it: the fingerprint is what a subscriber actually pins. -->
+            <span class="badge">Public</span>
+            <span class="fp" title="Your publisher fingerprint — how subscribers identify you">{v.publisher_fingerprint}</span>
+          {/if}
           <button class="linklike" onclick={() => toggleMembers(v)} aria-expanded={openVaultId === v.id}>
             {v.doc_count} document{v.doc_count === 1 ? "" : "s"} {openVaultId === v.id ? "▾" : "▸"}
           </button>
@@ -845,7 +859,9 @@
               onclick={() => {
                 exportId = exportId === v.id ? null : v.id;
                 exportPass = "";
+                exportMode = "sealed"; // private is the default every time the panel opens
                 shownKey = "";
+                publishedOpen = false;
                 shareError = "";
               }}
             >Share…</button>
@@ -884,11 +900,28 @@
 
         {#if exportId === v.id}
           <div class="share">
-            <p class="muted" style="margin:0 0 0.5rem; font-size:0.85rem">
-              This seals the vault into a single <code>.sbvault</code> file. The file and its key must
-              travel <strong>separately</strong> — together they are the contents in the clear. Send the
-              file however you like, then read the key out over a different channel.
-            </p>
+            <!-- Private (sealed) stays the default and unchanged; Public is an explicit, warned
+                 choice — the warning sits BEFORE the export, because after it there is no undo. -->
+            <div role="radiogroup" aria-label="How to share" style="display:flex; gap:1.25rem; flex-wrap:wrap; margin-bottom:0.5rem; font-size:0.9rem">
+              <label>
+                <input type="radio" bind:group={exportMode} value="sealed" /> Private — sealed file + a separate key
+              </label>
+              <label>
+                <input type="radio" bind:group={exportMode} value="open" /> Public — a plain file, no key
+              </label>
+            </div>
+            {#if exportMode === "sealed"}
+              <p class="muted" style="margin:0 0 0.5rem; font-size:0.85rem">
+                This seals the vault into a single <code>.sbvault</code> file. The file and its key must
+                travel <strong>separately</strong> — together they are the contents in the clear. Send the
+                file however you like, then read the key out over a different channel.
+              </p>
+            {:else}
+              <p class="warn" style="margin:0 0 0.5rem; font-size:0.85rem">
+                <strong>Public:</strong> anyone with the link can read everything in this vault. There is
+                <strong>no key</strong>, and there is <strong>no taking it back</strong>.
+              </p>
+            {/if}
             <label for="share-pass-{v.id}" style="display:block; margin-bottom:0.25rem; font-size:0.85rem">
               Confirm it's you — enter your <strong>SmartBrain passphrase</strong> (exporting hands
               out everything in this vault):
@@ -904,7 +937,7 @@
                 onkeydown={(e) => e.key === "Enter" && exportPass && exportVault(v)}
               />
               <button disabled={vaultBusy === v.id || !exportPass} onclick={() => exportVault(v)}>
-                {vaultBusy === v.id ? "Sealing…" : "Export"}
+                {vaultBusy === v.id ? (exportMode === "open" ? "Publishing…" : "Sealing…") : "Export"}
               </button>
             </div>
             {#if shareError}<p class="error" style="margin:0.4rem 0 0">{shareError}</p>{/if}
@@ -916,6 +949,14 @@
                 <code class="key">{shownKey}</code>
                 <button class="secondary" onclick={copyKey}>{keyCopied ? "Copied ✓" : "Copy key"}</button>
               </div>
+            {:else if publishedOpen}
+              <!-- No key row: there is nothing to copy, and pretending otherwise would imply a
+                   protection that doesn't exist. Hosting is docs, not an uploader (Stage B). -->
+              <p class="muted" style="margin:0.75rem 0 0; font-size:0.85rem">
+                <strong>Published.</strong> Upload the file anywhere (Drive, S3, any web host) and share
+                the link — or unzip it and upload the folder to a static host so future updates only
+                re-upload what changed.
+              </p>
             {/if}
           </div>
         {/if}
@@ -1018,13 +1059,31 @@
     font-size: 0.75rem;
   }
 
-  /* "Imported" — this vault came from someone else, so it can be replaced by an update from them. */
+  /* "Imported" — this vault came from someone else, so it can be replaced by an update from them.
+     "Public" — this vault has been published open; the fingerprint always sits beside it. */
   .badge {
     padding: 0.05rem 0.45rem;
     font-size: 0.7rem;
     border-radius: 999px;
     border: 1px solid var(--border);
     color: var(--muted);
+  }
+
+  /* The publisher fingerprint (SB-…): monospace because it is read/compared character by
+     character — it is the identity subscribers pin, never mere decoration. */
+  .fp {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.7rem;
+    color: var(--muted);
+  }
+
+  /* The no-take-backs warning shown BEFORE a public export (same treatment as setup's .warn). */
+  .warn {
+    border: 1px solid var(--danger, #c0392b);
+    background: color-mix(in srgb, var(--danger, #c0392b) 10%, transparent);
+    color: var(--text);
+    padding: 0.5rem 0.75rem;
+    border-radius: 8px;
   }
 
   .share {
