@@ -542,19 +542,29 @@
 
   async function importVault() {
     const file = importInput?.files?.[0];
-    if (!file || !importKey.trim()) return;
+    if (!file) return;
     vaultBusy = "import";
     importError = "";
     notice = "";
     try {
+      // The key may be empty: a PUBLIC (open) .sbvault has no key at all.
       const r = await api.importVault(file, importKey.trim());
-      // Name the publisher fingerprint: it is the only thing that says WHO this knowledge came from.
-      notice =
-        `Imported “${r.name}” from publisher ${r.publisher} — ${r.added} new document` +
-        `${r.added === 1 ? "" : "s"}${r.duplicates ? `, ${r.duplicates} you already had` : ""}. ` +
-        (r.vectors_used
-          ? "It is searchable now."
-          : "Meaning search needs a reindex (the vault was built with a different embedding model).");
+      if (r.update) {
+        // The file's vault identity was already pinned here, so it applied as an UPDATE to that
+        // vault (§7: it's an update, not an import) — never a duplicate.
+        const changed = (r.added ?? 0) + (r.updated ?? 0) + (r.deleted ?? 0) + (r.kept_yours ?? 0);
+        notice = changed
+          ? `That file is a newer version of “${r.name}” — applied as an update: ${updateSummary(r)}.`
+          : `“${r.name}” is already up to date (v${r.seq}).`;
+      } else {
+        // Name the publisher fingerprint: it is the only thing that says WHO this knowledge came from.
+        notice =
+          `Imported “${r.name}” from publisher ${r.publisher} — ${r.added} new document` +
+          `${r.added === 1 ? "" : "s"}${r.duplicates ? `, ${r.duplicates} you already had` : ""}. ` +
+          (r.vectors_used
+            ? "It is searchable now."
+            : "Meaning search needs a reindex (the vault was built with a different embedding model).");
+      }
       importKey = "";
       if (importInput) importInput.value = "";
       await Promise.all([loadDocs(), loadVaults()]);
@@ -599,6 +609,96 @@
       return new URL(url).hostname;
     } catch {
       return "";
+    }
+  }
+
+  // --- subscription updates: check, apply, and (after a key change) trust -----------------------
+
+  // Per-vault inline state for the check/update flow. Inline is the hard rule: the result, the
+  // "Update now" button, and any error live ON the card that was clicked — never page-bottom.
+  type UpdState =
+    | { kind: "checking" }
+    | { kind: "uptodate" }
+    | { kind: "available"; from: number; to: number }
+    | { kind: "updating" }
+    | { kind: "applied"; summary: string }
+    | { kind: "rollback" }
+    | { kind: "error"; message: string };
+  let updates = $state<Record<string, UpdState>>({});
+  // Trusting a NEW publisher key: one open confirm panel at a time, passphrase re-entered.
+  let trustOpenId = $state<string | null>(null);
+  let trustPass = $state("");
+  let trustError = $state(""); // inline, next to the passphrase field — same rule as shareError
+  let trustBusy = $state(false);
+
+  // A URL ending /manifest.json is a hosted TREE: checking fetches only that small file. Anything
+  // else is a single-file host, and honesty demands the tooltip say a check re-downloads it all.
+  function isTreeHost(url: string): boolean {
+    return url.endsWith("/manifest.json");
+  }
+
+  function updateSummary(r: { added?: number; updated?: number; deleted?: number; kept_yours?: number }): string {
+    const parts: string[] = [];
+    if (r.updated) parts.push(`${r.updated} updated`);
+    if (r.added) parts.push(`${r.added} added`);
+    if (r.deleted) parts.push(`${r.deleted} removed`);
+    // kept_yours = documents that stayed the user's own (edited, detached, or already theirs).
+    if (r.kept_yours) parts.push(`${r.kept_yours} kept (yours — your edits stay yours)`);
+    return parts.length ? parts.join(", ") : "nothing changed";
+  }
+
+  async function checkUpdates(v: Vault) {
+    updates = { ...updates, [v.id]: { kind: "checking" } };
+    try {
+      const r = await api.checkVaultUpdates(v.id);
+      updates = {
+        ...updates,
+        [v.id]: r.rollback
+          ? { kind: "rollback" }
+          : r.behind
+            ? { kind: "available", from: r.seq, to: r.remote_seq }
+            : { kind: "uptodate" },
+      };
+      await loadVaults(); // last_checked moved
+    } catch (err) {
+      updates = { ...updates, [v.id]: { kind: "error", message: describeError(err) } };
+      await loadVaults(); // a 409 may have just BLOCKED the pin — the card must show the warning
+    }
+  }
+
+  async function applyUpdate(v: Vault) {
+    updates = { ...updates, [v.id]: { kind: "updating" } };
+    try {
+      const r = await api.updateVault(v.id);
+      updates = { ...updates, [v.id]: { kind: "applied", summary: updateSummary(r) } };
+      await Promise.all([loadDocs(), loadVaults()]);
+      refreshIndexStatus(); // changed documents re-embed in the background
+    } catch (err) {
+      updates = { ...updates, [v.id]: { kind: "error", message: describeError(err) } };
+      await loadVaults();
+    }
+  }
+
+  async function trustPublisher(v: Vault) {
+    const offered = v.source?.blocked?.offered_pubkey;
+    if (!offered || !trustPass || trustBusy) return;
+    trustBusy = true;
+    trustError = "";
+    try {
+      // The exact key being blessed rides along: if the host rotated AGAIN since this warning was
+      // rendered, the backend refuses rather than pinning a key nobody confirmed.
+      const r = await api.trustVaultPublisher(v.id, offered, trustPass);
+      notice = `Re-pinned “${v.name}” to the new publisher key ${r.pinned_fingerprint}. Check for updates again.`;
+      trustOpenId = null;
+      trustPass = "";
+      const next = { ...updates };
+      delete next[v.id];
+      updates = next;
+      await loadVaults();
+    } catch (err) {
+      trustError = describeError(err);
+    } finally {
+      trustBusy = false;
     }
   }
 </script>
@@ -897,6 +997,17 @@
             {v.doc_count} document{v.doc_count === 1 ? "" : "s"} {openVaultId === v.id ? "▾" : "▸"}
           </button>
           <span class="spacer"></span>
+          {#if v.kind === "imported" && v.source?.url && !v.source?.blocked}
+            <!-- Zip-host honesty: with no per-file tree, a "check" re-downloads the whole file. -->
+            <button
+              class="secondary"
+              disabled={updates[v.id]?.kind === "checking" || updates[v.id]?.kind === "updating"}
+              title={isTreeHost(v.source.url)
+                ? "Checks the vault's small manifest file on the host"
+                : "This host serves the vault as one file, so checking re-downloads the whole file"}
+              onclick={() => checkUpdates(v)}
+            >{updates[v.id]?.kind === "checking" ? "Checking…" : "Check for updates"}</button>
+          {/if}
           <button class="secondary" onclick={() => startAdding(v)}>Add documents</button>
           <button class="secondary" onclick={() => (scope = v.id)} disabled={scope === v.id}>
             {scope === v.id ? "Searching this" : "Search this"}
@@ -917,6 +1028,74 @@
           <button class="secondary" disabled={vaultBusy === v.id} onclick={() => removeVault(v)}>Delete</button>
         </div>
         {#if v.description}<p class="muted vdesc">{v.description}</p>{/if}
+
+        {#if v.source?.blocked}
+          <!-- The one interruption the design allows itself: a key change must never silently
+               succeed, so updates stop and BOTH identities sit side by side until the human
+               verifies the new one with the publisher over a channel they trust. -->
+          <div class="warn" style="margin-top:0.5rem; font-size:0.85rem">
+            <p style="margin:0"><strong>The publisher's key changed — updates are blocked.</strong></p>
+            <p style="margin:0.35rem 0 0">
+              Pinned <span class="fp">{v.pinned_fingerprint}</span> · now offered
+              <span class="fp">{v.blocked_fingerprint}</span>. This is either the publisher rotating
+              their key — or someone impersonating them. Verify the new fingerprint with the
+              publisher out-of-band (call them, ask in person) before trusting it.
+            </p>
+            {#if remote.status === "idle"}
+              {#if trustOpenId === v.id}
+                <label for="trust-pass-{v.id}" style="display:block; margin:0.6rem 0 0.25rem">
+                  Confirm it's you — enter your <strong>SmartBrain passphrase</strong> to pin the
+                  new key (every future update will be trusted from it):
+                </label>
+                <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap">
+                  <input
+                    id="trust-pass-{v.id}"
+                    type="password"
+                    style="flex:1; min-width:10rem"
+                    bind:value={trustPass}
+                    placeholder="Your passphrase"
+                    autocomplete="current-password"
+                    onkeydown={(e) => e.key === "Enter" && trustPass && trustPublisher(v)}
+                  />
+                  <button disabled={trustBusy || !trustPass} onclick={() => trustPublisher(v)}>
+                    {trustBusy ? "Pinning…" : "Trust new key"}
+                  </button>
+                  <button class="secondary" onclick={() => { trustOpenId = null; trustPass = ""; trustError = ""; }}>
+                    Cancel
+                  </button>
+                </div>
+                {#if trustError}<p class="error" style="margin:0.4rem 0 0">{trustError}</p>{/if}
+              {:else}
+                <p style="margin:0.6rem 0 0">
+                  <button class="secondary" onclick={() => { trustOpenId = v.id; trustPass = ""; trustError = ""; }}>
+                    I confirmed with the publisher out-of-band that this is really them
+                  </button>
+                </p>
+              {/if}
+            {:else}
+              <p class="muted" style="margin:0.6rem 0 0">
+                Trusting a new key is done on the Desktop, not from a paired device.
+              </p>
+            {/if}
+          </div>
+        {:else if updates[v.id]}
+          {@const u = updates[v.id]}
+          <!-- Inline, on the card that was clicked — the hard rule: never a page-bottom message. -->
+          <p class="upd">
+            {#if u.kind === "checking"}Checking…{/if}
+            {#if u.kind === "uptodate"}Up to date (v{v.source?.seq}).{/if}
+            {#if u.kind === "available"}
+              <strong>Update available (v{u.from} → v{u.to}).</strong>
+              <button onclick={() => applyUpdate(v)}>Update now</button>
+            {/if}
+            {#if u.kind === "updating"}Updating…{/if}
+            {#if u.kind === "applied"}Updated — {u.summary}.{/if}
+            {#if u.kind === "rollback"}
+              The host is serving an <strong>older</strong> version than you already have — refused.
+            {/if}
+            {#if u.kind === "error"}<span class="error">{u.message}</span>{/if}
+          </p>
+        {/if}
 
         {#if openVaultId === v.id}
           <!-- The vault's contents: what you'd be sharing or searching. Removing takes the document
@@ -1032,27 +1211,30 @@
       <details style="margin-top:1rem">
         <summary>Add someone else's vault — import a file, or subscribe to a public URL</summary>
         <p class="muted" style="margin:0.5rem 0; font-size:0.85rem">
-          Pick the <code>.sbvault</code> file and paste the key they sent you. Its documents are
-          re-encrypted under <em>your</em> passphrase as they land, and anything you already have is
-          kept as-is rather than overwritten.
+          Pick the <code>.sbvault</code> file and paste the key they sent you (a <strong>public</strong>
+          file has no key — leave it empty). Its documents are re-encrypted under <em>your</em>
+          passphrase as they land, and anything you already have is kept as-is rather than
+          overwritten. A newer file of a vault you already have applies as an <em>update</em> to it.
         </p>
         <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap">
           <input bind:this={importInput} type="file" accept=".sbvault" aria-label="Vault file" />
           <input
             style="flex:1; min-width:10rem"
             bind:value={importKey}
-            placeholder="SBVK1-…"
+            placeholder="SBVK1-… (empty for a public file)"
             aria-label="Vault key"
           />
-          <button disabled={vaultBusy === "import" || !importKey.trim()} onclick={importVault}>
+          <button disabled={vaultBusy === "import"} onclick={importVault}>
             {vaultBusy === "import" ? "Importing…" : "Import"}
           </button>
         </div>
         {#if importError}<p class="error" style="margin:0.4rem 0 0">{importError}</p>{/if}
 
         <p class="muted" style="margin:0.9rem 0 0.35rem; font-size:0.85rem">
-          …or add a <strong>public</strong> vault by URL — no file, no key. It is fetched from the
-          public internet, checked against its publisher's signature, and re-encrypted under
+          …or add a <strong>public</strong> vault by URL — no file, no key. Paste the link to the
+          <code>.sbvault</code> file, or — if the publisher hosts the unzipped folder — to its
+          <code>manifest.json</code> (updates then download only what changed). It is fetched from
+          the public internet, checked against its publisher's signature, and re-encrypted under
           <em>your</em> passphrase as it lands. The publisher is <strong>pinned on first
           contact</strong>: future updates must come from the same identity.
         </p>
@@ -1108,6 +1290,16 @@
   .vdesc {
     margin: 0.35rem 0 0;
     font-size: 0.85rem;
+  }
+
+  /* Inline check/update result — it lives ON the card that was clicked, never page-bottom. */
+  .upd {
+    margin: 0.5rem 0 0;
+    font-size: 0.85rem;
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    flex-wrap: wrap;
   }
 
   /* The expanded "what's inside" list — compact, one document per row. */

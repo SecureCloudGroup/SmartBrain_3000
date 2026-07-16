@@ -299,6 +299,9 @@ export interface Vault {
     mode?: string;
     added_at?: string;
     last_checked?: string | null;
+    // Set when an update check met a DIFFERENT publisher key. While present, check/update refuse
+    // (409) and the card shows the key-change warning; trust-publisher must echo this exact key.
+    blocked?: { offered_pubkey: string } | null;
   } | null;
   // True once this vault has been published OPEN (a plaintext file, no key). Never clears —
   // publishing is irreversible — and the UI must show the fingerprint beside any "Public" badge.
@@ -307,6 +310,9 @@ export interface Vault {
   // The PINNED publisher of an imported/subscribed vault — the identity every update must match.
   // Never show a "Subscribed" badge without it.
   pinned_fingerprint?: string;
+  // The OFFERED key's fingerprint while a key change is blocked — always shown beside the pinned
+  // one (a human decides between identities, never from one alone).
+  blocked_fingerprint?: string;
   doc_count: number;
   created_at: string;
   updated_at: string;
@@ -326,6 +332,32 @@ export interface VaultImportResult {
   added: number;
   duplicates: number;
   vectors_used: boolean;
+  // Present when the file's vault_id matched an existing pin: it was applied as an UPDATE to that
+  // vault (never a duplicate), and the update counts below say what changed.
+  update?: boolean;
+  updated?: number;
+  deleted?: number;
+  kept_yours?: number;
+  seq?: number;
+}
+
+// "Is there a newer version?" — seq is the version pinned locally, remote_seq what the host
+// serves. `rollback` = the host is serving something OLDER than the pin (refused, never applied).
+export interface VaultCheckResult {
+  behind: boolean;
+  remote_seq: number;
+  seq: number;
+  rollback: boolean;
+}
+
+// What an applied update did. `kept_yours` = documents that stayed the user's own (they edited
+// them, or already had the same text) — an update never overwrites those.
+export interface VaultUpdateResult {
+  added: number;
+  updated: number;
+  deleted: number;
+  kept_yours: number;
+  seq: number;
 }
 
 // Subscribe-by-URL result: an import, plus the host the vault came from (host only — never the
@@ -695,6 +727,7 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ url }),
     }),
+  // `key` may be empty for a PUBLIC (open) .sbvault file — those have no key at all.
   importVault: async (file: File, key: string): Promise<VaultImportResult> => {
     await remoteReady;
     const res = await fetch(`/api/vaults/import?key=${encodeURIComponent(key)}`, {
@@ -706,6 +739,27 @@ export const api = {
     if (!res.ok) throw new ApiError(res.status, (data as { detail?: string })?.detail || "import failed");
     return data as VaultImportResult;
   },
+  // Ask the pinned URL whether a newer version exists (writes nothing but last_checked). A 409
+  // means updates are blocked: the publisher's key changed, or the host serves an older version.
+  checkVaultUpdates: (id: string) =>
+    req<VaultCheckResult>(`/api/vaults/${encodeURIComponent(id)}/check-updates`, { method: "POST" }),
+  // Fetch + verify + apply a newer version, all-or-nothing. Documents the user edited stay
+  // theirs (reported in kept_yours), and the publisher's signature is checked against the PIN.
+  updateVault: (id: string) =>
+    req<VaultUpdateResult>(`/api/vaults/${encodeURIComponent(id)}/update`, { method: "POST" }),
+  // Re-pin a subscription to a NEW publisher key the user confirmed out-of-band. The most
+  // consequential act in the vault system, so it gates like export: Desktop-local (x-sb-local)
+  // + passphrase re-entry — and it names the exact key it blesses, so a host that rotated again
+  // since the user checked is refused instead of silently trusted.
+  trustVaultPublisher: (id: string, offered_pubkey: string, passphrase: string) =>
+    req<{ ok: boolean; pinned_fingerprint: string }>(
+      `/api/vaults/${encodeURIComponent(id)}/trust-publisher`,
+      {
+        method: "POST",
+        headers: { "x-sb-local": "1" },
+        body: JSON.stringify({ offered_pubkey, passphrase }),
+      },
+    ),
 
   // email (Gmail via loopback OAuth; reads + user-initiated send; agent send is gated)
   emailStatus: () => req<EmailStatus>("/api/email/status"),

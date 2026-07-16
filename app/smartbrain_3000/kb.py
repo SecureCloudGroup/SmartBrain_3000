@@ -190,6 +190,32 @@ class KnowledgeBase:
         self.index.add_document(doc_id, title, doc["content"])  # title is indexed, so re-index it
         return True
 
+    def replace(self, doc_id: str, title: str, content: str, meta: dict | None = None) -> bool:
+        """Replace a document's whole body IN PLACE, keeping its id; False if it doesn't exist.
+
+        The update primitive for vaults (vault-format §7): delete-then-add would mint a new id,
+        breaking every citation, deep link, and open tab — ``rename`` already re-seals in place for
+        the title, and this generalises it. The old embeddings are DELETED, not kept: they describe
+        text that no longer exists, and a stale vector would keep ranking the document by its old
+        meaning. ``docs_needing_embedding`` then surfaces it and the background indexer re-embeds
+        (exactly the drop-and-re-embed path a model switch already takes).
+        """
+        assert doc_id, "doc id required"
+        assert title, "title must be non-empty"
+        assert content is not None, "content must not be None"
+        if self.get(doc_id) is None:
+            return False
+        nonce, ciphertext = self._seal(doc_id, title, content, meta)
+        self._conn.execute(
+            "UPDATE documents SET nonce = ?, ciphertext = ?, updated_at = now() WHERE id = ?;",
+            [nonce, ciphertext, doc_id],
+        )
+        self._conn.execute("DELETE FROM embeddings WHERE doc_id = ?;", [doc_id])
+        # add_document re-indexes the text AND drops the doc's rows from every vector block, so a
+        # built index can't keep scoring the old content while the re-embed catches up.
+        self.index.add_document(doc_id, title, content)
+        return True
+
     def find_duplicate(self, content: str) -> str | None:
         """The id of an existing document with identical text, if any.
 

@@ -19,7 +19,7 @@ from urllib.parse import urldefrag, urlparse
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
-from . import gateway, identity, kb as kbmod, netguard, tools, vault_format
+from . import gateway, identity, kb as kbmod, netguard, tools, vault_format, vault_sync
 from .data_routes import _reauthorize, _require_desktop_local
 from .vaults import IMPORT, IMPORTED
 
@@ -94,9 +94,15 @@ def _attach_pinned_fp(vaults: list[dict]) -> None:
     appears without the identity it is pinned to — the fingerprint every future update must match.
     """
     for vault in vaults:  # bounded by vaults._MAX_VAULTS
-        pubkey = (vault.get("source") or {}).get("publisher_pubkey")
+        source = vault.get("source") or {}
+        pubkey = source.get("publisher_pubkey")
         if isinstance(pubkey, str) and pubkey:
             vault["pinned_fingerprint"] = vault_format.fingerprint(pubkey)
+        offered = (source.get("blocked") or {}).get("offered_pubkey")
+        if isinstance(offered, str) and offered:
+            # A blocked subscription's OTHER identity: the key-change warning must show both
+            # fingerprints side by side, so the offered one rides the list response too.
+            vault["blocked_fingerprint"] = vault_format.fingerprint(offered)
 
 
 @router.get("/api/vaults")
@@ -316,6 +322,24 @@ def _audit_import(request: Request, name: str, fp: str, seq: int, added: int, du
     )
 
 
+def _audit_update(request: Request, name: str, fp: str, seq: int, result: dict,
+                  *, host: str | None = None) -> None:
+    """Audit one applied vault update — new INGRESS under an existing pin.
+
+    Same rules as _audit_import: the pinned fingerprint is the identity, and only the URL's HOST
+    ever reaches the row (a file update has none).
+    """
+    args = {"vault": name, "publisher": fp, "seq": seq}
+    if host is not None:
+        args["host"] = host
+    request.app.state.audit.append(
+        "user", "vault_update", "reviewed", "executed", True,
+        args_summary=tools.summarize(args),
+        result_summary=tools.summarize(
+            {k: result[k] for k in ("added", "updated", "deleted", "kept_yours")}),
+    )
+
+
 def _apply_docs(request: Request, vaults, knowledge, local_id: str, manifest: dict,
                 docs: list[dict]) -> dict:
     """Apply a VERIFIED vault's documents to local vault ``local_id``; return what happened.
@@ -335,14 +359,19 @@ def _apply_docs(request: Request, vaults, knowledge, local_id: str, manifest: di
         existing = knowledge.find_duplicate(doc["content"])
         if existing is not None:
             # The user already has this text. Keep THEIR document and just note the membership —
-            # never overwrite something they authored with a stranger's copy.
+            # never overwrite something they authored with a stranger's copy. The landed baseline
+            # is that existing (user's) doc, so an update never mistakes it for the publisher's.
             vaults.add_documents(local_id, [existing], origin="owner")
-            vaults.note_member_source(local_id, existing, doc["uid"], doc["hash"])
+            vaults.note_member_source(local_id, existing, doc["uid"], doc["hash"],
+                                      vault_sync._landed_hash(knowledge.get(existing)))
             duplicates += 1
             continue
         doc_id = knowledge.add(doc["title"], doc["content"], doc["meta"])
         vaults.add_documents(local_id, [doc_id], origin="import")
-        vaults.note_member_source(local_id, doc_id, doc["uid"], doc["hash"])
+        # landed_hash = the doc AS STORED locally (normalized) — separate from the publisher's signed
+        # hash, so a doc that normalized on the way in isn't later misread as a user edit.
+        vaults.note_member_source(local_id, doc_id, doc["uid"], doc["hash"],
+                                  vault_sync._landed_hash(doc))
         added += 1
         vectors = doc.get("vectors")
         # Use the shipped vectors ONLY if they were made by the same model, at the same dim, with
@@ -361,26 +390,108 @@ def _apply_docs(request: Request, vaults, knowledge, local_id: str, manifest: di
             "vectors_used": bool(shipped.get("model") == embed_model)}
 
 
+def _pin_for(vaults, vault_id: str) -> dict | None:
+    """The existing local vault whose pin names ``vault_id``, or None.
+
+    Bounded decrypt-scan (list_vaults is capped at vaults._MAX_VAULTS) — the resolution step both
+    ingress paths run BEFORE anything lands, so a vault identity can exist here at most once.
+    """
+    for vault in vaults.list_vaults():  # bounded by vaults._MAX_VAULTS
+        if (vault.get("source") or {}).get("vault_id") == vault_id:
+            return vault
+    return None
+
+
+def _rollback_import(vaults, knowledge, local_id: str) -> None:
+    """Undo a failed import/subscribe: the vault row, its memberships, and the docs it minted.
+
+    All-or-nothing, for real: the vault row + pin land BEFORE the documents, so a mid-apply
+    failure (KB write, embed, disk) would otherwise strand a partial vault whose pin makes every
+    RETRY hit the duplicate-409 — self-blocking until a manual delete. Only import-origin docs are
+    deleted: a deduped member is the USER's own doc, origin owner — kept.
+
+    (Compensating cleanup, not a transaction: everything an import creates is freshly minted, so
+    deleting it IS the undo. The update path can't say that — it overwrites bodies in place — so
+    vault_sync._write wraps its writes in a real transaction instead.)
+    """
+    minted = [m["id"] for m in vaults.members(local_id) if m["origin"] == IMPORT]
+    vaults.delete(local_id)
+    for doc_id in minted:  # bounded by _MAX_DOCS_PER_VAULT
+        knowledge.delete(doc_id)
+
+
+def _update_from_file(request: Request, vaults, knowledge, vault: dict, manifest: dict,
+                      docs: list[dict], data: bytes) -> dict:
+    """Route a re-imported FILE of an already-pinned vault into the update core (§7: "imported
+    from this vault — it's an update, not an import").
+
+    The PIN — never the file — is the authority, so §5 runs here exactly as a URL check would:
+    (2) the vault_id matched to reach this function; (3) the signature is verified against the
+    PINNED key over the exact manifest bytes in the file (open_vault's self-check is not this
+    check); (4) the seq must move forward. A sealed file updates a file-import pin fine (uids and
+    hashes are mode-independent), but a URL subscription is pinned to the vault's OPEN edition —
+    a sealed file there is a clear refusal, not a guess.
+    """
+    pin = vault.get("source") or {}
+    pinned_key = pin.get("publisher_pubkey") or ""
+    if not pinned_key:  # a pin without an identity can't verify anything — refuse, don't guess
+        raise HTTPException(status_code=409, detail=(
+            f"a vault with this identity already exists (“{vault['name']}”) but its pin is "
+            "incomplete — remove it and import the file fresh"))
+    fp = vault_format.fingerprint(pinned_key)
+    if not vault_format.manifest_signed_by(vault_format.manifest_entry(data), pinned_key):
+        raise HTTPException(status_code=409, detail=(
+            f"this file names a vault you already have (“{vault['name']}”) but is signed by a "
+            f"different publisher — pinned {fp}, file "
+            f"{vault_format.fingerprint(manifest['publisher']['pubkey'])} — refusing"))
+    if pin.get("mode") == vault_format.OPEN and manifest["mode"] == vault_format.SEALED:
+        raise HTTPException(status_code=409, detail=(
+            "you are subscribed to this vault's public edition, but this file is a sealed "
+            "export — check the subscription for updates instead, or remove it and import "
+            "the file fresh"))
+    seq, pinned_seq = manifest["seq"], int(pin.get("seq") or 0)
+    if seq < pinned_seq:
+        raise HTTPException(status_code=409, detail=(
+            f"this file is OLDER (v{seq}) than what you already have (v{pinned_seq}) — "
+            "refusing to roll back"))
+    base = {"id": vault["id"], "name": vault["name"], "publisher": fp, "update": True}
+    if seq == pinned_seq:
+        return {**base, "added": 0, "updated": 0, "deleted": 0, "kept_yours": 0, "seq": seq}
+    result = vault_sync.apply_from_docs(
+        vaults, knowledge, vault["id"], manifest, docs, gateway.embed_model(request.app.state.dbx))
+    log.info("updated vault %s from file to seq %d: %s", manifest["vault_id"], seq, result)
+    _audit_update(request, vault["name"], fp, seq, result)
+    return {**base, **result, "seq": seq}
+
+
 @router.post("/api/vaults/import")
-async def import_vault(request: Request, key: str) -> dict:
-    """Import a .sbvault (raw body) with its SBVK1- key. Verifies, decrypts, and RE-SEALS locally.
+async def import_vault(request: Request, key: str = "") -> dict:
+    """Import a .sbvault (raw body). Sealed needs its SBVK1- key; a PUBLIC (open) file needs none.
+    Verifies, decrypts when sealed, and RE-SEALS locally.
 
     Imported documents are re-sealed under THIS user's master key with fresh local ids: the GCM tag
     is bound to the doc_id, so there is no such thing as importing a ciphertext — and a malicious
     vault naming a document with an id that already exists locally could otherwise clobber it.
     Minting locally makes that attack structurally impossible.
+
+    A file whose vault_id is already pinned here routes into the UPDATE core instead of minting a
+    duplicate vault (§7) — see _update_from_file.
     """
     vaults, knowledge = _vaults(request), _kb(request)
     data = await request.body()
     if not data:
         raise HTTPException(status_code=400, detail="empty upload")
     try:
-        vault_key = vault_format.decode_vault_key(key)
+        vault_key = vault_format.decode_vault_key(key) if key.strip() else None
         manifest, docs = vault_format.open_vault(data, vault_key)
     except vault_format.VaultError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from None
 
     publisher = manifest["publisher"]
+    existing = _pin_for(vaults, manifest["vault_id"])
+    if existing is not None:
+        return _update_from_file(request, vaults, knowledge, existing, manifest, docs, data)
+
     # The vault's real name comes from the ENCRYPTED index (surfaced by open_vault as _sealed) — the
     # plaintext manifest deliberately carries no topic, so a host never learns what a vault is about.
     sealed = manifest.get("_sealed") or {}
@@ -391,8 +502,15 @@ async def import_vault(request: Request, key: str) -> dict:
         source={"vault_id": manifest["vault_id"], "publisher_pubkey": publisher["pubkey"],
                 "seq": manifest["seq"]},
     )
-
-    applied = _apply_docs(request, vaults, knowledge, local_id, manifest, docs)
+    try:
+        applied = _apply_docs(request, vaults, knowledge, local_id, manifest, docs)
+    except Exception:
+        # Same atomicity subscribe got (#77): nothing kept, retry works. vault_id only — a file
+        # import has no URL, and the vault's NAME is the topic, which never reaches a log.
+        _rollback_import(vaults, knowledge, local_id)
+        log.exception("import failed applying vault %s; rolled back", manifest["vault_id"])
+        raise HTTPException(status_code=500, detail=(
+            "import failed part-way — nothing was kept; try again")) from None
 
     log.info("imported vault %s: %d added, %d already present",
              manifest["vault_id"], applied["added"], applied["duplicates"])
@@ -437,30 +555,22 @@ def subscribe_vault(request: Request, body: SubscribeIn) -> dict:
         raise HTTPException(status_code=400, detail="enter the vault's URL")
     host = urlparse(url).hostname or ""
     try:
-        data = netguard.safe_fetch_vault(url)
+        # Both host shapes (§1): a .sbvault URL fetches the zip; a /manifest.json URL walks the
+        # unzipped tree (manifest -> index -> every object), each piece verified the same way.
+        manifest, docs = vault_sync.fetch_open_vault(url)
     except netguard.FetchError as exc:
         raise HTTPException(status_code=400, detail=_explain_fetch_refusal(str(exc))) from None
-
-    try:
-        if vault_format.read_manifest(data)["mode"] != vault_format.OPEN:
-            # v1 URL-subscribe is open-only (the plan's explicit deferral): a sealed vault's key
-            # must never ride a URL, so file + separately-sent key stays the sealed channel.
-            raise HTTPException(status_code=400, detail=(
-                "that vault is sealed — import its file with the key instead"))
-        manifest, docs = vault_format.open_vault(data)
-    except vault_format.VaultError as exc:
+    except (vault_format.VaultError, vault_sync.SyncError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from None
 
     publisher = manifest["publisher"]
-    # Resolve the claimed vault_id against every existing pin (bounded decrypt-scan: list_vaults
-    # is capped at vaults._MAX_VAULTS). Refusing BEFORE anything lands keeps this all-or-nothing.
-    for vault in vaults.list_vaults():
-        pin = vault.get("source") or {}
-        if pin.get("vault_id") != manifest["vault_id"]:
-            continue
-        if pin.get("publisher_pubkey") == publisher["pubkey"]:
+    # Resolve the claimed vault_id against every existing pin. Refusing BEFORE anything lands
+    # keeps this all-or-nothing.
+    existing = _pin_for(vaults, manifest["vault_id"])
+    if existing is not None:
+        if (existing.get("source") or {}).get("publisher_pubkey") == publisher["pubkey"]:
             raise HTTPException(status_code=409, detail=(
-                f"you already have this vault (“{vault['name']}”) — "
+                f"you already have this vault (“{existing['name']}”) — "
                 "check it for updates instead of subscribing again"))
         # Same vault_id, different key: either an impersonation of a vault this user already
         # trusts, or a publisher key change — and a key change must NEVER silently succeed (§5).
@@ -486,15 +596,7 @@ def subscribe_vault(request: Request, body: SubscribeIn) -> dict:
     try:
         applied = _apply_docs(request, vaults, knowledge, local_id, manifest, docs)
     except Exception:
-        # All-or-nothing, for real: the vault row + pin land BEFORE the documents, so a mid-apply
-        # failure (KB write, embed, disk) would otherwise strand a partial vault whose pin makes
-        # every RETRY hit the duplicate-409 above — self-blocking until a manual delete. Roll back
-        # everything this call minted: the vault row and its memberships, then the import-origin
-        # documents (a deduped member is the USER's own doc, origin owner — kept).
-        minted = [m["id"] for m in vaults.members(local_id) if m["origin"] == IMPORT]
-        vaults.delete(local_id)
-        for doc_id in minted:  # bounded by _MAX_DOCS_PER_VAULT
-            knowledge.delete(doc_id)
+        _rollback_import(vaults, knowledge, local_id)
         # Traceback for the bug report; vault_id + host only — never the URL (its path names the topic).
         log.exception("subscribe failed applying vault %s (host %s); rolled back",
                       manifest["vault_id"], host)
@@ -507,3 +609,148 @@ def subscribe_vault(request: Request, body: SubscribeIn) -> dict:
     _audit_import(request, name, fp, manifest["seq"], applied["added"], applied["duplicates"],
                   tool="vault_subscribe", host=host)
     return {"id": local_id, "name": name, "publisher": fp, "url_host": host, **applied}
+
+
+# --- check for updates / apply / trust a changed key ----------------------------------------------
+
+class TrustIn(BaseModel):
+    """Re-auth + the EXACT key being blessed. Echoing the offered pubkey back is what stops a
+    racing rotation from being trusted blind: the server compares it to the blocked record, so a
+    key that changed again since the user confirmed out-of-band is refused, never re-pinned."""
+
+    passphrase: str | None = None
+    recovery_key: str | None = None
+    offered_pubkey: str = Field(min_length=1, max_length=100)
+
+
+def _subscription(request: Request, vault_id: str) -> tuple:
+    """(vaults, vault, pin) for a URL subscription — 400 for anything else (all three routes)."""
+    vaults = _vaults(request)
+    vault = _require(vaults, vault_id)
+    pin = vault.get("source") or {}
+    if not pin.get("url") or not pin.get("publisher_pubkey") or not pin.get("vault_id"):
+        raise HTTPException(status_code=400, detail=(
+            "this vault is not a URL subscription — there is nothing to check"))
+    return vaults, vault, pin
+
+
+def _key_change_detail(pinned_pubkey: str, offered_pubkey: str) -> str:
+    """The one interruption the design allows itself — so it must say everything: BOTH identities,
+    side by side, and what unblocks it."""
+    return (f"the publisher's key CHANGED — pinned {vault_format.fingerprint(pinned_pubkey)}, "
+            f"offered {vault_format.fingerprint(offered_pubkey)}. Updates are blocked until you "
+            "confirm the new key with the publisher out-of-band and choose Trust new key")
+
+
+def _refuse_if_blocked(pin: dict) -> None:
+    """While a key change is pending, check/update short-circuit to the SAME 409 — no fetch, no
+    re-verify: nothing a hostile host serves may move the pin, and there is nothing new to learn
+    until the human decides."""
+    offered = (pin.get("blocked") or {}).get("offered_pubkey")
+    if offered:
+        raise HTTPException(status_code=409,
+                            detail=_key_change_detail(pin["publisher_pubkey"], offered))
+
+
+def _block_key_change(vaults, vault_id: str, pin: dict, offered_pubkey: str) -> HTTPException:
+    """Record the offered key in the pin (read-modify-write) and build the 409 to raise."""
+    vaults.update_source(vault_id, {"blocked": {"offered_pubkey": offered_pubkey}})
+    return HTTPException(status_code=409,
+                         detail=_key_change_detail(pin["publisher_pubkey"], offered_pubkey))
+
+
+def _checked(vaults, vault_id: str, pin: dict) -> dict:
+    """Run vault_sync.check for a route, mapping every failure to its HTTP shape."""
+    try:
+        return vault_sync.check(pin)
+    except vault_sync.KeyChanged as exc:
+        raise _block_key_change(vaults, vault_id, pin, exc.offered_pubkey) from None
+    except netguard.FetchError as exc:
+        raise HTTPException(status_code=400, detail=_explain_fetch_refusal(str(exc))) from None
+    except (vault_format.VaultError, vault_sync.SyncError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+
+
+@router.post("/api/vaults/{vault_id}/check-updates")
+def check_updates(request: Request, vault_id: str) -> dict:
+    """Ask the pinned URL whether a newer version exists. Writes NOTHING except last_checked
+    (and the blocked marker, when the answer is a key change)."""
+    vaults, _vault, pin = _subscription(request, vault_id)
+    _refuse_if_blocked(pin)
+    chk = _checked(vaults, vault_id, pin)
+    vaults.update_source(vault_id, {
+        "last_checked": datetime.now(timezone.utc).date().isoformat()})
+    return {"behind": chk["behind"], "remote_seq": chk["remote_seq"],
+            "seq": chk["pinned_seq"], "rollback": chk["rollback"]}
+
+
+@router.post("/api/vaults/{vault_id}/update")
+def update_vault_from_source(request: Request, vault_id: str) -> dict:
+    """Check and, when a newer version exists, APPLY it — all-or-nothing (vault-format §5)."""
+    vaults, vault, pin = _subscription(request, vault_id)
+    _refuse_if_blocked(pin)
+    knowledge = _kb(request)
+    chk = _checked(vaults, vault_id, pin)
+    # last_checked means "we successfully talked to the host" — it advances on EVERY verified
+    # answer (update, up-to-date, even a refused rollback), exactly as check-updates records it.
+    vaults.update_source(vault_id, {
+        "last_checked": datetime.now(timezone.utc).date().isoformat()})
+    if chk["rollback"]:
+        raise HTTPException(status_code=409, detail=(
+            f"the host is serving an OLDER version (v{chk['remote_seq']}) than you already have "
+            f"(v{chk['pinned_seq']}) — refusing to roll back"))
+    if not chk["behind"]:
+        return {"added": 0, "updated": 0, "deleted": 0, "kept_yours": 0, "seq": chk["pinned_seq"]}
+    host = urlparse(pin["url"]).hostname or ""
+    try:
+        result = vault_sync.apply(vaults, knowledge, vault_id, pin, chk,
+                                  gateway.embed_model(request.app.state.dbx))
+    except netguard.FetchError as exc:
+        raise HTTPException(status_code=400, detail=_explain_fetch_refusal(str(exc))) from None
+    except (vault_format.VaultError, vault_sync.SyncError) as exc:
+        # A tampered/malformed piece surfaced AFTER the manifest verified: nothing was applied
+        # (verification precedes the first write, and the write phase rolls back whole).
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    except Exception:
+        log.exception("update failed applying vault %s (host %s); rolled back",
+                      pin["vault_id"], host)
+        raise HTTPException(status_code=500, detail=(
+            "update failed part-way — nothing was changed; try again")) from None
+    log.info("updated vault %s (host %s) to seq %d: %s",
+             pin["vault_id"], host, chk["remote_seq"], result)
+    _audit_update(request, vault["name"], vault_format.fingerprint(pin["publisher_pubkey"]),
+                  chk["remote_seq"], result, host=host)
+    return {**result, "seq": chk["remote_seq"]}
+
+
+@router.post("/api/vaults/{vault_id}/trust-publisher")
+def trust_publisher(request: Request, vault_id: str, body: TrustIn) -> dict:
+    """Re-pin a subscription to the NEW key the user confirmed out-of-band; clear the block.
+
+    Trusting a new publisher key is the single most consequential act in the vault system — it
+    hands every future update to whoever holds that key — so it gates exactly like export
+    (Desktop-local + passphrase re-entry), and the body must name the exact key it blesses. The
+    seq floor deliberately survives the re-pin: a new key is not a license to roll back.
+    """
+    _require_desktop_local(request)
+    _reauthorize(request, body)
+    vaults, vault, pin = _subscription(request, vault_id)
+    offered = (pin.get("blocked") or {}).get("offered_pubkey")
+    if not offered:
+        raise HTTPException(status_code=409, detail=(
+            "there is no pending key change on this vault — check for updates first"))
+    if body.offered_pubkey != offered:
+        # The host rotated AGAIN after the user confirmed: what they verified out-of-band is not
+        # what would be pinned. Refuse — a stale confirmation must never bless a newer stranger.
+        raise HTTPException(status_code=409, detail=(
+            "the offered key has changed since you confirmed it — check for updates and confirm "
+            "the new fingerprint with the publisher again"))
+    vaults.update_source(vault_id, {"publisher_pubkey": offered, "blocked": None})
+    fp = vault_format.fingerprint(offered)
+    request.app.state.audit.append(
+        "user", "vault_trust_publisher", "reviewed", "executed", True,
+        args_summary=tools.summarize({"vault": vault["name"], "publisher": fp}),
+        result_summary=tools.summarize({"repinned": True}),
+    )
+    log.info("re-pinned vault %s to a new publisher key", pin["vault_id"])
+    return {"ok": True, "pinned_fingerprint": fp}
