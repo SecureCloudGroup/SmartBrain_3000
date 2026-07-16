@@ -11,7 +11,9 @@ Knowledge, Planner, Schedules, Email, and Activity — while Settings and setup 
 Talk to your assistant. Chat can optionally **use tools** to act on your behalf —
 search your knowledge, **read or summarize a whole document**, **save a note back to
 your knowledge**, add a task, fetch a public web page, send an email, and more. Replies
-are formatted (headings, lists, tables, and code blocks render properly).
+are formatted (headings, lists, tables, and code blocks render properly). You can
+**Stop** an answer mid-stream, **Copy** any reply, **Regenerate** the latest one, and
+**Rename** a saved chat.
 
 Tools are **risk-tiered**, and this is the core safety idea:
 

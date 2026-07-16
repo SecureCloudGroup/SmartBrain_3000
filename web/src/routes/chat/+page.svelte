@@ -6,6 +6,7 @@
   import { resumeChat } from "$lib/chat-resume";
   import { refreshPending } from "$lib/pending.svelte";
   import { api, ApiError, type AgentResult, type ChatMessage, type Conversation, type DiscoveredModel, type RecentScheduleRun, type Source } from "$lib/api";
+  import { finalAssistantId, transcriptUpToLastUser } from "$lib/chat-log";
   import { describeError } from "$lib/errors";
   import Markdown from "$lib/Markdown.svelte";
   import { remote } from "$lib/remote/connection.svelte";
@@ -34,6 +35,15 @@
     "web search, tasks, knowledge, and email actions won't run. Pick a tool-capable model above for those.";
   let pendingTurnId = $state<string | null>(null);
   let resumeNotice = $state(""); // transient: shown if Resume is clicked before the action is approved
+  // Non-null only while a STREAMED turn is in flight — flips the composer's Send into Stop.
+  // The non-streaming paths (remote/WebRTC, approval fallback) can't be interrupted mid-flight,
+  // so they never set it.
+  let stopper = $state<AbortController | null>(null);
+  let copiedId = $state<string | null>(null); // entry whose Copy just succeeded ("Copied ✓" flip)
+  let renaming = $state(false); // inline rename of the open conversation (Knowledge's idiom)
+  let renameValue = $state("");
+  // The only answer Regenerate is offered on — regenerating an older one would fork the thread.
+  const lastAnswerId = $derived(finalAssistantId(log));
 
   // Stable client-side ids for entries we just appended (server-issued ids are used
   // for messages loaded from history). Monotonic counter; bounded by user actions.
@@ -289,6 +299,7 @@
     error = "";
     pendingTurnId = null; // never carry a parked turn across a conversation switch
     resumeNotice = "";
+    renaming = false; // a half-typed rename belongs to the conversation being left
     try {
       const convo = await api.getConversation(id);
       chatSession.currentId = id;
@@ -310,7 +321,34 @@
     msgHasMore = false;
     pendingTurnId = null;
     resumeNotice = "";
+    renaming = false;
     error = "";
+  }
+
+  // Inline rename of the OPEN conversation — same Rename → input + Save/Cancel + Enter
+  // idiom as Knowledge's document rename.
+  function startRename() {
+    const current = conversations.find((c) => c.id === chatSession.currentId);
+    if (!current) return;
+    renameValue = current.title;
+    renaming = true;
+    error = "";
+  }
+  function cancelRename() {
+    renaming = false;
+  }
+  async function saveRename(): Promise<void> {
+    const t = renameValue.trim();
+    const cid = chatSession.currentId;
+    if (!t || cid === null) return;
+    error = "";
+    try {
+      await api.renameConversation(cid, t);
+      renaming = false;
+      await loadConversations(); // re-list so the picker shows the server's (source-of-truth) title
+    } catch (err) {
+      error = describeError(err);
+    }
   }
 
   async function remove(id: string) {
@@ -359,14 +397,7 @@
       log.push({ id: nextEntryId("user"), role: "user", content: text });
       await api.addMessage(cid, "user", text);
 
-      const messages = buildTranscript();
-      // Desktop/local -> stream tokens. Remote (WebRTC relay buffers SSE) -> non-stream.
-      if (remote.status === "idle") {
-        await streamTurn({ messages, cid });
-      } else {
-        const res = await api.agentTurn({ messages, model: modelId, conversation_id: cid });
-        await handleAgentResult(res, cid);
-      }
+      await runTurn(buildTranscript(), cid);
       await loadConversations(); // refresh recency/order
     } catch (err) {
       const text2 = describeError(err);
@@ -376,27 +407,62 @@
     }
   }
 
+  // One agent turn, dispatched the right way (shared by send + regenerate):
+  // Desktop/local -> stream tokens. Remote (WebRTC relay buffers SSE) -> non-stream.
+  async function runTurn(messages: ChatMessage[], cid: string): Promise<void> {
+    if (remote.status === "idle") {
+      await streamTurn({ messages, cid });
+    } else {
+      const res = await api.agentTurn({ messages, model: modelId, conversation_id: cid });
+      await handleAgentResult(res, cid);
+    }
+  }
+
+  // Regenerate the thread's final answer: re-run the turn from the history up to (and
+  // including) the last user message. There is no delete-message route server-side, so
+  // the fresh answer APPENDS below the old one — what you see is exactly what a reload
+  // shows (visually replacing it would diverge from the stored thread).
+  async function regenerate(): Promise<void> {
+    const cid = chatSession.currentId;
+    if (busy || !modelId || cid === null) return;
+    const messages = transcriptUpToLastUser(log);
+    if (!messages) return; // no user message to regenerate from
+    busy = true;
+    error = "";
+    modelNotice = "";
+    try {
+      await runTurn(messages, cid);
+      await loadConversations(); // refresh recency/order
+    } catch (err) {
+      const text = describeError(err);
+      if (text) log.push({ id: nextEntryId("err"), role: "assistant", content: text, err: true });
+    } finally {
+      busy = false;
+    }
+  }
+
+  // Copy an answer's RAW markdown (entry content, not rendered HTML) — same clipboard +
+  // 1.5s "Copied ✓" flip idiom as Settings → MCP's copy().
+  async function copyMessage(entry: Entry): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(entry.content);
+      copiedId = entry.id;
+      setTimeout(() => {
+        if (copiedId === entry.id) copiedId = null; // don't clobber a newer copy's flip
+      }, 1500);
+    } catch {
+      /* clipboard unavailable — the user can select the text */
+    }
+  }
+
   // Stream a single agent turn over SSE. On `delta` we mutate the open assistant
   // bubble in place; `done` finalizes + persists; `pending`/`tools` falls back to
   // the non-streaming endpoint so the existing approval/Resume flow still works.
+  // While the stream is live, `stopper` can abort it (the composer's Stop button):
+  // the partial answer is kept and persisted — a Stop is a choice, not an error.
   async function streamTurn(args: { messages: ChatMessage[]; cid: string }): Promise<void> {
     console.assert(Array.isArray(args.messages) && args.messages.length > 0, "streamTurn needs messages");
     console.assert(typeof args.cid === "string" && args.cid.length > 0, "streamTurn needs a conversation id");
-    const res = await api.agentTurnStream({
-      messages: args.messages,
-      model: modelId,
-      conversation_id: args.cid,
-    });
-    const body = res.body;
-    if (!body) {
-      // No streamable body — fall back so the user still gets an answer.
-      const fallback = await api.agentTurn({ messages: args.messages, model: modelId, conversation_id: args.cid });
-      await handleAgentResult(fallback, args.cid);
-      return;
-    }
-    const reader = body.getReader();
-    const decoder = new TextDecoder();
-    let buf = "";
     // Lazily-created streaming assistant bubble; we only show it once the first `delta` lands
     // so the bubble doesn't appear empty on a turn that immediately parks for approval.
     let streamId: string | null = null;
@@ -408,35 +474,78 @@
       log.push({ id, role: "assistant", content: "" });
       return id;
     };
+    const controller = new AbortController();
+    stopper = controller;
     try {
-      // Bounded loop: each iteration consumes one chunk from the server. The server
-      // terminates with a `done` event (or `error`), and we break on stream EOF.
-      for (let guard = 0; guard < 100_000; guard += 1) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, { stream: true });
-        const events = sliceEvents(buf);
-        buf = events.remainder;
-        const outcome = await applyEvents({
-          events: events.events,
-          cid: args.cid,
-          ensureStreamBubble,
-          streamRef: () => streamText,
-          setStream: (next) => { streamText = next; },
-        });
-        if (outcome === "terminal") return;
-        if (outcome === "fallback") {
-          // Tools-needed/approval — discard any partial stream bubble and replay non-streaming.
-          if (streamId) log = log.filter((e) => e.id !== streamId);
-          const replay = await api.agentTurn({ messages: args.messages, model: modelId, conversation_id: args.cid });
-          await handleAgentResult(replay, args.cid);
-          return;
+      const res = await api.agentTurnStream({
+        messages: args.messages,
+        model: modelId,
+        conversation_id: args.cid,
+      }, controller.signal);
+      const body = res.body;
+      if (!body) {
+        // No streamable body — fall back so the user still gets an answer. Not
+        // interruptible, so drop the Stop affordance first.
+        stopper = null;
+        const fallback = await api.agentTurn({ messages: args.messages, model: modelId, conversation_id: args.cid });
+        await handleAgentResult(fallback, args.cid);
+        return;
+      }
+      const reader = body.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      try {
+        // Bounded loop: each iteration consumes one chunk from the server. The server
+        // terminates with a `done` event (or `error`), and we break on stream EOF.
+        for (let guard = 0; guard < 100_000; guard += 1) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          const events = sliceEvents(buf);
+          buf = events.remainder;
+          const outcome = await applyEvents({
+            events: events.events,
+            cid: args.cid,
+            ensureStreamBubble,
+            streamRef: () => streamText,
+            setStream: (next) => { streamText = next; },
+          });
+          if (outcome === "terminal") return;
+          if (outcome === "fallback") {
+            // Tools-needed/approval — discard any partial stream bubble and replay
+            // non-streaming (not interruptible, so drop the Stop affordance first).
+            stopper = null;
+            if (streamId) log = log.filter((e) => e.id !== streamId);
+            const replay = await api.agentTurn({ messages: args.messages, model: modelId, conversation_id: args.cid });
+            await handleAgentResult(replay, args.cid);
+            return;
+          }
         }
+      } finally {
+        // Release the underlying connection regardless of how we leave the loop.
+        try { reader.releaseLock(); } catch { /* already released */ }
+      }
+    } catch (err) {
+      // Stop clicked: keep whatever streamed, mark it, and persist it through the
+      // normal path so a reload shows exactly what the user saw. Nothing streamed
+      // yet -> no bubble exists and nothing is persisted. Real errors still throw
+      // to send()/regenerate()'s red-bubble handler.
+      if (!isAbort(err)) throw err;
+      if (streamId && streamText) {
+        const stoppedText = `${streamText} (stopped)`;
+        const target = log.find((x) => x.id === streamId);
+        if (target) target.content = stoppedText;
+        await api.addMessage(args.cid, "assistant", stoppedText);
       }
     } finally {
-      // Release the underlying connection regardless of how we leave the loop.
-      try { reader.releaseLock(); } catch { /* already released */ }
+      stopper = null;
     }
+  }
+
+  // An aborted fetch/read rejects with a DOMException named "AbortError" — that's the
+  // user's Stop click, never something to paint as an error.
+  function isAbort(err: unknown): boolean {
+    return err instanceof DOMException && err.name === "AbortError";
   }
 
   // Split a buffer into complete SSE events (separated by a blank line). Returns the
@@ -628,20 +737,34 @@
   <div class="chat-toolbar">
     <button class="secondary" disabled={busy} onclick={newChat}>+ New chat</button>
     {#if conversations.length}
-      <select
-        aria-label="Saved chats"
-        disabled={busy}
-        value={chatSession.currentId ?? ""}
-        onchange={(e) => select((e.currentTarget as HTMLSelectElement).value)}
-      >
-        <option value="" disabled>Saved chats…</option>
-        {#each conversations as c (c.id)}<option value={c.id}>{c.title} ({startDate(c.created_at)})</option>{/each}
-      </select>
-      {#if convosHasMore}
-        <button class="secondary" disabled={busy} onclick={loadOlderConversations}>Load older</button>
-      {/if}
-      {#if chatSession.currentId}
-        <button class="secondary" disabled={busy} title="Delete this chat" onclick={() => remove(chatSession.currentId!)}>Delete</button>
+      {#if renaming && chatSession.currentId}
+        <!-- Inline rename replaces the picker (Knowledge's idiom) so the title being
+             edited and the list can't disagree mid-edit. Enter submits. -->
+        <input
+          style="flex:1; max-width:24rem"
+          aria-label="Chat title"
+          bind:value={renameValue}
+          onkeydown={(e) => e.key === "Enter" && saveRename()}
+        />
+        <button disabled={busy || !renameValue.trim()} onclick={saveRename}>Save</button>
+        <button class="secondary" onclick={cancelRename}>Cancel</button>
+      {:else}
+        <select
+          aria-label="Saved chats"
+          disabled={busy}
+          value={chatSession.currentId ?? ""}
+          onchange={(e) => select((e.currentTarget as HTMLSelectElement).value)}
+        >
+          <option value="" disabled>Saved chats…</option>
+          {#each conversations as c (c.id)}<option value={c.id}>{c.title} ({startDate(c.created_at)})</option>{/each}
+        </select>
+        {#if convosHasMore}
+          <button class="secondary" disabled={busy} onclick={loadOlderConversations}>Load older</button>
+        {/if}
+        {#if chatSession.currentId}
+          <button class="secondary" disabled={busy} title="Rename this chat" onclick={startRename}>Rename</button>
+          <button class="secondary" disabled={busy} title="Delete this chat" onclick={() => remove(chatSession.currentId!)}>Delete</button>
+        {/if}
       {/if}
     {/if}
     <span class="grow"></span>
@@ -710,6 +833,18 @@
             {/each}
           </div>
         {/if}
+        <!-- Quiet per-answer actions, tucked under the bubble like .cites. Copy grabs the raw
+             markdown (not rendered HTML); Regenerate only exists on the thread's final answer. -->
+        <div class="msg-actions">
+          <button class="msg-action" title="Copy the message text" onclick={() => copyMessage(entry)}>
+            {copiedId === entry.id ? "Copied ✓" : "Copy"}
+          </button>
+          {#if entry.id === lastAnswerId && !busy}
+            <button class="msg-action" title="Ask again — get a fresh answer to your last message" onclick={regenerate}>
+              Regenerate
+            </button>
+          {/if}
+        </div>
       {:else}
         <div class="bubble {entry.err ? 'err' : entry.role}">{entry.content}</div>
       {/if}
@@ -745,7 +880,13 @@
       placeholder="Message…  (Enter to send, Shift+Enter for a newline)"
       aria-label="Message"
     ></textarea>
-    <button disabled={busy || !input.trim() || !modelId} title={!modelId ? "Select a model first" : ""} onclick={send}>Send</button>
+    {#if stopper}
+      <!-- A streamed turn is in flight: Send becomes Stop. Aborting keeps + persists the
+           partial answer (see streamTurn); non-streamed turns keep the plain disabled Send. -->
+      <button title="Stop generating" onclick={() => stopper?.abort()}>Stop</button>
+    {:else}
+      <button disabled={busy || !input.trim() || !modelId} title={!modelId ? "Select a model first" : ""} onclick={send}>Send</button>
+    {/if}
   </div>
   {#if modelNotice}<p class="notice">{modelNotice}</p>{/if}
   {#if error}<p class="error">{error}</p>{/if}
@@ -780,6 +921,27 @@
   .cite:hover {
     color: var(--text);
     border-color: var(--accent);
+  }
+
+  /* Per-answer actions (Copy / Regenerate) — same tucked-under-the-bubble placement as
+     .cites. Always visible (hover-only reveals fail on touch) but quiet: bare muted text. */
+  .msg-actions {
+    align-self: flex-start;
+    display: flex;
+    gap: 0.75rem;
+    margin-top: -0.45rem;
+  }
+  .msg-action {
+    background: transparent;
+    border: 0;
+    padding: 0;
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--muted);
+    cursor: pointer;
+  }
+  .msg-action:hover {
+    color: var(--text);
   }
 
   /* Starter prompt chips — only visible on an empty chat log (U6). Match the existing
