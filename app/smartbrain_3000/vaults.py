@@ -331,6 +331,52 @@ class VaultStore:
             "publisher_pubkey": source.get("publisher_pubkey"),
         }
 
+    def update_source(self, vault_id: str, changes: dict) -> None:
+        """Read-modify-write the pin (the encrypted body's ``source``): merge ``changes`` in.
+
+        A value of None REMOVES that key (how a cleared ``blocked`` marker goes away). Everything
+        else in the body — and every source field not named — rides along verbatim: the pin is the
+        trust anchor every update is verified against, and losing a field of it silently (inside
+        the ciphertext, where no diff would show it) is the exact failure the read-modify-write
+        rule above exists to prevent.
+        """
+        assert vault_id, "vault id required"
+        assert isinstance(changes, dict) and changes, "changes required"
+        body = self._load_body(vault_id)
+        assert body is not None, "vault must exist"
+        source = body.get("source") or {}
+        for key, value in changes.items():  # bounded by the caller's literal dict
+            if value is None:
+                source.pop(key, None)
+            else:
+                source[key] = value
+        body["source"] = source
+        self._store_body(vault_id, body)
+
+    def forget_member_source(self, vault_id: str, doc_id: str, uid: str) -> None:
+        """Drop ONE upstream {uid, hash} entry from a membership body (the publisher deleted it).
+
+        The membership row itself stays — whether the document leaves the vault is the caller's
+        decision (an owner-origin copy never does), not a side effect of pruning provenance. A row
+        with no body, or without this uid, is left untouched (idempotent, like add/detach).
+        """
+        assert vault_id and doc_id and uid, "vault/doc/uid required"
+        row = self._conn.execute(
+            "SELECT nonce, ciphertext FROM vault_documents WHERE vault_id = ? AND doc_id = ?;",
+            [vault_id, doc_id],
+        ).fetchone()
+        if row is None or row[0] is None or row[1] is None:
+            return
+        entries = [e for e in self._open_member(vault_id, doc_id, bytes(row[0]), bytes(row[1]))
+                   if e["uid"] != uid]
+        nonce = os.urandom(_NONCE_BYTES)
+        ciphertext = self._aes.encrypt(
+            nonce, json.dumps(entries).encode("utf-8"), self._member_aad(vault_id, doc_id))
+        self._conn.execute(
+            "UPDATE vault_documents SET nonce = ?, ciphertext = ? WHERE vault_id = ? AND doc_id = ?;",
+            [nonce, ciphertext, vault_id, doc_id],
+        )
+
     def remember_key(self, vault_id: str, key: bytes) -> None:
         """Store the Vault Key of a vault we exported, so the user can re-show it to a friend
         without re-exporting (which would mint a NEW key and orphan the file already sent)."""

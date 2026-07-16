@@ -266,3 +266,15 @@ def safe_fetch_vault_manifest(url: str) -> bytes:
     raw-file hosts — stream-capped at ``vault_format.MAX_MANIFEST_BYTES``.
     """
     return _guarded_get(_strip_fragment(url), _MANIFEST_CT, vault_format.MAX_MANIFEST_BYTES)["content"]
+
+
+def safe_fetch_vault_object(url: str, max_bytes: int) -> bytes:
+    """Fetch one tree-hosted vault entry (index.bin / objects/*.bin) behind the SSRF guard.
+
+    The tree delta path fetches only the objects an update actually changed. The byte cap comes
+    from the caller because it differs by entry kind (index vs document vs vectors) — always one
+    of ``vault_format``'s explicit bounds, so transport and parser agree. Content types match the
+    manifest fetch: raw-file hosts serve ``.bin`` as octet-stream or text/plain.
+    """
+    assert 0 < max_bytes <= vault_format.MAX_VAULT_BYTES, "cap must be a vault_format bound"
+    return _guarded_get(_strip_fragment(url), _MANIFEST_CT, max_bytes)["content"]

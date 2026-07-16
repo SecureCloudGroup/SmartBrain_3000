@@ -416,12 +416,8 @@ def _entry(zf: zipfile.ZipFile, name: str, limit: int) -> bytes:
         raise VaultError(f"vault entry {name} is corrupted") from None
 
 
-def read_manifest(data: bytes) -> dict:
-    """Verify the container shape and the publisher SIGNATURE. No key needed — this is what a
-    recipient can check before deciding whether to trust the publisher at all.
-
-    The signature is checked in BOTH modes; the ``mode`` field (itself signed) then selects which
-    mode-specific fields must be present and, just as strictly, which must be ABSENT."""
+def _open_container(data: bytes) -> zipfile.ZipFile:
+    """Open a vault archive and enforce its container shape (size, entry-name allowlist)."""
     if len(data) > MAX_VAULT_BYTES:
         raise VaultError("that vault file is too large")
     try:
@@ -436,8 +432,54 @@ def read_manifest(data: bytes) -> dict:
             entry.startswith("objects/") and entry.endswith(".bin") and len(entry) == 8 + 32 + 4
         ):
             raise VaultError(f"vault contains an unexpected entry: {entry!r}")
+    return zf
 
-    envelope = parse_canonical(_entry(zf, _MANIFEST, MAX_MANIFEST_BYTES))
+
+def manifest_entry(data: bytes) -> bytes:
+    """The archive's raw ``manifest.json`` bytes — for verifying a pin against the EXACT file.
+
+    An update check must verify the signature over the very bytes the host served
+    (``manifest_signed_by``), so the caller needs the entry itself, not a parsed object."""
+    return _entry(_open_container(data), _MANIFEST, MAX_MANIFEST_BYTES)
+
+
+def manifest_signed_by(raw: bytes, pubkey_b64: str) -> bool:
+    """True iff ``raw`` (a manifest.json's bytes) is signed by ``pubkey_b64``.
+
+    §5 step 3's primitive: an update is verified against the PINNED publisher key — never against
+    the pubkey the downloaded manifest itself claims, which would make the pin decorative. A
+    malformed envelope is simply "not signed by this key".
+    """
+    assert isinstance(pubkey_b64, str) and pubkey_b64, "pinned pubkey required"
+    try:
+        envelope = parse_canonical(raw)
+    except VaultError:
+        return False
+    payload, sig = envelope.get("sbvault"), envelope.get("sig") or {}
+    if not isinstance(payload, dict) or not isinstance(sig.get("value"), str):
+        return False
+    return identity.verify(pubkey_b64, _SIG_PREFIX + canonical(payload), sig["value"])
+
+
+def read_manifest(data: bytes) -> dict:
+    """Verify the container shape and the publisher SIGNATURE. No key needed — this is what a
+    recipient can check before deciding whether to trust the publisher at all."""
+    return read_manifest_bytes(manifest_entry(data))
+
+
+def read_manifest_bytes(raw: bytes) -> dict:
+    """Verify a standalone ``manifest.json`` (a tree host serves this file directly) and return
+    its signed payload.
+
+    The signature is checked against the manifest's OWN pubkey in BOTH modes — this proves the
+    file is intact and really was signed by the key it names, which is all a FIRST contact can
+    check (TOFU). An UPDATE must additionally verify against the pinned key via
+    ``manifest_signed_by`` — trusting the embedded pubkey there would make the pin decorative.
+    The ``mode`` field (itself signed) then selects which mode-specific fields must be present
+    and, just as strictly, which must be ABSENT."""
+    if len(raw) > MAX_MANIFEST_BYTES:
+        raise VaultError("vault manifest is larger than allowed")
+    envelope = parse_canonical(raw)
     payload, sig = envelope.get("sbvault"), envelope.get("sig") or {}
     if not isinstance(payload, dict) or not isinstance(sig.get("value"), str):
         raise VaultError("vault manifest is malformed")
@@ -495,6 +537,87 @@ def read_manifest(data: bytes) -> dict:
     return payload
 
 
+def read_index(payload: dict, index_raw: bytes, k_name: bytes) -> list[dict]:
+    """Validate a vault's PLAINTEXT index against its verified manifest; return its doc rows.
+
+    Everything the signature transitively commits to at the index level is checked here: the
+    signed index hash, canonical form, the vault_id/seq echo, doc_count, every row's shape, duplicate
+    uids, and every object NAME recomputed from ``k_name`` (docs and vectors). After this, a row's
+    ``obj`` provably belongs to its ``(uid, hash)`` — which is what lets a tree-host update fetch
+    only the objects whose names it cannot derive from the hashes it already pinned.
+    """
+    assert isinstance(payload, dict), "verified manifest payload required"
+    assert len(k_name) == 32, "object-naming key must be 32 bytes"
+    if hashlib.sha256(index_raw).hexdigest() != payload["index"]["hash"]:
+        raise VaultError("vault index does not match its signed hash")
+    index = parse_canonical(index_raw)
+    if index.get("vault_id") != payload["vault_id"] or index.get("seq") != payload["seq"]:
+        raise VaultError("vault index disagrees with its manifest")
+
+    rows = index.get("docs")
+    if not isinstance(rows, list) or len(rows) > MAX_VAULT_DOCS or len(rows) != payload["doc_count"]:
+        raise VaultError("vault index is malformed")
+
+    seen_uids: set[str] = set()
+    for row in rows:  # bounded by MAX_VAULT_DOCS
+        uid, digest, obj = row.get("uid"), row.get("hash"), row.get("obj")
+        if not (isinstance(uid, str) and isinstance(digest, str) and isinstance(obj, str)):
+            raise VaultError("vault index entry is malformed")
+        # A uid IS the update key (§3), so two rows sharing one would double-import and make a later
+        # update ambiguous. Refuse rather than silently pick one — this also hardens sealed mode.
+        if uid in seen_uids:
+            raise VaultError("vault index names the same document twice")
+        seen_uids.add(uid)
+        # Recompute the object name from K_name and refuse a mismatch. In open mode the body is
+        # plaintext, so this — not GCM — is what stops a hostile file from parking a well-formed but
+        # wrong object under a legitimate name; in sealed mode it is a cheap extra guard.
+        if _obj_name(k_name, b"doc", uid, digest) != obj:
+            raise VaultError("a vault object is misnamed")
+        vec = row.get("vec")
+        if isinstance(vec, dict) and isinstance(vec.get("obj"), str):
+            vhash = vec.get("hash")
+            if not isinstance(vhash, str) or _obj_name(k_name, b"vec", uid, vhash) != vec["obj"]:
+                raise VaultError("a vault's vectors are misnamed")
+    return rows
+
+
+def read_doc_object(body: bytes, row: dict) -> dict:
+    """Validate one document object's PLAINTEXT bytes against its (index-verified) row.
+
+    The hash check chains the body to the signature (manifest sig -> index hash -> row hash), and
+    the field guards make a signed-but-malformed document a clean refusal. The SIGNED hash rides
+    along in the result: an importer pins {uid, hash} per member, and that pin must be the exact
+    value future indexes carry for this uid — recomputing it locally after the title/meta
+    normalisation below could silently disagree with what the publisher signed.
+    """
+    uid, digest = row["uid"], row["hash"]
+    if hashlib.sha256(body).hexdigest() != digest:
+        raise VaultError("a vault document does not match its signed hash")
+    doc_obj = parse_canonical(body)
+    title, content = doc_obj.get("title"), doc_obj.get("content")
+    if not isinstance(title, str) or not isinstance(content, str) or len(content) > MAX_TEXT:
+        raise VaultError("a vault document is malformed or too large")
+    return {"uid": uid, "title": title[:MAX_TITLE] or "Untitled",
+            "content": content, "meta": _clean_meta(doc_obj.get("meta")), "hash": digest}
+
+
+def read_vec_body(vbody: bytes, vec: dict) -> list[list[float]]:
+    """Validate one vector object's PLAINTEXT bytes against its (index-verified) vec block."""
+    if hashlib.sha256(vbody).hexdigest() != vec["hash"]:
+        raise VaultError("a vault's vectors do not match their signed hash")
+    return _read_vec_object(vbody)
+
+
+def doc_hash(title: str, content: str, meta: dict) -> str:
+    """The content hash a publisher signs for a document, recomputed from a LOCAL copy.
+
+    An update asks "does the user's copy still match what the publisher shipped?" by comparing
+    this against the pinned member hash — a mismatch means the user edited it, and the update must
+    keep theirs (plan decision #1). Same bytes ``pack`` hashes, by construction.
+    """
+    return hashlib.sha256(_doc_object(title, content, meta or {})).hexdigest()
+
+
 def open_vault(data: bytes, vault_key: bytes | None = None) -> tuple[dict, list[dict]]:
     """Verify and validate a vault, decrypting it in sealed mode. Returns (manifest payload, docs).
 
@@ -530,22 +653,14 @@ def open_vault(data: bytes, vault_key: bytes | None = None) -> tuple[dict, list[
         except Exception:
             raise VaultError("that key doesn't open this vault") from None
     else:
-        index_raw = index_ct  # raw canonical JSON; a mode-confused ciphertext fails parse_canonical below
-    if hashlib.sha256(index_raw).hexdigest() != payload["index"]["hash"]:
-        raise VaultError("vault index does not match its signed hash")
-    index = parse_canonical(index_raw)
-    if index.get("vault_id") != vault_id or index.get("seq") != payload["seq"]:
-        raise VaultError("vault index disagrees with its manifest")
-
-    rows = index.get("docs")
-    if not isinstance(rows, list) or len(rows) > MAX_VAULT_DOCS or len(rows) != payload["doc_count"]:
-        raise VaultError("vault index is malformed")
+        index_raw = index_ct  # raw canonical JSON; a mode-confused ciphertext fails read_index below
+    rows = read_index(payload, index_raw, k_name)
 
     # Surface the vault's real name/description. In sealed mode they live ONLY in the encrypted index
     # (the manifest carries no topic); in open mode they ride the plaintext manifest. Either source is
     # signed, so both are as trusted as the documents. Namespaced under "_sealed" so the importer
     # reads them the same way regardless of mode.
-    src = payload if mode == OPEN else index
+    src = payload if mode == OPEN else parse_canonical(index_raw)
     name, description = src.get("name"), src.get("description")
     payload["_sealed"] = {
         "name": name[:MAX_TITLE] if isinstance(name, str) else "",
@@ -553,22 +668,9 @@ def open_vault(data: bytes, vault_key: bytes | None = None) -> tuple[dict, list[
     }
 
     docs: list[dict] = []
-    seen_uids: set[str] = set()
     referenced: set[str] = set()
-    for row in rows:  # bounded by MAX_VAULT_DOCS
-        uid, digest, obj = row.get("uid"), row.get("hash"), row.get("obj")
-        if not (isinstance(uid, str) and isinstance(digest, str) and isinstance(obj, str)):
-            raise VaultError("vault index entry is malformed")
-        # A uid IS the update key (§3), so two rows sharing one would double-import and make a later
-        # update ambiguous. Refuse rather than silently pick one — this also hardens sealed mode.
-        if uid in seen_uids:
-            raise VaultError("vault index names the same document twice")
-        seen_uids.add(uid)
-        # Recompute the object name from K_name and refuse a mismatch. In open mode the body is
-        # plaintext, so this — not GCM — is what stops a hostile file from parking a well-formed but
-        # wrong object under a legitimate name; in sealed mode it is a cheap extra guard.
-        if _obj_name(k_name, b"doc", uid, digest) != obj:
-            raise VaultError("a vault object is misnamed")
+    for row in rows:  # bounded by MAX_VAULT_DOCS (row shapes + object names verified by read_index)
+        uid, digest, obj = row["uid"], row["hash"], row["obj"]
         referenced.add(f"objects/{obj}.bin")
         raw_obj = _entry(zf, f"objects/{obj}.bin", MAX_DOC_OBJECT_BYTES)
         if mode == SEALED:
@@ -581,22 +683,10 @@ def open_vault(data: bytes, vault_key: bytes | None = None) -> tuple[dict, list[
                 raise VaultError("a vault document failed its integrity check — it may have been tampered with") from None
         else:
             body = raw_obj
-        if hashlib.sha256(body).hexdigest() != digest:
-            raise VaultError("a vault document does not match its signed hash")
-        doc_obj = parse_canonical(body)
-        title, content = doc_obj.get("title"), doc_obj.get("content")
-        if not isinstance(title, str) or not isinstance(content, str) or len(content) > MAX_TEXT:
-            raise VaultError("a vault document is malformed or too large")
-        # The SIGNED hash rides along: an importer pins {uid, hash} per member, and that pin must be
-        # the exact value future indexes carry for this uid — recomputing it locally after the
-        # title/meta normalisation below could silently disagree with what the publisher signed.
-        out = {"uid": uid, "title": title[:MAX_TITLE] or "Untitled",
-               "content": content, "meta": _clean_meta(doc_obj.get("meta")), "hash": digest}
+        out = read_doc_object(body, row)
         vec = row.get("vec")
         if isinstance(vec, dict) and isinstance(vec.get("obj"), str):
-            vobj, vhash = vec["obj"], vec.get("hash")
-            if not isinstance(vhash, str) or _obj_name(k_name, b"vec", uid, vhash) != vobj:
-                raise VaultError("a vault's vectors are misnamed")
+            vobj, vhash = vec["obj"], vec["hash"]
             referenced.add(f"objects/{vobj}.bin")
             raw_vec = _entry(zf, f"objects/{vobj}.bin", MAX_VEC_OBJECT_BYTES)
             if mode == SEALED:
@@ -609,9 +699,7 @@ def open_vault(data: bytes, vault_key: bytes | None = None) -> tuple[dict, list[
                     raise VaultError("a vault's vectors failed their integrity check") from None
             else:
                 vbody = raw_vec
-            if hashlib.sha256(vbody).hexdigest() != vhash:
-                raise VaultError("a vault's vectors do not match their signed hash")
-            out["vectors"] = _read_vec_object(vbody)
+            out["vectors"] = read_vec_body(vbody, vec)
         docs.append(out)
 
     # Every objects/* entry must be referenced by the index (§1): an unreferenced object is either a

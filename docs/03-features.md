@@ -103,12 +103,26 @@ and the unit you share. Vaults live on the Knowledge page.
   from. Imported documents are protected from accidental edits (rename/delete are refused);
   **Detach** one in the vault's member list to make that copy yours.
 - **Subscribe to a public vault.** For a vault someone published **Public**, paste its URL
-  instead of picking a file — no key needed. SmartBrain fetches it (public internet hosts only,
-  not localhost or LAN addresses), verifies the publisher's signature, and re-encrypts the
-  documents under **your** passphrase as they land. The publisher's identity is **pinned on
-  first contact** — the vault card shows a **Subscribed** badge with the pinned fingerprint and
-  the host it came from — and future updates will only ever be accepted from that same
-  publisher. (Update checking arrives in a later release.)
+  instead of picking a file — no key needed. Link the `.sbvault` file itself, or — if the
+  publisher hosts the unzipped folder on a static host — its `manifest.json`. SmartBrain fetches
+  it (public internet hosts only, not localhost or LAN addresses), verifies the publisher's
+  signature, and re-encrypts the documents under **your** passphrase as they land. The
+  publisher's identity is **pinned on first contact** — the vault card shows a **Subscribed**
+  badge with the pinned fingerprint and the host it came from — and future updates will only
+  ever be accepted from that same publisher.
+- **Keep a subscription up to date.** Click **Check for updates** on a subscribed vault; when the
+  publisher has published a newer version, **Update now** fetches it, verifies everything against
+  the pinned publisher identity, and applies it all-or-nothing — you are never left half-updated.
+  Changed documents are updated **in place**, so citations and links to them keep working; new
+  ones are added, and ones the publisher removed are deleted. **Anything you edited stays yours**:
+  the update reports it as "kept" instead of overwriting it (same for documents you already had —
+  your copy wins). On a `manifest.json` (folder) host only the changed files are downloaded; a
+  single-file host re-downloads the whole file, and the button's tooltip says so. If the
+  publisher's **key ever changes**, updates stop with a warning showing both fingerprints — old
+  and new — until you confirm the new key with the publisher out-of-band and choose **Trust new
+  key** (Desktop + passphrase). A newer `.sbvault` *file* of a subscribed vault also applies as an
+  update — importing it never creates a duplicate. Checking is manual in this release; scheduled
+  auto-update comes next.
 
 Creating, adding, and searching a vault work everywhere, including a paired phone. **Exporting and
 importing a vault are done on the Desktop** — sharing a vault's contents, or bringing new ones in, is
