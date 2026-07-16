@@ -71,6 +71,8 @@
   let importInput = $state<HTMLInputElement | null>(null);
   let docsCard = $state<HTMLDivElement | null>(null); // scroll target for "Add documents" on a vault
   let importKey = $state("");
+  let subUrl = $state(""); // subscribe-by-URL: the public vault's address
+  let subscribeError = $state(""); // inline, next to the URL field — same rule as importError
   let vaultBusy = $state("");
 
   const ACCEPT = ".pdf,.docx,.pptx,.xlsx,.txt,.md,.markdown,.html,.htm,.csv,.json,.log,.rst";
@@ -563,6 +565,42 @@
       vaultBusy = "";
     }
   }
+
+  // Subscribe to a PUBLIC vault by its URL. The success notice names the publisher FINGERPRINT —
+  // the identity pinned on this first contact, which every later update must match.
+  async function subscribeVault() {
+    const url = subUrl.trim();
+    if (!url) return;
+    vaultBusy = "subscribe";
+    subscribeError = "";
+    notice = "";
+    try {
+      const r = await api.subscribeVault(url);
+      notice =
+        `Subscribed to “${r.name}” from ${r.url_host} — publisher ${r.publisher} (now pinned) — ` +
+        `${r.added} new document${r.added === 1 ? "" : "s"}${r.duplicates ? `, ${r.duplicates} you already had` : ""}. ` +
+        (r.vectors_used
+          ? "It is searchable now."
+          : "Meaning search needs a reindex (the vault was built with a different embedding model).");
+      subUrl = "";
+      await Promise.all([loadDocs(), loadVaults()]);
+      refreshIndexStatus();
+    } catch (err) {
+      subscribeError = describeError(err);
+    } finally {
+      vaultBusy = "";
+    }
+  }
+
+  // The host a subscription updates from — shown on the card. Never the full URL: its path can
+  // name the topic as plainly as the vault name would.
+  function hostOf(url: string): string {
+    try {
+      return new URL(url).hostname;
+    } catch {
+      return "";
+    }
+  }
 </script>
 
 {#if account.status?.unlocked}
@@ -838,7 +876,17 @@
       <div class="vault">
         <div class="vrow">
           <strong>{v.name}</strong>
-          {#if v.kind === "imported"}<span class="badge">Imported</span>{/if}
+          {#if v.kind === "imported"}
+            {#if v.source?.url}
+              <!-- Subscribed = it arrived from a URL and its publisher is PINNED. Never the badge
+                   without the identity behind it, plus the host updates will come from. -->
+              <span class="badge">Subscribed</span>
+              <span class="fp" title="The pinned publisher — every update must be signed by this identity">{v.pinned_fingerprint}</span>
+              <span class="fp" title="Where this vault is hosted">{hostOf(v.source.url)}</span>
+            {:else}
+              <span class="badge">Imported</span>
+            {/if}
+          {/if}
           {#if v.published_open}
             <!-- Published open = irreversibly public. NEVER the label without the identity behind
                  it: the fingerprint is what a subscriber actually pins. -->
@@ -982,7 +1030,7 @@
          paired phone), so both are Desktop work — same rule as the "Add to Knowledge" card. -->
     {#if remote.status === "idle"}
       <details style="margin-top:1rem">
-        <summary>Import a vault someone shared with you</summary>
+        <summary>Add someone else's vault — import a file, or subscribe to a public URL</summary>
         <p class="muted" style="margin:0.5rem 0; font-size:0.85rem">
           Pick the <code>.sbvault</code> file and paste the key they sent you. Its documents are
           re-encrypted under <em>your</em> passphrase as they land, and anything you already have is
@@ -1001,6 +1049,26 @@
           </button>
         </div>
         {#if importError}<p class="error" style="margin:0.4rem 0 0">{importError}</p>{/if}
+
+        <p class="muted" style="margin:0.9rem 0 0.35rem; font-size:0.85rem">
+          …or add a <strong>public</strong> vault by URL — no file, no key. It is fetched from the
+          public internet, checked against its publisher's signature, and re-encrypted under
+          <em>your</em> passphrase as it lands. The publisher is <strong>pinned on first
+          contact</strong>: future updates must come from the same identity.
+        </p>
+        <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap">
+          <input
+            style="flex:1; min-width:12rem"
+            bind:value={subUrl}
+            placeholder="https://example.com/expert-pack.sbvault"
+            aria-label="Public vault URL"
+            onkeydown={(e) => e.key === "Enter" && subUrl.trim() && subscribeVault()}
+          />
+          <button disabled={vaultBusy === "subscribe" || !subUrl.trim()} onclick={subscribeVault}>
+            {vaultBusy === "subscribe" ? "Subscribing…" : "Subscribe"}
+          </button>
+        </div>
+        {#if subscribeError}<p class="error" style="margin:0.4rem 0 0">{subscribeError}</p>{/if}
       </details>
     {/if}
   </div>

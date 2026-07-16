@@ -289,12 +289,24 @@ export interface Vault {
   version: number;
   name: string;
   description: string;
-  // Where an imported vault came from — pinned at import time. null for a vault you made yourself.
-  source: { vault_id?: string; publisher_pubkey?: string; seq?: number } | null;
+  // Where an imported vault came from — pinned at import/subscribe time. null for a vault you made
+  // yourself. `url` is present only on a URL subscription (fragment-stripped before it was stored).
+  source: {
+    vault_id?: string;
+    publisher_pubkey?: string;
+    seq?: number;
+    url?: string;
+    mode?: string;
+    added_at?: string;
+    last_checked?: string | null;
+  } | null;
   // True once this vault has been published OPEN (a plaintext file, no key). Never clears —
   // publishing is irreversible — and the UI must show the fingerprint beside any "Public" badge.
   published_open: boolean;
   publisher_fingerprint?: string; // present only when published_open: the identity subscribers pin
+  // The PINNED publisher of an imported/subscribed vault — the identity every update must match.
+  // Never show a "Subscribed" badge without it.
+  pinned_fingerprint?: string;
   doc_count: number;
   created_at: string;
   updated_at: string;
@@ -314,6 +326,12 @@ export interface VaultImportResult {
   added: number;
   duplicates: number;
   vectors_used: boolean;
+}
+
+// Subscribe-by-URL result: an import, plus the host the vault came from (host only — never the
+// full URL, whose path can name the topic as plainly as the vault name would).
+export interface VaultSubscribeResult extends VaultImportResult {
+  url_host: string;
 }
 
 export interface DeviceInfo {
@@ -669,6 +687,14 @@ export const api = {
     if (!res.ok) throw new ApiError(res.status, (data as { detail?: string })?.detail || "could not read the key");
     return (data as { key: string }).key;
   },
+  // Subscribe to a PUBLIC vault by URL. Ingress like importVault (unlock only, not Desktop-local):
+  // the documents are verified against the publisher's signature and re-encrypted under the user's
+  // own passphrase as they land, and the publisher is PINNED on this first contact.
+  subscribeVault: (url: string) =>
+    req<VaultSubscribeResult>("/api/vaults/subscribe", {
+      method: "POST",
+      body: JSON.stringify({ url }),
+    }),
   importVault: async (file: File, key: string): Promise<VaultImportResult> => {
     await remoteReady;
     const res = await fetch(`/api/vaults/import?key=${encodeURIComponent(key)}`, {

@@ -95,6 +95,14 @@ def test_safe_fetch_rejects_bad_scheme(url) -> None:
         netguard.safe_fetch(url)
 
 
+@pytest.mark.parametrize("url", ["http://example.test:99999/x", "http://example.test:abc/x"])
+def test_safe_fetch_rejects_malformed_port(url) -> None:
+    # urlparse validates the port lazily, on attribute access: a malformed one must be a clean
+    # FetchError, not a ValueError escaping into a 500. Checked before DNS, so no resolver stub.
+    with pytest.raises(FetchError, match="port"):
+        netguard.safe_fetch(url)
+
+
 def test_safe_fetch_rejects_userinfo(monkeypatch) -> None:
     _resolve_to(monkeypatch, "93.184.216.34")
     with pytest.raises(FetchError):
