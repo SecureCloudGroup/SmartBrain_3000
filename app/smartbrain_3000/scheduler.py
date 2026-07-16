@@ -31,6 +31,7 @@ from .kb import KnowledgeBase
 from .memory import MemoryStore
 from .planner import Planner
 from .secrets import MASTER_KEY_BYTES
+from .vaults import VaultStore
 
 log = logging.getLogger(__name__)
 
@@ -489,6 +490,7 @@ def _run_one(app, key: bytes, session: str, schedule: dict) -> dict:
             kb=KnowledgeBase(cursor, key), planner=Planner(cursor, key),
             memory=MemoryStore(cursor, key), email=getattr(app.state, "email", None),
             schedules=store,  # same per-thread cursor as the other stores (turn-cursor invariant)
+            vaults=VaultStore(cursor, key),  # so KB tools can tag imported-vault content
         )
         audit = AuditLog(cursor, key)
         approvals = ApprovalStore(cursor, key, session)

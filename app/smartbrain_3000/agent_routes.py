@@ -61,6 +61,7 @@ def _context(request: Request) -> tuple[tools.ToolContext, object]:
     return tools.ToolContext(
         kb=state.kb, planner=state.planner, memory=state.memory,
         email=getattr(state, "email", None), schedules=getattr(state, "schedules", None),
+        vaults=getattr(state, "vaults", None),  # so KB tools can tag imported-vault content
     ), audit
 
 

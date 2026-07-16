@@ -156,6 +156,60 @@ def test_shipped_vectors_make_an_imported_vault_instantly_searchable(alice, bob,
     assert hits["degraded"] is False and hits["results"]
 
 
+# --- imported documents are protected until the user claims them (C0) ----------------------------
+
+def test_imported_documents_are_read_only_until_detached(alice: TestClient, bob: TestClient) -> None:
+    # A future update from the publisher may REPLACE vault-owned documents, so an edit to one would
+    # be silently clobbered later. Rename/delete refuse while the membership is import-origin;
+    # Detach flips it to owner-origin, which unblocks edits AND makes any update skip the doc.
+    vid = _make_vault(alice, [("Doc", "the QUOKKA clause")], name="Expert pack")
+    blob, key = _export(alice, vid, _PASS_A)
+    imported = bob.post(f"/api/vaults/import?key={key}", content=blob).json()["id"]
+    got = bob.get(f"/api/vaults/{imported}").json()
+    assert got["members"][0]["origin"] == "import"
+    doc = got["members"][0]["id"]
+
+    r = bob.patch(f"/api/kb/{doc}", json={"title": "Renamed"})
+    assert r.status_code == 409 and "Detach" in r.json()["detail"]
+    assert "Expert pack" in r.json()["detail"], "the refusal must say WHICH vault owns the copy"
+    assert bob.delete(f"/api/kb/{doc}").status_code == 409
+    assert bob.get(f"/api/kb/{doc}").status_code == 200, "the document must survive both refusals"
+
+    r = bob.post(f"/api/vaults/{imported}/documents/{doc}/detach")
+    assert r.status_code == 200 and r.json() == {"ok": True, "origin": "owner"}
+    assert bob.get(f"/api/vaults/{imported}").json()["members"][0]["origin"] == "owner"
+
+    assert bob.patch(f"/api/kb/{doc}", json={"title": "Renamed"}).status_code == 200
+    assert bob.delete(f"/api/kb/{doc}").status_code == 200, "detached = the user's own document"
+
+
+def test_the_users_own_copy_stays_editable_after_an_import(alice: TestClient, bob: TestClient) -> None:
+    # The duplicate path marks Bob's pre-existing document owner-origin — it must never be locked.
+    own = bob.post("/api/kb", json={"title": "My notes", "content": "the QUOKKA clause"}).json()["id"]
+    vid = _make_vault(alice, [("Alice's copy", "the QUOKKA clause")])
+    blob, key = _export(alice, vid, _PASS_A)
+    body = bob.post(f"/api/vaults/import?key={key}", content=blob).json()
+    assert body["duplicates"] == 1
+
+    assert bob.patch(f"/api/kb/{own}", json={"title": "Still mine"}).status_code == 200
+    assert bob.delete(f"/api/kb/{own}").status_code == 200
+
+
+def test_import_writes_an_audit_row(alice: TestClient, bob: TestClient) -> None:
+    # Ingress of untrusted content is as security-relevant as any tool action: the row must say
+    # what arrived, who signed it (the fingerprint a human is asked to trust), and how much landed.
+    vid = _make_vault(alice, [("Doc", "body text")], name="Expert pack")
+    blob, key = _export(alice, vid, _PASS_A)
+    body = bob.post(f"/api/vaults/import?key={key}", content=blob).json()
+
+    rows = [e for e in bob.get("/api/audit").json()["entries"] if e["tool"] == "vault_import"]
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["actor"] == "user" and row["decision"] == "executed" and row["ok"] is True
+    assert "Expert pack" in row["args_summary"] and body["publisher"] in row["args_summary"]
+    assert json.loads(row["result_summary"])["added"] == 1
+
+
 # --- an untrusted file must not be able to hurt the importer -------------------------------------
 
 def test_a_tampered_vault_is_refused(alice: TestClient, bob: TestClient) -> None:

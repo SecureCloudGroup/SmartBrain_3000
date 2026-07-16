@@ -41,6 +41,28 @@ def _kb(request: Request) -> KnowledgeBase:
     return knowledge
 
 
+def _refuse_if_vault_owned(request: Request, doc_id: str) -> None:
+    """409 when the document is an imported vault's copy (any import-origin membership).
+
+    An update from the vault's publisher may later REPLACE vault-owned documents, so letting the
+    user rename or delete one would set up a silent clobber of what they believe is theirs. The
+    guarantee is by construction: a doc is editable only when no import-origin membership exists —
+    Detach flips the membership to owner-origin, which both unblocks edits and makes every future
+    update skip the doc. Owner-origin memberships never block anything.
+    """
+    store = getattr(request.app.state, "vaults", None)
+    if store is None:
+        return  # defense in depth: account._set_unlocked always sets kb and vaults together
+    info = store.import_provenance(doc_id)
+    if info is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"this document came from the imported vault “{info['name']}” and a "
+            "vault update may replace it — use Detach in that vault's member list to make "
+            "this copy yours first",
+        )
+
+
 @router.post("/api/kb")
 def add_doc(request: Request, body: DocIn) -> dict[str, str]:
     """Store an (encrypted) document; return its id."""
@@ -61,6 +83,7 @@ def rename_doc(request: Request, doc_id: str, body: RenameIn) -> dict[str, bool]
     doc = knowledge.get(doc_id)
     if doc is None:
         raise HTTPException(status_code=404, detail="document not found")
+    _refuse_if_vault_owned(request, doc_id)
     title = body.title.strip()
     if not title:
         raise HTTPException(status_code=422, detail="title must not be blank")
@@ -220,7 +243,9 @@ def delete_doc(request: Request, doc_id: str) -> dict[str, bool]:
     Without the second step a vault would keep pointing at a document that no longer exists — a
     ghost member that inflates its count and would be exported as a missing file.
     """
-    _kb(request).delete(doc_id)
+    knowledge = _kb(request)
+    _refuse_if_vault_owned(request, doc_id)
+    knowledge.delete(doc_id)
     store = getattr(request.app.state, "vaults", None)
     if store is not None:
         store.forget_document(doc_id)

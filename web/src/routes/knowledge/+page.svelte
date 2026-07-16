@@ -2,7 +2,15 @@
   import { onDestroy, onMount } from "svelte";
   import { goto } from "$app/navigation";
   import { account } from "$lib/account.svelte";
-  import { api, type KbDoc, type KbDocFull, type KbHit, type SearchMode, type Vault } from "$lib/api";
+  import {
+    api,
+    type KbDoc,
+    type KbDocFull,
+    type KbHit,
+    type SearchMode,
+    type Vault,
+    type VaultMember,
+  } from "$lib/api";
   import { describeError } from "$lib/errors";
   import { highlight, queryTerms } from "$lib/highlight";
   import { remote } from "$lib/remote/connection.svelte";
@@ -374,11 +382,12 @@
     docsCard?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
-  // Which vault's member list is expanded, and its document ids. A count alone ("2 documents")
-  // tells the user nothing about WHAT they're about to share or search — a real tester was confused
-  // by exactly that, so the count itself opens the list.
+  // Which vault's member list is expanded, and its documents (with each membership's origin, so
+  // imported rows can offer Detach). A count alone ("2 documents") tells the user nothing about
+  // WHAT they're about to share or search — a real tester was confused by exactly that, so the
+  // count itself opens the list.
   let openVaultId = $state<string | null>(null);
-  let memberIds = $state<string[]>([]);
+  let members = $state<VaultMember[]>([]);
 
   async function toggleMembers(v: Vault) {
     if (openVaultId === v.id) {
@@ -387,7 +396,7 @@
     }
     error = "";
     try {
-      memberIds = (await api.getVault(v.id)).doc_ids;
+      members = (await api.getVault(v.id)).members;
       openVaultId = v.id;
     } catch (err) {
       error = describeError(err);
@@ -402,8 +411,20 @@
     error = "";
     try {
       await api.removeFromVault(v.id, docId);
-      memberIds = memberIds.filter((x) => x !== docId);
+      members = members.filter((m) => m.id !== docId);
       await loadVaults(); // the count on the row just changed
+    } catch (err) {
+      error = describeError(err);
+    }
+  }
+
+  // Claim an imported copy as the user's own: the row stops being read-only, and a future update
+  // from the vault's publisher will skip it instead of replacing it.
+  async function detachFromVault(v: Vault, docId: string) {
+    error = "";
+    try {
+      await api.detachFromVault(v.id, docId);
+      members = members.map((m) => (m.id === docId ? { ...m, origin: "owner" } : m));
     } catch (err) {
       error = describeError(err);
     }
@@ -837,13 +858,22 @@
           <!-- The vault's contents: what you'd be sharing or searching. Removing takes the document
                out of the GROUPING only — the document itself stays in your knowledge. -->
           <ul class="vmembers">
-            {#each memberIds as id (id)}
+            {#each members as m (m.id)}
               <li>
-                <button class="linklike" onclick={() => open(id)}>{titleOf(id)}</button>
+                <button class="linklike" onclick={() => open(m.id)}>{titleOf(m.id)}</button>
+                {#if m.origin === "import"}
+                  <!-- Import-origin = the vault owns this copy: it is read-only and a future vault
+                       update may replace it. Detach hands it to the user instead. -->
+                  <button
+                    class="secondary vremove"
+                    title="Make this copy yours — future vault updates will no longer touch it"
+                    onclick={() => detachFromVault(v, m.id)}
+                  >Detach</button>
+                {/if}
                 <button
                   class="secondary vremove"
                   title="Remove from this vault (the document itself is kept)"
-                  onclick={() => removeFromVault(v, id)}
+                  onclick={() => removeFromVault(v, m.id)}
                 >Remove</button>
               </li>
             {:else}
