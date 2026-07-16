@@ -22,9 +22,11 @@ from __future__ import annotations
 
 import ipaddress
 import socket
-from urllib.parse import urljoin, urlparse, urlunparse
+from urllib.parse import urldefrag, urljoin, urlparse, urlunparse
 
 import httpx
+
+from . import vault_format
 
 _SCHEMES = ("http", "https")
 _MAX_REDIRECTS = 3
@@ -35,6 +37,12 @@ _ALLOWED_CT = ("text/", "application/json")
 # with a larger cap since documents are bigger than web pages.
 _INGEST_CT = ("text/", "application/json", "application/pdf", "application/xml", "application/octet-stream")
 _INGEST_MAX_BYTES = 25_000_000
+# Public-vault transport (subscribe-by-URL): archives are zips, but tree hosts
+# commonly serve them as generic binaries; manifests are JSON, but raw-file hosts
+# serve them as text/plain. Prefix match (str.startswith) covers charset suffixes.
+# Size caps are imported from vault_format so transport and parser agree.
+_VAULT_CT = ("application/zip", "application/octet-stream", "application/x-zip-compressed")
+_MANIFEST_CT = ("application/json", "text/plain", "application/octet-stream")
 # A browser-like UA: many public doc/PDF hosts (e.g. .mil/.gov) 403 a default
 # client UA. We fetch only what the user explicitly asked for, on their behalf.
 _USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
@@ -210,3 +218,34 @@ def safe_fetch_bytes(url: str) -> dict:
     content_type, content (bytes)}; the caller sniffs/extracts the bytes.
     """
     return _guarded_get(url, _INGEST_CT, _INGEST_MAX_BYTES)
+
+
+def _strip_fragment(url: str) -> str:
+    """Drop any ``#fragment`` before the URL reaches resolution, fetch, or a log.
+
+    A sealed-share URL carries its key material in the fragment (``#k=<key>``);
+    stripping here — before anything else sees the URL — guarantees the key can
+    never reach the remote host, an error message, or a log line.
+    """
+    assert url, "url required"
+    return urldefrag(url).url
+
+
+def safe_fetch_vault(url: str) -> bytes:
+    """Fetch a public-vault archive behind the SSRF guard; return raw bytes.
+
+    Same defenses as ``safe_fetch``, with vault-shaped bounds: zip-ish content
+    types only, capped at ``vault_format.MAX_VAULT_BYTES``. The cap is enforced
+    on the byte stream as it arrives (``_read_capped``) — a lying Content-Length
+    header cannot bypass it.
+    """
+    return _guarded_get(_strip_fragment(url), _VAULT_CT, vault_format.MAX_VAULT_BYTES)["content"]
+
+
+def safe_fetch_vault_manifest(url: str) -> bytes:
+    """Fetch a public-vault manifest (update check) behind the SSRF guard.
+
+    Manifests are small JSON documents — often served as ``text/plain`` by
+    raw-file hosts — stream-capped at ``vault_format.MAX_MANIFEST_BYTES``.
+    """
+    return _guarded_get(_strip_fragment(url), _MANIFEST_CT, vault_format.MAX_MANIFEST_BYTES)["content"]
