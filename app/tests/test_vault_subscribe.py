@@ -144,7 +144,10 @@ def test_subscribe_end_to_end_pins_the_publisher(alice: TestClient, bob: TestCli
     assert len(rows) == 1
     row = rows[0]
     assert row["actor"] == "user" and row["ok"] is True
-    assert "vaults.example.com" in row["args_summary"] and body["publisher"] in row["args_summary"]
+    # Parse the summary and compare the host field exactly — a substring check on a URL-ish
+    # value reads as incomplete sanitization to scanners, and equality is the stronger assert.
+    logged = json.loads(row["args_summary"])
+    assert logged["host"] == "vaults.example.com" and body["publisher"] in row["args_summary"]
     assert "expert-pack" not in row["args_summary"], "the URL path must never reach the audit log"
     assert "SECRETFRAG" not in row["args_summary"]
     assert json.loads(row["result_summary"])["added"] == 2
