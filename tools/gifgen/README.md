@@ -1,6 +1,6 @@
 # gifgen — quickstart GIF recorder
 
-Regenerates the nine animated quickstart clips in `docs/assets/gifs/` (also copied to
+Regenerates the ten animated quickstart clips in `docs/assets/gifs/` (also copied to
 `web/static/assets/gifs/` → built into `app/smartbrain_3000/web/assets/gifs/`). The clips are
 **build artifacts**: recorded from the real app driving a throwaway demo container against a tiny
 **mock OpenAI gateway**, so chat / tool-calls / model lists are deterministic and 100% synthetic —
@@ -25,7 +25,7 @@ cd .. && docker build -t smartbrain_3000:dev -f ../Dockerfile ..   # the app ima
 
 ```sh
 ./run.sh 03        # record + encode clip 03 -> out/03-first-chat.gif
-./run.sh all       # all nine
+./run.sh all       # all ten
 # cleanup:
 docker rm -f sb_gifdemo ; pkill -f mock_gateway.py
 ```
@@ -41,7 +41,7 @@ ffmpeg + gifsicle. Copy `out/*.gif` into `docs/assets/gifs/` + `web/static/asset
   pill, click ripple, focus ring, and full-screen title/terminal cards (captured in the video).
 - `mock_gateway.py` — stdlib mock OpenAI gateway (`/v1/models`, streaming + non-stream
   `/v1/chat/completions` with tool-calls, `/v1/embeddings`, Bifrost admin, Ollama `/api/tags`, `/reset`).
-- `clips.js` — the nine storyboards (`node clips.js 01`…`09`).
+- `clips.js` — the ten storyboards (`node clips.js 01`…`10`).
 - `run.sh` — per-clip demo state + record + encode.
 
 ## Conventions (see the planning spec in git history of c7c2112)
@@ -61,3 +61,7 @@ Encoding uses a **dither-free** palette — flat UI compresses far better; `dith
 - Clip 08: the pairing panel is taller than the space above the caption band, so the band is hidden
   (`opacity:0`) for the QR + `DEMO42` reveal, then restored.
 - Clip 09: capture the real Recovery Key from `/api/account/setup` and pass it as `RECOVERY_KEY`.
+- Clip 04: upload a FILE (only a file/URL carries a `source`, which is what citation chips show);
+  uploads auto-index, so there is no Reindex beat.
+- Clip 10: the SBVK1 vault key is DOM-redacted like clip 01's Recovery Key; the context needs
+  `acceptDownloads` (the `.sbvault` export) and clipboard permissions (the "Copied ✓" beat).

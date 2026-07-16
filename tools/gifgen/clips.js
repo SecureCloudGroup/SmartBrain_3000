@@ -1,4 +1,4 @@
-// Record one quickstart clip:  node clips.js <NN>   (NN = 01..09).  See README.md
+// Record one quickstart clip:  node clips.js <NN>   (NN = 01..10).  See README.md
 // for the demo-container + per-clip state each one needs. Output: ./video/*.webm.
 const { chromium, Rec } = require("./lib");
 const URL = process.env.DEMO_URL || "http://localhost:33096";
@@ -70,25 +70,47 @@ const CLIPS = {
     await R.cap("A real reply — your model is working", "2/3"); await R.dwell(2400);
     await R.cap("It reads freely — anything that changes data waits for approval", "3/3"); await R.dwell(2200); await done(h);
   },
-  // 04 knowledge (demo SET UP + model connected).
+  // 04 knowledge (demo SET UP + model connected). A FILE upload (not a note): only a file/URL
+  // carries a source, and the source is what the citation chips cite. Uploads auto-index —
+  // there is no Reindex beat any more.
   "04": async () => {
     const h = await open(); const { page, R } = h;
-    const LEASE = "Lease term 12 months, rent $1,800/mo due on the 1st, 60-day notice to vacate, landlord Pat Rivera.";
+    const LEASE = [
+      "RENTAL AGREEMENT — 414 Maple Court, Unit 3B",
+      "",
+      "This agreement is made between Pat Rivera (landlord) and the tenant.",
+      "The unit is rented unfurnished, with parking spot #12 included.",
+      "",
+      "Lease term: 12 months. Rent: $1,800 per month, due on the 1st.",
+      "Notice to vacate: 60 days, in writing. A late fee applies after the 5th.",
+      "",
+      "Utilities: tenant pays electric and internet; water and trash included.",
+      "Security deposit: one month's rent, returned within 21 days of move-out.",
+    ].join("\n");
     await nav(page, "Knowledge").click(); await page.waitForTimeout(800); await R.ensure();
     await R.cap("Add private knowledge — encrypted on your machine", "1/4"); await R.dwell(1500);
-    await page.locator("text=write a note").first().click().catch(() => {}); await page.waitForTimeout(500);
-    await R.type("#t", "Apartment Lease"); await R.type("#c", LEASE); await R.dwell(500);
-    await page.locator('xpath=//*[@id="c"]/following::button[contains(.,"Add")][1]').click(); await page.waitForTimeout(900);
-    await R.cap("Reindex so semantic search can find it", "2/4"); await R.click('button:has-text("Reindex")'); await page.waitForTimeout(1500); await R.ensure();
-    await R.cap("Search by meaning, not exact words", "3/4");
-    await page.locator("select").filter({ hasText: "Meaning" }).first().selectOption({ label: "Meaning" }).catch(() => {});
+    await R.moveTo(".drop"); await R.highlight(".drop");
+    await page.setInputFiles('input[type="file"][multiple]', { name: "Apartment-Lease.txt", mimeType: "text/plain", buffer: Buffer.from(LEASE) });
+    await page.waitForTimeout(1200); await R.noring(); await R.ensure();
+    await R.cap("Drop a file in — it's indexed automatically", "1/4"); await R.dwell(1700);
+    await R.cap("Search by meaning, not exact words", "2/4");
     await R.type('input[placeholder^="Search your knowledge"]', "what are my lease terms?"); await R.dwell(400);
-    await R.click('button:has-text("Search")'); await page.waitForTimeout(1200); await R.ensure(); await R.dwell(1400);
+    await R.click('form button:has-text("Search")'); await page.waitForTimeout(1200); await R.ensure();
+    await R.highlight(".cite");
+    await R.cap("Every result is a citation — the file it came from", "2/4"); await R.dwell(1900); await R.noring();
+    await R.click(".cite"); await page.waitForTimeout(900); await R.ensure();
+    await R.cap("Click it — the document opens at the matching passage", "3/4"); await R.dwell(2200);
     await nav(page, "Chat").click(); await page.waitForTimeout(800); await R.ensure();
     await R.cap("Or just ask Chat — it reads your knowledge for you", "4/4");
     await R.type(MSG, "What does my knowledge say about my lease?"); await R.dwell(400);
-    await R.click('button:has-text("Send")'); await page.waitForTimeout(3800); await R.ensure();
-    await R.cap("Answered from your knowledge — no approval needed to read", "4/4"); await R.dwell(2400); await done(h);
+    await R.click('button:has-text("Send")'); await page.waitForTimeout(4500); await R.ensure();
+    if (await page.locator(".cites .cite").count()) {
+      await R.highlight(".cites");
+      await R.cap("The answer cites its sources — a chip opens the passage", "4/4");
+    } else {
+      await R.cap("Answered from your knowledge — no approval needed to read", "4/4");
+    }
+    await R.dwell(2400); await done(h);
   },
   // 05 approval loop (demo SET UP + model connected; empty Activity/Planner).
   "05": async () => {
@@ -170,11 +192,46 @@ const CLIPS = {
     await R.click('button:has-text("Unlock")'); await page.waitForTimeout(1600); await R.ensure();
     await R.cap("Back in — your data was sealed, never lost", "4/4"); await R.dwell(2200); await done(h);
   },
+  // 10 vaults (demo SET UP + model connected; three documents pre-seeded via the API).
+  // The SBVK1 key is DOM-redacted the same way clip 01 redacts the Recovery Key.
+  "10": async () => {
+    const h = await open({ acceptDownloads: true, permissions: ["clipboard-read", "clipboard-write"] });
+    const { page, R } = h;
+    await nav(page, "Knowledge").click(); await page.waitForTimeout(800); await R.ensure();
+    await R.cap("A vault is a named set of documents — search it, share it", "1/5"); await R.dwell(1300);
+    await R.scrollCenter('input[aria-label="Select Apartment Lease"]');
+    await R.cap("Tick the documents that belong together", "1/5");
+    await R.click('input[aria-label="Select Apartment Lease"]'); await R.dwell(300);
+    await R.click('input[aria-label="Select Renters insurance policy"]'); await page.waitForTimeout(400); await R.ensure(); await R.dwell(600);
+    await R.cap("Name a vault — it's created with your selection", "2/5");
+    await R.scrollCenter('input[placeholder="New vault name…"]');
+    await R.type('input[placeholder="New vault name…"]', "Lease papers"); await R.dwell(400);
+    await R.click('button:has-text("Create with")'); await page.waitForTimeout(900); await R.ensure();
+    await R.click('button:has-text("2 documents")'); await page.waitForTimeout(500); await R.ensure();
+    await R.cap("The count opens it — exactly what you'd share, nothing hidden", "3/5"); await R.dwell(1600);
+    await R.cap("Search inside just this vault", "4/5");
+    await R.click('button:has-text("Search this")'); await R.dwell(300);
+    await R.scrollCenter('input[placeholder^="Search your knowledge"]');
+    await R.type('input[placeholder^="Search your knowledge"]', "how much notice to vacate?"); await R.dwell(400);
+    await R.click('form button:has-text("Search")'); await page.waitForTimeout(900); await R.ensure(); await R.dwell(1400);
+    await R.cap("Share it — the whole vault seals into a single file", "5/5");
+    await R.scrollCenter('button:has-text("Share")'); await R.dwell(300);
+    await R.click('button:has-text("Share")'); await page.waitForTimeout(600); await R.ensure();
+    await R.type('input[placeholder="Your passphrase"]', PASS); await R.dwell(400);
+    await R.click('button:has-text("Export")');
+    // Redact the key the instant it renders (it stays below the caption band until we scroll).
+    await page.waitForSelector("code.key", { timeout: 8000 });
+    await page.evaluate(() => { const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT); const re = /SBVK1-[A-Z2-7][A-Z2-7-]*/; let n; while ((n = w.nextNode())) if (re.test(n.nodeValue)) n.nodeValue = n.nodeValue.replace(re, "SBVK1-DEMO-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX"); });
+    await R.ensure(); await R.scrollCenter("code.key");
+    await R.cap("The file and its key travel separately — together they open it", "5/5"); await R.dwell(1500);
+    await R.click('button:has-text("Copy key")'); await R.dwell(1000);
+    await R.cap("They import it with the key — and search it themselves", "5/5"); await R.dwell(1900); await done(h);
+  },
 };
 
 (async () => {
   const n = process.argv[2];
-  if (!CLIPS[n]) { console.error("usage: node clips.js <01..09>"); process.exit(1); }
+  if (!CLIPS[n]) { console.error("usage: node clips.js <01..10>"); process.exit(1); }
   await CLIPS[n]();
   console.log("recorded " + n);
 })();
