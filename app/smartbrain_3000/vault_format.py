@@ -120,6 +120,17 @@ def new_vault_key() -> bytes:
     return os.urandom(32)
 
 
+def derive_name_key(vault_key: bytes, vault_id: str) -> bytes:
+    """K_name exactly as a sealed pack derives it from the Vault Key.
+
+    An open export of a previously-sealed vault must reuse THIS key: object names are
+    HMAC(K_name, ...), so deriving the same K_name keeps every uid, hash, and object name across
+    the flip — subscribers see an in-place mode change, not a rewrite. pack() and open_vault() call
+    this too, so "exactly as sealed does" holds by construction, not by convention.
+    """
+    return _derive(vault_key, vault_id, b"sbvault/v1/objname")
+
+
 def encode_vault_key(raw: bytes) -> str:
     """Render a Vault Key for a human to send to a friend: SBVK1-XXXX-XXXX-...
 
@@ -294,7 +305,7 @@ def pack(
     if mode == SEALED:
         assert vault_key is not None, "sealed pack requires a vault key"
         cek = _derive(vault_key, vault_id, b"sbvault/v1/content")
-        k_name = _derive(vault_key, vault_id, b"sbvault/v1/objname")
+        k_name = derive_name_key(vault_key, vault_id)
         k_nonce = _derive(vault_key, vault_id, b"sbvault/v1/nonce")
         aes = AESGCM(cek)
     else:
@@ -503,7 +514,7 @@ def open_vault(data: bytes, vault_key: bytes | None = None) -> tuple[dict, list[
             raise VaultError("this vault is sealed — it needs a key to open")
         cek = _derive(vault_key, vault_id, b"sbvault/v1/content")
         aes = AESGCM(cek)
-        k_name = _derive(vault_key, vault_id, b"sbvault/v1/objname")
+        k_name = derive_name_key(vault_key, vault_id)
         k_nonce = _derive(vault_key, vault_id, b"sbvault/v1/nonce")
     else:  # OPEN — no key; K_name is published in the manifest (base64-validated by read_manifest).
         aes = k_nonce = None

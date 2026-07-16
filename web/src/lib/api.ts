@@ -291,6 +291,10 @@ export interface Vault {
   description: string;
   // Where an imported vault came from — pinned at import time. null for a vault you made yourself.
   source: { vault_id?: string; publisher_pubkey?: string; seq?: number } | null;
+  // True once this vault has been published OPEN (a plaintext file, no key). Never clears —
+  // publishing is irreversible — and the UI must show the fingerprint beside any "Public" badge.
+  published_open: boolean;
+  publisher_fingerprint?: string; // present only when published_open: the identity subscribers pin
   doc_count: number;
   created_at: string;
   updated_at: string;
@@ -637,15 +641,16 @@ export const api = {
       body: JSON.stringify({ doc_ids }),
     }),
 
-  // Export hands out content that is plaintext-equivalent to whoever holds the key, so — like
-  // backup — it is Desktop-local (x-sb-local, which the WebRTC bridge cannot forward) and requires
-  // the passphrase again. Returns the .sbvault file itself.
-  exportVault: async (id: string, passphrase: string): Promise<Blob> => {
+  // Export hands out content that is plaintext-equivalent to whoever holds the key — and in
+  // "open" (public) mode IS the plaintext, with no key at all — so, like backup, it is
+  // Desktop-local (x-sb-local, which the WebRTC bridge cannot forward) and requires the
+  // passphrase again. Returns the .sbvault file itself.
+  exportVault: async (id: string, passphrase: string, mode: "sealed" | "open" = "sealed"): Promise<Blob> => {
     await remoteReady;
     const res = await fetch(`/api/vaults/${encodeURIComponent(id)}/export`, {
       method: "POST",
       headers: { "x-sb-local": "1", "content-type": "application/json" },
-      body: JSON.stringify({ passphrase }),
+      body: JSON.stringify({ passphrase, mode }),
     });
     if (!res.ok) {
       const data = await res.json().catch(() => null);
