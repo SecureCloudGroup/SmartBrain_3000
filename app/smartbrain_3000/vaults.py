@@ -68,6 +68,27 @@ class VaultStore:
         body.setdefault("description", "")
         return body
 
+    # Every write to an EXISTING body must go through _load_body → mutate → _store_body. A
+    # rebuild-from-known-fields would silently destroy anything a future writer put in the body
+    # (e.g. a publisher pin) — inside the ciphertext, where no log or diff would show the loss.
+
+    def _load_body(self, vault_id: str) -> dict | None:
+        """The decrypted body of one vault, or None — the read half of read-modify-write."""
+        row = self._conn.execute(
+            "SELECT nonce, ciphertext FROM vaults WHERE id = ?;", [vault_id]
+        ).fetchone()
+        if row is None:
+            return None
+        return self._open(vault_id, bytes(row[0]), bytes(row[1]))
+
+    def _store_body(self, vault_id: str, body: dict) -> None:
+        """Re-seal a body read via _load_body — the write half of read-modify-write."""
+        nonce, ciphertext = self._seal(vault_id, body)
+        self._conn.execute(
+            "UPDATE vaults SET nonce = ?, ciphertext = ?, updated_at = now() WHERE id = ?;",
+            [nonce, ciphertext, vault_id],
+        )
+
     # --- vaults ---------------------------------------------------------------------------------
 
     def create(self, name: str, description: str = "", *, kind: str = LOCAL, source: dict | None = None) -> str:
@@ -123,20 +144,14 @@ class VaultStore:
     def update(self, vault_id: str, name: str, description: str = "") -> bool:
         """Rename / re-describe a vault. False if it doesn't exist."""
         assert vault_id and name, "vault id + name required"
-        current = self.get(vault_id)
-        if current is None:
+        body = self._load_body(vault_id)
+        if body is None:
             return False
-        body = {"name": name[:_MAX_NAME], "description": description[:_MAX_DESCRIPTION]}
-        if current.get("source"):
-            body["source"] = current["source"]  # never lose where an imported vault came from
-        stored = self.get_key(vault_id)
-        if stored:
-            body["key"] = base64.b64encode(stored).decode("ascii")  # nor the key already sent out
-        nonce, ciphertext = self._seal(vault_id, body)
-        self._conn.execute(
-            "UPDATE vaults SET nonce = ?, ciphertext = ?, updated_at = now() WHERE id = ?;",
-            [nonce, ciphertext, vault_id],
-        )
+        # Change ONLY the fields this method writes; everything else (source, key, fields owned
+        # by future writers) rides along verbatim — see the read-modify-write note above.
+        body["name"] = name[:_MAX_NAME]
+        body["description"] = description[:_MAX_DESCRIPTION]
+        self._store_body(vault_id, body)
         return True
 
     def delete(self, vault_id: str) -> None:
@@ -197,26 +212,17 @@ class VaultStore:
         """Store the Vault Key of a vault we exported, so the user can re-show it to a friend
         without re-exporting (which would mint a NEW key and orphan the file already sent)."""
         assert len(key) == 32, "vault key must be 32 bytes"
-        current = self.get(vault_id)
-        assert current is not None, "vault must exist"
-        body = {"name": current["name"], "description": current["description"],
-                "key": base64.b64encode(key).decode("ascii")}
-        if current.get("source"):
-            body["source"] = current["source"]
-        nonce, ciphertext = self._seal(vault_id, body)
-        self._conn.execute(
-            "UPDATE vaults SET nonce = ?, ciphertext = ?, updated_at = now() WHERE id = ?;",
-            [nonce, ciphertext, vault_id],
-        )
+        body = self._load_body(vault_id)
+        assert body is not None, "vault must exist"
+        # Only the key changes; every other body field rides along verbatim (see above).
+        body["key"] = base64.b64encode(key).decode("ascii")
+        self._store_body(vault_id, body)
 
     def get_key(self, vault_id: str) -> bytes | None:
         """The stored Vault Key, or None if this vault has never been exported."""
-        row = self._conn.execute(
-            "SELECT nonce, ciphertext FROM vaults WHERE id = ?;", [vault_id]
-        ).fetchone()
-        if row is None:
+        body = self._load_body(vault_id)
+        if body is None:
             return None
-        body = self._open(vault_id, bytes(row[0]), bytes(row[1]))
         raw = body.get("key")
         return base64.b64decode(raw) if raw else None
 
