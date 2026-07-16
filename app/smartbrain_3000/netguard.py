@@ -126,11 +126,17 @@ def _read_capped(response: httpx.Response, max_bytes: int) -> bytes:
     """Read a streamed response up to ``max_bytes``; raise if it exceeds it."""
     chunks: list[bytes] = []
     total = 0
-    for chunk in response.iter_bytes():  # bounded by the size cap (abort early)
-        total += len(chunk)
-        if total > max_bytes:
-            raise FetchError("response too large")
-        chunks.append(chunk)
+    try:
+        for chunk in response.iter_bytes():  # bounded by the size cap (abort early)
+            total += len(chunk)
+            if total > max_bytes:
+                raise FetchError("response too large")
+            chunks.append(chunk)
+    except httpx.HTTPError as exc:
+        # A mid-stream failure (reset, timeout, protocol garbage) must be a clean FetchError like
+        # every other refusal — never an exception that escapes into a 500 whose log line carries
+        # the full request URL. Class name only: httpx messages can embed the URL itself.
+        raise FetchError(f"fetch failed while reading: {exc.__class__.__name__}") from None
     return b"".join(chunks)
 
 
@@ -177,7 +183,14 @@ def _guarded_get(url: str, allowed_ct: tuple[str, ...], max_bytes: int) -> dict:
             ip = _validated_ip(host)  # re-validated on every hop
             # httpx.Response (from send(stream=True)) is NOT a context manager — close
             # it explicitly in finally, or the body/connection leaks (and `with` raises).
-            response = _send_pinned(client, current, host, ip)
+            try:
+                response = _send_pinned(client, current, host, ip)
+            except (httpx.HTTPError, OSError) as exc:
+                # Refused/timed-out/TLS-failed connections are ordinary fates for a user-supplied
+                # URL: report them as FetchError (a clean 4xx upstream), never an unhandled 500
+                # whose log line would carry the full URL. Class name only — httpx messages can
+                # embed the URL itself, and the fragment-hygiene rule forbids that reaching a log.
+                raise FetchError(f"could not connect: {exc.__class__.__name__}") from None
             try:
                 if response.is_redirect:
                     location = response.headers.get("location")

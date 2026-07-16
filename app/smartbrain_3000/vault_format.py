@@ -587,8 +587,11 @@ def open_vault(data: bytes, vault_key: bytes | None = None) -> tuple[dict, list[
         title, content = doc_obj.get("title"), doc_obj.get("content")
         if not isinstance(title, str) or not isinstance(content, str) or len(content) > MAX_TEXT:
             raise VaultError("a vault document is malformed or too large")
+        # The SIGNED hash rides along: an importer pins {uid, hash} per member, and that pin must be
+        # the exact value future indexes carry for this uid — recomputing it locally after the
+        # title/meta normalisation below could silently disagree with what the publisher signed.
         out = {"uid": uid, "title": title[:MAX_TITLE] or "Untitled",
-               "content": content, "meta": _clean_meta(doc_obj.get("meta"))}
+               "content": content, "meta": _clean_meta(doc_obj.get("meta")), "hash": digest}
         vec = row.get("vec")
         if isinstance(vec, dict) and isinstance(vec.get("obj"), str):
             vobj, vhash = vec["obj"], vec.get("hash")

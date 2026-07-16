@@ -12,12 +12,14 @@ from __future__ import annotations
 import logging
 import os
 import uuid
+from datetime import datetime, timezone
 from typing import Literal
+from urllib.parse import urldefrag, urlparse
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
-from . import gateway, identity, kb as kbmod, tools, vault_format
+from . import gateway, identity, kb as kbmod, netguard, tools, vault_format
 from .data_routes import _reauthorize, _require_desktop_local
 from .vaults import IMPORTED
 
@@ -47,6 +49,11 @@ class ExportIn(BaseModel):
 
 class ImportIn(BaseModel):
     key: str = Field(min_length=1)  # the SBVK1-... vault key
+
+
+class SubscribeIn(BaseModel):
+    # 2048 is the classic practical URL ceiling; a longer one is not a vault link.
+    url: str = Field(min_length=1, max_length=2048)
 
 
 def _vaults(request: Request):
@@ -80,11 +87,24 @@ def _attach_publisher_fp(request: Request, vaults: list[dict]) -> None:
             vault["publisher_fingerprint"] = fp
 
 
+def _attach_pinned_fp(vaults: list[dict]) -> None:
+    """Attach the PINNED publisher's fingerprint (in place) to every imported/subscribed vault.
+
+    Same hard UI rule as _attach_publisher_fp, pointing the other way: a "Subscribed" badge never
+    appears without the identity it is pinned to — the fingerprint every future update must match.
+    """
+    for vault in vaults:  # bounded by vaults._MAX_VAULTS
+        pubkey = (vault.get("source") or {}).get("publisher_pubkey")
+        if isinstance(pubkey, str) and pubkey:
+            vault["pinned_fingerprint"] = vault_format.fingerprint(pubkey)
+
+
 @router.get("/api/vaults")
 def list_vaults(request: Request) -> dict:
     """All vaults, with how many documents each holds."""
     vaults = _vaults(request).list_vaults()
     _attach_publisher_fp(request, vaults)
+    _attach_pinned_fp(vaults)
     return {"vaults": vaults}
 
 
@@ -106,6 +126,7 @@ def get_vault(request: Request, vault_id: str) -> dict:
     store = _vaults(request)
     vault = _require(store, vault_id)
     _attach_publisher_fp(request, [vault])
+    _attach_pinned_fp([vault])
     members = store.members(vault_id)
     return {**vault, "doc_ids": [m["id"] for m in members], "members": members}
 
@@ -275,18 +296,69 @@ def vault_key(request: Request, vault_id: str, body: ExportIn) -> dict:
     return {"key": vault_format.encode_vault_key(key)}
 
 
-def _audit_import(request: Request, name: str, fp: str, seq: int, added: int, duplicates: int) -> None:
-    """Audit one vault import — INGRESS of someone else's content into the knowledge base.
+def _audit_import(request: Request, name: str, fp: str, seq: int, added: int, duplicates: int,
+                  *, tool: str = "vault_import", host: str | None = None) -> None:
+    """Audit one vault import/subscribe — INGRESS of someone else's content into the knowledge base.
 
     As security-relevant as any tool action, so it gets a row: what arrived (name), who signed it
     (fingerprint — the identity a human is asked to trust), and how much landed. Same
     user-initiated pattern as email_routes' send: the click is the consent, the row is the record.
+    A subscribe adds the URL's HOST only — never the full URL: its path can name the topic as
+    plainly as a vault name would, and a fragment could carry key material.
     """
+    args = {"vault": name, "publisher": fp, "seq": seq}
+    if host is not None:
+        args["host"] = host
     request.app.state.audit.append(
-        "user", "vault_import", "reviewed", "executed", True,
-        args_summary=tools.summarize({"vault": name, "publisher": fp, "seq": seq}),
+        "user", tool, "reviewed", "executed", True,
+        args_summary=tools.summarize(args),
         result_summary=tools.summarize({"added": added, "duplicates": duplicates}),
     )
+
+
+def _apply_docs(request: Request, vaults, knowledge, local_id: str, manifest: dict,
+                docs: list[dict]) -> dict:
+    """Apply a VERIFIED vault's documents to local vault ``local_id``; return what happened.
+
+    Shared by file import and URL subscribe — how trust was established differs, what lands must
+    not. Dedupe keeps the USER's copy (never overwrite something they authored with a stranger's);
+    every landed document gets a FRESH local id and is re-sealed under this user's master key (the
+    GCM tag binds to doc_id, so importing a ciphertext — or clobbering an existing id — is
+    structurally impossible). Both membership rows record the upstream {uid, hash}: the map a
+    future update diffs against (an owner-origin row with a uid = "this uid is the user's — skip").
+    Returns {added, duplicates, vectors_used}.
+    """
+    embed_model = gateway.embed_model(request.app.state.dbx)
+    shipped = manifest.get("embeddings") or {}
+    added = duplicates = 0
+    for doc in docs:  # bounded by vault_format.MAX_VAULT_DOCS
+        existing = knowledge.find_duplicate(doc["content"])
+        if existing is not None:
+            # The user already has this text. Keep THEIR document and just note the membership —
+            # never overwrite something they authored with a stranger's copy.
+            vaults.add_documents(local_id, [existing], origin="owner")
+            vaults.note_member_source(local_id, existing, doc["uid"], doc["hash"])
+            duplicates += 1
+            continue
+        doc_id = knowledge.add(doc["title"], doc["content"], doc["meta"])
+        vaults.add_documents(local_id, [doc_id], origin="import")
+        vaults.note_member_source(local_id, doc_id, doc["uid"], doc["hash"])
+        added += 1
+        vectors = doc.get("vectors")
+        # Use the shipped vectors ONLY if they were made by the same model, at the same dim, with
+        # the same chunker. Vectors chunked differently would give WRONG page citations, not merely
+        # worse ranking — kb.chunk_span is the inverse of chunk_text and is what cuts the snippet.
+        if (
+            vectors
+            and shipped.get("model") == embed_model
+            and len(vectors) == len(kbmod.chunk_text(doc["title"], doc["content"]))
+        ):
+            knowledge.put_embeddings(doc_id, vectors, embed_model)
+    # One bulk write, then drop the index: rebuilding it per-document is the O(n^2) path kbindex
+    # warns about (19s for 10k docs). The next search rebuilds in a single pass.
+    knowledge.reset_index()
+    return {"added": added, "duplicates": duplicates,
+            "vectors_used": bool(shipped.get("model") == embed_model)}
 
 
 @router.post("/api/vaults/import")
@@ -320,43 +392,102 @@ async def import_vault(request: Request, key: str) -> dict:
                 "seq": manifest["seq"]},
     )
 
-    embed_model = gateway.embed_model(request.app.state.dbx)
-    shipped = manifest.get("embeddings") or {}
-    added = duplicates = 0
-    for doc in docs:  # bounded by vault_format.MAX_VAULT_DOCS
-        existing = knowledge.find_duplicate(doc["content"])
-        if existing is not None:
-            # The user already has this text. Keep THEIR document and just note the membership —
-            # never overwrite something they authored with a stranger's copy.
-            vaults.add_documents(local_id, [existing], origin="owner")
-            duplicates += 1
-            continue
-        doc_id = knowledge.add(doc["title"], doc["content"], doc["meta"])
-        vaults.add_documents(local_id, [doc_id], origin="import")
-        added += 1
-        vectors = doc.get("vectors")
-        # Use the shipped vectors ONLY if they were made by the same model, at the same dim, with
-        # the same chunker. Vectors chunked differently would give WRONG page citations, not merely
-        # worse ranking — kb.chunk_span is the inverse of chunk_text and is what cuts the snippet.
-        if (
-            vectors
-            and shipped.get("model") == embed_model
-            and len(vectors) == len(kbmod.chunk_text(doc["title"], doc["content"]))
-        ):
-            knowledge.put_embeddings(doc_id, vectors, embed_model)
-    # One bulk write, then drop the index: rebuilding it per-document is the O(n^2) path kbindex
-    # warns about (19s for 10k docs). The next search rebuilds in a single pass.
-    knowledge.reset_index()
+    applied = _apply_docs(request, vaults, knowledge, local_id, manifest, docs)
 
-    log.info("imported vault %s: %d added, %d already present", manifest["vault_id"], added, duplicates)
+    log.info("imported vault %s: %d added, %d already present",
+             manifest["vault_id"], applied["added"], applied["duplicates"])
     imported_name = vaults.get(local_id)["name"]
     fp = vault_format.fingerprint(publisher["pubkey"])
-    _audit_import(request, imported_name, fp, manifest["seq"], added, duplicates)
-    return {
-        "id": local_id,
-        "name": imported_name,
-        "publisher": fp,
-        "added": added,
-        "duplicates": duplicates,
-        "vectors_used": bool(shipped.get("model") == embed_model),
-    }
+    _audit_import(request, imported_name, fp, manifest["seq"], applied["added"], applied["duplicates"])
+    return {"id": local_id, "name": imported_name, "publisher": fp, **applied}
+
+
+def _explain_fetch_refusal(msg: str) -> str:
+    """netguard's refusals, in the words of a person pasting a URL into a field.
+
+    The two cases a normal user can actually hit get plain language; anything else keeps the
+    guard's own message (it names the mechanism, which is what a bug report needs).
+    """
+    if "non-global" in msg:
+        return ("that address is not on the public internet — subscribing works with public "
+                "internet hosts only (not localhost or LAN addresses)")
+    if "content-type" in msg:
+        return "that URL doesn't serve a vault file — point it at the .sbvault file itself"
+    return f"could not fetch that vault: {msg}"
+
+
+@router.post("/api/vaults/subscribe")
+def subscribe_vault(request: Request, body: SubscribeIn) -> dict:
+    """Subscribe to a PUBLIC (open) vault by URL: fetch, verify, re-seal locally, PIN the publisher.
+
+    First contact IS the trust decision (TOFU, vault-format §5): the publisher key seen now is
+    pinned in the new vault's encrypted body, and every later update must verify against that pin —
+    never against whatever key a future download claims. Ingress, not egress, so it gates exactly
+    like file import (unlock only, no desktop-local): nothing leaves the machine, and everything
+    arriving is verified, bounded, re-sealed under this user's master key, and audited.
+    """
+    vaults, knowledge = _vaults(request), _kb(request)
+    # Fragment hygiene BEFORE the URL is fetched, pinned, parsed, or audited: a sealed-share link
+    # carries key material in its fragment (#k=...), and nothing downstream may ever see it.
+    # (netguard.safe_fetch_vault strips again — belt and suspenders, one rule.)
+    url = urldefrag(body.url.strip()).url
+    if not url:
+        # A whitespace- or fragment-only "URL" survives the model's min_length; refuse it here
+        # rather than let netguard's internal assert turn it into a 500.
+        raise HTTPException(status_code=400, detail="enter the vault's URL")
+    host = urlparse(url).hostname or ""
+    try:
+        data = netguard.safe_fetch_vault(url)
+    except netguard.FetchError as exc:
+        raise HTTPException(status_code=400, detail=_explain_fetch_refusal(str(exc))) from None
+
+    try:
+        if vault_format.read_manifest(data)["mode"] != vault_format.OPEN:
+            # v1 URL-subscribe is open-only (the plan's explicit deferral): a sealed vault's key
+            # must never ride a URL, so file + separately-sent key stays the sealed channel.
+            raise HTTPException(status_code=400, detail=(
+                "that vault is sealed — import its file with the key instead"))
+        manifest, docs = vault_format.open_vault(data)
+    except vault_format.VaultError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+
+    publisher = manifest["publisher"]
+    # Resolve the claimed vault_id against every existing pin (bounded decrypt-scan: list_vaults
+    # is capped at vaults._MAX_VAULTS). Refusing BEFORE anything lands keeps this all-or-nothing.
+    for vault in vaults.list_vaults():
+        pin = vault.get("source") or {}
+        if pin.get("vault_id") != manifest["vault_id"]:
+            continue
+        if pin.get("publisher_pubkey") == publisher["pubkey"]:
+            raise HTTPException(status_code=409, detail=(
+                f"you already have this vault (“{vault['name']}”) — "
+                "check it for updates instead of subscribing again"))
+        # Same vault_id, different key: either an impersonation of a vault this user already
+        # trusts, or a publisher key change — and a key change must NEVER silently succeed (§5).
+        raise HTTPException(status_code=409, detail=(
+            "a vault with this identity is already pinned to a different publisher — refusing "
+            "to add it (if the publisher really changed keys, remove the old vault first)"))
+
+    fp = vault_format.fingerprint(publisher["pubkey"])
+    sealed = manifest.get("_sealed") or {}
+    local_id = vaults.create(
+        (sealed.get("name") or "Subscribed vault")[:200],
+        f"Public vault · publisher {fp}",
+        kind=IMPORTED,
+        # THE pin. Everything a future update is verified against lives here, inside the
+        # ciphertext: the pinned key (the identity), seq (rollback floor), and the fetch URL
+        # (fragment-stripped above). last_checked is null until check-for-updates exists.
+        source={"url": url, "publisher_pubkey": publisher["pubkey"],
+                "vault_id": manifest["vault_id"], "seq": manifest["seq"],
+                "mode": vault_format.OPEN,
+                "added_at": datetime.now(timezone.utc).date().isoformat(),
+                "last_checked": None},
+    )
+    applied = _apply_docs(request, vaults, knowledge, local_id, manifest, docs)
+
+    log.info("subscribed to vault %s (host %s): %d added, %d already present",
+             manifest["vault_id"], host, applied["added"], applied["duplicates"])
+    name = vaults.get(local_id)["name"]
+    _audit_import(request, name, fp, manifest["seq"], applied["added"], applied["duplicates"],
+                  tool="vault_subscribe", host=host)
+    return {"id": local_id, "name": name, "publisher": fp, "url_host": host, **applied}

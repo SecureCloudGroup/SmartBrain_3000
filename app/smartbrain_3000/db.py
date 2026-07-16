@@ -190,6 +190,16 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
     # in this vault), so a vault update must NEVER clobber it. Plaintext because it is a permission
     # bit the API must check on every rename/delete, and it says nothing about content.
     (22, "ALTER TABLE vault_documents ADD COLUMN origin TEXT DEFAULT 'owner';"),
+    # Where a vault MEMBER came from: the upstream {uid, hash} recorded when a document arrives via
+    # vault import/subscribe — the map a future vault update diffs against. ENCRYPTED, not plaintext
+    # columns: a stored content hash is a plaintext fingerprint of encrypted content (the rule
+    # kbindex.content_hash states), and where a document came from is exactly as sensitive as what
+    # it says (kb._seal's rule). Nullable: rows the user added themselves have no upstream source.
+    (
+        23,
+        "ALTER TABLE vault_documents ADD COLUMN nonce BLOB; "
+        "ALTER TABLE vault_documents ADD COLUMN ciphertext BLOB;",
+    ),
 )
 
 # The newest migration this build knows how to apply. A database recording a

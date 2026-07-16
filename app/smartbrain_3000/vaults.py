@@ -228,6 +228,56 @@ class VaultStore:
         )
         return True
 
+    # --- member provenance (migration 23): the upstream {uid, hash} an update diffs against -------
+
+    def _member_aad(self, vault_id: str, doc_id: str) -> bytes:
+        """AAD for one membership's encrypted body — domain-separated from the vault body's."""
+        assert vault_id and doc_id, "vault id + doc id required"
+        return b"vault_doc:" + vault_id.encode("utf-8") + b":" + doc_id.encode("utf-8")
+
+    def note_member_source(self, vault_id: str, doc_id: str, uid: str, content_hash: str) -> None:
+        """Record where a member CAME FROM: the publisher's ``uid`` (the update key — which local
+        document is upstream's X?) and the SIGNED content ``hash`` (does the local copy still match
+        what the publisher shipped?). Set by import/subscribe; owner-added rows never get one.
+
+        Encrypted, not plaintext columns: a stored content hash is a plaintext fingerprint of
+        encrypted content — exactly what we don't keep (kbindex.content_hash's rule) — and where a
+        document came from is as sensitive as what it says (kb._seal's rule).
+        """
+        assert vault_id and doc_id and uid and content_hash, "vault/doc/uid/hash required"
+        nonce = os.urandom(_NONCE_BYTES)
+        plaintext = json.dumps({"uid": uid, "hash": content_hash}).encode("utf-8")
+        ciphertext = self._aes.encrypt(nonce, plaintext, self._member_aad(vault_id, doc_id))
+        self._conn.execute(
+            "UPDATE vault_documents SET nonce = ?, ciphertext = ? WHERE vault_id = ? AND doc_id = ?;",
+            [nonce, ciphertext, vault_id, doc_id],
+        )
+
+    def member_map(self, vault_id: str) -> dict[str, dict]:
+        """{uid: {doc_id, hash, origin}} for every member with a recorded upstream source.
+
+        The lookup table a vault update applies against: uid present -> update/skip decision;
+        uid absent -> a new document. Bounded decrypt-scan (<= _MAX_DOCS_PER_VAULT). Rows without
+        a body — documents the user added to the vault themselves — have no upstream uid and are
+        skipped: they are not errors, they are simply not the publisher's to touch.
+        """
+        assert vault_id, "vault id required"
+        rows = self._conn.execute(
+            "SELECT doc_id, origin, nonce, ciphertext FROM vault_documents WHERE vault_id = ? "
+            f"LIMIT {_MAX_DOCS_PER_VAULT};",
+            [vault_id],
+        ).fetchall()
+        out: dict[str, dict] = {}
+        for row in rows:  # bounded by _MAX_DOCS_PER_VAULT
+            if row[2] is None or row[3] is None:
+                continue  # owner-added row: no upstream source to map
+            doc_id = str(row[0])
+            body = json.loads(
+                self._aes.decrypt(bytes(row[2]), bytes(row[3]), self._member_aad(vault_id, doc_id))
+                .decode("utf-8"))
+            out[body["uid"]] = {"doc_id": doc_id, "hash": body["hash"], "origin": str(row[1])}
+        return out
+
     def import_provenance(self, doc_id: str) -> dict | None:
         """Where this document CAME FROM, if any of its memberships is import-origin; else None.
 

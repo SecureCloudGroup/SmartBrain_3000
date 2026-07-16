@@ -102,6 +102,13 @@ and the unit you share. Vaults live on the Knowledge page.
   result shows the publisher's fingerprint — the one thing that says *who* the knowledge came
   from. Imported documents are protected from accidental edits (rename/delete are refused);
   **Detach** one in the vault's member list to make that copy yours.
+- **Subscribe to a public vault.** For a vault someone published **Public**, paste its URL
+  instead of picking a file — no key needed. SmartBrain fetches it (public internet hosts only,
+  not localhost or LAN addresses), verifies the publisher's signature, and re-encrypts the
+  documents under **your** passphrase as they land. The publisher's identity is **pinned on
+  first contact** — the vault card shows a **Subscribed** badge with the pinned fingerprint and
+  the host it came from — and future updates will only ever be accepted from that same
+  publisher. (Update checking arrives in a later release.)
 
 Creating, adding, and searching a vault work everywhere, including a paired phone. **Exporting and
 importing a vault are done on the Desktop** — sharing a vault's contents, or bringing new ones in, is
