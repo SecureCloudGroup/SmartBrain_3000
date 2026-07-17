@@ -236,8 +236,29 @@ header.appbar .logo {
   border-radius: 22%;
 }
 
+/* Logo + title + version travel together as one flex item so the version tucks under the
+   title and the group never splits across a wrap. */
+header.appbar .brand {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+header.appbar .titlewrap {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.15;
+}
+
 header.appbar .title {
   font-weight: 700;
+}
+
+/* Running version under the title: small, muted, single line — reads fine in light and dark. */
+header.appbar .appversion {
+  font-size: 0.7rem;
+  color: var(--muted);
+  white-space: nowrap;
 }
 
 header.appbar .spacer {
