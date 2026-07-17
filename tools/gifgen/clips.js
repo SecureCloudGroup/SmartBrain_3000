@@ -248,11 +248,66 @@ const CLIPS = {
     await R.highlight('.badge');
     await R.cap("The version bumps automatically — subscribers pick it up on their next check", "5/5"); await R.dwell(2000); await done(h);
   },
+  // 11 vaults — the PUBLIC SUBSCRIBE + UPDATE story (the half clip 10 doesn't cover). Fully
+  // authentic: a REAL open .sbvault (built by vault_format.pack, signed by one Ed25519 key) is served
+  // in place of the network fetch by a RECORDER-ONLY netguard shim (gated on SB_GIFDEMO=1, lives in
+  // tools/gifgen only — never in the shipped image; see gifdemo_shim/sitecustomize.py). Everything
+  // the UI shows is real: the app verifies the publisher signature, PINS the key on first contact,
+  // re-encrypts every doc under the subscriber's own master key, honours a real Detach, and applies
+  // a real update whose summary counts updated / added / kept-yours. No passphrase is entered
+  // anywhere in this flow (subscribe/detach/check/update are unlock-only), so nothing is redacted.
+  "11": async () => {
+    const SERVE = require("path").join(__dirname, "out", "gifdemo", "serve.txt");
+    const serve = (name) => require("fs").writeFileSync(SERVE, name + "\n"); // flip the "hosted" file
+    serve("publisher-v1.sbvault"); // start on v1 (run.sh resets it too)
+    const SUB_URL = "https://vaults.example/frontend-playbook.sbvault";
+    const h = await open();
+    const { page, R } = h;
+    await nav(page, "Knowledge").click(); await page.waitForTimeout(700); await R.ensure();
+    await R.cap("Someone published a public vault — subscribe by URL", "1/4"); await R.dwell(1000);
+    await R.scrollCenter('summary:has-text("Add someone else")');
+    await R.click('summary:has-text("Add someone else")'); await page.waitForTimeout(350); await R.ensure();
+    await R.moveTo('input[aria-label="Public vault URL"]');
+    await R.type('input[aria-label="Public vault URL"]', SUB_URL); await R.dwell(350);
+    await R.cap("Paste the link — a public vault needs no key", "1/4");
+    await R.click('button:has-text("Subscribe")');
+    await R.cap("Verifying the publisher's signature, re-encrypting under your key…", "1/4");
+    await page.waitForSelector('.badge:has-text("Subscribed")', { timeout: 8000 }); await R.ensure();
+    await R.scrollCenter('.vault .vrow'); await page.waitForTimeout(250);
+    await R.highlight('.vault .vrow .fp'); // the pinned publisher fingerprint
+    await R.cap("Subscribed — the publisher's SB-… fingerprint is pinned, docs land", "2/4"); await R.dwell(1600); await R.noring();
+    // Prove the docs really landed and are usable: a keyword search scoped to just this vault. The
+    // search box sits directly above the vault, so this is a short hop, not a page-length scroll.
+    await R.click('button:has-text("Search this")'); await page.waitForTimeout(250); await R.ensure();
+    await R.type('input[aria-label="Search your knowledge"]', "on-call"); await R.dwell(200);
+    await page.locator('select[aria-label="Search mode"]').selectOption({ label: "Keyword" }).catch(() => {});
+    await R.click('form button:has-text("Search")'); await page.waitForTimeout(900); await R.ensure();
+    await R.cap("Its documents landed — searchable, scoped to just this vault", "2/4"); await R.dwell(1500);
+    // Make one document YOURS so the update must not overwrite it (the real owner-edit protection).
+    await R.scrollCenter('.vault .vrow'); await page.waitForTimeout(250);
+    await R.click('.vault button.linklike:has-text("document")'); await page.waitForTimeout(400); await R.ensure();
+    await R.cap("Make one copy yours — an update must never overwrite it", "3/4");
+    await R.scrollCenter('.vmembers li:has-text("Onboarding checklist")');
+    await R.click('.vmembers li:has-text("Onboarding checklist") button:has-text("Detach")');
+    await page.waitForTimeout(600); await R.ensure(); await R.dwell(700);
+    // The publisher ships v2 — the ONE simulated step: flip which local file the shim serves.
+    serve("publisher-v2.sbvault");
+    await R.cap("The publisher ships a new version — check for updates", "4/4");
+    await R.scrollCenter('button:has-text("Check for updates")'); await page.waitForTimeout(250);
+    await R.click('button:has-text("Check for updates")');
+    await page.waitForSelector('button:has-text("Update now")', { timeout: 8000 }); await R.ensure();
+    await R.scrollCenter('.upd'); await R.highlight('.upd');
+    await R.cap("Update available (v1 → v2) — signed by the same pinned key", "4/4"); await R.dwell(1500); await R.noring();
+    await R.click('button:has-text("Update now")'); await page.waitForTimeout(1300); await R.ensure();
+    await R.scrollCenter('.upd'); await R.highlight('.upd');
+    await R.cap("Updated and added — and the copy you made yours was kept", "4/4"); await R.dwell(2200); await R.noring();
+    await done(h);
+  },
 };
 
 (async () => {
   const n = process.argv[2];
-  if (!CLIPS[n]) { console.error("usage: node clips.js <01..10>"); process.exit(1); }
+  if (!CLIPS[n]) { console.error("usage: node clips.js <01..11>"); process.exit(1); }
   await CLIPS[n]();
   console.log("recorded " + n);
 })();

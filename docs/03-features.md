@@ -74,6 +74,8 @@ Your knowledge is also what external tools can read over [MCP](04-mcp.md).
 
 ![Vaults — tick documents into a vault, then publish it public: the no-key warning, a Public badge with your SB-… publisher fingerprint, and a version that bumps each time you export an update](assets/gifs/10-vaults.gif)
 
+![Subscribe to a public vault by URL, then pull the publisher's verified updates — the docs land re-encrypted under your key, a keyword search hits, you make one copy yours with Detach, and Update now applies v2 all-or-nothing while keeping your copy](assets/gifs/11-vault-subscribe.gif)
+
 A **vault** is a named set of your knowledge documents — the unit you scope a search to,
 and the unit you share. Vaults live on the Knowledge page.
 
