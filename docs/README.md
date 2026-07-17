@@ -6,7 +6,7 @@ this same Markdown at build time.
 
 1. [Getting started](01-getting-started.md) — requirements, install, first run, locking, updating.
 2. [Connect a model](02-models.md) — cloud provider keys and local models (Ollama / MLX).
-3. [Using SmartBrain_3000](03-features.md) — chat + tools, knowledge, planner, schedules, email, usage &amp; cost, activity.
+3. [Using SmartBrain_3000](03-features.md) — chat + tools, knowledge, vaults (share &amp; subscribe), planner, schedules, email, usage &amp; cost, activity.
 4. [Connect external tools (MCP)](04-mcp.md) — expose read-only Knowledge to a desktop AI client (e.g. Claude Desktop, Cursor).
 5. [Backup &amp; recovery](05-backup-recovery.md) — export, encrypted backup, restore, change passphrase, Recovery Key.
 6. [Privacy &amp; security](06-privacy-security.md) — what protects your data, what leaves your machine, real world limits.

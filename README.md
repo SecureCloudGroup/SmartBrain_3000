@@ -33,6 +33,10 @@ on your own computer — macOS, Linux, or Windows.
   knowledge, track tasks, and act on your behalf — but anything that changes
   data or reaches out parks for your approval first, and every attempt is
   audited.
+- **Group and share knowledge with Vaults.** Bundle documents into a **vault** to
+  scope a search, share it as an encrypted file, or **publish it publicly** so others
+  can **subscribe by URL** and stay up to date — signed, verified, and re-encrypted
+  under each reader's own passphrase. See [Vaults](docs/03-features.md#vaults).
 
 ## Quickstart
 
@@ -68,9 +72,10 @@ stack and opens the app for you. The app runs at **http://localhost:33000** — 
 1. **Set a passphrase** and **save your Emergency Kit** (a one-time Recovery
    Key). There is no password reset — the Recovery Key is the only way back in
    if you forget your passphrase, so store it somewhere safe and offline.
-2. **Connect a model** under **Settings**: add a cloud provider API key, or run
-   a local **Ollama** model (any OS). If Ollama is already running, SmartBrain
-   **detects it and offers a one-tap connect** right on the Chat screen.
+2. **Connect a model** under **Settings**: add a cloud provider API key, or run a
+   local model — **MLX** on an Apple-Silicon Mac, or **Ollama** on any OS. If one is
+   already running, SmartBrain **detects it and offers a one-tap connect** right on the
+   Chat screen.
 3. **Start chatting.**
 
 > **Building from source?** Contributors can `git clone` the repo and run

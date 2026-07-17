@@ -44,8 +44,8 @@ expires, tap **Pair a new phone** for a fresh one.
 ## Using it on your phone
 
 The phone shows a **trimmed set** of areas meant for use on the go: **Chat**,
-**Knowledge**, **Planner**, **Email**, and **Activity**. Settings and first-time setup
-live on the **Desktop**.
+**Knowledge**, **Planner**, **Schedules**, **Email**, and **Activity**. Settings and
+first-time setup live on the **Desktop**.
 
 A small **"Remote"** chip shows the connection state: **direct** (phone-to-Desktop),
 **relayed** (through the encrypted relay), or **BLOCKED** in red if your Desktop's

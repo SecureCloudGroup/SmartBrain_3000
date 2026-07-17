@@ -78,13 +78,13 @@ The first time you open the app it walks you through setup:
 
 A quick path from zero to seeing what SmartBrain does:
 
-1. **Connect a model.** Open **Chat**. If you're already running Ollama, you'll see
-   *"Found Ollama running on this machine"* — tap **Connect** and you're set. No
-   Ollama? Add a cloud key under **Settings → Cloud providers**, or
-   [install Ollama](https://ollama.com/download) and pull a model
-   (`ollama pull llama3.1:8b`). See [Connect a model](02-models.md).
+1. **Connect a model.** Open **Chat**. If a local model server is already running you'll
+   see *"Found … running on this machine"* — tap **Connect** and you're set. Nothing
+   running yet? Add a cloud key under **Settings → Cloud providers**, or start a local
+   model — **MLX** on an Apple-Silicon Mac, or [Ollama](https://ollama.com/download) on any
+   OS (`ollama pull qwen2.5:7b-instruct`). See [Connect a model](02-models.md).
 
-   ![Chat offering a one-tap connect for a detected Ollama server](assets/01-chat-connect.png)
+   ![Chat offering a one-tap connect for a detected local model server](assets/01-chat-connect.png)
 
 ![Your first chat — tap a suggestion, get a reply](assets/gifs/03-first-chat.gif)
 2. **Send your first message.** Ask it anything — e.g. *"What can you help me with?"*
@@ -133,9 +133,10 @@ Most first-run problems are one of these:
   warming up"*, click **Open SmartBrain** again in a moment. Still stuck? Check the logs:
   `docker compose -f docker-compose.release.yml logs smartbrain` (from source, use
   `compose/docker-compose.yml`).
-- **Chat says "No models available yet."** You haven't connected a model. If Ollama
-  is running, the Chat screen offers a one-tap **Connect**; otherwise add a cloud key
-  under **Settings → Cloud providers**. See [Connect a model](02-models.md).
+- **Chat says "No models available yet."** You haven't connected a model. If a local
+  model server (MLX or Ollama) is running, the Chat screen offers a one-tap **Connect**;
+  otherwise add a cloud key under **Settings → Cloud providers**. See
+  [Connect a model](02-models.md).
 - **Semantic search returns keyword results ("degraded").** The embedding model isn't
   pulled. On the Desktop run `ollama pull nomic-embed-text:v1.5` (the installer and
   `doctor` try to do this for you), then **Reindex** in Knowledge.

@@ -28,6 +28,15 @@ Refactor both to read-modify-write, preserving unknown keys, BEFORE Stage C.
   unlocked-only; NEVER auto-apply across a key change; results into the schedule_runs feed (carrier row).
 - **F — UI surfaces** [M]. subscription card (fingerprint always beside any label), key-change dialog
   (the one interruption), publish/hosting panel, imported-content provenance in approvals.
+- **G — Docs / content / video catch-up** [M]. Run AFTER E+F (deferred so the docs describe the
+  product that actually shipped, not a moving target). Audit the whole user-facing surface — README,
+  landing, docs/01–08 — against the shipped code, then fix in ONE docs PR: the full
+  publish→subscribe→stay-current→key-change vault story end-to-end; chat citations + the
+  stop/copy/regenerate/rename controls; and re-lead the model guide with **MLX/Qwen** over Ollama
+  (docs led Ollama, operator prefers oMLX). Flag as follow-ups, not fixed here: the in-app
+  model-suggestion drift (settings/models UI still hard-codes `ollama pull llama3.1:8b`, never
+  surfaces Qwen/MLX-first) and the incomplete `10-vaults` GIF (pre-public create→export only —
+  needs a publish→subscribe→update re-record). Audit-driven; DOCS ONLY.
 
 ## Safe deferrals
 rotated_from key-rotation cert → v1.1 (manual confirm dialog is the baseline; reserve the branch).
