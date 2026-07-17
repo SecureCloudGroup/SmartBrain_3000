@@ -86,7 +86,17 @@ func (s Stack) compose(ctx context.Context, args ...string) error {
 }
 
 // Up pulls the latest images and starts the stack in the background.
-func (s Stack) Up(ctx context.Context) error { return s.compose(ctx, "up", "-d") }
+//
+// The pull is what makes an upgrade actually take effect: `up -d` on its own reuses a cached
+// :latest image forever, so a freshly-upgraded launcher would keep running the OLD app image
+// (the "brew upgrade didn't update the app" bug). Pulling first fetches a moved :latest, and
+// `up -d` then recreates the container because the image id changed. A pull failure (offline,
+// registry hiccup, rate-limit) is TOLERATED — the app must still start on the cached image
+// rather than refuse to launch, exactly as it did before this pull existed.
+func (s Stack) Up(ctx context.Context) error {
+	_ = s.compose(ctx, "pull") // best-effort; offline/steady-state is a quick no-op, upgrades fetch
+	return s.compose(ctx, "up", "-d")
+}
 
 // Down stops and removes the containers. The user's ./data is left untouched.
 func (s Stack) Down(ctx context.Context) error { return s.compose(ctx, "down") }

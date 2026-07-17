@@ -50,6 +50,22 @@ func TestComposeArgs(t *testing.T) {
 	}
 }
 
+func TestComposeArgsPull(t *testing.T) {
+	// Up() pulls before up -d so an upgraded launcher fetches a moved :latest instead of reusing a
+	// cached image; pin the pull invocation's args.
+	s := Stack{Dir: "/tmp/sb", Port: DefaultPort}
+	got := s.composeArgs("pull")
+	want := []string{"compose", "-f", filepath.Join("/tmp/sb", composeName), "pull"}
+	if len(got) != len(want) {
+		t.Fatalf("arg count: got %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("arg %d: got %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
 func TestComposePathAndURL(t *testing.T) {
 	s := Stack{Dir: "/opt/data", Port: 33000}
 	if got := s.ComposePath(); got != "/opt/data/docker-compose.release.yml" {
