@@ -1,112 +1,68 @@
 #!/usr/bin/env python3
-"""Generate the launcher's icons — stdlib only, no image libraries.
+"""Generate the launcher's tray icons — an "SB" monogram.
 
-Outputs:
-  icon_mac.png  — menu-bar tray glyph, black on transparent (a rounded-square RING, used as a macOS
-                  *template* icon so the bar tints it for light/dark). A ring, not a filled box, so it
-                  reads as an icon rather than a black blob.
-  icon_win.ico  — the same ring in mid-blue for the Windows system tray (visible on light + dark bars).
-  icon_app.png is NOT generated here: it is the brand asset (assets/SmartBrain_Avatar.png, resized
-  to 512px) — regenerate it with `sips -z 512 512 ../../assets/SmartBrain_Avatar.png --out icon_app.png`.
-  CI turns it into SmartBrain.icns for the Finder icon.
+Outputs (committed next to this script; the launcher embeds them via //go:embed):
+  icon_mac.png  — 44x44 menu-bar glyph: "SB" in BLACK on transparent, used as a macOS *template*
+                  icon so the menu bar tints it for light/dark automatically.
+  icon_win.ico  — 32x32 "SB" in mid-blue for the Windows system tray (reads on light + dark bars).
 
-Run from this directory:  python3 generate_icons.py
+  icon_app.png is NOT generated here: it is the brand asset (assets/SmartBrain_Avatar.png resized to
+  512px) used for the Finder/Dock icon — regenerate with
+  `sips -z 512 512 ../../assets/SmartBrain_Avatar.png --out icon_app.png`. CI turns it into .icns.
+
+Needs Pillow + a bold sans TTF (tries DejaVu Sans Bold / Arial Bold / Helvetica). Run from this
+directory:  python3 generate_icons.py
 """
-
 from __future__ import annotations
 
-import struct
-import zlib
 from pathlib import Path
 
-SS = 4  # supersampling, box-averaged down for smooth edges
+from PIL import Image, ImageDraw, ImageFont
+
+_FONTS = [
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    "/Library/Fonts/Arial Bold.ttf",
+    "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+    "/System/Library/Fonts/HelveticaNeue.ttc",
+]
+_SS = 4  # supersample, then average down for smooth edges
 
 
-def _rounded(x: float, y: float, w: float, lo_f: float, hi_f: float, r_f: float) -> bool:
-    """Is (x, y) inside a rounded square inscribed in a w×w box (bounds/radius as fractions of w)?"""
-    lo, hi, radius = w * lo_f, w * hi_f, w * r_f
-    if x < lo or x > hi or y < lo or y > hi:
-        return False
-    cx = min(max(x, lo + radius), hi - radius)
-    cy = min(max(y, lo + radius), hi - radius)
-    dx, dy = x - cx, y - cy
-    return dx * dx + dy * dy <= radius * radius
+def _font_path() -> str:
+    for p in _FONTS:
+        if Path(p).exists():
+            return p
+    raise SystemExit("no bold TTF found — add one to _FONTS for your system")
 
 
-def _disc(x: float, y: float, w: float, r_f: float) -> bool:
-    dx, dy = x - w / 2, y - w / 2
-    return dx * dx + dy * dy <= (w * r_f) ** 2
+def _fit(font_path: str, box: int, text: str, frac: float) -> ImageFont.FreeTypeFont:
+    """Largest font size whose text fits within frac*box in both dimensions."""
+    s = 8
+    while True:
+        f = ImageFont.truetype(font_path, s)
+        b = ImageDraw.Draw(Image.new("RGBA", (4, 4))).textbbox((0, 0), text, font=f)
+        if (b[2] - b[0]) > box * frac or (b[3] - b[1]) > box * frac:
+            return ImageFont.truetype(font_path, max(8, s - 1))
+        s += 1
 
 
-def _in_ring(x: float, y: float, w: float) -> bool:
-    """A rounded-square outline: inside the outer rounded square, outside a smaller inner one."""
-    return _rounded(x, y, w, 0.08, 0.92, 0.30) and not _rounded(x, y, w, 0.28, 0.72, 0.22)
-
-
-def _app_rgb(x: float, y: float, w: float):
-    """Colour for the app tile: blue rounded tile with a white ring; None = transparent."""
-    if not _rounded(x, y, w, 0.05, 0.95, 0.23):
-        return None
-    if _disc(x, y, w, 0.30) and not _disc(x, y, w, 0.19):
-        return (255, 255, 255)
-    return (74, 144, 217)
-
-
-def render(size: int, kind: str, color=(0, 0, 0)) -> bytes:
-    """RGBA bytes. kind='ring' → a ring in `color`; kind='app' → the colour app tile."""
-    w = size * SS
-    buf = bytearray(size * size * 4)
-    for oy in range(size):
-        for ox in range(size):
-            r = g = b = 0
-            hits = 0
-            for sy in range(SS):
-                for sx in range(SS):
-                    px, py = ox * SS + sx + 0.5, oy * SS + sy + 0.5
-                    if kind == "app":
-                        c = _app_rgb(px, py, w)
-                        if c is not None:
-                            r, g, b = c
-                            hits += 1
-                    elif _in_ring(px, py, w):
-                        r, g, b = color
-                        hits += 1
-            i = (oy * size + ox) * 4
-            buf[i], buf[i + 1], buf[i + 2] = r, g, b
-            buf[i + 3] = 255 * hits // (SS * SS)
-    return bytes(buf)
-
-
-def _chunk(typ: bytes, data: bytes) -> bytes:
-    return struct.pack(">I", len(data)) + typ + data + struct.pack(">I", zlib.crc32(typ + data) & 0xFFFFFFFF)
-
-
-def png_bytes(size: int, rgba: bytes) -> bytes:
-    ihdr = struct.pack(">IIBBBBB", size, size, 8, 6, 0, 0, 0)  # 8-bit RGBA
-    raw = bytearray()
-    for y in range(size):
-        raw.append(0)  # filter type 0 per scanline
-        raw += rgba[y * size * 4 : (y + 1) * size * 4]
-    return (
-        b"\x89PNG\r\n\x1a\n"
-        + _chunk(b"IHDR", ihdr)
-        + _chunk(b"IDAT", zlib.compress(bytes(raw), 9))
-        + _chunk(b"IEND", b"")
-    )
-
-
-def ico_bytes(png: bytes, size: int) -> bytes:
-    """Wrap a PNG as a single-image .ico (PNG-in-ICO, supported on Windows Vista+)."""
-    header = struct.pack("<HHH", 0, 1, 1)  # reserved, type=icon, count=1
-    entry = struct.pack("<BBBBHHII", size, size, 0, 0, 1, 32, len(png), 6 + 16)
-    return header + entry + png
+def render(size: int, color: tuple[int, int, int], frac: float) -> Image.Image:
+    fp = _font_path()
+    box = size * _SS
+    img = Image.new("RGBA", (box, box), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    f = _fit(fp, box, "SB", frac)
+    b = d.textbbox((0, 0), "SB", font=f)
+    d.text(((box - (b[2] - b[0])) // 2 - b[0], (box - (b[3] - b[1])) // 2 - b[1]),
+           "SB", font=f, fill=color + (255,))
+    return img.resize((size, size), Image.LANCZOS)
 
 
 def main() -> None:
-    here = Path(__file__).resolve().parent
-    (here / "icon_mac.png").write_bytes(png_bytes(44, render(44, "ring", (0, 0, 0))))
-    (here / "icon_win.ico").write_bytes(ico_bytes(png_bytes(32, render(32, "ring", (74, 144, 217))), 32))
-    print("wrote icon_mac.png and icon_win.ico (icon_app.png is the brand asset — see docstring)")
+    here = Path(__file__).parent
+    render(44, (0, 0, 0), 0.80).save(here / "icon_mac.png")       # black template (macOS tints it)
+    render(32, (74, 144, 217), 0.84).save(here / "icon_win.ico")  # blue for the Windows tray
+    print("wrote icon_mac.png (SB, template) + icon_win.ico (SB, blue)")
 
 
 if __name__ == "__main__":
