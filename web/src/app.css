@@ -228,6 +228,14 @@ header.appbar {
   gap: 0.5rem 0.75rem;
   padding: 0.75rem 1.5rem;
   border-bottom: 1px solid var(--border);
+  /* Pinned to the top on every page (desktop + mobile) so the nav and Lock are always reachable,
+     even deep in a long chat or list. Needs its own opaque background (the header had none) so
+     content scrolls cleanly UNDER it, and a z-index above page content but below modals (900/1000)
+     — its own overflow dropdown (z-index 50) is scoped within this header's stacking context. */
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  background: var(--bg);
 }
 
 header.appbar .logo {
