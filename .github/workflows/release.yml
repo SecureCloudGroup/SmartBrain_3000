@@ -66,6 +66,10 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # Bake the release version (the bare semver, e.g. 0.5.1) into the image so /api/health
+          # and the UI report the tag that was built, not a frozen constant.
+          build-args: |
+            SMARTBRAIN_VERSION=${{ steps.meta.outputs.version }}
           # Cache layers in the registry so a re-tag of the same source is near-instant.
           cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache
           cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache,mode=max

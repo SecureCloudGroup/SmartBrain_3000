@@ -14,6 +14,12 @@ RUN pip install --no-cache-dir -c requirements.lock . \
     && mkdir -p /app/data \
     && chown -R smartbrain:smartbrain /app
 
+# Stamp the release version into the image so /api/health and the UI report the real version no
+# matter how the container is run. Placed AFTER the pip install (the expensive layer) so bumping
+# the version only invalidates this cheap ENV and the trivial layers below it, never the deps.
+ARG SMARTBRAIN_VERSION=0.0.0-dev
+ENV SMARTBRAIN_VERSION=${SMARTBRAIN_VERSION}
+
 USER smartbrain
 
 EXPOSE 33000

@@ -45,6 +45,31 @@ def test_health_and_status_still_work(app_client: TestClient) -> None:
     assert "desktop_routing_id" not in s.json()
 
 
+def test_health_reports_a_non_empty_version(app_client: TestClient) -> None:
+    # The version is no longer a frozen constant, but health must always report a non-empty one.
+    from smartbrain_3000 import main
+
+    v = app_client.get("/api/health").json()["version"]
+    assert v and v == main.__version__
+
+
+def test_version_is_stamped_from_the_environment(monkeypatch) -> None:
+    # __version__ reads SMARTBRAIN_VERSION at import (the build-time image stamp), with a dev
+    # fallback so health/tests never see an empty string. Reload the package to re-run that line.
+    import importlib
+
+    import smartbrain_3000
+
+    try:
+        monkeypatch.setenv("SMARTBRAIN_VERSION", "9.9.9-test")
+        assert importlib.reload(smartbrain_3000).__version__ == "9.9.9-test"
+
+        monkeypatch.delenv("SMARTBRAIN_VERSION", raising=False)
+        assert importlib.reload(smartbrain_3000).__version__ == "0.0.0-dev"
+    finally:
+        importlib.reload(smartbrain_3000)  # restore the module to the ambient environment
+
+
 def test_desktop_routing_id_is_random_and_distinct(tmp_path, monkeypatch) -> None:
     # Arch H6: routing id is its own random value, recorded in boot, != install_id.
     import duckdb

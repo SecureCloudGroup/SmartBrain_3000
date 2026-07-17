@@ -5,6 +5,7 @@
   import { page } from "$app/state";
   import { account } from "$lib/account.svelte";
   import { api } from "$lib/api";
+  import { displayVersion } from "$lib/version";
   import { theme, initTheme, cycleTheme } from "$lib/theme.svelte";
   import { pending, refreshPending } from "$lib/pending.svelte";
   import { scheduleUpdates, refreshScheduleUpdates } from "$lib/scheduleUpdates.svelte";
@@ -18,6 +19,7 @@
 
   let { children } = $props();
   let locking = $state(false);
+  let appVersion = $state(""); // "vX.Y.Z" once /api/health answers; "" (hidden) until then / on failure
   let overflowOpen = $state(false); // mobile ≤640px: secondary controls collapse into ⋯ menu
   // Chat gets the full-width container; everything else stays in the narrow column.
   const wide = $derived(page.url.pathname.startsWith("/chat"));
@@ -63,6 +65,12 @@
     // account.load() makes its first request (off the LAN there's no direct backend).
     await initRemote();
     account.load();
+    // Show the running version under the logo (best-effort — render nothing if health is unreachable).
+    try {
+      appVersion = displayVersion((await api.health()).version);
+    } catch {
+      // leave the version hidden rather than surface a broken "v"
+    }
   });
 
   // Keep the Activity badge fresh: refresh the pending count on each route change
@@ -124,8 +132,13 @@
 {/if}
 
 <header class="appbar">
-  <img class="logo" src="/icons/icon-192.png" alt="SmartBrain" />
-  <span class="title">SmartBrain_3000</span>
+  <div class="brand">
+    <img class="logo" src="/icons/icon-192.png" alt="SmartBrain" />
+    <span class="titlewrap">
+      <span class="title">SmartBrain_3000</span>
+      {#if appVersion}<span class="appversion">{appVersion}</span>{/if}
+    </span>
+  </div>
   {#if account.status?.unlocked}
     <nav class="appnav">
       {#each nav as n (n.href)}
