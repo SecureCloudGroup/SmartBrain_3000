@@ -25,6 +25,10 @@ const (
 	// talks to the same port the browser will.
 	DefaultPort = 33000
 	composeName = "docker-compose.release.yml"
+	// The update check inspects the app container (fixed container_name in the compose) and compares
+	// its image to a freshly-pulled :latest. appImage MUST match the compose's smartbrain image ref.
+	appContainer = "smartbrain_3000"
+	appImage     = "ghcr.io/securecloudgroup/smartbrain_3000:latest"
 )
 
 // Stack points at one installed SmartBrain: the directory holding its compose file and ./data.
@@ -100,6 +104,69 @@ func (s Stack) Up(ctx context.Context) error {
 
 // Down stops and removes the containers. The user's ./data is left untouched.
 func (s Stack) Down(ctx context.Context) error { return s.compose(ctx, "down") }
+
+// --- update detection -------------------------------------------------------------------------
+//
+// The launcher decides "is a newer version available?" with Docker alone — it never phones home to a
+// registry or GitHub (this is a local-first app). Pull fetches whatever :latest currently points to;
+// UpdateReady compares the running container's image to that pulled :latest. Because the compose
+// tracks :latest, a user several versions behind jumps STRAIGHT to the newest in one pull+recreate,
+// and the app's forward-only migrations run in sequence on startup — so multi-version gaps need no
+// special handling here.
+
+// Pull downloads the latest images WITHOUT recreating the running container, so a background check
+// never disrupts a live session. Offline/rate-limit errors are the caller's to tolerate.
+func (s Stack) Pull(ctx context.Context) error { return s.compose(ctx, "pull") }
+
+// dockerOutput runs `docker <args>` and returns trimmed stdout (the compose() helper discards it).
+func (s Stack) dockerOutput(ctx context.Context, args ...string) (string, error) {
+	out, err := exec.CommandContext(ctx, "docker", args...).Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// updateReadyFromIDs reports whether the running image differs from the freshly-pulled latest. Pure,
+// so it's unit-testable; an empty id means "couldn't tell" and is never treated as an update.
+func updateReadyFromIDs(runningID, latestID string) bool {
+	return runningID != "" && latestID != "" && runningID != latestID
+}
+
+// versionFromEnv extracts SMARTBRAIN_VERSION from a docker image's Config.Env slice ("" if absent —
+// e.g. an image built before the version was stamped). Pure/unit-tested.
+func versionFromEnv(env []string) string {
+	const key = "SMARTBRAIN_VERSION="
+	for _, e := range env {
+		if strings.HasPrefix(e, key) {
+			return strings.TrimPrefix(e, key)
+		}
+	}
+	return ""
+}
+
+// UpdateReady reports whether a newer image has been pulled and is waiting to be applied, plus the
+// version it would move to (may be "" for a pre-stamping image). ANY docker error (app not running,
+// daemon down, offline) returns (false, "", err) — a failed check is never surfaced to the user, it
+// just means "no update known right now". Call Pull first to refresh :latest.
+func (s Stack) UpdateReady(ctx context.Context) (bool, string, error) {
+	running, err := s.dockerOutput(ctx, "inspect", "--format", "{{.Image}}", appContainer)
+	if err != nil {
+		return false, "", err
+	}
+	latest, err := s.dockerOutput(ctx, "image", "inspect", "--format", "{{.Id}}", appImage)
+	if err != nil {
+		return false, "", err
+	}
+	if !updateReadyFromIDs(running, latest) {
+		return false, "", nil
+	}
+	env, err := s.dockerOutput(ctx, "image", "inspect", "--format", "{{range .Config.Env}}{{println .}}{{end}}", appImage)
+	if err != nil {
+		return true, "", nil // the update IS ready; we just couldn't read its version
+	}
+	return true, versionFromEnv(strings.Split(env, "\n")), nil
+}
 
 // Healthy reports whether the app is answering. It is the launcher's single source of truth for
 // "is it up?" — the same check the browser would succeed or fail at.

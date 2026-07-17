@@ -66,6 +66,42 @@ func TestComposeArgsPull(t *testing.T) {
 	}
 }
 
+func TestVersionFromEnv(t *testing.T) {
+	cases := []struct {
+		name string
+		env  []string
+		want string
+	}{
+		{"present among others", []string{"PATH=/bin", "SMARTBRAIN_VERSION=0.5.2", "TZ=UTC"}, "0.5.2"},
+		{"absent (pre-stamp image)", []string{"PATH=/bin", "TZ=UTC"}, ""},
+		{"empty value", []string{"SMARTBRAIN_VERSION="}, ""},
+		{"nil env", nil, ""},
+	}
+	for _, c := range cases {
+		if got := versionFromEnv(c.env); got != c.want {
+			t.Errorf("%s: versionFromEnv = %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
+func TestUpdateReadyFromIDs(t *testing.T) {
+	cases := []struct {
+		running, latest string
+		want            bool
+	}{
+		{"sha256:aaa", "sha256:bbb", true},  // differ -> an update is staged
+		{"sha256:aaa", "sha256:aaa", false}, // identical -> already latest
+		{"", "sha256:bbb", false},           // unknown running -> can't tell, never claim an update
+		{"sha256:aaa", "", false},           // unknown latest -> ditto
+		{"", "", false},
+	}
+	for _, c := range cases {
+		if got := updateReadyFromIDs(c.running, c.latest); got != c.want {
+			t.Errorf("updateReadyFromIDs(%q,%q) = %v, want %v", c.running, c.latest, got, c.want)
+		}
+	}
+}
+
 func TestComposePathAndURL(t *testing.T) {
 	s := Stack{Dir: "/opt/data", Port: 33000}
 	if got := s.ComposePath(); got != "/opt/data/docker-compose.release.yml" {
