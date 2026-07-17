@@ -165,6 +165,23 @@ def fingerprint(pubkey_b64: str) -> str:
     return "SB-" + "-".join(fp[i:i + 4] for i in range(0, 16, 4))
 
 
+_MAX_NAME_ECHO = 120  # bound an echoed publisher-chosen name
+
+
+def sanitize_name(name: object, cap: int = _MAX_NAME_ECHO) -> str:
+    """Neutralize a publisher-chosen vault NAME before it is echoed into a trust marker or the feed.
+
+    A vault name is attacker-controlled text. Every non-printable character (newlines, control
+    chars) and the bracket/quote characters (``[]'``) is replaced with a space, so a crafted name
+    cannot break out of a bracketed sentinel or forge markdown structure (a fake block, a phishing
+    ``[link](url)``) in the trusted UI; the length cap bounds it. Used by both the import-provenance
+    line (C0) and the auto-update feed messages, so the exact same rule protects every surface."""
+    assert cap > 0, "cap must be positive"
+    return "".join(
+        c if c.isprintable() and c not in "[]'" else " " for c in str(name)
+    )[:cap]
+
+
 # --- object naming + nonces ---------------------------------------------------------------------
 
 def _obj_name(k_name: bytes, kind: bytes, uid: str, content_hash: str) -> str:

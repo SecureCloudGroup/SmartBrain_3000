@@ -678,8 +678,7 @@ def check_updates(request: Request, vault_id: str) -> dict:
     vaults, _vault, pin = _subscription(request, vault_id)
     _refuse_if_blocked(pin)
     chk = _checked(vaults, vault_id, pin)
-    vaults.update_source(vault_id, {
-        "last_checked": datetime.now(timezone.utc).date().isoformat()})
+    vaults.update_source(vault_id, {"last_checked": vault_sync._now_iso()})
     return {"behind": chk["behind"], "remote_seq": chk["remote_seq"],
             "seq": chk["pinned_seq"], "rollback": chk["rollback"]}
 
@@ -693,8 +692,7 @@ def update_vault_from_source(request: Request, vault_id: str) -> dict:
     chk = _checked(vaults, vault_id, pin)
     # last_checked means "we successfully talked to the host" — it advances on EVERY verified
     # answer (update, up-to-date, even a refused rollback), exactly as check-updates records it.
-    vaults.update_source(vault_id, {
-        "last_checked": datetime.now(timezone.utc).date().isoformat()})
+    vaults.update_source(vault_id, {"last_checked": vault_sync._now_iso()})
     if chk["rollback"]:
         raise HTTPException(status_code=409, detail=(
             f"the host is serving an OLDER version (v{chk['remote_seq']}) than you already have "
@@ -754,3 +752,37 @@ def trust_publisher(request: Request, vault_id: str, body: TrustIn) -> dict:
     )
     log.info("re-pinned vault %s to a new publisher key", pin["vault_id"])
     return {"ok": True, "pinned_fingerprint": fp}
+
+
+# --- scheduled auto-update (opt-in) ---------------------------------------------------------------
+
+class SubscriptionIn(BaseModel):
+    """Auto-update preferences for a URL subscription. Both optional: a PATCH sets only what it
+    names (read-modify-write through update_source), so toggling auto-update never disturbs the
+    interval and vice versa. ``check_interval_seconds`` is bounded on input and floored to 1h on
+    apply — a background timer must never be able to hammer a host."""
+
+    auto_update: bool | None = None
+    check_interval_seconds: int | None = Field(default=None, ge=0, le=31_536_000)
+
+
+@router.patch("/api/vaults/{vault_id}/subscription")
+def set_subscription(request: Request, vault_id: str, body: SubscriptionIn) -> dict:
+    """Set opt-in scheduled auto-update on a URL subscription (default OFF). Unlock-gated; 400 on a
+    vault that isn't a URL subscription. The interval is clamped to a 1h floor.
+
+    Auto-update runs only on the Desktop, only while unlocked, and NEVER applies a publisher key
+    change on its own (the background pass blocks and reports it instead — see vault_sync.tick).
+    """
+    vaults, _vault, _pin = _subscription(request, vault_id)  # 400 unless a URL subscription
+    changes: dict = {}
+    if body.auto_update is not None:
+        changes["auto_update"] = bool(body.auto_update)
+    if body.check_interval_seconds is not None:
+        changes["check_interval_seconds"] = max(
+            int(body.check_interval_seconds), vault_sync._MIN_CHECK_INTERVAL_SECONDS)
+    if changes:
+        vaults.update_source(vault_id, changes)
+    updated = _require(vaults, vault_id)
+    _attach_pinned_fp([updated])
+    return updated

@@ -31,10 +31,11 @@ import base64
 import logging
 import time
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
-from . import kb as kbmod
+from . import gateway, kb as kbmod
 from . import netguard, vault_format
-from .vaults import IMPORT, OWNER
+from .vaults import IMPORT, OWNER, VaultStore
 
 log = logging.getLogger(__name__)
 
@@ -46,6 +47,32 @@ _TREE_SUFFIX = "/manifest.json"
 # between fetches, so the update is refused BEFORE the write transaction and nothing lands.
 _MAX_UPDATE_SECONDS = 120
 _monotonic = time.monotonic  # module attribute so a test can drive the deadline deterministically
+
+
+def _now() -> datetime:
+    """The wall clock as an aware UTC datetime — a module seam so a test can inject a fixed time
+    (the auto-update interval and per-vault backoff are measured against it)."""
+    return datetime.now(timezone.utc)
+
+
+def _now_iso() -> str:
+    """``last_checked`` as a full ISO-8601 UTC timestamp. Stage D wrote a bare DATE; Stage E's 1h
+    interval floor and per-vault backoff need the TIME too, so every writer now records the instant.
+    A bare date read back (a value stored before this change) is tolerated by _parse_checked."""
+    return _now().isoformat()
+
+
+def _parse_checked(value) -> datetime | None:
+    """Parse a stored ``last_checked`` into an aware UTC datetime, or None if absent/unparseable.
+    Accepts both the full timestamp Stage E writes and a bare date an older check may have left
+    (read as UTC midnight) — so a mixed history never drives a tighter loop than the floor allows."""
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
 
 
 class SyncError(Exception):
@@ -439,7 +466,7 @@ def _write(vaults, knowledge, local_id: str, manifest: dict, member_map: dict,
         # all — a pin at seq 5 over seq-4 documents would refuse the very update that fixes it.
         vaults.update_source(local_id, {
             "seq": manifest["seq"],
-            "last_checked": datetime.now(timezone.utc).date().isoformat(),
+            "last_checked": _now_iso(),
         })
         conn.execute("COMMIT;")
     except Exception:
@@ -455,3 +482,231 @@ def _write(vaults, knowledge, local_id: str, manifest: dict, member_map: dict,
         knowledge.reset_index()
     return {"added": added, "updated": updated, "deleted": deleted,
             "kept_yours": kept_new + kept_changed + kept_gone}
+
+
+# --- Stage E: opt-in scheduled auto-update --------------------------------------------------------
+#
+# The product promise is "subscribe once, stay current" — but a background timer that ingests remote
+# content is exactly where restraint is load-bearing. So this pass is thin over Stage D's check/apply
+# and does no update logic of its own: opt-in only (auto_update defaults OFF), unlocked only (mirrors
+# the scheduler), at most _MAX_SUBSCRIPTION_CHECKS_PER_TICK per tick, and it NEVER applies across a
+# publisher key change unattended — that stays the one human interruption D defined. Every attempt
+# advances last_checked so a dead host is backed off, and every per-vault failure is bounded and
+# swallowed (host logged, never the path) so one bad host can neither wedge the tick nor throw out
+# of it. Results (and a key-change "needs your OK") ride the scheduled-updates feed via ScheduleStore.
+
+_DEFAULT_CHECK_INTERVAL_SECONDS = 86_400  # daily
+_MIN_CHECK_INTERVAL_SECONDS = 3_600       # 1h floor: a background timer must never hammer a host
+_MAX_SUBSCRIPTION_CHECKS_PER_TICK = 2     # verifiable per-tick bound (P10 #2), like _MAX_PER_TICK
+
+
+def _interval_seconds(pin: dict) -> int:
+    """The subscription's check interval, defaulted and floored — the same 1h floor the route
+    clamps to, applied again here so a body written before the floor existed can't drive a faster
+    loop than the guarantee allows."""
+    raw = pin.get("check_interval_seconds")
+    try:
+        seconds = int(raw)
+    except (TypeError, ValueError):
+        seconds = _DEFAULT_CHECK_INTERVAL_SECONDS
+    return max(seconds, _MIN_CHECK_INTERVAL_SECONDS)
+
+
+def _is_due(pin: dict, now: datetime) -> bool:
+    """True when an auto-update subscription's interval has elapsed. A never-checked subscription
+    (last_checked None) is due at once: opting in means "check on the next tick"."""
+    last = _parse_checked(pin.get("last_checked"))
+    if last is None:
+        return True
+    return (now - last).total_seconds() >= _interval_seconds(pin)
+
+
+def _host_of(vault: dict) -> str:
+    """The subscription's host — the only piece of a URL that may ever reach a log or the card."""
+    return urlparse((vault.get("source") or {}).get("url") or "").hostname or ""
+
+
+def _due_subscriptions(vaults: VaultStore, now: datetime) -> list[dict]:
+    """The auto-update subscriptions whose interval has elapsed, bounded per tick.
+
+    A bounded decrypt-scan (list_vaults is capped at vaults._MAX_VAULTS). Blocked subscriptions are
+    EXCLUDED, not merely skipped: a pending key change is the user's to resolve, so it must never
+    consume a per-tick slot or re-fetch — that is what makes "next ticks skip a blocked vault" hold
+    with no retry loop. Capped at _MAX_SUBSCRIPTION_CHECKS_PER_TICK.
+    """
+    due: list[dict] = []
+    for vault in vaults.list_vaults():  # bounded by vaults._MAX_VAULTS
+        pin = vault.get("source") or {}
+        if not pin.get("url") or not pin.get("publisher_pubkey") or not pin.get("vault_id"):
+            continue  # not a URL subscription — nothing to check
+        if not pin.get("auto_update") or pin.get("blocked"):
+            continue  # opt-in only, and a pending key change is the human's to resolve
+        if _is_due(pin, now):
+            due.append(vault)
+        if len(due) >= _MAX_SUBSCRIPTION_CHECKS_PER_TICK:
+            break
+    return due
+
+
+def _host_error(host: str, exc: Exception) -> str:
+    """A host-only staleness/failure note for the subscription card — never the URL path, and never
+    the host's own words (which could echo attacker-chosen text into the UI)."""
+    if isinstance(exc, netguard.FetchError):
+        return f"couldn't reach {host}"
+    return f"{host} served a vault that failed verification"
+
+
+def _change_breakdown(result: dict) -> str:
+    parts = []
+    if result.get("added"):
+        parts.append(f"{result['added']} added")
+    if result.get("updated"):
+        parts.append(f"{result['updated']} updated")
+    if result.get("deleted"):
+        parts.append(f"{result['deleted']} removed")
+    if result.get("kept_yours"):
+        parts.append(f"{result['kept_yours']} kept as yours")
+    return ", ".join(parts)
+
+
+def _update_feed_message(name: str, seq: int, result: dict) -> str:
+    # The vault NAME is publisher-chosen — sanitize it the SAME way C0 sanitizes the provenance line
+    # (strip non-printables + brackets/quote, cap length) so a crafted name with newlines/brackets
+    # can't forge markdown structure or a phishing link in the trusted, markdown-rendered feed.
+    name = vault_format.sanitize_name(name)
+    changed = (int(result.get("added", 0)) + int(result.get("updated", 0))
+               + int(result.get("deleted", 0)))
+    plural = "" if changed == 1 else "s"
+    base = f"Vault “{name}” updated to v{seq} — {changed} document{plural} changed"
+    detail = _change_breakdown(result)
+    return f"{base} ({detail})" if detail else base
+
+
+def _key_change_feed_message(name: str, pinned_pubkey: str, offered_pubkey: str) -> str:
+    name = vault_format.sanitize_name(name)  # publisher-chosen — neutralize as C0 does (see above)
+    return (f"Vault “{name}” has a NEW publisher key — auto-update is paused until you "
+            f"confirm it. Pinned {vault_format.fingerprint(pinned_pubkey)}, offered "
+            f"{vault_format.fingerprint(offered_pubkey)}. Open Knowledge to review and Trust new key.")
+
+
+def _record_feed(schedules, status: str, message: str) -> None:
+    """Post a vault-update result into the scheduled-updates feed (plan decision #2's carrier row).
+    Best-effort: a feed-write failure must never abort or unwind an update that already landed."""
+    try:
+        schedules.record_vault_run(status, message)
+    except Exception as exc:  # the feed is cosmetic next to the applied update
+        log.warning("vault auto-update: feed record failed: %s", exc)
+
+
+def _auto_update_one(vaults, knowledge, schedules, vault: dict, embed_model: str) -> None:
+    """Check ONE subscription and apply a CLEAN update; record the outcome in the feed.
+
+    A publisher key change is never applied unattended: it blocks the subscription (the same
+    ``blocked`` marker the manual route sets) and posts a "needs your OK" feed row — the one
+    interruption the design allows. Any network/verification failure (or a stale host serving an
+    older manifest) advances last_checked (per-vault backoff) and records a host-only last_error so
+    the card can show staleness; it is never re-raised into the tick.
+    """
+    pin = vault["source"]
+    vault_id, name = vault["id"], vault["name"]
+    host = urlparse(pin["url"]).hostname or ""
+    now_iso = _now_iso()
+    try:
+        chk = check(pin)
+    except KeyChanged as exc:
+        # The one thing a timer must never do on its own. Block + surface; do NOT retry (the block
+        # excludes this vault from every future due set until the user resolves it).
+        vaults.update_source(vault_id, {
+            "blocked": {"offered_pubkey": exc.offered_pubkey},
+            "last_checked": now_iso, "last_error": None})
+        _record_feed(schedules, "blocked",
+                     _key_change_feed_message(name, pin["publisher_pubkey"], exc.offered_pubkey))
+        log.info("vault auto-update: publisher key changed for host %s — blocked, not applied",
+                 host)
+        return
+    except (netguard.FetchError, vault_format.VaultError, SyncError) as exc:
+        vaults.update_source(vault_id, {"last_checked": now_iso, "last_error": _host_error(host, exc)})
+        log.warning("vault auto-update: check failed for host %s (%s)", host, type(exc).__name__)
+        return
+    if chk["rollback"]:
+        # A validly-signed OLDER manifest: a frozen/rolled-back host. Never applied — surfaced as
+        # staleness on the card, not spammed into the feed.
+        vaults.update_source(vault_id, {
+            "last_checked": now_iso,
+            "last_error": f"{host} is serving an older version than you have"})
+        return
+    if not chk["behind"]:
+        vaults.update_source(vault_id, {"last_checked": now_iso, "last_error": None})
+        return
+    try:
+        result = apply(vaults, knowledge, vault_id, pin, chk, embed_model)
+    except Exception as exc:  # a piece failed AFTER verify: _write rolled back whole; back off + log
+        vaults.update_source(vault_id, {"last_checked": now_iso, "last_error": _host_error(host, exc)})
+        log.warning("vault auto-update: apply failed for host %s (%s)", host, type(exc).__name__)
+        return
+    # apply re-pinned seq + last_checked inside its transaction; just clear any stale error.
+    vaults.update_source(vault_id, {"last_error": None})
+    _record_feed(schedules, "complete", _update_feed_message(name, chk["remote_seq"], result))
+    log.info("vault auto-update: applied v%d for host %s (%s)", chk["remote_seq"], host, result)
+
+
+def _close_cursor(cursor) -> None:
+    """Best-effort close of the tick's per-thread cursor; a double-close must never raise."""
+    if cursor is None:
+        return
+    try:
+        cursor.close()
+    except Exception:  # already closed / DB torn down — nothing to release
+        pass
+
+
+def tick(app, pass_budget_seconds: float | None = None) -> int:
+    """Stage E: check DUE auto-update subscriptions and apply CLEAN updates. Returns how many were
+    checked. Called from scheduler.tick on the background thread, alongside the reindex pass.
+
+    Mirrors the scheduler's own gating: snapshot master_key + session and bail when either is
+    missing (locked — nothing can decrypt or act). Builds its OWN per-thread cursor (DuckDB cursors
+    are not shared across threads) and its stores over it, so apply's transaction is isolated to
+    this pass. Each subscription runs behind its own bounded try/except: a dead or hostile host is
+    logged (host only) and advances that vault's backoff — it can never throw out of the tick.
+
+    ``pass_budget_seconds`` (set by the scheduler) is an overall wall-clock budget on top of
+    netguard's per-fetch deadline: checked BETWEEN vaults, it abandons the remaining vaults for this
+    tick once the pass runs long — their last_checked is untouched (never processed), so they stay
+    due and retry next tick. None (a direct/test call) means no pass budget.
+    """
+    assert app is not None, "app required"
+    key = getattr(app.state, "master_key", None)
+    session = getattr(app.state, "session_id", None)
+    if key is None or session is None:
+        return 0  # locked — nothing can decrypt or act
+    cursor = app.state.db.cursor()
+    assert cursor is not None, "per-thread cursor required"
+    try:
+        vaults = VaultStore(cursor, key)
+        knowledge = kbmod.KnowledgeBase(cursor, key)
+        from .scheduler import ScheduleStore  # lazy: scheduler imports us — break the cycle here
+        schedules = ScheduleStore(cursor, key)
+        try:
+            embed_model = gateway.embed_model(cursor)
+        except Exception:  # a config read failed — apply still works, it just won't adopt vectors
+            embed_model = ""
+        due = _due_subscriptions(vaults, _now())
+        assert len(due) <= _MAX_SUBSCRIPTION_CHECKS_PER_TICK, "due set must respect the per-tick bound"
+        checked = 0
+        pass_start = _monotonic() if pass_budget_seconds is not None else 0.0
+        for vault in due:  # bounded by _MAX_SUBSCRIPTION_CHECKS_PER_TICK
+            # Between vaults: abandon the rest of the pass if the overall budget is spent — the
+            # unprocessed vaults keep their last_checked (never touched here) and retry next tick.
+            if pass_budget_seconds is not None and _monotonic() - pass_start > pass_budget_seconds:
+                log.warning("vault auto-update: pass budget exceeded — %d vault(s) deferred to next tick",
+                            len(due) - checked)
+                break
+            try:
+                _auto_update_one(vaults, knowledge, schedules, vault, embed_model)
+            except Exception:  # last-resort net: never let one host wedge the tick (host only)
+                log.warning("vault auto-update: unhandled error for host %s", _host_of(vault))
+            checked += 1
+        return checked
+    finally:
+        _close_cursor(cursor)  # release the pass's per-thread cursor

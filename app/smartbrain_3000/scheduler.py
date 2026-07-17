@@ -24,7 +24,7 @@ from concurrent.futures import ThreadPoolExecutor
 import duckdb
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-from . import agent, consent, gateway, ingest, tools, usage
+from . import agent, consent, gateway, ingest, tools, usage, vault_sync
 from .approvals import ApprovalStore
 from .audit import AuditLog
 from .kb import KnowledgeBase
@@ -38,6 +38,18 @@ log = logging.getLogger(__name__)
 _NONCE_BYTES = 12
 _LIST_LIMIT = 200  # max schedules listed (verifiable bound)
 _MAX_PER_TICK = 10  # max schedules fired per tick (verifiable bound)
+# Stage E carrier row (plan decision #2): vault auto-update results have no schedule, but the feed's
+# recent_runs / unseen_count INNER-JOIN schedule_runs to schedules (so a cascade-deleted schedule's
+# orphans can't inflate the badge). One reserved, DISABLED schedule keeps that JOIN valid without a
+# schema change — its runs ride the same feed + badge as any scheduled run. It never fires (enabled
+# false) and is hidden from the user's schedule list/get, so it can't be run, edited, or deleted.
+_VAULT_FEED_ID = "vault-updates"
+_VAULT_FEED_TITLE = "Vault updates"
+# Belt-and-suspenders over netguard's per-fetch deadline: even several slow-but-under-deadline hosts
+# must not consume the whole tick and starve due prompts. This overall wall-clock budget on the
+# vault pass is checked BETWEEN the (≤2) vaults; remaining vaults are abandoned for this tick (their
+# last_checked is untouched, so they retry next tick).
+_MAX_VAULT_PASS_SECONDS = 90
 # The background indexer works to a TIME budget, not a document count: 5-per-tick meant a 100-file
 # drop took ~10 minutes to index. 20s of a 30s tick drains a backlog steadily while still leaving
 # the single-threaded local model free most of the time (and it yields entirely to a live chat).
@@ -117,18 +129,22 @@ class ScheduleStore:
         return sid
 
     def list_schedules(self) -> list[dict]:
-        """Return all schedules (decrypted), soonest first."""
+        """Return all schedules (decrypted), soonest first. The reserved vault-updates carrier is
+        never a user schedule, so it is filtered out of the list the Schedules page shows."""
         rows = self._conn.execute(
             "SELECT id, nonce, ciphertext, enabled, interval_minutes, next_run, last_run "
-            "FROM schedules ORDER BY next_run ASC LIMIT ?;",
-            [_LIST_LIMIT],
+            "FROM schedules WHERE id != ? ORDER BY next_run ASC LIMIT ?;",
+            [_VAULT_FEED_ID, _LIST_LIMIT],
         ).fetchall()
         assert isinstance(rows, list), "fetchall must return a list"
         return [self._row(r) for r in rows]  # bounded by _LIST_LIMIT
 
     def get_schedule(self, sid: str) -> dict | None:
-        """Return one schedule, or None if absent."""
+        """Return one schedule, or None if absent. The reserved vault-updates carrier reads as
+        absent so no route can run, edit, or delete it as if it were a user schedule."""
         assert sid, "schedule id required"
+        if sid == _VAULT_FEED_ID:
+            return None
         row = self._conn.execute(
             "SELECT id, nonce, ciphertext, enabled, interval_minutes, next_run, last_run "
             "FROM schedules WHERE id = ?;",
@@ -174,8 +190,14 @@ class ScheduleStore:
         schedule_runs has no DB-level FK to schedules, so cascade in code (children
         first) — matching kb.delete / history.delete_conversation — otherwise orphaned
         encrypted run rows accumulate forever and ride into every backup.
+
+        The reserved vault-updates carrier reads as absent everywhere else (get/list hide it), so a
+        delete by that id is a no-op here too — it can never be deleted out from under the feed,
+        matching the "can't be deleted" guarantee.
         """
         assert sid, "schedule id required"
+        if sid == _VAULT_FEED_ID:
+            return  # the reserved carrier is not a user schedule — never deletable
         self._conn.execute("DELETE FROM schedule_runs WHERE schedule_id = ?;", [sid])
         self._conn.execute("DELETE FROM schedules WHERE id = ?;", [sid])
 
@@ -205,6 +227,34 @@ class ScheduleStore:
             [rid, sid, status, nonce, ciphertext],
         )
         return rid
+
+    def record_vault_run(self, status: str, message: str) -> str:
+        """Record a Stage E vault auto-update outcome into the scheduled-updates feed (decision #2).
+
+        The result rides the reserved carrier schedule, so recent_runs / unseen_count surface it and
+        light the badge exactly like a scheduled-prompt run — no schema change, and the feed's
+        orphan-proofing INNER JOIN stays valid.
+        """
+        assert status, "run status required"
+        self._ensure_vault_carrier()
+        return self.record_run(_VAULT_FEED_ID, status, message=message)
+
+    def _ensure_vault_carrier(self) -> None:
+        """Lazily create the reserved carrier schedule once (idempotent). Disabled so due_schedules
+        never selects it and no agent turn can ever fire from it; next_run is a required column, so
+        ``now()`` is stored purely to satisfy NOT NULL (a disabled row is never due regardless)."""
+        row = self._conn.execute(
+            "SELECT 1 FROM schedules WHERE id = ?;", [_VAULT_FEED_ID]
+        ).fetchone()
+        if row is not None:
+            return
+        nonce, ciphertext = self._seal(
+            _VAULT_FEED_ID, {"title": _VAULT_FEED_TITLE, "prompt": "(vault auto-update carrier)"})
+        self._conn.execute(
+            "INSERT INTO schedules (id, nonce, ciphertext, enabled, interval_minutes, next_run) "
+            "VALUES (?, ?, ?, false, 0, now());",
+            [_VAULT_FEED_ID, nonce, ciphertext],
+        )
 
     def list_runs(self, sid: str, limit: int = 20) -> list[dict]:
         """Return recent runs for a schedule (decrypted message/error), newest first."""
@@ -445,6 +495,19 @@ def _auto_reindex(cursor, key: bytes) -> None:
         _breaker_record(success=False)
 
 
+def _auto_update_vaults(app) -> None:
+    """Stage E hook: run the vault auto-update pass, isolated so a failure there can NEVER stop the
+    scheduler from firing due schedules. It builds its own per-thread cursor and swallows every
+    per-vault error itself (a dead/hostile host advances that vault's backoff and is logged, host
+    only); this guard is the belt-and-suspenders for anything it doesn't. It does not touch the
+    model server, so it runs regardless of the gateway breaker — a subscription stays current even
+    when the local model is down."""
+    try:
+        vault_sync.tick(app, pass_budget_seconds=_MAX_VAULT_PASS_SECONDS)
+    except Exception as exc:  # must never kill the schedule tick
+        log.warning("vault auto-update pass failed: %s", exc)
+
+
 def eager_reindex(cursor, key: bytes) -> None:
     """One-shot full backfill when the embeddings table is empty but documents exist.
 
@@ -523,6 +586,7 @@ def tick(app) -> int:
     try:
         eager_reindex(cursor, key)  # one-shot post-upgrade catch-up (empty embeddings + docs)
         _auto_reindex(cursor, key)  # keep semantic search current without a manual Reindex
+        _auto_update_vaults(app)    # Stage E: apply due subscription updates (model-independent)
         if _breaker_open():  # B11: gateway is known-bad — don't pile turns onto a dead model
             return 0
         store = ScheduleStore(cursor, key)

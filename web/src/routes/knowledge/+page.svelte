@@ -701,6 +701,35 @@
       trustBusy = false;
     }
   }
+
+  // --- opt-in scheduled auto-update (Stage E) ---------------------------------------------------
+  // Off by default. When on, a background pass on the Desktop applies CLEAN updates while unlocked
+  // and reports what it did in the Chat feed. It never applies a publisher key change on its own —
+  // that still blocks and waits for you. Errors are inline on the card (never page-bottom).
+  let subBusy = $state<Record<string, boolean>>({});
+  let subErr = $state<Record<string, string>>({});
+
+  async function saveSubscription(
+    v: Vault,
+    opts: { auto_update?: boolean; check_interval_seconds?: number },
+  ) {
+    subBusy = { ...subBusy, [v.id]: true };
+    subErr = { ...subErr, [v.id]: "" };
+    try {
+      await api.setSubscription(v.id, opts);
+      await loadVaults();
+    } catch (err) {
+      subErr = { ...subErr, [v.id]: describeError(err) };
+    } finally {
+      subBusy = { ...subBusy, [v.id]: false };
+    }
+  }
+
+  // "Last checked" text for the card. last_checked is a UTC timestamp (null = never yet).
+  function lastCheckedText(v: Vault): string {
+    const when = v.source?.last_checked ? new Date(v.source.last_checked).toLocaleString() : "never";
+    return `Last checked ${when}`;
+  }
 </script>
 
 {#if account.status?.unlocked}
@@ -1029,6 +1058,40 @@
         </div>
         {#if v.description}<p class="muted vdesc">{v.description}</p>{/if}
 
+        {#if v.kind === "imported" && v.source?.url && !v.source?.blocked}
+          <!-- Opt-in scheduled auto-update (Stage E). Off by default; when on, the Desktop applies
+               clean updates while unlocked and posts results into the Chat feed. A key change is
+               NEVER applied on a timer — it blocks and waits for you. -->
+          <div class="autoupd">
+            <label class="autoupd-toggle">
+              <input
+                type="checkbox"
+                checked={v.source?.auto_update ?? false}
+                disabled={subBusy[v.id]}
+                onchange={(e) => saveSubscription(v, { auto_update: e.currentTarget.checked })}
+              />
+              Auto-update
+            </label>
+            {#if v.source?.auto_update}
+              <select
+                class="autoupd-interval"
+                value={String(v.source?.check_interval_seconds ?? 86400)}
+                disabled={subBusy[v.id]}
+                onchange={(e) => saveSubscription(v, { check_interval_seconds: Number(e.currentTarget.value) })}
+                aria-label="How often to check for updates"
+              >
+                <option value="86400">Daily</option>
+                <option value="604800">Weekly</option>
+              </select>
+            {/if}
+            <span class="muted autoupd-when">{lastCheckedText(v)}</span>
+            {#if v.source?.last_error}
+              <span class="muted autoupd-stale" title="The last automatic check didn't get a fresh vault">· {v.source.last_error}</span>
+            {/if}
+            {#if subErr[v.id]}<span class="error autoupd-err">{subErr[v.id]}</span>{/if}
+          </div>
+        {/if}
+
         {#if v.source?.blocked}
           <!-- The one interruption the design allows itself: a key change must never silently
                succeed, so updates stop and BOTH identities sit side by side until the human
@@ -1300,6 +1363,32 @@
     gap: 0.5rem;
     align-items: center;
     flex-wrap: wrap;
+  }
+
+  /* Opt-in auto-update controls — a quiet row under the subscription, same compact scale as .upd. */
+  .autoupd {
+    margin: 0.4rem 0 0;
+    font-size: 0.85rem;
+    display: flex;
+    gap: 0.6rem;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .autoupd-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+  }
+  .autoupd-interval {
+    font-size: 0.8rem;
+    padding: 0.1rem 0.3rem;
+  }
+  .autoupd-when,
+  .autoupd-stale {
+    font-size: 0.8rem;
+  }
+  .autoupd-err {
+    font-size: 0.8rem;
   }
 
   /* The expanded "what's inside" list — compact, one document per row. */
