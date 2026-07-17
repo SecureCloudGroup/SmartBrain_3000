@@ -299,6 +299,12 @@ export interface Vault {
     mode?: string;
     added_at?: string;
     last_checked?: string | null;
+    // Opt-in scheduled auto-update (Stage E). Default OFF: the background timer only touches a
+    // subscription once the user turns this on. Interval is floored to 1h server-side. `last_error`
+    // is a HOST-ONLY staleness/failure note (never a URL path) so the card can flag a dead host.
+    auto_update?: boolean;
+    check_interval_seconds?: number;
+    last_error?: string | null;
     // Set when an update check met a DIFFERENT publisher key. While present, check/update refuse
     // (409) and the card shows the key-change warning; trust-publisher must echo this exact key.
     blocked?: { offered_pubkey: string } | null;
@@ -747,6 +753,14 @@ export const api = {
   // theirs (reported in kept_yours), and the publisher's signature is checked against the PIN.
   updateVault: (id: string) =>
     req<VaultUpdateResult>(`/api/vaults/${encodeURIComponent(id)}/update`, { method: "POST" }),
+  // Opt-in scheduled auto-update for a subscription (Stage E). Off by default; the interval is
+  // floored to 1h server-side. Auto-update runs only on the Desktop, only while unlocked, and never
+  // applies a publisher key change on its own — it blocks and reports that in the feed instead.
+  setSubscription: (id: string, opts: { auto_update?: boolean; check_interval_seconds?: number }) =>
+    req<Vault>(`/api/vaults/${encodeURIComponent(id)}/subscription`, {
+      method: "PATCH",
+      body: JSON.stringify(opts),
+    }),
   // Re-pin a subscription to a NEW publisher key the user confirmed out-of-band. The most
   // consequential act in the vault system, so it gates like export: Desktop-local (x-sb-local)
   // + passphrase re-entry — and it names the exact key it blesses, so a host that rotated again

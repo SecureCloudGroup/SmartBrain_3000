@@ -121,8 +121,13 @@ and the unit you share. Vaults live on the Knowledge page.
   publisher's **key ever changes**, updates stop with a warning showing both fingerprints — old
   and new — until you confirm the new key with the publisher out-of-band and choose **Trust new
   key** (Desktop + passphrase). A newer `.sbvault` *file* of a subscribed vault also applies as an
-  update — importing it never creates a duplicate. Checking is manual in this release; scheduled
-  auto-update comes next.
+  update — importing it never creates a duplicate.
+- **Scheduled auto-update (opt-in).** Turn on **Auto-update** on a subscribed vault card and pick a
+  cadence (daily or weekly) to have SmartBrain check and apply clean updates for you. It is **off by
+  default**, runs **only on the Desktop while unlocked**, and **never applies a publisher key change
+  on its own** — a changed key still blocks and waits for you to confirm it. Each run reports what it
+  did **in the chat feed** ("updated to v3 — 2 documents changed", or a "new publisher key" notice),
+  and the card shows when it was last checked so a dead or stale host is easy to spot.
 
 Creating, adding, and searching a vault work everywhere, including a paired phone. **Exporting and
 importing a vault are done on the Desktop** — sharing a vault's contents, or bringing new ones in, is

@@ -551,3 +551,34 @@ def test_schedule_store_exposes_conn_property() -> None:
 
     src = inspect.getsource(scheduler)
     assert "store._conn" not in src, "scheduler.py must not reach into ScheduleStore._conn"
+
+
+# --- Stage E: the vault-updates carrier row (plan decision #2) -------------------------------------
+
+
+def test_record_vault_run_surfaces_in_the_feed_and_badge() -> None:
+    # Vault auto-update results have no schedule, but the reserved carrier keeps the feed's INNER
+    # JOIN valid so they ride recent_runs + the unseen badge exactly like a scheduled-prompt run.
+    store, _, _ = _store()
+    store.record_vault_run("complete", "Vault X updated to v3 — 1 document changed")
+    runs = [r for r in store.recent_runs() if r["schedule_title"] == "Vault updates"]
+    assert len(runs) == 1 and runs[0]["message"].startswith("Vault X updated")
+    assert runs[0]["status"] == "complete" and runs[0]["seen"] is False
+    assert store.unseen_count() == 1
+    store.record_vault_run("blocked", "another one")  # carrier is created once, then reused
+    assert store.unseen_count() == 2
+
+
+def test_vault_carrier_is_hidden_from_the_schedule_list_and_get() -> None:
+    # The carrier is not a user schedule: it must never appear in the Schedules list, and get_schedule
+    # reads it as absent so no route can run, edit, or delete it.
+    store, conn, _ = _store()
+    store.add_schedule("real", "p", interval_minutes=0, start_in_minutes=0, model="m")
+    store.record_vault_run("complete", "x")  # lazily creates the carrier row
+    assert conn.execute("SELECT COUNT(*) FROM schedules WHERE id = ?;",
+                        [scheduler._VAULT_FEED_ID]).fetchone()[0] == 1, "the carrier row exists"
+    titles = [s["title"] for s in store.list_schedules()]
+    assert titles == ["real"], "the carrier is filtered out of the user's schedule list"
+    assert store.get_schedule(scheduler._VAULT_FEED_ID) is None
+    assert store.due_schedules() == [] or all(
+        s["id"] != scheduler._VAULT_FEED_ID for s in store.due_schedules()), "carrier never fires"
