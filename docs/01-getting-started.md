@@ -105,16 +105,19 @@ A quick path from zero to seeing what SmartBrain does:
 
 ## Updating
 
-How you update depends on how you installed:
+**The desktop app updates itself — no commands.** The menu-bar launcher quietly checks for a newer
+version in the background; when one is ready it shows **Install update now** and **Install on next
+start** in the menu. Click **Install update now** to apply it immediately, or just keep working and
+it installs the next time you start SmartBrain. Either way it always jumps straight to the newest
+version, even if you're several behind. The version you're on is shown under the logo, top-left.
 
-- **Homebrew (macOS):** `brew update && brew upgrade --cask smartbrain`, then reopen the app.
-- **Scoop (Windows):** `scoop update smartbrain`, then reopen the app.
-- **Release compose / desktop app:** it pulls the latest image on start, so updating is just a
-  **restart** — use the launcher's **Restart**, or run `docker compose -f
-  docker-compose.release.yml up -d` again.
-- **From source:** `python3 installer/install.py update` — it **backs up your encrypted data
-  first**, pulls the latest code, rebuilds the image, restarts the stack, and verifies it's
-  healthy. It prompts before making changes and runs on the host, never inside the container.
+The menu-bar app itself (the small launcher, not the app) updates through however you installed it —
+**Homebrew:** `brew update && brew upgrade --cask smartbrain`; **Scoop:** `scoop update smartbrain` —
+but that's rarely needed, since the app that matters updates on its own.
+
+**From source:** `python3 installer/install.py update` — it **backs up your encrypted data first**,
+pulls the latest code, rebuilds the image, restarts the stack, and verifies it's healthy. It prompts
+before making changes and runs on the host, never inside the container.
 
 Your data is kept in Docker volumes on your machine and is left untouched by an update. (More on
 backups: [Backup &amp; recovery](05-backup-recovery.md).)

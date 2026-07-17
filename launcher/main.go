@@ -35,15 +35,21 @@ var iconWin []byte
 const dockerGetURL = "https://docs.docker.com/get-docker/"
 
 var (
-	sb         stack.Stack
-	mu         sync.Mutex // serialize compose ops so two quick menu clicks can't race
-	mStatus    *systray.MenuItem
-	mGetDocker *systray.MenuItem
+	sb           stack.Stack
+	mu           sync.Mutex // serialize compose ops so two quick menu clicks can't race
+	mStatus      *systray.MenuItem
+	mGetDocker   *systray.MenuItem
+	mUpdateNow   *systray.MenuItem // hidden until a newer image is staged
+	mUpdateLater *systray.MenuItem
 	// Auto-open the Docker download page ONCE when Docker is missing — a helping hand, not a popup
 	// storm on every Restart while the user is mid-install.
 	openedDockerPage bool
 	// One "downloading…" desktop notification per launch, not one per Restart click.
 	notifiedStart bool
+	// One gentle "update available" notification per NEW version, never re-nagging the same one. The
+	// sentinel is a value no real version equals, so the first surfacing (even of a blank version)
+	// still notifies once.
+	lastNotifiedVersion = "\x00"
 )
 
 func main() {
@@ -69,6 +75,10 @@ func onReady() {
 	systray.AddSeparator()
 	mStop := systray.AddMenuItem("Stop", "Stop SmartBrain (your data is kept)")
 	mRestart := systray.AddMenuItem("Restart", "Restart SmartBrain")
+	mUpdateNow = systray.AddMenuItem("Install update now", "Download and apply the latest update now")
+	mUpdateNow.Hide()
+	mUpdateLater = systray.AddMenuItem("Install on next start", "Apply the update the next time you start SmartBrain")
+	mUpdateLater.Hide()
 	systray.AddSeparator()
 	mQuit := systray.AddMenuItem("Quit launcher", "Quit this menu — SmartBrain keeps running")
 
@@ -82,13 +92,22 @@ func onReady() {
 		return
 	}
 
-	go start() // bring it up on launch
+	go start()         // bring it up on launch
+	go updateChecker() // then quietly watch for a newer image
 
 	go func() {
 		for {
 			select {
 			case <-mOpen.ClickedCh:
 				go openOrStart()
+			case <-mUpdateNow.ClickedCh:
+				go installUpdate()
+			case <-mUpdateLater.ClickedCh:
+				// The new image is already pulled; Up() applies it on the next start (see #87). So
+				// "install on next start" is just: dismiss the prompt and let startup do it.
+				mUpdateNow.Hide()
+				mUpdateLater.Hide()
+				setStatus("Update ready — installs next time you start")
 			case <-mGetDocker.ClickedCh:
 				go func() {
 					if err := stack.OpenBrowser(dockerGetURL); err != nil {
@@ -108,6 +127,65 @@ func onReady() {
 }
 
 func setStatus(s string) { mStatus.SetTitle(s) }
+
+// updateChecker quietly watches for a newer app image: it pulls in the background (download only, so
+// a live session is never disturbed) and, if the pulled :latest differs from what's running, surfaces
+// "Install update now" / "Install on next start" in the menu. The user chooses when to apply — a
+// click, never a command. A dead/offline daemon just means "no update known"; the check stays silent.
+func updateChecker() {
+	time.Sleep(45 * time.Second) // let first-run startup settle before the first check
+	for {
+		checkForUpdate()
+		time.Sleep(6 * time.Hour)
+	}
+}
+
+func checkForUpdate() {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	_ = sb.Pull(ctx) // best-effort background pre-fetch; offline is fine
+	ready, ver, err := sb.UpdateReady(ctx)
+	if err != nil || !ready {
+		return // offline / daemon down / already latest — surface nothing
+	}
+	label := "Update available"
+	if ver != "" {
+		label += " (v" + ver + ")"
+	}
+	setStatus(label)
+	systray.SetTooltip("SmartBrain — " + label)
+	mUpdateNow.Show()
+	mUpdateLater.Show()
+	if ver != lastNotifiedVersion { // one gentle heads-up per new version; never re-nag the same one
+		lastNotifiedVersion = ver
+		stack.Notify("SmartBrain update available", "Open the menu to install now — or it installs next time you start.")
+	}
+}
+
+// installUpdate applies a waiting update immediately: Up() pulls (a no-op — already staged) then
+// recreates the container with the new image. It shares the operation lock with start/stop so it can
+// never race them; a dropped click is fine (the status line says what's happening).
+func installUpdate() {
+	if !mu.TryLock() {
+		return
+	}
+	defer mu.Unlock()
+	setStatus("Installing update…")
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	defer cancel()
+	if err := sb.Up(ctx); err != nil {
+		setStatus("Update failed — it'll install next time you start")
+		log.Println("update:", err)
+		return
+	}
+	mUpdateNow.Hide()
+	mUpdateLater.Hide()
+	if sb.WaitHealthy(ctx, 6*time.Minute) {
+		setStatus("Running ● (updated)")
+	} else {
+		setStatus("Updated — click Open in a moment")
+	}
+}
 
 // start ensures Docker is up, starts the stack, waits for health, and opens the browser. TryLock:
 // while one operation is in flight, further clicks are DROPPED, not queued — five impatient Restart
