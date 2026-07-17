@@ -192,40 +192,61 @@ const CLIPS = {
     await R.click('button:has-text("Unlock")'); await page.waitForTimeout(1600); await R.ensure();
     await R.cap("Back in — your data was sealed, never lost", "4/4"); await R.dwell(2200); await done(h);
   },
-  // 10 vaults (demo SET UP + model connected; three documents pre-seeded via the API).
-  // The SBVK1 key is DOM-redacted the same way clip 01 redacts the Recovery Key.
+  // 10 vaults — the PUBLIC publish story (demo SET UP + model connected; three docs pre-seeded).
+  // Single-instance and fully authentic: create a vault, publish it PUBLIC (no key, no take-backs),
+  // watch the card gain a Public badge + real SB- publisher fingerprint + version, then export the
+  // next version. No key is DOM-redacted here because a PUBLIC vault has none; the passphrase field
+  // is type=password (browser-masked), the same as clips 02/09.
   "10": async () => {
-    const h = await open({ acceptDownloads: true, permissions: ["clipboard-read", "clipboard-write"] });
+    const h = await open({ acceptDownloads: true });
     const { page, R } = h;
     await nav(page, "Knowledge").click(); await page.waitForTimeout(800); await R.ensure();
-    await R.cap("A vault is a named set of documents — search it, share it", "1/5"); await R.dwell(1300);
+    await R.cap("A vault is a named set of documents — publish it for anyone to read", "1/5"); await R.dwell(1200);
     await R.scrollCenter('input[aria-label="Select Apartment Lease"]');
     await R.cap("Tick the documents that belong together", "1/5");
     await R.click('input[aria-label="Select Apartment Lease"]'); await R.dwell(300);
-    await R.click('input[aria-label="Select Renters insurance policy"]'); await page.waitForTimeout(400); await R.ensure(); await R.dwell(600);
+    await R.click('input[aria-label="Select Renters insurance policy"]'); await page.waitForTimeout(400); await R.ensure(); await R.dwell(400);
     await R.cap("Name a vault — it's created with your selection", "2/5");
     await R.scrollCenter('input[placeholder="New vault name…"]');
     await R.type('input[placeholder="New vault name…"]', "Lease papers"); await R.dwell(400);
     await R.click('button:has-text("Create with")'); await page.waitForTimeout(900); await R.ensure();
-    await R.click('button:has-text("2 documents")'); await page.waitForTimeout(500); await R.ensure();
-    await R.cap("The count opens it — exactly what you'd share, nothing hidden", "3/5"); await R.dwell(1600);
-    await R.cap("Search inside just this vault", "4/5");
-    await R.click('button:has-text("Search this")'); await R.dwell(300);
-    await R.scrollCenter('input[placeholder^="Search your knowledge"]');
-    await R.type('input[placeholder^="Search your knowledge"]', "how much notice to vacate?"); await R.dwell(400);
-    await R.click('form button:has-text("Search")'); await page.waitForTimeout(900); await R.ensure(); await R.dwell(1400);
-    await R.cap("Share it — the whole vault seals into a single file", "5/5");
+    await R.cap("Your vault is created — now share it, or publish it public", "2/5"); await R.dwell(1100);
+    // Share -> Public: the no-key / no-take-backs warning sits BEFORE the export.
+    await R.cap("Publish it public", "3/5");
     await R.scrollCenter('button:has-text("Share")'); await R.dwell(300);
     await R.click('button:has-text("Share")'); await page.waitForTimeout(600); await R.ensure();
+    await R.click('input[type="radio"][value="open"]'); await page.waitForTimeout(400); await R.ensure();
+    await R.scrollCenter(".share .warn");
+    await R.highlight(".share .warn");
+    await R.cap("Public means no key — and no taking it back", "3/5"); await R.dwell(1800); await R.noring();
+    // Confirm with the passphrase (masked), then Export.
+    await R.cap("Confirm with your passphrase, then Export", "4/5");
     await R.type('input[placeholder="Your passphrase"]', PASS); await R.dwell(400);
-    await R.click('button:has-text("Export")');
-    // Redact the key the instant it renders (it stays below the caption band until we scroll).
-    await page.waitForSelector("code.key", { timeout: 8000 });
-    await page.evaluate(() => { const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT); const re = /SBVK1-[A-Z2-7][A-Z2-7-]*/; let n; while ((n = w.nextNode())) if (re.test(n.nodeValue)) n.nodeValue = n.nodeValue.replace(re, "SBVK1-DEMO-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX"); });
-    await R.ensure(); await R.scrollCenter("code.key");
-    await R.cap("The file and its key travel separately — together they open it", "5/5"); await R.dwell(1500);
-    await R.click('button:has-text("Copy key")'); await R.dwell(1000);
-    await R.cap("They import it with the key — and search it themselves", "5/5"); await R.dwell(1900); await done(h);
+    await R.click('.share button:has-text("Export")');
+    await R.cap("Publishing…", "4/5"); await page.waitForTimeout(700); // neutral beat: the card publishes while this shows
+    await page.waitForSelector('.share button:has-text("Export update")', { timeout: 8000 }); await R.ensure();
+    // The card now carries the Public badge + the real SB- fingerprint + the published version.
+    await R.scrollCenter('.badge'); await page.waitForTimeout(300);
+    await R.highlight('.badge');
+    await R.cap("Published — a Public badge, your SB-… fingerprint, and the version", "4/5"); await R.dwell(1900); await R.noring();
+    // Snapshot the version so we can prove the next publish bumps it (a fresh vault starts at v1,
+    // and each publish increments — so the first public version is already past v1).
+    const verBefore = await page.evaluate(() => {
+      const m = (document.querySelector(".vrow")?.textContent || "").match(/\bv(\d+)\b/);
+      return m ? Number(m[1]) : 0;
+    });
+    // Publish the next version: the file is signed, so only this identity can update it.
+    await R.cap("Publish a new version — it's signed, so only you can", "5/5");
+    await R.scrollCenter('.share button:has-text("Export update")'); await R.dwell(300);
+    await R.type('input[placeholder="Your passphrase"]', PASS); await R.dwell(400);
+    await R.click('.share button:has-text("Export update")'); await page.waitForTimeout(700);
+    await page.waitForFunction((prev) => {
+      const m = (document.querySelector(".vrow")?.textContent || "").match(/\bv(\d+)\b/);
+      return !!m && Number(m[1]) > prev;
+    }, verBefore, { timeout: 8000 }); await R.ensure();
+    await R.scrollCenter('.badge'); await page.waitForTimeout(300);
+    await R.highlight('.badge');
+    await R.cap("The version bumps automatically — subscribers pick it up on their next check", "5/5"); await R.dwell(2000); await done(h);
   },
 };
 

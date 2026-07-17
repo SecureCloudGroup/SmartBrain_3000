@@ -63,5 +63,10 @@ Encoding uses a **dither-free** palette — flat UI compresses far better; `dith
 - Clip 09: capture the real Recovery Key from `/api/account/setup` and pass it as `RECOVERY_KEY`.
 - Clip 04: upload a FILE (only a file/URL carries a `source`, which is what citation chips show);
   uploads auto-index, so there is no Reindex beat.
-- Clip 10: the SBVK1 vault key is DOM-redacted like clip 01's Recovery Key; the context needs
-  `acceptDownloads` (the `.sbvault` export) and clipboard permissions (the "Copied ✓" beat).
+- Clip 10: the PUBLIC-vault publish flow — Share → Public → the no-key/no-take-backs warning →
+  Export → a Public badge + the real `SB-…` publisher fingerprint (a public identity, deliberately
+  NOT redacted) + the version, then Export update to bump it. Needs only `acceptDownloads` (the
+  `.sbvault` export); there is no key to redact (a public vault has none) and the passphrase field is
+  `type=password` (browser-masked). A fresh vault starts at v1 and each publish increments, so the
+  first published version already reads v2. Encoded at a firmer `--lossy=100 --colors 100` (this
+  content-heavy clip) to stay under ~2.6 MB at the same 10fps/900px as 06/08.

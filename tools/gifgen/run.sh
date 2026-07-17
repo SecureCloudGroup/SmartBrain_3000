@@ -33,10 +33,10 @@ setup(){ curl -fsS -X POST $U/api/account/setup -H 'content-type: application/js
 connect(){ curl -fsS -X PUT $U/api/local-models/ollama -H 'content-type: application/json' -d '{"url":"http://host.docker.internal:11434"}' >/dev/null; }
 task(){ curl -fsS -X POST $U/api/tasks -H 'content-type: application/json' -d "$1" >/dev/null; }
 doc(){ curl -fsS -X POST $U/api/kb -H 'content-type: application/json' -d "$1" >/dev/null; }
-enc(){ local out="$1" fps="${2:-12}" scale="${3:-960}" webm; cd "$HERE"; webm=$(ls -t video/*.webm|head -1)
+enc(){ local out="$1" fps="${2:-12}" scale="${3:-960}" lossy="${4:-55}" colors="${5:-120}" webm; cd "$HERE"; webm=$(ls -t video/*.webm|head -1)
   ffmpeg -y -loglevel error -i "$webm" -vf "fps=$fps,scale=$scale:-1:flags=lanczos,palettegen=max_colors=120:stats_mode=diff" /tmp/sbpal.png
   ffmpeg -y -loglevel error -i "$webm" -i /tmp/sbpal.png -lavfi "fps=$fps,scale=$scale:-1:flags=lanczos[x];[x][1:v]paletteuse=dither=none" /tmp/sbraw.gif
-  gifsicle -O3 --lossy=55 --colors 120 /tmp/sbraw.gif -o "out/$out.gif"; echo "  -> out/$out.gif ($(du -h out/$out.gif|cut -f1))"; }
+  gifsicle -O3 --lossy=$lossy --colors $colors /tmp/sbraw.gif -o "out/$out.gif"; echo "  -> out/$out.gif ($(du -h out/$out.gif|cut -f1))"; }
 
 record(){ local n="$1"; mock_up; mkdir -p "$HERE/out"; rm -rf "$HERE/video"; mkdir -p "$HERE/video"; cd "$HERE"; local RK=""
   case "$n" in
@@ -56,7 +56,9 @@ record(){ local n="$1"; mock_up; mkdir -p "$HERE/out"; rm -rf "$HERE/video"; mkd
         doc '{"title":"Moving-day checklist","content":"Transfer utilities, forward mail at USPS, photograph every room at move-in, return the old keys by the 30th."}' ;;
   esac
   RECOVERY_KEY="$RK" DEMO_PASS="$PASS" node clips.js "$n"
-  case "$n" in 06|08|10) enc "$(name_of "$n")" 10 900 ;; *) enc "$(name_of "$n")" ;; esac
+  # Clip 10 (the public-vault publish story) is content-heavy; a firmer lossy/color budget keeps it
+  # under the ~2.6 MB target at the same 10fps/900px as 06/08.
+  case "$n" in 06|08) enc "$(name_of "$n")" 10 900 ;; 10) enc "$(name_of "$n")" 10 900 100 100 ;; *) enc "$(name_of "$n")" ;; esac
 }
 
 if [ "${1:-}" = "all" ]; then for n in 01 02 03 04 05 06 07 08 09 10; do echo "### $n"; record "$n"; done
