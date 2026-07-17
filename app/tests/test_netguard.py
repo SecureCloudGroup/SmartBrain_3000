@@ -284,3 +284,39 @@ def test_page_fetch_has_no_deadline_so_ingest_byte_behavior_is_unchanged(monkeyp
     monkeypatch.setattr(netguard, "_monotonic", lambda: 10_000.0)  # would trip any deadline, if one applied
     out = netguard.safe_fetch("http://example.test/page")
     assert out["text"] == body.decode("utf-8"), "page/ingest read is unbounded by the vault deadline"
+
+
+@pytest.mark.parametrize(
+    "headers,body,ok",
+    [
+        (None, b"PK\x03\x04realvaultbytes", True),                          # NO Content-Type (Caddy) + zip body
+        ({"content-type": "text/plain"}, b"PK\x03\x04realvaultbytes", True),  # wrong type (GitHub raw) + zip body
+        ({"content-type": "text/html"}, b"<html>404</html>", False),        # wrong type + non-zip (host error page)
+    ],
+)
+def test_vault_fetch_accepts_zip_magic_regardless_of_content_type(monkeypatch, headers, body, ok) -> None:
+    # Real-world gap found live (against a Caddy host): static hosts serve the unknown `.sbvault`
+    # extension with NO Content-Type, or a wrong one. A valid vault is a ZIP, so safe_fetch_vault
+    # accepts it by its magic bytes regardless of the header; the publisher signature is verified
+    # afterward, so this only widens which hosts work — it weakens nothing. A non-zip body under a
+    # wrong type is the host's HTML/error page and is still refused.
+    import httpx
+
+    _resolve_to(monkeypatch, "93.184.216.34")
+    _serve(monkeypatch, lambda r: httpx.Response(200, headers=headers or {}, content=body))
+    if ok:
+        assert netguard.safe_fetch_vault("http://tree.test/team.sbvault") == body
+    else:
+        with pytest.raises(FetchError):
+            netguard.safe_fetch_vault("http://tree.test/team.sbvault")
+
+
+def test_zip_magic_sniff_is_vault_only_not_page_ingest(monkeypatch) -> None:
+    # The magic-sniff widening is scoped to the vault fetch; page ingest never gets it, so a zip
+    # body under a non-ingest Content-Type stays refused on the ingest path.
+    import httpx
+
+    _resolve_to(monkeypatch, "93.184.216.34")
+    _serve(monkeypatch, lambda r: httpx.Response(200, headers={"content-type": "application/zip"}, content=b"PK\x03\x04x"))
+    with pytest.raises(FetchError):
+        netguard.safe_fetch_bytes("http://tree.test/thing")

@@ -52,6 +52,13 @@ _INGEST_MAX_BYTES = 25_000_000
 # Size caps are imported from vault_format so transport and parser agree.
 _VAULT_CT = ("application/zip", "application/octet-stream", "application/x-zip-compressed")
 _MANIFEST_CT = ("application/json", "text/plain", "application/octet-stream")
+# Every .sbvault is a ZIP. Static hosts routinely serve the unknown `.sbvault` extension with NO
+# Content-Type (Caddy) or a wrong one (GitHub raw -> text/plain), which the content-type allowlist
+# alone would reject — breaking the "host it anywhere" promise for a perfectly valid vault. So the
+# whole-vault fetch ALSO accepts a body whose first bytes are the ZIP magic, regardless of the header.
+# This is safe: the content-type was never a security control (it's attacker-controlled), and the
+# publisher signature is verified after the fetch — magic-sniffing only widens which hosts work.
+_ZIP_MAGIC = b"PK\x03\x04"
 # A browser-like UA: many public doc/PDF hosts (e.g. .mil/.gov) 403 a default
 # client UA. We fetch only what the user explicitly asked for, on their behalf.
 _USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
@@ -178,7 +185,7 @@ def _send_pinned(client: httpx.Client, url: str, host: str, ip: str) -> httpx.Re
 
 
 def _guarded_get(url: str, allowed_ct: tuple[str, ...], max_bytes: int,
-                 deadline_seconds: float | None = None) -> dict:
+                 deadline_seconds: float | None = None, accept_zip_magic: bool = False) -> dict:
     """Shared SSRF-guarded GET; return {final_url, status, content_type, content (bytes)}.
 
     All the defenses (scheme/userinfo/IP allowlist, per-request IP pin with no
@@ -228,9 +235,14 @@ def _guarded_get(url: str, allowed_ct: tuple[str, ...], max_bytes: int,
                 if response.status_code >= 400:  # an error page is not content
                     raise FetchError(f"upstream returned HTTP {response.status_code}")
                 ctype = response.headers.get("content-type", "")
-                if not ctype.startswith(allowed_ct):
+                ct_ok = ctype.startswith(allowed_ct)
+                if not ct_ok and not accept_zip_magic:
                     raise FetchError(f"content-type not allowed: {ctype or 'unknown'}")
                 content = _read_capped(response, max_bytes, deadline_seconds)
+                # accept_zip_magic: the header didn't match, but a real .sbvault is a ZIP — accept it
+                # if the bytes prove it, else it's the host's HTML/error page, so refuse clearly.
+                if not ct_ok and not content.startswith(_ZIP_MAGIC):
+                    raise FetchError(f"content-type not allowed: {ctype or 'unknown'}")
                 # Report the original (host-bearing) URL as the final URL, not the
                 # IP-rewritten one the transport actually dialed.
                 return {
@@ -280,7 +292,7 @@ def safe_fetch_vault(url: str) -> bytes:
     header cannot bypass it — and an overall deadline abandons a drip host.
     """
     return _guarded_get(_strip_fragment(url), _VAULT_CT, vault_format.MAX_VAULT_BYTES,
-                        _VAULT_FETCH_DEADLINE_SECONDS)["content"]
+                        _VAULT_FETCH_DEADLINE_SECONDS, accept_zip_magic=True)["content"]
 
 
 def safe_fetch_vault_manifest(url: str) -> bytes:
