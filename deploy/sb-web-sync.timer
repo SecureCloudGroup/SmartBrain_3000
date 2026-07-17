@@ -1,0 +1,10 @@
+[Unit]
+Description=Periodically sync the SmartBrain PWA shell + landing (hourly)
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

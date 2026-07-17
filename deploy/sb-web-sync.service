@@ -1,0 +1,9 @@
+[Unit]
+Description=Sync SmartBrain PWA shell + landing from the latest GitHub release
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Runs as the (user-manager) user that owns the repo checkout + the Caddy-served dirs.
+ExecStart=%h/sb-node/src/SmartBrain_3000/deploy/vps-sync-web.sh
