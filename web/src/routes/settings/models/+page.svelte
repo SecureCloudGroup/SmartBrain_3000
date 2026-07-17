@@ -8,6 +8,13 @@
   // we compose the URL. Advanced users can override with a full URL (non-standard host).
   const HOST = "host.docker.internal";
   const DEFAULT_PORT = { ollama: 11434, mlx: 8888 } as const;
+  // Genuinely-good local defaults we suggest per backend (docs/02-models.md): Qwen2.5-7B for
+  // chat, plus the embedding model semantic search needs. Surfaced in the pull/serve hints below.
+  const RECOMMENDED = {
+    ollama: "qwen2.5:7b-instruct",
+    mlx: "mlx-community/Qwen2.5-7B-Instruct-4bit",
+    embed: "nomic-embed-text:v1.5",
+  } as const;
 
   let models = $state<LocalModels | null>(null);
   let ollamaPort = $state(String(DEFAULT_PORT.ollama));
@@ -103,6 +110,30 @@
   people skip this and just add a cloud key under <a href="/settings/providers">Cloud providers</a>.
 </p>
 
+<!-- Tiered onboarding suggestion: meet the user where they are. Only shown before any local
+     backend is connected — priority Ollama → MLX → none. If both are running we recommend
+     Ollama; the non-primary backend can still be connected from its card below. -->
+{#if models && !models.ollama.configured && !models.mlx.configured}
+  {#if models.ollama.detected}
+    <p style="margin:0 0 1rem; padding:0.6rem 0.85rem; border:1px solid var(--accent); border-radius:6px">
+      <strong>Recommended: Ollama</strong> is running on this machine — the simplest way to stay fully local.
+      Connect it below, then pull a good model:
+      <code>ollama pull {RECOMMENDED.ollama}</code> and (for semantic search) <code>ollama pull {RECOMMENDED.embed}</code>.
+    </p>
+  {:else if models.mlx.detected}
+    <p style="margin:0 0 1rem; padding:0.6rem 0.85rem; border:1px solid var(--accent); border-radius:6px">
+      <strong>Recommended: MLX</strong> is running on this machine. Connect it below, then serve a good model:
+      <code>mlx_lm.server --model {RECOMMENDED.mlx}</code>.
+    </p>
+  {:else}
+    <p class="muted" style="margin:0 0 1rem; padding:0.6rem 0.85rem; border:1px solid var(--border); border-radius:6px">
+      <strong>No local model server found.</strong> To run models on your machine, set up
+      <strong>Ollama</strong> (any OS) or <strong>MLX</strong> (Apple Silicon), then connect it below.
+      New to local models? <a href="/help#models">Learn more</a>.
+    </p>
+  {/if}
+{/if}
+
 <div class="card">
   <h2 class="row">
     <span>Ollama</span>
@@ -130,13 +161,13 @@
   {#if models?.ollama.configured && !models.ollama.reachable}
     <p class="muted" style="margin-top:0.5rem">
       Can&rsquo;t reach Ollama. Install + start it (<a href="https://ollama.com/download" target="_blank" rel="noreferrer">ollama.com/download</a>),
-      then pull a model: <code>ollama pull llama3.1:8b</code> and (for semantic search) <code>ollama pull nomic-embed-text:v1.5</code>.
+      then pull a model: <code>ollama pull {RECOMMENDED.ollama}</code> and (for semantic search) <code>ollama pull {RECOMMENDED.embed}</code>.
     </p>
   {/if}
   {#if models && !models.ollama.configured && !models.ollama.detected}
     <p class="muted" style="margin-top:0.5rem">
       New to local models? Install + start Ollama (<a href="https://ollama.com/download" target="_blank" rel="noreferrer">ollama.com/download</a>),
-      then pull a model: <code>ollama pull llama3.1:8b</code> and (for semantic search) <code>ollama pull nomic-embed-text:v1.5</code>.
+      then pull a model: <code>ollama pull {RECOMMENDED.ollama}</code> and (for semantic search) <code>ollama pull {RECOMMENDED.embed}</code>.
     </p>
   {/if}
   <details bind:open={showOllamaAdv} style="margin-top:0.5rem">
