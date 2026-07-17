@@ -263,7 +263,10 @@ def _install_routes(application: FastAPI) -> None:
 
 def create_app() -> FastAPI:
     """Build a fully-wired SmartBrain app (and its own MCP server instance)."""
-    mcp = mcp_server.build_server(lambda: getattr(app.state, "kb", None))
+    mcp = mcp_server.build_server(
+        lambda: getattr(app.state, "kb", None),
+        lambda: getattr(app.state, "vaults", None),  # so MCP KB tools tag imported-vault content
+    )
     app = FastAPI(title="SmartBrain_3000", version=__version__, lifespan=_make_lifespan(mcp))
     _install_routes(app)
     # Read-only Knowledge for external tools; auth-gated by the MCP access token.

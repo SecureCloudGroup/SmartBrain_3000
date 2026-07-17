@@ -94,8 +94,10 @@ and the unit you share. Vaults live on the Knowledge page.
   vault, and there is **no taking it back**. Upload the file anywhere (Drive, S3, any web host)
   and share the link — or unzip it and upload the folder to a static host so future updates only
   re-upload what changed. Once published, the vault card shows a **Public** badge beside your
-  publisher fingerprint (`SB-…`) — the identity readers will see. The file is still signed, so
-  nobody else can publish an "update" to your vault in your name.
+  publisher fingerprint (`SB-…`) and the published version — the identity and version readers will
+  see. The file is still signed, so nobody else can publish an "update" to your vault in your name.
+  To publish a **new version**, export it again (replacing the file where you host it): the version
+  bumps automatically, and the button reads **Export update (v*N*)** so you know where it lands.
 - **Import someone else's.** Pick the `.sbvault` file and paste the key. Its documents are
   **re-encrypted under your own passphrase** as they land (nothing you import can read or
   weaken your data), and anything you already have is kept as-is rather than overwritten. The
@@ -117,17 +119,18 @@ and the unit you share. Vaults live on the Knowledge page.
   ones are added, and ones the publisher removed are deleted. **Anything you edited stays yours**:
   the update reports it as "kept" instead of overwriting it (same for documents you already had —
   your copy wins). On a `manifest.json` (folder) host only the changed files are downloaded; a
-  single-file host re-downloads the whole file, and the button's tooltip says so. If the
-  publisher's **key ever changes**, updates stop with a warning showing both fingerprints — old
-  and new — until you confirm the new key with the publisher out-of-band and choose **Trust new
-  key** (Desktop + passphrase). A newer `.sbvault` *file* of a subscribed vault also applies as an
+  single-file host re-downloads the whole file, and the card notes so. The card also shows how
+  long ago it was last checked and flags a failed check ("host may be unreachable"), so a dead or
+  stale host is easy to spot. If the
+  publisher's **key ever changes**, updates stop with a warning showing both fingerprints — pinned
+  (trusted) and offered (new), side by side — until you confirm the new key with the publisher
+  out-of-band and choose **Trust new key** (Desktop + passphrase). A newer `.sbvault` *file* of a subscribed vault also applies as an
   update — importing it never creates a duplicate.
 - **Scheduled auto-update (opt-in).** Turn on **Auto-update** on a subscribed vault card and pick a
   cadence (daily or weekly) to have SmartBrain check and apply clean updates for you. It is **off by
   default**, runs **only on the Desktop while unlocked**, and **never applies a publisher key change
   on its own** — a changed key still blocks and waits for you to confirm it. Each run reports what it
-  did **in the chat feed** ("updated to v3 — 2 documents changed", or a "new publisher key" notice),
-  and the card shows when it was last checked so a dead or stale host is easy to spot.
+  did **in the chat feed** ("updated to v3 — 2 documents changed", or a "new publisher key" notice).
 
 Creating, adding, and searching a vault work everywhere, including a paired phone. **Exporting and
 importing a vault are done on the Desktop** — sharing a vault's contents, or bringing new ones in, is
