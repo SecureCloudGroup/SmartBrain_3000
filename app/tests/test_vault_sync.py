@@ -16,9 +16,11 @@ The invariants under test:
 
 from __future__ import annotations
 
+import base64
 import io
 import json
 import os
+import socket
 import zipfile
 from collections.abc import Iterator
 
@@ -842,6 +844,119 @@ def test_autoupdate_dead_host_backs_off_and_other_schedules_still_fire(
     assert src["last_error"] == "couldn't reach vaults.example.com", "host only"
     assert "packs" not in src["last_error"] and "secret-topic" not in src["last_error"], "no path"
     assert "10.0.0.9" not in src["last_error"], "no exception text leaks to the card"
+
+
+def test_a_slow_drip_host_does_not_wedge_the_scheduler_and_a_co_scheduled_prompt_still_fires(
+        alice: TestClient, bob: TestClient, monkeypatch) -> None:
+    # THE MUST-FIX. A host that drips one chunk every <8s never trips the per-chunk read timeout and
+    # stays under the byte cap — the vault fetch would read toward 512 MiB, effectively forever, and
+    # because it runs SYNCHRONOUSLY in the scheduler tick it would wedge the whole loop so NO
+    # scheduled prompt ever fires again (unattended, until restart). The overall wall-clock deadline
+    # abandons the host: the fetch returns a clean FetchError, the vault backs off (last_checked
+    # advances), the pass returns, and a prompt due in the SAME tick still fires. This drives the
+    # REAL netguard deadline path (not a stubbed fetcher); the clock is injected so it trips with no
+    # real sleeping.
+    import httpx
+
+    scheduler._BREAKER.fails = 0  # a clean breaker so the co-scheduled prompt is allowed to fire
+    scheduler._BREAKER.until = 0.0
+    scheduler._BREAKER.warned = False
+    monkeypatch.setattr(scheduler, "eager_reindex", lambda *a, **k: None)  # isolate: no embed path
+    monkeypatch.setattr(scheduler, "_auto_reindex", lambda *a, **k: None)
+
+    real_safe_fetch_vault = netguard.safe_fetch_vault  # capture BEFORE _subscribed monkeypatches it
+    _vid, _ids, local_id, _blob = _subscribed(alice, bob, monkeypatch)  # host = vaults.example.com
+    _enable_auto(bob, local_id)
+
+    # Restore the REAL guarded fetch and point its transport at a drip host, so the tick exercises the
+    # actual deadline (not a stub). The host answers 200 with vault bytes, but the injected monotonic
+    # clock reports the read has already run past the deadline.
+    monkeypatch.setattr(netguard, "safe_fetch_vault", real_safe_fetch_vault)
+    monkeypatch.setattr(socket, "getaddrinfo", lambda node, *a, **k: [(2, 1, 6, "", ("93.184.216.34", 0))])
+    real_client = httpx.Client
+    drip = httpx.MockTransport(
+        lambda req: httpx.Response(200, headers={"content-type": "application/octet-stream"}, content=b"x" * 64))
+    monkeypatch.setattr(httpx, "Client", lambda **kw: real_client(transport=drip, **kw))
+    calls = {"n": 0}
+
+    def clock() -> float:  # first call is the read's start; the next is already past the deadline
+        calls["n"] += 1
+        return 0.0 if calls["n"] == 1 else float(netguard._VAULT_FETCH_DEADLINE_SECONDS) + 1.0
+
+    monkeypatch.setattr(netguard, "_monotonic", clock)
+
+    sid = bob.post("/api/schedules",
+                   json={"title": "nightly", "prompt": "p", "interval_minutes": 0,
+                         "start_in_minutes": 0}).json()["id"]
+    monkeypatch.setattr(agent, "run_turn", lambda *a, **k: {"status": "complete", "message": "done"})
+
+    assert scheduler.tick(bob.app) == 1, "the scheduler was NOT wedged — the due prompt still fired"
+    assert bob.app.state.schedules.list_runs(sid)[0]["status"] == "complete"
+
+    src = _pin(bob, local_id)["source"]
+    assert src["last_checked"], "the drip host was abandoned and backed off (last_checked advanced)"
+    assert src["last_error"] == "couldn't reach vaults.example.com", "host-only staleness note"
+    assert _feed(bob) == [], "a fetch failure is card staleness, not a feed row"
+
+
+def test_the_vault_pass_budget_abandons_the_second_vault_which_retries_next_tick(
+        alice: TestClient, bob: TestClient, monkeypatch) -> None:
+    # Belt-and-suspenders over netguard's per-fetch deadline: even several slow-but-under-deadline
+    # hosts must not consume the whole tick. The overall pass budget is checked BETWEEN vaults — once
+    # spent, the remaining vault is abandoned for THIS tick (its last_checked is untouched, so it
+    # stays due) and picked up next tick. The clock is injected so the budget trips after exactly one
+    # vault, deterministically — no real sleeping.
+    blobs: dict[str, bytes] = {}
+    subs: list[str] = []
+    for i in range(2):
+        vid, _ids = _make_vault(alice, [("Doc", f"body {i} ZORP unique")], name=f"Pack {i}")
+        blob = _export(alice, vid, _PASS_A)
+        url = f"https://h{i}.example.com/v.sbvault"
+        blobs[url] = blob
+        _serve(monkeypatch, blob)  # serve THIS blob for its subscribe
+        local_id = bob.post("/api/vaults/subscribe", json={"url": url}).json()["id"]
+        _enable_auto(bob, local_id)
+        subs.append(local_id)
+
+    fetched = _serve_map(monkeypatch, blobs)  # both hosts reachable (same version — not behind)
+    orig_mono = vault_sync._monotonic
+    calls = {"n": 0}
+
+    def clock() -> float:  # start (1) + the first vault's between-check (2) are under budget; (3) is past
+        calls["n"] += 1
+        return 0.0 if calls["n"] <= 2 else float(scheduler._MAX_VAULT_PASS_SECONDS) + 1.0
+
+    monkeypatch.setattr(vault_sync, "_monotonic", clock)
+
+    assert vault_sync.tick(bob.app, pass_budget_seconds=scheduler._MAX_VAULT_PASS_SECONDS) == 1, \
+        "only the first vault is processed this tick"
+    assert len(fetched) == 1, "the abandoned vault is never fetched"
+    assert sum(1 for lid in subs if _pin(bob, lid)["source"]["last_checked"]) == 1, \
+        "exactly one vault advanced; the other's last_checked is untouched"
+
+    # Next tick (real clock, no budget) processes the deferred vault — it was merely deferred.
+    monkeypatch.setattr(vault_sync, "_monotonic", orig_mono)
+    assert vault_sync.tick(bob.app) == 1
+    assert len(fetched) == 2, "the deferred vault is picked up on the next tick"
+    assert sum(1 for lid in subs if _pin(bob, lid)["source"]["last_checked"]) == 2
+
+
+def test_feed_messages_neutralize_a_hostile_publisher_name() -> None:
+    # The vault NAME is publisher-controlled and rides into the markdown-rendered feed. A name with
+    # newlines/brackets/quotes could forge a fake block or a phishing [link](url) in the user's
+    # trusted feed — so it is sanitized the SAME way C0 sanitizes the import provenance line.
+    hostile = "Innocent\n\n[Click here](http://evil.test) has 'quotes'"
+    msg = vault_sync._update_feed_message(hostile, 3, {"added": 1})
+    for bad in ("\n", "[", "]", "'"):
+        assert bad not in msg, f"{bad!r} must be neutralized in the update feed message"
+
+    pinned = base64.b64encode(b"\x01" * 32).decode()
+    offered = base64.b64encode(b"\x02" * 32).decode()
+    key_msg = vault_sync._key_change_feed_message(hostile, pinned, offered)
+    for bad in ("\n", "[", "]", "'"):
+        assert bad not in key_msg, f"{bad!r} must be neutralized in the key-change feed message"
+    # sanitizing the name did not gut the real signal — both fingerprints still ride the message.
+    assert vault_format.fingerprint(pinned) in key_msg and vault_format.fingerprint(offered) in key_msg
 
 
 def test_autoupdate_interval_floor_is_clamped_and_non_subscriptions_are_refused(

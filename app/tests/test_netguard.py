@@ -240,3 +240,47 @@ def test_safe_fetch_vault_cap_comes_from_vault_format(monkeypatch) -> None:
     _serve(monkeypatch, lambda request: httpx.Response(200, headers={"content-type": "application/zip"}, content=b"z" * 65))
     with pytest.raises(FetchError):
         netguard.safe_fetch_vault("http://tree.test/team.sbvault")
+
+
+# --- overall wall-clock deadline: abandon a slow-drip host --------------------------------------
+# The per-chunk read timeout (_TIMEOUT) alone lets a host drip one chunk every <8s and keep the read
+# alive under the byte cap until 512 MiB — effectively forever. On a VAULT fetch that would run
+# synchronously inside the scheduler tick and wedge the whole scheduler. An overall deadline abandons
+# it. The clock is injected (netguard._monotonic) so the deadline trips deterministically, no sleep.
+
+
+@pytest.mark.parametrize(
+    "fetch,ctype",
+    [
+        (netguard.safe_fetch_vault, "application/zip"),
+        (netguard.safe_fetch_vault_manifest, "application/json"),
+    ],
+)
+def test_vault_fetch_abandons_a_drip_host_at_the_deadline(monkeypatch, fetch, ctype) -> None:
+    import httpx
+
+    _resolve_to(monkeypatch, "93.184.216.34")
+    _serve(monkeypatch, lambda request: httpx.Response(200, headers={"content-type": ctype}, content=b"x" * 64))
+    calls = {"n": 0}
+
+    def clock() -> float:  # first call is the read's start; every later call is past the deadline
+        calls["n"] += 1
+        return 0.0 if calls["n"] == 1 else float(netguard._VAULT_FETCH_DEADLINE_SECONDS) + 1.0
+
+    monkeypatch.setattr(netguard, "_monotonic", clock)
+    with pytest.raises(FetchError) as exc:
+        fetch("http://tree.test/f")
+    assert "too slow" in str(exc.value), "the deadline yields a clean, class-name-only FetchError"
+
+
+def test_page_fetch_has_no_deadline_so_ingest_byte_behavior_is_unchanged(monkeypatch) -> None:
+    # The deadline binds ONLY the vault fetchers. A page fetch passes no deadline, so even a clock
+    # jumped far past any deadline never abandons it — the whole body still returns byte-for-byte.
+    import httpx
+
+    _resolve_to(monkeypatch, "93.184.216.34")
+    body = b"<html>" + b"z" * 4096 + b"</html>"
+    _serve(monkeypatch, lambda request: httpx.Response(200, headers={"content-type": "text/html; charset=utf-8"}, content=body))
+    monkeypatch.setattr(netguard, "_monotonic", lambda: 10_000.0)  # would trip any deadline, if one applied
+    out = netguard.safe_fetch("http://example.test/page")
+    assert out["text"] == body.decode("utf-8"), "page/ingest read is unbounded by the vault deadline"

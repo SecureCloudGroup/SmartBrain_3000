@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import ipaddress
 import socket
+import time
 from urllib.parse import urldefrag, urljoin, urlparse, urlunparse
 
 import httpx
@@ -32,6 +33,14 @@ _SCHEMES = ("http", "https")
 _MAX_REDIRECTS = 3
 _MAX_BYTES = 2_000_000
 _TIMEOUT = 8.0
+# _TIMEOUT is a PER-CHUNK read timeout only: a host that drips one byte every <8s keeps the read
+# alive until the size cap (512 MiB for a vault) — effectively forever, and on a vault fetch that
+# would wedge the whole scheduler tick. An OVERALL wall-clock deadline on the capped read abandons
+# such a host. It binds ONLY the vault fetchers (page/ingest byte-behavior is unchanged: they pass
+# no deadline). _monotonic is a module attribute so a test can drive the deadline deterministically
+# (mirrors vault_sync._monotonic) — no real sleeping.
+_VAULT_FETCH_DEADLINE_SECONDS = 60
+_monotonic = time.monotonic
 _ALLOWED_CT = ("text/", "application/json")
 # Knowledge ingestion also accepts PDFs and generic binaries (sniffed downstream),
 # with a larger cap since documents are bigger than web pages.
@@ -122,12 +131,24 @@ def _pin_url(url: str, ip: str) -> str:
     return urlunparse(parsed._replace(netloc=netloc))
 
 
-def _read_capped(response: httpx.Response, max_bytes: int) -> bytes:
-    """Read a streamed response up to ``max_bytes``; raise if it exceeds it."""
+def _read_capped(response: httpx.Response, max_bytes: int,
+                 deadline_seconds: float | None = None) -> bytes:
+    """Read a streamed response up to ``max_bytes``; raise if it exceeds it.
+
+    ``deadline_seconds`` (vault fetchers only) is an OVERALL wall-clock bound on the read: the
+    per-chunk ``_TIMEOUT`` alone lets a drip host stay alive until the cap, so between chunks we
+    check elapsed time against a monotonic start and abandon a host that runs past the deadline. A
+    drip host must yield a chunk each iteration (every <8s), so the loop body runs and the deadline
+    trips; a zero-byte hang is already caught by the read timeout, a connect hang by the connect
+    timeout. Page/ingest pass no deadline, so their byte-behavior is unchanged.
+    """
     chunks: list[bytes] = []
     total = 0
+    start = _monotonic() if deadline_seconds is not None else 0.0
     try:
-        for chunk in response.iter_bytes():  # bounded by the size cap (abort early)
+        for chunk in response.iter_bytes():  # bounded by the size cap AND the deadline (abort early)
+            if deadline_seconds is not None and _monotonic() - start > deadline_seconds:
+                raise FetchError("host too slow")
             total += len(chunk)
             if total > max_bytes:
                 raise FetchError("response too large")
@@ -156,13 +177,15 @@ def _send_pinned(client: httpx.Client, url: str, host: str, ip: str) -> httpx.Re
     return client.send(request, stream=True)
 
 
-def _guarded_get(url: str, allowed_ct: tuple[str, ...], max_bytes: int) -> dict:
+def _guarded_get(url: str, allowed_ct: tuple[str, ...], max_bytes: int,
+                 deadline_seconds: float | None = None) -> dict:
     """Shared SSRF-guarded GET; return {final_url, status, content_type, content (bytes)}.
 
     All the defenses (scheme/userinfo/IP allowlist, per-request IP pin with no
     global resolver mutation, bounded redirect re-validation, timeout, size cap,
     content-type allowlist) live here so both ``safe_fetch`` (text) and
-    ``safe_fetch_bytes`` (binary) reuse one copy.
+    ``safe_fetch_bytes`` (binary) reuse one copy. ``deadline_seconds`` (vault fetchers only)
+    adds an overall wall-clock bound on the body read; page/ingest pass None (unchanged).
     """
     assert url, "url required"
     assert allowed_ct and max_bytes > 0, "allowed content-types + positive cap required"
@@ -207,7 +230,7 @@ def _guarded_get(url: str, allowed_ct: tuple[str, ...], max_bytes: int) -> dict:
                 ctype = response.headers.get("content-type", "")
                 if not ctype.startswith(allowed_ct):
                     raise FetchError(f"content-type not allowed: {ctype or 'unknown'}")
-                content = _read_capped(response, max_bytes)
+                content = _read_capped(response, max_bytes, deadline_seconds)
                 # Report the original (host-bearing) URL as the final URL, not the
                 # IP-rewritten one the transport actually dialed.
                 return {
@@ -254,18 +277,21 @@ def safe_fetch_vault(url: str) -> bytes:
     Same defenses as ``safe_fetch``, with vault-shaped bounds: zip-ish content
     types only, capped at ``vault_format.MAX_VAULT_BYTES``. The cap is enforced
     on the byte stream as it arrives (``_read_capped``) — a lying Content-Length
-    header cannot bypass it.
+    header cannot bypass it — and an overall deadline abandons a drip host.
     """
-    return _guarded_get(_strip_fragment(url), _VAULT_CT, vault_format.MAX_VAULT_BYTES)["content"]
+    return _guarded_get(_strip_fragment(url), _VAULT_CT, vault_format.MAX_VAULT_BYTES,
+                        _VAULT_FETCH_DEADLINE_SECONDS)["content"]
 
 
 def safe_fetch_vault_manifest(url: str) -> bytes:
     """Fetch a public-vault manifest (update check) behind the SSRF guard.
 
     Manifests are small JSON documents — often served as ``text/plain`` by
-    raw-file hosts — stream-capped at ``vault_format.MAX_MANIFEST_BYTES``.
+    raw-file hosts — stream-capped at ``vault_format.MAX_MANIFEST_BYTES``, with an
+    overall deadline that abandons a drip host.
     """
-    return _guarded_get(_strip_fragment(url), _MANIFEST_CT, vault_format.MAX_MANIFEST_BYTES)["content"]
+    return _guarded_get(_strip_fragment(url), _MANIFEST_CT, vault_format.MAX_MANIFEST_BYTES,
+                        _VAULT_FETCH_DEADLINE_SECONDS)["content"]
 
 
 def safe_fetch_vault_object(url: str, max_bytes: int) -> bytes:
@@ -277,4 +303,5 @@ def safe_fetch_vault_object(url: str, max_bytes: int) -> bytes:
     manifest fetch: raw-file hosts serve ``.bin`` as octet-stream or text/plain.
     """
     assert 0 < max_bytes <= vault_format.MAX_VAULT_BYTES, "cap must be a vault_format bound"
-    return _guarded_get(_strip_fragment(url), _MANIFEST_CT, max_bytes)["content"]
+    return _guarded_get(_strip_fragment(url), _MANIFEST_CT, max_bytes,
+                        _VAULT_FETCH_DEADLINE_SECONDS)["content"]

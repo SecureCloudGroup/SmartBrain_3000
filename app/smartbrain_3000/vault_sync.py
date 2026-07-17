@@ -570,6 +570,10 @@ def _change_breakdown(result: dict) -> str:
 
 
 def _update_feed_message(name: str, seq: int, result: dict) -> str:
+    # The vault NAME is publisher-chosen — sanitize it the SAME way C0 sanitizes the provenance line
+    # (strip non-printables + brackets/quote, cap length) so a crafted name with newlines/brackets
+    # can't forge markdown structure or a phishing link in the trusted, markdown-rendered feed.
+    name = vault_format.sanitize_name(name)
     changed = (int(result.get("added", 0)) + int(result.get("updated", 0))
                + int(result.get("deleted", 0)))
     plural = "" if changed == 1 else "s"
@@ -579,6 +583,7 @@ def _update_feed_message(name: str, seq: int, result: dict) -> str:
 
 
 def _key_change_feed_message(name: str, pinned_pubkey: str, offered_pubkey: str) -> str:
+    name = vault_format.sanitize_name(name)  # publisher-chosen — neutralize as C0 does (see above)
     return (f"Vault “{name}” has a NEW publisher key — auto-update is paused until you "
             f"confirm it. Pinned {vault_format.fingerprint(pinned_pubkey)}, offered "
             f"{vault_format.fingerprint(offered_pubkey)}. Open Knowledge to review and Trust new key.")
@@ -655,7 +660,7 @@ def _close_cursor(cursor) -> None:
         pass
 
 
-def tick(app) -> int:
+def tick(app, pass_budget_seconds: float | None = None) -> int:
     """Stage E: check DUE auto-update subscriptions and apply CLEAN updates. Returns how many were
     checked. Called from scheduler.tick on the background thread, alongside the reindex pass.
 
@@ -664,6 +669,11 @@ def tick(app) -> int:
     are not shared across threads) and its stores over it, so apply's transaction is isolated to
     this pass. Each subscription runs behind its own bounded try/except: a dead or hostile host is
     logged (host only) and advances that vault's backoff — it can never throw out of the tick.
+
+    ``pass_budget_seconds`` (set by the scheduler) is an overall wall-clock budget on top of
+    netguard's per-fetch deadline: checked BETWEEN vaults, it abandons the remaining vaults for this
+    tick once the pass runs long — their last_checked is untouched (never processed), so they stay
+    due and retry next tick. None (a direct/test call) means no pass budget.
     """
     assert app is not None, "app required"
     key = getattr(app.state, "master_key", None)
@@ -684,7 +694,14 @@ def tick(app) -> int:
         due = _due_subscriptions(vaults, _now())
         assert len(due) <= _MAX_SUBSCRIPTION_CHECKS_PER_TICK, "due set must respect the per-tick bound"
         checked = 0
+        pass_start = _monotonic() if pass_budget_seconds is not None else 0.0
         for vault in due:  # bounded by _MAX_SUBSCRIPTION_CHECKS_PER_TICK
+            # Between vaults: abandon the rest of the pass if the overall budget is spent — the
+            # unprocessed vaults keep their last_checked (never touched here) and retry next tick.
+            if pass_budget_seconds is not None and _monotonic() - pass_start > pass_budget_seconds:
+                log.warning("vault auto-update: pass budget exceeded — %d vault(s) deferred to next tick",
+                            len(due) - checked)
+                break
             try:
                 _auto_update_one(vaults, knowledge, schedules, vault, embed_model)
             except Exception:  # last-resort net: never let one host wedge the tick (host only)

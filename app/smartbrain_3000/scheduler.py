@@ -45,6 +45,11 @@ _MAX_PER_TICK = 10  # max schedules fired per tick (verifiable bound)
 # false) and is hidden from the user's schedule list/get, so it can't be run, edited, or deleted.
 _VAULT_FEED_ID = "vault-updates"
 _VAULT_FEED_TITLE = "Vault updates"
+# Belt-and-suspenders over netguard's per-fetch deadline: even several slow-but-under-deadline hosts
+# must not consume the whole tick and starve due prompts. This overall wall-clock budget on the
+# vault pass is checked BETWEEN the (≤2) vaults; remaining vaults are abandoned for this tick (their
+# last_checked is untouched, so they retry next tick).
+_MAX_VAULT_PASS_SECONDS = 90
 # The background indexer works to a TIME budget, not a document count: 5-per-tick meant a 100-file
 # drop took ~10 minutes to index. 20s of a 30s tick drains a backlog steadily while still leaving
 # the single-threaded local model free most of the time (and it yields entirely to a live chat).
@@ -185,8 +190,14 @@ class ScheduleStore:
         schedule_runs has no DB-level FK to schedules, so cascade in code (children
         first) — matching kb.delete / history.delete_conversation — otherwise orphaned
         encrypted run rows accumulate forever and ride into every backup.
+
+        The reserved vault-updates carrier reads as absent everywhere else (get/list hide it), so a
+        delete by that id is a no-op here too — it can never be deleted out from under the feed,
+        matching the "can't be deleted" guarantee.
         """
         assert sid, "schedule id required"
+        if sid == _VAULT_FEED_ID:
+            return  # the reserved carrier is not a user schedule — never deletable
         self._conn.execute("DELETE FROM schedule_runs WHERE schedule_id = ?;", [sid])
         self._conn.execute("DELETE FROM schedules WHERE id = ?;", [sid])
 
@@ -492,7 +503,7 @@ def _auto_update_vaults(app) -> None:
     model server, so it runs regardless of the gateway breaker — a subscription stays current even
     when the local model is down."""
     try:
-        vault_sync.tick(app)
+        vault_sync.tick(app, pass_budget_seconds=_MAX_VAULT_PASS_SECONDS)
     except Exception as exc:  # must never kill the schedule tick
         log.warning("vault auto-update pass failed: %s", exc)
 

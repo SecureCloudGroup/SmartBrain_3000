@@ -71,6 +71,26 @@ def test_delete_schedule_cascades_run_history() -> None:
     assert conn.execute("SELECT COUNT(*) FROM schedule_runs WHERE schedule_id = ?;", [sid]).fetchone()[0] == 0
 
 
+def test_delete_schedule_cannot_remove_the_reserved_vault_carrier() -> None:
+    # get/list already hide the vault-updates carrier; delete_schedule must refuse it too, or a
+    # DELETE by that id would drop the carrier + cascade its runs and break the feed's INNER JOIN.
+    store, conn, _ = _store()
+    store.record_vault_run("complete", "Vault X updated to v3")  # lazily creates carrier + one run
+    assert conn.execute("SELECT COUNT(*) FROM schedule_runs WHERE schedule_id = ?;",
+                        [scheduler._VAULT_FEED_ID]).fetchone()[0] == 1
+
+    store.delete_schedule(scheduler._VAULT_FEED_ID)  # refused — the carrier is not a user schedule
+
+    assert conn.execute("SELECT COUNT(*) FROM schedules WHERE id = ?;",
+                        [scheduler._VAULT_FEED_ID]).fetchone()[0] == 1, "the carrier row survives"
+    assert conn.execute("SELECT COUNT(*) FROM schedule_runs WHERE schedule_id = ?;",
+                        [scheduler._VAULT_FEED_ID]).fetchone()[0] == 1, "its run history survives"
+
+    sid = store.add_schedule("t", "p", interval_minutes=0, start_in_minutes=0, model=None)
+    store.delete_schedule(sid)  # a normal schedule still deletes
+    assert store.get_schedule(sid) is None
+
+
 def test_content_encrypted_at_rest() -> None:
     store, conn, _ = _store()
     store.add_schedule("secret-title", "secret-prompt", interval_minutes=0, start_in_minutes=0, model=None)
