@@ -15,7 +15,7 @@ Open **Settings → Cloud providers** and add a key for any of:
 
 ![Settings → Cloud providers, with key fields for OpenAI, Anthropic, and Google](assets/02-providers.png)
 
-![Connect a model — one-tap local Ollama, or an encrypted cloud key](assets/gifs/02-connect-a-model.gif)
+![Connect a model — one-tap connect a detected local model, or add an encrypted cloud key](assets/gifs/02-connect-a-model.gif)
 
 Keys are stored **encrypted on your machine** and pushed to the local gateway
 while you're unlocked; locking removes them from the gateway again. The app never
@@ -26,27 +26,47 @@ returns a stored key over its API — only the fact that one is set.
 
 ## Local models (on your machine)
 
-Local models run on the **host** (not inside the container), and the app reaches
-them at `host.docker.internal`. Open **Settings → Local models** to connect them.
+Local models keep every prompt on your hardware — nothing goes to a provider. They run on
+the **host** (not inside the container), and the app reaches them at `host.docker.internal`.
+SmartBrain supports two backends and connects to either the same way:
 
-- **Ollama** — works on any OS. Install it, pull a model
-  (e.g. `ollama pull llama3.1:8b`), and point SmartBrain_3000 at it.
-- **MLX** — Apple-Silicon Macs only, run on the host.
+- **MLX** — Apple's on-device runtime for **Apple-Silicon Macs** (M-series). It's the fastest
+  path on a Mac, so it's the one to reach for first there. Install `mlx-lm`
+  (`pip install mlx-lm`) and start a server for a model:
 
-The panel shows whether each is reachable and which models it has.
+  ```sh
+  mlx_lm.server --host 0.0.0.0 --port 8888 --model mlx-community/Qwen2.5-7B-Instruct-4bit
+  ```
 
-> **Already running Ollama?** You usually don't need to touch this panel.
-> SmartBrain detects a local server on its default port and offers a one-tap
-> **Connect** — on the **Chat** screen when you have no model yet, and here under
-> the port field. The manual port/URL fields are for non-standard setups.
+- **Ollama** — works on **any OS** (macOS, Linux, Windows). [Install it](https://ollama.com/download),
+  then pull a model:
 
-![Settings → Local models showing a detected Ollama server with a Connect link](assets/03-local-models.png)
+  ```sh
+  ollama pull qwen2.5:7b-instruct
+  ```
+
+**Which model?** For local chat we suggest **Qwen2.5-7B-Instruct** — it follows instructions
+and drives the assistant's tools reliably at a size that runs comfortably on a laptop. That's
+`mlx-community/Qwen2.5-7B-Instruct-4bit` on MLX, or `qwen2.5:7b-instruct` on Ollama. Any
+tool-capable model works; the Chat model picker lists whatever your server has.
+
+Open **Settings → Local models** to connect a backend by port. The panel shows whether each
+is reachable and which models it has.
+
+> **Already running MLX or Ollama?** You usually don't need to touch this panel. SmartBrain
+> **detects** a local MLX (`:8888`) or Ollama (`:11434`) server on its default port and offers
+> a one-tap **Connect** — on the **Chat** screen when you have no model yet, and here under the
+> port field. The manual port/URL fields are for non-standard setups.
+
+![Settings → Local models showing a detected local server with a Connect link](assets/03-local-models.png)
 
 ## Embeddings (for Knowledge search)
 
 Semantic search in the [Knowledge base](03-features.md) needs an **embedding
-model**. The default is a **local** Ollama model — `nomic-embed-text:v1.5` — so
-your knowledge content stays on-box.
+model**. The default is a **local** `nomic-embed-text:v1.5`, served through Ollama, so
+your knowledge content stays on-box. The same embedding model also runs on **MLX**, so an
+Apple-Silicon Mac can run the whole stack MLX-only — point embeddings at your MLX server if
+you're not running Ollama.
 
 **The installer pulls this for you** when Ollama is present (and
 `python3 installer/install.py doctor` offers to). If you ever need to do it by hand,

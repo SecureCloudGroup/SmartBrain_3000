@@ -72,7 +72,7 @@ Your knowledge is also what external tools can read over [MCP](04-mcp.md).
 
 ## Vaults
 
-![Vaults — tick documents into a vault, search inside it, then export it with a separate key](assets/gifs/10-vaults.gif)
+![Vaults — group documents into a vault, search within it, then export it as an encrypted file to share](assets/gifs/10-vaults.gif)
 
 A **vault** is a named set of your knowledge documents — the unit you scope a search to,
 and the unit you share. Vaults live on the Knowledge page.
