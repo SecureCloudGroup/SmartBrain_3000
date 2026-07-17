@@ -75,6 +75,13 @@ def _set_unlocked(request: Request, master_key: bytes) -> None:
     assert len(master_key) == MASTER_KEY_BYTES, "master key must be 32 bytes"
     request.app.state.master_key = master_key
     request.app.state.secret_store = SecretStore(_conn(request), master_key)
+    # `vaults` MUST be provisioned before `kb`: a live `kb` with a still-None `vaults` is a fail-OPEN
+    # window in which the MCP read tools would serve imported-vault content WITHOUT its provenance
+    # banner (tagging short-circuits to "no tag" when vaults is None). Unlock runs on the threadpool
+    # sharing app.state with the concurrently-served MCP mount, so that window is reachable. Ordering
+    # vaults-then-kb makes it fail-CLOSED (kb None -> _knowledge() raises), mirroring _set_locked which
+    # clears kb before vaults for the same reason.
+    request.app.state.vaults = VaultStore(_conn(request), master_key)
     request.app.state.kb = KnowledgeBase(_conn(request), master_key)
     request.app.state.history = ChatHistory(_conn(request), master_key)
     request.app.state.memory = MemoryStore(_conn(request), master_key)
@@ -84,7 +91,6 @@ def _set_unlocked(request: Request, master_key: bytes) -> None:
     request.app.state.session_id = session_id
     request.app.state.approvals = ApprovalStore(_conn(request), master_key, session_id)
     request.app.state.schedules = ScheduleStore(_conn(request), master_key)
-    request.app.state.vaults = VaultStore(_conn(request), master_key)
     request.app.state.email = email_account.build_client(request.app.state.secret_store)  # None until connected
     try:
         gateway.provision_from_store(request.app.state.secret_store)

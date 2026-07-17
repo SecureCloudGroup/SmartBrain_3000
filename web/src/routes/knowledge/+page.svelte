@@ -725,10 +725,27 @@
     }
   }
 
-  // "Last checked" text for the card. last_checked is a UTC timestamp (null = never yet).
+  // "Last checked" text for the card — a relative phrase ("2 hours ago"), which reads at a glance
+  // and is itself the "is this stale?" signal. last_checked is a UTC timestamp (null = never yet).
+  function relativeSince(iso: string | null | undefined): string {
+    if (!iso) return "never";
+    const then = new Date(iso).getTime();
+    if (!Number.isFinite(then)) return "never";
+    const secs = Math.max(0, Math.round((Date.now() - then) / 1000));
+    if (secs < 60) return "just now";
+    const mins = Math.round(secs / 60);
+    if (mins < 60) return `${mins} minute${mins === 1 ? "" : "s"} ago`;
+    const hours = Math.round(mins / 60);
+    if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+    const days = Math.round(hours / 24);
+    return `${days} day${days === 1 ? "" : "s"} ago`;
+  }
   function lastCheckedText(v: Vault): string {
-    const when = v.source?.last_checked ? new Date(v.source.last_checked).toLocaleString() : "never";
-    return `Last checked ${when}`;
+    return `Last checked ${relativeSince(v.source?.last_checked)}`;
+  }
+  // Absolute timestamp for the hover title — the exact time backs up the relative phrase.
+  function lastCheckedAbs(v: Vault): string {
+    return v.source?.last_checked ? new Date(v.source.last_checked).toLocaleString() : "";
   }
 </script>
 
@@ -1012,6 +1029,9 @@
               <span class="badge">Subscribed</span>
               <span class="fp" title="The pinned publisher — every update must be signed by this identity">{v.pinned_fingerprint}</span>
               <span class="fp" title="Where this vault is hosted">{hostOf(v.source.url)}</span>
+              {#if v.source?.seq != null}
+                <span class="fp" title="The version you currently have (the seq you're pinned at)">v{v.source.seq}</span>
+              {/if}
             {:else}
               <span class="badge">Imported</span>
             {/if}
@@ -1021,6 +1041,7 @@
                  it: the fingerprint is what a subscriber actually pins. -->
             <span class="badge">Public</span>
             <span class="fp" title="Your publisher fingerprint — how subscribers identify you">{v.publisher_fingerprint}</span>
+            <span class="fp" title="The published version — subscribers pin this seq and pick up newer ones">v{v.version}</span>
           {/if}
           <button class="linklike" onclick={() => toggleMembers(v)} aria-expanded={openVaultId === v.id}>
             {v.doc_count} document{v.doc_count === 1 ? "" : "s"} {openVaultId === v.id ? "▾" : "▸"}
@@ -1084,9 +1105,15 @@
                 <option value="604800">Weekly</option>
               </select>
             {/if}
-            <span class="muted autoupd-when">{lastCheckedText(v)}</span>
+            <span class="muted autoupd-when" title={lastCheckedAbs(v)}>{lastCheckedText(v)}</span>
             {#if v.source?.last_error}
-              <span class="muted autoupd-stale" title="The last automatic check didn't get a fresh vault">· {v.source.last_error}</span>
+              <!-- Staleness: the last check couldn't reach a fresh vault. The backend keeps the
+                   detail HOST-only (never a URL path); it rides the hover title. -->
+              <span class="stale autoupd-stale" title={v.source.last_error}>· Last check failed — host may be unreachable</span>
+            {/if}
+            {#if !isTreeHost(v.source.url)}
+              <!-- Zip-host honesty: no per-file tree, so a check re-downloads the whole file. -->
+              <span class="muted autoupd-note" title="This host serves the vault as one file — checking re-downloads all of it">· checking re-downloads the whole file</span>
             {/if}
             {#if subErr[v.id]}<span class="error autoupd-err">{subErr[v.id]}</span>{/if}
           </div>
@@ -1098,11 +1125,22 @@
                verifies the new one with the publisher over a channel they trust. -->
           <div class="warn" style="margin-top:0.5rem; font-size:0.85rem">
             <p style="margin:0"><strong>The publisher's key changed — updates are blocked.</strong></p>
+            <!-- Both identities side by side, labeled: a human decides between them, never from one
+                 fingerprint alone. The pinned one is what they trusted; the offered one is new. -->
+            <div class="fp-compare">
+              <div class="fp-row">
+                <span class="fp-label">Pinned (trusted)</span>
+                <span class="fp">{v.pinned_fingerprint}</span>
+              </div>
+              <div class="fp-row">
+                <span class="fp-label">Offered (new)</span>
+                <span class="fp">{v.blocked_fingerprint}</span>
+              </div>
+            </div>
             <p style="margin:0.35rem 0 0">
-              Pinned <span class="fp">{v.pinned_fingerprint}</span> · now offered
-              <span class="fp">{v.blocked_fingerprint}</span>. This is either the publisher rotating
-              their key — or someone impersonating them. Verify the new fingerprint with the
-              publisher out-of-band (call them, ask in person) before trusting it.
+              This is either the publisher rotating their key — or someone impersonating them.
+              Verify the offered fingerprint with the publisher out-of-band (call them, ask in
+              person) before trusting it.
             </p>
             {#if remote.status === "idle"}
               {#if trustOpenId === v.id}
@@ -1227,7 +1265,15 @@
                 onkeydown={(e) => e.key === "Enter" && exportPass && exportVault(v)}
               />
               <button disabled={vaultBusy === v.id || !exportPass} onclick={() => exportVault(v)}>
-                {vaultBusy === v.id ? (exportMode === "open" ? "Publishing…" : "Sealing…") : "Export"}
+                {#if vaultBusy === v.id}
+                  {exportMode === "open" ? "Publishing…" : "Sealing…"}
+                {:else if exportMode === "open" && v.published_open}
+                  <!-- Already public: a re-export is the NEXT version. The seq auto-bumps server-side
+                       (bump_version), so the label just names where it lands. -->
+                  Export update (v{v.version + 1})
+                {:else}
+                  Export
+                {/if}
               </button>
             </div>
             {#if shareError}<p class="error" style="margin:0.4rem 0 0">{shareError}</p>{/if}
@@ -1245,7 +1291,8 @@
               <p class="muted" style="margin:0.75rem 0 0; font-size:0.85rem">
                 <strong>Published.</strong> Upload the file anywhere (Drive, S3, any web host) and share
                 the link — or unzip it and upload the folder to a static host so future updates only
-                re-upload what changed.
+                re-upload what changed. Replace the file in place to publish a new version; anyone
+                subscribed picks it up on their next update check.
               </p>
             {/if}
           </div>
@@ -1384,11 +1431,16 @@
     padding: 0.1rem 0.3rem;
   }
   .autoupd-when,
-  .autoupd-stale {
+  .autoupd-stale,
+  .autoupd-note {
     font-size: 0.8rem;
   }
   .autoupd-err {
     font-size: 0.8rem;
+  }
+  /* A failed check: not an error the user caused, but a signal the card must not hide. */
+  .stale {
+    color: var(--danger, #c0392b);
   }
 
   /* The expanded "what's inside" list — compact, one document per row. */
@@ -1424,6 +1476,29 @@
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: 0.7rem;
     color: var(--muted);
+  }
+
+  /* The key-change comparison: the pinned and offered fingerprints on their own labeled rows, so
+     the two identities are read side by side (the one human trust decision the model rests on). */
+  .fp-compare {
+    margin: 0.5rem 0 0;
+    display: grid;
+    gap: 0.25rem;
+  }
+  .fp-row {
+    display: flex;
+    gap: 0.5rem;
+    align-items: baseline;
+    flex-wrap: wrap;
+  }
+  .fp-label {
+    min-width: 8rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+  }
+  .fp-row .fp {
+    font-size: 0.85rem;
+    color: var(--text);
   }
 
   /* The no-take-backs warning shown BEFORE a public export (same treatment as setup's .warn). */

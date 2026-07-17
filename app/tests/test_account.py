@@ -75,6 +75,34 @@ def test_secret_api_rejects_non_provider_keys(client: TestClient) -> None:
     assert client.delete("/api/secrets/provider:openai:api_key").status_code == 200
 
 
+def test_unlock_provisions_vaults_before_kb(tmp_path, monkeypatch) -> None:
+    # Regression (adversarial review, Stage F): a live `kb` with a still-None `vaults` is a fail-OPEN
+    # window in which the MCP read tools serve imported-vault content WITHOUT its provenance banner.
+    # _set_unlocked must build vaults before kb so the window fails closed; assert that ordering.
+    from smartbrain_3000 import account
+
+    order: list[str] = []
+    real_kb, real_vaults = account.KnowledgeBase, account.VaultStore
+
+    def spy_kb(*a, **k):
+        order.append("kb")
+        return real_kb(*a, **k)
+
+    def spy_vaults(*a, **k):
+        order.append("vaults")
+        return real_vaults(*a, **k)
+
+    monkeypatch.setattr(account, "KnowledgeBase", spy_kb)
+    monkeypatch.setattr(account, "VaultStore", spy_vaults)
+    monkeypatch.setenv("SMARTBRAIN_DB_PATH", str(tmp_path / "test.duckdb"))
+    from smartbrain_3000.main import create_app
+
+    with TestClient(create_app()) as c:
+        c.post("/api/account/setup", json={"passphrase": "correct-horse"})
+
+    assert order.index("vaults") < order.index("kb"), f"kb provisioned before vaults: {order}"
+
+
 def test_unlock_with_passphrase(client: TestClient) -> None:
     client.post("/api/account/setup", json={"passphrase": "correct-horse"})
     client.post("/api/account/lock")
