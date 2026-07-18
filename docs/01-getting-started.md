@@ -4,7 +4,7 @@ SmartBrain_3000 is a **local-first, single-user AI assistant** that runs entirel
 on your own machine within a container (Docker). Your data and credentials stay on-box, encrypted
 at rest. The only outbound calls it makes are to services you explicitly opt into:
 the AI providers you configure, and Google's APIs if you connect Gmail. See
-[Privacy &amp; security](06-privacy-security.md) for the full picture.
+[Privacy &amp; security](07-privacy-security.md) for the full picture.
 
 ## What you need
 
@@ -121,7 +121,7 @@ pulls the latest code, rebuilds the image, restarts the stack, and verifies it's
 before making changes and runs on the host, never inside the container.
 
 Your data is kept in Docker volumes on your machine and is left untouched by an update. (More on
-backups: [Backup &amp; recovery](05-backup-recovery.md).)
+backups: [Backup &amp; recovery](06-backup-recovery.md).)
 
 ## Troubleshooting
 
@@ -145,7 +145,7 @@ Most first-run problems are one of these:
   pulled. On the Desktop run `ollama pull nomic-embed-text:v1.5` (the installer and
   `doctor` try to do this for you), then **Reindex** in Knowledge.
 - **The browser warns about the certificate** (only if you set up LAN/HTTPS). Trust
-  the local mkcert CA — see [Remote access](07-remote-access.md).
+  the local mkcert CA — see [Remote access](08-remote-access.md).
 - **"Database is newer than this app" / a restore is refused.** Pointing an older build
   at a newer data directory, or restoring a backup from a newer version, is refused on
   purpose to prevent data loss. Upgrade SmartBrain_3000 first (`install.py update`), then

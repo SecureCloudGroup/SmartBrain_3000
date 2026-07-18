@@ -76,7 +76,7 @@ keeps the encryption promise intact while still giving fast, whole-corpus search
 
 ## WebRTC signaling broker is single-operator
 
-[Remote access](07-remote-access.md) uses a signaling broker that is
+[Remote access](08-remote-access.md) uses a signaling broker that is
 **single-operator** by design. The hosted broker is **tokenless** (open
 registration, bounded by a desktop-count cap and per-registration rate limits),
 and the cryptographic guarantee that your phone is really talking to **your**
@@ -95,6 +95,6 @@ bandwidth before it expires.
 ## Next
 
 - [Using SmartBrain_3000](03-features.md) — what each area does, day to day.
-- [Privacy & security](06-privacy-security.md) — what protects your data and the
+- [Privacy & security](07-privacy-security.md) — what protects your data and the
   real world limits.
 - Back to the [documentation index](README.md).

@@ -36,7 +36,7 @@ control. Here's the model in plain terms, including the real world limits.
   you turn it on, your Desktop dials out to a content-blind signaling node to broker the
   connection — the SecureCloudGroup-hosted node (`rtc.securecloudgroup.com`) by default,
   or your own via `SMARTBRAIN_SIGNALING_URL`. It carries only connection metadata, never
-  your data (the link is end-to-end encrypted). See [Remote access](07-remote-access.md).
+  your data (the link is end-to-end encrypted). See [Remote access](08-remote-access.md).
 - **Public vaults (only if you subscribe).** Subscribing to a vault by URL — and any
   **Check for updates** or scheduled auto-update on it — fetches the vault from the host
   in that URL (public internet hosts only, never localhost or LAN addresses). Recurring
@@ -54,7 +54,7 @@ control. Here's the model in plain terms, including the real world limits.
   consequential happens without your sign-off.
 - **Single-user, personal scale.** SmartBrain_3000 is built for one owner on one
   machine. Several boundaries — one global unlock, a single-writer database, no
-  key at rest — are deliberate. See [Design limits](08-design-limits.md) for the
+  key at rest — are deliberate. See [Design limits](09-design-limits.md) for the
   full list and the reasoning.
 
 ## Reporting an issue

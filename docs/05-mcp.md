@@ -52,5 +52,5 @@ The client can then call the read-only Knowledge tools (search and read your doc
 
 ## Next
 
-- [Backup & recovery](05-backup-recovery.md).
-- [Privacy & security](06-privacy-security.md).
+- [Backup & recovery](06-backup-recovery.md).
+- [Privacy & security](07-privacy-security.md).

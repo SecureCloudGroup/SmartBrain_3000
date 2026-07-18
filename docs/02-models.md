@@ -84,4 +84,4 @@ sends your documents there on every reindex — only do that if you accept that 
 ## Next
 
 - [Using SmartBrain_3000](03-features.md) — start chatting and add knowledge.
-- [Connect external tools](04-mcp.md) — let a desktop AI client (e.g. Claude Desktop) read your Knowledge.
+- [Connect external tools](05-mcp.md) — let a desktop AI client (e.g. Claude Desktop) read your Knowledge.

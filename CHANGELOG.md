@@ -26,6 +26,9 @@ to know when a release changes behavior.
   landing page gains a Vaults pillar and drops an overstated "nothing is sent to us, ever"
   (the optional phone-access relay exists), the MCP page notes imported-content provenance
   labels, and getting-started notes the paired phone updates itself.
+- Vaults are now a first-class guide: **docs/04-vaults.md** ("Share knowledge with Vaults" —
+  it also headlines the in-app Help) instead of a subsection buried in Using SmartBrain_3000;
+  the later guides renumbered 05–09 with every cross-link updated.
 
 **Migration:** subscribing to a public vault records its upstream source in new encrypted
 columns — additive and forward-only, applied automatically on first launch (#77).

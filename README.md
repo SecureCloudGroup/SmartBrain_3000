@@ -36,7 +36,7 @@ on your own computer — macOS, Linux, or Windows.
 - **Group and share knowledge with Vaults.** Bundle documents into a **vault** to
   scope a search, share it as an encrypted file, or **publish it publicly** so others
   can **subscribe by URL** and stay up to date — signed, verified, and re-encrypted
-  under each reader's own passphrase. See [Vaults](docs/03-features.md#vaults).
+  under each reader's own passphrase. See [Share knowledge with Vaults](docs/04-vaults.md).
 
 ## Quickstart
 
@@ -113,7 +113,7 @@ These are advanced tiers — none are needed for the Quickstart above:
   [docs](docs/03-features.md#email-gmail).
 - **Your phone, from anywhere** — pair a phone to reach your assistant on Wi-Fi
   or cellular over an end-to-end-encrypted WebRTC link, with no router
-  port-forwarding. Off by default. See [Remote access](docs/07-remote-access.md).
+  port-forwarding. Off by default. See [Remote access](docs/08-remote-access.md).
 
 Full guide: **[docs/](docs/README.md)** (also available in-app under **Help**).
 
