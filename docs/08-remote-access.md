@@ -67,7 +67,7 @@ at any time. A revoked device can no longer connect.
   it. (The QR only opens the site; it carries no secret.)
 
 This changes *where you can reach the app from*, not what protects your data. See
-[Privacy &amp; security](06-privacy-security.md).
+[Privacy &amp; security](07-privacy-security.md).
 
 ## On your own Wi-Fi (LAN, HTTPS)
 
@@ -132,4 +132,4 @@ To run your own node instead:
 
 ## Next
 
-- [Privacy &amp; security](06-privacy-security.md) — what's protected and the real world limits.
+- [Privacy &amp; security](07-privacy-security.md) — what's protected and the real world limits.

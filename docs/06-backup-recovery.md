@@ -59,4 +59,4 @@ recovered — that's the cost of having no backdoor. Keep the Emergency Kit safe
 
 ## Next
 
-- [Privacy & security](06-privacy-security.md) — what's protected and what leaves your machine.
+- [Privacy & security](07-privacy-security.md) — what's protected and what leaves your machine.

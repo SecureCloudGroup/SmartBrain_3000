@@ -86,13 +86,14 @@ def main() -> int:
             print("   ", kit["recovery_key"])
             print("=" * 72)
 
-        # Sync docs: title == filename. No content-update endpoint exists, so a changed
-        # doc is delete + re-add; the vault attach below re-links the fresh ids.
-        existing = {d["title"]: d["id"] for d in api("GET", "/api/kb")["documents"]}
+        # Full-sync docs: title == filename. The instance exists ONLY to publish docs/, so
+        # anything not in the current file set (renamed/removed upstream) is deleted — else a
+        # rename would ship both the old and new doc. No content-update endpoint exists, so a
+        # changed doc is delete + re-add; the vault attach below re-links the fresh ids.
+        for d in api("GET", "/api/kb")["documents"]:
+            api("DELETE", f"/api/kb/{d['id']}")
         doc_ids = []
         for path in DOCS:
-            if path.name in existing:
-                api("DELETE", f"/api/kb/{existing[path.name]}")
             doc_ids.append(api("POST", "/api/kb", {
                 "title": path.name, "content": path.read_text(encoding="utf-8"),
             })["id"])
