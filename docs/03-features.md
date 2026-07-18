@@ -134,6 +134,13 @@ and the unit you share. Vaults live on the Knowledge page.
   on its own** — a changed key still blocks and waits for you to confirm it. Each run reports what it
   did **in the chat feed** ("updated to v3 — 2 documents changed", or a "new publisher key" notice).
 
+**Try it now — the official example vault.** This user guide is itself published as a public
+vault. Use **Subscribe to a public vault** and paste
+`https://smartbrain.securecloudgroup.com/vaults/smartbrain-docs.sbvault` — on first subscribe
+you'll see the publisher fingerprint being pinned; ours is `SB-3WZM-7CEI-GPJ7-3MLC`. If it
+matches, you're talking to us. The whole guide lands in your Knowledge, searchable and askable,
+and new versions are offered as updates whenever the docs change.
+
 Creating, adding, and searching a vault work everywhere, including a paired phone. **Exporting and
 importing a vault are done on the Desktop** — sharing a vault's contents, or bringing new ones in, is
 sensitive, so those actions live in the Desktop app.

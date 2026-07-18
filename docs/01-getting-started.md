@@ -110,6 +110,7 @@ version in the background; when one is ready it shows **Install update now** and
 start** in the menu. Click **Install update now** to apply it immediately, or just keep working and
 it installs the next time you start SmartBrain. Either way it always jumps straight to the newest
 version, even if you're several behind. The version you're on is shown under the logo, top-left.
+A **paired phone** needs nothing either: the phone app refreshes itself the next time you open it.
 
 The menu-bar app itself (the small launcher, not the app) updates through however you installed it —
 **Homebrew:** `brew update && brew upgrade --cask smartbrain`; **Scoop:** `scoop update smartbrain` —
