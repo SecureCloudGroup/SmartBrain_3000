@@ -42,7 +42,9 @@ The client can then call the read-only Knowledge tools (search and read your doc
 
 ## What it can and can't do
 
-- **Can:** search and read your Knowledge base.
+- **Can:** search and read your Knowledge base. Content that came from an imported or
+  subscribed vault is labeled with its provenance (which vault, whose key), so a client
+  can treat third-party knowledge as data rather than instructions.
 - **Can't:** see your credentials, write or delete anything, or reach other
   features — and by default it's reachable only from your own machine (loopback); it
   follows the app's host binding, so a LAN/HTTPS setup that exposes the app exposes it

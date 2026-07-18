@@ -18,7 +18,7 @@ sandboxing of one "user" from another within the same instance.
 
 **Why:** the product is a personal assistant for one owner on one machine.
 Adding multi-user identity, per-user keys, and access control would add a large
-surface for little benefit at this scale. One owner, one key, one vault.
+surface for little benefit at this scale. One owner, one key, one encrypted store.
 
 ## Single-writer embedded database (DuckDB)
 

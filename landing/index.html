@@ -83,7 +83,7 @@
       .hero .sub { margin-top: 0.9rem; font-size: 0.9rem; color: var(--muted); }
       .hero .sub a { color: var(--muted); }
 
-      .pillars { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; padding: 1rem 0 2.5rem; }
+      .pillars { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 1rem; padding: 1rem 0 2.5rem; }
       .pillar { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1.25rem; }
       .pillar h3 { margin: 0.2rem 0 0.4rem; font-size: 1.05rem; }
       .pillar p { margin: 0; color: var(--muted); font-size: 0.92rem; }
@@ -154,12 +154,17 @@
         <div class="pillar">
           <div class="ico">🔒</div>
           <h3>Fully local</h3>
-          <p>Runs in Docker on your machine. There is no SmartBrain server — nothing is sent to us, ever.</p>
+          <p>Runs in Docker on your machine. No accounts, no telemetry — the only SmartBrain-operated service is an optional, content-blind relay for phone access.</p>
         </div>
         <div class="pillar">
           <div class="ico">🗝️</div>
           <h3>You own your data</h3>
           <p>Your knowledge base, notes, and secrets live in a local database, encrypted at rest under your passphrase.</p>
+        </div>
+        <div class="pillar">
+          <div class="ico">📦</div>
+          <h3>Share with Vaults</h3>
+          <p>Group knowledge into vaults and share them — sealed for someone you trust, or published publicly so anyone can subscribe by URL and get signed updates.</p>
         </div>
         <div class="pillar">
           <div class="ico">🧠</div>

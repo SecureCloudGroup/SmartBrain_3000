@@ -16,6 +16,16 @@ to know when a release changes behavior.
   publisher pinning, check for and apply updates (the pinned publisher enforces every
   update), opt in to scheduled auto-updates, and the finishing UI surfaces plus an MCP
   provenance door (#76, #77, #78, #79, #80).
+- The official **example vault**: the user guide itself, published as a public vault at
+  `https://smartbrain.securecloudgroup.com/vaults/smartbrain-docs.sbvault` — subscribe by
+  URL to try Vaults in one paste — plus the builder that mints and updates it
+  (`tools/example-vaults/build.py`).
+
+### Changed
+- Docs & landing truth pass: the privacy page discloses vault-subscription fetches, the
+  landing page gains a Vaults pillar and drops an overstated "nothing is sent to us, ever"
+  (the optional phone-access relay exists), the MCP page notes imported-content provenance
+  labels, and getting-started notes the paired phone updates itself.
 
 **Migration:** subscribing to a public vault records its upstream source in new encrypted
 columns — additive and forward-only, applied automatically on first launch (#77).

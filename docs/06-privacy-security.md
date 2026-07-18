@@ -37,6 +37,10 @@ control. Here's the model in plain terms, including the real world limits.
   connection — the SecureCloudGroup-hosted node (`rtc.securecloudgroup.com`) by default,
   or your own via `SMARTBRAIN_SIGNALING_URL`. It carries only connection metadata, never
   your data (the link is end-to-end encrypted). See [Remote access](07-remote-access.md).
+- **Public vaults (only if you subscribe).** Subscribing to a vault by URL — and any
+  **Check for updates** or scheduled auto-update on it — fetches the vault from the host
+  in that URL (public internet hosts only, never localhost or LAN addresses). Recurring
+  checks happen only if you turned auto-update on.
 - **Nothing else.** Beyond the above, the app makes no outbound calls.
 
 ## Honest limits
