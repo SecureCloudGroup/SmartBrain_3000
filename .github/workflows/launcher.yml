@@ -29,7 +29,7 @@ jobs:
         # The launcher bakes in a copy of the release compose file. If it drifts from the real one
         # under compose/, users would run a stale stack. Fail loudly rather than ship the mismatch.
         run: diff compose/docker-compose.release.yml launcher/docker-compose.release.yml
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: launcher/go.mod
       - name: gofmt
@@ -48,7 +48,7 @@ jobs:
       contents: write # attach the .app to the release on a tag
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: launcher/go.mod
       - name: Build universal binary + bundle SmartBrain.app
@@ -96,7 +96,7 @@ jobs:
           codesign --force --deep --sign - "$APP"
           codesign --verify --deep --strict "$APP"
           ditto -c -k --keepParent "$APP" build/SmartBrain-macos.zip
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: SmartBrain-macos
           path: launcher/build/SmartBrain-macos.zip
@@ -115,7 +115,7 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: launcher/go.mod
       - name: Build SmartBrain.exe
@@ -124,7 +124,7 @@ jobs:
         run: |
           go build -o build/SmartBrain.exe .
           Compress-Archive -Path build/SmartBrain.exe -DestinationPath build/SmartBrain-windows.zip -Force
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: SmartBrain-windows
           path: launcher/build/SmartBrain-windows.zip
@@ -152,9 +152,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       # Hash the SAME zips that were just published, so the manifests can never point at a stale build.
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with: { name: SmartBrain-macos, path: dist }
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with: { name: SmartBrain-windows, path: dist }
 
       - name: Rewrite manifests for this version
