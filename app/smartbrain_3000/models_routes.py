@@ -31,6 +31,10 @@ CAPABILITY_LABELS = {
     "reasoning": "Reasoning",
     "agent": "Agent tasks (schedules)",
     "embedding": "Embedding (semantic search)",
+    # Bulk document summarization (the background summary tree). No built-in default:
+    # unset falls back to "chat" — but a big-context/cloud model here turns a book-size
+    # summary from an hours-long local trickle into minutes.
+    "summarize": "Document summaries",
 }
 
 

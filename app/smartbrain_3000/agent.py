@@ -20,7 +20,9 @@ from . import gateway, tools
 
 log = logging.getLogger(__name__)
 
-_MAX_STEPS = 6  # model round-trips per turn
+_MAX_STEPS = 8  # model round-trips per turn (raised 6->8 once the finalize rescue existed:
+                # multi-document questions were routinely two steps short, and an exhausted
+                # budget now degrades to an answer instead of an apology)
 _MAX_TOOL_CALLS = 8  # tool executions per turn (carried across a pause)
 _MAX_SOURCES = 20  # citations per turn (P10 #2 — a runaway hit list must not flood the UI)
 # The citation fields a knowledge-tool result may carry (mirrors kb.KnowledgeBase._hit).

@@ -50,6 +50,18 @@ def _map_call(model: str, title: str, focus: str, chunk: str, idx: int, total: i
     return gateway.completion_text(data).strip()
 
 
+def map_chunk(model: str, title: str, focus: str, chunk: str, idx: int, total: int) -> str:
+    """Public single-chunk map — the background tree builder summarizes one chunk per
+    call so a completed chunk is durable progress (resumable across ticks)."""
+    return _map_call(model, title, focus, chunk, idx, total)
+
+
+def reduce_parts(model: str, title: str, focus: str, parts: list[str]) -> str:
+    """Public single reduce — merge chunk summaries into one document summary."""
+    assert parts, "parts required"
+    return _reduce_call(model, title, focus, parts)
+
+
 def _reduce_call(model: str, title: str, focus: str, parts: list[str]) -> str:
     joined = "\n\n".join(f"## Section {i + 1}\n{p}" for i, p in enumerate(parts))
     system = (

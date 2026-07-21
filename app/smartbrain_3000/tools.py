@@ -66,6 +66,9 @@ class ToolContext:
     # API keys exactly like ``email`` encapsulates the Gmail token. None falls back to the
     # keyless DuckDuckGo path, so search always works.
     websearch: object | None = None
+    # The background summary tree (docsummaries.SummaryStore). None simply means
+    # summarize_document works live, uncached — a degradation, never a failure.
+    summaries: object | None = None
 
 
 @dataclass(frozen=True)
@@ -151,15 +154,18 @@ def _kb_search(ctx: ToolContext, args: dict) -> dict:
     assert ctx.kb is not None, "knowledge base unavailable"
     assert args.get("query"), "query required"
     limit = min(max(int(args.get("limit", 5)), 1), 20)
+    # doc_id narrows the search to ONE document (B2): pointed questions on a huge
+    # document ("who are the sponsors?") are retrieval problems, not summaries.
+    scope = {args["doc_id"]} if args.get("doc_id") else None
     model = gateway.embed_model(getattr(ctx.kb, "conn", None))
     try:
         vector = gateway.embed(args["query"], model)
     except Exception as exc:  # embed model unavailable — keyword-only, observably
         log.warning("kb_search: semantic unavailable, keyword-only: %s", exc)
-        results = ctx.kb.search(args["query"], limit=limit)
+        results = ctx.kb.search(args["query"], limit=limit, scope=scope)
         _tag_imported(ctx, results)
         return {"results": results, "degraded": True}
-    results = ctx.kb.hybrid_search(args["query"], vector, model, limit=limit)
+    results = ctx.kb.hybrid_search(args["query"], vector, model, limit=limit, scope=scope)
     _tag_imported(ctx, results)
     return {"results": results, "degraded": False}
 
@@ -238,31 +244,67 @@ def _read_document(ctx: ToolContext, args: dict) -> dict:
     }
 
 
-def _summarize_document(ctx: ToolContext, args: dict) -> dict:
-    """OBSERVE: summarize a saved document of ANY length via server-side map-reduce (one tool call).
+_LIVE_SUMMARY_BUDGET = 90.0  # seconds a chat turn will spend summarizing UNCACHED text live
 
-    Resolve by ``doc_id`` or ``query``/``title``, load the full text, split it, summarize each part, and
-    merge — so it handles hundreds of pages a single context could never hold. On a very large document
-    with a slow model it may hit an internal time budget and summarize only the covered head, returning
-    ``truncated: true`` with ``chars_covered``. Optional ``focus`` steers the summary toward a topic."""
+
+def _tree_store(ctx: ToolContext):
+    """The turn's SummaryStore (carried on the ToolContext like every domain store)."""
+    return ctx.summaries
+
+
+def _summarize_document(ctx: ToolContext, args: dict) -> dict:
+    """OBSERVE: summarize a saved document of ANY length — cached tree first, live second.
+
+    The background pass (scheduler) pre-builds a summary tree per document, so the
+    common case is an INSTANT cached answer regardless of size. A focus question maps
+    over the stored chunk summaries (~50x smaller than the raw text — seconds, full
+    coverage). While a big document's tree is still building, the covered chunks are
+    reduced live and the answer says so (``truncated`` + ``chars_covered``); a document
+    with no tree yet falls back to the original live map-reduce under an interactive
+    time budget."""
     assert ctx.model, "summarize requires a resolved model"
     doc = _resolve_doc(ctx, args)
+    content = doc.get("content") or ""
+    focus = str(args.get("focus", "") or "")
+    line = _provenance_line(ctx, doc["id"])
+    header = {"id": doc["id"], **({"provenance": line} if line else {})}
+    store = _tree_store(ctx)
+    if store is not None and content:
+        from . import docsummaries
+
+        total = len(content)
+        if not focus:
+            cached = store.doc_summary(doc["id"], total)
+            if cached is not None:
+                return {**header, "title": doc.get("title", ""), "summary": cached,
+                        "chunks": docsummaries.expected_chunks(total), "chars_covered": total,
+                        "total_chars": total, "truncated": False, "passes": 0, "cached": True}
+        parts = store.chunk_texts(doc["id"], total)
+        if parts:
+            # Focus or partial coverage: map-reduce over the STORED summaries — tiny input,
+            # full (or honestly partial) coverage in seconds even on a local model.
+            covered = min(len(parts) * docsummaries.CHUNK_CHARS, total)
+            result = docsum.summarize_document(
+                ctx.model, doc.get("title", ""), "\n\n".join(parts),
+                focus=focus, budget=_LIVE_SUMMARY_BUDGET,
+            )
+            complete = covered >= total
+            return {**header, "title": doc.get("title", ""), "summary": result["summary"],
+                    "chunks": len(parts), "chars_covered": covered, "total_chars": total,
+                    "truncated": (not complete) or result["truncated"],
+                    "passes": result["passes"], "cached": True}
+    # No tree yet (fresh doc / background pass hasn't reached it): live map-reduce,
+    # bounded to an interactive budget — a huge document returns the covered head
+    # honestly, and the background pass finishes the full tree for next time.
     cap = gateway.result_cap_for(getattr(ctx.kb, "conn", None), ctx.model)
     result = docsum.summarize_document(
-        ctx.model,
-        doc.get("title", ""),
-        doc.get("content") or "",
-        focus=str(args.get("focus", "") or ""),
-        chunk_chars=docsum.chunk_chars_for(cap),
+        ctx.model, doc.get("title", ""), content,
+        focus=focus, chunk_chars=docsum.chunk_chars_for(cap), budget=_LIVE_SUMMARY_BUDGET,
     )
     # `id` rides along so the chat citation built from this result can deep-link the
     # document in Knowledge (a title alone can't address it).
-    line = _provenance_line(ctx, doc["id"])
     return {
-        "id": doc["id"],
-        # Before `summary` for the same reason read_document tags before `content`: the warning
-        # must be read before the (summarized, still untrusted) imported text.
-        **({"provenance": line} if line else {}),
+        **header,
         **{k: result[k] for k in ("title", "chunks", "chars_covered", "total_chars", "truncated", "passes", "summary")},
     }
 
@@ -586,13 +628,15 @@ _TOOLS: tuple[Tool, ...] = (
                     "(an overview of any length), or list_documents (the whole catalog) — a snippet is "
                     "not the full text. Each result carries 'source' (the original file or URL) and "
                     "'page'. CITE them when you answer from a document — e.g. \"(Lease.pdf, p.12)\" — so "
-                    "the user can check the claim against the original.",
+                    "the user can check the claim against the original. Pass doc_id to search "
+                    "INSIDE one document — the right way to find a specific fact in a huge one.",
         params_schema={
             "type": "object",
             "additionalProperties": False,
             "properties": {
                 "query": {"type": "string"},
                 "limit": {"type": "integer"},
+                "doc_id": {"type": "string"},
             },
             "required": ["query"],
         },

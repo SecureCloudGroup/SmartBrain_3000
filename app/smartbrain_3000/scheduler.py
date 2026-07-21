@@ -24,7 +24,7 @@ from concurrent.futures import ThreadPoolExecutor
 import duckdb
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-from . import agent, consent, gateway, ingest, search, tools, usage, vault_sync
+from . import agent, consent, docsummaries, gateway, ingest, search, tools, usage, vault_sync
 from .approvals import ApprovalStore
 from .audit import AuditLog
 from .kb import KnowledgeBase
@@ -495,6 +495,64 @@ def _auto_reindex(cursor, key: bytes) -> None:
         _breaker_record(success=False)
 
 
+# B1: how much of a tick the summary-tree builder may spend. One map chunk on a local
+# 9B runs ~15-30s, so a tick usually advances the tree by exactly one chunk; a big-
+# context cloud model (the "summarize" routing slot) does several. The budget is
+# checked BEFORE each model call — an in-flight call is never interrupted.
+_AUTO_SUMMARIZE_SECONDS = 25.0
+_SUMMARIZE_SCAN_DOCS = 200  # newest documents considered per pass (P10 #2)
+
+
+def _auto_summarize(cursor, key: bytes) -> None:
+    """Advance the background summary tree within a per-tick budget. Never raises.
+
+    Mirrors ``_auto_reindex``'s discipline: skip when the breaker is open or a
+    foreground chat holds the single-threaded local model; record breaker outcomes.
+    Sweeps rows of deleted documents, restarts stale trees (document changed), and
+    does chunk maps / the final reduce via summarize.py's calls — resumable at any
+    point because every completed chunk is a row.
+    """
+    if _breaker_open():
+        return
+    try:
+        if not gateway.local_available():
+            return  # yield to the user's chat; a later tick resumes
+        from . import summarize as docsum
+
+        kb = KnowledgeBase(cursor, key)
+        store = docsummaries.SummaryStore(cursor, key)
+        docs = [{"id": d[0], "title": d[1], "content": d[2]}
+                for d in kb.iter_documents(_SUMMARIZE_SCAN_DOCS)]
+        store.sweep_stale({d["id"] for d in docs})
+        routes = gateway.load_routes(cursor)
+        model = gateway.resolve_model("summarize", routes) or gateway.resolve_model("chat", routes)
+        if not model:
+            return  # nothing to summarize WITH yet (fresh install, no model routed)
+        deadline = time.monotonic() + _AUTO_SUMMARIZE_SECONDS
+        for _ in range(docsummaries._MAX_TRACKED_DOCS):  # bounded (P10 #2); budget binds first
+            if time.monotonic() > deadline:
+                break
+            work = store.next_work(docs)
+            if work is None:
+                break  # tree is complete for every scanned document
+            doc, length = work["doc"], len(work["doc"]["content"])
+            if work["kind"] == "chunk":
+                idx = work["idx"]
+                chunk = doc["content"][idx * docsummaries.CHUNK_CHARS:(idx + 1) * docsummaries.CHUNK_CHARS]
+                text = docsum.map_chunk(model, doc["title"], "", chunk, idx,
+                                        docsummaries.expected_chunks(length))
+                store.put(doc["id"], idx, text, length, model)
+            else:  # reduce: all chunks summarized -> one whole-document summary
+                parts = store.chunk_texts(doc["id"], length)
+                text = docsum.reduce_parts(model, doc["title"], "", parts)
+                store.put(doc["id"], docsummaries.DOC_IDX, text, length, model)
+                log.info("summary tree complete for %r (%d chunks)", doc["title"][:60], len(parts))
+        _breaker_record(success=True)
+    except Exception as exc:  # summaries are a nicety — never let them break a tick
+        log.debug("auto-summarize skipped: %s", exc)
+        _breaker_record(success=False)
+
+
 def _auto_update_vaults(app) -> None:
     """Stage E hook: run the vault auto-update pass, isolated so a failure there can NEVER stop the
     scheduler from firing due schedules. It builds its own per-thread cursor and swallows every
@@ -562,6 +620,7 @@ def _run_one(app, key: bytes, session: str, schedule: dict) -> dict:
             schedules=store,  # same per-thread cursor as the other stores (turn-cursor invariant)
             vaults=VaultStore(cursor, key),  # so KB tools can tag imported-vault content
             websearch=websvc,
+            summaries=docsummaries.SummaryStore(cursor, key),
         )
         audit = AuditLog(cursor, key)
         approvals = ApprovalStore(cursor, key, session)
@@ -594,6 +653,7 @@ def tick(app) -> int:
     try:
         eager_reindex(cursor, key)  # one-shot post-upgrade catch-up (empty embeddings + docs)
         _auto_reindex(cursor, key)  # keep semantic search current without a manual Reindex
+        _auto_summarize(cursor, key)  # B1: build the background summary tree, one chunk at a time
         _auto_update_vaults(app)    # Stage E: apply due subscription updates (model-independent)
         if _breaker_open():  # B11: gateway is known-bad — don't pile turns onto a dead model
             return 0
