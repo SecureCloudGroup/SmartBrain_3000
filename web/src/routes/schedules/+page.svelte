@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Icon from "$lib/components/Icon.svelte";
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
   import { account } from "$lib/account.svelte";
@@ -278,7 +279,7 @@
             <span class="muted">{repeatLabel(s.interval_minutes)}</span>
             <button class="secondary" disabled={busyId === s.id} onclick={() => startEdit(s)}>Edit</button>
             <button disabled={busyId === s.id} onclick={() => runNow(s)}>{busyId === s.id ? "Running…" : "Run now"}</button>
-            <button class="del" title="Delete" aria-label="Delete schedule" onclick={() => remove(s.id)}>✕</button>
+            <button class="del" title="Delete" aria-label="Delete schedule" onclick={() => remove(s.id)}><Icon name="x" size={14} /></button>
           </div>
           <p class="muted" style="margin:0.4rem 0 0">{s.prompt}</p>
           <p class="muted" style="margin:0.2rem 0 0; font-size:0.85em">

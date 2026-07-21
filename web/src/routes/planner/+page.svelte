@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Icon from "$lib/components/Icon.svelte";
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
   import { account } from "$lib/account.svelte";
@@ -263,7 +264,7 @@
             </span>
             {#if t.due_date}<span style="white-space:nowrap; {isOverdue(t) ? 'color:var(--danger); font-weight:600' : 'color:var(--muted)'}">{dueLabel(t)}{#if isOverdue(t)} · overdue{/if}</span>{/if}
             <button class="secondary" title="Edit" onclick={() => startEdit(t)}>Edit</button>
-            <button class="del" title="Delete" aria-label="Delete task" onclick={() => remove(t.id)}>✕</button>
+            <button class="del" title="Delete" aria-label="Delete task" onclick={() => remove(t.id)}><Icon name="x" size={14} /></button>
           </div>
         {/if}
       {/each}

@@ -12,6 +12,8 @@ to know when a release changes behavior.
 ## [Unreleased]
 
 ### Added
+- A real icon system: a vendored Lucide subset (ISC) rendered by one Icon component
+  — the emoji-as-icons era (\U0001F313\u2600\U0001F319\u22EF\u2715) is over; icons inherit theme color and weight.
 - The app's typeface is now Inter Variable, self-hosted (latin subset, 97 KB, OFL
   license shipped alongside) — no font CDN, matching the privacy posture.
 - A new visual foundation — "calm precision-minimal": tonal dark (#121212 family) and

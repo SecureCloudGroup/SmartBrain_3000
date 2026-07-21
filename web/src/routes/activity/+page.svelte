@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Icon from "$lib/components/Icon.svelte";
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
   import { account } from "$lib/account.svelte";
@@ -164,7 +165,7 @@
         <span class="badge" style="border-color:{tierColor[e.tier] ?? 'var(--border)'}; color:{tierColor[e.tier] ?? 'var(--muted)'}">{e.tier}</span>
         <span class="muted">{e.decision}</span>
         <span class="muted" style="font-size:0.75rem">by {e.actor}</span>
-        <span style="color:{e.ok ? 'var(--ok)' : 'var(--danger)'}">{e.ok ? "✓" : "✕"} {e.ok ? "ok" : "failed"}</span>
+        <span style="color:{e.ok ? 'var(--ok)' : 'var(--danger)'}"><Icon name={e.ok ? "check" : "x"} size={13} /> {e.ok ? "ok" : "failed"}</span>
         <span class="spacer" style="flex:1"></span>
         <span class="muted" style="font-size:0.8rem">{e.ts}</span>
       </div>

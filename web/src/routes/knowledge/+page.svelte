@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Icon from "$lib/components/Icon.svelte";
   import { onDestroy, onMount } from "svelte";
   import { goto } from "$app/navigation";
   import { account } from "$lib/account.svelte";
@@ -1044,7 +1045,7 @@
             <span class="fp" title="The published version — subscribers pin this seq and pick up newer ones">v{v.version}</span>
           {/if}
           <button class="linklike" onclick={() => toggleMembers(v)} aria-expanded={openVaultId === v.id}>
-            {v.doc_count} document{v.doc_count === 1 ? "" : "s"} {openVaultId === v.id ? "▾" : "▸"}
+            {v.doc_count} document{v.doc_count === 1 ? "" : "s"} <Icon name={openVaultId === v.id ? "chevron-down" : "chevron-right"} size={12} />
           </button>
           <span class="spacer"></span>
           {#if v.kind === "imported" && v.source?.url && !v.source?.blocked}
