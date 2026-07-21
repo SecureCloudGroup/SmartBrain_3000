@@ -11,7 +11,9 @@ const ADD = 'form button:has-text("Add")';
 
 async function open(opts = {}) {
   const browser = await chromium.launch();
-  const ctx = await browser.newContext({ viewport: { width: W, height: H }, deviceScaleFactor: 2, recordVideo: { dir: "video", size: { width: W, height: H } }, ...opts });
+  // colorScheme dark: the docs/videos are DARK canonical (operator decision) — without
+  // this, Playwright's default prefers-color-scheme is LIGHT and the app follows it.
+  const ctx = await browser.newContext({ viewport: { width: W, height: H }, deviceScaleFactor: 2, colorScheme: "dark", recordVideo: { dir: "video", size: { width: W, height: H } }, ...opts });
   const page = await ctx.newPage();
   await page.goto(URL, { waitUntil: "networkidle" });
   const R = new Rec(page); await R.init();
@@ -53,7 +55,7 @@ const CLIPS = {
     await R.click('button:has-text("Connect")'); await page.waitForTimeout(1800); await R.ensure();
     await R.cap("Local model connected — free, fully on-box", "2/3"); await R.dwell(2000);
     await nav(page, "Settings").click(); await page.waitForTimeout(800);
-    await page.getByRole("link", { name: "Cloud providers" }).first().click().catch(() => {}); await page.waitForTimeout(700); await R.ensure();
+    await page.getByRole("tab", { name: "Cloud providers" }).first().click().catch(() => {}); await page.waitForTimeout(700); await R.ensure();
     await R.cap("No Ollama? Bring your own cloud key", "3/3");
     await R.moveTo("#k-anthropic"); await R.type("#k-anthropic", "sk-ant-DEMO-0000000000000000"); await R.dwell(600);
     await R.click('xpath=//input[@id="k-anthropic"]/following::button[contains(.,"Save")][1]'); await page.waitForTimeout(1000); await R.ensure();
@@ -65,7 +67,7 @@ const CLIPS = {
     await R.cap("Send your first message", "1/3"); await R.dwell(1600);
     await R.cap("Tap a suggestion — or type your own", "1/3");
     await R.click('button:has-text("What can you do?")'); await R.dwell(500);
-    await R.cap("Press Send", "1/3"); await R.click('button:has-text("Send")');
+    await R.cap("Press Send", "1/3"); await R.click('button[aria-label="Send"]');
     await R.cap("It answers using your connected model", "2/3"); await page.waitForTimeout(3800); await R.ensure();
     await R.cap("A real reply — your model is working", "2/3"); await R.dwell(2400);
     await R.cap("It reads freely — anything that changes data waits for approval", "3/3"); await R.dwell(2200); await done(h);
@@ -96,15 +98,17 @@ const CLIPS = {
     await R.cap("Search by meaning, not exact words", "2/4");
     await R.type('input[placeholder^="Search your knowledge"]', "what are my lease terms?"); await R.dwell(400);
     await R.click('form button:has-text("Search")'); await page.waitForTimeout(1200); await R.ensure();
-    await R.highlight(".cite");
+    await R.highlight(".hit .chip");
     await R.cap("Every result is a citation — the file it came from", "2/4"); await R.dwell(1900); await R.noring();
-    await R.click(".cite"); await page.waitForTimeout(900); await R.ensure();
+    await R.click(".hit .chip"); await page.waitForTimeout(900); await R.ensure();
     await R.cap("Click it — the document opens at the matching passage", "3/4"); await R.dwell(2200);
+    // The viewer is a true Modal now — close it before navigating (its overlay blocks the nav).
+    await page.keyboard.press("Escape"); await page.waitForTimeout(400);
     await nav(page, "Chat").click(); await page.waitForTimeout(800); await R.ensure();
     await R.cap("Or just ask Chat — it reads your knowledge for you", "4/4");
     await R.type(MSG, "What does my knowledge say about my lease?"); await R.dwell(400);
-    await R.click('button:has-text("Send")'); await page.waitForTimeout(4500); await R.ensure();
-    if (await page.locator(".cites .cite").count()) {
+    await R.click('button[aria-label="Send"]'); await page.waitForTimeout(4500); await R.ensure();
+    if (await page.locator(".cites .chip").count()) {
       await R.highlight(".cites");
       await R.cap("The answer cites its sources — a chip opens the passage", "4/4");
     } else {
@@ -118,7 +122,7 @@ const CLIPS = {
     await R.cap("Anything that changes data waits for your OK", "1/4"); await R.dwell(1700);
     await R.cap("Ask it to change something", "1/4");
     await R.click("button:has-text(\"buy milk\")"); await R.dwell(400);
-    await R.click('button:has-text("Send")'); await page.waitForTimeout(2800); await R.ensure();
+    await R.click('button[aria-label="Send"]'); await page.waitForTimeout(2800); await R.ensure();
     await R.cap("It proposes the action — it won’t run it on its own", "2/4"); await R.dwell(2300);
     await R.click("a:has-text('Activity')"); await page.waitForTimeout(1100); await R.ensure();
     await R.cap("Open Activity to review what it wants to do", "3/4"); await R.dwell(1800);
@@ -161,7 +165,7 @@ const CLIPS = {
   "08": async () => {
     const h = await open(); const { page, R } = h;
     await nav(page, "Settings").click(); await page.waitForTimeout(600);
-    await page.getByRole("link", { name: "Remote access" }).first().click(); await page.waitForTimeout(700); await R.ensure();
+    await page.getByRole("tab", { name: "Remote access" }).first().click(); await page.waitForTimeout(700); await R.ensure();
     await R.cap("Optional: reach SmartBrain from your phone — off by default", "1/3"); await R.dwell(1700);
     await R.cap("Name your phone, then pair it", "1/3");
     await R.moveTo('input[placeholder="My phone"]');
@@ -178,7 +182,7 @@ const CLIPS = {
   "09": async () => {
     const h = await open({ acceptDownloads: true }); const { page, R } = h;
     await nav(page, "Settings").click(); await page.waitForTimeout(700);
-    await page.getByRole("link", { name: "Account & Data" }).first().click(); await page.waitForTimeout(700); await R.ensure();
+    await page.getByRole("tab", { name: "Account & Data" }).first().click(); await page.waitForTimeout(700); await R.ensure();
     await R.cap("Optional: back up, and prove your way back in", "1/4"); await R.dwell(1600);
     await R.cap("A complete encrypted copy — restores with your passphrase", "2/4");
     await R.moveTo('input[placeholder="Your passphrase"]'); await R.type('input[placeholder="Your passphrase"]', PASS); await R.dwell(400);
@@ -225,9 +229,9 @@ const CLIPS = {
     await R.click('.share button:has-text("Export")');
     await R.cap("Publishing…", "4/5"); await page.waitForTimeout(700); // neutral beat: the card publishes while this shows
     await page.waitForSelector('.share button:has-text("Export update")', { timeout: 8000 }); await R.ensure();
-    // The card now carries the Public badge + the real SB- fingerprint + the published version.
-    await R.scrollCenter('.badge'); await page.waitForTimeout(300);
-    await R.highlight('.badge');
+    // The card now carries the Public chip + the real SB- fingerprint + the published version.
+    await R.scrollCenter('.vrow .chip:has-text("Public")'); await page.waitForTimeout(300);
+    await R.highlight('.vrow .chip:has-text("Public")');
     await R.cap("Published — a Public badge, your SB-… fingerprint, and the version", "4/5"); await R.dwell(1900); await R.noring();
     // Snapshot the version so we can prove the next publish bumps it (a fresh vault starts at v1,
     // and each publish increments — so the first public version is already past v1).
@@ -244,8 +248,8 @@ const CLIPS = {
       const m = (document.querySelector(".vrow")?.textContent || "").match(/\bv(\d+)\b/);
       return !!m && Number(m[1]) > prev;
     }, verBefore, { timeout: 8000 }); await R.ensure();
-    await R.scrollCenter('.badge'); await page.waitForTimeout(300);
-    await R.highlight('.badge');
+    await R.scrollCenter('.vrow .chip:has-text("Public")'); await page.waitForTimeout(300);
+    await R.highlight('.vrow .chip:has-text("Public")');
     await R.cap("The version bumps automatically — subscribers pick it up on their next check", "5/5"); await R.dwell(2000); await done(h);
   },
   // 11 vaults — the PUBLIC SUBSCRIBE + UPDATE story (the half clip 10 doesn't cover). Fully
@@ -272,9 +276,9 @@ const CLIPS = {
     await R.cap("Paste the link — a public vault needs no key", "1/4");
     await R.click('button:has-text("Subscribe")');
     await R.cap("Verifying the publisher's signature, re-encrypting under your key…", "1/4");
-    await page.waitForSelector('.badge:has-text("Subscribed")', { timeout: 8000 }); await R.ensure();
+    await page.waitForSelector('.chip:has-text("Subscribed")', { timeout: 8000 }); await R.ensure();
     await R.scrollCenter('.vault .vrow'); await page.waitForTimeout(250);
-    await R.highlight('.vault .vrow .fp'); // the pinned publisher fingerprint
+    await R.highlight('.vault .vrow .chip.mono'); // the pinned publisher fingerprint
     await R.cap("Subscribed — the publisher's SB-… fingerprint is pinned, docs land", "2/4"); await R.dwell(1600); await R.noring();
     // Prove the docs really landed and are usable: a keyword search scoped to just this vault. The
     // search box sits directly above the vault, so this is a short hop, not a page-length scroll.
