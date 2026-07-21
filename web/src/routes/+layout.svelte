@@ -15,6 +15,7 @@
   import RemoteStatus from "$lib/components/RemoteStatus.svelte";
   import PairSetup from "$lib/components/PairSetup.svelte";
   import Confirm from "$lib/components/Confirm.svelte";
+  import Toast from "$lib/components/Toast.svelte";
   import Icon from "$lib/components/Icon.svelte";
   import { confirmDialog } from "$lib/confirm.svelte";
 
@@ -197,6 +198,7 @@
 </header>
 
 <Confirm />
+<Toast />
 
 <main class:wrap={!wide} class:wrap-wide={wide}>
   {#if needsPairing}

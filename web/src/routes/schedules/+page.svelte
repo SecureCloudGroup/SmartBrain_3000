@@ -328,13 +328,5 @@
     margin: 0 0 0.2rem;
     font-weight: 600;
   }
-  .linklike {
-    background: none;
-    border: none;
-    padding: 0;
-    color: var(--text);
-    text-decoration: underline;
-    cursor: pointer;
-    font: inherit;
-  }
+  /* .linklike is now global (app.css) — one text-button voice everywhere. */
 </style>

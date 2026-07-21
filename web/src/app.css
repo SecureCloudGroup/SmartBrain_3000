@@ -51,6 +51,9 @@
   --t-fast: 120ms cubic-bezier(0.2, 0, 0, 1);
   --t-slow: 200ms cubic-bezier(0.2, 0, 0, 1);
 
+  /* fonts */
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
   /* dark surfaces (base never #000, text never #fff) */
   --bg: #121212;
   --panel: #1a1a1d;
@@ -296,15 +299,43 @@ button.del:hover {
 }
 
 /* Inline text-link button (e.g. "Set a new one", an email-row opener). */
-button.link {
+button.link,
+button.linklike {
   background: transparent;
   border: 0;
   color: var(--accent);
   padding: 0;
+  min-height: 0;
+  font-size: inherit;
   font-weight: 400;
+  line-height: inherit;
 }
-button.link:hover {
+button.link:hover,
+button.linklike:hover {
   text-decoration: underline;
+  filter: none;
+}
+
+/* Filled destructive button (Confirm's danger action). Outline .del stays the quiet variant. */
+button.danger {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+}
+
+/* Shared modal content rhythm (used by Confirm and every future Modal consumer). */
+.modal-title {
+  margin: 0 0 var(--s-2);
+  font-size: var(--f-section);
+}
+.modal-body {
+  margin: 0 0 var(--s-4);
+  color: var(--muted);
+}
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--s-2);
 }
 
 button:disabled {
