@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en" data-theme="dark" data-accent="teal">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>SmartBrain mockup — Knowledge (desktop)</title>
+<link rel="stylesheet" href="tokens.css" />
+<link rel="stylesheet" href="mock.css" />
+<style>
+  .backdrop { position: absolute; inset: 0; background: rgba(0,0,0,0.45); display: grid; place-items: center; padding: var(--s-5); }
+  .modal { background: var(--elevated); border: var(--hairline); border-radius: var(--r-3);
+           box-shadow: var(--shadow-modal); max-width: 640px; width: 100%; max-height: 85%;
+           display: flex; flex-direction: column; overflow: hidden; }
+  .modal .mhead { display: flex; align-items: center; gap: 10px; padding: var(--s-4) var(--s-5); border-bottom: var(--hairline); }
+  .modal .mbody { padding: var(--s-5); overflow-y: auto; font-size: var(--f-body); line-height: var(--lh-read); }
+  .modal .mfoot { display: flex; gap: var(--s-2); padding: var(--s-3) var(--s-5); border-top: var(--hairline); }
+  mark.hl { background: var(--accent-tint); color: var(--accent); border-radius: 3px; padding: 0 2px; }
+</style>
+</head>
+<body>
+
+<div class="pagehead">
+  <h2>Knowledge — desktop</h2>
+  <p class="muted">Search-first layout, list/card document rows, vault identity cards, the modal document
+  viewer (opens at the cited passage), and empty states. <a href="index.html">← back to index</a></p>
+</div>
+
+<!-- ============ populated knowledge ============ -->
+<div class="shell card" style="padding:0; overflow:hidden; max-width:1100px; margin:0 auto 48px;">
+  <aside class="sidebar">
+    <div class="brand"><span class="mark">SB</span><span><b>SmartBrain</b><small>v0.6.0</small></span></div>
+    <a class="navitem" href="#"><svg class="ic"><use href="#i-chat"/></svg> Chat</a>
+    <a class="navitem active" href="#"><svg class="ic"><use href="#i-book"/></svg> Knowledge</a>
+    <a class="navitem" href="#"><svg class="ic"><use href="#i-tasks"/></svg> Planner</a>
+    <a class="navitem" href="#"><svg class="ic"><use href="#i-clock"/></svg> Schedules</a>
+    <a class="navitem" href="#"><svg class="ic"><use href="#i-mail"/></svg> Email</a>
+    <a class="navitem" href="#"><svg class="ic"><use href="#i-pulse"/></svg> Activity <span class="count">1</span></a>
+    <a class="navitem" href="#"><svg class="ic"><use href="#i-chart"/></svg> Usage</a>
+    <a class="navitem" href="#"><svg class="ic"><use href="#i-sliders"/></svg> Settings</a>
+    <div class="foot">
+      <a class="navitem" href="#"><svg class="ic"><use href="#i-help"/></svg> Help</a>
+      <a class="navitem" href="#"><svg class="ic"><use href="#i-lock"/></svg> Lock</a>
+    </div>
+  </aside>
+
+  <div class="main">
+    <div class="topstrip">
+      <span class="title">Knowledge</span>
+      <span class="spacer"></span>
+      <span class="chip ok trust"><svg class="ic"><use href="#i-shield"/></svg> Encrypted · On-device</span>
+      <button class="secondary" style="min-height:36px; padding:7px 14px"><svg class="ic"><use href="#i-upload"/></svg> Add documents</button>
+    </div>
+
+    <div class="kwrap">
+      <div class="searchbar">
+        <svg class="ic"><use href="#i-search"/></svg>
+        <input value="parking clause" />
+        <span class="seg">
+          <button class="on">Best</button><button>Keyword</button><button>Meaning</button>
+        </span>
+        <span class="chip">All vaults <svg class="ic" style="width:11px;height:11px"><use href="#i-chevdown"/></svg></span>
+      </div>
+
+      <div class="docrow">
+        <div class="fic"><svg class="ic"><use href="#i-file"/></svg></div>
+        <div class="dmain">
+          <div class="dtitle">Lease.pdf</div>
+          <div class="dsnip">…one assigned <mark class="hl">parking</mark> space per unit; additional spaces subject to availability…</div>
+        </div>
+        <div class="dmeta"><span class="chip accent">p.14</span> 24 pages · Jul 2</div>
+        <div class="actions"><button class="iconbtn"><svg class="ic"><use href="#i-pencil"/></svg></button><button class="iconbtn"><svg class="ic"><use href="#i-x"/></svg></button></div>
+      </div>
+      <div class="docrow">
+        <div class="fic"><svg class="ic"><use href="#i-file"/></svg></div>
+        <div class="dmain">
+          <div class="dtitle">Meeting notes — landlord call</div>
+          <div class="dsnip">…he said the second <mark class="hl">parking</mark> spot usually frees up in September…</div>
+        </div>
+        <div class="dmeta"><span class="chip accent">note</span> Jun 28</div>
+        <div class="actions"><button class="iconbtn"><svg class="ic"><use href="#i-pencil"/></svg></button><button class="iconbtn"><svg class="ic"><use href="#i-x"/></svg></button></div>
+      </div>
+      <div class="docrow" style="border-bottom:0">
+        <div class="fic"><svg class="ic"><use href="#i-file"/></svg></div>
+        <div class="dmain">
+          <div class="dtitle">04-vaults.md</div>
+          <div class="dsnip">Share knowledge with Vaults — group documents, publish publicly, subscribe by URL…</div>
+        </div>
+        <div class="dmeta"><span class="chip"><svg class="ic" style="width:11px;height:11px"><use href="#i-vault"/></svg> SmartBrain Docs</span> Jul 20</div>
+        <div class="actions"><button class="iconbtn"><svg class="ic"><use href="#i-pencil"/></svg></button></div>
+      </div>
+
+      <h3 style="margin-top:var(--s-6)">Vaults</h3>
+      <div class="vaultgrid">
+        <div class="vaultcard">
+          <div class="vhead"><svg class="ic"><use href="#i-vault"/></svg> SmartBrain Docs</div>
+          <div class="meta">9 documents · v4</div>
+          <div class="fp">SB-3WZM-7CEI-GPJ7-3MLC</div>
+          <div class="vfoot">
+            <span class="chip ok"><svg class="ic"><use href="#i-check"/></svg> Subscribed</span>
+            <span class="chip">Up to date</span>
+          </div>
+        </div>
+        <div class="vaultcard">
+          <div class="vhead"><svg class="ic"><use href="#i-vault"/></svg> Home</div>
+          <div class="meta">14 documents</div>
+          <div class="fp muted">private</div>
+          <div class="vfoot"><span class="chip">Share…</span></div>
+        </div>
+        <div class="vaultcard">
+          <div class="vhead"><svg class="ic"><use href="#i-vault"/></svg> Recipes</div>
+          <div class="meta">31 documents · v2</div>
+          <div class="fp">SB-9QLM-2XVe-KK41-8PDA</div>
+          <div class="vfoot">
+            <span class="chip accent">Public</span>
+            <span class="chip">Export update (v3)</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="dropzone" style="margin-top:var(--s-5)">
+        <svg class="ic"><use href="#i-upload"/></svg>
+        Drop files here — PDF, Word, PowerPoint, Excel, HTML, text — or paste a URL
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ doc viewer modal ============ -->
+<div class="pagehead"><h3 class="muted" style="font-weight:600">Document viewer — one Modal, opened at the cited passage</h3></div>
+<div class="shell card" style="padding:0; overflow:hidden; max-width:1100px; margin:0 auto 48px; position:relative; min-height:520px;">
+  <aside class="sidebar" style="filter:blur(1px); opacity:0.6">
+    <div class="brand"><span class="mark">SB</span><span><b>SmartBrain</b><small>v0.6.0</small></span></div>
+    <a class="navitem active" href="#"><svg class="ic"><use href="#i-book"/></svg> Knowledge</a>
+  </aside>
+  <div class="main" style="filter:blur(1px); opacity:0.6">
+    <div class="topstrip"><span class="title">Knowledge</span></div>
+    <div class="kwrap"><div class="docrow"><div class="fic"><svg class="ic"><use href="#i-file"/></svg></div>
+      <div class="dmain"><div class="dtitle">Lease.pdf</div><div class="dsnip">…</div></div></div></div>
+  </div>
+  <div class="backdrop">
+    <div class="modal">
+      <div class="mhead">
+        <svg class="ic"><use href="#i-file"/></svg>
+        <b>Lease.pdf</b> <span class="meta">page 14 of 24</span>
+        <span class="spacer" style="flex:1"></span>
+        <button class="iconbtn"><svg class="ic"><use href="#i-x"/></svg></button>
+      </div>
+      <div class="mbody">
+        <p class="meta" style="margin:0 0 12px">§ 11 — PARKING</p>
+        <p>Tenant is entitled to <mark class="hl">one (1) assigned parking space</mark> in the covered structure,
+        identified as space <strong>B-41</strong>. Use of any additional space is
+        <mark class="hl">subject to availability</mark> and requires prior written consent of Landlord, at the
+        then-current monthly rate.</p>
+        <p>Guest parking is limited to the marked visitor stalls and a maximum of seventy-two (72)
+        consecutive hours.</p>
+      </div>
+      <div class="mfoot">
+        <button class="secondary"><svg class="ic"><use href="#i-search"/></svg> Find in document</button>
+        <span style="flex:1"></span>
+        <button class="secondary">Open full page</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ empty states ============ -->
+<div class="pagehead"><h3 class="muted" style="font-weight:600">Empty states — first run</h3></div>
+<div class="card" style="max-width:1100px; margin:0 auto 48px; display:grid; grid-template-columns:1fr 1fr; gap:var(--s-5); padding:var(--s-5)">
+  <div class="empty" style="border:var(--hairline); border-radius:var(--r-2)">
+    <div class="eic"><svg class="ic"><use href="#i-book"/></svg></div>
+    <h3>Build your knowledge</h3>
+    <p>Drop in a PDF or write a note — it's encrypted on your device and searchable in seconds.</p>
+    <div class="chips"><button>Add your first document</button></div>
+  </div>
+  <div class="empty" style="border:var(--hairline); border-radius:var(--r-2)">
+    <div class="eic"><svg class="ic"><use href="#i-vault"/></svg></div>
+    <h3>Try a public vault</h3>
+    <p>Subscribe to the SmartBrain user guide by URL — it lands signed, verified, and searchable.</p>
+    <div class="chips"><button class="secondary">Subscribe to SmartBrain Docs</button></div>
+  </div>
+</div>
+
+<div class="switcher">
+  <span class="lbl">Theme</span>
+  <span class="grp"><button data-k="theme" data-v="dark">Dark</button><button data-k="theme" data-v="light">Light</button></span>
+  <span class="lbl">Accent</span>
+  <span class="grp"><button data-k="accent" data-v="teal">A · Teal</button><button data-k="accent" data-v="indigo">B · Indigo</button></span>
+  <span class="lbl">Desktop nav</span>
+  <span class="grp"><button data-k="nav" data-v="sidebar">Sidebar</button><button data-k="nav" data-v="topbar">Top bar</button></span>
+  <a href="index.html">index</a>
+</div>
+
+<script src="mock.js"></script>
+</body>
+</html>

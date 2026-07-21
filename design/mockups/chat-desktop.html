@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en" data-theme="dark" data-accent="teal">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>SmartBrain mockup — Chat (desktop)</title>
+<link rel="stylesheet" href="tokens.css" />
+<link rel="stylesheet" href="mock.css" />
+</head>
+<body>
+
+<div class="pagehead">
+  <h2>Chat — desktop</h2>
+  <p class="muted">All six message states, the approval ActionCard, citations, and the composer.
+  Use the bar below to flip theme, accent, and the desktop-nav variant. <a href="index.html">← back to index</a></p>
+</div>
+
+<!-- ============ populated chat ============ -->
+<div class="shell card" style="padding:0; overflow:hidden; max-width:1100px; margin:0 auto 48px;">
+  <aside class="sidebar">
+    <div class="brand">
+      <span class="mark">SB</span>
+      <span><b>SmartBrain</b><small>v0.6.0</small></span>
+    </div>
+    <a class="navitem active" href="#"><svg class="ic"><use href="#i-chat"/></svg> Chat</a>
+    <a class="navitem" href="#"><svg class="ic"><use href="#i-book"/></svg> Knowledge</a>
+    <a class="navitem" href="#"><svg class="ic"><use href="#i-tasks"/></svg> Planner</a>
+    <a class="navitem" href="#"><svg class="ic"><use href="#i-clock"/></svg> Schedules</a>
+    <a class="navitem" href="#"><svg class="ic"><use href="#i-mail"/></svg> Email</a>
+    <a class="navitem" href="#"><svg class="ic"><use href="#i-pulse"/></svg> Activity <span class="count">1</span></a>
+    <a class="navitem" href="#"><svg class="ic"><use href="#i-chart"/></svg> Usage</a>
+    <a class="navitem" href="#"><svg class="ic"><use href="#i-sliders"/></svg> Settings</a>
+    <div class="foot">
+      <a class="navitem" href="#"><svg class="ic"><use href="#i-help"/></svg> Help</a>
+      <a class="navitem" href="#"><svg class="ic"><use href="#i-lock"/></svg> Lock</a>
+    </div>
+  </aside>
+
+  <div class="main">
+    <div class="topstrip">
+      <span class="title">Lease questions</span>
+      <button class="iconbtn" title="Rename"><svg class="ic"><use href="#i-pencil"/></svg></button>
+      <nav class="tnav">
+        <a class="navitem active" href="#">Chat</a><a class="navitem" href="#">Knowledge</a>
+        <a class="navitem" href="#">Planner</a><a class="navitem" href="#">Schedules</a>
+        <a class="navitem" href="#">Email</a><a class="navitem" href="#">Activity</a>
+        <a class="navitem" href="#">Usage</a><a class="navitem" href="#">Settings</a>
+      </nav>
+      <span class="spacer"></span>
+      <span class="chip ok trust"><svg class="ic"><use href="#i-shield"/></svg> Encrypted · On-device</span>
+      <span class="chip">Qwen3.5-9B <svg class="ic" style="width:11px;height:11px"><use href="#i-chevdown"/></svg></span>
+      <button class="iconbtn" title="Theme"><svg class="ic"><use href="#i-moon"/></svg></button>
+    </div>
+
+    <div class="chatwrap" style="position:relative">
+      <div class="msgs">
+        <div class="msgcol">
+
+          <!-- 1 · user -->
+          <div class="msg user">
+            <div class="who">You</div>
+            <div class="body"><p>Summarize the key terms in my lease, then email the landlord asking about the parking clause.</p></div>
+          </div>
+
+          <!-- 2 · assistant · complete, with citations -->
+          <div class="msg">
+            <div class="who">SmartBrain</div>
+            <div class="body">
+              <p>Your lease runs <strong>Aug 1, 2026 – Jul 31, 2027</strong> at $2,150/month, due the 1st with a 3-day grace period. The deposit is one month's rent, refundable within 21 days of move-out. Renewal requires 60 days' written notice.</p>
+              <p>The parking clause only guarantees <em>one</em> assigned space — a second space is "subject to availability," which is worth clarifying. I've drafted the email below.</p>
+            </div>
+            <div class="cites">
+              <span class="chip accent"><svg class="ic"><use href="#i-file"/></svg> Lease.pdf · p.2</span>
+              <span class="chip accent"><svg class="ic"><use href="#i-file"/></svg> Lease.pdf · p.14</span>
+            </div>
+            <div class="actions">
+              <button class="iconbtn" title="Copy"><svg class="ic"><use href="#i-copy"/></svg></button>
+              <button class="iconbtn" title="Regenerate"><svg class="ic"><use href="#i-refresh"/></svg></button>
+            </div>
+          </div>
+
+          <!-- 3 · ActionCard — approval surface (irreversible ⇒ default-deny) -->
+          <div class="actioncard irreversible">
+            <div class="head"><svg class="ic"><use href="#i-mail"/></svg> SmartBrain wants to send an email</div>
+            <div class="scope">
+              <span class="muted">To</span><b>landlord@parkview-mgmt.com</b>
+              <span class="muted">Subject</span><b>Question about the parking clause (Unit 4B)</b>
+              <span class="muted">Body</span><b class="muted" style="font-weight:400">Hi — my lease guarantees one assigned space, but we have two cars. Could you confirm whether a second space…</b>
+            </div>
+            <div class="foot">
+              <span class="chip warn"><svg class="ic"><use href="#i-warn"/></svg> Irreversible · sends outside your device</span>
+              <span class="spacer"></span>
+              <button class="secondary">Deny</button>
+              <button>Approve &amp; send</button>
+            </div>
+          </div>
+
+          <!-- 4 · assistant · thinking -->
+          <div class="msg">
+            <div class="who">SmartBrain <span class="state">· thinking</span></div>
+            <div class="body"><span class="thinking"><i></i><i></i><i></i></span></div>
+          </div>
+
+          <!-- 5 · assistant · streaming -->
+          <div class="msg">
+            <div class="who">SmartBrain <span class="state">· streaming</span></div>
+            <div class="body"><p>Checking your knowledge for the move-out checklist — the lease references it in appendix C, which lists three requirements for<span class="caret"></span></p></div>
+          </div>
+
+          <!-- 6 · assistant · error -->
+          <div class="msg">
+            <div class="who">SmartBrain <span class="state">· error</span></div>
+            <div class="errline"><svg class="ic"><use href="#i-warn"/></svg> The model didn't respond (connection lost).
+              <button class="ghost" style="color:var(--accent); font-weight:600">Retry</button>
+            </div>
+          </div>
+
+          <!-- 7 · assistant · stopped -->
+          <div class="msg">
+            <div class="who">SmartBrain <span class="state">· stopped</span></div>
+            <div class="body"><p>The deposit terms say that deductions must be itemized in writing, and —</p></div>
+            <div class="actions">
+              <button class="ghost" style="color:var(--accent); font-weight:600">Continue</button>
+              <button class="iconbtn" title="Copy"><svg class="ic"><use href="#i-copy"/></svg></button>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <div class="jump"><svg class="ic"><use href="#i-arrdown"/></svg> Jump to latest</div>
+
+      <div class="composer">
+        <div class="inner">
+          <textarea rows="1" placeholder="Message SmartBrain…"></textarea>
+          <button class="stop" title="Stop generating"><svg class="ic"><use href="#i-stop"/></svg></button>
+          <button class="send" title="Send"><svg class="ic"><use href="#i-send"/></svg></button>
+        </div>
+        <p class="hint">⌘↵ send · ⇧↵ newline — replies stream token-by-token; Stop is always here during generation</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ empty chat (first run) ============ -->
+<div class="pagehead"><h3 class="muted" style="font-weight:600">Empty state — first run</h3></div>
+<div class="shell card" style="padding:0; overflow:hidden; max-width:1100px; margin:0 auto 48px; min-height:480px;">
+  <aside class="sidebar">
+    <div class="brand"><span class="mark">SB</span><span><b>SmartBrain</b><small>v0.6.0</small></span></div>
+    <a class="navitem active" href="#"><svg class="ic"><use href="#i-chat"/></svg> Chat</a>
+    <a class="navitem" href="#"><svg class="ic"><use href="#i-book"/></svg> Knowledge</a>
+    <a class="navitem" href="#"><svg class="ic"><use href="#i-tasks"/></svg> Planner</a>
+    <a class="navitem" href="#"><svg class="ic"><use href="#i-sliders"/></svg> Settings</a>
+    <div class="foot"><a class="navitem" href="#"><svg class="ic"><use href="#i-lock"/></svg> Lock</a></div>
+  </aside>
+  <div class="main">
+    <div class="topstrip">
+      <span class="title">Chat</span><span class="spacer"></span>
+      <span class="chip ok trust"><svg class="ic"><use href="#i-shield"/></svg> Encrypted · On-device</span>
+    </div>
+    <div class="chatwrap">
+      <div class="msgs" style="display:grid; place-items:center">
+        <div class="empty">
+          <div class="eic"><svg class="ic"><use href="#i-chat"/></svg></div>
+          <h3>Ask your assistant</h3>
+          <p>It can search your knowledge, manage tasks, and act on your behalf — anything that changes data waits for your approval.</p>
+          <div class="chips">
+            <span class="chip">What can you do?</span>
+            <span class="chip">Save a note to my knowledge</span>
+            <span class="chip">Add “buy milk” to my tasks</span>
+          </div>
+        </div>
+      </div>
+      <div class="composer">
+        <div class="inner">
+          <textarea rows="1" placeholder="Message SmartBrain…"></textarea>
+          <button class="send" title="Send"><svg class="ic"><use href="#i-send"/></svg></button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- review switcher -->
+<div class="switcher">
+  <span class="lbl">Theme</span>
+  <span class="grp"><button data-k="theme" data-v="dark">Dark</button><button data-k="theme" data-v="light">Light</button></span>
+  <span class="lbl">Accent</span>
+  <span class="grp"><button data-k="accent" data-v="teal">A · Teal</button><button data-k="accent" data-v="indigo">B · Indigo</button></span>
+  <span class="lbl">Desktop nav</span>
+  <span class="grp"><button data-k="nav" data-v="sidebar">Sidebar</button><button data-k="nav" data-v="topbar">Top bar</button></span>
+  <a href="index.html">index</a>
+</div>
+
+<script src="mock.js"></script>
+</body>
+</html>

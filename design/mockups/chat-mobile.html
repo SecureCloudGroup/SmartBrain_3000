@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en" data-theme="dark" data-accent="teal">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>SmartBrain mockup — Chat (mobile PWA)</title>
+<link rel="stylesheet" href="tokens.css" />
+<link rel="stylesheet" href="mock.css" />
+<style>.row2 { display:flex; gap:var(--s-6); flex-wrap:wrap; justify-content:center; }</style>
+</head>
+<body>
+
+<div class="pagehead">
+  <h2>Chat — mobile PWA</h2>
+  <p class="muted">Standalone-app chrome: safe areas respected top and bottom, primary nav as a
+  bottom tab bar in the thumb zone (44px targets), composer above the tabs.
+  Open question for review: should the tab bar hide while the keyboard is up? <a href="index.html">← back to index</a></p>
+</div>
+
+<div class="row2">
+
+  <!-- populated -->
+  <div class="phone">
+    <div class="dynisland"></div>
+    <div class="statusbar"><span>9:41</span><span>􀙇 􀙈 􀛨</span></div>
+    <div class="topstrip">
+      <span class="title">Lease questions</span>
+      <span class="spacer"></span>
+      <span class="chip ok trust"><svg class="ic"><use href="#i-shield"/></svg> On-device</span>
+    </div>
+    <div class="pcontent">
+      <div class="msgs">
+        <div class="msgcol">
+          <div class="msg user">
+            <div class="who">You</div>
+            <div class="body"><p>Summarize the key terms in my lease.</p></div>
+          </div>
+          <div class="msg">
+            <div class="who">SmartBrain</div>
+            <div class="body">
+              <p>Aug 2026 – Jul 2027 at $2,150/month, one month's deposit, 60-day renewal notice. Parking guarantees only one assigned space.</p>
+            </div>
+            <div class="cites"><span class="chip accent"><svg class="ic"><use href="#i-file"/></svg> Lease.pdf · p.2</span></div>
+          </div>
+          <div class="msg">
+            <div class="who">SmartBrain <span class="state">· streaming</span></div>
+            <div class="body"><p>The move-out checklist in appendix C lists<span class="caret"></span></p></div>
+          </div>
+        </div>
+      </div>
+      <div class="composer">
+        <div class="inner">
+          <textarea rows="1" placeholder="Message…"></textarea>
+          <button class="stop"><svg class="ic"><use href="#i-stop"/></svg></button>
+          <button class="send"><svg class="ic"><use href="#i-send"/></svg></button>
+        </div>
+      </div>
+    </div>
+    <div class="tabbar">
+      <a class="tab active" href="#"><svg class="ic"><use href="#i-chat"/></svg> Chat</a>
+      <a class="tab" href="#"><svg class="ic"><use href="#i-book"/></svg> Knowledge</a>
+      <a class="tab" href="#"><span class="dot"></span><svg class="ic"><use href="#i-pulse"/></svg> Activity</a>
+      <a class="tab" href="#"><svg class="ic"><use href="#i-moreh"/></svg> More</a>
+    </div>
+    <div class="homebar"></div>
+  </div>
+
+  <!-- empty -->
+  <div class="phone">
+    <div class="dynisland"></div>
+    <div class="statusbar"><span>9:41</span><span>􀙇 􀙈 􀛨</span></div>
+    <div class="topstrip">
+      <span class="title">Chat</span>
+      <span class="spacer"></span>
+      <span class="chip ok trust"><svg class="ic"><use href="#i-shield"/></svg> On-device</span>
+    </div>
+    <div class="pcontent">
+      <div class="msgs" style="display:grid; place-items:center">
+        <div class="empty">
+          <div class="eic"><svg class="ic"><use href="#i-chat"/></svg></div>
+          <h3>Ask your assistant</h3>
+          <p>Your data stays on your Desktop — this phone talks to it over an encrypted link.</p>
+          <div class="chips">
+            <span class="chip">What can you do?</span>
+            <span class="chip">Add “buy milk” to my tasks</span>
+          </div>
+        </div>
+      </div>
+      <div class="composer">
+        <div class="inner">
+          <textarea rows="1" placeholder="Message…"></textarea>
+          <button class="send"><svg class="ic"><use href="#i-send"/></svg></button>
+        </div>
+      </div>
+    </div>
+    <div class="tabbar">
+      <a class="tab active" href="#"><svg class="ic"><use href="#i-chat"/></svg> Chat</a>
+      <a class="tab" href="#"><svg class="ic"><use href="#i-book"/></svg> Knowledge</a>
+      <a class="tab" href="#"><svg class="ic"><use href="#i-pulse"/></svg> Activity</a>
+      <a class="tab" href="#"><svg class="ic"><use href="#i-moreh"/></svg> More</a>
+    </div>
+    <div class="homebar"></div>
+  </div>
+
+</div>
+
+<div class="switcher">
+  <span class="lbl">Theme</span>
+  <span class="grp"><button data-k="theme" data-v="dark">Dark</button><button data-k="theme" data-v="light">Light</button></span>
+  <span class="lbl">Accent</span>
+  <span class="grp"><button data-k="accent" data-v="teal">A · Teal</button><button data-k="accent" data-v="indigo">B · Indigo</button></span>
+  <a href="index.html">index</a>
+</div>
+
+<script src="mock.js"></script>
+</body>
+</html>

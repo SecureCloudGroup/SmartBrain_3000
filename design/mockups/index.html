@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en" data-theme="dark" data-accent="teal">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>SmartBrain design mockups — review</title>
+<link rel="stylesheet" href="tokens.css" />
+<link rel="stylesheet" href="mock.css" />
+<style>
+  .frames { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: var(--s-3); }
+  .frames a { display: block; padding: var(--s-4); border: var(--hairline); border-radius: var(--r-2);
+              background: var(--panel); color: var(--text); transition: border-color var(--t-fast); }
+  .frames a:hover { border-color: var(--accent); text-decoration: none; }
+  .frames b { display: block; margin-bottom: 4px; }
+  ol.q { line-height: 1.7; padding-left: 1.2em; }
+  ol.q li { margin-bottom: var(--s-2); }
+</style>
+</head>
+<body>
+
+<div class="pagehead">
+  <h1>SmartBrain — design elevation, round 1</h1>
+  <p class="muted" style="max-width:640px">Direction: <strong>calm precision-minimal — privacy as
+  aesthetic</strong>. Everything here runs on the proposed token system (<span class="mono">tokens.css</span>);
+  on approval those tokens become the app's, verbatim. The switcher at the bottom of every page flips
+  <strong>theme</strong>, <strong>accent candidate</strong>, and the <strong>desktop-nav variant</strong> —
+  your choice follows you across pages.</p>
+</div>
+
+<div class="pagebody" style="display:flex; flex-direction:column; gap:var(--s-5)">
+
+  <div class="frames">
+    <a href="foundations.html"><b>Foundations</b><span class="muted">Palette · type · spacing · icons · controls · ActionCard</span></a>
+    <a href="chat-desktop.html"><b>Chat — desktop</b><span class="muted">Six message states · approval card · citations · empty state</span></a>
+    <a href="chat-mobile.html"><b>Chat — mobile PWA</b><span class="muted">Bottom tabs · safe areas · composer · empty state</span></a>
+    <a href="knowledge-desktop.html"><b>Knowledge — desktop</b><span class="muted">Search-first · doc rows · vault cards · modal viewer</span></a>
+    <a href="knowledge-mobile.html"><b>Knowledge — mobile PWA</b><span class="muted">Search + read on the go</span></a>
+  </div>
+
+  <div class="card">
+    <h3>The eight questions this review answers</h3>
+    <ol class="q">
+      <li><strong>Accent:</strong> A (muted teal — the calm/secure statement) or B (slate-indigo — continuity with today)? Same answer in both themes?</li>
+      <li><strong>Desktop nav:</strong> sidebar rail, or the refined top bar? (Toggle on the chat page.)</li>
+      <li><strong>Mobile tabs:</strong> is Chat · Knowledge · Activity · More the right four? Should the tab bar hide while the keyboard is open?</li>
+      <li><strong>Chat rows:</strong> full-width messages (no bubbles) — comfortable? Is the ~740px column right?</li>
+      <li><strong>ActionCard:</strong> does it read “deliberate” without being alarming? Default-deny for irreversible actions OK?</li>
+      <li><strong>Palettes:</strong> dark #121212 family and warm-white light — right darkness/warmth?</li>
+      <li><strong>Header identity:</strong> the “SB” mark shown here, or a mascot-derived mark? (Tray monogram stays either way.)</li>
+      <li><strong>Muscle memory:</strong> anything that must NOT move?</li>
+    </ol>
+    <p class="meta">Reply in the PR (or dictate changes in chat) — target is ≤2 review rounds, then
+    tokens.css locks and implementation starts.</p>
+  </div>
+
+  <div class="card">
+    <h3>What deliberately did NOT change</h3>
+    <p class="muted" style="margin:0">The copy voice (already the strongest brand asset), the approval-gate
+    model, all information architecture and features, the trust guarantees. This is a re-skin of how the
+    product <em>looks and feels</em> — nothing about what it does.</p>
+  </div>
+
+</div>
+
+<div class="switcher">
+  <span class="lbl">Theme</span>
+  <span class="grp"><button data-k="theme" data-v="dark">Dark</button><button data-k="theme" data-v="light">Light</button></span>
+  <span class="lbl">Accent</span>
+  <span class="grp"><button data-k="accent" data-v="teal">A · Teal</button><button data-k="accent" data-v="indigo">B · Indigo</button></span>
+  <span class="lbl">Desktop nav</span>
+  <span class="grp"><button data-k="nav" data-v="sidebar">Sidebar</button><button data-k="nav" data-v="topbar">Top bar</button></span>
+</div>
+
+<script src="mock.js"></script>
+</body>
+</html>
