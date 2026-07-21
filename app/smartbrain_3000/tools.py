@@ -62,6 +62,10 @@ class ToolContext:
     # ``dataclasses.replace(ctx, model=...)`` once the model is known; None in contexts that never
     # summarize (tests, some scheduled paths) — summarize_document asserts it is present.
     model: str | None = None
+    # The configured web-search service (search.SearchService) — encapsulates any provider
+    # API keys exactly like ``email`` encapsulates the Gmail token. None falls back to the
+    # keyless DuckDuckGo path, so search always works.
+    websearch: object | None = None
 
 
 @dataclass(frozen=True)
@@ -387,11 +391,31 @@ def _email_read(ctx: ToolContext, args: dict) -> dict:
     return ctx.email.read_message(args["message_id"])
 
 
+_EXTRACT_MIN_CHARS = 200  # an "article" shorter than this is likely a JS shell — return the raw page
+
+
+def _page_result(fetched: dict) -> dict:
+    """Shape a guarded page fetch for the model: extracted article text when the page is
+    HTML (title + clean prose via the same trafilatura path ingestion uses), raw text
+    otherwise or when extraction finds nothing (script-rendered shells)."""
+    text = fetched["text"]
+    looks_html = "<html" in text[:2000].lower() or "<!doctype" in text[:200].lower()
+    if looks_html:
+        try:
+            title, article = ingest.extract_html(text, fetched["final_url"])
+        except Exception:  # pathological markup — the raw page is still an answer
+            title, article = "", ""
+        if len(article) >= _EXTRACT_MIN_CHARS:
+            return {"final_url": fetched["final_url"], "status": fetched["status"],
+                    "title": title, "extracted": True, "text": article}
+    return {**fetched, "extracted": False}
+
+
 def _web_fetch(ctx: ToolContext, args: dict) -> dict:
     """REVIEWED: fetch a public URL behind the SSRF guard (no store access)."""
     assert args.get("url"), "url required"
     try:
-        return netguard.safe_fetch(args["url"])
+        return _page_result(netguard.safe_fetch(args["url"]))
     except netguard.FetchError as exc:
         # Some sites refuse non-browser fetches no matter what; a bare "HTTP 403" reads
         # to small models as "I have no web access" and they give up on the whole
@@ -411,10 +435,52 @@ def _kb_ingest_url(ctx: ToolContext, args: dict) -> dict:
 
 
 def _web_search(ctx: ToolContext, args: dict) -> dict:
-    """REVIEWED: search the web (DuckDuckGo); returns result titles, URLs, snippets."""
+    """REVIEWED: search the web via the configured provider chain; titles, URLs, snippets."""
     assert args.get("query"), "query required"
     limit = min(max(int(args.get("limit", 5)), 1), 10)
-    return {"results": search.web_search(args["query"], limit)}
+    if ctx.websearch is not None:
+        return ctx.websearch.search(args["query"], limit)
+    return {"results": search.web_search(args["query"], limit), "engine": "ddg"}
+
+
+_RESEARCH_MAX_PAGES = 4
+_RESEARCH_DEFAULT_PAGES = 3
+
+
+def _web_research(ctx: ToolContext, args: dict) -> dict:
+    """REVIEWED: search + read the top results in ONE step — a cited digest.
+
+    Search once, fetch the top N result pages through the guard, extract each to
+    clean article text, and return {query, engine, pages: [{url, title, text}],
+    skipped}. No model calls inside (fast, deterministic); the model synthesizes
+    from the digest. Exists because search→pick→fetch→extract loops were burning
+    the whole step budget one page at a time.
+    """
+    assert args.get("query"), "query required"
+    pages_wanted = min(max(int(args.get("pages", _RESEARCH_DEFAULT_PAGES)), 1), _RESEARCH_MAX_PAGES)
+    found = _web_search(ctx, {"query": args["query"], "limit": max(pages_wanted * 2, 5)})
+    cap = gateway.result_cap_for(getattr(ctx.kb, "conn", None), ctx.model or "")
+    per_page = max(1500, (cap - 2000) // max(pages_wanted, 1))
+    pages: list[dict] = []
+    skipped: list[dict] = []
+    seen_hosts: set[str] = set()
+    for hit in found.get("results", []):  # bounded by the search limit above
+        if len(pages) >= pages_wanted:
+            break
+        url = hit.get("url") or ""
+        host = url.split("/", 3)[2] if url.count("/") >= 2 else url
+        if host in seen_hosts:  # breadth over depth: one page per site
+            continue
+        try:
+            got = _page_result(netguard.safe_fetch(url))
+        except netguard.FetchError as exc:  # a refusing site is routine — note and move on
+            skipped.append({"url": url, "error": str(exc)[:120]})
+            continue
+        seen_hosts.add(host)
+        pages.append({"url": got["final_url"], "title": got.get("title") or hit.get("title") or "",
+                      "text": got["text"][:per_page]})
+    return {"query": args["query"], "engine": found.get("engine", "ddg"),
+            "pages": pages, "skipped": skipped}
 
 
 def _delete_task(ctx: ToolContext, args: dict) -> dict:
@@ -706,7 +772,9 @@ _TOOLS: tuple[Tool, ...] = (
     ),
     Tool(
         name="web_fetch",
-        description="Fetch a public web page or JSON URL (returns truncated text).",
+        description="Fetch and READ a public web page: returns the page's extracted article "
+                    "text (clean prose, no markup) plus its title, or raw text for non-HTML "
+                    "URLs. Use after web_search when one specific page matters.",
         params_schema={
             "type": "object",
             "additionalProperties": False,
@@ -715,6 +783,22 @@ _TOOLS: tuple[Tool, ...] = (
         },
         tier=Tier.REVIEWED,
         handler=_web_fetch,
+        egress=True,
+    ),
+    Tool(
+        name="web_research",
+        description="Research a question on the web in ONE step: searches, then fetches and "
+                    "extracts the top result pages (up to 4, one per site), returning a digest "
+                    "of {url, title, text} per page. Prefer this over separate "
+                    "web_search + web_fetch calls when you need to survey several sources.",
+        params_schema={
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {"query": {"type": "string"}, "pages": {"type": "integer"}},
+            "required": ["query"],
+        },
+        tier=Tier.REVIEWED,
+        handler=_web_research,
         egress=True,
     ),
     Tool(

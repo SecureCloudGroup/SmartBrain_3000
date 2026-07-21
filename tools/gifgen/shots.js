@@ -10,7 +10,7 @@ const BASE = process.env.SHOTS_BASE || "http://127.0.0.1:33096";
 const OUT = path.join(__dirname, "out", "shots");
 const ROUTES = [
   "/chat", "/knowledge", "/planner", "/schedules", "/email", "/activity",
-  "/usage", "/settings", "/settings/models", "/settings/router", "/help",
+  "/usage", "/settings", "/settings/models", "/settings/router", "/settings/web", "/help",
 ];
 const VIEWPORTS = [
   { name: "desktop", width: 1280, height: 800 },

@@ -255,7 +255,10 @@ def _require_provider_key(key: str) -> None:
     ``provider:<name>:api_key``). Refuse every other namespace so an unlocked-session bug or a
     confused-deputy through the local API can't clobber/delete the Gmail refresh token, device
     pairing records, or the MCP/WebRTC creds — those are written only by their own code paths."""
-    if not (key.startswith("provider:") and key.endswith(":api_key")):
+    # Two user-managed key namespaces: cloud providers and web-search providers. Both are
+    # "<ns>:<name>:api_key" — everything else (pairing records, the Gmail refresh token,
+    # MCP/WebRTC creds) stays writable only by its own code path.
+    if not (key.startswith(("provider:", "websearch:")) and key.endswith(":api_key")):
         raise HTTPException(status_code=403, detail="this endpoint manages provider keys only")
 
 
@@ -294,7 +297,8 @@ def list_secrets(request: Request) -> dict[str, list[str]]:
     """
     all_keys = _require_store(request).list_keys()
     assert isinstance(all_keys, list), "list_keys must return a list"
-    provider_keys = [k for k in all_keys if k.startswith("provider:") and k.endswith(":api_key")]
+    provider_keys = [k for k in all_keys
+                     if k.startswith(("provider:", "websearch:")) and k.endswith(":api_key")]
     assert len(provider_keys) <= len(all_keys), "filter cannot grow the list"
     return {"keys": provider_keys}
 

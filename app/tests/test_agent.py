@@ -738,3 +738,30 @@ def test_fit_for_finalize_no_tools_is_just_question_plus_nudge() -> None:
     out = agent._fit_for_finalize(msgs, budget_chars=1000)
     assert [m["role"] for m in out] == ["user", "system"]
     assert out[-1]["content"] == agent._EXHAUSTED_NUDGE
+
+
+def test_run_turn_emits_tool_events(monkeypatch) -> None:
+    # A4: the loop narrates inline executions — start (with a redacted detail) and
+    # done (with ok) per tool — and a listener that throws never breaks the turn.
+    ctx, audit, approvals = _wired()
+    _script(monkeypatch, [_toolcalls(("kb_search", {"query": "oolong"})), _text("done!")])
+    events: list[dict] = []
+    r = agent.run_turn(ctx, audit, approvals, messages=[{"role": "user", "content": "hi"}],
+                       model="m", conversation_id=None, turn_id="t-ev",
+                       on_event=events.append)
+    assert r["status"] == "complete" and r["message"] == "done!"
+    assert [e["state"] for e in events] == ["start", "done"]
+    assert events[0]["tool"] == "kb_search" and events[0]["detail"] == "oolong"
+    assert events[1]["ok"] is True
+
+
+def test_run_turn_survives_broken_event_listener(monkeypatch) -> None:
+    ctx, audit, approvals = _wired()
+    _script(monkeypatch, [_toolcalls(("kb_search", {"query": "x"})), _text("fine")])
+
+    def boom(_ev):
+        raise RuntimeError("listener bug")
+
+    r = agent.run_turn(ctx, audit, approvals, messages=[{"role": "user", "content": "hi"}],
+                       model="m", conversation_id=None, turn_id="t-ev2", on_event=boom)
+    assert r["status"] == "complete" and r["message"] == "fine"

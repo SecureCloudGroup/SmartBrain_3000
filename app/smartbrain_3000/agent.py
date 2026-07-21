@@ -287,7 +287,29 @@ def _emit_usage(usage_sink, model, response) -> None:
         usage_sink(model, response)
 
 
-def run_turn(ctx, audit, approvals, *, messages, model, conversation_id, turn_id, start_step=0, start_calls=0, usage_sink=None, auto_approve=frozenset(), timeout=60.0, result_cap=_RESULT_CAP) -> dict:
+def _notify(on_event, payload: dict) -> None:
+    """Deliver a progress event to an attached listener; a listener bug never breaks the turn."""
+    if on_event is None:
+        return
+    try:
+        on_event(payload)
+    except Exception:
+        log.warning("turn event listener failed", exc_info=True)
+
+
+def _tool_detail(name: str, args: dict | None) -> str:
+    """A short, REDACTED, human-readable argument (query/url/title) for an activity line."""
+    if not isinstance(args, dict):
+        return ""
+    red = tools.redact(args)
+    for key in ("query", "url", "title", "doc_id"):  # first recognizable handle wins
+        val = red.get(key)
+        if isinstance(val, str) and val:
+            return val[:80]
+    return ""
+
+
+def run_turn(ctx, audit, approvals, *, messages, model, conversation_id, turn_id, start_step=0, start_calls=0, usage_sink=None, auto_approve=frozenset(), timeout=60.0, result_cap=_RESULT_CAP, on_event=None) -> dict:
     """Run the bounded loop from ``start_step``; return a terminal/awaiting result.
 
     ``auto_approve`` is the set of REVIEWED tool names the user has remembered;
@@ -339,7 +361,13 @@ def run_turn(ctx, audit, approvals, *, messages, model, conversation_id, turn_id
         messages.append({"role": "assistant", "content": content, "tool_calls": tool_calls})
         parked, inline = _classify(tool_calls, auto_approve)
         for tc in inline:  # bounded by _MAX_TOOL_CALLS
-            messages.append(_execute_inline(ctx, audit, tc, conversation_id, auto_approve, result_cap))
+            tname, targs, _tcid = _tool_call_parts(tc)
+            _notify(on_event, {"kind": "tool", "state": "start", "tool": tname,
+                               "detail": _tool_detail(tname, targs)})
+            result_msg = _execute_inline(ctx, audit, tc, conversation_id, auto_approve, result_cap)
+            _notify(on_event, {"kind": "tool", "state": "done", "tool": tname,
+                               "ok": not result_msg["content"].startswith('{"error"')})
+            messages.append(result_msg)
         if parked:
             turn_state = {"model": model, "messages": messages, "step": step, "calls": calls, "conversation_id": conversation_id}
             return {"status": "awaiting_approval", "turn_id": turn_id, "pending": _park(approvals, audit, parked, conversation_id, turn_id, turn_state)}

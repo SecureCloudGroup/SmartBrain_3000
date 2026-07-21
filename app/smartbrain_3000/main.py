@@ -24,6 +24,7 @@ from .account import router as account_router
 from .chat_routes import router as chat_router
 from .local_models_routes import router as local_models_router
 from .models_routes import router as models_router
+from .web_routes import router as web_router
 from .kb_routes import router as kb_router
 from .history_routes import router as history_router
 from .memory_routes import router as memory_router
@@ -257,6 +258,7 @@ def _install_routes(application: FastAPI) -> None:
         account_router, chat_router, local_models_router, models_router, kb_router,
         history_router, memory_router, planner_router, agent_router, schedule_router,
         email_router, data_router, mcp_router, devices_router, vault_router,
+        web_router,
     ):  # fixed, bounded
         application.include_router(router)
 

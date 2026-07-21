@@ -11,6 +11,18 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Added
+- Web tooling that meets what users expect of a modern assistant:
+  **web pages read as articles** (fetches now return clean extracted prose + title via
+  the same reader ingestion uses, instead of raw HTML soup); **pluggable search
+  providers** — SearXNG (self-hosted), Brave, and Tavily (bring-your-own keys, stored
+  encrypted) with DuckDuckGo always anchoring the fallback chain, configured on a new
+  Settings → Web search page; a **one-step `web_research` tool** that searches, then
+  fetches and extracts the top pages (one per site, bounded) so a research question
+  no longer burns the step budget page by page; and **live tool activity in Chat** —
+  "Searching the web… ✓ / Reading a page…" narrated in place of the silent thinking
+  dots while the assistant works.
+
 ### Fixed
 - A bot-blocked website can no longer convince the assistant it has "no web access":
   page fetches now send the full browser-consistent header set (many WAFs 403 a

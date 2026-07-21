@@ -26,6 +26,7 @@
     { href: "/settings/providers", label: "Cloud providers" },
     { href: "/settings/models", label: "Local models" },
     { href: "/settings/router", label: "Model routing" },
+    { href: "/settings/web", label: "Web search" },
     { href: "/settings/memory", label: "Memory" },
     { href: "/settings/mcp", label: "Connections (MCP)" },
     { href: "/settings/devices", label: "Remote access" },

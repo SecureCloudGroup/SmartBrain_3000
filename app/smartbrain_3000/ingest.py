@@ -200,6 +200,12 @@ def _extract_xlsx(data: bytes) -> tuple[str, str, list[int]]:
     return "", text, starts  # a sheet is this format's "page" — cited as "sheet 2"
 
 
+def extract_html(html: str, url: str = "") -> tuple[str, str]:
+    """Public (title, main-article-text) extraction — the same trafilatura path ingestion
+    uses, shared with web_fetch so a fetched page reads as an article, not markup soup."""
+    return _extract_html(html, url)
+
+
 def _extract_html(html: str, url: str) -> tuple[str, str]:
     """Return (title, main-article-text) from HTML via trafilatura."""
     import trafilatura  # lazy: heavy dep
