@@ -166,6 +166,7 @@ def _tag_imported(ctx: ToolContext, results: list[dict]) -> None:
 
 
 _READ_ENVELOPE_MARGIN = 512  # leave room under the result cap for JSON keys/escaping around the window
+_READ_MIN_WINDOW = 12000  # floor for a requested page — a timid page burns a whole model step
 _READ_TITLE_CAP = 200  # bound the echoed title so the fixed envelope margin holds even for a huge title
 
 
@@ -202,7 +203,12 @@ def _read_document(ctx: ToolContext, args: dict) -> dict:
     cap = gateway.result_cap_for(getattr(ctx.kb, "conn", None), ctx.model or "")
     window_cap = max(1, cap - _READ_ENVELOPE_MARGIN)  # keep the serialized {window + metadata} under the cap
     offset = min(max(0, int(args.get("offset", 0))), total)
-    max_chars = min(max(1, int(args.get("max_chars", window_cap))), window_cap)
+    # Small models routinely request timid pages (max_chars 3000, seen live) and then burn
+    # a model round-trip per page walking a long document until the step budget dies. The
+    # server-returned next_offset is what drives paging, so raising a small request to an
+    # efficient window changes how much lands per step — never paging correctness.
+    requested = max(1, int(args.get("max_chars", window_cap)))
+    max_chars = min(window_cap, max(requested, min(_READ_MIN_WINDOW, window_cap)))
     window = content[offset:offset + max_chars]
     next_offset = offset + len(window)
     line = _provenance_line(ctx, doc["id"])
@@ -524,9 +530,11 @@ _TOOLS: tuple[Tool, ...] = (
     Tool(
         name="read_document",
         description="Read the FULL text of one saved document (not just a snippet), a page at a time. "
-                    "Identify it by doc_id (from kb_search) or by query/title. Returns a window of up to "
-                    "max_chars characters from offset (default 0); use the returned next_offset to read "
-                    "the next page. Use this to read or quote an exact passage of a long document.",
+                    "Identify it by doc_id (from kb_search) or by query/title. Returns a window from "
+                    "offset (default 0); use the returned next_offset to read the next page. Omit "
+                    "max_chars — the server already sizes each page as large as fits your context. "
+                    "Use this to read or quote an exact passage; for an overview or summary of a "
+                    "whole document, call summarize_document instead (it is one step).",
         params_schema={
             "type": "object",
             "additionalProperties": False,

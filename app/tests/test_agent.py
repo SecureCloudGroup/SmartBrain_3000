@@ -123,8 +123,32 @@ def test_unknown_and_bad_tool_calls_do_not_crash(monkeypatch) -> None:
 def test_max_steps_bound(monkeypatch) -> None:
     ctx, audit, approvals = _wired()
     monkeypatch.setattr(gateway, "chat_with_tools", lambda *a, **k: _toolcalls(("kb_search", {"query": "x"})))
+    # Finalization unavailable too (gateway down) -> the bound still terminates the loop.
+    def _down(*a, **k):
+        raise gateway.GatewayError(502, "gateway down")
+    monkeypatch.setattr(gateway, "chat", _down)
     r = _run(ctx, audit, approvals)
     assert r["status"] == "max_steps"  # never loops forever
+
+
+def test_exhausted_budget_finalizes_with_an_answer(monkeypatch) -> None:
+    # The internal counter must never reach chat as the whole reply ("step budget
+    # exhausted", seen live after a long document was paged until the budget died):
+    # when steps run out, one tools-disabled call answers from the gathered results.
+    ctx, audit, approvals = _wired()
+    monkeypatch.setattr(gateway, "chat_with_tools", lambda *a, **k: _toolcalls(("kb_search", {"query": "x"})))
+    seen = {}
+
+    def _plain(messages, model, timeout=60.0):
+        seen["last"] = messages[-1]
+        return _text("Here is the summary from what I read.")
+
+    monkeypatch.setattr(gateway, "chat", _plain)
+    r = _run(ctx, audit, approvals)
+    assert r["status"] == "complete" and r["message"] == "Here is the summary from what I read."
+    assert r["steps"] == agent._MAX_STEPS and r["sources"] == []
+    assert seen["last"]["role"] == "system", "the answer-now nudge rides in as a system line"
+    assert "do not request any more" in seen["last"]["content"].lower()
 
 
 def test_result_cap_truncates_tool_result_fed_back(monkeypatch) -> None:
