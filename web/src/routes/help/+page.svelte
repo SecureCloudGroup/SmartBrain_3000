@@ -74,6 +74,10 @@
     display: flex;
     gap: 1.5rem;
     align-items: flex-start;
+    /* Rides the full-width container but caps itself: nav rail + a ~46rem reading
+       column, centered in the shell's canvas. */
+    max-width: 64rem;
+    margin: 0 auto;
   }
   .help-nav {
     flex: 0 0 14rem;

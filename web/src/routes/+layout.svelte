@@ -17,38 +17,53 @@
   import Confirm from "$lib/components/Confirm.svelte";
   import Toast from "$lib/components/Toast.svelte";
   import Icon from "$lib/components/Icon.svelte";
+  import Chip from "$lib/components/Chip.svelte";
+  import type { IconName } from "$lib/icons";
   import { confirmDialog } from "$lib/confirm.svelte";
 
   let { children } = $props();
   let locking = $state(false);
   let appVersion = $state(""); // "vX.Y.Z" once /api/health answers; "" (hidden) until then / on failure
-  let overflowOpen = $state(false); // mobile ≤640px: secondary controls collapse into ⋯ menu
-  // Chat gets the full-width container; everything else stays in the narrow column.
-  const wide = $derived(page.url.pathname.startsWith("/chat"));
+  let moreOpen = $state(false); // mobile: the More sheet above the tab bar
+  // Chat + Help get the full-width container (chat for the log, help for its own
+  // two-column nav+article layout, which caps itself); everything else uses the column.
+  const wide = $derived(["/chat", "/help"].some((p) => page.url.pathname.startsWith(p)));
 
   // `remote: true` = shown on a paired phone; the rest are Desktop-only setup/review pages.
-  const NAV = [
-    { href: "/chat", label: "Chat", remote: true },
-    { href: "/knowledge", label: "Knowledge", remote: true },
-    { href: "/planner", label: "Planner", remote: true },
-    { href: "/schedules", label: "Schedules", remote: true },
-    { href: "/email", label: "Email", remote: true },
-    { href: "/activity", label: "Activity", remote: true },
-    { href: "/usage", label: "Usage", remote: false },
-    { href: "/settings", label: "Settings", remote: false },
+  // The single source of truth for BOTH the desktop sidebar and the mobile tabs/More sheet.
+  const NAV: { href: string; label: string; icon: IconName; remote: boolean }[] = [
+    { href: "/chat", label: "Chat", icon: "chat", remote: true },
+    { href: "/knowledge", label: "Knowledge", icon: "book", remote: true },
+    { href: "/planner", label: "Planner", icon: "tasks", remote: true },
+    { href: "/schedules", label: "Schedules", icon: "clock", remote: true },
+    { href: "/email", label: "Email", icon: "mail", remote: true },
+    { href: "/activity", label: "Activity", icon: "activity", remote: true },
+    { href: "/usage", label: "Usage", icon: "chart", remote: false },
+    { href: "/settings", label: "Settings", icon: "sliders", remote: false },
   ];
   // Desktop is the primary surface (status "idle" -> full nav); a paired phone (remote
   // session) shows only the consume-on-the-go pages.
   const remoteSession = $derived(remote.status !== "idle");
   const nav = $derived(remoteSession ? NAV.filter((n) => n.remote) : NAV);
+  // Mobile: the three thumb-zone tabs; everything else lives in the More sheet.
+  const TAB_HREFS = ["/chat", "/knowledge", "/activity"];
+  const tabNav = $derived(nav.filter((n) => TAB_HREFS.includes(n.href)));
+  const moreNav = $derived(nav.filter((n) => !TAB_HREFS.includes(n.href)));
   const isActive = (href: string) =>
     page.url.pathname === href || page.url.pathname.startsWith(href + "/");
+  const showNav = $derived(Boolean(account.status?.unlocked));
 
   const THEME_ICON = { system: "sun-moon", light: "sun", dark: "moon" } as const;
 
+  const badgeFor = (href: string) =>
+    href === "/activity" && pending.count > 0 ? pending.count
+    : href === "/chat" && scheduleUpdates.count > 0 ? scheduleUpdates.count
+    : 0;
+  const badgeTitle = (href: string) =>
+    href === "/activity" ? `${pending.count} awaiting approval` : `${scheduleUpdates.count} new scheduled updates`;
+
   // When the backend is unreachable, account.load() sets account.error with no
   // status — show a recoverable card instead of an indefinite per-page "Loading…".
-  // /help is bundled (works offline), so never block it.
   // /help and /pair work without a backend (bundled help; pairing stores a payload),
   // so never block them with the outage card.
   const offline = $derived(["/help", "/pair"].some((p) => page.url.pathname.startsWith(p)));
@@ -79,6 +94,7 @@
   // while unlocked (cheap, no timer; Chat + Activity also nudge it directly).
   $effect(() => {
     const path = page.url.pathname; // track navigation
+    moreOpen = false; // navigating away always closes the sheet
     if (account.status?.unlocked) {
       refreshPending();
       // The Chat page pulls unseen updates into the conversation + clears the badge itself, so
@@ -116,15 +132,38 @@
   }
 </script>
 
-<!-- Dismiss the mobile ⋯ overflow menu on Escape or an outside click (a11y: it otherwise
-     trapped focus with no keyboard/pointer way out). Clicks inside .appbar-overflow — including
-     the toggle — are ignored so the toggle still opens/closes it. -->
+<!-- Dismiss the mobile More sheet on Escape or an outside click (a11y: it otherwise
+     trapped focus with no keyboard/pointer way out). Clicks inside the sheet or on its
+     toggle are ignored so the toggle still opens/closes it. -->
 <svelte:window
-  onkeydown={(e) => { if (e.key === "Escape") overflowOpen = false; }}
+  onkeydown={(e) => { if (e.key === "Escape") moreOpen = false; }}
   onclick={(e) => {
-    if (overflowOpen && !(e.target as HTMLElement).closest(".appbar-overflow")) overflowOpen = false;
+    if (moreOpen && !(e.target as HTMLElement).closest(".more-sheet, .tab-more")) moreOpen = false;
   }}
 />
+
+{#snippet brand()}
+  <span class="brand">
+    <img class="logo" src="/icons/icon-192.png" alt="SmartBrain" />
+    <span class="titlewrap">
+      <span class="title">SmartBrain_3000</span>
+      {#if appVersion}<span class="appversion">{appVersion}</span>{/if}
+    </span>
+  </span>
+{/snippet}
+
+{#snippet controls()}
+  <a class="navitem" href="/help"><Icon name="help" /> Help</a>
+  <button class="navitem" title={`Theme: ${theme.mode}`} aria-label={`Theme: ${theme.mode}. Click to change.`} onclick={cycleTheme}>
+    <Icon name={THEME_ICON[theme.mode]} /> Theme
+  </button>
+  {#if remoteSession}
+    <button class="navitem" title="Forget this device's pairing" onclick={unpairDevice}><Icon name="link" /> Unpair</button>
+  {/if}
+  {#if account.status?.unlocked}
+    <button class="navitem" disabled={locking} onclick={lock}><Icon name="lock" /> {locking ? "Locking…" : "Lock"}</button>
+  {/if}
+{/snippet}
 
 {#if remote.status === "untrusted"}
   <!-- Possible MITM — render a full-width blocking banner so a phone user can't miss it. -->
@@ -133,91 +172,83 @@
   </div>
 {/if}
 
-<header class="appbar">
-  <div class="brand">
-    <img class="logo" src="/icons/icon-192.png" alt="SmartBrain" />
-    <span class="titlewrap">
-      <span class="title">SmartBrain_3000</span>
-      {#if appVersion}<span class="appversion">{appVersion}</span>{/if}
-    </span>
-  </div>
-  {#if account.status?.unlocked}
-    <nav class="appnav">
-      {#each nav as n (n.href)}
-        <a href={n.href} class:active={isActive(n.href)} aria-current={isActive(n.href) ? "page" : undefined}>
-          {n.label}{#if n.href === "/activity" && pending.count > 0}<span class="nav-badge" title="{pending.count} awaiting approval">{pending.count}</span>{/if}{#if n.href === "/chat" && scheduleUpdates.count > 0}<span class="nav-badge" title="{scheduleUpdates.count} new scheduled updates">{scheduleUpdates.count}</span>{/if}
-        </a>
-      {/each}
-    </nav>
-  {/if}
-  <span class="spacer"></span>
-  <RemoteStatus />
-  <!-- Desktop (>640px): secondary controls visible inline. Mobile (≤640px): collapsed into ⋯ menu below. -->
-  <div class="appbar-secondary">
-    <a class="help-link" href="/help">Help</a>
-    <button
-      class="theme-toggle"
-      title={`Theme: ${theme.mode}`}
-      aria-label={`Theme: ${theme.mode}. Click to change.`}
-      onclick={cycleTheme}
-    ><Icon name={THEME_ICON[theme.mode]} /></button>
-    {#if remoteSession}
-      <button class="secondary" onclick={unpairDevice} title="Forget this device's pairing">Unpair</button>
-    {/if}
-    {#if account.status?.unlocked}
-      <button class="secondary" disabled={locking} onclick={lock}>{locking ? "Locking…" : "Lock"}</button>
-    {/if}
-  </div>
-  <div class="appbar-overflow">
-    <button
-      class="secondary overflow-toggle"
-      aria-label="More controls"
-      aria-expanded={overflowOpen}
-      title="More"
-      onclick={() => (overflowOpen = !overflowOpen)}
-    ><Icon name="more-horizontal" /></button>
-    {#if overflowOpen}
-      <!-- svelte-ignore a11y_click_events_have_key_events -->
-      <div class="overflow-menu" role="menu" tabindex="-1" onclick={() => (overflowOpen = false)}>
-        <a class="help-link" href="/help">Help</a>
-        <button
-          class="theme-toggle"
-          title={`Theme: ${theme.mode}`}
-          aria-label={`Theme: ${theme.mode}. Click to change.`}
-          onclick={cycleTheme}
-        ><Icon name={THEME_ICON[theme.mode]} /> Theme</button>
-        {#if remoteSession}
-          <button class="secondary" onclick={unpairDevice} title="Forget this device's pairing">Unpair</button>
-        {/if}
-        {#if account.status?.unlocked}
-          <button class="secondary" disabled={locking} onclick={lock}>{locking ? "Locking…" : "Lock"}</button>
-        {/if}
+<div class="shell" class:with-side={showNav}>
+  {#if showNav}
+    <aside class="sidebar">
+      {@render brand()}
+      <nav class="side-nav" aria-label="Primary">
+        {#each nav as n (n.href)}
+          <a class="navitem" href={n.href} class:active={isActive(n.href)} aria-current={isActive(n.href) ? "page" : undefined}>
+            <Icon name={n.icon} /> {n.label}
+            {#if badgeFor(n.href) > 0}<span class="nav-badge" title={badgeTitle(n.href)}>{badgeFor(n.href)}</span>{/if}
+          </a>
+        {/each}
+      </nav>
+      <div class="side-foot">
+        {@render controls()}
       </div>
-    {/if}
+    </aside>
+  {/if}
+
+  <div class="shell-main">
+    <header class="topstrip" class:no-side={!showNav}>
+      {@render brand()}
+      <span class="spacer"></span>
+      {#if showNav && !remoteSession}
+        <Chip icon="shield" kind="ok" title="Your data is encrypted at rest and never leaves this machine">Encrypted · On-device</Chip>
+      {/if}
+      <RemoteStatus />
+      {#if !showNav}
+        <a class="navitem" href="/help"><Icon name="help" /> Help</a>
+      {/if}
+    </header>
+
+    <main class:wrap={!wide} class:wrap-wide={wide}>
+      {#if needsPairing}
+        <PairSetup />
+      {:else if remoteDown}
+        <div class="card">
+          <h1>Can&rsquo;t reach your Desktop</h1>
+          <p class="muted">{remote.detail || "The remote connection couldn't be established."}</p>
+          <p style="margin-top:1rem"><button onclick={() => window.location.reload()}>Retry</button></p>
+          <p class="muted" style="margin-top:1rem">Still stuck? <a href="/pair">Re-pair this device</a>.</p>
+        </div>
+      {:else if outage}
+        <div class="card">
+          <h1>Can&rsquo;t reach SmartBrain</h1>
+          <p class="muted">{account.error}</p>
+          <p style="margin-top:1rem"><button onclick={() => account.load()}>Retry</button></p>
+          <p class="muted" style="margin-top:1rem">First time on this device? <a href="/pair">Pair with a code</a>.</p>
+        </div>
+      {:else}
+        {@render children()}
+      {/if}
+    </main>
   </div>
-</header>
+</div>
+
+{#if showNav}
+  <nav class="tabbar" aria-label="Primary">
+    {#each tabNav as n (n.href)}
+      <a class="tab" href={n.href} class:active={isActive(n.href)} aria-current={isActive(n.href) ? "page" : undefined}>
+        {#if badgeFor(n.href) > 0}<span class="tab-dot" title={badgeTitle(n.href)}>{badgeFor(n.href)}</span>{/if}
+        <Icon name={n.icon} size={20} /> {n.label}
+      </a>
+    {/each}
+    <button class="tab tab-more" aria-expanded={moreOpen} onclick={() => (moreOpen = !moreOpen)}>
+      <Icon name="more-horizontal" size={20} /> More
+    </button>
+  </nav>
+  {#if moreOpen}
+    <div class="more-sheet" role="menu" tabindex="-1">
+      {#each moreNav as n (n.href)}
+        <a class="navitem" href={n.href} class:active={isActive(n.href)}><Icon name={n.icon} /> {n.label}</a>
+      {/each}
+      <div class="sheet-divider"></div>
+      {@render controls()}
+    </div>
+  {/if}
+{/if}
 
 <Confirm />
 <Toast />
-
-<main class:wrap={!wide} class:wrap-wide={wide}>
-  {#if needsPairing}
-    <PairSetup />
-  {:else if remoteDown}
-    <div class="card">
-      <h1>Can&rsquo;t reach your Desktop</h1>
-      <p class="muted">{remote.detail || "The remote connection couldn't be established."}</p>
-      <p style="margin-top:1rem"><button onclick={() => window.location.reload()}>Retry</button></p>
-      <p class="muted" style="margin-top:1rem">Still stuck? <a href="/pair">Re-pair this device</a>.</p>
-    </div>
-  {:else if outage}
-    <div class="card">
-      <h1>Can&rsquo;t reach SmartBrain</h1>
-      <p class="muted">{account.error}</p>
-      <p style="margin-top:1rem"><button onclick={() => account.load()}>Retry</button></p>
-      <p class="muted" style="margin-top:1rem">First time on this device? <a href="/pair">Pair with a code</a>.</p>
-    </div>
-  {:else}
-    {@render children()}
-  {/if}
-</main>
