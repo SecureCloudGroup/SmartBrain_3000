@@ -181,25 +181,35 @@ def _read_capped(response: httpx.Response, max_bytes: int,
     return b"".join(chunks)
 
 
-def _send_pinned(client: httpx.Client, url: str, host: str, ip: str) -> httpx.Response:
-    """One pinned GET: connect to ``ip``, present ``host`` in Host header + SNI.
+def _send_pinned(client: httpx.Client, url: str, host: str, ip: str,
+                 method: str = "GET", content: bytes | None = None,
+                 extra_headers: dict | None = None) -> httpx.Response:
+    """One pinned request: connect to ``ip``, present ``host`` in Host header + SNI.
+
+    ``method``/``content``/``extra_headers`` widen the SAME pinned transport to the
+    keyed search providers (Brave token header, Tavily JSON POST) — none of them
+    touch the address validation, redirect discipline, or read caps.
 
     Streaming response — the caller MUST close it. httpx.Response is NOT a context
     manager (only ``client.stream()`` is), so close it via try/finally, not ``with``.
     """
     assert client is not None and url and host and ip, "client/url/host/ip required"
+    assert method in ("GET", "POST"), "only GET/POST ride the guard"
     parsed = urlparse(url)
     host_header = f"{host}:{parsed.port}" if parsed.port is not None else host
+    headers = {"Host": host_header, **(extra_headers or {})}
     request = client.build_request(
-        "GET", _pin_url(url, ip), headers={"Host": host_header},
+        method, _pin_url(url, ip), headers=headers, content=content,
         extensions={"sni_hostname": host},
     )
     return client.send(request, stream=True)
 
 
 def _guarded_get(url: str, allowed_ct: tuple[str, ...], max_bytes: int,
-                 deadline_seconds: float | None = None, accept_zip_magic: bool = False) -> dict:
-    """Shared SSRF-guarded GET; return {final_url, status, content_type, content (bytes)}.
+                 deadline_seconds: float | None = None, accept_zip_magic: bool = False,
+                 method: str = "GET", content: bytes | None = None,
+                 extra_headers: dict | None = None) -> dict:
+    """Shared SSRF-guarded request; return {final_url, status, content_type, content (bytes)}.
 
     All the defenses (scheme/userinfo/IP allowlist, per-request IP pin with no
     global resolver mutation, bounded redirect re-validation, timeout, size cap,
@@ -230,7 +240,8 @@ def _guarded_get(url: str, allowed_ct: tuple[str, ...], max_bytes: int,
             # httpx.Response (from send(stream=True)) is NOT a context manager — close
             # it explicitly in finally, or the body/connection leaks (and `with` raises).
             try:
-                response = _send_pinned(client, current, host, ip)
+                response = _send_pinned(client, current, host, ip, method=method,
+                                        content=content, extra_headers=extra_headers)
             except (httpx.HTTPError, OSError) as exc:
                 # Refused/timed-out/TLS-failed connections are ordinary fates for a user-supplied
                 # URL: report them as FetchError (a clean 4xx upstream), never an unhandled 500
@@ -238,6 +249,11 @@ def _guarded_get(url: str, allowed_ct: tuple[str, ...], max_bytes: int,
                 # embed the URL itself, and the fragment-hygiene rule forbids that reaching a log.
                 raise FetchError(f"could not connect: {exc.__class__.__name__}") from None
             try:
+                if response.is_redirect and method == "POST":
+                    # A redirected POST would replay the body under rewritten-method
+                    # ambiguity (301/302 vs 307) — the API providers never redirect,
+                    # so refuse outright rather than model the edge.
+                    raise FetchError("redirect on POST not allowed")
                 if response.is_redirect:
                     location = response.headers.get("location")
                     if not location:
@@ -272,6 +288,40 @@ def safe_fetch(url: str) -> dict:
     """Fetch ``url`` behind the SSRF guard; return {final_url, status, text}."""
     got = _guarded_get(url, _ALLOWED_CT, _MAX_BYTES)
     return {"final_url": got["final_url"], "status": got["status"], "text": got["content"].decode("utf-8", "replace")}
+
+
+def safe_fetch_json(url: str, headers: dict | None = None) -> dict:
+    """Guarded GET returning parsed JSON (search APIs: SearXNG, Brave).
+
+    Same guard as ``safe_fetch``; ``headers`` carries a provider auth header — it
+    never influences address validation, redirects, or caps. Bad JSON is a clean
+    FetchError, never a decode traceback.
+    """
+    import json
+
+    got = _guarded_get(url, ("application/json", "text/"), _MAX_BYTES, extra_headers=headers)
+    try:
+        return json.loads(got["content"].decode("utf-8", "replace"))
+    except ValueError:
+        raise FetchError("upstream returned invalid JSON") from None
+
+
+def safe_post_json(url: str, payload: dict, headers: dict | None = None) -> dict:
+    """Guarded JSON POST returning parsed JSON (search APIs: Tavily).
+
+    Identical validation/pinning/caps as every other guarded call; redirects on
+    POST are refused outright (no method-rewrite ambiguity).
+    """
+    import json
+
+    body = json.dumps(payload).encode("utf-8")
+    got = _guarded_get(url, ("application/json", "text/"), _MAX_BYTES, method="POST",
+                       content=body, extra_headers={"Content-Type": "application/json",
+                                                    **(headers or {})})
+    try:
+        return json.loads(got["content"].decode("utf-8", "replace"))
+    except ValueError:
+        raise FetchError("upstream returned invalid JSON") from None
 
 
 def safe_fetch_bytes(url: str) -> dict:

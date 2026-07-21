@@ -12,6 +12,9 @@ from __future__ import annotations
 import dataclasses
 import json
 import logging
+import queue
+import threading
+import time
 import uuid
 from collections.abc import Iterator
 
@@ -20,7 +23,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 from starlette.responses import StreamingResponse
 
-from . import agent, consent, gateway, tools, usage
+from . import agent, consent, gateway, search, tools, usage
 from .chat_routes import _with_memory
 
 router = APIRouter()
@@ -58,10 +61,13 @@ def _context(request: Request) -> tuple[tools.ToolContext, object]:
     if audit is None:
         raise HTTPException(status_code=423, detail="locked: unlock first")
     state = request.app.state
+    secret_store = getattr(state, "secret_store", None)
     return tools.ToolContext(
         kb=state.kb, planner=state.planner, memory=state.memory,
         email=getattr(state, "email", None), schedules=getattr(state, "schedules", None),
         vaults=getattr(state, "vaults", None),  # so KB tools can tag imported-vault content
+        # Provider keys stay inside the service (ctx.email posture) — resolved here, once.
+        websearch=search.service_from(state.dbx, secret_store.get) if secret_store else None,
     ), audit
 
 
@@ -212,6 +218,77 @@ def agent_turn(request: Request, body: TurnIn) -> dict:
         raise HTTPException(status_code=502, detail=exc.message) from None
     except Exception as exc:  # gateway unreachable — match the plain-chat path's 502
         raise HTTPException(status_code=502, detail=f"gateway unreachable: {exc}") from exc
+
+
+# Overall bound on one streamed agent turn: 6 model round-trips at the interactive
+# per-call timeout, plus slack for tool executions between them.
+_STREAM_TURN_DEADLINE = 6 * _INTERACTIVE_TIMEOUT + 120.0
+
+
+@router.post("/api/agent/turn/events")
+def agent_turn_events(request: Request, body: TurnIn) -> StreamingResponse:
+    """The agent turn as SSE: live ``tool`` activity frames, then ONE terminal frame.
+
+    Distinct from ``/api/agent/turn/stream`` (which streams the FIRST model response's
+    text deltas and bails to this flow when tools appear): this endpoint runs the whole
+    tool loop, narrating it.
+
+    Terminal frames carry exactly what POST /api/agent/turn returns — ``event: final``
+    with the result dict, or ``event: error`` with {detail} — so the client treats the
+    last frame as the POST response. ``run_turn`` executes in one worker thread whose
+    DB access stays sequential (the same profile as any other request thread, via the
+    per-thread cursor wrapper); this generator only drains a queue and holds NOTHING
+    across yields (the gateway-serialization wedge taught that lesson).
+    """
+    ctx, audit = _context(request)
+    approvals = _approvals(request)
+    routes = gateway.load_routes(request.app.state.dbx)
+    model = body.model or gateway.resolve_model(body.capability, routes)
+    if not model:
+        raise HTTPException(status_code=400, detail=f"no model mapped for capability '{body.capability}'")
+    messages = _with_memory(request, list(body.messages))
+    conn = request.app.state.dbx
+
+    def sink(used_model: str, response: object) -> None:  # worker thread -> per-thread cursor
+        usage.record_response(conn, used_model, response)
+
+    frames: queue.Queue = queue.Queue(maxsize=256)  # bounded: a runaway emitter blocks, not OOMs
+
+    def worker() -> None:
+        try:
+            result = agent.run_turn(
+                ctx, audit, approvals, messages=messages, model=model,
+                conversation_id=body.conversation_id, turn_id=uuid.uuid4().hex, usage_sink=sink,
+                auto_approve=consent.remembered(conn), timeout=_INTERACTIVE_TIMEOUT,
+                result_cap=gateway.result_cap_for(conn, model),
+                on_event=lambda ev: frames.put(("tool", ev)),
+            )
+            frames.put(("final", result))
+        except gateway.GatewayError as exc:
+            frames.put(("error", {"detail": exc.message}))
+        except Exception as exc:  # match the JSON endpoint's 502 detail shape
+            frames.put(("error", {"detail": f"gateway unreachable: {exc}"}))
+
+    def events() -> Iterator[bytes]:
+        threading.Thread(target=worker, name="turn-stream", daemon=True).start()
+        deadline = time.monotonic() + _STREAM_TURN_DEADLINE
+        while True:  # bounded by the deadline below (P10 #2)
+            try:
+                kind, payload = frames.get(timeout=5.0)
+            except queue.Empty:
+                if time.monotonic() > deadline:
+                    yield _sse_event("error", {"detail": "turn timed out"})
+                    return
+                yield b": keepalive\n\n"  # SSE comment frame keeps proxies from idling out
+                continue
+            if kind == "tool":
+                yield _sse_event("tool", payload)
+                continue
+            yield _sse_event(kind, payload)  # "final" or "error" — terminal either way
+            return
+
+    return StreamingResponse(events(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache"})
 
 
 def _sse_event(event: str, payload: dict) -> bytes:

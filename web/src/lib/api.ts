@@ -521,6 +521,35 @@ export const api = {
     return res;
   },
 
+  // The WHOLE tool loop as SSE: `tool` activity frames while it works, then one
+  // terminal `final` (an AgentResult) or `error` frame. Same fallback posture as
+  // agentTurnStream — remote sessions use the JSON endpoint instead.
+  agentTurnEvents: async (body: {
+    messages: ChatMessage[];
+    model?: string;
+    capability?: string;
+    conversation_id?: string | null;
+  }): Promise<Response> => {
+    await remoteReady;
+    const res = await fetch("/api/agent/turn/events", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const detail = (await res.json().catch(() => null) as { detail?: string } | null)?.detail;
+      if (res.status === 423) goto("/unlock");
+      throw new ApiError(res.status, detail || `turn failed (${res.status})`);
+    }
+    return res;
+  },
+
+  // web-search provider configuration (keys ride the generic secrets endpoints)
+  getWebSearch: () =>
+    req<{ engine: string; searxng_url: string; configured: string[]; engines: string[] }>("/api/websearch"),
+  putWebSearch: (body: { engine: string; searxng_url: string }) =>
+    req<{ ok: boolean }>("/api/websearch", { method: "PUT", body: JSON.stringify(body) }),
+
   // chat history (encrypted conversations + messages; keyset pagination via before/limit)
   listConversations: (opts: { before?: string; limit?: number } = {}) => {
     const qs = new URLSearchParams();

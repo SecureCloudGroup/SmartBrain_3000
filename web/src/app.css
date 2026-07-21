@@ -565,6 +565,23 @@ button:disabled {
   height: 1px;
 }
 
+/* Live tool activity during a tool-running turn (the events endpoint narrates). */
+.activity {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.actline {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: var(--f-label);
+}
+.actline.done {
+  color: var(--faint);
+}
+
 /* Alive signals: pre-token thinking dots; a caret beside the streaming state label. */
 .thinking {
   display: inline-flex;

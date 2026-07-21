@@ -16,6 +16,7 @@
   import EmptyState from "$lib/components/EmptyState.svelte";
   import Icon from "$lib/components/Icon.svelte";
   import Spinner from "$lib/components/Spinner.svelte";
+  import type { IconName } from "$lib/icons";
 
   // Entry carries a stable id so {#each} can key on it (U16) — re-renders no longer
   // jump when a streaming assistant message mutates in place. `schedule` marks a fired
@@ -45,6 +46,21 @@
   // so they never set it.
   let stopper = $state<AbortController | null>(null);
   let copiedId = $state<string | null>(null); // entry whose Copy just succeeded ("Copied ✓" flip)
+  // Live tool-activity lines for the current tool-running turn (the events endpoint
+  // narrates: "Searching the web… ✓"). Cleared when the turn resolves.
+  let activity = $state<{ tool: string; detail: string; done: boolean; ok: boolean }[]>([]);
+  const TOOL_LABELS: Record<string, string> = {
+    web_search: "Searching the web", web_research: "Researching the web",
+    web_fetch: "Reading a page", kb_search: "Searching your knowledge",
+    read_document: "Reading a document", summarize_document: "Summarizing a document",
+    list_documents: "Listing documents", list_tasks: "Checking your tasks",
+    email_list: "Checking email", email_read: "Reading an email",
+  };
+  const TOOL_ICONS: Record<string, IconName> = {
+    web_search: "search", web_research: "search", web_fetch: "link",
+    kb_search: "book", read_document: "file", summarize_document: "file",
+    list_documents: "book", list_tasks: "tasks", email_list: "mail", email_read: "mail",
+  };
   let renaming = $state(false); // inline rename of the open conversation (Knowledge's idiom)
   let renameValue = $state("");
   // The only answer Regenerate is offered on — regenerating an older one would fork the thread.
@@ -553,12 +569,11 @@
           });
           if (outcome === "terminal") return;
           if (outcome === "fallback") {
-            // Tools-needed/approval — discard any partial stream bubble and replay
-            // non-streaming (not interruptible, so drop the Stop affordance first).
+            // Tools-needed/approval — discard any partial stream bubble and replay on
+            // the narrated tool path (not interruptible, so drop the Stop affordance).
             stopper = null;
             if (streamId) log = log.filter((e) => e.id !== streamId);
-            const replay = await api.agentTurn({ messages: args.messages, model: modelId, conversation_id: args.cid });
-            await handleAgentResult(replay, args.cid);
+            await runToolTurn(args.messages, args.cid);
             return;
           }
         }
@@ -587,6 +602,58 @@
   // user's Stop click, never something to paint as an error.
   function isAbort(err: unknown): boolean {
     return err instanceof DOMException && err.name === "AbortError";
+  }
+
+  // The tools path with a live narrative: run the WHOLE loop on the events endpoint,
+  // painting "Searching the web…" lines as they happen. The terminal frame is exactly
+  // an AgentResult and flows through handleAgentResult like the JSON endpoint's reply.
+  async function runToolTurn(messages: ChatMessage[], cid: string): Promise<void> {
+    activity = [];
+    try {
+      const res = await api.agentTurnEvents({ messages, model: modelId, conversation_id: cid });
+      const body = res.body;
+      if (!body) {
+        // No streamable body — the silent JSON path still answers.
+        const fallback = await api.agentTurn({ messages, model: modelId, conversation_id: cid });
+        await handleAgentResult(fallback, cid);
+        return;
+      }
+      const reader = body.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      try {
+        // Bounded loop: one chunk per iteration; the server ends with final/error.
+        for (let guard = 0; guard < 100_000; guard += 1) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          const sliced = sliceEvents(buf);
+          buf = sliced.remainder;
+          for (const ev of sliced.events) {
+            if (ev.event === "tool") {
+              const data = JSON.parse(ev.data) as { state: string; tool: string; detail?: string; ok?: boolean };
+              if (data.state === "start") {
+                activity.push({ tool: data.tool, detail: data.detail || "", done: false, ok: true });
+              } else {
+                const open = [...activity].reverse().find((a) => a.tool === data.tool && !a.done);
+                if (open) { open.done = true; open.ok = data.ok !== false; }
+              }
+            } else if (ev.event === "final") {
+              await handleAgentResult(JSON.parse(ev.data) as AgentResult, cid);
+              return;
+            } else if (ev.event === "error") {
+              const detail = (JSON.parse(ev.data) as { detail?: string }).detail;
+              throw new ApiError(502, detail || "turn failed");
+            }
+          }
+        }
+        throw new ApiError(502, "turn stream ended unexpectedly");
+      } finally {
+        try { reader.releaseLock(); } catch { /* already released */ }
+      }
+    } finally {
+      activity = [];
+    }
   }
 
   // Split a buffer into complete SSE events (separated by a blank line). Returns the
@@ -922,10 +989,26 @@
       {/if}
     {/each}
     {#if busy && !stopper}
-      <!-- Non-streamed / pre-first-token wait: an alive "thinking" signal, not a bare ellipsis. -->
+      <!-- Non-streamed / pre-first-token wait: an alive "thinking" signal — with a live
+           narrative of tool activity when the events endpoint is doing the work. -->
       <div class="msg">
-        <div class="who">SmartBrain <span class="state">· thinking</span></div>
-        <div class="body"><span class="thinking"><i></i><i></i><i></i></span></div>
+        <div class="who">SmartBrain <span class="state">· {activity.length ? "working" : "thinking"}</span></div>
+        <div class="body">
+          {#if activity.length}
+            <div class="activity">
+              {#each activity as a, i (i)}
+                <div class="actline" class:done={a.done}>
+                  <Icon name={TOOL_ICONS[a.tool] ?? "activity"} size={14} />
+                  <span>{TOOL_LABELS[a.tool] ?? a.tool}{a.detail ? ` — ${a.detail}` : ""}</span>
+                  {#if a.done}<Icon name={a.ok ? "check" : "warn"} size={14} />{/if}
+                </div>
+              {/each}
+              <span class="thinking"><i></i><i></i><i></i></span>
+            </div>
+          {:else}
+            <span class="thinking"><i></i><i></i><i></i></span>
+          {/if}
+        </div>
       </div>
     {/if}
     {#if log.length === 0}

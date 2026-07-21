@@ -24,13 +24,13 @@ from concurrent.futures import ThreadPoolExecutor
 import duckdb
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-from . import agent, consent, gateway, ingest, tools, usage, vault_sync
+from . import agent, consent, gateway, ingest, search, tools, usage, vault_sync
 from .approvals import ApprovalStore
 from .audit import AuditLog
 from .kb import KnowledgeBase
 from .memory import MemoryStore
 from .planner import Planner
-from .secrets import MASTER_KEY_BYTES
+from .secrets import MASTER_KEY_BYTES, SecretStore
 from .vaults import VaultStore
 
 log = logging.getLogger(__name__)
@@ -549,11 +549,19 @@ def _run_one(app, key: bytes, session: str, schedule: dict) -> dict:
     assert cursor is not None, "per-thread cursor required"
     try:
         store = ScheduleStore(cursor, key)
+        # SecretStore's first construction CREATEs its table; parallel tick threads on a
+        # fresh DB can catalog-conflict on that create. Config is a nicety for a scheduled
+        # turn — fall back to the keyless chain rather than fail the run.
+        try:
+            websvc = search.service_from(cursor, SecretStore(cursor, key).get)
+        except Exception:
+            websvc = None
         ctx = tools.ToolContext(
             kb=KnowledgeBase(cursor, key), planner=Planner(cursor, key),
             memory=MemoryStore(cursor, key), email=getattr(app.state, "email", None),
             schedules=store,  # same per-thread cursor as the other stores (turn-cursor invariant)
             vaults=VaultStore(cursor, key),  # so KB tools can tag imported-vault content
+            websearch=websvc,
         )
         audit = AuditLog(cursor, key)
         approvals = ApprovalStore(cursor, key, session)

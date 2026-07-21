@@ -707,3 +707,61 @@ def test_collect_sources_dedupes_and_bounds() -> None:
     out = agent._collect_sources(messages)
     assert len(out) == agent._MAX_SOURCES  # bounded (30 hits offered)
     assert len({(s["id"], s["offset"]) for s in out}) == len(out)  # deduped by (id, offset)
+
+
+def test_fit_for_finalize_rebuilds_within_budget() -> None:
+    # The transcript at exhaustion can exceed the model's context (seen live: five
+    # 34k-char pages of one document into a 32k-token model) — the rescue prompt must
+    # be rebuilt to fit, keeping the question, the FIRST result, and the newest work.
+    msgs = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "summarize the deal"},
+        {"role": "assistant", "content": "", "tool_calls": [{}]},
+        {"role": "tool", "content": "FIRST" + "a" * 5000},
+        {"role": "assistant", "content": "", "tool_calls": [{}]},
+        {"role": "tool", "content": "MID" + "b" * 5000},
+        {"role": "assistant", "content": "", "tool_calls": [{}]},
+        {"role": "tool", "content": "NEWEST" + "c" * 5000},
+    ]
+    out = agent._fit_for_finalize(msgs, budget_chars=9000)
+    total = sum(len(m["content"]) for m in out)
+    assert total <= 9000 + len(agent._EXHAUSTED_NUDGE) + 200  # nudge + label ride above the results budget
+    assert out[0]["content"] == "sys" and out[1]["content"] == "summarize the deal"
+    flat = out[2]["content"]
+    assert "FIRST" in flat and "NEWEST" in flat, "anchors: first result + newest work"
+    assert out[-1]["content"] == agent._EXHAUSTED_NUDGE
+    assert all(m.get("role") != "tool" for m in out), "plain chat call — no orphaned tool roles"
+
+
+def test_fit_for_finalize_no_tools_is_just_question_plus_nudge() -> None:
+    msgs = [{"role": "user", "content": "hello"}]
+    out = agent._fit_for_finalize(msgs, budget_chars=1000)
+    assert [m["role"] for m in out] == ["user", "system"]
+    assert out[-1]["content"] == agent._EXHAUSTED_NUDGE
+
+
+def test_run_turn_emits_tool_events(monkeypatch) -> None:
+    # A4: the loop narrates inline executions — start (with a redacted detail) and
+    # done (with ok) per tool — and a listener that throws never breaks the turn.
+    ctx, audit, approvals = _wired()
+    _script(monkeypatch, [_toolcalls(("kb_search", {"query": "oolong"})), _text("done!")])
+    events: list[dict] = []
+    r = agent.run_turn(ctx, audit, approvals, messages=[{"role": "user", "content": "hi"}],
+                       model="m", conversation_id=None, turn_id="t-ev",
+                       on_event=events.append)
+    assert r["status"] == "complete" and r["message"] == "done!"
+    assert [e["state"] for e in events] == ["start", "done"]
+    assert events[0]["tool"] == "kb_search" and events[0]["detail"] == "oolong"
+    assert events[1]["ok"] is True
+
+
+def test_run_turn_survives_broken_event_listener(monkeypatch) -> None:
+    ctx, audit, approvals = _wired()
+    _script(monkeypatch, [_toolcalls(("kb_search", {"query": "x"})), _text("fine")])
+
+    def boom(_ev):
+        raise RuntimeError("listener bug")
+
+    r = agent.run_turn(ctx, audit, approvals, messages=[{"role": "user", "content": "hi"}],
+                       model="m", conversation_id=None, turn_id="t-ev2", on_event=boom)
+    assert r["status"] == "complete" and r["message"] == "fine"

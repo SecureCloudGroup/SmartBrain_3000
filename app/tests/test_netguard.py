@@ -342,3 +342,43 @@ def test_page_fetch_sends_browser_consistent_headers(monkeypatch) -> None:
     assert seen["accept-language"], "browsers always send Accept-Language"
     assert seen["sec-fetch-mode"] == "navigate", "consistent Sec-Fetch set"
     assert seen["upgrade-insecure-requests"] == "1"
+
+
+def test_post_json_sends_body_and_headers(monkeypatch) -> None:
+    # Tavily rides a guarded JSON POST: body, content-type, and the auth header must
+    # arrive; the response parses back to a dict.
+    import httpx
+
+    _resolve_to(monkeypatch, "93.184.216.34")
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["method"] = request.method
+        seen["body"] = request.content
+        seen["ct"] = request.headers.get("content-type")
+        seen["auth"] = request.headers.get("x-api-key")
+        return httpx.Response(200, headers={"content-type": "application/json"}, text='{"ok": true}')
+
+    _serve(monkeypatch, handler)
+    out = netguard.safe_post_json("http://api.test/search", {"q": "x"}, headers={"X-Api-Key": "k"})
+    assert out == {"ok": True}
+    assert seen["method"] == "POST" and b'"q": "x"' in seen["body"]
+    assert seen["ct"] == "application/json" and seen["auth"] == "k"
+
+
+def test_post_json_refuses_redirects(monkeypatch) -> None:
+    import httpx
+
+    _resolve_to(monkeypatch, "93.184.216.34")
+    _serve(monkeypatch, lambda r: httpx.Response(302, headers={"location": "http://api.test/other"}))
+    with pytest.raises(FetchError):
+        netguard.safe_post_json("http://api.test/search", {"q": "x"})
+
+
+def test_fetch_json_rejects_invalid_json(monkeypatch) -> None:
+    import httpx
+
+    _resolve_to(monkeypatch, "93.184.216.34")
+    _serve(monkeypatch, lambda r: httpx.Response(200, headers={"content-type": "application/json"}, text="not json"))
+    with pytest.raises(FetchError):
+        netguard.safe_fetch_json("http://api.test/thing")

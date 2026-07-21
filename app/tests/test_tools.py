@@ -705,3 +705,78 @@ def test_web_fetch_error_steers_recovery(monkeypatch) -> None:
     msg = str(err.value)
     assert "HTTP 403" in msg, "the honest upstream error stays"
     assert "DIFFERENT URL" in msg and "web access itself is working" in msg
+
+
+def test_read_document_hints_summarize_for_huge_docs() -> None:
+    # A doc several times the window cannot be paged into context (a 170k-char doc
+    # walked a 32k-token model past its whole step budget, seen live) — the result
+    # says so at the exact moment the model decides whether to keep paging.
+    window_cap = gateway.result_cap_for(None, "") - tools._READ_ENVELOPE_MARGIN
+    ctx, doc_id = _wired_doc("Huge", "y" * (window_cap * 3))
+    out = _call("read_document", ctx, {"doc_id": doc_id})
+    assert "summarize_document" in out.get("hint", "")
+    ctx2, doc2 = _wired_doc("Small", "short body")
+    assert "hint" not in _call("read_document", ctx2, {"doc_id": doc2})
+
+
+# --- web page extraction + one-step research (A1/A3) ------------------------
+
+_ARTICLE_HTML = ("<!doctype html><html><head><title>T</title></head><body><nav>junk</nav>"
+                 "<article><h1>Weather in London</h1>" + "<p>Clear skies, 21 degrees. </p>" * 40
+                 + "</article></body></html>")
+
+
+def test_web_fetch_extracts_article_from_html(monkeypatch) -> None:
+    from smartbrain_3000 import netguard
+
+    monkeypatch.setattr(netguard, "safe_fetch",
+                        lambda url: {"final_url": url, "status": 200, "text": _ARTICLE_HTML})
+    out = tools._web_fetch(tools.ToolContext(), {"url": "https://site.test/w"})
+    assert out["extracted"] is True
+    assert "Clear skies" in out["text"] and "<article>" not in out["text"]
+    assert "junk" not in out["text"], "nav chrome stripped"
+
+
+def test_web_fetch_falls_back_to_raw_for_shells(monkeypatch) -> None:
+    # A script-rendered shell extracts to ~nothing — the raw page is still an answer.
+    from smartbrain_3000 import netguard
+
+    shell = "<!doctype html><html><body><div id=app></div><script>boot()</script></body></html>"
+    monkeypatch.setattr(netguard, "safe_fetch",
+                        lambda url: {"final_url": url, "status": 200, "text": shell})
+    out = tools._web_fetch(tools.ToolContext(), {"url": "https://spa.test/"})
+    assert out["extracted"] is False and out["text"] == shell
+
+
+def test_web_search_prefers_ctx_service() -> None:
+    class FakeService:
+        def search(self, query, limit):
+            return {"results": [{"title": "hit", "url": "https://x", "snippet": ""}], "engine": "brave"}
+
+    out = tools._web_search(tools.ToolContext(websearch=FakeService()), {"query": "q"})
+    assert out["engine"] == "brave"
+
+
+def test_web_research_bounds_dedups_and_survives_refusals(monkeypatch) -> None:
+    from smartbrain_3000 import netguard
+
+    class FakeService:
+        def search(self, query, limit):
+            return {"engine": "searxng", "results": [
+                {"title": "A", "url": "https://one.test/a", "snippet": ""},
+                {"title": "A2", "url": "https://one.test/b", "snippet": ""},   # same host: skipped
+                {"title": "B", "url": "https://two.test/x", "snippet": ""},    # refuses
+                {"title": "C", "url": "https://three.test/y", "snippet": ""},
+                {"title": "D", "url": "https://four.test/z", "snippet": ""},
+            ]}
+
+    def fetch(url):
+        if "two.test" in url:
+            raise netguard.FetchError("upstream returned HTTP 403")
+        return {"final_url": url, "status": 200, "text": _ARTICLE_HTML}
+
+    monkeypatch.setattr(netguard, "safe_fetch", fetch)
+    out = tools._web_research(tools.ToolContext(websearch=FakeService()), {"query": "q", "pages": 2})
+    assert [p["url"] for p in out["pages"]] == ["https://one.test/a", "https://three.test/y"]
+    assert out["skipped"][0]["url"] == "https://two.test/x"
+    assert out["engine"] == "searxng"
