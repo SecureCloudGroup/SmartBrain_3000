@@ -2,9 +2,16 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <link rel="icon" href="/icons/icon-192.png" />
+    <link rel="icon" href="/icons/favicon-32.png" sizes="32x32" />
+    <link rel="icon" href="/icons/icon-192.png" sizes="192x192" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="apple-mobile-web-app-title" content="SmartBrain" />
+    <!-- black-translucent lets the app draw under the iOS status bar; the shell pads with
+         safe-area-inset-top, so content clears the notch. -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
     <link rel="preload" href="/fonts/inter-var-latin.woff2" as="font" type="font/woff2" crossorigin />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <!-- Browser/PWA chrome follows the system theme (was hardcoded dark — light users got a dark
@@ -20,20 +27,20 @@
         if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
       } catch (e) {}
     </script>
-    <meta http-equiv="content-security-policy" content="default-src 'self'; connect-src 'self' wss: stun: turn:; img-src 'self' data:; manifest-src 'self'; object-src 'none'; script-src 'self' 'sha256-0qcH3DS2Pj3keQOf+ZLx0EToCkN1AKxsd1i95LUkMcY='; style-src 'self' 'unsafe-inline'; base-uri 'self'; form-action 'self'">
-		<link href="/_app/immutable/entry/start.BNeQRFxK.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/BnpH5VVN.js" rel="modulepreload">
+    <meta http-equiv="content-security-policy" content="default-src 'self'; connect-src 'self' wss: stun: turn:; img-src 'self' data:; manifest-src 'self'; object-src 'none'; script-src 'self' 'sha256-vYnC+K5Lk8Yy9atjFWszhtFJfxdpJdN3vFy2Pb8Cpn4='; style-src 'self' 'unsafe-inline'; base-uri 'self'; form-action 'self'">
+		<link href="/_app/immutable/entry/start.DgcB8lYd.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/CqmsPD0e.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/CXkL0Yf_.js" rel="modulepreload">
-		<link href="/_app/immutable/entry/app.CTKtU4NC.js" rel="modulepreload">
+		<link href="/_app/immutable/entry/app.DRoaxUMa.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/xihTtKlq.js" rel="modulepreload">
-		<link href="/_app/immutable/nodes/0.Cf67EIqV.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/BBZjRpbK.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/DtfWR8X7.js" rel="modulepreload">
+		<link href="/_app/immutable/nodes/0.Bf4EukCE.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/C0GWLV-Q.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/DRxt3pqF.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/C1irMsuH.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/mHhCDj7E.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/t28xdrHe.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/CDAG6Ytr.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/29N1bE_6.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/VtDv0Z_0.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/DnQNbxYd.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/HOJ18weF.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/fIlVcxxR.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/B2GInDKv.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/CdJTZ_yZ.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/CXDIa2sC.js" rel="modulepreload">
@@ -49,15 +56,15 @@
     <div style="display: contents">
 			<script>
 				{
-					__sveltekit_1y344sx = {
+					__sveltekit_klskra = {
 						base: ""
 					};
 
 					const element = document.currentScript.parentElement;
 
 					Promise.all([
-						import("/_app/immutable/entry/start.BNeQRFxK.js"),
-						import("/_app/immutable/entry/app.CTKtU4NC.js")
+						import("/_app/immutable/entry/start.DgcB8lYd.js"),
+						import("/_app/immutable/entry/app.DRoaxUMa.js")
 					]).then(([kit, app]) => {
 						kit.start(app, element);
 					});

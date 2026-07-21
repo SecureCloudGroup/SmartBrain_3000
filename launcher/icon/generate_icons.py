@@ -6,9 +6,8 @@ Outputs (committed next to this script; the launcher embeds them via //go:embed)
                   icon so the menu bar tints it for light/dark automatically.
   icon_win.ico  — 32x32 "SB" in mid-blue for the Windows system tray (reads on light + dark bars).
 
-  icon_app.png is NOT generated here: it is the brand asset (assets/SmartBrain_Avatar.png resized to
-  512px) used for the Finder/Dock icon — regenerate with
-  `sips -z 512 512 ../../assets/SmartBrain_Avatar.png --out icon_app.png`. CI turns it into .icns.
+  icon_app.png is NOT generated here: it is the Finder/Dock mark derived from the brand
+  asset by tools/brand/make_icons.py (run that from the repo root). CI turns it into .icns.
 
 Needs Pillow + a bold sans TTF (tries DejaVu Sans Bold / Arial Bold / Helvetica). Run from this
 directory:  python3 generate_icons.py

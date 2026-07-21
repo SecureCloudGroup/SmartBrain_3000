@@ -12,6 +12,17 @@ to know when a release changes behavior.
 ## [Unreleased]
 
 ### Added
+- One brand mark everywhere: a new generator (`tools/brand/make_icons.py`) derives every
+  raster asset from the one mascot source — PWA icons with a **properly maskable** variant
+  (no more white bleed or clipped wordmark on Android), an apple-touch icon, a real
+  favicon, a face-tight header mark that's legible at 30px, and the macOS Dock icon.
+  The app manifest moved to the design palette (#121212) and gained the 192px maskable
+  size; iOS gets proper standalone metas (app title, translucent status bar). The
+  landing page now runs the app's design system — Inter, the token palettes in both
+  themes, the real mark instead of an abstract gradient chip, icon pillars instead of
+  emoji — plus a favicon and social-preview (Open Graph) card, and a fix for a
+  pre-existing bug where the long install commands forced the whole page to scroll
+  sideways (phones included). The tray monogram is untouched.
 - Settings and onboarding joined the system: the settings section tabs are the same
   pill strip as everywhere else (one scrollable row on phones), and the last bare
   "Loading…" texts — root dispatcher, Settings, Usage, and the Setup busy state —

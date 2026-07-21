@@ -8,31 +8,56 @@
       name="description"
       content="A fully local, single-user AI assistant you run on your own computer. Your knowledge, models, and credentials stay on your hardware, encrypted under a passphrase only you hold."
     />
+    <link rel="icon" href="favicon-32.png" sizes="32x32" />
+    <link rel="icon" href="mark-64.png" sizes="64x64" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="SmartBrain" />
+    <meta property="og:title" content="SmartBrain — your own private AI, on your own machine" />
+    <meta
+      property="og:description"
+      content="A fully local AI assistant. Your knowledge, models, and credentials never leave your hardware."
+    />
+    <meta property="og:url" content="https://smartbrain.securecloudgroup.com/" />
+    <meta property="og:image" content="https://smartbrain.securecloudgroup.com/og.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:image" content="https://smartbrain.securecloudgroup.com/og.png" />
+    <link rel="preload" href="fonts/inter-var-latin.woff2" as="font" type="font/woff2" crossorigin />
     <!-- Self-contained on purpose: no external fonts, scripts, or trackers. What the page promises
-         (nothing leaves your machine) starts with the page itself. -->
+         (nothing leaves your machine) starts with the page itself. The typeface is the app's own
+         Inter subset, shipped next to this file (OFL license alongside). -->
     <style>
+      @font-face {
+        font-family: "Inter var";
+        src: url("fonts/inter-var-latin.woff2") format("woff2");
+        font-weight: 100 900;
+        font-style: normal;
+        font-display: swap;
+      }
+      /* The app's design tokens (web/src/app.css), verbatim where they apply here. */
       :root {
-        --bg: #f7f8fa;
+        --bg: #fafaf8;
         --panel: #ffffff;
-        --ink: #16181d;
-        --muted: #5b6270;
-        --line: #e4e7ec;
-        --accent: #2f6df6;
+        --ink: #1a1a1a;
+        --muted: #62626a;
+        --line: #e3e3df;
+        --accent: #0e7269;
+        --accent-strong: #0b5d56;
         --accent-ink: #ffffff;
-        --code-bg: #0f1220;
-        --code-ink: #e7ecf5;
+        --code-bg: #161619;
+        --code-ink: #e6e6e6;
       }
       @media (prefers-color-scheme: dark) {
         :root {
-          --bg: #0d0f14;
-          --panel: #14171f;
-          --ink: #eef1f6;
-          --muted: #9aa3b2;
-          --line: #242a36;
-          --accent: #5b8bff;
-          --accent-ink: #0b0d12;
-          --code-bg: #090b12;
-          --code-ink: #e7ecf5;
+          --bg: #121212;
+          --panel: #1a1a1d;
+          --ink: #e6e6e6;
+          --muted: #9c9ca4;
+          --line: #2c2c31;
+          --accent: #63b3a8;
+          --accent-strong: #2a7f74;
+          --accent-ink: #ffffff;
+          --code-bg: #161619;
+          --code-ink: #e6e6e6;
         }
       }
       * { box-sizing: border-box; }
@@ -41,7 +66,7 @@
         margin: 0;
         background: var(--bg);
         color: var(--ink);
-        font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        font: 16px/1.6 "Inter var", system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       }
       a { color: var(--accent); }
       .wrap { max-width: 960px; margin: 0 auto; padding: 0 1.25rem; }
@@ -52,11 +77,8 @@
         justify-content: space-between;
         padding: 1.1rem 0;
       }
-      .brand { display: flex; align-items: center; gap: 0.55rem; font-weight: 700; letter-spacing: -0.01em; }
-      .brand .mark {
-        width: 26px; height: 26px; border-radius: 7px;
-        background: linear-gradient(150deg, var(--accent), #8a5bff);
-      }
+      .brand { display: flex; align-items: center; gap: 0.55rem; font-weight: 650; letter-spacing: -0.01em; }
+      .brand .mark { width: 26px; height: 26px; display: block; }
       header nav a { margin-left: 1.25rem; color: var(--muted); text-decoration: none; font-weight: 500; }
       header nav a:hover { color: var(--ink); }
 
@@ -67,12 +89,14 @@
       /* The one command, chosen for the visitor's OS by the tiny script below. */
       .install {
         display: inline-flex; align-items: stretch; gap: 0;
-        background: var(--code-bg); border-radius: 10px; overflow: hidden;
-        max-width: 100%; text-align: left; box-shadow: 0 8px 30px rgba(0,0,0,0.12);
+        background: var(--code-bg); border: 1px solid var(--line); border-radius: 10px; overflow: hidden;
+        max-width: 100%; text-align: left;
       }
       .install code {
         color: var(--code-ink); font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
         font-size: 0.95rem; padding: 0.9rem 1.1rem; white-space: nowrap; overflow-x: auto;
+        min-width: 0; /* flex items refuse to shrink below content otherwise — the long
+                         commands were forcing the whole page to scroll sideways */
       }
       .install button {
         border: 0; border-left: 1px solid rgba(255,255,255,0.12);
@@ -85,9 +109,10 @@
 
       .pillars { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 1rem; padding: 1rem 0 2.5rem; }
       .pillar { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1.25rem; }
-      .pillar h3 { margin: 0.2rem 0 0.4rem; font-size: 1.05rem; }
+      .pillar h3 { margin: 0.45rem 0 0.4rem; font-size: 1.05rem; }
       .pillar p { margin: 0; color: var(--muted); font-size: 0.92rem; }
-      .pillar .ico { font-size: 1.4rem; }
+      .pillar .ico { color: var(--accent); }
+      .pillar .ico svg { width: 24px; height: 24px; display: block; }
       @media (max-width: 720px) { .pillars { grid-template-columns: 1fr; } }
 
       section.block { padding: 2.5rem 0; border-top: 1px solid var(--line); }
@@ -96,12 +121,12 @@
 
       .os { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
       @media (max-width: 720px) { .os { grid-template-columns: 1fr; } }
-      .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1.1rem; }
+      .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1.1rem; min-width: 0; }
       .card h3 { margin: 0 0 0.2rem; display: flex; align-items: center; gap: 0.5rem; font-size: 1rem; }
       .card .tag { font-size: 0.72rem; font-weight: 600; color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); padding: 0.1rem 0.45rem; border-radius: 999px; }
       .card p { color: var(--muted); font-size: 0.86rem; margin: 0.4rem 0 0.75rem; }
       .cmd { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; background: var(--code-bg); border-radius: 8px; padding: 0.5rem 0.7rem; }
-      .cmd code { color: var(--code-ink); font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 0.82rem; overflow-x: auto; white-space: nowrap; }
+      .cmd code { color: var(--code-ink); font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 0.82rem; overflow-x: auto; white-space: nowrap; min-width: 0; }
       .cmd button { border: 0; background: transparent; color: var(--muted); cursor: pointer; font-size: 0.78rem; font-weight: 600; flex: none; }
       .cmd button:hover { color: var(--code-ink); }
 
@@ -111,7 +136,7 @@
       .step::before {
         counter-increment: step; content: counter(step);
         position: absolute; left: 0; top: 0; width: 1.7rem; height: 1.7rem;
-        background: var(--accent); color: var(--accent-ink); border-radius: 50%;
+        background: var(--accent-strong); color: var(--accent-ink); border-radius: 50%;
         display: grid; place-items: center; font-weight: 700; font-size: 0.9rem;
       }
       .step h4 { margin: 0.1rem 0 0.2rem; font-size: 0.98rem; }
@@ -127,7 +152,7 @@
   <body>
     <div class="wrap">
       <header>
-        <div class="brand"><span class="mark"></span> SmartBrain</div>
+        <div class="brand"><img class="mark" src="mark-64.png" width="26" height="26" alt="" /> SmartBrain</div>
         <nav>
           <a href="https://github.com/SecureCloudGroup/SmartBrain_3000">GitHub</a>
           <a href="https://github.com/SecureCloudGroup/SmartBrain_3000#quickstart">Docs</a>
@@ -152,22 +177,22 @@
     <div class="wrap">
       <div class="pillars">
         <div class="pillar">
-          <div class="ico">🔒</div>
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div>
           <h3>Fully local</h3>
           <p>Runs in Docker on your machine. No accounts, no telemetry — the only SmartBrain-operated service is an optional, content-blind relay for phone access.</p>
         </div>
         <div class="pillar">
-          <div class="ico">🗝️</div>
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg></div>
           <h3>You own your data</h3>
           <p>Your knowledge base, notes, and secrets live in a local database, encrypted at rest under your passphrase.</p>
         </div>
         <div class="pillar">
-          <div class="ico">📦</div>
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></svg></div>
           <h3>Share with Vaults</h3>
           <p>Group knowledge into vaults and share them — sealed for someone you trust, or published publicly so anyone can subscribe by URL and get signed updates.</p>
         </div>
         <div class="pillar">
-          <div class="ico">🧠</div>
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 5H3"/><path d="M12 19H3"/><path d="M14 3v4"/><path d="M16 17v4"/><path d="M21 12h-9"/><path d="M21 19h-5"/><path d="M21 5h-7"/><path d="M8 10v4"/><path d="M8 12H3"/></svg></div>
           <h3>Your choice of AI</h3>
           <p>Bring your own API keys, or run fully local models with Ollama or Apple MLX. A built-in gateway routes between them.</p>
         </div>
