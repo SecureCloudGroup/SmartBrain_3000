@@ -12,6 +12,10 @@ to know when a release changes behavior.
 ## [Unreleased]
 
 ### Added
+- Settings and onboarding joined the system: the settings section tabs are the same
+  pill strip as everywhere else (one scrollable row on phones), and the last bare
+  "Loading…" texts — root dispatcher, Settings, Usage, and the Setup busy state —
+  became the shared spinner.
 - Planner, Schedules, and Email joined the system: one tab style everywhere, real
   empty states, spinners instead of bare "Loading…", and the email reader now opens
   in the same focused modal as every other dialog.

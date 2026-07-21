@@ -92,7 +92,7 @@
         autocorrect="off"
         spellcheck="false"
         maxlength="10"
-        style="text-transform:uppercase;letter-spacing:0.15em;font-family:ui-monospace,monospace"
+        style="text-transform:uppercase;letter-spacing:0.15em;font-family:var(--font-mono)"
       />
     </p>
     <p style="margin-top:1rem"><button onclick={submitCode} disabled={pairing}>{pairing ? "Pairing…" : "Pair"}</button></p>
