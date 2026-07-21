@@ -12,6 +12,12 @@ to know when a release changes behavior.
 ## [Unreleased]
 
 ### Added
+- All docs media regenerated in the new design, dark theme throughout: the 11
+  quickstart GIFs (with their reduced-motion posters) and the five guide screenshots
+  are re-shot on the redesigned app — sidebar shell, message rows, chips, modals. The
+  recorder now pins the dark theme explicitly and its storyboards follow the new
+  surfaces (settings tabs, the icon Send button, chip citations and badges, and the
+  document viewer that is now a true modal).
 - An accessibility and performance sweep, verified by axe across every route in both
   themes and viewports (now zero violations): the app version, composer hint, and
   mobile tab labels meet AA contrast; light-theme green/red are retuned so status
