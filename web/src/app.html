@@ -6,7 +6,11 @@
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#0b0b0f" />
+    <!-- Browser/PWA chrome follows the system theme (was hardcoded dark — light users got a dark
+         splash and status bar). An explicit in-app choice can't move these metas, but the system
+         default is right for the overwhelming case. -->
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#121212" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#fafaf8" />
     <title>SmartBrain_3000</title>
     <script>
       // Apply a saved light/dark choice before paint (avoids a flash); "system" = no attr.

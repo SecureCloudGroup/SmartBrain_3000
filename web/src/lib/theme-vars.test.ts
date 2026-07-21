@@ -23,13 +23,13 @@ function walk(dir: string, out: string[] = []): string[] {
 describe("theme CSS variables", () => {
   it("every var(--x) used in src/ is defined in app.css", () => {
     const appCss = readFileSync(join(SRC, "app.css"), "utf8");
-    const defined = new Set(Array.from(appCss.matchAll(/^\s*(--[a-z-]+)\s*:/gm), (m) => m[1]));
+    const defined = new Set(Array.from(appCss.matchAll(/^\s*(--[a-z0-9-]+)\s*:/gm), (m) => m[1]));
     expect(defined.size).toBeGreaterThan(5); // sanity: we actually parsed the theme
 
     const used = new Set<string>();
     for (const file of walk(SRC)) {
       const text = readFileSync(file, "utf8");
-      for (const m of text.matchAll(/var\((--[a-z-]+)/g)) used.add(m[1]);
+      for (const m of text.matchAll(/var\((--[a-z0-9-]+)/g)) used.add(m[1]);
     }
 
     const undefinedVars = [...used].filter((v) => !defined.has(v)).sort();
