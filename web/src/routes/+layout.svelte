@@ -144,7 +144,7 @@
 
 {#snippet brand()}
   <span class="brand">
-    <img class="logo" src="/icons/icon-192.png" alt="SmartBrain" />
+    <img class="logo" src="/icons/mark-64.png" alt="SmartBrain" />
     <span class="titlewrap">
       <span class="title">SmartBrain_3000</span>
       {#if appVersion}<span class="appversion">{appVersion}</span>{/if}
