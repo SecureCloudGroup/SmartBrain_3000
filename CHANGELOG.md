@@ -12,6 +12,10 @@ to know when a release changes behavior.
 ## [Unreleased]
 
 ### Added
+- Knowledge on the same system: document rows with quiet actions, search-result
+  citations as chips, vault identity as proper Subscribed/Public chips with monospace
+  fingerprints, real empty states — and the document viewer is now a true focused
+  modal that still opens at the cited passage.
 - Chat reads like a modern assistant: full-width labeled message rows on a reading
   measure (bubbles retired), visible thinking/streaming states, a redesigned composer
   with an always-visible Stop during generation, citation chips, an inline approval
