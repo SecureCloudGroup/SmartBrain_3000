@@ -212,7 +212,17 @@ def _citations_from(tool_name: str, result_str: str) -> list[dict]:
 
 
 def _collect_sources(messages: list[dict]) -> list[dict]:
-    """Citations for every knowledge-tool result in this turn, deduped by (id, offset).
+    """Citations for this turn's knowledge-tool results, weighted by DEPTH of use.
+
+    Citing every retrieved search hit sprayed the whole knowledge base as chips
+    under an answer about one document (seen live: a Tribeca question cited every
+    unrelated file its broad searches had merely SURFACED). Now the documents the
+    model actually READ (read_document / summarize_document) anchor the citations:
+    when any read happened, search hits survive only as page-level deep links INTO
+    those read documents. A search-only turn still cites its hits — the snippets
+    were the whole evidence. One chip per (document, page): the same document
+    surfaced by two queries collapses, and a read document with page chips drops
+    its redundant whole-document chip.
 
     Scanned from the MESSAGES (the deterministic record of what actually ran) rather
     than accumulated in loop state, so a turn that parked for approval still cites the
@@ -222,8 +232,9 @@ def _collect_sources(messages: list[dict]) -> list[dict]:
     """
     assert isinstance(messages, list), "messages must be a list"
     names: dict[str, str] = {}  # tool_call_id -> tool name
-    sources: list[dict] = []
-    seen: set[tuple] = set()
+    search_hits: list[dict] = []
+    read_cites: list[dict] = []  # ordered; one per document
+    read_ids: set = set()
     for msg in messages[-_SOURCE_SCAN_WINDOW:]:  # bounded (P10 #2); this turn's appends sit at the tail
         if not isinstance(msg, dict):
             continue
@@ -239,11 +250,29 @@ def _collect_sources(messages: list[dict]) -> list[dict]:
             if not name:
                 continue  # a result we can't attribute to a tool can't be cited safely
             for cite in _citations_from(name, msg.get("content") or ""):
-                key = (cite.get("id"), cite.get("offset"))
-                if key in seen or len(sources) >= _MAX_SOURCES:
-                    continue
-                seen.add(key)
-                sources.append(cite)
+                if name == "kb_search":
+                    search_hits.append(cite)
+                elif cite.get("id") not in read_ids:
+                    read_ids.add(cite.get("id"))
+                    read_cites.append(cite)
+    sources: list[dict] = []
+    seen: set[tuple] = set()
+    for hit in search_hits:  # bounded by the scan window x _MAX_SOURCES per result
+        if read_ids and hit.get("id") not in read_ids:
+            continue  # retrieved but never read — not evidence the answer stands on
+        key = (hit.get("id"), hit.get("page"))
+        if key in seen or len(sources) >= _MAX_SOURCES:
+            continue
+        seen.add(key)
+        sources.append(hit)
+    paged = {s.get("id") for s in sources if s.get("page") is not None}
+    for cite in read_cites:
+        if cite.get("id") in paged:
+            continue  # its page-level chips are strictly better links than doc-top
+        if len(sources) >= _MAX_SOURCES or (cite.get("id"), None) in seen:
+            continue
+        seen.add((cite.get("id"), None))
+        sources.append(cite)
     return sources
 
 

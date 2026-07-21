@@ -12,6 +12,12 @@ to know when a release changes behavior.
 ## [Unreleased]
 
 ### Fixed
+- Citations under an answer now reflect what the assistant actually READ, not
+  everything its searches merely surfaced: a broad question no longer sprays chips
+  for every unrelated document in the knowledge base, the same document found by two
+  searches shows one chip per page, and a document that was read keeps its precise
+  page links instead of a redundant whole-document chip. Search-only answers still
+  cite their snippet hits — there, the snippets were the evidence.
 - Tool-using turns stopped taking ten minutes: the agent now stops asking for more
   tools the moment its gathered results reach the model's context budget and writes
   the answer (every extra round-trip past that point re-fed the model a prompt it
