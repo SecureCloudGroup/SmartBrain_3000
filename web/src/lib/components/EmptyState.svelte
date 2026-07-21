@@ -15,7 +15,8 @@
 
 <div class="empty">
   <div class="eic"><Icon name={icon} size={24} /></div>
-  <h3>{title}</h3>
+  <!-- h2, not h3: these render directly under the page h1 (axe heading-order) -->
+  <h2>{title}</h2>
   {#if body}<p>{body}</p>{/if}
   {#if children}<div class="cta">{@render children()}</div>{/if}
 </div>
@@ -38,7 +39,7 @@
     display: grid;
     place-items: center;
   }
-  h3 { margin: 0; font-size: var(--f-section); font-weight: 600; }
+  h2 { margin: 0; font-size: var(--f-section); font-weight: 600; }
   p { margin: 0; color: var(--muted); max-width: 26rem; }
   .cta { display: flex; gap: var(--s-2); flex-wrap: wrap; justify-content: center; margin-top: var(--s-1); }
 </style>

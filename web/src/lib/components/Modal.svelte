@@ -25,9 +25,13 @@
 
   let el = $state<HTMLDivElement | null>(null);
 
-  // Move focus into the dialog when it opens (a11y — keyboard/SR users land here).
+  // Move focus into the dialog when it opens, and RESTORE it to the trigger when it
+  // closes (a11y — keyboard/SR users land here, then continue where they left off).
   $effect(() => {
-    if (open) el?.focus();
+    if (!open) return;
+    const prev = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    el?.focus();
+    return () => prev?.focus();
   });
 
   function key(e: KeyboardEvent) {

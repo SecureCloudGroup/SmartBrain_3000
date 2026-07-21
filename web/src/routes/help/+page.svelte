@@ -21,6 +21,9 @@
     current; // re-run after {@html} swaps in a new section
     if (typeof window === "undefined" || !article) return;
     const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+    // Horizontally scrollable code blocks need keyboard access (axe:
+    // scrollable-region-focusable) — the rendered markdown can't carry tabindex itself.
+    for (const pre of article.querySelectorAll("pre")) pre.tabIndex = 0;
     const apply = () => {
       for (const img of article!.querySelectorAll("img")) {
         const src = img.getAttribute("src") ?? "";

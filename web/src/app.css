@@ -97,8 +97,8 @@
   --text: #1a1a1a;
   --muted: #62626a;
   --faint: #94949b;
-  --danger: #c14f45;
-  --ok: #1e7d5f;
+  --danger: #b34237;
+  --ok: #1b7154;
   --warn: #8a5f18;
   --accent: #0e7269;
   --accent-strong: #0b5d56;
@@ -118,8 +118,8 @@
     --text: #1a1a1a;
     --muted: #62626a;
     --faint: #94949b;
-    --danger: #c14f45;
-    --ok: #1e7d5f;
+    --danger: #b34237;
+    --ok: #1b7154;
     --warn: #8a5f18;
     --accent: #0e7269;
     --accent-strong: #0b5d56;
@@ -251,6 +251,19 @@ input:hover,
 textarea:hover,
 select:hover {
   border-color: var(--border-strong);
+}
+/* Native toggles: big enough to hit (13px default fails target-size), themed via
+   accent-color. Their rows/labels provide the spacing that carries them past 24px. */
+input[type="checkbox"],
+input[type="radio"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent-strong);
+}
+/* Disclosure summaries were 20-22px tall — pad to a comfortable target. */
+summary {
+  padding: 6px 0;
+  cursor: pointer;
 }
 input:focus,
 textarea:focus,
@@ -417,7 +430,7 @@ button:disabled {
 }
 .brand .appversion {
   font-size: 0.7rem;
-  color: var(--faint);
+  color: var(--muted); /* --faint fails AA at this size (axe: 3.28/3.01) */
   white-space: nowrap;
 }
 
@@ -774,7 +787,7 @@ button:disabled {
 .composer .hint {
   margin: 6px 0 0;
   font-size: var(--f-meta);
-  color: var(--faint);
+  color: var(--muted); /* --faint fails AA at meta size (axe: 3.54/2.88) */
 }
 .resume-notice {
   margin: 0.35rem 0 0;
@@ -835,7 +848,7 @@ button:disabled {
   border: 0;
   border-radius: var(--r-1);
   background: transparent;
-  color: var(--faint);
+  color: var(--muted); /* --faint fails AA at this size (axe, Stage 13) */
   font-size: 10.5px;
   font-weight: 600;
   text-decoration: none;
@@ -845,7 +858,7 @@ button:disabled {
   text-decoration: none;
   filter: none;
   background: transparent;
-  color: var(--muted);
+  color: var(--text);
 }
 .tabbar .tab.active {
   color: var(--accent);

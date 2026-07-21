@@ -253,9 +253,10 @@
           <div style="display:flex; gap:0.5rem; align-items:flex-start; margin-top:0.4rem">
             <input
               type="checkbox"
-              style="width:auto; margin-top:0.3rem"
+              style="margin-top:0.3rem"
               checked={t.status === "done"}
               onchange={() => toggle(t)}
+              aria-label={t.status === "done" ? `Mark "${t.title}" not done` : `Mark "${t.title}" done`}
             />
             <span style="flex:1; {t.status === 'done' ? 'opacity:0.55; text-decoration:line-through' : ''}">
               <span>{t.title}</span>
