@@ -1,16 +1,65 @@
+/* Design tokens — calm precision-minimal (Gate 1, design/mockups/tokens.css made law).
+   Legacy var names are kept with NEW values so every existing rule reskins in place. */
 :root {
   color-scheme: dark;
-  --bg: #0b0b0f;
-  --panel: #15151c;
-  --field: #0e0e14;
-  --border: #2a2a35;
-  --text: #e7e7ea;
-  --muted: #a9a9b2;
-  --accent: #6d7cff; /* links, highlights, focus */
-  --accent-strong: #4350e0; /* button fill (>=4.5:1 with white text, WCAG AA) */
-  --danger: #ff6b6b;
-  --ok: #46d39a;
-  --warn: #e8a33d;
+
+  /* spacing (4/8pt) */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 24px;
+  --s-6: 32px;
+  --s-7: 48px;
+  --s-8: 64px;
+
+  /* type scale (~1.25); reading vs dense-UI line heights */
+  --f-meta: 12px;
+  --f-label: 14px;
+  --f-body: 16px;
+  --f-section: 20px;
+  --f-h2: 25px;
+  --f-h1: 31px;
+  --lh-read: 1.6;
+  --lh-ui: 1.5;
+
+  /* radii; depth is tonal + hairline (the one true shadow belongs to modals) */
+  --r-1: 6px;
+  --r-2: 10px;
+  --r-3: 14px;
+  --r-full: 999px;
+
+  /* z scale */
+  --z-nav: 30;
+  --z-sheet: 800;
+  --z-modal: 1000;
+  --z-toast: 1100;
+
+  /* motion: asymmetric — instant in, eased out; transform/opacity only */
+  --t-fast: 120ms cubic-bezier(0.2, 0, 0, 1);
+  --t-slow: 200ms cubic-bezier(0.2, 0, 0, 1);
+
+  /* dark surfaces (base never #000, text never #fff) */
+  --bg: #121212;
+  --panel: #1a1a1d;
+  --elevated: #202024;
+  --field: #161619;
+  --border: #2c2c31;
+  --border-strong: #3a3a41;
+  --text: #e6e6e6;
+  --muted: #9c9ca4;
+  --faint: #6b6b73;
+  --danger: #e5695e;
+  --ok: #4fb995;
+  --warn: #d9a04a;
+
+  /* the one accent — muted teal, desaturated so it never vibrates on dark */
+  --accent: #63b3a8;
+  --accent-strong: #2a7f74; /* fills; white text >= 4.5:1 (enforced by theme-contrast.test) */
+  --accent-tint: rgba(99, 179, 168, 0.1);
+  --focus: #63b3a8;
+
+  --shadow-modal: 0 12px 40px rgba(0, 0, 0, 0.45);
 }
 
 /* Light palette: an explicit choice (data-theme="light"), or the system
@@ -18,31 +67,44 @@
    app.html applies a saved choice before first paint to avoid a flash. */
 :root[data-theme="light"] {
   color-scheme: light;
-  --bg: #f6f7fb;
+  --bg: #fafaf8;
   --panel: #ffffff;
-  --field: #ffffff;
-  --border: #d9dae3;
-  --text: #1b1b22;
-  --muted: #5b5b69;
-  --accent: #4350e0;
-  --accent-strong: #4350e0;
-  --danger: #c62828;
-  --ok: #1f9d6b;
-  --warn: #b9770e;
+  --elevated: #ffffff;
+  --field: #f4f4f1;
+  --border: #e3e3df;
+  --border-strong: #cfcfc9;
+  --text: #1a1a1a;
+  --muted: #62626a;
+  --faint: #94949b;
+  --danger: #c14f45;
+  --ok: #1e7d5f;
+  --warn: #8a5f18;
+  --accent: #0e7269;
+  --accent-strong: #0b5d56;
+  --accent-tint: rgba(14, 114, 105, 0.07);
+  --focus: #0e7269;
+  --shadow-modal: 0 12px 40px rgba(20, 20, 20, 0.14);
 }
 @media (prefers-color-scheme: light) {
   :root:not([data-theme]) {
     color-scheme: light;
-    --bg: #f6f7fb;
+    --bg: #fafaf8;
     --panel: #ffffff;
-    --field: #ffffff;
-    --border: #d9dae3;
-    --text: #1b1b22;
-    --muted: #5b5b69;
-    --accent: #4350e0;
-    --accent-strong: #4350e0;
-    --danger: #c62828;
-    --ok: #1f9d6b;
+    --elevated: #ffffff;
+    --field: #f4f4f1;
+    --border: #e3e3df;
+    --border-strong: #cfcfc9;
+    --text: #1a1a1a;
+    --muted: #62626a;
+    --faint: #94949b;
+    --danger: #c14f45;
+    --ok: #1e7d5f;
+    --warn: #8a5f18;
+    --accent: #0e7269;
+    --accent-strong: #0b5d56;
+    --accent-tint: rgba(14, 114, 105, 0.07);
+    --focus: #0e7269;
+    --shadow-modal: 0 12px 40px rgba(20, 20, 20, 0.14);
   }
 }
 
@@ -50,11 +112,21 @@
   box-sizing: border-box;
 }
 
+/* One visible focus for every interactive element — keyboard users were previously
+   left to inconsistent UA outlines that vanish on accent-filled buttons. */
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: var(--r-1);
+}
+
 body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font: var(--f-body) / var(--lh-ui) system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: "tnum"; /* tabular numerals: fingerprints, usage tables */
   overflow-x: hidden; /* safety net: never let a stray element push the page sideways on mobile */
 }
 
@@ -79,9 +151,9 @@ a {
 .card {
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 1.5rem;
-  margin: 1rem 0;
+  border-radius: var(--r-2);
+  padding: var(--s-5);
+  margin: var(--s-4) 0;
 }
 
 /* Layout utilities (replace repeated ad-hoc inline flex rows). */
@@ -121,13 +193,16 @@ a {
 }
 
 h1 {
-  font-size: 1.5rem;
-  margin: 0 0 0.5rem;
+  font-size: var(--f-h2); /* app page titles sit at 25px; 31px is reserved for hero surfaces */
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  margin: 0 0 var(--s-3);
 }
 
 h2 {
-  font-size: 1.1rem;
-  margin: 0 0 0.75rem;
+  font-size: var(--f-section);
+  font-weight: 600;
+  margin: 0 0 var(--s-3);
 }
 
 label {
@@ -147,29 +222,53 @@ select {
 input,
 textarea,
 select {
-  padding: 0.6rem 0.75rem;
+  padding: 10px 12px;
   background: var(--field);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--r-1);
   color: var(--text);
   font: inherit;
+  transition: border-color var(--t-fast);
+}
+input:hover,
+textarea:hover,
+select:hover {
+  border-color: var(--border-strong);
+}
+input:focus,
+textarea:focus,
+select:focus {
+  border-color: var(--accent);
+  outline: none;
 }
 
 button {
-  padding: 0.6rem 1rem;
+  padding: 10px 16px;
+  min-height: 40px;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: var(--r-1);
   background: var(--accent-strong);
   color: #fff;
-  font: inherit;
+  font-family: inherit;
+  font-size: var(--f-label);
   font-weight: 600;
+  line-height: 1;
   cursor: pointer;
+  transition: background var(--t-fast), border-color var(--t-fast), filter var(--t-fast);
+}
+button:hover {
+  filter: brightness(1.08);
 }
 
 button.secondary {
   background: transparent;
-  border-color: var(--border);
+  border-color: var(--border-strong);
   color: var(--text);
+}
+button.secondary:hover {
+  background: var(--accent-tint);
+  border-color: var(--accent);
+  filter: none;
 }
 
 /* Ghost icon/danger button (e.g. the ✕ delete in lists). */
@@ -339,7 +438,9 @@ header.appbar .help-link:hover {
 
 .bubble.user {
   align-self: flex-end;
-  background: var(--accent);
+  /* accent-strong, not accent: white-on-accent was ~2.9:1 (AA fail). Interim until the
+     chat redesign replaces bubbles with full-width tinted rows. */
+  background: var(--accent-strong);
   color: #fff;
 }
 
@@ -351,7 +452,8 @@ header.appbar .help-link:hover {
 
 .bubble.err {
   align-self: flex-start;
-  background: #2a1416;
+  /* was hardcoded #2a1416 (dark-only); mix from the theme so light mode themes correctly */
+  background: color-mix(in srgb, var(--danger) 10%, var(--bg));
   border: 1px solid var(--danger);
   color: var(--danger);
 }

@@ -12,6 +12,10 @@ to know when a release changes behavior.
 ## [Unreleased]
 
 ### Added
+- A new visual foundation — "calm precision-minimal": tonal dark (#121212 family) and
+  warm-white light themes with a single muted-teal accent, a real type/spacing/radius
+  token system, a visible keyboard-focus ring everywhere, and WCAG-AA contrast enforced
+  by a permanent test in both themes. Every page reskins; nothing moves yet.
 - Public vaults: publish a vault openly, subscribe to one by URL with trust-on-first-use
   publisher pinning, check for and apply updates (the pinned publisher enforces every
   update), opt in to scheduled auto-updates, and the finishing UI surfaces plus an MCP
