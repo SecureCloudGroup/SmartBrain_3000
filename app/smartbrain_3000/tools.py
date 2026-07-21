@@ -377,7 +377,17 @@ def _email_read(ctx: ToolContext, args: dict) -> dict:
 def _web_fetch(ctx: ToolContext, args: dict) -> dict:
     """REVIEWED: fetch a public URL behind the SSRF guard (no store access)."""
     assert args.get("url"), "url required"
-    return netguard.safe_fetch(args["url"])
+    try:
+        return netguard.safe_fetch(args["url"])
+    except netguard.FetchError as exc:
+        # Some sites refuse non-browser fetches no matter what; a bare "HTTP 403" reads
+        # to small models as "I have no web access" and they give up on the whole
+        # question (seen live). Keep the honest error but steer the recovery.
+        raise netguard.FetchError(
+            f"{exc}. This one site refused or failed the request — web access itself is "
+            "working. Try a DIFFERENT URL from your search results, or answer from the "
+            "search snippets you already have."
+        ) from None
 
 
 def _kb_ingest_url(ctx: ToolContext, args: dict) -> dict:

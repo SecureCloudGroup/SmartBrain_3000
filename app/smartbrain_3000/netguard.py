@@ -59,9 +59,22 @@ _MANIFEST_CT = ("application/json", "text/plain", "application/octet-stream")
 # This is safe: the content-type was never a security control (it's attacker-controlled), and the
 # publisher signature is verified after the fetch — magic-sniffing only widens which hosts work.
 _ZIP_MAGIC = b"PK\x03\x04"
-# A browser-like UA: many public doc/PDF hosts (e.g. .mil/.gov) 403 a default
-# client UA. We fetch only what the user explicitly asked for, on their behalf.
+# Browser-consistent headers: many public hosts (e.g. .mil/.gov, timeanddate.com) 403
+# a default client UA — and a browser UA ALONE fails newer WAF checks, because it
+# arrives with httpx's bare `accept: */*` and none of the headers every real browser
+# sends (verified live: timeanddate.com 403s the UA-only request and 200s this set).
+# We fetch only what the user explicitly asked for, on their behalf, one URL at a time.
 _USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+_BROWSER_HEADERS = {
+    "User-Agent": _USER_AGENT,
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
+    "Upgrade-Insecure-Requests": "1",
+}
 
 # RFC 6052 NAT64 well-known prefix — an IPv6 in this /96 wraps an IPv4 in its
 # low 32 bits (e.g. 64:ff9b::7f00:1 -> 127.0.0.1, a real loopback bypass).
@@ -199,8 +212,7 @@ def _guarded_get(url: str, allowed_ct: tuple[str, ...], max_bytes: int,
     current = url
     # trust_env=False ignores HTTP(S)_PROXY/ALL_PROXY env vars (an env proxy
     # would tunnel past all IP validation).
-    headers = {"User-Agent": _USER_AGENT}
-    with httpx.Client(timeout=_TIMEOUT, follow_redirects=False, trust_env=False, headers=headers) as client:
+    with httpx.Client(timeout=_TIMEOUT, follow_redirects=False, trust_env=False, headers=_BROWSER_HEADERS) as client:
         for _ in range(_MAX_REDIRECTS + 1):  # fixed redirect bound
             parsed = urlparse(current)
             if parsed.scheme not in _SCHEMES:

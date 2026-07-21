@@ -11,6 +11,14 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Fixed
+- A bot-blocked website can no longer convince the assistant it has "no web access":
+  page fetches now send the full browser-consistent header set (many WAFs 403 a
+  browser User-Agent that arrives with a bare client fingerprint), and when a site
+  still refuses, the error fed back to the model says exactly that — this one site
+  refused, web access works, try a different result — instead of a bare HTTP status
+  that small local models read as a dead internet and give up on.
+
 ## [0.6.0] - 2026-07-21
 
 ### Added

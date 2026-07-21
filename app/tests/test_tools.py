@@ -670,3 +670,20 @@ def test_schedule_tools_wired_into_agent_context(client: TestClient) -> None:
     )
     assert w.status_code == 200 and w.json()["status"] == "awaiting_approval"  # parked, not executed
     assert client.get("/api/schedules").json()["schedules"] == []  # write did NOT run inline
+
+
+def test_web_fetch_error_steers_recovery(monkeypatch) -> None:
+    # A refused fetch must not read as "no web access": small models take a bare
+    # "upstream returned HTTP 403" as a dead internet and abandon the question
+    # (seen live). The tool keeps the honest error but appends the recovery steer.
+    from smartbrain_3000 import netguard
+
+    def refuse(url: str) -> dict:
+        raise netguard.FetchError("upstream returned HTTP 403")
+
+    monkeypatch.setattr(netguard, "safe_fetch", refuse)
+    with pytest.raises(netguard.FetchError) as err:
+        tools._web_fetch(tools.ToolContext(), {"url": "https://blocked.test/x"})
+    msg = str(err.value)
+    assert "HTTP 403" in msg, "the honest upstream error stays"
+    assert "DIFFERENT URL" in msg and "web access itself is working" in msg

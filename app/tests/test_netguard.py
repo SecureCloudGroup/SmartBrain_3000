@@ -320,3 +320,25 @@ def test_zip_magic_sniff_is_vault_only_not_page_ingest(monkeypatch) -> None:
     _serve(monkeypatch, lambda r: httpx.Response(200, headers={"content-type": "application/zip"}, content=b"PK\x03\x04x"))
     with pytest.raises(FetchError):
         netguard.safe_fetch_bytes("http://tree.test/thing")
+
+
+def test_page_fetch_sends_browser_consistent_headers(monkeypatch) -> None:
+    # WAFs 403 a browser UA that arrives with httpx's bare defaults (no Accept-Language,
+    # `accept: */*`) — the fingerprint mismatch IS the bot signal (timeanddate.com,
+    # verified live). The guarded client must send the full browser-consistent set.
+    import httpx
+
+    _resolve_to(monkeypatch, "93.184.216.34")
+    seen: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.update(request.headers)
+        return httpx.Response(200, headers={"content-type": "text/html"}, text="<html>ok</html>")
+
+    _serve(monkeypatch, handler)
+    netguard.safe_fetch("http://example.test/page")
+    assert seen["user-agent"].startswith("Mozilla/5.0"), "browser UA"
+    assert "text/html" in seen["accept"], "a browser Accept list, not */*"
+    assert seen["accept-language"], "browsers always send Accept-Language"
+    assert seen["sec-fetch-mode"] == "navigate", "consistent Sec-Fetch set"
+    assert seen["upgrade-insecure-requests"] == "1"
