@@ -12,6 +12,9 @@ to know when a release changes behavior.
 ## [Unreleased]
 
 ### Added
+- Planner, Schedules, and Email joined the system: one tab style everywhere, real
+  empty states, spinners instead of bare "Loading…", and the email reader now opens
+  in the same focused modal as every other dialog.
 - Knowledge on the same system: document rows with quiet actions, search-result
   citations as chips, vault identity as proper Subscribed/Public chips with monospace
   fingerprints, real empty states — and the document viewer is now a true focused
