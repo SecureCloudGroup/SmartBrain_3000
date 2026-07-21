@@ -174,6 +174,8 @@
   // indexer. Poll while there's a backlog so the page can say so instead of looking finished.
   let indexPending = $state(0);
   let indexTotal = $state(0);
+  let summarized = $state(0);
+  let summaryTotal = $state(0);
   let indexTimer: ReturnType<typeof setInterval> | null = null;
 
   async function refreshIndexStatus() {
@@ -181,9 +183,12 @@
       const s = await api.indexStatus();
       indexPending = s.pending;
       indexTotal = s.total;
-      if (s.pending > 0 && indexTimer === null) {
+      summarized = s.summarized ?? 0;
+      summaryTotal = s.summary_total ?? 0;
+      const working = s.pending > 0 || (s.summary_total ?? 0) > (s.summarized ?? 0);
+      if (working && indexTimer === null) {
         indexTimer = setInterval(refreshIndexStatus, 4000);
-      } else if (s.pending === 0 && indexTimer !== null) {
+      } else if (!working && indexTimer !== null) {
         clearInterval(indexTimer);
         indexTimer = null;
       }
@@ -817,6 +822,13 @@
       <p class="muted" style="margin-top:0.5rem; font-size:0.85rem">
         Indexing for meaning search — {indexTotal - indexPending} of {indexTotal} done. Keyword
         search already finds them.
+      </p>
+    {/if}
+    {#if summaryTotal > 0 && summarized < summaryTotal}
+      <!-- The background summary tree builds document-by-document; until a document's tree is
+           done, Chat summarizes what's covered and says so. -->
+      <p class="muted" style="margin-top:0.25rem; font-size:0.85rem">
+        Preparing instant summaries — {summarized} of {summaryTotal} documents ready.
       </p>
     {/if}
     <p class="muted" style="margin-top:0.5rem; font-size:0.85rem">

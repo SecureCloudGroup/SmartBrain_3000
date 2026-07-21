@@ -286,6 +286,7 @@ def test_http_upload_pdf_then_lexical_and_semantic_search(client: TestClient, mo
     # ...and the document is reported as still awaiting its vectors, rather than looking finished.
     assert client.get("/api/kb/index-status").json() == {
         "total": 1, "pending": 1, "indexed": 0, "model": gateway.embed_model(None),
+        "summarized": 0, "summary_total": 1,  # the background summary tree hasn't reached it yet
     }
 
     # Once the indexer has run, semantic finds it too — not degraded.

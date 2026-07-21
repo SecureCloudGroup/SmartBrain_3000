@@ -670,7 +670,8 @@ export const api = {
   // so the UI polls this to say "indexing 12 of 40" instead of looking done while semantic search
   // still can't see the new documents.
   indexStatus: () =>
-    req<{ total: number; pending: number; indexed: number; model: string }>("/api/kb/index-status"),
+    req<{ total: number; pending: number; indexed: number; model: string;
+          summarized: number; summary_total: number }>("/api/kb/index-status"),
   getDoc: (id: string) => req<KbDocFull>(`/api/kb/${encodeURIComponent(id)}`),
   renameDoc: (id: string, title: string) =>
     req<{ ok: boolean }>(`/api/kb/${encodeURIComponent(id)}`, {

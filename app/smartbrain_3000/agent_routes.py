@@ -23,7 +23,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 from starlette.responses import StreamingResponse
 
-from . import agent, consent, gateway, search, tools, usage
+from . import agent, consent, docsummaries, gateway, search, tools, usage
 from .chat_routes import _with_memory
 
 router = APIRouter()
@@ -62,12 +62,14 @@ def _context(request: Request) -> tuple[tools.ToolContext, object]:
         raise HTTPException(status_code=423, detail="locked: unlock first")
     state = request.app.state
     secret_store = getattr(state, "secret_store", None)
+    master_key = getattr(state, "master_key", None)
     return tools.ToolContext(
         kb=state.kb, planner=state.planner, memory=state.memory,
         email=getattr(state, "email", None), schedules=getattr(state, "schedules", None),
         vaults=getattr(state, "vaults", None),  # so KB tools can tag imported-vault content
         # Provider keys stay inside the service (ctx.email posture) — resolved here, once.
         websearch=search.service_from(state.dbx, secret_store.get) if secret_store else None,
+        summaries=docsummaries.SummaryStore(state.dbx, master_key) if master_key else None,
     ), audit
 
 

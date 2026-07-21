@@ -200,6 +200,22 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
         "ALTER TABLE vault_documents ADD COLUMN nonce BLOB; "
         "ALTER TABLE vault_documents ADD COLUMN ciphertext BLOB;",
     ),
+    # The background summary tree (B1): chunk summaries (idx 0..n-1) + the reduced
+    # whole-document summary (idx -1), sealed like every other content column.
+    # content_len is the doc's length when the row was written — plaintext STALENESS
+    # metadata (like cadence fields), never content; a changed length invalidates.
+    (
+        24,
+        "CREATE TABLE IF NOT EXISTS doc_summaries ("
+        " doc_id TEXT NOT NULL,"
+        " idx INTEGER NOT NULL,"
+        " nonce BLOB NOT NULL,"
+        " ciphertext BLOB NOT NULL,"
+        " content_len INTEGER NOT NULL,"
+        " model TEXT NOT NULL,"
+        " created_at TIMESTAMP DEFAULT now(),"
+        " PRIMARY KEY (doc_id, idx));",
+    ),
 )
 
 # The newest migration this build knows how to apply. A database recording a

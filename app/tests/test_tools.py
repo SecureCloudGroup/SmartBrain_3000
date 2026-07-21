@@ -780,3 +780,93 @@ def test_web_research_bounds_dedups_and_survives_refusals(monkeypatch) -> None:
     assert [p["url"] for p in out["pages"]] == ["https://one.test/a", "https://three.test/y"]
     assert out["skipped"][0]["url"] == "https://two.test/x"
     assert out["engine"] == "searxng"
+
+
+# --- summary tree at chat time (B1/B3) + doc-scoped search (B2) --------------
+
+def _wired_with_tree(title: str, content: str):
+    import duckdb as _duck
+
+    from smartbrain_3000.docsummaries import SummaryStore
+
+    conn = _duck.connect(":memory:")
+    dbmod.run_migrations(conn)
+    key = gen_master_key()
+    kb = KnowledgeBase(conn, key)
+    doc_id = kb.add(title, content)
+    store = SummaryStore(conn, key)
+    ctx = dataclasses.replace(tools.ToolContext(kb=kb, summaries=store), model="prov/m")
+    return ctx, store, doc_id
+
+
+def test_summarize_returns_cached_tree_instantly(monkeypatch) -> None:
+    from smartbrain_3000 import summarize as docsum
+    from smartbrain_3000.docsummaries import DOC_IDX
+
+    body = "b" * 5000
+    ctx, store, doc_id = _wired_with_tree("Book", body)
+    store.put(doc_id, DOC_IDX, "the cached whole-book summary", len(body), "m")
+
+    def no_live_calls(*a, **k):
+        raise AssertionError("cached path must not run a live map-reduce")
+
+    monkeypatch.setattr(docsum, "summarize_document", no_live_calls)
+    out = tools._summarize_document(ctx, {"doc_id": doc_id})
+    assert out["summary"] == "the cached whole-book summary"
+    assert out["cached"] is True and out["truncated"] is False
+    assert out["chars_covered"] == len(body) == out["total_chars"]
+
+
+def test_summarize_partial_tree_reduces_covered_chunks(monkeypatch) -> None:
+    from smartbrain_3000 import summarize as docsum
+    from smartbrain_3000.docsummaries import CHUNK_CHARS
+
+    body = "b" * (CHUNK_CHARS * 3)  # 3 chunks; only the first is summarized so far
+    ctx, store, doc_id = _wired_with_tree("Book", body)
+    store.put(doc_id, 0, "chunk-0 summary", len(body), "m")
+    seen = {}
+
+    def fake_reduce(model, title, content, focus="", **kw):
+        seen["input"] = content
+        return {"summary": "partial", "truncated": False, "passes": 1}
+
+    monkeypatch.setattr(docsum, "summarize_document", fake_reduce)
+    out = tools._summarize_document(ctx, {"doc_id": doc_id})
+    assert seen["input"] == "chunk-0 summary", "reduce runs over the STORED summaries"
+    assert out["truncated"] is True, "coverage is partial and says so"
+    assert out["chars_covered"] == CHUNK_CHARS and out["total_chars"] == CHUNK_CHARS * 3
+
+
+def test_summarize_focus_maps_over_stored_tree(monkeypatch) -> None:
+    from smartbrain_3000 import summarize as docsum
+    from smartbrain_3000.docsummaries import CHUNK_CHARS, DOC_IDX
+
+    body = "b" * (CHUNK_CHARS + 1)  # 2 chunks, tree complete
+    ctx, store, doc_id = _wired_with_tree("Book", body)
+    store.put(doc_id, 0, "S0", len(body), "m")
+    store.put(doc_id, 1, "S1", len(body), "m")
+    store.put(doc_id, DOC_IDX, "whole", len(body), "m")
+    seen = {}
+
+    def fake(model, title, content, focus="", **kw):
+        seen["content"], seen["focus"] = content, focus
+        return {"summary": "focused", "truncated": False, "passes": 1}
+
+    monkeypatch.setattr(docsum, "summarize_document", fake)
+    out = tools._summarize_document(ctx, {"doc_id": doc_id, "focus": "sponsors"})
+    assert seen["focus"] == "sponsors" and seen["content"] == "S0\n\nS1"
+    assert out["summary"] == "focused" and out["chars_covered"] == len(body)
+
+
+def test_kb_search_doc_id_scopes_to_one_document(monkeypatch) -> None:
+    from smartbrain_3000 import gateway
+
+    conn = duckdb.connect(":memory:")
+    dbmod.run_migrations(conn)
+    kb = KnowledgeBase(conn, gen_master_key())
+    lease = kb.add("Lease", "the sponsor of the lease is Pat")
+    kb.add("Other", "the sponsor of the other thing is Sam")
+    monkeypatch.setattr(gateway, "embed_model", lambda c: "")
+    monkeypatch.setattr(gateway, "embed", lambda q, m: (_ for _ in ()).throw(RuntimeError("no embed")))
+    out = tools._kb_search(tools.ToolContext(kb=kb), {"query": "sponsor", "doc_id": lease})
+    assert [r["title"] for r in out["results"]] == ["Lease"], "scoped to the one document"

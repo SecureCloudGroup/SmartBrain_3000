@@ -12,7 +12,7 @@ import logging
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from . import gateway, ingest
+from . import docsummaries, gateway, ingest
 from .kb import KnowledgeBase
 
 router = APIRouter()
@@ -188,7 +188,16 @@ def index_status(request: Request) -> dict:
     model = gateway.embed_model(request.app.state.dbx)
     total = knowledge.count_docs()
     pending = knowledge.docs_pending_embedding(model)
-    return {"total": total, "pending": pending, "indexed": max(0, total - pending), "model": model}
+    # B1: the background summary tree's progress rides the same status payload, so the
+    # Knowledge page can say "Preparing summaries — 3 of 5" beside the indexing line.
+    # Counted with one cheap query (docs that have a reduced doc-summary row), NOT by
+    # decrypting the corpus — this endpoint is polled every few seconds while working.
+    summarized = request.app.state.dbx.execute(
+        "SELECT count(DISTINCT doc_id) FROM doc_summaries WHERE idx = ?;",
+        [docsummaries.DOC_IDX],
+    ).fetchone()[0]
+    return {"total": total, "pending": pending, "indexed": max(0, total - pending), "model": model,
+            "summarized": min(summarized, total), "summary_total": total}
 
 
 @router.post("/api/kb/ingest-url")

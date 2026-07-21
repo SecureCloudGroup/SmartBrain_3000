@@ -12,6 +12,17 @@ to know when a release changes behavior.
 ## [Unreleased]
 
 ### Added
+- Book-scale documents, summarized instantly: every document now gets a background
+  **summary tree** (chunk summaries reduced into one whole-document summary), built a
+  piece at a time by the scheduler — encrypted like everything else, resumable, yielding
+  to your live chats, and shown as "Preparing instant summaries — X of Y" on the
+  Knowledge page. Asking Chat to summarize becomes an instant cached lookup at any size;
+  a still-building document answers from what's covered and says so; focus questions
+  ("summarize the fees") run over the stored tree in seconds. A new **Document
+  summaries** slot in Model routing lets a big-context model build trees fast while the
+  local model stays the private default; `kb_search` can now search INSIDE one document
+  (the right way to find one fact in a thousand pages); and tool-using turns get two
+  more steps now that an exhausted budget degrades to an answer.
 - Web tooling that meets what users expect of a modern assistant:
   **web pages read as articles** (fetches now return clean extracted prose + title via
   the same reader ingestion uses, instead of raw HTML soup); **pluggable search
