@@ -25,8 +25,9 @@
   let locking = $state(false);
   let appVersion = $state(""); // "vX.Y.Z" once /api/health answers; "" (hidden) until then / on failure
   let moreOpen = $state(false); // mobile: the More sheet above the tab bar
-  // Chat gets the full-width container; everything else stays in the narrow column.
-  const wide = $derived(page.url.pathname.startsWith("/chat"));
+  // Chat + Help get the full-width container (chat for the log, help for its own
+  // two-column nav+article layout, which caps itself); everything else uses the column.
+  const wide = $derived(["/chat", "/help"].some((p) => page.url.pathname.startsWith(p)));
 
   // `remote: true` = shown on a paired phone; the rest are Desktop-only setup/review pages.
   // The single source of truth for BOTH the desktop sidebar and the mobile tabs/More sheet.

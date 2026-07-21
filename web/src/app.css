@@ -154,7 +154,9 @@ a {
 }
 
 .wrap {
-  max-width: 44rem;
+  /* Sized for the sidebar'd shell: 44rem was tuned for the old full-width layout and
+     stranded content in a sea of empty canvas on desktop. */
+  max-width: 56rem;
   margin: 0 auto;
   padding: 1.5rem;
 }
