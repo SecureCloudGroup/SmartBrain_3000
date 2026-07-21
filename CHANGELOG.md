@@ -11,6 +11,8 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-07-21
+
 ### Added
 - All docs media regenerated in the new design, dark theme throughout: the 11
   quickstart GIFs (with their reduced-motion posters) and the five guide screenshots
