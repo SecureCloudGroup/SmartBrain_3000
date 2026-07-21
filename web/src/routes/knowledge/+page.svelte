@@ -1,5 +1,9 @@
 <script lang="ts">
   import Icon from "$lib/components/Icon.svelte";
+  import Chip from "$lib/components/Chip.svelte";
+  import EmptyState from "$lib/components/EmptyState.svelte";
+  import Modal from "$lib/components/Modal.svelte";
+  import Spinner from "$lib/components/Spinner.svelte";
   import { onDestroy, onMount } from "svelte";
   import { goto } from "$app/navigation";
   import { account } from "$lib/account.svelte";
@@ -41,7 +45,6 @@
   let renameValue = $state("");
   let failures = $state<string[]>([]); // per-file errors from a bulk drop
   let scoreHelpOpen = $state(false); // U12: visible score-meaning popover, no hover needed
-  let docOverlay = $state<HTMLDivElement | null>(null); // U4: focus target for opened doc
 
   // --- vaults: a named subset of knowledge you can search inside, and share -------------------
   let vaults = $state<Vault[]>([]);
@@ -258,23 +261,12 @@
     return { before: text.slice(0, start), mark: text.slice(start, end), after: text.slice(end) };
   });
 
-  // U4: when the doc overlay opens, move focus into it for keyboard/SR users.
-  $effect(() => {
-    if (selected) docOverlay?.focus();
-  });
-
+  // The doc viewer renders through the shared Modal (focus + Escape live there).
   // Bring the matched passage into view once it's rendered (a long document opens at the top
   // otherwise, which defeats the citation).
   $effect(() => {
     if (selected && markEl) markEl.scrollIntoView({ block: "center" });
   });
-
-  // U4: Escape closes the opened-doc overlay.
-  function onDocKey(event: KeyboardEvent) {
-    console.assert(event instanceof KeyboardEvent, "onDocKey expects a KeyboardEvent");
-    console.assert(typeof event.key === "string", "event.key must be a string");
-    if (event.key === "Escape") selected = null;
-  }
 
   async function add(event: Event) {
     event.preventDefault();
@@ -901,9 +893,9 @@
           <button class="linklike" onclick={() => open(r.id, r.offset)}>{r.title}</button>
           <!-- The citation: which file, which page. Clicking opens the document AT the passage. -->
           {#if r.source || r.page !== null}
-            <button class="cite" onclick={() => open(r.id, r.offset)} title="Open at this passage">
+            <Chip icon="file" kind="accent" onclick={() => open(r.id, r.offset)} title="Open at this passage">
               {r.source}{#if r.source && r.page !== null}&nbsp;·&nbsp;{/if}{#if r.page !== null}{locator(r)}{/if}
-            </button>
+            </Chip>
           {/if}
           <p class="snippet">
             {#each highlight(r.snippet, hitTerms) as seg}{#if seg.hit}<mark>{seg.t}</mark>{:else}{seg.t}{/if}{/each}
@@ -913,31 +905,23 @@
     {/if}
   </div>
 
-  {#if selected}
-    <div
-      class="card doc-overlay"
-      role="dialog"
-      aria-modal="false"
-      aria-label={selected.title}
-      tabindex="-1"
-      bind:this={docOverlay}
-      onkeydown={onDocKey}
-    >
-      <h2>{selected.title}</h2>
+  <Modal open={!!selected} label={selected?.title ?? "Document"} size="lg" onclose={() => (selected = null)}>
+    {#if selected}
+      <h2 class="modal-title">{selected.title}</h2>
       {#if hitOffset !== null}
-        <p class="muted" style="margin:0 0 0.5rem; font-size:0.85rem">Opened at the matching passage.</p>
+        <p class="muted opened-at">Opened at the matching passage.</p>
       {/if}
       <div class="kit">
         {#if docParts}
           {docParts.before}{#if docParts.mark}<mark class="passage" bind:this={markEl}>{docParts.mark}</mark>{/if}{docParts.after}
         {/if}
       </div>
-      <p class="doc-actions">
-        <button class="secondary" onclick={() => (selected = null)}>Close</button>
+      <div class="modal-actions">
         <button class="secondary" disabled={busy === selected.id} onclick={() => remove(selected!.id)}>Delete</button>
-      </p>
-    </div>
-  {/if}
+        <button onclick={() => (selected = null)}>Close</button>
+      </div>
+    {/if}
+  </Modal>
 
   <div class="card" bind:this={docsCard}>
     <h2 class="row">
@@ -948,7 +932,7 @@
       </button>
     </h2>
     {#if docs.length === 0}
-      <p class="muted">No documents yet — drop a file or paste a URL above.</p>
+      <EmptyState icon="book" title="Build your knowledge" body="Drop in a PDF or write a note above — it's encrypted on your device and searchable in seconds." />
     {/if}
 
     {#if picked.length > 0 || addTarget}
@@ -993,16 +977,19 @@
           <button class="secondary" onclick={cancelRename}>Cancel</button>
         </div>
       {:else}
-        <div style="display:flex; gap:0.5rem; align-items:center; margin-top:0.5rem">
+        <div class="docrow">
           <input
             type="checkbox"
             checked={picked.includes(d.id)}
             onchange={() => togglePick(d.id)}
             aria-label="Select {d.title}"
           />
-          <button class="secondary" style="flex:1; text-align:left; padding:0.4rem 0.6rem" onclick={() => open(d.id)}>{d.title}</button>
-          <button class="secondary" disabled={busy === d.id} onclick={() => startRename(d)}>Rename</button>
-          <button class="secondary" disabled={busy === d.id} onclick={() => remove(d.id)}>Delete</button>
+          <div class="fic"><Icon name="file" /></div>
+          <button class="dtitle" onclick={() => open(d.id)}>{d.title}</button>
+          <div class="dactions">
+            <button class="ghost" disabled={busy === d.id} onclick={() => startRename(d)}>Rename</button>
+            <button class="ghost" disabled={busy === d.id} onclick={() => remove(d.id)}>Delete</button>
+          </div>
         </div>
       {/if}
     {/each}
@@ -1016,7 +1003,7 @@
     </p>
 
     {#if vaults.length === 0}
-      <p class="muted">No vaults yet. Tick some documents above, then name a vault below.</p>
+      <EmptyState icon="vault" title="Group and share with vaults" body="Tick documents above and name a vault below — search inside just that set, or share it sealed or public." />
     {/if}
 
     {#each vaults as v (v.id)}
@@ -1027,21 +1014,21 @@
             {#if v.source?.url}
               <!-- Subscribed = it arrived from a URL and its publisher is PINNED. Never the badge
                    without the identity behind it, plus the host updates will come from. -->
-              <span class="badge">Subscribed</span>
-              <span class="fp" title="The pinned publisher — every update must be signed by this identity">{v.pinned_fingerprint}</span>
+              <Chip kind="ok" icon="check">Subscribed</Chip>
+              <Chip mono title="The pinned publisher — every update must be signed by this identity">{v.pinned_fingerprint}</Chip>
               <span class="fp" title="Where this vault is hosted">{hostOf(v.source.url)}</span>
               {#if v.source?.seq != null}
                 <span class="fp" title="The version you currently have (the seq you're pinned at)">v{v.source.seq}</span>
               {/if}
             {:else}
-              <span class="badge">Imported</span>
+              <Chip>Imported</Chip>
             {/if}
           {/if}
           {#if v.published_open}
             <!-- Published open = irreversibly public. NEVER the label without the identity behind
                  it: the fingerprint is what a subscriber actually pins. -->
-            <span class="badge">Public</span>
-            <span class="fp" title="Your publisher fingerprint — how subscribers identify you">{v.publisher_fingerprint}</span>
+            <Chip kind="accent">Public</Chip>
+            <Chip mono title="Your publisher fingerprint — how subscribers identify you">{v.publisher_fingerprint}</Chip>
             <span class="fp" title="The published version — subscribers pin this seq and pick up newer ones">v{v.version}</span>
           {/if}
           <button class="linklike" onclick={() => toggleMembers(v)} aria-expanded={openVaultId === v.id}>
@@ -1369,7 +1356,7 @@
   {#if notice}<p class="muted">{notice}</p>{/if}
   {#if error}<p class="error">{error}</p>{/if}
 {:else}
-  <p class="muted">Loading&hellip;</p>
+  <Spinner block />
 {/if}
 
 <style>
@@ -1380,10 +1367,65 @@
     align-items: center;
     flex-wrap: wrap;
     margin-top: 0.75rem;
-    padding: 0.5rem 0.6rem;
+    padding: var(--s-2) var(--s-3);
     border: 1px solid var(--accent);
-    border-radius: 6px;
-    background: var(--field);
+    border-radius: var(--r-1);
+    background: var(--accent-tint);
+  }
+
+  /* Document rows: list/card hybrid — icon chip, title as the row's action, quiet
+     Rename/Delete that don't shout on every line. */
+  .docrow {
+    display: flex;
+    align-items: center;
+    gap: var(--s-3);
+    padding: var(--s-2) var(--s-1);
+    border-radius: var(--r-1);
+    transition: background var(--t-fast);
+  }
+  .docrow:hover {
+    background: var(--elevated);
+  }
+  .docrow + .docrow {
+    border-top: 1px solid var(--border);
+  }
+  .docrow .fic {
+    width: 30px;
+    height: 30px;
+    flex: none;
+    border-radius: var(--r-1);
+    background: var(--accent-tint);
+    color: var(--accent);
+    display: grid;
+    place-items: center;
+  }
+  .docrow .dtitle {
+    flex: 1;
+    min-width: 0;
+    text-align: left;
+    background: transparent;
+    border: 0;
+    padding: 6px 0;
+    color: var(--text);
+    font-size: var(--f-label);
+    font-weight: 550;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    cursor: pointer;
+  }
+  .docrow .dtitle:hover {
+    color: var(--accent);
+    filter: none;
+  }
+  .docrow .dactions {
+    display: flex;
+    gap: 2px;
+    flex: none;
+  }
+  .opened-at {
+    margin: 0 0 0.5rem;
+    font-size: 0.85rem;
   }
 
   .vault {
@@ -1461,16 +1503,6 @@
     font-size: 0.75rem;
   }
 
-  /* "Imported" — this vault came from someone else, so it can be replaced by an update from them.
-     "Public" — this vault has been published open; the fingerprint always sits beside it. */
-  .badge {
-    padding: 0.05rem 0.45rem;
-    font-size: 0.7rem;
-    border-radius: 999px;
-    border: 1px solid var(--border);
-    color: var(--muted);
-  }
-
   /* The publisher fingerprint (SB-…): monospace because it is read/compared character by
      character — it is the identity subscribers pin, never mere decoration. */
   .fp {
@@ -1535,25 +1567,6 @@
     margin-top: 0.9rem;
   }
 
-  /* "Lease.pdf · p.12" — the citation. A button, because clicking it opens the document at the
-     matching passage rather than at the top. */
-  .cite {
-    margin-left: 0.4rem;
-    padding: 0.05rem 0.45rem;
-    font-size: 0.75rem;
-    font-weight: 500;
-    line-height: 1.5;
-    border-radius: 999px;
-    border: 1px solid var(--border);
-    background: var(--field);
-    color: var(--muted);
-    cursor: pointer;
-  }
-  .cite:hover {
-    color: var(--text);
-    border-color: var(--accent);
-  }
-
   .snippet {
     margin: 0.2rem 0 0;
     color: var(--muted);
@@ -1612,19 +1625,5 @@
     border-color: var(--accent);
     color: var(--accent);
   }
-  .doc-overlay {
-    max-height: 80vh;
-    overflow-y: auto;
-    position: relative;
-  }
-  .doc-actions {
-    position: sticky;
-    bottom: 0;
-    margin: 0.75rem -1rem -1rem;
-    padding: 0.75rem 1rem;
-    background: var(--panel);
-    border-top: 1px solid var(--border);
-    display: flex;
-    gap: 0.5rem;
-  }
+
 </style>
