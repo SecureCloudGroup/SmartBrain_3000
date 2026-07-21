@@ -6,6 +6,8 @@
   import { describeError } from "$lib/errors";
   import { confirmDialog } from "$lib/confirm.svelte";
   import { remote } from "$lib/remote/connection.svelte";
+  import Modal from "$lib/components/Modal.svelte";
+  import Spinner from "$lib/components/Spinner.svelte";
 
   let status = $state<EmailStatus | null>(null);
   let messages = $state<EmailMessage[]>([]);
@@ -24,7 +26,6 @@
   let clientIdEl = $state<HTMLInputElement | null>(null);
   let clientSecretEl = $state<HTMLInputElement | null>(null);
   let toEl = $state<HTMLInputElement | null>(null);
-  let openCloseEl = $state<HTMLButtonElement | null>(null);
   // Remember which element opened the message so we can return focus on close (U4 a11y).
   let openReturnFocus: HTMLElement | null = null;
 
@@ -146,9 +147,7 @@
     error = "";
     openReturnFocus = event.currentTarget as HTMLElement; // restore focus to opener on close
     try {
-      open = await api.emailMessage(m.id);
-      await tick();
-      openCloseEl?.focus(); // U4: move focus into the opened-email overlay
+      open = await api.emailMessage(m.id); // the shared Modal takes focus itself on open
     } catch (err) {
       open = null;
       error = describeError(err);
@@ -157,17 +156,9 @@
 
   function closeOpen() {
     console.assert(open !== null, "closeOpen: called with no open message");
-    console.assert(openCloseEl === null || openCloseEl instanceof HTMLButtonElement, "closeOpen: ref invariant");
     open = null;
     openReturnFocus?.focus(); // U4: return focus to the row the user came from
     openReturnFocus = null;
-  }
-
-  function onOverlayKey(event: KeyboardEvent) {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      closeOpen();
-    }
   }
 
   async function send(event: Event) {
@@ -289,76 +280,34 @@
 
   {#if error}<p class="error" role="alert">{error}</p>{/if}
 {:else}
-  <p class="muted">Loading&hellip;</p>
+  <Spinner block />
 {/if}
 
-{#if open}
-  <!-- svelte-ignore a11y_click_events_have_key_events -->
-  <div class="email-overlay" role="none" onclick={closeOpen}>
-    <div
-      class="email-dialog"
-      role="dialog"
-      aria-modal="true"
-      aria-label={open.subject || "(no subject)"}
-      tabindex="-1"
-      onkeydown={onOverlayKey}
-      onclick={(e) => e.stopPropagation()}
-    >
-      <header class="email-dialog-header">
-        <div style="min-width:0">
-          <strong style="display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">{open.subject || "(no subject)"}</strong>
-          <span class="muted" style="font-size:0.85rem">{open.from}</span>
-        </div>
-        <button class="secondary" bind:this={openCloseEl} onclick={closeOpen} aria-label="Close message">Close</button>
-      </header>
-      <div class="email-dialog-body">
-        <pre style="white-space:pre-wrap; margin:0">{open.body || "(empty)"}</pre>
-      </div>
+<Modal open={!!open} label={open?.subject || "(no subject)"} size="md" onclose={closeOpen}>
+  {#if open}
+    <h2 class="modal-title email-subject">{open.subject || "(no subject)"}</h2>
+    <p class="muted email-from">{open.from}</p>
+    <pre class="email-body">{open.body || "(empty)"}</pre>
+    <div class="modal-actions">
+      <button onclick={closeOpen}>Close</button>
     </div>
-  </div>
-{/if}
+  {/if}
+</Modal>
 
 <style>
-  .email-overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.5);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 900;
-    padding: 1rem;
+  .email-subject {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
-  .email-dialog {
-    background: var(--panel);
-    color: var(--text, #eee);
-    border: 1px solid var(--border, #333);
-    border-radius: 12px;
-    width: 100%;
-    max-width: 40rem;
-    max-height: 85vh;
-    display: flex;
-    flex-direction: column;
-    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
+  .email-from {
+    margin: 0 0 var(--s-3);
+    font-size: 0.85rem;
   }
-  /* Header is sticky inside the dialog so Close stays reachable on long bodies (U4). */
-  .email-dialog-header {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    padding: 0.75rem 1rem;
-    border-bottom: 1px solid var(--border, #2a2a2a);
-    position: sticky;
-    top: 0;
-    background: var(--panel);
-    border-top-left-radius: 12px;
-    border-top-right-radius: 12px;
-  }
-  .email-dialog-header > div {
-    flex: 1;
-  }
-  .email-dialog-body {
-    overflow: auto;
-    padding: 0.75rem 1rem 1rem;
+  .email-body {
+    white-space: pre-wrap;
+    word-break: break-word;
+    margin: 0;
+    font-family: inherit;
   }
 </style>

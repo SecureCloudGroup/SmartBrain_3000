@@ -1,5 +1,8 @@
 <script lang="ts">
   import Icon from "$lib/components/Icon.svelte";
+  import Tabs from "$lib/components/Tabs.svelte";
+  import EmptyState from "$lib/components/EmptyState.svelte";
+  import Spinner from "$lib/components/Spinner.svelte";
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
   import { account } from "$lib/account.svelte";
@@ -195,11 +198,11 @@
     own; anything that changes data or sends waits for your approval in Activity.
   </p>
 
-  <div class="subtabs" role="tablist">
-    <button role="tab" aria-selected={tab === "output"} class:active={tab === "output"} onclick={() => selectTab("output")}>Output</button>
-    <button role="tab" aria-selected={tab === "create"} class:active={tab === "create"} onclick={() => selectTab("create")}>Create</button>
-    <button role="tab" aria-selected={tab === "items"} class:active={tab === "items"} onclick={() => selectTab("items")}>Items</button>
-  </div>
+  <Tabs
+    tabs={[{ id: "output", label: "Output" }, { id: "create", label: "Create" }, { id: "items", label: "Items" }]}
+    active={tab}
+    onselect={(id) => selectTab(id as Tab)}
+  />
 
   {#if notice}<p class="notice">{notice}</p>{/if}
 
@@ -209,7 +212,7 @@
       <button class="secondary" onclick={loadOutput}>Refresh</button>
     </div>
     {#if recentRuns.length === 0}
-      <p class="muted">No output yet. Runs appear here after a schedule fires — or use “Run now” on the Items tab.</p>
+      <EmptyState icon="clock" title="Nothing has run yet" body="Runs land here after a schedule fires — or use “Run now” on the Items tab to see one immediately." />
     {/if}
     {#each recentRuns as run (run.id)}
       <div class="card run-card">
@@ -292,32 +295,10 @@
 
   {#if error}<p class="error">{error}</p>{/if}
 {:else}
-  <p class="muted">Loading&hellip;</p>
+  <Spinner block />
 {/if}
 
 <style>
-  .subtabs {
-    display: flex;
-    gap: 0.25rem;
-    border-bottom: 1px solid var(--border);
-    margin: 0.75rem 0 1rem;
-    overflow-x: auto; /* keep the three tabs on one row on a narrow phone */
-  }
-  .subtabs button {
-    background: none;
-    border: none;
-    border-bottom: 2px solid transparent;
-    border-radius: 0;
-    padding: 0.5rem 0.9rem;
-    color: var(--muted);
-    cursor: pointer;
-    white-space: nowrap;
-  }
-  .subtabs button.active {
-    color: var(--text);
-    border-bottom-color: var(--text);
-    font-weight: 600;
-  }
   .output-head {
     display: flex;
     align-items: center;

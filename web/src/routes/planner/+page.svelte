@@ -1,5 +1,7 @@
 <script lang="ts">
   import Icon from "$lib/components/Icon.svelte";
+  import EmptyState from "$lib/components/EmptyState.svelte";
+  import Spinner from "$lib/components/Spinner.svelte";
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
   import { account } from "$lib/account.svelte";
@@ -211,7 +213,7 @@
   </div>
 
   {#if tasks.length === 0}
-    <div class="card"><p class="muted" style="margin:0">No tasks yet — add one above.</p></div>
+    <div class="card"><EmptyState icon="tasks" title="A clear list" body="Add a task above — or ask in Chat: “add a task to call the dentist tomorrow.”" /></div>
   {/if}
 
   {#each groups as g (g.label)}
@@ -273,7 +275,7 @@
 
   {#if error}<p class="error">{error}</p>{/if}
 {:else}
-  <p class="muted">Loading&hellip;</p>
+  <Spinner block />
 {/if}
 
 <style>
