@@ -1594,13 +1594,7 @@
     margin: 0.35rem 0 0;
     font-size: 0.85rem;
   }
-  .linklike {
-    padding: 0;
-    border: 0;
-    background: none;
-    color: var(--accent);
-    cursor: pointer;
-  }
+  /* .linklike is now global (app.css) — one text-button voice everywhere. */
   .qhelp {
     width: 1.4rem;
     height: 1.4rem;

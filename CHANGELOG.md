@@ -12,6 +12,9 @@ to know when a release changes behavior.
 ## [Unreleased]
 
 ### Added
+- A shared component library (Modal, Tabs, Field, Toast, EmptyState, Spinner, Chip,
+  ActionCard): one modal shell now backs every dialog — starting with the app-wide
+  Confirm — ending the era of three competing overlay implementations.
 - A real icon system: a vendored Lucide subset (ISC) rendered by one Icon component
   — the emoji-as-icons era (\U0001F313\u2600\U0001F319\u22EF\u2715) is over; icons inherit theme color and weight.
 - The app's typeface is now Inter Variable, self-hosted (latin subset, 97 KB, OFL
