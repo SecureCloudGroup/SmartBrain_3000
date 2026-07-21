@@ -161,10 +161,13 @@ a {
   padding: 1.5rem;
 }
 
-/* Chat uses the full device width (with side padding) instead of the narrow column. */
+/* Chat + Help: a wider canvas than the form column, but still capped — full-bleed
+   sprawled the chat toolbar to opposite edges of big displays and stretched the
+   composer across the whole canvas. 64rem aligns toolbar, log, and composer to one
+   centered column (Help self-caps at the same width). */
 .wrap-wide {
   width: 100%;
-  max-width: 100%;
+  max-width: 64rem;
   margin: 0 auto;
   padding: 1rem 1.5rem 1.5rem;
 }
