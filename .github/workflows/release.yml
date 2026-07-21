@@ -36,11 +36,11 @@ jobs:
       # arm64 is built under emulation on this amd64 runner. It stays fast because every native
       # dependency (duckdb, cryptography, argon2, numpy, uvloop, watchfiles) ships an aarch64 wheel,
       # so `pip install` downloads rather than compiles — QEMU only runs Python, not a C toolchain.
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
 
       - name: Log in to ghcr.io
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -50,7 +50,7 @@ jobs:
       # rejects upper-case), and a `vMAJOR.MINOR.PATCH` tag yields `1.2.3`, `1.2`, and `latest`.
       - name: Image metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.IMAGE }}
           tags: |
@@ -59,7 +59,7 @@ jobs:
             type=raw,value=latest,enable=${{ github.ref_type == 'tag' }}
 
       - name: Build and push
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64,linux/arm64
