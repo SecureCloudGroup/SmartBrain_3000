@@ -7,8 +7,9 @@
   let routes = $state<Record<string, string>>({});
   let labels = $state<Record<string, string>>({});
   let busy = $state(false);
-  let error = $state("");
+  let error = $state(""); // initial LOAD failure only — save failures render inline at their buttons
   let notice = $state("");
+  let saveError = $state("");
 
   // Per-model context length (tokens). `ctxDefault` is the fallback when a model has no override;
   // `ctxInput` holds the editable string per model (blank = use the default).
@@ -16,6 +17,7 @@
   let ctxInput = $state<Record<string, string>>({});
   let ctxBusy = $state(false);
   let ctxNotice = $state("");
+  let ctxError = $state("");
 
   async function load() {
     error = "";
@@ -50,7 +52,7 @@
 
   async function saveContextLengths() {
     ctxBusy = true;
-    error = "";
+    ctxError = "";
     ctxNotice = "";
     try {
       // Send every shown model: a positive integer sets an override, blank/0 resets it to the default.
@@ -63,7 +65,7 @@
       ctxInput = Object.fromEntries(Object.entries(res.lengths).map(([id, n]) => [id, String(n)]));
       ctxNotice = "Context lengths saved.";
     } catch (err) {
-      error = describeError(err);
+      ctxError = describeError(err);
     } finally {
       ctxBusy = false;
     }
@@ -71,14 +73,14 @@
 
   async function save() {
     busy = true;
-    error = "";
+    saveError = "";
     notice = "";
     try {
       const res = await api.putRoutes(routes);
       routes = res.routes;
       notice = "Routing saved.";
     } catch (err) {
-      error = describeError(err);
+      saveError = describeError(err);
     } finally {
       busy = false;
     }
@@ -130,6 +132,7 @@
       <button disabled={busy} onclick={save}>{busy ? "Saving…" : "Save routing"}</button>
       <!-- Inline so the confirmation lands where the user is looking (was page-bottom, off-screen). -->
       {#if notice}<span class="muted" style="margin-left:0.75rem">{notice}</span>{/if}
+      {#if saveError}<span class="error" style="margin-left:0.75rem">Save failed — {saveError}</span>{/if}
     </p>
   </div>
 
@@ -158,6 +161,7 @@
       <p style="margin-top:1rem">
         <button disabled={ctxBusy} onclick={saveContextLengths}>{ctxBusy ? "Saving…" : "Save context lengths"}</button>
         {#if ctxNotice}<span class="muted" style="margin-left:0.75rem">{ctxNotice}</span>{/if}
+        {#if ctxError}<span class="error" style="margin-left:0.75rem">Save failed — {ctxError}</span>{/if}
       </p>
     {/if}
   </div>

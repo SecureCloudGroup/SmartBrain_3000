@@ -454,7 +454,8 @@ export const api = {
 
   // local models (Ollama / MLX, run on the host, fronted by Bifrost)
   localModels: () => req<LocalModels>("/api/local-models"),
-  listModels: () => req<{ models: DiscoveredModel[] }>("/api/models"),
+  // degraded: the gateway catalog was unreachable and the list came from direct local-server probes.
+  listModels: () => req<{ models: DiscoveredModel[]; degraded?: boolean }>("/api/models"),
   getRoutes: () => req<{ routes: Record<string, string>; labels: Record<string, string> }>("/api/routes"),
   putRoutes: (routes: Record<string, string>) =>
     req<{ ok: boolean; routes: Record<string, string> }>("/api/routes", {
