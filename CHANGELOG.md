@@ -18,6 +18,13 @@ to know when a release changes behavior.
   still refuses, the error fed back to the model says exactly that — this one site
   refused, web access works, try a different result — instead of a bare HTTP status
   that small local models read as a dead internet and give up on.
+- "step budget exhausted" can no longer be an entire chat reply: when the assistant
+  runs out of tool steps mid-task it now writes a real answer from everything it
+  already gathered (saying what it couldn't finish); document reading no longer
+  starves the budget — a timidly small page request is raised to the largest window
+  the model's context fits, so long documents take one or two reads instead of five —
+  and the read tool now points models at summarize_document for whole-document
+  overviews.
 
 ## [0.6.0] - 2026-07-21
 

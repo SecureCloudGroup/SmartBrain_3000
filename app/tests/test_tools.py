@@ -133,7 +133,10 @@ def test_read_document_resolves_by_query_and_returns_full_text() -> None:
     assert out["offset"] == 0 and out["truncated"] is False and out["next_offset"] is None
 
 
-def test_read_document_pages_by_offset() -> None:
+def test_read_document_pages_by_offset(monkeypatch) -> None:
+    # Floor lowered so the paging MECHANICS stay testable on a small fixture (the
+    # production floor would swallow a 16-char doc in one page — see the floor test).
+    monkeypatch.setattr(tools, "_READ_MIN_WINDOW", 1)
     ctx, doc_id = _wired_doc("Doc", "0123456789ABCDEF")
     first = _call("read_document", ctx, {"doc_id": doc_id, "offset": 0, "max_chars": 10})
     assert first["content"] == "0123456789" and first["returned_chars"] == 10
@@ -150,6 +153,21 @@ def test_read_document_clamps_window_to_result_cap() -> None:
     out = _call("read_document", ctx, {"doc_id": doc_id, "max_chars": 10_000_000})
     assert out["returned_chars"] < cap  # clamped below the cap (leaves the JSON-envelope margin)
     assert out["truncated"] is True and out["next_offset"] == out["returned_chars"]
+
+
+def test_read_document_floors_timid_pages() -> None:
+    # A small model asking for tiny pages (max_chars 3000, seen live) starved itself:
+    # five model round-trips to walk one document, and the step budget died before any
+    # answer. A small request is raised to the efficient window; the returned
+    # next_offset drives paging, so correctness is unchanged.
+    body = "x" * 9000
+    ctx, doc_id = _wired_doc("Long", body)
+    out = _call("read_document", ctx, {"doc_id": doc_id, "max_chars": 3000})
+    # The floor never exceeds the model-sized window cap (here the model-less default),
+    # so the effective page is min(floor, window_cap) — well above the timid request.
+    window_cap = gateway.result_cap_for(None, "") - tools._READ_ENVELOPE_MARGIN
+    expected = min(len(body), min(tools._READ_MIN_WINDOW, window_cap))
+    assert out["returned_chars"] == expected and expected > 3000
 
 
 def test_read_document_missing_doc_raises() -> None:
