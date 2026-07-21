@@ -18,6 +18,12 @@ to know when a release changes behavior.
   still refuses, the error fed back to the model says exactly that — this one site
   refused, web access works, try a different result — instead of a bare HTTP status
   that small local models read as a dead internet and give up on.
+- Huge documents no longer defeat the budget rescue: the recovery answer is now
+  built from a prompt REBUILT to fit the model's context (the question, the first
+  tool result, and the newest work — a 170k-character document had overflowed a
+  32k-token model so badly that the rescue call itself failed), and reading a
+  document several times larger than the context now says so in the result and
+  points the model at summarize_document, which chunks and covers the whole file.
 - "step budget exhausted" can no longer be an entire chat reply: when the assistant
   runs out of tool steps mid-task it now writes a real answer from everything it
   already gathered (saying what it couldn't finish); document reading no longer

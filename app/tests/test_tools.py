@@ -705,3 +705,15 @@ def test_web_fetch_error_steers_recovery(monkeypatch) -> None:
     msg = str(err.value)
     assert "HTTP 403" in msg, "the honest upstream error stays"
     assert "DIFFERENT URL" in msg and "web access itself is working" in msg
+
+
+def test_read_document_hints_summarize_for_huge_docs() -> None:
+    # A doc several times the window cannot be paged into context (a 170k-char doc
+    # walked a 32k-token model past its whole step budget, seen live) — the result
+    # says so at the exact moment the model decides whether to keep paging.
+    window_cap = gateway.result_cap_for(None, "") - tools._READ_ENVELOPE_MARGIN
+    ctx, doc_id = _wired_doc("Huge", "y" * (window_cap * 3))
+    out = _call("read_document", ctx, {"doc_id": doc_id})
+    assert "summarize_document" in out.get("hint", "")
+    ctx2, doc2 = _wired_doc("Small", "short body")
+    assert "hint" not in _call("read_document", ctx2, {"doc_id": doc2})

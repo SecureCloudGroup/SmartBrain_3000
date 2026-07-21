@@ -707,3 +707,34 @@ def test_collect_sources_dedupes_and_bounds() -> None:
     out = agent._collect_sources(messages)
     assert len(out) == agent._MAX_SOURCES  # bounded (30 hits offered)
     assert len({(s["id"], s["offset"]) for s in out}) == len(out)  # deduped by (id, offset)
+
+
+def test_fit_for_finalize_rebuilds_within_budget() -> None:
+    # The transcript at exhaustion can exceed the model's context (seen live: five
+    # 34k-char pages of one document into a 32k-token model) — the rescue prompt must
+    # be rebuilt to fit, keeping the question, the FIRST result, and the newest work.
+    msgs = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "summarize the deal"},
+        {"role": "assistant", "content": "", "tool_calls": [{}]},
+        {"role": "tool", "content": "FIRST" + "a" * 5000},
+        {"role": "assistant", "content": "", "tool_calls": [{}]},
+        {"role": "tool", "content": "MID" + "b" * 5000},
+        {"role": "assistant", "content": "", "tool_calls": [{}]},
+        {"role": "tool", "content": "NEWEST" + "c" * 5000},
+    ]
+    out = agent._fit_for_finalize(msgs, budget_chars=9000)
+    total = sum(len(m["content"]) for m in out)
+    assert total <= 9000 + len(agent._EXHAUSTED_NUDGE) + 200  # nudge + label ride above the results budget
+    assert out[0]["content"] == "sys" and out[1]["content"] == "summarize the deal"
+    flat = out[2]["content"]
+    assert "FIRST" in flat and "NEWEST" in flat, "anchors: first result + newest work"
+    assert out[-1]["content"] == agent._EXHAUSTED_NUDGE
+    assert all(m.get("role") != "tool" for m in out), "plain chat call — no orphaned tool roles"
+
+
+def test_fit_for_finalize_no_tools_is_just_question_plus_nudge() -> None:
+    msgs = [{"role": "user", "content": "hello"}]
+    out = agent._fit_for_finalize(msgs, budget_chars=1000)
+    assert [m["role"] for m in out] == ["user", "system"]
+    assert out[-1]["content"] == agent._EXHAUSTED_NUDGE

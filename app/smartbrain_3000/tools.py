@@ -220,6 +220,13 @@ def _read_document(ctx: ToolContext, args: dict) -> dict:
         "total_chars": total,
         "next_offset": next_offset if next_offset < total else None,
         "truncated": next_offset < total,
+        # A document several times the window CANNOT be paged into the model's context —
+        # a 170k-char doc walked a 32k-token model straight past its budget (seen live).
+        # Say so in the result, at the exact moment the model decides whether to page on.
+        **({"hint": f"This document is {total} chars — too large to read fully into context. "
+                    "Stop paging: for an overview or summary, call summarize_document "
+                    "(one step, covers the whole document)."}
+           if total > 2 * window_cap else {}),
         # Provenance is a sibling key, not a content prefix — a prefix would shift every offset and
         # break paging. It sits just BEFORE content so the warning is read before the untrusted text.
         **({"provenance": line} if line else {}),

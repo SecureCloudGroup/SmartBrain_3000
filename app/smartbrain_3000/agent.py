@@ -333,7 +333,8 @@ def run_turn(ctx, audit, approvals, *, messages, model, conversation_id, turn_id
                     "sources": _collect_sources(messages)}
         if calls + len(tool_calls) > _MAX_TOOL_CALLS:
             return _finalize_exhausted(messages, model, timeout=timeout, usage_sink=usage_sink,
-                                       reason="tool-call budget exceeded", steps=step + 1)
+                                       reason="tool-call budget exceeded", steps=step + 1,
+                                       result_cap=result_cap)
         calls += len(tool_calls)
         messages.append({"role": "assistant", "content": content, "tool_calls": tool_calls})
         parked, inline = _classify(tool_calls, auto_approve)
@@ -343,7 +344,8 @@ def run_turn(ctx, audit, approvals, *, messages, model, conversation_id, turn_id
             turn_state = {"model": model, "messages": messages, "step": step, "calls": calls, "conversation_id": conversation_id}
             return {"status": "awaiting_approval", "turn_id": turn_id, "pending": _park(approvals, audit, parked, conversation_id, turn_id, turn_state)}
     return _finalize_exhausted(messages, model, timeout=timeout, usage_sink=usage_sink,
-                               reason="step budget exhausted", steps=_MAX_STEPS)
+                               reason="step budget exhausted", steps=_MAX_STEPS,
+                               result_cap=result_cap)
 
 
 _EXHAUSTED_NUDGE = (
@@ -352,19 +354,64 @@ _EXHAUSTED_NUDGE = (
     "already contain. If something is genuinely missing, say plainly what you could "
     "not finish."
 )
+# Finalize-prompt budget as a multiple of the per-result cap. The cap is ~30% of the
+# model's context in chars (gateway._RESULT_FRACTION), so 2.4x ≈ 72% of the context —
+# leaving headroom for the system prompt, the question, the nudge, and the answer.
+_FINALIZE_BUDGET_FACTOR = 2.4
 
 
-def _finalize_exhausted(messages, model, *, timeout, usage_sink, reason: str, steps: int) -> dict:
+def _fit_for_finalize(messages, budget_chars: int) -> list[dict]:
+    """A fresh, in-budget prompt for the finalize call.
+
+    The transcript at exhaustion can exceed the model's context — that is often WHY
+    the budget died (seen live: five full-window pages of a 170k-char document fed a
+    32k-token model). Handing it back verbatim makes the rescue call fail exactly when
+    it's needed. Rebuild instead: the system prompt + the user's question + the FIRST
+    tool result (a paged document's framing lives up front) + the newest results that
+    fit, flattened into one message — a plain chat call, so tool-role pairing rules
+    never apply and templates never see orphaned tool messages.
+    """
+    assert budget_chars > 0, "positive budget required"
+    head = next((m for m in messages if m.get("role") == "system"), None)
+    question = next((m for m in reversed(messages) if m.get("role") == "user"), None)
+    tool_chunks = [m.get("content") or "" for m in messages if m.get("role") == "tool"]
+    used = sum(len(m.get("content") or "") for m in (head, question) if m)
+    kept: list[str] = []
+    if tool_chunks:  # the first result anchors the answer (search hits / page one)
+        first = tool_chunks[0][: max(1, budget_chars // 3)]
+        kept.append(first)
+        used += len(first)
+    for chunk in reversed(tool_chunks[1:]):  # then newest first — the most refined work
+        if used + len(chunk) > budget_chars:
+            room = budget_chars - used
+            if room > 500:  # a truncated tail beats dropping the result entirely
+                kept.insert(1, chunk[:room])
+            break
+        kept.insert(1, chunk)
+        used += len(chunk)
+    out = [m for m in (head, question) if m]
+    if kept:
+        out.append({"role": "system", "content":
+                    "Tool results gathered this turn (middle pages may be omitted to fit):\n\n"
+                    + "\n\n---\n\n".join(kept)})
+    out.append({"role": "system", "content": _EXHAUSTED_NUDGE})
+    return out
+
+
+def _finalize_exhausted(messages, model, *, timeout, usage_sink, reason: str, steps: int,
+                        result_cap: int) -> dict:
     """One tools-disabled model call that turns an exhausted budget into an answer.
 
     Without this, the internal counter leaked into chat as the entire reply ("step
     budget exhausted" — seen live after a long document was diligently paged five
     times and the budget died before a word of summary). The gathered tool results
-    are usually more than enough to answer, so ask the model to answer from them;
-    the raw reason survives only if that final call itself fails or leaks tool JSON.
+    are usually more than enough to answer, so ask the model to answer from them —
+    from a prompt REBUILT to fit its context — and the raw reason survives only if
+    that final call itself fails or leaks tool JSON.
     """
     try:
-        data = gateway.chat(messages + [{"role": "system", "content": _EXHAUSTED_NUDGE}], model, timeout=timeout)
+        prompt = _fit_for_finalize(messages, int(result_cap * _FINALIZE_BUDGET_FACTOR))
+        data = gateway.chat(prompt, model, timeout=timeout)
     except Exception:
         return {"status": "max_steps", "message": reason, "steps": steps}
     _emit_usage(usage_sink, model, data)
