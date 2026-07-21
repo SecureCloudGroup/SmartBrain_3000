@@ -217,6 +217,78 @@ def test_routes_endpoint_exposes_and_persists_embedding(client: TestClient) -> N
     assert r.status_code == 200 and r.json()["routes"]["embedding"] == "gemini/text-embedding-004"
 
 
+# --- catalog hardening: bounded timeout + degraded fallback to direct local probes ----
+
+def test_list_models_bounds_timeout_per_request() -> None:
+    """The catalog timeout must bind PER REQUEST: the pooled client's timeout is sized for
+    chat (60s), and Bifrost aggregates every provider's catalog live — one provider URL
+    that hangs (a stale LAN address that times out instead of refusing) would otherwise
+    stall every /api/models caller for the pool's full timeout."""
+    seen: dict = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen["timeout"] = req.extensions.get("timeout")
+        return httpx.Response(200, json={"data": []})
+
+    pool = httpx.Client(base_url="http://bifrost:8080", timeout=60.0, transport=httpx.MockTransport(handler))
+    gateway.list_models(client=pool, timeout=6.0)
+    assert seen["timeout"] == {"connect": 6.0, "read": 6.0, "write": 6.0, "pool": 6.0}
+
+
+def test_local_fallback_models_probes_configured_locals(monkeypatch) -> None:
+    monkeypatch.setattr(
+        gateway, "probe_ollama", lambda url: {"reachable": True, "models": ["llama3.2", "nomic-embed-text"]}
+    )
+    monkeypatch.setattr(
+        gateway,
+        "probe_mlx",
+        lambda url, key: {
+            "reachable": True,
+            "models": ["Qwen3.5-9B", "bge-m3-mlx-fp16"],
+            "context_lengths": {"Qwen3.5-9B": 32768},
+        },
+    )
+    store = {gateway.OLLAMA_URL_KEY: "http://h:11434", gateway.MLX_URL_KEY: "http://h:8888"}
+    out = gateway.local_fallback_models(store)
+    by_id = {m["id"]: m for m in out}
+    assert set(by_id) == {"ollama/llama3.2", "ollama/nomic-embed-text", "mlx/Qwen3.5-9B", "mlx/bge-m3-mlx-fp16"}
+    assert by_id["mlx/Qwen3.5-9B"]["chat"] is True and by_id["mlx/Qwen3.5-9B"]["context_length"] == 32768
+    assert by_id["mlx/bge-m3-mlx-fp16"]["embed"] is True and by_id["mlx/bge-m3-mlx-fp16"]["chat"] is False
+    assert by_id["ollama/nomic-embed-text"]["chat"] is False  # embed-name hint keeps it out of chat
+    assert all(m["pricing"] is None for m in out)  # local models are free
+
+
+def test_local_fallback_models_empty_when_unconfigured() -> None:
+    assert gateway.local_fallback_models({}) == []
+
+
+def test_models_endpoint_degrades_to_local_probes(client: TestClient, monkeypatch) -> None:
+    """A wedged/unreachable gateway catalog degrades to direct local probes — never a blank list."""
+    client.post("/api/account/setup", json={"passphrase": "correct-horse"})
+
+    def boom() -> list:
+        raise gateway.GatewayError(502, "catalog wedged")
+
+    monkeypatch.setattr(gateway, "list_models", boom)
+    fallback = [{"id": "mlx/q", "name": "mlx/q", "provider": "mlx", "context_length": None,
+                 "pricing": None, "chat": True, "embed": False}]
+    monkeypatch.setattr(gateway, "local_fallback_models", lambda store: fallback)
+    r = client.get("/api/models")
+    assert r.status_code == 200 and r.json() == {"models": fallback, "degraded": True}
+
+
+def test_models_endpoint_502_only_when_fallback_empty(client: TestClient, monkeypatch) -> None:
+    client.post("/api/account/setup", json={"passphrase": "correct-horse"})
+
+    def boom() -> list:
+        raise gateway.GatewayError(502, "catalog wedged")
+
+    monkeypatch.setattr(gateway, "list_models", boom)
+    monkeypatch.setattr(gateway, "local_fallback_models", lambda store: [])
+    r = client.get("/api/models")
+    assert r.status_code == 502 and "wedged" in r.json()["detail"]
+
+
 # --- B21: sensible default chat model when only local providers exist ----
 
 def test_default_chat_for_picks_local_when_no_cloud() -> None:

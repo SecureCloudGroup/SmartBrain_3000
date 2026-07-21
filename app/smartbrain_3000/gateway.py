@@ -313,16 +313,22 @@ def _norm_pricing(p: object) -> dict | None:
     return {"prompt": prompt, "completion": completion}
 
 
-def list_models(*, client: httpx.Client | None = None, timeout: float = 10.0) -> list[dict]:
+def list_models(*, client: httpx.Client | None = None, timeout: float = 6.0) -> list[dict]:
     """Discover available models from Bifrost's live catalog (OpenAI /v1/models).
 
     Returns one dict per model — {id, name, provider, context_length, pricing,
     chat} — derived from the gateway, so the list stays current as providers and
     their catalogs change. Raises ``GatewayError`` on a bad/unreachable gateway.
+
+    ``timeout`` is passed per-request so it binds even on the pooled client (whose
+    own timeout is sized for chat, 60s): Bifrost aggregates every registered
+    provider's catalog live, so one provider URL that hangs (a stale LAN address
+    times out rather than refusing) would otherwise stall this call — and every
+    /api/models caller with it — for the pool's full timeout.
     """
     client, owns_client = _resolve_client(client, timeout)
     try:
-        resp = client.get(_MODELS_PATH)
+        resp = client.get(_MODELS_PATH, timeout=timeout)
         if resp.status_code >= 400:
             try:
                 err_body = resp.json()
@@ -881,6 +887,38 @@ def deprovision_local(*, client: httpx.Client | None = None) -> None:
                 pass  # best-effort; absence is fine
 
     _run(client, _do)
+
+
+def local_fallback_models(store) -> list[dict]:
+    """Catalog fallback built by probing configured LOCAL providers directly.
+
+    When Bifrost's aggregated catalog is unavailable (one registered provider's
+    URL hanging wedges the whole /v1/models — the very failure that motivated
+    this), the local servers themselves are usually fine. Probing them directly
+    (each probe carries its own short timeout) degrades the catalog to "local
+    models only" instead of an empty list: chat keeps working, and cloud models
+    reappear once the gateway catalog recovers. Entries mirror list_models' shape.
+    """
+    out: list[dict] = []
+    ollama_url = store.get(OLLAMA_URL_KEY)
+    if ollama_url:
+        for name in probe_ollama(ollama_url)["models"][:_MAX_MODELS]:
+            mid = f"ollama/{name}"
+            out.append({
+                "id": mid, "name": mid, "provider": "ollama", "context_length": None,
+                "pricing": None, "chat": _is_chat_model({"id": mid}), "embed": _is_embed_model({"id": mid}),
+            })
+    mlx_url = store.get(MLX_URL_KEY)
+    if mlx_url:
+        probe = probe_mlx(mlx_url, store.get(MLX_KEY_KEY) or "")
+        for name in probe["models"][:_MAX_MODELS]:
+            mid = f"mlx/{name}"
+            out.append({
+                "id": mid, "name": mid, "provider": "mlx",
+                "context_length": probe["context_lengths"].get(name),
+                "pricing": None, "chat": _is_chat_model({"id": mid}), "embed": _is_embed_model({"id": mid}),
+            })
+    return out
 
 
 def probe_ollama(url: str, *, client: httpx.Client | None = None, timeout: float = 4.0) -> dict:

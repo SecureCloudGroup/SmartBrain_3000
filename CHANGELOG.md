@@ -30,6 +30,15 @@ to know when a release changes behavior.
   it also headlines the in-app Help) instead of a subsection buried in Using SmartBrain_3000;
   the later guides renumbered 05–09 with every cross-link updated.
 
+### Fixed
+- One dead local-provider URL can no longer blank the whole model list: the gateway
+  catalog call is now time-bounded (it previously inherited the pooled client's 60s
+  timeout), and when the catalog fails, `/api/models` degrades to directly-probed local
+  models — Chat keeps working on local models and shows an honest "couldn't load the
+  model list / degraded" notice instead of a misleading "add a key" empty state. Save
+  failures on the Model-routing page now land inline next to their button instead of a
+  vague connection error at the page bottom.
+
 **Migration:** subscribing to a public vault records its upstream source in new encrypted
 columns — additive and forward-only, applied automatically on first launch (#77).
 

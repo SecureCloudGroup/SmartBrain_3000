@@ -118,6 +118,8 @@
   // Until the probe answers, show NOTHING rather than "add a cloud key" guidance that a detected
   // Ollama will contradict a second later — first-run is the worst moment for conflicting advice.
   let probed = $state(false);
+  let modelsDegraded = $state(false); // catalog fell back to direct local probes
+  let modelsError = $state(""); // the model LIST fetch itself failed (distinct from an empty catalog)
   let connecting = $state(false);
   const providers = $derived([...new Set(models.map((m) => m.provider))].sort());
   const providerModels = $derived(models.filter((m) => m.provider === provider));
@@ -215,10 +217,15 @@
   }
 
   async function loadModels() {
+    modelsError = "";
     try {
-      models = (await api.listModels()).models.filter((x) => x.chat); // embeddings/image can't chat
-    } catch {
+      const res = await api.listModels();
+      models = res.models.filter((x) => x.chat); // embeddings/image can't chat
+      modelsDegraded = res.degraded === true;
+    } catch (err) {
       models = [];
+      modelsDegraded = false;
+      modelsError = describeError(err); // shown in place of the misleading "add a key" empty state
     }
     if (models.length === 0) {
       await detectLocal(); // offer a one-tap connect if a local server is running
@@ -786,6 +793,14 @@
     </span>
   </div>
 
+  {#if modelsDegraded && models.length > 0}
+    <p class="muted" style="margin:0.25rem 0 0; font-size:0.85rem">
+      Model list is degraded — the gateway catalog isn&rsquo;t responding, so only local models are
+      shown. A stale server entry under <a href="/settings/models">Settings → Local models</a> is the
+      usual cause.
+    </p>
+  {/if}
+
   {#if models.length === 0 && (detected || probed)}
     <div class="card">
       {#if detected}
@@ -797,6 +812,15 @@
         <p style="margin-top:0.75rem; display:flex; gap:0.5rem">
           <button disabled={connecting} onclick={connectLocal}>{connecting ? "Connecting…" : `Connect ${name}`}</button>
           <button class="secondary" disabled={connecting} onclick={loadModels}>Refresh</button>
+        </p>
+      {:else if modelsError}
+        <strong>Couldn&rsquo;t load the model list</strong>
+        <p class="muted" style="margin:0.4rem 0 0">
+          {modelsError} Your models are likely fine — check
+          <a href="/settings/models">Settings → Local models</a> for a stale or unreachable server entry.
+        </p>
+        <p style="margin-top:0.75rem">
+          <button class="secondary" disabled={busy} onclick={loadModels}>Retry</button>
         </p>
       {:else}
         <strong>No models available yet</strong>

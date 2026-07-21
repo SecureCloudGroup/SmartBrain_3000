@@ -8,12 +8,15 @@ and scheduler paths. All endpoints require the app to be unlocked.
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from . import gateway, usage
+
+log = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -47,15 +50,22 @@ def _require_unlocked(request: Request) -> None:
 
 @router.get("/api/models")
 def list_models_endpoint(request: Request) -> dict:
-    """Discovered model catalog from the gateway (live; reflects configured providers)."""
+    """Discovered model catalog from the gateway (live; reflects configured providers).
+
+    When the gateway catalog fails (one hanging provider URL wedges Bifrost's aggregate
+    /v1/models), fall back to probing the configured LOCAL servers directly and answer
+    ``degraded: true`` — one dead provider must never blank the whole model list.
+    """
     _require_unlocked(request)
     try:
-        models = gateway.list_models()
-    except gateway.GatewayError as exc:
-        raise HTTPException(status_code=502, detail=exc.message) from None
-    except Exception as exc:  # gateway unreachable
-        raise HTTPException(status_code=502, detail=f"gateway unreachable: {exc}") from exc
-    return {"models": models}
+        return {"models": gateway.list_models(), "degraded": False}
+    except Exception as exc:
+        detail = exc.message if isinstance(exc, gateway.GatewayError) else f"gateway unreachable: {exc}"
+        models = gateway.local_fallback_models(request.app.state.secret_store)
+        if not models:
+            raise HTTPException(status_code=502, detail=detail) from None
+        log.warning("model catalog degraded to direct local probes: %s", detail)
+        return {"models": models, "degraded": True}
 
 
 @router.get("/api/routes")
