@@ -104,6 +104,8 @@ The complete runtime set (67 packages) is exact-version pinned in [`app/requirem
 | [Ollama](https://github.com/ollama/ollama) | Optional local model server (host) | MIT |
 | [coturn](https://github.com/coturn/coturn) | STUN/TURN server (remote-access node, optional) | BSD-3-Clause |
 | [Caddy](https://github.com/caddyserver/caddy) | Reverse proxy / TLS for the remote-access node (optional) | Apache-2.0 |
+| [Inter](https://rsms.me/inter/) | UI typeface (self-hosted subset, `web/static/fonts/`; license ships beside the file) | OFL-1.1 |
+| [Lucide](https://lucide.dev) | UI icon set (vendored path data, `web/src/lib/icons.ts`) | ISC |
 
 If you believe an attribution here is inaccurate or incomplete, please open an
 issue or email **info@securecloudgroup.com**.

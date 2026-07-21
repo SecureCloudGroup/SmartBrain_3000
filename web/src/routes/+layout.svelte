@@ -15,6 +15,7 @@
   import RemoteStatus from "$lib/components/RemoteStatus.svelte";
   import PairSetup from "$lib/components/PairSetup.svelte";
   import Confirm from "$lib/components/Confirm.svelte";
+  import Icon from "$lib/components/Icon.svelte";
   import { confirmDialog } from "$lib/confirm.svelte";
 
   let { children } = $props();
@@ -42,7 +43,7 @@
   const isActive = (href: string) =>
     page.url.pathname === href || page.url.pathname.startsWith(href + "/");
 
-  const THEME_ICON = { system: "🌓", light: "☀", dark: "🌙" };
+  const THEME_ICON = { system: "sun-moon", light: "sun", dark: "moon" } as const;
 
   // When the backend is unreachable, account.load() sets account.error with no
   // status — show a recoverable card instead of an indefinite per-page "Loading…".
@@ -158,7 +159,7 @@
       title={`Theme: ${theme.mode}`}
       aria-label={`Theme: ${theme.mode}. Click to change.`}
       onclick={cycleTheme}
-    >{THEME_ICON[theme.mode]}</button>
+    ><Icon name={THEME_ICON[theme.mode]} /></button>
     {#if remoteSession}
       <button class="secondary" onclick={unpairDevice} title="Forget this device's pairing">Unpair</button>
     {/if}
@@ -173,7 +174,7 @@
       aria-expanded={overflowOpen}
       title="More"
       onclick={() => (overflowOpen = !overflowOpen)}
-    >⋯</button>
+    ><Icon name="more-horizontal" /></button>
     {#if overflowOpen}
       <!-- svelte-ignore a11y_click_events_have_key_events -->
       <div class="overflow-menu" role="menu" tabindex="-1" onclick={() => (overflowOpen = false)}>
@@ -183,7 +184,7 @@
           title={`Theme: ${theme.mode}`}
           aria-label={`Theme: ${theme.mode}. Click to change.`}
           onclick={cycleTheme}
-        >{THEME_ICON[theme.mode]} Theme</button>
+        ><Icon name={THEME_ICON[theme.mode]} /> Theme</button>
         {#if remoteSession}
           <button class="secondary" onclick={unpairDevice} title="Forget this device's pairing">Unpair</button>
         {/if}
