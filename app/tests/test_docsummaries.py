@@ -102,3 +102,23 @@ def test_auto_summarize_respects_missing_model(monkeypatch) -> None:
     monkeypatch.setattr(gateway, "load_routes", lambda c: {})
     monkeypatch.setattr(gateway, "resolve_model", lambda cap, routes: None)
     scheduler._auto_summarize(conn, gen_master_key())  # must simply no-op, never raise
+
+
+def test_auto_summarize_stands_aside_when_user_is_active(monkeypatch) -> None:
+    # A 30s map call in flight when a chat arrives reads as a hang (oMLX serves one
+    # request at a time) — the pass must not run at all unless the machine is idle.
+    from smartbrain_3000 import gateway, summarize
+    from smartbrain_3000.kb import KnowledgeBase
+
+    conn = duckdb.connect(":memory:")
+    dbmod.run_migrations(conn)
+    key = gen_master_key()
+    KnowledgeBase(conn, key).add("Doc", "z" * 100)
+    monkeypatch.setattr(gateway, "local_available", lambda: True)
+    monkeypatch.setattr(gateway, "load_routes", lambda c: {"chat": "prov/model"})
+
+    def must_not_run(*a, **k):
+        raise AssertionError("summarize pass ran while the user was active")
+
+    monkeypatch.setattr(summarize, "map_chunk", must_not_run)
+    scheduler._auto_summarize(conn, key, idle=False)  # skips silently

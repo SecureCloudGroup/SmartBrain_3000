@@ -55,11 +55,13 @@
     read_document: "Reading a document", summarize_document: "Summarizing a document",
     list_documents: "Listing documents", list_tasks: "Checking your tasks",
     email_list: "Checking email", email_read: "Reading an email",
+    __answering: "Writing the answer",
   };
   const TOOL_ICONS: Record<string, IconName> = {
     web_search: "search", web_research: "search", web_fetch: "link",
     kb_search: "book", read_document: "file", summarize_document: "file",
     list_documents: "book", list_tasks: "tasks", email_list: "mail", email_read: "mail",
+    __answering: "pencil",
   };
   let renaming = $state(false); // inline rename of the open conversation (Knowledge's idiom)
   let renameValue = $state("");
@@ -631,9 +633,13 @@
           buf = sliced.remainder;
           for (const ev of sliced.events) {
             if (ev.event === "tool") {
-              const data = JSON.parse(ev.data) as { state: string; tool: string; detail?: string; ok?: boolean };
-              if (data.state === "start") {
-                activity.push({ tool: data.tool, detail: data.detail || "", done: false, ok: true });
+              const data = JSON.parse(ev.data) as { kind?: string; state: string; tool?: string; detail?: string; ok?: boolean };
+              if (data.kind === "phase" && data.state === "answering") {
+                // The last long call (writing the answer from everything gathered) is
+                // visible too — otherwise the tail of a big turn looks hung.
+                activity.push({ tool: "__answering", detail: "", done: false, ok: true });
+              } else if (data.state === "start") {
+                activity.push({ tool: data.tool ?? "", detail: data.detail || "", done: false, ok: true });
               } else {
                 const open = [...activity].reverse().find((a) => a.tool === data.tool && !a.done);
                 if (open) { open.done = true; open.ok = data.ok !== false; }

@@ -7,6 +7,7 @@ Bifrost needs are managed separately (provisioned on unlock).
 
 from __future__ import annotations
 
+import time
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Request
@@ -71,6 +72,7 @@ def chat_endpoint(request: Request, body: ChatRequest) -> dict:
     """Resolve a model (explicit or by capability) and complete via Bifrost."""
     _require_unlocked(request)
     assert body.messages, "messages must be present"
+    request.app.state.last_interactive = time.monotonic()  # background model work stands aside
     routes = gateway.load_routes(request.app.state.dbx)
     model = body.model or gateway.resolve_model(body.capability, routes)
     if not model:

@@ -765,3 +765,24 @@ def test_run_turn_survives_broken_event_listener(monkeypatch) -> None:
     r = agent.run_turn(ctx, audit, approvals, messages=[{"role": "user", "content": "hi"}],
                        model="m", conversation_id=None, turn_id="t-ev2", on_event=boom)
     assert r["status"] == "complete" and r["message"] == "fine"
+
+
+def test_turn_stops_asking_for_tools_once_context_budget_reached(monkeypatch) -> None:
+    # Full-window results stacked past the model's context made every later round-trip
+    # re-prefill a huge prompt (a live turn ran 10+ minutes). Once gathered results
+    # reach the finalize budget, the loop must answer instead of asking for more.
+    ctx, audit, approvals = _wired()
+    calls = {"tools": 0}
+
+    def scripted(messages, model, spec, timeout=60.0):
+        calls["tools"] += 1
+        return _toolcalls(("kb_search", {"query": "x"}))
+
+    monkeypatch.setattr(gateway, "chat_with_tools", scripted)
+    monkeypatch.setattr(tools, "run", lambda *a, **k: {"pad": "x" * 900})  # ~1 result_cap each
+    monkeypatch.setattr(gateway, "chat", lambda msgs, model, timeout=60.0: _text("synthesized"))
+    r = agent.run_turn(ctx, audit, approvals, messages=[{"role": "user", "content": "hi"}],
+                       model="m", conversation_id=None, turn_id="t-budget", result_cap=1000)
+    assert r["status"] == "complete" and r["message"] == "synthesized"
+    # budget = 2.4 * 1000 -> three ~910-char results trip it; the 4th round-trip never happens
+    assert calls["tools"] == 3 < agent._MAX_STEPS
