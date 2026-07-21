@@ -786,3 +786,45 @@ def test_turn_stops_asking_for_tools_once_context_budget_reached(monkeypatch) ->
     assert r["status"] == "complete" and r["message"] == "synthesized"
     # budget = 2.4 * 1000 -> three ~910-char results trip it; the 4th round-trip never happens
     assert calls["tools"] == 3 < agent._MAX_STEPS
+
+
+def test_citations_weighted_by_depth_of_use() -> None:
+    # Broad searches surfaced every unrelated file as a chip (seen live). With a read
+    # in the turn: search hits survive only as page links INTO read documents, the
+    # same (doc, page) from two queries collapses, and the read doc's whole-document
+    # chip yields to its page chips.
+    def tcall(cid, name):
+        return {"id": cid, "type": "function", "function": {"name": name, "arguments": "{}"}}
+
+    def hit(doc, page):
+        return {"id": doc, "title": doc, "source": f"{doc}.pdf", "page": page,
+                "page_label": "page", "offset": 0}
+
+    msgs = [
+        {"role": "user", "content": "summarize the deal"},
+        {"role": "assistant", "content": "", "tool_calls": [tcall("c1", "kb_search")]},
+        {"role": "tool", "tool_call_id": "c1",
+         "content": json.dumps({"results": [hit("s1", 6), hit("unrelated", 2)]})},
+        {"role": "assistant", "content": "", "tool_calls": [tcall("c2", "kb_search")]},
+        {"role": "tool", "tool_call_id": "c2",
+         "content": json.dumps({"results": [hit("s1", 6), hit("s1", 29), hit("other", None)]})},
+        {"role": "assistant", "content": "", "tool_calls": [tcall("c3", "read_document")]},
+        {"role": "tool", "tool_call_id": "c3",
+         "content": json.dumps({"id": "s1", "title": "s1", "content": "..."})},
+    ]
+    out = agent._collect_sources(msgs)
+    assert [(s["id"], s["page"]) for s in out] == [("s1", 6), ("s1", 29)]
+    assert all(s["id"] == "s1" for s in out), "unread docs are never cited once a read happened"
+
+
+def test_citations_search_only_turn_still_cites_hits() -> None:
+    def tcall(cid, name):
+        return {"id": cid, "type": "function", "function": {"name": name, "arguments": "{}"}}
+
+    msgs = [
+        {"role": "assistant", "content": "", "tool_calls": [tcall("c1", "kb_search")]},
+        {"role": "tool", "tool_call_id": "c1", "content": json.dumps({"results": [
+            {"id": "a", "title": "A", "source": "", "page": None, "page_label": "page", "offset": 0}]})},
+    ]
+    out = agent._collect_sources(msgs)
+    assert [s["id"] for s in out] == ["a"], "snippets were the whole evidence — keep them"
