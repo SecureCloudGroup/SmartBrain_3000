@@ -51,7 +51,15 @@
   const moreNav = $derived(nav.filter((n) => !TAB_HREFS.includes(n.href)));
   const isActive = (href: string) =>
     page.url.pathname === href || page.url.pathname.startsWith(href + "/");
-  const showNav = $derived(Boolean(account.status?.unlocked));
+  // The sidebar appearing only after account.load() resolves shifted the whole main
+  // area on cold load (CLS 0.155, measured in the Stage-13 sweep). Until the real
+  // status arrives, fall back to the last session's nav state — wrong at most for one
+  // frame after a lock elsewhere, and nav labels are not sensitive.
+  const navHint = typeof localStorage !== "undefined" && localStorage.getItem("sbNav") === "1";
+  const showNav = $derived(account.status ? Boolean(account.status.unlocked) : navHint);
+  $effect(() => {
+    if (account.status) localStorage.setItem("sbNav", account.status.unlocked ? "1" : "0");
+  });
 
   const THEME_ICON = { system: "sun-moon", light: "sun", dark: "moon" } as const;
 

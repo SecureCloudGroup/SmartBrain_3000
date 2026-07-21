@@ -94,7 +94,7 @@
       <button class="secondary" onclick={copyKit}>{copied ? "Copied ✓" : "Copy"}</button>
     </p>
     <label style="display:flex; gap:0.5rem; align-items:center; margin-top:0.75rem">
-      <input type="checkbox" bind:checked={saved} disabled={!kitTouched} style="width:auto" />
+      <input type="checkbox" bind:checked={saved} disabled={!kitTouched} />
       I&rsquo;ve saved my Emergency Kit somewhere safe
     </label>
     {#if !kitTouched}

@@ -12,6 +12,14 @@ to know when a release changes behavior.
 ## [Unreleased]
 
 ### Added
+- An accessibility and performance sweep, verified by axe across every route in both
+  themes and viewports (now zero violations): the app version, composer hint, and
+  mobile tab labels meet AA contrast; light-theme green/red are retuned so status
+  chips pass on their tinted backgrounds (enforced forever by new contrast tests);
+  dialogs return focus to what opened them; task checkboxes are labeled for screen
+  readers and — with all native toggles — bigger and theme-colored; Help's scrollable
+  code blocks are keyboard-reachable; and the sidebar no longer pops in after load
+  (layout shift 0.157 → 0.002 on a cold open).
 - A quiet motion pass: dialogs, the mobile More sheet, toasts, and the "Jump to latest"
   pill now ease in (120–200ms, transform/opacity only) while dismissal stays instant;
   tab hovers stopped snapping. Every animation — including the two smooth-scroll

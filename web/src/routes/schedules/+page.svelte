@@ -277,7 +277,7 @@
           </div>
         {:else}
           <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap">
-            <input type="checkbox" style="width:auto" checked={s.enabled} onchange={() => toggle(s)} aria-label="Enabled" />
+            <input type="checkbox" checked={s.enabled} onchange={() => toggle(s)} aria-label="Enabled" />
             <strong style="flex:1; min-width:8rem; {s.enabled ? '' : 'opacity:0.55'}">{s.title}</strong>
             <span class="muted">{repeatLabel(s.interval_minutes)}</span>
             <button class="secondary" disabled={busyId === s.id} onclick={() => startEdit(s)}>Edit</button>

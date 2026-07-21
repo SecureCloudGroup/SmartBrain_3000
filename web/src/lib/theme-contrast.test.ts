@@ -71,6 +71,27 @@ describe("theme contrast (WCAG AA)", () => {
         const r = ratio("#ffffff", vars["--accent-strong"]);
         expect(r, `#fff on ${vars["--accent-strong"]} = ${r.toFixed(2)}`).toBeGreaterThanOrEqual(4.5);
       });
+      // Chips render their color ON its own 10% tint over the panel (Chip.svelte uses
+      // color-mix(color 10%, transparent); accent-tint is 10%/7% dark/light). Tinting
+      // brightens the background, which is exactly where light-theme ok slipped to 4.26
+      // (axe, Stage 13) — so the composited pair is enforced here at text contrast.
+      const mix = (fg: string, bg: string, w: number): string =>
+        "#" +
+        [1, 3, 5]
+          .map((i) =>
+            Math.round(w * parseInt(fg.slice(i, i + 2), 16) + (1 - w) * parseInt(bg.slice(i, i + 2), 16))
+              .toString(16)
+              .padStart(2, "0"),
+          )
+          .join("");
+      for (const tok of ["--ok", "--warn", "--danger", "--accent"] as const) {
+        const w = tok === "--accent" ? (name === "dark" ? 0.1 : 0.07) : 0.1;
+        it(`${tok} on its ${Math.round(w * 100)}% tint >= 4.5 (chips are meta-size text)`, () => {
+          const tint = mix(vars[tok], vars["--panel"], w);
+          const r = ratio(vars[tok], tint);
+          expect(r, `${tok} ${vars[tok]} on tint ${tint} = ${r.toFixed(2)}`).toBeGreaterThanOrEqual(4.5);
+        });
+      }
     });
   }
 
