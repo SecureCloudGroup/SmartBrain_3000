@@ -1,3 +1,15 @@
+/* Inter Variable (latin subset, self-hosted — no CDN, matching the privacy posture).
+   swap + metric-close system fallback keeps first paint readable; the service worker
+   precaches it, so only the very first cold visit can see the swap. OFL license sits
+   next to the file. */
+@font-face {
+  font-family: "Inter var";
+  src: url("/fonts/inter-var-latin.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
 /* Design tokens — calm precision-minimal (Gate 1, design/mockups/tokens.css made law).
    Legacy var names are kept with NEW values so every existing rule reskins in place. */
 :root {
@@ -124,7 +136,7 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font: var(--f-body) / var(--lh-ui) system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font: var(--f-body) / var(--lh-ui) "Inter var", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
   font-feature-settings: "tnum"; /* tabular numerals: fingerprints, usage tables */
   overflow-x: hidden; /* safety net: never let a stray element push the page sideways on mobile */

@@ -12,6 +12,8 @@ to know when a release changes behavior.
 ## [Unreleased]
 
 ### Added
+- The app's typeface is now Inter Variable, self-hosted (latin subset, 97 KB, OFL
+  license shipped alongside) — no font CDN, matching the privacy posture.
 - A new visual foundation — "calm precision-minimal": tonal dark (#121212 family) and
   warm-white light themes with a single muted-teal accent, a real type/spacing/radius
   token system, a visible keyboard-focus ring everywhere, and WCAG-AA contrast enforced
