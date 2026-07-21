@@ -12,6 +12,10 @@ to know when a release changes behavior.
 ## [Unreleased]
 
 ### Added
+- The app shell is rebuilt: a desktop sidebar rail (icons, labels, badges) with a slim
+  top strip carrying an "Encrypted · On-device" trust chip, and on phones a bottom tab
+  bar in the thumb zone (Chat · Knowledge · Activity · More) with proper notch/home-bar
+  safe areas — replacing the wall-of-links top bar on every screen size.
 - A shared component library (Modal, Tabs, Field, Toast, EmptyState, Spinner, Chip,
   ActionCard): one modal shell now backs every dialog — starting with the app-wide
   Confirm — ending the era of three competing overlay implementations.
