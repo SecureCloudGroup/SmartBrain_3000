@@ -78,7 +78,16 @@ record(){ local n="$1"; mock_up; mkdir -p "$HERE/out"; rm -rf "$HERE/video"; mkd
   case "$n" in 06|08) enc "$(name_of "$n")" 10 900 ;; 10) enc "$(name_of "$n")" 10 900 100 100 ;; 11) enc "$(name_of "$n")" 10 900 180 60 ;; *) enc "$(name_of "$n")" ;; esac
 }
 
+shots(){ # deterministic screenshot grid of every route (design-PR before/after evidence)
+  mock_up; reset_demo; setup >/dev/null; connect
+  task '{"title":"Call the dentist"}'; task '{"title":"Submit expense report"}'
+  doc '{"title":"Apartment Lease","content":"Lease term 12 months, rent $1,800/mo due on the 1st, 60-day notice to vacate, landlord Pat Rivera."}'
+  doc '{"title":"Renters insurance policy","content":"Policy RE-2210 with Homestead Mutual. Coverage: $30,000 personal property, $100,000 liability. Premium $14/mo, renews March 1."}'
+  cd "$HERE"; node shots.js
+}
+
 if [ "${1:-}" = "all" ]; then for n in 01 02 03 04 05 06 07 08 09 10 11; do echo "### $n"; record "$n"; done
+elif [ "${1:-}" = "shots" ]; then shots
 elif [ -n "$(name_of "${1:-}")" ]; then record "$1"
-else echo "usage: $0 <01..10|all>"; exit 1; fi
+else echo "usage: $0 <01..10|all|shots>"; exit 1; fi
 echo "done. (cleanup: docker rm -f sb_gifdemo; pkill -f mock_gateway.py)"
