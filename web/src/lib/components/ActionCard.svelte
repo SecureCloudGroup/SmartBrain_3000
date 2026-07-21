@@ -11,12 +11,14 @@
     title,
     tier = "reviewed",
     scope = "",
+    badge = true,
     actions,
   }: {
     icon?: IconName;
     title: string;
     tier?: "reviewed" | "irreversible";
     scope?: string; // pre-formatted "key: value" lines (Activity's fmtArgs output)
+    badge?: boolean; // hide the reversibility chip where it reads oddly (e.g. chat's resume card)
     actions?: Snippet;
   } = $props();
 </script>
@@ -28,10 +30,12 @@
   </div>
   {#if scope}<pre class="scope">{scope}</pre>{/if}
   <div class="foot">
-    {#if tier === "irreversible"}
-      <span class="chip warn"><Icon name="warn" size={12} /> Irreversible</span>
-    {:else}
-      <span class="chip"><Icon name="refresh" size={12} /> Reversible</span>
+    {#if badge}
+      {#if tier === "irreversible"}
+        <span class="chip warn"><Icon name="warn" size={12} /> Irreversible</span>
+      {:else}
+        <span class="chip"><Icon name="refresh" size={12} /> Reversible</span>
+      {/if}
     {/if}
     <span class="gap"></span>
     {@render actions?.()}

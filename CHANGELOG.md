@@ -12,6 +12,10 @@ to know when a release changes behavior.
 ## [Unreleased]
 
 ### Added
+- Chat reads like a modern assistant: full-width labeled message rows on a reading
+  measure (bubbles retired), visible thinking/streaming states, a redesigned composer
+  with an always-visible Stop during generation, citation chips, an inline approval
+  card, and a "Jump to latest" pill with scroll-aware auto-follow.
 - Approvals got their proper surface: pending actions in Activity render as deliberate
   "Action Cards" — tool, plain scope lines, a reversibility badge, and a clear
   Approve / Deny / Always-allow hierarchy (red is reserved for irreversible actions).

@@ -497,43 +497,128 @@ button:disabled {
   color: #fff;
 }
 
+/* ---- Chat: full-width message rows on a reading measure (no bubbles). ---- */
 .chat-log {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
-  margin: 1rem 0;
-  padding-bottom: 1rem; /* last bubble clears the sticky composer */
+  gap: var(--s-5);
+  margin: var(--s-4) 0;
+  padding-bottom: var(--s-4); /* last row clears the sticky composer */
   scroll-padding-bottom: 7rem;
 }
 
-.bubble {
-  padding: 0.6rem 0.9rem;
-  border-radius: 12px;
-  max-width: min(46rem, 85%); /* readable line length even when the page is full-width */
+.msg {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 46rem; /* 65–72ch reading measure inside the 64rem canvas */
+}
+.msg .who {
+  font-size: var(--f-meta);
+  font-weight: 600;
+  color: var(--faint);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.msg .who .state {
+  font-weight: 500;
+}
+.msg .body {
+  font-size: var(--f-body);
+  line-height: var(--lh-read);
   white-space: pre-wrap;
   word-break: break-word;
 }
-
-.bubble.user {
-  align-self: flex-end;
-  /* accent-strong, not accent: white-on-accent was ~2.9:1 (AA fail). Interim until the
-     chat redesign replaces bubbles with full-width tinted rows. */
-  background: var(--accent-strong);
-  color: #fff;
+.msg.user .body {
+  background: var(--accent-tint);
+  border-radius: var(--r-2);
+  padding: var(--s-3) var(--s-4);
 }
-
-.bubble.assistant {
-  align-self: flex-start;
-  background: var(--panel);
-  border: 1px solid var(--border);
+/* The Markdown component wraps itself in .bubble.assistant.md; inside a row the
+   bubble CHROME goes away (its typographic rules below still apply). */
+.msg .body .bubble.assistant.md {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  max-width: 100%;
 }
-
-.bubble.err {
-  align-self: flex-start;
-  /* was hardcoded #2a1416 (dark-only); mix from the theme so light mode themes correctly */
-  background: color-mix(in srgb, var(--danger) 10%, var(--bg));
-  border: 1px solid var(--danger);
+.msg .errline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   color: var(--danger);
+  font-size: var(--f-label);
+}
+.loadmore {
+  display: flex;
+  justify-content: center;
+  margin: 0;
+}
+.log-end {
+  height: 1px;
+}
+
+/* Alive signals: pre-token thinking dots; a caret beside the streaming state label. */
+.thinking {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  padding: 4px 0;
+}
+.thinking i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--muted);
+  opacity: 0.35;
+  animation: think 1.2s infinite;
+}
+.thinking i:nth-child(2) { animation-delay: 0.2s; }
+.thinking i:nth-child(3) { animation-delay: 0.4s; }
+@keyframes think {
+  0%, 100% { opacity: 0.25; }
+  50% { opacity: 0.9; }
+}
+.caret {
+  display: inline-block;
+  width: 6px;
+  height: 1em;
+  margin-left: 4px;
+  background: var(--accent);
+  border-radius: 2px;
+  animation: blink 1s steps(1) infinite;
+}
+@keyframes blink {
+  50% { opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .thinking i, .caret { animation: none; opacity: 0.7; }
+}
+
+/* "Jump to latest" — appears when the reader scrolls up (esp. mid-stream). */
+.jump {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(var(--tabbar-h) + 118px);
+  z-index: 20;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 7px 14px;
+  font-size: var(--f-label);
+  font-weight: 600;
+  background: var(--elevated);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--r-full);
+  box-shadow: var(--shadow-modal);
+}
+.jump:hover {
+  filter: none;
+  border-color: var(--accent);
 }
 
 /* --- Rendered assistant markdown (see lib/Markdown.svelte) -----------------------------------
@@ -641,9 +726,6 @@ button:disabled {
 }
 
 .composer {
-  display: flex;
-  gap: 0.5rem;
-  align-items: flex-end;
   /* Pin the input to the bottom of the viewport so it's always reachable while the log
      scrolls. sticky (not fixed) stays in flow — inherits the column width and rides above
      the iOS keyboard instead of being covered by it. */
@@ -654,10 +736,56 @@ button:disabled {
   border-top: 1px solid var(--border);
   padding: 0.5rem 0 calc(0.5rem + env(safe-area-inset-bottom));
 }
-
+.composer .inner {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--s-2);
+  background: var(--field);
+  border: 1px solid var(--border);
+  border-radius: var(--r-2);
+  padding: 6px 6px 6px 14px;
+  transition: border-color var(--t-fast);
+}
+.composer .inner:focus-within {
+  border-color: var(--accent);
+}
 .composer textarea {
-  resize: vertical;
-  min-height: 2.6rem;
+  flex: 1;
+  border: 0;
+  background: transparent;
+  resize: none;
+  padding: 8px 0;
+  min-height: 24px;
+  max-height: 40vh;
+  outline: none;
+}
+.composer .send,
+.composer .stop {
+  min-width: 40px;
+  min-height: 40px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+.composer .stop {
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+}
+.composer .stop:hover {
+  border-color: var(--danger);
+  color: var(--danger);
+  filter: none;
+}
+.composer .hint {
+  margin: 6px 0 0;
+  font-size: var(--f-meta);
+  color: var(--faint);
+}
+.resume-notice {
+  margin: 0.35rem 0 0;
+  font-size: 0.85rem;
 }
 
 /* Chat: a top toolbar of controls, then a full-width log + composer below. */

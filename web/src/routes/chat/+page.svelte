@@ -11,6 +11,11 @@
   import Markdown from "$lib/Markdown.svelte";
   import { remote } from "$lib/remote/connection.svelte";
   import { scheduleUpdates } from "$lib/scheduleUpdates.svelte";
+  import ActionCard from "$lib/components/ActionCard.svelte";
+  import Chip from "$lib/components/Chip.svelte";
+  import EmptyState from "$lib/components/EmptyState.svelte";
+  import Icon from "$lib/components/Icon.svelte";
+  import Spinner from "$lib/components/Spinner.svelte";
 
   // Entry carries a stable id so {#each} can key on it (U16) — re-renders no longer
   // jump when a streaming assistant message mutates in place. `schedule` marks a fired
@@ -96,6 +101,33 @@
 
   // Starter prompts shown when the chat log is empty (U6). Kept short + concrete so
   // a clicked chip drops straight into the composer.
+  // ---- Scroll management (view-layer only; the streaming machine below is untouched). ----
+  // A sentinel at the log's end drives both behaviors: auto-stick while the reader is at
+  // the bottom, and a "Jump to latest" pill the moment they scroll up during a stream.
+  let logEnd = $state<HTMLElement | null>(null);
+  let atBottom = $state(true);
+  $effect(() => {
+    if (!logEnd) return;
+    const io = new IntersectionObserver(([e]) => (atBottom = e.isIntersecting), {
+      rootMargin: "0px 0px 160px 0px", // "near enough" — the sticky composer covers the tail
+    });
+    io.observe(logEnd);
+    return () => io.disconnect();
+  });
+  // The id of the assistant entry currently streaming (the newest one while a stopper exists).
+  const streamingId = $derived(
+    stopper ? [...log].reverse().find((e) => e.role === "assistant" && !e.err)?.id ?? null : null,
+  );
+  const lastLen = $derived(log.length ? log[log.length - 1].content.length : 0);
+  $effect(() => {
+    void lastLen; // track every streamed delta + new entries
+    void log.length;
+    if (atBottom) requestAnimationFrame(() => logEnd?.scrollIntoView({ block: "end" }));
+  });
+  function jumpToLatest() {
+    logEnd?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }
+
   const STARTERS = [
     "What can you do?",
     "Save a note to my knowledge base.",
@@ -838,84 +870,122 @@
 
   <div class="chat-log">
     {#if msgHasMore}
-      <p class="row" style="justify-content:center">
+      <p class="loadmore">
         <button class="link" disabled={busy} onclick={loadOlderMessages}>Load older messages</button>
       </p>
     {/if}
     {#each log as entry (entry.id)}
       {#if entry.role === "assistant" && !entry.err}
-        <!-- Models answer in markdown; render it. User text + errors stay verbatim. -->
-        <Markdown content={entry.content} />
-        {#if entry.sources?.length}
-          <!-- Citation chips (same idiom as Knowledge's .cite): where the answer's knowledge
-               came from, straight from the tool results. Click = open the document there. -->
-          <div class="cites">
-            {#each entry.sources as s (`${s.id}:${s.offset ?? ""}`)}
-              <button class="cite" title="Open in Knowledge at this passage" onclick={() => openSource(s)}>
-                {s.source || s.title || "document"}{#if s.page != null}&nbsp;·&nbsp;{locator(s)}{/if}
-              </button>
-            {/each}
+        <!-- Full-width message row (no bubble): role label + rendered markdown. -->
+        <div class="msg">
+          <div class="who">
+            SmartBrain
+            {#if stopper && entry.id === streamingId}<span class="state">· streaming<span class="caret"></span></span>{/if}
           </div>
-        {/if}
-        <!-- Quiet per-answer actions, tucked under the bubble like .cites. Copy grabs the raw
-             markdown (not rendered HTML); Regenerate only exists on the thread's final answer. -->
-        <div class="msg-actions">
-          <button class="msg-action" title="Copy the message text" onclick={() => copyMessage(entry)}>
-            {copiedId === entry.id ? "Copied ✓" : "Copy"}
-          </button>
-          {#if entry.id === lastAnswerId && !busy}
-            <button class="msg-action" title="Ask again — get a fresh answer to your last message" onclick={regenerate}>
-              Regenerate
-            </button>
+          <div class="body"><Markdown content={entry.content} /></div>
+          {#if entry.sources?.length}
+            <!-- Citation chips: where the answer's knowledge came from, straight from the
+                 tool results. Click = open the document at the passage. -->
+            <div class="cites">
+              {#each entry.sources as s (`${s.id}:${s.offset ?? ""}`)}
+                <Chip icon="file" title="Open in Knowledge at this passage" onclick={() => openSource(s)}>
+                  {s.source || s.title || "document"}{#if s.page != null}&nbsp;·&nbsp;{locator(s)}{/if}
+                </Chip>
+              {/each}
+            </div>
           {/if}
+          <!-- Quiet per-answer actions. Copy grabs the raw markdown (not rendered HTML);
+               Regenerate only exists on the thread's final answer. -->
+          <div class="msg-actions">
+            <button class="msg-action" title="Copy the message text" onclick={() => copyMessage(entry)}>
+              {copiedId === entry.id ? "Copied ✓" : "Copy"}
+            </button>
+            {#if entry.id === lastAnswerId && !busy}
+              <button class="msg-action" title="Ask again — get a fresh answer to your last message" onclick={regenerate}>
+                Regenerate
+              </button>
+            {/if}
+          </div>
+        </div>
+      {:else if entry.err}
+        <div class="msg">
+          <div class="who">SmartBrain <span class="state">· error</span></div>
+          <div class="errline"><Icon name="warn" size={15} /> {entry.content}</div>
         </div>
       {:else}
-        <div class="bubble {entry.err ? 'err' : entry.role}">{entry.content}</div>
+        <div class="msg user">
+          <div class="who">You</div>
+          <div class="body">{entry.content}</div>
+        </div>
       {/if}
     {/each}
-    {#if busy}<div class="bubble assistant muted">…</div>{/if}
-    {#if log.length === 0}
-      <div class="starters">
-        <p class="muted" style="margin:0 0 0.5rem">I can use tools — some actions ask for your approval first.</p>
-        <div class="row" style="flex-wrap:wrap; gap:0.5rem">
-          {#each STARTERS as s (s)}
-            <button type="button" class="secondary starter" disabled={busy} onclick={() => useStarter(s)}>{s}</button>
-          {/each}
-        </div>
+    {#if busy && !stopper}
+      <!-- Non-streamed / pre-first-token wait: an alive "thinking" signal, not a bare ellipsis. -->
+      <div class="msg">
+        <div class="who">SmartBrain <span class="state">· thinking</span></div>
+        <div class="body"><span class="thinking"><i></i><i></i><i></i></span></div>
       </div>
     {/if}
+    {#if log.length === 0}
+      <EmptyState
+        icon="chat"
+        title="Ask your assistant"
+        body="It can search your knowledge, manage tasks, and act on your behalf — anything that changes data waits for your approval."
+      >
+        {#each STARTERS as s (s)}
+          <Chip onclick={() => useStarter(s)}>{s}</Chip>
+        {/each}
+      </EmptyState>
+    {/if}
+    <div class="log-end" bind:this={logEnd} aria-hidden="true"></div>
   </div>
 
+  {#if !atBottom && log.length > 0}
+    <button class="jump" onclick={jumpToLatest}><Icon name="arrow-down" size={14} /> Jump to latest</button>
+  {/if}
+
   {#if pendingTurnId}
-    <div class="approval-banner">
-      <strong>Approval needed:</strong>
-      <span class="muted">review the request in Activity, then resume.</span>
-      <span class="grow"></span>
-      <a class="approval-link" href="/activity">Open Activity</a>
-      <button class="secondary" disabled={busy} onclick={resume}>Resume after approval</button>
-    </div>
-    {#if resumeNotice}<p class="muted" style="margin:0.35rem 0 0; font-size:0.85rem">{resumeNotice}</p>{/if}
+    <ActionCard icon="activity" title="The assistant is waiting for your approval" badge={false}>
+      {#snippet actions()}
+        <button class="secondary" onclick={() => goto("/activity")}>Open Activity</button>
+        <button disabled={busy} onclick={resume}>Resume after approval</button>
+      {/snippet}
+    </ActionCard>
+    {#if resumeNotice}<p class="muted resume-notice">{resumeNotice}</p>{/if}
   {/if}
 
   <div class="composer">
-    <textarea
-      bind:value={input}
-      onkeydown={onKey}
-      placeholder="Message…  (Enter to send, Shift+Enter for a newline)"
-      aria-label="Message"
-    ></textarea>
-    {#if stopper}
-      <!-- A streamed turn is in flight: Send becomes Stop. Aborting keeps + persists the
-           partial answer (see streamTurn); non-streamed turns keep the plain disabled Send. -->
-      <button title="Stop generating" onclick={() => stopper?.abort()}>Stop</button>
-    {:else}
-      <button disabled={busy || !input.trim() || !modelId} title={!modelId ? "Select a model first" : ""} onclick={send}>Send</button>
-    {/if}
+    <div class="inner">
+      <textarea
+        bind:value={input}
+        onkeydown={onKey}
+        placeholder="Message SmartBrain…"
+        aria-label="Message"
+      ></textarea>
+      {#if stopper}
+        <!-- A streamed turn is in flight: Send becomes Stop. Aborting keeps + persists the
+             partial answer (see streamTurn); non-streamed turns keep the plain disabled Send. -->
+        <button class="stop" title="Stop generating" aria-label="Stop generating" onclick={() => stopper?.abort()}>
+          <Icon name="stop" />
+        </button>
+      {:else}
+        <button
+          class="send"
+          disabled={busy || !input.trim() || !modelId}
+          title={!modelId ? "Select a model first" : "Send"}
+          aria-label="Send"
+          onclick={send}
+        >
+          <Icon name="send" />
+        </button>
+      {/if}
+    </div>
+    <p class="hint">⏎ send · ⇧⏎ newline — replies stream in; Stop is always here while they do</p>
   </div>
   {#if modelNotice}<p class="notice">{modelNotice}</p>{/if}
   {#if error}<p class="error">{error}</p>{/if}
 {:else}
-  <p class="muted">Loading&hellip;</p>
+  <Spinner block />
 {/if}
 
 <style>
@@ -931,22 +1001,6 @@
     margin-top: -0.45rem;
     max-width: min(46rem, 85%); /* track the bubble width so chips never outdent it */
   }
-  .cite {
-    padding: 0.05rem 0.45rem;
-    font-size: 0.75rem;
-    font-weight: 500;
-    line-height: 1.5;
-    border-radius: 999px;
-    border: 1px solid var(--border);
-    background: var(--field);
-    color: var(--muted);
-    cursor: pointer;
-  }
-  .cite:hover {
-    color: var(--text);
-    border-color: var(--accent);
-  }
-
   /* Per-answer actions (Copy / Regenerate) — same tucked-under-the-bubble placement as
      .cites. Always visible (hover-only reveals fail on touch) but quiet: bare muted text. */
   .msg-actions {
@@ -968,33 +1022,5 @@
     color: var(--text);
   }
 
-  /* Starter prompt chips — only visible on an empty chat log (U6). Match the existing
-     .secondary button look but a touch smaller so a row of three reads as suggestions. */
-  .starter {
-    padding: 0.4rem 0.7rem;
-    font-size: 0.9rem;
-    font-weight: 500;
-  }
 
-  /* Approval banner (U8): a distinct strip placed JUST above the composer so the label
-     and the Resume action are adjacent — no more chat-bubble notice + far-away footer link. */
-  .approval-banner {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.5rem 0.75rem;
-    margin: 0.75rem 0 0.5rem;
-    padding: 0.6rem 0.9rem;
-    border: 1px solid var(--border);
-    border-left: 3px solid var(--accent);
-    border-radius: 8px;
-    background: color-mix(in srgb, var(--accent) 8%, transparent);
-  }
-  .approval-link {
-    color: var(--accent);
-    text-decoration: none;
-  }
-  .approval-link:hover {
-    text-decoration: underline;
-  }
 </style>
