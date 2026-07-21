@@ -295,6 +295,20 @@ button.secondary:hover {
   filter: none;
 }
 
+/* Quiet tertiary button — visible on hover, never competes with primary/secondary
+   (e.g. "Always allow" beside Approve/Deny on an ActionCard). */
+button.ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--muted);
+  font-weight: 500;
+}
+button.ghost:hover {
+  color: var(--text);
+  background: var(--elevated);
+  filter: none;
+}
+
 /* Ghost icon/danger button (e.g. the ✕ delete in lists). */
 button.del {
   background: transparent;

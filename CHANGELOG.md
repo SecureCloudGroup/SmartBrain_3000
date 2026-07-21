@@ -12,6 +12,9 @@ to know when a release changes behavior.
 ## [Unreleased]
 
 ### Added
+- Approvals got their proper surface: pending actions in Activity render as deliberate
+  "Action Cards" — tool, plain scope lines, a reversibility badge, and a clear
+  Approve / Deny / Always-allow hierarchy (red is reserved for irreversible actions).
 - The app shell is rebuilt: a desktop sidebar rail (icons, labels, badges) with a slim
   top strip carrying an "Encrypted · On-device" trust chip, and on phones a bottom tab
   bar in the thumb zone (Chat · Knowledge · Activity · More) with proper notch/home-bar

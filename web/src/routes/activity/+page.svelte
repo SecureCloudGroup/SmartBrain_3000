@@ -1,5 +1,4 @@
 <script lang="ts">
-  import Icon from "$lib/components/Icon.svelte";
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
   import { account } from "$lib/account.svelte";
@@ -7,6 +6,12 @@
   import { pending as pendingBadge } from "$lib/pending.svelte";
   import { confirmDialog } from "$lib/confirm.svelte";
   import { describeError } from "$lib/errors";
+  import ActionCard from "$lib/components/ActionCard.svelte";
+  import Chip from "$lib/components/Chip.svelte";
+  import EmptyState from "$lib/components/EmptyState.svelte";
+  import Icon from "$lib/components/Icon.svelte";
+  import Spinner from "$lib/components/Spinner.svelte";
+  import type { IconName } from "$lib/icons";
 
   let entries = $state<AuditEntry[]>([]);
   let pending = $state<PendingAction[]>([]);
@@ -85,11 +90,26 @@
     }
   }
 
-  const tierColor: Record<string, string> = {
-    observe: "var(--ok)",
-    reviewed: "var(--accent)",
-    irreversible: "var(--danger)",
+  // Tier -> Chip voice: observe reads calm (auto-run, read-only), reviewed carries the
+  // accent (waits for approval), irreversible is the only red on the page.
+  const tierKind: Record<string, "ok" | "accent" | "danger"> = {
+    observe: "ok",
+    reviewed: "accent",
+    irreversible: "danger",
   };
+
+  // A rough tool->icon mapping so pending cards read at a glance; pencil is the
+  // honest default for "changes something".
+  function iconForTool(tool: string): IconName {
+    const t = tool.toLowerCase();
+    if (t.includes("mail") || t.includes("email")) return "mail";
+    if (t.includes("task")) return "tasks";
+    if (t.includes("schedule")) return "clock";
+    if (t.includes("kb") || t.includes("knowledge") || t.includes("note") || t.includes("doc")) return "book";
+    if (t.includes("web") || t.includes("fetch") || t.includes("search")) return "search";
+    if (t.includes("vault")) return "vault";
+    return "pencil";
+  }
 
   // Show tool args as readable "key: value" lines instead of raw JSON. Accepts an
   // object (pending tiles) or a JSON string (history args_summary, already
@@ -123,58 +143,120 @@
   {#if pending.length > 0}
     <h2>Awaiting your approval</h2>
     {#each pending as p (p.id)}
-      <div class="card" style="padding:0.75rem 1rem; border-color:{tierColor[p.tier] ?? 'var(--border)'}">
-        <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap">
-          <strong>{p.tool}</strong>
-          <span class="badge" style="border-color:{tierColor[p.tier] ?? 'var(--border)'}; color:{tierColor[p.tier] ?? 'var(--muted)'}">{p.tier}</span>
-          <span class="spacer" style="flex:1"></span>
-          <button disabled={busy === p.id} onclick={() => approve(p)}>Approve</button>
+      <ActionCard icon={iconForTool(p.tool)} title={p.tool} tier={p.tier === "irreversible" ? "irreversible" : "reviewed"} scope={fmtArgs(p.args)}>
+        {#snippet actions()}
           {#if p.tier === "reviewed"}
-            <button disabled={busy === p.id} title="Approve and stop asking for this tool" onclick={() => approve(p, true)}>Always allow</button>
+            <button class="ghost" disabled={busy === p.id} title="Approve and stop asking for this tool" onclick={() => approve(p, true)}>Always allow</button>
           {/if}
           <button class="secondary" disabled={busy === p.id} onclick={() => deny(p)}>Deny</button>
-        </div>
-        <p class="muted" style="margin:0.4rem 0 0; font-family:ui-monospace,monospace; font-size:0.8rem; word-break:break-word; white-space:pre-wrap">{fmtArgs(p.args)}</p>
-      </div>
+          <button disabled={busy === p.id} onclick={() => approve(p)}>Approve</button>
+        {/snippet}
+      </ActionCard>
     {/each}
   {/if}
 
   {#if remembered.length > 0}
-    <h2 style="margin-top:1.5rem">Always allowed</h2>
-    <p class="muted" style="margin:0 0 0.5rem">These write tools run without asking. Irreversible actions (send email, delete) always ask.</p>
-    <div class="card" style="padding:0.75rem 1rem">
+    <h2 class="section-gap">Always allowed</h2>
+    <p class="muted hint-gap">These write tools run without asking. Irreversible actions (send email, delete) always ask.</p>
+    <div class="card tight">
       {#each remembered as name (name)}
-        <div style="display:flex; gap:0.5rem; align-items:center; padding:0.2rem 0">
+        <div class="arow">
           <strong>{name}</strong>
-          <span class="spacer" style="flex:1"></span>
+          <span class="grow"></span>
           <button class="secondary" disabled={busy === name} onclick={() => forget(name)}>Stop allowing</button>
         </div>
       {/each}
     </div>
   {/if}
 
-  <h2 style="margin-top:1.5rem">History</h2>
+  <h2 class="section-gap">History</h2>
   {#if entries.length === 0}
-    <p class="muted">No activity yet.</p>
-  {/if}
-
-  {#each entries as e (e.id)}
-    <div class="card" style="padding:0.75rem 1rem">
-      <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap">
-        <strong>{e.tool}</strong>
-        <span class="badge" style="border-color:{tierColor[e.tier] ?? 'var(--border)'}; color:{tierColor[e.tier] ?? 'var(--muted)'}">{e.tier}</span>
-        <span class="muted">{e.decision}</span>
-        <span class="muted" style="font-size:0.75rem">by {e.actor}</span>
-        <span style="color:{e.ok ? 'var(--ok)' : 'var(--danger)'}"><Icon name={e.ok ? "check" : "x"} size={13} /> {e.ok ? "ok" : "failed"}</span>
-        <span class="spacer" style="flex:1"></span>
-        <span class="muted" style="font-size:0.8rem">{e.ts}</span>
-      </div>
-      {#if e.args_summary}<p class="muted" style="margin:0.4rem 0 0; font-size:0.8rem; word-break:break-word; white-space:pre-wrap">{fmtArgs(e.args_summary)}</p>{/if}
-      {#if e.error}<p class="error" style="margin:0.3rem 0 0; font-size:0.8rem">{e.error}</p>{/if}
+    <EmptyState icon="activity" title="Nothing recorded yet" body="Every tool the assistant runs lands here — reads run freely, changes wait for your approval first." />
+  {:else}
+    <div class="card tight">
+      {#each entries as e (e.id)}
+        <div class="hrow">
+          <div class="hmain">
+            <strong>{e.tool}</strong>
+            <Chip kind={tierKind[e.tier] ?? ""}>{e.tier}</Chip>
+            <span class="muted">{e.decision}</span>
+            <span class="meta">by {e.actor}</span>
+            <span class="status" class:ok={e.ok} class:bad={!e.ok}>
+              <Icon name={e.ok ? "check" : "x"} size={13} /> {e.ok ? "ok" : "failed"}
+            </span>
+            <span class="grow"></span>
+            <span class="meta">{e.ts}</span>
+          </div>
+          {#if e.args_summary}<pre class="hargs">{fmtArgs(e.args_summary)}</pre>{/if}
+          {#if e.error}<p class="herr">{e.error}</p>{/if}
+        </div>
+      {/each}
     </div>
-  {/each}
+  {/if}
 
   {#if error}<p class="error">{error}</p>{/if}
 {:else}
-  <p class="muted">Loading&hellip;</p>
+  <Spinner block />
 {/if}
+
+<style>
+  .section-gap {
+    margin-top: var(--s-5);
+  }
+  .hint-gap {
+    margin: 0 0 var(--s-2);
+  }
+  .card.tight {
+    padding: var(--s-2) var(--s-4);
+  }
+  .grow {
+    flex: 1;
+  }
+  .arow {
+    display: flex;
+    align-items: center;
+    gap: var(--s-2);
+    padding: var(--s-2) 0;
+  }
+  .arow + .arow {
+    border-top: 1px solid var(--border);
+  }
+  .hrow {
+    padding: var(--s-3) 0;
+  }
+  .hrow + .hrow {
+    border-top: 1px solid var(--border);
+  }
+  .hmain {
+    display: flex;
+    align-items: center;
+    gap: var(--s-2);
+    flex-wrap: wrap;
+    font-size: var(--f-label);
+  }
+  .status {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-weight: 500;
+  }
+  .status.ok {
+    color: var(--ok);
+  }
+  .status.bad {
+    color: var(--danger);
+  }
+  .hargs {
+    margin: var(--s-1) 0 0;
+    font-family: var(--font-mono);
+    font-size: var(--f-meta);
+    color: var(--muted);
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .herr {
+    margin: var(--s-1) 0 0;
+    font-size: var(--f-meta);
+    color: var(--danger);
+  }
+</style>
