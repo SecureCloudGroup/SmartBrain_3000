@@ -1,1 +1,0 @@
-import{J as e}from"./CXkL0Yf_.js";var t=e({current:null});function n(e){return new Promise(n=>{t.current={title:e.title??`Please confirm`,body:e.body,confirmLabel:e.confirmLabel??`Confirm`,danger:e.danger??!0,resolve:n}})}function r(e){let n=t.current;t.current=null,n&&n.resolve(e)}export{t as n,r,n as t};

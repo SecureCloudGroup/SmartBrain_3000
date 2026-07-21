@@ -48,6 +48,7 @@
     padding: 7px 14px;
     text-decoration: none;
     cursor: pointer;
+    transition: background var(--t-fast), color var(--t-fast);
   }
   .tabs button:hover,
   .tabs a:hover { color: var(--text); filter: none; background: var(--elevated); text-decoration: none; }

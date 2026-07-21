@@ -125,7 +125,9 @@
     if (atBottom) requestAnimationFrame(() => logEnd?.scrollIntoView({ block: "end" }));
   });
   function jumpToLatest() {
-    logEnd?.scrollIntoView({ behavior: "smooth", block: "end" });
+    // CSS can't reach an explicit behavior:"smooth", so honor reduced motion here.
+    const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    logEnd?.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "end" });
   }
 
   const STARTERS = [

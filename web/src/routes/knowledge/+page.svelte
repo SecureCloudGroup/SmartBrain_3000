@@ -376,7 +376,9 @@
   function startAdding(v: Vault) {
     addTarget = v.id;
     picked = [];
-    docsCard?.scrollIntoView({ behavior: "smooth", block: "start" });
+    // CSS can't reach an explicit behavior:"smooth", so honor reduced motion here.
+    const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    docsCard?.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
   }
 
   // Which vault's member list is expanded, and its documents (with each membership's origin, so

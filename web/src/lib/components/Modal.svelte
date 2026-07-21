@@ -65,6 +65,7 @@
     justify-content: center;
     z-index: var(--z-modal);
     padding: var(--s-4);
+    animation: sb-fade-in var(--t-fast); /* entry only — dismissal is instant */
   }
   .modal {
     background: var(--elevated);
@@ -76,6 +77,13 @@
     width: 100%;
     max-height: 85vh;
     overflow-y: auto;
+    animation: sb-rise-in var(--t-slow);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .modal-overlay,
+    .modal {
+      animation: none;
+    }
   }
   .size-sm { max-width: 26rem; }
   .size-md { max-width: 40rem; }

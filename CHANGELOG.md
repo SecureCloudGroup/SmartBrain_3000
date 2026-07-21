@@ -12,6 +12,10 @@ to know when a release changes behavior.
 ## [Unreleased]
 
 ### Added
+- A quiet motion pass: dialogs, the mobile More sheet, toasts, and the "Jump to latest"
+  pill now ease in (120–200ms, transform/opacity only) while dismissal stays instant;
+  tab hovers stopped snapping. Every animation — including the two smooth-scroll
+  jumps — honors `prefers-reduced-motion`.
 - One brand mark everywhere: a new generator (`tools/brand/make_icons.py`) derives every
   raster asset from the one mascot source — PWA icons with a **properly maskable** variant
   (no more white bleed or clipped wordmark on Android), an apple-touch icon, a real

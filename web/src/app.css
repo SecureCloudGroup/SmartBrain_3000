@@ -47,7 +47,9 @@
   --z-modal: 1000;
   --z-toast: 1100;
 
-  /* motion: asymmetric — instant in, eased out; transform/opacity only */
+  /* motion: asymmetric — instant in, eased out; transform/opacity only.
+     Entry keyframes (sb-*) live at the end of this file; every use carries a
+     prefers-reduced-motion guard next to it. */
   --t-fast: 120ms cubic-bezier(0.2, 0, 0, 1);
   --t-slow: 200ms cubic-bezier(0.2, 0, 0, 1);
 
@@ -964,4 +966,22 @@ button:disabled {
   .card {
     padding: 1rem;
   }
+}
+
+/* ---- Entry motion (Stage 12) ------------------------------------------------
+   Overlays and transient chrome ease IN (they're new information); dismissal is
+   instant (leaving should never make the user wait). Transform/opacity only. */
+@keyframes sb-fade-in {
+  from { opacity: 0; }
+}
+@keyframes sb-rise-in {
+  from { opacity: 0; transform: translateY(6px); }
+}
+@keyframes sb-sheet-in {
+  from { opacity: 0; transform: translateY(12px); }
+}
+.more-sheet { animation: sb-sheet-in var(--t-slow); }
+.jump { animation: sb-fade-in var(--t-fast); } /* keeps its own translateX centering */
+@media (prefers-reduced-motion: reduce) {
+  .more-sheet, .jump { animation: none; }
 }

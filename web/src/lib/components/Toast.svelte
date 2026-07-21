@@ -1,6 +1,7 @@
 <script lang="ts">
   // Renders the toast queue (lib/toast.svelte.ts). One mount in the root layout.
-  import { fly } from "svelte/transition";
+  // Entry motion is CSS (not a Svelte transition) so prefers-reduced-motion can
+  // switch it off; dismissal is instant on purpose.
   import { toastState, dismissToast } from "$lib/toast.svelte";
   import Icon from "./Icon.svelte";
 </script>
@@ -8,7 +9,7 @@
 {#if toastState.items.length > 0}
   <div class="toasts" aria-live="polite">
     {#each toastState.items as t (t.id)}
-      <button class="toast {t.kind}" transition:fly={{ y: 8, duration: 150 }} onclick={() => dismissToast(t.id)}>
+      <button class="toast {t.kind}" onclick={() => dismissToast(t.id)}>
         <Icon name={t.kind === "ok" ? "check" : "warn"} size={14} />
         {t.msg}
       </button>
@@ -43,6 +44,12 @@
     font-weight: 500;
     min-height: 0;
     cursor: pointer; /* click to dismiss */
+    animation: sb-rise-in var(--t-slow);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .toast {
+      animation: none;
+    }
   }
   .toast :global(svg) { color: var(--ok); }
   .toast.error { border-left-color: var(--danger); }
