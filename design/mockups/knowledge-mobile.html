@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en" data-theme="dark" data-accent="teal">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>SmartBrain mockup — Knowledge (mobile PWA)</title>
+<link rel="stylesheet" href="tokens.css" />
+<link rel="stylesheet" href="mock.css" />
+</head>
+<body>
+
+<div class="pagehead">
+  <h2>Knowledge — mobile PWA</h2>
+  <p class="muted">Search, read, and vault status on the phone; ingest stays a Desktop action
+  (matching today's remote gating). <a href="index.html">← back to index</a></p>
+</div>
+
+<div class="phone">
+  <div class="dynisland"></div>
+  <div class="statusbar"><span>9:41</span><span>􀙇 􀙈 􀛨</span></div>
+  <div class="topstrip">
+    <span class="title">Knowledge</span>
+    <span class="spacer"></span>
+    <span class="chip ok trust"><svg class="ic"><use href="#i-shield"/></svg> On-device</span>
+  </div>
+  <div class="pcontent">
+    <div class="kwrap">
+      <div class="searchbar">
+        <svg class="ic"><use href="#i-search"/></svg>
+        <input value="parking" />
+      </div>
+      <div class="seg" style="margin-bottom:var(--s-3)">
+        <button class="on">Best</button><button>Keyword</button><button>Meaning</button>
+      </div>
+
+      <div class="docrow">
+        <div class="fic"><svg class="ic"><use href="#i-file"/></svg></div>
+        <div class="dmain">
+          <div class="dtitle">Lease.pdf</div>
+          <div class="dsnip">…one assigned parking space per unit…</div>
+        </div>
+        <div class="dmeta"><span class="chip accent">p.14</span></div>
+      </div>
+      <div class="docrow">
+        <div class="fic"><svg class="ic"><use href="#i-file"/></svg></div>
+        <div class="dmain">
+          <div class="dtitle">Meeting notes — landlord call</div>
+          <div class="dsnip">…second spot frees up in September…</div>
+        </div>
+        <div class="dmeta"><span class="chip accent">note</span></div>
+      </div>
+      <div class="docrow" style="border-bottom:0">
+        <div class="fic"><svg class="ic"><use href="#i-file"/></svg></div>
+        <div class="dmain">
+          <div class="dtitle">04-vaults.md</div>
+          <div class="dsnip">Share knowledge with Vaults…</div>
+        </div>
+        <div class="dmeta"><span class="chip"><svg class="ic" style="width:11px;height:11px"><use href="#i-vault"/></svg></span></div>
+      </div>
+
+      <h3 style="margin-top:var(--s-5); font-size:var(--f-label); color:var(--muted)">Vaults</h3>
+      <div class="vaultcard" style="margin-top:var(--s-2)">
+        <div class="vhead"><svg class="ic"><use href="#i-vault"/></svg> SmartBrain Docs</div>
+        <div class="meta">9 documents · v4</div>
+        <div class="fp">SB-3WZM-7CEI-GPJ7-3MLC</div>
+        <div class="vfoot"><span class="chip ok"><svg class="ic"><use href="#i-check"/></svg> Subscribed</span></div>
+      </div>
+      <p class="meta" style="margin-top:var(--s-4); text-align:center">Adding documents happens on your Desktop.</p>
+    </div>
+  </div>
+  <div class="tabbar">
+    <a class="tab" href="#"><svg class="ic"><use href="#i-chat"/></svg> Chat</a>
+    <a class="tab active" href="#"><svg class="ic"><use href="#i-book"/></svg> Knowledge</a>
+    <a class="tab" href="#"><svg class="ic"><use href="#i-pulse"/></svg> Activity</a>
+    <a class="tab" href="#"><svg class="ic"><use href="#i-moreh"/></svg> More</a>
+  </div>
+  <div class="homebar"></div>
+</div>
+
+<div class="switcher">
+  <span class="lbl">Theme</span>
+  <span class="grp"><button data-k="theme" data-v="dark">Dark</button><button data-k="theme" data-v="light">Light</button></span>
+  <span class="lbl">Accent</span>
+  <span class="grp"><button data-k="accent" data-v="teal">A · Teal</button><button data-k="accent" data-v="indigo">B · Indigo</button></span>
+  <a href="index.html">index</a>
+</div>
+
+<script src="mock.js"></script>
+</body>
+</html>

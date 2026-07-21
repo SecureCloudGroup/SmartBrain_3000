@@ -1,0 +1,213 @@
+/* SmartBrain design tokens — THE proposal (Gate 1).
+   On approval this file becomes web/src/app.css's token layer verbatim (Stage 2).
+   Direction: calm precision-minimal — "privacy as aesthetic".
+   Axes: [data-theme="dark|light"] × [data-accent="teal|indigo"].               */
+
+@font-face {
+  font-family: "Inter var";
+  src: url("assets/fonts/InterVariable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  /* ---- spacing (4/8pt) ---- */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 24px;
+  --s-6: 32px;
+  --s-7: 48px;
+  --s-8: 64px;
+
+  /* ---- type scale (~1.25) ---- */
+  --f-meta: 12px;   /* timestamps, badges, fine print   */
+  --f-label: 14px;  /* UI labels, buttons, nav          */
+  --f-body: 16px;   /* body, chat                       */
+  --f-section: 20px;/* card / section titles            */
+  --f-h2: 25px;     /* page sections                    */
+  --f-h1: 31px;     /* page titles                      */
+  --lh-read: 1.6;   /* long-form reading (chat answers) */
+  --lh-ui: 1.5;     /* dense UI                         */
+
+  /* ---- radii / borders ---- */
+  --r-1: 6px;   /* inputs, buttons, chips */
+  --r-2: 10px;  /* cards, message tints   */
+  --r-3: 14px;  /* modals, hero panels    */
+  --r-full: 999px;
+  --hairline: 1px solid var(--border);
+
+  /* ---- fonts ---- */
+  --font-ui: "Inter var", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* ---- z scale ---- */
+  --z-nav: 30;
+  --z-sheet: 800;
+  --z-modal: 1000;
+  --z-toast: 1100;
+
+  /* ---- motion (asymmetric: instant in, eased out) ---- */
+  --t-fast: 120ms cubic-bezier(0.2, 0, 0, 1);
+  --t-slow: 200ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+/* ================= DARK (default) ================= */
+:root,
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #121212;        /* base surface — never #000            */
+  --panel: #1a1a1d;     /* surface-1: cards, sidebar            */
+  --elevated: #202024;  /* surface-2: modals, menus, hovers     */
+  --field: #161619;     /* inputs sit slightly below the panel  */
+  --border: #2c2c31;    /* hairlines carry the depth            */
+  --border-strong: #3a3a41;
+  --text: #e6e6e6;      /* never #fff                           */
+  --muted: #9c9ca4;
+  --faint: #6b6b73;     /* timestamps, disabled                 */
+  --danger: #e5695e;
+  --ok: #4fb995;
+  --warn: #d9a04a;
+  --shadow-modal: 0 12px 40px rgba(0, 0, 0, 0.45); /* modals only — depth is tonal elsewhere */
+}
+
+/* ================= LIGHT ================= */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #fafaf8;        /* warm off-white, not clinical #fff    */
+  --panel: #ffffff;
+  --elevated: #ffffff;
+  --field: #f4f4f1;
+  --border: #e3e3df;
+  --border-strong: #cfcfc9;
+  --text: #1a1a1a;
+  --muted: #62626a;
+  --faint: #94949b;
+  --danger: #c14f45;
+  --ok: #1e7d5f;
+  --warn: #9a6c1f;
+  --shadow-modal: 0 12px 40px rgba(20, 20, 20, 0.14);
+}
+
+/* ================= ACCENT A — muted teal ("calm/secure") ================= */
+:root,
+:root[data-accent="teal"] {
+  --accent: #63b3a8;          /* dark-theme accent: desaturated, no vibration */
+  --accent-strong: #2a7f74;   /* fills; white text ≥ 4.5:1                    */
+  --accent-tint: rgba(99, 179, 168, 0.10);
+  --focus: #63b3a8;
+}
+:root[data-theme="light"][data-accent="teal"],
+:root[data-theme="light"]:not([data-accent="indigo"]) {
+  --accent: #0e7269;
+  --accent-strong: #0b5d56;
+  --accent-tint: rgba(14, 114, 105, 0.07);
+  --focus: #0e7269;
+}
+
+/* ================= ACCENT B — desaturated slate-indigo (continuity) ================= */
+:root[data-accent="indigo"] {
+  --accent: #939ce8;
+  --accent-strong: #4a54c4;
+  --accent-tint: rgba(147, 156, 232, 0.10);
+  --focus: #939ce8;
+}
+:root[data-theme="light"][data-accent="indigo"] {
+  --accent: #4a54c4;
+  --accent-strong: #3e47ad;
+  --accent-tint: rgba(74, 84, 196, 0.07);
+  --focus: #4a54c4;
+}
+
+/* ================= base element voice ================= */
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: var(--f-body) / var(--lh-ui) var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: "tnum"; /* tabular numerals: fingerprints, usage tables */
+}
+
+h1 { font-size: var(--f-h1); font-weight: 650; letter-spacing: -0.02em; margin: 0 0 var(--s-3); }
+h2 { font-size: var(--f-h2); font-weight: 600; letter-spacing: -0.01em; margin: 0 0 var(--s-3); }
+h3 { font-size: var(--f-section); font-weight: 600; margin: 0 0 var(--s-2); }
+a  { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+small, .meta { font-size: var(--f-meta); color: var(--faint); }
+.muted { color: var(--muted); }
+.mono { font-family: var(--font-mono); font-size: 0.86em; }
+
+/* every interactive element gets the same visible focus */
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: var(--r-1);
+}
+
+/* ---- buttons ---- */
+button, .btn {
+  font: 600 var(--f-label) / 1 var(--font-ui);
+  padding: 10px 16px;
+  border-radius: var(--r-1);
+  border: 1px solid transparent;
+  background: var(--accent-strong);
+  color: #fff;
+  cursor: pointer;
+  transition: background var(--t-fast), border-color var(--t-fast), transform var(--t-fast);
+  min-height: 40px;
+}
+button:hover { filter: brightness(1.08); }
+button:active { transform: translateY(0.5px); }
+button.secondary {
+  background: transparent;
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+button.secondary:hover { background: var(--accent-tint); border-color: var(--accent); filter: none; }
+button.ghost {
+  background: transparent; border: 0; color: var(--muted); padding: 8px; min-height: 36px;
+}
+button.ghost:hover { color: var(--text); background: var(--elevated); }
+button.danger { background: transparent; border-color: var(--danger); color: var(--danger); }
+button:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* ---- fields ---- */
+input, textarea, select {
+  font: var(--f-body) / var(--lh-ui) var(--font-ui);
+  color: var(--text);
+  background: var(--field);
+  border: var(--hairline);
+  border-radius: var(--r-1);
+  padding: 10px 12px;
+  transition: border-color var(--t-fast);
+}
+input:hover, textarea:hover, select:hover { border-color: var(--border-strong); }
+input:focus, textarea:focus, select:focus { border-color: var(--accent); outline: none; }
+label { display: block; font-size: var(--f-label); color: var(--muted); margin: 0 0 var(--s-1); }
+
+/* ---- surfaces ---- */
+.card {
+  background: var(--panel);
+  border: var(--hairline);
+  border-radius: var(--r-2);
+  padding: var(--s-5);
+}
+
+/* ---- chips (citation / status / identity) ---- */
+.chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: var(--f-meta); font-weight: 500;
+  padding: 3px 10px; border-radius: var(--r-full);
+  border: var(--hairline); color: var(--muted); background: var(--panel);
+  transition: border-color var(--t-fast), color var(--t-fast);
+}
+.chip:hover { border-color: var(--accent); color: var(--text); cursor: pointer; }
+.chip.accent { color: var(--accent); border-color: transparent; background: var(--accent-tint); }
+.chip.ok { color: var(--ok); border-color: transparent; background: color-mix(in srgb, var(--ok) 10%, transparent); }
+.chip.warn { color: var(--warn); border-color: transparent; background: color-mix(in srgb, var(--warn) 10%, transparent); }
+.chip .ic { width: 13px; height: 13px; }

@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en" data-theme="dark" data-accent="teal">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>SmartBrain mockup — Foundations</title>
+<link rel="stylesheet" href="tokens.css" />
+<link rel="stylesheet" href="mock.css" />
+<style>
+  .spin { width: 18px; height: 18px; border: 2px solid var(--border-strong); border-top-color: var(--accent);
+          border-radius: 50%; animation: spin 0.8s linear infinite; display: inline-block; vertical-align: -4px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .toast { display: inline-flex; align-items: center; gap: 10px; background: var(--elevated);
+           border: var(--hairline); border-left: 3px solid var(--ok); border-radius: var(--r-2);
+           padding: 12px 16px; box-shadow: var(--shadow-modal); font-size: var(--f-label); }
+  .icongrid { display: grid; grid-template-columns: repeat(auto-fill, 72px); gap: 8px; }
+  .icongrid div { display: flex; flex-direction: column; align-items: center; gap: 6px;
+                  padding: 10px 4px; border: var(--hairline); border-radius: var(--r-1);
+                  font-size: 10px; color: var(--faint); }
+  .icongrid svg { width: 19px; height: 19px; color: var(--text); }
+</style>
+</head>
+<body>
+
+<div class="pagehead">
+  <h2>Foundations</h2>
+  <p class="muted">The token system every screen is built from. Flip theme and accent below —
+  everything on this page responds. <a href="index.html">← back to index</a></p>
+</div>
+
+<div class="pagebody" style="display:flex; flex-direction:column; gap:var(--s-5)">
+
+  <div class="fgrid">
+    <div class="card">
+      <h3>Surfaces &amp; text</h3>
+      <div class="swatch"><i style="background:var(--bg)"></i> bg — base surface</div>
+      <div class="swatch"><i style="background:var(--panel)"></i> panel — cards, sidebar</div>
+      <div class="swatch"><i style="background:var(--elevated)"></i> elevated — modals, menus</div>
+      <div class="swatch"><i style="background:var(--field)"></i> field — inputs</div>
+      <div class="swatch"><i style="background:var(--border)"></i> border — hairlines carry depth</div>
+      <div class="swatch"><i style="background:var(--text)"></i> text · <span class="muted">muted</span> · <span class="meta">faint</span></div>
+    </div>
+    <div class="card">
+      <h3>Accent &amp; semantics</h3>
+      <div class="swatch"><i style="background:var(--accent)"></i> accent — links, highlights, focus</div>
+      <div class="swatch"><i style="background:var(--accent-strong)"></i> accent-strong — primary buttons</div>
+      <div class="swatch"><i style="background:var(--accent-tint)"></i> accent-tint — selection, user turns</div>
+      <div class="swatch"><i style="background:var(--ok)"></i> ok — trust chip, success</div>
+      <div class="swatch"><i style="background:var(--warn)"></i> warn — reversibility badges</div>
+      <div class="swatch"><i style="background:var(--danger)"></i> danger — destructive only</div>
+      <p class="meta" style="margin:8px 0 0">One accent. Semantic colors are reserved for the approval
+      and status surfaces — they never decorate.</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Type scale — Inter Variable, ~1.25 ratio, six sizes</h3>
+    <div class="typerow"><span class="meta">31 / h1 · 650</span><span style="font-size:var(--f-h1); font-weight:650; letter-spacing:-0.02em">Your knowledge, private by design</span></div>
+    <div class="typerow"><span class="meta">25 / h2 · 600</span><span style="font-size:var(--f-h2); font-weight:600">Share knowledge with Vaults</span></div>
+    <div class="typerow"><span class="meta">20 / section</span><span style="font-size:var(--f-section); font-weight:600">Model routing</span></div>
+    <div class="typerow"><span class="meta">16 / body · 1.6</span><span>Chat reads at sixteen over one-point-six — a 65–72 character measure.</span></div>
+    <div class="typerow"><span class="meta">14 / label</span><span style="font-size:var(--f-label)">Buttons, nav, list titles, form labels</span></div>
+    <div class="typerow" style="border-bottom:0"><span class="meta">12 / meta</span><span class="meta">Timestamps · fingerprints · SB-3WZM-7CEI-GPJ7-3MLC (tabular numerals)</span></div>
+  </div>
+
+  <div class="fgrid">
+    <div class="card">
+      <h3>Spacing — 4/8pt</h3>
+      <div style="display:flex; flex-direction:column; gap:8px">
+        <div class="spacebar" style="width:4px"></div><div class="spacebar" style="width:8px"></div>
+        <div class="spacebar" style="width:12px"></div><div class="spacebar" style="width:16px"></div>
+        <div class="spacebar" style="width:24px"></div><div class="spacebar" style="width:32px"></div>
+        <div class="spacebar" style="width:48px"></div><div class="spacebar" style="width:64px"></div>
+      </div>
+      <p class="meta" style="margin-top:10px">4 · 8 · 12 · 16 · 24 · 32 · 48 · 64 — internal padding ≤ external margin</p>
+    </div>
+    <div class="card">
+      <h3>Radii &amp; depth</h3>
+      <div style="display:flex; gap:12px; align-items:flex-end">
+        <div style="width:64px;height:44px;border:var(--hairline);border-radius:var(--r-1);display:grid;place-items:center" class="meta">6</div>
+        <div style="width:64px;height:52px;border:var(--hairline);border-radius:var(--r-2);display:grid;place-items:center" class="meta">10</div>
+        <div style="width:64px;height:60px;border:var(--hairline);border-radius:var(--r-3);display:grid;place-items:center;box-shadow:var(--shadow-modal)" class="meta">14</div>
+        <div style="width:64px;height:28px;border:var(--hairline);border-radius:var(--r-full);display:grid;place-items:center" class="meta">full</div>
+      </div>
+      <p class="meta" style="margin-top:10px">Depth is tonal (bg → panel → elevated) + hairlines. The one true shadow belongs to modals.</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Icons — one stroke family, never emoji</h3>
+    <div class="icongrid">
+      <div><svg class="ic"><use href="#i-chat"/></svg>chat</div>
+      <div><svg class="ic"><use href="#i-book"/></svg>knowledge</div>
+      <div><svg class="ic"><use href="#i-tasks"/></svg>planner</div>
+      <div><svg class="ic"><use href="#i-clock"/></svg>schedules</div>
+      <div><svg class="ic"><use href="#i-mail"/></svg>email</div>
+      <div><svg class="ic"><use href="#i-pulse"/></svg>activity</div>
+      <div><svg class="ic"><use href="#i-chart"/></svg>usage</div>
+      <div><svg class="ic"><use href="#i-sliders"/></svg>settings</div>
+      <div><svg class="ic"><use href="#i-shield"/></svg>trust</div>
+      <div><svg class="ic"><use href="#i-lock"/></svg>lock</div>
+      <div><svg class="ic"><use href="#i-vault"/></svg>vault</div>
+      <div><svg class="ic"><use href="#i-file"/></svg>document</div>
+      <div><svg class="ic"><use href="#i-search"/></svg>search</div>
+      <div><svg class="ic"><use href="#i-send"/></svg>send</div>
+      <div><svg class="ic"><use href="#i-stop"/></svg>stop</div>
+      <div><svg class="ic"><use href="#i-copy"/></svg>copy</div>
+      <div><svg class="ic"><use href="#i-refresh"/></svg>regenerate</div>
+      <div><svg class="ic"><use href="#i-upload"/></svg>upload</div>
+      <div><svg class="ic"><use href="#i-warn"/></svg>warning</div>
+      <div><svg class="ic"><use href="#i-sun"/></svg>light</div>
+      <div><svg class="ic"><use href="#i-moon"/></svg>dark</div>
+    </div>
+    <p class="meta" style="margin-top:10px">Mock icons are hand-drawn primitives; the app vendors the Lucide set (ISC) at implementation.</p>
+  </div>
+
+  <div class="card">
+    <h3>Controls</h3>
+    <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:center">
+      <button>Primary action</button>
+      <button class="secondary">Secondary</button>
+      <button class="ghost">Ghost</button>
+      <button class="danger">Delete</button>
+      <button disabled>Disabled</button>
+      <span class="spin"></span>
+      <span class="meta">spinner replaces eleven bare “Loading…”</span>
+    </div>
+    <div style="display:flex; gap:16px; margin-top:var(--s-4); flex-wrap:wrap; align-items:flex-end">
+      <span style="flex:1; min-width:220px"><label>Passphrase</label><input type="password" value="••••••••••" style="width:100%"></span>
+      <span class="seg"><button class="on">Best</button><button>Keyword</button><button>Meaning</button></span>
+    </div>
+    <div style="display:flex; gap:8px; margin-top:var(--s-4); flex-wrap:wrap">
+      <span class="chip accent"><svg class="ic"><use href="#i-file"/></svg> Lease.pdf · p.14</span>
+      <span class="chip ok"><svg class="ic"><use href="#i-check"/></svg> Subscribed</span>
+      <span class="chip warn"><svg class="ic"><use href="#i-warn"/></svg> Irreversible</span>
+      <span class="chip"><svg class="ic" style="width:11px;height:11px"><use href="#i-vault"/></svg> SmartBrain Docs</span>
+      <span class="chip ok trust"><svg class="ic"><use href="#i-shield"/></svg> Encrypted · On-device</span>
+    </div>
+    <div style="margin-top:var(--s-4)">
+      <span class="toast"><svg class="ic" style="color:var(--ok)"><use href="#i-check"/></svg> Context lengths saved.</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>ActionCard — reviewed (reversible) variant</h3>
+    <p class="meta" style="margin:0 0 12px">Accent-coded “deliberate pause”; the irreversible variant
+    (danger-coded, default-deny) is in the chat mock.</p>
+    <div class="actioncard">
+      <div class="head"><svg class="ic"><use href="#i-tasks"/></svg> SmartBrain wants to add a task</div>
+      <div class="scope">
+        <span class="muted">Task</span><b>Call the dentist about a cleaning</b>
+        <span class="muted">Due</span><b>Tomorrow, 9:00</b>
+      </div>
+      <div class="foot">
+        <span class="chip"><svg class="ic"><use href="#i-refresh"/></svg> Reversible</span>
+        <span class="spacer"></span>
+        <button class="ghost">Always allow</button>
+        <button class="secondary">Deny</button>
+        <button>Approve</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="switcher">
+  <span class="lbl">Theme</span>
+  <span class="grp"><button data-k="theme" data-v="dark">Dark</button><button data-k="theme" data-v="light">Light</button></span>
+  <span class="lbl">Accent</span>
+  <span class="grp"><button data-k="accent" data-v="teal">A · Teal</button><button data-k="accent" data-v="indigo">B · Indigo</button></span>
+  <a href="index.html">index</a>
+</div>
+
+<script src="mock.js"></script>
+</body>
+</html>
