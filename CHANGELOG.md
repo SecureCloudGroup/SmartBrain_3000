@@ -11,6 +11,15 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Fixed
+- Tool-using turns stopped taking ten minutes: the agent now stops asking for more
+  tools the moment its gathered results reach the model's context budget and writes
+  the answer (every extra round-trip past that point re-fed the model a prompt it
+  couldn't hold — pure prefill waste), a "Writing the answer…" line shows during that
+  final long call, and the background summary-tree builder now waits for five quiet
+  minutes before touching the local model — its 30-second chunk calls were making
+  chats queue behind them on oMLX's single request slot.
+
 ### Added
 - Book-scale documents, summarized instantly: every document now gets a background
   **summary tree** (chunk summaries reduced into one whole-document summary), built a

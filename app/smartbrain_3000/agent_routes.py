@@ -61,6 +61,10 @@ def _context(request: Request) -> tuple[tools.ToolContext, object]:
     if audit is None:
         raise HTTPException(status_code=423, detail="locked: unlock first")
     state = request.app.state
+    # The user is HERE: background model work (the summary-tree builder) must stand
+    # aside — oMLX serves one request at a time, and a 30s map call in flight when a
+    # chat arrives reads as "SmartBrain hung" (seen live).
+    state.last_interactive = time.monotonic()
     secret_store = getattr(state, "secret_store", None)
     master_key = getattr(state, "master_key", None)
     return tools.ToolContext(

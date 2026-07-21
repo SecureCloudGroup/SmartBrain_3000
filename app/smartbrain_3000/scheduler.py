@@ -500,11 +500,18 @@ def _auto_reindex(cursor, key: bytes) -> None:
 # context cloud model (the "summarize" routing slot) does several. The budget is
 # checked BEFORE each model call — an in-flight call is never interrupted.
 _AUTO_SUMMARIZE_SECONDS = 25.0
+# Build trees only when the user is IDLE: a map call holds the single-slot local model
+# for 30s+, and a chat arriving behind one reads as a hang (seen live). Five quiet
+# minutes means the machine is genuinely free; the tree resumes where it left off.
+_SUMMARIZE_IDLE_SECONDS = 300.0
 _SUMMARIZE_SCAN_DOCS = 200  # newest documents considered per pass (P10 #2)
 
 
-def _auto_summarize(cursor, key: bytes) -> None:
+def _auto_summarize(cursor, key: bytes, idle: bool = True) -> None:
     """Advance the background summary tree within a per-tick budget. Never raises.
+
+    ``idle`` is the caller's judgment that no interactive request happened recently —
+    when False the pass stands aside entirely (the foreground owns the model).
 
     Mirrors ``_auto_reindex``'s discipline: skip when the breaker is open or a
     foreground chat holds the single-threaded local model; record breaker outcomes.
@@ -512,7 +519,7 @@ def _auto_summarize(cursor, key: bytes) -> None:
     does chunk maps / the final reduce via summarize.py's calls — resumable at any
     point because every completed chunk is a row.
     """
-    if _breaker_open():
+    if _breaker_open() or not idle:
         return
     try:
         if not gateway.local_available():
@@ -653,7 +660,8 @@ def tick(app) -> int:
     try:
         eager_reindex(cursor, key)  # one-shot post-upgrade catch-up (empty embeddings + docs)
         _auto_reindex(cursor, key)  # keep semantic search current without a manual Reindex
-        _auto_summarize(cursor, key)  # B1: build the background summary tree, one chunk at a time
+        idle = time.monotonic() - getattr(app.state, "last_interactive", 0.0) > _SUMMARIZE_IDLE_SECONDS
+        _auto_summarize(cursor, key, idle=idle)  # B1: tree-building waits for a quiet machine
         _auto_update_vaults(app)    # Stage E: apply due subscription updates (model-independent)
         if _breaker_open():  # B11: gateway is known-bad — don't pile turns onto a dead model
             return 0

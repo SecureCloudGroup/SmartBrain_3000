@@ -324,7 +324,19 @@ def run_turn(ctx, audit, approvals, *, messages, model, conversation_id, turn_id
     assert messages and model, "messages + model required"
     ctx = dataclasses.replace(ctx, model=model)  # a handler (summarize) calls the gateway with THIS model
     calls = start_calls
+    # Turn-level CONTEXT budget: the step budget alone let full-window tool results
+    # stack past the model's context — every later round-trip re-prefilled a huge,
+    # partly-truncated prompt (a live turn ran 10+ minutes this way). Once gathered
+    # results reach the finalize budget, asking for MORE tools is pure waste: the
+    # model can't fit what it has. Stop and answer.
+    context_budget = int(result_cap * _FINALIZE_BUDGET_FACTOR)
+    gathered = start_calls and sum(  # a resumed turn re-counts its existing tool results
+        len(m.get("content") or "") for m in messages if m.get("role") == "tool") or 0
     for step in range(start_step, _MAX_STEPS):  # fixed upper bound (P10 #2)
+        if gathered >= context_budget:
+            return _finalize_exhausted(messages, model, timeout=timeout, usage_sink=usage_sink,
+                                       reason="context budget reached", steps=step,
+                                       result_cap=result_cap, on_event=on_event)
         try:
             data = gateway.chat_with_tools(messages, model, tools.openai_tools_spec(), timeout=timeout)
             _emit_usage(usage_sink, model, data)
@@ -358,7 +370,7 @@ def run_turn(ctx, audit, approvals, *, messages, model, conversation_id, turn_id
         if calls + len(tool_calls) > _MAX_TOOL_CALLS:
             return _finalize_exhausted(messages, model, timeout=timeout, usage_sink=usage_sink,
                                        reason="tool-call budget exceeded", steps=step + 1,
-                                       result_cap=result_cap)
+                                       result_cap=result_cap, on_event=on_event)
         calls += len(tool_calls)
         messages.append({"role": "assistant", "content": content, "tool_calls": tool_calls})
         parked, inline = _classify(tool_calls, auto_approve)
@@ -370,12 +382,13 @@ def run_turn(ctx, audit, approvals, *, messages, model, conversation_id, turn_id
             _notify(on_event, {"kind": "tool", "state": "done", "tool": tname,
                                "ok": not result_msg["content"].startswith('{"error"')})
             messages.append(result_msg)
+            gathered += len(result_msg["content"])
         if parked:
             turn_state = {"model": model, "messages": messages, "step": step, "calls": calls, "conversation_id": conversation_id}
             return {"status": "awaiting_approval", "turn_id": turn_id, "pending": _park(approvals, audit, parked, conversation_id, turn_id, turn_state)}
     return _finalize_exhausted(messages, model, timeout=timeout, usage_sink=usage_sink,
                                reason="step budget exhausted", steps=_MAX_STEPS,
-                               result_cap=result_cap)
+                               result_cap=result_cap, on_event=on_event)
 
 
 _EXHAUSTED_NUDGE = (
@@ -429,7 +442,7 @@ def _fit_for_finalize(messages, budget_chars: int) -> list[dict]:
 
 
 def _finalize_exhausted(messages, model, *, timeout, usage_sink, reason: str, steps: int,
-                        result_cap: int) -> dict:
+                        result_cap: int, on_event=None) -> dict:
     """One tools-disabled model call that turns an exhausted budget into an answer.
 
     Without this, the internal counter leaked into chat as the entire reply ("step
@@ -439,6 +452,7 @@ def _finalize_exhausted(messages, model, *, timeout, usage_sink, reason: str, st
     from a prompt REBUILT to fit its context — and the raw reason survives only if
     that final call itself fails or leaks tool JSON.
     """
+    _notify(on_event, {"kind": "phase", "state": "answering"})  # the last long call is visible too
     try:
         prompt = _fit_for_finalize(messages, int(result_cap * _FINALIZE_BUDGET_FACTOR))
         data = gateway.chat(prompt, model, timeout=timeout)
