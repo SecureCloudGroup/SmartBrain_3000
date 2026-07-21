@@ -195,15 +195,6 @@ a {
   flex: 1 1 auto;
 }
 
-/* Small rounded pill/tag (e.g. risk-tier labels in Activity). */
-.badge {
-  font-size: 0.75rem;
-  padding: 0.1rem 0.5rem;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  color: var(--muted);
-}
-
 /* Compact success/status banner (instead of overloading .card). */
 .notice {
   margin: 1rem 0 0;
@@ -815,27 +806,7 @@ button:disabled {
   min-height: 40vh;
 }
 
-nav.tabs {
-  display: flex;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-  margin: 0 0 1rem;
-}
-
-nav.tabs a {
-  padding: 0.4rem 0.75rem;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  text-decoration: none;
-  color: var(--text);
-}
-
-nav.tabs a.active {
-  background: var(--panel);
-  border-color: var(--accent);
-}
-
-/* Theme toggle in the appbar. */
+/* (Settings tabs now render through the shared Tabs component.) */
 /* Mobile bottom tab bar — thumb-zone primary nav (hidden on desktop, where the
    sidebar is the nav). Fixed so it survives long scrolls; safe-area padded. */
 .tabbar {
@@ -981,18 +952,6 @@ nav.tabs a.active {
   }
 }
 
-@media (max-width: 640px) {
-  /* Settings tabs: one horizontally-scrollable row. */
-  nav.tabs {
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    max-width: 100%;
-    -webkit-overflow-scrolling: touch;
-  }
-  nav.tabs a {
-    white-space: nowrap;
-  }
-}
 
 /* Tighter spacing + smaller controls on phones (the app had no breakpoints). */
 @media (max-width: 480px) {

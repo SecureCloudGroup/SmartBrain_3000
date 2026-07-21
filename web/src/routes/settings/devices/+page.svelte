@@ -158,7 +158,7 @@
         <li><b>Add to Home Screen</b>, then open the app.</li>
         <li>
           Enter this code:
-          <div style="font:700 2rem/1.2 ui-monospace,monospace; letter-spacing:0.25em; margin-top:0.25rem">{pairCode}</div>
+          <div style="font-family:var(--font-mono); font-weight:700; font-size:2rem; line-height:1.2; letter-spacing:0.25em; margin-top:0.25rem">{pairCode}</div>
           <span class="muted">expires in {fmtRemaining(pairRemaining)}</span>
         </li>
       </ol>

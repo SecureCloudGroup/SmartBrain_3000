@@ -5,52 +5,80 @@
   let {
     tabs,
     active,
-    onselect,
+    onselect = () => {},
     variant = "pill",
   }: {
-    tabs: { id: string; label: string }[];
+    tabs: { id: string; label: string; href?: string }[]; // href: route tabs (Settings) render as links
     active: string;
-    onselect: (id: string) => void;
+    onselect?: (id: string) => void;
     variant?: "pill" | "underline";
   } = $props();
 </script>
 
 <div class="tabs {variant}" role="tablist">
   {#each tabs as t (t.id)}
-    <button
-      role="tab"
-      aria-selected={active === t.id}
-      class:active={active === t.id}
-      onclick={() => onselect(t.id)}
-    >
-      {t.label}
-    </button>
+    {#if t.href}
+      <a role="tab" href={t.href} aria-selected={active === t.id} class:active={active === t.id}>{t.label}</a>
+    {:else}
+      <button
+        role="tab"
+        aria-selected={active === t.id}
+        class:active={active === t.id}
+        onclick={() => onselect(t.id)}
+      >
+        {t.label}
+      </button>
+    {/if}
   {/each}
 </div>
 
 <style>
   .tabs { display: flex; gap: var(--s-1); flex-wrap: wrap; margin: 0 0 var(--s-4); }
-  .tabs button {
+  .tabs button,
+  .tabs a {
+    display: inline-flex;
+    align-items: center;
     background: transparent;
     color: var(--muted);
     border: 1px solid transparent;
+    border-radius: var(--r-1);
+    font-size: var(--f-label);
     font-weight: 500;
     min-height: 36px;
     padding: 7px 14px;
+    text-decoration: none;
+    cursor: pointer;
   }
-  .tabs button:hover { color: var(--text); filter: none; background: var(--elevated); }
-  .pill button.active {
+  .tabs button:hover,
+  .tabs a:hover { color: var(--text); filter: none; background: var(--elevated); text-decoration: none; }
+  .pill button.active,
+  .pill a.active {
     background: var(--accent-tint);
     border-color: transparent;
     color: var(--accent);
     font-weight: 600;
   }
   .underline { gap: var(--s-3); border-bottom: 1px solid var(--border); }
-  .underline button { border-radius: 0; padding: 7px 2px; margin-bottom: -1px; }
-  .underline button.active {
+  .underline button,
+  .underline a { border-radius: 0; padding: 7px 2px; margin-bottom: -1px; }
+  .underline button.active,
+  .underline a.active {
     color: var(--accent);
     font-weight: 600;
     border-bottom: 2px solid var(--accent);
     background: transparent;
+  }
+  @media (max-width: 640px) {
+    /* Long strips (Settings has seven tabs): one horizontally-scrollable row. */
+    .tabs {
+      flex-wrap: nowrap;
+      overflow-x: auto;
+      max-width: 100%;
+      -webkit-overflow-scrolling: touch;
+    }
+    .tabs button,
+    .tabs a {
+      white-space: nowrap;
+    }
   }
 </style>

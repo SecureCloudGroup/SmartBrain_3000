@@ -5,6 +5,7 @@
   import { api, type UsageRow } from "$lib/api";
   import { describeError } from "$lib/errors";
   import { remote } from "$lib/remote/connection.svelte";
+  import Spinner from "$lib/components/Spinner.svelte";
 
   let rows = $state<UsageRow[]>([]);
   let total = $state(0);
@@ -107,7 +108,7 @@
     {#if loaded}
       <p class="muted">No usage in this range. Usage appears here after you <a href="/chat">chat with a model</a>.</p>
     {:else}
-      <p class="muted">Loading…</p>
+      <Spinner block />
     {/if}
   {:else}
     <div class="card">
@@ -134,7 +135,7 @@
   {/if}
   {#if error}<p class="error">{error}</p>{/if}
 {:else}
-  <p class="muted">Loading&hellip;</p>
+  <Spinner block />
 {/if}
 
 <style>

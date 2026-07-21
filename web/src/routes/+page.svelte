@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
   import { account } from "$lib/account.svelte";
+  import Spinner from "$lib/components/Spinner.svelte";
 
   // Dispatcher: route to setup / unlock based on vault state; Chat is the home page.
   async function decide() {
@@ -23,5 +24,5 @@
     <p style="margin-top:1rem"><button onclick={decide}>Retry</button></p>
   </div>
 {:else}
-  <p class="muted">Loading&hellip;</p>
+  <Spinner block />
 {/if}

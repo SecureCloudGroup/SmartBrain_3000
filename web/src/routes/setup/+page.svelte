@@ -3,6 +3,7 @@
   import { goto } from "$app/navigation";
   import { account } from "$lib/account.svelte";
   import { api, ApiError, type EmergencyKit } from "$lib/api";
+  import Spinner from "$lib/components/Spinner.svelte";
 
   let passphrase = $state("");
   let confirm = $state("");
@@ -117,7 +118,7 @@
       {#if error}<p class="error" role="alert">{error}</p>{/if}
       <p style="margin-top:1rem; display:flex; gap:0.5rem; align-items:center">
         <button disabled={busy} type="submit">{busy ? "Setting up…" : "Create vault"}</button>
-        {#if busy}<span class="spinner" aria-hidden="true"></span><span class="muted">Working…</span>{/if}
+        {#if busy}<Spinner size={16} /><span class="muted">Working…</span>{/if}
       </p>
     </form>
     <p class="muted" style="margin-top:0.75rem; font-size:0.85rem">
@@ -134,19 +135,5 @@
     padding: 0.75rem 1rem;
     border-radius: 8px;
     margin: 0.25rem 0 0.75rem;
-  }
-  .spinner {
-    width: 0.9rem;
-    height: 0.9rem;
-    border: 2px solid var(--border);
-    border-top-color: var(--accent);
-    border-radius: 50%;
-    display: inline-block;
-    animation: spin 0.8s linear infinite;
-  }
-  @keyframes spin {
-    to {
-      transform: rotate(360deg);
-    }
   }
 </style>

@@ -4,6 +4,8 @@
   import { page } from "$app/state";
   import { account } from "$lib/account.svelte";
   import { remote } from "$lib/remote/connection.svelte";
+  import Tabs from "$lib/components/Tabs.svelte";
+  import Spinner from "$lib/components/Spinner.svelte";
 
   let { children } = $props();
 
@@ -41,13 +43,12 @@
     <p style="margin-top:1rem"><a href="/chat">Back to Chat</a></p>
   </div>
 {:else if account.status?.unlocked}
-  <nav class="tabs">
-    {#each tabs as t (t.href)}
-      <a href={t.href} class:active={page.url.pathname === t.href}>{t.label}</a>
-    {/each}
-  </nav>
+  <Tabs
+    tabs={tabs.map((t) => ({ id: t.href, label: t.label, href: t.href }))}
+    active={page.url.pathname}
+  />
   <!-- Children mount only once unlocked, so their API calls never 423-flash. -->
   {@render children()}
 {:else}
-  <p class="muted">Loading&hellip;</p>
+  <Spinner block />
 {/if}

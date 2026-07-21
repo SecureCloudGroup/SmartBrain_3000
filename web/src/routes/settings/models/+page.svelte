@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { api, type LocalModels } from "$lib/api";
   import { describeError } from "$lib/errors";
+  import Chip from "$lib/components/Chip.svelte";
 
   // Local model servers (Ollama/MLX) run on the host; the in-container gateway reaches
   // them at host.docker.internal. We hide that plumbing: the user just gives a port, and
@@ -115,18 +116,18 @@
      Ollama; the non-primary backend can still be connected from its card below. -->
 {#if models && !models.ollama.configured && !models.mlx.configured}
   {#if models.ollama.detected}
-    <p style="margin:0 0 1rem; padding:0.6rem 0.85rem; border:1px solid var(--accent); border-radius:6px">
+    <p style="margin:0 0 1rem; padding:0.6rem 0.85rem; border:1px solid var(--accent); border-radius:var(--r-1)">
       <strong>Recommended: Ollama</strong> is running on this machine — the simplest way to stay fully local.
       Connect it below, then pull a good model:
       <code>ollama pull {RECOMMENDED.ollama}</code> and (for semantic search) <code>ollama pull {RECOMMENDED.embed}</code>.
     </p>
   {:else if models.mlx.detected}
-    <p style="margin:0 0 1rem; padding:0.6rem 0.85rem; border:1px solid var(--accent); border-radius:6px">
+    <p style="margin:0 0 1rem; padding:0.6rem 0.85rem; border:1px solid var(--accent); border-radius:var(--r-1)">
       <strong>Recommended: MLX</strong> is running on this machine. Connect it below, then serve a good model:
       <code>mlx_lm.server --model {RECOMMENDED.mlx}</code>.
     </p>
   {:else}
-    <p class="muted" style="margin:0 0 1rem; padding:0.6rem 0.85rem; border:1px solid var(--border); border-radius:6px">
+    <p class="muted" style="margin:0 0 1rem; padding:0.6rem 0.85rem; border:1px solid var(--border); border-radius:var(--r-1)">
       <strong>No local model server found.</strong> To run models on your machine, set up
       <strong>Ollama</strong> (any OS) or <strong>MLX</strong> (Apple Silicon), then connect it below.
       New to local models? <a href="/help#models">Learn more</a>.
@@ -139,14 +140,13 @@
     <span>Ollama</span>
     {#if models}
       {@const ok = models.ollama.configured && models.ollama.reachable}
-      {@const col = !models.ollama.configured ? "var(--muted)" : ok ? "var(--ok)" : "var(--danger)"}
-      <span class="badge" style="border-color:{col}; color:{col}">
+      <Chip kind={!models.ollama.configured ? "" : ok ? "ok" : "danger"}>
         {!models.ollama.configured ? "off" : ok ? "connected" : "unreachable"}
-      </span>
+      </Chip>
     {/if}
   </h2>
   {#if models && !models.ollama.configured && models.ollama.detected}
-    <p style="margin:0 0 0.6rem; padding:0.5rem 0.75rem; border:1px solid var(--ok); border-radius:6px; color:var(--ok)">
+    <p style="margin:0 0 0.6rem; padding:0.5rem 0.75rem; border:1px solid var(--ok); border-radius:var(--r-1); color:var(--ok)">
       ✓ Found Ollama running on this machine.
       <button class="link" disabled={busy === "ollama"} onclick={() => run("ollama", () => api.putOllama(models!.ollama.default_url))}>Connect it</button>
     </p>
@@ -199,14 +199,13 @@
     <span>MLX</span>
     {#if models}
       {@const ok = models.mlx.configured && models.mlx.reachable}
-      {@const col = !models.mlx.configured ? "var(--muted)" : ok ? "var(--ok)" : "var(--danger)"}
-      <span class="badge" style="border-color:{col}; color:{col}">
+      <Chip kind={!models.mlx.configured ? "" : ok ? "ok" : "danger"}>
         {!models.mlx.configured ? "off" : ok ? "connected" : "unreachable"}
-      </span>
+      </Chip>
     {/if}
   </h2>
   {#if models && !models.mlx.configured && models.mlx.detected}
-    <p style="margin:0 0 0.6rem; padding:0.5rem 0.75rem; border:1px solid var(--ok); border-radius:6px; color:var(--ok)">
+    <p style="margin:0 0 0.6rem; padding:0.5rem 0.75rem; border:1px solid var(--ok); border-radius:var(--r-1); color:var(--ok)">
       ✓ Found an MLX server running on this machine.
       <button class="link" disabled={busy === "mlx"} onclick={() => run("mlx", () => api.putMlx(models!.mlx.default_url, ""))}>Connect it</button>
     </p>
