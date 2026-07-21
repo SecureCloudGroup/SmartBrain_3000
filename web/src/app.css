@@ -54,6 +54,10 @@
   /* fonts */
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
+  /* mobile bottom tab bar height (0 on desktop) — the sticky chat composer and page
+     bottom padding offset by it so content never hides behind the tabs */
+  --tabbar-h: 0px;
+
   /* dark surfaces (base never #000, text never #fff) */
   --bg: #121212;
   --panel: #1a1a1d;
@@ -363,103 +367,115 @@ button:disabled {
   font-size: 0.85rem;
 }
 
-header.appbar {
+/* ---- App shell: desktop sidebar rail + slim top strip; mobile bottom tab bar. ----
+   Both nav surfaces render from the SAME NAV array in +layout.svelte (remote gating
+   included) — CSS only decides which is visible. */
+.shell {
+  min-height: 100dvh;
+}
+.shell-main {
+  min-width: 0;
   display: flex;
-  align-items: center;
-  flex-wrap: wrap; /* nav + controls wrap onto more rows on narrow screens (no horizontal overflow) */
-  gap: 0.5rem 0.75rem;
-  padding: 0.75rem 1.5rem;
-  border-bottom: 1px solid var(--border);
-  /* Pinned to the top on every page (desktop + mobile) so the nav and Lock are always reachable,
-     even deep in a long chat or list. Needs its own opaque background (the header had none) so
-     content scrolls cleanly UNDER it, and a z-index above page content but below modals (900/1000)
-     — its own overflow dropdown (z-index 50) is scoped within this header's stacking context. */
-  position: sticky;
-  top: 0;
-  z-index: 30;
-  background: var(--bg);
+  flex-direction: column;
 }
 
-header.appbar .logo {
-  width: 32px;
-  height: 32px;
-  border-radius: 22%;
+.sidebar {
+  display: none; /* mobile: the tab bar is the nav */
 }
 
-/* Logo + title + version travel together as one flex item so the version tucks under the
-   title and the group never splits across a wrap. */
-header.appbar .brand {
+.brand {
   display: flex;
   align-items: center;
   gap: 0.5rem;
 }
-
-header.appbar .titlewrap {
+.brand .logo {
+  width: 30px;
+  height: 30px;
+  border-radius: 22%;
+}
+.brand .titlewrap {
   display: flex;
   flex-direction: column;
   line-height: 1.15;
 }
-
-header.appbar .title {
-  font-weight: 700;
+.brand .title {
+  font-weight: 650;
+  font-size: var(--f-label);
+  letter-spacing: -0.01em;
 }
-
-/* Running version under the title: small, muted, single line — reads fine in light and dark. */
-header.appbar .appversion {
+.brand .appversion {
   font-size: 0.7rem;
-  color: var(--muted);
+  color: var(--faint);
   white-space: nowrap;
 }
 
-header.appbar .spacer {
+/* One nav-row voice for sidebar links, More-sheet rows, and the footer controls
+   (works on <a> and <button> alike). */
+.navitem {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  min-height: 40px;
+  border: 0;
+  border-radius: var(--r-1);
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--f-label);
+  font-weight: 500;
+  line-height: var(--lh-ui);
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background var(--t-fast), color var(--t-fast);
+}
+.navitem:hover {
+  background: var(--elevated);
+  color: var(--text);
+  text-decoration: none;
+  filter: none;
+}
+.navitem.active {
+  background: var(--accent-tint);
+  color: var(--accent);
+  font-weight: 600;
+}
+.navitem:disabled {
+  cursor: not-allowed;
+}
+
+.topstrip {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-height: 52px;
+  padding: calc(6px + env(safe-area-inset-top)) 1rem 6px;
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: var(--z-nav);
+  background: var(--bg);
+}
+.topstrip .spacer {
   flex: 1;
 }
-
-header.appbar .appnav {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.25rem;
-  margin-left: 0.5rem;
-}
-
-header.appbar .appnav a {
-  padding: 0.3rem 0.6rem;
-  border-radius: 8px;
-  text-decoration: none;
-  color: var(--muted);
-}
-
-header.appbar .appnav a:hover {
-  color: var(--text);
-}
-
-header.appbar .appnav a.active {
-  color: var(--text);
-  background: var(--panel);
+.topstrip .navitem {
+  min-height: 36px;
+  padding: 6px 10px;
 }
 
 .nav-badge {
   display: inline-block;
-  margin-left: 0.3rem;
-  min-width: 1.1rem;
-  padding: 0 0.3rem;
+  margin-left: auto;
+  min-width: 1.15rem;
+  padding: 0 0.35rem;
   font-size: 0.7rem;
-  line-height: 1.1rem;
+  font-weight: 600;
+  line-height: 1.15rem;
   text-align: center;
-  border-radius: 999px;
-  background: var(--danger);
+  border-radius: var(--r-full);
+  background: var(--accent-strong);
   color: #fff;
-}
-
-header.appbar .help-link {
-  padding: 0.3rem 0.6rem;
-  border-radius: 8px;
-  text-decoration: none;
-  color: var(--muted);
-}
-
-header.appbar .help-link:hover {
-  color: var(--text);
 }
 
 .chat-log {
@@ -613,7 +629,7 @@ header.appbar .help-link:hover {
      scrolls. sticky (not fixed) stays in flow — inherits the column width and rides above
      the iOS keyboard instead of being covered by it. */
   position: sticky;
-  bottom: 0;
+  bottom: var(--tabbar-h); /* clears the mobile tab bar; 0 on desktop */
   z-index: 5;
   background: var(--bg);
   border-top: 1px solid var(--border);
@@ -673,44 +689,81 @@ nav.tabs a.active {
 }
 
 /* Theme toggle in the appbar. */
-header.appbar .theme-toggle {
-  padding: 0.3rem 0.55rem;
-  background: transparent;
-  border: 1px solid var(--border);
-  color: var(--muted);
-  font-weight: 400;
-}
-
-/* Secondary appbar controls (Help / theme / Unpair / Lock). Desktop shows them
-   inline; mobile collapses them into the ⋯ overflow menu below. */
-header.appbar .appbar-secondary {
-  display: contents;
-}
-header.appbar .appbar-overflow {
+/* Mobile bottom tab bar — thumb-zone primary nav (hidden on desktop, where the
+   sidebar is the nav). Fixed so it survives long scrolls; safe-area padded. */
+.tabbar {
   display: none;
-  position: relative;
-}
-header.appbar .appbar-overflow .overflow-menu {
-  position: absolute;
+  position: fixed;
+  left: 0;
   right: 0;
-  top: calc(100% + 0.25rem);
+  bottom: 0;
+  z-index: var(--z-nav);
   background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 0.5rem;
+  border-top: 1px solid var(--border);
+  padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
+}
+.tabbar .tab {
+  position: relative;
+  flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
-  min-width: 10rem;
-  /* Never exceed the viewport (defense-in-depth so the menu can't clip off-screen). */
-  max-width: calc(100vw - 1.5rem);
-  z-index: 50;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-height: 44px;
+  padding: 4px 0;
+  border: 0;
+  border-radius: var(--r-1);
+  background: transparent;
+  color: var(--faint);
+  font-size: 10.5px;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
 }
-header.appbar .appbar-overflow .overflow-menu a,
-header.appbar .appbar-overflow .overflow-menu button {
-  text-align: left;
-  width: 100%;
+.tabbar .tab:hover {
+  text-decoration: none;
+  filter: none;
+  background: transparent;
+  color: var(--muted);
+}
+.tabbar .tab.active {
+  color: var(--accent);
+}
+.tab-dot {
+  position: absolute;
+  top: 2px;
+  left: calc(50% + 6px);
+  min-width: 1rem;
+  padding: 0 0.25rem;
+  font-size: 0.62rem;
+  font-weight: 600;
+  line-height: 1rem;
+  text-align: center;
+  border-radius: var(--r-full);
+  background: var(--accent-strong);
+  color: #fff;
+}
+
+/* The More sheet: everything that isn't a tab (secondary pages + Help/theme/Lock). */
+.more-sheet {
+  position: fixed;
+  left: 8px;
+  right: 8px;
+  bottom: calc(var(--tabbar-h) + 8px);
+  z-index: var(--z-sheet);
+  background: var(--elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--r-3);
+  box-shadow: var(--shadow-modal);
+  padding: var(--s-2);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.sheet-divider {
+  border-top: 1px solid var(--border);
+  margin: var(--s-1) 0;
 }
 
 /* Full-width banner for the BLOCKED (untrusted) remote state — see RemoteStatus.svelte. */
@@ -725,29 +778,64 @@ header.appbar .appbar-overflow .overflow-menu button {
   text-align: center;
 }
 
-/* On phones, keep the nav to one horizontally-scrollable row instead of wrapping
-   8 links into several tall rows. */
-@media (max-width: 640px) {
-  header.appbar .appnav {
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    max-width: 100%;
-    -webkit-overflow-scrolling: touch;
+/* ---- Shell breakpoints: sidebar >=768px, bottom tabs below. ---- */
+@media (min-width: 768px) {
+  .shell.with-side {
+    display: grid;
+    grid-template-columns: 232px minmax(0, 1fr);
   }
-  header.appbar .appnav a {
-    white-space: nowrap;
+  .shell.with-side .sidebar {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    position: sticky;
+    top: 0;
+    height: 100dvh;
+    overflow-y: auto;
+    padding: var(--s-4) var(--s-3);
+    background: var(--panel);
+    border-right: 1px solid var(--border);
   }
-  /* Collapse secondary controls into the ⋯ overflow menu. */
-  header.appbar .appbar-secondary {
+  .sidebar .brand {
+    padding: 2px 10px 14px;
+  }
+  .sidebar .side-nav {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .sidebar .side-foot {
+    margin-top: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    border-top: 1px solid var(--border);
+    padding-top: var(--s-3);
+  }
+  /* Desktop with a sidebar: the sidebar carries the brand; the strip stays slim. */
+  .shell.with-side .topstrip .brand {
     display: none;
   }
-  header.appbar .appbar-overflow {
-    display: block;
-    /* Keep the ⋯ pinned to the right even when the appbar wraps it to a new line —
-       otherwise it lands at the left and its right-anchored menu opens off-screen. */
-    margin-left: auto;
+}
+@media (max-width: 767px) {
+  :root {
+    --tabbar-h: calc(56px + env(safe-area-inset-bottom));
   }
-  /* Settings tabs: mirror the appnav pattern — one horizontally-scrollable row. */
+  .tabbar {
+    display: flex;
+  }
+  /* Page content always clears the fixed tab bar. */
+  .shell-main main {
+    padding-bottom: calc(var(--tabbar-h) + 8px);
+  }
+  /* The tab bar owns the bottom safe area; the composer just sits above it. */
+  .composer {
+    padding-bottom: 0.5rem;
+  }
+}
+
+@media (max-width: 640px) {
+  /* Settings tabs: one horizontally-scrollable row. */
   nav.tabs {
     flex-wrap: nowrap;
     overflow-x: auto;
