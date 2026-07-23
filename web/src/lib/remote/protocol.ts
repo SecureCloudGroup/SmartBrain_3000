@@ -5,6 +5,9 @@
 //   1. hello   {type:"hello", nonce}            -> hello_ok {type, pubkey, signature}
 //   2. auth    {type:"auth", device_id, credential} -> {type:"auth_ok"} | {type:"auth_error"}
 //   3. request {id, method, path, headers, body_b64} -> response {id, status, headers, body_b64}
+//   4. keepalive (authed only): ping {type:"ping", t} -> pong {type:"pong", t}. The phone
+//      sends these on a timer; a missing pong past the deadline means the path silently
+//      died (idle NAT/consent expiry) even though connectionState still says "connected".
 
 export interface ResponseFrame {
   id: string;
@@ -46,6 +49,16 @@ export function encodeHello(nonceB64: string): string {
 
 export function encodeAuth(deviceId: string, credential: string): string {
   return JSON.stringify({ type: "auth", device_id: deviceId, credential });
+}
+
+export function encodePing(t: number): string {
+  return JSON.stringify({ type: "ping", t });
+}
+
+// Has the keepalive gone unanswered past the deadline? lastPong === 0 means "no pong
+// expected yet" (timer not started / just connected) and is never dead.
+export function pingDead(lastPongMs: number, nowMs: number, deadMs: number): boolean {
+  return lastPongMs > 0 && nowMs - lastPongMs > deadMs;
 }
 
 export function encodeRequest(

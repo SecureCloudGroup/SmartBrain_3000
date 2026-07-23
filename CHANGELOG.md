@@ -21,6 +21,15 @@ to know when a release changes behavior.
   page focused on what needs your attention.
 
 ### Fixed
+- A paired phone stays connected instead of quietly dying after a short idle: the
+  connection now sends a small keepalive every 20 seconds (idle NAT/firewall mappings
+  were expiring in as little as 30 seconds, killing the path while the status still
+  said "connected"), a dead path is noticed within 45 seconds and reconnects on its
+  own, the retry budget doubled to about three minutes of patience (a phone radio
+  waking from sleep needs more than three quick attempts), switching apps for up to
+  three minutes no longer drops the session (was 15 seconds), and even after the
+  retries give up, the next tap in the app restarts the connection by itself instead
+  of failing until you find Retry.
 - Citations under an answer now reflect what the assistant actually READ, not
   everything its searches merely surfaced: a broad question no longer sprays chips
   for every unrelated document in the knowledge base, the same document found by two

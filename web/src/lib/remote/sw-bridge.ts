@@ -12,6 +12,7 @@
 // the durable window context and works on iOS.
 
 import { loadPairing } from "./store";
+import type { PairingPayload } from "./pairing";
 import { startRemote, getRemote, stopRemote } from "./webrtc";
 import { DIRECT_PARAM } from "./swconst";
 import { remote } from "./connection.svelte";
@@ -76,10 +77,20 @@ export async function relayFetch(
 
 // Override window.fetch so /api (+ /mcp) go over the WebRTC DataChannel in remote mode.
 // Everything else (and the __direct LAN probe) falls through to the real fetch unchanged.
-function installFetchRelay(): void {
+function installFetchRelay(pairing: PairingPayload): void {
   const realFetch = window.fetch.bind(window);
-  window.fetch = (input: RequestInfo | URL, init?: RequestInit): Promise<Response> =>
-    relayFetch(input, init, getRemote(), realFetch, window.location.origin);
+  window.fetch = (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    // Reconnect-on-demand: if the retry budget burned out (terminal "offline"), any
+    // /api call the user causes restarts the connection instead of failing until they
+    // find a Retry button. request() awaits the fresh connection's ready, and its 60s
+    // timeout comfortably covers the 15s connect budget.
+    if (remote.status === "offline") {
+      const href = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      const p = new URL(href, window.location.origin).pathname;
+      if (p.startsWith("/api") || p.startsWith("/mcp")) startRemote(pairing);
+    }
+    return relayFetch(input, init, getRemote(), realFetch, window.location.origin);
+  };
 }
 
 let _markRemoteReady: () => void = () => {};
@@ -116,7 +127,7 @@ async function _initRemote(): Promise<void> {
     return; // on the LAN — use /api directly, no relay
   }
   startRemote(pairing);
-  installFetchRelay();
+  installFetchRelay(pairing);
   // iOS Safari freezes JS when the page is backgrounded and does NOT release the
   // RTCPeerConnection, so the connection dies and a lingering dead PC blocks the next one
   // ("works once, then won't reconnect"). Tear down when the page is hidden, and
@@ -126,7 +137,10 @@ async function _initRemote(): Promise<void> {
   // background, so a glance-and-return shouldn't churn the connection. Only a longer
   // background tears down (closing the PC before iOS strands it). pagehide (reload/navigate)
   // still tears down immediately — that's the original "can't reconnect after refresh" fix.
-  const GRACE_MS = 15000;
+  // 3 minutes, not seconds: checking a message or camera and coming back was churning a
+  // full reconnect every time. If iOS freezes JS before the timer fires, resume()'s
+  // !isLive() check already handles the stranded PC, so a long grace costs nothing.
+  const GRACE_MS = 180000;
   let hideTimer: ReturnType<typeof setTimeout> | undefined;
   const cancelHide = () => {
     if (hideTimer) clearTimeout(hideTimer);
@@ -136,7 +150,9 @@ async function _initRemote(): Promise<void> {
     cancelHide();
     const conn = getRemote();
     // Reconnect if torn down, dropped, or the PC is silently dead (iOS froze before the
-    // grace timer fired) — isLive() stops us showing "connected" over a corpse.
+    // grace timer fired) — isLive() stops us showing "connected" over a corpse. This also
+    // recovers from terminal "offline": startRemote mints a fresh RemoteConnection, so the
+    // burned-out closed/reconnects state of the old one never lingers.
     if (!conn || remote.status === "offline" || remote.status === "reconnecting" || !conn.isLive()) {
       startRemote(pairing);
     }

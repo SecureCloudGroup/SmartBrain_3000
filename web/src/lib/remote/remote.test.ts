@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import { channelBinding, randomNonceB64, sdpFingerprint, verifyDesktopIdentity } from "./crypto";
 import { decodePairingFragment, encodePairingFragment, parsePairingPayload } from "./pairing";
-import { asResponse, b64ToBytes, bytesToB64, concatBytes, encodeRequest, parseMessage } from "./protocol";
+import { asResponse, b64ToBytes, bytesToB64, concatBytes, encodePing, encodeRequest, parseMessage, pingDead } from "./protocol";
 import { classifyCandidatePair } from "./candidate-pair";
 
 const SDP_A = "v=0\r\na=fingerprint:sha-256 AA:BB:CC\r\na=setup:actpass\r\n";
@@ -136,5 +136,22 @@ describe("protocol message guard (the request boundary)", () => {
   it("concatBytes preserves order and total length (request-encoding building block)", () => {
     const out = concatBytes(new Uint8Array([1, 2]), new Uint8Array([3, 4, 5]));
     expect([...out]).toEqual([1, 2, 3, 4, 5]);
+  });
+});
+
+describe("keepalive (ping/pong)", () => {
+  it("encodePing carries the timestamp in the documented frame shape", () => {
+    expect(JSON.parse(encodePing(12345))).toEqual({ type: "ping", t: 12345 });
+  });
+
+  it("pingDead: never dead before the first pong (lastPong 0)", () => {
+    expect(pingDead(0, 1_000_000, 45_000)).toBe(false);
+  });
+
+  it("pingDead: alive within the deadline, dead past it", () => {
+    const now = 1_000_000;
+    expect(pingDead(now - 44_999, now, 45_000)).toBe(false);
+    expect(pingDead(now - 45_000, now, 45_000)).toBe(false); // boundary: exactly at deadline
+    expect(pingDead(now - 45_001, now, 45_000)).toBe(true);
   });
 });

@@ -209,6 +209,69 @@ def test_e2e_channel_auth_then_request(app_client: TestClient) -> None:
     assert asyncio.run(run())["status"] == 200
 
 
+def test_e2e_ping_after_auth_gets_pong(app_client: TestClient) -> None:
+    """The keepalive: an authed ping is echoed as a pong carrying the same timestamp."""
+    store = SecretStore(duckdb.connect(":memory:"), gen_master_key())
+    dev = devices.create_device(store, "phone")
+
+    async def run() -> dict:
+        phone, pc, channel, events, auth = await _connect_and_auth(
+            store, app_client, dev["device_id"], dev["credential"]
+        )
+        assert auth["type"] == "auth_ok"
+        pong: asyncio.Future = asyncio.get_event_loop().create_future()
+
+        @channel.on("message")
+        def _resp(data) -> None:
+            m = json.loads(data)
+            if m.get("type") == "pong" and not pong.done():
+                pong.set_result(m)
+
+        channel.send(json.dumps({"type": "ping", "t": 12345}))
+        try:
+            return await asyncio.wait_for(pong, timeout=20)
+        finally:
+            await phone.close()
+            await pc.close()
+
+    reply = asyncio.run(run())
+    assert reply == {"type": "pong", "t": 12345}  # echoed, not re-stamped
+
+
+def test_e2e_ping_before_auth_is_rejected(app_client: TestClient) -> None:
+    """Pre-auth, a ping is just an invalid auth message: auth_error, channel closed —
+    the keepalive must not open an unauthenticated chat with the Desktop."""
+    store = SecretStore(duckdb.connect(":memory:"), gen_master_key())
+    devices.create_device(store, "phone")
+    from aiortc import RTCPeerConnection, RTCSessionDescription
+
+    async def run() -> dict:
+        phone = RTCPeerConnection()
+        channel = phone.createDataChannel("sb-api")
+        result: asyncio.Future = asyncio.get_event_loop().create_future()
+
+        @channel.on("open")
+        def _open() -> None:
+            channel.send(json.dumps({"type": "ping", "t": 1}))
+
+        @channel.on("message")
+        def _msg(data) -> None:
+            m = json.loads(data)
+            if not result.done():
+                result.set_result(m)
+
+        await phone.setLocalDescription(await phone.createOffer())
+        pc, answer = await webrtc_peer.answer_offer(phone.localDescription.sdp, store=store, http_client=app_client)
+        await phone.setRemoteDescription(RTCSessionDescription(sdp=answer, type="answer"))
+        try:
+            return await asyncio.wait_for(result, timeout=20)
+        finally:
+            await phone.close()
+            await pc.close()
+
+    assert asyncio.run(run())["type"] == "auth_error"  # rejected (and the channel closes)
+
+
 def test_encode_response_is_binary_safe() -> None:
     out = webrtc_peer._encode_response({"id": "9", "status": 201, "headers": {}, "body": b"\x00\xff hi"})
     parsed = json.loads(out)
