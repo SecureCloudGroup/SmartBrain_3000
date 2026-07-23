@@ -178,16 +178,18 @@ class SearchIndex:
         if self.truncated:
             log.warning("knowledge base exceeds %d documents; search covers the newest %d",
                         _MAX_INDEXED_DOCS, _MAX_INDEXED_DOCS)
-        for doc_id, title, content in docs:  # bounded by _MAX_INDEXED_DOCS
-            self._index_text(doc_id, title, content)
+        for doc_id, title, content, tags in docs:  # bounded by _MAX_INDEXED_DOCS
+            self._index_text(doc_id, title, content, tags)
         for model, dim, per_doc in self._kb.iter_embeddings():
             self._vecs.setdefault((model, dim), _VecBlock(dim)).bulk_load(per_doc)  # one pass, not O(n^2)
         self._built = True
         log.info("search index built: %d docs, %d tokens, %d vector blocks",
                  len(self._doc_len), len(self._postings), len(self._vecs))
 
-    def _index_text(self, doc_id: str, title: str, content: str) -> None:
-        tokens = tokenize(f"{title}\n{content}")
+    def _index_text(self, doc_id: str, title: str, content: str, tags: list[str] | None = None) -> None:
+        # Tags are lexical-only: they join the tokenized text (so BM25 — and therefore hybrid
+        # "Best" — matches them) but never touch embeddings, so a tag edit needs no re-embed.
+        tokens = tokenize(f"{title}\n{' '.join(tags or [])}\n{content}")
         freqs: dict[str, int] = {}
         for tok in tokens:
             freqs[tok] = freqs.get(tok, 0) + 1
@@ -203,13 +205,13 @@ class SearchIndex:
         with self._lock:
             return self._by_hash.get(content_hash(content))
 
-    def add_document(self, doc_id: str, title: str, content: str) -> None:
+    def add_document(self, doc_id: str, title: str, content: str, tags: list[str] | None = None) -> None:
         """Index a new/updated document. No-op before the first build (the build will pick it up)."""
         with self._lock:
             if not self._built:
                 return
             self.remove_document(doc_id)
-            self._index_text(doc_id, title, content)
+            self._index_text(doc_id, title, content, tags)
 
     def remove_document(self, doc_id: str) -> None:
         """Forget a document (its postings and every vector block row)."""

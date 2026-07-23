@@ -30,8 +30,11 @@ class UrlIn(BaseModel):
     url: str = Field(min_length=1)
 
 
-class RenameIn(BaseModel):
-    title: str = Field(min_length=1, max_length=300)
+class DocPatchIn(BaseModel):
+    """Partial document metadata update: send only what changes. Both absent -> 422."""
+
+    title: str | None = Field(default=None, min_length=1, max_length=300)
+    tags: list[str] | None = Field(default=None, max_length=20)  # None = untouched; [] = clear
 
 
 def _kb(request: Request) -> KnowledgeBase:
@@ -76,22 +79,30 @@ def list_docs(request: Request) -> dict:
 
 
 @router.patch("/api/kb/{doc_id}")
-def rename_doc(request: Request, doc_id: str, body: RenameIn) -> dict[str, bool]:
-    """Rename a document (default URL/file names are often cryptic). Re-embeds best-effort
-    so the new title is reflected in semantic search; a reindex backfills otherwise."""
+def patch_doc(request: Request, doc_id: str, body: DocPatchIn) -> dict[str, bool]:
+    """Update a document's title and/or tags. Both paths refuse on vault-owned copies —
+    a vault update may REPLACE the document, silently clobbering either edit.
+
+    A rename re-embeds best-effort (titles prefix every chunk); a tag change never does —
+    tags are lexical-only, the in-memory index re-tokenizes instantly."""
+    if body.title is None and body.tags is None:
+        raise HTTPException(status_code=422, detail="send a title and/or tags")
     knowledge = _kb(request)
     doc = knowledge.get(doc_id)
     if doc is None:
         raise HTTPException(status_code=404, detail="document not found")
     _refuse_if_vault_owned(request, doc_id)
-    title = body.title.strip()
-    if not title:
-        raise HTTPException(status_code=422, detail="title must not be blank")
-    knowledge.rename(doc_id, title)
-    try:  # best-effort: keep the title-prefixed embeddings current
-        ingest.embed_doc(knowledge, doc_id, title, doc["content"], gateway.embed_model(request.app.state.dbx))
-    except Exception as exc:  # embeddings optional; reindex can backfill
-        log.info("re-embed after rename skipped for %s: %s", doc_id, exc)
+    if body.title is not None:
+        title = body.title.strip()
+        if not title:
+            raise HTTPException(status_code=422, detail="title must not be blank")
+        knowledge.rename(doc_id, title)
+        try:  # best-effort: keep the title-prefixed embeddings current
+            ingest.embed_doc(knowledge, doc_id, title, doc["content"], gateway.embed_model(request.app.state.dbx))
+        except Exception as exc:  # embeddings optional; reindex can backfill
+            log.info("re-embed after rename skipped for %s: %s", doc_id, exc)
+    if body.tags is not None:
+        knowledge.set_tags(doc_id, body.tags)
     return {"ok": True}
 
 

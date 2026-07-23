@@ -137,8 +137,10 @@ def test_subscribe_end_to_end_pins_the_publisher(alice: TestClient, bob: TestCli
     assert all(m["origin"] == "import" for m in mm.values())
 
     # Subscribed documents get the same protections as file-imported ones (C0): read-only.
+    # Tags included — a vault update REPLACES the doc and replace() starts tags fresh.
     member_ids = {m["doc_id"] for m in mm.values()}
     assert bob.patch(f"/api/kb/{next(iter(member_ids))}", json={"title": "Renamed"}).status_code == 409
+    assert bob.patch(f"/api/kb/{next(iter(member_ids))}", json={"tags": ["mine"]}).status_code == 409
 
     # Ingress is audited: host only — never the full URL (its path names the topic).
     rows = [e for e in bob.get("/api/audit").json()["entries"] if e["tool"] == "vault_subscribe"]

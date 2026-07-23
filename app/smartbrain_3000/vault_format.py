@@ -207,7 +207,11 @@ def _nonce(k_nonce: bytes, kind: bytes, uid: str, content_hash: str) -> bytes:
 
 
 def _doc_object(title: str, content: str, meta: dict) -> bytes:
-    """Byte-for-byte the body kb._seal seals, minus the key — so an import is a straight kb.add."""
+    """Byte-for-byte the body kb._seal seals, minus the key — so an import is a straight kb.add.
+
+    Deliberately WITHOUT tags: tags are the local user's organization, not the publisher's
+    payload, so they never travel in an export (and an import starts untagged).
+    """
     return canonical({"content": content, "meta": meta or {}, "title": title})
 
 

@@ -253,6 +253,7 @@ export interface EmailMessage {
 export interface KbDoc {
   id: string;
   title: string;
+  tags: string[]; // manual labels; lexical-searchable and click-to-filter in the UI
   created_at: string;
   updated_at: string;
 }
@@ -296,6 +297,8 @@ export interface Vault {
   version: number;
   name: string;
   description: string;
+  tags: string[]; // the local user's labels — never travel in an export
+
   // Where an imported vault came from — pinned at import/subscribe time. null for a vault you made
   // yourself. `url` is present only on a URL subscription (fragment-stripped before it was stored).
   source: {
@@ -694,6 +697,11 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ title }),
     }),
+  setDocTags: (id: string, tags: string[]) =>
+    req<{ ok: boolean }>(`/api/kb/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ tags }),
+    }),
   deleteDoc: (id: string) =>
     req<{ ok: boolean }>(`/api/kb/${encodeURIComponent(id)}`, { method: "DELETE" }),
   // `vault` scopes the search to one vault's documents ("" = all knowledge).
@@ -718,6 +726,12 @@ export const api = {
   listVaults: () => req<{ vaults: Vault[] }>("/api/vaults"),
   createVault: (name: string, description = "") =>
     req<Vault>("/api/vaults", { method: "POST", body: JSON.stringify({ name, description }) }),
+  // Rename / re-describe / re-tag a vault. `tags` absent = untouched (a rename must not wipe them).
+  updateVaultMeta: (id: string, body: { name: string; description?: string; tags?: string[] }) =>
+    req<Vault>(`/api/vaults/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
   deleteVault: (id: string) =>
     req<{ ok: boolean }>(`/api/vaults/${encodeURIComponent(id)}`, { method: "DELETE" }),
   // One vault plus WHICH documents are in it — the list view only carries a count. `members`

@@ -336,3 +336,31 @@ def test_detach_of_a_document_not_in_the_vault_is_404(client: TestClient) -> Non
     vid = client.post("/api/vaults", json={"name": "V"}).json()["id"]
     r = client.post(f"/api/vaults/{vid}/documents/{doc}/detach")
     assert r.status_code == 404
+
+
+# --- manual tags on vaults ---------------------------------------------------------------------
+
+def test_vault_tags_create_update_clear() -> None:
+    _, vs = _stores()
+    vid = vs.create("Property", "leases", tags=[" legal ", "legal", ""])
+    assert vs.get(vid)["tags"] == ["legal"]  # cleaned on the way in
+    # tags=None (a rename-only update) must NOT wipe them
+    vs.update(vid, "Real estate", "renamed")
+    assert vs.get(vid)["tags"] == ["legal"]
+    # explicit tags replace; explicit [] clears
+    vs.update(vid, "Real estate", "renamed", tags=["property", "2024"])
+    assert vs.get(vid)["tags"] == ["property", "2024"]
+    vs.update(vid, "Real estate", "renamed", tags=[])
+    assert vs.get(vid)["tags"] == []
+
+
+def test_vault_update_rmw_keeps_source_alongside_tags() -> None:
+    # The read-modify-write pin: update() must never rebuild the body from known fields —
+    # source (the import pin) and tags both ride through every rename.
+    _, vs = _stores()
+    vid = vs.create("Imported", kind=IMPORTED, source={"url": "https://x/v.sbvault"})
+    vs.update(vid, "Imported", "", tags=["reference"])
+    vs.update(vid, "Imported renamed", "still here")
+    got = vs.get(vid)
+    assert got["source"] == {"url": "https://x/v.sbvault"}
+    assert got["tags"] == ["reference"]

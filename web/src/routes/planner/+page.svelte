@@ -8,6 +8,7 @@
   import { api, type Task, type TaskInput, type TaskPriority, type TaskRecur } from "$lib/api";
   import { confirmDialog } from "$lib/confirm.svelte";
   import { describeError } from "$lib/errors";
+  import { strToTags, tagsToStr } from "$lib/tags";
 
   let tasks = $state<Task[]>([]);
   let title = $state("");
@@ -37,10 +38,6 @@
     low: "var(--muted)",
   };
   const RECUR_LABEL: Record<TaskRecur, string> = { none: "", daily: "Repeats daily", weekly: "Repeats weekly" };
-
-  function strToTags(s: string): string[] {
-    return s.split(",").map((t) => t.trim()).filter(Boolean);
-  }
 
   function localDate(d: Date): string {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -130,7 +127,7 @@
     eDueTime = t.due_time ?? "";
     ePriority = t.priority;
     eRecur = t.recur;
-    eTagsStr = t.tags.join(", ");
+    eTagsStr = tagsToStr(t.tags);
     error = "";
   }
   function cancelEdit() {
