@@ -3,11 +3,15 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "engines": {
+    "node": "^20.19.0 || ^22.12.0 || >=24.0.0"
+  },
   "scripts": {
     "docs": "node scripts/build-docs.mjs",
     "dev": "npm run docs && vite dev",
     "build": "npm run docs && vite build",
     "preview": "vite preview",
+    "pretest": "node scripts/check-node.mjs",
     "test": "vitest run",
     "check": "npm run docs && svelte-kit sync && svelte-check --tsconfig ./tsconfig.json"
   },
