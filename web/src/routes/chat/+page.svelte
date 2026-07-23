@@ -6,7 +6,7 @@
   import { resumeChat } from "$lib/chat-resume";
   import { refreshPending } from "$lib/pending.svelte";
   import { api, ApiError, type AgentResult, type ChatMessage, type Conversation, type DiscoveredModel, type RecentScheduleRun, type Source } from "$lib/api";
-  import { finalAssistantId, transcriptUpToLastUser } from "$lib/chat-log";
+  import { finalAssistantId, mergeRefreshedLog, transcriptUpToLastUser } from "$lib/chat-log";
   import { describeError } from "$lib/errors";
   import Markdown from "$lib/Markdown.svelte";
   import { remote } from "$lib/remote/connection.svelte";
@@ -200,10 +200,13 @@
     }
     await pullScheduleUpdates(); // surface anything that fired while away, right here in the chat
     updatesTimer = setInterval(pullScheduleUpdates, 25000); // keep new ones arriving live while viewing Chat
+    // Returning to the app (phone unlock, tab switch) re-syncs what the OTHER device did.
+    document.addEventListener("visibilitychange", onVisibility);
   });
 
   onDestroy(() => {
     if (updatesTimer) clearInterval(updatesTimer);
+    document.removeEventListener("visibilitychange", onVisibility);
   });
 
   // Re-derive the approval banner from the server (pendingTurnId is component-local and is
@@ -352,6 +355,35 @@
     } catch (err) {
       error = describeError(err);
     }
+  }
+
+  // Refresh from the server: the conversation list + the open thread. This is how a
+  // desktop picks up messages sent from the paired phone (and vice versa) without a
+  // full reload — via the toolbar button, or automatically when the app becomes
+  // visible again. Guarded so it never races a live turn, a schedule pull, or an
+  // in-flight rename.
+  async function refreshChat(): Promise<void> {
+    if (busy || pulling || renaming) return;
+    error = "";
+    await loadConversations();
+    const cid = chatSession.currentId;
+    if (!cid) return;
+    try {
+      const convo = await api.getConversation(cid);
+      const server = convo.messages.map((m) => ({ id: m.id, role: m.role, content: m.content, sources: m.sources }));
+      log = mergeRefreshedLog(server, log) as typeof log;
+      msgCursor = convo.next_cursor ?? null;
+      msgHasMore = !!convo.has_more;
+      await restorePendingBanner(cid);
+    } catch (err) {
+      // Gone (deleted elsewhere) -> drop it, matching select(); transient -> surface.
+      if (err instanceof ApiError && err.status === 404) chatSession.currentId = null;
+      else error = describeError(err);
+    }
+  }
+
+  function onVisibility(): void {
+    if (document.visibilityState === "visible") void refreshChat();
   }
 
   async function select(id: string) {
@@ -850,6 +882,9 @@
 
   <div class="chat-toolbar">
     <button class="secondary" disabled={busy} onclick={newChat}>+ New chat</button>
+    <button class="secondary" disabled={busy} title="Reload chats and this thread (syncs changes made on your other device)" onclick={refreshChat}>
+      <Icon name="refresh" size={14} /> Refresh
+    </button>
     {#if conversations.length}
       {#if renaming && chatSession.currentId}
         <!-- Inline rename replaces the picker (Knowledge's idiom) so the title being
