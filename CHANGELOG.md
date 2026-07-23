@@ -21,6 +21,12 @@ to know when a release changes behavior.
   page focused on what needs your attention.
 
 ### Fixed
+- A phone could keep running an old version of the app for hours after a release —
+  even after deleting and re-adding it: the hosted origin served the app's HTML
+  without a no-cache header, so iOS was allowed to treat stale HTML as fresh
+  (and "Add to Home Screen" copies Safari's cached site data into the new app).
+  The origin now forces a revalidation of the HTML on every launch, and the
+  build's content-hashed assets are marked immutable so they cache forever safely.
 - A paired phone stays connected instead of quietly dying after a short idle: the
   connection now sends a small keepalive every 20 seconds (idle NAT/firewall mappings
   were expiring in as little as 30 seconds, killing the path while the status still
