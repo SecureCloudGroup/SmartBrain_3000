@@ -9,7 +9,7 @@
 
 import { channelBinding, randomNonceB64, verifyDesktopIdentity } from "./crypto";
 import type { PairingPayload } from "./pairing";
-import { asResponse, encodeAuth, encodeHello, encodeRequest, type ParsedResponse, parseMessage } from "./protocol";
+import { asResponse, encodeAuth, encodeHello, encodePing, encodeRequest, type ParsedResponse, parseMessage, pingDead } from "./protocol";
 import { classifyCandidatePair } from "./candidate-pair";
 import { setRemoteStatus } from "./connection.svelte";
 
@@ -18,7 +18,16 @@ const _REQUEST_TIMEOUT = 60000;
 const _RECONNECT_BASE_MS = 1000; // capped exponential backoff + jitter (mirrors the Desktop loop)
 const _RECONNECT_MAX_MS = 30000;
 const _CONNECT_TIMEOUT_MS = 15000; // wall-clock per attempt: ICE can stall forever without this
-const _MAX_RECONNECTS = 3; // after this many failures, stop and tell the user (don't spin forever)
+// After this many failures, stop and tell the user (don't spin forever). 6 attempts of
+// capped backoff ≈ 2.8 min of patience — enough for a phone radio waking from idle,
+// still ≈ 7 broker registrations per episode (well under the broker's 30/60s limit).
+const _MAX_RECONNECTS = 6;
+// Keepalive over the DataChannel: phone pings, Desktop echoes a pong. Idle NAT mappings
+// and consent timeouts silently kill the path after ~30s-2min of no traffic while
+// connectionState keeps saying "connected" — steady pings keep the mapping warm, and a
+// missing pong past the deadline reconnects proactively instead of at the next user tap.
+const _PING_INTERVAL_MS = 20000;
+const _PING_DEAD_MS = 45000; // > 2 intervals: one lost pong never kills a healthy link
 // After registering, wait briefly for the broker to push ephemeral STUN/TURN before gathering ICE
 // candidates; if none arrives (a static-mode node), fall back to the payload's ICE and offer anyway.
 const _ICE_PUSH_WAIT_MS = 800;
@@ -43,6 +52,8 @@ export class RemoteConnection {
   private closed = false;
   private reconnects = 0;
   private connectTimer: ReturnType<typeof setTimeout> | null = null;
+  private pingTimer: ReturnType<typeof setInterval> | null = null;
+  private lastPong = 0; // ms epoch of the newest pong; 0 = no keepalive expected yet
   private offerSent = false; // one offer per attempt (the ICE push and the wait-timeout both trigger it)
   private iceWaitTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -145,6 +156,10 @@ export class RemoteConnection {
     const type = m.type as string | undefined;
     if (type === "hello_ok") return this.onHelloOk(m);
     if (type === "auth_ok") return this.onAuthOk();
+    if (type === "pong") {
+      this.lastPong = Date.now();
+      return;
+    }
     if (type === "auth_error") {
       setRemoteStatus("offline", "this device isn't authorized — re-pair");
       this.failReady?.(new Error("auth_error"));
@@ -176,6 +191,8 @@ export class RemoteConnection {
 
   private async onAuthOk(): Promise<void> {
     if (this.connectTimer) { clearTimeout(this.connectTimer); this.connectTimer = null; } // connected in time
+    this.lastPong = Date.now(); // the auth round-trip proves the path is alive right now
+    this.pingTimer = setInterval(() => this.pingTick(), _PING_INTERVAL_MS);
     const kind = await this.connectionKind();
     // Fail SAFE on uncertainty: don't claim "direct (P2P)" unless we actually confirmed it —
     // a relayed session mislabeled as direct would falsely reassure the user.
@@ -190,6 +207,19 @@ export class RemoteConnection {
     } catch {
       return "unknown";
     }
+  }
+
+  // Keepalive tick: declare the connection dead if pongs stopped, otherwise ping.
+  // The dead-path case matters more than the traffic: an expired NAT mapping leaves
+  // connectionState on "connected" for minutes, so without this the user's next tap
+  // is what discovers the corpse (and eats the 60s request timeout).
+  private pingTick(): void {
+    if (this.closed || this.channel?.readyState !== "open") return;
+    if (pingDead(this.lastPong, Date.now(), _PING_DEAD_MS)) {
+      this.onConnectFailure();
+      return;
+    }
+    this.send(undefined, encodePing(Date.now()));
   }
 
   private onPcState(): void {
@@ -270,6 +300,8 @@ export class RemoteConnection {
   private teardown(): void {
     if (this.connectTimer) { clearTimeout(this.connectTimer); this.connectTimer = null; }
     if (this.iceWaitTimer) { clearTimeout(this.iceWaitTimer); this.iceWaitTimer = null; }
+    if (this.pingTimer) { clearInterval(this.pingTimer); this.pingTimer = null; }
+    this.lastPong = 0; // next connection starts a fresh keepalive clock (set on auth_ok)
     for (const [, p] of this.pending) {
       clearTimeout(p.timer); // fail in-flight requests fast instead of hanging to the timeout
       p.reject(new Error("connection dropped"));

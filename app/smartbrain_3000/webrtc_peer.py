@@ -22,6 +22,9 @@ Handshake over the channel (in order):
   3. REQUESTS: {"id","method","path","headers","body_b64"} -> {"id","status","headers",
      "body_b64"} (bodies base64 so binary uploads/backups are safe). The device is
      re-checked every request, so a revocation cuts the session off immediately.
+  4. KEEPALIVE (authed only): {"type":"ping","t"} -> {"type":"pong","t"}. The phone pings
+     on a timer so idle NAT/consent mappings stay warm and a dead path is noticed without
+     user traffic. Before auth, a ping is just an invalid auth message (rejected, closed).
 """
 
 from __future__ import annotations
@@ -195,6 +198,9 @@ async def _serve_message(channel, raw_text: str, http_client, store, session: di
         return
     if not session["authed"]:
         _handle_channel_auth(channel, msg, store, session)
+        return
+    if msg.get("type") == "ping":  # keepalive (authed only): echo so the phone knows the
+        _safe_send(channel, json.dumps({"type": "pong", "t": msg.get("t")}))  # path is alive
         return
     await _handle_request(channel, msg, http_client, store, session)
 
