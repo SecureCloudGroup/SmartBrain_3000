@@ -58,13 +58,15 @@ def test_rename_conversation() -> None:
     assert h.get_conversation(cid)["title"] == "new"
 
 
-def test_delete_cascades_messages() -> None:
+def test_delete_trashes_then_empty_trash_cascades_messages() -> None:
     h = _hist()
     cid = h.create_conversation("c")
     h.add_message(cid, "user", "hello")
     h.delete_conversation(cid)
-    assert h.get_conversation(cid) is None
-    assert h.get_messages(cid) == []  # messages gone, no orphans
+    assert h.get_conversation(cid) is None  # trashed reads absent everywhere
+    assert h.get_messages(cid) != []  # ...but messages survive until the purge
+    assert h.empty_trash() == 1
+    assert h.get_messages(cid) == []  # now truly gone, no orphans
 
 
 def test_list_orders_by_recent_activity() -> None:
@@ -403,3 +405,83 @@ def test_message_sources_via_api(client: TestClient) -> None:
     assert r.status_code == 200
     convo = client.get(f"/api/conversations/{cid}").json()
     assert convo["messages"][0]["sources"] == src
+
+
+# --- trash (30-day retention) ---------------------------------------------
+
+def test_trash_excluded_from_lists_then_restore_returns() -> None:
+    h = _hist()
+    keep = h.create_conversation("keep")
+    gone = h.create_conversation("gone")
+    h.delete_conversation(gone)
+    assert [c["id"] for c in h.list_conversations()] == [keep]
+    assert [c["id"] for c in h.list_conversations_page()["items"]] == [keep]
+    assert [t["id"] for t in h.list_trash()] == [gone]
+    assert h.list_trash()[0]["title"] == "gone"  # titles decrypt in the trash view
+    assert h.restore_conversation(gone) is True
+    assert {c["id"] for c in h.list_conversations()} == {keep, gone}
+    assert h.list_trash() == []
+
+
+def test_restore_of_live_or_unknown_returns_false() -> None:
+    h = _hist()
+    live = h.create_conversation("live")
+    assert h.restore_conversation(live) is False  # not in the trash
+    assert h.restore_conversation("nope") is False
+    assert h.get_conversation(live) is not None  # untouched
+
+
+def test_delete_all_trashes_every_live_conversation() -> None:
+    h = _hist()
+    for i in range(3):  # bounded seed
+        h.create_conversation(f"c{i}")
+    assert h.delete_all_conversations() == 3
+    assert h.list_conversations() == []
+    assert len(h.list_trash()) == 3
+    assert h.delete_all_conversations() == 0  # idempotent: nothing live remains
+
+
+def test_purge_expired_only_removes_past_cutoff() -> None:
+    h = _hist()
+    old = h.create_conversation("old")
+    fresh = h.create_conversation("fresh")
+    h.add_message(old, "user", "x")
+    h.delete_conversation(old)
+    h.delete_conversation(fresh)
+    # Backdate one stamp beyond the retention window (plaintext cadence metadata).
+    h._conn.execute(
+        "UPDATE conversations SET deleted_at = now() - to_days(31) WHERE id = ?;", [old]
+    )
+    assert h.purge_expired(days=30) == 1
+    assert [t["id"] for t in h.list_trash()] == [fresh]  # fresh survives
+    assert h.get_messages(old) == []  # purged conversation's messages went with it
+    assert h.restore_conversation(old) is False  # nothing left to restore
+
+
+def test_trash_routes_e2e(client: TestClient) -> None:
+    client.post("/api/account/setup", json={"passphrase": "correct-horse"})
+    a = client.post("/api/conversations", json={"title": "A"}).json()["id"]
+    b = client.post("/api/conversations", json={"title": "B"}).json()["id"]
+    client.post(f"/api/conversations/{a}/messages", json={"role": "user", "content": "hi"})
+    # Trash all -> lists empty, trash holds both, retention surfaced for the UI copy.
+    r = client.delete("/api/conversations")
+    assert r.json() == {"ok": True, "trashed": 2}
+    assert client.get("/api/conversations").json()["conversations"] == []
+    trash = client.get("/api/conversations/trash").json()
+    assert {t["id"] for t in trash["trash"]} == {a, b}
+    assert trash["retention_days"] == 30
+    # Restore one -> back in the list; restoring again 404s (no longer trashed).
+    assert client.post(f"/api/conversations/{a}/restore").json() == {"ok": True}
+    assert client.post(f"/api/conversations/{a}/restore").status_code == 404
+    assert [c["id"] for c in client.get("/api/conversations").json()["conversations"]] == [a]
+    # Empty trash -> b is gone for good.
+    assert client.delete("/api/conversations/trash").json() == {"ok": True, "deleted": 1}
+    assert client.get("/api/conversations/trash").json()["trash"] == []
+    assert client.get(f"/api/conversations/{b}").status_code == 404
+
+
+def test_trash_routes_require_unlock(client: TestClient) -> None:
+    assert client.delete("/api/conversations").status_code == 423
+    assert client.get("/api/conversations/trash").status_code == 423
+    assert client.delete("/api/conversations/trash").status_code == 423
+    assert client.post("/api/conversations/x/restore").status_code == 423

@@ -216,6 +216,10 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
         " created_at TIMESTAMP DEFAULT now(),"
         " PRIMARY KEY (doc_id, idx));",
     ),
+    # Chat trash: a trashed conversation gains deleted_at (plaintext cadence metadata,
+    # like created_at); every read filters it, restore clears it, and the scheduler
+    # purges rows past the retention window. Messages stay until the purge.
+    (25, "ALTER TABLE conversations ADD COLUMN deleted_at TIMESTAMP;"),
 )
 
 # The newest migration this build knows how to apply. A database recording a

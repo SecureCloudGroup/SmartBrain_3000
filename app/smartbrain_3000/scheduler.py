@@ -27,6 +27,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from . import agent, consent, docsummaries, gateway, ingest, search, tools, usage, vault_sync
 from .approvals import ApprovalStore
 from .audit import AuditLog
+from .history import ChatHistory
 from .kb import KnowledgeBase
 from .memory import MemoryStore
 from .planner import Planner
@@ -662,6 +663,12 @@ def tick(app) -> int:
         _auto_reindex(cursor, key)  # keep semantic search current without a manual Reindex
         idle = time.monotonic() - getattr(app.state, "last_interactive", 0.0) > _SUMMARIZE_IDLE_SECONDS
         _auto_summarize(cursor, key, idle=idle)  # B1: tree-building waits for a quiet machine
+        try:  # chat-trash retention: cheap SQL, isolated so it can never stop a tick
+            purged = ChatHistory(cursor, key).purge_expired()
+            if purged:
+                log.info("chat trash: purged %d expired conversations", purged)
+        except Exception as exc:
+            log.debug("trash purge skipped: %s", exc)
         _auto_update_vaults(app)    # Stage E: apply due subscription updates (model-independent)
         if _breaker_open():  # B11: gateway is known-bad — don't pile turns onto a dead model
             return 0

@@ -21,6 +21,8 @@ from .secrets import MASTER_KEY_BYTES
 
 _NONCE_BYTES = 12
 _LIST_LIMIT = 200  # max conversations listed (verifiable bound)
+TRASH_RETENTION_DAYS = 30  # trashed chats are restorable this long, then purged by the scheduler
+_PURGE_LIMIT = 1000  # max conversations hard-deleted per purge/empty pass (verifiable bound)
 _MSG_LIMIT = 2000  # max messages loaded per conversation (verifiable bound)
 _DEFAULT_LIST_PAGE = 50    # default page size for paginated conversation listing
 _MAX_LIST_PAGE = 200       # hard max page size (mirrors _LIST_LIMIT)
@@ -113,7 +115,7 @@ class ChatHistory:
         """Return id/title/timestamps for conversations, most-recent first."""
         rows = self._conn.execute(
             "SELECT id, nonce, ciphertext, created_at, updated_at FROM conversations "
-            "ORDER BY updated_at DESC LIMIT ?;",
+            "WHERE deleted_at IS NULL ORDER BY updated_at DESC LIMIT ?;",
             [_LIST_LIMIT],
         ).fetchall()
         assert isinstance(rows, list), "fetchall must return a list"
@@ -148,13 +150,13 @@ class ChatHistory:
         if cursor is None:
             rows = self._conn.execute(
                 "SELECT id, nonce, ciphertext, created_at, updated_at FROM conversations "
-                "ORDER BY updated_at DESC, id DESC LIMIT ?;",
+                "WHERE deleted_at IS NULL ORDER BY updated_at DESC, id DESC LIMIT ?;",
                 [page + 1],
             ).fetchall()
         else:
             rows = self._conn.execute(
                 "SELECT id, nonce, ciphertext, created_at, updated_at FROM conversations "
-                "WHERE (updated_at, id) < (CAST(? AS TIMESTAMP), ?) "
+                "WHERE deleted_at IS NULL AND (updated_at, id) < (CAST(? AS TIMESTAMP), ?) "
                 "ORDER BY updated_at DESC, id DESC LIMIT ?;",
                 [cursor[0], cursor[1], page + 1],
             ).fetchall()
@@ -182,7 +184,8 @@ class ChatHistory:
         """Return a conversation's id/title/timestamps, or None if absent."""
         assert cid, "conversation id required"
         row = self._conn.execute(
-            "SELECT nonce, ciphertext, created_at, updated_at FROM conversations WHERE id = ?;",
+            "SELECT nonce, ciphertext, created_at, updated_at FROM conversations "
+            "WHERE id = ? AND deleted_at IS NULL;",
             [cid],
         ).fetchone()
         if row is None:
@@ -202,11 +205,76 @@ class ChatHistory:
         )
 
     def delete_conversation(self, cid: str) -> None:
-        """Delete a conversation and its messages (no error if absent)."""
+        """Move a conversation to the TRASH (no error if absent).
+
+        Deleting is reversible for ``TRASH_RETENTION_DAYS``: the row just gains a
+        ``deleted_at`` stamp (plaintext cadence metadata, like ``created_at``) and
+        every read filters it out — messages stay untouched until the purge. Restore
+        clears the stamp; ``purge_expired``/``empty_trash`` do the real deletion.
+        """
         assert cid, "conversation id required"
-        self._conn.execute("DELETE FROM messages WHERE conversation_id = ?;", [cid])
-        self._conn.execute("DELETE FROM conversations WHERE id = ?;", [cid])
-        assert self.get_conversation(cid) is None, "conversation must be absent after delete"
+        self._conn.execute(
+            "UPDATE conversations SET deleted_at = now() WHERE id = ? AND deleted_at IS NULL;", [cid]
+        )
+        assert self.get_conversation(cid) is None, "conversation must read absent after trashing"
+
+    def delete_all_conversations(self) -> int:
+        """Move EVERY live conversation to the trash; return how many moved."""
+        count = self._conn.execute(
+            "SELECT count(*) FROM conversations WHERE deleted_at IS NULL;"
+        ).fetchone()[0]
+        self._conn.execute("UPDATE conversations SET deleted_at = now() WHERE deleted_at IS NULL;")
+        return int(count)
+
+    def list_trash(self) -> list[dict]:
+        """Trashed conversations (id/title/deleted_at), newest-trashed first."""
+        rows = self._conn.execute(
+            "SELECT id, nonce, ciphertext, deleted_at FROM conversations "
+            "WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC LIMIT ?;",
+            [_LIST_LIMIT],
+        ).fetchall()
+        out: list[dict] = []
+        for row in rows:  # bounded by _LIST_LIMIT
+            body = self._open(b"conversation:", str(row[0]), bytes(row[1]), bytes(row[2]))
+            out.append({"id": str(row[0]), "title": body["title"], "deleted_at": str(row[3])})
+        return out
+
+    def restore_conversation(self, cid: str) -> bool:
+        """Bring a trashed conversation back; False if it wasn't in the trash."""
+        assert cid, "conversation id required"
+        row = self._conn.execute(
+            "SELECT 1 FROM conversations WHERE id = ? AND deleted_at IS NOT NULL;", [cid]
+        ).fetchone()
+        if row is None:
+            return False
+        self._conn.execute("UPDATE conversations SET deleted_at = NULL WHERE id = ?;", [cid])
+        assert self.get_conversation(cid) is not None, "conversation must be readable after restore"
+        return True
+
+    def _hard_delete(self, cids: list[str]) -> None:
+        """Permanently remove conversations + their messages (child-first cascade)."""
+        for cid in cids:  # bounded by the caller's SELECT LIMIT
+            self._conn.execute("DELETE FROM messages WHERE conversation_id = ?;", [cid])
+            self._conn.execute("DELETE FROM conversations WHERE id = ?;", [cid])
+
+    def empty_trash(self) -> int:
+        """Permanently delete everything in the trash NOW; return how many went."""
+        rows = self._conn.execute(
+            "SELECT id FROM conversations WHERE deleted_at IS NOT NULL LIMIT ?;", [_PURGE_LIMIT]
+        ).fetchall()
+        self._hard_delete([str(r[0]) for r in rows])
+        return len(rows)
+
+    def purge_expired(self, days: int = TRASH_RETENTION_DAYS) -> int:
+        """Permanently delete trash older than ``days`` (the scheduler calls this)."""
+        assert days > 0, "retention must be positive"
+        rows = self._conn.execute(
+            "SELECT id FROM conversations WHERE deleted_at IS NOT NULL "
+            "AND deleted_at < now() - to_days(?) LIMIT ?;",
+            [days, _PURGE_LIMIT],
+        ).fetchall()
+        self._hard_delete([str(r[0]) for r in rows])
+        return len(rows)
 
     def add_message(self, cid: str, role: str, content: str, sources: list[dict] | None = None) -> str:
         """Append an encrypted message to a conversation; bump its updated_at.

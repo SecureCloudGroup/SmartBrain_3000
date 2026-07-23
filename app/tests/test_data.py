@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import Iterator
 
 import pytest
@@ -373,10 +374,21 @@ def _seed_v12(conn, master_key: bytes) -> dict:
         "INSERT INTO tasks (id, nonce, ciphertext, status, due_date) VALUES (?, ?, ?, 'open', ?);",
         [tid, nonce, ct, "2026-02-01"],
     )
+    # OLD conversation rows: no deleted_at column yet (migration 25 adds it), so seal
+    # with the store but raw-insert the v12-era shapes (same pattern as the OLD task).
     hist = ChatHistory(conn, master_key)
-    cid = hist.create_conversation("first chat")
-    hist.add_message(cid, "user", "hello")
-    hist.add_message(cid, "assistant", "hi there")
+    cid = str(uuid.uuid4())
+    nonce, ct = hist._seal(b"conversation:", cid, {"title": "first chat"})
+    conn.execute(
+        "INSERT INTO conversations (id, nonce, ciphertext) VALUES (?, ?, ?);", [cid, nonce, ct]
+    )
+    for role, content in (("user", "hello"), ("assistant", "hi there")):
+        mid = str(uuid.uuid4())
+        nonce, ct = hist._seal(b"message:", mid, {"role": role, "content": content})
+        conn.execute(
+            "INSERT INTO messages (id, conversation_id, nonce, ciphertext) VALUES (?, ?, ?, ?);",
+            [mid, cid, nonce, ct],
+        )
     mem = MemoryStore(conn, master_key)
     mem.add_memory(_UP_MEMORY)
     mem.set_profile("Brainy", "Sam", "be concise")
@@ -417,7 +429,7 @@ def test_upgrade_from_v12_preserves_all_client_data(tmp_path) -> None:
     }
 
     applied = dbmod.run_migrations(conn)
-    assert applied == 12  # exactly ids 13..24
+    assert applied == 13  # exactly ids 13..25
 
     # Every user-data row count is unchanged across the upgrade.
     for t, n in counts.items():
@@ -458,7 +470,7 @@ def test_upgrade_from_v2_preserves_documents(tmp_path) -> None:
     master_key = keyvault.set_passphrase(conn, _UP_PASS)
     doc_id = KnowledgeBase(conn, master_key).add("Ancient", "note from the v2 era")
 
-    assert dbmod.run_migrations(conn) == 22  # ids 3..24
+    assert dbmod.run_migrations(conn) == 23  # ids 3..25
     assert KnowledgeBase(conn, master_key).get(doc_id)["content"] == "note from the v2 era"
     assert conn.execute("SELECT COUNT(*) FROM documents;").fetchone()[0] == 1
     assert conn.execute("SELECT COUNT(*) FROM embeddings;").fetchone()[0] == 0  # fresh, empty
@@ -479,7 +491,7 @@ def test_upgrade_from_v17_preserves_embeddings_and_tasks(tmp_path) -> None:
     planner = Planner(conn, master_key)
     tid = planner.add_task("file taxes", priority="high", due_time="09:00", recur="weekly")
 
-    assert dbmod.run_migrations(conn) == 7  # ids 18..24
+    assert dbmod.run_migrations(conn) == 8  # ids 18..25
     # Chunked embedding preserved (18-21 only add schedule_runs, its seen column, and vaults).
     assert conn.execute("SELECT COUNT(*) FROM embeddings;").fetchone()[0] == 1
     t = planner.get_task(tid)
@@ -504,7 +516,7 @@ def test_migration_19_marks_preexisting_runs_seen(tmp_path) -> None:
         "INSERT INTO schedule_runs (id, schedule_id, status, nonce, ciphertext) VALUES (?, ?, ?, ?, ?);",
         ["run-old", sid, "complete", b"\x00" * 12, b"x"],
     )
-    assert dbmod.run_migrations(conn) == 6  # 19 adds seen; 20-23 vaults/membership; 24 doc_summaries
+    assert dbmod.run_migrations(conn) == 7  # 19 seen; 20-23 vaults; 24 doc_summaries; 25 chat trash
     assert store.unseen_count() == 0  # the back-catalog is seen -> badge stays quiet on upgrade
     conn.close()
 
@@ -517,7 +529,7 @@ def test_app_boots_and_serves_data_after_v12_upgrade(tmp_path, monkeypatch) -> N
     _apply_through(conn, 12)
     master_key = keyvault.set_passphrase(conn, _UP_PASS)
     _seed_v12(conn, master_key)
-    assert dbmod.run_migrations(conn) == 12  # ids 13..24 (incl. vaults + membership + doc_summaries)
+    assert dbmod.run_migrations(conn) == 13  # ids 13..25 (vaults + doc_summaries + chat trash)
     conn.close()  # release the file before the app opens it
 
     monkeypatch.setenv("SMARTBRAIN_DB_PATH", str(path))

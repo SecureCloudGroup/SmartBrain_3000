@@ -1,7 +1,9 @@
 <script lang="ts">
-  import { api } from "$lib/api";
+  import { onMount } from "svelte";
+  import { api, type TrashedConversation } from "$lib/api";
   import { confirmDialog } from "$lib/confirm.svelte";
   import { describeError } from "$lib/errors";
+  import { daysLeft, localTs } from "$lib/runs";
 
   let current = $state("");
   let next = $state("");
@@ -117,6 +119,85 @@
     }
   }
 
+  // --- chat trash (deleted chats are restorable until the retention window lapses) ---
+  let trash = $state<TrashedConversation[]>([]);
+  let retentionDays = $state(30);
+  let trashMsg = $state("");
+
+  async function loadTrash() {
+    try {
+      const r = await api.listTrash();
+      trash = r.trash;
+      retentionDays = r.retention_days;
+    } catch {
+      // Locked or unreachable — the card just shows empty; the rest of the page still works.
+    }
+  }
+  onMount(loadTrash);
+
+  async function deleteAllChats() {
+    trashMsg = "";
+    error = "";
+    if (
+      !(await confirmDialog({
+        title: "Delete all chats",
+        body: `Move every conversation to the Trash? You can restore from Trash for ${retentionDays} days.`,
+        confirmLabel: "Delete all",
+        danger: true,
+      }))
+    )
+      return;
+    busy = true;
+    try {
+      const r = await api.deleteAllConversations();
+      trashMsg = r.trashed ? `Moved ${r.trashed} chat${r.trashed === 1 ? "" : "s"} to the Trash.` : "No chats to delete.";
+      await loadTrash();
+    } catch (err) {
+      error = describeError(err);
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function restoreChat(id: string) {
+    trashMsg = "";
+    error = "";
+    busy = true;
+    try {
+      await api.restoreConversation(id);
+      trashMsg = "Chat restored.";
+      await loadTrash();
+    } catch (err) {
+      error = describeError(err);
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function emptyTrash() {
+    trashMsg = "";
+    error = "";
+    if (
+      !(await confirmDialog({
+        title: "Empty trash",
+        body: "Permanently delete every chat in the Trash? This cannot be undone.",
+        confirmLabel: "Empty trash",
+        danger: true,
+      }))
+    )
+      return;
+    busy = true;
+    try {
+      const r = await api.emptyTrash();
+      trashMsg = `Permanently deleted ${r.deleted} chat${r.deleted === 1 ? "" : "s"}.`;
+      await loadTrash();
+    } catch (err) {
+      error = describeError(err);
+    } finally {
+      busy = false;
+    }
+  }
+
   async function restore() {
     dataMsg = "";
     error = "";
@@ -197,6 +278,38 @@
     <button class="secondary" disabled={busy || !egressPass} onclick={exportData}>Export data (JSON)</button>
     <button disabled={busy || !egressPass} onclick={downloadBackup}>Download encrypted backup</button>
   </p>
+</div>
+
+<div class="card">
+  <h2>Chat trash</h2>
+  <p class="muted">
+    Deleted chats land here and stay restorable for {retentionDays} days, then they are
+    permanently removed.
+  </p>
+  {#if trash.length}
+    {#each trash as t (t.id)}
+      <div class="row">
+        <span style="min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">
+          {t.title}
+          <span class="muted">
+            — deleted {localTs(t.deleted_at)} ·
+            {#if daysLeft(t.deleted_at, retentionDays) === 0}deletes soon{:else}deletes in {daysLeft(t.deleted_at, retentionDays)} day{daysLeft(t.deleted_at, retentionDays) === 1 ? "" : "s"}{/if}
+          </span>
+        </span>
+        <span class="spacer"></span>
+        <button class="secondary" disabled={busy} onclick={() => restoreChat(t.id)}>Restore</button>
+      </div>
+    {/each}
+  {:else}
+    <p class="muted">The trash is empty.</p>
+  {/if}
+  <p style="display:flex; gap:0.5rem; flex-wrap:wrap; margin-top:0.75rem">
+    <button class="del" disabled={busy} onclick={deleteAllChats}>Delete all chats</button>
+    {#if trash.length}
+      <button class="del" disabled={busy} onclick={emptyTrash}>Empty trash</button>
+    {/if}
+  </p>
+  {#if trashMsg}<p class="notice">{trashMsg}</p>{/if}
 </div>
 
 <div class="card">
