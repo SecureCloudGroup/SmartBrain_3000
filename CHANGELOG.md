@@ -36,6 +36,17 @@ to know when a release changes behavior.
   chats queue behind them on oMLX's single request slot.
 
 ### Added
+- **Chat trash**: deleting a chat — or every chat at once with the new "Delete all
+  chats" action in Settings → Account & Data — now moves it to a Trash instead of
+  destroying it. Trashed chats disappear from every list but stay restorable for
+  30 days from the new Trash card, which shows when each was deleted and how long it
+  has left; after that the scheduler purges them for good, or "Empty trash" does it
+  immediately.
+- **Info page**: schedule output moved out of Schedules into a new Info page — in the
+  sidebar and, on a phone, its own bottom tab. The All tab shows every run newest-first;
+  a tab per schedule shows just that schedule's output. Schedules keeps Items + Create,
+  and "Run now" points at Info for results. (New scheduled-run notices still appear in
+  Chat exactly as before.)
 - Book-scale documents, summarized instantly: every document now gets a background
   **summary tree** (chunk summaries reduced into one whole-document summary), built a
   piece at a time by the scheduler — encrypted like everything else, resumable, yielding

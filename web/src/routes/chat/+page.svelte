@@ -81,7 +81,7 @@
   // than a normal reply. Display-only: never persisted or sent back to the model (buildTranscript
   // drops schedule entries), so they can't pollute a conversation's saved thread. Opening chat
   // pulls anything unseen; a light poll surfaces new ones live while you sit here. Marking them
-  // seen clears the Chat nav badge. The durable copy always lives on the Schedules → Output tab.
+  // seen clears the Chat nav badge. The durable copy always lives on the Info page.
   let pulling = false; // guards against overlapping pulls (mount + interval)
   let updatesTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -912,7 +912,7 @@
         {/if}
         {#if chatSession.currentId}
           <button class="secondary" disabled={busy} title="Rename this chat" onclick={startRename}>Rename</button>
-          <button class="secondary" disabled={busy} title="Delete this chat" onclick={() => remove(chatSession.currentId!)}>Delete</button>
+          <button class="secondary" disabled={busy} title="Move this chat to the Trash (restorable for 30 days in Settings → Account)" onclick={() => remove(chatSession.currentId!)}>Delete</button>
         {/if}
       {/if}
     {/if}

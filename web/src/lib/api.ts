@@ -93,6 +93,13 @@ export interface Conversation {
   updated_at: string;
 }
 
+// A conversation sitting in the trash: restorable until the retention window lapses.
+export interface TrashedConversation {
+  id: string;
+  title: string;
+  deleted_at: string;
+}
+
 // A citation extracted server-side from a knowledge tool's RESULT during an agent turn —
 // deterministic (never parsed out of model prose), so it exists with any model. Field
 // meanings mirror KbHit's citation block; `offset` deep-links Knowledge to the passage.
@@ -578,6 +585,15 @@ export const api = {
     }),
   deleteConversation: (id: string) =>
     req<{ ok: boolean }>(`/api/conversations/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  // Trash: deletes are reversible for the server's retention window, then purged.
+  deleteAllConversations: () =>
+    req<{ ok: boolean; trashed: number }>("/api/conversations", { method: "DELETE" }),
+  listTrash: () =>
+    req<{ trash: TrashedConversation[]; retention_days: number }>("/api/conversations/trash"),
+  emptyTrash: () =>
+    req<{ ok: boolean; deleted: number }>("/api/conversations/trash", { method: "DELETE" }),
+  restoreConversation: (id: string) =>
+    req<{ ok: boolean }>(`/api/conversations/${encodeURIComponent(id)}/restore`, { method: "POST" }),
   // `sources` (citations from the agent turn's tool results) persist with the assistant
   // message so a reloaded conversation shows the same chips as the live one.
   addMessage: (id: string, role: "user" | "assistant" | "system", content: string, sources?: Source[]) =>

@@ -37,6 +37,7 @@
     { href: "/planner", label: "Planner", icon: "tasks", remote: true },
     { href: "/schedules", label: "Schedules", icon: "clock", remote: true },
     { href: "/email", label: "Email", icon: "mail", remote: true },
+    { href: "/info", label: "Info", icon: "info", remote: true },
     { href: "/activity", label: "Activity", icon: "activity", remote: true },
     { href: "/usage", label: "Usage", icon: "chart", remote: false },
     { href: "/settings", label: "Settings", icon: "sliders", remote: false },
@@ -45,8 +46,8 @@
   // session) shows only the consume-on-the-go pages.
   const remoteSession = $derived(remote.status !== "idle");
   const nav = $derived(remoteSession ? NAV.filter((n) => n.remote) : NAV);
-  // Mobile: the three thumb-zone tabs; everything else lives in the More sheet.
-  const TAB_HREFS = ["/chat", "/knowledge", "/activity"];
+  // Mobile: the four thumb-zone tabs (plus More); everything else lives in the More sheet.
+  const TAB_HREFS = ["/chat", "/knowledge", "/info", "/activity"];
   const tabNav = $derived(nav.filter((n) => TAB_HREFS.includes(n.href)));
   const moreNav = $derived(nav.filter((n) => !TAB_HREFS.includes(n.href)));
   const isActive = (href: string) =>

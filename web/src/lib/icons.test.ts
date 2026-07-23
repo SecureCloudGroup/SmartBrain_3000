@@ -13,7 +13,7 @@ describe("vendored icon set", () => {
   });
 
   it("contains every icon the app currently renders", () => {
-    const used = ["sun", "moon", "sun-moon", "more-horizontal", "x", "check", "chevron-down", "chevron-right"] as const;
+    const used = ["sun", "moon", "sun-moon", "more-horizontal", "x", "check", "chevron-down", "chevron-right", "info"] as const;
     for (const n of used) expect(ICONS[n], n).toBeTruthy();
   });
 });

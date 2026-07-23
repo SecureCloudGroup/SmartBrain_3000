@@ -40,6 +40,7 @@ const SUBSET = {
   "clock": ["Clock"],
   "mail": ["Mail"],
   "activity": ["Activity"],
+  "info": ["Info"],
   "chart": ["ChartColumn", "BarChart3"],
   "sliders": ["SlidersHorizontal"],
   "monitor": ["Monitor"],

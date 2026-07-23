@@ -10,7 +10,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
-from .history import ChatHistory
+from .history import TRASH_RETENTION_DAYS, ChatHistory
 
 router = APIRouter()
 
@@ -63,6 +63,40 @@ def create_conversation(request: Request, body: NewConversation) -> dict[str, st
     """Create a conversation; return its id."""
     title = (body.title or "").strip() or "New conversation"
     return {"id": _hist(request).create_conversation(title)}
+
+
+# Trash routes: literal paths declared BEFORE the /{cid} handlers (the schedule_routes
+# convention) so "trash" is never captured as a conversation id.
+
+
+@router.delete("/api/conversations")
+def trash_all_conversations(request: Request) -> dict:
+    """Move EVERY conversation to the trash (restorable for the retention window).
+
+    Parked approvals referencing trashed conversations are left alone — parity with
+    the single-conversation path (they remain deniable in Activity).
+    """
+    return {"ok": True, "trashed": _hist(request).delete_all_conversations()}
+
+
+@router.get("/api/conversations/trash")
+def list_trash(request: Request) -> dict:
+    """Trashed conversations with when they were trashed + the retention window."""
+    return {"trash": _hist(request).list_trash(), "retention_days": TRASH_RETENTION_DAYS}
+
+
+@router.delete("/api/conversations/trash")
+def empty_trash(request: Request) -> dict:
+    """Permanently delete everything in the trash right now."""
+    return {"ok": True, "deleted": _hist(request).empty_trash()}
+
+
+@router.post("/api/conversations/{cid}/restore")
+def restore_conversation(request: Request, cid: str) -> dict:
+    """Bring a trashed conversation back; 404 if it isn't in the trash."""
+    if not _hist(request).restore_conversation(cid):
+        raise HTTPException(status_code=404, detail="not in the trash")
+    return {"ok": True}
 
 
 @router.get("/api/conversations/{cid}")

@@ -1,20 +1,19 @@
 <script lang="ts">
   import Icon from "$lib/components/Icon.svelte";
   import Tabs from "$lib/components/Tabs.svelte";
-  import EmptyState from "$lib/components/EmptyState.svelte";
   import Spinner from "$lib/components/Spinner.svelte";
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
   import { account } from "$lib/account.svelte";
-  import { api, type Schedule, type RecentScheduleRun } from "$lib/api";
+  import { api, type Schedule } from "$lib/api";
   import { confirmDialog } from "$lib/confirm.svelte";
   import { describeError } from "$lib/errors";
+  import { localTs } from "$lib/runs";
 
-  type Tab = "output" | "create" | "items";
-  let tab = $state<Tab>("output");
+  type Tab = "create" | "items";
+  let tab = $state<Tab>("items");
 
   let schedules = $state<Schedule[]>([]);
-  let recentRuns = $state<RecentScheduleRun[]>([]); // aggregate output across all schedules
 
   // Create form
   let title = $state("");
@@ -31,7 +30,7 @@
   let editRepeat = $state(1440);
 
   let error = $state("");
-  let notice = $state(""); // transient action feedback (e.g. "ran — see Output")
+  let notice = $state(""); // transient action feedback (e.g. "ran — output is on the Info page")
 
   const repeats = [
     { value: 0, label: "Once" },
@@ -61,20 +60,6 @@
     return repeats.find((r) => r.value === m)?.label ?? `Every ${m} min`;
   }
 
-  // Server timestamps are UTC strings (e.g. "2026-06-21 14:30:00") — render in the user's locale.
-  function localTs(s: string | null): string {
-    if (!s) return "";
-    const d = new Date(s.slice(0, 19).replace(" ", "T") + "Z");
-    return Number.isNaN(d.getTime()) ? s : d.toLocaleString();
-  }
-
-  function runStatusLabel(status: string): string {
-    if (status === "awaiting_approval") return "Needs approval";
-    if (status === "error") return "Failed";
-    if (status === "complete") return "Done";
-    return status;
-  }
-
   async function load() {
     try {
       schedules = (await api.listSchedules()).schedules;
@@ -83,18 +68,9 @@
     }
   }
 
-  async function loadOutput() {
-    try {
-      recentRuns = (await api.recentScheduleRuns()).runs;
-    } catch (err) {
-      error = describeError(err);
-    }
-  }
-
-  async function selectTab(t: Tab) {
+  function selectTab(t: Tab) {
     tab = t;
     notice = "";
-    if (t === "output") await loadOutput();
   }
 
   onMount(async () => {
@@ -102,7 +78,7 @@
     const s = account.status;
     if (s && !s.initialized) return goto("/setup");
     if (s && !s.unlocked) return goto("/unlock");
-    await Promise.all([load(), loadOutput()]);
+    await load();
   });
 
   async function add(event: Event) {
@@ -179,10 +155,9 @@
       const r = await api.runSchedule(s.id);
       notice =
         r.status === "awaiting_approval" ? `“${s.title}” needs approval — see Activity.`
-        : r.status === "error" ? `“${s.title}” failed — details below.`
-        : `“${s.title}” ran — output below.`;
-      await Promise.all([load(), loadOutput()]);
-      tab = "output"; // the result now shows at the top of Output
+        : r.status === "error" ? `“${s.title}” failed — details on the Info page.`
+        : `“${s.title}” ran — output is on the Info page.`;
+      await load();
     } catch (err) {
       error = describeError(err);
     } finally {
@@ -195,39 +170,19 @@
   <h1>Schedules</h1>
   <p class="muted">
     A schedule runs a prompt on a timer while the app is unlocked. Read-only steps run on their
-    own; anything that changes data or sends waits for your approval in Activity.
+    own; anything that changes data or sends waits for your approval in Activity. Run output
+    lives on the <a href="/info">Info</a> page.
   </p>
 
   <Tabs
-    tabs={[{ id: "output", label: "Output" }, { id: "create", label: "Create" }, { id: "items", label: "Items" }]}
+    tabs={[{ id: "items", label: "Items" }, { id: "create", label: "Create" }]}
     active={tab}
     onselect={(id) => selectTab(id as Tab)}
   />
 
   {#if notice}<p class="notice">{notice}</p>{/if}
 
-  {#if tab === "output"}
-    <div class="output-head">
-      <p class="muted" style="margin:0; flex:1">Latest output from your schedules, newest first.</p>
-      <button class="secondary" onclick={loadOutput}>Refresh</button>
-    </div>
-    {#if recentRuns.length === 0}
-      <EmptyState icon="clock" title="Nothing has run yet" body="Runs land here after a schedule fires — or use “Run now” on the Items tab to see one immediately." />
-    {/if}
-    {#each recentRuns as run (run.id)}
-      <div class="card run-card">
-        <p class="run-head">Scheduled Item: {run.schedule_title}</p>
-        <p class="muted" style="margin:0 0 0.35rem; font-size:0.8em">{localTs(run.ran_at)} · {runStatusLabel(run.status)}</p>
-        {#if run.error}
-          <p class="error" style="margin:0; white-space:pre-wrap">{run.error}</p>
-        {:else if run.status === "awaiting_approval"}
-          <p class="notice" style="margin:0">Awaiting your approval — open Activity to review.</p>
-        {:else}
-          <p style="margin:0; white-space:pre-wrap">{run.message || "(no output)"}</p>
-        {/if}
-      </div>
-    {/each}
-  {:else if tab === "create"}
+  {#if tab === "create"}
     <div class="card">
       <p class="muted" style="margin:0 0 0.5rem; font-size:0.85rem">
         Quick start:
@@ -297,17 +252,3 @@
 {:else}
   <Spinner block />
 {/if}
-
-<style>
-  .output-head {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    margin-bottom: 0.5rem;
-  }
-  .run-card .run-head {
-    margin: 0 0 0.2rem;
-    font-weight: 600;
-  }
-  /* .linklike is now global (app.css) — one text-button voice everywhere. */
-</style>
