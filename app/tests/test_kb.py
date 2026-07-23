@@ -289,3 +289,91 @@ def test_reindex_route_all_failed_returns_200(client: TestClient, monkeypatch) -
     body = r.json()
     assert body["failed"] >= 2 and body["embedded"] == 0
     assert "ollama down" in body["error"]
+
+
+# --- manual tags (lexical-only) -----------------------------------------------------------------
+
+def test_set_tags_roundtrip_cleaned_and_bounded() -> None:
+    kb = _kb()
+    doc_id = kb.add("Lease", "the rental agreement")
+    assert kb.set_tags(doc_id, [" property ", "property", "", "2024"]) is True
+    assert kb.get(doc_id)["tags"] == ["property", "2024"]  # trimmed, de-duped, blanks dropped
+    (row,) = [d for d in kb.list_docs() if d["id"] == doc_id]
+    assert row["tags"] == ["property", "2024"]  # the list surfaces tags without content
+    assert kb.set_tags(doc_id, [f"t{i}" for i in range(30)]) is True
+    assert len(kb.get(doc_id)["tags"]) == 20  # bounded (mirrors planner)
+    assert kb.set_tags("nope", ["x"]) is False
+
+
+def test_rename_preserves_tags() -> None:
+    # THE data-loss trap: rename re-seals the whole body, so tags must ride through.
+    kb = _kb()
+    doc_id = kb.add("Cryptic-scan-0042", "the deed to the house")
+    kb.set_tags(doc_id, ["property"])
+    assert kb.rename(doc_id, "House deed") is True
+    doc = kb.get(doc_id)
+    assert doc["title"] == "House deed" and doc["tags"] == ["property"]
+
+
+def test_replace_drops_tags() -> None:
+    # replace() is the vault-update primitive; vault-owned copies can't be tagged, so a
+    # replace starting fresh is intentional (pinned so a future edit can't flip it silently).
+    kb = _kb()
+    doc_id = kb.add("Guide", "v1 text")
+    kb.set_tags(doc_id, ["keep-me"])
+    assert kb.replace(doc_id, "Guide", "v2 text") is True
+    assert kb.get(doc_id)["tags"] == []
+
+
+def test_lexical_search_finds_tag_instantly() -> None:
+    kb = _kb()
+    doc_id = kb.add("Scan 0042", "an agreement between the parties")
+    kb.add("Recipes", "pasta with tomato sauce")
+    assert kb.search("taxes") == []  # index is built now; no tag yet
+    kb.set_tags(doc_id, ["taxes"])
+    results = kb.search("taxes")  # in-memory index re-tokenized instantly — no reindex step
+    assert [r["id"] for r in results] == [doc_id]
+
+
+def test_legacy_body_without_tags_opens_and_indexes() -> None:
+    # A document sealed before tags existed has no "tags" key; it must open as [] everywhere.
+    import json as jsonmod
+    import os as osmod
+    import uuid as uuidmod
+
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    conn = duckdb.connect(":memory:")
+    dbmod.run_migrations(conn)
+    key = gen_master_key()
+    kb = KnowledgeBase(conn, key)
+    doc_id = str(uuidmod.uuid4())
+    nonce = osmod.urandom(12)
+    body = {"title": "Old doc", "content": "sealed before tags existed", "meta": {}}
+    ciphertext = AESGCM(key).encrypt(nonce, jsonmod.dumps(body).encode(), doc_id.encode())
+    conn.execute("INSERT INTO documents (id, nonce, ciphertext) VALUES (?, ?, ?);",
+                 [doc_id, nonce, ciphertext])
+    assert kb.get(doc_id)["tags"] == []
+    (item,) = kb.iter_documents(limit=10)
+    assert item == (doc_id, "Old doc", "sealed before tags existed", [])
+    assert [r["id"] for r in kb.search("sealed")] == [doc_id]
+
+
+def test_patch_tags_via_api(client: TestClient) -> None:
+    client.post("/api/account/setup", json={"passphrase": "correct-horse"})
+    doc_id = client.post("/api/kb", json={"title": "Notes", "content": "x"}).json()["id"]
+    # tags only: title untouched
+    assert client.patch(f"/api/kb/{doc_id}", json={"tags": ["a", "b"]}).json() == {"ok": True}
+    got = client.get(f"/api/kb/{doc_id}").json()
+    assert got["title"] == "Notes" and got["tags"] == ["a", "b"]
+    assert client.get("/api/kb").json()["documents"][0]["tags"] == ["a", "b"]
+    # title only: tags untouched
+    client.patch(f"/api/kb/{doc_id}", json={"title": "Renamed"})
+    assert client.get(f"/api/kb/{doc_id}").json()["tags"] == ["a", "b"]
+    # clear with []
+    client.patch(f"/api/kb/{doc_id}", json={"tags": []})
+    assert client.get(f"/api/kb/{doc_id}").json()["tags"] == []
+    # neither field -> 422; blank title -> 422; unknown doc -> 404
+    assert client.patch(f"/api/kb/{doc_id}", json={}).status_code == 422
+    assert client.patch(f"/api/kb/{doc_id}", json={"title": "   "}).status_code == 422
+    assert client.patch("/api/kb/nope", json={"tags": ["x"]}).status_code == 404

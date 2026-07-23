@@ -23,6 +23,7 @@ import uuid
 import duckdb
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
+from .kb import _clean_tags
 from .secrets import MASTER_KEY_BYTES
 
 _NONCE_BYTES = 12
@@ -92,12 +93,17 @@ class VaultStore:
 
     # --- vaults ---------------------------------------------------------------------------------
 
-    def create(self, name: str, description: str = "", *, kind: str = LOCAL, source: dict | None = None) -> str:
+    def create(
+        self, name: str, description: str = "", *, kind: str = LOCAL,
+        source: dict | None = None, tags: list[str] | None = None,
+    ) -> str:
         """Create a vault; return its id. ``source`` carries import provenance (set by an import)."""
         assert name, "vault name required"
         assert kind in _KINDS, "unknown vault kind"
         vault_id = str(uuid.uuid4())
         body = {"name": name[:_MAX_NAME], "description": description[:_MAX_DESCRIPTION]}
+        if tags:
+            body["tags"] = _clean_tags(tags)
         if source:
             body["source"] = source  # e.g. {url, publisher_pubkey} — pinned at import time
         nonce, ciphertext = self._seal(vault_id, body)
@@ -136,6 +142,7 @@ class VaultStore:
             "version": int(row[2]),
             "name": body["name"],
             "description": body.get("description", ""),
+            "tags": body.get("tags", []),
             "source": body.get("source"),
             # Once true, forever true: an open publish put the plaintext in the world, and no later
             # action can take it back — the UI badge must outlive re-seals, renames, everything.
@@ -145,8 +152,12 @@ class VaultStore:
             "updated_at": str(row[6]),
         }
 
-    def update(self, vault_id: str, name: str, description: str = "") -> bool:
-        """Rename / re-describe a vault. False if it doesn't exist."""
+    def update(self, vault_id: str, name: str, description: str = "", tags: list[str] | None = None) -> bool:
+        """Rename / re-describe / re-tag a vault. False if it doesn't exist.
+
+        ``tags=None`` means UNTOUCHED (a rename-only PATCH must not wipe them); pass ``[]``
+        to clear. Tags never travel in exports — they're the local user's organization.
+        """
         assert vault_id and name, "vault id + name required"
         body = self._load_body(vault_id)
         if body is None:
@@ -155,6 +166,8 @@ class VaultStore:
         # by future writers) rides along verbatim — see the read-modify-write note above.
         body["name"] = name[:_MAX_NAME]
         body["description"] = description[:_MAX_DESCRIPTION]
+        if tags is not None:
+            body["tags"] = _clean_tags(tags)
         self._store_body(vault_id, body)
         return True
 

@@ -32,6 +32,7 @@ _MAX_IDS_PER_CALL = 1000  # bounded membership edit (P10 #2)
 class VaultIn(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     description: str = Field(default="", max_length=2000)
+    tags: list[str] | None = Field(default=None, max_length=20)  # None = untouched; [] = clear
 
 
 class DocIdsIn(BaseModel):
@@ -118,7 +119,7 @@ def list_vaults(request: Request) -> dict:
 def create_vault(request: Request, body: VaultIn) -> dict:
     """Create an empty vault."""
     store = _vaults(request)
-    vault_id = store.create(body.name.strip(), body.description.strip())
+    vault_id = store.create(body.name.strip(), body.description.strip(), tags=body.tags)
     return store.get(vault_id)
 
 
@@ -139,10 +140,10 @@ def get_vault(request: Request, vault_id: str) -> dict:
 
 @router.patch("/api/vaults/{vault_id}")
 def update_vault(request: Request, vault_id: str, body: VaultIn) -> dict:
-    """Rename / re-describe a vault."""
+    """Rename / re-describe / re-tag a vault (tags absent = untouched)."""
     store = _vaults(request)
     _require(store, vault_id)
-    store.update(vault_id, body.name.strip(), body.description.strip())
+    store.update(vault_id, body.name.strip(), body.description.strip(), tags=body.tags)
     return store.get(vault_id)
 
 

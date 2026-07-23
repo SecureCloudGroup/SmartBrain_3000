@@ -45,6 +45,13 @@ to know when a release changes behavior.
   chats queue behind them on oMLX's single request slot.
 
 ### Added
+- **Tags on documents and vaults**: label anything in Knowledge with your own tags
+  (a Tags button on every document row and vault card — comma-separated, up to 20).
+  Tags show as chips; clicking one filters both lists to that tag, and keyword +
+  Best search match tags instantly with no reindex. Tags are encrypted like
+  everything else, survive renames, never travel in a shared vault export, and
+  can't be put on an imported vault's copies (a vault update would overwrite
+  them — Detach first to make the copy yours).
 - **Chat trash**: deleting a chat — or every chat at once with the new "Delete all
   chats" action in Settings → Account & Data — now moves it to a Trash instead of
   destroying it. Trashed chats disappear from every list but stay restorable for

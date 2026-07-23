@@ -20,6 +20,7 @@
   import { highlight, queryTerms } from "$lib/highlight";
   import { remote } from "$lib/remote/connection.svelte";
   import { confirmDialog } from "$lib/confirm.svelte";
+  import { strToTags, tagsToStr } from "$lib/tags";
 
   let docs = $state<KbDoc[]>([]);
   let query = $state("");
@@ -43,6 +44,10 @@
   let busy = $state("");
   let renameId = $state<string | null>(null); // inline rename of a document
   let renameValue = $state("");
+  let tagEditId = $state<string | null>(null); // inline tag editor of a document (same idiom)
+  let tagEditValue = $state("");
+  // Click-to-filter: clicking any tag chip narrows BOTH lists (documents + vaults) to that tag.
+  let tagFilter = $state("");
   let failures = $state<string[]>([]); // per-file errors from a bulk drop
   let scoreHelpOpen = $state(false); // U12: visible score-meaning popover, no hover needed
 
@@ -317,13 +322,37 @@
     }
   }
 
+  const shownDocs = $derived(tagFilter ? docs.filter((d) => (d.tags ?? []).includes(tagFilter)) : docs);
+  const shownVaults = $derived(tagFilter ? vaults.filter((v) => (v.tags ?? []).includes(tagFilter)) : vaults);
+
   function startRename(d: KbDoc) {
     renameId = d.id;
     renameValue = d.title;
+    tagEditId = null;
     error = "";
   }
   function cancelRename() {
     renameId = null;
+  }
+
+  function startTagEdit(d: KbDoc) {
+    tagEditId = d.id;
+    tagEditValue = tagsToStr(d.tags);
+    renameId = null;
+    error = "";
+  }
+  async function saveTags(id: string) {
+    busy = id;
+    error = "";
+    try {
+      await api.setDocTags(id, strToTags(tagEditValue));
+      tagEditId = null;
+      await loadDocs();
+    } catch (err) {
+      error = describeError(err); // a vault-owned copy 409s here, naming the vault
+    } finally {
+      busy = "";
+    }
   }
   async function saveRename(id: string) {
     const t = renameValue.trim();
@@ -384,6 +413,31 @@
     // CSS can't reach an explicit behavior:"smooth", so honor reduced motion here.
     const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
     docsCard?.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
+  }
+
+  // Inline vault tag editor — same comma-string idiom as the document one.
+  let vaultTagEditId = $state<string | null>(null);
+  let vaultTagEditValue = $state("");
+
+  function startVaultTagEdit(v: Vault) {
+    vaultTagEditId = vaultTagEditId === v.id ? null : v.id;
+    vaultTagEditValue = tagsToStr(v.tags);
+    error = "";
+  }
+  async function saveVaultTags(v: Vault) {
+    vaultBusy = v.id;
+    error = "";
+    try {
+      // name/description ride along unchanged — the PATCH requires a name, and tags-only
+      // updates must not clear the rest.
+      await api.updateVaultMeta(v.id, { name: v.name, description: v.description, tags: strToTags(vaultTagEditValue) });
+      vaultTagEditId = null;
+      await loadVaults();
+    } catch (err) {
+      error = describeError(err);
+    } finally {
+      vaultBusy = "";
+    }
   }
 
   // Which vault's member list is expanded, and its documents (with each membership's origin, so
@@ -949,6 +1003,14 @@
       <EmptyState icon="book" title="Build your knowledge" body="Drop in a PDF or write a note above — it's encrypted on your device and searchable in seconds." />
     {/if}
 
+    {#if tagFilter}
+      <p class="muted" style="margin:0 0 0.25rem; font-size:0.85rem">
+        Showing {shownDocs.length} document{shownDocs.length === 1 ? "" : "s"} tagged
+        <strong>{tagFilter}</strong>.
+        <button class="linklike" type="button" onclick={() => (tagFilter = "")}>Show everything instead</button>
+      </p>
+    {/if}
+
     {#if picked.length > 0 || addTarget}
       <!-- The selection only means something in terms of vaults, so the bar that appears offers
            exactly that: put these in a vault. It also shows while a vault's "Add documents" is
@@ -979,7 +1041,7 @@
       </div>
     {/if}
 
-    {#each docs as d (d.id)}
+    {#each shownDocs as d (d.id)}
       {#if renameId === d.id}
         <div style="display:flex; gap:0.5rem; align-items:center; margin-top:0.5rem">
           <input
@@ -989,6 +1051,18 @@
           />
           <button disabled={busy === d.id || !renameValue.trim()} onclick={() => saveRename(d.id)}>Save</button>
           <button class="secondary" onclick={cancelRename}>Cancel</button>
+        </div>
+      {:else if tagEditId === d.id}
+        <div style="display:flex; gap:0.5rem; align-items:center; margin-top:0.5rem">
+          <input
+            style="flex:1"
+            bind:value={tagEditValue}
+            placeholder="Tags, comma-separated (e.g. property, 2024)"
+            aria-label="Tags for {d.title}"
+            onkeydown={(e) => e.key === "Enter" && saveTags(d.id)}
+          />
+          <button disabled={busy === d.id} onclick={() => saveTags(d.id)}>Save</button>
+          <button class="secondary" onclick={() => (tagEditId = null)}>Cancel</button>
         </div>
       {:else}
         <div class="docrow">
@@ -1000,7 +1074,11 @@
           />
           <div class="fic"><Icon name="file" /></div>
           <button class="dtitle" onclick={() => open(d.id)}>{d.title}</button>
+          {#each d.tags ?? [] as t (t)}
+            <Chip onclick={() => (tagFilter = t)} title="Show only items tagged “{t}”">{t}</Chip>
+          {/each}
           <div class="dactions">
+            <button class="ghost" disabled={busy === d.id} onclick={() => startTagEdit(d)}>Tags</button>
             <button class="ghost" disabled={busy === d.id} onclick={() => startRename(d)}>Rename</button>
             <button class="ghost" disabled={busy === d.id} onclick={() => remove(d.id)}>Delete</button>
           </div>
@@ -1020,7 +1098,15 @@
       <EmptyState icon="vault" title="Group and share with vaults" body="Tick documents above and name a vault below — search inside just that set, or share it sealed or public." />
     {/if}
 
-    {#each vaults as v (v.id)}
+    {#if tagFilter}
+      <p class="muted" style="margin:0 0 0.25rem; font-size:0.85rem">
+        Showing {shownVaults.length} vault{shownVaults.length === 1 ? "" : "s"} tagged
+        <strong>{tagFilter}</strong>.
+        <button class="linklike" type="button" onclick={() => (tagFilter = "")}>Show everything instead</button>
+      </p>
+    {/if}
+
+    {#each shownVaults as v (v.id)}
       <div class="vault">
         <div class="vrow">
           <strong>{v.name}</strong>
@@ -1045,10 +1131,14 @@
             <Chip mono title="Your publisher fingerprint — how subscribers identify you">{v.publisher_fingerprint}</Chip>
             <span class="fp" title="The published version — subscribers pin this seq and pick up newer ones">v{v.version}</span>
           {/if}
+          {#each v.tags ?? [] as t (t)}
+            <Chip onclick={() => (tagFilter = t)} title="Show only items tagged “{t}”">{t}</Chip>
+          {/each}
           <button class="linklike" onclick={() => toggleMembers(v)} aria-expanded={openVaultId === v.id}>
             {v.doc_count} document{v.doc_count === 1 ? "" : "s"} <Icon name={openVaultId === v.id ? "chevron-down" : "chevron-right"} size={12} />
           </button>
           <span class="spacer"></span>
+          <button class="secondary" onclick={() => startVaultTagEdit(v)} aria-expanded={vaultTagEditId === v.id}>Tags</button>
           {#if v.kind === "imported" && v.source?.url && !v.source?.blocked}
             <!-- Zip-host honesty: with no per-file tree, a "check" re-downloads the whole file. -->
             <button
@@ -1080,6 +1170,20 @@
           <button class="secondary" disabled={vaultBusy === v.id} onclick={() => removeVault(v)}>Delete</button>
         </div>
         {#if v.description}<p class="muted vdesc">{v.description}</p>{/if}
+
+        {#if vaultTagEditId === v.id}
+          <div style="display:flex; gap:0.5rem; align-items:center; margin-top:0.5rem">
+            <input
+              style="flex:1"
+              bind:value={vaultTagEditValue}
+              placeholder="Tags, comma-separated (e.g. reference, work)"
+              aria-label="Tags for {v.name}"
+              onkeydown={(e) => e.key === "Enter" && saveVaultTags(v)}
+            />
+            <button disabled={vaultBusy === v.id} onclick={() => saveVaultTags(v)}>Save</button>
+            <button class="secondary" onclick={() => (vaultTagEditId = null)}>Cancel</button>
+          </div>
+        {/if}
 
         {#if v.kind === "imported" && v.source?.url && !v.source?.blocked}
           <!-- Opt-in scheduled auto-update (Stage E). Off by default; when on, the Desktop applies

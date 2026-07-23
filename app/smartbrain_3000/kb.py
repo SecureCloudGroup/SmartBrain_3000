@@ -39,6 +39,19 @@ _MAX_EMBED_DIM = 4096  # hard upper bound on any embedding vector length
 _SEMANTIC_MIN_SCORE = 0.0  # cosine is [-1,1]; only surface positive matches
 _CHUNK_CHARS = 4000  # per-chunk size; safely under the embed model's context window
 _MAX_CHUNKS = 64  # cap chunks per doc (verifiable bound; ~256k chars covered)
+_MAX_TAGS = 20  # bound tags per document (mirrors planner._MAX_TAGS)
+
+
+def _clean_tags(tags: list[str] | None) -> list[str]:
+    """Trim, drop blanks, de-dupe, and bound the tag list (mirrors planner._clean_tags)."""
+    if not tags:
+        return []
+    seen: list[str] = []
+    for t in tags[:_MAX_TAGS]:  # bounded
+        s = str(t).strip()
+        if s and s not in seen:
+            seen.append(s)
+    return seen
 
 
 def chunk_text(title: str, content: str) -> list[str]:
@@ -119,8 +132,8 @@ class KnowledgeBase:
 
     # --- index data sources (each decrypts the corpus exactly ONCE, at build time) --------------
 
-    def iter_documents(self, limit: int) -> list[tuple[str, str, str]]:
-        """Decrypt every document once: (id, title, content). For the index build only.
+    def iter_documents(self, limit: int) -> list[tuple[str, str, str, list[str]]]:
+        """Decrypt every document once: (id, title, content, tags). For the index build only.
 
         An unreadable row is skipped rather than sinking the whole build — one corrupt document
         must not make the entire knowledge base unsearchable.
@@ -129,7 +142,7 @@ class KnowledgeBase:
         rows = self._conn.execute(
             "SELECT id, nonce, ciphertext FROM documents ORDER BY created_at DESC LIMIT ?;", [limit]
         ).fetchall()
-        out: list[tuple[str, str, str]] = []
+        out: list[tuple[str, str, str, list[str]]] = []
         for row in rows:  # bounded by `limit`
             doc_id = str(row[0])
             try:
@@ -137,7 +150,7 @@ class KnowledgeBase:
             except Exception as exc:  # corrupt/tampered row — skip it, keep the index usable
                 log.warning("skipping unreadable document %s: %s", doc_id, exc)
                 continue
-            out.append((doc_id, body["title"], body["content"]))
+            out.append((doc_id, body["title"], body["content"], body["tags"]))
         return out
 
     def iter_embeddings(self) -> list[tuple[str, int, dict[str, list[list[float]]]]]:
@@ -182,12 +195,34 @@ class KnowledgeBase:
         doc = self.get(doc_id)
         if doc is None:
             return False
-        nonce, ciphertext = self._seal(doc_id, title, doc["content"], doc.get("meta"))  # keep provenance
+        # keep provenance AND tags — a rename re-seals the whole body, so dropping either here
+        # would silently destroy it inside the ciphertext
+        nonce, ciphertext = self._seal(doc_id, title, doc["content"], doc.get("meta"), doc.get("tags"))
         self._conn.execute(
             "UPDATE documents SET nonce = ?, ciphertext = ?, updated_at = now() WHERE id = ?;",
             [nonce, ciphertext, doc_id],
         )
-        self.index.add_document(doc_id, title, doc["content"])  # title is indexed, so re-index it
+        # title + tags are indexed, so re-index them
+        self.index.add_document(doc_id, title, doc["content"], doc.get("tags"))
+        return True
+
+    def set_tags(self, doc_id: str, tags: list[str]) -> bool:
+        """Replace a document's tags (title/content/meta unchanged); False if it doesn't exist.
+
+        Lexical-only: the in-memory index re-tokenizes instantly, and embeddings are left
+        alone — a tag edit never queues a re-embed. Hybrid ("Best") search always fuses the
+        lexical run, so tag hits surface there; pure "Meaning" mode won't match tags.
+        """
+        assert doc_id, "doc id required"
+        doc = self.get(doc_id)
+        if doc is None:
+            return False
+        nonce, ciphertext = self._seal(doc_id, doc["title"], doc["content"], doc.get("meta"), tags)
+        self._conn.execute(
+            "UPDATE documents SET nonce = ?, ciphertext = ?, updated_at = now() WHERE id = ?;",
+            [nonce, ciphertext, doc_id],
+        )
+        self.index.add_document(doc_id, doc["title"], doc["content"], _clean_tags(tags))
         return True
 
     def replace(self, doc_id: str, title: str, content: str, meta: dict | None = None) -> bool:
@@ -199,6 +234,10 @@ class KnowledgeBase:
         text that no longer exists, and a stale vector would keep ranking the document by its old
         meaning. ``docs_needing_embedding`` then surfaces it and the background indexer re-embeds
         (exactly the drop-and-re-embed path a model switch already takes).
+
+        Tags are deliberately DROPPED, not preserved: this is the vault-update path, and
+        vault-owned copies can't be tagged in the first place (the PATCH route 409s), so any
+        tags here would be stale publisher state, not the user's.
         """
         assert doc_id, "doc id required"
         assert title, "title must be non-empty"
@@ -276,6 +315,7 @@ class KnowledgeBase:
                 {
                     "id": str(row[0]),
                     "title": body["title"],
+                    "tags": body["tags"],
                     "created_at": str(row[3]),
                     "updated_at": str(row[4]),
                 }
@@ -484,24 +524,28 @@ class KnowledgeBase:
         assert len(plaintext) == dim * 4, "embedding blob length mismatch"
         return list(struct.unpack(f"<{dim}f", plaintext))
 
-    def _seal(self, doc_id: str, title: str, content: str, meta: dict | None = None) -> tuple[bytes, bytes]:
-        """Encrypt {title, content, meta} bound to doc_id; return (nonce, ciphertext).
+    def _seal(
+        self, doc_id: str, title: str, content: str, meta: dict | None = None,
+        tags: list[str] | None = None,
+    ) -> tuple[bytes, bytes]:
+        """Encrypt {title, content, meta, tags} bound to doc_id; return (nonce, ciphertext).
 
         Provenance (filename, source URL, page map) lives INSIDE the ciphertext rather than in a
         plaintext column: where a document came from is exactly as sensitive as what it says.
+        Tags too — what a user labels a document reveals as much as its title does.
         """
         assert doc_id, "doc id required"
         assert title, "title required"
         nonce = os.urandom(_NONCE_BYTES)
-        body = {"title": title, "content": content, "meta": meta or {}}
+        body = {"title": title, "content": content, "meta": meta or {}, "tags": _clean_tags(tags)}
         plaintext = json.dumps(body).encode("utf-8")
         return nonce, self._aes.encrypt(nonce, plaintext, doc_id.encode("utf-8"))
 
     def _open(self, doc_id: str, nonce: bytes, ciphertext: bytes) -> dict:
         """Decrypt a stored document body for ``doc_id``.
 
-        ``meta`` is defaulted, not asserted: documents sealed before provenance existed have no meta
-        key, and they must keep opening (and searching) exactly as before.
+        ``meta``/``tags`` are defaulted, not asserted: documents sealed before those fields
+        existed have no such keys, and they must keep opening (and searching) exactly as before.
         """
         assert doc_id, "doc id required"
         assert len(nonce) == _NONCE_BYTES, "nonce must be 12 bytes"
@@ -509,6 +553,7 @@ class KnowledgeBase:
         body = json.loads(plaintext.decode("utf-8"))
         assert "title" in body and "content" in body, "document body malformed"
         body.setdefault("meta", {})  # pre-provenance document
+        body.setdefault("tags", [])  # pre-tags document
         return body
 
     @staticmethod
