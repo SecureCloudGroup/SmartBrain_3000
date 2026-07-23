@@ -11,6 +11,15 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Added
+- Chat gained a Refresh button — and refreshes itself whenever you return to the app —
+  so a conversation continued on your phone appears on the desktop (and vice versa)
+  without a page reload. Injected scheduled-update notices survive the refresh.
+
+### Changed
+- Activity's "Always allowed" list is collapsed by default (with a count), keeping the
+  page focused on what needs your attention.
+
 ### Fixed
 - Citations under an answer now reflect what the assistant actually READ, not
   everything its searches merely surfaced: a broad question no longer sprays chips

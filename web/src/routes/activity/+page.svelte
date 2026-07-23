@@ -156,17 +156,21 @@
   {/if}
 
   {#if remembered.length > 0}
-    <h2 class="section-gap">Always allowed</h2>
-    <p class="muted hint-gap">These write tools run without asking. Irreversible actions (send email, delete) always ask.</p>
-    <div class="card tight">
-      {#each remembered as name (name)}
-        <div class="arow">
-          <strong>{name}</strong>
-          <span class="grow"></span>
-          <button class="secondary" disabled={busy === name} onclick={() => forget(name)}>Stop allowing</button>
-        </div>
-      {/each}
-    </div>
+    <!-- Collapsed by default: this is reference material, not something to act on every
+         visit — the count keeps it glanceable without the vertical space. -->
+    <details class="section-gap">
+      <summary><span class="allow-head">Always allowed · {remembered.length}</span></summary>
+      <p class="muted hint-gap">These write tools run without asking. Irreversible actions (send email, delete) always ask.</p>
+      <div class="card tight">
+        {#each remembered as name (name)}
+          <div class="arow">
+            <strong>{name}</strong>
+            <span class="grow"></span>
+            <button class="secondary" disabled={busy === name} onclick={() => forget(name)}>Stop allowing</button>
+          </div>
+        {/each}
+      </div>
+    </details>
   {/if}
 
   <h2 class="section-gap">History</h2>
@@ -202,6 +206,14 @@
 <style>
   .section-gap {
     margin-top: var(--s-5);
+  }
+  /* The collapsed summary reads at the same weight as the sibling h2 section heads. */
+  .allow-head {
+    font-size: var(--f-section);
+    font-weight: 600;
+  }
+  details > .hint-gap {
+    margin-top: var(--s-2);
   }
   .hint-gap {
     margin: 0 0 var(--s-2);

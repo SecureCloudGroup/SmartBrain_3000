@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { finalAssistantId, transcriptUpToLastUser, type LogEntry } from "./chat-log";
+import { finalAssistantId, mergeRefreshedLog, transcriptUpToLastUser, type LogEntry } from "./chat-log";
 
 const user = (id: string, content = "hi"): LogEntry => ({ id, role: "user", content });
 const asst = (id: string, content = "hello"): LogEntry => ({ id, role: "assistant", content });
@@ -61,5 +61,31 @@ describe("transcriptUpToLastUser", () => {
     const out = transcriptUpToLastUser([user("u1", "q")]);
     expect(out).toEqual([{ role: "user", content: "q" }]);
     expect(Object.keys(out![0]).sort()).toEqual(["content", "role"]);
+  });
+});
+
+describe("mergeRefreshedLog", () => {
+  const server: LogEntry[] = [
+    { id: "m1", role: "user", content: "hi" },
+    { id: "m2", role: "assistant", content: "hello" },
+  ];
+
+  it("takes the server thread and re-appends local schedule notices in order", () => {
+    const current: LogEntry[] = [
+      { id: "old", role: "assistant", content: "stale" },
+      { id: "s1", role: "assistant", content: "run A", schedule: true },
+      { id: "s2", role: "assistant", content: "run B", schedule: true },
+    ];
+    expect(mergeRefreshedLog(server, current).map((e) => e.id)).toEqual(["m1", "m2", "s1", "s2"]);
+  });
+
+  it("drops unpersisted error bubbles, exactly like a full reload would", () => {
+    const current: LogEntry[] = [{ id: "e1", role: "assistant", content: "boom", err: true }];
+    expect(mergeRefreshedLog(server, current).map((e) => e.id)).toEqual(["m1", "m2"]);
+  });
+
+  it("handles empty inputs", () => {
+    expect(mergeRefreshedLog([], [])).toEqual([]);
+    expect(mergeRefreshedLog(server, [])).toEqual(server);
   });
 });

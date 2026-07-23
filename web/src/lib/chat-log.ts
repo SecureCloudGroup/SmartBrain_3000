@@ -41,3 +41,15 @@ export function transcriptUpToLastUser(
   }
   return null;
 }
+
+// The log after a REFRESH (manual button or returning to the app): server messages are
+// the truth for the persisted thread, but the page also holds entries that exist ONLY
+// locally — injected scheduled-run notices (already marked seen server-side; a naive
+// replace would lose them forever, nowhere else re-shows them). Those are re-appended.
+// Errored bubbles are dropped, exactly as a full reload would drop them: they were
+// never persisted. Older paged-in messages collapse back to the newest page — the same
+// semantics as opening the thread fresh; "Load older" re-pages.
+export function mergeRefreshedLog(serverEntries: LogEntry[], currentLog: LogEntry[]): LogEntry[] {
+  const schedules = currentLog.filter((e) => e.schedule);
+  return [...serverEntries, ...schedules];
+}
