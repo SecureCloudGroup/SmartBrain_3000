@@ -36,9 +36,23 @@
 		root * /srv/web
 		file_server
 	}
+	# Content-hashed build assets: cache forever. A changed file always has a NEW name, so
+	# staleness is impossible — and a request for a chunk that no longer exists must 404
+	# (no SPA fallback here: serving index.html as a .js module just breaks the boot later).
+	handle /_app/immutable/* {
+		header Cache-Control "public, max-age=31536000, immutable"
+		root * /srv/web
+		file_server
+	}
 	# The data-free PWA shell (static files), so a phone loads the app from this
 	# always-reachable origin. SPA fallback to index.html for client-side routes.
+	# no-cache on the HTML (like the service worker above): without it, iOS applies
+	# HEURISTIC caching to a response that has only Last-Modified — a phone can treat a
+	# weeks-old index.html as fresh for hours, resurrect the previous app shell from it,
+	# and even a delete-and-reinstall of the PWA inherits that staleness via Safari's
+	# copied site data. no-cache forces an ETag revalidation every load (cheap 304).
 	handle {
+		header Cache-Control "no-cache"
 		root * /srv/web
 		try_files {path} /index.html
 		file_server
