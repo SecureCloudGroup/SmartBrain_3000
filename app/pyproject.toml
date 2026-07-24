@@ -32,7 +32,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
-    "ruff",
+    "ruff<0.16",  # 0.16.0 promoted new default rules (216 findings); upgrade deliberately
 ]
 
 [tool.setuptools.packages.find]
