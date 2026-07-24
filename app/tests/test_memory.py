@@ -124,14 +124,21 @@ def test_chat_injects_base_prompt_without_memory(client: TestClient, monkeypatch
     seen: dict = {}
     monkeypatch.setattr(gateway, "chat", lambda messages, model: seen.update(messages=messages) or {"choices": []})
     client.post("/api/chat", json={"messages": [{"role": "user", "content": "hi"}], "capability": "fast_chat"})
-    # Base grounding (current time + tool guidance) is injected even with no profile/facts.
+    # Base grounding (tool guidance) is injected even with no profile/facts. The HEAD
+    # must be byte-stable (no live timestamp — it poisoned the local model's prefix
+    # cache); the live time rides a trailing system note instead.
     content = seen["messages"][0]["content"]
     assert seen["messages"][0]["role"] == "system"
-    assert "current date and time" in content
+    assert "current date and time is given" in content  # points at the trailing note
+    import re
+    assert not re.search(r"\d{4}-\d{2}-\d{2}", content), "head must carry NO live timestamp"
     # Trust-critical: the model must be told to actually call a tool for actions, never
     # to narrate a state change it didn't perform (the "claimed task added" failure mode).
     assert "MUST emit the matching tool call" in content
     assert seen["messages"][1] == {"role": "user", "content": "hi"}
+    tail = seen["messages"][-1]
+    assert tail["role"] == "system" and tail["content"].startswith("Current date and time: ")
+    assert re.search(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC", tail["content"])
 
 
 def test_chat_respects_caller_system_message(client: TestClient, monkeypatch) -> None:
