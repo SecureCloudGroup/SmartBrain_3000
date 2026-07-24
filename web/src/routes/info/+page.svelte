@@ -98,11 +98,11 @@
         <p class="run-head">Scheduled Item: {run.schedule_title}</p>
         <p class="muted" style="margin:0 0 0.35rem; font-size:0.8em">{localTs(run.ran_at)} · {runStatusLabel(run.status)}</p>
         {#if run.error}
-          <p class="error" style="margin:0; white-space:pre-wrap">{run.error}</p>
+          <p class="error run-body">{run.error}</p>
         {:else if run.status === "awaiting_approval"}
           <p class="notice" style="margin:0">Awaiting your approval — open Activity to review.</p>
         {:else}
-          <p style="margin:0; white-space:pre-wrap">{run.message || "(no output)"}</p>
+          <p class="run-body">{run.message || "(no output)"}</p>
         {/if}
       </div>
     {/each}
@@ -114,11 +114,11 @@
       <div class="card run-card">
         <p class="muted" style="margin:0 0 0.35rem; font-size:0.8em">{localTs(run.ran_at)} · {runStatusLabel(run.status)}</p>
         {#if run.error}
-          <p class="error" style="margin:0; white-space:pre-wrap">{run.error}</p>
+          <p class="error run-body">{run.error}</p>
         {:else if run.status === "awaiting_approval"}
           <p class="notice" style="margin:0">Awaiting your approval — open Activity to review.</p>
         {:else}
-          <p style="margin:0; white-space:pre-wrap">{run.message || "(no output)"}</p>
+          <p class="run-body">{run.message || "(no output)"}</p>
         {/if}
       </div>
     {/each}
@@ -139,5 +139,12 @@
   .run-card .run-head {
     margin: 0 0 0.2rem;
     font-weight: 600;
+  }
+  /* Run output is model text: preserve its line breaks, but break ANY long token —
+     an unwrappable URL used to widen the whole page on phones and clip every line. */
+  .run-body {
+    margin: 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
   }
 </style>

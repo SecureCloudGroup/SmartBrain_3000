@@ -48,6 +48,13 @@
     color: var(--muted);
     background: var(--panel);
     min-height: 0;
+    /* A chip never widens its container: an over-long label (a full source URL in a
+       search-hit citation) clips inside the pill instead of pushing the page wide.
+       min-width:0 also lets chips compress inside flex rows (document tag rows). */
+    max-width: 100%;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
   }
   button.chip.clicky { cursor: pointer; transition: border-color var(--t-fast), color var(--t-fast); }
   button.chip.clicky:hover { border-color: var(--accent); color: var(--text); background: var(--panel); filter: none; }
