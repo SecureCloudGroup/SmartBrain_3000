@@ -21,6 +21,11 @@ to know when a release changes behavior.
   page focused on what needs your attention.
 
 ### Fixed
+- "response exceeds channel limit" is gone from the phone: big responses (a grown
+  Activity feed, a large document opened remotely) now stream over the encrypted
+  connection in ordered parts and reassemble on the phone, instead of being refused
+  once they outgrew a single message. Bounded at 8 MB per response; an older phone
+  app keeps the old clean error until it updates.
 - Phone screens no longer clip content off the right edge: a long unbreakable token
   (a URL in a schedule's output, a full source link in a search citation) or a wide
   control (the seven-tab Settings strip, a file picker) could silently inflate the
