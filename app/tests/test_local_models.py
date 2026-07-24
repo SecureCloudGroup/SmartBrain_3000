@@ -260,3 +260,57 @@ def test_delete_local_removes_config_and_provider(client: TestClient, monkeypatc
     assert client.delete("/api/local-models/ollama").status_code == 200
     assert removed == ["ollama"]
     assert client.get("/api/local-models").json()["ollama"]["configured"] is False
+
+
+# --- mlxe: the dedicated MLX EMBEDDINGS provider ------------------------------------------
+
+def test_register_mlxe_payload_is_embedding_only() -> None:
+    record: list = []
+    with _mock_client(record) as client:
+        gateway.register_mlxe("http://host.docker.internal:8899", "k1", client=client)
+    create = next(b for (m, p, b) in record if m == "POST" and p == "/api/providers")
+    assert create["provider"] == "mlxe"
+    assert create["network_config"]["base_url"] == "http://host.docker.internal:8899"
+    assert create["network_config"]["allow_private_network"] is True
+    allowed = create["custom_provider_config"]["allowed_requests"]
+    assert allowed["embedding"] is True and allowed["list_models"] is True
+    # An embeddings server must never be offered a chat turn — Bifrost enforces it.
+    assert "chat_completion" not in allowed and "chat_completion_stream" not in allowed
+    key = next(b for (m, p, b) in record if p == "/api/providers/mlxe/keys")
+    assert key["name"] == "smartbrain-mlxe" and key["value"] == "k1"
+
+
+def test_provision_local_includes_mlxe() -> None:
+    store = _store({gateway.MLXE_URL_KEY: "http://host.docker.internal:8899"})
+    record: list = []
+    with _mock_client(record) as client:
+        done = gateway.provision_local_from_store(store, client=client)
+    assert done == ["mlxe"]
+    create = next(b for (m, p, b) in record if m == "POST" and p == "/api/providers")
+    assert create["provider"] == "mlxe"
+
+
+def test_fallback_models_mlxe_forced_embed_only(monkeypatch) -> None:
+    store = _store({gateway.MLXE_URL_KEY: "http://host.docker.internal:8899"})
+    monkeypatch.setattr(gateway, "probe_mlx",
+                        lambda url, key, **k: {"reachable": True, "models": ["qwen3-embedding-0.6b"],
+                                               "context_lengths": {}})
+    out = gateway.local_fallback_models(store)
+    (m,) = out
+    assert m["id"] == "mlxe/qwen3-embedding-0.6b"
+    assert m["embed"] is True and m["chat"] is False  # forced flags, not id heuristics
+
+
+def test_mlxe_routes_roundtrip(client) -> None:
+    client.post("/api/account/setup", json={"passphrase": "correct-horse"})
+    r = client.put("/api/local-models/mlxe", json={"url": "http://host.docker.internal:8899"})
+    assert r.status_code == 200 and r.json()["ok"] is True
+    status = client.get("/api/local-models").json()
+    assert status["mlxe"]["configured"] is True
+    assert status["mlxe"]["url"] == "http://host.docker.internal:8899"
+    assert client.delete("/api/local-models/mlxe").json()["ok"] is True
+    assert client.get("/api/local-models").json()["mlxe"]["configured"] is False
+
+
+def test_mlxe_model_id_is_local_for_the_semaphore() -> None:
+    assert gateway._is_local("mlxe/qwen3-embedding-0.6b") is True  # serializes like other local calls

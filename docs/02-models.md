@@ -64,9 +64,14 @@ is reachable and which models it has.
 
 Semantic search in the [Knowledge base](03-features.md) needs an **embedding
 model**. The default is a **local** `nomic-embed-text:v1.5`, served through Ollama, so
-your knowledge content stays on-box. The same embedding model also runs on **MLX**, so an
-Apple-Silicon Mac can run the whole stack MLX-only — point embeddings at your MLX server if
-you're not running Ollama.
+your knowledge content stays on-box.
+
+**MLX-only stack (no Ollama):** chat servers like oMLX serve encoder embedders only
+(BGE-class) and refuse decoder embedding models such as Qwen3-Embedding. For those, run
+the bundled **MLX embeddings server** (`tools/mlx_embed_server/install.sh` — a tiny
+login service on port 8899 serving `Qwen3-Embedding-0.6B` with correct pooling), connect
+it under Settings → Local models → **MLX embeddings**, then route Settings → Model
+routing → Embedding → `mlxe/qwen3-embedding-0.6b` and **Reindex**.
 
 **The installer pulls this for you** when Ollama is present (and
 `python3 installer/install.py doctor` offers to). If you ever need to do it by hand,

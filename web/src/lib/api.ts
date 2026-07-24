@@ -56,6 +56,7 @@ export interface ModelProvider {
 export interface LocalModels {
   ollama: ModelProvider;
   mlx: ModelProvider;
+  mlxe: ModelProvider; // the dedicated MLX EMBEDDINGS server (tools/mlx_embed_server)
 }
 
 export interface DiscoveredModel {
@@ -494,7 +495,12 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ url, api_key }),
     }),
-  deleteLocalModel: (name: "ollama" | "mlx") =>
+  putMlxe: (url: string, api_key: string) =>
+    req<{ ok: boolean; gateway_synced?: boolean }>("/api/local-models/mlxe", {
+      method: "PUT",
+      body: JSON.stringify({ url, api_key }),
+    }),
+  deleteLocalModel: (name: "ollama" | "mlx" | "mlxe") =>
     req<{ ok: boolean; gateway_synced?: boolean }>(`/api/local-models/${name}`, { method: "DELETE" }),
 
   // chat (stateless on the server today — the client sends the full transcript)

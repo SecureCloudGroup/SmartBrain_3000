@@ -63,7 +63,17 @@ def local_status(request: Request) -> dict:
         probe = gateway.probe_mlx(gateway.MLX_DEFAULT_URL, "", timeout=_DETECT_TIMEOUT)
         assert "reachable" in probe, "probe must report reachability"
         mlx["detected"], mlx["models"] = probe["reachable"], probe["models"]
-    return {"ollama": ollama, "mlx": mlx}
+    mlxe_url = store.get(gateway.MLXE_URL_KEY)
+    mlxe_key = store.get(gateway.MLXE_KEY_KEY)
+    mlxe = {"configured": bool(mlxe_url), "reachable": False, "models": [],
+            "url": mlxe_url or "", "detected": False, "default_url": gateway.MLXE_DEFAULT_URL}
+    if mlxe_url:
+        mlxe.update(gateway.probe_mlx(mlxe_url, mlxe_key or ""))  # same OpenAI /v1/models shape
+    else:
+        probe = gateway.probe_mlx(gateway.MLXE_DEFAULT_URL, "", timeout=_DETECT_TIMEOUT)
+        assert "reachable" in probe, "probe must report reachability"
+        mlxe["detected"], mlxe["models"] = probe["reachable"], probe["models"]
+    return {"ollama": ollama, "mlx": mlx, "mlxe": mlxe}
 
 
 @router.put("/api/local-models/ollama")
@@ -100,6 +110,25 @@ def put_mlx(request: Request, body: MLXConfig) -> dict[str, bool]:
     return {"ok": True, "gateway_synced": synced}
 
 
+@router.put("/api/local-models/mlxe")
+def put_mlxe(request: Request, body: MLXConfig) -> dict[str, bool]:
+    """Save the MLX embeddings server's URL + key and register it in Bifrost (live).
+
+    A separate provider from "mlx": chat servers (oMLX) refuse decoder embedding models,
+    so the embeddings model runs on its own tiny server (tools/mlx_embed_server) and only
+    the embedding capability is registered for it."""
+    store = _store(request)
+    store.put(gateway.MLXE_URL_KEY, body.url)
+    store.put(gateway.MLXE_KEY_KEY, body.api_key)
+    synced = True
+    try:
+        gateway.register_mlxe(body.url, body.api_key)
+    except Exception as exc:  # saved, but the gateway is unreachable — surface it
+        log.warning("mlxe register skipped: %s", exc)
+        synced = False
+    return {"ok": True, "gateway_synced": synced}
+
+
 def _detect_mlx_context_lengths(request: Request, url: str, api_key: str) -> None:
     """Persist each MLX model's server-reported max_model_len (bifrost strips it) so the dynamic
     result cap can size to it. Keyed 'mlx/<id>' to match catalog ids. A user override for a model
@@ -124,6 +153,9 @@ def delete_local(request: Request, name: str) -> dict[str, bool]:
     elif name == "mlx":
         store.delete(gateway.MLX_URL_KEY)
         store.delete(gateway.MLX_KEY_KEY)
+    elif name == "mlxe":
+        store.delete(gateway.MLXE_URL_KEY)
+        store.delete(gateway.MLXE_KEY_KEY)
     else:
         raise HTTPException(status_code=404, detail="unknown local provider")
     synced = True
