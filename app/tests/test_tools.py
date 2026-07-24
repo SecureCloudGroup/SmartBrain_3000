@@ -870,3 +870,49 @@ def test_kb_search_doc_id_scopes_to_one_document(monkeypatch) -> None:
     monkeypatch.setattr(gateway, "embed", lambda q, m: (_ for _ in ()).throw(RuntimeError("no embed")))
     out = tools._kb_search(tools.ToolContext(kb=kb), {"query": "sponsor", "doc_id": lease})
     assert [r["title"] for r in out["results"]] == ["Lease"], "scoped to the one document"
+
+
+# --- tool steering: bad doc_id scope + absent focus (both seen live) ----------------------
+
+def test_kb_search_rejects_unknown_doc_id_with_steering() -> None:
+    """A TITLE passed as doc_id used to silently scope the search to nothing — the model
+    read the empty result as 'the document does not mention it'."""
+    conn = duckdb.connect(":memory:")
+    dbmod.run_migrations(conn)
+    kb = KnowledgeBase(conn, gen_master_key())
+    kb.add("Real Doc", "the actual content about sponsors")
+    ctx = tools.ToolContext(kb=kb)
+    with pytest.raises(AssertionError) as ei:
+        tools.get_tool("kb_search").handler(ctx, {"query": "sponsors", "doc_id": "Real Doc.pdf"})
+    msg = str(ei.value)
+    assert "pass the `id` field" in msg and "Real Doc.pdf" in msg
+
+
+def test_kb_search_valid_doc_id_scope_still_works() -> None:
+    conn = duckdb.connect(":memory:")
+    dbmod.run_migrations(conn)
+    kb = KnowledgeBase(conn, gen_master_key())
+    doc_id = kb.add("Scoped", "alpha beta gamma content")
+    ctx = tools.ToolContext(kb=kb)
+    out = tools.get_tool("kb_search").handler(ctx, {"query": "gamma", "doc_id": doc_id})
+    assert [r["id"] for r in out["results"]] == [doc_id]
+
+
+def test_summarize_flags_absent_focus(monkeypatch) -> None:
+    """Focus-summarizing a document whose text never mentions the focus must SAY so —
+    a model focus-summarized an unrelated doc and presented it as a finding."""
+    conn = duckdb.connect(":memory:")
+    dbmod.run_migrations(conn)
+    kb = KnowledgeBase(conn, gen_master_key())
+    doc_id = kb.add("Korea Thesis", "market risk in semiconductors and leverage")
+    ctx = tools.ToolContext(kb=kb, model="m")
+    monkeypatch.setattr(tools.docsum, "summarize_document",
+                        lambda *a, **k: {"summary": "s", "truncated": False, "passes": 1,
+                                         "title": "Korea Thesis", "chunks": 1,
+                                         "chars_covered": 42, "total_chars": 42})
+    tool = tools.get_tool("summarize_document")
+    out = tool.handler(ctx, {"doc_id": doc_id, "focus": "Tribeca"})
+    assert out.get("focus_found") is False
+    assert "does not appear anywhere" in out.get("note", "")
+    out2 = tool.handler(ctx, {"doc_id": doc_id, "focus": "semiconductors"})
+    assert "focus_found" not in out2 and "note" not in out2

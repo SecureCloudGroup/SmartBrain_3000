@@ -11,6 +11,16 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Fixed
+- The assistant can no longer present an unrelated document as a finding: when it
+  asks for a focused summary of a document that never mentions the focus topic, the
+  result now says so plainly ("the focus does not appear anywhere in this document"),
+  giving the model a clean basis to drop it — seen live when a "summarize the Tribeca
+  doc" reply confidently included a document with zero Tribeca references. And a
+  document-scoped search called with a title instead of an id now returns a corrective
+  error instead of a silent empty result the model reads as "the document doesn't
+  mention it."
+
 ### Added
 - **MLX-only semantic search**: a new "MLX embeddings" local provider plus a bundled
   one-command server (`tools/mlx_embed_server/install.sh`) serve Qwen3-Embedding on

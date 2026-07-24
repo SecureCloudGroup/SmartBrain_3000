@@ -19,7 +19,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 
-from . import gateway, ingest, netguard, search, vault_format
+from . import gateway, ingest, kbindex, netguard, search, vault_format
 from . import summarize as docsum  # aliased: this module already defines a summarize() helper (line ~845)
 
 log = logging.getLogger(__name__)
@@ -157,6 +157,14 @@ def _kb_search(ctx: ToolContext, args: dict) -> dict:
     # doc_id narrows the search to ONE document (B2): pointed questions on a huge
     # document ("who are the sponsors?") are retrieval problems, not summaries.
     scope = {args["doc_id"]} if args.get("doc_id") else None
+    if scope:
+        # Models pass TITLES here (seen live: doc_id="...S-1_AsFiled.pdf") - an unknown id
+        # then scoped every run to nothing and returned a silent empty, which reads as
+        # "the document doesn't mention it". Fail with steering instead.
+        assert ctx.kb.get(str(args["doc_id"])) is not None, (
+            "no document with id " + repr(args["doc_id"]) + " - pass the `id` field from a "
+            "kb_search result (not the title), or drop doc_id to search all knowledge"
+        )
     model = gateway.embed_model(getattr(ctx.kb, "conn", None))
     try:
         vector = gateway.embed(args["query"], model)
@@ -268,6 +276,18 @@ def _summarize_document(ctx: ToolContext, args: dict) -> dict:
     focus = str(args.get("focus", "") or "")
     line = _provenance_line(ctx, doc["id"])
     header = {"id": doc["id"], **({"provenance": line} if line else {})}
+    if focus and content:
+        # Honesty flag: a model can (and did, live) focus-summarize a document its topic
+        # never appears in, then present the result as a finding. Don't block - synonyms
+        # are legitimate - but say plainly when NO focus term occurs in the text, so the
+        # model has a clean basis to drop the document instead of narrating around it.
+        focus_terms = set(kbindex.tokenize(focus))
+        if focus_terms and not (focus_terms & set(kbindex.tokenize(content))):
+            header["focus_found"] = False
+            header["note"] = (
+                "the focus " + repr(focus) + " does not appear anywhere in this document - "
+                "it is likely not about that topic"
+            )
     store = _tree_store(ctx)
     if store is not None and content:
         from . import docsummaries
