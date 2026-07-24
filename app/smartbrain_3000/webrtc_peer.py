@@ -22,6 +22,9 @@ Handshake over the channel (in order):
   3. REQUESTS: {"id","method","path","headers","body_b64"} -> {"id","status","headers",
      "body_b64"} (bodies base64 so binary uploads/backups are safe). The device is
      re-checked every request, so a revocation cuts the session off immediately.
+     A request carrying {"chunks": true} may get its response as ORDERED part-frames
+     {"id","seq","more","body_b64"} (first part also has status+headers) when one
+     message can't hold it; without the flag an oversized response stays a 413.
   4. KEEPALIVE (authed only): {"type":"ping","t"} -> {"type":"pong","t"}. The phone pings
      on a timer so idle NAT/consent mappings stay warm and a dead path is noticed without
      user traffic. Before auth, a ping is just an invalid auth message (rejected, closed).
@@ -43,6 +46,11 @@ _API_CHANNEL = "sb-api"
 _MAX_MESSAGE_BYTES = 256 * 1024  # cap on a single DataChannel message, BOTH directions
 _MAX_INFLIGHT = 16               # bound concurrent in-flight requests per channel
 _MAX_NONCE_BYTES = 64            # a peer's hello nonce is small; never sign arbitrary-length data
+# A response too big for one message is split into ordered part-frames when the request
+# advertised {"chunks": true} (phones do since the audit feed outgrew one message). The
+# ceiling bounds what one request may stream (memory on both ends); past it, 413 as ever.
+_MAX_RESPONSE_BYTES = 8 * 1024 * 1024
+_CHUNK_B64_CHARS = 192 * 1024  # per-frame payload; envelope stays well under _MAX_MESSAGE_BYTES
 
 # Strong refs to in-flight ``ensure_future`` tasks. CPython may GC a task whose
 # only reference is the event loop's weakref set (issue 91887), silently
@@ -75,6 +83,27 @@ def _error_response(rid: str, status: int, detail: str) -> str:
     """A JSON error response message (for 413/429/401 surfaced like any API error)."""
     body = json.dumps({"detail": detail}).encode("utf-8")
     return _encode_response({"id": rid or "?", "status": status, "headers": {}, "body": body})
+
+
+def _encode_response_parts(resp: dict) -> list[str]:
+    """Split one response into ordered part-frames a chunk-aware phone reassembles.
+
+    Every part carries ``{id, seq, more, body_b64}``; the FIRST also carries ``status`` +
+    ``headers``. The DataChannel is reliable + ordered, so ``seq`` is a cross-check, not a
+    reordering mechanism. Kept beside ``_encode_response`` so the two wire shapes evolve
+    together (mirrored in web/src/lib/remote/protocol.ts).
+    """
+    assert isinstance(resp, dict) and "id" in resp, "response frame needs an id"
+    body_b64 = base64.b64encode(resp.get("body") or b"").decode("ascii")
+    pieces = [body_b64[i : i + _CHUNK_B64_CHARS] for i in range(0, len(body_b64), _CHUNK_B64_CHARS)] or [""]
+    out: list[str] = []
+    for seq, piece in enumerate(pieces):  # bounded: len(body) <= _MAX_RESPONSE_BYTES
+        frame: dict = {"id": resp["id"], "seq": seq, "more": seq < len(pieces) - 1, "body_b64": piece}
+        if seq == 0:
+            frame["status"] = int(resp["status"])
+            frame["headers"] = resp.get("headers") or {}
+        out.append(json.dumps(frame))
+    return out
 
 
 def _sdp_fingerprint(sdp: str) -> str:
@@ -180,6 +209,13 @@ async def _handle_request(channel, msg: dict, http_client, store, session: dict)
         resp = await asyncio.to_thread(webrtc_bridge.handle_frame, frame, http_client)
         out = _encode_response(resp)
         if len(out) > _MAX_MESSAGE_BYTES:
+            body_len = len(resp.get("body") or b"")
+            if msg.get("chunks") is True and body_len <= _MAX_RESPONSE_BYTES:
+                # Chunk-aware phone: stream ordered parts instead of refusing. An old
+                # phone never sets the flag and keeps getting the 413 below.
+                for part in _encode_response_parts(resp):
+                    _safe_send(channel, part)
+                return
             out = _error_response(str(resp.get("id") or "?"), 413, "response exceeds channel limit")
         _safe_send(channel, out)
     except Exception as exc:  # a single bad request must never tear down the channel

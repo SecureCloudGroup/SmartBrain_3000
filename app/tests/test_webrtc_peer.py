@@ -289,3 +289,79 @@ def test_single_fingerprint_keeps_only_the_first() -> None:
     out = webrtc_peer._single_fingerprint(sdp)
     assert [ln for ln in out.splitlines() if ln.startswith("a=fingerprint:")] == ["a=fingerprint:sha-256 AA:BB:CC"]
     assert "a=setup:active" in out and out.startswith("v=0")  # all other lines preserved
+
+
+def test_e2e_big_response_chunked_when_advertised(app_client: TestClient) -> None:
+    """A response over the single-message cap streams as ordered part-frames when the
+    request carries chunks:true — and reassembles to exactly the HTTP body."""
+    app_client.post("/api/account/setup", json={"passphrase": "correct-horse"})
+    big = "x" * (400 * 1024)  # > _MAX_MESSAGE_BYTES once base64'd into a frame
+    doc_id = app_client.post("/api/kb", json={"title": "Big", "content": big}).json()["id"]
+    store = SecretStore(duckdb.connect(":memory:"), gen_master_key())
+    dev = devices.create_device(store, "phone")
+
+    async def run() -> dict:
+        phone, pc, channel, events, auth = await _connect_and_auth(
+            store, app_client, dev["device_id"], dev["credential"]
+        )
+        assert auth["type"] == "auth_ok"
+        done: asyncio.Future = asyncio.get_event_loop().create_future()
+        parts: list[dict] = []
+
+        @channel.on("message")
+        def _resp(data) -> None:
+            m = json.loads(data)
+            if "seq" in m and not done.done():
+                parts.append(m)
+                if m.get("more") is False:
+                    done.set_result(parts)
+
+        req = _req("1", "GET", f"/api/kb/{doc_id}")
+        req["chunks"] = True
+        channel.send(json.dumps(req))
+        try:
+            return await asyncio.wait_for(done, timeout=30)
+        finally:
+            await phone.close()
+            await pc.close()
+
+    frames = asyncio.run(run())
+    assert len(frames) > 1, "an oversized response must arrive as several parts"
+    assert frames[0]["status"] == 200 and frames[0]["seq"] == 0
+    assert [f["seq"] for f in frames] == list(range(len(frames)))  # ordered, gapless
+    assert all(len(json.dumps(f)) <= webrtc_peer._MAX_MESSAGE_BYTES for f in frames)
+    body = base64.b64decode("".join(f["body_b64"] for f in frames))
+    assert json.loads(body)["content"] == "x" * (400 * 1024)  # byte-exact reassembly
+
+
+def test_e2e_big_response_still_413_without_flag(app_client: TestClient) -> None:
+    """An old phone (no chunks flag) keeps today's behavior: a clean 413, never parts."""
+    app_client.post("/api/account/setup", json={"passphrase": "correct-horse"})
+    big = "y" * (400 * 1024)
+    doc_id = app_client.post("/api/kb", json={"title": "Big2", "content": big}).json()["id"]
+    store = SecretStore(duckdb.connect(":memory:"), gen_master_key())
+    dev = devices.create_device(store, "phone")
+
+    async def run() -> dict:
+        phone, pc, channel, events, auth = await _connect_and_auth(
+            store, app_client, dev["device_id"], dev["credential"]
+        )
+        assert auth["type"] == "auth_ok"
+        reply: asyncio.Future = asyncio.get_event_loop().create_future()
+
+        @channel.on("message")
+        def _resp(data) -> None:
+            m = json.loads(data)
+            if "status" in m and "seq" not in m and not reply.done():
+                reply.set_result(m)
+
+        channel.send(json.dumps(_req("2", "GET", f"/api/kb/{doc_id}")))
+        try:
+            return await asyncio.wait_for(reply, timeout=30)
+        finally:
+            await phone.close()
+            await pc.close()
+
+    resp = asyncio.run(run())
+    assert resp["status"] == 413
+    assert b"exceeds channel limit" in base64.b64decode(resp["body_b64"])

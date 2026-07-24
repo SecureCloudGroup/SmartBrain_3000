@@ -5,6 +5,9 @@
 //   1. hello   {type:"hello", nonce}            -> hello_ok {type, pubkey, signature}
 //   2. auth    {type:"auth", device_id, credential} -> {type:"auth_ok"} | {type:"auth_error"}
 //   3. request {id, method, path, headers, body_b64} -> response {id, status, headers, body_b64}
+//      Requests advertise {chunks:true}: a response too big for one channel message then
+//      arrives as ORDERED part-frames {id, seq, more, body_b64} (the first also carries
+//      status + headers) instead of a 413. Old Desktops ignore the flag and still 413.
 //   4. keepalive (authed only): ping {type:"ping", t} -> pong {type:"pong", t}. The phone
 //      sends these on a timer; a missing pong past the deadline means the path silently
 //      died (idle NAT/consent expiry) even though connectionState still says "connected".
@@ -68,7 +71,53 @@ export function encodeRequest(
   headers: Record<string, string>,
   body: Uint8Array,
 ): string {
-  return JSON.stringify({ id, method, path, headers, body_b64: bytesToB64(body) });
+  // chunks:true = this phone can reassemble part-framed responses (big audit feeds,
+  // large documents). An old Desktop ignores the key and 413s oversized responses.
+  return JSON.stringify({ id, method, path, headers, body_b64: bytesToB64(body), chunks: true });
+}
+
+// --- chunked responses -------------------------------------------------------------------
+// A part-frame is {id, seq, more, body_b64} (+ status/headers on seq 0). The DataChannel
+// is reliable + ordered, so seq is an integrity cross-check, not a reordering mechanism.
+
+export interface ChunkState {
+  id: string;
+  status: number;
+  headers: Record<string, string>;
+  parts: string[];
+  nextSeq: number;
+  totalChars: number;
+}
+
+// Bound what one response may accumulate on the phone (mirrors the Desktop's 8 MB
+// response ceiling with base64's 4/3 overhead + slack).
+const _MAX_CHUNK_TOTAL_CHARS = 12 * 1024 * 1024;
+
+export function isChunkFrame(m: Record<string, unknown>): boolean {
+  return typeof m.seq === "number" && typeof m.more === "boolean";
+}
+
+/** Fold one part-frame into the accumulating state.
+ *  Returns the updated state, the finished response (`done`), or an `error` string when
+ *  the stream is malformed (wrong seq, missing head, over the bound) — the caller drops
+ *  the transfer and fails the request. Pure, so it is unit-testable without a channel. */
+export function appendChunk(
+  state: ChunkState | null,
+  m: Record<string, unknown>,
+): { state?: ChunkState; done?: ParsedResponse; error?: string } {
+  const seq = Number(m.seq);
+  if (state === null) {
+    if (seq !== 0 || typeof m.status !== "number") return { error: "chunk stream must start at seq 0 with a status" };
+    state = { id: String(m.id ?? ""), status: Number(m.status), headers: (m.headers as Record<string, string>) ?? {}, parts: [], nextSeq: 0, totalChars: 0 };
+  }
+  if (seq !== state.nextSeq) return { error: `chunk out of order (got ${seq}, expected ${state.nextSeq})` };
+  const piece = String(m.body_b64 ?? "");
+  state.totalChars += piece.length;
+  if (state.totalChars > _MAX_CHUNK_TOTAL_CHARS) return { error: "chunked response exceeds the size bound" };
+  state.parts.push(piece);
+  state.nextSeq += 1;
+  if (m.more === true) return { state };
+  return { done: { id: state.id, status: state.status, headers: state.headers, body: b64ToBytes(state.parts.join("")) } };
 }
 
 // A control message is one with a "type" (hello_ok / auth_ok / auth_error); a response

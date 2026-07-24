@@ -9,7 +9,7 @@
 
 import { channelBinding, randomNonceB64, verifyDesktopIdentity } from "./crypto";
 import type { PairingPayload } from "./pairing";
-import { asResponse, encodeAuth, encodeHello, encodePing, encodeRequest, type ParsedResponse, parseMessage, pingDead } from "./protocol";
+import { appendChunk, asResponse, type ChunkState, encodeAuth, encodeHello, encodePing, encodeRequest, isChunkFrame, type ParsedResponse, parseMessage, pingDead } from "./protocol";
 import { classifyCandidatePair } from "./candidate-pair";
 import { setRemoteStatus } from "./connection.svelte";
 
@@ -37,7 +37,12 @@ const _ICE_PUSH_WAIT_MS = 800;
 const _CONNECT_FAIL_HINT =
   "Couldn't reach your Desktop. If it's on a VPN, turning the VPN off on the Desktop often fixes this — then Retry.";
 
-type Pending = { resolve: (r: ParsedResponse) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> };
+type Pending = {
+  resolve: (r: ParsedResponse) => void;
+  reject: (e: Error) => void;
+  timer: ReturnType<typeof setTimeout>;
+  chunks: ChunkState | null; // accumulating part-framed response, if the Desktop chunked
+};
 
 export class RemoteConnection {
   private pc: RTCPeerConnection | null = null;
@@ -165,6 +170,7 @@ export class RemoteConnection {
       this.failReady?.(new Error("auth_error"));
       return;
     }
+    if (isChunkFrame(m)) return this.onChunkFrame(m); // one part of a big response
     if (typeof m.status === "number") this.resolvePending(asResponse(m)); // a response frame
   }
 
@@ -264,7 +270,7 @@ export class RemoteConnection {
         this.pending.delete(id);
         reject(new Error("remote request timed out"));
       }, _REQUEST_TIMEOUT);
-      this.pending.set(id, { resolve, reject, timer });
+      this.pending.set(id, { resolve, reject, timer, chunks: null });
       try {
         this.channel?.send(frame);
       } catch (e) {
@@ -280,6 +286,32 @@ export class RemoteConnection {
   isLive(): boolean {
     const s = this.pc?.connectionState;
     return s === "new" || s === "connecting" || s === "connected";
+  }
+
+  // A big response arrives as ordered part-frames (see protocol.ts). Each part refreshes
+  // the request timer — the 60s budget then bounds the GAP between parts, not the whole
+  // transfer, so a slow relayed link can still deliver a large document.
+  private onChunkFrame(m: Record<string, unknown>): void {
+    const id = String(m.id ?? "");
+    const p = this.pending.get(id);
+    if (!p) return; // request already timed out / cancelled — drop the stragglers
+    const r = appendChunk(p.chunks, m);
+    if (r.error) {
+      clearTimeout(p.timer);
+      this.pending.delete(id);
+      p.reject(new Error(r.error));
+      return;
+    }
+    if (r.done) {
+      this.resolvePending(r.done);
+      return;
+    }
+    p.chunks = r.state ?? null;
+    clearTimeout(p.timer);
+    p.timer = setTimeout(() => {
+      this.pending.delete(id);
+      p.reject(new Error("remote request timed out"));
+    }, _REQUEST_TIMEOUT);
   }
 
   private resolvePending(resp: ParsedResponse): void {
