@@ -7,6 +7,7 @@
   import { refreshPending } from "$lib/pending.svelte";
   import { api, ApiError, type AgentResult, type ChatMessage, type Conversation, type DiscoveredModel, type RecentScheduleRun, type Source } from "$lib/api";
   import { finalAssistantId, mergeRefreshedLog, transcriptUpToLastUser } from "$lib/chat-log";
+  import { confirmDialog } from "$lib/confirm.svelte";
   import { describeError } from "$lib/errors";
   import Markdown from "$lib/Markdown.svelte";
   import { remote } from "$lib/remote/connection.svelte";
@@ -437,6 +438,26 @@
       await api.renameConversation(cid, t);
       renaming = false;
       await loadConversations(); // re-list so the picker shows the server's (source-of-truth) title
+    } catch (err) {
+      error = describeError(err);
+    }
+  }
+
+  // Move EVERY chat to the Trash (Settings -> Account & Data holds restore for 30 days).
+  // Lives here because chats are deleted where chats live; the confirm is non-negotiable.
+  async function removeAll() {
+    const ok = await confirmDialog({
+      title: "Delete all chats",
+      body: "Move every chat to the Trash? You can restore them from Settings \u2192 Account & Data for 30 days.",
+      confirmLabel: "Delete all",
+      danger: true,
+    });
+    if (!ok) return;
+    error = "";
+    try {
+      await api.deleteAllConversations();
+      newChat();
+      await loadConversations();
     } catch (err) {
       error = describeError(err);
     }
@@ -914,6 +935,7 @@
           <button class="secondary" disabled={busy} title="Rename this chat" onclick={startRename}>Rename</button>
           <button class="secondary" disabled={busy} title="Move this chat to the Trash (restorable for 30 days in Settings → Account)" onclick={() => remove(chatSession.currentId!)}>Delete</button>
         {/if}
+        <button class="del" disabled={busy} title="Move ALL chats to the Trash (restorable for 30 days in Settings → Account & Data)" onclick={removeAll}>Delete all…</button>
       {/if}
     {/if}
     <span class="grow"></span>
