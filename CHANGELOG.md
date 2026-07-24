@@ -11,6 +11,11 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Added
+- "Delete all…" now lives on the Chat page itself (next to the saved-chats picker, on
+  desktop and phone) — behind a confirmation, and everything still lands in the Trash
+  with 30 days to restore. The Trash itself stays in Settings → Account & Data.
+
 ### Fixed
 - The assistant can no longer present an unrelated document as a finding: when it
   asks for a focused summary of a document that never mentions the focus topic, the
