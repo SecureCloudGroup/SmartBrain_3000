@@ -8,7 +8,7 @@
   // them at host.docker.internal. We hide that plumbing: the user just gives a port, and
   // we compose the URL. Advanced users can override with a full URL (non-standard host).
   const HOST = "host.docker.internal";
-  const DEFAULT_PORT = { ollama: 11434, mlx: 8888 } as const;
+  const DEFAULT_PORT = { ollama: 11434, mlx: 8888, mlxe: 8899 } as const;
   // Genuinely-good local defaults we suggest per backend (docs/02-models.md): Qwen2.5-7B for
   // chat, plus the embedding model semantic search needs. Surfaced in the pull/serve hints below.
   const RECOMMENDED = {
@@ -22,6 +22,7 @@
   let mlxPort = $state(String(DEFAULT_PORT.mlx));
   let ollamaAdv = $state(""); // full-URL override (advanced)
   let mlxAdv = $state("");
+  let mlxePort = $state(String(DEFAULT_PORT.mlxe));
   let showOllamaAdv = $state(false);
   let showMlxAdv = $state(false);
   let mlxKey = $state("");
@@ -61,6 +62,7 @@
       mlxPort = m.port;
       mlxAdv = m.adv;
       showMlxAdv = m.useAdv;
+      mlxePort = hydrate(models.mlxe.url, DEFAULT_PORT.mlxe).port;
     } catch (err) {
       error = describeError(err);
     }
@@ -102,6 +104,7 @@
 
   const ollamaInvalid = $derived(!showOllamaAdv && !validPort(ollamaPort));
   const mlxInvalid = $derived(!showMlxAdv && !validPort(mlxPort));
+  const mlxeInvalid = $derived(!validPort(mlxePort));
 </script>
 
 <h1>Local models <span class="muted" style="font-weight:400; font-size:0.9rem">· optional</span></h1>
@@ -242,6 +245,44 @@
     </button>
     {#if models?.mlx.configured}
       <button class="secondary" disabled={busy === "mlx"} onclick={() => run("mlx", () => api.deleteLocalModel("mlx"))}>Remove</button>
+    {/if}
+  </p>
+</div>
+
+<div class="card">
+  <h2 class="row">
+    <span>MLX embeddings</span>
+    {#if models}
+      {@const ok = models.mlxe.configured && models.mlxe.reachable}
+      <Chip kind={!models.mlxe.configured ? "" : ok ? "ok" : "danger"}>
+        {!models.mlxe.configured ? "off" : ok ? "connected" : "unreachable"}
+      </Chip>
+    {/if}
+  </h2>
+  <p class="muted" style="margin:0 0 0.5rem; font-size:0.9rem">
+    A tiny dedicated server for <strong>semantic-search embeddings</strong> (Qwen3-Embedding on
+    MLX) — chat servers like oMLX can&rsquo;t serve this model class. One-time install:
+    <code>tools/mlx_embed_server/install.sh</code>, then route it under Model routing → Embedding.
+  </p>
+  {#if models && !models.mlxe.configured && models.mlxe.detected}
+    <p style="margin:0 0 0.6rem; padding:0.5rem 0.75rem; border:1px solid var(--ok); border-radius:var(--r-1); color:var(--ok)">
+      ✓ Found the embeddings server running on this machine.
+      <button class="link" disabled={busy === "mlxe"} onclick={() => run("mlxe", () => api.putMlxe(models!.mlxe.default_url, ""))}>Connect it</button>
+    </p>
+  {/if}
+  <label for="mlxe-port">Port</label>
+  <input id="mlxe-port" type="number" min="1" max="65535" bind:value={mlxePort} autocomplete="off" />
+  <p class="muted" style="font-size:0.85rem; margin:0.25rem 0 0">The install script&rsquo;s default is 8899.</p>
+  {#if mlxeInvalid}<p class="error" style="font-size:0.85rem; margin:0.25rem 0 0">Enter a port between 1 and 65535.</p>{/if}
+  {#if models?.mlxe.models.length}
+    <p class="muted" style="margin-top:0.5rem">Models: {models.mlxe.models.join(", ")}</p>
+  {/if}
+  <p style="margin-top:0.75rem; display:flex; gap:0.5rem">
+    <button disabled={busy === "mlxe" || mlxeInvalid} onclick={() => run("mlxe", () => api.putMlxe(`http://${HOST}:${mlxePort}`, ""))}>
+      {busy === "mlxe" ? "Saving…" : "Save & connect"}
+    </button>
+    {#if models?.mlxe.configured}
+      <button class="secondary" disabled={busy === "mlxe"} onclick={() => run("mlxe", () => api.deleteLocalModel("mlxe"))}>Remove</button>
     {/if}
   </p>
 </div>

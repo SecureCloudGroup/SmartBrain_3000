@@ -11,6 +11,14 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Added
+- **MLX-only semantic search**: a new "MLX embeddings" local provider plus a bundled
+  one-command server (`tools/mlx_embed_server/install.sh`) serve Qwen3-Embedding on
+  Apple Silicon with correct pooling — chat servers like oMLX refuse this model class.
+  Connect it under Settings → Local models, route the Embedding slot to
+  `mlxe/qwen3-embedding-0.6b`, Reindex, and the whole stack runs without Ollama.
+  The provider is embeddings-only by construction: it can never be offered a chat turn.
+
 ### Fixed
 - Hundreds-of-pages documents are now FULLY searchable by meaning. Semantic coverage
   used to stop silently at ~256k characters (64 chunks) and ingest truncated files at

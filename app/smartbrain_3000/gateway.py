@@ -87,7 +87,7 @@ def resolve_model(capability: str, routes: dict[str, str] | None = None) -> str 
     return table.get(capability)
 
 
-_LOCAL_PROVIDER_NAMES = frozenset(("ollama", "mlx"))
+_LOCAL_PROVIDER_NAMES = frozenset(("ollama", "mlx", "mlxe"))
 
 # A local model server (Ollama / MLX / oMLX) serves ONE request at a time: a second overlapping
 # request errors with "model is busy; cannot reload runtime settings variant until active requests
@@ -356,8 +356,10 @@ def list_models(*, client: httpx.Client | None = None, timeout: float = 6.0) -> 
             "provider": mid.split("/", 1)[0],
             "context_length": item.get("context_length"),
             "pricing": _norm_pricing(item.get("pricing")),
-            "chat": _is_chat_model(item),
-            "embed": _is_embed_model(item),
+            # mlxe is the dedicated embeddings server: force the flags rather than
+            # trusting id heuristics (it must never appear as a chat option).
+            "chat": False if mid.startswith("mlxe/") else _is_chat_model(item),
+            "embed": True if mid.startswith("mlxe/") else _is_embed_model(item),
         })
     return out
 
@@ -780,7 +782,7 @@ def remove_provider(bifrost_name: str, *, client: httpx.Client | None = None) ->
 # --- Local model providers (Ollama / MLX, on the host) --------------------
 # Local servers run on the host and must bind 0.0.0.0; the gateway reaches them
 # at host.docker.internal. Config lives in the secret store under these keys.
-LOCAL_PROVIDERS = ("ollama", "mlx")
+LOCAL_PROVIDERS = ("ollama", "mlx", "mlxe")
 # Bifrost's per-provider request timeout defaults to 30s — too short for a COLD local
 # model load (an agent/scheduled turn can be the first request after boot, and loading a
 # large MLX/Ollama model into memory takes well over 30s). Give local providers a generous
@@ -790,11 +792,17 @@ _LOCAL_PROVIDER_TIMEOUT_SECS = 300
 OLLAMA_URL_KEY = "local:ollama:url"
 MLX_URL_KEY = "local:mlx:url"
 MLX_KEY_KEY = "local:mlx:api_key"
+# The MLX EMBEDDINGS server (tools/mlx_embed_server) — a separate tiny host service,
+# because chat servers like oMLX serve only encoder embedders and refuse decoder
+# embedding models (verified live with Qwen3-Embedding: "not an embedding model").
+MLXE_URL_KEY = "local:mlxe:url"
+MLXE_KEY_KEY = "local:mlxe:api_key"
 # Default host URLs for auto-detecting a server when nothing is configured yet — the
 # common "I installed Ollama and SmartBrain, now connect them" path. The gateway runs
 # in-container and reaches host services via host.docker.internal.
 OLLAMA_DEFAULT_URL = "http://host.docker.internal:11434"
 MLX_DEFAULT_URL = "http://host.docker.internal:8888"
+MLXE_DEFAULT_URL = "http://host.docker.internal:8899"
 
 
 def register_ollama(url: str, *, client: httpx.Client | None = None) -> None:
@@ -857,6 +865,30 @@ def register_mlx(url: str, api_key: str = "", *, client: httpx.Client | None = N
     _run(client, lambda c: _replace_provider(c, "mlx", create_body, key_payload))
 
 
+def register_mlxe(url: str, api_key: str = "", *, client: httpx.Client | None = None) -> None:
+    """Register the MLX EMBEDDINGS server as a CUSTOM Bifrost provider.
+
+    Embedding + list_models ONLY — no chat. A dedicated embeddings server (Qwen3-Embedding
+    via mlx-embeddings) must never be offered a chat turn, and keeping chat out of the
+    allowed set makes Bifrost enforce that instead of trusting the router UI."""
+    assert url, "mlxe url required"
+    assert isinstance(api_key, str), "mlxe api key must be a string"
+    create_body = {
+        "provider": "mlxe",
+        "network_config": {"base_url": url, "default_request_timeout_in_seconds": _LOCAL_PROVIDER_TIMEOUT_SECS,
+                           "allow_private_network": True},
+        "custom_provider_config": {
+            "base_provider_type": "openai",
+            "allowed_requests": {
+                "list_models": True,
+                "embedding": True,
+            },
+        },
+    }
+    key_payload = {"name": "smartbrain-mlxe", "value": api_key or "none", "models": ["*"], "weight": 1.0}
+    _run(client, lambda c: _replace_provider(c, "mlxe", create_body, key_payload))
+
+
 def provision_local_from_store(store, *, client: httpx.Client | None = None) -> list[str]:
     """Register any configured local providers (Ollama/MLX) from the store."""
     assert store is not None, "secret store required"
@@ -871,6 +903,10 @@ def provision_local_from_store(store, *, client: httpx.Client | None = None) -> 
         if mlx_url:  # key is optional (keyless MLX/OMLX) — gate on the URL, like Ollama
             register_mlx(mlx_url, store.get(MLX_KEY_KEY) or "", client=c)
             done.append("mlx")
+        mlxe_url = store.get(MLXE_URL_KEY)
+        if mlxe_url:
+            register_mlxe(mlxe_url, store.get(MLXE_KEY_KEY) or "", client=c)
+            done.append("mlxe")
 
     _run(client, _do)
     assert isinstance(done, list), "must return a list"
@@ -917,6 +953,16 @@ def local_fallback_models(store) -> list[dict]:
                 "id": mid, "name": mid, "provider": "mlx",
                 "context_length": probe["context_lengths"].get(name),
                 "pricing": None, "chat": _is_chat_model({"id": mid}), "embed": _is_embed_model({"id": mid}),
+            })
+    mlxe_url = store.get(MLXE_URL_KEY)
+    if mlxe_url:
+        probe = probe_mlx(mlxe_url, store.get(MLXE_KEY_KEY) or "")  # same OpenAI shape as MLX
+        for name in probe["models"][:_MAX_MODELS]:
+            mid = f"mlxe/{name}"
+            # Forced flags, not heuristics: this server serves embeddings and nothing else.
+            out.append({
+                "id": mid, "name": mid, "provider": "mlxe", "context_length": None,
+                "pricing": None, "chat": False, "embed": True,
             })
     return out
 
