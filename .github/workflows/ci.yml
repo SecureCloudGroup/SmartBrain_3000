@@ -32,7 +32,7 @@ jobs:
           # requirements.lock is the exact-pinned resolution used by the release image;
           # apply it as constraints so CI tests the same versions users get.
           pip install -c app/requirements.lock ./app
-          pip install pytest ruff
+          pip install pytest "ruff<0.16"
       - name: Ruff
         run: python -m ruff check app/smartbrain_3000 app/tests installer
       - name: Pytest (app + signaling)
@@ -79,7 +79,7 @@ jobs:
         # No mount: exercise the code baked into the image, on the image's own Python.
         run: |
           docker run --rm --entrypoint /bin/sh smartbrain_3000:ci -c '
-            pip install --quiet pytest ruff
+            pip install --quiet pytest "ruff<0.16"
             cd /app
             python -m ruff check smartbrain_3000
             python -m pytest -q
