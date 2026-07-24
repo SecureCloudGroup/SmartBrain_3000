@@ -352,14 +352,16 @@ def _grounded_messages(ctx, prompt: str) -> list[dict]:
     plus the user's profile/facts. Without it the model can log a status string as a
     fact or claim work no tool performed — exactly what an ungrounded schedule did.
     """
-    from .chat_routes import _base_system_prompt  # lazy: keep the route<-domain edge off import time
+    from .chat_routes import _base_system_prompt, _time_line  # lazy: keep the route<-domain edge off import time
     assert ctx is not None, "tool context required"
     assert prompt, "prompt required"
     parts = [_base_system_prompt()]
     profile = ctx.memory.system_prompt() if ctx.memory is not None else None
     if profile:
         parts.append(profile)
-    return [{"role": "system", "content": "\n\n".join(parts)}, {"role": "user", "content": prompt}]
+    # Time rides the trailing note, same as chat — the head stays cache-stable.
+    return [{"role": "system", "content": "\n\n".join(parts)},
+            {"role": "user", "content": prompt}, _time_line()]
 
 
 def _record_run_safe(store: ScheduleStore, sid: str, status: str, message: str, error: str | None) -> None:

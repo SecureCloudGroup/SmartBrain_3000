@@ -147,7 +147,10 @@ def test_run_schedule_advances_then_runs(monkeypatch) -> None:
     result = scheduler.run_schedule(tools.ToolContext(), None, None, store, sched)
     assert result["status"] == "complete"
     msgs = seen["ran"]["messages"]
-    assert msgs[0]["role"] == "system" and msgs[-1]["content"] == "do it"  # grounded + prompt preserved
+    # Grounded head + prompt preserved; the live time now rides a TRAILING system
+    # note (cache-stable head), so the user prompt is second-to-last.
+    assert msgs[0]["role"] == "system" and msgs[-2]["content"] == "do it"
+    assert msgs[-1]["role"] == "system" and msgs[-1]["content"].startswith("Current date and time: ")
     assert store.get_schedule(sid)["enabled"] is False  # one-shot advanced (disabled)
 
 

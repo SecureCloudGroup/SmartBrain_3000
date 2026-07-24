@@ -12,6 +12,14 @@ to know when a release changes behavior.
 ## [Unreleased]
 
 ### Fixed
+- Chats and agent turns answer noticeably sooner on local models: the live clock in
+  the system prompt was invalidating the model server's prompt cache every minute
+  (measured 11% cache efficiency — the model re-read the entire conversation on
+  almost every step, ~12 seconds of pure re-processing per agent step on a long
+  context). The prompt head is now byte-stable and the current time rides a tiny
+  trailing note instead, so the cached prefix survives across steps and turns.
+
+### Fixed
 - The assistant can no longer present an unrelated document as a finding: when it
   asks for a focused summary of a document that never mentions the focus topic, the
   result now says so plainly ("the focus does not appear anywhere in this document"),

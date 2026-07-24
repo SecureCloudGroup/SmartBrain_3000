@@ -31,13 +31,20 @@ def _require_unlocked(request: Request) -> None:
 
 
 def _base_system_prompt() -> str:
-    """Always-on grounding: the current time, when to reach for tools, and the rule that
-    actions must go through a tool. Keeps models from inventing facts/URLs, claiming they
-    can't tell the time, or — the trust-critical one — telling the user an action is done
-    when no tool actually performed it."""
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    """Always-on grounding: when to reach for tools, and the rule that actions must go
+    through a tool. Keeps models from inventing facts/URLs, claiming they can't tell
+    the time, or — the trust-critical one — telling the user an action is done when no
+    tool actually performed it.
+
+    DELIBERATELY STATIC — this is the first text of every prompt, and the local model's
+    prefix cache keys on it byte-for-byte. A live minute-granular timestamp here
+    invalidated the ENTIRE cached prefix (system + memory + whole conversation) every
+    minute — measured 11% cache efficiency on oMLX, ~12s of re-prefill per agent step.
+    The live time now rides a tiny trailing system message (_time_line), after the
+    cacheable prefix."""
     return (
-        f"The current date and time is {now}. Work out other time zones yourself when "
+        "The current date and time is given in a system note at the end of the "
+        "conversation. Work out other time zones yourself when "
         "asked (e.g. London is UTC in winter, UTC+1 in summer) — never say you cannot "
         "tell the time. For current external facts (news, weather, prices, or a specific "
         "web page) call the web_search or web_fetch tools instead of guessing, and never "
@@ -64,7 +71,16 @@ def _with_memory(request: Request, messages: list[dict]) -> list[dict]:
     profile = memory.system_prompt() if memory is not None else None
     if profile:
         parts.append(profile)
-    return [{"role": "system", "content": "\n\n".join(parts)}, *messages]
+    # The live time goes LAST: everything before it is byte-stable across turns, so the
+    # local model's prefix cache covers the system prompt, memory, and the whole
+    # conversation — only this one line (and the newest user message) re-prefills.
+    return [{"role": "system", "content": "\n\n".join(parts)}, *messages, _time_line()]
+
+
+def _time_line() -> dict:
+    """The per-request live-time system note (kept OUT of the cacheable prefix)."""
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    return {"role": "system", "content": f"Current date and time: {now}."}
 
 
 @router.post("/api/chat")
