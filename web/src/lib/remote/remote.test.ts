@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import { channelBinding, randomNonceB64, sdpFingerprint, verifyDesktopIdentity } from "./crypto";
 import { decodePairingFragment, encodePairingFragment, parsePairingPayload } from "./pairing";
-import { asResponse, b64ToBytes, bytesToB64, concatBytes, encodePing, encodeRequest, parseMessage, pingDead } from "./protocol";
+import { appendChunk, asResponse, b64ToBytes, bytesToB64, concatBytes, encodePing, encodeRequest, isChunkFrame, parseMessage, pingDead } from "./protocol";
 import { classifyCandidatePair } from "./candidate-pair";
 
 const SDP_A = "v=0\r\na=fingerprint:sha-256 AA:BB:CC\r\na=setup:actpass\r\n";
@@ -153,5 +153,54 @@ describe("keepalive (ping/pong)", () => {
     expect(pingDead(now - 44_999, now, 45_000)).toBe(false);
     expect(pingDead(now - 45_000, now, 45_000)).toBe(false); // boundary: exactly at deadline
     expect(pingDead(now - 45_001, now, 45_000)).toBe(true);
+  });
+});
+
+describe("chunked responses (big audit feeds / large documents)", () => {
+  it("encodeRequest advertises chunk support", () => {
+    const m = JSON.parse(encodeRequest("1", "GET", "/api/audit", {}, new Uint8Array()));
+    expect(m.chunks).toBe(true);
+  });
+
+  it("reassembles ordered parts into one response", () => {
+    const body = "A".repeat(10);
+    const b64 = Buffer.from(body).toString("base64"); // 16 chars
+    const p1 = { id: "5", seq: 0, more: true, status: 200, headers: { "content-type": "application/json" }, body_b64: b64.slice(0, 8) };
+    const p2 = { id: "5", seq: 1, more: false, body_b64: b64.slice(8) };
+    const r1 = appendChunk(null, p1);
+    expect(r1.state && !r1.done && !r1.error).toBe(true);
+    const r2 = appendChunk(r1.state!, p2);
+    expect(r2.done?.status).toBe(200);
+    expect(r2.done?.headers["content-type"]).toBe("application/json");
+    expect(new TextDecoder().decode(r2.done!.body)).toBe(body);
+  });
+
+  it("a single-part stream (more:false at seq 0) completes immediately", () => {
+    const r = appendChunk(null, { id: "6", seq: 0, more: false, status: 204, headers: {}, body_b64: "" });
+    expect(r.done?.status).toBe(204);
+    expect(r.done?.body.length).toBe(0);
+  });
+
+  it("rejects a stream that doesn't start at seq 0 with a status", () => {
+    expect(appendChunk(null, { id: "7", seq: 1, more: false, body_b64: "" }).error).toBeTruthy();
+    expect(appendChunk(null, { id: "7", seq: 0, more: true, body_b64: "" }).error).toBeTruthy(); // no status
+  });
+
+  it("rejects an out-of-order part", () => {
+    const r1 = appendChunk(null, { id: "8", seq: 0, more: true, status: 200, headers: {}, body_b64: "AA" });
+    expect(appendChunk(r1.state!, { id: "8", seq: 2, more: false, body_b64: "BB" }).error).toBeTruthy();
+  });
+
+  it("bounds total accumulation", () => {
+    const big = "A".repeat(7 * 1024 * 1024);
+    const r1 = appendChunk(null, { id: "9", seq: 0, more: true, status: 200, headers: {}, body_b64: big });
+    expect(r1.error).toBeUndefined();
+    expect(appendChunk(r1.state!, { id: "9", seq: 1, more: true, body_b64: big }).error).toBeTruthy();
+  });
+
+  it("isChunkFrame separates parts from plain responses and control messages", () => {
+    expect(isChunkFrame({ id: "1", seq: 0, more: false })).toBe(true);
+    expect(isChunkFrame({ id: "1", status: 200, body_b64: "" })).toBe(false);
+    expect(isChunkFrame({ type: "pong", t: 1 })).toBe(false);
   });
 });
