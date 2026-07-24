@@ -158,7 +158,10 @@ a {
 .wrap {
   /* Sized for the sidebar'd shell: 44rem was tuned for the old full-width layout and
      stranded content in a sea of empty canvas on desktop. */
-  max-width: 56rem;
+  /* min(...,100%): the reading cap on desktop, the container on phones — without the
+     100% leg, a child whose min-content exceeds the viewport (a nowrap tab strip)
+     inflates <main> to the rem cap and every page line clips at the screen edge. */
+  max-width: min(56rem, 100%);
   margin: 0 auto;
   padding: 1.5rem;
 }
@@ -169,7 +172,7 @@ a {
    centered column (Help self-caps at the same width). */
 .wrap-wide {
   width: 100%;
-  max-width: 64rem;
+  max-width: min(64rem, 100%);
   margin: 0 auto;
   padding: 1rem 1.5rem 1.5rem;
 }
@@ -402,6 +405,22 @@ button:disabled {
   min-width: 0;
   display: flex;
   flex-direction: column;
+}
+/* The page column must never be widened by its content: one unbreakable token (a long
+   URL in schedule output or a citation) otherwise inflates <main> past the viewport and
+   CLIPS every line on the page (body's overflow-x:hidden hides the scroll). min-width:0
+   lets the flex item stay at viewport width; offending content wraps or overflows its
+   own box locally instead of shifting the whole page. */
+.shell-main > main {
+  min-width: 0;
+}
+
+/* File pickers have an intrinsic width (button + filename) that ignores flex sizing —
+   on a phone they poke past the screen edge. Cap them everywhere (Knowledge import,
+   Settings restore). */
+input[type="file"] {
+  max-width: 100%;
+  min-width: 0;
 }
 
 .sidebar {
@@ -995,6 +1014,11 @@ button:disabled {
   }
   .card {
     padding: 1rem;
+  }
+  /* A document row with several tag chips can outgrow a phone row — let it flow to a
+     second line instead of pushing the actions off the right edge. */
+  .docrow {
+    flex-wrap: wrap;
   }
 }
 

@@ -836,7 +836,7 @@
     </div>
 
     <label for="kburl" style="margin-top:1rem">…or add a web page / PDF by URL</label>
-    <div style="display:flex; gap:0.5rem">
+    <div style="display:flex; gap:0.5rem; flex-wrap:wrap">
       <input
         id="kburl"
         style="flex:1; min-width:10rem"
@@ -1689,6 +1689,7 @@
     margin: 0.2rem 0 0;
     color: var(--muted);
     line-height: 1.45;
+    overflow-wrap: anywhere; /* a long URL in a snippet must wrap, not widen the page */
   }
 
   /* Matched terms in a snippet, and the matched passage inside an opened document. */

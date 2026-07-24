@@ -152,6 +152,10 @@
   @media (max-width: 720px) {
     .help {
       flex-direction: column;
+      /* Stacked children must fill the column: the desktop align-items:flex-start
+         otherwise sizes each to its own max-content (the nowrap nav strip measured
+         1738px wide on a 390px phone) and the page clips. */
+      align-items: stretch;
     }
     .help-nav {
       position: static;

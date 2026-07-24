@@ -21,6 +21,14 @@ to know when a release changes behavior.
   page focused on what needs your attention.
 
 ### Fixed
+- Phone screens no longer clip content off the right edge: a long unbreakable token
+  (a URL in a schedule's output, a full source link in a search citation) or a wide
+  control (the seven-tab Settings strip, a file picker) could silently inflate the
+  page past the viewport — Info, Knowledge, every Settings page, and Help were all
+  affected. Pages now stay at screen width everywhere: run output and snippets wrap
+  long tokens, citation chips clip inside their pill, document tag rows flow to a
+  second line, and Help's section nav scrolls in place. Audited: every route is
+  clean at phone width, desktop layouts unchanged.
 - A phone could keep running an old version of the app for hours after a release —
   even after deleting and re-adding it: the hosted origin served the app's HTML
   without a no-cache header, so iOS was allowed to treat stale HTML as fresh
