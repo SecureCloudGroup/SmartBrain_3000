@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import struct
 import uuid
 from collections.abc import Iterator
 
@@ -429,7 +431,7 @@ def test_upgrade_from_v12_preserves_all_client_data(tmp_path) -> None:
     }
 
     applied = dbmod.run_migrations(conn)
-    assert applied == 13  # exactly ids 13..25
+    assert applied == 14  # exactly ids 13..26
 
     # Every user-data row count is unchanged across the upgrade.
     for t, n in counts.items():
@@ -470,7 +472,7 @@ def test_upgrade_from_v2_preserves_documents(tmp_path) -> None:
     master_key = keyvault.set_passphrase(conn, _UP_PASS)
     doc_id = KnowledgeBase(conn, master_key).add("Ancient", "note from the v2 era")
 
-    assert dbmod.run_migrations(conn) == 23  # ids 3..25
+    assert dbmod.run_migrations(conn) == 24  # ids 3..26
     assert KnowledgeBase(conn, master_key).get(doc_id)["content"] == "note from the v2 era"
     assert conn.execute("SELECT COUNT(*) FROM documents;").fetchone()[0] == 1
     assert conn.execute("SELECT COUNT(*) FROM embeddings;").fetchone()[0] == 0  # fresh, empty
@@ -487,11 +489,22 @@ def test_upgrade_from_v17_preserves_embeddings_and_tasks(tmp_path) -> None:
     master_key = keyvault.set_passphrase(conn, _UP_PASS)
     kb = KnowledgeBase(conn, master_key)
     doc_id = kb.add("Recent", "note from the v17 era")
-    kb.put_embeddings(doc_id, [[0.1, 0.2, 0.3]], "ollama/test")  # chunked vector
+    # v17-era embeddings row: no `total` column yet (migration 26 adds it), so seal with
+    # the store but raw-insert the era-accurate shape (same pattern as the v12 seeds).
+    vec = [0.1, 0.2, 0.3]
+    nonce = os.urandom(12)
+    ciphertext = kb._aes.encrypt(
+        nonce, struct.pack("<3f", *vec), kb._embed_aad(doc_id, 0, 3, "ollama/test")
+    )
+    conn.execute(
+        "INSERT INTO embeddings (doc_id, chunk_idx, nonce, ciphertext, dim, model) "
+        "VALUES (?, 0, ?, ?, 3, 'ollama/test');",
+        [doc_id, nonce, ciphertext],
+    )
     planner = Planner(conn, master_key)
     tid = planner.add_task("file taxes", priority="high", due_time="09:00", recur="weekly")
 
-    assert dbmod.run_migrations(conn) == 8  # ids 18..25
+    assert dbmod.run_migrations(conn) == 9  # ids 18..26
     # Chunked embedding preserved (18-21 only add schedule_runs, its seen column, and vaults).
     assert conn.execute("SELECT COUNT(*) FROM embeddings;").fetchone()[0] == 1
     t = planner.get_task(tid)
@@ -516,7 +529,7 @@ def test_migration_19_marks_preexisting_runs_seen(tmp_path) -> None:
         "INSERT INTO schedule_runs (id, schedule_id, status, nonce, ciphertext) VALUES (?, ?, ?, ?, ?);",
         ["run-old", sid, "complete", b"\x00" * 12, b"x"],
     )
-    assert dbmod.run_migrations(conn) == 7  # 19 seen; 20-23 vaults; 24 doc_summaries; 25 chat trash
+    assert dbmod.run_migrations(conn) == 8  # 19 seen; 20-23 vaults; 24 summaries; 25 trash; 26 embed total
     assert store.unseen_count() == 0  # the back-catalog is seen -> badge stays quiet on upgrade
     conn.close()
 
@@ -529,7 +542,7 @@ def test_app_boots_and_serves_data_after_v12_upgrade(tmp_path, monkeypatch) -> N
     _apply_through(conn, 12)
     master_key = keyvault.set_passphrase(conn, _UP_PASS)
     _seed_v12(conn, master_key)
-    assert dbmod.run_migrations(conn) == 13  # ids 13..25 (vaults + doc_summaries + chat trash)
+    assert dbmod.run_migrations(conn) == 14  # ids 13..26 (vaults + summaries + trash + embed total)
     conn.close()  # release the file before the app opens it
 
     monkeypatch.setenv("SMARTBRAIN_DB_PATH", str(path))

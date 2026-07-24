@@ -108,6 +108,7 @@ def test_reindex_stops_at_its_time_budget_instead_of_running_for_hours() -> None
 
     def slow_embed(*_a, **_k):
         time.sleep(0.02)  # stand in for a real embed call
+        return True  # contract: True = this document completed
 
     import smartbrain_3000.ingest as ing
     original = ing.embed_doc
@@ -128,7 +129,7 @@ def test_reindex_without_a_budget_still_finishes_the_backlog(monkeypatch) -> Non
     kb = _kb()
     for i in range(5):
         ingest.store(kb, f"Doc {i}", f"body {i}", embed=False)
-    monkeypatch.setattr(ingest, "embed_doc", lambda *a, **k: None)
+    monkeypatch.setattr(ingest, "embed_doc", lambda *a, **k: True)  # True = doc completed
     embedded, _s, _f, _e = ingest.reindex_pending(kb, "m")
     assert embedded == 5
 

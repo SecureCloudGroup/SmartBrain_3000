@@ -33,12 +33,19 @@ _SEARCH_SCAN_LIMIT = 500  # cap on a search's RESULT count
 _REINDEX_SCAN_LIMIT = 50_000  # max docs surfaced by docs_needing_embedding (lets reindex converge)
 # Ceilings on what the in-memory index holds (P10 #2 — a verifiable bound). Unlike the old
 # `LIMIT 500` these are sized for a real corpus, and exceeding them is reported, never silent.
-_MAX_INDEXED_VECTORS = 100_000  # ~10k docs at ~10 chunks each; ~300 MB at 768 dims, float32
+# Sized so the search-result cap's worth of MAXIMALLY-chunked docs (500 x _MAX_CHUNKS)
+# always fits — a hit can never be missing its vectors. Worst case ~2 GB at 1024 dims
+# float32, but that needs 500 four-million-char documents; a typical big-PDF corpus
+# (hundreds of chunks per doc) sits far below. Exceeding it is reported, never silent.
+_MAX_INDEXED_VECTORS = 500_000
 _SNIPPET_CHARS = 160
 _MAX_EMBED_DIM = 4096  # hard upper bound on any embedding vector length
 _SEMANTIC_MIN_SCORE = 0.0  # cosine is [-1,1]; only surface positive matches
 _CHUNK_CHARS = 4000  # per-chunk size; safely under the embed model's context window
-_MAX_CHUNKS = 64  # cap chunks per doc (verifiable bound; ~256k chars covered)
+# Cap chunks per doc (verifiable bound). 1000 x 4000 chars = 4M chars of semantic coverage,
+# matching ingest._MAX_TEXT exactly — every ingested character is searchable. The old cap
+# (64) silently left ~74% of a big S-1 invisible to meaning search.
+_MAX_CHUNKS = 1000
 _MAX_TAGS = 20  # bound tags per document (mirrors planner._MAX_TAGS)
 
 
@@ -265,11 +272,18 @@ class KnowledgeBase:
         return self.index.find_by_content(content)
 
     def docs_pending_embedding(self, model: str) -> int:
-        """How many documents still need an embedding for ``model`` — the indexing backlog."""
+        """How many documents still need an embedding for ``model`` — the indexing backlog.
+
+        MUST agree with ``docs_needing_embedding``: a doc mid-incremental-run (count <
+        its recorded total) is still pending — the old NOT-EXISTS check flipped to "done"
+        the moment ONE chunk landed, so the UI claimed a big document was indexed while
+        most of it wasn't searchable yet."""
         assert model, "model required"
         row = self._conn.execute(
-            "SELECT COUNT(*) FROM documents d "
-            "WHERE NOT EXISTS (SELECT 1 FROM embeddings e WHERE e.doc_id = d.id AND e.model = ?);",
+            "SELECT COUNT(*) FROM documents d LEFT JOIN "
+            "(SELECT doc_id, count(*) AS have, max(total) AS want FROM embeddings "
+            " WHERE model = ? GROUP BY doc_id) e ON e.doc_id = d.id "
+            "WHERE e.doc_id IS NULL OR (e.want IS NOT NULL AND e.have < e.want);",
             [model],
         ).fetchone()
         return int(row[0]) if row else 0
@@ -420,18 +434,69 @@ class KnowledgeBase:
         assert model, "model required"
         self._conn.execute("DELETE FROM embeddings WHERE doc_id = ?;", [doc_id])  # replace all chunks
         for idx, vector in enumerate(vectors):  # bounded by _MAX_CHUNKS
-            assert 1 <= len(vector) <= _MAX_EMBED_DIM, "vector dim out of range"
-            assert all(math.isfinite(x) for x in vector), "vector elements must be finite"
-            dim = len(vector)
-            nonce = os.urandom(_NONCE_BYTES)
-            plaintext = struct.pack(f"<{dim}f", *vector)
-            ciphertext = self._aes.encrypt(nonce, plaintext, self._embed_aad(doc_id, idx, dim, model))
-            self._conn.execute(
-                "INSERT INTO embeddings (doc_id, chunk_idx, nonce, ciphertext, dim, model) "
-                "VALUES (?, ?, ?, ?, ?, ?);",
-                [doc_id, idx, nonce, ciphertext, dim, model],
-            )
+            self._insert_embedding_row(doc_id, idx, vector, model, total=len(vectors))
         self.index.set_vectors(doc_id, vectors, model)  # a background reindex must reach the index
+
+    def _insert_embedding_row(self, doc_id: str, idx: int, vector: list[float], model: str,
+                              total: int) -> None:
+        """Seal + upsert one chunk row (PK (doc_id, chunk_idx) makes retries idempotent)."""
+        assert 1 <= len(vector) <= _MAX_EMBED_DIM, "vector dim out of range"
+        assert all(math.isfinite(x) for x in vector), "vector elements must be finite"
+        assert 0 <= idx < total <= _MAX_CHUNKS, "chunk index/total out of range"
+        dim = len(vector)
+        nonce = os.urandom(_NONCE_BYTES)
+        plaintext = struct.pack(f"<{dim}f", *vector)
+        ciphertext = self._aes.encrypt(nonce, plaintext, self._embed_aad(doc_id, idx, dim, model))
+        self._conn.execute(
+            "INSERT OR REPLACE INTO embeddings (doc_id, chunk_idx, nonce, ciphertext, dim, model, total) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?);",
+            [doc_id, idx, nonce, ciphertext, dim, model, total],
+        )
+
+    # --- incremental embedding (big documents; resumable across ticks and restarts) ------------
+    #
+    # A hundreds-of-pages PDF is up to _MAX_CHUNKS sequential model calls — minutes of work that
+    # must never happen inside one HTTP request or one scheduler tick. The indexer writes chunk
+    # rows ONE AT A TIME (each row records the run's expected ``total``), stops when its time
+    # budget runs out, and resumes at the missing chunks next pass. ``docs_needing_embedding``
+    # treats count < total as pending, so partial progress survives restarts and re-locks.
+
+    def stored_chunks(self, doc_id: str, model: str) -> set[int]:
+        """Chunk indexes already embedded for ``model`` (resume point for the indexer)."""
+        assert doc_id and model, "doc id + model required"
+        rows = self._conn.execute(
+            f"SELECT chunk_idx FROM embeddings WHERE doc_id = ? AND model = ? LIMIT {_MAX_CHUNKS};",
+            [doc_id, model],
+        ).fetchall()
+        return {int(r[0]) for r in rows}
+
+    def put_embedding_chunk(self, doc_id: str, idx: int, vector: list[float], model: str,
+                            total: int) -> None:
+        """Store ONE chunk vector of an in-progress embedding run (see block comment above)."""
+        assert doc_id and model, "doc id + model required"
+        self._insert_embedding_row(doc_id, idx, vector, model, total)
+
+    def clear_other_models(self, doc_id: str, model: str) -> None:
+        """Drop another model's rows before an incremental run — a doc must never hold a
+        per-chunk MIX of models (each (model, dim) scores in its own index block)."""
+        assert doc_id and model, "doc id + model required"
+        self._conn.execute(
+            "DELETE FROM embeddings WHERE doc_id = ? AND model <> ?;", [doc_id, model]
+        )
+
+    def clear_embeddings(self, doc_id: str) -> None:
+        """Drop a doc's vectors so the background indexer re-embeds it (e.g. after a rename —
+        the title prefixes every chunk, so old vectors are stale). The LIVE index keeps serving
+        the slightly-stale vectors until the re-embed lands: briefly stale beats a PATCH that
+        blocks for minutes on a big document."""
+        assert doc_id, "doc id required"
+        self._conn.execute("DELETE FROM embeddings WHERE doc_id = ?;", [doc_id])
+
+    def finish_embeddings(self, doc_id: str, model: str) -> None:
+        """Publish a completed incremental run to the live index (all rows re-read once)."""
+        vectors = self.vectors_for(doc_id, model)
+        assert vectors, "finish requires stored vectors"
+        self.index.set_vectors(doc_id, vectors, model)
 
     def put_embedding(self, doc_id: str, vector: list[float], model: str) -> None:
         """Store a single-chunk embedding (back-compat wrapper over put_embeddings)."""
@@ -471,11 +536,15 @@ class KnowledgeBase:
         return out
 
     def docs_needing_embedding(self, model: str) -> list[str]:
-        """Return ids of docs with no embedding or one from a different model."""
+        """Ids of docs with no embedding for ``model``, one from another model, or a
+        PARTIAL incremental run (count < the run's recorded total). NULL total = a legacy
+        all-at-once write = complete."""
         assert model, "model required"
         rows = self._conn.execute(
-            "SELECT d.id FROM documents d "
-            "WHERE NOT EXISTS (SELECT 1 FROM embeddings e WHERE e.doc_id = d.id AND e.model = ?) "
+            "SELECT d.id FROM documents d LEFT JOIN "
+            "(SELECT doc_id, count(*) AS have, max(total) AS want FROM embeddings "
+            " WHERE model = ? GROUP BY doc_id) e ON e.doc_id = d.id "
+            "WHERE e.doc_id IS NULL OR (e.want IS NOT NULL AND e.have < e.want) "
             f"ORDER BY d.created_at DESC LIMIT {_REINDEX_SCAN_LIMIT};",
             [model],
         ).fetchall()

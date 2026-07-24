@@ -11,6 +11,20 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Fixed
+- Hundreds-of-pages documents are now FULLY searchable by meaning. Semantic coverage
+  used to stop silently at ~256k characters (64 chunks) and ingest truncated files at
+  1M characters — most of a big S-1 was invisible to meaning search. Both limits now
+  cover ~4M characters (about a thousand dense pages), and they match, so every stored
+  character is reachable. Big documents embed INCREMENTALLY in the background: adding
+  one returns instantly, the indexer works between your chats and resumes exactly where
+  it left off after a restart or re-lock, the "Indexing X of Y" count now stays honest
+  until every chunk of every document is really done (it used to claim done after the
+  first chunk), and renaming a huge document no longer stalls while it re-embeds.
+- Upgrade safety: the database is checkpointed immediately after schema migrations —
+  a migration left in the write-ahead log could make the database fail to reopen after
+  an unclean stop (found while testing; never reported in the field).
+
 ### Added
 - Chat gained a Refresh button — and refreshes itself whenever you return to the app —
   so a conversation continued on your phone appears on the desktop (and vice versa)
