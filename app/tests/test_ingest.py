@@ -25,6 +25,7 @@ class _StubKB:
         self.docs: dict = {}
         self.meta: dict = {}
         self.embeds: dict = {}
+        self.chunk_rows: dict = {}
 
     def add(self, title: str, content: str, meta: dict | None = None) -> str:
         doc_id = f"d{len(self.docs)}"
@@ -44,6 +45,22 @@ class _StubKB:
 
     def put_embeddings(self, doc_id: str, vectors, model: str) -> None:
         self.embeds[doc_id] = (vectors[0], model)  # first chunk — matches the single-chunk assert
+
+    # Incremental surface embed_doc drives now (chunk-grain, resumable). Mirrors the real
+    # store's semantics just enough for these tests; finish publishes chunk 0 into `embeds`
+    # so the existing single-chunk asserts keep working unchanged.
+    def stored_chunks(self, doc_id: str, model: str) -> set[int]:
+        return {i for i, (v, m, t) in self.chunk_rows.get(doc_id, {}).items() if m == model}
+
+    def clear_other_models(self, doc_id: str, model: str) -> None:
+        rows = self.chunk_rows.get(doc_id, {})
+        self.chunk_rows[doc_id] = {i: e for i, e in rows.items() if e[1] == model}
+
+    def put_embedding_chunk(self, doc_id: str, idx: int, vector, model: str, total: int) -> None:
+        self.chunk_rows.setdefault(doc_id, {})[idx] = (vector, model, total)
+
+    def finish_embeddings(self, doc_id: str, model: str) -> None:
+        self.embeds[doc_id] = (self.chunk_rows[doc_id][0][0], model)
 
 
 def test_from_file_text() -> None:
@@ -178,7 +195,8 @@ def test_embed_doc_forwards_timeout_to_gateway(monkeypatch) -> None:
     monkeypatch.setattr(gateway, "embed", lambda text, model, *, client=None, timeout=None: seen.append(timeout) or [0.1, 0.2, 0.3])
     kb = _StubKB()
     ingest.embed_doc(kb, "d0", "Title", "body", "m")  # interactive default
-    ingest.embed_doc(kb, "d0", "Title", "body", "m", timeout=ingest._REINDEX_EMBED_TIMEOUT)
+    # A DIFFERENT doc: re-calling on d0 would correctly no-op now (already complete — resume).
+    ingest.embed_doc(kb, "d1", "Title", "body", "m", timeout=ingest._REINDEX_EMBED_TIMEOUT)
     assert seen == [ingest._EMBED_TIMEOUT, ingest._REINDEX_EMBED_TIMEOUT]
 
 

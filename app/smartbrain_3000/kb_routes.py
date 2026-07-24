@@ -97,10 +97,10 @@ def patch_doc(request: Request, doc_id: str, body: DocPatchIn) -> dict[str, bool
         if not title:
             raise HTTPException(status_code=422, detail="title must not be blank")
         knowledge.rename(doc_id, title)
-        try:  # best-effort: keep the title-prefixed embeddings current
-            ingest.embed_doc(knowledge, doc_id, title, doc["content"], gateway.embed_model(request.app.state.dbx))
-        except Exception as exc:  # embeddings optional; reindex can backfill
-            log.info("re-embed after rename skipped for %s: %s", doc_id, exc)
+        # The title prefixes every chunk, so the old vectors are stale — drop them and let
+        # the background indexer re-embed. Re-embedding INLINE here blocked the PATCH for
+        # minutes on a hundreds-of-pages document; briefly-stale semantic ranking doesn't.
+        knowledge.clear_embeddings(doc_id)
     if body.tags is not None:
         knowledge.set_tags(doc_id, body.tags)
     return {"ok": True}

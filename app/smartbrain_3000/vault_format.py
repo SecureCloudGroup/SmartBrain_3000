@@ -51,7 +51,7 @@ MAX_TITLE = 300
 MAX_PAGES = 1000  # mirrors ingest._MAX_SECTIONS
 MAX_TEXT = 1_000_000  # mirrors ingest._MAX_TEXT
 MAX_DIM = 4096  # mirrors kb._MAX_EMBED_DIM
-MAX_CHUNKS = 64  # mirrors kb._MAX_CHUNKS
+MAX_CHUNKS = 1000  # mirrors kb._MAX_CHUNKS (big-document coverage; ~4M chars per doc)
 
 _MANIFEST = "manifest.json"
 _INDEX = "index.bin"

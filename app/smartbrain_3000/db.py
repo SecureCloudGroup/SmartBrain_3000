@@ -220,6 +220,11 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
     # like created_at); every read filters it, restore clears it, and the scheduler
     # purges rows past the retention window. Messages stay until the purge.
     (25, "ALTER TABLE conversations ADD COLUMN deleted_at TIMESTAMP;"),
+    # Big-document embeddings: each chunk row records the doc's TOTAL expected chunk
+    # count for its model run, so a partially-embedded document (written incrementally,
+    # resumable across ticks and restarts) is detectable by count < total — without
+    # decrypting anything. NULL total = legacy all-at-once write = complete.
+    (26, "ALTER TABLE embeddings ADD COLUMN total INTEGER;"),
 )
 
 # The newest migration this build knows how to apply. A database recording a
@@ -472,6 +477,14 @@ def run_migrations(conn: duckdb.DuckDBPyConnection) -> int:
         conn.execute("INSERT INTO schema_migrations (id) VALUES (?);", [migration_id])
         applied += 1
     assert applied <= len(_MIGRATIONS), "applied count cannot exceed migrations"
+    if applied:
+        # Compact the WAL NOW: DuckDB (the pinned build) can fail to REPLAY a WAL that
+        # still contains an ALTER TABLE ("Failure while replaying WAL ... no default
+        # database set"), which would leave the database unopenable after an unclean
+        # stop right after an upgrade. Checkpointing makes every migration durable in
+        # the main file before any user data rides the WAL. In-memory DBs have no WAL;
+        # CHECKPOINT is a no-op there.
+        conn.execute("CHECKPOINT;")
     return applied
 
 

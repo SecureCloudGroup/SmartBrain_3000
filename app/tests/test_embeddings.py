@@ -265,7 +265,7 @@ def test_embedding_encrypted_at_rest() -> None:
 def test_migrations_create_chunked_embeddings_table() -> None:
     conn = duckdb.connect(":memory:")
     applied = dbmod.run_migrations(conn)
-    assert applied == 25  # ... + vaults/membership/provenance + doc_summaries + chat trash
+    assert applied == 26  # ... + doc_summaries + chat trash + embeddings total (big docs)
     cols = {r[1] for r in conn.execute("PRAGMA table_info('embeddings');").fetchall()}
     assert {"doc_id", "chunk_idx", "nonce", "ciphertext", "dim", "model", "created_at"} <= cols
     assert dbmod.run_migrations(conn) == 0  # idempotent
@@ -368,3 +368,102 @@ def test_index_bounds_are_sized_for_a_real_corpus() -> None:
     assert kbindex._MAX_INDEXED_DOCS >= 100 * kbmod._SEARCH_SCAN_LIMIT
     assert kbmod._MAX_INDEXED_VECTORS >= kbmod._SEARCH_SCAN_LIMIT * kbmod._MAX_CHUNKS
     assert kbmod._REINDEX_SCAN_LIMIT > kbmod._SEARCH_SCAN_LIMIT
+
+
+# --- big documents: incremental, resumable embedding (migration 26) ------------------------
+
+def _vec(seed: float, dim: int = 8) -> list[float]:
+    return [seed + i * 0.01 for i in range(dim)]
+
+
+def test_chunking_covers_big_documents() -> None:
+    from smartbrain_3000.kb import _MAX_CHUNKS, chunk_text
+
+    content = "x" * 300_000  # a ~100-page document; the old 64-chunk cap truncated at 256k
+    chunks = chunk_text("Big filing", content)
+    assert len(chunks) == 75  # ceil(300k / 4000) — nothing dropped
+    assert len(chunk_text("Huge", "y" * 10_000_000)) == _MAX_CHUNKS  # cap still verifiable
+
+
+def test_partial_run_is_pending_and_resumable() -> None:
+    kb = _kb()
+    doc_id = kb.add("Doc", "z" * 20_000)  # 5 chunks
+    kb.clear_other_models(doc_id, "m1")
+    for i in (0, 1, 2):
+        kb.put_embedding_chunk(doc_id, i, _vec(i), "m1", total=5)
+    assert kb.stored_chunks(doc_id, "m1") == {0, 1, 2}
+    assert doc_id in kb.docs_needing_embedding("m1")  # partial => still pending
+    assert kb.docs_pending_embedding("m1") == 1  # the STATUS count must agree (UI truth)
+    for i in (3, 4):
+        kb.put_embedding_chunk(doc_id, i, _vec(i), "m1", total=5)
+    kb.finish_embeddings(doc_id, "m1")
+    assert doc_id not in kb.docs_needing_embedding("m1")  # complete
+    assert kb.docs_pending_embedding("m1") == 0
+    assert len(kb.vectors_for(doc_id, "m1")) == 5
+
+
+def test_legacy_full_write_counts_complete() -> None:
+    kb = _kb()
+    doc_id = kb.add("Legacy", "content")
+    kb.put_embeddings(doc_id, [_vec(1.0)], "m1")
+    # Simulate a pre-migration row: NULL total (legacy all-at-once writes had no column).
+    kb.conn.execute("UPDATE embeddings SET total = NULL WHERE doc_id = ?;", [doc_id])
+    assert doc_id not in kb.docs_needing_embedding("m1")  # NULL total = complete
+    assert doc_id in kb.docs_needing_embedding("m2")  # other model still pending
+
+
+def test_model_switch_never_mixes_models_per_chunk() -> None:
+    kb = _kb()
+    doc_id = kb.add("Doc", "z" * 8_000)  # 2 chunks
+    kb.put_embeddings(doc_id, [_vec(1), _vec(2)], "old-model")
+    kb.clear_other_models(doc_id, "new-model")
+    kb.put_embedding_chunk(doc_id, 0, _vec(3), "new-model", total=2)
+    models = {str(r[0]) for r in kb.conn.execute(
+        "SELECT DISTINCT model FROM embeddings WHERE doc_id = ?;", [doc_id]).fetchall()}
+    assert models == {"new-model"}  # old rows gone before the new run wrote anything
+    assert doc_id in kb.docs_needing_embedding("new-model")  # 1 of 2 => pending
+
+
+def test_embed_doc_resumes_after_deadline(monkeypatch) -> None:
+    """The indexer's budget stops a big doc MID-RUN; the next pass finishes it."""
+    import time as timemod
+
+    from smartbrain_3000 import ingest
+
+    kb = _kb()
+    content = "w" * 40_000  # 10 chunks
+    doc_id = kb.add("Big", content)
+    calls = {"n": 0}
+
+    def fake_embed(text, model, client=None, timeout=None):
+        calls["n"] += 1
+        return _vec(calls["n"])
+
+    monkeypatch.setattr(ingest.gateway, "embed", fake_embed)
+    # First pass: deadline already lapsed after the first chunk write.
+    start = timemod.monotonic()
+    done = ingest.embed_doc(kb, doc_id, "Big", content, "m1", deadline=start)
+    assert done is False and calls["n"] == 0  # deadline hit before any embed this pass
+    done = ingest.embed_doc(kb, doc_id, "Big", content, "m1",
+                            deadline=timemod.monotonic() + 60)
+    assert done is True and calls["n"] == 10
+    assert doc_id not in kb.docs_needing_embedding("m1")
+    assert len(kb.vectors_for(doc_id, "m1")) == 10
+
+
+def test_store_defers_embedding_for_big_docs(monkeypatch) -> None:
+    from smartbrain_3000 import ingest
+
+    kb = _kb()
+    calls = {"n": 0}
+
+    def fake_embed(text, model, client=None, timeout=None):
+        calls["n"] += 1
+        return _vec(1.0)
+
+    monkeypatch.setattr(ingest.gateway, "embed", fake_embed)
+    monkeypatch.setattr(ingest.gateway, "embed_model", lambda conn=None: "m1")
+    small = ingest.store(kb, "Small", "s" * 4_000)  # 1 chunk -> embeds inline
+    assert calls["n"] == 1 and small["duplicate"] is False
+    ingest.store(kb, "Big", "b" * 100_000)  # 25 chunks -> deferred to the indexer
+    assert calls["n"] == 1  # unchanged: no inline embedding for the big doc

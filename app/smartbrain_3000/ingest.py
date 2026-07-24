@@ -27,7 +27,13 @@ from . import gateway, kb, netguard
 
 log = logging.getLogger(__name__)
 
-_MAX_TEXT = 1_000_000  # cap on stored text per document (chars)
+# Cap on stored text per document (chars): ~1000 dense pages. Sized WITH kb._MAX_CHUNKS
+# (1000 x 4000 chars) so every stored character is reachable by semantic search — the old
+# 1M cap paired with a 64-chunk embed cap left most of a big filing invisible.
+_MAX_TEXT = 4_000_000
+# Embed inline on add only when the doc is small; anything bigger defers to the background
+# indexer (dozens-to-hundreds of sequential local-model calls must never ride an HTTP request).
+_EMBED_ON_ADD_MAX_CHUNKS = 8
 _MAX_SECTIONS = 1000  # bounded loop over pages / slides / sheets
 _MAX_PARTS = 100_000  # bounded loop over paragraphs + table rows in a Word document
 _MAX_ROWS = 10_000  # bounded rows per spreadsheet sheet (a sheet can claim a million)
@@ -331,16 +337,34 @@ def from_file(filename: str, data: bytes) -> tuple[str, str, dict]:
     return _resolve_title(title, os.path.basename(filename)), text, meta
 
 
-def embed_doc(knowledge, doc_id: str, title: str, content: str, model: str, *, timeout: float = _EMBED_TIMEOUT) -> None:
-    """Chunk title+content, embed each chunk, and store the per-chunk vectors so a
-    long document is fully searchable (not just its head). ``timeout`` is per embed request —
-    the backfill path raises it so a cold local model's first load doesn't fail the embed."""
-    assert doc_id and title and model, "doc id, title, model required"
+def embed_doc(knowledge, doc_id: str, title: str, content: str, model: str, *,
+              timeout: float = _EMBED_TIMEOUT, deadline: float | None = None) -> bool:
+    """Embed a document's chunks INCREMENTALLY; return True when the doc is complete.
+
+    Each chunk vector is written as it is computed (idempotent per-chunk upsert), so a big
+    document — up to kb._MAX_CHUNKS sequential model calls, minutes of wall clock — survives
+    a ``deadline`` stop, a restart, or a re-lock, and the next pass resumes at the MISSING
+    chunks instead of starting over. The local-model semaphore is released between chunks,
+    so a foreground chat interleaves rather than queueing behind the whole document.
+    ``timeout`` is per embed request — the backfill path raises it so a cold local model's
+    first load doesn't fail the embed."""
+    assert doc_id and title and model, "doc id, model, title required"
     assert knowledge is not None, "knowledge base required"
-    chunks = kb.chunk_text(title, content)  # bounded by _MAX_CHUNKS
+    chunks = kb.chunk_text(title, content)  # bounded by kb._MAX_CHUNKS
+    knowledge.clear_other_models(doc_id, model)  # a doc must never mix models per chunk
+    have = knowledge.stored_chunks(doc_id, model)
+    missing = [i for i in range(len(chunks)) if i not in have]
+    if not missing:
+        knowledge.finish_embeddings(doc_id, model)  # already complete — just publish
+        return True
     with httpx.Client(base_url=gateway.gateway_url(), timeout=timeout) as client:
-        vectors = [gateway.embed(c, model, client=client, timeout=timeout) for c in chunks]
-    knowledge.put_embeddings(doc_id, vectors, model)
+        for i in missing:  # bounded by kb._MAX_CHUNKS
+            if deadline is not None and time.monotonic() >= deadline:
+                return False  # out of budget — progress is persisted; next pass resumes
+            vector = gateway.embed(chunks[i], model, client=client, timeout=timeout)
+            knowledge.put_embedding_chunk(doc_id, i, vector, model, total=len(chunks))
+    knowledge.finish_embeddings(doc_id, model)
+    return True
 
 
 def reindex_pending(
@@ -379,8 +403,11 @@ def reindex_pending(
             skipped += 1
             continue
         try:
-            embed_doc(knowledge, doc_id, doc["title"], doc["content"], model, timeout=timeout)
-            embedded += 1
+            # The deadline reaches INSIDE the doc: a hundreds-of-pages PDF stops between
+            # chunks when the budget lapses and resumes next pass (progress is persisted).
+            if embed_doc(knowledge, doc_id, doc["title"], doc["content"], model,
+                         timeout=timeout, deadline=deadline):
+                embedded += 1
         except Exception as exc:  # keep going on a single failure
             failed += 1
             if not error:
@@ -408,7 +435,9 @@ def store(knowledge, title: str, content: str, meta: dict | None = None, *, embe
         log.info("ingest: identical content already stored as %s — not adding a duplicate", existing)
         return {"id": existing, "title": title, "chars": len(content), "duplicate": True}
     doc_id = knowledge.add(title, content, meta)
-    if embed:
+    if embed and len(kb.chunk_text(title, content)) <= _EMBED_ON_ADD_MAX_CHUNKS:
+        # Inline only for SMALL docs: a big one is minutes of sequential model calls and
+        # must never ride this request — the background indexer picks it up within a tick.
         try:  # best-effort: make it immediately semantic-searchable
             model = gateway.embed_model(getattr(knowledge, "conn", None))  # routed embedding model
             embed_doc(knowledge, doc_id, title, content, model)
