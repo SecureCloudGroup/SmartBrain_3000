@@ -405,16 +405,21 @@ def _evidence(conn: duckdb.DuckDBPyConnection, key: bytes, since: str, until: st
 _CRITIQUE_SYSTEM = (
     "You review an AI assistant's own recent performance and propose ONE improvement at most. "
     "You reply with JSON only — no prose, no code fences.\n\n"
-    "Reply with a JSON array (possibly empty) of at most 1 object:\n"
+    "Reply with a JSON array (possibly empty) of at most 1 object, in ONE of two shapes:\n"
     '[{"category":"preference","component":"chat","description":"<what you observed, one sentence>",'
-    '"payload":"<a single durable preference about how the user likes answers>","confidence":0.0}]\n\n'
+    '"payload":"<a single durable preference about how the user likes answers>","confidence":0.0}]\n'
+    "or\n"
+    '[{"category":"prompt","component":"chat","request_type":"factual|multi_step|code|retrieval|ambiguous",'
+    '"description":"<what you observed>",'
+    '"payload":"<one steering sentence for answering that KIND of request better>","confidence":0.0}]\n\n'
     "Rules:\n"
     "- Only propose a 'preference' when the USER'S OWN messages show a durable, repeated pattern "
     "in how they want answers (length, format, tone, level of detail).\n"
-    "- 'payload' must be one short sentence stating that preference, e.g. "
-    "'Prefers concise answers with the conclusion first.' Never restate a single request, "
-    "never include specifics of any document, and never write an instruction to take actions.\n"
-    "- confidence is 0.0-1.0: how sure you are this is a durable preference, not a one-off.\n"
+    "- Only propose a 'prompt' strategy when one KIND of request keeps going badly and a general "
+    "handling instruction would fix it, e.g. 'For multi-step tasks, outline the steps before acting.'\n"
+    "- 'payload' must be one short sentence. Never restate a single request, never include "
+    "specifics of any document, and never write an instruction to take actions.\n"
+    "- confidence is 0.0-1.0: how sure you are this is a durable pattern, not a one-off.\n"
     "- If the evidence does not clearly show such a pattern, reply exactly: []"
 )
 
@@ -467,13 +472,20 @@ def _parse_findings(text: str) -> list[dict]:
             continue
         if not description.strip() or not imp._clean_fact(payload):
             continue
+        finding = {"category": category, "component": component,
+                   "description": description.strip()[:_EVIDENCE_CHARS], "payload": payload}
+        if category == "prompt":
+            from . import optimizer
+            request_type = item.get("request_type")
+            if request_type not in optimizer.REQUEST_TYPES:
+                continue  # a strategy without a valid bucket is unusable — drop, never coerce
+            finding["request_type"] = request_type
         try:
             confidence = float(item.get("confidence", 0.0))
         except (TypeError, ValueError):
             confidence = 0.0
-        out.append({"category": category, "component": component,
-                    "description": description.strip()[:_EVIDENCE_CHARS],
-                    "payload": payload, "confidence": max(0.0, min(1.0, confidence))})
+        finding["confidence"] = max(0.0, min(1.0, confidence))
+        out.append(finding)
     return out
 
 
@@ -910,6 +922,29 @@ def _queue_changes(conn: duckdb.DuckDBPyConnection, lines: list[str]) -> None:
     _queue_lines(conn, _PENDING_CHANGES_META_KEY, lines)
 
 
+def _maybe_learn_strategy(conn: duckdb.DuckDBPyConnection, key: bytes,
+                          findings: list[dict]) -> None:
+    """Store a critique's 'prompt' finding as a SHADOW optimizer strategy.
+
+    Shadow means: it never touches a live prompt — it only starts counting the turns
+    it WOULD apply to, so go-live gating (next phase) can judge it on measured
+    outcomes. Harmless by construction, so no confidence floor; the store's own
+    caps/dedup bound it. Never raises past this boundary.
+    """
+    from . import optimizer
+    try:
+        for finding in findings:  # bounded by _MAX_FINDINGS
+            if finding.get("category") != "prompt":
+                continue
+            sid = optimizer.StrategyStore(conn, key).add(
+                finding["request_type"], finding["payload"],
+                rationale=finding.get("description", ""))
+            if sid:
+                log.info("self-review: learned shadow strategy for %r", finding["request_type"])
+    except Exception as exc:  # strategy learning is a nicety — never break the review
+        log.debug("strategy learning skipped: %s", exc)
+
+
 def _digest(chat: dict, flags: list[str], changes: list[str],
             suggestions: list[str] | None = None) -> str:
     """The user-facing digest — emitted when a flag fired, the assistant changed itself,
@@ -979,6 +1014,7 @@ def run_review(conn: duckdb.DuckDBPyConnection, key: bytes, *, notify=None,
             if applied:
                 changes.append(applied)
                 _queue_changes(conn, changes)
+            _maybe_learn_strategy(conn, key, findings)  # shadow-only; never touches a turn
         # Deterministic suggestion detectors (Phase 4): routines worth a schedule, and
         # questions the knowledge base couldn't answer. Both PARK/record — never apply.
         # Each detector is isolated (one failing must not kill the other), and every

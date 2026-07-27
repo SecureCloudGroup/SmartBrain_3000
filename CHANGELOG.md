@@ -12,6 +12,18 @@ to know when a release changes behavior.
 ## [Unreleased]
 
 ### Added
+- **Prompt Optimizer groundwork — shadow mode** (off by default:
+  `PUT /api/selfimprove/optimizer {"enabled": true}`). When enabled, each incoming
+  ask is bucketed by a zero-latency rule-based classifier (factual / multi-step /
+  code / retrieval / ambiguous) and the self-review may learn a per-type steering
+  strategy from flagged windows — but every strategy is **shadow**: it never touches
+  a live prompt. Shadow strategies only count the turns they *would* have applied
+  to, building the evidence the go-live gate (next phase) will judge them on before
+  anything ever changes a real answer. All observation rows are content-free;
+  strategy text is encrypted at rest; `GET /api/selfimprove/optimizer` shows
+  everything learned.
+
+### Added
 - **The self-review now makes suggestions, not just fixes.** Two new detectors — both
   pure pattern-matching over your own messages, no model involved, and neither ever
   acts on its own:

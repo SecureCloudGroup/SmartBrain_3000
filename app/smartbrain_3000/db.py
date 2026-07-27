@@ -299,6 +299,35 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
         " nonce BLOB NOT NULL,"
         " ciphertext BLOB NOT NULL);",
     ),
+    # Prompt-optimizer strategies (self-improving framework, Phase 5): a per-request-type
+    # steering directive the reviewer learned from the user's own history. Ships SHADOW —
+    # a shadow strategy only counts the turns it WOULD have fired on; nothing reaches a
+    # live prompt until go-live gating measures it. request_type/status/fired are plaintext
+    # (content-free) so the hot-path match needs no decryption; the directive text itself
+    # is derived from private activity and lives in the encrypted body (AAD "optimizer:").
+    (
+        31,
+        "CREATE TABLE IF NOT EXISTS optimizer_strategies ("
+        " id TEXT PRIMARY KEY,"
+        " created_at TIMESTAMP DEFAULT now(),"
+        " request_type TEXT NOT NULL,"
+        " status TEXT NOT NULL DEFAULT 'shadow',"
+        " fired INTEGER NOT NULL DEFAULT 0,"
+        " nonce BLOB NOT NULL,"
+        " ciphertext BLOB NOT NULL);",
+    ),
+    # Shadow observations: one content-free row per classified turn (request type + which
+    # strategy would have fired). Joined against turn_metrics by conversation/time in the
+    # go-live gating analysis. Plaintext like turn_metrics: no message content, ever.
+    (
+        32,
+        "CREATE TABLE IF NOT EXISTS optimizer_events ("
+        " id TEXT PRIMARY KEY,"
+        " created_at TIMESTAMP DEFAULT now(),"
+        " conversation_id TEXT,"
+        " request_type TEXT NOT NULL,"
+        " strategy_id TEXT);",
+    ),
 )
 
 # The newest migration this build knows how to apply. A database recording a
