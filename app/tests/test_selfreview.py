@@ -589,6 +589,235 @@ def test_parse_findings_is_forgiving_on_wrapping_strict_on_content() -> None:
     assert len(selfreview._parse_findings(many)) == selfreview._MAX_FINDINGS
 
 
+# --- Phase 4: deterministic suggestion detectors -----------------------------
+
+def _seed_routine(conn, key, text: str, days: list[int]) -> str:
+    """One conversation with the same user ask repeated on the given days-ago stamps."""
+    history = ChatHistory(conn, key)
+    cid = history.create_conversation("routine")
+    for days_ago in days:
+        mid = history.add_message(cid, "user", text)
+        conn.execute("UPDATE messages SET created_at = now() - to_days(?) WHERE id = ?;",
+                     [days_ago, mid])
+    return cid
+
+
+def test_cluster_asks_groups_similar_and_ignores_noise() -> None:
+    entries = [
+        ("2026-07-27 08:00:00.000000", "summarize my open tasks for today please"),
+        ("2026-07-26 08:05:00.000000", "please summarize my open tasks for today"),
+        ("2026-07-25 07:55:00.000000", "summarize the open tasks for today"),
+        ("2026-07-26 12:00:00.000000", "what is the capital of France"),
+        ("2026-07-26 12:01:00.000000", "ok"),  # short: must never cluster
+        ("2026-07-26 12:02:00.000000", "thanks"),
+    ]
+    clusters = selfreview._cluster_asks(entries)
+    assert len(clusters) == 1 and len(clusters[0]["texts"]) == 3
+
+
+def test_cadence_daily_weekly_burst_irregular() -> None:
+    daily = [f"2026-07-{d:02d} 08:00:00.000000" for d in (24, 25, 26)]
+    assert selfreview._cadence_minutes(daily) == 1440
+    weekly = ["2026-07-06 09:00:00.000000", "2026-07-13 09:30:00.000000", "2026-07-20 08:45:00.000000"]
+    assert selfreview._cadence_minutes(weekly) == 10080
+    burst = ["2026-07-26 08:00:00.000000", "2026-07-26 08:20:00.000000", "2026-07-26 09:00:00.000000"]
+    assert selfreview._cadence_minutes(burst) is None  # retries, not a routine
+    irregular = ["2026-07-10 08:00:00.000000", "2026-07-11 08:00:00.000000", "2026-07-26 08:00:00.000000"]
+    assert selfreview._cadence_minutes(irregular) is None  # no clean rhythm -> no guess
+
+
+def test_workflow_suggestion_parks_and_never_nags() -> None:
+    conn, key = _conn(), gen_master_key()
+    _seed_routine(conn, key, "summarize my open tasks for this morning", [2, 1, 0])
+    lines = selfreview._suggest_workflows(conn, key, "sess1")
+    assert len(lines) == 1 and "waiting for your approval in Activity" in lines[0]
+    # A real, approvable create_schedule tile parked with validated args:
+    from smartbrain_3000.approvals import ApprovalStore
+    pending = ApprovalStore(conn, key, "sess1").list_pending()
+    assert len(pending) == 1 and pending[0]["tool"] == "create_schedule"
+    assert pending[0]["args"]["interval_minutes"] == 1440  # daily rhythm detected
+    assert pending[0]["args"]["prompt"] == "summarize my open tasks for this morning"
+    # Durable ledger record + the once-only rule:
+    ledger = improvements.ImprovementStore(conn, key).list()
+    assert len(ledger) == 1 and ledger[0]["lever_type"] == "schedule"
+    assert selfreview._suggest_workflows(conn, key, "sess1") == []  # never re-nag
+    assert len(ApprovalStore(conn, key, "sess1").list_pending()) == 1
+
+
+def test_workflow_suggestion_skips_existing_schedule() -> None:
+    conn, key = _conn(), gen_master_key()
+    _seed_routine(conn, key, "summarize my open tasks for this morning", [2, 1, 0])
+    scheduler.ScheduleStore(conn, key).add_schedule(
+        "Morning tasks", "summarize my open tasks each morning", 1440, 0, None)
+    assert selfreview._suggest_workflows(conn, key, "sess1") == []  # already automated
+    assert improvements.ImprovementStore(conn, key).list() == []
+
+
+def test_workflow_suggestion_without_session_still_records() -> None:
+    conn, key = _conn(), gen_master_key()
+    _seed_routine(conn, key, "summarize my open tasks for this morning", [2, 1, 0])
+    lines = selfreview._suggest_workflows(conn, key, None)
+    assert len(lines) == 1
+    assert improvements.ImprovementStore(conn, key).list()  # ledger row exists regardless
+
+
+def _seed_miss(conn, key, query: str) -> None:
+    AuditLog(conn, key).append(
+        "assistant", "kb_search", "observe", "auto", True,
+        args_summary=json.dumps({"query": query}),
+        result_summary=json.dumps({"results": [], "degraded": False}))
+
+
+def test_knowledge_gap_suggestion_and_dedup() -> None:
+    conn, key = _conn(), gen_master_key()
+    _seed_miss(conn, key, "tribeca lease terms")
+    since, until = selfreview._window(conn)
+    assert selfreview._suggest_knowledge(conn, key, since, until) == []  # one miss: too little
+    _seed_miss(conn, key, "cantor engagement fees")
+    since, until = selfreview._window(conn)  # recompute: the new row must be inside
+    lines = selfreview._suggest_knowledge(conn, key, since, until)
+    assert len(lines) == 1 and "couldn't answer 2 searches" in lines[0]
+    assert "tribeca lease terms" in lines[0]
+    row = improvements.ImprovementStore(conn, key).list()[0]
+    assert row["category"] == "knowledge" and row["lever_type"] == "document"
+    assert selfreview._suggest_knowledge(conn, key, since, until) == []  # same gap set: once
+
+
+def test_searches_with_hits_are_not_gaps() -> None:
+    conn, key = _conn(), gen_master_key()
+    for q in ("alpha", "beta"):
+        AuditLog(conn, key).append(
+            "assistant", "kb_search", "observe", "auto", True,
+            args_summary=json.dumps({"query": q}),
+            result_summary=json.dumps({"results": [{"id": "d1", "title": "Doc"}], "degraded": False}))
+    since, until = selfreview._window(conn)  # window computed AFTER seeding (rows inside)
+    assert selfreview._suggest_knowledge(conn, key, since, until) == []
+
+
+def test_distinct_template_routines_do_not_merge() -> None:
+    # Adversarial-review finding: with function words counted, "…tasks" vs "…invoices"
+    # merged at any workable threshold. Content-word similarity separates them.
+    entries = [
+        ("2026-07-27 08:00:00.000000", "summarize my open invoices for today"),
+        ("2026-07-26 08:00:00.000000", "summarize my open tasks for today"),
+        ("2026-07-25 08:00:00.000000", "summarize my open tasks for today"),
+        ("2026-07-24 08:00:00.000000", "summarize my open tasks for today"),
+    ]
+    clusters = selfreview._cluster_asks(entries)
+    assert len(clusters) == 1  # only the tasks routine qualifies (3 repeats)
+    assert all("tasks" in t for t in clusters[0]["texts"])  # invoices never joined it
+
+
+def test_resend_minutes_apart_is_one_occasion() -> None:
+    # Adversarial-review finding: a clarifying resend 5 minutes later counted as a
+    # separate repeat, and the near-zero gap let a "weekly" fire off two real occasions.
+    two_occasions = ["2026-07-20 09:00:00.000000", "2026-07-20 09:05:00.000000",
+                     "2026-07-26 09:00:00.000000"]
+    assert selfreview._cadence_minutes(two_occasions) is None
+    irregular = ["2026-07-10 08:00:00.000000", "2026-07-11 08:00:00.000000",
+                 "2026-07-26 08:00:00.000000"]  # gaps 24h + 360h: no unanimous rhythm
+    assert selfreview._cadence_minutes(irregular) is None
+
+
+def test_wording_drift_does_not_renag(monkeypatch) -> None:
+    # Adversarial-review finding: dedup keyed on exact text while identity is fuzzy —
+    # a rephrase re-proposed a declined routine every review. Fuzzy ledger dedup stops it.
+    conn, key = _conn(), gen_master_key()
+    _seed_routine(conn, key, "summarize my open tasks for this morning", [3, 2, 1])
+    assert len(selfreview._suggest_workflows(conn, key, "sess1")) == 1
+    # The routine continues under a different phrasing:
+    _seed_routine(conn, key, "please summarize the open tasks list each morning", [2, 1, 0])
+    assert selfreview._suggest_workflows(conn, key, "sess1") == []  # same routine: no re-nag
+    assert len(improvements.ImprovementStore(conn, key).list()) == 1  # one ledger row ever
+
+
+def test_expired_tile_reparks_quietly() -> None:
+    # The tile TTL is 1h, the digest cadence 8h — "waiting in Activity" must stay true.
+    conn, key = _conn(), gen_master_key()
+    _seed_routine(conn, key, "summarize my open tasks for this morning", [2, 1, 0])
+    selfreview._suggest_workflows(conn, key, "sess1")
+    conn.execute("UPDATE pending_actions SET created_at = now() - to_seconds(7200);")  # dead
+    lines = selfreview._suggest_workflows(conn, key, "sess1")
+    assert lines == []  # QUIET: no second digest line
+    from smartbrain_3000.approvals import ApprovalStore
+    tiles = ApprovalStore(conn, key, "sess1").list_pending()
+    fresh = [t for t in tiles if int(conn.execute(
+        "SELECT date_diff('second', CAST(? AS TIMESTAMP), now());", [t["created_at"]]
+    ).fetchone()[0]) < 3600]
+    assert len(fresh) == 1  # a live tile is available again
+
+
+def test_denied_tile_settles_ledger_and_never_returns() -> None:
+    conn, key = _conn(), gen_master_key()
+    _seed_routine(conn, key, "summarize my open tasks for this morning", [2, 1, 0])
+    selfreview._suggest_workflows(conn, key, "sess1")
+    prompt = improvements.ImprovementStore(conn, key).list()[0]["body"]["payload"]
+    AuditLog(conn, key).append(  # the user denies the tile (the approve route writes this)
+        "user", "create_schedule", "reviewed", "denied", True,
+        args_summary=json.dumps({"prompt": prompt}))
+    conn.execute("UPDATE pending_actions SET created_at = now() - to_seconds(7200);")
+    assert selfreview._suggest_workflows(conn, key, "sess1") == []
+    row = improvements.ImprovementStore(conn, key).list()[0]
+    assert row["status"] == "rejected"  # settled by the denial
+    from smartbrain_3000.approvals import ApprovalStore
+    tiles = ApprovalStore(conn, key, "sess1").list_pending()
+    assert all(int(conn.execute(
+        "SELECT date_diff('second', CAST(? AS TIMESTAMP), now());", [t["created_at"]]
+    ).fetchone()[0]) >= 3600 for t in tiles)  # nothing re-parked after the denial
+
+
+def test_oversized_routine_cannot_kill_the_suggestion_pass() -> None:
+    # Adversarial-review finding (reproduced by the verifier): a >8000-char pasted
+    # "routine" raised in validate_args and silently killed BOTH detectors for a week.
+    conn, key = _conn(), gen_master_key()
+    _seed_routine(conn, key, "re-check this config block " + "x " * 4200, [2, 1, 0])
+    _seed_routine(conn, key, "summarize my open tasks for this morning", [2, 1, 0])
+    _seed_miss(conn, key, "tribeca lease terms")
+    _seed_miss(conn, key, "cantor engagement fees")
+    lines = selfreview._suggest_workflows(conn, key, "sess1")
+    assert len(lines) == 1 and "summarize my open tasks" in lines[0]  # the good one survives
+    since, until = selfreview._window(conn)
+    assert len(selfreview._suggest_knowledge(conn, key, since, until)) == 1
+    ledger = improvements.ImprovementStore(conn, key).list()
+    assert {r["category"] for r in ledger} == {"workflow", "knowledge"}
+
+
+def test_suggestion_announcement_survives_notify_failure(monkeypatch) -> None:
+    # Adversarial-review finding: the ledger row commits before notify can fail, and its
+    # dedup then suppressed ever re-generating the lost line. The durable queue delivers it.
+    conn, key = _conn(), gen_master_key()
+    selfreview.set_enabled(conn, True)
+    _seed_routine(conn, key, "summarize my open tasks for this morning", [2, 1, 0])
+    _seed_turns(conn, total=6)
+    def boom(status: str, msg: str) -> None:
+        raise RuntimeError("feed write failed")
+    assert selfreview.run_review(conn, key, session="s1", notify=boom) is None
+    assert selfreview._queued_lines(conn, selfreview._PENDING_SUGGESTIONS_META_KEY)
+    delivered: list = []
+    out = selfreview.run_review(conn, key, session="s1",
+                                notify=lambda s, m: delivered.append(m))
+    assert out is not None and "Suggested:" in delivered[0]
+    assert "waiting for your approval" in delivered[0]  # the queued line rode the retry
+    assert selfreview._queued_lines(conn, selfreview._PENDING_SUGGESTIONS_META_KEY) == []
+
+
+def test_run_review_surfaces_suggestions_in_digest(monkeypatch) -> None:
+    # Suggestions alone (no flags, no changes) must produce a digest — the parked
+    # Activity tile expires in an hour, so it has to be seen.
+    conn, key = _conn(), gen_master_key()
+    selfreview.set_enabled(conn, True)
+    _seed_routine(conn, key, "summarize my open tasks for this morning", [2, 1, 0])
+    _seed_turns(conn, total=6)  # healthy window: no flags
+    notified: list = []
+    out = selfreview.run_review(conn, key, session="sess1",
+                                notify=lambda s, m: notified.append(m))
+    assert out is not None and out["flags"] == 0 and out["suggestions"] == 1
+    assert len(notified) == 1 and "Suggested:" in notified[0]
+    assert "waiting for your approval" in notified[0]
+    latest = selfreview.ReviewStore(conn, key).latest()
+    assert latest["scorecard"]["suggestions"]  # recorded in the stored scorecard too
+
+
 # --- HTTP API ---------------------------------------------------------------
 
 @pytest.fixture()

@@ -241,6 +241,15 @@ class ImprovementStore:
         assert iid, "improvement id required"
         self._conn.execute("UPDATE improvements SET evaluated_at = now() WHERE id = ?;", [iid])
 
+    def mark_rejected(self, iid: str) -> None:
+        """Settle a proposal the user turned down — never offered or re-parked again."""
+        assert iid, "improvement id required"
+        self._conn.execute(
+            "UPDATE improvements SET status = 'rejected',"
+            " evaluated_at = COALESCE(evaluated_at, now()) WHERE id = ? AND status = 'proposed';",
+            [iid],
+        )
+
     # --- levers -------------------------------------------------------------
 
     def _do_apply(self, row: dict) -> tuple[dict | None, dict | None]:

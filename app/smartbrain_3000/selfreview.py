@@ -86,9 +86,43 @@ _MIN_TRIAL_UNHAPPY = 2      # ...AND at least this many unhappy events: at the m
 # change is REVERTED after this many intervals (reversible-by-default: the very harm a bad
 # fact causes can be what keeps the user away from chat, so "no evidence" is not "no harm").
 _MAX_TRIAL_INTERVALS = 3
+
+# --- Phase 4: deterministic suggestion detectors ----------------------------
+# Both categories PARK for approval / suggest to the human — they never auto-apply
+# (creating a schedule or adding a document is user territory). Detection is pure
+# code over USER-authored evidence: no LLM, so no new prompt-injection surface.
+_WORKFLOW_LOOKBACK_DAYS = 7   # a "every morning" pattern needs days, not one 8h window
+_WORKFLOW_SCAN_MESSAGES = 300  # user messages decrypted per pass (verifiable bound)
+_WORKFLOW_MIN_REPEATS = 3     # occurrences before an ask counts as a routine
+_WORKFLOW_MIN_SPAN_HOURS = 48.0  # one burst of retries is not a routine
+_WORKFLOW_MIN_TOKENS = 3      # CONTENT words — "thanks" / "ok" must never cluster into a routine
+# Similarity is judged on CONTENT words only: with function words counted, template-shaped
+# asks about DIFFERENT things ("summarize my open tasks" vs "summarize my open invoices")
+# land right at any workable threshold (found by adversarial review), while rephrasings of
+# one routine dip below it. Dropping the scaffolding words separates the two cleanly:
+# tasks-vs-invoices falls to ~0.5, a genuine rephrase stays ≥0.75.
+_SIMILARITY_JACCARD = 0.7
+# Suppression checks (ledger dedup, denial matching, live-tile/schedule detection) use a
+# LOOSER bar: over-suppressing merely skips a suggestion, under-suppressing re-nags about
+# a declined routine — asymmetric costs, asymmetric thresholds. 0.55 keeps genuinely
+# distinct template-mates apart (tasks-vs-invoices = 0.5) while catching real rephrasings.
+_DEDUP_JACCARD = 0.55
+_STOPWORDS = frozenset((
+    "a", "an", "and", "are", "at", "be", "can", "could", "do", "for", "from", "give",
+    "in", "is", "it", "me", "my", "of", "on", "our", "please", "show", "than", "that",
+    "the", "this", "to", "today", "was", "we", "what", "will", "with", "would", "you",
+))
+_SCHEDULE_PROMPT_MAX_CHARS = 2000  # a routine's prompt, not a pasted document (see below)
+_MAX_SUGGESTIONS = 2          # per review (keeps the digest and Activity calm)
+_KNOWLEDGE_MIN_MISSES = 2     # distinct zero-hit searches before suggesting new docs
+_KNOWLEDGE_TOPIC_CHARS = 60   # per-topic truncation in the digest line
 # Digest lines that could not be delivered (notify failed / relock) queue durably here and
 # ride the next digest — a behavior change announcement must never be silently lost.
 _PENDING_CHANGES_META_KEY = "selfimprove:pending_changes"
+# Suggestions get the same durability under their own key (they render under a different
+# digest section): a suggestion's ledger row commits BEFORE notify can fail, and the dedup
+# that row powers would otherwise suppress ever re-generating the lost announcement.
+_PENDING_SUGGESTIONS_META_KEY = "selfimprove:pending_suggestions"
 
 
 def enabled(conn: duckdb.DuckDBPyConnection) -> bool:
@@ -552,9 +586,298 @@ def _maybe_apply(conn: duckdb.DuckDBPyConnection, key: bytes, findings: list[dic
     return f"learned a preference: {imp._clean_fact(best['payload'])}"
 
 
-def _queued_changes(conn: duckdb.DuckDBPyConnection) -> list[str]:
-    """Undelivered behavior-change announcements (bounded; corrupt config reads empty)."""
-    raw = db.meta_get(conn, _PENDING_CHANGES_META_KEY)
+def _jaccard(a: set[str], b: set[str]) -> float:
+    """Token-set overlap in [0,1]; empty sets never match."""
+    if not a or not b:
+        return 0.0
+    return len(a & b) / len(a | b)
+
+
+def _parse_ts(value: str):
+    """Parse a DB timestamp string (with or without fractional seconds); None if not one.
+
+    Used only for RELATIVE gap math between two DB-written stamps — never compared
+    against Python's clock, so the DB-clock-domain rule holds.
+    """
+    from datetime import datetime
+    for fmt in (_TS_FORMAT, "%Y-%m-%d %H:%M:%S"):
+        try:
+            return datetime.strptime(str(value), fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def _content_tokens(text: str) -> set[str]:
+    """Lowercased tokens minus scaffolding words — what an ask is actually ABOUT."""
+    from . import kbindex
+    return {t for t in kbindex.tokenize(text) if t not in _STOPWORDS}
+
+
+def _cluster_asks(entries: list[tuple[str, str]]) -> list[dict]:
+    """Greedy-cluster (created_at, text) user asks by content-word similarity.
+
+    Pure function (testable in isolation). Returns clusters as
+    {"texts": [...newest first...], "times": [...]} with len >= _WORKFLOW_MIN_REPEATS.
+    """
+    clusters: list[dict] = []
+    for created_at, text in entries[:_WORKFLOW_SCAN_MESSAGES]:  # bounded (P10 #2)
+        tokens = _content_tokens(text)
+        if len(tokens) < _WORKFLOW_MIN_TOKENS:
+            continue  # greetings/acks must never become a "routine"
+        for cluster in clusters:  # bounded by entries scanned
+            # Compare against the FIRST member's tokens (a stable anchor): growing the
+            # set with every join inflates the union and quietly raises the bar for
+            # later members, splitting one routine into several undersized clusters.
+            if _jaccard(tokens, cluster["tokens"]) >= _SIMILARITY_JACCARD:
+                cluster["texts"].append(text)
+                cluster["times"].append(created_at)
+                break
+        else:
+            clusters.append({"tokens": tokens, "texts": [text], "times": [created_at]})
+    return [c for c in clusters if len(c["texts"]) >= _WORKFLOW_MIN_REPEATS]
+
+
+def _cadence_minutes(times: list[str]) -> int | None:
+    """Infer a schedule cadence from occurrence stamps, or None when no clean rhythm.
+
+    Conservative on purpose: only daily-ish and weekly-ish rhythms produce a proposal —
+    an irregular pattern yields None rather than a made-up cadence the user must fix.
+    Stamps within 2h collapse into ONE occasion first: a resend/clarifying rephrase
+    minutes after an ask is the same sitting, and counting it separately let a
+    "weekly" proposal fire off only two real occasions (found by adversarial review —
+    the near-zero gap also skewed the median toward whatever single gap remained).
+    """
+    stamps = sorted(t for t in (_parse_ts(t) for t in times) if t is not None)
+    occasions = []
+    for stamp in stamps:  # bounded by input size
+        if not occasions or (stamp - occasions[-1]).total_seconds() > 2 * 3600:
+            occasions.append(stamp)
+    if len(occasions) < _WORKFLOW_MIN_REPEATS:
+        return None  # repeats are OCCASIONS, not messages
+    span_hours = (occasions[-1] - occasions[0]).total_seconds() / 3600
+    if span_hours < _WORKFLOW_MIN_SPAN_HOURS:
+        return None  # one burst, not a routine
+    gaps = [(b - a).total_seconds() / 3600
+            for a, b in zip(occasions, occasions[1:], strict=False)]  # offset pair-walk
+    # EVERY gap must agree on the rhythm. A median (any flavor) fails small samples:
+    # of two gaps [24h, 360h] the average lands inside the weekly band and the
+    # upper/lower middle each pick a different wrong answer — "refuses to guess"
+    # only holds if agreement is unanimous.
+    if all(18 <= g <= 30 for g in gaps):
+        return 1440   # daily
+    if all(5.5 * 24 <= g <= 8.5 * 24 for g in gaps):
+        return 10080  # weekly
+    return None
+
+
+def _recent_user_asks(conn: duckdb.DuckDBPyConnection, key: bytes) -> list[tuple[str, str]]:
+    """USER-authored messages from the last lookback window (bounded, trash excluded)."""
+    from .history import ChatHistory
+    cutoff_row = conn.execute(
+        "SELECT strftime(now() - to_days(?), ?);", [_WORKFLOW_LOOKBACK_DAYS, _TS_FORMAT]
+    ).fetchone()
+    cutoff = str(cutoff_row[0])
+    history = ChatHistory(conn, key)
+    out: list[tuple[str, str]] = []
+    for convo in history.list_conversations():  # bounded by the store's own list cap
+        if len(out) >= _WORKFLOW_SCAN_MESSAGES:
+            break
+        if convo["updated_at"] < cutoff:
+            continue  # untouched since the window — nothing recent inside
+        try:
+            msgs = history.get_messages(convo["id"])
+        except Exception:  # undecryptable — not evidence
+            continue
+        out.extend((m["created_at"], m["content"]) for m in msgs
+                   if m.get("role") == "user" and m["created_at"] >= cutoff)
+    out.sort(reverse=True)  # newest first; deterministic
+    return out[:_WORKFLOW_SCAN_MESSAGES]
+
+
+def _ledger_similar(store, prompt: str) -> dict | None:
+    """The most recent schedule-lever ledger row whose payload is the SAME ROUTINE.
+
+    Uses the clustering similarity, not exact text: dedup keyed on the exact newest
+    phrasing while cluster identity is fuzzy let ordinary wording drift re-propose a
+    declined routine at every review (found by adversarial review).
+    """
+    want = _content_tokens(prompt)
+    for row in store.list(200):  # bounded by the store's own cap
+        if row["lever_type"] != "schedule":
+            continue
+        if _jaccard(want, _content_tokens(row["body"].get("payload", ""))) >= _DEDUP_JACCARD:
+            return row
+    return None
+
+
+def _mark_denied_workflows(conn: duckdb.DuckDBPyConnection, key: bytes, store) -> None:
+    """A denied create_schedule tile is a verdict: settle the matching ledger row.
+
+    Denials live in the audit log (decision='denied'); match them fuzzily against
+    proposed schedule-lever rows and mark those rejected — rejected rows are never
+    re-parked or re-proposed. Best-effort and bounded.
+    """
+    from .audit import AuditLog
+    denied_prompts: list[set[str]] = []
+    for row in AuditLog(conn, key).list(limit=200):  # bounded
+        if row["tool"] == "create_schedule" and row["decision"] == "denied":
+            try:
+                denied_prompts.append(_content_tokens(json.loads(row["args_summary"]).get("prompt", "")))
+            except (ValueError, TypeError, AttributeError):
+                continue
+    if not denied_prompts:
+        return
+    for row in store.list(200):  # bounded
+        if row["lever_type"] != "schedule" or row["status"] != "proposed":
+            continue
+        mine = _content_tokens(row["body"].get("payload", ""))
+        if any(_jaccard(mine, d) >= _DEDUP_JACCARD for d in denied_prompts):
+            store.mark_rejected(row["id"])
+
+
+def _live_tile_for(conn: duckdb.DuckDBPyConnection, key: bytes, session: str,
+                   prompt: str) -> bool:
+    """True when a NON-EXPIRED pending create_schedule for this routine is visible."""
+    from .approvals import _TTL_SECONDS, ApprovalStore
+    want = _content_tokens(prompt)
+    for tile in ApprovalStore(conn, key, session).list_pending():  # bounded by store cap
+        if tile["tool"] != "create_schedule":
+            continue
+        age = conn.execute("SELECT date_diff('second', CAST(? AS TIMESTAMP), now());",
+                           [tile["created_at"]]).fetchone()
+        if age and int(age[0]) > _TTL_SECONDS:
+            continue  # listed but already expired — that tile is dead
+        if _jaccard(want, _content_tokens(str(tile["args"].get("prompt", "")))) >= _DEDUP_JACCARD:
+            return True
+    return False
+
+
+def _park_schedule(conn: duckdb.DuckDBPyConnection, key: bytes, session: str,
+                   args: dict) -> None:
+    """Park a validated create_schedule in Activity + write the audit 'proposed' row."""
+    from . import tools as toolsmod
+    from .approvals import ApprovalStore
+    tool = toolsmod.get_tool("create_schedule")
+    assert tool is not None, "create_schedule tool must exist"
+    validated = toolsmod.validate_args(tool, args)
+    ApprovalStore(conn, key, session).create_pending(
+        "create_schedule", tool.tier.value, validated)
+    from .audit import AuditLog
+    AuditLog(conn, key).append(
+        "assistant", "create_schedule", tool.tier.value, "proposed", True,
+        args_summary=toolsmod.summarize(validated))
+
+
+def _suggest_workflows(conn: duckdb.DuckDBPyConnection, key: bytes,
+                       session: str | None) -> list[str]:
+    """Detect repeated manual asks and propose a schedule — PARKED, never auto-created.
+
+    The proposal is a real pending ``create_schedule`` in Activity (approving it runs
+    the actual tool through the normal approval machinery), plus a durable ledger row.
+    Announcement discipline: each routine gets ONE digest line ever (fuzzy ledger
+    dedup), but while it stays relevant — proposed, not denied, still unautomated —
+    an expired tile is quietly re-parked each review so Activity always has it
+    available. A denied tile settles the ledger row as rejected: never offered again.
+    Each cluster is isolated: one bad cluster must not kill the others (an oversized
+    pasted-text "routine" once did, every pass, for a week).
+    """
+    from . import improvements as imp
+
+    store = imp.ImprovementStore(conn, key)
+    _mark_denied_workflows(conn, key, store)
+    suggestions: list[str] = []
+    reparked = 0
+    for cluster in _cluster_asks(_recent_user_asks(conn, key)):
+        if len(suggestions) >= _MAX_SUGGESTIONS or reparked >= _MAX_SUGGESTIONS:
+            break
+        try:
+            cadence = _cadence_minutes(cluster["times"])
+            if cadence is None:
+                continue
+            prompt = cluster["texts"][0]  # the newest phrasing of the routine
+            if len(prompt) > _SCHEDULE_PROMPT_MAX_CHARS:
+                continue  # a pasted document is not a routine prompt (and would fail validation)
+            if _schedule_exists_for(conn, key, prompt):
+                continue  # the user already automated it themselves
+            title = " ".join(prompt.split()[:6])[:60] or "Suggested routine"
+            args = {"title": title, "prompt": prompt, "interval_minutes": cadence,
+                    "start_in_minutes": cadence}
+            prior = _ledger_similar(store, prompt)
+            if prior is not None:
+                # Already offered. Denied/settled -> nothing. Still proposed with no live
+                # tile -> re-park QUIETLY (no digest line): the tile TTL is an hour, the
+                # digest cadence is eight — "waiting in Activity" must stay true.
+                if (session and prior["status"] == "proposed"
+                        and not _live_tile_for(conn, key, session, prompt)):
+                    _park_schedule(conn, key, session, args)
+                    reparked += 1
+                continue
+            store.add(category="workflow", component="chat", lever_type="schedule",
+                      description=f"repeated ask ({len(cluster['texts'])}x): {title}",
+                      payload=prompt, confidence=0.0, status="proposed")
+            if session:  # park the real, approvable action in Activity
+                _park_schedule(conn, key, session, args)
+            cadence_word = "daily" if cadence == 1440 else "weekly"
+            suggestions.append(
+                f"you've asked this {len(cluster['texts'])} times recently — a {cadence_word} "
+                f"schedule “{title}” is waiting for your approval in Activity")
+        except Exception as exc:  # one bad cluster must not kill the rest
+            log.debug("workflow suggestion skipped for one cluster: %s", exc)
+    return suggestions
+
+
+def _schedule_exists_for(conn: duckdb.DuckDBPyConnection, key: bytes, prompt: str) -> bool:
+    """True when an existing schedule already covers this ask (content-word similarity)."""
+    from .scheduler import ScheduleStore  # lazy: scheduler imports selfreview at module level
+    want = _content_tokens(prompt)
+    for sched in ScheduleStore(conn, key).list_schedules():  # bounded by store cap
+        if _jaccard(want, _content_tokens(sched["prompt"])) >= _DEDUP_JACCARD:
+            return True
+    return False
+
+
+def _suggest_knowledge(conn: duckdb.DuckDBPyConnection, key: bytes,
+                       since: str, until: str) -> list[str]:
+    """Flag questions the knowledge base could not answer at all this window.
+
+    Zero-hit searches come from the audit log's encrypted result summaries (an empty
+    result serializes tiny, so truncation can't fake one). One combined ledger row +
+    digest line; deduped forever like workflow proposals.
+    """
+    from . import improvements as imp
+    from .audit import AuditLog
+
+    misses: list[str] = []
+    for row in AuditLog(conn, key).list(limit=200):  # bounded by the store's own cap
+        if row["tool"] != "kb_search" or not row["ok"] or not (since <= row["ts"] < until):
+            continue
+        try:
+            result = json.loads(row["result_summary"])
+            query = str(json.loads(row["args_summary"]).get("query", "")).strip()
+        except (ValueError, TypeError):
+            continue  # truncated summary = it had results; not a miss
+        if isinstance(result, dict) and result.get("results") == [] and query:
+            topic = query[:_KNOWLEDGE_TOPIC_CHARS]
+            if topic.lower() not in (m.lower() for m in misses):
+                misses.append(topic)
+    if len(misses) < _KNOWLEDGE_MIN_MISSES:
+        return []
+    payload = "; ".join(sorted(m.lower() for m in misses[:5]))  # bounded, stable identity
+    store = imp.ImprovementStore(conn, key)
+    if store.find_by_payload(payload) is not None:
+        return []  # this exact gap set was already surfaced
+    store.add(category="knowledge", component="knowledge", lever_type="document",
+              description=f"knowledge gaps: {len(misses)} unanswered searches",
+              payload=payload, confidence=0.0, status="proposed")
+    quoted = ", ".join(f"“{m}”" for m in misses[:3])
+    return [f"your knowledge couldn't answer {len(misses)} searches ({quoted}) — "
+            "consider adding documents on these topics"]
+
+
+def _queued_lines(conn: duckdb.DuckDBPyConnection, meta_key: str) -> list[str]:
+    """Undelivered announcement lines under a queue key (bounded; corrupt reads empty)."""
+    raw = db.meta_get(conn, meta_key)
     if not raw:
         return []
     try:
@@ -566,46 +889,62 @@ def _queued_changes(conn: duckdb.DuckDBPyConnection) -> list[str]:
     return [str(v) for v in vals if isinstance(v, str)][:20]  # bounded (P10 #2)
 
 
-def _queue_changes(conn: duckdb.DuckDBPyConnection, lines: list[str]) -> None:
+def _queue_lines(conn: duckdb.DuckDBPyConnection, meta_key: str, lines: list[str]) -> None:
     """Durably queue announcement lines (append + dedup) until a digest delivers them.
 
-    Written the moment a mutation happens, BEFORE notify/persist can fail — so an
-    applied/reverted change can never go unannounced, whatever fails afterwards.
+    Written the moment the underlying mutation happens, BEFORE notify/persist can fail —
+    an applied/reverted change or a parked suggestion can never go unannounced.
     """
-    merged = _queued_changes(conn)
+    merged = _queued_lines(conn, meta_key)
     for line in lines:  # bounded: callers pass at most a few lines per pass
         if line not in merged:
             merged.append(line)
-    db.meta_set(conn, _PENDING_CHANGES_META_KEY, json.dumps(merged[:20]))
+    db.meta_set(conn, meta_key, json.dumps(merged[:20]))
 
 
-def _digest(chat: dict, flags: list[str], changes: list[str]) -> str:
-    """The user-facing digest — emitted when a flag fired OR the assistant changed itself.
+def _queued_changes(conn: duckdb.DuckDBPyConnection) -> list[str]:
+    return _queued_lines(conn, _PENDING_CHANGES_META_KEY)
+
+
+def _queue_changes(conn: duckdb.DuckDBPyConnection, lines: list[str]) -> None:
+    _queue_lines(conn, _PENDING_CHANGES_META_KEY, lines)
+
+
+def _digest(chat: dict, flags: list[str], changes: list[str],
+            suggestions: list[str] | None = None) -> str:
+    """The user-facing digest — emitted when a flag fired, the assistant changed itself,
+    or a suggestion parked in Activity (a tile expires in an hour; it must be seen).
 
     A behavior change is always worth telling the user about, even in an otherwise clean
     period: silent self-modification is exactly what the approval-gate philosophy rejects.
     """
-    assert flags or changes, "digest is only built when something is worth saying"
+    suggestions = suggestions or []
+    assert flags or changes or suggestions, "digest is only built when something is worth saying"
     head = (f"Self-review of the last period: {chat['turns']} chat turns"
             + (f", median answer {chat['median_ms'] / 1000:.1f}s" if chat["turns"] else "")
             + ".")
     sections = []
     if changes:
         sections.append("What changed:\n" + "\n".join(f"- {c}" for c in changes))
+    if suggestions:
+        sections.append("Suggested:\n" + "\n".join(f"- {s}" for s in suggestions))
     if flags:
         sections.append("Needs attention:\n" + "\n".join(f"- {f}" for f in flags))
     return head + "\n\n" + "\n\n".join(sections)
 
 
 def run_review(conn: duckdb.DuckDBPyConnection, key: bytes, *, notify=None,
-               locked_check=None) -> dict | None:
+               locked_check=None, session: str | None = None) -> dict | None:
     """One reviewer pass: gate on kill-switch + cadence, score the window, persist,
-    and surface a digest via ``notify(status, message)`` ONLY when a flag fired.
+    and surface a digest via ``notify(status, message)`` ONLY when a flag fired,
+    a behavior change happened, or a suggestion parked for approval.
 
     ``locked_check`` (the tick passes one) is consulted at entry AND again before any
     write: the tick snapshots the master key at its start, so without this re-check a
     mid-tick Lock would let the review keep decrypting and writing after the vault
     re-locked — the same stand-down contract run_schedule's locked_check enforces.
+    ``session`` (the tick's unlock session id) lets workflow suggestions park a real
+    pending action in Activity; without one they still record to the ledger.
 
     Returns the stored scorecard summary, or None when gated off / not yet due.
     Never raises past the boundary — a review failure must never hurt the tick.
@@ -640,23 +979,44 @@ def run_review(conn: duckdb.DuckDBPyConnection, key: bytes, *, notify=None,
             if applied:
                 changes.append(applied)
                 _queue_changes(conn, changes)
+        # Deterministic suggestion detectors (Phase 4): routines worth a schedule, and
+        # questions the knowledge base couldn't answer. Both PARK/record — never apply.
+        # Each detector is isolated (one failing must not kill the other), and every
+        # generated line queues durably at once: the ledger row a suggestion writes
+        # would otherwise dedup away any retry of a lost announcement.
+        suggestions: list[str] = []
+        for detector in (lambda: _suggest_workflows(conn, key, session),
+                         lambda: _suggest_knowledge(conn, key, since, until)):
+            try:
+                fresh = detector()
+                if fresh:
+                    suggestions.extend(fresh)
+                    _queue_lines(conn, _PENDING_SUGGESTIONS_META_KEY, fresh)
+            except Exception as exc:  # a suggestion pass is a nicety within a nicety
+                log.debug("self-review suggestion detector skipped: %s", exc)
         scorecard["changes"] = changes
+        scorecard["suggestions"] = suggestions
         if locked_check is not None and locked_check():
-            return None  # re-check before the review write (queued changes survive for later)
+            return None  # re-check before the review write (queued lines survive for later)
         pending = _queued_changes(conn)  # this pass's lines + any undelivered from before
+        pending_suggestions = _queued_lines(conn, _PENDING_SUGGESTIONS_META_KEY)
         rid = store.add(since, until, scorecard, len(flags))
         # Digest BEFORE the cadence advance: if notify fails, the stamp stays put and the
         # next tick re-runs the window — a duplicate review row and a retried digest.
         # The digest is this phase's only user-visible surface, so a harmless duplicate
         # beats silently losing it forever (the original order did exactly that).
         # A behavior change (applied or reverted) ALWAYS surfaces, flags or not.
-        if (flags or pending) and notify is not None:
-            notify("complete", _digest(scorecard["chat"], flags, pending))
+        if (flags or pending or pending_suggestions) and notify is not None:
+            notify("complete", _digest(scorecard["chat"], flags, pending, pending_suggestions))
             if pending:
                 db.meta_set(conn, _PENDING_CHANGES_META_KEY, "[]")  # delivered
+            if pending_suggestions:
+                db.meta_set(conn, _PENDING_SUGGESTIONS_META_KEY, "[]")  # delivered
         db.meta_set(conn, LAST_RUN_META_KEY, until)
-        log.info("self-review complete: window %s..%s, %d flag(s)", since, until, len(flags))
-        return {"id": rid, "window_start": since, "window_end": until, "flags": len(flags)}
+        log.info("self-review complete: window %s..%s, %d flag(s), %d suggestion(s)",
+                 since, until, len(flags), len(suggestions))
+        return {"id": rid, "window_start": since, "window_end": until, "flags": len(flags),
+                "suggestions": len(suggestions)}
     except Exception as exc:  # the reviewer is a background nicety — never break a tick
         log.warning("self-review failed: %s", exc)
         return None
