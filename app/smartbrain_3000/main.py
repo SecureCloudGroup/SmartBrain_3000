@@ -224,6 +224,12 @@ def _make_lifespan(mcp):
             base_url=gateway.gateway_url(), timeout=_GW_POOL_TIMEOUT
         )
         gateway.set_pool(application.state.gw_client)
+        try:  # privacy control: Bifrost request logging must stay off (see gateway.py).
+            # Runs even before unlock (compose guarantees bifrost is healthy first);
+            # best-effort here — every unlock re-enforces it.
+            gateway.ensure_gateway_privacy(application.state.gw_client)
+        except Exception as exc:
+            log.warning("gateway privacy enforcement skipped at startup: %s", exc)
         # Remote access dials out only once the user opts in by pairing a device (keeps
         # SECURITY.md's "off by default" true). SMARTBRAIN_WEBRTC_ENABLED overrides: "1" = always
         # on (activate now), "0" = fully disabled (no task); unset = lazy (waits for a pairing).

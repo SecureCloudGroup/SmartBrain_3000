@@ -682,6 +682,49 @@ def _run(client: httpx.Client | None, fn) -> None:
             client.close()
 
 
+# PRIVACY (see the bifrost block in compose/*.yml): Bifrost's request-logging plugin
+# writes every prompt/response into a plaintext logs.db by default. New stacks disable
+# the store at the source via a config.json the compose entrypoint writes — but a
+# compose change only reaches an installed user when their launcher updates (the file
+# is baked into the launcher binary) and curl-path users never re-download it. The APP
+# image, by contrast, updates on every restart — so the app itself enforces the client-
+# level flags over the admin API: enable_logging=false (no rows after bifrost's next
+# restart), disable_content_logging=true (LIVE-effective: bodies stop being recorded
+# immediately), and log_retention_days=1 (bifrost's own cleaner purges historical rows;
+# 1 is the API's minimum — the compose wrapper does the true file wipe where it can).
+_PRIVACY_CLIENT_FLAGS = {
+    "enable_logging": False,
+    "disable_content_logging": True,
+    "log_retention_days": 1,
+}
+
+
+def ensure_gateway_privacy(client: httpx.Client | None = None) -> bool:
+    """Idempotently force Bifrost's client config to the no-logging flags.
+
+    GET /api/config -> merge over the FULL client_config -> PUT it back (the handler
+    overwrites wholesale, so a partial body would clobber unrelated settings). Returns
+    True when a write was needed. Callers treat failures as best-effort (unlock/startup
+    must not break because the gateway is briefly unreachable) — but a failure is
+    logged loudly because this is a privacy control, not a nicety.
+    """
+    changed = False
+
+    def _apply(c: httpx.Client) -> None:
+        nonlocal changed
+        resp = c.get("/api/config")
+        resp.raise_for_status()
+        current = (resp.json() or {}).get("client_config") or {}
+        if all(current.get(k) == v for k, v in _PRIVACY_CLIENT_FLAGS.items()):
+            return  # already enforced — nothing to write
+        put = c.put("/api/config", json={"client_config": {**current, **_PRIVACY_CLIENT_FLAGS}})
+        put.raise_for_status()
+        changed = True  # gateway.py keeps no logger by design — callers report outcomes
+
+    _run(client, _apply)
+    return changed
+
+
 def _attach_key(client: httpx.Client, bifrost_name: str, key_payload: dict) -> None:
     """POST a fully-formed key payload to a provider, retrying transient 5xx.
 

@@ -56,3 +56,25 @@ jobs:
           curl -sf -b /tmp/cj "http://localhost:33000/api/kb/search?q=canary&mode=lexical" \
             | grep -q '"Smoke"'
           echo "setup + ingest + search all work on a fresh install"
+      - name: Bifrost must not log requests (privacy regression gate)
+        # Bifrost's default request logging wrote every prompt/response to a plaintext
+        # logs.db. The compose entrypoint + the app's admin-API enforcement disable it;
+        # this step makes any regression loud. The chat attempt is EXPECTED to fail (no
+        # provider on a fresh install) — the point is that even a failed inference
+        # request must leave no logs.db behind, and the client flags must be off.
+        working-directory: smoke
+        run: |
+          set -eux
+          curl -s -o /dev/null -X POST http://localhost:38080/v1/chat/completions \
+            -H 'content-type: application/json' \
+            -d '{"model":"openai/gpt-4o-mini","messages":[{"role":"user","content":"smoke canary"}]}' || true
+          sleep 2
+          docker compose -f docker-compose.release.yml exec -T bifrost \
+            sh -c 'test ! -e /app/data/logs.db' \
+            || { echo "::error::plaintext logs.db exists — Bifrost request logging is back"; exit 1; }
+          docker compose -f docker-compose.release.yml exec -T bifrost \
+            sh -c 'grep -q "\"logs_store\":{\"enabled\":false}" /app/data/config.json' \
+            || { echo "::error::bifrost config.json is missing the logs_store kill"; exit 1; }
+          curl -sf http://localhost:38080/api/config | grep -q '"is_logs_connected":false' \
+            || { echo "::error::bifrost reports a connected logs store"; exit 1; }
+          echo "no request logging: logs.db absent, store disabled, config enforced"
