@@ -23,7 +23,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 from starlette.responses import StreamingResponse
 
-from . import agent, consent, docsummaries, gateway, metrics, search, tools, usage
+from . import agent, consent, docsummaries, gateway, metrics, optimizer, search, tools, usage
 from .chat_routes import _with_memory
 
 router = APIRouter()
@@ -224,6 +224,8 @@ def agent_turn(request: Request, body: TurnIn) -> dict:
         raise HTTPException(status_code=400, detail=f"no model mapped for capability '{body.capability}'")
     messages = _with_memory(request, list(body.messages))  # server-side identity/memory injection
     conn = request.app.state.dbx
+    # Optimizer shadow observation (Phase 5): classify + count, content-free, fail-open.
+    optimizer.observe_turn(conn, body.messages, body.conversation_id)
 
     def sink(used_model: str, response: object) -> None:  # record spend as the turn runs
         usage.record_response(conn, used_model, response)
@@ -424,6 +426,9 @@ def agent_turn_stream(request: Request, body: TurnIn) -> StreamingResponse:
     if not model:
         raise HTTPException(status_code=400, detail=f"no model mapped for capability '{body.capability}'")
     messages = _with_memory(request, list(body.messages))  # same grounding as the non-streaming path
+    # Optimizer shadow observation (Phase 5). /events is deliberately NOT hooked: the SPA
+    # reaches it via THIS endpoint's tool-turn bail-out, and two hooks would count one ask twice.
+    optimizer.observe_turn(request.app.state.dbx, body.messages, body.conversation_id)
     # Streaming uses its OWN httpx.Client (not the gateway pool): a long-lived SSE
     # stream holds a connection for the whole response, so reusing the shared pool
     # would block sibling /api/chat calls behind the stream's connection.

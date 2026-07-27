@@ -42,6 +42,36 @@ def put_selfimprove(request: Request, body: SelfImproveIn) -> dict:
     return {"enabled": selfreview.enabled(conn)}
 
 
+class OptimizerIn(BaseModel):
+    enabled: bool
+
+
+@router.get("/api/selfimprove/optimizer")
+def get_optimizer(request: Request) -> dict:
+    """Optimizer state: kill-switch + every learned strategy (all shadow in this phase)."""
+    _require_unlocked(request)
+    from . import optimizer
+
+    conn = request.app.state.dbx
+    strategies = optimizer.StrategyStore(conn, request.app.state.master_key).list()
+    return {"enabled": optimizer.enabled(conn),
+            "strategies": [{"id": s["id"], "request_type": s["request_type"],
+                            "status": s["status"], "fired": s["fired"],
+                            "directive": s["directive"], "created_at": s["created_at"]}
+                           for s in strategies]}
+
+
+@router.put("/api/selfimprove/optimizer")
+def put_optimizer(request: Request, body: OptimizerIn) -> dict:
+    """Flip the optimizer kill-switch (default off; absent/corrupt reads as off)."""
+    _require_unlocked(request)
+    from . import optimizer
+
+    conn = request.app.state.dbx
+    optimizer.set_enabled(conn, body.enabled)
+    return {"enabled": optimizer.enabled(conn)}
+
+
 @router.get("/api/selfimprove/improvements")
 def list_improvements(request: Request) -> dict:
     """The change ledger: every improvement the reviewer proposed, applied, or reverted.

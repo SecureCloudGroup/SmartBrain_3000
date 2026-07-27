@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from . import gateway, usage
+from . import gateway, optimizer, usage
 
 router = APIRouter()
 
@@ -95,6 +95,8 @@ def chat_endpoint(request: Request, body: ChatRequest) -> dict:
         raise HTTPException(
             status_code=400, detail=f"no model mapped for capability '{body.capability}'"
         )
+    # Optimizer shadow observation (Phase 5): classify + count, content-free, fail-open.
+    optimizer.observe_turn(request.app.state.dbx, body.messages, None)
     try:
         result = gateway.chat(_with_memory(request, body.messages), model)
     except gateway.GatewayError as exc:  # provider/gateway reported an error
