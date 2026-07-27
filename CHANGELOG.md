@@ -11,6 +11,8 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-07-28
+
 ### Added
 - **The Prompt Optimizer can now go live — with evidence, on trial, and visibly.**
   A shadow strategy earns activation only when it kept firing (8+ matched asks) AND
@@ -48,6 +50,8 @@ to know when a release changes behavior.
   Both appear under a "Suggested:" section of the self-review digest and in the
   improvement ledger.
 
+## [0.7.0] - 2026-07-27
+
 ### Security
 - **The gateway no longer keeps a plaintext copy of your prompts.** Bifrost (the
   built-in model gateway) ships with request logging on by default, which had been
@@ -80,6 +84,10 @@ to know when a release changes behavior.
     the digest. One change at a time, at most 10 learned facts, hand-deleting a fact
     in Settings → Memory permanently rejects it, and a reverted preference is never
     re-applied. Kill-switch and privacy gates fail closed.
+
+## [0.6.9] - 2026-07-24
+
+_This section rolls up everything shipped across tags 0.6.1-0.6.9; earlier practice left these under Unreleased after tagging._
 
 ### Added
 - "Delete all…" now lives on the Chat page itself (next to the saved-chats picker, on
