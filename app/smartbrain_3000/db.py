@@ -225,6 +225,42 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
     # resumable across ticks and restarts) is detectable by count < total — without
     # decrypting anything. NULL total = legacy all-at-once write = complete.
     (26, "ALTER TABLE embeddings ADD COLUMN total INTEGER;"),
+    # Per-turn speed & quality telemetry (self-improving framework, Phase 1). ALL columns
+    # are plaintext, content-free metadata — how well/fast a turn went, never what was said —
+    # so the reviewer can compute rates/latencies directly in SQL without the master key. This
+    # captures signals the app never recorded: duration, time-to-first-token, step count, and
+    # the degraded / step-budget-exhausted outcomes, plus a per-turn token total (the usage_log
+    # has no turn linkage). Best-effort writes: telemetry must never fail a turn.
+    (
+        27,
+        "CREATE TABLE IF NOT EXISTS turn_metrics ("
+        " id TEXT PRIMARY KEY,"
+        " conversation_id TEXT,"
+        " created_at TIMESTAMP DEFAULT now(),"
+        " model TEXT NOT NULL,"
+        " is_local BOOLEAN NOT NULL DEFAULT false,"
+        " duration_ms INTEGER NOT NULL,"
+        " ttft_ms INTEGER,"
+        " steps INTEGER,"
+        " prompt_tokens INTEGER NOT NULL DEFAULT 0,"
+        " completion_tokens INTEGER NOT NULL DEFAULT 0,"
+        " degraded BOOLEAN NOT NULL DEFAULT false,"
+        " hit_max_steps BOOLEAN NOT NULL DEFAULT false,"
+        " outcome TEXT);",
+    ),
+    # Implicit-dissatisfaction events (self-improving framework, Phase 1): the user stopping a
+    # stream mid-answer or regenerating a reply is the strongest quality signal we have, and it
+    # was previously client-side only. One plaintext row per event (kind = 'stop' | 'regenerate');
+    # no content — message_id just points at which reply, for correlation with turn_metrics.
+    (
+        28,
+        "CREATE TABLE IF NOT EXISTS feedback_events ("
+        " id TEXT PRIMARY KEY,"
+        " conversation_id TEXT,"
+        " message_id TEXT,"
+        " created_at TIMESTAMP DEFAULT now(),"
+        " kind TEXT NOT NULL);",
+    ),
 )
 
 # The newest migration this build knows how to apply. A database recording a
