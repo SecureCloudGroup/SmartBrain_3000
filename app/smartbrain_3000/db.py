@@ -278,6 +278,27 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
         " nonce BLOB NOT NULL,"
         " ciphertext BLOB NOT NULL);",
     ),
+    # Learned improvements (self-improving framework, Phase 3): what the reviewer changed
+    # or proposed, and enough state to UNDO it. Lifecycle columns are plaintext so the
+    # trial/revert bookkeeping is queryable without the key; the description, the lever
+    # payload (free text that reaches a future prompt), and the captured prior state are
+    # derived from private activity and so live in the encrypted body (AAD "improvement:").
+    (
+        30,
+        "CREATE TABLE IF NOT EXISTS improvements ("
+        " id TEXT PRIMARY KEY,"
+        " created_at TIMESTAMP DEFAULT now(),"
+        " category TEXT NOT NULL,"
+        " component TEXT NOT NULL,"
+        " lever_type TEXT NOT NULL,"
+        " status TEXT NOT NULL,"
+        " confidence DOUBLE NOT NULL DEFAULT 0,"
+        " applied_at TIMESTAMP,"
+        " evaluated_at TIMESTAMP,"
+        " reverted_at TIMESTAMP,"
+        " nonce BLOB NOT NULL,"
+        " ciphertext BLOB NOT NULL);",
+    ),
 )
 
 # The newest migration this build knows how to apply. A database recording a
