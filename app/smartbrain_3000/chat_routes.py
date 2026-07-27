@@ -97,12 +97,22 @@ def chat_endpoint(request: Request, body: ChatRequest) -> dict:
         )
     # Optimizer shadow observation (Phase 5): classify + count, content-free, fail-open.
     optimizer.observe_turn(request.app.state.dbx, body.messages, None)
+    # Live steering (Phase 6): trailing note — cache-safe, fail-open (see agent_routes).
+    guidance = optimizer.apply_directive(request.app.state.dbx,
+                                         getattr(request.app.state, "master_key", None),
+                                         body.messages)
+    prompt = _with_memory(request, body.messages)
+    if guidance:
+        prompt = [*prompt, guidance["note"]]
     try:
-        result = gateway.chat(_with_memory(request, body.messages), model)
+        result = gateway.chat(prompt, model)
     except gateway.GatewayError as exc:  # provider/gateway reported an error
         raise HTTPException(status_code=502, detail=exc.message) from None
     except Exception as exc:  # gateway unreachable
         raise HTTPException(status_code=502, detail=f"gateway unreachable: {exc}") from exc
     usage.record_response(request.app.state.dbx, model, result)  # best-effort cost telemetry
     result.pop("extra_fields", None)  # drop Bifrost envelope (provider headers, etc.)
+    if guidance:
+        result["guidance"] = {"request_type": guidance["request_type"],
+                              "directive": guidance["directive"]}
     return result

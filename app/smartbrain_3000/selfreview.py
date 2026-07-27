@@ -580,6 +580,9 @@ def _maybe_apply(conn: duckdb.DuckDBPyConnection, key: bytes, findings: list[dic
     store = imp.ImprovementStore(conn, key)
     if store.on_trial() is not None:
         return None  # one change at a time, so the next window's metrics stay attributable
+    from . import optimizer
+    if optimizer.open_trial(conn):
+        return None  # a strategy trial is running — same one-change-at-a-time discipline
     best = max(findings, key=lambda f: f["confidence"])
     if store.find_by_payload(best["payload"]) is not None:
         # This exact payload already has a ledger row. Covers two failure modes found by
@@ -1015,6 +1018,21 @@ def run_review(conn: duckdb.DuckDBPyConnection, key: bytes, *, notify=None,
                 changes.append(applied)
                 _queue_changes(conn, changes)
             _maybe_learn_strategy(conn, key, findings)  # shadow-only; never touches a turn
+        # Optimizer go-live gate (Phase 6): settle any active strategy trial, then maybe
+        # promote ONE shadow strategy — blocked while a memory-fact trial is open (and
+        # vice versa) so every trial's metrics stay attributable to exactly one change.
+        # Runs every review: an open trial must settle even in a quiet window.
+        try:
+            from . import improvements as imp_mod
+            from . import optimizer
+            gate_lines = optimizer.promote_and_judge(
+                conn, key,
+                other_trial_open=imp_mod.ImprovementStore(conn, key).on_trial() is not None)
+            if gate_lines:
+                changes.extend(gate_lines)
+                _queue_changes(conn, gate_lines)
+        except Exception as exc:  # the gate is part of the review nicety — never break it
+            log.debug("optimizer gate skipped: %s", exc)
         # Deterministic suggestion detectors (Phase 4): routines worth a schedule, and
         # questions the knowledge base couldn't answer. Both PARK/record — never apply.
         # Each detector is isolated (one failing must not kill the other), and every

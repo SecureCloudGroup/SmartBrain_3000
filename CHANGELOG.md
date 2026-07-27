@@ -12,6 +12,18 @@ to know when a release changes behavior.
 ## [Unreleased]
 
 ### Added
+- **The Prompt Optimizer can now go live — with evidence, on trial, and visibly.**
+  A shadow strategy earns activation only when it kept firing (8+ matched asks) AND
+  the problem it targets persisted (a quarter or more of its matched turns going
+  badly); activation is announced in the digest and starts a measured trial against
+  that baseline — kept only if things measurably improve, auto-disabled (and
+  announced) if they don't or get worse. One trial at a time across the whole
+  framework, so every measurement stays attributable. When guidance shapes an
+  answer it rides a tiny trailing note (the prompt cache is never touched) and the
+  answer shows a quiet **"guided · …" chip** — hover it to read the exact steering
+  sentence. Everything remains behind the optimizer switch, off by default.
+
+### Added
 - **Prompt Optimizer groundwork — shadow mode** (off by default:
   `PUT /api/selfimprove/optimizer {"enabled": true}`). When enabled, each incoming
   ask is bucketed by a zero-latency rule-based classifier (factual / multi-step /
