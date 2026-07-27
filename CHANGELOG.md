@@ -11,6 +11,20 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Security
+- **The gateway no longer keeps a plaintext copy of your prompts.** Bifrost (the
+  built-in model gateway) ships with request logging on by default, which had been
+  writing every prompt and reply — chat, memory, knowledge content sent for
+  embedding — into an unencrypted `logs.db` inside its data volume, alongside
+  SmartBrain's encrypted database. Fixed at three layers: the stack now starts
+  Bifrost with its logging store disabled at the source and **destroys any existing
+  `logs.db` on startup**; the app itself re-enforces no-logging over the gateway's
+  admin API at every startup and unlock (so installs still on an older stack
+  definition are protected as soon as their app image updates — content capture
+  stops immediately and historical rows are purged by the gateway's own 1-day
+  retention cleaner); and the weekly fresh-install test now fails if a `logs.db`
+  ever reappears. No user action needed beyond restarting SmartBrain.
+
 ### Added
 - "Delete all…" now lives on the Chat page itself (next to the saved-chats picker, on
   desktop and phone) — behind a confirmation, and everything still lands in the Trash

@@ -100,6 +100,10 @@ def _set_unlocked(request: Request, master_key: bytes) -> None:
         gateway.provision_local_from_store(request.app.state.secret_store)
     except Exception as exc:  # gateway unreachable — best effort
         log.warning("local provisioning skipped: %s", exc)
+    try:  # privacy control: Bifrost request logging must stay off (see gateway.py)
+        gateway.ensure_gateway_privacy()
+    except Exception as exc:  # best effort at unlock; startup + next unlock retry it
+        log.warning("gateway privacy enforcement skipped: %s", exc)
     # Resume remote access if the user has already paired a device — a fresh, never-paired vault
     # stays fully offline. Pairing is the opt-in; this just reconnects the broker link across
     # restarts (see main._webrtc_loop / lazy-start).

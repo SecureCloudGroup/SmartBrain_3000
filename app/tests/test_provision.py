@@ -151,3 +151,71 @@ def test_set_provider_raises_after_persistent_500(monkeypatch) -> None:
     with pytest.raises(gateway.GatewayError):
         gateway.set_provider("openai", "sk-x", client=client)
     client.close()
+
+
+# --- gateway privacy enforcement (Bifrost request logging must stay off) ----
+
+def _config_client(record: list, client_config: dict) -> httpx.Client:
+    """Mock Bifrost /api/config: GET serves ``client_config``, PUT records the body."""
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.method == "GET" and req.url.path == "/api/config":
+            return httpx.Response(200, json={"client_config": dict(client_config),
+                                             "is_logs_connected": True})
+        body = json.loads(req.content) if req.content else None
+        record.append((req.method, req.url.path, body))
+        return httpx.Response(200, json={"ok": True})
+
+    return httpx.Client(base_url="http://bifrost:8080", transport=httpx.MockTransport(handler))
+
+
+def test_privacy_flags_written_and_unrelated_config_preserved() -> None:
+    # Bifrost's PUT /api/config overwrites client_config wholesale — the merge must
+    # carry every unrelated field through, or enforcing privacy would clobber them.
+    current = {"enable_logging": True, "disable_content_logging": False,
+               "log_retention_days": 365, "max_request_body_size_mb": 100,
+               "drop_excess_requests": False}
+    record: list = []
+    with _config_client(record, current) as client:
+        assert gateway.ensure_gateway_privacy(client) is True
+    assert len(record) == 1
+    method, path, body = record[0]
+    assert (method, path) == ("PUT", "/api/config")
+    put_cfg = body["client_config"]
+    assert put_cfg["enable_logging"] is False
+    assert put_cfg["disable_content_logging"] is True
+    assert put_cfg["log_retention_days"] == 1  # the API's minimum; drains history
+    assert put_cfg["max_request_body_size_mb"] == 100  # unrelated settings preserved
+    assert put_cfg["drop_excess_requests"] is False
+
+
+def test_privacy_enforcement_is_idempotent() -> None:
+    already = {"enable_logging": False, "disable_content_logging": True,
+               "log_retention_days": 1, "max_request_body_size_mb": 100}
+    record: list = []
+    with _config_client(record, already) as client:
+        assert gateway.ensure_gateway_privacy(client) is False
+    assert record == []  # nothing to write — no PUT at all
+
+
+@pytest.fixture()
+def app_client(tmp_path, monkeypatch) -> Iterator[TestClient]:
+    monkeypatch.setenv("SMARTBRAIN_DB_PATH", str(tmp_path / "test.duckdb"))
+    from smartbrain_3000.main import create_app
+
+    with TestClient(create_app()) as test_client:
+        yield test_client
+
+
+def test_unlock_enforces_privacy_and_survives_gateway_outage(app_client, monkeypatch) -> None:
+    calls: list = []
+    monkeypatch.setattr(gateway, "ensure_gateway_privacy", lambda *a, **k: calls.append(1))
+    resp = app_client.post("/api/account/setup", json={"passphrase": "correct-horse"})
+    assert resp.status_code == 200
+    assert calls  # enforced at unlock
+    # And a gateway outage must never block an unlock (best-effort with a loud log).
+    def down(*a, **k):
+        raise RuntimeError("bifrost unreachable")
+    monkeypatch.setattr(gateway, "ensure_gateway_privacy", down)
+    app_client.post("/api/account/lock")
+    resp = app_client.post("/api/account/unlock", json={"passphrase": "correct-horse"})
+    assert resp.status_code == 200  # unlock still works

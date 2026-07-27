@@ -68,6 +68,18 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - ../data/bifrost:/app/data
+    # PRIVACY: Bifrost's built-in request logging writes every prompt/response into a
+    # PLAINTEXT SQLite file (logs.db) inside its data volume — found live holding the
+    # full history of gateway traffic, unencrypted, beside the app's encrypted database.
+    # This wrapper (a) destroys any historical logs.db before startup and (b) writes a
+    # config.json that disables the logs store outright — for the logs_store section the
+    # file wins on EVERY boot (bifrost-http lib/config.go), so neither the admin UI nor
+    # the API can resurrect it — plus belt-and-braces client flags that disable the
+    # logging plugin and content capture. The app enforces the same client flags over
+    # the admin API at unlock (gateway.ensure_gateway_privacy) so installs still on an
+    # older compose file are protected too. exec keeps the stock entrypoint's dir/
+    # permission checks and signal handling intact.
+    entrypoint: ["sh", "-c", "rm -f /app/data/logs.db /app/data/logs.db-wal /app/data/logs.db-shm && printf '%s' '{\"logs_store\":{\"enabled\":false},\"client\":{\"enable_logging\":false,\"disable_content_logging\":true}}' > /app/data/config.json && exec /app/docker-entrypoint.sh"]
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/api/health || exit 1"]
       interval: 30s
