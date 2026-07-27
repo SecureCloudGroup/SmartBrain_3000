@@ -110,6 +110,14 @@ def _is_local(model: str) -> bool:
     return bool(model) and model.split("/", 1)[0] in _LOCAL_PROVIDER_NAMES
 
 
+def is_local(model: str) -> bool:
+    """Public: True if ``model`` runs on a local provider (never sends content off-box).
+
+    Used by the self-improving framework's privacy gate and its per-turn telemetry.
+    """
+    return _is_local(model)
+
+
 @contextmanager
 def _serialized(model: str) -> Iterator[None]:
     """Hold the local-model semaphore for a call to a local provider; a no-op for cloud models."""

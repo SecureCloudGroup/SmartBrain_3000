@@ -539,6 +539,7 @@
     if (busy || !modelId || cid === null) return;
     const messages = transcriptUpToLastUser(log);
     if (!messages) return; // no user message to regenerate from
+    void api.feedback("regenerate", cid); // implicit-dissatisfaction signal (best-effort)
     busy = true;
     error = "";
     modelNotice = "";
@@ -1113,7 +1114,7 @@
       {#if stopper}
         <!-- A streamed turn is in flight: Send becomes Stop. Aborting keeps + persists the
              partial answer (see streamTurn); non-streamed turns keep the plain disabled Send. -->
-        <button class="stop" title="Stop generating" aria-label="Stop generating" onclick={() => stopper?.abort()}>
+        <button class="stop" title="Stop generating" aria-label="Stop generating" onclick={() => { void api.feedback("stop", chatSession.currentId); stopper?.abort(); }}>
           <Icon name="stop" />
         </button>
       {:else}

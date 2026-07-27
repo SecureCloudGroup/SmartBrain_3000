@@ -23,7 +23,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 from starlette.responses import StreamingResponse
 
-from . import agent, consent, docsummaries, gateway, search, tools, usage
+from . import agent, consent, docsummaries, gateway, metrics, search, tools, usage
 from .chat_routes import _with_memory
 
 router = APIRouter()
@@ -198,6 +198,21 @@ def forget_remembered(request: Request, name: str) -> dict[str, bool]:
     return {"ok": True}
 
 
+def _record_turn_metric(conn, model, conversation_id, started, tally, result, *, ttft_ms=None):
+    """Best-effort per-turn speed/quality row from a run_turn result (Phase-1 telemetry)."""
+    if not isinstance(result, dict):
+        return
+    status = result.get("status") or ""
+    metrics.record_turn(
+        conn, model=model, is_local=gateway.is_local(model),
+        duration_ms=int((time.monotonic() - started) * 1000),
+        prompt_tokens=tally.prompt_tokens, completion_tokens=tally.completion_tokens,
+        conversation_id=conversation_id, ttft_ms=ttft_ms,
+        steps=result.get("steps"), degraded=bool(result.get("degraded")),
+        hit_max_steps=(status == "max_steps"), outcome=status,
+    )
+
+
 @router.post("/api/agent/turn")
 def agent_turn(request: Request, body: TurnIn) -> dict:
     """Run a bounded agentic tool-calling turn (OBSERVE auto, dangerous parks)."""
@@ -213,10 +228,12 @@ def agent_turn(request: Request, body: TurnIn) -> dict:
     def sink(used_model: str, response: object) -> None:  # record spend as the turn runs
         usage.record_response(conn, used_model, response)
 
+    tally = metrics._TokenTally(sink)  # sum tokens for one turn_metrics row (still records spend)
+    started = time.monotonic()
     try:
-        return agent.run_turn(
+        result = agent.run_turn(
             ctx, audit, approvals, messages=messages, model=model,
-            conversation_id=body.conversation_id, turn_id=uuid.uuid4().hex, usage_sink=sink,
+            conversation_id=body.conversation_id, turn_id=uuid.uuid4().hex, usage_sink=tally,
             auto_approve=consent.remembered(conn), timeout=_INTERACTIVE_TIMEOUT,
             result_cap=gateway.result_cap_for(conn, model),
         )
@@ -224,6 +241,8 @@ def agent_turn(request: Request, body: TurnIn) -> dict:
         raise HTTPException(status_code=502, detail=exc.message) from None
     except Exception as exc:  # gateway unreachable — match the plain-chat path's 502
         raise HTTPException(status_code=502, detail=f"gateway unreachable: {exc}") from exc
+    _record_turn_metric(conn, model, body.conversation_id, started, tally, result)
+    return result
 
 
 # Overall bound on one streamed agent turn: 6 model round-trips at the interactive
@@ -258,17 +277,20 @@ def agent_turn_events(request: Request, body: TurnIn) -> StreamingResponse:
     def sink(used_model: str, response: object) -> None:  # worker thread -> per-thread cursor
         usage.record_response(conn, used_model, response)
 
+    tally = metrics._TokenTally(sink)
     frames: queue.Queue = queue.Queue(maxsize=256)  # bounded: a runaway emitter blocks, not OOMs
 
     def worker() -> None:
+        started = time.monotonic()
         try:
             result = agent.run_turn(
                 ctx, audit, approvals, messages=messages, model=model,
-                conversation_id=body.conversation_id, turn_id=uuid.uuid4().hex, usage_sink=sink,
+                conversation_id=body.conversation_id, turn_id=uuid.uuid4().hex, usage_sink=tally,
                 auto_approve=consent.remembered(conn), timeout=_INTERACTIVE_TIMEOUT,
                 result_cap=gateway.result_cap_for(conn, model),
                 on_event=lambda ev: frames.put(("tool", ev)),
             )
+            _record_turn_metric(conn, model, body.conversation_id, started, tally, result)
             frames.put(("final", result))
         except gateway.GatewayError as exc:
             frames.put(("error", {"detail": exc.message}))
@@ -307,7 +329,7 @@ def _sse_event(event: str, payload: dict) -> bytes:
 
 def _stream_first_response(
     messages: list[dict], model: str, conversation_id: str | None, client: httpx.Client,
-    tools_spec: list[dict],
+    tools_spec: list[dict], conn=None,
 ) -> Iterator[bytes]:
     """Stream the FIRST model response as SSE; emit ``done`` on text or ``pending`` on tools.
 
@@ -322,6 +344,8 @@ def _stream_first_response(
     assert messages and model, "messages + model required"
     assert client is not None and tools_spec, "stream requires its own client + a tools spec"
     text_parts: list[str] = []
+    started = time.monotonic()  # for TTFT + duration telemetry (recorded on the plain-answer done)
+    ttft_ms: int | None = None
     saw_tools = False
     # A model may print a tool call as TEXT (```json / a bare {…}). We hold deltas until the
     # first non-whitespace char: if it opens a code fence or JSON object, SUPPRESS the stream
@@ -356,6 +380,8 @@ def _stream_first_response(
                         if lead[0] in ("`", "{"):  # opens a fence/JSON object — likely a text tool call
                             suppress = True
                             continue
+                        if ttft_ms is None:
+                            ttft_ms = int((time.monotonic() - started) * 1000)  # first visible token
                         yield _sse_event("delta", {"text": "".join(text_parts)})  # flush buffered prefix
                         continue
                     yield _sse_event("delta", {"text": delta})
@@ -369,6 +395,13 @@ def _stream_first_response(
         if saw_tools or suppress:  # tool turn (structured or text-emitted) — resolve via run_turn
             yield _sse_event("pending", {"detail": "tool turn — fall back to /api/agent/turn", "model": model})
             return
+        # Plain streamed answer completed here (no tool fallback) — record ONE turn_metrics row
+        # with the true time-to-first-token. Streamed deltas carry no usage block, so tokens are 0.
+        metrics.record_turn(
+            conn, model=model, is_local=gateway.is_local(model),
+            duration_ms=int((time.monotonic() - started) * 1000), ttft_ms=ttft_ms,
+            conversation_id=conversation_id, steps=0, outcome="complete",
+        )
         yield _sse_event("done", {"message": "".join(text_parts), "conversation_id": conversation_id, "model": model})
     except Exception as exc:  # gateway unreachable — surface, never crash the stream
         log.warning("stream aborted: %s", exc)
@@ -396,7 +429,8 @@ def agent_turn_stream(request: Request, body: TurnIn) -> StreamingResponse:
     # would block sibling /api/chat calls behind the stream's connection.
     stream_client = httpx.Client(base_url=gateway.gateway_url(), timeout=_INTERACTIVE_TIMEOUT)
     return StreamingResponse(
-        _stream_first_response(messages, model, body.conversation_id, stream_client, tools.openai_tools_spec()),
+        _stream_first_response(messages, model, body.conversation_id, stream_client,
+                               tools.openai_tools_spec(), conn=request.app.state.dbx),
         media_type="text/event-stream",
     )
 

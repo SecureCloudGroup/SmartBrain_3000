@@ -510,6 +510,9 @@ export const api = {
   // agentic tool-calling turn (OBSERVE auto-runs; dangerous tools park for approval)
   agentTurn: (body: { messages: ChatMessage[]; model?: string; capability?: string; conversation_id?: string | null }) =>
     req<AgentResult>("/api/agent/turn", { method: "POST", body: JSON.stringify(body) }),
+  // Best-effort implicit-feedback signal (Stop / Regenerate) — telemetry only, never blocks the UI.
+  feedback: (kind: "stop" | "regenerate", conversation_id?: string | null) =>
+    req<{ ok: boolean }>("/api/feedback", { method: "POST", body: JSON.stringify({ kind, conversation_id }) }).catch(() => undefined),
   agentResume: (turnId: string) =>
     req<AgentResult>(`/api/agent/resume/${encodeURIComponent(turnId)}`, { method: "POST" }),
   // SSE token streaming for a turn (Desktop/local only — the WebRTC relay buffers, so
