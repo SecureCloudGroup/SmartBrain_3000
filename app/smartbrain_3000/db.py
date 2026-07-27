@@ -261,6 +261,23 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
         " created_at TIMESTAMP DEFAULT now(),"
         " kind TEXT NOT NULL);",
     ),
+    # Self-review results (self-improving framework, Phase 2): one row per 8-hour review
+    # cycle. Window bounds, status, and the flag COUNT are plaintext cadence/query metadata
+    # (like schedules.next_run); the scorecard itself quotes per-tool failure details and
+    # so lives in the encrypted body (AAD "review:" + id) — the repo rule: anything derived
+    # from private activity is as sensitive as the activity.
+    (
+        29,
+        "CREATE TABLE IF NOT EXISTS reviews ("
+        " id TEXT PRIMARY KEY,"
+        " created_at TIMESTAMP DEFAULT now(),"
+        " window_start TIMESTAMP NOT NULL,"
+        " window_end TIMESTAMP NOT NULL,"
+        " status TEXT NOT NULL,"
+        " flags INTEGER NOT NULL DEFAULT 0,"
+        " nonce BLOB NOT NULL,"
+        " ciphertext BLOB NOT NULL);",
+    ),
 )
 
 # The newest migration this build knows how to apply. A database recording a
