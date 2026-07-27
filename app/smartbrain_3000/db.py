@@ -328,6 +328,12 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
         " request_type TEXT NOT NULL,"
         " strategy_id TEXT);",
     ),
+    # Optimizer go-live bookkeeping (Phase 6): when a strategy was promoted to active,
+    # when its trial settled, and the cohort bad-rate it must beat. All plaintext,
+    # content-free trial metadata (like improvements' lifecycle columns).
+    (33, "ALTER TABLE optimizer_strategies ADD COLUMN activated_at TIMESTAMP;"),
+    (34, "ALTER TABLE optimizer_strategies ADD COLUMN evaluated_at TIMESTAMP;"),
+    (35, "ALTER TABLE optimizer_strategies ADD COLUMN baseline_bad DOUBLE;"),
 )
 
 # The newest migration this build knows how to apply. A database recording a

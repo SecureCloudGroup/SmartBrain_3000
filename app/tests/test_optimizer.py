@@ -163,3 +163,141 @@ def test_optimizer_api(tmp_path, monkeypatch) -> None:
         rows = client.get("/api/selfimprove/optimizer").json()["strategies"]
         assert len(rows) == 1 and rows[0]["status"] == "shadow" and rows[0]["fired"] == 0
         assert rows[0]["directive"].startswith("Answer directly")
+
+
+# --- Phase 6: go-live gating + live directives -------------------------------
+
+def _seed_cohort(conn, key, sid: str, *, turns: int, bad: int, since_event=None) -> None:
+    """Seed matched event+metric pairs for a strategy's cohort (same conversation)."""
+    import uuid as _uuid
+    for i in range(turns):
+        cid = f"conv-{sid[:6]}-{i}"
+        conn.execute(
+            "INSERT INTO optimizer_events (id, conversation_id, request_type, strategy_id) "
+            "VALUES (?, ?, 'multi_step', ?);", [_uuid.uuid4().hex, cid, sid])
+        metrics.record_turn(conn, model="ollama/x", is_local=True, duration_ms=900,
+                            conversation_id=cid, hit_max_steps=i < bad,
+                            outcome="max_steps" if i < bad else "complete")
+
+
+def _shadow(conn, key, fired: int = 10) -> str:
+    sid = optimizer.StrategyStore(conn, key).add(
+        "multi_step", "Outline the plan before executing multi-step tasks.")
+    conn.execute("UPDATE optimizer_strategies SET fired = ? WHERE id = ?;", [fired, sid])
+    return sid
+
+
+def test_cohort_metrics_joins_events_to_turns() -> None:
+    conn, key = _conn(), gen_master_key()
+    sid = _shadow(conn, key)
+    _seed_cohort(conn, key, sid, turns=8, bad=4)
+    cohort = optimizer.cohort_metrics(conn, sid)
+    assert cohort == {"turns": 8, "bad": 4, "bad_rate": 0.5}
+
+
+def test_promotion_needs_relevance_and_persistent_problem() -> None:
+    conn, key = _conn(), gen_master_key()
+    store = optimizer.StrategyStore(conn, key)
+    # Healthy cohort: relevant but the problem resolved itself -> stays shadow.
+    sid = _shadow(conn, key)
+    _seed_cohort(conn, key, sid, turns=10, bad=1)
+    assert optimizer.promote_and_judge(conn, key) == []
+    assert store.list()[0]["status"] == "shadow"
+    # Bad cohort -> promoted, baseline recorded, announced.
+    conn.execute("DELETE FROM optimizer_events;")
+    conn.execute("DELETE FROM turn_metrics;")
+    _seed_cohort(conn, key, sid, turns=10, bad=5)
+    lines = optimizer.promote_and_judge(conn, key)
+    assert len(lines) == 1 and "activated guidance for multi_step" in lines[0]
+    row = store.list()[0]
+    assert row["status"] == "active" and row["baseline_bad"] == 0.5
+    assert row["activated_at"] is not None and row["evaluated_at"] is None
+    assert optimizer.open_trial(conn) is True
+
+
+def test_promotion_blocked_while_other_trial_open() -> None:
+    conn, key = _conn(), gen_master_key()
+    sid = _shadow(conn, key)
+    _seed_cohort(conn, key, sid, turns=10, bad=5)
+    assert optimizer.promote_and_judge(conn, key, other_trial_open=True) == []
+    assert optimizer.StrategyStore(conn, key).list()[0]["status"] == "shadow"
+
+
+def test_trial_kept_on_improvement_disabled_on_no_help_or_regression() -> None:
+    conn, key = _conn(), gen_master_key()
+    store = optimizer.StrategyStore(conn, key)
+    # KEPT: bad-rate halves after activation.
+    sid = _shadow(conn, key)
+    _seed_cohort(conn, key, sid, turns=10, bad=5)
+    optimizer.promote_and_judge(conn, key)
+    _seed_cohort(conn, key, sid, turns=8, bad=1)  # post-activation cohort: 12.5% bad
+    assert optimizer.promote_and_judge(conn, key) == []  # kept quietly
+    row = store.list()[0]
+    assert row["status"] == "active" and row["evaluated_at"] is not None
+    assert optimizer.open_trial(conn) is False
+    # DISABLED (didn't help): fresh strategy, post-activation rate stays at baseline.
+    conn.execute("DELETE FROM optimizer_events;")
+    conn.execute("DELETE FROM turn_metrics;")
+    conn.execute("DELETE FROM optimizer_strategies;")
+    sid2 = _shadow(conn, key)
+    _seed_cohort(conn, key, sid2, turns=10, bad=5)
+    optimizer.promote_and_judge(conn, key)
+    _seed_cohort(conn, key, sid2, turns=8, bad=4)
+    lines = optimizer.promote_and_judge(conn, key)
+    assert len(lines) == 1 and "didn't help" in lines[0]
+    assert store.list()[0]["status"] == "disabled"
+    # DISABLED early (made things worse): regression clears at 4 turns.
+    conn.execute("DELETE FROM optimizer_events;")
+    conn.execute("DELETE FROM turn_metrics;")
+    conn.execute("DELETE FROM optimizer_strategies;")
+    sid3 = _shadow(conn, key)
+    _seed_cohort(conn, key, sid3, turns=10, bad=3)  # baseline 30%
+    optimizer.promote_and_judge(conn, key)
+    _seed_cohort(conn, key, sid3, turns=4, bad=3)  # 75% bad after
+    lines = optimizer.promote_and_judge(conn, key)
+    assert len(lines) == 1 and "made them worse" in lines[0]
+    assert store.list()[0]["status"] == "disabled"
+
+
+def test_apply_directive_only_for_active_matching_type() -> None:
+    conn, key = _conn(), gen_master_key()
+    optimizer.set_enabled(conn, True)
+    sid = _shadow(conn, key)
+    ask = _ask("first gather the data, then summarize it, then email me the result")
+    assert optimizer.apply_directive(conn, key, ask) is None  # shadow: never live
+    optimizer.StrategyStore(conn, key).set_status(sid, "active")
+    hit = optimizer.apply_directive(conn, key, ask)
+    assert hit is not None and hit["request_type"] == "multi_step"
+    assert hit["note"]["role"] == "system"
+    assert "Outline the plan" in hit["note"]["content"]
+    assert optimizer.apply_directive(conn, key, _ask("what is the capital of France")) is None
+    assert optimizer.apply_directive(conn, None, ask) is None  # locked -> baseline
+    optimizer.set_enabled(conn, False)
+    assert optimizer.apply_directive(conn, key, ask) is None  # kill-switch -> baseline
+
+
+def test_review_gate_announces_activation(monkeypatch) -> None:
+    conn, key = _conn(), gen_master_key()
+    selfreview.set_enabled(conn, True)
+    optimizer.set_enabled(conn, True)
+    sid = _shadow(conn, key)
+    _seed_cohort(conn, key, sid, turns=10, bad=5)
+    monkeypatch.setattr(selfreview, "_critique", lambda *a, **k: [])
+    notified: list = []
+    out = selfreview.run_review(conn, key, notify=lambda s, m: notified.append(m))
+    assert out is not None
+    assert "activated guidance for multi_step" in notified[0]  # a behavior change: announced
+    assert optimizer.StrategyStore(conn, key).list()[0]["status"] == "active"
+
+
+def test_memory_apply_blocked_while_strategy_trial_open(monkeypatch) -> None:
+    conn, key = _conn(), gen_master_key()
+    sid = _shadow(conn, key)
+    optimizer.StrategyStore(conn, key).set_status(sid, "active")  # open trial (unevaluated)
+    finding = {"category": "preference", "component": "chat",
+               "description": "wants brevity", "payload": "Prefers concise answers always.",
+               "confidence": 0.9}
+    assert selfreview._maybe_apply(conn, key, [finding], {"turns": 10, "stops": 0,
+                                                          "regenerations": 0}) is None
+    from smartbrain_3000.memory import MemoryStore
+    assert MemoryStore(conn, key).list_memories() == []  # one trial at a time, framework-wide

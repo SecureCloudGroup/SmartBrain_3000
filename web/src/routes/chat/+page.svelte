@@ -23,7 +23,13 @@
   // jump when a streaming assistant message mutates in place. `schedule` marks a fired
   // scheduled-run update injected into the view (display-only; excluded from the transcript).
   // `sources` = the turn's deterministic citations (from tool results), rendered as chips.
-  type Entry = ChatMessage & { id: string; err?: boolean; schedule?: boolean; sources?: Source[] };
+  type Entry = ChatMessage & {
+    id: string; err?: boolean; schedule?: boolean; sources?: Source[];
+    // Optimizer transparency: which learned guidance shaped this answer (live-session
+    // only — not persisted with the message; the ledger keeps the durable record).
+    guidance?: { request_type: string; directive: string };
+  };
+  let liveGuidance: { request_type: string; directive: string } | null = null;
 
   let conversations = $state<Conversation[]>([]);
   let convosCursor = $state<string | null>(null); // next-older page cursor for the saved list
@@ -775,6 +781,10 @@
       } else if (e.event === "done") {
         await finalizeStream({ data: e.data, cid: opts.cid, streamText: opts.streamRef(), ensureStreamBubble: opts.ensureStreamBubble });
         return "terminal";
+      } else if (e.event === "meta") {
+        // Optimizer guidance announcement for this streamed answer (chip on finalize).
+        try { liveGuidance = (JSON.parse(e.data) as { guidance?: Entry["guidance"] }).guidance ?? null; }
+        catch { liveGuidance = null; }
       } else if (e.event === "pending" || e.event === "tools") {
         return "fallback";
       } else if (e.event === "error") {
@@ -834,7 +844,11 @@
     if (!finalText) finalText = "I didn't get a response — try again.";
     const id = opts.ensureStreamBubble();
     const target = log.find((x) => x.id === id);
-    if (target) target.content = finalText;
+    if (target) {
+      target.content = finalText;
+      if (liveGuidance) target.guidance = liveGuidance; // transparency chip on the live bubble
+    }
+    liveGuidance = null;
     await api.addMessage(opts.cid, "assistant", finalText);
   }
 
@@ -852,7 +866,9 @@
       // them on the live entry and persist them with the message so a reload shows the
       // same chips.
       const sources = res.sources?.length ? res.sources : undefined;
-      log.push({ id: nextEntryId("asst"), role: "assistant", content: reply, sources });
+      log.push({ id: nextEntryId("asst"), role: "assistant", content: reply, sources,
+                 guidance: res.guidance });
+      liveGuidance = null; // the result's own field wins over any stream meta
       await api.addMessage(cid, "assistant", reply, sources);
     }
   }
@@ -1027,6 +1043,13 @@
               {/each}
             </div>
           {/if}
+          {#if entry.guidance}
+            <!-- Optimizer transparency: a learned, measured-on-trial guidance shaped this
+                 answer. Hover shows the directive itself; the ledger keeps the history. -->
+            <div class="guided" title={entry.guidance.directive}>
+              guided · {entry.guidance.request_type.replace("_", " ")}
+            </div>
+          {/if}
           <!-- Quiet per-answer actions. Copy grabs the raw markdown (not rendered HTML);
                Regenerate only exists on the thread's final answer. -->
           <div class="msg-actions">
@@ -1149,6 +1172,16 @@
     gap: 0.35rem;
     margin-top: -0.45rem;
     max-width: min(46rem, 85%); /* track the bubble width so chips never outdent it */
+  }
+  /* Optimizer transparency chip — same tucked-under placement as .cites, quieter still:
+     it's a footnote ("this answer was steered"), not a control. Hover reveals the text. */
+  .guided {
+    align-self: flex-start;
+    font-size: 0.72rem;
+    color: var(--muted);
+    opacity: 0.75;
+    margin-top: -0.35rem;
+    cursor: help;
   }
   /* Per-answer actions (Copy / Regenerate) — same tucked-under-the-bubble placement as
      .cites. Always visible (hover-only reveals fail on touch) but quiet: bare muted text. */

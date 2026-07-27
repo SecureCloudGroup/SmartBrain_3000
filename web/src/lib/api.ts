@@ -133,6 +133,7 @@ export interface AgentResult {
   pending?: { id: string; tool: string; tier: string }[];
   degraded?: boolean;
   sources?: Source[]; // citations from the turn's tool results ([] when no knowledge was used)
+  guidance?: { request_type: string; directive: string }; // optimizer steering that shaped this answer
 }
 
 export interface Memory {

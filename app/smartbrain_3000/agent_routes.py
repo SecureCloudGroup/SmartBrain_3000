@@ -226,6 +226,13 @@ def agent_turn(request: Request, body: TurnIn) -> dict:
     conn = request.app.state.dbx
     # Optimizer shadow observation (Phase 5): classify + count, content-free, fail-open.
     optimizer.observe_turn(conn, body.messages, body.conversation_id)
+    # Live steering (Phase 6): an ACTIVE strategy rides a TRAILING system note (the
+    # _time_line slot — the static head and conversation prefix stay byte-stable, so
+    # steering never costs the prompt cache). Fail-open: no strategy = baseline.
+    guidance = optimizer.apply_directive(conn, getattr(request.app.state, "master_key", None),
+                                         body.messages)
+    if guidance:
+        messages = [*messages, guidance["note"]]
 
     def sink(used_model: str, response: object) -> None:  # record spend as the turn runs
         usage.record_response(conn, used_model, response)
@@ -244,6 +251,9 @@ def agent_turn(request: Request, body: TurnIn) -> dict:
     except Exception as exc:  # gateway unreachable — match the plain-chat path's 502
         raise HTTPException(status_code=502, detail=f"gateway unreachable: {exc}") from exc
     _record_turn_metric(conn, model, body.conversation_id, started, tally, result)
+    if guidance:  # transparency: the chip shows which guidance shaped this answer
+        result["guidance"] = {"request_type": guidance["request_type"],
+                              "directive": guidance["directive"]}
     return result
 
 
@@ -275,6 +285,12 @@ def agent_turn_events(request: Request, body: TurnIn) -> StreamingResponse:
         raise HTTPException(status_code=400, detail=f"no model mapped for capability '{body.capability}'")
     messages = _with_memory(request, list(body.messages))
     conn = request.app.state.dbx
+    # Live steering (Phase 6) — same trailing-note contract as /api/agent/turn. No shadow
+    # observation here (the stream endpoint already counted this ask before bailing out).
+    guidance = optimizer.apply_directive(conn, getattr(request.app.state, "master_key", None),
+                                         body.messages)
+    if guidance:
+        messages = [*messages, guidance["note"]]
 
     def sink(used_model: str, response: object) -> None:  # worker thread -> per-thread cursor
         usage.record_response(conn, used_model, response)
@@ -293,6 +309,9 @@ def agent_turn_events(request: Request, body: TurnIn) -> StreamingResponse:
                 on_event=lambda ev: frames.put(("tool", ev)),
             )
             _record_turn_metric(conn, model, body.conversation_id, started, tally, result)
+            if guidance:  # transparency chip data on the terminal frame
+                result["guidance"] = {"request_type": guidance["request_type"],
+                                      "directive": guidance["directive"]}
             frames.put(("final", result))
         except gateway.GatewayError as exc:
             frames.put(("error", {"detail": exc.message}))
@@ -429,15 +448,27 @@ def agent_turn_stream(request: Request, body: TurnIn) -> StreamingResponse:
     # Optimizer shadow observation (Phase 5). /events is deliberately NOT hooked: the SPA
     # reaches it via THIS endpoint's tool-turn bail-out, and two hooks would count one ask twice.
     optimizer.observe_turn(request.app.state.dbx, body.messages, body.conversation_id)
+    # Live steering (Phase 6): trailing note (cache-safe), plus a leading ``meta`` SSE
+    # frame so the streamed answer can show the transparency chip too. Clients that
+    # don't know ``meta`` ignore unknown SSE event names by contract.
+    guidance = optimizer.apply_directive(request.app.state.dbx,
+                                         getattr(request.app.state, "master_key", None),
+                                         body.messages)
+    if guidance:
+        messages = [*messages, guidance["note"]]
     # Streaming uses its OWN httpx.Client (not the gateway pool): a long-lived SSE
     # stream holds a connection for the whole response, so reusing the shared pool
     # would block sibling /api/chat calls behind the stream's connection.
     stream_client = httpx.Client(base_url=gateway.gateway_url(), timeout=_INTERACTIVE_TIMEOUT)
-    return StreamingResponse(
-        _stream_first_response(messages, model, body.conversation_id, stream_client,
-                               tools.openai_tools_spec(), conn=request.app.state.dbx),
-        media_type="text/event-stream",
-    )
+
+    def _frames() -> Iterator[bytes]:
+        if guidance:
+            yield _sse_event("meta", {"guidance": {"request_type": guidance["request_type"],
+                                                   "directive": guidance["directive"]}})
+        yield from _stream_first_response(messages, model, body.conversation_id, stream_client,
+                                          tools.openai_tools_spec(), conn=request.app.state.dbx)
+
+    return StreamingResponse(_frames(), media_type="text/event-stream")
 
 
 @router.post("/api/agent/resume/{turn_id}")
