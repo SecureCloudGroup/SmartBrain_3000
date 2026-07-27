@@ -26,6 +26,25 @@ to know when a release changes behavior.
   ever reappears. No user action needed beyond restarting SmartBrain.
 
 ### Added
+- **SmartBrain now reviews and improves itself** (off by default — turn it on with
+  `PUT /api/selfimprove {"enabled": true}`; a Settings toggle is coming). Three pieces:
+  - **It finally measures itself**: every chat/agent turn records content-free speed &
+    quality telemetry (latency, steps, degraded/step-budget outcomes, per-turn tokens),
+    and stopping or regenerating an answer is recorded as implicit feedback.
+  - **An 8-hour self-review** (while unlocked) scores Chat, Knowledge, and Tools from
+    that telemetry — pure SQL over plaintext metadata — and surfaces a digest through
+    the scheduled-updates feed ONLY when something needs attention; silence is normal.
+  - **A careful improvement loop**: when a window is flagged, a LOCAL model (never a
+    cloud one — your chats don't leave the machine, and only messages YOU wrote are
+    used as evidence) may propose one durable preference. High-confidence findings are
+    applied as a visible "(learned) …" memory fact, put on trial, measured against the
+    dissatisfaction rate they were applied under, auto-reverted if things get worse
+    (or if no evidence accumulates), and every applied/reverted change is announced in
+    the digest. One change at a time, at most 10 learned facts, hand-deleting a fact
+    in Settings → Memory permanently rejects it, and a reverted preference is never
+    re-applied. Kill-switch and privacy gates fail closed.
+
+### Added
 - "Delete all…" now lives on the Chat page itself (next to the saved-chats picker, on
   desktop and phone) — behind a confirmation, and everything still lands in the Trash
   with 30 days to restore. The Trash itself stays in Settings → Account & Data.
