@@ -695,6 +695,7 @@ def tick(app) -> int:
                 cursor, key,
                 notify=lambda status, msg: ScheduleStore(cursor, key).record_selfreview_run(status, msg),
                 locked_check=lambda: getattr(app.state, "master_key", None) is None,
+                session=session,  # lets a workflow suggestion park a real Activity tile
             )
         except Exception as exc:  # must never stop a tick
             log.debug("self-review skipped: %s", exc)

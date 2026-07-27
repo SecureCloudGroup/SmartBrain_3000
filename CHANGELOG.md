@@ -11,6 +11,19 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Added
+- **The self-review now makes suggestions, not just fixes.** Two new detectors — both
+  pure pattern-matching over your own messages, no model involved, and neither ever
+  acts on its own:
+  - **Routine spotting**: an ask you've typed 3+ times on a daily or weekly rhythm
+    ("summarize my open tasks…") becomes a ready-made schedule **waiting for your
+    approval in Activity** — approve it and it's created; ignore or decline it and it
+    is never offered again.
+  - **Knowledge gaps**: when several searches come back empty, the digest names the
+    topics your knowledge base couldn't answer so you know what's worth adding.
+  Both appear under a "Suggested:" section of the self-review digest and in the
+  improvement ledger.
+
 ### Security
 - **The gateway no longer keeps a plaintext copy of your prompts.** Bifrost (the
   built-in model gateway) ships with request logging on by default, which had been
