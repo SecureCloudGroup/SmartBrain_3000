@@ -11,6 +11,14 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Changed
+- Self-improvement's learning is now repeatable: the critique call pins a low
+  sampling temperature (identical evidence used to yield nothing on one run and a
+  high-confidence finding on the next), and the critique now sees how the
+  unsatisfying requests classify — plus clearer rules on when a pattern is a
+  global preference versus a per-request-type strategy. Verified live: two
+  identical probe runs now produce the identical finding.
+
 ### Added
 - **Settings → Self-improvement**: the framework's home in the app — switches for the
   self-review and the prompt optimizer, the full record of every improvement it has

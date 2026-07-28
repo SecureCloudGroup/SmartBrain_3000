@@ -482,20 +482,29 @@ def chat(
     *,
     client: httpx.Client | None = None,
     timeout: float = 60.0,
+    temperature: float | None = None,
 ) -> dict:
     """Send a chat completion through Bifrost; return the parsed JSON response.
+
+    ``temperature`` is opt-in: when None (every existing caller), the payload stays
+    byte-identical to before — user-facing chat keeps the model server's default.
+    The self-review critique pins a LOW temperature so what the framework learns is
+    repeatable rather than a sampling accident (same evidence produced [] on one run
+    and a 0.95-confidence finding on another during live E2E).
 
     Raises ``GatewayError`` (with the upstream status + provider message) when
     the gateway/provider reports an error, instead of leaking httpx internals.
     """
     assert messages, "messages must be non-empty"
     assert model, "model must be specified"
+    payload: dict = {"model": model, "messages": messages}
+    if temperature is not None:
+        assert 0.0 <= temperature <= 2.0, "temperature out of range"
+        payload["temperature"] = float(temperature)
     client, owns_client = _resolve_client(client, timeout)
     try:
         with _serialized(model):  # serialize local-provider calls (no-op for cloud)
-            resp = client.post(
-                "/v1/chat/completions", json={"model": model, "messages": messages}, timeout=timeout
-            )
+            resp = client.post("/v1/chat/completions", json=payload, timeout=timeout)
         try:
             data = resp.json()
         except ValueError:

@@ -504,6 +504,7 @@ def test_critique_end_to_end_with_local_model(monkeypatch) -> None:
     seen: dict = {}
     def fake_chat(messages, model, **kw):
         seen["model"], seen["prompt"] = model, messages[-1]["content"]
+        seen["temperature"] = kw.get("temperature")
         return {"choices": [{"message": {"content": json.dumps([_FINDING])}}]}
     monkeypatch.setattr(gateway, "chat", fake_chat)
     scorecard, flags = selfreview.build_scorecard(conn, key, *selfreview._window(conn))
@@ -513,6 +514,8 @@ def test_critique_end_to_end_with_local_model(monkeypatch) -> None:
     assert seen["model"] == "ollama/qwen2.5:7b-instruct"
     assert "please keep answers short" in seen["prompt"]  # the user's ask is evidence
     assert "SECRET-ASSISTANT-TEXT" not in seen["prompt"]  # assistant/tool text is NOT
+    assert seen["temperature"] == selfreview._CRITIQUE_TEMPERATURE  # repeatable learning
+    assert "classify as:" in seen["prompt"]  # ask-type distribution rides the evidence
 
 
 def test_evidence_excludes_trashed_conversations_and_tool_errors() -> None:
