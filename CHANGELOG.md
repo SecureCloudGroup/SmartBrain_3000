@@ -12,6 +12,15 @@ to know when a release changes behavior.
 ## [Unreleased]
 
 ### Changed
+- Groundwork for running SmartBrain WITHOUT Docker (no user-visible change today —
+  inside the container everything behaves byte-for-byte as before): the app now
+  detects where it's running, and natively defaults to loopback URLs for the
+  gateway and local model servers, a per-OS user-data directory for the database,
+  and a file-based version stamp. A new CI job boots the app natively on macOS,
+  Windows, and Linux — using the exact standalone-Python runtime a future
+  Docker-free install would ship — and walks the full first-run flow on each.
+
+### Changed
 - Self-improvement's learning is now repeatable: the critique call pins a low
   sampling temperature (identical evidence used to yield nothing on one run and a
   high-confidence finding on the next), and the critique now sees how the
