@@ -41,7 +41,14 @@ control. Here's the model in plain terms, including the real world limits.
   **Check for updates** or scheduled auto-update on it — fetches the vault from the host
   in that URL (public internet hosts only, never localhost or LAN addresses). Recurring
   checks happen only if you turned auto-update on.
-- **Nothing else.** Beyond the above, the app makes no outbound calls.
+- **Web search & fetch (only when the assistant uses those tools).** A web search goes
+  to the engine you chose — **DuckDuckGo by default**, or your own Brave/Tavily key or
+  self-hosted SearXNG (Settings → Web search) — and a web fetch goes to that page's
+  host. Dangerous fetches are approval-gated and SSRF-guarded; nothing is searched or
+  fetched outside a turn that calls for it.
+- **Nothing else.** Beyond the above, the app makes no outbound calls. Self-improvement
+  (if you enable it) is fully local by design: its reviews and learning run on your
+  machine against a local model only — it never sends your activity anywhere.
 
 ## Honest limits
 

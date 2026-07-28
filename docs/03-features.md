@@ -13,7 +13,9 @@ search your knowledge, **read or summarize a whole document**, **save a note bac
 your knowledge**, add a task, fetch a public web page, send an email, and more. Replies
 are formatted (headings, lists, tables, and code blocks render properly). You can
 **Stop** an answer mid-stream, **Copy** any reply, **Regenerate** the latest one, and
-**Rename** a saved chat.
+**Rename** a saved chat. Deleting a chat — or using **Delete all…** next to the saved-chats
+picker — moves it to the **Trash**, where it can be restored for 30 days from
+Settings → Account & Data.
 
 Tools are **risk-tiered**, and this is the core safety idea:
 
@@ -33,9 +35,11 @@ Activity and approve (Irreversible, with an extra confirm).
 ## Knowledge
 
 A private, encrypted knowledge base. Drag in **PDFs, Word (.docx), PowerPoint (.pptx),
-Excel (.xlsx), HTML and text files** — many files in one drop if you like — paste a URL,
-or write a note. Uploads don't block: they land right away and a background indexer makes
-them searchable within seconds. Adding the same content twice is a no-op — SmartBrain
+Excel (.xlsx), HTML, Markdown, CSV/JSON and other text files** — many files in one drop if
+you like — paste a URL, or write a note. **Big documents are welcome**: a
+several-hundred-page PDF is fine. Uploads don't block: they land right away, keyword search
+works within seconds, and meaning-search for a very large document fills in over the next
+few minutes in the background (it resumes by itself after a restart). Adding the same content twice is a no-op — SmartBrain
 recognises it and keeps the one copy rather than cluttering your results with duplicates.
 
 Search your knowledge three ways:
@@ -56,6 +60,10 @@ click one to open the document at the cited passage. The chips come from what th
 assistant actually searched and read, not from what it *says* it did, so you can
 check any claim against the original.
 
+**Organize with tags.** Every document (and vault) has an inline tag editor — click the
+tags line on a row to add or change them, and click any tag chip to filter the list to it.
+Editing tags is instant and never re-indexes the document.
+
 **Try it:** open **Knowledge**, drag in a document, and search it. Then ask **Chat**
 *"what does my knowledge say about …"* — the assistant searches it for you and tells you
 which file and page it got the answer from.
@@ -64,9 +72,9 @@ which file and page it got the answer from.
 
 ![Drop in a file, search it, open the cited passage, then ask Chat — answers cite their sources](assets/gifs/04-add-knowledge.gif)
 
-> Semantic search needs the embedding model pulled (the installer does this for you).
-> If results say *"degraded"*, run `ollama pull nomic-embed-text:v1.5` on the Desktop
-> and Reindex — see [Embeddings](02-models.md#embeddings-for-knowledge-search).
+> Semantic search needs an embedding model set up for your backend (the installer does
+> this for you on the Ollama path). If results say *"degraded"*, set one up — see
+> [Embeddings](02-models.md#embeddings-for-knowledge-search) — then **Reindex**.
 
 Your knowledge is also what external tools can read over [MCP](05-mcp.md).
 Group documents into **vaults** to scope a search — and to share them, privately
@@ -93,6 +101,10 @@ schedule fires an assistant turn on its cadence. Two things to know:
 
 Use **Run now** to fire one immediately.
 
+A run's output lands in four places: it appears **in your open Chat** (as a
+"Scheduled Item" notice), in the schedule's **Output** tab, as a durable copy on the
+**Info** page, and the Chat tab shows a badge while results are unseen.
+
 ## Email (Gmail)
 
 Connect a Gmail account with **your own** Google OAuth client. The whole flow is
@@ -116,6 +128,47 @@ Once connected you can read recent mail and compose/send:
 - **You** sending from the app is a direct action.
 - The **assistant** sending email is an **Irreversible** tool — it always parks
   for your approval first. It can draft; you approve the send.
+
+## Memory
+
+**Settings → Memory** holds who the assistant is for: your name, its name, standing
+custom instructions, and a list of remembered facts. Everything there is encrypted and
+injected into every conversation, so it's the place to look when you wonder "why does it
+keep doing that?" — including any *"(learned) …"* facts self-improvement added (delete
+one to permanently reject it).
+
+## Web search
+
+The assistant's web tools search with **DuckDuckGo by default — no key needed**. Under
+**Settings → Web search** you can switch engines: bring your own **Brave Search** or
+**Tavily** key, or point at a self-hosted **SearXNG**. Searches only happen when the
+assistant actually uses the web tools in a turn; see
+[Privacy & security](07-privacy-security.md) for exactly what leaves your machine.
+
+## Self-improvement
+
+SmartBrain can review its own recent performance and carefully improve — **off by
+default**, and switched on under **Settings → Self-improvement**. Every 8 hours (while
+unlocked) it scores Chat, Knowledge, and Tools from private, on-device telemetry. Quiet
+periods stay silent; when something needs attention you get a short digest in the chat
+feed. From a flagged period it may act — always within hard bounds:
+
+- **Learned preferences** — a local model (never a cloud one, and only from messages
+  *you* wrote) may learn one durable preference, applied as a visible *"(learned) …"*
+  fact in Settings → Memory, measured against your satisfaction, and **auto-reverted if
+  it doesn't help**. Deleting the fact yourself permanently rejects it.
+- **Suggested routines** — an ask you repeat on a daily/weekly rhythm becomes a
+  ready-made schedule **waiting for your approval in Activity**; decline it once and it
+  is never offered again.
+- **Knowledge gaps** — searches your knowledge couldn't answer get named in the digest.
+- **Prompt optimizer** (its own switch) — learns how kinds of requests go and may steer
+  them with a short guidance note; a strategy watches in *shadow* first, goes live only
+  after a measured trial, is turned off automatically if it doesn't help, and guided
+  answers always show a small **"guided · …"** chip.
+
+One change is ever on trial at a time, everything is reversible, every applied or
+reverted change is announced, and **Settings → Self-improvement** shows the complete
+record of what it has done.
 
 ## Usage & cost
 

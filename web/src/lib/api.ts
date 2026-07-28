@@ -136,6 +136,28 @@ export interface AgentResult {
   guidance?: { request_type: string; directive: string }; // optimizer steering that shaped this answer
 }
 
+export interface Improvement {
+  id: string;
+  created_at: string;
+  category: string; // preference | workflow | knowledge | prompt
+  component: string;
+  lever_type: string;
+  status: string; // proposed | active | reverted | rejected | superseded
+  confidence: number;
+  description: string;
+  applied_at: string | null;
+  reverted_at: string | null;
+}
+
+export interface OptimizerStrategy {
+  id: string;
+  request_type: string;
+  status: string; // shadow | active | disabled
+  fired: number;
+  directive: string;
+  created_at: string;
+}
+
 export interface Memory {
   id: string;
   text: string;
@@ -569,6 +591,16 @@ export const api = {
     req<{ engine: string; searxng_url: string; configured: string[]; engines: string[] }>("/api/websearch"),
   putWebSearch: (body: { engine: string; searxng_url: string }) =>
     req<{ ok: boolean }>("/api/websearch", { method: "PUT", body: JSON.stringify(body) }),
+
+  // self-improvement (the reviewer + prompt optimizer; all switches fail closed server-side)
+  getSelfImprove: () => req<{ enabled: boolean; last_run: string | null }>("/api/selfimprove"),
+  putSelfImprove: (enabled: boolean) =>
+    req<{ enabled: boolean }>("/api/selfimprove", { method: "PUT", body: JSON.stringify({ enabled }) }),
+  getOptimizer: () =>
+    req<{ enabled: boolean; strategies: OptimizerStrategy[] }>("/api/selfimprove/optimizer"),
+  putOptimizer: (enabled: boolean) =>
+    req<{ enabled: boolean }>("/api/selfimprove/optimizer", { method: "PUT", body: JSON.stringify({ enabled }) }),
+  listImprovements: () => req<{ improvements: Improvement[] }>("/api/selfimprove/improvements"),
 
   // chat history (encrypted conversations + messages; keyset pagination via before/limit)
   listConversations: (opts: { before?: string; limit?: number } = {}) => {
