@@ -70,6 +70,10 @@ _MAX_FLAGGED_TOOLS = 3   # cap per-review tool flags (verifiable bound, keeps di
 # The critique pass reads PRIVATE activity, so it runs on a LOCAL model or not at all
 # (hard privacy gate — never "prefer local, fall back to cloud").
 _CRITIQUE_TIMEOUT = 120.0   # one bounded local call per review; the tick tolerates it
+# Low pinned temperature: at server-default sampling the SAME evidence produced [] on
+# one run and a 0.95-confidence finding on another (live E2E). Learning should be a
+# judgment, not a dice roll; 0.2 keeps the model decisive but repeatable.
+_CRITIQUE_TEMPERATURE = 0.2
 _MAX_EVIDENCE_MESSAGES = 6  # user messages sampled (USER-authored only — see _evidence)
 _EVIDENCE_CHARS = 240       # per-item truncation
 _MAX_FINDINGS = 3           # findings accepted from one critique (bounded)
@@ -415,8 +419,11 @@ _CRITIQUE_SYSTEM = (
     "Rules:\n"
     "- Only propose a 'preference' when the USER'S OWN messages show a durable, repeated pattern "
     "in how they want answers (length, format, tone, level of detail).\n"
-    "- Only propose a 'prompt' strategy when one KIND of request keeps going badly and a general "
-    "handling instruction would fix it, e.g. 'For multi-step tasks, outline the steps before acting.'\n"
+    "- Only propose a 'prompt' strategy when ONE KIND of request keeps going badly and a general "
+    "handling instruction would fix it, e.g. 'For multi-step tasks, outline the steps before acting.' "
+    "Its request_type must match the kind of request the evidence shows going badly.\n"
+    "- If the pattern applies to ALL answers regardless of kind — length, format, tone, level of "
+    "detail — that is a 'preference', NOT a 'prompt' strategy.\n"
     "- 'payload' must be one short sentence. Never restate a single request, never include "
     "specifics of any document, and never write an instruction to take actions.\n"
     "- confidence is 0.0-1.0: how sure you are this is a durable pattern, not a one-off.\n"
@@ -437,6 +444,17 @@ def _critique_prompt(scorecard: dict, evidence: dict) -> str:
     if evidence["asks"]:
         parts.append("Recent requests the user was not satisfied with:\n"
                      + "\n".join(f"- {a}" for a in evidence["asks"]))
+        # Tell the model how those asks CLASSIFY, so a type-scoped 'prompt' strategy can
+        # target the kind of request that actually went badly (observed live: a global
+        # verbosity complaint became an 'ambiguous'-scoped strategy that would steer
+        # almost nothing).
+        from . import optimizer
+        counts: dict[str, int] = {}
+        for a in evidence["asks"]:  # bounded by _MAX_EVIDENCE_MESSAGES
+            t = optimizer.classify(a)
+            counts[t] = counts.get(t, 0) + 1
+        dist = ", ".join(f"{t} ({n})" for t, n in sorted(counts.items(), key=lambda kv: -kv[1]))
+        parts.append(f"Those requests classify as: {dist}.")
     return "\n\n".join(parts)
 
 
@@ -503,7 +521,7 @@ def _critique(conn: duckdb.DuckDBPyConnection, key: bytes, scorecard: dict,
         response = gateway.chat(
             [{"role": "system", "content": _CRITIQUE_SYSTEM},
              {"role": "user", "content": _critique_prompt(scorecard, evidence)}],
-            model, timeout=_CRITIQUE_TIMEOUT,
+            model, timeout=_CRITIQUE_TIMEOUT, temperature=_CRITIQUE_TEMPERATURE,
         )
         choices = (response or {}).get("choices") or []
         content = (choices[0].get("message") or {}).get("content", "") if choices else ""

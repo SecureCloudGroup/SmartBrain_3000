@@ -219,3 +219,17 @@ def test_unlock_enforces_privacy_and_survives_gateway_outage(app_client, monkeyp
     app_client.post("/api/account/lock")
     resp = app_client.post("/api/account/unlock", json={"passphrase": "correct-horse"})
     assert resp.status_code == 200  # unlock still works
+
+
+def test_chat_temperature_is_opt_in() -> None:
+    # Every existing caller sends None -> the payload must stay byte-identical (no
+    # temperature key at all); the critique's pinned value must pass through.
+    bodies: list = []
+    def handler(req: httpx.Request) -> httpx.Response:
+        bodies.append(json.loads(req.content))
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+    with httpx.Client(base_url="http://bifrost:8080", transport=httpx.MockTransport(handler)) as client:
+        gateway.chat([{"role": "user", "content": "x"}], "mlx/m", client=client)
+        gateway.chat([{"role": "user", "content": "x"}], "mlx/m", client=client, temperature=0.2)
+    assert "temperature" not in bodies[0]  # default: unchanged payload
+    assert bodies[1]["temperature"] == 0.2
