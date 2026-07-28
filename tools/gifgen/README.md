@@ -1,6 +1,6 @@
 # gifgen — quickstart GIF recorder
 
-Regenerates the ten animated quickstart clips in `docs/assets/gifs/` (also copied to
+Regenerates the eleven animated quickstart clips in `docs/assets/gifs/` (also copied to
 `web/static/assets/gifs/` → built into `app/smartbrain_3000/web/assets/gifs/`). The clips are
 **build artifacts**: recorded from the real app driving a throwaway demo container against a tiny
 **mock OpenAI gateway**, so chat / tool-calls / model lists are deterministic and 100% synthetic —
@@ -25,7 +25,7 @@ cd .. && docker build -t smartbrain_3000:dev -f ../Dockerfile ..   # the app ima
 
 ```sh
 ./run.sh 03        # record + encode clip 03 -> out/03-first-chat.gif
-./run.sh all       # all ten
+./run.sh all       # all eleven
 # cleanup:
 docker rm -f sb_gifdemo ; pkill -f mock_gateway.py
 ```
@@ -41,7 +41,7 @@ ffmpeg + gifsicle. Copy `out/*.gif` into `docs/assets/gifs/` + `web/static/asset
   pill, click ripple, focus ring, and full-screen title/terminal cards (captured in the video).
 - `mock_gateway.py` — stdlib mock OpenAI gateway (`/v1/models`, streaming + non-stream
   `/v1/chat/completions` with tool-calls, `/v1/embeddings`, Bifrost admin, Ollama `/api/tags`, `/reset`).
-- `clips.js` — the ten storyboards (`node clips.js 01`…`10`).
+- `clips.js` — the eleven storyboards (`node clips.js 01`…`10`).
 - `run.sh` — per-clip demo state + record + encode.
 
 ## Conventions (see the planning spec in git history of c7c2112)

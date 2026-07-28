@@ -141,15 +141,33 @@ Most first-run problems are one of these:
   model server (MLX or Ollama) is running, the Chat screen offers a one-tap **Connect**;
   otherwise add a cloud key under **Settings → Cloud providers**. See
   [Connect a model](02-models.md).
-- **Semantic search returns keyword results ("degraded").** The embedding model isn't
-  pulled. On the Desktop run `ollama pull nomic-embed-text:v1.5` (the installer and
-  `doctor` try to do this for you), then **Reindex** in Knowledge.
+- **Semantic search returns keyword results ("degraded").** No embedding model is set
+  up for your backend (on the Ollama path the installer and `doctor` try to do this for
+  you). See [Embeddings](02-models.md#embeddings-for-knowledge-search) for your setup,
+  then **Reindex** in Knowledge.
 - **The browser warns about the certificate** (only if you set up LAN/HTTPS). Trust
   the local mkcert CA — see [Remote access](08-remote-access.md).
 - **"Database is newer than this app" / a restore is refused.** Pointing an older build
   at a newer data directory, or restoring a backup from a newer version, is refused on
   purpose to prevent data loss. Upgrade SmartBrain_3000 first (`install.py update`), then
   reopen or retry the restore.
+
+## Uninstall
+
+Removing SmartBrain is two steps, in either order:
+
+1. **The app + launcher** — however you installed it: `brew uninstall --cask smartbrain`
+   (macOS) or `scoop uninstall smartbrain` (Windows); from source, `docker compose down`
+   in `compose/`.
+2. **Your data** — deliberately left behind by step 1 so an uninstall can never destroy
+   it. When you're sure (consider **Download encrypted backup** first — see
+   [Backup & recovery](06-backup-recovery.md)):
+
+   ```sh
+   docker volume rm smartbrain_smartbrain_data smartbrain_bifrost_data
+   ```
+
+   (From source, data lives in the repo's `data/` directory instead — delete that.)
 
 ## Next
 

@@ -31,15 +31,18 @@ the **host** (not inside the container), and the app reaches them at `host.docke
 SmartBrain supports two backends and connects to either the same way:
 
 - **MLX** — Apple's on-device runtime for **Apple-Silicon Macs** (M-series). It's the fastest
-  path on a Mac, so it's the one to reach for first there. Install `mlx-lm`
-  (`pip install mlx-lm`) and start a server for a model:
+  path on a Mac, so it's the one to reach for first there. The easiest way to run it is an
+  MLX **server app** (for example oMLX): download it, pick a model, and it serves on port
+  `8888` — SmartBrain's one-tap Connect finds it from there. No Python, no terminal.
+
+  Prefer the command line? `mlx-lm` works too (`pip install mlx-lm`, then):
 
   ```sh
-  mlx_lm.server --host 0.0.0.0 --port 8888 --model mlx-community/Qwen2.5-7B-Instruct-4bit
+  mlx_lm.server --port 8888 --model mlx-community/Qwen2.5-7B-Instruct-4bit
   ```
 
-- **Ollama** — works on **any OS** (macOS, Linux, Windows). [Install it](https://ollama.com/download),
-  then pull a model:
+- **Ollama** — works on **any OS**, and is **the** local-model path on Windows and Linux
+  (MLX is Apple-Silicon-only). [Install it](https://ollama.com/download), then pull a model:
 
   ```sh
   ollama pull qwen2.5:7b-instruct
@@ -66,12 +69,18 @@ Semantic search in the [Knowledge base](03-features.md) needs an **embedding
 model**. The default is a **local** `nomic-embed-text:v1.5`, served through Ollama, so
 your knowledge content stays on-box.
 
-**MLX-only stack (no Ollama):** chat servers like oMLX serve encoder embedders only
-(BGE-class) and refuse decoder embedding models such as Qwen3-Embedding. For those, run
-the bundled **MLX embeddings server** (`tools/mlx_embed_server/install.sh` — a tiny
-login service on port 8899 serving `Qwen3-Embedding-0.6B` with correct pooling), connect
-it under Settings → Local models → **MLX embeddings**, then route Settings → Model
-routing → Embedding → `mlxe/qwen3-embedding-0.6b` and **Reindex**.
+**MLX-only stack (no Ollama):** the simplest path is to serve an **encoder embedding
+model directly on your MLX chat server** — no second server needed. MLX server apps like
+oMLX serve encoder-class embedders (ModernBERT/BERT family; a good pick is
+`nomic-ai/modernbert-embed-base`): load it alongside your chat model, then route
+Settings → Model routing → **Embedding** → `mlx/<that model>` and **Reindex**. Done —
+one server runs everything.
+
+They refuse *decoder* embedding models such as Qwen3-Embedding ("not an embedding
+model"). Only if you specifically want one of those, use the bundled fallback: the
+**MLX embeddings server** (`tools/mlx_embed_server/install.sh` — a tiny login service on
+port 8899 serving `Qwen3-Embedding-0.6B` with correct pooling), connected under
+Settings → Local models → **MLX embeddings** and routed to `mlxe/qwen3-embedding-0.6b`.
 
 **The installer pulls this for you** when Ollama is present (and
 `python3 installer/install.py doctor` offers to). If you ever need to do it by hand,

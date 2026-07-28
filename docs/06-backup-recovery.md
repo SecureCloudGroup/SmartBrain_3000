@@ -36,6 +36,12 @@ so a restore is reversible.
 - A backup from a **newer version** of SmartBrain_3000 is **refused on purpose**
   (it would risk data loss under older code): upgrade this app first, then restore.
 
+## Chat Trash
+
+Deleted chats (one at a time, or Chat's **Delete all…**) land here for **30 days** —
+restore any of them, or **Empty trash now** to purge them immediately. After 30 days
+they're removed for good automatically.
+
 ## Change your passphrase
 
 **Change passphrase** re-wraps your master key under a new passphrase after

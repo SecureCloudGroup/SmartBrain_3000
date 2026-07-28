@@ -28,11 +28,16 @@ on your own computer — macOS, Linux, or Windows.
   gateway routes between them.
 - **Your data, encrypted on-device.** Your knowledge base, notes, plans, and
   secrets live in a local database, encrypted at rest under a passphrase only
-  you hold.
+  you hold. Real documents are welcome — a several-hundred-page PDF is fine.
 - **Chat with tools, under your control.** The assistant can search your
   knowledge, track tasks, and act on your behalf — but anything that changes
   data or reaches out parks for your approval first, and every attempt is
   audited.
+- **It quietly improves itself — within hard bounds.** Opt in and SmartBrain reviews
+  its own performance every 8 hours (locally, reversibly, one change at a time),
+  learns your preferences, suggests routines worth automating, and tells you about
+  every change it makes. See the docs on
+  [Self-improvement](docs/03-features.md#self-improvement).
 - **Group and share knowledge with Vaults.** Bundle documents into a **vault** to
   scope a search, share it as an encrypted file, or **publish it publicly** so others
   can **subscribe by URL** and stay up to date — signed, verified, and re-encrypted
@@ -128,6 +133,9 @@ SmartBrain_3000 is licensed under the **Elastic License 2.0 (ELv2)**. It is
   it, or ship a competing product built from it.
 
 See [LICENSE](LICENSE) for the full terms.
+
+More: **[Changelog](CHANGELOG.md)** · **[Contributing](CONTRIBUTING.md)** ·
+**[Security policy](SECURITY.md)**
 
 © 2026 The Frels Holdings LLC. "SmartBrain", "SmartBrain_3000", and
 "SmartBrain AI" are trademarks of The Frels Holdings LLC.

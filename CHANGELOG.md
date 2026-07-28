@@ -11,6 +11,22 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Added
+- **Settings → Self-improvement**: the framework's home in the app — switches for the
+  self-review and the prompt optimizer, the full record of every improvement it has
+  proposed, applied, kept, or reverted, and each learned strategy with its status.
+  No more API-only toggles.
+
+### Changed
+- **Docs truth pass** across the user guide: the MLX-only embeddings path now documents
+  the simple settled setup (an encoder model served directly on your MLX server) with the
+  bundled Qwen3 shim as the fallback; MLX chat setup leads with a server app instead of
+  `pip install`; the privacy page's "what leaves your machine" now includes web
+  search/fetch; document **tags**, the chat **Trash**, **big-document** behavior,
+  where scheduled output lands, the Web-search and Memory settings, and the whole
+  self-improvement framework; plus an **Uninstall** section, README links to the
+  changelog/contributing/security policy, and assorted small fixes.
+
 ## [0.8.0] - 2026-07-28
 
 ### Added
