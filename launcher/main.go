@@ -11,12 +11,14 @@ import (
 	"context"
 	_ "embed"
 	"log"
+	"os"
 	"runtime"
 	"sync"
 	"time"
 
 	"fyne.io/systray"
 
+	"github.com/SecureCloudGroup/SmartBrain_3000/launcher/native"
 	"github.com/SecureCloudGroup/SmartBrain_3000/launcher/stack"
 )
 
@@ -198,6 +200,14 @@ func start() {
 	defer mu.Unlock()
 	ctx := context.Background()
 
+	// Docker-exit Phase 1, behind an explicit opt-in: SMARTBRAIN_NATIVE=1 (plus
+	// SMARTBRAIN_NATIVE_VERSION to pick the release) runs the assembled native stack
+	// instead of Docker. Deliberately env-only and menu-invisible while it matures.
+	if nativeMode() {
+		startNative(ctx)
+		return
+	}
+
 	if !stack.DockerRunning(ctx) {
 		if !stack.DockerInstalled() {
 			// Don't dead-end a newcomer on a grey status line: take them to the fix. Open the
@@ -269,6 +279,39 @@ func openOrStart() {
 	start()
 }
 
+func nativeMode() bool { return os.Getenv("SMARTBRAIN_NATIVE") == "1" }
+
+func startNative(ctx context.Context) {
+	nv := native.New(sb.Dir)
+	version := os.Getenv("SMARTBRAIN_NATIVE_VERSION")
+	if version == "" {
+		version = nv.Current() // already assembled once — keep running what we have
+	}
+	if version == "" {
+		setStatus("Native mode needs SMARTBRAIN_NATIVE_VERSION for its first run")
+		return
+	}
+	setStatus("Assembling native install…")
+	// Bounded like the Docker pull path: downloads are ~400 MB on a first assembly.
+	asmCtx, cancel := context.WithTimeout(ctx, 15*time.Minute)
+	defer cancel()
+	if err := nv.Assemble(asmCtx, version); err != nil {
+		setStatus("Native assembly failed — see the log")
+		log.Println("native assemble:", err)
+		return
+	}
+	setStatus("Starting (native)…")
+	if err := nv.Up(ctx); err != nil {
+		setStatus("Native start failed — see the log")
+		log.Println("native up:", err)
+		return
+	}
+	setStatus("Running ● (native)")
+	if err := stack.OpenBrowser(sb.URL()); err != nil {
+		log.Println("open browser:", err)
+	}
+}
+
 func stop() {
 	if !mu.TryLock() {
 		return // an operation is in flight — see start()
@@ -278,6 +321,11 @@ func stop() {
 	// Bounded like Up: never hold the lock forever on a wedged daemon.
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
+	if nativeMode() {
+		native.New(sb.Dir).Down()
+		setStatus("Stopped")
+		return
+	}
 	if err := sb.Down(ctx); err != nil {
 		setStatus("Couldn't stop")
 		log.Println("down:", err)

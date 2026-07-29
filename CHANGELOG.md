@@ -12,6 +12,15 @@ to know when a release changes behavior.
 ## [Unreleased]
 
 ### Changed
+- The launcher can now run SmartBrain **without Docker** behind a hidden opt-in
+  (`SMARTBRAIN_NATIVE=1` — deliberately not in the menu yet while it matures): it
+  assembles an install from the pinned standalone-Python runtime, the release's
+  wheelhouse, and the mirrored gateway binary — every download sha256-verified,
+  installed offline into a versioned directory whose `current` pointer only flips
+  on success, so a failed upgrade leaves the previous version running (a rollback
+  the Docker path never had). Docker remains the default and is untouched.
+
+### Changed
 - Groundwork for running SmartBrain WITHOUT Docker (no user-visible change today —
   inside the container everything behaves byte-for-byte as before): the app now
   detects where it's running, and natively defaults to loopback URLs for the
