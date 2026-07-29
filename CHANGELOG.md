@@ -24,6 +24,13 @@ to know when a release changes behavior.
   restart a stack the user had just stopped). A stale `SMARTBRAIN_NATIVE_VERSION`
   pin can bootstrap a first install or force an upgrade, but can never downgrade an
   auto-updated one.
+- **Native mode now sticks.** It was env-only, so a reboot or plain relaunch of the
+  desktop app silently fell back to Docker — observed live as a compose attempt
+  colliding with the surviving native stack's ports and blaming the internet. A
+  successful native start now writes a persistent marker: every later launch boots
+  native with no env needed, and a relaunched launcher **adopts** a healthy running
+  stack instead of spawning a second one into the same ports. `SMARTBRAIN_NATIVE=0`
+  forces Docker for one run; deleting the marker rolls back for good.
 
 ## [0.8.5] - 2026-07-29
 

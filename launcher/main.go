@@ -12,6 +12,7 @@ import (
 	_ "embed"
 	"log"
 	"os"
+	"path/filepath"
 	"runtime"
 	"sync"
 	"time"
@@ -391,7 +392,42 @@ func openOrStart() {
 	start()
 }
 
-func nativeMode() bool { return os.Getenv("SMARTBRAIN_NATIVE") == "1" }
+// nativeMode reports whether this machine runs the native (Docker-free) stack.
+// The choice PERSISTS: a successful native start writes a marker in the app-data
+// dir, so reboots, Finder relaunches, and self-update handovers — none of which
+// carry the opt-in env — keep booting native. (Observed live: a plain relaunch
+// fell back to Docker, whose compose up then failed against the surviving native
+// stack's ports and blamed the internet.) Env still expresses the explicit acts:
+// "1" opts in, "0" forces Docker for this run; deleting the marker rolls back
+// for good.
+func nativeMode() bool {
+	return resolveNativeMode(os.Getenv("SMARTBRAIN_NATIVE"), nativeMarkerExists())
+}
+
+func resolveNativeMode(env string, marker bool) bool {
+	switch env {
+	case "1":
+		return true
+	case "0":
+		return false
+	}
+	return marker
+}
+
+func nativeMarkerPath() string { return filepath.Join(sb.Dir, "native-mode") }
+
+func nativeMarkerExists() bool {
+	_, err := os.Stat(nativeMarkerPath())
+	return err == nil
+}
+
+// persistNativeMode records the mode choice; failure only means a plain relaunch
+// would fall back to Docker once more, so log-and-continue is enough.
+func persistNativeMode() {
+	if err := os.WriteFile(nativeMarkerPath(), []byte("1\n"), 0o600); err != nil {
+		log.Println("native marker:", err)
+	}
+}
 
 // nativeBootVersion picks what to boot: the assembled `current` normally; the env pin
 // only when it bootstraps a first assembly or names a STRICTLY NEWER release (a
@@ -408,6 +444,16 @@ func nativeBootVersion(current, pinned string) string {
 
 func startNative(ctx context.Context) {
 	nv := native.New(sb.Dir)
+	if nv.Healthy(ctx) {
+		// The stack outlives the launcher by design (detached processes). A fresh
+		// launcher ADOPTS a healthy running stack instead of spawning a second one
+		// into the same ports — a collision that would "pass" health checks against
+		// the survivor while poisoning the pid files with its own dead spawns.
+		persistNativeMode()
+		setStatus("Running ● (native)")
+		startWatch(nv)
+		return
+	}
 	version := nativeBootVersion(nv.Current(), os.Getenv("SMARTBRAIN_NATIVE_VERSION"))
 	if version == "" {
 		setStatus("Native mode needs SMARTBRAIN_NATIVE_VERSION for its first run")
@@ -459,6 +505,7 @@ func startNative(ctx context.Context) {
 		}
 		return
 	}
+	persistNativeMode() // the stack runs natively — plain relaunches must too
 	setStatus("Running ● (native)")
 	if err := stack.OpenBrowser(sb.URL()); err != nil {
 		log.Println("open browser:", err)
