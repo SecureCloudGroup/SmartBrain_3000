@@ -58,8 +58,11 @@ jobs:
         run: |
           set -eux
           # One binary for both CPU families, so a single download runs on Intel and Apple Silicon.
-          GOARCH=arm64 CGO_ENABLED=1 go build -o build/sb-arm64 .
-          GOARCH=amd64 CGO_ENABLED=1 go build -o build/sb-amd64 .
+          # The baked version is what the self-updater compares against releases; dev builds
+          # bake "0.0.0-dev", which the updater treats as never-update (fail-closed).
+          LDFLAGS="-X main.launcherVersion=${VERSION#v}"
+          GOARCH=arm64 CGO_ENABLED=1 go build -ldflags "$LDFLAGS" -o build/sb-arm64 .
+          GOARCH=amd64 CGO_ENABLED=1 go build -ldflags "$LDFLAGS" -o build/sb-amd64 .
           lipo -create -output build/smartbrain build/sb-arm64 build/sb-amd64
 
           APP=build/SmartBrain.app
@@ -96,6 +99,8 @@ jobs:
           codesign --force --deep --sign - "$APP"
           codesign --verify --deep --strict "$APP"
           ditto -c -k --keepParent "$APP" build/SmartBrain-macos.zip
+          # The self-updater verifies this sidecar before any swap.
+          (cd build && shasum -a 256 SmartBrain-macos.zip > SmartBrain-macos.zip.sha256)
       - uses: actions/upload-artifact@v7
         with:
           name: SmartBrain-macos
@@ -106,7 +111,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "${{ github.ref_name }}" --generate-notes || true
-          gh release upload "${{ github.ref_name }}" launcher/build/SmartBrain-macos.zip --clobber
+          gh release upload "${{ github.ref_name }}" launcher/build/SmartBrain-macos.zip launcher/build/SmartBrain-macos.zip.sha256 --clobber
 
   windows:
     name: build (Windows exe)
@@ -120,10 +125,15 @@ jobs:
           go-version-file: launcher/go.mod
       - name: Build SmartBrain.exe
         working-directory: launcher
+        env:
+          VERSION: ${{ github.ref_type == 'tag' && github.ref_name || '0.0.0-dev' }}
         # systray on Windows is pure Go (no CGO), so this is a plain static build.
         run: |
-          go build -o build/SmartBrain.exe .
+          $ver = $env:VERSION -replace '^v',''
+          go build -ldflags "-X main.launcherVersion=$ver" -o build/SmartBrain.exe .
           Compress-Archive -Path build/SmartBrain.exe -DestinationPath build/SmartBrain-windows.zip -Force
+          $hash = (Get-FileHash build/SmartBrain-windows.zip -Algorithm SHA256).Hash.ToLower()
+          "$hash  SmartBrain-windows.zip" | Out-File -Encoding ascii build/SmartBrain-windows.zip.sha256
       - uses: actions/upload-artifact@v7
         with:
           name: SmartBrain-windows
@@ -135,7 +145,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "${{ github.ref_name }}" --generate-notes || true
-          gh release upload "${{ github.ref_name }}" launcher/build/SmartBrain-windows.zip --clobber
+          gh release upload "${{ github.ref_name }}" launcher/build/SmartBrain-windows.zip launcher/build/SmartBrain-windows.zip.sha256 --clobber
 
   packages:
     name: bump package managers (tags only)
