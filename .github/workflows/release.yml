@@ -12,9 +12,10 @@ on:
     tags: ["v*"]
   workflow_dispatch: # manual re-run from the Actions tab (e.g. to re-push :latest)
 
-# Least privilege: read the repo, write packages (the image). Nothing else.
+# Least privilege: read the repo, write packages (the image), write releases (the
+# native wheelhouse assets attach to the same tag's release the launcher zips use).
 permissions:
-  contents: read
+  contents: write
   packages: write
 
 concurrency:
@@ -73,3 +74,55 @@ jobs:
           # Cache layers in the registry so a re-tag of the same source is near-instant.
           cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache
           cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache,mode=max
+
+  # Docker-exit Phase 1: alongside the image, publish per-OS "wheelhouse" artifacts —
+  # every dependency wheel at the SAME requirements.lock the image installs, plus the
+  # app's own wheel and a version stamp. The native launcher assembles an install from
+  # exactly these (python-build-standalone runtime + this wheelhouse + the mirrored
+  # bifrost-http binary), fully offline once downloaded. Wheels are built on 3.12 to
+  # match the pinned pbs runtime ABI (cp312).
+  wheelhouse:
+    name: wheelhouse (${{ matrix.label }})
+    if: github.ref_type == 'tag' # artifacts attach to the tag's release; dispatch re-runs skip
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            label: linux-x64
+          - os: macos-latest
+            label: macos-arm64
+          - os: windows-latest
+            label: windows-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Build the wheelhouse at the pinned versions
+        shell: bash
+        run: |
+          set -eux
+          python -m pip install --upgrade pip
+          python -m pip wheel --wheel-dir wheelhouse -c app/requirements.lock ./app
+          echo "${GITHUB_REF_NAME#v}" > wheelhouse/VERSION
+          ls wheelhouse | wc -l
+      - name: Package + checksum
+        shell: bash
+        run: |
+          set -eux
+          NAME="smartbrain-wheelhouse-${GITHUB_REF_NAME#v}-${{ matrix.label }}"
+          mv wheelhouse "$NAME"
+          # zip is absent on windows runners' bash; python's zipfile is everywhere.
+          python -c "import shutil; shutil.make_archive('$NAME', 'zip', '.', '$NAME')"
+          python -c "import hashlib,sys; print(hashlib.sha256(open('$NAME.zip','rb').read()).hexdigest(), ' $NAME.zip')" > "$NAME.zip.sha256"
+          cat "$NAME.zip.sha256"
+      - name: Attach to the tag's release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eux
+          gh release create "${GITHUB_REF_NAME}" --generate-notes || true
+          gh release upload "${GITHUB_REF_NAME}" smartbrain-wheelhouse-*.zip smartbrain-wheelhouse-*.zip.sha256 --clobber
