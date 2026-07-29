@@ -421,8 +421,21 @@ export interface PairingResponse extends DeviceInfo {
   ice_servers: RTCIceServer[];
 }
 
+// The browser's IANA timezone, reported on health so the assistant can speak the
+// user's local time (the server otherwise only knows its own clock).
+function browserTimezone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone ?? "";
+  } catch {
+    return "";
+  }
+}
+
 export const api = {
-  health: () => req<{ status: string; version: string; launcher_update_needed?: boolean }>("/api/health"),
+  health: () =>
+    req<{ status: string; version: string; launcher_update_needed?: boolean }>("/api/health", {
+      headers: browserTimezone() ? { "x-smartbrain-timezone": browserTimezone() } : {},
+    }),
   accountStatus: () => req<AccountStatus>("/api/account/status"),
   setup: (passphrase: string) =>
     req<EmergencyKit>("/api/account/setup", { method: "POST", body: JSON.stringify({ passphrase }) }),

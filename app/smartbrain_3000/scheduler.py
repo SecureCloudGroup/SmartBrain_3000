@@ -376,7 +376,8 @@ def _grounded_messages(ctx, prompt: str) -> list[dict]:
         parts.append(profile)
     # Time rides the trailing note, same as chat — the head stays cache-stable.
     return [{"role": "system", "content": "\n\n".join(parts)},
-            {"role": "user", "content": prompt}, _time_line()]
+            {"role": "user", "content": prompt},
+            _time_line(getattr(ctx.kb, "conn", None))]
 
 
 def _record_run_safe(store: ScheduleStore, sid: str, status: str, message: str, error: str | None) -> None:

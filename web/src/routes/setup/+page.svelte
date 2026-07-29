@@ -109,7 +109,7 @@
 {:else}
   <div class="card">
     <h1>Set up SmartBrain</h1>
-    <p class="muted">Choose a passphrase. It encrypts everything on this device.</p>
+    <p class="muted">Choose a passphrase. It encrypts your SmartBrain data — chats, documents, and settings — so only you can read them.</p>
     <form onsubmit={submit}>
       <label for="pp">Passphrase</label>
       <input id="pp" type="password" bind:value={passphrase} bind:this={ppInput} autocomplete="new-password" />

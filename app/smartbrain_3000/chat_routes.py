@@ -9,11 +9,12 @@ from __future__ import annotations
 
 import time
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from . import gateway, optimizer, usage
+from . import db, gateway, optimizer, usage
 
 router = APIRouter()
 
@@ -74,13 +75,34 @@ def _with_memory(request: Request, messages: list[dict]) -> list[dict]:
     # The live time goes LAST: everything before it is byte-stable across turns, so the
     # local model's prefix cache covers the system prompt, memory, and the whole
     # conversation — only this one line (and the newest user message) re-prefills.
-    return [{"role": "system", "content": "\n\n".join(parts)}, *messages, _time_line()]
+    return [{"role": "system", "content": "\n\n".join(parts)}, *messages,
+            _time_line(request.app.state.dbx)]
 
 
-def _time_line() -> dict:
-    """The per-request live-time system note (kept OUT of the cacheable prefix)."""
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    return {"role": "system", "content": f"Current date and time: {now}."}
+def _time_line(conn=None) -> dict:
+    """The per-request live-time system note (kept OUT of the cacheable prefix).
+
+    Rendered in the USER's timezone (the browser reports its IANA zone via the
+    health handshake; ``meta user:timezone``), falling back to the server's local
+    zone. The line used to be bare UTC, which made every model do its own
+    timezone arithmetic for a zone it couldn't know — a 9B model greeting an
+    11:32 PM user with "Good morning! It's 5:32 am" was the result. Now the local
+    time is stated outright; the UTC anchor stays for cross-zone conversions.
+    """
+    zone = None
+    if conn is not None:
+        try:
+            name = db.meta_get(conn, "user:timezone")
+            zone = ZoneInfo(name) if name else None
+        except Exception:
+            zone = None  # unknown/corrupt zone name -> server-local fallback
+    now = datetime.now(timezone.utc)
+    local = now.astimezone(zone)  # zone=None means the server's own zone
+    hour = local.hour % 12 or 12  # portable 12-hour clock (%-I breaks on Windows)
+    stamp = (f"{local.strftime('%A, %B')} {local.day}, {local.year}, "
+             f"{hour}:{local:%M} {local:%p} {local.tzname() or ''}").rstrip()
+    return {"role": "system", "content":
+            f"Current date and time: {stamp} ({now:%Y-%m-%d %H:%M} UTC)."}
 
 
 @router.post("/api/chat")

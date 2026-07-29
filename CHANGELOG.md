@@ -11,6 +11,16 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Fixed
+- **The assistant now tells the time in your timezone.** The chat's time note used to
+  inject bare UTC and leave the conversion to the model — which couldn't know your zone
+  and sometimes got the math wrong ("Good morning! It's 5:32 am" at 11:32 PM). The
+  browser now reports its timezone, and the note states your local date and time
+  outright (UTC kept alongside for cross-zone questions). Scheduled runs use it too.
+- Setup wording no longer says your passphrase "encrypts everything on this device" —
+  it encrypts your SmartBrain data (chats, documents, settings), and now says exactly
+  that.
+
 ### Added
 - Users still on an old desktop app get a **one-time, self-retiring banner** in the
   app ("your desktop app needs a one-time update", with the download link and the
