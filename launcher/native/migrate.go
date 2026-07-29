@@ -107,3 +107,15 @@ func (n Native) MigrateFromDocker(ctx context.Context) error {
 	}
 	return nil
 }
+
+// DiscardMigratedData removes the copied native data after a FAILED takeover, so a
+// retry re-copies fresh instead of silently booting a stale snapshot. (The first live
+// migration failed after its copy; weeks later, NeedsMigration would have seen the
+// old copy, skipped the fresh one, and resurrected that night's data.) The Docker
+// volumes are, as ever, untouched — this only discards the native-side copy.
+func (n Native) DiscardMigratedData() {
+	if dataDir, err := appDataDir(); err == nil {
+		_ = os.RemoveAll(dataDir)
+	}
+	_ = os.RemoveAll(n.bifrostData())
+}

@@ -11,6 +11,15 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Fixed
+- The first live docker→native migration failed while unpacking the Python runtime
+  (its archive lists `bin/` symlinks before anything creates `bin/`; the unpacker
+  now creates a symlink's parent directory like it always did for files) — and a
+  failed takeover now discards its half-made data copy, so a later retry re-copies
+  fresh instead of ever booting a stale snapshot. Docker data was and remains
+  untouched throughout; the failed run cost ~10 minutes of downtime and rolled
+  back cleanly.
+
 ## [0.8.3] - 2026-07-29
 
 ### Changed
