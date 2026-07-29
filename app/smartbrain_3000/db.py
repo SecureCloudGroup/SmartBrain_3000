@@ -15,7 +15,12 @@ from pathlib import Path
 
 import duckdb
 
-DEFAULT_DB_PATH = "/app/data/smartbrain.duckdb"
+from . import runtime
+
+# Container: the bind/volume mount the stack has always used. Native: a per-OS
+# user-data directory (see runtime.default_data_dir). SMARTBRAIN_DB_PATH overrides both.
+DEFAULT_DB_PATH = ("/app/data/smartbrain.duckdb" if runtime.in_container()
+                   else str(runtime.default_data_dir() / "smartbrain.duckdb"))
 
 # Ordered, append-only migrations: (id, SQL). Never edit a shipped migration —
 # add a new one. The fixed tuple gives a verifiable upper bound.
@@ -349,6 +354,10 @@ def resolve_db_path() -> Path:
     assert raw, "database path must be non-empty"
     path = Path(raw)
     assert path.suffix == ".duckdb", "database path must end in .duckdb"
+    if not runtime.in_container():
+        # Containers guarantee /app/data via the mount; a native first run has to make
+        # its own home. Idempotent, and env-overridden paths get the same courtesy.
+        path.parent.mkdir(parents=True, exist_ok=True)
     return path
 
 

@@ -1,0 +1,82 @@
+name: Native smoke (3 OS)
+
+# Docker-exit Phase 0: prove the app runs NATIVELY — no container — on every OS we
+# ship to, using the exact runtime the future native stack will bundle (Astral's
+# python-build-standalone), the same requirements.lock the image installs, and the
+# same first-run flow the Linux install-smoke exercises. Gateway-free on purpose:
+# setup + knowledge + lexical search must work with no Bifrost and no model, which
+# is also what a fresh native install looks like before anything is configured.
+
+on:
+  pull_request:
+    paths:
+      - "app/**"
+      - ".github/workflows/native-smoke.yml"
+  workflow_dispatch:
+  schedule:
+    - cron: "41 6 * * 1" # weekly, Monday 06:41 UTC — drift canary like install-smoke
+
+permissions:
+  contents: read
+
+env:
+  PBS_RELEASE: "20260718"
+  PBS_PYTHON: "3.12.13"
+
+jobs:
+  smoke:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            pbs_triple: x86_64-unknown-linux-gnu
+            pybin: python/bin/python3
+          - os: macos-latest
+            pbs_triple: aarch64-apple-darwin
+            pybin: python/bin/python3
+          - os: windows-latest
+            pbs_triple: x86_64-pc-windows-msvc
+            pybin: python/python.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Fetch the runtime we will actually ship (python-build-standalone)
+        shell: bash
+        run: |
+          set -eux
+          curl -fsSL -o pbs.tar.gz \
+            "https://github.com/astral-sh/python-build-standalone/releases/download/${PBS_RELEASE}/cpython-${PBS_PYTHON}+${PBS_RELEASE}-${{ matrix.pbs_triple }}-install_only_stripped.tar.gz"
+          tar -xzf pbs.tar.gz
+          ./${{ matrix.pybin }} --version
+
+      - name: Install the app at its pinned versions (same lockfile as the image)
+        shell: bash
+        run: |
+          set -eux
+          ./${{ matrix.pybin }} -m pip install --quiet -c app/requirements.lock ./app
+
+      - name: Boot natively + first-run setup + knowledge + search
+        shell: bash
+        run: |
+          set -eux
+          export SMARTBRAIN_DB_PATH="${RUNNER_TEMP}/native-home/smartbrain.duckdb"
+          ./${{ matrix.pybin }} -m smartbrain_3000.serve &
+          SERVER_PID=$!
+          trap 'kill $SERVER_PID || true' EXIT
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:33000/api/health && break
+            sleep 2
+            if [ "$i" = "30" ]; then echo "::error::native app never became healthy"; exit 1; fi
+          done
+          curl -sf http://127.0.0.1:33000/api/health | grep -q '"status":"ok"'
+          curl -sf -c cj.txt -X POST http://127.0.0.1:33000/api/account/setup \
+            -H 'content-type: application/json' -d '{"passphrase":"native-smoke-pass"}' \
+            | grep -q recovery_key
+          curl -sf -b cj.txt -X POST http://127.0.0.1:33000/api/kb \
+            -H 'content-type: application/json' -d '{"title":"Smoke","content":"the native CANARY sentence"}' >/dev/null
+          curl -sf -b cj.txt "http://127.0.0.1:33000/api/kb/search?q=canary&mode=lexical" \
+            | grep -q '"Smoke"'
+          test -f "${RUNNER_TEMP}/native-home/smartbrain.duckdb"
+          echo "native boot + setup + ingest + search all work on ${{ matrix.os }}"

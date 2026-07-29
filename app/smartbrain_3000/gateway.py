@@ -18,7 +18,12 @@ from contextlib import contextmanager
 
 import httpx
 
-DEFAULT_GATEWAY_URL = "http://bifrost:8080"
+from . import runtime
+
+# Container: Bifrost answers at the compose service name; native: the same Bifrost
+# runs as a sibling process on loopback (the admin port the compose file already maps).
+# Env (SMARTBRAIN_LLM_GATEWAY_URL) overrides either way — these are only defaults.
+DEFAULT_GATEWAY_URL = "http://bifrost:8080" if runtime.in_container() else "http://127.0.0.1:38080"
 
 # Embedding model id (provider/model) routed to Ollama via Bifrost. The exact
 # Ollama tag matters: bare 'ollama/nomic-embed-text' 404s, ':v1.5' resolves.
@@ -860,9 +865,13 @@ MLXE_KEY_KEY = "local:mlxe:api_key"
 # Default host URLs for auto-detecting a server when nothing is configured yet — the
 # common "I installed Ollama and SmartBrain, now connect them" path. The gateway runs
 # in-container and reaches host services via host.docker.internal.
-OLLAMA_DEFAULT_URL = "http://host.docker.internal:11434"
-MLX_DEFAULT_URL = "http://host.docker.internal:8888"
-MLXE_DEFAULT_URL = "http://host.docker.internal:8899"
+# host.docker.internal is a CONTAINER concept (the bridge back to the host). Natively
+# the model servers are simply local, which also lets them stay loopback-bound — no
+# more --host 0.0.0.0 so a container can reach them (a small security win of the exit).
+_LOCAL_HOST = "host.docker.internal" if runtime.in_container() else "127.0.0.1"
+OLLAMA_DEFAULT_URL = f"http://{_LOCAL_HOST}:11434"
+MLX_DEFAULT_URL = f"http://{_LOCAL_HOST}:8888"
+MLXE_DEFAULT_URL = f"http://{_LOCAL_HOST}:8899"
 
 
 def register_ollama(url: str, *, client: httpx.Client | None = None) -> None:
