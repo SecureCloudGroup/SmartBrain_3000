@@ -28,9 +28,28 @@ func TestNewerComparison(t *testing.T) {
 		{"1.2.3.4", "0.8.3", false},
 	}
 	for _, c := range cases {
-		if got := newer(c.candidate, c.current); got != c.want {
-			t.Fatalf("newer(%q, %q) = %v, want %v", c.candidate, c.current, got, c.want)
+		if got := Newer(c.candidate, c.current); got != c.want {
+			t.Fatalf("Newer(%q, %q) = %v, want %v", c.candidate, c.current, got, c.want)
 		}
+	}
+}
+
+func TestLatestIsIndependentOfLauncherVersion(t *testing.T) {
+	serve := func(version, body string, err error) Updater {
+		u := New(version)
+		u.FetchBody = func(context.Context, string) ([]byte, error) { return []byte(body), err }
+		return u
+	}
+	// A dev launcher may not self-update, but it must still SEE releases — the
+	// native app assembly updates against Latest regardless of the binary's version.
+	if v, ok := serve("dev", `{"tag_name":"v0.8.5"}`, nil).Latest(context.Background()); !ok || v != "0.8.5" {
+		t.Fatalf("Latest must work from a dev build, got %q %v", v, ok)
+	}
+	if _, ok := serve("0.8.4", `{"tag_name":"nonsense"}`, nil).Latest(context.Background()); ok {
+		t.Fatal("an unparseable tag must read as no release")
+	}
+	if _, ok := serve("0.8.4", ``, fmt.Errorf("offline")).Latest(context.Background()); ok {
+		t.Fatal("API failure must read as no release")
 	}
 }
 
