@@ -11,6 +11,8 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.8.3] - 2026-07-29
+
 ### Changed
 - Native mode can now take over an existing Docker install: on its first run it
   COPIES your data out of the volumes (which are mounted read-only during the copy
