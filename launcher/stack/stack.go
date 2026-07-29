@@ -170,11 +170,20 @@ func (s Stack) UpdateReady(ctx context.Context) (bool, string, error) {
 
 // Healthy reports whether the app is answering. It is the launcher's single source of truth for
 // "is it up?" — the same check the browser would succeed or fail at.
+// LauncherVersion (set by main at startup) rides every health probe as a header, so
+// the app can tell a modern self-updating launcher from a legacy one — that is what
+// lets the app show legacy users the ONE-time "update your desktop app" nudge and
+// never show it again once a modern launcher is talking to it.
+var LauncherVersion = ""
+
 func (s Stack) Healthy(ctx context.Context) bool {
 	url := fmt.Sprintf("http://127.0.0.1:%d/api/health", s.Port)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return false
+	}
+	if LauncherVersion != "" {
+		req.Header.Set("X-SmartBrain-Launcher", LauncherVersion)
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

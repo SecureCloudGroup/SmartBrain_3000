@@ -20,6 +20,7 @@ import (
 
 	"github.com/SecureCloudGroup/SmartBrain_3000/launcher/native"
 	"github.com/SecureCloudGroup/SmartBrain_3000/launcher/stack"
+	"github.com/SecureCloudGroup/SmartBrain_3000/launcher/update"
 )
 
 // The release compose file is baked into the binary and written to the app-data dir on start. It is
@@ -58,6 +59,7 @@ func main() {
 	// A Finder-launched .app on macOS gets launchd's minimal PATH, which hides /usr/local/bin and
 	// Homebrew — so `docker` would look "not installed". Fix PATH before any Docker check runs.
 	stack.EnsureDockerPath()
+	stack.LauncherVersion = launcherVersion // rides health probes: the modern-launcher handshake
 	systray.Run(onReady, func() {})
 }
 
@@ -134,6 +136,9 @@ func setStatus(s string) { mStatus.SetTitle(s) }
 // a live session is never disturbed) and, if the pulled :latest differs from what's running, surfaces
 // "Install update now" / "Install on next start" in the menu. The user chooses when to apply — a
 // click, never a command. A dead/offline daemon just means "no update known"; the check stays silent.
+// Baked at release time via -ldflags (see launcher.yml); "dev" never self-updates.
+var launcherVersion = "dev"
+
 func updateChecker() {
 	time.Sleep(45 * time.Second) // let first-run startup settle before the first check
 	for {
@@ -145,6 +150,22 @@ func updateChecker() {
 func checkForUpdate() {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
+	// The launcher updates ITSELF first: a newer release means new compose/native
+	// capabilities that only a new binary can deliver. Verified download, atomic
+	// swap (previous kept as backup), then hand over to the replacement — the
+	// running stack (Docker or native) is untouched and outlives the handover.
+	upd := update.New(launcherVersion)
+	if ver, ok := upd.Available(ctx); ok {
+		setStatus("Updating SmartBrain…")
+		if _, err := upd.Apply(ctx, ver); err != nil {
+			log.Println("self-update:", err) // fail-closed: keep running, retry in 6h
+			setStatus("Running ●")
+		} else {
+			stack.Notify("SmartBrain updated", "Restarting with version "+ver+"…")
+			systray.Quit() // the replacement is already running, detached
+			return
+		}
+	}
 	_ = sb.Pull(ctx) // best-effort background pre-fetch; offline is fine
 	ready, ver, err := sb.UpdateReady(ctx)
 	if err != nil || !ready {
