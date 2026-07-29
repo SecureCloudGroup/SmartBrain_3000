@@ -67,7 +67,8 @@ restart the stack, pull the embedding model). See [installer/](../installer/READ
 
 The first time you open the app it walks you through setup:
 
-1. **Choose a passphrase** (at least 8 characters). This encrypts everything.
+1. **Choose a passphrase** (at least 8 characters). It encrypts your SmartBrain
+   data — chats, documents, and settings — so only you can read them.
 2. **Save your Emergency Kit.** You'll be shown a **Recovery Key** *once*. Store it
    somewhere safe and offline (print it, or put it in a password manager).
    - There is **no server and no password reset**. If you forget your passphrase,

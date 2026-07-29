@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import zoneinfo
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
@@ -305,6 +306,17 @@ def create_app() -> FastAPI:
             )
         except Exception:  # health stays a liveness probe first
             payload["launcher_update_needed"] = False
+        try:
+            # The SPA reports its IANA timezone the same way — it's what lets the
+            # chat time note speak the user's local time instead of bare UTC.
+            tz = request.headers.get("x-smartbrain-timezone", "")
+            if tz and len(tz) <= 64:
+                conn = request.app.state.dbx
+                if tz != db.meta_get(conn, "user:timezone"):
+                    zoneinfo.ZoneInfo(tz)  # validates; garbage raises -> not stored
+                    db.meta_set(conn, "user:timezone", tz)
+        except Exception:
+            pass
         assert payload["status"] == "ok", "health payload must report ok"
         return payload
 
