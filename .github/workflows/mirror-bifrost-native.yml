@@ -1,0 +1,63 @@
+# Mirror Bifrost's NATIVE binaries into a release we control (Docker-exit Phase 1).
+#
+# Why: the future native stack runs bifrost-http as a plain child process instead of a
+# container. Upstream distributes those binaries from a CDN whose files behind a PINNED
+# version URL have been observed to change (Last-Modified newer than the tag) — the exact
+# supply-chain posture mirror-bifrost.yml exists to avoid for the image. So: fetch the
+# four platform binaries ONCE, record their sha256s, and publish them as an immutable
+# GitHub release asset set. The launcher will download from HERE and verify against sums
+# pinned in its source — never from the CDN.
+#
+# Run from the Actions tab, or:  gh workflow run mirror-bifrost-native.yml -f version=v1.6.4
+name: Mirror bifrost native binaries
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Upstream Bifrost version to mirror (e.g. v1.6.4)"
+        required: true
+        default: "v1.6.4"
+
+permissions:
+  contents: write # creates the bifrost-native-<version> release + uploads assets
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Fetch the four platform binaries + record checksums
+        run: |
+          set -eux
+          V="${{ inputs.version }}"
+          mkdir out && cd out
+          for spec in darwin/arm64 darwin/amd64 linux/amd64 windows/amd64; do
+            plat="${spec%%/*}"; arch="${spec##*/}"
+            ext=""; [ "$plat" = "windows" ] && ext=".exe"
+            curl -fsSL -o "bifrost-http-${plat}-${arch}${ext}" \
+              "https://downloads.getmaxim.ai/bifrost/${V}/${plat}/${arch}/bifrost-http${ext}"
+          done
+          sha256sum bifrost-http-* | tee SHA256SUMS
+          # Sanity: four binaries, each plausibly a real static build (>50 MB).
+          test "$(ls bifrost-http-* | wc -l)" = "4"
+          for f in bifrost-http-*; do
+            test "$(stat -c%s "$f")" -gt 50000000 || { echo "::error::$f is suspiciously small"; exit 1; }
+          done
+      - name: Publish as an immutable release (refuses to overwrite an existing one)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eux
+          V="${{ inputs.version }}"
+          TAG="bifrost-native-${V}"
+          # Immutability is the point: if the tag exists, this mirror already happened —
+          # a re-run must never silently replace verified binaries. Bump the version
+          # input (a NEW upstream release) instead.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "::error::release $TAG already exists — refusing to overwrite mirrored binaries"
+            exit 1
+          fi
+          gh release create "$TAG" out/* \
+            --title "Bifrost native binaries ${V} (mirrored)" \
+            --notes "Upstream maximhq/bifrost ${V} bifrost-http binaries, mirrored from downloads.getmaxim.ai on $(date -u +%F) with recorded SHA256SUMS. The native launcher downloads from this release and verifies against sums pinned in its source."
