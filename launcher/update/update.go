@@ -104,13 +104,11 @@ func (u Updater) appRoot() (string, error) {
 	return filepath.Dir(exe), nil
 }
 
-// Available reports the newest released version when it is strictly newer than this
-// binary. Fail-closed everywhere: dev builds, unparseable versions, and API trouble
-// all mean "no update" — the launcher must never brick itself on a bad answer.
-func (u Updater) Available(ctx context.Context) (string, bool) {
-	if u.Version == "" || u.Version == "dev" {
-		return "", false
-	}
+// Latest returns the newest released version ("1.2.3"). Fail-closed: API trouble
+// or an unparseable tag reads as "no release". Deliberately NOT gated on Version —
+// callers use it for release artifacts beyond the launcher binary (the native app
+// assembly updates against it even from a dev-built launcher).
+func (u Updater) Latest(ctx context.Context) (string, bool) {
 	body, err := u.FetchBody(ctx, releaseAPI)
 	if err != nil {
 		return "", false
@@ -122,14 +120,28 @@ func (u Updater) Available(ctx context.Context) (string, bool) {
 		return "", false
 	}
 	latest := strings.TrimPrefix(strings.TrimSpace(payload.Tag), "v")
-	if latest == "" || !newer(latest, u.Version) {
+	if _, ok := parts(latest); !ok {
 		return "", false
 	}
 	return latest, true
 }
 
-// newer is a strict semver-ish compare; anything unparseable reads as NOT newer.
-func newer(candidate, current string) bool {
+// Available reports the newest released version when it is strictly newer than this
+// binary. Fail-closed everywhere: dev builds, unparseable versions, and API trouble
+// all mean "no update" — the launcher must never brick itself on a bad answer.
+func (u Updater) Available(ctx context.Context) (string, bool) {
+	if u.Version == "" || u.Version == "dev" {
+		return "", false
+	}
+	latest, ok := u.Latest(ctx)
+	if !ok || !Newer(latest, u.Version) {
+		return "", false
+	}
+	return latest, true
+}
+
+// Newer is a strict semver-ish compare; anything unparseable reads as NOT newer.
+func Newer(candidate, current string) bool {
 	ca, ok1 := parts(candidate)
 	cu, ok2 := parts(current)
 	if !ok1 || !ok2 {

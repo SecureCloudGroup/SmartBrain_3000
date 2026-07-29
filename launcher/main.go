@@ -12,6 +12,7 @@ import (
 	_ "embed"
 	"log"
 	"os"
+	"path/filepath"
 	"runtime"
 	"sync"
 	"time"
@@ -53,7 +54,36 @@ var (
 	// sentinel is a value no real version equals, so the first surfacing (even of a blank version)
 	// still notifies once.
 	lastNotifiedVersion = "\x00"
+	// The single native supervisor (see startWatch): its cancel func, nil when none runs.
+	watchMu     sync.Mutex
+	watchCancel context.CancelFunc
 )
+
+// startWatch (re)arms the native supervisor. Exactly ONE Watch goroutine may live at
+// a time: startNative used to spawn one per call, and a deliberate Stop left the old
+// one running — which then dutifully restarted the stack the user had just stopped.
+// Residual race, accepted: a watcher cancelled mid-restart finishes that iteration;
+// Down/Up are idempotent and converge.
+func startWatch(nv native.Native) {
+	watchMu.Lock()
+	defer watchMu.Unlock()
+	if watchCancel != nil {
+		watchCancel()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	watchCancel = cancel
+	go nv.Watch(ctx, setStatus)
+}
+
+// stopWatch retires the supervisor before a deliberate stop or supervised restart.
+func stopWatch() {
+	watchMu.Lock()
+	defer watchMu.Unlock()
+	if watchCancel != nil {
+		watchCancel()
+		watchCancel = nil
+	}
+}
 
 func main() {
 	// A Finder-launched .app on macOS gets launchd's minimal PATH, which hides /usr/local/bin and
@@ -166,6 +196,10 @@ func checkForUpdate() {
 			return
 		}
 	}
+	if nativeMode() {
+		checkNativeUpdate(ctx, upd)
+		return // everything below is Docker's update path (image pull + staging)
+	}
 	_ = sb.Pull(ctx) // best-effort background pre-fetch; offline is fine
 	ready, ver, err := sb.UpdateReady(ctx)
 	if err != nil || !ready {
@@ -185,9 +219,52 @@ func checkForUpdate() {
 	}
 }
 
+// checkNativeUpdate is the native stack's equivalent of the image pre-fetch: when a
+// newer APP release exists, assemble it into its own versioned directory (verified
+// downloads; the running version is untouched) and flip the `current` pointer — then
+// offer the same two menu choices the Docker path shows. Because Up() always boots
+// `current`, "Install on next start" needs no further mechanism, and "Install update
+// now" is just a supervised restart. Failures leave the running version current and
+// retry on the next 6-hour tick.
+func checkNativeUpdate(ctx context.Context, upd update.Updater) {
+	nv := native.New(sb.Dir)
+	current := nv.Current()
+	if current == "" {
+		return // nothing assembled yet — start() owns the first assembly
+	}
+	latest, ok := upd.Latest(ctx)
+	if !ok || !update.Newer(latest, current) {
+		return // offline / API trouble / already newest — surface nothing
+	}
+	if !mu.TryLock() {
+		return // a start/stop/install is in flight — this tick skips, the next retries
+	}
+	defer mu.Unlock()
+	setStatus("Downloading update v" + latest + "…")
+	// Assembly needs its own budget (checkForUpdate's ctx is minutes; downloads are
+	// ~400 MB on a slow line) — bounded like the first assembly in start().
+	asmCtx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	defer cancel()
+	if err := nv.Assemble(asmCtx, latest); err != nil {
+		log.Println("native update:", err)
+		setStatus("Running ● (native)") // current version untouched; retry in 6h
+		return
+	}
+	label := "Update available (v" + latest + ")"
+	setStatus(label)
+	systray.SetTooltip("SmartBrain — " + label)
+	mUpdateNow.Show()
+	mUpdateLater.Show()
+	if latest != lastNotifiedVersion {
+		lastNotifiedVersion = latest
+		stack.Notify("SmartBrain update ready", "Install from the menu now — or it installs next time you start.")
+	}
+}
+
 // installUpdate applies a waiting update immediately: Up() pulls (a no-op — already staged) then
 // recreates the container with the new image. It shares the operation lock with start/stop so it can
 // never race them; a dropped click is fine (the status line says what's happening).
+// Natively the staged version is already `current`, so this is a supervised Down+Up.
 func installUpdate() {
 	if !mu.TryLock() {
 		return
@@ -196,6 +273,21 @@ func installUpdate() {
 	setStatus("Installing update…")
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 	defer cancel()
+	if nativeMode() {
+		nv := native.New(sb.Dir)
+		stopWatch() // deliberate restart — the supervisor must not fight it
+		nv.Down()
+		if err := nv.Up(ctx); err != nil { // boots `current` — the staged version
+			setStatus("Update restart failed — see the native logs")
+			log.Println("native update install:", err)
+			return
+		}
+		startWatch(nv)
+		mUpdateNow.Hide()
+		mUpdateLater.Hide()
+		setStatus("Running ● (native, updated)")
+		return
+	}
 	if err := sb.Up(ctx); err != nil {
 		setStatus("Update failed — it'll install next time you start")
 		log.Println("update:", err)
@@ -300,14 +392,69 @@ func openOrStart() {
 	start()
 }
 
-func nativeMode() bool { return os.Getenv("SMARTBRAIN_NATIVE") == "1" }
+// nativeMode reports whether this machine runs the native (Docker-free) stack.
+// The choice PERSISTS: a successful native start writes a marker in the app-data
+// dir, so reboots, Finder relaunches, and self-update handovers — none of which
+// carry the opt-in env — keep booting native. (Observed live: a plain relaunch
+// fell back to Docker, whose compose up then failed against the surviving native
+// stack's ports and blamed the internet.) Env still expresses the explicit acts:
+// "1" opts in, "0" forces Docker for this run; deleting the marker rolls back
+// for good.
+func nativeMode() bool {
+	return resolveNativeMode(os.Getenv("SMARTBRAIN_NATIVE"), nativeMarkerExists())
+}
+
+func resolveNativeMode(env string, marker bool) bool {
+	switch env {
+	case "1":
+		return true
+	case "0":
+		return false
+	}
+	return marker
+}
+
+func nativeMarkerPath() string { return filepath.Join(sb.Dir, "native-mode") }
+
+func nativeMarkerExists() bool {
+	_, err := os.Stat(nativeMarkerPath())
+	return err == nil
+}
+
+// persistNativeMode records the mode choice; failure only means a plain relaunch
+// would fall back to Docker once more, so log-and-continue is enough.
+func persistNativeMode() {
+	if err := os.WriteFile(nativeMarkerPath(), []byte("1\n"), 0o600); err != nil {
+		log.Println("native marker:", err)
+	}
+}
+
+// nativeBootVersion picks what to boot: the assembled `current` normally; the env pin
+// only when it bootstraps a first assembly or names a STRICTLY NEWER release (a
+// deliberate manual upgrade). The pin must not win otherwise: relaunches inherit the
+// environment (the self-update handover preserves it), so a stale pin would silently
+// downgrade past whatever auto-update has assembled since. Forcing an older version
+// is a dev act: delete <dir>/current and pin.
+func nativeBootVersion(current, pinned string) string {
+	if current == "" || (pinned != "" && update.Newer(pinned, current)) {
+		return pinned
+	}
+	return current
+}
 
 func startNative(ctx context.Context) {
 	nv := native.New(sb.Dir)
-	version := os.Getenv("SMARTBRAIN_NATIVE_VERSION")
-	if version == "" {
-		version = nv.Current() // already assembled once — keep running what we have
+	if nv.Healthy(ctx) {
+		// The stack outlives the launcher by design (detached processes). A fresh
+		// launcher ADOPTS a healthy running stack instead of spawning a second one
+		// into the same ports — a collision that would "pass" health checks against
+		// the survivor while poisoning the pid files with its own dead spawns.
+		persistNativeMode()
+		setStatus("Running ● (native)")
+		startWatch(nv)
+		return
 	}
+	version := nativeBootVersion(nv.Current(), os.Getenv("SMARTBRAIN_NATIVE_VERSION"))
 	if version == "" {
 		setStatus("Native mode needs SMARTBRAIN_NATIVE_VERSION for its first run")
 		return
@@ -358,13 +505,14 @@ func startNative(ctx context.Context) {
 		}
 		return
 	}
+	persistNativeMode() // the stack runs natively — plain relaunches must too
 	setStatus("Running ● (native)")
 	if err := stack.OpenBrowser(sb.URL()); err != nil {
 		log.Println("open browser:", err)
 	}
 	// Supervision parity: the Docker path has restart: unless-stopped; natively the
 	// launcher watches and restarts (bounded — a crash loop reports, never spins).
-	go nv.Watch(context.Background(), setStatus)
+	startWatch(nv)
 }
 
 func stop() {
@@ -377,6 +525,7 @@ func stop() {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	if nativeMode() {
+		stopWatch() // a deliberate stop — the supervisor must not resurrect the stack
 		native.New(sb.Dir).Down()
 		setStatus("Stopped")
 		return

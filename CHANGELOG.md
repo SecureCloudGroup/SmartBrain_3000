@@ -11,6 +11,29 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Added
+- **Native installs now update the app themselves** — the answer to "will SmartBrain
+  auto-update?" is now yes on every layer. The launcher's 6-hour check (which already
+  updates the launcher binary) now also watches for new app releases in native mode:
+  a newer release is assembled in the background into its own versioned directory
+  (verified downloads; the running version keeps serving untouched) and offered
+  through the same **Install update now / Install on next start** menu the Docker
+  path has — installing is a supervised restart, and the previous version stays on
+  disk as the rollback. Supervision is tightened along the way: exactly one watcher
+  ever runs, and a deliberate **Stop** no longer fights it (the supervisor used to
+  restart a stack the user had just stopped). A stale `SMARTBRAIN_NATIVE_VERSION`
+  pin can bootstrap a first install or force an upgrade, but can never downgrade an
+  auto-updated one.
+- **Native mode now sticks.** It was env-only, so a reboot or plain relaunch of the
+  desktop app silently fell back to Docker — observed live as a compose attempt
+  colliding with the surviving native stack's ports and blaming the internet. A
+  successful native start now writes a persistent marker: every later launch boots
+  native with no env needed, and a relaunched launcher **adopts** a healthy running
+  stack instead of spawning a second one into the same ports. `SMARTBRAIN_NATIVE=0`
+  forces Docker for one run; deleting the marker rolls back for good.
+
+## [0.8.5] - 2026-07-29
+
 ### Fixed
 - **Native mode: "Save & connect" on a local model could take chat down** until the
   next unlock — and each retry made it worse. Three stacked defects: the settings
@@ -30,6 +53,8 @@ to know when a release changes behavior.
 - Setup wording no longer says your passphrase "encrypts everything on this device" —
   it encrypts your SmartBrain data (chats, documents, settings), and now says exactly
   that.
+
+## [0.8.4] - 2026-07-29
 
 ### Added
 - Users still on an old desktop app get a **one-time, self-retiring banner** in the
