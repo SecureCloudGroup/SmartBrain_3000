@@ -767,14 +767,50 @@ def _replace_provider(
 
     Providers are create-only in Bifrost and inline keys in the create body are
     ignored, so delete-then-create gives a clean slate ending with one key.
+
+    The create can be REFUSED — Bifrost v1.6.4 resolves the base_url hostname at
+    create time — and a refusal after our own delete used to leave the gateway
+    with NO provider at all: every chat dead until the next unlock, and each
+    save retry re-destroying it (the live native outage of 2026-07-28). So the
+    existing registration is snapshotted first and put back when the new one is
+    rejected: a refused save must never take down a working provider.
     """
     assert bifrost_name, "provider name required"
     assert create_body.get("provider"), "create_body must name the provider"
+    prior: dict | None = None
+    try:
+        got = client.get(f"/api/providers/{bifrost_name}")
+        prior = got.json() if got.status_code == 200 else None
+    except Exception:
+        prior = None  # snapshot is best-effort; the replacement proceeds regardless
     client.delete(f"/api/providers/{bifrost_name}")  # drop stale provider + keys
     created = client.post("/api/providers", json=create_body)
     if created.status_code not in (200, 201, 409):
+        if prior is not None:
+            _restore_provider(client, bifrost_name, prior, key_payload)
         created.raise_for_status()
     _attach_key(client, bifrost_name, key_payload)
+
+
+def _restore_provider(
+    client: httpx.Client, bifrost_name: str, prior: dict, key_payload: dict
+) -> None:
+    """Best-effort: re-create a provider from its pre-delete snapshot.
+
+    The caller's key is attached to the restored provider — key VALUES read back
+    masked, so the old key cannot be snapshotted; the fresh payload holds the
+    same stored secret. Failures stay silent: the caller re-raises the original
+    create error, which is the one the user must see.
+    """
+    body: dict = {"provider": prior.get("name") or bifrost_name}
+    for field in ("network_config", "custom_provider_config", "concurrency_and_buffer_size"):
+        if prior.get(field):
+            body[field] = prior[field]
+    try:
+        if client.post("/api/providers", json=body).status_code in (200, 201):
+            _attach_key(client, bifrost_name, key_payload)
+    except Exception:
+        pass  # original error wins; a failed restore changes nothing about it
 
 
 def set_provider(bifrost_name: str, api_key: str, *, client: httpx.Client | None = None) -> None:
@@ -1023,7 +1059,10 @@ def local_fallback_models(store) -> list[dict]:
     reappear once the gateway catalog recovers. Entries mirror list_models' shape.
     """
     out: list[dict] = []
-    ollama_url = store.get(OLLAMA_URL_KEY)
+    # localize_local_url on every probe: the STORED value may be from the other
+    # runtime (host.docker.internal natively, loopback in a container) — without
+    # translation this fallback fails exactly when it's needed.
+    ollama_url = localize_local_url(store.get(OLLAMA_URL_KEY))
     if ollama_url:
         for name in probe_ollama(ollama_url)["models"][:_MAX_MODELS]:
             mid = f"ollama/{name}"
@@ -1031,7 +1070,7 @@ def local_fallback_models(store) -> list[dict]:
                 "id": mid, "name": mid, "provider": "ollama", "context_length": None,
                 "pricing": None, "chat": _is_chat_model({"id": mid}), "embed": _is_embed_model({"id": mid}),
             })
-    mlx_url = store.get(MLX_URL_KEY)
+    mlx_url = localize_local_url(store.get(MLX_URL_KEY))
     if mlx_url:
         probe = probe_mlx(mlx_url, store.get(MLX_KEY_KEY) or "")
         for name in probe["models"][:_MAX_MODELS]:
@@ -1041,7 +1080,7 @@ def local_fallback_models(store) -> list[dict]:
                 "context_length": probe["context_lengths"].get(name),
                 "pricing": None, "chat": _is_chat_model({"id": mid}), "embed": _is_embed_model({"id": mid}),
             })
-    mlxe_url = store.get(MLXE_URL_KEY)
+    mlxe_url = localize_local_url(store.get(MLXE_URL_KEY))
     if mlxe_url:
         probe = probe_mlx(mlxe_url, store.get(MLXE_KEY_KEY) or "")  # same OpenAI shape as MLX
         for name in probe["models"][:_MAX_MODELS]:

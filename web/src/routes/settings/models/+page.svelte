@@ -4,10 +4,13 @@
   import { describeError } from "$lib/errors";
   import Chip from "$lib/components/Chip.svelte";
 
-  // Local model servers (Ollama/MLX) run on the host; the in-container gateway reaches
-  // them at host.docker.internal. We hide that plumbing: the user just gives a port, and
-  // we compose the URL. Advanced users can override with a full URL (non-standard host).
-  const HOST = "host.docker.internal";
+  // Local model servers (Ollama/MLX) run on this machine. The user just gives a port; we
+  // compose a loopback URL and the BACKEND translates it to whatever its runtime needs
+  // (host.docker.internal in a container, 127.0.0.1 natively — gateway.localize_local_url).
+  // Values saved by older builds used the docker host; both spell "this machine".
+  // Advanced users can override with a full URL (non-standard host).
+  const HOST = "127.0.0.1";
+  const THIS_MACHINE_HOSTS = ["127.0.0.1", "localhost", "host.docker.internal"];
   const DEFAULT_PORT = { ollama: 11434, mlx: 8888, mlxe: 8899 } as const;
   // Genuinely-good local defaults we suggest per backend (docs/02-models.md): Qwen2.5-7B for
   // chat, plus the embedding model semantic search needs. Surfaced in the pull/serve hints below.
@@ -35,16 +38,17 @@
     const n = Number(p);
     return Number.isInteger(n) && n >= 1 && n <= 65535;
   }
-  // Build the URL the gateway uses: the override if present, else host.docker.internal:port.
+  // Build the URL we save: the override if present, else this-machine:port.
   function urlFor(port: string, adv: string, useAdv: boolean): string {
     return useAdv && adv.trim() ? adv.trim() : `http://${HOST}:${port}`;
   }
-  // Map a saved URL back to the UI: standard host -> port field; anything else -> Advanced.
+  // Map a saved URL back to the UI: any this-machine host -> port field; anything else -> Advanced.
   function hydrate(url: string, fallback: number): { port: string; adv: string; useAdv: boolean } {
     if (!url) return { port: String(fallback), adv: "", useAdv: false };
     try {
       const u = new URL(url);
-      if (u.hostname === HOST) return { port: u.port || String(fallback), adv: "", useAdv: false };
+      if (THIS_MACHINE_HOSTS.includes(u.hostname))
+        return { port: u.port || String(fallback), adv: "", useAdv: false };
       return { port: String(fallback), adv: url, useAdv: true };
     } catch {
       return { port: String(fallback), adv: "", useAdv: false };

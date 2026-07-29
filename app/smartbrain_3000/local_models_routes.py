@@ -87,7 +87,12 @@ def put_ollama(request: Request, body: OllamaConfig) -> dict[str, bool]:
     _store(request).put(gateway.OLLAMA_URL_KEY, body.url)
     synced = True
     try:
-        gateway.register_ollama(body.url)
+        # localize at USE: the submitted/stored URL may name the other runtime's
+        # host (the SPA historically sent host.docker.internal) — registering it
+        # raw natively made Bifrost refuse the create ("no such host") after the
+        # old registration was already deleted. The probe path always localized;
+        # the register path must too.
+        gateway.register_ollama(gateway.localize_local_url(body.url))
     except Exception as exc:  # saved, but the gateway is unreachable — surface it
         log.warning("ollama register skipped: %s", exc)
         synced = False
@@ -102,11 +107,11 @@ def put_mlx(request: Request, body: MLXConfig) -> dict[str, bool]:
     store.put(gateway.MLX_KEY_KEY, body.api_key)
     synced = True
     try:
-        gateway.register_mlx(body.url, body.api_key)
+        gateway.register_mlx(gateway.localize_local_url(body.url), body.api_key)  # localize at USE (see put_ollama)
     except Exception as exc:  # saved, but the gateway is unreachable — surface it
         log.warning("mlx register skipped: %s", exc)
         synced = False
-    _detect_mlx_context_lengths(request, body.url, body.api_key)
+    _detect_mlx_context_lengths(request, gateway.localize_local_url(body.url), body.api_key)
     return {"ok": True, "gateway_synced": synced}
 
 
@@ -122,7 +127,7 @@ def put_mlxe(request: Request, body: MLXConfig) -> dict[str, bool]:
     store.put(gateway.MLXE_KEY_KEY, body.api_key)
     synced = True
     try:
-        gateway.register_mlxe(body.url, body.api_key)
+        gateway.register_mlxe(gateway.localize_local_url(body.url), body.api_key)  # localize at USE (see put_ollama)
     except Exception as exc:  # saved, but the gateway is unreachable — surface it
         log.warning("mlxe register skipped: %s", exc)
         synced = False

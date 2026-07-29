@@ -48,7 +48,7 @@ export interface ModelProvider {
   configured: boolean;
   reachable: boolean;
   models: string[];
-  url: string; // configured server URL (host.docker.internal:<port>); "" if unset
+  url: string; // configured server URL as stored (any this-machine host form); "" if unset
   detected: boolean; // not configured, but a server answered on the default port — offer 1-tap connect
   default_url: string; // the default host URL the server was detected on
 }

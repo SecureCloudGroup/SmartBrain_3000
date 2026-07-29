@@ -233,3 +233,62 @@ def test_chat_temperature_is_opt_in() -> None:
         gateway.chat([{"role": "user", "content": "x"}], "mlx/m", client=client, temperature=0.2)
     assert "temperature" not in bodies[0]  # default: unchanged payload
     assert bodies[1]["temperature"] == 0.2
+
+
+# --- refused creates must not destroy a working registration (2026-07-28 outage) ---
+# Bifrost v1.6.4 validates the base_url hostname at CREATE time; a refusal landing
+# after our own DELETE used to leave the gateway with no provider at all — chat dead,
+# and every save retry re-destroying it. _replace_provider now snapshots the existing
+# registration and puts it back when the new one is refused.
+
+
+def test_refused_create_restores_prior_registration() -> None:
+    prior = {
+        "name": "anthropic",
+        "network_config": {"base_url": "http://old-and-working:1"},
+        "custom_provider_config": None,  # null fields must be dropped from the restore body
+        "provider_status": "active",
+    }
+    record: list = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        body = json.loads(req.content) if req.content else None
+        record.append((req.method, req.url.path, body))
+        if req.method == "GET":
+            return httpx.Response(200, json=prior)
+        if req.method == "POST" and req.url.path == "/api/providers":
+            creates = [b for (m, p, b) in record if (m, p) == ("POST", "/api/providers")]
+            if len(creates) == 1:  # the intended create: refused (unresolvable host)
+                return httpx.Response(400, json={"error": {"message": "no such host"}})
+            return httpx.Response(200, json={"ok": True})  # the restore: accepted
+        return httpx.Response(200, json={"ok": True})
+
+    client = httpx.Client(base_url="http://bifrost:8080", transport=httpx.MockTransport(handler))
+    with client, pytest.raises(httpx.HTTPStatusError):  # caller must still SEE the refusal
+        gateway.set_provider("anthropic", "sk-new", client=client)
+    creates = [b for (m, p, b) in record if (m, p) == ("POST", "/api/providers")]
+    assert len(creates) == 2, "refused create must be followed by a restore"
+    assert creates[1] == {
+        "provider": "anthropic",
+        "network_config": {"base_url": "http://old-and-working:1"},
+    }
+    keys = [(m, p) for (m, p, b) in record if p.endswith("/keys")]
+    assert keys == [("POST", "/api/providers/anthropic/keys")]  # key re-attached to the restore
+
+
+def test_refused_create_without_prior_just_raises() -> None:
+    record: list = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        record.append((req.method, req.url.path))
+        if req.method == "GET":
+            return httpx.Response(404, json={"error": {"message": "not found"}})
+        if req.method == "POST" and req.url.path == "/api/providers":
+            return httpx.Response(400, json={"error": {"message": "no such host"}})
+        return httpx.Response(200, json={"ok": True})
+
+    client = httpx.Client(base_url="http://bifrost:8080", transport=httpx.MockTransport(handler))
+    with client, pytest.raises(httpx.HTTPStatusError):
+        gateway.set_provider("anthropic", "sk-new", client=client)
+    assert record.count(("POST", "/api/providers")) == 1, "nothing to restore -> no phantom create"
+    assert not any(p.endswith("/keys") for (m, p) in record)

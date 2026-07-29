@@ -12,6 +12,16 @@ to know when a release changes behavior.
 ## [Unreleased]
 
 ### Fixed
+- **Native mode: "Save & connect" on a local model could take chat down** until the
+  next unlock — and each retry made it worse. Three stacked defects: the settings
+  page submitted the Docker-era `host.docker.internal` host, the save endpoints
+  registered that URL untranslated (the probe path translated; the register path
+  didn't), and the gateway refuses a provider whose hostname doesn't resolve —
+  *after* the old registration was already deleted, leaving no provider at all.
+  Saves now translate the URL for the runtime they're in (both directions, so
+  rolling back to Docker keeps working), a refused registration restores the
+  previous one instead of leaving nothing, and the degraded-catalog fallback
+  translates too (it used to fail exactly when it was needed).
 - **The assistant now tells the time in your timezone.** The chat's time note used to
   inject bare UTC and leave the conversion to the model — which couldn't know your zone
   and sometimes got the math wrong ("Good morning! It's 5:32 am" at 11:32 PM). The
