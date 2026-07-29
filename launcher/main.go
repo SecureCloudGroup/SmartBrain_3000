@@ -291,6 +291,28 @@ func startNative(ctx context.Context) {
 		setStatus("Native mode needs SMARTBRAIN_NATIVE_VERSION for its first run")
 		return
 	}
+	if nv.NeedsMigration(ctx) {
+		// A COPY, not a move: the Docker volumes stay untouched as the rollback, and
+		// they are mounted read-only during the copy so nothing can modify them.
+		if !stack.DockerRunning(ctx) {
+			setStatus("Start Docker once more so your data can be copied out, then Restart")
+			return
+		}
+		setStatus("Copying your data out of Docker…")
+		downCtx, cancelDown := context.WithTimeout(ctx, 3*time.Minute)
+		if err := sb.Down(downCtx); err != nil { // never copy under a live writer
+			cancelDown()
+			setStatus("Couldn't stop the Docker stack — see the log")
+			log.Println("native migrate: down:", err)
+			return
+		}
+		cancelDown()
+		if err := nv.MigrateFromDocker(ctx); err != nil {
+			setStatus("Data copy failed — Docker data is untouched; see the log")
+			log.Println("native migrate:", err)
+			return
+		}
+	}
 	setStatus("Assembling native install…")
 	// Bounded like the Docker pull path: downloads are ~400 MB on a first assembly.
 	asmCtx, cancel := context.WithTimeout(ctx, 15*time.Minute)

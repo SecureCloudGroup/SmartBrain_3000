@@ -100,3 +100,19 @@ def test_data_dir_is_not_created_by_import(monkeypatch) -> None:
     # default_data_dir is a pure path computation — nothing on disk until a write.
     p = runtime.default_data_dir()
     assert isinstance(p, Path)
+
+def test_localize_local_url_is_bidirectional(monkeypatch) -> None:
+    # Native: the stored docker-bridge host becomes loopback.
+    monkeypatch.setattr(runtime, "in_container", lambda: False)
+    assert gateway.localize_local_url("http://host.docker.internal:8888") == "http://127.0.0.1:8888"
+    assert gateway.localize_local_url("http://127.0.0.1:8888") == "http://127.0.0.1:8888"
+    # Container: a natively-stored loopback/localhost URL becomes the docker bridge —
+    # this is what makes ROLLING BACK to Docker work without re-entering settings.
+    monkeypatch.setattr(runtime, "in_container", lambda: True)
+    assert gateway.localize_local_url("http://127.0.0.1:11434") == "http://host.docker.internal:11434"
+    assert gateway.localize_local_url("http://localhost:8888") == "http://host.docker.internal:8888"
+    assert gateway.localize_local_url("http://host.docker.internal:8899") == "http://host.docker.internal:8899"
+    assert gateway.localize_local_url("") == ""
+    # A remote LAN server the user configured explicitly is never rewritten.
+    monkeypatch.setattr(runtime, "in_container", lambda: False)
+    assert gateway.localize_local_url("http://192.168.1.50:11434") == "http://192.168.1.50:11434"
