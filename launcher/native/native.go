@@ -545,6 +545,15 @@ func untarGz(archive, dest string) error {
 			if _, ok := securePath(filepath.Dir(target), hdr.Linkname); !ok && filepath.IsAbs(hdr.Linkname) {
 				return fmt.Errorf("archive symlink escapes destination: %q", hdr.Linkname)
 			}
+			// The symlink's PARENT may not exist yet — tar entries are not ordered the
+			// way the regular-file branch assumes (python-build-standalone's archive
+			// places bin/ symlinks before any file creates bin/). Failed live on the
+			// first real migration: "symlink 2to3-3.12 .../python/bin/2to3: no such
+			// file or directory". Creating a symlink never requires its TARGET to
+			// exist, only its own parent directory.
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				return err
+			}
 			_ = os.Remove(target)
 			if err := os.Symlink(hdr.Linkname, target); err != nil {
 				return err

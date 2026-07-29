@@ -478,3 +478,92 @@ func TestMigrateFailsLoudlyOnStubDatabase(t *testing.T) {
 		t.Fatalf("a stub database must fail verification, got: %v", err)
 	}
 }
+
+func TestUntarSymlinkBeforeParentDir(t *testing.T) {
+	// Reproduces the first live migration's failure exactly: python-build-standalone's
+	// archive emits bin/ SYMLINKS before anything has created bin/ — "symlink
+	// 2to3-3.12 .../python/bin/2to3: no such file or directory".
+	dir := t.TempDir()
+	archive := filepath.Join(dir, "pbs-shaped.tar.gz")
+	f, err := os.Create(archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gz := gzip.NewWriter(f)
+	tw := tar.NewWriter(gz)
+	// Entry 1: a symlink deep in a directory NO prior entry created — and whose
+	// target does not exist yet either (both were true in the real archive).
+	if err := tw.WriteHeader(&tar.Header{Name: "python/bin/2to3", Typeflag: tar.TypeSymlink,
+		Linkname: "2to3-3.12", Mode: 0o777}); err != nil {
+		t.Fatal(err)
+	}
+	// Entry 2: the target file, only now.
+	body := "#!/fake\n"
+	if err := tw.WriteHeader(&tar.Header{Name: "python/bin/2to3-3.12", Typeflag: tar.TypeReg,
+		Mode: 0o755, Size: int64(len(body))}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write([]byte(body)); err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	out := filepath.Join(dir, "out")
+	if err := untarGz(archive, out); err != nil {
+		t.Fatalf("symlink-before-parent must unpack (the live-run bug): %v", err)
+	}
+	link, err := os.Readlink(filepath.Join(out, "python", "bin", "2to3"))
+	if err != nil || link != "2to3-3.12" {
+		t.Fatalf("symlink not materialized correctly: %q, %v", link, err)
+	}
+}
+
+func TestDiscardMigratedDataRemovesBothCopies(t *testing.T) {
+	if runtime.GOOS == "darwin" {
+		t.Skip("appDataDir is fixed on darwin; covered by the linux CI leg")
+	}
+	tmp := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", tmp)
+	t.Setenv("APPDATA", tmp)
+	n := New(t.TempDir())
+	dataDir, err := appDataDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range []string{dataDir, n.bifrostData()} {
+		if err := os.MkdirAll(d, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(d, "stale.db"), []byte("old"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	n.DiscardMigratedData()
+	for _, d := range []string{dataDir, n.bifrostData()} {
+		if _, err := os.Stat(d); !os.IsNotExist(err) {
+			t.Fatalf("%s must be removed after a failed takeover", d)
+		}
+	}
+}
+
+func TestUntarRealRuntimeArchive(t *testing.T) {
+	// Opt-in integration proof: point PBS_FIXTURE at a real python-build-standalone
+	// tarball and this unpacks it with the production code path — the exact archive
+	// whose symlink ordering broke the first live migration.
+	fixture := os.Getenv("PBS_FIXTURE")
+	if fixture == "" {
+		t.Skip("set PBS_FIXTURE to a real pbs tar.gz to run")
+	}
+	out := t.TempDir()
+	if err := untarGz(fixture, out); err != nil {
+		t.Fatalf("real runtime archive must unpack: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(out, "python")); err != nil {
+		t.Fatal("unpacked runtime missing python/ root")
+	}
+}
