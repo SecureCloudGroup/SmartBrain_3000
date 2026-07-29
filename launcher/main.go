@@ -310,6 +310,9 @@ func startNative(ctx context.Context) {
 	if err := stack.OpenBrowser(sb.URL()); err != nil {
 		log.Println("open browser:", err)
 	}
+	// Supervision parity: the Docker path has restart: unless-stopped; natively the
+	// launcher watches and restarts (bounded — a crash loop reports, never spins).
+	go nv.Watch(context.Background(), setStatus)
 }
 
 func stop() {
