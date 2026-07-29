@@ -296,3 +296,88 @@ func TestUnsupportedPlatformIsAnHonestError(t *testing.T) {
 		}
 	}
 }
+
+func TestPrepareBifrostDataKillsLoggingAtTheSource(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "bifrost-data")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// A historical plaintext log must be destroyed, and the kill-file written.
+	for _, f := range []string{"logs.db", "logs.db-wal", "logs.db-shm"} {
+		if err := os.WriteFile(filepath.Join(dir, f), []byte("secrets"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := prepareBifrostData(dir); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []string{"logs.db", "logs.db-wal", "logs.db-shm"} {
+		if _, err := os.Stat(filepath.Join(dir, f)); !os.IsNotExist(err) {
+			t.Fatalf("%s must be destroyed", f)
+		}
+	}
+	cfg, err := os.ReadFile(filepath.Join(dir, "config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"logs_store":{"enabled":false}`, `"enable_logging":false`, `"disable_content_logging":true`} {
+		if !strings.Contains(string(cfg), want) {
+			t.Fatalf("kill-file missing %s; got: %s", want, cfg)
+		}
+	}
+	// Idempotent: running again over the fresh state is fine.
+	if err := prepareBifrostData(dir); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestWatchRestartsAreBoundedAndReported(t *testing.T) {
+	n := New(t.TempDir())
+	n.Tick = 10 * time.Millisecond
+	n.Port = 1 // nothing listens: permanently unhealthy
+	var mu = make(chan string, 64)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		n.Watch(ctx, func(s string) { mu <- s })
+		close(done)
+	}()
+	select {
+	case <-done: // Watch gave up on its own after the bounded restart allowance
+	case <-ctx.Done():
+		t.Fatal("watch must stop itself after the bounded restart allowance")
+	}
+	var statuses []string
+	for len(mu) > 0 {
+		statuses = append(statuses, <-mu)
+	}
+	joined := strings.Join(statuses, "\n")
+	if !strings.Contains(joined, "restarting") || !strings.Contains(joined, "stopped restarting") {
+		t.Fatalf("expected restart attempts then a bounded give-up; got:\n%s", joined)
+	}
+	restartCount := strings.Count(joined, "SmartBrain stopped — restarting…")
+	if restartCount != 3 {
+		t.Fatalf("restart attempts = %d, want exactly the bounded 3", restartCount)
+	}
+}
+
+func TestWatchStopsOnContextCancel(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK) // healthy forever: Watch just idles
+	}))
+	defer srv.Close()
+	n := New(t.TempDir())
+	n.Tick = 10 * time.Millisecond
+	fmt.Sscanf(srv.URL, "http://127.0.0.1:%d", &n.Port)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { n.Watch(ctx, func(string) {}); close(done) }()
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("watch must exit when its context is cancelled")
+	}
+}

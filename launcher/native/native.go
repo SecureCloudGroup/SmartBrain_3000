@@ -98,11 +98,12 @@ type Native struct {
 	// Injectable side effects (tests replace these; production uses the defaults).
 	Fetch func(ctx context.Context, url, dest string) error            // download url -> dest file
 	Run   func(ctx context.Context, name string, args ...string) error // run a command to completion
+	Tick  time.Duration                                                // watchdog interval (tests shrink it)
 }
 
 // New returns a Native rooted beside the launcher's existing state dir.
 func New(launcherDir string) Native {
-	n := Native{Dir: filepath.Join(launcherDir, "native"), Port: AppPort}
+	n := Native{Dir: filepath.Join(launcherDir, "native"), Port: AppPort, Tick: 30 * time.Second}
 	n.Fetch = fetchURL
 	n.Run = runCmd
 	return n
@@ -280,6 +281,9 @@ func (n Native) Up(ctx context.Context) error {
 	if err := os.MkdirAll(n.bifrostData(), 0o700); err != nil {
 		return err
 	}
+	if err := prepareBifrostData(n.bifrostData()); err != nil {
+		return fmt.Errorf("native up: gateway data: %w", err)
+	}
 	bifrost := filepath.Join(vdir, "bifrost-http")
 	if runtime.GOOS == "windows" {
 		bifrost += ".exe"
@@ -334,6 +338,7 @@ func (n Native) spawn(ctx context.Context, name, bin string, args ...string) err
 		return err
 	}
 	cmd := exec.Command(bin, args...) // deliberately NOT CommandContext: ctx cancel must not kill the stack
+	cmd.SysProcAttr = detachAttr()    // survive launcher quit / terminal Ctrl-C (per-OS)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	if err := cmd.Start(); err != nil {
@@ -343,6 +348,60 @@ func (n Native) spawn(ctx context.Context, name, bin string, args ...string) err
 	go func() { _ = cmd.Wait(); logFile.Close() }() // reap; restart-on-crash is the next phase
 	return os.WriteFile(filepath.Join(n.runDir(), name+".pid"),
 		[]byte(strconv.Itoa(cmd.Process.Pid)+"\n"), 0o600)
+}
+
+// prepareBifrostData is the native equivalent of the compose entrypoint from the
+// plaintext-log privacy fix: destroy any historical request log and write the
+// config.json that disables Bifrost's logging STORE at the source (for that section
+// the file wins on every boot, so neither the admin UI nor the API can resurrect
+// it). Rewritten on every Up, exactly like the compose wrapper runs on every start.
+// Without this, a fresh native gateway boots with logging ON by default — observed
+// live on the first native run.
+func prepareBifrostData(dir string) error {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	for _, f := range []string{"logs.db", "logs.db-wal", "logs.db-shm"} {
+		_ = os.Remove(filepath.Join(dir, f))
+	}
+	kill := `{"logs_store":{"enabled":false},"client":{"enable_logging":false,"disable_content_logging":true}}` + "\n"
+	return os.WriteFile(filepath.Join(dir, "config.json"), []byte(kill), 0o600)
+}
+
+// Watch is the supervisor loop: while the context lives, health-check both children
+// and restart whichever died — gateway first (the app depends on it). Restarts are
+// BOUNDED (a crash loop reports instead of spinning forever), and onStatus keeps the
+// tray honest about what happened. Runs in its own goroutine; returns when ctx ends.
+func (n Native) Watch(ctx context.Context, onStatus func(string)) {
+	const maxRestarts = 3 // per window — a persistent crash needs a human
+	const window = 10 * time.Minute
+	restarts := 0
+	windowStart := time.Now()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(n.Tick):
+		}
+		if n.Healthy(ctx) {
+			continue
+		}
+		if time.Since(windowStart) > window {
+			restarts, windowStart = 0, time.Now() // fresh window, fresh allowance
+		}
+		if restarts >= maxRestarts {
+			onStatus("SmartBrain keeps crashing — stopped restarting; see the native logs")
+			return
+		}
+		restarts++
+		onStatus("SmartBrain stopped — restarting…")
+		n.Down()
+		if err := n.Up(ctx); err != nil {
+			onStatus("Restart failed — see the native logs")
+			continue // the next tick re-attempts within the bounded allowance
+		}
+		onStatus("Running ● (native)")
+	}
 }
 
 // terminate asks a process to exit (TERM + short grace on unix; hard kill on

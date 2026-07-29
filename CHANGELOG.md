@@ -12,6 +12,14 @@ to know when a release changes behavior.
 ## [Unreleased]
 
 ### Changed
+- Native mode (still behind its opt-in flag) grew up: the launcher now writes the
+  gateway's no-request-logging config before it ever starts (the native equivalent
+  of the container fix — a fresh native gateway was observed booting with logging
+  on by default), watches both processes and restarts a crashed one (bounded — a
+  crash loop reports instead of spinning), and detaches them so quitting the
+  launcher no longer takes SmartBrain down with it.
+
+### Changed
 - The launcher can now run SmartBrain **without Docker** behind a hidden opt-in
   (`SMARTBRAIN_NATIVE=1` — deliberately not in the menu yet while it matures): it
   assembles an install from the pinned standalone-Python runtime, the release's
