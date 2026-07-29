@@ -10,7 +10,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from smartbrain_3000 import gateway
+from smartbrain_3000 import gateway, runtime
 from smartbrain_3000.secrets import SecretStore, gen_master_key
 
 
@@ -176,6 +176,7 @@ def test_local_models_requires_unlock(client: TestClient) -> None:
 
 def test_put_ollama_stores_and_registers(client: TestClient, monkeypatch) -> None:
     client.post("/api/account/setup", json={"passphrase": "correct-horse"})
+    monkeypatch.setattr(runtime, "in_container", lambda: True)  # docker world: host passes through
     seen: list = []
     monkeypatch.setattr(gateway, "register_ollama", lambda url: seen.append(url))
     r = client.put("/api/local-models/ollama", json={"url": "http://host.docker.internal:11434"})
@@ -185,6 +186,7 @@ def test_put_ollama_stores_and_registers(client: TestClient, monkeypatch) -> Non
 
 def test_put_mlx_stores_and_registers(client: TestClient, monkeypatch) -> None:
     client.post("/api/account/setup", json={"passphrase": "correct-horse"})
+    monkeypatch.setattr(runtime, "in_container", lambda: True)  # docker world: host passes through
     seen: list = []
     monkeypatch.setattr(gateway, "register_mlx", lambda url, key: seen.append((url, key)))
     monkeypatch.setattr(gateway, "probe_mlx", lambda url, key, **k: {"reachable": True, "models": [], "context_lengths": {}})
@@ -194,6 +196,61 @@ def test_put_mlx_stores_and_registers(client: TestClient, monkeypatch) -> None:
     )
     assert r.status_code == 200
     assert seen == [("http://host.docker.internal:8888", "1234")]
+
+
+def test_put_endpoints_register_localized_urls(client: TestClient, monkeypatch) -> None:
+    """The register/probe calls must speak THIS runtime's dialect (the 2026-07-28 outage).
+
+    Natively, host.docker.internal does not resolve — Bifrost v1.6.4 refuses the
+    create outright — yet the SPA and old stored values submit exactly that host.
+    The save endpoints translate at USE (register + context probe) while STORING
+    the submitted value untouched, mirroring the probe path and provisioning.
+    """
+    client.post("/api/account/setup", json={"passphrase": "correct-horse"})
+    registered: list = []
+    probed: list = []
+    monkeypatch.setattr(gateway, "register_ollama", lambda url: registered.append(url))
+    monkeypatch.setattr(gateway, "register_mlx", lambda url, key: registered.append(url))
+    monkeypatch.setattr(gateway, "register_mlxe", lambda url, key: registered.append(url))
+    monkeypatch.setattr(
+        gateway, "probe_mlx",
+        lambda url, key, **k: probed.append(url) or {"reachable": True, "models": [], "context_lengths": {}},
+    )
+    monkeypatch.setattr(runtime, "in_container", lambda: False)  # native: docker host -> loopback
+    client.put("/api/local-models/ollama", json={"url": "http://host.docker.internal:11434"})
+    client.put("/api/local-models/mlx", json={"url": "http://host.docker.internal:8888", "api_key": "k"})
+    client.put("/api/local-models/mlxe", json={"url": "http://host.docker.internal:8899", "api_key": ""})
+    assert registered == [
+        "http://127.0.0.1:11434", "http://127.0.0.1:8888", "http://127.0.0.1:8899",
+    ]
+    assert "http://127.0.0.1:8888" in probed  # context-length detection probes localized too
+    monkeypatch.setattr(runtime, "in_container", lambda: True)  # container: loopback -> docker host
+    registered.clear()
+    client.put("/api/local-models/mlx", json={"url": "http://127.0.0.1:8888", "api_key": "k"})
+    assert registered == ["http://host.docker.internal:8888"]
+    # The STORED value stays exactly as submitted — translation happens only at use.
+    monkeypatch.setattr(gateway, "probe_ollama", lambda url, **k: {"reachable": True, "models": []})
+    assert client.get("/api/local-models").json()["mlx"]["url"] == "http://127.0.0.1:8888"
+
+
+def test_local_fallback_models_probes_localized_urls(monkeypatch) -> None:
+    # The degraded-catalog fallback must not die on other-runtime hosts — it exists
+    # for the moment the gateway is down, exactly when nothing else can compensate.
+    store = SecretStore(duckdb.connect(":memory:"), gen_master_key())
+    store.put(gateway.OLLAMA_URL_KEY, "http://host.docker.internal:11434")
+    store.put(gateway.MLX_URL_KEY, "http://host.docker.internal:8888")
+    probed: list = []
+    monkeypatch.setattr(
+        gateway, "probe_ollama", lambda url, **k: probed.append(url) or {"reachable": True, "models": ["m1"]},
+    )
+    monkeypatch.setattr(
+        gateway, "probe_mlx",
+        lambda url, key, **k: probed.append(url) or {"reachable": True, "models": ["m2"], "context_lengths": {}},
+    )
+    monkeypatch.setattr(runtime, "in_container", lambda: False)
+    out = gateway.local_fallback_models(store)
+    assert probed == ["http://127.0.0.1:11434", "http://127.0.0.1:8888"]
+    assert [m["id"] for m in out] == ["ollama/m1", "mlx/m2"]
 
 
 def test_put_mlx_persists_detected_context_lengths(client: TestClient, monkeypatch) -> None:
