@@ -38,6 +38,8 @@ to know when a release changes behavior.
   on success, so a failed upgrade leaves the previous version running (a rollback
   the Docker path never had). Docker remains the default and is untouched.
 
+## [0.8.2] - 2026-07-28
+
 ### Changed
 - Groundwork for running SmartBrain WITHOUT Docker (no user-visible change today —
   inside the container everything behaves byte-for-byte as before): the app now
@@ -54,6 +56,8 @@ to know when a release changes behavior.
   unsatisfying requests classify — plus clearer rules on when a pattern is a
   global preference versus a per-request-type strategy. Verified live: two
   identical probe runs now produce the identical finding.
+
+## [0.8.1] - 2026-07-28
 
 ### Added
 - **Settings → Self-improvement**: the framework's home in the app — switches for the
