@@ -381,3 +381,100 @@ func TestWatchStopsOnContextCancel(t *testing.T) {
 		t.Fatal("watch must exit when its context is cancelled")
 	}
 }
+
+func TestNeedsMigrationLogic(t *testing.T) {
+	n := New(t.TempDir())
+	volumeExists := true
+	n.Run = func(_ context.Context, name string, args ...string) error {
+		if name == "docker" && len(args) > 1 && args[0] == "volume" {
+			if volumeExists {
+				return nil
+			}
+			return fmt.Errorf("no such volume")
+		}
+		return nil
+	}
+	// Point the native data check at a temp dir via env (the per-OS branch honors it
+	// on linux; on darwin the real path may exist on a dev machine, so skip there).
+	if runtime.GOOS == "darwin" {
+		t.Skip("appDataDir is fixed on darwin; covered by the linux CI leg")
+	}
+	tmp := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", tmp)
+	t.Setenv("APPDATA", tmp)
+	if !n.NeedsMigration(context.Background()) {
+		t.Fatal("volume present + no native data must need migration")
+	}
+	volumeExists = false
+	if n.NeedsMigration(context.Background()) {
+		t.Fatal("no volume must mean nothing to migrate")
+	}
+	volumeExists = true
+	dataDir, err := appDataDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(dataDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dataDir, "smartbrain.duckdb"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if n.NeedsMigration(context.Background()) {
+		t.Fatal("existing native data must never be overwritten by a migration")
+	}
+}
+
+func TestMigrateCopiesReadOnlyAndVerifies(t *testing.T) {
+	if runtime.GOOS == "darwin" {
+		t.Skip("appDataDir is fixed on darwin; covered by the linux CI leg")
+	}
+	tmp := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", tmp)
+	t.Setenv("APPDATA", tmp)
+	n := New(t.TempDir())
+	var cmds []string
+	n.Run = func(_ context.Context, name string, args ...string) error {
+		cmds = append(cmds, name+" "+strings.Join(args, " "))
+		// Fake the copy by materializing a plausible database when the app-data copy runs.
+		if strings.Contains(strings.Join(args, " "), appVolume) {
+			dataDir, _ := appDataDir()
+			_ = os.MkdirAll(dataDir, 0o700)
+			return os.WriteFile(filepath.Join(dataDir, "smartbrain.duckdb"),
+				make([]byte, 8192), 0o600)
+		}
+		return nil
+	}
+	if err := n.MigrateFromDocker(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(cmds, "\n")
+	if !strings.Contains(joined, appVolume+":/from:ro") || !strings.Contains(joined, bifrostVolume+":/from:ro") {
+		t.Fatalf("volumes must be mounted READ-ONLY (the rollback guarantee); ran:\n%s", joined)
+	}
+	if !strings.Contains(joined, "cp -a /from/. /to/") {
+		t.Fatalf("copy command missing; ran:\n%s", joined)
+	}
+}
+
+func TestMigrateFailsLoudlyOnStubDatabase(t *testing.T) {
+	if runtime.GOOS == "darwin" {
+		t.Skip("appDataDir is fixed on darwin; covered by the linux CI leg")
+	}
+	tmp := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", tmp)
+	t.Setenv("APPDATA", tmp)
+	n := New(t.TempDir())
+	n.Run = func(_ context.Context, _ string, args ...string) error {
+		if strings.Contains(strings.Join(args, " "), appVolume) {
+			dataDir, _ := appDataDir()
+			_ = os.MkdirAll(dataDir, 0o700)
+			return os.WriteFile(filepath.Join(dataDir, "smartbrain.duckdb"), []byte("xx"), 0o600)
+		}
+		return nil
+	}
+	err := n.MigrateFromDocker(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "suspiciously small") {
+		t.Fatalf("a stub database must fail verification, got: %v", err)
+	}
+}

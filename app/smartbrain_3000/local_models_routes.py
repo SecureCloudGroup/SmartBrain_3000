@@ -50,7 +50,7 @@ def local_status(request: Request) -> dict:
     ollama = {"configured": bool(ollama_url), "reachable": False, "models": [],
               "url": ollama_url or "", "detected": False, "default_url": gateway.OLLAMA_DEFAULT_URL}
     if ollama_url:
-        ollama.update(gateway.probe_ollama(ollama_url))
+        ollama.update(gateway.probe_ollama(gateway.localize_local_url(ollama_url)))
     else:
         probe = gateway.probe_ollama(gateway.OLLAMA_DEFAULT_URL, timeout=_DETECT_TIMEOUT)
         assert "reachable" in probe, "probe must report reachability"
@@ -58,7 +58,7 @@ def local_status(request: Request) -> dict:
     mlx = {"configured": bool(mlx_url), "reachable": False, "models": [],
            "url": mlx_url or "", "detected": False, "default_url": gateway.MLX_DEFAULT_URL}
     if mlx_url:
-        mlx.update(gateway.probe_mlx(mlx_url, mlx_key or ""))
+        mlx.update(gateway.probe_mlx(gateway.localize_local_url(mlx_url), mlx_key or ""))
     else:
         probe = gateway.probe_mlx(gateway.MLX_DEFAULT_URL, "", timeout=_DETECT_TIMEOUT)
         assert "reachable" in probe, "probe must report reachability"
@@ -68,7 +68,7 @@ def local_status(request: Request) -> dict:
     mlxe = {"configured": bool(mlxe_url), "reachable": False, "models": [],
             "url": mlxe_url or "", "detected": False, "default_url": gateway.MLXE_DEFAULT_URL}
     if mlxe_url:
-        mlxe.update(gateway.probe_mlx(mlxe_url, mlxe_key or ""))  # same OpenAI /v1/models shape
+        mlxe.update(gateway.probe_mlx(gateway.localize_local_url(mlxe_url), mlxe_key or ""))  # same OpenAI /v1/models shape
     else:
         probe = gateway.probe_mlx(gateway.MLXE_DEFAULT_URL, "", timeout=_DETECT_TIMEOUT)
         assert "reachable" in probe, "probe must report reachability"

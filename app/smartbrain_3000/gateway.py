@@ -958,21 +958,39 @@ def register_mlxe(url: str, api_key: str = "", *, client: httpx.Client | None = 
     _run(client, lambda c: _replace_provider(c, "mlxe", create_body, key_payload))
 
 
+def localize_local_url(url: str) -> str:
+    """Translate a stored local-server URL to the world we are running in.
+
+    The STORED value is whatever the user connected with — on Docker that was
+    host.docker.internal; natively that host does not resolve, and the reverse is
+    just as broken (a natively-stored 127.0.0.1 inside a container is the container
+    itself). Translating at USE time keeps the stored value untouched, which is what
+    makes migrating to native — and rolling back to Docker — both work without the
+    user re-entering anything.
+    """
+    if not url:
+        return url
+    if runtime.in_container():
+        return (url.replace("://127.0.0.1", "://host.docker.internal")
+                   .replace("://localhost", "://host.docker.internal"))
+    return url.replace("://host.docker.internal", "://127.0.0.1")
+
+
 def provision_local_from_store(store, *, client: httpx.Client | None = None) -> list[str]:
     """Register any configured local providers (Ollama/MLX) from the store."""
     assert store is not None, "secret store required"
     done: list[str] = []
 
     def _do(c: httpx.Client) -> None:
-        ollama_url = store.get(OLLAMA_URL_KEY)
+        ollama_url = localize_local_url(store.get(OLLAMA_URL_KEY))
         if ollama_url:
             register_ollama(ollama_url, client=c)
             done.append("ollama")
-        mlx_url = store.get(MLX_URL_KEY)
+        mlx_url = localize_local_url(store.get(MLX_URL_KEY))
         if mlx_url:  # key is optional (keyless MLX/OMLX) — gate on the URL, like Ollama
             register_mlx(mlx_url, store.get(MLX_KEY_KEY) or "", client=c)
             done.append("mlx")
-        mlxe_url = store.get(MLXE_URL_KEY)
+        mlxe_url = localize_local_url(store.get(MLXE_URL_KEY))
         if mlxe_url:
             register_mlxe(mlxe_url, store.get(MLXE_KEY_KEY) or "", client=c)
             done.append("mlxe")

@@ -12,6 +12,14 @@ to know when a release changes behavior.
 ## [Unreleased]
 
 ### Changed
+- Native mode can now take over an existing Docker install: on its first run it
+  COPIES your data out of the volumes (which are mounted read-only during the copy
+  and left byte-for-byte untouched as the rollback), and stored local-model
+  addresses translate automatically between the Docker and native worlds in both
+  directions — migrating there and rolling back both work without re-entering
+  anything.
+
+### Changed
 - Native mode (still behind its opt-in flag) grew up: the launcher now writes the
   gateway's no-request-logging config before it ever starts (the native equivalent
   of the container fix — a fresh native gateway was observed booting with logging
