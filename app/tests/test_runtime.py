@@ -116,3 +116,22 @@ def test_localize_local_url_is_bidirectional(monkeypatch) -> None:
     # A remote LAN server the user configured explicitly is never rewritten.
     monkeypatch.setattr(runtime, "in_container", lambda: False)
     assert gateway.localize_local_url("http://192.168.1.50:11434") == "http://192.168.1.50:11434"
+
+
+def test_health_handshake_and_legacy_nudge(tmp_path, monkeypatch) -> None:
+    from fastapi.testclient import TestClient
+    monkeypatch.setenv("SMARTBRAIN_DB_PATH", str(tmp_path / "test.duckdb"))
+    from smartbrain_3000.main import create_app
+
+    with TestClient(create_app()) as client:
+        # In a container with no modern launcher ever seen: nudge.
+        monkeypatch.setattr(runtime, "in_container", lambda: True)
+        first = client.get("/api/health").json()
+        assert first["status"] == "ok" and first["launcher_update_needed"] is True
+        # A modern launcher handshakes once -> the nudge retires forever.
+        client.get("/api/health", headers={"X-SmartBrain-Launcher": "0.8.4"})
+        after = client.get("/api/health").json()
+        assert after["launcher_update_needed"] is False
+        # Native mode never nudges (there is no legacy-launcher story to fix there).
+        monkeypatch.setattr(runtime, "in_container", lambda: False)
+        assert client.get("/api/health").json()["launcher_update_needed"] is False

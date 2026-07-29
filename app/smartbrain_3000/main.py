@@ -19,7 +19,7 @@ import httpx
 from fastapi import FastAPI, Request
 from starlette.responses import PlainTextResponse
 
-from . import __version__, db, gateway, mcp_server, scheduler, serving
+from . import __version__, db, gateway, mcp_server, runtime, scheduler, serving
 from .account import router as account_router
 from .chat_routes import router as chat_router
 from .local_models_routes import router as local_models_router
@@ -283,10 +283,28 @@ def create_app() -> FastAPI:
     app.mount("/mcp", mcp_server.auth_wrapped_app(mcp, lambda: _mcp_token(app)))
 
     @app.get("/api/health")
-    def health() -> dict[str, str]:
-        """Liveness probe: report a fixed status plus the running version."""
+    def health(request: Request) -> dict[str, object]:
+        """Liveness probe: status + version, plus the legacy-launcher nudge flag.
+
+        Modern (self-updating) launchers stamp every probe with an
+        X-SmartBrain-Launcher header; recording that it was EVER seen is what lets
+        the UI show pre-self-update users a one-time "update the desktop app"
+        banner — and never show it again once a modern launcher is talking to us.
+        Both the record and the read are best-effort: health must never fail over
+        bookkeeping.
+        """
         assert __version__, "version string must be non-empty"
-        payload = {"status": "ok", "version": __version__}
+        payload: dict[str, object] = {"status": "ok", "version": __version__}
+        try:
+            handshake = request.headers.get("x-smartbrain-launcher", "")
+            conn = request.app.state.dbx
+            if handshake:
+                db.meta_set(conn, "launcher:version", handshake[:32])
+            payload["launcher_update_needed"] = bool(
+                runtime.in_container() and not db.meta_get(conn, "launcher:version")
+            )
+        except Exception:  # health stays a liveness probe first
+            payload["launcher_update_needed"] = False
         assert payload["status"] == "ok", "health payload must report ok"
         return payload
 

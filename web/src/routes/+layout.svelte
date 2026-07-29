@@ -24,6 +24,7 @@
   let { children } = $props();
   let locking = $state(false);
   let appVersion = $state(""); // "vX.Y.Z" once /api/health answers; "" (hidden) until then / on failure
+  let launcherNudge = $state(false); // one-time "update the desktop app" banner (legacy launchers only)
   let moreOpen = $state(false); // mobile: the More sheet above the tab bar
   // Chat + Help get the full-width container (chat for the log, help for its own
   // two-column nav+article layout, which caps itself); everything else uses the column.
@@ -93,7 +94,12 @@
     account.load();
     // Show the running version under the logo (best-effort — render nothing if health is unreachable).
     try {
-      appVersion = displayVersion((await api.health()).version);
+      const health = await api.health();
+      appVersion = displayVersion(health.version);
+      // One-time nudge for desktop apps too old to update themselves (they predate the
+      // self-update channel, so only the user can perform this last manual update).
+      launcherNudge = !!health.launcher_update_needed &&
+        sessionStorage.getItem("launcher-nudge-dismissed") !== "1";
     } catch {
       // leave the version hidden rather than surface a broken "v"
     }
@@ -213,6 +219,22 @@
     </header>
 
     <main class:wrap={!wide} class:wrap-wide={wide}>
+      {#if launcherNudge}
+        <!-- Pre-self-update desktop apps can't reach new capabilities on their own; this is
+             the ONE manual update a user ever does. Dismiss lasts the session; the flag
+             clears itself forever once a modern launcher talks to the backend. -->
+        <div class="launcher-nudge">
+          <span>Your SmartBrain <strong>desktop app</strong> needs a one-time update to keep
+            updating itself automatically.</span>
+          <a href="https://github.com/SecureCloudGroup/SmartBrain_3000/releases/latest"
+             target="_blank" rel="noreferrer">Download the new app</a>
+          <span class="muted">or run <code>brew upgrade --cask smartbrain</code> /
+            <code>scoop update smartbrain</code></span>
+          <button class="nudge-dismiss" title="Hide for this session"
+            onclick={() => { launcherNudge = false; sessionStorage.setItem("launcher-nudge-dismissed", "1"); }}>
+            ✕</button>
+        </div>
+      {/if}
       {#if needsPairing}
         <PairSetup />
       {:else if remoteDown}

@@ -422,7 +422,7 @@ export interface PairingResponse extends DeviceInfo {
 }
 
 export const api = {
-  health: () => req<{ status: string; version: string }>("/api/health"),
+  health: () => req<{ status: string; version: string; launcher_update_needed?: boolean }>("/api/health"),
   accountStatus: () => req<AccountStatus>("/api/account/status"),
   setup: (passphrase: string) =>
     req<EmergencyKit>("/api/account/setup", { method: "POST", body: JSON.stringify({ passphrase }) }),

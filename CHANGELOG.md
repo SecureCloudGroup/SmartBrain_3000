@@ -12,6 +12,14 @@ to know when a release changes behavior.
 ## [Unreleased]
 
 ### Added
+- Users still on an old desktop app get a **one-time, self-retiring banner** in the
+  app ("your desktop app needs a one-time update", with the download link and the
+  brew/scoop one-liners). It ships in the app image — which every install already
+  updates automatically — and disappears forever the moment a self-updating desktop
+  app talks to the backend. After that one click, nobody performs a manual update
+  again.
+
+### Added
 - **The desktop app now updates itself — the last thing that didn't.** The app
   image always self-updated; the launcher binary required a package-manager
   command, which is why new capabilities (like native mode) only reached users
