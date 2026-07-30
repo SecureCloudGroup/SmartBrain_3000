@@ -23,6 +23,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -99,6 +100,7 @@ type Native struct {
 	Fetch func(ctx context.Context, url, dest string) error            // download url -> dest file
 	Run   func(ctx context.Context, name string, args ...string) error // run a command to completion
 	Tick  time.Duration                                                // watchdog interval (tests shrink it)
+	PS    func(pid int) string                                         // a pid's command line ("" if unknown)
 }
 
 // New returns a Native rooted beside the launcher's existing state dir.
@@ -106,6 +108,7 @@ func New(launcherDir string) Native {
 	n := Native{Dir: filepath.Join(launcherDir, "native"), Port: AppPort, Tick: 30 * time.Second}
 	n.Fetch = fetchURL
 	n.Run = runCmd
+	n.PS = psCommand
 	return n
 }
 
@@ -270,6 +273,21 @@ func (n Native) Up(ctx context.Context) error {
 	if version == "" {
 		return fmt.Errorf("native up: nothing assembled yet")
 	}
+	// PREFLIGHT — never create a second instance. Spawning alongside a survivor
+	// "succeeds" against the survivor's health answers while the new spawns die on the
+	// held ports and the database lock, and spawn() then overwrites the pid records
+	// with pids that are about to die: every later Down stops nothing (the 2026-07-29
+	// poisoning, twice). Callers that WANT a running stack adopt it before calling Up.
+	//
+	// Two independent questions, because either alone has a blind spot: the port can
+	// answer while the records are stale (the live incident), and a survivor can be
+	// alive-but-not-answering (wedged, or still warming) while the port is silent.
+	if n.serving(ctx) {
+		return fmt.Errorf("native up: an instance is already serving on port %d — refusing to start a second", n.Port)
+	}
+	if name, pid, alive := n.liveRecordedChild(); alive {
+		return fmt.Errorf("native up: the previous %s (pid %d) is still running — stop it first", name, pid)
+	}
 	plat, err := currentPlatform()
 	if err != nil {
 		return err
@@ -288,29 +306,146 @@ func (n Native) Up(ctx context.Context) error {
 	if runtime.GOOS == "windows" {
 		bifrost += ".exe"
 	}
-	if err := n.spawn(ctx, "bifrost", bifrost,
-		"-app-dir", n.bifrostData(), "-host", "127.0.0.1", "-port", strconv.Itoa(BifrostPort)); err != nil {
+	gateway, err := n.spawn(ctx, "bifrost", bifrost,
+		"-app-dir", n.bifrostData(), "-host", "127.0.0.1", "-port", strconv.Itoa(BifrostPort))
+	if err != nil {
 		return fmt.Errorf("native up: gateway: %w", err)
 	}
-	if !waitHealthy(ctx, fmt.Sprintf("http://127.0.0.1:%d/api/health", BifrostPort), 60*time.Second) {
+	if err := awaitChild(ctx, gateway,
+		fmt.Sprintf("http://127.0.0.1:%d/api/health", BifrostPort), 60*time.Second, 0); err != nil {
 		n.Down()
-		return fmt.Errorf("native up: gateway never became healthy")
+		return fmt.Errorf("native up: gateway: %w", err)
 	}
 	// The app needs no forced env: Phase 0's native defaults point it at loopback Bifrost
 	// and the per-OS data dir on their own — running the defaults IS the test of them.
 	py := filepath.Join(vdir, plat.pythonRel)
-	if err := n.spawn(ctx, "app", py, "-m", "smartbrain_3000.serve"); err != nil {
+	app, err := n.spawn(ctx, "app", py, "-m", "smartbrain_3000.serve")
+	if err != nil {
 		n.Down()
 		return fmt.Errorf("native up: app: %w", err)
 	}
-	if !waitHealthy(ctx, fmt.Sprintf("http://127.0.0.1:%d/api/health", n.Port), 120*time.Second) {
+	if err := awaitChild(ctx, app,
+		fmt.Sprintf("http://127.0.0.1:%d/api/health", n.Port), 120*time.Second, appStartupGrace); err != nil {
 		n.Down()
-		return fmt.Errorf("native up: app never became healthy")
+		return fmt.Errorf("native up: app: %w", err)
 	}
 	return nil
 }
 
-// Down stops both children (best-effort, idempotent): TERM, brief grace, then KILL.
+// awaitChild waits for a spawned child to serve its port — and fails the instant the
+// child dies instead. "The port answers" alone is not proof the CHILD answers: a
+// survivor can answer while our spawn dies on the held port or the database lock. The
+// child's own exit is watched (its reaper closes exited), so a death is caught whenever
+// it happens — no settle window to tune, no latency added to a healthy start. The first
+// attempt at this used a fixed 1.5s watch AFTER health passed, which an adversarial
+// review correctly refuted: the app's database-lock death takes several seconds of
+// interpreter startup, so it outlived the window.
+//
+// Residual, honestly: a survivor that holds no live pid record AND fails the preflight
+// probes, then starts answering mid-Up, still looks like a healthy start. The preflight
+// is what narrows that to near-nothing; this check is what catches the rest.
+func awaitChild(ctx context.Context, c *child, healthURL string, budget, grace time.Duration) error {
+	start := time.Now()
+	deadline := start.Add(budget)
+	for time.Now().Before(deadline) { // bounded by the budget
+		select {
+		case <-c.exited:
+			return fmt.Errorf("the process we started exited — another instance is running, or see the log")
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(250 * time.Millisecond):
+		}
+		if !probe(ctx, healthURL) {
+			continue
+		}
+		// The port answers — but by whom? A survivor answers from the first instant while
+		// our spawn is still starting up and about to die on the held resource. The
+		// disambiguator is time since SPAWN, not time since the answer: a doomed app dies
+		// DURING startup (it cannot answer health before opening the database, so losing
+		// the database lock always precedes its first answer), so an answer we see before
+		// our child has outlived startup may well be someone else's.
+		if time.Since(start) < grace {
+			continue
+		}
+		select {
+		case <-c.exited:
+			return fmt.Errorf("the port answers but the process we started is gone — another instance is running")
+		default:
+			return nil
+		}
+	}
+	return fmt.Errorf("never became healthy within %s", budget)
+}
+
+// How long the app must outlive its own spawn before a health answer is credited to it
+// (see awaitChild). Costs nothing in practice — a real app start takes longer than this
+// to answer anyway. The gateway needs no grace: its failure mode is an immediate bind
+// error, caught by the exit channel on the first poll.
+const appStartupGrace = 6 * time.Second
+
+// serving reports whether an instance already answers the app port. Retried: one
+// unretried probe can lose to a momentary stall (a database checkpoint outlasts the
+// 3s probe), and a wrong "nothing is running" is precisely how the poisoning began.
+func (n Native) serving(ctx context.Context) bool {
+	for i := 0; i < 3; i++ { // fixed bound
+		if n.Healthy(ctx) {
+			return true
+		}
+		time.Sleep(400 * time.Millisecond)
+	}
+	return false
+}
+
+// liveRecordedChild reports a recorded child that is still running — the survivor a
+// health probe cannot see because it is wedged or still warming. Identity is VERIFIED
+// against the process's command line: a pid file outliving a reboot can name a
+// recycled, unrelated pid, and refusing to start because of that would be a far worse
+// bug than the one this prevents. An unverifiable pid therefore reads as "not ours"
+// (fail-open to starting) — which on Windows, where PS returns nothing, means this
+// check never fires and the health preflight carries the weight alone.
+func (n Native) liveRecordedChild() (string, int, bool) {
+	for name, marker := range map[string]string{"app": appProcessMarker, "bifrost": bifrostProcessMarker} {
+		raw, err := os.ReadFile(filepath.Join(n.runDir(), name+".pid"))
+		if err != nil {
+			continue
+		}
+		pid, perr := strconv.Atoi(strings.TrimSpace(string(raw)))
+		if perr != nil || !processAlive(pid) {
+			continue
+		}
+		if ps := n.PS; ps != nil && strings.Contains(ps(pid), marker) {
+			return name, pid, true
+		}
+	}
+	return "", 0, false
+}
+
+// Command-line fragments that identify our own children (see liveRecordedChild).
+const (
+	appProcessMarker     = "smartbrain_3000.serve"
+	bifrostProcessMarker = "bifrost-http"
+)
+
+// psCommand returns a pid's command line, or "" when it cannot be determined (any
+// error, and always on Windows — `ps` is unix-only, so identity there is unknown).
+func psCommand(pid int) string {
+	if runtime.GOOS == "windows" || pid <= 1 {
+		return ""
+	}
+	out, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "command=").Output()
+	if err != nil {
+		return ""
+	}
+	return string(out)
+}
+
+// Down stops both children (best-effort, idempotent): TERM, bounded wait for the
+// process to actually VANISH, then KILL and wait again. A pid file is removed only
+// for a process confirmed gone (or never alive — stale records from reboots and
+// prior crashes are dropped on sight). A survivor keeps its pid file: the record
+// must never claim less than the truth, Up's preflight refuses to double-start,
+// and the next Down retries. Trusting the file without verifying was how two
+// colliding starts poisoned the records and made every later stop a no-op.
 func (n Native) Down() {
 	for _, name := range []string{"app", "bifrost"} { // app first: it talks to the gateway
 		pidFile := filepath.Join(n.runDir(), name+".pid")
@@ -318,11 +453,55 @@ func (n Native) Down() {
 		if err != nil {
 			continue
 		}
-		if pid, perr := strconv.Atoi(strings.TrimSpace(string(raw))); perr == nil && pid > 1 {
-			terminate(pid)
+		pid, perr := strconv.Atoi(strings.TrimSpace(string(raw)))
+		if perr != nil || pid <= 1 || !processAlive(pid) {
+			_ = os.Remove(pidFile) // garbage or already gone — drop the stale record
+			continue
+		}
+		terminate(pid) // TERM + bounded grace + KILL (unix); hard kill (windows)
+		if !waitGone(pid, 3*time.Second) {
+			continue // still alive: KEEP the pid file and let the caller's Up refuse
 		}
 		_ = os.Remove(pidFile)
 	}
+}
+
+// processAlive reports whether pid names a live process. Unix: signal 0 probes without
+// touching the target (EPERM still means alive — someone else's process, but alive).
+// Windows: FindProcess opens a handle and fails for a pid with no process object.
+//
+// Release() is not optional: on Windows an open handle keeps a TERMINATED process's
+// object alive, so leaking one per probe would pin the zombie and make it read as
+// alive forever. Two honest limits remain — pid reuse can say "alive" about an
+// unrelated process, and Windows liveness is best-effort — so callers must treat this
+// as ADVISORY: liveRecordedChild verifies identity before acting on it, Down bounds
+// its waits, and Up's own-spawn check uses the child's exit channel rather than this.
+func processAlive(pid int) bool {
+	if pid <= 1 {
+		return false
+	}
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return false // windows: no such process
+	}
+	defer func() { _ = proc.Release() }()
+	if runtime.GOOS == "windows" {
+		return true
+	}
+	sigErr := proc.Signal(syscall.Signal(0))
+	return sigErr == nil || errors.Is(sigErr, syscall.EPERM)
+}
+
+// waitGone polls (bounded) until pid has actually exited.
+func waitGone(pid int, budget time.Duration) bool {
+	deadline := time.Now().Add(budget)
+	for time.Now().Before(deadline) { // bounded by the budget
+		if !processAlive(pid) {
+			return true
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return !processAlive(pid)
 }
 
 // Healthy mirrors stack.Healthy: one cheap loopback GET.
@@ -330,12 +509,21 @@ func (n Native) Healthy(ctx context.Context) bool {
 	return probe(ctx, fmt.Sprintf("http://127.0.0.1:%d/api/health", n.Port))
 }
 
+// child is a process we started: its pid, plus a channel the reaper closes the moment
+// it exits. The channel is what makes "did OUR spawn survive?" answerable without
+// polling a liveness primitive that pid reuse (and Windows handle semantics) can lie
+// about — this launcher started it, so this launcher knows.
+type child struct {
+	pid    int
+	exited chan struct{}
+}
+
 // spawn starts a child with logs under run/ and its pid recorded.
-func (n Native) spawn(ctx context.Context, name, bin string, args ...string) error {
+func (n Native) spawn(ctx context.Context, name, bin string, args ...string) (*child, error) {
 	logFile, err := os.OpenFile(filepath.Join(n.runDir(), name+".log"),
 		os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	cmd := exec.Command(bin, args...) // deliberately NOT CommandContext: ctx cancel must not kill the stack
 	cmd.SysProcAttr = detachAttr()    // survive launcher quit / terminal Ctrl-C (per-OS)
@@ -343,11 +531,16 @@ func (n Native) spawn(ctx context.Context, name, bin string, args ...string) err
 	cmd.Stderr = logFile
 	if err := cmd.Start(); err != nil {
 		logFile.Close()
-		return err
+		return nil, err
 	}
-	go func() { _ = cmd.Wait(); logFile.Close() }() // reap; restart-on-crash is the next phase
-	return os.WriteFile(filepath.Join(n.runDir(), name+".pid"),
-		[]byte(strconv.Itoa(cmd.Process.Pid)+"\n"), 0o600)
+	c := &child{pid: cmd.Process.Pid, exited: make(chan struct{})}
+	go func() { // reap, and publish the exit
+		_ = cmd.Wait()
+		logFile.Close()
+		close(c.exited)
+	}()
+	return c, os.WriteFile(filepath.Join(n.runDir(), name+".pid"),
+		[]byte(strconv.Itoa(c.pid)+"\n"), 0o600)
 }
 
 // prepareBifrostData is the native equivalent of the compose entrypoint from the

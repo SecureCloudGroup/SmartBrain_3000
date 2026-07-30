@@ -12,6 +12,19 @@ to know when a release changes behavior.
 ## [Unreleased]
 
 ### Fixed
+- **Native supervision now verifies instead of trusts.** Two colliding starts (a
+  relaunch that didn't stop the running stack, then the first auto-update install)
+  exposed the class: a health check passes whenever *something* answers the port, so
+  a second start's own dying processes went unnoticed, the recorded pids ended up
+  naming dead processes, and every later Stop silently stopped nothing. Starting now
+  refuses when an instance already answers (retried, so a momentary stall can't read
+  as "nothing is running") **and** when a previously recorded process is still alive
+  (verified to be ours, so a pid file that outlived a reboot can never block a
+  start). A health answer is credited to the process we started only once it has
+  outlived the startup in which a doomed one dies — and its own exit is watched
+  throughout, so a death is caught whenever it happens. Stopping now confirms a
+  process actually exited before dropping its record; a survivor keeps its record so
+  the launcher never loses its only handle on a running process.
 - **Chat could fail in Safari while the backend answered perfectly.** A local model
   takes ~8 seconds to its first token on a plain "hi", and the chat stream sent
   *nothing at all* during that wait — no opening bytes, no keepalive, and (unlike the
@@ -23,6 +36,8 @@ to know when a release changes behavior.
   streamed answer's connection breaks before a single word arrives, the app quietly
   re-requests it whole on the non-streaming endpoint instead of showing an error —
   chat now survives any browser or proxy that dislikes long-lived streams.
+
+## [0.8.6] - 2026-07-29
 
 ### Added
 - **Native installs now update the app themselves** — the answer to "will SmartBrain
