@@ -260,6 +260,13 @@ def agent_turn(request: Request, body: TurnIn) -> dict:
 # Overall bound on one streamed agent turn: 6 model round-trips at the interactive
 # per-call timeout, plus slack for tool executions between them.
 _STREAM_TURN_DEADLINE = 6 * _INTERACTIVE_TIMEOUT + 120.0
+# SSE liveness (the plain-chat stream): emit a comment frame whenever the producer has
+# been quiet this long, so a slow first token can never look like a dead connection.
+_SSE_HEARTBEAT_SECONDS = 5.0
+_SSE_QUEUE_FRAMES = 256  # bounded producer->consumer handoff
+# How long the producer waits for a full queue before concluding the client is gone.
+# Generous (a live client drains instantly; only a vanished one ever hits this).
+_SSE_PRODUCER_PUT_TIMEOUT = 30.0
 
 
 @router.post("/api/agent/turn/events")
@@ -462,13 +469,63 @@ def agent_turn_stream(request: Request, body: TurnIn) -> StreamingResponse:
     stream_client = httpx.Client(base_url=gateway.gateway_url(), timeout=_INTERACTIVE_TIMEOUT)
 
     def _frames() -> Iterator[bytes]:
+        # KEEP THE STREAM WARM. A local model takes ~8s to first token on a plain "hi"
+        # (measured; p90 of a real turn is ~60s), and this generator used to emit NOTHING
+        # for that whole time: no first bytes, no heartbeat, no Cache-Control. Safari drops
+        # an idle streamed body — the server completed the turn and recorded it while the
+        # browser painted "Couldn't reach SmartBrain" (2026-07-29). The sibling /events
+        # endpoint has always kept its stream warm; this one now does the same, which
+        # requires a worker thread: heartbeats must flow WHILE the gateway call blocks on
+        # the first token.
+        yield b": open\n\n"  # bytes on the wire immediately — the body is never idle-from-birth
         if guidance:
             yield _sse_event("meta", {"guidance": {"request_type": guidance["request_type"],
                                                    "directive": guidance["directive"]}})
-        yield from _stream_first_response(messages, model, body.conversation_id, stream_client,
-                                          tools.openai_tools_spec(), conn=request.app.state.dbx)
+        frames: queue.Queue = queue.Queue(maxsize=_SSE_QUEUE_FRAMES)  # bounded: a fast producer blocks, not OOMs
 
-    return StreamingResponse(_frames(), media_type="text/event-stream")
+        def producer() -> None:
+            # gen.close() is deterministic cleanup: it throws GeneratorExit into the
+            # producer generator so its finally blocks run NOW — releasing the local-model
+            # semaphore and closing the stream client — instead of at some later GC. A
+            # semaphore left held by an abandoned stream wedges every local model call.
+            gen = _stream_first_response(messages, model, body.conversation_id, stream_client,
+                                         tools.openai_tools_spec(), conn=request.app.state.dbx)
+            try:
+                for frame in gen:  # bounded by the inner generator's own delta budget
+                    try:
+                        frames.put(frame, timeout=_SSE_PRODUCER_PUT_TIMEOUT)
+                    except queue.Full:
+                        return  # consumer vanished (client disconnected) — abandon, never block forever
+            except Exception as exc:  # the inner generator handles its own errors; this is a backstop
+                log.warning("stream producer failed: %s", exc)
+                try:
+                    frames.put(_sse_event("error", {"detail": f"gateway unreachable: {exc}"}), timeout=1.0)
+                except queue.Full:
+                    pass
+            finally:
+                gen.close()
+                try:
+                    frames.put(None, timeout=1.0)  # EOF sentinel
+                except queue.Full:
+                    pass
+
+        threading.Thread(target=producer, name="chat-stream", daemon=True).start()
+        deadline = time.monotonic() + _STREAM_TURN_DEADLINE
+        while True:  # bounded by the deadline
+            try:
+                frame = frames.get(timeout=_SSE_HEARTBEAT_SECONDS)
+            except queue.Empty:
+                if time.monotonic() > deadline:
+                    yield _sse_event("error", {"detail": "turn timed out"})
+                    return
+                yield b": keepalive\n\n"  # SSE comment frame: keeps browsers/proxies from dropping an idle body
+                continue
+            if frame is None:
+                return
+            yield frame
+
+    return StreamingResponse(_frames(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache"})
 
 
 @router.post("/api/agent/resume/{turn_id}")
