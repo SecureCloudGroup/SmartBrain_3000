@@ -14,6 +14,7 @@ import dataclasses
 import json
 import logging
 import re
+import time
 import uuid
 
 from . import gateway, tools
@@ -340,6 +341,40 @@ def _tool_detail(name: str, args: dict | None) -> str:
     return ""
 
 
+# Statuses that mean "the server is briefly unavailable", NOT "this model cannot use tools".
+# 409 is the observed one: a local model server answers "is busy; cannot reload runtime settings
+# variant" for the several seconds it spends reloading a model.
+_TRANSIENT_STATUSES = frozenset({409, 429, 502, 503, 504})
+_TRANSIENT_RETRY_SECONDS = 3.0
+
+
+def _tools_call(messages: list[dict], model: str, *, timeout: float, usage_sink=None) -> dict:
+    """One tools round-trip, retried ONCE on a transient server error.
+
+    The retry exists to protect the trust rule. A transient failure used to fall through to
+    run_turn's plain-answer fallback, which re-asks the model with NO tools and flags the
+    turn degraded — so an action request ("add a task") reached a model that could not act,
+    and a model without tools narrates the action instead of performing it. That is the exact
+    failure mode the whole approval design exists to prevent, and it was live: a local model
+    server returned 409 six times while reloading, each one silently downgrading a turn.
+
+    A second failure still propagates, so the fallback remains for models that genuinely
+    cannot use tools — this can only ever turn a downgraded turn into a proper one.
+    """
+    assert messages and model, "messages + model required"
+    try:
+        data = gateway.chat_with_tools(messages, model, tools.openai_tools_spec(), timeout=timeout)
+    except gateway.GatewayError as exc:
+        if exc.status_code not in _TRANSIENT_STATUSES:
+            raise
+        log.warning("tools call hit a transient %s (%s); retrying WITH tools",
+                    exc.status_code, exc.message)
+        time.sleep(_TRANSIENT_RETRY_SECONDS)
+        data = gateway.chat_with_tools(messages, model, tools.openai_tools_spec(), timeout=timeout)
+    _emit_usage(usage_sink, model, data)
+    return data
+
+
 def run_turn(ctx, audit, approvals, *, messages, model, conversation_id, turn_id, start_step=0, start_calls=0, usage_sink=None, auto_approve=frozenset(), timeout=60.0, result_cap=_RESULT_CAP, on_event=None) -> dict:
     """Run the bounded loop from ``start_step``; return a terminal/awaiting result.
 
@@ -367,8 +402,7 @@ def run_turn(ctx, audit, approvals, *, messages, model, conversation_id, turn_id
                                        reason="context budget reached", steps=step,
                                        result_cap=result_cap, on_event=on_event)
         try:
-            data = gateway.chat_with_tools(messages, model, tools.openai_tools_spec(), timeout=timeout)
-            _emit_usage(usage_sink, model, data)
+            data = _tools_call(messages, model, timeout=timeout, usage_sink=usage_sink)
         except gateway.GatewayError as exc:
             if calls == 0:  # nothing ran yet: a model that can't use tools can still answer plainly
                 log.warning("tools call failed (%s); trying a plain answer: %s", exc.status_code, exc.message)
