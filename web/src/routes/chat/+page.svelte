@@ -648,6 +648,17 @@
       // normal path so a reload shows exactly what the user saw. Nothing streamed
       // yet -> no bubble exists and nothing is persisted. Real errors still throw
       // to send()/regenerate()'s red-bubble handler.
+      if (!isAbort(err) && !(err instanceof ApiError) && !streamText) {
+        // The streamed BODY broke before a single token landed — a transport drop, not
+        // a server error (those arrive as ApiError). The turn itself is fine: deliver it
+        // whole on the non-streaming endpoint rather than showing the user a red
+        // "couldn't reach SmartBrain" for an answer the backend produced happily.
+        stopper = null;
+        if (streamId) log = log.filter((e) => e.id !== streamId);
+        const whole = await api.agentTurn({ messages: args.messages, model: modelId, conversation_id: args.cid });
+        await handleAgentResult(whole, args.cid);
+        return;
+      }
       if (!isAbort(err)) throw err;
       if (streamId && streamText) {
         const stoppedText = `${streamText} (stopped)`;

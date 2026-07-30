@@ -11,6 +11,19 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Fixed
+- **Chat could fail in Safari while the backend answered perfectly.** A local model
+  takes ~8 seconds to its first token on a plain "hi", and the chat stream sent
+  *nothing at all* during that wait — no opening bytes, no keepalive, and (unlike the
+  sibling tool-turn stream, which has always done both) no `Cache-Control: no-cache`.
+  Safari drops an idle streamed response, so the browser showed "Couldn't reach
+  SmartBrain — check your connection" for a turn the server had completed and
+  recorded. The stream now puts bytes on the wire the moment it opens and sends a
+  keepalive every 5 seconds until the model produces text. Belt and braces: if a
+  streamed answer's connection breaks before a single word arrives, the app quietly
+  re-requests it whole on the non-streaming endpoint instead of showing an error —
+  chat now survives any browser or proxy that dislikes long-lived streams.
+
 ### Added
 - **Native installs now update the app themselves** — the answer to "will SmartBrain
   auto-update?" is now yes on every layer. The launcher's 6-hour check (which already

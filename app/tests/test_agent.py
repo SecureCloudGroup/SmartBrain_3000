@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import Iterator
 
 import duckdb
 import pytest
 from fastapi.testclient import TestClient
 
-from smartbrain_3000 import agent
+from smartbrain_3000 import agent, agent_routes
 from smartbrain_3000 import db as dbmod
 from smartbrain_3000 import gateway, tools
 from smartbrain_3000.approvals import ApprovalStore
@@ -828,3 +829,64 @@ def test_citations_search_only_turn_still_cites_hits() -> None:
     ]
     out = agent._collect_sources(msgs)
     assert [s["id"] for s in out] == ["a"], "snippets were the whole evidence — keep them"
+
+
+# --- SSE liveness: a slow first token must never look like a dead connection ----
+# The 2026-07-29 failure: a local model took 8.02s to its first token and this stream
+# emitted NOTHING for that whole window (no first bytes, no heartbeat, no Cache-Control,
+# unlike the sibling /events endpoint). Safari dropped the idle body; the browser showed
+# "Couldn't reach SmartBrain" for a turn the server had completed and recorded.
+
+
+def test_stream_keeps_the_connection_warm_while_the_model_thinks(
+    http_client: TestClient, monkeypatch
+) -> None:
+    http_client.post("/api/account/setup", json={"passphrase": "correct-horse"})
+    monkeypatch.setattr(agent_routes, "_SSE_HEARTBEAT_SECONDS", 0.15)
+
+    def slow(messages, model, **kw):
+        def gen():
+            time.sleep(0.9)  # model prefill — the window that used to be silent
+            yield {"delta": "hi there", "tool_calls": None, "finish_reason": "stop"}
+        return gen()
+
+    monkeypatch.setattr(gateway, "chat_stream", slow)
+    r = http_client.post(
+        "/api/agent/turn/stream",
+        json={"messages": [{"role": "user", "content": "hi"}], "capability": "fast_chat"},
+    )
+    assert r.status_code == 200
+    assert r.headers["cache-control"] == "no-cache"  # the sibling endpoint always had this
+    body = r.text
+    assert body.startswith(": open"), "bytes must hit the wire before the model is even called"
+    head = body.split("event: delta", 1)[0]
+    assert head.count(": keepalive") >= 3, f"heartbeats must fill the wait, got: {head!r}"
+    # Comment frames must not disturb the protocol: the real frames still arrive in order.
+    frames = _parse_sse(body)
+    assert [e for e, _ in frames] == ["delta", "done"]
+    assert frames[-1][1]["message"] == "hi there"
+    assert body.rstrip().endswith("}"), "the stream must end on its terminal frame, not a heartbeat"
+
+
+def test_stream_closes_its_producer_so_the_model_slot_is_released(
+    http_client: TestClient, monkeypatch
+) -> None:
+    # The wrapper runs the producer in a thread; if it never closed that generator, the
+    # local-model semaphore (held inside gateway.chat_stream) would leak and wedge every
+    # later local call. Deterministic close is the guarantee.
+    http_client.post("/api/account/setup", json={"passphrase": "correct-horse"})
+    cleaned: list[bool] = []
+
+    def fake_producer(*args, **kwargs):
+        try:
+            yield agent_routes._sse_event("done", {"message": "ok", "conversation_id": None, "model": "m"})
+        finally:
+            cleaned.append(True)
+
+    monkeypatch.setattr(agent_routes, "_stream_first_response", fake_producer)
+    r = http_client.post(
+        "/api/agent/turn/stream",
+        json={"messages": [{"role": "user", "content": "hi"}], "capability": "fast_chat"},
+    )
+    assert r.status_code == 200
+    assert cleaned == [True], "the producer generator must be closed (releases model slot + client)"
