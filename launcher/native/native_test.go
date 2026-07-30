@@ -613,10 +613,22 @@ func TestUpRefusesWhenAnotherInstanceServes(t *testing.T) {
 	}
 }
 
+// freeClosedPort returns a port that was just free and now has no listener.
+func freeClosedPort(t *testing.T) int {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	ln.Close()
+	return port
+}
+
 func TestUpDetectsDeadSpawnBehindSurvivor(t *testing.T) {
-	// The poisoning, replayed: our gateway spawn dies instantly while ANOTHER
-	// process answers the gateway port. waitHealthy passes (the survivor answers);
-	// Up used to conclude success and leave pid files naming the dead spawn.
+	// The poisoning, replayed: our gateway spawn dies while ANOTHER process answers the
+	// gateway port. Health passes (the survivor answers); Up used to conclude success and
+	// leave pid files naming the dead spawn, so every later Down stopped nothing.
 	if runtime.GOOS == "windows" {
 		t.Skip("uses a unix shell-script spawn")
 	}
@@ -637,7 +649,7 @@ func TestUpDetectsDeadSpawnBehindSurvivor(t *testing.T) {
 	n.Port = freeClosedPort(t) // nothing answers the APP port -> preflight passes
 	completedVersion(t, n, "1.0.0", map[string]string{"bifrost-http": "#!/bin/sh\nexit 0\n"})
 	err = n.Up(context.Background())
-	if err == nil || !strings.Contains(err.Error(), "another gateway is running") {
+	if err == nil || !strings.Contains(err.Error(), "another instance is running") {
 		t.Fatalf("a dead spawn behind an answering survivor must be refused, got: %v", err)
 	}
 	// The dead spawn's pid record must not outlive the failure (Down drops it).
@@ -646,16 +658,81 @@ func TestUpDetectsDeadSpawnBehindSurvivor(t *testing.T) {
 	}
 }
 
-// freeClosedPort returns a port that was just free and now has no listener.
-func freeClosedPort(t *testing.T) int {
-	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+func TestUpCatchesASLOWSpawnDeath(t *testing.T) {
+	// The refutation an adversarial review landed on the FIRST version of this fix: it
+	// watched the spawn for a fixed 1.5s AFTER health passed, but the app's real death
+	// (losing the database lock) takes several seconds of interpreter startup — so the
+	// doomed spawn passed the window and Up reported success. Watching the child's own
+	// exit has no window to outlive.
+	if runtime.GOOS == "windows" {
+		t.Skip("uses a unix shell-script spawn")
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK) // a survivor answering from the first instant
+	}))
+	defer srv.Close()
+	dir := t.TempDir()
+	script := filepath.Join(dir, "slow-death.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nsleep 2\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	n := New(dir)
+	if err := os.MkdirAll(n.runDir(), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	c, err := n.spawn(context.Background(), "app", script)
 	if err != nil {
 		t.Fatal(err)
 	}
-	port := ln.Addr().(*net.TCPAddr).Port
-	ln.Close()
-	return port
+	// Health answers immediately, so a settle-window check would have passed here.
+	if err := awaitChild(context.Background(), c, srv.URL, 20*time.Second, appStartupGrace); err == nil {
+		t.Fatal("a spawn that dies while the port answers must never read as a healthy start")
+	} else if !strings.Contains(err.Error(), "another instance is running") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestUpRefusesWhenARecordedChildIsStillAlive(t *testing.T) {
+	// The survivor a health probe cannot see: alive but not answering (wedged, or still
+	// warming). Down keeps its record precisely so this refusal can happen — without it,
+	// spawn() would overwrite the launcher's only handle on that process and orphan it.
+	if runtime.GOOS == "windows" {
+		t.Skip("identity verification is unix-only; windows relies on the health preflight")
+	}
+	if _, err := currentPlatform(); err != nil {
+		t.Skipf("unshipped platform: %v", err)
+	}
+	n := New(t.TempDir())
+	n.Port = freeClosedPort(t) // nothing answers -> the health preflight passes
+	completedVersion(t, n, "1.0.0", nil)
+	if err := os.MkdirAll(n.runDir(), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	child := exec.Command("sleep", "30")
+	if err := child.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = child.Process.Kill(); _ = child.Wait() }()
+	pid := child.Process.Pid
+	if err := os.WriteFile(filepath.Join(n.runDir(), "app.pid"),
+		[]byte(strconv.Itoa(pid)+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Identity says it IS ours -> refuse, naming it.
+	n.PS = func(int) string { return "/x/python3 -m smartbrain_3000.serve" }
+	err := n.Up(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "still running") {
+		t.Fatalf("a live recorded child must block a second start, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), strconv.Itoa(pid)) {
+		t.Fatalf("the refusal must name the pid so a human can act: %v", err)
+	}
+	// A RECYCLED pid (same number, unrelated process) must NOT block startup — refusing
+	// to start because a pid file outlived a reboot would be worse than the bug it guards.
+	n.PS = func(int) string { return "/usr/bin/some-unrelated-thing" }
+	if _, _, alive := n.liveRecordedChild(); alive {
+		t.Fatal("an unverifiable pid must read as not-ours (fail open to starting)")
+	}
 }
 
 func TestDownConfirmsDeathOfALiveChild(t *testing.T) {
