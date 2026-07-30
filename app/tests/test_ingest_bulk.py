@@ -187,3 +187,44 @@ def test_reindex_reports_what_is_still_pending(client: TestClient, monkeypatch) 
     body = client.post("/api/kb/reindex").json()
     assert body["failed"] == 1
     assert body["pending"] == 1, "it must say what is left rather than pretend it finished"
+
+
+def test_reindex_yields_to_a_waiting_user(monkeypatch) -> None:
+    """A draining backlog must get out of a user's way the moment they chat.
+
+    The background indexer only peeked at the model's state BEFORE starting, then
+    re-acquired the single local-model slot for every document — and the semaphore has
+    no queue fairness, so a user arriving mid-backlog kept losing the race to it
+    (measured live: consecutive chat turns at 16.1s and 28.6s while a backlog drained,
+    versus ~8s on an idle machine).
+    """
+    from smartbrain_3000 import ingest
+
+    class _KB:
+        def docs_needing_embedding(self, model: str) -> list[str]:
+            return [f"doc-{i}" for i in range(10)]
+
+        def get(self, doc_id: str) -> dict:
+            return {"title": doc_id, "content": "body"}
+
+    done: list[str] = []
+    waiting = {"user": False}
+
+    def fake_embed(knowledge, doc_id, title, content, model, **kw):  # noqa: ANN001 - test double
+        done.append(doc_id)
+        if len(done) == 3:
+            waiting["user"] = True  # a chat request lands after the third document
+        return True
+
+    monkeypatch.setattr(ingest, "embed_doc", fake_embed)
+    embedded, _skipped, failed, _err = ingest.reindex_pending(
+        _KB(), "mlx/embed", should_yield=lambda: waiting["user"]
+    )
+    assert done == ["doc-0", "doc-1", "doc-2"], f"must stop when the user arrives, got {done}"
+    assert embedded == 3 and failed == 0
+
+    # Without the callback the old behavior is untouched: drain the whole backlog.
+    done.clear()
+    waiting["user"] = False
+    embedded, _skipped, _failed, _err = ingest.reindex_pending(_KB(), "mlx/embed")
+    assert embedded == 10 and len(done) == 10, "no callback -> nothing changes"

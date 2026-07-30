@@ -374,6 +374,7 @@ def reindex_pending(
     limit: int = 1000,
     timeout: float = _REINDEX_EMBED_TIMEOUT,
     budget_seconds: float | None = None,
+    should_yield=None,
 ) -> tuple[int, int, int, str]:
     """Backfill embeddings for docs missing one or on a stale model (best-effort, bounded).
 
@@ -387,6 +388,13 @@ def reindex_pending(
     synchronous request that could run for hours on a large corpus). Whatever is left is simply
     picked up on the next pass — the work is idempotent.
 
+    ``should_yield`` is checked between documents and stops the run when it returns True — used by
+    the background indexer to get out of a user's way the moment they chat. The caller's one-time
+    "is the model free?" peek is not enough: this loop re-acquires the single local-model slot for
+    every document, and the semaphore has no queue fairness, so a user arriving mid-backlog kept
+    losing the race to it (measured: consecutive chat turns at 16.1s and 28.6s while a backlog
+    drained, against ~8s idle). Whatever is left is picked up next tick.
+
     Returns (embedded, skipped, failed, first_error). Shared by /api/kb/reindex and the scheduler.
     """
     assert knowledge is not None and model, "knowledge + model required"
@@ -398,6 +406,8 @@ def reindex_pending(
     for doc_id in pending:  # bounded by limit
         if deadline is not None and time.monotonic() >= deadline:
             break  # out of budget — the rest is picked up next pass
+        if should_yield is not None and should_yield():
+            break  # a user is waiting — their turn goes first, this resumes next pass
         doc = knowledge.get(doc_id)
         if doc is None:
             skipped += 1
