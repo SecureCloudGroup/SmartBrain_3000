@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterator
+
+import duckdb
 
 import pytest
 from fastapi.testclient import TestClient
 
 from smartbrain_3000 import db, gateway, usage
+from smartbrain_3000 import db as dbmod
 
 
 def _conn(tmp_path):
@@ -107,3 +111,57 @@ def test_usage_endpoint_time_bounds(client: TestClient, monkeypatch) -> None:
     assert client.get("/api/usage", params={"since": "2099-01-01 00:00:00"}).json()["usage"] == []
     # A malformed bound is ignored (the row is still counted).
     assert len(client.get("/api/usage", params={"since": "not-a-date"}).json()["usage"]) == 1
+
+
+# --- a model server that reloads its model per request must be SAID out loud ----
+# A live install spent 4.5s of every turn reloading the model — three times the rest of
+# the turn, for five days — and nothing in the app mentioned it, because usage recording
+# only ever looked at token counts. Diagnosing it took reading the model server's logs.
+
+
+def test_a_reloading_model_server_is_reported(caplog, monkeypatch) -> None:
+    from smartbrain_3000 import usage as usage_mod
+
+    monkeypatch.setattr(usage_mod, "_last_reload_warning", None)
+    conn = duckdb.connect(":memory:")
+    dbmod.run_migrations(conn)
+    with caplog.at_level(logging.WARNING):
+        usage_mod.record_response(conn, "mlx/slow", {
+            "usage": {"prompt_tokens": 10, "completion_tokens": 2, "model_load_duration": 4.6},
+        })
+    assert "LOADING the model" in caplog.text
+    assert "4.6s" in caplog.text
+
+    # The sentinel must mean "never warned", not "warned at time zero": on a freshly booted
+    # machine time.monotonic() is small, and a 0.0 sentinel would suppress the FIRST report
+    # for fifteen minutes — exactly when someone is most likely to be watching.
+    monkeypatch.setattr(usage_mod, "_last_reload_warning", None)
+    monkeypatch.setattr(usage_mod.time, "monotonic", lambda: 3.0)  # seconds since boot
+    caplog.clear()
+    with caplog.at_level(logging.WARNING):
+        usage_mod.record_response(conn, "mlx/slow", {
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "model_load_duration": 4.6}})
+    assert "LOADING the model" in caplog.text, "a just-booted machine must still get the first report"
+
+    # Throttled: a second report inside the window stays quiet rather than flooding the log.
+    caplog.clear()
+    with caplog.at_level(logging.WARNING):
+        usage_mod.record_response(conn, "mlx/slow", {
+            "usage": {"prompt_tokens": 10, "completion_tokens": 2, "model_load_duration": 4.6},
+        })
+    assert "LOADING the model" not in caplog.text
+
+
+def test_a_healthy_server_says_nothing(caplog, monkeypatch) -> None:
+    from smartbrain_3000 import usage as usage_mod
+
+    monkeypatch.setattr(usage_mod, "_last_reload_warning", None)
+    conn = duckdb.connect(":memory:")
+    dbmod.run_migrations(conn)
+    with caplog.at_level(logging.WARNING):
+        # A properly configured server reports no load time at all (verified live after the
+        # fix: the field disappears), and a brief one is not worth mentioning.
+        usage_mod.record_response(conn, "mlx/fine", {"usage": {"prompt_tokens": 10, "completion_tokens": 2}})
+        usage_mod.record_response(conn, "mlx/fine", {
+            "usage": {"prompt_tokens": 10, "completion_tokens": 2, "model_load_duration": 0.2}})
+    assert "LOADING the model" not in caplog.text
