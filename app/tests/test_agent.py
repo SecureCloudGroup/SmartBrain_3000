@@ -995,7 +995,7 @@ def test_missing_id_is_synthesized_not_refused() -> None:
     calls = agent_routes._assemble_tool_calls(
         [[{"index": 0, "function": {"name": "list_tasks", "arguments": "{}"}}]]
     )
-    assert calls and calls[0]["id"] == "call_0" and calls[0]["function"]["name"] == "list_tasks"
+    assert calls and calls[0]["id"].startswith("call_0_") and calls[0]["function"]["name"] == "list_tasks"
 
 
 # --- an action turn must pay for its first model response ONCE -----------------
@@ -1061,3 +1061,24 @@ def test_unassemblable_tool_calls_fall_back_to_asking_again(http_client: TestCli
         "messages": [{"role": "user", "content": "add a task"}], "capability": "fast_chat"})
     pending = [d for e, d in _parse_sse(stream.text) if e == "pending"]
     assert pending and "primed" not in pending[0], "a doubtful assembly must never be offered"
+
+
+def test_a_truncated_tool_stream_is_never_reused(http_client: TestClient, monkeypatch) -> None:
+    """The completeness gate: no terminal finish_reason -> no reuse, ask the model again.
+
+    Empty arguments assemble to a VALID {} — and seven tools (list_documents, list_tasks,
+    email_list, read_schedule_output, …) require no arguments and run inline WITHOUT
+    approval. A stream cut off mid-call must therefore never be handed on.
+    """
+    http_client.post("/api/account/setup", json={"passphrase": "correct-horse"})
+    monkeypatch.setattr(gateway, "chat_stream", _stream_chunks(
+        # the model names a tool, then the connection dies: no finish_reason ever arrives
+        {"delta": "", "tool_calls": [{"index": 0, "id": "c1",
+                                      "function": {"name": "email_list", "arguments": ""}}],
+         "finish_reason": None},
+    ))
+    stream = http_client.post("/api/agent/turn/stream", json={
+        "messages": [{"role": "user", "content": "what did I get today?"}], "capability": "fast_chat"})
+    pending = [d for e, d in _parse_sse(stream.text) if e == "pending"]
+    assert pending, "the turn still falls back as before"
+    assert "primed" not in pending[0], "an unfinished stream must never be reused"

@@ -386,7 +386,7 @@ def _assemble_tool_calls(fragments: list[list[dict]]) -> list[dict] | None:
             if not isinstance(frag, dict):
                 return None
             idx = frag.get("index", 0)
-            if not isinstance(idx, int) or len(by_index) > _MAX_STREAMED_TOOL_CALLS:
+            if not isinstance(idx, int) or len(by_index) >= _MAX_STREAMED_TOOL_CALLS:
                 return None
             call = by_index.setdefault(idx, {"id": "", "name": "", "arguments": ""})
             if frag.get("id"):
@@ -415,7 +415,7 @@ def _assemble_tool_calls(fragments: list[list[dict]]) -> list[dict] | None:
         if not isinstance(parsed, dict):
             return None
         out.append({
-            "id": call["id"] or f"call_{idx}",
+            "id": call["id"] or f"call_{idx}_{uuid.uuid4().hex[:8]}",
             "type": "function",
             "function": {"name": call["name"], "arguments": json.dumps(parsed)},
         })
@@ -490,6 +490,7 @@ def _stream_first_response(
     ttft_ms: int | None = None
     saw_tools = False
     tool_fragments: list[list[dict]] = []  # streamed tool-call pieces, reassembled below
+    saw_finish = False  # did the model actually FINISH? (see the completeness gate below)
     # A model may print a tool call as TEXT (```json / a bare {…}). We hold deltas until the
     # first non-whitespace char: if it opens a code fence or JSON object, SUPPRESS the stream
     # and bail to /api/agent/turn, where run_turn recovers the tool call — so raw JSON is
@@ -513,6 +514,7 @@ def _stream_first_response(
                         saw_tools = True
                         tool_fragments.append(chunk["tool_calls"])
                         if chunk.get("finish_reason"):
+                            saw_finish = True
                             break
                         continue
                     delta = chunk.get("delta") or ""
@@ -546,7 +548,12 @@ def _stream_first_response(
             # _assemble_tool_calls returns None on anything doubtful, and a missing/expired
             # token simply means the model is asked again — exactly today's behavior.
             payload = {"detail": "tool turn — fall back to /api/agent/turn", "model": model}
-            calls = _assemble_tool_calls(tool_fragments) if tool_fragments else None
+            # COMPLETENESS GATE. Only a stream that reached its terminal finish_reason may be
+            # reused. A truncated one assembles arguments that are empty but VALID — and seven
+            # tools (list_documents, list_tasks, email_list, read_schedule_output, …) require no
+            # arguments and run inline WITHOUT approval, so a half-received call would execute.
+            # Without a finish_reason we simply re-ask the model, exactly as before.
+            calls = _assemble_tool_calls(tool_fragments) if (tool_fragments and saw_finish) else None
             if calls is not None and client_messages is not None:
                 payload["primed"] = _stash_primed(
                     client_messages,
