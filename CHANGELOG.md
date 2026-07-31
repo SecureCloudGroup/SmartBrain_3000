@@ -11,6 +11,13 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Fixed
+- The one-time "your desktop app needs an update" banner stopped appearing in the previous
+  release. A lifecycle call added alongside it threw where the error could not be seen —
+  into an empty catch — which skipped the lines after it, including the banner. The banner
+  is back, the timer it introduced no longer outlives the page, and that catch now reports
+  what it caught instead of hiding it.
+
 ### Added
 - A **stress suite** that shakes the pieces together instead of holding them still:
   sustained mixed traffic (chats, agent turns, searches and history reads at once),

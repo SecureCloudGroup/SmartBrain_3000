@@ -89,6 +89,14 @@
   // show the reason + Retry instead of a perpetual "connecting…" / blank "Loading…".
   const remoteDown = $derived(remote.status === "offline" && !offline && !needsPairing);
 
+  let updateTimer: ReturnType<typeof setInterval> | null = null;
+
+  // Registered during initialisation (the only place Svelte allows it) so the version poll
+  // cannot outlive the page.
+  onDestroy(() => {
+    if (updateTimer) clearInterval(updateTimer);
+  });
+
   onMount(async () => {
     initTheme();
     watchForSWUpdate(); // pick up a freshly deployed service worker (iOS keeps the old one)
@@ -106,8 +114,12 @@
       // self-update channel, so only the user can perform this last manual update).
       launcherNudge = !!health.launcher_update_needed &&
         sessionStorage.getItem("launcher-nudge-dismissed") !== "1";
-    } catch {
-      // leave the version hidden rather than surface a broken "v"
+    } catch (err) {
+      // Leave the version hidden rather than surface a broken "v" — but SAY something. An
+      // empty catch here swallowed a genuine programming error for a full release: a throw
+      // from watchForAppUpdate silently skipped the lines below it, and the missing banner
+      // looked like a design choice rather than a bug.
+      console.warn("startup health check failed:", err);
     }
   });
 
@@ -116,19 +128,23 @@
 
   // Notice an update that landed while this tab was open. Cheap: one health call a minute,
   // the same request the page already makes on load, and it stops as soon as it fires.
+  //
+  // The cleanup is registered at the TOP of this component, not here: onDestroy must run
+  // during component initialisation, and this function is called from onMount AFTER an
+  // await, where that context is gone. Calling it here threw — silently, into onMount's
+  // catch — which killed every line after it, including the legacy-launcher banner.
   function watchForAppUpdate(): void {
-    const timer = setInterval(async () => {
+    updateTimer = setInterval(async () => {
       try {
         const health = await api.health();
         if (loadedVersion && health.version && health.version !== loadedVersion) {
           updatedVersion = displayVersion(health.version);
-          clearInterval(timer); // said once; the banner stays until the reload
+          if (updateTimer) clearInterval(updateTimer); // said once; the banner stays until the reload
         }
       } catch {
         /* offline or restarting — try again next minute */
       }
     }, 60_000);
-    onDestroy(() => clearInterval(timer));
   }
 
   // Keep the Activity badge fresh: refresh the pending count on each route change
