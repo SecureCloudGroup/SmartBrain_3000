@@ -10,7 +10,9 @@ package stack
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -175,6 +177,49 @@ func (s Stack) UpdateReady(ctx context.Context) (bool, string, error) {
 // lets the app show legacy users the ONE-time "update your desktop app" nudge and
 // never show it again once a modern launcher is talking to it.
 var LauncherVersion = ""
+
+// Handshake is the launcher's two-way word with the app, riding the health probe that
+// already exists rather than opening a port. It tells the app which version is STAGED and
+// ready to install, and hears back what the app is running plus whether the person sitting
+// in front of it asked for that install.
+//
+// This is what puts updates in the page the owner is actually looking at: before it, the
+// only sign of a waiting update was a menu behind a tray icon.
+//
+// Bounded and forgiving: a short timeout, a capped body, and any trouble at all reads as
+// "no news", because a failed handshake must never be mistaken for an install request.
+func Handshake(ctx context.Context, port int, staged string) (running string, requested string, ok bool) {
+	url := fmt.Sprintf("http://127.0.0.1:%d/api/health", port)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return "", "", false
+	}
+	if LauncherVersion != "" {
+		req.Header.Set("X-SmartBrain-Launcher", LauncherVersion)
+	}
+	if staged != "" {
+		req.Header.Set("X-SmartBrain-Update", staged)
+	}
+	client := http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", "", false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", "", false
+	}
+	var body struct {
+		Version         string `json:"version"`
+		UpdateRequested string `json:"update_requested"`
+	}
+	// The app is a process we supervise, but a capped read costs nothing and removes a
+	// whole class of surprise.
+	if json.NewDecoder(io.LimitReader(resp.Body, 8<<10)).Decode(&body) != nil {
+		return "", "", false
+	}
+	return body.Version, body.UpdateRequested, true
+}
 
 func (s Stack) Healthy(ctx context.Context) bool {
 	url := fmt.Sprintf("http://127.0.0.1:%d/api/health", s.Port)

@@ -135,3 +135,55 @@ def test_health_handshake_and_legacy_nudge(tmp_path, monkeypatch) -> None:
         # Native mode never nudges (there is no legacy-launcher story to fix there).
         monkeypatch.setattr(runtime, "in_container", lambda: False)
         assert client.get("/api/health").json()["launcher_update_needed"] is False
+
+
+def test_update_handshake_and_desktop_local_install(tmp_path, monkeypatch) -> None:
+    """The launcher's staged version reaches the page, and only the desk can install it.
+
+    Before this, a waiting update existed solely as a menu item behind a tray icon — the
+    owner's words: "the launcher process is not intuitive and clunky".
+    """
+    from fastapi.testclient import TestClient
+    monkeypatch.setenv("SMARTBRAIN_DB_PATH", str(tmp_path / "upd.duckdb"))
+    from smartbrain_3000.main import create_app
+
+    app = create_app()
+    with TestClient(app) as client:
+        # Nothing staged -> the page hears nothing, and there is nothing to install.
+        assert "update_ready" not in client.get("/api/health").json()
+        assert client.post("/api/update/install", headers={"x-sb-local": "1"}).status_code == 409
+
+        # The launcher stamps what it has staged onto its probe.
+        body = client.get("/api/health", headers={"X-SmartBrain-Update": "9.9.9"}).json()
+        assert body["update_ready"] == "9.9.9"
+        assert "update_requested" not in body, "nobody has asked for it yet"
+
+        # A paired phone may see it, but must not be able to restart the desk.
+        assert client.post("/api/update/install").status_code == 403
+
+        # The person at the desk asks; the launcher hears it on its next handshake.
+        assert client.post("/api/update/install", headers={"x-sb-local": "1"}).json()["version"] == "9.9.9"
+        after = client.get("/api/health", headers={"X-SmartBrain-Update": "9.9.9"}).json()
+        assert after["update_requested"] == "9.9.9"
+
+        # The launcher withdrawing the offer (installed some other way) clears the mirror.
+        assert "update_ready" not in client.get("/api/health").json()
+
+
+def test_launcher_version_is_written_only_when_it_changes(tmp_path, monkeypatch) -> None:
+    # The handshake now arrives every ~30s; rewriting the same value would be thousands of
+    # pointless database writes a day.
+    from fastapi.testclient import TestClient
+    from smartbrain_3000 import db as dbmod
+    monkeypatch.setenv("SMARTBRAIN_DB_PATH", str(tmp_path / "meta.duckdb"))
+    from smartbrain_3000.main import create_app
+
+    app = create_app()
+    with TestClient(app) as client:
+        writes = []
+        real_set = dbmod.meta_set
+        monkeypatch.setattr(dbmod, "meta_set",
+                            lambda conn, k, v: (writes.append(k), real_set(conn, k, v))[1])
+        for _ in range(4):
+            client.get("/api/health", headers={"X-SmartBrain-Launcher": "1.2.3"})
+        assert writes.count("launcher:version") == 1, f"one write, not one per probe: {writes}"

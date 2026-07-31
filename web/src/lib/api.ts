@@ -433,10 +433,25 @@ function browserTimezone(): string {
 
 export const api = {
   health: () =>
-    req<{ status: string; version: string; launcher_update_needed?: boolean }>("/api/health", {
+    req<{
+      status: string;
+      version: string;
+      launcher_update_needed?: boolean;
+      update_ready?: string;      // a version the desktop launcher has downloaded and can install
+      update_requested?: string;  // someone at the desk already asked for it
+    }>("/api/health", {
       headers: browserTimezone() ? { "x-smartbrain-timezone": browserTimezone() } : {},
     }),
   accountStatus: () => req<AccountStatus>("/api/account/status"),
+  // Ask the desktop launcher to install the update it has staged. Desktop-local only: the
+  // marker header is stripped by the phone bridge, so a paired device gets a 403 rather
+  // than the power to restart the machine.
+  installUpdate: () =>
+    req<{ ok: boolean; version: string }>("/api/update/install", {
+      method: "POST",
+      headers: { "x-sb-local": "1" },
+      body: JSON.stringify({}),
+    }),
   setup: (passphrase: string) =>
     req<EmergencyKit>("/api/account/setup", { method: "POST", body: JSON.stringify({ passphrase }) }),
   unlock: (body: { passphrase?: string; recovery_key?: string }) =>

@@ -17,7 +17,7 @@ from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
 import httpx
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from starlette.responses import PlainTextResponse
 
 from . import __version__, db, gateway, mcp_server, runtime, scheduler, serving
@@ -299,8 +299,8 @@ def create_app() -> FastAPI:
         try:
             handshake = request.headers.get("x-smartbrain-launcher", "")
             conn = request.app.state.dbx
-            if handshake:
-                db.meta_set(conn, "launcher:version", handshake[:32])
+            if handshake and handshake[:32] != db.meta_get(conn, "launcher:version"):
+                db.meta_set(conn, "launcher:version", handshake[:32])  # write only on change
             payload["launcher_update_needed"] = bool(
                 runtime.in_container() and not db.meta_get(conn, "launcher:version")
             )
@@ -317,8 +317,45 @@ def create_app() -> FastAPI:
                     db.meta_set(conn, "user:timezone", tz)
         except Exception:
             pass
+        # The launcher's half of the update handshake. It rides this probe (~every 30s) so
+        # the page can offer an install where the owner is actually looking, instead of only
+        # in a menu behind a tray icon. Both facts live in PROCESS memory, never the
+        # database: a restart is exactly what an install does, and clearing the request by
+        # construction is what stops one restart from asking for another.
+        staged = request.headers.get("x-smartbrain-update", "")[:32]
+        if staged:
+            request.app.state.update_ready = staged
+        elif getattr(request.app.state, "update_ready", ""):
+            request.app.state.update_ready = ""  # the launcher withdrew it (installed elsewhere)
+        ready = getattr(request.app.state, "update_ready", "")
+        if ready and ready != __version__:
+            payload["update_ready"] = ready
+            requested = getattr(request.app.state, "update_requested", "")
+            if requested == ready:
+                payload["update_requested"] = requested
         assert payload["status"] == "ok", "health payload must report ok"
         return payload
+
+    @app.post("/api/update/install")
+    def request_install(request: Request) -> dict[str, object]:
+        """Ask the desktop launcher to install the update it has staged.
+
+        Desktop-local ONLY. The remote bridge forwards anything under /api, so without this
+        guard a paired phone — or any web page the owner happened to visit — could restart
+        the machine's stack. A phone is shown the update exists; installing it stays a
+        decision made at the desk.
+
+        The request is a single string in process memory that the launcher claims on its
+        next handshake (within ~30s). It cannot outlive a restart, which is precisely what
+        an install is.
+        """
+        if request.headers.get("x-sb-local") != "1":
+            raise HTTPException(status_code=403, detail="this endpoint is Desktop-local only")
+        ready = getattr(request.app.state, "update_ready", "")
+        if not ready or ready == __version__:
+            raise HTTPException(status_code=409, detail="no update is staged to install")
+        request.app.state.update_requested = ready
+        return {"ok": True, "version": ready}
 
     @app.get("/api/status")
     def status(request: Request) -> dict[str, object]:
