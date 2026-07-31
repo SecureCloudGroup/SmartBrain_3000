@@ -37,9 +37,13 @@ jobs:
         run: test -z "$(gofmt -l .)" || { gofmt -l .; echo 'run gofmt'; exit 1; }
       - name: Vet + test
         working-directory: launcher
+        # ./... , not ./stack/... : every test written for the update channel, the native
+        # supervisor and the self-update swap lives outside stack/ and was never actually
+        # run here. They passed locally in a container and nowhere else — which is not
+        # coverage, it is a habit.
         run: |
           go vet ./...
-          go test ./stack/...
+          go test ./...
 
   macos:
     name: build (macOS universal, ad-hoc signed)

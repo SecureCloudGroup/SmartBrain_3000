@@ -11,6 +11,12 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Fixed
+- The menu-bar version line no longer lags behind an update it just installed: for up to
+  half a minute it could read "Running (updated)" above the *old* version number, which is
+  precisely the confusion the line exists to prevent. It now refreshes the moment a start
+  or an install finishes.
+
 ### Added
 - **Updates now appear in SmartBrain itself, with one button.** A waiting update used to
   exist only as a menu item behind the menu-bar icon — easy to miss, and nothing in the

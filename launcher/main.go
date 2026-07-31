@@ -185,6 +185,20 @@ func showVersions(appVersion string) {
 	mVersion.Show()
 }
 
+// refreshVersionLabel asks the app what it is running and relabels the menu NOW.
+//
+// The handshake would get there within 30s on its own, but the two moments the label
+// changes — a start and an install — are exactly the moments someone is looking at the
+// menu. Leaving "SmartBrain 0.8.9 · desktop app 0.8.10" under a status line that already
+// says "updated" invites the question the label exists to answer.
+func refreshVersionLabel() {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if running, _, ok := stack.Handshake(ctx, sb.Port, stagedVersion); ok {
+		showVersions(running)
+	}
+}
+
 // versionLabel is the pure half of showVersions (menus are not testable; strings are).
 func versionLabel(appVersion, desktopVersion string) string {
 	if desktopVersion != "dev" && desktopVersion != "" && desktopVersion != appVersion {
@@ -370,6 +384,7 @@ func installUpdate() {
 		mUpdateNow.Hide()
 		mUpdateLater.Hide()
 		setStatus("Running ● (native, updated)")
+		refreshVersionLabel() // say the new number now, not at the next handshake
 		return
 	}
 	if err := sb.Up(ctx); err != nil {
@@ -385,6 +400,7 @@ func installUpdate() {
 	} else {
 		setStatus("Updated — click Open in a moment")
 	}
+	refreshVersionLabel() // say the new number now, not at the next handshake
 }
 
 // start ensures Docker is up, starts the stack, waits for health, and opens the browser. TryLock:
@@ -592,6 +608,7 @@ func startNative(ctx context.Context) {
 	}
 	persistNativeMode() // the stack runs natively — plain relaunches must too
 	setStatus("Running ● (native)")
+	refreshVersionLabel() // the menu can answer "which version?" from the first moment
 	if err := stack.OpenBrowser(sb.URL()); err != nil {
 		log.Println("open browser:", err)
 	}
