@@ -479,7 +479,7 @@ def _breaker_record(success: bool) -> None:
                 _BREAKER.warned = True
 
 
-def _auto_reindex(cursor, key: bytes) -> None:
+def _auto_reindex(cursor, key: bytes, should_yield=None) -> None:
     """Background indexer: drain the embedding backlog so uploaded documents become semantically
     searchable on their own. Bounded; never raises. Honors the B11 breaker.
 
@@ -505,6 +505,7 @@ def _auto_reindex(cursor, key: bytes) -> None:
         embedded, _skipped, failed, _err = ingest.reindex_pending(
             KnowledgeBase(cursor, key), model,
             limit=_AUTO_REINDEX_MAX_DOCS, budget_seconds=_AUTO_REINDEX_SECONDS,
+            should_yield=should_yield,  # a chat that arrives mid-backlog goes first
         )
         if embedded or failed:
             log.info("auto-reindex: %d embedded, %d failed", embedded, failed)
@@ -678,7 +679,11 @@ def tick(app) -> int:
     assert cursor is not None, "per-thread cursor required"
     try:
         eager_reindex(cursor, key)  # one-shot post-upgrade catch-up (empty embeddings + docs)
-        _auto_reindex(cursor, key)  # keep semantic search current without a manual Reindex
+        # The backlog drains between user turns, never through them: the peek inside only
+        # sees the model's state at entry, so hand down a live "is someone waiting?" check.
+        started_tick = time.monotonic()
+        _auto_reindex(cursor, key, should_yield=lambda: (
+            getattr(app.state, "last_interactive", 0.0) > started_tick))
         idle = time.monotonic() - getattr(app.state, "last_interactive", 0.0) > _SUMMARIZE_IDLE_SECONDS
         _auto_summarize(cursor, key, idle=idle)  # B1: tree-building waits for a quiet machine
         try:  # chat-trash retention: cheap SQL, isolated so it can never stop a tick

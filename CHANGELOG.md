@@ -12,6 +12,16 @@ to know when a release changes behavior.
 ## [Unreleased]
 
 ### Fixed
+- **Chat no longer waits behind background indexing.** When Knowledge had documents to
+  embed, the background indexer drained them in a tight loop that re-took the single
+  local-model slot for every document — and because that slot has no queue fairness, a
+  chat sent mid-backlog kept losing the race. Measured on a real install: consecutive
+  turns at 16.1s and 28.6s while a backlog drained, against ~8s on an idle machine. The
+  indexer now steps aside the moment a chat arrives and resumes on the next pass (the
+  work was always idempotent). It already yielded to a chat *in flight*; what it missed
+  was a chat that arrived after it started.
+
+### Fixed
 - **Native supervision now verifies instead of trusts.** Two colliding starts (a
   relaunch that didn't stop the running stack, then the first auto-update install)
   exposed the class: a health check passes whenever *something* answers the port, so
