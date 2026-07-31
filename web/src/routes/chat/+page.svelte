@@ -39,6 +39,8 @@
   let msgHasMore = $state(false);
   let input = $state("");
   let busy = $state(false);
+  // Token for a first model response the server parked during the streaming phase (see applyEvents).
+  let primedToken: string | null = null;
   let error = $state("");
   // Set when a turn ran WITHOUT tools (the model can't call them) — otherwise the
   // assistant can sound like it acted when nothing did. Surfaced as a notice.
@@ -682,8 +684,10 @@
   // an AgentResult and flows through handleAgentResult like the JSON endpoint's reply.
   async function runToolTurn(messages: ChatMessage[], cid: string): Promise<void> {
     activity = [];
+    const primed = primedToken;
+    primedToken = null;  // one-time: a retry must ask the model afresh
     try {
-      const res = await api.agentTurnEvents({ messages, model: modelId, conversation_id: cid });
+      const res = await api.agentTurnEvents({ messages, model: modelId, conversation_id: cid, primed });
       const body = res.body;
       if (!body) {
         // No streamable body — the silent JSON path still answers.
@@ -797,6 +801,10 @@
         try { liveGuidance = (JSON.parse(e.data) as { guidance?: Entry["guidance"] }).guidance ?? null; }
         catch { liveGuidance = null; }
       } else if (e.event === "pending" || e.event === "tools") {
+        // The server may have parked the first model response for us; passing its token to
+        // the tool turn saves re-asking the model the same 4,000-token question.
+        try { primedToken = (JSON.parse(e.data) as { primed?: string }).primed ?? null; }
+        catch { primedToken = null; }
         return "fallback";
       } else if (e.event === "error") {
         const msg = describeStreamError(e.data);

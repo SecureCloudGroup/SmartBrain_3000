@@ -49,6 +49,10 @@ class ApproveIn(BaseModel):
 
 
 class TurnIn(BaseModel):
+    # One-time token from a stream's "pending" frame: lets this request REUSE the first
+    # model response the stream already paid for instead of asking again. Absent/stale
+    # simply means the model is asked, exactly as before.
+    primed: str | None = None
     messages: list[dict] = Field(min_length=1)
     model: str | None = None
     capability: str = "chat"
@@ -303,6 +307,7 @@ def agent_turn_events(request: Request, body: TurnIn) -> StreamingResponse:
         usage.record_response(conn, used_model, response)
 
     tally = metrics._TokenTally(sink)
+    primed = _take_primed(body.primed, list(body.messages))  # claimed once, or None
     frames: queue.Queue = queue.Queue(maxsize=256)  # bounded: a runaway emitter blocks, not OOMs
 
     def worker() -> None:
@@ -314,6 +319,7 @@ def agent_turn_events(request: Request, body: TurnIn) -> StreamingResponse:
                 auto_approve=consent.remembered(conn), timeout=_INTERACTIVE_TIMEOUT,
                 result_cap=gateway.result_cap_for(conn, model),
                 on_event=lambda ev: frames.put(("tool", ev)),
+                primed=primed,  # the stream already paid for this turn's first model response
             )
             _record_turn_metric(conn, model, body.conversation_id, started, tally, result)
             if guidance:  # transparency chip data on the terminal frame
@@ -355,9 +361,117 @@ def _sse_event(event: str, payload: dict) -> bytes:
     return f"event: {event}\ndata: {body}\n\n".encode("utf-8")
 
 
+# A streamed tool call arrives in FRAGMENTS: the name in one chunk, the JSON arguments split
+# across several more, keyed by index. Rebuilding them is what lets an action turn reuse its
+# first model round-trip instead of paying for it twice (measured: 4.18s + 3.88s on an identical
+# 4,007-token prompt). Bounded like every other loop here.
+_MAX_STREAMED_TOOL_CALLS = 16
+_MAX_STREAMED_ARG_CHARS = 100_000
+
+
+def _assemble_tool_calls(fragments: list[list[dict]]) -> list[dict] | None:
+    """Rebuild complete tool calls from streamed fragments, or None if they are not sound.
+
+    Returns None on ANYTHING doubtful — a missing name, arguments that do not parse as a JSON
+    object, too many calls, absurd argument length. That is deliberate: the caller then re-runs
+    the turn exactly as it does today, so a mis-assembled call can never reach a tool. Wrong
+    arguments would be worse than a slow answer — some tools run without asking.
+    """
+    assert isinstance(fragments, list), "fragments must be a list"
+    by_index: dict[int, dict] = {}
+    for chunk in fragments:  # bounded by the caller's delta budget
+        if not isinstance(chunk, list):
+            return None
+        for frag in chunk:
+            if not isinstance(frag, dict):
+                return None
+            idx = frag.get("index", 0)
+            if not isinstance(idx, int) or len(by_index) >= _MAX_STREAMED_TOOL_CALLS:
+                return None
+            call = by_index.setdefault(idx, {"id": "", "name": "", "arguments": ""})
+            if frag.get("id"):
+                call["id"] = str(frag["id"])
+            fn = frag.get("function") or {}
+            if not isinstance(fn, dict):
+                return None
+            if fn.get("name"):
+                call["name"] = str(fn["name"])
+            piece = fn.get("arguments")
+            if piece:
+                call["arguments"] += str(piece)
+                if len(call["arguments"]) > _MAX_STREAMED_ARG_CHARS:
+                    return None
+    if not by_index:
+        return None
+    out: list[dict] = []
+    for idx in sorted(by_index):  # stable order: the model's own call order
+        call = by_index[idx]
+        if not call["name"]:
+            return None
+        try:
+            parsed = json.loads(call["arguments"] or "{}")
+        except (ValueError, TypeError):
+            return None
+        if not isinstance(parsed, dict):
+            return None
+        out.append({
+            "id": call["id"] or f"call_{idx}_{uuid.uuid4().hex[:8]}",
+            "type": "function",
+            "function": {"name": call["name"], "arguments": json.dumps(parsed)},
+        })
+    return out
+
+
+# The first model response of an ACTION turn, kept just long enough for the follow-up
+# /events request to claim it. Without this the turn pays for that response twice: the stream
+# path discards it and run_turn re-asks the model with the same 4,000-token prompt (measured
+# 4.18s + 3.88s). Bounded and short-lived: a handful of entries, seconds of life, claimed once.
+_PRIMED_TTL_SECONDS = 120.0
+_MAX_PRIMED = 8
+_primed_lock = threading.Lock()
+_primed: dict[str, tuple[float, list[dict], dict]] = {}
+
+
+def _conversation_key(messages: list[dict]) -> str:
+    """Identity of the CLIENT's conversation (not the server-built prompt, which carries a
+    per-request time note that can tick between the two requests)."""
+    return json.dumps(messages, sort_keys=True, default=str)
+
+
+def _stash_primed(messages: list[dict], response: dict) -> str:
+    """Park a first response for the follow-up request; returns its one-time token."""
+    token = uuid.uuid4().hex
+    now = time.monotonic()
+    with _primed_lock:
+        for key in [k for k, (exp, _m, _r) in _primed.items() if exp <= now]:  # bounded by _MAX_PRIMED
+            _primed.pop(key, None)
+        while len(_primed) >= _MAX_PRIMED:
+            _primed.pop(next(iter(_primed)), None)  # oldest out; this is a cache, never a queue
+        _primed[token] = (now + _PRIMED_TTL_SECONDS, messages, response)
+    return token
+
+
+def _take_primed(token: str | None, messages: list[dict]) -> dict | None:
+    """Claim a parked first response — once, unexpired, and only for the SAME conversation.
+
+    A mismatch or a miss simply returns None and the turn calls the model as it always did,
+    so nothing here can put a stale answer in front of a user.
+    """
+    if not token:
+        return None
+    with _primed_lock:
+        entry = _primed.pop(token, None)
+    if entry is None:
+        return None
+    expiry, stashed, response = entry
+    if time.monotonic() > expiry or _conversation_key(stashed) != _conversation_key(messages):
+        return None
+    return response
+
+
 def _stream_first_response(
     messages: list[dict], model: str, conversation_id: str | None, client: httpx.Client,
-    tools_spec: list[dict], conn=None,
+    tools_spec: list[dict], conn=None, client_messages: list[dict] | None = None,
 ) -> Iterator[bytes]:
     """Stream the FIRST model response as SSE; emit ``done`` on text or ``pending`` on tools.
 
@@ -375,6 +489,8 @@ def _stream_first_response(
     started = time.monotonic()  # for TTFT + duration telemetry (recorded on the plain-answer done)
     ttft_ms: int | None = None
     saw_tools = False
+    tool_fragments: list[list[dict]] = []  # streamed tool-call pieces, reassembled below
+    saw_finish = False  # did the model actually FINISH? (see the completeness gate below)
     # A model may print a tool call as TEXT (```json / a bare {…}). We hold deltas until the
     # first non-whitespace char: if it opens a code fence or JSON object, SUPPRESS the stream
     # and bail to /api/agent/turn, where run_turn recovers the tool call — so raw JSON is
@@ -391,9 +507,16 @@ def _stream_first_response(
                     if chunks > _STREAM_DELTA_BUDGET:  # fixed upper bound (P10 #2)
                         yield _sse_event("error", {"detail": "stream exceeded delta budget"})
                         return
-                    if chunk.get("tool_calls"):  # model started a tool turn — bail to the fallback path
+                    if chunk.get("tool_calls"):  # the model started a tool turn
+                        # Keep reading instead of bailing on the first fragment: a streamed tool
+                        # call arrives in pieces, and collecting them lets the follow-up request
+                        # REUSE this response instead of paying the same prefill again.
                         saw_tools = True
-                        break
+                        tool_fragments.append(chunk["tool_calls"])
+                        if chunk.get("finish_reason"):
+                            saw_finish = True
+                            break
+                        continue
                     delta = chunk.get("delta") or ""
                     if not delta:
                         continue
@@ -421,7 +544,22 @@ def _stream_first_response(
                 yield _sse_event("error", {"status": exc.status_code, "detail": exc.message})
                 return
         if saw_tools or suppress:  # tool turn (structured or text-emitted) — resolve via run_turn
-            yield _sse_event("pending", {"detail": "tool turn — fall back to /api/agent/turn", "model": model})
+            # Hand the assembled first response to the follow-up request when it is sound.
+            # _assemble_tool_calls returns None on anything doubtful, and a missing/expired
+            # token simply means the model is asked again — exactly today's behavior.
+            payload = {"detail": "tool turn — fall back to /api/agent/turn", "model": model}
+            # COMPLETENESS GATE. Only a stream that reached its terminal finish_reason may be
+            # reused. A truncated one assembles arguments that are empty but VALID — and seven
+            # tools (list_documents, list_tasks, email_list, read_schedule_output, …) require no
+            # arguments and run inline WITHOUT approval, so a half-received call would execute.
+            # Without a finish_reason we simply re-ask the model, exactly as before.
+            calls = _assemble_tool_calls(tool_fragments) if (tool_fragments and saw_finish) else None
+            if calls is not None and client_messages is not None:
+                payload["primed"] = _stash_primed(
+                    client_messages,
+                    {"choices": [{"message": {"role": "assistant", "content": "", "tool_calls": calls}}]},
+                )
+            yield _sse_event("pending", payload)
             return
         # Plain streamed answer completed here (no tool fallback) — record ONE turn_metrics row
         # with the true time-to-first-token. Streamed deltas carry no usage block, so tokens are 0.
@@ -489,7 +627,8 @@ def agent_turn_stream(request: Request, body: TurnIn) -> StreamingResponse:
             # semaphore and closing the stream client — instead of at some later GC. A
             # semaphore left held by an abandoned stream wedges every local model call.
             gen = _stream_first_response(messages, model, body.conversation_id, stream_client,
-                                         tools.openai_tools_spec(), conn=request.app.state.dbx)
+                                         tools.openai_tools_spec(), conn=request.app.state.dbx,
+                                         client_messages=list(body.messages))
             try:
                 for frame in gen:  # bounded by the inner generator's own delta budget
                     try:
