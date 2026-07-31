@@ -50,7 +50,12 @@ def record_response(conn, model: str, response: object) -> None:
 # server's own timings. Say it out loud, rarely enough to stay readable.
 _RELOAD_WARN_SECONDS = 1.0
 _RELOAD_WARN_INTERVAL = 900.0  # at most once every 15 minutes per process
-_last_reload_warning = 0.0
+# None means "not yet warned" — NOT 0.0. time.monotonic() counts from an arbitrary origin
+# that is near zero on a freshly booted machine, so a 0.0 sentinel reads as "warned at
+# startup" and would swallow the first report for fifteen minutes. Startup is exactly when
+# a user is most likely to be watching. (CI caught this: its runners boot seconds before
+# the tests run, where a dev machine's clock is hours in.)
+_last_reload_warning: float | None = None
 
 
 def _warn_if_server_is_reloading(model: str, usage: dict) -> None:
@@ -61,7 +66,7 @@ def _warn_if_server_is_reloading(model: str, usage: dict) -> None:
         if not isinstance(seconds, (int, float)) or seconds < _RELOAD_WARN_SECONDS:
             return
         now = time.monotonic()
-        if now - _last_reload_warning < _RELOAD_WARN_INTERVAL:
+        if _last_reload_warning is not None and now - _last_reload_warning < _RELOAD_WARN_INTERVAL:
             return
         _last_reload_warning = now
         log.warning(

@@ -122,7 +122,7 @@ def test_usage_endpoint_time_bounds(client: TestClient, monkeypatch) -> None:
 def test_a_reloading_model_server_is_reported(caplog, monkeypatch) -> None:
     from smartbrain_3000 import usage as usage_mod
 
-    monkeypatch.setattr(usage_mod, "_last_reload_warning", 0.0)
+    monkeypatch.setattr(usage_mod, "_last_reload_warning", None)
     conn = duckdb.connect(":memory:")
     dbmod.run_migrations(conn)
     with caplog.at_level(logging.WARNING):
@@ -131,6 +131,17 @@ def test_a_reloading_model_server_is_reported(caplog, monkeypatch) -> None:
         })
     assert "LOADING the model" in caplog.text
     assert "4.6s" in caplog.text
+
+    # The sentinel must mean "never warned", not "warned at time zero": on a freshly booted
+    # machine time.monotonic() is small, and a 0.0 sentinel would suppress the FIRST report
+    # for fifteen minutes — exactly when someone is most likely to be watching.
+    monkeypatch.setattr(usage_mod, "_last_reload_warning", None)
+    monkeypatch.setattr(usage_mod.time, "monotonic", lambda: 3.0)  # seconds since boot
+    caplog.clear()
+    with caplog.at_level(logging.WARNING):
+        usage_mod.record_response(conn, "mlx/slow", {
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "model_load_duration": 4.6}})
+    assert "LOADING the model" in caplog.text, "a just-booted machine must still get the first report"
 
     # Throttled: a second report inside the window stays quiet rather than flooding the log.
     caplog.clear()
@@ -144,7 +155,7 @@ def test_a_reloading_model_server_is_reported(caplog, monkeypatch) -> None:
 def test_a_healthy_server_says_nothing(caplog, monkeypatch) -> None:
     from smartbrain_3000 import usage as usage_mod
 
-    monkeypatch.setattr(usage_mod, "_last_reload_warning", 0.0)
+    monkeypatch.setattr(usage_mod, "_last_reload_warning", None)
     conn = duckdb.connect(":memory:")
     dbmod.run_migrations(conn)
     with caplog.at_level(logging.WARNING):
