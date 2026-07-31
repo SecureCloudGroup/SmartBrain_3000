@@ -11,6 +11,15 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Added
+- A **stress suite** that shakes the pieces together instead of holding them still:
+  sustained mixed traffic (chats, agent turns, searches and history reads at once),
+  a streamed answer abandoned mid-flight against a real server socket, repeated
+  tool turns, and locking the vault while requests are in flight. Each one asserts
+  the single local-model slot comes back free — the failure that would quietly wedge
+  every later request. Every test was checked by breaking the protection it guards and
+  confirming it fails; two earlier versions passed against broken code and were rewritten.
+
 ### Changed
 - **Action turns no longer ask the model the same question twice.** When you asked for
   something that needs a tool ("add a task…"), the app streamed a first answer, saw the
