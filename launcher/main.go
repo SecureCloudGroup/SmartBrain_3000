@@ -43,6 +43,7 @@ var (
 	mu           sync.Mutex // serialize compose ops so two quick menu clicks can't race
 	mStatus      *systray.MenuItem
 	mGetDocker   *systray.MenuItem
+	mVersion     *systray.MenuItem // what is actually running (learned from the handshake)
 	mUpdateNow   *systray.MenuItem // hidden until a newer image is staged
 	mUpdateLater *systray.MenuItem
 	// Auto-open the Docker download page ONCE when Docker is missing — a helping hand, not a popup
@@ -54,6 +55,9 @@ var (
 	// sentinel is a value no real version equals, so the first surfacing (even of a blank version)
 	// still notifies once.
 	lastNotifiedVersion = "\x00"
+	// The version downloaded and ready to install, "" when there is none. Told to the app on
+	// every handshake so the page can offer the install where the owner is actually looking.
+	stagedVersion string
 	// The single native supervisor (see startWatch): its cancel func, nil when none runs.
 	watchMu     sync.Mutex
 	watchCancel context.CancelFunc
@@ -104,6 +108,12 @@ func onReady() {
 	mOpen := systray.AddMenuItem("Open SmartBrain", "Open the app in your browser")
 	mStatus = systray.AddMenuItem("Starting…", "")
 	mStatus.Disable() // a label, not a button
+	// The running version, so "which version am I on?" has an answer without opening the
+	// app — and so a desktop app that has outrun the SmartBrain it supervises is visible
+	// rather than a mystery (they diverge during an update, which caused real confusion).
+	mVersion = systray.AddMenuItem("", "")
+	mVersion.Disable()
+	mVersion.Hide() // nothing to say until the app answers
 	mGetDocker = systray.AddMenuItem("Get Docker…", "Open the Docker download page")
 	mGetDocker.Hide() // only shown when Docker is actually missing
 	systray.AddSeparator()
@@ -128,6 +138,7 @@ func onReady() {
 
 	go start()         // bring it up on launch
 	go updateChecker() // then quietly watch for a newer image
+	go handshakeLoop() // and keep the app told about what is staged
 
 	go func() {
 		for {
@@ -161,6 +172,59 @@ func onReady() {
 }
 
 func setStatus(s string) { mStatus.SetTitle(s) }
+
+// showVersions labels the menu with what is running. It names BOTH only when they differ:
+// during an update the desktop app is replaced before the app it supervises, and seeing
+// just one number then is how "did the update work?" becomes unanswerable.
+func showVersions(appVersion string) {
+	if appVersion == "" {
+		mVersion.Hide()
+		return
+	}
+	mVersion.SetTitle(versionLabel(appVersion, launcherVersion))
+	mVersion.Show()
+}
+
+// versionLabel is the pure half of showVersions (menus are not testable; strings are).
+func versionLabel(appVersion, desktopVersion string) string {
+	if desktopVersion != "dev" && desktopVersion != "" && desktopVersion != appVersion {
+		return "SmartBrain " + appVersion + " · desktop app " + desktopVersion
+	}
+	return "Version " + appVersion
+}
+
+// How often the launcher and the app exchange their one fact each.
+const handshakeInterval = 30 * time.Second
+
+// handshakeLoop keeps the app told which version is staged, and acts when the person in
+// front of the app asks to install it. Both runtimes serve the app on the same port, so
+// one loop covers Docker and native alike.
+//
+// Deliberately separate from the supervisor: watching that the stack is alive and
+// negotiating updates are different jobs, and a wedged one must not silence the other.
+func handshakeLoop() {
+	for {
+		time.Sleep(handshakeInterval)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		running, requested, ok := stack.Handshake(ctx, sb.Port, stagedVersion)
+		cancel()
+		if !ok {
+			continue
+		}
+		showVersions(running) // the handshake already carries it; the menu may as well say it
+		if requested == "" {
+			continue
+		}
+		// Install only what we actually staged, and never what is already running: the
+		// request lives in the app's memory, so a restart clears it, but a stale one must
+		// not cost a second restart either.
+		if requested != stagedVersion || requested == running {
+			continue
+		}
+		log.Println("install requested from the app:", requested)
+		installUpdate()
+	}
+}
 
 // updateChecker quietly watches for a newer app image: it pulls in the background (download only, so
 // a live session is never disturbed) and, if the pulled :latest differs from what's running, surfaces
@@ -224,6 +288,7 @@ func checkForUpdate() bool {
 	if ver != "" {
 		label += " (v" + ver + ")"
 	}
+	stagedVersion = ver // the app can now offer this install in the page itself
 	setStatus(label)
 	systray.SetTooltip("SmartBrain — " + label)
 	mUpdateNow.Show()
@@ -267,6 +332,7 @@ func checkNativeUpdate(ctx context.Context, upd update.Updater) bool {
 		return false                    // a half-finished download deserves a prompt retry
 	}
 	label := "Update available (v" + latest + ")"
+	stagedVersion = latest // the app can now offer this install in the page itself
 	setStatus(label)
 	systray.SetTooltip("SmartBrain — " + label)
 	mUpdateNow.Show()
@@ -300,6 +366,7 @@ func installUpdate() {
 			return
 		}
 		startWatch(nv)
+		stagedVersion = ""
 		mUpdateNow.Hide()
 		mUpdateLater.Hide()
 		setStatus("Running ● (native, updated)")
@@ -310,6 +377,7 @@ func installUpdate() {
 		log.Println("update:", err)
 		return
 	}
+	stagedVersion = ""
 	mUpdateNow.Hide()
 	mUpdateLater.Hide()
 	if sb.WaitHealthy(ctx, 6*time.Minute) {

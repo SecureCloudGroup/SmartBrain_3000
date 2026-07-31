@@ -90,6 +90,11 @@
   const remoteDown = $derived(remote.status === "offline" && !offline && !needsPairing);
 
   let updateTimer: ReturnType<typeof setInterval> | null = null;
+  // A version the desktop launcher has downloaded and can install. Shown here because the
+  // menu-bar item was the only place it ever appeared, so most people never saw it.
+  let updateReady = $state("");
+  let installing = $state(false);
+  let installFailed = $state(false);
 
   // Registered during initialisation (the only place Svelte allows it) so the version poll
   // cannot outlive the page.
@@ -109,6 +114,7 @@
       const health = await api.health();
       appVersion = displayVersion(health.version);
       loadedVersion = health.version;
+      noteUpdate(health.update_ready);
       watchForAppUpdate();
       // One-time nudge for desktop apps too old to update themselves (they predate the
       // self-update channel, so only the user can perform this last manual update).
@@ -133,10 +139,47 @@
   // during component initialisation, and this function is called from onMount AFTER an
   // await, where that context is gone. Calling it here threw — silently, into onMount's
   // catch — which killed every line after it, including the legacy-launcher banner.
+  // Remember a staged version unless it was already waved away. Dismissal is per version,
+  // so "not now" today does not silence a genuinely newer release tomorrow.
+  function noteUpdate(version: string | undefined): void {
+    if (!version) { updateReady = ""; return; }
+    if (localStorage.getItem("update-dismissed") === version) return;
+    updateReady = version;
+  }
+
+  async function startInstall(): Promise<void> {
+    installing = true;
+    installFailed = false;
+    try {
+      await api.installUpdate();
+      pollFasterWhileInstalling(); // the desktop app acts within ~30s, then restarts
+    } catch {
+      installing = false;
+      installFailed = true; // the launcher may be closed; the menu bar is the other way in
+    }
+  }
+
+  // While an install runs the backend goes away and returns on a new version. Checking once
+  // a minute would leave the page looking stuck for most of it.
+  function pollFasterWhileInstalling(): void {
+    if (updateTimer) clearInterval(updateTimer);
+    updateTimer = setInterval(async () => {
+      try {
+        const health = await api.health();
+        if (loadedVersion && health.version && health.version !== loadedVersion) {
+          location.reload(); // asked for here, so no second click to finish it
+        }
+      } catch {
+        /* the restart is in progress — it will answer again shortly */
+      }
+    }, 2_000);
+  }
+
   function watchForAppUpdate(): void {
     updateTimer = setInterval(async () => {
       try {
         const health = await api.health();
+        noteUpdate(health.update_ready);
         if (loadedVersion && health.version && health.version !== loadedVersion) {
           updatedVersion = displayVersion(health.version);
           if (updateTimer) clearInterval(updateTimer); // said once; the banner stays until the reload
@@ -261,6 +304,25 @@
     </header>
 
     <main class:wrap={!wide} class:wrap-wide={wide}>
+      {#if updateReady && !updatedVersion}
+        <div class="launcher-nudge">
+          {#if installing}
+            <span>Installing SmartBrain {displayVersion(updateReady)}. It restarts in a moment
+              and this page will come back on its own.</span>
+          {:else if installFailed}
+            <span>Couldn&rsquo;t reach the desktop app to start the install. Open the SmartBrain
+              icon in your menu bar and choose <strong>Install update now</strong>.</span>
+            <button class="nudge-dismiss" title="Hide"
+              onclick={() => { installFailed = false; updateReady = ""; }}>✕</button>
+          {:else}
+            <span>SmartBrain <strong>{displayVersion(updateReady)}</strong> is ready to install.
+              Installing restarts it — under a minute, and you&rsquo;ll unlock again afterwards.</span>
+            <button onclick={startInstall}>Install now</button>
+            <button class="nudge-dismiss" title="Not now"
+              onclick={() => { localStorage.setItem("update-dismissed", updateReady); updateReady = ""; }}>✕</button>
+          {/if}
+        </div>
+      {/if}
       {#if updatedVersion}
         <div class="launcher-nudge">
           <span>SmartBrain updated to <strong>{updatedVersion}</strong> while this page was

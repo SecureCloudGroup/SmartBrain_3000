@@ -11,6 +11,21 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Added
+- **Updates now appear in SmartBrain itself, with one button.** A waiting update used to
+  exist only as a menu item behind the menu-bar icon — easy to miss, and nothing in the
+  app you were actually looking at ever mentioned it. When the desktop app has downloaded
+  a new version, the page now says so and offers **Install now**; it restarts, and the page
+  reconnects and reloads on its own. "Not now" hides that version and stays quiet until a
+  newer one arrives. The menu-bar items still work exactly as before.
+  - Installing is **Desktop-only**: a paired phone can see that an update is waiting but
+    cannot restart the machine across the network.
+  - The menu-bar app now shows **which version is running**, so the question has an answer
+    without opening SmartBrain. During an update, when the desktop app has been replaced
+    but the app it supervises has not, it names both numbers instead of one misleading one.
+  - The app still makes **no outbound calls of its own** — it learns about the update from
+    the desktop app on the heartbeat they already exchange, rather than asking the internet.
+
 ### Fixed
 - The one-time "your desktop app needs an update" banner stopped appearing in the previous
   release. A lifecycle call added alongside it threw where the error could not be seen —

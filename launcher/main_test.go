@@ -117,3 +117,23 @@ func TestRetryDelayIsMuchShorterThanTheInterval(t *testing.T) {
 		t.Fatal("the first look after launch should be prompt: users restart expecting an update")
 	}
 }
+
+// The menu must answer "which version am I on?" — and must name BOTH numbers only when
+// they disagree. They disagree exactly during an update, when the desktop app has been
+// replaced but the SmartBrain it supervises has not, which is when a single number is
+// actively misleading.
+func TestVersionLabel(t *testing.T) {
+	cases := []struct {
+		app, launcher, want string
+	}{
+		{"0.8.8", "0.8.8", "Version 0.8.8"},
+		{"0.8.7", "0.8.8", "SmartBrain 0.8.7 · desktop app 0.8.8"},
+		{"0.8.8", "dev", "Version 0.8.8"}, // a dev build is not worth naming
+		{"0.8.8", "", "Version 0.8.8"},    // nor an unstamped one
+	}
+	for _, c := range cases {
+		if got := versionLabel(c.app, c.launcher); got != c.want {
+			t.Fatalf("versionLabel(%q, %q) = %q, want %q", c.app, c.launcher, got, c.want)
+		}
+	}
+}
