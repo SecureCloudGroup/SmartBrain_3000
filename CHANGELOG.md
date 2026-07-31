@@ -20,6 +20,9 @@ to know when a release changes behavior.
   newer one arrives. The menu-bar items still work exactly as before.
   - Installing is **Desktop-only**: a paired phone can see that an update is waiting but
     cannot restart the machine across the network.
+  - The menu-bar app now shows **which version is running**, so the question has an answer
+    without opening SmartBrain. During an update, when the desktop app has been replaced
+    but the app it supervises has not, it names both numbers instead of one misleading one.
   - The app still makes **no outbound calls of its own** — it learns about the update from
     the desktop app on the heartbeat they already exchange, rather than asking the internet.
 

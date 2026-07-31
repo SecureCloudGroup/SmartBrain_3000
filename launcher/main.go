@@ -43,6 +43,7 @@ var (
 	mu           sync.Mutex // serialize compose ops so two quick menu clicks can't race
 	mStatus      *systray.MenuItem
 	mGetDocker   *systray.MenuItem
+	mVersion     *systray.MenuItem // what is actually running (learned from the handshake)
 	mUpdateNow   *systray.MenuItem // hidden until a newer image is staged
 	mUpdateLater *systray.MenuItem
 	// Auto-open the Docker download page ONCE when Docker is missing — a helping hand, not a popup
@@ -107,6 +108,12 @@ func onReady() {
 	mOpen := systray.AddMenuItem("Open SmartBrain", "Open the app in your browser")
 	mStatus = systray.AddMenuItem("Starting…", "")
 	mStatus.Disable() // a label, not a button
+	// The running version, so "which version am I on?" has an answer without opening the
+	// app — and so a desktop app that has outrun the SmartBrain it supervises is visible
+	// rather than a mystery (they diverge during an update, which caused real confusion).
+	mVersion = systray.AddMenuItem("", "")
+	mVersion.Disable()
+	mVersion.Hide() // nothing to say until the app answers
 	mGetDocker = systray.AddMenuItem("Get Docker…", "Open the Docker download page")
 	mGetDocker.Hide() // only shown when Docker is actually missing
 	systray.AddSeparator()
@@ -166,6 +173,26 @@ func onReady() {
 
 func setStatus(s string) { mStatus.SetTitle(s) }
 
+// showVersions labels the menu with what is running. It names BOTH only when they differ:
+// during an update the desktop app is replaced before the app it supervises, and seeing
+// just one number then is how "did the update work?" becomes unanswerable.
+func showVersions(appVersion string) {
+	if appVersion == "" {
+		mVersion.Hide()
+		return
+	}
+	mVersion.SetTitle(versionLabel(appVersion, launcherVersion))
+	mVersion.Show()
+}
+
+// versionLabel is the pure half of showVersions (menus are not testable; strings are).
+func versionLabel(appVersion, desktopVersion string) string {
+	if desktopVersion != "dev" && desktopVersion != "" && desktopVersion != appVersion {
+		return "SmartBrain " + appVersion + " · desktop app " + desktopVersion
+	}
+	return "Version " + appVersion
+}
+
 // How often the launcher and the app exchange their one fact each.
 const handshakeInterval = 30 * time.Second
 
@@ -181,7 +208,11 @@ func handshakeLoop() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		running, requested, ok := stack.Handshake(ctx, sb.Port, stagedVersion)
 		cancel()
-		if !ok || requested == "" {
+		if !ok {
+			continue
+		}
+		showVersions(running) // the handshake already carries it; the menu may as well say it
+		if requested == "" {
 			continue
 		}
 		// Install only what we actually staged, and never what is already running: the
