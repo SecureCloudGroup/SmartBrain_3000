@@ -31,6 +31,15 @@ to know when a release changes behavior.
   as before, because wrong arguments would be far worse than a slower answer.
 
 ### Fixed
+- **An update no longer strands itself for six hours.** The launcher looks for updates
+  every six hours, but a look that *couldn't happen* — because a start, stop, or install
+  was in flight, or because the very first assembly was still running — used to count as
+  a look, pushing the next one a full six hours out. Restarting the app didn't help,
+  because a fresh launch is exactly when something is most likely in flight. A skipped
+  look now retries in 90 seconds, and the first look after launch comes in 20 seconds
+  instead of 45.
+
+### Fixed
 - **A busy model server can no longer cost the assistant its tools.** When the local
   model server was briefly unavailable — it answers "busy" for the seconds it spends
   reloading a model — the assistant quietly re-asked *without any tools* and marked the
