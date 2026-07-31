@@ -939,3 +939,125 @@ def test_genuine_tools_rejection_still_falls_back_to_a_plain_answer(monkeypatch)
                             model="mlx/m", conversation_id=None, turn_id="t2")
     assert attempts == [1], "a non-transient rejection must NOT be retried"
     assert result["degraded"] is True and result["status"] == "complete"
+
+
+# --- reassembling a streamed tool call (so an action turn stops paying twice) ---
+# A streamed tool call arrives in fragments: the name in one chunk, the JSON arguments
+# split across several more. Anything doubtful must return None so the caller falls back
+# to re-running the turn — a mis-assembled call could run a tool with wrong arguments,
+# and some tools run without asking.
+
+
+def test_assembles_a_tool_call_split_across_chunks() -> None:
+    calls = agent_routes._assemble_tool_calls([
+        [{"index": 0, "id": "call_a", "function": {"name": "add_task", "arguments": ""}}],
+        [{"index": 0, "function": {"arguments": '{"title": "call '}}],
+        [{"index": 0, "function": {"arguments": 'the dentist"}'}}],
+    ])
+    assert calls == [{
+        "id": "call_a", "type": "function",
+        "function": {"name": "add_task", "arguments": '{"title": "call the dentist"}'},
+    }]
+
+
+def test_assembles_two_interleaved_calls_in_model_order() -> None:
+    calls = agent_routes._assemble_tool_calls([
+        [{"index": 0, "id": "a", "function": {"name": "kb_search", "arguments": '{"q'}},
+         {"index": 1, "id": "b", "function": {"name": "list_tasks", "arguments": "{}"}}],
+        [{"index": 0, "function": {"arguments": 'uery": "tea"}'}}],
+    ])
+    assert [c["function"]["name"] for c in calls] == ["kb_search", "list_tasks"]
+    assert json.loads(calls[0]["function"]["arguments"]) == {"query": "tea"}
+
+
+def test_doubtful_fragments_refuse_to_assemble() -> None:
+    # Truncated JSON (the stream was cut) -> None, never a half-built call.
+    assert agent_routes._assemble_tool_calls(
+        [[{"index": 0, "id": "a", "function": {"name": "add_task", "arguments": '{"title": "ca'}}]]
+    ) is None
+    # No function name -> None.
+    assert agent_routes._assemble_tool_calls(
+        [[{"index": 0, "id": "a", "function": {"arguments": "{}"}}]]
+    ) is None
+    # Arguments that are not an object -> None.
+    assert agent_routes._assemble_tool_calls(
+        [[{"index": 0, "id": "a", "function": {"name": "add_task", "arguments": '"just a string"'}}]]
+    ) is None
+    # Nothing at all -> None.
+    assert agent_routes._assemble_tool_calls([]) is None
+    # Malformed shapes -> None, not an exception.
+    assert agent_routes._assemble_tool_calls([["not-a-dict"]]) is None
+    assert agent_routes._assemble_tool_calls([[{"index": "zero", "function": {"name": "x"}}]]) is None
+
+
+def test_missing_id_is_synthesized_not_refused() -> None:
+    # Some servers omit the id on the fragment that carries the name; that is not a defect.
+    calls = agent_routes._assemble_tool_calls(
+        [[{"index": 0, "function": {"name": "list_tasks", "arguments": "{}"}}]]
+    )
+    assert calls and calls[0]["id"] == "call_0" and calls[0]["function"]["name"] == "list_tasks"
+
+
+# --- an action turn must pay for its first model response ONCE -----------------
+
+
+def _stream_chunks(*chunks):
+    def fake(messages, model, **kw):
+        return iter(chunks)
+    return fake
+
+
+def test_action_turn_calls_the_model_once_instead_of_twice(http_client: TestClient, monkeypatch) -> None:
+    """The whole point: the streaming phase and the tool phase share one model response.
+
+    Measured before this: an identical 4,007-token prompt was sent twice, 4.18s + 3.88s.
+    """
+    http_client.post("/api/account/setup", json={"passphrase": "correct-horse"})
+    monkeypatch.setattr(gateway, "chat_stream", _stream_chunks(
+        {"delta": "", "tool_calls": [{"index": 0, "id": "c1",
+                                      "function": {"name": "list_tasks", "arguments": ""}}],
+         "finish_reason": None},
+        {"delta": "", "tool_calls": [{"index": 0, "function": {"arguments": "{}"}}],
+         "finish_reason": "tool_calls"},
+    ))
+    body = {"messages": [{"role": "user", "content": "what are my tasks?"}], "capability": "fast_chat"}
+    stream = http_client.post("/api/agent/turn/stream", json=body)
+    assert stream.status_code == 200
+    pending = [d for e, d in _parse_sse(stream.text) if e == "pending"]
+    assert pending and pending[0].get("primed"), "the assembled first response must be offered"
+
+    # The follow-up claims it: the model is NOT asked for that first response again.
+    asked: list = []
+    monkeypatch.setattr(gateway, "chat_with_tools",
+                        lambda *a, **k: asked.append(1) or _text("you have no tasks"))
+    events = http_client.post("/api/agent/turn/events", json={**body, "primed": pending[0]["primed"]})
+    assert events.status_code == 200
+    assert len(asked) == 1, f"one follow-up call after the tool ran, not a repeat of the first ({len(asked)})"
+
+
+def test_a_claimed_token_cannot_be_reused_or_crossed(http_client: TestClient, monkeypatch) -> None:
+    # Tokens are one-shot and conversation-bound: a replay, or a token from a DIFFERENT
+    # conversation, must fall back to asking the model rather than answering from a stash.
+    http_client.post("/api/account/setup", json={"passphrase": "correct-horse"})
+    first = {"role": "user", "content": "first question"}
+    token = agent_routes._stash_primed([first], {"choices": [{"message": {"content": "cached"}}]})
+    assert agent_routes._take_primed(token, [first]) is not None, "the right conversation claims it"
+    assert agent_routes._take_primed(token, [first]) is None, "a second claim gets nothing"
+    token2 = agent_routes._stash_primed([first], {"choices": [{"message": {"content": "cached"}}]})
+    assert agent_routes._take_primed(token2, [{"role": "user", "content": "other"}]) is None
+    assert agent_routes._take_primed(None, [first]) is None
+    assert agent_routes._take_primed("nonsense", [first]) is None
+
+
+def test_unassemblable_tool_calls_fall_back_to_asking_again(http_client: TestClient, monkeypatch) -> None:
+    # Truncated arguments must NOT be handed on: no token, so the turn behaves exactly as before.
+    http_client.post("/api/account/setup", json={"passphrase": "correct-horse"})
+    monkeypatch.setattr(gateway, "chat_stream", _stream_chunks(
+        {"delta": "", "tool_calls": [{"index": 0, "id": "c1",
+                                      "function": {"name": "add_task", "arguments": '{"title": "ca'}}],
+         "finish_reason": "tool_calls"},
+    ))
+    stream = http_client.post("/api/agent/turn/stream", json={
+        "messages": [{"role": "user", "content": "add a task"}], "capability": "fast_chat"})
+    pending = [d for e, d in _parse_sse(stream.text) if e == "pending"]
+    assert pending and "primed" not in pending[0], "a doubtful assembly must never be offered"

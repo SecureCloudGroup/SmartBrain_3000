@@ -375,7 +375,7 @@ def _tools_call(messages: list[dict], model: str, *, timeout: float, usage_sink=
     return data
 
 
-def run_turn(ctx, audit, approvals, *, messages, model, conversation_id, turn_id, start_step=0, start_calls=0, usage_sink=None, auto_approve=frozenset(), timeout=60.0, result_cap=_RESULT_CAP, on_event=None) -> dict:
+def run_turn(ctx, audit, approvals, *, messages, model, conversation_id, turn_id, start_step=0, start_calls=0, usage_sink=None, auto_approve=frozenset(), timeout=60.0, result_cap=_RESULT_CAP, on_event=None, primed=None) -> dict:
     """Run the bounded loop from ``start_step``; return a terminal/awaiting result.
 
     ``auto_approve`` is the set of REVIEWED tool names the user has remembered;
@@ -402,7 +402,12 @@ def run_turn(ctx, audit, approvals, *, messages, model, conversation_id, turn_id
                                        reason="context budget reached", steps=step,
                                        result_cap=result_cap, on_event=on_event)
         try:
-            data = _tools_call(messages, model, timeout=timeout, usage_sink=usage_sink)
+            if primed is not None and step == start_step:
+                # The streaming endpoint already made this exact call and kept the result;
+                # asking again would re-prefill ~4,000 tokens for an identical answer.
+                data, primed = primed, None
+            else:
+                data = _tools_call(messages, model, timeout=timeout, usage_sink=usage_sink)
         except gateway.GatewayError as exc:
             if calls == 0:  # nothing ran yet: a model that can't use tools can still answer plainly
                 log.warning("tools call failed (%s); trying a plain answer: %s", exc.status_code, exc.message)

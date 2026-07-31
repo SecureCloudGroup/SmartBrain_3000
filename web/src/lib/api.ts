@@ -584,6 +584,9 @@ export const api = {
     model?: string;
     capability?: string;
     conversation_id?: string | null;
+    // One-time token from the stream's "pending" frame: lets the server reuse the first
+    // model response it already produced instead of asking for it again.
+    primed?: string | null;
   }): Promise<Response> => {
     await remoteReady;
     const res = await fetch("/api/agent/turn/events", {

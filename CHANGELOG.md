@@ -11,6 +11,16 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Changed
+- **Action turns no longer ask the model the same question twice.** When you asked for
+  something that needs a tool ("add a task…"), the app streamed a first answer, saw the
+  model reach for a tool, threw that response away, and re-ran the whole turn from the
+  start — sending an identical ~4,000-token prompt a second time (measured: 4.18s then
+  3.88s). The first response is now reassembled from the stream and handed to the tool
+  phase, so it is paid for once. If anything about that response is doubtful — truncated
+  arguments, a missing tool name — it is discarded and the model is asked again exactly
+  as before, because wrong arguments would be far worse than a slower answer.
+
 ### Fixed
 - **A busy model server can no longer cost the assistant its tools.** When the local
   model server was briefly unavailable — it answers "busy" for the seconds it spends
