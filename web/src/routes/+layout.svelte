@@ -1,6 +1,6 @@
 <script lang="ts">
   import "../app.css";
-  import { onMount } from "svelte";
+  import { onMount, onDestroy } from "svelte";
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import { account } from "$lib/account.svelte";
@@ -24,6 +24,10 @@
   let { children } = $props();
   let locking = $state(false);
   let appVersion = $state(""); // "vX.Y.Z" once /api/health answers; "" (hidden) until then / on failure
+  // SmartBrain updates itself underneath an open tab, which leaves the page — and the version
+  // under the logo — showing the OLD build until someone reloads. That reads as "the update
+  // didn't work" (it happened twice in one day). Notice it and say so plainly instead.
+  let updatedVersion = $state(""); // set when the backend reports a version we didn't load with
   let launcherNudge = $state(false); // one-time "update the desktop app" banner (legacy launchers only)
   let moreOpen = $state(false); // mobile: the More sheet above the tab bar
   // Chat + Help get the full-width container (chat for the log, help for its own
@@ -96,6 +100,8 @@
     try {
       const health = await api.health();
       appVersion = displayVersion(health.version);
+      loadedVersion = health.version;
+      watchForAppUpdate();
       // One-time nudge for desktop apps too old to update themselves (they predate the
       // self-update channel, so only the user can perform this last manual update).
       launcherNudge = !!health.launcher_update_needed &&
@@ -104,6 +110,26 @@
       // leave the version hidden rather than surface a broken "v"
     }
   });
+
+  // The version this tab loaded with; a change means the app updated under our feet.
+  let loadedVersion = "";
+
+  // Notice an update that landed while this tab was open. Cheap: one health call a minute,
+  // the same request the page already makes on load, and it stops as soon as it fires.
+  function watchForAppUpdate(): void {
+    const timer = setInterval(async () => {
+      try {
+        const health = await api.health();
+        if (loadedVersion && health.version && health.version !== loadedVersion) {
+          updatedVersion = displayVersion(health.version);
+          clearInterval(timer); // said once; the banner stays until the reload
+        }
+      } catch {
+        /* offline or restarting — try again next minute */
+      }
+    }, 60_000);
+    onDestroy(() => clearInterval(timer));
+  }
 
   // Keep the Activity badge fresh: refresh the pending count on each route change
   // while unlocked (cheap, no timer; Chat + Activity also nudge it directly).
@@ -219,6 +245,15 @@
     </header>
 
     <main class:wrap={!wide} class:wrap-wide={wide}>
+      {#if updatedVersion}
+        <div class="launcher-nudge">
+          <span>SmartBrain updated to <strong>{updatedVersion}</strong> while this page was
+            open — reload to use the new version.</span>
+          <button onclick={() => location.reload()}>Reload</button>
+          <button class="nudge-dismiss" title="Keep using this page"
+            onclick={() => { updatedVersion = ""; }}>✕</button>
+        </div>
+      {/if}
       {#if launcherNudge}
         <!-- Pre-self-update desktop apps can't reach new capabilities on their own; this is
              the ONE manual update a user ever does. Dismiss lasts the session; the flag
