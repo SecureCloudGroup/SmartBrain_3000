@@ -169,15 +169,31 @@ func setStatus(s string) { mStatus.SetTitle(s) }
 // Baked at release time via -ldflags (see launcher.yml); "dev" never self-updates.
 var launcherVersion = "dev"
 
+// How long to wait before looking for updates again. A check that could not run (an
+// install/start was holding the operation lock) must not push the next look SIX HOURS
+// away — that is how "I restarted twice and nothing happened" happens: the first launch
+// is busy assembling, the check skips, and the user is left waiting out the full period.
+const (
+	updateFirstDelay = 20 * time.Second
+	updateInterval   = 6 * time.Hour
+	updateRetryDelay = 90 * time.Second
+)
+
 func updateChecker() {
-	time.Sleep(45 * time.Second) // let first-run startup settle before the first check
+	delay := updateFirstDelay // let startup settle, but only briefly
 	for {
-		checkForUpdate()
-		time.Sleep(6 * time.Hour)
+		time.Sleep(delay)
+		if checkForUpdate() {
+			delay = updateInterval
+		} else {
+			delay = updateRetryDelay // we never actually got to look — try again soon
+		}
 	}
 }
 
-func checkForUpdate() {
+// checkForUpdate reports whether a check actually happened; false means something was
+// in flight and the caller should retry soon rather than wait out the full interval.
+func checkForUpdate() bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 	// The launcher updates ITSELF first: a newer release means new compose/native
@@ -193,17 +209,16 @@ func checkForUpdate() {
 		} else {
 			stack.Notify("SmartBrain updated", "Restarting with version "+ver+"…")
 			systray.Quit() // the replacement is already running, detached
-			return
+			return true
 		}
 	}
 	if nativeMode() {
-		checkNativeUpdate(ctx, upd)
-		return // everything below is Docker's update path (image pull + staging)
+		return checkNativeUpdate(ctx, upd) // everything below is Docker's update path
 	}
 	_ = sb.Pull(ctx) // best-effort background pre-fetch; offline is fine
 	ready, ver, err := sb.UpdateReady(ctx)
 	if err != nil || !ready {
-		return // offline / daemon down / already latest — surface nothing
+		return true // offline / daemon down / already latest — a real look, nothing to do
 	}
 	label := "Update available"
 	if ver != "" {
@@ -217,6 +232,7 @@ func checkForUpdate() {
 		lastNotifiedVersion = ver
 		stack.Notify("SmartBrain update available", "Open the menu to install now — or it installs next time you start.")
 	}
+	return true
 }
 
 // checkNativeUpdate is the native stack's equivalent of the image pre-fetch: when a
@@ -226,18 +242,18 @@ func checkForUpdate() {
 // `current`, "Install on next start" needs no further mechanism, and "Install update
 // now" is just a supervised restart. Failures leave the running version current and
 // retry on the next 6-hour tick.
-func checkNativeUpdate(ctx context.Context, upd update.Updater) {
+func checkNativeUpdate(ctx context.Context, upd update.Updater) bool {
 	nv := native.New(sb.Dir)
 	current := nv.Current()
 	if current == "" {
-		return // nothing assembled yet — start() owns the first assembly
+		return false // still assembling the first version — look again shortly, not in 6h
 	}
 	latest, ok := upd.Latest(ctx)
 	if !ok || !update.Newer(latest, current) {
-		return // offline / API trouble / already newest — surface nothing
+		return true // offline / API trouble / already newest — a real look, nothing to do
 	}
 	if !mu.TryLock() {
-		return // a start/stop/install is in flight — this tick skips, the next retries
+		return false // a start/stop/install is in flight — retry soon, do not wait out the interval
 	}
 	defer mu.Unlock()
 	setStatus("Downloading update v" + latest + "…")
@@ -247,8 +263,8 @@ func checkNativeUpdate(ctx context.Context, upd update.Updater) {
 	defer cancel()
 	if err := nv.Assemble(asmCtx, latest); err != nil {
 		log.Println("native update:", err)
-		setStatus("Running ● (native)") // current version untouched; retry in 6h
-		return
+		setStatus("Running ● (native)") // current version untouched
+		return false                    // a half-finished download deserves a prompt retry
 	}
 	label := "Update available (v" + latest + ")"
 	setStatus(label)
@@ -259,6 +275,7 @@ func checkNativeUpdate(ctx context.Context, upd update.Updater) {
 		lastNotifiedVersion = latest
 		stack.Notify("SmartBrain update ready", "Install from the menu now — or it installs next time you start.")
 	}
+	return true
 }
 
 // installUpdate applies a waiting update immediately: Up() pulls (a no-op — already staged) then
