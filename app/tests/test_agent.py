@@ -890,3 +890,52 @@ def test_stream_closes_its_producer_so_the_model_slot_is_released(
     )
     assert r.status_code == 200
     assert cleaned == [True], "the producer generator must be closed (releases model slot + client)"
+
+
+# --- a transient server error must never strip the tools (trust-critical) ------
+# Live evidence: the local model server returned 409 "is busy; cannot reload runtime
+# settings variant" six times while reloading a model. 409 is not a tools rejection, but
+# ANY GatewayError on the first call fell through to the plain-answer fallback — which
+# re-asks with NO tools and flags the turn degraded. An action request then reaches a
+# model that cannot act, and such a model narrates the action instead of performing it.
+
+
+def test_transient_error_retries_with_tools_instead_of_degrading(monkeypatch) -> None:
+    ctx, audit, approvals = _wired()
+    monkeypatch.setattr(agent, "_TRANSIENT_RETRY_SECONDS", 0.0)
+    attempts: list[list] = []
+
+    def flaky(messages, model, tools_spec, **kw):
+        attempts.append(tools_spec)
+        if len(attempts) == 1:
+            raise gateway.GatewayError(409, "Model 'x' is busy; cannot reload runtime settings variant")
+        return _toolcalls(("add_task", {"title": "call the dentist"}))
+
+    monkeypatch.setattr(gateway, "chat_with_tools", flaky)
+    result = agent.run_turn(ctx, audit, approvals,
+                            messages=[{"role": "user", "content": "add a task to call the dentist"}],
+                            model="mlx/m", conversation_id=None, turn_id="t1")
+    assert len(attempts) == 2, "a transient failure must be retried"
+    assert attempts[1], "the RETRY must still carry the tools spec"
+    assert not result.get("degraded"), "a retried turn is not a degraded turn"
+    # The action parked for approval — only possible because the tools survived.
+    assert result["status"] == "awaiting_approval", result
+    assert [p["tool"] for p in result["pending"]] == ["add_task"]
+
+
+def test_genuine_tools_rejection_still_falls_back_to_a_plain_answer(monkeypatch) -> None:
+    # The forgiving path stays for models that truly cannot use tools: one attempt, no retry.
+    ctx, audit, approvals = _wired()
+    attempts: list[int] = []
+
+    def refuses(messages, model, tools_spec, **kw):
+        attempts.append(1)
+        raise gateway.GatewayError(400, "tools are not supported by this model")
+
+    monkeypatch.setattr(gateway, "chat_with_tools", refuses)
+    monkeypatch.setattr(gateway, "chat", lambda *a, **k: _text("I can't use tools, but here's an answer."))
+    result = agent.run_turn(ctx, audit, approvals,
+                            messages=[{"role": "user", "content": "hi"}],
+                            model="mlx/m", conversation_id=None, turn_id="t2")
+    assert attempts == [1], "a non-transient rejection must NOT be retried"
+    assert result["degraded"] is True and result["status"] == "complete"

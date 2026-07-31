@@ -12,6 +12,15 @@ to know when a release changes behavior.
 ## [Unreleased]
 
 ### Fixed
+- **A busy model server can no longer cost the assistant its tools.** When the local
+  model server was briefly unavailable — it answers "busy" for the seconds it spends
+  reloading a model — the assistant quietly re-asked *without any tools* and marked the
+  answer degraded. For a request like "add a task", that hands the job to a model that
+  cannot act, and a model that cannot act tends to describe the action instead of
+  performing it: the exact failure the approval system exists to prevent. Observed six
+  times on a real install. A transient failure is now retried **with** the tools, so the
+  action parks for your approval as it should; the forgiving plain-answer path stays only
+  for models that genuinely cannot use tools.
 - **Chat no longer waits behind background indexing.** When Knowledge had documents to
   embed, the background indexer drained them in a tight loop that re-took the single
   local-model slot for every document — and because that slot has no queue fairness, a
@@ -20,8 +29,6 @@ to know when a release changes behavior.
   indexer now steps aside the moment a chat arrives and resumes on the next pass (the
   work was always idempotent). It already yielded to a chat *in flight*; what it missed
   was a chat that arrived after it started.
-
-### Fixed
 - **Native supervision now verifies instead of trusts.** Two colliding starts (a
   relaunch that didn't stop the running stack, then the first auto-update install)
   exposed the class: a health check passes whenever *something* answers the port, so
