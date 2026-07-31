@@ -43,6 +43,13 @@ to know when a release changes behavior.
   version under the logo and the old interface — which reads as "the update didn't work"
   (it caused exactly that confusion twice in one day). The page now notices the version
   change and offers a one-click **Reload**, or you can dismiss it and keep working.
+- **SmartBrain now says so when your model server is reloading its model on every
+  request.** A misconfigured local server can spend seconds loading the model before
+  each answer — on a real install that was 4.5 seconds of every turn, three times the
+  cost of the actual work, for five days — and nothing in the app mentioned it, because
+  usage tracking only ever looked at token counts. Diagnosing it meant reading the model
+  server's own logs. It now appears in SmartBrain's log with what to check, at most once
+  every fifteen minutes.
 
 ### Fixed
 - **A busy model server can no longer cost the assistant its tools.** When the local
