@@ -38,6 +38,11 @@ to know when a release changes behavior.
   because a fresh launch is exactly when something is most likely in flight. A skipped
   look now retries in 90 seconds, and the first look after launch comes in 20 seconds
   instead of 45.
+- **An open tab now notices when SmartBrain updates underneath it.** The app updates
+  itself while you're using it, but a page loaded before the update kept showing the old
+  version under the logo and the old interface — which reads as "the update didn't work"
+  (it caused exactly that confusion twice in one day). The page now notices the version
+  change and offers a one-click **Reload**, or you can dismiss it and keep working.
 
 ### Fixed
 - **A busy model server can no longer cost the assistant its tools.** When the local
