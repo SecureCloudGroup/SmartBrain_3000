@@ -5,10 +5,10 @@ package native
 
 import (
 	"archive/tar"
-	"errors"
 	"archive/zip"
 	"compress/gzip"
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
