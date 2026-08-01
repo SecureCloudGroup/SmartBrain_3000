@@ -62,6 +62,19 @@ brew install --cask securecloudgroup/tap/smartbrain
 ```powershell
 scoop bucket add securecloudgroup https://github.com/SecureCloudGroup/scoop-bucket
 scoop install securecloudgroup/smartbrain
+```
+
+**Linux** — there is no desktop launcher for Linux yet, so run the release stack in
+Docker. Download the compose file and start it:
+
+```sh
+curl -fsSLO https://raw.githubusercontent.com/SecureCloudGroup/SmartBrain_3000/main/compose/docker-compose.release.yml
+docker compose -f docker-compose.release.yml up -d
+```
+
+Then open **http://localhost:33000**.
+
+Homebrew and Scoop install a small **desktop launcher** — a menu-bar / tray app. On its
 first start it downloads and verifies everything SmartBrain needs (a Python runtime, the
 app itself, and the model gateway) into a folder it owns, then runs it and opens your
 browser. That download is a few hundred megabytes, so allow a few minutes the first time;

@@ -41,6 +41,16 @@ scoop install securecloudgroup/smartbrain
 ```
 
 **Linux** — no desktop app yet. Download the release compose file and start it:
+
+```sh
+curl -fsSLO https://raw.githubusercontent.com/SecureCloudGroup/SmartBrain_3000/main/compose/docker-compose.release.yml
+docker compose -f docker-compose.release.yml up -d
+```
+
+Open **http://localhost:33000** and complete first-run setup below. Your data lives in
+named Docker volumes; back it up with the in-app encrypted backup.
+
+On macOS the launcher starts by itself once Homebrew finishes; on Windows, open
 **SmartBrain** from the Start menu. The menu-bar icon shows what it is doing. The first
 start downloads a few hundred megabytes, so give it a few minutes — the status line reads
 *"Downloading SmartBrain…"*, then *"Starting (native)…"*, then *"Running ● (native)"*.
