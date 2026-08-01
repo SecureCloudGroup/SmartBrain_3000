@@ -11,7 +11,9 @@ Design rules, in the order they matter:
 * It must work when the app is DOWN. That is when people run it. Every check degrades to
   a useful answer instead of an exception, and nothing here needs the app to be alive.
 * It is READ-ONLY unless you pass --fix. Then each repair is described in full and
-  confirmed one at a time. Your database is never touched by any of them.
+  confirmed one at a time. Your database is never touched by any of them, and none of
+  them kills or signals a process — the one that restarts SmartBrain does it by asking
+  SmartBrain, through the same button the app itself offers, and says so before it runs.
 * It never mentions Docker on a machine that runs the Docker-free build — except in the
   one case where a leftover container is genuinely holding a port we need, and on the
   platforms (Intel Macs, ARM Linux) that have no native build at all.
@@ -58,6 +60,8 @@ BIG_LOG_BYTES = 200 * 1024 * 1024
 # seconds and uvicorn logs every one of them, so a few hundred kilobytes is only an hour or
 # two — not enough to still contain the morning's failure.
 LOG_TAIL_BYTES = 2 * 1024 * 1024
+# What uvicorn prints when the app starts. Everything before the last one is a previous run.
+LOG_BOOT_MARKER = "Started server process"
 # app/smartbrain_3000/gateway.py: the local providers and the default embedding tag.
 LOCAL_PROVIDERS = ("ollama", "mlx", "mlxe")
 EMBED_MODEL_TAG = "nomic-embed-text:v1.5"
@@ -357,7 +361,9 @@ def port_listeners(port: int, system: str) -> list[tuple[str, int]]:
                 pid = int(parts[-1])
                 found.append((pid_command(pid, system).strip()[:60] or f"pid {pid}", pid))
         return found
-    code, out = run_cmd(["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN"])
+    # +c 0: without it lsof truncates COMMAND to nine characters, so Docker Desktop's
+    # listener reads as "com.docke" and every attempt to recognise it fails.
+    code, out = run_cmd(["lsof", "-nP", "+c", "0", f"-iTCP:{port}", "-sTCP:LISTEN"])
     if code != 0 or not out:
         return []
     listeners = []
@@ -454,14 +460,23 @@ def _version_key(version: str) -> tuple:
 
 
 def _read_log_tail(path: Path, limit: int = LOG_TAIL_BYTES) -> str:
+    """The end of a log, trimmed to the CURRENT run of the app.
+
+    Everything before the last start belongs to a problem that has already been restarted
+    past. Reporting it would mean warning about "address already in use" for as long as the
+    line stayed in the file — which is how a diagnostic becomes noise people stop reading.
+    Uvicorn announces each start, so there is an exact place to cut.
+    """
     try:
         size = path.stat().st_size
         with path.open("rb") as fh:
             if size > limit:
                 fh.seek(size - limit)
-            return fh.read(limit).decode("utf-8", "replace")
+            text = fh.read(limit).decode("utf-8", "replace")
     except OSError:
         return ""
+    start = text.rfind(LOG_BOOT_MARKER)
+    return text[start:] if start >= 0 else text
 
 
 def gather(m: Machine) -> Snapshot:
@@ -488,12 +503,11 @@ def gather(m: Machine) -> Snapshot:
     if health is not None:
         snap.app_port_answered = True
         status, body = health
-        if isinstance(body, dict):
+        if status == 200 and isinstance(body, dict):
             snap.app_health = body
         else:
-            snap.app_port_body = str(body)[:200]
-        if status != 200:
-            snap.app_health = None
+            # Whatever it was, keep a scrap of it: it is the only evidence of WHO answered.
+            snap.app_port_body = json.dumps(body)[:200] if isinstance(body, dict) else str(body)[:200]
     if snap.app_ok:
         account = http_json(m.app_url() + "/api/account/status")
         if account and isinstance(account[1], dict):
@@ -504,7 +518,9 @@ def gather(m: Machine) -> Snapshot:
         snap.gateway_answered = True
         body = providers[1]
         if isinstance(body, dict) and isinstance(body.get("providers"), list):
-            snap.providers = body["providers"]
+            # Keep only entries shaped the way we read them. The gateway is another program's
+            # API; a diagnostic that crashes on an unexpected reply is worse than useless.
+            snap.providers = [p for p in body["providers"] if isinstance(p, dict)]
 
     snap.log_tail = _read_log_tail(m.app_log)
     return snap
@@ -540,60 +556,72 @@ def check_install(m: Machine, s: Snapshot) -> list[Finding]:
     if not m.native_supported:
         return out  # the Docker path owns everything below; do not invent native complaints
 
+    out.extend(_check_selected_version(m, s))
+    out.extend(_check_partial_downloads(m, s))
+    out.extend(_check_native_marker(m, s))
+    return out
+
+
+def _check_selected_version(m: Machine, s: Snapshot) -> list[Finding]:
+    """Does `current` name a version that is really, completely there?"""
     if not s.current:
         detail = ("No version has finished assembling yet."
                   if not s.complete_versions
                   else f"Assembled versions are present ({', '.join(s.complete_versions)}) but none is selected.")
-        out.append(Finding(
+        return [Finding(
             FAIL, "No version is selected to run", detail,
             ("Open SmartBrain from the menu bar / system tray. It downloads and selects a version by itself.",
              "A first assembly is a few hundred megabytes and takes a few minutes."),
             fix=_fix_point_current(m, s),
-        ))
-    elif not s.current_complete:
-        missing_entirely = not (m.versions_dir / s.current).exists()
-        out.append(Finding(
-            FAIL, f"The selected version ({s.current}) is not a complete install",
-            "There is no folder for it — it was removed, or a download never finished."
-            if missing_entirely else
-            "Missing: " + ", ".join(s.current_missing_parts) + ". A download was interrupted.",
-            ("SmartBrain cannot start from a half-finished install.",),
-            fix=_fix_point_current(m, s),
-        ))
-    else:
-        out.append(Finding(OK, f"Version {s.current} is assembled and complete"))
+        )]
+    if s.current_complete:
+        return [Finding(OK, f"Version {s.current} is assembled and complete")]
+    missing_entirely = not (m.versions_dir / s.current).exists()
+    return [Finding(
+        FAIL, f"The selected version ({s.current}) is not a complete install",
+        "There is no folder for it — it was removed, or a download never finished."
+        if missing_entirely else
+        "Missing: " + ", ".join(s.current_missing_parts) + ". A download was interrupted.",
+        ("SmartBrain cannot start from a half-finished install.",),
+        fix=_fix_point_current(m, s),
+    )]
 
-    if s.partial_dirs:
-        names = ", ".join(p.name for p in s.partial_dirs)
-        out.append(Finding(
-            WARN, "Leftover pieces from an interrupted download", names,
-            fix=Fix(
-                "Delete the interrupted downloads",
-                "Removes only the .tmp-* scratch folders under\n"
-                f"  {m.versions_dir}\n"
-                "They are the working area of a download that was killed part way. Nothing runs from\n"
-                "them and nothing reads them; a future update simply starts a fresh one.",
-                lambda: _delete_all(s.partial_dirs),
-            ),
-        ))
 
-    if s.complete_versions and not m.native_marker.exists():
-        out.append(Finding(
-            WARN, "The Docker-free marker is missing",
-            f"{m.native_marker} does not exist, but a native install does.",
-            ("Without it, a plain relaunch of the launcher can try to start the Docker version instead,",
-             "which then collides with the running app and blames the network."),
-            fix=Fix(
-                "Write the Docker-free marker",
-                f"Creates the one-byte file\n  {m.native_marker}\n"
-                "It is exactly what the launcher writes itself after a successful native start, and\n"
-                "deleting it again is how you would deliberately go back to Docker.",
-                lambda: _write_marker(m),
-            ),
-        ))
-    elif m.native_marker.exists():
-        out.append(Finding(OK, "Docker-free mode is remembered across restarts"))
-    return out
+def _check_partial_downloads(m: Machine, s: Snapshot) -> list[Finding]:
+    if not s.partial_dirs:
+        return []
+    return [Finding(
+        WARN, "Leftover pieces from an interrupted download",
+        ", ".join(p.name for p in s.partial_dirs),
+        fix=Fix(
+            "Delete the interrupted downloads",
+            "Removes only the .tmp-* scratch folders under\n"
+            f"  {m.versions_dir}\n"
+            "They are the working area of a download that was killed part way. Nothing runs from\n"
+            "them and nothing reads them; a future update simply starts a fresh one.",
+            lambda: _delete_all(s.partial_dirs),
+        ),
+    )]
+
+
+def _check_native_marker(m: Machine, s: Snapshot) -> list[Finding]:
+    if m.native_marker.exists():
+        return [Finding(OK, "Docker-free mode is remembered across restarts")]
+    if not s.complete_versions:
+        return []  # nothing native has ever run here, so there is nothing to remember
+    return [Finding(
+        WARN, "The Docker-free marker is missing",
+        f"{m.native_marker} does not exist, but a native install does.",
+        ("Without it, a plain relaunch of the launcher can try to start the Docker version instead,",
+         "which then collides with the running app and blames the network."),
+        fix=Fix(
+            "Write the Docker-free marker",
+            f"Creates the one-byte file\n  {m.native_marker}\n"
+            "It is exactly what the launcher writes itself after a successful native start, and\n"
+            "deleting it again is how you would deliberately go back to Docker.",
+            lambda: _write_marker(m),
+        ),
+    )]
 
 
 def check_processes(m: Machine, s: Snapshot) -> list[Finding]:
@@ -729,71 +757,79 @@ def check_ports(m: Machine, s: Snapshot) -> list[Finding]:
 
 
 def check_app_state(m: Machine, s: Snapshot) -> list[Finding]:
-    out: list[Finding] = []
+    return _check_running_version(m, s) + _check_vault(m, s) + _check_database(m, s)
 
-    if s.app_ok and s.current and s.running_version:
-        if s.running_version == s.current:
-            out.append(Finding(OK, f"Running the version that is selected ({s.current})"))
-        elif _version_key(s.current) > _version_key(s.running_version):
-            out.append(Finding(
-                NOTE, f"Version {s.current} is downloaded and waiting",
-                f"You are running {s.running_version}. The update installs the next time SmartBrain starts.",
-                ("Nothing is wrong. It applies on the next start, or from the menu now.",),
-                fix=Fix(
-                    f"Install version {s.current} now",
-                    "Asks the desktop launcher to restart SmartBrain onto the version already downloaded.\n"
-                    "SmartBrain stops and starts again (a few seconds), and — as after any restart — you\n"
-                    "will need to unlock it with your passphrase. Your data is not touched, and the\n"
-                    "previous version stays on disk.",
-                    lambda: _request_install(m),
-                ),
-            ))
-        else:
-            out.append(Finding(
-                WARN, "The running version is newer than the selected one",
-                f"Running {s.running_version}; `current` says {s.current}.",
-                ("Usually means the app was started by hand. A Stop + Restart from the menu settles it.",),
-            ))
 
-    if s.account is not None:
-        if not s.account.get("initialized"):
-            out.append(Finding(NOTE, "First-run setup has not been completed",
-                               f"Open {m.app_url()} and choose a passphrase."))
-        elif not s.account.get("unlocked"):
-            out.append(Finding(
-                NOTE, "SmartBrain is locked",
-                "This is the normal state after every start, and it looks a lot like being broken.",
-                (f"Unlock it at {m.app_url()}.",
-                 "Your model providers are registered at unlock, so chat and search stay unavailable until then."),
-            ))
-        else:
-            out.append(Finding(OK, "The vault is unlocked"))
-            if not s.account.get("has_recovery"):
-                out.append(Finding(WARN, "No Emergency Kit has been saved",
-                                   "Without it, a forgotten passphrase means the data cannot be read again.",
-                                   (f"Create one at {m.app_url()}/settings/account.",)))
+def _check_running_version(m: Machine, s: Snapshot) -> list[Finding]:
+    """Is the app running the version that is selected — or is an update sitting on disk?"""
+    if not (s.app_ok and s.current and s.running_version):
+        return []
+    if s.running_version == s.current:
+        return [Finding(OK, f"Running the version that is selected ({s.current})")]
+    if _version_key(s.current) > _version_key(s.running_version):
+        return [Finding(
+            NOTE, f"Version {s.current} is downloaded and waiting",
+            f"You are running {s.running_version}. The update installs the next time SmartBrain starts.",
+            ("Nothing is wrong. It applies on the next start, or from the menu now.",),
+            fix=Fix(
+                f"Install version {s.current} now",
+                "Asks the desktop launcher to restart SmartBrain onto the version already downloaded.\n"
+                "Nothing is killed: this is the same request the app's own update button makes.\n"
+                "SmartBrain stops and starts again (a few seconds), and — as after any restart — you\n"
+                "will need to unlock it with your passphrase. Your data is not touched, and the\n"
+                "previous version stays on disk.",
+                lambda: _request_install(m),
+            ),
+        )]
+    return [Finding(
+        WARN, "The running version is newer than the selected one",
+        f"Running {s.running_version}; `current` says {s.current}.",
+        ("Usually means the app was started by hand. A Stop + Restart from the menu settles it.",),
+    )]
 
+
+def _check_vault(m: Machine, s: Snapshot) -> list[Finding]:
+    """Locked is the normal state after every start — and the commonest "it is broken"."""
+    if s.account is None:
+        return []
+    if not s.account.get("initialized"):
+        return [Finding(NOTE, "First-run setup has not been completed",
+                        f"Open {m.app_url()} and choose a passphrase.")]
+    if not s.account.get("unlocked"):
+        return [Finding(
+            NOTE, "SmartBrain is locked",
+            "This is the normal state after every start, and it looks a lot like being broken.",
+            (f"Unlock it at {m.app_url()}.",
+             "Your model providers are registered at unlock, so chat and search stay unavailable until then."),
+        )]
+    out = [Finding(OK, "The vault is unlocked")]
+    if not s.account.get("has_recovery"):
+        out.append(Finding(WARN, "No Emergency Kit has been saved",
+                           "Without it, a forgotten passphrase means the data cannot be read again.",
+                           (f"Create one at {m.app_url()}/settings/account.",)))
+    return out
+
+
+def _check_database(m: Machine, s: Snapshot) -> list[Finding]:
+    """Report the database and NEVER offer to touch it. Everything here is read-only, always."""
     db = m.db_path
-    if db.exists():
-        size = db.stat().st_size
-        if size < MIN_DB_BYTES:
-            out.append(Finding(
-                FAIL, "The database file looks like a stub, not a vault",
-                f"{db} is {size} bytes.",
-                ("This is what a copy that failed part way looks like.",
-                 "Do not delete it. Restore your most recent backup, or ask for help before touching it."),
-            ))
-        else:
-            out.append(Finding(OK, "Your database is in place", f"{db} ({_human_bytes(size)})"))
-    elif s.app_ok:
-        out.append(Finding(WARN, "The database is not where it was expected", f"Looked for {db}."))
+    out: list[Finding] = []
+    if not db.exists():
+        out.append(Finding(WARN, "The database is not where it was expected", f"Looked for {db}.")
+                   if s.app_ok else
+                   Finding(NOTE, "No database yet", f"None at {db} — normal before the first run."))
+    elif db.stat().st_size < MIN_DB_BYTES:
+        out.append(Finding(
+            FAIL, "The database file looks like a stub, not a vault",
+            f"{db} is {db.stat().st_size} bytes.",
+            ("This is what a copy that failed part way looks like.",
+             "Do not delete it. Restore your most recent backup, or ask for help before touching it."),
+        ))
     else:
-        out.append(Finding(NOTE, "No database yet", f"None at {db} — normal before the first run."))
-
-    staged = Path(str(db) + ".restore-pending")
-    if staged.exists():
+        out.append(Finding(OK, "Your database is in place", f"{db} ({_human_bytes(db.stat().st_size)})"))
+    if Path(str(db) + ".restore-pending").exists():
         out.append(Finding(NOTE, "A restore is staged and applies on the next start",
-                           f"{staged.name} is waiting beside your database."))
+                           f"{db.name}.restore-pending is waiting beside your database."))
     return out
 
 
@@ -866,7 +902,8 @@ def _check_embedding_model(url: str) -> list[Finding]:
     answer = http_json(url.rstrip("/") + "/api/tags")
     if not answer or not isinstance(answer[1], dict):
         return []
-    tags = [str(mod.get("name") or "") for mod in (answer[1].get("models") or [])]
+    models = answer[1].get("models")
+    tags = [str(mod.get("name") or "") for mod in models if isinstance(mod, dict)] if isinstance(models, list) else []
     if any(tag == EMBED_MODEL_TAG for tag in tags):
         return [Finding(OK, f"The embedding model is installed ({EMBED_MODEL_TAG})")]
     return [Finding(
@@ -884,67 +921,75 @@ def _check_embedding_model(url: str) -> list[Finding]:
 
 
 def check_housekeeping(m: Machine, s: Snapshot) -> list[Finding]:
-    out: list[Finding] = []
+    return (_check_disk(m) + _check_old_versions(m, s) + _check_launcher_staging(m)
+            + _check_gateway_privacy(m, s) + _check_log_sizes(m, s)
+            + _check_log_for_known_trouble(m, s) + _check_stale_browser_cache(m, s))
 
+
+def _check_disk(m: Machine) -> list[Finding]:
     try:
         free = shutil.disk_usage(m.launcher_dir if m.launcher_dir.exists() else m.home).free
     except OSError:
-        free = -1
-    if free < 0:
-        pass
-    elif free < CRITICAL_DISK_BYTES:
-        out.append(Finding(FAIL, "The disk is nearly full", f"{_human_bytes(free)} free.",
-                           ("SmartBrain cannot download an update, and the database may fail to write.",)))
-    elif free < LOW_DISK_BYTES:
-        out.append(Finding(WARN, "Not much room left for an update", f"{_human_bytes(free)} free.",
-                           ("A version download needs a couple of gigabytes while it unpacks.",)))
-    else:
-        out.append(Finding(OK, "Enough disk space", f"{_human_bytes(free)} free"))
+        return []  # an unreadable volume is not a finding we can stand behind
+    if free < CRITICAL_DISK_BYTES:
+        return [Finding(FAIL, "The disk is nearly full", f"{_human_bytes(free)} free.",
+                        ("SmartBrain cannot download an update, and the database may fail to write.",))]
+    if free < LOW_DISK_BYTES:
+        return [Finding(WARN, "Not much room left for an update", f"{_human_bytes(free)} free.",
+                        ("A version download needs a couple of gigabytes while it unpacks.",))]
+    return [Finding(OK, "Enough disk space", f"{_human_bytes(free)} free")]
 
+
+def _check_old_versions(m: Machine, s: Snapshot) -> list[Finding]:
+    """Nothing in the product ever prunes these; one machine reached 4.1 GB of them."""
     prunable = _prunable_versions(s)
-    if prunable:
-        total = sum(_dir_size(m.versions_dir / v) for v in prunable)
-        out.append(Finding(
-            WARN, f"{len(prunable)} old version{'s' if len(prunable) != 1 else ''} still on disk",
-            f"{', '.join(prunable)} — about {_human_bytes(total)}.",
-            ("Every update leaves its predecessor behind and nothing removes them.",),
-            fix=Fix(
-                "Remove the old versions",
-                "Deletes these folders and nothing else:\n"
-                + "\n".join(f"  {m.versions_dir / v}" for v in prunable)
-                + f"\nThe version you run ({s.current}) and the one before it are kept, so you can still\n"
-                "roll back. Each folder holds only downloaded parts; any of them can be fetched again.",
-                lambda: _delete_all([m.versions_dir / v for v in prunable]),
-            ),
-        ))
+    if not prunable:
+        return []
+    total = sum(_dir_size(m.versions_dir / v) for v in prunable)
+    return [Finding(
+        WARN, f"{len(prunable)} old version{'s' if len(prunable) != 1 else ''} still on disk",
+        f"{', '.join(prunable)} — about {_human_bytes(total)}.",
+        ("Every update leaves its predecessor behind and nothing removes them.",),
+        fix=Fix(
+            "Remove the old versions",
+            "Deletes these folders and nothing else:\n"
+            + "\n".join(f"  {m.versions_dir / v}" for v in prunable)
+            + f"\nThe version you run ({s.current}) and the one before it are kept, so you can still\n"
+            "roll back. Each folder holds only downloaded parts; any of them can be fetched again.",
+            lambda: _delete_all([m.versions_dir / v for v in prunable]),
+        ),
+    )]
 
-    if m.system == "Darwin":
-        staging = sorted(APPLICATIONS_DIR.glob(".smartbrain-update-*"))
-        if staging:
-            out.append(Finding(
-                WARN, "A launcher update was interrupted",
-                ", ".join(p.name for p in staging),
-                fix=Fix(
-                    "Remove the leftover launcher staging folders",
-                    "Deletes only these half-unpacked copies:\n"
-                    + "\n".join(f"  {p}" for p in staging)
-                    + "\nThe installed launcher and the /Applications/SmartBrain.app.previous rollback are\n"
-                    "left exactly as they are.",
-                    lambda: _delete_all(staging),
-                ),
-            ))
 
-    out.extend(_check_gateway_privacy(m, s))
+def _check_launcher_staging(m: Machine) -> list[Finding]:
+    """A self-update killed part way leaves its half-unpacked copy beside the app."""
+    if m.system != "Darwin":
+        return []
+    staging = sorted(APPLICATIONS_DIR.glob(".smartbrain-update-*"))
+    if not staging:
+        return []
+    return [Finding(
+        WARN, "A launcher update was interrupted", ", ".join(p.name for p in staging),
+        fix=Fix(
+            "Remove the leftover launcher staging folders",
+            "Deletes only these half-unpacked copies:\n"
+            + "\n".join(f"  {p}" for p in staging)
+            + "\nThe installed launcher and the /Applications/SmartBrain.app.previous rollback are\n"
+            "left exactly as they are.",
+            lambda: _delete_all(staging),
+        ),
+    )]
 
-    for log in (m.app_log, m.gateway_log):
-        if not log.exists():
+
+def _check_log_sizes(m: Machine, s: Snapshot) -> list[Finding]:
+    """Nothing rotates these: they are opened append-only and never looked at again."""
+    stopped = not ((s.app and s.app.verified) or (s.gateway and s.gateway.verified) or s.app_ok)
+    out: list[Finding] = []
+    for log in (m.app_log, m.gateway_log):  # fixed, bounded
+        if not log.exists() or log.stat().st_size <= BIG_LOG_BYTES:
             continue
-        size = log.stat().st_size
-        if size <= BIG_LOG_BYTES:
-            continue
-        stopped = not ((s.app and s.app.verified) or (s.gateway and s.gateway.verified) or s.app_ok)
         fix = None
-        if stopped:
+        if stopped:  # a running process holds the file open; renaming it under itself helps nobody
             fix = Fix(
                 f"Set {log.name} aside and start a new one",
                 f"Renames\n  {log}\nto {log.name}.old (replacing any earlier .old) so the file starts fresh.\n"
@@ -952,11 +997,8 @@ def check_housekeeping(m: Machine, s: Snapshot) -> list[Finding]:
                 "is stopped, because the running process holds the file open.",
                 lambda log=log: _rotate_log(log),
             )
-        out.append(Finding(WARN, f"{log.name} has grown large", _human_bytes(size),
+        out.append(Finding(WARN, f"{log.name} has grown large", _human_bytes(log.stat().st_size),
                            () if stopped else ("It can be rotated once SmartBrain is stopped.",), fix=fix))
-
-    out.extend(_check_log_for_known_trouble(m, s))
-    out.extend(_check_stale_browser_cache(m, s))
     return out
 
 
@@ -1055,11 +1097,19 @@ def _check_stale_browser_cache(m: Machine, s: Snapshot) -> list[Finding]:
 
 
 def _response_headers(url: str) -> dict[str, str]:
-    try:
-        with urllib.request.urlopen(url, timeout=_HTTP_TIMEOUT) as resp:  # noqa: S310 - fixed loopback URL
-            return {k.lower(): v for k, v in resp.headers.items()}
-    except Exception:
-        return {}
+    """A loopback response's headers, with the same http-then-https attempt as http_json.
+
+    Without the fallback an install behind the LAN/TLS overlay reads as "no headers", which
+    the caller would report as a caching problem that does not exist.
+    """
+    for candidate in (url, url.replace("http://", "https://", 1)):
+        ctx = ssl._create_unverified_context() if candidate.startswith("https") else None
+        try:
+            with urllib.request.urlopen(candidate, timeout=_HTTP_TIMEOUT, context=ctx) as resp:  # noqa: S310 - fixed loopback URL
+                return {k.lower(): v for k, v in resp.headers.items()}
+        except Exception:
+            continue
+    return {}
 
 
 # --- Fixes -------------------------------------------------------------------------

@@ -619,6 +619,17 @@ def test_known_trouble_in_the_log_is_translated_into_a_sentence(tmp_path, world)
     assert "holding SmartBrain's port" in finding.detail
 
 
+def test_trouble_from_before_the_last_restart_is_not_reported(tmp_path, world):
+    """A line that has already been restarted past must not warn forever."""
+    m = _healthy(tmp_path, world)
+    m.app_log.write_text(
+        "OSError: [Errno 48] address already in use\n"
+        f"INFO:     {doctor.LOG_BOOT_MARKER} [100]\n"
+        "INFO:     Application startup complete.\n")
+    sections, _ = doctor.diagnose(m)
+    assert not any("log records a problem" in f.title for f in _levels(sections, doctor.WARN))
+
+
 def test_a_stale_browser_cache_is_named_as_such(tmp_path, world):
     m = _healthy(tmp_path, world)
     m.app_log.write_text('127.0.0.1 - "GET /_app/immutable/nodes/9.old.js HTTP/1.1" 404\n')
@@ -628,6 +639,41 @@ def test_a_stale_browser_cache_is_named_as_such(tmp_path, world):
 
 
 # --- N8: small pieces that have to be right -------------------------------------------
+
+def test_a_surprising_reply_from_the_gateway_does_not_crash_the_doctor(tmp_path, world):
+    """The gateway is another program's API; a diagnostic that dies on it is useless."""
+    m = _healthy(tmp_path, world)
+    world.http[PROVIDERS] = (200, {"providers": ["not-a-mapping", None, 7]})
+    sections, _ = doctor.diagnose(m)
+    assert any("no model providers" in f.title for f in _levels(sections, doctor.FAIL))
+
+
+def test_a_stranger_reply_is_quoted_back(tmp_path, world):
+    """Whatever answered the port is the evidence; keep enough of it to name the culprit."""
+    m = _healthy(tmp_path, world)
+    world.http[APP_HEALTH] = (403, {"detail": "some other program"})
+    world.http.pop(ACCOUNT)
+    sections, _ = doctor.diagnose(m)
+    finding = next(f for f in _levels(sections, doctor.FAIL) if "Something else is answering" in f.title)
+    assert "some other program" in finding.detail
+
+
+def test_the_install_guard_asks_over_plain_http(monkeypatch, tmp_path):
+    """A from-source mkcert cert must not make the guard blind to a running native app."""
+    monkeypatch.setattr(install, "_doctor", lambda: doctor)
+    monkeypatch.setattr(install, "REPO_ROOT", tmp_path)
+    (tmp_path / "data" / "certs").mkdir(parents=True)
+    (tmp_path / "data" / "certs" / "cert.pem").write_text("x")  # _health_ok would go https here
+    machine = _machine(tmp_path)
+    machine.launcher_dir.mkdir(parents=True)
+    machine.native_marker.write_text("1\n")
+    monkeypatch.setattr(doctor.Machine, "detect", classmethod(lambda cls, env=None: machine))
+    asked: list[str] = []
+    monkeypatch.setattr(doctor, "http_json",
+                        lambda url, **kw: (asked.append(url), (200, {"status": "ok"}))[1])
+    assert install._native_install_running() is True
+    assert asked == [f"http://127.0.0.1:{machine.app_port}/api/health"]
+
 
 def test_version_order_is_numeric_not_alphabetic():
     assert sorted(["0.8.9", "0.8.10", "0.8.4"], key=doctor._version_key) == ["0.8.4", "0.8.9", "0.8.10"]

@@ -279,6 +279,14 @@ def cmd_install(open_browser: bool) -> int:
     return 0
 
 
+def _doctor():
+    """Import installer/doctor.py (this directory is not a package, so load it by path)."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import doctor  # noqa: PLC0415 - lazy on purpose: importing costs nothing until asked
+
+    return doctor
+
+
 def cmd_doctor(argv: list[str]) -> int:
     """Diagnose this computer's SmartBrain install (doctor.py), passing our flags through.
 
@@ -287,10 +295,7 @@ def cmd_doctor(argv: list[str]) -> int:
     which has nothing to do with this file's compose build. Keeping it separate is also
     what lets someone run it on a machine that has no repo checkout beyond the one file.
     """
-    sys.path.insert(0, str(Path(__file__).resolve().parent))  # installer/ is not a package
-    import doctor  # noqa: PLC0415 - lazy on purpose: importing costs nothing until asked
-
-    return doctor.main(argv)
+    return _doctor().main(argv)
 
 
 def _native_install_running() -> bool:
@@ -299,12 +304,18 @@ def _native_install_running() -> bool:
     `install` and `update` build and start a SECOND stack on the same ports. Doing that on
     top of a running native install produces a port collision, a database already held by
     another process, and a very confusing failure — so both commands stop first.
-    """
-    sys.path.insert(0, str(Path(__file__).resolve().parent))
-    import doctor  # noqa: PLC0415 - lazy, same reason as cmd_doctor
 
+    The probe is deliberately NOT _health_ok(): that one switches to https the moment a
+    from-source mkcert cert exists, and the native app only ever serves plain http on
+    loopback. Asking the wrong scheme would answer "nothing is running" on exactly the
+    developer machines this guard exists for.
+    """
+    doctor = _doctor()
     machine = doctor.Machine.detect()
-    return bool(machine.native_marker.exists() and _health_ok())
+    if not machine.native_marker.exists():
+        return False
+    answer = doctor.http_json(f"http://127.0.0.1:{machine.app_port}/api/health")
+    return bool(answer and isinstance(answer[1], dict) and answer[1].get("status") == "ok")
 
 
 def _refuse_over_native_install(action: str) -> bool:
