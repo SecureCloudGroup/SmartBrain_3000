@@ -12,6 +12,30 @@ to know when a release changes behavior.
 ## [Unreleased]
 
 ### Fixed
+- **The doctor was diagnosing a product that no longer exists.** `installer/install.py
+  doctor` opened by testing for Docker — "Docker not found", "Docker daemon not reachable",
+  "Docker Compose v2 not found" — and on a normal, perfectly healthy install all three
+  failed, so someone whose only real problem was a locked vault was told to go and install
+  Docker. Its advice was `compose up -d`, which does nothing to the app they are running.
+  It has been rebuilt around the install people actually have.
+
+  The new `python3 installer/doctor.py` needs no Docker, no repository, and — importantly —
+  no running app, since that is when people reach for it. It reports on the assembled
+  install and the version selected to run; both processes and whether their records still
+  name them; both ports and *who* is answering; whether the vault is locked (which looks a
+  great deal like being broken); the database file; the model gateway's providers and the
+  local model servers behind them, including one that is reloading its model on every
+  request; disk space; a downloaded update waiting for a restart; leftovers from an
+  interrupted download; and the handful of failures this project has hit before, read out
+  of the log as one sentence each.
+
+  It is read-only until you ask. `--fix` then offers each repair one at a time, printing in
+  full what it is about to do, and every one of them stays away from your data. Docker is
+  mentioned in exactly two places: on the Intel Macs and ARM Linux machines that genuinely
+  run it, and when a leftover container really is holding the port SmartBrain needs — in
+  which case removing it is offered, with the reassurance that Docker volumes are untouched.
+
+### Fixed
 - **`brew uninstall --zap` could delete your knowledge base.** The cask removed the whole
   `~/Library/Application Support/SmartBrain` folder, on the stated grounds that your data
   lived in Docker volumes — true when that was written, and false the moment the

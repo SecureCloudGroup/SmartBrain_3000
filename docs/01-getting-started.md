@@ -111,9 +111,6 @@ cd SmartBrain_3000
 python3 installer/install.py install
 ```
 
-`python3 installer/install.py doctor` checks and offers to fix common problems (start Docker,
-restart the stack, pull the embedding model). See [installer/](../installer/README.md).
-
 A from-source install keeps its data in the repo's own `data/` directory, not in the
 folder above.
 
@@ -201,6 +198,24 @@ Your data lives in the `data` folder named under **Install** above, and an updat
 touches it. (More on backups: [Backup &amp; recovery](06-backup-recovery.md).)
 
 ## Troubleshooting
+
+### Ask the doctor first
+
+If you have Python 3 and a copy of the repository, one command inspects this computer's
+install and says what is wrong in plain words — it needs no running app, which is exactly
+when you want it:
+
+```sh
+python3 installer/doctor.py
+```
+
+It changes nothing. Add `--fix` and it offers each safe repair one at a time, describing
+what it will do before it does it; it never touches your data. It knows about half-finished
+downloads, records pointing at processes that are gone, ports held by something else, a
+gateway that has quietly died under a running app, a locked vault, a model server that
+isn't answering, staged updates, and low disk space.
+
+The rest of this section is what those problems look like from the menu.
 
 Most first-run problems are one of these:
 

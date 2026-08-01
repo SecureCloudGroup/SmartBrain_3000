@@ -27,11 +27,32 @@ Or invoke the cross-platform core directly:
 
 ```sh
 python3 installer/install.py          # install (default)
-python3 installer/install.py doctor   # re-check prerequisites + the running stack
 python3 installer/install.py update   # rebuild from current source + restart, then verify
 python3 installer/install.py certs smartbrain.local 192.168.1.50   # TLS cert for LAN/mobile
 python3 installer/install.py --no-open
 ```
+
+## The doctor
+
+`doctor` is **not** part of the from-source path and needs no repo, no Docker, and no
+running app. It looks at the ordinary install a person actually has — the one the launcher
+assembles under your user-data folder — and says what is wrong with it in plain words:
+
+```sh
+python3 installer/doctor.py            # report only; nothing is changed
+python3 installer/doctor.py -v         # ...including the checks that passed
+python3 installer/doctor.py --fix      # offer each safe repair, one at a time
+python3 installer/install.py doctor    # the same tool, reached through the installer
+```
+
+It checks the assembled install and the `current` pointer, both processes and their pid
+records, both ports and *who* is answering them, the vault's lock state, the database file,
+the model gateway's providers and the local model servers behind them, disk space, staged
+updates, leftovers from interrupted downloads, and the log for the handful of failures this
+project has actually hit. It exits non-zero only when something is genuinely broken.
+
+Repairs are offered one at a time, each printed in full before it runs, and **never** touch
+your data directory. It is read-only unless you pass `--fix`.
 
 ## LAN / mobile access (HTTPS)
 
@@ -73,8 +94,9 @@ container, so the app never needs access to the Docker socket.
 3. **Verify** — waits for `http://localhost:33000/api/health` to report healthy.
 4. **Next steps** — opens the app and points you at first-run setup.
 
-`doctor` re-runs the prerequisite checks plus a stack-health probe and exits
-non-zero if anything is red — handy for re-running any time.
+`install` and `update` refuse to run while a Docker-free SmartBrain is live on the
+same machine — they would build a second stack onto the same port and the same
+database. Stop SmartBrain from its menu first.
 
 ## What it does NOT do (by design)
 
