@@ -5,6 +5,7 @@ package native
 
 import (
 	"archive/tar"
+	"errors"
 	"archive/zip"
 	"compress/gzip"
 	"context"
@@ -780,5 +781,39 @@ func TestProcessAliveAndWaitGone(t *testing.T) {
 	}
 	if processAlive(0) || processAlive(-5) {
 		t.Fatal("nonsense pids are never alive")
+	}
+}
+
+// A tester on a clean machine installed via Homebrew, let it start once under Docker
+// (which creates the volumes before anyone finishes first-run), then switched to native —
+// and got "database missing after copy" instead of an app. An empty volume is an ordinary
+// situation, not a failure: there is simply nothing to carry over.
+func TestEmptyDockerVolumeMeansFreshStartNotFailure(t *testing.T) {
+	if runtime.GOOS == "darwin" {
+		t.Skip("writes to the real per-OS app data dir; exercised on linux CI")
+	}
+	n := New(t.TempDir())
+	// Every docker command "succeeds" and copies nothing — exactly what an empty volume does.
+	n.Run = func(ctx context.Context, name string, args ...string) error { return nil }
+
+	err := n.MigrateFromDocker(context.Background())
+	if !errors.Is(err, ErrNoDataToMigrate) {
+		t.Fatalf("an empty volume must report 'nothing to migrate', got: %v", err)
+	}
+}
+
+func TestACopyThatActuallyFailsIsStillAnError(t *testing.T) {
+	// The forgiving branch above must not swallow a real failure: if docker itself errors,
+	// the user's data may exist and be unreachable, and a fresh start would look like loss.
+	if runtime.GOOS == "darwin" {
+		t.Skip("writes to the real per-OS app data dir; exercised on linux CI")
+	}
+	n := New(t.TempDir())
+	n.Run = func(ctx context.Context, name string, args ...string) error {
+		return fmt.Errorf("docker daemon is not running")
+	}
+	err := n.MigrateFromDocker(context.Background())
+	if err == nil || errors.Is(err, ErrNoDataToMigrate) {
+		t.Fatalf("a failed copy must stay an error, got: %v", err)
 	}
 }

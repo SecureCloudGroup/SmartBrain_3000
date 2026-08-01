@@ -16,11 +16,21 @@ package native
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 )
+
+// ErrNoDataToMigrate means the Docker volume was there but empty — nothing to carry over.
+//
+// That is a completely ordinary situation, not a failure: `docker compose up` creates the
+// volumes the first time the stack starts, long before anyone finishes first-run setup. So
+// anyone who installs, lets it start once under Docker, and then switches to native has an
+// empty volume waiting. Reported by a tester who did exactly that on a clean machine and
+// got "database missing after copy" instead of an app.
+var ErrNoDataToMigrate = errors.New("no SmartBrain data in the Docker volumes")
 
 const (
 	appVolume     = "smartbrain_smartbrain_data"
@@ -97,10 +107,15 @@ func (n Native) MigrateFromDocker(ctx context.Context) error {
 	}
 	// Sanity: the database landed and is not a stub. The REAL verification is the
 	// native stack booting healthy on it (the caller's next step).
+	//
+	// A missing database HERE means the copies above succeeded and found nothing — an
+	// empty volume, i.e. a Docker install that never completed first-run. That is not an
+	// error; it is a fresh start. A copy that genuinely failed returned above, so this
+	// branch cannot swallow one.
 	db := filepath.Join(dataDir, "smartbrain.duckdb")
 	info, err := os.Stat(db)
 	if err != nil {
-		return fmt.Errorf("migrate: database missing after copy: %w", err)
+		return ErrNoDataToMigrate
 	}
 	if info.Size() < 4096 {
 		return fmt.Errorf("migrate: database suspiciously small (%d bytes)", info.Size())

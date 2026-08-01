@@ -12,6 +12,15 @@ to know when a release changes behavior.
 ## [Unreleased]
 
 ### Fixed
+- **A clean install could refuse to start in Docker-free mode.** If SmartBrain had been
+  started once under Docker — which happens the moment you install it — the empty data
+  volumes it creates were mistaken for data waiting to be moved, and the switch to
+  Docker-free mode failed with "database missing after copy" instead of simply starting.
+  An empty volume now means what it should: there is nothing to carry over, so it starts
+  fresh. A copy that genuinely fails is still reported, because that one might mean your
+  data is there and unreachable.
+
+### Fixed
 - The menu-bar version line no longer lags behind an update it just installed: for up to
   half a minute it could read "Running (updated)" above the *old* version number, which is
   precisely the confusion the line exists to prevent. It now refreshes the moment a start
