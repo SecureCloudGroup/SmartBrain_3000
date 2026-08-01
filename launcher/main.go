@@ -10,6 +10,7 @@ package main
 import (
 	"context"
 	_ "embed"
+	"errors"
 	"log"
 	"os"
 	"path/filepath"
@@ -578,12 +579,16 @@ func startNative(ctx context.Context) {
 		}
 		cancelDown()
 		if err := nv.MigrateFromDocker(ctx); err != nil {
-			setStatus("Data copy failed — Docker data is untouched; see the log")
-			log.Println("native migrate:", err)
-			nv.DiscardMigratedData() // a partial copy must not shadow a fresh one later
-			return
+			if !errors.Is(err, native.ErrNoDataToMigrate) {
+				setStatus("Data copy failed — Docker data is untouched; see the log")
+				log.Println("native migrate:", err)
+				nv.DiscardMigratedData() // a partial copy must not shadow a fresh one later
+				return
+			}
+			log.Println("native: the Docker volumes are empty — starting fresh")
+		} else {
+			migrated = true // there IS copied data, so a later failure must discard it
 		}
-		migrated = true
 	}
 	setStatus("Assembling native install…")
 	// Bounded like the Docker pull path: downloads are ~400 MB on a first assembly.
