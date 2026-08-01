@@ -75,6 +75,10 @@ If you only want your phone to reach the Desktop **on the same Wi-Fi**, you don'
 the signaling node at all — you can serve the app over HTTPS on your local network. This
 uses a local certificate so your phone trusts the connection.
 
+> This path is set up by the repo's installer, so it needs an
+> [install from source](01-getting-started.md#install-from-source-for-contributors). Pairing
+> above works on every install and needs none of this.
+
 1. **Make a local certificate** (uses [mkcert](https://github.com/FiloSottile/mkcert)),
    passing a name and your Desktop's LAN IP:
 

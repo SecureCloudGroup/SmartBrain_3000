@@ -5,9 +5,15 @@ control. Here's the model in plain terms, including the real world limits.
 
 ## What protects your data
 
-- **Local-first.** Everything runs in Docker on your machine: no account server and
-  no telemetry. The only SmartBrain-operated service is the optional, content-blind
-  signaling node for remote phone access — off by default (see below).
+- **Local-first.** Everything runs on your machine — the app, the model gateway, and your
+  database — with no account server and no telemetry. The only SmartBrain-operated service
+  is the optional, content-blind signaling node for remote phone access — off by default
+  (see below).
+- **Verified at install.** The desktop app assembles SmartBrain from a pinned Python
+  runtime, the release's own packages, and the model gateway. Every download is checked
+  against a known checksum before it is used, and a version only becomes the live one once
+  all of it succeeded — so a failed or tampered download leaves the previous version
+  running rather than replacing it.
 - **Encrypted at rest.** Your knowledge, chats, tasks, memories, email
   credentials, and provider keys are encrypted (AES-256-GCM) in the local
   database. The encryption key is derived from your passphrase (a slow, modern
@@ -46,6 +52,11 @@ control. Here's the model in plain terms, including the real world limits.
   self-hosted SearXNG (Settings → Web search) — and a web fetch goes to that page's
   host. Dangerous fetches are approval-gated and SSRF-guarded; nothing is searched or
   fetched outside a turn that calls for it.
+- **Update checks — by the desktop app, not by SmartBrain.** Every six hours the menu-bar
+  launcher asks GitHub whether a newer release exists, and downloads it from GitHub if so.
+  That request carries no identity and nothing about you or your data; it is the same
+  public release page anyone can open. SmartBrain itself makes no such call — it hears
+  about a waiting update from the launcher over the local heartbeat they already exchange.
 - **Nothing else.** Beyond the above, the app makes no outbound calls. Self-improvement
   (if you enable it) is fully local by design: its reviews and learning run on your
   machine against a local model only — it never sends your activity anywhere.

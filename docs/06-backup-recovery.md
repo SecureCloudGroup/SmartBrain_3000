@@ -31,10 +31,42 @@ so a restore is reversible.
 
 - Allowed when you're **unlocked**, or onto a **fresh install** (moving to a new
   machine) — never over a locked, initialized vault.
-- After staging, restart the stack (`python3 installer/install.py update`, or
-  restart the container) and unlock with that backup's passphrase.
+- After staging, restart SmartBrain — **Restart** in the menu-bar / tray menu (from
+  source, `python3 installer/install.py update`) — and unlock with that backup's
+  passphrase.
 - A backup from a **newer version** of SmartBrain_3000 is **refused on purpose**
   (it would risk data loss under older code): upgrade this app first, then restore.
+
+## Starting completely fresh
+
+If an install is broken in a way that restarting and updating cannot fix, there is a full
+reset: back up, remove everything SmartBrain put on the machine, install the latest
+version, and restore your data.
+
+**You almost certainly do not need this.** Try quitting and reopening SmartBrain from the
+menu bar first, then `brew update && brew upgrade --cask smartbrain`, then a hard reload of
+the browser tab. A full reset re-downloads the whole app and takes 10–30 minutes.
+
+```sh
+bash installer/full-reset.sh --inventory   # what is on this machine; changes nothing
+bash installer/full-reset.sh --dry-run     # the whole plan, carried out on nothing
+bash installer/full-reset.sh               # do it
+```
+
+It will not continue without a backup file it has checked, it shows every deletion before
+it happens and asks you to type a confirmation word, and it never deletes your backup or
+your data — your data folder is **moved** to `~/SmartBrain-reset-<timestamp>/`, not removed.
+
+One step is manual, and skipping it is the usual reason a correct reinstall still looks
+broken: **clear the browser**. SmartBrain installs a service worker that caches the app,
+and it will keep serving the old version after a reinstall. The script prints a snippet to
+paste into your browser console that unregisters it and clears the cached app, the
+paired-device credential, and stored settings. A paired phone has to be paired again
+afterwards.
+
+macOS only for now. On Windows the same five steps apply, against `%APPDATA%\SmartBrain`
+and the Scoop package.
+
 
 ## Chat Trash
 

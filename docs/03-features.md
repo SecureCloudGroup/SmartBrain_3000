@@ -17,12 +17,20 @@ are formatted (headings, lists, tables, and code blocks render properly). You ca
 picker — moves it to the **Trash**, where it can be restored for 30 days from
 Settings → Account & Data.
 
+The assistant also knows what time it is **where you are**. Your browser reports its
+timezone and every turn is told your local date and time, with UTC alongside for
+cross-zone questions; scheduled runs get the same. There is nothing to configure — the
+zone is read from your browser and stored locally, like any other setting.
+
 Tools are **risk-tiered**, and this is the core safety idea:
 
 - **Observe** (e.g. knowledge search) runs automatically — it only reads.
-- **Reviewed / Irreversible** (e.g. add a task, send an email, delete a task) are
-  **never run automatically**. The assistant *proposes* them and they wait for
-  your approval in **Activity**. Irreversible actions need an extra confirmation.
+- **Reviewed** (e.g. add a task, search the web) is **never run automatically** until you
+  say so. The assistant *proposes* it and it waits for your approval in **Activity**. If
+  you get tired of approving the same tool, **Always allow** lets that one run without
+  asking from then on — and **Stop allowing** takes it back.
+- **Irreversible** (e.g. send an email, delete a task) always waits for your approval, with
+  an extra confirmation, and can never be pre-authorized.
 
 So the assistant can draft and suggest, but anything that changes data or reaches
 out requires your explicit OK. Every tool attempt is written to the audit log.
@@ -72,8 +80,8 @@ which file and page it got the answer from.
 
 ![Drop in a file, search it, open the cited passage, then ask Chat — answers cite their sources](assets/gifs/04-add-knowledge.gif)
 
-> Semantic search needs an embedding model set up for your backend (the installer does
-> this for you on the Ollama path). If results say *"degraded"*, set one up — see
+> Semantic search needs an embedding model set up for your backend. If results say
+> *"degraded"*, set one up — see
 > [Embeddings](02-models.md#embeddings-for-knowledge-search) — then **Reindex**.
 
 Your knowledge is also what external tools can read over [MCP](05-mcp.md).
@@ -167,8 +175,8 @@ feed. From a flagged period it may act — always within hard bounds:
   answers always show a small **"guided · …"** chip.
 
 One change is ever on trial at a time, everything is reversible, every applied or
-reverted change is announced, and **Settings → Self-improvement** shows the complete
-record of what it has done.
+reverted change is announced, and **Settings → Self-improvement** shows the record of
+what it has done under **What it has done**.
 
 ## Usage & cost
 
@@ -186,7 +194,11 @@ on-device gateway).
 
 Your audit + approvals view:
 
-- **Pending approvals** — review and approve/deny what the assistant proposed.
+- **Awaiting your approval** — review what the assistant proposed and **Approve** or
+  **Deny** it. **Always allow** approves it and stops asking for that tool from then on;
+  anything pre-authorized this way is listed under **Always allowed**, where **Stop
+  allowing** takes the permission back. Irreversible tools can't be pre-authorized —
+  they ask every time.
 - **Audit log** — an encrypted record of every tool attempt (what, when, outcome).
 
 ## Next
