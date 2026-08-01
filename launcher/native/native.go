@@ -91,6 +91,16 @@ func currentPlatform() (platform, error) {
 		runtime.GOOS, runtime.GOARCH)
 }
 
+// Supported reports whether this OS/arch can run the Docker-free stack — i.e. whether a
+// Python runtime and gateway binary are pinned for it. Intel Macs and arm Linux have
+// neither, and the macOS cask ships a UNIVERSAL binary, so an Intel user installs exactly
+// this app: they must keep Docker rather than be handed a launcher that cannot start
+// anything.
+func Supported() bool {
+	_, err := currentPlatform()
+	return err == nil
+}
+
 // Native points at one Docker-free SmartBrain install rooted under the launcher's dir.
 type Native struct {
 	Dir  string // <launcher dir>/native — versions/, current, run/, bifrost-data/ live here
