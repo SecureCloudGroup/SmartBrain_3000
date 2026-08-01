@@ -503,17 +503,21 @@ func openOrStart() {
 // "1" opts in, "0" forces Docker for this run; deleting the marker rolls back
 // for good.
 func nativeMode() bool {
-	return resolveNativeMode(os.Getenv("SMARTBRAIN_NATIVE"), nativeMarkerExists())
+	return resolveNativeMode(os.Getenv("SMARTBRAIN_NATIVE"), nativeMarkerExists(), native.Supported())
 }
 
-func resolveNativeMode(env string, marker bool) bool {
+func resolveNativeMode(env string, marker, supported bool) bool {
 	switch env {
 	case "1":
 		return true
 	case "0":
 		return false
 	}
-	return marker
+	// Docker-free is now the DEFAULT — but only where it can actually be assembled. On a
+	// platform with no pinned runtime the honest answer is Docker: a marker cannot exist
+	// there anyway (nothing native ever started), and defaulting such a machine into native
+	// would leave it with a launcher that cannot start the app at all.
+	return supported || marker
 }
 
 func nativeMarkerPath() string { return filepath.Join(sb.Dir, "native-mode") }
@@ -537,11 +541,21 @@ func persistNativeMode() {
 // environment (the self-update handover preserves it), so a stale pin would silently
 // downgrade past whatever auto-update has assembled since. Forcing an older version
 // is a dev act: delete <dir>/current and pin.
-func nativeBootVersion(current, pinned string) string {
-	if current == "" || (pinned != "" && update.Newer(pinned, current)) {
-		return pinned
+func nativeBootVersion(current, pinned, launcher string) string {
+	if pinned != "" && (current == "" || update.Newer(pinned, current)) {
+		return pinned // bootstraps a first install, or forces a deliberate upgrade
 	}
-	return current
+	if current != "" {
+		return current // normal operation: run what is assembled
+	}
+	// A fresh install: nothing assembled and nothing pinned. The launcher and the app ship
+	// from the SAME release tag, so the version this binary was built as is exactly the app
+	// to assemble. Without this, every fresh install would stop and ask for an environment
+	// variable no ordinary user has ever heard of.
+	if launcher != "" && launcher != "dev" {
+		return launcher
+	}
+	return "" // a local dev build has no release to match; the pin is required there
 }
 
 func startNative(ctx context.Context) {
@@ -556,9 +570,10 @@ func startNative(ctx context.Context) {
 		startWatch(nv)
 		return
 	}
-	version := nativeBootVersion(nv.Current(), os.Getenv("SMARTBRAIN_NATIVE_VERSION"))
+	version := nativeBootVersion(nv.Current(), os.Getenv("SMARTBRAIN_NATIVE_VERSION"), launcherVersion)
 	if version == "" {
-		setStatus("Native mode needs SMARTBRAIN_NATIVE_VERSION for its first run")
+		// Only reachable from a local dev build, which matches no published release.
+		setStatus("Set SMARTBRAIN_NATIVE_VERSION to run a dev build without Docker")
 		return
 	}
 	migrated := false

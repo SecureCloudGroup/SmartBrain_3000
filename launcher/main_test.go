@@ -15,22 +15,29 @@ import (
 // Docker, whose compose up then collided with the surviving native stack's ports.
 func TestResolveNativeMode(t *testing.T) {
 	cases := []struct {
-		env    string
-		marker bool
-		want   bool
-		why    string
+		env       string
+		marker    bool
+		supported bool
+		want      bool
+		why       string
 	}{
-		{"1", false, true, "explicit opt-in works before any marker exists"},
-		{"", true, true, "a marked machine stays native with no env at all"},
-		{"0", true, false, "env 0 forces Docker for this run (the rollback)"},
-		{"", false, false, "fresh machines keep the Docker default"},
-		{"garbage", true, true, "unrecognized env defers to the marker"},
-		{"garbage", false, false, "unrecognized env on a fresh machine stays Docker"},
+		{"1", false, true, true, "explicit opt-in works before any marker exists"},
+		{"", true, true, true, "a marked machine stays Docker-free"},
+		{"0", true, true, false, "env 0 forces Docker for this run (the escape hatch)"},
+		{"", false, true, true, "DEFAULT: a fresh supported machine is Docker-free"},
+		{"garbage", false, true, true, "unrecognized env falls through to the default"},
+		// The one that protects real people: the macOS cask is a universal binary, so an
+		// Intel Mac installs this same app. There is no runtime pinned for it, so defaulting
+		// it into native would leave it unable to start anything at all.
+		{"", false, false, false, "an unsupported platform keeps Docker"},
+		{"garbage", false, false, false, "…and is not talked out of it by a junk env value"},
+		{"1", false, false, true, "an explicit opt-in is still honoured (it will fail loudly, not silently)"},
+		{"", true, false, true, "a machine that HAS run native keeps doing so"},
 	}
 	for _, c := range cases {
-		if got := resolveNativeMode(c.env, c.marker); got != c.want {
-			t.Fatalf("resolveNativeMode(%q, %v) = %v, want %v (%s)",
-				c.env, c.marker, got, c.want, c.why)
+		if got := resolveNativeMode(c.env, c.marker, c.supported); got != c.want {
+			t.Fatalf("resolveNativeMode(%q, marker=%v, supported=%v) = %v, want %v (%s)",
+				c.env, c.marker, c.supported, got, c.want, c.why)
 		}
 	}
 }
@@ -41,21 +48,25 @@ func TestResolveNativeMode(t *testing.T) {
 // the night of the migration would otherwise downgrade every future update.
 func TestNativeBootVersion(t *testing.T) {
 	cases := []struct {
-		current, pinned, want string
-		why                   string
+		current, pinned, launcher, want string
+		why                             string
 	}{
-		{"", "", "", "nothing anywhere -> caller reports first-run guidance"},
-		{"", "0.8.4", "0.8.4", "first run bootstraps from the pin"},
-		{"0.8.5", "", "0.8.5", "normal operation boots what is assembled"},
-		{"0.8.5", "0.8.5", "0.8.5", "pin agreeing with current changes nothing"},
-		{"0.8.5", "0.8.4", "0.8.5", "STALE pin must never downgrade an updated install"},
-		{"0.8.5", "0.9.0", "0.9.0", "a deliberately newer pin is a manual upgrade"},
-		{"0.8.5", "garbage", "0.8.5", "an unparseable pin is ignored (fail-closed)"},
+		// The case that makes Docker-free installable by ordinary people: nothing assembled,
+		// nothing pinned, so assemble the app that ships with THIS launcher's release.
+		{"", "", "0.8.11", "0.8.11", "a fresh install assembles its own release"},
+		{"", "", "dev", "", "a local dev build matches no release; the pin is required"},
+		{"", "", "", "", "an unstamped build likewise"},
+		{"", "0.8.4", "0.8.11", "0.8.4", "an explicit pin still wins on a first run"},
+		{"0.8.5", "", "0.8.11", "0.8.5", "normal operation boots what is assembled, NOT the launcher's version"},
+		{"0.8.5", "0.8.5", "0.8.11", "0.8.5", "pin agreeing with current changes nothing"},
+		{"0.8.5", "0.8.4", "0.8.11", "0.8.5", "STALE pin must never downgrade an updated install"},
+		{"0.8.5", "0.9.0", "0.8.11", "0.9.0", "a deliberately newer pin is a manual upgrade"},
+		{"0.8.5", "garbage", "0.8.11", "0.8.5", "an unparseable pin is ignored (fail-closed)"},
 	}
 	for _, c := range cases {
-		if got := nativeBootVersion(c.current, c.pinned); got != c.want {
-			t.Fatalf("nativeBootVersion(%q, %q) = %q, want %q (%s)",
-				c.current, c.pinned, got, c.want, c.why)
+		if got := nativeBootVersion(c.current, c.pinned, c.launcher); got != c.want {
+			t.Fatalf("nativeBootVersion(%q, %q, %q) = %q, want %q (%s)",
+				c.current, c.pinned, c.launcher, got, c.want, c.why)
 		}
 	}
 }
