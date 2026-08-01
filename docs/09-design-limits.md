@@ -37,10 +37,14 @@ you're unlocked. So a **restart** (or a crash, or `Lock`) returns the app to the
 **locked** state, and any **in-flight approvals are invalidated** — a parked
 action won't silently run after a restart; you'll unlock and re-approve.
 
+A parked action also **expires after an hour** on its own. Approval is consent to something
+happening *now*, and an hour-old "yes" to a half-remembered request is not the same thing.
+
 **Why:** this trades some unattended resilience for security. The upside is
 that data at rest is never decryptable without your passphrase or Recovery Key,
 even if someone copies the disk. The cost is that an unattended restart leaves
-the app locked until you return.
+the app locked until you return, and that nothing — no schedule, no vault
+auto-update, no self-review — happens while it is locked.
 
 ## Append-only audit log (no hash chain)
 
@@ -66,13 +70,39 @@ The trade-offs that follow from that:
 - **The first search after unlocking pays a one-time build.** Roughly 0.2s for 1,000
   documents and ~1.8s for 10,000. Searches after that are single-digit milliseconds.
 - **The index costs RAM** — dominated by the vectors (~30 MB per 1,000 documents at 768
-  dimensions). Very large libraries are bounded by an explicit ceiling, and if a corpus
-  exceeds it that is **reported, not silently ignored**.
+  dimensions). Very large libraries are bounded by an explicit ceiling — **100,000
+  documents** — and if a corpus exceeds it that is **reported, not silently ignored**.
 - **Nothing is written to disk.** The index is never persisted, so encryption at rest is
   unchanged: it exists only while the vault is unlocked and dies with the master key.
 
 **Why:** indexing encrypted content on disk without leaking it is hard. Rebuilding in memory
 keeps the encryption promise intact while still giving fast, whole-corpus search.
+
+## One local-model request at a time
+
+A local model server — Ollama, MLX, oMLX — serves **one request at a time**. SmartBrain has
+several things that might want it at once: your chat, the background indexer embedding new
+documents, the summary builder, a scheduled run. They are **queued**, never overlapped, so a
+second caller can't provoke the "model is busy" failure that would break the first.
+
+Your chat has priority: background work steps aside the moment a chat arrives and picks up
+where it left off afterwards. The visible cost is that a large indexing backlog can still
+make an answer feel slower than usual while it drains.
+
+**Why:** the alternative is either failed requests or a queue the user can't see. Cloud
+providers have no such limit and are unaffected — this applies only to local models.
+
+## A turn is bounded
+
+One request to the assistant gets at most **eight tool steps**. When those run out — or when
+what it has gathered would no longer fit in the model's context — it stops asking for tools
+and writes an answer from what it has, saying plainly what it couldn't finish. It never
+loops, and it never quietly gives up.
+
+**Why:** an unbounded agent is a way to spend an afternoon and a lot of money on a question
+that needed one search. A hard step count makes the worst case predictable. Where it isn't
+enough, the answer says so and you can ask a narrower question — which is nearly always
+faster than letting it wander.
 
 ## WebRTC signaling broker is single-operator
 

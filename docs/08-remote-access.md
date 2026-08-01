@@ -23,7 +23,8 @@ own node? See *Self-hosting the signaling node* at the end.)
 
 ![Pair a phone — QR + 6-character code over end-to-end-encrypted WebRTC](assets/gifs/08-pair-a-phone.gif)
 
-On the **Desktop**, open **Settings → Remote access**, give the phone a name, and tap
+On the **Desktop**, open **Settings → Remote access**, give the phone a name (it defaults to
+*My phone*, and is only a label so you can tell your devices apart later), and tap
 **Pair a new phone**. You'll see a QR code, three short steps, and a **6-character code**.
 
 On the **phone**:
@@ -34,8 +35,12 @@ On the **phone**:
    - **Android:** the **⋮** menu → *Install app*.
 3. In the installed app, **enter the 6-character code** and tap **Pair**.
 
-That's it — the phone connects, from Wi-Fi or cellular. The code lasts a few minutes; if it
-expires, tap **Pair a new phone** for a fresh one.
+The Desktop watches while you do this and says so: *"Waiting for your phone…"*, then
+*"Your phone connected."*
+
+That's it — the phone connects, from Wi-Fi or cellular. The code lasts **5 minutes** and the
+page counts it down; if it expires, tap **Pair a new phone** for a fresh one. One pairing
+can be in progress at a time.
 
 > Why install first? On iPhone, an app on the Home Screen has its own private storage, separate
 > from Safari — so pairing happens *in the installed app*. The QR's only job is to open the site
@@ -44,17 +49,32 @@ expires, tap **Pair a new phone** for a fresh one.
 ## Using it on your phone
 
 The phone shows a **trimmed set** of areas meant for use on the go: **Chat**,
-**Knowledge**, **Planner**, **Schedules**, **Email**, and **Activity**. Settings and
-first-time setup live on the **Desktop**.
+**Knowledge**, **Planner**, **Schedules**, **Email**, **Info**, and **Activity**. Usage,
+Settings, and first-time setup live on the **Desktop**.
+
+A handful of individual actions are Desktop-only too, even inside those areas — anything
+that hands out your data or changes trust. Exporting or importing a vault, trusting a
+publisher's new key, adding documents by upload or URL, connecting Gmail, and downloading a
+backup or export all stay on the Desktop. On the phone those controls are either not shown
+or replaced with a line pointing you at the Desktop, so nothing fails halfway.
 
 A small **"Remote"** chip shows the connection state: **direct** (phone-to-Desktop),
 **relayed** (through the encrypted relay), or **BLOCKED** in red if your Desktop's
 identity can't be verified — re-pair if you reinstalled the app.
 
+The connection is built to survive a phone: it sends a small keepalive so an idle mobile
+network can't quietly drop it, notices a dead path within about a minute and reconnects on
+its own, and tolerates you switching apps for a few minutes. If the retries do give up, the
+next tap in the app starts it again.
+
+Your Desktop must be **running and unlocked** for any of this to work. The phone is a window
+onto it, not a copy of it.
+
 ## Manage devices
 
-Under **Settings → Remote access** you can pair more devices and **Revoke** any device
-at any time. A revoked device can no longer connect.
+Under **Settings → Remote access** you can pair more devices, see when each was paired, and
+**Revoke** any of them at any time. A revoked device can no longer connect. On the phone
+itself, **Unpair** in the sidebar forgets the pairing from that end.
 
 ## Security
 

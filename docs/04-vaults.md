@@ -69,6 +69,26 @@ you'll see the publisher fingerprint being pinned; ours is `SB-3WZM-7CEI-GPJ7-3M
 matches, you're talking to us. The whole guide lands in your Knowledge, searchable and askable,
 and new versions are offered as updates whenever the docs change.
 
-Creating, adding, and searching a vault work everywhere, including a paired phone. **Exporting and
-importing a vault are done on the Desktop** — sharing a vault's contents, or bringing new ones in, is
-sensitive, so those actions live in the Desktop app.
+**What travels.** A vault export carries the documents themselves — their titles and text —
+and nothing else. Your **tags do not travel**: they're your labels, not the publisher's, and
+they stay behind. For the same reason you can't tag the copies an imported vault gave you; a
+future update would overwrite them. **Detach** a copy first if you want to make it yours and
+label it.
+
+**Reading the card.** A vault card carries chips for whatever applies: **Public** with your
+publisher fingerprint and the version you last exported; **Subscribed** with the pinned
+publisher fingerprint, the host it came from, and the version you have; **Imported** for one
+that arrived as a file. Checking a subscription tells you where you stand — *"Up to date
+(v3)."* or *"Update available (v3 → v4)."*
+
+Creating a vault, adding documents to it, and searching inside it work everywhere, including
+a paired phone. **Exporting, importing, subscribing, and trusting a publisher's changed key
+are done on the Desktop** — sharing a vault's contents, bringing new ones in, and deciding
+whom to trust are all sensitive, so those actions live in the Desktop app.
+
+## Next
+
+- [Using SmartBrain_3000](03-features.md) — the Knowledge page these vaults live on.
+- [Connect external tools](05-mcp.md) — imported vault content is labeled with its
+  provenance there too.
+- [Privacy & security](07-privacy-security.md) — what a subscription fetches, and when.

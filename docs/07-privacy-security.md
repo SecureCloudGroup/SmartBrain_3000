@@ -25,17 +25,43 @@ control. Here's the model in plain terms, including the real world limits.
   your network.
 - **Approval gates.** The assistant can read freely but can't change data or reach
   out (send email, delete, fetch the web) without your explicit approval, with an
-  extra confirm for irreversible actions. Everything it attempts is audited.
+  extra confirm for irreversible actions. Everything it attempts is audited. A parked
+  action expires after an hour, and locking cancels every pending one.
 - **Credential firewall.** Tools and connected MCP clients act on your behalf but
-  never receive your raw keys or tokens.
+  never receive your raw keys or tokens. Anything that looks like a secret — a key, a
+  token, a password, a passphrase — is stripped before an action is shown to you or
+  written to the audit log.
 - **Web-fetch guard.** The web-fetch tool refuses private/internal addresses and
   doesn't follow redirects into them (anti-SSRF).
+- **The model gateway keeps no transcript.** Bifrost ships with request logging on, which
+  would write every prompt and reply to an unencrypted file beside your database.
+  SmartBrain starts it with that store disabled, destroys any log database it finds on
+  startup, and re-asserts the setting at every start and unlock.
+
+### What is encrypted, and what isn't
+
+Content is encrypted; the small amount of bookkeeping needed to find and schedule things is
+not. Being precise about the line matters more than claiming everything:
+
+- **Encrypted** (AES-256-GCM, under your key): documents and their text, chat messages,
+  task titles, notes and tags, memories and your profile, schedule titles and prompts,
+  scheduled-run output, provider and search API keys, the Gmail token, the MCP token,
+  and the arguments and results recorded in the audit log.
+- **Not encrypted** (plaintext metadata in the same local database): timestamps, a
+  schedule's cadence and next-run time, a task's due date, priority and status, which
+  model is routed to what, and, in the audit log, the tool's name, its risk tier, what you
+  decided and whether it worked. Someone with your disk learns *that* a tool ran and
+  when — not what it was given or what came back.
 
 ## What leaves your machine (and when)
 
 - **Cloud model calls.** If you use an OpenAI/Anthropic/Google model, your prompts
   and the content you send go to that provider. Use a **local model** (Ollama/MLX)
-  to keep everything on-box.
+  to keep everything on-box. Four jobs use a model, and each is routed separately
+  under Settings → Model routing: chat, scheduled runs, embeddings for search, and
+  background document summaries. Point any of them at a cloud provider and that job's
+  content goes there — the embedding and summary slots are the easy ones to overlook,
+  because they run over your documents in the background rather than in front of you.
 - **Email.** If you connect Gmail, the app talks to Google's APIs to read/send your
   mail — over a loopback OAuth flow, with your own OAuth client.
 - **Remote access (only if you enable it).** Phone access is **off by default**. When
@@ -60,6 +86,15 @@ control. Here's the model in plain terms, including the real world limits.
 - **Nothing else.** Beyond the above, the app makes no outbound calls. Self-improvement
   (if you enable it) is fully local by design: its reviews and learning run on your
   machine against a local model only — it never sends your activity anywhere.
+
+Two things that sound like they'd leave and don't:
+
+- **MCP.** A connected desktop AI client reads your knowledge over a loopback
+  connection on your own machine. SmartBrain sends nothing outward for it. What that
+  *client* then does with what it read is its business, not SmartBrain's — see
+  [MCP](05-mcp.md).
+- **Publishing a vault.** Export writes a file to your disk. Nothing is uploaded;
+  where it goes afterwards is entirely your doing. See [Vaults](04-vaults.md).
 
 ## Honest limits
 

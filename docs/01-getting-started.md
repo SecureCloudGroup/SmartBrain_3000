@@ -71,7 +71,11 @@ alongside your data:
 
 On macOS and Windows, rarely — usually after an interrupted first start, or on a machine
 that ran an early Docker build — the launcher can end up with a half-finished install or a
-leftover container holding port 33000. This resets it without touching your data:
+leftover container holding port 33000. This resets it without touching your data.
+
+Try **Restart** in the menu first — it is faster and fixes most of what goes wrong. If that
+doesn't do it, work through the four steps below. They take a couple of minutes and are the
+right answer for a half-finished install or a stuck port.
 
 1. **Stop it.** In the menu-bar / tray menu choose **Stop**, then **Quit launcher**.
    (**Quit launcher** on its own leaves SmartBrain running — **Stop** is what shuts it
@@ -90,6 +94,11 @@ leftover container holding port 33000. This resets it without touching your data
 Your database is in the `data` folder above and none of these steps touch it. To force a
 full re-download of the runtime, delete the `native` folder next to it — that folder holds
 only downloaded parts and is rebuilt on the next start.
+
+If even that leaves the install broken, there is one more step — a full reset, which removes
+everything SmartBrain put on the machine and reinstalls it. It is slow and deliberate, and
+almost nobody needs it: see
+[Backup & recovery → Starting completely fresh](06-backup-recovery.md#starting-completely-fresh).
 
 ### Install from source (for contributors)
 
