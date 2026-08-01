@@ -535,6 +535,17 @@ func persistNativeMode() {
 	}
 }
 
+// shouldAdopt decides whether a healthy answer on the app port belongs to US.
+//
+// A health check alone is not proof. Anyone still on the Docker stack publishes the very
+// same port with restart: unless-stopped, so it answers at handover — and adopting it
+// would mark the machine "running natively" while nothing native exists, skip the data
+// migration entirely, and then wedge updates forever, because the update check gives up
+// when no version is assembled. Only adopt when we have an assembly of our own.
+func shouldAdopt(assembled string, healthy bool) bool {
+	return assembled != "" && healthy
+}
+
 // nativeBootVersion picks what to boot: the assembled `current` normally; the env pin
 // only when it bootstraps a first assembly or names a STRICTLY NEWER release (a
 // deliberate manual upgrade). The pin must not win otherwise: relaunches inherit the
@@ -560,11 +571,10 @@ func nativeBootVersion(current, pinned, launcher string) string {
 
 func startNative(ctx context.Context) {
 	nv := native.New(sb.Dir)
-	if nv.Healthy(ctx) {
-		// The stack outlives the launcher by design (detached processes). A fresh
-		// launcher ADOPTS a healthy running stack instead of spawning a second one
-		// into the same ports — a collision that would "pass" health checks against
-		// the survivor while poisoning the pid files with its own dead spawns.
+	if shouldAdopt(nv.Current(), nv.Healthy(ctx)) {
+		// The stack outlives the launcher by design (detached processes), so a fresh
+		// launcher ADOPTS a healthy running stack instead of spawning a second one into
+		// the same ports.
 		persistNativeMode()
 		setStatus("Running ● (native)")
 		startWatch(nv)
@@ -576,14 +586,24 @@ func startNative(ctx context.Context) {
 		setStatus("Set SMARTBRAIN_NATIVE_VERSION to run a dev build without Docker")
 		return
 	}
+	// ASSEMBLE FIRST. Downloading ~400 MB binds no ports, touches no data, and stops
+	// nothing — so if it fails (offline, a proxy, a full disk) the machine is exactly as it
+	// was. Everything destructive happens below, only once the replacement is proven to be
+	// on disk. The reverse order turned a working install into a dead one on any hiccup.
+	setStatus("Downloading SmartBrain…")
+	asmCtx, cancelAsm := context.WithTimeout(ctx, 15*time.Minute)
+	err := nv.Assemble(asmCtx, version)
+	cancelAsm()
+	if err != nil {
+		setStatus("Download failed — nothing was changed; check the log and Restart")
+		log.Println("native assemble:", err)
+		return
+	}
+
 	migrated := false
 	if nv.NeedsMigration(ctx) {
 		// A COPY, not a move: the Docker volumes stay untouched as the rollback, and
 		// they are mounted read-only during the copy so nothing can modify them.
-		if !stack.DockerRunning(ctx) {
-			setStatus("Start Docker once more so your data can be copied out, then Restart")
-			return
-		}
 		setStatus("Copying your data out of Docker…")
 		downCtx, cancelDown := context.WithTimeout(ctx, 3*time.Minute)
 		if err := sb.Down(downCtx); err != nil { // never copy under a live writer
@@ -604,18 +624,6 @@ func startNative(ctx context.Context) {
 		} else {
 			migrated = true // there IS copied data, so a later failure must discard it
 		}
-	}
-	setStatus("Assembling native install…")
-	// Bounded like the Docker pull path: downloads are ~400 MB on a first assembly.
-	asmCtx, cancel := context.WithTimeout(ctx, 15*time.Minute)
-	defer cancel()
-	if err := nv.Assemble(asmCtx, version); err != nil {
-		setStatus("Native assembly failed — see the log")
-		log.Println("native assemble:", err)
-		if migrated { // tonight's copy must not resurrect as a stale snapshot on retry
-			nv.DiscardMigratedData()
-		}
-		return
 	}
 	setStatus("Starting (native)…")
 	if err := nv.Up(ctx); err != nil {

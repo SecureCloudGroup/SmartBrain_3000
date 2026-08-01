@@ -148,3 +148,27 @@ func TestVersionLabel(t *testing.T) {
 		}
 	}
 }
+
+// A healthy answer on the app port is not proof that WE are serving it. Anyone still on
+// the Docker stack publishes the same port with restart: unless-stopped, so it answers at
+// handover. Adopting that would mark the machine "running natively" while nothing native
+// exists, skip the data migration, and then wedge updates forever — the update check gives
+// up when no version is assembled.
+func TestShouldAdopt(t *testing.T) {
+	cases := []struct {
+		assembled string
+		healthy   bool
+		want      bool
+		why       string
+	}{
+		{"0.8.12", true, true, "our own assembly is answering — adopt it, do not start a second"},
+		{"", true, false, "SOMETHING answers but we assembled nothing: not ours"},
+		{"0.8.12", false, false, "we have an assembly but nothing is running — start it"},
+		{"", false, false, "nothing assembled, nothing running — a first install"},
+	}
+	for _, c := range cases {
+		if got := shouldAdopt(c.assembled, c.healthy); got != c.want {
+			t.Fatalf("shouldAdopt(%q, %v) = %v, want %v (%s)", c.assembled, c.healthy, got, c.want, c.why)
+		}
+	}
+}
