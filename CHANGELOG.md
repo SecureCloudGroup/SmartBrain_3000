@@ -12,6 +12,15 @@ to know when a release changes behavior.
 ## [Unreleased]
 
 ### Fixed
+- **`brew uninstall --zap` could delete your knowledge base.** The cask removed the whole
+  `~/Library/Application Support/SmartBrain` folder, on the stated grounds that your data
+  lived in Docker volumes — true when that was written, and false the moment the
+  Docker-free stack landed, because the database now lives inside that very folder. A
+  `--zap` uninstall now removes only the app's own files (assembled runtimes, logs,
+  bookkeeping, and the gateway config that holds provisioned provider keys) and never
+  touches your data.
+
+### Fixed
 - **A clean install could refuse to start in Docker-free mode.** If SmartBrain had been
   started once under Docker — which happens the moment you install it — the empty data
   volumes it creates were mistaken for data waiting to be moved, and the switch to

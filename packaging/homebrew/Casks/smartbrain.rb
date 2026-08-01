@@ -42,11 +42,30 @@ cask "smartbrain" do
     If macOS asks whether SmartBrain may "access data from other apps", click Allow — that's it
     locating your Docker installation.
 
-    Your data lives in Docker volumes and survives uninstalls; back it up in-app (Settings).
+    Your data survives uninstalls — including `--zap`, which removes only the app's own files.
+    Back it up any time from Settings → Account & Data.
   EOS
 
-  # "zap" removes the launcher's config dir. The user's DATA is in Docker volumes (smartbrain_data /
-  # bifrost_data), which Homebrew cannot remove — deliberate: uninstalling an app should not silently
-  # shred a knowledge base. Removing the data is an explicit `docker volume rm` by the user.
-  zap trash: "~/Library/Application Support/SmartBrain"
+  # "zap" removes the app's OWN files and nothing else. It used to remove the whole
+  # ~/Library/Application Support/SmartBrain tree, on the stated grounds that "the user's DATA is in
+  # Docker volumes" — true when that line was written, and false the moment the Docker-free stack
+  # landed: the database now lives at data/smartbrain.duckdb inside that very tree. On a live install
+  # that path held a 34 MB knowledge base, so `brew uninstall --zap` would have shredded it.
+  #
+  # Listed leaf by leaf, deliberately, so that adding a new state directory later cannot silently
+  # widen this into user data again:
+  #   data/               the user's encrypted database — NEVER removed by an uninstall
+  #   native/versions/    assembled runtimes (GBs) — safe to drop, re-downloaded on demand
+  #   native/run/         pid files and logs
+  #   native/bifrost-data/ gateway config, which holds PROVISIONED PROVIDER KEYS — removing it on
+  #                       uninstall is the point: leaving credentials behind would be worse
+  #   native/current, native-mode, docker-compose.release.yml — launcher bookkeeping
+  zap trash: [
+    "~/Library/Application Support/SmartBrain/docker-compose.release.yml",
+    "~/Library/Application Support/SmartBrain/native-mode",
+    "~/Library/Application Support/SmartBrain/native/current",
+    "~/Library/Application Support/SmartBrain/native/run",
+    "~/Library/Application Support/SmartBrain/native/versions",
+    "~/Library/Application Support/SmartBrain/native/bifrost-data",
+  ]
 end
