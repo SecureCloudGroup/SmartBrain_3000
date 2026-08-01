@@ -27,20 +27,21 @@ cask "smartbrain" do
     system_command "/usr/bin/open", args: ["-a", "#{appdir}/SmartBrain.app"]
   end
 
-  # Docker is required (the app runs the stack in containers). We do NOT force-install Docker Desktop
-  # as a dependency, because plenty of this audience run Colima / OrbStack / Engine instead — the
-  # launcher detects Docker and guides the user if it's missing.
+  # SmartBrain brings its own runtime on Apple Silicon — no Docker, nothing to install first.
+  # Intel Macs have no native build (no pinned Python runtime exists for x86_64 darwin), so the
+  # launcher falls back to Docker there and says so. We still do NOT force-install Docker Desktop:
+  # that audience often runs Colima / OrbStack / Engine instead.
   caveats <<~EOS
-    SmartBrain runs on Docker. If you don't have it yet, install Docker first (Docker Desktop is the
-    easiest; Colima/OrbStack also work) and start it: https://docs.docker.com/get-docker/
-    Note: Docker Desktop's own first launch asks you to accept its terms — do that before continuing.
-
     SmartBrain has been LAUNCHED for you — it's a menu-bar app (icon at the top-right of your
-    screen). The first run downloads the app image (a minute or two), then opens it in your browser
-    at http://localhost:33000. To start it again later, open SmartBrain from Applications.
+    screen). The first run downloads and verifies everything it needs (a few hundred MB, a few
+    minutes), then opens it in your browser at http://localhost:33000. To start it again later,
+    open SmartBrain from Applications.
 
-    If macOS asks whether SmartBrain may "access data from other apps", click Allow — that's it
-    locating your Docker installation.
+    On an Intel Mac, SmartBrain runs in Docker instead. Install Docker first (Docker Desktop is
+    the easiest; Colima and OrbStack also work) and start it: https://docs.docker.com/get-docker/
+
+    If macOS asks whether SmartBrain may "access data from other apps", Allow or Deny is fine —
+    it is only looking for Docker, which an Apple Silicon Mac does not need.
 
     Your data survives uninstalls — including `--zap`, which removes only the app's own files.
     Back it up any time from Settings → Account & Data.

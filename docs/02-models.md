@@ -1,8 +1,8 @@
 # Connect a model
 
 SmartBrain_3000 talks to language models through a local **gateway** (Bifrost),
-which runs as part of the stack. You can use **cloud providers** (with your own
-API keys) and/or **local models** running on your machine. Nothing is sent to a
+which runs on your machine alongside the app. You can use **cloud providers** (with your
+own API keys) and/or **local models** running on your machine. Nothing is sent to a
 provider unless you configure it and use it.
 
 ## Cloud providers (your API keys)
@@ -26,8 +26,8 @@ returns a stored key over its API — only the fact that one is set.
 
 ## Local models (on your machine)
 
-Local models keep every prompt on your hardware — nothing goes to a provider. They run on
-the **host** (not inside the container), and the app reaches them at `host.docker.internal`.
+Local models keep every prompt on your hardware — nothing goes to a provider. You run the
+model server yourself and SmartBrain reaches it over loopback on your own machine.
 SmartBrain supports two backends and connects to either the same way:
 
 - **MLX** — Apple's on-device runtime for **Apple-Silicon Macs** (M-series). It's the fastest
@@ -82,13 +82,14 @@ model"). Only if you specifically want one of those, use the bundled fallback: t
 port 8899 serving `Qwen3-Embedding-0.6B` with correct pooling), connected under
 Settings → Local models → **MLX embeddings** and routed to `mlxe/qwen3-embedding-0.6b`.
 
-**The installer pulls this for you** when Ollama is present (and
-`python3 installer/install.py doctor` offers to). If you ever need to do it by hand,
-pull that exact tag:
+**Pull it yourself** once, with that exact tag:
 
 ```sh
 ollama pull nomic-embed-text:v1.5
 ```
+
+(A from-source install does this for you when Ollama is present, and
+`python3 installer/install.py doctor` offers to.)
 
 The tag matters: the bare `nomic-embed-text` won't resolve. If semantic search shows
 keyword results and says *"degraded"*, this model isn't pulled — run the command above

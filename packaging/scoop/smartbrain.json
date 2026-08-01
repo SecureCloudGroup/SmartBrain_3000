@@ -1,28 +1,31 @@
 {
-  "version": "0.4.2",
-  "description": "Local-first personal AI assistant — your data stays on your machine.",
-  "homepage": "https://github.com/SecureCloudGroup/SmartBrain_3000",
-  "license": "Elastic-2.0",
-  "notes": [
-    "SmartBrain needs Docker (Docker Desktop, or Engine under WSL2).",
-    "Run 'smartbrain' or use the Start-menu shortcut; first run downloads the app image and opens it in your browser."
-  ],
-  "architecture": {
-    "64bit": {
-      "url": "https://github.com/SecureCloudGroup/SmartBrain_3000/releases/download/v0.4.2/SmartBrain-windows.zip",
-      "hash": "db27e09fa900c0a9c50fed563d1e1c2a16a40fd08ab2b42b895fbb6dedcb9d2f"
-    }
-  },
-  "bin": "SmartBrain.exe",
-  "shortcuts": [
-    ["SmartBrain.exe", "SmartBrain"]
-  ],
-  "checkver": "github",
-  "autoupdate": {
+    "version": "0.4.2",
+    "description": "Local-first personal AI assistant \u2014 your data stays on your machine.",
+    "homepage": "https://github.com/SecureCloudGroup/SmartBrain_3000",
+    "license": "Elastic-2.0",
+    "notes": [
+        "SmartBrain brings its own runtime \u2014 Docker is not required.",
+        "Run 'smartbrain' or use the Start-menu shortcut; the first run downloads and verifies everything it needs (a few hundred MB, a few minutes)."
+    ],
     "architecture": {
-      "64bit": {
-        "url": "https://github.com/SecureCloudGroup/SmartBrain_3000/releases/download/v$version/SmartBrain-windows.zip"
-      }
+        "64bit": {
+            "url": "https://github.com/SecureCloudGroup/SmartBrain_3000/releases/download/v0.4.2/SmartBrain-windows.zip",
+            "hash": "db27e09fa900c0a9c50fed563d1e1c2a16a40fd08ab2b42b895fbb6dedcb9d2f"
+        }
+    },
+    "bin": "SmartBrain.exe",
+    "shortcuts": [
+        [
+            "SmartBrain.exe",
+            "SmartBrain"
+        ]
+    ],
+    "checkver": "github",
+    "autoupdate": {
+        "architecture": {
+            "64bit": {
+                "url": "https://github.com/SecureCloudGroup/SmartBrain_3000/releases/download/v$version/SmartBrain-windows.zip"
+            }
+        }
     }
-  }
 }

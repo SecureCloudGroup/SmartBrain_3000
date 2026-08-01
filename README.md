@@ -20,8 +20,9 @@ setup — it cannot read your data.
 
 ## What it is
 
-SmartBrain_3000 is a **fully local, single-user** AI assistant you run in Docker
-on your own computer — macOS, Linux, or Windows.
+SmartBrain_3000 is a **fully local, single-user** AI assistant that runs on your
+own computer — macOS, Linux, or Windows. It needs no Docker and no other setup:
+the desktop app assembles what it needs and runs it directly, with no containers.
 
 - **Your choice of AI.** Bring your own API keys for OpenAI, Anthropic, or
   Google — or run **fully local models** with Ollama or Apple MLX. A built-in
@@ -45,8 +46,8 @@ on your own computer — macOS, Linux, or Windows.
 
 ## Quickstart
 
-The only prerequisite is **[Docker](https://docs.docker.com/get-docker/)**, running. Then
-install the SmartBrain app from **https://smartbrain.securecloudgroup.com**, or with one command:
+There are no prerequisites — no Docker, no Python, no accounts. Install the SmartBrain app
+from **https://smartbrain.securecloudgroup.com**, or with one command:
 
 **macOS** — in the Terminal app:
 
@@ -61,18 +62,11 @@ scoop bucket add securecloudgroup https://github.com/SecureCloudGroup/scoop-buck
 scoop install securecloudgroup/smartbrain
 ```
 
-_(`winget install SecureCloudGroup.SmartBrain` is coming soon.)_
-
-**Any OS, straight from Docker** — download the release compose file and run it (no app, no clone):
-
-```sh
-curl -fsSLO https://raw.githubusercontent.com/SecureCloudGroup/SmartBrain_3000/main/compose/docker-compose.release.yml
-docker compose -f docker-compose.release.yml up -d
-```
-
-Homebrew and Scoop install a small **desktop launcher** (a menu-bar / tray app) that starts the
-stack and opens the app for you. The app runs at **http://localhost:33000** — the first run
-**downloads a prebuilt image** (a minute or two), then starts instantly. In the app:
+Homebrew and Scoop install a small **desktop launcher** — a menu-bar / tray app. On its
+first start it downloads and verifies everything SmartBrain needs (a Python runtime, the
+app itself, and the model gateway) into a folder it owns, then runs it and opens your
+browser. That download is a few hundred megabytes, so allow a few minutes the first time;
+after that it starts in seconds. The app runs at **http://localhost:33000**. In the app:
 
 1. **Set a passphrase** and **save your Emergency Kit** (a one-time Recovery
    Key). There is no password reset — the Recovery Key is the only way back in
@@ -83,9 +77,15 @@ stack and opens the app for you. The app runs at **http://localhost:33000** — 
    Chat screen.
 3. **Start chatting.**
 
+> **Does it need Docker?** No — not on an Apple-Silicon Mac, 64-bit Windows, or 64-bit x86
+> Linux. There is no native build yet for **Intel Macs** or **ARM Linux**; on those the
+> launcher runs SmartBrain in Docker instead, so Docker has to be installed and running.
+> `SMARTBRAIN_NATIVE=0` forces the Docker path on any machine.
+
 > **Building from source?** Contributors can `git clone` the repo and run
-> `python3 installer/install.py install` (this also needs git + Python, and compiles the image
-> locally). See [Install from source](docs/01-getting-started.md#install-from-source-for-contributors).
+> `python3 installer/install.py install` (this needs Docker, git, and Python, and compiles
+> the image locally). See
+> [Install from source](docs/01-getting-started.md#install-from-source-for-contributors).
 
 ### See it in action
 
@@ -103,11 +103,21 @@ from install to fully working; the rest are optional power-ups:
 
 ### Updating
 
-- **Homebrew:** `brew update && brew upgrade --cask smartbrain` · **Scoop:** `scoop update smartbrain` — then reopen the app.
-- **Release compose / launcher:** it pulls the latest image on start, so updating is just a **restart** (the launcher's **Restart**, or re-run the compose command).
+**SmartBrain updates itself — there is no command to run.** The desktop app looks for a new
+release in the background and downloads it without disturbing what you're doing. Once it's
+ready, the app itself says so and offers **Install now**; the same update is offered in the
+menu as **Install update now** / **Install on next start**. Installing restarts SmartBrain
+(under a minute), so you unlock again afterwards. Ignore the notice and the update installs
+the next time you start. The desktop app updates itself the same way, so `brew upgrade` and
+`scoop update` are no longer part of normal use.
+
+- **Which version am I on?** The menu names it, and so does the app under the logo, top-left.
+- **From a paired phone** you can see that an update is waiting, but installing it is
+  Desktop-only.
 - **From source:** `python3 installer/install.py update` backs up your encrypted data first, then rebuilds, restarts, and verifies — prompting before changes, on the host, never inside the container.
 
-Your data is kept in Docker volumes on your machine and is left untouched by an update.
+Your data lives in a folder you own — `~/Library/Application Support/SmartBrain/data` on
+macOS — and an update never touches it.
 
 ## Going further (optional)
 

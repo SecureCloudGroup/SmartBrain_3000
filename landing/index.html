@@ -179,7 +179,7 @@
         <div class="pillar">
           <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div>
           <h3>Fully local</h3>
-          <p>Runs in Docker on your machine. No accounts, no telemetry — the only SmartBrain-operated service is an optional, content-blind relay for phone access.</p>
+          <p>Runs entirely on your machine. No accounts, no telemetry — the only SmartBrain-operated service is an optional, content-blind relay for phone access.</p>
         </div>
         <div class="pillar">
           <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg></div>
@@ -215,7 +215,7 @@
         <div class="os">
           <div class="card">
             <h3>🍎 macOS <span class="tag">Homebrew</span></h3>
-            <p>One command in the Terminal app. Installs to Applications, opens on first click — no security prompt.</p>
+            <p>One command in the Terminal app. Installs to Applications, opens on first click — no security prompt, and nothing else to install.</p>
             <div class="cmd">
               <code>brew install --cask securecloudgroup/tap/smartbrain</code>
               <button type="button" data-copy-text="brew install --cask securecloudgroup/tap/smartbrain">Copy</button>
@@ -223,7 +223,7 @@
           </div>
           <div class="card">
             <h3>🪟 Windows <span class="tag">Scoop</span></h3>
-            <p>In Terminal or PowerShell — no SmartScreen prompt. (<code>winget</code> coming soon.)</p>
+            <p>In Terminal or PowerShell — no SmartScreen prompt, and nothing else to install.</p>
             <div class="cmd">
               <code>scoop bucket add securecloudgroup https://github.com/SecureCloudGroup/scoop-bucket; scoop install securecloudgroup/smartbrain</code>
               <button type="button" data-copy-text="scoop bucket add securecloudgroup https://github.com/SecureCloudGroup/scoop-bucket; scoop install securecloudgroup/smartbrain">Copy</button>
@@ -241,7 +241,7 @@
         <p class="note" style="margin-top:1rem">
           Prefer a direct download? Grab the
           <a href="https://github.com/SecureCloudGroup/SmartBrain_3000/releases/latest">latest release</a>.
-          SmartBrain needs <a href="https://docs.docker.com/get-docker/">Docker</a> (Desktop, Colima, OrbStack, or Engine).
+          On macOS and Windows, SmartBrain needs nothing else — it brings its own runtime and keeps it updated. Linux, and Macs with Intel processors, run it in <a href="https://docs.docker.com/get-docker/">Docker</a> (Desktop, Colima, OrbStack, or Engine).
         </p>
       </div>
     </section>
