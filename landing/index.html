@@ -418,7 +418,7 @@
         <div class="os">
           <div class="card">
             <h3>🍎 macOS <span class="tag">Homebrew</span></h3>
-            <p>One command in the Terminal app. Installs to Applications, opens on first click — no security prompt, and nothing else to install.</p>
+            <p>One command in the Terminal app. Installs to Applications, opens on first click — no security prompt, and on Apple Silicon nothing else to install.</p>
             <div class="cmd">
               <code>brew install --cask securecloudgroup/tap/smartbrain</code>
               <button type="button" data-copy-text="brew install --cask securecloudgroup/tap/smartbrain">Copy</button>
@@ -446,7 +446,10 @@
           installs them when you say so — there is no package-manager command to run again. Prefer a
           direct download? Grab the
           <a href="https://github.com/SecureCloudGroup/SmartBrain_3000/releases/latest">latest release</a>.
-          On macOS and Windows, SmartBrain needs nothing else — it brings its own runtime. Linux, and Macs with Intel processors, run it in <a href="https://docs.docker.com/get-docker/">Docker</a> (Desktop, Colima, OrbStack, or Engine).
+          On Apple Silicon Macs and Windows it needs nothing else — it brings its own runtime. An Intel
+          Mac installs the same app with the same command and runs it in
+          <a href="https://docs.docker.com/get-docker/">Docker</a>; Linux uses the Docker command above.
+          Docker Desktop, Colima, OrbStack or Engine all work.
           Full detail in <a href="https://github.com/SecureCloudGroup/SmartBrain_3000/blob/main/docs/01-getting-started.md#install">Getting started</a>.
         </p>
       </div>
