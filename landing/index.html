@@ -81,6 +81,7 @@
       .brand .mark { width: 26px; height: 26px; display: block; }
       header nav a { margin-left: 1.25rem; color: var(--muted); text-decoration: none; font-weight: 500; }
       header nav a:hover { color: var(--ink); }
+      @media (max-width: 420px) { header nav a { margin-left: 0.85rem; font-size: 0.92rem; } }
 
       .hero { padding: 3.5rem 0 2.5rem; text-align: center; }
       .hero h1 { font-size: clamp(2rem, 5vw, 3.2rem); line-height: 1.08; letter-spacing: -0.02em; margin: 0 0 1rem; }
@@ -130,6 +131,22 @@
       .cmd button { border: 0; background: transparent; color: var(--muted); cursor: pointer; font-size: 0.78rem; font-weight: 600; flex: none; }
       .cmd button:hover { color: var(--code-ink); }
 
+      /* Feature cards reuse .card; only the grid and the trailing docs link are new. Each card
+         ends in a link to the page of the manual that covers it — the site's job is to hand the
+         reader off to the real documentation, not to re-tell it. */
+      .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1rem; }
+      .features .card { display: flex; flex-direction: column; }
+      .features .card p { flex: 1 1 auto; margin: 0.35rem 0 0.85rem; }
+      .doclink { font-size: 0.83rem; font-weight: 600; text-decoration: none; align-self: flex-start; }
+      .doclink:hover, .doclink:focus-visible { text-decoration: underline; }
+
+      /* The full manual, one line each — for the reader who would rather start from the index. */
+      ol.docs { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 0 1.75rem; }
+      ol.docs li { border-top: 1px solid var(--line); padding: 0.7rem 0; }
+      ol.docs a { font-weight: 600; text-decoration: none; }
+      ol.docs a:hover, ol.docs a:focus-visible { text-decoration: underline; }
+      ol.docs span { display: block; color: var(--muted); font-size: 0.86rem; }
+
       .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; counter-reset: step; }
       @media (max-width: 720px) { .steps { grid-template-columns: 1fr; } }
       .step { position: relative; padding-left: 2.4rem; }
@@ -147,6 +164,12 @@
       footer a { color: var(--muted); text-decoration: none; }
       footer a:hover { color: var(--ink); }
       .note { font-size: 0.82rem; color: var(--muted); }
+      /* The pillars are five h3s with no visible heading above them, which left a hole in the
+         document outline for anyone navigating by heading. Names the group without drawing it. */
+      .sr-only {
+        position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+        overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+      }
     </style>
   </head>
   <body>
@@ -154,8 +177,10 @@
       <header>
         <div class="brand"><img class="mark" src="mark-64.png" width="26" height="26" alt="" /> SmartBrain</div>
         <nav>
-          <a href="https://github.com/SecureCloudGroup/SmartBrain_3000">GitHub</a>
+          <a href="#features">Features</a>
+          <a href="#install">Install</a>
           <a href="https://github.com/SecureCloudGroup/SmartBrain_3000/blob/main/docs/README.md">Docs</a>
+          <a href="https://github.com/SecureCloudGroup/SmartBrain_3000">GitHub</a>
         </nav>
       </header>
     </div>
@@ -175,6 +200,7 @@
     </div>
 
     <div class="wrap">
+      <h2 class="sr-only">What SmartBrain is</h2>
       <div class="pillars">
         <div class="pillar">
           <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div>
@@ -203,6 +229,183 @@
         </div>
       </div>
     </div>
+
+    <section class="block" id="features">
+      <div class="wrap">
+        <h2>What it does</h2>
+        <p class="intro">
+          Every item here links to the page of the manual that covers it, so you can read the detail
+          — including the limits — before you install anything.
+        </p>
+        <div class="features">
+          <div class="card">
+            <h3>Chat that can act</h3>
+            <p>
+              Ask in plain language. The assistant can search your knowledge, read or summarize a whole
+              document, save a note, add a task, look something up on the web, or draft an email. Answers
+              stream as they are written, and you can stop, copy or regenerate one.
+            </p>
+            <a class="doclink" href="https://github.com/SecureCloudGroup/SmartBrain_3000/blob/main/docs/03-features.md#chat">Chat &amp; tools<span aria-hidden="true"> →</span></a>
+          </div>
+
+          <div class="card">
+            <h3>Knowledge, with citations</h3>
+            <p>
+              Drop in PDFs, Word, PowerPoint, Excel, HTML, Markdown, CSV, JSON and plain text, or paste a
+              URL. Search by keyword, by meaning, or both at once. Every result names its source and,
+              where the file has them, the place in it — a deck cites its slide, a spreadsheet its sheet,
+              a PDF its page — and opens the document at the passage that matched, highlighted.
+            </p>
+            <a class="doclink" href="https://github.com/SecureCloudGroup/SmartBrain_3000/blob/main/docs/03-features.md#knowledge">Knowledge<span aria-hidden="true"> →</span></a>
+          </div>
+
+          <div class="card">
+            <h3>Approvals and an audit log</h3>
+            <p>
+              Tools are tiered. Reading runs on its own. Anything that writes or reaches out waits for
+              you — approve it once, or tell it to stop asking about that one tool. Sending an email or
+              deleting something asks every time, with a second confirmation, and can never be
+              pre-approved. Every attempt goes into an audit log you can read.
+            </p>
+            <a class="doclink" href="https://github.com/SecureCloudGroup/SmartBrain_3000/blob/main/docs/03-features.md#activity">Activity &amp; approvals<span aria-hidden="true"> →</span></a>
+          </div>
+
+          <div class="card">
+            <h3>Vaults you can share</h3>
+            <p>
+              Group documents into a vault to scope a search — or to share it. Hand someone a sealed,
+              encrypted file and the key separately, or publish an open one and let anyone subscribe by
+              URL. Updates are signed with your key, and a subscriber's copy will not accept a change
+              signed by a different one. You host the file; SmartBrain hosts nothing.
+            </p>
+            <a class="doclink" href="https://github.com/SecureCloudGroup/SmartBrain_3000/blob/main/docs/04-vaults.md">Vaults<span aria-hidden="true"> →</span></a>
+          </div>
+
+          <div class="card">
+            <h3>Planner</h3>
+            <p>
+              Tasks with due dates, times and priorities, grouped into Today, This week and Later. The
+              assistant can propose one; you approve it before it lands.
+            </p>
+            <a class="doclink" href="https://github.com/SecureCloudGroup/SmartBrain_3000/blob/main/docs/03-features.md#planner">Planner<span aria-hidden="true"> →</span></a>
+          </div>
+
+          <div class="card">
+            <h3>Schedules</h3>
+            <p>
+              Run a prompt once, or hourly, daily or weekly — “every morning, summarize my open tasks.”
+              Output lands in your chat and on the schedule's own page. Schedules run only while the app
+              is unlocked, and anything risky inside a run parks for your approval rather than acting alone.
+            </p>
+            <a class="doclink" href="https://github.com/SecureCloudGroup/SmartBrain_3000/blob/main/docs/03-features.md#schedules">Schedules<span aria-hidden="true"> →</span></a>
+          </div>
+
+          <div class="card">
+            <h3>Email</h3>
+            <p>
+              Optional, and Gmail only. You connect it with your own Google OAuth client, and SmartBrain
+              asks for two scopes: read and send. Nothing else — no archiving, no labels, no deleting. The
+              assistant drafts; you approve the send.
+            </p>
+            <a class="doclink" href="https://github.com/SecureCloudGroup/SmartBrain_3000/blob/main/docs/03-features.md#email-gmail">Email<span aria-hidden="true"> →</span></a>
+          </div>
+
+          <div class="card">
+            <h3>Web search</h3>
+            <p>
+              DuckDuckGo works with no key at all. You can switch to your own Brave or Tavily key, or
+              point at a SearXNG instance you run. Searching is a reviewed action, so nothing goes out
+              until you allow it.
+            </p>
+            <a class="doclink" href="https://github.com/SecureCloudGroup/SmartBrain_3000/blob/main/docs/03-features.md#web-search">Web search<span aria-hidden="true"> →</span></a>
+          </div>
+
+          <div class="card">
+            <h3>Memory</h3>
+            <p>
+              Your name, its name, standing instructions and a list of remembered facts — encrypted, and
+              added to every conversation. It is one readable list, so when you wonder why it keeps doing
+              something, you can look, and delete the line.
+            </p>
+            <a class="doclink" href="https://github.com/SecureCloudGroup/SmartBrain_3000/blob/main/docs/03-features.md#memory">Memory<span aria-hidden="true"> →</span></a>
+          </div>
+
+          <div class="card">
+            <h3>Local or cloud models</h3>
+            <p>
+              Run models on your own machine with Ollama or Apple MLX, or bring your own keys for OpenAI,
+              Anthropic or Google. A gateway on your machine routes each job — chat, reasoning, embeddings,
+              summarizing — to whichever you picked for it.
+            </p>
+            <a class="doclink" href="https://github.com/SecureCloudGroup/SmartBrain_3000/blob/main/docs/02-models.md">Connect a model<span aria-hidden="true"> →</span></a>
+          </div>
+
+          <div class="card">
+            <h3>Usage and cost</h3>
+            <p>
+              An estimate of what your cloud models have cost, per model, over a range you choose. Local
+              models show as free. It is computed on your machine from your own token counts — no usage
+              data leaves it.
+            </p>
+            <a class="doclink" href="https://github.com/SecureCloudGroup/SmartBrain_3000/blob/main/docs/03-features.md#usage--cost">Usage &amp; cost<span aria-hidden="true"> →</span></a>
+          </div>
+
+          <div class="card">
+            <h3>Reach it from your phone</h3>
+            <p>
+              Pair a phone once, then use SmartBrain on Wi-Fi or cellular. There is no port to forward and
+              nothing listening for inbound connections. The link is direct where the network allows it;
+              where it does not, a relay passes it along without being able to read it. Off until you pair
+              a device.
+            </p>
+            <a class="doclink" href="https://github.com/SecureCloudGroup/SmartBrain_3000/blob/main/docs/08-remote-access.md">Remote access<span aria-hidden="true"> →</span></a>
+          </div>
+
+          <div class="card">
+            <h3>Connect other tools (MCP)</h3>
+            <p>
+              Point Claude Desktop, Cursor or another MCP client at SmartBrain and let it search and read
+              your knowledge base. Read-only, behind a token you mint yourself, and off until you do.
+            </p>
+            <a class="doclink" href="https://github.com/SecureCloudGroup/SmartBrain_3000/blob/main/docs/05-mcp.md">MCP<span aria-hidden="true"> →</span></a>
+          </div>
+
+          <div class="card">
+            <h3>Backup and recovery</h3>
+            <p>
+              Export everything as JSON, or take a backup you can restore later — your content stays
+              encrypted under your own key inside it. Your Recovery Key and Emergency Kit are issued once
+              at setup and are the only way back in if you forget your passphrase. There is no reset,
+              because nobody else holds a copy.
+            </p>
+            <a class="doclink" href="https://github.com/SecureCloudGroup/SmartBrain_3000/blob/main/docs/06-backup-recovery.md">Backup &amp; recovery<span aria-hidden="true"> →</span></a>
+          </div>
+
+          <div class="card">
+            <h3>Self-improvement, off by default</h3>
+            <p>
+              If you switch it on, SmartBrain scores its own recent work from telemetry that never leaves
+              your machine. At most it learns one short preference at a time — it shows up in Memory
+              marked “(learned)”, it is measured, and it is reverted on its own if it does not help. A
+              second switch lets it steer how it handles a kind of request, and answers it steered say
+              so. It does not change its own code.
+            </p>
+            <a class="doclink" href="https://github.com/SecureCloudGroup/SmartBrain_3000/blob/main/docs/03-features.md#self-improvement">Self-improvement<span aria-hidden="true"> →</span></a>
+          </div>
+
+          <div class="card">
+            <h3>What actually leaves your machine</h3>
+            <p>
+              The app makes no calls of its own: no accounts, no analytics, no telemetry. Things go out
+              when you ask for them — a cloud model you configured, a web search, Gmail, a vault you
+              subscribed to — and the desktop app checks GitHub for its own updates. All of it is written
+              down, along with the limits this design does not pretend to solve.
+            </p>
+            <a class="doclink" href="https://github.com/SecureCloudGroup/SmartBrain_3000/blob/main/docs/07-privacy-security.md#what-leaves-your-machine-and-when">Privacy &amp; security<span aria-hidden="true"> →</span></a>
+          </div>
+        </div>
+      </div>
+    </section>
 
     <section class="block" id="install">
       <div class="wrap">
@@ -239,9 +442,12 @@
           </div>
         </div>
         <p class="note" style="margin-top:1rem">
-          Prefer a direct download? Grab the
+          You run that command once. After the first launch SmartBrain looks for its own updates and
+          installs them when you say so — there is no package-manager command to run again. Prefer a
+          direct download? Grab the
           <a href="https://github.com/SecureCloudGroup/SmartBrain_3000/releases/latest">latest release</a>.
-          On macOS and Windows, SmartBrain needs nothing else — it brings its own runtime and keeps it updated. Linux, and Macs with Intel processors, run it in <a href="https://docs.docker.com/get-docker/">Docker</a> (Desktop, Colima, OrbStack, or Engine).
+          On macOS and Windows, SmartBrain needs nothing else — it brings its own runtime. Linux, and Macs with Intel processors, run it in <a href="https://docs.docker.com/get-docker/">Docker</a> (Desktop, Colima, OrbStack, or Engine).
+          Full detail in <a href="https://github.com/SecureCloudGroup/SmartBrain_3000/blob/main/docs/01-getting-started.md#install">Getting started</a>.
         </p>
       </div>
     </section>
@@ -264,6 +470,65 @@
             <p>Add an API key or a local model (MLX or Ollama), then start building your private knowledge base.</p>
           </div>
         </div>
+        <p class="note" style="margin-top:1.25rem">
+          Step by step, with screenshots, in
+          <a href="https://github.com/SecureCloudGroup/SmartBrain_3000/blob/main/docs/01-getting-started.md#first-run">First run</a>
+          and
+          <a href="https://github.com/SecureCloudGroup/SmartBrain_3000/blob/main/docs/01-getting-started.md#your-first-5-minutes">Your first 5 minutes</a>.
+        </p>
+      </div>
+    </section>
+
+    <section class="block" id="docs">
+      <div class="wrap">
+        <h2>Documentation</h2>
+        <p class="intro">
+          The whole manual is public, and it is the same text the app shows on its own Help page.
+        </p>
+        <ol class="docs">
+          <li>
+            <a href="https://github.com/SecureCloudGroup/SmartBrain_3000/blob/main/docs/01-getting-started.md">Getting started</a>
+            <span>What you need, installing, first run, locking, updating, troubleshooting, uninstalling.</span>
+          </li>
+          <li>
+            <a href="https://github.com/SecureCloudGroup/SmartBrain_3000/blob/main/docs/02-models.md">Connect a model</a>
+            <span>Cloud provider keys, local models with Ollama or MLX, and the embedding model knowledge search uses.</span>
+          </li>
+          <li>
+            <a href="https://github.com/SecureCloudGroup/SmartBrain_3000/blob/main/docs/03-features.md">Using SmartBrain</a>
+            <span>Chat and tools, knowledge, planner, schedules, email, memory, web search, usage, activity.</span>
+          </li>
+          <li>
+            <a href="https://github.com/SecureCloudGroup/SmartBrain_3000/blob/main/docs/04-vaults.md">Share knowledge with Vaults</a>
+            <span>Group documents, share a sealed vault privately, publish one openly, subscribe by URL.</span>
+          </li>
+          <li>
+            <a href="https://github.com/SecureCloudGroup/SmartBrain_3000/blob/main/docs/05-mcp.md">Connect external tools (MCP)</a>
+            <span>Give a desktop AI client read-only access to your knowledge base.</span>
+          </li>
+          <li>
+            <a href="https://github.com/SecureCloudGroup/SmartBrain_3000/blob/main/docs/06-backup-recovery.md">Backup &amp; recovery</a>
+            <span>Export, encrypted backup, restore, changing your passphrase, and the Recovery Key.</span>
+          </li>
+          <li>
+            <a href="https://github.com/SecureCloudGroup/SmartBrain_3000/blob/main/docs/07-privacy-security.md">Privacy &amp; security</a>
+            <span>What protects your data, what leaves your machine and when, and the honest limits.</span>
+          </li>
+          <li>
+            <a href="https://github.com/SecureCloudGroup/SmartBrain_3000/blob/main/docs/08-remote-access.md">Remote access</a>
+            <span>Pairing a phone, using it on Wi-Fi or cellular, managing and revoking devices.</span>
+          </li>
+          <li>
+            <a href="https://github.com/SecureCloudGroup/SmartBrain_3000/blob/main/docs/09-design-limits.md">Design limits</a>
+            <span>The single-user, local-first choices that were made on purpose, and what they cost.</span>
+          </li>
+        </ol>
+        <p class="note" style="margin-top:1.25rem">
+          Also worth reading: the
+          <a href="https://github.com/SecureCloudGroup/SmartBrain_3000/blob/main/CHANGELOG.md">changelog</a>,
+          the <a href="https://github.com/SecureCloudGroup/SmartBrain_3000/blob/main/SECURITY.md">security policy</a>,
+          and the <a href="https://github.com/SecureCloudGroup/SmartBrain_3000/blob/main/LICENSE">license</a>.
+        </p>
       </div>
     </section>
 
@@ -273,6 +538,7 @@
         <span>
           <a href="https://github.com/SecureCloudGroup/SmartBrain_3000">Source</a> ·
           <a href="https://github.com/SecureCloudGroup/SmartBrain_3000/blob/main/docs/README.md">Docs</a> ·
+          <a href="https://github.com/SecureCloudGroup/SmartBrain_3000/blob/main/docs/07-privacy-security.md">Privacy &amp; security</a> ·
           <a href="https://github.com/SecureCloudGroup/SmartBrain_3000/releases/latest">Releases</a>
         </span>
       </div>
