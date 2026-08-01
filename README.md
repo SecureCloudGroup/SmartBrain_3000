@@ -21,8 +21,9 @@ setup — it cannot read your data.
 ## What it is
 
 SmartBrain_3000 is a **fully local, single-user** AI assistant that runs on your
-own computer — macOS, Linux, or Windows. It needs no Docker and no other setup:
-the desktop app assembles what it needs and runs it directly, with no containers.
+own computer — macOS, Linux, or Windows. On macOS and Windows the desktop app
+assembles what it needs and runs it directly, with no Docker and nothing else to
+install first. On Linux it runs in Docker.
 
 - **Your choice of AI.** Bring your own API keys for OpenAI, Anthropic, or
   Google — or run **fully local models** with Ollama or Apple MLX. A built-in
@@ -46,8 +47,9 @@ the desktop app assembles what it needs and runs it directly, with no containers
 
 ## Quickstart
 
-There are no prerequisites — no Docker, no Python, no accounts. Install the SmartBrain app
-from **https://smartbrain.securecloudgroup.com**, or with one command:
+On **macOS and Windows** there are no prerequisites — no Docker, no Python, no accounts.
+Install the SmartBrain app from **https://smartbrain.securecloudgroup.com**, or with one
+command:
 
 **macOS** — in the Terminal app:
 
@@ -60,9 +62,6 @@ brew install --cask securecloudgroup/tap/smartbrain
 ```powershell
 scoop bucket add securecloudgroup https://github.com/SecureCloudGroup/scoop-bucket
 scoop install securecloudgroup/smartbrain
-```
-
-Homebrew and Scoop install a small **desktop launcher** — a menu-bar / tray app. On its
 first start it downloads and verifies everything SmartBrain needs (a Python runtime, the
 app itself, and the model gateway) into a folder it owns, then runs it and opens your
 browser. That download is a few hundred megabytes, so allow a few minutes the first time;
@@ -77,10 +76,10 @@ after that it starts in seconds. The app runs at **http://localhost:33000**. In 
    Chat screen.
 3. **Start chatting.**
 
-> **Does it need Docker?** No — not on an Apple-Silicon Mac, 64-bit Windows, or 64-bit x86
-> Linux. There is no native build yet for **Intel Macs** or **ARM Linux**; on those the
-> launcher runs SmartBrain in Docker instead, so Docker has to be installed and running.
-> `SMARTBRAIN_NATIVE=0` forces the Docker path on any machine.
+> **Does it need Docker?** Not on an **Apple-Silicon Mac** or **64-bit Windows** — those run
+> it directly. **Intel Macs** install the same desktop app but fall back to Docker, because
+> there is no native build for them. **Linux** has no desktop app yet and runs the Docker
+> stack above. `SMARTBRAIN_NATIVE=0` forces the Docker path on any machine.
 
 > **Building from source?** Contributors can `git clone` the repo and run
 > `python3 installer/install.py install` (this needs Docker, git, and Python, and compiles
@@ -103,7 +102,7 @@ from install to fully working; the rest are optional power-ups:
 
 ### Updating
 
-**SmartBrain updates itself — there is no command to run.** The desktop app looks for a new
+**On macOS and Windows, SmartBrain updates itself — there is no command to run.** The desktop app looks for a new
 release in the background and downloads it without disturbing what you're doing. Once it's
 ready, the app itself says so and offers **Install now**; the same update is offered in the
 menu as **Install update now** / **Install on next start**. Installing restarts SmartBrain
@@ -114,10 +113,13 @@ the next time you start. The desktop app updates itself the same way, so `brew u
 - **Which version am I on?** The menu names it, and so does the app under the logo, top-left.
 - **From a paired phone** you can see that an update is waiting, but installing it is
   Desktop-only.
+- **On Linux (Docker):** no launcher does it for you — re-run `docker compose -f docker-compose.release.yml pull`
+  then `docker compose -f docker-compose.release.yml up -d`.
 - **From source:** `python3 installer/install.py update` backs up your encrypted data first, then rebuilds, restarts, and verifies — prompting before changes, on the host, never inside the container.
 
-Your data lives in a folder you own — `~/Library/Application Support/SmartBrain/data` on
-macOS — and an update never touches it.
+An update never touches your data. On macOS and Windows it lives in a folder you own
+(`~/Library/Application Support/SmartBrain/data` on macOS); the Linux Docker stack keeps it
+in named Docker volumes.
 
 ## Going further (optional)
 

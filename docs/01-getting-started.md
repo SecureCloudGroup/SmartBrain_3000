@@ -8,15 +8,18 @@ the AI providers you configure, and Google's APIs if you connect Gmail. See
 
 ## What you need
 
-Nothing. There is no Docker to install, no Python, no accounts, and no config files to
-edit. SmartBrain brings its own runtime: on first start the desktop app downloads a
-Python runtime, the app itself, and the model gateway, checks each one against a
-checksum, and runs them as two ordinary programs on your machine.
+On **macOS and Windows**: nothing. There is no Docker to install, no Python, no accounts,
+and no config files to edit. SmartBrain brings its own runtime — on first start the desktop
+app downloads a Python runtime, the app itself, and the model gateway, checks each one
+against a checksum, and runs them as two ordinary programs on your machine.
 
-One exception: there is no native build yet for **Intel Macs** or **ARM Linux**. On those
-machines the launcher runs SmartBrain in Docker instead, so you need
-[Docker](https://docs.docker.com/get-docker/) installed and running. Everything else in
-this guide works the same either way.
+Two cases need [Docker](https://docs.docker.com/get-docker/) installed and running:
+
+- **Linux** — there is no desktop app for Linux yet, so it runs the Docker stack.
+- **Intel Macs** — they install the same desktop app as Apple Silicon, but there is no
+  native build for them, so it falls back to running SmartBrain in Docker.
+
+Everything else in this guide works the same on all of them.
 
 ## Install
 
@@ -37,26 +40,28 @@ scoop bucket add securecloudgroup https://github.com/SecureCloudGroup/scoop-buck
 scoop install securecloudgroup/smartbrain
 ```
 
-On macOS the launcher starts by itself once Homebrew finishes; on Windows, open
+**Linux** — no desktop app yet. Download the release compose file and start it:
 **SmartBrain** from the Start menu. The menu-bar icon shows what it is doing. The first
 start downloads a few hundred megabytes, so give it a few minutes — the status line reads
 *"Downloading SmartBrain…"*, then *"Starting (native)…"*, then *"Running ● (native)"*.
 After that it starts in seconds and your browser opens at **http://localhost:33000**. Then
 complete first-run setup below.
 
-Everything the app installs lives in one folder you own, alongside your data:
+On macOS and Windows, everything the desktop app installs lives in one folder you own,
+alongside your data:
 
 | | Folder |
 | --- | --- |
 | macOS | `~/Library/Application Support/SmartBrain` |
 | Windows | `%APPDATA%\SmartBrain` |
-| Linux | `~/.config/SmartBrain` (your database is under `~/.local/share/smartbrain/data`) |
+
+(The Linux Docker stack keeps its data in named Docker volumes instead.)
 
 ### If an install is misbehaving: a clean upgrade
 
-Rarely — usually after an interrupted first start, or on a machine that ran an early
-Docker build — the launcher can end up with a half-finished install or a leftover
-container holding port 33000. This resets it without touching your data:
+On macOS and Windows, rarely — usually after an interrupted first start, or on a machine
+that ran an early Docker build — the launcher can end up with a half-finished install or a
+leftover container holding port 33000. This resets it without touching your data:
 
 1. **Stop it.** In the menu-bar / tray menu choose **Stop**, then **Quit launcher**.
    (**Quit launcher** on its own leaves SmartBrain running — **Stop** is what shuts it
@@ -218,7 +223,7 @@ Most first-run problems are one of these:
   purpose to prevent data loss. Let SmartBrain update itself first, then reopen or retry
   the restore.
 
-On an **Intel Mac** or **ARM Linux**, where SmartBrain runs in Docker, two more apply:
+On **Linux** and **Intel Macs**, where SmartBrain runs in Docker, two more apply:
 
 - **"Docker is required — install it, start it, then click Restart."** Install
   [Docker](https://docs.docker.com/get-docker/) — the launcher opens the download page for
@@ -236,7 +241,8 @@ one is yours to take deliberately.
 
 1. **The app.** Stop it first (**Stop** in the menu), then remove it however you installed
    it: `brew uninstall --cask smartbrain` on macOS, `scoop uninstall smartbrain` on
-   Windows. From source, `docker compose down` in `compose/`.
+   Windows, `docker compose -f docker-compose.release.yml down` on Linux. From source,
+   `docker compose down` in `compose/`.
 
    On macOS you can add `--zap` to clear what the app downloaded as well:
    `brew uninstall --zap --cask smartbrain`. That removes the assembled runtime, the logs,
@@ -251,7 +257,10 @@ one is yours to take deliberately.
    | --- | --- |
    | macOS | `~/Library/Application Support/SmartBrain` |
    | Windows | `%APPDATA%\SmartBrain` |
-   | Linux | `~/.config/SmartBrain` and `~/.local/share/smartbrain` |
+
+   On Linux the data is in Docker volumes, so it goes with the stack:
+   `docker compose -f docker-compose.release.yml down -v`. The `-v` is what deletes the
+   volumes — without it your data stays.
 
    Take a **Download encrypted backup** first if there's any chance you'll want it back —
    see [Backup & recovery](06-backup-recovery.md). There is no way to recover it afterwards.
