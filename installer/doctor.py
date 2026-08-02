@@ -677,6 +677,11 @@ def check_processes(m: Machine, s: Snapshot) -> list[Finding]:
                 ))
                 noted_unavailable = True
             continue
+        # The marker alone matches every SmartBrain process on the machine — including one
+        # belonging to a different install (another user, a from-source dev stack alongside a
+        # native install). Reporting those as this install's survivors is the bug this scope
+        # prevents; a candidate must actually be running out of THIS install's versions dir.
+        found = _in_this_install(m, rec, found)
         unrecorded = [p for p in found if not (rec.verified and p == rec.pid)]
         if not unrecorded:
             continue
@@ -715,6 +720,31 @@ def check_processes(m: Machine, s: Snapshot) -> list[Finding]:
                 ),
             ))
     return out
+
+
+def _in_this_install(m: Machine, rec: PidRecord, pids: list[int]) -> list[int]:
+    """Keep only pids whose command line runs out of ``m.versions_dir``.
+
+    The launcher spawns both children from ``<versions_dir>/<v>/...`` (see
+    ``launcher/native/native.go``), so a real process of this install always names that
+    path on its command line. A pid whose command line cannot be read at all (another
+    user's process refusing ``ps``, PowerShell denied) reads as NOT ours — being silent
+    about a foreign process is correct; naming it as the user's own survivor is the bug.
+    """
+    assert isinstance(pids, list), "pids must be a list"
+    assert rec is not None, "record required for command-line reuse"
+    needle = str(m.versions_dir)
+    windows = m.system == "Windows"
+    scoped: list[int] = []
+    for pid in pids:  # bounded by pgrep / Win32_Process output
+        command = rec.command if pid == rec.pid else pid_command(pid, m.system)
+        if not command:
+            continue  # unreadable command line — treat as foreign, not as ours
+        haystack = command.lower() if windows else command
+        target = needle.lower() if windows else needle
+        if target in haystack:
+            scoped.append(pid)
+    return scoped
 
 
 def _pid_finding(m: Machine, rec: PidRecord, human: str) -> Finding:

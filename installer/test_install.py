@@ -217,7 +217,13 @@ def _healthy(tmp_path, world, version="0.8.13"):
     (m.run_dir / "bifrost.pid").write_text("200\n")
     m.data_dir.mkdir(parents=True, exist_ok=True)
     (m.data_dir / "smartbrain.duckdb").write_bytes(b"x" * 50_000)
-    world.alive = {100: "python3 -m smartbrain_3000.serve", 200: "/x/bifrost-http -port 38080"}
+    # Command lines as the launcher spawns them: both children run out of
+    # <versions_dir>/<v>/..., which is how check_processes scopes to this install.
+    vdir = m.versions_dir / version
+    world.alive = {
+        100: f"{vdir}/python/bin/python3 -m smartbrain_3000.serve",
+        200: f"{vdir}/bifrost-http -app-dir {m.bifrost_data} -host 127.0.0.1 -port 38080",
+    }
     world.matches = {doctor.APP_MARKER: [100], doctor.GATEWAY_MARKER: [200],
                      "SmartBrain.app/Contents/MacOS": [3]}
     world.http = {
@@ -360,7 +366,8 @@ def test_recycled_pid_is_a_failure_and_nothing_is_killed(tmp_path, world):
 
 def test_two_app_processes_is_a_failure(tmp_path, world):
     m = _healthy(tmp_path, world)
-    world.alive[101] = "python3 -m smartbrain_3000.serve"
+    vdir = m.versions_dir / "0.8.13"
+    world.alive[101] = f"{vdir}/python/bin/python3 -m smartbrain_3000.serve"
     world.matches[doctor.APP_MARKER] = [100, 101]
     sections, _ = doctor.diagnose(m)
     assert any("More than one app process" in f.title for f in _levels(sections, doctor.FAIL))
@@ -375,6 +382,61 @@ def test_an_unrecorded_survivor_is_reported(tmp_path, world):
     finding = next(f for f in _levels(sections, doctor.WARN) if "no record of" in f.title)
     assert "100" in finding.detail
     assert "will not stop it" in " ".join(finding.advice)
+
+
+def test_marker_match_outside_this_install_is_ignored(tmp_path, world):
+    """The bug from the field: a marker hit belonging to ANOTHER install is not our survivor.
+
+    Multi-user machines, or a from-source dev stack alongside a native install, cause pgrep
+    to return SmartBrain processes that are not this install's. Reporting them as
+    unrecorded survivors of this install (and advising Stop + Restart on them) is what
+    put this scoping in.
+    """
+    m = _healthy(tmp_path, world)
+    (m.run_dir / "app.pid").unlink()          # this install has NO app recorded...
+    world.alive[4177] = (                     # ...and the foreign process runs from
+        "/Users/other/Library/Application Support/SmartBrain/native/versions/0.8.13/"
+        "python/bin/python3 -m smartbrain_3000.serve"
+    )
+    world.matches[doctor.APP_MARKER] = [4177]
+    sections, _ = doctor.diagnose(m)
+    assert not any("no record of" in f.title for f in _levels(sections, doctor.WARN))
+    assert not any("More than one" in f.title for f in _levels(sections, doctor.FAIL))
+
+
+def test_survivor_from_older_version_of_this_install_is_still_reported(tmp_path, world):
+    """The whole point of the check: a survivor from an earlier version of THIS install.
+
+    After an update flips ``current``, an older-version process still counts as a survivor
+    of this install — its command line still contains this install's versions dir. This
+    fixture also plants a foreign SmartBrain pid so the assertion catches both directions:
+    scope too tight (miss the older-version survivor) OR scope too loose (name the foreign).
+    """
+    m = _healthy(tmp_path, world, version="0.8.13")
+    _assemble(m, "0.8.12")                                 # an older assembly of this install
+    (m.run_dir / "app.pid").unlink()                       # no pid record for the survivor
+    old_vdir = m.versions_dir / "0.8.12"
+    world.alive[555] = f"{old_vdir}/python/bin/python3 -m smartbrain_3000.serve"
+    world.alive[4177] = (                                  # a foreign install's process
+        "/Users/other/Library/Application Support/SmartBrain/native/versions/0.8.13/"
+        "python/bin/python3 -m smartbrain_3000.serve"
+    )
+    world.matches[doctor.APP_MARKER] = [555, 4177]
+    sections, _ = doctor.diagnose(m)
+    finding = next(f for f in _levels(sections, doctor.WARN) if "no record of" in f.title)
+    assert "555" in finding.detail                          # ours is named
+    assert "4177" not in finding.detail                     # the foreign one is not
+
+
+def test_unreadable_command_line_is_treated_as_not_ours(tmp_path, world, monkeypatch):
+    """Permission-denied on another user's process reads as foreign, never as our survivor."""
+    m = _healthy(tmp_path, world)
+    (m.run_dir / "app.pid").unlink()
+    world.matches[doctor.APP_MARKER] = [8888]  # a pid pgrep saw...
+    # ...but whose command line ps refuses to reveal (another user's, on a locked-down box).
+    monkeypatch.setattr(doctor, "pid_command", lambda pid, system: "")
+    sections, _ = doctor.diagnose(m)
+    assert not any("no record of" in f.title for f in _levels(sections, doctor.WARN))
 
 
 def test_stack_without_its_launcher_is_a_note_not_a_failure(tmp_path, world):
