@@ -171,7 +171,7 @@ def world(monkeypatch):
     w = World()
     monkeypatch.setattr(doctor, "http_json",
                         lambda url, timeout=3.0, headers=None, method="GET": w.http.get(url))
-    monkeypatch.setattr(doctor, "pid_alive", lambda pid: pid in w.alive)
+    monkeypatch.setattr(doctor, "pid_alive", lambda pid, system: pid in w.alive)
     monkeypatch.setattr(doctor, "pid_command", lambda pid, system: w.alive.get(pid, ""))
     monkeypatch.setattr(doctor, "matching_pids", lambda marker, system: w.matches.get(marker, []))
     monkeypatch.setattr(doctor, "port_listeners", lambda port, system: w.listeners.get(port, []))
@@ -710,3 +710,85 @@ def test_report_hides_passing_checks_unless_asked():
     quiet = "\n".join(doctor.render(sections, verbose=False))
     assert "bad" in quiet and "fine" not in quiet
     assert "fine" in "\n".join(doctor.render(sections, verbose=True))
+
+
+# --- N9: the six defects the doctor used to have -------------------------------------
+
+
+def test_pid_alive_never_calls_os_kill_on_windows(monkeypatch):
+    """os.kill on Windows routes to TerminateProcess for anything but CTRL_C/CTRL_BREAK.
+
+    A read-only diagnose that reaches pid_alive would kill the user's live SmartBrain.
+    """
+    def refuse(pid, sig):  # pragma: no cover - the whole point is that we never call it
+        raise AssertionError(f"os.kill was called with ({pid}, {sig}) on Windows")
+    monkeypatch.setattr(doctor.os, "kill", refuse)
+    monkeypatch.setattr(doctor, "run_cmd",
+                        lambda cmd: (0, "python.exe   1234 Console   1  100 K"))
+    assert doctor.pid_alive(1234, "Windows") is True
+    monkeypatch.setattr(doctor, "run_cmd",
+                        lambda cmd: (0, "INFO: No tasks are running which match the specified criteria."))
+    assert doctor.pid_alive(1234, "Windows") is False
+    monkeypatch.setattr(doctor, "run_cmd", lambda cmd: (1, ""))
+    assert doctor.pid_alive(1234, "Windows") is False
+
+
+def test_matching_pids_distinguishes_unavailable_from_empty(monkeypatch):
+    """None means "could not look"; [] means "looked and found nothing"."""
+    monkeypatch.setattr(doctor, "run_cmd", lambda cmd: (127, ""))  # pgrep not installed
+    assert doctor.matching_pids("smartbrain_3000.serve", "Linux") is None
+    monkeypatch.setattr(doctor, "run_cmd", lambda cmd: (1, ""))    # pgrep ran, no match
+    assert doctor.matching_pids("smartbrain_3000.serve", "Linux") == []
+    monkeypatch.setattr(doctor, "run_cmd", lambda cmd: (0, "42\n7\n"))
+    assert doctor.matching_pids("smartbrain_3000.serve", "Linux") == [42, 7]
+
+
+def test_check_processes_notes_when_the_search_is_unavailable(tmp_path, world, monkeypatch):
+    """A silent [] on Windows made the duplicate/survivor check invisible for a whole platform."""
+    m = _healthy(tmp_path, world)
+    monkeypatch.setattr(doctor, "matching_pids", lambda marker, system: None)
+    sections, _ = doctor.diagnose(m)
+    assert any("cross-check could not run" in f.title for f in _levels(sections, doctor.NOTE))
+    assert not _levels(sections, doctor.FAIL)  # cannot look != healthy, but cannot look != broken
+
+
+def test_prunable_never_returns_the_running_version(tmp_path, world):
+    """A staged update flips ``current`` while the app still runs from the older folder.
+
+    Deleting the running assembly rmtree's the interpreter under lazy imports. Uses
+    four complete versions so a prune actually happens (three-version cases collapse
+    to an empty prune list once running is protected, and cannot exercise the text).
+    """
+    m = _healthy(tmp_path, world, version="0.8.10")  # world.http reports 0.8.10 running
+    _assemble(m, "0.8.5")                             # ancient; the one that must prune
+    _assemble(m, "0.8.12")                            # newer than running; becomes rollback
+    _assemble(m, "0.8.13", select=True)               # newest, current, NOT running
+    snap = doctor.gather(m)
+    assert snap.current == "0.8.13" and snap.running_version == "0.8.10"
+    prunable = doctor._prunable_versions(snap)
+    assert "0.8.10" not in prunable, f"would delete the running assembly: {prunable}"
+    assert prunable == ["0.8.5"], prunable
+    # And the confirmation text must name the running version, not just `current`.
+    sections, _ = doctor.diagnose(m)
+    finding = next(f for f in _levels(sections, doctor.WARN) if "old version" in f.title)
+    assert "0.8.10" in finding.fix.explain
+
+
+def test_docker_leftovers_fix_stays_silent_when_no_native_assembly_exists(tmp_path, world):
+    """A Linux compose install is the install — never call it "leftovers"."""
+    m = _machine(tmp_path, system="Linux", arch="x86_64")
+    m.launcher_dir.mkdir(parents=True)  # exists, but versions_dir is empty
+    world.command_result = (0, "smartbrain_3000\nsmartbrain_bifrost\n")
+    snap = doctor.gather(m)
+    assert snap.complete_versions == ()
+    assert doctor._fix_docker_leftovers(snap, [("com.docker.backend", 77)]) is None
+
+
+def test_headline_does_not_claim_a_running_version_when_no_install_here(tmp_path, world):
+    """Multi-user machines: /api/health may belong to another user's install."""
+    m = _machine(tmp_path)                        # launcher_dir does NOT exist
+    world.http = {APP_HEALTH: (200, {"status": "ok", "version": "0.8.13"})}
+    _, snap = doctor.diagnose(m)
+    line = doctor.headline(m, snap)
+    assert "0.8.13 running" not in line
+    assert "no install here" in line.lower()

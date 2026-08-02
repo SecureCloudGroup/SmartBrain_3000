@@ -306,10 +306,23 @@ def run_cmd(cmd: list[str]) -> tuple[int, str]:
     return proc.returncode, (proc.stdout + proc.stderr).strip()
 
 
-def pid_alive(pid: int) -> bool:
-    """Does a process with this pid exist? Advisory only — pids are recycled."""
+def pid_alive(pid: int, system: str) -> bool:
+    """Does a process with this pid exist? Advisory only — pids are recycled.
+
+    Windows is a hard no on ``os.kill``: CPython routes every signal except
+    ``CTRL_C_EVENT`` / ``CTRL_BREAK_EVENT`` to ``TerminateProcess``, so ``os.kill(pid, 0)``
+    does not test liveness — it terminates the target. In plain read-only diagnose mode
+    the doctor would kill the user's own SmartBrain. Never "simplify" this back.
+    """
     if pid <= 1:
         return False
+    if system == "Windows":
+        code, out = run_cmd(["tasklist", "/FI", f"PID eq {pid}", "/NH"])
+        if code != 0:
+            return False
+        # tasklist prints an "INFO: No tasks..." line when nothing matches; a real match
+        # includes the pid as its own token in the row.
+        return any(tok == str(pid) for tok in out.split())
     try:
         os.kill(pid, 0)
     except PermissionError:
@@ -337,13 +350,34 @@ def pid_command(pid: int, system: str) -> str:
     return out if code == 0 else ""
 
 
-def matching_pids(marker: str, system: str) -> list[int]:
-    """Every live pid whose command line contains ``marker`` ([] when we cannot look)."""
+def matching_pids(marker: str, system: str) -> list[int] | None:
+    """Every live pid whose command line contains ``marker``.
+
+    Distinguishes the two very different answers callers must not conflate:
+    ``[]`` means we looked and nothing matched; ``None`` means the search itself was
+    unavailable (pgrep missing, PowerShell refused, etc.). Silently returning ``[]`` on
+    an unavailable platform is how a duplicate-process check goes quietly blind — see
+    the docstring on ``pid_command`` for the same principle.
+    """
     if system == "Windows":
-        return []
+        # Refuse marker characters PowerShell would treat specially. Today's markers are
+        # module constants; guard anyway so nobody wires a variable through here later.
+        if not re.fullmatch(r"[A-Za-z0-9_.\-]+", marker):
+            return None
+        script = (
+            "Get-CimInstance Win32_Process | "
+            f"Where-Object {{ $_.CommandLine -like '*{marker}*' }} | "
+            "Select-Object -ExpandProperty ProcessId"
+        )
+        code, out = run_cmd(["powershell", "-NoProfile", "-Command", script])
+        if code != 0:
+            return None
+        return [int(p) for p in out.split() if p.isdigit()]
     code, out = run_cmd(["pgrep", "-f", marker])
+    if code == 1:
+        return []  # pgrep ran and found nothing
     if code != 0:
-        return []
+        return None  # pgrep missing (127), timed out (124), or errored (2/3)
     return [int(p) for p in out.split() if p.isdigit()]
 
 
@@ -427,7 +461,7 @@ def _read_pid(m: Machine, name: str, marker: str) -> PidRecord:
     if not rec.raw.isdigit():
         return rec
     rec.pid = int(rec.raw)
-    rec.alive = pid_alive(rec.pid)
+    rec.alive = pid_alive(rec.pid, m.system)
     if not rec.alive:
         return rec
     rec.command = pid_command(rec.pid, m.system)
@@ -626,6 +660,7 @@ def _check_native_marker(m: Machine, s: Snapshot) -> list[Finding]:
 
 def check_processes(m: Machine, s: Snapshot) -> list[Finding]:
     out: list[Finding] = []
+    noted_unavailable = False
     for rec, marker, human in ((s.app, APP_MARKER, "app"), (s.gateway, GATEWAY_MARKER, "gateway")):
         assert rec is not None, "snapshot must carry both pid records"
         out.append(_pid_finding(m, rec, human))
@@ -633,6 +668,15 @@ def check_processes(m: Machine, s: Snapshot) -> list[Finding]:
         # in two distinct ways: a genuine double start, and a survivor nothing has a record of
         # (which is what makes a later Stop quietly stop nothing).
         found = matching_pids(marker, m.system)
+        if found is None:
+            if not noted_unavailable:
+                out.append(Finding(
+                    NOTE, "The process cross-check could not run",
+                    "A duplicate SmartBrain process or an unrecorded survivor cannot be detected"
+                    " here without it.",
+                ))
+                noted_unavailable = True
+            continue
         unrecorded = [p for p in found if not (rec.verified and p == rec.pid)]
         if not unrecorded:
             continue
@@ -654,8 +698,10 @@ def check_processes(m: Machine, s: Snapshot) -> list[Finding]:
             ))
 
     if m.system == "Darwin":
-        launcher_running = bool(matching_pids("SmartBrain.app/Contents/MacOS", "Darwin"))
-        if s.app_ok and not launcher_running:
+        launcher_pids = matching_pids("SmartBrain.app/Contents/MacOS", "Darwin")
+        # Only warn on an affirmative "we looked and found none". None ("could not look") is
+        # not evidence the launcher is closed, and we do not want a false accusation here.
+        if s.app_ok and launcher_pids == []:
             out.append(Finding(
                 NOTE, "SmartBrain is running without its menu-bar launcher",
                 "The app keeps running when you quit the launcher — that is by design.",
@@ -708,14 +754,14 @@ def check_ports(m: Machine, s: Snapshot) -> list[Finding]:
             _holder_detail(app_holders) or f"It replied, but not as SmartBrain: {s.app_port_body[:80]}",
             ("SmartBrain cannot start while another program holds this port.",
              "Close that program, then use Restart in the SmartBrain menu."),
-            fix=_fix_docker_leftovers(app_holders + gateway_holders),
+            fix=_fix_docker_leftovers(s, app_holders + gateway_holders),
         ))
     elif app_holders:
         out.append(Finding(
             FAIL, f"Port {m.app_port} is held by something that is not answering",
             _holder_detail(app_holders),
             ("A wedged process on this port stops SmartBrain from starting.",),
-            fix=_fix_docker_leftovers(app_holders),
+            fix=_fix_docker_leftovers(s, app_holders),
         ))
     elif s.app and s.app.verified:
         out.append(Finding(
@@ -739,7 +785,7 @@ def check_ports(m: Machine, s: Snapshot) -> list[Finding]:
             FAIL, f"Something else is answering on port {m.gateway_port}",
             _holder_detail(gateway_holders) or "The reply was not the SmartBrain gateway.",
             ("The gateway is how every model request leaves the app.",),
-            fix=_fix_docker_leftovers(gateway_holders),
+            fix=_fix_docker_leftovers(s, gateway_holders),
         ))
     elif s.app_ok:
         # The launcher's supervisor only watches the APP port, so a dead gateway is invisible
@@ -946,6 +992,18 @@ def _check_old_versions(m: Machine, s: Snapshot) -> list[Finding]:
     if not prunable:
         return []
     total = sum(_dir_size(m.versions_dir / v) for v in prunable)
+    running = s.running_version or s.current
+    if s.running_version and s.running_version != s.current:
+        kept_line = (
+            f"The version you run ({s.running_version}) and the version selected"
+            f" ({s.current}) are both kept,\n"
+            "along with the one before them for rollback."
+        )
+    else:
+        kept_line = (
+            f"The version you run ({running}) and the one before it are kept, so you can"
+            " still\nroll back."
+        )
     return [Finding(
         WARN, f"{len(prunable)} old version{'s' if len(prunable) != 1 else ''} still on disk",
         f"{', '.join(prunable)} — about {_human_bytes(total)}.",
@@ -954,8 +1012,9 @@ def _check_old_versions(m: Machine, s: Snapshot) -> list[Finding]:
             "Remove the old versions",
             "Deletes these folders and nothing else:\n"
             + "\n".join(f"  {m.versions_dir / v}" for v in prunable)
-            + f"\nThe version you run ({s.current}) and the one before it are kept, so you can still\n"
-            "roll back. Each folder holds only downloaded parts; any of them can be fetched again.",
+            + "\n" + kept_line
+            + " Each folder holds only downloaded parts; any of them can be\n"
+            "fetched again.",
             lambda: _delete_all([m.versions_dir / v for v in prunable]),
         ),
     )]
@@ -1144,13 +1203,16 @@ def _fix_point_current(m: Machine, s: Snapshot) -> Fix | None:
     )
 
 
-def _fix_docker_leftovers(holders: Iterable[tuple[str, int]]) -> Fix | None:
+def _fix_docker_leftovers(s: Snapshot, holders: Iterable[tuple[str, int]]) -> Fix | None:
     """The single case where Docker may be named on a native machine: its container has our port.
 
-    Only offered when the listener really does look like Docker AND a SmartBrain container
-    really does exist. Otherwise this stays silent — a native install has no business
-    talking about containers.
+    Only offered when the listener really does look like Docker, a SmartBrain container
+    really does exist, AND there is a complete native assembly on this machine — because
+    without that last piece the container IS the install (the only supported runtime on
+    Linux is compose, and there is no native launcher build for it), not a leftover.
     """
+    if not s.complete_versions:
+        return None  # no native assembly here means containers are the install, not leftovers
     if not any("docker" in cmd.lower() or "vpnkit" in cmd.lower() for cmd, _ in holders):
         return None
     code, out = run_cmd(["docker", "ps", "-a", "--format", "{{.Names}}"])
@@ -1262,7 +1324,12 @@ def _prunable_versions(s: Snapshot) -> list[str]:
     if not s.current or not s.current_complete:
         return []  # never prune while the running version is in doubt
     keep = {s.current}
-    others = [v for v in s.complete_versions if v != s.current]
+    # After a downloaded update flips `current`, the live process is still executing from
+    # its OLDER assembly. Deleting that folder rmtree's the interpreter, stdlib and
+    # wheelhouse out from under lazy imports (pypdf, docx, aiortc, ...). Always keep it.
+    if s.running_version:
+        keep.add(s.running_version)
+    others = [v for v in s.complete_versions if v not in keep]
     if others:
         keep.add(others[-1])  # the rollback
     return [v for v in s.complete_versions if v not in keep]
@@ -1354,8 +1421,14 @@ def summarise(sections: list[Section], fixable: int, can_fix: bool) -> tuple[lis
 def headline(m: Machine, s: Snapshot) -> str:
     """One orienting line: what this tool looked at. A silent report should still say where it looked."""
     mode = "Docker-free install" if m.native_supported else "Docker install"
-    if s.app_ok:
+    # ``app_ok`` only proves 127.0.0.1 answered — not that whatever answered belongs to
+    # THIS install. When we found no install at the examined location, claiming its
+    # version is running would contradict the FAIL that appears right below.
+    install_here = m.launcher_dir.exists() and bool(s.complete_versions)
+    if s.app_ok and install_here:
         state = f"version {s.running_version} running"
+    elif s.app_ok:
+        state = "no install here — something else is answering on the port"
     elif s.current:
         state = f"version {s.current} installed, not running"
     else:
