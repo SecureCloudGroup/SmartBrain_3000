@@ -31,9 +31,9 @@ so a restore is reversible.
 
 - Allowed when you're **unlocked**, or onto a **fresh install** (moving to a new
   machine) — never over a locked, initialized vault.
-- After staging, restart SmartBrain — **Restart** in the menu-bar / tray menu (from
-  source, `python3 installer/install.py update`) — and unlock with that backup's
-  passphrase.
+- After staging, restart SmartBrain — **Restart** in the menu-bar / tray menu, or
+  `docker compose -f docker-compose.release.yml restart` on Linux (from source,
+  `python3 installer/install.py update`) — and unlock with that backup's passphrase.
 - A backup from a **newer version** of SmartBrain_3000 is **refused on purpose**
   (it would risk data loss under older code): upgrade this app first, then restore.
 
