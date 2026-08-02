@@ -140,7 +140,7 @@ ollama pull nomic-embed-text:v1.5
 ```
 
 (A from-source install does this for you when Ollama is present, and
-`python3 installer/install.py doctor` offers to.)
+`python3 installer/doctor.py --fix` offers to pull it if it is missing.)
 
 The tag matters: the bare `nomic-embed-text` won't resolve. If semantic search shows
 keyword results and says *"degraded"*, this model isn't pulled — run the command above

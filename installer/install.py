@@ -9,9 +9,14 @@ installer means they only ever exist inside the app's encrypted store.
 
 Commands:
   install   prereq gate -> build image locally -> start stack -> verify  (default)
-  doctor    re-check prerequisites + running stack; report green/red (exit 1 on fail)
+  doctor    check THIS computer's SmartBrain install and offer safe repairs (see doctor.py)
   update    back up data -> pull latest -> rebuild + restart -> verify (prompts first)
   certs     generate a local CA + TLS cert (mkcert) for LAN/mobile HTTPS access
+
+Note on Docker: everything here except `doctor` is the FROM-SOURCE path, which builds the
+image locally and therefore genuinely needs Docker. Ordinary installs are Docker-free —
+the launcher assembles a native install — and `doctor` diagnoses that install; it lives in
+doctor.py and knows nothing about compose.
 """
 
 from __future__ import annotations
@@ -239,6 +244,8 @@ def cmd_install(open_browser: bool) -> int:
     """Prereq gate -> build + start the stack -> verify health -> next steps."""
     assert isinstance(open_browser, bool), "open_browser must be a bool"
     print(_paint("1", "\nSmartBrain_3000 installer\n"))
+    if _refuse_over_native_install("build a second copy"):
+        return 1
     passed, lines = check_prereqs()
     assert isinstance(passed, bool) and isinstance(lines, list), "prereq report shape"
     for line in lines:
@@ -250,11 +257,11 @@ def cmd_install(open_browser: bool) -> int:
     print(note("First run downloads + builds components — usually a few minutes (longer on a slow link)."))
     if _compose(["up", "-d", "--build"]) != 0:
         print(fail("\nThe build or startup step failed."))
-        print(note("Most often Docker isn't running, or it's low on disk space. Try:  install.py doctor"))
+        print(note("Most often Docker isn't running, or it's low on disk space."))
         return 1
     if not wait_healthy():
         print(fail(f"\nThe app started but isn't responding at {_app_url()} yet."))
-        print(note("On a first run give it another minute, then run:  install.py doctor  (it can restart it for you)"))
+        print(note("On a first run give it another minute, then re-check:  install.py doctor"))
         print(note("Or view logs:  " + " ".join([*_compose_cmd(), "-f", str(COMPOSE_FILE), "logs", "smartbrain"])))
         return 1
     print(ok(f"\nSmartBrain_3000 is running at {_app_url()}"))
@@ -272,70 +279,56 @@ def cmd_install(open_browser: bool) -> int:
     return 0
 
 
-def _confirm(prompt: str) -> bool:
-    """Ask a yes/no question (default No). Only call when stdin is a TTY."""
-    assert prompt, "prompt required"
-    assert sys.stdin.isatty(), "_confirm must only run interactively"
-    return input(f"{prompt} [y/N] ").strip().lower() in ("y", "yes")
+def _doctor():
+    """Import installer/doctor.py (this directory is not a package, so load it by path)."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import doctor  # noqa: PLC0415 - lazy on purpose: importing costs nothing until asked
+
+    return doctor
 
 
-def _try_start_docker() -> None:
-    """Best-effort start of the Docker daemon (platform-specific; may be a no-op)."""
-    system = platform.system()
-    assert system, "platform must be identifiable"
-    assert system in ("Darwin", "Linux", "Windows"), f"unsupported platform: {system}"
-    if system == "Darwin":
-        subprocess.run(["colima", "start"] if shutil.which("colima") else ["open", "-a", "Docker"], check=False)
-    elif system == "Linux":
-        subprocess.run(["systemctl", "start", "docker"], check=False)
-    else:
-        print(note("Start Docker Desktop from the Start menu, then re-run doctor."))
+def cmd_doctor(argv: list[str]) -> int:
+    """Diagnose this computer's SmartBrain install (doctor.py), passing our flags through.
+
+    The doctor deliberately does NOT live here. It is about the install a person actually
+    has — a Docker-free one, assembled by the launcher under the user's app-data folder —
+    which has nothing to do with this file's compose build. Keeping it separate is also
+    what lets someone run it on a machine that has no repo checkout beyond the one file.
+    """
+    return _doctor().main(argv)
 
 
-def _doctor_fix(healthy: bool) -> None:
-    """Offer to fix the common failures: dead daemon, stopped stack, missing embed model."""
-    assert isinstance(healthy, bool), "healthy must be a bool"
-    daemon = shutil.which("docker") is not None and _probe(["docker", "info"])[0] == 0
-    assert isinstance(daemon, bool), "daemon state must be a bool"
-    if not daemon:
-        if _confirm("Docker doesn't look like it's running — try to start it?"):
-            _try_start_docker()
-            print(note("Give Docker a moment to start, then re-run:  install.py doctor"))
-        return  # nothing else can run without the daemon
-    if _compose_cmd() is None:
-        return  # can't act on the stack without compose
-    if not healthy and _confirm("The app isn't responding — (re)start it now?"):
-        _compose(["up", "-d"])
-        if wait_healthy() and _confirm("Open it in your browser?"):
-            try:
-                webbrowser.open(_app_url())
-            except Exception:
-                pass
-    if _confirm(f"Pull the embedding model ({EMBED_MODEL_TAG}) so semantic search works?"):
-        _ensure_embed_model()
+def _native_install_running() -> bool:
+    """True when a launcher-managed (Docker-free) SmartBrain is live on this machine.
+
+    `install` and `update` build and start a SECOND stack on the same ports. Doing that on
+    top of a running native install produces a port collision, a database already held by
+    another process, and a very confusing failure — so both commands stop first.
+
+    The probe is deliberately NOT _health_ok(): that one switches to https the moment a
+    from-source mkcert cert exists, and the native app only ever serves plain http on
+    loopback. Asking the wrong scheme would answer "nothing is running" on exactly the
+    developer machines this guard exists for.
+    """
+    doctor = _doctor()
+    machine = doctor.Machine.detect()
+    if not machine.native_marker.exists():
+        return False
+    answer = doctor.http_json(f"http://127.0.0.1:{machine.app_port}/api/health")
+    return bool(answer and isinstance(answer[1], dict) and answer[1].get("status") == "ok")
 
 
-def cmd_doctor() -> int:
-    """Re-check prerequisites + the running stack; report green/red, and (interactively) fix."""
-    print(_paint("1", "\nSmartBrain_3000 doctor\n"))
-    passed, lines = check_prereqs()
-    for line in lines:
-        print(" ", line)
-    healthy = _health_ok()
-    assert isinstance(passed, bool) and isinstance(healthy, bool), "check results must be bools"
-    print(" ", (ok if healthy else fail)(f"App responding at {_app_url()}/api/health" if healthy else
-              f"App not responding at {_app_url()}/api/health — is the stack up? ('install' or compose up -d)"))
-    if passed and healthy:
-        print("\n" + ok("All checks passed."))
-        return 0
-    print("\n" + fail("Some checks failed (see above)."))
-    # Offer remediations only when interactive; in CI/non-TTY this stays a report (exit 1).
-    if sys.stdin.isatty():
-        _doctor_fix(healthy)
-        if check_prereqs()[0] and _health_ok():
-            print("\n" + ok("Fixed — all checks pass now."))
-            return 0
-    return 1
+def _refuse_over_native_install(action: str) -> bool:
+    """Print the explanation and return True when ``action`` must not proceed."""
+    assert action, "action name required"
+    if not _native_install_running():
+        return False
+    print(fail(f"A Docker-free SmartBrain is already running on this computer — not going to {action}."))
+    print(note("This command builds and starts the from-source Docker stack, which would fight it"))
+    print("      for port 33000 and for the database.")
+    print(note("To look at the install you actually have:  python3 installer/doctor.py"))
+    print(note("To develop against the source anyway, stop SmartBrain from its menu first."))
+    return True
 
 
 def _backup_db() -> bool:
@@ -367,8 +360,11 @@ def cmd_update() -> int:
     """Back up, pull the latest source, rebuild + restart the stack, and verify."""
     assert COMPOSE_FILE.parent.name == "compose", "compose file must live under compose/"
     print(_paint("1", "\nSmartBrain_3000 update\n"))
+    if _refuse_over_native_install("rebuild over it"):
+        return 1
     if _compose_cmd() is None:
-        print(fail("Docker Compose not found — run 'doctor' for details."))
+        print(fail("Docker Compose not found — this from-source command needs it."))
+        print(note("Update Docker Desktop, or install the compose plugin, then retry."))
         return 1
     print(note("This backs up your encrypted data, pulls the latest version, and restarts."))
     answer = input("Continue? [y/N] ").strip().lower()
@@ -448,7 +444,7 @@ def cmd_wireguard(action: str) -> int:
     assert action in ("up", "down", "status"), "action must be up/down/status"
     base = _compose_cmd()
     if base is None:
-        print(fail("Docker Compose not available — see 'doctor'."))
+        print(fail("Docker Compose not available — this from-source command needs it."))
         return 1
     files = ["-f", str(COMPOSE_FILE), "-f", str(LAN_FILE), "-f", str(WG_FILE)]
     peer = REPO_ROOT / "data" / "wireguard" / "peer_phone" / "peer_phone.png"
@@ -497,7 +493,7 @@ def cmd_webrtc(action: str) -> int:
     assert action in ("up", "down", "status"), "action must be up/down/status"
     base = _compose_cmd()
     if base is None:
-        print(fail("Docker Compose not available — see 'doctor'."))
+        print(fail("Docker Compose not available — this from-source command needs it."))
         return 1
 
     if action == "status":
@@ -545,10 +541,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("hostnames", nargs="*",
                         help="hostnames for 'certs' (e.g. smartbrain.local 192.168.1.50); up/down/status for 'wireguard'/'webrtc'")
     parser.add_argument("--no-open", action="store_true", help="do not open the browser after install")
+    parser.add_argument("--fix", action="store_true", help="doctor: offer to repair what it safely can")
+    parser.add_argument("-v", "--verbose", action="store_true", help="doctor: also list the checks that passed")
     args = parser.parse_args(argv)
     assert args.command in ("install", "doctor", "update", "certs", "wireguard", "webrtc"), "unknown command"
     if args.command == "doctor":
-        return cmd_doctor()
+        return cmd_doctor(["--fix"] * args.fix + ["--verbose"] * args.verbose)
     if args.command == "update":
         return cmd_update()
     if args.command == "certs":
