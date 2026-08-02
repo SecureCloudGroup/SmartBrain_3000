@@ -144,6 +144,10 @@ These are advanced tiers — none are needed for the Quickstart above:
 - **Your phone, from anywhere** — pair a phone to reach your assistant on Wi-Fi
   or cellular over an end-to-end-encrypted WebRTC link, with no router
   port-forwarding. Off by default. See [Remote access](docs/08-remote-access.md).
+- **Your knowledge in another AI client** — SmartBrain is also an MCP server, so
+  Claude Desktop, Cursor, or any MCP client can search and read your knowledge base
+  (read-only, loopback, behind a token you mint). Off until you generate that token.
+  See [Connect external tools](docs/05-mcp.md).
 
 Full guide: **[docs/](docs/README.md)** (also available in-app under **Help**).
 

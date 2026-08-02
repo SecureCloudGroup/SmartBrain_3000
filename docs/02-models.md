@@ -63,6 +63,57 @@ is reachable and which models it has.
 
 ![Settings → Local models showing a detected local server with a Connect link](assets/03-local-models.png)
 
+## Choosing a model in Chat
+
+The **Chat** screen has a **Provider** and a **Model** picker above the conversation. It
+opens on your routed Chat model (below); picking a different one there applies to that
+session only and is never saved. Only chat-capable models are listed — an embedding model
+can't hold a conversation, so it isn't offered.
+
+If you pick a model that can't call tools, SmartBrain says so under the reply rather than
+pretending: *"This model can't use tools, so it answered from its own knowledge only — web
+search, tasks, knowledge, and email actions won't run."*
+
+## Which model does what (Model routing)
+
+**Settings → Model routing** decides which model serves which job. Every model you have
+configured — cloud or local — can be pointed at any slot, and the list is discovered live
+from your providers.
+
+| Slot | What it serves | If you don't set it |
+| --- | --- | --- |
+| **Chat** | Ordinary conversation and the assistant's tool-using turns. | `openai/gpt-4o-mini`, which needs an OpenAI key — so this is the one slot worth setting deliberately. |
+| **Agent tasks (schedules)** | Scheduled runs and background turns. These call tools, so pick a model that reliably tool-calls. | **Same as Chat** |
+| **Embedding (semantic search)** | Turning your documents and queries into vectors for meaning search. Only embedding models are offered. | `ollama/nomic-embed-text:v1.5` |
+| **Document summaries** | The background summary tree that makes "summarize this" instant on large documents. | Same as Chat |
+
+Chat is the root: the two slots that say *Same as Chat* really do follow it, so setting Chat
+alone is a complete configuration.
+
+Two more things worth knowing:
+
+- Changing **Embedding** only affects new items. Run **Reindex (semantic)** on the
+  Knowledge page afterwards so existing documents stay searchable.
+- **Document summaries** is the slot to change if you have a big-context cloud model and a
+  book-sized library: it turns a summary tree that would trickle for hours on a small local
+  model into minutes. Point it at a cloud model and your documents are sent to that provider
+  as the tree is built — keep it on a local model if that matters to you.
+
+The page also lists **Fast chat** and **Reasoning** slots. Nothing in the app requests them
+today, so setting them changes nothing.
+
+### Model context length
+
+Under the routing table, **Model context length** tells SmartBrain how many tokens each
+model can hold. That number sizes how much of a document, or how large a tool result, the
+model is handed in one step — a bigger context means Chat reads and summarizes far longer
+documents per step.
+
+MLX servers report their own context length and are filled in automatically. Anything else
+uses **8,192 tokens** until you set a value. Leave a field blank to go back to the default,
+and use the model's real figure — this setting tells SmartBrain what the model can take, it
+doesn't change what the model can take.
+
 ## Embeddings (for Knowledge search)
 
 Semantic search in the [Knowledge base](03-features.md) needs an **embedding
