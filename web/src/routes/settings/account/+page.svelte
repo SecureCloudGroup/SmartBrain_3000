@@ -320,9 +320,8 @@
     so this is reversible.
   </p>
   <p class="muted">
-    To apply it, restart the app:
-    <code>docker compose -f compose/docker-compose.yml restart smartbrain</code>
-    (or restart Docker Desktop).
+    To apply it, restart SmartBrain: open the SmartBrain icon in your menu bar (Windows: the
+    system tray) and choose <strong>Restart</strong>. You&rsquo;ll unlock again afterwards.
   </p>
   <p style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center">
     <input type="file" accept=".duckdb" bind:files={restoreFile} />
