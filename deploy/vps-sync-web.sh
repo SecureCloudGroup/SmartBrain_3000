@@ -8,8 +8,9 @@
 # It deploys the content of the latest v* TAG (matching what the Desktop image ships). It extracts
 # that content with `git archive` into a temp dir and rsyncs it out — it deliberately NEVER checks the
 # repo working tree out to a tag, because older release tags don't contain this very script and a
-# checkout would delete it mid-run. The working tree only ever tracks `main` (so the tooling itself
-# stays current). Idempotent; refuses an empty build so `rsync --delete` can't wipe the live shell.
+# checkout would delete it mid-run. It also never updates its own checkout (see below): a script that
+# systemd runs on a public node must not re-fetch itself from a moving branch.
+# Idempotent; refuses an empty build so `rsync --delete` can't wipe the live shell.
 set -euo pipefail
 
 REPO_DIR="${SB_REPO_DIR:-$HOME/sb-node/src/SmartBrain_3000}"
@@ -19,8 +20,13 @@ STAMP="${SB_STAMP:-$HOME/sb-node/.web-deployed-tag}"
 
 cd "$REPO_DIR"
 git fetch --quiet --tags --prune origin
-# Keep the deploy tooling itself current — this checkout exists only to run this script.
-git reset --quiet --hard origin/main
+# NOTE: this script deliberately does NOT update its own checkout. It used to run
+# `git reset --hard origin/main` here, which meant systemd executed whatever this file
+# said on main at the next timer tick — every push to main was code execution on the
+# public node, with no release gate in between. Content deployment does not need it:
+# `git archive "$latest"` below reads from the TAG OBJECT, not the working tree, so the
+# fetch above is enough to publish new releases. Updating the tooling is now a
+# deliberate operator action:  git -C "$REPO_DIR" reset --hard <reviewed-ref>
 
 latest="$(git tag -l 'v*' | sort -V | tail -1)"
 [ -n "$latest" ] || { echo "no v* release tag found — nothing to deploy"; exit 1; }
