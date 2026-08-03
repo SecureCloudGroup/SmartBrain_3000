@@ -58,6 +58,7 @@ type Updater struct {
 	AppRoot   string                  // install root; resolved from the executable when empty
 	Asset     string                  // release zip name; resolved from GOOS when empty
 	Layout    string                  // "bundle" (.app) or "flat" (exe); resolved from GOOS when empty
+	PubKey    string                  // release signing key; the compiled-in one when empty
 }
 
 // New returns a production Updater for this binary.
@@ -200,16 +201,27 @@ func (u Updater) Apply(ctx context.Context, version string) (string, error) {
 
 	zipPath := filepath.Join(staging, asset)
 	base := fmt.Sprintf("%s/v%s/", releaseBase, version)
-	if err := u.Fetch(ctx, base+asset, zipPath); err != nil {
-		return "", fmt.Errorf("download: %w", err)
-	}
+	// Establish that the checksum is OURS before spending bandwidth on the payload
+	// it describes: the sidecar comes from the same release as the zip, so on its own
+	// it proves only that the two agree — which an attacker who can publish both can
+	// arrange. The signature is what makes it evidence.
 	sumRaw, err := u.FetchBody(ctx, base+asset+".sha256")
 	if err != nil {
 		return "", fmt.Errorf("checksum: %w", err)
 	}
+	sigRaw, err := u.FetchBody(ctx, base+asset+".sha256.minisig")
+	if err != nil {
+		return "", fmt.Errorf("signature: %w", err)
+	}
+	if err := verifySignature(sumRaw, string(sigRaw), u.publicKey()); err != nil {
+		return "", fmt.Errorf("signature: %w", err)
+	}
 	want := strings.Fields(strings.TrimSpace(string(sumRaw)))
 	if len(want) == 0 || len(want[0]) != 64 {
 		return "", fmt.Errorf("checksum: malformed sidecar")
+	}
+	if err := u.Fetch(ctx, base+asset, zipPath); err != nil {
+		return "", fmt.Errorf("download: %w", err)
 	}
 	got, err := sha256File(zipPath)
 	if err != nil {

@@ -27,14 +27,16 @@ is true of the broker protocol and still leaves things worth knowing:
 - **A desktop id is a routing key, not a secret.** It travels in the pairing QR and
   in every phone hello. The broker refuses to re-register an id that already holds a
   live socket, but you should not treat one as confidential.
-- **Releases are verified for integrity, not authenticity.** The launcher checks a
-  SHA-256 published alongside each download over TLS. That detects corruption and
-  tampering in transit; it is not a signature, so it does not prove authorship — a
-  compromised release pipeline could publish a matching pair. Code-signing
-  certificates are not yet in place. Relatedly, the Homebrew cask clears the
-  quarantine attribute on install: the app is unsigned, so without it macOS would
-  block a binary we build in public CI. Both are deliberate, documented trade-offs
-  of shipping without a paid signing certificate.
+- **Releases are signed, but the app is not OS-signed.** Each release's checksum
+  file carries an Ed25519 signature, and the public key is compiled into the
+  launcher, so an update that was not produced by us is refused rather than
+  installed — a checksum alone could not do this, since it ships from the same
+  release as the file it describes. You can verify any release yourself with the
+  stock minisign tool; see `docs/internal/release-signing.md`. What this does *not*
+  do is make the binaries signed in the operating system's eyes: they are not, which
+  is why the Homebrew cask clears the quarantine attribute (macOS would otherwise
+  block a binary built in public CI) and why a browser download warns. Platform
+  code-signing certificates are a paid, separate step and are on the roadmap.
 - **Secret redaction matches argument names, not values.** Tool arguments named like
   credentials (`api_key`, `token`, `password`, `passphrase`, `secret`, …) are
   redacted before display and audit. This is defence in depth on top of the

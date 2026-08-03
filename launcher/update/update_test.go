@@ -103,7 +103,9 @@ func fixtureZip(t *testing.T, dir, layout, marker string) string {
 	return path
 }
 
-func harness(t *testing.T, layout string) (Updater, *[]string, string) {
+// harness returns a ready Updater, the recorded relaunches, the install root, and
+// the private key its release fixtures are signed with.
+func harness(t *testing.T, layout string) (Updater, *[]string, string, string) {
 	t.Helper()
 	work := t.TempDir()
 	// The "installed" launcher the swap will displace.
@@ -132,6 +134,13 @@ func harness(t *testing.T, layout string) (Updater, *[]string, string) {
 	u.AppRoot = root
 	u.Asset = "launcher.zip"
 	u.Layout = layout
+	// A throwaway release key per test: the harness signs exactly what a release
+	// workflow signs, so the whole authenticity path runs rather than being stubbed.
+	pub, priv, err := GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	u.PubKey = pub
 	u.Fetch = func(_ context.Context, url, dest string) error {
 		b, err := os.ReadFile(zipPath)
 		if err != nil {
@@ -140,13 +149,26 @@ func harness(t *testing.T, layout string) (Updater, *[]string, string) {
 		return os.WriteFile(dest, b, 0o755)
 	}
 	u.FetchBody = func(_ context.Context, url string) ([]byte, error) {
-		if strings.HasSuffix(url, ".sha256") {
-			return []byte(sum + "  launcher.zip\n"), nil
-		}
-		return []byte(`{"tag_name":"v9.9.9"}`), nil
+		return releaseBody(t, url, sum+"  launcher.zip\n", priv)
 	}
 	u.Start = func(path string) error { *started = append(*started, path); return nil }
-	return u, started, root
+	return u, started, root, priv
+}
+
+// releaseBody answers the three URLs Apply fetches, signing the sidecar with priv.
+func releaseBody(t *testing.T, url, sidecar, priv string) ([]byte, error) {
+	t.Helper()
+	switch {
+	case strings.HasSuffix(url, ".sha256.minisig"):
+		sig, err := SignDetached(priv, []byte(sidecar), "launcher.zip")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return []byte(sig), nil
+	case strings.HasSuffix(url, ".sha256"):
+		return []byte(sidecar), nil
+	}
+	return []byte(`{"tag_name":"v9.9.9"}`), nil
 }
 
 func TestApplySwapsKeepsBackupAndRelaunches(t *testing.T) {
@@ -156,7 +178,7 @@ func TestApplySwapsKeepsBackupAndRelaunches(t *testing.T) {
 }
 
 func applySwapCase(t *testing.T, layout string) {
-	u, started, root := harness(t, layout)
+	u, started, root, _ := harness(t, layout)
 	newExe, err := u.Apply(context.Background(), "9.9.9")
 	if err != nil {
 		t.Fatal(err)
@@ -182,13 +204,11 @@ func applySwapCase(t *testing.T, layout string) {
 }
 
 func TestApplyRefusesTamperedZipAndTouchesNothing(t *testing.T) {
-	u, started, root := harness(t, "flat")
-	realFetchBody := u.FetchBody
-	u.FetchBody = func(ctx context.Context, url string) ([]byte, error) {
-		if strings.HasSuffix(url, ".sha256") {
-			return []byte(strings.Repeat("0", 64) + "  launcher.zip\n"), nil
-		}
-		return realFetchBody(ctx, url)
+	u, started, root, _ := harness(t, "flat")
+	// Tamper the PAYLOAD, leaving the signed sidecar untouched — the case where an
+	// attacker can swap the zip but cannot forge the signature over its checksum.
+	u.Fetch = func(_ context.Context, _, dest string) error {
+		return os.WriteFile(dest, []byte("not the release you signed"), 0o600)
 	}
 	if _, err := u.Apply(context.Background(), "9.9.9"); err == nil ||
 		!strings.Contains(err.Error(), "checksum mismatch") {
@@ -205,7 +225,7 @@ func TestApplyRefusesTamperedZipAndTouchesNothing(t *testing.T) {
 }
 
 func TestApplyRefusesZipMissingTheApp(t *testing.T) {
-	u, _, root := harness(t, "flat")
+	u, _, root, priv := harness(t, "flat")
 	empty := fixtureZip(t, t.TempDir(), "flat", "x")
 	// Rebuild the fixture as an EMPTY zip (no expected member).
 	f, err := os.Create(empty)
@@ -224,7 +244,7 @@ func TestApplyRefusesZipMissingTheApp(t *testing.T) {
 		return os.WriteFile(dest, b, 0o755)
 	}
 	u.FetchBody = func(_ context.Context, url string) ([]byte, error) {
-		return []byte(sum + "  launcher.zip\n"), nil
+		return releaseBody(t, url, sum+"  launcher.zip\n", priv)
 	}
 	if _, err := u.Apply(context.Background(), "9.9.9"); err == nil ||
 		!strings.Contains(err.Error(), "zip missing") {
