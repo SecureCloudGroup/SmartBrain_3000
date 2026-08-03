@@ -82,6 +82,9 @@ export async function pairByCode(code: string, timeoutMs = 30_000): Promise<Pair
     let nonce = new Uint8Array();
     let started = false;
     let settled = false;
+    // Set only once the host proves knowledge of the pairing code on THIS channel.
+    // Until then nothing it sends may be acted on.
+    let hostVerified = false;
     // Fallback if the broker doesn't hand us ICE (older broker): the node runs coturn (STUN)
     // on :3478. STUN alone covers Wi-Fi / non-symmetric NAT; the broker's STUN+TURN adds cellular.
     const fallbackIce: RTCIceServer[] = [{ urls: `stun:${window.location.hostname}:3478` }];
@@ -121,11 +124,20 @@ export async function pairByCode(code: string, timeoutMs = 30_000): Promise<Pair
             if (!macEqual(b64ToBytes(String(m.mac ?? "")), await mac(codeKey, "host", nonce, binding))) {
               return done(new Error("wrong code, or the connection couldn't be verified"));
             }
+            // Only now has the peer proved it knows the code AND is bound to THIS channel.
+            hostVerified = true;
             const proof = await mac(codeKey, "guest", b64ToBytes(String(m.nonce2 ?? "")), binding);
             channel.send(JSON.stringify({ type: "pconfirm", mac: bytesToB64(proof) }));
           } else if (m.type === "ppayload") {
+            // The payload names the credential, the pubkey we pin, and the broker we
+            // trust from here on — accepting it from an unproven peer would pin the
+            // ATTACKER's key, and every later connection would then "verify" fine
+            // against it. The broker routes this room and can answer the offer itself,
+            // so this must never run before the MAC check above.
+            if (!hostVerified) return done(new Error("pairing failed"));
             done(null, parsePairingPayload(String(m.payload ?? "")));
           } else if (m.type === "perror") {
+            if (!hostVerified) return done(new Error("pairing failed"));
             done(new Error("incorrect code"));
           }
         } catch (e) {

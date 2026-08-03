@@ -53,6 +53,8 @@ export class RemoteConnection {
   private markReady: (() => void) | null = null;
   private failReady: ((e: Error) => void) | null = null;
   private nonceB64 = "";
+  // Per-connection: cleared on teardown so a reconnect must prove identity again.
+  private desktopVerified = false;
   private seq = 0;
   private closed = false;
   private reconnects = 0;
@@ -160,6 +162,13 @@ export class RemoteConnection {
     }
     const type = m.type as string | undefined;
     if (type === "hello_ok") return this.onHelloOk(m);
+    // Everything below acts on what the peer says. Until onHelloOk has checked the
+    // signature against our PINNED pubkey, the peer is just whoever answered the
+    // offer — a rogue answerer that skips hello_ok and sends auth_ok would otherwise
+    // flip the UI to "connected" and have every /api call relayed to, and answered
+    // by, an unverified party. The credential is withheld either way (it only goes
+    // out at the end of onHelloOk), but the session itself must not start.
+    if (!this.desktopVerified) return;
     if (type === "auth_ok") return this.onAuthOk();
     if (type === "pong") {
       this.lastPong = Date.now();
@@ -168,6 +177,10 @@ export class RemoteConnection {
     if (type === "auth_error") {
       setRemoteStatus("offline", "this device isn't authorized — re-pair");
       this.failReady?.(new Error("auth_error"));
+      // Close, or connectionState churn restarts the backoff loop and buries this
+      // actionable message under "reconnecting…" and then the generic VPN hint.
+      // Re-pairing is a user action; retrying cannot fix a revoked device.
+      this.close();
       return;
     }
     if (isChunkFrame(m)) return this.onChunkFrame(m); // one part of a big response
@@ -192,6 +205,7 @@ export class RemoteConnection {
       this.close();
       return;
     }
+    this.desktopVerified = true; // signature + pinned pubkey both check out
     this.send(undefined, encodeAuth(this.pairing.deviceId, this.pairing.credential)); // proven: safe to auth
   }
 
@@ -334,6 +348,7 @@ export class RemoteConnection {
     if (this.iceWaitTimer) { clearTimeout(this.iceWaitTimer); this.iceWaitTimer = null; }
     if (this.pingTimer) { clearInterval(this.pingTimer); this.pingTimer = null; }
     this.lastPong = 0; // next connection starts a fresh keepalive clock (set on auth_ok)
+    this.desktopVerified = false; // identity is proven per connection, never inherited
     for (const [, p] of this.pending) {
       clearTimeout(p.timer); // fail in-flight requests fast instead of hanging to the timeout
       p.reject(new Error("connection dropped"));
