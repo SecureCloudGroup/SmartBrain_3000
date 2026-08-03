@@ -14,7 +14,8 @@
 # Registration auth — set exactly one:
 #   SIGNALING_OPEN=1            hosted/public: tokenless registration (the public app ships NO secret),
 #                              bounded by a desktop cap + registration rate-limit.
-#   SIGNALING_TOKEN=<secret>   self-host: a shared registration secret (then set SIGNALING_OPEN=0).
+#   SIGNALING_TOKEN=<secret>   self-host: a shared registration secret. This is the default
+#                              posture — SIGNALING_OPEN is 0 unless you set it.
 #
 # TURN uses EPHEMERAL credentials (coturn use-auth-secret): the broker mints short-lived creds from
 # TURN_SECRET per connection and pushes them over signaling, so no TURN secret is ever baked into a
@@ -46,8 +47,11 @@ services:
     environment:
       - SIGNALING_HOST=0.0.0.0
       - SIGNALING_PORT=8089
-      # Registration auth: hosted tokenless (default) OR a shared token for self-host.
-      - SIGNALING_OPEN=${SIGNALING_OPEN:-1}
+      # Registration auth. Defaults CLOSED: someone deploying this file is self-hosting,
+      # and an unset variable must not silently hand them a broker the whole internet can
+      # register desktops on. The hosted node opts into open mode via its own .env.
+      # With neither this nor SIGNALING_TOKEN set the broker refuses to start.
+      - SIGNALING_OPEN=${SIGNALING_OPEN:-0}
       - SIGNALING_TOKEN=${SIGNALING_TOKEN:-}
       # Ephemeral TURN: the broker mints short-lived coturn creds from this secret and pushes them
       # to desktops + phones over signaling — no static creds in any client or QR. SAME value as
