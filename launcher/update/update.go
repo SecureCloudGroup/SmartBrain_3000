@@ -37,6 +37,14 @@ import (
 const (
 	releaseAPI  = "https://api.github.com/repos/SecureCloudGroup/SmartBrain_3000/releases/latest"
 	releaseBase = "https://github.com/SecureCloudGroup/SmartBrain_3000/releases/download"
+
+	// Ceilings on what a download may consume before the checksum ever runs. The
+	// endpoint is trusted-by-TLS, not trusted-by-signature, so a hostile or
+	// misbehaving response must not be able to exhaust memory or the disk: metadata
+	// is the release JSON + a 64-char sidecar, and the payload is one launcher zip
+	// (tens of MB). Both are orders of magnitude under these bounds.
+	maxMetaBytes    = 8 << 20   // release JSON / sha256 sidecar
+	maxPayloadBytes = 256 << 20 // the platform zip
 )
 
 // Updater self-updates one installed launcher. Side effects are injectable so the
@@ -255,15 +263,53 @@ func freshInstall(layout, unpacked, root string) (dir string, exeAfterSwap strin
 
 // --- side-effect defaults ----------------------------------------------------
 
+// fetchURL streams the response straight to dest, never holding the whole payload
+// in memory, and stops at maxPayloadBytes. dest is a zip we unpack — never executed
+// in place — so it needs no execute bit.
 func fetchURL(ctx context.Context, url, dest string) error {
-	body, err := fetchBody(ctx, url)
+	resp, err := get(ctx, url)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(dest, body, 0o755)
+	defer resp.Body.Close()
+	f, err := os.OpenFile(dest, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	// No early return between here and Close, so the close error is reported rather
+	// than discarded by a defer — a short write must not look like a good download.
+	written, copyErr := io.Copy(f, io.LimitReader(resp.Body, maxPayloadBytes+1))
+	closeErr := f.Close()
+	if copyErr != nil {
+		return copyErr
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	if written > maxPayloadBytes {
+		return fmt.Errorf("GET %s: response exceeds %d bytes", url, maxPayloadBytes)
+	}
+	return nil
 }
 
 func fetchBody(ctx context.Context, url string) ([]byte, error) {
+	resp, err := get(ctx, url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxMetaBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(body) > maxMetaBytes {
+		return nil, fmt.Errorf("GET %s: response exceeds %d bytes", url, maxMetaBytes)
+	}
+	return body, nil
+}
+
+// get issues the request and rejects any non-200 before the caller reads a byte.
+func get(ctx context.Context, url string) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
@@ -272,11 +318,11 @@ func fetchBody(ctx context.Context, url string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
 		return nil, fmt.Errorf("GET %s: %s", url, resp.Status)
 	}
-	return io.ReadAll(resp.Body)
+	return resp, nil
 }
 
 func startDetached(path string) error {
