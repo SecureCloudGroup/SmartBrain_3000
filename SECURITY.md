@@ -11,6 +11,38 @@ broker (`rtc.securecloudgroup.com`) by default, or your own via `SMARTBRAIN_SIGN
 — which sees connection metadata only. We take security seriously and welcome
 responsible disclosure.
 
+## Trust model — what "content-blind" does and does not cover
+
+Being explicit about the edges, because "the node sees connection metadata only"
+is true of the broker protocol and still leaves things worth knowing:
+
+- **The phone app is served from the same origin as the broker.** When you pair a
+  phone it loads the web app from the signaling node's domain, and its pairing
+  credential is stored by that origin. The broker never sees your traffic — it is
+  relayed end-to-end encrypted and your phone pins the Desktop's key — but whoever
+  controls that host serves the code doing the pinning. A compromised node (or its
+  operator) could serve modified JavaScript and read the stored credential. Running
+  your own node via `SMARTBRAIN_SIGNALING_URL` moves that trust to you; using the
+  Desktop only avoids it entirely.
+- **A desktop id is a routing key, not a secret.** It travels in the pairing QR and
+  in every phone hello. The broker refuses to re-register an id that already holds a
+  live socket, but you should not treat one as confidential.
+- **Releases are signed, but the app is not OS-signed.** Each release's checksum
+  file carries an Ed25519 signature, and the public key is compiled into the
+  launcher, so an update that was not produced by us is refused rather than
+  installed — a checksum alone could not do this, since it ships from the same
+  release as the file it describes. You can verify any release yourself with the
+  stock minisign tool; see `docs/internal/release-signing.md`. What this does *not*
+  do is make the binaries signed in the operating system's eyes: they are not, which
+  is why the Homebrew cask clears the quarantine attribute (macOS would otherwise
+  block a binary built in public CI) and why a browser download warns. Platform
+  code-signing certificates are a paid, separate step and are on the roadmap.
+- **Secret redaction matches argument names, not values.** Tool arguments named like
+  credentials (`api_key`, `token`, `password`, `passphrase`, `secret`, …) are
+  redacted before display and audit. This is defence in depth on top of the
+  structural credential firewall — not content inspection. A secret you paste into
+  free text (an email body, a note) is not detected as one.
+
 ## Reporting a vulnerability
 
 **Please report security issues privately. Do not open a public GitHub issue

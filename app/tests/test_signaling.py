@@ -443,3 +443,80 @@ def test_open_mode_desktop_registration_rate_limited() -> None:
             await server.wait_closed()
 
     asyncio.run(run())
+
+
+def test_duplicate_desktop_registration_refused() -> None:
+    """A live desktop_id cannot be taken over by a second registration.
+
+    The id is a routing key, not a secret — it rides the pairing QR and every phone
+    hello — so in open mode anyone who learns one could otherwise displace the real
+    Desktop and receive that user's phone offers.
+    """
+    async def run() -> None:
+        server, url, broker = await _serve_broker("", open_mode=True)
+        try:
+            async with websockets.connect(url) as first:
+                await first.send(json.dumps({"role": "desktop", "desktop_id": "d1"}))
+                assert json.loads(await asyncio.wait_for(first.recv(), 5))["type"] == "registered"
+
+                async with websockets.connect(url) as impostor:
+                    await impostor.send(json.dumps({"role": "desktop", "desktop_id": "d1"}))
+                    m = json.loads(await asyncio.wait_for(impostor.recv(), 5))
+                    assert m["type"] == "error" and m["detail"] == "already registered"
+
+                # The incumbent still owns the slot and still receives offers.
+                assert broker._desktops.get("d1") is not None
+                async with websockets.connect(url) as phone:
+                    await phone.send(json.dumps({"role": "phone", "desktop_id": "d1"}))
+                    await phone.send(json.dumps({"type": "offer", "sdp": "SDP-OFFER"}))
+                    relayed = json.loads(await asyncio.wait_for(first.recv(), 5))
+                    assert relayed["type"] == "offer" and relayed["sdp"] == "SDP-OFFER"
+        finally:
+            server.close()
+            await server.wait_closed()
+
+    asyncio.run(run())
+
+
+def test_desktop_id_reusable_after_the_holder_disconnects() -> None:
+    """Refusing a duplicate must not lock the id out after a genuine drop."""
+    async def run() -> None:
+        server, url, _ = await _serve_broker("", open_mode=True)
+        try:
+            async with websockets.connect(url) as first:
+                await first.send(json.dumps({"role": "desktop", "desktop_id": "d1"}))
+                assert json.loads(await asyncio.wait_for(first.recv(), 5))["type"] == "registered"
+            for _ in range(50):  # let the server observe the close
+                await asyncio.sleep(0.01)
+                async with websockets.connect(url) as again:
+                    await again.send(json.dumps({"role": "desktop", "desktop_id": "d1"}))
+                    m = json.loads(await asyncio.wait_for(again.recv(), 5))
+                    if m["type"] == "registered":
+                        return
+            raise AssertionError("desktop_id never became reusable after disconnect")
+        finally:
+            server.close()
+            await server.wait_closed()
+
+    asyncio.run(run())
+
+
+def test_connection_without_a_hello_is_dropped() -> None:
+    """Every admission cap runs after the hello, so silence must not hold a socket."""
+    async def run() -> None:
+        broker = broker_mod.Broker("", open_mode=True)
+        server = await websockets.serve(broker.handle, "127.0.0.1", 0)
+        url = f"ws://127.0.0.1:{server.sockets[0].getsockname()[1]}"
+        original = broker_mod._HELLO_TIMEOUT_SECS
+        broker_mod._HELLO_TIMEOUT_SECS = 0.05  # keep the test fast
+        try:
+            async with websockets.connect(url) as silent:
+                with pytest.raises(Exception):  # closed by the broker, never admitted
+                    await asyncio.wait_for(silent.recv(), 5)
+            assert broker._desktops == {} and broker._phones == {}
+        finally:
+            broker_mod._HELLO_TIMEOUT_SECS = original
+            server.close()
+            await server.wait_closed()
+
+    asyncio.run(run())

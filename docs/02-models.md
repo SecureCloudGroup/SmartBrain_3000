@@ -7,11 +7,18 @@ provider unless you configure it and use it.
 
 ## Cloud providers (your API keys)
 
+An API key is a long secret string you create in a provider's developer console. It is
+**billed per use and is not the same thing as a consumer subscription** — a ChatGPT Plus
+or Claude Pro plan does not include one, and paying for a plan does not give you a key.
+Most providers ask for a card and bill cents per request at typical personal use. If you
+would rather pay nothing and keep everything on your machine, skip this section entirely
+and use [a local model](#local-models-on-your-machine) instead.
+
 Open **Settings → Cloud providers** and add a key for any of:
 
-- **OpenAI**
-- **Anthropic**
-- **Google (Gemini)**
+- **OpenAI** — [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
+- **Anthropic** — [console.anthropic.com/settings/keys](https://console.anthropic.com/settings/keys)
+- **Google (Gemini)** — [aistudio.google.com/apikey](https://aistudio.google.com/apikey)
 
 ![Settings → Cloud providers, with key fields for OpenAI, Anthropic, and Google](assets/02-providers.png)
 
@@ -142,9 +149,9 @@ ollama pull nomic-embed-text:v1.5
 (A from-source install does this for you when Ollama is present, and
 `python3 installer/doctor.py --fix` offers to pull it if it is missing.)
 
-The tag matters: the bare `nomic-embed-text` won't resolve. If semantic search shows
-keyword results and says *"degraded"*, this model isn't pulled — run the command above
-and **Reindex**. You can change the model, but pointing embeddings at a cloud provider
+The tag matters: the bare `nomic-embed-text` won't resolve. If search says *"Showing
+keyword results"*, no embedding model is in place — run the command above and
+**Reindex**. You can change the model, but pointing embeddings at a cloud provider
 sends your documents there on every reindex — only do that if you accept that tradeoff.
 
 ## Next

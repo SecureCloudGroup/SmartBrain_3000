@@ -226,8 +226,8 @@ which file and page it got the answer from.
 
 ![Drop in a file, search it, open the cited passage, then ask Chat — answers cite their sources](assets/gifs/04-add-knowledge.gif)
 
-> Semantic search needs an embedding model set up for your backend. If results say
-> *"degraded"*, set one up — see
+> Semantic search needs an embedding model. If results say *"Showing keyword
+> results"*, set one up — see
 > [Embeddings](02-models.md#embeddings-for-knowledge-search) — then **Reindex**.
 
 Your knowledge is also what external tools can read over [MCP](05-mcp.md).
