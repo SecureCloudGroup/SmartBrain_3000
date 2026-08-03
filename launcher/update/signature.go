@@ -45,7 +45,7 @@ import (
 // than falling back to the checksum alone — an unauthenticated update is the exact
 // thing this exists to prevent, and failing open would silently restore it. See
 // docs/internal/release-signing.md to generate the keypair and fill this in.
-const releasePublicKey = ""
+const releasePublicKey = "RWRetWVGVuVVMv0qZngZ+daVts4oOfS2Oa6aKvGVrxaumYebL2Abn6kL"
 
 const (
 	// "Ed": Ed25519 over the file contents. "ED" is minisign's prehashed variant.

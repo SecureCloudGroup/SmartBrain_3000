@@ -143,6 +143,26 @@ func TestCompiledInKeyIsUsedWhenNoneInjected(t *testing.T) {
 	}
 }
 
+func TestCompiledInKeyIsWellFormed(t *testing.T) {
+	// A mistyped or truncated paste would otherwise surface as every launcher
+	// rejecting a release that was signed perfectly well. Catch it at build time.
+	// Empty is allowed and means "this build never self-updates" — see
+	// TestVerifyFailsClosedWithoutAKey for that path.
+	if releasePublicKey == "" {
+		t.Skip("no release key compiled in; updates are disabled for this build")
+	}
+	alg, keyID, key, err := parsePublicKey(releasePublicKey)
+	if err != nil {
+		t.Fatalf("releasePublicKey does not parse: %v", err)
+	}
+	if alg != algEd25519 {
+		t.Fatalf("releasePublicKey algorithm = %q, want %q", alg, algEd25519)
+	}
+	if len(keyID) != minisignKeyID || len(key) != 32 {
+		t.Fatalf("releasePublicKey has key id %d bytes and key %d bytes", len(keyID), len(key))
+	}
+}
+
 func TestApplyRefusesWhenTheSignatureIsMissing(t *testing.T) {
 	u, started, _, _ := harness(t, "flat")
 	u.FetchBody = func(_ context.Context, url string) ([]byte, error) {
