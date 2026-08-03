@@ -41,7 +41,7 @@ Everything after that is optional and can be read when you need it.
 | --- | --- |
 | Install it | [Getting started → Install](01-getting-started.md#install) |
 | Fix "No models available yet" | [Connect a model](02-models.md) |
-| Fix search saying *"degraded"* | [Connect a model → Embeddings](02-models.md#embeddings-for-knowledge-search) |
+| Fix search showing only keyword results | [Connect a model → Embeddings](02-models.md#embeddings-for-knowledge-search) |
 | Change which model does which job | [Connect a model → Model routing](02-models.md#which-model-does-what-model-routing) |
 | Fix an install that won't start | [Getting started → Troubleshooting](01-getting-started.md#troubleshooting), then [what to try, in order](06-backup-recovery.md#when-something-is-broken-what-to-try-in-order) |
 | Understand why an action is "awaiting approval" | [Using SmartBrain_3000 → Chat](03-features.md#chat) |
@@ -57,6 +57,7 @@ Everything after that is optional and can be read when you need it.
 | Know what leaves your machine | [Privacy & security](07-privacy-security.md) |
 | Use it from your phone | [Remote access](08-remote-access.md) |
 | Report a security problem | [`SECURITY.md`](https://github.com/SecureCloudGroup/SmartBrain_3000/blob/main/SECURITY.md) |
+| Ask a question / get unstuck | [Discussions](https://github.com/SecureCloudGroup/SmartBrain_3000/discussions) |
 
 ## Two things worth knowing up front
 

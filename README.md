@@ -47,9 +47,21 @@ install first. On Linux it runs in Docker.
 
 ## Quickstart
 
-On **macOS and Windows** there are no prerequisites — no Docker, no Python, no accounts.
-Install the SmartBrain app from **https://smartbrain.securecloudgroup.com**, or with one
-command:
+On **macOS and Windows** SmartBrain itself needs nothing else — no Docker, no Python, no
+accounts. The one-line installs below go through a package manager (Homebrew on macOS,
+Scoop on Windows); if you don't already have one, install it first with its own one-liner:
+
+- **macOS — Homebrew** (if `brew` reports "command not found"), from [brew.sh](https://brew.sh):
+  ```sh
+  /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+  ```
+- **Windows — Scoop** (if `scoop` isn't recognised), from [scoop.sh](https://scoop.sh), in PowerShell:
+  ```powershell
+  Invoke-RestMethod -Uri https://get.scoop.sh | Invoke-Expression
+  ```
+
+Then install the SmartBrain app from **https://smartbrain.securecloudgroup.com**, or with
+one command:
 
 **macOS** — in the Terminal app:
 
@@ -164,10 +176,19 @@ SmartBrain_3000 is licensed under the **Elastic License 2.0 (ELv2)**. It is
 See [LICENSE](LICENSE) for the full terms.
 
 More: **[Changelog](CHANGELOG.md)** · **[Contributing](CONTRIBUTING.md)** ·
-**[Security policy](SECURITY.md)**
+**[Security policy](SECURITY.md)** ·
+**[Ask a question](https://github.com/SecureCloudGroup/SmartBrain_3000/discussions)**
 
 © 2026 The Frels Holdings LLC. "SmartBrain", "SmartBrain_3000", and
 "SmartBrain AI" are trademarks of The Frels Holdings LLC.
+
+## Getting help
+
+Stuck, or something didn't work the way this page said it would? Ask in
+[Discussions](https://github.com/SecureCloudGroup/SmartBrain_3000/discussions) —
+questions about installing, connecting a model, or getting your documents in are
+all welcome, and no question is too basic. Found a reproducible bug? Open an
+[issue](https://github.com/SecureCloudGroup/SmartBrain_3000/issues).
 
 ## Security
 
