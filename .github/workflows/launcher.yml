@@ -108,7 +108,11 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: SmartBrain-macos
-          path: launcher/build/SmartBrain-macos.zip
+          # The sidecar travels too: the sign job signs these EXACT bytes, so it must
+          # sign the published file rather than recompute one that only looks the same.
+          path: |
+            launcher/build/SmartBrain-macos.zip
+            launcher/build/SmartBrain-macos.zip.sha256
       - name: Attach to the release (tags only)
         if: github.ref_type == 'tag'
         env:
@@ -141,7 +145,9 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: SmartBrain-windows
-          path: launcher/build/SmartBrain-windows.zip
+          path: |
+            launcher/build/SmartBrain-windows.zip
+            launcher/build/SmartBrain-windows.zip.sha256
       - name: Attach to the release (tags only)
         if: github.ref_type == 'tag'
         shell: bash # so `|| true` works if the macOS job created the release first
@@ -150,6 +156,62 @@ jobs:
         run: |
           gh release create "${{ github.ref_name }}" --generate-notes || true
           gh release upload "${{ github.ref_name }}" launcher/build/SmartBrain-windows.zip launcher/build/SmartBrain-windows.zip.sha256 --clobber
+
+  sign:
+    name: sign the release checksums (tags only)
+    needs: [macos, windows] # sign what those jobs actually published
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # attach the .minisig files to the release
+    env:
+      SMARTBRAIN_SIGNING_KEY: ${{ secrets.SMARTBRAIN_SIGNING_KEY }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with: { go-version-file: launcher/go.mod }
+      - uses: actions/download-artifact@v8
+        with: { name: SmartBrain-macos, path: dist }
+      - uses: actions/download-artifact@v8
+        with: { name: SmartBrain-windows, path: dist }
+
+      # Fail loudly rather than publishing a release the launcher will refuse to
+      # install: a signature is not optional, so a missing key is a broken release.
+      - name: Require the signing key
+        run: |
+          if [ -z "$SMARTBRAIN_SIGNING_KEY" ]; then
+            echo "SMARTBRAIN_SIGNING_KEY is not set — the launcher refuses unsigned releases." >&2
+            echo "See docs/internal/release-signing.md." >&2
+            exit 1
+          fi
+
+      # Catch a rotated-but-not-shipped key here, where it is a red build, instead of
+      # after publishing an update every installed launcher rejects.
+      - name: Check the key matches the one launchers verify with
+        working-directory: launcher
+        run: |
+          baked="$(grep -oP 'releasePublicKey = "\K[^"]*' update/signature.go)"
+          signing="$(go run ./cmd/sbsign pubkey)"
+          if [ "$baked" != "$signing" ]; then
+            echo "signing key does not match releasePublicKey compiled into the launcher:" >&2
+            echo "  baked in: ${baked:-<empty>}" >&2
+            echo "  signing:  $signing" >&2
+            exit 1
+          fi
+
+      - name: Sign the checksum sidecars
+        run: |
+          go -C launcher run ./cmd/sbsign sign \
+            "$PWD/dist/SmartBrain-macos.zip.sha256" \
+            "$PWD/dist/SmartBrain-windows.zip.sha256"
+
+      - name: Attach the signatures to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ github.ref_name }}" \
+            dist/SmartBrain-macos.zip.sha256.minisig \
+            dist/SmartBrain-windows.zip.sha256.minisig --clobber
 
   packages:
     name: bump package managers (tags only)

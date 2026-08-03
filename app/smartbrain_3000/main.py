@@ -15,6 +15,7 @@ import os
 import zoneinfo
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
+from urllib.parse import urlsplit
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
@@ -82,6 +83,83 @@ class HostGuard:
             await self._app(scope, receive, send)
             return
         await PlainTextResponse("Invalid host header", status_code=400)(scope, receive, send)
+
+
+class OriginGuard:
+    """Reject API calls that a *different* site drove the browser into making.
+
+    The API authenticates by process state ("is the vault unlocked"), not by a
+    per-request credential, so any page the owner visits while unlocked could
+    otherwise POST to the local origin and have it act with full authority — no
+    preflight required for a form-style or text/plain body. Host validation does
+    not stop this: the attacker uses the real hostname.
+
+    Two independent signals, either of which is conclusive when present:
+
+    * ``Sec-Fetch-Site`` — the browser states the relationship itself. Only
+      ``same-origin`` (our SPA) and ``none`` (the user typed/bookmarked it) may
+      reach the API; ``cross-site`` and ``same-site`` are refused.
+    * ``Origin`` — must name exactly the host:port the request was addressed to.
+      A sandboxed or redirected context sends ``null``, which matches nothing.
+
+    Comparing Origin against the *request's own* Host is only sound because
+    HostGuard runs too: under DNS rebinding both headers carry the attacker's
+    hostname and so agree here — it is the Host allow-list that refuses that.
+    The two guards are complementary; neither replaces the other.
+
+    Clients that are not browsers — the MCP server, the launcher handshake, curl
+    — send neither header and are unaffected. Requests relayed in over WebRTC
+    also arrive bare: ``webrtc_bridge.parse_request`` forwards only a three-header
+    allow-list, so a phone cannot forge either signal.
+
+    Scoped to ``/api`` and ``/mcp``: navigating to the app shell from a link on
+    another page is legitimate and stays allowed (framing is already refused by
+    ``X-Frame-Options`` / ``frame-ancestors``).
+    """
+
+    _GUARDED = ("/api", "/mcp")
+    _ALLOWED_SITES = frozenset({"same-origin", "none"})
+
+    def __init__(self, app) -> None:
+        self._app = app
+
+    async def __call__(self, scope, receive, send) -> None:
+        assert "type" in scope, "ASGI scope must have a type"
+        if scope["type"] not in ("http", "websocket"):
+            await self._app(scope, receive, send)
+            return
+        path = scope.get("path", "")
+        if not path.startswith(self._GUARDED):
+            await self._app(scope, receive, send)
+            return
+        headers = dict(scope.get("headers") or [])
+        site = headers.get(b"sec-fetch-site", b"").decode("latin-1").strip().lower()
+        if site and site not in self._ALLOWED_SITES:
+            await self._refuse(scope, receive, send)
+            return
+        origin = headers.get(b"origin", b"").decode("latin-1").strip()
+        if origin and not _origin_matches(origin, headers.get(b"host", b"").decode("latin-1")):
+            await self._refuse(scope, receive, send)
+            return
+        await self._app(scope, receive, send)
+
+    async def _refuse(self, scope, receive, send) -> None:
+        await PlainTextResponse("Cross-origin request refused", status_code=403)(scope, receive, send)
+
+
+def _origin_matches(origin: str, host_header: str) -> bool:
+    """True when ``origin`` names the same host:port the request was addressed to.
+
+    Compares authorities, so scheme differences (http vs https) do not matter —
+    the LAN/TLS overlay serves the same authority over https. ``null`` and any
+    unparseable value match nothing.
+    """
+    assert isinstance(origin, str), "origin must be a string"
+    assert isinstance(host_header, str), "host header must be a string"
+    if not host_header:
+        return False
+    authority = urlsplit(origin).netloc
+    return bool(authority) and authority.lower() == host_header.strip().lower()
 
 
 def _mcp_token(application: FastAPI) -> str | None:
@@ -262,6 +340,7 @@ def _install_routes(application: FastAPI) -> None:
     """Mount middleware + every API router on ``application`` (registration order matters)."""
     assert application is not None, "application required"
     application.add_middleware(HostGuard, allowed=_allowed_hosts())  # anti DNS-rebinding (case-insensitive)
+    application.add_middleware(OriginGuard)  # anti cross-site drive-by against the local API
     serving.add_security_headers(application)  # tight CSP + hardening on every response
     for router in (
         account_router, chat_router, local_models_router, models_router, kb_router,

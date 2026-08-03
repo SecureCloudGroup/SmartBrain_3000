@@ -247,9 +247,9 @@ Most first-run problems are one of these:
   (a draft/speculative-decoding option pointed at an incompatible model, or an
   idle-unload setting). It isn't shown in the app — read the log if answers feel
   uniformly slow.
-- **Semantic search returns keyword results ("degraded").** No embedding model is set
-  up for your backend. See [Embeddings](02-models.md#embeddings-for-knowledge-search) for
-  your setup, then **Reindex** in Knowledge.
+- **Search says "Showing keyword results".** No embedding model is set up yet. See
+  [Embeddings](02-models.md#embeddings-for-knowledge-search) for your setup, then
+  **Reindex** in Knowledge.
 - **The browser warns about the certificate** (only if you set up LAN/HTTPS). Trust
   the local mkcert CA — see [Remote access](08-remote-access.md).
 - **"Database is newer than this app" / a restore is refused.** Pointing an older build

@@ -28,9 +28,11 @@ control. Here's the model in plain terms, including the real world limits.
   extra confirm for irreversible actions. Everything it attempts is audited. A parked
   action expires after an hour, and locking cancels every pending one.
 - **Credential firewall.** Tools and connected MCP clients act on your behalf but
-  never receive your raw keys or tokens. Anything that looks like a secret — a key, a
-  token, a password, a passphrase — is stripped before an action is shown to you or
-  written to the audit log.
+  never receive your raw keys or tokens. On top of that, any tool setting *named*
+  like a credential — `api_key`, `token`, `password`, `passphrase`, `secret` — is
+  stripped before an action is shown to you or written to the audit log. That match
+  is on the name, not the content: a secret you type into ordinary text, like the
+  body of an email, isn't recognised as one, so treat free text as visible.
 - **Web-fetch guard.** The web-fetch tool refuses private/internal addresses and
   doesn't follow redirects into them (anti-SSRF).
 - **The model gateway keeps no transcript.** Bifrost ships with request logging on, which

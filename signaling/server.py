@@ -55,10 +55,18 @@ import websockets
 log = logging.getLogger("sb-signaling")
 
 _MAX_MSG = 256 * 1024
+# How long a fresh connection may stay silent before it must identify itself.
+_HELLO_TIMEOUT_SECS = 10.0
 # Defaults for the phone-side bounds (overridable via env at Broker() construction).
 # These keep an unauthenticated public endpoint from being memory-flooded or used to
 # starve a single desktop, while staying generous enough for normal multi-device use.
-_DEFAULT_MAX_PHONES = 64
+# GLOBAL backstop across every user of the node, not a per-user allowance: a hosted
+# broker serves the whole install base, so this must scale with _DEFAULT_MAX_DESKTOPS
+# rather than with one household. Fairness between users is enforced by
+# _DEFAULT_MAX_PHONES_PER_DESKTOP + the per-desktop connect rate limit; this value
+# exists only to bound total memory. (It was 64 — small enough that the 65th phone
+# *worldwide* was refused.)
+_DEFAULT_MAX_PHONES = 5000
 _DEFAULT_MAX_PHONES_PER_DESKTOP = 8
 _DEFAULT_PHONE_RATE_LIMIT = 30           # new phone connects per desktop_id...
 _DEFAULT_PHONE_RATE_WINDOW_SECS = 60.0   # ...per this sliding window.
@@ -143,7 +151,10 @@ class Broker:
         role = ident = None
         phone_desktop_id = ""
         try:
-            hello = json.loads(await ws.recv())
+            # Every admission cap below runs only once a hello arrives, so a connection
+            # that never sends one would hold a socket indefinitely while bypassing all
+            # of them. Bound the wait.
+            hello = json.loads(await asyncio.wait_for(ws.recv(), _HELLO_TIMEOUT_SECS))
             assert isinstance(hello, dict), "hello must be a JSON object"
             role = hello.get("role")
             desktop_id = str(hello.get("desktop_id") or "")
@@ -154,6 +165,19 @@ class Broker:
                 reject = self._admit_desktop(hello.get("token"))
                 if reject is not None:
                     await _send(ws, {"type": "error", "detail": reject})
+                    return
+                # First registration of an id wins for as long as it holds the socket.
+                # A desktop_id is a routing key, not a secret — it rides the pairing QR
+                # and every phone hello — so in open mode anyone who learns one could
+                # otherwise re-register it, silently displace the real Desktop, and
+                # receive that user's phone offers. (Their pinned-key channel auth would
+                # refuse the impostor, but their remote access would stay dead: the
+                # cleanup below is identity-checked, so the victim's own disconnect would
+                # not even restore it.) A genuine reconnect after a drop still works —
+                # the stale socket is gone by then.
+                if desktop_id in self._desktops:
+                    log.info("refusing duplicate desktop registration")
+                    await _send(ws, {"type": "error", "detail": "already registered"})
                     return
                 ident = desktop_id
                 self._desktops[desktop_id] = ws
@@ -247,6 +271,10 @@ class Broker:
         assert isinstance(desktop_id, str), "desktop_id must be a string"
         assert desktop_id, "desktop_id must be non-empty"
         if len(self._phones) >= self._max_phones:
+            # Node-wide saturation refuses users who did nothing wrong and looks to them
+            # like remote access is simply broken, so make it loud: it is an operator
+            # signal to raise SIGNALING_MAX_PHONES, never a routine rejection.
+            log.warning("global phone cap reached (%d) — refusing new phones", self._max_phones)
             return "busy"
         if self._phones_per_desktop.get(desktop_id, 0) >= self._max_phones_per_desktop:
             return "busy"

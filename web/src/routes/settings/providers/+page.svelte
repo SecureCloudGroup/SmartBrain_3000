@@ -3,10 +3,13 @@
   import { api, type DiscoveredModel } from "$lib/api";
   import { describeError } from "$lib/errors";
 
+  // keyUrl: where this provider issues API keys. An empty "API key" box assumes the
+  // reader knows what one is, where to get it, and that it is billed separately from a
+  // consumer subscription — the most common place a new user stalls.
   const PROVIDERS = [
-    { logical: "openai", label: "OpenAI" },
-    { logical: "anthropic", label: "Anthropic" },
-    { logical: "google", label: "Google (Gemini)" },
+    { logical: "openai", label: "OpenAI", keyUrl: "https://platform.openai.com/api-keys" },
+    { logical: "anthropic", label: "Anthropic", keyUrl: "https://console.anthropic.com/settings/keys" },
+    { logical: "google", label: "Google (Gemini)", keyUrl: "https://aistudio.google.com/apikey" },
   ];
   const keyName = (logical: string) => `provider:${logical}:api_key`;
   // The gateway names a provider differently from our logical key (Google → Gemini).
@@ -105,6 +108,13 @@
       <span class="muted" style="font-weight:400">· {isSet(p.logical) ? "configured" : "not set"}</span>
     </h2>
     <label for={`k-${p.logical}`}>API key</label>
+    {#if !isSet(p.logical)}
+      <p class="muted" style="margin-top:0; margin-bottom:0.5rem">
+        <a href={p.keyUrl} target="_blank" rel="noopener noreferrer">Get a key from {p.label}</a> —
+        a long string starting with a prefix like <code>sk-</code>. It's paid per use and billed
+        by {p.label}, separately from any chat subscription you may already have.
+      </p>
+    {/if}
     <input
       id={`k-${p.logical}`}
       type="password"

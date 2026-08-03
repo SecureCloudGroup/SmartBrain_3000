@@ -927,9 +927,14 @@
     {/if}
     {#if results}
       {#if degraded}
+        <!-- The old copy assumed Ollama. Someone who set up a cloud key never installed it,
+             so "run ollama pull …" was a command for software they don't have — a dead end
+             on the feature the product leads with. Send them to the setting instead. -->
         <p class="muted" style="margin-top:0.5rem">
-          Meaning search needs the embedding model — showing keyword results. On the Desktop, run
-          <code>ollama pull nomic-embed-text:v1.5</code>, then Reindex.
+          Showing keyword results — meaning search needs an embedding model.
+          <a href="/settings/models">Choose one in Settings → Models</a>, then Reindex.
+          A cloud provider you've already connected can do this; a local model keeps it on
+          your machine.
         </p>
       {/if}
       {#if results.length === 0}
