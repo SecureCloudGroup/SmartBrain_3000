@@ -25,6 +25,33 @@ def test_remember_only_reviewed(tmp_path) -> None:
     assert consent.remembered(conn) == {"remember_fact"}
 
 
+def test_outbound_egress_tools_are_never_remembered(tmp_path) -> None:
+    """REVIEWED is not sufficient: a model-chosen destination still re-asks.
+
+    Unattended egress with a model-composed URL or query is how a prompt injection
+    walks data out, so per-call review is the control that must not be waivable.
+    """
+    conn = _conn(tmp_path)
+    for name in ("web_fetch", "web_research", "kb_ingest_url", "web_search"):
+        assert consent.remember(conn, name) is False, name
+    assert consent.remembered(conn) == set()
+
+
+def test_inbound_egress_tools_stay_rememberable(tmp_path) -> None:
+    """Reading the user's own mailbox has no model-chosen destination to leak to."""
+    conn = _conn(tmp_path)
+    assert consent.remember(conn, "email_read") is True
+    assert consent.remember(conn, "email_send") is False  # IRREVERSIBLE, unchanged
+    assert consent.remembered(conn) == {"email_read"}
+
+
+def test_remembered_ignores_egress_written_by_an_older_build(tmp_path) -> None:
+    """Filters on READ too, so a row written before this rule cannot auto-approve."""
+    conn = _conn(tmp_path)
+    db.meta_set(conn, "remembered_tools", json.dumps(["web_fetch", "remember_fact"]))
+    assert consent.remembered(conn) == {"remember_fact"}
+
+
 def test_forget(tmp_path) -> None:
     conn = _conn(tmp_path)
     consent.remember(conn, "remember_fact")
