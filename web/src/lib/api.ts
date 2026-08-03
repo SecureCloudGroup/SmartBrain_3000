@@ -206,6 +206,9 @@ export interface PendingAction {
   turn_id: string | null; // the parked agent turn this approval belongs to (lets chat re-find its banner)
   conversation_id: string | null;
   args: Record<string, unknown>;
+  // Whether consent would actually store an "always allow" for this tool. The server
+  // decides; offering the button where it would be refused reads as a broken button.
+  rememberable?: boolean;
 }
 
 export interface Schedule {

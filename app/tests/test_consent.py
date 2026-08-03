@@ -25,24 +25,34 @@ def test_remember_only_reviewed(tmp_path) -> None:
     assert consent.remembered(conn) == {"remember_fact"}
 
 
-def test_outbound_egress_tools_are_never_remembered(tmp_path) -> None:
-    """REVIEWED is not sufficient: a model-chosen destination still re-asks.
+def test_model_addressed_egress_is_never_remembered(tmp_path) -> None:
+    """A tool the model can AIM must keep re-asking, whatever its tier.
 
-    Unattended egress with a model-composed URL or query is how a prompt injection
-    walks data out, so per-call review is the control that must not be waivable.
+    web_fetch and kb_ingest_url take a `url` straight from the model, so a remembered
+    one would let injected instructions reach an attacker's server unattended. That
+    per-call review is the control, and it must not be waivable.
     """
     conn = _conn(tmp_path)
-    for name in ("web_fetch", "web_research", "kb_ingest_url", "web_search"):
+    for name in ("web_fetch", "kb_ingest_url"):
         assert consent.remember(conn, name) is False, name
+        assert consent.is_rememberable(name) is False, name
     assert consent.remembered(conn) == set()
 
 
-def test_inbound_egress_tools_stay_rememberable(tmp_path) -> None:
-    """Reading the user's own mailbox has no model-chosen destination to leak to."""
+def test_fixed_destination_egress_stays_rememberable(tmp_path) -> None:
+    """Egress the USER pointed somewhere is not an exfiltration channel.
+
+    A search goes to the configured provider and email reads go to the user's own
+    mailbox: the model supplies a query, never an address, so there is no attacker
+    endpoint to receive anything. These are also the most-used tools — making them
+    re-ask forever is a real cost for no security gain.
+    """
     conn = _conn(tmp_path)
-    assert consent.remember(conn, "email_read") is True
+    for name in ("web_search", "web_research", "email_read", "email_list"):
+        assert consent.remember(conn, name) is True, name
+        assert consent.is_rememberable(name) is True, name
     assert consent.remember(conn, "email_send") is False  # IRREVERSIBLE, unchanged
-    assert consent.remembered(conn) == {"email_read"}
+    assert consent.remembered(conn) == {"web_search", "web_research", "email_read", "email_list"}
 
 
 def test_remembered_ignores_egress_written_by_an_older_build(tmp_path) -> None:

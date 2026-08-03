@@ -178,3 +178,31 @@ def test_pending_rejected_after_relock(client: TestClient) -> None:
     client.post("/api/account/lock")
     client.post("/api/account/unlock", json={"passphrase": "correct-horse"})  # new session
     assert client.post(f"/api/agent/pending/{pid}/approve", json={}).status_code == 404  # cross-session
+
+
+def test_pending_says_whether_always_allow_would_stick(client: TestClient) -> None:
+    """The UI hides "Always allow" on this flag, so it must match what consent does.
+
+    Regression: consent began refusing model-addressed egress while the button was
+    still offered for every REVIEWED tool, so clicking it approved once and then kept
+    asking — indistinguishable from a broken button.
+    """
+    pid = client.post("/api/tools/invoke",
+                      json={"name": "remember_fact", "args": {"text": "tea"}}).json()["pending_id"]
+    pend = {p["id"]: p for p in client.get("/api/agent/pending").json()["pending"]}
+    assert pend[pid]["rememberable"] is True
+    client.post(f"/api/agent/pending/{pid}/deny")
+
+    # Every pending action must carry the flag, and it must agree with consent.
+    from smartbrain_3000 import consent
+    for name, expected in (("web_fetch", False), ("kb_ingest_url", False),
+                           ("web_search", True), ("remember_fact", True)):
+        assert consent.is_rememberable(name) is expected, name
+
+
+def test_always_allow_actually_stops_asking(client: TestClient) -> None:
+    """End to end: the button's promise holds for a tool that advertises it."""
+    pid = client.post("/api/tools/invoke",
+                      json={"name": "remember_fact", "args": {"text": "one"}}).json()["pending_id"]
+    assert client.post(f"/api/agent/pending/{pid}/approve", json={"remember": True}).status_code == 200
+    assert "remember_fact" in client.get("/api/agent/remembered").json()["tools"]

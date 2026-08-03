@@ -132,7 +132,10 @@ def list_pending(request: Request) -> dict:
     pending = [
         {"id": p["id"], "tool": p["tool"], "tier": p["tier"], "created_at": p["created_at"],
          "turn_id": p.get("turn_id"), "conversation_id": p.get("conversation_id"),
-         "args": tools.redact(p["args"])}
+         "args": tools.redact(p["args"]),
+         # So the UI never offers "Always allow" on a tool consent would refuse to
+         # store — that reads as the button being broken rather than as a rule.
+         "rememberable": consent.is_rememberable(p["tool"])}
         for p in approvals.list_pending()
     ]
     return {"pending": pending}
