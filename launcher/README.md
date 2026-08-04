@@ -61,7 +61,7 @@ A browser-downloaded `.dmg`/`.exe` is the *one* channel that would still warn �
 | `stack/` | Docker orchestration — no GUI dependency, unit-tested on any platform |
 | `update/` | launcher self-update, and the Ed25519 release-signature check |
 | `cmd/sbsign/` | generates the release signing key and signs release checksums (CI) |
-| `icon/` | the tray icons + the stdlib generator that made them (placeholder mark) |
+| `icon/` | the tray icons (SB monogram) + their generator; the Dock icon comes from `tools/brand/make_icons.py` |
 | `docker-compose.release.yml` | embedded copy of the release stack; CI fails if it drifts from `compose/` |
 
 ## Build locally
@@ -77,4 +77,6 @@ go build -o smartbrain .       # the app (macOS needs Xcode CLT for cgo; Windows
 CI (`.github/workflows/launcher.yml`) builds the macOS universal `.app` (ad-hoc signed) and the
 Windows `.exe`, and attaches them to the GitHub Release on a version tag.
 
-> The icon is a neutral placeholder (a rounded square); swap in a designed asset when there is one.
+> Icons: the menu-bar / tray glyph is a deliberate "SB" monogram template icon (macOS tints
+> template icons for light/dark automatically — a detailed mark would render as mush there);
+> the Dock/Finder icon is derived from the brand mascot by `tools/brand/make_icons.py`.
