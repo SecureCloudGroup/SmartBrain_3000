@@ -1,10 +1,15 @@
 // SmartBrain launcher — a menu-bar/tray app whose only job is to make the app one click to reach:
-// start Docker if needed, `docker compose up`, wait until it's healthy, and open the browser. It
-// draws no app UI of its own (the real UI is the SvelteKit app in your browser), so it stays tiny.
+// start the stack, wait until it's healthy, and open the browser. It draws no app UI of its own
+// (the real UI is the SvelteKit app in your browser), so it stays tiny.
 //
-// It is deliberately transparent: it writes ONE compose file into a per-user folder and shells out
-// to `docker compose` exactly as you would by hand. Quitting the launcher leaves SmartBrain running
-// (like Docker Desktop's own tray); use Stop to actually shut it down.
+// There are two stacks. The Docker-free native one (package native) is the default wherever its
+// runtime is pinned — macOS on Apple Silicon and Windows — and Docker is the fallback elsewhere;
+// resolveNativeMode below decides. Neither is a user-facing choice.
+//
+// It is deliberately transparent: on the Docker path it writes ONE compose file into a per-user
+// folder and shells out to `docker compose` exactly as you would by hand, and on the native path
+// every artifact it downloads is checked against a sum pinned in this repo before it runs. Quitting
+// the launcher leaves SmartBrain running; use Stop to actually shut it down.
 package main
 
 import (
