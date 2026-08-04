@@ -168,6 +168,8 @@ When an update is ready you're told in two places:
   Click **Install now** to apply it. The page reconnects and reloads by itself when the new
   version comes up — there's nothing to click twice. Dismissing the notice hides that
   version and stays quiet until a newer one arrives.
+
+  ![The in-app update strip saying a new version is ready to install, with an Install now button](assets/07-update-banner.png)
 - **In the menu-bar / tray menu**, as **Install update now** and **Install on next start**.
 
 Ignore it entirely and the update installs the next time you start SmartBrain. Either way
