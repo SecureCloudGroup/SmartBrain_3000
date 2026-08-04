@@ -23,8 +23,40 @@ concurrency:
   cancel-in-progress: false # never abort a half-finished push — a partial image tag is worse than a wait
 
 jobs:
+  # The example vault (landing/vaults/smartbrain-docs.sbvault) ships the user guide to
+  # subscribers, but CI cannot rebuild it — the publisher's Ed25519 signing key lives only
+  # in the operator's sb_publisher_data Docker volume (subscribers PIN that key). Without
+  # this gate a release can quietly ship a guide the published vault no longer matches:
+  # subscribers then see "up to date" forever against stale docs (it happened — the vault
+  # sat at its 2026-07-18 build while docs/ was rewritten for weeks). Rebuild locally with
+  #   SB_PUBLISHER_PASS=<passphrase> python3 tools/example-vaults/build.py
+  # and commit the refreshed vault, then re-tag.
+  vault-freshness:
+    name: example vault matches docs
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # the check is ancestry between the vault's last commit and HEAD
+      - name: Fail if the user guide changed after the vault was last rebuilt
+        run: |
+          set -eu
+          vault=landing/vaults/smartbrain-docs.sbvault
+          vault_commit=$(git log -1 --format=%H -- "$vault")
+          test -n "$vault_commit" # the vault must exist and have history
+          stale=$(git log --format='%h %s' "$vault_commit..HEAD" -- 'docs/0*.md')
+          if [ -n "$stale" ]; then
+            echo "::error::docs/ changed after $vault was last rebuilt — rebuild it (see the comment on this job), commit, and re-tag. Stale commits:"
+            echo "$stale"
+            exit 1
+          fi
+          echo "vault is current (last rebuilt in $vault_commit)"
+
   image:
     name: build + push (amd64, arm64)
+    needs: [vault-freshness]
     runs-on: ubuntu-latest
     env:
       # ghcr rejects upper-case names, and github.repository is mixed-case (SecureCloudGroup/…).
@@ -83,6 +115,7 @@ jobs:
   # match the pinned pbs runtime ABI (cp312).
   wheelhouse:
     name: wheelhouse (${{ matrix.label }})
+    needs: [vault-freshness]
     if: github.ref_type == 'tag' # artifacts attach to the tag's release; dispatch re-runs skip
     strategy:
       fail-fast: false
@@ -118,11 +151,16 @@ jobs:
           python -c "import shutil; shutil.make_archive('$NAME', 'zip', '.', '$NAME')"
           python -c "import hashlib,sys; print(hashlib.sha256(open('$NAME.zip','rb').read()).hexdigest(), ' $NAME.zip')" > "$NAME.zip.sha256"
           cat "$NAME.zip.sha256"
+      - name: Ensure the release exists
+        uses: ./.github/actions/ensure-release
+        with:
+          tag: ${{ github.ref_name }}
+        env:
+          GH_TOKEN: ${{ github.token }}
       - name: Attach to the tag's release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -eux
-          gh release create "${GITHUB_REF_NAME}" --generate-notes || true
           gh release upload "${GITHUB_REF_NAME}" smartbrain-wheelhouse-*.zip smartbrain-wheelhouse-*.zip.sha256 --clobber
