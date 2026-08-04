@@ -1,5 +1,6 @@
-// Package native is the launcher's Docker-free stack (Docker-exit Phase 1) — behind an
-// explicit opt-in flag, nothing here runs by default.
+// Package native is the launcher's Docker-free stack, and the DEFAULT wherever it can
+// be assembled — see resolveNativeMode in main.go. It stopped being opt-in some time
+// ago; SMARTBRAIN_NATIVE=1/0 now only forces the answer either way.
 //
 // Where the Docker path pulls one image, the native path ASSEMBLES an install from three
 // verified parts: a pinned python-build-standalone runtime, the release's wheelhouse

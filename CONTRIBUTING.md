@@ -1,7 +1,9 @@
 # Contributing to SmartBrain_3000
 
 Thanks for your interest in improving SmartBrain_3000. This is a local-first,
-single-user AI assistant that runs entirely on your own machine via Docker.
+single-user AI assistant that runs entirely on your own machine. On macOS and
+Windows it installs and runs without Docker; Docker is the fallback on Linux and
+Intel Macs. Development and the test suite still use containers — see below.
 
 ## License of contributions
 
