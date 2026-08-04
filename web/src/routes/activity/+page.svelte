@@ -145,8 +145,12 @@
     {#each pending as p (p.id)}
       <ActionCard icon={iconForTool(p.tool)} title={p.tool} tier={p.tier === "irreversible" ? "irreversible" : "reviewed"} scope={fmtArgs(p.args)}>
         {#snippet actions()}
-          {#if p.tier === "reviewed"}
+          {#if p.tier === "reviewed" && p.rememberable !== false}
             <button class="ghost" disabled={busy === p.id} title="Approve and stop asking for this tool" onclick={() => approve(p, true)}>Always allow</button>
+          {:else if p.tier === "reviewed"}
+            <!-- The server refuses to remember this one, so don't offer a button that
+                 silently wouldn't stick. Say why instead. -->
+            <span class="muted" style="font-size:0.82rem" title="This tool can reach an address the assistant chooses, so each call is reviewed.">Always-allow unavailable</span>
           {/if}
           <button class="secondary" disabled={busy === p.id} onclick={() => deny(p)}>Deny</button>
           <button disabled={busy === p.id} onclick={() => approve(p)}>Approve</button>
@@ -160,7 +164,7 @@
          visit — the count keeps it glanceable without the vertical space. -->
     <details class="section-gap">
       <summary><span class="allow-head">Always allowed · {remembered.length}</span></summary>
-      <p class="muted hint-gap">These write tools run without asking. Irreversible actions (send email, delete) always ask.</p>
+      <p class="muted hint-gap">These write tools run without asking. Irreversible actions (send email, delete) always ask, and so does anything that fetches an address the assistant picks, like opening a link or adding one to your knowledge.</p>
       <div class="card tight">
         {#each remembered as name (name)}
           <div class="arow">
