@@ -64,12 +64,12 @@ def build_server(
         capped = max(1, min(limit, 20))
         model = gateway.embed_model(getattr(knowledge, "conn", None))
         try:
-            vector = gateway.embed(query, model)
+            vector = gateway.embed(query, model, task="query")
         except Exception as exc:  # embed model unavailable — degrade to lexical, observably
             log.warning("MCP kb_search fell back to lexical: %s", exc)
             results = knowledge.search(query, limit=capped)
         else:
-            results = knowledge.semantic_search(vector, model, limit=capped)
+            results = knowledge.semantic_search(vector, gateway.embedding_scheme(model), limit=capped)
         tools.tag_imported(vaults_of(), results)  # mark imported-vault hits as untrusted data
         return results
 

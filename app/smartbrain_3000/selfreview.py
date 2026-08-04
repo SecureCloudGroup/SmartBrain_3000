@@ -281,7 +281,9 @@ def _knowledge_stats(conn: duckdb.DuckDBPyConnection, key: bytes, tools: list[di
     try:  # gateway down / no embed model routed -> backlog unknown, never fatal
         from . import gateway
         from .kb import KnowledgeBase
-        pending = KnowledgeBase(conn, key).docs_pending_embedding(gateway.embed_model(conn))
+        pending = KnowledgeBase(conn, key).docs_pending_embedding(
+            gateway.embedding_scheme(gateway.embed_model(conn))
+        )
     except Exception as exc:
         log.debug("self-review: embedding backlog unknown: %s", exc)
     return {
