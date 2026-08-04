@@ -415,9 +415,10 @@ func start() {
 	defer mu.Unlock()
 	ctx := context.Background()
 
-	// Docker-exit Phase 1, behind an explicit opt-in: SMARTBRAIN_NATIVE=1 (plus
-	// SMARTBRAIN_NATIVE_VERSION to pick the release) runs the assembled native stack
-	// instead of Docker. Deliberately env-only and menu-invisible while it matures.
+	// The assembled native stack is the default wherever it can be built (see
+	// resolveNativeMode); Docker is the fallback for platforms with no pinned runtime.
+	// SMARTBRAIN_NATIVE=1/0 forces the choice, and SMARTBRAIN_NATIVE_VERSION picks the
+	// release. Still menu-invisible: which stack is running is not a user decision.
 	if nativeMode() {
 		startNative(ctx)
 		return

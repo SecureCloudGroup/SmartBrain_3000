@@ -22,6 +22,13 @@ GitHub Release exists (its assets are what they download).
 resolves to that repo. The cask strips the quarantine flag in a `postflight` (the app is ad-hoc
 signed, so this is all it needs to open on first click).
 
+> **The version and hashes committed here are placeholders, not the current release.**
+> `packaging/refresh.py` rewrites them from the built zips during the release run, and the
+> tap and bucket repos receive the rewritten copies — so those are what `brew` and `scoop`
+> users actually install, and they are current. Never publish a file from this directory
+> without running `refresh.py` for the version you are shipping first, or you will point
+> people at an old release.
+
 **winget** — the easiest route is Microsoft's `wingetcreate`:
 ```
 wingetcreate submit packaging/winget --token <gh-token>
