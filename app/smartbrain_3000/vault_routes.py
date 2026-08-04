@@ -224,7 +224,11 @@ def export_vault(request: Request, vault_id: str, body: ExportIn) -> Response:
     vaults, knowledge, secrets = _vaults(request), _kb(request), _secrets(request)
     vault = _require(vaults, vault_id)
 
-    embed_model = gateway.embed_model(request.app.state.dbx)
+    # Vectors are stored (and shipped) under the storage scheme — the identity that includes
+    # the '#tp1' marker for prefix-capable models. A subscriber only adopts vectors when the
+    # shipped identity matches theirs, so a bare-id publisher and a scheme-marked subscriber
+    # (or vice versa) simply skip vector adoption and re-embed locally.
+    embed_model = gateway.embedding_scheme(gateway.embed_model(request.app.state.dbx))
     docs: list[dict] = []
     for doc_id in vaults.document_ids(vault_id):  # bounded by _MAX_DOCS_PER_VAULT
         doc = knowledge.get(doc_id)
@@ -353,7 +357,9 @@ def _apply_docs(request: Request, vaults, knowledge, local_id: str, manifest: di
     future update diffs against (an owner-origin row with a uid = "this uid is the user's — skip").
     Returns {added, duplicates, vectors_used}.
     """
-    embed_model = gateway.embed_model(request.app.state.dbx)
+    # Storage identity for locally-adopted vectors — same scheme the publisher wrote under,
+    # so nomic vectors keep the '#tp1' marker on import and match subscriber queries.
+    embed_model = gateway.embedding_scheme(gateway.embed_model(request.app.state.dbx))
     shipped = manifest.get("embeddings") or {}
     added = duplicates = 0
     for doc in docs:  # bounded by vault_format.MAX_VAULT_DOCS

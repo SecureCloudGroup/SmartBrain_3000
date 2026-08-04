@@ -351,19 +351,22 @@ def embed_doc(knowledge, doc_id: str, title: str, content: str, model: str, *,
     assert doc_id and title and model, "doc id, model, title required"
     assert knowledge is not None, "knowledge base required"
     chunks = kb.chunk_text(title, content)  # bounded by kb._MAX_CHUNKS
-    knowledge.clear_other_models(doc_id, model)  # a doc must never mix models per chunk
-    have = knowledge.stored_chunks(doc_id, model)
+    # STORAGE identity (may carry a task-prefix scheme marker); the WIRE model stays bare.
+    # A doc under the previous scheme reads as stale and is cleared before re-embedding.
+    scheme = gateway.embedding_scheme(model)
+    knowledge.clear_other_models(doc_id, scheme)  # a doc must never mix schemes per chunk
+    have = knowledge.stored_chunks(doc_id, scheme)
     missing = [i for i in range(len(chunks)) if i not in have]
     if not missing:
-        knowledge.finish_embeddings(doc_id, model)  # already complete — just publish
+        knowledge.finish_embeddings(doc_id, scheme)  # already complete — just publish
         return True
     with httpx.Client(base_url=gateway.gateway_url(), timeout=timeout) as client:
         for i in missing:  # bounded by kb._MAX_CHUNKS
             if deadline is not None and time.monotonic() >= deadline:
                 return False  # out of budget — progress is persisted; next pass resumes
             vector = gateway.embed(chunks[i], model, client=client, timeout=timeout)
-            knowledge.put_embedding_chunk(doc_id, i, vector, model, total=len(chunks))
-    knowledge.finish_embeddings(doc_id, model)
+            knowledge.put_embedding_chunk(doc_id, i, vector, scheme, total=len(chunks))
+    knowledge.finish_embeddings(doc_id, scheme)
     return True
 
 
@@ -399,7 +402,9 @@ def reindex_pending(
     """
     assert knowledge is not None and model, "knowledge + model required"
     assert budget_seconds is None or budget_seconds > 0, "budget must be positive"
-    pending = knowledge.docs_needing_embedding(model)[:limit]
+    # Under the storage scheme (prefix-marked for nomic) — legacy bare-id rows read as stale
+    # here and get re-embedded WITH the task prefix on the next pass.
+    pending = knowledge.docs_needing_embedding(gateway.embedding_scheme(model))[:limit]
     deadline = (time.monotonic() + budget_seconds) if budget_seconds else None
     embedded = skipped = failed = 0
     error = ""
