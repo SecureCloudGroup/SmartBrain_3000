@@ -112,7 +112,7 @@ def test_chat_injects_memory_system_prompt(client: TestClient, monkeypatch) -> N
     client.put("/api/profile", json={"assistant_name": "Jarvis", "user_name": "Alex", "instructions": ""})
     seen: dict = {}
     monkeypatch.setattr(gateway, "chat", lambda messages, model: seen.update(messages=messages) or {"choices": []})
-    client.post("/api/chat", json={"messages": [{"role": "user", "content": "hi"}], "capability": "fast_chat"})
+    client.post("/api/chat", json={"messages": [{"role": "user", "content": "hi"}], "capability": "chat"})
     assert seen["messages"][0]["role"] == "system"
     assert "Allergic to peanuts" in seen["messages"][0]["content"]
     assert "Jarvis" in seen["messages"][0]["content"]
@@ -123,7 +123,7 @@ def test_chat_injects_base_prompt_without_memory(client: TestClient, monkeypatch
     client.post("/api/account/setup", json={"passphrase": "correct-horse"})
     seen: dict = {}
     monkeypatch.setattr(gateway, "chat", lambda messages, model: seen.update(messages=messages) or {"choices": []})
-    client.post("/api/chat", json={"messages": [{"role": "user", "content": "hi"}], "capability": "fast_chat"})
+    client.post("/api/chat", json={"messages": [{"role": "user", "content": "hi"}], "capability": "chat"})
     # Base grounding (tool guidance) is injected even with no profile/facts. The HEAD
     # must be byte-stable (no live timestamp — it poisoned the local model's prefix
     # cache); the live time rides a trailing system note instead.
@@ -146,6 +146,6 @@ def test_chat_respects_caller_system_message(client: TestClient, monkeypatch) ->
     client.post("/api/memories", json={"text": "fact"})
     seen: dict = {}
     monkeypatch.setattr(gateway, "chat", lambda messages, model: seen.update(messages=messages) or {"choices": []})
-    body = {"messages": [{"role": "system", "content": "caller"}, {"role": "user", "content": "hi"}], "capability": "fast_chat"}
+    body = {"messages": [{"role": "system", "content": "caller"}, {"role": "user", "content": "hi"}], "capability": "chat"}
     client.post("/api/chat", json=body)
     assert [m["content"] for m in seen["messages"]] == ["caller", "hi"]  # no double system message

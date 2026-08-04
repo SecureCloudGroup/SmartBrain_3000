@@ -402,6 +402,8 @@ Your audit and approvals view. Two parts:
   and stops asking for that tool from then on; anything pre-authorized this way is listed
   under **Always allowed**, where **Stop allowing** takes the permission back. Irreversible
   tools can't be pre-authorized — they ask every time, with an extra confirmation.
+
+  ![The Always allowed list on the Activity page — a pre-authorized tool with its Stop allowing button](assets/08-always-allowed.png)
 - **History** — the record of every tool the assistant ran or tried to run: which tool, its
   risk tier, what you decided, whether it succeeded, when, and a summary of what it was
   given. Any error it hit is shown too. Arguments and results are encrypted at rest, and

@@ -1,7 +1,6 @@
 // Pairing payload: what the phone stores at pairing so it can later reach the Desktop
-// from anywhere and verify it. The Desktop renders this as a QR (a deep link with the
-// payload in the URL FRAGMENT, which never leaves the device / never hits a server);
-// the phone reads it from location.hash, validates, and persists it.
+// from anywhere and verify it. The phone receives it over an encrypted WebRTC channel
+// after the operator enters the 6-char code (see paircode.ts), validates, and persists it.
 
 export interface PairingPayload {
   v: number;
@@ -30,21 +29,4 @@ export function parsePairingPayload(raw: string): PairingPayload {
     desktopId: String(o.desktopId ?? ""),
     iceServers: Array.isArray(o.iceServers) ? (o.iceServers as RTCIceServer[]) : [],
   };
-}
-
-// URL-safe base64 of the UTF-8 JSON, for the QR deep-link fragment.
-export function encodePairingFragment(payload: PairingPayload): string {
-  const json = JSON.stringify(payload);
-  const b64 = btoa(String.fromCharCode(...new TextEncoder().encode(json)));
-  return b64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
-
-export function decodePairingFragment(hash: string): PairingPayload {
-  const frag = hash.replace(/^#/, "");
-  if (!frag) throw new Error("no pairing data in URL");
-  const b64 = frag.replace(/-/g, "+").replace(/_/g, "/");
-  const bin = atob(b64);
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  return parsePairingPayload(new TextDecoder().decode(bytes));
 }

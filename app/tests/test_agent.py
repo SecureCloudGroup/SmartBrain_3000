@@ -481,7 +481,7 @@ def test_stream_yields_deltas_then_done(http_client: TestClient, monkeypatch) ->
     monkeypatch.setattr(gateway, "chat_stream", fake)
     r = http_client.post(
         "/api/agent/turn/stream",
-        json={"messages": [{"role": "user", "content": "hi"}], "capability": "fast_chat", "conversation_id": "c1"},
+        json={"messages": [{"role": "user", "content": "hi"}], "capability": "chat", "conversation_id": "c1"},
     )
     assert r.status_code == 200 and r.headers["content-type"].startswith("text/event-stream")
     frames = _parse_sse(r.text)
@@ -505,7 +505,7 @@ def test_stream_tool_turn_emits_pending(http_client: TestClient, monkeypatch) ->
     monkeypatch.setattr(gateway, "chat_stream", fake)
     r = http_client.post(
         "/api/agent/turn/stream",
-        json={"messages": [{"role": "user", "content": "hi"}], "capability": "fast_chat"},
+        json={"messages": [{"role": "user", "content": "hi"}], "capability": "chat"},
     )
     assert r.status_code == 200
     frames = _parse_sse(r.text)
@@ -526,7 +526,7 @@ def test_stream_gateway_error_emits_error_frame(http_client: TestClient, monkeyp
     monkeypatch.setattr(gateway, "chat_stream", fake)
     r = http_client.post(
         "/api/agent/turn/stream",
-        json={"messages": [{"role": "user", "content": "hi"}], "capability": "fast_chat"},
+        json={"messages": [{"role": "user", "content": "hi"}], "capability": "chat"},
     )
     assert r.status_code == 200  # SSE response already opened — error is the LAST frame
     frames = _parse_sse(r.text)
@@ -555,7 +555,7 @@ def test_stream_offers_tools_to_model(http_client: TestClient, monkeypatch) -> N
     monkeypatch.setattr(gateway, "chat_stream", fake)
     http_client.post(
         "/api/agent/turn/stream",
-        json={"messages": [{"role": "user", "content": "add a task"}], "capability": "fast_chat"},
+        json={"messages": [{"role": "user", "content": "add a task"}], "capability": "chat"},
     )
     assert seen["tools_spec"], "stream must offer tools so the model can actually call one"
     names = [t.get("function", {}).get("name") for t in seen["tools_spec"]]
@@ -584,7 +584,7 @@ def test_stream_retries_without_tools_when_unsupported(http_client: TestClient, 
     monkeypatch.setattr(gateway, "chat_stream", fake)
     r = http_client.post(
         "/api/agent/turn/stream",
-        json={"messages": [{"role": "user", "content": "hi"}], "capability": "fast_chat"},
+        json={"messages": [{"role": "user", "content": "hi"}], "capability": "chat"},
     )
     frames = _parse_sse(r.text)
     assert calls[0] is not None and calls[1] is None  # tried with tools, then retried without
@@ -608,7 +608,7 @@ def test_turn_route_degrades_when_tools_unsupported(http_client: TestClient, mon
     monkeypatch.setattr(gateway, "chat", lambda messages, model, **k: _text("plain answer"))
     r = http_client.post(
         "/api/agent/turn",
-        json={"messages": [{"role": "user", "content": "hi"}], "capability": "fast_chat"},
+        json={"messages": [{"role": "user", "content": "hi"}], "capability": "chat"},
     )
     assert r.status_code == 200
     body = r.json()
@@ -628,7 +628,7 @@ def test_turn_route_hard_gateway_error_is_502(http_client: TestClient, monkeypat
     monkeypatch.setattr(gateway, "chat", hard_error)
     r = http_client.post(
         "/api/agent/turn",
-        json={"messages": [{"role": "user", "content": "hi"}], "capability": "fast_chat"},
+        json={"messages": [{"role": "user", "content": "hi"}], "capability": "chat"},
     )
     assert r.status_code == 502
     assert "API key" in r.json().get("detail", "")
@@ -853,7 +853,7 @@ def test_stream_keeps_the_connection_warm_while_the_model_thinks(
     monkeypatch.setattr(gateway, "chat_stream", slow)
     r = http_client.post(
         "/api/agent/turn/stream",
-        json={"messages": [{"role": "user", "content": "hi"}], "capability": "fast_chat"},
+        json={"messages": [{"role": "user", "content": "hi"}], "capability": "chat"},
     )
     assert r.status_code == 200
     assert r.headers["cache-control"] == "no-cache"  # the sibling endpoint always had this
@@ -886,7 +886,7 @@ def test_stream_closes_its_producer_so_the_model_slot_is_released(
     monkeypatch.setattr(agent_routes, "_stream_first_response", fake_producer)
     r = http_client.post(
         "/api/agent/turn/stream",
-        json={"messages": [{"role": "user", "content": "hi"}], "capability": "fast_chat"},
+        json={"messages": [{"role": "user", "content": "hi"}], "capability": "chat"},
     )
     assert r.status_code == 200
     assert cleaned == [True], "the producer generator must be closed (releases model slot + client)"
@@ -1020,7 +1020,7 @@ def test_action_turn_calls_the_model_once_instead_of_twice(http_client: TestClie
         {"delta": "", "tool_calls": [{"index": 0, "function": {"arguments": "{}"}}],
          "finish_reason": "tool_calls"},
     ))
-    body = {"messages": [{"role": "user", "content": "what are my tasks?"}], "capability": "fast_chat"}
+    body = {"messages": [{"role": "user", "content": "what are my tasks?"}], "capability": "chat"}
     stream = http_client.post("/api/agent/turn/stream", json=body)
     assert stream.status_code == 200
     pending = [d for e, d in _parse_sse(stream.text) if e == "pending"]
@@ -1058,7 +1058,7 @@ def test_unassemblable_tool_calls_fall_back_to_asking_again(http_client: TestCli
          "finish_reason": "tool_calls"},
     ))
     stream = http_client.post("/api/agent/turn/stream", json={
-        "messages": [{"role": "user", "content": "add a task"}], "capability": "fast_chat"})
+        "messages": [{"role": "user", "content": "add a task"}], "capability": "chat"})
     pending = [d for e, d in _parse_sse(stream.text) if e == "pending"]
     assert pending and "primed" not in pending[0], "a doubtful assembly must never be offered"
 
@@ -1078,7 +1078,7 @@ def test_a_truncated_tool_stream_is_never_reused(http_client: TestClient, monkey
          "finish_reason": None},
     ))
     stream = http_client.post("/api/agent/turn/stream", json={
-        "messages": [{"role": "user", "content": "what did I get today?"}], "capability": "fast_chat"})
+        "messages": [{"role": "user", "content": "what did I get today?"}], "capability": "chat"})
     pending = [d for e, d in _parse_sse(stream.text) if e == "pending"]
     assert pending, "the turn still falls back as before"
     assert "primed" not in pending[0], "an unfinished stream must never be reused"

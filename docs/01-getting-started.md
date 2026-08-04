@@ -164,11 +164,13 @@ is separate from the install, so nothing changes under you until you say so.
 
 When an update is ready you're told in two places:
 
-- **In SmartBrain itself**, a strip at the top of the page: *"SmartBrain v0.8.12 is ready to
+- **In SmartBrain itself**, a strip at the top of the page: *"SmartBrain vX.Y.Z is ready to
   install. Installing restarts it — under a minute, and you'll unlock again afterwards."*
   Click **Install now** to apply it. The page reconnects and reloads by itself when the new
   version comes up — there's nothing to click twice. Dismissing the notice hides that
   version and stays quiet until a newer one arrives.
+
+  ![The in-app update strip saying a new version is ready to install, with an Install now button](assets/07-update-banner.png)
 - **In the menu-bar / tray menu**, as **Install update now** and **Install on next start**.
 
 Ignore it entirely and the update installs the next time you start SmartBrain. Either way
@@ -184,12 +186,17 @@ menu names it too. During an update, when the launcher has been replaced but the
 supervises hasn't yet, the menu names both numbers rather than one misleading one.
 
 If SmartBrain updates while you have a page open, that page notices and offers a **Reload**:
-*"SmartBrain updated to v0.8.12 while this page was open — reload to use the new version."*
+*"SmartBrain updated to vX.Y.Z while this page was open — reload to use the new version."*
 You can dismiss it and keep working on the old page.
 
 The launcher updates itself on the same schedule, so `brew upgrade --cask smartbrain` and
 `scoop update smartbrain` are not part of normal use — they're there if you ever need to
 force it.
+
+**Linux (Docker):** `docker compose -f docker-compose.release.yml pull`, then
+`docker compose -f docker-compose.release.yml up -d`. The stack tracks the newest release;
+to hold a specific version instead, export `SMARTBRAIN_VERSION=0.8.18` (or put it in a
+`.env` next to the compose file) before `up` — unset it to go back to the newest.
 
 **From source:** `python3 installer/install.py update` — it **backs up your encrypted data first**,
 pulls the latest code, rebuilds the image, restarts the stack, and verifies it's healthy. It prompts

@@ -2,7 +2,7 @@
 
 The app routes all model calls through Bifrost at ``SMARTBRAIN_LLM_GATEWAY_URL``.
 A small capability -> "provider/model" map lets callers ask for a capability
-(e.g. "fast_chat") instead of a concrete model id; an explicit model id always
+(e.g. "chat") instead of a concrete model id; an explicit model id always
 wins. Provider configuration (keys, local endpoints) is managed separately.
 """
 
@@ -34,13 +34,32 @@ _MAX_EMBED_DIM = 4096  # trust-boundary cap on a response vector (mirrors kb._MA
 # a safe margin under nomic-embed-text's 2048-token window. Long docs embed on their head.
 _MAX_EMBED_CHARS = 6000
 
+# Embed models that were TRAINED on nomic-style task prefixes ("search_document: " on
+# passages, "search_query: " on queries) — sending raw text hurts retrieval measurably
+# (2026-07-24 benchmark). Match on the tail (the part after 'provider/') so any provider
+# routing to a nomic-embed-text variant picks up the convention.
+# modernbert-embed is trained from the Nomic Embed recipe and expects the same prefixes —
+# and it is a live config: oMLX installs route embedding to nomicai-modernbert-embed-base.
+_TASK_PREFIX_MODELS: tuple[str, ...] = ("nomic-embed-text", "modernbert-embed")
+_TASK_PREFIXES: dict[str, str] = {
+    "document": "search_document: ",
+    "query": "search_query: ",
+}
+# Storage-only marker appended to the routed model id when forming the STORAGE identity for
+# vectors (see ``embedding_scheme``). Never sent on the wire. Bump ('#tp2', ...) to force a
+# full re-embed under a new prefixing scheme.
+_TASK_PREFIX_MARK = "#tp1"
+
 # Minimal default capability -> "provider/model" map. Made user-editable later
 # (settings UI). An explicit model id in the request overrides this.
 DEFAULT_ROUTES: dict[str, str] = {
-    "fast_chat": "openai/gpt-4o-mini",
     "chat": "openai/gpt-4o-mini",
-    "reasoning": "anthropic/claude-3-5-sonnet-latest",
 }
+
+# Capabilities the app actually consumes. load_routes filters saved routes against this
+# so an old install carrying retired capability keys (e.g. "fast_chat", "reasoning")
+# neither surfaces in the UI nor confuses a downstream `resolve_model` lookup.
+KNOWN_CAPABILITIES: frozenset[str] = frozenset({"chat", "embedding", "agent", "summarize"})
 
 # Shown (as a GatewayError) when a request exceeds its timeout — usually a cold local
 # model still loading. Clearer than a raw httpx timeout or bifrost's generic wording.
@@ -177,10 +196,13 @@ def load_routes(conn) -> dict[str, str]:
 
     Falls back to ``DEFAULT_ROUTES`` for any capability the user hasn't set, so a
     fresh install still resolves a model. Malformed stored JSON is ignored.
+    Stored keys outside ``KNOWN_CAPABILITIES`` (retired capability names left over
+    from earlier installs) are silently dropped so they can't leak into the UI.
     """
     from . import db  # local import: db has no gateway dependency (avoids any cycle)
 
     assert conn is not None, "conn required to load routes"
+    assert KNOWN_CAPABILITIES, "known-capability allowlist must be non-empty"
     routes = dict(DEFAULT_ROUTES)
     raw = db.meta_get(conn, _ROUTES_META_KEY)
     if not raw:
@@ -191,7 +213,7 @@ def load_routes(conn) -> dict[str, str]:
         return routes  # corrupt config — fall back to defaults rather than fail a chat
     if isinstance(stored, dict):
         for cap, model in stored.items():
-            if isinstance(cap, str) and isinstance(model, str) and model:
+            if isinstance(cap, str) and cap in KNOWN_CAPABILITIES and isinstance(model, str) and model:
                 routes[cap] = model
     return routes
 
@@ -610,21 +632,66 @@ def embed_model(conn=None) -> str:
     return model
 
 
+def uses_task_prefixes(model: str) -> bool:
+    """True when this embed model expects nomic-style task prefixes on its input.
+
+    The prefix convention ("search_document: " / "search_query: ") is baked into
+    nomic-embed-text at training time; sending it to a model that wasn't trained on it
+    (bge-m3, mxbai-embed-large, OpenAI's, ...) corrupts the vector rather than helping.
+    Matched on the model tail (the 'model' half of 'provider/model'), so any provider
+    routing to a nomic-embed-text variant picks it up.
+    """
+    assert model, "model required"
+    assert isinstance(model, str), "model must be a string"
+    _, _, tail = model.partition("/")
+    haystack = tail or model
+    return any(fragment in haystack for fragment in _TASK_PREFIX_MODELS)
+
+
+def embedding_scheme(model: str) -> str:
+    """Storage identity for vectors produced under the current text scheme.
+
+    For a prefix-capable model this returns ``model + '#tp1'``; for every other model it
+    returns ``model`` unchanged. The marker exists so vectors embedded WITHOUT prefixes
+    (stored under the bare model id from older builds) can never silently fuse with
+    prefixed query vectors — they land in a different (model, dim) block and become stale,
+    which the background indexer re-embeds under the new identity. Bump the suffix
+    ('#tp2', ...) to re-embed the world under a new prefixing scheme. The marker is
+    storage-only and MUST NOT reach the wire — send the bare model id to Bifrost.
+    """
+    assert model, "model required"
+    if uses_task_prefixes(model):
+        return model + _TASK_PREFIX_MARK
+    return model
+
+
 def embed(
     input_text: str,
     model: str,
     *,
+    task: str = "document",
     client: httpx.Client | None = None,
     timeout: float = 15.0,
 ) -> list[float]:
     """Embed text through Bifrost's /v1/embeddings; return the float vector.
+
+    ``task`` is "document" (a passage being indexed) or "query" (a search string); for
+    nomic-embed-text and other prefix-capable models this prepends the model's expected
+    task prefix ("search_document: " / "search_query: ") — a free retrieval-quality win
+    the model was trained on. Non-prefix models see byte-identical wire behavior.
 
     Raises ``GatewayError`` on the upstream error envelope, a non-JSON body, or
     a malformed 200 (empty data, missing/empty embedding, non-finite element).
     """
     assert input_text, "input text must be non-empty"
     assert model, "model must be specified"
-    input_text = input_text[:_MAX_EMBED_CHARS]  # fit the embed context; long docs embed on their head
+    assert task in _TASK_PREFIXES, "task must be 'document' or 'query'"
+    if uses_task_prefixes(model):
+        # Prepend BEFORE the char cap so the prefix can't be truncated away — the tail is
+        # cut, the prefix stays, and total length still fits the embed model's context.
+        input_text = (_TASK_PREFIXES[task] + input_text)[:_MAX_EMBED_CHARS]
+    else:
+        input_text = input_text[:_MAX_EMBED_CHARS]  # fit the embed context; long docs embed on their head
     client, owns_client = _resolve_client(client, timeout)
     try:
         # Per-request timeout: a cold local embed model can take ~50s to load on its first call,

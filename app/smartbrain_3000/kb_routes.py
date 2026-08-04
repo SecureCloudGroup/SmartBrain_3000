@@ -151,13 +151,14 @@ def search_docs(request: Request, q: str, mode: str = "hybrid", limit: int = 10,
         return {"results": knowledge.search(q, limit=limit, scope=scope), "degraded": False}
     model = gateway.embed_model(request.app.state.dbx)
     try:
-        vector = gateway.embed(q, model)
+        vector = gateway.embed(q, model, task="query")
     except Exception as exc:  # gateway/embed model unavailable — degrade, but say so
         log.warning("%s search fell back to lexical: %s", mode, exc)
         return {"results": knowledge.search(q, limit=limit, scope=scope), "degraded": True}
+    scheme = gateway.embedding_scheme(model)  # storage identity — matches how vectors were keyed
     if mode == "semantic":
-        return {"results": knowledge.semantic_search(vector, model, limit=limit, scope=scope), "degraded": False}
-    return {"results": knowledge.hybrid_search(q, vector, model, limit=limit, scope=scope), "degraded": False}
+        return {"results": knowledge.semantic_search(vector, scheme, limit=limit, scope=scope), "degraded": False}
+    return {"results": knowledge.hybrid_search(q, vector, scheme, limit=limit, scope=scope), "degraded": False}
 
 
 _REINDEX_BUDGET_SECONDS = 25.0  # a request must RETURN; the background indexer finishes the rest
@@ -184,7 +185,9 @@ def reindex(request: Request) -> dict:
         "skipped": skipped,
         "failed": failed,
         "error": error,
-        "pending": knowledge.docs_pending_embedding(model),  # still to do; the indexer will get it
+        # Backlog under the current storage scheme (prefix-marked for nomic) — legacy bare-id
+        # rows are counted here as pending until the indexer re-embeds them with prefixes.
+        "pending": knowledge.docs_pending_embedding(gateway.embedding_scheme(model)),
     }
 
 
@@ -198,7 +201,7 @@ def index_status(request: Request) -> dict:
     knowledge = _kb(request)
     model = gateway.embed_model(request.app.state.dbx)
     total = knowledge.count_docs()
-    pending = knowledge.docs_pending_embedding(model)
+    pending = knowledge.docs_pending_embedding(gateway.embedding_scheme(model))
     # B1: the background summary tree's progress rides the same status payload, so the
     # Knowledge page can say "Preparing summaries — 3 of 5" beside the indexing line.
     # Counted with one cheap query (docs that have a reduced doc-summary row), NOT by

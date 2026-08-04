@@ -159,6 +159,8 @@ const CLIPS = {
     await R.cap("Name it, give it a prompt, set a cadence", "2/3"); await R.dwell(800);
     await R.click('button:has-text("Add schedule")'); await page.waitForTimeout(1100); await R.ensure();
     await R.cap("Fire it now to see it work", "3/3"); await R.click('button:has-text("Run now")'); await page.waitForTimeout(3500); await R.ensure();
+    // Run output lives on the Info page now — follow it there for the payoff.
+    await nav(page, "Info").click(); await page.waitForTimeout(1000); await R.ensure();
     await R.cap("A real summary of your open tasks — dangerous actions still ask first", "3/3"); await R.dwell(2600); await done(h);
   },
   // 08 pair a phone (demo SET UP; WEBRTC off is fine — pairing provisions a device).

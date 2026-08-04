@@ -103,7 +103,7 @@ paste into your browser console that unregisters it and clears the cached app, t
 paired-device credential, and stored settings. A paired phone has to be paired again
 afterwards.
 
-macOS only for now. On Windows the same five steps apply, against `%APPDATA%\SmartBrain`
+macOS only for now. On Windows the same process applies, against `%APPDATA%\SmartBrain`
 and the Scoop package.
 
 ## Chat Trash
