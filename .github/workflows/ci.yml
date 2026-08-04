@@ -60,9 +60,24 @@ jobs:
       - name: Unit tests
         working-directory: web
         run: npm test
-      - name: Build the SPA (smoke)
+      # app/smartbrain_3000/web/ is not build output that CI can throw away — the
+      # Dockerfile copies it verbatim, so it IS the shipped UI. This used to build
+      # and discard, which let source and shipped bundle diverge silently: a whole
+      # release went out with frontend fixes present in src/ and absent from the
+      # product, every check green. The build is reproducible (svelte.config.js
+      # derives the version from the source rather than the clock), so a rebuild
+      # that differs from what is committed means someone forgot to commit it.
+      - name: Build the SPA, and require the committed bundle to match
         working-directory: web
-        run: npm run build
+        run: |
+          npm run build
+          # --cached after `add` so ADDED and DELETED chunks count, not just edits.
+          git add -A -- ../app/smartbrain_3000/web
+          if ! git diff --cached --quiet -- ../app/smartbrain_3000/web; then
+            echo "::error::The shipped SPA is stale. app/smartbrain_3000/web/ is copied verbatim into the image, so this means the product would ship without your change. Run 'npm run build' in web/ and commit app/smartbrain_3000/web/."
+            git diff --cached --stat -- ../app/smartbrain_3000/web | tail -20
+            exit 1
+          fi
 
   docker-image:
     name: docker image (build + test)
