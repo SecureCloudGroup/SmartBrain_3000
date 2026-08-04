@@ -32,6 +32,14 @@ to know when a release changes behavior.
   0.8.18. The first update after this change reloads open tabs once as the cache id rolls
   over.
 
+### Removed
+- **Dead surface off the pages that carry it.** Settings → Model routing no longer lists
+  **Fast chat** and **Reasoning** slots — nothing in the app read them, so setting either
+  did nothing but suggest otherwise. An old install that had saved a value into one of them
+  loads fine; the retired keys are silently dropped rather than resurfacing. The pairing
+  page has also lost its leftover QR-payload decode path: the Desktop stopped emitting
+  payload QRs when pairing moved to the 6-character code, so that branch could never fire.
+
 ## [0.8.18] - 2026-08-03
 
 ### Fixed
