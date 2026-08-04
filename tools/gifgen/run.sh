@@ -39,7 +39,10 @@ reset_demo(){ docker rm -f sb_gifdemo >/dev/null 2>&1 || true
     -v "$REPO/app:/app" ${SHIM[@]+"${SHIM[@]}"} -e SMARTBRAIN_DB_PATH=/tmp/demo.duckdb -e SMARTBRAIN_HOST=0.0.0.0 \
     -e SMARTBRAIN_WEBRTC_ENABLED=0 -e SMARTBRAIN_LLM_GATEWAY_URL=http://host.docker.internal:$GW \
     smartbrain_3000:dev >/dev/null
-  for i in $(seq 1 40); do curl -fsS $U/api/health >/dev/null 2>&1 && break; sleep 1; done; }
+  # The header stamps "a modern launcher talks to this install" (persisted in meta), so the
+  # demo never records the one-time legacy-launcher nudge banner a launcher-less container
+  # would otherwise show in every clip.
+  for i in $(seq 1 40); do curl -fsS -H 'x-smartbrain-launcher: gifdemo' $U/api/health >/dev/null 2>&1 && break; sleep 1; done; }
 setup(){ curl -fsS -X POST $U/api/account/setup -H 'content-type: application/json' -d "{\"passphrase\":\"$PASS\"}"; }
 connect(){ curl -fsS -X PUT $U/api/local-models/ollama -H 'content-type: application/json' -d '{"url":"http://host.docker.internal:11434"}' >/dev/null; }
 task(){ curl -fsS -X POST $U/api/tasks -H 'content-type: application/json' -d "$1" >/dev/null; }
@@ -86,8 +89,18 @@ shots(){ # deterministic screenshot grid of every route (design-PR before/after 
   cd "$HERE"; node shots.js
 }
 
+docshots(){ # the seven committed guide screenshots (docs/assets + web/static/assets)
+  mock_up; curl -fsS "http://127.0.0.1:$GW/reset" >/dev/null; reset_demo; setup >/dev/null
+  cd "$HERE"; node docshots.js disconnected
+  connect
+  doc '{"title":"Apartment Lease","content":"Lease term 12 months, rent $1,800/mo due on the 1st, 60-day notice to vacate, landlord Pat Rivera."}'
+  doc '{"title":"Renters insurance policy","content":"Policy RE-2210 with Homestead Mutual. Coverage: $30,000 personal property, $100,000 liability. Premium $14/mo, renews March 1."}'
+  node docshots.js connected
+}
+
 if [ "${1:-}" = "all" ]; then for n in 01 02 03 04 05 06 07 08 09 10 11; do echo "### $n"; record "$n"; done
 elif [ "${1:-}" = "shots" ]; then shots
+elif [ "${1:-}" = "docshots" ]; then docshots
 elif [ -n "$(name_of "${1:-}")" ]; then record "$1"
-else echo "usage: $0 <01..10|all|shots>"; exit 1; fi
+else echo "usage: $0 <01..10|all|shots|docshots>"; exit 1; fi
 echo "done. (cleanup: docker rm -f sb_gifdemo; pkill -f mock_gateway.py)"

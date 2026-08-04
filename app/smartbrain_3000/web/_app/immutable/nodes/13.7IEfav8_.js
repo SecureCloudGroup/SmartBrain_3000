@@ -1,0 +1,1 @@
+import{nt as e,o as t,r as n,tt as r}from"../chunks/DO5TPgeu.js";import{t as i}from"../chunks/N9qgHkIZ.js";import"../chunks/xihTtKlq.js";import"../chunks/Dl5RZlHt.js";import"../chunks/Osv1pjHx.js";import{t as a}from"../chunks/Bbr6S-ok.js";function o(o,s){e(s,!1),n(()=>i(`/settings/providers`)),t(),a(o,{block:!0}),r()}export{o as component};

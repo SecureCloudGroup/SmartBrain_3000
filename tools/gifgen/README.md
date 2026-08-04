@@ -26,6 +26,7 @@ cd .. && docker build -t smartbrain_3000:dev -f ../Dockerfile ..   # the app ima
 ```sh
 ./run.sh 03        # record + encode clip 03 -> out/03-first-chat.gif
 ./run.sh all       # all eleven
+./run.sh docshots  # the seven guide screenshots -> out/docshots/*.png
 # cleanup:
 docker rm -f sb_gifdemo ; pkill -f mock_gateway.py
 ```
@@ -42,6 +43,9 @@ ffmpeg + gifsicle. Copy `out/*.gif` into `docs/assets/gifs/` + `web/static/asset
 - `mock_gateway.py` — stdlib mock OpenAI gateway (`/v1/models`, streaming + non-stream
   `/v1/chat/completions` with tool-calls, `/v1/embeddings`, Bifrost admin, Ollama `/api/tags`, `/reset`).
 - `clips.js` — the eleven storyboards (`node clips.js 01`…`10`).
+- `docshots.js` — the seven committed guide screenshots (docs/assets + web/static/assets); the
+  update-banner shot plays the launcher by stamping `x-smartbrain-update` on the page's own
+  health probes — recorder-only, nothing in the app is faked.
 - `run.sh` — per-clip demo state + record + encode.
 
 ## Conventions (see the planning spec in git history of c7c2112)
