@@ -4,7 +4,8 @@ Everything here runs locally and is encrypted at rest. Here's what each area doe
 
 ## Where things live
 
-The sidebar (a bottom tab bar on a phone) holds nine areas. This is the whole app:
+The sidebar holds nine areas — this is the whole app. On a phone the four you reach for
+most sit in the bottom bar (Chat, Knowledge, Info, Activity) and the rest are under **More**:
 
 | Area | What it's for |
 | --- | --- |
@@ -128,7 +129,7 @@ These are the tools it can reach for. It picks them itself; you decide whether t
 | Remember a fact | Adds a fact to Settings → Memory. |
 | Add a task | Adds a planner task. Asking twice for the same thing won't duplicate it. |
 | Complete a task | Ticks a task off; a recurring one rolls forward. |
-| Update a task | Edits a task's title, date, priority, tags or notes. |
+| Update a task | Edits a task's title, date, time, priority, repeat or notes. (Tags are yours to set in Planner; the assistant can't change them.) |
 | Search the web | Searches with your configured engine. |
 | Fetch a page | Reads one public web page as article text. |
 | Research the web | Searches, then reads the top results, in one step. |
@@ -260,7 +261,7 @@ approval. Deleting a task is irreversible, so it asks every time.
 Run a prompt on a timer — e.g. "every morning, summarize my open tasks." A
 schedule fires an assistant turn on its cadence.
 
-The page has two tabs. **Create** takes a name, the prompt itself, how often it should
+The page has two tabs and opens on **Items**. **Create** takes a name, the prompt itself, how often it should
 **Repeat** — **Once**, **Hourly**, **Daily**, or **Weekly** — and when it should **First
 run**: **Now**, **In 1 hour**, or **Tomorrow**. Three presets (Check the news, Morning
 briefing, Weekly knowledge review) fill the form in if you'd rather start from one.

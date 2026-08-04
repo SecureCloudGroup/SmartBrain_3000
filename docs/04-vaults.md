@@ -15,7 +15,7 @@ and the unit you share. Vaults live on the Knowledge page.
   them, or remove one from the vault (the document itself is kept).
 - **Search inside one.** Pick a vault next to the search box to search *only* its documents
   — e.g. keep a "Work" vault and a "Home" vault and ask each separately.
-- **Share it.** **Export** a vault and SmartBrain seals it into a single `.sbvault` file and
+- **Share it.** Choose **Share…** on the vault and SmartBrain seals it into a single `.sbvault` file and
   shows you a one-time key (starting `SBVK1-`). Send the file however you like, then give the
   person the key over a **different** channel — together they are the contents in the clear,
   so keep them apart.
