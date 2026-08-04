@@ -36,6 +36,8 @@ def test_embed_model_env(monkeypatch) -> None:
 
 
 def test_gateway_embed_forms_request_and_parses() -> None:
+    # A non-prefix embed model must have byte-identical wire behavior — the task-prefix path
+    # is nomic-specific (test_gateway_embed_prepends_document_prefix_for_nomic covers that).
     seen: dict = {}
 
     def handler(req: httpx.Request) -> httpx.Response:
@@ -44,10 +46,10 @@ def test_gateway_embed_forms_request_and_parses() -> None:
         return httpx.Response(200, json={"data": [{"embedding": [0.1, 0.2, 0.3]}]})
 
     with _mock(handler) as client:
-        out = gateway.embed("hello", "ollama/nomic-embed-text:v1.5", client=client)
+        out = gateway.embed("hello", "ollama/mxbai-embed-large:latest", client=client)
     assert out == pytest.approx([0.1, 0.2, 0.3])
     assert seen["path"] == "/v1/embeddings"
-    assert seen["body"] == {"model": "ollama/nomic-embed-text:v1.5", "input": "hello"}
+    assert seen["body"] == {"model": "ollama/mxbai-embed-large:latest", "input": "hello"}
 
 
 def test_gateway_embed_raises_on_error_envelope() -> None:
@@ -467,3 +469,127 @@ def test_store_defers_embedding_for_big_docs(monkeypatch) -> None:
     assert calls["n"] == 1 and small["duplicate"] is False
     ingest.store(kb, "Big", "b" * 100_000)  # 25 chunks -> deferred to the indexer
     assert calls["n"] == 1  # unchanged: no inline embedding for the big doc
+
+
+# --- nomic-embed-text task prefixes + storage-scheme marker --------------------------------
+#
+# nomic-embed-text was trained on task prefixes ("search_document: " on passages,
+# "search_query: " on queries) — sending raw text hurts retrieval. The gateway now prepends
+# them for nomic models, but a mid-migration corpus still holds vectors that were embedded
+# WITHOUT prefixes: fusing those with prefixed query vectors would degrade ranking silently.
+# ``embedding_scheme`` returns the storage identity ('...#tp1' for prefix-capable models); old
+# rows sit under the bare id, appear stale to the backlog probe, and the background indexer
+# re-embeds them under the new identity.
+
+def test_uses_task_prefixes_matches_nomic_only() -> None:
+    assert gateway.uses_task_prefixes("ollama/nomic-embed-text:v1.5") is True
+    assert gateway.uses_task_prefixes("ollama/nomic-embed-text") is True
+    assert gateway.uses_task_prefixes("mlxe/nomic-embed-text-v1.5") is True  # any provider
+    assert gateway.uses_task_prefixes("ollama/mxbai-embed-large:latest") is False
+    assert gateway.uses_task_prefixes("mlx/bge-m3-mlx-fp16") is False
+    assert gateway.uses_task_prefixes("openai/text-embedding-3-small") is False
+
+
+def test_embedding_scheme_marks_nomic_and_leaves_others_unchanged() -> None:
+    # The marker is what keeps mid-migration corpora safe: bare-id (pre-prefix) vectors
+    # and '#tp1' (prefixed) vectors land in different (model, dim) blocks, so a prefixed
+    # query can never silently fuse against a non-prefixed passage.
+    assert gateway.embedding_scheme("ollama/nomic-embed-text:v1.5") == "ollama/nomic-embed-text:v1.5#tp1"
+    assert gateway.embedding_scheme("ollama/mxbai-embed-large:latest") == "ollama/mxbai-embed-large:latest"
+    assert gateway.embedding_scheme("openai/text-embedding-3-small") == "openai/text-embedding-3-small"
+
+
+def test_gateway_embed_prepends_document_prefix_for_nomic() -> None:
+    seen: dict = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen["body"] = json.loads(req.content)
+        return httpx.Response(200, json={"data": [{"embedding": [0.1, 0.2, 0.3]}]})
+
+    with _mock(handler) as client:
+        gateway.embed("the cargo vessel departed at dawn", "ollama/nomic-embed-text:v1.5",
+                      task="document", client=client)
+    # The prefix is on the INPUT; the wire model stays bare (the marker is storage-only).
+    assert seen["body"]["input"] == "search_document: the cargo vessel departed at dawn"
+    assert seen["body"]["model"] == "ollama/nomic-embed-text:v1.5"
+    assert "#" not in seen["body"]["model"]
+
+
+def test_gateway_embed_prepends_query_prefix_for_nomic() -> None:
+    seen: dict = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen["body"] = json.loads(req.content)
+        return httpx.Response(200, json={"data": [{"embedding": [0.1, 0.2, 0.3]}]})
+
+    with _mock(handler) as client:
+        gateway.embed("what did the ship do at sunrise", "ollama/nomic-embed-text:v1.5",
+                      task="query", client=client)
+    assert seen["body"]["input"] == "search_query: what did the ship do at sunrise"
+    assert seen["body"]["model"] == "ollama/nomic-embed-text:v1.5"
+
+
+def test_gateway_embed_leaves_non_nomic_wire_untouched() -> None:
+    # Byte-identical to today for every non-nomic embed model — the prefix convention is
+    # nomic-specific, and sending it to a model that wasn't trained on it corrupts results.
+    for task in ("document", "query"):
+        seen: dict = {}
+
+        def handler(req: httpx.Request, s: dict = seen) -> httpx.Response:
+            s["body"] = json.loads(req.content)
+            return httpx.Response(200, json={"data": [{"embedding": [0.1, 0.2, 0.3]}]})
+
+        with _mock(handler) as client:
+            gateway.embed("raw passage", "ollama/mxbai-embed-large:latest",
+                          task=task, client=client)
+        assert seen["body"] == {"model": "ollama/mxbai-embed-large:latest", "input": "raw passage"}
+
+
+def test_gateway_embed_prefix_survives_truncation() -> None:
+    # The prefix goes on BEFORE the _MAX_EMBED_CHARS cap so a big-chunk head-truncation
+    # can never eat the prefix (which would silently send raw text and defeat the point).
+    seen: dict = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen["body"] = json.loads(req.content)
+        return httpx.Response(200, json={"data": [{"embedding": [0.1, 0.2, 0.3]}]})
+
+    long_text = "x" * (gateway._MAX_EMBED_CHARS + 1000)
+    with _mock(handler) as client:
+        gateway.embed(long_text, "ollama/nomic-embed-text:v1.5", task="document", client=client)
+    wire = seen["body"]["input"]
+    assert wire.startswith("search_document: ")
+    assert len(wire) == gateway._MAX_EMBED_CHARS  # total stays within the cap
+
+
+def test_gateway_embed_rejects_unknown_task() -> None:
+    handler = lambda req: httpx.Response(200, json={"data": [{"embedding": [0.1]}]})
+    with _mock(handler) as client, pytest.raises(AssertionError):
+        gateway.embed("hi", "ollama/nomic-embed-text:v1.5", task="bogus", client=client)
+
+
+def test_bare_nomic_vectors_read_as_stale_under_new_scheme() -> None:
+    # Migration mechanism: docs whose vectors were stored under the BARE nomic id (from before
+    # this change) show up in docs_needing_embedding under the current '#tp1' scheme, so the
+    # background indexer picks them up and re-embeds them WITH the task prefix.
+    kb = _kb()
+    doc_id = kb.add("Old", "content")
+    kb.put_embedding(doc_id, [1.0, 0.0], "ollama/nomic-embed-text:v1.5")  # legacy row: bare id
+    scheme = gateway.embedding_scheme("ollama/nomic-embed-text:v1.5")
+    assert scheme == "ollama/nomic-embed-text:v1.5#tp1"
+    assert doc_id in kb.docs_needing_embedding(scheme)  # stale under the new scheme
+    assert kb.docs_pending_embedding(scheme) == 1
+
+
+def test_bare_nomic_vectors_do_not_fuse_with_prefixed_queries() -> None:
+    # Vectors embedded WITHOUT prefixes must never be scored against a prefixed query vector —
+    # that's a cross-scheme comparison, meaningless in the same way a cross-model one is. The
+    # semantic block is keyed on the storage scheme, so an old bare-id row is invisible.
+    kb = _kb()
+    doc_id = kb.add("Old", "content")
+    kb.put_embedding(doc_id, [1.0, 0.0], "ollama/nomic-embed-text:v1.5")  # legacy bare id
+    scheme = gateway.embedding_scheme("ollama/nomic-embed-text:v1.5")
+    assert kb.semantic_search([1.0, 0.0], scheme) == []  # bare-stored row is invisible
+    # After the indexer re-embeds under the new scheme, the same query finds it.
+    kb.put_embedding(doc_id, [1.0, 0.0], scheme)
+    assert [h["id"] for h in kb.semantic_search([1.0, 0.0], scheme)] == [doc_id]

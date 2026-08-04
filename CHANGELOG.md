@@ -11,6 +11,22 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Changed
+- **Semantic search on the default local embedder now sends the task prefixes it was
+  trained on.** `nomic-embed-text` was trained to expect `search_document: ` on passages
+  and `search_query: ` on queries; sending raw text is a known retrieval-quality loss
+  (measured against the real knowledge base on 2026-07-24). The gateway now prepends the
+  right prefix on every embed call for nomic models — and only for nomic; other embed
+  models (`bge-m3`, `mxbai-embed-large`, OpenAI's, ...) see byte-identical wire behavior,
+  because sending nomic-style prefixes to a model that wasn't trained on them corrupts
+  results. Existing vectors were embedded WITHOUT the prefix, so fusing them with a
+  prefixed query would silently degrade ranking: they are treated as stale and the
+  background indexer re-embeds them under the new scheme with no user action needed. A
+  large knowledge base takes a few passes to drain — during that window the default
+  hybrid search keeps returning results (its keyword half is unaffected), and semantic-
+  only mode returns no hits for the not-yet-re-embedded documents until the backfill
+  reaches them.
+
 ### Fixed
 - **The doctor was diagnosing a product that no longer exists.** `installer/install.py
   doctor` opened by testing for Docker — "Docker not found", "Docker daemon not reachable",

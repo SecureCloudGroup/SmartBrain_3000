@@ -167,13 +167,14 @@ def _kb_search(ctx: ToolContext, args: dict) -> dict:
         )
     model = gateway.embed_model(getattr(ctx.kb, "conn", None))
     try:
-        vector = gateway.embed(args["query"], model)
+        vector = gateway.embed(args["query"], model, task="query")
     except Exception as exc:  # embed model unavailable — keyword-only, observably
         log.warning("kb_search: semantic unavailable, keyword-only: %s", exc)
         results = ctx.kb.search(args["query"], limit=limit, scope=scope)
         _tag_imported(ctx, results)
         return {"results": results, "degraded": True}
-    results = ctx.kb.hybrid_search(args["query"], vector, model, limit=limit, scope=scope)
+    scheme = gateway.embedding_scheme(model)  # storage identity — matches how vectors were keyed
+    results = ctx.kb.hybrid_search(args["query"], vector, scheme, limit=limit, scope=scope)
     _tag_imported(ctx, results)
     return {"results": results, "degraded": False}
 

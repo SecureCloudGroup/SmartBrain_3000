@@ -688,7 +688,10 @@ def tick(app, pass_budget_seconds: float | None = None) -> int:
         from .scheduler import ScheduleStore  # lazy: scheduler imports us — break the cycle here
         schedules = ScheduleStore(cursor, key)
         try:
-            embed_model = gateway.embed_model(cursor)
+            # Storage identity, not the wire model — locally-adopted vectors must land under
+            # the same '#tp1' scheme our KB and queries use, so the vectors_ok gate treats a
+            # bare-id publisher's shipment as mismatched and leaves us to re-embed locally.
+            embed_model = gateway.embedding_scheme(gateway.embed_model(cursor))
         except Exception:  # a config read failed — apply still works, it just won't adopt vectors
             embed_model = ""
         due = _due_subscriptions(vaults, _now())
