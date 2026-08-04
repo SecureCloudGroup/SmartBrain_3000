@@ -1,56 +1,15 @@
 <script lang="ts">
-  // Two pairing paths land here:
-  //  - QR deep link (Safari): the payload is in the URL fragment (never hits a server); we
-  //    show WHAT is being paired and require a tap before storing it.
-  //  - Code (installed home-screen app): iOS isolates the installed app's storage from
-  //    Safari, so it can't inherit a QR pairing. With no fragment we show a code-entry form;
-  //    the operator reads a 6-char code off the Desktop and we fetch the pairing over an
-  //    encrypted WebRTC channel (see paircode.ts).
-  import { onMount } from "svelte";
-  import { decodePairingFragment, type PairingPayload } from "$lib/remote/pairing";
+  // Pairing runs entirely by 6-char code: the Desktop shows a code and QR whose only job is
+  // to open this site on the phone so the operator can install the PWA. On iOS an installed
+  // Home Screen app has its own storage isolated from Safari, so pairing must happen in the
+  // installed app; we fetch the pairing over an encrypted WebRTC channel (see paircode.ts).
   import { pairByCode } from "$lib/remote/paircode";
   import { savePairing } from "$lib/remote/store";
 
-  let phase = $state<"review" | "code" | "done" | "error">("review");
-  let payload = $state<PairingPayload | null>(null);
+  let phase = $state<"code" | "done" | "error">("code");
   let error = $state("");
   let code = $state("");
   let pairing = $state(false);
-
-  onMount(() => {
-    if (!window.location.hash.replace(/^#/, "")) {
-      phase = "code"; // no QR payload in the URL -> manual code entry (installed-app path)
-      return;
-    }
-    try {
-      payload = decodePairingFragment(window.location.hash);
-      history.replaceState(null, "", window.location.pathname); // scrub the secret from the URL
-    } catch (e) {
-      error = e instanceof Error ? e.message : "invalid pairing link";
-      phase = "error";
-    }
-  });
-
-  function signalingHost(url: string): string {
-    try {
-      return new URL(url).host;
-    } catch {
-      return url;
-    }
-  }
-
-  async function confirm() {
-    if (!payload) return;
-    try {
-      // payload is a Svelte $state proxy (for the review UI); IndexedDB can't
-      // structured-clone a proxy, so persist a plain snapshot of it.
-      await savePairing($state.snapshot(payload));
-      phase = "done";
-    } catch (e) {
-      error = e instanceof Error ? e.message : "could not save the pairing";
-      phase = "error";
-    }
-  }
 
   async function submitCode() {
     if (pairing) return;
@@ -68,17 +27,7 @@
 </script>
 
 <div class="card">
-  {#if phase === "review" && payload}
-    <h1>Pair this phone?</h1>
-    <p>You're about to pair this phone for remote access to:</p>
-    <ul>
-      <li>Desktop: <b>{payload.desktopId || "(unnamed)"}</b></li>
-      <li>via <b>{signalingHost(payload.signalingUrl)}</b></li>
-    </ul>
-    <p class="muted" style="font-size:0.85rem">Only continue if you started this from your own
-      Desktop's <b>Settings → Remote access</b>.</p>
-    <p style="margin-top:1rem"><button onclick={confirm}>Pair this phone</button></p>
-  {:else if phase === "code"}
+  {#if phase === "code"}
     <h1>Pair this device</h1>
     <p>On your Desktop, open <b>Settings &rarr; Remote access &rarr; Pair a new phone</b>, then enter
       the 6-character code shown.</p>

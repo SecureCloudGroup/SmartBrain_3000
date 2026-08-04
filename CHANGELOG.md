@@ -11,6 +11,14 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Removed
+- **Dead surface off the pages that carry it.** Settings → Model routing no longer lists
+  **Fast chat** and **Reasoning** slots — nothing in the app read them, so setting either
+  did nothing but suggest otherwise. An old install that had saved a value into one of them
+  loads fine; the retired keys are silently dropped rather than resurfacing. The pairing
+  page has also lost its leftover QR-payload decode path: the Desktop stopped emitting
+  payload QRs when pairing moved to the 6-character code, so that branch could never fire.
+
 ### Fixed
 - **The doctor was diagnosing a product that no longer exists.** `installer/install.py
   doctor` opened by testing for Docker — "Docker not found", "Docker daemon not reachable",

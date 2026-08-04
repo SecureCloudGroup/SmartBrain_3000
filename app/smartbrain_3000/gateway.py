@@ -2,7 +2,7 @@
 
 The app routes all model calls through Bifrost at ``SMARTBRAIN_LLM_GATEWAY_URL``.
 A small capability -> "provider/model" map lets callers ask for a capability
-(e.g. "fast_chat") instead of a concrete model id; an explicit model id always
+(e.g. "chat") instead of a concrete model id; an explicit model id always
 wins. Provider configuration (keys, local endpoints) is managed separately.
 """
 
@@ -37,10 +37,13 @@ _MAX_EMBED_CHARS = 6000
 # Minimal default capability -> "provider/model" map. Made user-editable later
 # (settings UI). An explicit model id in the request overrides this.
 DEFAULT_ROUTES: dict[str, str] = {
-    "fast_chat": "openai/gpt-4o-mini",
     "chat": "openai/gpt-4o-mini",
-    "reasoning": "anthropic/claude-3-5-sonnet-latest",
 }
+
+# Capabilities the app actually consumes. load_routes filters saved routes against this
+# so an old install carrying retired capability keys (e.g. "fast_chat", "reasoning")
+# neither surfaces in the UI nor confuses a downstream `resolve_model` lookup.
+KNOWN_CAPABILITIES: frozenset[str] = frozenset({"chat", "embedding", "agent", "summarize"})
 
 # Shown (as a GatewayError) when a request exceeds its timeout — usually a cold local
 # model still loading. Clearer than a raw httpx timeout or bifrost's generic wording.
@@ -177,10 +180,13 @@ def load_routes(conn) -> dict[str, str]:
 
     Falls back to ``DEFAULT_ROUTES`` for any capability the user hasn't set, so a
     fresh install still resolves a model. Malformed stored JSON is ignored.
+    Stored keys outside ``KNOWN_CAPABILITIES`` (retired capability names left over
+    from earlier installs) are silently dropped so they can't leak into the UI.
     """
     from . import db  # local import: db has no gateway dependency (avoids any cycle)
 
     assert conn is not None, "conn required to load routes"
+    assert KNOWN_CAPABILITIES, "known-capability allowlist must be non-empty"
     routes = dict(DEFAULT_ROUTES)
     raw = db.meta_get(conn, _ROUTES_META_KEY)
     if not raw:
@@ -191,7 +197,7 @@ def load_routes(conn) -> dict[str, str]:
         return routes  # corrupt config — fall back to defaults rather than fail a chat
     if isinstance(stored, dict):
         for cap, model in stored.items():
-            if isinstance(cap, str) and isinstance(model, str) and model:
+            if isinstance(cap, str) and cap in KNOWN_CAPABILITIES and isinstance(model, str) and model:
                 routes[cap] = model
     return routes
 

@@ -1,9 +1,10 @@
 """Model discovery + capability routing API.
 
 ``/api/models`` returns the gateway's live catalog (dynamic — no hardcoded
-model lists). Capability routing (which model serves chat / reasoning /
-embeddings) is persisted in the ``meta`` table and read back by the chat, agent,
-and scheduler paths. All endpoints require the app to be unlocked.
+model lists). Capability routing (which model serves chat, background agent
+turns, embeddings, and document summaries) is persisted in the ``meta`` table
+and read back by the chat, agent, and scheduler paths. All endpoints require
+the app to be unlocked.
 """
 
 from __future__ import annotations
@@ -22,13 +23,11 @@ router = APIRouter()
 
 _LOCAL_PROVIDERS = ("ollama", "mlx")
 
-# Capability -> human label for the routing UI. Keys mirror gateway.DEFAULT_ROUTES,
-# plus "agent" — a background/scheduled-turn override with NO built-in default (so it
-# stays absent from DEFAULT_ROUTES); when unset the agent path falls back to "chat".
+# Capability -> human label for the routing UI. Every key must be one the app
+# actually consumes (gateway.KNOWN_CAPABILITIES) — a label without a consumer would
+# render a routing slot that does nothing, which is exactly the trap we just removed.
 CAPABILITY_LABELS = {
     "chat": "Chat",
-    "fast_chat": "Fast chat",
-    "reasoning": "Reasoning",
     "agent": "Agent tasks (schedules)",
     "embedding": "Embedding (semantic search)",
     # Bulk document summarization (the background summary tree). No built-in default:
@@ -36,6 +35,9 @@ CAPABILITY_LABELS = {
     # summary from an hours-long local trickle into minutes.
     "summarize": "Document summaries",
 }
+assert set(CAPABILITY_LABELS).issubset(gateway.KNOWN_CAPABILITIES), (
+    "every routing label must map to a capability the app actually consumes"
+)
 
 
 class RoutesBody(BaseModel):

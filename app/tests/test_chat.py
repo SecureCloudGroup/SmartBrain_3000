@@ -18,7 +18,7 @@ _CANNED = {
 
 
 def test_resolve_model_known() -> None:
-    assert gateway.resolve_model("fast_chat") == "openai/gpt-4o-mini"
+    assert gateway.resolve_model("chat") == "openai/gpt-4o-mini"
 
 
 def test_resolve_model_unknown_is_none() -> None:
@@ -64,7 +64,7 @@ def test_chat_when_unlocked_returns_completion(client: TestClient, monkeypatch) 
     monkeypatch.setattr(gateway, "chat", lambda messages, model: _CANNED)
     r = client.post(
         "/api/chat",
-        json={"messages": [{"role": "user", "content": "hi"}], "capability": "fast_chat"},
+        json={"messages": [{"role": "user", "content": "hi"}], "capability": "chat"},
     )
     assert r.status_code == 200
     assert r.json() == _CANNED
@@ -105,7 +105,7 @@ def test_chat_strips_extra_fields(client: TestClient, monkeypatch) -> None:
     )
     r = client.post(
         "/api/chat",
-        json={"messages": [{"role": "user", "content": "hi"}], "capability": "fast_chat"},
+        json={"messages": [{"role": "user", "content": "hi"}], "capability": "chat"},
     )
     assert r.status_code == 200
     assert r.json() == {"id": "x", "choices": []}  # envelope dropped
@@ -120,7 +120,7 @@ def test_chat_provider_error_surfaces_message(client: TestClient, monkeypatch) -
     monkeypatch.setattr(gateway, "chat", boom)
     r = client.post(
         "/api/chat",
-        json={"messages": [{"role": "user", "content": "hi"}], "capability": "fast_chat"},
+        json={"messages": [{"role": "user", "content": "hi"}], "capability": "chat"},
     )
     assert r.status_code == 502
     assert r.json()["detail"] == "Incorrect API key provided"

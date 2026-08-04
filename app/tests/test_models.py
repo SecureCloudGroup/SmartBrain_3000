@@ -83,10 +83,10 @@ def test_routes_roundtrip_and_merge(tmp_path) -> None:
     conn = db.open_db(tmp_path / "r.duckdb")
     db.run_migrations(conn)  # creates the meta table
     assert gateway.load_routes(conn) == gateway.DEFAULT_ROUTES  # defaults when unset
-    gateway.save_routes(conn, {"chat": "gemini/gemini-2.5-flash"})
+    gateway.save_routes(conn, {"chat": "gemini/gemini-2.5-flash", "agent": "openai/gpt-4o"})
     merged = gateway.load_routes(conn)
     assert merged["chat"] == "gemini/gemini-2.5-flash"
-    assert merged["reasoning"] == gateway.DEFAULT_ROUTES["reasoning"]  # untouched cap keeps default
+    assert merged["agent"] == "openai/gpt-4o"  # a persisted extra capability layers over defaults
 
 
 def test_load_routes_corrupt_json_falls_back(tmp_path) -> None:
@@ -94,6 +94,22 @@ def test_load_routes_corrupt_json_falls_back(tmp_path) -> None:
     db.run_migrations(conn)  # creates the meta table
     db.meta_set(conn, "model_routes", "{not valid json")
     assert gateway.load_routes(conn) == gateway.DEFAULT_ROUTES
+
+
+def test_load_routes_drops_retired_capabilities(tmp_path) -> None:
+    """A saved-routes blob left over from before the 'fast_chat'/'reasoning' slots were removed
+    must load without crashing and must not leak those retired keys back to the UI. The retired
+    keys are ignored; a legitimate capability saved alongside them still comes through."""
+    import json as _json
+
+    conn = db.open_db(tmp_path / "r3.duckdb")
+    db.run_migrations(conn)
+    stored = {"fast_chat": "openai/gpt-4o-mini", "reasoning": "anthropic/claude-3-5-sonnet-latest",
+              "chat": "gemini/gemini-2.5-flash"}
+    db.meta_set(conn, "model_routes", _json.dumps(stored))  # pre-migration on-disk shape
+    loaded = gateway.load_routes(conn)
+    assert "fast_chat" not in loaded and "reasoning" not in loaded  # stale keys dropped
+    assert loaded["chat"] == "gemini/gemini-2.5-flash"  # legitimate route still applied
 
 
 def test_context_lengths_roundtrip_and_validate(tmp_path) -> None:
