@@ -485,6 +485,10 @@ def test_uses_task_prefixes_matches_nomic_only() -> None:
     assert gateway.uses_task_prefixes("ollama/nomic-embed-text:v1.5") is True
     assert gateway.uses_task_prefixes("ollama/nomic-embed-text") is True
     assert gateway.uses_task_prefixes("mlxe/nomic-embed-text-v1.5") is True  # any provider
+    # modernbert-embed is trained from the Nomic Embed recipe (same prefixes) — and it is
+    # the model oMLX installs actually route embedding to, so missing it here would leave
+    # the flagship local config un-prefixed.
+    assert gateway.uses_task_prefixes("mlx/nomicai-modernbert-embed-base-bf16") is True
     assert gateway.uses_task_prefixes("ollama/mxbai-embed-large:latest") is False
     assert gateway.uses_task_prefixes("mlx/bge-m3-mlx-fp16") is False
     assert gateway.uses_task_prefixes("openai/text-embedding-3-small") is False
@@ -495,6 +499,7 @@ def test_embedding_scheme_marks_nomic_and_leaves_others_unchanged() -> None:
     # and '#tp1' (prefixed) vectors land in different (model, dim) blocks, so a prefixed
     # query can never silently fuse against a non-prefixed passage.
     assert gateway.embedding_scheme("ollama/nomic-embed-text:v1.5") == "ollama/nomic-embed-text:v1.5#tp1"
+    assert gateway.embedding_scheme("mlx/nomicai-modernbert-embed-base-bf16") == "mlx/nomicai-modernbert-embed-base-bf16#tp1"
     assert gateway.embedding_scheme("ollama/mxbai-embed-large:latest") == "ollama/mxbai-embed-large:latest"
     assert gateway.embedding_scheme("openai/text-embedding-3-small") == "openai/text-embedding-3-small"
 
