@@ -75,8 +75,9 @@ phone on your network you need HTTPS with a cert your phone trusts:
      docker compose -f compose/docker-compose.yml -f compose/docker-compose.lan.yml up -d
    ```
 
-mDNS (`.local` discovery), QR pairing, and remote access (WireGuard) are the next
-steps — see [`docs/08-remote-access.md`](../docs/08-remote-access.md).
+Phone remote access (QR + pairing code over WebRTC) ships in the app — Settings →
+Remote access, see [`docs/08-remote-access.md`](../docs/08-remote-access.md). WireGuard
+remains a compose-level alternative; mDNS (`.local` discovery) is a possible future step.
 
 **Updating:** `git pull` for newer code, then `install.py update` (rebuilds the
 image and restarts). Back up first in the app — Settings → Account & Data →
@@ -107,5 +108,6 @@ database. Stop SmartBrain from its menu first.
 - **Local models** (Ollama / Apple MLX) run on the *host*; install them yourself
   and wire them in **Settings → Local models**. The app reaches them via
   `host.docker.internal`.
-- **Mobile (HTTPS via a local CA + mDNS) and remote access (WireGuard)** are a
-  later, device-dependent step and are not configured here.
+- **Phone access** is configured in the app, not here: Settings → Remote access
+  pairs a phone over WebRTC (see [`docs/08-remote-access.md`](../docs/08-remote-access.md)).
+  The LAN/HTTPS path (local CA) and WireGuard are optional from-source alternatives.

@@ -70,5 +70,6 @@ host operating system or physical access to the user's machine.
 
 ## Supported versions
 
-SmartBrain_3000 is in early development. Only the latest `main` is supported;
-security fixes land there.
+SmartBrain_3000 is in early development. Only the latest release is supported:
+security fixes land on `main` and ship in the next release, and installed apps
+update themselves to it. There are no maintained older release lines.
