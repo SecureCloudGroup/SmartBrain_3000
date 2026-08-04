@@ -38,7 +38,9 @@ _MAX_EMBED_CHARS = 6000
 # passages, "search_query: " on queries) — sending raw text hurts retrieval measurably
 # (2026-07-24 benchmark). Match on the tail (the part after 'provider/') so any provider
 # routing to a nomic-embed-text variant picks up the convention.
-_TASK_PREFIX_MODELS: tuple[str, ...] = ("nomic-embed-text",)
+# modernbert-embed is trained from the Nomic Embed recipe and expects the same prefixes —
+# and it is a live config: oMLX installs route embedding to nomicai-modernbert-embed-base.
+_TASK_PREFIX_MODELS: tuple[str, ...] = ("nomic-embed-text", "modernbert-embed")
 _TASK_PREFIXES: dict[str, str] = {
     "document": "search_document: ",
     "query": "search_query: ",
