@@ -563,7 +563,9 @@ def test_gateway_embed_prefix_survives_truncation() -> None:
 
 
 def test_gateway_embed_rejects_unknown_task() -> None:
-    handler = lambda req: httpx.Response(200, json={"data": [{"embedding": [0.1]}]})
+    def handler(req):
+        return httpx.Response(200, json={"data": [{"embedding": [0.1]}]})
+
     with _mock(handler) as client, pytest.raises(AssertionError):
         gateway.embed("hi", "ollama/nomic-embed-text:v1.5", task="bogus", client=client)
 
