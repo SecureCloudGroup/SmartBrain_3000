@@ -34,8 +34,8 @@ installed, so it does **not** test the true cold start (no Docker) — do that o
 ## What you need to set up
 
 - **A clean environment per OS you support** — a fresh macOS VM/account, a clean Windows VM, optionally
-  Linux. Each exercises a *different* install path (Homebrew / winget+Scoop / Docker one-liner), so they
-  are genuinely different tests, not repeats.
+  Linux. Each exercises a *different* install path (Homebrew / Scoop / Docker one-liner —
+  plus winget once it is re-published), so they are genuinely different tests, not repeats.
 - **Two environments for the Vault test** — sharing needs a "you" and a "friend": two VMs, or two OS
   user accounts, each with its **own passphrase**.
 - **A phone** for the mobile-pairing test.
@@ -57,9 +57,9 @@ record time taken and every point of friction (see [Recording findings](#recordi
 2. Follow the install command shown for your OS — and **nothing else** (no docs, no memory).
 3. Launch it (open the app / go to `http://localhost:33000`).
 
-**Watch for:** a security warning (Gatekeeper/SmartScreen — there should be **none** via brew/winget/
-scoop); whether Docker is required and, if it isn't installed, whether you're *told* or just left with
-an error; how many minutes until the app opens.
+**Watch for:** a security warning (Gatekeeper/SmartScreen — there should be **none** via brew/scoop,
+nor via winget once it is live); whether Docker is required and, if it isn't installed, whether you're
+*told* or just left with an error; how many minutes until the app opens.
 **Deliberately run the no-Docker case on at least one VM** — that is the real cold start.
 
 ### Stage 1 · First-run setup
@@ -133,7 +133,7 @@ when │ what they were trying to do │ what confused or broke │ severity
 | Date | OS / how installed | Persona | S0 | S1 | S2 | S3 | S4 | S5 | Blockers | Notes |
 |---|---|---|---|---|---|---|---|---|---|---|
 | | macOS / Homebrew | primary | | | | | | | | |
-| | Windows / winget | primary | | | | | | | | |
+| | Windows / winget (once re-published) | primary | | | | | | | | |
 | | Windows / Scoop | technical | | | | | | | | |
 | | Linux / Docker | technical | | | | | | | | |
 

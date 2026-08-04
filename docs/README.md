@@ -49,7 +49,7 @@ Everything after that is optional and can be read when you need it.
 | Run a prompt on a timer | [Using SmartBrain_3000 → Schedules](03-features.md#schedules) |
 | Connect Gmail | [Using SmartBrain_3000 → Email](03-features.md#email-gmail) |
 | Change what the assistant knows about you | [Using SmartBrain_3000 → Memory](03-features.md#memory) |
-| See what your cloud models cost | [Using SmartBrain_3000 → Usage & cost](03-features.md) |
+| See what your cloud models cost | [Using SmartBrain_3000 → Usage & cost](03-features.md#usage--cost) |
 | Share documents with someone | [Vaults](04-vaults.md) |
 | Let Claude Desktop read your notes | [MCP](05-mcp.md) |
 | Back up, restore, or move to a new machine | [Backup & recovery](06-backup-recovery.md) |
