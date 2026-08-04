@@ -106,9 +106,6 @@ Two more things worth knowing:
   model into minutes. Point it at a cloud model and your documents are sent to that provider
   as the tree is built — keep it on a local model if that matters to you.
 
-The page also lists **Fast chat** and **Reasoning** slots. Nothing in the app requests them
-today, so setting them changes nothing.
-
 ### Model context length
 
 Under the routing table, **Model context length** tells SmartBrain how many tokens each

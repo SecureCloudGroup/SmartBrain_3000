@@ -2,7 +2,7 @@ import { getPublicKeyAsync, signAsync } from "@noble/ed25519";
 import { describe, expect, it } from "vitest";
 
 import { channelBinding, randomNonceB64, sdpFingerprint, verifyDesktopIdentity } from "./crypto";
-import { decodePairingFragment, encodePairingFragment, parsePairingPayload } from "./pairing";
+import { parsePairingPayload } from "./pairing";
 import { appendChunk, asResponse, b64ToBytes, bytesToB64, concatBytes, encodePing, encodeRequest, isChunkFrame, parseMessage, pingDead } from "./protocol";
 import { classifyCandidatePair } from "./candidate-pair";
 
@@ -84,14 +84,12 @@ describe("pairing payload", () => {
     signalingUrl: "wss://connect.example.org", desktopId: "desk1", iceServers: [{ urls: "stun:x:3478" }],
   };
 
-  it("round-trips through the QR fragment codec", () => {
-    const got = decodePairingFragment("#" + encodePairingFragment(payload));
-    expect(got).toEqual(payload);
+  it("parses a well-formed payload verbatim (round-trips through JSON)", () => {
+    expect(parsePairingPayload(JSON.stringify(payload))).toEqual(payload);
   });
 
   it("rejects payloads missing required fields", () => {
     expect(() => parsePairingPayload(JSON.stringify({ deviceId: "x" }))).toThrow();
-    expect(() => decodePairingFragment("#")).toThrow();
   });
 });
 

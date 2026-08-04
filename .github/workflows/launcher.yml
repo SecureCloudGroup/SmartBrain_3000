@@ -113,12 +113,18 @@ jobs:
           path: |
             launcher/build/SmartBrain-macos.zip
             launcher/build/SmartBrain-macos.zip.sha256
+      - name: Ensure the release exists (tags only)
+        if: github.ref_type == 'tag'
+        uses: ./.github/actions/ensure-release
+        with:
+          tag: ${{ github.ref_name }}
+        env:
+          GH_TOKEN: ${{ github.token }}
       - name: Attach to the release (tags only)
         if: github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${{ github.ref_name }}" --generate-notes || true
           gh release upload "${{ github.ref_name }}" launcher/build/SmartBrain-macos.zip launcher/build/SmartBrain-macos.zip.sha256 --clobber
 
   windows:
@@ -148,13 +154,19 @@ jobs:
           path: |
             launcher/build/SmartBrain-windows.zip
             launcher/build/SmartBrain-windows.zip.sha256
+      - name: Ensure the release exists (tags only)
+        if: github.ref_type == 'tag'
+        uses: ./.github/actions/ensure-release
+        with:
+          tag: ${{ github.ref_name }}
+        env:
+          GH_TOKEN: ${{ github.token }}
       - name: Attach to the release (tags only)
         if: github.ref_type == 'tag'
-        shell: bash # so `|| true` works if the macOS job created the release first
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${{ github.ref_name }}" --generate-notes || true
           gh release upload "${{ github.ref_name }}" launcher/build/SmartBrain-windows.zip launcher/build/SmartBrain-windows.zip.sha256 --clobber
 
   sign:
@@ -212,6 +224,22 @@ jobs:
           gh release upload "${{ github.ref_name }}" \
             dist/SmartBrain-macos.zip.sha256.minisig \
             dist/SmartBrain-windows.zip.sha256.minisig --clobber
+
+      # Concurrent `gh release create` calls have produced two release objects for one tag
+      # before (v0.8.6, v0.8.14) — assets then scatter across both, and users can land on
+      # the empty one. ensure-release narrows that race; this catches whatever slips through,
+      # while a duplicate is still cheap to delete and re-run.
+      - name: Exactly one release object must exist for this tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          n=$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+                --jq "[.[] | select(.tag_name==\"${GITHUB_REF_NAME}\")] | length")
+          if [ "$n" != "1" ]; then
+            echo "expected exactly one release for ${GITHUB_REF_NAME}, found $n —" >&2
+            echo "delete the duplicate (gh release list --json name,tagName,id) and re-run this job." >&2
+            exit 1
+          fi
 
   packages:
     name: bump package managers (tags only)
