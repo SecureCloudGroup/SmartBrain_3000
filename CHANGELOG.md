@@ -11,6 +11,13 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Changed
+- The web app now builds the same bytes from the same sources: its build id is a content
+  hash instead of a build-time timestamp, and CI fails when the committed bundle no longer
+  matches the source next to it — the guard for the stale-interface class of bug fixed in
+  0.8.18. The first update after this change reloads open tabs once as the cache id rolls
+  over.
+
 ### Removed
 - **Dead surface off the pages that carry it.** Settings → Model routing no longer lists
   **Fast chat** and **Reasoning** slots — nothing in the app read them, so setting either
@@ -18,6 +25,38 @@ to know when a release changes behavior.
   loads fine; the retired keys are silently dropped rather than resurfacing. The pairing
   page has also lost its leftover QR-payload decode path: the Desktop stopped emitting
   payload QRs when pairing moved to the 6-character code, so that branch could never fire.
+
+## [0.8.18] - 2026-08-03
+
+### Fixed
+- **"Always allow" works now.** Approving an action with "Always allow" recorded nothing,
+  so the same action kept coming back — and the interface built for managing it had never
+  actually shipped inside the app bundle. Remembered approvals now stick, and they are
+  deliberately narrow: only reviewable tools with fixed destinations qualify, so a tool
+  whose target the model composes on the fly (fetching an arbitrary URL, ingesting from
+  an arbitrary address) asks every time, always. The Activity page lists everything you
+  have allowed, each with a **Stop allowing** button.
+
+## [0.8.17] - 2026-08-03
+
+### Security
+- **Launch-readiness pass (Phase 0)** across the security core, the hosted broker,
+  release signing, and onboarding. The user-visible piece: release artifacts are now
+  signed (Ed25519 / minisign) and the desktop app verifies the signature before
+  installing any self-update, with the public key compiled into the app. Verification
+  instructions for stock `minisign` are in the security policy.
+
+## [0.8.16] - 2026-08-03
+
+- Identical to 0.8.15 — the tag points at the same commit; no changes.
+
+## [0.8.15] - 2026-08-02
+
+### Fixed
+- The doctor scopes its process cross-check to the install being examined, instead of
+  flagging processes that belong to a different SmartBrain install on the same machine.
+
+## [0.8.14] - 2026-08-02
 
 ### Fixed
 - **The doctor was diagnosing a product that no longer exists.** `installer/install.py
@@ -42,6 +81,26 @@ to know when a release changes behavior.
   mentioned in exactly two places: on the Intel Macs and ARM Linux machines that genuinely
   run it, and when a leftover container really is holding the port SmartBrain needs — in
   which case removing it is offered, with the reassurance that Docker volumes are untouched.
+- The Restore card on Settings → Account & Data told users to run a restart command that
+  does nothing on the install they actually have; its instructions now match how the app
+  runs.
+
+### Changed
+- Documentation completeness pass: the guides now document every feature, the landing page
+  shows what SmartBrain actually does with each feature linked to its documentation, and
+  the Linux story is told truthfully (Linux runs via Docker and has no desktop app).
+
+## [0.8.13] - 2026-08-01
+
+### Added
+- **Docker-free by default, with automatic data migration.** On Apple Silicon Macs and
+  64-bit Windows the desktop app now assembles and runs SmartBrain natively — no Docker
+  required. An existing Docker install's data is copied across on the first native start
+  (copied, never moved: the Docker volumes stay untouched as a fallback), and
+  `SMARTBRAIN_NATIVE=0` forces the Docker path for one run.
+
+### Changed
+- The documentation now describes the Docker-free product instead of the Docker-only one.
 
 ### Fixed
 - **`brew uninstall --zap` could delete your knowledge base.** The cask removed the whole
@@ -52,6 +111,8 @@ to know when a release changes behavior.
   bookkeeping, and the gateway config that holds provisioned provider keys) and never
   touches your data.
 
+## [0.8.12] - 2026-08-01
+
 ### Fixed
 - **A clean install could refuse to start in Docker-free mode.** If SmartBrain had been
   started once under Docker — which happens the moment you install it — the empty data
@@ -61,11 +122,15 @@ to know when a release changes behavior.
   fresh. A copy that genuinely fails is still reported, because that one might mean your
   data is there and unreachable.
 
+## [0.8.11] - 2026-07-31
+
 ### Fixed
 - The menu-bar version line no longer lags behind an update it just installed: for up to
   half a minute it could read "Running (updated)" above the *old* version number, which is
   precisely the confusion the line exists to prevent. It now refreshes the moment a start
-  or an install finishes.
+  or an install finishes. The launcher's test suite now runs in CI.
+
+## [0.8.10] - 2026-07-31
 
 ### Added
 - **Updates now appear in SmartBrain itself, with one button.** A waiting update used to
@@ -88,6 +153,8 @@ to know when a release changes behavior.
   into an empty catch — which skipped the lines after it, including the banner. The banner
   is back, the timer it introduced no longer outlives the page, and that catch now reports
   what it caught instead of hiding it.
+
+## [0.8.9] - 2026-07-31
 
 ### Added
 - A **stress suite** that shakes the pieces together instead of holding them still:
@@ -129,6 +196,8 @@ to know when a release changes behavior.
   server's own logs. It now appears in SmartBrain's log with what to check, at most once
   every fifteen minutes.
 
+## [0.8.8] - 2026-07-30
+
 ### Fixed
 - **A busy model server can no longer cost the assistant its tools.** When the local
   model server was briefly unavailable — it answers "busy" for the seconds it spends
@@ -147,6 +216,10 @@ to know when a release changes behavior.
   indexer now steps aside the moment a chat arrives and resumes on the next pass (the
   work was always idempotent). It already yielded to a chat *in flight*; what it missed
   was a chat that arrived after it started.
+
+## [0.8.7] - 2026-07-29
+
+### Fixed
 - **Native supervision now verifies instead of trusts.** Two colliding starts (a
   relaunch that didn't stop the running stack, then the first auto-update install)
   exposed the class: a health check passes whenever *something* answers the port, so

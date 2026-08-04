@@ -1,0 +1,30 @@
+# Replaces the `gh release create "$TAG" --generate-notes || true` idiom that used to run in
+# every job that attaches assets. That idiom had two real failure modes, both observed:
+#   - concurrent creates raced GitHub into TWO release objects for one tag (v0.8.6, v0.8.14),
+#     scattering assets across them;
+#   - `|| true` swallowed genuine failures, so a job could "succeed" having attached nothing.
+# This action converges concurrent callers onto one release object and fails loudly when the
+# release truly cannot be made. Callers must set GH_TOKEN on the calling step.
+name: Ensure the tag's release exists
+description: Create the GitHub Release for a tag exactly once, tolerating concurrent creators.
+inputs:
+  tag:
+    description: The tag whose release must exist
+    required: true
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        TAG: ${{ inputs.tag }}
+      run: |
+        set -eu
+        # View-first, then a tolerant create, then re-view: whichever concurrent job loses
+        # the create race finds the winner's release on its next look.
+        for i in 1 2 3; do
+          if gh release view "$TAG" --json id >/dev/null 2>&1; then exit 0; fi
+          if gh release create "$TAG" --generate-notes >/dev/null 2>&1; then exit 0; fi
+          sleep "$i"
+        done
+        # Loud failure — a missing release means every upload after this would be lost.
+        gh release view "$TAG" --json id >/dev/null

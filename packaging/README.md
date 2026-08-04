@@ -12,8 +12,9 @@ so we don't lead with it.
 | winget (Windows) | `winget/SecureCloudGroup.SmartBrain.*.yaml` | `winget install SecureCloudGroup.SmartBrain` | `microsoft/winget-pkgs` (PR, they review) |
 | Scoop (Windows) | `scoop/smartbrain.json` | `scoop install securecloudgroup/smartbrain` | your bucket repo `SecureCloudGroup/scoop-bucket` |
 
-All three are pinned to the current release and its SHA-256. They only work once the matching
-GitHub Release exists (its assets are what they download).
+The copies committed here are **placeholder templates** — `packaging/refresh.py` rewrites them
+with the shipping version and its SHA-256 during the release run (see the warning below). A
+manifest only works once the matching GitHub Release exists (its assets are what it downloads).
 
 ## First-time publish
 
@@ -29,13 +30,16 @@ signed, so this is all it needs to open on first click).
 > without running `refresh.py` for the version you are shipping first, or you will point
 > people at an old release.
 
-**winget** — the easiest route is Microsoft's `wingetcreate`:
+**winget** — first run `refresh.py` for the release you are shipping (the committed manifests
+are placeholders; submitting them as-is publishes an old version to real users). Then the
+easiest route is Microsoft's `wingetcreate`:
 ```
 wingetcreate submit packaging/winget --token <gh-token>
 ```
 or fork `microsoft/winget-pkgs` and open a PR placing the three files under
-`manifests/s/SecureCloudGroup/SmartBrain/0.4.0/`. Their bot validates (installs it in a sandbox) and
-a maintainer merges. No code-signing is required for a `.zip`/`.exe` — only MSIX must be signed.
+`manifests/s/SecureCloudGroup/SmartBrain/<version>/`. Their bot validates (installs it in a
+sandbox) and a maintainer merges. No code-signing is required for a `.zip`/`.exe` — only MSIX
+must be signed.
 
 **Scoop** — create a public repo `SecureCloudGroup/scoop-bucket` with `smartbrain.json` at
 `bucket/smartbrain.json`. Users add it with `scoop bucket add securecloudgroup https://github.com/SecureCloudGroup/scoop-bucket`.

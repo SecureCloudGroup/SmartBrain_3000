@@ -86,17 +86,20 @@ def main() -> int:
             print("   ", kit["recovery_key"])
             print("=" * 72)
 
-        # Full-sync docs: title == filename. The instance exists ONLY to publish docs/, so
-        # anything not in the current file set (renamed/removed upstream) is deleted — else a
-        # rename would ship both the old and new doc. No content-update endpoint exists, so a
-        # changed doc is delete + re-add; the vault attach below re-links the fresh ids.
+        # Full-sync docs: title = the doc's H1 (it becomes the row subscribers see in their
+        # Knowledge list — "Getting started", not "01-getting-started.md"). The instance
+        # exists ONLY to publish docs/, so anything not in the current file set
+        # (renamed/removed upstream) is deleted — else a rename would ship both the old and
+        # new doc. No content-update endpoint exists, so a changed doc is delete + re-add;
+        # the vault attach below re-links the fresh ids.
         for d in api("GET", "/api/kb")["documents"]:
             api("DELETE", f"/api/kb/{d['id']}")
         doc_ids = []
         for path in DOCS:
-            doc_ids.append(api("POST", "/api/kb", {
-                "title": path.name, "content": path.read_text(encoding="utf-8"),
-            })["id"])
+            text = path.read_text(encoding="utf-8")
+            title = next((ln[2:].strip() for ln in text.splitlines() if ln.startswith("# ")),
+                         path.name)
+            doc_ids.append(api("POST", "/api/kb", {"title": title, "content": text})["id"])
         print(f"synced {len(doc_ids)} docs into the publisher instance")
 
         vaults = api("GET", "/api/vaults")["vaults"]
