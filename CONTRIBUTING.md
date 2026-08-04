@@ -61,6 +61,12 @@ cd compose && docker compose up -d --build
 # app on http://localhost:33000
 ```
 
+**Version fields** — the `version` in `app/pyproject.toml` and `web/package.json` is not the
+product version and is deliberately never bumped. The running version comes from the release
+tag: baked into the Docker image as `SMARTBRAIN_VERSION`, written to the native install's
+`VERSION` file, and compiled into the launcher via `-X main.launcherVersion`. `/api/health`
+reports it and the UI displays it. Don't "fix" those two files.
+
 ## Pull requests
 
 1. Branch from `main`.
