@@ -46,8 +46,9 @@ There is no paid Apple/Microsoft signing cert. That's fine because of how it's d
 - **macOS** binaries are **ad-hoc signed** (`codesign -s -`) — free, needs no Apple account, and is all
   Apple Silicon requires to run. The app ships via **Homebrew**, which installs without applying the
   quarantine flag, so Gatekeeper never shows the "unidentified developer" wall.
-- **Windows** ships via **winget / Scoop**, which don't apply Mark-of-the-Web, so SmartScreen's
-  "Windows protected your PC" prompt never fires for an unsigned exe.
+- **Windows** ships via **Scoop** (winget pending re-publication), which doesn't apply
+  Mark-of-the-Web, so SmartScreen's "Windows protected your PC" prompt never fires for an
+  unsigned exe.
 
 A browser-downloaded `.dmg`/`.exe` is the *one* channel that would still warn — so we don't use it.
 
