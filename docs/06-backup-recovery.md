@@ -124,7 +124,7 @@ passphrase changes. A passphrase must be at least 8 characters.
 There is **no server and no reset**. Use your **Recovery Key** from the Emergency
 Kit you saved during setup:
 
-1. Lock / reopen the app and choose **Unlock with Recovery Key**.
+1. Lock / reopen the app and choose **Use recovery key**.
 2. Enter the key exactly as shown (dashes and letter case don't matter).
 3. Once in, go to **Settings → Account & Data → Change passphrase** and use
    **"Forgot your current passphrase… Set a new one"** — that path sets a new

@@ -150,8 +150,9 @@ A quick path from zero to seeing what SmartBrain does:
 
 ## Locking and unlocking
 
-- Use **Lock** (top right) to drop the key from memory — your data is sealed until
-  you unlock again. Locking also clears your provider keys from the gateway.
+- Use **Lock**, at the bottom of the sidebar (under **More** on a phone), to drop the key
+  from memory — your data is sealed until you unlock again. Locking also clears your
+  provider keys from the gateway.
 - **Unlock** with your passphrase. Forgot it? Choose **Use recovery key**
   and enter the key from your Emergency Kit (dashes and letter case don't matter).
 
