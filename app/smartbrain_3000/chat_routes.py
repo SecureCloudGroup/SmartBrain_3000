@@ -8,7 +8,7 @@ Bifrost needs are managed separately (provisioned on unlock).
 from __future__ import annotations
 
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, HTTPException, Request
@@ -96,7 +96,7 @@ def _time_line(conn=None) -> dict:
             zone = ZoneInfo(name) if name else None
         except Exception:
             zone = None  # unknown/corrupt zone name -> server-local fallback
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     local = now.astimezone(zone)  # zone=None means the server's own zone
     hour = local.hour % 12 or 12  # portable 12-hour clock (%-I breaks on Windows)
     stamp = (f"{local.strftime('%A, %B')} {local.day}, {local.year}, "

@@ -90,6 +90,21 @@ to know when a release changes behavior.
   delete confirmation, the sealed re-key warning, and the "you republished
   with no changes" nudge — on desktop and phone alike.
 
+### Changed
+- **The first download shows its progress.** Assembling SmartBrain fetches
+  ~400 MB, and the tray used to sit on a bare "Downloading SmartBrain…" for
+  minutes with no sign of life. The status line now names each piece and how
+  far along it is — *python 43%*, *app 12%*, *gateway 87%* — during the first
+  install and app updates alike.
+- Ruff upgraded to 0.16 deliberately, and the pin is now read from a single
+  source. The old `<0.16` pin was correct — 0.16 promoted new default rules —
+  but CI hardcoded its own copy of the version, so a Dependabot bump to
+  `app/pyproject.toml` would show green while changing nothing CI ran (#191).
+  The 0.16 rule set is now triaged with an explicit `[tool.ruff.lint]` config
+  that records every deviation from defaults with a one-line rationale, and
+  both CI ruff invocations install ruff from the app's `[dev]` extra so the
+  pin in `app/pyproject.toml` is the only place it lives.
+
 ## [0.8.22] - 2026-08-05
 
 ### Changed

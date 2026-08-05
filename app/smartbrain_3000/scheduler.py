@@ -24,7 +24,18 @@ from concurrent.futures import ThreadPoolExecutor
 import duckdb
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-from . import agent, consent, docsummaries, gateway, ingest, search, selfreview, tools, usage, vault_sync
+from . import (
+    agent,
+    consent,
+    docsummaries,
+    gateway,
+    ingest,
+    search,
+    selfreview,
+    tools,
+    usage,
+    vault_sync,
+)
 from .approvals import ApprovalStore
 from .audit import AuditLog
 from .history import ChatHistory
@@ -367,7 +378,10 @@ def _grounded_messages(ctx, prompt: str) -> list[dict]:
     plus the user's profile/facts. Without it the model can log a status string as a
     fact or claim work no tool performed — exactly what an ungrounded schedule did.
     """
-    from .chat_routes import _base_system_prompt, _time_line  # lazy: keep the route<-domain edge off import time
+    from .chat_routes import (  # lazy: keep the route<-domain edge off import time
+        _base_system_prompt,
+        _time_line,
+    )
     assert ctx is not None, "tool context required"
     assert prompt, "prompt required"
     parts = [_base_system_prompt()]

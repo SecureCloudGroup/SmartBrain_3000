@@ -280,7 +280,7 @@ def http_json(url: str, timeout: float = _HTTP_TIMEOUT, headers: dict[str, str] 
         req = urllib.request.Request(candidate, headers=headers or {}, method=method)
         ctx = ssl._create_unverified_context() if candidate.startswith("https") else None
         try:
-            with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:  # noqa: S310 - fixed loopback URL
+            with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
                 raw = resp.read(1 << 20)
                 status = resp.status
         except urllib.error.HTTPError as exc:  # answered, just not with 200 — that IS an answer
@@ -1194,7 +1194,7 @@ def _response_headers(url: str) -> dict[str, str]:
     for candidate in (url, url.replace("http://", "https://", 1)):
         ctx = ssl._create_unverified_context() if candidate.startswith("https") else None
         try:
-            with urllib.request.urlopen(candidate, timeout=_HTTP_TIMEOUT, context=ctx) as resp:  # noqa: S310 - fixed loopback URL
+            with urllib.request.urlopen(candidate, timeout=_HTTP_TIMEOUT, context=ctx) as resp:
                 return {k.lower(): v for k, v in resp.headers.items()}
         except Exception:
             continue
@@ -1485,7 +1485,7 @@ def apply_fixes(sections: list[Section]) -> None:
     for finding in offered:  # bounded by the number of findings
         fix = finding.fix
         assert fix is not None, "only findings with a fix reach here"
-        print("")
+        print()
         print(f"  {finding.title}")
         print(f"  -> {fix.label}")
         for line in fix.explain.splitlines():

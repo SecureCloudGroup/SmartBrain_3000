@@ -244,7 +244,7 @@ def _guarded_get(url: str, allowed_ct: tuple[str, ...], max_bytes: int,
             if not host:
                 raise FetchError("no host in URL")
             try:
-                parsed.port  # urlparse validates the port lazily, on ACCESS: a malformed one
+                parsed.port  # noqa: B018 - urlparse validates the port lazily, on ACCESS: a malformed one
             except ValueError:  # (":abc", ":99999") must be a refusal like any other, not a 500
                 raise FetchError("invalid port in URL") from None
             ip = _validated_ip(host)  # re-validated on every hop
@@ -319,7 +319,7 @@ def validate_public_url(url: str) -> None:
     if not host:
         raise FetchError("no host in URL")
     try:
-        parsed.port  # urlparse validates port lazily, on ACCESS — see _guarded_get
+        parsed.port  # noqa: B018 - urlparse validates port lazily, on ACCESS — see _guarded_get
     except ValueError:
         raise FetchError("invalid port in URL") from None
     try:

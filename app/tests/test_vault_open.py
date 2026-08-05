@@ -121,8 +121,8 @@ def test_sealed_to_open_flip_is_byte_identical_where_it_must_be() -> None:
          "vectors": [[1.0, 0.0], [0.0, 1.0]]},  # a vec object exercises vec-name identity too
         {"uid": "u2", "title": "Doc two", "content": "beta body", "meta": {}, "chunks": 1},
     ]
-    common = dict(store=store, vault_id=vault_id, name="Topic", description="desc", seq=7,
-                  docs=docs, embed_model="test-model")
+    common = {"store": store, "vault_id": vault_id, "name": "Topic", "description": "desc",
+              "seq": 7, "docs": docs, "embed_model": "test-model"}
     sealed = vault_format.pack(**common, vault_key=vault_key)  # mode defaults to sealed
     opened = vault_format.pack(**common, name_key=name_key, mode=vault_format.OPEN)
 
@@ -304,9 +304,9 @@ def test_a_signed_index_with_a_non_dict_row_is_a_clean_refusal() -> None:
 def test_open_export_is_byte_reproducible() -> None:
     store = _store()
     name_key = vault_format.new_vault_key()  # a persisted random K_name, as a born-open vault would use
-    kwargs = dict(store=store, vault_id="v1", name="V", description="", seq=1,
-                  docs=[{"uid": "u1", "title": "T", "content": "body", "meta": {}, "chunks": 1}],
-                  name_key=name_key, mode=vault_format.OPEN)
+    kwargs = {"store": store, "vault_id": "v1", "name": "V", "description": "", "seq": 1,
+              "docs": [{"uid": "u1", "title": "T", "content": "body", "meta": {}, "chunks": 1}],
+              "name_key": name_key, "mode": vault_format.OPEN}
     assert vault_format.pack(**kwargs) == vault_format.pack(**kwargs)
 
 

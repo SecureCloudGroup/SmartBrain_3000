@@ -6,7 +6,12 @@ import duckdb
 
 from smartbrain_3000 import db as dbmod
 from smartbrain_3000 import scheduler
-from smartbrain_3000.docsummaries import CHUNK_CHARS, DOC_IDX, SummaryStore, expected_chunks
+from smartbrain_3000.docsummaries import (
+    CHUNK_CHARS,
+    DOC_IDX,
+    SummaryStore,
+    expected_chunks,
+)
 from smartbrain_3000.secrets import gen_master_key
 
 

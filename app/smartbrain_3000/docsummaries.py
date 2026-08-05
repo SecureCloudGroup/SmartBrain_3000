@@ -59,7 +59,7 @@ class SummaryStore:
 
     @staticmethod
     def _aad(doc_id: str, idx: int) -> bytes:
-        return f"docsummary:{doc_id}:{idx}".encode("utf-8")
+        return f"docsummary:{doc_id}:{idx}".encode()
 
     # -- writes ---------------------------------------------------------------
     def put(self, doc_id: str, idx: int, text: str, content_len: int, model: str) -> None:

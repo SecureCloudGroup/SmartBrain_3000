@@ -100,7 +100,7 @@ def test_parse_request_strips_unsafe_headers() -> None:
 
 def test_upstream_failure_becomes_error_frame() -> None:
     class _Boom:
-        def request(self, *a, **k):  # noqa: ANN002, ANN003 - test stub
+        def request(self, *a, **k):
             raise RuntimeError("loopback down")
 
     out = webrtc_bridge.handle_frame({"id": "r7", "method": "GET", "path": "/api/health"}, _Boom())

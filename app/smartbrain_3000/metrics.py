@@ -84,7 +84,7 @@ class _TokenTally:
     ``usage`` block so the caller can record ONE turn_metrics row with the turn total.
     """
 
-    __slots__ = ("_inner", "prompt_tokens", "completion_tokens")
+    __slots__ = ("_inner", "completion_tokens", "prompt_tokens")
 
     def __init__(self, inner):
         self._inner = inner

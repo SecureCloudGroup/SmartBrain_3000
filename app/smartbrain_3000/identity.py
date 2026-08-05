@@ -18,7 +18,10 @@ from __future__ import annotations
 import base64
 
 from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
+from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+    Ed25519PrivateKey,
+    Ed25519PublicKey,
+)
 
 _PRIVKEY_SECRET = "webrtc:identity_ed25519"
 # A SECOND, separate signing identity, used to sign published vaults. Deliberately not the WebRTC
