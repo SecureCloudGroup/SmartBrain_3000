@@ -80,6 +80,13 @@ to know when a release changes behavior.
   delete confirmation, the sealed re-key warning, and the "you republished
   with no changes" nudge — on desktop and phone alike.
 
+### Changed
+- **The first download shows its progress.** Assembling SmartBrain fetches
+  ~400 MB, and the tray used to sit on a bare "Downloading SmartBrain…" for
+  minutes with no sign of life. The status line now names each piece and how
+  far along it is — *python 43%*, *app 12%*, *gateway 87%* — during the first
+  install and app updates alike.
+
 ## [0.8.22] - 2026-08-05
 
 ### Changed

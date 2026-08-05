@@ -6,10 +6,12 @@ package native
 import (
 	"archive/tar"
 	"archive/zip"
+	"bytes"
 	"compress/gzip"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -112,7 +114,7 @@ func harness(t *testing.T, version string) (Native, *[]string) {
 
 	calls := &[]string{}
 	n := New(t.TempDir())
-	n.Fetch = func(_ context.Context, url, dest string) error {
+	n.Fetch = func(_ context.Context, url, dest string, _ func(done, total int64)) error {
 		switch {
 		case strings.Contains(url, "python-build-standalone"):
 			return copyFile(pbsTar, dest)
@@ -240,6 +242,70 @@ func TestArchiveEscapeRefused(t *testing.T) {
 	writeZip(t, evilZip, map[string]string{"../escape.txt": "boo"})
 	if err := unzip(evilZip, filepath.Join(dir, "out2")); err == nil {
 		t.Fatal("zip path escape must be refused")
+	}
+}
+
+func TestProgressReaderReportsEachPercentOnce(t *testing.T) {
+	var got []int
+	r := newProgressReader(bytes.NewReader(make([]byte, 200)), 200,
+		func(done, total int64) { got = append(got, percent(done, total)) })
+	buf := make([]byte, 1) // two 1-byte reads per percent step — only the first may report
+	for {
+		if _, err := r.Read(buf); err == io.EOF {
+			break
+		}
+	}
+	if len(got) != 101 {
+		t.Fatalf("200 reads made %d reports, want 101 (0%%–100%%, once each)", len(got))
+	}
+	for i, pct := range got {
+		if pct != i {
+			t.Fatalf("report %d = %d%%, want %d%% (monotonic, no repeats)", i, pct, i)
+		}
+	}
+}
+
+func TestProgressReaderSilentWithoutContentLength(t *testing.T) {
+	for _, total := range []int64{0, -1} { // "no Content-Length" arrives as either
+		calls := 0
+		r := newProgressReader(strings.NewReader("some download body"), total,
+			func(int64, int64) { calls++ })
+		if _, err := io.Copy(io.Discard, r); err != nil {
+			t.Fatal(err)
+		}
+		if calls != 0 {
+			t.Fatalf("total=%d must report nothing, got %d calls", total, calls)
+		}
+	}
+}
+
+func TestProgressReaderClampsALyingContentLength(t *testing.T) {
+	last := -1
+	r := newProgressReader(bytes.NewReader(make([]byte, 150)), 100, // server said 100, sent 150
+		func(done, total int64) {
+			last = percent(done, total)
+			if last > 100 {
+				t.Fatalf("reported %d%% — must clamp at 100", last)
+			}
+		})
+	if _, err := io.Copy(io.Discard, r); err != nil {
+		t.Fatal(err)
+	}
+	if last != 100 {
+		t.Fatalf("final report = %d%%, want 100%%", last)
+	}
+}
+
+func TestProgressForNamesTheArtifactAndSurvivesNil(t *testing.T) {
+	n := New(t.TempDir())
+	if n.progressFor("python") != nil {
+		t.Fatal("no Progress sink must mean a nil per-fetch callback, not a live one")
+	}
+	gotArtifact, gotPct := "", -1
+	n.Progress = func(artifact string, pct int) { gotArtifact, gotPct = artifact, pct }
+	n.progressFor("app")(50, 200)
+	if gotArtifact != "app" || gotPct != 25 {
+		t.Fatalf(`got (%q, %d%%), want ("app", 25%%)`, gotArtifact, gotPct)
 	}
 }
 

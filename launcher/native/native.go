@@ -108,10 +108,17 @@ type Native struct {
 	Port int    // app port (loopback)
 
 	// Injectable side effects (tests replace these; production uses the defaults).
-	Fetch func(ctx context.Context, url, dest string) error            // download url -> dest file
-	Run   func(ctx context.Context, name string, args ...string) error // run a command to completion
-	Tick  time.Duration                                                // watchdog interval (tests shrink it)
-	PS    func(pid int) string                                         // a pid's command line ("" if unknown)
+	// Fetch's progress callback is optional — nil means download silently.
+	Fetch func(ctx context.Context, url, dest string, progress func(done, total int64)) error // download url -> dest file
+	Run   func(ctx context.Context, name string, args ...string) error                        // run a command to completion
+	Tick  time.Duration                                                                       // watchdog interval (tests shrink it)
+	PS    func(pid int) string                                                                // a pid's command line ("" if unknown)
+
+	// Progress, when set, hears how far each artifact's download is: the artifact's
+	// user-facing name ("python", "app", "gateway") and the whole percent fetched.
+	// Called from the downloading goroutine, at most once per percent step, and only
+	// when the server said how big the file is. Nil = the old silent behavior.
+	Progress func(artifact string, percent int)
 }
 
 // New returns a Native rooted beside the launcher's existing state dir.
@@ -175,7 +182,7 @@ func (n Native) Assemble(ctx context.Context, version string) error {
 	// 1) The Python runtime — pinned upstream asset, pinned sum.
 	pbsName := fmt.Sprintf("cpython-%s+%s-%s-install_only_stripped.tar.gz", pbsPython, pbsRelease, plat.pbsTriple)
 	pbsTar := filepath.Join(tmp, "pbs.tar.gz")
-	if err := n.fetchVerified(ctx, pbsBase+"/"+pbsRelease+"/"+pbsName, pbsTar, pbsSums[plat.pbsTriple]); err != nil {
+	if err := n.fetchVerified(ctx, pbsBase+"/"+pbsRelease+"/"+pbsName, pbsTar, pbsSums[plat.pbsTriple], "python"); err != nil {
 		return fmt.Errorf("runtime: %w", err)
 	}
 	if err := untarGz(pbsTar, tmp); err != nil { // yields tmp/python/
@@ -188,7 +195,7 @@ func (n Native) Assemble(ctx context.Context, version string) error {
 	whZip := filepath.Join(tmp, whName+".zip")
 	sumFile := filepath.Join(tmp, whName+".zip.sha256")
 	base := fmt.Sprintf("%s/v%s/", releaseBase, version)
-	if err := n.Fetch(ctx, base+whName+".zip.sha256", sumFile); err != nil {
+	if err := n.Fetch(ctx, base+whName+".zip.sha256", sumFile, nil); err != nil { // 64 bytes — nothing to report
 		return fmt.Errorf("wheelhouse checksum: %w", err)
 	}
 	wantRaw, err := os.ReadFile(sumFile)
@@ -199,7 +206,7 @@ func (n Native) Assemble(ctx context.Context, version string) error {
 	if len(want) == 0 || len(want[0]) != 64 {
 		return fmt.Errorf("wheelhouse checksum: malformed sidecar")
 	}
-	if err := n.fetchVerified(ctx, base+whName+".zip", whZip, want[0]); err != nil {
+	if err := n.fetchVerified(ctx, base+whName+".zip", whZip, want[0], "app"); err != nil {
 		return fmt.Errorf("wheelhouse: %w", err)
 	}
 	if err := unzip(whZip, tmp); err != nil { // yields tmp/<whName>/
@@ -213,7 +220,7 @@ func (n Native) Assemble(ctx context.Context, version string) error {
 		bifrostDest += ".exe"
 	}
 	bifrostURL := fmt.Sprintf("%s/%s/%s", releaseBase, bifrostRelease, plat.bifrostAsset)
-	if err := n.fetchVerified(ctx, bifrostURL, bifrostDest, bifrostSums[plat.bifrostAsset]); err != nil {
+	if err := n.fetchVerified(ctx, bifrostURL, bifrostDest, bifrostSums[plat.bifrostAsset], "gateway"); err != nil {
 		return fmt.Errorf("gateway: %w", err)
 	}
 	if err := os.Chmod(bifrostDest, 0o755); err != nil {
@@ -257,12 +264,13 @@ func (n Native) writeCurrent(version string) error {
 	return os.Rename(tmp, n.currentPath())
 }
 
-// fetchVerified downloads to dest and enforces the expected sha256, deleting on mismatch.
-func (n Native) fetchVerified(ctx context.Context, url, dest, wantSum string) error {
+// fetchVerified downloads to dest and enforces the expected sha256, deleting on
+// mismatch. artifact is the user-facing name progress is reported under.
+func (n Native) fetchVerified(ctx context.Context, url, dest, wantSum, artifact string) error {
 	if wantSum == "" {
 		return fmt.Errorf("no pinned checksum for %s — refusing to download", filepath.Base(dest))
 	}
-	if err := n.Fetch(ctx, url, dest); err != nil {
+	if err := n.Fetch(ctx, url, dest, n.progressFor(artifact)); err != nil {
 		return err
 	}
 	got, err := sha256File(dest)
@@ -274,6 +282,16 @@ func (n Native) fetchVerified(ctx context.Context, url, dest, wantSum string) er
 		return fmt.Errorf("checksum mismatch for %s: got %s want %s", filepath.Base(dest), got, wantSum)
 	}
 	return nil
+}
+
+// progressFor adapts the per-fetch byte counts to the Progress sink, naming the
+// artifact and rounding to a whole percent. Nil when no sink is set, so the fetch
+// stays exactly as silent as before.
+func (n Native) progressFor(artifact string) func(done, total int64) {
+	if n.Progress == nil {
+		return nil
+	}
+	return func(done, total int64) { n.Progress(artifact, percent(done, total)) }
 }
 
 // Up starts bifrost-http then the app from the current assembly, recording pids so a
@@ -642,7 +660,7 @@ func sha256File(path string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-func fetchURL(ctx context.Context, url, dest string) error {
+func fetchURL(ctx context.Context, url, dest string, progress func(done, total int64)) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return err
@@ -660,8 +678,49 @@ func fetchURL(ctx context.Context, url, dest string) error {
 		return err
 	}
 	defer f.Close()
-	_, err = io.Copy(f, resp.Body)
+	_, err = io.Copy(f, newProgressReader(resp.Body, resp.ContentLength, progress))
 	return err
+}
+
+// newProgressReader wraps a download stream so progress hears (done, total) as bytes
+// flow — but only when the whole-number percent advances, so a ~400 MB body makes at
+// most 101 reports instead of one per 32 KiB chunk (the tray must not be hammered).
+// A nil callback or an unknown length (ContentLength <= 0) returns r untouched: the
+// status line simply keeps its static text.
+func newProgressReader(r io.Reader, total int64, progress func(done, total int64)) io.Reader {
+	if progress == nil || total <= 0 {
+		return r
+	}
+	return &progressReader{r: r, total: total, lastPct: -1, report: progress}
+}
+
+type progressReader struct {
+	r       io.Reader
+	total   int64
+	done    int64
+	lastPct int // last percent reported; -1 before the first
+	report  func(done, total int64)
+}
+
+func (p *progressReader) Read(b []byte) (int, error) {
+	n, err := p.r.Read(b)
+	if n > 0 {
+		p.done += int64(n)
+		if pct := percent(p.done, p.total); pct != p.lastPct {
+			p.lastPct = pct
+			p.report(p.done, p.total)
+		}
+	}
+	return n, err
+}
+
+// percent is the whole-number percent of done over total, clamped to 100 — a server
+// that understates Content-Length must never yield "104%".
+func percent(done, total int64) int {
+	if done >= total {
+		return 100
+	}
+	return int(done * 100 / total)
 }
 
 func runCmd(ctx context.Context, name string, args ...string) error {
