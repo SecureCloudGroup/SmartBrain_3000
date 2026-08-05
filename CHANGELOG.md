@@ -11,6 +11,8 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.8.19] - 2026-08-04
+
 ### Changed
 - **Semantic search on the default local embedder now sends the task prefixes it was
   trained on.** `nomic-embed-text` was trained to expect `search_document: ` on passages
