@@ -33,6 +33,11 @@ class VaultIn(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     description: str = Field(default="", max_length=2000)
     tags: list[str] | None = Field(default=None, max_length=20)  # None = untouched; [] = clear
+    # Publisher-side note: where the user uploaded this vault's .sbvault so a friend can
+    # subscribe. None = untouched, "" = cleared (mirrors the tags rule); PATCH validates the
+    # shape via the SAME netguard rules the subscribe path applies (no LAN, no localhost, http(s)
+    # only), so a URL stored here is one the /subscribe path would also accept at fetch time.
+    hosted_url: str | None = Field(default=None, max_length=2048)
 
 
 class DocIdsIn(BaseModel):
@@ -138,12 +143,53 @@ def get_vault(request: Request, vault_id: str) -> dict:
     return {**vault, "doc_ids": [m["id"] for m in members], "members": members}
 
 
+def _explain_hosted_url_refusal(msg: str) -> str:
+    """Netguard refusals, phrased for a user typing into the hosted-URL field.
+
+    The one case a normal user hits (a LAN/localhost URL) gets plain language; anything else
+    keeps the guard's own words. Sibling of ``_explain_fetch_refusal`` — separate copy because
+    the PATCH surface is "storing a URL", not "subscribing" (the subscribe wording would read
+    wrong in Settings).
+    """
+    if "non-global" in msg:
+        return ("hosted URL must be on the public internet — localhost and LAN addresses "
+                "are not accepted")
+    if "scheme" in msg:
+        return "hosted URL must use http:// or https://"
+    return f"hosted URL is not usable: {msg}"
+
+
+def _normalize_hosted_url(request_url: str | None) -> str | None:
+    """Prepare the PATCH's ``hosted_url`` for the store: None untouched, else strip + defrag.
+
+    Fragment hygiene mirrors subscribe's rule: a sealed-share link carries key material after
+    ``#``, and nothing stored (or later fetched) may ever see it. Empty after strip == cleared.
+    """
+    if request_url is None:
+        return None
+    return urldefrag(request_url.strip()).url
+
+
 @router.patch("/api/vaults/{vault_id}")
 def update_vault(request: Request, vault_id: str, body: VaultIn) -> dict:
-    """Rename / re-describe / re-tag a vault (tags absent = untouched)."""
+    """Rename / re-describe / re-tag / re-note-hosted-URL a vault (each absent = untouched).
+
+    ``hosted_url``: absent = untouched, ``""`` = cleared, else validated against the same
+    netguard rules the ``/subscribe`` path applies (http(s) only; the SSRF guard's IP allowlist
+    rejects LAN/localhost). No fetch here — this is metadata; verify-hosted is where the URL is
+    actually retrieved.
+    """
     store = _vaults(request)
     _require(store, vault_id)
-    store.update(vault_id, body.name.strip(), body.description.strip(), tags=body.tags)
+    hosted_url = _normalize_hosted_url(body.hosted_url)
+    if hosted_url:
+        try:
+            netguard.validate_public_url(hosted_url)
+        except netguard.FetchError as exc:
+            raise HTTPException(status_code=400,
+                                detail=_explain_hosted_url_refusal(str(exc))) from None
+    store.update(vault_id, body.name.strip(), body.description.strip(),
+                 tags=body.tags, hosted_url=hosted_url)
     return store.get(vault_id)
 
 
@@ -390,6 +436,99 @@ def vault_key(request: Request, vault_id: str, body: ExportIn) -> dict:
                 "anyone with the file can read it"))
         raise HTTPException(status_code=409, detail="export this vault first — it has no key yet")
     return {"key": vault_format.encode_vault_key(key)}
+
+
+def _verify_detail_matches(remote_seq: int, retired: bool) -> str:
+    """The hosted file agrees with this install's last publish."""
+    if retired:
+        return f"the hosted file is the retired v{remote_seq} you last published — subscribers will see the retirement"
+    return f"the hosted file matches what this install last published (v{remote_seq})"
+
+
+def _verify_detail_seq_mismatch(remote_seq: int, local_seq: int) -> str:
+    """Behind (forgot to upload) vs newer-anomaly (was it published from another machine?)."""
+    if remote_seq < local_seq:
+        return (f"the hosted file is v{remote_seq}, but this install has published up to "
+                f"v{local_seq} — did you forget to upload the new file?")
+    return (f"the hosted file is NEWER (v{remote_seq}) than this install's record "
+            f"(v{local_seq}) — was it published from another machine?")
+
+
+def _synthetic_pin(vault: dict, hosted_url: str, pubkey: str) -> dict:
+    """The pin ``vault_sync.check`` expects — synthesized against THIS install's identity.
+
+    Not a subscription (no state is written from this call): the URL is the vault's own
+    ``hosted_url``, the publisher key is this install's, the vault_id is the vault's own.
+    ``seq`` is set to 0 so check's rollback/behind flags aren't consulted here — verify-hosted
+    computes its matches/behind against ``published_seq`` directly.
+    """
+    return {"url": hosted_url, "publisher_pubkey": pubkey,
+            "vault_id": vault["id"], "seq": 0}
+
+
+@router.post("/api/vaults/{vault_id}/verify-hosted")
+def verify_hosted(request: Request, vault_id: str) -> dict:
+    """Fetch the vault's ``hosted_url`` and report whether it matches THIS install's record.
+
+    Publisher action, so Desktop-local (matches export/retire); read-only, so no re-auth: no
+    subscription state is touched and no local vault body is written. The verification runs the
+    SAME machinery a subscriber's check uses (``vault_sync.check``) with a synthesized pin
+    against THIS install's own publisher pubkey and the vault's own id — so a KeyChanged from
+    check means "the hosted file isn't signed by you".
+
+    Response: ``{reachable, seq, matches, behind, retired, detail}``.
+      * ``matches`` — hosted seq == this install's ``published_seq``.
+      * ``behind`` — hosted seq < ``published_seq`` (the classic forgot-to-upload).
+      * a hosted seq > ``published_seq`` is a genuine anomaly (published from another machine);
+        surfaced in ``detail`` with matches=False, behind=False.
+      * 404 / 410 / timeout / any FetchError → reachable=False with an honest ``detail``.
+      * A hosted file signed by a different key → reachable=True, matches=False, ``detail`` says
+        the signature isn't yours (never a 500).
+    """
+    _require_desktop_local(request)
+    vaults = _vaults(request)
+    vault = _require(vaults, vault_id)
+    hosted_url = (vault.get("hosted_url") or "").strip()
+    if not hosted_url:
+        raise HTTPException(status_code=400,
+                            detail="this vault has no hosted URL set — add one first")
+    pubkey = identity.public_key_b64(_secrets(request), identity.VAULT_PUBLISHER_SECRET)
+    return _run_verify_hosted(vault, _synthetic_pin(vault, hosted_url, pubkey))
+
+
+def _run_verify_hosted(vault: dict, pin: dict) -> dict:
+    """The verify-hosted core: run ``vault_sync.check`` and map every outcome to the shape.
+
+    Broken out so the route body stays under the function-length rule and every error branch has
+    a clear name. Never raises HTTPException — every failure is a well-typed row.
+    """
+    assert isinstance(vault, dict) and vault.get("id"), "vault dict required"
+    assert isinstance(pin, dict) and pin.get("url"), "pin dict required"
+    local_seq = int(vault.get("published_seq") or 0)
+    empty = {"reachable": False, "seq": None, "matches": False, "behind": False,
+             "retired": False, "detail": ""}
+    try:
+        chk = vault_sync.check(pin)
+    except vault_sync.KeyChanged as exc:
+        offered_fp = vault_format.fingerprint(exc.offered_pubkey)
+        detail = (f"the hosted file's signature isn't yours — it is signed by {offered_fp}. "
+                  "Someone else may be publishing at that URL.")
+        return {**empty, "reachable": True, "detail": detail}
+    except netguard.FetchError as exc:
+        return {**empty, "reachable": False, "detail": _explain_fetch_refusal(str(exc))}
+    except (vault_format.VaultError, vault_sync.SyncError) as exc:
+        # The host responded but the response is not this vault's file (malformed, wrong
+        # vault_id, sealed instead of open). "Reachable" as a network fact; the content is
+        # what's wrong, so surface the guard's message verbatim in detail.
+        return {**empty, "reachable": True, "detail": str(exc)}
+    remote_seq = int(chk["remote_seq"])
+    retired = bool(chk["retired"])
+    matches = remote_seq == local_seq
+    behind = remote_seq < local_seq
+    detail = (_verify_detail_matches(remote_seq, retired) if matches
+              else _verify_detail_seq_mismatch(remote_seq, local_seq))
+    return {"reachable": True, "seq": remote_seq, "matches": matches,
+            "behind": behind, "retired": retired, "detail": detail}
 
 
 def _audit_import(request: Request, name: str, fp: str, seq: int, added: int, duplicates: int,

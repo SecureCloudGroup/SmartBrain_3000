@@ -296,6 +296,40 @@ def _guarded_get(url: str, allowed_ct: tuple[str, ...], max_bytes: int,
     raise FetchError("too many redirects")
 
 
+def validate_public_url(url: str) -> None:
+    """Run the SSRF guard's pre-fetch URL checks against ``url`` without fetching. Raises
+    ``FetchError`` on the same shapes ``_guarded_get`` would refuse before it opens a socket:
+    unknown scheme, embedded userinfo, missing/invalid host, invalid port, or an address that
+    resolves to a non-global (localhost/LAN/reserved) IP. This exists so a caller storing a URL
+    (e.g. a vault's ``hosted_url``) can reuse the guard's rules for validation-only, without a
+    fetch attempt at PATCH time; the fetch itself remains the authoritative refusal at use time.
+
+    A DNS-unresolvable host at validation time (transient outage, offline test env) is treated
+    as SHAPE-OK — the caller isn't attempting the fetch here, and the eventual verify/fetch is
+    where an unreachable host becomes an honest failure. Localhost/LAN literals and hostnames
+    that DO resolve to non-global addresses are still rejected: that's the load-bearing rule.
+    """
+    assert isinstance(url, str) and url, "url required"
+    parsed = urlparse(_strip_fragment(url))
+    if parsed.scheme not in _SCHEMES:
+        raise FetchError("scheme not allowed")
+    if parsed.username or parsed.password:
+        raise FetchError("userinfo in URL not allowed")
+    host = parsed.hostname
+    if not host:
+        raise FetchError("no host in URL")
+    try:
+        parsed.port  # urlparse validates port lazily, on ACCESS — see _guarded_get
+    except ValueError:
+        raise FetchError("invalid port in URL") from None
+    try:
+        _validated_ip(host)  # DNS + is_global allowlist; raises FetchError on non-global
+    except FetchError as exc:
+        if str(exc).startswith("cannot resolve host"):
+            return  # shape OK; the fetch is the honest failure point for a dead/typo host
+        raise
+
+
 def safe_fetch(url: str) -> dict:
     """Fetch ``url`` behind the SSRF guard; return {final_url, status, text}."""
     got = _guarded_get(url, _ALLOWED_CT, _MAX_BYTES)

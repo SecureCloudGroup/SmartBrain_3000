@@ -175,18 +175,29 @@ class VaultStore:
             # signed by them; local ``name``/``description`` is what THIS user renamed the vault to.
             "publisher_name": body.get("publisher_name") or "",
             "publisher_description": body.get("publisher_description") or "",
+            # The publisher's own hosted-URL note (open-published vaults): where the user uploaded
+            # the .sbvault so a friend could subscribe. Local metadata only — never travels in the
+            # export — and the verify-hosted route reads it to check the hosted file against this
+            # install's published_seq. Empty string when unset.
+            "hosted_url": body.get("hosted_url") or "",
             "doc_count": self.count_documents(vault_id),
             "created_at": str(row[5]),
             "updated_at": str(row[6]),
         }
 
-    def update(self, vault_id: str, name: str, description: str = "", tags: list[str] | None = None) -> bool:
-        """Rename / re-describe / re-tag a vault. False if it doesn't exist.
+    def update(self, vault_id: str, name: str, description: str = "",
+               tags: list[str] | None = None, hosted_url: str | None = None) -> bool:
+        """Rename / re-describe / re-tag / re-note-hosted-URL a vault. False if it doesn't exist.
 
         ``tags=None`` means UNTOUCHED (a rename-only PATCH must not wipe them); pass ``[]``
         to clear. Tags never travel in exports — they're the local user's organization.
+
+        ``hosted_url`` follows the same absent/empty rule: ``None`` = untouched, ``""`` = clear,
+        any other string is stored verbatim (the caller validates its shape). Local metadata:
+        never rides an export — it's where THIS install remembers the publisher uploaded the file.
         """
         assert vault_id and name, "vault id + name required"
+        assert tags is None or isinstance(tags, list), "tags must be None or a list"
         body = self._load_body(vault_id)
         if body is None:
             return False
@@ -196,6 +207,11 @@ class VaultStore:
         body["description"] = description[:_MAX_DESCRIPTION]
         if tags is not None:
             body["tags"] = _clean_tags(tags)
+        if hosted_url is not None:
+            if hosted_url:
+                body["hosted_url"] = hosted_url
+            else:
+                body.pop("hosted_url", None)
         self._store_body(vault_id, body)
         return True
 

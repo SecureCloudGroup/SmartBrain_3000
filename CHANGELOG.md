@@ -59,6 +59,17 @@ to know when a release changes behavior.
     distribute the new file.
   - **Unchanged republish flag.** Publishing twice with no content changes
     is flagged on the export response so the UI can ask "did you mean to?"
+  - **Remember where you uploaded the vault, and verify it.** A vault can
+    now carry an optional `hosted_url` (settable via `PATCH /api/vaults/{id}`,
+    validated with the same public-internet rules the subscribe path already
+    applies — no localhost, no LAN, http(s) only); and a new
+    `POST /api/vaults/{id}/verify-hosted` action fetches that URL and reports
+    whether the hosted file matches this install's last publish
+    (`{reachable, seq, matches, behind, retired, detail}`) — including
+    the "you forgot to upload the new file" case, the "hosted file is newer
+    than this install's record — was it published from another machine?"
+    anomaly, and the "the signature at that URL isn't yours" case. Read-only:
+    no pin, no subscription state is touched.
 
   The UI for the retire button, the *Retired by publisher* card treatment,
   the *Unreachable* state and its copy, the *remove documents on delete*

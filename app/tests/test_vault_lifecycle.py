@@ -617,3 +617,211 @@ def test_rollback_export_is_still_refused_with_the_new_fields(
     _serve(monkeypatch, blob1)  # host regresses
     r = bob.post(f"/api/vaults/{local_id}/update")
     assert r.status_code == 409 and "roll back" in r.json()["detail"]
+
+
+# =================================================================================================
+# hosted_url PATCH + verify-hosted (closing the reported gap: the app forgot the upload URL)
+# =================================================================================================
+
+_HOSTED_URL = "https://vaults.example.com/packs/expert-pack.sbvault"
+
+
+def test_patch_hosted_url_round_trips_and_is_absent_by_default(alice: TestClient) -> None:
+    # A fresh vault carries no hosted_url; PATCH stores it verbatim; GET surfaces it. Rename +
+    # hosted_url may travel in one PATCH — the tags/hosted_url absent rule keeps each field
+    # independent, so a URL PATCH must never wipe an existing name (and vice versa).
+    vid, _ = _make_vault(alice, _DOCS)
+    assert alice.get(f"/api/vaults/{vid}").json()["hosted_url"] == "", "unset == empty string"
+
+    r = alice.patch(f"/api/vaults/{vid}",
+                    json={"name": "Expert pack", "hosted_url": _HOSTED_URL})
+    assert r.status_code == 200
+    assert r.json()["hosted_url"] == _HOSTED_URL
+    assert alice.get(f"/api/vaults/{vid}").json()["hosted_url"] == _HOSTED_URL
+
+    # A PATCH without hosted_url must not wipe it (tags-pattern parity).
+    alice.patch(f"/api/vaults/{vid}", json={"name": "Expert pack renamed"})
+    assert alice.get(f"/api/vaults/{vid}").json()["hosted_url"] == _HOSTED_URL
+
+
+def test_patch_hosted_url_empty_string_clears_it(alice: TestClient) -> None:
+    # Empty string == cleared, exactly like tags. A user removing the note must be able to
+    # remove it — no separate DELETE endpoint required.
+    vid, _ = _make_vault(alice, _DOCS)
+    alice.patch(f"/api/vaults/{vid}", json={"name": "Expert pack", "hosted_url": _HOSTED_URL})
+    assert alice.get(f"/api/vaults/{vid}").json()["hosted_url"] == _HOSTED_URL
+
+    r = alice.patch(f"/api/vaults/{vid}", json={"name": "Expert pack", "hosted_url": ""})
+    assert r.status_code == 200 and r.json()["hosted_url"] == ""
+
+
+def test_patch_hosted_url_strips_fragment_before_storing(alice: TestClient) -> None:
+    # Fragment hygiene mirrors subscribe: a sealed-share URL keeps its key in the fragment, so
+    # nothing stored (or later fetched) may ever see it. Belt and suspenders — netguard would
+    # strip again at fetch time, but the store must never keep the fragment on disk.
+    vid, _ = _make_vault(alice, _DOCS)
+    r = alice.patch(f"/api/vaults/{vid}",
+                    json={"name": "Expert pack", "hosted_url": _HOSTED_URL + "#k=SECRETFRAG"})
+    assert r.status_code == 200
+    assert r.json()["hosted_url"] == _HOSTED_URL, "fragment must be dropped before storage"
+    assert "SECRETFRAG" not in alice.get(f"/api/vaults/{vid}").json()["hosted_url"]
+
+
+def test_patch_hosted_url_refuses_a_bad_scheme(alice: TestClient) -> None:
+    # http(s) only; anything else is refused with a clean 400 that names the rule.
+    vid, _ = _make_vault(alice, _DOCS)
+    for bad in ("ftp://vaults.example.com/pack.sbvault",
+                "javascript:alert(1)",
+                "file:///etc/passwd"):
+        r = alice.patch(f"/api/vaults/{vid}", json={"name": "Expert pack", "hosted_url": bad})
+        assert r.status_code == 400, (bad, r.text)
+        assert "http" in r.json()["detail"], (bad, r.text)
+    assert alice.get(f"/api/vaults/{vid}").json()["hosted_url"] == "", "no partial store on refusal"
+
+
+def test_patch_hosted_url_refuses_lan_and_localhost_via_real_netguard(alice: TestClient) -> None:
+    # NO monkeypatch: the SAME netguard IP allowlist the /subscribe path uses must reject
+    # localhost/LAN here too. The refusal explains in plain words — same rule as subscribe.
+    vid, _ = _make_vault(alice, _DOCS)
+    for bad in ("http://localhost:33000/pack.sbvault",
+                "http://127.0.0.1/pack.sbvault",
+                "http://10.0.0.5/pack.sbvault"):
+        r = alice.patch(f"/api/vaults/{vid}", json={"name": "Expert pack", "hosted_url": bad})
+        assert r.status_code == 400, (bad, r.text)
+        assert "public internet" in r.json()["detail"], (bad, r.text)
+    assert alice.get(f"/api/vaults/{vid}").json()["hosted_url"] == ""
+
+
+def _publish_and_set_hosted(client: TestClient, docs: list[tuple[str, str]] = _DOCS,
+                             ) -> tuple[str, bytes]:
+    """Publish a vault open and record its hosted_url — the setup verify-hosted operates on."""
+    vid, _ = _make_vault(client, docs)
+    blob = _export(client, vid, _PASS_A, mode="open")
+    r = client.patch(f"/api/vaults/{vid}",
+                     json={"name": "Expert pack", "hosted_url": _HOSTED_URL})
+    assert r.status_code == 200
+    return vid, blob
+
+
+def test_verify_hosted_happy_path_matches(alice: TestClient, monkeypatch) -> None:
+    # Publish → set hosted_url → serve the SAME blob at the URL → verify-hosted reports matches.
+    # This is the "the file up there IS what I last published" path — the whole point of the
+    # feature. The response shape is exactly what the UI task will consume.
+    vid, blob = _publish_and_set_hosted(alice)
+    fetched = _serve(monkeypatch, blob)
+
+    r = alice.post(f"/api/vaults/{vid}/verify-hosted", headers=_LOCAL)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    published_seq = alice.get(f"/api/vaults/{vid}").json()["published_seq"]
+    assert body == {"reachable": True, "seq": published_seq, "matches": True,
+                    "behind": False, "retired": False, "detail": body["detail"]}
+    assert "matches" in body["detail"] and str(published_seq) in body["detail"]
+    assert fetched == [_HOSTED_URL], "verify-hosted must fetch the stored URL, once"
+
+
+def test_verify_hosted_behind_case_is_the_classic_forgot_to_upload(
+        alice: TestClient, monkeypatch) -> None:
+    # Publish v2, hosted still v2, publish v3 (new content), hosted URL still serves v2.
+    # The response calls out "did you forget to upload the new file?" — matches=False, behind=True.
+    vid, blob_v2 = _publish_and_set_hosted(alice)
+    # Bump: add a doc and re-publish, so published_seq moves ahead of what's hosted.
+    new_id = alice.post("/api/kb", json={"title": "New", "content": "fresh content"}).json()["id"]
+    alice.post(f"/api/vaults/{vid}/documents", json={"doc_ids": [new_id]})
+    _export(alice, vid, _PASS_A, mode="open")  # v3; published_seq now == 3
+    published_seq = alice.get(f"/api/vaults/{vid}").json()["published_seq"]
+    assert published_seq == 3
+
+    _serve(monkeypatch, blob_v2)  # host still on the OLD file
+    body = alice.post(f"/api/vaults/{vid}/verify-hosted", headers=_LOCAL).json()
+    assert body["reachable"] is True
+    assert body["seq"] == 2
+    assert body["matches"] is False and body["behind"] is True
+    assert "forget to upload" in body["detail"] or "forgot to upload" in body["detail"]
+
+
+def test_verify_hosted_newer_hosted_seq_is_the_anomaly_case(
+        alice: TestClient, bob: TestClient, monkeypatch) -> None:
+    # A hosted file signed by us but NEWER than our record — was it published from another
+    # machine? Use bob's install as an unrelated Desktop and give it Alice's publisher secret
+    # so the file it publishes is "signed by Alice" from Alice's pov. Simpler: build a NEWER
+    # blob directly using Alice's identity via her own /export, then rewind Alice's version.
+    # Cleanest: publish v2, verify it (matches), then hand-plant a higher published_seq lower
+    # than the hosted file's seq. But hand-planting bypasses the whole publish path — instead,
+    # publish twice, serve the OLDER one but pretend published_seq is even LOWER: publish once
+    # (v2), leave hosted at v2, then rewrite the local published_seq to 1 in the body — the
+    # published_seq legacy fallback fabric is deliberately tolerant of a hand-set lower value.
+    vid, blob = _publish_and_set_hosted(alice)
+    store = alice.app.state.vaults
+    body = store._load_body(vid)
+    body["published_seq"] = 1  # simulate "another machine published v2; this install thinks v1"
+    store._store_body(vid, body)
+    assert alice.get(f"/api/vaults/{vid}").json()["published_seq"] == 1
+
+    _serve(monkeypatch, blob)  # hosted file is v2
+    body = alice.post(f"/api/vaults/{vid}/verify-hosted", headers=_LOCAL).json()
+    assert body["reachable"] is True
+    assert body["seq"] == 2
+    assert body["matches"] is False and body["behind"] is False
+    assert "NEWER" in body["detail"] and "another machine" in body["detail"]
+
+
+def test_verify_hosted_wrong_signature_says_the_signature_is_not_yours(
+        alice: TestClient, monkeypatch) -> None:
+    # A stranger's vault at the same URL: same vault_id, valid signature — by a different key.
+    # verify-hosted must return reachable=True, matches=False, and name the OFFERED fingerprint
+    # in the detail so the user knows who is at that URL now. Never a 500; no state changes.
+    vid, _blob = _publish_and_set_hosted(alice)
+    vault_id = alice.get(f"/api/vaults/{vid}").json()["id"]
+
+    conn = duckdb.connect(":memory:")
+    dbmod.run_migrations(conn)
+    attacker = SecretStore(conn, gen_master_key())  # a different Ed25519 identity
+    forged = vault_format.pack(
+        store=attacker, vault_id=vault_id, name="Impostor", description="", seq=99,
+        mode=vault_format.OPEN, name_key=gen_master_key(),
+        docs=[{"uid": "evil-1", "title": "Poison", "content": "malicious REPLACEMENT",
+               "meta": {}, "chunks": 1}])
+    offered_pub = vault_format.read_manifest(forged)["publisher"]["pubkey"]
+    _serve(monkeypatch, forged)
+
+    body = alice.post(f"/api/vaults/{vid}/verify-hosted", headers=_LOCAL).json()
+    assert body["reachable"] is True
+    assert body["matches"] is False and body["behind"] is False
+    assert body["seq"] is None, "a stranger's seq is not this install's business"
+    assert vault_format.fingerprint(offered_pub) in body["detail"]
+    assert "isn't yours" in body["detail"] or "not yours" in body["detail"]
+    # No pin state exists on a publisher-side vault, and none may be added by a read-only check.
+    assert alice.get(f"/api/vaults/{vid}").json()["source"] is None
+
+
+def test_verify_hosted_unreachable_url_is_a_clean_reachable_false(
+        alice: TestClient, monkeypatch) -> None:
+    # 404 / 410 / timeout: every one must be reachable=False with an honest detail, never a 500.
+    vid, _blob = _publish_and_set_hosted(alice)
+
+    def gone(_url: str) -> bytes:
+        raise netguard.FetchError("upstream returned HTTP 410", status=410)
+
+    monkeypatch.setattr(netguard, "safe_fetch_vault", gone)
+    body = alice.post(f"/api/vaults/{vid}/verify-hosted", headers=_LOCAL).json()
+    assert body == {"reachable": False, "seq": None, "matches": False, "behind": False,
+                    "retired": False, "detail": body["detail"]}
+    assert body["detail"], "an honest detail must always be present"
+
+
+def test_verify_hosted_is_desktop_local_only_matching_export(alice: TestClient) -> None:
+    # Same fence as /export and /retire: a bridged request has no x-sb-local header, and this
+    # endpoint refuses. The publisher's identity key sits behind the fence for a reason — a
+    # remote device must not be able to trigger a read that names it.
+    vid, _blob = _publish_and_set_hosted(alice)
+    r = alice.post(f"/api/vaults/{vid}/verify-hosted")  # no _LOCAL header
+    assert r.status_code == 403 and "Desktop-local" in r.json()["detail"]
+
+
+def test_verify_hosted_without_hosted_url_is_a_clean_400(alice: TestClient) -> None:
+    # No hosted_url set: nothing to verify. Clear 400 that says what to do next, so the UI can
+    # render it inline rather than surfacing a confusing empty response.
+    vid, _ = _make_vault(alice, _DOCS)
+    r = alice.post(f"/api/vaults/{vid}/verify-hosted", headers=_LOCAL)
+    assert r.status_code == 400 and "hosted URL" in r.json()["detail"]
