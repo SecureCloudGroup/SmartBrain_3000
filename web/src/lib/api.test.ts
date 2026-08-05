@@ -173,6 +173,60 @@ describe("vault client calls", () => {
     expect(r.removed_docs).toBe(5);
   });
 
+  it("updateVaultMeta carries hosted_url in the PATCH body when the field is provided", async () => {
+    // The hosted-URL note is publisher-local metadata: the UI Save button writes it via the same
+    // PATCH the rename/tags editors use. Absent = untouched (a rename must not wipe it); an empty
+    // string clears it — mirrors the tags rule and matches the backend semantics.
+    const spy = captureFetch(200, { id: "v-1" });
+    await api.updateVaultMeta("v-1", { name: "Expert", hosted_url: "https://ex.com/e.sbvault" });
+    const [url, init] = spy.mock.calls[0];
+    expect(String(url)).toBe("/api/vaults/v-1");
+    expect(init!.method).toBe("PATCH");
+    expect(JSON.parse(String(init!.body))).toEqual({
+      name: "Expert", hosted_url: "https://ex.com/e.sbvault",
+    });
+  });
+
+  it("updateVaultMeta with hosted_url:'' sends the empty string so the server clears it", async () => {
+    // "" is a distinct value the server reads as "clear the note"; if the client dropped it, the
+    // Save-with-empty flow would silently no-op and the user would never be able to un-set the URL.
+    const spy = captureFetch(200, { id: "v-1" });
+    await api.updateVaultMeta("v-1", { name: "Expert", hosted_url: "" });
+    expect(JSON.parse(String(spy.mock.calls[0][1]!.body))).toEqual({
+      name: "Expert", hosted_url: "",
+    });
+  });
+
+  it("verifyHostedVault posts to /verify-hosted with the Desktop-local marker header", async () => {
+    // verify-hosted is Desktop-local (its verdict names this install's own publisher key). A
+    // dropped x-sb-local header is a 403 through the bridge — pin the header here so a phone
+    // regression turns into a red test rather than a broken UI on the phone.
+    const spy = captureFetch(200, {
+      reachable: true, seq: 4, matches: true, behind: false, retired: false,
+      detail: "the hosted file matches what this install last published (v4)",
+    });
+    const r = await api.verifyHostedVault("v-1");
+    const [url, init] = spy.mock.calls[0];
+    expect(String(url)).toBe("/api/vaults/v-1/verify-hosted");
+    expect(init!.method).toBe("POST");
+    expect((init!.headers as Record<string, string>)["x-sb-local"]).toBe("1");
+    expect(r).toEqual({
+      reachable: true, seq: 4, matches: true, behind: false, retired: false,
+      detail: "the hosted file matches what this install last published (v4)",
+    });
+  });
+
+  it("verifyHostedVault surfaces the server's detail on a 400 (no hosted URL set)", async () => {
+    // The endpoint's 400 detail is human-ready — the UI renders it inline. A silent generic fallback
+    // would strip the "add a URL first" hint the server carefully wrote.
+    captureFetch(400, { detail: "this vault has no hosted URL set — add one first" });
+    await expect(api.verifyHostedVault("v-1")).rejects.toMatchObject({
+      name: "ApiError",
+      status: 400,
+      message: "this vault has no hosted URL set — add one first",
+    });
+  });
+
   it("sends the vault key in the query and the file as the raw body on import", async () => {
     const spy = captureFetch(200, { id: "v-2", name: "Shared", publisher: "SB-AAAA" });
     const file = new File(["sealed-bytes"], "expert.sbvault");

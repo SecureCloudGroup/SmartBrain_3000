@@ -356,6 +356,10 @@ export interface Vault {
   // distinct from the local ``name``/``description`` this user can edit. Empty string when unknown.
   publisher_name: string;
   publisher_description: string;
+  // Publisher-side note (open-published vaults): where the user uploaded the .sbvault. Local
+  // metadata only — never travels in the export. Empty string = unset. Settable via PATCH
+  // (validated with the same public-internet rules subscribe applies); read by verify-hosted.
+  hosted_url: string;
   name: string;
   description: string;
   tags: string[]; // the local user's labels — never travel in an export
@@ -456,6 +460,22 @@ export interface VaultUpdateResult {
   seq: number;
   retired: boolean;
   renamed_from: string | null;
+}
+
+// Publisher-side "does the file up there match what I last published?" — powered by
+// vault_sync.check against the vault's hosted_url, verified against THIS install's own key.
+// `matches` = hosted seq == published_seq; `behind` = hosted seq < published_seq (the classic
+// forgot-to-upload). A hosted seq > local one is a genuine anomaly (matches=false, behind=false).
+// Unreachable (404/410/timeout) is a clean `reachable:false, seq:null` row; a hosted file signed
+// by a different key is `reachable:true, matches:false, seq:null` with the offered fingerprint
+// in `detail`. `detail` is always a human-ready sentence — the UI renders it verbatim.
+export interface VerifyHostedResult {
+  reachable: boolean;
+  seq: number | null;
+  matches: boolean;
+  behind: boolean;
+  retired: boolean;
+  detail: string;
 }
 
 // Metadata a vault export response header carries — the file is the body, these describe the
@@ -899,8 +919,14 @@ export const api = {
   listVaults: () => req<{ vaults: Vault[] }>("/api/vaults"),
   createVault: (name: string, description = "") =>
     req<Vault>("/api/vaults", { method: "POST", body: JSON.stringify({ name, description }) }),
-  // Rename / re-describe / re-tag a vault. `tags` absent = untouched (a rename must not wipe them).
-  updateVaultMeta: (id: string, body: { name: string; description?: string; tags?: string[] }) =>
+  // Rename / re-describe / re-tag / re-note-hosted-URL a vault. Each field is INDEPENDENT: absent
+  // = untouched (a rename must not wipe tags or the hosted URL); `hosted_url: ""` clears the note.
+  // Server validates hosted_url against the same netguard rules subscribe uses (http(s) only, no
+  // localhost/LAN) — a bad URL is a 400 with a plain-words detail the UI surfaces inline.
+  updateVaultMeta: (
+    id: string,
+    body: { name: string; description?: string; tags?: string[]; hosted_url?: string },
+  ) =>
     req<Vault>(`/api/vaults/${encodeURIComponent(id)}`, {
       method: "PATCH",
       body: JSON.stringify(body),
@@ -983,6 +1009,15 @@ export const api = {
     const headers = parseExportHeaders(res.headers);
     return { blob: await res.blob(), headers };
   },
+  // Fetch the vault's hosted_url and check the hosted file against THIS install's last publish.
+  // Desktop-local only (x-sb-local; the bridge strips it) — the endpoint names this install's own
+  // publisher key in its verdict, so a paired device must not be able to trigger the read.
+  // Read-only: never touches subscription state, never re-pins anything.
+  verifyHostedVault: (id: string) =>
+    req<VerifyHostedResult>(`/api/vaults/${encodeURIComponent(id)}/verify-hosted`, {
+      method: "POST",
+      headers: { "x-sb-local": "1" },
+    }),
   vaultKey: async (id: string, passphrase: string): Promise<string> => {
     await remoteReady;
     const res = await fetch(`/api/vaults/${encodeURIComponent(id)}/key`, {

@@ -28,6 +28,7 @@ function makeVault(overrides: Partial<Vault> = {}): Vault {
     sealed_seq: null,
     publisher_name: "",
     publisher_description: "",
+    hosted_url: "",
     name: "Sample",
     description: "",
     tags: [],

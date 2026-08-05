@@ -16,6 +16,7 @@
     type SearchMode,
     type Vault,
     type VaultMember,
+    type VerifyHostedResult,
   } from "$lib/api";
   import { describeError } from "$lib/errors";
   import { highlight, queryTerms } from "$lib/highlight";
@@ -79,6 +80,17 @@
   let retireOpenId = $state<string | null>(null);
   let retirePass = $state("");
   let retireError = $state("");
+  // Hosted-URL note (published-open vaults, inside the Share panel): the draft the user is
+  // editing, an inline save error next to the Save button, and the last verify-hosted verdict
+  // whose `detail` is rendered verbatim (the backend phrases every case for a human). Reset
+  // whenever the Share panel toggles or switches vaults so a previous vault's verdict never
+  // bleeds across.
+  let hostedDraft = $state("");
+  let hostedError = $state("");
+  // "" | "save" | "verify" — which button is in flight, so both can disable together but their
+  // labels can independently say "Saving…" / "Checking…" without a stale label on the wrong one.
+  let hostedBusy = $state<"" | "save" | "verify">("");
+  let hostedResult = $state<VerifyHostedResult | null>(null);
   // Delete flow for subscribed/imported: two-option confirm. Local vaults still use the simple
   // confirmDialog — they have no imported documents for the option to apply to.
   let deleteOpenId = $state<string | null>(null);
@@ -673,6 +685,57 @@
     }
   }
 
+  // Save the publisher's hosted-URL note: the same PATCH the rename/tags editors use, only the
+  // hosted_url field carried (name is required by the endpoint's shape so it rides along
+  // unchanged). Empty string == cleared. A refusal (bad scheme, LAN/localhost) is a 400 whose
+  // detail the server phrased for a human; render it inline next to Save, not page-bottom.
+  async function saveHostedUrl(v: Vault) {
+    console.assert(v && typeof v.id === "string", "saveHostedUrl: vault required");
+    console.assert(typeof hostedDraft === "string", "saveHostedUrl: draft must be a string");
+    hostedBusy = "save";
+    hostedError = "";
+    hostedResult = null; // a stale verdict against the old URL would mislead
+    try {
+      await api.updateVaultMeta(v.id, {
+        name: v.name, description: v.description, hosted_url: hostedDraft.trim(),
+      });
+      await loadVaults();
+    } catch (err) {
+      hostedError = describeError(err);
+    } finally {
+      hostedBusy = "";
+    }
+  }
+
+  // Fetch the hosted file and check it against this install's last publish. The server's `detail`
+  // is human-ready for every branch (matches / behind / anomaly / wrong-signature / unreachable);
+  // the UI just picks a state-appropriate style for it. Never surfaces a raw exception — every
+  // network/parse failure comes back as a well-typed row.
+  async function verifyHosted(v: Vault) {
+    console.assert(v && typeof v.id === "string", "verifyHosted: vault required");
+    console.assert(v.published_open, "verifyHosted: only meaningful on published-open vaults");
+    hostedBusy = "verify";
+    hostedError = "";
+    hostedResult = null;
+    try {
+      hostedResult = await api.verifyHostedVault(v.id);
+    } catch (err) {
+      hostedError = describeError(err);
+    } finally {
+      hostedBusy = "";
+    }
+  }
+
+  // The verdict's style: ok when matches, warn on any anomaly (behind / newer-than-local /
+  // wrong-signature), muted when the host is unreachable — mirrors the three categories the
+  // backend distinguishes in its response shape.
+  function hostedResultClass(r: VerifyHostedResult): string {
+    console.assert(r !== null && typeof r === "object", "hostedResultClass: verdict required");
+    console.assert(typeof r.reachable === "boolean", "hostedResultClass: reachable must be boolean");
+    if (!r.reachable) return "muted";
+    return r.matches ? "hosted-ok" : "hosted-warn";
+  }
+
   async function importVault() {
     const file = importInput?.files?.[0];
     if (!file) return;
@@ -1249,6 +1312,11 @@
                 retireOpenId = null;      // and neither must a half-open Retire panel
                 retirePass = "";
                 retireError = "";
+                // Seed the hosted-URL editor from the vault (empty when unset), and clear any
+                // verdict/error a previous vault's Share panel left behind.
+                hostedDraft = v.hosted_url ?? "";
+                hostedError = "";
+                hostedResult = null;
               }}
             >Share…</button>
           {/if}
@@ -1541,6 +1609,48 @@
               </p>
             {/if}
 
+            {#if v.published_open}
+              <!-- Publisher-local note of WHERE the .sbvault was uploaded, so verify-hosted can
+                   catch the classic "published v9 but forgot to upload the new file" gap. The
+                   URL never travels in the export — it's just this install's memo. -->
+              <div class="hosted">
+                <label for="hosted-{v.id}" style="display:block; margin-bottom:0.25rem; font-size:0.85rem">
+                  <strong>Hosted at.</strong> Where you uploaded this vault. Only this install sees it —
+                  it's a note so SmartBrain can check the hosted copy against your last publish.
+                </label>
+                <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap">
+                  <input
+                    id="hosted-{v.id}"
+                    style="flex:1; min-width:14rem"
+                    bind:value={hostedDraft}
+                    placeholder="https://example.com/vaults/my-vault.sbvault"
+                    aria-label="Where this vault is hosted"
+                    onkeydown={(e) => e.key === "Enter" && saveHostedUrl(v)}
+                  />
+                  <button disabled={hostedBusy !== ""} onclick={() => saveHostedUrl(v)}>
+                    {hostedBusy === "save" ? "Saving…" : "Save"}
+                  </button>
+                  {#if v.hosted_url}
+                    <!-- Verify only lights up once a URL is stored — a button that immediately
+                         400s on click would read as broken. -->
+                    <button class="secondary" disabled={hostedBusy !== ""} onclick={() => verifyHosted(v)}>
+                      {hostedBusy === "verify" ? "Checking…" : "Verify hosted copy"}
+                    </button>
+                  {/if}
+                </div>
+                {#if hostedError}<p class="error" style="margin:0.4rem 0 0">{hostedError}</p>{/if}
+                {#if hostedResult}
+                  <!-- The server phrased every verdict for a human ("hosted file matches…",
+                       "did you forget to upload…", "signature isn't yours…", "upstream 410"),
+                       so the UI renders `detail` verbatim and just picks a style: ok when it
+                       matches, warn on any anomaly, muted when the host is unreachable. -->
+                  <p class="hosted-note {hostedResultClass(hostedResult)}" style="margin:0.4rem 0 0; font-size:0.85rem">
+                    {hostedResult.detail}
+                  </p>
+                {/if}
+              </div>
+            {/if}
+
             {#if v.published_open && !v.retired_published}
               <!-- Retire: the last publish. Only meaningful on a live public vault, and only from
                    the Desktop (same gate as export — the produced file is decrypted plaintext).
@@ -1786,6 +1896,23 @@
     margin-top: 0.6rem;
     padding-top: 0.6rem;
     border-top: 1px solid var(--border);
+  }
+  /* Hosted-URL editor: same sibling-step rule as .retire — an inline row inside the Share
+     panel, separated by a divider so it doesn't look grafted onto the export controls. */
+  .hosted {
+    margin-top: 0.6rem;
+    padding-top: 0.6rem;
+    border-top: 1px solid var(--border);
+  }
+  /* Verify-hosted verdict lines: the backend picks the words; the UI picks the color. Matches
+     reads green (safe to distribute), any anomaly reads warn (behind / newer / wrong-signature
+     — the user has to decide something), unreachable is muted (a network fact, not the user's
+     fault). Keep the same font-size as .subnote so it sits in the same visual register. */
+  .hosted-note.hosted-ok {
+    color: var(--ok);
+  }
+  .hosted-note.hosted-warn {
+    color: var(--warn);
   }
   /* Phones: the .vrow can hold many chips (state, fingerprint, version, publish date, tags),
      and desktop-only flex-wrap alone still lets the actions push off the right edge before

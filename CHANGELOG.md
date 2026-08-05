@@ -69,14 +69,16 @@ to know when a release changes behavior.
     the "you forgot to upload the new file" case, the "hosted file is newer
     than this install's record — was it published from another machine?"
     anomaly, and the "the signature at that URL isn't yours" case. Read-only:
-    no pin, no subscription state is touched.
+    no pin, no subscription state is touched. The Share panel on a published
+    vault now shows a **Hosted at** row (URL + Save) and, once set, a
+    **Verify hosted copy** button whose verdict styles the server's plain-words
+    detail — green when it matches, warn on any anomaly, muted when the host is
+    unreachable.
 
-  The UI for the retire button, the *Retired by publisher* card treatment,
-  the *Unreachable* state and its copy, the *remove documents on delete*
-  confirmation, the sealed re-key warning, and the "you republished with no
-  changes" nudge all follow in the next release — this release wires the
-  backend for the format, storage, and update semantics that make those
-  surfaces safe to add without changing the on-disk vault format.
+  All of it ships with its interface in this release: the Retire… flow, the
+  *Retired by publisher* and *Unreachable* card treatments, the two-choice
+  delete confirmation, the sealed re-key warning, and the "you republished
+  with no changes" nudge — on desktop and phone alike.
 
 ### Changed
 - **A paired phone can now add to Knowledge — and see Usage.** The phone was
