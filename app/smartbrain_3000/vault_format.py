@@ -25,8 +25,10 @@ import hmac
 import io
 import json
 import os
+import re
 import struct
 import zipfile
+from datetime import datetime, timezone
 
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -59,6 +61,7 @@ _VEC_MAGIC = b"SBVEC1"
 _KEY_PREFIX = "SBVK1-"
 _SIG_PREFIX = b"sbvault-sig:v1\n"
 _ZIP_DATE = (1980, 1, 1, 0, 0, 0)  # fixed, so the same content produces a byte-identical file
+_DATE_RE = re.compile(r"\A\d{4}-\d{2}-\d{2}\Z")  # published_at: YYYY-MM-DD, no timezone/newline play
 
 
 class VaultError(Exception):
@@ -292,6 +295,11 @@ def _clean_meta(meta) -> dict:
 
 # --- pack ---------------------------------------------------------------------------------------
 
+def _today_utc() -> str:
+    """Today's date in UTC as YYYY-MM-DD — module seam so a test can pin it."""
+    return datetime.now(timezone.utc).date().isoformat()
+
+
 def pack(
     *,
     store,
@@ -305,6 +313,8 @@ def pack(
     mode: str = SEALED,
     embed_model: str = "",
     label: str = "",
+    published_at: str | None = None,
+    retired: bool = False,
 ) -> bytes:
     """Build a .sbvault. ``docs`` = [{uid, title, content, meta, vectors?}].
 
@@ -323,6 +333,10 @@ def pack(
         raise VaultError(f"unknown vault mode: {mode!r}")
     if len(docs) > MAX_VAULT_DOCS:
         raise VaultError(f"a vault holds at most {MAX_VAULT_DOCS} documents")
+    # published_at is a plain UTC calendar date: no timezone play, no wall-clock format ambiguity.
+    # Only fixing the format at the WRITE end makes read-side validation a one-line regex.
+    if published_at is not None and not (isinstance(published_at, str) and _DATE_RE.match(published_at)):
+        raise VaultError("published_at must be a YYYY-MM-DD calendar date")
     if mode == SEALED:
         assert vault_key is not None, "sealed pack requires a vault key"
         cek = _derive(vault_key, vault_id, b"sbvault/v1/content")
@@ -401,6 +415,14 @@ def pack(
         payload["name"] = name
         payload["description"] = description
         payload["name_key"] = base64.b64encode(name_key).decode("ascii")
+    # v1 additive fields (spec §2 "additive fields"). Signed like everything else in the payload,
+    # so tampering with either invalidates the signature. Emitted ONLY when set — an export from a
+    # publisher that never opts in stays byte-for-byte what it always was. Both modes may carry
+    # ``published_at``; ``retired`` is a normal open export plus this one flag (see §5).
+    if published_at is not None:
+        payload["published_at"] = published_at
+    if retired:
+        payload["retired"] = True
 
     manifest_raw = canonical(payload)
     sig = identity.sign(store, _SIG_PREFIX + manifest_raw, identity.VAULT_PUBLISHER_SECRET)
@@ -536,6 +558,17 @@ def read_manifest_bytes(raw: bytes) -> dict:
     if not isinstance(index_meta, dict) or not isinstance(index_meta.get("hash"), str) \
             or len(index_meta["hash"]) != 64:
         raise VaultError("vault manifest is malformed (index)")
+    # v1 additive fields (see spec §2 "additive fields"): older readers ignore an unknown key, so
+    # PRESENT means SET here — validate the value type or refuse. A future reader looking at an
+    # older manifest sees them absent and treats them as defaults. Both are covered by the signature.
+    if "published_at" in payload:
+        if not (isinstance(payload["published_at"], str) and _DATE_RE.match(payload["published_at"])):
+            raise VaultError("vault manifest is malformed (published_at)")
+    if "retired" in payload and payload["retired"] is not True:
+        # ``retired`` is a one-way marker: true means "publisher retired this vault". Any other
+        # value is a signal we don't understand — refuse, don't guess. Reject bool False too so a
+        # signed-but-noisy value can never look like an implicit intent.
+        raise VaultError("vault manifest is malformed (retired)")
     mode = payload.get("mode")
     if mode == SEALED:
         # Sealed carries the wrap params and, by the §2 metadata rule, no topic: a host storing your
@@ -648,6 +681,21 @@ def doc_hash(title: str, content: str, meta: dict) -> str:
     keep theirs (plan decision #1). Same bytes ``pack`` hashes, by construction.
     """
     return hashlib.sha256(_doc_object(title, content, meta or {})).hexdigest()
+
+
+def docs_fingerprint(docs: list[dict]) -> str:
+    """A deterministic content-only fingerprint for a list of pack()-style doc dicts.
+
+    Independent of ``seq``, ``vault_id``, mode, and publish date, so two exports that ship the
+    identical set of documents fingerprint the same — which is what "unchanged republish"
+    actually means. Sorted by uid so pack-argument ordering doesn't perturb the value; each row
+    is (uid, doc_hash) so a title or content change nudges it. Mode-agnostic: works for both the
+    sealed and open publish paths without needing to look at the packed blob.
+    """
+    assert isinstance(docs, list), "docs must be a list"
+    rows = sorted((str(d["uid"]), doc_hash(d["title"], d["content"], d.get("meta") or {}))
+                  for d in docs)
+    return hashlib.sha256(canonical(rows)).hexdigest()
 
 
 def open_vault(data: bytes, vault_key: bytes | None = None) -> tuple[dict, list[dict]]:

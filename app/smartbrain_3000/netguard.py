@@ -82,7 +82,18 @@ _NAT64_WK = ipaddress.IPv6Network("64:ff9b::/96")
 
 
 class FetchError(Exception):
-    """A blocked or failed guarded fetch."""
+    """A blocked or failed guarded fetch.
+
+    ``status`` carries the HTTP status when the failure is a clean upstream 4xx/5xx (else None).
+    Callers that need to distinguish "the publisher took this down" (HTTP 410 Gone) from a
+    generic dead host key on it — the guard's message text is not a stable contract.
+    """
+
+    def __init__(self, message: str, *, status: int | None = None) -> None:
+        assert message, "message required"
+        assert status is None or (100 <= status <= 599), "status must be an HTTP code"
+        super().__init__(message)
+        self.status = status
 
 
 def _unwrap(addr: ipaddress._BaseAddress) -> ipaddress._BaseAddress:
@@ -261,7 +272,8 @@ def _guarded_get(url: str, allowed_ct: tuple[str, ...], max_bytes: int,
                     current = urljoin(current, location)
                     continue
                 if response.status_code >= 400:  # an error page is not content
-                    raise FetchError(f"upstream returned HTTP {response.status_code}")
+                    raise FetchError(f"upstream returned HTTP {response.status_code}",
+                                     status=response.status_code)
                 ctype = response.headers.get("content-type", "")
                 ct_ok = ctype.startswith(allowed_ct)
                 if not ct_ok and not accept_zip_magic:
@@ -282,6 +294,40 @@ def _guarded_get(url: str, allowed_ct: tuple[str, ...], max_bytes: int,
             finally:
                 response.close()
     raise FetchError("too many redirects")
+
+
+def validate_public_url(url: str) -> None:
+    """Run the SSRF guard's pre-fetch URL checks against ``url`` without fetching. Raises
+    ``FetchError`` on the same shapes ``_guarded_get`` would refuse before it opens a socket:
+    unknown scheme, embedded userinfo, missing/invalid host, invalid port, or an address that
+    resolves to a non-global (localhost/LAN/reserved) IP. This exists so a caller storing a URL
+    (e.g. a vault's ``hosted_url``) can reuse the guard's rules for validation-only, without a
+    fetch attempt at PATCH time; the fetch itself remains the authoritative refusal at use time.
+
+    A DNS-unresolvable host at validation time (transient outage, offline test env) is treated
+    as SHAPE-OK — the caller isn't attempting the fetch here, and the eventual verify/fetch is
+    where an unreachable host becomes an honest failure. Localhost/LAN literals and hostnames
+    that DO resolve to non-global addresses are still rejected: that's the load-bearing rule.
+    """
+    assert isinstance(url, str) and url, "url required"
+    parsed = urlparse(_strip_fragment(url))
+    if parsed.scheme not in _SCHEMES:
+        raise FetchError("scheme not allowed")
+    if parsed.username or parsed.password:
+        raise FetchError("userinfo in URL not allowed")
+    host = parsed.hostname
+    if not host:
+        raise FetchError("no host in URL")
+    try:
+        parsed.port  # urlparse validates port lazily, on ACCESS — see _guarded_get
+    except ValueError:
+        raise FetchError("invalid port in URL") from None
+    try:
+        _validated_ip(host)  # DNS + is_global allowlist; raises FetchError on non-global
+    except FetchError as exc:
+        if str(exc).startswith("cannot resolve host"):
+            return  # shape OK; the fetch is the honest failure point for a dead/typo host
+        raise
 
 
 def safe_fetch(url: str) -> dict:

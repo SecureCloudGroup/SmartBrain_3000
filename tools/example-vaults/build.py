@@ -16,6 +16,7 @@ re-sync changed docs, and export the next version (subscribers auto-pick up the 
 Stdlib-only on purpose: runs on any machine with Python 3 and Docker.
 """
 
+import datetime
 import json
 import os
 import pathlib
@@ -31,7 +32,16 @@ VOLUME = "sb_publisher_data"
 PORT = 34500
 BASE = f"http://127.0.0.1:{PORT}"
 VAULT_NAME = "SmartBrain Docs"
-VAULT_DESC = "The official SmartBrain_3000 user guide — searchable, kept up to date by the project."
+# The description now travels to subscribers (the publisher's own description propagates on
+# every update — no longer overwritten by a generic "Public vault · publisher …"), so the
+# visible line carries the build date. That way a subscriber can see at a glance how current
+# the guide they're reading is even before they open a document. UTC to match the rest of the
+# publish-date plumbing (manifest stamps are UTC calendar dates).
+_TODAY = datetime.datetime.now(datetime.timezone.utc).date().isoformat()
+VAULT_DESC = (
+    "The official SmartBrain_3000 user guide — searchable, kept up to date by the project. "
+    f"Updated {_TODAY}."
+)
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 DOCS = sorted(REPO.glob("docs/0*.md"))  # the numbered user guide only, never docs/internal/
@@ -106,6 +116,12 @@ def main() -> int:
         vault = next((v for v in vaults if v["name"] == VAULT_NAME), None)
         if vault is None:
             vault = api("POST", "/api/vaults", {"name": VAULT_NAME, "description": VAULT_DESC})
+        else:
+            # Keep the description in sync: the "Updated {date}" line is computed each build and
+            # propagates to subscribers on the next update. Without this PATCH the line would
+            # freeze at the date the vault was FIRST minted and re-runs would ship stale text.
+            api("PATCH", f"/api/vaults/{vault['id']}",
+                {"name": VAULT_NAME, "description": VAULT_DESC})
         api("POST", f"/api/vaults/{vault['id']}/documents", {"doc_ids": doc_ids})
 
         blob = api("POST", f"/api/vaults/{vault['id']}/export",
