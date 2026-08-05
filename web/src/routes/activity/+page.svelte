@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
   import { account } from "$lib/account.svelte";
-  import { api, type AuditEntry, type PendingAction } from "$lib/api";
+  import { api, type AuditEntry, type PendingAction, type RememberedSite } from "$lib/api";
   import { pending as pendingBadge } from "$lib/pending.svelte";
   import { confirmDialog } from "$lib/confirm.svelte";
   import { describeError } from "$lib/errors";
@@ -15,7 +15,8 @@
 
   let entries = $state<AuditEntry[]>([]);
   let pending = $state<PendingAction[]>([]);
-  let remembered = $state<string[]>([]);
+  let rememberedTools = $state<string[]>([]);
+  let rememberedSites = $state<RememberedSite[]>([]);
   let busy = $state("");
   let error = $state("");
 
@@ -23,7 +24,9 @@
     try {
       pending = (await api.listPending()).pending;
       pendingBadge.count = pending.length; // keep the nav badge in sync after approve/deny
-      remembered = (await api.listRemembered()).tools;
+      const r = await api.listRemembered();
+      rememberedTools = r.tools;
+      rememberedSites = r.sites;
       entries = (await api.getAudit(200)).entries;
     } catch (err) {
       error = describeError(err);
@@ -76,11 +79,13 @@
     }
   }
 
-  async function forget(name: string) {
-    busy = name;
+  async function forget(name: string, host: string | null = null) {
+    // busy tag combines tool + host so a site row's spinner doesn't lock every row that shares
+    // the tool name (multiple hosts for the same tool live in the list side-by-side).
+    busy = host ? `${name}@${host}` : name;
     error = "";
     try {
-      await api.forgetRemembered(name);
+      await api.forgetRemembered(name, host);
       await load();
     } catch (err) {
       error = describeError(err);
@@ -145,9 +150,13 @@
     {#each pending as p (p.id)}
       <ActionCard icon={iconForTool(p.tool)} title={p.tool} tier={p.tier === "irreversible" ? "irreversible" : "reviewed"} scope={fmtArgs(p.args)}>
         {#snippet actions()}
-          {#if p.tier === "reviewed" && p.rememberable !== false}
+          {#if p.tier === "reviewed" && p.remember_mode === "tool"}
             <button class="ghost" disabled={busy === p.id} title="Approve and stop asking for this tool" onclick={() => approve(p, true)}>Always allow</button>
-          {:else if p.tier === "reviewed"}
+          {:else if p.tier === "reviewed" && p.remember_mode === "site" && p.remember_host}
+            <!-- URL tool: consent is per-host, so the label names the exact destination.
+                 The host is ellipsized inside the button so a long name can't push the card wide. -->
+            <button class="ghost allow-site" disabled={busy === p.id} title={`Approve and stop asking for ${p.remember_host}`} onclick={() => approve(p, true)}>Always allow {p.remember_host}</button>
+          {:else if p.tier === "reviewed" && p.remember_mode === null}
             <!-- The server refuses to remember this one, so don't offer a button that
                  silently wouldn't stick. Say why instead. -->
             <span class="muted" style="font-size:0.82rem" title="This tool can reach an address the assistant chooses, so each call is reviewed.">Always-allow unavailable</span>
@@ -159,18 +168,27 @@
     {/each}
   {/if}
 
-  {#if remembered.length > 0}
+  {#if rememberedTools.length + rememberedSites.length > 0}
     <!-- Collapsed by default: this is reference material, not something to act on every
          visit — the count keeps it glanceable without the vertical space. -->
     <details class="section-gap">
-      <summary><span class="allow-head">Always allowed · {remembered.length}</span></summary>
-      <p class="muted hint-gap">These write tools run without asking. Irreversible actions (send email, delete) always ask, and so does anything that fetches an address the assistant picks, like opening a link or adding one to your knowledge.</p>
+      <summary><span class="allow-head">Always allowed · {rememberedTools.length + rememberedSites.length}</span></summary>
+      <p class="muted hint-gap">These write tools run without asking. Irreversible actions (send email, delete) always ask; URL tools remember one site at a time so a call to a different address still parks for approval.</p>
       <div class="card tight">
-        {#each remembered as name (name)}
+        {#each rememberedTools as name (name)}
           <div class="arow">
             <strong>{name}</strong>
             <span class="grow"></span>
             <button class="secondary" disabled={busy === name} onclick={() => forget(name)}>Stop allowing</button>
+          </div>
+        {/each}
+        {#each rememberedSites as s (`${s.tool}@${s.host}`)}
+          <div class="arow">
+            <strong>{s.tool}</strong>
+            <span class="sep">·</span>
+            <span class="host" title={s.host}>{s.host}</span>
+            <span class="grow"></span>
+            <button class="secondary" disabled={busy === `${s.tool}@${s.host}`} onclick={() => forget(s.tool, s.host)}>Stop allowing</button>
           </div>
         {/each}
       </div>
@@ -236,6 +254,27 @@
   }
   .arow + .arow {
     border-top: 1px solid var(--border);
+  }
+  /* Site row: the host truncates instead of pushing "Stop allowing" off-card
+     (tested with a 60-char host name in vitest). */
+  .arow .sep {
+    color: var(--muted);
+  }
+  .arow .host {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--muted);
+  }
+  /* Per-site Always-allow button: the host lives inside the label, so the whole
+     button caps at the card width and ellipsizes rather than wrapping the layout. */
+  .allow-site {
+    max-width: 100%;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .hrow {
     padding: var(--s-3) 0;

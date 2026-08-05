@@ -115,3 +115,187 @@ def test_approve_with_remember_roundtrip(client: TestClient, monkeypatch) -> Non
     # Revoke.
     assert client.delete("/api/agent/remembered/remember_fact").status_code == 200
     assert client.get("/api/agent/remembered").json()["tools"] == []
+
+
+# --- per-site "Always allow" for the URL tools ----------------------------
+
+
+def test_remember_mode_per_tool_tier(tmp_path) -> None:
+    """"tool" for whole-tool consent, "site" for the URL tools, None otherwise."""
+    for name in ("remember_fact", "add_task", "save_note",
+                 "web_search", "web_research", "email_read", "email_list"):
+        assert consent.remember_mode(name) == "tool", name
+    for name in ("web_fetch", "kb_ingest_url"):
+        assert consent.remember_mode(name) == "site", name
+    for name in ("delete_task", "email_send", "kb_search", "list_tasks", "no_such"):
+        assert consent.remember_mode(name) is None, name
+
+
+def test_remember_site_stores_lowercase_host(tmp_path) -> None:
+    """The stored host is lowercased/normalized by urllib — case-insensitive by design."""
+    conn = _conn(tmp_path)
+    assert consent.remember_site(conn, "web_fetch", "HTTPS://News.Example.COM/latest?x=1") is True
+    assert consent.remembered(conn) == {"web_fetch@news.example.com"}
+
+
+def test_remember_site_refuses_non_site_tools(tmp_path) -> None:
+    """Whole-tool remember for web_fetch/kb_ingest_url stays refused; site is the ONLY path."""
+    conn = _conn(tmp_path)
+    for name in ("web_fetch", "kb_ingest_url"):
+        assert consent.remember(conn, name) is False, name          # whole-tool refused (unchanged)
+    assert consent.remember_site(conn, "remember_fact", "https://x/") is False   # not site-mode
+    assert consent.remember_site(conn, "email_send", "https://x/") is False       # irreversible
+    assert consent.remembered(conn) == set()
+
+
+def test_remember_site_refuses_bad_urls(tmp_path) -> None:
+    """A URL with no valid host must not create an entry the reader would just drop."""
+    conn = _conn(tmp_path)
+    for bad in ("", "not a url", "file:///etc/passwd", "http://", "http:///path", "javascript:alert(1)"):
+        assert consent.remember_site(conn, "web_fetch", bad) is False, bad
+    assert consent.remembered(conn) == set()
+
+
+def test_allowed_exact_host_match_and_no_subdomain_inheritance(tmp_path) -> None:
+    """A remembered host matches EXACTLY: a sibling subdomain still parks."""
+    conn = _conn(tmp_path)
+    consent.remember_site(conn, "web_fetch", "https://news.example.com/a")
+    entries = consent.remembered(conn)
+    assert consent.allowed_in(entries, "web_fetch", {"url": "https://news.example.com/other"}) is True
+    assert consent.allowed_in(entries, "web_fetch", {"url": "https://www.news.example.com/x"}) is False
+    assert consent.allowed_in(entries, "web_fetch", {"url": "https://example.com/x"}) is False
+    # A different site-mode tool (kb_ingest_url) is not auto-approved by a web_fetch entry.
+    assert consent.allowed_in(entries, "kb_ingest_url", {"url": "https://news.example.com/x"}) is False
+    # Whole-tool tools still work by name (no URL involved).
+    entries2 = entries | {"remember_fact"}
+    assert consent.allowed_in(entries2, "remember_fact", {"text": "hi"}) is True
+
+
+def test_allowed_missing_or_malformed_url_is_false(tmp_path) -> None:
+    """`allowed` must be TOTAL — a bad url returns False, never raises."""
+    conn = _conn(tmp_path)
+    consent.remember_site(conn, "web_fetch", "https://news.example.com/a")
+    entries = consent.remembered(conn)
+    for args in ({}, {"url": None}, {"url": ""}, {"url": 123}, {"url": "not a url"}):
+        assert consent.allowed(conn, "web_fetch", args) is False, args
+        assert consent.allowed_in(entries, "web_fetch", args) is False, args
+
+
+def test_self_defending_read_drops_malformed_and_stale_entries(tmp_path) -> None:
+    """The reader must accept ONLY entries that satisfy the current tool tier + mode."""
+    conn = _conn(tmp_path)
+    # A grab bag of things a corrupt writer or a schema change could leave behind.
+    db.meta_set(conn, "remembered_tools", json.dumps([
+        "remember_fact",                # valid: whole-tool
+        "web_fetch@news.example.com",   # valid: site
+        "web_fetch",                    # invalid: site-mode tool can't be whole-tool remembered
+        "remember_fact@example.com",    # invalid: whole-tool tool has no site entries
+        "@example.com",                 # invalid: empty tool name
+        "web_fetch@",                   # invalid: empty host
+        "web_fetch@a@b",                # invalid: multiple @
+        "web_fetch@bad host!",          # invalid: host syntax
+        "delete_task",                  # invalid: IRREVERSIBLE (mode == None)
+        "no_such_tool",                 # invalid: unknown tool
+    ]))
+    assert consent.remembered(conn) == {"remember_fact", "web_fetch@news.example.com"}
+
+
+def _web_fetch_response(url: str) -> dict:
+    """A model response proposing web_fetch(url)."""
+    args = json.dumps({"url": url})
+    return {"choices": [{"message": {"content": "", "tool_calls": [
+        {"id": "wf1", "type": "function", "function": {"name": "web_fetch", "arguments": args}},
+    ]}}]}
+
+
+def _always_returns(response: dict):
+    """A chat_with_tools stub that always returns the given response."""
+    return lambda *a, **k: response
+
+
+def test_approve_with_remember_on_web_fetch_stores_site_and_auto_runs(
+    client: TestClient, monkeypatch
+) -> None:
+    """End-to-end: approve web_fetch with remember, then the SAME host runs without parking."""
+    client.post("/api/account/setup", json={"passphrase": "correct-horse"})
+    from smartbrain_3000 import netguard
+
+    monkeypatch.setattr(netguard, "safe_fetch",
+                        lambda url: {"final_url": url, "status": 200, "text": "ok"})
+    # First turn: park a web_fetch, approve + remember -> stores web_fetch@example.com.
+    monkeypatch.setattr(gateway, "chat_with_tools",
+                        _always_returns(_web_fetch_response("https://example.com/one")))
+    turn = client.post("/api/agent/turn",
+                       json={"messages": [{"role": "user", "content": "fetch"}], "model": "m"})
+    pid = turn.json()["pending"][0]["id"]
+    approve = client.post(f"/api/agent/pending/{pid}/approve", json={"remember": True})
+    assert approve.status_code == 200
+    assert client.get("/api/agent/remembered").json()["sites"] == [
+        {"tool": "web_fetch", "host": "example.com"}
+    ]
+    # Second turn: same host + a plain reply — must NOT park.
+    seq = iter([_web_fetch_response("https://example.com/two"),
+                {"choices": [{"message": {"content": "done"}}]}])
+    monkeypatch.setattr(gateway, "chat_with_tools", lambda *a, **k: next(seq))
+    result = client.post("/api/agent/turn",
+                         json={"messages": [{"role": "user", "content": "again"}], "model": "m"}).json()
+    assert result["status"] == "complete" and result["message"] == "done"
+    # Third turn: a DIFFERENT host still parks — the injected-URL case survives.
+    monkeypatch.setattr(gateway, "chat_with_tools",
+                        _always_returns(_web_fetch_response("https://attacker.example.net/steal")))
+    other = client.post("/api/agent/turn",
+                        json={"messages": [{"role": "user", "content": "fetch attacker"}], "model": "m"}).json()
+    assert other["status"] == "awaiting_approval"
+
+
+def test_remembered_endpoint_returns_sites_and_forget_removes_one(
+    client: TestClient, monkeypatch
+) -> None:
+    """The GET returns UI-consumable site records; DELETE with ?host= removes just one."""
+    client.post("/api/account/setup", json={"passphrase": "correct-horse"})
+    from smartbrain_3000 import netguard
+
+    monkeypatch.setattr(netguard, "safe_fetch",
+                        lambda url: {"final_url": url, "status": 200, "text": "ok"})
+    for url in ("https://a.example.com/x", "https://b.example.com/y"):
+        monkeypatch.setattr(gateway, "chat_with_tools",
+                            _always_returns(_web_fetch_response(url)))
+        pid = client.post("/api/agent/turn",
+                          json={"messages": [{"role": "user", "content": url}], "model": "m"}
+                          ).json()["pending"][0]["id"]
+        client.post(f"/api/agent/pending/{pid}/approve", json={"remember": True})
+    body = client.get("/api/agent/remembered").json()
+    assert body["tools"] == []
+    assert body["sites"] == [
+        {"tool": "web_fetch", "host": "a.example.com"},
+        {"tool": "web_fetch", "host": "b.example.com"},
+    ]
+    # Forget one host; the other survives.
+    assert client.delete("/api/agent/remembered/web_fetch", params={"host": "a.example.com"}).status_code == 200
+    assert client.get("/api/agent/remembered").json()["sites"] == [
+        {"tool": "web_fetch", "host": "b.example.com"}
+    ]
+
+
+def test_pending_payload_carries_remember_mode_and_host(
+    client: TestClient, monkeypatch
+) -> None:
+    """The tile hints tell the UI which button (whole-tool vs "Always allow <host>")."""
+    client.post("/api/account/setup", json={"passphrase": "correct-horse"})
+    monkeypatch.setattr(gateway, "chat_with_tools",
+                        _always_returns(_web_fetch_response("https://news.example.com/latest")))
+    client.post("/api/agent/turn",
+                json={"messages": [{"role": "user", "content": "fetch"}], "model": "m"})
+    tile = client.get("/api/agent/pending").json()["pending"][0]
+    assert tile["tool"] == "web_fetch"
+    assert tile["remember_mode"] == "site"
+    assert tile["remember_host"] == "news.example.com"
+    assert tile["rememberable"] is True  # phone bundle sees the button
+    # A whole-tool tool carries the "tool" mode and no host.
+    client.post(f"/api/agent/pending/{tile['id']}/deny")
+    monkeypatch.setattr(gateway, "chat_with_tools", _reviewed_tool_call)
+    client.post("/api/agent/turn",
+                json={"messages": [{"role": "user", "content": "note"}], "model": "m"})
+    tile2 = client.get("/api/agent/pending").json()["pending"][0]
+    assert tile2["remember_mode"] == "tool" and tile2["remember_host"] is None
+    assert tile2["rememberable"] is True

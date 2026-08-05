@@ -208,7 +208,20 @@ export interface PendingAction {
   args: Record<string, unknown>;
   // Whether consent would actually store an "always allow" for this tool. The server
   // decides; offering the button where it would be refused reads as a broken button.
+  // Superseded by `remember_mode` for the web UI; kept for back-compat readers.
   rememberable?: boolean;
+  // The consent shape the server would apply. "tool" = whole-tool remember, "site" =
+  // per-host remember (button reads "Always allow <host>"), null = never remembered.
+  remember_mode?: "tool" | "site" | null;
+  // The host parsed from this pending call's URL, when remember_mode is "site".
+  remember_host?: string | null;
+}
+
+// One site-scoped consent entry: URL tools remember per-host, so the same tool can
+// have several — each row is deleted independently (DELETE with ?host=).
+export interface RememberedSite {
+  tool: string;
+  host: string;
 }
 
 export interface Schedule {
@@ -694,9 +707,13 @@ export const api = {
     }),
   denyAction: (id: string) =>
     req<{ ok: boolean }>(`/api/agent/pending/${encodeURIComponent(id)}/deny`, { method: "POST" }),
-  listRemembered: () => req<{ tools: string[] }>("/api/agent/remembered"),
-  forgetRemembered: (name: string) =>
-    req<{ ok: boolean }>(`/api/agent/remembered/${encodeURIComponent(name)}`, { method: "DELETE" }),
+  listRemembered: () => req<{ tools: string[]; sites: RememberedSite[] }>("/api/agent/remembered"),
+  // `host` scopes the delete to one site-scoped entry (URL tools remember per-host).
+  // Without it, the WHOLE-tool consent for `name` is dropped.
+  forgetRemembered: (name: string, host: string | null = null) => {
+    const q = host ? `?host=${encodeURIComponent(host)}` : "";
+    return req<{ ok: boolean }>(`/api/agent/remembered/${encodeURIComponent(name)}${q}`, { method: "DELETE" });
+  },
 
   // planner tasks (encrypted; status + due_date plaintext)
   listTasks: () => req<{ tasks: Task[] }>("/api/tasks"),
