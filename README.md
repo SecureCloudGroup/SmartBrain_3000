@@ -36,9 +36,9 @@ install first. On Linux it runs in Docker.
   data or reaches out parks for your approval first, and every attempt is
   audited.
 - **It quietly improves itself — within hard bounds.** Opt in and SmartBrain reviews
-  its own performance every 8 hours (locally, reversibly, one change at a time),
-  learns your preferences, suggests routines worth automating, and tells you about
-  every change it makes. See the docs on
+  its own performance on the cadence you choose (default: every 8 hours) — locally,
+  reversibly, one change at a time — learns your preferences, suggests routines worth
+  automating, and tells you about every change it makes. See the docs on
   [Self-improvement](docs/03-features.md#self-improvement).
 - **Group and share knowledge with Vaults.** Bundle documents into a **vault** to
   scope a search, share it as an encrypted file, or **publish it publicly** so others
