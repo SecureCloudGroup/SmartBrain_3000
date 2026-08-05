@@ -11,6 +11,17 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Changed
+- **Self-review cadence is now yours to pick.** How often SmartBrain reviews itself
+  used to be hard-wired to every 8 hours; **Settings → Self-improvement** now offers
+  **every 2, 4, 8 (default), or 24 hours** — plus the existing **Off**, which stays the
+  fail-closed kill switch. Heavy chat days benefit from a 2-hour loop (faster feedback);
+  24 keeps a light machine quiet. Note that the "on trial" and auto-revert windows are
+  denominated in *intervals*, so they scale with the cadence too: a 2-hour cadence
+  reviews AND reverts about four times faster than the default, and a 24-hour cadence
+  three times slower. The suggestion-detector's own "one burst of retries is not a
+  routine" window (48 real hours) stays wall-clock — it isn't affected by the setting.
+
 ## [0.8.21] - 2026-08-04
 
 ### Fixed

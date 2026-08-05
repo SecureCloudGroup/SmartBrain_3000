@@ -174,3 +174,46 @@ describe("approvals + remembered consent", () => {
     expect(init!.method).toBe("DELETE");
   });
 });
+
+// Self-improvement cadence: the Settings segmented control sends ONE PUT per click.
+// Picking an hour flips the reviewer on AND sets the cadence together (a two-request
+// dance would leave a valid state visible mid-flight — off-with-new-cadence — and give
+// the server an extra chance to fail between them). Picking Off must NOT touch the
+// stored interval, so the body carries only enabled:false — the server preserves it.
+describe("self-improve cadence", () => {
+  function captureFetch(status = 200, body: unknown = {}) {
+    const spy = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) =>
+      jsonResponse(status, body),
+    );
+    globalThis.fetch = spy as unknown as typeof globalThis.fetch;
+    return spy;
+  }
+
+  it("putSelfImprove(off) sends only { enabled: false } in one PUT", async () => {
+    const spy = captureFetch(200, { enabled: false, interval_hours: 8, last_run: null });
+    await api.putSelfImprove({ enabled: false });
+    expect(spy.mock.calls).toHaveLength(1);
+    const [url, init] = spy.mock.calls[0];
+    expect(String(url)).toBe("/api/selfimprove");
+    expect(init!.method).toBe("PUT");
+    expect(JSON.parse(String(init!.body))).toEqual({ enabled: false });
+  });
+
+  it("putSelfImprove(interval) sends both enabled:true and the interval_hours in one PUT", async () => {
+    const spy = captureFetch(200, { enabled: true, interval_hours: 4, last_run: null });
+    await api.putSelfImprove({ enabled: true, interval_hours: 4 });
+    expect(spy.mock.calls).toHaveLength(1);
+    const [url, init] = spy.mock.calls[0];
+    expect(String(url)).toBe("/api/selfimprove");
+    expect(init!.method).toBe("PUT");
+    expect(JSON.parse(String(init!.body))).toEqual({ enabled: true, interval_hours: 4 });
+  });
+
+  it("getSelfImprove returns { enabled, interval_hours, last_run }", async () => {
+    captureFetch(200, { enabled: true, interval_hours: 2, last_run: "2026-08-01 12:00:00.000000" });
+    const state = await api.getSelfImprove();
+    expect(state.enabled).toBe(true);
+    expect(state.interval_hours).toBe(2);
+    expect(state.last_run).toBe("2026-08-01 12:00:00.000000");
+  });
+});

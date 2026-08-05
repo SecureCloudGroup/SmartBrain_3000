@@ -47,6 +47,26 @@ def test_kill_switch_fails_closed() -> None:
     assert selfreview.enabled(conn) is False
 
 
+def test_interval_hours_default_and_fail_closed() -> None:
+    conn = _conn()
+    assert selfreview.interval_hours(conn) == 8  # absent -> default
+    dbmod.meta_set(conn, selfreview.INTERVAL_META_KEY, "not a number")  # garbled -> default
+    assert selfreview.interval_hours(conn) == 8
+    dbmod.meta_set(conn, selfreview.INTERVAL_META_KEY, "6")  # out-of-set -> default
+    assert selfreview.interval_hours(conn) == 8
+    for hours in (2, 4, 8, 24):  # every allowed value round-trips
+        selfreview.set_interval_hours(conn, hours)
+        assert selfreview.interval_hours(conn) == hours
+
+
+def test_set_interval_hours_validates_the_allowed_set() -> None:
+    conn = _conn()
+    for bad in (0, 1, 3, 6, 12, 48, -1):
+        with pytest.raises(ValueError, match="interval_hours must be one of"):
+            selfreview.set_interval_hours(conn, bad)
+    assert selfreview.interval_hours(conn) == 8  # nothing bad ever persisted
+
+
 def test_due_cadence() -> None:
     conn = _conn()
     assert selfreview.due(conn) is True  # never ran -> due
@@ -55,12 +75,30 @@ def test_due_cadence() -> None:
     assert selfreview.due(conn) is False  # just ran -> not due
     old = conn.execute(
         "SELECT strftime(now() - to_seconds(?), ?);",
-        [selfreview.REVIEW_INTERVAL_SECONDS + 60, selfreview._TS_FORMAT],
+        [selfreview.DEFAULT_REVIEW_INTERVAL_HOURS * 3600 + 60, selfreview._TS_FORMAT],
     ).fetchone()
     dbmod.meta_set(conn, selfreview.LAST_RUN_META_KEY, str(old[0]))
     assert selfreview.due(conn) is True  # a full interval ago -> due again
     dbmod.meta_set(conn, selfreview.LAST_RUN_META_KEY, "not a timestamp")
     assert selfreview.due(conn) is True  # corrupt cadence stamp -> run and self-heal
+
+
+def test_due_honors_configured_interval() -> None:
+    # The due-check re-reads the setting every call, so changing the cadence takes
+    # effect on the very next scheduler tick — no scheduler machinery to update.
+    conn = _conn()
+    two_hours_ago = conn.execute("SELECT strftime(now() - to_seconds(?), ?);",
+                                 [2 * 3600 + 60, selfreview._TS_FORMAT]).fetchone()
+    dbmod.meta_set(conn, selfreview.LAST_RUN_META_KEY, str(two_hours_ago[0]))
+    selfreview.set_interval_hours(conn, 8)
+    assert selfreview.due(conn) is False  # 2h ago, default 8h cadence -> not due
+    selfreview.set_interval_hours(conn, 2)
+    assert selfreview.due(conn) is True   # 2h cadence -> now due
+    eight_hours_ago = conn.execute("SELECT strftime(now() - to_seconds(?), ?);",
+                                   [8 * 3600 + 60, selfreview._TS_FORMAT]).fetchone()
+    dbmod.meta_set(conn, selfreview.LAST_RUN_META_KEY, str(eight_hours_ago[0]))
+    selfreview.set_interval_hours(conn, 24)
+    assert selfreview.due(conn) is False  # 8h ago, 24h cadence -> not due yet
 
 
 def test_disabled_run_review_is_a_noop() -> None:
@@ -168,7 +206,8 @@ def test_stale_stamp_from_disabled_gap_is_clamped() -> None:
     assert out is not None and out["window_start"] != stale
     row = conn.execute(  # the clamped start is within ~2 intervals of now
         "SELECT strptime(?, ?) >= now() - to_seconds(?);",
-        [out["window_start"], selfreview._TS_FORMAT, 2 * selfreview.REVIEW_INTERVAL_SECONDS],
+        [out["window_start"], selfreview._TS_FORMAT,
+         2 * selfreview.DEFAULT_REVIEW_INTERVAL_HOURS * 3600],
     ).fetchone()
     assert bool(row[0])
 
@@ -178,7 +217,7 @@ def test_slightly_late_stamp_is_kept() -> None:
     # rows from the extra minutes would otherwise be silently dropped.
     conn, key = _conn(), gen_master_key()
     selfreview.set_enabled(conn, True)
-    late = _stamp(conn, selfreview.REVIEW_INTERVAL_SECONDS + 300)  # 8h + 5min ago
+    late = _stamp(conn, selfreview.DEFAULT_REVIEW_INTERVAL_HOURS * 3600 + 300)  # 8h + 5min ago
     dbmod.meta_set(conn, selfreview.LAST_RUN_META_KEY, late)
     out = selfreview.run_review(conn, key)
     assert out is not None and out["window_start"] == late
@@ -196,7 +235,7 @@ def test_pending_embedding_flags_only_when_persistent() -> None:
     card = selfreview.ReviewStore(conn, key).latest()["scorecard"]
     assert card["knowledge"]["pending_embedding"] == 1
     dbmod.meta_set(conn, selfreview.LAST_RUN_META_KEY,
-                   _stamp(conn, selfreview.REVIEW_INTERVAL_SECONDS + 60))  # force due again
+                   _stamp(conn, selfreview.DEFAULT_REVIEW_INTERVAL_HOURS * 3600 + 60))  # force due
     notified: list = []
     second = selfreview.run_review(conn, key, notify=lambda s, m: notified.append(m))
     assert second is not None and second["flags"] == 1  # still pending a whole interval later
@@ -283,7 +322,7 @@ def _flagged_setup(monkeypatch, findings) -> tuple:
 
 def _force_due(conn) -> None:
     dbmod.meta_set(conn, selfreview.LAST_RUN_META_KEY,
-                   _stamp(conn, selfreview.REVIEW_INTERVAL_SECONDS + 60))
+                   _stamp(conn, selfreview.DEFAULT_REVIEW_INTERVAL_HOURS * 3600 + 60))
 
 
 def test_high_confidence_finding_applies_and_announces(monkeypatch) -> None:
@@ -402,7 +441,8 @@ def test_stale_unmeasured_trial_is_reverted(monkeypatch) -> None:
     iid = improvements.ImprovementStore(conn, key).list()[0]["id"]
     conn.execute(  # trial has sat unjudged past the interval cap
         "UPDATE improvements SET applied_at = now() - to_seconds(?) WHERE id = ?;",
-        [(selfreview._MAX_TRIAL_INTERVALS + 1) * selfreview.REVIEW_INTERVAL_SECONDS, iid],
+        [(selfreview._MAX_TRIAL_INTERVALS + 1)
+         * selfreview.DEFAULT_REVIEW_INTERVAL_HOURS * 3600, iid],
     )
     conn.execute("DELETE FROM turn_metrics;")  # and there is no fresh evidence at all
     _force_due(conn)
@@ -413,6 +453,47 @@ def test_stale_unmeasured_trial_is_reverted(monkeypatch) -> None:
     assert store.on_trial() is None and store.get(iid)["status"] == "reverted"
     assert MemoryStore(conn, key).list_memories() == []  # the unverified fact is gone
     assert "removed an unverified change" in notified[0]
+
+
+def test_stale_trial_interval_scales_with_cadence(monkeypatch) -> None:
+    # Interval-denominated windows scale with the configured cadence: on a 2h cadence
+    # the same three-interval revert clock is six wall hours, not twenty-four. An
+    # apply that would still be within the cap at 8h cadence must trip the stale-
+    # revert at 2h — proves _MAX_TRIAL_INTERVALS is read against the LIVE interval.
+    conn, key = _flagged_setup(monkeypatch, [_FINDING])
+    selfreview.run_review(conn, key)  # applies; trial opens
+    iid = improvements.ImprovementStore(conn, key).list()[0]["id"]
+    conn.execute(  # 7 wall hours ago: WITHIN 3 intervals at 8h (24h cap), PAST it at 2h (6h)
+        "UPDATE improvements SET applied_at = now() - to_seconds(?) WHERE id = ?;",
+        [7 * 3600, iid],
+    )
+    conn.execute("DELETE FROM turn_metrics;")  # no post-apply evidence in either case
+    _force_due(conn)
+    monkeypatch.setattr(selfreview, "_critique", lambda *a, **k: [])
+    # Default 8h cadence: the trial stays open (still inside 3*8h = 24h).
+    selfreview.run_review(conn, key)
+    assert improvements.ImprovementStore(conn, key).on_trial() is not None
+    # Switch to 2h cadence and re-run: 7h > 3*2h = 6h, so the stale revert fires.
+    selfreview.set_interval_hours(conn, 2)
+    dbmod.meta_set(conn, selfreview.LAST_RUN_META_KEY,
+                   _stamp(conn, 2 * 3600 + 60))  # force due at the new cadence
+    notified: list = []
+    selfreview.run_review(conn, key, notify=lambda s, m: notified.append(m))
+    store = improvements.ImprovementStore(conn, key)
+    assert store.on_trial() is None and store.get(iid)["status"] == "reverted"
+    assert "removed an unverified change" in notified[0]
+
+
+def test_workflow_min_span_hours_is_wall_clock_not_interval() -> None:
+    # _WORKFLOW_MIN_SPAN_HOURS = 48h ("one burst of retries is not a routine") is a
+    # WALL-CLOCK safety window — its rationale is real elapsed time, not review count,
+    # so it must NOT scale with the cadence setting. A burst spanning under 48h stays
+    # not-a-routine regardless of how frequently the reviewer runs.
+    burst = ["2026-07-26 08:00:00.000000",  # ~24h span: retries, not a routine
+             "2026-07-26 20:00:00.000000",
+             "2026-07-27 08:00:00.000000"]
+    assert selfreview._cadence_minutes(burst) is None
+    assert selfreview._WORKFLOW_MIN_SPAN_HOURS == 48.0  # unchanged by any cadence setting
 
 
 def test_reverted_payload_never_flaps_back(monkeypatch) -> None:
@@ -841,10 +922,28 @@ def test_selfimprove_api_requires_unlock(client: TestClient) -> None:
 def test_selfimprove_api_round_trip(client: TestClient) -> None:
     client.post("/api/account/setup", json={"passphrase": "correct-horse"})
     state = client.get("/api/selfimprove").json()
-    assert state == {"enabled": False, "last_run": None}  # default off, never ran
+    assert state == {"enabled": False, "interval_hours": 8, "last_run": None}  # defaults
     assert client.put("/api/selfimprove", json={"enabled": True}).json()["enabled"] is True
     assert client.get("/api/selfimprove").json()["enabled"] is True
     assert client.put("/api/selfimprove", json={"enabled": False}).json()["enabled"] is False
+
+
+def test_selfimprove_api_interval_setting(client: TestClient) -> None:
+    # The cadence is a first-class setting: GET carries it, PUT accepts each of
+    # {2, 4, 8, 24}, an invalid choice comes back 422 with the allowed set in the
+    # message, and changing the interval must NOT flip the kill-switch either way.
+    client.post("/api/account/setup", json={"passphrase": "correct-horse"})
+    client.put("/api/selfimprove", json={"enabled": True})  # kill-switch on
+    for hours in (2, 4, 8, 24):
+        body = client.put("/api/selfimprove", json={"interval_hours": hours}).json()
+        assert body["interval_hours"] == hours
+        assert body["enabled"] is True  # never flipped by an interval change
+    bad = client.put("/api/selfimprove", json={"interval_hours": 6})
+    assert bad.status_code == 422
+    assert "2, 4, 8, 24" in bad.json()["detail"]  # the allowed set is visible to the caller
+    # Symmetric: flipping enabled must not reset the interval either.
+    client.put("/api/selfimprove", json={"interval_hours": 2})
+    assert client.put("/api/selfimprove", json={"enabled": False}).json()["interval_hours"] == 2
 
 
 def test_improvements_ledger_api(client: TestClient) -> None:

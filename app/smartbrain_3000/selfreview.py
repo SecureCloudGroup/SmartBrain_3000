@@ -1,7 +1,8 @@
 """Self-review: the periodic scorecard + critique pass (self-improving framework).
 
-Every ~8 hours (while unlocked) this quantifies how well each component — Chat,
-Knowledge, Tools — performed over the window, entirely in SQL over PLAINTEXT
+On the operator's configured cadence (2/4/8/24 hours; default 8, kill-switch off is
+"never") this quantifies how well each component — Chat, Knowledge, Tools —
+performed over the window, entirely in SQL over PLAINTEXT
 metadata columns. When something is flagged, a LOCAL model critiques a bounded
 sample of the evidence and may propose ONE improvement; a high-confidence learned
 preference is applied through the reversible memory-fact lever and put ON TRIAL —
@@ -48,11 +49,12 @@ _TS_FORMAT = "%Y-%m-%d %H:%M:%S.%f"
 
 ENABLED_META_KEY = "selfimprove:enabled"
 LAST_RUN_META_KEY = "selfimprove:last_run"
-REVIEW_INTERVAL_SECONDS = 8 * 3600  # operator-chosen cadence: every 8 hours
-# A first-ever review (no last_run) still needs a bounded window — 8h, matching the
-# cadence, so a years-old backlog can't produce a misleading "everything is on fire"
-# first scorecard from ancient rows.
-_FIRST_WINDOW_SECONDS = REVIEW_INTERVAL_SECONDS
+INTERVAL_META_KEY = "selfimprove:interval_hours"
+DEFAULT_REVIEW_INTERVAL_HOURS = 8  # cadence when unset; also the fail-closed fallback
+# Exactly the set surfaced in Settings; anything else read back from meta is treated as
+# corrupt and falls back to the default (a wiped/garbled setting must never make the
+# reviewer wait weeks between passes — mirrors the kill-switch's fail-closed posture).
+ALLOWED_INTERVAL_HOURS = frozenset((2, 4, 8, 24))
 
 # Deterministic flag thresholds. Every rate flag carries a MINIMUM SAMPLE so two bad
 # turns on a quiet day can't page the user; the numbers are starting points the later
@@ -89,6 +91,9 @@ _MIN_TRIAL_UNHAPPY = 2      # ...AND at least this many unhappy events: at the m
 # A trial that can't gather evidence must not stay live unmeasured forever — an unverified
 # change is REVERTED after this many intervals (reversible-by-default: the very harm a bad
 # fact causes can be what keeps the user away from chat, so "no evidence" is not "no harm").
+# Deliberately DENOMINATED IN INTERVALS: a 2h cadence evaluates trials four times faster
+# than a 24h one — heavy-use machines learn faster, light ones stay calmer, and this
+# window scales with the chosen review pace by design (documented for the operator).
 _MAX_TRIAL_INTERVALS = 3
 
 # --- Phase 4: deterministic suggestion detectors ----------------------------
@@ -143,6 +148,44 @@ def set_enabled(conn: duckdb.DuckDBPyConnection, on: bool) -> None:
     db.meta_set(conn, ENABLED_META_KEY, "true" if on else "false")
 
 
+def interval_hours(conn: duckdb.DuckDBPyConnection) -> int:
+    """Configured cadence in hours (one of ALLOWED_INTERVAL_HOURS).
+
+    FAIL-CLOSED: absent, non-numeric, or out-of-set reads all return the default —
+    a corrupt setting must never widen the review interval past what the operator
+    picked from the allowed set (or shrink it to something silly).
+    """
+    assert conn is not None, "conn required"
+    raw = db.meta_get(conn, INTERVAL_META_KEY)
+    if not raw:
+        return DEFAULT_REVIEW_INTERVAL_HOURS
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return DEFAULT_REVIEW_INTERVAL_HOURS
+    return value if value in ALLOWED_INTERVAL_HOURS else DEFAULT_REVIEW_INTERVAL_HOURS
+
+
+def set_interval_hours(conn: duckdb.DuckDBPyConnection, hours: int) -> int:
+    """Persist a new cadence; raises ValueError on anything outside the allowed set.
+
+    Never touches the kill-switch: turning Off is a separate action, so changing
+    "how often" cannot accidentally re-enable a reviewer the user disabled (and
+    vice versa). Returns the applied value for the caller's echo.
+    """
+    assert conn is not None, "conn required"
+    if hours not in ALLOWED_INTERVAL_HOURS:
+        raise ValueError(
+            f"interval_hours must be one of {sorted(ALLOWED_INTERVAL_HOURS)}; got {hours!r}")
+    db.meta_set(conn, INTERVAL_META_KEY, str(hours))
+    return hours
+
+
+def _interval_seconds(conn: duckdb.DuckDBPyConnection) -> int:
+    """The current cadence in seconds (re-read every tick so a change lands next tick)."""
+    return interval_hours(conn) * 3600
+
+
 def last_run(conn: duckdb.DuckDBPyConnection) -> str | None:
     """The previous review's window_end ('%Y-%m-%d %H:%M:%S', DB clock), or None."""
     return db.meta_get(conn, LAST_RUN_META_KEY)
@@ -161,7 +204,7 @@ def due(conn: duckdb.DuckDBPyConnection) -> bool:
     try:
         row = conn.execute(
             "SELECT strptime(?, ?) + to_seconds(?) <= now();",
-            [prev, _TS_FORMAT, REVIEW_INTERVAL_SECONDS],
+            [prev, _TS_FORMAT, _interval_seconds(conn)],
         ).fetchone()
     except duckdb.Error:
         return True  # corrupt timestamp -> run now and self-heal
@@ -225,13 +268,15 @@ def _window(conn: duckdb.DuckDBPyConnection) -> tuple[str, str]:
     run's meta_set could rewrite it, so the advertised self-heal would never happen
     (found by adversarial review, reproduced live). A stale-but-valid stamp from a
     long disabled gap falls back too: an unbounded catch-up window is exactly the
-    misleading everything-on-fire scorecard _FIRST_WINDOW_SECONDS exists to prevent.
-    Cadence jitter (a tick landing minutes late) stays within the 2x bound, so a
-    normal, slightly-long window is still covered edge to edge.
+    misleading everything-on-fire scorecard the first-window clamp exists to prevent
+    (the fallback is one full cadence, so a years-old backlog can't dominate a first
+    scorecard). Cadence jitter (a tick landing minutes late) stays within the 2x
+    bound, so a normal, slightly-long window is still covered edge to edge.
     """
+    first_window = _interval_seconds(conn)
     row = conn.execute(
         "SELECT strftime(now() - to_seconds(?), ?), strftime(now(), ?);",
-        [_FIRST_WINDOW_SECONDS, _TS_FORMAT, _TS_FORMAT],
+        [first_window, _TS_FORMAT, _TS_FORMAT],
     ).fetchone()
     assert row is not None, "clock query must return a row"
     fallback, until = str(row[0]), str(row[1])
@@ -241,7 +286,7 @@ def _window(conn: duckdb.DuckDBPyConnection) -> tuple[str, str]:
     try:
         recent = conn.execute(
             "SELECT strptime(?, ?) >= now() - to_seconds(?);",
-            [prev, _TS_FORMAT, 2 * _FIRST_WINDOW_SECONDS],
+            [prev, _TS_FORMAT, 2 * first_window],
         ).fetchone()
     except duckdb.Error:
         return fallback, until  # corrupt stamp -> bounded window; meta_set then heals it
@@ -561,7 +606,7 @@ def _settle_trial(conn: duckdb.DuckDBPyConnection, key: bytes, since: str, until
     if chat["turns"] < _MIN_TRIAL_TURNS:
         stale = conn.execute(
             "SELECT CAST(? AS TIMESTAMP) < now() - to_seconds(?);",
-            [trial["applied_at"], _MAX_TRIAL_INTERVALS * REVIEW_INTERVAL_SECONDS],
+            [trial["applied_at"], _MAX_TRIAL_INTERVALS * _interval_seconds(conn)],
         ).fetchone()
         if stale and stale[0]:  # never enough evidence — undo the unverified change
             if store.revert(trial["id"]):

@@ -362,7 +362,8 @@ Searches only happen when the assistant actually uses the web tools in a turn; s
 ## Self-improvement
 
 SmartBrain can review its own recent performance and carefully improve — **off by
-default**, and switched on under **Settings → Self-improvement**. Every 8 hours (while
+default**, and switched on under **Settings → Self-improvement**. On the cadence you
+choose — every 2, 4, 8 (default), or 24 hours — under Settings → Self-improvement (while
 unlocked) it scores Chat, Knowledge, and Tools from private, on-device telemetry. Quiet
 periods stay silent; when something needs attention you get a short digest in the chat
 feed. From a flagged period it may act — always within hard bounds:

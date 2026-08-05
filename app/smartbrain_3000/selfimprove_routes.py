@@ -22,24 +22,38 @@ def _require_unlocked(request: Request) -> None:
 
 
 class SelfImproveIn(BaseModel):
-    enabled: bool
+    # Both optional: PUT can change JUST enabled, JUST interval, or both — and
+    # setting one must never flip the other (see set_interval_hours' docstring).
+    enabled: bool | None = None
+    interval_hours: int | None = None
 
 
 @router.get("/api/selfimprove")
 def get_selfimprove(request: Request) -> dict:
-    """Kill-switch state + last review cadence stamp (reads are plaintext meta)."""
+    """Kill-switch state + configured cadence + last review stamp (plaintext meta)."""
     _require_unlocked(request)
     conn = request.app.state.dbx
-    return {"enabled": selfreview.enabled(conn), "last_run": selfreview.last_run(conn)}
+    return {"enabled": selfreview.enabled(conn),
+            "interval_hours": selfreview.interval_hours(conn),
+            "last_run": selfreview.last_run(conn)}
 
 
 @router.put("/api/selfimprove")
 def put_selfimprove(request: Request, body: SelfImproveIn) -> dict:
-    """Flip the master kill-switch. Off is the default; absent/corrupt config reads as off."""
+    """Update kill-switch and/or cadence. Off is the default; absent/corrupt config reads
+    as off. Cadence outside the allowed set → 422 with the allowed values in the message."""
     _require_unlocked(request)
     conn = request.app.state.dbx
-    selfreview.set_enabled(conn, body.enabled)
-    return {"enabled": selfreview.enabled(conn)}
+    if body.interval_hours is not None:
+        try:
+            selfreview.set_interval_hours(conn, body.interval_hours)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if body.enabled is not None:
+        selfreview.set_enabled(conn, body.enabled)
+    return {"enabled": selfreview.enabled(conn),
+            "interval_hours": selfreview.interval_hours(conn),
+            "last_run": selfreview.last_run(conn)}
 
 
 class OptimizerIn(BaseModel):
