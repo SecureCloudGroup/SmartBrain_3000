@@ -124,3 +124,53 @@ describe("vault client calls", () => {
     expect(spy.mock.calls[0][1]!.body).toBe(file);
   });
 });
+
+// Approval + remembered-consent client. The Activity page reads listRemembered as
+// { tools, sites }, and its "Always allow www.zerohedge.com" button flows through
+// approveAction with `remember: true`. Stop-allowing a site row is a DELETE that must
+// carry ?host= — without it the server would drop the WHOLE-tool consent instead.
+describe("approvals + remembered consent", () => {
+  function captureFetch(status = 200, body: unknown = {}) {
+    const spy = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) =>
+      jsonResponse(status, body),
+    );
+    globalThis.fetch = spy as unknown as typeof globalThis.fetch;
+    return spy;
+  }
+
+  it("approve sends {confirm_tool, remember} in the JSON body", async () => {
+    const spy = captureFetch(200, { status: "executed", result: {} });
+    await api.approveAction("pid-1", null, true);
+    const [url, init] = spy.mock.calls[0];
+    expect(String(url)).toBe("/api/agent/pending/pid-1/approve");
+    expect(init!.method).toBe("POST");
+    expect(JSON.parse(String(init!.body))).toEqual({ confirm_tool: null, remember: true });
+  });
+
+  it("listRemembered returns the { tools, sites } shape (site rows carry tool + host)", async () => {
+    captureFetch(200, {
+      tools: ["kb_add"],
+      sites: [{ tool: "web_fetch", host: "www.zerohedge.com" }],
+    });
+    const r = await api.listRemembered();
+    expect(r.tools).toEqual(["kb_add"]);
+    expect(r.sites).toEqual([{ tool: "web_fetch", host: "www.zerohedge.com" }]);
+  });
+
+  it("forgetRemembered without a host drops WHOLE-tool consent (no query string)", async () => {
+    const spy = captureFetch(200, { ok: true });
+    await api.forgetRemembered("kb_add");
+    const [url, init] = spy.mock.calls[0];
+    expect(String(url)).toBe("/api/agent/remembered/kb_add");
+    expect(init!.method).toBe("DELETE");
+    expect(String(url)).not.toContain("host=");
+  });
+
+  it("forgetRemembered with a host encodes it as ?host= so only that site row is dropped", async () => {
+    const spy = captureFetch(200, { ok: true });
+    await api.forgetRemembered("web_fetch", "www.zerohedge.com");
+    const [url, init] = spy.mock.calls[0];
+    expect(String(url)).toBe("/api/agent/remembered/web_fetch?host=www.zerohedge.com");
+    expect(init!.method).toBe("DELETE");
+  });
+});

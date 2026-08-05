@@ -91,7 +91,12 @@ Tools are **risk-tiered**, and this is the core safety idea:
 - **Reviewed** (e.g. add a task, search the web) is **never run automatically** until you
   say so. The assistant *proposes* it and it waits for your approval in **Activity**. If
   you get tired of approving the same tool, **Always allow** lets that one run without
-  asking from then on — and **Stop allowing** takes it back.
+  asking from then on — and **Stop allowing** takes it back. The two tools that fetch a
+  URL the assistant composed (**Fetch a page**, **Add a URL to knowledge**) are allowed
+  **per site**: the button reads *Always allow <that site>*, future calls to that exact
+  site run unattended, and a different site still asks once. That's deliberate — a page
+  the assistant reads could try to talk it into fetching an address an attacker owns,
+  and an unknown site always parks for your review.
 - **Irreversible** (e.g. send an email, delete a task) always waits for your approval, with
   an extra confirmation, and can never be pre-authorized.
 
@@ -399,7 +404,10 @@ Your audit and approvals view. Two parts:
 
 - **Awaiting your approval** — a card per proposed action, naming the tool, what it would
   do, and whether it is reversible. **Approve** or **Deny** it. **Always allow** approves it
-  and stops asking for that tool from then on; anything pre-authorized this way is listed
+  and stops asking for that tool from then on (for the URL tools, for that tool **on that
+  site** — the list shows each allowed site as its own row). Denying an action holds for
+  the rest of that run: the assistant is told, and an identical retry is refused instead
+  of asking you again; anything pre-authorized this way is listed
   under **Always allowed**, where **Stop allowing** takes the permission back. Irreversible
   tools can't be pre-authorized — they ask every time, with an extra confirmation.
 
