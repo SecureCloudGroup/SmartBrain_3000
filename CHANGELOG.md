@@ -11,6 +11,8 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.8.22] - 2026-08-05
+
 ### Changed
 - **A paired phone can now add to Knowledge — and see Usage.** The phone was
   read-only for Knowledge; it now offers the full **Add to Knowledge** card (write a
