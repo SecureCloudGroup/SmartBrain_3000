@@ -15,6 +15,7 @@ import json
 import threading
 from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import ClassVar
 
 import pytest
 
@@ -22,7 +23,9 @@ from smartbrain_3000 import email_oauth, gmail
 
 
 class _GmailHandler(BaseHTTPRequestHandler):
-    requests: list[dict] = []
+    # Class-level aggregate: BaseHTTPRequestHandler instantiates a new handler per request,
+    # so tests read the shared log after the server has fielded several calls.
+    requests: ClassVar[list[dict]] = []
 
     def log_message(self, *a) -> None:
         pass

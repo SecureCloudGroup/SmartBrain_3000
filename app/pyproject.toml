@@ -32,7 +32,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
-    "ruff<0.16",  # 0.16.0 promoted new default rules (216 findings); upgrade deliberately
+    "ruff>=0.16,<0.17",
 ]
 
 [tool.setuptools.packages.find]
@@ -47,3 +47,49 @@ smartbrain_3000 = ["web/**/*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
+
+# Ruff config is EXPLICIT so a ruff upgrade that promotes new default rules is a
+# deliberate decision, not a silent CI failure. See #191 for the drift this closes.
+# Every entry below is a rule ruff 0.16 turns on by default that the codebase
+# deliberately deviates from; correctness rules with real findings were fixed
+# rather than added here.
+[tool.ruff.lint]
+ignore = [
+    # The app catches Exception at edges (best-effort operations, request
+    # handlers, background sync/scheduler ticks) so one bad row/URL never takes
+    # the whole loop down. Auditing 120 sites for narrower types is a project of
+    # its own; the pattern is intentional and comment-documented at each site.
+    "BLE001",
+    # Multi-line SQL literals inside migration tuples are deliberately split for
+    # line-width. They are not "did you forget a comma?" — each sits next to an
+    # integer version number that makes the tuple shape unambiguous.
+    "ISC004",
+    # Tuple-unpacking that names every element documents the return shape for
+    # the reader, even when the specific caller/test doesn't use every field.
+    # Prefixing with `_` erases that documentation for no runtime benefit.
+    "RUF059",
+    # Tests use `pytest.raises(Exception)` to assert "some crypto/decode failure
+    # happens" without pinning the exact library exception class (e.g. wrong-key
+    # decryption where the crypto backend's tag-failure type is an internal
+    # detail we don't want to lock tests to).
+    "B017",
+    # `try/except: pass` is used for compensating rollbacks and best-effort side
+    # operations (opening the browser, deleting a leftover provider row) where
+    # the caller has already committed to a specific outcome and a secondary
+    # failure must not overwrite it.
+    "S110",
+    # `try/except: continue` in the doctor's URL-candidate probe skips a failed
+    # http-vs-https attempt to try the next one; logging every miss would spam
+    # the user's terminal with intended-to-be-invisible fallbacks.
+    "S112",
+    # DTZ005/007/011: the app is a single-user personal assistant. User-facing
+    # dates and times are LOCAL wall-clock by design (backup filename stamps,
+    # planner recurrence "due tomorrow", /api/models `since=` query bound).
+    # UTC-normalising them would surprise the user in every one of these places.
+    "DTZ005",
+    "DTZ007",
+    "DTZ011",
+    # installer/doctor.py has a `#!/usr/bin/env python3` shebang but is imported
+    # by install.py, not run directly. The shebang is documentation.
+    "EXE001",
+]

@@ -11,7 +11,6 @@ from fastapi.testclient import TestClient
 from smartbrain_3000 import devices
 from smartbrain_3000.secrets import SecretStore, gen_master_key
 
-
 # B8: the Desktop-local marker the real UI sends; the WebRTC bridge strips it, so a
 # bridged-in (paired-phone) request lacks it and is refused with 403. Enrolling/revoking
 # devices is Desktop-only so a paired phone can't self-mint a credential or revoke the Desktop's.

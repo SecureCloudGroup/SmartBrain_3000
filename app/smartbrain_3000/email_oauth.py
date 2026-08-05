@@ -54,7 +54,7 @@ def redirect_uri() -> str:
         uri = f"http://localhost:{os.environ.get('SMARTBRAIN_PORT', '33000')}{_CALLBACK_PATH}"
     # Hard raise, NOT assert (asserts are stripped under `python -O`): the loopback redirect is the
     # local-first guarantee that Google delivers the auth code only to the user's own machine.
-    if not (uri.startswith("http://localhost") or uri.startswith("http://127.0.0.1")):
+    if not uri.startswith(("http://localhost", "http://127.0.0.1")):
         raise EmailOAuthError("SMARTBRAIN_OAUTH_REDIRECT must be a loopback URI (http://localhost or http://127.0.0.1)")
     return uri
 

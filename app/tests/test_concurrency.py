@@ -37,7 +37,7 @@ def test_threadlocalconn_isolates_thread_results() -> None:
                 time.sleep(0)  # widen the execute->fetch window (exposes clobbering)
                 if rel.fetchone()[0] != tid:
                     mismatches.append(tid)
-        except Exception as exc:  # noqa: BLE001 - record, don't crash the thread
+        except Exception as exc:
             errors.append(repr(exc))
 
     threads = [threading.Thread(target=worker, args=(n,)) for n in range(_THREADS)]
@@ -83,7 +83,7 @@ def test_concurrent_requests_stay_consistent(client: TestClient) -> None:
                     r = client.get(route)
                     if r.status_code != 200:
                         errors.append(f"{route} -> {r.status_code}")
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             errors.append(repr(exc))
 
     threads = [threading.Thread(target=hammer, args=(n,)) for n in range(_THREADS)]

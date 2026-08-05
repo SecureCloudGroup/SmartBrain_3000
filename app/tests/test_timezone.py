@@ -9,7 +9,7 @@ states the local time outright, keeping the UTC anchor for cross-zone math.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import duckdb
 from fastapi.testclient import TestClient
@@ -29,8 +29,8 @@ def _conn(tz: str | None) -> duckdb.DuckDBPyConnection:
 def _freeze(monkeypatch, *utc_parts: int) -> None:
     class _Fixed(datetime):
         @classmethod
-        def now(cls, tz=None):  # noqa: ANN001 - datetime signature
-            return datetime(*utc_parts, tzinfo=timezone.utc).astimezone(tz)
+        def now(cls, tz=None):
+            return datetime(*utc_parts, tzinfo=UTC).astimezone(tz)
 
     monkeypatch.setattr(chat_routes, "datetime", _Fixed)
 

@@ -197,7 +197,7 @@ def _health_ok() -> bool:
     # localhost but the script's trust store may not include the mkcert CA).
     ctx = ssl._create_unverified_context() if url.startswith("https") else None
     try:
-        with urllib.request.urlopen(url, timeout=2, context=ctx) as resp:  # noqa: S310 - fixed loopback URL
+        with urllib.request.urlopen(url, timeout=2, context=ctx) as resp:
             return resp.status == 200 and b'"status":"ok"' in resp.read(256)
     except Exception:
         return False
@@ -282,7 +282,7 @@ def cmd_install(open_browser: bool) -> int:
 def _doctor():
     """Import installer/doctor.py (this directory is not a package, so load it by path)."""
     sys.path.insert(0, str(Path(__file__).resolve().parent))
-    import doctor  # noqa: PLC0415 - lazy on purpose: importing costs nothing until asked
+    import doctor
 
     return doctor
 

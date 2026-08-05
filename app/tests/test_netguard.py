@@ -149,9 +149,8 @@ def test_vault_fetch_fragment_never_reaches_resolver_or_logs(monkeypatch, caplog
         return [(2, 1, 6, "", ("127.0.0.1", 0))]  # loopback -> refused before any connect
 
     monkeypatch.setattr(socket, "getaddrinfo", spy_gai)
-    with caplog.at_level(logging.DEBUG):
-        with pytest.raises(FetchError) as exc:
-            fetch("https://tree.test/team.sbvault#k=FAKEKEY_ABC123")
+    with caplog.at_level(logging.DEBUG), pytest.raises(FetchError) as exc:
+        fetch("https://tree.test/team.sbvault#k=FAKEKEY_ABC123")
     assert seen["node"] == "tree.test"
     assert "FAKEKEY_ABC123" not in str(exc.value)
     assert "FAKEKEY_ABC123" not in caplog.text

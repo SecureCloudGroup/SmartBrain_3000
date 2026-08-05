@@ -32,6 +32,7 @@ import json
 import logging
 import os
 import uuid
+from itertools import pairwise
 
 import duckdb
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -738,8 +739,7 @@ def _cadence_minutes(times: list[str]) -> int | None:
     span_hours = (occasions[-1] - occasions[0]).total_seconds() / 3600
     if span_hours < _WORKFLOW_MIN_SPAN_HOURS:
         return None  # one burst, not a routine
-    gaps = [(b - a).total_seconds() / 3600
-            for a, b in zip(occasions, occasions[1:], strict=False)]  # offset pair-walk
+    gaps = [(b - a).total_seconds() / 3600 for a, b in pairwise(occasions)]
     # EVERY gap must agree on the rhythm. A median (any flavor) fails small samples:
     # of two gaps [24h, 360h] the average lands inside the weekly band and the
     # upper/lower middle each pick a different wrong answer — "refuses to guess"
@@ -909,7 +909,9 @@ def _suggest_workflows(conn: duckdb.DuckDBPyConnection, key: bytes,
 
 def _schedule_exists_for(conn: duckdb.DuckDBPyConnection, key: bytes, prompt: str) -> bool:
     """True when an existing schedule already covers this ask (content-word similarity)."""
-    from .scheduler import ScheduleStore  # lazy: scheduler imports selfreview at module level
+    from .scheduler import (
+        ScheduleStore,  # lazy: scheduler imports selfreview at module level
+    )
     want = _content_tokens(prompt)
     for sched in ScheduleStore(conn, key).list_schedules():  # bounded by store cap
         if _jaccard(want, _content_tokens(sched["prompt"])) >= _DEDUP_JACCARD:

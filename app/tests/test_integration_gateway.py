@@ -12,10 +12,9 @@ from __future__ import annotations
 from collections.abc import Iterator
 
 import pytest
+from _fakegateway import FakeGateway
 
 from smartbrain_3000 import gateway
-
-from _fakegateway import FakeGateway
 
 
 @pytest.fixture()

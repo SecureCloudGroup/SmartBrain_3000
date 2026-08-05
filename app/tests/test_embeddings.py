@@ -56,9 +56,8 @@ def test_gateway_embed_raises_on_error_envelope() -> None:
     def handler(req: httpx.Request) -> httpx.Response:
         return httpx.Response(404, json={"error": {"message": "model not found"}})
 
-    with _mock(handler) as client:
-        with pytest.raises(gateway.GatewayError) as info:
-            gateway.embed("hi", "ollama/nope", client=client)
+    with _mock(handler) as client, pytest.raises(gateway.GatewayError) as info:
+        gateway.embed("hi", "ollama/nope", client=client)
     assert info.value.status_code == 404
     assert info.value.message == "model not found"
 
@@ -68,9 +67,9 @@ def test_gateway_embed_raises_on_malformed_200() -> None:
     # serialize NaN, but the gateway can return one and embed() must reject it.
     bodies = (b'{"data": []}', b'{"data": [{}]}', b'{"data": [{"embedding": [1.0, NaN]}]}')
     for body in bodies:
-        with _mock(lambda req, b=body: httpx.Response(200, content=b)) as client:
-            with pytest.raises(gateway.GatewayError):
-                gateway.embed("hi", "ollama/x", client=client)
+        with _mock(lambda req, b=body: httpx.Response(200, content=b)) as client, \
+                pytest.raises(gateway.GatewayError):
+            gateway.embed("hi", "ollama/x", client=client)
 
 
 # --- cosine (now a vectorised mat-vec inside the search index) -------------
@@ -291,9 +290,8 @@ def test_gateway_embed_non_json_body() -> None:
     def handler(req: httpx.Request) -> httpx.Response:
         return httpx.Response(200, content=b"not json at all", headers={"content-type": "text/plain"})
 
-    with _mock(handler) as client:
-        with pytest.raises(gateway.GatewayError) as info:
-            gateway.embed("hi", "ollama/x", client=client)
+    with _mock(handler) as client, pytest.raises(gateway.GatewayError) as info:
+        gateway.embed("hi", "ollama/x", client=client)
     assert "non-JSON" in info.value.message
 
 
