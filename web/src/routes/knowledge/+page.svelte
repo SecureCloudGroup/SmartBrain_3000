@@ -806,8 +806,9 @@
 {#if account.status?.unlocked}
   <h1>Knowledge</h1>
 
-  <!-- Ingesting (drag-drop, file picker, URL) is Desktop work; on a phone, keep search + view. -->
-  {#if remote.status === "idle"}
+  <!-- Adding by note, file, or URL works on the phone too — the backend allows it (unlock-only,
+       25 MB body cap on the bridge). The desktop-only fences are further down: sharing/exporting a
+       vault, and trusting a rotated publisher key. -->
   <div class="card">
     <h2>Add to Knowledge</h2>
     <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -889,7 +890,6 @@
       You can also ask in Chat: <em>“add this PDF to my knowledge: &lt;url&gt;”</em>.
     </p>
   </div>
-  {/if}
 
   <div class="card">
     <h2>Search</h2>
@@ -1412,7 +1412,7 @@
     {/each}
 
     <!-- Organising (create / add / search a vault) works everywhere, phone included — it is not
-         egress. Only export and import are Desktop-only, below. -->
+         egress. Only export (Share…, above) stays Desktop-only. -->
     <div style="display:flex; gap:0.5rem; align-items:center; margin-top:1rem; flex-wrap:wrap">
       <input
         style="flex:1; min-width:10rem"
@@ -1426,54 +1426,52 @@
       </button>
     </div>
 
-    <!-- Import is ingestion and export is plaintext-equivalent egress (the backend refuses it from a
-         paired phone), so both are Desktop work — same rule as the "Add to Knowledge" card. -->
-    {#if remote.status === "idle"}
-      <details style="margin-top:1rem">
-        <summary>Add someone else's vault — import a file, or subscribe to a public URL</summary>
-        <p class="muted" style="margin:0.5rem 0; font-size:0.85rem">
-          Pick the <code>.sbvault</code> file and paste the key they sent you (a <strong>public</strong>
-          file has no key — leave it empty). Its documents are re-encrypted under <em>your</em>
-          passphrase as they land, and anything you already have is kept as-is rather than
-          overwritten. A newer file of a vault you already have applies as an <em>update</em> to it.
-        </p>
-        <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap">
-          <input bind:this={importInput} type="file" accept=".sbvault" aria-label="Vault file" />
-          <input
-            style="flex:1; min-width:10rem"
-            bind:value={importKey}
-            placeholder="SBVK1-… (empty for a public file)"
-            aria-label="Vault key"
-          />
-          <button disabled={vaultBusy === "import"} onclick={importVault}>
-            {vaultBusy === "import" ? "Importing…" : "Import"}
-          </button>
-        </div>
-        {#if importError}<p class="error" style="margin:0.4rem 0 0">{importError}</p>{/if}
+    <!-- Import (a .sbvault file, or a subscribe-by-URL) is ingestion — the backend allows it from
+         a paired phone. Export/sharing is plaintext-equivalent egress and stays Desktop-only above. -->
+    <details style="margin-top:1rem">
+      <summary>Add someone else's vault — import a file, or subscribe to a public URL</summary>
+      <p class="muted" style="margin:0.5rem 0; font-size:0.85rem">
+        Pick the <code>.sbvault</code> file and paste the key they sent you (a <strong>public</strong>
+        file has no key — leave it empty). Its documents are re-encrypted under <em>your</em>
+        passphrase as they land, and anything you already have is kept as-is rather than
+        overwritten. A newer file of a vault you already have applies as an <em>update</em> to it.
+      </p>
+      <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap">
+        <input bind:this={importInput} type="file" accept=".sbvault" aria-label="Vault file" />
+        <input
+          style="flex:1; min-width:10rem"
+          bind:value={importKey}
+          placeholder="SBVK1-… (empty for a public file)"
+          aria-label="Vault key"
+        />
+        <button disabled={vaultBusy === "import"} onclick={importVault}>
+          {vaultBusy === "import" ? "Importing…" : "Import"}
+        </button>
+      </div>
+      {#if importError}<p class="error" style="margin:0.4rem 0 0">{importError}</p>{/if}
 
-        <p class="muted" style="margin:0.9rem 0 0.35rem; font-size:0.85rem">
-          …or add a <strong>public</strong> vault by URL — no file, no key. Paste the link to the
-          <code>.sbvault</code> file, or — if the publisher hosts the unzipped folder — to its
-          <code>manifest.json</code> (updates then download only what changed). It is fetched from
-          the public internet, checked against its publisher's signature, and re-encrypted under
-          <em>your</em> passphrase as it lands. The publisher is <strong>pinned on first
-          contact</strong>: future updates must come from the same identity.
-        </p>
-        <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap">
-          <input
-            style="flex:1; min-width:12rem"
-            bind:value={subUrl}
-            placeholder="https://example.com/expert-pack.sbvault"
-            aria-label="Public vault URL"
-            onkeydown={(e) => e.key === "Enter" && subUrl.trim() && subscribeVault()}
-          />
-          <button disabled={vaultBusy === "subscribe" || !subUrl.trim()} onclick={subscribeVault}>
-            {vaultBusy === "subscribe" ? "Subscribing…" : "Subscribe"}
-          </button>
-        </div>
-        {#if subscribeError}<p class="error" style="margin:0.4rem 0 0">{subscribeError}</p>{/if}
-      </details>
-    {/if}
+      <p class="muted" style="margin:0.9rem 0 0.35rem; font-size:0.85rem">
+        …or add a <strong>public</strong> vault by URL — no file, no key. Paste the link to the
+        <code>.sbvault</code> file, or — if the publisher hosts the unzipped folder — to its
+        <code>manifest.json</code> (updates then download only what changed). It is fetched from
+        the public internet, checked against its publisher's signature, and re-encrypted under
+        <em>your</em> passphrase as it lands. The publisher is <strong>pinned on first
+        contact</strong>: future updates must come from the same identity.
+      </p>
+      <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap">
+        <input
+          style="flex:1; min-width:12rem"
+          bind:value={subUrl}
+          placeholder="https://example.com/expert-pack.sbvault"
+          aria-label="Public vault URL"
+          onkeydown={(e) => e.key === "Enter" && subUrl.trim() && subscribeVault()}
+        />
+        <button disabled={vaultBusy === "subscribe" || !subUrl.trim()} onclick={subscribeVault}>
+          {vaultBusy === "subscribe" ? "Subscribing…" : "Subscribe"}
+        </button>
+      </div>
+      {#if subscribeError}<p class="error" style="margin:0.4rem 0 0">{subscribeError}</p>{/if}
+    </details>
   </div>
 
   {#if notice}<p class="muted">{notice}</p>{/if}

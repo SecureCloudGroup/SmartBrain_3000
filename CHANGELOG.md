@@ -12,6 +12,16 @@ to know when a release changes behavior.
 ## [Unreleased]
 
 ### Changed
+- **A paired phone can now add to Knowledge — and see Usage.** The phone was
+  read-only for Knowledge; it now offers the full **Add to Knowledge** card (write a
+  note, upload a file, add a web page or PDF by URL) and the **Add someone else's
+  vault** panel (import a `.sbvault`, or subscribe to a public URL) — the desktop is
+  still where it lands, and the bridge carries up to 25 MB per upload. **Usage &
+  cost** also joins the phone's More sheet so you can check spend on the go. The
+  security fences that stay Desktop-only are unchanged and for the same reasons:
+  exporting or sharing a vault, trusting a rotated publisher key, connecting Gmail,
+  downloading a backup or export, and managing paired devices — all things that hand
+  out your data or change trust.
 - **Self-review cadence is now yours to pick.** How often SmartBrain reviews itself
   used to be hard-wired to every 8 hours; **Settings → Self-improvement** now offers
   **every 2, 4, 8 (default), or 24 hours** — plus the existing **Off**, which stays the

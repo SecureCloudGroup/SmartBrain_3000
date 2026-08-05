@@ -16,7 +16,7 @@ most sit in the bottom bar (Chat, Knowledge, Info, Activity) and the rest are un
 | **Email** | An optional Gmail connection: read and send. |
 | **Info** | The output of your scheduled runs, newest first. |
 | **Activity** | Approvals waiting for you, and the record of everything the assistant tried. |
-| **Usage** | What your cloud models have cost. Desktop only. |
+| **Usage** | What your cloud models have cost. |
 | **Settings** | Everything you configure. Desktop only. |
 
 Below them sit four controls: **Help** (this guide, offline, no unlock needed), **Theme**
@@ -25,8 +25,8 @@ The top strip shows an **Encrypted · On-device** chip and, on a phone, the remo
 state. The version you're running is under the logo, top-left.
 
 The **Desktop** shows all nine areas. On a **paired phone**
-([Remote access](08-remote-access.md)) you get the seven meant for use on the go — Chat,
-Knowledge, Planner, Schedules, Email, Info, and Activity — while Usage, Settings, and
+([Remote access](08-remote-access.md)) you get the eight meant for use on the go — Chat,
+Knowledge, Planner, Schedules, Email, Info, Activity, and Usage — while Settings and
 first-time setup stay on the Desktop.
 
 ## Chat
@@ -395,7 +395,7 @@ comes from each provider's live figures. **Local models (Ollama, MLX) are free**
 
 Usage appears here after you chat with a model. None of it leaves your machine — it's
 computed locally from your own token counts, and the only network call is a local fetch of
-the price list from the on-device gateway. This page is Desktop-only.
+the price list from the on-device gateway.
 
 ## Activity
 

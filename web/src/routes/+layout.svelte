@@ -44,7 +44,7 @@
     { href: "/email", label: "Email", icon: "mail", remote: true },
     { href: "/info", label: "Info", icon: "info", remote: true },
     { href: "/activity", label: "Activity", icon: "activity", remote: true },
-    { href: "/usage", label: "Usage", icon: "chart", remote: false },
+    { href: "/usage", label: "Usage", icon: "chart", remote: true },
     { href: "/settings", label: "Settings", icon: "sliders", remote: false },
   ];
   // Desktop is the primary surface (status "idle" -> full nav); a paired phone (remote

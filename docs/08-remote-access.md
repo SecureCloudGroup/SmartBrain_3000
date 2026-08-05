@@ -49,14 +49,16 @@ can be in progress at a time.
 ## Using it on your phone
 
 The phone shows a **trimmed set** of areas meant for use on the go: **Chat**,
-**Knowledge**, **Planner**, **Schedules**, **Email**, **Info**, and **Activity**. Usage,
-Settings, and first-time setup live on the **Desktop**.
+**Knowledge**, **Planner**, **Schedules**, **Email**, **Info**, **Activity**, and **Usage**.
+Settings and first-time setup live on the **Desktop**. Adding to your Knowledge — notes,
+uploads, and add-by-URL, plus importing or subscribing to someone else's vault — works from
+the phone too; the desktop is still where it lands.
 
-A handful of individual actions are Desktop-only too, even inside those areas — anything
-that hands out your data or changes trust. Exporting or importing a vault, trusting a
-publisher's new key, adding documents by upload or URL, connecting Gmail, and downloading a
-backup or export all stay on the Desktop. On the phone those controls are either not shown
-or replaced with a line pointing you at the Desktop, so nothing fails halfway.
+A handful of individual actions are Desktop-only, even inside those areas — anything that
+hands out your data or changes trust. Exporting a vault (sharing it sealed or public),
+trusting a publisher's new key after it rotates, connecting Gmail, and downloading a backup
+or export all stay on the Desktop. On the phone those controls are either not shown or
+replaced with a line pointing you at the Desktop, so nothing fails halfway.
 
 A small **"Remote"** chip shows the connection state: **direct** (phone-to-Desktop),
 **relayed** (through the encrypted relay), or **BLOCKED** in red if your Desktop's
