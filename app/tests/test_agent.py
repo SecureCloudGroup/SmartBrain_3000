@@ -1147,3 +1147,224 @@ def test_canonical_key_ignores_arg_key_order() -> None:
     a = agent._canonical_key("web_fetch", {"url": "https://x", "b": 2})
     b = agent._canonical_key("web_fetch", {"b": 2, "url": "https://x"})
     assert a == b
+
+
+# --- scheduled auto-resume (approve/deny finishes a parked scheduled turn) ---
+#
+# The failure this covers (v0.8.20): a scheduled News check parks web_fetch, the
+# run ends "Awaiting your approval", the user approves in Activity — and nothing
+# resumes the scheduled turn. The chat page owns the manual /resume/{turn_id}
+# for chat turns; scheduled turns had no equivalent, so approving did visibly
+# nothing for the run. Approve/deny of the LAST pending of a SCHEDULED turn now
+# resumes the turn server-side and records its outcome to the schedule's feed.
+
+
+def _scheduled_client(tmp_path, monkeypatch):
+    """Unlocked app + a schedule, with the auto-resume worker running INLINE.
+
+    Overriding ``_start_resume_thread`` keeps the test synchronous — any race
+    between the approve response and the background resume disappears, so the
+    test can assert the recorded run immediately.
+    """
+    from smartbrain_3000 import agent_routes
+    monkeypatch.setenv("SMARTBRAIN_DB_PATH", str(tmp_path / "sched.duckdb"))
+    monkeypatch.setattr(agent_routes, "_start_resume_thread",
+                        lambda target, args, name: target(*args))
+    from smartbrain_3000.main import create_app
+    client = TestClient(create_app())
+    client.__enter__()
+    client.post("/api/account/setup", json={"passphrase": "correct-horse"})
+    sid = client.post("/api/schedules", json={
+        "title": "News check", "prompt": "check the news", "interval_minutes": 60, "start_in_minutes": 0,
+    }).json()["id"]
+    return client, sid
+
+
+def _scripted_gateway(monkeypatch, responses):
+    """chat_with_tools returns the queued responses in order (reused by all threads)."""
+    from smartbrain_3000 import gateway as gwmod
+    it = iter(responses)
+    lock = __import__("threading").Lock()
+
+    def fake(*a, **k):
+        with lock:  # the auto-resume runs on a background thread in production;
+            return next(it)  # a shared iterator + lock keeps a race-free sequence
+    monkeypatch.setattr(gwmod, "chat_with_tools", fake)
+
+
+def test_scheduled_park_stashes_scheduled_origin_in_turn_state(monkeypatch) -> None:
+    # The marker the approve endpoint reads to know a park came from run_schedule.
+    from smartbrain_3000 import scheduler
+    from smartbrain_3000.scheduler import ScheduleStore
+
+    conn = duckdb.connect(":memory:")
+    dbmod.run_migrations(conn)
+    key = gen_master_key()
+    kb = KnowledgeBase(conn, key)
+    ctx = tools.ToolContext(kb=kb, planner=Planner(conn, key), memory=MemoryStore(conn, key))
+    audit = AuditLog(conn, key)
+    approvals = ApprovalStore(conn, key, "sess1")
+    store = ScheduleStore(conn, key)
+    sid = store.add_schedule("t", "p", interval_minutes=0, start_in_minutes=0, model="m")
+    _script(monkeypatch, [_toolcalls(("remember_fact", {"text": "x"}))])
+    result = scheduler.run_schedule(ctx, audit, approvals, store, store.get_schedule(sid))
+    assert result["status"] == "awaiting_approval"
+    pid = result["pending"][0]["id"]
+    ts = approvals.get(pid)["turn_state"]
+    assert ts and ts.get("origin") == {"kind": "scheduled", "schedule_id": sid}
+
+
+@pytest.fixture()
+def sched_client(tmp_path, monkeypatch):
+    client, sid = _scheduled_client(tmp_path, monkeypatch)
+    try:
+        yield client, sid
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_scheduled_approve_finishes_the_run_and_records_output(sched_client, monkeypatch) -> None:
+    client, sid = sched_client
+    # First call parks a REVIEWED write; the resumed call answers plainly.
+    _scripted_gateway(monkeypatch, [
+        _toolcalls(("remember_fact", {"text": "note this"})),
+        _text("Here is the news."),
+    ])
+    run = client.post(f"/api/schedules/{sid}/run").json()
+    assert run["status"] == "awaiting_approval"
+    pid = run["pending"][0]["id"]
+    # Approve — the scheduled turn's tail runs inline (worker monkeypatched) and
+    # a NEW schedule_runs row lands with the final answer.
+    ok = client.post(f"/api/agent/pending/{pid}/approve", json={})
+    assert ok.status_code == 200
+    assert ok.json().get("resumed_turn") is True
+    runs = client.get(f"/api/schedules/{sid}/runs").json()["runs"]
+    # Two runs recorded: the initial "awaiting_approval" (from run_schedule) and
+    # the resumed "complete" — the latter must carry the model's actual answer.
+    statuses = [r["status"] for r in runs]
+    assert "complete" in statuses
+    final = next(r for r in runs if r["status"] == "complete")
+    assert final["message"] == "Here is the news."
+
+
+def test_scheduled_approve_with_remember_web_fetch_stores_the_site(sched_client, monkeypatch) -> None:
+    # The observed failure: user approves a scheduled web_fetch with "Always allow"
+    # for the host; the approval records the site AND the scheduled turn resumes.
+    client, sid = sched_client
+    _scripted_gateway(monkeypatch, [
+        _toolcalls(("web_fetch", {"url": "https://news.example.com/latest"})),
+        _text("Top story: it worked."),
+    ])
+    from smartbrain_3000 import netguard
+    monkeypatch.setattr(netguard, "safe_fetch",
+                        lambda url: {"final_url": url, "status": 200, "text": "top story text"})
+    run = client.post(f"/api/schedules/{sid}/run").json()
+    pid = run["pending"][0]["id"]
+    ok = client.post(f"/api/agent/pending/{pid}/approve", json={"remember": True})
+    assert ok.status_code == 200 and ok.json().get("resumed_turn") is True
+    sites = client.get("/api/agent/remembered").json()["sites"]
+    assert {"tool": "web_fetch", "host": "news.example.com"} in sites
+    runs = client.get(f"/api/schedules/{sid}/runs").json()["runs"]
+    assert any(r["status"] == "complete" and r["message"] == "Top story: it worked." for r in runs)
+
+
+def test_scheduled_deny_finishes_the_run_with_the_denial(sched_client, monkeypatch) -> None:
+    client, sid = sched_client
+    _scripted_gateway(monkeypatch, [
+        _toolcalls(("remember_fact", {"text": "y"})),
+        _text("Skipped the note as you asked."),
+    ])
+    run = client.post(f"/api/schedules/{sid}/run").json()
+    pid = run["pending"][0]["id"]
+    resp = client.post(f"/api/agent/pending/{pid}/deny")
+    assert resp.status_code == 200 and resp.json() == {"ok": True}  # response shape unchanged
+    runs = client.get(f"/api/schedules/{sid}/runs").json()["runs"]
+    assert any(r["status"] == "complete" and "Skipped" in r["message"] for r in runs)
+
+
+def test_chat_turn_approve_is_not_auto_resumed(sched_client, monkeypatch) -> None:
+    # A chat turn's approve must NOT trigger a scheduled auto-resume — the chat
+    # page owns POST /api/agent/resume/{turn_id} for its own flow.
+    client, _sid = sched_client
+    _scripted_gateway(monkeypatch, [_toolcalls(("remember_fact", {"text": "z"}))])
+    turn = client.post("/api/agent/turn", json={
+        "messages": [{"role": "user", "content": "remember z"}], "model": "openai/gpt-4",
+        "conversation_id": "c1",
+    }).json()
+    assert turn["status"] == "awaiting_approval"
+    pid = turn["pending"][0]["id"]
+    ok = client.post(f"/api/agent/pending/{pid}/approve", json={})
+    assert ok.status_code == 200
+    assert ok.json().get("resumed_turn") is False  # chat park: server-side auto-resume off
+
+
+def test_two_pending_first_approval_waits_second_resumes(sched_client, monkeypatch) -> None:
+    # A single scheduled step that parks TWO calls: only the LAST approval — which
+    # leaves zero unresolved pendings — may trigger the auto-resume.
+    client, sid = sched_client
+    _scripted_gateway(monkeypatch, [
+        _toolcalls(("remember_fact", {"text": "one"}), ("remember_fact", {"text": "two"})),
+        _text("Both noted."),
+    ])
+    run = client.post(f"/api/schedules/{sid}/run").json()
+    assert run["status"] == "awaiting_approval" and len(run["pending"]) == 2
+    a, b = run["pending"][0]["id"], run["pending"][1]["id"]
+    first = client.post(f"/api/agent/pending/{a}/approve", json={})
+    assert first.json().get("resumed_turn") is False  # sibling still pending
+    second = client.post(f"/api/agent/pending/{b}/approve", json={})
+    assert second.json().get("resumed_turn") is True
+    runs = client.get(f"/api/schedules/{sid}/runs").json()["runs"]
+    assert any(r["status"] == "complete" and r["message"] == "Both noted." for r in runs)
+
+
+def test_scheduled_resume_still_strips_schedule_write_tools(sched_client, monkeypatch) -> None:
+    # Even if the user remembered set_schedule_enabled interactively, the resumed
+    # SCHEDULED turn must not auto-run it (an injected prompt could otherwise mutate
+    # schedules unattended). It parks like any other REVIEWED write.
+    client, sid = sched_client
+    # Remember a schedule-writing tool (interactive would let this auto-run).
+    from smartbrain_3000 import consent
+    from smartbrain_3000.db import ThreadLocalConn
+    conn: ThreadLocalConn = client.app.state.dbx
+    consent.remember(conn, "set_schedule_enabled")
+    _scripted_gateway(monkeypatch, [
+        _toolcalls(("remember_fact", {"text": "one"})),
+        _toolcalls(("set_schedule_enabled", {"schedule_id": sid, "enabled": False})),
+    ])
+    run = client.post(f"/api/schedules/{sid}/run").json()
+    pid = run["pending"][0]["id"]
+    client.post(f"/api/agent/pending/{pid}/approve", json={})
+    # After resume, a second pending exists for set_schedule_enabled — proof the
+    # remembered consent did NOT let the scheduled tail auto-run a schedule write.
+    pend = client.get("/api/agent/pending").json()["pending"]
+    tools_seen = [p["tool"] for p in pend]
+    assert "set_schedule_enabled" in tools_seen
+
+
+def test_auto_resume_is_idempotent_when_double_kicked(monkeypatch) -> None:
+    # Two same-turn resolutions racing to the "zero pending left" check must not
+    # both drive the resume — the module-level claim set ensures one wins.
+    from smartbrain_3000 import agent_routes
+
+    calls = []
+
+    def fake_worker(*args):
+        calls.append(args[-2])  # turn_id
+    monkeypatch.setattr(agent_routes, "_resume_scheduled_worker", fake_worker)
+    monkeypatch.setattr(agent_routes, "_start_resume_thread",
+                        lambda target, args, name: target(*args))
+    from types import SimpleNamespace
+    fake_req = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(
+        dbx=None, schedules=None, audit=object(), approvals=object(), secret_store=None,
+        master_key=None, kb=None, planner=None, memory=None, email=None, vaults=None,
+        last_interactive=0.0,
+    )))
+    agent_routes._RESUMING_TURNS.clear()
+    # First call claims the turn_id; second is a no-op.
+    ok1 = agent_routes._launch_scheduled_resume(fake_req, "turn-x", "sched-x")
+    assert ok1 is True and calls == ["turn-x"]
+    # The worker cleared the claim on exit (test worker does not), so we must simulate
+    # the "still in flight" case by adding the id back.
+    agent_routes._RESUMING_TURNS.add("turn-x")
+    ok2 = agent_routes._launch_scheduled_resume(fake_req, "turn-x", "sched-x")
+    assert ok2 is False and calls == ["turn-x"]  # no second dispatch

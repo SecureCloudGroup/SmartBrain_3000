@@ -23,7 +23,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 from starlette.responses import StreamingResponse
 
-from . import agent, consent, docsummaries, gateway, metrics, optimizer, search, tools, usage
+from . import agent, consent, docsummaries, gateway, metrics, optimizer, scheduler, search, tools, usage
 from .chat_routes import _with_memory
 
 router = APIRouter()
@@ -162,9 +162,125 @@ def list_pending(request: Request) -> dict:
     return {"pending": [_pending_tile(p) for p in approvals.list_pending()]}
 
 
+# Idempotency guard for the scheduled auto-resume (issue: the user approves the
+# LAST of two same-turn pendings while a background resume for the first is still
+# in flight — both would try to drive the same tail). A turn_id enters the set
+# when its resume starts and leaves when it returns; a second attempt for a
+# turn_id already in the set is a no-op.
+_RESUME_LOCK = threading.Lock()
+_RESUMING_TURNS: set[str] = set()
+
+
+def _all_pending_resolved(approvals, turn_id: str) -> bool:
+    """True iff no pending/approved rows remain for the turn — safe to auto-resume."""
+    assert approvals is not None and turn_id, "approvals + turn id required"
+    rows = approvals.list_for_turn(turn_id)
+    assert isinstance(rows, list), "list_for_turn must return a list"
+    return bool(rows) and not any(r["status"] in ("pending", "approved") for r in rows)
+
+
+def _scheduled_origin(row: dict) -> dict | None:
+    """Return the scheduled-origin marker from a pending row, or None if not scheduled.
+
+    Chat turns (owned by the chat page's resume flow) return None so this endpoint
+    never double-drives them. Only the marker put in by ``scheduler.run_schedule``
+    counts — a missing turn_state or a missing/mismatched kind is treated as not
+    scheduled, so an old parked turn without an origin cannot trigger auto-resume.
+    """
+    assert isinstance(row, dict), "row must be a dict"
+    state = row.get("turn_state") if isinstance(row.get("turn_state"), dict) else None
+    origin = state.get("origin") if state else None
+    if not isinstance(origin, dict):
+        return None
+    return origin if origin.get("kind") == "scheduled" and origin.get("schedule_id") else None
+
+
+def _start_resume_thread(target, args, name) -> None:
+    """Spawn the auto-resume worker on a daemon thread. Isolated + module-level so
+    tests can monkeypatch it and run the worker synchronously without a thread race."""
+    assert callable(target) and name, "target callable + name required"
+    threading.Thread(target=target, args=args, name=name, daemon=True).start()
+
+
+def _launch_scheduled_resume(request: Request, turn_id: str, schedule_id: str) -> bool:
+    """Claim + spawn the scheduled auto-resume; returns False if already in flight."""
+    assert turn_id and schedule_id, "turn + schedule id required"
+    assert request is not None, "request required"
+    with _RESUME_LOCK:
+        if turn_id in _RESUMING_TURNS:
+            return False  # another approval already kicked off the resume
+        _RESUMING_TURNS.add(turn_id)
+    ctx, audit = _context(request)
+    approvals = _approvals(request)
+    state = request.app.state
+    schedules = getattr(state, "schedules", None)
+    conn = state.dbx  # ThreadLocalConn: safe from the worker thread (per-thread cursors)
+    _start_resume_thread(
+        _resume_scheduled_worker,
+        (ctx, audit, approvals, conn, schedules, turn_id, schedule_id),
+        f"sched-resume-{turn_id[:8]}",
+    )
+    return True
+
+
+def _resume_scheduled_worker(ctx, audit, approvals, conn, schedules, turn_id: str, schedule_id: str) -> None:
+    """Background: resume a scheduled turn and record its final outcome. Never raises.
+
+    Guards mirror ``scheduler.run_schedule``: schedule-writing tools are stripped
+    from ``auto_approve`` (an injected prompt must not self-modify schedules mid-
+    resume) and the timeout matches the tick's per-turn budget so a cold-loading
+    local model has room to finish. A re-park (status ``awaiting_approval``) is
+    NOT recorded as a new run — the next approval cycle will resume again and
+    the terminal outcome ends up in the feed.
+    """
+    assert turn_id and schedule_id, "turn + schedule id required"
+    assert approvals is not None and audit is not None, "unlocked stores required"
+
+    def sink(used_model: str, response: object) -> None:
+        usage.record_response(conn, used_model, response)
+
+    try:
+        auto_approve = consent.remembered(conn) - tools.SCHEDULE_WRITE_TOOLS
+        result = agent.resume_turn(
+            ctx, audit, approvals, turn_id, conn=conn, usage_sink=sink,
+            auto_approve=auto_approve, timeout=scheduler._AGENT_TURN_TIMEOUT,
+        )
+    except Exception as exc:
+        log.warning("scheduled resume for %s failed: %s", turn_id, exc)
+        if schedules is not None:
+            try:
+                schedules.record_run(schedule_id, "error", message="", error=str(exc))
+            except Exception as rec_exc:
+                log.warning("failed to record resumed scheduled run: %s", rec_exc)
+        with _RESUME_LOCK:
+            _RESUMING_TURNS.discard(turn_id)
+        return
+    with _RESUME_LOCK:
+        _RESUMING_TURNS.discard(turn_id)
+    if result is None:
+        log.warning("scheduled resume for %s found no parked state", turn_id)
+        return
+    status = str(result.get("status") or "complete")
+    if status == "awaiting_approval":
+        return  # re-parked — the next approval cycle carries the outcome
+    if schedules is None:
+        return
+    try:
+        schedules.record_run(schedule_id, status, message=str(result.get("message", "")))
+    except Exception as exc:
+        log.warning("failed to record resumed scheduled run: %s", exc)
+
+
 @router.post("/api/agent/pending/{pid}/approve")
 def approve(request: Request, pid: str, body: ApproveIn) -> dict:
-    """Approve + execute a pending action (audited). IRREVERSIBLE needs confirm_tool."""
+    """Approve + execute a pending action (audited). IRREVERSIBLE needs confirm_tool.
+
+    When the resolved pending was the last unresolved action of a SCHEDULED turn,
+    the turn's tail is resumed on a background thread and its final answer lands
+    in the Scheduled updates feed — no more scheduled runs left dangling on
+    "Awaiting your approval". Chat parks (owned by the chat page's resume flow)
+    are untouched.
+    """
     ctx, audit = _context(request)
     approvals = _approvals(request)
     row = approvals.get(pid)
@@ -201,12 +317,19 @@ def approve(request: Request, pid: str, body: ApproveIn) -> dict:
         approvals.store_result(pid, {"error": str(exc)})
         raise HTTPException(status_code=502, detail=f"tool failed: {exc}") from None
     approvals.store_result(pid, result)  # so a parked agent turn can resume with it
-    return {"status": "executed", "result": result}
+    resumed = _maybe_finish_scheduled_turn(request, row)
+    return {"status": "executed", "result": result, "resumed_turn": resumed}
 
 
 @router.post("/api/agent/pending/{pid}/deny")
 def deny(request: Request, pid: str) -> dict[str, bool]:
-    """Deny a pending action (audited; never executes)."""
+    """Deny a pending action (audited; never executes).
+
+    A deny that resolves the LAST pending of a scheduled turn still auto-resumes
+    the turn so its "couldn't do X" answer lands in the Scheduled updates feed
+    instead of the turn dangling forever. Chat parks are left to the chat page.
+    The response shape is unchanged (the auto-resume is a side effect).
+    """
     ctx, audit = _context(request)
     approvals = _approvals(request)
     row = approvals.get(pid)
@@ -215,7 +338,30 @@ def deny(request: Request, pid: str) -> dict[str, bool]:
     if not approvals.deny(pid):
         raise HTTPException(status_code=409, detail=f"already {row['status']}")
     audit.append("user", row["tool_name"], row["tier"], "denied", True, args_summary=tools.summarize(row["args"]))
+    _maybe_finish_scheduled_turn(request, row)  # side effect: scheduled turn tail finishes into Info
     return {"ok": True}
+
+
+def _maybe_finish_scheduled_turn(request: Request, row: dict) -> bool:
+    """Kick off a scheduled auto-resume when this resolution finished the turn.
+
+    ``row`` is the pending fetched BEFORE resolution — its ``turn_state.origin``
+    tells us whether the turn came from ``scheduler.run_schedule``, and its
+    ``turn_id`` links every sibling pending in the same turn. No-op for chat
+    parks (origin None) or when other pendings still block the resume.
+    """
+    assert request is not None and isinstance(row, dict), "request + row required"
+    origin = _scheduled_origin(row)
+    if origin is None:
+        return False
+    schedule_id = origin.get("schedule_id")
+    turn_id = row.get("turn_id")
+    if not isinstance(schedule_id, str) or not isinstance(turn_id, str):
+        return False  # a scheduled park always carries both; missing means malformed state
+    approvals = _approvals(request)
+    if not _all_pending_resolved(approvals, turn_id):
+        return False
+    return _launch_scheduled_resume(request, turn_id, schedule_id)
 
 
 @router.get("/api/agent/remembered")

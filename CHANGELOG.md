@@ -11,6 +11,20 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Fixed
+- **Approving — or denying — a scheduled run's parked action now finishes that
+  run.** A scheduled "News check" that parked a `web_fetch` for approval used to
+  end at "Awaiting your approval" and stay there: approving the action ran the
+  fetch but nothing resumed the parked scheduled turn, so the run visibly did
+  nothing until the user triggered the schedule again. Resolving the last
+  pending of a scheduled run now server-side resumes the turn and its answer
+  lands in the Scheduled updates feed alongside every other scheduled run;
+  denying does the same so the "couldn't do X" answer is recorded instead of
+  dangling forever. Chat parks are unaffected — the chat page still owns its
+  Resume flow. The resume honors the same safety guards as the tick: even a
+  remembered schedule-writing tool still parks for human approval (an injected
+  prompt must not self-modify schedules mid-resume).
+
 ### Changed
 - **"Always allow" is now available for the URL tools — per site.** Approving a
   `web_fetch` or `kb_ingest_url` action offered no way to stop being asked again, because

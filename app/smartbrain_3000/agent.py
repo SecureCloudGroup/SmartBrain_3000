@@ -395,7 +395,7 @@ def _tools_call(messages: list[dict], model: str, *, timeout: float, usage_sink=
     return data
 
 
-def run_turn(ctx, audit, approvals, *, messages, model, conversation_id, turn_id, start_step=0, start_calls=0, usage_sink=None, auto_approve=frozenset(), denied=frozenset(), timeout=60.0, result_cap=_RESULT_CAP, on_event=None, primed=None) -> dict:
+def run_turn(ctx, audit, approvals, *, messages, model, conversation_id, turn_id, start_step=0, start_calls=0, usage_sink=None, auto_approve=frozenset(), denied=frozenset(), timeout=60.0, result_cap=_RESULT_CAP, on_event=None, primed=None, origin=None) -> dict:
     """Run the bounded loop from ``start_step``; return a terminal/awaiting result.
 
     ``auto_approve`` is the remembered-consent ENTRY SET (plain tool names +
@@ -405,7 +405,11 @@ def run_turn(ctx, audit, approvals, *, messages, model, conversation_id, turn_id
     turn; a matching new call short-circuits with an error instead of parking, so
     the deny/request loop cannot spin. ``timeout`` is the per-gateway-call budget —
     the scheduled path raises it so a cold local-model load doesn't fail the turn.
-    ``result_cap`` caps each tool-result string fed back to the model.
+    ``result_cap`` caps each tool-result string fed back to the model. ``origin``
+    is opaque provenance stashed in the parked turn_state so the approve endpoint
+    can tell a scheduled park from a chat park and auto-resume the scheduled one
+    (chat parks are resumed by the chat page); a small dict like ``{"kind":
+    "scheduled", "schedule_id": sid}`` — None for turns that need no auto-resume.
     """
     assert audit is not None and approvals is not None, "unlocked stores required"
     assert messages and model, "messages + model required"
@@ -475,7 +479,7 @@ def run_turn(ctx, audit, approvals, *, messages, model, conversation_id, turn_id
             messages.append(result_msg)
             gathered += len(result_msg["content"])
         if parked:
-            turn_state = {"model": model, "messages": messages, "step": step, "calls": calls, "conversation_id": conversation_id}
+            turn_state = {"model": model, "messages": messages, "step": step, "calls": calls, "conversation_id": conversation_id, "origin": origin}
             return {"status": "awaiting_approval", "turn_id": turn_id, "pending": _park(approvals, audit, parked, conversation_id, turn_id, turn_state)}
     return _finalize_exhausted(messages, model, timeout=timeout, usage_sink=usage_sink,
                                reason="step budget exhausted", steps=_MAX_STEPS,
@@ -606,4 +610,5 @@ def resume_turn(ctx, audit, approvals, turn_id: str, *, conn=None, usage_sink=No
         conversation_id=turn_state.get("conversation_id"), turn_id=turn_id,
         start_step=turn_state["step"] + 1, start_calls=turn_state["calls"], usage_sink=usage_sink,
         auto_approve=auto_approve, denied=denied, timeout=timeout, result_cap=result_cap,
+        origin=turn_state.get("origin"),  # a re-park must carry the same provenance forward
     )

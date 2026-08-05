@@ -435,6 +435,9 @@ def run_schedule(ctx, audit, approvals, store: ScheduleStore, schedule: dict, *,
             auto_approve=consent.remembered(conn) - tools.SCHEDULE_WRITE_TOOLS,
             timeout=_AGENT_TURN_TIMEOUT,  # tolerate a cold local-model load (see constant)
             result_cap=gateway.result_cap_for(conn, model),
+            # Provenance stashed in any resulting park's turn_state — the approve/deny endpoint
+            # reads this to auto-resume a scheduled turn (chat parks are resumed by the chat page).
+            origin={"kind": "scheduled", "schedule_id": sid},
         )
         _breaker_record(success=True)  # B11: a successful turn resets the breaker
         _record_run_safe(store, sid, str(result.get("status", "complete")), str(result.get("message", "")), None)

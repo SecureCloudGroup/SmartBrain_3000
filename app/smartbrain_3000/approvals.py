@@ -101,7 +101,7 @@ class ApprovalStore:
         assert pid, "pending id required"
         row = self._conn.execute(
             "SELECT tool_name, tier, status, nonce, ciphertext, "
-            "date_diff('second', created_at, now()) FROM pending_actions WHERE id = ?;",
+            "date_diff('second', created_at, now()), turn_id FROM pending_actions WHERE id = ?;",
             [pid],
         ).fetchone()
         if row is None:
@@ -117,6 +117,9 @@ class ApprovalStore:
             "args": body["args"],
             "result": body.get("result"),
             "turn_state": body.get("turn_state"),
+            # turn_id lets the approve/deny route look up the whole turn (list_for_turn)
+            # to check whether resolving THIS pending finished a scheduled turn's tail.
+            "turn_id": None if row[6] is None else str(row[6]),
             "expired": int(row[5]) > _TTL_SECONDS,
         }
 
