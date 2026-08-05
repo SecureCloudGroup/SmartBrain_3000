@@ -11,6 +11,8 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.8.23] - 2026-08-05
+
 ### Changed
 - **A paired phone now tells you the difference between a locked Desktop and an
   unreachable one.** The **Remote** chip used to say only *offline* — with a hint
