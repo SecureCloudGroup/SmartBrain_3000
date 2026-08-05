@@ -1,0 +1,5 @@
+# The ruff config for the whole repo lives in app/pyproject.toml (the app is where
+# the pin also lives — see #191). This file just points ruff there so files in this
+# directory, which has no pyproject.toml of its own to anchor discovery, pick up the
+# same rules and per-rule ignore decisions.
+extend = "../app/pyproject.toml"

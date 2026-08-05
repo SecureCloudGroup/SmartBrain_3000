@@ -13,7 +13,7 @@ import io
 import json
 import zipfile
 from collections.abc import Iterator
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import duckdb
 import pytest
@@ -468,7 +468,7 @@ def test_slow_dead_host_escalates_only_after_count_and_days(
     monkeypatch.setattr(netguard, "safe_fetch_vault", refuse)
 
     # Nine attempts, all "today" — count trips (9 >= 8) but the day floor doesn't (elapsed = 0).
-    fixed_now = datetime(2026, 8, 5, 12, 0, 0, tzinfo=timezone.utc)
+    fixed_now = datetime(2026, 8, 5, 12, 0, 0, tzinfo=UTC)
     monkeypatch.setattr(vault_sync, "_now", lambda: fixed_now)
     for _ in range(9):
         # Force the subscription to look due each iteration by clearing last_checked.
@@ -479,7 +479,7 @@ def test_slow_dead_host_escalates_only_after_count_and_days(
     assert int(src["consecutive_failures"]) >= 8
 
     # Now advance the clock by 8 days: the very next failure trips unreachable.
-    later = datetime(2026, 8, 13, 12, 0, 0, tzinfo=timezone.utc)
+    later = datetime(2026, 8, 13, 12, 0, 0, tzinfo=UTC)
     monkeypatch.setattr(vault_sync, "_now", lambda: later)
     bob.app.state.vaults.update_source(local_id, {"last_checked": None})
     vault_sync.tick(bob.app)

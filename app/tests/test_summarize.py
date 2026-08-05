@@ -11,10 +11,9 @@ from __future__ import annotations
 from collections.abc import Iterator
 
 import pytest
+from _fakegateway import FakeGateway
 
 from smartbrain_3000 import gateway, summarize
-
-from _fakegateway import FakeGateway
 
 _MODEL = "test/model"  # NOT mlx/ or ollama/ -> not serialized, so the map loop isn't gated in tests
 

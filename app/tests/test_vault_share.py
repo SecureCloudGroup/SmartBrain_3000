@@ -294,16 +294,18 @@ def test_export_is_desktop_local_and_needs_the_passphrase(alice: TestClient) -> 
 def test_export_is_byte_reproducible() -> None:
     # Deterministic nonces + fixed zip timestamps: the same content produces the same file, so an
     # incremental publish can upload only what actually changed.
-    from smartbrain_3000.secrets import SecretStore, gen_master_key
     import duckdb
+
     from smartbrain_3000 import db as dbmod
+    from smartbrain_3000.secrets import SecretStore, gen_master_key
 
     conn = duckdb.connect(":memory:")
     dbmod.run_migrations(conn)
     store = SecretStore(conn, gen_master_key())
     key = vault_format.new_vault_key()
     docs = [{"uid": "u1", "title": "T", "content": "body", "meta": {}, "chunks": 1}]
-    kwargs = dict(store=store, vault_id="v1", name="V", description="", seq=1, docs=docs, vault_key=key)
+    kwargs = {"store": store, "vault_id": "v1", "name": "V", "description": "",
+              "seq": 1, "docs": docs, "vault_key": key}
     assert vault_format.pack(**kwargs) == vault_format.pack(**kwargs)
 
 

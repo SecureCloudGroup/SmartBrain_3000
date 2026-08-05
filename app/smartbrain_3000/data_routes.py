@@ -161,7 +161,7 @@ def backup_db(request: Request, body: ReauthRequest) -> FileResponse:
     # NamedTemporaryFile gives us a unique path in the DB dir; close it
     # immediately so DuckDB can open the file itself (we own cleanup via the
     # background task on the response).
-    handle = tempfile.NamedTemporaryFile(
+    handle = tempfile.NamedTemporaryFile(  # noqa: SIM115 - close-and-unlink pattern: only need the unique path
         prefix=f"{alias}_", suffix=".duckdb", dir=str(parent), delete=False
     )
     tmp = Path(handle.name)
@@ -242,7 +242,7 @@ async def restore_db(request: Request) -> dict:
     # the final rename to ``staged`` is atomic. We close the handle and unlink
     # the path immediately so our own ``open("wb")`` in _stream_restore_to_disk
     # owns it cleanly.
-    handle = tempfile.NamedTemporaryFile(
+    handle = tempfile.NamedTemporaryFile(  # noqa: SIM115 - close-and-unlink pattern: only need the unique path
         prefix="sb_restore_", suffix=".part", dir=str(staged.parent), delete=False
     )
     tmp = Path(handle.name)

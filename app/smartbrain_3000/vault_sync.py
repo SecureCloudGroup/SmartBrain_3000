@@ -30,11 +30,11 @@ from __future__ import annotations
 import base64
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from urllib.parse import urlparse
 
-from . import gateway, kb as kbmod
-from . import netguard, vault_format
+from . import gateway, netguard, vault_format
+from . import kb as kbmod
 from .vaults import IMPORT, OWNER, VaultStore
 
 log = logging.getLogger(__name__)
@@ -52,7 +52,7 @@ _monotonic = time.monotonic  # module attribute so a test can drive the deadline
 def _now() -> datetime:
     """The wall clock as an aware UTC datetime — a module seam so a test can inject a fixed time
     (the auto-update interval and per-vault backoff are measured against it)."""
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _now_iso() -> str:
@@ -72,7 +72,7 @@ def _parse_checked(value) -> datetime | None:
         dt = datetime.fromisoformat(value)
     except ValueError:
         return None
-    return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=UTC)
 
 
 class SyncError(Exception):
@@ -820,7 +820,9 @@ def tick(app, pass_budget_seconds: float | None = None) -> int:
     try:
         vaults = VaultStore(cursor, key)
         knowledge = kbmod.KnowledgeBase(cursor, key)
-        from .scheduler import ScheduleStore  # lazy: scheduler imports us — break the cycle here
+        from .scheduler import (
+            ScheduleStore,  # lazy: scheduler imports us — break the cycle here
+        )
         schedules = ScheduleStore(cursor, key)
         try:
             # Storage identity, not the wire model — locally-adopted vectors must land under

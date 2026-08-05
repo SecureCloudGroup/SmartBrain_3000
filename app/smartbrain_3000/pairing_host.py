@@ -85,7 +85,12 @@ def _wire_pairing_channel(pc, channel, code_key: bytes, payload: dict, state: di
 
 async def _answer(offer_sdp: str, ice_servers, code_key: bytes, payload: dict, state: dict):
     """Create a peer for the app's pairing offer; return ``(pc, answer_sdp)``."""
-    from aiortc import RTCConfiguration, RTCIceServer, RTCPeerConnection, RTCSessionDescription
+    from aiortc import (
+        RTCConfiguration,
+        RTCIceServer,
+        RTCPeerConnection,
+        RTCSessionDescription,
+    )
 
     assert offer_sdp, "offer sdp required"
     servers = [RTCIceServer(**s) for s in (ice_servers or [])]

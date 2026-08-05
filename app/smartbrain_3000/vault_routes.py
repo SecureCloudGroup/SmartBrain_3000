@@ -12,14 +12,15 @@ from __future__ import annotations
 import logging
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Literal
 from urllib.parse import urldefrag, urlparse
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
-from . import gateway, identity, kb as kbmod, netguard, tools, vault_format, vault_sync
+from . import gateway, identity, netguard, tools, vault_format, vault_sync
+from . import kb as kbmod
 from .data_routes import _reauthorize, _require_desktop_local
 from .vaults import IMPORT, IMPORTED
 
@@ -841,7 +842,7 @@ def subscribe_vault(request: Request, body: SubscribeIn) -> dict:
         source={"url": url, "publisher_pubkey": publisher["pubkey"],
                 "vault_id": manifest["vault_id"], "seq": manifest["seq"],
                 "mode": vault_format.OPEN,
-                "added_at": datetime.now(timezone.utc).date().isoformat(),
+                "added_at": datetime.now(UTC).date().isoformat(),
                 "last_checked": None},
     )
     # Record the publisher's own name/description in the body BEFORE apply, so a mid-apply

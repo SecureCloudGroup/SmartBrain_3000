@@ -13,13 +13,12 @@ as what it says.
 from __future__ import annotations
 
 import duckdb
+from _pdfgen import make_pdf
 
 from smartbrain_3000 import db as dbmod
 from smartbrain_3000 import ingest
 from smartbrain_3000.kb import KnowledgeBase, chunk_span, page_for
 from smartbrain_3000.secrets import gen_master_key
-
-from _pdfgen import make_pdf
 
 
 def _kb() -> KnowledgeBase:

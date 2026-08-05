@@ -210,7 +210,7 @@ def test_reindex_yields_to_a_waiting_user(monkeypatch) -> None:
     done: list[str] = []
     waiting = {"user": False}
 
-    def fake_embed(knowledge, doc_id, title, content, model, **kw):  # noqa: ANN001 - test double
+    def fake_embed(knowledge, doc_id, title, content, model, **kw):
         done.append(doc_id)
         if len(done) == 3:
             waiting["user"] = True  # a chat request lands after the third document

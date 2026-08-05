@@ -18,7 +18,6 @@ from smartbrain_3000.planner import Planner
 from smartbrain_3000.secrets import gen_master_key
 from smartbrain_3000.vaults import IMPORTED, VaultStore
 
-
 # --- registry invariants --------------------------------------------------
 
 def test_registry_invariants() -> None:

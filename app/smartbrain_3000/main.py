@@ -13,8 +13,8 @@ import asyncio
 import logging
 import os
 import zoneinfo
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
 from urllib.parse import urlsplit
 
 import httpx
@@ -23,23 +23,23 @@ from starlette.responses import PlainTextResponse
 
 from . import __version__, db, gateway, mcp_server, runtime, scheduler, serving
 from .account import router as account_router
-from .chat_routes import router as chat_router
-from .local_models_routes import router as local_models_router
-from .models_routes import router as models_router
-from .web_routes import router as web_router
-from .kb_routes import router as kb_router
-from .history_routes import router as history_router
-from .memory_routes import router as memory_router
-from .planner_routes import router as planner_router
 from .agent_routes import router as agent_router
+from .chat_routes import router as chat_router
+from .data_routes import router as data_router
+from .devices_routes import router as devices_router
+from .email_routes import router as email_router
+from .history_routes import router as history_router
+from .kb_routes import router as kb_router
+from .local_models_routes import router as local_models_router
+from .mcp_routes import router as mcp_router
+from .memory_routes import router as memory_router
 from .metrics_routes import router as metrics_router
+from .models_routes import router as models_router
+from .planner_routes import router as planner_router
 from .schedule_routes import router as schedule_router
 from .selfimprove_routes import router as selfimprove_router
 from .vault_routes import router as vault_router
-from .email_routes import router as email_router
-from .data_routes import router as data_router
-from .mcp_routes import router as mcp_router
-from .devices_routes import router as devices_router
+from .web_routes import router as web_router
 
 log = logging.getLogger(__name__)
 
@@ -183,7 +183,7 @@ async def _scheduler_loop(application: FastAPI) -> None:
     while not stop.is_set():
         try:
             await asyncio.wait_for(stop.wait(), timeout=_TICK_SECONDS)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             pass  # idle interval elapsed — time to tick
         if stop.is_set():
             break
@@ -275,7 +275,7 @@ async def _drain_startup_tasks(tasks: tuple) -> None:
             continue
         try:
             await asyncio.wait_for(task, timeout=20)
-        except (asyncio.TimeoutError, asyncio.CancelledError):
+        except (TimeoutError, asyncio.CancelledError):
             pass  # hung past the gateway timeout — proceed to close
         except Exception as exc:  # a crashed background task must not leak (B12)
             log.warning("task crashed: %s", exc)

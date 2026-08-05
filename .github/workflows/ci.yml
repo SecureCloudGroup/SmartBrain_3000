@@ -30,9 +30,11 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           # requirements.lock is the exact-pinned resolution used by the release image;
-          # apply it as constraints so CI tests the same versions users get.
-          pip install -c app/requirements.lock ./app
-          pip install pytest "ruff<0.16"
+          # apply it as constraints so CI tests the same versions users get. The [dev]
+          # extra pulls pytest + ruff at the pin declared in app/pyproject.toml — one
+          # source of truth, so a Dependabot bump to the dev extra can't drift past CI
+          # (see #191, closed by adopting the extra here and inside the image below).
+          pip install -c app/requirements.lock "./app[dev]"
       - name: Ruff
         run: python -m ruff check app/smartbrain_3000 app/tests installer
       - name: Pytest (app + signaling)
@@ -92,10 +94,13 @@ jobs:
         run: docker build -t smartbrain_3000:ci .
       - name: Ruff + pytest inside the shipped image
         # No mount: exercise the code baked into the image, on the image's own Python.
+        # The [dev] extra is resolved from the /app/pyproject.toml that was copied into
+        # the image at build time, so the ruff/pytest versions here come from the same
+        # single source as the host job above — no hardcoded literal to drift (see #191).
         run: |
           docker run --rm --entrypoint /bin/sh smartbrain_3000:ci -c '
-            pip install --quiet pytest "ruff<0.16"
             cd /app
+            pip install --quiet -c requirements.lock ".[dev]"
             python -m ruff check smartbrain_3000
             python -m pytest -q
           '

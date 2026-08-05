@@ -174,6 +174,7 @@ def test_launcher_version_is_written_only_when_it_changes(tmp_path, monkeypatch)
     # The handshake now arrives every ~30s; rewriting the same value would be thousands of
     # pointless database writes a day.
     from fastapi.testclient import TestClient
+
     from smartbrain_3000 import db as dbmod
     monkeypatch.setenv("SMARTBRAIN_DB_PATH", str(tmp_path / "meta.duckdb"))
     from smartbrain_3000.main import create_app

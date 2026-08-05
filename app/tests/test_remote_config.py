@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from smartbrain_3000 import remote_config
 
-
 # --- signaling_url --------------------------------------------------------
 
 def test_signaling_url_defaults_to_hosted_node(monkeypatch) -> None:
