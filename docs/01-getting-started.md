@@ -235,13 +235,16 @@ Most first-run problems are one of these:
   machine was altered. Fix the cause and click **Restart** in the menu.
 - **"SmartBrain keeps crashing — stopped restarting; see the native logs."** The launcher
   restarts a stopped SmartBrain, but gives up after three tries in ten minutes rather than
-  spinning. The logs are `native/run/app.log` and `native/run/bifrost.log` inside the folder
-  named under **Install** above.
-- **"Native start failed — see the log."** Open `native/run/app.log`. If it says an instance
-  is *already serving on port 33000*, something else holds that port — usually a SmartBrain
-  a previous launcher started and never stopped. Choose **Stop** in the menu, then
-  **Restart**; if it persists, follow **If an install is misbehaving: a clean upgrade**
-  under **Install** above.
+  spinning. The logs are `app.log` and `bifrost.log` — choose **Open logs** in the
+  menu-bar / tray menu and the folder opens in Finder / Explorer. Their full home is
+  `~/Library/Application Support/SmartBrain/native/run/` on macOS (Finder hides
+  `~/Library`, so outside the menu use **Go → Go to Folder…**, ⇧⌘G) and
+  `%APPDATA%\SmartBrain\native\run\` on Windows.
+- **"Native start failed — see the log."** Open `app.log` (**Open logs** in the menu).
+  If it says an instance is *already serving on port 33000*, something else holds that
+  port — usually a SmartBrain a previous launcher started and never stopped. Choose
+  **Stop** in the menu, then **Restart**; if it persists, follow **If an install is
+  misbehaving: a clean upgrade** under **Install** above.
 - **macOS asks if SmartBrain may "access data from other apps."** Click **Allow**, or don't —
   the launcher is checking whether Docker is installed, which it only needs as a fallback.
   It reads nothing else, and declining doesn't stop SmartBrain from running.
@@ -253,8 +256,8 @@ Most first-run problems are one of these:
   configured to reload the model on every single request. SmartBrain notices and writes a
   line to `native/run/app.log` naming the model and the seconds lost, with what to check
   (a draft/speculative-decoding option pointed at an incompatible model, or an
-  idle-unload setting). It isn't shown in the app — read the log if answers feel
-  uniformly slow.
+  idle-unload setting). It isn't shown in the app — read it via **Open logs** in the
+  menu if answers feel uniformly slow.
 - **Search says "Showing keyword results".** No embedding model is set up yet. See
   [Embeddings](02-models.md#embeddings-for-knowledge-search) for your setup, then
   **Reindex** in Knowledge.

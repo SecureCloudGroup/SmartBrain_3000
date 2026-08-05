@@ -126,6 +126,7 @@ func onReady() {
 	systray.AddSeparator()
 	mStop := systray.AddMenuItem("Stop", "Stop SmartBrain (your data is kept)")
 	mRestart := systray.AddMenuItem("Restart", "Restart SmartBrain")
+	mOpenLogs := systray.AddMenuItem("Open logs", "Open the folder with SmartBrain's log files")
 	mUpdateNow = systray.AddMenuItem("Install update now", "Download and apply the latest update now")
 	mUpdateNow.Hide()
 	mUpdateLater = systray.AddMenuItem("Install on next start", "Apply the update the next time you start SmartBrain")
@@ -170,6 +171,8 @@ func onReady() {
 				go stop()
 			case <-mRestart.ClickedCh:
 				go start()
+			case <-mOpenLogs.ClickedCh:
+				go openLogs()
 			case <-mQuit.ClickedCh:
 				systray.Quit()
 				return
@@ -505,6 +508,32 @@ func openOrStart() {
 		return
 	}
 	start()
+}
+
+// logsDir picks what "Open logs" shows: natively, the run/ folder where app.log and
+// bifrost.log land; on a Docker install — which writes no log files (container logs
+// live in the Docker daemon) — the app-data folder itself, so the click still lands
+// somewhere real instead of an empty folder invented for it.
+func logsDir(isNative bool, dataDir string) string {
+	if isNative {
+		return native.New(dataDir).RunDir()
+	}
+	return dataDir
+}
+
+// openLogs shows the folder every "see the log" message points at. The dir is created
+// first (harmless when it exists) so an install that simply hasn't started yet can
+// never meet an error here. OpenFolder is fire-and-forget by design: Windows' explorer
+// exits nonzero even on success, so an exit code must never be read as failure.
+func openLogs() {
+	dir := logsDir(nativeMode(), sb.Dir)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		log.Println("open logs:", err)
+		return
+	}
+	if err := stack.OpenFolder(dir); err != nil {
+		log.Println("open logs:", err)
+	}
 }
 
 // nativeMode reports whether this machine runs the native (Docker-free) stack.

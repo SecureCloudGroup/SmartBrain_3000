@@ -149,6 +149,20 @@ func TestVersionLabel(t *testing.T) {
 	}
 }
 
+// "Open logs" must land somewhere real on every install: natively that is run/, where
+// app.log and bifrost.log live; a Docker install writes no log files (container logs
+// live in the daemon), so the click shows the app-data folder rather than an empty
+// folder invented for it.
+func TestLogsDir(t *testing.T) {
+	dir := filepath.Join("some", "data")
+	if got, want := logsDir(true, dir), filepath.Join(dir, "native", "run"); got != want {
+		t.Fatalf("logsDir(native) = %q, want %q", got, want)
+	}
+	if got := logsDir(false, dir); got != dir {
+		t.Fatalf("logsDir(docker) = %q, want the data dir %q", got, dir)
+	}
+}
+
 // A healthy answer on the app port is not proof that WE are serving it. Anyone still on
 // the Docker stack publishes the same port with restart: unless-stopped, so it answers at
 // handover. Adopting that would mark the machine "running natively" while nothing native
