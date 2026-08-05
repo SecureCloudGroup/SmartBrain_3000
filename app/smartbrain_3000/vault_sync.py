@@ -102,10 +102,13 @@ def is_tree_url(url: str) -> bool:
 def check(pin: dict) -> dict:
     """Ask the pinned URL whether a newer version exists. Verifies, in §5 order; applies NOTHING.
 
-    Returns {manifest, blob, tree, remote_seq, pinned_seq, behind, rollback}. ``blob`` carries the
-    already-fetched zip on a zip host so an apply immediately after doesn't download it twice.
-    Raises KeyChanged on a key substitution, SyncError/VaultError on refusals, FetchError from the
-    guard — the caller maps each to its HTTP shape.
+    Returns {manifest, blob, tree, remote_seq, pinned_seq, behind, rollback, retired}. ``blob``
+    carries the already-fetched zip on a zip host so an apply immediately after doesn't download
+    it twice. ``retired`` is True iff the manifest carries the ``retired`` marker (spec §5) — the
+    caller applies the final content and moves the subscription into the retired state; a later
+    higher-seq non-retired manifest from the same pinned key un-retires it. Raises KeyChanged on
+    a key substitution, SyncError/VaultError on refusals, FetchError from the guard — the caller
+    maps each to its HTTP shape.
     """
     url, pinned_key = pin.get("url"), pin.get("publisher_pubkey")
     if not url or not pinned_key or not pin.get("vault_id"):
@@ -135,7 +138,8 @@ def check(pin: dict) -> dict:
         raise SyncError("the publisher re-sealed this vault — a URL subscription can only follow "
                         "it while it is published open")
     # (4) seq: strictly greater is an update; equal is up to date; lower is a rollback (or a
-    # frozen host replaying an old file) and must be refused, never silently re-applied.
+    # frozen host replaying an old file) and must be refused, never silently re-applied. A
+    # retired manifest follows the same seq rules — rollback protection is not weakened.
     remote_seq, pinned_seq = payload["seq"], int(pin.get("seq") or 0)
     return {
         "manifest": payload,
@@ -145,6 +149,7 @@ def check(pin: dict) -> dict:
         "pinned_seq": pinned_seq,
         "behind": remote_seq > pinned_seq,
         "rollback": remote_seq < pinned_seq,
+        "retired": bool(payload.get("retired", False)),
     }
 
 
@@ -352,6 +357,7 @@ def _land_new(vaults, knowledge, local_id: str, new_docs: list[dict], vectors_ok
             kept += 1
             continue
         doc_id = knowledge.add(doc["title"], doc["content"], doc["meta"])
+        vaults.note_imported_doc(doc_id)  # permanent import trace (freeze-trap protection)
         vaults.add_documents(local_id, [doc_id], origin=IMPORT)
         vaults.note_member_source(local_id, doc_id, doc["uid"], doc["hash"], _landed_hash(doc))
         _maybe_vectors(knowledge, doc_id, doc, vectors_ok, embed_model)
@@ -462,12 +468,24 @@ def _write(vaults, knowledge, local_id: str, manifest: dict, member_map: dict,
             raise SyncError(
                 f"this update would leave the vault over {vault_format.MAX_VAULT_DOCS} documents")
 
-        # Re-pin INSIDE the transaction: the seq floor and the documents move together, or not at
-        # all — a pin at seq 5 over seq-4 documents would refuse the very update that fixes it.
-        vaults.update_source(local_id, {
-            "seq": manifest["seq"],
-            "last_checked": _now_iso(),
-        })
+        # Propagate publisher name/description alongside the content update. This lives INSIDE
+        # the transaction with everything else so a rollback discards it too — a change to the
+        # publisher's chosen name should not persist without the docs the change went with.
+        publisher_name = str(manifest.get("name") or "")
+        publisher_description = str(manifest.get("description") or "")
+        previous_name = vaults.note_publisher_meta(
+            local_id, name=publisher_name, description=publisher_description)
+
+        # Retirement-state bookkeeping (spec §5): a retired manifest flips the subscription into
+        # ``retired`` so _due_subscriptions excludes it, exactly like ``blocked``; a normal (non-
+        # retired) higher-seq manifest un-retires — the publisher came back. Both writes happen
+        # inside the transaction alongside the seq re-pin, so state and content move together.
+        source_changes: dict = {"seq": manifest["seq"], "last_checked": _now_iso()}
+        if bool(manifest.get("retired")):
+            source_changes["retired"] = True
+        else:
+            source_changes["retired"] = None  # None removes the key (see update_source)
+        vaults.update_source(local_id, source_changes)
         conn.execute("COMMIT;")
     except Exception:
         try:
@@ -481,7 +499,9 @@ def _write(vaults, knowledge, local_id: str, manifest: dict, member_map: dict,
         # rolled-back rows never committed.
         knowledge.reset_index()
     return {"added": added, "updated": updated, "deleted": deleted,
-            "kept_yours": kept_new + kept_changed + kept_gone}
+            "kept_yours": kept_new + kept_changed + kept_gone,
+            "retired": bool(manifest.get("retired")),
+            "renamed_from": previous_name}
 
 
 # --- Stage E: opt-in scheduled auto-update --------------------------------------------------------
@@ -498,6 +518,28 @@ def _write(vaults, knowledge, local_id: str, manifest: dict, member_map: dict,
 _DEFAULT_CHECK_INTERVAL_SECONDS = 86_400  # daily
 _MIN_CHECK_INTERVAL_SECONDS = 3_600       # 1h floor: a background timer must never hammer a host
 _MAX_SUBSCRIPTION_CHECKS_PER_TICK = 2     # verifiable per-tick bound (P10 #2), like _MAX_PER_TICK
+
+# Dead-host escalation (spec §5 addendum). The auto-update pass counts CONSECUTIVE fetch/verify
+# failures per subscription and, once BOTH thresholds trip, marks the subscription ``unreachable``
+# so it drops out of the due set (like ``blocked`` / ``retired``) and stops consuming per-tick
+# slots. The user's manual "Check for updates" still runs; a success clears the counter.
+#
+#   * _UNREACHABLE_FAILURE_COUNT (8): four days of failures at the default daily interval PLUS an
+#     opportunity to interrupt the pattern with a single success. 8 is generous enough that a
+#     laptop closed for a long weekend doesn't cross the line, tight enough that a truly dead
+#     host is dropped from the pass within about a week.
+#   * _UNREACHABLE_MIN_DAYS (7): the escalation ALSO requires a real week to have passed. A user
+#     who taps "Check for updates" eight times in five minutes on a broken host must not have the
+#     subscription auto-disabled by their own retries — the counter is per-attempt, the day floor
+#     keeps it from tripping on burst.
+#   * HTTP 410 Gone is an intentional "took this down" signal, not transport flakiness, so it
+#     shortcuts both thresholds and marks ``unreachable`` at once with a distinct reason. Any
+#     other 4xx/5xx (including 404, which may be a slow-path misconfig) counts toward the slow
+#     escalation, exactly like a connection refusal.
+_UNREACHABLE_FAILURE_COUNT = 8
+_UNREACHABLE_MIN_DAYS = 7
+_UNREACHABLE_REASON_TOOK_DOWN = "took_down"  # HTTP 410 Gone
+_UNREACHABLE_REASON_DEAD_HOST = "dead_host"  # exhausted the failure budget
 
 
 def _interval_seconds(pin: dict) -> int:
@@ -529,10 +571,11 @@ def _host_of(vault: dict) -> str:
 def _due_subscriptions(vaults: VaultStore, now: datetime) -> list[dict]:
     """The auto-update subscriptions whose interval has elapsed, bounded per tick.
 
-    A bounded decrypt-scan (list_vaults is capped at vaults._MAX_VAULTS). Blocked subscriptions are
-    EXCLUDED, not merely skipped: a pending key change is the user's to resolve, so it must never
-    consume a per-tick slot or re-fetch — that is what makes "next ticks skip a blocked vault" hold
-    with no retry loop. Capped at _MAX_SUBSCRIPTION_CHECKS_PER_TICK.
+    A bounded decrypt-scan (list_vaults is capped at vaults._MAX_VAULTS). EXCLUDED from every
+    future due set: ``blocked`` (pending key change — the human's to resolve), ``retired`` (the
+    publisher retired the vault; nothing to update anymore) and ``unreachable`` (the host proved
+    dead — 410 Gone, or exhausted the failure budget). Manual "Check for updates" still runs on
+    any of these; the timer never does. Capped at _MAX_SUBSCRIPTION_CHECKS_PER_TICK.
     """
     due: list[dict] = []
     for vault in vaults.list_vaults():  # bounded by vaults._MAX_VAULTS
@@ -541,11 +584,40 @@ def _due_subscriptions(vaults: VaultStore, now: datetime) -> list[dict]:
             continue  # not a URL subscription — nothing to check
         if not pin.get("auto_update") or pin.get("blocked"):
             continue  # opt-in only, and a pending key change is the human's to resolve
+        if pin.get("retired") or pin.get("unreachable"):
+            continue  # retired / unreachable — the timer stops (manual check still allowed)
         if _is_due(pin, now):
             due.append(vault)
         if len(due) >= _MAX_SUBSCRIPTION_CHECKS_PER_TICK:
             break
     return due
+
+
+def _failure_state_after(pin: dict, now: datetime) -> dict:
+    """Advance the consecutive-failure counter for one failed fetch/verify, returning the source
+    changes to persist. Sets ``unreachable`` when BOTH the count and the elapsed-days thresholds
+    are exceeded — so a burst of manual retries can't self-inflict the flag."""
+    prev_count = int(pin.get("consecutive_failures") or 0)
+    count = prev_count + 1
+    first_at_iso = pin.get("first_failure_at")
+    first_at = _parse_checked(first_at_iso) if isinstance(first_at_iso, str) else None
+    if first_at is None:
+        # Counter went 0 -> 1: stamp the start of this failure run.
+        first_at_iso = now.isoformat()
+        first_at = now
+    changes: dict = {"consecutive_failures": count, "first_failure_at": first_at_iso}
+    if count >= _UNREACHABLE_FAILURE_COUNT and \
+            (now - first_at).total_seconds() >= _UNREACHABLE_MIN_DAYS * 86_400:
+        changes["unreachable"] = True
+        changes["unreachable_reason"] = _UNREACHABLE_REASON_DEAD_HOST
+    return changes
+
+
+def _clear_failure_state() -> dict:
+    """The source-changes payload that clears the failure counter on any verified answer from
+    the host — up-to-date, rollback-refusal, or a successful apply. None removes the key."""
+    return {"consecutive_failures": None, "first_failure_at": None,
+            "unreachable": None, "unreachable_reason": None, "last_error": None}
 
 
 def _host_error(host: str, exc: Exception) -> str:
@@ -589,6 +661,29 @@ def _key_change_feed_message(name: str, pinned_pubkey: str, offered_pubkey: str)
             f"{vault_format.fingerprint(offered_pubkey)}. Open Knowledge to review and Trust new key.")
 
 
+def _retired_feed_message(name: str, seq: int, result: dict) -> str:
+    """The retirement feed row (spec §5): the publisher retired the vault, we applied the final
+    content update and stopped auto-checking. Content-change breakdown rides along so a user
+    who never looked at this vault still sees WHAT the final delta was."""
+    name = vault_format.sanitize_name(name)  # publisher-chosen — neutralize as C0 does (see above)
+    base = f"Vault “{name}” was retired by the publisher at v{seq} — auto-update stopped"
+    detail = _change_breakdown(result)
+    return f"{base} ({detail})" if detail else base
+
+
+def _unreachable_feed_message(name: str, reason: str) -> str:
+    """Feed row for a subscription that just tipped into ``unreachable``. Two reasons only, so
+    the copy is deterministic; anything else is a bug on the caller."""
+    assert reason in (_UNREACHABLE_REASON_TOOK_DOWN, _UNREACHABLE_REASON_DEAD_HOST), \
+        "unknown unreachable reason"
+    name = vault_format.sanitize_name(name)  # publisher-chosen — neutralize as C0 does (see above)
+    if reason == _UNREACHABLE_REASON_TOOK_DOWN:
+        return (f"Vault “{name}” — the publisher took this vault down (HTTP 410). "
+                "Auto-update stopped; a manual check will still try again.")
+    return (f"Vault “{name}” — the host has been unreachable for over a week. "
+            "Auto-update stopped; a manual check will still try again.")
+
+
 def _record_feed(schedules, status: str, message: str) -> None:
     """Post a vault-update result into the scheduled-updates feed (plan decision #2's carrier row).
     Best-effort: a feed-write failure must never abort or unwind an update that already landed."""
@@ -598,56 +693,96 @@ def _record_feed(schedules, status: str, message: str) -> None:
         log.warning("vault auto-update: feed record failed: %s", exc)
 
 
+def _record_check_failure(vaults, schedules, vault_id: str, name: str, pin: dict, host: str,
+                          exc: Exception, now_iso: str, now: datetime) -> None:
+    """Bookkeep a failed CHECK: HTTP 410 shortcuts to ``unreachable`` immediately; anything else
+    advances the failure counter and MAY escalate. All failures record a host-only ``last_error``
+    for the card's staleness note (never the URL path, never the exception text) and advance
+    ``last_checked`` for per-vault backoff. Feed rows land only when a subscription tips into
+    unreachable — cosmetic staleness alone shouldn't spam the feed."""
+    status = getattr(exc, "status", None)
+    changes: dict = {"last_checked": now_iso, "last_error": _host_error(host, exc)}
+    if isinstance(exc, netguard.FetchError) and status == 410:
+        # 410 Gone means the publisher intentionally removed the file — bypass the slow counter
+        # and drop out of the pass at once, so the timer stops hammering a dead URL.
+        changes["unreachable"] = True
+        changes["unreachable_reason"] = _UNREACHABLE_REASON_TOOK_DOWN
+        vaults.update_source(vault_id, changes)
+        _record_feed(schedules, "unreachable",
+                     _unreachable_feed_message(name, _UNREACHABLE_REASON_TOOK_DOWN))
+        log.info("vault auto-update: host %s returned 410 Gone — marked unreachable", host)
+        return
+    changes.update(_failure_state_after(pin, now))
+    became_unreachable = changes.get("unreachable") is True
+    vaults.update_source(vault_id, changes)
+    if became_unreachable:
+        _record_feed(schedules, "unreachable",
+                     _unreachable_feed_message(name, _UNREACHABLE_REASON_DEAD_HOST))
+        log.info("vault auto-update: host %s exhausted the failure budget — marked unreachable", host)
+    else:
+        log.warning("vault auto-update: check failed for host %s (%s)", host, type(exc).__name__)
+
+
 def _auto_update_one(vaults, knowledge, schedules, vault: dict, embed_model: str) -> None:
     """Check ONE subscription and apply a CLEAN update; record the outcome in the feed.
 
     A publisher key change is never applied unattended: it blocks the subscription (the same
     ``blocked`` marker the manual route sets) and posts a "needs your OK" feed row — the one
     interruption the design allows. Any network/verification failure (or a stale host serving an
-    older manifest) advances last_checked (per-vault backoff) and records a host-only last_error so
-    the card can show staleness; it is never re-raised into the tick.
+    older manifest) advances last_checked (per-vault backoff), counts toward the dead-host
+    escalation, and records a host-only last_error so the card can show staleness; it is never
+    re-raised into the tick. HTTP 410 Gone shortcuts to ``unreachable`` immediately.
     """
     pin = vault["source"]
     vault_id, name = vault["id"], vault["name"]
     host = urlparse(pin["url"]).hostname or ""
-    now_iso = _now_iso()
+    now = _now()
+    now_iso = now.isoformat()
     try:
         chk = check(pin)
     except KeyChanged as exc:
         # The one thing a timer must never do on its own. Block + surface; do NOT retry (the block
         # excludes this vault from every future due set until the user resolves it).
-        vaults.update_source(vault_id, {
-            "blocked": {"offered_pubkey": exc.offered_pubkey},
-            "last_checked": now_iso, "last_error": None})
+        clear = _clear_failure_state()
+        clear.update({"blocked": {"offered_pubkey": exc.offered_pubkey}, "last_checked": now_iso})
+        vaults.update_source(vault_id, clear)
         _record_feed(schedules, "blocked",
                      _key_change_feed_message(name, pin["publisher_pubkey"], exc.offered_pubkey))
         log.info("vault auto-update: publisher key changed for host %s — blocked, not applied",
                  host)
         return
     except (netguard.FetchError, vault_format.VaultError, SyncError) as exc:
-        vaults.update_source(vault_id, {"last_checked": now_iso, "last_error": _host_error(host, exc)})
-        log.warning("vault auto-update: check failed for host %s (%s)", host, type(exc).__name__)
+        _record_check_failure(vaults, schedules, vault_id, name, pin, host, exc, now_iso, now)
         return
     if chk["rollback"]:
         # A validly-signed OLDER manifest: a frozen/rolled-back host. Never applied — surfaced as
-        # staleness on the card, not spammed into the feed.
-        vaults.update_source(vault_id, {
+        # staleness on the card, not spammed into the feed. Counts as talking to the host, so the
+        # failure counter clears (the host is UP, just serving stale).
+        clear = _clear_failure_state()
+        clear.update({
             "last_checked": now_iso,
             "last_error": f"{host} is serving an older version than you have"})
+        vaults.update_source(vault_id, clear)
         return
     if not chk["behind"]:
-        vaults.update_source(vault_id, {"last_checked": now_iso, "last_error": None})
+        vaults.update_source(vault_id, {**_clear_failure_state(), "last_checked": now_iso})
         return
     try:
         result = apply(vaults, knowledge, vault_id, pin, chk, embed_model)
     except Exception as exc:  # a piece failed AFTER verify: _write rolled back whole; back off + log
-        vaults.update_source(vault_id, {"last_checked": now_iso, "last_error": _host_error(host, exc)})
-        log.warning("vault auto-update: apply failed for host %s (%s)", host, type(exc).__name__)
+        _record_check_failure(vaults, schedules, vault_id, name, pin, host, exc, now_iso, now)
         return
-    # apply re-pinned seq + last_checked inside its transaction; just clear any stale error.
-    vaults.update_source(vault_id, {"last_error": None})
-    _record_feed(schedules, "complete", _update_feed_message(name, chk["remote_seq"], result))
-    log.info("vault auto-update: applied v%d for host %s (%s)", chk["remote_seq"], host, result)
+    # apply re-pinned seq + last_checked inside its transaction; just clear any stale failure state.
+    vaults.update_source(vault_id, _clear_failure_state())
+    if result.get("retired"):
+        _record_feed(schedules, "retired",
+                     _retired_feed_message(name, chk["remote_seq"], result))
+        log.info("vault auto-update: retired v%d for host %s (%s)", chk["remote_seq"], host, result)
+    else:
+        _record_feed(schedules, "complete",
+                     _update_feed_message(name, chk["remote_seq"], result))
+        log.info("vault auto-update: applied v%d for host %s (%s)",
+                 chk["remote_seq"], host, result)
 
 
 def _close_cursor(cursor) -> None:

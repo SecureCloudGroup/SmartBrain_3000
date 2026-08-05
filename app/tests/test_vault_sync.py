@@ -192,11 +192,13 @@ def test_update_applies_in_place_and_repins_seq(alice: TestClient, bob: TestClie
 
     r = bob.post(f"/api/vaults/{local_id}/check-updates")
     assert r.status_code == 200, r.text
-    assert r.json() == {"behind": True, "remote_seq": 3, "seq": 2, "rollback": False}
+    assert r.json() == {"behind": True, "remote_seq": 3, "seq": 2, "rollback": False,
+                        "retired": False, "kind": "update"}
 
     r = bob.post(f"/api/vaults/{local_id}/update")
     assert r.status_code == 200, r.text
-    assert r.json() == {"added": 1, "updated": 1, "deleted": 1, "kept_yours": 0, "seq": 3}
+    assert r.json() == {"added": 1, "updated": 1, "deleted": 1, "kept_yours": 0, "seq": 3,
+                        "retired": False, "renamed_from": None}
 
     mm = store.member_map(local_id)
     assert mm[uid_b]["doc_id"] == doc_b_before, "an update must NEVER change the local doc id"
@@ -229,7 +231,8 @@ def test_same_seq_is_up_to_date_and_a_no_op(alice: TestClient, bob: TestClient, 
 
     r = bob.post(f"/api/vaults/{local_id}/update")
     assert r.status_code == 200
-    assert r.json() == {"added": 0, "updated": 0, "deleted": 0, "kept_yours": 0, "seq": 2}
+    assert r.json() == {"added": 0, "updated": 0, "deleted": 0, "kept_yours": 0, "seq": 2,
+                        "retired": False, "renamed_from": None}
     assert bob.get("/api/kb").json()["documents"] == docs_before
 
 
@@ -284,7 +287,8 @@ def test_tree_host_subscribe_then_delta_update_fetches_only_changed_objects(
     fetched.clear()
     r = bob.post(f"/api/vaults/{local_id}/update")
     assert r.status_code == 200, r.text
-    assert r.json() == {"added": 0, "updated": 1, "deleted": 0, "kept_yours": 0, "seq": 3}
+    assert r.json() == {"added": 0, "updated": 1, "deleted": 0, "kept_yours": 0, "seq": 3,
+                        "retired": False, "renamed_from": None}
     changed_obj = _row(blob2, "Guidance")["obj"]
     assert fetched == [_TREE_URL, _TREE_BASE + "index.bin",
                        _TREE_BASE + f"objects/{changed_obj}.bin"], \
@@ -402,7 +406,8 @@ def test_key_substitution_blocks_and_trust_publisher_unblocks(alice: TestClient,
     # Re-pinned: the very update that was refused now verifies and applies.
     r = bob.post(f"/api/vaults/{local_id}/update")
     assert r.status_code == 200, r.text
-    assert r.json() == {"added": 1, "updated": 0, "deleted": 3, "kept_yours": 0, "seq": 99}
+    assert r.json() == {"added": 1, "updated": 0, "deleted": 3, "kept_yours": 0, "seq": 99,
+                        "retired": False, "renamed_from": None}
     titles = {d["title"] for d in bob.get("/api/kb").json()["documents"]}
     assert titles == {"Poison"}
 
@@ -455,7 +460,8 @@ def test_owner_edited_doc_is_kept_and_flipped_not_clobbered(alice: TestClient, b
 
     r = bob.post(f"/api/vaults/{local_id}/update")
     assert r.status_code == 200, r.text
-    assert r.json() == {"added": 0, "updated": 1, "deleted": 0, "kept_yours": 1, "seq": 3}
+    assert r.json() == {"added": 0, "updated": 1, "deleted": 0, "kept_yours": 1, "seq": 3,
+                        "retired": False, "renamed_from": None}
     assert bob.get(f"/api/kb/{doc_b}").json()["content"] == "MY OWN careful annotations"
     assert store.origin_of(local_id, doc_b) == "owner", "the flip makes every future update skip it"
     # And the origin flip means the NEXT update counts it kept without even fetching a hash match.

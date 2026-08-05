@@ -115,6 +115,21 @@ The domain-separating prefix means a vault signature can never be replayed as th
 | `crypto` | obj | **sealed only.** `{alg, kdf, compress, key_epoch, key_check, key_wraps[]}`. |
 | `embeddings` | obj\|null | §6. |
 | `rotated_from` | obj | optional key-rotation certificate (§5). |
+| `published_at` | str | **v1 additive.** UTC calendar date the export was produced (`YYYY-MM-DD`). Present iff the writer chose to stamp it; older readers ignore an unknown key. Covered by the signature. |
+| `retired` | bool | **v1 additive.** Set (and only set to `true`) by a retire-export — a final open publish with content **intact**. The subscriber applies the update, then moves the subscription into `retired` state (§5). |
+
+### v1 additive fields — the compat rule
+
+`format_version` stays at **1**. New knowledge lives in *additive* fields whose PRESENCE means SET and
+whose ABSENCE means UNSET: `published_at` and `retired` above are the first two. A reader from an
+older build sees an unknown key and ignores it, exactly as JSON allows. A reader from a newer build
+seeing the field absent uses the documented default (no date; not retired). Both the field and its
+value ride the signed payload, so tampering with either invalidates the signature.
+
+Semantic changes — anything a reader **must** understand to act correctly — still go in `requires`
+and force a hard refuse (unchanged from v1). This rule is what lets a v1-shipped subscriber accept a
+retire-export from a v1.1 publisher without a schema bump, while a `requires`-token change would
+force the upgrade.
 
 `key_wraps[]` deliberately mirrors the **`key_wraps` table** in `keyvault.py` — same shape, same mental model.
 Two types in v1: `{"type":"direct"}` (key conveyed out-of-band) and `{"type":"argon2id", salt, time_cost,
@@ -237,6 +252,44 @@ transaction. A subscriber must never end up half on seq 4 and half on seq 5.
 **What this stops:** a compromised host (bucket takeover, MITM) substituting/tampering/adding/removing
 documents; a stranger publishing a "v2" of your vault elsewhere; rollback; cross-vault object splicing.
 
+### Retirement (`retired: true`) — a graceful publisher stop
+
+A publisher who is stopping produces one last **open export** with content intact and
+`retired: true` in the signed manifest. That file replaces the hosted one. On the subscriber:
+
+1. The manifest verifies exactly as any update does — §5 order unchanged; rollback protection
+   unchanged; the seq must be strictly greater than the pin.
+2. The final content update is applied. Subscribers get the last edit.
+3. The subscription is moved into the `retired` state and DROPPED from the auto-update pool —
+   like `blocked`, it never consumes a per-tick slot again on its own.
+4. Manual "Check for updates" still runs. A later, higher-seq, **non-retired** manifest signed by
+   the same pinned key **un-retires** the subscription — the publisher came back. This is the one
+   place a subscriber's automatic state reverses; the security fences (pinned key, seq floor) are
+   the reason it's safe. The publisher-side flag `retired_published` on the local vault clears the
+   same way: the next normal open export publishes a non-retired manifest.
+
+Retirement is not deletion. There is no way for a publisher to reach back and remove a document
+from a subscriber's Knowledge base — a recipient always has the plaintext (§7 non-goals), and a
+retire-export is content **intact** by construction. What retirement does is **stop the update
+channel** with a marker the subscriber can see, so a stale host silently freezing on the last real
+version can be distinguished from a publisher who explicitly signed "this is the end".
+
+### Dead-host handling — 410 Gone and slow escalation
+
+An auto-update fetch that fails is transport flakiness until it isn't. Two thresholds:
+
+* **HTTP 410 Gone** is the publisher's explicit "I took this down" signal — the subscription is
+  moved to `unreachable` **immediately** (bypass the slow counter). Distinct copy on the card:
+  *"the publisher took this vault down."*
+* Anything else (connection refused, TLS, 404, timeout, verification failure) counts toward a
+  per-subscription consecutive-failure counter. Once BOTH `_UNREACHABLE_FAILURE_COUNT` (8) *and*
+  `_UNREACHABLE_MIN_DAYS` (7 real days since the first failure of the current run) are exceeded,
+  the subscription flips to `unreachable`. The day floor keeps a burst of manual retries from
+  self-inflicting the flag.
+
+`unreachable` is exclude-from-due exactly like `blocked` and `retired`. Manual check still runs; a
+success clears the counter, the flag, and the last-error note in one write.
+
 ---
 
 ## 6. Embeddings — ship them
@@ -284,6 +337,27 @@ best, silent clobbering at worst. Minting locally makes that attack **structural
 **Vault-owned = read-only.** A document with an `origin='import'` membership refuses rename/delete with a 409
 pointing at **Detach**. This makes *"an update can replace them without clobbering the user's edits"* true **by
 construction**: a vault-owned doc cannot have user edits.
+
+### Re-subscribing after a delete — the freeze fix
+
+`DELETE /api/vaults/{id}` keeps documents by default (removing a grouping is not shredding your
+files). That leaves the possibility of an **orphan**: a document minted by a previous import whose
+vault was deleted. A re-subscribe would then hit `find_duplicate`, and — if it added the orphan as
+`owner`-origin — every future update to that `uid` would be **silently frozen forever** (owner-origin
+memberships are skipped by both `_apply_changes` and `_apply_deletions`).
+
+The fix is a **permanent one-way marker** on documents that were minted by an import (`vault_import_traces`
+table, populated by `_apply_docs` and `_land_new` on every mint). On re-subscribe, the dedupe branch
+is:
+
+* `find_duplicate` matches AND the doc has NO current memberships AND was ever imported →
+  re-adopt as `origin='import'` (un-freeze the orphan; future updates apply again).
+* Otherwise → `origin='owner'` (the historical rule; a user-authored duplicate stays editable
+  and an upstream delete never takes their document).
+
+`DELETE /api/vaults/{id}?remove_docs=1` is the opt-in that also deletes the vault's import-origin
+documents outright — the deliberate "yes, really shred these" path. Owner-origin members always
+survive regardless.
 
 ### Two KB changes this needs
 1. **`KnowledgeBase.replace(doc_id, title, content, meta)`** — re-seal **in place**, keeping the `doc_id`.

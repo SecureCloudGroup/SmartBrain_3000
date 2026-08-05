@@ -339,6 +339,13 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
     (33, "ALTER TABLE optimizer_strategies ADD COLUMN activated_at TIMESTAMP;"),
     (34, "ALTER TABLE optimizer_strategies ADD COLUMN evaluated_at TIMESTAMP;"),
     (35, "ALTER TABLE optimizer_strategies ADD COLUMN baseline_bad DOUBLE;"),
+    # Vault import history (fixes the delete-keeping-docs freeze trap): a one-way flag that
+    # SURVIVES a vault_documents row deletion, so a re-subscribe can distinguish an ex-import
+    # orphan (safe to re-adopt as vault-owned so updates apply) from a user-authored duplicate
+    # (must stay owner-origin so a rename/delete works and an upstream delete never takes it).
+    # No content, no ciphertext — the doc_id itself is opaque, and losing this row would only
+    # revert a re-subscribe to the pre-fix behavior (freeze), so it stays plaintext.
+    (36, "CREATE TABLE IF NOT EXISTS vault_import_traces (doc_id TEXT PRIMARY KEY);"),
 )
 
 # The newest migration this build knows how to apply. A database recording a

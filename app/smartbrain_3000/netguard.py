@@ -82,7 +82,18 @@ _NAT64_WK = ipaddress.IPv6Network("64:ff9b::/96")
 
 
 class FetchError(Exception):
-    """A blocked or failed guarded fetch."""
+    """A blocked or failed guarded fetch.
+
+    ``status`` carries the HTTP status when the failure is a clean upstream 4xx/5xx (else None).
+    Callers that need to distinguish "the publisher took this down" (HTTP 410 Gone) from a
+    generic dead host key on it — the guard's message text is not a stable contract.
+    """
+
+    def __init__(self, message: str, *, status: int | None = None) -> None:
+        assert message, "message required"
+        assert status is None or (100 <= status <= 599), "status must be an HTTP code"
+        super().__init__(message)
+        self.status = status
 
 
 def _unwrap(addr: ipaddress._BaseAddress) -> ipaddress._BaseAddress:
@@ -261,7 +272,8 @@ def _guarded_get(url: str, allowed_ct: tuple[str, ...], max_bytes: int,
                     current = urljoin(current, location)
                     continue
                 if response.status_code >= 400:  # an error page is not content
-                    raise FetchError(f"upstream returned HTTP {response.status_code}")
+                    raise FetchError(f"upstream returned HTTP {response.status_code}",
+                                     status=response.status_code)
                 ctype = response.headers.get("content-type", "")
                 ct_ok = ctype.startswith(allowed_ct)
                 if not ct_ok and not accept_zip_magic:

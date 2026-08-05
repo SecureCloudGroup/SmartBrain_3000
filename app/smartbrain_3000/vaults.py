@@ -136,17 +136,45 @@ class VaultStore:
     def _row(self, row) -> dict:
         vault_id = str(row[0])
         body = self._open(vault_id, bytes(row[3]), bytes(row[4]))
+        version = int(row[2])
+        published_open = bool(body.get("published_open", False))
+        # published_seq = the last seq an OPEN export was published under (the truthful "public
+        # version"). Legacy vaults published before this field existed had no counter, so fall
+        # back to ``version`` — the value the export handler bumped just before pack() saw it.
+        published_seq_raw = body.get("published_seq")
+        if isinstance(published_seq_raw, int) and published_seq_raw >= 0:
+            published_seq: int | None = published_seq_raw
+        else:
+            published_seq = version if published_open else None
+        sealed_seq_raw = body.get("sealed_seq")
+        sealed_seq = sealed_seq_raw if isinstance(sealed_seq_raw, int) and sealed_seq_raw >= 0 else None
         return {
             "id": vault_id,
             "kind": str(row[1]),
-            "version": int(row[2]),
+            "version": version,
+            # ``internal_seq`` == the counter every export bumps (public + private share this).
+            # The UI compares ``internal_seq > published_seq`` to say "changed since last publish".
+            "internal_seq": version,
             "name": body["name"],
             "description": body.get("description", ""),
             "tags": body.get("tags", []),
             "source": body.get("source"),
             # Once true, forever true: an open publish put the plaintext in the world, and no later
             # action can take it back — the UI badge must outlive re-seals, renames, everything.
-            "published_open": bool(body.get("published_open", False)),
+            "published_open": published_open,
+            "published_seq": published_seq,
+            "published_at": body.get("published_at") or None,
+            # Retired-published is a publisher-side one-way marker: this vault has been retired to
+            # every subscriber. A later normal open export un-retires it (see vault_sync).
+            "retired_published": bool(body.get("retired_published", False)),
+            # Sealed-share side of the same story: has this vault ever been sealed-shared, and at
+            # what seq. The UI shows a re-key warning when a sealed re-export mints a fresh key.
+            "shared_sealed": bool(body.get("shared_sealed", False)),
+            "sealed_seq": sealed_seq,
+            # Publisher meta (imported/subscribed vaults): the publisher's own name/description as
+            # signed by them; local ``name``/``description`` is what THIS user renamed the vault to.
+            "publisher_name": body.get("publisher_name") or "",
+            "publisher_description": body.get("publisher_description") or "",
             "doc_count": self.count_documents(vault_id),
             "created_at": str(row[5]),
             "updated_at": str(row[6]),
@@ -180,6 +208,49 @@ class VaultStore:
         assert vault_id, "vault id required"
         self._conn.execute("DELETE FROM vault_documents WHERE vault_id = ?;", [vault_id])
         self._conn.execute("DELETE FROM vaults WHERE id = ?;", [vault_id])
+
+    def note_imported_doc(self, doc_id: str) -> None:
+        """Record that ``doc_id`` was minted from a vault import. One-way, permanent, plaintext.
+
+        This is what distinguishes a user-authored doc that HAPPENS to match a subscribed vault's
+        content from an ex-import orphan whose vault was deleted (both look identical otherwise:
+        find_duplicate matches, doc has no memberships). The distinction lets a re-subscribe
+        re-adopt the orphan as vault-owned (so updates apply again — the freeze-trap fix) while
+        keeping the user-authored duplicate owner-origin (their rename/delete keeps working, and
+        an upstream delete never takes their authored copy).
+        """
+        assert doc_id, "doc id required"
+        # ON CONFLICT DO NOTHING is idempotent — a re-import (Bob imports Alice's vault twice,
+        # deduped both times) writes the row once; a re-adopted orphan writes it again as a no-op.
+        self._conn.execute(
+            "INSERT INTO vault_import_traces (doc_id) VALUES (?) ON CONFLICT DO NOTHING;",
+            [doc_id],
+        )
+
+    def was_ever_imported(self, doc_id: str) -> bool:
+        """True iff ``doc_id`` was minted by a vault import at any point in its history — the
+        signal a re-subscribe uses to un-freeze orphans without ever converting a user-authored
+        duplicate into vault-owned content (see note_imported_doc)."""
+        assert doc_id, "doc id required"
+        row = self._conn.execute(
+            "SELECT 1 FROM vault_import_traces WHERE doc_id = ? LIMIT 1;", [doc_id]
+        ).fetchone()
+        return row is not None
+
+    def import_origin_doc_ids(self, vault_id: str) -> list[str]:
+        """The doc ids in a vault whose membership is import-origin — the docs a caller may opt
+        to delete alongside the vault (``DELETE /api/vaults/{id}?remove_docs=1``). Owner-origin
+        members are the user's own documents and are never included, even when the caller asks
+        to remove everything (the "delete grouping vs shred files" invariant still holds for
+        owner-origin members).
+        """
+        assert vault_id, "vault id required"
+        rows = self._conn.execute(
+            "SELECT doc_id FROM vault_documents WHERE vault_id = ? AND origin = ? "
+            f"LIMIT {_MAX_DOCS_PER_VAULT};",
+            [vault_id, IMPORT],
+        ).fetchall()
+        return [str(r[0]) for r in rows]
 
     def bump_version(self, vault_id: str) -> int:
         """Increment the vault's monotonic version (an export publishes a version)."""
@@ -424,10 +495,18 @@ class VaultStore:
         raw = body.get("key")
         return base64.b64decode(raw) if raw else None
 
-    def note_open_publish(self, vault_id: str, name_key: bytes) -> None:
+    def note_open_publish(self, vault_id: str, name_key: bytes, *, seq: int,
+                          published_at: str, index_hash: str, retired: bool = False) -> bool:
         """Record an OPEN publish in the encrypted body: the ``published_open`` marker (drives the
-        UI's "Public" badge — publishing is irreversible, so the flag never clears) and, on the
+        UI's "Public" badge — publishing is irreversible, so the flag never clears), and, on the
         FIRST open publish only, the object-naming key.
+
+        Also records ``published_seq`` (the truthful "public version" the UI shows — distinct from
+        ``version``, which every export bumps), ``published_at`` (the plaintext calendar date the
+        manifest carries), ``retired_published`` (marker for a publisher-retired vault; cleared by
+        the next normal open publish per the un-retire rule), and the last export's INDEX HASH
+        (per mode) — the caller compares against it to surface "you republished with no changes".
+        Returns True when the index hash equals the previously-stored one (unchanged republish).
 
         K_name must be fixed once and persisted: object names are HMAC(K_name, ...), so a
         republish under a fresh key would rename every object and turn a tree-host delta update
@@ -435,12 +514,67 @@ class VaultStore:
         first publish is the one subscribers pinned their tree against.
         """
         assert len(name_key) == 32, "name key must be 32 bytes"
+        assert isinstance(seq, int) and seq > 0, "seq must be a positive integer"
         body = self._load_body(vault_id)
         assert body is not None, "vault must exist"
         body["published_open"] = True
         if "name_key" not in body:
             body["name_key"] = base64.b64encode(name_key).decode("ascii")
+        body["published_seq"] = int(seq)
+        body["published_at"] = str(published_at)
+        # Un-retire on a normal open publish: the publisher came back. A retire-export sets the
+        # flag explicitly (retired=True), so a later normal publish clearing it here is exactly
+        # the spec's un-retire rule.
+        body["retired_published"] = bool(retired)
+        previous = body.get("last_open_index_hash")
+        body["last_open_index_hash"] = str(index_hash)
         self._store_body(vault_id, body)
+        return isinstance(previous, str) and previous == str(index_hash)
+
+    def note_sealed_publish(self, vault_id: str, *, seq: int, index_hash: str) -> tuple[bool, bool]:
+        """Record a SEALED export in the encrypted body: ``shared_sealed`` (has this vault ever
+        been sealed-shared) + ``sealed_seq`` (the seq of the LAST sealed export — the UI compares
+        against ``internal_seq`` to note "changed since last sealed share") + the last export's
+        index hash. Returns ``(rotated_key, unchanged)``:
+
+        * ``rotated_key`` is True whenever ``shared_sealed`` was already set — every sealed export
+          mints a fresh Vault Key (see vault_routes.export_vault), and a re-export orphans every
+          recipient of the previous file. That's the UI's re-key warning.
+        * ``unchanged`` mirrors the open-side signal: the produced index hash equals the previous
+          sealed export's — the caller warns "you re-shared with no changes to the documents".
+        """
+        assert isinstance(seq, int) and seq > 0, "seq must be a positive integer"
+        body = self._load_body(vault_id)
+        assert body is not None, "vault must exist"
+        rotated = bool(body.get("shared_sealed", False))
+        previous = body.get("last_sealed_index_hash")
+        body["shared_sealed"] = True
+        body["sealed_seq"] = int(seq)
+        body["last_sealed_index_hash"] = str(index_hash)
+        self._store_body(vault_id, body)
+        return rotated, (isinstance(previous, str) and previous == str(index_hash))
+
+    def note_publisher_meta(self, vault_id: str, *, name: str, description: str) -> str | None:
+        """Record the publisher's own name/description into the imported vault's body (the values
+        signed by the publisher, distinct from the local ``name``/``description`` this user can
+        rename freely). Called by subscribe and by every applied update, so a publisher's rename
+        propagates to subscribers without clobbering a local rename the user chose.
+
+        Returns the PREVIOUS ``publisher_name`` when it changed (so the update result can note
+        "the publisher renamed this to X"), else None. Blank inputs are stored as empty strings —
+        never as absent — so a publisher who clears a description propagates that clear too.
+        """
+        assert vault_id, "vault id required"
+        body = self._load_body(vault_id)
+        assert body is not None, "vault must exist"
+        prev = body.get("publisher_name")
+        body["publisher_name"] = str(name)[:_MAX_NAME]
+        body["publisher_description"] = str(description)[:_MAX_DESCRIPTION]
+        self._store_body(vault_id, body)
+        prev_str = str(prev) if isinstance(prev, str) else ""
+        if prev_str and prev_str != body["publisher_name"]:
+            return prev_str
+        return None
 
     def get_name_key(self, vault_id: str) -> bytes | None:
         """The persisted object-naming key, or None if this vault was never published open."""

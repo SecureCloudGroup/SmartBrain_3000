@@ -11,6 +11,62 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Added
+- **The vault publisher lifecycle: retire, dated publishes, dead-host handling
+  — with a truthful public version chip.** Sharing a vault used to have one
+  path (publish) and one way to stop (delete the file and hope everyone
+  noticed). It now has the whole arc a real publisher needs:
+  - **Retire a vault, keep everyone's copies.** A new **Retire** action on the
+    publisher side produces one final, dated open export marked `retired`;
+    subscribers apply the last content update and then move into a **Retired
+    by publisher** state that drops out of auto-checks. Nothing gets deleted
+    from anyone's Knowledge — retirement stops the update channel, it doesn't
+    reach back and take your documents. A later normal publish from the same
+    key un-retires the subscription (the publisher came back).
+  - **The public version chip now says the truth.** Sealed private-share
+    exports used to inflate the same version counter subscribers saw as the
+    "public" version, so private activity moved the public number. There are
+    now two: `internal_seq` (bumps on every export) and `published_seq` (only
+    an open publish moves it). The Knowledge card can honestly show *Public
+    v3, internal v5* and *Changed since last publish*.
+  - **Publish dates.** Every export stamps a UTC calendar date the manifest
+    carries; the subscriber sees when what they're looking at was actually
+    made.
+  - **A publisher taking the vault down is a distinct signal.** A hosted vault
+    that returns **HTTP 410 Gone** flips the subscription to *Unreachable —
+    the publisher took this vault down* immediately; a host that's just been
+    down for a real week (8 failed attempts across 7 days) escalates to the
+    same state via the slower path. Auto-update stops in both cases; a manual
+    check still tries.
+  - **Delete a subscribed vault — your choice.** `DELETE /api/vaults/{id}`
+    still keeps documents by default (removing a grouping isn't shredding your
+    files), but `?remove_docs=1` also deletes the vault's import-origin docs
+    outright. Owner-origin copies always survive either way.
+  - **Re-subscribing after a delete un-freezes updates.** The old "delete but
+    keep docs" then "re-subscribe" combination silently froze every future
+    update to the re-adopted docs. A new one-way import trace lets a
+    re-subscribe re-adopt ex-import orphans as vault-owned so updates apply
+    again — while never converting a user-authored duplicate into a
+    stranger's to update.
+  - **A publisher's description is theirs to write.** Subscribing used to
+    overwrite the publisher's own description with "Public vault · publisher
+    &lt;fingerprint&gt;". Now the publisher's name and description are shown as
+    written and propagate on every update — a publisher rename is called out
+    in the update result.
+  - **Sealed re-share warns about the key.** Every sealed export mints a
+    fresh Vault Key that orphans everyone who had the previous file; the
+    export response now flags the re-key so the UI can warn before you
+    distribute the new file.
+  - **Unchanged republish flag.** Publishing twice with no content changes
+    is flagged on the export response so the UI can ask "did you mean to?"
+
+  The UI for the retire button, the *Retired by publisher* card treatment,
+  the *Unreachable* state and its copy, the *remove documents on delete*
+  confirmation, the sealed re-key warning, and the "you republished with no
+  changes" nudge all follow in the next release — this release wires the
+  backend for the format, storage, and update semantics that make those
+  surfaces safe to add without changing the on-disk vault format.
+
 ### Changed
 - **A paired phone can now add to Knowledge — and see Usage.** The phone was
   read-only for Knowledge; it now offers the full **Add to Knowledge** card (write a
