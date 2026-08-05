@@ -409,7 +409,9 @@ Your audit and approvals view. Two parts:
   the rest of that run: the assistant is told, and an identical retry is refused instead
   of asking you again; anything pre-authorized this way is listed
   under **Always allowed**, where **Stop allowing** takes the permission back. Irreversible
-  tools can't be pre-authorized — they ask every time, with an extra confirmation.
+  tools can't be pre-authorized — they ask every time, with an extra confirmation. When the
+  action you resolve belongs to a **scheduled** run, the run finishes on the spot and its
+  answer lands in the Scheduled updates feed — no need to trigger the schedule again.
 
   ![The Always allowed list on the Activity page — a pre-authorized tool with its Stop allowing button](assets/08-always-allowed.png)
 - **History** — the record of every tool the assistant ran or tried to run: which tool, its
