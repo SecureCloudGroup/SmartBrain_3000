@@ -136,6 +136,10 @@ export interface AgentResult {
   guidance?: { request_type: string; directive: string }; // optimizer steering that shaped this answer
 }
 
+// Allowed self-review cadences (the Settings segmented control's hour options). Kept in
+// lockstep with selfreview.ALLOWED_INTERVAL_HOURS; anything else 422s server-side.
+export type SelfImproveInterval = 2 | 4 | 8 | 24;
+
 export interface Improvement {
   id: string;
   created_at: string;
@@ -640,9 +644,18 @@ export const api = {
     req<{ ok: boolean }>("/api/websearch", { method: "PUT", body: JSON.stringify(body) }),
 
   // self-improvement (the reviewer + prompt optimizer; all switches fail closed server-side)
-  getSelfImprove: () => req<{ enabled: boolean; last_run: string | null }>("/api/selfimprove"),
-  putSelfImprove: (enabled: boolean) =>
-    req<{ enabled: boolean }>("/api/selfimprove", { method: "PUT", body: JSON.stringify({ enabled }) }),
+  // Cadence is a fixed set the settings UI exposes as a segmented control; the server 422s
+  // anything else. `enabled` and `interval_hours` are independent — a PUT that names one
+  // MUST never flip the other, so both callers below and the tests pin the exact body.
+  getSelfImprove: () =>
+    req<{ enabled: boolean; interval_hours: SelfImproveInterval; last_run: string | null }>(
+      "/api/selfimprove",
+    ),
+  putSelfImprove: (patch: { enabled?: boolean; interval_hours?: SelfImproveInterval }) =>
+    req<{ enabled: boolean; interval_hours: SelfImproveInterval; last_run: string | null }>(
+      "/api/selfimprove",
+      { method: "PUT", body: JSON.stringify(patch) },
+    ),
   getOptimizer: () =>
     req<{ enabled: boolean; strategies: OptimizerStrategy[] }>("/api/selfimprove/optimizer"),
   putOptimizer: (enabled: boolean) =>
