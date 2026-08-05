@@ -16,6 +16,7 @@ import (
 	"context"
 	_ "embed"
 	"errors"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -342,6 +343,12 @@ func checkNativeUpdate(ctx context.Context, upd update.Updater) bool {
 	}
 	defer mu.Unlock()
 	setStatus("Downloading update v" + latest + "…")
+	// Live progress on the same line: per-artifact percent, because three downloads
+	// pretending to be one bar would lie three times. Reported from this goroutine,
+	// which already owns the status line (same pattern as Watch's onStatus).
+	nv.Progress = func(artifact string, pct int) {
+		setStatus(fmt.Sprintf("Downloading update v%s… %s %d%%", latest, artifact, pct))
+	}
 	// Assembly needs its own budget (checkForUpdate's ctx is minutes; downloads are
 	// ~400 MB on a slow line) — bounded like the first assembly in start().
 	asmCtx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
@@ -597,6 +604,12 @@ func startNative(ctx context.Context) {
 	// was. Everything destructive happens below, only once the replacement is proven to be
 	// on disk. The reverse order turned a working install into a dead one on any hiccup.
 	setStatus("Downloading SmartBrain…")
+	// Live progress on the same line: per-artifact percent, because three downloads
+	// pretending to be one bar would lie three times. A response without a length
+	// keeps the static text above.
+	nv.Progress = func(artifact string, pct int) {
+		setStatus(fmt.Sprintf("Downloading SmartBrain… %s %d%%", artifact, pct))
+	}
 	asmCtx, cancelAsm := context.WithTimeout(ctx, 15*time.Minute)
 	err := nv.Assemble(asmCtx, version)
 	cancelAsm()
