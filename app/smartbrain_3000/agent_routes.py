@@ -125,20 +125,41 @@ def invoke_tool(request: Request, body: InvokeIn) -> dict:
     return {"status": "awaiting_approval", "pending_id": pid, "tool": body.name, "tier": tool.tier.value}
 
 
+def _pending_tile(p: dict) -> dict:
+    """Shape a pending row for the UI tile: redacted args + Always-allow hints.
+
+    ``remember_mode`` tells the UI which consent shape applies — ``"tool"`` for
+    whole-tool consent, ``"site"`` for the URL tools (per-host), None when consent
+    refuses to remember at all. ``remember_host`` carries the parsed host of the
+    pending URL so the UI can label the button "Always allow <host>". Site-mode
+    with an unparseable URL surfaces as non-rememberable so no button appears.
+    """
+    tool = p["tool"]
+    args = p["args"] if isinstance(p["args"], dict) else {}
+    mode = consent.remember_mode(tool)
+    host: str | None = None
+    if mode == "site":
+        url = args.get("url")
+        host = consent.host_from_url(url) if isinstance(url, str) else None
+    rememberable = mode == "tool" or (mode == "site" and host is not None)
+    return {
+        "id": p["id"], "tool": tool, "tier": p["tier"], "created_at": p["created_at"],
+        "turn_id": p.get("turn_id"), "conversation_id": p.get("conversation_id"),
+        "args": tools.redact(args),
+        # rememberable stays true for either mode: the phone bundle reads only this
+        # flag to decide whether to show the "Always allow" button; the newer web UI
+        # additionally reads remember_mode/remember_host to label it precisely.
+        "rememberable": rememberable,
+        "remember_mode": mode,
+        "remember_host": host,
+    }
+
+
 @router.get("/api/agent/pending")
 def list_pending(request: Request) -> dict:
     """List actions awaiting approval (args redacted for the tile)."""
     approvals = _approvals(request)
-    pending = [
-        {"id": p["id"], "tool": p["tool"], "tier": p["tier"], "created_at": p["created_at"],
-         "turn_id": p.get("turn_id"), "conversation_id": p.get("conversation_id"),
-         "args": tools.redact(p["args"]),
-         # So the UI never offers "Always allow" on a tool consent would refuse to
-         # store — that reads as the button being broken rather than as a rule.
-         "rememberable": consent.is_rememberable(p["tool"])}
-        for p in approvals.list_pending()
-    ]
-    return {"pending": pending}
+    return {"pending": [_pending_tile(p) for p in approvals.list_pending()]}
 
 
 @router.post("/api/agent/pending/{pid}/approve")
@@ -162,7 +183,14 @@ def approve(request: Request, pid: str, body: ApproveIn) -> dict:
         raise HTTPException(status_code=409, detail="could not approve (resolved or expired)")
     audit.append("user", row["tool_name"], row["tier"], "approved", True, args_summary=tools.summarize(row["args"]))
     if body.remember:  # remember consent (no-op for IRREVERSIBLE — those always re-ask)
-        consent.remember(request.app.state.dbx, row["tool_name"])
+        # Site-mode tools (web_fetch, kb_ingest_url) remember one HOST, not the whole
+        # tool: the URL the model composed for this pending call becomes the allowed
+        # destination; a future call to a DIFFERENT host still parks for approval.
+        row_args = row["args"] if isinstance(row["args"], dict) else {}
+        if consent.remember_mode(row["tool_name"]) == "site":
+            consent.remember_site(request.app.state.dbx, row["tool_name"], row_args.get("url", ""))
+        else:
+            consent.remember(request.app.state.dbx, row["tool_name"])
     try:
         result = tools.run(ctx, audit, row["tool_name"], row["args"], actor="user", claim=lambda: approvals.claim(pid))
     except PermissionError:
@@ -192,16 +220,40 @@ def deny(request: Request, pid: str) -> dict[str, bool]:
 
 @router.get("/api/agent/remembered")
 def list_remembered(request: Request) -> dict:
-    """Tools the user has remembered (auto-approved writes); IRREVERSIBLE is never here."""
+    """Auto-approved consent: whole-tool ``tools`` + per-host ``sites``.
+
+    ``tools`` stays a list of names (the phone bundle reads it that way); ``sites``
+    carries the URL tools' remembered hosts as ``{"tool", "host"}`` records so the
+    UI can list them and DELETE any one entry via the same route.
+    """
     _approvals(request)  # unlocked gate
-    return {"tools": sorted(consent.remembered(request.app.state.dbx))}
+    entries = consent.remembered(request.app.state.dbx)
+    tool_names: list[str] = []
+    sites: list[dict[str, str]] = []
+    for entry in entries:  # bounded by the meta row's size
+        head, sep, host = entry.partition("@")
+        if sep and host:
+            sites.append({"tool": head, "host": host})
+        else:
+            tool_names.append(entry)
+    tool_names.sort()
+    sites.sort(key=lambda s: (s["tool"], s["host"]))
+    return {"tools": tool_names, "sites": sites}
 
 
 @router.delete("/api/agent/remembered/{name}")
-def forget_remembered(request: Request, name: str) -> dict[str, bool]:
-    """Forget a remembered tool so it prompts for approval again."""
+def forget_remembered(request: Request, name: str, host: str | None = None) -> dict[str, bool]:
+    """Forget a remembered entry so it prompts for approval again.
+
+    Without ``host`` this drops the WHOLE-tool consent for ``name``. With ``host`` it
+    drops just that one site entry (the two URL tools remember per-host, so the same
+    tool can have several — deleting one leaves the rest alone).
+    """
     _approvals(request)
-    consent.forget(request.app.state.dbx, name)
+    if host:
+        consent.forget_site(request.app.state.dbx, name, host)
+    else:
+        consent.forget(request.app.state.dbx, name)
     return {"ok": True}
 
 

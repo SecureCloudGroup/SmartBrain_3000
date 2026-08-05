@@ -11,6 +11,22 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Changed
+- **"Always allow" is now available for the URL tools — per site.** Approving a
+  `web_fetch` or `kb_ingest_url` action offered no way to stop being asked again, because
+  remembering the whole tool would have let a prompt-injected URL fetch anywhere unattended.
+  The button now remembers ONE host: the scheduled news check runs unattended after one
+  approval, and a fetch pointed at an unknown host — the shape an exfiltration takes —
+  still parks for approval. Existing whole-tool remembered consents (e.g. `web_search`,
+  `add_task`) are unchanged. Manage remembered hosts under Settings → Approvals; the same
+  DELETE endpoint drops a single (tool, host) pair.
+- **A denial sticks for the rest of the turn.** Denying a tool call would let the model
+  immediately re-request the exact same action, spawning a fresh pending row — a loop of
+  deny, request, deny. The tool result now says plainly that the user denied it and not
+  to try again this turn; if the model re-emits the identical call anyway, the server
+  refuses without creating another pending, so the turn converges. A DIFFERENT call still
+  parks normally.
+
 ## [0.8.19] - 2026-08-04
 
 ### Changed

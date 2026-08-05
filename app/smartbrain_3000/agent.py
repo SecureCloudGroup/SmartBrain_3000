@@ -17,7 +17,7 @@ import re
 import time
 import uuid
 
-from . import gateway, tools
+from . import consent, gateway, tools
 
 log = logging.getLogger(__name__)
 
@@ -157,14 +157,31 @@ def _args_valid(tool: tools.Tool, args: dict) -> bool:
         return False
 
 
-def _execute_inline(ctx: tools.ToolContext, audit, tc: dict, conversation_id: str | None, auto_approve, result_cap: int = _RESULT_CAP) -> dict:
-    """Run a non-parked tool call (OBSERVE / remembered write / unknown / invalid)."""
+def _canonical_key(name: str, args: dict) -> str:
+    """Deterministic (name, args) identity for same-turn denial matching.
+
+    Sorted-key JSON so ``{"a": 1, "b": 2}`` and ``{"b": 2, "a": 1}`` collapse to one
+    key — the model may re-emit an identical call with a reshuffled arg order and
+    we still recognize it as the exact action the user just denied.
+    """
+    assert isinstance(name, str) and name, "name required"
+    assert isinstance(args, dict), "args must be a dict"
+    return name + ":" + json.dumps(args, sort_keys=True, default=str)
+
+
+def _execute_inline(ctx: tools.ToolContext, audit, tc: dict, conversation_id: str | None, auto_approve, denied, result_cap: int = _RESULT_CAP) -> dict:
+    """Run a non-parked tool call (OBSERVE / remembered write / unknown / invalid / same-turn denied)."""
     name, args, tcid = _tool_call_parts(tc)
     tool = tools.get_tool(name) if name else None
-    # A REVIEWED write the user chose to remember runs without re-asking. The tier
-    # check means an IRREVERSIBLE tool can NEVER auto-run, even if the set is corrupt.
-    remembered = tool is not None and tool.tier is tools.Tier.REVIEWED and name in auto_approve
-    if args is None or tool is None:
+    # A REVIEWED write the user chose to remember (whole-tool or site-scoped) runs
+    # without re-asking. The tier check means an IRREVERSIBLE tool can NEVER auto-run,
+    # even if the entry set is corrupt.
+    remembered = tool is not None and tool.tier is tools.Tier.REVIEWED and consent.allowed_in(auto_approve, name, args or {})
+    # The user denied THIS exact (tool, args) earlier in this turn: refuse without a
+    # new pending row so the deny/request loop can never spin.
+    if denied and tool is not None and args is not None and _canonical_key(name, args) in denied:
+        content = json.dumps({"error": "the user already denied exactly this action this turn; do not attempt it again"})
+    elif args is None or tool is None:
         content = json.dumps({"error": f"cannot run tool '{name}'"})
     elif tool.tier is not tools.Tier.OBSERVE and not remembered:
         # A non-OBSERVE, un-remembered tool only reaches inline with invalid args
@@ -277,19 +294,22 @@ def _collect_sources(messages: list[dict]) -> list[dict]:
     return sources
 
 
-def _classify(tool_calls: list[dict], auto_approve) -> tuple[list[dict], list[dict]]:
-    """Split tool_calls into (parked = valid non-OBSERVE & not remembered, inline = rest)."""
+def _classify(tool_calls: list[dict], auto_approve, denied) -> tuple[list[dict], list[dict]]:
+    """Split tool_calls into (parked = valid non-OBSERVE & not remembered & not denied, inline = rest)."""
     assert isinstance(tool_calls, list), "tool_calls must be a list"
+    assert denied is not None, "denied snapshot required (empty set is fine)"
     parked, inline = [], []
     for tc in tool_calls:  # bounded by _MAX_TOOL_CALLS (checked by the caller)
         name, args, _ = _tool_call_parts(tc)
         tool = tools.get_tool(name) if name else None
         dangerous = tool is not None and tool.tier is not tools.Tier.OBSERVE
-        remembered = tool is not None and tool.tier is tools.Tier.REVIEWED and name in auto_approve
-        # Park a valid dangerous call unless it's a remembered write (runs inline).
-        # Invalid args go inline so the model gets the error and the approve path
-        # never wedges on a bad arg.
-        if dangerous and not remembered and args is not None and _args_valid(tool, args):
+        remembered = tool is not None and tool.tier is tools.Tier.REVIEWED and consent.allowed_in(auto_approve, name, args or {})
+        already_denied = args is not None and denied and _canonical_key(name, args) in denied
+        # Park a valid dangerous call unless it's a remembered write OR the user
+        # already denied this EXACT (name, args) earlier in the same turn — that
+        # denied one takes the inline path so it returns an error instead of
+        # spawning another pending row (the deny/request loop).
+        if dangerous and not remembered and not already_denied and args is not None and _args_valid(tool, args):
             parked.append(tc)
         else:
             inline.append(tc)
@@ -375,14 +395,17 @@ def _tools_call(messages: list[dict], model: str, *, timeout: float, usage_sink=
     return data
 
 
-def run_turn(ctx, audit, approvals, *, messages, model, conversation_id, turn_id, start_step=0, start_calls=0, usage_sink=None, auto_approve=frozenset(), timeout=60.0, result_cap=_RESULT_CAP, on_event=None, primed=None) -> dict:
+def run_turn(ctx, audit, approvals, *, messages, model, conversation_id, turn_id, start_step=0, start_calls=0, usage_sink=None, auto_approve=frozenset(), denied=frozenset(), timeout=60.0, result_cap=_RESULT_CAP, on_event=None, primed=None) -> dict:
     """Run the bounded loop from ``start_step``; return a terminal/awaiting result.
 
-    ``auto_approve`` is the set of REVIEWED tool names the user has remembered;
-    those run inline instead of parking. IRREVERSIBLE tools always park. ``timeout``
-    is the per-gateway-call budget — the scheduled path raises it so a cold local-model
-    load doesn't fail the turn. ``result_cap`` caps each tool-result string fed back to the
-    model; the route sizes it to the model's context so a big-context model can read more.
+    ``auto_approve`` is the remembered-consent ENTRY SET (plain tool names +
+    ``tool@host`` site entries) the user has chosen; a call auto-runs when
+    ``consent.allowed_in`` matches. IRREVERSIBLE tools always park. ``denied`` is
+    the canonical-key set of (name, args) pairs the user denied earlier in THIS
+    turn; a matching new call short-circuits with an error instead of parking, so
+    the deny/request loop cannot spin. ``timeout`` is the per-gateway-call budget —
+    the scheduled path raises it so a cold local-model load doesn't fail the turn.
+    ``result_cap`` caps each tool-result string fed back to the model.
     """
     assert audit is not None and approvals is not None, "unlocked stores required"
     assert messages and model, "messages + model required"
@@ -441,12 +464,12 @@ def run_turn(ctx, audit, approvals, *, messages, model, conversation_id, turn_id
                                        result_cap=result_cap, on_event=on_event)
         calls += len(tool_calls)
         messages.append({"role": "assistant", "content": content, "tool_calls": tool_calls})
-        parked, inline = _classify(tool_calls, auto_approve)
+        parked, inline = _classify(tool_calls, auto_approve, denied)
         for tc in inline:  # bounded by _MAX_TOOL_CALLS
             tname, targs, _tcid = _tool_call_parts(tc)
             _notify(on_event, {"kind": "tool", "state": "start", "tool": tname,
                                "detail": _tool_detail(tname, targs)})
-            result_msg = _execute_inline(ctx, audit, tc, conversation_id, auto_approve, result_cap)
+            result_msg = _execute_inline(ctx, audit, tc, conversation_id, auto_approve, denied, result_cap)
             _notify(on_event, {"kind": "tool", "state": "done", "tool": tname,
                                "ok": not result_msg["content"].startswith('{"error"')})
             messages.append(result_msg)
@@ -534,6 +557,12 @@ def _finalize_exhausted(messages, model, *, timeout, usage_sink, reason: str, st
             "sources": _collect_sources(messages)}
 
 
+_DENIED_TOOL_RESULT = (
+    "The user denied this exact action. Do not attempt it again this turn; "
+    "proceed without it or explain what you could not do."
+)
+
+
 def resume_turn(ctx, audit, approvals, turn_id: str, *, conn=None, usage_sink=None, auto_approve=frozenset(), timeout=60.0, result_cap=_RESULT_CAP) -> dict | None:
     """Resume a parked turn once its approvals are resolved; None if unknown turn.
 
@@ -560,17 +589,21 @@ def resume_turn(ctx, audit, approvals, turn_id: str, *, conn=None, usage_sink=No
     messages = turn_state["messages"]
     if conn is not None:  # size the cap to the resumed turn's model (known only now, from turn_state)
         result_cap = gateway.result_cap_for(conn, turn_state["model"])
+    # Every denied action from ANY earlier park of this turn (not just the latest
+    # batch): a call denied in park #1 must still short-circuit if the model
+    # re-emits it after park #2 resumes.
+    denied = frozenset(_canonical_key(r["tool_name"], r["args"]) for r in rows if r["status"] == "denied")
     for r in batch:  # one tool-result message per call in the latest park (server-reconstructed)
         if r["status"] == "executed" and r["result"] is not None:
             content = json.dumps(r["result"], default=str)
         elif r["status"] == "executed":
             content = json.dumps({"error": "tool execution failed"})  # never claim a forged success
         else:
-            content = json.dumps({"error": "action was not approved"})
+            content = json.dumps({"error": _DENIED_TOOL_RESULT})
         messages.append({"role": "tool", "tool_call_id": r["tool_call_id"], "content": content[:result_cap]})
     return run_turn(
         ctx, audit, approvals, messages=messages, model=turn_state["model"],
         conversation_id=turn_state.get("conversation_id"), turn_id=turn_id,
         start_step=turn_state["step"] + 1, start_calls=turn_state["calls"], usage_sink=usage_sink,
-        auto_approve=auto_approve, timeout=timeout, result_cap=result_cap,
+        auto_approve=auto_approve, denied=denied, timeout=timeout, result_cap=result_cap,
     )

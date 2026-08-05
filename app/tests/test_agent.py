@@ -1082,3 +1082,68 @@ def test_a_truncated_tool_stream_is_never_reused(http_client: TestClient, monkey
     pending = [d for e, d in _parse_sse(stream.text) if e == "pending"]
     assert pending, "the turn still falls back as before"
     assert "primed" not in pending[0], "an unfinished stream must never be reused"
+
+
+# --- a denial STICKS for the rest of the turn ---------------------------------
+# Live UX failure: user denies a fetch, the model immediately re-requests it, new
+# pending, deny — "a loop of deny, request, try again, deny". A denied action must
+# short-circuit the second try instead of spawning another pending row.
+
+
+def test_denied_repeat_returns_error_without_a_new_pending(monkeypatch) -> None:
+    """Same (name, args) after deny -> inline tool error, NOT another pending row."""
+    ctx, audit, approvals = _wired()
+    # Turn 1: model requests remember_fact; it parks.
+    _script(monkeypatch, [_toolcalls(("remember_fact", {"text": "one"}))])
+    r1 = _run(ctx, audit, approvals, turn_id="t-deny")
+    pid = r1["pending"][0]["id"]
+    # User denies.
+    assert approvals.deny(pid) is True
+    # On resume, the model re-emits the IDENTICAL call (sorted-key JSON canonical)
+    # THEN a plain answer. The repeat must NOT park; it must feed back an error
+    # and let the turn complete.
+    calls = _recorder(monkeypatch, [
+        _toolcalls(("remember_fact", {"text": "one"})),
+        _text("ok, skipping"),
+    ])
+    r2 = agent.resume_turn(ctx, audit, approvals, "t-deny")
+    assert r2["status"] == "complete" and r2["message"] == "ok, skipping"
+    # Nothing new was parked.
+    assert approvals.list_pending() == []
+    # The tool_result the model saw on the retry was an error (the short-circuit).
+    tool_msgs = [m for m in calls[-1] if m.get("role") == "tool"]
+    assert any("already denied" in (m.get("content") or "") for m in tool_msgs)
+
+
+def test_denied_repeat_with_different_args_still_parks(monkeypatch) -> None:
+    """The denial is exact-match: different args must still create a fresh pending."""
+    ctx, audit, approvals = _wired()
+    _script(monkeypatch, [_toolcalls(("remember_fact", {"text": "one"}))])
+    pid = _run(ctx, audit, approvals, turn_id="t-diff")["pending"][0]["id"]
+    approvals.deny(pid)
+    # Different args -> the classifier doesn't recognize it and parks normally.
+    _script(monkeypatch, [_toolcalls(("remember_fact", {"text": "two"}))])
+    r2 = agent.resume_turn(ctx, audit, approvals, "t-diff")
+    assert r2["status"] == "awaiting_approval"
+    assert r2["pending"][0]["tool"] == "remember_fact"
+
+
+def test_denied_tool_result_wording_reaches_the_model(monkeypatch) -> None:
+    """The tool_result fed back on deny must say plainly: user denied; don't retry."""
+    ctx, audit, approvals = _wired()
+    _script(monkeypatch, [_toolcalls(("remember_fact", {"text": "x"}))])
+    pid = _run(ctx, audit, approvals, turn_id="t-word")["pending"][0]["id"]
+    approvals.deny(pid)
+    calls = _recorder(monkeypatch, [_text("understood")])
+    agent.resume_turn(ctx, audit, approvals, "t-word")
+    tool_msg = next(m for m in calls[-1] if m.get("role") == "tool")
+    content = tool_msg["content"]
+    assert "denied" in content.lower()
+    assert "again this turn" in content.lower()
+
+
+def test_canonical_key_ignores_arg_key_order() -> None:
+    """Two dicts with the same content in different order collapse to one key."""
+    a = agent._canonical_key("web_fetch", {"url": "https://x", "b": 2})
+    b = agent._canonical_key("web_fetch", {"b": 2, "url": "https://x"})
+    assert a == b
