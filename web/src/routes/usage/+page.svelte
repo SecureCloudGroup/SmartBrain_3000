@@ -4,7 +4,6 @@
   import { account } from "$lib/account.svelte";
   import { api, type UsageRow } from "$lib/api";
   import { describeError } from "$lib/errors";
-  import { remote } from "$lib/remote/connection.svelte";
   import Spinner from "$lib/components/Spinner.svelte";
 
   let rows = $state<UsageRow[]>([]);
@@ -66,7 +65,6 @@
   }
 
   onMount(async () => {
-    if (remote.status !== "idle") return goto("/chat"); // usage analytics is a Desktop (review-at-the-desk) page
     if (account.status === null) await account.load();
     const s = account.status;
     if (s && !s.initialized) return goto("/setup");
