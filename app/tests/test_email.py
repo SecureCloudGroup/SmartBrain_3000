@@ -20,7 +20,6 @@ from smartbrain_3000 import email_oauth, gmail, tools
 from smartbrain_3000.audit import AuditLog
 from smartbrain_3000.secrets import gen_master_key
 
-
 # --- a fake httpx response/client ----------------------------------------
 
 class _Resp:

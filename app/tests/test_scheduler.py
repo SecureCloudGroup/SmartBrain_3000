@@ -437,8 +437,7 @@ def test_tick_claim_is_serialized(monkeypatch) -> None:
         # mark_ran runs INSIDE the _RUN_LOCK claim window — count overlap there.
         with inside_lock:
             inside[0] += 1
-            if inside[0] > max_inside[0]:
-                max_inside[0] = inside[0]
+            max_inside[0] = max(max_inside[0], inside[0])
         time.sleep(0.01)  # widen the window so any race would be visible
         try:
             real_mark_ran(self, sid, interval_minutes)

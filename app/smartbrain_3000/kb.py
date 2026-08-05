@@ -581,7 +581,7 @@ class KnowledgeBase:
         assert chunk_idx >= 0, "chunk idx must be non-negative"
         assert 1 <= dim <= _MAX_EMBED_DIM, "dim out of range"
         assert model, "model required"
-        return b"embedding:" + f"{doc_id}|{chunk_idx}|{dim}|{model}".encode("utf-8")
+        return b"embedding:" + f"{doc_id}|{chunk_idx}|{dim}|{model}".encode()
 
     def _open_embedding(
         self, doc_id: str, chunk_idx: int, nonce: bytes, ciphertext: bytes, dim: int, model: str

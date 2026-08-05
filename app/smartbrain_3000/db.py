@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 import threading
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import duckdb
@@ -526,7 +526,7 @@ def _unique_sibling(path: Path, suffix: str) -> Path:
     """
     assert isinstance(path, Path), "path must be a Path"
     assert suffix, "suffix required"
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f")
+    stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S-%f")
     return path.parent / (path.name + suffix + "-" + stamp)
 
 
@@ -644,7 +644,7 @@ def record_boot(conn: duckdb.DuckDBPyConnection) -> dict[str, str]:
     if install_id is None:
         install_id = str(uuid.uuid4())
         meta_set(conn, "install_id", install_id)
-        meta_set(conn, "first_seen", datetime.now(timezone.utc).isoformat())
+        meta_set(conn, "first_seen", datetime.now(UTC).isoformat())
     routing_id = meta_get(conn, "desktop_routing_id")
     if routing_id is None:
         routing_id = str(uuid.uuid4())

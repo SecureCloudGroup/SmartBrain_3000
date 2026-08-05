@@ -12,7 +12,6 @@ import socket
 import struct
 import time
 
-
 # SecureCloudGroup's hosted, content-blind signaling node — the default so a fresh install can pair
 # a phone with zero configuration. Self-hosters override with SMARTBRAIN_SIGNALING_URL=wss://<node>.
 # Pre-wiring the URL exposes nothing on its own: remote access still reaches the broker only once the

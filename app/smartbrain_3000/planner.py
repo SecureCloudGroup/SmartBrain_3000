@@ -173,7 +173,7 @@ class Planner:
         assert recur in ("daily", "weekly"), "recur must be daily/weekly"
         assert isinstance(due_date, str) and len(due_date) >= 10, "due_date must be YYYY-MM-DD"
         parsed = datetime.strptime(due_date[:10], "%Y-%m-%d").date()
-        base = parsed if parsed >= date.today() else date.today()
+        base = max(parsed, date.today())
         step = timedelta(days=1 if recur == "daily" else 7)
         nxt = base + step
         assert nxt >= date.today(), "next occurrence must be >= today"

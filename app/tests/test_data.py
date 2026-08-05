@@ -174,7 +174,7 @@ def test_restore_streams_large_body_without_buffering(client: TestClient, monkey
     backup = client.post("/api/backup", json={"passphrase": "correct-horse"}, headers=_LOCAL).content
     from starlette.requests import Request as StarletteRequest
 
-    def _boom(self):  # noqa: ANN001 — instance method patch on Starlette's Request
+    def _boom(self):
         raise AssertionError("restore must stream the body, not buffer it")
 
     monkeypatch.setattr(StarletteRequest, "body", _boom)
@@ -264,9 +264,9 @@ def test_migrations_idempotent_on_populated_db(tmp_path) -> None:
     # After migrations + real user data, re-running run_migrations() must be a
     # no-op (returns 0, every row survives). Guards against an accidental
     # destructive migration being added to the tail of the list.
+    from smartbrain_3000.history import ChatHistory
     from smartbrain_3000.kb import KnowledgeBase
     from smartbrain_3000.planner import Planner
-    from smartbrain_3000.history import ChatHistory
     from smartbrain_3000.secrets import gen_master_key
 
     conn = dbmod.open_db(tmp_path / "live.duckdb")

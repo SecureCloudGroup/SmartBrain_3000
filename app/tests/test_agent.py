@@ -10,9 +10,8 @@ import duckdb
 import pytest
 from fastapi.testclient import TestClient
 
-from smartbrain_3000 import agent, agent_routes
+from smartbrain_3000 import agent, agent_routes, gateway, tools
 from smartbrain_3000 import db as dbmod
-from smartbrain_3000 import gateway, tools
 from smartbrain_3000.approvals import ApprovalStore
 from smartbrain_3000.audit import AuditLog
 from smartbrain_3000.kb import KnowledgeBase
@@ -464,8 +463,7 @@ def test_stream_endpoint_requires_unlock(http_client: TestClient) -> None:
 
 
 def _stream(*chunks: dict) -> Iterator[dict]:
-    for c in chunks:
-        yield c
+    yield from chunks
 
 
 def test_stream_yields_deltas_then_done(http_client: TestClient, monkeypatch) -> None:

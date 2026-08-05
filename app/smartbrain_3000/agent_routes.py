@@ -23,7 +23,18 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 from starlette.responses import StreamingResponse
 
-from . import agent, consent, docsummaries, gateway, metrics, optimizer, scheduler, search, tools, usage
+from . import (
+    agent,
+    consent,
+    docsummaries,
+    gateway,
+    metrics,
+    optimizer,
+    scheduler,
+    search,
+    tools,
+    usage,
+)
 from .chat_routes import _with_memory
 
 router = APIRouter()
@@ -559,7 +570,7 @@ def _sse_event(event: str, payload: dict) -> bytes:
     assert event, "sse event name required"
     assert isinstance(payload, dict), "sse payload must be a dict"
     body = json.dumps(payload, default=str)
-    return f"event: {event}\ndata: {body}\n\n".encode("utf-8")
+    return f"event: {event}\ndata: {body}\n\n".encode()
 
 
 # A streamed tool call arrives in FRAGMENTS: the name in one chunk, the JSON arguments split

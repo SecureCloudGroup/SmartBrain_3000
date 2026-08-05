@@ -168,9 +168,9 @@ def test_chat_stream_flags_tool_calls() -> None:
 
 
 def test_chat_stream_raises_on_error_status() -> None:
-    with _stream_mock(b'{"error": {"message": "down"}}', status=502) as mock:
-        with pytest.raises(gateway.GatewayError) as info:
-            list(gateway.chat_stream([{"role": "user", "content": "hi"}], "m", client=mock))
+    with _stream_mock(b'{"error": {"message": "down"}}', status=502) as mock, \
+            pytest.raises(gateway.GatewayError) as info:
+        list(gateway.chat_stream([{"role": "user", "content": "hi"}], "m", client=mock))
     assert info.value.status_code == 502 and "down" in info.value.message
 
 

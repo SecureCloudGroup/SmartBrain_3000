@@ -20,7 +20,9 @@ from dataclasses import dataclass
 from enum import Enum
 
 from . import gateway, ingest, kbindex, netguard, search, vault_format
-from . import summarize as docsum  # aliased: this module already defines a summarize() helper (line ~845)
+from . import (
+    summarize as docsum,  # aliased: this module already defines a summarize() helper (line ~845)
+)
 
 log = logging.getLogger(__name__)
 

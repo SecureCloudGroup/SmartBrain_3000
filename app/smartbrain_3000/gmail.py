@@ -54,8 +54,7 @@ def _extract_body(payload: dict) -> str:
         body = node.get("body") or {}
         if node.get("mimeType") == "text/plain" and body.get("data"):
             return _b64url_decode(body["data"])
-        for part in (node.get("parts") or [])[:_MAX_PARTS]:  # bounded fan-out
-            stack.append(part)
+        stack.extend((node.get("parts") or [])[:_MAX_PARTS])  # bounded fan-out
     return ""
 
 

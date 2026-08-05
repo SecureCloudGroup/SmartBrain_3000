@@ -73,7 +73,9 @@ def test_version_is_stamped_from_the_environment(monkeypatch) -> None:
 def test_desktop_routing_id_is_random_and_distinct(tmp_path, monkeypatch) -> None:
     # Arch H6: routing id is its own random value, recorded in boot, != install_id.
     import duckdb
-    from smartbrain_3000 import db as dbmod, remote_config
+
+    from smartbrain_3000 import db as dbmod
+    from smartbrain_3000 import remote_config
 
     conn = duckdb.connect(":memory:")
     dbmod.run_migrations(conn)
@@ -117,7 +119,8 @@ def test_drain_handles_none_tasks() -> None:
 
 def _seed_smartbrain_db(path) -> None:
     """Build a real (key_wraps-bearing) DB at ``path`` so it passes is_smartbrain_db."""
-    from smartbrain_3000 import db as dbmod, keyvault
+    from smartbrain_3000 import db as dbmod
+    from smartbrain_3000 import keyvault
 
     conn = dbmod.open_db(path)
     dbmod.run_migrations(conn)
@@ -139,9 +142,8 @@ def test_lifespan_applies_staged_restore_and_logs(tmp_path, monkeypatch, caplog)
     dbmod.staged_restore_path(db_path).write_bytes(staged_src.read_bytes())
 
     monkeypatch.setenv("SMARTBRAIN_DB_PATH", str(db_path))
-    with caplog.at_level("WARNING"):
-        with TestClient(main.create_app()) as client:
-            assert client.get("/api/health").status_code == 200
+    with caplog.at_level("WARNING"), TestClient(main.create_app()) as client:
+        assert client.get("/api/health").status_code == 200
 
     assert list(tmp_path.glob("live.duckdb.pre-restore-*"))  # old DB displaced (unique timestamped name)
     assert not dbmod.staged_restore_path(db_path).exists()  # staged file consumed
@@ -175,9 +177,8 @@ def test_lifespan_webrtc_enabled_no_url_logs_and_skips(tmp_path, monkeypatch, ca
     monkeypatch.setenv("SMARTBRAIN_WEBRTC_ENABLED", "1")
     monkeypatch.setenv("SMARTBRAIN_SIGNALING_URL", "")
 
-    with caplog.at_level("WARNING"):
-        with TestClient(main.create_app()) as client:
-            assert client.get("/api/health").status_code == 200
+    with caplog.at_level("WARNING"), TestClient(main.create_app()) as client:
+        assert client.get("/api/health").status_code == 200
 
     msgs = " ".join(rec.message for rec in caplog.records)
     assert "SIGNALING_URL is unset" in msgs or "remote access off" in msgs

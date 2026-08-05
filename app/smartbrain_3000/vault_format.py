@@ -28,7 +28,7 @@ import os
 import re
 import struct
 import zipfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -249,7 +249,7 @@ def _read_vec_object(raw: bytes) -> list[list[float]]:
         # `matrix @ q` produce NaN and ranks the WHOLE corpus at random — the one place a malicious
         # vault could silently break search.
         for x in vec:
-            if x != x or x in (float("inf"), float("-inf")):
+            if x != x or x in (float("inf"), float("-inf")):  # noqa: PLR0124 - x != x is the canonical NaN test
                 raise VaultError("vector object contains a non-finite value")
         out.append(vec)
     return out
@@ -297,7 +297,7 @@ def _clean_meta(meta) -> dict:
 
 def _today_utc() -> str:
     """Today's date in UTC as YYYY-MM-DD — module seam so a test can pin it."""
-    return datetime.now(timezone.utc).date().isoformat()
+    return datetime.now(UTC).date().isoformat()
 
 
 def pack(
@@ -399,7 +399,7 @@ def pack(
         },
         "doc_count": len(index_docs),
         "index": {"hash": hashlib.sha256(index_raw).hexdigest(), "bytes": len(index_raw)},
-        "embeddings": ({"model": embed_model, "dim": sorted(dims)[0],
+        "embeddings": ({"model": embed_model, "dim": min(dims),
                         "chunking": {"scheme": "sb-chunk-v1", "chunk_chars": 4000,
                                      "max_chunks": MAX_CHUNKS, "title_prefix": True}}
                        if dims and embed_model else None),
@@ -561,9 +561,10 @@ def read_manifest_bytes(raw: bytes) -> dict:
     # v1 additive fields (see spec §2 "additive fields"): older readers ignore an unknown key, so
     # PRESENT means SET here — validate the value type or refuse. A future reader looking at an
     # older manifest sees them absent and treats them as defaults. Both are covered by the signature.
-    if "published_at" in payload:
-        if not (isinstance(payload["published_at"], str) and _DATE_RE.match(payload["published_at"])):
-            raise VaultError("vault manifest is malformed (published_at)")
+    if "published_at" in payload and not (
+        isinstance(payload["published_at"], str) and _DATE_RE.match(payload["published_at"])
+    ):
+        raise VaultError("vault manifest is malformed (published_at)")
     if "retired" in payload and payload["retired"] is not True:
         # ``retired`` is a one-way marker: true means "publisher retired this vault". Any other
         # value is a signal we don't understand — refuse, don't guess. Reject bool False too so a

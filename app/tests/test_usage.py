@@ -6,7 +6,6 @@ import logging
 from collections.abc import Iterator
 
 import duckdb
-
 import pytest
 from fastapi.testclient import TestClient
 
@@ -93,7 +92,7 @@ def test_usage_endpoint_local_is_free(client: TestClient, monkeypatch) -> None:
         "usage": {"prompt_tokens": 10, "completion_tokens": 5},
     })
     client.post("/api/chat", json={"messages": [{"role": "user", "content": "hi"}], "model": "ollama/llama3.2"})
-    monkeypatch.setattr(gateway, "list_models", lambda: [])  # no pricing available
+    monkeypatch.setattr(gateway, "list_models", list)  # no pricing available
     u = client.get("/api/usage").json()
     row = next(x for x in u["usage"] if x["model"] == "ollama/llama3.2")
     assert row["local"] is True and row["cost"] == 0.0
@@ -106,7 +105,7 @@ def test_usage_endpoint_time_bounds(client: TestClient, monkeypatch) -> None:
         "usage": {"prompt_tokens": 10, "completion_tokens": 5},
     })
     client.post("/api/chat", json={"messages": [{"role": "user", "content": "hi"}], "model": "gemini/x"})
-    monkeypatch.setattr(gateway, "list_models", lambda: [])
+    monkeypatch.setattr(gateway, "list_models", list)
     # A future 'since' excludes the just-recorded row.
     assert client.get("/api/usage", params={"since": "2099-01-01 00:00:00"}).json()["usage"] == []
     # A malformed bound is ignored (the row is still counted).

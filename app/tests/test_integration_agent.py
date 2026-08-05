@@ -13,9 +13,8 @@ import json
 from collections.abc import Iterator
 
 import pytest
-from fastapi.testclient import TestClient
-
 from _fakegateway import FakeGateway
+from fastapi.testclient import TestClient
 
 _ADD_TASK_CALL = [{
     "id": "call_1", "type": "function",

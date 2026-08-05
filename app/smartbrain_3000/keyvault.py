@@ -44,7 +44,7 @@ def _aad(method: str) -> bytes:
     """Associated data binding a wrap to its unlock method."""
     assert method, "method required"
     assert method in ("passphrase", "recovery"), "unknown unlock method"
-    return f"smartbrain_3000:master_key:{method}".encode("utf-8")
+    return f"smartbrain_3000:master_key:{method}".encode()
 
 
 def _derive(
