@@ -1,7 +1,16 @@
 <script lang="ts">
   // Small header chip shown only when the app is in remote mode (reached over WebRTC).
   // On the Desktop LAN the status stays "idle" and nothing renders.
+  //
+  // "Locked" is derived (see chip.ts): a locked Desktop still answers over the encrypted
+  // bridge, so the phone must distinguish "Desktop is locked" (bridge up, vault locked)
+  // from "Desktop is unreachable" (can't get on the bridge at all — off, asleep, no path).
   import { remote } from "$lib/remote/connection.svelte";
+  import { account } from "$lib/account.svelte";
+  import { chipState } from "$lib/remote/chip";
+  import Icon from "$lib/components/Icon.svelte";
+
+  const state = $derived(chipState(remote.status, account.status?.unlocked ?? null));
 
   const LABEL: Record<string, string> = {
     connecting: "Remote · connecting…",
@@ -11,30 +20,43 @@
     "connected-relay": "Remote · relayed",
     reconnecting: "Remote · reconnecting…",
     untrusted: "Remote · BLOCKED",
-    offline: "Remote · offline",
+    offline: "Remote · unreachable",
+    locked: "Desktop locked",
   };
   const tone = $derived(
-    remote.status === "connected-direct"
+    state === "connected-direct"
       ? "ok"
-      : remote.status === "connected-relay"
+      : state === "connected-relay"
         ? "warn"
-        : remote.status === "untrusted"
-          ? "bad"
-          : "muted",
+        : state === "locked"
+          ? "warn"
+          : state === "untrusted"
+            ? "bad"
+            : "muted",
   );
   const tip = $derived(
-    remote.status === "connected-relay"
+    state === "connected-relay"
       ? "Direct wasn't possible, so traffic goes through an encrypted relay that can't read it."
-      : remote.status === "untrusted"
+      : state === "untrusted"
         ? "Couldn't verify your Desktop's identity — connection blocked. Re-pair if you reinstalled."
-        : remote.detail,
+        : state === "locked"
+          ? "Your Desktop is locked. Tap to unlock — the bridge is up, but nothing here works until it's unlocked."
+          : remote.detail,
   );
 </script>
 
-{#if remote.status !== "idle" && remote.status !== "untrusted"}
+{#if state !== "idle" && state !== "untrusted"}
   <!-- BLOCKED (untrusted) renders as a full-width banner from the layout instead of this chip;
-       a possible-MITM warning must not be easy to miss in a tiny appbar pill. -->
-  <span class="remote-chip {tone}" title={tip}>{LABEL[remote.status] ?? remote.status}</span>
+       a possible-MITM warning must not be easy to miss in a tiny appbar pill.
+       Locked is tap-through to /unlock — the unlock endpoint works over the bridge today
+       (no desktop-local fence on POST /api/account/unlock), so the user can act right here. -->
+  {#if state === "locked"}
+    <a class="remote-chip {tone}" href="/unlock" title={tip}>
+      <Icon name="lock" /> {LABEL[state]}
+    </a>
+  {:else}
+    <span class="remote-chip {tone}" title={tip}>{LABEL[state] ?? state}</span>
+  {/if}
 {/if}
 
 <style>
@@ -44,6 +66,7 @@
     border-radius: 999px;
     border: 1px solid var(--border, #4444);
     white-space: nowrap;
+    text-decoration: none; /* the locked variant is an <a>; keep it looking like a chip, not a link */
   }
   /* Theme tokens (not hardcoded hex): the light-theme --ok/--warn meet 4.5:1 contrast. */
   .remote-chip.ok {

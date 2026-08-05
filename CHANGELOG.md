@@ -11,6 +11,16 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Changed
+- **A paired phone now tells you the difference between a locked Desktop and an
+  unreachable one.** The **Remote** chip used to say only *offline* — with a hint
+  that muddled the two ("it may be off or locked"). It now shows **Desktop locked**
+  (tap-through to unlock from the phone, since the encrypted bridge is fine and the
+  Desktop is still answering) when the vault is locked, and **unreachable** ("may be
+  off or asleep") only when the phone genuinely can't reach the Desktop at all. The
+  distinction is honest: a locked Desktop still answers over the bridge, so it is
+  never the reason for a connection failure.
+
 ### Added
 - **The vault publisher lifecycle: retire, dated publishes, dead-host handling
   — with a truthful public version chip.** Sharing a vault used to have one

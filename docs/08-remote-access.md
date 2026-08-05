@@ -61,8 +61,11 @@ or export all stay on the Desktop. On the phone those controls are either not sh
 replaced with a line pointing you at the Desktop, so nothing fails halfway.
 
 A small **"Remote"** chip shows the connection state: **direct** (phone-to-Desktop),
-**relayed** (through the encrypted relay), or **BLOCKED** in red if your Desktop's
-identity can't be verified — re-pair if you reinstalled the app.
+**relayed** (through the encrypted relay), **Desktop locked** if your Desktop is up and
+the encrypted bridge is fine but its vault is locked — tap the chip to unlock from here,
+**unreachable** if your Desktop is off, asleep, or otherwise can't be reached at all, or
+**BLOCKED** in red if your Desktop's identity can't be verified — re-pair if you reinstalled
+the app.
 
 The connection is built to survive a phone: it sends a small keepalive so an idle mobile
 network can't quietly drop it, notices a dead path within about a minute and reconnects on

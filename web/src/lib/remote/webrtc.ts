@@ -31,11 +31,13 @@ const _PING_DEAD_MS = 45000; // > 2 intervals: one lost pong never kills a healt
 // After registering, wait briefly for the broker to push ephemeral STUN/TURN before gathering ICE
 // candidates; if none arrives (a static-mode node), fall back to the payload's ICE and offer anyway.
 const _ICE_PUSH_WAIT_MS = 800;
-// Shown when the connection can't be established. The #1 real-world cause (a VPN on the
-// Desktop blocking the UDP relay path) is hard to detect, so we surface it as the first thing
-// to try rather than spinning on "connecting…" indefinitely.
+// Shown when the connection can't be established. "Unreachable" is the honest word now that
+// a locked Desktop is distinguished elsewhere (chip.ts) — a locked Desktop still connects, so
+// this message no longer needs to hedge "off or locked". The #1 real-world remaining cause
+// (a VPN on the Desktop blocking the UDP relay path) is hard to detect, so we surface it as
+// the first thing to try rather than spinning on "connecting…" indefinitely.
 const _CONNECT_FAIL_HINT =
-  "Couldn't reach your Desktop. If it's on a VPN, turning the VPN off on the Desktop often fixes this — then Retry.";
+  "Desktop unreachable — it may be off or asleep. If it's on a VPN, turning the VPN off on the Desktop often fixes this — then Retry.";
 
 type Pending = {
   resolve: (r: ParsedResponse) => void;

@@ -8,7 +8,12 @@
 //   connected         connected, but direct-vs-relay couldn't be determined (don't over-claim)
 //   reconnecting      link dropped; retrying
 //   untrusted         Desktop identity FAILED to verify — refused (possible MITM); no data sent
-//   offline           can't reach the Desktop (it may be off or locked)
+//   offline           can't reach the Desktop at all (off, asleep, or no network path)
+//
+// A LOCKED Desktop is deliberately NOT in this list: the bridge has no coupling to the vault
+// lock and a locked Desktop still connects and answers (its APIs return their normal locked
+// responses). "Locked" is a phone-side overlay derived from `connected + account.unlocked=false`
+// — see chip.ts, which the chip component uses to present it distinctly.
 
 export type RemoteStatus =
   | "idle"
