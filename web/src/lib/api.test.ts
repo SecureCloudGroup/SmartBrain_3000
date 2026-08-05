@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // installs goto as vi.fn(); we read it here to assert the 423 -> /unlock side-effect.
 const { goto } = await import("$app/navigation");
 const gotoSpy = goto as unknown as ReturnType<typeof vi.fn>;
-const { api, ApiError } = await import("./api");
+const { api, ApiError, parseExportHeaders } = await import("./api");
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -107,6 +107,27 @@ describe("vault client calls", () => {
     expect(init.method).toBe("POST");
   });
 
+  it("returns { blob, headers } so the UI can warn on unchanged/rotated-key without a second call", async () => {
+    const spy = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) =>
+      new Response(new Blob(["hi"]), {
+        status: 200,
+        headers: {
+          "x-sb-export-seq": "4",
+          "x-sb-export-mode": "sealed",
+          "x-sb-export-rotated-key": "1",
+        },
+      }),
+    );
+    globalThis.fetch = spy as unknown as typeof globalThis.fetch;
+    const { blob, headers } = await api.exportVault("v-1", "pw");
+    expect(blob).toBeInstanceOf(Blob);
+    expect(headers.seq).toBe(4);
+    expect(headers.mode).toBe("sealed");
+    expect(headers.rotatedKey).toBe(true);
+    expect(headers.unchanged).toBe(false);
+    expect(headers.retired).toBe(false);
+  });
+
   it("surfaces the server's detail when an export is refused", async () => {
     captureFetch(403, { detail: "desktop only" });
     await expect(api.exportVault("v-1", "pw")).rejects.toMatchObject({
@@ -116,12 +137,82 @@ describe("vault client calls", () => {
     });
   });
 
+  it("retireVault posts to /retire with the passphrase body and the Desktop-local marker", async () => {
+    const spy = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) =>
+      new Response(new Blob(["final"]), {
+        status: 200,
+        headers: {
+          "x-sb-export-seq": "9",
+          "x-sb-export-mode": "open",
+          "x-sb-export-retired": "1",
+        },
+      }),
+    );
+    globalThis.fetch = spy as unknown as typeof globalThis.fetch;
+    const { headers } = await api.retireVault("v-1", "pw");
+    expect(String(spy.mock.calls[0][0])).toBe("/api/vaults/v-1/retire");
+    const init = spy.mock.calls[0][1]!;
+    expect(init.method).toBe("POST");
+    expect((init.headers as Record<string, string>)["x-sb-local"]).toBe("1");
+    expect(JSON.parse(String(init.body))).toEqual({ passphrase: "pw" });
+    expect(headers.retired).toBe(true);
+    expect(headers.mode).toBe("open");
+  });
+
+  it("deleteVault(id) keeps documents by default — no query string", async () => {
+    const spy = captureFetch(200, { ok: true, removed_docs: 0 });
+    await api.deleteVault("v-1");
+    expect(String(spy.mock.calls[0][0])).toBe("/api/vaults/v-1");
+    expect(spy.mock.calls[0][1]!.method).toBe("DELETE");
+  });
+
+  it("deleteVault(id, {remove_docs:true}) adds ?remove_docs=1 and returns the count", async () => {
+    const spy = captureFetch(200, { ok: true, removed_docs: 5 });
+    const r = await api.deleteVault("v-1", { remove_docs: true });
+    expect(String(spy.mock.calls[0][0])).toBe("/api/vaults/v-1?remove_docs=1");
+    expect(r.removed_docs).toBe(5);
+  });
+
   it("sends the vault key in the query and the file as the raw body on import", async () => {
     const spy = captureFetch(200, { id: "v-2", name: "Shared", publisher: "SB-AAAA" });
     const file = new File(["sealed-bytes"], "expert.sbvault");
     await api.importVault(file, "SBVK1-abc");
     expect(String(spy.mock.calls[0][0])).toContain("key=SBVK1-abc");
     expect(spy.mock.calls[0][1]!.body).toBe(file);
+  });
+});
+
+// parseExportHeaders is exported so a test can PIN the exact header names the UI reads. A
+// silent server-side rename ("x-sb-export-rotated" → "x-sb-export-rekey") would otherwise
+// simply stop firing the sealed re-key warning, with nothing catching the drift.
+describe("parseExportHeaders — the /export + /retire response header shape", () => {
+  it("returns typed defaults when none of the x-sb-export-* headers are present", () => {
+    const parsed = parseExportHeaders(new Headers({}));
+    expect(parsed).toEqual({
+      seq: null, mode: null, unchanged: false, rotatedKey: false, retired: false,
+    });
+  });
+
+  it("reads seq as an integer and rejects a non-numeric one", () => {
+    expect(parseExportHeaders(new Headers({ "x-sb-export-seq": "12" })).seq).toBe(12);
+    expect(parseExportHeaders(new Headers({ "x-sb-export-seq": "abc" })).seq).toBeNull();
+  });
+
+  it("accepts sealed|open for mode; anything else is null (no UI would render it)", () => {
+    expect(parseExportHeaders(new Headers({ "x-sb-export-mode": "sealed" })).mode).toBe("sealed");
+    expect(parseExportHeaders(new Headers({ "x-sb-export-mode": "open" })).mode).toBe("open");
+    expect(parseExportHeaders(new Headers({ "x-sb-export-mode": "weird" })).mode).toBeNull();
+  });
+
+  it("maps the three '1'-valued flags to booleans", () => {
+    const parsed = parseExportHeaders(new Headers({
+      "x-sb-export-unchanged": "1",
+      "x-sb-export-rotated-key": "1",
+      "x-sb-export-retired": "1",
+    }));
+    expect(parsed.unchanged).toBe(true);
+    expect(parsed.rotatedKey).toBe(true);
+    expect(parsed.retired).toBe(true);
   });
 });
 

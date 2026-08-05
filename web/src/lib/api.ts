@@ -338,7 +338,24 @@ export interface KbHit {
 export interface Vault {
   id: string;
   kind: "local" | "imported";
-  version: number;
+  version: number; // legacy alias for internal_seq (kept for callers that predate the lifecycle split)
+  // internal_seq: every export bumps this. published_seq: only OPEN publishes move it, so the
+  // "public version" a subscriber sees is truthful even after private sealed shares. null when
+  // this vault has never been open-published.
+  internal_seq: number;
+  published_seq: number | null;
+  published_at: string | null; // UTC calendar date the last open publish stamped (YYYY-MM-DD)
+  // Publisher-side one-way marker: this vault was retired to every subscriber. A later normal
+  // open publish un-retires it (see backend spec §5).
+  retired_published: boolean;
+  // Sealed-share history: has this vault ever been sealed-shared, and at what seq (the UI warns
+  // that a sealed re-export mints a new key that orphans previous recipients).
+  shared_sealed: boolean;
+  sealed_seq: number | null;
+  // Publisher's own name/description (imported/subscribed vaults) — signed by the publisher and
+  // distinct from the local ``name``/``description`` this user can edit. Empty string when unknown.
+  publisher_name: string;
+  publisher_description: string;
   name: string;
   description: string;
   tags: string[]; // the local user's labels — never travel in an export
@@ -362,6 +379,17 @@ export interface Vault {
     // Set when an update check met a DIFFERENT publisher key. While present, check/update refuse
     // (409) and the card shows the key-change warning; trust-publisher must echo this exact key.
     blocked?: { offered_pubkey: string } | null;
+    // The publisher retired the vault: an applied retire-export flips this on, the auto-update
+    // timer excludes retired subscriptions, and the docs stay in Knowledge (this is a channel
+    // stop, not a shred). A later non-retired higher-seq apply un-sets it (publisher came back).
+    retired?: boolean;
+    // The host proved dead. `took_down` = HTTP 410 Gone (publisher intentionally removed it);
+    // `dead_host` = eight consecutive failures spanning ≥ 7 days. Both drop the subscription
+    // from the auto-update pass; a manual check still runs, and a success clears the flag.
+    unreachable?: boolean;
+    unreachable_reason?: "took_down" | "dead_host";
+    consecutive_failures?: number;
+    first_failure_at?: string | null;
   } | null;
   // True once this vault has been published OPEN (a plaintext file, no key). Never clears —
   // publishing is irreversible — and the UI must show the fingerprint beside any "Public" badge.
@@ -403,21 +431,60 @@ export interface VaultImportResult {
 
 // "Is there a newer version?" — seq is the version pinned locally, remote_seq what the host
 // serves. `rollback` = the host is serving something OLDER than the pin (refused, never applied).
+// `retired` is True iff the remote manifest carries the publisher's retire marker; `kind` is the
+// one-word disposition for the UI (retired short-circuits over update — applying a retire-export
+// leaves the vault in the retired state, so a "click Update" button that means "stop following
+// this" would mislead).
 export interface VaultCheckResult {
   behind: boolean;
   remote_seq: number;
   seq: number;
   rollback: boolean;
+  retired: boolean;
+  kind: "update" | "up-to-date" | "rollback" | "retired";
 }
 
 // What an applied update did. `kept_yours` = documents that stayed the user's own (they edited
-// them, or already had the same text) — an update never overwrites those.
+// them, or already had the same text) — an update never overwrites those. `retired` = the applied
+// update was a retire-export (the subscription is now in the retired state, no longer auto-
+// checked). `renamed_from` = the publisher's previous name when the update carried a rename.
 export interface VaultUpdateResult {
   added: number;
   updated: number;
   deleted: number;
   kept_yours: number;
   seq: number;
+  retired: boolean;
+  renamed_from: string | null;
+}
+
+// Metadata a vault export response header carries — the file is the body, these describe the
+// export mode + whether the file duplicates the previous content and whether the export minted
+// a fresh Vault Key (a sealed re-export orphans anyone holding the old key).
+export interface ExportHeaders {
+  seq: number | null;
+  mode: "sealed" | "open" | null;
+  unchanged: boolean;
+  rotatedKey: boolean;
+  retired: boolean;
+}
+
+// Pure parser for the x-sb-export-* headers the backend attaches to /export + /retire.
+// Extracted so a test can pin the exact header names — a silent rename on either side would
+// otherwise reduce the UI to "no warning ever fires" without failing any type check.
+export function parseExportHeaders(h: Headers): ExportHeaders {
+  console.assert(h instanceof Headers, "parseExportHeaders: real Headers instance required");
+  console.assert(typeof h.get === "function", "parseExportHeaders: h.get missing");
+  const rawSeq = h.get("x-sb-export-seq");
+  const parsedSeq = rawSeq === null ? NaN : Number.parseInt(rawSeq, 10);
+  const mode = h.get("x-sb-export-mode");
+  return {
+    seq: Number.isFinite(parsedSeq) ? parsedSeq : null,
+    mode: mode === "sealed" || mode === "open" ? mode : null,
+    unchanged: h.get("x-sb-export-unchanged") === "1",
+    rotatedKey: h.get("x-sb-export-rotated-key") === "1",
+    retired: h.get("x-sb-export-retired") === "1",
+  };
 }
 
 // Subscribe-by-URL result: an import, plus the host the vault came from (host only — never the
@@ -838,8 +905,16 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(body),
     }),
-  deleteVault: (id: string) =>
-    req<{ ok: boolean }>(`/api/vaults/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  // `remove_docs: true` also deletes the vault's IMPORT-origin documents (owner-origin copies
+  // always stay — "delete grouping vs shred files" applies to the user's own documents whatever
+  // they asked for). Default is false — the historical "keep documents" behavior.
+  deleteVault: (id: string, opts: { remove_docs?: boolean } = {}) => {
+    const qs = opts.remove_docs ? "?remove_docs=1" : "";
+    return req<{ ok: boolean; removed_docs: number }>(
+      `/api/vaults/${encodeURIComponent(id)}${qs}`,
+      { method: "DELETE" },
+    );
+  },
   // One vault plus WHICH documents are in it — the list view only carries a count. `members`
   // carries each membership's origin so the UI shows Detach only on imported rows.
   getVault: (id: string) =>
@@ -868,7 +943,11 @@ export const api = {
   // "open" (public) mode IS the plaintext, with no key at all — so, like backup, it is
   // Desktop-local (x-sb-local, which the WebRTC bridge cannot forward) and requires the
   // passphrase again. Returns the .sbvault file itself.
-  exportVault: async (id: string, passphrase: string, mode: "sealed" | "open" = "sealed"): Promise<Blob> => {
+  exportVault: async (
+    id: string,
+    passphrase: string,
+    mode: "sealed" | "open" = "sealed",
+  ): Promise<{ blob: Blob; headers: ExportHeaders }> => {
     await remoteReady;
     const res = await fetch(`/api/vaults/${encodeURIComponent(id)}/export`, {
       method: "POST",
@@ -879,7 +958,30 @@ export const api = {
       const data = await res.json().catch(() => null);
       throw new ApiError(res.status, (data as { detail?: string })?.detail || `export failed (${res.status})`);
     }
-    return res.blob();
+    // Read headers BEFORE consuming the body — a blob() call can invalidate the response object
+    // in some implementations, and the UI needs both (blob to download, headers to warn on).
+    const headers = parseExportHeaders(res.headers);
+    return { blob: await res.blob(), headers };
+  },
+  // Retire a published vault: produces a FINAL open export with content intact and the retired
+  // marker set. Subscribers apply the final content and drop out of auto-checks; publishing again
+  // un-retires. Same Desktop-local + passphrase gate as /export — the file is decrypted plaintext.
+  retireVault: async (
+    id: string,
+    passphrase: string,
+  ): Promise<{ blob: Blob; headers: ExportHeaders }> => {
+    await remoteReady;
+    const res = await fetch(`/api/vaults/${encodeURIComponent(id)}/retire`, {
+      method: "POST",
+      headers: { "x-sb-local": "1", "content-type": "application/json" },
+      body: JSON.stringify({ passphrase }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => null);
+      throw new ApiError(res.status, (data as { detail?: string })?.detail || `retire failed (${res.status})`);
+    }
+    const headers = parseExportHeaders(res.headers);
+    return { blob: await res.blob(), headers };
   },
   vaultKey: async (id: string, passphrase: string): Promise<string> => {
     await remoteReady;

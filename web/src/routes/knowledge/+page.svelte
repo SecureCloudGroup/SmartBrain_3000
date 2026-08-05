@@ -9,6 +9,7 @@
   import { account } from "$lib/account.svelte";
   import {
     api,
+    type ExportHeaders,
     type KbDoc,
     type KbDocFull,
     type KbHit,
@@ -21,6 +22,12 @@
   import { remote } from "$lib/remote/connection.svelte";
   import { confirmDialog } from "$lib/confirm.svelte";
   import { strToTags, tagsToStr } from "$lib/tags";
+  import {
+    retiredSubscriptionNote,
+    unreachableSubscriptionNote,
+    vaultChips,
+    vaultChipsSummary,
+  } from "$lib/vaultChips";
 
   let docs = $state<KbDoc[]>([]);
   let query = $state("");
@@ -62,6 +69,20 @@
   let exportMode = $state<"sealed" | "open">("sealed"); // private (sealed) is ALWAYS the default
   let shownKey = $state(""); // the SBVK1- key, revealed after an export
   let publishedOpen = $state(false); // a public export just finished — show the hosting hint
+  // The x-sb-export-* headers of the LAST export in this share panel — powers the "you re-published
+  // with no changes" nudge and the sealed re-key warning. Cleared when the share panel toggles or
+  // when the panel switches vaults, so a warning from a previous vault never bleeds across.
+  let lastExportHeaders = $state<ExportHeaders | null>(null);
+  // Retire flow: same panel, its own passphrase field + explanatory copy. The confirmed=false step
+  // shows the plain-words explanation and requires an explicit "Yes, retire" click before the
+  // passphrase field appears — so a mis-click on Retire… never dumps a passphrase-prompt at the user.
+  let retireOpenId = $state<string | null>(null);
+  let retirePass = $state("");
+  let retireError = $state("");
+  // Delete flow for subscribed/imported: two-option confirm. Local vaults still use the simple
+  // confirmDialog — they have no imported documents for the option to apply to.
+  let deleteOpenId = $state<string | null>(null);
+  let deleteRemoveDocs = $state(false);
   // Panel-local errors: "incorrect passphrase" must appear NEXT TO the passphrase field, not at the
   // bottom of a long page (a live tester read it as a broken page, not a wrong password).
   let shareError = $state("");
@@ -536,7 +557,17 @@
     }
   }
 
+  // Local vaults keep the simple confirm — there are no imported documents to choose about.
   async function removeVault(v: Vault) {
+    console.assert(v && typeof v.id === "string", "removeVault: vault required");
+    if (v.kind === "imported") {
+      // Open the inline two-option panel: Keep documents (default) or Also remove them.
+      // A confirmDialog is single-boolean; a "remove_docs" choice needs two clicks worth of
+      // clarity, and the inline panel matches the trust/share/retire pattern on this card.
+      deleteOpenId = v.id;
+      deleteRemoveDocs = false;
+      return;
+    }
     const ok = await confirmDialog({
       title: `Delete “${v.name}”`,
       // The distinction that matters: this removes a grouping, not the files in it.
@@ -544,13 +575,28 @@
       confirmLabel: "Delete vault",
     });
     if (!ok) return;
+    await doDeleteVault(v, false);
+  }
+
+  // The commit half of the delete flow — shared between the local confirmDialog path and the
+  // subscribed/imported inline panel. `remove_docs` is the opt-in that also shreds import-origin
+  // documents (owner-origin copies always stay — the backend enforces this too).
+  async function doDeleteVault(v: Vault, removeDocs: boolean) {
+    console.assert(v && typeof v.id === "string", "doDeleteVault: vault required");
+    console.assert(typeof removeDocs === "boolean", "doDeleteVault: removeDocs must be a boolean");
     vaultBusy = v.id;
     error = "";
     try {
-      await api.deleteVault(v.id);
+      const r = await api.deleteVault(v.id, { remove_docs: removeDocs });
       if (scope === v.id) scope = "";
       if (addTarget === v.id) addTarget = "";
-      await loadVaults();
+      deleteOpenId = null;
+      notice = removeDocs
+        ? `Deleted “${v.name}” and removed ${r.removed_docs} imported document${r.removed_docs === 1 ? "" : "s"}.`
+        : `Deleted “${v.name}”. Its documents remain in your knowledge.`;
+      // Docs may have moved (remove_docs deletes them), so refresh both lists — the docs list
+      // for the ones that vanished, the vaults list for the count on this row.
+      await Promise.all([loadDocs(), loadVaults()]);
     } catch (err) {
       error = describeError(err);
     } finally {
@@ -569,16 +615,22 @@
 
   // Export downloads the .sbvault. Sealed: then shows its key — the two must travel separately,
   // whoever holds both holds the contents. Public/open: there IS no key, so the follow-up is a
-  // hosting hint instead of a key row.
+  // hosting hint instead of a key row. The response headers carry the flags the UI warns on:
+  // x-sb-export-unchanged (identical to the previous export) and x-sb-export-rotated-key
+  // (a sealed re-export minted a NEW Vault Key, orphaning previous recipients).
   async function exportVault(v: Vault) {
+    console.assert(v && typeof v.id === "string", "exportVault: vault required");
+    console.assert(typeof exportPass === "string", "exportVault: passphrase state must be a string");
     if (!exportPass) return;
     vaultBusy = v.id;
     shareError = "";
     notice = "";
     shownKey = "";
     publishedOpen = false;
+    lastExportHeaders = null;
     try {
-      const blob = await api.exportVault(v.id, exportPass, exportMode);
+      const { blob, headers } = await api.exportVault(v.id, exportPass, exportMode);
+      lastExportHeaders = headers;
       saveBlob(blob, `${v.name.replace(/[^\w -]/g, "") || "vault"}.sbvault`);
       if (exportMode === "sealed") {
         shownKey = await api.vaultKey(v.id, exportPass);
@@ -589,6 +641,33 @@
       await loadVaults(); // the card's Public badge may have just appeared
     } catch (err) {
       shareError = describeError(err);
+    } finally {
+      vaultBusy = "";
+    }
+  }
+
+  // Retire a published-open vault. Produces a FINAL open export marked retired; the user hosts
+  // this file in place of the previous one, and subscribers apply the last content update and
+  // stop auto-checking. Same Desktop-local + passphrase gate as export — the produced file is
+  // decrypted plaintext.
+  async function retireVault(v: Vault) {
+    console.assert(v && typeof v.id === "string", "retireVault: vault required");
+    console.assert(v.published_open, "retireVault: only meaningful on published-open vaults");
+    if (!retirePass) return;
+    vaultBusy = v.id;
+    retireError = "";
+    notice = "";
+    lastExportHeaders = null;
+    try {
+      const { blob, headers } = await api.retireVault(v.id, retirePass);
+      lastExportHeaders = headers;
+      saveBlob(blob, `${v.name.replace(/[^\w -]/g, "") || "vault"}-retired.sbvault`);
+      retirePass = "";
+      retireOpenId = null;
+      notice = `Retired “${v.name}”. Replace the hosted file with this one — it tells subscribers you've retired the vault.`;
+      await loadVaults(); // the card's chip just flipped from Public to Retired
+    } catch (err) {
+      retireError = describeError(err);
     } finally {
       vaultBusy = "";
     }
@@ -673,9 +752,9 @@
   type UpdState =
     | { kind: "checking" }
     | { kind: "uptodate" }
-    | { kind: "available"; from: number; to: number }
+    | { kind: "available"; from: number; to: number; retired: boolean }
     | { kind: "updating" }
-    | { kind: "applied"; summary: string }
+    | { kind: "applied"; summary: string; retired: boolean; renamedFrom: string | null }
     | { kind: "rollback" }
     | { kind: "error"; message: string };
   let updates = $state<Record<string, UpdState>>({});
@@ -710,7 +789,7 @@
         [v.id]: r.rollback
           ? { kind: "rollback" }
           : r.behind
-            ? { kind: "available", from: r.seq, to: r.remote_seq }
+            ? { kind: "available", from: r.seq, to: r.remote_seq, retired: r.retired }
             : { kind: "uptodate" },
       };
       await loadVaults(); // last_checked moved
@@ -724,7 +803,9 @@
     updates = { ...updates, [v.id]: { kind: "updating" } };
     try {
       const r = await api.updateVault(v.id);
-      updates = { ...updates, [v.id]: { kind: "applied", summary: updateSummary(r) } };
+      updates = { ...updates, [v.id]: {
+        kind: "applied", summary: updateSummary(r), retired: r.retired, renamedFrom: r.renamed_from,
+      } };
       await Promise.all([loadDocs(), loadVaults()]);
       refreshIndexStatus(); // changed documents re-embed in the background
     } catch (err) {
@@ -1114,27 +1195,20 @@
     {#each shownVaults as v (v.id)}
       <div class="vault">
         <div class="vrow">
-          <strong>{v.name}</strong>
-          {#if v.kind === "imported"}
-            {#if v.source?.url}
-              <!-- Subscribed = it arrived from a URL and its publisher is PINNED. Never the badge
-                   without the identity behind it, plus the host updates will come from. -->
-              <Chip kind="ok" icon="check">Subscribed</Chip>
-              <Chip mono title="The pinned publisher — every update must be signed by this identity">{v.pinned_fingerprint}</Chip>
-              <span class="fp" title="Where this vault is hosted">{hostOf(v.source.url)}</span>
-              {#if v.source?.seq != null}
-                <span class="fp" title="The version you currently have (the seq you're pinned at)">v{v.source.seq}</span>
-              {/if}
-            {:else}
-              <Chip>Imported</Chip>
-            {/if}
+          <strong class="vname">{v.name}</strong>
+          <!-- One state-chip list per vault, from the pure vaultChips mapper: Private / Public /
+               Retired / Subscribed / Blocked / Retired-by-publisher / Unreachable / Imported. The
+               ordering (dominant chip, then fingerprint, then version) lives inside the helper. -->
+          {#each vaultChips(v) as c (c.key)}
+            <Chip kind={c.kind} icon={c.icon ?? ""} mono={c.mono ?? false} title={c.title ?? ""}>
+              {c.label}
+            </Chip>
+          {/each}
+          {#if v.kind === "imported" && v.source?.url}
+            <span class="fp" title="Where this vault is hosted">{hostOf(v.source.url)}</span>
           {/if}
-          {#if v.published_open}
-            <!-- Published open = irreversibly public. NEVER the label without the identity behind
-                 it: the fingerprint is what a subscriber actually pins. -->
-            <Chip kind="accent">Public</Chip>
-            <Chip mono title="Your publisher fingerprint — how subscribers identify you">{v.publisher_fingerprint}</Chip>
-            <span class="fp" title="The published version — subscribers pin this seq and pick up newer ones">v{v.version}</span>
+          {#if vaultChipsSummary(v)}
+            <span class="fp" title="The date the publisher stamped this version">{vaultChipsSummary(v)}</span>
           {/if}
           {#each v.tags ?? [] as t (t)}
             <Chip onclick={() => (tagFilter = t)} title="Show only items tagged “{t}”">{t}</Chip>
@@ -1144,8 +1218,10 @@
           </button>
           <span class="spacer"></span>
           <button class="secondary" onclick={() => startVaultTagEdit(v)} aria-expanded={vaultTagEditId === v.id}>Tags</button>
-          {#if v.kind === "imported" && v.source?.url && !v.source?.blocked}
-            <!-- Zip-host honesty: with no per-file tree, a "check" re-downloads the whole file. -->
+          {#if v.kind === "imported" && v.source?.url && !v.source?.blocked && !v.source?.retired}
+            <!-- Zip-host honesty: with no per-file tree, a "check" re-downloads the whole file.
+                 Retired subscriptions hide auto-update entirely, but a MANUAL check still runs
+                 on unreachable ones (a dead host coming back clears the flag server-side). -->
             <button
               class="secondary"
               disabled={updates[v.id]?.kind === "checking" || updates[v.id]?.kind === "updating"}
@@ -1169,6 +1245,10 @@
                 shownKey = "";
                 publishedOpen = false;
                 shareError = "";
+                lastExportHeaders = null; // last export's warnings must not survive a panel toggle
+                retireOpenId = null;      // and neither must a half-open Retire panel
+                retirePass = "";
+                retireError = "";
               }}
             >Share…</button>
           {/if}
@@ -1190,10 +1270,12 @@
           </div>
         {/if}
 
-        {#if v.kind === "imported" && v.source?.url && !v.source?.blocked}
+        {#if v.kind === "imported" && v.source?.url && !v.source?.blocked && !v.source?.retired}
           <!-- Opt-in scheduled auto-update (Stage E). Off by default; when on, the Desktop applies
                clean updates while unlocked and posts results into the Chat feed. A key change is
-               NEVER applied on a timer — it blocks and waits for you. -->
+               NEVER applied on a timer — it blocks and waits for you. Hidden on a retired
+               subscription: the timer stops server-side too (spec §5), and offering a control
+               that only ever no-ops would read as a broken button. -->
           <div class="autoupd">
             <label class="autoupd-toggle">
               <input
@@ -1228,6 +1310,19 @@
             {/if}
             {#if subErr[v.id]}<span class="error autoupd-err">{subErr[v.id]}</span>{/if}
           </div>
+        {/if}
+
+        {#if retiredSubscriptionNote(v)}
+          <!-- The publisher retired this vault: no more updates from them, but the documents
+               they already gave you stay in your knowledge and remain readable. The chip
+               above says the state; this line says what it means for the reader. -->
+          <p class="muted subnote">{retiredSubscriptionNote(v)}</p>
+        {/if}
+        {#if unreachableSubscriptionNote(v)}
+          <!-- Two distinct copies, per unreachable_reason: "took_down" (HTTP 410 Gone — an
+               intentional publisher takedown) reads differently from "dead_host" (eight
+               consecutive failures across a week). Manual Check for updates stays available. -->
+          <p class="muted subnote">{unreachableSubscriptionNote(v)}</p>
         {/if}
 
         {#if v.source?.blocked}
@@ -1297,11 +1392,26 @@
             {#if u.kind === "checking"}Checking…{/if}
             {#if u.kind === "uptodate"}Up to date (v{v.source?.seq}).{/if}
             {#if u.kind === "available"}
-              <strong>Update available (v{u.from} → v{u.to}).</strong>
-              <button onclick={() => applyUpdate(v)}>Update now</button>
+              {#if u.retired}
+                <!-- The pending update is a RETIRE-export: applying it captures the final content
+                     and stops auto-updates. Say so before the button, so "Apply" doesn't read as
+                     "get more updates". -->
+                <strong>The publisher retired this vault at v{u.to} — applying captures the final content and stops checking.</strong>
+                <button onclick={() => applyUpdate(v)}>Apply retirement</button>
+              {:else}
+                <strong>Update available (v{u.from} → v{u.to}).</strong>
+                <button onclick={() => applyUpdate(v)}>Update now</button>
+              {/if}
             {/if}
             {#if u.kind === "updating"}Updating…{/if}
-            {#if u.kind === "applied"}Updated — {u.summary}.{/if}
+            {#if u.kind === "applied"}
+              {#if u.retired}
+                Retired by publisher — your documents remain in Knowledge. {u.summary}.
+              {:else}
+                Updated — {u.summary}.
+              {/if}
+              {#if u.renamedFrom}<span class="muted"> (renamed from “{u.renamedFrom}”)</span>{/if}
+            {/if}
             {#if u.kind === "rollback"}
               The host is serving an <strong>older</strong> version than you already have — refused.
             {/if}
@@ -1355,6 +1465,15 @@
                 travel <strong>separately</strong> — together they are the contents in the clear. Send the
                 file however you like, then read the key out over a different channel.
               </p>
+              {#if v.shared_sealed}
+                <!-- Every sealed export mints a FRESH Vault Key — anyone holding the previous
+                     key can no longer open the new file. Warn BEFORE the export, not after, so
+                     the user isn't distributing a file that silently orphaned their friends. -->
+                <p class="warn" style="margin:0 0 0.5rem; font-size:0.85rem">
+                  <strong>Re-sealing issues a new key.</strong> Anyone holding the old key will need
+                  the new one to open this file — the previous file is not affected.
+                </p>
+              {/if}
             {:else}
               <p class="warn" style="margin:0 0 0.5rem; font-size:0.85rem">
                 <strong>Public:</strong> anyone with the link can read everything in this vault. There is
@@ -1388,6 +1507,21 @@
               </button>
             </div>
             {#if shareError}<p class="error" style="margin:0.4rem 0 0">{shareError}</p>{/if}
+            {#if lastExportHeaders?.unchanged && lastExportHeaders?.seq !== null}
+              <!-- Unchanged republish: server-side content-only fingerprint matched the previous
+                   export. Not an error — just a "did you mean to?" nudge before the user distributes
+                   a file that will look like an update but ship no changes. -->
+              <p class="muted" style="margin:0.4rem 0 0; font-size:0.85rem">
+                Nothing changed since v{lastExportHeaders.seq} — you published an identical version.
+              </p>
+            {/if}
+            {#if lastExportHeaders?.rotatedKey}
+              <!-- A sealed re-export always mints a fresh key. Say so AFTER the fact too so a user
+                 who dismissed the pre-export warning still sees the consequence beside the new key. -->
+              <p class="warn" style="margin:0.4rem 0 0; font-size:0.85rem">
+                <strong>This issued a NEW key</strong> — the previous key no longer opens the new file.
+              </p>
+            {/if}
             {#if shownKey}
               <p style="margin:0.75rem 0 0.25rem; font-size:0.9rem">
                 <strong>Vault key.</strong> Send this to them <em>separately</em> from the file:
@@ -1406,6 +1540,72 @@
                 subscribed picks it up on their next update check.
               </p>
             {/if}
+
+            {#if v.published_open && !v.retired_published}
+              <!-- Retire: the last publish. Only meaningful on a live public vault, and only from
+                   the Desktop (same gate as export — the produced file is decrypted plaintext).
+                   Two-step: an explainer BEFORE the passphrase field, so a mis-click on Retire…
+                   never opens a passphrase prompt on the user unannounced. -->
+              <div class="retire">
+                {#if retireOpenId === v.id}
+                  <p class="muted" style="margin:0 0 0.4rem; font-size:0.85rem">
+                    <strong>Retire this vault.</strong> This produces one final version subscribers
+                    apply — the content they already have stays in their Knowledge, and their
+                    check-for-updates stops. You can publish again later to un-retire.
+                  </p>
+                  <label for="retire-pass-{v.id}" style="display:block; margin-bottom:0.25rem; font-size:0.85rem">
+                    Confirm it's you — enter your <strong>SmartBrain passphrase</strong> to retire this vault:
+                  </label>
+                  <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap">
+                    <input
+                      id="retire-pass-{v.id}"
+                      type="password"
+                      style="flex:1; min-width:10rem"
+                      bind:value={retirePass}
+                      placeholder="Your passphrase"
+                      autocomplete="current-password"
+                      onkeydown={(e) => e.key === "Enter" && retirePass && retireVault(v)}
+                    />
+                    <button disabled={vaultBusy === v.id || !retirePass} onclick={() => retireVault(v)}>
+                      {vaultBusy === v.id ? "Retiring…" : "Retire vault"}
+                    </button>
+                    <button class="secondary" onclick={() => { retireOpenId = null; retirePass = ""; retireError = ""; }}>
+                      Cancel
+                    </button>
+                  </div>
+                  {#if retireError}<p class="error" style="margin:0.4rem 0 0">{retireError}</p>{/if}
+                {:else}
+                  <button class="secondary" onclick={() => { retireOpenId = v.id; retirePass = ""; retireError = ""; }}>
+                    Retire…
+                  </button>
+                {/if}
+              </div>
+            {/if}
+          </div>
+        {/if}
+
+        {#if deleteOpenId === v.id}
+          <!-- Two-option delete for subscribed/imported vaults: keep documents (default,
+               historical behavior) or also remove the vault's import-origin documents. Owner-
+               origin copies always stay — the backend enforces this too. -->
+          <div class="warn" style="margin-top:0.5rem; font-size:0.85rem">
+            <p style="margin:0"><strong>Delete “{v.name}”?</strong></p>
+            <div role="radiogroup" aria-label="What to do with the documents" style="display:flex; flex-direction:column; gap:0.3rem; margin:0.5rem 0">
+              <label>
+                <input type="radio" name="del-{v.id}" checked={!deleteRemoveDocs} onchange={() => (deleteRemoveDocs = false)} />
+                Keep documents — the vault is removed but everything it grouped stays in your Knowledge.
+              </label>
+              <label>
+                <input type="radio" name="del-{v.id}" checked={deleteRemoveDocs} onchange={() => (deleteRemoveDocs = true)} />
+                Also remove the vault's imported documents — anything you authored yourself stays either way.
+              </label>
+            </div>
+            <div style="display:flex; gap:0.5rem; flex-wrap:wrap">
+              <button disabled={vaultBusy === v.id} onclick={() => doDeleteVault(v, deleteRemoveDocs)}>
+                {vaultBusy === v.id ? "Deleting…" : (deleteRemoveDocs ? "Delete vault + documents" : "Delete vault")}
+              </button>
+              <button class="secondary" onclick={() => (deleteOpenId = null)}>Cancel</button>
+            </div>
           </div>
         {/if}
       </div>
@@ -1561,9 +1761,46 @@
     align-items: center;
     flex-wrap: wrap;
   }
+  /* The vault name shrinks (rather than pushing chips off the row) on a narrow layout — same
+     ellipsis idiom .docrow .dtitle uses, so a long name never breaks the row. */
+  .vrow .vname {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
   .vdesc {
     margin: 0.35rem 0 0;
     font-size: 0.85rem;
+  }
+  /* Subscription state note: the muted sentence that expands on a chip whose meaning matters
+     ("Retired by publisher — your documents remain…", "Unreachable — dead host / took down"). */
+  .subnote {
+    margin: 0.35rem 0 0;
+    font-size: 0.85rem;
+  }
+  /* Retire… lives at the bottom of the share panel: quiet button on a live public vault, and
+     an inline explanation + passphrase when opened. Same top rule as .share, so the panels
+     read as sibling steps rather than a nested overlay. */
+  .retire {
+    margin-top: 0.6rem;
+    padding-top: 0.6rem;
+    border-top: 1px solid var(--border);
+  }
+  /* Phones: the .vrow can hold many chips (state, fingerprint, version, publish date, tags),
+     and desktop-only flex-wrap alone still lets the actions push off the right edge before
+     the chips wrap — same failure .docrow already fixed. Force a compact scale so state
+     stays readable, then let the actions flow to their own line. */
+  @media (max-width: 480px) {
+    .vrow {
+      gap: 0.35rem;
+    }
+    .vrow .spacer {
+      /* On a phone the spacer would leave the action buttons stranded on the right; wrapping
+         them to the next line reads better than a stretched-out top row. */
+      flex-basis: 100%;
+      height: 0;
+    }
   }
 
   /* Inline check/update result — it lives ON the card that was clicked, never page-bottom. */
