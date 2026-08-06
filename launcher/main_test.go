@@ -186,3 +186,56 @@ func TestShouldAdopt(t *testing.T) {
 		}
 	}
 }
+
+// The persona table: which face a bare launch wears. Only linux ever leaves the
+// tray — and it must SAY so, because systray itself registers into the void
+// silently when no SNI host is on the bus.
+func TestPickPersona(t *testing.T) {
+	cases := []struct {
+		goos           string
+		graphical, sni bool
+		want           persona
+		why            string
+	}{
+		{"darwin", false, false, personaTray, "macOS always has a menu bar; the probes are never consulted"},
+		{"windows", false, false, personaTray, "Windows always has a tray"},
+		{"linux", true, true, personaTray, "a desktop with an SNI host draws the tray"},
+		{"linux", true, false, personaHeadlessNoTray, "a desktop without one runs headless — and gets told why"},
+		{"linux", false, true, personaHeadless, "no display server: a server or SSH session"},
+		{"linux", false, false, personaHeadless, "…with no bus either, likewise"},
+	}
+	for _, c := range cases {
+		if got := pickPersona(c.goos, c.graphical, c.sni); got != c.want {
+			t.Fatalf("pickPersona(%q, graphical=%v, sni=%v) = %v, want %v (%s)",
+				c.goos, c.graphical, c.sni, got, c.want, c.why)
+		}
+	}
+}
+
+// Verbs come from argv[1]; anything flag-shaped is not a verb (older macOS passed
+// -psn_… to Finder-launched apps, which must still land in the tray).
+func TestCliVerb(t *testing.T) {
+	cases := []struct {
+		args []string
+		verb string
+		ok   bool
+	}{
+		{[]string{"smartbrain"}, "", false},
+		{[]string{"smartbrain", "run"}, "run", true},
+		{[]string{"smartbrain", "status"}, "status", true},
+		{[]string{"smartbrain", "-psn_0_12345"}, "", false},
+		{[]string{"smartbrain", "--flag"}, "", false},
+	}
+	for _, c := range cases {
+		verb, ok := cliVerb(c.args)
+		if verb != c.verb || ok != c.ok {
+			t.Fatalf("cliVerb(%v) = %q, %v; want %q, %v", c.args, verb, ok, c.verb, c.ok)
+		}
+	}
+}
+
+func TestRunVerbRejectsUnknown(t *testing.T) {
+	if got := runVerb("frobnicate"); got != 2 {
+		t.Fatalf("an unknown verb must print usage and exit 2, got %d", got)
+	}
+}

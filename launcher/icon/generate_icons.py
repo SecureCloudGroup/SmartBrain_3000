@@ -2,9 +2,11 @@
 """Generate the launcher's tray icons — an "SB" monogram.
 
 Outputs (committed next to this script; the launcher embeds them via //go:embed):
-  icon_mac.png  — 44x44 menu-bar glyph: "SB" in BLACK on transparent, used as a macOS *template*
-                  icon so the menu bar tints it for light/dark automatically.
-  icon_win.ico  — 32x32 "SB" in mid-blue for the Windows system tray (reads on light + dark bars).
+  icon_mac.png   — 44x44 menu-bar glyph: "SB" in BLACK on transparent, used as a macOS *template*
+                   icon so the menu bar tints it for light/dark automatically.
+  icon_win.ico   — 32x32 "SB" in mid-blue for the Windows system tray (reads on light + dark bars).
+  icon_linux.png — 44x44 "SB" in the same mid-blue for the Linux tray (SNI carries raw PNG; no
+                   template tinting exists there, so the blue must read on light + dark panels).
 
   icon_app.png is NOT generated here: it is the Finder/Dock mark derived from the brand
   asset by tools/brand/make_icons.py (run that from the repo root). CI turns it into .icns.
@@ -59,9 +61,10 @@ def render(size: int, color: tuple[int, int, int], frac: float) -> Image.Image:
 
 def main() -> None:
     here = Path(__file__).parent
-    render(44, (0, 0, 0), 0.80).save(here / "icon_mac.png")       # black template (macOS tints it)
-    render(32, (74, 144, 217), 0.84).save(here / "icon_win.ico")  # blue for the Windows tray
-    print("wrote icon_mac.png (SB, template) + icon_win.ico (SB, blue)")
+    render(44, (0, 0, 0), 0.80).save(here / "icon_mac.png")         # black template (macOS tints it)
+    render(32, (74, 144, 217), 0.84).save(here / "icon_win.ico")    # blue for the Windows tray
+    render(44, (74, 144, 217), 0.80).save(here / "icon_linux.png")  # same blue for the Linux tray
+    print("wrote icon_mac.png (SB, template) + icon_win.ico (SB, blue) + icon_linux.png (SB, blue)")
 
 
 if __name__ == "__main__":

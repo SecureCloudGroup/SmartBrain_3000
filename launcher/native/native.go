@@ -777,6 +777,15 @@ func untarGz(archive, dest string) error {
 		return err
 	}
 	defer gz.Close()
+	if err := os.MkdirAll(dest, 0o755); err != nil {
+		return err
+	}
+	// Symlink containment below compares fully-resolved paths, so resolve dest once
+	// up front — it may itself sit behind a symlink (macOS /tmp, /var).
+	root, err := filepath.EvalSymlinks(dest)
+	if err != nil {
+		return err
+	}
 	tr := tar.NewReader(gz)
 	for { // bounded by archive contents
 		hdr, err := tr.Next()
@@ -786,10 +795,14 @@ func untarGz(archive, dest string) error {
 		if err != nil {
 			return err
 		}
-		target, ok := securePath(dest, hdr.Name)
-		if !ok {
+		name := filepath.FromSlash(hdr.Name)
+		if filepath.Clean(name) == "." { // the archive's own root entry ("./")
+			continue
+		}
+		if !filepath.IsLocal(name) {
 			return fmt.Errorf("archive entry escapes destination: %q", hdr.Name)
 		}
+		target := filepath.Join(dest, name)
 		switch hdr.Typeflag {
 		case tar.TypeDir:
 			if err := os.MkdirAll(target, 0o755); err != nil {
@@ -809,9 +822,6 @@ func untarGz(archive, dest string) error {
 			}
 			out.Close()
 		case tar.TypeSymlink:
-			if _, ok := securePath(filepath.Dir(target), hdr.Linkname); !ok && filepath.IsAbs(hdr.Linkname) {
-				return fmt.Errorf("archive symlink escapes destination: %q", hdr.Linkname)
-			}
 			// The symlink's PARENT may not exist yet — tar entries are not ordered the
 			// way the regular-file branch assumes (python-build-standalone's archive
 			// places bin/ symlinks before any file creates bin/). Failed live on the
@@ -821,8 +831,37 @@ func untarGz(archive, dest string) error {
 			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 				return err
 			}
+			// Symlinks are judged on RESOLVED paths, not header strings: an archive
+			// could plant a link and route a later entry through it, which no lexical
+			// check can see.
+			parent, err := filepath.EvalSymlinks(filepath.Dir(target))
+			if err != nil {
+				return err
+			}
+			if parent != root && !strings.HasPrefix(parent, root+string(os.PathSeparator)) {
+				return fmt.Errorf("archive entry escapes destination: %q", hdr.Name)
+			}
+			linkname := filepath.FromSlash(hdr.Linkname)
+			if filepath.IsAbs(linkname) {
+				return fmt.Errorf("archive symlink escapes destination: %q", hdr.Linkname)
+			}
+			linkDest := filepath.Join(parent, linkname)
+			if !strings.HasPrefix(linkDest, root+string(os.PathSeparator)) {
+				return fmt.Errorf("archive symlink escapes destination: %q", hdr.Linkname)
+			}
+			// A dangling target is legitimate (links can precede the files they point
+			// at); when it does exist already, what it points THROUGH must stay inside.
+			if resolved, err := filepath.EvalSymlinks(linkDest); err == nil &&
+				!strings.HasPrefix(resolved, root+string(os.PathSeparator)) {
+				return fmt.Errorf("archive symlink escapes destination: %q", hdr.Linkname)
+			}
+			// Written in normalized form, re-derived from the containment-checked path.
+			rel, err := filepath.Rel(parent, linkDest)
+			if err != nil {
+				return err
+			}
 			_ = os.Remove(target)
-			if err := os.Symlink(hdr.Linkname, target); err != nil {
+			if err := os.Symlink(rel, target); err != nil {
 				return err
 			}
 		}
@@ -837,10 +876,14 @@ func unzip(archive, dest string) error {
 	}
 	defer r.Close()
 	for _, zf := range r.File { // bounded by archive contents
-		target, ok := securePath(dest, zf.Name)
-		if !ok {
+		name := filepath.FromSlash(zf.Name)
+		if filepath.Clean(name) == "." { // the archive's own root entry ("./")
+			continue
+		}
+		if !filepath.IsLocal(name) {
 			return fmt.Errorf("archive entry escapes destination: %q", zf.Name)
 		}
+		target := filepath.Join(dest, name)
 		if zf.FileInfo().IsDir() {
 			if err := os.MkdirAll(target, 0o755); err != nil {
 				return err
@@ -868,14 +911,4 @@ func unzip(archive, dest string) error {
 		out.Close()
 	}
 	return nil
-}
-
-// securePath joins base+name and confirms the result stays under base.
-func securePath(base, name string) (string, bool) {
-	target := filepath.Join(base, filepath.FromSlash(name))
-	rel, err := filepath.Rel(base, target)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", false
-	}
-	return target, true
 }

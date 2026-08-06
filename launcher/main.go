@@ -21,6 +21,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -42,6 +43,9 @@ var iconMac []byte
 
 //go:embed icon/icon_win.ico
 var iconWin []byte
+
+//go:embed icon/icon_linux.png
+var iconLinux []byte
 
 const dockerGetURL = "https://docs.docker.com/get-docker/"
 
@@ -101,13 +105,69 @@ func main() {
 	// Homebrew — so `docker` would look "not installed". Fix PATH before any Docker check runs.
 	stack.EnsureDockerPath()
 	stack.LauncherVersion = launcherVersion // rides health probes: the modern-launcher handshake
-	systray.Run(onReady, func() {})
+	if verb, ok := cliVerb(os.Args); ok {
+		os.Exit(runVerb(verb))
+	}
+	// A bare launch: the tray wherever one can be drawn, headless where none can.
+	// systray itself never says which it is — its SNI registration failure is
+	// log-only and onReady fires regardless, which on a stock GNOME (no
+	// AppIndicator extension) means a launcher that "runs" invisibly. So the
+	// persona is decided HERE, honestly, before systray gets a vote.
+	switch pickPersona(runtime.GOOS, graphicalSession(), sniAvailable()) {
+	case personaHeadless:
+		log.Println("no graphical session — running headless (verbs: run, start, stop, status, version)")
+		runHeadless()
+	case personaHeadlessNoTray:
+		log.Println("no tray host on this desktop — running headless; on GNOME, install the AppIndicator extension for the tray menu")
+		stack.Notify("SmartBrain is running without a tray",
+			"Tray not available — on GNOME install the AppIndicator extension; SmartBrain keeps running.")
+		runHeadless()
+	default:
+		systray.Run(onReady, func() {})
+	}
+}
+
+// cliVerb extracts a command verb from argv. Anything flag-shaped is NOT a verb:
+// older macOS passed -psn_… to Finder-launched apps, and a flag typo should meet
+// the usage text via runVerb only when it was clearly meant as a command.
+func cliVerb(args []string) (string, bool) {
+	if len(args) < 2 || strings.HasPrefix(args[1], "-") {
+		return "", false
+	}
+	return args[1], true
+}
+
+// The three ways a bare launch can run. Only linux ever leaves the tray: macOS and
+// Windows always have a host for the icon.
+type persona int
+
+const (
+	personaTray           persona = iota
+	personaHeadless               // no graphical session at all — a server, SSH, systemd
+	personaHeadlessNoTray         // a desktop, but nothing on the bus to draw a tray in
+)
+
+// pickPersona is the pure decision (probes feed it; tests table it).
+func pickPersona(goos string, graphical, sni bool) persona {
+	if goos != "linux" {
+		return personaTray
+	}
+	if !graphical {
+		return personaHeadless
+	}
+	if !sni {
+		return personaHeadlessNoTray
+	}
+	return personaTray
 }
 
 func onReady() {
-	if runtime.GOOS == "darwin" {
+	switch runtime.GOOS {
+	case "darwin":
 		systray.SetTemplateIcon(iconMac, iconMac) // template = auto light/dark in the macOS menu bar
-	} else {
+	case "linux":
+		systray.SetIcon(iconLinux) // SNI carries raw PNG; systray's .ico decoding is Windows-only
+	default:
 		systray.SetIcon(iconWin)
 	}
 	systray.SetTooltip("SmartBrain")
@@ -181,12 +241,61 @@ func onReady() {
 	}()
 }
 
-func setStatus(s string) { mStatus.SetTitle(s) }
+// The tray-touching seams. In the headless persona no menu exists — mStatus and its
+// siblings stay nil — so every touch goes through these: status lines become log
+// lines, menu movements become no-ops. In the tray persona every item is built in
+// onReady before any goroutine runs, so the guards never fire and behavior is
+// EXACTLY what it was when these calls were inline.
+func setStatus(s string) {
+	if mStatus == nil {
+		log.Println("status:", s)
+		return
+	}
+	mStatus.SetTitle(s)
+}
+
+func setTooltip(s string) {
+	if mStatus == nil {
+		return // headless: no icon to hover
+	}
+	systray.SetTooltip(s)
+}
+
+func menuShow(m *systray.MenuItem) {
+	if m != nil {
+		m.Show()
+	}
+}
+
+func menuHide(m *systray.MenuItem) {
+	if m != nil {
+		m.Hide()
+	}
+}
+
+// quitForRestart ends this process after a successful self-update: the tray loop is
+// asked to quit; headless simply exits 0 — systemd's Restart= (or the detached
+// replacement outside systemd) carries on with the new binary.
+func quitForRestart() {
+	if mStatus != nil {
+		systray.Quit()
+		return
+	}
+	os.Exit(0)
+}
+
+// openBrowser opens the app URL; a swappable seam so the CLI `start` verb — which
+// PRINTS where the app is — never seizes the user's browser. The tray personas
+// never touch it, so their behavior is unchanged.
+var openBrowser = stack.OpenBrowser
 
 // showVersions labels the menu with what is running. It names BOTH only when they differ:
 // during an update the desktop app is replaced before the app it supervises, and seeing
 // just one number then is how "did the update work?" becomes unanswerable.
 func showVersions(appVersion string) {
+	if mVersion == nil {
+		return // headless: the version travels in the handshake, not a menu
+	}
 	if appVersion == "" {
 		mVersion.Hide()
 		return
@@ -289,6 +398,12 @@ func checkForUpdate() bool {
 	// swap (previous kept as backup), then hand over to the replacement — the
 	// running stack (Docker or native) is untouched and outlives the handover.
 	upd := update.New(launcherVersion)
+	if underSystemd() {
+		// systemd owns the relaunch: Restart= restarts the unit with the swapped-in
+		// binary. A detached child here would escape the unit's cgroup — killed with
+		// the unit, or double-running beside its restart. Swap only; exit below.
+		upd.Start = func(string) error { return nil }
+	}
 	if ver, ok := upd.Available(ctx); ok {
 		setStatus("Updating SmartBrain…")
 		if _, err := upd.Apply(ctx, ver); err != nil {
@@ -296,7 +411,7 @@ func checkForUpdate() bool {
 			setStatus("Running ●")
 		} else {
 			stack.Notify("SmartBrain updated", "Restarting with version "+ver+"…")
-			systray.Quit() // the replacement is already running, detached
+			quitForRestart() // tray: quit the loop; headless: exit 0 (the stack keeps running either way)
 			return true
 		}
 	}
@@ -314,9 +429,9 @@ func checkForUpdate() bool {
 	}
 	stagedVersion = ver // the app can now offer this install in the page itself
 	setStatus(label)
-	systray.SetTooltip("SmartBrain — " + label)
-	mUpdateNow.Show()
-	mUpdateLater.Show()
+	setTooltip("SmartBrain — " + label)
+	menuShow(mUpdateNow)
+	menuShow(mUpdateLater)
 	if ver != lastNotifiedVersion { // one gentle heads-up per new version; never re-nag the same one
 		lastNotifiedVersion = ver
 		stack.Notify("SmartBrain update available", "Open the menu to install now — or it installs next time you start.")
@@ -364,9 +479,9 @@ func checkNativeUpdate(ctx context.Context, upd update.Updater) bool {
 	label := "Update available (v" + latest + ")"
 	stagedVersion = latest // the app can now offer this install in the page itself
 	setStatus(label)
-	systray.SetTooltip("SmartBrain — " + label)
-	mUpdateNow.Show()
-	mUpdateLater.Show()
+	setTooltip("SmartBrain — " + label)
+	menuShow(mUpdateNow)
+	menuShow(mUpdateLater)
 	if latest != lastNotifiedVersion {
 		lastNotifiedVersion = latest
 		stack.Notify("SmartBrain update ready", "Install from the menu now — or it installs next time you start.")
@@ -397,8 +512,8 @@ func installUpdate() {
 		}
 		startWatch(nv)
 		stagedVersion = ""
-		mUpdateNow.Hide()
-		mUpdateLater.Hide()
+		menuHide(mUpdateNow)
+		menuHide(mUpdateLater)
 		setStatus("Running ● (native, updated)")
 		refreshVersionLabel() // say the new number now, not at the next handshake
 		return
@@ -409,8 +524,8 @@ func installUpdate() {
 		return
 	}
 	stagedVersion = ""
-	mUpdateNow.Hide()
-	mUpdateLater.Hide()
+	menuHide(mUpdateNow)
+	menuHide(mUpdateLater)
 	if sb.WaitHealthy(ctx, 6*time.Minute) {
 		setStatus("Running ● (updated)")
 	} else {
@@ -443,7 +558,7 @@ func start() {
 		if !stack.DockerInstalled() {
 			// Don't dead-end a newcomer on a grey status line: take them to the fix. Open the
 			// download page once, and leave a "Get Docker…" menu item for later.
-			mGetDocker.Show()
+			menuShow(mGetDocker)
 			if !openedDockerPage {
 				openedDockerPage = true
 				if err := stack.OpenBrowser(dockerGetURL); err != nil {
@@ -453,7 +568,7 @@ func start() {
 			setStatus("Docker is required — install it, start it, then click Restart")
 			return
 		}
-		mGetDocker.Hide()
+		menuHide(mGetDocker)
 		setStatus("Starting Docker…")
 		stack.TryStartDocker(ctx)
 		if !waitDocker(ctx, 90*time.Second) {
@@ -461,7 +576,7 @@ func start() {
 			return
 		}
 	}
-	mGetDocker.Hide()
+	menuHide(mGetDocker)
 
 	// `docker` on PATH does not imply the compose PLUGIN exists (e.g. `brew install docker` without
 	// it). Catch that here with an honest message instead of blaming the network later.
@@ -488,7 +603,7 @@ func start() {
 	// A first `up` pulls images, so allow generous time before calling it stuck.
 	if sb.WaitHealthy(ctx, 6*time.Minute) {
 		setStatus("Running ●")
-		if err := stack.OpenBrowser(sb.URL()); err != nil {
+		if err := openBrowser(sb.URL()); err != nil {
 			log.Println("open browser:", err)
 		}
 	} else {
@@ -502,7 +617,7 @@ func openOrStart() {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	if sb.Healthy(ctx) {
-		if err := stack.OpenBrowser(sb.URL()); err != nil {
+		if err := openBrowser(sb.URL()); err != nil {
 			log.Println("open browser:", err)
 		}
 		return
@@ -685,7 +800,7 @@ func startNative(ctx context.Context) {
 	persistNativeMode() // the stack runs natively — plain relaunches must too
 	setStatus("Running ● (native)")
 	refreshVersionLabel() // the menu can answer "which version?" from the first moment
-	if err := stack.OpenBrowser(sb.URL()); err != nil {
+	if err := openBrowser(sb.URL()); err != nil {
 		log.Println("open browser:", err)
 	}
 	// Supervision parity: the Docker path has restart: unless-stopped; natively the

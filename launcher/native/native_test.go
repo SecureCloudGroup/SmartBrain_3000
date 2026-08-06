@@ -243,6 +243,33 @@ func TestArchiveEscapeRefused(t *testing.T) {
 	if err := unzip(evilZip, filepath.Join(dir, "out2")); err == nil {
 		t.Fatal("zip path escape must be refused")
 	}
+	for i, link := range []string{"/etc/passwd", "../../outside"} {
+		archive := filepath.Join(dir, fmt.Sprintf("link%d.tar.gz", i))
+		writeTarGzSymlink(t, archive, "sub/planted", link)
+		if err := untarGz(archive, filepath.Join(dir, fmt.Sprintf("out-link%d", i))); err == nil {
+			t.Fatalf("symlink escape %q must be refused", link)
+		}
+	}
+}
+
+func writeTarGzSymlink(t *testing.T, dest, name, linkname string) {
+	t.Helper()
+	f, err := os.Create(dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	gz := gzip.NewWriter(f)
+	tw := tar.NewWriter(gz)
+	if err := tw.WriteHeader(&tar.Header{Name: name, Linkname: linkname, Mode: 0o777, Typeflag: tar.TypeSymlink}); err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestProgressReaderReportsEachPercentOnce(t *testing.T) {
