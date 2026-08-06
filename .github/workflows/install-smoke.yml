@@ -78,3 +78,89 @@ jobs:
           curl -sf http://localhost:38080/api/config | grep -q '"is_logs_connected":false' \
             || { echo "::error::bifrost reports a connected logs store"; exit 1; }
           echo "no request logging: logs.db absent, store disabled, config enforced"
+
+  # The documented NATIVE Linux install, exactly as a stranger runs it: download the
+  # script, run it with --headless, expect a systemd --user unit serving on loopback.
+  # Same honesty contract as the Docker job above — this is the two-command story the
+  # docs promise, run verbatim against the latest published release.
+  script-install:
+    name: script install (native, headless)
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      # The Linux tarball first ships with v0.9.0. Until a release carries it, this
+      # job reports a clear skip instead of a misleading red.
+      - name: Does the latest release ship the Linux tarball yet?
+        id: gate
+        run: |
+          if curl -fsIL -o /dev/null "https://github.com/SecureCloudGroup/SmartBrain_3000/releases/latest/download/SmartBrain-linux-x86_64.tar.gz"; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::latest release has no Linux tarball yet (it ships with v0.9.0) — nothing to test"
+          fi
+      - name: A user session for systemd --user (runners have no login session)
+        if: steps.gate.outputs.present == 'true'
+        run: |
+          sudo loginctl enable-linger "$USER"
+          # give the user manager a moment to come up
+          for _ in $(seq 1 10); do
+            XDG_RUNTIME_DIR="/run/user/$(id -u)" systemctl --user is-system-running >/dev/null 2>&1 && break
+            sleep 1
+          done
+      - name: Install exactly like the docs say (headless)
+        if: steps.gate.outputs.present == 'true'
+        run: |
+          set -eux
+          XDG_RUNTIME_DIR="/run/user/$(id -u)"
+          export XDG_RUNTIME_DIR
+          # a careful user installs minisign first, so CI exercises the FULL verification path
+          sudo apt-get update -qq && sudo apt-get install -qq -y minisign
+          curl -fsSLO https://raw.githubusercontent.com/SecureCloudGroup/SmartBrain_3000/main/installer/install-linux.sh
+          sh install-linux.sh --headless
+      - name: Wait for health (first start assembles the app)
+        if: steps.gate.outputs.present == 'true'
+        run: |
+          XDG_RUNTIME_DIR="/run/user/$(id -u)"
+          export XDG_RUNTIME_DIR
+          for i in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:33000/api/health >/dev/null; then
+              echo "HEALTHY after ~$((i*5))s"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::native app never became healthy after 300s"
+          systemctl --user status smartbrain.service || true
+          tail -40 "$HOME/.config/SmartBrain/native/run/app.log" || true
+          exit 1
+      - name: First-run setup actually works, unit is active
+        if: steps.gate.outputs.present == 'true'
+        run: |
+          set -eux
+          XDG_RUNTIME_DIR="/run/user/$(id -u)"
+          export XDG_RUNTIME_DIR
+          systemctl --user is-active smartbrain.service
+          curl -sf -c /tmp/cj -X POST http://127.0.0.1:33000/api/account/setup \
+            -H 'content-type: application/json' -d '{"passphrase":"smoke-test-passphrase"}' \
+            | grep -q recovery_key
+          curl -sf -b /tmp/cj -X POST http://127.0.0.1:33000/api/kb \
+            -H 'content-type: application/json' -d '{"title":"Smoke","content":"the CANARY sentence"}' >/dev/null
+          curl -sf -b /tmp/cj "http://127.0.0.1:33000/api/kb/search?q=canary&mode=lexical" \
+            | grep -q '"Smoke"'
+      - name: Uninstall keeps the data
+        if: steps.gate.outputs.present == 'true'
+        run: |
+          set -eux
+          XDG_RUNTIME_DIR="/run/user/$(id -u)"
+          export XDG_RUNTIME_DIR
+          sh install-linux.sh --uninstall
+          if [ -e "$HOME/.local/bin/smartbrain" ]; then
+            echo "::error::uninstall left the bin symlink"; exit 1
+          fi
+          if systemctl --user is-active smartbrain.service 2>/dev/null; then
+            echo "::error::unit still active after uninstall"; exit 1
+          fi
+          test -f "$HOME/.local/share/smartbrain/data/smartbrain.duckdb"
+          echo "uninstall removed the launcher and kept the data"

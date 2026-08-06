@@ -249,16 +249,20 @@ jobs:
           fi
 
       # Catch a rotated-but-not-shipped key here, where it is a red build, instead of
-      # after publishing an update every installed launcher rejects.
+      # after publishing an update every installed launcher rejects. The Linux install
+      # script embeds the same key for its download verification, so it is held to the
+      # same bar — a drifted copy there would make every script install fail verification.
       - name: Check the key matches the one launchers verify with
         working-directory: launcher
         run: |
           baked="$(grep -oP 'releasePublicKey = "\K[^"]*' update/signature.go)"
+          embedded="$(grep -oP 'MINISIGN_PUBKEY="\K[^"]*' ../installer/install-linux.sh)"
           signing="$(go run ./cmd/sbsign pubkey)"
-          if [ "$baked" != "$signing" ]; then
-            echo "signing key does not match releasePublicKey compiled into the launcher:" >&2
-            echo "  baked in: ${baked:-<empty>}" >&2
-            echo "  signing:  $signing" >&2
+          if [ "$baked" != "$signing" ] || [ "$embedded" != "$signing" ]; then
+            echo "signing key mismatch:" >&2
+            echo "  launcher (update/signature.go):     ${baked:-<empty>}" >&2
+            echo "  script (installer/install-linux.sh): ${embedded:-<empty>}" >&2
+            echo "  signing:                             $signing" >&2
             exit 1
           fi
 
