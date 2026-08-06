@@ -423,3 +423,41 @@ func TestApplyUnpacksTarball(t *testing.T) {
 		t.Fatalf("replacement must be started at its installed path; got %v / %q", started, newExe)
 	}
 }
+
+// The refusals the swap path depends on: neither entries nor symlink targets may
+// step outside the unpack root.
+func TestUntarGzRefusesEscapes(t *testing.T) {
+	cases := []struct {
+		name string
+		hdr  tar.Header
+	}{
+		{"dotdot file", tar.Header{Name: "../escape.txt", Typeflag: tar.TypeReg, Mode: 0o644}},
+		{"absolute symlink", tar.Header{Name: "planted", Typeflag: tar.TypeSymlink, Linkname: "/etc/passwd", Mode: 0o777}},
+		{"escaping symlink", tar.Header{Name: "sub/planted", Typeflag: tar.TypeSymlink, Linkname: "../../outside", Mode: 0o777}},
+	}
+	for _, tc := range cases {
+		t.Run(strings.ReplaceAll(tc.name, " ", "-"), func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "evil.tar.gz")
+			f, err := os.Create(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			gz := gzip.NewWriter(f)
+			tw := tar.NewWriter(gz)
+			if err := tw.WriteHeader(&tc.hdr); err != nil {
+				t.Fatal(err)
+			}
+			if err := tw.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if err := gz.Close(); err != nil {
+				t.Fatal(err)
+			}
+			f.Close()
+			if err := untarGz(path, filepath.Join(dir, "out")); err == nil {
+				t.Fatalf("%s must be refused", tc.name)
+			}
+		})
+	}
+}
