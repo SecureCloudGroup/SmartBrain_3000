@@ -11,6 +11,15 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Fixed
+- **Connecting Gmail works again.** The Phase-0 origin guard (0.8.18) refused
+  Google's redirect back from the consent screen — by nature a cross-site
+  navigation — so finishing OAuth died on "Cross-origin request refused" and
+  the connect (or reconnect) never completed. The guard now steps aside for
+  exactly that one navigation (the callback GET, whose one-shot `state` check
+  is the real defense); scripted cross-site requests to the same path are
+  refused as before.
+
 ## [0.9.0] - 2026-08-06
 
 ### Added

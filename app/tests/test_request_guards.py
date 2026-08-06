@@ -88,6 +88,37 @@ def test_shell_navigation_from_another_site_allowed(client: TestClient) -> None:
     assert r.status_code == 200
 
 
+def test_oauth_callback_navigation_allowed_cross_site(client: TestClient) -> None:
+    """Google's consent page redirects the browser here — a cross-site navigation
+    by design. The guard must let it through to the route, whose one-shot state
+    check is the real defense. 400 (no pending flow), not 403, proves the guard
+    stepped aside and the route answered.
+    """
+    r = client.get(
+        "/api/email/oauth/callback?code=x&state=y",
+        headers={"sec-fetch-site": "cross-site", "sec-fetch-mode": "navigate"},
+    )
+    assert r.status_code != 403
+
+
+def test_oauth_callback_scripted_fetch_still_refused(client: TestClient) -> None:
+    """The exemption is navigations only — a cross-site fetch/XHR stays refused."""
+    r = client.get(
+        "/api/email/oauth/callback?code=x&state=y",
+        headers={"sec-fetch-site": "cross-site", "sec-fetch-mode": "cors"},
+    )
+    assert r.status_code == 403
+
+
+def test_oauth_callback_post_still_refused(client: TestClient) -> None:
+    """The exemption is GET/HEAD only — a cross-site POST to the path stays refused."""
+    r = client.post(
+        "/api/email/oauth/callback",
+        headers={"sec-fetch-site": "cross-site"},
+    )
+    assert r.status_code == 403
+
+
 # --- HostGuard: the anti-DNS-rebinding check ----------------------------------
 
 
