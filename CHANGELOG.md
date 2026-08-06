@@ -11,6 +11,8 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.8.24] - 2026-08-05
+
 ### Added
 - **Open logs in the menu — the folder every "see the log" message points at is now
   one click away.** The troubleshooting docs send people to `native/run/app.log`, but
