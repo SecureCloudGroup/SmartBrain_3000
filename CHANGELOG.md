@@ -11,6 +11,15 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Added
+- **Open logs in the menu — the folder every "see the log" message points at is now
+  one click away.** The troubleshooting docs send people to `native/run/app.log`, but
+  macOS hides `~/Library`, and a real user reported they simply could not get to that
+  folder. The menu-bar / tray menu now has **Open logs**, which opens it in Finder /
+  Explorer (on a Docker install, which writes no native log files, it opens the
+  SmartBrain data folder instead). The getting-started guide now also names the full
+  per-OS paths and the Finder **Go to Folder** route.
+
 ## [0.8.23] - 2026-08-05
 
 ### Changed

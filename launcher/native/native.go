@@ -136,6 +136,10 @@ func (n Native) currentPath() string        { return filepath.Join(n.Dir, "curre
 func (n Native) runDir() string             { return filepath.Join(n.Dir, "run") }
 func (n Native) bifrostData() string        { return filepath.Join(n.Dir, "bifrost-data") }
 
+// RunDir is the folder holding the children's logs (app.log, bifrost.log) and pid
+// files — exported so the menu's "Open logs" can show it to the user.
+func (n Native) RunDir() string { return n.runDir() }
+
 // Current returns the assembled version the pointer names, or "" when none is complete.
 func (n Native) Current() string {
 	raw, err := os.ReadFile(n.currentPath())

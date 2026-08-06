@@ -4,8 +4,8 @@ A tiny menu-bar / system-tray app that makes SmartBrain one click to reach. It h
 the real app is the SvelteKit interface in your browser — so all it does is start the stack, wait
 until it is healthy, and open `http://localhost:33000`.
 
-The tray menu is just **Open**, a status line, **Stop**, **Restart**, and **Quit launcher** (which
-leaves SmartBrain running).
+The tray menu is just **Open**, a status line, **Stop**, **Restart**, **Open logs** (the folder the
+troubleshooting docs point at), and **Quit launcher** (which leaves SmartBrain running).
 
 ## Two stacks, one launcher
 

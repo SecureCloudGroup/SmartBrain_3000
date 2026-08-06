@@ -403,3 +403,23 @@ func OpenBrowser(url string) error {
 	args := openArgs(url)
 	return exec.Command(args[0], args[1:]...).Start()
 }
+
+// openFolderArgs is the platform command to show a folder in the OS file browser. Separated for
+// testability. Windows' explorer exits nonzero even on success, so callers must never read its
+// exit code — Start-and-forget (as OpenFolder does) is the contract.
+func openFolderArgs(dir string) []string {
+	switch runtime.GOOS {
+	case "darwin":
+		return []string{"open", dir}
+	case "windows":
+		return []string{"explorer", dir}
+	default:
+		return []string{"xdg-open", dir}
+	}
+}
+
+// OpenFolder shows dir in the OS file browser (Finder / Explorer).
+func OpenFolder(dir string) error {
+	args := openFolderArgs(dir)
+	return exec.Command(args[0], args[1:]...).Start()
+}

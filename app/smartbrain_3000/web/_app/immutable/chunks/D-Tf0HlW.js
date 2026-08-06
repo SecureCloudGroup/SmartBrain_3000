@@ -1,0 +1,1 @@
+import{q as e}from"./DO5TPgeu.js";import{n as t}from"./DuiTpvCL.js";var n=e({count:0});async function r(){try{n.count=(await t.unseenScheduleUpdates()).count}catch{}}export{n,r as t};
