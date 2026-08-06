@@ -1,0 +1,11 @@
+# Desktop entry TEMPLATE for the SmartBrain launcher. install-linux.sh substitutes
+# __LAUNCHER__ with the installed binary's absolute path and drops this into
+# ~/.local/share/applications/ (the icon ships separately as "smartbrain").
+[Desktop Entry]
+Type=Application
+Name=SmartBrain
+Comment=Local-first AI assistant
+Exec=__LAUNCHER__
+Icon=smartbrain
+Categories=Utility;
+StartupNotify=false

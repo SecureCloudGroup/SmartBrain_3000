@@ -11,6 +11,21 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Added
+- **Linux joins the native stack — one launcher, tray or headless.** This release
+  train is the Linux one. The same launcher that lives in the macOS menu bar and the
+  Windows tray now runs on Linux desktops and servers: where the desktop can host a
+  tray icon it gets the familiar menu, and where it can't — a server, an SSH
+  session, or a stock GNOME without the AppIndicator extension — it says so once and
+  keeps running headless instead of pretending a tray exists. It also grew verbs for
+  people without a mouse on the machine: `smartbrain run` (foreground, what a
+  systemd unit runs), `start` (prints the app's URL), `stop`, `status`, and
+  `version`. Self-updates understand systemd: under a unit the launcher swaps
+  itself and lets `Restart=` bring up the new binary, instead of detaching a child
+  the unit would kill. And it refuses to self-update out of a shared `bin`
+  directory — the swap replaces the launcher's whole folder, which must never be a
+  folder other tools live in.
+
 ## [0.8.24] - 2026-08-05
 
 ### Added

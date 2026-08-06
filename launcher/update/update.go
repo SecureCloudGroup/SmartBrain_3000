@@ -18,7 +18,9 @@
 package update
 
 import (
+	"archive/tar"
 	"archive/zip"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -56,8 +58,9 @@ type Updater struct {
 	FetchBody func(ctx context.Context, url string) ([]byte, error)
 	Start     func(path string) error // launch the replacement binary, detached
 	AppRoot   string                  // install root; resolved from the executable when empty
-	Asset     string                  // release zip name; resolved from GOOS when empty
+	Asset     string                  // release archive name; resolved from GOOS when empty
 	Layout    string                  // "bundle" (.app) or "flat" (exe); resolved from GOOS when empty
+	Exe       string                  // flat-layout executable name; resolved from GOOS when empty
 	PubKey    string                  // release signing key; the compiled-in one when empty
 }
 
@@ -66,20 +69,29 @@ func New(version string) Updater {
 	return Updater{Version: version, Fetch: fetchURL, FetchBody: fetchBody, Start: startDetached}
 }
 
-// assetName is the per-OS launcher zip our releases have always attached. The
-// Asset/Layout fields exist so the swap logic itself tests on any OS (linux CI has
-// no launcher artifact; production there stays an honest error).
+// assetName is the per-OS launcher archive our releases attach. The Asset/Layout
+// fields exist so the swap logic itself tests on any OS.
 func (u Updater) assetName() (string, error) {
 	if u.Asset != "" {
 		return u.Asset, nil
 	}
-	switch runtime.GOOS {
+	return assetFor(runtime.GOOS, runtime.GOARCH)
+}
+
+// assetFor is the pure half of assetName, so every OS's answer tests everywhere.
+func assetFor(goos, goarch string) (string, error) {
+	switch goos {
 	case "darwin":
 		return "SmartBrain-macos.zip", nil
 	case "windows":
 		return "SmartBrain-windows.zip", nil
+	case "linux":
+		if goarch == "amd64" {
+			return "SmartBrain-linux-x86_64.tar.gz", nil
+		}
+		return "", fmt.Errorf("no launcher artifact for linux/%s", goarch)
 	}
-	return "", fmt.Errorf("no launcher artifact for %s", runtime.GOOS)
+	return "", fmt.Errorf("no launcher artifact for %s", goos)
 }
 
 func (u Updater) layout() string {
@@ -90,6 +102,23 @@ func (u Updater) layout() string {
 		return "bundle"
 	}
 	return "flat"
+}
+
+func (u Updater) exeName() string {
+	if u.Exe != "" {
+		return u.Exe
+	}
+	return exeNameFor(runtime.GOOS)
+}
+
+// exeNameFor names the flat-layout executable per OS. Darwin ships a bundle, so
+// flat there exists only in tests — the historical Windows name keeps those honest
+// on every GOOS.
+func exeNameFor(goos string) string {
+	if goos == "linux" {
+		return "smartbrain"
+	}
+	return "SmartBrain.exe"
 }
 
 // appRoot locates what gets swapped: the .app bundle on macOS, the exe's directory
@@ -193,13 +222,17 @@ func (u Updater) Apply(ctx context.Context, version string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("locate install: %w", err)
 	}
+	home, _ := os.UserHomeDir() // "" on error — the guard still catches any …/bin root
+	if err := refuseSharedBinSwap(u.layout(), root, home); err != nil {
+		return "", err
+	}
 	staging, err := os.MkdirTemp(filepath.Dir(root), ".smartbrain-update-")
 	if err != nil {
 		return "", fmt.Errorf("staging: %w", err)
 	}
 	defer os.RemoveAll(staging)
 
-	zipPath := filepath.Join(staging, asset)
+	archive := filepath.Join(staging, asset)
 	base := fmt.Sprintf("%s/v%s/", releaseBase, version)
 	// Establish that the checksum is OURS before spending bandwidth on the payload
 	// it describes: the sidecar comes from the same release as the zip, so on its own
@@ -220,10 +253,10 @@ func (u Updater) Apply(ctx context.Context, version string) (string, error) {
 	if len(want) == 0 || len(want[0]) != 64 {
 		return "", fmt.Errorf("checksum: malformed sidecar")
 	}
-	if err := u.Fetch(ctx, base+asset, zipPath); err != nil {
+	if err := u.Fetch(ctx, base+asset, archive); err != nil {
 		return "", fmt.Errorf("download: %w", err)
 	}
-	got, err := sha256File(zipPath)
+	got, err := sha256File(archive)
 	if err != nil {
 		return "", err
 	}
@@ -231,10 +264,14 @@ func (u Updater) Apply(ctx context.Context, version string) (string, error) {
 		return "", fmt.Errorf("checksum mismatch: got %s want %s", got, want[0])
 	}
 	unpacked := filepath.Join(staging, "unpacked")
-	if err := unzip(zipPath, unpacked); err != nil {
+	unpack := unzip
+	if strings.HasSuffix(asset, ".tar.gz") { // the linux artifact; zips everywhere else
+		unpack = untarGz
+	}
+	if err := unpack(archive, unpacked); err != nil {
 		return "", fmt.Errorf("unpack: %w", err)
 	}
-	fresh, newExe, err := freshInstall(u.layout(), unpacked, root)
+	fresh, newExe, err := freshInstall(u.layout(), u.exeName(), unpacked, root)
 	if err != nil {
 		return "", err
 	}
@@ -255,22 +292,37 @@ func (u Updater) Apply(ctx context.Context, version string) (string, error) {
 	return newExe, nil
 }
 
-// freshInstall finds what the zip provided and where its executable will live once
-// the swap puts it at root's path.
-func freshInstall(layout, unpacked, root string) (dir string, exeAfterSwap string, err error) {
+// freshInstall finds what the archive provided and where its executable will live
+// once the swap puts it at root's path.
+func freshInstall(layout, exeName, unpacked, root string) (dir string, exeAfterSwap string, err error) {
 	if layout == "bundle" {
 		fresh := filepath.Join(unpacked, "SmartBrain.app")
 		if _, err := os.Stat(fresh); err != nil {
-			return "", "", fmt.Errorf("zip missing SmartBrain.app")
+			return "", "", fmt.Errorf("archive missing SmartBrain.app")
 		}
 		return fresh, filepath.Join(root, "Contents", "MacOS", "SmartBrain"), nil
 	}
-	exe := filepath.Join(unpacked, "SmartBrain.exe")
+	exe := filepath.Join(unpacked, exeName)
 	if _, err := os.Stat(exe); err != nil {
-		return "", "", fmt.Errorf("zip missing SmartBrain.exe")
+		return "", "", fmt.Errorf("archive missing %s", exeName)
 	}
-	// Windows swaps the whole directory shape the same way: the unpacked dir becomes root.
-	return unpacked, filepath.Join(root, "SmartBrain.exe"), nil
+	// Flat layouts swap the whole directory shape the same way: the unpacked dir becomes root.
+	return unpacked, filepath.Join(root, exeName), nil
+}
+
+// refuseSharedBinSwap guards the flat-layout swap, which RENAMES the app root and
+// moves a fresh directory in its place. Pointed at a shared bin directory — a
+// hand-copied binary in ~/.local/bin is the way that happens — the swap would eat
+// every other tool living there. Such installs must not self-update in place;
+// install-linux.sh gives SmartBrain its own directory.
+func refuseSharedBinSwap(layout, root, home string) error {
+	if layout != "flat" {
+		return nil
+	}
+	if filepath.Base(root) == "bin" || (home != "" && root == filepath.Join(home, ".local", "bin")) {
+		return fmt.Errorf("refusing to update in place: %s is a shared bin directory and the update replaces the launcher's whole folder — reinstall with install-linux.sh, which gives SmartBrain its own directory", root)
+	}
+	return nil
 }
 
 // --- side-effect defaults ----------------------------------------------------
@@ -401,4 +453,78 @@ func unzip(archive, dest string) error {
 		out.Close()
 	}
 	return nil
+}
+
+// untarGz unpacks a .tar.gz beneath dest, refusing entries that escape it. Ported
+// from the native package (the same kept-local convention as unzip above), including
+// its symlink-ordering fix — see the symlink branch.
+func untarGz(archive, dest string) error {
+	f, err := os.Open(archive)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	gz, err := gzip.NewReader(f)
+	if err != nil {
+		return err
+	}
+	defer gz.Close()
+	tr := tar.NewReader(gz)
+	for { // bounded by archive contents
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		target, ok := securePath(dest, hdr.Name)
+		if !ok {
+			return fmt.Errorf("archive entry escapes destination: %q", hdr.Name)
+		}
+		switch hdr.Typeflag {
+		case tar.TypeDir:
+			if err := os.MkdirAll(target, 0o755); err != nil {
+				return err
+			}
+		case tar.TypeReg:
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				return err
+			}
+			out, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.FileMode(hdr.Mode)&0o777)
+			if err != nil {
+				return err
+			}
+			if _, err := io.Copy(out, tr); err != nil { //nolint:gosec // checksum-verified archive
+				out.Close()
+				return err
+			}
+			out.Close()
+		case tar.TypeSymlink:
+			if _, ok := securePath(filepath.Dir(target), hdr.Linkname); !ok && filepath.IsAbs(hdr.Linkname) {
+				return fmt.Errorf("archive symlink escapes destination: %q", hdr.Linkname)
+			}
+			// The symlink's PARENT may not exist yet — tar entries are not ordered the
+			// way the regular-file branch assumes (learned live in the native package:
+			// bin/ symlinks can precede any file that creates bin/). Creating a symlink
+			// never requires its TARGET to exist, only its own parent directory.
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				return err
+			}
+			_ = os.Remove(target)
+			if err := os.Symlink(hdr.Linkname, target); err != nil {
+				return err
+			}
+		}
+	}
+}
+
+// securePath joins base+name and confirms the result stays under base.
+func securePath(base, name string) (string, bool) {
+	target := filepath.Join(base, filepath.FromSlash(name))
+	rel, err := filepath.Rel(base, target)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	return target, true
 }

@@ -3,7 +3,9 @@
 package update
 
 import (
+	"archive/tar"
 	"archive/zip"
+	"compress/gzip"
 	"context"
 	"fmt"
 	"os"
@@ -134,6 +136,7 @@ func harness(t *testing.T, layout string) (Updater, *[]string, string, string) {
 	u.AppRoot = root
 	u.Asset = "launcher.zip"
 	u.Layout = layout
+	u.Exe = "SmartBrain.exe" // pinned like its siblings, so the fixtures hold on any GOOS
 	// A throwaway release key per test: the harness signs exactly what a release
 	// workflow signs, so the whole authenticity path runs rather than being stubbed.
 	pub, priv, err := GenerateKey()
@@ -247,10 +250,176 @@ func TestApplyRefusesZipMissingTheApp(t *testing.T) {
 		return releaseBody(t, url, sum+"  launcher.zip\n", priv)
 	}
 	if _, err := u.Apply(context.Background(), "9.9.9"); err == nil ||
-		!strings.Contains(err.Error(), "zip missing") {
+		!strings.Contains(err.Error(), "archive missing") {
 		t.Fatalf("a zip without the app must be refused, got: %v", err)
 	}
 	if _, err := os.Stat(root); err != nil {
 		t.Fatal("the running install must still be in place")
+	}
+}
+
+// Every OS's release artifact name, checked from any OS. Linux ships a tarball
+// (mode bits and symlinks survive; zips lose them), and only amd64 has one.
+func TestAssetForEachOS(t *testing.T) {
+	cases := []struct {
+		goos, goarch, want string
+		ok                 bool
+	}{
+		{"darwin", "arm64", "SmartBrain-macos.zip", true},
+		{"darwin", "amd64", "SmartBrain-macos.zip", true},
+		{"windows", "amd64", "SmartBrain-windows.zip", true},
+		{"linux", "amd64", "SmartBrain-linux-x86_64.tar.gz", true},
+		{"linux", "arm64", "", false}, // no artifact — an honest error, not a bad URL
+		{"plan9", "amd64", "", false},
+	}
+	for _, c := range cases {
+		got, err := assetFor(c.goos, c.goarch)
+		if c.ok && (err != nil || got != c.want) {
+			t.Fatalf("assetFor(%s, %s) = %q, %v; want %q", c.goos, c.goarch, got, err, c.want)
+		}
+		if !c.ok && err == nil {
+			t.Fatalf("assetFor(%s, %s) must error", c.goos, c.goarch)
+		}
+	}
+}
+
+func TestExeNameForEachOS(t *testing.T) {
+	cases := map[string]string{
+		"windows": "SmartBrain.exe",
+		"linux":   "smartbrain",
+		"darwin":  "SmartBrain.exe", // bundle OSes never use flat in production; tests keep the historical name
+	}
+	for goos, want := range cases {
+		if got := exeNameFor(goos); got != want {
+			t.Fatalf("exeNameFor(%s) = %q, want %q", goos, got, want)
+		}
+	}
+}
+
+// The flat swap RENAMES the app root. Pointed at a shared bin directory, that
+// would eat every other tool living there — refuse, loudly.
+func TestRefuseSharedBinSwap(t *testing.T) {
+	home := filepath.Join(string(filepath.Separator)+"home", "u")
+	refuse := []struct{ layout, root string }{
+		{"flat", filepath.Join(home, ".local", "bin")},
+		{"flat", filepath.Join(string(filepath.Separator)+"opt", "tools", "bin")},
+	}
+	for _, c := range refuse {
+		err := refuseSharedBinSwap(c.layout, c.root, home)
+		if err == nil || !strings.Contains(err.Error(), "install-linux.sh") {
+			t.Fatalf("refuseSharedBinSwap(%s, %s) must refuse and name install-linux.sh, got %v", c.layout, c.root, err)
+		}
+	}
+	allow := []struct{ layout, root string }{
+		{"flat", filepath.Join(home, ".local", "share", "smartbrain")}, // its own directory: the supported shape
+		{"bundle", filepath.Join(home, "bin")},                         // bundle swaps a .app, never a bin dir
+	}
+	for _, c := range allow {
+		if err := refuseSharedBinSwap(c.layout, c.root, home); err != nil {
+			t.Fatalf("refuseSharedBinSwap(%s, %s) must allow, got %v", c.layout, c.root, err)
+		}
+	}
+}
+
+// fixtureTarGz builds a linux-style launcher tarball: the executable (0755), a
+// plain file (0644), and a symlink placed BEFORE anything creates its parent
+// directory — the entry ordering that failed live in the native package.
+func fixtureTarGz(t *testing.T, dir, exe, marker string) string {
+	t.Helper()
+	path := filepath.Join(dir, "launcher.tar.gz")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gz := gzip.NewWriter(f)
+	tw := tar.NewWriter(gz)
+	write := func(hdr *tar.Header, body string) {
+		t.Helper()
+		hdr.Size = int64(len(body))
+		if err := tw.WriteHeader(hdr); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tw.Write([]byte(body)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(&tar.Header{Name: "libexec/" + exe + "-link", Typeflag: tar.TypeSymlink, Linkname: "../" + exe, Mode: 0o777}, "")
+	write(&tar.Header{Name: exe, Typeflag: tar.TypeReg, Mode: 0o755}, marker)
+	write(&tar.Header{Name: "README", Typeflag: tar.TypeReg, Mode: 0o644}, "hi")
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	return path
+}
+
+// The linux artifact end to end: a .tar.gz asset routes to untarGz, the swap
+// installs it, and what tar promised survives — the executable bit and the
+// symlink whose parent directory no earlier entry created.
+func TestApplyUnpacksTarball(t *testing.T) {
+	work := t.TempDir()
+	root := filepath.Join(work, "SmartBrain")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "smartbrain"), []byte("OLD"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tarPath := fixtureTarGz(t, t.TempDir(), "smartbrain", "NEW")
+	sum, err := sha256File(tarPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := []string{}
+	u := New("0.8.3")
+	u.AppRoot = root
+	u.Asset = "SmartBrain-linux-x86_64.tar.gz"
+	u.Layout = "flat"
+	u.Exe = "smartbrain"
+	pub, priv, err := GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	u.PubKey = pub
+	u.Fetch = func(_ context.Context, url, dest string) error {
+		b, err := os.ReadFile(tarPath)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(dest, b, 0o600)
+	}
+	u.FetchBody = func(_ context.Context, url string) ([]byte, error) {
+		return releaseBody(t, url, sum+"  SmartBrain-linux-x86_64.tar.gz\n", priv)
+	}
+	u.Start = func(path string) error { started = append(started, path); return nil }
+
+	newExe, err := u.Apply(context.Background(), "9.9.9")
+	if err != nil {
+		t.Fatal(err)
+	}
+	installedExe := filepath.Join(root, "smartbrain")
+	body, err := os.ReadFile(installedExe)
+	if err != nil || string(body) != "NEW" {
+		t.Fatalf("swap did not install the new binary: %q %v", body, err)
+	}
+	info, err := os.Stat(installedExe)
+	if err != nil || info.Mode().Perm()&0o100 == 0 {
+		t.Fatalf("the executable bit must survive the tarball: %v %v", info, err)
+	}
+	if info, err := os.Stat(filepath.Join(root, "README")); err != nil || info.Mode().Perm()&0o111 != 0 {
+		t.Fatalf("a plain file must stay plain: %v %v", info, err)
+	}
+	link, err := os.Readlink(filepath.Join(root, "libexec", "smartbrain-link"))
+	if err != nil || link != "../smartbrain" {
+		t.Fatalf("the early-ordered symlink must survive: %q %v", link, err)
+	}
+	if _, err := os.Stat(root + ".previous"); err != nil {
+		t.Fatal("the displaced install must remain as a backup")
+	}
+	if len(started) != 1 || started[0] != newExe || newExe != installedExe {
+		t.Fatalf("replacement must be started at its installed path; got %v / %q", started, newExe)
 	}
 }

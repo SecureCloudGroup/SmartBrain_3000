@@ -332,15 +332,21 @@ func DockerRunning(ctx context.Context) bool {
 	return exec.CommandContext(ctx, "docker", "info").Run() == nil
 }
 
-// Notify shows a native desktop notification (macOS only; best-effort, fire-and-forget). The
+// Notify shows a native desktop notification (best-effort, fire-and-forget). The
 // launcher is a menu-bar app with no window, so a first-run image download would otherwise be
 // minutes of silence for anyone who doesn't think to click the tray icon.
 func Notify(title, body string) {
-	if runtime.GOOS != "darwin" {
-		return
+	switch runtime.GOOS {
+	case "darwin":
+		script := fmt.Sprintf("display notification %q with title %q", body, title)
+		_ = exec.Command("/usr/bin/osascript", "-e", script).Start()
+	case "linux":
+		// notify-send ships with every mainstream desktop; a server without one
+		// stays silent, which is exactly right for a machine with no screen.
+		if p, err := exec.LookPath("notify-send"); err == nil {
+			_ = exec.Command(p, "--app-name=SmartBrain", title, body).Start()
+		}
 	}
-	script := fmt.Sprintf("display notification %q with title %q", body, title)
-	_ = exec.Command("/usr/bin/osascript", "-e", script).Start()
 }
 
 // ComposeAvailable reports whether the `docker compose` plugin answers. Finding `docker` on PATH is
