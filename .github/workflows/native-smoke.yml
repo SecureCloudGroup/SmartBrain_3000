@@ -11,6 +11,7 @@ on:
   pull_request:
     paths:
       - "app/**"
+      - "launcher/**"
       - ".github/workflows/native-smoke.yml"
   workflow_dispatch:
   schedule:
@@ -80,3 +81,77 @@ jobs:
             | grep -q '"Smoke"'
           test -f "${RUNNER_TEMP}/native-home/smartbrain.duckdb"
           echo "native boot + setup + ingest + search all work on ${{ matrix.os }}"
+
+  # The smoke matrix above hand-assembles the stack; this job makes the LAUNCHER do it —
+  # the first CI run of native.Assemble on any OS. The launcher assembles an install from
+  # a RELEASE (pinned pbs + that release's wheelhouse + the mirrored bifrost), and no
+  # release carries this PR's version, so the build is stamped with the newest published
+  # release: exactly the assets a real install fetches today. Unforced XDG paths on
+  # purpose — the asserts pin down where user data and logs actually land.
+  linux-native-e2e:
+    name: linux native e2e (launcher assembles a real release)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: launcher/go.mod
+      - name: Pick the newest published release
+        id: rel
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag=$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name)
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "assembling $tag"
+      - name: Build the PR's launcher stamped as that release
+        working-directory: launcher
+        env:
+          TAG: ${{ steps.rel.outputs.tag }}
+        run: |
+          set -eux
+          CGO_ENABLED=0 go build -ldflags "-X main.launcherVersion=${TAG#v}" -o build/smartbrain .
+      - name: start — assemble, boot, and adopt the real release
+        run: |
+          set -eux
+          ./launcher/build/smartbrain start | tee start.out
+          grep -q 'http://localhost:33000' start.out
+          curl -sf http://127.0.0.1:33000/api/health | grep -q '"status":"ok"'
+      - name: The app is really usable — setup, ingest, search
+        run: |
+          set -eux
+          curl -sf -c cj.txt -X POST http://127.0.0.1:33000/api/account/setup \
+            -H 'content-type: application/json' -d '{"passphrase":"native-e2e-pass"}' \
+            | grep -q recovery_key
+          curl -sf -b cj.txt -X POST http://127.0.0.1:33000/api/kb \
+            -H 'content-type: application/json' -d '{"title":"Smoke","content":"the native CANARY sentence"}' >/dev/null
+          curl -sf -b cj.txt "http://127.0.0.1:33000/api/kb/search?q=canary&mode=lexical" \
+            | grep -q '"Smoke"'
+      - name: Data and logs land where the docs say
+        run: |
+          set -eux
+          # user data: the XDG path the app owns; logs: the folder "Open logs" opens
+          test -f "$HOME/.local/share/smartbrain/data/smartbrain.duckdb"
+          test -s "$HOME/.config/SmartBrain/native/run/app.log"
+          test -s "$HOME/.config/SmartBrain/native/run/bifrost.log"
+      - name: Bifrost listens on loopback only
+        run: |
+          set -eux
+          ss -ltn | awk '$4 ~ /:38080$/ {print $4}' > bifrost.binds
+          cat bifrost.binds
+          test -s bifrost.binds
+          if grep -v '^127\.0\.0\.1:' bifrost.binds; then
+            echo "::error::bifrost is listening beyond loopback"; exit 1
+          fi
+      - name: status, stop, and the port actually closes
+        run: |
+          set -eux
+          ./launcher/build/smartbrain status | grep -q running
+          ./launcher/build/smartbrain stop
+          if ./launcher/build/smartbrain status; then
+            echo "::error::status still reports running after stop"; exit 1
+          fi
+          if curl -sf --max-time 3 http://127.0.0.1:33000/api/health; then
+            echo "::error::app port still answers after stop"; exit 1
+          fi

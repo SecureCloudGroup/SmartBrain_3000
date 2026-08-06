@@ -25,6 +25,12 @@ to know when a release changes behavior.
   the unit would kill. And it refuses to self-update out of a shared `bin`
   directory — the swap replaces the launcher's whole folder, which must never be a
   folder other tools live in.
+- **The Linux launcher ships with every release.** Releases now attach
+  `SmartBrain-linux-x86_64.tar.gz` — a fully static binary plus desktop entry and
+  icon — with the same sha256 sidecar and minisign signature as the macOS and
+  Windows builds. CI now also proves the native assembly end to end on a clean
+  Linux runner: the launcher downloads and verifies a real release (Python
+  runtime, wheelhouse, gateway), serves on loopback only, and stops clean.
 
 ## [0.8.24] - 2026-08-05
 
