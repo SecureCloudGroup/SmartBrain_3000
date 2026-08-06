@@ -1,10 +1,11 @@
-# Launcher — build the desktop tray app for macOS and Windows. It has no code signing certificate
+# Launcher — build the launcher for macOS, Windows, and Linux. It has no code signing certificate
 # (a deliberate $0 choice): macOS binaries are AD-HOC signed, which is free and is all Apple Silicon
 # needs to run, and the app is delivered through Homebrew/winget, which don't apply the quarantine
-# flag — so no Gatekeeper/SmartScreen wall. See docs on the install story.
+# flag — so no Gatekeeper/SmartScreen wall. Linux ships a static tarball verified by the install
+# script and the self-updater. See docs on the install story.
 #
-# On a PR that touches the launcher, this just proves it still builds on both OSes. On a version tag
-# it also attaches the built app to that tag's GitHub Release, ready for Homebrew/winget to point at.
+# On a PR that touches the launcher, this just proves it still builds on every OS. On a version tag
+# it also attaches the built app to that tag's GitHub Release, ready for the package channels.
 name: Launcher
 
 on:
@@ -169,9 +170,57 @@ jobs:
         run: |
           gh release upload "${{ github.ref_name }}" launcher/build/SmartBrain-windows.zip launcher/build/SmartBrain-windows.zip.sha256 --clobber
 
+  linux:
+    name: build (Linux x86_64, static)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: launcher/go.mod
+      - name: Build the smartbrain binary + tarball
+        working-directory: launcher
+        env:
+          VERSION: ${{ github.ref_type == 'tag' && github.ref_name || '0.0.0-dev' }}
+        # systray on Linux is pure-Go (StatusNotifierItem over D-Bus), so CGO stays off:
+        # one fully static binary runs on any x86_64 distro, glibc or not. The artifact
+        # is a tarball, not a zip, because tar preserves the exec bit — the self-updater
+        # unpacks this same flat layout when it swaps itself.
+        run: |
+          set -eux
+          CGO_ENABLED=0 go build -ldflags "-s -w -X main.launcherVersion=${VERSION#v}" -o build/smartbrain .
+          cp ../packaging/linux/smartbrain.desktop build/smartbrain.desktop
+          cp icon/icon_app.png build/smartbrain.png
+          tar -C build -czf build/SmartBrain-linux-x86_64.tar.gz smartbrain smartbrain.desktop smartbrain.png
+          # The self-updater verifies this sidecar before any swap.
+          (cd build && sha256sum SmartBrain-linux-x86_64.tar.gz > SmartBrain-linux-x86_64.tar.gz.sha256)
+      - uses: actions/upload-artifact@v7
+        with:
+          name: SmartBrain-linux
+          # The sidecar travels too: the sign job signs these EXACT bytes, so it must
+          # sign the published file rather than recompute one that only looks the same.
+          path: |
+            launcher/build/SmartBrain-linux-x86_64.tar.gz
+            launcher/build/SmartBrain-linux-x86_64.tar.gz.sha256
+      - name: Ensure the release exists (tags only)
+        if: github.ref_type == 'tag'
+        uses: ./.github/actions/ensure-release
+        with:
+          tag: ${{ github.ref_name }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Attach to the release (tags only)
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ github.ref_name }}" launcher/build/SmartBrain-linux-x86_64.tar.gz launcher/build/SmartBrain-linux-x86_64.tar.gz.sha256 --clobber
+
   sign:
     name: sign the release checksums (tags only)
-    needs: [macos, windows] # sign what those jobs actually published
+    needs: [macos, windows, linux] # sign what those jobs actually published
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     permissions:
@@ -186,6 +235,8 @@ jobs:
         with: { name: SmartBrain-macos, path: dist }
       - uses: actions/download-artifact@v8
         with: { name: SmartBrain-windows, path: dist }
+      - uses: actions/download-artifact@v8
+        with: { name: SmartBrain-linux, path: dist }
 
       # Fail loudly rather than publishing a release the launcher will refuse to
       # install: a signature is not optional, so a missing key is a broken release.
@@ -215,7 +266,8 @@ jobs:
         run: |
           go -C launcher run ./cmd/sbsign sign \
             "$PWD/dist/SmartBrain-macos.zip.sha256" \
-            "$PWD/dist/SmartBrain-windows.zip.sha256"
+            "$PWD/dist/SmartBrain-windows.zip.sha256" \
+            "$PWD/dist/SmartBrain-linux-x86_64.tar.gz.sha256"
 
       - name: Attach the signatures to the release
         env:
@@ -223,7 +275,8 @@ jobs:
         run: |
           gh release upload "${{ github.ref_name }}" \
             dist/SmartBrain-macos.zip.sha256.minisig \
-            dist/SmartBrain-windows.zip.sha256.minisig --clobber
+            dist/SmartBrain-windows.zip.sha256.minisig \
+            dist/SmartBrain-linux-x86_64.tar.gz.sha256.minisig --clobber
 
       # Concurrent `gh release create` calls have produced two release objects for one tag
       # before (v0.8.6, v0.8.14) — assets then scatter across both, and users can land on
