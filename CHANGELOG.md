@@ -11,6 +11,8 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-08-06
+
 ### Added
 - **Linux joins the native stack — one launcher, tray or headless.** This release
   train is the Linux one. The same launcher that lives in the macOS menu bar and the
