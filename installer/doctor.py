@@ -1238,8 +1238,9 @@ def _fix_docker_leftovers(s: Snapshot, holders: Iterable[tuple[str, int]]) -> Fi
 
     Only offered when the listener really does look like Docker, a SmartBrain container
     really does exist, AND there is a complete native assembly on this machine — because
-    without that last piece the container IS the install (the only supported runtime on
-    Linux is compose, and there is no native launcher build for it), not a leftover.
+    without that last piece the container IS the install (containers are a first-class,
+    deliberate choice on Linux, and the only runtime on Intel Macs and ARM Linux), not
+    a leftover.
     """
     if not s.complete_versions:
         return None  # no native assembly here means containers are the install, not leftovers

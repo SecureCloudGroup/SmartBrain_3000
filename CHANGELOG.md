@@ -31,6 +31,14 @@ to know when a release changes behavior.
   Windows builds. CI now also proves the native assembly end to end on a clean
   Linux runner: the launcher downloads and verifies a real release (Python
   runtime, wheelhouse, gateway), serves on loopback only, and stops clean.
+- **A Linux install worth auditing.** `installer/install-linux.sh` is the documented
+  two-command story: download the script, read it, run it — never `curl | sh`. It
+  verifies the release's minisign signature and checksum, installs per-user with no
+  root, and adds a menu entry — or, with `--headless`, a systemd `--user` service
+  for servers. The same script uninstalls: `--uninstall` keeps your data and names
+  exactly what remains, `--purge` removes that too. The getting-started guide,
+  README, and landing page now tell the native Linux story, containers staying the
+  documented first-class alternative.
 
 ## [0.8.24] - 2026-08-05
 

@@ -435,11 +435,11 @@
             </div>
           </div>
           <div class="card">
-            <h3>🐧 Linux <span class="tag">Docker</span></h3>
-            <p>Downloads the release file and pulls the prebuilt image — no build, no clone. Then open <code>http://localhost:33000</code>.</p>
+            <h3>🐧 Linux <span class="tag">Native</span></h3>
+            <p>Download the install script, read it, run it — it verifies the release’s signature, installs per-user with no root, and adds SmartBrain to your app menu. Add <code>--headless</code> on a server for a systemd service. x86_64; arm and Alpine run the Docker stack instead.</p>
             <div class="cmd">
-              <code>curl -fsSLO https://raw.githubusercontent.com/SecureCloudGroup/SmartBrain_3000/main/compose/docker-compose.release.yml &amp;&amp; docker compose -f docker-compose.release.yml up -d</code>
-              <button type="button" data-copy-text="curl -fsSLO https://raw.githubusercontent.com/SecureCloudGroup/SmartBrain_3000/main/compose/docker-compose.release.yml &amp;&amp; docker compose -f docker-compose.release.yml up -d">Copy</button>
+              <code>curl -fsSLO https://raw.githubusercontent.com/SecureCloudGroup/SmartBrain_3000/main/installer/install-linux.sh &amp;&amp; sh install-linux.sh</code>
+              <button type="button" data-copy-text="curl -fsSLO https://raw.githubusercontent.com/SecureCloudGroup/SmartBrain_3000/main/installer/install-linux.sh &amp;&amp; sh install-linux.sh">Copy</button>
             </div>
           </div>
         </div>
@@ -448,10 +448,11 @@
           installs them when you say so — there is no package-manager command to run again. Prefer a
           direct download? Grab the
           <a href="https://github.com/SecureCloudGroup/SmartBrain_3000/releases/latest">latest release</a>.
-          On Apple Silicon Macs and Windows it needs nothing else — it brings its own runtime. An Intel
-          Mac installs the same app with the same command and runs it in
-          <a href="https://docs.docker.com/get-docker/">Docker</a>; Linux uses the Docker command above.
-          Docker Desktop, Colima, OrbStack or Engine all work.
+          On Apple Silicon Macs, Windows, and x86_64 Linux it needs nothing else — it brings its own
+          runtime. An Intel Mac installs the same app with the same command and runs it in
+          <a href="https://docs.docker.com/get-docker/">Docker</a>; containers are equally at home on
+          Linux (<code>compose/docker-compose.release.yml</code> in the repo). Docker Desktop, Colima,
+          OrbStack or Engine all work.
           Full detail in <a href="https://github.com/SecureCloudGroup/SmartBrain_3000/blob/main/docs/01-getting-started.md#install">Getting started</a>.
         </p>
       </div>
@@ -568,8 +569,8 @@
           cmdEl.textContent = "brew install --cask securecloudgroup/tap/smartbrain";
           noteEl.innerHTML = "for macOS · <a href='#install'>other systems below</a>";
         } else {
-          cmdEl.textContent = "curl -fsSLO https://raw.githubusercontent.com/SecureCloudGroup/SmartBrain_3000/main/compose/docker-compose.release.yml && docker compose -f docker-compose.release.yml up -d";
-          noteEl.innerHTML = "for Linux · <a href='#install'>other systems below</a>";
+          cmdEl.textContent = "curl -fsSLO https://raw.githubusercontent.com/SecureCloudGroup/SmartBrain_3000/main/installer/install-linux.sh && sh install-linux.sh";
+          noteEl.innerHTML = "for Linux (native, x86_64) · <a href='#install'>other systems below</a>";
         }
       })();
 

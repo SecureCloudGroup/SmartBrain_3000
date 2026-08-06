@@ -41,9 +41,11 @@ so a restore is reversible.
 
 - Allowed when you're **unlocked**, or onto a **fresh install** (moving to a new
   machine) — never over a locked, initialized vault.
-- After staging, restart SmartBrain — **Restart** in the menu-bar / tray menu, or
-  `docker compose -f docker-compose.release.yml restart` on Linux (from source,
-  `python3 installer/install.py update`) — and unlock with that backup's passphrase.
+- After staging, restart SmartBrain — **Restart** in the menu-bar / tray menu
+  (headless Linux: `systemctl --user restart smartbrain`), or
+  `docker compose -f docker-compose.release.yml restart` on the Docker stack (from
+  source, `python3 installer/install.py update`) — and unlock with that backup's
+  passphrase.
 - A backup from a **newer version** of SmartBrain_3000 is **refused on purpose**
   (it would risk data loss under older code): upgrade this app first, then restore.
 - A file that isn't a SmartBrain backup, is empty, or is larger than 1 GiB is refused

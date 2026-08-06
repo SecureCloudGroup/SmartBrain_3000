@@ -21,9 +21,10 @@ setup — it cannot read your data.
 ## What it is
 
 SmartBrain_3000 is a **fully local, single-user** AI assistant that runs on your
-own computer — macOS, Linux, or Windows. On macOS and Windows the desktop app
-assembles what it needs and runs it directly, with no Docker and nothing else to
-install first. On Linux it runs in Docker.
+own computer — macOS, Windows, or Linux. The launcher assembles what it needs and
+runs it directly, with no Docker and nothing else to install first — as a desktop
+tray app, or headless under systemd on a Linux server. Containers remain a
+first-class alternative wherever you prefer them.
 
 - **Your choice of AI.** Bring your own API keys for OpenAI, Anthropic, or
   Google — or run **fully local models** with Ollama or Apple MLX. A built-in
@@ -47,9 +48,9 @@ install first. On Linux it runs in Docker.
 
 ## Quickstart
 
-On **macOS and Windows** SmartBrain itself needs nothing else — no Docker, no Python, no
-accounts. The one-line installs below go through a package manager (Homebrew on macOS,
-Scoop on Windows); if you don't already have one, install it first with its own one-liner:
+SmartBrain itself needs nothing else — no Docker, no Python, no accounts. On macOS and
+Windows the install goes through a package manager (Homebrew on macOS, Scoop on
+Windows); if you don't already have one, install it first with its own one-liner:
 
 - **macOS — Homebrew** (if `brew` reports "command not found"), from [brew.sh](https://brew.sh):
   ```sh
@@ -76,8 +77,17 @@ scoop bucket add securecloudgroup https://github.com/SecureCloudGroup/scoop-buck
 scoop install securecloudgroup/smartbrain
 ```
 
-**Linux** — there is no desktop launcher for Linux yet, so run the release stack in
-Docker. Download the compose file and start it:
+**Linux (x86_64)** — download the install script, read it, run it. It verifies the
+release's signature and checksum, installs per-user (no root), and adds SmartBrain to
+your app menu; `--headless` sets up a systemd `--user` service for a server instead:
+
+```sh
+curl -fsSLO https://raw.githubusercontent.com/SecureCloudGroup/SmartBrain_3000/main/installer/install-linux.sh
+sh install-linux.sh          # desktop; or:  sh install-linux.sh --headless
+```
+
+Then `smartbrain start`. Prefer containers (or on arm/musl, where there is no native
+build yet)? The Docker stack is one file:
 
 ```sh
 curl -fsSLO https://raw.githubusercontent.com/SecureCloudGroup/SmartBrain_3000/main/compose/docker-compose.release.yml
@@ -101,10 +111,10 @@ after that it starts in seconds. The app runs at **http://localhost:33000**. In 
    Chat screen.
 3. **Start chatting.**
 
-> **Does it need Docker?** Not on an **Apple-Silicon Mac** or **64-bit Windows** — those run
-> it directly. **Intel Macs** install the same desktop app but fall back to Docker, because
-> there is no native build for them. **Linux** has no desktop app yet and runs the Docker
-> stack above. `SMARTBRAIN_NATIVE=0` forces the Docker path on any machine.
+> **Does it need Docker?** Not on an **Apple-Silicon Mac**, **64-bit Windows**, or
+> **x86_64 Linux** — those run it directly. **Intel Macs** install the same desktop app
+> but fall back to Docker, because there is no native build for them; **arm/musl Linux**
+> runs the Docker stack above. `SMARTBRAIN_NATIVE=0` forces the Docker path on any machine.
 
 > **Building from source?** Contributors can `git clone` the repo and run
 > `python3 installer/install.py install` (this needs Docker, git, and Python, and compiles
@@ -127,7 +137,7 @@ from install to fully working; the rest are optional power-ups:
 
 ### Updating
 
-**On macOS and Windows, SmartBrain updates itself — there is no command to run.** The desktop app looks for a new
+**SmartBrain updates itself — there is no command to run.** The launcher looks for a new
 release in the background and downloads it without disturbing what you're doing. Once it's
 ready, the app itself says so and offers **Install now**; the same update is offered in the
 menu as **Install update now** / **Install on next start**. Installing restarts SmartBrain
@@ -138,13 +148,15 @@ the next time you start. The desktop app updates itself the same way, so `brew u
 - **Which version am I on?** The menu names it, and so does the app under the logo, top-left.
 - **From a paired phone** you can see that an update is waiting, but installing it is
   Desktop-only.
-- **On Linux (Docker):** no launcher does it for you — re-run `docker compose -f docker-compose.release.yml pull`
+- **Headless Linux** swaps under systemd and the unit's `Restart=` brings up the new
+  version — nothing to run there either.
+- **On the Linux Docker stack:** no launcher does it for you — re-run `docker compose -f docker-compose.release.yml pull`
   then `docker compose -f docker-compose.release.yml up -d`.
 - **From source:** `python3 installer/install.py update` backs up your encrypted data first, then rebuilds, restarts, and verifies — prompting before changes, on the host, never inside the container.
 
-An update never touches your data. On macOS and Windows it lives in a folder you own
-(`~/Library/Application Support/SmartBrain/data` on macOS); the Linux Docker stack keeps it
-in named Docker volumes.
+An update never touches your data. It lives in a folder you own
+(`~/Library/Application Support/SmartBrain/data` on macOS, `~/.local/share/smartbrain/data`
+on Linux); the Linux Docker stack keeps it in named Docker volumes.
 
 ## Going further (optional)
 
