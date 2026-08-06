@@ -33,9 +33,10 @@ installed, so it does **not** test the true cold start (no Docker) — do that o
 
 ## What you need to set up
 
-- **A clean environment per OS you support** — a fresh macOS VM/account, a clean Windows VM, optionally
-  Linux. Each exercises a *different* install path (Homebrew / Scoop / Docker one-liner —
-  plus winget once it is re-published), so they are genuinely different tests, not repeats.
+- **A clean environment per OS you support** — a fresh macOS VM/account, a clean Windows VM, and clean
+  Linux VMs. Each exercises a *different* install path (Homebrew / Scoop / the Linux install script,
+  desktop and `--headless` / the Docker one-liner — plus winget once it is re-published), so they are
+  genuinely different tests, not repeats.
 - **Two environments for the Vault test** — sharing needs a "you" and a "friend": two VMs, or two OS
   user accounts, each with its **own passphrase**.
 - **A phone** for the mobile-pairing test.
@@ -135,6 +136,9 @@ when │ what they were trying to do │ what confused or broke │ severity
 | | macOS / Homebrew | primary | | | | | | | | |
 | | Windows / winget (once re-published) | primary | | | | | | | | |
 | | Windows / Scoop | technical | | | | | | | | |
+| | Linux desktop (GNOME, no extension) / install script | primary | | | | | | | | |
+| | Linux desktop (KDE or XFCE) / install script | technical | | | | | | | | |
+| | Linux server (SSH only) / install script --headless | technical | | | | | | | | |
 | | Linux / Docker | technical | | | | | | | | |
 
 ---
@@ -194,8 +198,10 @@ Windows). Microsoft gives away ready-made evaluation VMs:
 
 ## Appendix B · Automating Stage 0 (regression guard)
 
-Stage 0 for Linux can be automated so it never silently regresses: a CI job on a fresh Ubuntu runner
-that installs *only* via the public path (pull the prebuilt image + `docker-compose.release.yml`, no
-repo build), waits for `/api/health`, and fails if the app doesn't come up. It won't catch UX friction
-— that needs a human — but it catches "the one-line install is broken" before a user does. Not yet
-built; see the note in the install work.
+Stage 0 for Linux is automated so it never silently regresses, twice over: the `smoke` job in
+`install-smoke.yml` runs the public Docker path (pull the prebuilt image +
+`docker-compose.release.yml`, no repo build), and its `script-install` job runs the documented
+native path (`install-linux.sh --headless`) — both wait for `/api/health`, prove first-run
+setup/ingest/search, and fail if a stranger's install would. `native-smoke.yml` additionally proves
+the launcher's own assembly end to end on every launcher PR. None of that catches UX friction —
+that still needs a human with the stages above.

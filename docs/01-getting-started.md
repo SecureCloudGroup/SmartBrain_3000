@@ -8,16 +8,18 @@ the AI providers you configure, and Google's APIs if you connect Gmail. See
 
 ## What you need
 
-On **macOS and Windows**: nothing. There is no Docker to install, no Python, no accounts,
-and no config files to edit. SmartBrain brings its own runtime — on first start the desktop
-app downloads a Python runtime, the app itself, and the model gateway, checks each one
-against a checksum, and runs them as two ordinary programs on your machine.
+On **macOS, Windows, and Linux (x86_64)**: nothing. There is no Docker to install, no
+Python, no accounts, and no config files to edit. SmartBrain brings its own runtime — on
+first start the launcher downloads a Python runtime, the app itself, and the model
+gateway, checks each one against a checksum, and runs them as two ordinary programs on
+your machine.
 
 Two cases need [Docker](https://docs.docker.com/get-docker/) installed and running:
 
-- **Linux** — there is no desktop app for Linux yet, so it runs the Docker stack.
 - **Intel Macs** — they install the same desktop app as Apple Silicon, but there is no
   native build for them, so it falls back to running SmartBrain in Docker.
+- **Other Linux machines** — arm boards and musl distros (Alpine) have no native build
+  yet. Containers also remain first-class on any Linux where you simply prefer them.
 
 Everything else in this guide works the same on all of them.
 
@@ -40,30 +42,60 @@ scoop bucket add securecloudgroup https://github.com/SecureCloudGroup/scoop-buck
 scoop install securecloudgroup/smartbrain
 ```
 
-**Linux** — no desktop app yet. Download the release compose file and start it:
+**Linux (x86_64)** — download the install script, read it if you like (it's written to
+be read), then run it:
+
+```sh
+curl -fsSLO https://raw.githubusercontent.com/SecureCloudGroup/SmartBrain_3000/main/installer/install-linux.sh
+sh install-linux.sh
+```
+
+It verifies the release's minisign signature and checksum, installs the launcher for
+your user only (no root), and puts **SmartBrain** in your app menu. Start it with
+`smartbrain start`. Where no tray can be drawn — a server, or stock GNOME without the
+AppIndicator extension — the launcher says so once and keeps running without one;
+SmartBrain works the same either way.
+
+**Linux server (headless)** — the same script with `--headless` installs a systemd
+`--user` unit instead of a menu entry, started immediately; allow lingering and it also
+starts at boot:
+
+```sh
+sh install-linux.sh --headless
+sudo loginctl enable-linger $USER
+```
+
+Manage it with `systemctl --user status|restart|stop smartbrain` or the launcher's own
+verbs (`smartbrain status`, `smartbrain stop`). It serves this machine only
+(http://127.0.0.1:33000); to reach it from your other devices see
+[Remote access](08-remote-access.md).
+
+**Prefer containers?** The Docker stack stays first-class on Linux. Download the release
+compose file and start it — data then lives in named Docker volumes; back it up with the
+in-app encrypted backup:
 
 ```sh
 curl -fsSLO https://raw.githubusercontent.com/SecureCloudGroup/SmartBrain_3000/main/compose/docker-compose.release.yml
 docker compose -f docker-compose.release.yml up -d
 ```
 
-Open **http://localhost:33000** and complete first-run setup below. Your data lives in
-named Docker volumes; back it up with the in-app encrypted backup.
-
 On macOS the launcher starts by itself once Homebrew finishes; on Windows, open
-**SmartBrain** from the Start menu. The menu-bar icon shows what it is doing. The first
+**SmartBrain** from the Start menu; on Linux, launch **SmartBrain** from the app menu or
+run `smartbrain start`. The menu-bar icon shows what it is doing. The first
 start downloads a few hundred megabytes, so give it a few minutes — the status line reads
 *"Downloading SmartBrain…"*, then *"Starting (native)…"*, then *"Running ● (native)"*.
 After that it starts in seconds and your browser opens at **http://localhost:33000**. Then
 complete first-run setup below.
 
 On macOS and Windows, everything the desktop app installs lives in one folder you own,
-alongside your data:
+alongside your data. Linux follows the XDG convention, so there it is two:
 
 | | Folder |
 | --- | --- |
 | macOS | `~/Library/Application Support/SmartBrain` |
 | Windows | `%APPDATA%\SmartBrain` |
+| Linux — your data | `~/.local/share/smartbrain` |
+| Linux — runtime + logs | `~/.config/SmartBrain` |
 
 (The Linux Docker stack keeps its data in named Docker volumes instead.)
 
@@ -87,7 +119,7 @@ right answer for a half-finished install or a stuck port.
    ```
 
 3. **Upgrade the launcher** — `brew upgrade --cask smartbrain` on macOS,
-   `scoop update smartbrain` on Windows.
+   `scoop update smartbrain` on Windows, re-run the install script on Linux.
 4. **Start SmartBrain again** and watch the menu. It re-downloads whatever is missing and
    settles on **Running ● (native)**; the line under it names the version now running.
 
@@ -193,6 +225,10 @@ The launcher updates itself on the same schedule, so `brew upgrade --cask smartb
 `scoop update smartbrain` are not part of normal use — they're there if you ever need to
 force it.
 
+**Linux (native)** updates itself the same way. On a headless install the swap happens
+under systemd: the launcher installs the new version, exits, and the unit's `Restart=`
+brings the new one up.
+
 **Linux (Docker):** `docker compose -f docker-compose.release.yml pull`, then
 `docker compose -f docker-compose.release.yml up -d`. The stack tracks the newest release;
 to hold a specific version instead, export `SMARTBRAIN_VERSION=0.8.18` (or put it in a
@@ -238,13 +274,19 @@ Most first-run problems are one of these:
   spinning. The logs are `app.log` and `bifrost.log` — choose **Open logs** in the
   menu-bar / tray menu and the folder opens in Finder / Explorer. Their full home is
   `~/Library/Application Support/SmartBrain/native/run/` on macOS (Finder hides
-  `~/Library`, so outside the menu use **Go → Go to Folder…**, ⇧⌘G) and
-  `%APPDATA%\SmartBrain\native\run\` on Windows.
+  `~/Library`, so outside the menu use **Go → Go to Folder…**, ⇧⌘G),
+  `%APPDATA%\SmartBrain\native\run\` on Windows, and
+  `~/.config/SmartBrain/native/run/` on Linux.
 - **"Native start failed — see the log."** Open `app.log` (**Open logs** in the menu).
   If it says an instance is *already serving on port 33000*, something else holds that
   port — usually a SmartBrain a previous launcher started and never stopped. Choose
   **Stop** in the menu, then **Restart**; if it persists, follow **If an install is
   misbehaving: a clean upgrade** under **Install** above.
+- **No tray icon on Linux (usually stock GNOME).** GNOME removed tray icons; the
+  [AppIndicator extension](https://extensions.gnome.org/extension/615/appindicator-support/)
+  brings them back. SmartBrain notices the missing tray, tells you once in a desktop
+  notification, and keeps running without it — the browser at http://localhost:33000 and
+  the `smartbrain` commands work exactly the same.
 - **macOS asks if SmartBrain may "access data from other apps."** Click **Allow**, or don't —
   the launcher is checking whether Docker is installed, which it only needs as a fallback.
   It reads nothing else, and declining doesn't stop SmartBrain from running.
@@ -268,7 +310,7 @@ Most first-run problems are one of these:
   purpose to prevent data loss. Let SmartBrain update itself first, then reopen or retry
   the restore.
 
-On **Linux** and **Intel Macs**, where SmartBrain runs in Docker, two more apply:
+On **Intel Macs** and Linux machines running the **Docker stack**, two more apply:
 
 - **"Docker is required — install it, start it, then click Restart."** Install
   [Docker](https://docs.docker.com/get-docker/) — the launcher opens the download page for
@@ -286,8 +328,10 @@ one is yours to take deliberately.
 
 1. **The app.** Stop it first (**Stop** in the menu), then remove it however you installed
    it: `brew uninstall --cask smartbrain` on macOS, `scoop uninstall smartbrain` on
-   Windows, `docker compose -f docker-compose.release.yml down` on Linux. From source,
-   `docker compose down` in `compose/`.
+   Windows, `sh install-linux.sh --uninstall` on Linux (it removes the launcher, menu
+   entry, and systemd unit, then names exactly what data remains), or
+   `docker compose -f docker-compose.release.yml down` for the Linux Docker stack. From
+   source, `docker compose down` in `compose/`.
 
    On macOS you can add `--zap` to clear what the app downloaded as well:
    `brew uninstall --zap --cask smartbrain`. That removes the assembled runtime, the logs,
@@ -295,15 +339,19 @@ one is yours to take deliberately.
    the app pushed into it, so clearing it is the point. **It does not touch your `data`
    folder**, and neither does a plain uninstall.
 
-2. **Your data**, if and when you want it gone. It is the single folder named under
+2. **Your data**, if and when you want it gone. It is the folder named under
    **Install** above, with `data` inside it:
 
    | | Delete |
    | --- | --- |
    | macOS | `~/Library/Application Support/SmartBrain` |
    | Windows | `%APPDATA%\SmartBrain` |
+   | Linux (native) | `~/.local/share/smartbrain` and `~/.config/SmartBrain` |
 
-   On Linux the data is in Docker volumes, so it goes with the stack:
+   On native Linux, `sh install-linux.sh --purge` is the one-command version: launcher,
+   runtime, logs, gateway configuration, and data, all gone.
+
+   On the Linux Docker stack the data is in Docker volumes, so it goes with the stack:
    `docker compose -f docker-compose.release.yml down -v`. The `-v` is what deletes the
    volumes — without it your data stays.
 
