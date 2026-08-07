@@ -11,6 +11,8 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-08-06
+
 ### Fixed
 - **Connecting Gmail works again.** The Phase-0 origin guard (0.8.18) refused
   Google's redirect back from the consent screen — by nature a cross-site
