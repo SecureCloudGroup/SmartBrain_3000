@@ -119,6 +119,12 @@ class OriginGuard:
 
     _GUARDED = ("/api", "/mcp")
     _ALLOWED_SITES = frozenset({"same-origin", "none"})
+    # The Gmail OAuth callback is DESIGNED to arrive as a cross-site navigation —
+    # Google's consent page redirects the browser straight to it, so origin rules
+    # cannot hold there. Its real defense is the one-shot ``state`` the route
+    # verifies with a constant-time compare (email_routes). Navigations only:
+    # a scripted cross-site fetch/XHR to the same path is still refused below.
+    _OAUTH_CALLBACK = "/api/email/oauth/callback"
 
     def __init__(self, app) -> None:
         self._app = app
@@ -133,6 +139,14 @@ class OriginGuard:
             await self._app(scope, receive, send)
             return
         headers = dict(scope.get("headers") or [])
+        if (
+            path == self._OAUTH_CALLBACK
+            and scope.get("method", "").upper() in ("GET", "HEAD")
+            and headers.get(b"sec-fetch-mode", b"navigate").decode("latin-1").strip().lower()
+            == "navigate"
+        ):
+            await self._app(scope, receive, send)
+            return
         site = headers.get(b"sec-fetch-site", b"").decode("latin-1").strip().lower()
         if site and site not in self._ALLOWED_SITES:
             await self._refuse(scope, receive, send)
