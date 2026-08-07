@@ -11,6 +11,8 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-08-07
+
 ### Fixed
 - **Schedule times shown hours off on desktop installs.** The database session
   followed the computer's timezone, so native installs stored local times while
