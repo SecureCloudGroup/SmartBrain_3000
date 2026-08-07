@@ -7,6 +7,7 @@
   import { refreshPending } from "$lib/pending.svelte";
   import { api, ApiError, type AgentResult, type ChatMessage, type Conversation, type DiscoveredModel, type RecentScheduleRun, type Source } from "$lib/api";
   import { finalAssistantId, mergeRefreshedLog, transcriptUpToLastUser } from "$lib/chat-log";
+  import { parseTs } from "$lib/runs";
   import { confirmDialog } from "$lib/confirm.svelte";
   import { describeError } from "$lib/errors";
   import Markdown from "$lib/Markdown.svelte";
@@ -186,7 +187,7 @@
   const providerModels = $derived(models.filter((m) => m.provider === provider));
 
   // Conversation start date (created_at is UTC; show it in the user's local date).
-  const startDate = (iso: string) => new Date(iso.slice(0, 19).replace(" ", "T") + "Z").toLocaleDateString();
+  const startDate = (iso: string) => parseTs(iso)?.toLocaleDateString() ?? iso;
 
   onMount(async () => {
     if (account.status === null) await account.load();

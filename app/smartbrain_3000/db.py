@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import threading
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -22,9 +23,10 @@ from . import runtime
 DEFAULT_DB_PATH = ("/app/data/smartbrain.duckdb" if runtime.in_container()
                    else str(runtime.default_data_dir() / "smartbrain.duckdb"))
 
-# Ordered, append-only migrations: (id, SQL). Never edit a shipped migration —
-# add a new one. The fixed tuple gives a verifiable upper bound.
-_MIGRATIONS: tuple[tuple[int, str], ...] = (
+# Ordered, append-only migrations: (id, SQL — or a callable returning SQL, for the
+# rare migration whose statement depends on the machine applying it). Never edit a
+# shipped migration — add a new one. The fixed tuple gives a verifiable upper bound.
+_MIGRATIONS: tuple[tuple[int, str | Callable[[], str]], ...] = (
     (1, "CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);"),
     (
         2,
@@ -346,7 +348,32 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
     # No content, no ciphertext — the doc_id itself is opaque, and losing this row would only
     # revert a re-subscribe to the pre-fix behavior (freeze), so it stays plaintext.
     (36, "CREATE TABLE IF NOT EXISTS vault_import_traces (doc_id TEXT PRIMARY KEY);"),
+    # Scheduler timestamps become UTC (the session is pinned to UTC in open_db from this
+    # build on). Before the pin, `now()` wrote NAIVE LOCAL time on native installs (the
+    # DuckDB session follows the host timezone), so the schedule cadence a native user
+    # already has must shift by the host's UTC offset exactly once. Containers always ran
+    # UTC, so their offset — and this migration — is naturally zero there. A callable, not
+    # a string: the offset must be read from the machine applying the migration, not the
+    # one that built the release. Other historical timestamps (chat, documents) are
+    # display-only and deliberately left alone.
+    (37, lambda: _utc_shift_sql()),
 )
+
+
+def _utc_shift_minutes() -> int:
+    """Minutes to ADD to a naive local timestamp to express it in UTC (0 on UTC hosts)."""
+    offset = datetime.now().astimezone().utcoffset()
+    assert offset is not None, "astimezone() always yields an aware datetime"
+    return -int(offset.total_seconds() // 60)
+
+
+def _utc_shift_sql() -> str:
+    minutes = _utc_shift_minutes()
+    return (
+        f"UPDATE schedules SET next_run = next_run + to_minutes({minutes}), "
+        f"last_run = last_run + to_minutes({minutes}); "
+        f"UPDATE schedule_runs SET ran_at = ran_at + to_minutes({minutes});"
+    )
 
 # The newest migration this build knows how to apply. A database recording a
 # migration id beyond this was written by a NEWER app version; opening it with
@@ -369,10 +396,20 @@ def resolve_db_path() -> Path:
 
 
 def open_db(path: Path) -> duckdb.DuckDBPyConnection:
-    """Open the embedded DuckDB at `path`, creating parent dirs if needed."""
+    """Open the embedded DuckDB at `path`, creating parent dirs if needed.
+
+    The session timezone is pinned to UTC: every `now()` / `current_timestamp`
+    written into a naive TIMESTAMP column is a UTC instant on every install.
+    Without the pin the session follows the HOST timezone, so native installs
+    wrote local time while containers wrote UTC — and the SPA, which renders
+    all timestamps as UTC-in-local-time, showed native schedule times hours off
+    (found live: a schedule due 11:48 EDT displayed as 7:48). Cursors inherit
+    the pin (verified against the pinned duckdb build), so per-thread cursors
+    from ThreadLocalConn are covered too. Migration 37 shifted pre-pin rows.
+    """
     assert isinstance(path, Path), "path must be a Path"
     path.parent.mkdir(parents=True, exist_ok=True)
-    conn = duckdb.connect(str(path))
+    conn = duckdb.connect(str(path), config={"TimeZone": "UTC"})
     assert conn is not None, "duckdb.connect must return a connection"
     return conn
 
@@ -598,7 +635,7 @@ def run_migrations(conn: duckdb.DuckDBPyConnection) -> int:
         ).fetchone()
         if seen is not None:
             continue
-        conn.execute(sql)
+        conn.execute(sql() if callable(sql) else sql)
         conn.execute("INSERT INTO schema_migrations (id) VALUES (?);", [migration_id])
         applied += 1
     assert applied <= len(_MIGRATIONS), "applied count cannot exceed migrations"
