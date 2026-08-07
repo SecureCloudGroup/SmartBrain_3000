@@ -1,5 +1,24 @@
 import { describe, expect, it } from "vitest";
-import { daysLeft, localTs, runStatusLabel } from "./runs";
+import { daysLeft, localTs, parseTs, runStatusLabel } from "./runs";
+
+describe("parseTs", () => {
+  it("treats naive server timestamps as UTC", () => {
+    expect(parseTs("2026-06-21 14:30:00")?.getTime()).toBe(Date.parse("2026-06-21T14:30:00Z"));
+    expect(parseTs("2026-06-21 14:30:00.123456")?.getTime()).toBe(Date.parse("2026-06-21T14:30:00Z"));
+  });
+
+  it("respects an explicit offset or Z instead of re-stamping UTC", () => {
+    expect(parseTs("2026-06-21T14:30:00+02:00")?.getTime()).toBe(Date.parse("2026-06-21T12:30:00Z"));
+    expect(parseTs("2026-06-21T14:30:00Z")?.getTime()).toBe(Date.parse("2026-06-21T14:30:00Z"));
+    expect(parseTs("2026-06-21 14:30:00+00:00")?.getTime()).toBe(Date.parse("2026-06-21T14:30:00Z"));
+  });
+
+  it("returns null for junk and empty", () => {
+    expect(parseTs("not a date")).toBeNull();
+    expect(parseTs("")).toBeNull();
+    expect(parseTs(null)).toBeNull();
+  });
+});
 
 describe("localTs", () => {
   it("renders a UTC server timestamp in the local locale", () => {

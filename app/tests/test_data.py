@@ -301,6 +301,44 @@ def test_migrations_idempotent_on_populated_db(tmp_path) -> None:
     assert got is not None and got["content"] == "buy oat milk"
 
 
+# --- UTC timestamps (the 7:48-vs-11:48 schedule bug) -----------------------
+
+def test_open_db_pins_session_timezone_to_utc(tmp_path) -> None:
+    # Native installs used to inherit the HOST timezone, so `now()` wrote naive
+    # LOCAL timestamps that the SPA (which assumes UTC) displayed hours off.
+    conn = dbmod.open_db(tmp_path / "tz.duckdb")
+    assert conn.execute("SELECT current_setting('TimeZone');").fetchone()[0] == "UTC"
+    # Cursors (what ThreadLocalConn hands each thread) must inherit the pin.
+    assert conn.cursor().execute("SELECT current_setting('TimeZone');").fetchone()[0] == "UTC"
+
+
+def test_migration_37_shifts_scheduler_rows_by_host_offset(tmp_path, monkeypatch) -> None:
+    # A pre-pin native DB holds local-time cadence rows; migration 37 must move
+    # them to UTC by the host's offset — and by exactly zero on UTC hosts (the
+    # container case, where rows were always UTC).
+    conn = dbmod.open_db(tmp_path / "shift.duckdb")
+    assert dbmod.run_migrations(conn) > 0
+    conn.execute(
+        "INSERT INTO schedules (id, nonce, ciphertext, interval_minutes, next_run, last_run) "
+        "VALUES ('s1', ''::BLOB, ''::BLOB, 1440, TIMESTAMP '2026-08-07 11:48:00', "
+        "TIMESTAMP '2026-08-06 11:48:00'), "
+        "('s2', ''::BLOB, ''::BLOB, 1440, TIMESTAMP '2026-08-07 06:00:00', NULL);"
+    )
+    # Rewind ONLY migration 37 and re-apply it as an EDT (UTC-4) host would.
+    conn.execute("DELETE FROM schema_migrations WHERE id = 37;")
+    monkeypatch.setattr(dbmod, "_utc_shift_minutes", lambda: 240)
+    assert dbmod.run_migrations(conn) == 1
+    next_run, last_run = conn.execute(
+        "SELECT next_run, last_run FROM schedules WHERE id = 's1';"
+    ).fetchone()
+    assert str(next_run) == "2026-08-07 15:48:00"  # 11:48 EDT -> 15:48 UTC
+    assert str(last_run) == "2026-08-06 15:48:00"
+    # A NULL last_run (the never-ran case) must survive the arithmetic as NULL.
+    assert conn.execute(
+        "SELECT last_run FROM schedules WHERE id = 's2';"
+    ).fetchone()[0] is None
+
+
 def test_embeddings_table_is_chunked_shape(tmp_path) -> None:
     # Migration 13/14 drop the per-doc table and re-create it keyed by
     # (doc_id, chunk_idx). A populated DB after migrations must expose the
@@ -431,7 +469,7 @@ def test_upgrade_from_v12_preserves_all_client_data(tmp_path) -> None:
     }
 
     applied = dbmod.run_migrations(conn)
-    assert applied == 24  # exactly ids 13..36 (adds vault_import_traces at 36)
+    assert applied == 25  # exactly ids 13..37 (36 import traces; 37 UTC shift)
 
     # Every user-data row count is unchanged across the upgrade.
     for t, n in counts.items():
@@ -472,7 +510,7 @@ def test_upgrade_from_v2_preserves_documents(tmp_path) -> None:
     master_key = keyvault.set_passphrase(conn, _UP_PASS)
     doc_id = KnowledgeBase(conn, master_key).add("Ancient", "note from the v2 era")
 
-    assert dbmod.run_migrations(conn) == 34  # ids 3..36
+    assert dbmod.run_migrations(conn) == 35  # ids 3..37
     assert KnowledgeBase(conn, master_key).get(doc_id)["content"] == "note from the v2 era"
     assert conn.execute("SELECT COUNT(*) FROM documents;").fetchone()[0] == 1
     assert conn.execute("SELECT COUNT(*) FROM embeddings;").fetchone()[0] == 0  # fresh, empty
@@ -504,7 +542,7 @@ def test_upgrade_from_v17_preserves_embeddings_and_tasks(tmp_path) -> None:
     planner = Planner(conn, master_key)
     tid = planner.add_task("file taxes", priority="high", due_time="09:00", recur="weekly")
 
-    assert dbmod.run_migrations(conn) == 19  # ids 18..36
+    assert dbmod.run_migrations(conn) == 20  # ids 18..37
     # Chunked embedding preserved (18-21 only add schedule_runs, its seen column, and vaults).
     assert conn.execute("SELECT COUNT(*) FROM embeddings;").fetchone()[0] == 1
     t = planner.get_task(tid)
@@ -529,7 +567,7 @@ def test_migration_19_marks_preexisting_runs_seen(tmp_path) -> None:
         "INSERT INTO schedule_runs (id, schedule_id, status, nonce, ciphertext) VALUES (?, ?, ?, ?, ?);",
         ["run-old", sid, "complete", b"\x00" * 12, b"x"],
     )
-    assert dbmod.run_migrations(conn) == 18  # 19 seen; 20-23 vaults; 24 summaries; 25 trash; 26 embed total; 27-35 selfimprove; 36 import traces
+    assert dbmod.run_migrations(conn) == 19  # 19 seen; 20-23 vaults; 24 summaries; 25 trash; 26 embed total; 27-35 selfimprove; 36 import traces; 37 UTC shift
     assert store.unseen_count() == 0  # the back-catalog is seen -> badge stays quiet on upgrade
     conn.close()
 
@@ -542,7 +580,7 @@ def test_app_boots_and_serves_data_after_v12_upgrade(tmp_path, monkeypatch) -> N
     _apply_through(conn, 12)
     master_key = keyvault.set_passphrase(conn, _UP_PASS)
     _seed_v12(conn, master_key)
-    assert dbmod.run_migrations(conn) == 24  # ids 13..36 (vaults + summaries + trash + embed total + selfimprove + import traces)
+    assert dbmod.run_migrations(conn) == 25  # ids 13..37 (vaults + summaries + trash + embed total + selfimprove + import traces + UTC shift)
     conn.close()  # release the file before the app opens it
 
     monkeypatch.setenv("SMARTBRAIN_DB_PATH", str(path))

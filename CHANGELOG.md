@@ -11,6 +11,15 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Fixed
+- **Schedule times shown hours off on desktop installs.** The database session
+  followed the computer's timezone, so native installs stored local times while
+  the app rendered every timestamp as if it were UTC — a schedule due at
+  11:48 AM displayed as 7:48 AM. All timestamps are now stored in UTC on every
+  install (a one-time migration shifts existing schedule times on this machine),
+  and every time in the app is displayed in your local timezone. Docker installs
+  always stored UTC and are unaffected.
+
 ## [0.9.1] - 2026-08-06
 
 ### Fixed

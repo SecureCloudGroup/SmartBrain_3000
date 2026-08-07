@@ -4,6 +4,7 @@
   import { api, type DeviceInfo } from "$lib/api";
   import { confirmDialog } from "$lib/confirm.svelte";
   import { describeError } from "$lib/errors";
+  import { localTs } from "$lib/runs";
 
   let devices = $state<DeviceInfo[]>([]);
   let label = $state("My phone");
@@ -24,11 +25,7 @@
     return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
   }
   // created_at is a UTC string — show it in the user's locale.
-  function localCreatedAt(s: string): string {
-    if (!s) return "";
-    const d = new Date(s.slice(0, 19).replace(" ", "T") + "Z");
-    return Number.isNaN(d.getTime()) ? s : d.toLocaleString();
-  }
+  const localCreatedAt = (s: string): string => localTs(s);
   onDestroy(stopPairPolling);
 
   async function load() {

@@ -266,7 +266,7 @@ def test_embedding_encrypted_at_rest() -> None:
 def test_migrations_create_chunked_embeddings_table() -> None:
     conn = duckdb.connect(":memory:")
     applied = dbmod.run_migrations(conn)
-    assert applied == 36  # ... + optimizer trial columns (33-35) + vault import traces (36)
+    assert applied == 37  # ... + optimizer trial columns (33-35) + vault import traces (36) + UTC shift (37)
     cols = {r[1] for r in conn.execute("PRAGMA table_info('embeddings');").fetchall()}
     assert {"doc_id", "chunk_idx", "nonce", "ciphertext", "dim", "model", "created_at"} <= cols
     assert dbmod.run_migrations(conn) == 0  # idempotent
