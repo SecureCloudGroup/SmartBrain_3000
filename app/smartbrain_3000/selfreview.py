@@ -818,16 +818,17 @@ def _mark_denied_workflows(conn: duckdb.DuckDBPyConnection, key: bytes, store) -
 
 def _live_tile_for(conn: duckdb.DuckDBPyConnection, key: bytes, session: str,
                    prompt: str) -> bool:
-    """True when a NON-EXPIRED pending create_schedule for this routine is visible."""
-    from .approvals import _TTL_SECONDS, ApprovalStore
+    """True when a live pending create_schedule for this routine is visible.
+
+    list_pending sweeps expired rows before returning, so anything it lists IS
+    live — no second age check here (the old one re-derived the store's TTL and
+    silently broke when the TTL split in two).
+    """
+    from .approvals import ApprovalStore
     want = _content_tokens(prompt)
     for tile in ApprovalStore(conn, key, session).list_pending():  # bounded by store cap
         if tile["tool"] != "create_schedule":
             continue
-        age = conn.execute("SELECT date_diff('second', CAST(? AS TIMESTAMP), now());",
-                           [tile["created_at"]]).fetchone()
-        if age and int(age[0]) > _TTL_SECONDS:
-            continue  # listed but already expired — that tile is dead
         if _jaccard(want, _content_tokens(str(tile["args"].get("prompt", "")))) >= _DEDUP_JACCARD:
             return True
     return False
@@ -886,8 +887,9 @@ def _suggest_workflows(conn: duckdb.DuckDBPyConnection, key: bytes,
             prior = _ledger_similar(store, prompt)
             if prior is not None:
                 # Already offered. Denied/settled -> nothing. Still proposed with no live
-                # tile -> re-park QUIETLY (no digest line): the tile TTL is an hour, the
-                # digest cadence is eight — "waiting in Activity" must stay true.
+                # tile -> re-park QUIETLY (no digest line). Suggestion tiles live on the
+                # scheduled-park clock (30 days), so this now fires rarely — but
+                # "waiting in Activity" must stay true for however long it takes.
                 if (session and prior["status"] == "proposed"
                         and not _live_tile_for(conn, key, session, prompt)):
                     _park_schedule(conn, key, session, args)
