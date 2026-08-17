@@ -11,6 +11,18 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.9.3] - 2026-08-17
+
+### Fixed
+- **Approvals from scheduled runs no longer expire before you can act.** A parked
+  action expired one hour after it was created — fine for a live chat, but a
+  schedule that fires while you're away parks its approvals precisely so you can
+  resolve them later, and every click after the hour was refused with "approval
+  expired". Scheduled approvals now wait **30 days**; chat approvals keep the
+  one-hour clock (a stale conversation shouldn't act late), and irreversible
+  actions still re-confirm every time. Expired items also now drop off the
+  Activity list instead of showing Approve buttons that can never work.
+
 ## [0.9.2] - 2026-08-07
 
 ### Fixed

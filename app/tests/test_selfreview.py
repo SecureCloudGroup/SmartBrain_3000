@@ -815,20 +815,39 @@ def test_wording_drift_does_not_renag(monkeypatch) -> None:
     assert len(improvements.ImprovementStore(conn, key).list()) == 1  # one ledger row ever
 
 
-def test_expired_tile_reparks_quietly() -> None:
-    # The tile TTL is 1h, the digest cadence 8h — "waiting in Activity" must stay true.
+def test_aged_tile_stays_live_without_duplicates() -> None:
+    # Suggestion tiles are scheduled-class parks (30-day clock): a two-hour-old
+    # tile is still LIVE, so a later review must neither add a digest line nor
+    # park a duplicate beside it.
     conn, key = _conn(), gen_master_key()
     _seed_routine(conn, key, "summarize my open tasks for this morning", [2, 1, 0])
     selfreview._suggest_workflows(conn, key, "sess1")
-    conn.execute("UPDATE pending_actions SET created_at = now() - to_seconds(7200);")  # dead
+    conn.execute("UPDATE pending_actions SET created_at = now() - to_seconds(7200);")
     lines = selfreview._suggest_workflows(conn, key, "sess1")
     assert lines == []  # QUIET: no second digest line
     from smartbrain_3000.approvals import ApprovalStore
-    tiles = ApprovalStore(conn, key, "sess1").list_pending()
-    fresh = [t for t in tiles if int(conn.execute(
-        "SELECT date_diff('second', CAST(? AS TIMESTAMP), now());", [t["created_at"]]
-    ).fetchone()[0]) < 3600]
-    assert len(fresh) == 1  # a live tile is available again
+    tiles = [t for t in ApprovalStore(conn, key, "sess1").list_pending()
+             if t["tool"] == "create_schedule"]
+    assert len(tiles) == 1  # the original tile, still approvable — not a duplicate
+
+
+def test_expired_tile_reparks_quietly() -> None:
+    # Past the 30-day scheduled clock the tile is swept dead; the next review
+    # re-parks it QUIETLY — "waiting in Activity" stays true, digest stays silent.
+    conn, key = _conn(), gen_master_key()
+    _seed_routine(conn, key, "summarize my open tasks for this morning", [2, 1, 0])
+    selfreview._suggest_workflows(conn, key, "sess1")
+    conn.execute("UPDATE pending_actions SET created_at = now() - to_seconds(2592100);")  # >30d
+    lines = selfreview._suggest_workflows(conn, key, "sess1")
+    assert lines == []  # QUIET: no second digest line
+    from smartbrain_3000.approvals import ApprovalStore
+    tiles = [t for t in ApprovalStore(conn, key, "sess1").list_pending()
+             if t["tool"] == "create_schedule"]
+    assert len(tiles) == 1  # a live tile is available again
+    age = int(conn.execute(
+        "SELECT date_diff('second', CAST(? AS TIMESTAMP), now());", [tiles[0]["created_at"]]
+    ).fetchone()[0])
+    assert age < 3600  # and it is the fresh re-park, not the swept original
 
 
 def test_denied_tile_settles_ledger_and_never_returns() -> None:
