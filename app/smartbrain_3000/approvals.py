@@ -26,7 +26,17 @@ from .secrets import MASTER_KEY_BYTES
 
 _NONCE_BYTES = 12
 _LIST_LIMIT = 200  # max pending rows surfaced (verifiable bound)
-_TTL_SECONDS = 3600  # a pending action expires after an hour
+# Two expiry clocks, split on conversation_id (chat parks carry one; scheduled parks
+# run with None — scheduler.py passes conversation_id=None):
+#   - A CHAT park goes stale with its conversation: an hour later the context has
+#     moved on and approving into it would act on a world that no longer exists.
+#   - A SCHEDULED park exists precisely to wait for the user ("parks for your
+#     approval ... resolve later") — the run fired while they were away, and the
+#     one-hour clock silently killed every approval a user didn't reach in time
+#     (found live: three SPAC-news parks, all 409 "approval expired" on click).
+#     30 days (operator's call); IRREVERSIBLE actions re-confirm regardless.
+_CHAT_TTL_SECONDS = 3600
+_SCHEDULED_TTL_SECONDS = 30 * 86400
 # Serializes the read-then-write of a status transition on the shared DuckDB
 # connection so two concurrent approves/claims cannot both win. Module-level (not
 # per-ApprovalStore) on purpose: every store wraps the SAME process-wide DuckDB
@@ -76,7 +86,21 @@ class ApprovalStore:
         return pid
 
     def list_pending(self) -> list[dict]:
-        """Return pending rows for THIS session (args preview is the caller's job)."""
+        """Return pending rows for THIS session (args preview is the caller's job).
+
+        Sweeps first: rows past their TTL flip to status 'expired' so the list can
+        never offer an Approve the approve route would refuse — the list and the
+        button must agree. The sweep is lock-serialized like every other status
+        transition, and 'expired' reads as resolved to the turn-resume math
+        (anything not pending/approved counts as settled).
+        """
+        with _CAS_LOCK:
+            self._conn.execute(
+                "UPDATE pending_actions SET status = 'expired', resolved_at = now() "
+                "WHERE status = 'pending' AND date_diff('second', created_at, now()) > "
+                "CASE WHEN conversation_id IS NULL THEN ? ELSE ? END;",
+                [_SCHEDULED_TTL_SECONDS, _CHAT_TTL_SECONDS],
+            )
         rows = self._conn.execute(
             "SELECT id, tool_name, tier, created_at, turn_id, conversation_id, nonce, ciphertext FROM pending_actions "
             "WHERE status = 'pending' ORDER BY created_at DESC LIMIT ?;",
@@ -101,7 +125,8 @@ class ApprovalStore:
         assert pid, "pending id required"
         row = self._conn.execute(
             "SELECT tool_name, tier, status, nonce, ciphertext, "
-            "date_diff('second', created_at, now()), turn_id FROM pending_actions WHERE id = ?;",
+            "date_diff('second', created_at, now()), turn_id, conversation_id "
+            "FROM pending_actions WHERE id = ?;",
             [pid],
         ).fetchone()
         if row is None:
@@ -120,7 +145,7 @@ class ApprovalStore:
             # turn_id lets the approve/deny route look up the whole turn (list_for_turn)
             # to check whether resolving THIS pending finished a scheduled turn's tail.
             "turn_id": None if row[6] is None else str(row[6]),
-            "expired": int(row[5]) > _TTL_SECONDS,
+            "expired": int(row[5]) > self._ttl_for(row[7]),
         }
 
     def list_for_turn(self, turn_id: str) -> list[dict]:
@@ -171,15 +196,21 @@ class ApprovalStore:
         ciphertext = self._aes.encrypt(nonce, json.dumps(body).encode("utf-8"), b"pending:" + pid.encode("utf-8"))
         self._conn.execute("UPDATE pending_actions SET nonce = ?, ciphertext = ? WHERE id = ?;", [nonce, ciphertext, pid])
 
+    @staticmethod
+    def _ttl_for(conversation_id) -> int:
+        """The expiry clock a row lives under: chat parks 1h, scheduled parks 30d."""
+        return _CHAT_TTL_SECONDS if conversation_id is not None else _SCHEDULED_TTL_SECONDS
+
     def _cas(self, pid: str, expected: str, new: str) -> bool:
         """Atomically move pid from ``expected`` to ``new`` (lock-serialized)."""
         assert pid and expected and new, "cas args required"
         with _CAS_LOCK:
             row = self._conn.execute(
-                "SELECT status, date_diff('second', created_at, now()) FROM pending_actions WHERE id = ?;",
+                "SELECT status, date_diff('second', created_at, now()), conversation_id "
+                "FROM pending_actions WHERE id = ?;",
                 [pid],
             ).fetchone()
-            if row is None or str(row[0]) != expected or int(row[1]) > _TTL_SECONDS:
+            if row is None or str(row[0]) != expected or int(row[1]) > self._ttl_for(row[2]):
                 return False
             self._conn.execute(
                 "UPDATE pending_actions SET status = ?, resolved_at = now() WHERE id = ?;", [new, pid]

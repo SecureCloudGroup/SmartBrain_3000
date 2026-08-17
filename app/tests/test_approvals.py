@@ -58,14 +58,52 @@ def test_concurrent_approve_exactly_one_wins() -> None:
     assert sum(1 for r in results if r) == 1  # the CAS lets exactly one win
 
 
-def test_ttl_expiry_blocks_approval(monkeypatch) -> None:
+def test_chat_park_ttl_expiry_blocks_approval(monkeypatch) -> None:
     from smartbrain_3000 import approvals as appmod
 
-    monkeypatch.setattr(appmod, "_TTL_SECONDS", -1)  # everything is already expired
+    monkeypatch.setattr(appmod, "_CHAT_TTL_SECONDS", -1)  # every chat park is already expired
     s = _store()
-    pid = s.create_pending("add_task", "reviewed", {"title": "x"})
+    pid = s.create_pending("add_task", "reviewed", {"title": "x"}, conversation_id="c1")
     assert s.get(pid)["expired"] is True
     assert s.approve(pid) is False and s.claim(pid) is False
+
+
+def test_scheduled_park_outlives_the_chat_ttl(monkeypatch) -> None:
+    # The bug found live: scheduled parks (conversation_id=None) died on the
+    # 1-hour chat clock while the user was away. They live on the 30-day clock.
+    from smartbrain_3000 import approvals as appmod
+
+    monkeypatch.setattr(appmod, "_CHAT_TTL_SECONDS", -1)  # chat clock already expired
+    s = _store()
+    pid = s.create_pending("web_fetch", "reviewed", {"url": "https://example.com"})
+    assert s.get(pid)["expired"] is False  # scheduled: still approvable
+    assert s.approve(pid) is True and s.claim(pid) is True
+
+
+def test_scheduled_park_expires_on_its_own_clock(monkeypatch) -> None:
+    from smartbrain_3000 import approvals as appmod
+
+    monkeypatch.setattr(appmod, "_SCHEDULED_TTL_SECONDS", -1)
+    s = _store()
+    pid = s.create_pending("web_fetch", "reviewed", {"url": "https://example.com"})
+    assert s.get(pid)["expired"] is True
+    assert s.approve(pid) is False
+
+
+def test_list_pending_sweeps_expired_rows(monkeypatch) -> None:
+    # The list and the Approve button must agree: a row past its TTL flips to
+    # status 'expired' and stops being offered — no more dead Approve buttons
+    # that 409 on every click.
+    from smartbrain_3000 import approvals as appmod
+
+    s = _store()
+    stale = s.create_pending("web_fetch", "reviewed", {"url": "https://old.example"})
+    fresh_chat = s.create_pending("add_task", "reviewed", {"title": "x"}, conversation_id="c1")
+    monkeypatch.setattr(appmod, "_SCHEDULED_TTL_SECONDS", -1)  # scheduled rows now stale
+    listed = s.list_pending()
+    assert [p["id"] for p in listed] == [fresh_chat]  # the stale one dropped off
+    assert s.get(stale)["status"] == "expired"  # swept, not deleted — audit trail intact
+    assert s.approve(stale) is False
 
 
 def test_cross_session_invisible() -> None:
