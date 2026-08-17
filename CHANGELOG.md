@@ -11,6 +11,8 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.9.3] - 2026-08-17
+
 ### Fixed
 - **Approvals from scheduled runs no longer expire before you can act.** A parked
   action expired one hour after it was created — fine for a live chat, but a
