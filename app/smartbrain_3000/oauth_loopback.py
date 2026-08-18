@@ -16,9 +16,9 @@ from __future__ import annotations
 
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import quote
 
 CALLBACK_PATH = "/api/email/oauth/callback"
-_LOOPBACK_HOSTS = ("localhost", "127.0.0.1")
 
 
 def _make_handler(https_port: int) -> type[BaseHTTPRequestHandler]:
@@ -26,18 +26,22 @@ def _make_handler(https_port: int) -> type[BaseHTTPRequestHandler]:
         protocol_version = "HTTP/1.1"
 
         def _redirect(self) -> None:
-            # Redirect only to the loopback host the browser used, swapped to the https app
-            # port. Any non-loopback Host (can't happen over a loopback-only socket, but be
-            # safe) collapses to localhost — never an open redirect to an external origin.
-            host = self.headers.get("Host", "localhost").rsplit(":", 1)[0].strip().lower()
-            if host not in _LOOPBACK_HOSTS:
-                host = "localhost"
-            # Forward only the OAuth callback path (with its query); anything else → app root.
-            # A header value must never carry CR/LF (response splitting) — the request
-            # line can't contain raw newlines, but the guarantee belongs here, where the
-            # header is written, not to the parser's internals.
-            path = self.path.replace("\r", "").replace("\n", "")
-            path = path if path.split("?", 1)[0] == CALLBACK_PATH else "/"
+            # The Location header is REBUILT, never forwarded: no byte of the request
+            # reaches a header un-encoded (response splitting). Redirect only to the
+            # loopback host the browser used, swapped to the https app port; any
+            # non-loopback Host (can't happen over a loopback-only socket, but be safe)
+            # collapses to localhost — never an open redirect to an external origin.
+            raw_host = self.headers.get("Host", "localhost").rsplit(":", 1)[0].strip().lower()
+            host = "127.0.0.1" if raw_host == "127.0.0.1" else "localhost"  # always a literal
+            # Forward only the OAuth callback path; anything else → app root. The query
+            # is percent-encoded: control bytes become %XX while the characters Google's
+            # code/state actually use (unreserved plus = & % + /) pass through untouched,
+            # so the callback's parameters survive byte-for-byte.
+            raw_path, _, raw_query = self.path.partition("?")
+            if raw_path == CALLBACK_PATH:
+                path = CALLBACK_PATH + (f"?{quote(raw_query, safe='=&%+/')}" if raw_query else "")
+            else:
+                path = "/"
             location = f"https://{host}:{https_port}{path}"
             body = b"Redirecting to the secure app\xe2\x80\xa6\n"
             self.send_response(302)
