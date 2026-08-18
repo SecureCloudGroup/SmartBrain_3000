@@ -6,6 +6,12 @@ labels: enhancement
 assignees: ""
 ---
 
+<!--
+Ideas are welcome. SmartBrain_3000 is maintained part-time: everything is read
+and considered, and requests are picked up as capacity allows — there is no
+guaranteed timeline, and not every good idea will fit the roadmap.
+-->
+
 ## Problem
 
 What are you trying to do that's hard or impossible today?
