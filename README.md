@@ -202,6 +202,13 @@ questions about installing, connecting a model, or getting your documents in are
 all welcome, and no question is too basic. Found a reproducible bug? Open an
 [issue](https://github.com/SecureCloudGroup/SmartBrain_3000/issues).
 
+A word on response times: SmartBrain_3000 is built and maintained **part-time**.
+Everything posted here gets read, and issues are addressed as quickly as
+possible — data-safety problems first, broken installs next, everything else
+after that — but there is no guaranteed turnaround. The best way to speed a fix
+along is a clear report: what you did, what you expected, what happened instead,
+and the relevant lines from **Open logs** in the menu.
+
 ## Security
 
 Please report security issues **privately** — see [SECURITY.md](SECURITY.md)
