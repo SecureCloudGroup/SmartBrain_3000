@@ -11,6 +11,16 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.9.4] - 2026-08-17
+
+### Changed
+- **Housekeeping and hardening.** Web UI dependency refresh (including an icon-set
+  update), defense-in-depth hardening of the Gmail OAuth helper's redirect (header
+  values are rebuilt from verified parts, never forwarded from the request), and
+  the README + issue templates now state support expectations plainly: the project
+  is maintained part-time — everything is read and addressed as quickly as
+  possible, with no promised turnaround.
+
 ## [0.9.3] - 2026-08-17
 
 ### Fixed
