@@ -131,3 +131,24 @@ def test_helper_non_callback_path_goes_to_root(helper) -> None:
     _server, port = helper
     status, loc = _location(port, "/wp-admin?x=1", host="localhost")
     assert status == 302 and loc == "https://localhost:33000/"
+
+
+def test_helper_strips_crlf_from_location() -> None:
+    # Defense-in-depth: a CR/LF that somehow reached self.path must never be written
+    # into the Location header (response splitting). http.client refuses to SEND such
+    # a path, so the handler is driven directly with a socketless fake.
+    import io
+
+    handler_cls = oauth_loopback._make_handler(33000)
+    fake = handler_cls.__new__(handler_cls)
+    fake.path = oauth_loopback.CALLBACK_PATH + "?code=x\r\nSet-Cookie: evil=1"
+    fake.headers = {"Host": "localhost"}
+    sent: list[tuple[str, object]] = []
+    fake.send_response = lambda code: sent.append(("status", code))
+    fake.send_header = lambda k, v: sent.append((k, v))
+    fake.end_headers = lambda: None
+    fake.wfile = io.BytesIO()
+    fake._redirect()
+    loc = next(v for k, v in sent if k == "Location")
+    assert "\r" not in loc and "\n" not in loc
+    assert loc.startswith("https://localhost:33000/api/email/oauth/callback?")

@@ -33,7 +33,11 @@ def _make_handler(https_port: int) -> type[BaseHTTPRequestHandler]:
             if host not in _LOOPBACK_HOSTS:
                 host = "localhost"
             # Forward only the OAuth callback path (with its query); anything else → app root.
-            path = self.path if self.path.split("?", 1)[0] == CALLBACK_PATH else "/"
+            # A header value must never carry CR/LF (response splitting) — the request
+            # line can't contain raw newlines, but the guarantee belongs here, where the
+            # header is written, not to the parser's internals.
+            path = self.path.replace("\r", "").replace("\n", "")
+            path = path if path.split("?", 1)[0] == CALLBACK_PATH else "/"
             location = f"https://{host}:{https_port}{path}"
             body = b"Redirecting to the secure app\xe2\x80\xa6\n"
             self.send_response(302)
