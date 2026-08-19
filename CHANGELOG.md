@@ -11,6 +11,21 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Changed
+- **Using a model server on another machine is now a first-class, explained path.**
+  Field testing (SmartBrain on a Linux laptop, models on a Mac) found the remote
+  option buried: the Ollama/MLX panels now say plainly when to use the port (same
+  machine) and when to use the renamed **"Server on another machine"** field, the
+  can't-reach hint explains network access and API keys, and the models guide gains
+  a step-by-step "Use a model server on another machine" section (server-side
+  toggles, the one-line verification curl, then connect). The **MLX embeddings**
+  card — whose install instruction pointed at a repo path desktop installs don't
+  have — now leads with "most setups don't need this", says honestly that the
+  fallback installer requires a source checkout, and gains the same remote-server
+  and API-key fields as the other backends. The Linux install script and guide now
+  also give the real fix for `smartbrain: command not found` right after install
+  (log out and back in).
+
 ## [0.9.4] - 2026-08-17
 
 ### Changed

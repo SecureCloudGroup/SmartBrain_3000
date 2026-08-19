@@ -132,7 +132,11 @@ command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$
 
 case ":$PATH:" in
   *:"$HOME/.local/bin":*) ;;
-  *) echo "NOTE: $HOME/.local/bin is not on your PATH — use the full path or add it." ;;
+  *)
+    echo "NOTE: $HOME/.local/bin is not on your PATH yet. On most distros (Ubuntu,"
+    echo "      Debian) just log out and back in — your shell adds it automatically"
+    echo "      once the directory exists. Until then, use the full path:"
+    echo "      $HOME/.local/bin/smartbrain" ;;
 esac
 
 VERSION=$("$LAUNCHER_DIR/smartbrain" version | head -1)

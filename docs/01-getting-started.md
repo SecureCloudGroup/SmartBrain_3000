@@ -52,7 +52,9 @@ sh install-linux.sh
 
 It verifies the release's minisign signature and checksum, installs the launcher for
 your user only (no root), and puts **SmartBrain** in your app menu. Start it with
-`smartbrain start`. Where no tray can be drawn — a server, or stock GNOME without the
+`smartbrain start`. (If that says *command not found*, log out and back in — your shell
+adds `~/.local/bin` to PATH automatically once it exists; until then use
+`~/.local/bin/smartbrain`.) Where no tray can be drawn — a server, or stock GNOME without the
 AppIndicator extension — the launcher says so once and keeps running without one;
 SmartBrain works the same either way.
 
