@@ -11,6 +11,8 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.9.5] - 2026-08-19
+
 ### Changed
 - **Using a model server on another machine is now a first-class, explained path.**
   Field testing (SmartBrain on a Linux laptop, models on a Mac) found the remote
