@@ -26,9 +26,12 @@
   let ollamaAdv = $state(""); // full-URL override (advanced)
   let mlxAdv = $state("");
   let mlxePort = $state(String(DEFAULT_PORT.mlxe));
+  let mlxeAdv = $state("");
   let showOllamaAdv = $state(false);
   let showMlxAdv = $state(false);
+  let showMlxeAdv = $state(false);
   let mlxKey = $state("");
+  let mlxeKey = $state("");
   let busy = $state("");
   let error = $state("");
   let notice = $state("");
@@ -66,7 +69,10 @@
       mlxPort = m.port;
       mlxAdv = m.adv;
       showMlxAdv = m.useAdv;
-      mlxePort = hydrate(models.mlxe.url, DEFAULT_PORT.mlxe).port;
+      const me = hydrate(models.mlxe.url, DEFAULT_PORT.mlxe);
+      mlxePort = me.port;
+      mlxeAdv = me.adv;
+      showMlxeAdv = me.useAdv;
     } catch (err) {
       error = describeError(err);
     }
@@ -106,9 +112,25 @@
     }
   }
 
+  async function saveMlxe() {
+    busy = "mlxe";
+    error = "";
+    notice = "";
+    try {
+      const r = await api.putMlxe(urlFor(mlxePort, mlxeAdv, showMlxeAdv), mlxeKey);
+      mlxeKey = "";
+      if (r.gateway_synced === false) notice = NOT_LIVE;
+      await load();
+    } catch (err) {
+      error = describeError(err);
+    } finally {
+      busy = "";
+    }
+  }
+
   const ollamaInvalid = $derived(!showOllamaAdv && !validPort(ollamaPort));
   const mlxInvalid = $derived(!showMlxAdv && !validPort(mlxPort));
-  const mlxeInvalid = $derived(!validPort(mlxePort));
+  const mlxeInvalid = $derived(!showMlxeAdv && !validPort(mlxePort));
 </script>
 
 <h1>Local models <span class="muted" style="font-weight:400; font-size:0.9rem">· optional</span></h1>
@@ -160,7 +182,11 @@
   {/if}
   <label for="ollama-port">Port</label>
   <input id="ollama-port" type="number" min="1" max="65535" bind:value={ollamaPort} disabled={showOllamaAdv} autocomplete="off" />
-  <p class="muted" style="font-size:0.85rem; margin:0.25rem 0 0">The port your Ollama server listens on. Default is 11434 — leave it unless you changed it.</p>
+  <p class="muted" style="font-size:0.85rem; margin:0.25rem 0 0">
+    For Ollama running <strong>on this machine</strong> — default port 11434; leave it unless you
+    changed it. Ollama on <strong>another computer</strong>? Use &ldquo;Server on another
+    machine&rdquo; below.
+  </p>
   {#if ollamaInvalid}<p class="error" style="font-size:0.85rem; margin:0.25rem 0 0">Enter a port between 1 and 65535.</p>{/if}
   {#if models?.ollama.models.length}
     <p class="muted" style="margin-top:0.5rem">Models: {models.ollama.models.join(", ")}</p>
@@ -178,15 +204,20 @@
     </p>
   {/if}
   <details bind:open={showOllamaAdv} style="margin-top:0.5rem">
-    <summary class="muted" style="font-size:0.85rem; cursor:pointer">Advanced: use a full URL</summary>
+    <summary class="muted" style="font-size:0.85rem; cursor:pointer">Server on another machine (or a custom URL)</summary>
     <input
       type="url"
       bind:value={ollamaAdv}
-      placeholder={`http://${HOST}:${DEFAULT_PORT.ollama}`}
+      placeholder={`http://192.168.1.50:${DEFAULT_PORT.ollama}`}
       autocomplete="off"
       style="margin-top:0.4rem"
     />
-    <p class="muted" style="font-size:0.8rem; margin:0.25rem 0 0">For a server on another host or a non-standard address.</p>
+    <p class="muted" style="font-size:0.8rem; margin:0.25rem 0 0">
+      Enter the other computer&rsquo;s address, e.g. <code>http://192.168.1.50:11434</code>. On that
+      machine, Ollama must listen beyond localhost: start it with <code>OLLAMA_HOST=0.0.0.0</code>
+      (and allow it through its firewall). See the
+      <a href="/help#connect-a-model" target="_blank">models guide</a>.
+    </p>
   </details>
   <p style="margin-top:0.75rem; display:flex; gap:0.5rem">
     <button
@@ -219,7 +250,11 @@
   {/if}
   <label for="mlx-port">Port</label>
   <input id="mlx-port" type="number" min="1" max="65535" bind:value={mlxPort} disabled={showMlxAdv} autocomplete="off" />
-  <p class="muted" style="font-size:0.85rem; margin:0.25rem 0 0">The port your MLX server listens on. Default is 8888.</p>
+  <p class="muted" style="font-size:0.85rem; margin:0.25rem 0 0">
+    For an MLX server <strong>on this machine</strong> — default port 8888. Server on
+    <strong>another computer</strong> (e.g. a Mac running oMLX)? Use &ldquo;Server on another
+    machine&rdquo; below.
+  </p>
   {#if mlxInvalid}<p class="error" style="font-size:0.85rem; margin:0.25rem 0 0">Enter a port between 1 and 65535.</p>{/if}
   <label for="mlx-key" style="margin-top:0.5rem">API key <span class="muted" style="font-weight:400">(optional)</span></label>
   <input id="mlx-key" type="password" bind:value={mlxKey} autocomplete="off" placeholder="Leave blank if your server has none" />
@@ -228,20 +263,27 @@
   {/if}
   {#if models?.mlx.configured && !models.mlx.reachable}
     <p class="muted" style="margin-top:0.5rem">
-      Can&rsquo;t reach MLX. Start your MLX server on the host bound to <code>0.0.0.0</code> (so the gateway
-      can reach it) on this port — e.g. <code>mlx_lm.server --host 0.0.0.0 --port {mlxPort}</code>.
+      Can&rsquo;t reach MLX. On this machine: start the server bound to <code>0.0.0.0</code>, e.g.
+      <code>mlx_lm.server --host 0.0.0.0 --port {mlxPort}</code>. On another machine: enable its
+      network access / LAN setting (oMLX has a toggle), allow it through the firewall, and if the
+      server requires an API key, enter it above — a missing key looks exactly like unreachable.
     </p>
   {/if}
   <details bind:open={showMlxAdv} style="margin-top:0.5rem">
-    <summary class="muted" style="font-size:0.85rem; cursor:pointer">Advanced: use a full URL</summary>
+    <summary class="muted" style="font-size:0.85rem; cursor:pointer">Server on another machine (or a custom URL)</summary>
     <input
       type="url"
       bind:value={mlxAdv}
-      placeholder={`http://${HOST}:${DEFAULT_PORT.mlx}`}
+      placeholder={`http://192.168.1.50:${DEFAULT_PORT.mlx}`}
       autocomplete="off"
       style="margin-top:0.4rem"
     />
-    <p class="muted" style="font-size:0.8rem; margin:0.25rem 0 0">For a server on another host or a non-standard address.</p>
+    <p class="muted" style="font-size:0.8rem; margin:0.25rem 0 0">
+      Enter the other computer&rsquo;s address, e.g. <code>http://192.168.1.50:8888</code>. On that
+      machine, enable the server&rsquo;s network/LAN access (oMLX: allow network access, which also
+      issues the API key to paste above) and allow it through the firewall. See the
+      <a href="/help#connect-a-model" target="_blank">models guide</a>.
+    </p>
   </details>
   <p style="margin-top:0.75rem; display:flex; gap:0.5rem">
     <button disabled={busy === "mlx" || mlxInvalid || (showMlxAdv && !mlxAdv.trim())} onclick={saveMlx}>
@@ -264,9 +306,14 @@
     {/if}
   </h2>
   <p class="muted" style="margin:0 0 0.5rem; font-size:0.9rem">
-    A tiny dedicated server for <strong>semantic-search embeddings</strong> (Qwen3-Embedding on
-    MLX) — chat servers like oMLX can&rsquo;t serve this model class. One-time install:
-    <code>tools/mlx_embed_server/install.sh</code>, then route it under Model routing → Embedding.
+    <strong>Most setups don&rsquo;t need this.</strong> For semantic search, the simplest path is to
+    load an <em>encoder</em> embedding model (e.g. <code>modernbert-embed</code>) on your regular
+    MLX chat server and route Model routing → Embedding to it — one server runs everything. This
+    card is only for <em>decoder</em>-class embedders (Qwen3-Embedding), which chat servers refuse:
+    a tiny dedicated server serves them instead. Its installer ships in the source repo
+    (<code>tools/mlx_embed_server/install.sh</code> — requires a <code>git clone</code> of
+    SmartBrain_3000 on the server machine; it is not part of the desktop install). Details in the
+    <a href="/help#connect-a-model" target="_blank">models guide</a>.
   </p>
   {#if models && !models.mlxe.configured && models.mlxe.detected}
     <p style="margin:0 0 0.6rem; padding:0.5rem 0.75rem; border:1px solid var(--ok); border-radius:var(--r-1); color:var(--ok)">
@@ -275,14 +322,33 @@
     </p>
   {/if}
   <label for="mlxe-port">Port</label>
-  <input id="mlxe-port" type="number" min="1" max="65535" bind:value={mlxePort} autocomplete="off" />
-  <p class="muted" style="font-size:0.85rem; margin:0.25rem 0 0">The install script&rsquo;s default is 8899.</p>
+  <input id="mlxe-port" type="number" min="1" max="65535" bind:value={mlxePort} disabled={showMlxeAdv} autocomplete="off" />
+  <p class="muted" style="font-size:0.85rem; margin:0.25rem 0 0">
+    For the embeddings server <strong>on this machine</strong> — the install script&rsquo;s default
+    is 8899. On <strong>another computer</strong>? Use &ldquo;Server on another machine&rdquo; below.
+  </p>
   {#if mlxeInvalid}<p class="error" style="font-size:0.85rem; margin:0.25rem 0 0">Enter a port between 1 and 65535.</p>{/if}
+  <label for="mlxe-key" style="margin-top:0.5rem">API key <span class="muted" style="font-weight:400">(optional)</span></label>
+  <input id="mlxe-key" type="password" bind:value={mlxeKey} autocomplete="off" placeholder="Leave blank if your server has none" />
   {#if models?.mlxe.models.length}
     <p class="muted" style="margin-top:0.5rem">Models: {models.mlxe.models.join(", ")}</p>
   {/if}
+  <details bind:open={showMlxeAdv} style="margin-top:0.5rem">
+    <summary class="muted" style="font-size:0.85rem; cursor:pointer">Server on another machine (or a custom URL)</summary>
+    <input
+      type="url"
+      bind:value={mlxeAdv}
+      placeholder={`http://192.168.1.50:${DEFAULT_PORT.mlxe}`}
+      autocomplete="off"
+      style="margin-top:0.4rem"
+    />
+    <p class="muted" style="font-size:0.8rem; margin:0.25rem 0 0">
+      Enter the other computer&rsquo;s address, e.g. <code>http://192.168.1.50:8899</code> — the
+      embeddings server must be reachable from this machine (bound beyond localhost, firewall open).
+    </p>
+  </details>
   <p style="margin-top:0.75rem; display:flex; gap:0.5rem">
-    <button disabled={busy === "mlxe" || mlxeInvalid} onclick={() => run("mlxe", () => api.putMlxe(`http://${HOST}:${mlxePort}`, ""))}>
+    <button disabled={busy === "mlxe" || mlxeInvalid || (showMlxeAdv && !mlxeAdv.trim())} onclick={saveMlxe}>
       {busy === "mlxe" ? "Saving…" : "Save & connect"}
     </button>
     {#if models?.mlxe.configured}

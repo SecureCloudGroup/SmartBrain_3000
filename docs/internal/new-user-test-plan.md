@@ -136,7 +136,7 @@ when │ what they were trying to do │ what confused or broke │ severity
 | | macOS / Homebrew | primary | | | | | | | | |
 | | Windows / winget (once re-published) | primary | | | | | | | | |
 | | Windows / Scoop | technical | | | | | | | | |
-| | Linux desktop (GNOME, no extension) / install script | primary | | | | | | | | |
+| 2026-08-19 | Linux desktop (GNOME, no extension) / install script, real Ubuntu 24.04 laptop, v0.9.4 | primary | ✅ | ✅ | ✅ | — | — | partial (uninstall-keeps-data ✅, purge ✅) | none | Fallback notification + extension→tray flow ✅; LAN MLX (Mac oMLX) chat+embeddings ✅ after friction (F1: remote-server field buried; F2: MLXE card repo-path unusable on launcher installs, no remote/key fields; F3: PATH note lacks log-out/in fix) — all fixed same day; desktop self-update handover 0.9.0→0.9.4 with live signed artifacts ✅ |
 | | Linux desktop (KDE or XFCE) / install script | technical | | | | | | | | |
 | | Linux server (SSH only) / install script --headless | technical | | | | | | | | |
 | | Linux / Docker | technical | | | | | | | | |

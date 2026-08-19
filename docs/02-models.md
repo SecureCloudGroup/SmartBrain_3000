@@ -31,10 +31,12 @@ returns a stored key over its API — only the fact that one is set.
 > Using a cloud model means your prompts (and any content you send) go to that
 > provider. If you'd rather keep everything on your machine, use a local model.
 
-## Local models (on your machine)
+## Local models (yours — on this machine or another one you own)
 
-Local models keep every prompt on your hardware — nothing goes to a provider. You run the
-model server yourself and SmartBrain reaches it over loopback on your own machine.
+Local models keep every prompt on hardware you control — nothing goes to a provider. You run
+the model server yourself and SmartBrain connects to it: usually on the same machine, but a
+server elsewhere on your network works too (a common setup: SmartBrain on a Linux box, the
+models on a Mac's GPU — see [Use a model server on another machine](#use-a-model-server-on-another-machine)).
 SmartBrain supports two backends and connects to either the same way:
 
 - **MLX** — Apple's on-device runtime for **Apple-Silicon Macs** (M-series). It's the fastest
@@ -69,6 +71,32 @@ is reachable and which models it has.
 > port field. The manual port/URL fields are for non-standard setups.
 
 ![Settings → Local models showing a detected local server with a Connect link](assets/03-local-models.png)
+
+### Use a model server on another machine
+
+SmartBrain on one computer can use a model server on another — e.g. SmartBrain on a Linux
+laptop, the models on an Apple-Silicon Mac. Three steps:
+
+1. **Make the server listen beyond localhost**, on the server machine:
+   - **oMLX**: enable its *network access* setting — it starts listening on the LAN and
+     shows an **API key** (copy it; requests without it are refused).
+   - **`mlx_lm.server`**: start with `--host 0.0.0.0`.
+   - **Ollama**: start with the environment variable `OLLAMA_HOST=0.0.0.0`.
+   Allow the app through that machine's firewall if prompted.
+2. **Verify from the SmartBrain machine** (expect a JSON model list):
+
+   ```sh
+   curl -s -H "Authorization: Bearer YOUR_KEY" http://SERVER_IP:8888/v1/models
+   ```
+
+   (Drop the header for a server with no key; Ollama's port is `11434`.)
+3. **Connect in SmartBrain**: Settings → Local models → the backend's
+   **"Server on another machine"** field → enter `http://SERVER_IP:PORT`, paste the API key
+   if the server has one, **Save & connect**.
+
+Traffic between the two machines is plain HTTP on your own network — fine at home; don't
+route it across networks you don't trust. Note that local model servers answer one request
+at a time, so two SmartBrains sharing one server take turns.
 
 ## Choosing a model in Chat
 
@@ -133,9 +161,13 @@ one server runs everything.
 
 They refuse *decoder* embedding models such as Qwen3-Embedding ("not an embedding
 model"). Only if you specifically want one of those, use the bundled fallback: the
-**MLX embeddings server** (`tools/mlx_embed_server/install.sh` — a tiny login service on
-port 8899 serving `Qwen3-Embedding-0.6B` with correct pooling), connected under
-Settings → Local models → **MLX embeddings** and routed to `mlxe/qwen3-embedding-0.6b`.
+**MLX embeddings server** — a tiny login service on port 8899 serving
+`Qwen3-Embedding-0.6B` with correct pooling. Its installer ships **in the source
+repository**, not in the desktop install: on the server machine,
+`git clone https://github.com/SecureCloudGroup/SmartBrain_3000.git` and run
+`tools/mlx_embed_server/install.sh`. Then connect it under Settings → Local models →
+**MLX embeddings** (same-machine port, or its "Server on another machine" field) and route
+Embedding to `mlxe/qwen3-embedding-0.6b`.
 
 **Pull it yourself** once, with that exact tag:
 
