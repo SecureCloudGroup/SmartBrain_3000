@@ -6,12 +6,18 @@
 
 A personal AI assistant that runs **entirely on your own machine** — your
 knowledge, your AI models, and your credentials stay on your hardware, encrypted
-at rest under a passphrase only you hold. Your data never leaves your hardware — the
-one exception is **optional** remote phone access: if you turn it on, your Desktop
-connects to a **content-blind** signaling node to set up an end-to-end-encrypted link
-to your phone (the SecureCloudGroup-hosted `rtc.securecloudgroup.com` by default, or
-your own via `SMARTBRAIN_SIGNALING_URL`). It only ever relays encrypted connection
-setup — it cannot read your data.
+at rest under a passphrase only you hold. Your data never leaves your hardware
+unless you explicitly choose otherwise — and there are exactly two ways to choose:
+
+- **Cloud models (optional).** Run fully local models (MLX/Ollama) and every prompt
+  stays on-box — the suggested path whenever your hardware can carry one. Add a
+  cloud provider key instead and what you send that model (including knowledge
+  content it is given) goes to that provider — your choice, per model.
+- **Remote phone access (optional).** If you turn it on, your Desktop connects to a
+  **content-blind** signaling node to set up an end-to-end-encrypted link to your
+  phone (the SecureCloudGroup-hosted `rtc.securecloudgroup.com` by default, or your
+  own via `SMARTBRAIN_SIGNALING_URL`). It only ever relays encrypted connection
+  setup — it cannot read your data.
 
 <p align="center">
   <img src="docs/assets/gifs/01-install-to-unlocked.gif" alt="One command installs SmartBrain; set a passphrase, save your Emergency Kit, and land on an unlocked Chat" width="760" />
