@@ -92,7 +92,8 @@ curl -fsSLO https://raw.githubusercontent.com/SecureCloudGroup/SmartBrain_3000/m
 sh install-linux.sh          # desktop; or:  sh install-linux.sh --headless
 ```
 
-Then `smartbrain start`. Prefer containers (or on arm/musl, where there is no native
+Then `smartbrain start` — if that says *command not found*, log out and back in
+(your shell picks up `~/.local/bin` once it exists). Prefer containers (or on arm/musl, where there is no native
 build yet)? The Docker stack is one file:
 
 ```sh
@@ -112,9 +113,11 @@ after that it starts in seconds. The app runs at **http://localhost:33000**. In 
    Key). There is no password reset — the Recovery Key is the only way back in
    if you forget your passphrase, so store it somewhere safe and offline.
 2. **Connect a model** under **Settings**: add a cloud provider API key, or run a
-   local model — **MLX** on an Apple-Silicon Mac, or **Ollama** on any OS. If one is
-   already running, SmartBrain **detects it and offers a one-tap connect** right on the
-   Chat screen.
+   local model — **MLX** on an Apple-Silicon Mac, **Ollama** on any OS, or either one
+   running on **another machine you own** (SmartBrain on a Linux box, models on a Mac's
+   GPU — see [the models guide](docs/02-models.md#use-a-model-server-on-another-machine)).
+   If one is already running locally, SmartBrain **detects it and offers a one-tap
+   connect** right on the Chat screen.
 3. **Start chatting.**
 
 > **Does it need Docker?** Not on an **Apple-Silicon Mac**, **64-bit Windows**, or
