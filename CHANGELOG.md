@@ -11,6 +11,8 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.9.7] - 2026-08-22
+
 ### Fixed
 - **Deep-audit hardening (pre-launch).** Three independent adversarial reviews of
   the codebase produced four fixes, all shipped here: the launcher's new stale-
