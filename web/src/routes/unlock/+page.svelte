@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onDestroy, onMount } from "svelte";
   import { goto } from "$app/navigation";
   import { account } from "$lib/account.svelte";
   import { api, ApiError } from "$lib/api";
@@ -8,12 +8,33 @@
   let value = $state("");
   let error = $state("");
   let busy = $state(false);
+  let watchTimer: ReturnType<typeof setInterval> | null = null;
 
   onMount(async () => {
     if (account.status === null) await account.load();
     const s = account.status;
     if (s && !s.initialized) goto("/setup");
     else if (s?.unlocked) goto("/chat");
+    // One vault, one lock: unlocking from ANY device (the phone, another tab) unlocks
+    // it here too — so this screen watches for that and walks in on its own instead of
+    // sitting locked until a manual refresh. Light poll, cleared on unmount.
+    watchTimer = setInterval(async () => {
+      try {
+        if ((await api.accountStatus()).unlocked) {
+          if (watchTimer) clearInterval(watchTimer);
+          watchTimer = null;
+          await account.load();
+          goto("/chat");
+        }
+      } catch {
+        /* backend restarting or offline — keep watching */
+      }
+    }, 3_000);
+  });
+
+  onDestroy(() => {
+    if (watchTimer) clearInterval(watchTimer);
+    watchTimer = null;
   });
 
   async function submit(event: Event) {
@@ -51,4 +72,8 @@
       </button>
     </p>
   </form>
+  <p class="muted" style="margin-top:0.75rem; font-size:0.85rem">
+    One vault, one lock: unlocking here also unlocks your paired phone — and unlocking
+    there unlocks here, on its own.
+  </p>
 </div>
