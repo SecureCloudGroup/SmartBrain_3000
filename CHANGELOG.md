@@ -12,6 +12,19 @@ to know when a release changes behavior.
 ## [Unreleased]
 
 ### Fixed
+- **Deep-audit hardening (pre-launch).** Three independent adversarial reviews of
+  the codebase produced four fixes, all shipped here: the launcher's new stale-
+  gateway cleanup now verifies the port-holder's identity before acting, so it can
+  never touch Docker's port-forwarder or any other legitimate process (unknown
+  identity refuses with an actionable message); the Windows process lookup no
+  longer depends on English netstat output (it silently failed on German, French,
+  and every other localized Windows); the phone's resume check can no longer
+  misfire against a connection that is still mid-handshake or against a later
+  connection cycle; and the two streaming chat endpoints now route vault-locked
+  responses through the same central handler as everything else, closing the last
+  gap of the redirect-stampede class.
+
+### Fixed
 - **An update can no longer leave the app looking broken.** Two real failure
   modes from the field, both closed: a browser tab open across an update-restart
   got stuck in a redirect loop so fast the unlock screen never loaded (the tab

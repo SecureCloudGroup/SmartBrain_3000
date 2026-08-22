@@ -160,10 +160,21 @@
   }
 
   // While an install runs the backend goes away and returns on a new version. Checking once
-  // a minute would leave the page looking stuck for most of it.
+  // a minute would leave the page looking stuck for most of it. Bounded: an install that
+  // never completes (launcher quit mid-install) must not leave a 2s poll running until
+  // tab close — after the budget, fall back to the normal once-a-minute watcher.
   function pollFasterWhileInstalling(): void {
     if (updateTimer) clearInterval(updateTimer);
+    const deadline = Date.now() + 10 * 60_000; // minutes beyond any real install
     updateTimer = setInterval(async () => {
+      if (Date.now() > deadline) {
+        if (updateTimer) clearInterval(updateTimer);
+        updateTimer = null;
+        installing = false;
+        installFailed = true; // honest: the install didn't land in any plausible window
+        watchForAppUpdate();
+        return;
+      }
       try {
         const health = await api.health();
         if (loadedVersion && health.version && health.version !== loadedVersion) {

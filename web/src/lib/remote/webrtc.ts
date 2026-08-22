@@ -62,6 +62,7 @@ export class RemoteConnection {
   private reconnects = 0;
   private connectTimer: ReturnType<typeof setTimeout> | null = null;
   private pingTimer: ReturnType<typeof setInterval> | null = null;
+  private verifyTimer: ReturnType<typeof setTimeout> | null = null;
   private lastPong = 0; // ms epoch of the newest pong; 0 = no keepalive expected yet
   private offerSent = false; // one offer per attempt (the ICE push and the wait-timeout both trigger it)
   private iceWaitTimer: ReturnType<typeof setTimeout> | null = null;
@@ -311,15 +312,31 @@ export class RemoteConnection {
   // pong: send one now, give it a short human-scale deadline, and route a miss into
   // the normal failure path (teardown + reconnect) immediately. A healthy link pongs
   // well inside the deadline and nothing churns.
+  //
+  // Audit hardening: (1) a connection still in its HANDSHAKE has no pong baseline
+  // (lastPong 0 — pongs are dropped until the Desktop is verified), so verifying it
+  // would kill a healthy connect seconds from success; the connect timeout owns that
+  // phase, verify() stands down. (2) The deadline timer is tracked and cleared by
+  // teardown(), so a stale verify can never condemn the NEXT connection cycle.
+  // (3) A channel that slams shut between the check and the send throws — that throw
+  // IS the failure evidence, routed to the same funnel instead of escaping unhandled.
   verify(deadlineMs = 2500): void {
     if (this.closed) return;
     if (!this.isLive() || this.channel?.readyState !== "open") {
       this.onConnectFailure();
       return;
     }
+    if (this.lastPong === 0) return; // mid-handshake: no baseline; connectTimer owns it
     const before = this.lastPong;
-    this.send(undefined, encodePing(Date.now()));
-    setTimeout(() => {
+    try {
+      this.send(undefined, encodePing(Date.now()));
+    } catch {
+      this.onConnectFailure();
+      return;
+    }
+    if (this.verifyTimer) clearTimeout(this.verifyTimer);
+    this.verifyTimer = setTimeout(() => {
+      this.verifyTimer = null;
       if (this.closed) return;
       if (this.lastPong === before) this.onConnectFailure();
     }, deadlineMs);
@@ -370,6 +387,7 @@ export class RemoteConnection {
     if (this.connectTimer) { clearTimeout(this.connectTimer); this.connectTimer = null; }
     if (this.iceWaitTimer) { clearTimeout(this.iceWaitTimer); this.iceWaitTimer = null; }
     if (this.pingTimer) { clearInterval(this.pingTimer); this.pingTimer = null; }
+    if (this.verifyTimer) { clearTimeout(this.verifyTimer); this.verifyTimer = null; } // a stale verify must not condemn the next cycle
     this.lastPong = 0; // next connection starts a fresh keepalive clock (set on auth_ok)
     this.desktopVerified = false; // identity is proven per connection, never inherited
     for (const [, p] of this.pending) {
