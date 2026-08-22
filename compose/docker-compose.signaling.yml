@@ -61,6 +61,17 @@ services:
       # cellular carriers) blocks UDP — coturn also listens on TCP 3478.
       - SIGNALING_ICE_URLS=stun:${SIGNALING_DOMAIN}:3478,turn:${SIGNALING_DOMAIN}:3478,turn:${SIGNALING_DOMAIN}:3478?transport=tcp
     # No published port — Caddy reaches it on the internal network as signaling:8089.
+    # APP-LEVEL health: the probe completes a real hello/reply exchange, because the
+    # observed failure mode accepts sockets while the handler layer is starved — a
+    # TCP check would call that healthy. Docker only MARKS unhealthy; pair this with
+    # a host cron that restarts unhealthy containers, e.g.:
+    #   */2 * * * * docker ps -q -f health=unhealthy | xargs -r docker restart
+    healthcheck:
+      test: ["CMD", "python", "/srv/health.py"]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 10s
     restart: unless-stopped
 
   coturn:

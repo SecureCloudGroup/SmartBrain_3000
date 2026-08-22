@@ -6,6 +6,7 @@ RUN useradd --create-home --uid 10001 sb && pip install --no-cache-dir "websocke
 USER sb
 WORKDIR /srv
 COPY server.py /srv/server.py
+COPY health.py /srv/health.py
 
 EXPOSE 8089
 CMD ["python", "server.py"]
