@@ -437,6 +437,19 @@ export interface Vault {
 
 // One document's membership in a vault. `origin` says who owns the COPY: "import" = it came with
 // the vault (read-only; a vault update may replace it — Detach to claim it), "owner" = the user's.
+// A feed subscription: a vault that fills itself. The URL is stored encrypted server-side;
+// cadence fields are plaintext so the scheduler can find due feeds without the master key.
+export interface Feed {
+  id: string;
+  vault_id: string;
+  url: string;
+  title: string;
+  enabled: boolean;
+  last_checked: string | null; // null = never fetched yet
+  last_status: string; // "ok", "ok: N new", or "error: reason" — shown verbatim on the row
+  created_at: string;
+}
+
 export interface VaultMember {
   id: string;
   origin: "owner" | "import";
@@ -989,6 +1002,25 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ doc_ids }),
     }),
+
+  // feeds — subscribe to an RSS/Atom URL; new posts land as documents in the feed's own vault.
+  // Adding and deleting are Desktop-local (the paste IS the consent for background refreshes,
+  // so it must come from the machine's owner); reading and refreshing work from any surface.
+  listFeeds: () => req<{ feeds: Feed[] }>("/api/feeds"),
+  addFeed: (url: string) =>
+    req<{ id: string; title: string; vault_id: string; items: number }>("/api/feeds", {
+      method: "POST",
+      headers: { "x-sb-local": "1" },
+      body: JSON.stringify({ url }),
+    }),
+  refreshFeed: (id: string) =>
+    req<{ items: number }>(`/api/feeds/${encodeURIComponent(id)}/refresh`, { method: "POST" }),
+  // Same keep-vs-shred rule as deleteVault: the grouping goes, the articles stay unless asked.
+  deleteFeed: (id: string, opts: { remove_docs?: boolean } = {}) =>
+    req<{ deleted: boolean; docs_removed: number }>(
+      `/api/feeds/${encodeURIComponent(id)}${opts.remove_docs ? "?remove_docs=1" : ""}`,
+      { method: "DELETE", headers: { "x-sb-local": "1" } },
+    ),
 
   // Export hands out content that is plaintext-equivalent to whoever holds the key — and in
   // "open" (public) mode IS the plaintext, with no key at all — so, like backup, it is

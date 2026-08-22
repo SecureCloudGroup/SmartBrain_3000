@@ -370,6 +370,18 @@ def safe_post_json(url: str, payload: dict, headers: dict | None = None) -> dict
         raise FetchError("upstream returned invalid JSON") from None
 
 
+def safe_fetch_feed(url: str) -> dict:
+    """Guarded GET for RSS/Atom documents — same SSRF guard, XML-friendly content types.
+
+    Feeds ship as application/rss+xml, application/atom+xml, text/xml, application/xml,
+    and occasionally text/html from sloppy servers; the parser rejects non-feeds, so the
+    content-type gate here is about class (textual), not format.
+    """
+    got = _guarded_get(url, ("application/", "text/"), _MAX_BYTES)
+    return {"final_url": got["final_url"], "status": got["status"],
+            "text": got["content"].decode("utf-8", "replace")}
+
+
 def safe_fetch_bytes(url: str) -> dict:
     """Fetch ``url`` behind the SSRF guard, returning raw bytes (for ingestion).
 

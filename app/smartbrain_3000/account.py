@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field
 from . import email_account, gateway, keyvault
 from .approvals import ApprovalStore
 from .audit import AuditLog
+from .feeds import FeedStore
 from .history import ChatHistory
 from .kb import KnowledgeBase
 from .memory import MemoryStore
@@ -82,6 +83,7 @@ def _set_unlocked(request: Request, master_key: bytes) -> None:
     # vaults-then-kb makes it fail-CLOSED (kb None -> _knowledge() raises), mirroring _set_locked which
     # clears kb before vaults for the same reason.
     request.app.state.vaults = VaultStore(_conn(request), master_key)
+    request.app.state.feeds = FeedStore(_conn(request), master_key)
     request.app.state.kb = KnowledgeBase(_conn(request), master_key)
     request.app.state.history = ChatHistory(_conn(request), master_key)
     request.app.state.memory = MemoryStore(_conn(request), master_key)
@@ -219,6 +221,7 @@ def account_lock(request: Request) -> dict[str, bool]:
     request.app.state.session_id = None
     request.app.state.schedules = None
     request.app.state.vaults = None
+    request.app.state.feeds = None
     request.app.state.email = None
     request.app.state.email_oauth_pending = None
     return {"unlocked": False}
