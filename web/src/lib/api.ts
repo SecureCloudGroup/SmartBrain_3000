@@ -7,6 +7,17 @@ import { goto } from "$app/navigation";
 
 import { remoteReady } from "$lib/remote/sw-bridge";
 
+// The vault can relock mid-session (an update restart, a Lock from another device).
+// Client truth must flip the INSTANT the first 423 arrives: an open tab that keeps
+// believing "unlocked" re-fires its guarded effects on every redirect and stampedes
+// the server (observed live at ~37 req/s: fetch → 423 → goto → navigation → effect →
+// fetch, so fast the unlock page never finished loading). The account store registers
+// itself here at startup — a static import of it would be circular.
+let onLocked: (() => void) | null = null;
+export function registerLockedHandler(fn: () => void): void {
+  onLocked = fn;
+}
+
 export class ApiError extends Error {
   status: number;
   constructor(status: number, message: string) {
@@ -26,7 +37,12 @@ async function req<T>(path: string, opts: RequestInit = {}): Promise<T> {
   if (!res.ok) {
     const detail = (data && (data as { detail?: string }).detail) || `request failed (${res.status})`;
     if (res.status === 423) {
-      goto("/unlock"); // vault locked mid-session — bounce to unlock
+      onLocked?.(); // client state flips to locked BEFORE any effect can re-fire a fetch
+      const onUnlockPage =
+        typeof window !== "undefined" && window.location.pathname.startsWith("/unlock");
+      if (!onUnlockPage) {
+        goto("/unlock"); // vault locked mid-session — bounce to unlock (idempotent)
+      }
     }
     throw new ApiError(res.status, detail);
   }

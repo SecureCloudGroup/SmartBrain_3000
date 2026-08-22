@@ -11,6 +11,16 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Fixed
+- **An update can no longer leave the app looking broken.** Two real failure
+  modes from the field, both closed: a browser tab open across an update-restart
+  got stuck in a redirect loop so fast the unlock screen never loaded (the tab
+  now flips itself to "locked" on the first refusal and lands on the unlock page
+  once); and a gateway process orphaned by a years-old bookkeeping bug could
+  survive updates forever, silently serving an old version under a new app — the
+  launcher now clears anything squatting on the gateway port before starting the
+  right one, so the gateway always matches the release.
+
 ## [0.9.6] - 2026-08-22
 
 ### Fixed

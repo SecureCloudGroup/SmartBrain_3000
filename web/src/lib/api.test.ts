@@ -64,6 +64,32 @@ describe("req wrapper (via api.health)", () => {
     expect(gotoSpy).toHaveBeenCalledWith("/unlock");
   });
 
+  it("notifies the registered lock handler on 423 (breaks the stale-unlocked stampede)", async () => {
+    const { registerLockedHandler } = await import("./api");
+    const onLocked = vi.fn();
+    registerLockedHandler(onLocked);
+    globalThis.fetch = vi.fn(async () =>
+      jsonResponse(423, { detail: "locked" }),
+    ) as unknown as typeof globalThis.fetch;
+    await expect(api.health()).rejects.toMatchObject({ status: 423 });
+    expect(onLocked).toHaveBeenCalledTimes(1);
+  });
+
+  it("does NOT re-navigate when already on /unlock (no redirect loop)", async () => {
+    // This suite runs DOM-less; stand in a minimal window to simulate the tab
+    // already sitting on the unlock page.
+    (globalThis as { window?: unknown }).window = { location: { pathname: "/unlock" } };
+    try {
+      globalThis.fetch = vi.fn(async () =>
+        jsonResponse(423, { detail: "locked" }),
+      ) as unknown as typeof globalThis.fetch;
+      await expect(api.health()).rejects.toMatchObject({ status: 423 });
+      expect(gotoSpy).not.toHaveBeenCalled();
+    } finally {
+      delete (globalThis as { window?: unknown }).window;
+    }
+  });
+
   it("does NOT navigate on non-423 errors", async () => {
     globalThis.fetch = vi.fn(async () =>
       jsonResponse(503, { detail: "down" }),

@@ -910,3 +910,71 @@ func TestACopyThatActuallyFailsIsStillAnError(t *testing.T) {
 		t.Fatalf("a failed copy must stay an error, got: %v", err)
 	}
 }
+
+// --- port-holder resolution (the bifrost zombie fix) ------------------------
+
+func TestPortHolderPidFindsOurOwnListener(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	port := ln.Addr().(*net.TCPAddr).Port
+	pid, err := portHolderPid(port)
+	if err != nil {
+		t.Skipf("no lookup tool on this runner: %v", err) // lsof/ss/netstat availability varies
+	}
+	if pid != os.Getpid() {
+		t.Fatalf("expected our own pid %d, got %d", os.Getpid(), pid)
+	}
+}
+
+func TestKillPortHolderRefusesSelf(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	port := ln.Addr().(*net.TCPAddr).Port
+	if _, err := portHolderPid(port); err != nil {
+		t.Skipf("no lookup tool on this runner: %v", err)
+	}
+	// The holder is THIS test process — the guard must refuse rather than suicide.
+	if err := killPortHolder(port); err == nil || !strings.Contains(err.Error(), "refusing to kill self") {
+		t.Fatalf("expected refusing-to-kill-self, got %v", err)
+	}
+}
+
+func TestParseSsPid(t *testing.T) {
+	out := `State  Recv-Q Send-Q Local Address:Port Peer Address:Port Process
+LISTEN 0      1024   127.0.0.1:38080    0.0.0.0:*         users:(("bifrost-http",pid=9005,fd=7))`
+	pid, err := parseSsPid(out)
+	if err != nil || pid != 9005 {
+		t.Fatalf("want 9005, got %d / %v", pid, err)
+	}
+	if _, err := parseSsPid("LISTEN 0 1024 127.0.0.1:38080 0.0.0.0:*"); err == nil {
+		t.Fatal("pid-less output (another user's listener) must error, not guess")
+	}
+}
+
+func TestParseNetstatPid(t *testing.T) {
+	out := "  Proto  Local Address          Foreign Address        State           PID\r\n" +
+		"  TCP    127.0.0.1:38080        0.0.0.0:0              LISTENING       4321\r\n" +
+		"  TCP    127.0.0.1:33000        0.0.0.0:0              ESTABLISHED     9999\r\n"
+	pid, err := parseNetstatPid(out, 38080)
+	if err != nil || pid != 4321 {
+		t.Fatalf("want 4321, got %d / %v", pid, err)
+	}
+	if _, err := parseNetstatPid(out, 12345); err == nil {
+		t.Fatal("absent port must error")
+	}
+}
+
+func TestParseFirstPid(t *testing.T) {
+	if pid, err := parseFirstPid("9005\n"); err != nil || pid != 9005 {
+		t.Fatalf("want 9005, got %d / %v", pid, err)
+	}
+	if _, err := parseFirstPid("\n\n"); err == nil {
+		t.Fatal("empty output must error")
+	}
+}
