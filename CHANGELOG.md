@@ -11,6 +11,8 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.9.8] - 2026-08-22
+
 ### Fixed
 - **The phone picks up updates on its own now.** After an update, a resumed phone
   app could keep running the old version until you force-closed it — its
