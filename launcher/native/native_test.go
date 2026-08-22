@@ -719,10 +719,11 @@ func freeClosedPort(t *testing.T) int {
 	return port
 }
 
-func TestUpDetectsDeadSpawnBehindSurvivor(t *testing.T) {
-	// The poisoning, replayed: our gateway spawn dies while ANOTHER process answers the
-	// gateway port. Health passes (the survivor answers); Up used to conclude success and
-	// leave pid files naming the dead spawn, so every later Down stopped nothing.
+func TestUpRefusesWhenGatewayHolderCannotBeStopped(t *testing.T) {
+	// A survivor answers the gateway port but cannot be killed (here: it IS the test
+	// process, tripping the self-kill guard — the stand-in for any unkillable holder).
+	// Up must fail LOUD before spawning anything, never adopt the imposter: silent
+	// adoption is how an Aug-7 gateway served under an Aug-22 app for four releases.
 	if runtime.GOOS == "windows" {
 		t.Skip("uses a unix shell-script spawn")
 	}
@@ -743,8 +744,8 @@ func TestUpDetectsDeadSpawnBehindSurvivor(t *testing.T) {
 	n.Port = freeClosedPort(t) // nothing answers the APP port -> preflight passes
 	completedVersion(t, n, "1.0.0", map[string]string{"bifrost-http": "#!/bin/sh\nexit 0\n"})
 	err = n.Up(context.Background())
-	if err == nil || !strings.Contains(err.Error(), "another instance is running") {
-		t.Fatalf("a dead spawn behind an answering survivor must be refused, got: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "could not be stopped") {
+		t.Fatalf("an unkillable gateway-port holder must fail Up loud, got: %v", err)
 	}
 	// The dead spawn's pid record must not outlive the failure (Down drops it).
 	if _, statErr := os.Stat(filepath.Join(n.runDir(), "bifrost.pid")); !os.IsNotExist(statErr) {
@@ -976,5 +977,56 @@ func TestParseFirstPid(t *testing.T) {
 	}
 	if _, err := parseFirstPid("\n\n"); err == nil {
 		t.Fatal("empty output must error")
+	}
+}
+
+func TestUpKillsStaleGatewayAndProceeds(t *testing.T) {
+	// The auto-heal itself: a SEPARATE stale process answers the gateway port (the
+	// observed zombie — an Aug-7 gateway under an Aug-22 app). Up's preflight must
+	// kill it and proceed to spawn its own gateway — proven by Up failing LATER on
+	// the stub bifrost dying, which can only be reached after the port was cleared.
+	if runtime.GOOS == "windows" {
+		t.Skip("uses a unix shell-script spawn")
+	}
+	if _, err := currentPlatform(); err != nil {
+		t.Skipf("unshipped platform: %v", err)
+	}
+	py, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("needs python3 for the separate-process survivor")
+	}
+	healthURL := fmt.Sprintf("http://127.0.0.1:%d/api/health", BifrostPort)
+	if probe(context.Background(), healthURL) {
+		t.Skip("gateway port busy on this host")
+	}
+	script := "from http.server import HTTPServer, BaseHTTPRequestHandler\n" +
+		"class S(BaseHTTPRequestHandler):\n" +
+		"    def do_GET(self):\n        self.send_response(200)\n        self.end_headers()\n" +
+		"    def log_message(self, *a):\n        pass\n" +
+		fmt.Sprintf("HTTPServer(('127.0.0.1', %d), S).serve_forever()\n", BifrostPort)
+	surv := exec.Command(py, "-c", script)
+	if err := surv.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = surv.Process.Kill(); _, _ = surv.Process.Wait() }()
+	deadline := time.Now().Add(10 * time.Second)
+	for !probe(context.Background(), healthURL) { // bounded by the deadline
+		if time.Now().After(deadline) {
+			t.Fatal("survivor server never came up")
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	n := New(t.TempDir())
+	n.Port = freeClosedPort(t) // nothing answers the APP port -> that preflight passes
+	completedVersion(t, n, "1.0.0", map[string]string{"bifrost-http": "#!/bin/sh\nexit 0\n"})
+	err = n.Up(context.Background())
+	// Past the preflight the stub gateway exits at once — awaitChild's net catches
+	// THAT. Reaching this error is the proof the stale holder was removed first.
+	if err == nil || !strings.Contains(err.Error(), "another instance is running") {
+		t.Fatalf("expected the spawn-death error after the stale holder was cleared, got: %v", err)
+	}
+	if probe(context.Background(), healthURL) {
+		t.Fatal("the stale gateway is still serving — the preflight did not kill it")
 	}
 }
