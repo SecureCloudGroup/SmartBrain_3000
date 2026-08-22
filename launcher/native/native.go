@@ -27,6 +27,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -329,8 +330,8 @@ func (n Native) Up(ctx context.Context) error {
 	// against the survivor's health answers while its own fresh spawn died on the held
 	// port. Silently adopting it is version drift; kill it and start the right one.
 	if probe(ctx, fmt.Sprintf("http://127.0.0.1:%d/api/health", BifrostPort)) {
-		if err := killPortHolder(BifrostPort); err != nil {
-			return fmt.Errorf("native up: port %d is already serving and its owner could not be stopped (%v) — quit the stale bifrost-http process and Start again", BifrostPort, err)
+		if err := n.killPortHolderIfOurs(BifrostPort, bifrostProcessMarker); err != nil {
+			return fmt.Errorf("native up: port %d is already serving and its owner could not be stopped (%v) — stop whatever holds it and Start again", BifrostPort, err)
 		}
 		if err := awaitPortFree(ctx, BifrostPort, 5*time.Second); err != nil {
 			return fmt.Errorf("native up: port %d did not free up after stopping its owner: %w", BifrostPort, err)
@@ -929,33 +930,51 @@ func unzip(archive, dest string) error {
 }
 
 // awaitPortFree waits (bounded) for a just-killed port holder to actually release the
-// port — the kernel keeps the socket alive briefly after SIGKILL.
+// port — the kernel keeps the socket alive briefly after SIGKILL. A TCP dial is the
+// honest signal: connection refused means free; an HTTP health probe would call a
+// non-HTTP squatter "free" and let the spawn die on the bind instead.
 func awaitPortFree(ctx context.Context, port int, budget time.Duration) error {
 	deadline := time.Now().Add(budget)
-	url := fmt.Sprintf("http://127.0.0.1:%d/api/health", port)
+	addr := fmt.Sprintf("127.0.0.1:%d", port)
 	for time.Now().Before(deadline) { // bounded by the budget
-		if !probe(ctx, url) {
-			return nil
+		conn, err := net.DialTimeout("tcp", addr, 500*time.Millisecond)
+		if err != nil {
+			return nil // refused — nothing listening
 		}
+		_ = conn.Close()
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-time.After(200 * time.Millisecond):
 		}
 	}
-	return fmt.Errorf("still serving after %s", budget)
+	return fmt.Errorf("still listening after %s", budget)
 }
 
-// killPortHolder finds the process listening on 127.0.0.1:port and kills it. Only ever
-// called for OUR ports after the preflights proved the holder can't be a recorded child,
-// so the holder is by construction a stale instance of our own stack.
-func killPortHolder(port int) error {
+// killPortHolderIfOurs kills the port's listener ONLY when its command line carries
+// “marker“. The audit finding this encodes: "the port answers" does not mean "the
+// holder is ours" — on a machine where the Docker stack legitimately publishes this
+// port, the OS-level listener is Docker's forwarder (com.docker.backend on macOS,
+// docker-proxy on Linux), and killing it is collateral damage to every container the
+// user runs. Identity is checked through the injectable PS seam; identity UNKNOWN
+// (Windows, where ps is unavailable, or any lookup failure) refuses rather than
+// gambles — the caller surfaces the honest error naming the pid.
+func (n Native) killPortHolderIfOurs(port int, marker string) error {
 	pid, err := portHolderPid(port)
 	if err != nil {
 		return err
 	}
 	if pid == os.Getpid() {
 		return fmt.Errorf("refusing to kill self (pid %d)", pid)
+	}
+	cmdline := ""
+	if n.PS != nil {
+		cmdline = n.PS(pid)
+	}
+	if !strings.Contains(cmdline, marker) {
+		return fmt.Errorf(
+			"pid %d on port %d is not a %s process — if this is your Docker stack, stop it first (or set SMARTBRAIN_NATIVE=0); otherwise free the port",
+			pid, port, marker)
 	}
 	proc, err := os.FindProcess(pid)
 	if err != nil {
@@ -1029,19 +1048,20 @@ func parseSsPid(out string) (int, error) {
 	return strconv.Atoi(rest[:end])
 }
 
-// parseNetstatPid finds the LISTENING row for the port in `netstat -ano -p tcp` output;
-// the pid is the final column.
+// parseNetstatPid finds the row owning the local port in `netstat -ano -p tcp` output;
+// the pid is the final column. Deliberately NO match on the state column: netstat
+// localizes it (German ABHÖREN, French LISTENING equivalents…), so filtering on the
+// English word silently breaks every non-English Windows. Shape-matching the row —
+// TCP proto, local address ending in :port — identifies the owner regardless of
+// locale; ESTABLISHED rows for the same local port belong to the same owning pid.
 func parseNetstatPid(out string, port int) (int, error) {
 	needle := fmt.Sprintf(":%d", port)
 	for _, line := range strings.Split(out, "\n") { // bounded by command output
-		if !strings.Contains(line, "LISTENING") {
-			continue
-		}
 		fields := strings.Fields(line)
-		// Proto Local Foreign State PID — local address must end with our port.
-		if len(fields) >= 5 && strings.HasSuffix(fields[1], needle) {
+		// Proto Local Foreign State PID
+		if len(fields) >= 5 && strings.EqualFold(fields[0], "TCP") && strings.HasSuffix(fields[1], needle) {
 			return strconv.Atoi(fields[len(fields)-1])
 		}
 	}
-	return 0, fmt.Errorf("no LISTENING row for port %d", port)
+	return 0, fmt.Errorf("no TCP row for port %d", port)
 }

@@ -18,6 +18,20 @@ export function registerLockedHandler(fn: () => void): void {
   onLocked = fn;
 }
 
+// EVERY 423, from every fetch path, goes through here — req() and both streaming
+// endpoints alike. An audit found the streaming endpoints doing their own bare
+// goto("/unlock") without the state flip: bounded today, but exactly the bug class
+// that stampeded a tab at 37 req/s, waiting to be copy-pasted into the next
+// raw-fetch endpoint. One handler, no copies to drift.
+function handleLocked(): void {
+  onLocked?.(); // client state flips to locked BEFORE any effect can re-fire a fetch
+  const onUnlockPage =
+    typeof window !== "undefined" && window.location.pathname.startsWith("/unlock");
+  if (!onUnlockPage) {
+    goto("/unlock"); // vault locked mid-session — bounce to unlock (idempotent)
+  }
+}
+
 export class ApiError extends Error {
   status: number;
   constructor(status: number, message: string) {
@@ -37,12 +51,7 @@ async function req<T>(path: string, opts: RequestInit = {}): Promise<T> {
   if (!res.ok) {
     const detail = (data && (data as { detail?: string }).detail) || `request failed (${res.status})`;
     if (res.status === 423) {
-      onLocked?.(); // client state flips to locked BEFORE any effect can re-fire a fetch
-      const onUnlockPage =
-        typeof window !== "undefined" && window.location.pathname.startsWith("/unlock");
-      if (!onUnlockPage) {
-        goto("/unlock"); // vault locked mid-session — bounce to unlock (idempotent)
-      }
+      handleLocked();
     }
     throw new ApiError(res.status, detail);
   }
@@ -708,7 +717,7 @@ export const api = {
     });
     if (!res.ok) {
       const detail = (await res.json().catch(() => null) as { detail?: string } | null)?.detail;
-      if (res.status === 423) goto("/unlock");
+      if (res.status === 423) handleLocked();
       throw new ApiError(res.status, detail || `stream failed (${res.status})`);
     }
     return res;
@@ -734,7 +743,7 @@ export const api = {
     });
     if (!res.ok) {
       const detail = (await res.json().catch(() => null) as { detail?: string } | null)?.detail;
-      if (res.status === 423) goto("/unlock");
+      if (res.status === 423) handleLocked();
       throw new ApiError(res.status, detail || `turn failed (${res.status})`);
     }
     return res;

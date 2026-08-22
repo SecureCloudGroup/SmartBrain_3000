@@ -21,6 +21,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -940,9 +941,46 @@ func TestKillPortHolderRefusesSelf(t *testing.T) {
 	if _, err := portHolderPid(port); err != nil {
 		t.Skipf("no lookup tool on this runner: %v", err)
 	}
-	// The holder is THIS test process — the guard must refuse rather than suicide.
-	if err := killPortHolder(port); err == nil || !strings.Contains(err.Error(), "refusing to kill self") {
+	// The holder is THIS test process — the guard must refuse rather than suicide,
+	// and the self check must fire BEFORE identity could ever justify a kill.
+	n := New(t.TempDir())
+	if err := n.killPortHolderIfOurs(port, "native.test"); err == nil || !strings.Contains(err.Error(), "refusing to kill self") {
 		t.Fatalf("expected refusing-to-kill-self, got %v", err)
+	}
+}
+
+func TestKillPortHolderRefusesForeignProcess(t *testing.T) {
+	// The audit finding: the port answering does not make its holder OURS. A listener
+	// whose command line lacks the marker (stand-in for Docker's port-forwarder) must
+	// be left ALIVE, and the refusal must say why.
+	py, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("needs python3 for the foreign listener")
+	}
+	foreign := exec.Command(py, "-c",
+		"import socket,time,sys\ns=socket.socket()\ns.bind(('127.0.0.1',0))\ns.listen()\nprint(s.getsockname()[1])\nsys.stdout.flush()\ntime.sleep(60)")
+	out, err := foreign.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := foreign.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = foreign.Process.Kill(); _, _ = foreign.Process.Wait() }()
+	var port int
+	if _, err := fmt.Fscan(out, &port); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := portHolderPid(port); err != nil {
+		t.Skipf("no lookup tool on this runner: %v", err)
+	}
+	n := New(t.TempDir())
+	err = n.killPortHolderIfOurs(port, bifrostProcessMarker)
+	if err == nil || !strings.Contains(err.Error(), "is not a bifrost-http process") {
+		t.Fatalf("a foreign port holder must be refused with the reason, got %v", err)
+	}
+	if err := foreign.Process.Signal(syscall.Signal(0)); err != nil {
+		t.Fatal("the foreign process must still be alive — refusal means NOT killed")
 	}
 }
 
@@ -969,6 +1007,14 @@ func TestParseNetstatPid(t *testing.T) {
 	if _, err := parseNetstatPid(out, 12345); err == nil {
 		t.Fatal("absent port must error")
 	}
+	// The state column is LOCALIZED (German below) — matching the English word
+	// silently broke every non-English Windows. Shape-matching must not care.
+	de := "  Proto  Lokale Adresse         Remoteadresse          Status          PID\r\n" +
+		"  TCP    127.0.0.1:38080        0.0.0.0:0              ABH\u00d6REN         7777\r\n"
+	pid, err = parseNetstatPid(de, 38080)
+	if err != nil || pid != 7777 {
+		t.Fatalf("German netstat must parse: want 7777, got %d / %v", pid, err)
+	}
 }
 
 func TestParseFirstPid(t *testing.T) {
@@ -980,35 +1026,38 @@ func TestParseFirstPid(t *testing.T) {
 	}
 }
 
-func TestUpKillsStaleGatewayAndProceeds(t *testing.T) {
-	// The auto-heal itself: a SEPARATE stale process answers the gateway port (the
-	// observed zombie — an Aug-7 gateway under an Aug-22 app). Up's preflight must
-	// kill it and proceed to spawn its own gateway — proven by Up failing LATER on
-	// the stub bifrost dying, which can only be reached after the port was cleared.
-	if runtime.GOOS == "windows" {
-		t.Skip("uses a unix shell-script spawn")
-	}
-	if _, err := currentPlatform(); err != nil {
-		t.Skipf("unshipped platform: %v", err)
-	}
+// gatewaySurvivor starts a separate-process HTTP-200 server on the gateway port. When
+// asOurs is true, the process is launched via an executable named `bifrost-http` (a
+// python script under the hood) so its command line carries the identity marker — the
+// faithful stand-in for the observed stale-gateway zombie; when false, it runs as a
+// plain python process (the stand-in for Docker's port-forwarder or any foreign tool).
+func gatewaySurvivor(t *testing.T, asOurs bool) *exec.Cmd {
+	t.Helper()
 	py, err := exec.LookPath("python3")
 	if err != nil {
 		t.Skip("needs python3 for the separate-process survivor")
 	}
-	healthURL := fmt.Sprintf("http://127.0.0.1:%d/api/health", BifrostPort)
-	if probe(context.Background(), healthURL) {
-		t.Skip("gateway port busy on this host")
-	}
-	script := "from http.server import HTTPServer, BaseHTTPRequestHandler\n" +
+	script := "#!/usr/bin/env python3\n" +
+		"from http.server import HTTPServer, BaseHTTPRequestHandler\n" +
 		"class S(BaseHTTPRequestHandler):\n" +
 		"    def do_GET(self):\n        self.send_response(200)\n        self.end_headers()\n" +
 		"    def log_message(self, *a):\n        pass\n" +
 		fmt.Sprintf("HTTPServer(('127.0.0.1', %d), S).serve_forever()\n", BifrostPort)
-	surv := exec.Command(py, "-c", script)
-	if err := surv.Start(); err != nil {
+	var cmd *exec.Cmd
+	if asOurs {
+		bin := filepath.Join(t.TempDir(), "bifrost-http")
+		if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		cmd = exec.Command(bin)
+	} else {
+		cmd = exec.Command(py, "-c", strings.TrimPrefix(script, "#!/usr/bin/env python3\n"))
+	}
+	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = surv.Process.Kill(); _, _ = surv.Process.Wait() }()
+	t.Cleanup(func() { _ = cmd.Process.Kill(); _, _ = cmd.Process.Wait() })
+	healthURL := fmt.Sprintf("http://127.0.0.1:%d/api/health", BifrostPort)
 	deadline := time.Now().Add(10 * time.Second)
 	for !probe(context.Background(), healthURL) { // bounded by the deadline
 		if time.Now().After(deadline) {
@@ -1016,11 +1065,31 @@ func TestUpKillsStaleGatewayAndProceeds(t *testing.T) {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
+	return cmd
+}
+
+func TestUpKillsStaleGatewayAndProceeds(t *testing.T) {
+	// The auto-heal itself: a SEPARATE stale bifrost-http answers the gateway port
+	// (the observed zombie — an Aug-7 gateway under an Aug-22 app). Up's preflight
+	// must verify its identity, kill it, and proceed to spawn its own gateway —
+	// proven by Up failing LATER on the stub bifrost dying, which is only reachable
+	// after the port was cleared.
+	if runtime.GOOS == "windows" {
+		t.Skip("uses a unix shell-script spawn")
+	}
+	if _, err := currentPlatform(); err != nil {
+		t.Skipf("unshipped platform: %v", err)
+	}
+	healthURL := fmt.Sprintf("http://127.0.0.1:%d/api/health", BifrostPort)
+	if probe(context.Background(), healthURL) {
+		t.Skip("gateway port busy on this host")
+	}
+	gatewaySurvivor(t, true) // command line carries the bifrost-http marker
 
 	n := New(t.TempDir())
 	n.Port = freeClosedPort(t) // nothing answers the APP port -> that preflight passes
 	completedVersion(t, n, "1.0.0", map[string]string{"bifrost-http": "#!/bin/sh\nexit 0\n"})
-	err = n.Up(context.Background())
+	err := n.Up(context.Background())
 	// Past the preflight the stub gateway exits at once — awaitChild's net catches
 	// THAT. Reaching this error is the proof the stale holder was removed first.
 	if err == nil || !strings.Contains(err.Error(), "another instance is running") {
@@ -1028,5 +1097,32 @@ func TestUpKillsStaleGatewayAndProceeds(t *testing.T) {
 	}
 	if probe(context.Background(), healthURL) {
 		t.Fatal("the stale gateway is still serving — the preflight did not kill it")
+	}
+}
+
+func TestUpRefusesForeignGatewayPortHolder(t *testing.T) {
+	// The identity gate at the Up level: a FOREIGN process on the gateway port (the
+	// Docker port-forwarder case from the audit) must fail Up loud — and survive.
+	if runtime.GOOS == "windows" {
+		t.Skip("uses a unix shell-script spawn")
+	}
+	if _, err := currentPlatform(); err != nil {
+		t.Skipf("unshipped platform: %v", err)
+	}
+	healthURL := fmt.Sprintf("http://127.0.0.1:%d/api/health", BifrostPort)
+	if probe(context.Background(), healthURL) {
+		t.Skip("gateway port busy on this host")
+	}
+	gatewaySurvivor(t, false) // plain python: no marker in the command line
+
+	n := New(t.TempDir())
+	n.Port = freeClosedPort(t)
+	completedVersion(t, n, "1.0.0", map[string]string{"bifrost-http": "#!/bin/sh\nexit 0\n"})
+	err := n.Up(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "could not be stopped") {
+		t.Fatalf("a foreign gateway-port holder must fail Up loud, got: %v", err)
+	}
+	if !probe(context.Background(), healthURL) {
+		t.Fatal("the foreign process must still be serving — refusal means NOT killed")
 	}
 }
