@@ -11,6 +11,8 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.9.10] - 2026-08-22
+
 ### Added
 - **Follow websites — RSS/Atom feed subscriptions.** Paste a feed URL on the Knowledge
   page and SmartBrain keeps up with it for you: each subscription gets its own vault,
