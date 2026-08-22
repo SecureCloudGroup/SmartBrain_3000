@@ -149,13 +149,17 @@ async function _initRemote(): Promise<void> {
   const resume = () => {
     cancelHide();
     const conn = getRemote();
-    // Reconnect if torn down, dropped, or the PC is silently dead (iOS froze before the
-    // grace timer fired) — isLive() stops us showing "connected" over a corpse. This also
-    // recovers from terminal "offline": startRemote mints a fresh RemoteConnection, so the
-    // burned-out closed/reconnects state of the old one never lingers.
+    // Reconnect if torn down, dropped, or the PC is obviously dead (iOS froze before the
+    // grace timer fired). This also recovers from terminal "offline": startRemote mints a
+    // fresh RemoteConnection, so the burned-out closed/reconnects state never lingers.
     if (!conn || remote.status === "offline" || remote.status === "reconnecting" || !conn.isLive()) {
       startRemote(pairing);
+      return;
     }
+    // The PC CLAIMS to be alive — but connectionState lies after an iOS background
+    // freeze. Demand a fresh pong on a short deadline; a miss reconnects within ~3s
+    // instead of whenever the 45s keepalive math would have noticed.
+    conn.verify();
   };
   window.addEventListener("pagehide", () => {
     cancelHide();

@@ -142,10 +142,11 @@
     io.observe(logEnd);
     return () => io.disconnect();
   });
-  // The id of the assistant entry currently streaming (the newest one while a stopper exists).
-  const streamingId = $derived(
-    stopper ? [...log].reverse().find((e) => e.role === "assistant" && !e.err)?.id ?? null : null,
-  );
+  // The id of the assistant entry currently streaming — set when the stream bubble is
+  // actually created (first delta), not when the request starts. Deriving it from "the
+  // newest assistant entry while a stopper exists" mislabeled the PREVIOUS answer as
+  // streaming during the pre-first-token wait, and hid the thinking row with it.
+  let streamEntryId = $state<string | null>(null);
   const lastLen = $derived(log.length ? log[log.length - 1].content.length : 0);
   $effect(() => {
     void lastLen; // track every streamed delta + new entries
@@ -593,6 +594,7 @@
       if (streamId) return streamId;
       const id = nextEntryId("asst");
       streamId = id;
+      streamEntryId = id;
       log.push({ id, role: "assistant", content: "" });
       return id;
     };
@@ -637,6 +639,7 @@
             // Tools-needed/approval — discard any partial stream bubble and replay on
             // the narrated tool path (not interruptible, so drop the Stop affordance).
             stopper = null;
+            streamEntryId = null;
             if (streamId) log = log.filter((e) => e.id !== streamId);
             await runToolTurn(args.messages, args.cid);
             return;
@@ -657,6 +660,7 @@
         // whole on the non-streaming endpoint rather than showing the user a red
         // "couldn't reach SmartBrain" for an answer the backend produced happily.
         stopper = null;
+        streamEntryId = null;
         if (streamId) log = log.filter((e) => e.id !== streamId);
         const whole = await api.agentTurn({ messages: args.messages, model: modelId, conversation_id: args.cid });
         await handleAgentResult(whole, args.cid);
@@ -671,6 +675,7 @@
       }
     } finally {
       stopper = null;
+      streamEntryId = null;
     }
   }
 
@@ -1049,7 +1054,7 @@
         <div class="msg">
           <div class="who">
             SmartBrain
-            {#if stopper && entry.id === streamingId}<span class="state">· streaming<span class="caret"></span></span>{/if}
+            {#if stopper && entry.id === streamEntryId}<span class="state">· streaming<span class="caret"></span></span>{/if}
           </div>
           <div class="body"><Markdown content={entry.content} /></div>
           {#if entry.sources?.length}
@@ -1095,9 +1100,11 @@
         </div>
       {/if}
     {/each}
-    {#if busy && !stopper}
-      <!-- Non-streamed / pre-first-token wait: an alive "thinking" signal — with a live
-           narrative of tool activity when the events endpoint is doing the work. -->
+    {#if busy && !streamEntryId}
+      <!-- The wait for real content, streamed or not: an alive "thinking" signal — with a
+           live narrative of tool activity when the events endpoint is doing the work. The
+           streamed path used to hide this the moment the request started (stopper set),
+           leaving the desktop silent until the first token — many seconds on a big model. -->
       <div class="msg">
         <div class="who">SmartBrain <span class="state">· {activity.length ? "working" : "thinking"}</span></div>
         <div class="body">

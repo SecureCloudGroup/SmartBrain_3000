@@ -11,6 +11,19 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Fixed
+- **The desktop now shows "thinking" while a streamed answer is on its way.** The
+  streamed chat path hid the thinking indicator the moment the request started,
+  leaving the page silent until the first token — many seconds on a large model.
+  The indicator now stays up until real content arrives (and the previous answer
+  no longer briefly wears a "streaming" caret it didn't earn).
+- **Coming back to the phone app reconnects in seconds, not "eventually".** iOS
+  freezes the connection when the app is backgrounded but keeps claiming it's
+  connected, so returning could leave the phone staring at a dead link until the
+  keepalive noticed (up to ~45 s). On return the phone now demands a fresh
+  heartbeat within a couple of seconds and reconnects immediately if it doesn't
+  arrive; a genuinely healthy connection is left untouched.
+
 ## [0.9.5] - 2026-08-19
 
 ### Changed
