@@ -357,6 +357,20 @@ _MIGRATIONS: tuple[tuple[int, str | Callable[[], str]], ...] = (
     # one that built the release. Other historical timestamps (chat, documents) are
     # display-only and deliberately left alone.
     (37, lambda: _utc_shift_sql()),
+    # Feed subscriptions (RSS/Atom → self-filling vaults). The URL+title are sealed in
+    # ciphertext (a feed list is a reading profile); cadence metadata is plaintext so
+    # the refresh tick finds due rows without the key — the schedules-table convention.
+    # feed_seen is the per-feed dedup set (guids only — vault_import_traces' pattern).
+    (
+        38,
+        "CREATE TABLE IF NOT EXISTS feeds ("
+        "id TEXT PRIMARY KEY, vault_id TEXT NOT NULL, nonce BLOB NOT NULL, "
+        "ciphertext BLOB NOT NULL, enabled BOOLEAN DEFAULT true, "
+        "last_checked TIMESTAMP, last_status TEXT DEFAULT '', "
+        "created_at TIMESTAMP DEFAULT current_timestamp); "
+        "CREATE TABLE IF NOT EXISTS feed_seen ("
+        "feed_id TEXT NOT NULL, guid TEXT NOT NULL, PRIMARY KEY (feed_id, guid));",
+    ),
 )
 
 

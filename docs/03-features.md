@@ -240,6 +240,25 @@ Your knowledge is also what external tools can read over [MCP](05-mcp.md).
 Group documents into **vaults** to scope a search — and to share them, privately
 or publicly: see [Share knowledge with Vaults](04-vaults.md).
 
+### Follow websites (feeds)
+
+Any site that publishes an **RSS or Atom feed** — most blogs, news sites, and release
+pages do — can fill your knowledge by itself. On the **Knowledge** page, open *Follow a
+website*, paste the feed URL, and Subscribe. The subscription gets its own vault, and
+every new post lands there as a searchable, citable document — so *"what did that blog
+say about X?"* works in Chat, and a schedule (below) can summarize the week's posts for
+you. What lands is what the feed carries: usually the title, link, and summary — some
+feeds include the full article, many don't.
+
+SmartBrain checks each feed **about every six hours, directly from this machine** — no
+server in the middle — and articles are encrypted at rest like every other document.
+Posts it has already saved are recognised and skipped, so a feed never duplicates itself.
+**Refresh** on a feed's row checks right now, and the row always shows when it last
+checked and what happened. Only the public URLs you pasted yourself are ever fetched.
+
+**Unsubscribe** stops the checking and removes the feed's vault. Its saved articles are
+your documents and stay in your knowledge — unless you choose *Delete articles too*.
+
 ## Planner
 
 ![Planner — tasks grouped Today / This week / by due date](assets/gifs/06-planner.gif)

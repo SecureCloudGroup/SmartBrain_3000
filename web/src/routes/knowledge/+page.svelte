@@ -10,6 +10,7 @@
   import {
     api,
     type ExportHeaders,
+    type Feed,
     type KbDoc,
     type KbDocFull,
     type KbHit,
@@ -117,6 +118,14 @@
   let subscribeError = $state(""); // inline, next to the URL field — same rule as importError
   let vaultBusy = $state("");
 
+  // Feeds — a vault that fills itself. Pasting the URL here IS the consent for the 6-hourly
+  // background refresh of that host, so add/unsubscribe are Desktop-local like import/export.
+  let feeds = $state<Feed[]>([]);
+  let feedUrl = $state("");
+  let feedError = $state(""); // inline, next to the URL field — same rule as subscribeError
+  let feedBusy = $state(""); // "add" | "<feed id>" while a request is in flight
+  let feedConfirmId = $state<string | null>(null); // unsubscribe: one open keep-vs-delete panel
+
   const ACCEPT = ".pdf,.docx,.pptx,.xlsx,.txt,.md,.markdown,.html,.htm,.csv,.json,.log,.rst";
   const _MAX_FILES = 200; // bounded per drop (uploads no longer block on embedding, so this can be generous)
 
@@ -136,12 +145,74 @@
     }
   }
 
+  async function loadFeeds() {
+    try {
+      feeds = (await api.listFeeds()).feeds;
+    } catch (err) {
+      error = describeError(err);
+    }
+  }
+
+  async function addFeed() {
+    const url = feedUrl.trim();
+    if (!url || feedBusy) return;
+    feedBusy = "add";
+    feedError = "";
+    try {
+      const r = await api.addFeed(url);
+      notice = `Subscribed to “${r.title}” — ${r.items} article${r.items === 1 ? "" : "s"} saved to its vault. New posts are picked up automatically.`;
+      feedUrl = "";
+      await Promise.all([loadFeeds(), loadDocs(), loadVaults()]);
+      refreshIndexStatus(); // the new articles embed in the background
+    } catch (err) {
+      feedError = describeError(err);
+    } finally {
+      feedBusy = "";
+    }
+  }
+
+  async function refreshFeed(f: Feed) {
+    if (feedBusy) return;
+    feedBusy = f.id;
+    try {
+      const r = await api.refreshFeed(f.id);
+      notice = r.items
+        ? `“${f.title}”: ${r.items} new article${r.items === 1 ? "" : "s"}.`
+        : `“${f.title}”: nothing new.`;
+      await Promise.all([loadFeeds(), loadDocs(), loadVaults()]);
+      if (r.items) refreshIndexStatus();
+    } catch (err) {
+      feedError = describeError(err);
+      await loadFeeds(); // the row's status just recorded the failure — show it
+    } finally {
+      feedBusy = "";
+    }
+  }
+
+  async function unsubscribeFeed(f: Feed, removeDocs: boolean) {
+    if (feedBusy) return;
+    feedBusy = f.id;
+    feedError = "";
+    try {
+      const r = await api.deleteFeed(f.id, { remove_docs: removeDocs });
+      notice = removeDocs
+        ? `Unsubscribed from “${f.title}” and deleted its ${r.docs_removed} article${r.docs_removed === 1 ? "" : "s"}.`
+        : `Unsubscribed from “${f.title}”. Its saved articles stay in your knowledge.`;
+      feedConfirmId = null;
+      await Promise.all([loadFeeds(), loadDocs(), loadVaults()]);
+    } catch (err) {
+      feedError = describeError(err);
+    } finally {
+      feedBusy = "";
+    }
+  }
+
   onMount(async () => {
     if (account.status === null) await account.load();
     const s = account.status;
     if (s && !s.initialized) return goto("/setup");
     if (s && !s.unlocked) return goto("/unlock");
-    await Promise.all([loadDocs(), loadVaults()]);
+    await Promise.all([loadDocs(), loadVaults(), loadFeeds()]);
     refreshIndexStatus();
     // Deep link from a chat citation chip: /knowledge?doc=<id>&offset=<n> opens the
     // document at the cited passage (no offset -> at the top). Plain window.location —
@@ -1782,6 +1853,60 @@
       </div>
       {#if subscribeError}<p class="error" style="margin:0.4rem 0 0">{subscribeError}</p>{/if}
     </details>
+
+    <!-- Feeds: a vault that fills itself. Fetches happen from THIS machine on its own schedule
+         (nothing goes through any SmartBrain server), and articles are stored encrypted like
+         every other document. Add/unsubscribe are Desktop-local; the paste is the consent. -->
+    <details style="margin-top:1rem" open={feeds.length > 0}>
+      <summary>Follow a website — subscribe to its RSS/Atom feed{feeds.length ? ` · ${feeds.length}` : ""}</summary>
+      <p class="muted" style="margin:0.5rem 0; font-size:0.85rem">
+        Paste a feed URL and new posts are saved into their own vault as searchable documents —
+        checked every few hours, fetched directly from this machine, encrypted like everything
+        else. Ask about them in chat, or use them in schedules.
+      </p>
+      <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap">
+        <input
+          style="flex:1; min-width:12rem"
+          bind:value={feedUrl}
+          placeholder="https://example.com/feed.xml"
+          aria-label="Feed URL"
+          onkeydown={(e) => e.key === "Enter" && feedUrl.trim() && addFeed()}
+        />
+        <button disabled={feedBusy === "add" || !feedUrl.trim()} onclick={addFeed}>
+          {feedBusy === "add" ? "Subscribing…" : "Subscribe"}
+        </button>
+      </div>
+      {#if feedError}<p class="error" style="margin:0.4rem 0 0">{feedError}</p>{/if}
+      {#each feeds as f (f.id)}
+        <div class="feed-row">
+          <div style="flex:1; min-width:10rem">
+            <strong>{f.title}</strong>
+            <span class="muted" style="font-size:0.85rem"> · {new URL(f.url).hostname}</span>
+            <div class="muted" style="font-size:0.8rem">
+              {f.last_checked ? `checked ${f.last_checked.slice(0, 16)} — ${f.last_status}` : "not checked yet"}
+            </div>
+          </div>
+          <button disabled={feedBusy === f.id} onclick={() => refreshFeed(f)}>
+            {feedBusy === f.id ? "Working…" : "Refresh"}
+          </button>
+          <button disabled={feedBusy === f.id} onclick={() => (feedConfirmId = feedConfirmId === f.id ? null : f.id)}>
+            Unsubscribe
+          </button>
+        </div>
+        {#if feedConfirmId === f.id}
+          <!-- Same two-option rule as vault delete: the grouping goes; the articles are the
+               user's documents and stay unless they explicitly ask for them gone. -->
+          <div class="feed-confirm">
+            <span class="muted" style="font-size:0.85rem">Stop following, and its saved articles?</span>
+            <button disabled={feedBusy === f.id} onclick={() => unsubscribeFeed(f, false)}>Keep articles</button>
+            <button class="danger" disabled={feedBusy === f.id} onclick={() => unsubscribeFeed(f, true)}>
+              Delete articles too
+            </button>
+            <button onclick={() => (feedConfirmId = null)}>Cancel</button>
+          </div>
+        {/if}
+      {/each}
+    </details>
   </div>
 
   {#if notice}<p class="muted">{notice}</p>{/if}
@@ -1791,6 +1916,22 @@
 {/if}
 
 <style>
+  /* --- feeds ----------------------------------------------------------------------------- */
+  .feed-row {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-top: 0.75rem;
+  }
+  .feed-confirm {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-top: 0.4rem;
+  }
+
   /* --- vaults ---------------------------------------------------------------------------- */
   .pickbar {
     display: flex;

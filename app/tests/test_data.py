@@ -469,7 +469,7 @@ def test_upgrade_from_v12_preserves_all_client_data(tmp_path) -> None:
     }
 
     applied = dbmod.run_migrations(conn)
-    assert applied == 25  # exactly ids 13..37 (36 import traces; 37 UTC shift)
+    assert applied == 26  # exactly ids 13..38 (36 import traces; 37 UTC shift; 38 feeds)
 
     # Every user-data row count is unchanged across the upgrade.
     for t, n in counts.items():
@@ -510,7 +510,7 @@ def test_upgrade_from_v2_preserves_documents(tmp_path) -> None:
     master_key = keyvault.set_passphrase(conn, _UP_PASS)
     doc_id = KnowledgeBase(conn, master_key).add("Ancient", "note from the v2 era")
 
-    assert dbmod.run_migrations(conn) == 35  # ids 3..37
+    assert dbmod.run_migrations(conn) == 36  # ids 3..38
     assert KnowledgeBase(conn, master_key).get(doc_id)["content"] == "note from the v2 era"
     assert conn.execute("SELECT COUNT(*) FROM documents;").fetchone()[0] == 1
     assert conn.execute("SELECT COUNT(*) FROM embeddings;").fetchone()[0] == 0  # fresh, empty
@@ -542,7 +542,7 @@ def test_upgrade_from_v17_preserves_embeddings_and_tasks(tmp_path) -> None:
     planner = Planner(conn, master_key)
     tid = planner.add_task("file taxes", priority="high", due_time="09:00", recur="weekly")
 
-    assert dbmod.run_migrations(conn) == 20  # ids 18..37
+    assert dbmod.run_migrations(conn) == 21  # ids 18..38
     # Chunked embedding preserved (18-21 only add schedule_runs, its seen column, and vaults).
     assert conn.execute("SELECT COUNT(*) FROM embeddings;").fetchone()[0] == 1
     t = planner.get_task(tid)
@@ -567,7 +567,7 @@ def test_migration_19_marks_preexisting_runs_seen(tmp_path) -> None:
         "INSERT INTO schedule_runs (id, schedule_id, status, nonce, ciphertext) VALUES (?, ?, ?, ?, ?);",
         ["run-old", sid, "complete", b"\x00" * 12, b"x"],
     )
-    assert dbmod.run_migrations(conn) == 19  # 19 seen; 20-23 vaults; 24 summaries; 25 trash; 26 embed total; 27-35 selfimprove; 36 import traces; 37 UTC shift
+    assert dbmod.run_migrations(conn) == 20  # 19 seen; 20-23 vaults; 24 summaries; 25 trash; 26 embed total; 27-35 selfimprove; 36 import traces; 37 UTC shift; 38 feeds
     assert store.unseen_count() == 0  # the back-catalog is seen -> badge stays quiet on upgrade
     conn.close()
 
@@ -580,7 +580,7 @@ def test_app_boots_and_serves_data_after_v12_upgrade(tmp_path, monkeypatch) -> N
     _apply_through(conn, 12)
     master_key = keyvault.set_passphrase(conn, _UP_PASS)
     _seed_v12(conn, master_key)
-    assert dbmod.run_migrations(conn) == 25  # ids 13..37 (vaults + summaries + trash + embed total + selfimprove + import traces + UTC shift)
+    assert dbmod.run_migrations(conn) == 26  # ids 13..38 (vaults + summaries + trash + embed total + selfimprove + import traces + UTC shift + feeds)
     conn.close()  # release the file before the app opens it
 
     monkeypatch.setenv("SMARTBRAIN_DB_PATH", str(path))

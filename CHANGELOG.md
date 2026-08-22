@@ -11,6 +11,15 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Added
+- **Follow websites — RSS/Atom feed subscriptions.** Paste a feed URL on the Knowledge
+  page and SmartBrain keeps up with it for you: each subscription gets its own vault,
+  and every new post lands there as a searchable, citable, encrypted document — ask
+  about them in Chat, or have a schedule summarize the week's posts. Checks run about
+  every six hours directly from your machine (no server in the middle), already-saved
+  posts are never duplicated, and unsubscribing keeps your saved articles unless you
+  say otherwise.
+
 ## [0.9.9] - 2026-08-22
 
 ### Changed

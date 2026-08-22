@@ -28,6 +28,7 @@ from . import (
     agent,
     consent,
     docsummaries,
+    feeds,
     gateway,
     ingest,
     search,
@@ -68,6 +69,7 @@ _CARRIER_IDS = (_VAULT_FEED_ID, _SELFREVIEW_FEED_ID)  # every reserved non-user 
 # vault pass is checked BETWEEN the (≤2) vaults; remaining vaults are abandoned for this tick (their
 # last_checked is untouched, so they retry next tick).
 _MAX_VAULT_PASS_SECONDS = 90
+_MAX_FEED_PASS_SECONDS = 20.0  # feeds share the tick; a slow host can't eat it
 # The background indexer works to a TIME budget, not a document count: 5-per-tick meant a 100-file
 # drop took ~10 minutes to index. 20s of a 30s tick drains a backlog steadily while still leaving
 # the single-threaded local model free most of the time (and it yields entirely to a live chat).
@@ -610,6 +612,17 @@ def _auto_update_vaults(app) -> None:
         log.warning("vault auto-update pass failed: %s", exc)
 
 
+def _auto_update_feeds(app) -> None:
+    """Feed-refresh pass, isolated exactly like _auto_update_vaults: its own cursor,
+    per-feed error swallowing inside, this guard for anything it doesn't catch — a dead
+    feed host must never stop due schedules from firing. Model-independent, so it runs
+    regardless of the gateway breaker."""
+    try:
+        feeds.tick(app, pass_budget_seconds=_MAX_FEED_PASS_SECONDS)
+    except Exception as exc:  # must never kill the schedule tick
+        log.warning("feed refresh pass failed: %s", exc)
+
+
 def eager_reindex(cursor, key: bytes) -> None:
     """One-shot full backfill when the embeddings table is empty but documents exist.
 
@@ -710,6 +723,7 @@ def tick(app) -> int:
         except Exception as exc:
             log.debug("trash purge skipped: %s", exc)
         _auto_update_vaults(app)    # Stage E: apply due subscription updates (model-independent)
+        _auto_update_feeds(app)     # RSS/Atom subscriptions: same isolation contract
         try:  # self-review (Phase 2): 8h-cadence scorecard, self-gated (kill-switch + due),
             # pure SQL in this phase so it needs no model; isolated like the trash purge.
             # locked_check mirrors run_schedule's: a mid-tick Lock stands the review down
