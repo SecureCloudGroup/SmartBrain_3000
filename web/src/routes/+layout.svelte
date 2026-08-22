@@ -5,6 +5,7 @@
   import { page } from "$app/state";
   import { account } from "$lib/account.svelte";
   import { api } from "$lib/api";
+  import { resumeUpdateAction } from "$lib/update";
   import { displayVersion } from "$lib/version";
   import { theme, initTheme, cycleTheme } from "$lib/theme.svelte";
   import { pending, refreshPending } from "$lib/pending.svelte";
@@ -105,6 +106,10 @@
   onMount(async () => {
     initTheme();
     watchForSWUpdate(); // pick up a freshly deployed service worker (iOS keeps the old one)
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") void checkVersionOnResume();
+    });
+    window.addEventListener("pageshow", () => void checkVersionOnResume()); // bfcache restore
     // Set up remote mode FIRST so the page's fetch override relays /api over WebRTC before
     // account.load() makes its first request (off the LAN there's no direct backend).
     await initRemote();
@@ -199,6 +204,31 @@
         /* offline or restarting — try again next minute */
       }
     }, 60_000);
+  }
+
+  // The 60s watcher freezes while a PWA is backgrounded and iOS throttles it on resume,
+  // so a resumed phone ran old code until a force-close (field report, the 0.9.7
+  // upgrade). Check at the moment that matters instead: every return to the foreground,
+  // with two short retries so the check rides out the remote bridge's own resume
+  // reconnect. Locked (the guaranteed post-update state — nothing in flight to lose)
+  // reloads on the spot; unlocked falls back to the banner. resumeUpdateAction holds
+  // that decision and its reasoning.
+  async function checkVersionOnResume(attempt = 0): Promise<void> {
+    try {
+      const health = await api.health();
+      noteUpdate(health.update_ready);
+      const action = resumeUpdateAction(loadedVersion, health.version ?? "", !!account.status?.unlocked);
+      if (action === "reload") {
+        location.reload();
+      } else if (action === "banner") {
+        updatedVersion = displayVersion(health.version);
+        if (updateTimer) clearInterval(updateTimer);
+      }
+    } catch {
+      // The bridge may still be resuming — a bounded pair of retries, then the 60s
+      // watcher owns it again.
+      if (attempt < 2) setTimeout(() => void checkVersionOnResume(attempt + 1), 4_000);
+    }
   }
 
   // Keep the Activity badge fresh: refresh the pending count on each route change
