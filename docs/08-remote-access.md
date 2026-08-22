@@ -62,7 +62,9 @@ replaced with a line pointing you at the Desktop, so nothing fails halfway.
 
 A small **"Remote"** chip shows the connection state: **direct** (phone-to-Desktop),
 **relayed** (through the encrypted relay), **Desktop locked** if your Desktop is up and
-the encrypted bridge is fine but its vault is locked — tap the chip to unlock from here,
+the encrypted bridge is fine but its vault is locked — tap the chip to unlock from here
+(it's one shared lock: unlocking from the phone unlocks the Desktop too, and a Desktop
+sitting on its unlock screen walks in on its own),
 **unreachable** if your Desktop is off, asleep, or otherwise can't be reached at all, or
 **BLOCKED** in red if your Desktop's identity can't be verified — re-pair if you reinstalled
 the app.
@@ -72,8 +74,9 @@ network can't quietly drop it, notices a dead path within about a minute and rec
 its own, and tolerates you switching apps for a few minutes. If the retries do give up, the
 next tap in the app starts it again.
 
-Your Desktop must be **running and unlocked** for any of this to work. The phone is a window
-onto it, not a copy of it.
+Your Desktop must be **running and unlocked** for any of this to work — and since the
+phone is a window onto the Desktop, they share one vault and one lock: unlock (or lock)
+on either, and both follow. The phone is a window onto it, not a copy of it.
 
 ## Manage devices
 

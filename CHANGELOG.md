@@ -11,6 +11,15 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Changed
+- **One vault, one lock — now said everywhere, and fully true.** The Desktop and a
+  paired phone always shared the same lock (the phone is a window onto the Desktop),
+  but the words never quite said so and a Desktop sitting on its unlock screen
+  wouldn't notice a phone-side unlock until refreshed. The unlock screen now watches
+  and continues on its own when the vault is unlocked from any other device, and the
+  unlock screen, getting-started guide, and remote-access guide all state the shared
+  lock plainly: unlock (or lock) on either device, and both follow.
+
 ## [0.9.8] - 2026-08-22
 
 ### Fixed

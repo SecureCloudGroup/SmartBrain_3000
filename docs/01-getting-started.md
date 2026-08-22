@@ -184,6 +184,11 @@ A quick path from zero to seeing what SmartBrain does:
 
 ## Locking and unlocking
 
+There is **one vault and one lock**: the Desktop and a paired phone share it. Unlocking
+on the phone unlocks the Desktop; unlocking on the Desktop unlocks the phone — a screen
+sitting on the unlock page notices on its own and continues. Locking anywhere locks
+everywhere, for the same reason: the key lives (or doesn't) in exactly one place.
+
 - Use **Lock**, at the bottom of the sidebar (under **More** on a phone), to drop the key
   from memory — your data is sealed until you unlock again. Locking also clears your
   provider keys from the gateway.
