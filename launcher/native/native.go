@@ -321,6 +321,21 @@ func (n Native) Up(ctx context.Context) error {
 	if name, pid, alive := n.liveRecordedChild(); alive {
 		return fmt.Errorf("native up: the previous %s (pid %d) is still running — stop it first", name, pid)
 	}
+	// The GATEWAY port gets the same discipline as the app port — plus auto-healing.
+	// Anything already serving it here is never legitimately ours: a legitimate gateway
+	// was stopped by the Down that precedes every Up, and live pid records were checked
+	// above. What's left is a survivor from a lost pid record — observed live: an Aug-7
+	// gateway still serving under an Aug-22 app, because every Up since "succeeded"
+	// against the survivor's health answers while its own fresh spawn died on the held
+	// port. Silently adopting it is version drift; kill it and start the right one.
+	if probe(ctx, fmt.Sprintf("http://127.0.0.1:%d/api/health", BifrostPort)) {
+		if err := killPortHolder(BifrostPort); err != nil {
+			return fmt.Errorf("native up: port %d is already serving and its owner could not be stopped (%v) — quit the stale bifrost-http process and Start again", BifrostPort, err)
+		}
+		if err := awaitPortFree(ctx, BifrostPort, 5*time.Second); err != nil {
+			return fmt.Errorf("native up: port %d did not free up after stopping its owner: %w", BifrostPort, err)
+		}
+	}
 	plat, err := currentPlatform()
 	if err != nil {
 		return err
@@ -911,4 +926,122 @@ func unzip(archive, dest string) error {
 		out.Close()
 	}
 	return nil
+}
+
+// awaitPortFree waits (bounded) for a just-killed port holder to actually release the
+// port — the kernel keeps the socket alive briefly after SIGKILL.
+func awaitPortFree(ctx context.Context, port int, budget time.Duration) error {
+	deadline := time.Now().Add(budget)
+	url := fmt.Sprintf("http://127.0.0.1:%d/api/health", port)
+	for time.Now().Before(deadline) { // bounded by the budget
+		if !probe(ctx, url) {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(200 * time.Millisecond):
+		}
+	}
+	return fmt.Errorf("still serving after %s", budget)
+}
+
+// killPortHolder finds the process listening on 127.0.0.1:port and kills it. Only ever
+// called for OUR ports after the preflights proved the holder can't be a recorded child,
+// so the holder is by construction a stale instance of our own stack.
+func killPortHolder(port int) error {
+	pid, err := portHolderPid(port)
+	if err != nil {
+		return err
+	}
+	if pid == os.Getpid() {
+		return fmt.Errorf("refusing to kill self (pid %d)", pid)
+	}
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return err
+	}
+	return proc.Kill()
+}
+
+// portHolderPid resolves the pid listening on a local TCP port, per OS. Same-user
+// processes only — which is exactly the stale-stack case this exists for.
+func portHolderPid(port int) (int, error) {
+	switch runtime.GOOS {
+	case "darwin":
+		out, err := exec.Command("lsof", "-ti", fmt.Sprintf("tcp:%d", port), "-sTCP:LISTEN").Output()
+		if err != nil {
+			return 0, fmt.Errorf("lsof: %w", err)
+		}
+		return parseFirstPid(string(out))
+	case "linux":
+		// lsof isn't guaranteed on servers; ss (iproute2) is. Try lsof first (cleanest
+		// output), fall back to parsing ss.
+		if out, err := exec.Command("lsof", "-ti", fmt.Sprintf("tcp:%d", port), "-sTCP:LISTEN").Output(); err == nil {
+			return parseFirstPid(string(out))
+		}
+		out, err := exec.Command("ss", "-ltnp", fmt.Sprintf("sport = :%d", port)).Output()
+		if err != nil {
+			return 0, fmt.Errorf("ss: %w", err)
+		}
+		return parseSsPid(string(out))
+	case "windows":
+		out, err := exec.Command("netstat", "-ano", "-p", "tcp").Output()
+		if err != nil {
+			return 0, fmt.Errorf("netstat: %w", err)
+		}
+		return parseNetstatPid(string(out), port)
+	}
+	return 0, fmt.Errorf("no port-holder lookup for %s", runtime.GOOS)
+}
+
+// parseFirstPid reads lsof -t output: one pid per line.
+func parseFirstPid(out string) (int, error) {
+	for _, line := range strings.Split(out, "\n") { // bounded by command output
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		pid, err := strconv.Atoi(line)
+		if err != nil {
+			return 0, fmt.Errorf("unexpected lsof output %q", line)
+		}
+		return pid, nil
+	}
+	return 0, fmt.Errorf("no listener found")
+}
+
+// parseSsPid extracts pid=N from `ss -ltnp` output, e.g. users:(("bifrost-http",pid=9005,fd=7)).
+func parseSsPid(out string) (int, error) {
+	const marker = "pid="
+	i := strings.Index(out, marker)
+	if i < 0 {
+		return 0, fmt.Errorf("no pid in ss output (listener owned by another user?)")
+	}
+	rest := out[i+len(marker):]
+	end := 0
+	for end < len(rest) && rest[end] >= '0' && rest[end] <= '9' { // bounded by output length
+		end++
+	}
+	if end == 0 {
+		return 0, fmt.Errorf("malformed pid in ss output")
+	}
+	return strconv.Atoi(rest[:end])
+}
+
+// parseNetstatPid finds the LISTENING row for the port in `netstat -ano -p tcp` output;
+// the pid is the final column.
+func parseNetstatPid(out string, port int) (int, error) {
+	needle := fmt.Sprintf(":%d", port)
+	for _, line := range strings.Split(out, "\n") { // bounded by command output
+		if !strings.Contains(line, "LISTENING") {
+			continue
+		}
+		fields := strings.Fields(line)
+		// Proto Local Foreign State PID — local address must end with our port.
+		if len(fields) >= 5 && strings.HasSuffix(fields[1], needle) {
+			return strconv.Atoi(fields[len(fields)-1])
+		}
+	}
+	return 0, fmt.Errorf("no LISTENING row for port %d", port)
 }

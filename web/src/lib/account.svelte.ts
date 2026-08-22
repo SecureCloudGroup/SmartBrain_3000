@@ -2,7 +2,7 @@
 // to guard their routes; `load()` refreshes it from the backend. Concurrent
 // callers (the root layout + a page guard on cold start) share one in-flight
 // request rather than firing duplicates.
-import { ApiError, type AccountStatus, api } from "./api";
+import { ApiError, type AccountStatus, api, registerLockedHandler } from "./api";
 
 class Account {
   status = $state<AccountStatus | null>(null);
@@ -33,3 +33,10 @@ class Account {
 }
 
 export const account = new Account();
+
+// First 423 anywhere → this tab is locked, immediately. Guarded effects (the layout's
+// badge refreshes, page pollers) read account.status.unlocked and stop cold, which is
+// what breaks the 423-redirect stampede an open tab fell into after an update restart.
+registerLockedHandler(() => {
+  if (account.status) account.status.unlocked = false;
+});
