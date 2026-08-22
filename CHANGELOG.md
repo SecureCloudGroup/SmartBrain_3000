@@ -11,6 +11,8 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.9.9] - 2026-08-22
+
 ### Changed
 - **One vault, one lock — now said everywhere, and fully true.** The Desktop and a
   paired phone always shared the same lock (the phone is a window onto the Desktop),
