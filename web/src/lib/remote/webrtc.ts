@@ -304,6 +304,27 @@ export class RemoteConnection {
     return s === "new" || s === "connecting" || s === "connected";
   }
 
+  // Active liveness check for the resume-from-background path. connectionState LIES
+  // after iOS freezes the transport (it reports "connected" over a corpse), and the
+  // keepalive only declares death ~45s after the last real pong — so a returning user
+  // could stare at a dead "connected" chip while their taps hung. Trust only a fresh
+  // pong: send one now, give it a short human-scale deadline, and route a miss into
+  // the normal failure path (teardown + reconnect) immediately. A healthy link pongs
+  // well inside the deadline and nothing churns.
+  verify(deadlineMs = 2500): void {
+    if (this.closed) return;
+    if (!this.isLive() || this.channel?.readyState !== "open") {
+      this.onConnectFailure();
+      return;
+    }
+    const before = this.lastPong;
+    this.send(undefined, encodePing(Date.now()));
+    setTimeout(() => {
+      if (this.closed) return;
+      if (this.lastPong === before) this.onConnectFailure();
+    }, deadlineMs);
+  }
+
   // A big response arrives as ordered part-frames (see protocol.ts). Each part refreshes
   // the request timer — the 60s budget then bounds the GAP between parts, not the whole
   // transfer, so a slow relayed link can still deliver a large document.
