@@ -11,6 +11,8 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.9.6] - 2026-08-22
+
 ### Fixed
 - **The desktop now shows "thinking" while a streamed answer is on its way.** The
   streamed chat path hid the thinking indicator the moment the request started,
