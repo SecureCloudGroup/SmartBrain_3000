@@ -11,6 +11,16 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Fixed
+- **The phone picks up updates on its own now.** After an update, a resumed phone
+  app could keep running the old version until you force-closed it — its
+  once-a-minute version check freezes in the background and iOS throttles it on
+  return. The check now runs the moment the app comes back to the foreground
+  (riding out the reconnect), and when the vault is locked — the guaranteed
+  post-update state, with nothing in flight to lose — the app reloads itself to
+  the new version on the spot. Unlocked sessions still get the reload banner
+  rather than a surprise: no one loses a half-typed message to an update.
+
 ## [0.9.7] - 2026-08-22
 
 ### Fixed
