@@ -11,6 +11,8 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.9.15] - 2026-08-23
+
 ### Added
 - **Voice: dictate and listen, on every platform.** Chat gains a microphone (push to
   talk — your words land in the message box for review) and spoken replies (read aloud
