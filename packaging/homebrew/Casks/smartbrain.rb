@@ -8,8 +8,8 @@
 # step the user would hit the Gatekeeper "unidentified developer" wall — the whole reason we ship via
 # Homebrew instead of a browser download is to avoid exactly that.
 cask "smartbrain" do
-  version "0.9.14"
-  sha256 "c36de06aea7f03917ad661488b24e5b17082f0331075804a4a1d8141270f587a"
+  version "0.9.15"
+  sha256 "8806ad99adaa19cb06716dfe72455711280e3af755f23a5a16e936026e116094"
 
   url "https://github.com/SecureCloudGroup/SmartBrain_3000/releases/download/v#{version}/SmartBrain-macos.zip"
   name "SmartBrain"
