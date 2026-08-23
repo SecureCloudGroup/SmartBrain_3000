@@ -11,6 +11,8 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.9.11] - 2026-08-22
+
 ### Added
 - **Tag a feed once, every article carries it.** Subscribing to a feed now takes optional
   tags, stamped on every document the feed ever ingests — one click on the tag chip
