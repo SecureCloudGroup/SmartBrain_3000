@@ -529,7 +529,6 @@ input[type="file"] {
   gap: var(--s-5);
   margin: var(--s-4) 0;
   padding-bottom: var(--s-4); /* last row clears the sticky composer */
-  scroll-padding-bottom: 7rem;
 }
 
 .msg {
@@ -638,13 +637,17 @@ input[type="file"] {
   .thinking i, .caret { animation: none; opacity: 0.7; }
 }
 
-/* "Jump to latest" — appears when the reader scrolls up (esp. mid-stream). */
-.jump {
+/* Chat scroll pills — Top and/or Latest, in one fixed row above the composer. */
+.jump-row {
   position: fixed;
   left: 50%;
   transform: translateX(-50%);
   bottom: calc(var(--tabbar-h) + 118px);
   z-index: 20;
+  display: flex;
+  gap: 0.5rem;
+}
+.jump {
   display: inline-flex;
   align-items: center;
   gap: 7px;

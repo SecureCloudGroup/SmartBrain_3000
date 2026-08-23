@@ -11,6 +11,23 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Changed
+- **Approve without leaving chat.** When the assistant needs your go-ahead (a web search,
+  a fetch, an email), the blocked actions now appear right in the conversation as cards
+  with Approve / Always allow / Deny — and Approve all when several reviewed actions are
+  waiting. Resolving the last one resumes the turn by itself; no more trip to Activity
+  and back. Activity still lists everything.
+- **Chat opens and jumps to the real bottom.** Opening a conversation lands on the newest
+  message, and the new Top / Latest pills jump either way. "Jump to latest" used to stop
+  with the newest message hidden behind the message box — fixed.
+
+### Fixed
+- **Times are your local times, everywhere.** The assistant is now told to state dates
+  and times in your local zone (it sometimes echoed UTC when summarizing search results),
+  and three displays that read UTC timestamps as if they were local — vault "last
+  checked" ages, the hosted-check tooltip, and the feed row's checked time — now convert
+  properly.
+
 ## [0.9.11] - 2026-08-22
 
 ### Added
