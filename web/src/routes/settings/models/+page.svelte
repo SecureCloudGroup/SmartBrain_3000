@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { api, type LocalModels } from "$lib/api";
+  import { api, type LocalModels, type VoiceStatus } from "$lib/api";
   import { describeError } from "$lib/errors";
   import Chip from "$lib/components/Chip.svelte";
 
@@ -32,6 +32,14 @@
   let showMlxeAdv = $state(false);
   let mlxKey = $state("");
   let mlxeKey = $state("");
+  // Voice (audio) server — empty URL means "use the MLX chat server above" (oMLX
+  // serves /v1/audio/* natively). Windows/Linux point this at a whisper-family server.
+  let voiceStatus = $state<VoiceStatus | null>(null);
+  let voiceUrl = $state("");
+  let voiceKey = $state("");
+  let voiceStt = $state("");
+  let voiceTts = $state("");
+  let voiceVoice = $state("");
   let busy = $state("");
   let error = $state("");
   let notice = $state("");
@@ -72,6 +80,13 @@
       const me = hydrate(models.mlxe.url, DEFAULT_PORT.mlxe);
       mlxePort = me.port;
       mlxeAdv = me.adv;
+      // Probe here (settings page only): reachability is worth several seconds HERE.
+      voiceStatus = await api.voiceStatus(true).catch(() => null);
+      if (voiceStatus) {
+        voiceStt = voiceStatus.stt_model;
+        voiceTts = voiceStatus.tts_model;
+        voiceVoice = voiceStatus.tts_voice;
+      }
       showMlxeAdv = me.useAdv;
     } catch (err) {
       error = describeError(err);
@@ -131,6 +146,43 @@
   const ollamaInvalid = $derived(!showOllamaAdv && !validPort(ollamaPort));
   const mlxInvalid = $derived(!showMlxAdv && !validPort(mlxPort));
   const mlxeInvalid = $derived(!showMlxeAdv && !validPort(mlxePort));
+
+  async function saveVoice() {
+    busy = "voice";
+    error = "";
+    try {
+      const r = await api.putVoiceConfig({
+        url: voiceUrl.trim(), api_key: voiceKey, stt_model: voiceStt.trim(),
+        tts_model: voiceTts.trim(), tts_voice: voiceVoice.trim(),
+      });
+      voiceStatus = r.status;
+      voiceKey = "";
+      notice = r.status.reachable
+        ? "Voice server connected."
+        : "Saved — but the voice server did not answer. Check the address and that it's running.";
+    } catch (err) {
+      error = describeError(err);
+    } finally {
+      busy = "";
+    }
+  }
+
+  async function removeVoice() {
+    busy = "voice";
+    error = "";
+    try {
+      await api.deleteVoiceConfig();
+      voiceStatus = await api.voiceStatus(true).catch(() => null);
+      voiceUrl = "";
+      voiceStt = "";
+      voiceTts = "";
+      voiceVoice = "";
+    } catch (err) {
+      error = describeError(err);
+    } finally {
+      busy = "";
+    }
+  }
 </script>
 
 <h1>Local models <span class="muted" style="font-weight:400; font-size:0.9rem">· optional</span></h1>
@@ -353,6 +405,48 @@
     </button>
     {#if models?.mlxe.configured}
       <button class="secondary" disabled={busy === "mlxe"} onclick={() => run("mlxe", () => api.deleteLocalModel("mlxe"))}>Remove</button>
+    {/if}
+  </p>
+</div>
+
+<div class="card">
+  <h2 class="row">
+    <span>Voice</span>
+    {#if voiceStatus}
+      {@const ok = voiceStatus.configured && voiceStatus.reachable}
+      <Chip kind={!voiceStatus.configured ? "" : ok ? "ok" : "danger"}>
+        {!voiceStatus.configured ? "off" : ok ? "connected" : "unreachable"}
+      </Chip>
+    {/if}
+  </h2>
+  <p class="muted" style="margin:0 0 0.5rem; font-size:0.9rem">
+    Dictation and spoken replies in Chat, through a <strong>local</strong> audio server —
+    your voice never leaves your machines. On a Mac, <strong>oMLX already serves
+    audio</strong>: leave the address empty and SmartBrain uses the MLX server configured
+    above. On Windows/Linux, point this at a whisper-family server (e.g.
+    <code>speaches</code> or <code>whisper.cpp</code>&rsquo;s server) instead. Replies are spoken with your
+    device&rsquo;s own voices; the server voice below is an optional upgrade (and the fallback
+    for Linux desktops without system voices).
+  </p>
+  {#if voiceStatus?.configured && voiceStatus.source === "mlx"}
+    <p class="muted" style="font-size:0.85rem; margin:0 0 0.5rem">Using the MLX server configured above.</p>
+  {/if}
+  <label for="voice-url">Audio server URL <span class="muted" style="font-weight:400">(empty = use the MLX server)</span></label>
+  <input id="voice-url" type="url" bind:value={voiceUrl} autocomplete="off" placeholder="http://192.168.1.50:8000" />
+  <label for="voice-key" style="margin-top:0.5rem">API key <span class="muted" style="font-weight:400">(optional)</span></label>
+  <input id="voice-key" type="password" bind:value={voiceKey} autocomplete="off" placeholder="Leave blank if your server has none" />
+  <label for="voice-stt" style="margin-top:0.5rem">Transcription model</label>
+  <input id="voice-stt" bind:value={voiceStt} autocomplete="off" placeholder="whisper-large-v3-turbo" />
+  <label for="voice-tts" style="margin-top:0.5rem">Server voice model <span class="muted" style="font-weight:400">(optional)</span></label>
+  <input id="voice-tts" bind:value={voiceTts} autocomplete="off" placeholder="e.g. kokoro — empty keeps your device's voices" />
+  {#if voiceTts.trim()}
+    <label for="voice-voice" style="margin-top:0.5rem">Voice name <span class="muted" style="font-weight:400">(optional)</span></label>
+    <input id="voice-voice" bind:value={voiceVoice} autocomplete="off" placeholder="e.g. af_heart" />
+  {/if}
+  <p style="margin-top:0.75rem; display:flex; gap:0.5rem">
+    <button disabled={busy === "voice"} onclick={saveVoice}>{busy === "voice" ? "Saving…" : "Save & connect"}</button>
+    {#if voiceStatus?.configured && voiceStatus.source === "voice"}
+      <button class="secondary" disabled={busy === "voice"} onclick={removeVoice}>Remove</button>
     {/if}
   </p>
 </div>

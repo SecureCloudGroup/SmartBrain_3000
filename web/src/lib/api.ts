@@ -248,6 +248,18 @@ export interface PendingAction {
 
 // One site-scoped consent entry: URL tools remember per-host, so the same tool can
 // have several — each row is deleted independently (DELETE with ?host=).
+// Voice server status (STT/TTS through the user's LOCAL audio server). reachable is
+// null unless the caller asked for a live probe (settings page); the chat page's
+// per-mount call never pays one.
+export interface VoiceStatus {
+  configured: boolean;
+  source: "voice" | "mlx" | "";
+  reachable: boolean | null;
+  stt_model: string;
+  tts_model: string; // "" = server TTS off (browser system voices only)
+  tts_voice: string;
+}
+
 export interface RememberedSite {
   tool: string;
   host: string;
@@ -838,6 +850,45 @@ export const api = {
   invokeTool: (name: string, args: Record<string, unknown>) =>
     req<{ result: unknown }>("/api/tools/invoke", { method: "POST", body: JSON.stringify({ name, args }) }),
   getAudit: (limit = 100) => req<{ entries: AuditEntry[] }>(`/api/audit?limit=${limit}`),
+  // voice — dictation + spoken replies through the user's local audio server. The
+  // phone's audio rides the WebRTC bridge like any upload; nothing touches a third party.
+  voiceStatus: (probe = false) =>
+    req<VoiceStatus>(`/api/voice/status${probe ? "?probe=1" : ""}`),
+  voiceTranscribe: async (audio: Blob): Promise<{ text: string }> => {
+    await remoteReady;
+    const res = await fetch("/api/voice/transcribe", {
+      method: "POST",
+      headers: { "content-type": "audio/wav" },
+      body: audio,
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) {
+      if (res.status === 423) handleLocked();
+      throw new ApiError(res.status, (data as { detail?: string })?.detail || `transcription failed (${res.status})`);
+    }
+    return data as { text: string };
+  },
+  // One spoken chunk from the server voice; null = no server voice configured (the
+  // caller falls back or stays quiet — this is the LAST link of the fallback chain).
+  voiceSpeak: async (text: string): Promise<Blob | null> => {
+    await remoteReady;
+    const res = await fetch("/api/voice/speak", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text }),
+    });
+    if (!res.ok) return null;
+    return res.blob();
+  },
+  putVoiceConfig: (body: { url: string; api_key: string; stt_model: string; tts_model: string; tts_voice: string }) =>
+    req<{ ok: boolean; status: VoiceStatus }>("/api/local-models/voice", {
+      method: "PUT",
+      headers: { "x-sb-local": "1" },
+      body: JSON.stringify(body),
+    }),
+  deleteVoiceConfig: () =>
+    req<{ ok: boolean }>("/api/local-models/voice", { method: "DELETE", headers: { "x-sb-local": "1" } }),
+
   listPending: () => req<{ pending: PendingAction[] }>("/api/agent/pending"),
   approveAction: (id: string, confirmTool: string | null = null, remember = false) =>
     req<{ status: string; result: unknown }>(`/api/agent/pending/${encodeURIComponent(id)}/approve`, {

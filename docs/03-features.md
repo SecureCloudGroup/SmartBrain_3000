@@ -110,6 +110,24 @@ Activity and approve (Irreversible, with an extra confirm).
 
 A parked action doesn't wait indefinitely — see **Activity**, below.
 
+### Voice — dictate and listen
+
+Chat can listen and talk. If a voice server is configured (see
+[Voice](02-models.md#voice-dictation-and-spoken-replies) — on a Mac with oMLX there's
+nothing to set up), a **microphone button** appears in the message box: tap, speak, tap
+again, and your words land in the box as text — **you review before it sends**. The
+transcription happens on your own machine; nothing is sent to any speech service.
+
+The **speaker button** next to it turns on spoken replies: answers are read aloud
+**sentence by sentence as they stream in**, in your device's own voice. Every answer
+also has a quiet **Listen** action underneath to hear just that one. Speaking to the
+assistant — or asking something new — interrupts the voice mid-sentence, the way a
+conversation should.
+
+On the phone, both work the same way: dictation travels the encrypted connection to
+your Desktop for transcription, and replies speak with the phone's own voices — even
+offline.
+
 ## What the assistant can do
 
 These are the tools it can reach for. It picks them itself; you decide whether they run.

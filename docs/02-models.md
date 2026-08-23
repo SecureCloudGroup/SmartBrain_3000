@@ -183,6 +183,31 @@ keyword results"*, no embedding model is in place — run the command above and
 **Reindex**. You can change the model, but pointing embeddings at a cloud provider
 sends your documents there on every reindex — only do that if you accept that tradeoff.
 
+## Voice (dictation and spoken replies)
+
+Chat can listen and talk — see [Voice in Chat](03-features.md#voice-dictate-and-listen)
+for how it feels to use. Under the hood, **your voice never leaves your machines**:
+speech-to-text runs on a local audio server you configure under **Settings → Local
+models → Voice**, and replies are spoken with your device's own voices.
+
+- **Mac (Apple Silicon)** — nothing extra to set up: **oMLX already serves audio**.
+  Leave the Voice address empty and SmartBrain uses your MLX server. The default
+  transcription model is `whisper-large-v3-turbo` (oMLX downloads it on first use).
+- **Windows / Linux** — run any local server that speaks the standard
+  `/v1/audio/transcriptions` API and put its address in the Voice card. Two good
+  choices: [speaches](https://github.com/speaches-ai/speaches) (CPU or GPU, also
+  offers server voices) or `whisper.cpp`'s server. Set the transcription model to
+  whatever model you pulled there.
+- **Phone (PWA)** — nothing to configure: your phone's microphone audio travels the
+  same encrypted connection as everything else to the Desktop, which transcribes it
+  with the server above. Replies use the phone's own voices, offline.
+
+**Spoken replies** use your device's built-in voices by default — instant and offline
+on macOS, Windows, iPhone, and Android. Linux desktops often ship no browser voices;
+there (or if you just want a nicer voice), set the optional **Server voice model** in
+the Voice card (e.g. `kokoro` on a server that offers speech) and SmartBrain speaks
+through it instead.
+
 ## Next
 
 - [Using SmartBrain_3000](03-features.md) — start chatting and add knowledge.

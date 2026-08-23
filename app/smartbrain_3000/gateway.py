@@ -155,6 +155,18 @@ def _serialized(model: str) -> Iterator[None]:
         yield
 
 
+@contextmanager
+def serialized_local() -> Iterator[None]:
+    """Hold the local-model semaphore unconditionally — for direct calls to a local
+    server that don't route through Bifrost (voice transcription/speech). The same
+    single-request-at-a-time contract as ``_serialized``, without needing a model id."""
+    _LOCAL_SEM.acquire()
+    try:
+        yield
+    finally:
+        _LOCAL_SEM.release()
+
+
 def local_available() -> bool:
     """Non-blocking peek: True if no local-model call is in flight right now. Advisory only — a
     background task (auto-reindex) uses it to skip cleanly when a foreground chat holds the model,
@@ -964,6 +976,12 @@ MLX_KEY_KEY = "local:mlx:api_key"
 # because chat servers like oMLX serve only encoder embedders and refuse decoder
 # embedding models (verified live with Qwen3-Embedding: "not an embedding model").
 MLXE_URL_KEY = "local:mlxe:url"
+# Voice (STT/TTS) server — any OpenAI-compatible /v1/audio/* endpoint. Unset means
+# "fall back to the MLX server" (oMLX serves audio too); Windows/Linux users point this
+# at a whisper.cpp-family or speaches server instead. Never registered in Bifrost —
+# audio endpoints are called directly (the gateway doesn't proxy them).
+VOICE_URL_KEY = "local:voice:url"
+VOICE_KEY_KEY = "local:voice:api_key"
 MLXE_KEY_KEY = "local:mlxe:api_key"
 # Default host URLs for auto-detecting a server when nothing is configured yet — the
 # common "I installed Ollama and SmartBrain, now connect them" path. The gateway runs

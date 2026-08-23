@@ -11,6 +11,16 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Added
+- **Voice: dictate and listen, on every platform.** Chat gains a microphone (push to
+  talk — your words land in the message box for review) and spoken replies (read aloud
+  sentence-by-sentence as they stream, with a per-answer Listen action and natural
+  barge-in). Speech-to-text runs on a local audio server you configure under Settings →
+  Local models → Voice — on a Mac with oMLX there is nothing to set up — and the phone
+  sends its audio over the same encrypted connection as everything else. Your voice
+  never leaves your machines. Replies use your device's own voices, with an optional
+  server voice as upgrade or Linux fallback.
+
 ## [0.9.14] - 2026-08-23
 
 ### Added
