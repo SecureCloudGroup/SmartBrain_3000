@@ -11,6 +11,8 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.9.12] - 2026-08-23
+
 ### Changed
 - **Approve without leaving chat.** When the assistant needs your go-ahead (a web search,
   a fetch, an email), the blocked actions now appear right in the conversation as cards
