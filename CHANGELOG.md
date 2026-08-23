@@ -11,6 +11,8 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.9.14] - 2026-08-23
+
 ### Added
 - **Retry a message with one click.** Every message you've sent shows a small colored
   Retry pill beside "You" — click it and the same request is sent again, exactly as if
