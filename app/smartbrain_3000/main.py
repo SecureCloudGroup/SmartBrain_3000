@@ -40,6 +40,7 @@ from .planner_routes import router as planner_router
 from .schedule_routes import router as schedule_router
 from .selfimprove_routes import router as selfimprove_router
 from .vault_routes import router as vault_router
+from .voice_routes import router as voice_router
 from .web_routes import router as web_router
 
 log = logging.getLogger(__name__)
@@ -361,7 +362,7 @@ def _install_routes(application: FastAPI) -> None:
         account_router, chat_router, local_models_router, models_router, kb_router,
         history_router, memory_router, planner_router, agent_router, schedule_router,
         metrics_router, selfimprove_router, email_router, data_router, mcp_router, devices_router,
-        vault_router, feed_router, web_router,
+        vault_router, feed_router, voice_router, web_router,
     ):  # fixed, bounded
         application.include_router(router)
 

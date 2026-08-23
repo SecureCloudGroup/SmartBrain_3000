@@ -12,7 +12,7 @@ import logging
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from . import gateway
+from . import gateway, voice
 
 router = APIRouter()
 log = logging.getLogger(__name__)
@@ -149,6 +149,33 @@ def _detect_mlx_context_lengths(request: Request, url: str, api_key: str) -> Non
         log.warning("mlx context-length detection skipped: %s", exc)
 
 
+class VoiceConfig(BaseModel):
+    """The voice (audio) server + model names. url may be empty = "use the MLX server"."""
+    url: str = ""
+    api_key: str = ""
+    stt_model: str = ""  # empty -> voice.DEFAULT_STT_MODEL
+    tts_model: str = ""  # empty -> server TTS off (browser system voices only)
+    tts_voice: str = ""
+
+
+@router.put("/api/local-models/voice")
+def put_voice(request: Request, body: VoiceConfig) -> dict:
+    """Save the voice server + models. Not registered in Bifrost — audio endpoints are
+    called directly (the gateway doesn't proxy /v1/audio/*). Returns the fresh status
+    so the page can show reachability without a second round-trip."""
+    store = _store(request)
+    for key, value in ((gateway.VOICE_URL_KEY, body.url.strip()),
+                       (gateway.VOICE_KEY_KEY, body.api_key),
+                       (voice.STT_MODEL_KEY, body.stt_model.strip()),
+                       (voice.TTS_MODEL_KEY, body.tts_model.strip()),
+                       (voice.TTS_VOICE_KEY, body.tts_voice.strip())):
+        if value:
+            store.put(key, value)
+        else:
+            store.delete(key)
+    return {"ok": True, "status": voice.status(store, probe=True)}
+
+
 @router.delete("/api/local-models/{name}")
 def delete_local(request: Request, name: str) -> dict[str, bool]:
     """Remove a local provider's config and deprovision it from Bifrost."""
@@ -161,6 +188,11 @@ def delete_local(request: Request, name: str) -> dict[str, bool]:
     elif name == "mlxe":
         store.delete(gateway.MLXE_URL_KEY)
         store.delete(gateway.MLXE_KEY_KEY)
+    elif name == "voice":
+        for key in (gateway.VOICE_URL_KEY, gateway.VOICE_KEY_KEY,
+                    voice.STT_MODEL_KEY, voice.TTS_MODEL_KEY, voice.TTS_VOICE_KEY):
+            store.delete(key)
+        return {"ok": True, "gateway_synced": True}  # never in Bifrost, nothing to deprovision
     else:
         raise HTTPException(status_code=404, detail="unknown local provider")
     synced = True

@@ -5,7 +5,7 @@
   import { chatSession } from "$lib/chat.svelte";
   import { resumeChat } from "$lib/chat-resume";
   import { refreshPending } from "$lib/pending.svelte";
-  import { api, ApiError, type AgentResult, type ChatMessage, type Conversation, type DiscoveredModel, type PendingAction, type RecentScheduleRun, type Source } from "$lib/api";
+  import { api, ApiError, type AgentResult, type ChatMessage, type Conversation, type DiscoveredModel, type PendingAction, type RecentScheduleRun, type Source, type VoiceStatus } from "$lib/api";
   import { finalAssistantId, mergeRefreshedLog, transcriptUpToLastUser } from "$lib/chat-log";
   import { parseTs } from "$lib/runs";
   import { confirmDialog } from "$lib/confirm.svelte";
@@ -15,6 +15,8 @@
   import { scheduleUpdates } from "$lib/scheduleUpdates.svelte";
   import ActionCard from "$lib/components/ActionCard.svelte";
   import { fmtArgs, iconForTool } from "$lib/pendingCards";
+  import { Recorder } from "$lib/audio/recorder";
+  import { Speaker, speechAvailable } from "$lib/audio/speaker";
   import Chip from "$lib/components/Chip.svelte";
   import EmptyState from "$lib/components/EmptyState.svelte";
   import Icon from "$lib/components/Icon.svelte";
@@ -176,6 +178,77 @@
     window.scrollTo({ top: 0, behavior: reduce ? "auto" : "smooth" });
   }
 
+  // ---- Voice (V1): push-to-talk dictation + spoken replies. ----
+  // STT runs on the user's LOCAL audio server (see Settings → Local models); the mic
+  // only shows when one is configured. TTS prefers the browser's system voices and
+  // falls back to the server voice — the Speaker owns that chain.
+  const recorder = new Recorder();
+  let recState = $state<"idle" | "recording" | "transcribing">("idle");
+  let voiceInfo = $state<VoiceStatus | null>(null);
+  let speechPossible = $state(false);
+  let autoSpeak = $state(false);
+  let listeningId = $state<string | null>(null); // which message the Listen button is reading
+  const speaker = new Speaker(
+    (text) => (voiceInfo?.tts_model ? api.voiceSpeak(text) : Promise.resolve(null)),
+    () => (listeningId = null),
+  );
+
+  async function toggleMic(): Promise<void> {
+    if (recState === "transcribing" || busy) return;
+    if (recState === "idle") {
+      speaker.stop(); // barge-in: talking to it interrupts it
+      listeningId = null;
+      error = "";
+      try {
+        await recorder.start();
+        recState = "recording";
+      } catch {
+        error = "Microphone unavailable — check this site's mic permission in the browser.";
+      }
+      return;
+    }
+    recState = "transcribing";
+    try {
+      const blob = await recorder.stop();
+      const r = await api.voiceTranscribe(blob);
+      // Into the composer, editable — dictation proposes, the user disposes (V1:
+      // no auto-send; reviewing the transcript before it runs is the safe default).
+      if (r.text) input = input ? `${input.trimEnd()} ${r.text}` : r.text;
+    } catch (err) {
+      error = describeError(err);
+    } finally {
+      recState = "idle";
+    }
+  }
+
+  function toggleAutoSpeak(): void {
+    autoSpeak = !autoSpeak;
+    try {
+      localStorage.setItem("sb:autospeak", autoSpeak ? "1" : "0");
+    } catch {
+      /* storage unavailable — the toggle still works for this visit */
+    }
+    if (autoSpeak) {
+      // iOS only allows speech that a user gesture started — this click IS the
+      // gesture, so prime the engine with a silent utterance while we have it.
+      if (typeof speechSynthesis !== "undefined") speechSynthesis.speak(new SpeechSynthesisUtterance(" "));
+    } else {
+      speaker.stop();
+      listeningId = null;
+    }
+  }
+
+  function listen(entry: Entry): void {
+    if (listeningId === entry.id) {
+      speaker.stop();
+      listeningId = null;
+      return;
+    }
+    speaker.stop();
+    listeningId = entry.id;
+    speaker.say(entry.content);
+  }
+
   const STARTERS = [
     "What can you do?",
     "Save a note to my knowledge base.",
@@ -234,6 +307,19 @@
       setTimeout(() => scrollToBottom(false), 200);
     }
     window.addEventListener("scroll", onWindowScroll, { passive: true });
+    // Voice availability (no live probe — configured-ness is enough to show the mic).
+    void api
+      .voiceStatus()
+      .then(async (v) => {
+        voiceInfo = v;
+        speechPossible = await speechAvailable(!!v.tts_model);
+        try {
+          autoSpeak = speechPossible && localStorage.getItem("sb:autospeak") === "1";
+        } catch {
+          autoSpeak = false;
+        }
+      })
+      .catch(() => undefined);
     await pullScheduleUpdates(); // surface anything that fired while away, right here in the chat
     updatesTimer = setInterval(pullScheduleUpdates, 25000); // keep new ones arriving live while viewing Chat
     // Returning to the app (phone unlock, tab switch) re-syncs what the OTHER device did.
@@ -244,6 +330,7 @@
     if (updatesTimer) clearInterval(updatesTimer);
     document.removeEventListener("visibilitychange", onVisibility);
     window.removeEventListener("scroll", onWindowScroll);
+    speaker.stop(); // navigating away must not leave a voice talking
   });
 
   // The open conversation's blocked actions, rendered as inline approval cards above the
@@ -632,6 +719,8 @@
   // One agent turn, dispatched the right way (shared by send + regenerate):
   // Desktop/local -> stream tokens. Remote (WebRTC relay buffers SSE) -> non-stream.
   async function runTurn(messages: ChatMessage[], cid: string): Promise<void> {
+    speaker.stop(); // a new turn silences the previous answer (its reply will speak)
+    listeningId = null;
     if (remote.status === "idle") {
       await streamTurn({ messages, cid });
     } else {
@@ -922,6 +1011,7 @@
         opts.setStream(next);
         const target = log.find((x) => x.id === id);
         if (target) target.content = next;
+        if (autoSpeak) speaker.feed(piece); // complete sentences speak as they stream
       } else if (e.event === "done") {
         await finalizeStream({ data: e.data, cid: opts.cid, streamText: opts.streamRef(), ensureStreamBubble: opts.ensureStreamBubble });
         return "terminal";
@@ -997,6 +1087,7 @@
       if (liveGuidance) target.guidance = liveGuidance; // transparency chip on the live bubble
     }
     liveGuidance = null;
+    if (autoSpeak) speaker.flush(); // the unfinished last sentence
     await api.addMessage(opts.cid, "assistant", finalText);
   }
 
@@ -1017,6 +1108,7 @@
       const sources = res.sources?.length ? res.sources : undefined;
       log.push({ id: nextEntryId("asst"), role: "assistant", content: reply, sources,
                  guidance: res.guidance });
+      if (autoSpeak) speaker.say(reply); // non-streamed path: speak the whole answer
       liveGuidance = null; // the result's own field wins over any stream meta
       await api.addMessage(cid, "assistant", reply, sources);
     }
@@ -1210,6 +1302,11 @@
                 Regenerate
               </button>
             {/if}
+            {#if speechPossible && !entry.schedule}
+              <button class="msg-action" title={listeningId === entry.id ? "Stop reading" : "Read this answer aloud"} onclick={() => listen(entry)}>
+                {listeningId === entry.id ? "Stop" : "Listen"}
+              </button>
+            {/if}
           </div>
         </div>
       {:else if entry.err}
@@ -1317,6 +1414,29 @@
 
   <div class="composer">
     <div class="inner">
+      {#if voiceInfo?.configured}
+        <button
+          class="voice mic"
+          class:recording={recState === "recording"}
+          disabled={recState === "transcribing" || busy}
+          title={recState === "recording" ? "Stop and transcribe" : "Dictate (push to talk)"}
+          aria-label={recState === "recording" ? "Stop and transcribe" : "Dictate"}
+          onclick={toggleMic}
+        >
+          <Icon name={recState === "transcribing" ? "clock" : "mic"} size={16} />
+        </button>
+      {/if}
+      {#if speechPossible}
+        <button
+          class="voice autospeak"
+          class:active={autoSpeak}
+          title={autoSpeak ? "Stop speaking replies aloud" : "Speak replies aloud"}
+          aria-label={autoSpeak ? "Stop speaking replies aloud" : "Speak replies aloud"}
+          onclick={toggleAutoSpeak}
+        >
+          <Icon name="speaker" size={16} />
+        </button>
+      {/if}
       <textarea
         bind:value={input}
         onkeydown={onKey}
@@ -1326,7 +1446,7 @@
       {#if stopper}
         <!-- A streamed turn is in flight: Send becomes Stop. Aborting keeps + persists the
              partial answer (see streamTurn); non-streamed turns keep the plain disabled Send. -->
-        <button class="stop" title="Stop generating" aria-label="Stop generating" onclick={() => { void api.feedback("stop", chatSession.currentId); stopper?.abort(); }}>
+        <button class="stop" title="Stop generating" aria-label="Stop generating" onclick={() => { void api.feedback("stop", chatSession.currentId); speaker.stop(); stopper?.abort(); }}>
           <Icon name="stop" />
         </button>
       {:else}
@@ -1416,6 +1536,43 @@
   .retry:disabled {
     opacity: 0.45;
     cursor: default;
+  }
+
+  /* Composer voice buttons: quiet circles that match the field, mic goes danger-red
+     while recording (the one state that must be unmissable), auto-speak fills accent
+     while on. */
+  .voice {
+    align-self: flex-end;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    flex: none;
+    border: 0;
+    border-radius: var(--r-full);
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+  }
+  .voice:hover:not(:disabled) {
+    color: var(--text);
+    background: var(--accent-tint);
+  }
+  .voice.mic.recording {
+    background: var(--danger);
+    color: #fff;
+    animation: mic-pulse 1.6s ease-in-out infinite;
+  }
+  .voice.autospeak.active {
+    background: var(--accent-strong);
+    color: #fff;
+  }
+  @keyframes mic-pulse {
+    50% { opacity: 0.65; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .voice.mic.recording { animation: none; }
   }
 
   /* Same ellipsis rule as Activity's card: a long host can't push the card wide. */
