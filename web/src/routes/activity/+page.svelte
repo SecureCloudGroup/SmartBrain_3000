@@ -7,6 +7,7 @@
   import { confirmDialog } from "$lib/confirm.svelte";
   import { describeError } from "$lib/errors";
   import ActionCard from "$lib/components/ActionCard.svelte";
+  import { fmtArgs, iconForTool } from "$lib/pendingCards";
   import Chip from "$lib/components/Chip.svelte";
   import EmptyState from "$lib/components/EmptyState.svelte";
   import Icon from "$lib/components/Icon.svelte";
@@ -103,42 +104,6 @@
     irreversible: "danger",
   };
 
-  // A rough tool->icon mapping so pending cards read at a glance; pencil is the
-  // honest default for "changes something".
-  function iconForTool(tool: string): IconName {
-    const t = tool.toLowerCase();
-    if (t.includes("mail") || t.includes("email")) return "mail";
-    if (t.includes("task")) return "tasks";
-    if (t.includes("schedule")) return "clock";
-    if (t.includes("kb") || t.includes("knowledge") || t.includes("note") || t.includes("doc")) return "book";
-    if (t.includes("web") || t.includes("fetch") || t.includes("search")) return "search";
-    if (t.includes("vault")) return "vault";
-    return "pencil";
-  }
-
-  // Show tool args as readable "key: value" lines instead of raw JSON. Accepts an
-  // object (pending tiles) or a JSON string (history args_summary, already
-  // redacted + capped server-side); long values are truncated for display.
-  function fmtArgs(args: unknown): string {
-    let obj: unknown = args;
-    if (typeof args === "string") {
-      if (!args.trim()) return "";
-      try {
-        obj = JSON.parse(args);
-      } catch {
-        return args; // truncated / non-JSON summary — show as-is
-      }
-    }
-    if (obj && typeof obj === "object" && !Array.isArray(obj)) {
-      return Object.entries(obj as Record<string, unknown>)
-        .map(([k, v]) => {
-          const s = typeof v === "string" ? v : JSON.stringify(v);
-          return `${k}: ${s.length > 200 ? s.slice(0, 200) + "…" : s}`;
-        })
-        .join("\n");
-    }
-    return typeof args === "string" ? args : JSON.stringify(args);
-  }
 </script>
 
 {#if account.status?.unlocked}

@@ -20,6 +20,7 @@
     type VerifyHostedResult,
   } from "$lib/api";
   import { describeError } from "$lib/errors";
+  import { localTs, parseTs } from "$lib/runs";
   import { highlight, queryTerms } from "$lib/highlight";
   import { remote } from "$lib/remote/connection.svelte";
   import { confirmDialog } from "$lib/confirm.svelte";
@@ -1065,7 +1066,7 @@
   // and is itself the "is this stale?" signal. last_checked is a UTC timestamp (null = never yet).
   function relativeSince(iso: string | null | undefined): string {
     if (!iso) return "never";
-    const then = new Date(iso).getTime();
+    const then = parseTs(iso)?.getTime() ?? NaN; // server timestamps are UTC; naive Date() read them as local
     if (!Number.isFinite(then)) return "never";
     const secs = Math.max(0, Math.round((Date.now() - then) / 1000));
     if (secs < 60) return "just now";
@@ -1081,7 +1082,7 @@
   }
   // Absolute timestamp for the hover title — the exact time backs up the relative phrase.
   function lastCheckedAbs(v: Vault): string {
-    return v.source?.last_checked ? new Date(v.source.last_checked).toLocaleString() : "";
+    return v.source?.last_checked ? localTs(v.source.last_checked) : "";
   }
 </script>
 
@@ -1975,7 +1976,7 @@
             <strong>{f.title}</strong>
             <span class="muted" style="font-size:0.85rem"> · {new URL(f.url).hostname}</span>
             <div class="muted" style="font-size:0.8rem">
-              {f.last_checked ? `checked ${f.last_checked.slice(0, 16)} — ${f.last_status}` : "not checked yet"}{f.tags.length ? ` · tags every article: ${f.tags.join(", ")}` : ""}
+              {f.last_checked ? `checked ${localTs(f.last_checked)} — ${f.last_status}` : "not checked yet"}{f.tags.length ? ` · tags every article: ${f.tags.join(", ")}` : ""}
             </div>
           </div>
           <button disabled={feedBusy === f.id} onclick={() => refreshFeed(f)}>

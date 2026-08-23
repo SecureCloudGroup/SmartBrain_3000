@@ -5,7 +5,7 @@
   import { chatSession } from "$lib/chat.svelte";
   import { resumeChat } from "$lib/chat-resume";
   import { refreshPending } from "$lib/pending.svelte";
-  import { api, ApiError, type AgentResult, type ChatMessage, type Conversation, type DiscoveredModel, type RecentScheduleRun, type Source } from "$lib/api";
+  import { api, ApiError, type AgentResult, type ChatMessage, type Conversation, type DiscoveredModel, type PendingAction, type RecentScheduleRun, type Source } from "$lib/api";
   import { finalAssistantId, mergeRefreshedLog, transcriptUpToLastUser } from "$lib/chat-log";
   import { parseTs } from "$lib/runs";
   import { confirmDialog } from "$lib/confirm.svelte";
@@ -14,6 +14,7 @@
   import { remote } from "$lib/remote/connection.svelte";
   import { scheduleUpdates } from "$lib/scheduleUpdates.svelte";
   import ActionCard from "$lib/components/ActionCard.svelte";
+  import { fmtArgs, iconForTool } from "$lib/pendingCards";
   import Chip from "$lib/components/Chip.svelte";
   import EmptyState from "$lib/components/EmptyState.svelte";
   import Icon from "$lib/components/Icon.svelte";
@@ -148,15 +149,31 @@
   // streaming during the pre-first-token wait, and hid the thinking row with it.
   let streamEntryId = $state<string | null>(null);
   const lastLen = $derived(log.length ? log[log.length - 1].content.length : 0);
+  // Scroll the WINDOW to the true end of the document. scrollIntoView on the sentinel
+  // put it at the viewport bottom — which the sticky composer covers, so "jump to
+  // latest" always hid the newest message behind the input. Document-end can't: at full
+  // scroll the composer sits at its natural in-flow position below the log.
+  function scrollToBottom(smooth = false) {
+    const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    window.scrollTo({ top: document.documentElement.scrollHeight,
+                      behavior: smooth && !reduce ? "smooth" : "auto" });
+  }
   $effect(() => {
     void lastLen; // track every streamed delta + new entries
     void log.length;
-    if (atBottom) requestAnimationFrame(() => logEnd?.scrollIntoView({ block: "end" }));
+    if (atBottom) requestAnimationFrame(() => scrollToBottom(false));
   });
   function jumpToLatest() {
-    // CSS can't reach an explicit behavior:"smooth", so honor reduced motion here.
+    scrollToBottom(true);
+  }
+  // "Back to top" appears once the reader is meaningfully into the history.
+  let showTop = $state(false);
+  function onWindowScroll() {
+    showTop = window.scrollY > 500;
+  }
+  function jumpToTop() {
     const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
-    logEnd?.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "end" });
+    window.scrollTo({ top: 0, behavior: reduce ? "auto" : "smooth" });
   }
 
   const STARTERS = [
@@ -205,10 +222,18 @@
       // resumeChat returns the newest page's messages (server default); if there are older
       // ones, re-fetch through getConversation to capture next_cursor/has_more.
       if (chatSession.currentId) await refreshOpenCursor(chatSession.currentId);
-      await restorePendingBanner(chatSession.currentId); // re-show Resume if a parked turn survived a nav away
+      await loadPendingActions(chatSession.currentId); // re-show approvals if a parked turn survived a nav away
     } catch (err) {
       error = describeError(err);
     }
+    // Open at the newest message, unconditionally. The auto-stick effect above also fires,
+    // but rendered markdown settles its final heights a beat after first paint — the second
+    // pass lands the log truly at the bottom instead of "almost".
+    if (log.length > 0) {
+      requestAnimationFrame(() => scrollToBottom(false));
+      setTimeout(() => scrollToBottom(false), 200);
+    }
+    window.addEventListener("scroll", onWindowScroll, { passive: true });
     await pullScheduleUpdates(); // surface anything that fired while away, right here in the chat
     updatesTimer = setInterval(pullScheduleUpdates, 25000); // keep new ones arriving live while viewing Chat
     // Returning to the app (phone unlock, tab switch) re-syncs what the OTHER device did.
@@ -218,19 +243,92 @@
   onDestroy(() => {
     if (updatesTimer) clearInterval(updatesTimer);
     document.removeEventListener("visibilitychange", onVisibility);
+    window.removeEventListener("scroll", onWindowScroll);
   });
 
-  // Re-derive the approval banner from the server (pendingTurnId is component-local and is
-  // lost when the user follows "Open Activity" and returns): if the open conversation has a
-  // parked turn awaiting approval, restore its Resume affordance. Best-effort — the server's
-  // pending list is the source of truth, so this also survives a full reload.
-  async function restorePendingBanner(cid: string | null): Promise<void> {
-    if (!cid) return;
+  // The open conversation's blocked actions, rendered as inline approval cards above the
+  // composer (U8 follow-up: approving no longer requires a trip to Activity). The server's
+  // pending list is the source of truth — re-derived on mount, on park, and after every
+  // verdict, so it survives reloads and nav-aways.
+  let pendingActions = $state<PendingAction[]>([]);
+  let approvalBusy = $state(""); // pending-action id, or "all", while a verdict is in flight
+  // Approve-all only when every card is reviewed-tier: an irreversible action must keep
+  // its own deliberate confirm, never ride a batch.
+  const allReviewed = $derived(pendingActions.length > 1 && pendingActions.every((p) => p.tier !== "irreversible"));
+
+  async function loadPendingActions(cid: string | null): Promise<void> {
+    if (!cid) {
+      pendingActions = [];
+      pendingTurnId = null;
+      return;
+    }
     try {
       const { pending } = await api.listPending();
-      pendingTurnId = pending.find((p) => p.conversation_id === cid && p.turn_id)?.turn_id ?? null;
+      pendingActions = pending.filter((p) => p.conversation_id === cid);
+      pendingTurnId = pendingActions.find((p) => p.turn_id)?.turn_id ?? null;
     } catch {
-      // a transient failure just leaves the banner absent (Activity still lists the approval)
+      // a transient failure just leaves the cards absent (Activity still lists the approval)
+    }
+  }
+
+  // One verdict, then continue: when the LAST card resolves, the parked turn resumes by
+  // itself — approve/deny in place of the old approve-in-Activity-then-click-Resume trek.
+  async function resolveApproval(p: PendingAction, verdict: "approve" | "deny", remember = false) {
+    if (approvalBusy || busy) return;
+    if (
+      verdict === "approve" &&
+      p.tier === "irreversible" &&
+      !(await confirmDialog({
+        title: "Irreversible action",
+        body: `Run ${p.tool}? This cannot be undone.`,
+        confirmLabel: "Run",
+        danger: true,
+      }))
+    )
+      return;
+    approvalBusy = p.id;
+    error = "";
+    const turn = pendingTurnId; // survives the list going empty below
+    try {
+      if (verdict === "approve") {
+        await api.approveAction(p.id, p.tier === "irreversible" ? p.tool : null, remember);
+      } else {
+        await api.denyAction(p.id);
+      }
+      pendingActions = pendingActions.filter((x) => x.id !== p.id);
+      refreshPending(); // nav badge
+      if (pendingActions.length === 0 && turn) {
+        approvalBusy = "";
+        await resume();
+      }
+    } catch (err) {
+      error = describeError(err);
+      await loadPendingActions(chatSession.currentId); // stale/expired items drop off
+    } finally {
+      approvalBusy = "";
+    }
+  }
+
+  async function approveAll() {
+    if (approvalBusy || busy || !allReviewed) return;
+    approvalBusy = "all";
+    error = "";
+    const turn = pendingTurnId;
+    try {
+      for (const p of [...pendingActions]) {
+        await api.approveAction(p.id, null, false);
+        pendingActions = pendingActions.filter((x) => x.id !== p.id);
+      }
+      refreshPending();
+      if (turn) {
+        approvalBusy = "";
+        await resume();
+      }
+    } catch (err) {
+      error = describeError(err);
+      await loadPendingActions(chatSession.currentId);
+    } finally {
+      approvalBusy = "";
     }
   }
 
@@ -385,7 +483,7 @@
       log = mergeRefreshedLog(server, log) as typeof log;
       msgCursor = convo.next_cursor ?? null;
       msgHasMore = !!convo.has_more;
-      await restorePendingBanner(cid);
+      await loadPendingActions(cid);
     } catch (err) {
       // Gone (deleted elsewhere) -> drop it, matching select(); transient -> surface.
       if (err instanceof ApiError && err.status === 404) chatSession.currentId = null;
@@ -400,6 +498,7 @@
   async function select(id: string) {
     error = "";
     pendingTurnId = null; // never carry a parked turn across a conversation switch
+    pendingActions = [];
     resumeNotice = "";
     renaming = false; // a half-typed rename belongs to the conversation being left
     try {
@@ -408,7 +507,7 @@
       log = convo.messages.map((m) => ({ id: m.id, role: m.role, content: m.content, sources: m.sources }));
       msgCursor = convo.next_cursor ?? null;
       msgHasMore = !!convo.has_more;
-      await restorePendingBanner(id); // this conversation may have a parked turn awaiting approval
+      await loadPendingActions(id); // this conversation may have a parked turn awaiting approval
     } catch (err) {
       // Gone (deleted) -> drop it so it can't error forever; transient -> keep it for next visit.
       if (err instanceof ApiError && err.status === 404) chatSession.currentId = null;
@@ -422,6 +521,7 @@
     msgCursor = null;
     msgHasMore = false;
     pendingTurnId = null;
+    pendingActions = [];
     resumeNotice = "";
     renaming = false;
     error = "";
@@ -881,10 +981,11 @@
     refreshPending(); // update the Activity badge (a turn may have parked/cleared approvals)
     if (res.status === "awaiting_approval") {
       pendingTurnId = res.turn_id ?? null;
-      // U8: the banner near the composer announces the approval; we no longer push a
-      // chat-bubble notice with a far-away footer link.
+      // The blocked actions render as inline approval cards above the composer.
+      await loadPendingActions(cid);
     } else {
       pendingTurnId = null;
+      pendingActions = [];
       if (res.degraded) modelNotice = DEGRADED_NOTICE;
       const reply = res.message || "I didn't get a response — try again.";
       // Citations came from the turn's TOOL RESULTS (server-side, deterministic) — keep
@@ -919,8 +1020,8 @@
     try {
       const res = await api.agentResume(pendingTurnId);
       if (res.status === "awaiting_approval") {
-        // Clicked Resume before approving in Activity — say so, don't silently no-op.
-        resumeNotice = "Still waiting on your approval — open Activity, approve the action, then Resume.";
+        // Resumed into another blocked action (or one is still unresolved) — the cards say so.
+        resumeNotice = "Still waiting on your approval — approve or deny the action above.";
       }
       await handleAgentResult(res, chatSession.currentId);
       await loadConversations();
@@ -1139,11 +1240,44 @@
     <div class="log-end" bind:this={logEnd} aria-hidden="true"></div>
   </div>
 
-  {#if !atBottom && log.length > 0}
-    <button class="jump" onclick={jumpToLatest}><Icon name="arrow-down" size={14} /> Jump to latest</button>
+  {#if log.length > 0 && (showTop || !atBottom)}
+    <div class="jump-row">
+      {#if showTop}
+        <button class="jump" onclick={jumpToTop}><Icon name="arrow-up" size={14} /> Top</button>
+      {/if}
+      {#if !atBottom}
+        <button class="jump" onclick={jumpToLatest}><Icon name="arrow-down" size={14} /> Latest</button>
+      {/if}
+    </div>
   {/if}
 
-  {#if pendingTurnId}
+  {#if pendingActions.length > 0}
+    <!-- The blocked actions themselves, right where the conversation paused — approve,
+         always-allow, or deny without leaving chat. Resolving the last one resumes the
+         turn automatically. Activity still lists everything. -->
+    {#each pendingActions as p (p.id)}
+      <ActionCard icon={iconForTool(p.tool)} title={p.tool} tier={p.tier === "irreversible" ? "irreversible" : "reviewed"} scope={fmtArgs(p.args)}>
+        {#snippet actions()}
+          {#if p.tier === "reviewed" && p.remember_mode === "tool"}
+            <button class="ghost" disabled={approvalBusy !== "" || busy} title="Approve and stop asking for this tool" onclick={() => resolveApproval(p, "approve", true)}>Always allow</button>
+          {:else if p.tier === "reviewed" && p.remember_mode === "site" && p.remember_host}
+            <button class="ghost allow-site" disabled={approvalBusy !== "" || busy} title={`Approve and stop asking for ${p.remember_host}`} onclick={() => resolveApproval(p, "approve", true)}>Always allow {p.remember_host}</button>
+          {/if}
+          <button class="secondary" disabled={approvalBusy !== "" || busy} onclick={() => resolveApproval(p, "deny")}>Deny</button>
+          <button disabled={approvalBusy !== "" || busy} onclick={() => resolveApproval(p, "approve")}>Approve</button>
+        {/snippet}
+      </ActionCard>
+    {/each}
+    {#if allReviewed}
+      <p class="approve-all">
+        <button disabled={approvalBusy !== "" || busy} onclick={approveAll}>
+          {approvalBusy === "all" ? "Approving…" : `Approve all ${pendingActions.length}`}
+        </button>
+      </p>
+    {/if}
+    {#if resumeNotice}<p class="muted resume-notice">{resumeNotice}</p>{/if}
+  {:else if pendingTurnId}
+    <!-- Parked turn whose pending list couldn't load (transient) — keep the old fallback. -->
     <ActionCard icon="activity" title="The assistant is waiting for your approval" badge={false}>
       {#snippet actions()}
         <button class="secondary" onclick={() => goto("/activity")}>Open Activity</button>
@@ -1231,5 +1365,16 @@
     color: var(--text);
   }
 
-
+  /* Same ellipsis rule as Activity's card: a long host can't push the card wide. */
+  .allow-site {
+    max-width: 16rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .approve-all {
+    display: flex;
+    justify-content: flex-end;
+    margin: 0 0 var(--s-3);
+  }
 </style>

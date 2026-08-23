@@ -45,7 +45,9 @@ def _base_system_prompt() -> str:
     cacheable prefix."""
     return (
         "The current date and time is given in a system note at the end of the "
-        "conversation. Work out other time zones yourself when "
+        "conversation. When you state any date or time to the user, give it in THEIR "
+        "local time (the zone named in that note) — never answer in UTC or a source's "
+        "zone unless asked. Work out other time zones yourself when "
         "asked (e.g. London is UTC in winter, UTC+1 in summer) — never say you cannot "
         "tell the time. For current external facts (news, weather, prices, or a specific "
         "web page) call the web_search or web_fetch tools instead of guessing, and never "
