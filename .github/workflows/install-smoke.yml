@@ -91,15 +91,32 @@ jobs:
     steps:
       # The Linux tarball first ships with v0.9.0. Until a release carries it, this
       # job reports a clear skip instead of a misleading red.
+      #
+      # The install needs THREE files that arrive from TWO workflows: the launcher build
+      # uploads the tarball and .sha256, and the sign job attaches .sha256.minisig LAST —
+      # while this smoke fires when "Release image" completes, which never waits for the
+      # sign job. v0.9.13 lost exactly that race (the script 404'd seven seconds before
+      # the minisig landed), so the gate waits — bounded — for the signature before
+      # testing, and a signature that never arrives is a loud sign-job failure, not a skip.
       - name: Does the latest release ship the Linux tarball yet?
         id: gate
         run: |
-          if curl -fsIL -o /dev/null "https://github.com/SecureCloudGroup/SmartBrain_3000/releases/latest/download/SmartBrain-linux-x86_64.tar.gz"; then
-            echo "present=true" >> "$GITHUB_OUTPUT"
-          else
+          base="https://github.com/SecureCloudGroup/SmartBrain_3000/releases/latest/download"
+          if ! curl -fsIL -o /dev/null "$base/SmartBrain-linux-x86_64.tar.gz"; then
             echo "present=false" >> "$GITHUB_OUTPUT"
             echo "::notice::latest release has no Linux tarball yet (it ships with v0.9.0) — nothing to test"
+            exit 0
           fi
+          for i in $(seq 1 60); do  # up to 5 minutes for the sign job to finish
+            if curl -fsIL -o /dev/null "$base/SmartBrain-linux-x86_64.tar.gz.sha256.minisig"; then
+              echo "present=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "signature not attached yet (sign job still running) — waiting ($i/60)"
+            sleep 5
+          done
+          echo "::error::tarball is attached but its signature never arrived — the sign job failed or stalled"
+          exit 1
       - name: A user session for systemd --user (runners have no login session)
         if: steps.gate.outputs.present == 'true'
         run: |
