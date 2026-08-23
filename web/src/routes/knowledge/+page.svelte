@@ -122,9 +122,17 @@
   // background refresh of that host, so add/unsubscribe are Desktop-local like import/export.
   let feeds = $state<Feed[]>([]);
   let feedUrl = $state("");
+  let feedTags = $state(""); // optional, comma-separated — stamped on every article the feed ingests
   let feedError = $state(""); // inline, next to the URL field — same rule as subscribeError
   let feedBusy = $state(""); // "add" | "<feed id>" while a request is in flight
   let feedConfirmId = $state<string | null>(null); // unsubscribe: one open keep-vs-delete panel
+
+  // Bulk actions on the picked documents: add tags to all, or delete all. Both loop the
+  // per-document endpoints, so vault-owned (publisher) copies refuse individually (409) and
+  // the notice reports the honest split instead of pretending everything applied.
+  let bulkTagOpen = $state(false);
+  let bulkTagValue = $state("");
+  let bulkBusy = $state(""); // "tag" | "delete" while a loop is in flight
 
   const ACCEPT = ".pdf,.docx,.pptx,.xlsx,.txt,.md,.markdown,.html,.htm,.csv,.json,.log,.rst";
   const _MAX_FILES = 200; // bounded per drop (uploads no longer block on embedding, so this can be generous)
@@ -159,9 +167,10 @@
     feedBusy = "add";
     feedError = "";
     try {
-      const r = await api.addFeed(url);
+      const r = await api.addFeed(url, strToTags(feedTags));
       notice = `Subscribed to “${r.title}” — ${r.items} article${r.items === 1 ? "" : "s"} saved to its vault. New posts are picked up automatically.`;
       feedUrl = "";
+      feedTags = "";
       await Promise.all([loadFeeds(), loadDocs(), loadVaults()]);
       refreshIndexStatus(); // the new articles embed in the background
     } catch (err) {
@@ -187,6 +196,64 @@
     } finally {
       feedBusy = "";
     }
+  }
+
+  async function bulkTag() {
+    const add = strToTags(bulkTagValue);
+    if (add.length === 0 || bulkBusy) return;
+    bulkBusy = "tag";
+    error = "";
+    let done = 0;
+    let refused = 0;
+    for (const id of picked) {
+      const row = docs.find((d) => d.id === id);
+      if (!row) continue;
+      const merged = [...row.tags, ...add.filter((t) => !row.tags.includes(t))];
+      try {
+        await api.setDocTags(id, merged);
+        done += 1;
+      } catch {
+        refused += 1; // vault-owned copies 409 — a publisher update would clobber the edit
+      }
+    }
+    notice = refused
+      ? `Tagged ${done} of ${picked.length} — ${refused} are a publisher's copies (detach them to edit).`
+      : `Tagged ${done} document${done === 1 ? "" : "s"}.`;
+    bulkTagOpen = false;
+    bulkTagValue = "";
+    picked = [];
+    bulkBusy = "";
+    await loadDocs();
+  }
+
+  async function bulkDelete() {
+    if (bulkBusy) return;
+    const ok = await confirmDialog({
+      title: `Delete ${picked.length} document${picked.length === 1 ? "" : "s"}`,
+      body: "This can't be undone.",
+      confirmLabel: "Delete all",
+    });
+    if (!ok) return;
+    bulkBusy = "delete";
+    error = "";
+    let done = 0;
+    let refused = 0;
+    for (const id of picked) {
+      try {
+        await api.deleteDoc(id);
+        if (selected?.id === id) selected = null;
+        results = results?.filter((r) => r.id !== id) ?? null;
+        done += 1;
+      } catch {
+        refused += 1;
+      }
+    }
+    notice = refused
+      ? `Deleted ${done} of ${picked.length} — ${refused} are a publisher's copies (detach them to delete).`
+      : `Deleted ${done} document${done === 1 ? "" : "s"}.`;
+    picked = [];
+    bulkBusy = "";
+    await Promise.all([loadDocs(), loadVaults()]); // vault counts moved
   }
 
   async function unsubscribeFeed(f: Feed, removeDocs: boolean) {
@@ -1232,9 +1299,9 @@
     {/if}
 
     {#if picked.length > 0 || addTarget}
-      <!-- The selection only means something in terms of vaults, so the bar that appears offers
-           exactly that: put these in a vault. It also shows while a vault's "Add documents" is
-           armed but nothing is ticked yet — that state must TELL the user what to do next. -->
+      <!-- The bar offers what a selection can mean: put these in a vault, tag them all, or
+           delete them all. It also shows while a vault's "Add documents" is armed but nothing
+           is ticked yet — that state must TELL the user what to do next. -->
       <div class="pickbar">
         {#if picked.length === 0}
           <strong>Tick documents below to add them to “{vaults.find((v) => v.id === addTarget)?.name}”</strong>
@@ -1255,8 +1322,26 @@
         {:else}
           <span class="muted">Name a vault below to create one with these.</span>
         {/if}
+        {#if bulkTagOpen}
+          <input
+            style="min-width:9rem"
+            bind:value={bulkTagValue}
+            placeholder="tags to add"
+            aria-label="Tags to add to selected"
+            onkeydown={(e) => e.key === "Enter" && bulkTagValue.trim() && bulkTag()}
+          />
+          <button disabled={bulkBusy === "tag" || !bulkTagValue.trim()} onclick={bulkTag}>
+            {bulkBusy === "tag" ? "Tagging…" : "Apply"}
+          </button>
+          <button class="secondary" onclick={() => { bulkTagOpen = false; bulkTagValue = ""; }}>Cancel</button>
+        {:else}
+          <button class="secondary" disabled={bulkBusy !== ""} onclick={() => (bulkTagOpen = true)}>Tag…</button>
+        {/if}
+        <button class="danger" disabled={bulkBusy !== ""} onclick={bulkDelete}>
+          {bulkBusy === "delete" ? "Deleting…" : "Delete"}
+        </button>
         <span class="spacer"></span>
-        <button class="secondary" onclick={() => { picked = []; addTarget = ""; }}>Clear</button>
+        <button class="secondary" onclick={() => { picked = []; addTarget = ""; bulkTagOpen = false; }}>Clear</button>
         {/if}
       </div>
     {/if}
@@ -1872,6 +1957,13 @@
           aria-label="Feed URL"
           onkeydown={(e) => e.key === "Enter" && feedUrl.trim() && addFeed()}
         />
+        <input
+          style="min-width:9rem"
+          bind:value={feedTags}
+          placeholder="tags (optional)"
+          aria-label="Tags for every article"
+          onkeydown={(e) => e.key === "Enter" && feedUrl.trim() && addFeed()}
+        />
         <button disabled={feedBusy === "add" || !feedUrl.trim()} onclick={addFeed}>
           {feedBusy === "add" ? "Subscribing…" : "Subscribe"}
         </button>
@@ -1883,7 +1975,7 @@
             <strong>{f.title}</strong>
             <span class="muted" style="font-size:0.85rem"> · {new URL(f.url).hostname}</span>
             <div class="muted" style="font-size:0.8rem">
-              {f.last_checked ? `checked ${f.last_checked.slice(0, 16)} — ${f.last_status}` : "not checked yet"}
+              {f.last_checked ? `checked ${f.last_checked.slice(0, 16)} — ${f.last_status}` : "not checked yet"}{f.tags.length ? ` · tags every article: ${f.tags.join(", ")}` : ""}
             </div>
           </div>
           <button disabled={feedBusy === f.id} onclick={() => refreshFeed(f)}>

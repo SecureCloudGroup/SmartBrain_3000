@@ -182,17 +182,21 @@ class KnowledgeBase:
             grouped.setdefault((model, dim), {}).setdefault(doc_id, []).append(vector)
         return [(model, dim, per_doc) for (model, dim), per_doc in grouped.items()]
 
-    def add(self, title: str, content: str, meta: dict | None = None) -> str:
-        """Encrypt and store a document (with optional provenance ``meta``); return its new id."""
+    def add(self, title: str, content: str, meta: dict | None = None,
+            tags: list[str] | None = None) -> str:
+        """Encrypt and store a document (with optional provenance ``meta`` and ``tags``);
+        return its new id."""
         assert title, "title must be non-empty"
         assert content is not None, "content must not be None"
         doc_id = str(uuid.uuid4())
-        nonce, ciphertext = self._seal(doc_id, title, content, meta)
+        clean = _clean_tags(tags)
+        nonce, ciphertext = self._seal(doc_id, title, content, meta, clean)
         self._conn.execute(
             "INSERT INTO documents (id, nonce, ciphertext) VALUES (?, ?, ?);",
             [doc_id, nonce, ciphertext],
         )
-        self.index.add_document(doc_id, title, content)  # keep the index live (no-op until it's built)
+        # keep the index live (no-op until it's built); tags are lexical-searchable
+        self.index.add_document(doc_id, title, content, clean)
         return doc_id
 
     def rename(self, doc_id: str, title: str) -> bool:

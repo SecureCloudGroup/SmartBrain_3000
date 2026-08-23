@@ -447,6 +447,7 @@ export interface Feed {
   enabled: boolean;
   last_checked: string | null; // null = never fetched yet
   last_status: string; // "ok", "ok: N new", or "error: reason" — shown verbatim on the row
+  tags: string[]; // stamped on every document the feed ingests; set at subscribe time
   created_at: string;
 }
 
@@ -1007,11 +1008,12 @@ export const api = {
   // Adding and deleting are Desktop-local (the paste IS the consent for background refreshes,
   // so it must come from the machine's owner); reading and refreshing work from any surface.
   listFeeds: () => req<{ feeds: Feed[] }>("/api/feeds"),
-  addFeed: (url: string) =>
+  // `tags` (optional) are stamped on every document the feed ever ingests.
+  addFeed: (url: string, tags: string[] = []) =>
     req<{ id: string; title: string; vault_id: string; items: number }>("/api/feeds", {
       method: "POST",
       headers: { "x-sb-local": "1" },
-      body: JSON.stringify({ url }),
+      body: JSON.stringify(tags.length ? { url, tags } : { url }),
     }),
   refreshFeed: (id: string) =>
     req<{ items: number }>(`/api/feeds/${encodeURIComponent(id)}/refresh`, { method: "POST" }),

@@ -107,6 +107,17 @@ def test_store_roundtrip_and_delete() -> None:
     assert store.get(fid) is None and store.list_feeds() == []
 
 
+def test_feed_tags_stamp_every_ingested_doc() -> None:
+    store, kb, vaults, _conn = _stores()
+    vid = vaults.create("Test Blog", tags=["feed"])
+    fid = store.add("https://blog.example/feed.xml", "Test Blog", vid, tags=["spac", " spac ", ""])
+    feed = store.get(fid)
+    assert feed["tags"] == ["spac", " spac ", ""]  # sealed as given; kb cleans on ingest
+    assert feedsmod.ingest_new_items(store, kb, vaults, feed, feedsmod.parse_feed(RSS)) == 2
+    for doc_id in vaults.document_ids(vid):
+        assert kb.get(doc_id)["tags"] == ["spac"]  # trimmed + de-duped by the kb rules
+
+
 def test_ingest_dedupes_by_guid() -> None:
     store, kb, vaults, conn = _stores()
     vid = vaults.create("Test Blog", tags=["feed"])
@@ -140,10 +151,15 @@ def test_feed_routes_full_lifecycle(client: TestClient, monkeypatch) -> None:
     monkeypatch.setattr(fr.netguard, "validate_public_url", lambda url: None)
     monkeypatch.setattr(fr.feedsmod, "fetch_and_parse", lambda url: feedsmod.parse_feed(RSS))
 
-    r = client.post("/api/feeds", json={"url": "https://blog.example/feed.xml"}, headers=_LOCAL)
+    r = client.post("/api/feeds", json={"url": "https://blog.example/feed.xml", "tags": ["spac"]},
+                    headers=_LOCAL)
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["title"] == "Test Blog" and body["items"] == 2
+
+    # The feed's tag rode into both ingested documents.
+    docs = client.get("/api/kb").json()["documents"]
+    assert len(docs) == 2 and all(d["tags"] == ["spac"] for d in docs)
 
     listed = client.get("/api/feeds").json()["feeds"]
     assert len(listed) == 1 and listed[0]["last_status"] == "ok: 2 new"
