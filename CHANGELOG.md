@@ -11,6 +11,8 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.9.13] - 2026-08-23
+
 ### Added
 - **Check for updates from the menu.** The launcher's tray menu gains "Check for
   updates" — the same quiet check the 6-hour timer runs, on demand, and it answers
