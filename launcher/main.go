@@ -52,6 +52,9 @@ const dockerGetURL = "https://docs.docker.com/get-docker/"
 var (
 	sb           stack.Stack
 	mu           sync.Mutex // serialize compose ops so two quick menu clicks can't race
+	checkMu      sync.Mutex // serialize update checks (timer vs. the menu's manual check)
+	restarting   bool       // a successful self-update is handing over to the new binary
+	lastStatus   string     // mirror of the tray status line, so a transient check can restore it
 	mStatus      *systray.MenuItem
 	mGetDocker   *systray.MenuItem
 	mVersion     *systray.MenuItem // what is actually running (learned from the handshake)
@@ -187,6 +190,7 @@ func onReady() {
 	mStop := systray.AddMenuItem("Stop", "Stop SmartBrain (your data is kept)")
 	mRestart := systray.AddMenuItem("Restart", "Restart SmartBrain")
 	mOpenLogs := systray.AddMenuItem("Open logs", "Open the folder with SmartBrain's log files")
+	mCheckUpdate := systray.AddMenuItem("Check for updates", "Look for a newer version right now")
 	mUpdateNow = systray.AddMenuItem("Install update now", "Download and apply the latest update now")
 	mUpdateNow.Hide()
 	mUpdateLater = systray.AddMenuItem("Install on next start", "Apply the update the next time you start SmartBrain")
@@ -213,6 +217,8 @@ func onReady() {
 			select {
 			case <-mOpen.ClickedCh:
 				go openOrStart()
+			case <-mCheckUpdate.ClickedCh:
+				go manualUpdateCheck()
 			case <-mUpdateNow.ClickedCh:
 				go installUpdate()
 			case <-mUpdateLater.ClickedCh:
@@ -247,6 +253,7 @@ func onReady() {
 // onReady before any goroutine runs, so the guards never fire and behavior is
 // EXACTLY what it was when these calls were inline.
 func setStatus(s string) {
+	lastStatus = s
 	if mStatus == nil {
 		log.Println("status:", s)
 		return
@@ -277,6 +284,7 @@ func menuHide(m *systray.MenuItem) {
 // asked to quit; headless simply exits 0 — systemd's Restart= (or the detached
 // replacement outside systemd) carries on with the new binary.
 func quitForRestart() {
+	restarting = true
 	if mStatus != nil {
 		systray.Quit()
 		return
@@ -380,12 +388,37 @@ func updateChecker() {
 	delay := updateFirstDelay // let startup settle, but only briefly
 	for {
 		time.Sleep(delay)
-		if checkForUpdate() {
+		checkMu.Lock() // never race the menu's manual check
+		looked := checkForUpdate()
+		checkMu.Unlock()
+		if looked {
 			delay = updateInterval
 		} else {
 			delay = updateRetryDelay // we never actually got to look — try again soon
 		}
 	}
+}
+
+// manualUpdateCheck is the menu's "Check for updates": the same quiet check the 6-hour
+// timer runs, but on demand and with an answer either way — the timer's silence is
+// right for a background look and wrong for a click.
+func manualUpdateCheck() {
+	if !checkMu.TryLock() {
+		return // a check is already running; its result will surface on its own
+	}
+	defer checkMu.Unlock()
+	prev := lastStatus
+	setStatus("Checking for updates…")
+	looked := checkForUpdate()
+	if restarting || stagedVersion != "" {
+		return // found one: the check already surfaced the install menu / restart
+	}
+	setStatus(prev)
+	if !looked {
+		stack.Notify("Can't check right now", "SmartBrain is busy starting or installing — try again in a moment.")
+		return
+	}
+	stack.Notify("You're up to date", "No newer SmartBrain version was found.")
 }
 
 // checkForUpdate reports whether a check actually happened; false means something was

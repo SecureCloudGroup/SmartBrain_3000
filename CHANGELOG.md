@@ -11,6 +11,12 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Added
+- **Check for updates from the menu.** The launcher's tray menu gains "Check for
+  updates" — the same quiet check the 6-hour timer runs, on demand, and it answers
+  either way: an update surfaces the usual install choices, and "no newer version"
+  says so instead of leaving you waiting on the timer.
+
 ## [0.9.12] - 2026-08-23
 
 ### Changed
