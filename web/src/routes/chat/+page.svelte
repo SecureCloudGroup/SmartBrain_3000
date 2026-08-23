@@ -664,6 +664,29 @@
     }
   }
 
+  // Re-send a previous user message verbatim (the Retry pill beside "You"): a nudge
+  // that didn't land shouldn't need retyping. It appends as a NEW user message —
+  // exactly as if retyped and sent — so what you see stays what a reload shows.
+  async function retryMessage(entry: Entry): Promise<void> {
+    const cid = chatSession.currentId;
+    if (busy || !modelId || cid === null) return;
+    void api.feedback("retry", cid); // implicit-dissatisfaction signal (best-effort)
+    busy = true;
+    error = "";
+    modelNotice = "";
+    try {
+      log.push({ id: nextEntryId("user"), role: "user", content: entry.content });
+      await api.addMessage(cid, "user", entry.content);
+      await runTurn(buildTranscript(), cid);
+      await loadConversations(); // refresh recency/order
+    } catch (err) {
+      const text = describeError(err);
+      if (text) log.push({ id: nextEntryId("err"), role: "assistant", content: text, err: true });
+    } finally {
+      busy = false;
+    }
+  }
+
   // Copy an answer's RAW markdown (entry content, not rendered HTML) — same clipboard +
   // 1.5s "Copied ✓" flip idiom as Settings → MCP's copy().
   async function copyMessage(entry: Entry): Promise<void> {
@@ -1196,7 +1219,12 @@
         </div>
       {:else}
         <div class="msg user">
-          <div class="who">You</div>
+          <div class="who">
+            You
+            <button class="retry" title="Send this message again" disabled={busy || !modelId} onclick={() => retryMessage(entry)}>
+              <Icon name="refresh" size={11} /> Retry
+            </button>
+          </div>
           <div class="body">{entry.content}</div>
         </div>
       {/if}
@@ -1363,6 +1391,31 @@
   }
   .msg-action:hover {
     color: var(--text);
+  }
+
+  /* Retry pill beside "You" — deliberately COLORED (accent) so it reads as an action
+     among the muted meta labels; the only colored control in the message rows. */
+  .retry {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    border: 0;
+    background: var(--accent-tint);
+    color: var(--accent-strong);
+    border-radius: var(--r-full);
+    padding: 2px 10px;
+    min-height: 0;
+    font-size: 0.72rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .retry:hover:not(:disabled) {
+    background: var(--accent-strong);
+    color: #fff;
+  }
+  .retry:disabled {
+    opacity: 0.45;
+    cursor: default;
   }
 
   /* Same ellipsis rule as Activity's card: a long host can't push the card wide. */

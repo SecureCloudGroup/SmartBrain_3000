@@ -11,6 +11,11 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Added
+- **Retry a message with one click.** Every message you've sent shows a small colored
+  Retry pill beside "You" — click it and the same request is sent again, exactly as if
+  you'd retyped it. For the times a nudge ("Go") deserves a second run without the typing.
+
 ## [0.9.13] - 2026-08-23
 
 ### Added
