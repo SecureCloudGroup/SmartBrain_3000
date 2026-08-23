@@ -11,6 +11,14 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Added
+- **Tag a feed once, every article carries it.** Subscribing to a feed now takes optional
+  tags, stamped on every document the feed ever ingests — one click on the tag chip
+  filters your library to the subject you follow.
+- **Bulk tag and bulk delete.** The selection bar on the Knowledge page can now tag or
+  delete everything you've ticked in one action. Publisher-owned copies refuse
+  individually, and the result reports the honest split.
+
 ## [0.9.10] - 2026-08-22
 
 ### Added

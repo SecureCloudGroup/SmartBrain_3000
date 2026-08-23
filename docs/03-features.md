@@ -208,9 +208,12 @@ check any claim against the original.
 tags line on a row to add or change them, and click any tag chip to filter the list to it.
 Editing tags is instant and never re-indexes the document. Up to 20 tags per document.
 
-**Each row also has Rename and Delete**, and a checkbox for picking documents to put in a
-vault. Renaming re-indexes the document in the background, because the title is part of what
-search matches on; tagging doesn't.
+**Each row also has Rename and Delete**, and a checkbox for selecting documents — put the
+selection in a vault, **tag them all at once**, or **delete them all at once** from the bar
+that appears. Renaming re-indexes the document in the background, because the title is part
+of what search matches on; tagging doesn't. Documents that came from someone else's vault
+refuse bulk edits individually (a publisher update could overwrite them) and the result
+says so honestly — detach a copy to make it yours first.
 
 **Instant summaries.** In the background SmartBrain builds a summary of every document —
 summaries of its parts, reduced into a summary of the whole. That's what makes *"summarize
@@ -244,7 +247,9 @@ or publicly: see [Share knowledge with Vaults](04-vaults.md).
 
 Any site that publishes an **RSS or Atom feed** — most blogs, news sites, and release
 pages do — can fill your knowledge by itself. On the **Knowledge** page, open *Follow a
-website*, paste the feed URL, and Subscribe. The subscription gets its own vault, and
+website*, paste the feed URL, and Subscribe. Add tags there (optional, comma-separated)
+and **every article the feed ever saves carries them** — so one click on the tag chip
+filters your whole library to that subject. The subscription gets its own vault, and
 every new post lands there as a searchable, citable document — so *"what did that blog
 say about X?"* works in Chat, and a schedule (below) can summarize the week's posts for
 you. What lands is what the feed carries: usually the title, link, and summary — some

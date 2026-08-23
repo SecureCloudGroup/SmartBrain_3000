@@ -44,6 +44,9 @@ def _kb(request: Request):
 
 class FeedAddIn(BaseModel):
     url: str = Field(min_length=8, max_length=2000)
+    # Stamped on every document the feed ever ingests (the kb tag rules apply: trimmed,
+    # de-duped, capped at 20 — mirroring the document PATCH surface).
+    tags: list[str] | None = Field(default=None, max_length=20)
 
 
 @router.get("/api/feeds")
@@ -68,7 +71,7 @@ def add_feed(request: Request, body: FeedAddIn) -> dict:
     store = _store(request)
     vaults = _vaults(request)
     vault_id = vaults.create(parsed["title"], "Feed subscription", tags=["feed"])
-    feed_id = store.add(url, parsed["title"], vault_id)
+    feed_id = store.add(url, parsed["title"], vault_id, tags=body.tags)
     feed = store.get(feed_id)
     added = feedsmod.ingest_new_items(store, _kb(request), vaults, feed, parsed)
     store.mark_checked(feed_id, f"ok: {added} new")

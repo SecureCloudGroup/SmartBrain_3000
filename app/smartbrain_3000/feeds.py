@@ -111,13 +111,16 @@ class FeedStore:
         self._conn = conn
         self._aes = AESGCM(master_key)
 
-    def add(self, url: str, title: str, vault_id: str) -> str:
+    def add(self, url: str, title: str, vault_id: str, tags: list[str] | None = None) -> str:
+        """``tags`` are stamped on every document the feed ever ingests — set at subscribe
+        time, sealed with the URL (which topics you follow is as telling as where)."""
         assert url and title and vault_id, "url, title, vault id required"
         count = self._conn.execute("SELECT COUNT(*) FROM feeds;").fetchone()[0]
         if int(count) >= _MAX_FEEDS:
             raise FeedError(f"feed limit reached ({_MAX_FEEDS})")
         feed_id = str(uuid.uuid4())
-        nonce, ciphertext = self._seal(feed_id, {"url": url[:_MAX_URL], "title": title[:_MAX_TITLE]})
+        nonce, ciphertext = self._seal(feed_id, {"url": url[:_MAX_URL], "title": title[:_MAX_TITLE],
+                                                 "tags": [str(t)[:100] for t in (tags or [])[:20]]})
         self._conn.execute(
             "INSERT INTO feeds (id, vault_id, nonce, ciphertext) VALUES (?, ?, ?, ?);",
             [feed_id, vault_id, nonce, ciphertext],
@@ -195,6 +198,7 @@ class FeedStore:
         body = json.loads(self._aes.decrypt(bytes(row[2]), bytes(row[3]), aad))
         return {
             "id": feed_id, "vault_id": str(row[1]), "url": body["url"], "title": body["title"],
+            "tags": body.get("tags", []),  # absent in pre-tag rows
             "enabled": bool(row[4]),
             "last_checked": None if row[5] is None else str(row[5]),
             "last_status": str(row[6] or ""), "created_at": str(row[7]),
@@ -239,7 +243,8 @@ def ingest_new_items(store: FeedStore, kb, vaults, feed: dict, parsed: dict) -> 
             content_parts.append("")
             content_parts.append(item["summary"])
         doc_id = kb.add(title, "\n".join(content_parts),
-                        meta={"feed_id": feed["id"], "feed_guid": item["guid"][:_MAX_URL]})
+                        meta={"feed_id": feed["id"], "feed_guid": item["guid"][:_MAX_URL]},
+                        tags=feed.get("tags"))
         vaults.add_documents(feed["vault_id"], [doc_id])
         store.mark_seen(feed["id"], item["guid"])
         added += 1
