@@ -18,7 +18,7 @@ import uuid
 
 log = logging.getLogger(__name__)
 
-FEEDBACK_KINDS = ("stop", "regenerate")
+FEEDBACK_KINDS = ("stop", "regenerate", "retry")
 
 
 def record_turn(
@@ -64,7 +64,7 @@ def record_turn(
 
 
 def record_feedback(conn, *, kind: str, conversation_id: str | None = None, message_id: str | None = None) -> None:
-    """Insert one implicit-feedback row (kind = 'stop' | 'regenerate'). Best-effort."""
+    """Insert one implicit-feedback row (kind = 'stop' | 'regenerate' | 'retry'). Best-effort."""
     if conn is None or kind not in FEEDBACK_KINDS:
         return
     try:
