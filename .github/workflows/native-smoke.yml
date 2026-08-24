@@ -118,6 +118,17 @@ jobs:
           ./launcher/build/smartbrain start | tee start.out
           grep -q 'http://localhost:33000' start.out
           curl -sf http://127.0.0.1:33000/api/health | grep -q '"status":"ok"'
+      # A failed start used to end with "see the log" — on a runner nobody can see.
+      # The 2026-08-24 canary failure ("gateway: the process we started exited") was
+      # undiagnosable for exactly that reason. Dump every log the launcher writes.
+      - name: On failure, actually show the logs
+        if: failure()
+        run: |
+          for f in "$HOME/.config/SmartBrain/native/run/app.log" \
+                   "$HOME/.config/SmartBrain/native/run/bifrost.log"; do
+            echo "===== $f ====="
+            tail -n 100 "$f" 2>/dev/null || echo "(missing)"
+          done
       - name: The app is really usable — setup, ingest, search
         run: |
           set -eux
