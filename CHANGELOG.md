@@ -11,6 +11,8 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.9.19] - 2026-08-24
+
 ### Added
 - **Voice now just works — dictation is built in, zero setup, every OS.** SmartBrain
   transcribes on your machine with Moonshine, a fast on-device speech-to-text engine:
