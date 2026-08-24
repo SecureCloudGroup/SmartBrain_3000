@@ -113,8 +113,8 @@ A parked action doesn't wait indefinitely — see **Activity**, below.
 ### Voice — dictate and listen
 
 Chat can listen and talk. If a voice server is configured (see
-[Voice](02-models.md#voice-dictation-and-spoken-replies) — on a Mac with oMLX there's
-nothing to set up), a **microphone button** appears in the message box: tap, speak, tap
+[Voice](02-models.md#voice-dictation-and-spoken-replies) — on a Mac, oMLX with a
+whisper model loaded is all it takes), a **microphone button** appears in the message box: tap, speak, tap
 again, and your words land in the box as text — **you review before it sends**. The
 transcription happens on your own machine; nothing is sent to any speech service.
 

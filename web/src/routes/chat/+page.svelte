@@ -225,7 +225,9 @@
       // no auto-send; reviewing the transcript before it runs is the safe default).
       if (r.text) input = input ? `${input.trimEnd()} ${r.text}` : r.text;
     } catch (err) {
-      error = describeError(err);
+      // The server's own words, verbatim: describeError's friendly 502 wording hid
+      // "Model 'whisper-…' not found" behind "couldn't reach the model" in the field.
+      error = err instanceof ApiError && err.message ? err.message : describeError(err);
     } finally {
       recState = "idle";
     }

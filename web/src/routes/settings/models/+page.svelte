@@ -431,6 +431,15 @@
   {#if voiceStatus?.configured && voiceStatus.source === "mlx"}
     <p class="muted" style="font-size:0.85rem; margin:0 0 0.5rem">Using the MLX server configured above.</p>
   {/if}
+  {#if voiceStatus?.reachable && voiceStatus.stt_ready === false}
+    <!-- Reachable-but-modelless fails only at dictation time; say it HERE first. -->
+    <p class="error" style="font-size:0.85rem; margin:0 0 0.5rem">
+      The server answers, but it has <strong>no transcription (whisper) model loaded</strong> —
+      dictation will fail until one is added there (for example
+      <code>mlx-community/whisper-large-v3-turbo</code>). Once any whisper model is loaded,
+      SmartBrain finds and uses it automatically.
+    </p>
+  {/if}
   <label for="voice-url">Audio server URL <span class="muted" style="font-weight:400">(empty = use the MLX server)</span></label>
   <input id="voice-url" type="url" bind:value={voiceUrl} autocomplete="off" placeholder="http://192.168.1.50:8000" />
   <label for="voice-key" style="margin-top:0.5rem">API key <span class="muted" style="font-weight:400">(optional)</span></label>
