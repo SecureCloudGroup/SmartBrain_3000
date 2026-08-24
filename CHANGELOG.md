@@ -11,6 +11,8 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.9.17] - 2026-08-23
+
 ### Fixed
 - **Dictation actually starts now.** Pressing the mic failed immediately: the audio
   recorder loaded its processing module from an inline blob URL, which the app's own
