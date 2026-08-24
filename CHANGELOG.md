@@ -11,6 +11,15 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Added
+- **Voice now just works — dictation is built in, zero setup, every OS.** SmartBrain
+  transcribes on your machine with Moonshine, a fast on-device speech-to-text engine:
+  the model (~236 MB) is fetched once, integrity-checked, quietly in the background
+  after unlock, and dictation is instant and offline from then on (English, for now).
+  A configured audio server still takes over automatically for other languages or
+  maximum accuracy — and if it can't serve, the built-in engine carries on instead of
+  failing. No model names, no servers, no settings.
+
 ## [0.9.18] - 2026-08-24
 
 ### Fixed

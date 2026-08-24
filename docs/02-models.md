@@ -186,26 +186,23 @@ sends your documents there on every reindex — only do that if you accept that 
 ## Voice (dictation and spoken replies)
 
 Chat can listen and talk — see [Voice in Chat](03-features.md#voice-dictate-and-listen)
-for how it feels to use. Under the hood, **your voice never leaves your machines**:
-speech-to-text runs on a local audio server you configure under **Settings → Local
-models → Voice**, and replies are spoken with your device's own voices.
+for how it feels to use. Under the hood, **your voice never leaves your machines** —
+and there is **nothing to set up**: dictation is built in, on every OS.
 
-- **Mac (Apple Silicon)** — **oMLX already serves the audio endpoints**; leave the
-  Voice address empty and SmartBrain uses your MLX server. One thing to do once:
-  **load a whisper model into oMLX** (for example
-  `mlx-community/whisper-large-v3-turbo`), the same way you loaded your chat model —
-  servers only offer the models they've loaded. Whatever whisper build it has,
-  SmartBrain finds and uses it automatically; the Voice card in Settings warns you
-  if the server is reachable but has no transcription model yet.
-- **Windows / Linux** — run any local server that speaks the standard
-  `/v1/audio/transcriptions` API and put its address in the Voice card. Two good
-  choices: [speaches](https://github.com/speaches-ai/speaches) (CPU or GPU, also
-  offers server voices) or `whisper.cpp`'s server, each with a whisper model pulled.
-  SmartBrain auto-detects whatever whisper model the server offers — you only set a
-  model name if you want a specific one.
+- **Built in (the default)** — SmartBrain transcribes on your machine with
+  [Moonshine](https://github.com/usefulsensors/moonshine), a fast on-device
+  speech-to-text model. The first time voice is used (or quietly in the background
+  after you unlock), it fetches its model files once (~236 MB, integrity-checked);
+  after that, dictation is instant and fully offline. English only, for now.
+- **Your own audio server (optional)** — for other languages or maximum accuracy,
+  run any local server that speaks the standard `/v1/audio/transcriptions` API (oMLX
+  with a whisper model on a Mac, [speaches](https://github.com/speaches-ai/speaches)
+  or `whisper.cpp`'s server elsewhere) and put its address in **Settings → Local
+  models → Voice**. When it's configured and healthy it takes over automatically —
+  and if it ever can't serve, the built-in engine carries on instead of failing.
 - **Phone (PWA)** — nothing to configure: your phone's microphone audio travels the
   same encrypted connection as everything else to the Desktop, which transcribes it
-  with the server above. Replies use the phone's own voices, offline.
+  locally. Replies use the phone's own voices, offline.
 
 **Spoken replies** use your device's built-in voices by default — instant and offline
 on macOS, Windows, iPhone, and Android. Linux desktops often ship no browser voices;

@@ -68,27 +68,39 @@ def test_transcribe_happy_path(monkeypatch) -> None:
     assert seen["model"] == voice.DEFAULT_STT_MODEL
 
 
-def test_transcribe_errors(monkeypatch) -> None:
+def test_transcribe_unconfigured_uses_local_engine(monkeypatch) -> None:
     store = _secret_store()
-    with pytest.raises(voice.VoiceError) as e:
-        voice.transcribe(store, b"x")  # nothing configured
-    assert e.value.status == 503
+    monkeypatch.setattr(voice.moonshine, "transcribe_wav", lambda audio: "local text")
+    assert voice.transcribe(store, b"RIFF") == "local text"
 
+
+def test_transcribe_local_failure_is_actionable(monkeypatch) -> None:
+    store = _secret_store()
+
+    def not_ready(audio):
+        raise RuntimeError("preparing voice (40%) — one-time download, try again shortly")
+    monkeypatch.setattr(voice.moonshine, "transcribe_wav", not_ready)
+    with pytest.raises(voice.VoiceError) as e:
+        voice.transcribe(store, b"RIFF")
+    assert e.value.status == 503 and "preparing voice (40%)" in e.value.message
+
+
+def test_transcribe_server_failure_falls_back_to_local(monkeypatch) -> None:
+    """A configured-but-broken server must not take dictation down: local carries on."""
+    store = _secret_store()
     store.put(gateway.MLX_URL_KEY, "http://127.0.0.1:8888")
+    monkeypatch.setattr(voice.moonshine, "transcribe_wav", lambda audio: "local rescue")
+
     monkeypatch.setattr(voice.httpx, "post",
                         lambda url, **kw: _resp(500, {"error": {"message": "model exploded"}}))
-    with pytest.raises(voice.VoiceError) as e:
-        voice.transcribe(store, b"x")
-    assert e.value.status == 502 and "model exploded" in e.value.message
+    assert voice.transcribe(store, b"RIFF") == "local rescue"
 
     def timeout(url, **kw):
         raise httpx.ConnectTimeout("slow")
     monkeypatch.setattr(voice.httpx, "post", timeout)
-    with pytest.raises(voice.VoiceError) as e:
-        voice.transcribe(store, b"x")
-    assert e.value.status == 504
+    assert voice.transcribe(store, b"RIFF") == "local rescue"
 
-    with pytest.raises(voice.VoiceError) as e:
+    with pytest.raises(voice.VoiceError) as e:  # size guard fires before any engine
         voice.transcribe(store, b"x" * (voice._MAX_AUDIO_BYTES + 1))
     assert e.value.status == 413
 
@@ -117,18 +129,22 @@ def test_transcribe_autoresolves_whisper_model(monkeypatch) -> None:
     assert calls == ["whisper-turbo-mlx"]  # no second resolution round-trip
 
 
-def test_transcribe_no_whisper_anywhere_is_actionable(monkeypatch) -> None:
+def test_transcribe_no_server_whisper_falls_back_to_local(monkeypatch) -> None:
     store = _secret_store()
     store.put(gateway.MLX_URL_KEY, "http://127.0.0.1:8888")
     monkeypatch.setattr(voice.httpx, "post",
                         lambda url, **kw: _resp(404, {"detail": "Model 'x' not found. Available: Qwen"}))
     monkeypatch.setattr(voice.gateway, "probe_mlx",
                         lambda url, key, **kw: {"reachable": True, "models": ["Qwen"]})
-    with pytest.raises(voice.VoiceError) as e:
-        voice.transcribe(store, b"RIFF")
-    assert e.value.status == 503
-    assert "no transcription (whisper) model" in e.value.message
-    assert "mlx-community/whisper-large-v3-turbo" in e.value.message  # names the fix
+    monkeypatch.setattr(voice.moonshine, "transcribe_wav", lambda audio: "moonshine says hi")
+    assert voice.transcribe(store, b"RIFF") == "moonshine says hi"
+
+
+def test_status_reports_local_engine() -> None:
+    store = _secret_store()
+    st = voice.status(store)
+    assert st["stt_available"] is True
+    assert st["local"]["phase"] in ("absent", "downloading", "ready", "error")
 
 
 def test_status_probe_reports_stt_ready(monkeypatch) -> None:
