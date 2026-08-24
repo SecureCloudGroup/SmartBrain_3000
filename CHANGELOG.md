@@ -11,6 +11,8 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.9.18] - 2026-08-24
+
 ### Fixed
 - **Dictation finds the server's whisper model by itself — and tells the truth when
   there isn't one.** The first real dictation failed three layers deep: the voice
