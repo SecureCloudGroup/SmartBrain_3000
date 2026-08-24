@@ -11,6 +11,11 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Fixed
+- **The voice buttons are actually visible now.** The mic and speaker buttons in the
+  message box rendered as 2-pixel slivers — the app's base button padding inside their
+  fixed width squeezed the icons to nothing. They now size like the Send button.
+
 ## [0.9.15] - 2026-08-23
 
 ### Added

@@ -1546,8 +1546,13 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 34px;
-    height: 34px;
+    /* The global button rule's padding (10px 16px) inside a fixed 34px width left a
+       2px content box — the icon rendered as a sliver. Zero it and size like Send. */
+    width: 40px;
+    height: 40px;
+    min-width: 40px;
+    min-height: 40px;
+    padding: 0;
     flex: none;
     border: 0;
     border-radius: var(--r-full);
