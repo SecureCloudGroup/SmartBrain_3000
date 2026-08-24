@@ -17,7 +17,7 @@ import logging
 
 import httpx
 
-from . import gateway
+from . import gateway, moonshine
 
 log = logging.getLogger(__name__)
 
@@ -83,7 +83,10 @@ def status(store, probe: bool = False) -> dict:
     cfg = server_config(store)
     out = {"configured": bool(cfg["url"]), "source": cfg["source"], "reachable": None,
            "stt_model": stt_model(store), "tts_model": store.get(TTS_MODEL_KEY) or "",
-           "tts_voice": store.get(TTS_VOICE_KEY) or "", "stt_ready": None}
+           "tts_voice": store.get(TTS_VOICE_KEY) or "", "stt_ready": None,
+           # The local engine makes dictation unconditionally available; `local` carries
+           # its phase/pct so the mic can show "Preparing voice (N%)" honestly.
+           "stt_available": True, "local": moonshine.status()}
     if probe and cfg["url"]:
         probed = gateway.probe_mlx(cfg["url"], cfg["api_key"])  # plain /v1/models GET, best-effort
         out["reachable"] = bool(probed.get("reachable"))
@@ -112,7 +115,25 @@ def transcribe(store, audio: bytes, content_type: str = "audio/wav") -> str:
         raise VoiceError(413, "recording too long — try a shorter one")
     cfg = server_config(store)
     if not cfg["url"]:
-        raise VoiceError(503, "no voice server configured — add one under Settings → Local models")
+        return _transcribe_local(audio)  # the zero-touch default: in-process Moonshine
+    try:
+        return _transcribe_server(store, cfg, audio, content_type)
+    except VoiceError as exc:
+        # A configured server that can't transcribe right now (down, or no whisper
+        # model) must not take dictation down with it — the local engine carries on,
+        # and the server outranks it again the moment it can actually serve.
+        log.warning("voice: server transcription unavailable (%s) — using local engine", exc.message)
+        return _transcribe_local(audio)
+
+
+def _transcribe_local(audio: bytes) -> str:
+    try:
+        return moonshine.transcribe_wav(audio)
+    except RuntimeError as exc:
+        raise VoiceError(503, str(exc)) from None
+
+
+def _transcribe_server(store, cfg: dict, audio: bytes, content_type: str) -> str:
     resp = _post_transcription(cfg, audio, content_type, stt_model(store))
     if resp.status_code >= 400:
         reason = _upstream_reason(resp)
@@ -121,11 +142,7 @@ def transcribe(store, audio: bytes, content_type: str = "audio/wav") -> str:
         probe = gateway.probe_mlx(cfg["url"], cfg["api_key"])
         resolved = _find_whisper(probe.get("models") or [])
         if not resolved:
-            raise VoiceError(503, (
-                "the voice server has no transcription (whisper) model loaded — load one "
-                "there (for example mlx-community/whisper-large-v3-turbo), or point "
-                "Settings → Local models → Voice at a server that has one. "
-                f"The server reports: {reason}"))
+            raise VoiceError(503, "the voice server has no transcription (whisper) model loaded")
         resp = _post_transcription(cfg, audio, content_type, resolved)
         if resp.status_code >= 400:
             raise VoiceError(502, _upstream_reason(resp))

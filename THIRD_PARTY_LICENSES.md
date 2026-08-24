@@ -7,7 +7,7 @@ is a summary — the authoritative license text ships with each package.
 
 ## Runtime (Python — shipped in the Docker image; pinned in `app/requirements.lock`)
 
-The complete runtime set (67 packages) is exact-version pinned in [`app/requirements.lock`](app/requirements.lock). All are permissive (MIT / BSD / Apache-2.0 / ISC / PSF) **except** the two weak/file-level-copyleft components called out below; their notices ship unmodified inside each package.
+The complete runtime set (82 packages) is exact-version pinned in [`app/requirements.lock`](app/requirements.lock). All are permissive (MIT / BSD / Apache-2.0 / ISC / PSF) **except** the two weak/file-level-copyleft components called out below; their notices ship unmodified inside each package.
 
 | Component | Purpose | License |
 |-----------|---------|---------|
@@ -46,7 +46,10 @@ The complete runtime set (67 packages) is exact-version pinned in [`app/requirem
 | lxml | transitive dependency | BSD-3-Clause |
 | lxml_html_clean | transitive dependency | BSD-3-Clause |
 | mcp | Model Context Protocol server | MIT |
+| numpy | Vector math (semantic search; voice audio) | BSD-3-Clause |
+| onnxruntime | Voice: Moonshine STT inference | MIT |
 | packaging | transitive dependency | Apache-2.0 OR BSD-2-Clause |
+| protobuf | transitive dependency (onnxruntime) | BSD-3-Clause |
 | pycparser | transitive dependency | BSD-2-Clause |
 | pydantic | Request validation | MIT |
 | pydantic-settings | transitive dependency | MIT |
@@ -106,6 +109,7 @@ The complete runtime set (67 packages) is exact-version pinned in [`app/requirem
 | [Caddy](https://github.com/caddyserver/caddy) | Reverse proxy / TLS for the remote-access node (optional) | Apache-2.0 |
 | [Inter](https://rsms.me/inter/) | UI typeface (self-hosted subset, `web/static/fonts/`; license ships beside the file) | OFL-1.1 |
 | [Lucide](https://lucide.dev) | UI icon set (vendored path data, `web/src/lib/icons.ts`) | ISC |
+| [Moonshine](https://github.com/usefulsensors/moonshine) | On-device speech-to-text: vendored ONNX inference loop + tokenizer (`app/smartbrain_3000/moonshine.py`, `assets/moonshine-tokenizer.json`); model weights fetched hash-pinned at first use | MIT |
 
 If you believe an attribution here is inaccurate or incomplete, please open an
 issue or email **info@securecloudgroup.com**.
