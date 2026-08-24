@@ -19,10 +19,9 @@ import uuid
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from . import email_account, gateway, keyvault
+from . import email_account, gateway, keyvault, moonshine
 from .approvals import ApprovalStore
 from .audit import AuditLog
-from . import moonshine
 from .feeds import FeedStore
 from .history import ChatHistory
 from .kb import KnowledgeBase

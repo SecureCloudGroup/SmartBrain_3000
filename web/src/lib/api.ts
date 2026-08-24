@@ -261,6 +261,10 @@ export interface VoiceStatus {
   // Probed only: the configured (or any whisper-family) transcription model is loaded
   // on the server. false = reachable but dictation WILL fail — the settings card warns.
   stt_ready: boolean | null;
+  // Dictation is always available: the in-process local engine backs everything.
+  stt_available: boolean;
+  // The local engine's readiness (one-time model fetch): phase + download percent.
+  local: { phase: "absent" | "downloading" | "ready" | "error"; pct: number; error: string };
 }
 
 export interface RememberedSite {

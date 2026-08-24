@@ -1426,7 +1426,7 @@
 
   <div class="composer">
     <div class="inner">
-      {#if voiceInfo?.configured}
+      {#if voiceInfo?.stt_available}
         <button
           class="voice mic"
           class:recording={recState === "recording"}

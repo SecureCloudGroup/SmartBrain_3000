@@ -14,13 +14,12 @@ from smartbrain_3000 import moonshine
 
 def _wav(rate: int = 16000, seconds: float = 0.5, channels: int = 1, width: int = 2) -> bytes:
     buf = io.BytesIO()
-    w = wave.open(buf, "wb")
-    w.setnchannels(channels)
-    w.setsampwidth(width)
-    w.setframerate(rate)
-    n = int(rate * seconds)
-    w.writeframes(b"".join(struct.pack("<h", int(1000 * math.sin(i / 10))) for i in range(n)))
-    w.close()
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(channels)
+        w.setsampwidth(width)
+        w.setframerate(rate)
+        n = int(rate * seconds)
+        w.writeframes(b"".join(struct.pack("<h", int(1000 * math.sin(i / 10))) for i in range(n)))
     return buf.getvalue()
 
 
