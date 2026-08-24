@@ -3,20 +3,11 @@
 // Captures at the context's NATIVE rate via an AudioWorklet (Safari quietly ignores a
 // requested sampleRate, so asking for 16 kHz is a lie on the platform we care most
 // about) and downsamples in JS — the one path that behaves identically on Safari,
-// Chrome, and Firefox, desktop and phone. The worklet module ships inline as a blob
-// URL so there's no extra asset to route.
+// Chrome, and Firefox, desktop and phone. The worklet ships as a real static file
+// (/capture-worklet.js): the app's CSP is script-src 'self', which rightly refuses
+// an inline blob: module — the first field test failed exactly there.
 
 import { downsample, encodeWav, TARGET_RATE } from "./wav";
-
-const WORKLET_SRC = `
-registerProcessor("sb-capture", class extends AudioWorkletProcessor {
-  process(inputs) {
-    const ch = inputs[0] && inputs[0][0];
-    if (ch && ch.length) this.port.postMessage(ch.slice(0));
-    return true;
-  }
-});
-`;
 
 export class Recorder {
   private stream: MediaStream | null = null;
@@ -36,12 +27,7 @@ export class Recorder {
       audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 },
     });
     this.context = new AudioContext();
-    const url = URL.createObjectURL(new Blob([WORKLET_SRC], { type: "text/javascript" }));
-    try {
-      await this.context.audioWorklet.addModule(url);
-    } finally {
-      URL.revokeObjectURL(url);
-    }
+    await this.context.audioWorklet.addModule("/capture-worklet.js");
     this.node = new AudioWorkletNode(this.context, "sb-capture");
     this.node.port.onmessage = (e: MessageEvent<Float32Array>) => {
       this.parts.push(e.data);
