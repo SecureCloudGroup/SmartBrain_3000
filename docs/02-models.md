@@ -190,14 +190,19 @@ for how it feels to use. Under the hood, **your voice never leaves your machines
 speech-to-text runs on a local audio server you configure under **Settings → Local
 models → Voice**, and replies are spoken with your device's own voices.
 
-- **Mac (Apple Silicon)** — nothing extra to set up: **oMLX already serves audio**.
-  Leave the Voice address empty and SmartBrain uses your MLX server. The default
-  transcription model is `whisper-large-v3-turbo` (oMLX downloads it on first use).
+- **Mac (Apple Silicon)** — **oMLX already serves the audio endpoints**; leave the
+  Voice address empty and SmartBrain uses your MLX server. One thing to do once:
+  **load a whisper model into oMLX** (for example
+  `mlx-community/whisper-large-v3-turbo`), the same way you loaded your chat model —
+  servers only offer the models they've loaded. Whatever whisper build it has,
+  SmartBrain finds and uses it automatically; the Voice card in Settings warns you
+  if the server is reachable but has no transcription model yet.
 - **Windows / Linux** — run any local server that speaks the standard
   `/v1/audio/transcriptions` API and put its address in the Voice card. Two good
   choices: [speaches](https://github.com/speaches-ai/speaches) (CPU or GPU, also
-  offers server voices) or `whisper.cpp`'s server. Set the transcription model to
-  whatever model you pulled there.
+  offers server voices) or `whisper.cpp`'s server, each with a whisper model pulled.
+  SmartBrain auto-detects whatever whisper model the server offers — you only set a
+  model name if you want a specific one.
 - **Phone (PWA)** — nothing to configure: your phone's microphone audio travels the
   same encrypted connection as everything else to the Desktop, which transcribes it
   with the server above. Replies use the phone's own voices, offline.

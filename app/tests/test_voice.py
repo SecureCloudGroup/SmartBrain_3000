@@ -93,6 +93,57 @@ def test_transcribe_errors(monkeypatch) -> None:
     assert e.value.status == 413
 
 
+def test_transcribe_autoresolves_whisper_model(monkeypatch) -> None:
+    """A 'not found' answer triggers catalog lookup, a retry with the server's own
+    whisper model, and a persisted name — the field-test failure, self-healed."""
+    store = _secret_store()
+    store.put(gateway.MLX_URL_KEY, "http://127.0.0.1:8888")
+    calls: list = []
+
+    def fake_post(url, **kw):
+        calls.append(kw["data"]["model"])
+        if kw["data"]["model"] == voice.DEFAULT_STT_MODEL:
+            return _resp(404, {"detail": "Model 'whisper-large-v3-turbo' not found. Available: Qwen, whisper-turbo-mlx"})
+        return _resp(200, {"text": "resolved fine"})
+
+    monkeypatch.setattr(voice.httpx, "post", fake_post)
+    monkeypatch.setattr(voice.gateway, "probe_mlx",
+                        lambda url, key, **kw: {"reachable": True, "models": ["Qwen", "whisper-turbo-mlx"]})
+    assert voice.transcribe(store, b"RIFF") == "resolved fine"
+    assert calls == [voice.DEFAULT_STT_MODEL, "whisper-turbo-mlx"]
+    assert store.get(voice.STT_MODEL_KEY) == "whisper-turbo-mlx"  # sticky
+    calls.clear()
+    assert voice.transcribe(store, b"RIFF") == "resolved fine"
+    assert calls == ["whisper-turbo-mlx"]  # no second resolution round-trip
+
+
+def test_transcribe_no_whisper_anywhere_is_actionable(monkeypatch) -> None:
+    store = _secret_store()
+    store.put(gateway.MLX_URL_KEY, "http://127.0.0.1:8888")
+    monkeypatch.setattr(voice.httpx, "post",
+                        lambda url, **kw: _resp(404, {"detail": "Model 'x' not found. Available: Qwen"}))
+    monkeypatch.setattr(voice.gateway, "probe_mlx",
+                        lambda url, key, **kw: {"reachable": True, "models": ["Qwen"]})
+    with pytest.raises(voice.VoiceError) as e:
+        voice.transcribe(store, b"RIFF")
+    assert e.value.status == 503
+    assert "no transcription (whisper) model" in e.value.message
+    assert "mlx-community/whisper-large-v3-turbo" in e.value.message  # names the fix
+
+
+def test_status_probe_reports_stt_ready(monkeypatch) -> None:
+    store = _secret_store()
+    store.put(gateway.MLX_URL_KEY, "http://127.0.0.1:8888")
+    monkeypatch.setattr(voice.gateway, "probe_mlx",
+                        lambda url, key, **kw: {"reachable": True, "models": ["Qwen"]})
+    st = voice.status(store, probe=True)
+    assert st["reachable"] is True and st["stt_ready"] is False
+    monkeypatch.setattr(voice.gateway, "probe_mlx",
+                        lambda url, key, **kw: {"reachable": True, "models": ["Qwen", "any-whisper-build"]})
+    assert voice.status(store, probe=True)["stt_ready"] is True
+    assert voice.status(store)["stt_ready"] is None  # unprobed stays unknown
+
+
 def test_speak_requires_tts_model(monkeypatch) -> None:
     store = _secret_store()
     store.put(gateway.MLX_URL_KEY, "http://127.0.0.1:8888")

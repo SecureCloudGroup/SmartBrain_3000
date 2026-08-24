@@ -64,6 +64,14 @@ def stt_model(store) -> str:
     return store.get(STT_MODEL_KEY) or DEFAULT_STT_MODEL
 
 
+def _find_whisper(models: list) -> str:
+    """First whisper-family model id in a server catalog, or ""."""
+    for mid in models:
+        if isinstance(mid, str) and "whisper" in mid.lower():
+            return mid
+    return ""
+
+
 def status(store, probe: bool = False) -> dict:
     """What the voice UI needs to decide what to show: is STT/TTS worth offering?
 
@@ -75,39 +83,73 @@ def status(store, probe: bool = False) -> dict:
     cfg = server_config(store)
     out = {"configured": bool(cfg["url"]), "source": cfg["source"], "reachable": None,
            "stt_model": stt_model(store), "tts_model": store.get(TTS_MODEL_KEY) or "",
-           "tts_voice": store.get(TTS_VOICE_KEY) or ""}
+           "tts_voice": store.get(TTS_VOICE_KEY) or "", "stt_ready": None}
     if probe and cfg["url"]:
         probed = gateway.probe_mlx(cfg["url"], cfg["api_key"])  # plain /v1/models GET, best-effort
         out["reachable"] = bool(probed.get("reachable"))
+        if out["reachable"]:
+            models = probed.get("models") or []
+            # Ready = the configured model is loaded, or ANY whisper-family model is
+            # (transcribe auto-resolves to it). The field test proved a reachable
+            # server with no whisper model fails with a 'not found' the UI must warn
+            # about BEFORE the user is mid-dictation.
+            out["stt_ready"] = stt_model(store) in models or bool(_find_whisper(models))
     return out
 
 
 def transcribe(store, audio: bytes, content_type: str = "audio/wav") -> str:
-    """Send captured audio to the local server's /v1/audio/transcriptions; return the text."""
+    """Send captured audio to the local server's /v1/audio/transcriptions; return the text.
+
+    Self-healing on the model name: servers refuse ids they haven't loaded (the field
+    test hit "Model 'whisper-large-v3-turbo' not found"), and every server names its
+    whisper differently — on a not-found, look at what the server actually HAS, retry
+    with its whisper-family model, and persist the resolved name so the next call is
+    direct. A server with NO whisper model gets an error that says exactly that and
+    exactly what to do — not a shrug.
+    """
     assert audio, "audio bytes required"
     if len(audio) > _MAX_AUDIO_BYTES:
         raise VoiceError(413, "recording too long — try a shorter one")
     cfg = server_config(store)
     if not cfg["url"]:
         raise VoiceError(503, "no voice server configured — add one under Settings → Local models")
-    headers = {"Authorization": f"Bearer {cfg['api_key']}"} if cfg["api_key"] else {}
-    files = {"file": ("audio.wav", audio, content_type or "audio/wav")}
-    data = {"model": stt_model(store), "response_format": "json"}
-    try:
-        with gateway.serialized_local():
-            resp = httpx.post(f"{cfg['url'].rstrip('/')}/v1/audio/transcriptions",
-                              headers=headers, files=files, data=data, timeout=_TRANSCRIBE_TIMEOUT)
-    except httpx.TimeoutException:
-        raise VoiceError(504, "the voice server took too long — is the model still loading?") from None
-    except httpx.HTTPError as exc:
-        raise VoiceError(502, f"could not reach the voice server: {exc.__class__.__name__}") from None
+    resp = _post_transcription(cfg, audio, content_type, stt_model(store))
     if resp.status_code >= 400:
-        raise VoiceError(502, _upstream_reason(resp))
+        reason = _upstream_reason(resp)
+        if "not found" not in reason.lower():
+            raise VoiceError(502, reason)
+        probe = gateway.probe_mlx(cfg["url"], cfg["api_key"])
+        resolved = _find_whisper(probe.get("models") or [])
+        if not resolved:
+            raise VoiceError(503, (
+                "the voice server has no transcription (whisper) model loaded — load one "
+                "there (for example mlx-community/whisper-large-v3-turbo), or point "
+                "Settings → Local models → Voice at a server that has one. "
+                f"The server reports: {reason}"))
+        resp = _post_transcription(cfg, audio, content_type, resolved)
+        if resp.status_code >= 400:
+            raise VoiceError(502, _upstream_reason(resp))
+        store.put(STT_MODEL_KEY, resolved)  # sticky: next call goes straight there
+        log.info("voice: transcription model auto-resolved")
     try:
         text = resp.json().get("text", "")
     except ValueError:
         raise VoiceError(502, "the voice server returned a non-JSON transcription") from None
     return str(text or "").strip()
+
+
+def _post_transcription(cfg: dict, audio: bytes, content_type: str, model: str) -> httpx.Response:
+    headers = {"Authorization": f"Bearer {cfg['api_key']}"} if cfg["api_key"] else {}
+    files = {"file": ("audio.wav", audio, content_type or "audio/wav")}
+    data = {"model": model, "response_format": "json"}
+    try:
+        with gateway.serialized_local():
+            return httpx.post(f"{cfg['url'].rstrip('/')}/v1/audio/transcriptions",
+                              headers=headers, files=files, data=data, timeout=_TRANSCRIBE_TIMEOUT)
+    except httpx.TimeoutException:
+        raise VoiceError(504, "the voice server took too long — is the model still loading?") from None
+    except httpx.HTTPError as exc:
+        raise VoiceError(502, f"could not reach the voice server: {exc.__class__.__name__}") from None
 
 
 def speak(store, text: str) -> tuple[bytes, str]:

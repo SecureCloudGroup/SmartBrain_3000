@@ -258,6 +258,9 @@ export interface VoiceStatus {
   stt_model: string;
   tts_model: string; // "" = server TTS off (browser system voices only)
   tts_voice: string;
+  // Probed only: the configured (or any whisper-family) transcription model is loaded
+  // on the server. false = reachable but dictation WILL fail — the settings card warns.
+  stt_ready: boolean | null;
 }
 
 export interface RememberedSite {

@@ -11,6 +11,16 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Fixed
+- **Dictation finds the server's whisper model by itself — and tells the truth when
+  there isn't one.** The first real dictation failed three layers deep: the voice
+  server had no whisper model loaded, the app insisted on one exact model name, and
+  the on-screen error blamed the connection. Now SmartBrain uses whatever whisper
+  model the server offers (and remembers it), the error names the actual fix when the
+  server has none, and the Settings Voice card warns about a reachable-but-modelless
+  server before you're mid-sentence. The guide no longer claims Macs need zero setup —
+  loading a whisper model into oMLX once is the honest requirement.
+
 ## [0.9.17] - 2026-08-23
 
 ### Fixed
