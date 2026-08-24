@@ -11,6 +11,14 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Fixed
+- **Dictation actually starts now.** Pressing the mic failed immediately: the audio
+  recorder loaded its processing module from an inline blob URL, which the app's own
+  Content-Security-Policy rightly refuses — and the error message blamed mic
+  permissions, which was wrong. The module now ships as a normal app file (the strict
+  CSP stays exactly as strict), and mic errors name what actually happened: permission
+  denied, no microphone, or the real failure.
+
 ## [0.9.16] - 2026-08-23
 
 ### Fixed

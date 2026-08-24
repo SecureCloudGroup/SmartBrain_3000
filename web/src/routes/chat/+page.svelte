@@ -202,8 +202,18 @@
       try {
         await recorder.start();
         recState = "recording";
-      } catch {
-        error = "Microphone unavailable — check this site's mic permission in the browser.";
+      } catch (err) {
+        // Name the ACTUAL failure — the first field test hit a CSP refusal that a
+        // generic "check mic permission" message sent the user chasing in the
+        // wrong direction entirely.
+        console.error("mic start failed:", err);
+        if (err instanceof DOMException && (err.name === "NotAllowedError" || err.name === "SecurityError")) {
+          error = "Microphone access was denied — allow it for this site in the browser.";
+        } else if (err instanceof DOMException && err.name === "NotFoundError") {
+          error = "No microphone was found on this device.";
+        } else {
+          error = `Could not start the microphone: ${err instanceof Error ? err.message : String(err)}`;
+        }
       }
       return;
     }
