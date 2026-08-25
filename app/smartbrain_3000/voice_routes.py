@@ -49,11 +49,17 @@ async def voice_transcribe(request: Request) -> dict:
     if request.headers.get("x-sb-voice-keep") or os.environ.get("SMARTBRAIN_VOICE_KEEP_LAST"):
         # The mic tester (Settings → Status) keeps its recording so a bad capture can be
         # diagnosed from the audio itself instead of theory. Desktop-local only (the
-        # bridge strips x-sb-* markers) — a paired phone can't leave files behind.
-        from . import moonshine as _m
-        keep = _m.model_dir().parent / "voice-last.wav"
-        keep.parent.mkdir(parents=True, exist_ok=True)
-        keep.write_bytes(audio)
+        # bridge strips x-sb-* markers). BEST-EFFORT BY LAW: a diagnostic must never be
+        # able to fail the feature it diagnoses — this exact write once 500'd the whole
+        # route on a permission error, eating the recording it existed to explain.
+        try:
+            from . import moonshine as _m
+            keep = _m.model_dir().parent / "voice-last.wav"
+            keep.parent.mkdir(parents=True, exist_ok=True)
+            keep.write_bytes(audio)
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning("voice keep-last skipped: %s", exc)
     if len(audio) > _MAX_BODY:
         raise HTTPException(status_code=413, detail="recording too long — try a shorter one")
     try:
