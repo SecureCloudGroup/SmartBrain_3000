@@ -16,6 +16,16 @@ from smartbrain_3000.secrets import SecretStore, gen_master_key
 _LOCAL = {"X-SB-Local": "1"}
 
 
+@pytest.fixture(autouse=True)
+def _fresh_server_skip():
+    """The server-failure skip window is module state; without this, one test's
+    fallback poisons every later test into silently using the local engine
+    (adversarial-review finding — the auto-resolve test failed deterministically)."""
+    voice.reset_server_skip()
+    yield
+    voice.reset_server_skip()
+
+
 def _secret_store() -> SecretStore:
     conn = duckdb.connect(":memory:")
     dbmod.run_migrations(conn)
@@ -144,7 +154,30 @@ def test_status_reports_local_engine() -> None:
     store = _secret_store()
     st = voice.status(store)
     assert st["stt_available"] is True
-    assert st["local"]["phase"] in ("absent", "downloading", "ready", "error")
+    assert st["local"]["phase"] in ("absent", "downloading", "loading", "ready", "error")
+    assert st["engine"] in ("server", "local")
+
+
+def test_server_failure_is_skipped_for_a_while(monkeypatch) -> None:
+    """After a server failure, the next presses go STRAIGHT to local — no re-paying
+    the server's round-trips on every dictation (field: latency + log spam)."""
+    store = _secret_store()
+    store.put(gateway.MLX_URL_KEY, "http://127.0.0.1:8888")
+    monkeypatch.setattr(voice, "_server_skip_until", 0.0)
+    calls = []
+
+    def failing_post(url, **kw):
+        calls.append(url)
+        raise httpx.ConnectTimeout("down")
+    monkeypatch.setattr(voice.httpx, "post", failing_post)
+    monkeypatch.setattr(voice.moonshine, "transcribe_wav", lambda audio: "local")
+    assert voice.transcribe(store, b"RIFF") == "local"
+    assert len(calls) == 1
+    assert voice.transcribe(store, b"RIFF") == "local"
+    assert len(calls) == 1  # skip window: server not retried
+    assert voice._current_engine(store) == "local"
+    monkeypatch.setattr(voice, "_server_skip_until", 0.0)  # window expired
+    assert voice._current_engine(store) == "server"
 
 
 def test_status_probe_reports_stt_ready(monkeypatch) -> None:

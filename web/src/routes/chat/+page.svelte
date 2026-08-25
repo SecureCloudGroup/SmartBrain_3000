@@ -185,6 +185,39 @@
   const recorder = new Recorder();
   let recState = $state<"idle" | "recording" | "transcribing">("idle");
   let voiceInfo = $state<VoiceStatus | null>(null);
+  let voicePollTimer: ReturnType<typeof setInterval> | null = null;
+  // The mic is USABLE when a server will take the call, or the local engine is loaded.
+  // Anything else renders as live progress ON the button — never a dead click.
+  const micUsable = $derived(
+    !!voiceInfo && (voiceInfo.engine === "server" || voiceInfo.local?.phase === "ready"),
+  );
+
+  // While the local engine is absent/downloading/loading, poll so the button's percent
+  // moves and the mic enables itself the moment the engine is ready (field lesson: an
+  // invisible download reads as a broken product).
+  function syncVoicePolling(): void {
+    const settling = voiceInfo && !micUsable && voiceInfo.local?.phase !== "error";
+    if (settling && !voicePollTimer) {
+      voicePollTimer = setInterval(async () => {
+        voiceInfo = await api.voiceStatus().catch(() => voiceInfo);
+        syncVoicePolling();
+      }, 2000);
+    } else if (!settling && voicePollTimer) {
+      clearInterval(voicePollTimer);
+      voicePollTimer = null;
+    }
+  }
+
+  function retryVoiceModel(): void {
+    // Error state: the button becomes "retry the download" — one tap, polling resumes.
+    void api
+      .voiceStatus(false, true)
+      .then((v) => {
+        voiceInfo = v;
+        syncVoicePolling();
+      })
+      .catch(() => undefined);
+  }
   let speechPossible = $state(false);
   let autoSpeak = $state(false);
   let listeningId = $state<string | null>(null); // which message the Listen button is reading
@@ -228,6 +261,10 @@
       // The server's own words, verbatim: describeError's friendly 502 wording hid
       // "Model 'whisper-…' not found" behind "couldn't reach the model" in the field.
       error = err instanceof ApiError && err.message ? err.message : describeError(err);
+      // A not-ready failure means state moved server-side — re-sync so the button
+      // shows the live phase instead of leaving the user to guess.
+      voiceInfo = await api.voiceStatus().catch(() => voiceInfo);
+      syncVoicePolling();
     } finally {
       recState = "idle";
     }
@@ -324,6 +361,7 @@
       .voiceStatus()
       .then(async (v) => {
         voiceInfo = v;
+        syncVoicePolling();
         speechPossible = await speechAvailable(!!v.tts_model);
         try {
           autoSpeak = speechPossible && localStorage.getItem("sb:autospeak") === "1";
@@ -343,6 +381,7 @@
     document.removeEventListener("visibilitychange", onVisibility);
     window.removeEventListener("scroll", onWindowScroll);
     speaker.stop(); // navigating away must not leave a voice talking
+    if (voicePollTimer) clearInterval(voicePollTimer);
   });
 
   // The open conversation's blocked actions, rendered as inline approval cards above the
@@ -1427,16 +1466,44 @@
   <div class="composer">
     <div class="inner">
       {#if voiceInfo?.stt_available}
-        <button
-          class="voice mic"
-          class:recording={recState === "recording"}
-          disabled={recState === "transcribing" || busy}
-          title={recState === "recording" ? "Stop and transcribe" : "Dictate (push to talk)"}
-          aria-label={recState === "recording" ? "Stop and transcribe" : "Dictate"}
-          onclick={toggleMic}
-        >
-          <Icon name={recState === "transcribing" ? "clock" : "mic"} size={16} />
-        </button>
+        {#if micUsable}
+          <button
+            class="voice mic"
+            class:recording={recState === "recording"}
+            disabled={recState === "transcribing" || busy}
+            title={recState === "recording" ? "Stop and transcribe" : "Dictate (push to talk)"}
+            aria-label={recState === "recording" ? "Stop and transcribe" : "Dictate"}
+            onclick={toggleMic}
+          >
+            <Icon name={recState === "transcribing" ? "clock" : "mic"} size={16} />
+          </button>
+        {:else if voiceInfo.local?.phase === "error"}
+          <button
+            class="voice mic voice-error"
+            title={`Voice model download failed (${voiceInfo.local.error}) — tap to retry`}
+            aria-label="Retry the voice model download"
+            onclick={retryVoiceModel}
+          >
+            <Icon name="refresh" size={16} />
+          </button>
+        {:else}
+          <!-- Preparing: live percent IN the button, spinner while the engine loads.
+               Disabled but never mysterious — the title says exactly what's happening. -->
+          <button
+            class="voice mic preparing"
+            disabled
+            title={voiceInfo.local?.phase === "loading"
+              ? "Voice is almost ready — loading the engine"
+              : `Preparing voice — one-time download (${voiceInfo.local?.pct ?? 0}%)`}
+            aria-label="Preparing voice"
+          >
+            {#if voiceInfo.local?.phase === "loading"}
+              <Icon name="clock" size={14} />
+            {:else}
+              <span class="mic-pct">{voiceInfo.local?.pct ?? 0}%</span>
+            {/if}
+          </button>
+        {/if}
       {/if}
       {#if speechPossible}
         <button
@@ -1583,6 +1650,19 @@
   }
   .voice.autospeak.active {
     background: var(--accent-strong);
+    color: #fff;
+  }
+  .voice.preparing {
+    background: var(--accent-tint);
+    color: var(--accent-strong);
+  }
+  .mic-pct {
+    font-size: 0.62rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+  .voice.voice-error {
+    background: var(--danger);
     color: #fff;
   }
   @keyframes mic-pulse {

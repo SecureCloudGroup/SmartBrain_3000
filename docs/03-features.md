@@ -17,7 +17,7 @@ most sit in the bottom bar (Chat, Knowledge, Info, Activity) and the rest are un
 | **Info** | The output of your scheduled runs, newest first. |
 | **Activity** | Approvals waiting for you, and the record of everything the assistant tried. |
 | **Usage** | What your cloud models have cost. |
-| **Settings** | Everything you configure. Desktop only. |
+| **Settings** | Everything you configure — and **Status**, a live view of everything the app is doing. Desktop only. |
 
 Below them sit four controls: **Help** (this guide, offline, no unlock needed), **Theme**
 (follow the system, or force light or dark), **Lock**, and — on a paired phone — **Unpair**.

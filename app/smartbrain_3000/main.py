@@ -21,7 +21,16 @@ import httpx
 from fastapi import FastAPI, HTTPException, Request
 from starlette.responses import PlainTextResponse
 
-from . import __version__, db, gateway, mcp_server, runtime, scheduler, serving
+from . import (
+    __version__,
+    db,
+    gateway,
+    mcp_server,
+    moonshine,
+    runtime,
+    scheduler,
+    serving,
+)
 from .account import router as account_router
 from .agent_routes import router as agent_router
 from .chat_routes import router as chat_router
@@ -39,6 +48,7 @@ from .models_routes import router as models_router
 from .planner_routes import router as planner_router
 from .schedule_routes import router as schedule_router
 from .selfimprove_routes import router as selfimprove_router
+from .status_routes import router as status_router
 from .vault_routes import router as vault_router
 from .voice_routes import router as voice_router
 from .web_routes import router as web_router
@@ -311,6 +321,10 @@ def _make_lifespan(mcp):
         applied = db.run_migrations(conn)
         assert applied >= 0, "migration count must be non-negative"
         _init_app_state(application, conn)
+        # Voice model: start the one-time background fetch at BOOT, not first unlock —
+        # the files aren't user data and need no key, and by the time someone unlocks
+        # and presses the mic, ready is the common case instead of the lucky one.
+        moonshine.prefetch(application)
         # Single long-lived pooled httpx client for gateway calls (B22). Stored on
         # the gateway module so per-call functions reuse it without each route
         # having to pass ``client=``; tests that don't set the pool keep using a
@@ -362,7 +376,7 @@ def _install_routes(application: FastAPI) -> None:
         account_router, chat_router, local_models_router, models_router, kb_router,
         history_router, memory_router, planner_router, agent_router, schedule_router,
         metrics_router, selfimprove_router, email_router, data_router, mcp_router, devices_router,
-        vault_router, feed_router, voice_router, web_router,
+        vault_router, feed_router, status_router, voice_router, web_router,
     ):  # fixed, bounded
         application.include_router(router)
 

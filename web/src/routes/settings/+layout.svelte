@@ -23,6 +23,7 @@
   });
 
   const tabs = [
+    { href: "/settings/status", label: "Status" },
     { href: "/settings/providers", label: "Cloud providers" },
     { href: "/settings/models", label: "Local models" },
     { href: "/settings/router", label: "Model routing" },
