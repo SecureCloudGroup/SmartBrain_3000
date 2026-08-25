@@ -11,6 +11,8 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.9.22] - 2026-08-25
+
 ### Fixed
 - **Dictation records for real now — and says so.** Two stacked capture bugs made the
   mic record silence while looking alive: Safari starts audio processing suspended
