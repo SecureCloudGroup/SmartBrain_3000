@@ -11,6 +11,8 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.9.23] - 2026-08-25
+
 ### Added
 - **Mic & speaker check, built in.** Settings → Status → Voice gains a one-tap test:
   it records three seconds with a live level bar, plays the recording back so you hear
