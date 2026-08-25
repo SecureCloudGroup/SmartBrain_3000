@@ -8,9 +8,14 @@ cards own those). Reachability shown here is what the app already knows.
 
 from __future__ import annotations
 
+import os
+import platform
+import sys
+from pathlib import Path
+
 from fastapi import APIRouter, Request
 
-from . import __version__, devices, gateway, stt_local, voice
+from . import __version__, db, devices, gateway, stt_local, voice
 
 router = APIRouter()
 
@@ -29,6 +34,8 @@ def app_status(request: Request) -> dict:
         "version": __version__,
         "unlocked": unlocked,
         "voice_local": stt_local.status(),  # phase/pct/error — needs no key
+        "storage": _storage_status(),  # sizes only, no key needed (field request:
+        "memory": _memory_status(),    # "show how much disk/memory SmartBrain uses")
     }
     if not unlocked:
         return out
@@ -50,6 +57,76 @@ def app_status(request: Request) -> dict:
     out["feeds"] = _feed_status(state)
     out["devices"] = _device_status(store)
     return out
+
+
+def _dir_bytes(root: Path) -> int:
+    """Recursive size of a directory (files only). Data dirs are moderate — a full
+    walk is milliseconds, and the honest number beats a stale estimate."""
+    total = 0
+    try:
+        for entry in os.scandir(root):
+            if entry.is_file(follow_symlinks=False):
+                total += entry.stat(follow_symlinks=False).st_size
+            elif entry.is_dir(follow_symlinks=False):
+                total += _dir_bytes(Path(entry.path))
+    except OSError:
+        pass
+    return total
+
+
+def _storage_status() -> dict:
+    """What SmartBrain occupies on this machine's disk, broken into the pieces a user
+    would recognize: the database, the voice model, and everything together."""
+    try:
+        db_path = db.resolve_db_path()
+        data_dir = db_path.parent
+        db_bytes = db_path.stat().st_size if db_path.exists() else 0
+        models_bytes = _dir_bytes(data_dir / "models")
+        total_bytes = _dir_bytes(data_dir)
+        return {"data_dir": str(data_dir), "db_bytes": db_bytes,
+                "models_bytes": models_bytes, "total_bytes": total_bytes}
+    except Exception:
+        return {"data_dir": "", "db_bytes": 0, "models_bytes": 0, "total_bytes": 0}
+
+
+def _memory_status() -> dict:
+    """This process's peak resident memory, per platform. The `resource` module is
+    Unix-only — importing it at module top broke the ENTIRE app on Windows (the
+    Windows smoke caught it before release); it stays lazy, and Windows asks the
+    kernel directly. ru_maxrss is bytes on macOS, kilobytes on Linux."""
+    try:
+        if platform.system() == "Windows":
+            rss = _windows_peak_rss()
+        else:
+            import resource  # Unix-only stdlib — MUST stay a lazy import
+
+            rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+            if platform.system() != "Darwin":
+                rss *= 1024
+        return {"rss_bytes": int(rss), "python": sys.version.split()[0]}
+    except Exception:
+        return {"rss_bytes": 0, "python": ""}
+
+
+def _windows_peak_rss() -> int:
+    """PeakWorkingSetSize via psapi — the Windows equivalent of ru_maxrss, stdlib-only."""
+    import ctypes
+    from ctypes import wintypes
+
+    class _PMC(ctypes.Structure):
+        _fields_ = [
+            ("cb", wintypes.DWORD), ("PageFaultCount", wintypes.DWORD),
+            ("PeakWorkingSetSize", ctypes.c_size_t), ("WorkingSetSize", ctypes.c_size_t),
+            ("QuotaPeakPagedPoolUsage", ctypes.c_size_t), ("QuotaPagedPoolUsage", ctypes.c_size_t),
+            ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t), ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+            ("PagefileUsage", ctypes.c_size_t), ("PeakPagefileUsage", ctypes.c_size_t),
+        ]
+
+    pmc = _PMC()
+    pmc.cb = ctypes.sizeof(_PMC)
+    handle = ctypes.windll.kernel32.GetCurrentProcess()
+    ctypes.windll.psapi.GetProcessMemoryInfo(handle, ctypes.byref(pmc), pmc.cb)
+    return int(pmc.PeakWorkingSetSize)
 
 
 def _knowledge_status(state, conn) -> dict:

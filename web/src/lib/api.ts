@@ -275,6 +275,8 @@ export interface AppStatus {
   version: string;
   unlocked: boolean;
   voice_local: { phase: "absent" | "downloading" | "loading" | "ready" | "error"; pct: number; error: string };
+  storage: { data_dir: string; db_bytes: number; models_bytes: number; total_bytes: number };
+  memory: { rss_bytes: number; python: string };
   voice?: { engine: "server" | "local"; server_configured: boolean; stt_model: string; tts_model: string };
   local_models?: { ollama_configured: boolean; mlx_configured: boolean; mlxe_configured: boolean };
   knowledge?: { documents: number; embedded_chunks: number };

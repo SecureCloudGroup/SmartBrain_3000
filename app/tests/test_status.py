@@ -26,6 +26,8 @@ def test_status_works_locked(client: TestClient) -> None:
     assert body["unlocked"] is False
     assert body["version"]
     assert body["voice_local"]["phase"] in ("absent", "downloading", "loading", "ready", "error")
+    assert body["storage"]["total_bytes"] >= body["storage"]["db_bytes"] >= 0
+    assert body["memory"]["rss_bytes"] > 0  # a running process occupies memory, always
     assert "knowledge" not in body  # encrypted-store sections wait for unlock
 
 

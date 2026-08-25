@@ -17,6 +17,7 @@
   import { fmtArgs, iconForTool } from "$lib/pendingCards";
   import { Recorder } from "$lib/audio/recorder";
   import { Speaker, speechAvailable } from "$lib/audio/speaker";
+  import { parseVoiceCommand } from "$lib/audio/commands";
   import Chip from "$lib/components/Chip.svelte";
   import EmptyState from "$lib/components/EmptyState.svelte";
   import Icon from "$lib/components/Icon.svelte";
@@ -185,7 +186,62 @@
   const recorder = new Recorder();
   let recState = $state<"idle" | "recording" | "transcribing">("idle");
   let micLevel = $state(0); // live input level while recording — the pulse that says "I hear you"
-  recorder.onLevel = (rms) => (micLevel = Math.min(1, rms * 6));
+  // ---- Silence endpointing (VAD): stop talking and the recording ends itself. ----
+  // Wall-clock on the level stream: once speech has been HEARD, ~1.2s under the
+  // silence floor auto-stops — you never tap twice. Tapping early still works.
+  const SPEECH_RMS = 0.012;
+  const SILENCE_RMS = 0.006;
+  const SILENCE_MS = 1200;
+  const WAIT_FOR_SPEECH_MS = 8000;
+  let heardSpeech = false;
+  let lastLoudAt = 0;
+  let recStartedAt = 0;
+  let vadTimer: ReturnType<typeof setInterval> | null = null;
+  let handsFree = $state(false); // auto-send the transcript (spoken "cancel" still stops it)
+  recorder.onLevel = (rms) => {
+    micLevel = Math.min(1, rms * 6);
+    if (rms > SPEECH_RMS) heardSpeech = true;
+    if (rms > SILENCE_RMS) lastLoudAt = performance.now();
+  };
+
+  function startVadWatch() {
+    heardSpeech = false;
+    lastLoudAt = performance.now();
+    recStartedAt = performance.now();
+    vadTimer = setInterval(() => {
+      if (recState !== "recording") return stopVadWatch();
+      const now = performance.now();
+      if (heardSpeech && now - lastLoudAt > SILENCE_MS) {
+        stopVadWatch();
+        void finishRecording(); // you stopped talking — that IS the stop signal
+      } else if (!heardSpeech && now - recStartedAt > WAIT_FOR_SPEECH_MS) {
+        stopVadWatch();
+        void cancelRecording();
+        error = "Didn't hear anything — check the level ring moves when you speak.";
+      }
+    }, 150);
+  }
+  function stopVadWatch() {
+    if (vadTimer) clearInterval(vadTimer);
+    vadTimer = null;
+  }
+
+  function toggleHandsFree() {
+    handsFree = !handsFree;
+    try {
+      localStorage.setItem("sb:handsfree", handsFree ? "1" : "0");
+    } catch {
+      /* storage unavailable — session-only toggle */
+    }
+  }
+
+  async function cancelRecording(): Promise<void> {
+    stopVadWatch();
+    if (recState !== "recording") return;
+    recState = "idle";
+    micLevel = 0;
+    await recorder.stop().catch(() => undefined); // discard — Esc/cancel means no transcript
+  }
   let voiceInfo = $state<VoiceStatus | null>(null);
   let voicePollTimer: ReturnType<typeof setInterval> | null = null;
   // The mic is USABLE when a server will take the call, or the local engine is loaded.
@@ -230,28 +286,36 @@
 
   async function toggleMic(): Promise<void> {
     if (recState === "transcribing" || busy) return;
-    if (recState === "idle") {
-      speaker.stop(); // barge-in: talking to it interrupts it
-      listeningId = null;
-      error = "";
-      try {
-        await recorder.start();
-        recState = "recording";
-      } catch (err) {
-        // Name the ACTUAL failure — the first field test hit a CSP refusal that a
-        // generic "check mic permission" message sent the user chasing in the
-        // wrong direction entirely.
-        console.error("mic start failed:", err);
-        if (err instanceof DOMException && (err.name === "NotAllowedError" || err.name === "SecurityError")) {
-          error = "Microphone access was denied — allow it for this site in the browser.";
-        } else if (err instanceof DOMException && err.name === "NotFoundError") {
-          error = "No microphone was found on this device.";
-        } else {
-          error = `Could not start the microphone: ${err instanceof Error ? err.message : String(err)}`;
-        }
+    if (recState === "idle") return startRecording();
+    stopVadWatch();
+    await finishRecording();
+  }
+
+  async function startRecording(): Promise<void> {
+    speaker.stop(); // barge-in: talking to it interrupts it
+    listeningId = null;
+    error = "";
+    try {
+      await recorder.start();
+      recState = "recording";
+      startVadWatch(); // stop talking and it stops itself — you never tap twice
+    } catch (err) {
+      // Name the ACTUAL failure — the first field test hit a CSP refusal that a
+      // generic "check mic permission" message sent the user chasing in the
+      // wrong direction entirely.
+      console.error("mic start failed:", err);
+      if (err instanceof DOMException && (err.name === "NotAllowedError" || err.name === "SecurityError")) {
+        error = "Microphone access was denied — allow it for this site in the browser.";
+      } else if (err instanceof DOMException && err.name === "NotFoundError") {
+        error = "No microphone was found on this device.";
+      } else {
+        error = `Could not start the microphone: ${err instanceof Error ? err.message : String(err)}`;
       }
-      return;
     }
+  }
+
+  async function finishRecording(): Promise<void> {
+    if (recState !== "recording") return;
     recState = "transcribing";
     try {
       const rec = await recorder.stop();
@@ -261,17 +325,29 @@
       // looked exactly like this and showed nothing at all.
       if (rec.seconds < 0.3 || rec.peak < 0.003) {
         error = rec.seconds < 0.3
-          ? "That was too short — hold the mic on while you speak, then tap to stop."
+          ? "That was too short — speak after tapping the mic; it stops by itself when you pause."
           : "The microphone recorded silence — check your input device and its level (System Settings → Sound → Input).";
         return;
       }
       const r = await api.voiceTranscribe(rec.blob);
-      // Into the composer, editable — dictation proposes, the user disposes (V1:
-      // no auto-send; reviewing the transcript before it runs is the safe default).
-      if (r.text) {
-        input = input ? `${input.trimEnd()} ${r.text}` : r.text;
-      } else {
+      if (!r.text) {
         error = "Didn't catch any words — try again, a little closer to the microphone.";
+        return;
+      }
+      // Spoken controls: a trailing "send" submits, a lone "cancel" discards,
+      // "start over" clears and re-listens (Dragon/Apple-dictation idiom).
+      const cmd = parseVoiceCommand(r.text);
+      if (cmd.action === "cancel") return;
+      if (cmd.action === "restart") {
+        input = "";
+        recState = "idle";
+        return startRecording();
+      }
+      if (cmd.text) input = input ? `${input.trimEnd()} ${cmd.text}` : cmd.text;
+      if ((cmd.action === "send" || handsFree) && input.trim()) {
+        recState = "idle"; // send() refuses while a recording state lingers on busy paths
+        await send();
+        return;
       }
     } catch (err) {
       // The server's own words, verbatim: describeError's friendly 502 wording hid
@@ -282,7 +358,30 @@
       voiceInfo = await api.voiceStatus().catch(() => voiceInfo);
       syncVoicePolling();
     } finally {
-      recState = "idle";
+      if (recState === "transcribing") recState = "idle";
+    }
+  }
+
+  // Desktop power idiom: HOLD Space to talk (when focus isn't in a text field),
+  // release to transcribe; Esc cancels a recording outright.
+  function onVoiceKeydown(e: KeyboardEvent): void {
+    const el = document.activeElement as HTMLElement | null;
+    const typing = !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable);
+    if (e.code === "Escape" && recState === "recording") {
+      e.preventDefault();
+      void cancelRecording();
+      return;
+    }
+    if (e.code === "Space" && !typing && !e.repeat && recState === "idle" && !busy && micUsable) {
+      e.preventDefault();
+      void startRecording();
+    }
+  }
+  function onVoiceKeyup(e: KeyboardEvent): void {
+    if (e.code === "Space" && recState === "recording") {
+      e.preventDefault();
+      stopVadWatch();
+      void finishRecording();
     }
   }
 
@@ -372,6 +471,13 @@
       setTimeout(() => scrollToBottom(false), 200);
     }
     window.addEventListener("scroll", onWindowScroll, { passive: true });
+    window.addEventListener("keydown", onVoiceKeydown);
+    window.addEventListener("keyup", onVoiceKeyup);
+    try {
+      handsFree = localStorage.getItem("sb:handsfree") === "1";
+    } catch {
+      handsFree = false;
+    }
     // Voice availability (no live probe — configured-ness is enough to show the mic).
     void api
       .voiceStatus()
@@ -396,6 +502,9 @@
     if (updatesTimer) clearInterval(updatesTimer);
     document.removeEventListener("visibilitychange", onVisibility);
     window.removeEventListener("scroll", onWindowScroll);
+    window.removeEventListener("keydown", onVoiceKeydown);
+    window.removeEventListener("keyup", onVoiceKeyup);
+    stopVadWatch();
     speaker.stop(); // navigating away must not leave a voice talking
     if (voicePollTimer) clearInterval(voicePollTimer);
   });
@@ -1533,6 +1642,17 @@
           <Icon name="speaker" size={16} />
         </button>
       {/if}
+      {#if voiceInfo?.stt_available}
+        <button
+          class="voice autospeak"
+          class:active={handsFree}
+          title={handsFree ? "Hands-free is ON: dictation sends itself (say “cancel” to discard)" : "Hands-free: send dictation automatically when you stop talking"}
+          aria-label={handsFree ? "Turn hands-free off" : "Turn hands-free on"}
+          onclick={toggleHandsFree}
+        >
+          <Icon name="zap" size={16} />
+        </button>
+      {/if}
       <textarea
         bind:value={input}
         onkeydown={onKey}
@@ -1558,6 +1678,16 @@
       {/if}
     </div>
     <p class="hint">⏎ send · ⇧⏎ newline — replies stream in; Stop is always here while they do</p>
+    {#if voiceInfo?.stt_available}
+      <!-- Voice instructions, state-aware: what to do NOW, not a manual to remember. -->
+      {#if recState === "recording"}
+        <p class="hint listening">Listening — just talk; a pause finishes it. Say “send” to submit as you finish · Esc cancels</p>
+      {:else if recState === "transcribing"}
+        <p class="hint">Writing down what you said…</p>
+      {:else if micUsable}
+        <p class="hint">🎙 tap the mic or hold Space and talk — it stops when you pause · say “send”, “cancel”, or “start over”{handsFree ? " · hands-free is ON: dictations send themselves" : ""}</p>
+      {/if}
+    {/if}
   </div>
   {#if modelNotice}<p class="notice">{modelNotice}</p>{/if}
   {#if error}<p class="error">{error}</p>{/if}
@@ -1684,6 +1814,10 @@
   .voice.voice-error {
     background: var(--danger);
     color: #fff;
+  }
+  .hint.listening {
+    color: var(--danger); /* recording is the one state that must be unmissable */
+    font-weight: 600;
   }
   @keyframes mic-pulse {
     50% { opacity: 0.65; }
