@@ -8,7 +8,8 @@
   import Chip from "$lib/components/Chip.svelte";
   import Spinner from "$lib/components/Spinner.svelte";
   import { account } from "$lib/account.svelte";
-  import { api, type AppStatus } from "$lib/api";
+  import { api, ApiError, type AppStatus } from "$lib/api";
+  import { Recorder } from "$lib/audio/recorder";
   import { describeError } from "$lib/errors";
 
   let status = $state<AppStatus | null>(null);
@@ -46,6 +47,63 @@
 
   function retryVoice() {
     void api.voiceStatus(false, true).then(load).catch(() => undefined);
+  }
+
+  // ---- Mic & Speaker check (field request): record 3 s with a live level bar, play
+  // it back (you HEAR what the recorder heard — the speaker check and the garble
+  // detector in one), transcribe it, and keep the bytes on disk for diagnosis. ----
+  const testRec = new Recorder();
+  let micTest = $state<"idle" | "recording" | "processing" | "done">("idle");
+  let micTestLevel = $state(0);
+  let micTestPeakSeen = $state(0);
+  let micTestSeconds = $state(0);
+  let micTestUrl = $state<string | null>(null); // playback of the exact recording
+  let micTestText = $state<string | null>(null);
+  let micTestError = $state("");
+  let micCountdown = $state(3);
+  testRec.onLevel = (rms) => {
+    micTestLevel = Math.min(1, rms * 6);
+    if (rms > micTestPeakSeen) micTestPeakSeen = rms;
+  };
+
+  async function runMicTest() {
+    if (micTest === "recording" || micTest === "processing") return;
+    micTestError = "";
+    micTestText = null;
+    micTestPeakSeen = 0;
+    if (micTestUrl) URL.revokeObjectURL(micTestUrl);
+    micTestUrl = null;
+    try {
+      await testRec.start();
+    } catch (err) {
+      micTest = "idle";
+      micTestError =
+        err instanceof DOMException && (err.name === "NotAllowedError" || err.name === "SecurityError")
+          ? "Microphone access was denied — allow it for this site in the browser, and check System Settings → Privacy & Security → Microphone."
+          : `Could not start the microphone: ${err instanceof Error ? err.message : String(err)}`;
+      return;
+    }
+    micTest = "recording";
+    for (micCountdown = 3; micCountdown > 0; micCountdown--) {
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+    micTest = "processing";
+    try {
+      const rec = await testRec.stop();
+      micTestLevel = 0;
+      micTestSeconds = rec.seconds;
+      micTestUrl = URL.createObjectURL(rec.blob);
+      if (rec.peak < 0.003) {
+        micTestError = "The microphone recorded silence — check the input device and its level (System Settings → Sound → Input).";
+        micTest = "done";
+        return;
+      }
+      const r = await api.voiceTranscribe(rec.blob, { keep: true });
+      micTestText = r.text || "";
+    } catch (err) {
+      micTestError = err instanceof ApiError && err.message ? err.message : describeError(err);
+    }
+    micTest = "done";
   }
 </script>
 
@@ -89,6 +147,42 @@
             <div class="srow"><span>Server voice (spoken replies)</span><Chip kind="ok">{status.voice.tts_model}</Chip></div>
           {/if}
         {/if}
+
+        <!-- The whole voice path, tested in one tap: record → hear yourself → read the
+             transcription. Each leg failing points at exactly one culprit. -->
+        <div class="mic-test">
+          <div class="srow">
+            <span><strong>Mic &amp; speaker check</strong></span>
+            <button
+              class="secondary"
+              disabled={micTest === "recording" || micTest === "processing"}
+              onclick={runMicTest}
+            >
+              {micTest === "recording" ? `Recording… ${micCountdown}` : micTest === "processing" ? "Working…" : "Test now"}
+            </button>
+          </div>
+          {#if micTest === "recording"}
+            <p class="muted" style="margin:0.35rem 0 0.25rem; font-size:0.85rem">Say a full sentence out loud — the bar should move with your voice:</p>
+            <div class="bar"><div class="fill" style={`width:${Math.round(micTestLevel * 100)}%`}></div></div>
+          {/if}
+          {#if micTest === "done"}
+            {#if micTestUrl}
+              <p class="muted" style="margin:0.5rem 0 0.25rem; font-size:0.85rem">
+                <strong>1. Speaker check:</strong> press play — you should hear yourself, clearly.
+              </p>
+              <audio controls src={micTestUrl} style="width:100%; max-width:24rem"></audio>
+            {/if}
+            {#if micTestText !== null}
+              <p class="muted" style="margin:0.5rem 0 0.25rem; font-size:0.85rem"><strong>2. What dictation heard</strong> ({micTestSeconds.toFixed(1)}s, peak {micTestPeakSeen.toFixed(3)}):</p>
+              {#if micTestText}
+                <p style="margin:0; font-size:0.95rem">“{micTestText}”</p>
+              {:else}
+                <p class="error" style="margin:0; font-size:0.9rem">No words recognized. If the playback above sounds clear, the engine is the problem — if it sounds silent or garbled, the microphone is.</p>
+              {/if}
+            {/if}
+          {/if}
+          {#if micTestError}<p class="error" style="margin:0.4rem 0 0; font-size:0.9rem">{micTestError}</p>{/if}
+        </div>
       </div>
     </div>
 
@@ -168,6 +262,11 @@
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
     gap: 0.75rem;
+  }
+  .mic-test {
+    margin-top: 0.6rem;
+    padding-top: 0.6rem;
+    border-top: 1px solid var(--border);
   }
   .bar {
     flex: 1;

@@ -11,6 +11,14 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Added
+- **Mic & speaker check, built in.** Settings → Status → Voice gains a one-tap test:
+  it records three seconds with a live level bar, plays the recording back so you hear
+  exactly what the recorder heard (that's the speaker check — and the fastest possible
+  diagnosis of a bad microphone), and shows what dictation understood. Each leg failing
+  points at exactly one culprit, on screen, in plain words. The test recording is kept
+  locally so a problem can be diagnosed from the audio itself.
+
 ## [0.9.22] - 2026-08-25
 
 ### Fixed

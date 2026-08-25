@@ -881,7 +881,7 @@ export const api = {
     return req<VoiceStatus>(`/api/voice/status${qs ? `?${qs}` : ""}`);
   },
   appStatus: () => req<AppStatus>("/api/status/overview"),
-  voiceTranscribe: async (audio: Blob): Promise<{ text: string }> => {
+  voiceTranscribe: async (audio: Blob, opts: { keep?: boolean } = {}): Promise<{ text: string }> => {
     await remoteReady;
     // Hard timeout: a hung transcription request once wedged the mic for five minutes
     // of dead clicks. 45 s is generous for any healthy engine; past it, fail loudly.
@@ -891,7 +891,7 @@ export const api = {
     try {
       res = await fetch("/api/voice/transcribe", {
         method: "POST",
-        headers: { "content-type": "audio/wav" },
+        headers: { "content-type": "audio/wav", ...(opts.keep ? { "x-sb-voice-keep": "1" } : {}) },
         body: audio,
         signal: abort.signal,
       });
