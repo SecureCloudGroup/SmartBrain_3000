@@ -38,6 +38,7 @@ const _ICE_PUSH_WAIT_MS = 800;
 // the first thing to try rather than spinning on "connecting…" indefinitely.
 const _CONNECT_FAIL_HINT =
   "Desktop unreachable — it may be off or asleep. If it's on a VPN, turning the VPN off on the Desktop often fixes this — then Retry.";
+const _LOCKED_HINT = "your Desktop is locked — unlock it there, then this phone reconnects";
 
 type Pending = {
   resolve: (r: ParsedResponse) => void;
@@ -57,6 +58,7 @@ export class RemoteConnection {
   private nonceB64 = "";
   // Per-connection: cleared on teardown so a reconnect must prove identity again.
   private desktopVerified = false;
+  private lockedHint = false; // the last attempt was refused by a LOCKED Desktop — keep saying so while retrying
   private seq = 0;
   private closed = false;
   private reconnects = 0;
@@ -171,6 +173,16 @@ export class RemoteConnection {
     // flip the UI to "connected" and have every /api call relayed to, and answered
     // by, an unverified party. The credential is withheld either way (it only goes
     // out at the end of onHelloOk), but the session itself must not start.
+    if (type === "auth_error" && m.reason === "locked" && !this.desktopVerified) {
+      // A LOCKED Desktop answers the offer but cannot sign hello_ok (its keys live in the
+      // encrypted store), so this arrives UNVERIFIED. It carries no secret and unlocks
+      // nothing — it only names the wait. Keep retrying: unlocking is the fix, and the
+      // next attempt after it succeeds. (Field v0.9.26: a locked Desktop showed a spinner
+      // and then "unreachable".)
+      this.lockedHint = true;
+      this.onConnectFailure();
+      return;
+    }
     if (!this.desktopVerified) return;
     if (type === "auth_ok") return this.onAuthOk();
     if (type === "pong") {
@@ -180,9 +192,7 @@ export class RemoteConnection {
     if (type === "auth_error") {
       // A LOCKED Desktop can't verify any phone (the credentials live in its encrypted
       // store) — say that, not "re-pair" (field: a locked Desktop read as a broken pairing).
-      setRemoteStatus("offline", m.reason === "locked"
-        ? "your Desktop is locked — unlock it there, then this phone reconnects"
-        : "this device isn't authorized — re-pair");
+      setRemoteStatus("offline", m.reason === "locked" ? _LOCKED_HINT : "this device isn't authorized — re-pair");
       this.failReady?.(new Error("auth_error"));
       // Close, or connectionState churn restarts the backoff loop and buries this
       // actionable message under "reconnecting…" and then the generic VPN hint.
@@ -253,6 +263,7 @@ export class RemoteConnection {
     const s = this.pc?.connectionState;
     if (this.closed) return;
     if (s === "connected") this.reconnects = 0; // healthy — reset backoff
+    if (s === "connected") this.lockedHint = false;
     if (s === "failed" || s === "disconnected") this.onConnectFailure();
   }
 
@@ -266,7 +277,7 @@ export class RemoteConnection {
       this.failTerminal();
       return;
     }
-    setRemoteStatus("reconnecting");
+    setRemoteStatus("reconnecting", this.lockedHint ? _LOCKED_HINT : "");
     const ceiling = Math.min(_RECONNECT_MAX_MS, _RECONNECT_BASE_MS * 2 ** this.reconnects);
     const delay = ceiling / 2 + Math.random() * (ceiling / 2); // capped exponential + jitter
     this.reconnects += 1;
@@ -278,7 +289,7 @@ export class RemoteConnection {
   private failTerminal(): void {
     this.closed = true; // stop the retry loop until the user (or a resume) restarts it
     this.teardown();
-    setRemoteStatus("offline", _CONNECT_FAIL_HINT);
+    setRemoteStatus("offline", this.lockedHint ? _LOCKED_HINT : _CONNECT_FAIL_HINT);
   }
 
   async request(method: string, path: string, headers: Record<string, string>, body: Uint8Array): Promise<ParsedResponse> {

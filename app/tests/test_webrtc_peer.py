@@ -390,3 +390,43 @@ def test_chunked_request_out_of_order_is_dropped() -> None:
     session: dict = {}
     assert assemble_request_part(session, {"rq": True, "id": "3", "seq": 1, "more": False, "body_b64": "x"}) is None
     assert session["req_parts"] == {}  # no head -> dropped, not accumulated forever
+
+
+def test_e2e_locked_desktop_names_itself(app_client: TestClient) -> None:
+    """A LOCKED Desktop (no store) still answers the offer and tells the phone WHY on its
+    first frame — auth_error{reason: locked} — then closes. Before: the offer was
+    dropped and the phone timed out into "unreachable" (field, v0.9.26)."""
+    from aiortc import RTCPeerConnection, RTCSessionDescription
+
+    async def run() -> dict:
+        phone = RTCPeerConnection()
+        channel = phone.createDataChannel("sb-api")
+        loop = asyncio.get_event_loop()
+        first, closed = loop.create_future(), loop.create_future()
+
+        @channel.on("open")
+        def _open() -> None:
+            channel.send(json.dumps({"type": "hello", "nonce": base64.b64encode(b"sixteen-byte-non").decode()}))
+
+        @channel.on("message")
+        def _msg(data) -> None:
+            if not first.done():
+                first.set_result(json.loads(data))
+
+        @channel.on("close")
+        def _close() -> None:
+            if not closed.done():
+                closed.set_result(True)
+
+        await phone.setLocalDescription(await phone.createOffer())
+        pc, answer = await webrtc_peer.answer_offer(phone.localDescription.sdp, store=None, http_client=app_client)
+        await phone.setRemoteDescription(RTCSessionDescription(sdp=answer, type="answer"))
+        try:
+            m = await asyncio.wait_for(first, timeout=20)
+            await asyncio.wait_for(closed, timeout=20)
+            return m
+        finally:
+            await phone.close()
+            await pc.close()
+
+    assert asyncio.run(run()) == {"type": "auth_error", "reason": "locked"}

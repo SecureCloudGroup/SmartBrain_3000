@@ -11,6 +11,24 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Fixed
+- **Phone dictation actually works now.** The Desktop side of the encrypted link accepts
+  messages up to 64 KB, and browsers refuse to send anything larger — the phone's
+  recording never left the phone (a clock forever), and on Safari the failed send took
+  the whole link down with it ("no models available" until a restart). Recordings now
+  travel in parts that fit.
+- **Replies stream and speak on the Desktop.** The app read the wrong field from the
+  server's streaming events, so answers only appeared whole at the end and "read
+  replies aloud" never received a word (Listen worked because it bypasses streaming).
+- **A locked Desktop says so to the phone.** The Desktop used to ignore a phone's
+  connection while locked, so the phone spun and then reported "unreachable". It now
+  answers, says "your Desktop is locked — unlock it there", and the phone keeps
+  retrying so it walks in on its own after the unlock. The pairing timeout names the
+  locked case too.
+
+### Changed
+- **Playback speed** offers finer steps (0.8× to 2× in tenths through 1.5×).
+
 ## [0.9.26] - 2026-08-25
 
 ### Added
