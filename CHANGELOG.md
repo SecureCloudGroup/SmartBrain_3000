@@ -11,6 +11,8 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.9.21] - 2026-08-24
+
 ### Fixed
 - **The microphone was forbidden by our own security header.** The app's
   Permissions-Policy — written before voice existed — denied microphone access
