@@ -57,9 +57,8 @@ async def _reap_unconnected(pc, phone_id: str, peers: dict) -> None:
 async def _on_offer(ws, msg: dict, get_store, http_client, ice_servers, peers: dict) -> None:
     """Answer one phone offer (if unlocked + under the peer cap) and return the SDP."""
     phone_id = str(msg.get("from") or "")
-    store = get_store()
-    if store is None:  # app is locked — nothing to reach; ignore the offer
-        return
+    store = get_store()  # None while LOCKED: the peer still answers, so the phone can be
+    # told "your Desktop is locked" instead of timing out into "unreachable" (field).
     old = peers.pop(phone_id, None)  # a re-offer replaces its own prior peer (no orphan/leak)
     if old is not None:
         await old.close()

@@ -102,7 +102,7 @@ export async function pairByCode(code: string, timeoutMs = 30_000): Promise<Pair
       if (err) reject(err);
       else resolve(payload as PairingPayload);
     };
-    const timer = setTimeout(() => done(new Error("pairing timed out — check the code and your network")), timeoutMs);
+    const timer = setTimeout(() => done(new Error("pairing timed out — a locked Desktop can't pair; unlock it, get a fresh code, and check your network")), timeoutMs);
 
     // Build the peer once we know which ICE servers to use, then offer. The broker hands a
     // pairing room the node's STUN+TURN so this works off-Wi-Fi too.

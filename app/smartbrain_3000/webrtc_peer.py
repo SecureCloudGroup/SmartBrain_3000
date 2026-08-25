@@ -165,6 +165,13 @@ def _handle_channel_auth(channel, msg: dict, store, session: dict) -> None:
     assert isinstance(msg, dict), "message dict required"
     assert isinstance(session, dict) and "pc" in session, "session must carry the pc"
     mtype = msg.get("type")
+    if store is None:
+        # A LOCKED Desktop cannot prove its identity nor verify anyone — the keys live
+        # in the encrypted store. Say so on the FIRST frame (the phone's hello), before
+        # any verification the phone could not complete anyway, then close.
+        _safe_send(channel, json.dumps({"type": "auth_error", "reason": "locked"}))
+        channel.close()
+        return
     if mtype == "hello":  # prove Desktop identity, bound to this DTLS channel
         try:
             nonce = base64.b64decode(str(msg.get("nonce") or ""))
@@ -177,12 +184,6 @@ def _handle_channel_auth(channel, msg: dict, store, session: dict) -> None:
             log.warning("webrtc: hello failed: %s", type(exc).__name__)
         return
     device_id = str(msg.get("device_id") or "")
-    if store is None:
-        # A LOCKED Desktop cannot verify anyone — the credentials live in the encrypted
-        # store. Say so: the phone showed "failed to pair" with no clue (field report).
-        _safe_send(channel, json.dumps({"type": "auth_error", "reason": "locked"}))
-        channel.close()
-        return
     if mtype == "auth" and devices.verify_device(store, device_id, str(msg.get("credential") or "")):
         session["authed"], session["device_id"] = True, device_id
         _safe_send(channel, json.dumps({"type": "auth_ok"}))
@@ -322,7 +323,8 @@ async def answer_offer(offer_sdp: str, *, store, http_client, ice_servers=None):
     )
 
     assert offer_sdp, "offer sdp required"
-    assert store is not None, "device store required for channel auth"
+    # store may be None (LOCKED): the channel then answers every hello with
+    # auth_error{reason: locked} and closes — it never serves a request.
     servers = [RTCIceServer(**s) for s in (ice_servers or [])]
     pc = RTCPeerConnection(configuration=RTCConfiguration(iceServers=servers))
 

@@ -219,8 +219,12 @@
           <span>Playback speed <span class="muted">(spoken replies)</span></span>
           <select value={String(ttsRate)} onchange={setTtsRate} aria-label="Playback speed">
             <option value="0.8">0.8×</option>
+            <option value="0.9">0.9×</option>
             <option value="1">1× (natural)</option>
-            <option value="1.25">1.25×</option>
+            <option value="1.1">1.1×</option>
+            <option value="1.2">1.2×</option>
+            <option value="1.3">1.3×</option>
+            <option value="1.4">1.4×</option>
             <option value="1.5">1.5×</option>
             <option value="1.75">1.75×</option>
             <option value="2">2×</option>
