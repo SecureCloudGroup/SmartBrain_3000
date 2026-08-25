@@ -184,6 +184,8 @@
   // falls back to the server voice — the Speaker owns that chain.
   const recorder = new Recorder();
   let recState = $state<"idle" | "recording" | "transcribing">("idle");
+  let micLevel = $state(0); // live input level while recording — the pulse that says "I hear you"
+  recorder.onLevel = (rms) => (micLevel = Math.min(1, rms * 6));
   let voiceInfo = $state<VoiceStatus | null>(null);
   let voicePollTimer: ReturnType<typeof setInterval> | null = null;
   // The mic is USABLE when a server will take the call, or the local engine is loaded.
@@ -252,11 +254,25 @@
     }
     recState = "transcribing";
     try {
-      const blob = await recorder.stop();
-      const r = await api.voiceTranscribe(blob);
+      const rec = await recorder.stop();
+      micLevel = 0;
+      // Silence is information, never a shrug: a too-short or dead-level recording
+      // gets named BEFORE any transcription — the Safari suspended-context failure
+      // looked exactly like this and showed nothing at all.
+      if (rec.seconds < 0.3 || rec.peak < 0.003) {
+        error = rec.seconds < 0.3
+          ? "That was too short — hold the mic on while you speak, then tap to stop."
+          : "The microphone recorded silence — check your input device and its level (System Settings → Sound → Input).";
+        return;
+      }
+      const r = await api.voiceTranscribe(rec.blob);
       // Into the composer, editable — dictation proposes, the user disposes (V1:
       // no auto-send; reviewing the transcript before it runs is the safe default).
-      if (r.text) input = input ? `${input.trimEnd()} ${r.text}` : r.text;
+      if (r.text) {
+        input = input ? `${input.trimEnd()} ${r.text}` : r.text;
+      } else {
+        error = "Didn't catch any words — try again, a little closer to the microphone.";
+      }
     } catch (err) {
       // The server's own words, verbatim: describeError's friendly 502 wording hid
       // "Model 'whisper-…' not found" behind "couldn't reach the model" in the field.
@@ -1470,6 +1486,7 @@
           <button
             class="voice mic"
             class:recording={recState === "recording"}
+            style={recState === "recording" ? `--mic-level:${micLevel.toFixed(2)}` : ""}
             disabled={recState === "transcribing" || busy}
             title={recState === "recording" ? "Stop and transcribe" : "Dictate (push to talk)"}
             aria-label={recState === "recording" ? "Stop and transcribe" : "Dictate"}
@@ -1647,6 +1664,9 @@
     background: var(--danger);
     color: #fff;
     animation: mic-pulse 1.6s ease-in-out infinite;
+    /* The live level ring: grows with the speaker's voice, so capture is visible —
+       a silent ring while talking means the mic ISN'T hearing you, and now you know. */
+    box-shadow: 0 0 0 calc(2px + var(--mic-level, 0) * 10px) color-mix(in srgb, var(--danger) 35%, transparent);
   }
   .voice.autospeak.active {
     background: var(--accent-strong);

@@ -16,6 +16,10 @@ export class Recorder {
   private silentSink: GainNode | null = null;
   private parts: Float32Array[] = [];
   private length = 0;
+  private peakLevel = 0;
+  /** Live input level (0..1-ish RMS per chunk) — the UI animates it so "is it hearing
+      me?" is never a mystery. Assigned by the caller before start(). */
+  onLevel: ((level: number) => void) | null = null;
 
   get active(): boolean {
     return this.context !== null;
@@ -28,18 +32,34 @@ export class Recorder {
       audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 },
     });
     this.context = new AudioContext();
+    // Safari creates contexts SUSPENDED even inside a user gesture; without this the
+    // graph runs but processes zero samples — a red recording button capturing pure
+    // silence, which the field hit as "prompt appeared, button red, no text".
+    await this.context.resume();
     const source = this.context.createMediaStreamSource(this.stream);
     const push = (chunk: Float32Array) => {
       this.parts.push(chunk);
       this.length += chunk.length;
+      let sum = 0;
+      for (let i = 0; i < chunk.length; i++) sum += chunk[i] * chunk[i];
+      const rms = Math.sqrt(sum / chunk.length);
+      if (rms > this.peakLevel) this.peakLevel = rms;
+      this.onLevel?.(rms);
     };
     try {
       await this.context.audioWorklet.addModule("/capture-worklet.js");
       const node = new AudioWorkletNode(this.context, "sb-capture");
       node.port.onmessage = (e: MessageEvent<Float32Array>) => push(e.data);
       source.connect(node);
+      // Through a zero-gain sink to the destination: rendering graphs only reliably
+      // PULL nodes on a path to a destination — a dangling worklet can process nothing
+      // at all (measured: level 0.00 in Chromium). The mute gain keeps it inaudible.
+      const sink = this.context.createGain();
+      sink.gain.value = 0;
+      node.connect(sink);
+      sink.connect(this.context.destination);
       this.node = node;
-      // NOT connected to destination: capture only, no monitoring feedback loop.
+      this.silentSink = sink;
     } catch (err) {
       // The worklet file can 404 on a PWA origin that lags the app by a deploy, or be
       // refused by a stricter CSP — capture must not die over the modern path. The
@@ -58,8 +78,9 @@ export class Recorder {
     }
   }
 
-  /** Stop capturing and return the WAV blob (empty recording -> zero-sample WAV). */
-  async stop(): Promise<Blob> {
+  /** Stop capturing; returns the WAV plus what was actually heard, so the caller can
+      say "that was silence" instead of transcribing nothing and showing nothing. */
+  async stop(): Promise<{ blob: Blob; seconds: number; peak: number }> {
     const rate = this.context?.sampleRate ?? TARGET_RATE;
     if (this.node instanceof AudioWorkletNode) this.node.port.close();
     this.node?.disconnect();
@@ -78,6 +99,13 @@ export class Recorder {
     }
     this.parts = [];
     this.length = 0;
-    return new Blob([encodeWav(downsample(all, rate, TARGET_RATE), TARGET_RATE)], { type: "audio/wav" });
+    const peak = this.peakLevel;
+    this.peakLevel = 0;
+    const samples = downsample(all, rate, TARGET_RATE);
+    return {
+      blob: new Blob([encodeWav(samples, TARGET_RATE)], { type: "audio/wav" }),
+      seconds: samples.length / TARGET_RATE,
+      peak,
+    };
   }
 }

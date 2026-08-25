@@ -29,7 +29,12 @@ describe("theme CSS variables", () => {
     const used = new Set<string>();
     for (const file of walk(SRC)) {
       const text = readFileSync(file, "utf8");
-      for (const m of text.matchAll(/var\((--[a-z0-9-]+)/g)) used.add(m[1]);
+      // A var() carrying an explicit fallback — var(--x, 0) — is self-sufficient by
+      // construction (dynamic per-element vars like the mic level ring set it inline);
+      // the guard is for THEME tokens that must exist in app.css.
+      for (const m of text.matchAll(/var\((--[a-z0-9-]+)(,)?/g)) {
+        if (!m[2]) used.add(m[1]);
+      }
     }
 
     const undefinedVars = [...used].filter((v) => !defined.has(v)).sort();
