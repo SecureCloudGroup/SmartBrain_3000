@@ -11,6 +11,8 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.9.25] - 2026-08-25
+
 ### Added
 - **Dictation that ends when you stop talking — and listens to you about everything
   else.** Pause for a moment and the recording finishes itself (no second tap). Say
