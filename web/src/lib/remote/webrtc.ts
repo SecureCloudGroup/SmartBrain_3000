@@ -9,7 +9,7 @@
 
 import { channelBinding, randomNonceB64, verifyDesktopIdentity } from "./crypto";
 import type { PairingPayload } from "./pairing";
-import { appendChunk, asResponse, type ChunkState, encodeAuth, encodeHello, encodePing, encodeRequest, isChunkFrame, type ParsedResponse, parseMessage, pingDead } from "./protocol";
+import { appendChunk, asResponse, type ChunkState, encodeAuth, encodeHello, encodePing, encodeRequestParts, isChunkFrame, type ParsedResponse, parseMessage, pingDead } from "./protocol";
 import { classifyCandidatePair } from "./candidate-pair";
 import { setRemoteStatus } from "./connection.svelte";
 
@@ -178,7 +178,11 @@ export class RemoteConnection {
       return;
     }
     if (type === "auth_error") {
-      setRemoteStatus("offline", "this device isn't authorized — re-pair");
+      // A LOCKED Desktop can't verify any phone (the credentials live in its encrypted
+      // store) — say that, not "re-pair" (field: a locked Desktop read as a broken pairing).
+      setRemoteStatus("offline", m.reason === "locked"
+        ? "your Desktop is locked — unlock it there, then this phone reconnects"
+        : "this device isn't authorized — re-pair");
       this.failReady?.(new Error("auth_error"));
       // Close, or connectionState churn restarts the backoff loop and buries this
       // actionable message under "reconnecting…" and then the generic VPN hint.
@@ -281,7 +285,7 @@ export class RemoteConnection {
     if (!this.ready) throw new Error("not connecting");
     await this.ready;
     const id = String(++this.seq);
-    const frame = encodeRequest(id, method, path, headers, body);
+    const frames = encodeRequestParts(id, method, path, headers, body); // 1 frame, or ordered parts
     return new Promise<ParsedResponse>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
@@ -289,7 +293,7 @@ export class RemoteConnection {
       }, _REQUEST_TIMEOUT);
       this.pending.set(id, { resolve, reject, timer, chunks: null });
       try {
-        this.channel?.send(frame);
+        for (const frame of frames) this.channel?.send(frame); // reliable + ordered channel
       } catch (e) {
         clearTimeout(timer);
         this.pending.delete(id);

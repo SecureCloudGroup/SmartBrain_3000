@@ -239,3 +239,17 @@ func TestRunVerbRejectsUnknown(t *testing.T) {
 		t.Fatalf("an unknown verb must print usage and exit 2, got %d", got)
 	}
 }
+
+func TestCgroupIsOurServiceIgnoresDesktopScopes(t *testing.T) {
+	// GNOME launches desktop apps inside transient scopes and leaks INVOCATION_ID into
+	// their environment; only the real unit may claim systemd will restart us.
+	if cgroupIsOurService("0::/user.slice/user-1000.slice/user@1000.service/app.slice/app-gnome-smartbrain-2231.scope\n") {
+		t.Fatal("a desktop app scope must not count as our service")
+	}
+	if !cgroupIsOurService("0::/user.slice/user-1000.slice/user@1000.service/app.slice/smartbrain.service\n") {
+		t.Fatal("our unit must be recognized")
+	}
+	if cgroupIsOurService("") {
+		t.Fatal("empty cgroup must not count")
+	}
+}

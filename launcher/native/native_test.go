@@ -1126,3 +1126,27 @@ func TestUpRefusesForeignGatewayPortHolder(t *testing.T) {
 		t.Fatal("the foreign process must still be serving — refusal means NOT killed")
 	}
 }
+
+func TestPruneVersionsKeepsCurrentAndPreviousOnly(t *testing.T) {
+	n := New(t.TempDir())
+	for _, v := range []string{"0.9.20", "0.9.21", "0.9.22", "0.9.23", ".tmp-0.9.24"} {
+		if err := os.MkdirAll(n.versionDir(v), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	n.pruneVersions("0.9.23", "0.9.22")
+	entries, _ := os.ReadDir(n.versionsDir())
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	want := map[string]bool{"0.9.22": true, "0.9.23": true, ".tmp-0.9.24": true}
+	if len(names) != len(want) {
+		t.Fatalf("kept %v, want exactly %v", names, want)
+	}
+	for _, nm := range names {
+		if !want[nm] {
+			t.Fatalf("unexpected survivor %q (in-flight .tmp- and the two kept versions only)", nm)
+		}
+	}
+}

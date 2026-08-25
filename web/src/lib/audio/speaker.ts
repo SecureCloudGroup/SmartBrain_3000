@@ -100,6 +100,7 @@ export class Speaker {
   private speakSystem(text: string): Promise<void> {
     return new Promise((resolve) => {
       const u = new SpeechSynthesisUtterance(text);
+      u.rate = speechRate(); // Settings → Status → Playback speed (system voices only)
       u.onend = () => resolve();
       u.onerror = () => resolve(); // a bad utterance must not wedge the queue
       speechSynthesis.speak(u);
@@ -120,6 +121,18 @@ export class Speaker {
       void el.play().catch(() => resolve());
     });
     this.audioEl = null;
+  }
+}
+
+/** Playback speed for spoken replies, persisted per device. 1 = natural; system voices
+ * accept 0.5–2 sensibly. Read at speak time so a change applies to the next sentence. */
+export const SPEECH_RATE_KEY = "sb:tts-rate";
+export function speechRate(): number {
+  try {
+    const v = parseFloat(localStorage.getItem(SPEECH_RATE_KEY) ?? "1");
+    return Number.isFinite(v) && v >= 0.5 && v <= 2 ? v : 1;
+  } catch {
+    return 1;
   }
 }
 

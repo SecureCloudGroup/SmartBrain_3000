@@ -19,7 +19,11 @@
       await savePairing(await pairByCode(code));
       phase = "done";
     } catch (e) {
-      error = e instanceof Error ? e.message : "pairing failed";
+      // A locked Desktop can't pair (its device store is encrypted) and the phone only
+      // sees a timeout — name the likeliest cause rather than a bare "failed".
+      error = e instanceof Error && e.message !== "pairing failed"
+        ? e.message
+        : "Pairing didn't complete — make sure your Desktop is UNLOCKED and showing a pairing code, then try again.";
     } finally {
       pairing = false;
     }

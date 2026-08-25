@@ -11,6 +11,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -167,7 +168,28 @@ func cmdVersion() int {
 // underSystemd reports whether systemd is supervising this process (it sets
 // INVOCATION_ID for every unit it runs). Then the unit's Restart= policy owns
 // relaunching after a self-update — see checkForUpdate.
-func underSystemd() bool { return os.Getenv("INVOCATION_ID") != "" }
+// underSystemd reports whether THIS process is the smartbrain.service unit — the only
+// case where systemd's Restart= will relaunch us after a self-update swap. It used to
+// check $INVOCATION_ID alone, which GNOME sessions leak into every app they launch:
+// the tray launcher on a GNOME desktop swapped its binary, exited expecting a
+// restart, and nobody relaunched it (field report: "the launcher does not auto
+// restart on Linux"). The cgroup names the unit; nothing else does.
+func underSystemd() bool {
+	if os.Getenv("INVOCATION_ID") == "" {
+		return false
+	}
+	cg, err := os.ReadFile("/proc/self/cgroup")
+	if err != nil {
+		return false // no cgroup view (non-Linux, odd sandbox): assume nobody restarts us
+	}
+	return cgroupIsOurService(string(cg))
+}
+
+// cgroupIsOurService: true only when the cgroup path names our unit (a .service, not a
+// desktop app scope like app-gnome-smartbrain-1234.scope).
+func cgroupIsOurService(cgroup string) bool {
+	return strings.Contains(cgroup, "/smartbrain.service")
+}
 
 // graphicalSession reports whether a desktop could draw ANY UI: a display server
 // plus a session bus (systray's SNI backend needs both). Off linux it is always
