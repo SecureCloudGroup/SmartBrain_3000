@@ -14,7 +14,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 from starlette.responses import Response
 
-from . import moonshine, voice
+from . import stt_local, voice
 
 router = APIRouter()
 
@@ -35,7 +35,7 @@ class SpeakIn(BaseModel):
 @router.get("/api/voice/status")
 def voice_status(request: Request, probe: int = 0, prepare: int = 0) -> dict:
     if prepare:
-        moonshine.prefetch(request.app)  # idempotent; re-arms after an error
+        stt_local.prefetch(request.app)  # idempotent; re-arms after an error
     return voice.status(_store(request), probe=bool(probe))
 
 
@@ -53,7 +53,7 @@ async def voice_transcribe(request: Request) -> dict:
         # able to fail the feature it diagnoses — this exact write once 500'd the whole
         # route on a permission error, eating the recording it existed to explain.
         try:
-            from . import moonshine as _m
+            from . import stt_local as _m
             keep = _m.model_dir().parent / "voice-last.wav"
             keep.parent.mkdir(parents=True, exist_ok=True)
             keep.write_bytes(audio)

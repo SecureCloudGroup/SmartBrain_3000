@@ -26,10 +26,10 @@ from . import (
     db,
     gateway,
     mcp_server,
-    moonshine,
     runtime,
     scheduler,
     serving,
+    stt_local,
 )
 from .account import router as account_router
 from .agent_routes import router as agent_router
@@ -324,7 +324,7 @@ def _make_lifespan(mcp):
         # Voice model: start the one-time background fetch at BOOT, not first unlock —
         # the files aren't user data and need no key, and by the time someone unlocks
         # and presses the mic, ready is the common case instead of the lucky one.
-        moonshine.prefetch(application)
+        stt_local.prefetch(application)
         # Single long-lived pooled httpx client for gateway calls (B22). Stored on
         # the gateway module so per-call functions reuse it without each route
         # having to pass ``client=``; tests that don't set the pool keep using a

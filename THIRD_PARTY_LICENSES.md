@@ -7,7 +7,7 @@ is a summary — the authoritative license text ships with each package.
 
 ## Runtime (Python — shipped in the Docker image; pinned in `app/requirements.lock`)
 
-The complete runtime set (82 packages) is exact-version pinned in [`app/requirements.lock`](app/requirements.lock). All are permissive (MIT / BSD / Apache-2.0 / ISC / PSF) **except** the two weak/file-level-copyleft components called out below; their notices ship unmodified inside each package.
+The complete runtime set (82 packages) is exact-version pinned in [`app/requirements.lock`](app/requirements.lock). All are permissive (MIT / BSD / Apache-2.0 / ISC / PSF) **except** the weak/file-level-copyleft components called out below; their notices ship unmodified inside each package.
 
 | Component | Purpose | License |
 |-----------|---------|---------|
@@ -27,17 +27,25 @@ The complete runtime set (82 packages) is exact-version pinned in [`app/requirem
 | click | transitive dependency | BSD-3-Clause |
 | courlan | transitive dependency | Apache-2.0 |
 | cryptography | AES-GCM at rest | Apache-2.0 OR BSD-3-Clause |
+| ctranslate2 | Voice: Whisper inference engine | MIT |
 | dateparser | transitive dependency | BSD-3-Clause |
 | dnspython | transitive dependency | ISC |
 | duckdb | Embedded DB | MIT |
+| et_xmlfile | transitive dependency (openpyxl) | MIT |
 | fastapi | HTTP framework | MIT |
+| faster-whisper | Voice: local Whisper runtime | MIT |
+| filelock | transitive dependency (huggingface_hub) | Unlicense |
+| flatbuffers | transitive dependency (onnxruntime) | Apache-2.0 |
+| fsspec | transitive dependency (huggingface_hub) | BSD-3-Clause |
 | google-crc32c | transitive dependency | Apache-2.0 |
 | h11 | transitive dependency | MIT |
+| hf-xet | transitive dependency (huggingface_hub) | Apache-2.0 |
 | htmldate | transitive dependency | Apache-2.0 |
 | httpcore | transitive dependency | BSD-3-Clause |
 | httptools | transitive dependency | MIT |
 | httpx | HTTP client (gateway/OAuth/Gmail) | BSD-3-Clause |
 | httpx-sse | transitive dependency | MIT |
+| huggingface_hub | transitive dependency (faster-whisper) | Apache-2.0 |
 | idna | transitive dependency | BSD-3-Clause |
 | ifaddr | transitive dependency | MIT |
 | jsonschema | transitive dependency | MIT |
@@ -47,13 +55,15 @@ The complete runtime set (82 packages) is exact-version pinned in [`app/requirem
 | lxml_html_clean | transitive dependency | BSD-3-Clause |
 | mcp | Model Context Protocol server | MIT |
 | numpy | Vector math (semantic search; voice audio) | BSD-3-Clause |
-| onnxruntime | Voice: Moonshine STT inference | MIT |
+| onnxruntime | transitive dependency (faster-whisper VAD) | MIT |
+| openpyxl | Excel (.xlsx) ingestion | MIT |
 | packaging | transitive dependency | Apache-2.0 OR BSD-2-Clause |
+| Pillow | transitive dependency (python-pptx image handling) | HPND (Pillow license) |
 | protobuf | transitive dependency (onnxruntime) | BSD-3-Clause |
 | pycparser | transitive dependency | BSD-2-Clause |
 | pydantic | Request validation | MIT |
-| pydantic-settings | transitive dependency | MIT |
 | pydantic_core | transitive dependency | MIT |
+| pydantic-settings | transitive dependency | MIT |
 | pyee | transitive dependency | MIT |
 | Pygments | transitive dependency | BSD-2-Clause |
 | PyJWT | transitive dependency | MIT |
@@ -61,29 +71,37 @@ The complete runtime set (82 packages) is exact-version pinned in [`app/requirem
 | pyOpenSSL | DTLS (via aiortc) | Apache-2.0 |
 | pypdf | PDF text extraction | BSD-3-Clause |
 | python-dateutil | transitive dependency | Apache-2.0 OR BSD-3-Clause |
+| python-docx | Word (.docx) ingestion | MIT |
 | python-dotenv | transitive dependency | BSD-3-Clause |
 | python-multipart | transitive dependency | Apache-2.0 |
+| python-pptx | PowerPoint (.pptx) ingestion | MIT |
 | pytz | transitive dependency | MIT |
 | PyYAML | transitive dependency | MIT |
 | referencing | transitive dependency | MIT |
 | regex | transitive dependency | Apache-2.0 |
 | rpds-py | transitive dependency | MIT |
+| setuptools | transitive dependency (packaging tooling) | MIT |
 | six | transitive dependency | MIT |
 | sse-starlette | transitive dependency | BSD-3-Clause |
 | starlette | ASGI toolkit | BSD-3-Clause |
 | tld | TLD parsing (via trafilatura/courlan) | MPL-1.1 / GPL-2.0 / LGPL-2.1 (tri-license — used under MPL-1.1) |
+| tokenizers | transitive dependency (faster-whisper) | Apache-2.0 |
+| tqdm | transitive dependency (huggingface_hub) | MIT / MPL-2.0 (per-file; see note) |
 | trafilatura | HTML article extraction | Apache-2.0 |
-| typing-inspection | transitive dependency | MIT |
 | typing_extensions | transitive dependency | PSF-2.0 |
+| typing-inspection | transitive dependency | MIT |
 | tzlocal | transitive dependency | MIT |
 | urllib3 | transitive dependency | MIT |
 | uvicorn | ASGI server | BSD-3-Clause |
 | uvloop | transitive dependency | MIT OR Apache-2.0 |
 | watchfiles | transitive dependency | MIT |
 | websockets | WebSocket client (signaling) | BSD-3-Clause |
+| XlsxWriter | Excel export | BSD-2-Clause |
 
 > **certifi (MPL-2.0)** — Mozilla's CA bundle, shipped **unmodified**. MPL-2.0 is file-level (weak) copyleft: it is not viral against SmartBrain's own code; we retain certifi's MPL-2.0 notice in the image.
 >
+> **tqdm** is dual-licensed **MIT / MPL-2.0** at file level (most files MIT; a handful MPL-2.0, shipped **unmodified** — the same non-viral posture as certifi). It arrives transitively via `faster-whisper → huggingface_hub`.
+
 > **tld** is tri-licensed **MPL-1.1 / GPL-2.0-only / LGPL-2.1-or-later**; SmartBrain elects and relies on it under the **MPL-1.1** arm (NOT GPL-2.0). It arrives transitively via `trafilatura → courlan`. (Legal review should confirm this election.)
 
 
@@ -109,7 +127,7 @@ The complete runtime set (82 packages) is exact-version pinned in [`app/requirem
 | [Caddy](https://github.com/caddyserver/caddy) | Reverse proxy / TLS for the remote-access node (optional) | Apache-2.0 |
 | [Inter](https://rsms.me/inter/) | UI typeface (self-hosted subset, `web/static/fonts/`; license ships beside the file) | OFL-1.1 |
 | [Lucide](https://lucide.dev) | UI icon set (vendored path data, `web/src/lib/icons.ts`) | ISC |
-| [Moonshine](https://github.com/usefulsensors/moonshine) | On-device speech-to-text: vendored ONNX inference loop + tokenizer (`app/smartbrain_3000/moonshine.py`, `assets/moonshine-tokenizer.json`); model weights fetched hash-pinned at first use | MIT |
+| [Whisper / faster-whisper](https://github.com/SYSTRAN/faster-whisper) | On-device speech-to-text runtime (`app/smartbrain_3000/stt_local.py`); model weights fetched hash-pinned at first use | MIT |
 
 If you believe an attribution here is inaccurate or incomplete, please open an
 issue or email **info@securecloudgroup.com**.
