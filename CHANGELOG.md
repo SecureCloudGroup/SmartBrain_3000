@@ -11,6 +11,8 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.9.26] - 2026-08-25
+
 ### Added
 - **Playback speed for spoken replies.** Settings → Status → Voice gains a speed control
   (0.8× to 2×) that applies to the next sentence spoken and confirms itself out loud.
