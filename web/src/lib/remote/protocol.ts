@@ -82,7 +82,11 @@ export function encodeRequest(
 // transcribing clock forever. Big bodies now go as ordered part-frames
 // {rq: true, id, seq, more, body_b64} (+ method/path/headers on seq 0); small ones keep
 // the single frame so an old Desktop still serves them.
-export const REQUEST_CHUNK_CHARS = 128 * 1024; // per-frame base64 payload, safely under limits
+// The Desktop peer (aiortc) advertises a 64 KiB max message size, and browsers REFUSE
+// to send a DataChannel message larger than the remote's limit — Chrome throws, Safari
+// tears the whole channel down. 48 KiB of base64 plus the envelope stays under it.
+export const REQUEST_CHUNK_CHARS = 48 * 1024;
+export const PEER_MAX_MESSAGE_BYTES = 65536;
 
 export function encodeRequestParts(
   id: string,

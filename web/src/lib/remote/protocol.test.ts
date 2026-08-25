@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { encodeRequestParts, REQUEST_CHUNK_CHARS } from "./protocol";
+import { encodeRequestParts, PEER_MAX_MESSAGE_BYTES, REQUEST_CHUNK_CHARS } from "./protocol";
 
 describe("encodeRequestParts", () => {
   it("keeps small bodies as the single legacy frame", () => {
@@ -17,5 +17,12 @@ describe("encodeRequestParts", () => {
     expect(last.more).toBe(false);
     expect(last.method).toBeUndefined(); // only the head carries routing
     for (const f of frames) expect(f.length).toBeLessThan(REQUEST_CHUNK_CHARS + 512);
+  });
+  it("never produces a frame the Desktop peer (aiortc, 64 KiB max message) would refuse — the v0.9.26 phone clock", () => {
+    const body = new Uint8Array(400 * 1024);
+    const headers = { "content-type": "audio/wav", "x-long": "h".repeat(2000) };
+    for (const f of encodeRequestParts("9", "POST", "/api/voice/transcribe", headers, body)) {
+      expect(new TextEncoder().encode(f).length).toBeLessThan(PEER_MAX_MESSAGE_BYTES);
+    }
   });
 });

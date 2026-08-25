@@ -1254,7 +1254,11 @@
     console.assert(typeof data === "string", "readDelta needs a string");
     if (!data) return "";
     try {
-      const obj = JSON.parse(data) as { delta?: string };
+      // The server's delta frame is {"text": "..."} (agent_routes). This read "delta"
+      // since day one, so no token ever streamed on the Desktop and auto-speak was
+      // never fed — the answer only appeared whole at "done". Field: v0.9.26.
+      const obj = JSON.parse(data) as { text?: string; delta?: string };
+      if (typeof obj.text === "string") return obj.text;
       return typeof obj.delta === "string" ? obj.delta : "";
     } catch {
       return "";
