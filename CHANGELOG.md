@@ -11,6 +11,15 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Fixed
+- **Dictation records for real now — and says so.** Two stacked capture bugs made the
+  mic record silence while looking alive: Safari starts audio processing suspended
+  (never resumed), and the capture node wasn't on a path the audio graph pulls — so on
+  every engine the red button could capture nothing. Both fixed, and verified by
+  driving the real UI end-to-end in a browser. The mic now also pulses with your
+  actual voice level while recording, and a silent or word-free recording gets a
+  plain-words message naming the fix — never a silent nothing again.
+
 ## [0.9.21] - 2026-08-24
 
 ### Fixed

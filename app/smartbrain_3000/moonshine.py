@@ -37,9 +37,9 @@ _REPO_BASE = "https://huggingface.co/UsefulSensors/moonshine/resolve/main/onnx/m
 # while the second file still streamed — the field caught it).
 MODEL_FILES = {
     "encoder_model.onnx":
-        ("153e128e7abd64a74ee47f2c3f585c3171c4d46cbb368b032827934c4e01e779", 80_100_600),
+        ("153e128e7abd64a74ee47f2c3f585c3171c4d46cbb368b032827934c4e01e779", 80_818_781),
     "decoder_model_merged.onnx":
-        ("58778763ca8438963190244d6b26572bdca2cedec56a4b91e828f3f2d69ef3c5", 166_213_710),
+        ("58778763ca8438963190244d6b26572bdca2cedec56a4b91e828f3f2d69ef3c5", 166_211_345),
 }
 _TOTAL_BYTES = sum(size for _, size in MODEL_FILES.values())
 _TOKENIZER = Path(__file__).parent / "assets" / "moonshine-tokenizer.json"
