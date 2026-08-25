@@ -11,6 +11,8 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.9.20] - 2026-08-24
+
 ### Added
 - **Settings → Status: a live view of everything the app is doing.** App version, lock
   state, the voice model's download (with a real progress bar and a retry button),
