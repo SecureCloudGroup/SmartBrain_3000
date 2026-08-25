@@ -11,6 +11,8 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.9.24] - 2026-08-25
+
 ### Changed
 - **Dictation now runs on Whisper — the engine that survives real voices.** The Mic &
   speaker check caught the previous engine returning nothing for perfectly clear
