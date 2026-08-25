@@ -80,7 +80,7 @@ def test_transcribe_happy_path(monkeypatch) -> None:
 
 def test_transcribe_unconfigured_uses_local_engine(monkeypatch) -> None:
     store = _secret_store()
-    monkeypatch.setattr(voice.moonshine, "transcribe_wav", lambda audio: "local text")
+    monkeypatch.setattr(voice.stt_local, "transcribe_wav", lambda audio: "local text")
     assert voice.transcribe(store, b"RIFF") == "local text"
 
 
@@ -89,7 +89,7 @@ def test_transcribe_local_failure_is_actionable(monkeypatch) -> None:
 
     def not_ready(audio):
         raise RuntimeError("preparing voice (40%) — one-time download, try again shortly")
-    monkeypatch.setattr(voice.moonshine, "transcribe_wav", not_ready)
+    monkeypatch.setattr(voice.stt_local, "transcribe_wav", not_ready)
     with pytest.raises(voice.VoiceError) as e:
         voice.transcribe(store, b"RIFF")
     assert e.value.status == 503 and "preparing voice (40%)" in e.value.message
@@ -99,7 +99,7 @@ def test_transcribe_server_failure_falls_back_to_local(monkeypatch) -> None:
     """A configured-but-broken server must not take dictation down: local carries on."""
     store = _secret_store()
     store.put(gateway.MLX_URL_KEY, "http://127.0.0.1:8888")
-    monkeypatch.setattr(voice.moonshine, "transcribe_wav", lambda audio: "local rescue")
+    monkeypatch.setattr(voice.stt_local, "transcribe_wav", lambda audio: "local rescue")
 
     monkeypatch.setattr(voice.httpx, "post",
                         lambda url, **kw: _resp(500, {"error": {"message": "model exploded"}}))
@@ -146,7 +146,7 @@ def test_transcribe_no_server_whisper_falls_back_to_local(monkeypatch) -> None:
                         lambda url, **kw: _resp(404, {"detail": "Model 'x' not found. Available: Qwen"}))
     monkeypatch.setattr(voice.gateway, "probe_mlx",
                         lambda url, key, **kw: {"reachable": True, "models": ["Qwen"]})
-    monkeypatch.setattr(voice.moonshine, "transcribe_wav", lambda audio: "moonshine says hi")
+    monkeypatch.setattr(voice.stt_local, "transcribe_wav", lambda audio: "moonshine says hi")
     assert voice.transcribe(store, b"RIFF") == "moonshine says hi"
 
 
@@ -170,7 +170,7 @@ def test_server_failure_is_skipped_for_a_while(monkeypatch) -> None:
         calls.append(url)
         raise httpx.ConnectTimeout("down")
     monkeypatch.setattr(voice.httpx, "post", failing_post)
-    monkeypatch.setattr(voice.moonshine, "transcribe_wav", lambda audio: "local")
+    monkeypatch.setattr(voice.stt_local, "transcribe_wav", lambda audio: "local")
     assert voice.transcribe(store, b"RIFF") == "local"
     assert len(calls) == 1
     assert voice.transcribe(store, b"RIFF") == "local"

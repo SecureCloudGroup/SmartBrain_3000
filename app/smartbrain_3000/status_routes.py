@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Request
 
-from . import __version__, devices, gateway, moonshine, voice
+from . import __version__, devices, gateway, stt_local, voice
 
 router = APIRouter()
 
@@ -28,7 +28,7 @@ def app_status(request: Request) -> dict:
     out: dict = {
         "version": __version__,
         "unlocked": unlocked,
-        "voice_local": moonshine.status(),  # phase/pct/error — needs no key
+        "voice_local": stt_local.status(),  # phase/pct/error — needs no key
     }
     if not unlocked:
         return out

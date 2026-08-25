@@ -19,7 +19,7 @@ import uuid
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from . import email_account, gateway, keyvault, moonshine
+from . import email_account, gateway, keyvault, stt_local
 from .approvals import ApprovalStore
 from .audit import AuditLog
 from .feeds import FeedStore
@@ -84,7 +84,7 @@ def _set_unlocked(request: Request, master_key: bytes) -> None:
     # clears kb before vaults for the same reason.
     request.app.state.vaults = VaultStore(_conn(request), master_key)
     request.app.state.feeds = FeedStore(_conn(request), master_key)
-    moonshine.prefetch(request.app)  # voice model: one-time background fetch, idempotent
+    stt_local.prefetch(request.app)  # voice model: one-time background fetch, idempotent
     request.app.state.kb = KnowledgeBase(_conn(request), master_key)
     request.app.state.history = ChatHistory(_conn(request), master_key)
     request.app.state.memory = MemoryStore(_conn(request), master_key)

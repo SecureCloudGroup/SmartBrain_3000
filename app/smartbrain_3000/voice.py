@@ -18,7 +18,7 @@ import time
 
 import httpx
 
-from . import gateway, moonshine
+from . import gateway, stt_local
 
 log = logging.getLogger(__name__)
 
@@ -92,7 +92,7 @@ def status(store, probe: bool = False) -> dict:
            "tts_voice": store.get(TTS_VOICE_KEY) or "", "stt_ready": None,
            # The local engine makes dictation unconditionally available; `local` carries
            # its phase/pct so the mic can show "Preparing voice (N%)" honestly.
-           "stt_available": True, "local": moonshine.status(),
+           "stt_available": True, "local": stt_local.status(),
            "engine": _current_engine(store)}
     if probe and cfg["url"]:
         probed = gateway.probe_mlx(cfg["url"], cfg["api_key"])  # plain /v1/models GET, best-effort
@@ -152,7 +152,7 @@ def _current_engine(store) -> str:
 
 def _transcribe_local(audio: bytes) -> str:
     try:
-        return moonshine.transcribe_wav(audio)
+        return stt_local.transcribe_wav(audio)
     except RuntimeError as exc:
         raise VoiceError(503, str(exc)) from None
 

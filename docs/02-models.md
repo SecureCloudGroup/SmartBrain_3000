@@ -190,12 +190,13 @@ for how it feels to use. Under the hood, **your voice never leaves your machines
 and there is **nothing to set up**: dictation is built in, on every OS.
 
 - **Built in (the default)** — SmartBrain transcribes on your machine with
-  [Moonshine](https://github.com/usefulsensors/moonshine), a fast on-device
-  speech-to-text model. Its model files (~236 MB, integrity-checked) download once,
-  in the background, starting the moment the app launches — **watch the progress
-  right on the mic button**, or on **Settings → Status**. Until it's ready the mic
-  shows a live percent instead of pretending; after that, dictation is instant and
-  fully offline. English only, for now.
+  **Whisper** (via [faster-whisper](https://github.com/SYSTRAN/faster-whisper), the
+  industry-standard local runtime — chosen after field testing for its robustness on
+  real-world voices). Its model files (~141 MB, integrity-checked) download once, in
+  the background, starting the moment the app launches — **watch the progress right
+  on the mic button**, or on **Settings → Status**. Until it's ready the mic shows a
+  live percent instead of pretending; after that, dictation runs in well under a
+  second, fully offline, in your language — Whisper understands dozens.
 - **Your own audio server (optional)** — for other languages or maximum accuracy,
   run any local server that speaks the standard `/v1/audio/transcriptions` API (oMLX
   with a whisper model on a Mac, [speaches](https://github.com/speaches-ai/speaches)

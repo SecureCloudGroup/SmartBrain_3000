@@ -11,6 +11,17 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Changed
+- **Dictation now runs on Whisper — the engine that survives real voices.** The Mic &
+  speaker check caught the previous engine returning nothing for perfectly clear
+  speech (byte-verified: the same recording transcribes flawlessly under Whisper).
+  The built-in engine is now Whisper base via faster-whisper, the industry-standard
+  local runtime: sub-half-second on ordinary CPUs, a smaller one-time download
+  (~141 MB, integrity-checked, replacing the old files automatically), and it
+  understands dozens of languages instead of English only. Everything else —
+  background download with live progress, the always-honest mic states, your own
+  audio server taking over when configured — is unchanged.
+
 ## [0.9.23] - 2026-08-25
 
 ### Added
