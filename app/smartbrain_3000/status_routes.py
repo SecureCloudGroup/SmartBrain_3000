@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import os
 import platform
-import resource
 import sys
 from pathlib import Path
 
@@ -91,15 +90,43 @@ def _storage_status() -> dict:
 
 
 def _memory_status() -> dict:
-    """This process's peak resident memory. ru_maxrss is bytes on macOS, kilobytes on
-    Linux — normalized here so the page never shows a 1024x lie."""
+    """This process's peak resident memory, per platform. The `resource` module is
+    Unix-only — importing it at module top broke the ENTIRE app on Windows (the
+    Windows smoke caught it before release); it stays lazy, and Windows asks the
+    kernel directly. ru_maxrss is bytes on macOS, kilobytes on Linux."""
     try:
-        rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-        if platform.system() != "Darwin":
-            rss *= 1024
+        if platform.system() == "Windows":
+            rss = _windows_peak_rss()
+        else:
+            import resource  # Unix-only stdlib — MUST stay a lazy import
+
+            rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+            if platform.system() != "Darwin":
+                rss *= 1024
         return {"rss_bytes": int(rss), "python": sys.version.split()[0]}
     except Exception:
         return {"rss_bytes": 0, "python": ""}
+
+
+def _windows_peak_rss() -> int:
+    """PeakWorkingSetSize via psapi — the Windows equivalent of ru_maxrss, stdlib-only."""
+    import ctypes
+    from ctypes import wintypes
+
+    class _PMC(ctypes.Structure):
+        _fields_ = [
+            ("cb", wintypes.DWORD), ("PageFaultCount", wintypes.DWORD),
+            ("PeakWorkingSetSize", ctypes.c_size_t), ("WorkingSetSize", ctypes.c_size_t),
+            ("QuotaPeakPagedPoolUsage", ctypes.c_size_t), ("QuotaPagedPoolUsage", ctypes.c_size_t),
+            ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t), ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+            ("PagefileUsage", ctypes.c_size_t), ("PeakPagefileUsage", ctypes.c_size_t),
+        ]
+
+    pmc = _PMC()
+    pmc.cb = ctypes.sizeof(_PMC)
+    handle = ctypes.windll.kernel32.GetCurrentProcess()
+    ctypes.windll.psapi.GetProcessMemoryInfo(handle, ctypes.byref(pmc), pmc.cb)
+    return int(pmc.PeakWorkingSetSize)
 
 
 def _knowledge_status(state, conn) -> dict:
