@@ -11,6 +11,12 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Added
+- **Live transcription.** Your words appear under the message box while you are still
+  talking. The recording so far is re-read every 1.5 s (a fast greedy pass); the full
+  pass at the pause writes the finished transcript into the box, exactly as before.
+  Works the same on the Desktop and on a paired phone.
+
 ## [0.9.26] - 2026-08-25
 
 ### Added

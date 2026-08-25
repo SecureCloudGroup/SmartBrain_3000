@@ -40,13 +40,17 @@ def voice_status(request: Request, probe: int = 0, prepare: int = 0) -> dict:
 
 
 @router.post("/api/voice/transcribe")
-async def voice_transcribe(request: Request) -> dict:
-    """Raw audio body in (the client's 16 kHz mono WAV), transcript text out."""
+async def voice_transcribe(request: Request, partial: int = 0) -> dict:
+    """Raw audio body in (the client's 16 kHz mono WAV), transcript text out.
+
+    `partial=1` marks a live snapshot of an utterance still being spoken: decoded
+    greedily for speed, never kept, never the final word.
+    """
     store = _store(request)
     audio = await request.body()
     if not audio:
         raise HTTPException(status_code=422, detail="empty audio body")
-    if request.headers.get("x-sb-voice-keep") or os.environ.get("SMARTBRAIN_VOICE_KEEP_LAST"):
+    if not partial and (request.headers.get("x-sb-voice-keep") or os.environ.get("SMARTBRAIN_VOICE_KEEP_LAST")):
         # The mic tester (Settings → Status) keeps its recording so a bad capture can be
         # diagnosed from the audio itself instead of theory. Desktop-local only (the
         # bridge strips x-sb-* markers). BEST-EFFORT BY LAW: a diagnostic must never be
@@ -63,7 +67,7 @@ async def voice_transcribe(request: Request) -> dict:
     if len(audio) > _MAX_BODY:
         raise HTTPException(status_code=413, detail="recording too long — try a shorter one")
     try:
-        text = voice.transcribe(store, audio, request.headers.get("content-type", "audio/wav"))
+        text = voice.transcribe(store, audio, request.headers.get("content-type", "audio/wav"), partial=bool(partial))
     except voice.VoiceError as exc:
         raise HTTPException(status_code=exc.status, detail=exc.message) from None
     return {"text": text}

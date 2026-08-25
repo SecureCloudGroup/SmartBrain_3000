@@ -176,7 +176,7 @@ def _load_model(directory: Path):
     return WhisperModel(str(directory), device="cpu", compute_type="int8")
 
 
-def transcribe_wav(wav_bytes: bytes) -> str:
+def transcribe_wav(wav_bytes: bytes, *, partial: bool = False) -> str:
     """16 kHz mono 16-bit WAV in, text out. NEVER blocks on the model: not-ready raises
     immediately with the live phase, and absent/error states re-arm the background fetch
     so the system is always healing itself while the user sees honest progress."""
@@ -194,7 +194,10 @@ def transcribe_wav(wav_bytes: bytes) -> str:
         raise RuntimeError(f"preparing voice ({pct}%) — one-time download, the mic enables itself when ready")
     audio = _decode_wav(wav_bytes)
     with _run_lock:  # CT2 transcription is not guaranteed thread-safe; each call is fast
-        segments, _info = model.transcribe(audio[0], beam_size=5)
+        # Live snapshots decode greedily: they are re-read every second while the user
+        # is still talking, so speed beats the last few percent of accuracy — the final
+        # pass at the pause keeps the full beam.
+        segments, _info = model.transcribe(audio[0], beam_size=1 if partial else 5)
         text = " ".join(seg.text.strip() for seg in segments)
     return text.strip()
 

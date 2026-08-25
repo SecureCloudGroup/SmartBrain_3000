@@ -80,14 +80,14 @@ def test_transcribe_happy_path(monkeypatch) -> None:
 
 def test_transcribe_unconfigured_uses_local_engine(monkeypatch) -> None:
     store = _secret_store()
-    monkeypatch.setattr(voice.stt_local, "transcribe_wav", lambda audio: "local text")
+    monkeypatch.setattr(voice.stt_local, "transcribe_wav", lambda audio, partial=False: "local text")
     assert voice.transcribe(store, b"RIFF") == "local text"
 
 
 def test_transcribe_local_failure_is_actionable(monkeypatch) -> None:
     store = _secret_store()
 
-    def not_ready(audio):
+    def not_ready(audio, partial=False):
         raise RuntimeError("preparing voice (40%) — one-time download, try again shortly")
     monkeypatch.setattr(voice.stt_local, "transcribe_wav", not_ready)
     with pytest.raises(voice.VoiceError) as e:
@@ -99,7 +99,7 @@ def test_transcribe_server_failure_falls_back_to_local(monkeypatch) -> None:
     """A configured-but-broken server must not take dictation down: local carries on."""
     store = _secret_store()
     store.put(gateway.MLX_URL_KEY, "http://127.0.0.1:8888")
-    monkeypatch.setattr(voice.stt_local, "transcribe_wav", lambda audio: "local rescue")
+    monkeypatch.setattr(voice.stt_local, "transcribe_wav", lambda audio, partial=False: "local rescue")
 
     monkeypatch.setattr(voice.httpx, "post",
                         lambda url, **kw: _resp(500, {"error": {"message": "model exploded"}}))
@@ -146,7 +146,7 @@ def test_transcribe_no_server_whisper_falls_back_to_local(monkeypatch) -> None:
                         lambda url, **kw: _resp(404, {"detail": "Model 'x' not found. Available: Qwen"}))
     monkeypatch.setattr(voice.gateway, "probe_mlx",
                         lambda url, key, **kw: {"reachable": True, "models": ["Qwen"]})
-    monkeypatch.setattr(voice.stt_local, "transcribe_wav", lambda audio: "moonshine says hi")
+    monkeypatch.setattr(voice.stt_local, "transcribe_wav", lambda audio, partial=False: "moonshine says hi")
     assert voice.transcribe(store, b"RIFF") == "moonshine says hi"
 
 
@@ -170,7 +170,7 @@ def test_server_failure_is_skipped_for_a_while(monkeypatch) -> None:
         calls.append(url)
         raise httpx.ConnectTimeout("down")
     monkeypatch.setattr(voice.httpx, "post", failing_post)
-    monkeypatch.setattr(voice.stt_local, "transcribe_wav", lambda audio: "local")
+    monkeypatch.setattr(voice.stt_local, "transcribe_wav", lambda audio, partial=False: "local")
     assert voice.transcribe(store, b"RIFF") == "local"
     assert len(calls) == 1
     assert voice.transcribe(store, b"RIFF") == "local"
@@ -254,9 +254,9 @@ def test_voice_status_and_settings_roundtrip(client: TestClient, monkeypatch) ->
 
 
 def test_transcribe_route(client: TestClient, monkeypatch) -> None:
-    monkeypatch.setattr(voice, "transcribe", lambda store, audio, ctype="audio/wav": "hello world")
+    monkeypatch.setattr(voice, "transcribe", lambda store, audio, ctype="audio/wav", **kw: "hello world")
     import smartbrain_3000.voice_routes as vr
-    monkeypatch.setattr(vr.voice, "transcribe", lambda store, audio, ctype="audio/wav": "hello world")
+    monkeypatch.setattr(vr.voice, "transcribe", lambda store, audio, ctype="audio/wav", **kw: "hello world")
     r = client.post("/api/voice/transcribe", content=b"RIFF....WAVE",
                     headers={"content-type": "audio/wav"})
     assert r.status_code == 200 and r.json() == {"text": "hello world"}
@@ -266,7 +266,7 @@ def test_transcribe_route(client: TestClient, monkeypatch) -> None:
 def test_transcribe_route_surfaces_voice_errors(client: TestClient, monkeypatch) -> None:
     import smartbrain_3000.voice_routes as vr
 
-    def boom(store, audio, ctype="audio/wav"):
+    def boom(store, audio, ctype="audio/wav", **kw):
         raise voice.VoiceError(503, "no voice server configured — add one under Settings → Local models")
     monkeypatch.setattr(vr.voice, "transcribe", boom)
     r = client.post("/api/voice/transcribe", content=b"x")
@@ -279,3 +279,28 @@ def test_speak_route(client: TestClient, monkeypatch) -> None:
     r = client.post("/api/voice/speak", json={"text": "hi there"})
     assert r.status_code == 200 and r.content == b"AUDIO"
     assert r.headers["content-type"].startswith("audio/mpeg")
+
+
+def test_transcribe_route_partial_flag(client: TestClient, monkeypatch, tmp_path) -> None:
+    """A live snapshot (?partial=1) reaches the engine flagged as partial and is never
+    kept as the diagnostic recording — only the final pass is worth keeping."""
+    import smartbrain_3000.stt_local as sl
+    import smartbrain_3000.voice_routes as vr
+    seen = []
+    monkeypatch.setattr(vr.voice, "transcribe", lambda store, audio, ctype="audio/wav", partial=False: seen.append(partial) or "so far")
+    monkeypatch.setattr(sl, "model_dir", lambda: tmp_path / "models" / "x")
+    monkeypatch.setenv("SMARTBRAIN_VOICE_KEEP_LAST", "1")
+    r = client.post("/api/voice/transcribe?partial=1", content=b"RIFF....WAVE", headers={"content-type": "audio/wav"})
+    assert r.status_code == 200 and r.json() == {"text": "so far"}
+    assert seen == [True]
+    assert not (tmp_path / "models" / "voice-last.wav").exists()
+    client.post("/api/voice/transcribe", content=b"RIFF....WAVE", headers={"content-type": "audio/wav"})
+    assert seen == [True, False]
+    assert (tmp_path / "models" / "voice-last.wav").exists()
+
+
+def test_transcribe_partial_reaches_local_engine(monkeypatch) -> None:
+    seen = []
+    monkeypatch.setattr(voice.stt_local, "transcribe_wav", lambda audio, partial=False: seen.append(partial) or "t")
+    assert voice.transcribe(_secret_store(), b"x", partial=True) == "t"
+    assert seen == [True]

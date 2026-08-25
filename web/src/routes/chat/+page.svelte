@@ -198,6 +198,38 @@
   let recStartedAt = 0;
   let vadTimer: ReturnType<typeof setInterval> | null = null;
   let handsFree = $state(false); // auto-send the transcript (spoken "cancel" still stops it)
+  // ---- Live transcription: words show up WHILE you talk. ----
+  // Every LIVE_MS the audio-so-far is re-read by the engine (greedy, sub-second) and
+  // shown as a rough line under the composer; nothing enters the message box until
+  // the pause, when the full-beam pass writes the real transcript. One request in
+  // flight at a time — a slow engine just refreshes less often, never queues.
+  const LIVE_MS = 1500;
+  let liveText = $state("");
+  let liveTimer: ReturnType<typeof setInterval> | null = null;
+  let liveInflight = false;
+  let liveGen = 0; // a snapshot answered after "start over" must not paint the old words
+  function startLiveWatch() {
+    liveText = "";
+    const gen = ++liveGen;
+    liveTimer = setInterval(() => {
+      if (recState !== "recording") return stopLiveWatch();
+      if (!heardSpeech || liveInflight) return;
+      const snap = recorder.snapshot();
+      if (snap.seconds < 0.5) return;
+      liveInflight = true;
+      api
+        .voiceTranscribe(snap.blob, { partial: true })
+        .then((r) => {
+          if (gen === liveGen && recState === "recording" && r.text) liveText = r.text;
+        })
+        .catch(() => undefined) // rough draft only — the final pass reports errors
+        .finally(() => (liveInflight = false));
+    }, LIVE_MS);
+  }
+  function stopLiveWatch() {
+    if (liveTimer) clearInterval(liveTimer);
+    liveTimer = null;
+  }
   recorder.onLevel = (rms) => {
     micLevel = Math.min(1, rms * 6);
     if (rms > SPEECH_RMS) heardSpeech = true;
@@ -237,6 +269,8 @@
 
   async function cancelRecording(): Promise<void> {
     stopVadWatch();
+    stopLiveWatch();
+    liveText = "";
     if (recState !== "recording") return;
     recState = "idle";
     micLevel = 0;
@@ -299,6 +333,7 @@
       await recorder.start();
       recState = "recording";
       startVadWatch(); // stop talking and it stops itself — you never tap twice
+      startLiveWatch();
     } catch (err) {
       // Name the ACTUAL failure — the first field test hit a CSP refusal that a
       // generic "check mic permission" message sent the user chasing in the
@@ -317,6 +352,7 @@
   async function finishRecording(): Promise<void> {
     if (recState !== "recording") return;
     recState = "transcribing";
+    stopLiveWatch();
     try {
       const rec = await recorder.stop();
       micLevel = 0;
@@ -358,6 +394,7 @@
       voiceInfo = await api.voiceStatus().catch(() => voiceInfo);
       syncVoicePolling();
     } finally {
+      liveText = "";
       if (recState === "transcribing") recState = "idle";
     }
   }
@@ -499,6 +536,7 @@
   });
 
   onDestroy(() => {
+    stopLiveWatch();
     if (updatesTimer) clearInterval(updatesTimer);
     document.removeEventListener("visibilitychange", onVisibility);
     window.removeEventListener("scroll", onWindowScroll);
@@ -1680,10 +1718,12 @@
     <p class="hint">⏎ send · ⇧⏎ newline — replies stream in; Stop is always here while they do</p>
     {#if voiceInfo?.stt_available}
       <!-- Voice instructions, state-aware: what to do NOW, not a manual to remember. -->
-      {#if recState === "recording"}
+      {#if recState === "recording" && liveText}
+        <p class="hint listening live">{liveText}…</p>
+      {:else if recState === "recording"}
         <p class="hint listening">Listening — just talk; a pause finishes it. Say “send” to submit as you finish · Esc cancels</p>
       {:else if recState === "transcribing"}
-        <p class="hint">Writing down what you said…</p>
+        <p class="hint">{liveText ? `${liveText}…` : "Writing down what you said…"}</p>
       {:else if micUsable}
         <p class="hint">🎙 tap the mic or hold Space and talk — it stops when you pause · say “send”, “cancel”, or “start over”{handsFree ? " · hands-free is ON: dictations send themselves" : ""}</p>
       {/if}
