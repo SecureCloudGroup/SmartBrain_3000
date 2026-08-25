@@ -118,6 +118,12 @@ optional own-server upgrade). A **microphone button** sits in the message box: t
 again, and your words land in the box as text — **you review before it sends**. The
 transcription happens on your own machine; nothing is sent to any speech service.
 
+**Talking is the only step.** Tap the mic (or **hold Space** on a keyboard) and speak —
+when you pause, the recording ends by itself and your words appear. Say **“send”** at
+the end to submit in the same breath, **“cancel”** to discard, or **“start over”** to
+clear and re-listen; **Esc** cancels a recording too. The **hands-free** toggle (⚡ next
+to the mic) sends every dictation automatically — say “cancel” to stop one.
+
 The **speaker button** next to it turns on spoken replies: answers are read aloud
 **sentence by sentence as they stream in**, in your device's own voice. Every answer
 also has a quiet **Listen** action underneath to hear just that one. Speaking to the

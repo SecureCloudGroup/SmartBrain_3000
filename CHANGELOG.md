@@ -11,6 +11,15 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Added
+- **Dictation that ends when you stop talking — and listens to you about everything
+  else.** Pause for a moment and the recording finishes itself (no second tap). Say
+  "send" to submit in the same breath, "cancel" to discard, "start over" to re-listen.
+  Hold **Space** to talk on a keyboard; **Esc** cancels. A **hands-free** toggle sends
+  every dictation automatically. And Settings → Status now shows **how much disk and
+  memory SmartBrain uses** (database, voice model, everything — plus this browser's
+  cache), and the mic test's playback works in every browser.
+
 ## [0.9.24] - 2026-08-25
 
 ### Changed

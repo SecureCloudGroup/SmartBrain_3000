@@ -45,6 +45,18 @@
     : { kind: "", label: "waiting" },
   );
 
+  function human(bytes: number): string {
+    if (bytes >= 1 << 30) return `${(bytes / (1 << 30)).toFixed(2)} GB`;
+    if (bytes >= 1 << 20) return `${(bytes / (1 << 20)).toFixed(1)} MB`;
+    if (bytes >= 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+    return `${bytes} B`;
+  }
+
+  // This browser's own footprint (PWA caches etc.) — client-side, works wherever the
+  // page renders; null when the browser won't say.
+  let browserUsage = $state<number | null>(null);
+  void navigator.storage?.estimate?.().then((e) => (browserUsage = e.usage ?? null)).catch(() => undefined);
+
   function retryVoice() {
     void api.voiceStatus(false, true).then(load).catch(() => undefined);
   }
@@ -53,6 +65,38 @@
   // it back (you HEAR what the recorder heard — the speaker check and the garble
   // detector in one), transcribe it, and keep the bytes on disk for diagnosis. ----
   const testRec = new Recorder();
+  let playCtx: AudioContext | null = null;
+  let playSrc: AudioBufferSourceNode | null = null;
+  let playing = $state(false);
+  let micTestBlob = $state<Blob | null>(null); // gates the Play button's render
+
+  // Safari renders an <audio> with a WAV blob URL as "Error" — decoding through the
+  // audio engine works everywhere, so the play button drives a BufferSource instead.
+  async function togglePlayback() {
+    if (playing) {
+      playSrc?.stop();
+      return;
+    }
+    if (!micTestBlob) return;
+    try {
+      playCtx = playCtx ?? new AudioContext();
+      await playCtx.resume();
+      const buf = await playCtx.decodeAudioData(await micTestBlob.arrayBuffer());
+      const src = playCtx.createBufferSource();
+      src.buffer = buf;
+      src.connect(playCtx.destination);
+      src.onended = () => {
+        playing = false;
+        playSrc = null;
+      };
+      playSrc = src;
+      playing = true;
+      src.start();
+    } catch (err) {
+      playing = false;
+      micTestError = `Playback failed: ${err instanceof Error ? err.message : String(err)}`;
+    }
+  }
   let micTest = $state<"idle" | "recording" | "processing" | "done">("idle");
   let micTestLevel = $state(0);
   let micTestPeakSeen = $state(0);
@@ -73,6 +117,8 @@
     micTestPeakSeen = 0;
     if (micTestUrl) URL.revokeObjectURL(micTestUrl);
     micTestUrl = null;
+    micTestBlob = null;
+    playSrc?.stop();
     try {
       await testRec.start();
     } catch (err) {
@@ -92,7 +138,8 @@
       const rec = await testRec.stop();
       micTestLevel = 0;
       micTestSeconds = rec.seconds;
-      micTestUrl = URL.createObjectURL(rec.blob);
+      micTestBlob = rec.blob;
+      micTestUrl = URL.createObjectURL(rec.blob); // kept for a download affordance later
       if (rec.peak < 0.003) {
         micTestError = "The microphone recorded silence — check the input device and its level (System Settings → Sound → Input).";
         micTest = "done";
@@ -126,7 +173,7 @@
       </h2>
       <div class="rows">
         <div class="srow">
-          <span>Built-in dictation model <span class="muted">(one-time ~236 MB download)</span></span>
+          <span>Built-in dictation model <span class="muted">(one-time ~141 MB download)</span></span>
           {#if voicePhase === "downloading"}
             <div class="bar" role="progressbar" aria-valuenow={status.voice_local.pct} aria-valuemin={0} aria-valuemax={100}>
               <div class="fill" style={`width:${status.voice_local.pct}%`}></div>
@@ -148,6 +195,13 @@
           {/if}
         {/if}
 
+        <!-- How to actually use it — the same words the Chat hint teaches. -->
+        <div class="rows" style="margin-top:0.6rem">
+          <p class="muted" style="margin:0; font-size:0.85rem"><strong>How to dictate:</strong> in Chat, tap the 🎙 mic (or hold <strong>Space</strong>) and talk — it stops when you pause and your words land in the message box.</p>
+          <p class="muted" style="margin:0; font-size:0.85rem"><strong>Spoken controls:</strong> end with <em>“send”</em> to submit, say <em>“cancel”</em> to discard, <em>“start over”</em> to redo. <strong>Esc</strong> cancels a recording.</p>
+          <p class="muted" style="margin:0; font-size:0.85rem"><strong>Hands-free (⚡ beside the mic):</strong> every dictation sends itself when you pause. <strong>Spoken replies:</strong> the speaker button reads answers aloud as they arrive; <em>Listen</em> under any answer reads just that one.</p>
+        </div>
+
         <!-- The whole voice path, tested in one tap: record → hear yourself → read the
              transcription. Each leg failing points at exactly one culprit. -->
         <div class="mic-test">
@@ -166,11 +220,11 @@
             <div class="bar"><div class="fill" style={`width:${Math.round(micTestLevel * 100)}%`}></div></div>
           {/if}
           {#if micTest === "done"}
-            {#if micTestUrl}
+            {#if micTestBlob}
               <p class="muted" style="margin:0.5rem 0 0.25rem; font-size:0.85rem">
                 <strong>1. Speaker check:</strong> press play — you should hear yourself, clearly.
               </p>
-              <audio controls src={micTestUrl} style="width:100%; max-width:24rem"></audio>
+              <button class="secondary" onclick={togglePlayback}>{playing ? "Stop" : "▶ Play my recording"}</button>
             {/if}
             {#if micTestText !== null}
               <p class="muted" style="margin:0.5rem 0 0.25rem; font-size:0.85rem"><strong>2. What dictation heard</strong> ({micTestSeconds.toFixed(1)}s, peak {micTestPeakSeen.toFixed(3)}):</p>
@@ -183,6 +237,19 @@
           {/if}
           {#if micTestError}<p class="error" style="margin:0.4rem 0 0; font-size:0.9rem">{micTestError}</p>{/if}
         </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2 class="row"><span>Storage &amp; memory</span></h2>
+      <div class="rows">
+        <div class="srow"><span>Everything SmartBrain stores <span class="muted">({status.storage.data_dir})</span></span><strong>{human(status.storage.total_bytes)}</strong></div>
+        <div class="srow"><span>Your encrypted database</span><strong>{human(status.storage.db_bytes)}</strong></div>
+        <div class="srow"><span>Voice model</span><strong>{human(status.storage.models_bytes)}</strong></div>
+        <div class="srow"><span>App memory (peak)</span><strong>{human(status.memory.rss_bytes)}</strong></div>
+        {#if browserUsage !== null}
+          <div class="srow"><span>This browser's cache</span><strong>{human(browserUsage)}</strong></div>
+        {/if}
       </div>
     </div>
 
