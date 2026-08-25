@@ -177,6 +177,12 @@ def _handle_channel_auth(channel, msg: dict, store, session: dict) -> None:
             log.warning("webrtc: hello failed: %s", type(exc).__name__)
         return
     device_id = str(msg.get("device_id") or "")
+    if store is None:
+        # A LOCKED Desktop cannot verify anyone — the credentials live in the encrypted
+        # store. Say so: the phone showed "failed to pair" with no clue (field report).
+        _safe_send(channel, json.dumps({"type": "auth_error", "reason": "locked"}))
+        channel.close()
+        return
     if mtype == "auth" and devices.verify_device(store, device_id, str(msg.get("credential") or "")):
         session["authed"], session["device_id"] = True, device_id
         _safe_send(channel, json.dumps({"type": "auth_ok"}))
@@ -238,7 +244,51 @@ async def _serve_message(channel, raw_text: str, http_client, store, session: di
     if msg.get("type") == "ping":  # keepalive (authed only): echo so the phone knows the
         _safe_send(channel, json.dumps({"type": "pong", "t": msg.get("t")}))  # path is alive
         return
+    if msg.get("rq") is True:  # a part of a chunked REQUEST (big bodies, e.g. dictation WAV)
+        whole = assemble_request_part(session, msg)
+        if whole is None:
+            return  # more parts to come (or a malformed stream, dropped with a log line)
+        msg = whole
     await _handle_request(channel, msg, http_client, store, session)
+
+
+# Requests used to cross as ONE frame; a few seconds of dictation WAV exceeds DataChannel
+# message limits and the phone's send died silently. Part-frames {rq, id, seq, more,
+# body_b64} (+ method/path/headers on seq 0) are reassembled here, bounded and ordered.
+_MAX_REQUEST_BYTES = 20 * 1024 * 1024
+_MAX_REQUEST_PARTS = 512
+
+
+def assemble_request_part(session: dict, msg: dict) -> dict | None:
+    """Fold one request part into the session; return the whole request when complete."""
+    parts = session.setdefault("req_parts", {})
+    rid = str(msg.get("id") or "")
+    seq = msg.get("seq")
+    if not rid or not isinstance(seq, int):
+        return None
+    state = parts.get(rid)
+    if seq == 0:
+        state = {"head": {k: msg.get(k) for k in ("id", "method", "path", "headers", "chunks")},
+                 "pieces": [], "chars": 0, "next": 0}
+        parts[rid] = state
+    if state is None or seq != state["next"]:
+        parts.pop(rid, None)
+        log.warning("webrtc: request parts out of order — dropped")
+        return None
+    piece = str(msg.get("body_b64") or "")
+    state["chars"] += len(piece)
+    state["next"] += 1
+    if state["chars"] > _MAX_REQUEST_BYTES * 4 // 3 or state["next"] > _MAX_REQUEST_PARTS:
+        parts.pop(rid, None)
+        log.warning("webrtc: chunked request exceeds the size bound — dropped")
+        return None
+    state["pieces"].append(piece)
+    if msg.get("more") is True:
+        return None
+    parts.pop(rid, None)
+    whole = dict(state["head"])
+    whole["body_b64"] = "".join(state["pieces"])
+    return whole
 
 
 def _wire_channel(pc, channel, http_client, store) -> None:

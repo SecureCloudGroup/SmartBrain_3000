@@ -365,3 +365,28 @@ def test_e2e_big_response_still_413_without_flag(app_client: TestClient) -> None
     resp = asyncio.run(run())
     assert resp["status"] == 413
     assert b"exceeds channel limit" in base64.b64decode(resp["body_b64"])
+
+
+def test_chunked_request_reassembly_in_order() -> None:
+    """Dictation-sized bodies arrive as ordered parts; the whole request emerges once."""
+    from smartbrain_3000.webrtc_peer import assemble_request_part
+
+    session: dict = {}
+    head = {"rq": True, "id": "9", "seq": 0, "more": True, "method": "POST",
+            "path": "/api/voice/transcribe", "headers": {"content-type": "audio/wav"},
+            "chunks": True, "body_b64": "AAAA"}
+    assert assemble_request_part(session, head) is None
+    assert assemble_request_part(session, {"rq": True, "id": "9", "seq": 1, "more": True, "body_b64": "BBBB"}) is None
+    whole = assemble_request_part(session, {"rq": True, "id": "9", "seq": 2, "more": False, "body_b64": "CCCC"})
+    assert whole is not None
+    assert whole["method"] == "POST" and whole["path"] == "/api/voice/transcribe"
+    assert whole["body_b64"] == "AAAABBBBCCCC"
+    assert session["req_parts"] == {}  # nothing lingers
+
+
+def test_chunked_request_out_of_order_is_dropped() -> None:
+    from smartbrain_3000.webrtc_peer import assemble_request_part
+
+    session: dict = {}
+    assert assemble_request_part(session, {"rq": True, "id": "3", "seq": 1, "more": False, "body_b64": "x"}) is None
+    assert session["req_parts"] == {}  # no head -> dropped, not accumulated forever

@@ -11,6 +11,25 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Added
+- **Playback speed for spoken replies.** Settings → Status → Voice gains a speed control
+  (0.8× to 2×) that applies to the next sentence spoken and confirms itself out loud.
+
+### Fixed
+- **Dictation from the phone works.** Requests crossed the phone's encrypted link as one
+  message, and a few seconds of recording was too big for it — the phone showed a
+  transcribing clock forever. Large requests now travel in ordered parts, both ways.
+- **A locked Desktop tells the phone.** Pairing and connecting to a locked Desktop
+  failed with a bare "failed"; the phone now says "your Desktop is locked — unlock it
+  there," and the pairing screen says what to check.
+- **Updates no longer hoard disk.** The launcher kept every version it ever assembled
+  (~600 MB each — a field machine held 41 of them, 24 GB). It now keeps the current
+  version plus the previous one as a rollback backup and removes the rest.
+- **The Linux launcher restarts after updating.** On GNOME desktops the launcher
+  mistook itself for a systemd service (the session leaks a systemd marker into every
+  app), swapped its binary, and waited for a restart that never came. It now checks the
+  real service identity and relaunches itself like the Mac and Windows launchers.
+
 ## [0.9.25] - 2026-08-25
 
 ### Added

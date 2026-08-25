@@ -76,6 +76,34 @@ export function encodeRequest(
   return JSON.stringify({ id, method, path, headers, body_b64: bytesToB64(body), chunks: true });
 }
 
+// --- chunked requests --------------------------------------------------------------------
+// Requests used to cross as ONE frame; a few seconds of dictation WAV (~200-400 KB base64)
+// exceeds DataChannel message limits and the send died silently — the phone showed a
+// transcribing clock forever. Big bodies now go as ordered part-frames
+// {rq: true, id, seq, more, body_b64} (+ method/path/headers on seq 0); small ones keep
+// the single frame so an old Desktop still serves them.
+export const REQUEST_CHUNK_CHARS = 128 * 1024; // per-frame base64 payload, safely under limits
+
+export function encodeRequestParts(
+  id: string,
+  method: string,
+  path: string,
+  headers: Record<string, string>,
+  body: Uint8Array,
+): string[] {
+  const b64 = bytesToB64(body);
+  if (b64.length <= REQUEST_CHUNK_CHARS) return [encodeRequest(id, method, path, headers, body)];
+  const pieces: string[] = [];
+  for (let i = 0; i < b64.length; i += REQUEST_CHUNK_CHARS) pieces.push(b64.slice(i, i + REQUEST_CHUNK_CHARS));
+  return pieces.map((piece, seq) =>
+    JSON.stringify(
+      seq === 0
+        ? { rq: true, id, seq, more: pieces.length > 1, method, path, headers, chunks: true, body_b64: piece }
+        : { rq: true, id, seq, more: seq < pieces.length - 1, body_b64: piece },
+    ),
+  );
+}
+
 // --- chunked responses -------------------------------------------------------------------
 // A part-frame is {id, seq, more, body_b64} (+ status/headers on seq 0). The DataChannel
 // is reliable + ordered, so seq is an integrity cross-check, not a reordering mechanism.

@@ -10,6 +10,7 @@
   import { account } from "$lib/account.svelte";
   import { api, ApiError, type AppStatus } from "$lib/api";
   import { Recorder } from "$lib/audio/recorder";
+  import { SPEECH_RATE_KEY, speechRate } from "$lib/audio/speaker";
   import { describeError } from "$lib/errors";
 
   let status = $state<AppStatus | null>(null);
@@ -56,6 +57,25 @@
   // page renders; null when the browser won't say.
   let browserUsage = $state<number | null>(null);
   void navigator.storage?.estimate?.().then((e) => (browserUsage = e.usage ?? null)).catch(() => undefined);
+
+  // Playback speed for spoken replies (field request): stored per device, applied to
+  // the next sentence spoken — no reload, no server.
+  let ttsRate = $state(speechRate());
+  function setTtsRate(e: Event) {
+    ttsRate = parseFloat((e.target as HTMLSelectElement).value);
+    try {
+      localStorage.setItem(SPEECH_RATE_KEY, String(ttsRate));
+    } catch {
+      /* storage unavailable — applies for this visit only */
+    }
+    if (typeof speechSynthesis !== "undefined") {
+      // Audible confirmation at the new speed — the setting explains itself.
+      const u = new SpeechSynthesisUtterance("This is how fast I'll speak.");
+      u.rate = ttsRate;
+      speechSynthesis.cancel();
+      speechSynthesis.speak(u);
+    }
+  }
 
   function retryVoice() {
     void api.voiceStatus(false, true).then(load).catch(() => undefined);
@@ -194,6 +214,18 @@
             <div class="srow"><span>Server voice (spoken replies)</span><Chip kind="ok">{status.voice.tts_model}</Chip></div>
           {/if}
         {/if}
+
+        <div class="srow">
+          <span>Playback speed <span class="muted">(spoken replies)</span></span>
+          <select value={String(ttsRate)} onchange={setTtsRate} aria-label="Playback speed">
+            <option value="0.8">0.8×</option>
+            <option value="1">1× (natural)</option>
+            <option value="1.25">1.25×</option>
+            <option value="1.5">1.5×</option>
+            <option value="1.75">1.75×</option>
+            <option value="2">2×</option>
+          </select>
+        </div>
 
         <!-- How to actually use it — the same words the Chat hint teaches. -->
         <div class="rows" style="margin-top:0.6rem">

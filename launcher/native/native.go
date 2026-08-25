@@ -27,6 +27,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -254,7 +255,38 @@ func (n Native) Assemble(ctx context.Context, version string) error {
 		return fmt.Errorf("assemble: commit: %w", err)
 	}
 	cleanup = false
-	return n.writeCurrent(version)
+	prev := n.Current() // the version we are leaving: kept as the one rollback backup
+	if err := n.writeCurrent(version); err != nil {
+		return err
+	}
+	n.pruneVersions(version, prev)
+	return nil
+}
+
+// pruneVersions removes every assembled version except the ones named — the new
+// current and the one it replaced (the rollback backup). Nothing pruned them before:
+// a field machine held 41 assemblies (~588 MB each, 24 GB) after a week of releases.
+// Best-effort — a stubborn directory must never fail an otherwise successful update.
+func (n Native) pruneVersions(keep ...string) {
+	kept := map[string]bool{}
+	for _, k := range keep {
+		if k != "" {
+			kept[k] = true
+		}
+	}
+	entries, err := os.ReadDir(n.versionsDir())
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if !e.IsDir() || kept[name] || strings.HasPrefix(name, ".tmp-") {
+			continue // in-flight assemblies clean themselves up; never race one
+		}
+		if err := os.RemoveAll(n.versionDir(name)); err != nil {
+			log.Println("prune old version:", name, err)
+		}
+	}
 }
 
 // writeCurrent flips the pointer via write-then-rename so a crash can't leave it torn.
