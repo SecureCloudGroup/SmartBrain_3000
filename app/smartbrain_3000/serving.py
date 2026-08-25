@@ -30,7 +30,11 @@ _HARDENING_HEADERS = {
     "X-Frame-Options": "DENY",
     "Cross-Origin-Opener-Policy": "same-origin",
     "Cross-Origin-Resource-Policy": "same-origin",
-    "Permissions-Policy": "geolocation=(), microphone=(), camera=()",
+    # microphone=(self): voice dictation records IN this document (Chat's push-to-talk).
+    # Chrome-family browsers enforce this header over any user grant — the blanket deny
+    # (written before voice existed) made the mic dead on every Chromium surface, found
+    # only by driving the real UI. Geolocation and camera stay denied: nothing uses them.
+    "Permissions-Policy": "geolocation=(), microphone=(self), camera=()",
 }
 
 
