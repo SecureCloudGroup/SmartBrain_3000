@@ -11,6 +11,14 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Fixed
+- **The microphone was forbidden by our own security header.** The app's
+  Permissions-Policy — written before voice existed — denied microphone access
+  document-wide, so browsers that enforce it (Chrome-family, and the PWA) refused to
+  record no matter what permissions you granted. Dictation now allows the microphone
+  for the app itself; geolocation and camera stay denied. Found by driving the real
+  UI in an automated browser after a field report of dead mic clicks.
+
 ## [0.9.20] - 2026-08-24
 
 ### Added
