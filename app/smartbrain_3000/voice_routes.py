@@ -8,6 +8,8 @@ Desktop by the user's own local server, and never touches a third party.
 
 from __future__ import annotations
 
+import os
+
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 from starlette.responses import Response
@@ -44,6 +46,14 @@ async def voice_transcribe(request: Request) -> dict:
     audio = await request.body()
     if not audio:
         raise HTTPException(status_code=422, detail="empty audio body")
+    if request.headers.get("x-sb-voice-keep") or os.environ.get("SMARTBRAIN_VOICE_KEEP_LAST"):
+        # The mic tester (Settings → Status) keeps its recording so a bad capture can be
+        # diagnosed from the audio itself instead of theory. Desktop-local only (the
+        # bridge strips x-sb-* markers) — a paired phone can't leave files behind.
+        from . import moonshine as _m
+        keep = _m.model_dir().parent / "voice-last.wav"
+        keep.parent.mkdir(parents=True, exist_ok=True)
+        keep.write_bytes(audio)
     if len(audio) > _MAX_BODY:
         raise HTTPException(status_code=413, detail="recording too long — try a shorter one")
     try:
