@@ -12,7 +12,8 @@ import { downsample, encodeWav, TARGET_RATE } from "./wav";
 export class Recorder {
   private stream: MediaStream | null = null;
   private context: AudioContext | null = null;
-  private node: AudioWorkletNode | null = null;
+  private node: AudioWorkletNode | ScriptProcessorNode | null = null;
+  private silentSink: GainNode | null = null;
   private parts: Float32Array[] = [];
   private length = 0;
 
@@ -27,21 +28,43 @@ export class Recorder {
       audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 },
     });
     this.context = new AudioContext();
-    await this.context.audioWorklet.addModule("/capture-worklet.js");
-    this.node = new AudioWorkletNode(this.context, "sb-capture");
-    this.node.port.onmessage = (e: MessageEvent<Float32Array>) => {
-      this.parts.push(e.data);
-      this.length += e.data.length;
+    const source = this.context.createMediaStreamSource(this.stream);
+    const push = (chunk: Float32Array) => {
+      this.parts.push(chunk);
+      this.length += chunk.length;
     };
-    this.context.createMediaStreamSource(this.stream).connect(this.node);
-    // NOT connected to destination: capture only, no monitoring feedback loop.
+    try {
+      await this.context.audioWorklet.addModule("/capture-worklet.js");
+      const node = new AudioWorkletNode(this.context, "sb-capture");
+      node.port.onmessage = (e: MessageEvent<Float32Array>) => push(e.data);
+      source.connect(node);
+      this.node = node;
+      // NOT connected to destination: capture only, no monitoring feedback loop.
+    } catch (err) {
+      // The worklet file can 404 on a PWA origin that lags the app by a deploy, or be
+      // refused by a stricter CSP — capture must not die over the modern path. The
+      // deprecated ScriptProcessor runs everywhere; it needs a sink to fire, so it
+      // routes through a zero-gain node (never audible, no feedback).
+      console.warn("audio worklet unavailable, using ScriptProcessor fallback:", err);
+      const sp = this.context.createScriptProcessor(4096, 1, 1);
+      sp.onaudioprocess = (e) => push(new Float32Array(e.inputBuffer.getChannelData(0)));
+      const mute = this.context.createGain();
+      mute.gain.value = 0;
+      source.connect(sp);
+      sp.connect(mute);
+      mute.connect(this.context.destination);
+      this.node = sp;
+      this.silentSink = mute;
+    }
   }
 
   /** Stop capturing and return the WAV blob (empty recording -> zero-sample WAV). */
   async stop(): Promise<Blob> {
     const rate = this.context?.sampleRate ?? TARGET_RATE;
-    this.node?.port.close();
+    if (this.node instanceof AudioWorkletNode) this.node.port.close();
     this.node?.disconnect();
+    this.silentSink?.disconnect();
+    this.silentSink = null;
     this.stream?.getTracks().forEach((t) => t.stop());
     await this.context?.close().catch(() => undefined);
     this.node = null;

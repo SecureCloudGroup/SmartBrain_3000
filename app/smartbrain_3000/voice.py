@@ -14,12 +14,18 @@ the local-model semaphore, so a transcription can never overlap a local chat gen
 from __future__ import annotations
 
 import logging
+import time
 
 import httpx
 
 from . import gateway, moonshine
 
 log = logging.getLogger(__name__)
+
+# After a configured server fails to transcribe, skip it for a while instead of paying
+# its round-trips (and log spam) on EVERY mic press — the local engine serves meanwhile.
+_SERVER_SKIP_SECONDS = 300.0
+_server_skip_until = 0.0
 
 STT_MODEL_KEY = "voice:stt_model"
 TTS_MODEL_KEY = "voice:tts_model"
@@ -86,7 +92,8 @@ def status(store, probe: bool = False) -> dict:
            "tts_voice": store.get(TTS_VOICE_KEY) or "", "stt_ready": None,
            # The local engine makes dictation unconditionally available; `local` carries
            # its phase/pct so the mic can show "Preparing voice (N%)" honestly.
-           "stt_available": True, "local": moonshine.status()}
+           "stt_available": True, "local": moonshine.status(),
+           "engine": _current_engine(store)}
     if probe and cfg["url"]:
         probed = gateway.probe_mlx(cfg["url"], cfg["api_key"])  # plain /v1/models GET, best-effort
         out["reachable"] = bool(probed.get("reachable"))
@@ -113,17 +120,34 @@ def transcribe(store, audio: bytes, content_type: str = "audio/wav") -> str:
     assert audio, "audio bytes required"
     if len(audio) > _MAX_AUDIO_BYTES:
         raise VoiceError(413, "recording too long — try a shorter one")
+    global _server_skip_until
     cfg = server_config(store)
-    if not cfg["url"]:
+    if not cfg["url"] or time.monotonic() < _server_skip_until:
         return _transcribe_local(audio)  # the zero-touch default: in-process Moonshine
     try:
         return _transcribe_server(store, cfg, audio, content_type)
     except VoiceError as exc:
         # A configured server that can't transcribe right now (down, or no whisper
         # model) must not take dictation down with it — the local engine carries on,
-        # and the server outranks it again the moment it can actually serve.
-        log.warning("voice: server transcription unavailable (%s) — using local engine", exc.message)
+        # and for a while we stop paying the server's round-trips on every press.
+        _server_skip_until = time.monotonic() + _SERVER_SKIP_SECONDS
+        log.warning("voice: server transcription unavailable (%s) — local engine for the next %d min",
+                    exc.message, int(_SERVER_SKIP_SECONDS // 60))
         return _transcribe_local(audio)
+
+
+def reset_server_skip() -> None:
+    """Forget a server-failure skip window (config just changed — try it fresh)."""
+    global _server_skip_until
+    _server_skip_until = 0.0
+
+
+def _current_engine(store) -> str:
+    """Which engine the NEXT dictation will use — the status/Status-page truth."""
+    cfg = server_config(store)
+    if cfg["url"] and time.monotonic() >= _server_skip_until:
+        return "server"
+    return "local"
 
 
 def _transcribe_local(audio: bytes) -> str:

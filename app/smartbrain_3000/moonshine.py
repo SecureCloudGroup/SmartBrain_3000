@@ -19,6 +19,7 @@ from __future__ import annotations
 import hashlib
 import io
 import logging
+import os
 import threading
 import wave
 from pathlib import Path
@@ -31,23 +32,30 @@ log = logging.getLogger(__name__)
 
 _REPO_BASE = "https://huggingface.co/UsefulSensors/moonshine/resolve/main/onnx/merged/base/float"
 # Exact bytes validated on 2026-08-24 (0.86 s for an 8 s utterance, CPU-only, M4 Max).
-# A served file that hashes differently is discarded, never loaded.
+# A served file that hashes differently is discarded, never loaded. Sizes ride along so
+# download progress is byte-accurate across BOTH files (per-file windows lied at 100%
+# while the second file still streamed — the field caught it).
 MODEL_FILES = {
-    "encoder_model.onnx": "153e128e7abd64a74ee47f2c3f585c3171c4d46cbb368b032827934c4e01e779",
-    "decoder_model_merged.onnx": "58778763ca8438963190244d6b26572bdca2cedec56a4b91e828f3f2d69ef3c5",
+    "encoder_model.onnx":
+        ("153e128e7abd64a74ee47f2c3f585c3171c4d46cbb368b032827934c4e01e779", 80_100_600),
+    "decoder_model_merged.onnx":
+        ("58778763ca8438963190244d6b26572bdca2cedec56a4b91e828f3f2d69ef3c5", 166_213_710),
 }
+_TOTAL_BYTES = sum(size for _, size in MODEL_FILES.values())
 _TOKENIZER = Path(__file__).parent / "assets" / "moonshine-tokenizer.json"
 
 _MAX_SECONDS = 64  # Moonshine's per-call ceiling; push-to-talk is far shorter
 _MAX_TOKENS = 192
 
 # Download/load state, readable without the lock (single writer, torn reads harmless).
+# Phases: absent -> downloading (byte-accurate pct) -> loading (engine init, seconds)
+#         -> ready | error (retryable — prefetch() re-arms from error/absent).
 _state_lock = threading.Lock()
-_phase = "absent"  # absent | downloading | ready | error
+_phase = "absent"
 _pct = 0
 _error = ""
 _model = None  # loaded MoonshineModel, once ready
-_prefetch_started = False
+_fetch_inflight = False
 
 
 def model_dir() -> Path:
@@ -61,40 +69,46 @@ def status() -> dict:
 
 
 def prefetch(app=None) -> None:
-    """Kick the one-time model fetch in the background (called at unlock). Idempotent."""
-    global _prefetch_started
+    """Kick the background model fetch (app startup + unlock call it). Idempotent while
+    a fetch is in flight or the model is ready; re-arms after an error so a transient
+    network failure heals on the next call instead of wedging voice forever.
+
+    The phase flips to "downloading" AT ARM TIME, not when the thread gets scheduled:
+    a status read racing the thread start must see motion, or the chat page's retry
+    button reads a stale "error" and stops polling (the review's wedge scenario).
+    """
+    if os.environ.get("SMARTBRAIN_NO_VOICE_PREFETCH"):
+        return  # test suites and network-forbidden deploys opt out explicitly
+    global _fetch_inflight, _phase, _pct, _error
     with _state_lock:
-        if _prefetch_started:
+        if _fetch_inflight or _phase == "ready":
             return
-        _prefetch_started = True
-    threading.Thread(target=_ensure_ready_quiet, name="moonshine-prefetch", daemon=True).start()
-
-
-def _ensure_ready_quiet() -> None:
-    try:
-        ensure_ready()
-    except Exception as exc:  # the mic press will surface it; prefetch never raises
-        log.warning("moonshine prefetch failed: %s", exc)
-
-
-def ensure_ready() -> None:
-    """Download (hash-verified) and load the model if needed; raises RuntimeError on failure."""
-    global _phase, _pct, _error, _model
-    with _state_lock:
-        if _phase == "ready":
-            return
-        if _phase == "downloading":
-            raise RuntimeError("preparing voice — try again in a moment")
+        _fetch_inflight = True
         _phase, _pct, _error = "downloading", 0, ""
+    threading.Thread(target=_fetch_and_load, name="moonshine-prefetch", daemon=True).start()
+
+
+def _fetch_and_load() -> None:
+    """The ONLY code that downloads or loads — always on this background thread. A
+    request thread never blocks on it (the field test's five-minute hang was transcribe
+    downloading 236 MB inline while the UI showed nothing)."""
+    global _phase, _pct, _error, _model, _fetch_inflight
     try:
         directory = model_dir()
         directory.mkdir(parents=True, exist_ok=True)
-        total = len(MODEL_FILES)
-        for i, (name, digest) in enumerate(sorted(MODEL_FILES.items())):
+        done_bytes = 0
+        for name in sorted(MODEL_FILES):
+            digest, size = MODEL_FILES[name]
             dest = directory / name
-            if not (dest.exists() and _sha256(dest) == digest):
-                _download(f"{_REPO_BASE}/{name}", dest, digest,
-                          base_pct=i * 100 // total, span_pct=100 // total)
+            if dest.exists() and _sha256(dest) == digest:
+                done_bytes += size
+                _set_pct(done_bytes)
+                continue
+            _download(f"{_REPO_BASE}/{name}", dest, digest, done_bytes)
+            done_bytes += size
+            _set_pct(done_bytes)
+        with _state_lock:
+            _phase = "loading"  # engine init takes seconds; saying "100%" here is a lie
         model = _load_model(directory)
         with _state_lock:
             _model = model
@@ -103,12 +117,19 @@ def ensure_ready() -> None:
     except Exception as exc:
         with _state_lock:
             _phase, _error = "error", str(exc)[:200]
-        raise RuntimeError(f"voice model unavailable: {exc}") from exc
+        log.warning("moonshine fetch failed: %s", exc)
+    finally:
+        with _state_lock:
+            _fetch_inflight = False
 
 
-def _download(url: str, dest: Path, digest: str, *, base_pct: int, span_pct: int) -> None:
-    """Stream one pinned file to disk with progress; refuse a hash mismatch."""
+def _set_pct(done_bytes: int) -> None:
     global _pct
+    _pct = min(99, done_bytes * 100 // _TOTAL_BYTES)  # 100 is "ready", nothing else
+
+
+def _download(url: str, dest: Path, digest: str, base_bytes: int) -> None:
+    """Stream one pinned file to disk with byte-accurate progress; refuse a hash mismatch."""
     import httpx  # lazy: matches the app's import-time discipline for heavy paths
 
     log.info("moonshine: downloading %s", dest.name)
@@ -117,15 +138,13 @@ def _download(url: str, dest: Path, digest: str, *, base_pct: int, span_pct: int
     with httpx.stream("GET", url, follow_redirects=True, timeout=120.0) as resp:
         if resp.status_code != 200:
             raise RuntimeError(f"model download failed (HTTP {resp.status_code})")
-        length = int(resp.headers.get("content-length") or 0)
         seen = 0
         with open(tmp, "wb") as f:
             for chunk in resp.iter_bytes(1 << 20):
                 f.write(chunk)
                 hasher.update(chunk)
                 seen += len(chunk)
-                if length:
-                    _pct = base_pct + min(span_pct, seen * span_pct // length)
+                _set_pct(base_bytes + seen)
     if hasher.hexdigest() != digest:
         tmp.unlink(missing_ok=True)
         raise RuntimeError(f"model download failed verification ({dest.name})")
@@ -141,20 +160,21 @@ def _sha256(path: Path) -> str:
 
 
 def transcribe_wav(wav_bytes: bytes) -> str:
-    """16 kHz mono 16-bit WAV in, text out. Raises RuntimeError when not ready."""
+    """16 kHz mono 16-bit WAV in, text out. NEVER blocks on the model: not-ready raises
+    immediately with the live phase, and absent/error states re-arm the background fetch
+    so the system is always healing itself while the user sees honest progress."""
     assert wav_bytes, "audio required"
     with _state_lock:
         model = _model
         phase, pct, err = _phase, _pct, _error
     if model is None:
-        if phase == "downloading":
-            raise RuntimeError(f"preparing voice ({pct}%) — one-time download, try again shortly")
+        if phase in ("absent", "error"):
+            prefetch()  # re-arm; the UI polls status and enables the mic when ready
         if phase == "error":
-            raise RuntimeError(f"voice model unavailable: {err}")
-        # absent: fetch synchronously (the caller reached us before any prefetch)
-        ensure_ready()
-        with _state_lock:
-            model = _model
+            raise RuntimeError(f"voice model unavailable ({err}) — retrying the download now")
+        if phase == "loading":
+            raise RuntimeError("voice is almost ready — loading the engine, a few more seconds")
+        raise RuntimeError(f"preparing voice ({pct}%) — one-time download, the mic enables itself when ready")
     audio = _decode_wav(wav_bytes)
     tokens = model.generate(audio)
     import tokenizers  # lazy for the same reason as httpx above

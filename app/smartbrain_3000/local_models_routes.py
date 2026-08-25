@@ -105,6 +105,7 @@ def put_mlx(request: Request, body: MLXConfig) -> dict[str, bool]:
     store = _store(request)
     store.put(gateway.MLX_URL_KEY, body.url)
     store.put(gateway.MLX_KEY_KEY, body.api_key)
+    voice.reset_server_skip()  # a reconfigured MLX server deserves an immediate voice try
     synced = True
     try:
         gateway.register_mlx(gateway.localize_local_url(body.url), body.api_key)  # localize at USE (see put_ollama)
@@ -173,6 +174,7 @@ def put_voice(request: Request, body: VoiceConfig) -> dict:
             store.put(key, value)
         else:
             store.delete(key)
+    voice.reset_server_skip()  # a reconfigured server deserves an immediate try
     return {"ok": True, "status": voice.status(store, probe=True)}
 
 

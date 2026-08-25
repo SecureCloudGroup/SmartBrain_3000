@@ -263,8 +263,24 @@ export interface VoiceStatus {
   stt_ready: boolean | null;
   // Dictation is always available: the in-process local engine backs everything.
   stt_available: boolean;
-  // The local engine's readiness (one-time model fetch): phase + download percent.
-  local: { phase: "absent" | "downloading" | "ready" | "error"; pct: number; error: string };
+  // Which engine the NEXT dictation will use (a failing server is skipped for a while).
+  engine: "server" | "local";
+  // The local engine's readiness: download percent, then a brief engine-load phase.
+  local: { phase: "absent" | "downloading" | "loading" | "ready" | "error"; pct: number; error: string };
+}
+
+// The aggregate Settings → Status payload (see status_routes.py). Sections beyond
+// voice_local appear only when unlocked.
+export interface AppStatus {
+  version: string;
+  unlocked: boolean;
+  voice_local: { phase: "absent" | "downloading" | "loading" | "ready" | "error"; pct: number; error: string };
+  voice?: { engine: "server" | "local"; server_configured: boolean; stt_model: string; tts_model: string };
+  local_models?: { ollama_configured: boolean; mlx_configured: boolean; mlxe_configured: boolean };
+  knowledge?: { documents: number; embedded_chunks: number };
+  schedules?: { enabled: number; total: number };
+  feeds?: { count: number; errors?: number };
+  devices?: { paired: number };
 }
 
 export interface RememberedSite {
@@ -859,15 +875,32 @@ export const api = {
   getAudit: (limit = 100) => req<{ entries: AuditEntry[] }>(`/api/audit?limit=${limit}`),
   // voice — dictation + spoken replies through the user's local audio server. The
   // phone's audio rides the WebRTC bridge like any upload; nothing touches a third party.
-  voiceStatus: (probe = false) =>
-    req<VoiceStatus>(`/api/voice/status${probe ? "?probe=1" : ""}`),
+  // `prepare` re-arms the local model download after an error (idempotent).
+  voiceStatus: (probe = false, prepare = false) => {
+    const qs = [probe ? "probe=1" : "", prepare ? "prepare=1" : ""].filter(Boolean).join("&");
+    return req<VoiceStatus>(`/api/voice/status${qs ? `?${qs}` : ""}`);
+  },
+  appStatus: () => req<AppStatus>("/api/status/overview"),
   voiceTranscribe: async (audio: Blob): Promise<{ text: string }> => {
     await remoteReady;
-    const res = await fetch("/api/voice/transcribe", {
-      method: "POST",
-      headers: { "content-type": "audio/wav" },
-      body: audio,
-    });
+    // Hard timeout: a hung transcription request once wedged the mic for five minutes
+    // of dead clicks. 45 s is generous for any healthy engine; past it, fail loudly.
+    const abort = new AbortController();
+    const timer = setTimeout(() => abort.abort(), 45000);
+    let res: Response;
+    try {
+      res = await fetch("/api/voice/transcribe", {
+        method: "POST",
+        headers: { "content-type": "audio/wav" },
+        body: audio,
+        signal: abort.signal,
+      });
+    } catch (err) {
+      if (abort.signal.aborted) throw new ApiError(504, "transcription timed out — try again");
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
     const data = await res.json().catch(() => null);
     if (!res.ok) {
       if (res.status === 423) handleLocked();

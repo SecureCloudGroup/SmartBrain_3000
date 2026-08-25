@@ -12,7 +12,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 from starlette.responses import Response
 
-from . import voice
+from . import moonshine, voice
 
 router = APIRouter()
 
@@ -31,7 +31,9 @@ class SpeakIn(BaseModel):
 
 
 @router.get("/api/voice/status")
-def voice_status(request: Request, probe: int = 0) -> dict:
+def voice_status(request: Request, probe: int = 0, prepare: int = 0) -> dict:
+    if prepare:
+        moonshine.prefetch(request.app)  # idempotent; re-arms after an error
     return voice.status(_store(request), probe=bool(probe))
 
 

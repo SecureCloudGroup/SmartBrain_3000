@@ -11,6 +11,24 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Added
+- **Settings → Status: a live view of everything the app is doing.** App version, lock
+  state, the voice model's download (with a real progress bar and a retry button),
+  which dictation engine is active, model-server configuration, knowledge counts,
+  schedules, feeds, and paired devices — one calm page, updating while you watch.
+
+### Fixed
+- **Voice setup is now fully visible and never hangs.** The first field test hit every
+  version of invisible: a mic press could stall for minutes downloading the model
+  inline, "100%" showed while the engine was still loading, and a stuck request left
+  the mic dead to further clicks. Now the download starts at app launch, the mic
+  button itself shows the live percent (then "loading engine", then ready — it enables
+  itself), a press can never block on a download, failed downloads offer one-tap
+  retry, transcription requests time out instead of wedging the mic, and a configured
+  audio server that fails is skipped for a while instead of slowing every press.
+  Recording also survives a missing or blocked audio-worklet by falling back to a
+  universal capture path — the phone failure's root cause.
+
 ## [0.9.19] - 2026-08-24
 
 ### Added
