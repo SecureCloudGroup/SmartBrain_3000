@@ -11,6 +11,18 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Added
+- **Conversation mode — 100% voice.** The 🗣 button beside the mic: you talk, it sends
+  itself, the reply is spoken, and the mic reopens for your follow-up. Say “stop
+  listening” or “goodbye” to end. The first mic open still needs one tap (a browser
+  rule); after that, no buttons.
+- **Your own wake word.** Settings → Status → Voice: set a phrase (“Hey Merl”,
+  “Hey Catherine”, “Hey SmartBrain”) and **test it** — three tries show exactly what the
+  engine heard, and if it spells your name its own way you can accept those spellings so
+  the phrase works as you say it. With a wake word set, conversation mode waits for the
+  phrase instead of listening all the time; “Hey Merl, what's on my calendar” carries the
+  question through in one breath.
+
 ## [0.9.28] - 2026-08-26
 
 ### Fixed

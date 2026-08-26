@@ -18,6 +18,7 @@
   import { Recorder } from "$lib/audio/recorder";
   import { Speaker, speechAvailable } from "$lib/audio/speaker";
   import { parseVoiceCommand } from "$lib/audio/commands";
+  import { CONVERSATION_KEY, isStopListening, loadWakeWord, matchWake } from "$lib/audio/wakeword";
   import Chip from "$lib/components/Chip.svelte";
   import EmptyState from "$lib/components/EmptyState.svelte";
   import Icon from "$lib/components/Icon.svelte";
@@ -184,7 +185,7 @@
   // only shows when one is configured. TTS prefers the browser's system voices and
   // falls back to the server voice — the Speaker owns that chain.
   const recorder = new Recorder();
-  let recState = $state<"idle" | "recording" | "transcribing">("idle");
+  let recState = $state<"idle" | "standby" | "recording" | "transcribing">("idle");
   let micLevel = $state(0); // live input level while recording — the pulse that says "I hear you"
   // ---- Silence endpointing (VAD): stop talking and the recording ends itself. ----
   // Wall-clock on the level stream: once speech has been HEARD, ~1.2s under the
@@ -198,6 +199,62 @@
   let recStartedAt = 0;
   let vadTimer: ReturnType<typeof setInterval> | null = null;
   let handsFree = $state(false); // auto-send the transcript (spoken "cancel" still stops it)
+  // ---- Conversation mode: 100% voice. ----
+  // ON: every dictation sends itself, the reply is spoken, and when it finishes the mic
+  // reopens for the follow-up. With a wake word set (Settings → Status → Voice) the mic
+  // sits in STANDBY — VAD only, a rolling 2 s window, nothing transcribed — until speech
+  // is heard; the utterance is then checked for the phrase at its start. Say "stop
+  // listening" or "goodbye" to leave. The first mic open still needs one tap (browsers
+  // require a gesture) — after that, no buttons.
+  let conversation = $state(false);
+  let wake = $state<{ phrase: string; aliases: string[] }>({ phrase: "", aliases: [] });
+  let fromStandby = false; // this recording began by waking from standby → check the phrase
+  let lastWakeMiss = $state(""); // what standby heard that was NOT the phrase (a hint, not an error)
+  function toggleConversation() {
+    conversation = !conversation;
+    try {
+      localStorage.setItem(CONVERSATION_KEY, conversation ? "1" : "0");
+    } catch {
+      /* session-only */
+    }
+    if (conversation) {
+      wake = loadWakeWord();
+      if (recState === "idle") void (wake.phrase ? startStandby() : startRecording());
+    } else if (recState === "standby") {
+      void cancelRecording();
+    }
+  }
+  async function startStandby(): Promise<void> {
+    if (!conversation || !wake.phrase || recState !== "idle" || !micUsable) return;
+    error = "";
+    try {
+      recorder.rolling = 2;
+      await recorder.start();
+      recState = "standby";
+      heardSpeech = false;
+    } catch (err) {
+      recorder.rolling = null;
+      console.error("standby mic failed:", err);
+      error = "Couldn't open the microphone for the wake word — tap the mic to allow it.";
+      conversation = false;
+    }
+  }
+  // Speech heard in standby: keep everything from here on and run the normal endpointing.
+  function wakeFromStandby(): void {
+    if (recState !== "standby") return;
+    recorder.rolling = null;
+    recState = "recording";
+    fromStandby = true;
+    startVadWatch();
+    heardSpeech = true;
+    lastLoudAt = performance.now();
+    startLiveWatch();
+  }
+  // The reply finished speaking: reopen the mic for the follow-up (conversation mode).
+  function afterReplySpoken(): void {
+    if (!conversation || recState !== "idle" || busy) return;
+    void (wake.phrase ? startStandby() : startRecording());
+  }
   // ---- Live transcription: words show up WHILE you talk. ----
   // Every LIVE_MS the audio-so-far is re-read by the engine (greedy, sub-second) and
   // shown as a rough line under the composer; nothing enters the message box until
@@ -232,6 +289,12 @@
   }
   recorder.onLevel = (rms) => {
     micLevel = Math.min(1, rms * 6);
+    if (recState === "standby") {
+      // While the reply is still being spoken, only a clearly louder voice counts — the
+      // speaker's own output leaks into the mic on devices without echo cancellation.
+      if (rms > (speaker.speaking ? SPEECH_RMS * 3 : SPEECH_RMS)) wakeFromStandby();
+      return;
+    }
     if (rms > SPEECH_RMS) heardSpeech = true;
     if (rms > SILENCE_RMS) lastLoudAt = performance.now();
   };
@@ -248,8 +311,11 @@
         void finishRecording(); // you stopped talking — that IS the stop signal
       } else if (!heardSpeech && now - recStartedAt > WAIT_FOR_SPEECH_MS) {
         stopVadWatch();
-        void cancelRecording();
-        error = "Didn't hear anything — check the level ring moves when you speak.";
+        void cancelRecording().then(() => {
+          if (conversation && wake.phrase) return startStandby(); // the follow-up window closed — back to the wake word
+          if (conversation) return; // no wake word: the conversation pauses until the next tap
+          error = "Didn't hear anything — check the level ring moves when you speak.";
+        });
       }
     }, 150);
   }
@@ -271,8 +337,10 @@
     stopVadWatch();
     stopLiveWatch();
     liveText = "";
-    if (recState !== "recording") return;
+    fromStandby = false;
+    if (recState !== "recording" && recState !== "standby") return;
     recState = "idle";
+    recorder.rolling = null;
     micLevel = 0;
     await recorder.stop().catch(() => undefined); // discard — Esc/cancel means no transcript
   }
@@ -315,12 +383,16 @@
   let listeningId = $state<string | null>(null); // which message the Listen button is reading
   const speaker = new Speaker(
     (text) => (voiceInfo?.tts_model ? api.voiceSpeak(text) : Promise.resolve(null)),
-    () => (listeningId = null),
+    () => {
+      listeningId = null;
+      afterReplySpoken();
+    },
   );
 
   async function toggleMic(): Promise<void> {
     if (recState === "transcribing" || busy) return;
     if (recState === "idle") return startRecording();
+    if (recState === "standby") return wakeFromStandby(); // a tap skips the wake word
     stopVadWatch();
     await finishRecording();
   }
@@ -330,6 +402,7 @@
     listeningId = null;
     error = "";
     try {
+      recorder.rolling = null; // a full take: keep every sample from the first syllable
       await recorder.start();
       recState = "recording";
       startVadWatch(); // stop talking and it stops itself — you never tap twice
@@ -353,8 +426,11 @@
     if (recState !== "recording") return;
     recState = "transcribing";
     stopLiveWatch();
+    const woke = fromStandby;
+    fromStandby = false;
     try {
       const rec = await recorder.stop();
+      recorder.rolling = null;
       micLevel = 0;
       // Silence is information, never a shrug: a too-short or dead-level recording
       // gets named BEFORE any transcription — the Safari suspended-context failure
@@ -366,10 +442,37 @@
         return;
       }
       const r = await api.voiceTranscribe(rec.blob);
-      if (!r.text) {
+      let heard = r.text;
+      if (woke) {
+        // Woke from standby: only an utterance that STARTS with the wake phrase counts.
+        // Anything else (the TV, a conversation across the room) is dropped silently.
+        const m = matchWake(heard, wake.phrase, wake.aliases);
+        if (!m.hit) {
+          lastWakeMiss = m.heard;
+          return;
+        }
+        lastWakeMiss = "";
+        heard = m.rest;
+        if (!heard.trim()) {
+          // Just the name: open the mic for the request itself (the "Hey Siri" pause).
+          recState = "idle";
+          return startRecording();
+        }
+      }
+      if (conversation && isStopListening(heard)) {
+        conversation = false;
+        try {
+          localStorage.setItem(CONVERSATION_KEY, "0");
+        } catch {
+          /* session-only */
+        }
+        return;
+      }
+      if (!heard) {
         error = "Didn't catch any words — try again, a little closer to the microphone.";
         return;
       }
+      r.text = heard;
       // Spoken controls: a trailing "send" submits, a lone "cancel" discards,
       // "start over" clears and re-listens (Dragon/Apple-dictation idiom).
       const cmd = parseVoiceCommand(r.text);
@@ -380,7 +483,7 @@
         return startRecording();
       }
       if (cmd.text) input = input ? `${input.trimEnd()} ${cmd.text}` : cmd.text;
-      if ((cmd.action === "send" || handsFree) && input.trim()) {
+      if ((cmd.action === "send" || handsFree || conversation) && input.trim()) {
         recState = "idle"; // send() refuses while a recording state lingers on busy paths
         await send();
         return;
@@ -396,6 +499,7 @@
     } finally {
       liveText = "";
       if (recState === "transcribing") recState = "idle";
+      if (conversation && recState === "idle" && !busy && wake.phrase) void startStandby();
     }
   }
 
@@ -415,6 +519,7 @@
     }
   }
   function onVoiceKeyup(e: KeyboardEvent): void {
+    if (e.code === "Space" && recState === "standby") return; // standby ignores the PTT key
     if (e.code === "Space" && recState === "recording") {
       e.preventDefault();
       stopVadWatch();
@@ -512,9 +617,11 @@
     window.addEventListener("keyup", onVoiceKeyup);
     try {
       handsFree = localStorage.getItem("sb:handsfree") === "1";
+      conversation = localStorage.getItem(CONVERSATION_KEY) === "1";
     } catch {
       handsFree = false;
     }
+    wake = loadWakeWord();
     // Voice availability (no live probe — configured-ness is enough to show the mic).
     void api
       .voiceStatus()
@@ -537,6 +644,7 @@
 
   onDestroy(() => {
     stopLiveWatch();
+    if (recState === "standby") void cancelRecording();
     if (updatesTimer) clearInterval(updatesTimer);
     document.removeEventListener("visibilitychange", onVisibility);
     window.removeEventListener("scroll", onWindowScroll);
@@ -927,6 +1035,10 @@
       if (text2) log.push({ id: nextEntryId("err"), role: "assistant", content: text2, err: true });
     } finally {
       busy = false;
+      // Conversation mode: if the reply is not being spoken (auto-speak off, or it
+      // finished before the turn closed), reopen the mic now; otherwise the Speaker's
+      // idle callback does it when the last sentence ends.
+      if (!speaker.speaking) afterReplySpoken();
     }
   }
 
@@ -1637,6 +1749,7 @@
           <button
             class="voice mic"
             class:recording={recState === "recording"}
+            class:standby={recState === "standby"}
             style={recState === "recording" ? `--mic-level:${micLevel.toFixed(2)}` : ""}
             disabled={recState === "transcribing" || busy}
             title={recState === "recording" ? "Stop and transcribe" : "Dictate (push to talk)"}
@@ -1694,6 +1807,13 @@
         >
           <Icon name="zap" size={16} />
         </button>
+        <button
+          class="voice autospeak conversation"
+          class:active={conversation}
+          title={conversation ? "Conversation mode is ON: talk, it answers aloud, then listens again (say “stop listening” to end)" : "Conversation mode: 100% voice — no buttons between turns"}
+          aria-label={conversation ? "Turn conversation mode off" : "Turn conversation mode on"}
+          onclick={toggleConversation}
+        >🗣</button>
       {/if}
       <textarea
         bind:value={input}
@@ -1722,14 +1842,16 @@
     <p class="hint">⏎ send · ⇧⏎ newline — replies stream in; Stop is always here while they do</p>
     {#if voiceInfo?.stt_available}
       <!-- Voice instructions, state-aware: what to do NOW, not a manual to remember. -->
-      {#if recState === "recording" && liveText}
+      {#if recState === "standby"}
+        <p class="hint">Waiting for “{wake.phrase}”… say it, then your request{lastWakeMiss ? ` · heard “${lastWakeMiss}” — not the wake word` : ""} · say “stop listening” to end</p>
+      {:else if recState === "recording" && liveText}
         <p class="hint listening live">{liveText}…</p>
       {:else if recState === "recording"}
         <p class="hint listening">Listening — just talk; a pause finishes it. Say “send” to submit as you finish · Esc cancels</p>
       {:else if recState === "transcribing"}
         <p class="hint">{liveText ? `${liveText}…` : "Writing down what you said…"}</p>
       {:else if micUsable}
-        <p class="hint">🎙 tap the mic or hold Space and talk — it stops when you pause · say “send”, “cancel”, or “start over”{handsFree ? " · hands-free is ON: dictations send themselves" : ""}</p>
+        <p class="hint">🎙 tap the mic or hold Space and talk — it stops when you pause · say “send”, “cancel”, or “start over”{conversation ? " · conversation mode is ON: it answers aloud and listens again" : handsFree ? " · hands-free is ON: dictations send themselves" : ""}</p>
       {/if}
     {/if}
   </div>
@@ -1833,6 +1955,14 @@
   .voice:hover:not(:disabled) {
     color: var(--text);
     background: var(--accent-tint);
+  }
+  .voice.mic.standby {
+    color: var(--danger, #d33);
+    opacity: 0.75;
+  }
+  .voice.conversation {
+    font-size: 15px;
+    line-height: 1;
   }
   .voice.mic.recording {
     background: var(--danger);
