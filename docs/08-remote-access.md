@@ -42,6 +42,11 @@ That's it — the phone connects, from Wi-Fi or cellular. The code lasts **5 min
 page counts it down; if it expires, tap **Pair a new phone** for a fresh one. One pairing
 can be in progress at a time.
 
+If your Desktop is **locked** while the phone pairs or connects, the Desktop says so to the
+phone: *"your Desktop is locked — unlock it there, then this phone reconnects."* The phone
+keeps retrying and walks in on its own once you unlock; the pairing screen's timeout names
+the locked case too, so you know what to do.
+
 > Why install first? On iPhone, an app on the Home Screen has its own private storage, separate
 > from Safari — so pairing happens *in the installed app*. The QR's only job is to open the site
 > so you can install it; it carries no secret.
@@ -60,6 +65,11 @@ trusting a publisher's new key after it rotates, connecting Gmail, and downloadi
 or export all stay on the Desktop. On the phone those controls are either not shown or
 replaced with a line pointing you at the Desktop, so nothing fails halfway.
 
+Voice works on the phone too — the mic, spoken replies, and the pills above the message box.
+The settings behind those pills (the wake word, playback speed, and the **Short / Medium /
+Long** reply default) are set on the Desktop under **Settings → Status → Voice**, since
+Settings is Desktop-only. See [Voice](03-features.md#voice).
+
 A small **"Remote"** chip shows the connection state: **direct** (phone-to-Desktop),
 **relayed** (through the encrypted relay), **Desktop locked** if your Desktop is up and
 the encrypted bridge is fine but its vault is locked — tap the chip to unlock from here
@@ -74,9 +84,11 @@ network can't quietly drop it, notices a dead path within about a minute and rec
 its own, and tolerates you switching apps for a few minutes. If the retries do give up, the
 next tap in the app starts it again.
 
-Your Desktop must be **running and unlocked** for any of this to work — and since the
-phone is a window onto the Desktop, they share one vault and one lock: unlock (or lock)
-on either, and both follow. The phone is a window onto it, not a copy of it.
+Your Desktop must be **running** for any of this to work, and **unlocked** to do anything
+with — a locked Desktop tells your phone so, and the phone reconnects by itself after the
+unlock. Since the phone is a window onto the Desktop, they share one vault and one lock:
+unlock (or lock) on either, and both follow. The phone is a window onto it, not a copy of
+it.
 
 ## Manage devices
 

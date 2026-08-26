@@ -54,14 +54,17 @@ record time taken and every point of friction (see [Recording findings](#recordi
 *The single most important stage: this is your time-to-first-chat, and what people judge you on.*
 
 1. Open **`smartbrain.securecloudgroup.com`** in a browser. Read it cold: do you understand *what this
-   is* and *what you need* (Docker) before clicking anything?
+   is* and that on an Apple-Silicon Mac, 64-bit Windows or x86_64 Linux you need *nothing else*
+   before clicking anything?
 2. Follow the install command shown for your OS — and **nothing else** (no docs, no memory).
 3. Launch it (open the app / go to `http://localhost:33000`).
 
 **Watch for:** a security warning (Gatekeeper/SmartScreen — there should be **none** via brew/scoop,
-nor via winget once it is live); whether Docker is required and, if it isn't installed, whether you're
-*told* or just left with an error; how many minutes until the app opens.
-**Deliberately run the no-Docker case on at least one VM** — that is the real cold start.
+nor via winget once it is live); whether the native (Docker-free) path is what actually runs on the
+three native platforms, with no mention of Docker at all; how many minutes until the app opens.
+Docker is only required on **Intel Macs and arm Linux** — on those, check whether you're *told* it is
+missing or just left with an error. **Run the native cold start on at least one VM with no Docker
+installed** — that is what a real new user has.
 
 ### Stage 1 · First-run setup
 
@@ -80,6 +83,23 @@ nor via winget once it is live); whether Docker is required and, if it isn't ins
 3. Ask a question in chat that needs those documents. Does the answer **cite its sources**, and are the
    citations correct?
 
+### Stage 2½ · Voice
+
+1. Open Chat right after first start. The mic button shows a download percentage while the voice model
+   fetches itself (~141 MB); wait until it reads ready. Nothing to install, nothing to configure.
+2. Tap the mic and say a sentence, then stop talking. Do the words appear under the box while you
+   speak, and does the text land in the message box once you pause?
+3. Dictate again and end with "…send". Does the message submit on its own?
+4. Turn on the **Speak replies** pill and send a question. Is the answer read aloud as it streams?
+5. While it is speaking, is Send now **Stop**, and does pressing it (or talking over it) cut the voice?
+6. Go to **Settings → Status → Voice**: set a wake word (e.g. "Hey SmartBrain") and run the
+   recognition test. Then switch on **Conversation**, say the wake word and a question, and wait — does
+   it answer aloud and listen again? Say "stop listening" to end.
+
+**Watch for:** the mic asking for permission twice, a mic that never leaves the download percentage,
+dictation that lands empty on clear speech (the Mic & speaker check in Status is the instrument),
+speech that keeps going after Stop.
+
 ### Stage 3 · Vaults (the differentiator)
 
 1. On environment **A**: create a vault, add documents, export it, note the `SBVK1-…` key.
@@ -89,9 +109,12 @@ nor via winget once it is live); whether Docker is required and, if it isn't ins
 ### Stage 4 · Mobile
 
 1. Pair a phone (QR). Open Knowledge on the phone, search, open a result.
+2. On the phone, tap the mic and dictate a message. Does the text land, and does the model list still
+   work afterwards (send a second, typed message)? Then lock the Desktop and try dictating again — the
+   phone should say the Desktop is locked, not fail silently.
 
 **Watch for:** does pairing "just work" or is there fiddling? Does search actually return the desktop's
-data over the connection?
+data over the connection? Does phone dictation ask for the mic permission once and then work?
 
 ### Stage 5 · Safety & lifecycle (the trust tests)
 
@@ -108,8 +131,9 @@ data over the connection?
 | **0 · Install** | App is running in the browser **< 5 min** from opening the landing page, on a clean machine, with **zero security warnings**, and the tester never had to search the web or guess a command. |
 | **1 · First model** | Tester reaches a **working chat answer** without help, and can state why they saved the recovery key. |
 | **2 · Knowledge** | Mixed files ingest with **no duplicates**; tester finds a specific fact via search and gets an answer with a **correct, clickable citation** (target ≥ 90% of knowledge answers cited). |
+| **2½ · Voice** | Mic goes from percentage to ready with no action from the tester; a spoken sentence lands as text; "…send" submits; Speak replies reads aloud and **Stop** silences it; the wake-word test passes and Conversation mode completes one spoken round-trip. |
 | **3 · Vaults** | The "friend" imports a shared vault and searches it **unaided, in < 2 min**. |
-| **4 · Mobile** | Phone returns a correct search result from the desktop's knowledge. |
+| **4 · Mobile** | Phone returns a correct search result from the desktop's knowledge; phone dictation lands text, the model list survives it, and a locked Desktop is reported as such. |
 | **5 · Recovery** | Forgotten-passphrase recovery works; data survives a backup → restore. |
 
 **Overall gate before inviting real people: zero *Blockers* in Stages 0–2 on every OS you support.**

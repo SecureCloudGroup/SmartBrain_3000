@@ -4,17 +4,21 @@ A tiny menu-bar / system-tray app that makes SmartBrain one click to reach. It h
 the real app is the SvelteKit interface in your browser — so all it does is start the stack, wait
 until it is healthy, and open `http://localhost:33000`.
 
-The tray menu is just **Open**, a status line, **Stop**, **Restart**, **Open logs** (the folder the
-troubleshooting docs point at), and **Quit launcher** (which leaves SmartBrain running).
+The tray menu is just **Open**, the version, a status line, **Stop**, **Restart**, **Open logs** (the
+folder the troubleshooting docs point at), **Get Docker…** (only where Docker is the stack),
+**Check for updates** with **Install update now** / **Install on next start** once one is ready, and
+**Quit launcher** (which leaves SmartBrain running).
 
 ## Two stacks, one launcher
 
-**Native (Docker-free) is the default** wherever it can be assembled — macOS on Apple Silicon and
-Windows today. There the launcher downloads a pinned Python runtime, a wheelhouse and the gateway
-binary, verifies each against a checksum pinned in the source, and assembles a versioned install it
-can flip atomically (and roll back). Nothing else has to be installed first.
+**Native (Docker-free) is the default** wherever it can be assembled — macOS on Apple Silicon,
+Windows x64 and Linux x86_64 (tray app, or headless under systemd via `install-linux.sh`). There the
+launcher downloads a pinned Python runtime, a wheelhouse and the gateway binary, verifies each against
+a checksum pinned in the source, and assembles a versioned install it can flip atomically (and roll
+back). Nothing else has to be installed first. Updates keep the current and previous version and prune
+older ones; on a Linux desktop the launcher relaunches itself after one.
 
-**Docker is the fallback** for platforms with no pinned runtime — Linux and Intel Macs. There the
+**Docker is the fallback** for platforms with no pinned runtime — Intel Macs and arm Linux. There the
 launcher writes **one** file, the release `docker-compose.release.yml`, into a per-user folder and
 shells out to `docker compose` exactly as you would by hand.
 
@@ -26,6 +30,8 @@ Per-user state lives in:
 
 - macOS: `~/Library/Application Support/SmartBrain/`
 - Windows: `%APPDATA%\SmartBrain\`
+- Linux (XDG, so two folders): the launcher and your data in `~/.local/share/smartbrain/` (data under
+  `data/`); runtime, config and logs in `~/.config/SmartBrain/`
 
 On the native path your knowledge is a file under that folder; on the Docker path it lives in named
 volumes (`smartbrain_data`, `bifrost_data`) — not bind mounts, deliberately: on Linux a

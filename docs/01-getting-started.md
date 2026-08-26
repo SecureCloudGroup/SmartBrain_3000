@@ -177,9 +177,14 @@ A quick path from zero to seeing what SmartBrain does:
 3. **Add something to Knowledge.** Open **Knowledge**, add a note or drop in a PDF — it's
    indexed automatically within seconds. Now ask Chat about it.
 4. **Watch the approval flow.** Ask the assistant to *"add a task to call the dentist
-   tomorrow."* Because creating a task changes data, it **parks for your approval** in
-   **Activity** instead of acting on its own. Open **Activity** and approve it.
-5. **That's the core loop:** the assistant can read freely, but anything that changes
+   tomorrow."* Because creating a task changes data, it **parks for your approval** instead
+   of acting on its own: a card appears right in the conversation with **Approve**,
+   **Always allow**, and **Deny**. Tap **Approve** and the turn picks up where it left off.
+   **Activity** keeps a record of every such request.
+5. **Talk to it.** Tap the **mic** button, say something, and stop — it notices the pause
+   and stops recording on its own. Say *"send"* to send it. See
+   [Voice](03-features.md#voice).
+6. **That's the core loop:** the assistant can read freely, but anything that changes
    data or reaches out waits for your **OK** — and every attempt is audited.
 
 ## Locking and unlocking
@@ -199,7 +204,9 @@ everywhere, for the same reason: the key lives (or doesn't) in exactly one place
 
 **SmartBrain updates itself — no commands.** The launcher checks for a newer version in the
 background and downloads it quietly, without disturbing a session in progress. The download
-is separate from the install, so nothing changes under you until you say so.
+is separate from the install, so nothing changes under you until you say so. The launcher
+keeps only the version you're running plus the previous one, as a rollback backup — older
+downloaded versions are removed automatically, so updates don't pile up on disk.
 
 When an update is ready you're told in two places:
 
@@ -211,6 +218,8 @@ When an update is ready you're told in two places:
 
   ![The in-app update strip saying a new version is ready to install, with an Install now button](assets/07-update-banner.png)
 - **In the menu-bar / tray menu**, as **Install update now** and **Install on next start**.
+  **Check for updates** in the same menu runs the background check on demand, and says so
+  when there is no newer version.
 
 Ignore it entirely and the update installs the next time you start SmartBrain. Either way
 you jump straight to the newest version, even if you're several behind. Because the key is
@@ -222,7 +231,9 @@ you open it.
 
 **Which version is running?** The app shows it under the logo, top-left, and the menu-bar
 menu names it too. During an update, when the launcher has been replaced but the app it
-supervises hasn't yet, the menu names both numbers rather than one misleading one.
+supervises hasn't yet, the menu names both numbers rather than one misleading one. After
+the launcher updates itself it compares the version the app is actually running with what
+it has already downloaded, and offers any newer one from the menu.
 
 If SmartBrain updates while you have a page open, that page notices and offers a **Reload**:
 *"SmartBrain updated to vX.Y.Z while this page was open — reload to use the new version."*
@@ -232,9 +243,11 @@ The launcher updates itself on the same schedule, so `brew upgrade --cask smartb
 `scoop update smartbrain` are not part of normal use — they're there if you ever need to
 force it.
 
-**Linux (native)** updates itself the same way. On a headless install the swap happens
-under systemd: the launcher installs the new version, exits, and the unit's `Restart=`
-brings the new one up.
+**Linux (native)** updates itself the same way. On a desktop (GNOME and the like) the
+launcher relaunches itself after installing the update — an earlier version mistook the
+desktop session for systemd and waited forever for a restart that never came. On a headless
+install the swap happens under systemd: the launcher installs the new version, exits, and
+the unit's `Restart=` brings the new one up.
 
 **Linux (Docker):** `docker compose -f docker-compose.release.yml pull`, then
 `docker compose -f docker-compose.release.yml up -d`. The stack tracks the newest release;
@@ -270,12 +283,21 @@ The rest of this section is what those problems look like from the menu.
 
 Most first-run problems are one of these:
 
+- **Start with Settings → Status.** Before restarting anything, open **Settings → Status**
+  in the app. It shows the app version, whether the vault is locked, the voice model's
+  download progress with a one-tap **Retry download**, which dictation engine is active,
+  how the model server is configured, your knowledge counts, schedules, feeds (with a chip
+  counting any that are failing), paired devices, and **Storage & memory** — disk used by
+  the database and the models (the voice model is about 141 MB), and memory in use. Most
+  "something seems off" questions are answered there.
 - **The page won't load at http://localhost:33000.** Give a first start a few more minutes —
   it's downloading a few hundred megabytes, and the menu's status line says what it's doing.
   Once that line reads **Running ●**, click **Open SmartBrain** in the menu.
 - **"Download failed — nothing was changed; check the log and Restart."** The download of the
   runtime didn't finish (no connection, a proxy, or not enough disk space). Nothing on your
-  machine was altered. Fix the cause and click **Restart** in the menu.
+  machine was altered. Fix the cause and click **Restart** in the menu. A failed download of
+  an *update* is announced the same way, in a desktop notification that names the error,
+  rather than being retried silently.
 - **"SmartBrain keeps crashing — stopped restarting; see the native logs."** The launcher
   restarts a stopped SmartBrain, but gives up after three tries in ten minutes rather than
   spinning. The logs are `app.log` and `bifrost.log` — choose **Open logs** in the
@@ -297,6 +319,11 @@ Most first-run problems are one of these:
 - **macOS asks if SmartBrain may "access data from other apps."** Click **Allow**, or don't —
   the launcher is checking whether Docker is installed, which it only needs as a fallback.
   It reads nothing else, and declining doesn't stop SmartBrain from running.
+- **The mic is greyed out or shows a percent.** The voice model (about 141 MB) is still
+  downloading — it starts at app launch on every OS, and the percent is its progress. Wait
+  for it to finish. A red error state on the mic means the download failed — tap the mic to
+  retry, or use **Retry download** under **Settings → Status**. A failed voice download is
+  also announced, so it never fails silently. See [Voice](03-features.md#voice).
 - **Chat says "No models available yet."** You haven't connected a model. If a local
   model server (MLX or Ollama) is running, the Chat screen offers a one-tap **Connect**;
   otherwise add a cloud key under **Settings → Cloud providers**. See

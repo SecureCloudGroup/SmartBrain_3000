@@ -108,6 +108,10 @@ database. Stop SmartBrain from its menu first.
 - **Local models** (Ollama / Apple MLX) run on the *host*; install them yourself
   and wire them in **Settings → Local models**. The app reaches them via
   `host.docker.internal`.
+- **Voice needs none of that.** Dictation uses a built-in engine; its model (~141 MB)
+  downloads itself at first boot into the data directory, beside the database (the
+  `smartbrain_data` volume on Docker, `./data` from source). Set
+  `SMARTBRAIN_NO_VOICE_PREFETCH=1` to skip that boot-time download on an air-gapped deploy.
 - **Phone access** is configured in the app, not here: Settings → Remote access
   pairs a phone over WebRTC (see [`docs/08-remote-access.md`](../docs/08-remote-access.md)).
   The LAN/HTTPS path (local CA) and WireGuard are optional from-source alternatives.

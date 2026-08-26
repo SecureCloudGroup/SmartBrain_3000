@@ -49,6 +49,10 @@ not. Being precise about the line matters more than claiming everything:
   task titles, notes and tags, memories and your profile, schedule titles and prompts,
   scheduled-run output, provider and search API keys, the Gmail token, the MCP token,
   and the arguments and results recorded in the audit log.
+- **Not encrypted, outside the database:** the speech model files (about 141 MB under
+  the data folder's `models/`) — public model weights, nothing of yours — and, if you
+  run the Mic & speaker check, its last three-second test recording, kept beside them
+  so a bad capture can be diagnosed from the audio itself.
 - **Not encrypted** (plaintext metadata in the same local database): timestamps, a
   schedule's cadence and next-run time, a task's due date, priority and status, which
   model is routed to what, and, in the audit log, the tool's name, its risk tier, what you
@@ -80,7 +84,17 @@ not. Being precise about the line matters more than claiming everything:
   self-hosted SearXNG (Settings → Web search) — and a web fetch goes to that page's
   host. Dangerous fetches are approval-gated and SSRF-guarded; nothing is searched or
   fetched outside a turn that calls for it.
-- **Update checks — by the desktop app, not by SmartBrain.** Every six hours the menu-bar
+- **The speech model, once.** At launch, SmartBrain fetches the Whisper dictation model
+  (about 141 MB, four files) from the public Hugging Face repository
+  `Systran/faster-whisper-base`, and checks every file against a pinned hash. The request
+  carries no identity and nothing about you; it happens once, and never again while the
+  files are in place. Air-gapped or network-forbidden deployments set
+  `SMARTBRAIN_NO_VOICE_PREFETCH=1` to skip it (dictation is then unavailable until a
+  voice server is configured). **Your voice itself never leaves your machines**: dictation
+  is transcribed on the Desktop, spoken replies use your device's own voices, and a
+  phone's audio travels only the end-to-end encrypted link to your Desktop.
+- **Update checks — by the desktop app, not by SmartBrain.** Every six hours — or when you
+  choose **Check for updates** in its menu — the menu-bar
   launcher asks GitHub whether a newer release exists, and downloads it from GitHub if so.
   That request carries no identity and nothing about you or your data; it is the same
   public release page anyone can open. SmartBrain itself makes no such call — it hears

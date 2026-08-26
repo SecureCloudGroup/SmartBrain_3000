@@ -92,6 +92,21 @@ make an answer feel slower than usual while it drains.
 **Why:** the alternative is either failed requests or a queue the user can't see. Cloud
 providers have no such limit and are unaffected — this applies only to local models.
 
+## Voice: one dictation at a time, 120 seconds, one download
+
+Dictation runs on your own machine, and three limits follow from that:
+
+- **One dictation is transcribed at a time.** Like the local model, the speech engine is
+  queued, never overlapped — a second recording waits for the first to be turned into text.
+- **A single recording is capped at 120 seconds.** Dictation normally stops itself when you
+  pause; the cap is the backstop for a mic left open. Say it in two pieces if you need more.
+- **The voice model is a one-time ~141 MB download.** It starts at app launch on every OS,
+  unconditionally, so voice is zero-setup — and the price of zero-setup is that disk.
+
+**Why:** running speech recognition locally is what keeps your voice on-box. Bounding each
+recording and serializing transcription keeps memory and CPU predictable on an ordinary
+laptop; downloading the model without asking is what makes the mic simply work.
+
 ## A turn is bounded
 
 One request to the assistant gets at most **eight tool steps**. When those run out — or when

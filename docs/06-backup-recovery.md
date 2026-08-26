@@ -68,6 +68,12 @@ Your Recovery Key comes across with the backup and still works.
 Three escalating repairs. Start at the top; each is slower and more disruptive than the one
 above it, and most problems never get past the first.
 
+0. **Look first.** Open **Settings → Status** in the app before you touch anything. It shows
+   the app version, the lock state, the voice model's download progress (with a one-tap
+   **Retry download**), the model-server configuration, knowledge counts, schedules, feeds
+   with a count of any that are failing, paired devices, and **Storage & memory** — disk
+   used by the database and the models, and memory in use. If SmartBrain seems to be using
+   a lot of disk, that last panel says where it went.
 1. **Restart.** Choose **Restart** in the menu-bar / tray menu. Then reload the browser tab.
    This fixes most transient trouble and takes seconds.
 2. **A clean upgrade.** Non-destructive, a couple of minutes: stop SmartBrain, clear any
@@ -106,7 +112,9 @@ paired-device credential, and stored settings. A paired phone has to be paired a
 afterwards.
 
 macOS only for now. On Windows the same process applies, against `%APPDATA%\SmartBrain`
-and the Scoop package.
+and the Scoop package. On native Linux, `sh install-linux.sh --purge` removes everything
+(`--uninstall` keeps your data) — see
+[Getting started → Uninstall](01-getting-started.md#uninstall).
 
 ## Chat Trash
 

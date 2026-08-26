@@ -12,7 +12,7 @@ An API key is a long secret string you create in a provider's developer console.
 or Claude Pro plan does not include one, and paying for a plan does not give you a key.
 Most providers ask for a card and bill cents per request at typical personal use. If you
 would rather pay nothing and keep everything on your machine, skip this section entirely
-and use [a local model](#local-models-on-your-machine) instead.
+and use [a local model](#local-models-yours-on-this-machine-or-another-one-you-own) instead.
 
 Open **Settings → Cloud providers** and add a key for any of:
 
@@ -185,9 +185,10 @@ sends your documents there on every reindex — only do that if you accept that 
 
 ## Voice (dictation and spoken replies)
 
-Chat can listen and talk — see [Voice in Chat](03-features.md#voice-dictate-and-listen)
-for how it feels to use. Under the hood, **your voice never leaves your machines** —
-and there is **nothing to set up**: dictation is built in, on every OS.
+Chat can listen and talk — see [Voice](03-features.md#voice) for how it is used (modes,
+wake word, choosing a voice per OS). This page is only about what runs underneath.
+**Your voice never leaves your machines**, and there is **nothing to set up**: dictation
+is built in, on every OS.
 
 - **Built in (the default)** — SmartBrain transcribes on your machine with
   **Whisper** (via [faster-whisper](https://github.com/SYSTRAN/faster-whisper), the
@@ -196,7 +197,8 @@ and there is **nothing to set up**: dictation is built in, on every OS.
   the background, starting the moment the app launches — **watch the progress right
   on the mic button**, or on **Settings → Status**. Until it's ready the mic shows a
   live percent instead of pretending; after that, dictation runs in well under a
-  second, fully offline, in your language — Whisper understands dozens.
+  second, fully offline, in your language — Whisper understands dozens. One dictation
+  is transcribed at a time; a recording is capped at two minutes.
 - **Your own audio server (optional)** — for other languages or maximum accuracy,
   run any local server that speaks the standard `/v1/audio/transcriptions` API (oMLX
   with a whisper model on a Mac, [speaches](https://github.com/speaches-ai/speaches)
@@ -208,10 +210,15 @@ and there is **nothing to set up**: dictation is built in, on every OS.
   locally. Replies use the phone's own voices, offline.
 
 **Spoken replies** use your device's built-in voices by default — instant and offline
-on macOS, Windows, iPhone, and Android. Linux desktops often ship no browser voices;
-there (or if you just want a nicer voice), set the optional **Server voice model** in
-the Voice card (e.g. `kokoro` on a server that offers speech) and SmartBrain speaks
-through it instead.
+on macOS, Windows, iPhone, and Android; Linux gets excellent ones through Pied/Piper
+(see [Choosing a voice](03-features.md#choosing-a-voice)). If you would rather use a
+server voice, set the optional **Server voice model** in the Voice card (e.g. `kokoro`
+on a server that offers speech) and SmartBrain speaks through it instead.
+
+Voice settings live in two places: the optional **servers** above under **Settings →
+Local models → Voice**; everything about *using* voice — download progress and retry,
+the engine in use, playback speed, wake word and its test, the mic & speaker check —
+under **Settings → Status → Voice**.
 
 ## Next
 

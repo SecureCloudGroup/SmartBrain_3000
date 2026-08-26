@@ -42,6 +42,13 @@ first-class alternative wherever you prefer them.
   knowledge, track tasks, and act on your behalf — but anything that changes
   data or reaches out parks for your approval first, and every attempt is
   audited.
+- **Talk to it.** Tap the mic (or hold Space) and dictate; have replies read aloud;
+  or go fully hands-free in Conversation mode, with a wake word if you want one.
+  Speech is transcribed on your own machine by a built-in engine — nothing to
+  install, nothing sent anywhere. See [Voice](docs/03-features.md#voice).
+- **Follow websites.** Subscribe to an RSS/Atom feed and it becomes a knowledge
+  vault that fills itself; tag or delete many items at once. See
+  [Feeds](docs/03-features.md#follow-websites-feeds).
 - **It quietly improves itself — within hard bounds.** Opt in and SmartBrain reviews
   its own performance on the cadence you choose (default: every 8 hours) — locally,
   reversibly, one change at a time — learns your preferences, suggests routines worth
@@ -152,11 +159,17 @@ ready, the app itself says so and offers **Install now**; the same update is off
 menu as **Install update now** / **Install on next start**. Installing restarts SmartBrain
 (under a minute), so you unlock again afterwards. Ignore the notice and the update installs
 the next time you start. The desktop app updates itself the same way, so `brew upgrade` and
-`scoop update` are no longer part of normal use.
+`scoop update` are no longer part of normal use. Don't want to wait for the background check?
+**Check for updates** in the menu looks right now. Installing keeps the previous version on
+disk for rollback and prunes anything older; a download that fails says so in the menu.
 
-- **Which version am I on?** The menu names it, and so does the app under the logo, top-left.
+- **Which version am I on?** The menu names it, and so does the app under the logo, top-left
+  — and **Settings → Status** shows it alongside the lock state, model server, voice engine,
+  schedules, feeds and paired devices, which is the first place to look when something is off.
 - **From a paired phone** you can see that an update is waiting, but installing it is
   Desktop-only.
+- **Linux desktop** launchers relaunch themselves after an update, so the tray icon comes back
+  on its own.
 - **Headless Linux** swaps under systemd and the unit's `Restart=` brings up the new
   version — nothing to run there either.
 - **On the Linux Docker stack:** no launcher does it for you — re-run `docker compose -f docker-compose.release.yml pull`
