@@ -11,6 +11,8 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.9.27] - 2026-08-25
+
 ### Added
 - **Live transcription.** Your words appear under the message box while you are still
   talking. The recording so far is re-read every 1.5 s (a fast greedy pass); the full
