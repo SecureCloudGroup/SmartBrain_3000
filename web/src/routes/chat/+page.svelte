@@ -258,6 +258,9 @@
     } finally {
       micOpening = false;
     }
+    // The reply may have finished while the mic was opening (onIdle returned early on
+    // micOpening): decide again now, or a no-wake standby would sit with nothing to wait for.
+    if (recState === "standby" && !wake.phrase && !speaker.speaking) afterReplySpoken();
   }
   // Speech heard in standby: keep everything from here on and run the normal endpointing.
   function wakeFromStandby(): void {
@@ -270,6 +273,12 @@
     heardSpeech = true;
     lastLoudAt = performance.now();
     startLiveWatch();
+  }
+  // The user stopped the speech (Stop button, Speak-replies off): the no-wake interrupt
+  // window has nothing left to interrupt and no wake word to wait for — close it, or the
+  // mic sits open in standby with no exit (review finding).
+  function closeInterruptWindow(): void {
+    if (recState === "standby" && !wake.phrase) void cancelRecording();
   }
   // The reply finished speaking: reopen the mic for the follow-up (conversation mode).
   function afterReplySpoken(): void {
@@ -576,6 +585,7 @@
       if (typeof speechSynthesis !== "undefined") speechSynthesis.speak(new SpeechSynthesisUtterance(" "));
     } else {
       speaker.stop();
+      closeInterruptWindow();
       listeningId = null;
     }
   }
@@ -1381,7 +1391,7 @@
         opts.setStream(next);
         const target = log.find((x) => x.id === id);
         if (target) target.content = next;
-        if (autoSpeak) speaker.feed(piece); // complete sentences speak as they stream
+        if (spokenTurn) speaker.feed(piece); // complete sentences speak as they stream
       } else if (e.event === "done") {
         await finalizeStream({ data: e.data, cid: opts.cid, streamText: opts.streamRef(), ensureStreamBubble: opts.ensureStreamBubble });
         return "terminal";
@@ -1461,7 +1471,7 @@
       if (liveGuidance) target.guidance = liveGuidance; // transparency chip on the live bubble
     }
     liveGuidance = null;
-    if (autoSpeak) speaker.flush(); // the unfinished last sentence
+    if (spokenTurn) speaker.flush(); // the unfinished last sentence
     await api.addMessage(opts.cid, "assistant", finalText);
   }
 
@@ -1482,7 +1492,7 @@
       const sources = res.sources?.length ? res.sources : undefined;
       log.push({ id: nextEntryId("asst"), role: "assistant", content: reply, sources,
                  guidance: res.guidance });
-      if (autoSpeak) speaker.say(reply); // non-streamed path: speak the whole answer
+      if (spokenTurn) speaker.say(reply); // non-streamed path: speak the whole answer
       liveGuidance = null; // the result's own field wins over any stream meta
       await api.addMessage(cid, "assistant", reply, sources);
     }
@@ -1879,7 +1889,7 @@
         <!-- A streamed turn is in flight, OR the reply is still being read aloud (speech lags
              the stream, and a long spoken answer with no Stop was the field complaint):
              Send becomes Stop. Aborting keeps + persists the partial answer (see streamTurn). -->
-        <button class="stop" title={stopper ? "Stop generating" : "Stop speaking"} aria-label={stopper ? "Stop generating" : "Stop speaking"} onclick={() => { if (stopper) void api.feedback("stop", chatSession.currentId); speaker.stop(); stopper?.abort(); }}>
+        <button class="stop" title={stopper ? "Stop generating" : "Stop speaking"} aria-label={stopper ? "Stop generating" : "Stop speaking"} onclick={() => { if (stopper) void api.feedback("stop", chatSession.currentId); speaker.stop(); closeInterruptWindow(); stopper?.abort(); }}>
           <Icon name="stop" />
         </button>
       {:else}

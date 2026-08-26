@@ -69,7 +69,7 @@ class TurnIn(BaseModel):
     capability: str = "chat"
     conversation_id: str | None = None
     # Spoken replies: the client asks for a length ("short" | "medium" | "long"). Applied as
-    # a TRAILING system note (the optimizer-guidance slot) so the static prompt head and the
+    # a TRAILING system note, after any optimizer guidance, so the static prompt head and the
     # conversation prefix stay byte-stable for the local model's prefix cache.
     reply_length: str | None = None
 
