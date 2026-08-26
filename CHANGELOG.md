@@ -11,6 +11,8 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.9.29] - 2026-08-26
+
 ### Added
 - **Conversation mode — 100% voice.** The 🗣 button beside the mic: you talk, it sends
   itself, the reply is spoken, and the mic reopens for your follow-up. Say “stop
