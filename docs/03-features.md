@@ -45,15 +45,17 @@ away. When the assistant is using tools it narrates what it is doing in place of
 thinking dots: *"Searching the web…"*, *"Reading a document…"*, *"Writing the answer…"*,
 each ticked off as it finishes.
 
-If the conversation has scrolled, a **Jump to latest** pill brings you back down.
+If the conversation has scrolled, **Top** and **Latest** pills jump you to either end.
 
 ### After an answer
 
-Every reply carries **Copy** (the raw Markdown, not the rendered page). The most recent one
-also offers **Regenerate** — ask again for a fresh answer to your last message. The new
-answer is added below the old one rather than replacing it, so what you see is exactly what
-a reload will show. Only the newest answer can be regenerated; redoing an older one would
-fork the thread.
+Every reply carries **Copy** (the raw Markdown, not the rendered page) and **Listen**
+(read just this answer aloud — see **Voice**, below). The most recent one also offers
+**Regenerate** — ask again for a fresh answer to your last message. The new answer is
+added below the old one rather than replacing it, so what you see is exactly what a
+reload will show. Only the newest answer can be regenerated; redoing an older one would
+fork the thread. Every message *you* sent carries a colored **Retry** beside **You** — it
+sends that exact message again, handy after a model hiccup or a model switch.
 
 Answers that used your knowledge show **source chips** underneath — more on those under
 **Knowledge**, below.
@@ -89,8 +91,10 @@ Tools are **risk-tiered**, and this is the core safety idea:
 
 - **Observe** (e.g. knowledge search) runs automatically — it only reads.
 - **Reviewed** (e.g. add a task, search the web) is **never run automatically** until you
-  say so. The assistant *proposes* it and it waits for your approval in **Activity**. If
-  you get tired of approving the same tool, **Always allow** lets that one run without
+  say so. The assistant *proposes* it and a card appears **right in the conversation**
+  with **Approve**, **Always allow**, and **Deny**; resolving the last pending card resumes
+  the turn by itself, and **Approve all** appears when several reviewed-tier actions are
+  waiting. **Activity** keeps the record. If you get tired of approving the same tool, **Always allow** lets that one run without
   asking from then on — and **Stop allowing** takes it back. The two tools that fetch a
   URL the assistant composed (**Fetch a page**, **Add a URL to knowledge**) are allowed
   **per site**: the button reads *Always allow <that site>*, future calls to that exact
@@ -105,34 +109,95 @@ out requires your explicit OK. Every attempt is recorded in **Activity**.
 
 **For example:** ask *"search my knowledge for the lease terms"* and the assistant
 reads and answers immediately (Observe). Ask *"email the landlord about it"* and it
-**drafts** the message but **parks it in Activity** — nothing sends until you open
-Activity and approve (Irreversible, with an extra confirm).
+**drafts** the message and **parks it as a card in the chat** — nothing sends until you
+approve it there (Irreversible, with an extra confirm). Activity lists it too.
 
 A parked action doesn't wait indefinitely — see **Activity**, below.
 
-### Voice — dictate and listen
+## Voice
 
-Chat can listen and talk — with **nothing to set up**: dictation is built in on every
-OS (see [Voice](02-models.md#voice-dictation-and-spoken-replies) for how, and for the
-optional own-server upgrade). A **microphone button** sits in the message box: tap, speak, tap
-again, and your words land in the box as text — **you review before it sends**. The
-transcription happens on your own machine; nothing is sent to any speech service.
+Chat can listen and talk, with **nothing to set up**: dictation is built in on every OS
+and runs on your own machine (how, and the optional own-server upgrade, is under
+[Voice](02-models.md#voice-dictation-and-spoken-replies) on the models page). Nothing you
+say is sent to any speech service — on the phone, audio travels the encrypted link to
+your Desktop, which transcribes it locally.
 
-**Talking is the only step.** Tap the mic (or **hold Space** on a keyboard) and speak —
-when you pause, the recording ends by itself and your words appear. Say **“send”** at
-the end to submit in the same breath, **“cancel”** to discard, or **“start over”** to
-clear and re-listen; **Esc** cancels a recording too. The **hands-free** toggle (⚡ next
-to the mic) sends every dictation automatically — say “cancel” to stop one.
+### Dictate
 
-The **speaker button** next to it turns on spoken replies: answers are read aloud
-**sentence by sentence as they stream in**, in your device's own voice. Every answer
-also has a quiet **Listen** action underneath to hear just that one. Speaking to the
-assistant — or asking something new — interrupts the voice mid-sentence, the way a
-conversation should.
+Tap the **mic** beside the message box (or **hold Space** on a keyboard) and talk. Your
+words appear **under the box as you speak**; when you pause, the recording ends by itself
+and the finished transcript lands in the message box — **you review before it sends**.
+Say **“send”** at the end to submit in the same breath, **“cancel”** to discard, or
+**“start over”** to clear and re-listen; **Esc** cancels a recording too. One recording
+is capped at two minutes.
 
-On the phone, both work the same way: dictation travels the encrypted connection to
-your Desktop for transcription, and replies speak with the phone's own voices — even
-offline.
+The first time, the mic may show a **percent**: the speech model is downloading (once,
+about 141 MB) and the mic enables itself when it is ready. A red mic means the download
+failed — tap it to retry, or use **Retry download** on **Settings → Status**.
+
+### The voice modes
+
+Above the message box sits a row of labeled pills. Each is a mode you leave on:
+
+- **Speak replies** — answers are read aloud **sentence by sentence as they stream in**,
+  in your device's own voice. Every answer also has a quiet **Listen** action underneath
+  to hear just that one. While a reply is being read, **Send becomes Stop** — press it to
+  stop the voice (a stopped answer keeps its text).
+- **Hands-free** — every dictation sends itself when you pause; say “cancel” to stop one.
+- **Conversation** — 100% voice. You talk, it sends itself, the reply is spoken, and the
+  mic reopens for your follow-up. **Talking over a reply interrupts it**, and your words
+  become the next message. Say **“stop listening”** or **“goodbye”** to end. The first mic
+  open still needs one tap (a browser rule); after that, no buttons.
+- **Short · Medium · Long** — how long *spoken* replies should be. It applies only while
+  replies are read aloud (Speak replies or Conversation on); typed chat is unaffected. The
+  default is **Short**, because a long spoken answer is tiring — Long is one tap away when
+  you need the detail.
+
+### Your own wake word
+
+With Conversation on, SmartBrain can wait for a phrase instead of listening all the time
+— **“Hey SmartBrain”**, **“Hey Merl”**, whatever you like. Set it under **Settings →
+Status → Voice** and press **Test recognition**: say the phrase three times, and it shows
+exactly what the engine heard each time. Unusual names are often spelled the engine's own
+way (“Merl” may come back as “Merle”); one tap **accepts those spellings**, and from then
+on the phrase works as you say it. Then, in Chat, the Conversation pill shows your phrase
+and the mic waits for it: **“Hey Merl, what's on my calendar?”** carries the question
+through in one breath, and anything that doesn't start with the phrase is ignored (the
+hint under the box tells you what it heard).
+
+### Choosing a voice
+
+Spoken replies use the voices your browser gets from the operating system — instant and
+offline. The default voice is rarely the best one installed, and a better one is a
+settings change away:
+
+- **macOS** — *System Settings → Accessibility → Spoken Content → System voice → ⓘ*, pick a
+  language and download an **Enhanced** or **Premium** voice (Zoe, Ava, Samantha
+  Enhanced…). Safari and Chrome pick them up immediately; the built-in voices are
+  excellent and need nothing else.
+- **Linux** — desktops often ship no browser voices at all. Install
+  [Pied](https://github.com/Elleo/pied) (a Flatpak): it sets up the **Piper** neural
+  voices for speech-dispatcher, which Chrome, Chromium and Firefox use. Chrome lists them
+  as “… piper”; Firefox lists them by file name (`en_US-…-medium.onnx`) — same voices.
+  They sound as good as the commercial ones.
+- **Windows** — *Settings → Accessibility → Narrator → Add natural voices* installs
+  Microsoft's **Natural** voices (Ava, Andrew…). **Edge** exposes them to the web; Chrome
+  and Firefox see only the classic SAPI voices (David, Zira), so on Windows use Edge for
+  the best voice.
+- **iPhone / iPad / Android** — the phone's own voices work as they are; iOS gets better
+  ones under *Settings → Accessibility → Spoken Content → Voices*.
+
+Whichever voice you pick, **Playback speed** (Settings → Status → Voice) speaks at 0.8× to
+2×, and the **Mic & speaker check** on the same page records three seconds, plays them
+back, and shows the transcript — the fastest way to tell a microphone problem from a
+voice problem.
+
+### Voice on the phone
+
+Dictation, live words, spoken replies, the modes, and the wake word all work on the phone
+exactly as on the Desktop. The settings behind them — wake word, playback speed, the
+Short/Medium/Long default — are set on the Desktop under **Settings → Status → Voice**,
+because Settings is Desktop-only. Replies speak with the phone's own voices, even offline.
 
 ## What the assistant can do
 
@@ -452,7 +517,8 @@ the price list from the on-device gateway.
 Your audit and approvals view. Two parts:
 
 - **Awaiting your approval** — a card per proposed action, naming the tool, what it would
-  do, and whether it is reversible. **Approve** or **Deny** it. **Always allow** approves it
+  do, and whether it is reversible (the same card appears in the chat itself, and
+  resolving it there is identical). **Approve** or **Deny** it. **Always allow** approves it
   and stops asking for that tool from then on (for the URL tools, for that tool **on that
   site** — the list shows each allowed site as its own row). Denying an action holds for
   the rest of that run: the assistant is told, and an identical retry is refused instead
