@@ -11,6 +11,15 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Added
+- **Short · Medium · Long for spoken replies.** A segmented pill in the voice row sets how
+  long replies should be when they are read aloud (Speak replies or Conversation on);
+  typed chat is unaffected. Default Short — a long spoken answer is the thing that made
+  voice tiring, and Long is one tap away when you need it.
+- **Stop while it's speaking.** Send turns into Stop for as long as a reply is being read
+  aloud, not just while the text streams. In conversation mode you can also just start
+  talking over it — your voice interrupts the reply, with or without a wake word.
+
 ## [0.9.30] - 2026-08-26
 
 ### Changed

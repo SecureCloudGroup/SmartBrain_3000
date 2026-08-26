@@ -207,6 +207,19 @@
   // listening" or "goodbye" to leave. The first mic open still needs one tap (browsers
   // require a gesture) — after that, no buttons.
   let conversation = $state(false);
+  let speaking = $state(false); // reactive mirror of speaker.speaking (Stop button, hints)
+  // Spoken-reply length: applies only while replies are spoken (Speak replies or
+  // Conversation on). Typed chat is unaffected. Default short — long spoken answers
+  // are the thing that made voice annoying in the field.
+  let replyLength = $state<"short" | "medium" | "long">("short");
+  function setReplyLength(v: "short" | "medium" | "long") {
+    replyLength = v;
+    try {
+      localStorage.setItem("sb:reply-length", v);
+    } catch {
+      /* session-only */
+    }
+  }
   let wake = $state<{ phrase: string; aliases: string[] }>({ phrase: "", aliases: [] });
   let fromStandby = false; // this recording began by waking from standby → check the phrase
   let micOpening = false; // getUserMedia is in flight: a second opener must wait, not race
@@ -226,7 +239,10 @@
     }
   }
   async function startStandby(): Promise<void> {
-    if (!conversation || !wake.phrase || recState !== "idle" || !micUsable || micOpening) return;
+    // Standby exists for a wake word, and — with or without one — while a reply is being
+    // read aloud, so that speaking over it interrupts it (the field ask: a long spoken
+    // answer needs a way to stop that isn't a button).
+    if (!conversation || !(wake.phrase || speaker.speaking) || recState !== "idle" || !micUsable || micOpening) return;
     error = "";
     micOpening = true;
     try {
@@ -242,21 +258,40 @@
     } finally {
       micOpening = false;
     }
+    // The reply may have finished while the mic was opening (onIdle returned early on
+    // micOpening): decide again now, or a no-wake standby would sit with nothing to wait for.
+    if (recState === "standby" && !wake.phrase && !speaker.speaking) afterReplySpoken();
   }
   // Speech heard in standby: keep everything from here on and run the normal endpointing.
   function wakeFromStandby(): void {
     if (recState !== "standby") return;
+    if (speaker.speaking) speaker.stop(); // barge-in: your voice interrupts the reply
     recorder.rolling = null;
     recState = "recording";
-    fromStandby = true;
+    fromStandby = !!wake.phrase; // no wake word: the utterance IS the follow-up
     startVadWatch();
     heardSpeech = true;
     lastLoudAt = performance.now();
     startLiveWatch();
   }
+  // The user stopped the speech (Stop button, Speak-replies off): the no-wake interrupt
+  // window has nothing left to interrupt and no wake word to wait for — close it, or the
+  // mic sits open in standby with no exit (review finding).
+  function closeInterruptWindow(): void {
+    if (recState === "standby" && !wake.phrase) void cancelRecording();
+  }
   // The reply finished speaking: reopen the mic for the follow-up (conversation mode).
   function afterReplySpoken(): void {
-    if (!conversation || recState !== "idle" || busy || micOpening) return;
+    if (!conversation || busy || micOpening) return;
+    if (recState === "standby" && !wake.phrase) {
+      // The interrupt window was open while it spoke; it finished — take the follow-up now.
+      recorder.rolling = null;
+      recState = "recording";
+      startVadWatch();
+      startLiveWatch();
+      return;
+    }
+    if (recState !== "idle") return;
     void (wake.phrase ? startStandby() : startRecording());
   }
   // ---- Live transcription: words show up WHILE you talk. ----
@@ -384,6 +419,7 @@
   }
   let speechPossible = $state(false);
   let autoSpeak = $state(false);
+  const spokenTurn = $derived(autoSpeak || conversation); // the reply will be read aloud
   let listeningId = $state<string | null>(null); // which message the Listen button is reading
   const speaker = new Speaker(
     (text) => (voiceInfo?.tts_model ? api.voiceSpeak(text) : Promise.resolve(null)),
@@ -392,6 +428,7 @@
       afterReplySpoken();
     },
   );
+  speaker.onSpeaking = (on) => (speaking = on);
 
   async function toggleMic(): Promise<void> {
     if (recState === "transcribing" || busy) return;
@@ -507,7 +544,7 @@
     } finally {
       liveText = "";
       if (recState === "transcribing") recState = "idle";
-      if (conversation && recState === "idle" && !busy && wake.phrase && !speaker.speaking) void startStandby();
+      if (conversation && recState === "idle" && !busy && (wake.phrase || speaker.speaking)) void startStandby();
     }
   }
 
@@ -548,6 +585,7 @@
       if (typeof speechSynthesis !== "undefined") speechSynthesis.speak(new SpeechSynthesisUtterance(" "));
     } else {
       speaker.stop();
+      closeInterruptWindow();
       listeningId = null;
     }
   }
@@ -630,6 +668,12 @@
       handsFree = false;
     }
     wake = loadWakeWord();
+    try {
+      const rl = localStorage.getItem("sb:reply-length");
+      if (rl === "short" || rl === "medium" || rl === "long") replyLength = rl;
+    } catch {
+      /* default short */
+    }
     // Voice availability (no live probe — configured-ness is enough to show the mic).
     void api
       .voiceStatus()
@@ -1046,7 +1090,8 @@
       // Conversation mode: if the reply is not being spoken (auto-speak off, or it
       // finished before the turn closed), reopen the mic now; otherwise the Speaker's
       // idle callback does it when the last sentence ends.
-      if (!speaker.speaking) afterReplySpoken();
+      if (speaker.speaking) void startStandby(); // interrupt window while it reads aloud
+      else afterReplySpoken();
     }
   }
 
@@ -1058,7 +1103,7 @@
     if (remote.status === "idle") {
       await streamTurn({ messages, cid });
     } else {
-      const res = await api.agentTurn({ messages, model: modelId, conversation_id: cid });
+      const res = await api.agentTurn({ messages, model: modelId, conversation_id: cid, reply_length: spokenTurn ? replyLength : undefined });
       await handleAgentResult(res, cid);
     }
   }
@@ -1151,13 +1196,14 @@
         messages: args.messages,
         model: modelId,
         conversation_id: args.cid,
+        reply_length: spokenTurn ? replyLength : undefined,
       }, controller.signal);
       const body = res.body;
       if (!body) {
         // No streamable body — fall back so the user still gets an answer. Not
         // interruptible, so drop the Stop affordance first.
         stopper = null;
-        const fallback = await api.agentTurn({ messages: args.messages, model: modelId, conversation_id: args.cid });
+        const fallback = await api.agentTurn({ messages: args.messages, model: modelId, conversation_id: args.cid, reply_length: spokenTurn ? replyLength : undefined });
         await handleAgentResult(fallback, args.cid);
         return;
       }
@@ -1208,7 +1254,7 @@
         stopper = null;
         streamEntryId = null;
         if (streamId) log = log.filter((e) => e.id !== streamId);
-        const whole = await api.agentTurn({ messages: args.messages, model: modelId, conversation_id: args.cid });
+        const whole = await api.agentTurn({ messages: args.messages, model: modelId, conversation_id: args.cid, reply_length: spokenTurn ? replyLength : undefined });
         await handleAgentResult(whole, args.cid);
         return;
       }
@@ -1239,11 +1285,11 @@
     const primed = primedToken;
     primedToken = null;  // one-time: a retry must ask the model afresh
     try {
-      const res = await api.agentTurnEvents({ messages, model: modelId, conversation_id: cid, primed });
+      const res = await api.agentTurnEvents({ messages, model: modelId, conversation_id: cid, primed, reply_length: spokenTurn ? replyLength : undefined });
       const body = res.body;
       if (!body) {
         // No streamable body — the silent JSON path still answers.
-        const fallback = await api.agentTurn({ messages, model: modelId, conversation_id: cid });
+        const fallback = await api.agentTurn({ messages, model: modelId, conversation_id: cid, reply_length: spokenTurn ? replyLength : undefined });
         await handleAgentResult(fallback, cid);
         return;
       }
@@ -1345,7 +1391,7 @@
         opts.setStream(next);
         const target = log.find((x) => x.id === id);
         if (target) target.content = next;
-        if (autoSpeak) speaker.feed(piece); // complete sentences speak as they stream
+        if (spokenTurn) speaker.feed(piece); // complete sentences speak as they stream
       } else if (e.event === "done") {
         await finalizeStream({ data: e.data, cid: opts.cid, streamText: opts.streamRef(), ensureStreamBubble: opts.ensureStreamBubble });
         return "terminal";
@@ -1425,7 +1471,7 @@
       if (liveGuidance) target.guidance = liveGuidance; // transparency chip on the live bubble
     }
     liveGuidance = null;
-    if (autoSpeak) speaker.flush(); // the unfinished last sentence
+    if (spokenTurn) speaker.flush(); // the unfinished last sentence
     await api.addMessage(opts.cid, "assistant", finalText);
   }
 
@@ -1446,7 +1492,7 @@
       const sources = res.sources?.length ? res.sources : undefined;
       log.push({ id: nextEntryId("asst"), role: "assistant", content: reply, sources,
                  guidance: res.guidance });
-      if (autoSpeak) speaker.say(reply); // non-streamed path: speak the whole answer
+      if (spokenTurn) speaker.say(reply); // non-streamed path: speak the whole answer
       liveGuidance = null; // the result's own field wins over any stream meta
       await api.addMessage(cid, "assistant", reply, sources);
     }
@@ -1781,6 +1827,13 @@
             onclick={toggleConversation}
           ><Icon name="chat" size={14} /> Conversation{wake.phrase ? ` · “${wake.phrase}”` : ""}</button>
         {/if}
+        {#if speechPossible}
+          <span class="length" class:inactive={!spokenTurn} role="group" aria-label="Spoken reply length" title={spokenTurn ? "How long spoken replies should be" : "Applies when replies are spoken (Speak replies or Conversation on)"}>
+            {#each ["short", "medium", "long"] as v (v)}
+              <button class="mode seg" class:active={replyLength === v} aria-pressed={replyLength === v} onclick={() => setReplyLength(v as "short" | "medium" | "long")}>{v[0].toUpperCase() + v.slice(1)}</button>
+            {/each}
+          </span>
+        {/if}
       </div>
     {/if}
     <div class="inner">
@@ -1832,10 +1885,11 @@
         placeholder="Message SmartBrain…"
         aria-label="Message"
       ></textarea>
-      {#if stopper}
-        <!-- A streamed turn is in flight: Send becomes Stop. Aborting keeps + persists the
-             partial answer (see streamTurn); non-streamed turns keep the plain disabled Send. -->
-        <button class="stop" title="Stop generating" aria-label="Stop generating" onclick={() => { void api.feedback("stop", chatSession.currentId); speaker.stop(); stopper?.abort(); }}>
+      {#if stopper || speaking}
+        <!-- A streamed turn is in flight, OR the reply is still being read aloud (speech lags
+             the stream, and a long spoken answer with no Stop was the field complaint):
+             Send becomes Stop. Aborting keeps + persists the partial answer (see streamTurn). -->
+        <button class="stop" title={stopper ? "Stop generating" : "Stop speaking"} aria-label={stopper ? "Stop generating" : "Stop speaking"} onclick={() => { if (stopper) void api.feedback("stop", chatSession.currentId); speaker.stop(); closeInterruptWindow(); stopper?.abort(); }}>
           <Icon name="stop" />
         </button>
       {:else}
@@ -1853,7 +1907,9 @@
     <p class="hint">⏎ send · ⇧⏎ newline — replies stream in; Stop is always here while they do</p>
     {#if voiceInfo?.stt_available}
       <!-- Voice instructions, state-aware: what to do NOW, not a manual to remember. -->
-      {#if recState === "standby"}
+      {#if recState === "standby" && !wake.phrase}
+        <p class="hint">Reading the reply — just start talking to interrupt · say “stop listening” to end</p>
+      {:else if recState === "standby"}
         <p class="hint">Waiting for “{wake.phrase}”… say it, then your request{lastWakeMiss ? ` · heard “${lastWakeMiss}” — not the wake word` : ""} · say “stop listening” to end</p>
       {:else if recState === "recording" && liveText}
         <p class="hint listening live">{liveText}…</p>
@@ -2000,6 +2056,25 @@
     background: var(--accent-strong);
     border-color: var(--accent-strong);
     color: #fff;
+  }
+  /* Short · Medium · Long as one segmented pill, dimmed until replies are spoken. */
+  .length {
+    display: inline-flex;
+    margin-left: auto;
+  }
+  .length .seg {
+    border-radius: 0;
+    margin-left: -1px;
+  }
+  .length .seg:first-child {
+    border-radius: var(--r-full) 0 0 var(--r-full);
+    margin-left: 0;
+  }
+  .length .seg:last-child {
+    border-radius: 0 var(--r-full) var(--r-full) 0;
+  }
+  .length.inactive {
+    opacity: 0.55;
   }
   .voice.mic.recording {
     background: var(--danger);

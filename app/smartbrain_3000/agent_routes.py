@@ -68,6 +68,25 @@ class TurnIn(BaseModel):
     model: str | None = None
     capability: str = "chat"
     conversation_id: str | None = None
+    # Spoken replies: the client asks for a length ("short" | "medium" | "long"). Applied as
+    # a TRAILING system note, after any optimizer guidance, so the static prompt head and the
+    # conversation prefix stay byte-stable for the local model's prefix cache.
+    reply_length: str | None = None
+
+
+_REPLY_LENGTH_NOTES = {
+    "short": "This reply will be read aloud. Answer in one to three sentences, plainly, "
+             "with no headings or lists; offer more detail only if the user asks for it.",
+    "medium": "This reply will be read aloud. Keep it to a short paragraph or two, plainly, "
+              "with no headings or lists.",
+}
+
+
+def reply_length_note(value: str | None) -> dict | None:
+    """The trailing system note for a requested spoken-reply length; None = no constraint
+    ("long", unset, or an unknown value — never a 4xx over a preference)."""
+    text = _REPLY_LENGTH_NOTES.get((value or "").strip().lower())
+    return {"role": "system", "content": text} if text else None
 
 
 def _context(request: Request) -> tuple[tools.ToolContext, object]:
@@ -449,6 +468,8 @@ def agent_turn(request: Request, body: TurnIn) -> dict:
                                          body.messages)
     if guidance:
         messages = [*messages, guidance["note"]]
+    if (length_note := reply_length_note(body.reply_length)) is not None:
+        messages = [*messages, length_note]
 
     def sink(used_model: str, response: object) -> None:  # record spend as the turn runs
         usage.record_response(conn, used_model, response)
@@ -514,6 +535,8 @@ def agent_turn_events(request: Request, body: TurnIn) -> StreamingResponse:
                                          body.messages)
     if guidance:
         messages = [*messages, guidance["note"]]
+    if (length_note := reply_length_note(body.reply_length)) is not None:
+        messages = [*messages, length_note]
 
     def sink(used_model: str, response: object) -> None:  # worker thread -> per-thread cursor
         usage.record_response(conn, used_model, response)
@@ -813,6 +836,8 @@ def agent_turn_stream(request: Request, body: TurnIn) -> StreamingResponse:
                                          body.messages)
     if guidance:
         messages = [*messages, guidance["note"]]
+    if (length_note := reply_length_note(body.reply_length)) is not None:
+        messages = [*messages, length_note]
     # Streaming uses its OWN httpx.Client (not the gateway pool): a long-lived SSE
     # stream holds a connection for the whole response, so reusing the shared pool
     # would block sibling /api/chat calls behind the stream's connection.
