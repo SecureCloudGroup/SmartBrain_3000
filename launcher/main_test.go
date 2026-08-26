@@ -253,3 +253,18 @@ func TestCgroupIsOurServiceIgnoresDesktopScopes(t *testing.T) {
 		t.Fatal("empty cgroup must not count")
 	}
 }
+
+func TestPendingAssembledOffersOnlyWhatIsNewerThanRunning(t *testing.T) {
+	cases := []struct{ current, running, want string }{
+		{"0.9.27", "0.9.26", "0.9.27"}, // staged, restart adopted the old app: offer it
+		{"0.9.27", "0.9.27", ""},       // running what is assembled
+		{"0.9.26", "0.9.27", ""},       // pointer behind the app (pinned/dev): nothing to offer
+		{"", "0.9.26", ""},             // nothing assembled
+		{"0.9.27", "", ""},             // app hasn't said what it runs yet
+	}
+	for _, c := range cases {
+		if got := pendingAssembled(c.current, c.running); got != c.want {
+			t.Fatalf("pendingAssembled(%q, %q) = %q, want %q", c.current, c.running, got, c.want)
+		}
+	}
+}

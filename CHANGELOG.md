@@ -11,6 +11,15 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Fixed
+- **The launcher no longer strands a downloaded app update.** After a launcher
+  self-update, a restart adopted the still-running old app while the newer app version
+  sat assembled on disk, and the update check then saw "already newest" — no Install
+  item, no way forward (Linux, v0.9.27). The launcher now compares what the app reports
+  it is *running* and offers any newer assembled version. A failed app download is now
+  announced once instead of silently retrying, and pruning old versions never removes
+  the directory the live app runs from.
+
 ## [0.9.27] - 2026-08-25
 
 ### Added

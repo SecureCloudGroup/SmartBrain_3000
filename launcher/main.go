@@ -69,6 +69,7 @@ var (
 	// sentinel is a value no real version equals, so the first surfacing (even of a blank version)
 	// still notifies once.
 	lastNotifiedVersion = "\x00"
+	lastFailedVersion   = "\x00" // last version whose download failure was announced
 	// The version downloaded and ready to install, "" when there is none. Told to the app on
 	// every handshake so the page can offer the install where the owner is actually looking.
 	stagedVersion string
@@ -297,10 +298,44 @@ func quitForRestart() {
 // never touch it, so their behavior is unchanged.
 var openBrowser = stack.OpenBrowser
 
+// appRunning is the version the running app last reported in its handshake. It can
+// lag the assembled `current`: an update stages a version and waits for the click, and
+// a launcher restart in between adopts the OLD running stack — so "is there something
+// assembled that isn't running?" must be asked of the app, not of the pointer file.
+var appRunning string
+
+// pendingAssembled returns the assembled version to OFFER when it is newer than the
+// app actually running, else "". Field (Linux, v0.9.27): the launcher self-updated,
+// staged the app version, was restarted, adopted the still-running old app, and then
+// found "current is already newest" — nothing to install, forever.
+func pendingAssembled(current, running string) string {
+	if current != "" && running != "" && update.Newer(current, running) {
+		return current
+	}
+	return ""
+}
+
+// stageUpdate offers an assembled version for install: menu, status, one notification.
+func stageUpdate(version string) {
+	label := "Update available (v" + version + ")"
+	stagedVersion = version // the app can now offer this install in the page itself
+	setStatus(label)
+	setTooltip("SmartBrain — " + label)
+	menuShow(mUpdateNow)
+	menuShow(mUpdateLater)
+	if version != lastNotifiedVersion {
+		lastNotifiedVersion = version
+		stack.Notify("SmartBrain update ready", "Install from the menu now — or it installs next time you start.")
+	}
+}
+
 // showVersions labels the menu with what is running. It names BOTH only when they differ:
 // during an update the desktop app is replaced before the app it supervises, and seeing
 // just one number then is how "did the update work?" becomes unanswerable.
 func showVersions(appVersion string) {
+	if appVersion != "" {
+		appRunning = appVersion // what the supervised app says it IS (may lag `current`)
+	}
 	if mVersion == nil {
 		return // headless: the version travels in the handshake, not a menu
 	}
@@ -487,6 +522,9 @@ func checkNativeUpdate(ctx context.Context, upd update.Updater) bool {
 	}
 	latest, ok := upd.Latest(ctx)
 	if !ok || !update.Newer(latest, current) {
+		if v := pendingAssembled(current, appRunning); v != "" && stagedVersion == "" {
+			stageUpdate(v) // assembled earlier, never installed: offer it again
+		}
 		return true // offline / API trouble / already newest — a real look, nothing to do
 	}
 	if !mu.TryLock() {
@@ -504,21 +542,17 @@ func checkNativeUpdate(ctx context.Context, upd update.Updater) bool {
 	// ~400 MB on a slow line) — bounded like the first assembly in start().
 	asmCtx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 	defer cancel()
+	nv.Running = appRunning // never prune the directory the live app runs from
 	if err := nv.Assemble(asmCtx, latest); err != nil {
 		log.Println("native update:", err)
-		setStatus("Running ● (native)") // current version untouched
-		return false                    // a half-finished download deserves a prompt retry
+		setStatus("Running ● (native) — update v" + latest + " download failed, retrying")
+		if latest != lastFailedVersion { // say it ONCE per version — silence read as "can't update"
+			lastFailedVersion = latest
+			stack.Notify("SmartBrain update didn't download", "v"+latest+": "+err.Error()+" — retrying in the background.")
+		}
+		return false // a half-finished download deserves a prompt retry
 	}
-	label := "Update available (v" + latest + ")"
-	stagedVersion = latest // the app can now offer this install in the page itself
-	setStatus(label)
-	setTooltip("SmartBrain — " + label)
-	menuShow(mUpdateNow)
-	menuShow(mUpdateLater)
-	if latest != lastNotifiedVersion {
-		lastNotifiedVersion = latest
-		stack.Notify("SmartBrain update ready", "Install from the menu now — or it installs next time you start.")
-	}
+	stageUpdate(latest)
 	return true
 }
 
@@ -788,6 +822,7 @@ func startNative(ctx context.Context) {
 		setStatus(fmt.Sprintf("Downloading SmartBrain… %s %d%%", artifact, pct))
 	}
 	asmCtx, cancelAsm := context.WithTimeout(ctx, 15*time.Minute)
+	nv.Running = appRunning
 	err := nv.Assemble(asmCtx, version)
 	cancelAsm()
 	if err != nil {
