@@ -38,6 +38,10 @@ export class Speaker {
     private onIdle: (() => void) | null = null, // fires when the queue drains (UI label reset)
   ) {}
 
+  /** Mirrors `speaking` into Svelte state: class fields are invisible to the reactivity
+      graph, and the composer needs a Stop button the whole time a reply is being read. */
+  onSpeaking: ((on: boolean) => void) | null = null;
+
   get speaking(): boolean {
     return this.playing || this.queue.length > 0;
   }
@@ -77,6 +81,7 @@ export class Speaker {
       this.audioEl = null;
     }
     this.playing = false;
+    this.onSpeaking?.(false);
   }
 
   private async pump(): Promise<void> {
@@ -84,6 +89,7 @@ export class Speaker {
     const next = this.queue.shift();
     if (next === undefined) return;
     this.playing = true;
+    this.onSpeaking?.(true);
     try {
       if (this.useSystem === null) this.useSystem = (await voicesReady()).length > 0;
       if (this.stopped) return;
@@ -93,7 +99,10 @@ export class Speaker {
     } finally {
       this.playing = false;
       if (!this.stopped && this.queue.length > 0) void this.pump();
-      else if (!this.stopped && this.queue.length === 0) this.onIdle?.();
+      else {
+        this.onSpeaking?.(false);
+        if (!this.stopped && this.queue.length === 0) this.onIdle?.();
+      }
     }
   }
 
