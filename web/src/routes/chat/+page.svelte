@@ -1862,7 +1862,7 @@
       {:else if recState === "transcribing"}
         <p class="hint">{liveText ? `${liveText}…` : "Writing down what you said…"}</p>
       {:else if micUsable}
-        <p class="hint">🎙 tap the mic or hold Space and talk — it stops when you pause · say “send”, “cancel”, or “start over”{conversation ? " · conversation mode is ON: it answers aloud and listens again" : handsFree ? " · hands-free is ON: dictations send themselves" : ""}</p>
+        <p class="hint"><Icon name="mic" size={12} /> tap the mic or hold Space and talk — it stops when you pause · say “send”, “cancel”, or “start over”{conversation ? " · conversation mode is ON: it answers aloud and listens again" : handsFree ? " · hands-free is ON: dictations send themselves" : ""}</p>
       {/if}
     {/if}
   </div>

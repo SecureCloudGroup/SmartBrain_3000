@@ -340,7 +340,7 @@
             {/each}
             {#if wakeTest === "done"}
               {#if wakeHits >= 2}
-                <p style="margin:0; font-size:0.85rem"><strong>Works:</strong> {wakeHits} of 3 recognised. Turn on conversation mode (🗣 beside the mic in Chat) and just say it.</p>
+                <p style="margin:0; font-size:0.85rem"><strong>Works:</strong> {wakeHits} of 3 recognised. Turn on the Conversation pill above the message box in Chat and just say it.</p>
               {:else if wakeNewSpellings.length}
                 <p style="margin:0; font-size:0.85rem"><strong>The engine spells it differently</strong> — it heard “{wakeNewSpellings.join("”, “")}”. Accept those spellings and the name works as you say it.</p>
                 <p style="margin:0"><button onclick={acceptSpellings}>Accept these spellings</button></p>
@@ -359,10 +359,10 @@
 
         <!-- How to actually use it — the same words the Chat hint teaches. -->
         <div class="rows" style="margin-top:0.6rem">
-          <p class="muted" style="margin:0; font-size:0.85rem"><strong>How to dictate:</strong> in Chat, tap the 🎙 mic (or hold <strong>Space</strong>) and talk — your words appear under the box as you speak; when you pause, the finished transcript lands in the message box.</p>
+          <p class="muted" style="margin:0; font-size:0.85rem"><strong>How to dictate:</strong> in Chat, tap the mic beside the message box (or hold <strong>Space</strong>) and talk — your words appear under the box as you speak; when you pause, the finished transcript lands in the message box.</p>
           <p class="muted" style="margin:0; font-size:0.85rem"><strong>Spoken controls:</strong> end with <em>“send”</em> to submit, say <em>“cancel”</em> to discard, <em>“start over”</em> to redo. <strong>Esc</strong> cancels a recording.</p>
-          <p class="muted" style="margin:0; font-size:0.85rem"><strong>Hands-free (⚡ beside the mic):</strong> every dictation sends itself when you pause. <strong>Spoken replies:</strong> the speaker button reads answers aloud as they arrive; <em>Listen</em> under any answer reads just that one.</p>
-          <p class="muted" style="margin:0; font-size:0.85rem"><strong>Conversation mode (🗣 beside the mic):</strong> 100% voice — you talk, it answers aloud, then listens again. With a wake word set above, it waits for your phrase instead of listening all the time; say <em>“stop listening”</em> or <em>“goodbye”</em> to end. The first mic open needs one tap (a browser rule); after that, no buttons.</p>
+          <p class="muted" style="margin:0; font-size:0.85rem"><strong>Hands-free</strong> (pill above the message box): every dictation sends itself when you pause. <strong>Speak replies</strong> (pill): answers are read aloud as they arrive; <em>Listen</em> under any answer reads just that one.</p>
+          <p class="muted" style="margin:0; font-size:0.85rem"><strong>Conversation</strong> (pill above the message box): 100% voice — you talk, it answers aloud, then listens again. With a wake word set above, it waits for your phrase instead of listening all the time; say <em>“stop listening”</em> or <em>“goodbye”</em> to end. The first mic open needs one tap (a browser rule); after that, no buttons.</p>
         </div>
 
         <!-- The whole voice path, tested in one tap: record → hear yourself → read the
