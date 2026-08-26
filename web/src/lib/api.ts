@@ -742,7 +742,7 @@ export const api = {
     req<ChatResponse>("/api/chat", { method: "POST", body: JSON.stringify(body) }),
 
   // agentic tool-calling turn (OBSERVE auto-runs; dangerous tools park for approval)
-  agentTurn: (body: { messages: ChatMessage[]; model?: string; capability?: string; conversation_id?: string | null }) =>
+  agentTurn: (body: { messages: ChatMessage[]; model?: string; capability?: string; conversation_id?: string | null; reply_length?: string }) =>
     req<AgentResult>("/api/agent/turn", { method: "POST", body: JSON.stringify(body) }),
   // Best-effort implicit-feedback signal (Stop / Regenerate) — telemetry only, never blocks the UI.
   feedback: (kind: "stop" | "regenerate" | "retry", conversation_id?: string | null) =>
@@ -758,6 +758,7 @@ export const api = {
     model?: string;
     capability?: string;
     conversation_id?: string | null;
+    reply_length?: string; // spoken replies: "short" | "medium" | "long"
   }, signal?: AbortSignal): Promise<Response> => {
     await remoteReady;
     const res = await fetch("/api/agent/turn/stream", {
@@ -785,6 +786,7 @@ export const api = {
     // One-time token from the stream's "pending" frame: lets the server reuse the first
     // model response it already produced instead of asking for it again.
     primed?: string | null;
+    reply_length?: string;
   }): Promise<Response> => {
     await remoteReady;
     const res = await fetch("/api/agent/turn/events", {

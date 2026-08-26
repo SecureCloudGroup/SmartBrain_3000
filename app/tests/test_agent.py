@@ -1366,3 +1366,32 @@ def test_auto_resume_is_idempotent_when_double_kicked(monkeypatch) -> None:
     agent_routes._RESUMING_TURNS.add("turn-x")
     ok2 = agent_routes._launch_scheduled_resume(fake_req, "turn-x", "sched-x")
     assert ok2 is False and calls == ["turn-x"]  # no second dispatch
+
+
+def test_reply_length_note_shapes() -> None:
+    from smartbrain_3000.agent_routes import reply_length_note
+    assert "one to three sentences" in reply_length_note("short")["content"]
+    assert reply_length_note("MEDIUM")["role"] == "system"
+    assert reply_length_note("long") is None  # no constraint
+    assert reply_length_note(None) is None and reply_length_note("bogus") is None
+
+
+def test_stream_carries_reply_length_as_trailing_system_note(http_client: TestClient, monkeypatch) -> None:
+    """A spoken turn asks for a length; it reaches the model as the LAST system message,
+    after the static head and the conversation — the prefix cache stays intact."""
+    http_client.post("/api/account/setup", json={"passphrase": "correct-horse"})
+    seen = []
+
+    def fake(messages, model, **kw):
+        seen.append(messages)
+        return _stream({"delta": "ok", "tool_calls": None, "finish_reason": "stop"})
+
+    monkeypatch.setattr(gateway, "chat_stream", fake)
+    r = http_client.post("/api/agent/turn/stream",
+                         json={"messages": [{"role": "user", "content": "hi"}], "reply_length": "short"})
+    assert r.status_code == 200
+    last = seen[-1][-1]
+    assert last["role"] == "system" and "read aloud" in last["content"]
+    assert seen[-1][0]["role"] == "system"  # the static head is still first
+    r = http_client.post("/api/agent/turn/stream", json={"messages": [{"role": "user", "content": "hi"}]})
+    assert r.status_code == 200 and "read aloud" not in seen[-1][-1].get("content", "")
