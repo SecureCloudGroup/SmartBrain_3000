@@ -23,6 +23,21 @@ export function downsample(samples: Float32Array, fromRate: number, toRate: numb
 }
 
 /** Encode mono float samples ([-1, 1]) as a 16-bit PCM WAV file. */
+/** Concatenate captured chunks and produce a 16 kHz mono WAV — the ONE path both the
+    final recording and the live (mid-utterance) snapshots go through. */
+export function partsToWav(parts: Float32Array[], fromRate: number): { blob: Blob; seconds: number } {
+  let length = 0;
+  for (const p of parts) length += p.length;
+  const all = new Float32Array(length);
+  let off = 0;
+  for (const p of parts) {
+    all.set(p, off);
+    off += p.length;
+  }
+  const samples = downsample(all, fromRate, TARGET_RATE);
+  return { blob: new Blob([encodeWav(samples, TARGET_RATE)], { type: "audio/wav" }), seconds: samples.length / TARGET_RATE };
+}
+
 export function encodeWav(samples: Float32Array, sampleRate: number): ArrayBuffer {
   console.assert(sampleRate > 0, "sample rate must be positive");
   const buf = new ArrayBuffer(44 + samples.length * 2);

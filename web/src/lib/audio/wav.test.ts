@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { downsample, encodeWav } from "./wav";
+import { downsample, encodeWav, partsToWav } from "./wav";
 
 describe("downsample", () => {
   it("passes through at equal rates", () => {
@@ -39,5 +39,20 @@ describe("encodeWav", () => {
     const view = new DataView(buf);
     expect(view.getInt16(44, true)).toBe(0x7fff);
     expect(view.getInt16(46, true)).toBe(-0x8000);
+  });
+});
+
+describe("partsToWav", () => {
+  it("concatenates chunks, downsamples to 16 kHz, and reports seconds — the live snapshot path", () => {
+    const parts = [new Float32Array(48000).fill(0.1), new Float32Array(24000).fill(-0.1)]; // 1.5 s at 48 kHz
+    const out = partsToWav(parts, 48000);
+    expect(out.seconds).toBeCloseTo(1.5, 2);
+    expect(out.blob.type).toBe("audio/wav");
+    expect(out.blob.size).toBe(44 + 24000 * 2);
+  });
+  it("is empty-safe: no chunks yet gives a header-only WAV of zero seconds", () => {
+    const out = partsToWav([], 48000);
+    expect(out.seconds).toBe(0);
+    expect(out.blob.size).toBe(44);
   });
 });

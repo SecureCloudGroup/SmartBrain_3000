@@ -7,7 +7,7 @@
 // (/capture-worklet.js): the app's CSP is script-src 'self', which rightly refuses
 // an inline blob: module — the first field test failed exactly there.
 
-import { downsample, encodeWav, TARGET_RATE } from "./wav";
+import { partsToWav, TARGET_RATE } from "./wav";
 
 export class Recorder {
   private stream: MediaStream | null = null;
@@ -78,6 +78,12 @@ export class Recorder {
     }
   }
 
+  /** Everything heard SO FAR as a WAV, without stopping — live transcription re-reads
+      the growing utterance every second or so and shows the words as they come. */
+  snapshot(): { blob: Blob; seconds: number } {
+    return partsToWav(this.parts, this.context?.sampleRate ?? TARGET_RATE);
+  }
+
   /** Stop capturing; returns the WAV plus what was actually heard, so the caller can
       say "that was silence" instead of transcribing nothing and showing nothing. */
   async stop(): Promise<{ blob: Blob; seconds: number; peak: number }> {
@@ -91,21 +97,11 @@ export class Recorder {
     this.node = null;
     this.stream = null;
     this.context = null;
-    const all = new Float32Array(this.length);
-    let off = 0;
-    for (const p of this.parts) {
-      all.set(p, off);
-      off += p.length;
-    }
+    const wav = partsToWav(this.parts, rate);
     this.parts = [];
     this.length = 0;
     const peak = this.peakLevel;
     this.peakLevel = 0;
-    const samples = downsample(all, rate, TARGET_RATE);
-    return {
-      blob: new Blob([encodeWav(samples, TARGET_RATE)], { type: "audio/wav" }),
-      seconds: samples.length / TARGET_RATE,
-      peak,
-    };
+    return { ...wav, peak };
   }
 }

@@ -233,7 +233,7 @@
 
         <!-- How to actually use it — the same words the Chat hint teaches. -->
         <div class="rows" style="margin-top:0.6rem">
-          <p class="muted" style="margin:0; font-size:0.85rem"><strong>How to dictate:</strong> in Chat, tap the 🎙 mic (or hold <strong>Space</strong>) and talk — it stops when you pause and your words land in the message box.</p>
+          <p class="muted" style="margin:0; font-size:0.85rem"><strong>How to dictate:</strong> in Chat, tap the 🎙 mic (or hold <strong>Space</strong>) and talk — your words appear under the box as you speak; when you pause, the finished transcript lands in the message box.</p>
           <p class="muted" style="margin:0; font-size:0.85rem"><strong>Spoken controls:</strong> end with <em>“send”</em> to submit, say <em>“cancel”</em> to discard, <em>“start over”</em> to redo. <strong>Esc</strong> cancels a recording.</p>
           <p class="muted" style="margin:0; font-size:0.85rem"><strong>Hands-free (⚡ beside the mic):</strong> every dictation sends itself when you pause. <strong>Spoken replies:</strong> the speaker button reads answers aloud as they arrive; <em>Listen</em> under any answer reads just that one.</p>
         </div>

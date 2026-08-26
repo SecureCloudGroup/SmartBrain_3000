@@ -11,6 +11,12 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Added
+- **Live transcription.** Your words appear under the message box while you are still
+  talking. The recording so far is re-read every 1.5 s (a fast greedy pass); the full
+  pass at the pause writes the finished transcript into the box, exactly as before.
+  Works the same on the Desktop and on a paired phone.
+
 ### Fixed
 - **Phone dictation actually works now.** The Desktop side of the encrypted link accepts
   messages up to 64 KB, and browsers refuse to send anything larger — the phone's

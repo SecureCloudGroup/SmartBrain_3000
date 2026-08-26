@@ -107,7 +107,7 @@ def status(store, probe: bool = False) -> dict:
     return out
 
 
-def transcribe(store, audio: bytes, content_type: str = "audio/wav") -> str:
+def transcribe(store, audio: bytes, content_type: str = "audio/wav", *, partial: bool = False) -> str:
     """Send captured audio to the local server's /v1/audio/transcriptions; return the text.
 
     Self-healing on the model name: servers refuse ids they haven't loaded (the field
@@ -123,7 +123,7 @@ def transcribe(store, audio: bytes, content_type: str = "audio/wav") -> str:
     global _server_skip_until
     cfg = server_config(store)
     if not cfg["url"] or time.monotonic() < _server_skip_until:
-        return _transcribe_local(audio)  # the zero-touch default: in-process Moonshine
+        return _transcribe_local(audio, partial)  # the zero-touch default: in-process Whisper
     try:
         return _transcribe_server(store, cfg, audio, content_type)
     except VoiceError as exc:
@@ -133,7 +133,7 @@ def transcribe(store, audio: bytes, content_type: str = "audio/wav") -> str:
         _server_skip_until = time.monotonic() + _SERVER_SKIP_SECONDS
         log.warning("voice: server transcription unavailable (%s) — local engine for the next %d min",
                     exc.message, int(_SERVER_SKIP_SECONDS // 60))
-        return _transcribe_local(audio)
+        return _transcribe_local(audio, partial)
 
 
 def reset_server_skip() -> None:
@@ -150,9 +150,9 @@ def _current_engine(store) -> str:
     return "local"
 
 
-def _transcribe_local(audio: bytes) -> str:
+def _transcribe_local(audio: bytes, partial: bool = False) -> str:
     try:
-        return stt_local.transcribe_wav(audio)
+        return stt_local.transcribe_wav(audio, partial=partial)
     except RuntimeError as exc:
         raise VoiceError(503, str(exc)) from None
 

@@ -143,3 +143,19 @@ def test_pct_is_byte_accurate_and_reserves_100_for_ready(monkeypatch) -> None:
     monkeypatch.setattr(moonshine, "_pct", 0)
     moonshine._set_pct(moonshine._TOTAL_BYTES)  # every byte down, engine not loaded yet
     assert moonshine._pct == 99  # 100 means READY, nothing else — the field saw '(100%)' lie
+
+
+def test_partial_decodes_greedily_final_keeps_the_beam(monkeypatch) -> None:
+    """Live snapshots trade beam width for speed; the final pass does not."""
+    beams = []
+
+    class _Model:
+        def transcribe(self, audio, **kw):
+            beams.append(kw["beam_size"])
+            return iter(()), None
+
+    monkeypatch.setattr(moonshine, "_phase", "ready")
+    monkeypatch.setattr(moonshine, "_model", _Model())
+    moonshine.transcribe_wav(_wav(), partial=True)
+    moonshine.transcribe_wav(_wav())
+    assert beams == [1, 5]
