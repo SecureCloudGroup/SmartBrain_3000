@@ -1751,6 +1751,38 @@
   {/if}
 
   <div class="composer">
+    {#if speechPossible || voiceInfo?.stt_available}
+      <!-- Voice MODES live above the field as labeled pills — four unlabeled circles in
+           the input row read as "busy" in the field, and a word beats a guessed icon.
+           The mic itself stays in the row: it is the action, these are the settings. -->
+      <div class="voice-modes" role="group" aria-label="Voice modes">
+        {#if speechPossible}
+          <button
+            class="mode"
+            class:active={autoSpeak}
+            aria-pressed={autoSpeak}
+            title={autoSpeak ? "Replies are read aloud as they arrive — tap to stop" : "Read replies aloud as they arrive"}
+            onclick={toggleAutoSpeak}
+          ><Icon name="speaker" size={14} /> Speak replies</button>
+        {/if}
+        {#if voiceInfo?.stt_available}
+          <button
+            class="mode"
+            class:active={handsFree}
+            aria-pressed={handsFree}
+            title={handsFree ? "Dictation sends itself when you pause (say “cancel” to discard) — tap to turn off" : "Send dictation automatically when you stop talking"}
+            onclick={toggleHandsFree}
+          ><Icon name="zap" size={14} /> Hands-free</button>
+          <button
+            class="mode"
+            class:active={conversation}
+            aria-pressed={conversation}
+            title={conversation ? "Conversation mode is ON: talk, it answers aloud, then listens again (say “stop listening” to end) — tap to turn off" : "100% voice: talk, it answers aloud, then listens again — no buttons between turns"}
+            onclick={toggleConversation}
+          ><Icon name="chat" size={14} /> Conversation{wake.phrase ? ` · “${wake.phrase}”` : ""}</button>
+        {/if}
+      </div>
+    {/if}
     <div class="inner">
       {#if voiceInfo?.stt_available}
         {#if micUsable}
@@ -1794,35 +1826,6 @@
           </button>
         {/if}
       {/if}
-      {#if speechPossible}
-        <button
-          class="voice autospeak"
-          class:active={autoSpeak}
-          title={autoSpeak ? "Stop speaking replies aloud" : "Speak replies aloud"}
-          aria-label={autoSpeak ? "Stop speaking replies aloud" : "Speak replies aloud"}
-          onclick={toggleAutoSpeak}
-        >
-          <Icon name="speaker" size={16} />
-        </button>
-      {/if}
-      {#if voiceInfo?.stt_available}
-        <button
-          class="voice autospeak"
-          class:active={handsFree}
-          title={handsFree ? "Hands-free is ON: dictation sends itself (say “cancel” to discard)" : "Hands-free: send dictation automatically when you stop talking"}
-          aria-label={handsFree ? "Turn hands-free off" : "Turn hands-free on"}
-          onclick={toggleHandsFree}
-        >
-          <Icon name="zap" size={16} />
-        </button>
-        <button
-          class="voice autospeak conversation"
-          class:active={conversation}
-          title={conversation ? "Conversation mode is ON: talk, it answers aloud, then listens again (say “stop listening” to end)" : "Conversation mode: 100% voice — no buttons between turns"}
-          aria-label={conversation ? "Turn conversation mode off" : "Turn conversation mode on"}
-          onclick={toggleConversation}
-        >🗣</button>
-      {/if}
       <textarea
         bind:value={input}
         onkeydown={onKey}
@@ -1859,7 +1862,7 @@
       {:else if recState === "transcribing"}
         <p class="hint">{liveText ? `${liveText}…` : "Writing down what you said…"}</p>
       {:else if micUsable}
-        <p class="hint">🎙 tap the mic or hold Space and talk — it stops when you pause · say “send”, “cancel”, or “start over”{conversation ? " · conversation mode is ON: it answers aloud and listens again" : handsFree ? " · hands-free is ON: dictations send themselves" : ""}</p>
+        <p class="hint"><Icon name="mic" size={12} /> tap the mic or hold Space and talk — it stops when you pause · say “send”, “cancel”, or “start over”{conversation ? " · conversation mode is ON: it answers aloud and listens again" : handsFree ? " · hands-free is ON: dictations send themselves" : ""}</p>
       {/if}
     {/if}
   </div>
@@ -1968,9 +1971,35 @@
     color: var(--danger, #d33);
     opacity: 0.75;
   }
-  .voice.conversation {
-    font-size: 15px;
-    line-height: 1;
+  /* Voice mode pills above the field: quiet outlines, accent fill when ON. */
+  .voice-modes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin: 0 0 0.4rem;
+  }
+  .mode {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    min-height: 0;
+    padding: 3px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-full);
+    background: transparent;
+    color: var(--muted);
+    font-size: 0.75rem;
+    font-weight: 500;
+    cursor: pointer;
+  }
+  .mode:hover {
+    color: var(--text);
+    background: var(--accent-tint);
+  }
+  .mode.active {
+    background: var(--accent-strong);
+    border-color: var(--accent-strong);
+    color: #fff;
   }
   .voice.mic.recording {
     background: var(--danger);
@@ -1979,10 +2008,6 @@
     /* The live level ring: grows with the speaker's voice, so capture is visible —
        a silent ring while talking means the mic ISN'T hearing you, and now you know. */
     box-shadow: 0 0 0 calc(2px + var(--mic-level, 0) * 10px) color-mix(in srgb, var(--danger) 35%, transparent);
-  }
-  .voice.autospeak.active {
-    background: var(--accent-strong);
-    color: #fff;
   }
   .voice.preparing {
     background: var(--accent-tint);
