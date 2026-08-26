@@ -93,7 +93,7 @@ export class Speaker {
     } finally {
       this.playing = false;
       if (!this.stopped && this.queue.length > 0) void this.pump();
-      else if (this.queue.length === 0) this.onIdle?.();
+      else if (!this.stopped && this.queue.length === 0) this.onIdle?.();
     }
   }
 

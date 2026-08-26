@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { downsample, encodeWav, partsToWav } from "./wav";
+import { downsample, encodeWav, partsToWav, trimParts } from "./wav";
 
 describe("downsample", () => {
   it("passes through at equal rates", () => {
@@ -54,5 +54,17 @@ describe("partsToWav", () => {
     const out = partsToWav([], 48000);
     expect(out.seconds).toBe(0);
     expect(out.blob.size).toBe(44);
+  });
+});
+
+describe("trimParts", () => {
+  it("keeps the newest chunks up to the window and never splits a chunk", () => {
+    const parts = [1, 2, 3, 4].map((n) => new Float32Array(100).fill(n));
+    const kept = trimParts(parts, 250);
+    expect(kept.map((p) => p[0])).toEqual([2, 3, 4]); // 300 samples: dropping one more would go under 250
+  });
+  it("returns the same array when already within the window", () => {
+    const parts = [new Float32Array(10)];
+    expect(trimParts(parts, 100)).toBe(parts);
   });
 });

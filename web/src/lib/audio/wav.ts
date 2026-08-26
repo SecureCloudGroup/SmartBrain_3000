@@ -22,7 +22,19 @@ export function downsample(samples: Float32Array, fromRate: number, toRate: numb
   return out;
 }
 
-/** Encode mono float samples ([-1, 1]) as a 16-bit PCM WAV file. */
+/** Drop the OLDEST chunks until at most `maxSamples` remain — standby listening keeps a
+    short rolling window instead of growing without bound while nothing is said. */
+export function trimParts(parts: Float32Array[], maxSamples: number): Float32Array[] {
+  let total = 0;
+  for (const p of parts) total += p.length;
+  let i = 0;
+  while (i < parts.length && total - parts[i].length >= maxSamples) {
+    total -= parts[i].length;
+    i++;
+  }
+  return i === 0 ? parts : parts.slice(i);
+}
+
 /** Concatenate captured chunks and produce a 16 kHz mono WAV — the ONE path both the
     final recording and the live (mid-utterance) snapshots go through. */
 export function partsToWav(parts: Float32Array[], fromRate: number): { blob: Blob; seconds: number } {
@@ -38,6 +50,7 @@ export function partsToWav(parts: Float32Array[], fromRate: number): { blob: Blo
   return { blob: new Blob([encodeWav(samples, TARGET_RATE)], { type: "audio/wav" }), seconds: samples.length / TARGET_RATE };
 }
 
+/** Encode mono float samples ([-1, 1]) as a 16-bit PCM WAV file. */
 export function encodeWav(samples: Float32Array, sampleRate: number): ArrayBuffer {
   console.assert(sampleRate > 0, "sample rate must be positive");
   const buf = new ArrayBuffer(44 + samples.length * 2);

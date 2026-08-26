@@ -10,6 +10,7 @@
   import { account } from "$lib/account.svelte";
   import { api, ApiError, type AppStatus } from "$lib/api";
   import { Recorder } from "$lib/audio/recorder";
+  import { loadWakeWord, matchWake, saveWakeWord } from "$lib/audio/wakeword";
   import { SPEECH_RATE_KEY, speechRate } from "$lib/audio/speaker";
   import { describeError } from "$lib/errors";
 
@@ -27,6 +28,7 @@
   }
 
   onMount(async () => {
+    ({ phrase: wakePhrase, aliases: wakeAliases } = loadWakeWord());
     await load();
     timer = setInterval(load, 3000);
   });
@@ -116,6 +118,83 @@
       playing = false;
       micTestError = `Playback failed: ${err instanceof Error ? err.message : String(err)}`;
     }
+  }
+  // ---- Wake word: the user's own phrase, TESTED here before it is relied on. ----
+  // The engine spells unusual names its own way; three tries show exactly what it hears,
+  // and the spellings it produced can be accepted as aliases so the name works naturally.
+  const wakeRec = new Recorder();
+  let wakePhrase = $state("");
+  let wakeAliases = $state<string[]>([]);
+  let wakeTest = $state<"idle" | "listening" | "processing" | "done">("idle");
+  let wakeRound = $state(0);
+  let wakeHeard = $state<{ heard: string; hit: boolean }[]>([]);
+  let wakeError = $state("");
+  let wakeLevel = $state(0);
+  let wakeSaved = $state("");
+  let wakeLoud = false;
+  let wakeLastLoud = 0;
+  wakeRec.onLevel = (rms) => {
+    wakeLevel = Math.min(1, rms * 6);
+    if (rms > 0.012) wakeLoud = true;
+    if (rms > 0.006) wakeLastLoud = performance.now();
+  };
+  const wakeHits = $derived(wakeHeard.filter((h) => h.hit).length);
+  // Spellings the engine produced that the phrase did NOT already accept — the aliases on offer.
+  const wakeNewSpellings = $derived(
+    wakeHeard
+      .filter((h) => !h.hit && h.heard)
+      .map((h) => h.heard.split(" ").slice(0, wakePhrase.trim().split(/\s+/).length).join(" "))
+      .filter((v, i, a) => v && a.indexOf(v) === i),
+  );
+  function saveWake() {
+    saveWakeWord(wakePhrase, wakeAliases);
+    wakeSaved = wakePhrase.trim() ? `Saved — “${wakePhrase.trim()}” is your wake word.` : "Wake word cleared.";
+  }
+  function acceptSpellings() {
+    wakeAliases = [...new Set([...wakeAliases, ...wakeNewSpellings])];
+    wakeHeard = wakeHeard.map((h) => ({ ...h, hit: h.hit || matchWake(h.heard, wakePhrase, wakeAliases).hit }));
+    saveWake();
+  }
+  async function runWakeTest() {
+    if (wakeTest === "listening" || wakeTest === "processing" || !wakePhrase.trim()) return;
+    wakeError = "";
+    wakeHeard = [];
+    for (wakeRound = 1; wakeRound <= 3; wakeRound++) {
+      try {
+        await wakeRec.start();
+      } catch (err) {
+        wakeError = `Could not start the microphone: ${err instanceof Error ? err.message : String(err)}`;
+        wakeTest = "idle";
+        return;
+      }
+      wakeTest = "listening";
+      wakeLoud = false;
+      wakeLastLoud = performance.now();
+      const started = performance.now();
+      // Endpoint exactly like Chat: speech heard, then ~1.2 s of quiet; 8 s with nothing.
+      await new Promise<void>((done) => {
+        const t = setInterval(() => {
+          const now = performance.now();
+          if ((wakeLoud && now - wakeLastLoud > 1200) || now - started > 8000) {
+            clearInterval(t);
+            done();
+          }
+        }, 100);
+      });
+      wakeTest = "processing";
+      try {
+        const rec = await wakeRec.stop();
+        wakeLevel = 0;
+        const r = wakeLoud ? await api.voiceTranscribe(rec.blob) : { text: "" };
+        const m = matchWake(r.text, wakePhrase, wakeAliases);
+        wakeHeard = [...wakeHeard, { heard: m.heard, hit: m.hit }];
+      } catch (err) {
+        wakeError = err instanceof ApiError && err.message ? err.message : describeError(err);
+        wakeTest = "done";
+        return;
+      }
+    }
+    wakeTest = "done";
   }
   let micTest = $state<"idle" | "recording" | "processing" | "done">("idle");
   let micTestLevel = $state(0);
@@ -231,11 +310,59 @@
           </select>
         </div>
 
+        <div class="srow" style="align-items:flex-start; flex-wrap:wrap; gap:0.5rem">
+          <span>Wake word <span class="muted">(conversation mode — “Hey Siri”, but yours)</span></span>
+          <span style="display:flex; gap:0.4rem; flex-wrap:wrap; align-items:center">
+            <input
+              type="text"
+              bind:value={wakePhrase}
+              placeholder="Hey SmartBrain"
+              aria-label="Wake word"
+              style="min-width:11rem"
+            />
+            <button class="secondary" onclick={saveWake} disabled={wakeTest === "listening" || wakeTest === "processing"}>Save</button>
+            <button onclick={runWakeTest} disabled={!wakePhrase.trim() || wakeTest === "listening" || wakeTest === "processing"}>
+              {wakeTest === "listening" ? `Say it now… (${wakeRound} of 3)` : wakeTest === "processing" ? "Checking…" : "Test recognition"}
+            </button>
+          </span>
+        </div>
+        {#if wakeSaved}
+          <p class="muted" style="margin:0; font-size:0.85rem">{wakeSaved}</p>
+        {/if}
+        {#if wakeTest === "listening"}
+          <div class="bar"><div class="fill" style={`width:${Math.round(wakeLevel * 100)}%`}></div></div>
+          <p class="muted" style="margin:0; font-size:0.85rem">Say <strong>“{wakePhrase}”</strong> the way you naturally would — it stops when you pause.</p>
+        {/if}
+        {#if wakeHeard.length}
+          <div class="rows" style="margin:0.25rem 0">
+            {#each wakeHeard as h, i (i)}
+              <p class="muted" style="margin:0; font-size:0.85rem">{i + 1}. heard <em>“{h.heard || "(nothing)"}”</em> — {h.hit ? "✓ recognised" : "✗ not recognised"}</p>
+            {/each}
+            {#if wakeTest === "done"}
+              {#if wakeHits >= 2}
+                <p style="margin:0; font-size:0.85rem"><strong>Works:</strong> {wakeHits} of 3 recognised. Turn on conversation mode (🗣 beside the mic in Chat) and just say it.</p>
+              {:else if wakeNewSpellings.length}
+                <p style="margin:0; font-size:0.85rem"><strong>The engine spells it differently</strong> — it heard “{wakeNewSpellings.join("”, “")}”. Accept those spellings and the name works as you say it.</p>
+                <p style="margin:0"><button onclick={acceptSpellings}>Accept these spellings</button></p>
+              {:else}
+                <p style="margin:0; font-size:0.85rem"><strong>Not recognised.</strong> Try a phrase with two clear words (“Hey Catherine”), a little closer to the microphone, or check the Mic &amp; speaker test below.</p>
+              {/if}
+            {/if}
+          </div>
+        {/if}
+        {#if wakeAliases.length}
+          <p class="muted" style="margin:0; font-size:0.85rem">Accepted spellings: {wakeAliases.join(", ")} <button class="secondary" style="margin-left:0.4rem" onclick={() => { wakeAliases = []; saveWake(); }}>clear</button></p>
+        {/if}
+        {#if wakeError}
+          <p class="error" style="margin:0; font-size:0.85rem">{wakeError}</p>
+        {/if}
+
         <!-- How to actually use it — the same words the Chat hint teaches. -->
         <div class="rows" style="margin-top:0.6rem">
           <p class="muted" style="margin:0; font-size:0.85rem"><strong>How to dictate:</strong> in Chat, tap the 🎙 mic (or hold <strong>Space</strong>) and talk — your words appear under the box as you speak; when you pause, the finished transcript lands in the message box.</p>
           <p class="muted" style="margin:0; font-size:0.85rem"><strong>Spoken controls:</strong> end with <em>“send”</em> to submit, say <em>“cancel”</em> to discard, <em>“start over”</em> to redo. <strong>Esc</strong> cancels a recording.</p>
           <p class="muted" style="margin:0; font-size:0.85rem"><strong>Hands-free (⚡ beside the mic):</strong> every dictation sends itself when you pause. <strong>Spoken replies:</strong> the speaker button reads answers aloud as they arrive; <em>Listen</em> under any answer reads just that one.</p>
+          <p class="muted" style="margin:0; font-size:0.85rem"><strong>Conversation mode (🗣 beside the mic):</strong> 100% voice — you talk, it answers aloud, then listens again. With a wake word set above, it waits for your phrase instead of listening all the time; say <em>“stop listening”</em> or <em>“goodbye”</em> to end. The first mic open needs one tap (a browser rule); after that, no buttons.</p>
         </div>
 
         <!-- The whole voice path, tested in one tap: record → hear yourself → read the
