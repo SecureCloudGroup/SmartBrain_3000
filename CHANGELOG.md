@@ -11,6 +11,8 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.9.30] - 2026-08-26
+
 ### Changed
 - **Calmer voice controls.** The three voice modes — Speak replies, Hands-free,
   Conversation — are now labeled pills in a row above the message box instead of
