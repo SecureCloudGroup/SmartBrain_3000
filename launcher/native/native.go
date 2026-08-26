@@ -121,6 +121,11 @@ type Native struct {
 	// Called from the downloading goroutine, at most once per percent step, and only
 	// when the server said how big the file is. Nil = the old silent behavior.
 	Progress func(artifact string, percent int)
+	// Running is the version the supervised app reports it is executing (from the
+	// launcher's handshake), which can lag `current` while a staged update waits for its
+	// click. Pruning must keep it: deleting the directory under a live interpreter turns
+	// the next lazy import into a crash. Empty = unknown (nothing extra kept).
+	Running string
 }
 
 // New returns a Native rooted beside the launcher's existing state dir.
@@ -259,7 +264,7 @@ func (n Native) Assemble(ctx context.Context, version string) error {
 	if err := n.writeCurrent(version); err != nil {
 		return err
 	}
-	n.pruneVersions(version, prev)
+	n.pruneVersions(version, prev, n.Running)
 	return nil
 }
 

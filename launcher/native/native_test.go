@@ -1134,7 +1134,7 @@ func TestPruneVersionsKeepsCurrentAndPreviousOnly(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	n.pruneVersions("0.9.23", "0.9.22")
+	n.pruneVersions("0.9.23", "0.9.22", "") // unknown running version keeps nothing extra
 	entries, _ := os.ReadDir(n.versionsDir())
 	var names []string
 	for _, e := range entries {
@@ -1148,5 +1148,19 @@ func TestPruneVersionsKeepsCurrentAndPreviousOnly(t *testing.T) {
 		if !want[nm] {
 			t.Fatalf("unexpected survivor %q (in-flight .tmp- and the two kept versions only)", nm)
 		}
+	}
+}
+
+func TestPruneVersionsKeepsTheRunningVersion(t *testing.T) {
+	n := New(t.TempDir())
+	for _, v := range []string{"0.9.25", "0.9.26", "0.9.27"} {
+		if err := os.MkdirAll(n.versionDir(v), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// 0.9.26 was staged but never installed; the app still RUNS 0.9.25; 0.9.27 lands.
+	n.pruneVersions("0.9.27", "0.9.26", "0.9.25")
+	if _, err := os.Stat(n.versionDir("0.9.25")); err != nil {
+		t.Fatalf("the running version's directory was pruned from under the live app: %v", err)
 	}
 }
