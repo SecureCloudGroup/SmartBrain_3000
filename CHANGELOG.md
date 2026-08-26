@@ -11,6 +11,8 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.9.28] - 2026-08-26
+
 ### Fixed
 - **The launcher no longer strands a downloaded app update.** After a launcher
   self-update, a restart adopted the still-running old app while the newer app version
