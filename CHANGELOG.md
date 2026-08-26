@@ -11,6 +11,8 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.9.31] - 2026-08-26
+
 ### Added
 - **Short · Medium · Long for spoken replies.** A segmented pill in the voice row sets how
   long replies should be when they are read aloud (Speak replies or Conversation on);
