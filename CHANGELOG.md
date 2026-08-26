@@ -11,6 +11,12 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Changed
+- **Calmer voice controls.** The three voice modes — Speak replies, Hands-free,
+  Conversation — are now labeled pills in a row above the message box instead of
+  unlabeled circles crowding the input; the mic stays beside the field. Same on the
+  phone. The Conversation pill shows your wake word when one is set.
+
 ## [0.9.29] - 2026-08-26
 
 ### Added
