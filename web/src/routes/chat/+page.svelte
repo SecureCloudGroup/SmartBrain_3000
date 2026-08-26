@@ -209,6 +209,7 @@
   let conversation = $state(false);
   let wake = $state<{ phrase: string; aliases: string[] }>({ phrase: "", aliases: [] });
   let fromStandby = false; // this recording began by waking from standby → check the phrase
+  let micOpening = false; // getUserMedia is in flight: a second opener must wait, not race
   let lastWakeMiss = $state(""); // what standby heard that was NOT the phrase (a hint, not an error)
   function toggleConversation() {
     conversation = !conversation;
@@ -225,8 +226,9 @@
     }
   }
   async function startStandby(): Promise<void> {
-    if (!conversation || !wake.phrase || recState !== "idle" || !micUsable) return;
+    if (!conversation || !wake.phrase || recState !== "idle" || !micUsable || micOpening) return;
     error = "";
+    micOpening = true;
     try {
       recorder.rolling = 2;
       await recorder.start();
@@ -237,6 +239,8 @@
       console.error("standby mic failed:", err);
       error = "Couldn't open the microphone for the wake word — tap the mic to allow it.";
       conversation = false;
+    } finally {
+      micOpening = false;
     }
   }
   // Speech heard in standby: keep everything from here on and run the normal endpointing.
@@ -252,7 +256,7 @@
   }
   // The reply finished speaking: reopen the mic for the follow-up (conversation mode).
   function afterReplySpoken(): void {
-    if (!conversation || recState !== "idle" || busy) return;
+    if (!conversation || recState !== "idle" || busy || micOpening) return;
     void (wake.phrase ? startStandby() : startRecording());
   }
   // ---- Live transcription: words show up WHILE you talk. ----
@@ -398,9 +402,11 @@
   }
 
   async function startRecording(): Promise<void> {
+    if (micOpening || recState !== "idle") return;
     speaker.stop(); // barge-in: talking to it interrupts it
     listeningId = null;
     error = "";
+    micOpening = true;
     try {
       recorder.rolling = null; // a full take: keep every sample from the first syllable
       await recorder.start();
@@ -419,6 +425,8 @@
       } else {
         error = `Could not start the microphone: ${err instanceof Error ? err.message : String(err)}`;
       }
+    } finally {
+      micOpening = false;
     }
   }
 
@@ -499,7 +507,7 @@
     } finally {
       liveText = "";
       if (recState === "transcribing") recState = "idle";
-      if (conversation && recState === "idle" && !busy && wake.phrase) void startStandby();
+      if (conversation && recState === "idle" && !busy && wake.phrase && !speaker.speaking) void startStandby();
     }
   }
 
@@ -508,7 +516,7 @@
   function onVoiceKeydown(e: KeyboardEvent): void {
     const el = document.activeElement as HTMLElement | null;
     const typing = !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable);
-    if (e.code === "Escape" && recState === "recording") {
+    if (e.code === "Escape" && (recState === "recording" || recState === "standby")) {
       e.preventDefault();
       void cancelRecording();
       return;

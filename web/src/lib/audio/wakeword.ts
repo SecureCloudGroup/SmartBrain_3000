@@ -60,7 +60,7 @@ export function matchWake(transcript: string, phrase: string, aliases: string[] 
 /** Spoken exits from conversation mode — a whole short utterance, not a mid-sentence word. */
 export function isStopListening(text: string): boolean {
   const t = normalizeWake(text);
-  return /^(stop listening|stop|goodbye|good bye|bye|that s all|thats all|go to sleep)( now)?$/.test(t);
+  return /^(stop listening|goodbye|good bye|bye|that s all|thats all|go to sleep)( now)?$/.test(t);
 }
 
 export function loadWakeWord(): { phrase: string; aliases: string[] } {

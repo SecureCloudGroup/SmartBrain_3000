@@ -30,6 +30,7 @@ describe("isStopListening / normalizeWake", () => {
     expect(isStopListening("Stop listening.")).toBe(true);
     expect(isStopListening("goodbye")).toBe(true);
     expect(isStopListening("please stop the server")).toBe(false);
+    expect(isStopListening("stop")).toBe(false); // a fragment, not an exit
   });
   it("normalizes punctuation and case", () => {
     expect(normalizeWake("  Hey, MERL!  ")).toBe("hey merl");

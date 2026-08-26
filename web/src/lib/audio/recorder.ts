@@ -31,7 +31,7 @@ export class Recorder {
 
   /** Ask for the mic and start capturing. Throws (with the browser's reason) on denial. */
   async start(): Promise<void> {
-    console.assert(!this.context, "recorder already running");
+    if (this.context) throw new Error("recorder already running");
     this.stream = await navigator.mediaDevices.getUserMedia({
       audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 },
     });
@@ -109,6 +109,7 @@ export class Recorder {
     const wav = partsToWav(this.parts, rate);
     this.parts = [];
     this.length = 0;
+    this.rolling = null; // every take starts from the caller's explicit choice
     const peak = this.peakLevel;
     this.peakLevel = 0;
     return { ...wav, peak };
