@@ -17,7 +17,7 @@ most sit in the bottom bar (Chat, Knowledge, Info, Activity) and the rest are un
 | **Info** | The output of your scheduled runs, newest first. |
 | **Activity** | Approvals waiting for you, and the record of everything the assistant tried. |
 | **Usage** | What your cloud models have cost. |
-| **Settings** | Everything you configure — and **Status**, a live view of everything the app is doing. Desktop only. |
+| **Settings** | Everything you configure — and **Status**, a live view of everything the app is doing. Desktop only. Tab by tab under [Settings](#settings), below. |
 
 Below them sit four controls: **Help** (this guide, offline, no unlock needed), **Theme**
 (follow the system, or force light or dark), **Lock**, and — on a paired phone — **Unpair**.
@@ -147,9 +147,9 @@ Above the message box sits a row of labeled pills. Each is a mode you leave on:
 - **Conversation** — 100% voice. You talk, it sends itself, the reply is spoken, and the
   mic reopens for your follow-up. Say **“stop listening”** or **“goodbye”** to end. The
   first mic open still needs one tap (a browser rule); after that, no buttons. To cut a
-  reply short, press **Stop** — or, with a wake word set, say the phrase over it. (The
-  mic stays closed while a reply is read unless a wake word is set: the microphone hears
-  the reply too, and only your phrase can tell the two apart.)
+  reply short, press **Stop**. (The microphone stays closed while a reply is read: it
+  would hear the reply too, and an open microphone makes the system turn the voice
+  down — so the mic opens the moment the voice finishes.)
 - **Short · Medium · Long** — how long *spoken* replies should be. It applies only while
   replies are read aloud (Speak replies or Conversation on); typed chat is unaffected. The
   default is **Short**, because a long spoken answer is tiring — Long is one tap away when
@@ -544,6 +544,90 @@ An action left unanswered **expires after an hour**, and **locking cancels every
 pending** — in both cases the action never runs at all. When you deny one instead, the
 assistant is told it wasn't approved and carries on from there; it is never told an action
 succeeded when it didn't.
+
+## Settings
+
+Everything you configure lives under **Settings**, as a row of tabs. It is Desktop-only: a
+paired phone shows a note to make changes on the Desktop instead. Opening Settings lands on
+**Cloud providers**; the tabs, in order:
+
+### Status
+
+A live view of what the app is doing right now, refreshed every few seconds — the first
+place to look when something seems off.
+
+- **App** — the version you are running and whether the vault is unlocked.
+- **Voice** — the built-in dictation model (download progress, or **Retry download** if it
+  failed), which dictation engine is in use (**built-in** or **your audio server**), the
+  server voice if you set one, **Playback speed** for spoken replies (0.8× to 2×), your
+  **Wake word** with **Test recognition** and accepted spellings, the how-to-dictate
+  notes, and the **Mic & speaker check**: **Test now** records three seconds with a level
+  bar, plays them back, and shows what dictation heard — the fastest way to tell a
+  microphone problem from a voice problem. See [Voice](#voice).
+- **Storage & memory** — disk used by everything SmartBrain stores (with the folder), by
+  the encrypted database and the voice model, the app's peak memory, and this browser's
+  cache.
+- **Model servers** — whether Ollama, MLX, and MLX embeddings are configured (live
+  reachability is on the Local models tab).
+- **Knowledge**, **Schedules**, **Feeds**, **Remote access** — document and embedded-chunk
+  counts, enabled schedules, feed subscriptions (with a **failing** count when a feed
+  can't be fetched), and paired devices.
+
+### Cloud providers
+
+API keys for **OpenAI**, **Anthropic**, and **Google (Gemini)** — stored encrypted, never
+shown back, replace or remove only. Saving a key discovers its chat models. Details:
+[Connect a model](02-models.md#cloud-providers-your-api-keys).
+
+### Local models
+
+Optional servers on your own machines: **Ollama**, **MLX**, **MLX embeddings**, and the
+**Voice** card (an optional audio server and server voice — the built-in dictation needs
+none of this). Each card shows **connected / unreachable / off**, offers **Connect it** when
+a server is detected on this machine, and has a **Server on another machine** option.
+Details: [Local models](02-models.md#local-models-yours-on-this-machine-or-another-one-you-own)
+and [Voice](02-models.md#voice-dictation-and-spoken-replies).
+
+### Model routing
+
+Which model serves each job — chat, the agent (schedules and background tasks; **Same as
+Chat** by default), embeddings for search — and **Model context length** per routed model.
+Details: [Which model does what](02-models.md#which-model-does-what-model-routing).
+
+### Web search
+
+Which engine "search the web" uses: **Automatic**, **SearXNG** (your own instance),
+**Brave Search**, **Tavily**, or **DuckDuckGo** (no key). Keys are stored encrypted.
+Details: [Web search](#web-search).
+
+### Memory
+
+The assistant's name, your name, custom instructions, and the list of remembered facts
+(**Remember** / **Forget**). Details: [Memory](#memory).
+
+### Self-improvement
+
+**Self-review** cadence (**Off / 2h / 4h / 8h / 24h**), the **Prompt optimizer** switch, and
+the record of everything it proposed, applied, kept, or reverted. Both are off until you
+turn them on. Details: [Self-improvement](#self-improvement).
+
+### Connections (MCP)
+
+The endpoint and access token that let a desktop AI client read your knowledge over MCP
+— **Generate**, **Copy**, **Regenerate**, **Revoke**. Details: [MCP access](05-mcp.md).
+
+### Remote access
+
+**Pair a new phone** (a QR code that opens the app, plus a six-character code that
+expires) and the list of **paired devices** with **Revoke**. Details:
+[Remote access](08-remote-access.md).
+
+### Account & Data
+
+**Change passphrase** (or set a new one after a Recovery-Key unlock), **Export & backup**
+(readable JSON export, or the full encrypted database), **Chat trash** (restore or empty;
+30-day retention), and **Restore** from a backup file, applied on the next restart.
+Details: [Backup & recovery](06-backup-recovery.md).
 
 ## Next
 

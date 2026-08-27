@@ -241,12 +241,11 @@
     }
   }
   async function startStandby(): Promise<void> {
-    // Standby exists ONLY for a wake word. While a reply is read aloud the mic hears the
-    // reply itself (OS speech is outside the browser's echo cancellation; on a phone the
-    // speaker sits beside the mic) — a level gate cannot tell that from you, and the
-    // field got a feedback loop. With a wake word the phrase is the filter, so the mic
-    // may stay open while it speaks; without one the interrupt is the Stop button.
-    if (!conversation || !wake.phrase || recState !== "idle" || !micUsable || micOpening) return;
+    // Standby exists ONLY for a wake word, and never while a reply is being read: the mic
+    // would hear the reply (OS speech is outside the browser's echo cancellation — the
+    // field got a feedback loop) and an open capture makes the OS duck the voice (the
+    // field heard replies fade). Interrupting a reply is the Stop button.
+    if (!conversation || !wake.phrase || recState !== "idle" || !micUsable || micOpening || speaker.speaking) return;
     error = "";
     micOpening = true;
     try {
@@ -548,7 +547,7 @@
     } finally {
       liveText = "";
       if (recState === "transcribing") recState = "idle";
-      if (conversation && recState === "idle" && !busy && wake.phrase) void startStandby();
+      if (conversation && recState === "idle" && !busy && wake.phrase && !speaker.speaking) void startStandby();
     }
   }
 
@@ -1094,9 +1093,10 @@
       // Conversation mode: if the reply is not being spoken (auto-speak off, or it
       // finished before the turn closed), reopen the mic now; otherwise the Speaker's
       // idle callback does it when the last sentence ends.
-      if (speaker.speaking) {
-        if (wake.phrase) void startStandby(); // "Hey Merl" over the reply interrupts it
-      } else afterReplySpoken();
+      // Never hold the mic open while the reply is read: an active capture makes the OS
+      // DUCK its own audio (macOS voice-processing, iOS play-and-record) — the field heard
+      // replies start loud and fade. The Speaker's idle callback reopens the mic after.
+      if (!speaker.speaking) afterReplySpoken();
     }
   }
 
