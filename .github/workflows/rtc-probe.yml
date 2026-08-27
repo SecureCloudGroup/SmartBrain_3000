@@ -9,7 +9,9 @@ name: RTC probe
 
 on:
   schedule:
-    - cron: "*/30 * * * *"
+    # Off the :00/:30 marks on purpose: GitHub drops or delays schedules most on the
+    # busiest minutes of the hour, and this one never fired at */30 in seven tries.
+    - cron: "7,37 * * * *"
   workflow_dispatch:
 
 permissions:
