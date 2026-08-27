@@ -11,6 +11,13 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Fixed
+- **Spoken replies no longer fade.** With a wake word set, the microphone opened while the
+  reply was still being read, and an active microphone makes the operating system turn
+  its own audio down (macOS voice processing, iOS even more) — replies started loud and
+  got softer. The mic now opens only after the voice finishes; Stop is the way to cut a
+  reply short.
+
 ## [0.9.32] - 2026-08-26
 
 ### Fixed

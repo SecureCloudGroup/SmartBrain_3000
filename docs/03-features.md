@@ -147,9 +147,9 @@ Above the message box sits a row of labeled pills. Each is a mode you leave on:
 - **Conversation** — 100% voice. You talk, it sends itself, the reply is spoken, and the
   mic reopens for your follow-up. Say **“stop listening”** or **“goodbye”** to end. The
   first mic open still needs one tap (a browser rule); after that, no buttons. To cut a
-  reply short, press **Stop** — or, with a wake word set, say the phrase over it. (The
-  mic stays closed while a reply is read unless a wake word is set: the microphone hears
-  the reply too, and only your phrase can tell the two apart.)
+  reply short, press **Stop**. (The microphone stays closed while a reply is read: it
+  would hear the reply too, and an open microphone makes the system turn the voice
+  down — so the mic opens the moment the voice finishes.)
 - **Short · Medium · Long** — how long *spoken* replies should be. It applies only while
   replies are read aloud (Speak replies or Conversation on); typed chat is unaffected. The
   default is **Short**, because a long spoken answer is tiring — Long is one tap away when
