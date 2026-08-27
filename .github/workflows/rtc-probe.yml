@@ -42,13 +42,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          body="The scheduled probe of rtc.securecloudgroup.com failed at $(date -u +%Y-%m-%dT%H:%M:%SZ).
-
-\`\`\`
-$(cat probe.log)
-\`\`\`
-
-Runbook: docs/internal/rtc-runbook.md"
+          body="$(printf 'The scheduled probe of rtc.securecloudgroup.com failed at %s.\n\n~~~\n%s\n~~~\n\nRunbook: docs/internal/rtc-runbook.md\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(cat probe.log)")"
           num=$(gh issue list --label rtc-outage --state open --json number --jq '.[0].number')
           if [ -n "$num" ]; then gh issue comment "$num" --body "$body"; else gh issue create --title "RTC node probe failing" --label rtc-outage --body "$body"; fi
       - name: Close the outage issue on recovery
