@@ -170,7 +170,7 @@ def test_run_schedule_grounds_the_prompt(monkeypatch) -> None:
 def test_run_schedule_honors_remembered_consent(monkeypatch) -> None:
     # A scheduled run must honor remembered writes (no user at the approval tile).
     store, conn, _ = _store()
-    consent.remember(conn, "remember_fact")  # a remembered REVIEWED write
+    consent.remember(conn, "add_task")  # a remembered REVIEWED write
     sid = store.add_schedule("o", "do it", interval_minutes=0, start_in_minutes=0, model="m")
     seen = {}
 
@@ -180,14 +180,14 @@ def test_run_schedule_honors_remembered_consent(monkeypatch) -> None:
 
     monkeypatch.setattr(agent, "run_turn", fake)
     scheduler.run_schedule(tools.ToolContext(), None, None, store, store.get_schedule(sid))
-    assert "remember_fact" in seen["ran"]["auto_approve"]
+    assert "add_task" in seen["ran"]["auto_approve"]
 
 
 def test_run_schedule_never_auto_approves_schedule_writes(monkeypatch) -> None:
     # Security: even if the user remembered create/update/set_enabled in interactive chat, an
     # AUTONOMOUS scheduled turn must NOT auto-run them (an injected prompt could otherwise spawn
-    # self-perpetuating schedules). They're stripped from auto_approve so they always park; other
-    # remembered writes (remember_fact) still auto-run.
+    # self-perpetuating schedules). They're stripped from auto_approve so they always park — and so
+    # is remember_fact: a fact written unattended lands in every later system prompt.
     store, conn, _ = _store()
     for name in ("remember_fact", "create_schedule", "update_schedule", "set_schedule_enabled"):
         consent.remember(conn, name)
@@ -196,8 +196,8 @@ def test_run_schedule_never_auto_approves_schedule_writes(monkeypatch) -> None:
     monkeypatch.setattr(agent, "run_turn", lambda *a, **k: seen.update(k) or {"status": "complete"})
     scheduler.run_schedule(tools.ToolContext(), None, None, store, store.get_schedule(sid))
     auto = seen["auto_approve"]
-    assert "remember_fact" in auto  # ordinary remembered write still honored
-    assert auto.isdisjoint(tools.SCHEDULE_WRITE_TOOLS)  # every schedule-mutating tool stripped
+    assert "remember_fact" not in auto  # memory writes never run unattended on a standing grant
+    assert auto.isdisjoint(tools.UNATTENDED_NEVER_AUTO)  # schedule writes + memory writes stripped
 
 
 def test_run_schedule_no_model_errors(monkeypatch) -> None:

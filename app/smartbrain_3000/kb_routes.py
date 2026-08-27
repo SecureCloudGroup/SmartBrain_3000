@@ -57,7 +57,10 @@ def _refuse_if_vault_owned(request: Request, doc_id: str) -> None:
     if store is None:
         return  # defense in depth: account._set_unlocked always sets kb and vaults together
     info = store.import_provenance(doc_id)
-    if info is not None:
+    # Only IMPORT-origin copies can be replaced by a publisher's update. A FEED-origin item is
+    # marked untrusted for the model's sake (same provenance lookup) but is additive-only
+    # ingestion — the user may rename or delete it like any note of their own.
+    if info is not None and info.get("origin") == "import":
         raise HTTPException(
             status_code=409,
             detail=f"this document came from the imported vault “{info['name']}” and a "

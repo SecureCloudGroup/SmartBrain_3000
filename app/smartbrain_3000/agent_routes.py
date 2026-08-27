@@ -270,7 +270,7 @@ def _resume_scheduled_worker(ctx, audit, approvals, conn, schedules, turn_id: st
         usage.record_response(conn, used_model, response)
 
     try:
-        auto_approve = consent.remembered(conn) - tools.SCHEDULE_WRITE_TOOLS
+        auto_approve = consent.remembered(conn) - tools.UNATTENDED_NEVER_AUTO
         result = agent.resume_turn(
             ctx, audit, approvals, turn_id, conn=conn, usage_sink=sink,
             auto_approve=auto_approve, timeout=scheduler._AGENT_TURN_TIMEOUT,

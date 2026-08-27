@@ -448,7 +448,7 @@ def run_schedule(ctx, audit, approvals, store: ScheduleStore, schedule: dict, *,
             # Honor remembered writes (no user at the tile) — EXCEPT schedule-mutating tools,
             # which must never auto-run in an autonomous turn (they'd let an injected prompt
             # spawn/rewrite self-perpetuating schedules); those always park for human approval.
-            auto_approve=consent.remembered(conn) - tools.SCHEDULE_WRITE_TOOLS,
+            auto_approve=consent.remembered(conn) - tools.UNATTENDED_NEVER_AUTO,
             timeout=_AGENT_TURN_TIMEOUT,  # tolerate a cold local-model load (see constant)
             result_cap=gateway.result_cap_for(conn, model),
             # Provenance stashed in any resulting park's turn_state — the approve/deny endpoint

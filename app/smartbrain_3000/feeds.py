@@ -28,6 +28,7 @@ import xml.etree.ElementTree as ET
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from . import netguard
+from . import vaults as vaults_mod
 
 log = logging.getLogger("smartbrain.feeds")
 
@@ -245,7 +246,7 @@ def ingest_new_items(store: FeedStore, kb, vaults, feed: dict, parsed: dict) -> 
         doc_id = kb.add(title, "\n".join(content_parts),
                         meta={"feed_id": feed["id"], "feed_guid": item["guid"][:_MAX_URL]},
                         tags=feed.get("tags"))
-        vaults.add_documents(feed["vault_id"], [doc_id])
+        vaults.add_documents(feed["vault_id"], [doc_id], origin=vaults_mod.FEED)  # someone else's words
         store.mark_seen(feed["id"], item["guid"])
         added += 1
     return added

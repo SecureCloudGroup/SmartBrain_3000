@@ -225,3 +225,37 @@ def test_tick_refreshes_due_and_isolates_failures(client: TestClient, monkeypatc
     feeds_now = {f["id"]: f for f in client.get("/api/feeds").json()["feeds"]}
     assert feeds_now[good["id"]]["last_status"].startswith("ok")
     assert feeds_now[bad["id"]]["last_status"].startswith("error")
+
+
+def test_feed_items_are_feed_origin_so_the_model_sees_them_as_outside_words() -> None:
+    from smartbrain_3000 import vaults as vaults_mod
+    store, kb, vaults, _conn = _stores()
+    vid = vaults.create("Test Blog", tags=["feed"])
+    feed = store.get(store.add("https://blog.example/feed.xml", "Test Blog", vid))
+    assert feedsmod.ingest_new_items(store, kb, vaults, feed, feedsmod.parse_feed(RSS)) == 2
+    for doc_id in vaults.document_ids(vid):
+        assert vaults.origin_of(vid, doc_id) == vaults_mod.FEED
+        assert vaults.import_provenance(doc_id)["origin"] == vaults_mod.FEED
+    # vault-owned copies: removable alongside the vault, but never rename/delete-blocked
+    assert set(vaults.import_origin_doc_ids(vid)) == set(vaults.document_ids(vid))
+    from fastapi import HTTPException
+
+    from smartbrain_3000 import kb_routes
+
+    class _Req:
+        class app:
+            class state:
+                pass
+    _Req.app.state.vaults = vaults
+    for doc_id in vaults.document_ids(vid):
+        kb_routes._refuse_if_vault_owned(_Req, doc_id)  # no 409 for a feed item
+
+    class _Imported:
+        def import_provenance(self, doc_id):
+            return {"origin": "import", "name": "Other", "vault_id": "v"}
+    _Req.app.state.vaults = _Imported()
+    try:
+        kb_routes._refuse_if_vault_owned(_Req, "x")
+        raise AssertionError("import-origin copies must still be refused")
+    except HTTPException as exc:
+        assert exc.status_code == 409

@@ -40,7 +40,9 @@ _KINDS = (LOCAL, IMPORTED)
 # Who owns a MEMBER of a vault (vs. who owns the vault).
 OWNER = "owner"  # the user's own document, which merely also sits in this vault — never clobber it
 IMPORT = "import"  # came from a vault: vault-owned, and a later update may replace it
-_ORIGINS = (OWNER, IMPORT)
+FEED = "feed"  # pulled from a website's feed: the open internet, unattended — never the user's words
+_ORIGINS = (OWNER, IMPORT, FEED)
+_UNTRUSTED_ORIGINS = (IMPORT, FEED)
 
 
 class VaultStore:
@@ -262,9 +264,9 @@ class VaultStore:
         """
         assert vault_id, "vault id required"
         rows = self._conn.execute(
-            "SELECT doc_id FROM vault_documents WHERE vault_id = ? AND origin = ? "
+            "SELECT doc_id FROM vault_documents WHERE vault_id = ? AND origin IN (?, ?) "
             f"LIMIT {_MAX_DOCS_PER_VAULT};",
-            [vault_id, IMPORT],
+            [vault_id, IMPORT, FEED],  # feed items are vault-owned copies too, never the user's words
         ).fetchall()
         return [str(r[0]) for r in rows]
 
@@ -431,9 +433,9 @@ class VaultStore:
         # ORDER BY so the SAME vault is named every time a doc sits import-origin in several
         # vaults — an unordered LIMIT 1 would let the 409 detail / provenance line flip between calls.
         row = self._conn.execute(
-            "SELECT vault_id FROM vault_documents WHERE doc_id = ? AND origin = ? "
+            "SELECT vault_id, origin FROM vault_documents WHERE doc_id = ? AND origin IN (?, ?) "
             "ORDER BY added_at ASC LIMIT 1;",
-            [doc_id, IMPORT],
+            [doc_id, IMPORT, FEED],
         ).fetchone()
         if row is None:
             return None
@@ -443,6 +445,7 @@ class VaultStore:
         source = vault.get("source") or {}
         return {
             "vault_id": vault["id"],
+            "origin": str(row[1]),
             "name": vault["name"],
             "publisher_pubkey": source.get("publisher_pubkey"),
         }

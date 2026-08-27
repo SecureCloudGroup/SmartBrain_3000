@@ -11,6 +11,20 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Security
+- **Knowledge and prompt injection: tighter containment.** A review of everything the
+  assistant reads found no hole in the approval gates, and closed the gaps around them:
+  feed items, fetched web pages, search results, and emails are now marked *data, not
+  instructions* as they enter the model's context (imported vault content already was),
+  and the assistant is told that outside text never carries instructions; approval cards
+  show every argument in full (an email body or schedule prompt can no longer hide its
+  tail); unattended scheduled runs can no longer remember facts on a standing grant;
+  document titles can no longer break out of the summarizer's instructions; out-of-budget
+  rescue no longer replays tool text as a system instruction; and replies cannot load
+  remote images (an exfiltration channel the content policy already blocked). A
+  containment test suite feeds a model that *obeys* injected instructions and asserts
+  that nothing reaches beyond a parked approval.
+
 ## [0.9.33] - 2026-08-26
 
 ### Fixed

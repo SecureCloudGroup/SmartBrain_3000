@@ -13,6 +13,7 @@ Kept out of ``tools.py`` (mirroring ``ingest``/``search``) so the tool handler s
 from __future__ import annotations
 
 import math
+import re
 import time
 from collections.abc import Callable
 
@@ -39,7 +40,15 @@ def _focus_clause(focus: str) -> str:
     return f" Focus especially on: {focus}." if focus else ""
 
 
+def _safe_title(title: str) -> str:
+    """A document title is untrusted text that lands INSIDE the system string: one line, no quotes
+    or control characters that could close the quotation and continue as instructions, capped."""
+    t = re.sub(r"[\s\"'`\[\]{}]+", " ", title or "").strip()
+    return t[:_MAX_TITLE] or "untitled"
+
+
 def _map_call(model: str, title: str, focus: str, chunk: str, idx: int, total: int) -> str:
+    title = _safe_title(title)
     system = (
         f"You are summarizing section {idx + 1} of {total} of a longer document titled "
         f"\"{title}\". Write a faithful, self-contained summary of THIS section's key points — facts, "
@@ -63,6 +72,7 @@ def reduce_parts(model: str, title: str, focus: str, parts: list[str]) -> str:
 
 
 def _reduce_call(model: str, title: str, focus: str, parts: list[str]) -> str:
+    title = _safe_title(title)
     joined = "\n\n".join(f"## Section {i + 1}\n{p}" for i, p in enumerate(parts))
     system = (
         f"You are merging section summaries of a document titled \"{title}\" into ONE coherent "
