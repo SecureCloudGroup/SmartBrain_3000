@@ -19,6 +19,7 @@ import io
 import logging
 import os
 import shutil
+import socket
 import threading
 import wave
 from pathlib import Path
@@ -91,20 +92,23 @@ def describe_failure(exc: BaseException) -> str:
 
     The Status page shows this string and the API returns it, so it must say what to DO
     without echoing library internals (URLs, paths, stack context) to the browser. The
-    complete exception goes to the log, where it belongs.
+    complete exception goes to the log, where it belongs. Order matters: an HTTP status
+    line also contains a URL, so status codes are classified before reachability.
     """
     name = type(exc).__name__
     text = str(exc).lower()
-    if isinstance(exc, OSError) and getattr(exc, "errno", None) == 28 or "no space left" in text:
+    if (isinstance(exc, OSError) and getattr(exc, "errno", None) == 28) or "no space left" in text:
         return "not enough disk space to download the voice model — free some space and retry"
     if "verification" in text or "checksum" in text or "digest" in text:
         return "the downloaded voice model failed verification — retry the download"
-    if "timed out" in text or "timeout" in name.lower():
-        return "the voice model download timed out — check the network and retry"
-    if any(k in name for k in ("Connection", "URLError", "HTTPError", "RemoteDisconnected", "SSL")) or "connect" in text or "resolve" in text:
-        return "could not reach the model download (huggingface.co) — check the network and retry"
-    if "http" in text and any(c in text for c in ("403", "404", "429", "500", "502", "503")):
+    if "http" in text and any(f" {c}" in text or f"http {c}" in text or f"({c}" in text for c in ("403", "404", "429", "500", "502", "503")):
         return "the model download server refused the request — retry later"
+    if isinstance(exc, TimeoutError) or "timed out" in text or "timeout" in name.lower():
+        return "the voice model download timed out — check the network and retry"
+    if (isinstance(exc, (ConnectionError, socket.gaierror, socket.herror, socket.timeout))
+            or any(k in name for k in ("Connection", "URLError", "RemoteDisconnected", "SSL", "gaierror"))
+            or "name or service" in text or "nodename" in text or "connection refused" in text):
+        return "could not reach the model download (huggingface.co) — check the network and retry"
     if any(k in text for k in ("ctranslate", "whisper", "model.bin", "load")):
         return "the voice engine failed to load its model files — retry the download"
     return "the voice model download failed — retry; if it keeps failing, check the log"
