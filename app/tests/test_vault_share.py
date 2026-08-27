@@ -176,7 +176,7 @@ def test_imported_documents_are_read_only_until_detached(alice: TestClient, bob:
     assert bob.get(f"/api/kb/{doc}").status_code == 200, "the document must survive both refusals"
 
     r = bob.post(f"/api/vaults/{imported}/documents/{doc}/detach")
-    assert r.status_code == 200 and r.json() == {"ok": True, "origin": "owner"}
+    assert r.status_code == 200 and r.json() == {"ok": True, "flipped": True, "origin": "owner"}
     assert bob.get(f"/api/vaults/{imported}").json()["members"][0]["origin"] == "owner"
 
     assert bob.patch(f"/api/kb/{doc}", json={"title": "Renamed"}).status_code == 200
