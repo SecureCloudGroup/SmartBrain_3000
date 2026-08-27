@@ -38,6 +38,7 @@ def b64(b: bytes) -> str:
 
 def check_tls_days(host: str) -> int:
     ctx = ssl.create_default_context()
+    ctx.minimum_version = ssl.TLSVersion.TLSv1_2  # the node speaks TLS 1.2+; never negotiate down
     with socket.create_connection((host, 443), timeout=10) as sock, ctx.wrap_socket(sock, server_hostname=host) as tls:
         cert = tls.getpeercert()
     not_after = ssl.cert_time_to_seconds(cert["notAfter"])
