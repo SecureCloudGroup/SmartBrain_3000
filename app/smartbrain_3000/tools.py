@@ -470,8 +470,9 @@ def _email_read(ctx: ToolContext, args: dict) -> dict:
         raise ValueError("no email account connected")
     assert args.get("message_id"), "message_id required"
     msg = ctx.email.read_message(args["message_id"])
-    body = msg.pop("body", None)
-    return {**msg, "provenance": external_provenance("email"), "body": body}
+    # Marker BEFORE the body (dict order is the read order); the source dict is left untouched.
+    return {**{k: v for k, v in msg.items() if k != "body"},
+            "provenance": external_provenance("email"), "body": msg.get("body")}
 
 
 _EXTRACT_MIN_CHARS = 200  # an "article" shorter than this is likely a JS shell — return the raw page

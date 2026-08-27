@@ -75,6 +75,11 @@ describe("remote images", () => {
     expect(html).not.toContain("<img");
     expect(html).toContain("[image: secret]");
   });
+  it("drops SVG image/use elements too (the same remote-loading channel)", () => {
+    const html = renderMarkdown('<svg><image href="https://evil.example/x.png"/><use href="https://evil.example/s.svg#a"/></svg>');
+    expect(html).not.toContain("<image");
+    expect(html).not.toContain("<use");
+  });
   it("keeps data: and same-origin images", () => {
     expect(renderMarkdown("![a](data:image/png;base64,AAAA)")).toContain("<img");
     expect(renderMarkdown("![a](/assets/x.png)")).toContain("<img");

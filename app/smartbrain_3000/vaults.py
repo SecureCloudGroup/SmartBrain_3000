@@ -264,9 +264,9 @@ class VaultStore:
         """
         assert vault_id, "vault id required"
         rows = self._conn.execute(
-            "SELECT doc_id FROM vault_documents WHERE vault_id = ? AND origin = ? "
+            "SELECT doc_id FROM vault_documents WHERE vault_id = ? AND origin IN (?, ?) "
             f"LIMIT {_MAX_DOCS_PER_VAULT};",
-            [vault_id, IMPORT],
+            [vault_id, IMPORT, FEED],  # feed items are vault-owned copies too, never the user's words
         ).fetchall()
         return [str(r[0]) for r in rows]
 

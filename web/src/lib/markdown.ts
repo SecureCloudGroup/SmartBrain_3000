@@ -49,7 +49,8 @@ export function renderMarkdown(src: string): string {
   return DOMPurify.sanitize(html, {
     // Defaults already drop <script>, on* handlers and javascript: URLs. We additionally refuse the
     // tags that would let a reply reach outside its bubble or phone home.
-    FORBID_TAGS: ["style", "form", "input", "button", "iframe", "object", "embed", "link", "meta"],
+    // "image"/"use" are SVG's remote-loading elements — the same exfiltration channel as <img>.
+    FORBID_TAGS: ["style", "form", "input", "button", "iframe", "object", "embed", "link", "meta", "image", "use"],
     FORBID_ATTR: ["style", "srcset", "formaction"],
   });
 }

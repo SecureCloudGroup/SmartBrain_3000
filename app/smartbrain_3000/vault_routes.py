@@ -254,8 +254,8 @@ def detach_document(request: Request, vault_id: str, doc_id: str) -> dict:
     _require(store, vault_id)
     if store.origin_of(vault_id, doc_id) is None:
         raise HTTPException(status_code=404, detail="document is not in this vault")
-    store.detach(vault_id, doc_id)
-    return {"ok": True, "origin": "owner"}
+    flipped = store.detach(vault_id, doc_id)  # False = nothing to flip (already owner, or a feed item)
+    return {"ok": True, "flipped": flipped, "origin": store.origin_of(vault_id, doc_id)}
 
 
 # --- export / import ----------------------------------------------------------------------------

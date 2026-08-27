@@ -236,3 +236,25 @@ def test_feed_items_are_feed_origin_so_the_model_sees_them_as_outside_words() ->
     for doc_id in vaults.document_ids(vid):
         assert vaults.origin_of(vid, doc_id) == vaults_mod.FEED
         assert vaults.import_provenance(doc_id)["origin"] == vaults_mod.FEED
+    # vault-owned copies: removable alongside the vault, but never rename/delete-blocked
+    assert set(vaults.import_origin_doc_ids(vid)) == set(vaults.document_ids(vid))
+    from fastapi import HTTPException
+    from smartbrain_3000 import kb_routes
+
+    class _Req:
+        class app:
+            class state:
+                pass
+    _Req.app.state.vaults = vaults
+    for doc_id in vaults.document_ids(vid):
+        kb_routes._refuse_if_vault_owned(_Req, doc_id)  # no 409 for a feed item
+
+    class _Imported:
+        def import_provenance(self, doc_id):
+            return {"origin": "import", "name": "Other", "vault_id": "v"}
+    _Req.app.state.vaults = _Imported()
+    try:
+        kb_routes._refuse_if_vault_owned(_Req, "x")
+        raise AssertionError("import-origin copies must still be refused")
+    except HTTPException as exc:
+        assert exc.status_code == 409
