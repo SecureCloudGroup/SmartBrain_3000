@@ -11,6 +11,8 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.9.32] - 2026-08-26
+
 ### Fixed
 - **No more talking to itself.** With spoken replies on, the microphone could hear the
   reply being read aloud (the browser's echo cancellation covers only its own audio, not
