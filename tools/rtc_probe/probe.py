@@ -87,7 +87,9 @@ async def run_pair(node: str, relay_only: bool) -> float:
     import websockets
 
     url = f"wss://{node}/signal"
-    desktop_id = "probe-" + secrets.token_hex(8)
+    # sbpair-* ids are signed but never BOUND by the broker (pairing rooms are ephemeral),
+    # so a probe every 30 minutes leaves no trace in the id→key bindings file.
+    desktop_id = "sbpair-probe-" + secrets.token_hex(8)
     key = Ed25519PrivateKey.generate()
     got_offer: asyncio.Future = asyncio.get_running_loop().create_future()
     answer_q: asyncio.Queue = asyncio.Queue()
