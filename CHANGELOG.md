@@ -11,6 +11,16 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Fixed
+- **No more talking to itself.** With spoken replies on, the microphone could hear the
+  reply being read aloud (the browser's echo cancellation covers only its own audio, not
+  the system voice — on a phone the speaker sits next to the mic) and hands-free or
+  conversation mode sent the fragments back: a loop. Two fixes: a recording that is
+  mostly the reply's own words is dropped and the hint says so, on every path; and the
+  mic no longer opens while a reply is being read unless a wake word is set — the
+  phrase is what tells your voice from its own. To interrupt without a wake word, press
+  Stop. The follow-up mic also waits a moment after the voice ends.
+
 ## [0.9.31] - 2026-08-26
 
 ### Added
