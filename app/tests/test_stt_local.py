@@ -159,3 +159,22 @@ def test_partial_decodes_greedily_final_keeps_the_beam(monkeypatch) -> None:
     moonshine.transcribe_wav(_wav(), partial=True)
     moonshine.transcribe_wav(_wav())
     assert beams == [1, 5]
+
+
+def test_failure_wording_is_fixed_and_actionable_never_the_raw_exception() -> None:
+    """The error string reaches the browser (Status page + API); it must be a fixed sentence
+    that says what to do — raw exception text carried URLs and internals (CodeQL flagged it)."""
+    import socket
+    cases = [
+        (OSError(28, "No space left on device"), "disk space"),
+        (ValueError("model.bin failed verification (sha256 mismatch)"), "verification"),
+        (TimeoutError("timed out"), "timed out"),
+        (socket.gaierror(8, "nodename nor servname provided, or not known"), "could not reach"),
+        (RuntimeError("HTTP 503 from https://huggingface.co/Systran/faster-whisper-base/resolve/main/model.bin"), "refused"),
+        (RuntimeError("CTranslate2 failed to load model.bin"), "engine failed to load"),
+        (RuntimeError("something odd at /Users/t/.something/secret/path"), "download failed"),
+    ]
+    for exc, expect in cases:
+        msg = moonshine.describe_failure(exc)
+        assert expect in msg, (exc, msg)
+        assert "/" not in msg.replace("huggingface.co", "") and "Users" not in msg  # no paths, no URLs

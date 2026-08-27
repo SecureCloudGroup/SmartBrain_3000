@@ -86,6 +86,30 @@ def prefetch(app=None) -> None:
     threading.Thread(target=_fetch_and_load, name="stt-prefetch", daemon=True).start()
 
 
+def describe_failure(exc: BaseException) -> str:
+    """A fixed, user-facing sentence for a failed download or load — never the raw exception.
+
+    The Status page shows this string and the API returns it, so it must say what to DO
+    without echoing library internals (URLs, paths, stack context) to the browser. The
+    complete exception goes to the log, where it belongs.
+    """
+    name = type(exc).__name__
+    text = str(exc).lower()
+    if isinstance(exc, OSError) and getattr(exc, "errno", None) == 28 or "no space left" in text:
+        return "not enough disk space to download the voice model — free some space and retry"
+    if "verification" in text or "checksum" in text or "digest" in text:
+        return "the downloaded voice model failed verification — retry the download"
+    if "timed out" in text or "timeout" in name.lower():
+        return "the voice model download timed out — check the network and retry"
+    if any(k in name for k in ("Connection", "URLError", "HTTPError", "RemoteDisconnected", "SSL")) or "connect" in text or "resolve" in text:
+        return "could not reach the model download (huggingface.co) — check the network and retry"
+    if "http" in text and any(c in text for c in ("403", "404", "429", "500", "502", "503")):
+        return "the model download server refused the request — retry later"
+    if any(k in text for k in ("ctranslate", "whisper", "model.bin", "load")):
+        return "the voice engine failed to load its model files — retry the download"
+    return "the voice model download failed — retry; if it keeps failing, check the log"
+
+
 def _fetch_and_load() -> None:
     """The ONLY code that downloads or loads — always on this background thread. A
     request thread never blocks on it."""
@@ -114,8 +138,8 @@ def _fetch_and_load() -> None:
         log.info("stt: whisper model ready")
     except Exception as exc:
         with _state_lock:
-            _phase, _error = "error", str(exc)[:200]
-        log.warning("stt fetch failed: %s", exc)
+            _phase, _error = "error", describe_failure(exc)
+        log.warning("stt fetch failed: %s", exc)  # the full reason stays in the log
     finally:
         with _state_lock:
             _fetch_inflight = False
