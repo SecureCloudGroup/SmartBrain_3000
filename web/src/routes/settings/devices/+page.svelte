@@ -11,7 +11,7 @@
   let error = $state("");
   let originQr = $state(""); // data URL of the node-origin QR (just opens the site on the phone)
   let originHost = $state(""); // host shown in step (1) as a fallback for typing
-  let pairCode = $state(""); // 6-char code entered in the installed PWA
+  let pairCode = $state(""); // 8-char code entered in the installed PWA (shown ABCD-EFGH)
   let codeBusy = $state(false);
   let pairState = $state<"idle" | "waiting" | "paired" | "expired">("idle");
   let pairRemaining = $state(0); // seconds until the code expires
@@ -24,8 +24,15 @@
   function fmtRemaining(s: number): string {
     return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
   }
-  // created_at is a UTC string — show it in the user's locale.
+  // created_at / last_seen are UTC strings — show them in the user's locale. last_seen is
+  // stamped by the Desktop at most hourly on a successful connect; "never" = paired but
+  // never connected. A credential has no expiry: a stale device is rotated by revoking it.
   const localCreatedAt = (s: string): string => localTs(s);
+  const lastSeen = (d: DeviceInfo): string => {
+    return d.last_seen ? `last seen ${localTs(d.last_seen)}` : "never connected";
+  };
+  // The code is shown grouped ABCD-EFGH (typed with or without the dash on the phone).
+  const fmtCode = (c: string): string => (c.length === 8 ? `${c.slice(0, 4)}-${c.slice(4)}` : c);
   onDestroy(stopPairPolling);
 
   async function load() {
@@ -126,7 +133,7 @@
       <div class="row">
         <span>
           <span style="color:var(--ok)" aria-hidden="true">●</span>
-          {d.label} <span class="muted">({localCreatedAt(d.created_at)})</span>
+          {d.label} <span class="muted">(paired {localCreatedAt(d.created_at)} · {lastSeen(d)})</span>
           <span style="color:var(--ok); font-weight:600">· Paired</span>
         </span>
         <button class="del" onclick={() => revoke(d.device_id)}>Revoke</button>
@@ -155,7 +162,7 @@
         <li><b>Add to Home Screen</b>, then open the app.</li>
         <li>
           Enter this code:
-          <div style="font-family:var(--font-mono); font-weight:700; font-size:2rem; line-height:1.2; letter-spacing:0.25em; margin-top:0.25rem">{pairCode}</div>
+          <div style="font-family:var(--font-mono); font-weight:700; font-size:2rem; line-height:1.2; letter-spacing:0.25em; margin-top:0.25rem">{fmtCode(pairCode)}</div>
           <span class="muted">expires in {fmtRemaining(pairRemaining)}</span>
         </li>
       </ol>

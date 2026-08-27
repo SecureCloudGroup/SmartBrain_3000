@@ -6,6 +6,8 @@ desktop id, and ICE servers stay consistent across the two consumers.
 
 from __future__ import annotations
 
+import pytest
+
 from smartbrain_3000 import remote_config
 
 # --- signaling_url --------------------------------------------------------
@@ -187,3 +189,23 @@ def test_adapt_pushed_ice_udp_turn_first_when_reachable(monkeypatch) -> None:
 
 def test_adapt_pushed_ice_empty_is_safe() -> None:
     assert remote_config.adapt_pushed_ice([]) == []
+
+
+def test_signaling_url_refuses_plaintext_ws(monkeypatch) -> None:
+    # The broker relays the answer SDP (DTLS fingerprint); over ws:// an on-path attacker
+    # could swap it. Fail loudly instead of dialing.
+    monkeypatch.setenv("SMARTBRAIN_SIGNALING_URL", "ws://broker.example/ws")
+    monkeypatch.delenv("SMARTBRAIN_ALLOW_INSECURE_SIGNALING", raising=False)
+    with pytest.raises(ValueError, match="wss://"):
+        remote_config.signaling_url()
+    monkeypatch.setenv("SMARTBRAIN_SIGNALING_URL", "http://broker.example")
+    with pytest.raises(ValueError):
+        remote_config.signaling_url()
+
+
+def test_signaling_url_allows_insecure_only_with_explicit_env(monkeypatch) -> None:
+    monkeypatch.setenv("SMARTBRAIN_SIGNALING_URL", "ws://127.0.0.1:8089")
+    monkeypatch.setenv("SMARTBRAIN_ALLOW_INSECURE_SIGNALING", "1")
+    assert remote_config.signaling_url() == "ws://127.0.0.1:8089"
+    monkeypatch.setenv("SMARTBRAIN_SIGNALING_URL", "")  # unconfigured stays empty, never raises
+    assert remote_config.signaling_url() == ""

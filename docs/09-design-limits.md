@@ -122,20 +122,25 @@ faster than letting it wander.
 ## WebRTC signaling broker is single-operator
 
 [Remote access](08-remote-access.md) uses a signaling broker that is
-**single-operator** by design. The hosted broker is **tokenless** (open
-registration, bounded by a desktop-count cap and per-registration rate limits),
-and the cryptographic guarantee that your phone is really talking to **your**
-Desktop is the **DTLS-fingerprint pin** captured at pairing — not the broker.
-TURN relay uses **ephemeral credentials** (coturn `use-auth-secret`, minted per
-connection and short-lived); those credentials grant **relay bandwidth only**,
-never access to the app or your data. A **self-hosted** node may instead run with
-a shared registration token and static, quota-bounded TURN creds.
+**single-operator** by design: one node, in-memory sessions, no failover. The
+hosted broker is **tokenless** (open registration — but every Desktop proves it
+owns its routing id with a signature, and the node binds the id to that key on first
+sight; bounded by desktop, per-address, and per-socket limits), and the
+cryptographic guarantee that your phone is really talking to **your** Desktop is
+the **Ed25519 key pinned at pairing**, proven per connection with a signature bound
+to that connection's DTLS fingerprints — not the broker. TURN relay uses
+**ephemeral credentials** (coturn `use-auth-secret`, minted per connection, one-hour
+lifetime); those credentials grant **relay bandwidth only**, never access to the
+app or your data. A **self-hosted** node may instead run with a shared registration
+token and static, quota-bounded TURN creds.
 
 **Why:** the broker is content-blind — it only helps devices find each other.
-The end-to-end security comes from the pinned fingerprint, so the broker doesn't
-need per-user accounts to be safe. Ephemeral, per-connection TURN creds keep the
-relay simple while ensuring a leaked credential can, at worst, consume some relay
-bandwidth before it expires.
+The end-to-end security comes from the pinned key, so the broker doesn't need
+per-user accounts to be safe. Ephemeral, per-connection TURN creds keep the relay
+simple while ensuring a leaked credential can, at worst, consume some relay
+bandwidth before it expires. The single node is the honest trade for a service
+that keeps no records: if it is down, phones reconnect on their own when it is
+back, and nothing is lost.
 
 ## Next
 

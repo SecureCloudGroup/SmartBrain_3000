@@ -6,6 +6,11 @@
 }
 
 {$SIGNALING_DOMAIN} {
+	# NO access log on purpose — Caddy logs nothing per request unless a `log` directive
+	# is present, and none is: this node keeps no per-connection records (no client IPs,
+	# no paths, no timestamps). Do not add one.
+	# HSTS: a phone that once reached this origin over https never downgrades to http.
+	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
 	# Any WebSocket upgrade -> the signaling broker, regardless of path. Phones pair to
 	# wss://<domain>/signal, but pairings issued before the /signal move use wss://<domain>
 	# (path "/"); routing by the Upgrade header makes BOTH work, while normal GET "/" still
@@ -15,7 +20,13 @@
 		header Upgrade websocket
 	}
 	handle @ws {
-		reverse_proxy signaling:8089
+		reverse_proxy signaling:8089 {
+			# The broker keys its per-IP limits on X-Forwarded-For (it trusts this proxy).
+			# Replace — never append to — whatever the client sent, so the broker only
+			# ever sees the address Caddy itself observed. Not left to Caddy's default.
+			header_up -X-Forwarded-For
+			header_up X-Forwarded-For {client_ip}
+		}
 	}
 	# /api and /mcp are served by the Desktop over the WebRTC DataChannel, NEVER by this
 	# node. Return 404 so the SPA's direct-reachability probe fails and it uses the remote

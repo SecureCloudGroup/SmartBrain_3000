@@ -17,6 +17,13 @@ from smartbrain_3000.secrets import SecretStore, gen_master_key
 _LOCAL = {"X-SB-Local": "1"}
 
 
+@pytest.fixture(autouse=True)
+def _unbound_meta(monkeypatch):
+    """devices.bind_meta is process-wide (main.py binds the app's conn at boot); unit tests
+    here run without one so an earlier app fixture's closed conn can't leak in."""
+    monkeypatch.setattr(devices, "_meta_conn", None)
+
+
 def _store() -> SecretStore:
     return SecretStore(duckdb.connect(":memory:"), gen_master_key())
 
@@ -68,6 +75,46 @@ def test_revoke_removes_device() -> None:
     devices.revoke_device(store, rec["device_id"])  # idempotent — no error on re-revoke
 
 
+def test_last_seen_stamped_hourly_on_verify() -> None:
+    import datetime as dt
+
+    store = _store()
+    rec = devices.create_device(store, "Phone")
+    assert devices.list_devices(store)[0]["last_seen"] is None  # paired, never connected
+    t0 = dt.datetime(2026, 8, 27, 12, 0, tzinfo=dt.UTC)
+    assert devices.verify_device(store, rec["device_id"], rec["credential"], now=t0)
+    assert devices.list_devices(store)[0]["last_seen"] == t0.isoformat()
+    # within the hour: no rewrite (bounded writes)
+    assert devices.verify_device(store, rec["device_id"], rec["credential"], now=t0 + dt.timedelta(minutes=59))
+    assert devices.list_devices(store)[0]["last_seen"] == t0.isoformat()
+    t1 = t0 + dt.timedelta(hours=1, seconds=1)
+    assert devices.verify_device(store, rec["device_id"], rec["credential"], now=t1)
+    assert devices.list_devices(store)[0]["last_seen"] == t1.isoformat()
+    # a failed verify never stamps
+    assert devices.verify_device(store, rec["device_id"], "wrong", now=t1 + dt.timedelta(hours=2)) is False
+    assert devices.list_devices(store)[0]["last_seen"] == t1.isoformat()
+
+
+def test_known_device_digests_follow_create_and_revoke(monkeypatch) -> None:
+    """The plaintext digest set (locked-state hint) tracks mint/revoke and hides the id."""
+    from smartbrain_3000 import db
+
+    conn = duckdb.connect(":memory:")
+    conn.execute("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);")
+    monkeypatch.setattr(devices, "_meta_conn", None)
+    assert devices.is_known_device_id("anything") is False  # unbound -> never known
+    devices.bind_meta(conn)
+    store = _store()
+    rec = devices.create_device(store, "Phone")
+    assert devices.is_known_device_id(rec["device_id"]) is True
+    assert devices.is_known_device_id("no-such-id") is False
+    assert devices.is_known_device_id("") is False
+    raw = db.meta_get(conn, "devices:known_digests") or ""
+    assert rec["device_id"] not in raw and rec["credential"] not in raw  # keyed digest only
+    devices.revoke_device(store, rec["device_id"])
+    assert devices.is_known_device_id(rec["device_id"]) is False
+
+
 def test_label_is_bounded() -> None:
     store = _store()
     rec = devices.create_device(store, "x" * 200)
@@ -100,6 +147,7 @@ def test_create_list_revoke_flow(client: TestClient) -> None:
     assert len(listed) == 1
     assert listed[0]["device_id"] == created["device_id"]
     assert "credential" not in listed[0]  # never leak the secret on read
+    assert listed[0]["last_seen"] is None and listed[0]["created_at"]
 
     assert client.delete(f"/api/devices/{created['device_id']}", headers=_LOCAL).status_code == 200
     assert client.get("/api/devices").json()["devices"] == []

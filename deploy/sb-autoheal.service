@@ -1,0 +1,11 @@
+[Unit]
+Description=Restart Docker containers that their healthcheck has marked unhealthy
+After=docker.service
+
+[Service]
+Type=oneshot
+# Docker only MARKS a container unhealthy (the broker's app-level probe in
+# signaling/health.py); nothing restarts it. This is the restart: every container whose
+# health is "unhealthy" right now, with docker's normal stop grace. Runs as the
+# (user-manager) user that owns the compose deployment and is in the docker group.
+ExecStart=/bin/sh -c 'docker ps -q -f health=unhealthy | xargs -r docker restart'

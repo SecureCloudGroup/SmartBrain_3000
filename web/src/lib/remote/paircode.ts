@@ -1,6 +1,6 @@
 // Pairing-by-code on the APP side — the installed (home-screen) PWA can't inherit the
 // Safari pairing (iOS isolates its storage), so it fetches the pairing itself: the operator
-// reads a 6-char code off the Desktop, types it here, and we connect to the Desktop over
+// reads an 8-char code (shown ABCD-EFGH) off the Desktop, types it here, and we connect to the Desktop over
 // WebRTC (relayed by the broker), prove mutual knowledge of the code bound to the DTLS
 // channel, and receive the PairingPayload inside the encrypted channel.
 //
@@ -17,15 +17,17 @@ import { b64ToBytes, bytesToB64 } from "./protocol";
 const _ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; // must match pairing_code.py
 const _SALT = "sb-pair-v1";
 const _ITERS = 300_000;
-const _CODE_LEN = 6;
+const _CODE_LEN = 8; // 31^8 ≈ 2^39.6 — see pairing_code.py for the offline-grind arithmetic
 
+// Uppercase + drop anything outside the alphabet (spaces, the display dash, O/0/I/1/L), so
+// "ABCD-EFGH", "abcd efgh" and "ABCDEFGH" derive the same room + key. Mirrors normalize().
 export function normalizeCode(code: string): string {
   return [...code.toUpperCase()].filter((c) => _ALPHABET.includes(c)).join("");
 }
 
 export async function deriveCode(code: string): Promise<{ roomId: string; codeKey: CryptoKey }> {
   const norm = normalizeCode(code);
-  if (norm.length !== _CODE_LEN) throw new Error("the code is 6 characters");
+  if (norm.length !== _CODE_LEN) throw new Error("the code is 8 characters (shown as ABCD-EFGH)");
   const enc = new TextEncoder();
   const base = await crypto.subtle.importKey("raw", enc.encode(norm), "PBKDF2", false, ["deriveBits"]);
   const bits = await crypto.subtle.deriveBits(

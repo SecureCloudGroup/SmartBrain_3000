@@ -16,7 +16,7 @@ import json
 import logging
 import os
 
-from . import pairing_code, remote_config, webrtc_peer
+from . import pairing_code, remote_config, webrtc_peer, webrtc_signaling
 
 log = logging.getLogger(__name__)
 
@@ -25,6 +25,7 @@ _MAX_MSG = 256 * 1024
 _MAX_CHANNEL_MSG = 64 * 1024  # the pairing payload is a couple KB; cap inbound + outbound
 _NONCE_BYTES = 16
 _MAX_GUESSES = 8
+_MAX_PEERS = 8  # bound concurrent pairing peers (a broker-side phone can offer repeatedly)
 
 
 def _b64(b: bytes) -> str:
@@ -107,6 +108,16 @@ async def _answer(offer_sdp: str, ice_servers, code_key: bytes, payload: dict, s
     return pc, webrtc_peer._single_fingerprint(pc.localDescription.sdp)
 
 
+def _reap_on_close(pc, phone_id: str, peers: dict) -> None:
+    """Free the peer's slot when its connection ends, so the cap counts live peers only."""
+    assert phone_id, "phone id required"
+
+    @pc.on("connectionstatechange")
+    async def _on_state() -> None:
+        if pc.connectionState in ("closed", "failed", "disconnected") and peers.get(phone_id) is pc:
+            peers.pop(phone_id, None)
+
+
 def _send(channel, obj: dict) -> None:
     try:
         channel.send(json.dumps(obj))
@@ -115,17 +126,20 @@ def _send(channel, obj: dict) -> None:
 
 
 async def run_pairing_host(
-    *, signaling_url: str, token: str, code: str, payload: dict, stop=None, ice_servers=None, expiry_s: int = 300
+    *, signaling_url: str, token: str, code: str, payload: dict, stop=None, ice_servers=None, expiry_s: int = 300,
+    conn=None,
 ) -> bool:
     """Host one pairing session for ``code``, serving ``payload``. Returns True if a device
-    paired, else False (expired / too many wrong attempts / stopped / link error)."""
+    paired, else False (expired / too many wrong attempts / stopped / link error). ``conn``
+    holds the routing key: the pairing room is a desktop registration too, signed like the
+    main one (the broker never binds ``sbpair-*`` ids, it only demands a valid signature)."""
     import websockets  # lazy: only when a session runs
 
     assert signaling_url and code, "signaling url + code required"  # token empty in hosted (tokenless) mode
     assert isinstance(payload, dict), "payload must be a dict (PairingPayload)"
     room_id, code_key = pairing_code.derive(code)
     state: dict = {"done": asyncio.Event(), "ok": False, "guesses": 0}
-    peers: list = []
+    peers: dict = {}  # phone_id -> pc; bounded by _MAX_PEERS, reaped when the peer closes
 
     async def _deadline() -> None:
         await asyncio.sleep(expiry_s)
@@ -146,7 +160,7 @@ async def run_pairing_host(
     timers = [asyncio.ensure_future(_deadline()), asyncio.ensure_future(_await_stop())]
     try:
         async with websockets.connect(signaling_url, max_size=_MAX_MSG) as ws:
-            await ws.send(json.dumps({"role": "desktop", "desktop_id": room_id, "token": token}))
+            await webrtc_signaling.register_desktop(ws, desktop_id=room_id, token=token, conn=conn)
             closer = asyncio.ensure_future(_close_ws_on_done(ws))
             # Broker-pushed ephemeral ICE (STUN/TURN, fresh creds) overrides the static ice_servers
             # param — without it the pairing peer has no relay candidate and never connects.
@@ -166,9 +180,17 @@ async def run_pairing_host(
                     # blocked) so the relay works from Docker / UDP-blocking networks.
                     ice = (remote_config.adapt_pushed_ice(node_ice)
                            if node_ice is not None else ice_servers)
+                    phone_id = str(msg.get("from") or "")
+                    old = peers.pop(phone_id, None)  # a re-offer replaces its own prior peer
+                    if old is not None:
+                        await old.close()
+                    if len(peers) >= _MAX_PEERS:
+                        log.warning("pair: peer cap reached; dropping offer")
+                        continue
                     pc, answer_sdp = await _answer(str(msg.get("sdp") or ""), ice, code_key, payload, state)
-                    peers.append(pc)
-                    await ws.send(json.dumps({"type": "answer", "to": msg.get("from"), "sdp": answer_sdp}))
+                    peers[phone_id] = pc
+                    _reap_on_close(pc, phone_id, peers)
+                    await ws.send(json.dumps({"type": "answer", "to": phone_id, "sdp": answer_sdp}))
             finally:
                 closer.cancel()
     except Exception as exc:  # any disconnect — the session just ends (caller can restart)
@@ -178,6 +200,6 @@ async def run_pairing_host(
             t.cancel()
         if state["ok"]:
             await asyncio.sleep(1.0)  # let the payload flush before tearing the channel down
-        for pc in peers:
+        for pc in list(peers.values()):
             await pc.close()
     return state["ok"]

@@ -24,9 +24,16 @@ is true of the broker protocol and still leaves things worth knowing:
   operator) could serve modified JavaScript and read the stored credential. Running
   your own node via `SMARTBRAIN_SIGNALING_URL` moves that trust to you; using the
   Desktop only avoids it entirely.
-- **A desktop id is a routing key, not a secret.** It travels in the pairing QR and
-  in every phone hello. The broker refuses to re-register an id that already holds a
-  live socket, but you should not treat one as confidential.
+- **A desktop id is a routing key, not a secret.** It travels in the pairing payload and
+  in every phone hello (the QR carries only the site address). It does not need to be
+  confidential: a Desktop proves ownership of its id to the broker with an Ed25519
+  signature, and the broker binds the id to that key on first sight, so knowing an id
+  lets nobody take its place — while it is online or offline.
+- **What the hosted node keeps.** No accounts; no access log is configured; the
+  application log records no ids or addresses; container logs rotate at 10 MB. It sees
+  connection offers and answers (IP addresses, timing) and nothing else. Pairing by code
+  extends the node slightly more trust than a session does — see the *Security* section
+  of the remote-access guide — and a self-hosted node removes that.
 - **Releases are signed, but the app is not OS-signed.** Each release's checksum
   file carries an Ed25519 signature, and the public key is compiled into the
   launcher, so an update that was not produced by us is refused rather than

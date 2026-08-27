@@ -593,6 +593,7 @@ export interface DeviceInfo {
   device_id: string;
   label: string;
   created_at: string;
+  last_seen: string | null; // last successful connection (hourly granularity), null = never
 }
 
 // POST /api/devices response = the full pairing payload (shown once, encoded into the QR).

@@ -28,6 +28,13 @@ Handshake over the channel (in order):
   4. KEEPALIVE (authed only): {"type":"ping","t"} -> {"type":"pong","t"}. The phone pings
      on a timer so idle NAT/consent mappings stay warm and a dead path is noticed without
      user traffic. Before auth, a ping is just an invalid auth message (rejected, closed).
+
+LOCKED Desktop (no store): it can neither sign hello_ok nor verify anyone, but a paired
+phone deserves to hear "locked" rather than time out. That bit must not leak to whoever
+answers/relays an offer, so: hello -> {"type":"locked_challenge"}; the phone answers
+{"type":"whoami","device_id"} (its PUBLIC id — never the credential); if the id matches
+the plaintext digest set of devices minted here (devices.is_known_device_id) the Desktop
+sends auth_error{reason:"locked"} and closes, otherwise it closes silently.
 """
 
 from __future__ import annotations
@@ -167,9 +174,14 @@ def _handle_channel_auth(channel, msg: dict, store, session: dict) -> None:
     mtype = msg.get("type")
     if store is None:
         # A LOCKED Desktop cannot prove its identity nor verify anyone — the keys live
-        # in the encrypted store. Say so on the FIRST frame (the phone's hello), before
-        # any verification the phone could not complete anyway, then close.
-        _safe_send(channel, json.dumps({"type": "auth_error", "reason": "locked"}))
+        # in the encrypted store. Only a holder of a paired device id is told so: hello
+        # gets a challenge; whoami with a known id gets the hint; anything else closes
+        # silently, so an unpaired answerer learns nothing about this install's state.
+        if mtype == "hello":
+            _safe_send(channel, json.dumps({"type": "locked_challenge"}))
+            return
+        if mtype == "whoami" and devices.is_known_device_id(str(msg.get("device_id") or "")):
+            _safe_send(channel, json.dumps({"type": "auth_error", "reason": "locked"}))
         channel.close()
         return
     if mtype == "hello":  # prove Desktop identity, bound to this DTLS channel
@@ -323,8 +335,8 @@ async def answer_offer(offer_sdp: str, *, store, http_client, ice_servers=None):
     )
 
     assert offer_sdp, "offer sdp required"
-    # store may be None (LOCKED): the channel then answers every hello with
-    # auth_error{reason: locked} and closes — it never serves a request.
+    # store may be None (LOCKED): the channel then runs the locked_challenge/whoami
+    # exchange (module docstring) and closes — it never serves a request.
     servers = [RTCIceServer(**s) for s in (ice_servers or [])]
     pc = RTCPeerConnection(configuration=RTCConfiguration(iceServers=servers))
 

@@ -1,5 +1,5 @@
 <script lang="ts">
-  // Pairing runs entirely by 6-char code: the Desktop shows a code and QR whose only job is
+  // Pairing runs entirely by 8-char code (shown ABCD-EFGH; the dash is optional when typing): the Desktop shows a code and QR whose only job is
   // to open this site on the phone so the operator can install the PWA. On iOS an installed
   // Home Screen app has its own storage isolated from Safari, so pairing must happen in the
   // installed app; we fetch the pairing over an encrypted WebRTC channel (see paircode.ts).
@@ -34,17 +34,17 @@
   {#if phase === "code"}
     <h1>Pair this device</h1>
     <p>On your Desktop, open <b>Settings &rarr; Remote access &rarr; Pair a new phone</b>, then enter
-      the 6-character code shown.</p>
+      the 8-character code shown (with or without the dash).</p>
     <p style="margin-top:1rem">
       <input
         bind:value={code}
-        placeholder="e.g. ABC234"
+        placeholder="e.g. ABCD-EFGH"
         aria-label="Pairing code"
         autocapitalize="characters"
         autocomplete="off"
         autocorrect="off"
         spellcheck="false"
-        maxlength="10"
+        maxlength="12"
         style="text-transform:uppercase;letter-spacing:0.15em;font-family:var(--font-mono)"
       />
     </p>
