@@ -24,7 +24,7 @@
 # the node; clients never see it.
 services:
   caddy:
-    image: caddy:2
+    image: caddy:2.10   # pinned: the X-Forwarded-For rewrite in the Caddyfile relies on {client_ip}
     container_name: sb_caddy
     restart: unless-stopped
     ports:
@@ -81,6 +81,9 @@ services:
       # docker's default pools); anything else is keyed on the raw peer, so a direct client
       # cannot forge the header to dodge the limits.
       - SIGNALING_TRUSTED_PROXIES=172.16.0.0/12
+      # A binding unseen for this many days may be reclaimed when the map is full; live ones
+      # never are (a full map of live bindings refuses new Desktops with "busy" instead).
+      - SIGNALING_BINDING_TTL_DAYS=${SIGNALING_BINDING_TTL_DAYS:-30}
     volumes:
       - sb_signaling_state:/state
     # No published port — Caddy reaches it on the internal network as signaling:8089.

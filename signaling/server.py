@@ -103,6 +103,9 @@ _DEFAULT_OFFER_WINDOW_SECS = 60.0        # ...per this window (excess -> rate_li
 _DEFAULT_ANSWER_LIMIT = 60               # answers one desktop socket may send per window...
 _DEFAULT_ANSWER_WINDOW_SECS = 60.0       # ...(excess dropped; the link stays up).
 _DEFAULT_TRUSTED_PROXIES = "127.0.0.1/32,::1/128"
+# A binding not seen for this long may be reclaimed when the map is full; a live one never is.
+_DEFAULT_BINDING_TTL_DAYS = 30
+_BINDING_TOUCH_PERSIST_SECS = 3600.0     # write last_seen to disk at most hourly per binding
 # Desktop proof-of-possession (G1/G2).
 _REGISTER_PREFIX = b"sb-register-v1"     # domain separation for the registration signature
 _NONCE_BYTES = 16
@@ -144,25 +147,34 @@ def _parse_networks(raw: str) -> list:
     return [ipaddress.ip_network(n.strip(), strict=False) for n in raw.split(",") if n.strip()]
 
 
+def _is_trusted(ip: str, trusted: list) -> bool:
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    return any(addr in net for net in trusted)
+
+
 def _client_ip(ws, trusted: list) -> str:
-    """The address per-IP limits key on: the first X-Forwarded-For hop when (and ONLY when)
-    the socket peer is a trusted proxy — otherwise a direct client could forge the header
-    and dodge every per-IP bound — else the socket peer address itself."""
+    """The address per-IP limits key on. When (and ONLY when) the socket peer is a trusted
+    proxy, it is the RIGHTMOST X-Forwarded-For hop that is not itself a trusted proxy —
+    the leftmost entries are whatever the client chose to send, the rightmost ones were
+    appended by proxies we trust, so the first untrusted address walking from the right is
+    the real client. A direct (untrusted) peer is keyed on its socket address, header or not,
+    so it cannot forge its way past any per-IP bound."""
     assert isinstance(trusted, list), "trusted networks must be a list"
     peer = ""
     try:
         peer = str((ws.remote_address or ("",))[0])
     except Exception:  # unix sockets / test doubles without a peer
         peer = ""
-    try:
-        addr = ipaddress.ip_address(peer)
-    except ValueError:
+    if not _is_trusted(peer, trusted):
         return peer or "?"
-    if any(addr in net for net in trusted):
-        headers = getattr(getattr(ws, "request", None), "headers", None)
-        fwd = (headers.get("X-Forwarded-For", "") if headers is not None else "").split(",")[0].strip()
-        if fwd:
-            return fwd[:64]
+    headers = getattr(getattr(ws, "request", None), "headers", None)
+    fwd = headers.get("X-Forwarded-For", "") if headers is not None else ""
+    for hop in reversed([h.strip() for h in fwd.split(",")]):
+        if hop and not _is_trusted(hop, trusted):
+            return hop[:64]
     return peer
 
 
@@ -182,43 +194,80 @@ def _verify_registration(pubkey_b64: str, sig_b64: str, nonce: bytes, desktop_id
 
 
 class _Bindings:
-    """desktop_id -> pubkey TOFU map, bounded (oldest evicted) and optionally persisted.
+    """desktop_id -> {pubkey, last_seen} TOFU map, bounded and optionally persisted.
+
+    Fullness is FAIL-CLOSED: when the map is at capacity only bindings not seen for
+    ``ttl_secs`` are reclaimed, and if none are, the new binding is refused. Evicting the
+    oldest-inserted instead would let anyone able to register (open mode) flood the map
+    with throwaway ids until a victim's binding fell out, then bind the victim's id under
+    their own key — the exact takeover the map exists to prevent.
 
     Persistence is a plain JSON file written atomically (tmp + rename) so a crash mid-write
     never leaves a truncated map that would silently unbind every Desktop. A missing or
     unreadable file starts empty — the node degrades to first-come binding, never refuses.
     """
 
-    def __init__(self, path: str, max_entries: int) -> None:
+    def __init__(self, path: str, max_entries: int, ttl_secs: float) -> None:
         assert max_entries > 0, "max_entries must be positive"
+        assert ttl_secs > 0, "ttl_secs must be positive"
         self._path = path
         self._max = int(max_entries)
-        self._map: dict[str, str] = {}
+        self._ttl = float(ttl_secs)
+        self._map: dict[str, dict] = {}  # desktop_id -> {"pubkey": str, "seen": unix ts}
         if path:
             self._load()
 
     def get(self, desktop_id: str) -> str | None:
-        return self._map.get(desktop_id)
+        entry = self._map.get(desktop_id)
+        return None if entry is None else entry["pubkey"]
 
-    def bind(self, desktop_id: str, pubkey: str) -> None:
+    def touch(self, desktop_id: str, now: float | None = None) -> None:
+        """Mark a bound id as live (called on every successful registration), so it can
+        never be reclaimed while in use. Disk writes are throttled to hourly per id."""
+        entry = self._map.get(desktop_id)
+        if entry is None:
+            return
+        now = time.time() if now is None else now
+        if now - entry["seen"] >= _BINDING_TOUCH_PERSIST_SECS:
+            entry["seen"] = now
+            self._save()
+        else:
+            entry["seen"] = now
+
+    def bind(self, desktop_id: str, pubkey: str, now: float | None = None) -> bool:
+        """Bind on first sight. Returns False (fail closed) when the map is full of live ids."""
         assert desktop_id and pubkey, "desktop_id + pubkey required"
         if desktop_id in self._map:
-            return
-        while len(self._map) >= self._max:  # oldest first (dict preserves insertion order)
-            self._map.pop(next(iter(self._map)))
-        self._map[desktop_id] = pubkey
+            return True
+        now = time.time() if now is None else now
+        if len(self._map) >= self._max:
+            stale = [k for k, e in self._map.items() if now - e["seen"] > self._ttl]
+            for k in stale:
+                self._map.pop(k, None)
+        if len(self._map) >= self._max:
+            log.warning("desktop binding map full (%d live bindings) — refusing a new binding; "
+                        "raise SIGNALING_MAX_DESKTOPS or lower SIGNALING_BINDING_TTL_DAYS", self._max)
+            return False
+        self._map[desktop_id] = {"pubkey": pubkey, "seen": now}
         self._save()
+        return True
 
     def __len__(self) -> int:
         return len(self._map)
 
     def _load(self) -> None:
+        # Deliberate: a corrupt file starts EMPTY (availability over strictness) — every
+        # Desktop re-binds on first sight rather than all being refused. This is also the
+        # runbook's documented reset: delete the file, restart.
         try:
             with open(self._path, encoding="utf-8") as fh:
                 data = json.load(fh)
             assert isinstance(data, dict), "bindings file must hold a JSON object"
-            items = [(str(k), str(v)) for k, v in data.items() if k and v]
-            self._map = dict(items[-self._max:])
+            loaded: dict[str, dict] = {}
+            for k, v in list(data.items())[-self._max:]:
+                if k and isinstance(v, dict) and v.get("pubkey"):
+                    loaded[str(k)] = {"pubkey": str(v["pubkey"]), "seen": float(v.get("seen") or 0.0)}
+            self._map = loaded
             log.info("loaded %d desktop bindings", len(self._map))
         except FileNotFoundError:
             pass
@@ -268,6 +317,7 @@ class Broker:
         offer_window_secs: float = _DEFAULT_OFFER_WINDOW_SECS,
         answer_limit: int = _DEFAULT_ANSWER_LIMIT,
         answer_window_secs: float = _DEFAULT_ANSWER_WINDOW_SECS,
+        binding_ttl_days: float = _DEFAULT_BINDING_TTL_DAYS,
     ) -> None:
         assert isinstance(token, str), "token must be a string"
         assert pair_ice is None or isinstance(pair_ice, list), "pair_ice must be a list"
@@ -305,7 +355,9 @@ class Broker:
         # Per-desktop monotonic timestamps of recent phone connects (pruned each admit).
         self._phone_connects: dict[str, list[float]] = {}
         # Proof-of-possession: desktop_id -> pubkey (TOFU), bounded by the desktop cap.
-        self._bindings = _Bindings(state_file, self._max_desktops)
+        assert binding_ttl_days > 0, "binding_ttl_days must be positive"
+        self._bindings = _Bindings(state_file, self._max_desktops, float(binding_ttl_days) * 86400.0)
+        self._state_file = str(state_file or "")
         self._allow_legacy = bool(allow_legacy)
         # Per-IP bounds. Concurrent counts shrink to zero and are dropped on close, so the map
         # is bounded by live sockets; the hello map is swept like the phone rate map.
@@ -350,8 +402,6 @@ class Broker:
                 return
             if role == "desktop":
                 reject = self._admit_desktop(hello.get("token"))
-                if reject is None:
-                    reject = await self._prove_desktop(ws, desktop_id, hello.get("pubkey"))
                 if reject is not None:
                     await _send(ws, {"type": "error", "detail": reject})
                     return
@@ -362,12 +412,16 @@ class Broker:
                 # user's phone offers. (Their pinned-key channel auth would refuse the
                 # impostor, but their remote access would stay dead: the cleanup below is
                 # identity-checked, so the victim's own disconnect would not even restore
-                # it.) The proof above already stops a stranger; this guards against the
-                # same key registering twice. A genuine reconnect after a drop still works —
-                # the stale socket is gone by then.
+                # it.) Checked BEFORE the proof so a flood of hellos for a live id costs
+                # no Ed25519 work and no round trip. A genuine reconnect after a drop still
+                # works — the stale socket is gone by then.
                 if desktop_id in self._desktops:
                     log.info("refusing duplicate desktop registration")
                     await _send(ws, {"type": "error", "detail": "already registered"})
+                    return
+                reject = await self._prove_desktop(ws, desktop_id, hello.get("pubkey"))
+                if reject is not None:
+                    await _send(ws, {"type": "error", "detail": reject})
                     return
                 ident = desktop_id
                 self._desktops[desktop_id] = ws
@@ -422,13 +476,21 @@ class Broker:
         bucket.append(now)
         self._ip_hellos[ip] = bucket
         if len(self._ip_hellos) > _RATE_MAP_MAX_KEYS:
-            for key in list(self._ip_hellos.keys())[:_RATE_MAP_MAX_KEYS]:
-                kept = [t for t in self._ip_hellos[key] if t > cutoff]
-                if kept:
-                    self._ip_hellos[key] = kept
-                else:
-                    self._ip_hellos.pop(key, None)
+            self._sweep_ip_hellos(cutoff)
         return True
+
+    def _sweep_ip_hellos(self, cutoff: float) -> None:
+        """Bound the per-ip hello map: drop every expired bucket, then — if a burst of live
+        ips still overflows it — the oldest-inserted buckets until it fits. Dropping a live
+        bucket only forgets part of one ip's budget; growing without bound is the real risk."""
+        for key in list(self._ip_hellos.keys()):
+            kept = [t for t in self._ip_hellos[key] if t > cutoff]
+            if kept:
+                self._ip_hellos[key] = kept
+            else:
+                self._ip_hellos.pop(key, None)
+        while len(self._ip_hellos) > _RATE_MAP_MAX_KEYS:
+            self._ip_hellos.pop(next(iter(self._ip_hellos)))
 
     async def _prove_desktop(self, ws, desktop_id: str, pubkey) -> str | None:
         """Challenge/response proof that this Desktop holds the key bound to ``desktop_id``.
@@ -457,9 +519,22 @@ class Broker:
             pubkey, str(reply.get("sig") or ""), nonce, desktop_id
         ):
             return "unauthorized"
-        if bound is None and not desktop_id.startswith(_PAIR_PREFIX):
-            self._bindings.bind(desktop_id, pubkey)
+        if desktop_id.startswith(_PAIR_PREFIX):
+            return None
+        if bound is not None:
+            self._bindings.touch(desktop_id)
+        elif not self._bindings.bind(desktop_id, pubkey):
+            return "busy"  # map full of live bindings: fail closed rather than evict a victim
         return None
+
+    def status_summary(self) -> str:
+        """One line for the startup log: mode, ICE, binding count/persistence, legacy gate."""
+        return (
+            f"mode={'open' if self._open_mode else 'token'}, "
+            f"ice={'ephemeral' if self._turn_secret else 'static'}, "
+            f"bindings={len(self._bindings)} {'persisted' if self._state_file else 'in-memory'}, "
+            f"legacy={'ALLOWED' if self._allow_legacy else 'off'}"
+        )
 
     def _admit_desktop(self, token) -> str | None:
         """Authorize a desktop registration. Returns ``None`` to admit, else an error ``detail``.
@@ -659,6 +734,7 @@ def _broker_from_env(token: str, pair_ice: list, open_mode: bool = False) -> Bro
         offer_window_secs=float(os.environ.get("SIGNALING_OFFER_WINDOW_SECS", _DEFAULT_OFFER_WINDOW_SECS)),
         answer_limit=int(os.environ.get("SIGNALING_ANSWER_LIMIT", _DEFAULT_ANSWER_LIMIT)),
         answer_window_secs=float(os.environ.get("SIGNALING_ANSWER_WINDOW_SECS", _DEFAULT_ANSWER_WINDOW_SECS)),
+        binding_ttl_days=float(os.environ.get("SIGNALING_BINDING_TTL_DAYS", _DEFAULT_BINDING_TTL_DAYS)),
     )
 
 
@@ -675,11 +751,7 @@ async def main() -> None:
             "SIGNALING_TOKEN must be set to a non-empty desktop registration secret "
             "(or set SIGNALING_OPEN=1 for hosted tokenless mode)")
     broker = _broker_from_env(token, _pair_ice_from_env(), open_mode=open_mode)
-    log.info("signaling broker listening on %s:%d (mode=%s, ice=%s, bindings=%d%s, legacy=%s)",
-             host, port, "open" if open_mode else "token",
-             "ephemeral" if os.environ.get("SIGNALING_TURN_SECRET") else "static",
-             len(broker._bindings), " persisted" if os.environ.get("SIGNALING_STATE_FILE") else " in-memory",
-             "ALLOWED" if broker._allow_legacy else "off")
+    log.info("signaling broker listening on %s:%d (%s)", host, port, broker.status_summary())
     async with websockets.serve(broker.handle, host, port, max_size=_MAX_MSG):
         await asyncio.Future()  # run forever
 

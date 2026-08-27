@@ -20,7 +20,13 @@
 		header Upgrade websocket
 	}
 	handle @ws {
-		reverse_proxy signaling:8089
+		reverse_proxy signaling:8089 {
+			# The broker keys its per-IP limits on X-Forwarded-For (it trusts this proxy).
+			# Replace — never append to — whatever the client sent, so the broker only
+			# ever sees the address Caddy itself observed. Not left to Caddy's default.
+			header_up -X-Forwarded-For
+			header_up X-Forwarded-For {client_ip}
+		}
 	}
 	# /api and /mcp are served by the Desktop over the WebRTC DataChannel, NEVER by this
 	# node. Return 404 so the SPA's direct-reachability probe fails and it uses the remote

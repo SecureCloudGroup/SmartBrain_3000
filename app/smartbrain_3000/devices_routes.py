@@ -113,8 +113,8 @@ async def start_pair_code(request: Request, body: DeviceCreate) -> dict:
         pairing_host.run_pairing_host(
             signaling_url=signaling, token=token, code=code, payload=payload,
             stop=stop, ice_servers=remote_config.ice_servers(), expiry_s=300,
-        conn=request.app.state.db,
-    )
+            conn=request.app.state.db,
+        )
     )
     request.app.state.pair_session = {"stop": stop, "task": task}
     _activate_remote(request.app)  # pairing is the opt-in -> open the broker link (lazy-start)

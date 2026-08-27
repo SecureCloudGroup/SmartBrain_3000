@@ -175,9 +175,10 @@ export class RemoteConnection {
     // out at the end of onHelloOk), but the session itself must not start.
     if (type === "locked_challenge" && !this.desktopVerified) {
       // A LOCKED Desktop won't say so to just anyone: it asks who we are first, and only
-      // a device id it minted gets the "locked" hint below. The id is PUBLIC routing
-      // data (it already rides the signaling offer); the credential stays withheld until
-      // the Desktop has proved itself in onHelloOk.
+      // a device id it minted gets the "locked" hint below. The id is a public identifier
+      // that reveals nothing exploitable without the credential — and the credential stays
+      // withheld until the Desktop has proved itself in onHelloOk. A rogue answerer learns
+      // at most that some paired phone exists.
       this.send({ type: "whoami", device_id: this.pairing.deviceId });
       return;
     }

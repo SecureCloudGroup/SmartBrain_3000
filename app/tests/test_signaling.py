@@ -673,7 +673,7 @@ def test_bindings_persist_across_restart(tmp_path) -> None:
         finally:
             server.close()
             await server.wait_closed()
-        assert json.loads(pathlib.Path(state).read_text()) == {"d1": _pub_b64(_KEY)}
+        assert json.loads(pathlib.Path(state).read_text())["d1"]["pubkey"] == _pub_b64(_KEY)
         # A fresh broker (restart) loads the binding: the stranger is still refused.
         server, url = await _serve(_open_broker(state_file=state))
         try:
@@ -687,16 +687,65 @@ def test_bindings_persist_across_restart(tmp_path) -> None:
     asyncio.run(run())
 
 
-def test_bindings_bounded_oldest_evicted(tmp_path) -> None:
-    b = broker_mod._Bindings(str(tmp_path / "b.json"), max_entries=2)
-    b.bind("a", "ka")
-    b.bind("b", "kb")
-    b.bind("c", "kc")
-    assert b.get("a") is None and b.get("b") == "kb" and b.get("c") == "kc"
-    assert len(broker_mod._Bindings(str(tmp_path / "b.json"), max_entries=2)) == 2
+_DAY = 86400.0
+
+
+def test_bindings_full_map_refuses_rather_than_evicting_live_ids(tmp_path) -> None:
+    """A flood of new ids cannot push a victim's fresh binding out (fail closed)."""
+    b = broker_mod._Bindings(str(tmp_path / "b.json"), max_entries=2, ttl_secs=30 * _DAY)
+    now = 1_800_000_000.0
+    assert b.bind("victim", "kv", now=now) and b.bind("x1", "k1", now=now)
+    for i in range(50):  # the flood
+        assert b.bind(f"flood{i}", "kf", now=now + i) is False
+    assert b.get("victim") == "kv" and b.get("x1") == "k1" and len(b) == 2
+    # Persisted with last_seen; a reload keeps both.
+    again = broker_mod._Bindings(str(tmp_path / "b.json"), max_entries=2, ttl_secs=30 * _DAY)
+    assert again.get("victim") == "kv" and again._map["victim"]["seen"] == now
+
+
+def test_bindings_stale_id_is_reclaimable_but_touched_id_is_not(tmp_path) -> None:
+    b = broker_mod._Bindings(str(tmp_path / "b.json"), max_entries=2, ttl_secs=30 * _DAY)
+    t0 = 1_800_000_000.0
+    assert b.bind("old", "ko", now=t0) and b.bind("live", "kl", now=t0)
+    b.touch("live", now=t0 + 31 * _DAY)  # the live Desktop registered again recently
+    assert b.bind("new", "kn", now=t0 + 31 * _DAY)  # old (31 days unseen) reclaimed
+    assert b.get("old") is None and b.get("live") == "kl" and b.get("new") == "kn"
     # An unreadable file starts empty rather than refusing every Desktop.
     (tmp_path / "bad.json").write_text("{not json")
-    assert len(broker_mod._Bindings(str(tmp_path / "bad.json"), max_entries=2)) == 0
+    assert len(broker_mod._Bindings(str(tmp_path / "bad.json"), max_entries=2, ttl_secs=1.0)) == 0
+
+
+def test_broker_refuses_new_desktop_when_binding_map_is_full_of_live_ids() -> None:
+    async def run() -> None:
+        broker = _open_broker(max_desktops=2)
+        server, url = await _serve(broker)
+        try:
+            for did in ("d1", "d2"):
+                async with websockets.connect(url) as d:
+                    assert (await _register(d, did, token="", key=_keypair()))["type"] == "registered"
+            async with websockets.connect(url) as d:  # third id: proven, but no slot to bind
+                m = await _register(d, "d3", token="", key=_keypair())
+                assert m == {"type": "error", "detail": "busy"}
+            assert broker._bindings.get("d1") and broker._bindings.get("d2") and not broker._bindings.get("d3")
+            async with websockets.connect(url) as d:  # a bound id still registers (touch, not bind)
+                m = await _register(d, "d1", token="", key=_keypair())
+                assert m["detail"] == "unauthorized"  # wrong key for d1
+        finally:
+            server.close()
+            await server.wait_closed()
+
+    asyncio.run(run())
+
+
+def test_ip_hello_map_sweep_bounds_the_map(monkeypatch) -> None:
+    monkeypatch.setattr(broker_mod, "_RATE_MAP_MAX_KEYS", 2)
+    b = _open_broker(ip_hello_limit=5, ip_hello_window_secs=60.0)
+    for ip in ("a", "b", "c", "d", "e"):
+        assert b._admit_ip_hello(ip)
+    assert len(b._ip_hellos) <= 2  # live buckets past the cap: oldest dropped until it fits
+    b._ip_hellos = {"x": [0.0], "y": [0.0], "z": [0.0]}  # all expired
+    assert b._admit_ip_hello("w")
+    assert set(b._ip_hellos) == {"w"}
 
 
 def test_pairing_rooms_are_signed_but_never_bound() -> None:
@@ -788,6 +837,10 @@ class _FakeWs:
 def test_client_ip_honours_forwarded_header_only_from_trusted_proxy() -> None:
     trusted = broker_mod._parse_networks("172.16.0.0/12,127.0.0.1/32")
     assert broker_mod._client_ip(_FakeWs("172.18.0.2", "203.0.113.9, 172.18.0.2"), trusted) == "203.0.113.9"
+    # Rightmost UNTRUSTED hop wins: a client-supplied leftmost entry is ignored.
+    assert broker_mod._client_ip(_FakeWs("172.18.0.2", "1.2.3.4, 203.0.113.9, 172.18.0.3"), trusted) == "203.0.113.9"
+    # Every hop trusted (or header empty): fall back to the socket peer.
+    assert broker_mod._client_ip(_FakeWs("172.18.0.2", "172.18.0.3"), trusted) == "172.18.0.2"
     # A direct client forging the header is keyed on its real peer address.
     assert broker_mod._client_ip(_FakeWs("198.51.100.4", "203.0.113.9"), trusted) == "198.51.100.4"
     assert broker_mod._client_ip(_FakeWs("172.18.0.2"), trusted) == "172.18.0.2"
@@ -897,6 +950,9 @@ def test_new_limits_read_from_env(monkeypatch) -> None:
     assert (b._max_conns_per_ip, b._ip_hello_limit, b._ip_hello_window) == (3, 4, 5.5)
     assert (b._offer_limit, b._offer_window, b._answer_limit, b._answer_window) == (6, 7.5, 8, 9.5)
     assert [str(n) for n in b._trusted] == ["10.0.0.0/8"] and b._allow_legacy and b._turn_ttl == 3600
+    monkeypatch.setenv("SIGNALING_BINDING_TTL_DAYS", "2")
+    assert broker_mod._broker_from_env("secret", [])._bindings._ttl == 2 * 86400.0
+    assert "bindings=0 in-memory" in b.status_summary() and "legacy=ALLOWED" in b.status_summary()
     assert broker_mod._DEFAULT_TURN_TTL == 3600 and broker_mod._DEFAULT_TRUSTED_PROXIES == "127.0.0.1/32,::1/128"
 
 

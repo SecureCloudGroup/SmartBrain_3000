@@ -33,9 +33,12 @@ session is brokered through it, so an outage reads to users as "SmartBrain is br
    - Certificate: Caddy renews automatically; if `tls` fails, `docker logs sb_caddy | grep -i acme`
      and confirm ports 80/443 are reachable.
    - Full restart: `cd ~/sb-node && docker compose -f compose/docker-compose.signaling.yml -f compose/docker-compose.landing.yml up -d`.
-   - Desktop-id bindings live in the `sb_signaling_state` volume (`/state/bindings.json`);
-     deleting the volume forgets every binding (any Desktop then re-binds on its next
-     registration — safe, but do it only when a user is locked out of their own id).
+   - Desktop-id bindings live in the `sb_signaling_state` volume (`/state/bindings.json`,
+     shape `{desktop_id: {"pubkey": ..., "seen": <unix time>}}`). A binding unseen for
+     `SIGNALING_BINDING_TTL_DAYS` (30) can be reclaimed; live ones are never evicted — when
+     the map is full the node answers `busy` and logs a warning. Deleting the file forgets
+     every binding (any Desktop then re-binds on its next registration — safe, but do it
+     only when a user is locked out of their own id).
 4. **Users during an outage:** Desktops reconnect on their own (1→30 s backoff); phones retry
    six times then show "Desktop unreachable" — they reconnect on the next open. Nothing is
    lost; nothing needs re-pairing.

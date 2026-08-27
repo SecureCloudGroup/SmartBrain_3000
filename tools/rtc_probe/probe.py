@@ -17,6 +17,7 @@ import base64
 import json
 import logging
 import os
+import re
 import secrets
 import socket
 import ssl
@@ -88,7 +89,7 @@ async def run_pair(node: str, relay_only: bool) -> float:
     url = f"wss://{node}/signal"
     desktop_id = "probe-" + secrets.token_hex(8)
     key = Ed25519PrivateKey.generate()
-    got_offer: asyncio.Future = asyncio.get_event_loop().create_future()
+    got_offer: asyncio.Future = asyncio.get_running_loop().create_future()
     answer_q: asyncio.Queue = asyncio.Queue()
     desk_task = asyncio.ensure_future(desktop_side(url, desktop_id, key, got_offer, answer_q))
 
@@ -109,8 +110,8 @@ async def run_pair(node: str, relay_only: bool) -> float:
             assert any("turn:" in u for s in ice for u in (s.get("urls") or [])), "no TURN server pushed — relay path cannot be tested"
         pc_phone = RTCPeerConnection(RTCConfiguration(iceServers=servers))
         pc_desk = RTCPeerConnection(RTCConfiguration(iceServers=servers))
-        opened: asyncio.Future = asyncio.get_event_loop().create_future()
-        echoed: asyncio.Future = asyncio.get_event_loop().create_future()
+        opened: asyncio.Future = asyncio.get_running_loop().create_future()
+        echoed: asyncio.Future = asyncio.get_running_loop().create_future()
 
         @pc_desk.on("datachannel")
         def _on_dc(ch):
@@ -138,7 +139,8 @@ async def run_pair(node: str, relay_only: bool) -> float:
         if relay_only:
             # aiortc has no iceTransportPolicy: offer ONLY relay candidates, so whatever pair
             # the two sides nominate must run through coturn.
-            offer_sdp = "\n".join(l for l in offer_sdp.split("\n") if not l.startswith("a=candidate:") or " typ relay " in l)
+            lines = re.split(r"\r?\n", offer_sdp)
+            offer_sdp = "\r\n".join(l for l in lines if not l.startswith("a=candidate:") or " typ relay " in l)
             assert " typ relay " in offer_sdp, "no relay candidate gathered — TURN allocation failed"
         await ws.send(json.dumps({"type": "offer", "sdp": offer_sdp}))
         offer = await asyncio.wait_for(got_offer, _CHANNEL_WAIT)
@@ -154,6 +156,7 @@ async def run_pair(node: str, relay_only: bool) -> float:
         await pc_phone.close()
         await pc_desk.close()
     desk_task.cancel()
+    await asyncio.gather(desk_task, return_exceptions=True)  # retrieve the cancellation quietly
     return elapsed
 
 
