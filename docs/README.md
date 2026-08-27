@@ -50,6 +50,7 @@ Everything after that is optional and can be read when you need it.
 | Add documents and search them | [Using SmartBrain_3000 → Knowledge](03-features.md#knowledge) |
 | Follow a website (feeds) | [Using SmartBrain_3000 → Follow websites](03-features.md#follow-websites-feeds) |
 | Is something wrong? Settings → Status | [Getting started → Troubleshooting](01-getting-started.md#troubleshooting) |
+| What's in Settings? | [Using SmartBrain → Settings](03-features.md#settings) |
 | Run a prompt on a timer | [Using SmartBrain_3000 → Schedules](03-features.md#schedules) |
 | Connect Gmail | [Using SmartBrain_3000 → Email](03-features.md#email-gmail) |
 | Change what the assistant knows about you | [Using SmartBrain_3000 → Memory](03-features.md#memory) |

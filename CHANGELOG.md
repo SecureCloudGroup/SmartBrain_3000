@@ -18,6 +18,11 @@ to know when a release changes behavior.
   got softer. The mic now opens only after the voice finishes; Stop is the way to cut a
   reply short.
 
+### Changed
+- **Help shows each page's sections.** The Help sidebar now lists the open page's sections
+  (Voice, Knowledge, Settings…) as links, so what you're looking for is one click away
+  instead of a scroll through a long page.
+
 ## [0.9.32] - 2026-08-26
 
 ### Fixed

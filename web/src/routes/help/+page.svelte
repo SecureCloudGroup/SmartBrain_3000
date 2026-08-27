@@ -63,6 +63,17 @@
       >
         {section.title}
       </a>
+      {#if section.slug === current.slug && section.headings.length > 1}
+        <!-- The open page's sections, one click away — "Voice" and "Settings" were
+             invisible from a sidebar that listed only nine page titles. -->
+        <ul class="help-sub" aria-label={`Sections of ${section.title}`}>
+          {#each section.headings as h (h.id)}
+            <li>
+              <a class="help-sublink" class:active={headingId === h.id} href={`#${section.slug}__${h.id}`}>{h.text}</a>
+            </li>
+          {/each}
+        </ul>
+      {/if}
     {/each}
   </nav>
 
@@ -89,6 +100,28 @@
     display: flex;
     flex-direction: column;
     gap: 0.25rem;
+  }
+  .help-sub {
+    list-style: none;
+    margin: 0 0 0.35rem;
+    padding: 0 0 0 0.9rem;
+    border-left: 2px solid var(--border);
+  }
+  .help-sublink {
+    display: block;
+    padding: 0.2rem 0.5rem;
+    font-size: 0.82rem;
+    color: var(--muted);
+    text-decoration: none;
+    border-radius: var(--r-1, 6px);
+  }
+  .help-sublink:hover {
+    color: var(--text);
+    background: var(--accent-tint);
+  }
+  .help-sublink.active {
+    color: var(--accent-strong);
+    font-weight: 600;
   }
   .help-nav h2 {
     margin: 0 0 0.5rem;
