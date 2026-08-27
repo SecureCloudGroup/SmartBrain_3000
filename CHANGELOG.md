@@ -11,6 +11,8 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.9.34] - 2026-08-27
+
 ### Security
 - **Knowledge and prompt injection: tighter containment.** A review of everything the
   assistant reads found no hole in the approval gates, and closed the gaps around them:
