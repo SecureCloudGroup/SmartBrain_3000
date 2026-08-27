@@ -65,6 +65,10 @@
   .head :global(svg) { color: var(--accent); }
   .irreversible .head :global(svg) { color: var(--danger); }
   .scope {
+    max-height: 16rem;
+    overflow: auto;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
     margin: 0;
     font-family: var(--font-mono, ui-monospace, monospace);
     font-size: var(--f-meta);

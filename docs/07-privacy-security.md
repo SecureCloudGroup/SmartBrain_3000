@@ -118,9 +118,15 @@ Two things that sound like they'd leave and don't:
   can't fully protect a running, unlocked session. Keep your machine secure.
 - **No recovery backdoor.** Lose both your passphrase and Recovery Key and the data
   is unrecoverable — by design. Keep the Emergency Kit safe and offline.
-- **Prompt injection.** Content the assistant reads (web pages, emails, documents)
-  could try to manipulate it. The approval gates are the backstop: nothing
-  consequential happens without your sign-off.
+- **Prompt injection.** Content the assistant reads (web pages, emails, documents,
+  feed items) could try to manipulate it, and no model is immune. What SmartBrain does
+  about it: outside text is marked as *data, not instructions* at the moment it enters
+  the model's context, and the model is told so; the approval gates are the backstop —
+  nothing consequential happens without your sign-off, approval cards show every
+  argument in full, an injected web address always parks (sites are allowed one at a
+  time, exactly), and unattended runs can never write a memory or a schedule on a
+  standing grant; replies cannot load remote images. Hidden text in files (white-on-white
+  PDF text, hidden spreadsheet rows) is still read — that is why the gates exist.
 - **Single-user, personal scale.** SmartBrain_3000 is built for one owner on one
   machine. Several boundaries — one global unlock, a single-writer database, no
   key at rest — are deliberate. See [Design limits](09-design-limits.md) for the

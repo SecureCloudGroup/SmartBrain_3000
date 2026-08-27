@@ -17,7 +17,8 @@ export function iconForTool(tool: string): IconName {
 
 // Show tool args as readable "key: value" lines instead of raw JSON. Accepts an
 // object (pending tiles) or a JSON string (history args_summary, already
-// redacted + capped server-side); long values are truncated for display.
+// redacted + capped server-side). Values are shown WHOLE: an approval card that hides the tail of
+// an email body or a schedule prompt is exactly where an injected instruction would hide.
 export function fmtArgs(args: unknown): string {
   let obj: unknown = args;
   if (typeof args === "string") {
@@ -32,7 +33,7 @@ export function fmtArgs(args: unknown): string {
     return Object.entries(obj as Record<string, unknown>)
       .map(([k, v]) => {
         const s = typeof v === "string" ? v : JSON.stringify(v);
-        return `${k}: ${s.length > 200 ? s.slice(0, 200) + "…" : s}`;
+        return `${k}: ${s}`;
       })
       .join("\n");
   }

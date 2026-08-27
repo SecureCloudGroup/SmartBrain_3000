@@ -27,6 +27,16 @@ function installHooks(): void {
       node.setAttribute("target", "_blank");
       node.setAttribute("rel", "noopener noreferrer nofollow");
     }
+    // A remote image in a reply is an exfiltration channel: the URL can carry whatever the
+    // model was talked into putting there, and the browser fetches it without a click. CSP
+    // already refuses the load; drop the element too, keeping its alt text in view.
+    if (node.tagName === "IMG") {
+      const src = node.getAttribute("src") ?? "";
+      if (!/^(data:|\/(?!\/))/.test(src)) {
+        const alt = node.getAttribute("alt") ?? "";
+        node.replaceWith(node.ownerDocument.createTextNode(alt ? `[image: ${alt}]` : "[image removed]"));
+      }
+    }
   });
   hooked = true;
 }
