@@ -11,6 +11,8 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.9.35] - 2026-08-27
+
 ### Security
 - **Remote access, reviewed end to end for the public.** The session protocol was found
   sound (your phone pins your Desktop's key and proves it per connection; the node never
