@@ -11,6 +11,8 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.9.33] - 2026-08-26
+
 ### Fixed
 - **Spoken replies no longer fade.** With a wake word set, the microphone opened while the
   reply was still being read, and an active microphone makes the operating system turn
