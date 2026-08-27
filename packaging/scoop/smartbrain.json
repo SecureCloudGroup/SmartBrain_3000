@@ -1,5 +1,5 @@
 {
-    "version": "0.9.31",
+    "version": "0.9.32",
     "description": "Local-first personal AI assistant \u2014 your data stays on your machine.",
     "homepage": "https://github.com/SecureCloudGroup/SmartBrain_3000",
     "license": "Elastic-2.0",
@@ -9,8 +9,8 @@
     ],
     "architecture": {
         "64bit": {
-            "url": "https://github.com/SecureCloudGroup/SmartBrain_3000/releases/download/v0.9.31/SmartBrain-windows.zip",
-            "hash": "f0a37029ab349c36125ecfbd5cb2a865883f80e4030466a006e49e9e22164710"
+            "url": "https://github.com/SecureCloudGroup/SmartBrain_3000/releases/download/v0.9.32/SmartBrain-windows.zip",
+            "hash": "e2c44c5d36c89175ce8109eaf87d02569bf5f8ed3c6b2d501ee2568f48e6b853"
         }
     },
     "bin": "SmartBrain.exe",
