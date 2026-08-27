@@ -7,10 +7,13 @@ All values come from the WebRTC compose overlay; empty when the feature is uncon
 
 from __future__ import annotations
 
+import logging
 import os
 import socket
 import struct
 import time
+
+log = logging.getLogger(__name__)
 
 # SecureCloudGroup's hosted, content-blind signaling node — the default so a fresh install can pair
 # a phone with zero configuration. Self-hosters override with SMARTBRAIN_SIGNALING_URL=wss://<node>.
@@ -20,8 +23,22 @@ _DEFAULT_SIGNALING_URL = "wss://rtc.securecloudgroup.com"
 
 
 def signaling_url() -> str:
-    """The wss:// signaling broker URL — defaults to the hosted node; env-overridable for self-host."""
-    return os.environ.get("SMARTBRAIN_SIGNALING_URL", _DEFAULT_SIGNALING_URL)
+    """The wss:// signaling broker URL — defaults to the hosted node; env-overridable for self-host.
+
+    Refuses (ValueError) anything but ``wss://``: the broker sees DTLS fingerprints and ICE
+    addresses, and a plaintext ``ws://`` would let an on-path attacker swap the answer SDP.
+    ``SMARTBRAIN_ALLOW_INSECURE_SIGNALING=1`` admits ``ws://`` for local development only.
+    Empty stays empty (remote access unconfigured).
+    """
+    url = os.environ.get("SMARTBRAIN_SIGNALING_URL", _DEFAULT_SIGNALING_URL).strip()
+    if not url or url.startswith("wss://"):
+        return url
+    if os.environ.get("SMARTBRAIN_ALLOW_INSECURE_SIGNALING", "").strip() in ("1", "true", "True"):
+        log.warning("remote access: using INSECURE signaling url %s (allowed by env)", url)
+        return url
+    log.error("remote access: refusing signaling url %s — must be wss:// "
+              "(set SMARTBRAIN_ALLOW_INSECURE_SIGNALING=1 only for local development)", url)
+    raise ValueError("SMARTBRAIN_SIGNALING_URL must start with wss://")
 
 
 def desktop_id(boot: dict | None = None) -> str:

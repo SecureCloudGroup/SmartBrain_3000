@@ -73,8 +73,10 @@ not. Being precise about the line matters more than claiming everything:
 - **Remote access (only if you enable it).** Phone access is **off by default**. When
   you turn it on, your Desktop dials out to a content-blind signaling node to broker the
   connection — the SecureCloudGroup-hosted node (`rtc.securecloudgroup.com`) by default,
-  or your own via `SMARTBRAIN_SIGNALING_URL`. It carries only connection metadata, never
-  your data (the link is end-to-end encrypted). See [Remote access](08-remote-access.md).
+  or your own via `SMARTBRAIN_SIGNALING_URL`. It carries only connection metadata — the
+  offers and answers that name your phone's and Desktop's IP addresses, and when they
+  connect — never your data (the link is end-to-end encrypted), and it keeps no log of
+  who connected. See [Remote access](08-remote-access.md) for exactly what it sees.
 - **Public vaults (only if you subscribe).** Subscribing to a vault by URL — and any
   **Check for updates** or scheduled auto-update on it — fetches the vault from the host
   in that URL (public internet hosts only, never localhost or LAN addresses). Recurring

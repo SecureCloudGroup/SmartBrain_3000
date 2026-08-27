@@ -700,6 +700,18 @@ def record_boot(conn: duckdb.DuckDBPyConnection) -> dict[str, str]:
     if routing_id is None:
         routing_id = str(uuid.uuid4())
         meta_set(conn, "desktop_routing_id", routing_id)
+    if meta_get(conn, "desktop_routing_key") is None:
+        # ``desktop_routing_key`` is the Ed25519 private key (base64 raw bytes) the
+        # Desktop uses to PROVE it owns ``desktop_routing_id`` to the signaling broker
+        # (challenge/response on every registration). It protects only routing
+        # continuity — that nobody can squat the id and swallow this Desktop's phone
+        # offers — never any data: app data is authenticated by the device credential
+        # and the pinned DTLS key, so a copied routing key can at most register as this
+        # Desktop and then fail channel auth. Plaintext is therefore acceptable, and
+        # required: the Desktop must register while the vault is still LOCKED. It is
+        # deliberately NOT returned in the boot dict (``/api/status`` echoes that).
+        from .routing_key import generate_private_key_b64
+        meta_set(conn, "desktop_routing_key", generate_private_key_b64())
     count = int(meta_get(conn, "boot_count") or "0") + 1
     meta_set(conn, "boot_count", str(count))
     first_seen = meta_get(conn, "first_seen")

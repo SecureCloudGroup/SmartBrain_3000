@@ -24,6 +24,7 @@ from starlette.responses import PlainTextResponse
 from . import (
     __version__,
     db,
+    devices,
     gateway,
     mcp_server,
     runtime,
@@ -244,6 +245,7 @@ async def _webrtc_loop(application: FastAPI) -> None:
         # network state — fast (UDP) when possible, resilient (TCP) when UDP is blocked.
         ice_servers=remote_config.ice_servers_adaptive,
         stop=application.state.webrtc_stop,
+        conn=application.state.db,
     )
 
 
@@ -275,6 +277,9 @@ def _init_app_state(application: FastAPI, conn) -> None:
     assert conn is not None, "open db connection required"
     application.state.db = conn  # raw root: startup migrations, scheduler cursor, shutdown
     application.state.dbx = db.ThreadLocalConn(conn)  # per-thread cursors for request handlers
+    # Plaintext meta for devices: lets a LOCKED Desktop answer "is this a paired device id?"
+    # (HMAC digests only — no credentials) so the locked hint goes only to paired phones.
+    devices.bind_meta(application.state.dbx)
     application.state.boot = db.record_boot(conn)
     application.state.master_key = None       # set only after setup/unlock
     application.state.secret_store = None

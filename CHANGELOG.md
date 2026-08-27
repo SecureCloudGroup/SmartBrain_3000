@@ -11,6 +11,27 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Security
+- **Remote access, reviewed end to end for the public.** The session protocol was found
+  sound (your phone pins your Desktop's key and proves it per connection; the node never
+  sees your data). Everything around it was tightened: a Desktop now **proves it owns its
+  routing id** to the node with a signature, and the node remembers which key owns which
+  id, so nobody can take a Desktop's place while it is offline; the node enforces
+  per-address and per-socket limits, answers can't cross rooms, relay credentials expire
+  after an hour and are per client; only `wss://` nodes are accepted, on both sides; the
+  phone validates everything in the pairing payload; the **pairing code is now 8
+  characters** (`ABCD-EFGH`) so a hostile node can't cheaply search for it; a locked
+  Desktop tells only a paired phone that it is locked; paired devices show when they were
+  last seen; container logs rotate; HSTS is on; the node's healthcheck now restarts a
+  wedged broker; and a **scheduled probe pairs through the real node every 30 minutes**
+  (natural path and forced relay) and opens an issue if anything fails. The docs now say
+  exactly what the node sees (your devices' addresses and when they connect) and keeps
+  (nothing), and where pairing trusts it slightly more than a session does.
+
+### Changed
+- **Phone re-pairing needed after this update** when a phone is on the old app: the locked
+  handshake and the 8-character code changed together. Desktops keep working.
+
 ## [0.9.34] - 2026-08-27
 
 ### Security

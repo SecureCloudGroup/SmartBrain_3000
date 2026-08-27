@@ -62,7 +62,12 @@ def _store(request: Request):
 
 @router.get("/api/devices")
 def list_devices(request: Request) -> dict:
-    """List paired devices (metadata only — never their credentials)."""
+    """List paired devices (metadata only — never their credentials).
+
+    Each row carries ``created_at`` and ``last_seen`` (ISO UTC or null; stamped on a
+    successful connect at most hourly) so a stale device can be spotted and revoked —
+    revoke + re-pair is the only rotation path for a device credential.
+    """
     return {"devices": devices.list_devices(_store(request))}
 
 
@@ -90,7 +95,7 @@ def create_device(request: Request, body: DeviceCreate) -> dict:
 async def start_pair_code(request: Request, body: DeviceCreate) -> dict:
     """Start a one-time pairing-by-code session for the installed (home-screen) app.
 
-    Mints a device, generates a 6-char code, and hosts it on the broker for 5 minutes; the
+    Mints a device, generates an 8-char code, and hosts it on the broker for 5 minutes; the
     app enters the code to fetch the pairing over an encrypted channel (see pairing_code.py).
     Requires unlock + a configured signaling broker. One session at a time.
     """
@@ -108,7 +113,8 @@ async def start_pair_code(request: Request, body: DeviceCreate) -> dict:
         pairing_host.run_pairing_host(
             signaling_url=signaling, token=token, code=code, payload=payload,
             stop=stop, ice_servers=remote_config.ice_servers(), expiry_s=300,
-        )
+        conn=request.app.state.db,
+    )
     )
     request.app.state.pair_session = {"stop": stop, "task": task}
     _activate_remote(request.app)  # pairing is the opt-in -> open the broker link (lazy-start)

@@ -1,0 +1,10 @@
+[Unit]
+Description=Restart unhealthy Docker containers (every 2 min)
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=2min
+Persistent=false
+
+[Install]
+WantedBy=timers.target

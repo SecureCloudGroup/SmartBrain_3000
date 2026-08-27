@@ -91,6 +91,32 @@ describe("pairing payload", () => {
   it("rejects payloads missing required fields", () => {
     expect(() => parsePairingPayload(JSON.stringify({ deviceId: "x" }))).toThrow();
   });
+
+  it("requires a wss:// signaling URL (never plaintext or a non-websocket scheme)", () => {
+    expect(() => parsePairingPayload(JSON.stringify({ ...payload, signalingUrl: "ws://connect.example.org" }))).toThrow(/wss/);
+    expect(() => parsePairingPayload(JSON.stringify({ ...payload, signalingUrl: "https://connect.example.org" }))).toThrow(/wss/);
+  });
+
+  it("accepts a missing iceServers (empty list) and string-or-array urls with ICE schemes", () => {
+    const { iceServers: _drop, ...noIce } = payload;
+    expect(parsePairingPayload(JSON.stringify(noIce)).iceServers).toEqual([]);
+    const ice = [{ urls: ["turn:x:3478?transport=tcp", "turns:x:5349"], username: "u", credential: "c" }, { urls: "stun:y:3478" }];
+    expect(parsePairingPayload(JSON.stringify({ ...payload, iceServers: ice })).iceServers).toEqual(ice);
+  });
+
+  it("rejects iceServers that aren't ICE (non-array, non-object, non-string/ non-ICE-scheme urls)", () => {
+    const bad = [
+      { urls: "https://evil.example/turn" },
+      { urls: ["stun:x:3478", "http://evil.example"] },
+      { urls: 42 },
+      { username: "u" },
+      "stun:x:3478",
+    ];
+    for (const entry of bad) {
+      expect(() => parsePairingPayload(JSON.stringify({ ...payload, iceServers: [entry] }))).toThrow(/iceServers/);
+    }
+    expect(() => parsePairingPayload(JSON.stringify({ ...payload, iceServers: { urls: "stun:x:3478" } }))).toThrow(/iceServers/);
+  });
 });
 
 describe("connectionKind classifies the nominated candidate pair", () => {

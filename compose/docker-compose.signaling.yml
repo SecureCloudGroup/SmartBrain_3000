@@ -40,6 +40,11 @@ services:
       - caddy_config:/config
     depends_on:
       - signaling
+    logging:                # bound the container log on disk (default json-file is unbounded)
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   signaling:
     build: ../signaling
@@ -60,12 +65,30 @@ services:
       # STUN/TURN urls the node hands clients. ?transport=tcp is the fallback when a network (some
       # cellular carriers) blocks UDP — coturn also listens on TCP 3478.
       - SIGNALING_ICE_URLS=stun:${SIGNALING_DOMAIN}:3478,turn:${SIGNALING_DOMAIN}:3478,turn:${SIGNALING_DOMAIN}:3478?transport=tcp
+      # Ephemeral TURN credential lifetime. 1h: a leaked credential is useful for minutes,
+      # not a day, and both clients get fresh creds on every (re)register anyway.
+      - SIGNALING_TURN_TTL=3600
+      # Desktop proof-of-possession: desktop_id -> Ed25519 pubkey bindings (trust-on-first-use)
+      # persist here so a restart cannot be used to re-bind someone's id. Named volume, owned
+      # by the broker's unprivileged user (see signaling/Dockerfile).
+      - SIGNALING_STATE_FILE=/state/bindings.json
+      # Transition window ONLY: 1 admits unsigned (pre-proof) Desktops for ids that have no
+      # binding yet. Leave 0 once every install has updated — an unsigned hello can never take
+      # over a bound id either way.
+      - SIGNALING_ALLOW_LEGACY=${SIGNALING_ALLOW_LEGACY:-0}
+      # Per-IP limits key on X-Forwarded-For ONLY when the socket peer is one of these
+      # networks. Caddy reaches the broker over the compose bridge (172.16.0.0/12 covers
+      # docker's default pools); anything else is keyed on the raw peer, so a direct client
+      # cannot forge the header to dodge the limits.
+      - SIGNALING_TRUSTED_PROXIES=172.16.0.0/12
+    volumes:
+      - sb_signaling_state:/state
     # No published port — Caddy reaches it on the internal network as signaling:8089.
     # APP-LEVEL health: the probe completes a real hello/reply exchange, because the
     # observed failure mode accepts sockets while the handler layer is starved — a
-    # TCP check would call that healthy. Docker only MARKS unhealthy; pair this with
-    # a host cron that restarts unhealthy containers, e.g.:
-    #   */2 * * * * docker ps -q -f health=unhealthy | xargs -r docker restart
+    # TCP check would call that healthy. Docker only MARKS unhealthy; the restart is done
+    # by the user-level timer in deploy/sb-autoheal.service + deploy/sb-autoheal.timer
+    # (every 2 min: restart every container Docker marks unhealthy) — install both.
     healthcheck:
       test: ["CMD", "python", "/srv/health.py"]
       interval: 30s
@@ -73,6 +96,11 @@ services:
       retries: 3
       start_period: 10s
     restart: unless-stopped
+    logging:                # bound the container log on disk (default json-file is unbounded)
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   coturn:
     image: coturn/coturn:4.6
@@ -123,7 +151,13 @@ services:
       - "--denied-peer-ip=172.16.0.0-172.31.255.255"
       - "--denied-peer-ip=192.168.0.0-192.168.255.255"
     restart: unless-stopped
+    logging:                # bound the container log on disk (default json-file is unbounded)
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   caddy_data:
   caddy_config:
+  sb_signaling_state:   # desktop_id -> pubkey bindings (SIGNALING_STATE_FILE); keep it

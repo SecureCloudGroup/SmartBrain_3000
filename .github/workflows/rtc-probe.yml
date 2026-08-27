@@ -1,0 +1,63 @@
+name: RTC probe
+
+# The hosted signaling node is what a user's phone depends on; a silent wedge there reads
+# as "SmartBrain is broken". Every 30 minutes this plays both sides of a pairing through
+# the real node (registration with proof-of-possession, offer/answer, DataChannel round
+# trip — once naturally, once forcing the TURN relay), checks STUN and certificate
+# expiry, and opens or updates a GitHub issue when anything fails. It touches no secrets
+# and never connects to the node by SSH. See docs/internal/rtc-runbook.md.
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  contents: read
+
+concurrency:
+  group: rtc-probe
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install probe deps
+        run: python -m pip install -q "aiortc==1.14.0" "websockets==16.0" "cryptography>=42"
+      - name: Probe the node
+        id: probe
+        run: |
+          set +e
+          python tools/rtc_probe/probe.py | tee probe.log
+          echo "rc=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+      - name: Open or update the outage issue
+        if: steps.probe.outputs.rc != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          body="The scheduled probe of rtc.securecloudgroup.com failed at $(date -u +%Y-%m-%dT%H:%M:%SZ).
+
+\`\`\`
+$(cat probe.log)
+\`\`\`
+
+Runbook: docs/internal/rtc-runbook.md"
+          num=$(gh issue list --label rtc-outage --state open --json number --jq '.[0].number')
+          if [ -n "$num" ]; then gh issue comment "$num" --body "$body"; else gh issue create --title "RTC node probe failing" --label rtc-outage --body "$body"; fi
+      - name: Close the outage issue on recovery
+        if: steps.probe.outputs.rc == '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          num=$(gh issue list --label rtc-outage --state open --json number --jq '.[0].number')
+          [ -n "$num" ] && gh issue close "$num" --comment "Probe passing again at $(date -u +%Y-%m-%dT%H:%M:%SZ)." || true
+      - name: Fail the run on a failed probe
+        if: steps.probe.outputs.rc != '0'
+        run: exit 1

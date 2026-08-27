@@ -14,18 +14,20 @@ traffic falls back to an encrypted **relay** that still can't read your data.
 This uses a small **signaling node** on a public server (not your home machine) that helps your
 phone find your Desktop. SmartBrain is **preconfigured to use one**, so there's nothing to set
 up — your Desktop dials **out** to it, so nothing on your home network is ever exposed. The node
-is **content-blind**: it only relays the encrypted connection setup, never your data. (Prefer your
-own node? See *Self-hosting the signaling node* at the end.)
+is **content-blind**: it never sees your data, only the connection setup. Be precise about what
+that setup contains: the node reads the WebRTC offer and answer, which name the **IP addresses**
+of your phone and your Desktop, and it knows *when* they are connected — nothing more. (Prefer
+your own node? See *Self-hosting the signaling node* at the end.)
 
 ## Pair your phone
 
 ![Settings → Remote access: name a phone and pair it](assets/06-remote-access.png)
 
-![Pair a phone — QR + 6-character code over end-to-end-encrypted WebRTC](assets/gifs/08-pair-a-phone.gif)
+![Pair a phone — QR plus a short pairing code over end-to-end-encrypted WebRTC](assets/gifs/08-pair-a-phone.gif)
 
 On the **Desktop**, open **Settings → Remote access**, give the phone a name (it defaults to
 *My phone*, and is only a label so you can tell your devices apart later), and tap
-**Pair a new phone**. You'll see a QR code, three short steps, and a **6-character code**.
+**Pair a new phone**. You'll see a QR code, three short steps, and an **8-character code** (shown as `ABCD-EFGH`).
 
 On the **phone**:
 
@@ -33,7 +35,7 @@ On the **phone**:
 2. **Add it to your Home Screen**, then open the installed app:
    - **iPhone/iPad:** the **Share** button → *Add to Home Screen*.
    - **Android:** the **⋮** menu → *Install app*.
-3. In the installed app, **enter the 6-character code** and tap **Pair**.
+3. In the installed app, **enter the 8-character code** (the dash is optional) and tap **Pair**.
 
 The Desktop watches while you do this and says so: *"Waiting for your phone…"*, then
 *"Your phone connected."*
@@ -99,12 +101,35 @@ itself, **Unpair** in the sidebar forgets the pairing from that end.
 ## Security
 
 - **Off by default.** Nothing is reachable until you pair a device.
-- **End-to-end encrypted.** The connection is encrypted (DTLS); the signaling node and
-  relay only ever see scrambled bytes, never your data.
+- **End-to-end encrypted.** The connection is encrypted (DTLS) between your phone and your
+  Desktop; the relay, when one is needed, carries only scrambled bytes.
 - **Identity-checked.** Before sending anything, your phone verifies your Desktop's
-  identity (a key pinned at pairing), so a compromised node can't impersonate it.
-- **One-time code.** The 6-character pairing code is single-use and short-lived — don't share
-  it. (The QR only opens the site; it carries no secret.)
+  identity: a **key pinned at pairing** (Ed25519), proven with a signature bound to *this*
+  connection — so a compromised node cannot impersonate your Desktop or sit in the middle
+  of a session. Your Desktop proves it owns its routing id to the node the same way, so
+  nobody can quietly take its place while it is offline.
+- **One-time code.** The 8-character pairing code (typed as `ABCD-EFGH`) is single-use,
+  expires in five minutes, and ends after eight wrong guesses — don't share it. The QR only
+  opens the site; it carries no secret.
+
+**What the node sees, and keeps.** The node reads the connection offers and answers (your
+phone's and Desktop's IP addresses, and when they connect), relays them, and holds nothing
+else: it keeps **no account**, **no access log** (none is configured), writes **no addresses
+or ids** into its application log, and its container logs are rotated at 10 MB. It never
+holds your data, your device credential, or your pairing code. Relay credentials it hands
+out expire after an hour and grant relay bandwidth only.
+
+**Two honest limits.**
+1. *Pairing trusts the node more than a session does.* During code pairing the node sees a
+   value derived from your code and could, in theory, search for the code offline — with an
+   8-character code and 300,000 rounds of key stretching that is roughly 2⁵⁸ operations,
+   a cost rather than an impossibility. A session, once paired, is safe from the node
+   entirely (the key pin above). If you would rather not extend even that trust, pair on a
+   node you run yourself.
+2. *The phone app is served from the node's domain.* Whoever runs the node ships the
+   JavaScript that does the pinning and holds your pairing credential in that origin's
+   storage. The hosted node deploys only signed release tags; self-hosting moves that trust
+   to you, and using the Desktop alone avoids it.
 
 This changes *where you can reach the app from*, not what protects your data. See
 [Privacy &amp; security](07-privacy-security.md).
@@ -160,8 +185,11 @@ To run your own node instead:
      docker compose -f compose/docker-compose.signaling.yml up -d
    ```
 
-   The node mints **ephemeral TURN credentials** per connection (coturn `use-auth-secret`),
-   so no secret is ever baked into the app or a QR.
+   The node mints **ephemeral TURN credentials** per connection (coturn `use-auth-secret`,
+   one-hour lifetime), so no secret is ever baked into the app or a QR. Desktops prove
+   ownership of their routing id with a signature, and the node remembers which key owns
+   which id (`SIGNALING_STATE_FILE`, a small JSON file on a volume) so an id can't be
+   taken over. Per-address and per-socket limits are on by default.
 2. **Point your Desktop at it** — set in your environment / `.env`:
 
    ```sh
@@ -169,7 +197,9 @@ To run your own node instead:
    ```
 
    The Desktop fetches STUN/TURN from the node automatically; there's nothing else to set.
-   Then pair devices as above.
+   Only `wss://` is accepted (an unencrypted `ws://` node is refused). Then pair devices as
+   above. The node's health is probed every 30 seconds, and `deploy/sb-autoheal.*` restarts
+   a container that reports unhealthy — install those units alongside the compose file.
 
 (A WireGuard VPN overlay also exists as a CLI-only alternative —
 `python3 installer/install.py wireguard up` — but WebRTC is the recommended path.)

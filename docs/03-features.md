@@ -618,7 +618,7 @@ The endpoint and access token that let a desktop AI client read your knowledge o
 
 ### Remote access
 
-**Pair a new phone** (a QR code that opens the app, plus a six-character code that
+**Pair a new phone** (a QR code that opens the app, plus an eight-character code that
 expires) and the list of **paired devices** with **Revoke**. Details:
 [Remote access](08-remote-access.md).
 

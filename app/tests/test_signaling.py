@@ -9,6 +9,7 @@ it isn't mounted. The full-loop test wires broker + run_signaling + a real aiort
 from __future__ import annotations
 
 import asyncio
+import base64
 import importlib.util
 import json
 import os
@@ -21,7 +22,7 @@ import pytest
 import websockets
 from fastapi.testclient import TestClient
 
-from smartbrain_3000 import devices, webrtc_signaling
+from smartbrain_3000 import db, devices, routing_key, webrtc_signaling
 from smartbrain_3000.secrets import SecretStore, gen_master_key
 
 _SIGNALING_DIR = pathlib.Path(__file__).resolve().parents[2] / "signaling"
@@ -39,6 +40,46 @@ if os.environ.get("SMARTBRAIN_REQUIRE_SIGNALING_TESTS") and importlib.util.find_
 broker_mod = pytest.importorskip("server", reason="signaling/ not mounted")
 
 
+def _keypair():
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    return Ed25519PrivateKey.generate()
+
+
+_KEY = _keypair()  # the "real" Desktop's routing key for the tests below
+
+
+def _pub_b64(key) -> str:
+    return base64.b64encode(key.public_key().public_bytes_raw()).decode("ascii")
+
+
+async def _register(ws, desktop_id: str, token: str = "secret", key=None, pubkey: str | None = None) -> dict:
+    """Desktop hello + proof-of-possession; returns the broker's final reply.
+
+    ``key=None`` uses the shared test key; ``pubkey`` overrides the advertised key so a
+    test can present a key it cannot sign for.
+    """
+    key = key or _KEY
+    hello = {"role": "desktop", "desktop_id": desktop_id, "token": token,
+             "pubkey": _pub_b64(key) if pubkey is None else pubkey}
+    await ws.send(json.dumps(hello))
+    msg = json.loads(await asyncio.wait_for(ws.recv(), 5))
+    if msg.get("type") != "challenge":
+        return msg
+    nonce = base64.b64decode(msg["nonce"])
+    sig = key.sign(b"sb-register-v1" + nonce + desktop_id.encode())
+    await ws.send(json.dumps({"type": "prove", "sig": base64.b64encode(sig).decode("ascii")}))
+    return json.loads(await asyncio.wait_for(ws.recv(), 5))
+
+
+def _conn_with_routing_key():
+    """An in-memory DB carrying a routing key, as record_boot leaves it."""
+    conn = duckdb.connect(":memory:")
+    conn.execute("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);")
+    db.meta_set(conn, "desktop_routing_key", routing_key.generate_private_key_b64())
+    return conn
+
+
 async def _serve_broker(token: str = "secret", **kwargs):
     """Start the broker on an ephemeral loopback port; return (server, ws_url, broker)."""
     broker = broker_mod.Broker(token, **kwargs)
@@ -52,12 +93,10 @@ def test_broker_relays_and_authorizes() -> None:
         server, url, _ = await _serve_broker("secret")
         try:
             async with websockets.connect(url) as bad:  # wrong token -> rejected
-                await bad.send(json.dumps({"role": "desktop", "desktop_id": "d1", "token": "nope"}))
-                assert json.loads(await asyncio.wait_for(bad.recv(), 5))["type"] == "error"
+                assert (await _register(bad, "d1", token="nope"))["type"] == "error"
 
             async with websockets.connect(url) as desk:
-                await desk.send(json.dumps({"role": "desktop", "desktop_id": "d1", "token": "secret"}))
-                assert json.loads(await asyncio.wait_for(desk.recv(), 5))["type"] == "registered"
+                assert (await _register(desk, "d1", token="secret"))["type"] == "registered"
                 async with websockets.connect(url) as phone:
                     await phone.send(json.dumps({"role": "phone", "desktop_id": "d1"}))
                     await phone.send(json.dumps({"type": "offer", "sdp": "SDP-OFFER"}))
@@ -98,8 +137,7 @@ def test_broker_rejects_when_token_unset() -> None:
         url = f"ws://127.0.0.1:{server.sockets[0].getsockname()[1]}"
         try:
             async with websockets.connect(url) as desk:
-                await desk.send(json.dumps({"role": "desktop", "desktop_id": "d1", "token": "anything"}))
-                assert json.loads(await asyncio.wait_for(desk.recv(), 5))["type"] == "error"
+                assert (await _register(desk, "d1", token="anything"))["type"] == "error"
         finally:
             server.close()
             await server.wait_closed()
@@ -129,6 +167,7 @@ def test_full_loop_phone_to_app(app_client: TestClient) -> None:
         desk = asyncio.create_task(webrtc_signaling.run_signaling(
             signaling_url=url, desktop_id="d1", token="secret",
             get_store=lambda: store, stop=stop, http_client=app_client,  # inject the app
+            conn=_conn_with_routing_key(),
         ))
         phone = RTCPeerConnection()
         channel = phone.createDataChannel("sb-api")
@@ -351,8 +390,7 @@ def test_open_mode_admits_desktop_without_token() -> None:
         url = f"ws://127.0.0.1:{server.sockets[0].getsockname()[1]}"
         try:
             async with websockets.connect(url) as desk:
-                await desk.send(json.dumps({"role": "desktop", "desktop_id": "d-open"}))  # NO token
-                assert json.loads(await asyncio.wait_for(desk.recv(), 5))["type"] == "registered"
+                assert (await _register(desk, "d-open", token=""))["type"] == "registered"  # NO token
         finally:
             server.close()
             await server.wait_closed()
@@ -369,8 +407,7 @@ def test_ephemeral_ice_pushed_to_desktop_and_phone() -> None:
         url = f"ws://127.0.0.1:{server.sockets[0].getsockname()[1]}"
         try:
             async with websockets.connect(url) as desk:
-                await desk.send(json.dumps({"role": "desktop", "desktop_id": "d1"}))
-                assert json.loads(await asyncio.wait_for(desk.recv(), 5))["type"] == "registered"
+                assert (await _register(desk, "d1", token=""))["type"] == "registered"
                 ice_msg = json.loads(await asyncio.wait_for(desk.recv(), 5))
                 assert ice_msg["type"] == "ice"
                 _verify_ephemeral(ice_msg["iceServers"], secret, urls)
@@ -432,11 +469,9 @@ def test_open_mode_desktop_registration_rate_limited() -> None:
         try:
             for i in range(2):  # two registrations allowed (connect-and-close frees the slot)
                 async with websockets.connect(url) as d:
-                    await d.send(json.dumps({"role": "desktop", "desktop_id": f"d{i}"}))
-                    assert json.loads(await asyncio.wait_for(d.recv(), 5))["type"] == "registered"
+                    assert (await _register(d, f"d{i}", token=""))["type"] == "registered"
             async with websockets.connect(url) as d:  # third within the window -> rate-limited
-                await d.send(json.dumps({"role": "desktop", "desktop_id": "d3"}))
-                m = json.loads(await asyncio.wait_for(d.recv(), 5))
+                m = await _register(d, "d3", token="")
                 assert m["type"] == "error" and m["detail"] == "rate_limited"
         finally:
             server.close()
@@ -456,12 +491,10 @@ def test_duplicate_desktop_registration_refused() -> None:
         server, url, broker = await _serve_broker("", open_mode=True)
         try:
             async with websockets.connect(url) as first:
-                await first.send(json.dumps({"role": "desktop", "desktop_id": "d1"}))
-                assert json.loads(await asyncio.wait_for(first.recv(), 5))["type"] == "registered"
+                assert (await _register(first, "d1", token=""))["type"] == "registered"
 
                 async with websockets.connect(url) as impostor:
-                    await impostor.send(json.dumps({"role": "desktop", "desktop_id": "d1"}))
-                    m = json.loads(await asyncio.wait_for(impostor.recv(), 5))
+                    m = await _register(impostor, "d1", token="")
                     assert m["type"] == "error" and m["detail"] == "already registered"
 
                 # The incumbent still owns the slot and still receives offers.
@@ -484,13 +517,11 @@ def test_desktop_id_reusable_after_the_holder_disconnects() -> None:
         server, url, _ = await _serve_broker("", open_mode=True)
         try:
             async with websockets.connect(url) as first:
-                await first.send(json.dumps({"role": "desktop", "desktop_id": "d1"}))
-                assert json.loads(await asyncio.wait_for(first.recv(), 5))["type"] == "registered"
+                assert (await _register(first, "d1", token=""))["type"] == "registered"
             for _ in range(50):  # let the server observe the close
                 await asyncio.sleep(0.01)
                 async with websockets.connect(url) as again:
-                    await again.send(json.dumps({"role": "desktop", "desktop_id": "d1"}))
-                    m = json.loads(await asyncio.wait_for(again.recv(), 5))
+                    m = await _register(again, "d1", token="")
                     if m["type"] == "registered":
                         return
             raise AssertionError("desktop_id never became reusable after disconnect")
@@ -520,3 +551,364 @@ def test_connection_without_a_hello_is_dropped() -> None:
             await server.wait_closed()
 
     asyncio.run(run())
+
+
+# --- desktop proof-of-possession (G1/G2) --------------------------------------------------
+
+def _open_broker(**kwargs):
+    """Sync helper for the async tests below: (broker, server, url) on loopback."""
+    broker = broker_mod.Broker("", open_mode=True, **kwargs)
+    return broker
+
+
+async def _serve(broker):
+    server = await websockets.serve(broker.handle, "127.0.0.1", 0)
+    return server, f"ws://127.0.0.1:{server.sockets[0].getsockname()[1]}"
+
+
+def test_unsigned_desktop_hello_is_unauthorized() -> None:
+    """No pubkey and legacy off: refused even in open mode, even for a never-seen id."""
+    async def run() -> None:
+        server, url = await _serve(_open_broker())
+        try:
+            async with websockets.connect(url) as d:
+                await d.send(json.dumps({"role": "desktop", "desktop_id": "d1"}))
+                m = json.loads(await asyncio.wait_for(d.recv(), 5))
+                assert m == {"type": "error", "detail": "unauthorized"}
+        finally:
+            server.close()
+            await server.wait_closed()
+
+    asyncio.run(run())
+
+
+def test_bad_signature_is_unauthorized_and_does_not_bind() -> None:
+    async def run() -> None:
+        broker = _open_broker()
+        server, url = await _serve(broker)
+        try:
+            async with websockets.connect(url) as d:
+                # Advertise the real key but sign with a stranger's: the proof fails.
+                m = await _register(d, "d1", token="", key=_keypair(), pubkey=_pub_b64(_KEY))
+                assert m == {"type": "error", "detail": "unauthorized"}
+            assert broker._bindings.get("d1") is None, "a failed proof must not bind"
+            async with websockets.connect(url) as d:  # the real key still binds afterwards
+                assert (await _register(d, "d1", token=""))["type"] == "registered"
+            assert broker._bindings.get("d1") == _pub_b64(_KEY)
+        finally:
+            server.close()
+            await server.wait_closed()
+
+    asyncio.run(run())
+
+
+def test_bound_desktop_id_refuses_a_different_key() -> None:
+    """TOFU: after d1 is bound to the real key, a stranger's key (even signing correctly
+    for itself) is refused — and the real key still registers after the stranger tried."""
+    async def run() -> None:
+        server, url = await _serve(_open_broker())
+        try:
+            async with websockets.connect(url) as d:
+                assert (await _register(d, "d1", token=""))["type"] == "registered"
+            async with websockets.connect(url) as impostor:
+                m = await _register(impostor, "d1", token="", key=_keypair())
+                assert m == {"type": "error", "detail": "unauthorized"}
+            async with websockets.connect(url) as d:
+                assert (await _register(d, "d1", token=""))["type"] == "registered"
+        finally:
+            server.close()
+            await server.wait_closed()
+
+    asyncio.run(run())
+
+
+def test_token_mode_checks_token_before_proof() -> None:
+    """Wrong token -> unauthorized WITHOUT a challenge (no work spent on strangers)."""
+    async def run() -> None:
+        server, url, _ = await _serve_broker("secret")
+        try:
+            async with websockets.connect(url) as d:
+                await d.send(json.dumps({"role": "desktop", "desktop_id": "d1", "token": "nope",
+                                         "pubkey": _pub_b64(_KEY)}))
+                m = json.loads(await asyncio.wait_for(d.recv(), 5))
+                assert m == {"type": "error", "detail": "unauthorized"}
+            async with websockets.connect(url) as d:  # right token still needs the proof
+                m = await _register(d, "d1", token="secret", key=_keypair(), pubkey=_pub_b64(_KEY))
+                assert m == {"type": "error", "detail": "unauthorized"}
+        finally:
+            server.close()
+            await server.wait_closed()
+
+    asyncio.run(run())
+
+
+def test_legacy_unsigned_hello_only_for_unbound_ids() -> None:
+    async def run() -> None:
+        server, url = await _serve(_open_broker(allow_legacy=True))
+        try:
+            async with websockets.connect(url) as legacy:  # never-bound id: admitted
+                await legacy.send(json.dumps({"role": "desktop", "desktop_id": "old"}))
+                assert json.loads(await asyncio.wait_for(legacy.recv(), 5))["type"] == "registered"
+            async with websockets.connect(url) as d:
+                assert (await _register(d, "d1", token=""))["type"] == "registered"
+            async with websockets.connect(url) as legacy:  # bound id: an unsigned hello cannot take it
+                await legacy.send(json.dumps({"role": "desktop", "desktop_id": "d1"}))
+                m = json.loads(await asyncio.wait_for(legacy.recv(), 5))
+                assert m == {"type": "error", "detail": "unauthorized"}
+        finally:
+            server.close()
+            await server.wait_closed()
+
+    asyncio.run(run())
+
+
+def test_bindings_persist_across_restart(tmp_path) -> None:
+    state = str(tmp_path / "bindings.json")
+
+    async def run() -> None:
+        server, url = await _serve(_open_broker(state_file=state))
+        try:
+            async with websockets.connect(url) as d:
+                assert (await _register(d, "d1", token=""))["type"] == "registered"
+        finally:
+            server.close()
+            await server.wait_closed()
+        assert json.loads(pathlib.Path(state).read_text()) == {"d1": _pub_b64(_KEY)}
+        # A fresh broker (restart) loads the binding: the stranger is still refused.
+        server, url = await _serve(_open_broker(state_file=state))
+        try:
+            async with websockets.connect(url) as impostor:
+                m = await _register(impostor, "d1", token="", key=_keypair())
+                assert m == {"type": "error", "detail": "unauthorized"}
+        finally:
+            server.close()
+            await server.wait_closed()
+
+    asyncio.run(run())
+
+
+def test_bindings_bounded_oldest_evicted(tmp_path) -> None:
+    b = broker_mod._Bindings(str(tmp_path / "b.json"), max_entries=2)
+    b.bind("a", "ka")
+    b.bind("b", "kb")
+    b.bind("c", "kc")
+    assert b.get("a") is None and b.get("b") == "kb" and b.get("c") == "kc"
+    assert len(broker_mod._Bindings(str(tmp_path / "b.json"), max_entries=2)) == 2
+    # An unreadable file starts empty rather than refusing every Desktop.
+    (tmp_path / "bad.json").write_text("{not json")
+    assert len(broker_mod._Bindings(str(tmp_path / "bad.json"), max_entries=2)) == 0
+
+
+def test_pairing_rooms_are_signed_but_never_bound() -> None:
+    """A re-used code must not hit 'unauthorized' because a previous session bound the room."""
+    async def run() -> None:
+        broker = _open_broker()
+        server, url = await _serve(broker)
+        try:
+            async with websockets.connect(url) as d:
+                assert (await _register(d, "sbpair-abc", token="", key=_keypair()))["type"] == "registered"
+            async with websockets.connect(url) as d:  # different Desktop, same code-room
+                assert (await _register(d, "sbpair-abc", token="", key=_keypair()))["type"] == "registered"
+            assert broker._bindings.get("sbpair-abc") is None
+            async with websockets.connect(url) as d:  # but an unsigned pairing hello is refused
+                await d.send(json.dumps({"role": "desktop", "desktop_id": "sbpair-abc"}))
+                assert json.loads(await asyncio.wait_for(d.recv(), 5))["detail"] == "unauthorized"
+        finally:
+            server.close()
+            await server.wait_closed()
+
+    asyncio.run(run())
+
+
+def test_register_desktop_helper_completes_challenge() -> None:
+    """The Desktop-side helper (used by run_signaling AND the pairing host) signs with the
+    stored routing key and binds; a second conn (other key) is then refused."""
+    async def run() -> None:
+        broker = _open_broker()
+        server, url = await _serve(broker)
+        conn = _conn_with_routing_key()
+        try:
+            async with websockets.connect(url) as ws:
+                await webrtc_signaling.register_desktop(ws, desktop_id="d1", token="", conn=conn)
+            assert broker._bindings.get("d1") == routing_key.public_key_b64(conn)
+            async with websockets.connect(url) as ws:
+                with pytest.raises(RuntimeError, match="unauthorized"):
+                    await webrtc_signaling.register_desktop(
+                        ws, desktop_id="d1", token="", conn=_conn_with_routing_key())
+        finally:
+            server.close()
+            await server.wait_closed()
+
+    asyncio.run(run())
+
+
+# --- per-client limits (G3/G4/G5) ---------------------------------------------------------
+
+def test_per_ip_concurrent_connection_cap() -> None:
+    async def run() -> None:
+        server, url = await _serve(_open_broker(max_conns_per_ip=2))
+        try:
+            held = [await _open_phone(url, f"d{i}") for i in range(2)]
+            try:
+                async with websockets.connect(url) as extra:  # refused BEFORE any hello
+                    assert await _is_busy_reject(extra, "busy")
+            finally:
+                for ws in held:
+                    await ws.close()
+        finally:
+            server.close()
+            await server.wait_closed()
+
+    asyncio.run(run())
+
+
+def test_per_ip_hello_rate_limit() -> None:
+    async def run() -> None:
+        server, url = await _serve(_open_broker(ip_hello_limit=2, ip_hello_window_secs=60.0))
+        try:
+            for i in range(2):
+                ws = await _open_phone(url, f"d{i}")
+                await ws.close()
+            async with websockets.connect(url) as third:
+                await third.send(json.dumps({"role": "phone", "desktop_id": "d9"}))
+                assert await _is_busy_reject(third, "rate_limited")
+        finally:
+            server.close()
+            await server.wait_closed()
+
+    asyncio.run(run())
+
+
+class _FakeWs:
+    def __init__(self, peer: str, forwarded: str = "") -> None:
+        self.remote_address = (peer, 1234)
+        self.request = type("R", (), {"headers": {"X-Forwarded-For": forwarded} if forwarded else {}})()
+
+
+def test_client_ip_honours_forwarded_header_only_from_trusted_proxy() -> None:
+    trusted = broker_mod._parse_networks("172.16.0.0/12,127.0.0.1/32")
+    assert broker_mod._client_ip(_FakeWs("172.18.0.2", "203.0.113.9, 172.18.0.2"), trusted) == "203.0.113.9"
+    # A direct client forging the header is keyed on its real peer address.
+    assert broker_mod._client_ip(_FakeWs("198.51.100.4", "203.0.113.9"), trusted) == "198.51.100.4"
+    assert broker_mod._client_ip(_FakeWs("172.18.0.2"), trusted) == "172.18.0.2"
+
+
+def test_phone_offer_rate_limit_closes_socket() -> None:
+    async def run() -> None:
+        server, url = await _serve(_open_broker(offer_limit=2, offer_window_secs=60.0))
+        try:
+            async with websockets.connect(url) as phone:
+                await phone.send(json.dumps({"role": "phone", "desktop_id": "d1"}))
+                for _ in range(2):
+                    await phone.send(json.dumps({"type": "offer", "sdp": "x"}))
+                    assert "offline" in json.loads(await asyncio.wait_for(phone.recv(), 5))["detail"]
+                await phone.send(json.dumps({"type": "offer", "sdp": "x"}))
+                assert await _is_busy_reject(phone, "rate_limited")
+                with pytest.raises(Exception):  # the broker closes the socket after the refusal
+                    await asyncio.wait_for(phone.recv(), 5)
+        finally:
+            server.close()
+            await server.wait_closed()
+
+    asyncio.run(run())
+
+
+def test_desktop_answer_rate_limit_drops_excess() -> None:
+    async def run() -> None:
+        broker = _open_broker(answer_limit=1, answer_window_secs=60.0)
+        server, url = await _serve(broker)
+        try:
+            async with websockets.connect(url) as desk, websockets.connect(url) as phone:
+                assert (await _register(desk, "d1", token=""))["type"] == "registered"
+                await phone.send(json.dumps({"role": "phone", "desktop_id": "d1"}))
+                await phone.send(json.dumps({"type": "offer", "sdp": "x"}))
+                pid = json.loads(await asyncio.wait_for(desk.recv(), 5))["from"]
+                await desk.send(json.dumps({"type": "answer", "to": pid, "sdp": "one"}))
+                await desk.send(json.dumps({"type": "answer", "to": pid, "sdp": "two"}))
+                assert json.loads(await asyncio.wait_for(phone.recv(), 5))["sdp"] == "one"
+                with pytest.raises(TimeoutError):
+                    await asyncio.wait_for(phone.recv(), 0.3)
+                assert broker._dropped_answers == 1
+        finally:
+            server.close()
+            await server.wait_closed()
+
+    asyncio.run(run())
+
+
+def test_cross_room_answer_is_dropped() -> None:
+    """A desktop can only answer phones that dialled ITS id, never another desktop's phone."""
+    async def run() -> None:
+        broker = _open_broker()
+        server, url = await _serve(broker)
+        try:
+            async with websockets.connect(url) as d1, websockets.connect(url) as d2, \
+                    websockets.connect(url) as phone:
+                assert (await _register(d1, "d1", token=""))["type"] == "registered"
+                assert (await _register(d2, "d2", token="", key=_keypair()))["type"] == "registered"
+                await phone.send(json.dumps({"role": "phone", "desktop_id": "d1"}))
+                await phone.send(json.dumps({"type": "offer", "sdp": "x"}))
+                pid = json.loads(await asyncio.wait_for(d1.recv(), 5))["from"]
+                await d2.send(json.dumps({"type": "answer", "to": pid, "sdp": "EVIL"}))
+                await d1.send(json.dumps({"type": "answer", "to": pid, "sdp": "GOOD"}))
+                assert json.loads(await asyncio.wait_for(phone.recv(), 5))["sdp"] == "GOOD"
+                assert broker._dropped_answers == 1
+        finally:
+            server.close()
+            await server.wait_closed()
+
+    asyncio.run(run())
+
+
+def test_turn_credentials_named_per_client() -> None:
+    secret, urls = "s", ["turn:n:3478"]
+
+    async def run() -> None:
+        server, url = await _serve(_open_broker(turn_urls=urls, turn_secret=secret, turn_ttl=3600))
+        try:
+            async with websockets.connect(url) as desk, websockets.connect(url) as phone:
+                assert (await _register(desk, "d1", token=""))["type"] == "registered"
+                dname = json.loads(await asyncio.wait_for(desk.recv(), 5))["iceServers"][0]["username"]
+                await phone.send(json.dumps({"role": "phone", "desktop_id": "d1"}))
+                pname = json.loads(await asyncio.wait_for(phone.recv(), 5))["iceServers"][0]["username"]
+                assert dname.split(":", 1)[1] != pname.split(":", 1)[1] != "sb"
+                assert "d1" not in dname  # the routing id must not appear in coturn logs
+                assert int(dname.split(":")[0]) <= int(__import__("time").time()) + 3600
+        finally:
+            server.close()
+            await server.wait_closed()
+
+    asyncio.run(run())
+
+
+def test_new_limits_read_from_env(monkeypatch) -> None:
+    monkeypatch.setenv("SIGNALING_MAX_CONNS_PER_IP", "3")
+    monkeypatch.setenv("SIGNALING_IP_HELLO_LIMIT", "4")
+    monkeypatch.setenv("SIGNALING_IP_HELLO_WINDOW_SECS", "5.5")
+    monkeypatch.setenv("SIGNALING_OFFER_LIMIT", "6")
+    monkeypatch.setenv("SIGNALING_OFFER_WINDOW_SECS", "7.5")
+    monkeypatch.setenv("SIGNALING_ANSWER_LIMIT", "8")
+    monkeypatch.setenv("SIGNALING_ANSWER_WINDOW_SECS", "9.5")
+    monkeypatch.setenv("SIGNALING_TRUSTED_PROXIES", "10.0.0.0/8")
+    monkeypatch.setenv("SIGNALING_ALLOW_LEGACY", "1")
+    monkeypatch.setenv("SIGNALING_TURN_TTL", "3600")
+    monkeypatch.delenv("SIGNALING_STATE_FILE", raising=False)
+    b = broker_mod._broker_from_env("secret", [])
+    assert (b._max_conns_per_ip, b._ip_hello_limit, b._ip_hello_window) == (3, 4, 5.5)
+    assert (b._offer_limit, b._offer_window, b._answer_limit, b._answer_window) == (6, 7.5, 8, 9.5)
+    assert [str(n) for n in b._trusted] == ["10.0.0.0/8"] and b._allow_legacy and b._turn_ttl == 3600
+    assert broker_mod._DEFAULT_TURN_TTL == 3600 and broker_mod._DEFAULT_TRUSTED_PROXIES == "127.0.0.1/32,::1/128"
+
+
+def test_record_boot_generates_routing_key_but_keeps_it_out_of_boot() -> None:
+    conn = duckdb.connect(":memory:")
+    db.run_migrations(conn)
+    boot = db.record_boot(conn)
+    assert "desktop_routing_key" not in boot  # /api/status echoes boot; the key must not leak
+    first = db.meta_get(conn, "desktop_routing_key")
+    assert first and len(base64.b64decode(first)) == 32
+    db.record_boot(conn)
+    assert db.meta_get(conn, "desktop_routing_key") == first, "generated once, stable across boots"
+    sig = base64.b64decode(routing_key.sign(conn, b"m"))
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+    Ed25519PublicKey.from_public_bytes(base64.b64decode(routing_key.public_key_b64(conn))).verify(sig, b"m")

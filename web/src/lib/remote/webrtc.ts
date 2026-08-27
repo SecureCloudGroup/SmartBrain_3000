@@ -173,9 +173,17 @@ export class RemoteConnection {
     // flip the UI to "connected" and have every /api call relayed to, and answered
     // by, an unverified party. The credential is withheld either way (it only goes
     // out at the end of onHelloOk), but the session itself must not start.
+    if (type === "locked_challenge" && !this.desktopVerified) {
+      // A LOCKED Desktop won't say so to just anyone: it asks who we are first, and only
+      // a device id it minted gets the "locked" hint below. The id is PUBLIC routing
+      // data (it already rides the signaling offer); the credential stays withheld until
+      // the Desktop has proved itself in onHelloOk.
+      this.send({ type: "whoami", device_id: this.pairing.deviceId });
+      return;
+    }
     if (type === "auth_error" && m.reason === "locked" && !this.desktopVerified) {
       // A LOCKED Desktop answers the offer but cannot sign hello_ok (its keys live in the
-      // encrypted store), so this arrives UNVERIFIED. It carries no secret and unlocks
+      // encrypted store), so this arrives UNVERIFIED (after the whoami exchange above). It carries no secret and unlocks
       // nothing — it only names the wait. Keep retrying: unlocking is the fix, and the
       // next attempt after it succeeds. (Field v0.9.26: a locked Desktop showed a spinner
       // and then "unreachable".)

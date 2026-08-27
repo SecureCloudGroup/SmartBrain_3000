@@ -16,8 +16,9 @@ unless you explicitly choose otherwise — and there are exactly two ways to cho
 - **Remote phone access (optional).** If you turn it on, your Desktop connects to a
   **content-blind** signaling node to set up an end-to-end-encrypted link to your
   phone (the SecureCloudGroup-hosted `rtc.securecloudgroup.com` by default, or your
-  own via `SMARTBRAIN_SIGNALING_URL`). It only ever relays encrypted connection
-  setup — it cannot read your data.
+  own via `SMARTBRAIN_SIGNALING_URL`). It sees the connection setup — your two
+  devices' addresses, and when they connect — and never your data, which is encrypted
+  end to end; it keeps no log of who connected.
 
 <p align="center">
   <img src="docs/assets/gifs/01-install-to-unlocked.gif" alt="One command installs SmartBrain; set a passphrase, save your Emergency Kit, and land on an unlocked Chat" width="760" />

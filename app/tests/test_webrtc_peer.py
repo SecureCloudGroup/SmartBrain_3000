@@ -392,17 +392,17 @@ def test_chunked_request_out_of_order_is_dropped() -> None:
     assert session["req_parts"] == {}  # no head -> dropped, not accumulated forever
 
 
-def test_e2e_locked_desktop_names_itself(app_client: TestClient) -> None:
-    """A LOCKED Desktop (no store) still answers the offer and tells the phone WHY on its
-    first frame — auth_error{reason: locked} — then closes. Before: the offer was
-    dropped and the phone timed out into "unreachable" (field, v0.9.26)."""
+def _locked_exchange(app_client: TestClient, device_id: str) -> list:
+    """Drive hello -> locked_challenge -> whoami(device_id) against a LOCKED Desktop; return
+    every frame received before the channel closed."""
     from aiortc import RTCPeerConnection, RTCSessionDescription
 
-    async def run() -> dict:
+    async def run() -> list:
         phone = RTCPeerConnection()
         channel = phone.createDataChannel("sb-api")
         loop = asyncio.get_event_loop()
-        first, closed = loop.create_future(), loop.create_future()
+        closed = loop.create_future()
+        got: list = []
 
         @channel.on("open")
         def _open() -> None:
@@ -410,8 +410,10 @@ def test_e2e_locked_desktop_names_itself(app_client: TestClient) -> None:
 
         @channel.on("message")
         def _msg(data) -> None:
-            if not first.done():
-                first.set_result(json.loads(data))
+            m = json.loads(data)
+            got.append(m)
+            if m.get("type") == "locked_challenge":
+                channel.send(json.dumps({"type": "whoami", "device_id": device_id}))
 
         @channel.on("close")
         def _close() -> None:
@@ -422,11 +424,33 @@ def test_e2e_locked_desktop_names_itself(app_client: TestClient) -> None:
         pc, answer = await webrtc_peer.answer_offer(phone.localDescription.sdp, store=None, http_client=app_client)
         await phone.setRemoteDescription(RTCSessionDescription(sdp=answer, type="answer"))
         try:
-            m = await asyncio.wait_for(first, timeout=20)
             await asyncio.wait_for(closed, timeout=20)
-            return m
+            return got
         finally:
             await phone.close()
             await pc.close()
 
-    assert asyncio.run(run()) == {"type": "auth_error", "reason": "locked"}
+    return asyncio.run(run())
+
+
+def test_e2e_locked_desktop_hints_only_a_paired_device(app_client: TestClient) -> None:
+    """A LOCKED Desktop (no store) still answers the offer, but says "locked" only to a
+    holder of a device id it minted: hello -> locked_challenge, whoami(known id) ->
+    auth_error{reason: locked} + close. The digest set lives in plaintext meta so it
+    works while locked (before: the hint went to whoever sent the first frame)."""
+    devices.bind_meta(app_client.app.state.dbx)
+    store = SecretStore(app_client.app.state.dbx, gen_master_key())
+    rec = devices.create_device(store, "phone")
+    got = _locked_exchange(app_client, rec["device_id"])
+    assert got == [{"type": "locked_challenge"}, {"type": "auth_error", "reason": "locked"}]
+
+
+def test_e2e_locked_desktop_is_silent_to_a_stranger(app_client: TestClient) -> None:
+    """An unknown device id (or a revoked one) gets the challenge and then a silent close —
+    no locked bit for anyone who merely answered/relayed an offer."""
+    devices.bind_meta(app_client.app.state.dbx)
+    store = SecretStore(app_client.app.state.dbx, gen_master_key())
+    rec = devices.create_device(store, "phone")
+    devices.revoke_device(store, rec["device_id"])
+    assert _locked_exchange(app_client, "not-a-device") == [{"type": "locked_challenge"}]
+    assert _locked_exchange(app_client, rec["device_id"]) == [{"type": "locked_challenge"}]

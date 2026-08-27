@@ -15,10 +15,11 @@ loaded when remote access is actually turned on.
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
 
-from . import remote_config, webrtc_bridge, webrtc_peer
+from . import remote_config, routing_key, webrtc_bridge, webrtc_peer
 
 log = logging.getLogger(__name__)
 
@@ -29,6 +30,8 @@ _MAX_PEERS = 8            # bound concurrent device connections
 _PEER_CONNECT_TIMEOUT = 30  # seconds — reap a peer that never finishes connecting
 _MAX_MSG = 256 * 1024
 _CONNECTED = ("connected", "completed")
+_REGISTER_TIMEOUT = 10  # seconds — the broker's challenge/registered must arrive promptly
+_MAX_NONCE = 64
 
 # Strong refs to fire-and-forget tasks (reaper, stop watcher). CPython issue
 # 91887: a task whose only reference is the loop's weakref set can be GC'd
@@ -88,6 +91,36 @@ async def _on_offer(ws, msg: dict, get_store, http_client, ice_servers, peers: d
     await ws.send(json.dumps({"type": "answer", "to": phone_id, "sdp": answer_sdp}))
 
 
+async def register_desktop(ws, *, desktop_id: str, token: str, conn) -> None:
+    """Register ``desktop_id`` on the broker, completing its proof-of-possession challenge.
+
+    Hello carries the routing public key; the broker answers ``challenge`` with a nonce,
+    we sign ``sb-register-v1 || nonce || desktop_id`` with the routing key and reply
+    ``prove``; ``registered`` ends the exchange. With ``conn`` None there is no key, so
+    a legacy unsigned hello goes out — the broker admits it only for never-bound ids and
+    only while SIGNALING_ALLOW_LEGACY=1. Raises on any refusal so the caller's reconnect
+    path (not a silent dead link) handles it.
+    """
+    assert desktop_id, "desktop id required"
+    hello: dict = {"role": "desktop", "desktop_id": desktop_id, "token": token}
+    if conn is not None:
+        hello["pubkey"] = routing_key.public_key_b64(conn)
+    await ws.send(json.dumps(hello))
+    for _ in range(2):  # at most challenge -> registered; anything else is a refusal
+        msg = json.loads(await asyncio.wait_for(ws.recv(), _REGISTER_TIMEOUT))
+        mtype = msg.get("type")
+        if mtype == "challenge" and conn is not None:
+            nonce = base64.b64decode(str(msg.get("nonce") or ""))
+            assert 0 < len(nonce) <= _MAX_NONCE, "challenge nonce must be small + non-empty"
+            sig = routing_key.sign(conn, routing_key.registration_message(nonce, desktop_id))
+            await ws.send(json.dumps({"type": "prove", "sig": sig}))
+            continue
+        if mtype == "registered":
+            return
+        raise RuntimeError(f"broker refused registration: {msg.get('detail') or mtype}")
+    raise RuntimeError("broker never confirmed registration")
+
+
 async def _close_on_stop(ws, stop) -> None:
     """Close the WSS as soon as ``stop`` fires, so shutdown isn't blocked on recv()."""
     await stop.wait()
@@ -108,14 +141,16 @@ async def _arm_backoff_reset(state: dict) -> None:
 
 
 async def run_signaling(
-    *, signaling_url, desktop_id, token, get_store, ice_servers=None, stop=None, http_client=None
+    *, signaling_url, desktop_id, token, get_store, ice_servers=None, stop=None, http_client=None,
+    conn=None,
 ) -> None:
     """Connect to the broker and answer phone offers until ``stop`` is set.
 
     Bounded reconnect with exponential backoff; a dropped connection is retried so
     the Desktop stays reachable. ``get_store`` is called per offer so a lock/unlock
     is observed without restarting the loop. ``http_client`` defaults to the app's
-    loopback client; tests inject one bound to the app.
+    loopback client; tests inject one bound to the app. ``conn`` is the DB connection
+    holding the routing key (see :mod:`routing_key`); None sends a legacy unsigned hello.
     """
     import websockets  # lazy: only when remote access is enabled
 
@@ -130,7 +165,7 @@ async def run_signaling(
             reset_arm: asyncio.Task | None = None
             try:
                 async with websockets.connect(signaling_url, max_size=_MAX_MSG) as ws:
-                    await ws.send(json.dumps({"role": "desktop", "desktop_id": desktop_id, "token": token}))
+                    await register_desktop(ws, desktop_id=desktop_id, token=token, conn=conn)
                     # Arm — not apply — a backoff reset. The reset only takes effect
                     # if the link stays UP for _BACKOFF_STABLE_SECS (B14): a
                     # connect->drop loop won't clear the backoff at handshake.
