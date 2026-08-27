@@ -239,6 +239,7 @@ def test_feed_items_are_feed_origin_so_the_model_sees_them_as_outside_words() ->
     # vault-owned copies: removable alongside the vault, but never rename/delete-blocked
     assert set(vaults.import_origin_doc_ids(vid)) == set(vaults.document_ids(vid))
     from fastapi import HTTPException
+
     from smartbrain_3000 import kb_routes
 
     class _Req:
