@@ -145,9 +145,11 @@ Above the message box sits a row of labeled pills. Each is a mode you leave on:
   stop the voice (a stopped answer keeps its text).
 - **Hands-free** — every dictation sends itself when you pause; say “cancel” to stop one.
 - **Conversation** — 100% voice. You talk, it sends itself, the reply is spoken, and the
-  mic reopens for your follow-up. **Talking over a reply interrupts it**, and your words
-  become the next message. Say **“stop listening”** or **“goodbye”** to end. The first mic
-  open still needs one tap (a browser rule); after that, no buttons.
+  mic reopens for your follow-up. Say **“stop listening”** or **“goodbye”** to end. The
+  first mic open still needs one tap (a browser rule); after that, no buttons. To cut a
+  reply short, press **Stop** — or, with a wake word set, say the phrase over it. (The
+  mic stays closed while a reply is read unless a wake word is set: the microphone hears
+  the reply too, and only your phrase can tell the two apart.)
 - **Short · Medium · Long** — how long *spoken* replies should be. It applies only while
   replies are read aloud (Speak replies or Conversation on); typed chat is unaffected. The
   default is **Short**, because a long spoken answer is tiring — Long is one tap away when
@@ -163,7 +165,8 @@ way (“Merl” may come back as “Merle”); one tap **accepts those spellings
 on the phrase works as you say it. Then, in Chat, the Conversation pill shows your phrase
 and the mic waits for it: **“Hey Merl, what's on my calendar?”** carries the question
 through in one breath, and anything that doesn't start with the phrase is ignored (the
-hint under the box tells you what it heard).
+hint under the box tells you what it heard). If a recording turns out to be the reply's
+own voice coming back through the microphone, it is dropped and the hint says so.
 
 ### Choosing a voice
 
