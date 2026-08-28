@@ -69,6 +69,17 @@ reports it and the UI displays it. Don't "fix" those two files.
 
 ## Pull requests
 
+**Pick an issue with a “Done means” line** — every open issue has one; it is the acceptance
+test. Labels: `good first issue` (self-contained), `help wanted` (welcome, talk first),
+`needs design` (a maintainer decision is pending — say so in the issue before coding).
+Outside PRs are credited in the changelog entry they ship in and in the README's
+Contributors section.
+
+If your change touches `docs/0*.md`, note that the published docs vault must be rebuilt by a
+maintainer before the next release (a `vault-freshness` check on the release workflow enforces
+it) — nothing for you to do beyond mentioning it in the PR.
+
+
 1. Branch from `main`.
 2. Keep the diff focused; every changed line should trace to the stated goal.
 3. Add or update tests; `ruff` and `svelte-check` must be clean (zero warnings).
