@@ -217,6 +217,17 @@ More: **[Changelog](CHANGELOG.md)** · **[Contributing](CONTRIBUTING.md)** ·
 © 2026 The Frels Holdings LLC. "SmartBrain", "SmartBrain_3000", and
 "SmartBrain AI" are trademarks of The Frels Holdings LLC.
 
+## Contributors
+
+Outside contributions are credited here and in the changelog entry they ship in. Every open
+issue carries a **Done means** line; `good first issue` means you can finish it from the issue
+text alone, `help wanted` means it's welcome and may need a short conversation first, and
+`needs design` means a maintainer decision is still pending — comment if you want to shape it.
+Start at [Where help is wanted](https://github.com/SecureCloudGroup/SmartBrain_3000/discussions/259),
+which also carries the roadmap.
+
+- *(your name here — the first outside PR starts this list)*
+
 ## Getting help
 
 Stuck, or something didn't work the way this page said it would? Ask in
