@@ -384,6 +384,53 @@ def test_models_catalog_appends_claudecode_when_enabled(client: TestClient, monk
     assert "claudecode/opus" in ids and "claudecode/sonnet" in ids
 
 
+def test_degraded_catalog_still_lists_claudecode(client: TestClient, monkeypatch) -> None:
+    """A wedged Bifrost must not hide the Claude Code models from the pickers."""
+    _unlock(client)
+    _quiet_server_probes(monkeypatch)
+    monkeypatch.setattr(claudecli, "probe", lambda **k: {
+        "supported": True, "installed": True, "path": "/fake/claude",
+        "version": "2.1.148", "version_ok": True, "logged_in": True, "reachable": True})
+    client.put("/api/local-models/claudecode")
+
+    def boom(**k):
+        raise gateway.GatewayError(502, "bifrost down")
+
+    monkeypatch.setattr(gateway, "list_models", boom)
+    body = client.get("/api/models").json()
+    assert body["degraded"] is True
+    assert "claudecode/sonnet" in [m["id"] for m in body["models"]]
+
+
+def test_user_routes_chat_to_claudecode_model(client: TestClient) -> None:
+    """Selecting a Claude Code model under Model routing persists and reads back."""
+    _unlock(client)
+    r = client.put("/api/routes", json={"routes": {"chat": "claudecode/sonnet"}})
+    assert r.status_code == 200
+    assert client.get("/api/routes").json()["routes"]["chat"] == "claudecode/sonnet"
+
+
+def test_chat_turn_serves_the_selected_claudecode_model(client: TestClient, monkeypatch) -> None:
+    """The full user path: route chat to claudecode, send a message, get the CLI's
+    reply — and an explicit picker choice (body.model) must win over the route."""
+    _unlock(client)
+    served: list[str] = []
+
+    def fake_stream(messages, model, **kw):
+        served.append(model)
+        yield {"delta": "hello from claude", "tool_calls": None, "finish_reason": "stop"}
+
+    monkeypatch.setattr(claudecli, "chat_stream", fake_stream)
+    client.put("/api/routes", json={"routes": {"chat": "claudecode/sonnet"}})
+    r = client.post("/api/chat", json={"messages": [{"role": "user", "content": "hi"}]})
+    assert r.status_code == 200
+    assert r.json()["choices"][0]["message"]["content"] == "hello from claude"
+    r = client.post("/api/chat", json={"messages": [{"role": "user", "content": "hi"}],
+                                       "model": "claudecode/haiku"})
+    assert r.status_code == 200
+    assert served == ["claudecode/sonnet", "claudecode/haiku"]  # route, then explicit pick
+
+
 def test_update_endpoint(client: TestClient, monkeypatch) -> None:
     _unlock(client)
     monkeypatch.setattr(claudecli, "update",
