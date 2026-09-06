@@ -11,6 +11,8 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.9.36] - 2026-09-06
+
 ### Added
 - **Claude Code as a model provider.** If you already pay for Claude, SmartBrain can
   use Anthropic's models through the `claude` command installed on your computer — no
