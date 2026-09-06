@@ -11,6 +11,8 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.9.37] - 2026-09-06
+
 ### Added
 - **Usage & cost shows what your Claude plan absorbed.** Claude Code rows now carry
   an API-equivalent value ("your plan · ≈ $0.42") computed by the `claude` command
