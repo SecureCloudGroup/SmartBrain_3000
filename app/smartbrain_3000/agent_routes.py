@@ -733,6 +733,11 @@ def _stream_first_response(
     decided = False
     suppress = False
     chunks = 0
+    # Claude Code streams carry token usage on their final chunk (Bifrost streams don't);
+    # without capturing it here, interactive claudecode chats never reach Usage & cost —
+    # the streamed path was the ONLY way users chat, so the page stayed empty (v0.9.36
+    # field report).
+    stream_usage: dict | None = None
     spec: list[dict] | None = tools_spec  # drops to None if the model rejects tools
     try:
         for attempt in range(2):  # at most: with tools, then without (P10 #2 bounded)
@@ -742,6 +747,8 @@ def _stream_first_response(
                     if chunks > _STREAM_DELTA_BUDGET:  # fixed upper bound (P10 #2)
                         yield _sse_event("error", {"detail": "stream exceeded delta budget"})
                         return
+                    if isinstance(chunk.get("usage"), dict):
+                        stream_usage = chunk["usage"]
                     if chunk.get("tool_calls"):  # the model started a tool turn
                         # Keep reading instead of bailing on the first fragment: a streamed tool
                         # call arrives in pieces, and collecting them lets the follow-up request
@@ -797,7 +804,17 @@ def _stream_first_response(
             yield _sse_event("pending", payload)
             return
         # Plain streamed answer completed here (no tool fallback) — record ONE turn_metrics row
-        # with the true time-to-first-token. Streamed deltas carry no usage block, so tokens are 0.
+        # with the true time-to-first-token. Bifrost's streamed deltas carry no usage block
+        # (tokens are 0); a Claude Code stream reports its tokens on the final chunk, so
+        # record those for the Usage & cost view (best-effort, mirrors record_response).
+        if stream_usage is not None and conn is not None:
+            cost = stream_usage.get("cost_usd")
+            try:
+                usage.record(conn, model, int(stream_usage.get("prompt_tokens") or 0),
+                             int(stream_usage.get("completion_tokens") or 0),
+                             cost_usd=float(cost) if isinstance(cost, (int, float)) else None)
+            except Exception as exc:  # usage logging must never fail a turn
+                log.debug("stream usage record skipped: %s", exc)
         metrics.record_turn(
             conn, model=model, is_local=gateway.is_local(model),
             duration_ms=int((time.monotonic() - started) * 1000), ttft_ms=ttft_ms,

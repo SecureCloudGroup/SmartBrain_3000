@@ -82,6 +82,31 @@ _HEADING_FORGERY = re.compile(
 _probe_lock = threading.Lock()
 _probe_cache: tuple[float, dict] | None = None
 
+# Last plan-window report from the CLI's rate_limit_event (emitted per chat run).
+# Single-reference swap under CPython — read/written whole, never mutated in place.
+_rate_limit: dict | None = None
+
+
+def rate_limit_status() -> dict | None:
+    """The most recent Claude plan-window report, or None before any chat has run.
+
+    ``{status, resets_at (epoch seconds), using_overage, captured_at}`` — the UI's
+    honest answer to "am I burning my Claude quota?" without guessing plan tiers."""
+    return dict(_rate_limit) if _rate_limit is not None else None
+
+
+def _capture_rate_limit(event: dict) -> None:
+    """Record a rate_limit_event's plan-window fields (best-effort)."""
+    assert isinstance(event, dict), "event must be a dict"
+    info = event.get("rate_limit_info")
+    if not isinstance(info, dict):
+        return
+    global _rate_limit
+    _rate_limit = {"status": str(info.get("status") or ""),
+                   "resets_at": info.get("resetsAt"),
+                   "using_overage": bool(info.get("isUsingOverage")),
+                   "captured_at": time.time()}
+
 # Serve-time consent gate (2026-09 audit): the enabled flag must gate SERVING, not just the
 # catalog — otherwise a route/schedule/explicit model id ships chats to Anthropic for a user
 # who never clicked Connect (never saw the red warning), and Disconnect wouldn't stop them.
@@ -402,6 +427,9 @@ def chat_stream(messages: list[dict], model: str, *, timeout: float = 300.0,
                 if line.strip():
                     noise.append(line.strip())
                 continue
+            if event.get("type") == "rate_limit_event":
+                _capture_rate_limit(event)
+                continue
             if event.get("type") == "result":
                 saw_result = True
                 watchdog.cancel()  # the answer is complete — a late fire must not 504 it
@@ -451,7 +479,10 @@ def _reap(proc: subprocess.Popen) -> None:
 
 def _event_usage(event: dict) -> dict | None:
     """Map the result event's token usage to the OpenAI shape (None when absent) —
-    without it, Claude Code turns never appear in Usage & cost."""
+    without it, Claude Code turns never appear in Usage & cost.
+
+    ``cost_usd`` rides along when the CLI reports ``total_cost_usd``: the API-equivalent
+    value of the call, priced by the CLI itself — no price table for us to let drift."""
     assert isinstance(event, dict), "event must be a dict"
     usage = event.get("usage")
     if not isinstance(usage, dict):
@@ -462,7 +493,11 @@ def _event_usage(event: dict) -> dict | None:
         completion = int(usage.get("output_tokens") or 0)
     except (TypeError, ValueError):
         return None
-    return {"prompt_tokens": prompt, "completion_tokens": completion}
+    out = {"prompt_tokens": prompt, "completion_tokens": completion}
+    cost = event.get("total_cost_usd")
+    if isinstance(cost, (int, float)) and cost >= 0:
+        out["cost_usd"] = float(cost)
+    return out
 
 
 def chat(messages: list[dict], model: str, *, timeout: float = 300.0,

@@ -172,6 +172,10 @@
     scrollToBottom(true);
   }
   // "Back to top" appears once the reader is meaningfully into the history.
+  // Measured composer height: the jump pills sit ABOVE it. A fixed offset guess broke
+  // as the composer grew (voice pills, reply-length row, wrapped hint lines on mobile)
+  // and the pills landed on the input (field report, v0.9.36).
+  let composerH = $state(118);
   let showTop = $state(false);
   function onWindowScroll() {
     showTop = window.scrollY > 500;
@@ -867,10 +871,12 @@
     }
     // The routed "chat" model (Settings → Model routing) is the authoritative DEFAULT and the
     // single source of truth shared by Desktop + PWA (stored server-side, in backups, survives
-    // reboots/upgrades). It always wins on load so changing the routing default propagates here;
-    // a manual pick below is session-only and never persisted (a stale local pick used to
-    // silently override the routed default — e.g. defaulting to gemini after routing to MLX).
-    const def = models.find((x) => x.id === routedChat) || models[0];
+    // reboots/upgrades). It wins on a fresh app load; a manual pick is remembered in memory for
+    // this app session (chatSession.pickedModel) so navigating to another tab and back doesn't
+    // silently flip the model — but it is never persisted (a stale local pick used to silently
+    // override the routed default — e.g. defaulting to gemini after routing to MLX).
+    const def = models.find((x) => x.id === chatSession.pickedModel)
+      || models.find((x) => x.id === routedChat) || models[0];
     if (def) {
       provider = def.provider;
       modelId = def.id;
@@ -882,6 +888,7 @@
   function onProvider() {
     const list = models.filter((m) => m.provider === provider);
     modelId = list.length ? list[0].id : "";
+    chatSession.pickedModel = modelId || null; // a deliberate pick — keep it across tab hops
   }
 
   async function loadConversations(): Promise<boolean> {
@@ -1594,7 +1601,8 @@
     </span>
     <span class="field">
       <label for="model">Model</label>
-      <select id="model" bind:value={modelId} disabled={providerModels.length === 0}>
+      <select id="model" bind:value={modelId} disabled={providerModels.length === 0}
+        onchange={() => (chatSession.pickedModel = modelId || null)}>
         {#if providerModels.length === 0}
           <option value="" disabled>No models for this provider</option>
         {:else}
@@ -1755,7 +1763,7 @@
   </div>
 
   {#if log.length > 0 && (showTop || !atBottom)}
-    <div class="jump-row">
+    <div class="jump-row" style={`bottom: calc(var(--tabbar-h) + ${composerH + 12}px)`}>
       {#if showTop}
         <button class="jump" onclick={jumpToTop}><Icon name="arrow-up" size={14} /> Top</button>
       {/if}
@@ -1801,7 +1809,7 @@
     {#if resumeNotice}<p class="muted resume-notice">{resumeNotice}</p>{/if}
   {/if}
 
-  <div class="composer">
+  <div class="composer" bind:clientHeight={composerH}>
     {#if speechPossible || voiceInfo?.stt_available}
       <!-- Voice MODES live above the field as labeled pills — four unlabeled circles in
            the input row read as "busy" in the field, and a word beats a guessed icon.

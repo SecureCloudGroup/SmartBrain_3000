@@ -38,9 +38,11 @@ def _fresh_module_state():
     """Probe cache and the serve-time consent gate are module-wide; isolate per test.
     The gate defaults ON here so provider tests exercise serving; gate tests flip it."""
     claudecli._probe_cache = None
+    claudecli._rate_limit = None
     claudecli.set_enabled(True)
     yield
     claudecli._probe_cache = None
+    claudecli._rate_limit = None
     claudecli.set_enabled(False)
 
 
@@ -310,6 +312,19 @@ def test_usage_reaches_the_openai_shape(monkeypatch) -> None:
     event = {"type": "result", "usage": {"input_tokens": 5, "cache_read_input_tokens": 90,
                                          "cache_creation_input_tokens": 25, "output_tokens": 7}}
     assert claudecli._event_usage(event) == {"prompt_tokens": 120, "completion_tokens": 7}
+    event["total_cost_usd"] = 0.0168  # the CLI prices its own call at current API rates
+    assert claudecli._event_usage(event)["cost_usd"] == 0.0168
+
+
+def test_rate_limit_window_capture() -> None:
+    """The CLI's rate_limit_event is the honest plan-window answer — capture it."""
+    claudecli._capture_rate_limit({"type": "rate_limit_event", "rate_limit_info": {
+        "status": "allowed", "resetsAt": 1788732600, "isUsingOverage": False}})
+    win = claudecli.rate_limit_status()
+    assert win["status"] == "allowed" and win["resets_at"] == 1788732600
+    assert win["using_overage"] is False and win["captured_at"] > 0
+    claudecli._capture_rate_limit({"type": "rate_limit_event"})  # malformed: keeps the last
+    assert claudecli.rate_limit_status()["status"] == "allowed"
 
 
 def test_catalog_hidden_in_container(monkeypatch) -> None:
@@ -318,6 +333,35 @@ def test_catalog_hidden_in_container(monkeypatch) -> None:
     store.put(gateway.CLAUDECODE_ENABLED_KEY, "1")
     monkeypatch.setattr(gateway.runtime, "in_container", lambda: True)
     assert gateway.claudecode_models(store) == []
+
+
+def test_streamed_turn_records_usage(tmp_path, monkeypatch) -> None:
+    """The streamed path is how users actually chat; a claudecode stream's final-chunk
+    usage must land in the usage log or Usage & cost stays empty (v0.9.36 field report)."""
+    from smartbrain_3000 import agent_routes, db, usage
+
+    conn = db.open_db(tmp_path / "u.duckdb")
+    db.run_migrations(conn)  # creates usage_log
+
+    def fake_stream(messages, model, **kw):
+        yield {"delta": "hi", "tool_calls": None, "finish_reason": None}
+        yield {"delta": "", "tool_calls": None, "finish_reason": "stop",
+               "usage": {"prompt_tokens": 200, "completion_tokens": 40, "cost_usd": 0.05}}
+
+    monkeypatch.setattr(claudecli, "chat_stream", fake_stream)
+
+    class _Client:
+        def close(self) -> None:
+            pass
+
+    spec = [{"type": "function", "function": {"name": "t", "description": "", "parameters": {}}}]
+    events = list(agent_routes._stream_first_response(
+        [{"role": "user", "content": "x"}], "claudecode/sonnet", None, _Client(), spec, conn=conn))
+    assert any(b"done" in e for e in events)
+    rows = usage.summary(conn, None, None)
+    assert rows and rows[0]["model"] == "claudecode/sonnet"
+    assert rows[0]["prompt_tokens"] == 200 and rows[0]["completion_tokens"] == 40
+    assert rows[0]["recorded_cost"] == 0.05  # the plan-absorbed API value rides along
 
 
 # --- Subprocess failure paths (real child processes via a stub binary) ------

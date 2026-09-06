@@ -11,6 +11,30 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Added
+- **Usage & cost shows what your Claude plan absorbed.** Claude Code rows now carry
+  an API-equivalent value ("your plan · ≈ $0.42") computed by the `claude` command
+  itself at current rates — no price table in SmartBrain to go stale — while the
+  out-of-pocket total stays $0. The Claude Code card also shows your **plan window**
+  as of the last chat (within limits / using overage, and when it resets), straight
+  from the CLI's own rate-limit report. (Migration 39 adds the cost column.)
+
+### Fixed
+- **Claude Code chats now show in Usage & cost.** Streamed replies — the way chat
+  actually answers — never recorded their token counts, so the page stayed empty for
+  Claude Code models (v0.9.36 field report). The stream's final token report is now
+  recorded, and the row shows "your plan" as intended.
+- **Your model pick no longer silently reverts.** Choosing a model in Chat, visiting
+  another tab (Usage, Settings…), and coming back flipped the picker back to the
+  routed default — and quietly ran the next turns on it (v0.9.36 field report). A
+  manual pick now holds for the whole app session; a fresh launch still opens on
+  the routed default from Settings → Model routing, which stays the one persisted
+  source of truth.
+- **The Top/Latest jump pills no longer sit on the message box.** Their position was
+  a fixed guess of the composer's height, which the voice controls and hint lines
+  outgrew — desktop and mobile. The pills now measure the composer and ride just
+  above it, wherever it ends.
+
 ## [0.9.36] - 2026-09-06
 
 ### Added

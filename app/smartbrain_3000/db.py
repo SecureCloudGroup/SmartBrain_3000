@@ -371,6 +371,14 @@ _MIGRATIONS: tuple[tuple[int, str | Callable[[], str]], ...] = (
         "CREATE TABLE IF NOT EXISTS feed_seen ("
         "feed_id TEXT NOT NULL, guid TEXT NOT NULL, PRIMARY KEY (feed_id, guid));",
     ),
+    # Per-call API-equivalent cost for plan-covered models (Claude Code): the CLI reports
+    # each call's cost priced at current API rates (total_cost_usd) — recording it lets
+    # Usage & cost show the value the plan absorbed without maintaining a price table.
+    # NULL for every other provider (their cost is computed from catalog pricing).
+    (
+        39,
+        "ALTER TABLE usage_log ADD COLUMN IF NOT EXISTS cost_usd DOUBLE;",
+    ),
 )
 
 

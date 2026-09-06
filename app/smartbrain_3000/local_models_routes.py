@@ -96,7 +96,10 @@ def _claudecode_status(store, force: bool = False) -> dict:
             "detected": (not configured) and probe["reachable"],
             "supported": probe["supported"], "installed": probe["installed"],
             "logged_in": probe["logged_in"], "version": probe["version"] or "",
-            "version_ok": probe["version_ok"]}
+            "version_ok": probe["version_ok"],
+            # Plan-window report from the CLI's last chat run (None before any run):
+            # the honest "am I burning my Claude quota?" answer, no plan tiers guessed.
+            "plan_window": claudecli.rate_limit_status()}
 
 
 @router.put("/api/local-models/ollama")
