@@ -466,6 +466,11 @@
         {#if cc.version}
           <p class="muted" style="margin:0.25rem 0 0; font-size:0.85rem">Claude Code {cc.version}</p>
         {/if}
+        {#if cc.plan_window}
+          <p class="muted" style="margin:0.25rem 0 0; font-size:0.85rem">
+            Claude plan window (as of the last chat): {cc.plan_window.status === "allowed" ? "within limits" : cc.plan_window.status}{cc.plan_window.using_overage ? " · using overage" : ""}{cc.plan_window.resets_at ? ` · resets ${new Date(cc.plan_window.resets_at * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : ""}
+          </p>
+        {/if}
       {/if}
       <p style="margin-top:0.75rem; display:flex; gap:0.5rem; flex-wrap:wrap">
         <button class="secondary" disabled={busy === "claudecode-check"} onclick={() => run("claudecode-check", async () => { await api.localModels(true); return {}; })}>

@@ -11,6 +11,14 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Added
+- **Usage & cost shows what your Claude plan absorbed.** Claude Code rows now carry
+  an API-equivalent value ("your plan · ≈ $0.42") computed by the `claude` command
+  itself at current rates — no price table in SmartBrain to go stale — while the
+  out-of-pocket total stays $0. The Claude Code card also shows your **plan window**
+  as of the last chat (within limits / using overage, and when it resets), straight
+  from the CLI's own rate-limit report. (Migration 39 adds the cost column.)
+
 ### Fixed
 - **Claude Code chats now show in Usage & cost.** Streamed replies — the way chat
   actually answers — never recorded their token counts, so the page stayed empty for

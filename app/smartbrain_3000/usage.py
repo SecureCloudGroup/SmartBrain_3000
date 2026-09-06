@@ -15,13 +15,20 @@ import uuid
 log = logging.getLogger(__name__)
 
 
-def record(conn, model: str, prompt_tokens: int, completion_tokens: int) -> None:
-    """Insert one usage row (model + token counts)."""
+def record(conn, model: str, prompt_tokens: int, completion_tokens: int,
+           cost_usd: float | None = None) -> None:
+    """Insert one usage row (model + token counts).
+
+    ``cost_usd`` is the API-equivalent cost a plan-covered call reports for itself
+    (Claude Code's ``total_cost_usd``); None for providers whose cost is computed
+    from catalog pricing at display time."""
     assert model, "model required to record usage"
     assert prompt_tokens >= 0 and completion_tokens >= 0, "token counts must be non-negative"
     conn.execute(
-        "INSERT INTO usage_log (id, model, prompt_tokens, completion_tokens) VALUES (?, ?, ?, ?);",
-        [uuid.uuid4().hex, model, int(prompt_tokens), int(completion_tokens)],
+        "INSERT INTO usage_log (id, model, prompt_tokens, completion_tokens, cost_usd)"
+        " VALUES (?, ?, ?, ?, ?);",
+        [uuid.uuid4().hex, model, int(prompt_tokens), int(completion_tokens),
+         float(cost_usd) if cost_usd is not None else None],
     )
 
 
@@ -36,8 +43,10 @@ def record_response(conn, model: str, response: object) -> None:
     usage = response.get("usage")
     if not isinstance(usage, dict):
         return
+    cost = usage.get("cost_usd")
     try:
-        record(conn, model, usage.get("prompt_tokens") or 0, usage.get("completion_tokens") or 0)
+        record(conn, model, usage.get("prompt_tokens") or 0, usage.get("completion_tokens") or 0,
+               cost_usd=float(cost) if isinstance(cost, (int, float)) else None)
     except Exception as exc:  # never fail a turn over telemetry
         log.debug("usage record skipped: %s", exc)
     _warn_if_server_is_reloading(model, usage)
@@ -99,12 +108,15 @@ def summary(conn, since: str | None = None, until: str | None = None) -> list[di
         params.append(until)
     clause = (" WHERE " + " AND ".join(where)) if where else ""
     rows = conn.execute(
-        "SELECT model, COUNT(*), COALESCE(SUM(prompt_tokens), 0), COALESCE(SUM(completion_tokens), 0) "
+        "SELECT model, COUNT(*), COALESCE(SUM(prompt_tokens), 0), COALESCE(SUM(completion_tokens), 0), "
+        "SUM(cost_usd) "
         f"FROM usage_log{clause} GROUP BY model ORDER BY 2 DESC;",
         params,
     ).fetchall()
     assert rows is not None, "query must return a result set"
     return [
-        {"model": r[0], "calls": int(r[1]), "prompt_tokens": int(r[2]), "completion_tokens": int(r[3])}
+        {"model": r[0], "calls": int(r[1]), "prompt_tokens": int(r[2]), "completion_tokens": int(r[3]),
+         # API-equivalent value self-reported by plan-covered calls; None when never reported.
+         "recorded_cost": float(r[4]) if r[4] is not None else None}
         for r in rows
     ]

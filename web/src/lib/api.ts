@@ -88,6 +88,9 @@ export interface ClaudeCodeProvider {
   logged_in: boolean; // `claude auth status` reports a signed-in account
   version: string; // best-effort CLI version string ("" if unknown)
   version_ok: boolean; // the CLI is new enough for SmartBrain's containment flags
+  // Plan-window report from the CLI's last chat run (null before any run):
+  // the honest "am I burning my Claude quota?" answer, no plan tiers guessed.
+  plan_window: { status: string; resets_at: number | null; using_overage: boolean; captured_at: number } | null;
 }
 
 export interface LocalModels {
@@ -112,8 +115,11 @@ export interface UsageRow {
   calls: number;
   prompt_tokens: number;
   completion_tokens: number;
-  cost: number; // USD, computed from live catalog pricing
+  cost: number; // USD, computed from live catalog pricing (out-of-pocket)
   local: boolean; // local provider (no cost)
+  // API-equivalent value a plan-covered model (Claude Code) reported for its own
+  // calls — informational ("what the plan absorbed"), never part of total_cost.
+  plan_value: number | null;
 }
 
 export interface ChatMessage {

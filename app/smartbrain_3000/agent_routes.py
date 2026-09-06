@@ -808,9 +808,11 @@ def _stream_first_response(
         # (tokens are 0); a Claude Code stream reports its tokens on the final chunk, so
         # record those for the Usage & cost view (best-effort, mirrors record_response).
         if stream_usage is not None and conn is not None:
+            cost = stream_usage.get("cost_usd")
             try:
                 usage.record(conn, model, int(stream_usage.get("prompt_tokens") or 0),
-                             int(stream_usage.get("completion_tokens") or 0))
+                             int(stream_usage.get("completion_tokens") or 0),
+                             cost_usd=float(cost) if isinstance(cost, (int, float)) else None)
             except Exception as exc:  # usage logging must never fail a turn
                 log.debug("stream usage record skipped: %s", exc)
         metrics.record_turn(

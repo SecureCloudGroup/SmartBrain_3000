@@ -123,7 +123,9 @@
               <td>{fmt(r.calls)}</td>
               <td>{fmt(r.prompt_tokens)}</td>
               <td>{fmt(r.completion_tokens)}</td>
-              <td>{r.model.startsWith("claudecode/") ? "your plan" : r.local ? "free" : money(r.cost)}</td>
+              <td>{r.model.startsWith("claudecode/")
+                ? (r.plan_value ? `your plan · ≈ ${money(r.plan_value)}` : "your plan")
+                : r.local ? "free" : money(r.cost)}</td>
             </tr>
           {/each}
         </tbody>

@@ -173,6 +173,9 @@ def get_usage(request: Request, since: str | None = None, until: str | None = No
         )
         total += cost
         local = r["model"].split("/", 1)[0] in _LOCAL_PROVIDERS
-        out.append({**r, "cost": cost, "local": local})
+        # plan_value: the API-equivalent dollars a plan-covered model (Claude Code)
+        # reported for its own calls — informational, never part of out-of-pocket total.
+        plan_value = r.pop("recorded_cost", None)
+        out.append({**r, "cost": cost, "local": local, "plan_value": plan_value})
     assert total >= 0.0, "total cost must be non-negative"
     return {"usage": out, "total_cost": total}
