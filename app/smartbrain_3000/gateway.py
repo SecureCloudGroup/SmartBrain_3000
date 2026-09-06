@@ -18,7 +18,7 @@ from contextlib import contextmanager
 
 import httpx
 
-from . import runtime
+from . import claudecli, runtime
 
 # Container: Bifrost answers at the compose service name; native: the same Bifrost
 # runs as a sibling process on loopback (the admin port the compose file already maps).
@@ -473,6 +473,9 @@ def chat_stream(
     assert messages, "messages must be non-empty"
     assert model, "model must be specified"
     assert tools_spec is None or tools_spec, "tools_spec, if given, must be non-empty"
+    if claudecli.is_claudecode(model):  # served by the user's claude CLI, not Bifrost
+        yield from claudecli.chat_stream(messages, model, timeout=timeout, tools_spec=tools_spec)
+        return
     client, owns_client = _resolve_client(client, timeout)
     payload: dict = {"model": model, "messages": messages, "stream": True}
     if tools_spec:
@@ -536,6 +539,9 @@ def chat(
     """
     assert messages, "messages must be non-empty"
     assert model, "model must be specified"
+    if claudecli.is_claudecode(model):  # served by the user's claude CLI, not Bifrost
+        assert temperature is None, "claudecode does not honor temperature — refuse loudly"
+        return claudecli.chat(messages, model, timeout=timeout)
     payload: dict = {"model": model, "messages": messages}
     if temperature is not None:
         assert 0.0 <= temperature <= 2.0, "temperature out of range"
@@ -600,6 +606,8 @@ def chat_with_tools(
     assert messages, "messages must be non-empty"
     assert model, "model must be specified"
     assert tools_spec, "tools spec must be non-empty"
+    if claudecli.is_claudecode(model):  # tool offers ride the text protocol (see claudecli)
+        return claudecli.chat(messages, model, timeout=timeout, tools_spec=tools_spec)
     client, owns_client = _resolve_client(client, timeout)
     try:
         # Pass timeout per-request: the pooled client (always installed in prod) has a
@@ -983,6 +991,12 @@ MLXE_URL_KEY = "local:mlxe:url"
 VOICE_URL_KEY = "local:voice:url"
 VOICE_KEY_KEY = "local:voice:api_key"
 MLXE_KEY_KEY = "local:mlxe:api_key"
+# Claude Code (the user's own `claude` CLI) — configured like a local server but NOT
+# local in the privacy sense (prompts go to Anthropic under the user's own login).
+# Deliberately absent from _LOCAL_PROVIDER_NAMES and LOCAL_PROVIDERS: is_local() must
+# stay False (self-review privacy gate, metrics), and there is nothing to register in
+# Bifrost — gateway.chat/chat_stream/chat_with_tools branch to claudecli by model prefix.
+CLAUDECODE_ENABLED_KEY = "local:claudecode:enabled"
 # Default host URLs for auto-detecting a server when nothing is configured yet — the
 # common "I installed Ollama and SmartBrain, now connect them" path. The gateway runs
 # in-container and reaches host services via host.docker.internal.
@@ -1176,6 +1190,18 @@ def local_fallback_models(store) -> list[dict]:
                 "pricing": None, "chat": False, "embed": True,
             })
     return out
+
+
+def claudecode_models(store) -> list[dict]:
+    """Catalog entries for the Claude Code CLI provider — empty unless enabled.
+
+    Not part of Bifrost's catalog (nothing is registered there), so both the
+    normal and the degraded /api/models paths append these app-side.
+    """
+    assert store is not None, "secret store required"
+    if not store.get(CLAUDECODE_ENABLED_KEY):
+        return []
+    return claudecli.catalog_models()
 
 
 def probe_ollama(url: str, *, client: httpx.Client | None = None, timeout: float = 4.0) -> dict:

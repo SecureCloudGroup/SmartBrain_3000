@@ -98,6 +98,53 @@ Traffic between the two machines is plain HTTP on your own network — fine at h
 route it across networks you don't trust. Note that local model servers answer one request
 at a time, so two SmartBrains sharing one server take turns.
 
+## Claude Code (your Claude account — sends chats to Anthropic)
+
+If you already pay for Claude (any Claude plan, or an API sign-in through the Claude
+Code app), SmartBrain can use Anthropic's models **through the `claude` command
+installed on this computer** — no API key to create or paste. It's configured on the
+same page as your local servers because it behaves like one operationally, but it is
+**not local in the privacy sense**:
+
+> **This option sends your chats to Anthropic.** Your messages — and any knowledge or
+> documents the assistant reads into a conversation — leave this machine and go to
+> Anthropic under your own Claude sign-in. Skip it if you want a fully private,
+> local-only setup.
+
+Set it up (Settings → Local models → **Claude Code**):
+
+1. **Install Claude Code** — run the command shown on the page
+   (`curl -fsSL https://claude.ai/install.sh | bash`, or `brew install --cask claude-code`).
+2. **Sign in** — open a terminal, run `claude`, and sign in with your Claude account
+   when the browser opens. SmartBrain never sees or stores that sign-in; it stays with
+   the `claude` command, and SmartBrain doesn't know or care which plan you're on.
+3. Back in SmartBrain, press **Check again** — the page verifies the command is
+   installed and signed in (a local check only; no chat is sent) — then **Connect**.
+
+Three models appear in the pickers and under Model routing: `claudecode/opus`,
+`claudecode/sonnet`, and `claudecode/haiku` (aliases — the `claude` command resolves
+each to its current generation, so they stay valid across updates).
+
+### How it stays contained
+
+Claude Code is normally an *agent* that can read files and run commands. SmartBrain
+does not use it that way: it drives the `claude` command in plain-text mode with a
+**custom agent whose tool set is empty** (`"tools": []`) and **session persistence
+off**. That combination turns the CLI into a pure language-model endpoint — it cannot
+read your files, run commands, browse the web, or keep the conversation on disk.
+SmartBrain's own tools keep working exactly as with any other model, with every
+action parked for your approval as usual. SmartBrain also tells the CLI to load
+none of your Claude Code settings or `CLAUDE.md` files, so nothing you've written
+there reaches these conversations. What the model does see beyond the conversation:
+the current date, and the email address of the signed-in Claude account (your own —
+Anthropic already has it). The one thing that leaves your machine is the
+conversation text itself, as the notice above says. (These invariants are enforced
+by tests in SmartBrain's suite, not just promised here.)
+
+Claude Code installed natively keeps itself up to date; the **Update Claude Code**
+button on the page checks and installs right now. Docker installs can't use this
+provider — the `claude` command lives on the host, so run SmartBrain natively.
+
 ## Choosing a model in Chat
 
 The **Chat** screen has a **Provider** and a **Model** picker above the conversation. It

@@ -78,10 +78,22 @@ export interface ModelProvider {
   default_url: string; // the default host URL the server was detected on
 }
 
+export interface ClaudeCodeProvider {
+  configured: boolean;
+  reachable: boolean;
+  models: string[];
+  detected: boolean; // installed + signed in but not yet enabled — offer 1-tap Connect
+  supported: boolean; // false inside Docker installs (the CLI runs on the host only)
+  installed: boolean; // the `claude` binary is present on PATH
+  logged_in: boolean; // `claude auth status` reports a signed-in account
+  version: string; // best-effort CLI version string ("" if unknown)
+}
+
 export interface LocalModels {
   ollama: ModelProvider;
   mlx: ModelProvider;
   mlxe: ModelProvider; // the dedicated MLX EMBEDDINGS server (tools/mlx_embed_server)
+  claudecode?: ClaudeCodeProvider; // absent on older backends — the UI hides the card
 }
 
 export interface DiscoveredModel {
@@ -278,7 +290,7 @@ export interface AppStatus {
   storage: { data_dir: string; db_bytes: number; models_bytes: number; total_bytes: number };
   memory: { rss_bytes: number; python: string };
   voice?: { engine: "server" | "local"; server_configured: boolean; stt_model: string; tts_model: string };
-  local_models?: { ollama_configured: boolean; mlx_configured: boolean; mlxe_configured: boolean };
+  local_models?: { ollama_configured: boolean; mlx_configured: boolean; mlxe_configured: boolean; claudecode_configured: boolean };
   knowledge?: { documents: number; embedded_chunks: number };
   schedules?: { enabled: number; total: number };
   feeds?: { count: number; errors?: number };
@@ -735,7 +747,13 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ url, api_key }),
     }),
-  deleteLocalModel: (name: "ollama" | "mlx" | "mlxe") =>
+  // Claude Code is enable/disable-only (no URL, no key — the CLI drives itself); the
+  // backend probes the local binary + `claude auth status`, never the model itself.
+  putClaudeCode: () =>
+    req<{ ok: boolean; gateway_synced?: boolean }>("/api/local-models/claudecode", { method: "PUT" }),
+  updateClaudeCode: () =>
+    req<{ ok: boolean; output: string; version?: string }>("/api/local-models/claudecode/update", { method: "POST" }),
+  deleteLocalModel: (name: "ollama" | "mlx" | "mlxe" | "claudecode") =>
     req<{ ok: boolean; gateway_synced?: boolean }>(`/api/local-models/${name}`, { method: "DELETE" }),
 
   // chat (stateless on the server today — the client sends the full transcript)
