@@ -98,7 +98,7 @@ Traffic between the two machines is plain HTTP on your own network — fine at h
 route it across networks you don't trust. Note that local model servers answer one request
 at a time, so two SmartBrains sharing one server take turns.
 
-## Claude Code (your Claude account — sends chats to Anthropic)
+## Claude Code (sends your chats to Anthropic)
 
 If you already pay for Claude (any Claude plan, or an API sign-in through the Claude
 Code app), SmartBrain can use Anthropic's models **through the `claude` command
@@ -135,11 +135,14 @@ read your files, run commands, browse the web, or keep the conversation on disk.
 SmartBrain's own tools keep working exactly as with any other model, with every
 action parked for your approval as usual. SmartBrain also tells the CLI to load
 none of your Claude Code settings or `CLAUDE.md` files, so nothing you've written
-there reaches these conversations. What the model does see beyond the conversation:
-the current date, and the email address of the signed-in Claude account (your own —
-Anthropic already has it). The one thing that leaves your machine is the
-conversation text itself, as the notice above says. (These invariants are enforced
-by tests in SmartBrain's suite, not just promised here.)
+there reaches these conversations, and it switches off the CLI's optional
+telemetry and error reporting for these calls — the conversation going to
+Anthropic is the traffic this feature adds. What the model does see beyond the
+conversation: the current date, and the email address of the signed-in Claude
+account (your own — Anthropic already has it). Pressing **Remove** on the card
+truly disconnects: SmartBrain refuses to serve `claudecode/*` models afterwards,
+even if a routing entry or schedule still names one. (These invariants are
+enforced by tests in SmartBrain's suite, not just promised here.)
 
 Claude Code installed natively keeps itself up to date; the **Update Claude Code**
 button on the page checks and installs right now. Docker installs can't use this

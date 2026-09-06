@@ -1606,9 +1606,9 @@
 
   {#if modelsDegraded && models.length > 0}
     <p class="muted" style="margin:0.25rem 0 0; font-size:0.85rem">
-      Model list is degraded — the gateway catalog isn&rsquo;t responding, so only local models are
-      shown. A stale server entry under <a href="/settings/models">Settings → Local models</a> is the
-      usual cause.
+      Model list is degraded — the gateway catalog isn&rsquo;t responding, so only locally-served
+      models and Claude Code are shown. A stale server entry under
+      <a href="/settings/models">Settings → Local models</a> is the usual cause.
     </p>
   {/if}
 

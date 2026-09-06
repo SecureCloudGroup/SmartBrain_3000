@@ -81,7 +81,7 @@
   <h1>Usage &amp; cost</h1>
   <p class="muted">
     Estimated spend per model, computed from your providers' live pricing. Local models (Ollama,
-    MLX) run on your hardware and cost nothing.
+    MLX) run on your hardware and cost nothing. Claude Code models are covered by your Claude plan.
   </p>
 
   <div class="range">
@@ -123,7 +123,7 @@
               <td>{fmt(r.calls)}</td>
               <td>{fmt(r.prompt_tokens)}</td>
               <td>{fmt(r.completion_tokens)}</td>
-              <td>{r.local ? "free" : money(r.cost)}</td>
+              <td>{r.model.startsWith("claudecode/") ? "your plan" : r.local ? "free" : money(r.cost)}</td>
             </tr>
           {/each}
         </tbody>
