@@ -637,12 +637,14 @@ input[type="file"] {
   .thinking i, .caret { animation: none; opacity: 0.7; }
 }
 
-/* Chat scroll pills — Top and/or Latest, in one fixed row above the composer. */
+/* Chat scroll pills — Top and/or Latest, in one fixed row above the composer.
+   `bottom` is set inline from the MEASURED composer height (chat/+page.svelte) — a
+   fixed guess here put the pills on top of the input once the composer grew. */
 .jump-row {
   position: fixed;
   left: 50%;
   transform: translateX(-50%);
-  bottom: calc(var(--tabbar-h) + 118px);
+  bottom: calc(var(--tabbar-h) + 130px); /* fallback until the measurement binds */
   z-index: 20;
   display: flex;
   gap: 0.5rem;

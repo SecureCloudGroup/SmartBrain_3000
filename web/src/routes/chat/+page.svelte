@@ -172,6 +172,10 @@
     scrollToBottom(true);
   }
   // "Back to top" appears once the reader is meaningfully into the history.
+  // Measured composer height: the jump pills sit ABOVE it. A fixed offset guess broke
+  // as the composer grew (voice pills, reply-length row, wrapped hint lines on mobile)
+  // and the pills landed on the input (field report, v0.9.36).
+  let composerH = $state(118);
   let showTop = $state(false);
   function onWindowScroll() {
     showTop = window.scrollY > 500;
@@ -1755,7 +1759,7 @@
   </div>
 
   {#if log.length > 0 && (showTop || !atBottom)}
-    <div class="jump-row">
+    <div class="jump-row" style={`bottom: calc(var(--tabbar-h) + ${composerH + 12}px)`}>
       {#if showTop}
         <button class="jump" onclick={jumpToTop}><Icon name="arrow-up" size={14} /> Top</button>
       {/if}
@@ -1801,7 +1805,7 @@
     {#if resumeNotice}<p class="muted resume-notice">{resumeNotice}</p>{/if}
   {/if}
 
-  <div class="composer">
+  <div class="composer" bind:clientHeight={composerH}>
     {#if speechPossible || voiceInfo?.stt_available}
       <!-- Voice MODES live above the field as labeled pills — four unlabeled circles in
            the input row read as "busy" in the field, and a word beats a guessed icon.

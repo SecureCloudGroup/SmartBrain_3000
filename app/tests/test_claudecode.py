@@ -320,6 +320,34 @@ def test_catalog_hidden_in_container(monkeypatch) -> None:
     assert gateway.claudecode_models(store) == []
 
 
+def test_streamed_turn_records_usage(tmp_path, monkeypatch) -> None:
+    """The streamed path is how users actually chat; a claudecode stream's final-chunk
+    usage must land in the usage log or Usage & cost stays empty (v0.9.36 field report)."""
+    from smartbrain_3000 import agent_routes, db, usage
+
+    conn = db.open_db(tmp_path / "u.duckdb")
+    db.run_migrations(conn)  # creates usage_log
+
+    def fake_stream(messages, model, **kw):
+        yield {"delta": "hi", "tool_calls": None, "finish_reason": None}
+        yield {"delta": "", "tool_calls": None, "finish_reason": "stop",
+               "usage": {"prompt_tokens": 200, "completion_tokens": 40}}
+
+    monkeypatch.setattr(claudecli, "chat_stream", fake_stream)
+
+    class _Client:
+        def close(self) -> None:
+            pass
+
+    spec = [{"type": "function", "function": {"name": "t", "description": "", "parameters": {}}}]
+    events = list(agent_routes._stream_first_response(
+        [{"role": "user", "content": "x"}], "claudecode/sonnet", None, _Client(), spec, conn=conn))
+    assert any(b"done" in e for e in events)
+    rows = usage.summary(conn, None, None)
+    assert rows and rows[0]["model"] == "claudecode/sonnet"
+    assert rows[0]["prompt_tokens"] == 200 and rows[0]["completion_tokens"] == 40
+
+
 # --- Subprocess failure paths (real child processes via a stub binary) ------
 
 _STUB_HEADER = "#!/usr/bin/env python3\nimport sys, time, json\n"
