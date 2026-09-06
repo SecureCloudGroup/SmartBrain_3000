@@ -12,12 +12,13 @@ import logging
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from . import gateway, voice
+from . import claudecli, gateway, voice
 
 router = APIRouter()
 log = logging.getLogger(__name__)
 
 _DETECT_TIMEOUT = 1.5  # short probe of the default port when nothing is configured yet
+_CLAUDECODE_PROBE_TIMEOUT = 6.0  # two quick CLI execs (--version, auth status), no model traffic
 
 
 class OllamaConfig(BaseModel):
@@ -73,7 +74,25 @@ def local_status(request: Request) -> dict:
         probe = gateway.probe_mlx(gateway.MLXE_DEFAULT_URL, "", timeout=_DETECT_TIMEOUT)
         assert "reachable" in probe, "probe must report reachability"
         mlxe["detected"], mlxe["models"] = probe["reachable"], probe["models"]
-    return {"ollama": ollama, "mlx": mlx, "mlxe": mlxe}
+    return {"ollama": ollama, "mlx": mlx, "mlxe": mlxe, "claudecode": _claudecode_status(store)}
+
+
+def _claudecode_status(store) -> dict:
+    """Claude Code CLI state for the UI — probe is local-only (no model traffic).
+
+    Same configured/reachable/detected vocabulary as the server providers so the
+    page logic carries over; ``detected`` (installed + logged in, not yet enabled)
+    drives the one-tap Connect banner. NOT local in the privacy sense — the UI
+    must pair this block with the sends-data-to-Anthropic warning."""
+    assert store is not None, "secret store required"
+    probe = claudecli.probe(timeout=_CLAUDECODE_PROBE_TIMEOUT)
+    configured = bool(store.get(gateway.CLAUDECODE_ENABLED_KEY))
+    return {"configured": configured, "reachable": probe["reachable"],
+            "models": [m["id"].split("/", 1)[1] for m in claudecli.catalog_models()],
+            "detected": (not configured) and probe["reachable"],
+            "supported": probe["supported"], "installed": probe["installed"],
+            "logged_in": probe["logged_in"], "version": probe["version"] or "",
+            "version_ok": probe["version_ok"]}
 
 
 @router.put("/api/local-models/ollama")
@@ -135,6 +154,40 @@ def put_mlxe(request: Request, body: MLXConfig) -> dict[str, bool]:
     return {"ok": True, "gateway_synced": synced}
 
 
+@router.put("/api/local-models/claudecode")
+def put_claudecode(request: Request) -> dict:
+    """Enable the Claude Code provider (the user's own `claude` CLI login).
+
+    Nothing to register in Bifrost — the gateway branches to the CLI by model
+    prefix — so ``gateway_synced`` is always True (mirrors put_voice). Refuses
+    when the CLI isn't ready: enabling a provider that can't serve a turn would
+    only manufacture a confusing chat-time failure. Returns the fresh status so
+    the page can render state without a second round-trip."""
+    store = _store(request)
+    status = _claudecode_status(store)
+    if not status["supported"]:
+        raise HTTPException(status_code=400, detail="Claude Code runs on the host — not available in a Docker install")
+    if not status["reachable"]:
+        if not status["installed"]:
+            detail = "Claude Code is not installed"
+        elif not status["version_ok"]:
+            detail = "This Claude Code version is too old — press Update Claude Code first"
+        else:
+            detail = "Claude Code is installed but not signed in — run `claude` in a terminal and sign in"
+        raise HTTPException(status_code=400, detail=detail)
+    store.put(gateway.CLAUDECODE_ENABLED_KEY, "1")
+    return {"ok": True, "gateway_synced": True, "status": _claudecode_status(store)}
+
+
+@router.post("/api/local-models/claudecode/update")
+def update_claudecode(request: Request) -> dict:
+    """Run `claude update` (checks and installs) and report the outcome + version."""
+    _store(request)  # unlock gate only; the update itself touches no secrets
+    result = claudecli.update()
+    assert "ok" in result, "update must report ok"
+    return result
+
+
 def _detect_mlx_context_lengths(request: Request, url: str, api_key: str) -> None:
     """Persist each MLX model's server-reported max_model_len (bifrost strips it) so the dynamic
     result cap can size to it. Keyed 'mlx/<id>' to match catalog ids. A user override for a model
@@ -194,6 +247,9 @@ def delete_local(request: Request, name: str) -> dict[str, bool]:
         for key in (gateway.VOICE_URL_KEY, gateway.VOICE_KEY_KEY,
                     voice.STT_MODEL_KEY, voice.TTS_MODEL_KEY, voice.TTS_VOICE_KEY):
             store.delete(key)
+        return {"ok": True, "gateway_synced": True}  # never in Bifrost, nothing to deprovision
+    elif name == "claudecode":
+        store.delete(gateway.CLAUDECODE_ENABLED_KEY)
         return {"ok": True, "gateway_synced": True}  # never in Bifrost, nothing to deprovision
     else:
         raise HTTPException(status_code=404, detail="unknown local provider")

@@ -68,6 +68,12 @@ not. Being precise about the line matters more than claiming everything:
   background document summaries. Point any of them at a cloud provider and that job's
   content goes there — the embedding and summary slots are the easy ones to overlook,
   because they run over your documents in the background rather than in front of you.
+- **Claude Code models.** The `claudecode/*` models send the conversation to Anthropic
+  under your own Claude sign-in, exactly like a cloud provider — configured beside the
+  local servers, but not local in the privacy sense. SmartBrain drives the `claude`
+  command with an empty tool set and session persistence off, so the CLI itself cannot
+  read files, run commands, or keep the conversation on disk; the conversation text
+  still goes to Anthropic. See [Connect a model](02-models.md#claude-code-your-claude-account--sends-chats-to-anthropic).
 - **Email.** If you connect Gmail, the app talks to Google's APIs to read/send your
   mail — over a loopback OAuth flow, with your own OAuth client.
 - **Remote access (only if you enable it).** Phone access is **off by default**. When

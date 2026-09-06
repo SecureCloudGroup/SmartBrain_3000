@@ -50,6 +50,9 @@ def app_status(request: Request) -> dict:
         "ollama_configured": bool(store.get(gateway.OLLAMA_URL_KEY)),
         "mlx_configured": bool(store.get(gateway.MLX_URL_KEY)),
         "mlxe_configured": bool(store.get(gateway.MLXE_URL_KEY)),
+        # Claude Code: configured-flag only here (this route does no live probes);
+        # NOT local in the privacy sense — chats go to Anthropic (see docs).
+        "claudecode_configured": bool(store.get(gateway.CLAUDECODE_ENABLED_KEY)),
     }
     conn = state.dbx
     out["knowledge"] = _knowledge_status(state, conn)

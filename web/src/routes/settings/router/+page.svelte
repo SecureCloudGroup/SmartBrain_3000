@@ -106,7 +106,7 @@
         {#each providersFor(cap) as p (p)}
           <optgroup label={p}>
             {#each modelsFor(cap).filter((m) => m.provider === p) as m (m.id)}
-              <option value={m.id}>{m.name}{m.pricing ? "" : " · free"}</option>
+              <option value={m.id}>{m.name}{m.provider === "claudecode" ? " · your Claude plan" : m.pricing ? "" : " · free"}</option>
             {/each}
           </optgroup>
         {/each}

@@ -63,11 +63,15 @@ def list_models_endpoint(request: Request) -> dict:
     ``degraded: true`` — one dead provider must never blank the whole model list.
     """
     _require_unlocked(request)
+    store = request.app.state.secret_store
+    # Claude Code models come from the app, not Bifrost (nothing is registered there),
+    # so they are appended on BOTH paths — a wedged gateway must not hide them.
+    extra = gateway.claudecode_models(store)
     try:
-        return {"models": gateway.list_models(), "degraded": False}
+        return {"models": gateway.list_models() + extra, "degraded": False}
     except Exception as exc:
         detail = exc.message if isinstance(exc, gateway.GatewayError) else f"gateway unreachable: {exc}"
-        models = gateway.local_fallback_models(request.app.state.secret_store)
+        models = gateway.local_fallback_models(store) + extra
         if not models:
             raise HTTPException(status_code=502, detail=detail) from None
         log.warning("model catalog degraded to direct local probes: %s", detail)

@@ -11,6 +11,28 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.9.36] - 2026-09-06
+
+### Added
+- **Claude Code as a model provider.** If you already pay for Claude, SmartBrain can
+  use Anthropic's models through the `claude` command installed on your computer — no
+  API key to create or paste, and SmartBrain never sees the sign-in. Configured under
+  Settings → Local models with the same connect flow as Ollama/MLX (auto-detected when
+  installed and signed in, one-tap Connect, a Check that verifies readiness without
+  sending a chat, and an Update button), and clearly marked in red for what it is:
+  **this option sends your chats to Anthropic.** The CLI is driven with an empty tool
+  set and session persistence off — a pure language-model endpoint that cannot read
+  files, run commands, or keep conversations on disk (test-enforced) — while
+  SmartBrain's own approval-gated tools keep working unchanged. Not local in the
+  privacy sense: the self-review privacy gate treats it as a cloud model. Native
+  installs only (Docker can't reach the host's `claude`).
+
+### Changed
+- **New menu-bar icon.** The tray now shows a brain silhouette with "SB" cut out of
+  its center — black with white letters on a light macOS menu bar, auto-inverting in
+  dark mode (it's a template icon). Windows and Linux trays keep the mid-blue tint,
+  since those bars don't auto-tint and pure black would vanish on dark panels.
+
 ## [0.9.35] - 2026-08-27
 
 ### Security
