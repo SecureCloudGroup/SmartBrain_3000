@@ -474,7 +474,11 @@ def chat_stream(
     assert model, "model must be specified"
     assert tools_spec is None or tools_spec, "tools_spec, if given, must be non-empty"
     if claudecli.is_claudecode(model):  # served by the user's claude CLI, not Bifrost
-        yield from claudecli.chat_stream(messages, model, timeout=timeout, tools_spec=tools_spec)
+        # Floor the timeout: callers size theirs for Bifrost HTTP hops (60s default),
+        # but a CLI turn is a whole answer — 60s would kill healthy long replies.
+        yield from claudecli.chat_stream(messages, model,
+                                         timeout=max(timeout, claudecli.MIN_TIMEOUT),
+                                         tools_spec=tools_spec)
         return
     client, owns_client = _resolve_client(client, timeout)
     payload: dict = {"model": model, "messages": messages, "stream": True}
@@ -541,7 +545,7 @@ def chat(
     assert model, "model must be specified"
     if claudecli.is_claudecode(model):  # served by the user's claude CLI, not Bifrost
         assert temperature is None, "claudecode does not honor temperature — refuse loudly"
-        return claudecli.chat(messages, model, timeout=timeout)
+        return claudecli.chat(messages, model, timeout=max(timeout, claudecli.MIN_TIMEOUT))
     payload: dict = {"model": model, "messages": messages}
     if temperature is not None:
         assert 0.0 <= temperature <= 2.0, "temperature out of range"
@@ -607,7 +611,8 @@ def chat_with_tools(
     assert model, "model must be specified"
     assert tools_spec, "tools spec must be non-empty"
     if claudecli.is_claudecode(model):  # tool offers ride the text protocol (see claudecli)
-        return claudecli.chat(messages, model, timeout=timeout, tools_spec=tools_spec)
+        return claudecli.chat(messages, model, timeout=max(timeout, claudecli.MIN_TIMEOUT),
+                              tools_spec=tools_spec)
     client, owns_client = _resolve_client(client, timeout)
     try:
         # Pass timeout per-request: the pooled client (always installed in prod) has a
@@ -1114,6 +1119,9 @@ def localize_local_url(url: str) -> str:
 def provision_local_from_store(store, *, client: httpx.Client | None = None) -> list[str]:
     """Register any configured local providers (Ollama/MLX) from the store."""
     assert store is not None, "secret store required"
+    # Sync the Claude Code serve-time gate first, outside the Bifrost calls — a wedged
+    # Bifrost must not leave the consent gate stale (it gates data flow to Anthropic).
+    claudecli.set_enabled(bool(store.get(CLAUDECODE_ENABLED_KEY)) and not runtime.in_container())
     done: list[str] = []
 
     def _do(c: httpx.Client) -> None:
@@ -1136,7 +1144,9 @@ def provision_local_from_store(store, *, client: httpx.Client | None = None) -> 
 
 
 def deprovision_local(*, client: httpx.Client | None = None) -> None:
-    """Remove local providers from Bifrost (best-effort)."""
+    """Remove local providers from Bifrost (best-effort); close the Claude Code gate."""
+    claudecli.set_enabled(False)  # locking must stop claudecode serving too
+
     def _do(c: httpx.Client) -> None:
         for name in LOCAL_PROVIDERS:  # fixed, bounded
             try:
@@ -1199,8 +1209,8 @@ def claudecode_models(store) -> list[dict]:
     normal and the degraded /api/models paths append these app-side.
     """
     assert store is not None, "secret store required"
-    if not store.get(CLAUDECODE_ENABLED_KEY):
-        return []
+    if runtime.in_container() or not store.get(CLAUDECODE_ENABLED_KEY):
+        return []  # a leftover flag in Docker must not list models no chat can serve
     return claudecli.catalog_models()
 
 

@@ -87,6 +87,7 @@ export interface ClaudeCodeProvider {
   installed: boolean; // the `claude` binary is present on PATH
   logged_in: boolean; // `claude auth status` reports a signed-in account
   version: string; // best-effort CLI version string ("" if unknown)
+  version_ok: boolean; // the CLI is new enough for SmartBrain's containment flags
 }
 
 export interface LocalModels {
@@ -711,7 +712,9 @@ export const api = {
     req<{ ok: boolean }>(`/api/secrets/${encodeURIComponent(key)}`, { method: "DELETE" }),
 
   // local models (Ollama / MLX, run on the host, fronted by Bifrost)
-  localModels: () => req<LocalModels>("/api/local-models"),
+  // `fresh` busts the backend's Claude Code probe cache — the settings "Check again"
+  // button uses it so a fresh CLI install/update shows up without a page reload.
+  localModels: (fresh = false) => req<LocalModels>(`/api/local-models${fresh ? "?fresh=1" : ""}`),
   // degraded: the gateway catalog was unreachable and the list came from direct local-server probes.
   listModels: () => req<{ models: DiscoveredModel[]; degraded?: boolean }>("/api/models"),
   getRoutes: () => req<{ routes: Record<string, string>; labels: Record<string, string> }>("/api/routes"),
@@ -751,8 +754,13 @@ export const api = {
   // backend probes the local binary + `claude auth status`, never the model itself.
   putClaudeCode: () =>
     req<{ ok: boolean; gateway_synced?: boolean }>("/api/local-models/claudecode", { method: "PUT" }),
+  // Runs `claude update` on the host binary — Desktop-local only (x-sb-local; the WebRTC
+  // bridge strips it) so a paired phone cannot trigger a package install on the Desktop.
   updateClaudeCode: () =>
-    req<{ ok: boolean; output: string; version?: string }>("/api/local-models/claudecode/update", { method: "POST" }),
+    req<{ ok: boolean; output: string; version?: string }>("/api/local-models/claudecode/update", {
+      method: "POST",
+      headers: { "x-sb-local": "1" },
+    }),
   deleteLocalModel: (name: "ollama" | "mlx" | "mlxe" | "claudecode") =>
     req<{ ok: boolean; gateway_synced?: boolean }>(`/api/local-models/${name}`, { method: "DELETE" }),
 

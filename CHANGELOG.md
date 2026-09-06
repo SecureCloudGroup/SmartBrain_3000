@@ -33,6 +33,22 @@ to know when a release changes behavior.
   dark mode (it's a template icon). Windows and Linux trays keep the mid-blue tint,
   since those bars don't auto-tint and pure black would vanish on dark panels.
 
+### Security
+- **Claude Code provider hardened before first release** (pre-release audit, three
+  adversarial reviews): connecting is now enforced where it matters — SmartBrain
+  refuses to serve `claudecode/*` models until you press Connect, and **Remove truly
+  disconnects**, even for a routing entry or schedule still naming one. Pasted text
+  can no longer forge transcript headings (fake "tool result" / "user" turns). The
+  CLI runs with its optional telemetry and error reporting off, from a private
+  working directory, with SmartBrain's own secrets stripped from its environment,
+  and Update Claude Code can only be pressed at the desk (not from a paired phone).
+  Also fixed: streamed answers were killed at exactly 60 seconds (now the same
+  5-minute budget as everywhere else), very long conversations now keep the newest
+  turns instead of the oldest, Claude Code turns now appear in **Usage & cost**
+  (marked "your plan", not a dollar cost), an old CLI version is now called out on
+  the card with the Update button right there, and a wrong link on the connected
+  card was repaired.
+
 ## [0.9.35] - 2026-08-27
 
 ### Security

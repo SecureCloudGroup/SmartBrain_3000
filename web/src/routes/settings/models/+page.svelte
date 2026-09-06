@@ -43,9 +43,12 @@
   let busy = $state("");
   let error = $state("");
   let notice = $state("");
-  // Copy-command feedback + last Update Claude Code output (muted line under the card).
+  // Copy-command feedback + last Update Claude Code result (success = muted version,
+  // failure = red line — the pre-audit code rendered every backend message as muted,
+  // which quietly hid "Claude Code is not installed." in the same tone as "up to date").
   let ccInstallCopied = $state(false);
   let ccUpdateInfo = $state("");
+  let ccUpdateError = $state("");
   const NOT_LIVE = "Saved — but not live in the gateway yet (it'll sync once the model server is reachable).";
 
   function validPort(p: string): boolean {
@@ -181,16 +184,22 @@
   }
 
   // Update flow: distinct from run() because we want the returned version/output for
-  // the muted post-update line, not just the reload.
+  // the post-update line — muted on success, red on failure. r.ok is authoritative;
+  // r.output's last line names the reason ("Claude Code is not installed.", etc.).
   async function updateClaudeCode() {
     busy = "claudecode-update";
     error = "";
     notice = "";
     ccUpdateInfo = "";
+    ccUpdateError = "";
     try {
       const r = await api.updateClaudeCode();
       const tail = r.output.trim().split("\n").slice(-1)[0] ?? "";
-      ccUpdateInfo = r.version ? `Claude Code ${r.version}` : tail;
+      if (r.ok) {
+        ccUpdateInfo = r.version ? `Claude Code ${r.version}` : tail;
+      } else {
+        ccUpdateError = tail ? `Update failed — ${tail}` : "Update failed.";
+      }
       await load();
     } catch (err) {
       error = describeError(err);
@@ -385,6 +394,12 @@
     {#if cc.supported === false}
       <h2 class="row"><span>Claude Code</span></h2>
       <p class="muted" style="margin:0">Claude Code is not available in Docker installs — it runs on the host.</p>
+      {#if cc.configured}
+        <p class="muted" style="margin:0.5rem 0 0; font-size:0.85rem">Connected on a native install — remove it here to clear the leftover entry.</p>
+        <p style="margin-top:0.75rem">
+          <button class="secondary" disabled={busy === "claudecode"} onclick={() => run("claudecode", () => api.deleteLocalModel("claudecode"))}>Remove</button>
+        </p>
+      {/if}
     {:else}
       {@const ccOk = cc.configured && cc.reachable}
       <h2 class="row">
@@ -433,32 +448,46 @@
               <span class="muted">2. Signed in — pending step 1.</span>
             {/if}
           </div>
+          <div>
+            {#if cc.version_ok}
+              <span style="color:var(--ok)">✓ 3. Version{cc.version ? ` ${cc.version}` : ""}</span>
+            {:else if cc.installed}
+              <span class="error">3. This Claude Code is too old — press Update Claude Code below, or run <code>claude update</code> in a terminal.</span>
+            {:else}
+              <span class="muted">3. Version — pending step 1.</span>
+            {/if}
+          </div>
         </div>
       {/if}
       {#if cc.configured && cc.reachable}
         <p class="muted" style="margin:0.25rem 0 0">
-          Serving models: opus · sonnet · haiku — pick one under <a href="/settings/routes">Settings → Model routing</a> or in the chat model picker.
+          Serving models: opus · sonnet · haiku — pick one under <a href="/settings/router">Settings → Model routing</a> or in the chat model picker.
         </p>
         {#if cc.version}
           <p class="muted" style="margin:0.25rem 0 0; font-size:0.85rem">Claude Code {cc.version}</p>
         {/if}
       {/if}
       <p style="margin-top:0.75rem; display:flex; gap:0.5rem; flex-wrap:wrap">
-        <button class="secondary" disabled={busy === "claudecode"} onclick={load}>Check again</button>
+        <button class="secondary" disabled={busy === "claudecode-check"} onclick={() => run("claudecode-check", async () => { await api.localModels(true); return {}; })}>
+          {busy === "claudecode-check" ? "Checking…" : "Check again"}
+        </button>
         {#if !cc.configured}
-          <button disabled={busy === "claudecode" || !cc.installed || !cc.logged_in} onclick={() => run("claudecode", () => api.putClaudeCode())}>
+          <button disabled={busy === "claudecode" || !cc.reachable} onclick={() => run("claudecode", () => api.putClaudeCode())}>
             {busy === "claudecode" ? "Connecting…" : "Connect"}
           </button>
         {/if}
-        {#if cc.configured}
+        {#if cc.installed}
           <button class="secondary" disabled={busy === "claudecode-update"} onclick={updateClaudeCode}>
             {busy === "claudecode-update" ? "Updating…" : "Update Claude Code"}
           </button>
+        {/if}
+        {#if cc.configured}
           <button class="secondary" disabled={busy === "claudecode"} onclick={() => run("claudecode", () => api.deleteLocalModel("claudecode"))}>Remove</button>
         {/if}
       </p>
       {#if ccUpdateInfo}<p class="muted" style="margin-top:0.5rem; font-size:0.85rem">{ccUpdateInfo}</p>{/if}
-      {#if cc.configured}
+      {#if ccUpdateError}<p class="error" style="margin-top:0.5rem; font-size:0.85rem">{ccUpdateError}</p>{/if}
+      {#if cc.installed}
         <p class="muted" style="margin-top:0.5rem; font-size:0.85rem">Claude Code installed natively keeps itself up to date; Update Claude Code checks right now.</p>
       {/if}
       <details style="margin-top:0.5rem">
@@ -468,8 +497,11 @@
           (a custom agent with <code>tools: []</code>) and session persistence off. That turns the
           CLI into a pure language-model endpoint: it cannot read files, run commands, browse, or
           remember the conversation on disk. SmartBrain&rsquo;s own tools still work exactly as
-          before — every action parks for your approval here, unchanged. What does leave: the
-          conversation text itself goes to Anthropic, as the red notice above says.
+          before — every action parks for your approval here, unchanged. SmartBrain also
+          switches off the CLI&rsquo;s optional telemetry and error reporting for these calls,
+          and Remove truly disconnects — SmartBrain refuses to serve these models afterwards,
+          even if a routing entry still names one. What does leave: the conversation text itself
+          goes to Anthropic, as the red notice above says.
         </p>
       </details>
     {/if}

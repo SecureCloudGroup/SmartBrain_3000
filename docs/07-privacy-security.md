@@ -73,7 +73,7 @@ not. Being precise about the line matters more than claiming everything:
   local servers, but not local in the privacy sense. SmartBrain drives the `claude`
   command with an empty tool set and session persistence off, so the CLI itself cannot
   read files, run commands, or keep the conversation on disk; the conversation text
-  still goes to Anthropic. See [Connect a model](02-models.md#claude-code-your-claude-account--sends-chats-to-anthropic).
+  still goes to Anthropic. See [Connect a model](02-models.md#claude-code-sends-your-chats-to-anthropic).
 - **Email.** If you connect Gmail, the app talks to Google's APIs to read/send your
   mail — over a loopback OAuth flow, with your own OAuth client.
 - **Remote access (only if you enable it).** Phone access is **off by default**. When
