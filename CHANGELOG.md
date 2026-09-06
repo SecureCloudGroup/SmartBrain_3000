@@ -16,6 +16,12 @@ to know when a release changes behavior.
   actually answers — never recorded their token counts, so the page stayed empty for
   Claude Code models (v0.9.36 field report). The stream's final token report is now
   recorded, and the row shows "your plan" as intended.
+- **Your model pick no longer silently reverts.** Choosing a model in Chat, visiting
+  another tab (Usage, Settings…), and coming back flipped the picker back to the
+  routed default — and quietly ran the next turns on it (v0.9.36 field report). A
+  manual pick now holds for the whole app session; a fresh launch still opens on
+  the routed default from Settings → Model routing, which stays the one persisted
+  source of truth.
 - **The Top/Latest jump pills no longer sit on the message box.** Their position was
   a fixed guess of the composer's height, which the voice controls and hint lines
   outgrew — desktop and mobile. The pills now measure the composer and ride just

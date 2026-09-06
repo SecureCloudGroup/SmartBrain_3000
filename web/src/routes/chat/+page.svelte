@@ -871,10 +871,12 @@
     }
     // The routed "chat" model (Settings → Model routing) is the authoritative DEFAULT and the
     // single source of truth shared by Desktop + PWA (stored server-side, in backups, survives
-    // reboots/upgrades). It always wins on load so changing the routing default propagates here;
-    // a manual pick below is session-only and never persisted (a stale local pick used to
-    // silently override the routed default — e.g. defaulting to gemini after routing to MLX).
-    const def = models.find((x) => x.id === routedChat) || models[0];
+    // reboots/upgrades). It wins on a fresh app load; a manual pick is remembered in memory for
+    // this app session (chatSession.pickedModel) so navigating to another tab and back doesn't
+    // silently flip the model — but it is never persisted (a stale local pick used to silently
+    // override the routed default — e.g. defaulting to gemini after routing to MLX).
+    const def = models.find((x) => x.id === chatSession.pickedModel)
+      || models.find((x) => x.id === routedChat) || models[0];
     if (def) {
       provider = def.provider;
       modelId = def.id;
@@ -886,6 +888,7 @@
   function onProvider() {
     const list = models.filter((m) => m.provider === provider);
     modelId = list.length ? list[0].id : "";
+    chatSession.pickedModel = modelId || null; // a deliberate pick — keep it across tab hops
   }
 
   async function loadConversations(): Promise<boolean> {
@@ -1598,7 +1601,8 @@
     </span>
     <span class="field">
       <label for="model">Model</label>
-      <select id="model" bind:value={modelId} disabled={providerModels.length === 0}>
+      <select id="model" bind:value={modelId} disabled={providerModels.length === 0}
+        onchange={() => (chatSession.pickedModel = modelId || null)}>
         {#if providerModels.length === 0}
           <option value="" disabled>No models for this provider</option>
         {:else}
