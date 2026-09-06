@@ -423,6 +423,7 @@
           <div class="srow"><span>Ollama</span><Chip kind={status.local_models.ollama_configured ? "ok" : ""}>{status.local_models.ollama_configured ? "configured" : "off"}</Chip></div>
           <div class="srow"><span>MLX</span><Chip kind={status.local_models.mlx_configured ? "ok" : ""}>{status.local_models.mlx_configured ? "configured" : "off"}</Chip></div>
           <div class="srow"><span>MLX embeddings</span><Chip kind={status.local_models.mlxe_configured ? "ok" : ""}>{status.local_models.mlxe_configured ? "configured" : "off"}</Chip></div>
+          <div class="srow"><span>Claude Code</span><Chip kind={status.local_models?.claudecode_configured ? "ok" : ""}>{status.local_models?.claudecode_configured ? "configured" : "off"}</Chip></div>
         </div>
         <p class="muted" style="font-size:0.8rem; margin:0.5rem 0 0">
           Live reachability checks run on <a href="/settings/models">Local models</a>.

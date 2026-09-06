@@ -43,6 +43,9 @@
   let busy = $state("");
   let error = $state("");
   let notice = $state("");
+  // Copy-command feedback + last Update Claude Code output (muted line under the card).
+  let ccInstallCopied = $state(false);
+  let ccUpdateInfo = $state("");
   const NOT_LIVE = "Saved — but not live in the gateway yet (it'll sync once the model server is reachable).";
 
   function validPort(p: string): boolean {
@@ -160,6 +163,35 @@
       notice = r.status.reachable
         ? "Voice server connected."
         : "Saved — but the voice server did not answer. Check the address and that it's running.";
+    } catch (err) {
+      error = describeError(err);
+    } finally {
+      busy = "";
+    }
+  }
+
+  async function copyClaudeCodeInstall() {
+    try {
+      await navigator.clipboard.writeText("curl -fsSL https://claude.ai/install.sh | bash");
+      ccInstallCopied = true;
+      setTimeout(() => (ccInstallCopied = false), 1500);
+    } catch {
+      /* clipboard unavailable — the user can select the text */
+    }
+  }
+
+  // Update flow: distinct from run() because we want the returned version/output for
+  // the muted post-update line, not just the reload.
+  async function updateClaudeCode() {
+    busy = "claudecode-update";
+    error = "";
+    notice = "";
+    ccUpdateInfo = "";
+    try {
+      const r = await api.updateClaudeCode();
+      const tail = r.output.trim().split("\n").slice(-1)[0] ?? "";
+      ccUpdateInfo = r.version ? `Claude Code ${r.version}` : tail;
+      await load();
     } catch (err) {
       error = describeError(err);
     } finally {
@@ -347,6 +379,103 @@
   </p>
 </div>
 
+{#if models?.claudecode}
+  {@const cc = models.claudecode}
+  <div class="card">
+    {#if cc.supported === false}
+      <h2 class="row"><span>Claude Code</span></h2>
+      <p class="muted" style="margin:0">Claude Code is not available in Docker installs — it runs on the host.</p>
+    {:else}
+      {@const ccOk = cc.configured && cc.reachable}
+      <h2 class="row">
+        <span>Claude Code</span>
+        <Chip kind={!cc.configured ? "" : ccOk ? "ok" : "danger"}>
+          {!cc.configured ? "off" : ccOk ? "connected" : "unreachable"}
+        </Chip>
+      </h2>
+      <p class="warn"><strong>This option sends your chats to Anthropic.</strong> Your messages — and any knowledge or documents the assistant reads into a conversation — leave this machine and go to Anthropic under your own Claude sign-in. Skip this if you want a fully private, local-only setup.</p>
+      {#if !cc.configured && cc.detected}
+        <p style="margin:0 0 0.6rem; padding:0.5rem 0.75rem; border:1px solid var(--ok); border-radius:var(--r-1); color:var(--ok)">
+          ✓ Found Claude Code installed and signed in.
+          <button class="link" disabled={busy === "claudecode"} onclick={() => run("claudecode", () => api.putClaudeCode())}>Connect</button>
+        </p>
+      {/if}
+      {#if !cc.reachable}
+        <ol style="line-height:1.7">
+          <li>
+            Install Claude Code:
+            <div class="kit" style="margin-top:0.35rem">curl -fsSL https://claude.ai/install.sh | bash</div>
+            <p style="margin-top:0.35rem">
+              <button class="secondary" onclick={copyClaudeCodeInstall}>{ccInstallCopied ? "Copied!" : "Copy"}</button>
+            </p>
+            <p class="muted" style="font-size:0.85rem; margin:0.25rem 0 0">or <code>brew install --cask claude-code</code>.</p>
+          </li>
+          <li>
+            Open a terminal, run <code>claude</code>, and sign in with your Claude account when the browser opens.
+            <p class="muted" style="font-size:0.85rem; margin:0.25rem 0 0">Any paid Claude plan or API sign-in works — SmartBrain never sees or stores it.</p>
+          </li>
+          <li>Come back here and press <strong>Check again</strong>.</li>
+        </ol>
+        <div class="rows" style="margin-top:0.5rem">
+          <div>
+            {#if cc.installed}
+              <span style="color:var(--ok)">✓ 1. Installed{cc.version ? ` (${cc.version})` : ""}</span>
+            {:else}
+              <span class="error">1. Not found — complete step 1, then Check again.</span>
+            {/if}
+          </div>
+          <div>
+            {#if cc.logged_in}
+              <span style="color:var(--ok)">✓ 2. Signed in</span>
+            {:else if cc.installed}
+              <span class="error">2. Installed but not signed in — run <code>claude</code> in a terminal and sign in.</span>
+            {:else}
+              <span class="muted">2. Signed in — pending step 1.</span>
+            {/if}
+          </div>
+        </div>
+      {/if}
+      {#if cc.configured && cc.reachable}
+        <p class="muted" style="margin:0.25rem 0 0">
+          Serving models: opus · sonnet · haiku — pick one under <a href="/settings/routes">Settings → Model routing</a> or in the chat model picker.
+        </p>
+        {#if cc.version}
+          <p class="muted" style="margin:0.25rem 0 0; font-size:0.85rem">Claude Code {cc.version}</p>
+        {/if}
+      {/if}
+      <p style="margin-top:0.75rem; display:flex; gap:0.5rem; flex-wrap:wrap">
+        <button class="secondary" disabled={busy === "claudecode"} onclick={load}>Check again</button>
+        {#if !cc.configured}
+          <button disabled={busy === "claudecode" || !cc.installed || !cc.logged_in} onclick={() => run("claudecode", () => api.putClaudeCode())}>
+            {busy === "claudecode" ? "Connecting…" : "Connect"}
+          </button>
+        {/if}
+        {#if cc.configured}
+          <button class="secondary" disabled={busy === "claudecode-update"} onclick={updateClaudeCode}>
+            {busy === "claudecode-update" ? "Updating…" : "Update Claude Code"}
+          </button>
+          <button class="secondary" disabled={busy === "claudecode"} onclick={() => run("claudecode", () => api.deleteLocalModel("claudecode"))}>Remove</button>
+        {/if}
+      </p>
+      {#if ccUpdateInfo}<p class="muted" style="margin-top:0.5rem; font-size:0.85rem">{ccUpdateInfo}</p>{/if}
+      {#if cc.configured}
+        <p class="muted" style="margin-top:0.5rem; font-size:0.85rem">Claude Code installed natively keeps itself up to date; Update Claude Code checks right now.</p>
+      {/if}
+      <details style="margin-top:0.5rem">
+        <summary class="muted">How this stays contained</summary>
+        <p class="muted" style="font-size:0.9rem; margin:0.35rem 0 0">
+          SmartBrain drives the <code>claude</code> command in plain-text mode with an empty tool set
+          (a custom agent with <code>tools: []</code>) and session persistence off. That turns the
+          CLI into a pure language-model endpoint: it cannot read files, run commands, browse, or
+          remember the conversation on disk. SmartBrain&rsquo;s own tools still work exactly as
+          before — every action parks for your approval here, unchanged. What does leave: the
+          conversation text itself goes to Anthropic, as the red notice above says.
+        </p>
+      </details>
+    {/if}
+  </div>
+{/if}
+
 <div class="card">
   <h2 class="row">
     <span>MLX embeddings</span>
@@ -462,3 +591,16 @@
 
 {#if notice}<p class="muted">{notice}</p>{/if}
 {#if error}<p class="error">{error}</p>{/if}
+
+<style>
+  /* House rule: never red body text. The Claude Code card's warning uses the same
+     red-tinted panel + normal --text body copy as setup/+page.svelte's .warn. */
+  .warn {
+    border: 1px solid var(--danger, #c0392b);
+    background: color-mix(in srgb, var(--danger, #c0392b) 10%, transparent);
+    color: var(--text);
+    padding: 0.75rem 1rem;
+    border-radius: 8px;
+    margin: 0.25rem 0 0.75rem;
+  }
+</style>

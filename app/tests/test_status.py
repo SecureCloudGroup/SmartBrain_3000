@@ -36,7 +36,8 @@ def test_status_unlocked_has_every_section(client: TestClient) -> None:
     body = client.get("/api/status/overview").json()
     assert body["unlocked"] is True
     assert body["voice"]["engine"] in ("server", "local")
-    assert set(body["local_models"]) == {"ollama_configured", "mlx_configured", "mlxe_configured"}
+    assert set(body["local_models"]) == {"ollama_configured", "mlx_configured", "mlxe_configured",
+                                         "claudecode_configured"}
     assert body["knowledge"] == {"documents": 0, "embedded_chunks": 0}
     assert body["schedules"]["total"] >= 0
     assert body["feeds"]["count"] == 0
