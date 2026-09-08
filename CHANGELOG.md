@@ -11,6 +11,14 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.9.38] - 2026-09-07
+
+### Changed
+- **Site only — no app changes** (updating from 0.9.37 is a no-op). The landing site
+  gained an engineering blog (first post: how SmartBrain turns Claude Code into a
+  contained, pure language-model backend) plus robots.txt and a sitemap so search
+  engines can finally find the project.
+
 ## [0.9.37] - 2026-09-06
 
 ### Added

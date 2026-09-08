@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Blog — SmartBrain</title>
+    <meta name="description" content="Engineering notes from building SmartBrain — a self-hosted, local-first AI assistant." />
+    <link rel="icon" href="../favicon-32.png" sizes="32x32" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="SmartBrain" />
+    <meta property="og:title" content="SmartBrain blog" />
+    <meta property="og:description" content="Engineering notes from building a self-hosted, local-first AI assistant." />
+    <meta property="og:url" content="https://smartbrain.securecloudgroup.com/blog/" />
+    <meta property="og:image" content="https://smartbrain.securecloudgroup.com/og.png" />
+    <link rel="preload" href="../fonts/inter-var-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <!-- Self-contained on purpose, like the rest of this site: no external fonts, scripts, or trackers. -->
+    <style>
+      @font-face {
+        font-family: "Inter var";
+        src: url("../fonts/inter-var-latin.woff2") format("woff2");
+        font-weight: 100 900;
+        font-style: normal;
+        font-display: swap;
+      }
+      :root {
+        --bg: #fafaf8; --panel: #ffffff; --ink: #1a1a1a; --muted: #62626a; --line: #e3e3df;
+        --accent: #0e7269; --accent-strong: #0b5d56;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #121212; --panel: #1a1a1d; --ink: #e6e6e6; --muted: #9c9ca4; --line: #2c2c31;
+          --accent: #63b3a8; --accent-strong: #2a7f74;
+        }
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0; background: var(--bg); color: var(--ink);
+        font: 16px/1.65 "Inter var", system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      }
+      a { color: var(--accent); }
+      .wrap { max-width: 720px; margin: 0 auto; padding: 0 1.25rem; }
+      header { display: flex; align-items: center; justify-content: space-between; padding: 1.1rem 0; }
+      .brand { display: flex; align-items: center; gap: 0.55rem; font-weight: 650; letter-spacing: -0.01em; color: var(--ink); text-decoration: none; }
+      .brand .mark { width: 26px; height: 26px; display: block; }
+      header nav a { margin-left: 1.25rem; color: var(--muted); text-decoration: none; font-weight: 500; }
+      header nav a:hover { color: var(--ink); }
+      h1 { font-size: clamp(1.6rem, 4vw, 2.1rem); letter-spacing: -0.02em; margin: 1.2rem 0 0.4rem; }
+      .sub { color: var(--muted); margin: 0 0 2rem; }
+      .post { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1.25rem 1.4rem; margin: 0 0 1rem; }
+      .post h2 { margin: 0 0 0.3rem; font-size: 1.15rem; letter-spacing: -0.01em; }
+      .post h2 a { color: var(--ink); text-decoration: none; }
+      .post h2 a:hover { color: var(--accent); }
+      .post .date { color: var(--muted); font-size: 0.85rem; }
+      .post p { margin: 0.5rem 0 0; color: var(--muted); font-size: 0.95rem; }
+      footer { border-top: 1px solid var(--line); margin-top: 3rem; padding: 2rem 0 3rem; color: var(--muted); font-size: 0.88rem; }
+      footer a { color: var(--muted); }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <header>
+        <a class="brand" href="../"><img class="mark" src="../mark-64.png" width="26" height="26" alt="" /> SmartBrain</a>
+        <nav>
+          <a href="https://github.com/SecureCloudGroup/SmartBrain_3000/blob/main/docs/README.md">Docs</a>
+          <a href="https://github.com/SecureCloudGroup/SmartBrain_3000">GitHub</a>
+        </nav>
+      </header>
+
+      <h1>Blog</h1>
+      <p class="sub">Engineering notes from building a self-hosted, local-first AI assistant.</p>
+
+      <div class="post">
+        <h2><a href="claude-code-pure-llm-endpoint.html">Turning Claude Code into a pure LLM endpoint</a></h2>
+        <div class="date">September 7, 2026</div>
+        <p>
+          We wanted a Claude subscription to work as a plain model backend — no API key. Driving a
+          full coding agent as a bare model took real containment work: the obvious tool-blocking
+          flag blocks nothing, your global CLAUDE.md rides into every session by default, and argv
+          is public. What leaked, how we proved it, and the tested recipe that seals it.
+        </p>
+      </div>
+    </div>
+
+    <footer>
+      <div class="wrap">
+        <a href="../">SmartBrain</a> — your own private AI, on your own machine ·
+        <a href="https://github.com/SecureCloudGroup/SmartBrain_3000">GitHub</a>
+      </div>
+    </footer>
+  </body>
+</html>
