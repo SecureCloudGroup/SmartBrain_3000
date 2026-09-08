@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Turning Claude Code into a pure LLM endpoint — SmartBrain blog</title>
+    <meta name="description" content="We wanted a self-hosted assistant to use a Claude subscription as a plain model backend. Locking the CLI down took real work — here is what leaked by default and the recipe that seals it." />
+    <link rel="icon" href="../favicon-32.png" sizes="32x32" />
+    <meta property="og:type" content="article" />
+    <meta property="og:site_name" content="SmartBrain" />
+    <meta property="og:title" content="Turning Claude Code into a pure LLM endpoint" />
+    <meta property="og:description" content="What the claude CLI injects and allows by default, and the tested recipe that turns it into a contained, no-tools model backend." />
+    <meta property="og:url" content="https://smartbrain.securecloudgroup.com/blog/claude-code-pure-llm-endpoint.html" />
+    <meta property="og:image" content="https://smartbrain.securecloudgroup.com/og.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="preload" href="../fonts/inter-var-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <!-- Self-contained on purpose, like the rest of this site: no external fonts, scripts, or trackers. -->
+    <style>
+      @font-face {
+        font-family: "Inter var";
+        src: url("../fonts/inter-var-latin.woff2") format("woff2");
+        font-weight: 100 900;
+        font-style: normal;
+        font-display: swap;
+      }
+      /* The app's design tokens (web/src/app.css), verbatim where they apply here. */
+      :root {
+        --bg: #fafaf8; --panel: #ffffff; --ink: #1a1a1a; --muted: #62626a; --line: #e3e3df;
+        --accent: #0e7269; --accent-strong: #0b5d56; --accent-ink: #ffffff;
+        --code-bg: #161619; --code-ink: #e6e6e6; --danger: #c0392b;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #121212; --panel: #1a1a1d; --ink: #e6e6e6; --muted: #9c9ca4; --line: #2c2c31;
+          --accent: #63b3a8; --accent-strong: #2a7f74; --accent-ink: #ffffff;
+          --code-bg: #161619; --code-ink: #e6e6e6; --danger: #e5695e;
+        }
+      }
+      * { box-sizing: border-box; }
+      html { -webkit-text-size-adjust: 100%; }
+      body {
+        margin: 0; background: var(--bg); color: var(--ink);
+        font: 16px/1.65 "Inter var", system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      }
+      a { color: var(--accent); }
+      .wrap { max-width: 720px; margin: 0 auto; padding: 0 1.25rem; }
+      header { display: flex; align-items: center; justify-content: space-between; padding: 1.1rem 0; }
+      .brand { display: flex; align-items: center; gap: 0.55rem; font-weight: 650; letter-spacing: -0.01em; color: var(--ink); text-decoration: none; }
+      .brand .mark { width: 26px; height: 26px; display: block; }
+      header nav a { margin-left: 1.25rem; color: var(--muted); text-decoration: none; font-weight: 500; }
+      header nav a:hover { color: var(--ink); }
+      article { padding: 1.5rem 0 3rem; }
+      article h1 { font-size: clamp(1.7rem, 4.5vw, 2.4rem); line-height: 1.12; letter-spacing: -0.02em; margin: 0 0 0.5rem; }
+      .meta { color: var(--muted); font-size: 0.9rem; margin: 0 0 2rem; }
+      article h2 { font-size: 1.3rem; letter-spacing: -0.01em; margin: 2.2rem 0 0.6rem; }
+      article p, article li { color: var(--ink); }
+      article .lead { font-size: 1.08rem; color: var(--muted); }
+      pre {
+        background: var(--code-bg); color: var(--code-ink); border: 1px solid var(--line);
+        border-radius: 10px; padding: 0.9rem 1.1rem; overflow-x: auto;
+        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 0.86rem; line-height: 1.55;
+      }
+      code { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 0.92em; }
+      p code, li code { background: var(--panel); border: 1px solid var(--line); border-radius: 5px; padding: 0.08em 0.35em; }
+      .callout {
+        border: 1px solid var(--danger); border-radius: 10px; padding: 0.85rem 1.1rem;
+        background: color-mix(in srgb, var(--danger) 8%, transparent); margin: 1.4rem 0;
+      }
+      footer { border-top: 1px solid var(--line); padding: 2rem 0 3rem; color: var(--muted); font-size: 0.88rem; }
+      footer a { color: var(--muted); }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <header>
+        <a class="brand" href="../"><img class="mark" src="../mark-64.png" width="26" height="26" alt="" /> SmartBrain</a>
+        <nav>
+          <a href="./">Blog</a>
+          <a href="https://github.com/SecureCloudGroup/SmartBrain_3000/blob/main/docs/README.md">Docs</a>
+          <a href="https://github.com/SecureCloudGroup/SmartBrain_3000">GitHub</a>
+        </nav>
+      </header>
+
+      <article>
+        <h1>Turning Claude Code into a pure LLM endpoint</h1>
+        <p class="meta">September 7, 2026 · the SmartBrain project</p>
+
+        <p class="lead">
+          SmartBrain is a self-hosted assistant that runs on local models by default. We wanted an
+          optional extra: use the Claude subscription many people already pay for as a plain model
+          backend — through the <code>claude</code> CLI, so there is no API key and no per-token bill.
+          That means driving a full coding <em>agent</em> as if it were a bare model. Locking it down
+          took real work, and the defaults surprised us. Here is what leaked, how we found it, and the
+          exact recipe that seals it — all of it enforced by tests in our suite, not just promised.
+        </p>
+
+        <h2>Surprise #1: the obvious tool-blocking flag blocks nothing</h2>
+        <p>
+          Claude Code can read files, run shell commands, and browse. For a chat backend all of that
+          must be off — the assistant embedding it has its own tools behind its own approval gates.
+          The flag that looks right is <code>--disallowedTools "*"</code>. We tested it by asking the
+          model to run <code>echo hi</code> with its Bash tool:
+        </p>
+        <pre>{"type":"tool_use","name":"Bash","input":{"command":"echo hi"}}
+{"type":"tool_result","content":"hi","is_error":false}</pre>
+        <p>
+          It ran. The wildcard is not a tool name, so it matches nothing, and there is no error telling
+          you so. What actually works is defining a custom agent whose tool set is <em>empty</em> and
+          selecting it for the session. The init event then reports <code>"tools": []</code>, and the
+          model itself confirms it has no Bash access when asked to use it.
+        </p>
+
+        <h2>Surprise #2: your global CLAUDE.md rides into every session</h2>
+        <p>
+          We asked the contained session what personal context it could see. The answer, verbatim from
+          the default configuration: the user's private <code>~/.claude/CLAUDE.md</code>, quoted back
+          with its path. A chat backend must not see the operator's personal instructions file. The fix
+          is <code>--setting-sources ""</code> — load no user or project settings at all. We A/B-tested
+          the same question with and without the flag: with it, the model reports no file access and no
+          CLAUDE.md. What still reaches the model afterwards: the current date, and the email address of
+          the signed-in Claude account — the account the chats already go to.
+        </p>
+
+        <h2>Surprise #3: argv is public</h2>
+        <p>
+          Every flag you pass is visible to any process on the machine via <code>ps</code>. So nothing
+          conversation-derived can go on the command line: our agent definition on argv is a static
+          constant, and the system prompt, tool descriptions, and transcript all travel over stdin. Our
+          test asserts the argv is byte-identical across turns.
+        </p>
+
+        <h2>The recipe</h2>
+        <pre>claude -p --verbose \
+  --output-format stream-json --include-partial-messages \
+  --no-session-persistence \
+  --setting-sources "" \
+  --strict-mcp-config \
+  --model sonnet \
+  --agents '{"backend":{"description":"chat backend",
+             "prompt":"&lt;static pointer to stdin&gt;","tools":[]}}' \
+  --agent backend</pre>
+        <ul>
+          <li><code>"tools": []</code> — no file, shell, or web access (the part <code>--disallowedTools</code> won't give you).</li>
+          <li><code>--no-session-persistence</code> — no transcript on disk.</li>
+          <li><code>--setting-sources ""</code> — no user/project settings or CLAUDE.md in the session.</li>
+          <li><code>--strict-mcp-config</code> — MCP servers from ambient config are structurally ignored.</li>
+          <li><code>stream-json</code> requires <code>--verbose</code> in print mode — the error tells you, eventually.</li>
+        </ul>
+        <p>Three environment details round it out:</p>
+        <ul>
+          <li>Set <code>CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1</code> — the CLI's documented opt-out of telemetry and error reporting, so the conversation is the traffic the feature adds.</li>
+          <li>Strip <code>ANTHROPIC_API_KEY</code> from the child's environment — an inherited key silently switches the CLI from the subscription to API billing.</li>
+          <li>Run from a private <code>0700</code> working directory, never a shared <code>/tmp</code> — on multi-user Linux, anyone can pre-place a <code>.claude/agents/</code> or <code>.mcp.json</code> in a shared cwd for your session to trip on.</li>
+        </ul>
+
+        <h2>Process hygiene, learned the hard way</h2>
+        <p>
+          An adversarial review of our first implementation found two ways it could wedge: stderr piped
+          but never drained (the CLI is chatty under <code>--verbose</code>; a full pipe stalls it
+          mid-answer), and a deadline that was only checked when output arrived — a hung CLI would block
+          the reader forever. The fixes: merge stderr into stdout and filter, feed stdin from a helper
+          thread, enforce the deadline with a watchdog timer that kills the child's whole process group
+          (<code>start_new_session</code> + <code>killpg</code> — a helper process holding the pipe open
+          survives a plain kill), and always reap.
+        </p>
+
+        <div class="callout">
+          <strong>Being honest about what this is:</strong> chats on this path go to Anthropic under the
+          user's own sign-in. SmartBrain marks the option in red, keeps fully-local models the default,
+          refuses to serve these models until the user explicitly connects them, and disconnecting
+          actually stops the traffic — including for scheduled jobs that still name the model.
+        </div>
+
+        <h2>The payoff</h2>
+        <p>
+          The CLI becomes a well-behaved model backend: streaming tokens, tool use via a plain-text
+          protocol our agent loop already speaks, token counts and API-equivalent cost reported per call
+          (the CLI prices itself — no rate table to go stale), and the user's plan-window status straight
+          from its rate-limit events. Subscription in, model out.
+        </p>
+        <p>
+          The full implementation — containment tests included — is open source:
+          <a href="https://github.com/SecureCloudGroup/SmartBrain_3000">SmartBrain_3000</a>, with the
+          user-facing docs in
+          <a href="https://github.com/SecureCloudGroup/SmartBrain_3000/blob/main/docs/02-models.md">Connect a model</a>.
+          Verified against Claude Code 2.1.x; flags move fast in this ecosystem — test, don't trust,
+          including us.
+        </p>
+      </article>
+    </div>
+
+    <footer>
+      <div class="wrap">
+        <a href="../">SmartBrain</a> — your own private AI, on your own machine ·
+        <a href="./">More posts</a> ·
+        <a href="https://github.com/SecureCloudGroup/SmartBrain_3000">GitHub</a>
+      </div>
+    </footer>
+  </body>
+</html>
