@@ -26,6 +26,16 @@ to know when a release changes behavior.
   changing a card and are never auto-approved in scheduled runs. (Migration 40 adds the
   four `ni_*` tables.) On phones the tab bar is now Chat, Neural, Knowledge, Info — with
   Activity in the More sheet, whose button now rolls up waiting-approval badges.
+- **Neural Interface (phase 2a): trends, salience, and alerts.** Cards can now chart —
+  a hand-drawn sparkline or gauge over a rolling history the engine keeps per item —
+  and *notice things for you*: display rules ("turn red when the delta goes negative")
+  and alert rules ("tell me when the price drops") share one small condition grammar.
+  Display rules are applied by the engine while preparing the card, so what you see is
+  still a pure function of the data. Alerts fire only when a condition *becomes* true
+  (with a per-rule cooldown — never repeat-spam) and arrive exactly like scheduled-run
+  updates: the Chat badge, a notice in your open chat, and the durable copy on Info,
+  under a "Neural Interface" heading. New pipeline math: sum/avg/min/max/count and
+  change-since-last-run.
 
 ## [0.9.38] - 2026-09-07
 

@@ -12,6 +12,8 @@ export type ChipKind = "" | "accent" | "ok" | "warn" | "danger";
 export type StackDir = "v" | "h";
 export type StackGap = "sm" | "md";
 export type NumberFormat = "plain" | "compact" | "percent" | "currency";
+export type SparkKind = "line" | "bars";
+export interface SparkPoint { t: string; v: number }
 
 export interface StackNode {
   type: "stack";
@@ -51,6 +53,21 @@ export interface RepeatNode {
   max: number;
   template: SceneNode;
 }
+// v2 nodes — server-side binder resolves any {"$bind": …} into concrete data before render.
+export interface SparkNode {
+  type: "spark";
+  points: Array<number | SparkPoint>;
+  kind: SparkKind;
+  tone?: Tone;
+}
+export interface GaugeNode {
+  type: "gauge";
+  value: number;
+  min: number;
+  max: number;
+  tone?: Tone;
+  label?: string;
+}
 
 export type SceneNode =
   | StackNode
@@ -61,12 +78,16 @@ export type SceneNode =
   | ChipNode
   | BarNode
   | IconNode
-  | RepeatNode;
+  | RepeatNode
+  | SparkNode
+  | GaugeNode;
 
 // Caps — mirror §5 exactly. A surviving repeat is invalid at render time (§4.3).
 const MAX_NODES = 100;
 const MAX_DEPTH = 8;
 const MAX_TEXT_CHARS = 2000;
+const MAX_SPARK_POINTS = 500;
+const MAX_LABEL_CHARS = 200;
 
 // Closed enums.
 const TEXT_ROLES: readonly TextRole[] = ["title", "label", "value", "caption"];
@@ -76,9 +97,13 @@ const CHIP_KINDS: readonly ChipKind[] = ["", "accent", "ok", "warn", "danger"];
 const STACK_DIRS: readonly StackDir[] = ["v", "h"];
 const STACK_GAPS: readonly StackGap[] = ["sm", "md"];
 const NUMBER_FORMATS: readonly NumberFormat[] = ["plain", "compact", "percent", "currency"];
+const SPARK_KINDS: readonly SparkKind[] = ["line", "bars"];
 
 // Reserved-for-later types — MUST be refused so old clients don't mis-render new scenes.
-const RESERVED_TYPES: ReadonlySet<string> = new Set(["spark", "gauge", "image", "when", "on_tap"]);
+// `spark` and `gauge` graduated in v2 and are handled below. `when` also stays here so
+// {type: "when"} is refused with the same message (the `when` KEY on any node is
+// caught earlier by the surviving-key check — server strips it at bind time).
+const RESERVED_TYPES: ReadonlySet<string> = new Set(["image", "when", "on_tap"]);
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
@@ -132,10 +157,49 @@ function checkIcon(n: Record<string, unknown>): string | null {
   return null;
 }
 
+function checkSpark(n: Record<string, unknown>): string | null {
+  console.assert(n.type === "spark", "checkSpark: type must be spark");
+  console.assert(typeof n === "object", "checkSpark: node must be an object");
+  const points = n.points;
+  if (!Array.isArray(points)) return "spark.points must be array";
+  if (points.length > MAX_SPARK_POINTS) return "spark.points exceeds 500";
+  for (const p of points) {
+    if (typeof p === "number") {
+      if (!Number.isFinite(p)) return "spark.points value must be finite";
+      continue;
+    }
+    if (!isRecord(p)) return "spark.points entry must be number or {t, v}";
+    if (typeof p.v !== "number" || !Number.isFinite(p.v)) return "spark.points.v must be finite";
+    if (p.t !== undefined && typeof p.t !== "string") return "spark.points.t must be string";
+  }
+  if (!SPARK_KINDS.includes(n.kind as SparkKind)) return "spark.kind invalid";
+  if (n.tone !== undefined && !TONES.includes(n.tone as Tone)) return "spark.tone invalid";
+  return null;
+}
+
+function checkGauge(n: Record<string, unknown>): string | null {
+  console.assert(n.type === "gauge", "checkGauge: type must be gauge");
+  console.assert(typeof n === "object", "checkGauge: node must be an object");
+  if (typeof n.value !== "number" || !Number.isFinite(n.value)) return "gauge.value must be finite";
+  if (typeof n.min !== "number" || !Number.isFinite(n.min)) return "gauge.min must be finite";
+  if (typeof n.max !== "number" || !Number.isFinite(n.max)) return "gauge.max must be finite";
+  if (n.max <= n.min) return "gauge.max must be > gauge.min";
+  if (n.tone !== undefined && !TONES.includes(n.tone as Tone)) return "gauge.tone invalid";
+  if (n.label !== undefined) {
+    if (typeof n.label !== "string") return "gauge.label must be string";
+    if (n.label.length > MAX_LABEL_CHARS) return "gauge.label exceeds 200 chars";
+  }
+  return null;
+}
+
 // One node's LEAF checks (children handled by the caller's traversal).
 function checkLeaf(n: Record<string, unknown>): string | null {
   console.assert(typeof n === "object" && n !== null, "checkLeaf: object required");
   console.assert(typeof n.type === "string", "checkLeaf: type must be string");
+  // The `when` key is a bind-time construct (§5 conditions): the server evaluates it
+  // and strips it before writing the bound snapshot. A surviving `when` on any node
+  // therefore means the payload is not a bound scene — refuse it outright.
+  if ("when" in n) return "when key must be stripped server-side";
   const t = n.type as string;
   if (RESERVED_TYPES.has(t)) return `reserved type refused: ${t}`;
   if (t === "repeat") return "repeat must be expanded server-side before rendering";
@@ -145,6 +209,8 @@ function checkLeaf(n: Record<string, unknown>): string | null {
   if (t === "chip") return checkChip(n);
   if (t === "bar") return checkBar(n);
   if (t === "icon") return checkIcon(n);
+  if (t === "spark") return checkSpark(n);
+  if (t === "gauge") return checkGauge(n);
   if (t === "stack") {
     if (!STACK_DIRS.includes(n.dir as StackDir)) return "stack.dir invalid";
     if (!STACK_GAPS.includes(n.gap as StackGap)) return "stack.gap invalid";

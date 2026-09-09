@@ -85,9 +85,11 @@ _FAILING_THRESHOLD = 3                       # >= this many consecutive fails ->
 _BROKEN_FAILURE_COUNT = 8                    # 8 failures in >= 7 days -> broken
 _BROKEN_MIN_DAYS = 7                         # vault_sync escalation rule
 _MAX_PAYLOAD_BYTES = 256 * 1024              # bound on the JSON-serialized bound scene (bind → snapshot)
-# Reserved output name: repeat.item.<...> binds against the current list element, so an
-# extract named "item" would collide with the repeat root at bind time. Refuse at spec time.
-_RESERVED_OUTPUT_NAMES: frozenset[str] = frozenset({"item"})
+# Reserved output names: repeat.item.<...> binds against the current list element, so an
+# extract named "item" would collide with the repeat root at bind time. "history" is the
+# read-only namespace exposed by §11 (history.<series-name>), so a pipeline output named
+# "history" would shadow the history bind root. Both refused at spec time.
+_RESERVED_OUTPUT_NAMES: frozenset[str] = frozenset({"item", "history"})
 # Icon names: literal-only, lowercase kebab shape (Lucide-subset convention). No {{}} or $bind.
 _ICON_NAME_RE = re.compile(r"^[a-z0-9-]{1,60}$")
 # Auth-shaped literal header names are refused (see _validate_http_json_source): a literal
@@ -106,21 +108,26 @@ _DISPLAY_SIZES: frozenset[str] = frozenset({"small", "wide"})
 _STATES: frozenset[str] = frozenset(
     {"draft", "commissioning", "live", "degraded", "failing", "broken", "paused"}
 )
-_SLOTS: frozenset[str] = frozenset({"latest", "last_good", "preview"})
+_SLOTS: frozenset[str] = frozenset(
+    {"latest", "last_good", "preview", "history", "alert_state"}
+)
 _REVISION_ORIGINS: frozenset[str] = frozenset(
     {"user", "agent", "repair_l1", "repair_l2", "template"}
 )
 _TRANSFORM_FNS: frozenset[str] = frozenset(
-    {"round", "scale", "rename", "pick", "sort_by", "top_n"}
+    {"round", "scale", "rename", "pick", "sort_by", "top_n",
+     "sum", "avg", "min", "max", "count", "delta_prev"}
 )
+# v2 aggregate fns that fail with "empty_aggregate" on an empty input list (count does not).
+_AGGREGATE_FNS: frozenset[str] = frozenset({"sum", "avg", "min", "max"})
 _SORT_DIRS: frozenset[str] = frozenset({"asc", "desc"})
 _SCENE_TYPES: frozenset[str] = frozenset(
-    {"stack", "grid", "divider", "text", "number", "chip", "bar", "icon", "repeat"}
+    {"stack", "grid", "divider", "text", "number", "chip", "bar", "icon", "repeat",
+     "spark", "gauge"}
 )
 # Reserved for later phases — validators MUST reject in v1 so old apps refuse new scenes.
-_RESERVED_SCENE_TYPES: frozenset[str] = frozenset(
-    {"spark", "gauge", "image", "when", "on_tap"}
-)
+# v2 promoted spark + gauge (§5 Added in v2) out of the reserved set into _SCENE_TYPES.
+_RESERVED_SCENE_TYPES: frozenset[str] = frozenset({"image", "on_tap"})
 _STACK_DIRS: frozenset[str] = frozenset({"v", "h"})
 _STACK_GAPS: frozenset[str] = frozenset({"sm", "md"})
 _TEXT_ROLES: frozenset[str] = frozenset({"title", "label", "value", "caption"})
@@ -130,6 +137,22 @@ _TEXT_TONES: frozenset[str] = frozenset(
 _TEXT_SIZES: frozenset[str] = frozenset({"sm", "md", "lg"})
 _NUM_FORMATS: frozenset[str] = frozenset({"plain", "compact", "percent", "currency"})
 _CHIP_KINDS: frozenset[str] = frozenset({"", "accent", "ok", "warn", "danger"})
+_SPARK_KINDS: frozenset[str] = frozenset({"line", "bars"})
+
+# v2 caps + enums (§5 spark, §5 Conditions, §11 History, §12 Alerts).
+_MAX_SPARK_POINTS = 500          # bound on bound spark.points (list or history series)
+_MAX_HISTORY_SERIES = 4          # spec-level history.track series count (§11)
+_MAX_HISTORY_POINTS = 500        # per-series point ceiling; max_points is clamped to this
+_DEFAULT_HISTORY_POINTS = 100    # per-series default when max_points is unset
+_MAX_WHEN_RULES = 5              # per §5 Conditions cap
+_WHEN_OPS: frozenset[str] = frozenset({"lt", "le", "gt", "ge", "eq", "ne"})
+_ORDER_OPS: frozenset[str] = frozenset({"lt", "le", "gt", "ge"})
+_MAX_ALERTS = 5                  # per-item alerts cap (§12)
+_MAX_ALERT_NAME = 40             # slug length ceiling
+_ALERT_NAME_RE = re.compile(r"^[a-z0-9-]{1,40}$")  # slug charset per §12
+_MAX_ALERT_MESSAGE = 500         # bound message length (post-interpolation)
+_MIN_ALERT_COOLDOWN = 5          # clamp floor (§12 "≥ 5")
+_DEFAULT_ALERT_COOLDOWN = 60     # default cooldown when the spec omits it
 
 # Path grammar (§4.1) — one regex per production. `__proto__` is denied by name even
 # though it matches ``_KEY_RE`` (JS-prototype-pollution style names are never a data path
@@ -266,7 +289,7 @@ def validate_spec(spec: object) -> dict:
     # change atomically with the source/scene it goes with.
     allowed = {"version", "title", "goal", "params", "source", "pipeline", "scene",
                "display", "contract", "repair_policy", "model", "_c2_ok",
-               "interval_minutes"}
+               "interval_minutes", "history", "alerts"}
     _closed_keys(body, allowed, "spec")
     if body.get("version") != 1:
         raise ValueError("spec.version must be 1")
@@ -274,11 +297,15 @@ def validate_spec(spec: object) -> dict:
     _require_str(body.get("goal"), "spec.goal", max_len=_MAX_GOAL)
     _validate_params(body.get("params") or {})
     _validate_source(body.get("source"))
-    _validate_pipeline(body.get("pipeline") or [])
+    outputs = _validate_pipeline(body.get("pipeline") or [])
     validate_scene(body.get("scene"))
     _validate_display(body.get("display") or {})
     _validate_repair_policy(body.get("repair_policy") or {})
     _validate_model_override(body.get("model"))
+    if "history" in body and body["history"] is not None:
+        _validate_history_spec(body["history"], outputs)
+    if "alerts" in body and body["alerts"] is not None:
+        _validate_alerts_spec(body["alerts"])
     # contract is system-written at commissioning; refuse a caller-supplied one so a spec
     # cannot self-attest its shape (the whole point of the C1/C2 verdict).
     if body.get("contract") is not None:
@@ -415,21 +442,28 @@ def _validate_internal_schedule_source(s: dict) -> None:
     _require_str(s.get("schedule_id"), "spec.source.schedule_id", max_len=100)
 
 
-def _validate_pipeline(pipeline: object) -> None:
-    """§4 pipeline stages — extract / transform, each with its own shape."""
+def _validate_pipeline(pipeline: object) -> set[str]:
+    """§4 pipeline stages — extract / transform, each with its own shape.
+
+    Returns the set of final top-level output names (used by history validation to
+    refuse collisions per §11). Extract stages REPLACE the outputs (as ``_apply_extract``
+    does at runtime); transforms mutate them in place (rename, aggregate ``as``)."""
     if not isinstance(pipeline, list):
         raise ValueError("spec.pipeline must be a list")  # noqa: TRY004
     if len(pipeline) > _MAX_PIPELINE_STAGES:
         raise ValueError(f"spec.pipeline exceeds {_MAX_PIPELINE_STAGES} stages")
+    outputs: set[str] = set()
     for i, stage in enumerate(pipeline):
         st = _require_dict(stage, f"spec.pipeline[{i}]")
         op = st.get("op")
         if op == "extract":
             _validate_extract_stage(st, i)
+            outputs = set((st.get("paths") or {}).keys())
         elif op == "transform":
-            _validate_transform_stage(st, i)
+            _validate_transform_stage(st, i, outputs)
         else:
             raise ValueError(f"spec.pipeline[{i}].op must be 'extract' or 'transform'")
+    return outputs
 
 
 def _validate_extract_stage(st: dict, i: int) -> None:
@@ -452,18 +486,28 @@ def _validate_extract_stage(st: dict, i: int) -> None:
         parse_path(path)  # raises ValueError on any grammar violation
 
 
-def _validate_transform_stage(st: dict, i: int) -> None:
-    """One transform stage: closed function set, per-fn required args."""
+def _validate_transform_stage(st: dict, i: int, outputs: set[str]) -> None:
+    """One transform stage: closed function set, per-fn required args.
+
+    ``outputs`` is mutated in place as ops declare new names (rename ``to`` /
+    aggregate + delta_prev ``as``) so a later op's aggregate can refuse an
+    ``as`` name that already exists earlier in the pipeline (§4.2 collision rule).
+    """
     _closed_keys(st, {"op", "apply"}, f"spec.pipeline[{i}]")
     apply = st.get("apply")
     if not isinstance(apply, list) or not apply or len(apply) > _MAX_TRANSFORM_APPLY:
         raise ValueError(f"spec.pipeline[{i}].apply must be 1..{_MAX_TRANSFORM_APPLY} ops")
     for j, op in enumerate(apply):
-        _validate_transform_op(op, i, j)
+        _validate_transform_op(op, i, j, outputs)
 
 
-def _validate_transform_op(op: object, i: int, j: int) -> None:
-    """One transform apply entry — closed fn set + required args per fn."""
+def _validate_transform_op(op: object, i: int, j: int, outputs: set[str]) -> None:
+    """One transform apply entry — closed fn set + required args per fn.
+
+    ``outputs`` tracks running top-level names so v2 aggregates + delta_prev can refuse
+    an ``as`` that collides with an existing output (§4.2). It is mutated in place
+    (rename/aggregate/delta_prev add or move names).
+    """
     node = _require_dict(op, f"spec.pipeline[{i}].apply[{j}]")
     fn = node.get("fn")
     if fn not in _TRANSFORM_FNS:
@@ -471,36 +515,73 @@ def _validate_transform_op(op: object, i: int, j: int) -> None:
     field = node.get("field")
     if not isinstance(field, str) or not _KEY_RE.match(field):
         raise ValueError(f"spec.pipeline[{i}].apply[{j}].field malformed")
+    where = f"spec.pipeline[{i}].apply[{j}]"
     if fn == "round":
-        _closed_keys(node, {"fn", "field", "digits"}, f"spec.pipeline[{i}].apply[{j}]")
+        _closed_keys(node, {"fn", "field", "digits"}, where)
         if not isinstance(node.get("digits"), int) or isinstance(node.get("digits"), bool):
-            raise ValueError(f"spec.pipeline[{i}].apply[{j}].digits must be int")
+            raise ValueError(f"{where}.digits must be int")
     elif fn == "scale":
-        _closed_keys(node, {"fn", "field", "factor"}, f"spec.pipeline[{i}].apply[{j}]")
+        _closed_keys(node, {"fn", "field", "factor"}, where)
         if not isinstance(node.get("factor"), (int, float)) or isinstance(node.get("factor"), bool):
-            raise ValueError(f"spec.pipeline[{i}].apply[{j}].factor must be number")
+            raise ValueError(f"{where}.factor must be number")
     elif fn == "rename":
-        _closed_keys(node, {"fn", "field", "to"}, f"spec.pipeline[{i}].apply[{j}]")
+        _closed_keys(node, {"fn", "field", "to"}, where)
         to = node.get("to")
         if not isinstance(to, str) or not _KEY_RE.match(to):
-            raise ValueError(f"spec.pipeline[{i}].apply[{j}].to malformed")
+            raise ValueError(f"{where}.to malformed")
+        if to in _RESERVED_OUTPUT_NAMES:
+            raise ValueError(f"{where}.to: {to!r} is reserved (bind root)")
+        outputs.discard(field)
+        outputs.add(to)
     elif fn == "pick":
-        _closed_keys(node, {"fn", "field", "keys"}, f"spec.pipeline[{i}].apply[{j}]")
+        _closed_keys(node, {"fn", "field", "keys"}, where)
         keys = node.get("keys")
         if not isinstance(keys, list) or not keys or not all(
                 isinstance(k, str) and _KEY_RE.match(k) for k in keys):
-            raise ValueError(f"spec.pipeline[{i}].apply[{j}].keys must be a non-empty key list")
+            raise ValueError(f"{where}.keys must be a non-empty key list")
     elif fn == "sort_by":
-        _closed_keys(node, {"fn", "field", "key", "dir"}, f"spec.pipeline[{i}].apply[{j}]")
+        _closed_keys(node, {"fn", "field", "key", "dir"}, where)
         if "key" in node and not (isinstance(node["key"], str) and _KEY_RE.match(node["key"])):
-            raise ValueError(f"spec.pipeline[{i}].apply[{j}].key malformed")
+            raise ValueError(f"{where}.key malformed")
         if node.get("dir") not in _SORT_DIRS:
-            raise ValueError(f"spec.pipeline[{i}].apply[{j}].dir must be 'asc' or 'desc'")
-    else:  # top_n
-        _closed_keys(node, {"fn", "field", "n"}, f"spec.pipeline[{i}].apply[{j}]")
+            raise ValueError(f"{where}.dir must be 'asc' or 'desc'")
+    elif fn == "top_n":
+        _closed_keys(node, {"fn", "field", "n"}, where)
         n = node.get("n")
         if not isinstance(n, int) or isinstance(n, bool) or n < 1 or n > _MAX_TOP_N:
-            raise ValueError(f"spec.pipeline[{i}].apply[{j}].n must be 1..{_MAX_TOP_N}")
+            raise ValueError(f"{where}.n must be 1..{_MAX_TOP_N}")
+    elif fn == "count":
+        _closed_keys(node, {"fn", "field", "as"}, where)
+        _validate_transform_as(node.get("as"), where, outputs)
+    elif fn in _AGGREGATE_FNS:
+        _closed_keys(node, {"fn", "field", "key", "as"}, where)
+        key = node.get("key")
+        if not isinstance(key, str) or not _KEY_RE.match(key):
+            raise ValueError(f"{where}.key malformed")
+        _validate_transform_as(node.get("as"), where, outputs)
+    else:  # delta_prev
+        _closed_keys(node, {"fn", "field", "series", "as"}, where)
+        series = node.get("series")
+        if not isinstance(series, str) or not _KEY_RE.match(series):
+            raise ValueError(f"{where}.series malformed")
+        _validate_transform_as(node.get("as"), where, outputs)
+
+
+def _validate_transform_as(name: object, where: str, outputs: set[str]) -> None:
+    """Shared ``as`` guard for v2 aggregates + count + delta_prev (§4.2 collision rule).
+
+    Refuses malformed names, reserved names, and collisions with existing outputs; on
+    success, mutates ``outputs`` in place so a later op's ``as`` sees the new name.
+    """
+    assert isinstance(where, str) and where, "where required"
+    assert isinstance(outputs, set), "outputs must be a set"
+    if not isinstance(name, str) or not _KEY_RE.match(name):
+        raise ValueError(f"{where}.as malformed")
+    if name in _RESERVED_OUTPUT_NAMES:
+        raise ValueError(f"{where}.as: {name!r} is reserved (bind root)")
+    if name in outputs:
+        raise ValueError(f"{where}.as: {name!r} collides with an existing pipeline output")
+    outputs.add(name)
 
 
 def _validate_display(display: object) -> None:
@@ -523,6 +604,73 @@ def _validate_model_override(model: object) -> None:
         return
     if not isinstance(model, str) or "/" not in model:
         raise ValueError("spec.model must be 'provider/model' or null")
+
+
+def _validate_history_spec(history: object, outputs: set[str]) -> None:
+    """§11 history: {track: {name: path}, max_points}. ≤4 series; name obeys the output
+    namespace rules (not ``item``, not ``history``, no collision with pipeline outputs)."""
+    assert isinstance(outputs, set), "outputs must be a set"
+    node = _require_dict(history, "spec.history")
+    _closed_keys(node, {"track", "max_points"}, "spec.history")
+    track = _require_dict(node.get("track"), "spec.history.track")
+    if not track or len(track) > _MAX_HISTORY_SERIES:
+        raise ValueError(f"spec.history.track must be 1..{_MAX_HISTORY_SERIES} series")
+    for name, path in track.items():
+        if not isinstance(name, str) or not _KEY_RE.match(name):
+            raise ValueError(f"spec.history.track key {name!r} malformed")
+        if name in _RESERVED_OUTPUT_NAMES:
+            raise ValueError(f"spec.history.track.{name}: {name!r} is reserved")
+        if name in outputs:
+            raise ValueError(
+                f"spec.history.track.{name}: collides with pipeline output {name!r}"
+            )
+        if not isinstance(path, str):
+            raise ValueError(f"spec.history.track.{name} path must be a string")  # noqa: TRY004
+        parse_path(path)
+    if "max_points" in node:
+        mp = node["max_points"]
+        if not isinstance(mp, int) or isinstance(mp, bool) or mp < 1:
+            raise ValueError("spec.history.max_points must be a positive integer")
+
+
+def _validate_alerts_spec(alerts: object) -> None:
+    """§12 alerts: ≤5 rules; slug names unique; when-shaped left/op/right; message template
+    ≤500 chars; cooldown_minutes clamped ≥5 at engine time (bounds re-checked below)."""
+    if not isinstance(alerts, list):
+        raise ValueError("spec.alerts must be a list")  # noqa: TRY004
+    if len(alerts) > _MAX_ALERTS:
+        raise ValueError(f"spec.alerts exceeds {_MAX_ALERTS} rules")
+    seen: set[str] = set()
+    for i, rule in enumerate(alerts):
+        where = f"spec.alerts[{i}]"
+        r = _require_dict(rule, where)
+        _closed_keys(r, {"name", "left", "op", "right", "message", "cooldown_minutes"}, where)
+        name = r.get("name")
+        if not isinstance(name, str) or not _ALERT_NAME_RE.match(name):
+            raise ValueError(f"{where}.name must match [a-z0-9-]{{1,{_MAX_ALERT_NAME}}}")
+        if name in seen:
+            raise ValueError(f"{where}.name {name!r} is a duplicate")
+        seen.add(name)
+        _validate_when_operand(r.get("left"), f"{where}.left")
+        _validate_when_operand(r.get("right"), f"{where}.right")
+        if r.get("op") not in _WHEN_OPS:
+            raise ValueError(f"{where}.op must be one of {sorted(_WHEN_OPS)}")
+        message = r.get("message")
+        if not isinstance(message, str) or not message or len(message) > _MAX_ALERT_MESSAGE:
+            raise ValueError(f"{where}.message must be 1..{_MAX_ALERT_MESSAGE} chars")
+        # Grammar-check every {{path}} in the template (excluding the {{title}} macro).
+        for match in _BIND_INTERP.finditer(message):
+            token = match.group(1)
+            if token == "title":
+                continue
+            try:
+                parse_path(token)
+            except ValueError as exc:
+                raise ValueError(f"{where}.message: bad {{{{path}}}} {token!r}: {exc}") from None
+        if "cooldown_minutes" in r:
+            cd = r["cooldown_minutes"]
+            if not isinstance(cd, int) or isinstance(cd, bool):
+                raise ValueError(f"{where}.cooldown_minutes must be an integer")
 
 
 def validate_scene(scene: object) -> dict:
@@ -590,6 +738,7 @@ def _validate_scene_shape(node: dict) -> list[object]:
         "stack": _validate_stack, "grid": _validate_grid, "divider": _validate_divider,
         "text": _validate_text, "number": _validate_number, "chip": _validate_chip,
         "bar": _validate_bar, "icon": _validate_icon, "repeat": _validate_repeat,
+        "spark": _validate_spark, "gauge": _validate_gauge,
     }
     fn = dispatch[node["type"]]
     return fn(node)
@@ -624,7 +773,7 @@ def _validate_divider(node: dict) -> list[object]:
 
 
 def _validate_text(node: dict) -> list[object]:
-    _closed_keys(node, {"type", "value", "role", "tone", "size"}, "scene text")
+    _closed_keys(node, {"type", "value", "role", "tone", "size", "when"}, "scene text")
     _validate_bindable(node.get("value"), "scene text.value", allow_string=True, max_len=_MAX_TEXT_CHARS)
     if node.get("role") not in _TEXT_ROLES:
         raise ValueError(f"scene text.role must be one of {sorted(_TEXT_ROLES)}")
@@ -632,11 +781,12 @@ def _validate_text(node: dict) -> list[object]:
         raise ValueError(f"scene text.tone must be one of {sorted(_TEXT_TONES)}")
     if node.get("size") not in _TEXT_SIZES:
         raise ValueError(f"scene text.size must be one of {sorted(_TEXT_SIZES)}")
+    _validate_when(node, "scene text")
     return []
 
 
 def _validate_number(node: dict) -> list[object]:
-    _closed_keys(node, {"type", "value", "format", "unit", "tone", "size"}, "scene number")
+    _closed_keys(node, {"type", "value", "format", "unit", "tone", "size", "when"}, "scene number")
     _validate_bindable(node.get("value"), "scene number.value", allow_string=False, max_len=0)
     if node.get("format") not in _NUM_FORMATS:
         raise ValueError(f"scene number.format must be one of {sorted(_NUM_FORMATS)}")
@@ -652,6 +802,7 @@ def _validate_number(node: dict) -> list[object]:
         raise ValueError(f"scene number.tone must be one of {sorted(_TEXT_TONES)}")
     if node.get("size") not in _TEXT_SIZES:
         raise ValueError(f"scene number.size must be one of {sorted(_TEXT_SIZES)}")
+    _validate_when(node, "scene number")
     return []
 
 
@@ -670,24 +821,26 @@ def _check_interp_grammar(value: str, what: str) -> None:
 
 
 def _validate_chip(node: dict) -> list[object]:
-    _closed_keys(node, {"type", "value", "kind"}, "scene chip")
+    _closed_keys(node, {"type", "value", "kind", "when"}, "scene chip")
     _validate_bindable(node.get("value"), "scene chip.value", allow_string=True, max_len=_MAX_TEXT_CHARS)
     if node.get("kind") not in _CHIP_KINDS:
         raise ValueError(f"scene chip.kind must be one of {sorted(_CHIP_KINDS)}")
+    _validate_when(node, "scene chip")
     return []
 
 
 def _validate_bar(node: dict) -> list[object]:
-    _closed_keys(node, {"type", "value", "max", "tone"}, "scene bar")
+    _closed_keys(node, {"type", "value", "max", "tone", "when"}, "scene bar")
     _validate_bindable(node.get("value"), "scene bar.value", allow_string=False, max_len=0)
     _validate_bindable(node.get("max"), "scene bar.max", allow_string=False, max_len=0)
     if node.get("tone") not in _TEXT_TONES:
         raise ValueError(f"scene bar.tone must be one of {sorted(_TEXT_TONES)}")
+    _validate_when(node, "scene bar")
     return []
 
 
 def _validate_icon(node: dict) -> list[object]:
-    _closed_keys(node, {"type", "name", "tone"}, "scene icon")
+    _closed_keys(node, {"type", "name", "tone", "when"}, "scene icon")
     name = _require_str(node.get("name"), "scene icon.name", max_len=60)
     # Literal-only (K1): no {{...}} or $bind. An icon name is a design token, not data —
     # binder-driven names would let a payload string reach the renderer's icon dispatcher.
@@ -698,7 +851,125 @@ def _validate_icon(node: dict) -> list[object]:
         )
     if node.get("tone") not in _TEXT_TONES:
         raise ValueError(f"scene icon.tone must be one of {sorted(_TEXT_TONES)}")
+    _validate_when(node, "scene icon")
     return []
+
+
+def _validate_spark(node: dict) -> list[object]:
+    """§5 spark: {points ($bind or literal list of numbers / {t,v}), kind, tone, when}."""
+    _closed_keys(node, {"type", "points", "kind", "tone", "when"}, "scene spark")
+    points = node.get("points")
+    if isinstance(points, dict):
+        _closed_keys(points, {"$bind"}, "scene spark.points")
+        path = points.get("$bind")
+        if not isinstance(path, str):
+            raise ValueError("scene spark.points.$bind must be a string")  # noqa: TRY004
+        parse_path(path)
+    elif isinstance(points, list):
+        if len(points) > _MAX_SPARK_POINTS:
+            raise ValueError(f"scene spark.points literal exceeds {_MAX_SPARK_POINTS}")
+        for i, p in enumerate(points):  # bounded by _MAX_SPARK_POINTS
+            _validate_spark_literal_point(p, i)
+    else:
+        raise ValueError("scene spark.points must be a $bind object or a literal list")  # noqa: TRY004
+    if node.get("kind") not in _SPARK_KINDS:
+        raise ValueError(f"scene spark.kind must be one of {sorted(_SPARK_KINDS)}")
+    if node.get("tone") not in _TEXT_TONES:
+        raise ValueError(f"scene spark.tone must be one of {sorted(_TEXT_TONES)}")
+    _validate_when(node, "scene spark")
+    return []
+
+
+def _validate_spark_literal_point(p: object, i: int) -> None:
+    """A literal spark point is a bare number OR a closed-shape {t: str, v: number}."""
+    assert i >= 0, "index must be non-negative"
+    if isinstance(p, (int, float)) and not isinstance(p, bool):
+        return
+    if isinstance(p, dict):
+        _closed_keys(p, {"t", "v"}, f"scene spark.points[{i}]")
+        if not isinstance(p.get("t"), str):
+            raise ValueError(f"scene spark.points[{i}].t must be a string")  # noqa: TRY004
+        v = p.get("v")
+        if not isinstance(v, (int, float)) or isinstance(v, bool):
+            raise ValueError(f"scene spark.points[{i}].v must be a number")  # noqa: TRY004
+        return
+    raise ValueError(f"scene spark.points[{i}] must be a number or {{t,v}} object")
+
+
+def _validate_gauge(node: dict) -> list[object]:
+    """§5 gauge: {value/min/max/tone/label, when}. Literal max > literal min (§5 rule)."""
+    _closed_keys(node, {"type", "value", "min", "max", "tone", "label", "when"}, "scene gauge")
+    _validate_bindable(node.get("value"), "scene gauge.value", allow_string=False, max_len=0)
+    _validate_bindable(node.get("min"), "scene gauge.min", allow_string=False, max_len=0)
+    _validate_bindable(node.get("max"), "scene gauge.max", allow_string=False, max_len=0)
+    if node.get("tone") not in _TEXT_TONES:
+        raise ValueError(f"scene gauge.tone must be one of {sorted(_TEXT_TONES)}")
+    label = node.get("label")
+    if not isinstance(label, str) or len(label) > _MAX_TEXT_CHARS:
+        raise ValueError(f"scene gauge.label must be a string <= {_MAX_TEXT_CHARS} chars")
+    _check_interp_grammar(label, "scene gauge.label")
+    # max > min when both are literal numbers (bind-time values can't be checked at spec).
+    lit_min = _literal_number(node.get("min"))
+    lit_max = _literal_number(node.get("max"))
+    if lit_min is not None and lit_max is not None and lit_max <= lit_min:
+        raise ValueError("scene gauge.max must be > min when both are literal numbers")
+    _validate_when(node, "scene gauge")
+    return []
+
+
+def _literal_number(value: object) -> float | None:
+    """Return ``value`` as a float when it is a literal number, else None ($bind counts as None)."""
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    return None
+
+
+def _validate_when(node: dict, what: str) -> None:
+    """§5 Conditions: content-node ``when`` list. Missing key = OK, empty list = OK too."""
+    assert isinstance(what, str) and what, "what required"
+    if "when" not in node:
+        return
+    rules = node["when"]
+    if not isinstance(rules, list):
+        raise ValueError(f"{what}.when must be a list")  # noqa: TRY004
+    if len(rules) > _MAX_WHEN_RULES:
+        raise ValueError(f"{what}.when exceeds {_MAX_WHEN_RULES} rules")
+    for i, rule in enumerate(rules):  # bounded by _MAX_WHEN_RULES
+        _validate_when_rule(rule, f"{what}.when[{i}]")
+
+
+def _validate_when_rule(rule: object, where: str) -> None:
+    """One §5 rule: {left, op, right, set} — set carries tone and/or hidden:true."""
+    assert isinstance(where, str) and where, "where required"
+    r = _require_dict(rule, where)
+    _closed_keys(r, {"left", "op", "right", "set"}, where)
+    _validate_when_operand(r.get("left"), f"{where}.left")
+    _validate_when_operand(r.get("right"), f"{where}.right")
+    if r.get("op") not in _WHEN_OPS:
+        raise ValueError(f"{where}.op must be one of {sorted(_WHEN_OPS)}")
+    s = _require_dict(r.get("set"), f"{where}.set")
+    _closed_keys(s, {"tone", "hidden"}, f"{where}.set")
+    if not s:
+        raise ValueError(f"{where}.set must set at least tone or hidden")
+    if "tone" in s and s["tone"] not in _TEXT_TONES:
+        raise ValueError(f"{where}.set.tone must be one of {sorted(_TEXT_TONES)}")
+    if "hidden" in s and s["hidden"] is not True:
+        raise ValueError(f"{where}.set.hidden must be true when present")
+
+
+def _validate_when_operand(value: object, where: str) -> None:
+    """A when operand is a $bind object OR a JSON scalar (str/int/float/bool/None)."""
+    assert isinstance(where, str) and where, "where required"
+    if isinstance(value, dict):
+        _closed_keys(value, {"$bind"}, where)
+        path = value.get("$bind")
+        if not isinstance(path, str):
+            raise ValueError(f"{where}.$bind must be a string")  # noqa: TRY004
+        parse_path(path)
+        return
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return
+    raise ValueError(f"{where} must be a $bind object or JSON scalar")
 
 
 def _validate_repeat(node: dict) -> list[object]:
@@ -767,18 +1038,24 @@ def _resolve_path(payload: object, steps: list[tuple]) -> Any:
     return cur
 
 
-def run_pipeline(stages: list[dict], payload: object) -> dict:
+def run_pipeline(stages: list[dict], payload: object,
+                 *, history: dict | None = None) -> dict:
     """Execute the pipeline (§4); return the named-outputs dict. Raises NIError on any
-    failure (missing path, transform type mismatch — never coercion)."""
+    failure (missing path, transform type mismatch — never coercion).
+
+    ``history`` (§11) is passed through to the transform executor so delta_prev can
+    read the last completed run's series. Default None = empty series (first run).
+    """
     assert isinstance(stages, list), "stages must be a list"
     assert payload is not None, "payload required"
+    hist = history if history is not None else {}
     current: object = payload
     for stage in stages:  # bounded by _MAX_PIPELINE_STAGES
         op = stage.get("op")
         if op == "extract":
             current = _apply_extract(stage.get("paths") or {}, current)
         elif op == "transform":
-            current = _apply_transform(stage.get("apply") or [], current)
+            current = _apply_transform(stage.get("apply") or [], current, history=hist)
         else:
             raise NIError("pipeline_bad_stage", str(op))
     if not isinstance(current, dict):
@@ -795,17 +1072,18 @@ def _apply_extract(paths: dict, payload: object) -> dict:
     return out
 
 
-def _apply_transform(apply: list[dict], payload: object) -> dict:
+def _apply_transform(apply: list[dict], payload: object, *, history: dict) -> dict:
     """Apply each transform op to the named-outputs dict, in order."""
     if not isinstance(payload, dict):
         raise NIError("transform_needs_dict", "transform requires an extract dict")
+    assert isinstance(history, dict), "history must be a dict (may be empty)"
     current = dict(payload)  # copy: transforms MUST NOT mutate caller state
     for op in apply:  # bounded by _MAX_TRANSFORM_APPLY
-        current = _apply_transform_op(op, current)
+        current = _apply_transform_op(op, current, history=history)
     return current
 
 
-def _apply_transform_op(op: dict, payload: dict) -> dict:
+def _apply_transform_op(op: dict, payload: dict, *, history: dict) -> dict:
     """Dispatch one transform apply entry against the current dict."""
     fn = op["fn"]
     field = op["field"]
@@ -822,8 +1100,14 @@ def _apply_transform_op(op: dict, payload: dict) -> dict:
         out[field] = _txf_pick(payload[field], op["keys"])
     elif fn == "sort_by":
         out[field] = _txf_sort(payload[field], op.get("key"), op["dir"])
-    else:  # top_n (bounded)
+    elif fn == "top_n":
         out[field] = _txf_top_n(payload[field], op["n"])
+    elif fn == "count":
+        out[op["as"]] = _txf_count(payload[field])
+    elif fn in _AGGREGATE_FNS:
+        out[op["as"]] = _txf_aggregate(fn, payload[field], op["key"])
+    else:  # delta_prev
+        out[op["as"]] = _txf_delta_prev(payload[field], op["series"], history)
     return out
 
 
@@ -880,6 +1164,69 @@ def _txf_top_n(value: object, n: int) -> list:
         raise NIError("transform_type", "top_n needs a list")
     assert 1 <= n <= _MAX_TOP_N, "n already validated"
     return value[:n]
+
+
+def _txf_count(value: object) -> int:
+    """v2 count(field, as): length of a list. Empty list counts 0 (never fails)."""
+    if not isinstance(value, list):
+        raise NIError("transform_type", "count needs a list")
+    assert isinstance(value, list), "invariant: value is a list"
+    return len(value)
+
+
+def _txf_aggregate(fn: str, value: object, key: str) -> float:
+    """v2 sum/avg/min/max(field, key, as) over a list-of-objects; empty list = failure."""
+    assert fn in _AGGREGATE_FNS, "fn already validated"
+    if not isinstance(value, list):
+        raise NIError("transform_type", f"{fn} needs a list")
+    if not value:
+        raise NIError("empty_aggregate", f"{fn} on empty list")
+    numbers: list[float] = []
+    for entry in value:  # bounded by input length
+        if not isinstance(entry, dict) or key not in entry:
+            raise NIError("transform_type", f"{fn} needs list of objects with {key!r}")
+        v = entry[key]
+        if not isinstance(v, (int, float)) or isinstance(v, bool):
+            raise NIError("transform_type", f"{fn}: non-numeric {key!r}")
+        numbers.append(float(v))
+    if fn == "sum":
+        return float(sum(numbers))
+    if fn == "avg":
+        return float(sum(numbers) / len(numbers))
+    if fn == "min":
+        return float(min(numbers))
+    return float(max(numbers))
+
+
+def _txf_delta_prev(value: object, series: str, history: dict) -> dict:
+    """v2 delta_prev(field, series, as): current field minus last point of history series.
+
+    First-run rule (§4.2): when the referenced series is empty (or absent), write
+    ``{value: 0, direction: "flat"}`` — never a failure, so commissioning still passes.
+    Direction is ``up`` / ``down`` / ``flat`` from the numeric delta's sign.
+    """
+    assert isinstance(series, str) and series, "series required"
+    assert isinstance(history, dict), "history must be a dict"
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        raise NIError("transform_type", "delta_prev needs a number in field")
+    points = history.get(series) or []
+    if not isinstance(points, list) or not points:
+        return {"value": 0, "direction": "flat"}
+    last = points[-1]
+    if isinstance(last, dict) and "v" in last:
+        prev = last["v"]
+    else:
+        prev = last
+    if not isinstance(prev, (int, float)) or isinstance(prev, bool):
+        raise NIError("transform_type", "delta_prev: previous point not numeric")
+    delta = float(value) - float(prev)
+    if delta > 0:
+        direction = "up"
+    elif delta < 0:
+        direction = "down"
+    else:
+        direction = "flat"
+    return {"value": delta, "direction": direction}
 
 
 # --- param substitution + bind (pure) -------------------------------------
@@ -955,28 +1302,52 @@ def _resolve_param_string(value: str, params: dict, *, path: str,
     return _PARAM_PLACEHOLDER.sub(_one, value)
 
 
-def bind_scene(scene: dict, data: dict) -> dict:
+def bind_scene(scene: dict, data: dict, *, history: dict | None = None) -> dict:
     """Return the scene with $bind + {{path}} resolved and repeat nodes expanded.
 
     Enforces the post-expansion caps (nodes <= 100, depth <= 8, text <= 2000). Any
     unresolved binding, type mismatch, or cap violation raises NIError.
+
+    ``history`` (§11) is exposed to the binder as the read-only ``history.<name>``
+    namespace: internally we merge ``{"history": history}`` into ``data`` so a
+    ``$bind: history.price`` walks the standard resolver. The pipeline guarantees no
+    top-level output is named ``history`` (see ``_RESERVED_OUTPUT_NAMES``), so the
+    merge cannot shadow user data.
     """
     assert isinstance(scene, dict), "scene must be a dict"
     assert isinstance(data, dict), "data must be a dict"
+    merged: dict = dict(data)
+    if history is not None:
+        assert isinstance(history, dict), "history must be a dict"
+        merged["history"] = history
     counter = _NodeCounter()
-    bound = _bind_node(scene, data, depth=1, item=None, counter=counter)
+    bound = _bind_node(scene, merged, depth=1, item=None, counter=counter)
+    if bound is None:
+        raise NIError("bind_type", "scene root cannot be hidden by when")
     if counter.count > _MAX_SCENE_NODES:
         raise NIError("bind_scene_too_large", f"{counter.count} nodes (max {_MAX_SCENE_NODES})")
     return bound
 
 
-def _bind_node(node: object, data: dict, *, depth: int, item: Any, counter: _NodeCounter) -> dict:
-    """Bind one scene node (iterative expansion of repeat)."""
+def _bind_node(node: object, data: dict, *, depth: int, item: Any,
+               counter: _NodeCounter) -> dict | None:
+    """Bind one scene node; returns None when a ``when`` rule set ``hidden: true``.
+
+    Callers with a ``children`` list filter None entries so the hidden node is dropped
+    from the bound payload entirely (§5 Conditions). ``when`` never survives binding —
+    it is consumed here and no ``when`` key is copied into the output.
+    """
     assert counter is not None, "counter required"
     if not isinstance(node, dict):
         raise NIError("bind_bad_node", "scene node must be a dict")
     if depth > _MAX_SCENE_DEPTH:
         raise NIError("bind_depth", f"exceeds {_MAX_SCENE_DEPTH}")
+    tone_override: str | None = None
+    if "when" in node:
+        applied = _apply_when(node.get("when") or [], data, item=item)
+        if applied.get("hidden") is True:
+            return None
+        tone_override = applied.get("tone")
     counter.count += 1
     if counter.count > _MAX_SCENE_NODES:
         raise NIError("bind_scene_too_large", f"{counter.count} nodes (max {_MAX_SCENE_NODES})")
@@ -985,18 +1356,28 @@ def _bind_node(node: object, data: dict, *, depth: int, item: Any, counter: _Nod
         return _bind_repeat(node, data, depth=depth, counter=counter)
     out: dict = {"type": ntype}
     for key, value in node.items():
-        if key == "type":
+        if key in ("type", "when"):
             continue
         if key == "children":
-            out[key] = [_bind_node(c, data, depth=depth + 1, item=item, counter=counter)
-                        for c in (value or [])]  # bounded by scene node cap
+            child_nodes: list[dict] = []
+            for c in (value or []):  # bounded by scene node cap
+                bound_child = _bind_node(c, data, depth=depth + 1, item=item, counter=counter)
+                if bound_child is not None:
+                    child_nodes.append(bound_child)
+            out[key] = child_nodes
         else:
             out[key] = _bind_value(value, data, item=item)
+    if tone_override is not None:
+        out["tone"] = tone_override
     return out
 
 
 def _bind_repeat(node: dict, data: dict, *, depth: int, counter: _NodeCounter) -> dict:
-    """Expand a repeat into a stack of template clones bound to each list element."""
+    """Expand a repeat into a stack of template clones bound to each list element.
+
+    A ``when`` rule that hides a template clone drops that clone from the expansion
+    (its slot is removed from the stack's children entirely, matching the §5 rule).
+    """
     items_bind = node.get("items") or {}
     steps = parse_path(items_bind["$bind"])
     items = _resolve_path(data, steps)
@@ -1006,7 +1387,9 @@ def _bind_repeat(node: dict, data: dict, *, depth: int, counter: _NodeCounter) -
     template = node["template"]
     children: list[dict] = []
     for entry in items[:max_n]:  # bounded by max_n <= _MAX_REPEAT_MAX
-        children.append(_bind_node(template, data, depth=depth + 1, item=entry, counter=counter))
+        bound_child = _bind_node(template, data, depth=depth + 1, item=entry, counter=counter)
+        if bound_child is not None:
+            children.append(bound_child)
     return {"type": "stack", "dir": "v", "gap": "sm", "children": children}
 
 
@@ -1033,6 +1416,62 @@ def _resolve_bind(steps: list[tuple], data: dict, *, item: Any) -> object:
         if not steps:
             return root
     return _resolve_path(root, steps)
+
+
+def _apply_when(rules: list, data: dict, *, item: Any) -> dict:
+    """Evaluate a content node's ``when`` rules in order (§5 Conditions).
+
+    Returns ``{"hidden": True}`` on the first match with ``set.hidden=True`` (short-circuits;
+    the caller drops the node). Otherwise ``{"tone": <token>}`` with the LAST matching
+    tone (later rules override earlier ones — §5 "later tone wins").
+    """
+    assert isinstance(rules, list), "rules must be a list"
+    assert isinstance(data, dict), "data required"
+    result: dict = {}
+    for rule in rules:  # bounded by _MAX_WHEN_RULES
+        left = _resolve_when_operand(rule.get("left"), data, item=item)
+        right = _resolve_when_operand(rule.get("right"), data, item=item)
+        if _eval_when(left, rule.get("op"), right):
+            set_body = rule.get("set") or {}
+            if set_body.get("hidden") is True:
+                return {"hidden": True}
+            if "tone" in set_body:
+                result["tone"] = set_body["tone"]
+    return result
+
+
+def _resolve_when_operand(value: object, data: dict, *, item: Any) -> object:
+    """Resolve a when/alerts operand: $bind against outputs, otherwise pass the scalar."""
+    if isinstance(value, dict) and "$bind" in value:
+        steps = parse_path(value["$bind"])
+        return _resolve_bind(steps, data, item=item)
+    return value
+
+
+def _eval_when(left: object, op: object, right: object) -> bool:
+    """Evaluate one when/alerts comparison. Ordering ops require numbers on both sides
+    (else NIError('when_type')); eq/ne compare scalars strictly (no coercion)."""
+    if op in _ORDER_OPS:
+        if not _is_finite_number(left) or not _is_finite_number(right):
+            raise NIError("when_type", f"{op} requires numbers on both sides")
+        lf, rf = float(left), float(right)  # type: ignore[arg-type]
+        if op == "lt":
+            return lf < rf
+        if op == "le":
+            return lf <= rf
+        if op == "gt":
+            return lf > rf
+        return lf >= rf
+    if op == "eq":
+        return left == right
+    return left != right
+
+
+def _is_finite_number(x: object) -> bool:
+    """True when ``x`` is a finite int/float (bool refused; NaN/inf refused)."""
+    if not isinstance(x, (int, float)) or isinstance(x, bool):
+        return False
+    return math.isfinite(float(x))
 
 
 def _interpolate_string(value: str, data: dict, *, item: Any) -> str:
@@ -1629,7 +2068,7 @@ def _is_due(item: dict, now: datetime) -> bool:
 # --- engine ---------------------------------------------------------------
 
 def tick(app, pass_budget_seconds: float = 20.0,
-         breaker_open=None) -> int:
+         breaker_open=None) -> dict:
     """Run due NI items — modeled line-for-line on feeds.tick.
 
     Bails when the vault is locked (sealed specs can't decrypt); owns a per-thread
@@ -1641,12 +2080,17 @@ def tick(app, pass_budget_seconds: float = 20.0,
     ``mark_checked``, so the next tick with a healthy gateway picks them up); http_json
     and internal.schedule items are unaffected (they don't touch the gateway).
     Doc §8 already promises this behavior.
+
+    Returns ``{"checked": int, "alerts": list, "broken": list}``: fired alerts (§12)
+    and this-tick broken transitions (§6) are collected here for the scheduler's
+    ``_auto_update_ni`` to post to the carrier row (§12 posts every alert + broken
+    notice through the NI carrier).
     """
     assert app is not None, "app required"
     assert pass_budget_seconds > 0, "pass budget must be positive"
     key = getattr(app.state, "master_key", None)
     if key is None:
-        return 0  # locked — sealed specs can't even decrypt
+        return {"checked": 0, "alerts": [], "broken": []}  # locked — nothing can decrypt
     from . import (
         gateway as gateway_mod,  # lazy: keep gateway off ni's import graph edges
     )
@@ -1655,6 +2099,8 @@ def tick(app, pass_budget_seconds: float = 20.0,
 
     cursor = app.state.db.cursor()
     checked = 0
+    fired: list[dict] = []
+    broken: list[dict] = []
     try:
         store = NIStore(cursor, key)
         secrets_store = SecretStore(cursor, key)
@@ -1662,26 +2108,41 @@ def tick(app, pass_budget_seconds: float = 20.0,
         started = time.monotonic()
         for item in store.due_items():  # bounded by _MAX_ITEMS_PER_PASS
             if time.monotonic() - started > pass_budget_seconds:
-                return checked  # the rest stay due; next tick continues
+                break  # the rest stay due; next tick continues
             if breaker_open is not None and breaker_open():
                 source_type = (item["spec"].get("source") or {}).get("type")
                 if source_type == "model":
                     continue  # skip; item stays due for the next tick
+            prior_state = item["state"]
             try:
-                run_item(store, item["id"], gateway_mod=gateway_mod,
-                         secrets_store=secrets_store, schedules_store=schedules_store)
+                result = run_item(store, item["id"], gateway_mod=gateway_mod,
+                                  secrets_store=secrets_store, schedules_store=schedules_store)
+                if isinstance(result, dict):
+                    fired.extend(result.get("alerts") or [])
             except NIError as exc:
                 store.mark_checked(item["id"], exc.kind[:_MAX_STATUS])
             except Exception:  # last-resort net: one bad item must not stop the pass
                 log.warning("ni item run failed with unexpected error: item=%s", item["id"])
                 store.mark_checked(item["id"], "internal")
+            _collect_broken_transition(store, item["id"], prior_state, item, broken)
             checked += 1
     finally:
         try:
             cursor.close()
         except Exception:
             pass
-    return checked
+    return {"checked": checked, "alerts": fired, "broken": broken}
+
+
+def _collect_broken_transition(store: NIStore, item_id: str, prior_state: str,
+                               prior_item: dict, broken: list[dict]) -> None:
+    """Append a §12 broken notice for an item that transitioned to broken THIS tick."""
+    assert store is not None and item_id and prior_item is not None, "args required"
+    after = store.get_item(item_id)
+    if after is None or after["state"] != "broken" or prior_state == "broken":
+        return
+    title = str(prior_item["spec"].get("title") or "")
+    broken.append({"item_id": item_id, "title": title, "broken": True})
 
 
 def run_item(store: NIStore, item_id: str, *, gateway_mod, secrets_store,
@@ -1703,11 +2164,17 @@ def run_item(store: NIStore, item_id: str, *, gateway_mod, secrets_store,
     if item is None:
         raise NIError("item_missing")
     started = time.monotonic()
+    history: dict = {}
     try:
+        # History (§11) is loaded ONCE per run, PRE-append: the binder + delta_prev see
+        # the last completed run's series so a delta compares against the previous
+        # snapshot, not this one. Inside the try so a corrupt slot routes through
+        # ``_handle_failure`` instead of leaking a raw exception past bookkeeping.
+        history = _load_history_series(store, item_id, item["spec"])
         spec = substitute_params(item["spec"])
         payload = _fetch_source(spec, item_id, gateway_mod, secrets_store,
                                 schedules_store, store)
-        outputs = run_pipeline(spec.get("pipeline") or [], payload)
+        outputs = run_pipeline(spec.get("pipeline") or [], payload, history=history)
     except NIError as exc:
         _handle_failure(store, item, exc, started)
         raise
@@ -1719,7 +2186,7 @@ def run_item(store: NIStore, item_id: str, *, gateway_mod, secrets_store,
     # prior code didn't wrap (a raw ValueError from a serialize step used to skip the
     # ni_runs row entirely — audit finding G).
     try:
-        return _finalize_run(store, item, spec, outputs, started)
+        return _finalize_run(store, item, spec, outputs, started, history=history)
     except NIError:
         raise
     except Exception as exc:
@@ -1729,8 +2196,16 @@ def run_item(store: NIStore, item_id: str, *, gateway_mod, secrets_store,
 
 
 def _finalize_run(store: NIStore, item: dict, spec: dict, outputs: dict,
-                  started: float) -> dict:
-    """Contract-check (if applicable), bind, write snapshots, record run + transition."""
+                  started: float, *, history: dict) -> dict:
+    """Contract-check (if applicable), bind, evaluate alerts, append history, write
+    snapshots, record run + transition.
+
+    Alerts (§12) and history append (§11) both live inside the "successful run" path:
+    a bind or contract failure short-circuits before either. An ``alert_bind`` or
+    ``history_type`` failure raises like a bind failure — bookkeeping records the
+    error and ``last_good`` keeps rendering.
+    """
+    assert isinstance(history, dict), "history required (pre-append)"
     contract = spec.get("contract")
     state = item["state"]
     contract_ok: bool | None = None
@@ -1749,12 +2224,14 @@ def _finalize_run(store: NIStore, item: dict, spec: dict, outputs: dict,
             _handle_failure(store, item, exc, started, contract_ok=False)
             raise exc
     try:
-        bound = bind_scene(spec["scene"], outputs)
+        bound = bind_scene(spec["scene"], outputs, history=history)
+        _enforce_bind_types(spec["scene"], bound)
+        _enforce_payload_size(bound)
+        fired = _process_alerts(store, item, outputs)
+        _append_history_series(store, item, outputs, history)
     except NIError as exc:
         _handle_failure(store, item, exc, started, contract_ok=contract_ok)
         raise
-    _enforce_bind_types(spec["scene"], bound)
-    _enforce_payload_size(bound)
     duration_ms = int((time.monotonic() - started) * 1000)
     store.write_snapshot(item["id"], "latest", bound, ok=True)
     store.write_snapshot(item["id"], "last_good", bound, ok=True)
@@ -1762,7 +2239,152 @@ def _finalize_run(store: NIStore, item: dict, spec: dict, outputs: dict,
     store.record_run(item["id"], "ok", duration_ms=duration_ms, error=None,
                      contract_ok=contract_ok)
     _transition_on_success(store, item, spec, outputs)
-    return {"status": "ok", "duration_ms": duration_ms}
+    return {"status": "ok", "duration_ms": duration_ms, "alerts": fired}
+
+
+def _load_history_series(store: NIStore, item_id: str, spec: dict | None = None) -> dict:
+    """Read the sealed ``history`` slot; empty dict when the slot is absent (first run).
+
+    Tracked series that have no points yet are seeded as empty lists so a spark bound
+    to ``history.<name>`` binds to ``[]`` on the very first run (C1) instead of dying
+    with ``extract_miss`` — an item charting its own history must be able to commission.
+    """
+    assert store is not None and item_id, "store + id required"
+    snap = store.read_snapshot(item_id, "history")
+    payload = (snap.get("payload") or {}) if snap is not None else {}
+    series = payload if isinstance(payload, dict) else {}
+    tracked = ((spec or {}).get("history") or {}).get("track") or {}
+    for name in tracked:
+        series.setdefault(name, [])
+    return series
+
+
+def _append_history_series(store: NIStore, item: dict, outputs: dict,
+                           prior: dict) -> None:
+    """Append one point per tracked series to the sealed ``history`` slot (§11).
+
+    The binder + delta_prev have ALREADY seen ``prior`` this run; the append writes the
+    new point OUT so the NEXT completed run sees this run's number as ``last``. Non-
+    numeric values raise NIError('history_type') — the run fails and last_good renders.
+    Trims each series to the clamped ``max_points`` (≤500, default 100).
+    """
+    assert store is not None and item is not None, "store + item required"
+    assert isinstance(prior, dict), "prior must be a dict"
+    hist_spec = item["spec"].get("history")
+    if not hist_spec:
+        return
+    tracked = hist_spec.get("track") or {}
+    raw_cap = hist_spec.get("max_points")
+    if not isinstance(raw_cap, int) or isinstance(raw_cap, bool):
+        raw_cap = _DEFAULT_HISTORY_POINTS
+    max_points = max(1, min(int(raw_cap), _MAX_HISTORY_POINTS))
+    now_iso = datetime.now(UTC).isoformat()
+    new_slot: dict = {}
+    for name, path in tracked.items():  # bounded by _MAX_HISTORY_SERIES
+        steps = parse_path(path)
+        try:
+            value = _resolve_path(outputs, steps)
+        except NIError as exc:
+            raise NIError("history_type", f"{name}: {exc.kind}") from None
+        if not _is_finite_number(value):
+            raise NIError("history_type", f"{name} not a finite number")
+        series = list(prior.get(name) or [])
+        series.append({"t": now_iso, "v": float(value)})
+        if len(series) > max_points:
+            series = series[-max_points:]
+        new_slot[name] = series
+    # Preserve unrelated series from prior (a spec that DROPS a series should not delete
+    # the old data mid-tick — the old series stays until the item is deleted).
+    for name, series in prior.items():
+        new_slot.setdefault(name, series)
+    store.write_snapshot(item["id"], "history", new_slot, ok=True)
+
+
+def _process_alerts(store: NIStore, item: dict, outputs: dict) -> list[dict]:
+    """§12 alerts: LIVE items only, edge-triggered, cooldown-aware.
+
+    A rule's per-name state ``{active, last_fired}`` lives in the sealed ``alert_state``
+    slot; on a false→true transition beyond cooldown we fire once, record ``last_fired``,
+    and stay silent until the condition has been false at least once. Unresolvable operands
+    (or numeric ops on non-numbers) raise NIError('alert_bind'), failing the run — alerts
+    are part of the contract surface.
+    """
+    assert store is not None and item is not None, "store + item required"
+    if item["state"] != "live":
+        return []
+    rules = item["spec"].get("alerts") or []
+    if not rules:
+        return []
+    prior_state = _load_alert_state(store, item["id"])
+    now = datetime.now(UTC)
+    title = str(item["spec"].get("title") or "")
+    new_rules: dict = {}
+    fired: list[dict] = []
+    for rule in rules:  # bounded by _MAX_ALERTS
+        name = rule["name"]
+        prior = prior_state.get(name) or {"active": False, "last_fired": None}
+        try:
+            left = _resolve_when_operand(rule.get("left"), outputs, item=None)
+            right = _resolve_when_operand(rule.get("right"), outputs, item=None)
+            truthy = _eval_when(left, rule.get("op"), right)
+        except NIError as exc:
+            raise NIError("alert_bind", f"{name}: {exc.kind}") from None
+        cooldown = _clamp_alert_cooldown(rule.get("cooldown_minutes"))
+        last_fired = None if prior.get("last_fired") is None else _to_utc(prior["last_fired"])
+        should_fire = (
+            bool(truthy) and not prior.get("active", False)
+            and (last_fired is None or (now - last_fired) >= timedelta(minutes=cooldown))
+        )
+        if should_fire:
+            message = _interpolate_alert_message(rule.get("message", ""), outputs, title)
+            fired.append({"item_id": item["id"], "title": title, "message": message})
+            last_fired = now
+        new_rules[name] = {
+            "active": bool(truthy),
+            "last_fired": None if last_fired is None else last_fired.isoformat(),
+        }
+    store.write_snapshot(item["id"], "alert_state", {"rules": new_rules}, ok=True)
+    return fired
+
+
+def _load_alert_state(store: NIStore, item_id: str) -> dict:
+    """Read the sealed ``alert_state`` slot; returns {name: {active, last_fired}}."""
+    assert store is not None and item_id, "store + id required"
+    snap = store.read_snapshot(item_id, "alert_state")
+    if snap is None:
+        return {}
+    body = snap.get("payload") or {}
+    rules = body.get("rules") if isinstance(body, dict) else None
+    return rules if isinstance(rules, dict) else {}
+
+
+def _clamp_alert_cooldown(raw: object) -> int:
+    """Clamp per §12: default 60 when unset/malformed, floor at _MIN_ALERT_COOLDOWN."""
+    if not isinstance(raw, int) or isinstance(raw, bool):
+        return _DEFAULT_ALERT_COOLDOWN
+    return max(_MIN_ALERT_COOLDOWN, int(raw))
+
+
+def _interpolate_alert_message(template: str, outputs: dict, title: str) -> str:
+    """{{title}} + {{path}} interpolation against outputs; cap at _MAX_ALERT_MESSAGE."""
+    assert isinstance(template, str), "template must be a string"
+    assert isinstance(outputs, dict) and isinstance(title, str), "outputs + title required"
+
+    def _one(m: re.Match) -> str:
+        token = m.group(1)
+        if token == "title":
+            return title
+        try:
+            steps = parse_path(token)
+            return str(_resolve_bind(steps, outputs, item=None))
+        except NIError as exc:
+            raise NIError("alert_bind", f"message {{{{ {token} }}}}: {exc.kind}") from None
+
+    out = _BIND_INTERP.sub(_one, template)
+    if len(out) > _MAX_ALERT_MESSAGE:
+        raise NIError("alert_bind",
+                      f"message length {len(out)} exceeds {_MAX_ALERT_MESSAGE}")
+    return out
 
 
 def _enforce_bind_types(scene: dict, bound: dict) -> None:
@@ -1793,8 +2415,42 @@ def _enforce_bind_types(scene: dict, bound: dict) -> None:
             # tripping the "compare with self" lint on the classic NaN pattern.
             if not math.isfinite(float(value)):
                 raise NIError("bind_type", f"{ntype}.value must be finite")
+        elif ntype == "spark":
+            _enforce_spark_points(node)
+        elif ntype == "gauge":
+            _enforce_gauge_bounds(node)
         pending.extend(node.get("children") or [])  # bounded by _MAX_SCENE_NODES
     raise NIError("bind_type", "bound tree exceeded traversal bound")
+
+
+def _enforce_spark_points(node: dict) -> None:
+    """Post-bind check for §5 spark: points list ≤500 of numbers or {t,v} with numeric v."""
+    assert isinstance(node, dict), "node must be a dict"
+    points = node.get("points")
+    if not isinstance(points, list):
+        raise NIError("bind_type", "spark.points must resolve to a list")
+    if len(points) > _MAX_SPARK_POINTS:
+        raise NIError("bind_type",
+                      f"spark.points has {len(points)} points (max {_MAX_SPARK_POINTS})")
+    for p in points:  # bounded by _MAX_SPARK_POINTS
+        if isinstance(p, (int, float)) and not isinstance(p, bool):
+            continue
+        if isinstance(p, dict):
+            v = p.get("v")
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                continue
+        raise NIError("bind_type", "spark.points needs numbers or {t,v} with numeric v")
+
+
+def _enforce_gauge_bounds(node: dict) -> None:
+    """Post-bind check for §5 gauge: value/min/max are finite numbers, max > min."""
+    assert isinstance(node, dict), "node must be a dict"
+    for key in ("value", "min", "max"):
+        v = node.get(key)
+        if not isinstance(v, (int, float)) or isinstance(v, bool) or not math.isfinite(float(v)):
+            raise NIError("bind_type", f"gauge.{key} must be a finite number")
+    if float(node["max"]) <= float(node["min"]):
+        raise NIError("bind_type", "gauge.max must be > min after binding")
 
 
 def _enforce_payload_size(bound: dict) -> None:
