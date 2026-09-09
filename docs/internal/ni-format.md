@@ -35,7 +35,9 @@ Follows the house sealed-body + plaintext-operational-columns convention
   (streak marker; §6), `position INTEGER`, `spec_rev INTEGER`,
   `created_at TIMESTAMP`, `updated_at TIMESTAMP`; sealed body (AAD
   `ni_item:<id>`): the spec (§2).
-- `ni_snapshots` — `item_id TEXT`, `slot TEXT` (`latest` | `last_good` | `preview`),
+- `ni_snapshots` — `item_id TEXT`, `slot TEXT` (`latest` | `last_good` | `preview`;
+  v2 adds `history` (§11) and `alert_state` (§12) — the slot set is app-level, no
+  schema change),
   `nonce BLOB`, `ciphertext BLOB` (AAD `ni_snapshot:<item_id>:<slot>`), `ok BOOLEAN`,
   `created_at TIMESTAMP`, `PRIMARY KEY (item_id, slot)`. Sealed body: the bound
   payload (§4.3) — the data, not the scene.
@@ -78,6 +80,9 @@ No foreign keys; `NIStore.delete` cascades in code (feeds precedent).
   precedent).
 - Interval floor: `interval_minutes >= 1`, clamped (never an error). One-shot items
   do not exist in v1; `enabled=false` is the pause.
+- v2 optional keys: `"history"` (§11) and `"alerts"` (§12). A v1 app's validator
+  rejects specs carrying them (closed-key law) — that is the intended forward
+  refusal.
 
 ## 3. Sources (v1: three types, closed set)
 
@@ -167,6 +172,17 @@ Closed function set v1: `round(field, digits)`, `scale(field, factor)`,
 keys), `sort_by(field, key?, dir)`, `top_n(field, n<=50)`. All pure; type
 mismatches are stage failures, never coercion guesses.
 
+Added in v2 (same closed-set discipline):
+- Aggregates over a list-of-objects field: `sum(field, key, as)`, `avg(field,
+  key, as)`, `min(field, key, as)`, `max(field, key, as)`, `count(field, as)` —
+  each writes a NEW numeric output named `as` (the list is untouched; `as` must
+  not collide with an existing output; numeric key values required, mismatch =
+  stage failure; empty list ⇒ count 0, others = stage failure `empty_aggregate`).
+- `delta_prev(field, series, as)` — current numeric `field` minus the LAST point
+  of history series `series` (§11); writes `{value, direction: "up"|"down"|
+  "flat"}` to `as`. When the series is empty (first run) it writes
+  `{value: 0, direction: "flat"}` — never a failure, so commissioning passes.
+
 ### 4.3 Bind + render-validate (implicit, always last)
 
 Binding walks the scene, resolves every `{"$bind": path}` and `{{path}}`
@@ -197,15 +213,41 @@ Content (each `value`-like prop accepts a JSON literal or `{"$bind": "<path>"}`)
    "template": <node>}` — inside `template`, paths beginning `item.` resolve
    against the current list element.
 
+Added in v2:
+- `{"type": "spark", "points": {"$bind": "history.<name>"}, "kind": "line"|"bars",
+   "tone": …}` — a sparkline over a history series (§11) or any bound list of
+   numbers / `{t, v}` points; ≤ 500 points (excess = bind failure); rendered as
+   hand-rolled inline SVG (polyline / rects), stroke/fill from the tone token,
+   fixed viewBox, width 100%, no axes. Non-numeric point = bind failure.
+- `{"type": "gauge", "value": …, "min": 0, "max": …, "tone": …, "label": "…"}` —
+  an arc gauge; `max > min` required, value clamped visually to [min, max]
+  (clamping is presentation; the raw value still binds for conditions).
+
+Conditions (v2, **bind-time — the client never sees them**): any CONTENT node may
+carry `"when": [rule…]` (≤ 5 rules):
+
+```json
+{"when": [{"left": {"$bind": "delta.value"}, "op": "lt", "right": 0,
+           "set": {"tone": "danger"}}]}
+```
+- `left`/`right`: `{"$bind": path}` or a JSON scalar. `op` ∈ `lt|le|gt|ge|eq|ne`
+  (ordering ops require numbers on both sides — mismatch = bind failure `when_type`;
+  eq/ne compare scalars strictly, no coercion).
+- `set`: `{"tone": <tone enum>}` and/or `{"hidden": true}`. Rules evaluate in
+  order at BIND time; later tone wins; `hidden` drops the node from the bound
+  payload entirely. The stored/bound payload carries only the RESULT — `when`
+  never survives binding, and the client validator continues to REJECT it in a
+  bound payload. Determinism is preserved: conditions are pure functions of the
+  run's data.
+
 Rules:
 - **Text is text.** Bound strings render as plain text — no markdown, no HTML, no
   links. (Injection point P3: a lying string can render, but it cannot become UI.)
 - Tones map to design tokens only; no raw colors anywhere in the grammar.
 - Caps: ≤ 100 nodes after repeat expansion, depth ≤ 8, text ≤ 2000 chars, repeat
   `max` ≤ 50. Enforced at bind time and again by the renderer.
-- Reserved for later phases (validators must REJECT in v1, so old apps refuse new
-  scenes rather than mis-render them): `spark`, `gauge`, `image`, `when`
-  (conditions), `on_tap` (behaviors).
+- Reserved for later phases (validators must REJECT, so old apps refuse new
+  scenes rather than mis-render them): `image`, `on_tap` (behaviors).
 
 ## 6. Lifecycle state machine (fully enumerated)
 
@@ -349,3 +391,70 @@ conversation before the card is parked. Approving the card is what moves
   `urlparse().hostname`). Secrets never travel through chat or tool args.
 - All handlers 423 → the standard locked contract; literal paths before `{id}`
   (schedule_routes ordering comment).
+
+## 11. History (v2)
+
+Optional spec field:
+
+```json
+{"history": {"track": {"priceLog": "price"}, "max_points": 100}}
+```
+
+- `track`: name → pipeline-output path (§4.1 grammar). ≤ 4 series; values must be
+  numeric at run time (non-numeric = run failure `history_type`). Series names
+  share the output namespace rules (no `item`, no collisions with pipeline
+  outputs).
+- After every SUCCESSFUL run (commissioning included), the engine appends
+  `{"t": "<iso8601 UTC>", "v": <number>}` per tracked series and trims to
+  `max_points` (≤ 500, default 100), storing all series in the sealed
+  `ni_snapshots` slot `history` (AAD `ni_snapshot:<id>:history`). Failed runs
+  append nothing.
+- The binder exposes each series as `history.<name>` (a list of `{t, v}`) to
+  `$bind`, `spark.points`, and `delta_prev`. `history.*` paths are read-only
+  inputs — extract/transform outputs cannot be named `history`. A series' `name`
+  also must not collide with any pipeline output (the tracked PATH points at an
+  output; the NAME is a separate namespace entry).
+- Tracked series with no points yet are **seeded as empty lists** for the binder,
+  so a spark over `history.<name>` binds to `[]` on the first run (C1) and
+  renders as an empty placeholder — an item charting its own history must be
+  able to commission. `delta_prev` likewise never fails on an empty series (§4.2).
+- Deleting the item deletes the slot (cascade); a source-change rewind KEEPS
+  history (same subject, new plumbing) unless the user deletes the item.
+- Renaming or removing a tracked series drops the old series on the next successful
+  append — retention guarantees the SAME names across rewinds, not renamed ones.
+
+## 12. Alerts (v2)
+
+Optional spec field — the same closed condition grammar as §5 `when`, promoted:
+
+```json
+{"alerts": [{"name": "price-drop", "left": {"$bind": "delta.value"}, "op": "lt",
+             "right": 0, "message": "{{title}}: price fell to {{price}}",
+             "cooldown_minutes": 60}]}
+```
+
+- ≤ 5 rules; `name` = short slug (charset `[a-z0-9-]{1,40}`, unique per item);
+  `left`/`op`/`right` exactly as §5 conditions; `message` is a template
+  interpolated against the run's outputs plus `{{title}}` (plain text, ≤ 500
+  chars bound); `cooldown_minutes` clamped to ≥ 5, default 60.
+- Evaluated by the engine after every successful bind, on LIVE items only.
+  **Edge-triggered**: a rule fires only on the false→true transition of its
+  condition, and never again until it has been false at least once — and never
+  within its cooldown. Per-rule state (`active: bool`, `last_fired: ts`) lives in
+  the sealed `alert_state` snapshot slot; plaintext columns carry nothing about
+  alert rules or their names.
+- A fired alert (and every `broken` transition) posts to the **NI carrier row**:
+  a third reserved schedule id (`_CARRIER_IDS` pattern, id `neural-interface`,
+  title "Neural Interface") via `schedules.record_run`-style writes — riding the
+  existing unseen badge, the chat `### Scheduled Item ###` injection, and the
+  /info archive with zero new notification plumbing. Alert body = the bound
+  `message`; broken body = "<title> is broken — open Neural Interface, or ask me
+  to fix it." Host-free, as always.
+- The evaluation is deterministic (pure function of run outputs + stored state);
+  a rule whose binds cannot resolve marks the RUN failed (`alert_bind`), exactly
+  like a scene bind failure — alerts are part of the contract surface, not
+  best-effort.
+- Renaming an alert rule (changing its `name` slug) resets its per-rule
+  `alert_state` — the new name has no prior `active`/`last_fired` record, so a rule
+  whose condition is already true at the next run may fire immediately. Accepted
+  behavior: the operator saw the rename in the approved update card.

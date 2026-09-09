@@ -366,6 +366,36 @@ def test_run_route_refuses_draft_and_broken_with_409(client: TestClient) -> None
     assert r2.status_code == 409
 
 
+def test_manual_run_route_posts_alerts_and_broken_to_carrier(
+    client: TestClient, monkeypatch,
+) -> None:
+    """M1b (audit 2026-09-09): POST /api/ni/items/{id}/run posts fired alerts +
+    broken transition notices to the NI carrier row exactly like _auto_update_ni.
+    """
+    from smartbrain_3000 import scheduler as sched
+
+    _unlock(client)
+    iid = _create_via_tool(client)
+    client.app.state.ni.commission(iid)  # /run refuses draft (K6) — advance out of it
+
+    def fake_run_item(store, item_id, *, gateway_mod, secrets_store,
+                      schedules_store=None):
+        store.set_state(item_id, "broken")  # forces broken-transition posting
+        return {"status": "ok", "duration_ms": 1,
+                "alerts": [{"item_id": item_id, "title": "Watch",
+                            "message": "manual fired"}]}
+
+    monkeypatch.setattr(ni, "run_item", fake_run_item)
+    r = client.post(f"/api/ni/items/{iid}/run")
+    assert r.status_code == 200, r.text
+    store = sched.ScheduleStore(client.app.state.dbx,
+                                client.app.state.master_key)
+    messages = [row["message"] for row in store.recent_runs()
+                if row["schedule_title"] == "Neural Interface"]
+    assert "manual fired" in messages
+    assert any("is broken" in m for m in messages)
+
+
 def test_fetch_http_json_refuses_redirect_only_when_headers_attached(monkeypatch) -> None:
     """E: NI's http_json fetch opts out of redirects WHEN and ONLY WHEN it attaches any
     header (secret or literal) — a hostile server could otherwise 302 to itself and

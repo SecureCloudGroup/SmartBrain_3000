@@ -64,7 +64,12 @@ _VAULT_FEED_TITLE = "Vault updates"
 # fires), hidden from list/get, never deletable.
 _SELFREVIEW_FEED_ID = "self-review"
 _SELFREVIEW_FEED_TITLE = "Self-review"
-_CARRIER_IDS = (_VAULT_FEED_ID, _SELFREVIEW_FEED_ID)  # every reserved non-user schedule
+# Third reserved carrier (Neural Interface): NI alerts + broken-transition notices ride the
+# same feed + badge machinery as vault-updates / self-review. Same guarantees: disabled
+# (never fires), hidden from list/get, never deletable (§12).
+_NI_FEED_ID = "neural-interface"
+_NI_FEED_TITLE = "Neural Interface"
+_CARRIER_IDS = (_VAULT_FEED_ID, _SELFREVIEW_FEED_ID, _NI_FEED_ID)  # every reserved non-user schedule
 # Belt-and-suspenders over netguard's per-fetch deadline: even several slow-but-under-deadline hosts
 # must not consume the whole tick and starve due prompts. This overall wall-clock budget on the
 # vault pass is checked BETWEEN the (≤2) vaults; remaining vaults are abandoned for this tick (their
@@ -152,10 +157,12 @@ class ScheduleStore:
 
     def list_schedules(self) -> list[dict]:
         """Return all schedules (decrypted), soonest first. The reserved carriers (vault updates,
-        self-review) are never user schedules, so they are filtered out of the Schedules page list."""
+        self-review, neural-interface) are never user schedules, so they are filtered out
+        of the Schedules page list."""
+        placeholders = ",".join("?" for _ in _CARRIER_IDS)
         rows = self._conn.execute(
             "SELECT id, nonce, ciphertext, enabled, interval_minutes, next_run, last_run "
-            "FROM schedules WHERE id NOT IN (?, ?) ORDER BY next_run ASC LIMIT ?;",
+            f"FROM schedules WHERE id NOT IN ({placeholders}) ORDER BY next_run ASC LIMIT ?;",
             [*_CARRIER_IDS, _LIST_LIMIT],
         ).fetchall()
         assert isinstance(rows, list), "fetchall must return a list"
@@ -271,6 +278,17 @@ class ScheduleStore:
         assert status, "run status required"
         self._ensure_carrier(_SELFREVIEW_FEED_ID, _SELFREVIEW_FEED_TITLE, "(self-review carrier)")
         return self.record_run(_SELFREVIEW_FEED_ID, status, message=message)
+
+    def record_ni_run(self, status: str, message: str) -> str:
+        """Record a Neural Interface alert or broken-transition notice (§12).
+
+        Same carrier pattern as vault-updates / self-review: the notice rides the feed +
+        badge machinery so a fired alert or broken transition surfaces in recent_runs and
+        the unseen count without new notification plumbing.
+        """
+        assert status, "run status required"
+        self._ensure_carrier(_NI_FEED_ID, _NI_FEED_TITLE, "(Neural Interface carrier)")
+        return self.record_run(_NI_FEED_ID, status, message=message)
 
     def _ensure_carrier(self, sid: str, title: str, note: str) -> None:
         """Lazily create a reserved carrier schedule once (idempotent). Disabled so due_schedules
@@ -633,12 +651,59 @@ def _auto_update_ni(app) -> None:
     Threads the gateway breaker check down (I): model-source items skip while the breaker
     is open, mirroring the schedule/reindex/summarize passes. http_json and
     internal.schedule sources are unaffected — they don't touch the gateway.
+
+    Fired alerts + broken-transition notices returned by ``ni.tick`` (§12) are posted to
+    the NI carrier row inside a bounded try/except — a posting failure never fails the
+    tick (bookkeeping mirrors the vault/self-review carrier pattern).
     """
     try:
-        ni.tick(app, pass_budget_seconds=_MAX_NI_PASS_SECONDS,
-                breaker_open=_breaker_open)
+        result = ni.tick(app, pass_budget_seconds=_MAX_NI_PASS_SECONDS,
+                         breaker_open=_breaker_open)
     except Exception as exc:  # must never kill the schedule tick
         log.warning("ni refresh pass failed: %s", exc)
+        return
+    if not isinstance(result, dict):
+        return
+    alerts = result.get("alerts") or []
+    broken = result.get("broken") or []
+    if not alerts and not broken:
+        return
+    key = getattr(app.state, "master_key", None)
+    if key is None:
+        return
+    cursor = app.state.db.cursor()
+    try:
+        post_ni_carrier_notices(ScheduleStore(cursor, key), alerts, broken)
+    except Exception as exc:  # posting must never kill the schedule tick either
+        log.warning("ni carrier posting failed: %s", exc)
+    finally:
+        _close_cursor(cursor)
+
+
+def post_ni_carrier_notices(schedules_store, alerts: list, broken: list) -> None:
+    """Write each fired alert + broken transition notice to the NI carrier (§12).
+
+    Called from ``_auto_update_ni`` (engine tick) and ``ni_routes.run_item`` (manual
+    /run) — both need the same carrier surface (M1b, audit 2026-09-09). LOW#4:
+    per-notice try/except so one failed ``record_ni_run`` never drops the rest;
+    posting is best-effort surfacing, not a run gate.
+    """
+    assert schedules_store is not None, "schedules store required"
+    assert isinstance(alerts, list) and isinstance(broken, list), "alerts/broken must be lists"
+    for alert in alerts:  # bounded by upstream tick's per-pass item + rule limits
+        try:
+            schedules_store.record_ni_run("complete", str(alert.get("message", "")))
+        except Exception as exc:  # one bad record must not drop the rest
+            log.warning("ni carrier alert post failed: %s", exc)
+    for notice in broken:  # bounded by the same
+        try:
+            title = str(notice.get("title", "an item"))
+            schedules_store.record_ni_run(
+                "broken",
+                f"{title} is broken — open Neural Interface, or ask me to fix it.",
+            )
+        except Exception as exc:
+            log.warning("ni carrier broken post failed: %s", exc)
 
 
 def eager_reindex(cursor, key: bytes) -> None:

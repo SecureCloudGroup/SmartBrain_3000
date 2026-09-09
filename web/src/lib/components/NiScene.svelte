@@ -15,6 +15,7 @@
     type SceneNode,
     type Tone,
   } from "$lib/ni/scene";
+  import { sparkPath, sparkBars, gaugeArc } from "$lib/ni/sparkline";
 
   let { node }: { node: SceneNode } = $props();
 
@@ -61,6 +62,27 @@
     console.assert(typeof value === "number", "barPct: value is number");
     console.assert(typeof max === "number" && max > 0, "barPct: max > 0");
     return Math.min(100, Math.max(0, (value / max) * 100));
+  }
+
+  // Spark/gauge use the same tone→token map as everything else. A `default` or
+  // absent tone maps to accent (mirrors the bar's "default paints as accent"
+  // rule) so a chartable node always has a visible stroke/fill.
+  const SPARK_W = 200;
+  const SPARK_H = 30;
+  const GAUGE_R = 40;
+  const GAUGE_TRACK_D = gaugeArc(1, 0, 1, GAUGE_R).d;
+
+  function sparkColor(tone: Tone | undefined): string {
+    console.assert(tone === undefined || tone in TONE_VAR, "sparkColor: tone in enum");
+    console.assert(typeof TONE_VAR === "object", "sparkColor: TONE_VAR present");
+    const t: Tone = tone && tone !== "default" ? tone : "accent";
+    return TONE_VAR[t];
+  }
+
+  function clampValue(v: number, lo: number, hi: number): number {
+    console.assert(typeof v === "number", "clampValue: v is number");
+    console.assert(hi > lo, "clampValue: hi > lo");
+    return Math.min(hi, Math.max(lo, v));
   }
 </script>
 
@@ -118,6 +140,69 @@
   {:else}
     <span class="muted" title={`unknown icon: ${node.name}`}>·</span>
   {/if}
+{:else if node.type === "spark"}
+  {#if node.points.length === 0}
+    <span class="muted ni-spark-empty" role="img" aria-label="trend">—</span>
+  {:else}
+    <svg
+      class="ni-spark"
+      viewBox={`0 0 ${SPARK_W} ${SPARK_H}`}
+      preserveAspectRatio="none"
+      role="img"
+      aria-label="trend"
+      style={`color: ${sparkColor(node.tone)}`}
+    >
+      {#if node.kind === "line"}
+        <polyline
+          points={sparkPath(node.points, SPARK_W, SPARK_H)}
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.5"
+          stroke-linejoin="round"
+          stroke-linecap="round"
+          vector-effect="non-scaling-stroke"
+        />
+      {:else}
+        {#each sparkBars(node.points, SPARK_W, SPARK_H) as r, i (i)}
+          <rect x={r.x} y={r.y} width={r.w} height={r.h} fill="currentColor" />
+        {/each}
+      {/if}
+    </svg>
+  {/if}
+{:else if node.type === "gauge"}
+  <div class="ni-gauge">
+    <svg
+      class="ni-gauge-svg"
+      viewBox="-48 -48 96 72"
+      role="meter"
+      aria-label={node.label ?? "gauge"}
+      aria-valuenow={clampValue(node.value, node.min, node.max)}
+      aria-valuemin={node.min}
+      aria-valuemax={node.max}
+      style={`color: ${sparkColor(node.tone)}`}
+    >
+      <path
+        d={GAUGE_TRACK_D}
+        fill="none"
+        stroke="var(--accent-tint)"
+        stroke-width="6"
+        stroke-linecap="round"
+      />
+      {#if gaugeArc(node.value, node.min, node.max, GAUGE_R).pct > 0}
+        <path
+          d={gaugeArc(node.value, node.min, node.max, GAUGE_R).d}
+          fill="none"
+          stroke="currentColor"
+          stroke-width="6"
+          stroke-linecap="round"
+        />
+      {/if}
+    </svg>
+    <div class="ni-gauge-value">{formatNumber(node.value, "plain")}</div>
+    {#if node.label}
+      <div class="ni-gauge-label">{node.label}</div>
+    {/if}
+  </div>
 {/if}
 
 <style>
@@ -143,5 +228,40 @@
     border-radius: var(--r-full);
     /* Motion law (app.css §motion): transitions are transform/opacity only. A width
        tween would violate that and re-layout every frame — the bar just snaps. */
+  }
+  /* Spark + gauge sit inline like any other content node — no motion (charter),
+     tokens only for color. Non-uniform SVG scaling is fine for fills; the line's
+     `vector-effect: non-scaling-stroke` keeps stroke width visually consistent. */
+  .ni-spark {
+    display: block;
+    width: 100%;
+    height: 30px;
+  }
+  .ni-spark-empty {
+    font-size: var(--f-label);
+    color: var(--muted);
+  }
+  .ni-gauge {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--s-1);
+  }
+  .ni-gauge-svg {
+    /* viewBox is 96x72 — keep the 4:3 ratio so the arc's rounded caps
+       (y up to +20 + stroke) are never clipped. */
+    width: 120px;
+    height: 90px;
+  }
+  .ni-gauge-value {
+    font-size: var(--f-h2);
+    font-variant-numeric: tabular-nums;
+    color: var(--text);
+    line-height: var(--lh-ui);
+  }
+  .ni-gauge-label {
+    font-size: var(--f-label);
+    color: var(--muted);
+    line-height: var(--lh-ui);
   }
 </style>
