@@ -29,6 +29,8 @@ export function runStatusLabel(status: string): string {
   if (status === "awaiting_approval") return "Needs approval";
   if (status === "error") return "Failed";
   if (status === "complete") return "Done";
+  if (status === "broken") return "Needs attention";
+  if (status === "repaired") return "Repaired itself";
   return status;
 }
 

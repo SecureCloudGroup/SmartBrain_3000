@@ -11,13 +11,14 @@ from __future__ import annotations
 
 import logging
 import time
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from . import gateway, ni, tools
 from .account import _require_desktop_local
-from .scheduler import ScheduleStore, post_ni_carrier_notices
+from .scheduler import _NI_FEED_ID, ScheduleStore, post_ni_carrier_notices
 
 log = logging.getLogger("smartbrain.ni.routes")
 
@@ -119,6 +120,58 @@ def board(request: Request) -> dict:
 # Literal paths would live here if any existed — /api/ni/items/... has no literal
 # children (validate/run/credential are all under /{id}/...), so the ordering
 # comment is here for parity with schedule_routes even though nothing shadows it.
+# (/api/ni/notices below is literal too, but lives outside /items/ entirely.)
+
+
+_MAX_NOTICES = 20  # §17: limit clamp for the launcher's notice poll
+_DEFAULT_NOTICES = 10
+_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
+# status -> kind (§17). post_ni_carrier_notices writes "complete" for fired
+# alerts, "broken" for broken transitions, "repaired" for §14 self-repairs;
+# anything unexpected reads as the mildest kind rather than being dropped.
+_NOTICE_KIND_BY_STATUS = {"broken": "broken", "repaired": "repaired"}
+
+
+def _notice_id(ran_at: str) -> int:
+    """Stable, monotonic notice id: the run's UTC timestamp in microseconds.
+
+    schedule_runs primary keys are UUIDs (record_run), which cannot serve the
+    launcher's highest-seen-id dedupe. ran_at is UTC (the DB session is pinned —
+    see db.open_db), immutable, and microsecond-granular, so the derived integer
+    is stable across polls and ordered by insertion. Two notices landing in the
+    same microsecond would share an id — accepted: autocommit inserts are
+    microseconds apart in practice, and a coalesced toast still shows on the board.
+    """
+    assert ran_at, "ran_at required"
+    stamp = datetime.fromisoformat(str(ran_at))
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=UTC)
+    return (stamp - _EPOCH) // timedelta(microseconds=1)
+
+
+@router.get("/api/ni/notices")
+def list_notices(request: Request, limit: int = _DEFAULT_NOTICES) -> list[dict]:
+    """Newest NI carrier notices for the launcher's tray notifications (§17).
+
+    Desktop-local (the launcher calls 127.0.0.1 directly; a bridged phone must not
+    pull notice bodies) AND unlocked-only — a locked vault answers 423, which the
+    launcher treats as "skip", so sealed content never crosses the unlock boundary.
+    Bodies are the already-sanitized carrier messages (§12 H1 guard upstream).
+    """
+    _require_desktop_local(request)
+    _store(request)  # 423 while locked — the notices surface simply goes dark
+    state = request.app.state
+    schedules = getattr(state, "schedules", None) or ScheduleStore(state.dbx, state.master_key)
+    runs = schedules.list_runs(_NI_FEED_ID, limit=min(max(int(limit), 1), _MAX_NOTICES))
+    return [
+        {
+            "id": _notice_id(run["ran_at"]),
+            "kind": _NOTICE_KIND_BY_STATUS.get(run["status"], "alert"),
+            "body": run["message"],
+            "ts": run["ran_at"],
+        }
+        for run in runs  # list_runs is newest-first and bounded by the clamp above
+    ]
 
 
 @router.get("/api/ni/items/{item_id}")
@@ -216,8 +269,11 @@ def run_item(request: Request, item_id: str) -> dict:
     store.clear_last_checked(item_id)
     started = time.monotonic()
     try:
+        # kb rides along so internal.kb items work on manual refresh too, not
+        # just engine ticks (None when locked mid-request — run_item refuses).
         result = ni.run_item(store, item_id, gateway_mod=gateway,
-                             secrets_store=secrets, schedules_store=schedules)
+                             secrets_store=secrets, schedules_store=schedules,
+                             kb=getattr(state, "kb", None))
     except ni.NIError as exc:
         store.mark_checked(item_id, exc.kind[:200])
         _post_carrier_after_run(schedules, store, item_id, prior_state, item,

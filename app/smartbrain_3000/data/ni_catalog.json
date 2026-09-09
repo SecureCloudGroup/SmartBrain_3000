@@ -1,0 +1,115 @@
+{
+  "version": 1,
+  "sources": [
+    {
+      "id": "open-meteo-forecast",
+      "title": "Open-Meteo current weather + forecast",
+      "host": "api.open-meteo.com",
+      "url_template": "https://api.open-meteo.com/v1/forecast?latitude={{param:latitude}}&longitude={{param:longitude}}&current=temperature_2m,wind_speed_10m",
+      "docs_url": "https://open-meteo.com/en/docs",
+      "auth": "none",
+      "category": "weather",
+      "notes": "Keyless JSON weather; free non-commercial use. Latitude/longitude are decimal degrees; add other 'current' or 'hourly' fields as the docs list."
+    },
+    {
+      "id": "wttr-in-json",
+      "title": "wttr.in weather (JSON)",
+      "host": "wttr.in",
+      "url_template": "https://wttr.in/{{param:location}}?format=j1",
+      "docs_url": "https://github.com/chubin/wttr.in",
+      "auth": "none",
+      "category": "weather",
+      "notes": "Keyless plain-language weather; format=j1 returns JSON. Community-run and occasionally rate-limits or blocks on burst; keep the cadence gentle."
+    },
+    {
+      "id": "usgs-earthquakes-hour",
+      "title": "USGS earthquakes (past hour, all magnitudes)",
+      "host": "earthquake.usgs.gov",
+      "url_template": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_hour.geojson",
+      "docs_url": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/geojson.php",
+      "auth": "none",
+      "category": "misc",
+      "notes": "Keyless GeoJSON feed refreshed every minute; the response is a FeatureCollection with each quake under features[].properties (mag, place, time)."
+    },
+    {
+      "id": "usgs-earthquakes-day",
+      "title": "USGS earthquakes (past day, magnitude 2.5+)",
+      "host": "earthquake.usgs.gov",
+      "url_template": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_day.geojson",
+      "docs_url": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/geojson.php",
+      "auth": "none",
+      "category": "misc",
+      "notes": "Keyless GeoJSON feed; fewer quakes than the all-hour feed and a longer window — a better fit for a once-per-hour dashboard tile."
+    },
+    {
+      "id": "hn-top-stories",
+      "title": "Hacker News top stories (ids)",
+      "host": "hacker-news.firebaseio.com",
+      "url_template": "https://hacker-news.firebaseio.com/v0/topstories.json",
+      "docs_url": "https://github.com/HackerNews/API",
+      "auth": "none",
+      "category": "news",
+      "notes": "Keyless JSON array of up to 500 story ids, newest-ranked first. Fetching the story titles themselves is a per-id lookup via hn-item."
+    },
+    {
+      "id": "hn-item",
+      "title": "Hacker News item by id",
+      "host": "hacker-news.firebaseio.com",
+      "url_template": "https://hacker-news.firebaseio.com/v0/item/{{param:id}}.json",
+      "docs_url": "https://github.com/HackerNews/API",
+      "auth": "none",
+      "category": "news",
+      "notes": "Keyless JSON for one story/comment (title, url, score, by, time). Pair with hn-top-stories to render the top N titles."
+    },
+    {
+      "id": "coingecko-simple-price",
+      "title": "CoinGecko simple price",
+      "host": "api.coingecko.com",
+      "url_template": "https://api.coingecko.com/api/v3/simple/price?ids={{param:coin_id}}&vs_currencies={{param:vs_currency}}",
+      "docs_url": "https://www.coingecko.com/api/documentation",
+      "auth": "none",
+      "category": "crypto",
+      "notes": "Keyless public tier is rate-limited (~10-30 req/min) and returns 429 when tripped. coin_id is CoinGecko's slug (e.g. 'bitcoin'), vs_currency is a currency code (e.g. 'usd')."
+    },
+    {
+      "id": "coingecko-trending",
+      "title": "CoinGecko trending coins (24h)",
+      "host": "api.coingecko.com",
+      "url_template": "https://api.coingecko.com/api/v3/search/trending",
+      "docs_url": "https://www.coingecko.com/api/documentation",
+      "auth": "none",
+      "category": "crypto",
+      "notes": "Keyless list of the top-searched coins over the last 24 hours; same rate-limit caveat as the price endpoint (public tier, ~10-30 req/min)."
+    },
+    {
+      "id": "frankfurter-latest",
+      "title": "Frankfurter latest FX rates (ECB)",
+      "host": "api.frankfurter.app",
+      "url_template": "https://api.frankfurter.app/latest?base={{param:base}}",
+      "docs_url": "https://www.frankfurter.app/docs/",
+      "auth": "none",
+      "category": "finance",
+      "notes": "Keyless daily FX rates published by the ECB (weekdays only, no weekend/holiday update). base is a 3-letter ISO code (e.g. 'EUR', 'USD')."
+    },
+    {
+      "id": "frankfurter-currencies",
+      "title": "Frankfurter currency list",
+      "host": "api.frankfurter.app",
+      "url_template": "https://api.frankfurter.app/currencies",
+      "docs_url": "https://www.frankfurter.app/docs/",
+      "auth": "none",
+      "category": "finance",
+      "notes": "Keyless map of every supported currency code to its display name. Useful for a params-picker; not for a live tile."
+    },
+    {
+      "id": "mempool-blocks-tip-height",
+      "title": "mempool.space Bitcoin chain tip height",
+      "host": "mempool.space",
+      "url_template": "https://mempool.space/api/blocks/tip/height",
+      "docs_url": "https://mempool.space/docs/api/rest",
+      "auth": "none",
+      "category": "crypto",
+      "notes": "Keyless single integer (the current block height). Public instance is community-run and best-effort; a gentle cadence is expected."
+    }
+  ]
+}

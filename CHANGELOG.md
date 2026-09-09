@@ -47,6 +47,15 @@ to know when a release changes behavior.
   only if the next run passes the card's validated data contract, auto-reverted otherwise,
   and a "repaired itself" notice tells you it happened. One attempt per breakage, fully
   recorded in the card's run history.
+- **Neural Interface (phase 2c): pages, your library, vetted sources, and tray alerts.**
+  Cards can now watch ordinary **web pages** (readable text is extracted in a locked-down
+  helper process — hostile HTML never gets parsed inside the app) and your own
+  **knowledge library** (zero network — "a card of my notes about X"). The assistant now
+  suggests data sources from a small **vetted catalog** of genuinely free, keyless public
+  APIs first — and always tells you whether a suggestion came from the catalog or from
+  live web search; the choice stays yours. And on Mac/Linux the desktop app shows **system
+  notifications** for Neural Interface alerts, broken cards, and self-repairs — only while
+  the vault is unlocked, never replaying old notices after a restart.
 
 ## [0.9.38] - 2026-09-07
 
