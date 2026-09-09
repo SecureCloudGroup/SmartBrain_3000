@@ -18,8 +18,9 @@
 
   let { node }: { node: SceneNode } = $props();
 
-  // Validate every subtree — bounded by the spec's 100-node/depth-8 caps, cheap in
-  // practice. A single bad node degrades to a quiet placeholder, never a thrown error.
+  // Validate the whole subtree — bounded by the spec's 100-node/depth-8 caps, cheap
+  // in practice. Any invalid node refuses the WHOLE card to a quiet "unrenderable"
+  // placeholder (never a thrown error) — we don't try to render around a bad node.
   // (validateBoundScene itself refuses a null/non-object root, so top-level pre-checks
   // are redundant — Svelte 5 would flag reading a $props() rune at script-top anyway.)
   const err = $derived(validateBoundScene(node));
@@ -99,7 +100,8 @@
   <div
     class="ni-bar"
     role="progressbar"
-    aria-valuenow={node.value}
+    aria-label="progress"
+    aria-valuenow={Math.min(node.max, Math.max(0, node.value))}
     aria-valuemin={0}
     aria-valuemax={node.max}
   >
@@ -109,7 +111,7 @@
     ></div>
   </div>
 {:else if node.type === "icon"}
-  {#if node.name in ICONS}
+  {#if Object.hasOwn(ICONS, node.name)}
     <span style={toneStyle(node.tone)}>
       <Icon name={node.name as IconName} />
     </span>
@@ -139,6 +141,7 @@
   .ni-bar-fill {
     height: 100%;
     border-radius: var(--r-full);
-    transition: width var(--t-slow);
+    /* Motion law (app.css §motion): transitions are transform/opacity only. A width
+       tween would violate that and re-layout every frame — the bar just snaps. */
   }
 </style>

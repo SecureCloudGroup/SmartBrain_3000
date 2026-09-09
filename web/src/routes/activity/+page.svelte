@@ -7,7 +7,7 @@
   import { confirmDialog } from "$lib/confirm.svelte";
   import { describeError } from "$lib/errors";
   import ActionCard from "$lib/components/ActionCard.svelte";
-  import { fmtArgs, iconForTool } from "$lib/pendingCards";
+  import { fmtArgs, iconForTool, promotedLine } from "$lib/pendingCards";
   import Chip from "$lib/components/Chip.svelte";
   import EmptyState from "$lib/components/EmptyState.svelte";
   import Icon from "$lib/components/Icon.svelte";
@@ -113,7 +113,7 @@
   {#if pending.length > 0}
     <h2>Awaiting your approval</h2>
     {#each pending as p (p.id)}
-      <ActionCard icon={iconForTool(p.tool)} title={p.tool} tier={p.tier === "irreversible" ? "irreversible" : "reviewed"} scope={fmtArgs(p.args)}>
+      <ActionCard icon={iconForTool(p.tool)} title={p.tool} tier={p.tier === "irreversible" ? "irreversible" : "reviewed"} promoted={promotedLine(p.tool, p.args) ?? ""} scope={fmtArgs(p.args)}>
         {#snippet actions()}
           {#if p.tier === "reviewed" && p.remember_mode === "tool"}
             <button class="ghost" disabled={busy === p.id} title="Approve and stop asking for this tool" onclick={() => approve(p, true)}>Always allow</button>

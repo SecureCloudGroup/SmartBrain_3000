@@ -18,7 +18,8 @@ export function relTime(ts: string | null, now: Date = new Date()): string {
   const delta = now.getTime() - d.getTime();
   if (delta < 0) return "just now"; // clock skew — never render "in 5m", it reads as broken
   if (delta < 45_000) return "just now";
-  if (delta < HOUR) return `${Math.round(delta / MINUTE)}m ago`;
+  // Floor minutes so 59m30s never rounds to "60m ago" — the hour branch handles that.
+  if (delta < HOUR) return `${Math.floor(delta / MINUTE)}m ago`;
   if (delta < DAY) return `${Math.round(delta / HOUR)}h ago`;
   if (delta < 2 * DAY) return "yesterday";
   return `${Math.floor(delta / DAY)}d ago`;

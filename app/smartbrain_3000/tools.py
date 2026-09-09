@@ -775,13 +775,21 @@ def _assemble_spec(args: dict) -> dict:
 
 
 def _create_ni_item(ctx: ToolContext, args: dict) -> dict:
-    """REVIEWED (egress=True): create a new NI item in draft with a validated preview snapshot.
+    """REVIEWED (egress=True): create a new NI item, ready for the engine to commission.
 
     The full spec (§2) is validated by ``ni.validate_spec`` (closed schema, closed
-    enums, PRE-expansion scene caps), then ``store.add_item`` also binds the
-    preview payload against the scene up-front — so a spec whose preview cannot
-    even render never lands. Egress-flagged (source URL/instruction reaches out at
-    commissioning); non-rememberable by consent.remember_mode's default rule.
+    enums, PRE-expansion scene caps), the param-substituted http_json URL runs the
+    netguard public-URL check (J), then ``store.add_item`` also binds the preview
+    payload against the scene up-front — so a spec whose preview cannot even render
+    never lands. Egress-flagged (source URL/instruction reaches out at commissioning);
+    non-rememberable by consent.remember_mode's default rule.
+
+    Landing state (A1): the item lands in ``commissioning`` (due immediately -> C1 on
+    the next tick), because NI write tools are REVIEWED + egress + non-rememberable,
+    so the handler only ever runs after explicit human approval — approval IS consent.
+    Exceptions: (a) any ``secret``-kind param whose value is empty forces ``draft``
+    (a secret must be entered via the credential PUT before the engine tries), and
+    (b) an explicit ``draft: true`` from the agent's "show me first" affordance.
     """
     assert ctx.ni is not None, "neural interface unavailable"
     for key in ("title", "goal", "source", "pipeline", "scene", "display",
@@ -793,17 +801,23 @@ def _create_ni_item(ctx: ToolContext, args: dict) -> dict:
     preview = args["preview_payload"]
     assert isinstance(preview, dict), "preview_payload must be a JSON object"
     ni.bind_scene(spec["scene"], preview)  # proves preview renders before store.add_item does
+    _validate_ni_public_url(spec)  # J: refuse a non-public / SSRF-shaped URL up front
     item_id = ctx.ni.add_item(spec, preview, origin="agent")
-    return {"id": item_id, "state": "draft"}
+    landing = _initial_ni_state(spec, bool(args.get("draft")))
+    if landing != "draft":
+        ctx.ni.commission(item_id)  # draft -> commissioning (also clears any streak marker)
+    return {"id": item_id, "state": landing}
 
 
 def _update_ni_item(ctx: ToolContext, args: dict) -> dict:
-    """REVIEWED (egress=True): partial-update an existing NI item; source change → back to draft.
+    """REVIEWED (egress=True): partial-update an existing NI item; source change re-consents.
 
-    Merges the given fields into the stored spec and revalidates. Any change to
-    ``source`` (URL, headers, type, or the model instruction) rewinds state to
-    ``draft`` per §9 so a new source is re-consented before the engine touches it.
-    Origin ``agent`` on the revision row (mirrors the write path in agent.py).
+    Merges the given fields into the stored spec and revalidates. The store's
+    ``update_spec`` always strips ``_c2_ok`` / ``contract`` from the sealed body and
+    resets the streak (A3/F). A source change (D4: type/url/headers/instruction OR
+    the value of any param referenced by ``source.url`` via ``{{param:X}}``) sends the
+    item straight to ``commissioning`` — the approved update card IS the re-consent
+    (A3 rationale). Origin ``agent`` on the revision row (mirrors agent.py).
     """
     assert ctx.ni is not None, "neural interface unavailable"
     assert args.get("item_id"), "item_id required"
@@ -815,12 +829,89 @@ def _update_ni_item(ctx: ToolContext, args: dict) -> dict:
                 "display", "model", "interval_minutes"):
         if key in args:
             spec[key] = args[key]
+    ni.validate_spec(spec)  # early raise before we touch the store
+    _validate_ni_public_url(spec)  # J: same URL check as create
+    source_changed = _ni_source_effectively_changed(current["spec"], spec)
     ctx.ni.update_spec(args["item_id"], spec, origin="agent")
-    source_changed = "source" in args and args["source"] != current["spec"].get("source")
+    if "preview_payload" in args:  # K8: refresh the preview snapshot alongside the spec
+        preview = args["preview_payload"]
+        if not isinstance(preview, dict):
+            raise ValueError("preview_payload must be a JSON object")
+        bound = ni.bind_scene(spec["scene"], preview)
+        ctx.ni.write_snapshot(args["item_id"], "preview", bound, ok=True)
     if source_changed:
-        ctx.ni.set_state(args["item_id"], "draft")  # re-consent gate per §9
+        ctx.ni.commission(args["item_id"])  # A3: the approved update card is re-consent
     return {"ok": True, "id": args["item_id"],
-            "state_reset": "draft" if source_changed else None}
+            "state_reset": "commissioning" if source_changed else None}
+
+
+def _initial_ni_state(spec: dict, draft_flag: bool) -> str:
+    """A1: 'commissioning' unless the caller asked for draft or a secret param is unfilled."""
+    assert isinstance(spec, dict), "spec must be a dict"
+    if draft_flag:
+        return "draft"
+    for name, p in (spec.get("params") or {}).items():  # bounded by _MAX_PARAMS
+        assert isinstance(name, str), "param name is a string post-validation"
+        if isinstance(p, dict) and p.get("kind") == "secret" and not p.get("value"):
+            return "draft"
+    return "commissioning"
+
+
+def _ni_source_effectively_changed(old_spec: dict, new_spec: dict) -> bool:
+    """D4: return True when the source itself, or any param referenced by source.url via
+    ``{{param:X}}``, effectively changed value between old and new specs.
+
+    Comparing only ``spec.source`` misses the case where the URL template is unchanged
+    but a param the template interpolates was rewritten — the effective URL still
+    moves. Enumerating referenced params captures that case cheaply.
+    """
+    assert isinstance(old_spec, dict) and isinstance(new_spec, dict), "both specs required"
+    old_source = old_spec.get("source") or {}
+    new_source = new_spec.get("source") or {}
+    if old_source != new_source:
+        return True
+    url = str(new_source.get("url") or "")
+    if not url:
+        return False
+    old_params = old_spec.get("params") or {}
+    new_params = new_spec.get("params") or {}
+    for match in ni._PARAM_PLACEHOLDER.finditer(url):
+        name = match.group(1)
+        old_val = (old_params.get(name) or {}).get("value") if isinstance(old_params.get(name), dict) else None
+        new_val = (new_params.get(name) or {}).get("value") if isinstance(new_params.get(name), dict) else None
+        if old_val != new_val:
+            return True
+    return False
+
+
+def _validate_ni_public_url(spec: dict) -> None:
+    """J: netguard.validate_public_url on the substituted http_json URL, if any.
+
+    Skipped when a referenced string param is still empty (commission re-checks); a
+    validation error is surfaced verbatim to the tool caller so the model can fix it.
+    """
+    assert isinstance(spec, dict), "spec must be a dict"
+    source = spec.get("source") or {}
+    if source.get("type") != "http_json":
+        return
+    url = str(source.get("url") or "")
+    if not url:
+        return
+    # If any referenced param is a still-empty string, defer to commission-time re-check.
+    params = spec.get("params") or {}
+    for match in ni._PARAM_PLACEHOLDER.finditer(url):
+        name = match.group(1)
+        pval = (params.get(name) or {}).get("value") if isinstance(params.get(name), dict) else None
+        if isinstance(pval, str) and not pval:
+            return
+    try:
+        filled = ni.substitute_params(spec)["source"]["url"]
+    except ValueError as exc:
+        raise ValueError(f"spec.source.url: {exc}") from None
+    try:
+        netguard.validate_public_url(filled)
+    except netguard.FetchError as exc:
+        raise ValueError(f"spec.source.url refused: {exc}") from None
 
 
 def _set_ni_item_enabled(ctx: ToolContext, args: dict) -> dict:
@@ -841,11 +932,22 @@ def _run_ni_item_now(ctx: ToolContext, args: dict) -> dict:
     on its own thread with the credential store; the tool's job is just to bring the
     item forward. HTTP ``POST /api/ni/items/{id}/run`` does a synchronous run (Desktop
     context has direct access to the SecretStore).
+
+    K6: refuses draft (no C1 yet), paused (``enabled=false``), and broken (permanent
+    refusal) with a clear error — otherwise a "run now" against a broken item would
+    look like a live retry that never fires.
     """
     assert ctx.ni is not None, "neural interface unavailable"
     assert args.get("item_id"), "item_id required"
-    if ctx.ni.get_item(args["item_id"]) is None:
+    item = ctx.ni.get_item(args["item_id"])
+    if item is None:
         raise ValueError("item not found")
+    if item["state"] == "draft":
+        raise ValueError("cannot run a draft item — commission it first")
+    if item["state"] == "broken":
+        raise ValueError("cannot run a broken item — edit + re-commission first")
+    if not item["enabled"]:
+        raise ValueError("cannot run a paused item — resume it first (set_ni_item_enabled)")
     ctx.ni.clear_last_checked(args["item_id"])
     return {"ok": True, "id": args["item_id"]}
 
@@ -1299,6 +1401,9 @@ _TOOLS: tuple[Tool, ...] = (
                 "interval_minutes": {"type": "integer"},
                 "model": {"type": "string"},
                 "preview_payload": {"type": "object"},
+                # A1: agent opts INTO draft with the "show me first" affordance. Absent
+                # or false lands the item in commissioning (approval == consent).
+                "draft": {"type": "boolean"},
             },
             "required": ["title", "goal", "source", "pipeline", "scene",
                          "display", "interval_minutes", "preview_payload"],
@@ -1328,6 +1433,8 @@ _TOOLS: tuple[Tool, ...] = (
                 "display": {"type": "object"},
                 "interval_minutes": {"type": "integer"},
                 "model": {"type": "string"},
+                # K8: rewrite the preview snapshot alongside the spec (stale-preview note in doc).
+                "preview_payload": {"type": "object"},
             },
             "required": ["item_id"],
         },

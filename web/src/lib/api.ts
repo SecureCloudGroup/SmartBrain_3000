@@ -638,25 +638,29 @@ export interface NiBoardItem {
   // Bound payload for the appropriate slot (§10 /board): draft -> preview, live -> latest,
   // degraded/failing/etc -> last_good. null when no snapshot has ever been written.
   payload: SceneNode | null;
-  payload_slot: "preview" | "latest" | "last_good";
+  // null when no snapshot has ever been written (payload is also null then).
+  payload_slot: "preview" | "latest" | "last_good" | null;
   payload_at: string | null;
 }
 
 // A single run — telemetry (§1 ni_runs). Plaintext; host-free error class only.
+// error is null on success; contract_ok is null when the payload didn't reach the
+// contract stage (e.g. a fetch/transform failure short-circuited the run).
 export interface NiRun {
   ts: string;
   status: string;
   duration_ms: number;
-  error: string; // "" on success
-  contract_ok: boolean;
+  error: string | null;
+  contract_ok: boolean | null;
 }
 
 // Item detail (§10 GET /items/{id}) — the SPEC (secrets as names) + health + runs.
-// The spec's inner shape is deliberately unstructured on the client — the board renders
-// bound payloads, and the detail surface (later phases) touches individual fields by name.
+// title + display live INSIDE spec (the spec is authoritative); spec_rev bumps on
+// every server-side edit so the client can detect drift. The spec's inner shape is
+// deliberately unstructured — the board renders bound payloads and detail surfaces
+// touch individual fields by name.
 export interface NiItemDetail {
   id: string;
-  title: string;
   state: NiState;
   enabled: boolean;
   interval_minutes: number;
@@ -664,8 +668,8 @@ export interface NiItemDetail {
   last_status: string;
   consecutive_failures: number;
   position: number;
-  display: NiDisplay;
   spec: Record<string, unknown>;
+  spec_rev: number;
   runs: NiRun[];
 }
 
@@ -1366,8 +1370,22 @@ export const api = {
       method: "POST",
       body: JSON.stringify(note ? { ok, note } : { ok }),
     }),
+  // Run once now. `status` is the outcome ("ok" or "error"); `kind` is the host-free
+  // error class when status is "error" (e.g. "http_5xx", "contract"). 409 = draft /
+  // broken / disabled — the caller surfaces the detail.
   niRun: (id: string) =>
-    req<{ ok: boolean; state: NiState }>(`/api/ni/items/${encodeURIComponent(id)}/run`, { method: "POST" }),
+    req<{ status: "ok" | "error"; kind?: string; duration_ms: number }>(
+      `/api/ni/items/${encodeURIComponent(id)}/run`,
+      { method: "POST" },
+    ),
+  // Activate a draft: the server moves it into commissioning so real fetches begin.
+  // 409 detail explains what stopped it (an unfilled credential is the common case);
+  // the card surfaces the detail verbatim.
+  niCommission: (id: string) =>
+    req<{ state: "commissioning" }>(
+      `/api/ni/items/${encodeURIComponent(id)}/commission`,
+      { method: "POST" },
+    ),
   niPatch: (id: string, body: { enabled?: boolean; position?: number; display?: NiDisplay }) =>
     req<{ ok: boolean }>(`/api/ni/items/${encodeURIComponent(id)}`, {
       method: "PATCH",

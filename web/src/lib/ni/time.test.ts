@@ -23,6 +23,12 @@ describe("relTime", () => {
     expect(relTime(ago(3 * 60_000), NOW)).toBe("3m ago");
   });
 
+  it("caps the minutes bucket at 59 (never renders '60m ago' — the hour branch takes over)", () => {
+    // 59m30s is still under an hour; floor keeps it at 59, then the next tick crosses into 1h.
+    expect(relTime(ago(59 * 60_000 + 30_000), NOW)).toBe("59m ago");
+    expect(relTime(ago(60 * 60_000), NOW)).toBe("1h ago");
+  });
+
   it("hours for < 24h", () => {
     expect(relTime(ago(5 * 3_600_000), NOW)).toBe("5h ago");
   });

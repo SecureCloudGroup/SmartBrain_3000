@@ -31,8 +31,9 @@ Follows the house sealed-body + plaintext-operational-columns convention
 
 - `ni_items` — plaintext: `id TEXT PRIMARY KEY`, `enabled BOOLEAN`, `state TEXT`
   (§6), `interval_minutes INTEGER`, `last_checked TIMESTAMP`, `last_status TEXT`
-  (host-free), `consecutive_failures INTEGER`, `position INTEGER`, `spec_rev
-  INTEGER`, `created_at TIMESTAMP`, `updated_at TIMESTAMP`; sealed body (AAD
+  (host-free), `consecutive_failures INTEGER`, `first_failure_at TIMESTAMP`
+  (streak marker; §6), `position INTEGER`, `spec_rev INTEGER`,
+  `created_at TIMESTAMP`, `updated_at TIMESTAMP`; sealed body (AAD
   `ni_item:<id>`): the spec (§2).
 - `ni_snapshots` — `item_id TEXT`, `slot TEXT` (`latest` | `last_good` | `preview`),
   `nonce BLOB`, `ciphertext BLOB` (AAD `ni_snapshot:<item_id>:<slot>`), `ok BOOLEAN`,
@@ -85,12 +86,33 @@ No foreign keys; `NIStore.delete` cascades in code (feeds precedent).
 {"type": "http_json", "url": "https://api.example.com/quote?sym={{param:symbol}}",
  "headers": {"X-Api-Key": {"$secret": "ni:<item_id>:api_key"}}}
 ```
-- Fetched via `netguard.safe_fetch_json` only. `validate_public_url` runs at every
-  create/update. The URL (with params substituted) is frozen by user consent; no
-  model output may ever alter `url` or `headers`.
+- Fetched via `netguard.safe_fetch_json` only. `validate_public_url` runs on the
+  param-substituted URL at every create / update / commission (skipped when a
+  referenced string param is still empty; commission re-checks). The URL's
+  **scheme + authority is frozen literal**: `{{param:...}}` may appear only inside
+  the path or query, never in the scheme/userinfo/host/port — validators refuse
+  a placeholder there. Param values that DO land in the URL are percent-encoded
+  at substitution time (`urllib.parse.quote(safe="")`) so a value can never
+  rewrite URL structure.
+- Header values are literal strings or `{"$secret": "ni:..."}` refs — nothing
+  else. `{{param:...}}` is forbidden inside plain header values (a param cannot
+  smuggle auth-shaped bytes into a header). Auth-shaped literal header names
+  (`authorization`, `proxy-authorization`, `cookie`, any name containing
+  `token`/`secret`/`key`) are refused unless the value is a `$secret` ref.
+  `$secret` refs must start with `ni:` at spec validation; the loader further
+  enforces the full `ni:{item_id}:` scoping (a spec cannot borrow another
+  item's credentials).
 - `$secret` values resolve at fetch time by the engine; the resolved secret is
-  host-bound: it attaches only when the request host equals the host recorded when
-  the credential was entered. Any other host refuses the fetch outright.
+  host-bound: it attaches only when the request host equals the host recorded
+  when the credential was entered (`put_credential` IDNA-lowercases the host so
+  the compare matches `urlparse().hostname`). Any other host refuses the fetch
+  outright (`secret_host_mismatch` → permanent broken). Secrets never ride an
+  http request (`secret_requires_https` refusal).
+- **Redirect discipline** (credential exfiltration guard): whenever the fetch
+  carries ANY header (secret or literal), the engine passes
+  `allow_redirects=False` through `safe_fetch_json` / `_guarded_get`, so a 3xx
+  raises `FetchError("redirect refused")` before the header re-sends to a
+  rewritten host. Header-free requests keep the default redirect behavior.
 - Response caps: 2 MB, `application/json`/`text/` content types, 8s per-read
   timeout (netguard defaults).
 
@@ -192,22 +214,55 @@ States (plaintext `ni_items.state`):
 (user, from any post-draft state; resume returns to `commissioning` if the item
 was never live, else `live`).
 
+Approval IS consent. NI write tools are REVIEWED + egress + non-rememberable, so
+the create/update handler only ever runs after explicit human approval. The
+default landing state for a fresh `create_ni_item` is therefore
+**`commissioning`** (not `draft`) — the C1 tick happens on the next scheduler
+pass. Two exceptions land it in `draft` instead: (a) any `secret`-kind param
+whose value is empty (the credential must be entered via
+`PUT /credential` before the engine tries), and (b) an explicit `draft: true`
+in the create args (the agent's "show me first" affordance).
+
+An `update_ni_item` whose source effectively changed sends the item straight to
+`commissioning` too — the approved update card IS the re-consent. Every
+`update_spec` also strips `_c2_ok` and `contract` from the sealed body and
+resets `consecutive_failures` + `first_failure_at` (both attestations describe a
+specific spec and are meaningless once the spec moves).
+
 - `draft` — spec + `preview` snapshot (dummy data, agent-invented, validated
-  against the same grammar). Never fetches. Never expires in v1.
-- `commissioning` — entered when the user approves the create/activation card.
+  against the same grammar). Never fetches. Never expires in v1. Left by the
+  Activate button (`POST /api/ni/items/{id}/commission` — refuses 409 unless
+  state is `draft` and every secret param has a value).
+- `commissioning` — entered on create (default), on activate, or on the
+  re-consent path after an update whose source effectively changed.
   - **C1 (immediate)**: one real run of the full pipeline. Failure → stays
     `commissioning`, error surfaced for redrafting.
   - **C2 (user)**: the real result renders on /ni with "Looks right" /
     "Something's wrong". Wrong → back to draft with the user's note.
+    `POST /api/ni/items/{id}/validate` refuses with 409 unless the item is
+    currently `commissioning` (integrity: a verdict outside commissioning has
+    no C1 output to endorse).
   - **C3 (automatic)**: the next engine-cadence run must pass and satisfy the
-    contract captured at C1/C2. Pass → `live`.
+    contract captured at C1. **If `_c2_ok` is set but no contract was captured
+    yet, the first clean run captures the contract and STAYS commissioning**
+    (one more clean run required to promote to `live`). If a contract IS
+    present when `_c2_ok` fires, the pre-bind check runs on every subsequent
+    run; a violation is a run failure that keeps the item at `commissioning`.
 - `live` — engine runs at cadence; every run contract-checked.
 - `degraded` — latest run failed or violated contract; `last_good` renders dimmed.
+  `latest` becomes an `ok=false` marker with an empty payload so the board's
+  latest-if-ok-else-last_good fallback picks up last_good on its own.
 - `failing` — ≥ 3 consecutive failures; effective interval doubles per failure
   beyond 3 (cap 24h).
-- `broken` — 8 consecutive failures over ≥ 7 days (vault_sync escalation rule), or
-  a permanent refusal (e.g. credential host mismatch). Engine stops scheduling it;
-  carrier-row alert fires; only user/agent action (edit → re-commission) leaves it.
+- `broken` — 8 consecutive failures over ≥ 7 days **measured from
+  `first_failure_at`** (the streak start), NOT `created_at`. A long-lived
+  healthy item that only starts failing today therefore can't be classed
+  broken from its birthday. `first_failure_at` is set on the FIRST failure of
+  a streak, cleared on success, on `update_spec`, and on `commission()`. A
+  permanent refusal (e.g. credential host mismatch) escalates straight to
+  `broken` without waiting on the counter. Engine stops scheduling broken
+  items; carrier-row alert fires; only user/agent action (edit → re-commission)
+  leaves it.
 
 Every failure records an `ni_runs` row with a host-free error class. `mark_checked`
 on every attempt is the backoff (feeds law).
@@ -228,14 +283,28 @@ satisfaction, not mere parsing.
 
 ## 8. Engine pass
 
-`ni.tick(app, pass_budget_seconds)` called from `scheduler.tick` after the feeds
-pass, feeds contract verbatim: locked → return; own cursor; due =
+`ni.tick(app, pass_budget_seconds, breaker_open=None)` called from
+`scheduler.tick` after the feeds pass, feeds contract verbatim: locked →
+return; own cursor; due =
 `enabled AND state NOT IN ('draft','paused','broken') AND (last_checked IS NULL OR
 age > effective_interval)`, `NULLS FIRST`, oldest first; `_MAX_ITEMS_PER_PASS = 3`;
 per-item try/except; wall-clock budget between items; `mark_checked` on every
 attempt; host-free `last_status`. `model` sources additionally require
 `gateway.local_available()` when the route is local, and respect the scheduler
-breaker.
+breaker: `_auto_update_ni` passes the scheduler's `_breaker_open` to `tick`, and
+while it returns True, model-source items are SKIPPED (they stay due — no
+`mark_checked`, so the next tick with a healthy gateway picks them up).
+`http_json` and `internal.schedule` items are unaffected by the breaker (they
+don't touch the gateway).
+
+Bound-payload guards on every write: `bind_scene` results are re-checked against
+per-prop expectations (text/chip string ≤ 2000 chars; number/bar numeric+finite;
+repeat items list) — a mismatch is `bind_type`. The JSON-serialized bound
+payload is capped at 256 KiB before `write_snapshot`; exceeding = run failure
+`payload_too_large`. Any exception on the whole finalize path (contract check,
+bind, snapshot write) is wrapped as `NIError` so mark_checked + `ni_runs` row +
+failure bump + `latest` ok=false snapshot fire on every failure path (a raw
+`ValueError` used to skip the run row entirely).
 
 ## 9. Tools and tiers (v1)
 
@@ -243,10 +312,10 @@ breaker.
 |---|---|---|
 | `list_ni_items` | OBSERVE | plaintext state + titles |
 | `read_ni_item` | OBSERVE | spec + health + latest bound payload (untrusted-data provenance line first, KB-tool precedent) |
-| `create_ni_item` | REVIEWED, egress | full spec + preview payload; validates everything; lands in `draft` |
-| `update_ni_item` | REVIEWED | partial; source/url/header changes force state back to `draft` (re-consent) |
+| `create_ni_item` | REVIEWED, egress | full spec + preview payload; validates everything; lands in `commissioning` (approval == consent) unless a secret param is unfilled or `draft: true` is passed |
+| `update_ni_item` | REVIEWED | partial; a source change (URL/headers/type/instruction OR the value of any param referenced by `source.url` via `{{param:}}`) sends the item to `commissioning` (re-consent). Optional `preview_payload` rewrites the preview snapshot alongside the spec — note the preview is stale until this is passed |
 | `set_ni_item_enabled` | REVIEWED | pause/resume |
-| `run_ni_item_now` | REVIEWED, egress | clears `last_checked` |
+| `run_ni_item_now` | REVIEWED, egress | clears `last_checked`; refuses draft/paused/broken |
 | `delete_ni_item` | IRREVERSIBLE | typed confirm |
 
 `NI_WRITE_TOOLS = {create, update, set_enabled, run_now}` joins
@@ -265,11 +334,18 @@ conversation before the card is parked. Approving the card is what moves
   payload (`preview` for drafts, else `latest` ok / `last_good`).
 - `GET  /api/ni/items/{id}` — spec (secrets as names), health, run history.
 - `POST /api/ni/items/{id}/validate` — C2 verdict `{ok: bool, note?: str}`.
+  Refuses 409 unless the item is currently `commissioning`.
+- `POST /api/ni/items/{id}/commission` — the Activate button on the drafted
+  card: `draft` → `commissioning`. Refuses 409 unless state is `draft`, and
+  409 with a clear detail when any secret param is still unfilled. Response
+  `{"state": "commissioning"}`.
 - `POST /api/ni/items/{id}/run` — manual refresh (engine path, same guards).
+  Refuses 409 for `draft` and `broken`, and 409 when paused (`enabled=false`).
 - `PATCH /api/ni/items/{id}` — position/display/enabled (UI edits).
 - `DELETE /api/ni/items/{id}`.
 - `PUT  /api/ni/items/{id}/credential` — enter a secret param value
   (desktop-local, body `{name, value, host}`); stores under `ni:<id>:<name>`,
-  host-bound. Secrets never travel through chat or tool args.
+  host-bound (host IDNA-lowercased at store time so it matches
+  `urlparse().hostname`). Secrets never travel through chat or tool args.
 - All handlers 423 → the standard locked contract; literal paths before `{id}`
   (schedule_routes ordering comment).

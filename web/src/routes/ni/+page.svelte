@@ -23,7 +23,13 @@
   let loaded = $state(false);
   let error = $state("");
   let busyId = $state<string | null>(null);
+  // Set while the "Something's wrong" verdict POST is in flight — disables the modal
+  // Send button so a double-tap can't fire two /validate calls for the same item.
+  let sendingNote = $state(false);
   let timer: ReturnType<typeof setInterval> | null = null;
+  // Request-generation counter — a stale load() response never overwrites newer state
+  // (e.g. a delete + re-poll racing an earlier slow board fetch would resurrect the card).
+  let gen = 0;
   // Small "Something's wrong" note prompt (C2 verdict, §6).
   let noteFor = $state<NiBoardItem | null>(null);
   let noteText = $state("");
@@ -32,17 +38,20 @@
     console.assert(typeof api.niBoard === "function", "load: niBoard method present");
     console.assert(Array.isArray(items), "load: items array");
     if (!account.status?.unlocked) return;
+    const g = ++gen;
     try {
       const r = await api.niBoard();
+      if (g !== gen) return; // a newer load() started while we awaited — drop this response
       // position asc — the spec orders the board that way; the server MAY already sort,
       // but a client-side re-sort keeps a mid-migration server honest.
       items = [...r.items].sort((a, b) => a.position - b.position);
       error = "";
     } catch (err) {
+      if (g !== gen) return; // stale failure — the newer request will paint the truth
       const msg = describeError(err);
       if (msg) error = msg;
     } finally {
-      loaded = true;
+      if (g === gen) loaded = true;
     }
   }
 
@@ -52,7 +61,14 @@
     if (document.visibilityState === "visible") void load();
   }
 
-  onMount(() => {
+  onMount(async () => {
+    // Mount guard mirrors schedules/+page.svelte: without the account status, a cold
+    // navigation would sit on the spinner until the next 10s tick (load() bails when
+    // status is null). Redirect uninitialized/locked before any board fetch fires.
+    if (account.status === null) await account.load();
+    const s = account.status;
+    if (s && !s.initialized) return goto("/setup");
+    if (s && !s.unlocked) return goto("/unlock");
     void load();
     // Poll only while the tab is visible AND the vault is unlocked (guarded inside load).
     timer = setInterval(() => {
@@ -65,20 +81,32 @@
     document.removeEventListener("visibilitychange", onVisible);
   });
 
+  // Cold-navigate → unlock flow: when the vault flips from locked to unlocked in this
+  // tab, re-trigger load() so the board paints immediately instead of waiting up to 10s.
+  $effect(() => {
+    console.assert(typeof account.status?.unlocked !== "undefined" || account.status === null, "$effect: unlocked accessed");
+    console.assert(gen >= 0, "$effect: gen counter present");
+    if (account.status?.unlocked) void load();
+  });
+
   // Health chip: state (+ stale check) collapses to one calm pill on the card header.
   type ChipDescriptor = { kind: "" | "accent" | "ok" | "warn" | "danger"; label: string };
   function healthChip(item: NiBoardItem): ChipDescriptor {
     console.assert(typeof item.state === "string", "healthChip: state is string");
     console.assert(typeof item.interval_minutes === "number", "healthChip: interval is number");
     const s: NiState = item.state;
+    // Chip labels are Title-cased for the whole set (Live / Stale / Degraded / Failing /
+    // Broken / Commissioning / Preview / Paused) — a mid-line lowercase pill (the old
+    // "stale" / "live" / "failing") reads as unfinished next to the others.
     if (s === "draft") return { kind: "", label: "Preview" };
     if (s === "commissioning") return { kind: "accent", label: "Commissioning" };
     if (s === "broken") return { kind: "danger", label: "Broken" };
-    if (s === "failing" || s === "degraded") return { kind: "warn", label: s };
+    if (s === "failing") return { kind: "warn", label: "Failing" };
+    if (s === "degraded") return { kind: "warn", label: "Degraded" };
     if (s === "paused") return { kind: "", label: "Paused" };
     // live: fresh if payload is inside 2x cadence; else stale.
-    if (isStale(item.payload_at, item.interval_minutes)) return { kind: "warn", label: "stale" };
-    return { kind: "ok", label: "live" };
+    if (isStale(item.payload_at, item.interval_minutes)) return { kind: "warn", label: "Stale" };
+    return { kind: "ok", label: "Live" };
   }
 
   async function runNow(item: NiBoardItem) {
@@ -86,7 +114,13 @@
     console.assert(busyId === null || busyId === item.id, "runNow: busy id matches or null");
     busyId = item.id;
     try {
-      await api.niRun(item.id);
+      const r = await api.niRun(item.id);
+      // A 200 with status: "error" is a real failure — the payload didn't refresh,
+      // and staying silent reads as "did nothing" to the operator. Kind is the
+      // host-free error class (e.g. "http_5xx", "contract"); shown when present.
+      if (r.status === "error") {
+        error = r.kind ? `Run failed (${r.kind}).` : "Run failed.";
+      }
       await load();
     } catch (err) {
       const msg = describeError(err);
@@ -121,12 +155,34 @@
       danger: true,
     });
     if (!ok) return;
+    // Lock the card's buttons while the DELETE is in flight — otherwise the second
+    // click can fire before the row disappears, and it would 404 on the same id.
+    busyId = item.id;
     try {
       await api.niDelete(item.id);
       items = items.filter((x) => x.id !== item.id);
     } catch (err) {
       const msg = describeError(err);
       if (msg) error = msg;
+    } finally {
+      busyId = null;
+    }
+  }
+
+  async function activate(item: NiBoardItem) {
+    console.assert(item.state === "draft", "activate: only drafts");
+    console.assert(typeof item.id === "string", "activate: id is string");
+    busyId = item.id;
+    try {
+      await api.niCommission(item.id);
+      await load();
+    } catch (err) {
+      // 409 detail names the unfilled credential (or other reason it won't commission);
+      // describeError passes 4xx messages through verbatim, which is what we want here.
+      const msg = describeError(err);
+      if (msg) error = msg;
+    } finally {
+      busyId = null;
     }
   }
 
@@ -154,9 +210,10 @@
   async function submitWrongNote() {
     console.assert(noteFor !== null, "submitWrongNote: a target must be set");
     console.assert(typeof noteText === "string", "submitWrongNote: note is string");
-    if (!noteFor) return;
+    if (!noteFor || sendingNote) return;
     const target = noteFor;
     busyId = target.id;
+    sendingNote = true;
     try {
       await api.niValidate(target.id, false, noteText.trim() || undefined);
       noteFor = null;
@@ -167,6 +224,7 @@
       if (msg) error = msg;
     } finally {
       busyId = null;
+      sendingNote = false;
     }
   }
 </script>
@@ -209,13 +267,23 @@
             {#if item.payload}
               <NiScene node={item.payload} />
             {:else}
-              <p class="muted" style="margin:0; font-size:0.9rem">Waiting for the first run…</p>
+              <p class="muted" style="margin:0; font-size:var(--f-label)">Waiting for the first run…</p>
             {/if}
           </div>
 
+          {#if preview}
+            <div class="ni-actions">
+              <button
+                disabled={busyId === item.id}
+                onclick={() => activate(item)}
+                title="Activate — start fetching for real"
+              >{busyId === item.id ? "Activating…" : "Activate"}</button>
+            </div>
+          {/if}
+
           {#if item.state === "commissioning" && item.payload && item.payload_slot !== "preview"}
             <div class="ni-commission">
-              <p style="margin:0 0 var(--s-2); font-size:0.9rem">This is live data — is it right?</p>
+              <p style="margin:0 0 var(--s-2); font-size:var(--f-label)">This is live data — is it right?</p>
               <div class="ni-actions">
                 <button
                   class="secondary"
@@ -278,8 +346,8 @@
         aria-label="Note"
       ></textarea>
       <div class="modal-actions" style="margin-top: var(--s-4)">
-        <button class="secondary" onclick={() => { noteFor = null; noteText = ""; }}>Cancel</button>
-        <button onclick={submitWrongNote}>Send</button>
+        <button class="secondary" disabled={sendingNote} onclick={() => { noteFor = null; noteText = ""; }}>Cancel</button>
+        <button disabled={sendingNote} onclick={submitWrongNote}>{sendingNote ? "Sending…" : "Send"}</button>
       </div>
     </Modal>
   {/if}
@@ -305,8 +373,10 @@
   }
   .ni-card.wide { grid-column: span 2; }
   /* Wide cards collapse back to a single column on narrow viewports so a two-span
-     card never overflows the grid. */
-  @media (max-width: 480px) {
+     card never overflows the grid. Raised from 480px so a two-column layout with a
+     14rem minimum track (~448px + gutters ≈ 480–520px) doesn't try to render a
+     span-2 card into ~230px and clip the content. */
+  @media (max-width: 560px) {
     .ni-card.wide { grid-column: auto; }
   }
   .ni-card.preview {

@@ -399,6 +399,10 @@ _MIGRATIONS: tuple[tuple[int, str | Callable[[], str]], ...] = (
     #                   contract_ok). No content — the error is a host-free class string —
     #                   so the health view queries without the key. Pruned in code to 50/item.
     # No foreign keys; ``NIStore.delete`` cascades in code (feeds precedent).
+    # ``first_failure_at`` (plaintext) is the streak marker per §6: timestamp of the FIRST failure
+    # in the current run of failures; cleared on success/rewind/update/commission. Escalation to
+    # ``broken`` measures elapsed time from this marker (not ``created_at``), so a long-lived
+    # healthy item that only starts failing today can never be classed broken from its birthday.
     (
         40,
         "CREATE TABLE IF NOT EXISTS ni_items ("
@@ -409,6 +413,7 @@ _MIGRATIONS: tuple[tuple[int, str | Callable[[], str]], ...] = (
         " last_checked TIMESTAMP,"
         " last_status TEXT DEFAULT '',"
         " consecutive_failures INTEGER NOT NULL DEFAULT 0,"
+        " first_failure_at TIMESTAMP,"
         " position INTEGER NOT NULL DEFAULT 0,"
         " spec_rev INTEGER NOT NULL DEFAULT 1,"
         " nonce BLOB NOT NULL,"

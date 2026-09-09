@@ -30,16 +30,29 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import re
+import threading
 import time
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from urllib.parse import quote as _url_quote
+from urllib.parse import urlparse
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 log = logging.getLogger("smartbrain.ni")
+
+# Cheap race mitigation for the sealed-spec read-modify-write sites (update_spec,
+# record_validation, and the C1 contract re-seal in _transition_on_success). A parallel
+# tick + a route write could otherwise lose either write's fields when both decrypt the
+# same starting spec. This is a module-level Lock (not a per-instance one) because a route
+# thread and a tick thread hold DIFFERENT NIStore instances (different DuckDB cursors) —
+# a per-instance lock would not serialize them. Held only across the encrypt+UPDATE (never
+# across a fetch, model call, or the whole run pipeline), so contention stays negligible.
+_SPEC_LOCK = threading.Lock()
 
 _NONCE_BYTES = 12
 _MAX_ITEMS = 200                 # bound on ni_items rows (per-key decrypt scan)
@@ -71,6 +84,19 @@ _INTERVAL_CEILING_MINUTES = 24 * 60          # effective-interval cap on failing
 _FAILING_THRESHOLD = 3                       # >= this many consecutive fails -> failing
 _BROKEN_FAILURE_COUNT = 8                    # 8 failures in >= 7 days -> broken
 _BROKEN_MIN_DAYS = 7                         # vault_sync escalation rule
+_MAX_PAYLOAD_BYTES = 256 * 1024              # bound on the JSON-serialized bound scene (bind → snapshot)
+# Reserved output name: repeat.item.<...> binds against the current list element, so an
+# extract named "item" would collide with the repeat root at bind time. Refuse at spec time.
+_RESERVED_OUTPUT_NAMES: frozenset[str] = frozenset({"item"})
+# Icon names: literal-only, lowercase kebab shape (Lucide-subset convention). No {{}} or $bind.
+_ICON_NAME_RE = re.compile(r"^[a-z0-9-]{1,60}$")
+# Auth-shaped literal header names are refused (see _validate_http_json_source): a literal
+# value in one of these carries plaintext auth in the sealed spec; the only allowed form is
+# {"$secret": "..."} so the credential lives in the SecretStore (host-bound at storage).
+_AUTH_HEADER_LITERAL_NAMES: frozenset[str] = frozenset({
+    "authorization", "proxy-authorization", "cookie", "x-api-key", "api-key",
+})
+_AUTH_HEADER_TOKEN_SUBSTRINGS: tuple[str, ...] = ("token", "secret", "key")
 
 # Closed vocabularies — v1 refuses anything else, so old clients refuse new nodes rather
 # than mis-render them (the "reject reserved types" contract in ni-format §5).
@@ -297,21 +323,84 @@ def _validate_source(source: object) -> None:
 
 
 def _validate_http_json_source(s: dict) -> None:
-    """§3 http_json: {type, url, headers}. URL is user-consented; $secret refs live here."""
+    """§3 http_json: {type, url, headers}. URL is user-consented; $secret refs live here.
+
+    URL structure is frozen at consent time: the raw template's scheme + authority must be
+    literal (no ``{{param:``), so a filled-in param value can never rewrite the host or port
+    the user approved. Placeholders are allowed only inside path/query. Plain header values
+    are literals or ``$secret`` refs — never templated — so a param value can't smuggle
+    auth-shaped bytes into a header. Auth-shaped literal header names are refused unless
+    the value is a $secret ref (the credential belongs in the SecretStore).
+    """
     _closed_keys(s, {"type", "url", "headers"}, "spec.source (http_json)")
-    _require_str(s.get("url"), "spec.source.url", max_len=_MAX_URL)
+    url = _require_str(s.get("url"), "spec.source.url", max_len=_MAX_URL)
+    _validate_http_json_url_shape(url)
     headers = s.get("headers") or {}
     hdrs = _require_dict(headers, "spec.source.headers")
     if len(hdrs) > _MAX_HEADERS:
         raise ValueError(f"spec.source.headers exceeds {_MAX_HEADERS}")
     for name, value in hdrs.items():
         _require_str(name, "spec.source.headers key", max_len=_MAX_HEADER_NAME)
-        if isinstance(value, dict):
+        is_secret = isinstance(value, dict)
+        if is_secret:
             _closed_keys(value, {"$secret"}, f"spec.source.headers.{name}")
-            _require_str(value.get("$secret"), f"spec.source.headers.{name}.$secret",
-                         max_len=_MAX_HEADER_VALUE)
+            ref = _require_str(value.get("$secret"), f"spec.source.headers.{name}.$secret",
+                               max_len=_MAX_HEADER_VALUE)
+            if not ref.startswith("ni:"):
+                raise ValueError(
+                    f"spec.source.headers.{name}.$secret must start with 'ni:' (item-scoped)"
+                )
         else:
-            _require_str(value, f"spec.source.headers.{name}", max_len=_MAX_HEADER_VALUE)
+            literal = _require_str(value, f"spec.source.headers.{name}",
+                                   max_len=_MAX_HEADER_VALUE)
+            # Templating a plain header value would let a param inject bytes into auth-
+            # shaped headers. Header literals are strings OR $secret refs — nothing else.
+            if "{{param:" in literal:
+                raise ValueError(
+                    f"spec.source.headers.{name} may not use {{{{param:}}}} — "
+                    "use a $secret ref or a plain literal"
+                )
+        if _is_auth_shaped_header(name) and not is_secret:
+            raise ValueError(
+                f"spec.source.headers.{name}: auth-shaped header requires a "
+                "{\"$secret\": \"ni:<item>:<name>\"} value (never a plain literal)"
+            )
+
+
+def _validate_http_json_url_shape(url: str) -> None:
+    """Refuse ``{{param:`` in the URL's scheme/authority; require literal http(s)://host.
+
+    This runs on the RAW template BEFORE any param substitution, so a placeholder in the
+    scheme, userinfo, host, or port can never move the request off the host the user
+    consented to. Placeholders may appear only inside the path or query.
+    """
+    assert isinstance(url, str), "url must be a string"
+    lowered = url.lower()
+    if not lowered.startswith(("https://", "http://")):
+        raise ValueError("spec.source.url must start with http:// or https:// (literal scheme)")
+    scheme_end = url.find("://") + 3
+    # Locate the end of the authority: first ``/`` (path), ``?`` (query), or ``#``.
+    tail = url[scheme_end:]
+    stops = [len(tail)] + [tail.find(ch) for ch in "/?#" if tail.find(ch) != -1]
+    authority_end = scheme_end + min(stops)
+    header = url[:authority_end]
+    if "{{param:" in header:
+        raise ValueError(
+            "spec.source.url may only contain {{param:...}} in the path or query "
+            "(scheme + host must be literal)"
+        )
+    # The authority must have SOMETHING (a host) — a raw "https:///path" is malformed.
+    if authority_end == scheme_end:
+        raise ValueError("spec.source.url must include a host after the scheme")
+
+
+def _is_auth_shaped_header(name: str) -> bool:
+    """True when a plain-literal value in this header would smuggle auth (K4)."""
+    assert isinstance(name, str) and name, "header name required"
+    low = name.lower()
+    if low in _AUTH_HEADER_LITERAL_NAMES:
+        return True
+    return any(sub in low for sub in _AUTH_HEADER_TOKEN_SUBSTRINGS)
 
 
 def _validate_model_source(s: dict) -> None:
@@ -344,7 +433,9 @@ def _validate_pipeline(pipeline: object) -> None:
 
 
 def _validate_extract_stage(st: dict, i: int) -> None:
-    """One extract stage: closed keys, path grammar per named output."""
+    """One extract stage: closed keys, path grammar per named output. ``item`` is reserved
+    (repeat template roots resolve ``item.<...>`` against the current list element — an
+    extract named ``item`` would collide with that bind root)."""
     _closed_keys(st, {"op", "paths"}, f"spec.pipeline[{i}]")
     paths = _require_dict(st.get("paths"), f"spec.pipeline[{i}].paths")
     if not paths or len(paths) > _MAX_EXTRACT_PATHS:
@@ -352,6 +443,10 @@ def _validate_extract_stage(st: dict, i: int) -> None:
     for name, path in paths.items():
         if not isinstance(name, str) or not _KEY_RE.match(name):
             raise ValueError(f"spec.pipeline[{i}].paths key {name!r} malformed")
+        if name in _RESERVED_OUTPUT_NAMES:
+            raise ValueError(
+                f"spec.pipeline[{i}].paths.{name}: '{name}' is reserved (bind root)"
+            )
         if not isinstance(path, str):
             raise ValueError(f"spec.pipeline[{i}].paths.{name} must be a string")  # noqa: TRY004
         parse_path(path)  # raises ValueError on any grammar violation
@@ -457,14 +552,18 @@ class _NodeCounter:
 
 def _validate_scene_node(node: object, depth: int, counter: _NodeCounter) -> None:
     """Iterative pre-order walk (no recursion, POW10 #1). Each node validates its own
-    shape via a dispatch table; children are pushed onto the pending stack."""
+    shape via a dispatch table; children are pushed onto the pending stack.
+
+    ``in_repeat`` propagates down a repeat's template: a second repeat encountered while
+    in_repeat is True is refused (K5 nested-repeat guard — the binder's repeat expander
+    can't safely resolve nested ``item.<...>`` chains against two different list roots)."""
     assert counter is not None, "counter required"
     assert depth >= 1, "depth must start at 1"
-    pending: list[tuple[object, int]] = [(node, depth)]
+    pending: list[tuple[object, int, bool]] = [(node, depth, False)]
     for _ in range(2 * _MAX_SCENE_NODES_PRE_EXPAND):  # bounded (POW10 #2); the cap is the real bound
         if not pending:
             return
-        current, d = pending.pop()
+        current, d, in_repeat = pending.pop()
         if d > _MAX_SCENE_DEPTH:
             raise ValueError(f"scene depth exceeds {_MAX_SCENE_DEPTH}")
         n = _require_dict(current, "scene node")
@@ -473,10 +572,15 @@ def _validate_scene_node(node: object, depth: int, counter: _NodeCounter) -> Non
             raise ValueError(f"scene node type {ntype!r} is reserved and refused in v1")
         if ntype not in _SCENE_TYPES:
             raise ValueError(f"scene node type {ntype!r} unknown")
+        if ntype == "repeat" and in_repeat:
+            raise ValueError("scene repeat may not be nested inside another repeat template")
         counter.count += 1
         children = _validate_scene_shape(n)
+        # Anything under a repeat's template inherits in_repeat=True (so a stack-wrapped nested
+        # repeat is still caught). A top-level sibling repeat under the same stack is fine.
+        child_in_repeat = in_repeat or ntype == "repeat"
         for child in reversed(children):  # bounded by the current node's children
-            pending.append((child, d + 1))
+            pending.append((child, d + 1, child_in_repeat))
     raise ValueError("scene traversal exceeded bound")
 
 
@@ -537,13 +641,32 @@ def _validate_number(node: dict) -> list[object]:
     if node.get("format") not in _NUM_FORMATS:
         raise ValueError(f"scene number.format must be one of {sorted(_NUM_FORMATS)}")
     unit = node.get("unit")
-    if unit is not None and (not isinstance(unit, str) or len(unit) > 20):
-        raise ValueError("scene number.unit must be a short string or null")
+    if unit is not None:
+        if not isinstance(unit, str) or len(unit) > 20:
+            raise ValueError("scene number.unit must be a short string or null")
+        # bind runs _bind_value over every non-children prop, so unit can carry {{path}}
+        # interpolations. Grammar-check them up-front (G1) so bind_scene never raises a
+        # raw ValueError from parse_path on this field.
+        _check_interp_grammar(unit, "scene number.unit")
     if node.get("tone") not in _TEXT_TONES:
         raise ValueError(f"scene number.tone must be one of {sorted(_TEXT_TONES)}")
     if node.get("size") not in _TEXT_SIZES:
         raise ValueError(f"scene number.size must be one of {sorted(_TEXT_SIZES)}")
     return []
+
+
+def _check_interp_grammar(value: str, what: str) -> None:
+    """Validate every ``{{path}}`` inside a string at validation time (G1)."""
+    assert isinstance(value, str), "value must be a string"
+    assert what, "what required"
+    for match in _BIND_INTERP.finditer(value):
+        token = match.group(1)
+        if token.startswith("param:"):
+            continue  # param substitution runs pre-bind; grammar checked elsewhere
+        try:
+            parse_path(token)
+        except ValueError as exc:
+            raise ValueError(f"{what}: bad {{{{path}}}} interpolation: {exc}") from None
 
 
 def _validate_chip(node: dict) -> list[object]:
@@ -565,7 +688,14 @@ def _validate_bar(node: dict) -> list[object]:
 
 def _validate_icon(node: dict) -> list[object]:
     _closed_keys(node, {"type", "name", "tone"}, "scene icon")
-    _require_str(node.get("name"), "scene icon.name", max_len=60)
+    name = _require_str(node.get("name"), "scene icon.name", max_len=60)
+    # Literal-only (K1): no {{...}} or $bind. An icon name is a design token, not data —
+    # binder-driven names would let a payload string reach the renderer's icon dispatcher.
+    if not _ICON_NAME_RE.match(name):
+        raise ValueError(
+            "scene icon.name must be lowercase kebab (a-z, 0-9, -) 1..60 chars, "
+            "literal (no {{}} or $bind)"
+        )
     if node.get("tone") not in _TEXT_TONES:
         raise ValueError(f"scene icon.tone must be one of {sorted(_TEXT_TONES)}")
     return []
@@ -759,7 +889,9 @@ def substitute_params(spec: dict) -> dict:
 
     Rejects a secret-kind param appearing anywhere — secrets attach only through
     ``{"$secret": "..."}`` in headers, resolved at fetch time. String and number params
-    substitute inline; everything else passes through unchanged.
+    substitute inline; everything else passes through unchanged. Values landing inside
+    ``source.url`` are percent-encoded (D2) so a param value like ``../..`` or
+    ``&admin=1`` can never rewrite URL structure the user consented to.
     """
     assert isinstance(spec, dict), "spec must be a dict"
     params = spec.get("params") or {}
@@ -770,13 +902,20 @@ def substitute_params(spec: dict) -> dict:
 
 
 def _substitute_in(node: object, params: dict, *, path: str) -> None:
-    """Walk ``node`` in place; substitute {{param:X}} in every string except $secret bodies."""
+    """Walk ``node`` in place; substitute {{param:X}} in every string except $secret bodies.
+
+    Any string reached at ``spec.source.url`` is filled with the URL-encoded variant so
+    param values cannot inject URL structure (see ``_resolve_param_string``).
+    """
     assert path, "path required for error context"
     assert params is not None, "params required"
     if isinstance(node, dict):
         for k, v in list(node.items()):
             if isinstance(v, str):
-                node[k] = _resolve_param_string(v, params, path=f"{path}.{k}")
+                node[k] = _resolve_param_string(
+                    v, params, path=f"{path}.{k}",
+                    url_encode=(path == "spec.source" and k == "url"),
+                )
             elif isinstance(v, (dict, list)):
                 if isinstance(v, dict) and set(v.keys()) == {"$secret"}:
                     continue  # $secret bodies are opaque names, resolved at fetch time
@@ -784,13 +923,20 @@ def _substitute_in(node: object, params: dict, *, path: str) -> None:
     elif isinstance(node, list):
         for i, v in enumerate(node):
             if isinstance(v, str):
-                node[i] = _resolve_param_string(v, params, path=f"{path}[{i}]")
+                node[i] = _resolve_param_string(v, params, path=f"{path}[{i}]",
+                                                url_encode=False)
             elif isinstance(v, (dict, list)):
                 _substitute_in(v, params, path=f"{path}[{i}]")
 
 
-def _resolve_param_string(value: str, params: dict, *, path: str) -> str:
-    """Return ``value`` with every ``{{param:X}}`` filled; secret refs refused."""
+def _resolve_param_string(value: str, params: dict, *, path: str,
+                          url_encode: bool = False) -> str:
+    """Return ``value`` with every ``{{param:X}}`` filled; secret refs refused.
+
+    ``url_encode`` (D2): when substituting into ``source.url``, each value is
+    percent-encoded (``safe=""``) so ``?``/``&``/``/``/``#`` in a value can never
+    reshape the URL. The literal template around the placeholder stays untouched.
+    """
     assert isinstance(value, str), "value must be a string"
     assert path, "path required"
 
@@ -803,7 +949,8 @@ def _resolve_param_string(value: str, params: dict, *, path: str) -> str:
             raise ValueError(f"{path}: param {name!r} malformed")
         if p["kind"] == "secret":
             raise ValueError(f"{path}: secret param {name!r} may not be substituted inline")
-        return str(p.get("value"))
+        raw = str(p.get("value"))
+        return _url_quote(raw, safe="") if url_encode else raw
 
     return _PARAM_PLACEHOLDER.sub(_one, value)
 
@@ -995,21 +1142,49 @@ def put_credential(secrets_store, item_id: str, name: str, value: str, host: str
     """Store a secret value under ``ni:<item_id>:<name>`` bound to ``host``.
 
     Body is JSON {"value":..., "host":...}: the engine refuses to attach the secret when
-    a fetch host differs, so a stolen or misrouted credential cannot cross hosts. Returns
+    a fetch host differs, so a stolen or misrouted credential cannot cross hosts. ``host``
+    is IDNA-normalized + lowercased at store time so a mixed-case or IDN spelling matches
+    the URL's parsed hostname later (urlparse().hostname is already lowercase). Returns
     the store key name.
     """
     assert secrets_store is not None, "secrets store required"
     assert item_id and name and value, "item_id + name + value required"
     assert isinstance(host, str) and host, "host required (empty = no binding)"
+    normalized = _normalize_host(host)
     key = f"ni:{item_id}:{name}"
-    secrets_store.put(key, json.dumps({"value": value, "host": host}))
+    secrets_store.put(key, json.dumps({"value": value, "host": normalized}))
     return key
 
 
-def _load_credential(secrets_store, key: str, expected_host: str) -> str:
-    """Return the stored value iff its bound host matches ``expected_host``; else NIError."""
+def _normalize_host(host: str) -> str:
+    """Lowercase + IDNA-encode ``host`` so binding matches urlparse().hostname (K3)."""
+    assert isinstance(host, str) and host, "host required"
+    low = host.strip().lower()
+    try:
+        return low.encode("idna").decode("ascii")
+    except UnicodeError:
+        # Already ASCII or an unencodable label: keep the lowercased form so a
+        # non-IDN literal still stores as-is (matches urlparse().hostname behavior).
+        return low
+
+
+def _load_credential(secrets_store, key: str, expected_host: str,
+                     *, item_id: str, request_scheme: str) -> str:
+    """Return the stored value iff its bound host matches ``expected_host``; else NIError.
+
+    ``item_id`` + ``key`` are checked together (K2): the loader is the one place the full
+    ``ni:{item_id}:name`` prefix is enforced, so a spec whose $secret ref points at another
+    item's namespace refuses cleanly. ``request_scheme`` must be ``https`` (K3): a secret
+    never rides an http request — the transport would leak it in cleartext.
+    """
     assert secrets_store is not None, "secrets store required"
     assert key and expected_host, "key + host required"
+    assert item_id, "item_id required for scoped-prefix check"
+    expected_prefix = f"ni:{item_id}:"
+    if not key.startswith(expected_prefix):
+        raise NIError("secret_not_scoped", "credential key outside this item's namespace")
+    if request_scheme.lower() != "https":
+        raise NIError("secret_requires_https", "a secret may not ride http requests")
     raw = secrets_store.get(key)
     if raw is None:
         raise NIError("secret_missing", key)
@@ -1087,8 +1262,8 @@ class NIStore:
         assert item_id, "item id required"
         row = self._conn.execute(
             "SELECT id, enabled, state, interval_minutes, last_checked, last_status, "
-            "consecutive_failures, position, spec_rev, nonce, ciphertext, created_at, "
-            "updated_at FROM ni_items WHERE id = ?;",
+            "consecutive_failures, first_failure_at, position, spec_rev, nonce, ciphertext, "
+            "created_at, updated_at FROM ni_items WHERE id = ?;",
             [item_id],
         ).fetchone()
         return None if row is None else self._row(row)
@@ -1096,34 +1271,45 @@ class NIStore:
     def list_items(self) -> list[dict]:
         rows = self._conn.execute(
             "SELECT id, enabled, state, interval_minutes, last_checked, last_status, "
-            "consecutive_failures, position, spec_rev, nonce, ciphertext, created_at, "
-            "updated_at FROM ni_items ORDER BY position ASC, created_at ASC LIMIT ?;",
+            "consecutive_failures, first_failure_at, position, spec_rev, nonce, ciphertext, "
+            "created_at, updated_at FROM ni_items ORDER BY position ASC, created_at ASC LIMIT ?;",
             [_MAX_ITEMS],
         ).fetchall()
         assert isinstance(rows, list), "fetchall must return a list"
         return [self._row(r) for r in rows]  # bounded by _MAX_ITEMS
 
     def update_spec(self, item_id: str, new_spec: dict, *, origin: str = "user") -> int:
-        """Validate + reseal + bump spec_rev; append a revision row and prune to 10."""
+        """Validate + reseal + bump spec_rev; append a revision row and prune to 10.
+
+        Any update ALWAYS strips ``_c2_ok`` and ``contract`` from the sealed spec (A3):
+        both are system-attested at commissioning against a specific spec, and once the
+        spec changes those attestations no longer describe the item. It also resets the
+        streak (consecutive_failures + first_failure_at) so the failure counter measures
+        the current spec's behavior, not the prior one's.
+        """
         assert item_id, "item id required"
         assert isinstance(new_spec, dict), "spec must be a dict"
-        current = self.get_item(item_id)
-        if current is None:
-            raise ValueError("item not found")
-        if origin not in _REVISION_ORIGINS:
-            raise ValueError(f"origin must be one of {sorted(_REVISION_ORIGINS)}")
-        validated = validate_spec(new_spec)
-        new_rev = int(current["spec_rev"]) + 1
-        interval = self._clamp_interval(validated)
-        nonce, ciphertext = self._seal_item(item_id, validated)
-        self._conn.execute(
-            "UPDATE ni_items SET nonce = ?, ciphertext = ?, spec_rev = ?, "
-            "interval_minutes = ?, updated_at = now() WHERE id = ?;",
-            [nonce, ciphertext, new_rev, interval, item_id],
-        )
-        self._write_revision(item_id, new_rev, validated, origin)
-        self._prune_revisions(item_id)
-        return new_rev
+        with _SPEC_LOCK:
+            current = self.get_item(item_id)
+            if current is None:
+                raise ValueError("item not found")
+            if origin not in _REVISION_ORIGINS:
+                raise ValueError(f"origin must be one of {sorted(_REVISION_ORIGINS)}")
+            validated = validate_spec(new_spec)
+            validated.pop("_c2_ok", None)
+            validated["contract"] = None  # keep the key present so validators stay happy
+            new_rev = int(current["spec_rev"]) + 1
+            interval = self._clamp_interval(validated)
+            nonce, ciphertext = self._seal_item(item_id, validated)
+            self._conn.execute(
+                "UPDATE ni_items SET nonce = ?, ciphertext = ?, spec_rev = ?, "
+                "interval_minutes = ?, consecutive_failures = 0, "
+                "first_failure_at = NULL, updated_at = now() WHERE id = ?;",
+                [nonce, ciphertext, new_rev, interval, item_id],
+            )
+            self._write_revision(item_id, new_rev, validated, origin)
+            self._prune_revisions(item_id)
+            return new_rev
 
     def set_enabled(self, item_id: str, enabled: bool) -> None:
         assert item_id, "item id required"
@@ -1215,8 +1401,8 @@ class NIStore:
         because it's an exponential formula: SQL would tangle for no benefit."""
         rows = self._conn.execute(
             "SELECT id, enabled, state, interval_minutes, last_checked, last_status, "
-            "consecutive_failures, position, spec_rev, nonce, ciphertext, created_at, "
-            "updated_at FROM ni_items "
+            "consecutive_failures, first_failure_at, position, spec_rev, nonce, ciphertext, "
+            "created_at, updated_at FROM ni_items "
             "WHERE enabled AND state NOT IN ('draft', 'paused', 'broken') "
             "ORDER BY last_checked ASC NULLS FIRST LIMIT ?;",
             [_MAX_ITEMS],
@@ -1254,13 +1440,15 @@ class NIStore:
     def bump_failure(self, item_id: str, status: str) -> int:
         """Advance consecutive_failures by one and stamp the status; return the new count.
 
-        Combined with ``mark_checked``, this is the run bookkeeping the engine calls after
-        a failure (whether the failure was fetch, transform, contract, or bind — every
-        failing outcome bumps the counter equally per §6).
+        Also sets ``first_failure_at = now()`` on the FIRST failure of a streak (F): the
+        broken escalation measures elapsed time from the streak start, not the item's
+        birthday, so a long-lived healthy item that begins failing today can't be classed
+        broken immediately just because it's older than the 7-day threshold.
         """
         assert item_id and isinstance(status, str), "item id + status required"
         self._conn.execute(
             "UPDATE ni_items SET consecutive_failures = consecutive_failures + 1, "
+            "first_failure_at = COALESCE(first_failure_at, now()), "
             "last_checked = now(), last_status = ? WHERE id = ?;",
             [status[:_MAX_STATUS], item_id],
         )
@@ -1273,10 +1461,29 @@ class NIStore:
         """Reset the failure counter on a good run (state transitions layer atop this)."""
         assert item_id and isinstance(status, str), "item id + status required"
         self._conn.execute(
-            "UPDATE ni_items SET consecutive_failures = 0, last_checked = now(), "
-            "last_status = ? WHERE id = ?;",
+            "UPDATE ni_items SET consecutive_failures = 0, first_failure_at = NULL, "
+            "last_checked = now(), last_status = ? WHERE id = ?;",
             [status[:_MAX_STATUS], item_id],
         )
+
+    def get_first_failure_at(self, item_id: str) -> datetime | None:
+        """Return the streak marker (F), or None when no active streak exists."""
+        assert item_id, "item id required"
+        row = self._conn.execute(
+            "SELECT first_failure_at FROM ni_items WHERE id = ?;", [item_id]
+        ).fetchone()
+        return None if row is None or row[0] is None else _to_utc(row[0])
+
+    def commission(self, item_id: str) -> None:
+        """draft -> commissioning: also clears any streak marker (A2). Route helper (B)."""
+        assert item_id, "item id required"
+        with _SPEC_LOCK:
+            self._conn.execute(
+                "UPDATE ni_items SET state = 'commissioning', "
+                "consecutive_failures = 0, first_failure_at = NULL, "
+                "updated_at = now() WHERE id = ?;",
+                [item_id],
+            )
 
     def get_created_at(self, item_id: str) -> datetime | None:
         assert item_id, "item id required"
@@ -1292,24 +1499,34 @@ class NIStore:
         restarts) so the next real run can transition to ``live``; ok=False sends the
         item back to ``draft`` for the agent to redraft (the note is not persisted in v1
         — the operator sees it in the UI at verdict time).
+
+        Refuses (ValueError, mapped to 409 by the route) unless the item is currently
+        ``commissioning`` (C1 integrity): a verdict against any other state — live,
+        broken, draft — has no C1 output to endorse and would silently corrupt the
+        state machine.
         """
         assert item_id, "item id required"
         assert isinstance(ok, bool), "ok must be bool"
         assert isinstance(note, str), "note must be a string"
-        current = self.get_item(item_id)
-        if current is None:
-            raise ValueError("item not found")
-        spec = current["spec"]
-        assert isinstance(spec, dict), "spec must decrypt to a dict"
-        if not ok:
-            self.set_state(item_id, "draft")
-            return
-        spec["_c2_ok"] = True
-        nonce, ciphertext = self._seal_item(item_id, spec)
-        self._conn.execute(
-            "UPDATE ni_items SET nonce = ?, ciphertext = ?, updated_at = now() WHERE id = ?;",
-            [nonce, ciphertext, item_id],
-        )
+        with _SPEC_LOCK:
+            current = self.get_item(item_id)
+            if current is None:
+                raise ValueError("item not found")
+            if current["state"] != "commissioning":
+                raise ValueError(
+                    f"record_validation refused: state={current['state']!r} (expected 'commissioning')"
+                )
+            spec = current["spec"]
+            assert isinstance(spec, dict), "spec must decrypt to a dict"
+            if not ok:
+                self.set_state(item_id, "draft")
+                return
+            spec["_c2_ok"] = True
+            nonce, ciphertext = self._seal_item(item_id, spec)
+            self._conn.execute(
+                "UPDATE ni_items SET nonce = ?, ciphertext = ?, updated_at = now() WHERE id = ?;",
+                [nonce, ciphertext, item_id],
+            )
 
     def _write_revision(self, item_id: str, rev: int, spec: dict, origin: str) -> None:
         """Seal one revision under ``ni_revision:<item_id>:<rev>``."""
@@ -1367,15 +1584,17 @@ class NIStore:
     def _row(self, row: tuple) -> dict:
         item_id = str(row[0])
         aad = f"ni_item:{item_id}".encode()
-        spec = json.loads(self._aes.decrypt(bytes(row[9]), bytes(row[10]), aad).decode("utf-8"))
+        spec = json.loads(self._aes.decrypt(bytes(row[10]), bytes(row[11]), aad).decode("utf-8"))
         return {
             "id": item_id, "enabled": bool(row[1]), "state": str(row[2]),
             "interval_minutes": int(row[3]),
             "last_checked": None if row[4] is None else str(row[4]),
             "last_status": str(row[5] or ""),
-            "consecutive_failures": int(row[6]), "position": int(row[7]),
-            "spec_rev": int(row[8]), "spec": spec,
-            "created_at": str(row[11]), "updated_at": str(row[12]),
+            "consecutive_failures": int(row[6]),
+            "first_failure_at": None if row[7] is None else _to_utc(row[7]),
+            "position": int(row[8]),
+            "spec_rev": int(row[9]), "spec": spec,
+            "created_at": str(row[12]), "updated_at": str(row[13]),
         }
 
 
@@ -1409,12 +1628,19 @@ def _is_due(item: dict, now: datetime) -> bool:
 
 # --- engine ---------------------------------------------------------------
 
-def tick(app, pass_budget_seconds: float = 20.0) -> int:
+def tick(app, pass_budget_seconds: float = 20.0,
+         breaker_open=None) -> int:
     """Run due NI items — modeled line-for-line on feeds.tick.
 
     Bails when the vault is locked (sealed specs can't decrypt); owns a per-thread
     cursor (DuckDB cursors are not thread-safe); one bounded try/except per item; a
     wall-clock budget between items so a slow host can't eat the tick.
+
+    ``breaker_open`` (I): a Callable returning True while the gateway breaker is
+    suppressing model traffic. Model-source items are SKIPPED (they stay due — no
+    ``mark_checked``, so the next tick with a healthy gateway picks them up); http_json
+    and internal.schedule items are unaffected (they don't touch the gateway).
+    Doc §8 already promises this behavior.
     """
     assert app is not None, "app required"
     assert pass_budget_seconds > 0, "pass budget must be positive"
@@ -1437,6 +1663,10 @@ def tick(app, pass_budget_seconds: float = 20.0) -> int:
         for item in store.due_items():  # bounded by _MAX_ITEMS_PER_PASS
             if time.monotonic() - started > pass_budget_seconds:
                 return checked  # the rest stay due; next tick continues
+            if breaker_open is not None and breaker_open():
+                source_type = (item["spec"].get("source") or {}).get("type")
+                if source_type == "model":
+                    continue  # skip; item stays due for the next tick
             try:
                 run_item(store, item["id"], gateway_mod=gateway_mod,
                          secrets_store=secrets_store, schedules_store=schedules_store)
@@ -1461,6 +1691,11 @@ def run_item(store: NIStore, item_id: str, *, gateway_mod, secrets_store,
     Substitute params -> fetch -> pipeline -> optional contract check -> bind -> write
     snapshots (latest always; last_good on success) -> record_run -> transition. Raises
     NIError on a failure (caller records mark_checked + last_status).
+
+    ANY exception from the pipeline / bind / finalize path is wrapped as NIError inside
+    the try/except so bookkeeping (mark_checked + ni_runs row + failure bump + latest
+    snapshot with ok=False) fires on EVERY failure path (G2/G3 — the prior code let a
+    non-NIError from finalize skip the run row entirely).
     """
     assert store is not None and item_id, "store + id required"
     assert gateway_mod is not None and secrets_store is not None, "gateway + secrets required"
@@ -1470,7 +1705,8 @@ def run_item(store: NIStore, item_id: str, *, gateway_mod, secrets_store,
     started = time.monotonic()
     try:
         spec = substitute_params(item["spec"])
-        payload = _fetch_source(spec, item_id, gateway_mod, secrets_store, schedules_store)
+        payload = _fetch_source(spec, item_id, gateway_mod, secrets_store,
+                                schedules_store, store)
         outputs = run_pipeline(spec.get("pipeline") or [], payload)
     except NIError as exc:
         _handle_failure(store, item, exc, started)
@@ -1479,7 +1715,17 @@ def run_item(store: NIStore, item_id: str, *, gateway_mod, secrets_store,
         wrapped = NIError("internal", exc.__class__.__name__)
         _handle_failure(store, item, wrapped, started)
         raise wrapped from None
-    return _finalize_run(store, item, spec, outputs, started)
+    # Finalize under the same net: bind / contract / snapshot writes can raise types the
+    # prior code didn't wrap (a raw ValueError from a serialize step used to skip the
+    # ni_runs row entirely — audit finding G).
+    try:
+        return _finalize_run(store, item, spec, outputs, started)
+    except NIError:
+        raise
+    except Exception as exc:
+        wrapped = NIError("internal", exc.__class__.__name__)
+        _handle_failure(store, item, wrapped, started)
+        raise wrapped from None
 
 
 def _finalize_run(store: NIStore, item: dict, spec: dict, outputs: dict,
@@ -1488,7 +1734,14 @@ def _finalize_run(store: NIStore, item: dict, spec: dict, outputs: dict,
     contract = spec.get("contract")
     state = item["state"]
     contract_ok: bool | None = None
-    if contract is not None and state in ("live", "degraded", "failing"):
+    # C3 (commissioning + _c2_ok + contract already captured): the run must satisfy the
+    # captured contract before we can move to live. A violation = a run failure, and
+    # ``_transition_on_failure`` keeps the item at commissioning per §6.
+    check_contract_now = contract is not None and (
+        state in ("live", "degraded", "failing")
+        or (state == "commissioning" and spec.get("_c2_ok") is True)
+    )
+    if check_contract_now:
         ok, violation = check_contract(contract, outputs)
         contract_ok = ok
         if not ok:
@@ -1500,6 +1753,8 @@ def _finalize_run(store: NIStore, item: dict, spec: dict, outputs: dict,
     except NIError as exc:
         _handle_failure(store, item, exc, started, contract_ok=contract_ok)
         raise
+    _enforce_bind_types(spec["scene"], bound)
+    _enforce_payload_size(bound)
     duration_ms = int((time.monotonic() - started) * 1000)
     store.write_snapshot(item["id"], "latest", bound, ok=True)
     store.write_snapshot(item["id"], "last_good", bound, ok=True)
@@ -1510,47 +1765,121 @@ def _finalize_run(store: NIStore, item: dict, spec: dict, outputs: dict,
     return {"status": "ok", "duration_ms": duration_ms}
 
 
+def _enforce_bind_types(scene: dict, bound: dict) -> None:
+    """Post-bind per-prop type check (H): text/chip string, number/bar numeric, repeat list.
+
+    The scene validator constrained the source shape; this re-checks that the BINDER
+    honored the same shape after substituting live data, so a bound payload never
+    reaches write_snapshot with a wrong-typed leaf value (e.g. a $bind that resolved a
+    dict into a text.value slot). Iterative walk (no recursion, POW10 #1)."""
+    assert isinstance(scene, dict) and isinstance(bound, dict), "scene + bound required"
+    pending: list[dict] = [bound]
+    for _ in range(2 * _MAX_SCENE_NODES):  # bounded (POW10 #2); post-expansion cap is the real bound
+        if not pending:
+            return
+        node = pending.pop()
+        if not isinstance(node, dict):
+            raise NIError("bind_type", "bound node must be a dict")
+        ntype = node.get("type")
+        if ntype in ("text", "chip"):
+            value = node.get("value")
+            if not isinstance(value, str) or len(value) > _MAX_TEXT_CHARS:
+                raise NIError("bind_type", f"{ntype}.value must be a string <= {_MAX_TEXT_CHARS}")
+        elif ntype in ("number", "bar"):
+            value = node.get("value")
+            if not isinstance(value, (int, float)) or isinstance(value, bool):
+                raise NIError("bind_type", f"{ntype}.value must be a finite number")
+            # math.isfinite matches the "finite number" contract (rejects NaN + inf) without
+            # tripping the "compare with self" lint on the classic NaN pattern.
+            if not math.isfinite(float(value)):
+                raise NIError("bind_type", f"{ntype}.value must be finite")
+        pending.extend(node.get("children") or [])  # bounded by _MAX_SCENE_NODES
+    raise NIError("bind_type", "bound tree exceeded traversal bound")
+
+
+def _enforce_payload_size(bound: dict) -> None:
+    """Refuse a bound payload whose JSON serialization exceeds _MAX_PAYLOAD_BYTES (H)."""
+    assert isinstance(bound, dict), "bound must be a dict"
+    size = len(json.dumps(bound).encode("utf-8"))
+    if size > _MAX_PAYLOAD_BYTES:
+        raise NIError("payload_too_large",
+                      f"{size} bytes (max {_MAX_PAYLOAD_BYTES})")
+
+
 def _handle_failure(store: NIStore, item: dict, exc: NIError, started: float, *,
                     contract_ok: bool | None = None) -> None:
-    """Bookkeeping for any failing outcome: run row + failure counter + state transition."""
+    """Bookkeeping for any failing outcome: run row + failure counter + state transition.
+
+    Also writes a ``latest`` snapshot marked ``ok=False`` with an empty payload (G3) so
+    the board's ``_pick_board_snapshot`` fallback (latest-if-ok else last_good) sees a
+    real failure marker instead of silently keeping the previous latest — otherwise a
+    degraded item shows its last-good in the "latest" slot until a manual /run fires.
+    """
     assert store is not None and item is not None and exc is not None, "args required"
     duration_ms = int((time.monotonic() - started) * 1000)
     store.record_run(item["id"], "error", duration_ms=duration_ms, error=exc.kind,
                      contract_ok=contract_ok)
+    try:
+        store.write_snapshot(item["id"], "latest", {}, ok=False)
+    except Exception:  # bookkeeping must never mask the original failure
+        log.warning("ni latest-snapshot failure marker skipped: item=%s", item["id"])
     new_count = store.bump_failure(item["id"], exc.kind)
     _transition_on_failure(store, item, exc, new_count)
 
 
 def _transition_on_success(store: NIStore, item: dict, spec: dict, outputs: dict) -> None:
     """§6 success transitions: commissioning->live (C3 after C2 ok, contract satisfied);
-    contract capture on C1; degraded/failing/live -> live."""
+    C1 contract capture with one-more-clean-run gate; degraded/failing/live -> live.
+
+    C (audit): on the first C1 pass with ``_c2_ok`` already true, if the sealed spec has
+    NO contract yet, capture it now and STAY in commissioning (require one more clean
+    run to reach live). If a contract IS present, the pre-bind check in ``_finalize_run``
+    already verified it — a pass here moves the item to live.
+    """
     assert store is not None and item and spec, "args required"
     state = item["state"]
     if state == "commissioning":
-        if spec.get("_c2_ok") is True:
-            # C3: the first post-C2 run must satisfy the (already captured) contract.
-            # Move to live and keep the contract as-is.
+        if spec.get("_c2_ok") is True and item["spec"].get("contract") is not None:
+            # C3: contract already captured + verified pre-bind. Move to live.
             store.set_state(item["id"], "live")
             return
-        # C1: capture the contract on first successful commissioning run.
-        contract = capture_contract(outputs)
-        updated = dict(item["spec"])
-        updated["contract"] = contract
-        # Re-seal WITHOUT bumping spec_rev — the contract is system-written; a rev bump
-        # would incorrectly claim the user/agent changed the spec.
-        nonce, ciphertext = store._seal_item(item["id"], updated)
-        store.conn.execute(
-            "UPDATE ni_items SET nonce = ?, ciphertext = ?, updated_at = now() WHERE id = ?;",
-            [nonce, ciphertext, item["id"]],
-        )
+        if spec.get("_c2_ok") is True and item["spec"].get("contract") is None:
+            # First clean run AFTER C2 verdict — capture the contract and require ONE MORE
+            # clean run (with the contract check active) before promoting to live.
+            _reseal_capture_contract(store, item, outputs)
+            return
+        # Pre-C2 (C1): capture the contract on first successful commissioning run;
+        # user's C2 verdict still needed before we consider promotion.
+        _reseal_capture_contract(store, item, outputs)
         return
     if state in ("live", "degraded", "failing"):
         store.set_state(item["id"], "live")
 
 
+def _reseal_capture_contract(store: NIStore, item: dict, outputs: dict) -> None:
+    """Capture and re-seal the contract WITHOUT bumping spec_rev (system-written)."""
+    assert store is not None and item and outputs is not None, "args required"
+    contract = capture_contract(outputs)
+    with _SPEC_LOCK:
+        # Re-read under the lock: another writer could have amended the spec between
+        # run_item's initial fetch and now (rev bump + strip _c2_ok on update_spec).
+        fresh = store.get_item(item["id"])
+        if fresh is None:
+            return
+        updated = dict(fresh["spec"])
+        updated["contract"] = contract
+        nonce, ciphertext = store._seal_item(item["id"], updated)
+        store.conn.execute(
+            "UPDATE ni_items SET nonce = ?, ciphertext = ?, updated_at = now() WHERE id = ?;",
+            [nonce, ciphertext, item["id"]],
+        )
+
+
 def _transition_on_failure(store: NIStore, item: dict, exc: NIError, count: int) -> None:
     """§6 failure transitions: degraded -> failing after threshold; broken on the
-    escalation rule (8 failures across >=7 days) or a permanent refusal."""
+    escalation rule (8 failures across >=7 days FROM THE STREAK START, F) or a permanent
+    refusal.
+    """
     assert store is not None and item is not None and exc is not None, "args required"
     if exc.kind == "secret_host_mismatch":
         # A credential host mismatch is a permanent refusal — no schedule of retries
@@ -1558,9 +1887,9 @@ def _transition_on_failure(store: NIStore, item: dict, exc: NIError, count: int)
         store.set_state(item["id"], "broken")
         return
     if count >= _BROKEN_FAILURE_COUNT:
-        created = store.get_created_at(item["id"])
+        first = store.get_first_failure_at(item["id"])
         now = datetime.now(UTC)
-        if created is not None and (now - created) >= timedelta(days=_BROKEN_MIN_DAYS):
+        if first is not None and (now - first) >= timedelta(days=_BROKEN_MIN_DAYS):
             store.set_state(item["id"], "broken")
             return
     if item["state"] == "commissioning":
@@ -1572,46 +1901,67 @@ def _transition_on_failure(store: NIStore, item: dict, exc: NIError, count: int)
 
 
 def _fetch_source(spec: dict, item_id: str, gateway_mod, secrets_store,
-                  schedules_store) -> dict:
+                  schedules_store, store: NIStore) -> dict:
     """Dispatch by source type — each returns the payload the pipeline consumes."""
     assert isinstance(spec, dict) and item_id, "spec + id required"
+    assert store is not None, "store required (model routes need its cursor)"
     source = spec.get("source") or {}
     stype = source.get("type")
     if stype == "http_json":
         return _fetch_http_json(source, item_id, secrets_store)
     if stype == "model":
-        return _fetch_model(spec, source, gateway_mod)
+        return _fetch_model(spec, source, gateway_mod, store)
     if stype == "internal.schedule":
         return _fetch_internal_schedule(source, schedules_store)
     raise NIError("source_bad_type", str(stype))
 
 
 def _fetch_http_json(source: dict, item_id: str, secrets_store) -> dict:
-    """Guarded JSON fetch; headers with ``$secret`` are host-bound at storage time."""
-    from urllib.parse import urlparse
+    """Guarded JSON fetch; headers with ``$secret`` are host-bound at storage time.
 
+    Redirects are refused whenever ANY header is attached (E): auth headers must never
+    re-send to a rewritten host, and a hostile server could otherwise 302 to itself and
+    harvest the credential. When no headers are attached we keep the default redirect
+    following (parity with feed/vault fetchers).
+    """
     from . import netguard  # lazy: keep netguard off ni's import graph edges
 
     url = source["url"]
-    host = urlparse(url).hostname or ""
+    parsed = urlparse(url)
+    host = parsed.hostname or ""
+    scheme = (parsed.scheme or "").lower()
     if not host:
         raise NIError("source_bad_url", "no host")
     resolved_headers: dict[str, str] = {}
     for name, value in (source.get("headers") or {}).items():  # bounded by _MAX_HEADERS
         if isinstance(value, dict) and "$secret" in value:
-            resolved_headers[name] = _load_credential(secrets_store, value["$secret"], host)
+            resolved_headers[name] = _load_credential(
+                secrets_store, value["$secret"], host,
+                item_id=item_id, request_scheme=scheme,
+            )
         elif isinstance(value, str):
             resolved_headers[name] = value
+    has_headers = bool(resolved_headers)
     try:
-        return netguard.safe_fetch_json(url, headers=resolved_headers or None)
+        return netguard.safe_fetch_json(
+            url, headers=resolved_headers or None,
+            allow_redirects=not has_headers,  # E: refuse hop when carrying any header
+        )
     except netguard.FetchError as exc:
         raise NIError("fetch_failed", exc.__class__.__name__) from None
 
 
-def _fetch_model(spec: dict, source: dict, gateway_mod) -> dict:
-    """Run one chat completion on the ``ni`` route (or item override); return {'text': ...}."""
+def _fetch_model(spec: dict, source: dict, gateway_mod, store: NIStore) -> dict:
+    """Run one chat completion on the ``ni`` route (or item override); return {'text': ...}.
+
+    ``gateway_mod.load_routes`` requires the store's cursor (B): the previous
+    ``load_routes(None)`` tripped the module's own ``conn is not None`` assertion.
+    """
     assert isinstance(spec, dict) and isinstance(source, dict), "spec + source required"
-    routes = gateway_mod.load_routes(None) if hasattr(gateway_mod, "load_routes") else {}
+    assert store is not None, "store required to read model routes"
+    routes: dict = {}
+    if hasattr(gateway_mod, "load_routes"):
+        routes = gateway_mod.load_routes(store.conn)
     override = spec.get("model")
     model = override or gateway_mod.resolve_model("ni", routes) or gateway_mod.resolve_model("chat", routes)
     if not model:

@@ -628,9 +628,15 @@ def _auto_update_feeds(app) -> None:
 def _auto_update_ni(app) -> None:
     """Neural Interface item pass — same isolation contract as _auto_update_feeds: its own
     cursor, per-item try/except inside, this guard for anything it doesn't catch. A slow or
-    hostile NI source must never stop due schedules from firing."""
+    hostile NI source must never stop due schedules from firing.
+
+    Threads the gateway breaker check down (I): model-source items skip while the breaker
+    is open, mirroring the schedule/reindex/summarize passes. http_json and
+    internal.schedule sources are unaffected — they don't touch the gateway.
+    """
     try:
-        ni.tick(app, pass_budget_seconds=_MAX_NI_PASS_SECONDS)
+        ni.tick(app, pass_budget_seconds=_MAX_NI_PASS_SECONDS,
+                breaker_open=_breaker_open)
     except Exception as exc:  # must never kill the schedule tick
         log.warning("ni refresh pass failed: %s", exc)
 

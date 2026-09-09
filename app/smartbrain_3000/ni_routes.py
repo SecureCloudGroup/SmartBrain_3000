@@ -132,12 +132,44 @@ def validate_item(request: Request, item_id: str, body: ValidateIn) -> dict:
     """C2 verdict: ok=true stamps _c2_ok inside the sealed spec so the next real run
     can transition to live; ok=false rewinds the item to draft (per §6 C2-wrong).
     The note is not persisted in v1 — the operator saw it in the UI at verdict time.
+
+    C1 integrity: refuses (409) unless the item is currently ``commissioning`` —
+    a verdict against live/broken/draft has no C1 output to endorse.
     """
     store = _store(request)
     if store.get_item(item_id) is None:
         raise HTTPException(status_code=404, detail="item not found")
-    store.record_validation(item_id, body.ok, body.note or "")
+    try:
+        store.record_validation(item_id, body.ok, body.note or "")
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
     return {"ok": True, "state": store.get_item(item_id)["state"]}
+
+
+@router.post("/api/ni/items/{item_id}/commission")
+def commission_item(request: Request, item_id: str) -> dict:
+    """A2: draft -> commissioning (the Activate button on the drafted card).
+
+    Refuses (409) when the current state is not ``draft`` and separately (409) when
+    any ``secret``-kind param still has an empty value (the credential must be
+    entered via PUT /credential before the engine attempts a run).
+    """
+    store = _store(request)
+    item = store.get_item(item_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="item not found")
+    if item["state"] != "draft":
+        raise HTTPException(status_code=409,
+                            detail=f"commission refused: state={item['state']!r}")
+    params = item["spec"].get("params") or {}
+    for name, param in params.items():  # bounded by _MAX_PARAMS
+        if isinstance(param, dict) and param.get("kind") == "secret" and not param.get("value"):
+            raise HTTPException(
+                status_code=409,
+                detail=f"commission refused: secret param {name!r} not yet filled",
+            )
+    store.commission(item_id)
+    return {"state": "commissioning"}
 
 
 @router.post("/api/ni/items/{item_id}/run")
@@ -147,10 +179,18 @@ def run_item(request: Request, item_id: str) -> dict:
     Uses the request-scoped stores directly — SecretStore and ScheduleStore are Desktop-side
     objects; the tool path never sees them. On success/failure we still ``mark_checked`` so
     the tick's backoff bookkeeping is consistent whether the tick or this endpoint fired it.
+
+    K6: refuses draft (no C1 yet) and broken (permanent refusal) with 409.
     """
     store = _store(request)
-    if store.get_item(item_id) is None:
+    item = store.get_item(item_id)
+    if item is None:
         raise HTTPException(status_code=404, detail="item not found")
+    if item["state"] in ("draft", "broken"):
+        raise HTTPException(status_code=409,
+                            detail=f"run refused: state={item['state']!r}")
+    if not item["enabled"]:
+        raise HTTPException(status_code=409, detail="run refused: item paused")
     state = request.app.state
     secrets = _secret_store(request)
     schedules = getattr(state, "schedules", None) or ScheduleStore(state.dbx, state.master_key)

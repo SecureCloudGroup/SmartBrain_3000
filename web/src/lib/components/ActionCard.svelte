@@ -10,6 +10,7 @@
     icon = "pencil" as IconName,
     title,
     tier = "reviewed",
+    promoted = "",
     scope = "",
     badge = true,
     actions,
@@ -17,6 +18,9 @@
     icon?: IconName;
     title: string;
     tier?: "reviewed" | "irreversible";
+    // Consent-critical line the card must show FIRST and bold (e.g. the URL an
+    // ni-item fetch would hit). Empty = no promoted line.
+    promoted?: string;
     scope?: string; // pre-formatted "key: value" lines (Activity's fmtArgs output)
     badge?: boolean; // hide the reversibility chip where it reads oddly (e.g. chat's resume card)
     actions?: Snippet;
@@ -28,6 +32,7 @@
     <Icon name={tier === "irreversible" ? "warn" : icon} size={16} />
     {title}
   </div>
+  {#if promoted}<p class="promoted">{promoted}</p>{/if}
   {#if scope}<pre class="scope">{scope}</pre>{/if}
   <div class="foot">
     {#if badge}
@@ -64,6 +69,14 @@
   }
   .head :global(svg) { color: var(--accent); }
   .irreversible .head :global(svg) { color: var(--danger); }
+  .promoted {
+    margin: 0;
+    font-weight: 600;
+    font-size: var(--f-label);
+    color: var(--text);
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
   .scope {
     max-height: 16rem;
     overflow: auto;
