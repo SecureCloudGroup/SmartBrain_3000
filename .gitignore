@@ -38,6 +38,11 @@ recovery-key*
 
 # ---- Local user data: embedded DuckDB, sqlite, runtime state ---------------
 data/
+# The bundled NI source catalog is SHIPPED package data, not user data — without
+# this exception the blanket data/ rule silently drops it from every clone and
+# the app fails at import (ni_catalog loads it at module load).
+!app/smartbrain_3000/data/
+!app/smartbrain_3000/data/**
 runtime/
 *.duckdb
 *.duckdb.wal

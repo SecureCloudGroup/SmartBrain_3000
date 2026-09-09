@@ -193,14 +193,20 @@ def test_run_route_executes_synchronously(client: TestClient, monkeypatch) -> No
 
     captured: dict = {}
 
-    def fake_run_item(store, item_id, *, gateway_mod, secrets_store, schedules_store=None):
+    sentinel_kb = object()
+    client.app.state.kb = sentinel_kb
+
+    def fake_run_item(store, item_id, *, gateway_mod, secrets_store,
+                      schedules_store=None, kb=None):
         captured["id"] = item_id
+        captured["kb"] = kb  # the route must thread app.state.kb (internal.kb items)
         return {"status": "ok", "duration_ms": 7}
 
     monkeypatch.setattr(ni, "run_item", fake_run_item)
     r = client.post(f"/api/ni/items/{iid}/run")
     assert r.status_code == 200
     assert r.json()["status"] == "ok" and captured["id"] == iid
+    assert captured["kb"] is sentinel_kb
 
 
 def test_run_route_reports_nierror(client: TestClient, monkeypatch) -> None:
@@ -384,7 +390,7 @@ def test_manual_run_route_posts_alerts_and_broken_to_carrier(
     client.app.state.ni.commission(iid)  # /run refuses draft (K6) — advance out of it
 
     def fake_run_item(store, item_id, *, gateway_mod, secrets_store,
-                      schedules_store=None, reserve_repair=None):
+                      schedules_store=None, reserve_repair=None, kb=None):
         store.set_state(item_id, "broken")  # forces broken-transition posting
         return {"status": "ok", "duration_ms": 1,
                 "alerts": [{"item_id": item_id, "title": "Watch",
@@ -464,3 +470,77 @@ def test_fetch_http_json_refuses_redirect_only_when_headers_attached(monkeypatch
     with pytest.raises(netguard.FetchError, match="redirect refused"):
         netguard.safe_fetch_json("https://api.example.com/q",
                                  headers={"X-Trace": "id-1"}, allow_redirects=False)
+
+
+# --- §17: GET /api/ni/notices (launcher tray poll) --------------------------
+
+def _notices_store(client: TestClient):
+    from smartbrain_3000 import scheduler as sched
+
+    return sched.ScheduleStore(client.app.state.dbx, client.app.state.master_key)
+
+
+def test_notices_requires_desktop_local_header(client: TestClient) -> None:
+    """A bridged-in remote device must never pull notice bodies (403 without the marker)."""
+    _unlock(client)
+    assert client.get("/api/ni/notices").status_code == 403
+
+
+def test_notices_locked_returns_423(client: TestClient) -> None:
+    """A locked vault yields no notices at all — the launcher reads 423 as 'skip'."""
+    r = client.get("/api/ni/notices", headers={"X-SB-Local": "1"})
+    assert r.status_code == 423
+
+
+def test_notices_kind_mapping_via_carrier_posts(client: TestClient) -> None:
+    """Each notice type posted through post_ni_carrier_notices maps to its §17 kind:
+    fired alert -> "alert" (status complete), broken transition -> "broken",
+    §14 self-repair -> "repaired" — with the sealed message as the body."""
+    from smartbrain_3000 import scheduler as sched
+
+    _unlock(client)
+    sched.post_ni_carrier_notices(
+        _notices_store(client),
+        [{"item_id": "a", "title": "Watch", "message": "CPU is hot"}],
+        [{"item_id": "b", "title": "Doomed"}],
+        repaired=[{"item_id": "c", "title": "Mended"}],
+    )
+    rows = client.get("/api/ni/notices", headers={"X-SB-Local": "1"}).json()
+    assert len(rows) == 3
+    by_kind = {r["kind"]: r for r in rows}
+    assert set(by_kind) == {"alert", "broken", "repaired"}
+    assert by_kind["alert"]["body"] == "CPU is hot"
+    assert "Doomed is broken" in by_kind["broken"]["body"]
+    assert "Mended repaired itself" in by_kind["repaired"]["body"]
+    for row in rows:
+        assert set(row) == {"id", "kind", "body", "ts"}
+        assert isinstance(row["id"], int) and row["id"] > 0 and row["ts"]
+
+
+def test_notices_newest_first_and_ids_stable_monotonic(client: TestClient) -> None:
+    """The launcher dedupes by highest-seen id, so ids must be stable across polls
+    and ordered by recency (newest first = non-increasing down the list)."""
+    import time as _time
+
+    _unlock(client)
+    store = _notices_store(client)
+    store.record_ni_run("complete", "first")
+    _time.sleep(0.002)  # distinct microsecond timestamps -> strictly ordered ids
+    store.record_ni_run("complete", "second")
+    rows = client.get("/api/ni/notices", headers={"X-SB-Local": "1"}).json()
+    assert [r["body"] for r in rows] == ["second", "first"]
+    assert rows[0]["id"] > rows[1]["id"]
+    again = client.get("/api/ni/notices", headers={"X-SB-Local": "1"}).json()
+    assert again == rows  # stable: the same rows answer with the same ids
+
+
+def test_notices_limit_clamped_and_defaulted(client: TestClient) -> None:
+    _unlock(client)
+    store = _notices_store(client)
+    for i in range(25):  # bounded: just past the ≤20 clamp
+        store.record_ni_run("complete", f"m{i}")
+    local = {"X-SB-Local": "1"}
+    assert len(client.get("/api/ni/notices", headers=local).json()) == 10  # default
+    assert len(client.get("/api/ni/notices?limit=50", headers=local).json()) == 20  # clamp
+    assert len(client.get("/api/ni/notices?limit=0", headers=local).json()) == 1  # floor
+    assert len(client.get("/api/ni/notices?limit=5", headers=local).json()) == 5

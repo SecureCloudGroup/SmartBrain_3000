@@ -383,6 +383,28 @@ def safe_post_json(url: str, payload: dict, headers: dict | None = None) -> dict
         raise FetchError("upstream returned invalid JSON") from None
 
 
+def safe_fetch_page(url: str, headers: dict | None = None,
+                    allow_redirects: bool = True,
+                    deadline_seconds: float | None = None) -> dict:
+    """Guarded GET for the ``http_page`` NI source — HTML bytes for the subprocess jail.
+
+    Same SSRF guard as every other fetcher, with the html-friendly content-type set
+    (``text/html``, ``application/xhtml+xml``, plus the generic ``text/``) so pages
+    served with a plain ``text/plain`` still land. Returns ``{final_url, status,
+    content_type, content (bytes)}`` — the caller feeds ``content`` into
+    ``jailrun.run_extractor`` (no in-process HTML parse, per §15 + §16).
+    ``allow_redirects=False`` is threaded through when the NI caller attaches any
+    header (mirrors ``safe_fetch_json`` credential-exfiltration guard).
+    """
+    got = _guarded_get(
+        url, ("text/html", "application/xhtml+xml", "text/"),
+        _MAX_BYTES, extra_headers=headers, allow_redirects=allow_redirects,
+        deadline_seconds=deadline_seconds,
+    )
+    return {"final_url": got["final_url"], "status": got["status"],
+            "content_type": got["content_type"], "content": got["content"]}
+
+
 def safe_fetch_feed(url: str) -> dict:
     """Guarded GET for RSS/Atom documents — same SSRF guard, XML-friendly content types.
 

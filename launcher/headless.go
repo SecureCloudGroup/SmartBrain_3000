@@ -62,7 +62,7 @@ func runVerb(verb string) int {
 	}
 }
 
-// runHeadless is the tray-less persona: the same stack init and the exact three
+// runHeadless is the tray-less persona: the same stack init and the exact four
 // goroutines onReady launches, minus the menus (whose seams no-op — see setStatus
 // and friends in main.go). SIGTERM/SIGINT stops the stack and exits 0, so a
 // systemd unit's stop actually stops SmartBrain — unlike quitting the tray, which
@@ -81,6 +81,7 @@ func runHeadless() {
 	go start()         // bring it up on launch
 	go updateChecker() // then quietly watch for a newer image
 	go handshakeLoop() // and keep the app told about what is staged
+	go noticesLoop()   // and surface Neural Interface notices as toasts
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)

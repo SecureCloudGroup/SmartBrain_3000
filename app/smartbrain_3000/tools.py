@@ -19,7 +19,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 
-from . import gateway, ingest, kbindex, netguard, ni, search, vault_format
+from . import gateway, ingest, kbindex, netguard, ni, ni_catalog, search, vault_format
 from . import (
     summarize as docsum,  # aliased: this module already defines a summarize() helper (line ~845)
 )
@@ -692,14 +692,33 @@ def _ni_source_provenance(source: dict | None) -> str:
     if not isinstance(source, dict):
         return "the NI item source"
     stype = source.get("type")
-    if stype == "http_json":
+    if stype in ("http_json", "http_page"):
         url = source.get("url") or ""
         return _host_of(url) if isinstance(url, str) else "the NI item source"
     if stype == "model":
         return "the routed model"
     if stype == "internal.schedule":
         return "the referenced schedule"
+    if stype == "internal.kb":
+        # Imported vault docs are third-party content — the KB label keeps that
+        # stance visible in the provenance line.
+        return "your knowledge base (may include imported third-party documents)"
     return "the NI item source"
+
+
+def _list_ni_catalog(ctx: ToolContext, args: dict) -> dict:
+    """OBSERVE: list the bundled Neural Interface source catalog (§18) — vetted, keyless/free-tier
+    public endpoints the drafting agent should prefer over open web research.
+
+    Static data (no ctx access — ctx is intentionally ignored, same shape as other
+    no-store OBSERVE handlers). Optional ``category`` filters the list; an unknown
+    category returns ``[]`` — never an error — so the model can pass through the
+    user's word without a pre-check.
+    """
+    assert isinstance(args, dict), "args must be a dict"
+    category = args.get("category")
+    assert category is None or isinstance(category, str), "category must be a string"
+    return {"sources": ni_catalog.entries(category)}
 
 
 def _list_ni_items(ctx: ToolContext, args: dict) -> dict:
@@ -1371,6 +1390,25 @@ _TOOLS: tuple[Tool, ...] = (
         egress=False,
     ),
     Tool(
+        name="list_ni_catalog",
+        description="List the bundled catalog of VETTED public data sources for Neural Interface tiles — "
+                    "keyless / free-tier JSON endpoints (finance, weather, news, crypto, misc), each with "
+                    "id/title/host/url_template/docs_url/auth/category/notes. When drafting a create_ni_item "
+                    "PREFER a catalog entry over live web research and tell the user the suggestion is 'from "
+                    "SmartBrain's vetted catalog'; if you fall back to web_search / web_research to find a "
+                    "different source, describe it as 'found via web search' so the difference is visible. "
+                    "Optional 'category' filters to one category (unknown category returns an empty list, not "
+                    "an error).",
+        params_schema={
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {"category": {"type": "string"}},
+        },
+        tier=Tier.OBSERVE,
+        handler=_list_ni_catalog,
+        egress=False,
+    ),
+    Tool(
         name="list_ni_items",
         description="List the user's Neural Interface ITEMS (little always-on info tiles rendered from a "
                     "closed scene grammar), each with id/title/state/enabled/interval_minutes and health. "
@@ -1518,7 +1556,7 @@ _TOOLS: tuple[Tool, ...] = (
 
 # OBSERVE tools must be read-only + no egress; this allowlist is the structural
 # safety invariant checked at import.
-_OBSERVE_READONLY = frozenset({"kb_search", "read_document", "summarize_document", "list_documents", "list_tasks", "list_schedules", "read_schedule_output", "list_ni_items", "read_ni_item"})
+_OBSERVE_READONLY = frozenset({"kb_search", "read_document", "summarize_document", "list_documents", "list_tasks", "list_schedules", "read_schedule_output", "list_ni_catalog", "list_ni_items", "read_ni_item"})
 
 # REVIEWED tools that MUTATE schedules. A schedule creates/rewrites/re-enables an autonomous
 # agent turn, so these must NEVER auto-run (via remembered consent) inside a schedule-executed

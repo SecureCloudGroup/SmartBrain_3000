@@ -577,3 +577,85 @@ L0's domain (backoff) or the user's (credentials).
 - Repair attempts and their outcomes write `ni_runs` rows (status
   `repair_applied` / `repair_reverted` / `repair_failed`) — visible in the item's
   run history. Everything is auditable: the revision spine holds the before/after.
+
+## 15. `http_page` and `internal.kb` sources (v2c)
+
+`http_page`:
+```json
+{"type": "http_page", "url": "https://example.com/status",
+ "headers": {"X-Api-Key": {"$secret": "ni:<item_id>:api_key"}}}
+```
+- URL/param/header/credential/redirect rules are IDENTICAL to `http_json` (§3
+  — frozen scheme+authority, percent-encoded params, host-bound https-only
+  secrets, `allow_redirects=False` whenever any header rides).
+- Fetch via netguard with text/HTML content types, 2 MB cap. The body is then
+  **extracted in a subprocess jail** (§16) — HTML parsers are historically
+  vulnerable and this is the one place we parse hostile markup. Pipeline
+  payload: `{"text": str, "title": str}` (text ≤ 200 KB post-extraction).
+
+`internal.kb`:
+```json
+{"type": "internal.kb", "query": "quarterly spending", "limit": 5}
+```
+- Zero egress: runs the knowledge-base hybrid search on the user's own library.
+  `limit` clamped 1–10. Payload: `{"results": [{"title", "snippet", "doc_id"}]}`
+  (snippets ≤ 500 chars each). Requires the unlocked KB; locked ⇒ the engine
+  isn't running anyway. Imported-vault content keeps its third-party status —
+  the pipeline treats every source's bytes as untrusted, this one included.
+
+## 16. Subprocess jail (v2c)
+
+For parse steps over hostile input (today: `http_page` extraction). Contract,
+modeled on claudecli.py's process hygiene:
+
+- Child = `sys.executable -c` entry importing only the extractor; **stripped
+  environment** (no `SMARTBRAIN_*`, no `ANTHROPIC_*`, minimal PATH — the
+  claudecli `_cli_env` discipline), private cwd, `start_new_session=True`.
+- Input over stdin (bytes), output = one JSON object on stdout (size-capped);
+  stderr merged and discarded except for the failure class.
+- Resource limits in the child via `resource.setrlimit` (CPU seconds, address
+  space, no core files) — platform-guarded (the `resource` module is
+  POSIX-only; on Windows rely on the watchdog alone, and note it).
+- Watchdog timer kills the whole process group (`os.killpg`) at the deadline;
+  always reaped. Timeout/crash/malformed output ⇒ run failure class
+  `extract_jail` — never an exception past the engine's bookkeeping.
+
+## 17. Notices endpoint + tray notifications (v2c)
+
+- `GET /api/ni/notices?limit=N` — **desktop-local** (`x-sb-local`), unlocked
+  only (423 otherwise). Returns the newest NI carrier-row entries
+  `[{id, kind: "alert"|"broken"|"repaired", body, ts}]`, newest first, limit
+  clamped ≤ 20. Bodies are sanitized at WRITE time: alert messages by the §12
+  interpolation guard, and broken/repaired notices by the same newline-collapse
+  + leading-`#` quote applied to the embedded item TITLE when the carrier row is
+  posted (titles are user/agent-authored spec text and these bodies render
+  inside chat's `###`-delimited notice wrapper).
+- The native launcher polls the endpoint unconditionally every 60s; a 423
+  (locked), connection failure, or any non-200 reads as "skip" — which covers
+  healthy+unlocked in one probe. It surfaces NEW
+  entries via the existing `stack.Notify` (macOS/Linux; Windows has no Notify
+  implementation yet — documented gap). De-dup by highest-seen id in memory
+  (the `lastNotifiedVersion` idiom); at most 3 notifications per poll, extras
+  collapse to "…and N more on your Neural Interface."
+- A locked vault produces no notifications at all (the endpoint 423s) — tray
+  notices never leak sealed content past the unlock boundary.
+
+## 18. Source catalog (v2c: bundled seed; remote pack rides Phase 3 trust machinery)
+
+The curated ground for "AI suggests, user picks" (creation-flow law, §9).
+
+- v2c ships a **bundled** catalog: `app/smartbrain_3000/data/ni_catalog.json`,
+  in-repo (reviewed = trusted), loaded read-only at import. Shape:
+  `{"version": 1, "sources": [{"id", "title", "host", "url_template",
+  "docs_url", "auth": "none"|"key", "category", "notes"}]}` — every
+  `url_template` must pass the §3 URL-shape rules (literal https authority;
+  `{{param:...}}` only in path/query) and is validated by a test against the
+  real validator.
+- New OBSERVE tool `list_ni_catalog(category?)` — read-only, no egress —
+  returning the entries so the drafting agent suggests from vetted ground
+  first; live web research remains the labeled fallback. Suggested-source
+  provenance in chat: catalog entries are described as "from SmartBrain's
+  vetted catalog"; researched ones as "found via web search".
+- The remote signed catalog PACK (seq, Ed25519, pinned key, update checks) is
+  deliberately deferred to Phase 3 — it is the same trust machinery as the
+  template Library and ships once, together.
