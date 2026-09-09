@@ -420,6 +420,8 @@ Optional spec field:
   able to commission. `delta_prev` likewise never fails on an empty series (§4.2).
 - Deleting the item deletes the slot (cascade); a source-change rewind KEEPS
   history (same subject, new plumbing) unless the user deletes the item.
+- Renaming or removing a tracked series drops the old series on the next successful
+  append — retention guarantees the SAME names across rewinds, not renamed ones.
 
 ## 12. Alerts (v2)
 
@@ -452,3 +454,7 @@ Optional spec field — the same closed condition grammar as §5 `when`, promote
   a rule whose binds cannot resolve marks the RUN failed (`alert_bind`), exactly
   like a scene bind failure — alerts are part of the contract surface, not
   best-effort.
+- Renaming an alert rule (changing its `name` slug) resets its per-rule
+  `alert_state` — the new name has no prior `active`/`last_fired` record, so a rule
+  whose condition is already true at the next run may fire immediately. Accepted
+  behavior: the operator saw the rename in the approved update card.

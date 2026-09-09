@@ -173,7 +173,7 @@
   <div class="ni-gauge">
     <svg
       class="ni-gauge-svg"
-      viewBox="-48 -48 96 60"
+      viewBox="-48 -48 96 72"
       role="meter"
       aria-label={node.label ?? "gauge"}
       aria-valuenow={clampValue(node.value, node.min, node.max)}
@@ -248,8 +248,10 @@
     gap: var(--s-1);
   }
   .ni-gauge-svg {
+    /* viewBox is 96x72 — keep the 4:3 ratio so the arc's rounded caps
+       (y up to +20 + stroke) are never clipped. */
     width: 120px;
-    height: 75px;
+    height: 90px;
   }
   .ni-gauge-value {
     font-size: var(--f-h2);

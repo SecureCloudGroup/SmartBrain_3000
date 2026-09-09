@@ -757,8 +757,14 @@ def _read_ni_item(ctx: ToolContext, args: dict) -> dict:
 
 
 def _assemble_spec(args: dict) -> dict:
-    """Assemble the full spec dict from the tool's flat args; interval_minutes goes on the spec."""
-    return {
+    """Assemble the full spec dict from the tool's flat args; interval_minutes goes on the spec.
+
+    H3 (audit 2026-09-09): ``history`` (§11) and ``alerts`` (§12) are first-class spec
+    fields; the create tool must carry them through so an agent can author an item
+    that already tracks a series or fires an edge-triggered alert on approval. The
+    inner shape is validated by ``ni.validate_spec`` — the JSON schema stays loose.
+    """
+    spec: dict = {
         "version": 1,
         "title": args["title"],
         "goal": args["goal"],
@@ -772,6 +778,11 @@ def _assemble_spec(args: dict) -> dict:
         "model": args.get("model"),
         "interval_minutes": int(args["interval_minutes"]),
     }
+    if args.get("history") is not None:
+        spec["history"] = args["history"]
+    if args.get("alerts") is not None:
+        spec["alerts"] = args["alerts"]
+    return spec
 
 
 def _create_ni_item(ctx: ToolContext, args: dict) -> dict:
@@ -800,7 +811,10 @@ def _create_ni_item(ctx: ToolContext, args: dict) -> dict:
     ni.validate_scene(spec["scene"])
     preview = args["preview_payload"]
     assert isinstance(preview, dict), "preview_payload must be a JSON object"
-    ni.bind_scene(spec["scene"], preview)  # proves preview renders before store.add_item does
+    # H3 (audit 2026-09-09): seed empty history series so a scene whose spark or
+    # delta_prev binds to ``history.<name>`` can render the preview without dying on
+    # ``extract_miss`` (mirrors the C1 seeding in ``_load_history_series``).
+    ni.bind_scene(spec["scene"], preview, history=ni._seed_history(spec))
     _validate_ni_public_url(spec)  # J: refuse a non-public / SSRF-shaped URL up front
     item_id = ctx.ni.add_item(spec, preview, origin="agent")
     landing = _initial_ni_state(spec, bool(args.get("draft")))
@@ -825,8 +839,12 @@ def _update_ni_item(ctx: ToolContext, args: dict) -> dict:
     if current is None:
         raise ValueError("item not found")
     spec = dict(current["spec"])  # shallow copy; we replace whole subtrees, never mutate in place
+    # H3 (audit 2026-09-09): ``history`` + ``alerts`` are REVIEWED-updatable — an alerts
+    # or history change is a plain spec edit, NOT a source change (§11/§12), so the item
+    # stays on its current state track. ``update_spec`` still strips ``_c2_ok`` /
+    # ``contract`` per A3, which is right for any spec edit.
     for key in ("title", "goal", "params", "source", "pipeline", "scene",
-                "display", "model", "interval_minutes"):
+                "display", "model", "interval_minutes", "history", "alerts"):
         if key in args:
             spec[key] = args[key]
     ni.validate_spec(spec)  # early raise before we touch the store
@@ -837,7 +855,8 @@ def _update_ni_item(ctx: ToolContext, args: dict) -> dict:
         preview = args["preview_payload"]
         if not isinstance(preview, dict):
             raise ValueError("preview_payload must be a JSON object")
-        bound = ni.bind_scene(spec["scene"], preview)
+        # H3: seed history so a history-bound spark in the new scene renders on preview.
+        bound = ni.bind_scene(spec["scene"], preview, history=ni._seed_history(spec))
         ctx.ni.write_snapshot(args["item_id"], "preview", bound, ok=True)
     if source_changed:
         ctx.ni.commission(args["item_id"])  # A3: the approved update card is re-consent
@@ -1401,6 +1420,10 @@ _TOOLS: tuple[Tool, ...] = (
                 "interval_minutes": {"type": "integer"},
                 "model": {"type": "string"},
                 "preview_payload": {"type": "object"},
+                # H3: history + alerts are first-class spec fields — the inner shape is
+                # validated by ni.validate_spec (§11/§12); the schema stays loose here.
+                "history": {"type": "object"},
+                "alerts": {"type": "array"},
                 # A1: agent opts INTO draft with the "show me first" affordance. Absent
                 # or false lands the item in commissioning (approval == consent).
                 "draft": {"type": "boolean"},
@@ -1435,6 +1458,10 @@ _TOOLS: tuple[Tool, ...] = (
                 "model": {"type": "string"},
                 # K8: rewrite the preview snapshot alongside the spec (stale-preview note in doc).
                 "preview_payload": {"type": "object"},
+                # H3: history + alerts are updatable — an alerts/history change is a plain
+                # REVIEWED spec edit, NOT a source change (§11/§12 audit 2026-09-09).
+                "history": {"type": "object"},
+                "alerts": {"type": "array"},
             },
             "required": ["item_id"],
         },

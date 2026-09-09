@@ -662,14 +662,6 @@ def _auto_update_ni(app) -> None:
     except Exception as exc:  # must never kill the schedule tick
         log.warning("ni refresh pass failed: %s", exc)
         return
-    try:
-        _post_ni_carrier_notices(app, result)
-    except Exception as exc:  # posting must never kill the schedule tick either
-        log.warning("ni carrier posting failed: %s", exc)
-
-
-def _post_ni_carrier_notices(app, result) -> None:
-    """Write each fired alert + broken notice to the NI carrier (§12). Locked vault = no-op."""
     if not isinstance(result, dict):
         return
     alerts = result.get("alerts") or []
@@ -681,17 +673,37 @@ def _post_ni_carrier_notices(app, result) -> None:
         return
     cursor = app.state.db.cursor()
     try:
-        store = ScheduleStore(cursor, key)
-        for alert in alerts:  # bounded by upstream tick's per-pass item + rule limits
-            store.record_ni_run("complete", str(alert.get("message", "")))
-        for notice in broken:  # bounded by the same
+        post_ni_carrier_notices(ScheduleStore(cursor, key), alerts, broken)
+    except Exception as exc:  # posting must never kill the schedule tick either
+        log.warning("ni carrier posting failed: %s", exc)
+    finally:
+        _close_cursor(cursor)
+
+
+def post_ni_carrier_notices(schedules_store, alerts: list, broken: list) -> None:
+    """Write each fired alert + broken transition notice to the NI carrier (§12).
+
+    Called from ``_auto_update_ni`` (engine tick) and ``ni_routes.run_item`` (manual
+    /run) — both need the same carrier surface (M1b, audit 2026-09-09). LOW#4:
+    per-notice try/except so one failed ``record_ni_run`` never drops the rest;
+    posting is best-effort surfacing, not a run gate.
+    """
+    assert schedules_store is not None, "schedules store required"
+    assert isinstance(alerts, list) and isinstance(broken, list), "alerts/broken must be lists"
+    for alert in alerts:  # bounded by upstream tick's per-pass item + rule limits
+        try:
+            schedules_store.record_ni_run("complete", str(alert.get("message", "")))
+        except Exception as exc:  # one bad record must not drop the rest
+            log.warning("ni carrier alert post failed: %s", exc)
+    for notice in broken:  # bounded by the same
+        try:
             title = str(notice.get("title", "an item"))
-            store.record_ni_run(
+            schedules_store.record_ni_run(
                 "broken",
                 f"{title} is broken — open Neural Interface, or ask me to fix it.",
             )
-    finally:
-        _close_cursor(cursor)
+        except Exception as exc:
+            log.warning("ni carrier broken post failed: %s", exc)
 
 
 def eager_reindex(cursor, key: bytes) -> None:

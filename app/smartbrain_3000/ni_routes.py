@@ -9,6 +9,7 @@ reset and the MCP-token endpoints).
 
 from __future__ import annotations
 
+import logging
 import time
 
 from fastapi import APIRouter, HTTPException, Request
@@ -16,7 +17,9 @@ from pydantic import BaseModel, Field
 
 from . import gateway, ni, tools
 from .account import _require_desktop_local
-from .scheduler import ScheduleStore
+from .scheduler import ScheduleStore, post_ni_carrier_notices
+
+log = logging.getLogger("smartbrain.ni.routes")
 
 router = APIRouter()
 
@@ -180,6 +183,12 @@ def run_item(request: Request, item_id: str) -> dict:
     objects; the tool path never sees them. On success/failure we still ``mark_checked`` so
     the tick's backoff bookkeeping is consistent whether the tick or this endpoint fired it.
 
+    M1b (audit 2026-09-09): fired alerts + broken-transition notices land on the NI
+    carrier row exactly like ``_auto_update_ni`` — the surfacing surface must not depend
+    on whether the run came from the tick or a manual /run click. Posting is best-effort
+    (a locked carrier or a record_ni_run failure must never turn a successful run into
+    a route error).
+
     K6: refuses draft (no C1 yet) and broken (permanent refusal) with 409.
     """
     store = _store(request)
@@ -194,6 +203,7 @@ def run_item(request: Request, item_id: str) -> dict:
     state = request.app.state
     secrets = _secret_store(request)
     schedules = getattr(state, "schedules", None) or ScheduleStore(state.dbx, state.master_key)
+    prior_state = item["state"]
     store.clear_last_checked(item_id)
     started = time.monotonic()
     try:
@@ -201,9 +211,35 @@ def run_item(request: Request, item_id: str) -> dict:
                              secrets_store=secrets, schedules_store=schedules)
     except ni.NIError as exc:
         store.mark_checked(item_id, exc.kind[:200])
+        _post_carrier_after_run(schedules, store, item_id, prior_state, item, alerts=[])
         return {"status": "error", "kind": exc.kind,
                 "duration_ms": int((time.monotonic() - started) * 1000)}
+    _post_carrier_after_run(schedules, store, item_id, prior_state, item,
+                            alerts=result.get("alerts") or [])
     return {"status": "ok", **result}
+
+
+def _post_carrier_after_run(schedules, store: ni.NIStore, item_id: str,
+                            prior_state: str, prior_item: dict, *, alerts: list) -> None:
+    """M1b helper: post fired alerts + any this-run broken transition to the carrier.
+
+    Never raises — surfacing is best-effort and must not turn a completed /run into a
+    route error. A locked carrier or a record_ni_run failure logs and returns.
+    """
+    assert schedules is not None and store is not None, "schedules + store required"
+    assert item_id and prior_item is not None, "item context required"
+    broken: list = []
+    try:
+        ni._collect_broken_transition(store, item_id, prior_state, prior_item, broken)
+    except Exception as exc:  # collection must not shadow a real run outcome
+        log.warning("ni carrier: broken-transition collect failed: %s", exc)
+        broken = []
+    if not alerts and not broken:
+        return
+    try:
+        post_ni_carrier_notices(schedules, alerts, broken)
+    except Exception as exc:
+        log.warning("ni carrier: manual-run post failed: %s", exc)
 
 
 @router.patch("/api/ni/items/{item_id}")

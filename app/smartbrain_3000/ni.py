@@ -153,6 +153,13 @@ _ALERT_NAME_RE = re.compile(r"^[a-z0-9-]{1,40}$")  # slug charset per §12
 _MAX_ALERT_MESSAGE = 500         # bound message length (post-interpolation)
 _MIN_ALERT_COOLDOWN = 5          # clamp floor (§12 "≥ 5")
 _DEFAULT_ALERT_COOLDOWN = 60     # default cooldown when the spec omits it
+_MAX_GAUGE_LABEL = 200           # M3 client parity (web/src/lib/ni/scene.ts MAX_LABEL_CHARS)
+# Heading-forgery guard (H1, audit 2026-09-09): an alert message renders inside the
+# chat notice's own markdown ``### Scheduled Item ...`` heading, so any fetched string
+# carrying a newline plus a spoofed ``###`` line could forge a fake notice boundary
+# with a clickable phishing link. Modeled on claudecli.py's ``_HEADING_FORGERY`` /
+# ``_neutralize`` precedent (transcript-forgery guard from the 2026-09 audit).
+_ALERT_NEWLINE_RUN = re.compile(r"[\r\n]+")
 
 # Path grammar (§4.1) — one regex per production. `__proto__` is denied by name even
 # though it matches ``_KEY_RE`` (JS-prototype-pollution style names are never a data path
@@ -934,12 +941,18 @@ def _validate_when(node: dict, what: str) -> None:
         raise ValueError(f"{what}.when must be a list")  # noqa: TRY004
     if len(rules) > _MAX_WHEN_RULES:
         raise ValueError(f"{what}.when exceeds {_MAX_WHEN_RULES} rules")
+    ntype = node.get("type") if isinstance(node.get("type"), str) else None
     for i, rule in enumerate(rules):  # bounded by _MAX_WHEN_RULES
-        _validate_when_rule(rule, f"{what}.when[{i}]")
+        _validate_when_rule(rule, f"{what}.when[{i}]", node_type=ntype)
 
 
-def _validate_when_rule(rule: object, where: str) -> None:
-    """One §5 rule: {left, op, right, set} — set carries tone and/or hidden:true."""
+def _validate_when_rule(rule: object, where: str, *, node_type: str | None = None) -> None:
+    """One §5 rule: {left, op, right, set} — set carries tone and/or hidden:true.
+
+    LOW#3 (audit 2026-09-09): a chip node has ``kind`` (not ``tone``); a ``set.tone``
+    rule on a chip would never take effect. Refuse it at validation time — the caller
+    threads ``node_type`` in from ``_validate_when``.
+    """
     assert isinstance(where, str) and where, "where required"
     r = _require_dict(rule, where)
     _closed_keys(r, {"left", "op", "right", "set"}, where)
@@ -953,6 +966,10 @@ def _validate_when_rule(rule: object, where: str) -> None:
         raise ValueError(f"{where}.set must set at least tone or hidden")
     if "tone" in s and s["tone"] not in _TEXT_TONES:
         raise ValueError(f"{where}.set.tone must be one of {sorted(_TEXT_TONES)}")
+    if "tone" in s and node_type == "chip":
+        raise ValueError(
+            f"{where}.set.tone refused on chip nodes (chips carry 'kind', not 'tone')"
+        )
     if "hidden" in s and s["hidden"] is not True:
         raise ValueError(f"{where}.set.hidden must be true when present")
 
@@ -1450,7 +1467,14 @@ def _resolve_when_operand(value: object, data: dict, *, item: Any) -> object:
 
 def _eval_when(left: object, op: object, right: object) -> bool:
     """Evaluate one when/alerts comparison. Ordering ops require numbers on both sides
-    (else NIError('when_type')); eq/ne compare scalars strictly (no coercion)."""
+    (else NIError('when_type')); eq/ne compare scalars strictly (no coercion).
+
+    LOW#1 (audit 2026-09-09): booleans are a subclass of int, so ``True == 1`` is
+    natively True — refused explicitly here (eq/ne bool-vs-number => unequal). A NaN
+    operand on either side is treated as unequal (eq => False, ne => True) for both
+    ops; Python's native ``!=`` on NaN already returns True, but the explicit guard
+    documents the contract.
+    """
     if op in _ORDER_OPS:
         if not _is_finite_number(left) or not _is_finite_number(right):
             raise NIError("when_type", f"{op} requires numbers on both sides")
@@ -1462,6 +1486,16 @@ def _eval_when(left: object, op: object, right: object) -> bool:
         if op == "gt":
             return lf > rf
         return lf >= rf
+    left_bool = isinstance(left, bool)
+    right_bool = isinstance(right, bool)
+    left_num = isinstance(left, (int, float)) and not left_bool
+    right_num = isinstance(right, (int, float)) and not right_bool
+    if (left_bool and right_num) or (left_num and right_bool):
+        return op == "ne"
+    if left_num and not math.isfinite(float(left)):
+        return op == "ne"
+    if right_num and not math.isfinite(float(right)):
+        return op == "ne"
     if op == "eq":
         return left == right
     return left != right
@@ -1669,7 +1703,10 @@ class NIStore:
         validated = validate_spec(spec)
         if origin not in _REVISION_ORIGINS:
             raise ValueError(f"origin must be one of {sorted(_REVISION_ORIGINS)}")
-        bound = bind_scene(validated["scene"], preview_payload)  # proves the preview renders
+        # H3 (audit 2026-09-09): seed empty history so a scene whose spark or delta_prev
+        # binds to ``history.<name>`` can render the preview (mirrors C1 first-run seeding).
+        bound = bind_scene(validated["scene"], preview_payload,
+                           history=_seed_history(validated))  # proves the preview renders
         assert isinstance(bound, dict), "bind_scene must return a dict"
         count = self._conn.execute("SELECT COUNT(*) FROM ni_items;").fetchone()[0]
         if int(count) >= _MAX_ITEMS:
@@ -2197,13 +2234,22 @@ def run_item(store: NIStore, item_id: str, *, gateway_mod, secrets_store,
 
 def _finalize_run(store: NIStore, item: dict, spec: dict, outputs: dict,
                   started: float, *, history: dict) -> dict:
-    """Contract-check (if applicable), bind, evaluate alerts, append history, write
-    snapshots, record run + transition.
+    """Contract-check (if applicable), bind, append history, write snapshots, record
+    run + transition, THEN evaluate alerts (order matters — see M1a below).
 
     Alerts (§12) and history append (§11) both live inside the "successful run" path:
     a bind or contract failure short-circuits before either. An ``alert_bind`` or
     ``history_type`` failure raises like a bind failure — bookkeeping records the
     error and ``last_good`` keeps rendering.
+
+    M1a (audit 2026-09-09): alerts run LAST so ``alert_state`` never commits when a
+    preceding step (history append, snapshot write, record_run, transition) fails.
+    Previously ``_process_alerts`` ran BEFORE ``_append_history_series``, so a
+    ``history_type`` failure could leave ``active=true`` in ``alert_state`` while the
+    run itself failed — the next successful run would then skip the edge and never
+    re-fire. Order is now: contract → bind/enforce → history append → snapshots →
+    record_run → transition → alerts. ``_process_alerts`` writes its snapshot LAST,
+    so an internal exception also leaves ``alert_state`` untouched.
     """
     assert isinstance(history, dict), "history required (pre-append)"
     contract = spec.get("contract")
@@ -2227,7 +2273,6 @@ def _finalize_run(store: NIStore, item: dict, spec: dict, outputs: dict,
         bound = bind_scene(spec["scene"], outputs, history=history)
         _enforce_bind_types(spec["scene"], bound)
         _enforce_payload_size(bound)
-        fired = _process_alerts(store, item, outputs)
         _append_history_series(store, item, outputs, history)
     except NIError as exc:
         _handle_failure(store, item, exc, started, contract_ok=contract_ok)
@@ -2239,7 +2284,25 @@ def _finalize_run(store: NIStore, item: dict, spec: dict, outputs: dict,
     store.record_run(item["id"], "ok", duration_ms=duration_ms, error=None,
                      contract_ok=contract_ok)
     _transition_on_success(store, item, spec, outputs)
+    try:
+        fired = _process_alerts(store, item, outputs)
+    except NIError as exc:
+        _handle_failure(store, item, exc, started, contract_ok=contract_ok)
+        raise
     return {"status": "ok", "duration_ms": duration_ms, "alerts": fired}
+
+
+def _seed_history(spec: dict) -> dict:
+    """Return ``{name: []}`` for every tracked history series in ``spec`` (§11).
+
+    Shared between ``_load_history_series`` (empty-slot seeding at run time) and the
+    tool + store preview-binding paths (H3, audit 2026-09-09), so a spark or
+    ``delta_prev`` bound to ``history.<name>`` resolves against a dummy preview
+    payload — matching the C1 first-run seeding contract in §11.
+    """
+    assert isinstance(spec, dict), "spec must be a dict"
+    tracked = (spec.get("history") or {}).get("track") or {}
+    return {name: [] for name in tracked}
 
 
 def _load_history_series(store: NIStore, item_id: str, spec: dict | None = None) -> dict:
@@ -2248,13 +2311,20 @@ def _load_history_series(store: NIStore, item_id: str, spec: dict | None = None)
     Tracked series that have no points yet are seeded as empty lists so a spark bound
     to ``history.<name>`` binds to ``[]`` on the very first run (C1) instead of dying
     with ``extract_miss`` — an item charting its own history must be able to commission.
+
+    LOW#2 (audit 2026-09-09): a decrypt/decode failure (corrupt slot) raises
+    ``NIError('history_slot')`` so the caller's ``_handle_failure`` records the run
+    row + failure counter, instead of leaking a raw ``InvalidTag`` / JSON error past
+    bookkeeping.
     """
     assert store is not None and item_id, "store + id required"
-    snap = store.read_snapshot(item_id, "history")
+    try:
+        snap = store.read_snapshot(item_id, "history")
+    except Exception as exc:  # corrupt sealed slot — route through _handle_failure
+        raise NIError("history_slot", exc.__class__.__name__) from None
     payload = (snap.get("payload") or {}) if snap is not None else {}
     series = payload if isinstance(payload, dict) else {}
-    tracked = ((spec or {}).get("history") or {}).get("track") or {}
-    for name in tracked:
+    for name in _seed_history(spec or {}):
         series.setdefault(name, [])
     return series
 
@@ -2267,6 +2337,11 @@ def _append_history_series(store: NIStore, item: dict, outputs: dict,
     new point OUT so the NEXT completed run sees this run's number as ``last``. Non-
     numeric values raise NIError('history_type') — the run fails and last_good renders.
     Trims each series to the clamped ``max_points`` (≤500, default 100).
+
+    M4 (audit 2026-09-09): series whose names are no longer in the current track are
+    DROPPED on this append (rename/remove is destructive on next success). §11's
+    retention promise covers the same names across rewinds — not the old name after
+    it was renamed away.
     """
     assert store is not None and item is not None, "store + item required"
     assert isinstance(prior, dict), "prior must be a dict"
@@ -2293,10 +2368,6 @@ def _append_history_series(store: NIStore, item: dict, outputs: dict,
         if len(series) > max_points:
             series = series[-max_points:]
         new_slot[name] = series
-    # Preserve unrelated series from prior (a spec that DROPS a series should not delete
-    # the old data mid-tick — the old series stays until the item is deleted).
-    for name, series in prior.items():
-        new_slot.setdefault(name, series)
     store.write_snapshot(item["id"], "history", new_slot, ok=True)
 
 
@@ -2366,21 +2437,33 @@ def _clamp_alert_cooldown(raw: object) -> int:
 
 
 def _interpolate_alert_message(template: str, outputs: dict, title: str) -> str:
-    """{{title}} + {{path}} interpolation against outputs; cap at _MAX_ALERT_MESSAGE."""
+    """{{title}} + {{path}} interpolation against outputs; cap at _MAX_ALERT_MESSAGE.
+
+    Heading-forgery guard (H1, audit 2026-09-09): each RESOLVED value has its
+    ``[\\r\\n]+`` runs collapsed to a single space (so a fetched string carrying
+    ``\\n\\n### Scheduled Item Y ###...`` can never forge a chat-notice boundary),
+    then the ASSEMBLED message is quoted with ``> `` when it starts with ``#`` —
+    after the newline-collapse there is only one line, so the leading-``#`` check
+    suffices (claudecli.py's ``_HEADING_FORGERY`` precedent, kept simple). The
+    ``_MAX_ALERT_MESSAGE`` cap applies AFTER sanitization.
+    """
     assert isinstance(template, str), "template must be a string"
     assert isinstance(outputs, dict) and isinstance(title, str), "outputs + title required"
 
     def _one(m: re.Match) -> str:
         token = m.group(1)
         if token == "title":
-            return title
+            return _ALERT_NEWLINE_RUN.sub(" ", title)
         try:
             steps = parse_path(token)
-            return str(_resolve_bind(steps, outputs, item=None))
+            resolved = _resolve_bind(steps, outputs, item=None)
         except NIError as exc:
             raise NIError("alert_bind", f"message {{{{ {token} }}}}: {exc.kind}") from None
+        return _ALERT_NEWLINE_RUN.sub(" ", str(resolved))
 
     out = _BIND_INTERP.sub(_one, template)
+    if out.startswith("#"):  # neutralize leading heading — quote it so the ### stays inert
+        out = "> " + out
     if len(out) > _MAX_ALERT_MESSAGE:
         raise NIError("alert_bind",
                       f"message length {len(out)} exceeds {_MAX_ALERT_MESSAGE}")
@@ -2424,7 +2507,16 @@ def _enforce_bind_types(scene: dict, bound: dict) -> None:
 
 
 def _enforce_spark_points(node: dict) -> None:
-    """Post-bind check for §5 spark: points list ≤500 of numbers or {t,v} with numeric v."""
+    """Post-bind check for §5 spark: points list ≤500 of FINITE numbers or {t,v}.
+
+    H2 (audit 2026-09-09): ``json.loads`` accepts NaN/Infinity, and a single non-finite
+    value landing in ``latest`` + ``last_good`` snaps ``GET /api/ni/board`` to 500 for
+    EVERY item (Starlette re-encodes with ``allow_nan=False``). Enforce ``math.isfinite``
+    on bare numbers and on ``v`` at bind time so a bad point never reaches the sealed
+    snapshot. Also mirrors ``web/src/lib/ni/scene.ts checkSpark`` (M3): ``t`` must be a
+    string when present, and ``{t,v}`` point objects reject extra keys — client-parity so
+    a payload that binds server-side also renders on the client without a refusal.
+    """
     assert isinstance(node, dict), "node must be a dict"
     points = node.get("points")
     if not isinstance(points, list):
@@ -2434,16 +2526,33 @@ def _enforce_spark_points(node: dict) -> None:
                       f"spark.points has {len(points)} points (max {_MAX_SPARK_POINTS})")
     for p in points:  # bounded by _MAX_SPARK_POINTS
         if isinstance(p, (int, float)) and not isinstance(p, bool):
+            if not math.isfinite(float(p)):
+                raise NIError("bind_type", "spark.points value must be finite")
             continue
         if isinstance(p, dict):
             v = p.get("v")
-            if isinstance(v, (int, float)) and not isinstance(v, bool):
-                continue
+            if not (isinstance(v, (int, float)) and not isinstance(v, bool)):
+                raise NIError("bind_type",
+                              "spark.points needs numbers or {t,v} with numeric v")
+            if not math.isfinite(float(v)):
+                raise NIError("bind_type", "spark.points.v must be finite")
+            extras = set(p) - {"t", "v"}
+            if extras:
+                raise NIError("bind_type",
+                              f"spark.points has extra keys {sorted(extras)}")
+            if "t" in p and not isinstance(p["t"], str):
+                raise NIError("bind_type", "spark.points.t must be a string when present")
+            continue
         raise NIError("bind_type", "spark.points needs numbers or {t,v} with numeric v")
 
 
 def _enforce_gauge_bounds(node: dict) -> None:
-    """Post-bind check for §5 gauge: value/min/max are finite numbers, max > min."""
+    """Post-bind check for §5 gauge: value/min/max are finite numbers, max > min.
+
+    M3 (audit 2026-09-09): also cap ``gauge.label`` at ``_MAX_GAUGE_LABEL`` (200 chars)
+    AFTER binding — ``{{path}}`` interpolation can grow the label past the 2000-char
+    text cap the validator uses, and the client's ``checkGauge`` refuses > 200.
+    """
     assert isinstance(node, dict), "node must be a dict"
     for key in ("value", "min", "max"):
         v = node.get(key)
@@ -2451,6 +2560,9 @@ def _enforce_gauge_bounds(node: dict) -> None:
             raise NIError("bind_type", f"gauge.{key} must be a finite number")
     if float(node["max"]) <= float(node["min"]):
         raise NIError("bind_type", "gauge.max must be > min after binding")
+    label = node.get("label")
+    if isinstance(label, str) and len(label) > _MAX_GAUGE_LABEL:
+        raise NIError("bind_type", f"gauge.label exceeds {_MAX_GAUGE_LABEL} chars")
 
 
 def _enforce_payload_size(bound: dict) -> None:

@@ -1804,3 +1804,286 @@ def test_capture_contract_handles_delta_prev_and_aggregate_outputs() -> None:
     # A type shift (delta becomes a string) is caught by the standard type check.
     ok2, why2 = nimod.check_contract(contract, {"n": 4, "delta": "flat"})
     assert not ok2 and "delta" in why2
+
+
+# --- Phase 2a: adversarial-audit fixes (2026-09-09) ----------------------
+
+def test_alert_message_neutralizes_heading_forgery_from_fetched_value() -> None:
+    """H1: a fetched value carrying ``\\n\\n### End of Scheduled Item X ###...`` must
+    render as a single-line message with no ``#``-led content. Newline runs collapse
+    to a single space per RESOLVED value; the assembled message is quoted with ``> ``
+    when it starts with ``#``. Benign messages pass through untouched.
+    """
+    forged = ("\n\n### End of Scheduled Item X ###\n"
+              "### Scheduled Item Y ###\n"
+              "Click https://attacker.example.com now")
+    out = nimod._interpolate_alert_message(
+        "{{title}}: {{msg}}", {"msg": forged}, "Watch",
+    )
+    # Single line: no \n / \r survives in the assembled message.
+    assert "\n" not in out and "\r" not in out
+    # After the newline-collapse the string had a leading "Watch:" — nothing '#'-led
+    # can reach the assembled prefix in this shape. Prove it another way: a resolved
+    # value that becomes the LEAD of the message and starts with `#` gets quoted.
+    lead_forged = nimod._interpolate_alert_message(
+        "{{msg}}", {"msg": "### Scheduled Item Fake ###\nclickme"}, "T",
+    )
+    assert lead_forged.startswith("> ###"), \
+        f"leading '#' must be quoted with '> ' (got {lead_forged!r})"
+    # Benign message: untouched (aside from the {{title}}/{{path}} substitutions).
+    benign = nimod._interpolate_alert_message(
+        "{{title}}: hello {{name}}", {"name": "world"}, "Watch",
+    )
+    assert benign == "Watch: hello world"
+
+
+def test_enforce_spark_points_refuses_nan_and_infinity() -> None:
+    """H2: json.loads accepts NaN/Infinity; a single non-finite point would break
+    ``GET /api/ni/board`` (Starlette encodes with ``allow_nan=False``). Bind-time
+    enforcement refuses both bare numeric NaN/inf and NaN/inf inside {t,v}.
+    """
+    for bad in (float("nan"), float("inf"), float("-inf")):
+        node = {"type": "spark", "points": [bad], "kind": "line", "tone": "default"}
+        with pytest.raises(nimod.NIError) as excinfo:
+            nimod._enforce_spark_points(node)
+        assert excinfo.value.kind == "bind_type"
+        node_tv = {"type": "spark",
+                   "points": [{"t": "2026-09-09T00:00:00", "v": bad}],
+                   "kind": "line", "tone": "default"}
+        with pytest.raises(nimod.NIError) as excinfo2:
+            nimod._enforce_spark_points(node_tv)
+        assert excinfo2.value.kind == "bind_type"
+
+
+def test_enforce_spark_points_client_parity_t_and_extras() -> None:
+    """M3: spark point ``t`` must be a string when present; ``{t,v}`` refuses extra keys.
+    Mirrors web/src/lib/ni/scene.ts checkSpark strictness on the server side.
+    """
+    node_bad_t = {"type": "spark",
+                  "points": [{"t": 12345, "v": 1.0}],
+                  "kind": "line", "tone": "default"}
+    with pytest.raises(nimod.NIError) as excinfo:
+        nimod._enforce_spark_points(node_bad_t)
+    assert excinfo.value.kind == "bind_type"
+    node_extras = {"type": "spark",
+                   "points": [{"t": "ts", "v": 1.0, "extra": 42}],
+                   "kind": "line", "tone": "default"}
+    with pytest.raises(nimod.NIError) as excinfo2:
+        nimod._enforce_spark_points(node_extras)
+    assert excinfo2.value.kind == "bind_type"
+
+
+def test_enforce_gauge_bounds_caps_label_at_200_chars() -> None:
+    """M3: post-bind cap on gauge.label matches the client's MAX_LABEL_CHARS=200
+    (spec-time cap is 2000, but {{path}} interpolation can grow it further).
+    """
+    node = {"type": "gauge", "value": 1.0, "min": 0.0, "max": 10.0,
+            "tone": "default", "label": "x" * 201}
+    with pytest.raises(nimod.NIError) as excinfo:
+        nimod._enforce_gauge_bounds(node)
+    assert excinfo.value.kind == "bind_type"
+    node_ok = {"type": "gauge", "value": 1.0, "min": 0.0, "max": 10.0,
+               "tone": "default", "label": "x" * 200}
+    nimod._enforce_gauge_bounds(node_ok)  # exactly at the cap = ok
+
+
+def test_create_ni_item_carries_history_and_alerts_through_tool(monkeypatch: pytest.MonkeyPatch) -> None:
+    """H3: create_ni_item tool must ship history + alerts to the sealed spec so an
+    agent can author an item that already tracks a series or fires an alert on
+    approval. Round-trip via the tool registry (registry-level, like existing tool tests).
+    """
+    from smartbrain_3000 import netguard
+    ctx, _c, _k = _tool_ctx()
+    args = _tool_spec_args()
+    args.pop("draft")
+    args["source"] = {"type": "http_json",
+                      "url": "https://api.example.com/q",
+                      "headers": {}}
+    args["preview_payload"] = {"text": "preview"}
+    args["history"] = {"track": {"priceLog": "text"}, "max_points": 5}
+    args["alerts"] = [{"name": "hot", "left": {"$bind": "text"}, "op": "eq",
+                       "right": "burn", "message": "{{title}}: on fire"}]
+    # Skip netguard.validate_public_url — the fetch host is example.com, but the
+    # test env resolves it and the test isn't about URL validation.
+    monkeypatch.setattr(netguard, "validate_public_url", lambda *_a, **_k: None)
+    out = _tool_call("create_ni_item", ctx, args)
+    assert out["state"] == "commissioning", out
+    spec = ctx.ni.get_item(out["id"])["spec"]
+    assert spec["history"] == {"track": {"priceLog": "text"}, "max_points": 5}
+    assert spec["alerts"][0]["name"] == "hot"
+
+
+def test_create_ni_item_history_bound_spark_preview_renders(monkeypatch: pytest.MonkeyPatch) -> None:
+    """H3: a scene whose spark binds to ``history.<name>`` must be creatable with a
+    dummy preview payload. The preview binding seeds an empty history series for
+    every tracked name (mirrors the C1 seeding in _load_history_series).
+    """
+    from smartbrain_3000 import netguard
+    ctx, _c, _k = _tool_ctx()
+    args = _tool_spec_args()
+    args.pop("draft")
+    args["source"] = {"type": "http_json",
+                      "url": "https://api.example.com/q",
+                      "headers": {}}
+    args["pipeline"] = [{"op": "extract", "paths": {"price": "price"}}]
+    args["scene"] = {"type": "stack", "dir": "v", "gap": "sm", "children": [
+        {"type": "spark", "points": {"$bind": "history.priceLog"},
+         "kind": "line", "tone": "default"},
+    ]}
+    args["preview_payload"] = {"price": 1.0}
+    args["history"] = {"track": {"priceLog": "price"}, "max_points": 5}
+    monkeypatch.setattr(netguard, "validate_public_url", lambda *_a, **_k: None)
+    out = _tool_call("create_ni_item", ctx, args)
+    snap = ctx.ni.read_snapshot(out["id"], "preview")
+    assert snap is not None and snap["ok"] is True
+    # The bound spark rendered an empty list — no extract_miss on first-run history.
+    spark_node = snap["payload"]["children"][0]
+    assert spark_node["type"] == "spark" and spark_node["points"] == []
+
+
+def test_finalize_run_leaves_alert_state_uncommitted_when_history_type_fails() -> None:
+    """M1a: alerts run AFTER history append + snapshots + record_run + transition;
+    a history_type failure must NOT commit alert_state (so the rule re-fires on the
+    next success rather than staying silently ``active=true``).
+    """
+    store, conn, key = _store()
+    # Scene binds a plain text field so bind succeeds; the failure comes from history.
+    scene = {"type": "stack", "dir": "v", "gap": "sm", "children": [
+        {"type": "text", "value": "{{note}}", "role": "title",
+         "tone": "default", "size": "md"},
+    ]}
+    spec = _basic_spec(
+        title="Watch", scene=scene,
+        pipeline=[{"op": "extract", "paths": {"note": "note", "n": "n"}}],
+        history={"track": {"nlog": "n"}},
+        alerts=[{"name": "hot", "left": {"$bind": "n"}, "op": "gt",
+                 "right": 0, "message": "hi"}],
+    )
+    iid = store.add_item(spec, {"n": 0, "note": "seed"})
+    store.set_state(iid, "live")
+    # Prime alert as previously-false so the run below would flip it to true.
+    nimod._process_alerts(store, store.get_item(iid), {"n": 0})
+    # Force a history_type failure: n resolves to a non-number in the outputs.
+    outputs = {"note": "hi", "n": "not-a-number"}
+    with pytest.raises(nimod.NIError) as excinfo:
+        nimod._finalize_run(store, store.get_item(iid), spec, outputs,
+                            started=0.0, history={"nlog": []})
+    assert excinfo.value.kind == "history_type"
+    # alert_state must NOT have been marked fired (edge un-armed for next success).
+    state = nimod._load_alert_state(store, iid)
+    assert state.get("hot", {}).get("active") is False, \
+        f"alert_state must not commit when finalize fails; got {state!r}"
+
+
+def test_append_history_prunes_renamed_series() -> None:
+    """M4: renaming/removing a tracked series drops the old series on next append
+    (§11 retention promise = same names across rewinds, not renamed ones).
+    """
+    store, _conn, _key = _store()
+    scene = {"type": "stack", "dir": "v", "gap": "sm", "children": [
+        {"type": "number", "value": {"$bind": "price"}, "format": "plain",
+         "unit": "USD", "tone": "default", "size": "md"},
+    ]}
+    spec = _basic_spec(
+        scene=scene,
+        pipeline=[{"op": "extract", "paths": {"price": "price"}}],
+        history={"track": {"oldName": "price"}, "max_points": 5},
+    )
+    iid = store.add_item(spec, {"price": 0})
+    store.set_state(iid, "live")
+    nimod._append_history_series(store, store.get_item(iid), {"price": 1.0}, {})
+    # Now rename the tracked series (oldName -> newName) via update_spec.
+    renamed = dict(spec, history={"track": {"newName": "price"}, "max_points": 5})
+    store.update_spec(iid, renamed)
+    prior = nimod._load_history_series(store, iid, store.get_item(iid)["spec"])
+    nimod._append_history_series(store, store.get_item(iid), {"price": 2.0}, prior)
+    snap = store.read_snapshot(iid, "history")
+    payload = snap["payload"]
+    assert "oldName" not in payload, \
+        f"renamed-away series must be dropped; got {list(payload)!r}"
+    assert [p["v"] for p in payload["newName"]] == [2.0]
+
+
+def test_eval_when_bool_vs_number_and_nan_operand() -> None:
+    """LOW#1: eq/ne on bool-vs-number compares as unequal (bool is a Python int
+    subclass, so ``True == 1`` is natively True — refused). NaN operand → unequal.
+    """
+    # Bool vs number: True != 1 for both ops.
+    assert nimod._eval_when(True, "eq", 1) is False
+    assert nimod._eval_when(True, "ne", 1) is True
+    assert nimod._eval_when(0, "eq", False) is False
+    assert nimod._eval_when(0, "ne", False) is True
+    # NaN operand: eq → False, ne → True (both operands).
+    nan = float("nan")
+    assert nimod._eval_when(nan, "eq", 5) is False
+    assert nimod._eval_when(nan, "ne", 5) is True
+    assert nimod._eval_when(5, "eq", nan) is False
+    assert nimod._eval_when(5, "ne", nan) is True
+    # Baseline: two real equal ints still compare equal.
+    assert nimod._eval_when(3, "eq", 3) is True
+
+
+def test_load_history_series_raises_history_slot_on_corrupt_slot() -> None:
+    """LOW#2: a decrypt/decode failure on the sealed history slot raises
+    NIError('history_slot') so _handle_failure records the run + bumps failure,
+    instead of leaking a raw InvalidTag past bookkeeping.
+    """
+    store, conn, _key = _store()
+    iid = store.add_item(_basic_spec(), _preview())
+    # Poison the sealed history slot with garbage bytes so the AES-GCM decrypt fails.
+    conn.execute(
+        "INSERT INTO ni_snapshots (item_id, slot, nonce, ciphertext, ok) "
+        "VALUES (?, 'history', ?, ?, true) "
+        "ON CONFLICT (item_id, slot) DO UPDATE SET nonce = excluded.nonce, "
+        "ciphertext = excluded.ciphertext;",
+        [iid, b"\x00" * 12, b"\x00" * 32],
+    )
+    with pytest.raises(nimod.NIError) as excinfo:
+        nimod._load_history_series(store, iid)
+    assert excinfo.value.kind == "history_slot"
+
+
+def test_validate_when_refuses_set_tone_on_chip_node() -> None:
+    """LOW#3: chip nodes have ``kind``, not ``tone`` — a set.tone rule would never
+    take effect. Refuse it at spec validation time.
+    """
+    scene = {"type": "stack", "dir": "v", "gap": "sm", "children": [
+        {"type": "chip", "value": "hi", "kind": "accent",
+         "when": [{"left": {"$bind": "x"}, "op": "eq", "right": 1,
+                   "set": {"tone": "danger"}}]},
+    ]}
+    with pytest.raises(ValueError, match="chip"):
+        nimod.validate_scene(scene)
+    # Hidden on a chip is fine.
+    ok_scene = {"type": "stack", "dir": "v", "gap": "sm", "children": [
+        {"type": "chip", "value": "hi", "kind": "accent",
+         "when": [{"left": {"$bind": "x"}, "op": "eq", "right": 1,
+                   "set": {"hidden": True}}]},
+    ]}
+    nimod.validate_scene(ok_scene)
+
+
+def test_post_ni_carrier_notices_per_notice_try_except() -> None:
+    """LOW#4: one failed record_ni_run must not drop the rest of the notices."""
+    from smartbrain_3000 import scheduler as sched
+
+    class _Flaky:
+        def __init__(self) -> None:
+            self.calls: list = []
+            self.first = True
+
+        def record_ni_run(self, status: str, message: str) -> str:
+            self.calls.append((status, message))
+            if self.first:
+                self.first = False
+                raise RuntimeError("boom")
+            return "rid"
+
+    store = _Flaky()
+    alerts = [{"item_id": "a", "title": "T", "message": "first"},
+              {"item_id": "b", "title": "T", "message": "second"}]
+    broken = [{"item_id": "c", "title": "Doomed", "broken": True}]
+    sched.post_ni_carrier_notices(store, alerts, broken)
+    # Every notice was ATTEMPTED even though the first raised.
+    assert len(store.calls) == 3
+    assert [s for s, _m in store.calls] == ["complete", "complete", "broken"]
