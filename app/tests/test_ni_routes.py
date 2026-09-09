@@ -371,6 +371,11 @@ def test_manual_run_route_posts_alerts_and_broken_to_carrier(
 ) -> None:
     """M1b (audit 2026-09-09): POST /api/ni/items/{id}/run posts fired alerts +
     broken transition notices to the NI carrier row exactly like _auto_update_ni.
+
+    D6 (audit 2026-09-09): also asserts the ``repaired`` list rides the same
+    carrier surface (a §14 trial can succeed on a manual /run too). Previously
+    the /run path silently dropped ``result['repaired']`` so the user missed the
+    "<title> repaired itself" notice when they clicked Refresh themselves.
     """
     from smartbrain_3000 import scheduler as sched
 
@@ -379,11 +384,12 @@ def test_manual_run_route_posts_alerts_and_broken_to_carrier(
     client.app.state.ni.commission(iid)  # /run refuses draft (K6) — advance out of it
 
     def fake_run_item(store, item_id, *, gateway_mod, secrets_store,
-                      schedules_store=None):
+                      schedules_store=None, reserve_repair=None):
         store.set_state(item_id, "broken")  # forces broken-transition posting
         return {"status": "ok", "duration_ms": 1,
                 "alerts": [{"item_id": item_id, "title": "Watch",
-                            "message": "manual fired"}]}
+                            "message": "manual fired"}],
+                "repaired": [{"item_id": item_id, "title": "Watch"}]}
 
     monkeypatch.setattr(ni, "run_item", fake_run_item)
     r = client.post(f"/api/ni/items/{iid}/run")
@@ -394,6 +400,7 @@ def test_manual_run_route_posts_alerts_and_broken_to_carrier(
                 if row["schedule_title"] == "Neural Interface"]
     assert "manual fired" in messages
     assert any("is broken" in m for m in messages)
+    assert any("Watch repaired itself" in m for m in messages), messages
 
 
 def test_fetch_http_json_refuses_redirect_only_when_headers_attached(monkeypatch) -> None:

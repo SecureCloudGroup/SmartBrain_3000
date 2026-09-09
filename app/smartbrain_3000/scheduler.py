@@ -666,22 +666,25 @@ def _auto_update_ni(app) -> None:
         return
     alerts = result.get("alerts") or []
     broken = result.get("broken") or []
-    if not alerts and not broken:
+    repaired = result.get("repaired") or []
+    if not alerts and not broken and not repaired:
         return
     key = getattr(app.state, "master_key", None)
     if key is None:
         return
     cursor = app.state.db.cursor()
     try:
-        post_ni_carrier_notices(ScheduleStore(cursor, key), alerts, broken)
+        post_ni_carrier_notices(ScheduleStore(cursor, key), alerts, broken,
+                                repaired=repaired)
     except Exception as exc:  # posting must never kill the schedule tick either
         log.warning("ni carrier posting failed: %s", exc)
     finally:
         _close_cursor(cursor)
 
 
-def post_ni_carrier_notices(schedules_store, alerts: list, broken: list) -> None:
-    """Write each fired alert + broken transition notice to the NI carrier (§12).
+def post_ni_carrier_notices(schedules_store, alerts: list, broken: list,
+                             *, repaired: list | None = None) -> None:
+    """Write each fired alert + broken transition + §14 repair notice to the NI carrier.
 
     Called from ``_auto_update_ni`` (engine tick) and ``ni_routes.run_item`` (manual
     /run) — both need the same carrier surface (M1b, audit 2026-09-09). LOW#4:
@@ -690,6 +693,8 @@ def post_ni_carrier_notices(schedules_store, alerts: list, broken: list) -> None
     """
     assert schedules_store is not None, "schedules store required"
     assert isinstance(alerts, list) and isinstance(broken, list), "alerts/broken must be lists"
+    repaired_list = list(repaired or [])
+    assert isinstance(repaired_list, list), "repaired must be a list"
     for alert in alerts:  # bounded by upstream tick's per-pass item + rule limits
         try:
             schedules_store.record_ni_run("complete", str(alert.get("message", "")))
@@ -704,6 +709,15 @@ def post_ni_carrier_notices(schedules_store, alerts: list, broken: list) -> None
             )
         except Exception as exc:
             log.warning("ni carrier broken post failed: %s", exc)
+    for notice in repaired_list:  # bounded by _MAX_ITEMS_PER_PASS
+        try:
+            title = str(notice.get("title", "an item"))
+            schedules_store.record_ni_run(
+                "complete",
+                f"{title} repaired itself — data mapping updated.",
+            )
+        except Exception as exc:
+            log.warning("ni carrier repaired post failed: %s", exc)
 
 
 def eager_reindex(cursor, key: bytes) -> None:

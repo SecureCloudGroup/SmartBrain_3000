@@ -36,6 +36,17 @@ to know when a release changes behavior.
   updates: the Chat badge, a notice in your open chat, and the durable copy on Info,
   under a "Neural Interface" heading. New pipeline math: sum/avg/min/max/count and
   change-since-last-run.
+- **Neural Interface (phase 2b): interpretation and self-repair.** A card's pipeline can
+  now include one language-model step ("summarize these headlines") — it runs on your
+  **local** model only (never a cloud fallback), sees the data inside a guarded fence with
+  no tool access, and must answer in an exact JSON shape or the run fails safely to the
+  last good result. Cards that include one are honestly badged **Interpreted**. And when a
+  card breaks because the data's shape changed, it can now **fix itself**: a local model
+  proposes new data mappings — it is structurally unable to touch the source address,
+  headers, schedule, or anything consent-bearing — the fix is applied as a trial, kept
+  only if the next run passes the card's validated data contract, auto-reverted otherwise,
+  and a "repaired itself" notice tells you it happened. One attempt per breakage, fully
+  recorded in the card's run history.
 
 ## [0.9.38] - 2026-09-07
 

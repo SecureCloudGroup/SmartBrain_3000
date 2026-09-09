@@ -82,9 +82,17 @@ def _pick_board_snapshot(store: ni.NIStore, item: dict) -> dict | None:
 
 
 def _board_row(store: ni.NIStore, item: dict) -> dict:
-    """One board row: plaintext operational fields + display + the chosen snapshot's payload."""
+    """One board row: plaintext operational fields + display + the chosen snapshot's payload.
+
+    ``interpreted`` (§13 honesty): True when a model reads the item's data — either a
+    ``model`` source or a pipeline that contains an ``llm`` stage. The card renders an
+    "Interpreted" chip so the user can always see which readings came from a model.
+    """
+    assert store is not None and item, "store + item required"
     snap = _pick_board_snapshot(store, item)
     slot = "preview" if item["state"] == "draft" else (snap.get("slot") if snap else None)
+    source_type = (item["spec"].get("source") or {}).get("type")
+    interpreted = source_type == "model" or ni._spec_has_llm_stage(item["spec"])
     return {
         "id": item["id"], "title": item["spec"].get("title", ""),
         "state": item["state"], "enabled": item["enabled"],
@@ -93,6 +101,7 @@ def _board_row(store: ni.NIStore, item: dict) -> dict:
         "consecutive_failures": item["consecutive_failures"],
         "position": item["position"],
         "display": item["spec"].get("display") or {"size": "small"},
+        "interpreted": interpreted,
         "payload_slot": slot,
         "payload_at": snap["created_at"] if snap else None,
         "payload_ok": snap["ok"] if snap else None,
@@ -211,33 +220,42 @@ def run_item(request: Request, item_id: str) -> dict:
                              secrets_store=secrets, schedules_store=schedules)
     except ni.NIError as exc:
         store.mark_checked(item_id, exc.kind[:200])
-        _post_carrier_after_run(schedules, store, item_id, prior_state, item, alerts=[])
+        _post_carrier_after_run(schedules, store, item_id, prior_state, item,
+                                alerts=[], repaired=[])
         return {"status": "error", "kind": exc.kind,
                 "duration_ms": int((time.monotonic() - started) * 1000)}
     _post_carrier_after_run(schedules, store, item_id, prior_state, item,
-                            alerts=result.get("alerts") or [])
+                            alerts=result.get("alerts") or [],
+                            repaired=result.get("repaired") or [])
     return {"status": "ok", **result}
 
 
 def _post_carrier_after_run(schedules, store: ni.NIStore, item_id: str,
-                            prior_state: str, prior_item: dict, *, alerts: list) -> None:
+                            prior_state: str, prior_item: dict, *, alerts: list,
+                            repaired: list) -> None:
     """M1b helper: post fired alerts + any this-run broken transition to the carrier.
+
+    D6 (audit 2026-09-09): a §14 repair trial can succeed on a manual /run just as
+    on a tick pass; the ``repaired`` list from ``ni.run_item`` must ride the same
+    carrier path as it does from ``_auto_update_ni`` — otherwise the user misses
+    the "<title> repaired itself" notice when they clicked Refresh themselves.
 
     Never raises — surfacing is best-effort and must not turn a completed /run into a
     route error. A locked carrier or a record_ni_run failure logs and returns.
     """
     assert schedules is not None and store is not None, "schedules + store required"
     assert item_id and prior_item is not None, "item context required"
+    assert isinstance(alerts, list) and isinstance(repaired, list), "alerts + repaired must be lists"
     broken: list = []
     try:
         ni._collect_broken_transition(store, item_id, prior_state, prior_item, broken)
     except Exception as exc:  # collection must not shadow a real run outcome
         log.warning("ni carrier: broken-transition collect failed: %s", exc)
         broken = []
-    if not alerts and not broken:
+    if not alerts and not broken and not repaired:
         return
     try:
-        post_ni_carrier_notices(schedules, alerts, broken)
+        post_ni_carrier_notices(schedules, alerts, broken, repaired=repaired)
     except Exception as exc:
         log.warning("ni carrier: manual-run post failed: %s", exc)
 

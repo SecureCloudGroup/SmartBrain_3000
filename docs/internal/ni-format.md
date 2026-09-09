@@ -458,3 +458,122 @@ Optional spec field — the same closed condition grammar as §5 `when`, promote
   `alert_state` — the new name has no prior `active`/`last_fired` record, so a rule
   whose condition is already true at the next run may fire immediately. Accepted
   behavior: the operator saw the rename in the approved update card.
+
+## 13. `llm` pipeline stage (v2b — the ONE deterministic-core exception)
+
+```json
+{"op": "llm", "instruction": "Summarize the headlines in one sentence each.",
+ "output": {"summary": "string", "count": "number"}}
+```
+
+- Position: anywhere in `pipeline`, executed in order like any stage. At most ONE
+  llm stage per item.
+- `instruction`: user-visible spec text, ≤ 2000 chars, `{{param:}}`-free.
+- `output`: flat closed map, ≤ 6 fields, name rules as other outputs (no
+  collisions, no reserved names); types ∈ `string | number | boolean`
+  (strings bound ≤ 2000 chars). The stage's outputs join the pipeline namespace
+  like extract outputs.
+- Execution: the current pipeline value is serialized (≤ 8 KB excerpt, truncation
+  marked) and sent WITH the instruction to the `ni` route (or the item's `model`
+  override) — **local models only**: if the resolved model is not local
+  (`gateway.is_local` false), the run fails with class `llm_requires_local` —
+  never a cloud fallback, the selfreview precedent. The model call carries NO
+  tools; the data excerpt is fenced and heading-forgery-neutralized (claudecli
+  precedent) — injection containment is the output channel: the reply must be a
+  single JSON object matching `output` exactly (strict parse, exact keys, type
+  check; **`number` values must be finite** — `NaN`/`±Infinity` are refused so a
+  non-finite value never reaches the contract check or the sealed snapshot,
+  D4 audit 2026-09-09); one retry appends a FIXED generic sentence asking again
+  for the exact schema (never the raw parse error — safer: no payload fragments
+  can re-enter the prompt via the error message, D9 audit 2026-09-09); a second
+  failure raises `llm_output` and `last_good` keeps rendering.
+- Engine discipline (§8 additions): items with an llm stage clamp
+  `interval_minutes` to ≥ 5; at most `_MAX_LLM_ITEMS_PER_PASS = 1` such item per
+  pass; the pass requires `gateway.local_available()` for them (busy slot ⇒ the
+  item simply stays due — not a failure) and respects the scheduler breaker.
+- Honesty: the board row for such an item carries `"interpreted": true` and the
+  card shows an "Interpreted" chip — the user can always see which cards contain
+  a model's reading of the data rather than pure arithmetic.
+- Contract note: llm outputs are contract-checked like any output (shape/types),
+  which bounds drift; their VALUES are inherently non-deterministic — bounds in
+  the contract apply if present.
+
+## 14. L1 self-repair (v2b — local-model spec repair, egress-inert by construction)
+
+Trigger: an item reaches `failing` (≥ 3 consecutive failures) with a
+**spec-shape** failure class — `extract_miss`, `transform_type`,
+`contract_violation`, `bind_type`, `when_type`, `history_type`, `alert_bind`,
+`llm_output` — and `repair_policy.l1` is true. Never for transport classes
+(`fetch_failed`, `redirect refused`, `secret_*`, `llm_requires_local`): those are
+L0's domain (backoff) or the user's (credentials).
+
+- **One attempt per failure streak**: sealed spec field `_l1_last_attempt`
+  (system-written, like `_c2_ok`); an attempt is allowed only when it predates
+  the current `first_failure_at`. `_l1_last_attempt` is KEPT across a revert
+  (§14 trial-failure), a manual `_c2_ok` reset, and even a `_l1_trial` clear —
+  the streak marker itself (`first_failure_at`) resets on success/update/commission,
+  and that reset is what lets the next streak get a fresh attempt (D1 audit
+  2026-09-09). Requires a local `ni` route + `local_available()` (else silently
+  waits — the streak persists, so the attempt fires on a later pass). Also
+  requires the item's `contract` to be captured (non-null): with no contract
+  there is nothing to repair against, so `_maybe_repair_l1` bails silently and
+  the streak continues toward `broken` (D7 audit 2026-09-09).
+- **Sealed system-only keys** (`_l1_trial`, `_l1_last_attempt`): `validate_spec`
+  shape-checks them so an agent-authored spec cannot smuggle arbitrary shapes
+  through the sealed body — `_l1_trial` must be `{"rev_before": int>=1}` and
+  `_l1_last_attempt` must be an ISO-8601 string (D1 audit 2026-09-09).
+- **`update_spec` semantics for trial markers**: any user/agent update strips
+  `_l1_trial` (a user edit supersedes any in-flight trial — the trial is void;
+  carrying it forward would let the NEXT failure's revert restore a PRE-UPDATE
+  revision, silently undoing the user's edit and — worse — re-instating the old
+  source URL + old `_c2_ok` + old `contract`, bypassing re-consent). D1 audit
+  2026-09-09. `_l1_last_attempt` stays (see above).
+- **Model input** (fenced + neutralized, NO tools): the item's `goal`, the
+  current `extract`/`transform` stages, the failure class + detail, the captured
+  `contract`, and a ≤ 4 KB excerpt of the failing run's RAW payload. All four
+  fenced blocks (stages / contract / raw payload) ride the same
+  heading-forgery + triple-backtick neutralizer as §13 (D8 audit 2026-09-09) —
+  contract keys are payload-derived, so a fetched string could otherwise
+  forge a `### ...` section boundary or close the surrounding fence through
+  the sealed contract.
+- **Model output — the entire repair surface**: a JSON object with optional
+  `"extract"` (full replacement paths map, §4.1 grammar-validated) and/or
+  `"transform"` (full replacement apply-list, closed ops only). Nothing else:
+  never `source`, `url`, `headers`, `schedule`, `scene`, `llm.instruction`,
+  `alerts`, `params`. Strict parse + full spec re-validation; a reply that
+  touches anything else, fails validation, or isn't JSON = repair attempt failed
+  (recorded, no spec change).
+- **TOCTOU guard on apply** (D3 audit 2026-09-09): `apply_repair(item_id,
+  candidate, expected_rev=...)` reads `spec_rev` at the START of the attempt
+  and re-checks under `_SPEC_LOCK` at write time; a mismatch (a concurrent
+  user update landed while the multi-second model call was in flight) aborts
+  the apply and records `repair_failed` with error `spec_changed`. The trial
+  is NOT stamped, so the (already-superseded) failure ladder keeps its own
+  bookkeeping intact.
+- **Engine discipline for repair fires** (D5 audit 2026-09-09): under the tick
+  path, a repair attempt is subject to the same local-model discipline as an
+  llm-stage item — the scheduler breaker must be closed, the pass's shared
+  llm slot must be free, and at most ONE repair may fire per tick. A fired
+  repair consumes the pass's llm slot; two failing items in the same pass
+  therefore see only the first repair (the second stays failing and picks up
+  the next pass with a free slot). Manual `POST /api/ni/items/{id}/run`
+  bypasses this discipline — it is user-invoked and singular; the user's
+  click is the consent that a single local model call is welcome.
+- **Trial semantics** (improvements.py discipline): the repaired stages are
+  applied as a revision with origin `repair_l1` — via a dedicated store path that
+  bumps `spec_rev` and records the revision but **keeps `contract`, `_c2_ok`,
+  state, and failure counters** (the contract IS the repair target; a repair
+  must NOT trigger re-consent — it cannot touch consent-bearing fields by
+  construction). The next engine run is the trial: success **and** contract
+  satisfied ⇒ repair sticks, counters clear, a carrier notice posts
+  ("<title> repaired itself — data mapping updated."); failure ⇒ automatic
+  revert to the pre-repair revision, `_l1_last_attempt` stands (no second
+  attempt this streak), the ladder continues toward `broken`. The revert
+  path holds `_SPEC_LOCK` and strips `_l1_trial` INLINE — never re-entering
+  a lock-taking helper — so a pruned/malformed `rev_before` or a corrupt
+  sealed revision records `repair_reverted` with a diagnostic `error`
+  (`bad_rev_before` / `missing_prior` / `revert_unavailable`) and clears the
+  marker rather than wedging the scheduler (D2 audit 2026-09-09).
+- Repair attempts and their outcomes write `ni_runs` rows (status
+  `repair_applied` / `repair_reverted` / `repair_failed`) — visible in the item's
+  run history. Everything is auditable: the revision spine holds the before/after.
