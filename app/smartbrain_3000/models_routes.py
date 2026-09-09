@@ -34,6 +34,9 @@ CAPABILITY_LABELS = {
     # unset falls back to "chat" — but a big-context/cloud model here turns a book-size
     # summary from an hours-long local trickle into minutes.
     "summarize": "Document summaries",
+    # Neural Interface item generation (design-time drafts, commissioning + repair
+    # calls). Local by default — the deterministic runtime path never calls a model.
+    "ni": "Neural Interface",
 }
 assert set(CAPABILITY_LABELS).issubset(gateway.KNOWN_CAPABILITIES), (
     "every routing label must map to a capability the app actually consumes"

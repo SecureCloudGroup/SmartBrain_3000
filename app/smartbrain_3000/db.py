@@ -379,6 +379,71 @@ _MIGRATIONS: tuple[tuple[int, str | Callable[[], str]], ...] = (
         39,
         "ALTER TABLE usage_log ADD COLUMN IF NOT EXISTS cost_usd DOUBLE;",
     ),
+    # Neural Interface (NI) items — deterministic mini-apps whose spec is authored (partly)
+    # by the agent and rendered from a closed scene grammar. Four tables, all following the
+    # house sealed-body + plaintext-operational-columns convention (schedules/feeds):
+    #   ni_items      — the spec (fetch source, pipeline, scene, params incl. secret NAMES —
+    #                   never secret VALUES) is SEALED under AAD ``ni_item:<id>`` because a
+    #                   spec is as telling as the data it fetches (which sites, which topics,
+    #                   which schedule). Plaintext columns are the operational cadence the
+    #                   engine needs without the key (enabled / state / interval /
+    #                   last_checked / last_status / consecutive_failures / position /
+    #                   spec_rev). last_status is host-free (feeds law).
+    #   ni_snapshots  — the BOUND PAYLOAD (data, not the scene) sealed under AAD
+    #                   ``ni_snapshot:<item_id>:<slot>``; one row per slot (latest,
+    #                   last_good, preview). ok is plaintext so the board can pick the right
+    #                   slot without decrypting.
+    #   ni_revisions  — every spec change sealed under AAD ``ni_revision:<item_id>:<rev>``,
+    #                   pruned in code to the newest 10 per item.
+    #   ni_runs       — plaintext operational telemetry (status, duration_ms, error class,
+    #                   contract_ok). No content — the error is a host-free class string —
+    #                   so the health view queries without the key. Pruned in code to 50/item.
+    # No foreign keys; ``NIStore.delete`` cascades in code (feeds precedent).
+    # ``first_failure_at`` (plaintext) is the streak marker per §6: timestamp of the FIRST failure
+    # in the current run of failures; cleared on success/rewind/update/commission. Escalation to
+    # ``broken`` measures elapsed time from this marker (not ``created_at``), so a long-lived
+    # healthy item that only starts failing today can never be classed broken from its birthday.
+    (
+        40,
+        "CREATE TABLE IF NOT EXISTS ni_items ("
+        " id TEXT PRIMARY KEY,"
+        " enabled BOOLEAN NOT NULL DEFAULT true,"
+        " state TEXT NOT NULL DEFAULT 'draft',"
+        " interval_minutes INTEGER NOT NULL DEFAULT 60,"
+        " last_checked TIMESTAMP,"
+        " last_status TEXT DEFAULT '',"
+        " consecutive_failures INTEGER NOT NULL DEFAULT 0,"
+        " first_failure_at TIMESTAMP,"
+        " position INTEGER NOT NULL DEFAULT 0,"
+        " spec_rev INTEGER NOT NULL DEFAULT 1,"
+        " nonce BLOB NOT NULL,"
+        " ciphertext BLOB NOT NULL,"
+        " created_at TIMESTAMP DEFAULT current_timestamp,"
+        " updated_at TIMESTAMP DEFAULT current_timestamp);"
+        "CREATE TABLE IF NOT EXISTS ni_snapshots ("
+        " item_id TEXT NOT NULL,"
+        " slot TEXT NOT NULL,"
+        " nonce BLOB NOT NULL,"
+        " ciphertext BLOB NOT NULL,"
+        " ok BOOLEAN NOT NULL DEFAULT true,"
+        " created_at TIMESTAMP DEFAULT current_timestamp,"
+        " PRIMARY KEY (item_id, slot));"
+        "CREATE TABLE IF NOT EXISTS ni_revisions ("
+        " item_id TEXT NOT NULL,"
+        " rev INTEGER NOT NULL,"
+        " nonce BLOB NOT NULL,"
+        " ciphertext BLOB NOT NULL,"
+        " origin TEXT NOT NULL,"
+        " created_at TIMESTAMP DEFAULT current_timestamp,"
+        " PRIMARY KEY (item_id, rev));"
+        "CREATE TABLE IF NOT EXISTS ni_runs ("
+        " item_id TEXT NOT NULL,"
+        " ts TIMESTAMP DEFAULT current_timestamp,"
+        " status TEXT NOT NULL,"
+        " duration_ms INTEGER NOT NULL DEFAULT 0,"
+        " error TEXT,"
+        " contract_ok BOOLEAN);",
+    ),
 )
 
 

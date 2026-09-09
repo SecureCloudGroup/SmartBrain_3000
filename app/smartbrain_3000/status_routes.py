@@ -58,6 +58,7 @@ def app_status(request: Request) -> dict:
     out["knowledge"] = _knowledge_status(state, conn)
     out["schedules"] = _schedule_status(conn)
     out["feeds"] = _feed_status(state)
+    out["ni"] = _ni_status(conn)
     out["devices"] = _device_status(store)
     return out
 
@@ -160,6 +161,20 @@ def _feed_status(state) -> dict:
         return {"count": len(rows), "errors": errors}
     except Exception:
         return {"count": 0}
+
+
+def _ni_status(conn) -> dict:
+    """Count NI items by state (plaintext-only query; no decrypt) — the Status page's tile."""
+    try:
+        rows = conn.execute(
+            "SELECT state, COUNT(*) FROM ni_items GROUP BY state;"
+        ).fetchall()
+        by_state = {str(r[0]): int(r[1]) for r in rows}  # bounded: state has 7 values
+        assert isinstance(by_state, dict), "by_state must be a dict"
+        total = sum(by_state.values())
+        return {"total": total, "by_state": by_state}
+    except Exception:
+        return {"total": 0, "by_state": {}}
 
 
 def _device_status(store) -> dict:

@@ -219,7 +219,8 @@ def _send_pinned(client: httpx.Client, url: str, host: str, ip: str,
 def _guarded_get(url: str, allowed_ct: tuple[str, ...], max_bytes: int,
                  deadline_seconds: float | None = None, accept_zip_magic: bool = False,
                  method: str = "GET", content: bytes | None = None,
-                 extra_headers: dict | None = None) -> dict:
+                 extra_headers: dict | None = None,
+                 allow_redirects: bool = True) -> dict:
     """Shared SSRF-guarded request; return {final_url, status, content_type, content (bytes)}.
 
     All the defenses (scheme/userinfo/IP allowlist, per-request IP pin with no
@@ -265,6 +266,13 @@ def _guarded_get(url: str, allowed_ct: tuple[str, ...], max_bytes: int,
                     # ambiguity (301/302 vs 307) — the API providers never redirect,
                     # so refuse outright rather than model the edge.
                     raise FetchError("redirect on POST not allowed")
+                if response.is_redirect and not allow_redirects:
+                    # NI-style callers attach auth headers (secret or literal) whose value
+                    # would silently re-send to every hop. A hostile server can 302 to its
+                    # own host and harvest the header — a credential-exfiltration path. When
+                    # the caller opts out, refuse the very first 3xx so a header never
+                    # crosses a redirect boundary.
+                    raise FetchError("redirect refused")
                 if response.is_redirect:
                     location = response.headers.get("location")
                     if not location:
@@ -336,16 +344,21 @@ def safe_fetch(url: str) -> dict:
     return {"final_url": got["final_url"], "status": got["status"], "text": got["content"].decode("utf-8", "replace")}
 
 
-def safe_fetch_json(url: str, headers: dict | None = None) -> dict:
+def safe_fetch_json(url: str, headers: dict | None = None,
+                    allow_redirects: bool = True) -> dict:
     """Guarded GET returning parsed JSON (search APIs: SearXNG, Brave).
 
     Same guard as ``safe_fetch``; ``headers`` carries a provider auth header — it
     never influences address validation, redirects, or caps. Bad JSON is a clean
-    FetchError, never a decode traceback.
+    FetchError, never a decode traceback. ``allow_redirects=False`` refuses any
+    3xx so an auth-carrying request never re-sends its headers to a rewritten host
+    (credential-exfiltration path — NI's ``_fetch_http_json`` opts out when it
+    attaches ANY header, secret or literal).
     """
     import json
 
-    got = _guarded_get(url, ("application/json", "text/"), _MAX_BYTES, extra_headers=headers)
+    got = _guarded_get(url, ("application/json", "text/"), _MAX_BYTES,
+                       extra_headers=headers, allow_redirects=allow_redirects)
     try:
         return json.loads(got["content"].decode("utf-8", "replace"))
     except ValueError:

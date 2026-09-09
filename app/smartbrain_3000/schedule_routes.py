@@ -116,6 +116,7 @@ def run_now(request: Request, sid: str) -> dict:
         kb=state.kb, planner=state.planner, memory=state.memory,
         email=getattr(state, "email", None), schedules=store,
         vaults=getattr(state, "vaults", None),  # so KB tools can tag imported-vault content
+        ni=getattr(state, "ni", None),  # so NI tools reach the store from a scheduled Run-now turn
     )
     return scheduler.run_schedule(ctx, state.audit, state.approvals, store, schedule)
 

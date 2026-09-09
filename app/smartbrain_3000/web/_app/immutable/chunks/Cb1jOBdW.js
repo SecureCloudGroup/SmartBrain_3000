@@ -1,1 +1,0 @@
-import{Y as e}from"./DjEv3xy6.js";import{n as t}from"./CG34xIzH.js";var n=e({count:0});async function r(){try{n.count=(await t.listPending()).pending.length}catch{}}export{r as n,n as t};

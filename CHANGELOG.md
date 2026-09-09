@@ -11,6 +11,22 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Added
+- **Neural Interface (phase 1)** — a new dashboard, second only to Chat, of things you
+  asked to watch. Describe what you want in Chat; the assistant designs a card (source →
+  pipeline → layout), shows it with sample data for your approval, and the engine keeps it
+  fresh. You always pick the data source yourself, and the approval card shows the exact
+  address, which is then frozen. New cards go through **commissioning**: the first real run
+  is shown for you to validate, a second clean run proves stability, and every later
+  refresh is checked against the data shape you approved — on failure the card shows the
+  last good result with a health chip instead of something wrong. Cards render from a
+  fixed set of safe building blocks (fetched content is plain text, never markup or
+  links); sources fetch through the same network guard as feeds; a locked vault stops
+  everything; the assistant's Neural Interface tools always ask before creating or
+  changing a card and are never auto-approved in scheduled runs. (Migration 40 adds the
+  four `ni_*` tables.) On phones the tab bar is now Chat, Neural, Knowledge, Info — with
+  Activity in the More sheet, whose button now rolls up waiting-approval badges.
+
 ## [0.9.38] - 2026-09-07
 
 ### Changed

@@ -14,7 +14,7 @@
   import { remote } from "$lib/remote/connection.svelte";
   import { scheduleUpdates } from "$lib/scheduleUpdates.svelte";
   import ActionCard from "$lib/components/ActionCard.svelte";
-  import { fmtArgs, iconForTool } from "$lib/pendingCards";
+  import { fmtArgs, iconForTool, promotedLine } from "$lib/pendingCards";
   import { Recorder } from "$lib/audio/recorder";
   import { Speaker, speechAvailable } from "$lib/audio/speaker";
   import { parseVoiceCommand } from "$lib/audio/commands";
@@ -1778,7 +1778,7 @@
          always-allow, or deny without leaving chat. Resolving the last one resumes the
          turn automatically. Activity still lists everything. -->
     {#each pendingActions as p (p.id)}
-      <ActionCard icon={iconForTool(p.tool)} title={p.tool} tier={p.tier === "irreversible" ? "irreversible" : "reviewed"} scope={fmtArgs(p.args)}>
+      <ActionCard icon={iconForTool(p.tool)} title={p.tool} tier={p.tier === "irreversible" ? "irreversible" : "reviewed"} promoted={promotedLine(p.tool, p.args) ?? ""} scope={fmtArgs(p.args)}>
         {#snippet actions()}
           {#if p.tier === "reviewed" && p.remember_mode === "tool"}
             <button class="ghost" disabled={approvalBusy !== "" || busy} title="Approve and stop asking for this tool" onclick={() => resolveApproval(p, "approve", true)}>Always allow</button>
