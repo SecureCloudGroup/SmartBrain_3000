@@ -6,6 +6,7 @@ import type { IconName } from "$lib/icons";
 // honest default for "changes something".
 export function iconForTool(tool: string): IconName {
   const t = tool.toLowerCase();
+  if (t.includes("ni_item")) return "monitor";
   if (t.includes("mail") || t.includes("email")) return "mail";
   if (t.includes("task")) return "tasks";
   if (t.includes("schedule")) return "clock";

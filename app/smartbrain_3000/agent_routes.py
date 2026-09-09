@@ -108,6 +108,7 @@ def _context(request: Request) -> tuple[tools.ToolContext, object]:
         # Provider keys stay inside the service (ctx.email posture) — resolved here, once.
         websearch=search.service_from(state.dbx, secret_store.get) if secret_store else None,
         summaries=docsummaries.SummaryStore(state.dbx, master_key) if master_key else None,
+        ni=getattr(state, "ni", None),  # NI tools read/write via the unlocked NIStore
     ), audit
 
 

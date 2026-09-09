@@ -31,14 +31,16 @@
   let updatedVersion = $state(""); // set when the backend reports a version we didn't load with
   let launcherNudge = $state(false); // one-time "update the desktop app" banner (legacy launchers only)
   let moreOpen = $state(false); // mobile: the More sheet above the tab bar
-  // Chat + Help get the full-width container (chat for the log, help for its own
-  // two-column nav+article layout, which caps itself); everything else uses the column.
-  const wide = $derived(["/chat", "/help"].some((p) => page.url.pathname.startsWith(p)));
+  // Chat + Help + Neural get the full-width container (chat for the log, help for its
+  // two-column nav+article layout which caps itself, Neural for the auto-fit card grid);
+  // everything else uses the column.
+  const wide = $derived(["/chat", "/help", "/ni"].some((p) => page.url.pathname.startsWith(p)));
 
   // `remote: true` = shown on a paired phone; the rest are Desktop-only setup/review pages.
   // The single source of truth for BOTH the desktop sidebar and the mobile tabs/More sheet.
   const NAV: { href: string; label: string; icon: IconName; remote: boolean }[] = [
     { href: "/chat", label: "Chat", icon: "chat", remote: true },
+    { href: "/ni", label: "Neural", icon: "monitor", remote: true },
     { href: "/knowledge", label: "Knowledge", icon: "book", remote: true },
     { href: "/planner", label: "Planner", icon: "tasks", remote: true },
     { href: "/schedules", label: "Schedules", icon: "clock", remote: true },
@@ -52,8 +54,9 @@
   // session) shows only the consume-on-the-go pages.
   const remoteSession = $derived(remote.status !== "idle");
   const nav = $derived(remoteSession ? NAV.filter((n) => n.remote) : NAV);
-  // Mobile: the four thumb-zone tabs (plus More); everything else lives in the More sheet.
-  const TAB_HREFS = ["/chat", "/knowledge", "/info", "/activity"];
+  // Mobile: the four thumb-zone tabs (plus More); everything else — including Activity
+  // — lives in the More sheet, which renders the remainder automatically from NAV.
+  const TAB_HREFS = ["/chat", "/ni", "/knowledge", "/info"];
   const tabNav = $derived(nav.filter((n) => TAB_HREFS.includes(n.href)));
   const moreNav = $derived(nav.filter((n) => !TAB_HREFS.includes(n.href)));
   const isActive = (href: string) =>
@@ -76,6 +79,9 @@
     : 0;
   const badgeTitle = (href: string) =>
     href === "/activity" ? `${pending.count} awaiting approval` : `${scheduleUpdates.count} new scheduled updates`;
+  // Activity lives in the More sheet on mobile; without a rolled-up count on the
+  // More button its badge would be invisible until the sheet is opened.
+  const moreBadge = $derived(moreNav.reduce((sum, n) => sum + badgeFor(n.href), 0));
 
   // When the backend is unreachable, account.load() sets account.error with no
   // status — show a recoverable card instead of an indefinite per-page "Loading…".
@@ -421,13 +427,17 @@
       </a>
     {/each}
     <button class="tab tab-more" aria-expanded={moreOpen} onclick={() => (moreOpen = !moreOpen)}>
+      {#if moreBadge > 0}<span class="tab-dot" title={`${moreBadge} waiting`}>{moreBadge}</span>{/if}
       <Icon name="more-horizontal" size={20} /> More
     </button>
   </nav>
   {#if moreOpen}
     <div class="more-sheet" role="menu" tabindex="-1">
       {#each moreNav as n (n.href)}
-        <a class="navitem" href={n.href} class:active={isActive(n.href)}><Icon name={n.icon} /> {n.label}</a>
+        <a class="navitem" href={n.href} class:active={isActive(n.href)}>
+          <Icon name={n.icon} /> {n.label}
+          {#if badgeFor(n.href) > 0}<span class="nav-badge" title={badgeTitle(n.href)}>{badgeFor(n.href)}</span>{/if}
+        </a>
       {/each}
       <div class="sheet-divider"></div>
       {@render controls()}

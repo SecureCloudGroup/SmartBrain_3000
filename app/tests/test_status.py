@@ -41,4 +41,5 @@ def test_status_unlocked_has_every_section(client: TestClient) -> None:
     assert body["knowledge"] == {"documents": 0, "embedded_chunks": 0}
     assert body["schedules"]["total"] >= 0
     assert body["feeds"]["count"] == 0
+    assert body["ni"] == {"total": 0, "by_state": {}}  # NI items count by state (empty on fresh install)
     assert body["devices"]["paired"] == 0

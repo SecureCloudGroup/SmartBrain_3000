@@ -46,6 +46,7 @@ from .mcp_routes import router as mcp_router
 from .memory_routes import router as memory_router
 from .metrics_routes import router as metrics_router
 from .models_routes import router as models_router
+from .ni_routes import router as ni_router
 from .planner_routes import router as planner_router
 from .schedule_routes import router as schedule_router
 from .selfimprove_routes import router as selfimprove_router
@@ -291,6 +292,7 @@ def _init_app_state(application: FastAPI, conn) -> None:
     application.state.approvals = None
     application.state.session_id = None
     application.state.schedules = None
+    application.state.ni = None                 # NIStore once unlocked
     application.state.email = None              # GmailClient once connected
     application.state.email_oauth_pending = None  # in-flight OAuth handshake
     application.state.scheduler_stop = asyncio.Event()  # cooperative shutdown signal
@@ -381,7 +383,7 @@ def _install_routes(application: FastAPI) -> None:
         account_router, chat_router, local_models_router, models_router, kb_router,
         history_router, memory_router, planner_router, agent_router, schedule_router,
         metrics_router, selfimprove_router, email_router, data_router, mcp_router, devices_router,
-        vault_router, feed_router, status_router, voice_router, web_router,
+        vault_router, feed_router, ni_router, status_router, voice_router, web_router,
     ):  # fixed, bounded
         application.include_router(router)
 

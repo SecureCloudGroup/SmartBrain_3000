@@ -375,6 +375,40 @@ tick it off, **Edit** to change any field, and **Delete**.
 The assistant can read your tasks freely, and can add, complete, or edit one with your
 approval. Deleting a task is irreversible, so it asks every time.
 
+## Neural Interface
+
+A dashboard of things you asked to watch. You describe what you want to see in
+Chat — *"show me AAPL every 5 minutes"*, *"a card with my open tasks by due
+date"* — and the assistant designs a card for it: where the data comes from, how
+it's processed, and how it's laid out. The engine then keeps it fresh on its own
+schedule.
+
+How a card comes to life:
+
+1. **You pick the source.** The assistant can suggest where the data could come
+   from, but the choice of source is always yours — the approval card shows the
+   exact address it will fetch, and that address is frozen: nothing can quietly
+   change it later without asking you again.
+2. **Preview first.** The assistant shows the card with sample data so you can
+   approve the look ("make the total bigger" works — it's a conversation).
+3. **Commissioning.** After you approve, the system runs the real pipeline and
+   shows you the first live result — you confirm it's the *right* data, and one
+   more clean run at cadence proves it's stable. Only then is the card live.
+4. **It keeps itself honest.** Every refresh is checked against the shape of the
+   data you validated. If the source changes or breaks, the card shows the last
+   good result (dimmed, with a health chip) rather than something wrong — and a
+   broken card tells you in Chat.
+
+Cards render from a fixed set of safe building blocks (text, numbers, bars,
+chips, lists) — fetched content is displayed as plain text, never as links,
+markup, or instructions. Sources are fetched with the same network guard as
+feeds; a locked vault stops everything. Cards refresh about every N minutes (1
+minute is the floor), never in real time.
+
+Each card offers **Run now**, **Pause**, and **Delete**; drafts are marked
+"Preview — sample data" until commissioned. On a phone, Neural sits second in
+the tab bar.
+
 ## Schedules
 
 ![Schedules — run a prompt on a timer, then Run now](assets/gifs/07-schedule-a-prompt.gif)

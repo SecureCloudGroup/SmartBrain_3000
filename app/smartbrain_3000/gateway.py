@@ -59,7 +59,7 @@ DEFAULT_ROUTES: dict[str, str] = {
 # Capabilities the app actually consumes. load_routes filters saved routes against this
 # so an old install carrying retired capability keys (e.g. "fast_chat", "reasoning")
 # neither surfaces in the UI nor confuses a downstream `resolve_model` lookup.
-KNOWN_CAPABILITIES: frozenset[str] = frozenset({"chat", "embedding", "agent", "summarize"})
+KNOWN_CAPABILITIES: frozenset[str] = frozenset({"chat", "embedding", "agent", "summarize", "ni"})
 
 # Shown (as a GatewayError) when a request exceeds its timeout — usually a cold local
 # model still loading. Clearer than a raw httpx timeout or bifrost's generic wording.

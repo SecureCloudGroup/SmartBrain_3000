@@ -608,6 +608,67 @@ export interface VaultSubscribeResult extends VaultImportResult {
   url_host: string;
 }
 
+// neural interface (ni-format §10) — the board + item detail + user actions.
+// Every payload the backend returns is BOUND (data inlined per §4.3); the client
+// only validates + renders. Secrets are always names, never values.
+import type { SceneNode } from "$lib/ni/scene";
+
+export type NiState =
+  | "draft"
+  | "commissioning"
+  | "live"
+  | "degraded"
+  | "failing"
+  | "broken"
+  | "paused";
+
+export interface NiDisplay { size: "small" | "wide" }
+
+export interface NiBoardItem {
+  id: string;
+  title: string;
+  state: NiState;
+  enabled: boolean;
+  interval_minutes: number;
+  last_checked: string | null;
+  last_status: string; // host-free
+  consecutive_failures: number;
+  position: number;
+  display: NiDisplay;
+  // Bound payload for the appropriate slot (§10 /board): draft -> preview, live -> latest,
+  // degraded/failing/etc -> last_good. null when no snapshot has ever been written.
+  payload: SceneNode | null;
+  payload_slot: "preview" | "latest" | "last_good";
+  payload_at: string | null;
+}
+
+// A single run — telemetry (§1 ni_runs). Plaintext; host-free error class only.
+export interface NiRun {
+  ts: string;
+  status: string;
+  duration_ms: number;
+  error: string; // "" on success
+  contract_ok: boolean;
+}
+
+// Item detail (§10 GET /items/{id}) — the SPEC (secrets as names) + health + runs.
+// The spec's inner shape is deliberately unstructured on the client — the board renders
+// bound payloads, and the detail surface (later phases) touches individual fields by name.
+export interface NiItemDetail {
+  id: string;
+  title: string;
+  state: NiState;
+  enabled: boolean;
+  interval_minutes: number;
+  last_checked: string | null;
+  last_status: string;
+  consecutive_failures: number;
+  position: number;
+  display: NiDisplay;
+  spec: Record<string, unknown>;
+  runs: NiRun[];
+}
+
 export interface DeviceInfo {
   device_id: string;
   label: string;
@@ -1293,6 +1354,36 @@ export const api = {
   mcpToken: () => req<{ token: string | null }>("/api/mcp/token", { headers: { "x-sb-local": "1" } }),
   mcpNewToken: () => req<{ token: string }>("/api/mcp/token", { method: "POST", headers: { "x-sb-local": "1" } }),
   mcpRevokeToken: () => req<{ ok: boolean }>("/api/mcp/token", { method: "DELETE", headers: { "x-sb-local": "1" } }),
+
+  // neural interface (ni-format §10). All routes go through req<T> so 423 handling
+  // (redirect to /unlock + client state flip) is automatic. The credential PUT is the
+  // one exception: it's Desktop-local (x-sb-local; the WebRTC bridge strips it), so a
+  // paired phone cannot enter or replace an item's secret.
+  niBoard: () => req<{ items: NiBoardItem[] }>("/api/ni/board"),
+  niItem: (id: string) => req<NiItemDetail>(`/api/ni/items/${encodeURIComponent(id)}`),
+  niValidate: (id: string, ok: boolean, note?: string) =>
+    req<{ ok: boolean; state: NiState }>(`/api/ni/items/${encodeURIComponent(id)}/validate`, {
+      method: "POST",
+      body: JSON.stringify(note ? { ok, note } : { ok }),
+    }),
+  niRun: (id: string) =>
+    req<{ ok: boolean; state: NiState }>(`/api/ni/items/${encodeURIComponent(id)}/run`, { method: "POST" }),
+  niPatch: (id: string, body: { enabled?: boolean; position?: number; display?: NiDisplay }) =>
+    req<{ ok: boolean }>(`/api/ni/items/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
+  niDelete: (id: string) =>
+    req<{ ok: boolean }>(`/api/ni/items/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  // Enter a secret param value. Desktop-local (x-sb-local; the bridge strips it) — a
+  // paired phone cannot mint or rotate an NI credential (secrets never travel through
+  // chat or tool args either — §10).
+  niPutCredential: (id: string, name: string, value: string, host: string) =>
+    req<{ ok: boolean }>(`/api/ni/items/${encodeURIComponent(id)}/credential`, {
+      method: "PUT",
+      headers: { "x-sb-local": "1" },
+      body: JSON.stringify({ name, value, host }),
+    }),
 
   // device pairing (remote access via WebRTC)
   // Enrolling/revoking devices + hosting a pairing session are Desktop-local only (x-sb-local;
