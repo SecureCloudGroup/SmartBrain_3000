@@ -461,6 +461,19 @@ def safe_fetch_vault_manifest(url: str) -> bytes:
                         _VAULT_FETCH_DEADLINE_SECONDS)["content"]
 
 
+def safe_fetch_ni_pack(url: str, max_bytes: int) -> bytes:
+    """Fetch a Neural Interface template pack (§19) behind the SSRF guard — RAW bytes.
+
+    Packs are canonical JSON: signature verification must run against the EXACT bytes
+    the host served (a re-decode / re-encode would break canonical form). Same SSRF
+    machinery as vault manifests + the streamed byte cap; content-type set accepts JSON
+    plus the two textual/raw fallbacks raw-file hosts commonly serve.
+    """
+    assert 0 < max_bytes, "cap must be positive"
+    return _guarded_get(_strip_fragment(url), _MANIFEST_CT, max_bytes,
+                        _VAULT_FETCH_DEADLINE_SECONDS)["content"]
+
+
 def safe_fetch_vault_object(url: str, max_bytes: int) -> bytes:
     """Fetch one tree-hosted vault entry (index.bin / objects/*.bin) behind the SSRF guard.
 

@@ -644,6 +644,67 @@ export interface NiBoardItem {
   // Honesty flag (§13): true when the item's pipeline contains an llm stage or its
   // source is model-generated. Surfaced on the card as an "Interpreted" chip.
   interpreted: boolean;
+  // Fleet-healing signals (ni-format §20): this item was installed from a library
+  // template that has since been fixed/changed. Applying is per-item + user-driven —
+  // NEVER silent (the card gets a small accent chip + confirm modal). `template_gone`
+  // is informational only: the library retired this template.
+  template_update?: boolean;
+  template_gone?: boolean;
+}
+
+// ni library (ni-format §19/§20) — the Global Library subscription: one hosted
+// pack of templates the operator installs into their own board. Trust reuses the
+// vault machinery (TOFU pin, monotonic seq, KeyChanged blocking). Every source a
+// template will fetch is `sources` (host + path) — the install sheet renders each
+// one unmissably (§20 law: authorization is the consent). `preview_payload` is a
+// bound scene — the template list renders it through <NiScene> for a taste.
+export interface NiTemplateSource {
+  type: string; // "http" | "internal.schedule" etc — display-only classification
+  host: string; // e.g. "api.example.com"
+  path: string; // e.g. "/v1/quote"
+}
+
+export interface NiTemplateParam {
+  name: string;   // machine name (matches spec_template)
+  label: string;  // human-friendly label
+  kind: "string" | "number" | "secret";
+}
+
+export interface NiTemplate {
+  id: string;
+  title: string;
+  goal: string;
+  category: string;
+  tags: string[];
+  notes: string;
+  sources: NiTemplateSource[];
+  params: NiTemplateParam[];
+  preview_payload: SceneNode;
+}
+
+// Blocked when a check met a DIFFERENT publisher key: nothing is applied, the sheet
+// shows the pinned-vs-offered comparison, and re-pinning requires a passphrase.
+export interface NiLibraryBlocked { offered_fingerprint: string }
+
+export interface NiLibraryState {
+  connected: boolean;
+  url?: string;
+  fingerprint?: string;      // the pinned publisher fingerprint (SB-XXXX-…)
+  seq?: number;
+  last_checked?: string;
+  // A failed check must be VISIBLE: "Last checked just now" with a silent error
+  // would read as healthy during an active attack (tamper/rollback/dead host).
+  last_error?: string | null;
+  unreachable?: boolean;
+  blocked?: NiLibraryBlocked | null;
+  templates?: NiTemplate[];
+}
+
+// Install response: the item is a draft; `needs_credentials` names any secret
+// params that still require values (entered on the card via the existing flow).
+export interface NiInstallResult {
+  item_id: string;
+  needs_credentials?: string[];
 }
 
 // A single run — telemetry (§1 ni_runs). Plaintext; host-free error class only.
@@ -1404,6 +1465,47 @@ export const api = {
       method: "PUT",
       headers: { "x-sb-local": "1" },
       body: JSON.stringify({ name, value, host }),
+    }),
+
+  // ni library (ni-format §19/§20). Connect / disconnect / trust-key are Desktop-local
+  // (x-sb-local; the WebRTC bridge strips it) — the paste IS the consent for background
+  // update checks, so it must come from the machine's owner; mirrors the feeds law.
+  // Check-now + install run over any surface (unlock-only) — the pin is already made.
+  niLibrary: () => req<NiLibraryState>("/api/ni/library"),
+  niLibraryConnect: (url: string) =>
+    req<NiLibraryState>("/api/ni/library/connect", {
+      method: "POST",
+      headers: { "x-sb-local": "1" },
+      body: JSON.stringify({ url }),
+    }),
+  niLibraryCheck: () =>
+    req<NiLibraryState>("/api/ni/library/check", { method: "POST" }),
+  niLibraryDisconnect: () =>
+    req<{ ok: boolean }>("/api/ni/library", {
+      method: "DELETE",
+      headers: { "x-sb-local": "1" },
+    }),
+  // Re-pin after KeyChanged — mirrors trustVaultPublisher: the offered fingerprint the
+  // user just SAW rides along so a host that rotated AGAIN is refused, not silently pinned.
+  niLibraryTrustKey: (offered_fingerprint: string, passphrase: string) =>
+    req<NiLibraryState>("/api/ni/library/trust-key", {
+      method: "POST",
+      headers: { "x-sb-local": "1" },
+      body: JSON.stringify({ offered_fingerprint, passphrase }),
+    }),
+  // Install a template into the board — lands as a draft (§20 install law); Activate
+  // stays the consent. `params` maps string/number param values by name; secret params
+  // are entered afterwards on the card (never through install).
+  niLibraryInstall: (template_id: string, params: Record<string, string | number>) =>
+    req<NiInstallResult>("/api/ni/library/install", {
+      method: "POST",
+      body: JSON.stringify({ template_id, params }),
+    }),
+  // Fleet healing (§20): apply the pack's updated template to this item. Server resets
+  // it to a draft; the card's normal draft affordances take over (Activate re-consents).
+  niApplyTemplateUpdate: (id: string) =>
+    req<{ state: "draft" }>(`/api/ni/items/${encodeURIComponent(id)}/apply-template-update`, {
+      method: "POST",
     }),
 
   // device pairing (remote access via WebRTC)

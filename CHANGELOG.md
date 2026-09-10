@@ -56,6 +56,17 @@ to know when a release changes behavior.
   live web search; the choice stays yours. And on Mac/Linux the desktop app shows **system
   notifications** for Neural Interface alerts, broken cards, and self-repairs — only while
   the vault is unlocked, never replaying old notices after a restart.
+- **Neural Interface (phase 3): the Library.** Connect to a signed template library and
+  install ready-made cards. Trust works like vault subscriptions: the publisher's key is
+  pinned on first contact and every pack is verified against it — the publisher's
+  **fingerprint** is the identity you see, version rollbacks are refused, and a changed
+  key blocks updates until you confirm the new fingerprint with your passphrase.
+  Installing shows every source address up front, lands as a draft, and **your Activate
+  is still the consent** — a library can never start traffic by itself. When the library
+  fixes a template you use, your card shows "Update available"; applying shows what
+  changed and goes through draft → commissioning again (fixes are offered, never pushed).
+  You can also export any card as a shareable template — credentials and personal values
+  are stripped — for submission to the community registry.
 
 ## [0.9.38] - 2026-09-07
 

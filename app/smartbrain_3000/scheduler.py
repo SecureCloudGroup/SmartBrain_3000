@@ -33,6 +33,7 @@ from . import (
     gateway,
     ingest,
     ni,
+    ni_library,
     search,
     selfreview,
     tools,
@@ -644,6 +645,45 @@ def _auto_update_feeds(app) -> None:
         log.warning("feed refresh pass failed: %s", exc)
 
 
+_MAX_LIBRARY_PASS_SECONDS = 20.0  # NI library pass shares the tick — same feed law
+
+
+def _auto_update_ni_library(app) -> None:
+    """One NI library check per tick when due (§20 cadence). Isolated exactly like the
+    other passes: its own cursor, its own try/except, per-fetch failure counted
+    inside — a dead library host can NEVER stop due schedules from firing.
+
+    LOW#5 (audit 2026-09-09): when the tick's outcome TRANSITIONS the source to
+    blocked (KeyChanged) or rollback (older pack), post a carrier notice ONCE via the
+    NI feed so the launcher's tray + the chat notice row surface it. The transition
+    check lives inside ``ni_library.tick`` (compares against the persisted pin), so
+    a per-tick spam of the same block/rollback yields exactly one notice per change.
+    """
+    try:
+        result = ni_library.tick(app, pass_budget_seconds=_MAX_LIBRARY_PASS_SECONDS)
+    except Exception as exc:  # must never kill the schedule tick
+        log.warning("ni library update pass failed: %s", exc)
+        return
+    if not isinstance(result, dict):
+        return
+    notice = result.get("notice")
+    if not isinstance(notice, dict):
+        return
+    key = getattr(app.state, "master_key", None)
+    if key is None:
+        return
+    cursor = app.state.db.cursor()
+    try:
+        # "broken" status → /api/ni/notices renders as the "broken" kind, matching the
+        # tray icon/tone the launcher already uses for interrupted work. Reusing the
+        # existing kind keeps the launcher's dedupe (lastNotifiedVersion) intact.
+        ScheduleStore(cursor, key).record_ni_run("broken", str(notice.get("message") or ""))
+    except Exception as exc:  # posting must never kill the schedule tick either
+        log.warning("ni library carrier posting failed: %s", exc)
+    finally:
+        _close_cursor(cursor)
+
+
 def _auto_update_ni(app) -> None:
     """Neural Interface item pass — same isolation contract as _auto_update_feeds: its own
     cursor, per-item try/except inside, this guard for anything it doesn't catch. A slow or
@@ -835,6 +875,7 @@ def tick(app) -> int:
             log.debug("trash purge skipped: %s", exc)
         _auto_update_vaults(app)    # Stage E: apply due subscription updates (model-independent)
         _auto_update_feeds(app)     # RSS/Atom subscriptions: same isolation contract
+        _auto_update_ni_library(app)  # NI global library (§20): same isolation contract
         _auto_update_ni(app)        # Neural Interface items: same isolation contract
         try:  # self-review (Phase 2): 8h-cadence scorecard, self-gated (kill-switch + due),
             # pure SQL in this phase so it needs no model; isolated like the trash purge.
