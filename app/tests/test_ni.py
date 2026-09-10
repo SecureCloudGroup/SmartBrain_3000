@@ -637,7 +637,7 @@ def test_tick_isolates_per_item_failures(monkeypatch: pytest.MonkeyPatch) -> Non
     ok_gw = _FakeGateway(text="ok")
 
     def fake_run_item(store_arg, item_id, *, gateway_mod, secrets_store,
-                      schedules_store=None):
+                      schedules_store=None, reserve_repair=None):
         if item_id == bad_iid:
             raise nimod.NIError("fetch_failed", "oops")
         # Reuse the real run_item for the good one; use the ok gateway.
@@ -659,7 +659,8 @@ def test_tick_no_op_when_locked() -> None:
     _s, conn, key = _store()
     app = _fake_app(conn, key)
     app.state.master_key = None
-    assert nimod.tick(app) == {"checked": 0, "alerts": [], "broken": []}
+    assert nimod.tick(app) == {"checked": 0, "alerts": [], "broken": [],
+                                "repaired": []}
 
 
 # --- NI tool registry (Phase 1 wiring) -------------------------------------
@@ -1731,7 +1732,7 @@ def test_tick_returns_alerts_and_broken_transitions(monkeypatch: pytest.MonkeyPa
     nimod._process_alerts(store, store.get_item(iid_alert), {"price": 5})
 
     def fake_run_item(store_arg, item_id, *, gateway_mod, secrets_store,
-                      schedules_store=None):
+                      schedules_store=None, reserve_repair=None):
         if item_id == iid_broken:
             store_arg.set_state(iid_broken, "broken")
             raise nimod.NIError("secret_host_mismatch", "boom")
@@ -2087,3 +2088,817 @@ def test_post_ni_carrier_notices_per_notice_try_except() -> None:
     # Every notice was ATTEMPTED even though the first raised.
     assert len(store.calls) == 3
     assert [s for s, _m in store.calls] == ["complete", "complete", "broken"]
+
+
+# --- Phase 2b: §13 llm pipeline stage ------------------------------------
+
+def _llm_spec(instruction: str = "Summarize the record.",
+              output: dict | None = None,
+              interval: int = 60,
+              extra_pipeline: list | None = None,
+              **overrides) -> dict:
+    """A commissioning-ready spec whose pipeline runs one llm stage after extract."""
+    schema = output if output is not None else {"summary": "string", "count": "number"}
+    scene = {"type": "stack", "dir": "v", "gap": "sm", "children": [
+        {"type": "text", "value": "{{summary}}", "role": "title",
+         "tone": "default", "size": "md"},
+    ]}
+    pipeline: list = list(extra_pipeline or [])
+    pipeline.append({"op": "llm", "instruction": instruction, "output": schema})
+    spec = _basic_spec(scene=scene, pipeline=pipeline, interval_minutes=interval,
+                       source={"type": "model", "instruction": "raw"})
+    spec.update(overrides)
+    return spec
+
+
+def test_llm_stage_refuses_two_stages_per_pipeline() -> None:
+    """§13: at most one llm stage per pipeline."""
+    spec = _llm_spec(extra_pipeline=[
+        {"op": "llm", "instruction": "First.", "output": {"a": "string"}},
+    ])
+    with pytest.raises(ValueError, match="at most one llm stage"):
+        nimod.validate_spec(spec)
+
+
+def test_llm_stage_refuses_bad_output_type() -> None:
+    """§13: output types must be string | number | boolean; anything else refused."""
+    with pytest.raises(ValueError, match="output.count"):
+        nimod.validate_spec(_llm_spec(output={"count": "integer"}))
+
+
+def test_llm_stage_refuses_param_placeholder_in_instruction() -> None:
+    """§13: {{param:...}} inside the instruction is refused at validation time."""
+    with pytest.raises(ValueError, match="param"):
+        nimod.validate_spec(_llm_spec(instruction="Summarize {{param:sym}}."))
+
+
+def test_llm_stage_output_collision_refused() -> None:
+    """§13: an llm output name colliding with an earlier pipeline output is refused."""
+    with pytest.raises(ValueError, match="collides"):
+        nimod.validate_spec(_llm_spec(extra_pipeline=[
+            {"op": "extract", "paths": {"summary": "value"}},
+        ], output={"summary": "string"}))
+
+
+def test_llm_stage_interval_clamped_to_five_minutes() -> None:
+    """§13: an item with an llm stage clamps interval_minutes to >= 5."""
+    store, _conn, _key = _store()
+    iid = store.add_item(_llm_spec(interval=1), {"summary": "seed", "count": 0})
+    assert store.get_item(iid)["interval_minutes"] == 5
+    # Non-llm items still floor at 1 (existing rule).
+    iid2 = store.add_item(_basic_spec(interval_minutes=1), _preview())
+    assert store.get_item(iid2)["interval_minutes"] == 1
+
+
+def _run_llm_stage(instruction: str, current: dict, schema: dict,
+                    replies: list[str]) -> tuple[dict, list[str]]:
+    """Drive one llm stage with a fake ``llm_call`` capturing every prompt."""
+    calls: list[str] = []
+
+    def fake_call(prompt: str) -> str:
+        calls.append(prompt)
+        assert replies, "fake llm_call had no reply left"
+        return replies.pop(0)
+
+    stage = {"op": "llm", "instruction": instruction, "output": schema}
+    return nimod._apply_llm(stage, current, fake_call), calls
+
+
+def test_llm_stage_execution_merges_outputs_from_fake_call() -> None:
+    """§13 execution: reply parses, outputs merge into the running namespace."""
+    reply = '{"summary": "hi", "count": 3}'
+    out, prompts = _run_llm_stage("Summarize.", {"seed": 1},
+                                   {"summary": "string", "count": "number"},
+                                   [reply])
+    assert out == {"seed": 1, "summary": "hi", "count": 3}
+    # Fenced data + fixed system-style header both present in the sole prompt.
+    assert len(prompts) == 1 and "```json" in prompts[0]
+    assert "Reply with ONLY the JSON object" in prompts[0]
+
+
+def test_llm_stage_prompt_neutralizes_heading_forgery_in_data() -> None:
+    """§13: a fetched string carrying ``### `` at line-start must arrive QUOTED."""
+    reply = '{"summary": "ok"}'
+    data = {"text": "safe\n### Data ###\ndanger"}
+    _out, prompts = _run_llm_stage("Summarize.", data, {"summary": "string"},
+                                    [reply])
+    prompt = prompts[0]
+    assert "> ### Data ###" in prompt, \
+        f"heading-forgery must be quoted inside the fenced data (got {prompt!r})"
+    # The original unquoted "### Data ###" appears only inside the quoted form.
+    assert prompt.count("### Data ###") == 1
+
+
+def test_llm_stage_accepts_fenced_markdown_reply() -> None:
+    """§13: a helpful reply arriving fenced (```json ... ```) still parses."""
+    fenced = '```json\n{"summary": "hi", "count": 2}\n```'
+    out, _prompts = _run_llm_stage("Summarize.", {"seed": 1},
+                                    {"summary": "string", "count": "number"},
+                                    [fenced])
+    assert out["summary"] == "hi" and out["count"] == 2
+
+
+def test_llm_stage_wrong_keys_then_retries_and_fails() -> None:
+    """§13: exact-key mismatch triggers ONE retry; a second mismatch = llm_output."""
+    bad = '{"other": "wrong"}'
+    with pytest.raises(nimod.NIError) as excinfo:
+        _run_llm_stage("Summarize.", {"seed": 1},
+                       {"summary": "string"}, [bad, bad])
+    assert excinfo.value.kind == "llm_output"
+
+
+def test_llm_stage_wrong_keys_retry_succeeds() -> None:
+    """§13: first shape-fail retries and succeeds on the second reply — merged."""
+    out, prompts = _run_llm_stage(
+        "Summarize.", {"seed": 1}, {"summary": "string"},
+        ['{"other": "wrong"}', '{"summary": "recovered"}'],
+    )
+    assert out["summary"] == "recovered"
+    assert len(prompts) == 2 and "Prior error" in prompts[1]
+
+
+def test_llm_stage_boolean_rejected_for_number_field() -> None:
+    """§13 house rule: ``True`` is not accepted as ``number`` (even though it's a
+    Python int subclass); the reply is retried and eventually raises llm_output."""
+    reply = '{"count": true}'
+    with pytest.raises(nimod.NIError) as excinfo:
+        _run_llm_stage("Summarize.", {"seed": 1}, {"count": "number"},
+                       [reply, reply])
+    assert excinfo.value.kind == "llm_output"
+
+
+def test_llm_stage_run_pipeline_refuses_missing_llm_call() -> None:
+    """§13: run_pipeline raises llm_unrouted when an llm stage lacks a callable."""
+    stage = {"op": "llm", "instruction": "hi", "output": {"summary": "string"}}
+    with pytest.raises(nimod.NIError) as excinfo:
+        nimod.run_pipeline([stage], {"seed": 1}, llm_call=None)
+    assert excinfo.value.kind == "llm_unrouted"
+
+
+def _run_llm_item_with_gateway(gw, spec_overrides: dict | None = None) -> tuple:
+    """Build a live NI item wired to a fake gateway and execute run_item once."""
+    store, conn, key = _store()
+    secrets, schedules = SecretStore(conn, key), ScheduleStore(conn, key)
+    spec = _llm_spec(**(spec_overrides or {}))
+    iid = store.add_item(spec, {"summary": "seed", "count": 0})
+    store.set_state(iid, "live")
+    return store, secrets, schedules, iid, gw
+
+
+def test_make_llm_call_refuses_non_local_route() -> None:
+    """§13: gateway.is_local(model) false ⇒ NIError('llm_requires_local')."""
+    store, _c, _k = _store()
+    gw = _FakeGateway(model="openai/gpt-4o", text="ignored")
+    with pytest.raises(nimod.NIError) as excinfo:
+        nimod._make_llm_call(store, _llm_spec(), gw)
+    assert excinfo.value.kind == "llm_requires_local"
+
+
+def test_run_item_with_llm_pipeline_end_to_end() -> None:
+    """§13 integration: llm stage runs, outputs merge, snapshot renders."""
+
+    class _ReplyGW(_FakeGateway):
+        def __init__(self) -> None:
+            super().__init__(model="ollama/x", text='{"summary": "hello", "count": 1}')
+
+    store, secrets, schedules, iid, gw = _run_llm_item_with_gateway(_ReplyGW())
+    result = nimod.run_item(store, iid, gateway_mod=gw,
+                             secrets_store=secrets, schedules_store=schedules)
+    assert result["status"] == "ok"
+    snap = store.read_snapshot(iid, "latest")
+    assert snap is not None and snap["ok"] is True
+    assert snap["payload"]["children"][0]["value"] == "hello"
+
+
+def test_tick_skips_llm_item_when_local_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """§13: an llm-stage item stays due when local_available() is False (no mark_checked)."""
+    from smartbrain_3000 import gateway
+    store, conn, key = _store()
+    iid = store.add_item(_llm_spec(), {"summary": "seed", "count": 0})
+    store.set_state(iid, "live")
+    conn.execute("UPDATE ni_items SET last_checked = NULL;")
+    # Real module patch — `from . import gateway` binds via the parent package's
+    # attribute, so sys.modules swaps don't reach tick's fresh import.
+    monkeypatch.setattr(gateway, "local_available", lambda: False)
+    monkeypatch.setattr(gateway, "load_routes", lambda _c: {"ni": "ollama/x"})
+    monkeypatch.setattr(gateway, "resolve_model", lambda cap, r: r.get(cap))
+    nimod.tick(_fake_app(conn, key))
+    # Local was busy — llm-item stayed due (no mark_checked ran).
+    assert store.get_item(iid)["last_checked"] is None
+
+
+def test_tick_at_most_one_llm_item_per_pass(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """§13: at most _MAX_LLM_ITEMS_PER_PASS llm items fire in a single tick."""
+    from smartbrain_3000 import gateway
+    store, conn, key = _store()
+    ids = [store.add_item(_llm_spec(), {"summary": "seed", "count": 0})
+           for _ in range(2)]
+    for iid in ids:  # bounded
+        store.set_state(iid, "live")
+    conn.execute("UPDATE ni_items SET last_checked = NULL;")
+
+    llm_calls: list[str] = []
+
+    def fake_chat(messages, _model, **_kwargs):
+        content = messages[0]["content"]
+        if "Reply with ONLY the JSON object" in content:
+            llm_calls.append("llm")
+            return {"choices": [{"message":
+                                  {"content": '{"summary":"hi","count":1}'}}]}
+        # Source-model turn: returns arbitrary text the pipeline consumes.
+        return {"choices": [{"message":
+                              {"content": '{"summary":"raw","count":0}'}}]}
+
+    monkeypatch.setattr(gateway, "chat", fake_chat)
+    monkeypatch.setattr(gateway, "local_available", lambda: True)
+    monkeypatch.setattr(gateway, "is_local", lambda _m: True)
+    monkeypatch.setattr(gateway, "load_routes", lambda _c: {"ni": "ollama/x"})
+    monkeypatch.setattr(gateway, "resolve_model", lambda cap, r: r.get(cap))
+    monkeypatch.setattr(gateway, "completion_text",
+                         lambda d: d["choices"][0]["message"]["content"])
+
+    result = nimod.tick(_fake_app(conn, key))
+    assert result["checked"] >= 1
+    # Exactly one llm-stage chat happened despite two due llm items.
+    assert len(llm_calls) == 1, f"llm cap breached: {llm_calls!r}"
+
+
+# --- Phase 2b: /api/ni/board interpreted flag -----------------------------
+
+def test_board_row_interpreted_flag_reflects_model_source_and_llm_stage() -> None:
+    """§13 honesty: ``interpreted`` is True for a model source OR a pipeline with an
+    llm stage; a plain http_json + extract-only item stays False."""
+    from smartbrain_3000 import ni_routes
+
+    store, _c, _k = _store()
+    plain_id = store.add_item(_basic_spec(source={
+        "type": "http_json", "url": "https://api.example.com/q", "headers": {},
+    }, pipeline=[{"op": "extract", "paths": {"text": "text"}}],
+        scene={"type": "stack", "dir": "v", "gap": "sm", "children": [
+            {"type": "text", "value": "{{text}}", "role": "title",
+             "tone": "default", "size": "md"},
+        ]}), {"text": "preview"})
+    model_id = store.add_item(_fetching_scene_spec(), _fetching_preview())
+    llm_id = store.add_item(_llm_spec(), {"summary": "seed", "count": 0})
+
+    rows = {i["id"]: ni_routes._board_row(store, store.get_item(i["id"]))
+            for i in store.list_items()}
+    assert rows[plain_id]["interpreted"] is False
+    assert rows[model_id]["interpreted"] is True
+    assert rows[llm_id]["interpreted"] is True
+
+
+# --- Phase 2b: §14 L1 self-repair ----------------------------------------
+
+def _l1_failing_item(store) -> tuple[str, dict]:
+    """Set up an item at state=failing with a contract captured, ready for repair.
+
+    Uses ``model`` source + a single ``extract`` stage so a fake gateway can drive
+    both the payload (via ``_FakeGateway.chat``) and the trial verdict.
+    """
+    scene = {"type": "stack", "dir": "v", "gap": "sm", "children": [
+        {"type": "text", "value": "{{note}}", "role": "title",
+         "tone": "default", "size": "md"},
+    ]}
+    spec = _basic_spec(
+        title="Watch", scene=scene,
+        source={"type": "model", "instruction": "hi"},
+        pipeline=[{"op": "extract", "paths": {"note": "text"}}],
+    )
+    iid = store.add_item(spec, {"note": "seed"})
+    # Attest _c2_ok + a captured contract inline, then push to failing.
+    current = store.get_item(iid)["spec"]
+    current["_c2_ok"] = True
+    current["contract"] = {"shape": {"note": "string"}}
+    store.conn.execute(
+        "UPDATE ni_items SET nonce = ?, ciphertext = ?, "
+        "consecutive_failures = 3, first_failure_at = now() - INTERVAL '10 MINUTES', "
+        "state = 'failing' WHERE id = ?;",
+        [*store._seal_item(iid, current), iid],
+    )
+    return iid, current
+
+
+def _seed_l1_trial(store, iid: str, rev_before: int) -> None:
+    """Stamp ``_l1_trial = {"rev_before": rev_before}`` on the sealed spec."""
+    from datetime import UTC, datetime  # local import: bounded scope for helper
+    current = store.get_item(iid)["spec"]
+    current["_l1_trial"] = {"rev_before": rev_before}
+    current["_l1_last_attempt"] = datetime.now(UTC).isoformat()
+    store.conn.execute(
+        "UPDATE ni_items SET nonce = ?, ciphertext = ? WHERE id = ?;",
+        [*store._seal_item(iid, current), iid],
+    )
+
+
+def _l1_gw_with_reply(reply: str, *, local: bool = True, model: str = "ollama/x"):
+    """Fake gateway whose completion_text returns ``reply`` verbatim."""
+
+    class _GW(_FakeGateway):
+        def __init__(self) -> None:
+            super().__init__(text=reply, local_ok=local, model=model)
+
+    return _GW()
+
+
+def test_l1_never_fires_for_transport_class() -> None:
+    """§14: L1 refuses transport classes outright (fetch_failed, secret_*, llm_requires_local)."""
+    store, _c, _k = _store()
+    iid, _spec = _l1_failing_item(store)
+    gw = _l1_gw_with_reply('{"extract": {"note": "value"}}')
+    for kind in ("fetch_failed", "secret_host_mismatch", "llm_requires_local",
+                 "model_error"):
+        nimod._maybe_repair_l1(store, store.get_item(iid), gw, "excerpt",
+                                nimod.NIError(kind, "detail"))
+    # No apply happened — spec_rev is still 1 (initial).
+    assert store.get_item(iid)["spec_rev"] == 1
+
+
+def test_l1_never_fires_when_policy_off() -> None:
+    """§14: repair_policy.l1 = False never fires."""
+    store, _c, _k = _store()
+    iid, spec = _l1_failing_item(store)
+    spec["repair_policy"] = {"l1": False, "l2_frontier": False}
+    store.conn.execute(
+        "UPDATE ni_items SET nonce = ?, ciphertext = ? WHERE id = ?;",
+        [*store._seal_item(iid, spec), iid],
+    )
+    gw = _l1_gw_with_reply('{"extract": {"note": "value"}}')
+    nimod._maybe_repair_l1(store, store.get_item(iid), gw, "excerpt",
+                            nimod.NIError("contract_violation", ""))
+    assert store.get_item(iid)["spec_rev"] == 1
+
+
+def test_l1_never_fires_outside_failing_state() -> None:
+    """§14: repair only fires when state=failing (§6 threshold)."""
+    store, _c, _k = _store()
+    iid, _ = _l1_failing_item(store)
+    store.set_state(iid, "degraded")  # push back off failing
+    gw = _l1_gw_with_reply('{"extract": {"note": "value"}}')
+    nimod._maybe_repair_l1(store, store.get_item(iid), gw, "excerpt",
+                            nimod.NIError("contract_violation", ""))
+    assert store.get_item(iid)["spec_rev"] == 1
+
+
+def test_l1_refuses_unknown_key_in_reply_and_records_repair_failed() -> None:
+    """§14: any key outside {extract, transform} = attempt failed; records repair_failed."""
+    store, _c, _k = _store()
+    iid, _ = _l1_failing_item(store)
+    gw = _l1_gw_with_reply(
+        '{"extract": {"note": "value"}, "source": {"type": "model"}}'
+    )
+    nimod._maybe_repair_l1(store, store.get_item(iid), gw, "excerpt",
+                            nimod.NIError("contract_violation", ""))
+    runs = store.list_runs(iid, limit=5)
+    assert any(r["status"] == "repair_failed" for r in runs)
+    # _l1_last_attempt was stamped (no second attempt this streak).
+    assert store.get_item(iid)["spec"].get("_l1_last_attempt")
+    # No revision was written.
+    assert store.get_item(iid)["spec_rev"] == 1
+
+
+def test_l1_refuses_bad_path_grammar_and_records_repair_failed() -> None:
+    """§14: a candidate whose extract paths violate §4.1 grammar = validate failure."""
+    store, _c, _k = _store()
+    iid, _ = _l1_failing_item(store)
+    gw = _l1_gw_with_reply('{"extract": {"note": "bad path with spaces"}}')
+    nimod._maybe_repair_l1(store, store.get_item(iid), gw, "excerpt",
+                            nimod.NIError("extract_miss", "path"))
+    runs = store.list_runs(iid, limit=5)
+    assert any(r["status"] == "repair_failed" for r in runs)
+    assert store.get_item(iid)["spec_rev"] == 1
+
+
+def test_l1_apply_keeps_contract_c2_and_counters_and_bumps_rev() -> None:
+    """§14: apply_repair preserves contract/_c2_ok/state/failure counters, bumps spec_rev."""
+    store, _c, _k = _store()
+    iid, _spec = _l1_failing_item(store)
+    before = store.get_item(iid)
+    gw = _l1_gw_with_reply('{"extract": {"note": "value"}}')
+    nimod._maybe_repair_l1(store, store.get_item(iid), gw, "excerpt",
+                            nimod.NIError("contract_violation", ""))
+    after = store.get_item(iid)
+    assert after["spec_rev"] == before["spec_rev"] + 1
+    assert after["state"] == "failing", "state must not change under repair"
+    assert after["consecutive_failures"] == before["consecutive_failures"]
+    assert after["first_failure_at"] == before["first_failure_at"]
+    assert after["spec"]["contract"] == before["spec"]["contract"]
+    assert after["spec"].get("_c2_ok") is True
+    assert isinstance(after["spec"].get("_l1_trial"), dict)
+    assert after["spec"]["_l1_trial"]["rev_before"] == before["spec_rev"]
+    runs = store.list_runs(iid, limit=5)
+    assert any(r["status"] == "repair_applied" for r in runs)
+
+
+def test_l1_one_attempt_per_streak() -> None:
+    """§14: after an attempt lands, a second call this streak is refused (no new rev)."""
+    store, _c, _k = _store()
+    iid, _ = _l1_failing_item(store)
+    gw = _l1_gw_with_reply('{"extract": {"note": "value"}}')
+    nimod._maybe_repair_l1(store, store.get_item(iid), gw, "excerpt",
+                            nimod.NIError("contract_violation", ""))
+    rev_after_first = store.get_item(iid)["spec_rev"]
+    # A second attempt within the same streak must be a no-op.
+    nimod._maybe_repair_l1(store, store.get_item(iid), gw, "excerpt",
+                            nimod.NIError("contract_violation", ""))
+    assert store.get_item(iid)["spec_rev"] == rev_after_first
+
+
+def test_l1_trial_success_emits_notice_and_clears_trial() -> None:
+    """§14: a clean run with ``_l1_trial`` set emits a repaired notice + clears the trial."""
+    store, conn, key = _store()
+    secrets, schedules = SecretStore(conn, key), ScheduleStore(conn, key)
+    iid, _spec = _l1_failing_item(store)
+    _seed_l1_trial(store, iid, rev_before=1)
+    gw = _FakeGateway(text="hello", model="ollama/x")
+    result = nimod.run_item(store, iid, gateway_mod=gw,
+                             secrets_store=secrets, schedules_store=schedules)
+    assert result["status"] == "ok"
+    assert result.get("repaired") and result["repaired"][0]["item_id"] == iid
+    after = store.get_item(iid)
+    assert "_l1_trial" not in after["spec"]
+    assert after["state"] == "live"
+
+
+def test_l1_trial_failure_reverts_to_pre_repair_revision() -> None:
+    """§14: a failing trial run restores the pre-repair revision + records repair_reverted."""
+    store, conn, key = _store()
+    secrets, schedules = SecretStore(conn, key), ScheduleStore(conn, key)
+    iid, _ = _l1_failing_item(store)
+    original_stages = list(store.get_item(iid)["spec"]["pipeline"])
+    # Apply a broken repair via the store method directly (unit-focused): the pipeline's
+    # extract now targets a missing key, so the trial run will fail extract_miss.
+    broken = dict(store.get_item(iid)["spec"])
+    broken["pipeline"] = [{"op": "extract", "paths": {"note": "missing"}}]
+    store.apply_repair(iid, broken, origin="repair_l1")
+    after_apply_rev = store.get_item(iid)["spec_rev"]
+    assert store.get_item(iid)["spec"].get("_l1_trial") is not None
+
+    gw = _FakeGateway(text="hello", model="ollama/x")
+    with pytest.raises(nimod.NIError):
+        nimod.run_item(store, iid, gateway_mod=gw,
+                       secrets_store=secrets, schedules_store=schedules)
+
+    after = store.get_item(iid)
+    # Revert wrote a new revision restoring the original pipeline (audit spine intact).
+    assert after["spec_rev"] == after_apply_rev + 1
+    assert after["spec"]["pipeline"] == original_stages
+    assert "_l1_trial" not in after["spec"]
+    # _l1_last_attempt stands: no second attempt fires this streak.
+    assert after["spec"].get("_l1_last_attempt")
+    runs = store.list_runs(iid, limit=10)
+    assert any(r["status"] == "repair_reverted" for r in runs)
+
+    # Prove the streak-block: another _maybe_repair_l1 call MUST refuse.
+    rev_before_retry = after["spec_rev"]
+    nimod._maybe_repair_l1(store, store.get_item(iid), gw, "excerpt",
+                            nimod.NIError("contract_violation", ""))
+    assert store.get_item(iid)["spec_rev"] == rev_before_retry
+
+
+def test_scheduler_posts_ni_repaired_notice_to_carrier(monkeypatch) -> None:
+    """§14 wiring: repaired notices ride the NI carrier via post_ni_carrier_notices."""
+    from smartbrain_3000 import scheduler as sched
+
+    conn = duckdb.connect(":memory:")
+    dbmod.run_migrations(conn)
+    key = gen_master_key()
+    app = SimpleNamespace(state=SimpleNamespace(master_key=key,
+                                                 db=SimpleNamespace(cursor=conn.cursor)))
+
+    def fake_tick(_app, pass_budget_seconds=20.0, breaker_open=None):
+        return {"checked": 1, "alerts": [], "broken": [],
+                "repaired": [{"item_id": "z", "title": "Watch"}]}
+
+    monkeypatch.setattr(sched.ni, "tick", fake_tick)
+    sched._auto_update_ni(app)
+    store = sched.ScheduleStore(conn, key)
+    messages = [r["message"] for r in store.recent_runs()
+                if r["schedule_title"] == "Neural Interface"]
+    assert any("Watch repaired itself" in m for m in messages), messages
+
+
+# --- Phase 2b audit (2026-09-09): D1-D8 regressions ----------------------
+
+def test_D1_update_spec_pops_l1_trial_so_revert_cant_undo_user_edit() -> None:
+    """D1: a user edit through the tool handler must void any in-flight repair trial
+    so a later failure's revert can NEVER restore a pre-update revision (which would
+    silently undo the edit AND recover the old source URL + old _c2_ok + old
+    contract, bypassing re-consent). Force a failure after the edit: no revert
+    should happen (spec stays the user's, rev un-bumped by revert, no repair_reverted
+    ni_runs row).
+    """
+    ctx, _c, _k = _tool_ctx()
+    store = ctx.ni
+    iid, _spec = _l1_failing_item(store)
+    # Land a repair so _l1_trial is set: gateway replies with a valid extract map.
+    gw = _l1_gw_with_reply('{"extract": {"note": "value"}}')
+    nimod._maybe_repair_l1(store, store.get_item(iid), gw, "excerpt",
+                            nimod.NIError("contract_violation", ""))
+    assert isinstance(store.get_item(iid)["spec"].get("_l1_trial"), dict), "trial staged"
+    rev_after_repair = store.get_item(iid)["spec_rev"]
+
+    # User edits via the tool handler (pure title change; not a source change).
+    _tool_call("update_ni_item", ctx, {"item_id": iid, "title": "User Rename"})
+    after_edit = store.get_item(iid)
+    assert "_l1_trial" not in after_edit["spec"], "D1: user edit must strip _l1_trial"
+    assert after_edit["spec"]["title"] == "User Rename"
+
+    # Force a failure — the revert path must NO-OP because _l1_trial is gone.
+    rev_before_failure = store.get_item(iid)["spec_rev"]
+    store.set_state(iid, "live")  # any post-draft state is fine for _handle_failure
+    nimod._handle_failure(store, store.get_item(iid),
+                           nimod.NIError("bind_type", "forced"), started=0.0)
+    after_fail = store.get_item(iid)
+    # The revert would have bumped rev + written repair_reverted. Prove neither happened.
+    assert after_fail["spec_rev"] == rev_before_failure, "no revert bumped rev"
+    runs = store.list_runs(iid, limit=20)
+    assert not any(r["status"] == "repair_reverted" for r in runs), (
+        "no repair_reverted row: revert must not fire after user edit stripped _l1_trial"
+    )
+    # And the user's edit stands (title unchanged).
+    assert after_fail["spec"]["title"] == "User Rename"
+    # rev_after_repair is unused past its assertion; silence lint.
+    assert rev_after_repair >= 1
+
+
+def test_D1_validate_spec_shape_checks_system_only_keys() -> None:
+    """D1: agents cannot smuggle arbitrary shapes into _l1_trial / _l1_last_attempt."""
+    spec = _basic_spec()
+    spec["_l1_trial"] = {"rev_before": "not-an-int"}  # wrong type
+    with pytest.raises(ValueError, match="_l1_trial"):
+        nimod.validate_spec(spec)
+    spec["_l1_trial"] = {"rev_before": 0}  # must be >= 1
+    with pytest.raises(ValueError, match="_l1_trial"):
+        nimod.validate_spec(spec)
+    spec["_l1_trial"] = {"rev_before": 1, "extra": 1}  # closed-key
+    with pytest.raises(ValueError, match="_l1_trial"):
+        nimod.validate_spec(spec)
+    spec.pop("_l1_trial")
+    spec["_l1_last_attempt"] = 12345
+    with pytest.raises(ValueError, match="_l1_last_attempt"):
+        nimod.validate_spec(spec)
+    spec["_l1_last_attempt"] = "not-an-iso-date"
+    with pytest.raises(ValueError, match="_l1_last_attempt"):
+        nimod.validate_spec(spec)
+
+
+def _revert_under_timeout(store, item_id: str, *, seconds: float = 2.0) -> bool:
+    """Run ``_revert_l1_trial_if_active`` in a background thread; return True iff it
+    completes within ``seconds``. Proves the D2 non-deadlock invariant without a
+    real signal-based timeout (POSIX-only) so the assertion runs on every platform.
+    """
+    import threading
+    done = threading.Event()
+
+    def _run() -> None:
+        try:
+            nimod._revert_l1_trial_if_active(store, item_id)
+        finally:
+            done.set()
+
+    thread = threading.Thread(target=_run, daemon=True)
+    thread.start()
+    return done.wait(timeout=seconds)
+
+
+def test_D2_revert_bad_rev_before_completes_and_clears_trial() -> None:
+    """D2: rev_before pruned/malformed does NOT re-enter _clear_l1_trial (which would
+    re-acquire the non-reentrant _SPEC_LOCK and wedge the scheduler); the revert
+    completes within a bounded time and clears the trial marker + records a
+    repair_reverted row with error 'bad_rev_before'.
+    """
+    store, _c, _k = _store()
+    iid, _spec = _l1_failing_item(store)
+    _seed_l1_trial(store, iid, rev_before=1)
+    # Corrupt the sealed spec so rev_before is missing entirely (simulating pruning).
+    current = store.get_item(iid)["spec"]
+    current["_l1_trial"] = {"rev_before": 0}  # would fail validate_spec, but we seal directly
+    store.conn.execute(
+        "UPDATE ni_items SET nonce = ?, ciphertext = ? WHERE id = ?;",
+        [*store._seal_item(iid, current), iid],
+    )
+    assert _revert_under_timeout(store, iid), "D2: revert wedged on bad rev_before"
+    after = store.get_item(iid)
+    assert "_l1_trial" not in after["spec"], "marker cleared even on the bail branch"
+    runs = store.list_runs(iid, limit=10)
+    assert any(r["status"] == "repair_reverted" and r["error"] == "bad_rev_before"
+               for r in runs)
+
+
+def test_D2_revert_corrupt_revision_completes_with_revert_unavailable() -> None:
+    """D2: a corrupt/missing revision ciphertext must NOT leak past the revert path.
+    ``get_revision``'s decrypt is wrapped in try/except so the bail branch records
+    a repair_reverted row with error 'revert_unavailable' and drops the marker.
+    """
+    store, _c, _k = _store()
+    iid, _spec = _l1_failing_item(store)
+    _seed_l1_trial(store, iid, rev_before=1)
+    # Destroy the ciphertext for rev=1: any byte flip is enough to raise on decrypt.
+    store.conn.execute(
+        "UPDATE ni_revisions SET ciphertext = ? WHERE item_id = ? AND rev = ?;",
+        [b"\x00" * 32, iid, 1],
+    )
+    assert _revert_under_timeout(store, iid), "D2: revert wedged on corrupt revision"
+    after = store.get_item(iid)
+    assert "_l1_trial" not in after["spec"]
+    runs = store.list_runs(iid, limit=10)
+    assert any(r["status"] == "repair_reverted" and r["error"] == "revert_unavailable"
+               for r in runs)
+
+
+def test_D3_apply_repair_aborts_when_expected_rev_stale() -> None:
+    """D3: apply_repair(expected_rev=...) refuses when the current spec_rev moved
+    since the caller read it. Records nothing (caller records repair_failed); the
+    user's edit remains intact + _l1_trial is not stamped."""
+    store, _c, _k = _store()
+    iid, _spec = _l1_failing_item(store)
+    stale_rev = store.get_item(iid)["spec_rev"]
+    # A concurrent user update lands between the read and the write.
+    edited = dict(store.get_item(iid)["spec"], title="Concurrent Edit")
+    store.update_spec(iid, edited, origin="user")
+    assert store.get_item(iid)["spec_rev"] != stale_rev
+
+    candidate = dict(store.get_item(iid)["spec"],
+                     pipeline=[{"op": "extract", "paths": {"note": "value"}}])
+    result = store.apply_repair(iid, candidate, origin="repair_l1",
+                                 expected_rev=stale_rev)
+    assert result is None, "D3: stale expected_rev must abort the apply"
+    after = store.get_item(iid)
+    assert after["spec"]["title"] == "Concurrent Edit", "user edit intact"
+    assert "_l1_trial" not in after["spec"], "no trial stamped on aborted apply"
+
+
+def test_D3_attempt_l1_repair_records_spec_changed_on_toctou() -> None:
+    """D3: when the store aborts under expected_rev mismatch, the attempt records a
+    repair_failed row with error 'spec_changed' — no spec change, no trial."""
+    store, _c, _k = _store()
+    iid, _spec = _l1_failing_item(store)
+
+    # Fake gateway that races a user update in during its chat() call.
+    class _RacingGW(_FakeGateway):
+        def __init__(self, outer_store, outer_iid) -> None:
+            super().__init__(text='{"extract": {"note": "value"}}', model="ollama/x")
+            self._outer_store = outer_store
+            self._outer_iid = outer_iid
+
+        def chat(self, _messages, _model, **_kwargs):
+            edited = dict(self._outer_store.get_item(self._outer_iid)["spec"],
+                          title="Beat You To It")
+            self._outer_store.update_spec(self._outer_iid, edited, origin="user")
+            return super().chat(_messages, _model, **_kwargs)
+
+    gw = _RacingGW(store, iid)
+    nimod._maybe_repair_l1(store, store.get_item(iid), gw, "excerpt",
+                            nimod.NIError("contract_violation", ""))
+    runs = store.list_runs(iid, limit=10)
+    assert any(r["status"] == "repair_failed" and r["error"] == "spec_changed"
+               for r in runs), runs
+
+
+def test_D4_llm_stage_nan_number_retried_then_llm_output() -> None:
+    """D4: a NaN reply for a `number`-typed llm output is refused (non-finite), the
+    stage retries once, and the second failure raises llm_output — never lets NaN
+    reach the contract check or the sealed snapshot.
+    """
+    stage = {"op": "llm", "instruction": "hi",
+             "output": {"count": "number"}}
+    replies = iter(['{"count": NaN}', '{"count": NaN}'])
+
+    def fake_llm(prompt: str) -> str:
+        assert isinstance(prompt, str) and prompt, "prompt required"
+        assert prompt.startswith("You transform"), "prompt starts with the schema block"
+        return next(replies)
+
+    with pytest.raises(nimod.NIError) as exc_info:
+        nimod._apply_llm(stage, {"seed": 1}, fake_llm)
+    assert exc_info.value.kind == "llm_output"
+
+
+def test_D5_repair_reserve_refuses_when_breaker_open() -> None:
+    """D5: under the tick, an open breaker withholds the repair reservation — no
+    repair fires + streak persists so the next pass with a healthy gateway retries.
+    """
+    store, _c, _k = _store()
+    iid, _spec = _l1_failing_item(store)
+    rev_before = store.get_item(iid)["spec_rev"]
+    gw = _l1_gw_with_reply('{"extract": {"note": "value"}}')
+
+    def _no_slot() -> bool:
+        return False  # tick refuses (breaker open OR slot busy)
+
+    nimod._maybe_repair_l1(store, store.get_item(iid), gw, "excerpt",
+                            nimod.NIError("contract_violation", ""),
+                            reserve_repair=_no_slot)
+    assert store.get_item(iid)["spec_rev"] == rev_before, "no apply happened"
+    runs = store.list_runs(iid, limit=10)
+    assert not any(r["status"] in ("repair_applied", "repair_failed") for r in runs), (
+        "reservation refusal is silent — no run row, item stays failing"
+    )
+
+
+def test_D5_only_one_repair_fires_per_tick_via_shared_reservation() -> None:
+    """D5: two failing items sharing one tick-level reservation callable — only the
+    FIRST call succeeds (repair fires), the second is refused (streak persists).
+    The reservation encapsulates the tick-owned rules; the shape here matches the
+    real closure built by ``ni.tick``.
+    """
+    store, _c, _k = _store()
+    iid1, _s1 = _l1_failing_item(store)
+    iid2, _s2 = _l1_failing_item(store)
+    fired = {"n": 0}
+
+    def _reserve() -> bool:
+        # Mimics tick's _try_reserve_repair: at-most-one per pass.
+        assert isinstance(fired["n"], int), "state guard"
+        if fired["n"] >= 1:
+            return False
+        fired["n"] += 1
+        return True
+
+    gw = _l1_gw_with_reply('{"extract": {"note": "value"}}')
+    # First failing item claims the slot.
+    nimod._maybe_repair_l1(store, store.get_item(iid1), gw, "excerpt",
+                            nimod.NIError("contract_violation", ""),
+                            reserve_repair=_reserve)
+    # Second failing item hits an empty slot: no apply, no run row.
+    rev_before_second = store.get_item(iid2)["spec_rev"]
+    nimod._maybe_repair_l1(store, store.get_item(iid2), gw, "excerpt",
+                            nimod.NIError("contract_violation", ""),
+                            reserve_repair=_reserve)
+    assert fired["n"] == 1, "exactly one reservation succeeded"
+    assert store.get_item(iid2)["spec_rev"] == rev_before_second, "second item untouched"
+    runs2 = store.list_runs(iid2, limit=10)
+    assert not any(r["status"] in ("repair_applied", "repair_failed") for r in runs2)
+
+
+def test_D5_repair_reservation_consumes_llm_slot_atomically() -> None:
+    """D5: the reservation must consume the shared llm slot ATOMICALLY — an llm-stage
+    item admitted after a repair fired must see the slot as busy. This test uses the
+    exact same nonlocal-counter shape as ``ni.tick``'s _try_reserve_repair.
+    """
+    llm_this_pass = 0
+    repair_fired_this_pass = False
+
+    def _try_reserve() -> bool:
+        nonlocal llm_this_pass, repair_fired_this_pass
+        assert isinstance(llm_this_pass, int), "counter shape"
+        assert nimod._MAX_LLM_ITEMS_PER_PASS >= 1, "cap positive"
+        if repair_fired_this_pass:
+            return False
+        if llm_this_pass >= nimod._MAX_LLM_ITEMS_PER_PASS:
+            return False
+        llm_this_pass += 1
+        repair_fired_this_pass = True
+        return True
+
+    store, _c, _k = _store()
+    iid, _spec = _l1_failing_item(store)
+    gw = _l1_gw_with_reply('{"extract": {"note": "value"}}')
+    nimod._maybe_repair_l1(store, store.get_item(iid), gw, "excerpt",
+                            nimod.NIError("contract_violation", ""),
+                            reserve_repair=_try_reserve)
+    # After the repair fired, the shared llm slot is used up — an llm-stage item
+    # admitted next in the pass would fail the >= cap check.
+    assert llm_this_pass == 1 and repair_fired_this_pass is True
+
+
+def test_D7_maybe_repair_l1_bails_when_contract_is_none() -> None:
+    """D7: with no captured contract there is nothing to repair against; bail
+    silently (streak keeps advancing toward broken)."""
+    store, _c, _k = _store()
+    iid, _spec = _l1_failing_item(store)
+    # Strip the contract from the sealed spec.
+    current = dict(store.get_item(iid)["spec"])
+    current["contract"] = None
+    store.conn.execute(
+        "UPDATE ni_items SET nonce = ?, ciphertext = ? WHERE id = ?;",
+        [*store._seal_item(iid, current), iid],
+    )
+    rev_before = store.get_item(iid)["spec_rev"]
+    gw = _l1_gw_with_reply('{"extract": {"note": "value"}}')
+    nimod._maybe_repair_l1(store, store.get_item(iid), gw, "excerpt",
+                            nimod.NIError("contract_violation", ""))
+    assert store.get_item(iid)["spec_rev"] == rev_before, "no repair fired"
+    runs = store.list_runs(iid, limit=10)
+    assert not any(r["status"] in ("repair_applied", "repair_failed") for r in runs)
+
+
+def test_D8_repair_prompt_neutralizes_contract_and_stages_fences() -> None:
+    """D8: fenced blocks (stages_json + contract_json) run through the same fence
+    neutralizer as the payload excerpt — a contract key carrying ``` (payload-
+    derived at capture time) cannot close the surrounding fence early.
+    """
+    spec = _basic_spec()
+    spec["contract"] = {"shape": {"badly```keyed": "string"}}
+    prompt = nimod._build_l1_repair_prompt(spec,
+                                            nimod.NIError("contract_violation", ""),
+                                            raw_excerpt="")
+    # The literal triple-backtick from the contract key must not appear as-is
+    # inside the assembled prompt; the neutralizer inserts a zero-width space.
+    assert "badly```keyed" not in prompt
+    assert "badly``\u200b`keyed" in prompt

@@ -641,6 +641,9 @@ export interface NiBoardItem {
   // null when no snapshot has ever been written (payload is also null then).
   payload_slot: "preview" | "latest" | "last_good" | null;
   payload_at: string | null;
+  // Honesty flag (§13): true when the item's pipeline contains an llm stage or its
+  // source is model-generated. Surfaced on the card as an "Interpreted" chip.
+  interpreted: boolean;
 }
 
 // A single run — telemetry (§1 ni_runs). Plaintext; host-free error class only.

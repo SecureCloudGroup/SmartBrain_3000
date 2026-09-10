@@ -254,7 +254,15 @@
         <div class="card ni-card" class:wide class:preview>
           <div class="ni-head">
             <strong class="ni-title">{item.title}</strong>
-            <Chip kind={health.kind}>{health.label}</Chip>
+            <span class="ni-chips">
+              <Chip kind={health.kind}>{health.label}</Chip>
+              {#if item.interpreted}
+                <Chip
+                  kind=""
+                  title="This card includes a language model's reading of the data, not pure arithmetic."
+                >Interpreted</Chip>
+              {/if}
+            </span>
           </div>
 
           {#if preview}
@@ -388,6 +396,13 @@
     align-items: center;
     justify-content: space-between;
     gap: var(--s-2);
+    flex-wrap: wrap;
+  }
+  .ni-chips {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s-1);
+    flex-wrap: wrap;
   }
   .ni-title {
     font-size: var(--f-label);
