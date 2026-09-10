@@ -212,6 +212,7 @@ func onReady() {
 	go start()         // bring it up on launch
 	go updateChecker() // then quietly watch for a newer image
 	go handshakeLoop() // and keep the app told about what is staged
+	go noticesLoop()   // and surface Neural Interface notices as toasts
 
 	go func() {
 		for {

@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import threading
 import time
 import uuid
@@ -695,6 +696,15 @@ def post_ni_carrier_notices(schedules_store, alerts: list, broken: list,
     assert isinstance(alerts, list) and isinstance(broken, list), "alerts/broken must be lists"
     repaired_list = list(repaired or [])
     assert isinstance(repaired_list, list), "repaired must be a list"
+
+    def _flat_title(notice: dict) -> str:
+        # Titles are user/agent-authored spec text (≤300 chars, newlines legal) and
+        # these bodies render inside chat's "### Scheduled Item ###" markdown
+        # wrapper — collapse newlines and quote a leading '#' so a title can't
+        # forge a notice boundary (parity with the alert-message H1 guard).
+        title = re.sub(r"[\r\n]+", " ", str(notice.get("title", "an item"))).strip()
+        return f"'{title}'" if title.startswith("#") else (title or "an item")
+
     for alert in alerts:  # bounded by upstream tick's per-pass item + rule limits
         try:
             schedules_store.record_ni_run("complete", str(alert.get("message", "")))
@@ -702,7 +712,7 @@ def post_ni_carrier_notices(schedules_store, alerts: list, broken: list,
             log.warning("ni carrier alert post failed: %s", exc)
     for notice in broken:  # bounded by the same
         try:
-            title = str(notice.get("title", "an item"))
+            title = _flat_title(notice)
             schedules_store.record_ni_run(
                 "broken",
                 f"{title} is broken — open Neural Interface, or ask me to fix it.",
@@ -711,9 +721,12 @@ def post_ni_carrier_notices(schedules_store, alerts: list, broken: list,
             log.warning("ni carrier broken post failed: %s", exc)
     for notice in repaired_list:  # bounded by _MAX_ITEMS_PER_PASS
         try:
-            title = str(notice.get("title", "an item"))
+            title = _flat_title(notice)
+            # Distinct status (§17): /api/ni/notices derives each notice's kind from
+            # the run status, and "complete" already means a fired alert — a repair
+            # riding the same status would be indistinguishable from one.
             schedules_store.record_ni_run(
-                "complete",
+                "repaired",
                 f"{title} repaired itself — data mapping updated.",
             )
         except Exception as exc:

@@ -111,7 +111,13 @@ _AUTH_HEADER_TOKEN_SUBSTRINGS: tuple[str, ...] = ("token", "secret", "key")
 
 # Closed vocabularies — v1 refuses anything else, so old clients refuse new nodes rather
 # than mis-render them (the "reject reserved types" contract in ni-format §5).
-_SOURCE_TYPES: frozenset[str] = frozenset({"http_json", "model", "internal.schedule"})
+_SOURCE_TYPES: frozenset[str] = frozenset(
+    {"http_json", "http_page", "model", "internal.schedule", "internal.kb"}
+)
+# §15 caps: internal.kb query length + result cap + per-snippet render cap.
+_MAX_KB_QUERY = 500
+_MAX_KB_LIMIT = 10
+_MAX_KB_SNIPPET = 500
 _PARAM_KINDS: frozenset[str] = frozenset({"string", "number", "secret"})
 _DISPLAY_SIZES: frozenset[str] = frozenset({"small", "wide"})
 _STATES: frozenset[str] = frozenset(
@@ -151,6 +157,7 @@ _SPARK_KINDS: frozenset[str] = frozenset({"line", "bars"})
 # v2 caps + enums (§5 spark, §5 Conditions, §11 History, §12 Alerts).
 _MAX_SPARK_POINTS = 500          # bound on bound spark.points (list or history series)
 _MAX_HISTORY_SERIES = 4          # spec-level history.track series count (§11)
+_PAGE_FETCH_DEADLINE_S = 15.0    # wall-clock bound on an http_page body read (drip hosts)
 _MAX_HISTORY_POINTS = 500        # per-series point ceiling; max_points is clamped to this
 _DEFAULT_HISTORY_POINTS = 100    # per-series default when max_points is unset
 _MAX_WHEN_RULES = 5              # per §5 Conditions cap
@@ -390,15 +397,19 @@ def _validate_params(params: object) -> None:
 
 
 def _validate_source(source: object) -> None:
-    """§3 sources — three closed types, each with its own shape."""
+    """§3 + §15 sources — closed type set, each with its own shape."""
     s = _require_dict(source, "spec.source")
     stype = s.get("type")
     if stype not in _SOURCE_TYPES:
         raise ValueError(f"spec.source.type must be one of {sorted(_SOURCE_TYPES)}")
     if stype == "http_json":
         _validate_http_json_source(s)
+    elif stype == "http_page":
+        _validate_http_page_source(s)
     elif stype == "model":
         _validate_model_source(s)
+    elif stype == "internal.kb":
+        _validate_internal_kb_source(s)
     else:
         _validate_internal_schedule_source(s)
 
@@ -413,7 +424,27 @@ def _validate_http_json_source(s: dict) -> None:
     auth-shaped bytes into a header. Auth-shaped literal header names are refused unless
     the value is a $secret ref (the credential belongs in the SecretStore).
     """
-    _closed_keys(s, {"type", "url", "headers"}, "spec.source (http_json)")
+    _validate_http_source_shape(s, "http_json")
+
+
+def _validate_http_page_source(s: dict) -> None:
+    """§15 http_page: {type, url, headers}. URL/param/header/credential rules are IDENTICAL
+    to http_json (§3 — frozen scheme+authority, percent-encoded params, host-bound
+    https-only secrets, auth-shaped header refusal). The body is fetched as html bytes and
+    parsed inside the §16 subprocess jail; the pipeline payload is {"text", "title"}.
+    """
+    _validate_http_source_shape(s, "http_page")
+
+
+def _validate_http_source_shape(s: dict, type_label: str) -> None:
+    """Shared URL + header shape check for the §3 http_json and §15 http_page sources.
+
+    Kept as one implementation so the two source types cannot drift on the load-bearing
+    rules — auth-shaped header refusal, ``$secret`` scoping, {{param:}}-in-authority
+    refusal, and header literal restrictions all apply to BOTH sources verbatim.
+    """
+    assert isinstance(type_label, str) and type_label, "type_label required"
+    _closed_keys(s, {"type", "url", "headers"}, f"spec.source ({type_label})")
     url = _require_str(s.get("url"), "spec.source.url", max_len=_MAX_URL)
     _validate_http_json_url_shape(url)
     headers = s.get("headers") or {}
@@ -446,6 +477,22 @@ def _validate_http_json_source(s: dict) -> None:
                 f"spec.source.headers.{name}: auth-shaped header requires a "
                 "{\"$secret\": \"ni:<item>:<name>\"} value (never a plain literal)"
             )
+
+
+def _validate_internal_kb_source(s: dict) -> None:
+    """§15 internal.kb: {type, query, limit}. Zero egress — runs the KB hybrid search.
+
+    ``query`` is user-visible spec text (≤500 chars); ``limit`` is clamped to 1..10 at
+    engine time. Everything else is refused so a spec cannot smuggle a scope or a raw
+    embedding vector past the ``knowledge-base only`` contract.
+    """
+    _closed_keys(s, {"type", "query", "limit"}, "spec.source (internal.kb)")
+    _require_str(s.get("query"), "spec.source.query", max_len=_MAX_KB_QUERY)
+    limit = s.get("limit")
+    if not isinstance(limit, int) or isinstance(limit, bool):
+        raise ValueError("spec.source.limit must be an integer")  # noqa: TRY004 — one exception class per validator (task contract)
+    if limit < 1 or limit > _MAX_KB_LIMIT:
+        raise ValueError(f"spec.source.limit must be 1..{_MAX_KB_LIMIT}")
 
 
 def _validate_http_json_url_shape(url: str) -> None:
@@ -2514,6 +2561,10 @@ def tick(app, pass_budget_seconds: float = 20.0,
         repair_fired_this_pass = True
         return True
 
+    # §15 internal.kb reads the user's own KB — the tick threads app.state.kb through
+    # run_item (getattr so a locked / route-only context surfaces as ``kb_unavailable``
+    # from the source dispatch, matching feeds' getattr(app.state, 'feeds', None) style).
+    kb = getattr(app.state, "kb", None)
     try:
         store = NIStore(cursor, key)
         secrets_store = SecretStore(cursor, key)
@@ -2538,10 +2589,15 @@ def tick(app, pass_budget_seconds: float = 20.0,
                 llm_this_pass += 1
             prior_state = item["state"]
             try:
+                # ``kb`` is threaded only when set: test fakes that predate the §15
+                # signature (fake_run_item without ``kb``) must keep working, and the
+                # source dispatch already treats a missing kb as ``kb_unavailable``.
+                extra: dict = {"kb": kb} if kb is not None else {}
                 result = run_item(store, item["id"], gateway_mod=gateway_mod,
                                   secrets_store=secrets_store,
                                   schedules_store=schedules_store,
-                                  reserve_repair=_try_reserve_repair)
+                                  reserve_repair=_try_reserve_repair,
+                                  **extra)
                 if isinstance(result, dict):
                     fired.extend(result.get("alerts") or [])
                     repaired.extend(result.get("repaired") or [])
@@ -2573,7 +2629,8 @@ def _collect_broken_transition(store: NIStore, item_id: str, prior_state: str,
 
 
 def run_item(store: NIStore, item_id: str, *, gateway_mod, secrets_store,
-             schedules_store=None, reserve_repair: object | None = None) -> dict:
+             schedules_store=None, kb: object | None = None,
+             reserve_repair: object | None = None) -> dict:
     """Execute one item end-to-end and apply the state-machine transition.
 
     Substitute params -> fetch -> pipeline -> optional contract check -> bind -> write
@@ -2610,7 +2667,7 @@ def run_item(store: NIStore, item_id: str, *, gateway_mod, secrets_store,
         if _spec_has_llm_stage(spec):
             llm_call = _make_llm_call(store, spec, gateway_mod)
         payload = _fetch_source(spec, item_id, gateway_mod, secrets_store,
-                                schedules_store, store)
+                                schedules_store, store, kb)
         raw_excerpt = _payload_excerpt_for_repair(payload)
         outputs = run_pipeline(spec.get("pipeline") or [], payload,
                                 history=history, llm_call=llm_call)
@@ -3460,18 +3517,27 @@ def _drop_trial_marker_inline(store: NIStore, item_id: str, spec: dict) -> None:
 # --- source dispatch ------------------------------------------------------
 
 def _fetch_source(spec: dict, item_id: str, gateway_mod, secrets_store,
-                  schedules_store, store: NIStore) -> dict:
-    """Dispatch by source type — each returns the payload the pipeline consumes."""
+                  schedules_store, store: NIStore, kb: object | None) -> dict:
+    """Dispatch by source type — each returns the payload the pipeline consumes.
+
+    ``kb`` is the caller-provided knowledge-base handle (``app.state.kb`` at tick
+    time). When absent, the ``internal.kb`` source raises ``NIError('kb_unavailable')``;
+    every other source is unaffected.
+    """
     assert isinstance(spec, dict) and item_id, "spec + id required"
     assert store is not None, "store required (model routes need its cursor)"
     source = spec.get("source") or {}
     stype = source.get("type")
     if stype == "http_json":
         return _fetch_http_json(source, item_id, secrets_store)
+    if stype == "http_page":
+        return _fetch_http_page(source, item_id, secrets_store)
     if stype == "model":
         return _fetch_model(spec, source, gateway_mod, store)
     if stype == "internal.schedule":
         return _fetch_internal_schedule(source, schedules_store)
+    if stype == "internal.kb":
+        return _fetch_internal_kb(source, kb)
     raise NIError("source_bad_type", str(stype))
 
 
@@ -3508,6 +3574,110 @@ def _fetch_http_json(source: dict, item_id: str, secrets_store) -> dict:
         )
     except netguard.FetchError as exc:
         raise NIError("fetch_failed", exc.__class__.__name__) from None
+
+
+def _fetch_http_page(source: dict, item_id: str, secrets_store) -> dict:
+    """§15 http_page: netguard-guarded HTML fetch + §16 subprocess-jailed extraction.
+
+    Inherits the http_json credential-exfiltration guard verbatim: when ANY header
+    rides (secret or literal), ``allow_redirects=False`` is threaded through so a
+    3xx never re-sends the header to a rewritten host. The response bytes are handed
+    to ``jailrun.run_extractor`` — an HTML parse never runs in-process on hostile
+    input. Pipeline payload: ``{"text": str, "title": str}``. Any jail failure
+    (timeout / crash / malformed JSON / oversize) surfaces as ``extract_jail``.
+    """
+    from . import jailrun, netguard  # lazy: keep both off ni's import graph edges
+
+    url = source["url"]
+    parsed = urlparse(url)
+    host = parsed.hostname or ""
+    scheme = (parsed.scheme or "").lower()
+    if not host:
+        raise NIError("source_bad_url", "no host")
+    resolved_headers: dict[str, str] = {}
+    for name, value in (source.get("headers") or {}).items():  # bounded by _MAX_HEADERS
+        if isinstance(value, dict) and "$secret" in value:
+            resolved_headers[name] = _load_credential(
+                secrets_store, value["$secret"], host,
+                item_id=item_id, request_scheme=scheme,
+            )
+        elif isinstance(value, str):
+            resolved_headers[name] = value
+    has_headers = bool(resolved_headers)
+    try:
+        got = netguard.safe_fetch_page(
+            url, headers=resolved_headers or None,
+            allow_redirects=not has_headers,  # E: refuse hop when carrying any header
+            # Overall wall-clock bound on the body read: without it a drip host
+            # (a chunk every <8s) stretches a 2MB read to minutes INSIDE the
+            # scheduler tick thread (the phase-2b D5 lesson). 15s fetch + 20s
+            # jail caps this item's worst case at ~35s.
+            deadline_seconds=_PAGE_FETCH_DEADLINE_S,
+        )
+    except netguard.FetchError as exc:
+        raise NIError("fetch_failed", exc.__class__.__name__) from None
+    body = got.get("content") if isinstance(got, dict) else None
+    if not isinstance(body, (bytes, bytearray)):
+        raise NIError("fetch_failed", "no bytes")
+    try:
+        return jailrun.run_extractor(bytes(body), url_hint=url)
+    except jailrun.JailError as exc:
+        raise NIError("extract_jail", exc.reason) from None
+
+
+def _fetch_internal_kb(source: dict, kb: object | None) -> dict:
+    """§15 internal.kb: zero-egress hybrid search on the user's own library.
+
+    ``kb`` is the caller-provided KnowledgeBase (from ``app.state.kb`` at tick time).
+    When absent (route path that didn't thread one, or a locked vault) the run fails
+    with ``NIError('kb_unavailable')`` — the engine doesn't run under a locked vault
+    anyway, so this is only visible in tests + on a manual /run before wiring.
+
+    Prefers ``hybrid_search`` when the KB exposes it (mirrors mcp_server.kb_search's
+    fallback pattern); a hybrid call passing ``query_vector=None`` degrades to
+    lexical inside the KB itself — no embedding round-trip. On any other exception
+    inside the KB (corrupt index, decrypt error) we surface ``NIError('kb_error')``
+    so the run fails cleanly instead of leaking a raw exception past bookkeeping.
+    """
+    if kb is None:
+        raise NIError("kb_unavailable", "no unlocked kb")
+    query = str(source.get("query") or "")
+    raw_limit = source.get("limit")
+    if not isinstance(raw_limit, int) or isinstance(raw_limit, bool):
+        raise NIError("source_bad_type", "limit not an int")
+    limit = max(1, min(int(raw_limit), _MAX_KB_LIMIT))
+    if not query:
+        raise NIError("source_bad_type", "empty query")
+    try:
+        if hasattr(kb, "hybrid_search"):
+            hits = kb.hybrid_search(query, None, "", limit=limit)
+        else:
+            hits = kb.search(query, limit=limit)
+    except Exception as exc:  # decrypt / index / assertion — never leak past here
+        raise NIError("kb_error", exc.__class__.__name__) from None
+    if not isinstance(hits, list):
+        raise NIError("kb_error", "bad hits shape")
+    results: list[dict] = []
+    for hit in hits[:limit]:  # bounded by limit <= _MAX_KB_LIMIT
+        results.append(_shape_kb_hit(hit))
+    return {"results": results}
+
+
+def _shape_kb_hit(hit: object) -> dict:
+    """Normalize one KB search hit to §15's ``{title, snippet, doc_id}`` shape.
+
+    KB.search yields ``{id, title, snippet, ...}`` (see kb._hit); we keep only the
+    contract's three fields, coerce to string, and cap ``snippet`` at
+    ``_MAX_KB_SNIPPET``. A malformed hit (non-dict) becomes an empty row rather
+    than raising — the whole run is best-effort.
+    """
+    if not isinstance(hit, dict):
+        return {"title": "", "snippet": "", "doc_id": ""}
+    title = str(hit.get("title") or "")
+    snippet = str(hit.get("snippet") or "")
+    doc_id = str(hit.get("id") or hit.get("doc_id") or "")
+    return {"title": title[:_MAX_KB_QUERY], "snippet": snippet[:_MAX_KB_SNIPPET],
+            "doc_id": doc_id[:_MAX_KB_QUERY]}
 
 
 def _fetch_model(spec: dict, source: dict, gateway_mod, store: NIStore) -> dict:
