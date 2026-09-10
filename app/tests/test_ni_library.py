@@ -645,6 +645,15 @@ def test_export_refuses_internal_schedule_source(
 
 # --- build.py + validate.py smoke ------------------------------------------
 
+# The publisher/registry tooling lives in the repo's tools/ tree, which the SHIPPED
+# app image deliberately does not include (it's operator/CI tooling, not app code).
+# The docker-image CI job runs this suite inside that image, so these four
+# subprocess-driven tests must skip cleanly there instead of failing on a missing path.
+_TOOLS_DIR = pathlib.Path(__file__).resolve().parents[2] / "tools" / "ni-library"
+_needs_tooling = pytest.mark.skipif(
+    not _TOOLS_DIR.is_dir(), reason="publisher tooling not shipped in the app image")
+
+
 def _run_build(tmp_path: pathlib.Path, master_key_b64: str,
                 pack_id: str = "pack-1", seq: int = 1) -> tuple[pathlib.Path, pathlib.Path]:
     """Invoke tools/ni-library/build.py in a subprocess; return (pack_path, publisher_dir)."""
@@ -670,6 +679,7 @@ def _run_build(tmp_path: pathlib.Path, master_key_b64: str,
     return pack_path, publisher_dir
 
 
+@_needs_tooling
 def test_build_py_signs_a_pack_that_verifies(tmp_path) -> None:
     """Full loop: build.py signs → parse_pack/verify_pack accept the resulting bytes."""
     key = base64.b64encode(gen_master_key()).decode("ascii")
@@ -680,6 +690,7 @@ def test_build_py_signs_a_pack_that_verifies(tmp_path) -> None:
     assert verdict["behind"]
 
 
+@_needs_tooling
 def test_build_py_output_refuses_after_byte_flip(tmp_path) -> None:
     """A tampered byte in the built pack must be refused by verify_pack."""
     key = base64.b64encode(gen_master_key()).decode("ascii")
@@ -692,6 +703,7 @@ def test_build_py_output_refuses_after_byte_flip(tmp_path) -> None:
         ni_library.verify_pack(tampered, payload["publisher"]["pubkey"], "pack-1", 0)
 
 
+@_needs_tooling
 def test_validate_py_accepts_good_and_rejects_bad(tmp_path) -> None:
     """validate.py exits 0 on a good template dir, 1 on a bad one."""
     good_dir = tmp_path / "good"
@@ -711,6 +723,7 @@ def test_validate_py_accepts_good_and_rejects_bad(tmp_path) -> None:
     assert poisoned.returncode == 1
 
 
+@_needs_tooling
 def test_validate_py_empty_dir_exits_nonzero(tmp_path) -> None:
     """LOW#2 (audit 2026-09-09): an empty template directory is a broken PR, not a
     passing CI — validate.py must exit nonzero so registry-repo CI catches it."""
