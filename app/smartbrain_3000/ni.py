@@ -124,7 +124,7 @@ _STATES: frozenset[str] = frozenset(
     {"draft", "commissioning", "live", "degraded", "failing", "broken", "paused"}
 )
 _SLOTS: frozenset[str] = frozenset(
-    {"latest", "last_good", "preview", "history", "alert_state"}
+    {"latest", "last_good", "preview", "preview_data", "history", "alert_state"}
 )
 _REVISION_ORIGINS: frozenset[str] = frozenset(
     {"user", "agent", "repair_l1", "repair_l2", "template"}
@@ -312,27 +312,35 @@ def _closed_keys(node: dict, allowed: set[str], what: str) -> None:
         raise ValueError(f"{what} has unknown keys: {sorted(extra)}")
 
 
-def validate_spec(spec: object) -> dict:
+def validate_spec(spec: object, *, allow_empty_params: bool = False) -> dict:
     """Validate an item spec (§2) end-to-end; return the validated dict.
 
     Refuses unknown top-level keys, checks every enum, delegates §3/§4/§5 shape to their
     own helpers, and refuses a system-set ``contract`` from the caller (the engine writes
     it at C1/C2 — see run_item). Raises ValueError with a short, precise message.
+
+    ``allow_empty_params`` (§19): a template pack ships spec_templates whose string /
+    number params carry empty values and whose secret params carry the ``ni:self:<name>``
+    placeholder — filled in at install time. When True this only relaxes the per-param
+    VALUE checks (labels + kinds + shape are still enforced); everything else — source
+    URL shape, header rules, pipeline, scene, alerts, history — is validated verbatim.
     """
     body = _require_dict(spec, "spec")
     # interval_minutes is a first-class spec field (``_clamp_interval`` reads it from here on
     # add_item + update_spec); it lives in the sealed body so a revision captures a cadence
     # change atomically with the source/scene it goes with.
+    # ``_template`` (§19 install provenance): sealed alongside the spec so a board query
+    # can compare an item's recorded template hash against the currently-stored pack.
     allowed = {"version", "title", "goal", "params", "source", "pipeline", "scene",
                "display", "contract", "repair_policy", "model", "_c2_ok",
                "interval_minutes", "history", "alerts",
-               "_l1_last_attempt", "_l1_trial"}
+               "_l1_last_attempt", "_l1_trial", "_template"}
     _closed_keys(body, allowed, "spec")
     if body.get("version") != 1:
         raise ValueError("spec.version must be 1")
     _require_str(body.get("title"), "spec.title", max_len=_MAX_TITLE)
     _require_str(body.get("goal"), "spec.goal", max_len=_MAX_GOAL)
-    _validate_params(body.get("params") or {})
+    _validate_params(body.get("params") or {}, allow_empty=allow_empty_params)
     _validate_source(body.get("source"))
     outputs = _validate_pipeline(body.get("pipeline") or [])
     validate_scene(body.get("scene"))
@@ -348,7 +356,26 @@ def validate_spec(spec: object) -> dict:
     if body.get("contract") is not None:
         _require_dict(body["contract"], "spec.contract")
     _validate_l1_system_keys(body)
+    _validate_template_provenance(body.get("_template"))
     return body
+
+
+def _validate_template_provenance(value: object) -> None:
+    """§19 shape check for the sealed ``_template`` provenance stamp.
+
+    The install path writes {pack_id, template_id, seq, spec_hash} inside the sealed
+    spec so ``apply-template-update`` can compare an item against the currently-stored
+    pack. Absent = never installed from the library; refused when malformed.
+    """
+    if value is None:
+        return
+    node = _require_dict(value, "spec._template")
+    _closed_keys(node, {"pack_id", "template_id", "seq", "spec_hash"}, "spec._template")
+    for key in ("pack_id", "template_id", "spec_hash"):
+        _require_str(node.get(key), f"spec._template.{key}", max_len=200)
+    seq = node.get("seq")
+    if not isinstance(seq, int) or isinstance(seq, bool) or seq < 1:
+        raise ValueError("spec._template.seq must be a positive int")
 
 
 def _validate_l1_system_keys(body: dict) -> None:
@@ -374,8 +401,16 @@ def _validate_l1_system_keys(body: dict) -> None:
             raise ValueError(f"spec._l1_last_attempt not ISO-8601: {exc}") from None
 
 
-def _validate_params(params: object) -> None:
-    """§2 params map: name -> {label, kind, value}. Enums closed, sizes bounded."""
+_NI_SELF_PLACEHOLDER = "ni:self:"
+
+
+def _validate_params(params: object, *, allow_empty: bool = False) -> None:
+    """§2 params map: name -> {label, kind, value}. Enums closed, sizes bounded.
+
+    ``allow_empty`` (§19 template packs): string/number values MAY be empty strings and
+    secret values MUST be either empty or the literal ``ni:self:<name>`` placeholder —
+    the install path fills them in from the user's inputs + the credential PUT.
+    """
     node = _require_dict(params, "spec.params")
     if len(node) > _MAX_PARAMS:
         raise ValueError(f"spec.params exceeds {_MAX_PARAMS}")
@@ -389,11 +424,31 @@ def _validate_params(params: object) -> None:
         _require_str(p.get("label"), f"spec.params.{name}.label", max_len=200)
         if p.get("kind") not in _PARAM_KINDS:
             raise ValueError(f"spec.params.{name}.kind must be one of {sorted(_PARAM_KINDS)}")
-        value = p.get("value")
-        if not isinstance(value, (str, int, float)) or isinstance(value, bool):
-            raise ValueError(f"spec.params.{name}.value must be a string or number")  # noqa: TRY004
-        if isinstance(value, str) and len(value) > _MAX_PARAM_VALUE:
-            raise ValueError(f"spec.params.{name}.value too long")
+        _validate_param_value(name, p, allow_empty=allow_empty)
+
+
+def _validate_param_value(name: str, p: dict, *, allow_empty: bool) -> None:
+    """One param's value: template-mode relaxations vs. the fully-populated shape.
+
+    LOW#4 (audit 2026-09-09): the trailing empty-string no-op was fossil code — leaving
+    it in obscured what the validator actually does. Non-template mode already accepts
+    empty strings via the length check below (0 <= _MAX_PARAM_VALUE), so no explicit
+    branch is needed and dropping it makes the flow read as "one refusal or fall-through".
+    """
+    assert isinstance(name, str) and name, "param name required"
+    assert isinstance(p, dict), "param body must be a dict"
+    value = p.get("value")
+    kind = p.get("kind")
+    # A fully-populated spec still stores secret VALUES as $secret refs elsewhere;
+    # the ``params.<name>.value`` for a secret is a stable identifier string in v1.
+    if kind == "secret" and allow_empty and (
+        value == "" or (isinstance(value, str) and value.startswith(_NI_SELF_PLACEHOLDER))
+    ):
+        return
+    if not isinstance(value, (str, int, float)) or isinstance(value, bool):
+        raise ValueError(f"spec.params.{name}.value must be a string or number")  # noqa: TRY004
+    if isinstance(value, str) and len(value) > _MAX_PARAM_VALUE:
+        raise ValueError(f"spec.params.{name}.value too long")
 
 
 def _validate_source(source: object) -> None:
@@ -2001,12 +2056,17 @@ class NIStore:
         return self._conn
 
     def add_item(self, spec: dict, preview_payload: dict, *,
-                 origin: str = "user") -> str:
+                 origin: str = "user", item_id: str | None = None) -> str:
         """Create a new item in ``draft`` with a validated preview snapshot.
 
         ``spec`` is validated first (whole shape), then sealed; the preview payload is
         bound against the scene up-front so the very first snapshot proves the scene
         renders. ``origin`` seeds the initial ni_revisions row.
+
+        ``item_id`` (H2 audit 2026-09-09): an optional pre-minted UUID lets the library
+        install path rewrite ``ni:self:<name>`` → ``ni:<item_id>:<name>`` in the spec
+        BEFORE we seal it — a single write, no re-seal race. Callers pass a str(uuid4())
+        or leave it None to have add_item mint one as it always did.
         """
         assert isinstance(spec, dict), "spec must be a dict"
         assert isinstance(preview_payload, dict), "preview payload must be a dict"
@@ -2021,7 +2081,10 @@ class NIStore:
         count = self._conn.execute("SELECT COUNT(*) FROM ni_items;").fetchone()[0]
         if int(count) >= _MAX_ITEMS:
             raise ValueError(f"item limit reached ({_MAX_ITEMS})")
-        item_id = str(uuid.uuid4())
+        if item_id is None:
+            item_id = str(uuid.uuid4())
+        else:
+            assert isinstance(item_id, str) and item_id, "item_id must be a non-empty string"
         interval = self._clamp_interval(validated)
         nonce, ciphertext = self._seal_item(item_id, validated)
         self._conn.execute(
@@ -2034,6 +2097,11 @@ class NIStore:
         # says the board returns the "decrypted bound payload"; the preview slot renders
         # to the client through the same reader as a real run's output.
         self.write_snapshot(item_id, "preview", bound, ok=True)
+        # §21 export-as-template needs the RAW preview payload (the data that fed
+        # bind_scene) to emit a new §19 template — the bound tree is not the same
+        # shape. Sealed alongside the bound preview so export can round-trip through
+        # ni_library.parse_pack. Never rendered; internal to the export path.
+        self.write_snapshot(item_id, "preview_data", preview_payload, ok=True)
         self._write_revision(item_id, 1, validated, origin)
         return item_id
 
@@ -2447,6 +2515,44 @@ class NIStore:
         nonce = os.urandom(_NONCE_BYTES)
         aad = f"ni_snapshot:{item_id}:{slot}".encode()
         return nonce, self._aes.encrypt(nonce, json.dumps(payload).encode("utf-8"), aad)
+
+    def write_reserved_snapshot(self, reserved_id: str, slot: str, payload: dict) -> None:
+        """Seal ``payload`` under a RESERVED item_id (never a real item, so slot names
+        outside ``_SLOTS`` are OK) — used by ``ni_library.LibraryStore`` for the source
+        pin and the verified pack (§19/§20). The row lives in ``ni_snapshots`` but no
+        matching ``ni_items`` row exists, so board/list queries never surface it.
+        """
+        assert reserved_id and reserved_id.startswith("__") and slot, "reserved id + slot required"
+        assert isinstance(payload, dict), "payload must be a dict"
+        nonce, ciphertext = self._seal_snapshot(reserved_id, slot, payload)
+        self._conn.execute(
+            "INSERT INTO ni_snapshots (item_id, slot, nonce, ciphertext, ok) "
+            "VALUES (?, ?, ?, ?, true) ON CONFLICT (item_id, slot) DO UPDATE SET "
+            "nonce = excluded.nonce, ciphertext = excluded.ciphertext, created_at = now();",
+            [reserved_id, slot, nonce, ciphertext],
+        )
+
+    def read_reserved_snapshot(self, reserved_id: str, slot: str) -> dict | None:
+        """Read a reserved-id snapshot; return None when absent. Mirror of write above."""
+        assert reserved_id and reserved_id.startswith("__") and slot, "reserved id + slot required"
+        row = self._conn.execute(
+            "SELECT nonce, ciphertext, created_at FROM ni_snapshots "
+            "WHERE item_id = ? AND slot = ?;",
+            [reserved_id, slot],
+        ).fetchone()
+        if row is None:
+            return None
+        aad = f"ni_snapshot:{reserved_id}:{slot}".encode()
+        body = json.loads(self._aes.decrypt(bytes(row[0]), bytes(row[1]), aad).decode("utf-8"))
+        return {"payload": body, "created_at": str(row[2])}
+
+    def delete_reserved_snapshot(self, reserved_id: str, slot: str) -> None:
+        """Drop one reserved-id slot (LibraryStore.disconnect)."""
+        assert reserved_id and reserved_id.startswith("__") and slot, "reserved id + slot required"
+        self._conn.execute(
+            "DELETE FROM ni_snapshots WHERE item_id = ? AND slot = ?;",
+            [reserved_id, slot],
+        )
 
     def _row(self, row: tuple) -> dict:
         item_id = str(row[0])

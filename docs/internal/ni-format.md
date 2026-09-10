@@ -659,3 +659,118 @@ The curated ground for "AI suggests, user picks" (creation-flow law, §9).
 - The remote signed catalog PACK (seq, Ed25519, pinned key, update checks) is
   deliberately deferred to Phase 3 — it is the same trust machinery as the
   template Library and ships once, together.
+
+## 19. Template pack format (v3 — the Global Library container)
+
+A **template** is an item spec with its slots empty; a **pack** is a signed,
+versioned collection of templates. The trust machinery is the vault subscription
+model reused: Ed25519 over canonical JSON, fingerprint display law, TOFU pin,
+monotonic seq, rollback refusal, KeyChanged blocking.
+
+Envelope (canonical JSON per vault_format's `canonical()` — sorted keys, no
+floats, duplicate-key rejection; signed over `b"sb-ni-pack-sig:v1\n" +
+canonical(payload)`):
+
+```json
+{"sb_ni_pack": {
+   "version": 1,
+   "pack_id": "<uuid, stable for the pack's lifetime>",
+   "seq": 3,
+   "published_at": "2026-09-09",
+   "publisher": {"label": "SmartBrain project", "pubkey": "<b64 Ed25519>"},
+   "templates": [{
+      "id": "<slug, unique in pack>",
+      "title": "…", "goal": "…", "category": "…", "tags": ["…"],
+      "spec_template": { <§2 spec: params present with kind+label but EMPTY
+                          values; secret params carry the "ni:self:<name>"
+                          placeholder; contract null; repair fields absent;
+                          no credentials, no personal data> },
+      "preview_payload": { <bound scene, dummy data — §5-valid> },
+      "notes": "one honest sentence"
+   }]
+ },
+ "sig": {"alg": "ed25519", "value": "<b64>"}}
+```
+
+- Verification order on every fetch (vault_sync §5 discipline): shape/bounds
+  guards → `pack_id` matches the pin → signature against the PINNED key over the
+  exact served bytes → `seq >` pinned = update, `==` up-to-date, `<` = rollback
+  refusal. A different key = KeyChanged: reported, never applied, source blocked
+  until the user re-trusts with the exact offered key (passphrase re-auth,
+  vault precedent).
+- Bounds: ≤ 200 templates/pack, pack ≤ 2 MB, every `spec_template` passes the
+  FULL §2 validator (with empty param values allowed) and every
+  `preview_payload` the §5 bound-scene validator AT INSTALL and AT PACK LOAD —
+  the signature is never a validator bypass (P5).
+- The publisher's label is decoration; the FINGERPRINT (`SB-XXXX-…`, same
+  derivation as vaults) is the identity shown in trust UI. First contact PINS
+  the pack's ``publisher.pubkey`` (TOFU, vault-manifest precedent); every later
+  fetch is verified against that pin — the pubkey a future pack CLAIMS is
+  never consulted for the pin.
+
+## 20. Library source, install, and fleet healing (v3)
+
+- **One library source in v1** (the official), stored like a vault subscription:
+  sealed source record `{url, publisher_pubkey, pack_id, seq, added_at,
+  last_checked, blocked}` — TOFU-pinned on connect. Connect/disconnect are
+  desktop-local + explicit UI acts (feeds law). The official URL is prefilled,
+  never hardcoded-trusted: the pin still happens on first fetch.
+- **Install** (UI act, not chat): pick a template → the install sheet shows
+  title, goal, EVERY source host+path unmissably, required params → user fills
+  params (secrets via the credential path, never chat) → item created in
+  `draft` with sealed provenance `_template = {pack_id, template_id, seq,
+  spec_hash}` → the user's explicit **Activate** (commission) is the consent
+  event, same as any draft. Installing never auto-runs anything.
+- **Fleet healing**: when a pack update changes a template (spec_hash differs),
+  every item carrying that `_template` provenance shows "Template update
+  available" on its card. Applying is per-item and user-driven: the diff is
+  shown (source changes highlighted), acceptance re-enters
+  `draft → commissioning` (a template update is NEVER silently applied and
+  NEVER inherits standing consent — the admin fixed the class; each user still
+  approves their instance). Param values and credentials carry over; `_c2_ok`,
+  contract, and trial markers reset (§6/§14 laws).
+- **Update checking**: piggybacks the engine tick at low frequency (24h default,
+  1h floor, vault_sync cadence discipline; manual "Check now" in the UI).
+  Library check failures are host-free statuses; dead-host escalation as vaults.
+- **Rollback vs. unreachable** (M3 audit 2026-09-09): a validly-signed OLDER pack
+  is NOT unreachable — the host answered. The source's `last_checked` still
+  advances (stopping the 30s refetch loop) and the status reads "host is serving
+  an older pack (v{remote} < pinned v{pinned})"; the consecutive-failure counter
+  and the `unreachable` escalation stay UNTOUCHED. `KeyChanged` blocks the same
+  way and does not count toward unreachable either.
+- **State-transition notice** (LOW#5 audit 2026-09-09): the first tick to
+  transition to `blocked` (KeyChanged) or rollback (older pack) posts ONE carrier
+  notice on the Neural Interface feed ("Library updates are blocked — open
+  Neural Interface → Library."). Subsequent ticks under the same state post
+  nothing — the pin persists the last state so restarts don't re-fire either.
+
+## 21. Export-as-template + submission (v3)
+
+- `GET /api/ni/items/{id}/export-template` (desktop-local): returns the §19
+  template JSON for the item — sanitizer strips: secret VALUES (secret params
+  reset to the `ni:self:` placeholder), string/number param values (emptied,
+  label kept), `contract`, `_c2_ok`, `_l1_*`, `_template`, and (H2 audit
+  2026-09-09) rewrites this item's `ni:<item_id>:<name>` refs (header `$secret`
+  values and secret param values) back to `ni:self:<name>` so the emitted
+  template installs cleanly for the next subscriber and never carries the
+  original item's UUID. The exporter REFUSES:
+  - `internal.schedule` sources — machine-local schedule id is meaningless
+    elsewhere;
+  - `internal.kb` sources (M6 audit 2026-09-09) — `query` is personal search
+    text; recreate as a template manually;
+  - any spec whose WHOLE substituted URL (path + query) OR its percent-decoded
+    form OR any `llm`-stage instruction contains an entered credential VALUE
+    (M5 audit 2026-09-09 — widened from "URL query only" so a credential pasted
+    into a path segment or inside a model instruction is caught).
+  Note: the credential-substring guard is belt-and-braces; the primary rule is
+  `$secret` discipline (credentials ride `{"$secret": "ni:..."}` refs, never
+  plain literals). Base64-encoded credentials are OUT OF SCOPE for the guard.
+  Items created BEFORE the `preview_data` slot existed (pre-Phase-3) refuse
+  export with a clear message naming the cause; recreate them in the current
+  app first (LOW#7 audit 2026-09-09).
+- Submission is a GitHub PR to the registry repo (file layout mirrors the pack:
+  one JSON per template + CI that validates every template with the app's own
+  validators). Only the operator (publisher-key holder) merges, signs, and
+  publishes the pack to the landing site (vault publish workflow, second key
+  `ni:publisher_ed25519` in the publisher volume — separate rotation domain
+  from the vault key).

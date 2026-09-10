@@ -29,6 +29,12 @@ _PRIVKEY_SECRET = "webrtc:identity_ed25519"
 # public and may one day need rotating. Rotating one must not break the other, and compromise of a
 # published identity must not let anyone impersonate this Desktop to its own phone.
 VAULT_PUBLISHER_SECRET = "vault:publisher_ed25519"
+# A THIRD signing identity used to sign published Neural Interface template packs
+# (docs/internal/ni-format.md §19). Rotated independently from the vault key: a
+# compromise or rotation of the library-pack identity must not force every vault
+# subscriber to re-trust their vault pins, and vice versa. Same mint/load mechanism
+# via ``_load_or_create`` — the constant is what selects WHICH identity.
+NI_PUBLISHER_SECRET = "ni:publisher_ed25519"
 _RAW = serialization.Encoding.Raw
 _RAW_PRIV = serialization.PrivateFormat.Raw
 _RAW_PUB = serialization.PublicFormat.Raw
