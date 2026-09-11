@@ -68,7 +68,6 @@ Each template JSON is exactly one entry from `pack.templates[]`:
     "scene":   { … },
     "display": { "size": "small" },
     "contract": null,
-    "repair_policy": {"l1": true, "l2_frontier": false},
     "model": null
   },
   "preview_payload": { … dummy data matching the scene’s binds … },
@@ -83,11 +82,13 @@ Params:
   required by the validator; leaving it out fails `parse_pack`.
 - Secret params ship with the placeholder `"ni:self:<name>"`; the installed item
   writes the real value under `ni:<item_id>:<name>` via the credential PUT.
-- `contract`, `_c2_ok`, `_l1_*`, `_template` are FORBIDDEN in a template — the
-  install path stamps `_template` itself, and the other keys are engine-owned
-  (see §20). `parse_pack` refuses any template that carries them (audit
-  2026-09-09 LOW#6 — belt AND suspenders alongside `build_installed_spec`'s
-  strip).
+- `contract`, `_c2_ok`, `_l1_*`, `_l2_*`, `_template`, `repair_policy` are
+  FORBIDDEN in a template — the install path stamps `_template` itself, the
+  engine keys are engine-owned (see §20), and `repair_policy` is always the
+  installer's LOCAL choice (Phase 4b D2c audit 2026-09-11 — the install path
+  forces the safe default `{l1: true, l2_frontier: false}` regardless of what
+  a template shipped). `parse_pack` refuses any template that carries them
+  (belt AND suspenders alongside `build_installed_spec`'s strip).
 
 ## validate.py
 

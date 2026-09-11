@@ -17,6 +17,7 @@
   import {
     api,
     type NiBoardItem,
+    type NiItemDetail,
     type NiLibraryState,
     type NiState,
     type NiTemplate,
@@ -30,6 +31,7 @@
     templateCategories,
     validateParamForm,
   } from "$lib/ni/library";
+  import { formatStageJson, stagesFromSpec } from "$lib/ni/proposal";
   import { isStale, relTime } from "$lib/ni/time";
 
   let items = $state<NiBoardItem[]>([]);
@@ -76,6 +78,35 @@
   let updatePromptFor = $state<NiBoardItem | null>(null);
   let applyingUpdate = $state(false);
 
+  // L2 proposal review modal (ni-format §23). Opening fetches the item detail so the
+  // diff view has the CURRENT extract/transform to render alongside the proposed ones
+  // (the /board response ships bound payloads, not the spec). Apply is a TRIAL — the
+  // engine auto-reverts on the next failing run — so the copy in the modal says so.
+  let proposalFor = $state<NiBoardItem | null>(null);
+  let proposalDetail = $state<NiItemDetail | null>(null);
+  let proposalLoading = $state(false);
+  let proposalBusy = $state(false);
+  // The current stages come from proposalDetail.spec; the proposed stages come from
+  // proposalDetail.spec._l2_proposal.stages (sealed body — served alongside the spec).
+  const proposalCurrent = $derived(
+    proposalDetail ? stagesFromSpec(proposalDetail.spec) : { extract: null, transform: null },
+  );
+  const proposalProposedStages = $derived(readProposedStages(proposalDetail));
+
+  // Per-card repair-policy modal (§23). The overflow row on every card opens this —
+  // it lazily fetches niItem(id) so the checkboxes reflect the CURRENT spec's
+  // repair_policy (the board row deliberately doesn't carry it — this lever is a
+  // detail-view concern, not a first-glance chip). Save posts through the
+  // Desktop-local niRepairPolicy; the WebRTC bridge blocks it from a paired phone
+  // (which surfaces as a 403 the modal paints via describeError).
+  let repairFor = $state<NiBoardItem | null>(null);
+  let repairDetail = $state<NiItemDetail | null>(null);
+  let repairLoading = $state(false);
+  let repairBusy = $state(false);
+  let repairError = $state("");
+  let repairL1 = $state(true);
+  let repairL2Frontier = $state(false);
+
   // Filtered view of the pinned pack's templates — derived so the search input and category
   // dropdown re-render inline without any imperative "if changed then refilter" bookkeeping.
   const filteredTemplates = $derived(
@@ -87,6 +118,33 @@
   const paramFormError = $derived(
     installTemplate ? validateParamForm(installTemplate.params, installParams) : null,
   );
+
+  // Slice the proposed stages out of the item spec's sealed `_l2_proposal` (§23).
+  // The detail endpoint serves this alongside the spec; the shape is closed
+  // ({stages: {extract?, transform?}}) but the top-level spec type is unstructured,
+  // so we defensively pattern-match. Returns null-null when the item has no proposal.
+  function readProposedStages(detail: NiItemDetail | null): {
+    extract: Record<string, unknown> | null;
+    transform: unknown[] | null;
+  } {
+    console.assert(detail === null || typeof detail === "object", "readProposedStages: detail is object|null");
+    console.assert(detail === null || detail.spec !== undefined, "readProposedStages: spec present when detail present");
+    if (!detail) return { extract: null, transform: null };
+    const proposal = detail.spec._l2_proposal;
+    if (!proposal || typeof proposal !== "object" || Array.isArray(proposal)) {
+      return { extract: null, transform: null };
+    }
+    const stages = (proposal as Record<string, unknown>).stages;
+    if (!stages || typeof stages !== "object" || Array.isArray(stages)) {
+      return { extract: null, transform: null };
+    }
+    const s = stages as Record<string, unknown>;
+    const extract = s.extract && typeof s.extract === "object" && !Array.isArray(s.extract)
+      ? (s.extract as Record<string, unknown>)
+      : null;
+    const transform = Array.isArray(s.transform) ? s.transform : null;
+    return { extract, transform };
+  }
 
   async function openLibrary(): Promise<void> {
     console.assert(typeof api.niLibrary === "function", "openLibrary: niLibrary present");
@@ -250,6 +308,137 @@
       if (msg) error = msg;
     } finally {
       applyingUpdate = false;
+      busyId = null;
+    }
+  }
+
+  // Read the spec's repair_policy defensively (spec is Record<string, unknown>).
+  // Server default: l1 = true, l2_frontier = false — mirrored here so a spec that
+  // pre-dates the field renders with the same defaults the backend would apply.
+  function readRepairPolicy(detail: NiItemDetail | null): { l1: boolean; l2_frontier: boolean } {
+    console.assert(detail === null || typeof detail === "object", "readRepairPolicy: detail is object|null");
+    console.assert(detail === null || detail.spec !== undefined, "readRepairPolicy: spec present when detail present");
+    const fallback = { l1: true, l2_frontier: false };
+    if (!detail) return fallback;
+    const raw = detail.spec.repair_policy;
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return fallback;
+    const rec = raw as Record<string, unknown>;
+    const l1 = typeof rec.l1 === "boolean" ? rec.l1 : fallback.l1;
+    const l2 = typeof rec.l2_frontier === "boolean" ? rec.l2_frontier : fallback.l2_frontier;
+    return { l1, l2_frontier: l2 };
+  }
+
+  async function openRepair(item: NiBoardItem): Promise<void> {
+    console.assert(typeof item.id === "string", "openRepair: id is string");
+    console.assert(repairFor === null, "openRepair: no other repair modal open");
+    repairFor = item;
+    repairDetail = null;
+    repairError = "";
+    repairLoading = true;
+    try {
+      repairDetail = await api.niItem(item.id);
+      const p = readRepairPolicy(repairDetail);
+      repairL1 = p.l1;
+      repairL2Frontier = p.l2_frontier;
+    } catch (err) {
+      repairError = describeError(err);
+    } finally {
+      repairLoading = false;
+    }
+  }
+  function closeRepair(): void {
+    console.assert(repairBusy === false, "closeRepair: not while save in flight");
+    console.assert(typeof repairLoading === "boolean", "closeRepair: repairLoading is boolean");
+    repairFor = null;
+    repairDetail = null;
+    repairError = "";
+  }
+  async function saveRepair(): Promise<void> {
+    console.assert(repairFor !== null, "saveRepair: a target must be set");
+    console.assert(repairBusy === false, "saveRepair: no concurrent save");
+    const target = repairFor;
+    if (!target || repairBusy) return;
+    repairBusy = true;
+    repairError = "";
+    try {
+      await api.niRepairPolicy(target.id, { l1: repairL1, l2_frontier: repairL2Frontier });
+      repairFor = null;
+      repairDetail = null;
+    } catch (err) {
+      // 403 arrives when a paired phone tried the Desktop-local route; describeError
+      // passes the backend's human sentence through verbatim.
+      repairError = describeError(err);
+    } finally {
+      repairBusy = false;
+    }
+  }
+
+  async function openProposal(item: NiBoardItem): Promise<void> {
+    console.assert(item.l2_proposal === true, "openProposal: chip must be present");
+    console.assert(proposalFor === null, "openProposal: no other proposal open");
+    proposalFor = item;
+    proposalDetail = null;
+    proposalLoading = true;
+    try {
+      proposalDetail = await api.niItem(item.id);
+    } catch (err) {
+      const msg = describeError(err);
+      if (msg) error = msg;
+      proposalFor = null;
+    } finally {
+      proposalLoading = false;
+    }
+  }
+  function closeProposal(): void {
+    console.assert(proposalBusy === false, "closeProposal: not while apply/dismiss in flight");
+    console.assert(typeof proposalLoading === "boolean", "closeProposal: proposalLoading is boolean");
+    proposalFor = null;
+    proposalDetail = null;
+  }
+  async function applyProposal(): Promise<void> {
+    console.assert(proposalFor !== null, "applyProposal: a target must be set");
+    console.assert(proposalBusy === false, "applyProposal: no concurrent apply");
+    const target = proposalFor;
+    if (!target || proposalBusy) return;
+    proposalBusy = true;
+    busyId = target.id;
+    try {
+      await api.niL2Apply(target.id);
+      proposalFor = null;
+      proposalDetail = null;
+      await load();
+    } catch (err) {
+      const msg = describeError(err);
+      if (msg) error = msg;
+    } finally {
+      proposalBusy = false;
+      busyId = null;
+    }
+  }
+  async function dismissProposal(): Promise<void> {
+    console.assert(proposalFor !== null, "dismissProposal: a target must be set");
+    console.assert(proposalBusy === false, "dismissProposal: no concurrent dismiss");
+    const target = proposalFor;
+    if (!target || proposalBusy) return;
+    const ok = await confirmDialog({
+      title: "Dismiss proposed fix?",
+      body: "Dismiss this proposed fix? It won't be offered again for this breakage.",
+      confirmLabel: "Dismiss",
+      danger: true,
+    });
+    if (!ok) return;
+    proposalBusy = true;
+    busyId = target.id;
+    try {
+      await api.niL2Dismiss(target.id);
+      proposalFor = null;
+      proposalDetail = null;
+      await load();
+    } catch (err) {
+      const msg = describeError(err);
+      if (msg) error = msg;
+    } finally {
+      proposalBusy = false;
       busyId = null;
     }
   }
@@ -497,6 +686,15 @@
                   title="The library updated this card's template — click to review and apply"
                 >Update available</Chip>
               {/if}
+              {#if item.l2_proposal}
+                <!-- L2 frontier repair (§23): a proposed fix is parked. NEVER auto-applied —
+                     the chip opens the review modal (diff + Apply as trial / Dismiss). -->
+                <Chip
+                  kind="accent"
+                  onclick={() => openProposal(item)}
+                  title="A proposed fix from Claude — click to review"
+                >Fix proposed</Chip>
+              {/if}
               {#if item.template_gone}
                 <!-- Informational only: the library retired this template. The card keeps working
                      until the user chooses to delete it — no auto-anything. -->
@@ -565,6 +763,12 @@
               <button
                 class="ghost"
                 disabled={busyId === item.id}
+                onclick={() => openRepair(item)}
+                title="Repair settings — local vs frontier"
+              >Repair settings</button>
+              <button
+                class="ghost"
+                disabled={busyId === item.id}
                 onclick={() => remove(item)}
                 title="Delete"
               >Delete</button>
@@ -620,6 +824,102 @@
         <button class="secondary" disabled={applyingUpdate} onclick={() => { updatePromptFor = null; }}>Cancel</button>
         <button disabled={applyingUpdate} onclick={applyTemplateUpdate}>
           {applyingUpdate ? "Applying…" : "Apply update"}
+        </button>
+      </div>
+    </Modal>
+  {/if}
+
+  <!-- L2 proposal review (§23). PARK-ONLY: rendering the diff never applies anything.
+       Apply runs the proposed stages as a TRIAL — the next refresh must pass this
+       card's captured contract, else the engine auto-reverts. -->
+  {#if proposalFor}
+    <Modal
+      open
+      size="md"
+      label="A proposed fix from Claude"
+      onclose={() => { if (!proposalBusy) closeProposal(); }}
+    >
+      <h2 class="modal-title">A proposed fix from Claude</h2>
+      <p class="modal-body">
+        Your card kept failing, so (with your per-card permission) Claude proposed new
+        data mappings. Nothing has been applied. Applying runs it as a trial — kept only
+        if the next refresh passes this card’s validated contract, automatically reverted
+        otherwise.
+      </p>
+      {#if proposalLoading}
+        <Spinner block />
+      {:else if !proposalDetail}
+        <p class="error">Couldn’t load this proposal.</p>
+      {:else}
+        <div class="prop-diff">
+          <div class="prop-col">
+            <p class="prop-col-label">Current mapping</p>
+            <p class="prop-sub-label">extract</p>
+            <pre class="prop-json">{formatStageJson(proposalCurrent.extract)}</pre>
+            <p class="prop-sub-label">transform</p>
+            <pre class="prop-json">{formatStageJson(proposalCurrent.transform)}</pre>
+          </div>
+          <div class="prop-col">
+            <p class="prop-col-label">Proposed mapping</p>
+            <p class="prop-sub-label">extract</p>
+            <pre class="prop-json">{formatStageJson(proposalProposedStages.extract)}</pre>
+            <p class="prop-sub-label">transform</p>
+            <pre class="prop-json">{formatStageJson(proposalProposedStages.transform)}</pre>
+          </div>
+        </div>
+      {/if}
+      <div class="modal-actions" style="margin-top: var(--s-4)">
+        <button class="ghost" disabled={proposalBusy} onclick={closeProposal}>Cancel</button>
+        <button
+          class="secondary"
+          disabled={proposalBusy || proposalLoading || !proposalDetail}
+          onclick={dismissProposal}
+        >Dismiss</button>
+        <button
+          disabled={proposalBusy || proposalLoading || !proposalDetail}
+          onclick={applyProposal}
+        >{proposalBusy ? "Applying…" : "Apply"}</button>
+      </div>
+    </Modal>
+  {/if}
+
+  <!-- Per-card repair settings (§23). The board row deliberately doesn't carry
+       repair_policy — this lever is a detail-view concern, so opening the modal
+       lazily fetches the item detail. Saving is Desktop-local (x-sb-local); a
+       paired phone gets a 403 the modal surfaces verbatim. -->
+  {#if repairFor}
+    <Modal
+      open
+      label="Repair settings"
+      onclose={() => { if (!repairBusy) closeRepair(); }}
+    >
+      <h2 class="modal-title">Repair settings — “{repairFor.title}”</h2>
+      {#if repairLoading}
+        <Spinner block />
+      {:else if !repairDetail}
+        <p class="error">{repairError || "Couldn’t load this card."}</p>
+      {:else}
+        <p class="modal-body">
+          When a card keeps failing, SmartBrain can try to fix it. Local repair only
+          touches your own machine. Frontier repair sends this card’s goal, data
+          mappings, and failure details to Anthropic under your Claude sign-in — only
+          after local repair fails, and fixes are always proposed for your review,
+          never applied.
+        </p>
+        <label class="repair-row">
+          <input type="checkbox" bind:checked={repairL1} disabled={repairBusy} />
+          <span><strong>Local repair</strong> — retry small mapping fixes on this machine.</span>
+        </label>
+        <label class="repair-row">
+          <input type="checkbox" bind:checked={repairL2Frontier} disabled={repairBusy} />
+          <span><strong>Frontier repair via Claude</strong> — ask Anthropic for a proposed fix when local repair fails.</span>
+        </label>
+        {#if repairError}<p class="error" style="margin:var(--s-3) 0 0">{repairError}</p>{/if}
+      {/if}
+      <div class="modal-actions" style="margin-top: var(--s-4)">
+        <button class="secondary" disabled={repairBusy} onclick={closeRepair}>Cancel</button>
+        <button disabled={repairBusy || repairLoading || !repairDetail} onclick={saveRepair}>
+          {repairBusy ? "Saving…" : "Save"}
         </button>
       </div>
     </Modal>
@@ -923,6 +1223,19 @@
     flex-wrap: wrap;
   }
   .ni-page-head h1 { margin: 0; }
+  /* Repair-settings modal checkbox row — top-aligned so the sentence wraps under the
+     control (not beside a raised baseline). */
+  .repair-row {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--s-2);
+    margin: var(--s-3) 0 0;
+    cursor: pointer;
+  }
+  .repair-row input[type="checkbox"] {
+    margin-top: 0.2em;
+    flex-shrink: 0;
+  }
   /* --- Global Library sheet (Modal size lg body) ------------------------------------------ */
   .lib-header {
     display: flex;
@@ -1080,6 +1393,49 @@
     flex-wrap: wrap;
   }
   .lib-trust-row input { flex: 1; min-width: 10rem; }
+  /* --- L2 proposal review modal (§23) --------------------------------------------------- */
+  /* Side-by-side on wide viewports, stacked on narrow. Every mapping is verbatim JSON in
+     a mono <pre>: the approval surface must show the EXACT values that would be applied
+     (approval-surface law) — no highlighting/collapsing masks the change. */
+  .prop-diff {
+    display: grid;
+    gap: var(--s-3);
+    grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+    margin: var(--s-3) 0 0;
+  }
+  .prop-col {
+    padding: var(--s-3);
+    border: 1px solid var(--border);
+    border-radius: var(--r-2);
+    background: var(--panel);
+    min-width: 0;
+  }
+  .prop-col-label {
+    margin: 0 0 var(--s-2);
+    font-weight: 600;
+    font-size: var(--f-label);
+  }
+  .prop-sub-label {
+    margin: var(--s-2) 0 var(--s-1);
+    font-size: var(--f-meta);
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .prop-json {
+    margin: 0;
+    padding: var(--s-2);
+    background: var(--elevated);
+    border: 1px dashed var(--border);
+    border-radius: var(--r-1);
+    font-family: var(--font-mono, ui-monospace, monospace);
+    font-size: var(--f-meta);
+    color: var(--text);
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow-x: auto;
+    max-height: 20rem;
+  }
   /* The one warning panel this page owns (matches knowledge/ .warn treatment). */
   .warn {
     border: 1px solid var(--danger);

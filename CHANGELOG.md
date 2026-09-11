@@ -77,6 +77,15 @@ to know when a release changes behavior.
   MCP page (desktop only); stdio servers launch with a scrubbed environment, and the
   connection to your own server's address is the one deliberate, user-typed exception to
   the app's public-address-only network guard.
+- **Neural Interface (phase 4b): a frontier second opinion — proposed, never applied.**
+  When a card keeps failing after the local model's one repair attempt, and ONLY if you've
+  turned on "frontier repair" for that specific card AND connected Claude Code, Claude may
+  propose new data mappings. The proposal is **parked, never applied**: the card shows
+  "Fix proposed — review" with the current and proposed mappings side by side, and your
+  Apply runs it as the same trial as local repairs — kept only if the next refresh passes
+  the card's validated contract, auto-reverted otherwise. What's sent is bounded (the
+  card's goal, its data mappings, the failure class — never your library, never
+  credentials), one proposal per breakage, everything in the card's run history.
 
 ## [0.9.38] - 2026-09-07
 

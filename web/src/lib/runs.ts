@@ -31,6 +31,7 @@ export function runStatusLabel(status: string): string {
   if (status === "complete") return "Done";
   if (status === "broken") return "Needs attention";
   if (status === "repaired") return "Repaired itself";
+  if (status === "proposal") return "Fix proposed";
   return status;
 }
 
