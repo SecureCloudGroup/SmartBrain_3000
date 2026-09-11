@@ -112,8 +112,20 @@ _AUTH_HEADER_TOKEN_SUBSTRINGS: tuple[str, ...] = ("token", "secret", "key")
 # Closed vocabularies — v1 refuses anything else, so old clients refuse new nodes rather
 # than mis-render them (the "reject reserved types" contract in ni-format §5).
 _SOURCE_TYPES: frozenset[str] = frozenset(
-    {"http_json", "http_page", "model", "internal.schedule", "internal.kb"}
+    {"http_json", "http_page", "model", "internal.schedule", "internal.kb", "mcp_tool"}
 )
+# §22 mcp_tool grammar — tool names ride a strict slug + bounded frozen arguments.
+# NB: ``\Z`` (end of string) instead of ``$`` (which matches before a trailing newline
+# in Python's re) — a name like ``"query\n"`` would otherwise slip through and be
+# handed to the client as a tool identifier with an embedded newline.
+_MCP_TOOL_NAME_RE = re.compile(r"[A-Za-z0-9_./-]{1,100}\Z")
+_MAX_MCP_ARGS_BYTES = 8 * 1024        # canonical JSON bytes cap for arguments dict
+_MAX_MCP_SERVER_ID = 40               # server id slug ceiling (uuid4 = 36 chars)
+# §22 server_id grammar: a runtime SLOT would be catastrophic (a filled param could
+# rewrite ``server_id`` to another registered server the user never approved for this
+# item), so the id is a strict slug — no ``{{`` or ``}}`` inside, ever. ``\Z`` again
+# instead of ``$`` for the trailing-newline reason above.
+_MCP_SERVER_ID_RE = re.compile(r"[A-Za-z0-9_-]{1,40}\Z")
 # §15 caps: internal.kb query length + result cap + per-snippet render cap.
 _MAX_KB_QUERY = 500
 _MAX_KB_LIMIT = 10
@@ -465,6 +477,8 @@ def _validate_source(source: object) -> None:
         _validate_model_source(s)
     elif stype == "internal.kb":
         _validate_internal_kb_source(s)
+    elif stype == "mcp_tool":
+        _validate_mcp_source(s)
     else:
         _validate_internal_schedule_source(s)
 
@@ -548,6 +562,63 @@ def _validate_internal_kb_source(s: dict) -> None:
         raise ValueError("spec.source.limit must be an integer")  # noqa: TRY004 — one exception class per validator (task contract)
     if limit < 1 or limit > _MAX_KB_LIMIT:
         raise ValueError(f"spec.source.limit must be 1..{_MAX_KB_LIMIT}")
+
+
+def _validate_mcp_source(s: dict) -> None:
+    """§22 mcp_tool: {type, server_id, tool, arguments}. Everything is FROZEN literal.
+
+    * ``server_id`` names an entry in the user's server registry (see ni_mcp). Slug
+      grammar (``[A-Za-z0-9_-]{1,40}``) refuses ``{{param:}}`` by shape — the server
+      is a consent artifact, not a runtime slot.
+    * ``tool`` is a slug the user picked from their server; the description was
+      NEVER fetched into any prompt or spec (§22 injection rules).
+    * ``arguments`` is a JSON-serializable dict already frozen at spec time. This
+      validator refuses ``{{param:``  anywhere inside (a placeholder would let a
+      param value rewrite what the user approved) AND refuses ``$secret`` refs
+      (credentials live in the user's OWN server per §22, never in the spec).
+    """
+    _closed_keys(s, {"type", "server_id", "tool", "arguments"}, "spec.source (mcp_tool)")
+    server_id = _require_str(s.get("server_id"), "spec.source.server_id",
+                             max_len=_MAX_MCP_SERVER_ID)
+    # ``fullmatch`` (belt to the ``\Z`` in the pattern) kills any embedded ``{{param:``
+    # by grammar: the id is a fixed slot at spec time, never a runtime template.
+    if not _MCP_SERVER_ID_RE.fullmatch(server_id):
+        raise ValueError(
+            "spec.source.server_id must match [A-Za-z0-9_-]{1,40}",
+        )
+    tool = _require_str(s.get("tool"), "spec.source.tool", max_len=100)
+    if not _MCP_TOOL_NAME_RE.fullmatch(tool):
+        raise ValueError(
+            "spec.source.tool must match [A-Za-z0-9_./-]{1,100}",
+        )
+    arguments = s.get("arguments")
+    if not isinstance(arguments, dict):
+        raise ValueError("spec.source.arguments must be an object")  # noqa: TRY004
+    # Canonical serialize + size gate: the sealed argument body must be JSON-
+    # roundtrippable (no bytes / non-JSON types) and stay under _MAX_MCP_ARGS_BYTES.
+    try:
+        encoded = json.dumps(arguments, sort_keys=True, allow_nan=False,
+                             ensure_ascii=False)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"spec.source.arguments must be JSON-serializable: {exc}") from None
+    if len(encoded.encode("utf-8")) > _MAX_MCP_ARGS_BYTES:
+        raise ValueError(
+            f"spec.source.arguments exceeds {_MAX_MCP_ARGS_BYTES} canonical bytes",
+        )
+    # Any ``{{param:`` inside the encoded body is a runtime slot the user's approval
+    # doesn't cover (the whole point of §22's frozen literal is that the string the
+    # user approved is the only thing that ever runs). Substring check on the
+    # canonical bytes catches nested dicts / lists in one pass.
+    if "{{param:" in encoded:
+        raise ValueError(
+            "spec.source.arguments may not contain {{param:...}} — the arguments "
+            "block is a frozen literal (§22)",
+        )
+    if '"$secret"' in encoded:
+        raise ValueError(
+            "spec.source.arguments may not contain $secret refs — credentials live "
+            "in your MCP server, not in this spec (§22)",
+        )
 
 
 def _validate_http_json_url_shape(url: str) -> None:
@@ -3644,6 +3715,8 @@ def _fetch_source(spec: dict, item_id: str, gateway_mod, secrets_store,
         return _fetch_internal_schedule(source, schedules_store)
     if stype == "internal.kb":
         return _fetch_internal_kb(source, kb)
+    if stype == "mcp_tool":
+        return _fetch_mcp(source, store)
     raise NIError("source_bad_type", str(stype))
 
 
@@ -3872,5 +3945,43 @@ def _fetch_internal_schedule(source: dict, schedules_store) -> dict:
     run = runs[0]
     return {"message": run.get("message", ""), "status": run.get("status", ""),
             "ts": run.get("ran_at", "")}
+
+
+def _fetch_mcp(source: dict, store: NIStore) -> dict:
+    """§22 mcp_tool: resolve the server from the user's registry, run one tools/call.
+
+    ``store`` is the caller's NIStore (the sealed server registry lives under a
+    reserved snapshot id — same storage seam LibraryStore uses). The registry is
+    built in place from the store; a disabled server, an unknown ``server_id``, or
+    any transport / protocol failure classes back to §22's host-free set
+    (``mcp_unavailable`` / ``mcp_tool_error`` / ``mcp_timeout``).
+
+    Nothing model-authored reaches this code path: the server config, tool name,
+    and arguments block were all typed by the user in a desktop-local act and
+    frozen at spec time — the create/update consent surface promoted "MCP:
+    <label> → <tool>" plus the frozen arguments before the item was sealed (§22
+    "the string the user approved is the only thing that ever runs").
+    """
+    from . import ni_mcp  # lazy: keep the mcp package off ni's import graph edges
+
+    assert isinstance(source, dict), "source must be a dict"
+    assert store is not None, "store required for the server registry"
+    server_id = source.get("server_id")
+    if not isinstance(server_id, str) or not server_id:
+        raise NIError("mcp_unavailable", "bad server id")
+    registry = ni_mcp.ServerRegistry(store)
+    server = registry.get(server_id)
+    if server is None:
+        raise NIError("mcp_unavailable", "server not registered")
+    if not server.get("enabled"):
+        raise NIError("mcp_unavailable", "server disabled")
+    tool = source.get("tool")
+    arguments = source.get("arguments") or {}
+    if not isinstance(tool, str) or not tool or not isinstance(arguments, dict):
+        raise NIError("mcp_unavailable", "bad tool/arguments shape")
+    try:
+        return ni_mcp.call_tool(server, tool, arguments)
+    except ni_mcp.NIMcpError as exc:
+        raise NIError(exc.kind, exc.detail) from None
 
 

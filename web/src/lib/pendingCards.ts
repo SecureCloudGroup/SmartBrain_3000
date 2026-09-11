@@ -16,12 +16,16 @@ export function iconForTool(tool: string): IconName {
   return "pencil";
 }
 
-// Consent law: the URL a create_ni_item / update_ni_item card would fetch must be
-// UNMISSABLE — fmtArgs buries it mid-JSON otherwise. Returns "Fetches: <url>" for
-// those tools when the args carry a source.url, else null. Handles both an object
-// (pending tiles) and a JSON string (history args_summary). A params-substituted URL
-// simply renders the template — that's fine; the template still names the host.
-export function promotedLine(tool: string, args: unknown): string | null {
+// Consent law: the source a create_ni_item / update_ni_item card would call must be
+// UNMISSABLE — fmtArgs buries it mid-JSON otherwise. Returns a promoted line for those
+// tools when the args carry an identifiable source, else null:
+//   http_json / http_page  → "Fetches: <url>"
+//   mcp_tool (§22)         → "MCP: <server label> → <tool>" (falls back to a generic
+//                             phrase when the caller didn't resolve a label yet)
+// Handles both an object (pending tiles) and a JSON string (history args_summary). A
+// params-substituted URL simply renders the template — that's fine; the template still
+// names the host. `arguments` themselves already render whole via fmtArgs.
+export function promotedLine(tool: string, args: unknown, mcpLabel?: string): string | null {
   console.assert(typeof tool === "string", "promotedLine: tool is string");
   console.assert(args !== undefined, "promotedLine: args defined");
   const t = tool.toLowerCase();
@@ -38,9 +42,19 @@ export function promotedLine(tool: string, args: unknown): string | null {
   if (!obj || typeof obj !== "object" || Array.isArray(obj)) return null;
   const source = (obj as Record<string, unknown>).source;
   if (!source || typeof source !== "object" || Array.isArray(source)) return null;
-  const url = (source as Record<string, unknown>).url;
-  if (typeof url !== "string" || url.length === 0) return null;
-  return `Fetches: ${url}`;
+  const src = source as Record<string, unknown>;
+  const url = src.url;
+  if (typeof url === "string" && url.length > 0) return `Fetches: ${url}`;
+  // mcp_tool: name the SERVER (the backend attaches its human label to the pending
+  // row) so the consent surface reads at a glance. Fallback keeps the card honest
+  // when a caller hasn't threaded the label through yet.
+  const serverId = src.server_id;
+  const toolName = src.tool;
+  if (typeof serverId === "string" && serverId.length > 0
+      && typeof toolName === "string" && toolName.length > 0) {
+    return `MCP: ${mcpLabel ?? "your configured server"} → ${toolName}`;
+  }
+  return null;
 }
 
 // Show tool args as readable "key: value" lines instead of raw JSON. Accepts an

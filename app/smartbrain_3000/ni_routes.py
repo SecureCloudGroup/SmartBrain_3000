@@ -19,7 +19,7 @@ from urllib.parse import unquote, urlparse
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from . import gateway, netguard, ni, ni_library, tools, vault_format
+from . import gateway, netguard, ni, ni_library, ni_mcp, tools, vault_format
 from .account import _require_desktop_local
 from .data_routes import _reauthorize
 from .scheduler import _NI_FEED_ID, ScheduleStore, post_ni_carrier_notices
@@ -1025,3 +1025,139 @@ def _slugify(text: str) -> str:
     if not slug[0].isalpha() and slug[0] != "_":
         slug = "x" + slug
     return slug[:ni_library.MAX_TEMPLATE_ID]
+
+
+# --- MCP server registry (§22 outbound-MCP source) --------------------------
+
+class McpServerIn(BaseModel):
+    """Create / update body for one MCP server config (§22).
+
+    The transport-specific fields are validated in ``ni_mcp._validate_new_config``;
+    Pydantic here bounds the raw shape only (labels + short strings) so the request
+    is rejected fast before it lands in the registry.
+    """
+
+    label: str = Field(min_length=1, max_length=ni_mcp.MAX_LABEL)
+    transport: str = Field(min_length=1, max_length=10)
+    enabled: bool = True
+    command: str | None = Field(default=None, max_length=ni_mcp.MAX_COMMAND)
+    args: list[str] | None = Field(default=None, max_length=ni_mcp.MAX_ARGS)
+    url: str | None = Field(default=None, max_length=ni_mcp.MAX_URL)
+
+
+def _registry(store: ni.NIStore) -> ni_mcp.ServerRegistry:
+    """Wrap the unlocked NIStore in a ServerRegistry."""
+    assert store is not None, "store required"
+    return ni_mcp.ServerRegistry(store)
+
+
+def _to_body(model: McpServerIn) -> dict:
+    """Pydantic body → dict fit for the registry validator (drops unset optionals)."""
+    assert model is not None, "model required"
+    body: dict = {"label": model.label, "transport": model.transport,
+                  "enabled": bool(model.enabled)}
+    if model.command is not None:
+        body["command"] = model.command
+    if model.args is not None:
+        body["args"] = list(model.args)
+    if model.url is not None:
+        body["url"] = model.url
+    return body
+
+
+@router.get("/api/ni/mcp-servers")
+def list_mcp_servers(request: Request) -> dict:
+    """List every configured MCP server (§22). Requires unlock.
+
+    Read-only from any unlocked surface — the payload carries the raw command/url
+    so the config sheet can render it, but the payload is secrets-free by
+    construction (§22 credentials live in the user's OWN server, never in the
+    registry). Writes stay desktop-local.
+    """
+    store = _store(request)
+    return {"servers": _registry(store).list_servers()}
+
+
+@router.post("/api/ni/mcp-servers")
+def add_mcp_server(request: Request, body: McpServerIn) -> dict:
+    """Create one MCP server config. Desktop-local (§22: server config carries
+    execution/connection authority)."""
+    _require_desktop_local(request)
+    store = _store(request)
+    try:
+        row = _registry(store).add(_to_body(body))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    request.app.state.audit.append(
+        "user", "ni_mcp_server_add", "reviewed", "executed", True,
+        args_summary=tools.summarize({"label": row["label"],
+                                       "transport": row["transport"]}),
+        result_summary=tools.summarize({"id": row["id"]}),
+    )
+    return row
+
+
+@router.put("/api/ni/mcp-servers/{server_id}")
+def update_mcp_server(request: Request, server_id: str, body: McpServerIn) -> dict:
+    """Replace one MCP server config. Desktop-local."""
+    _require_desktop_local(request)
+    store = _store(request)
+    registry = _registry(store)
+    try:
+        row = registry.update(server_id, _to_body(body))
+    except KeyError:
+        raise HTTPException(status_code=404, detail="server not found") from None
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    request.app.state.audit.append(
+        "user", "ni_mcp_server_update", "reviewed", "executed", True,
+        args_summary=tools.summarize({"label": row["label"],
+                                       "transport": row["transport"]}),
+        result_summary=tools.summarize({"id": row["id"]}),
+    )
+    return row
+
+
+@router.delete("/api/ni/mcp-servers/{server_id}")
+def delete_mcp_server(request: Request, server_id: str) -> dict:
+    """Drop one MCP server config. Desktop-local. Refuses when any item still
+    references this server (409 with the item count so the sheet can show it)."""
+    _require_desktop_local(request)
+    store = _store(request)
+    in_use = _count_items_using_mcp_server(store, server_id)
+    if in_use:
+        raise HTTPException(
+            status_code=409,
+            detail=f"refusing: {in_use} item(s) still reference this server",
+        )
+    registry = _registry(store)
+    try:
+        registry.delete(server_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="server not found") from None
+    request.app.state.audit.append(
+        "user", "ni_mcp_server_delete", "reviewed", "executed", True,
+        args_summary=tools.summarize({"id": server_id}),
+        result_summary=tools.summarize({"deleted": True}),
+    )
+    return {"ok": True}
+
+
+def _count_items_using_mcp_server(store: ni.NIStore, server_id: str) -> int:
+    """Scan every item's sealed spec for an ``mcp_tool`` source referencing this
+    server id. Bounded by ``NIStore._MAX_ITEMS``.
+
+    Delete-in-use is refused so a stale server config can't be dropped out from
+    under a live item (§22 fetch would then raise ``mcp_unavailable`` forever until
+    the source were re-consented). The count is metadata only — no source detail.
+    """
+    assert store is not None, "store required"
+    assert isinstance(server_id, str) and server_id, "server id required"
+    count = 0
+    for item in store.list_items():  # bounded by NIStore._MAX_ITEMS
+        source = item["spec"].get("source") or {}
+        if not isinstance(source, dict):
+            continue
+        if source.get("type") == "mcp_tool" and source.get("server_id") == server_id:
+            count += 1
+    return count

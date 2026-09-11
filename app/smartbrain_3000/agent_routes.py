@@ -156,7 +156,7 @@ def invoke_tool(request: Request, body: InvokeIn) -> dict:
     return {"status": "awaiting_approval", "pending_id": pid, "tool": body.name, "tier": tool.tier.value}
 
 
-def _pending_tile(p: dict) -> dict:
+def _pending_tile(p: dict, *, mcp_label: str | None = None) -> dict:
     """Shape a pending row for the UI tile: redacted args + Always-allow hints.
 
     ``remember_mode`` tells the UI which consent shape applies — ``"tool"`` for
@@ -164,6 +164,12 @@ def _pending_tile(p: dict) -> dict:
     refuses to remember at all. ``remember_host`` carries the parsed host of the
     pending URL so the UI can label the button "Always allow <host>". Site-mode
     with an unparseable URL surfaces as non-rememberable so no button appears.
+
+    ``mcp_label`` (§22 audit F7): when the parked tool is create_ni_item /
+    update_ni_item with an ``mcp_tool`` source, the caller resolves the registry
+    entry's user-visible label and passes it here so the consent tile can show
+    ``MCP: <label> → <tool>`` (the frozen-statement law from §22). Absent /
+    unresolvable rows surface as ``None`` — the tile still renders.
     """
     tool = p["tool"]
     args = p["args"] if isinstance(p["args"], dict) else {}
@@ -183,14 +189,50 @@ def _pending_tile(p: dict) -> dict:
         "rememberable": rememberable,
         "remember_mode": mode,
         "remember_host": host,
+        "mcp_label": mcp_label,
     }
+
+
+def _resolve_pending_mcp_label(p: dict, ni_store) -> str | None:
+    """Look up the registry label for a parked create/update-ni-item with an mcp source.
+
+    Never rewrites args — the consent surface reads this side channel to render the
+    tile; the executor still uses the sealed ``server_id`` from ``args`` verbatim.
+    Returns None for anything that isn't an mcp source, when the store is locked,
+    or when the referenced server no longer exists.
+    """
+    assert isinstance(p, dict), "pending row must be a dict"
+    if ni_store is None:
+        return None
+    if p.get("tool") not in ("create_ni_item", "update_ni_item"):
+        return None
+    args = p.get("args") if isinstance(p.get("args"), dict) else {}
+    source = args.get("source") if isinstance(args.get("source"), dict) else {}
+    if source.get("type") != "mcp_tool":
+        return None
+    server_id = source.get("server_id")
+    if not isinstance(server_id, str) or not server_id:
+        return None
+    from . import ni_mcp
+    try:
+        entry = ni_mcp.ServerRegistry(ni_store).get(server_id)
+    except (ValueError, KeyError):
+        return None
+    if not isinstance(entry, dict):
+        return None
+    label = entry.get("label")
+    return label if isinstance(label, str) and label else None
 
 
 @router.get("/api/agent/pending")
 def list_pending(request: Request) -> dict:
     """List actions awaiting approval (args redacted for the tile)."""
     approvals = _approvals(request)
-    return {"pending": [_pending_tile(p) for p in approvals.list_pending()]}
+    ni_store = getattr(request.app.state, "ni", None)
+    return {"pending": [
+        _pending_tile(p, mcp_label=_resolve_pending_mcp_label(p, ni_store))
+        for p in approvals.list_pending()
+    ]}
 
 
 # Idempotency guard for the scheduled auto-resume (issue: the user approves the

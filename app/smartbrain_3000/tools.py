@@ -703,6 +703,14 @@ def _ni_source_provenance(source: dict | None) -> str:
         # Imported vault docs are third-party content — the KB label keeps that
         # stance visible in the provenance line.
         return "your knowledge base (may include imported third-party documents)"
+    if stype == "mcp_tool":
+        # §22: the LABEL for the server lives in the desktop-local registry (not
+        # in the sealed source), so this pure helper cannot resolve it here. The
+        # tool NAME is spec content and safe to name; the routes / board layer
+        # can enrich with the label where store access exists.
+        tool = source.get("tool") or ""
+        base = "your configured MCP server"
+        return f"{base} (tool {tool})" if isinstance(tool, str) and tool else base
     return "the NI item source"
 
 

@@ -67,6 +67,16 @@ to know when a release changes behavior.
   changed and goes through draft → commissioning again (fixes are offered, never pushed).
   You can also export any card as a shareable template — credentials and personal values
   are stripped — for submission to the community registry.
+- **Neural Interface (phase 4a): your MCP servers as card sources.** Cards can now pull
+  from MCP servers **you** configure — which is how database cards work: your own
+  postgres/sqlite MCP server keeps the credentials in its own process, and SmartBrain
+  only calls the one tool with the exact arguments you approved (shown in full on the
+  approval card, frozen thereafter — changing them means re-approval). SmartBrain never
+  reads ambient MCP config, never feeds server tool listings to models, and treats every
+  result as untrusted data like any other source. Servers are added on the Settings →
+  MCP page (desktop only); stdio servers launch with a scrubbed environment, and the
+  connection to your own server's address is the one deliberate, user-typed exception to
+  the app's public-address-only network guard.
 
 ## [0.9.38] - 2026-09-07
 

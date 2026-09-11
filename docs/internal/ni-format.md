@@ -774,3 +774,65 @@ canonical(payload)`):
   publishes the pack to the landing site (vault publish workflow, second key
   `ni:publisher_ed25519` in the publisher volume — separate rotation domain
   from the vault key).
+
+## 22. `mcp_tool` source (v4a — outbound MCP, the named philosophy extension)
+
+SmartBrain's MCP has been inbound-only by design. This section extends it the one
+way the operator approved: SmartBrain may CONSUME servers the user explicitly
+configures — never ambient `.mcp.json`, never discovery, never tool listings fed
+to models. The payoff: databases and the whole MCP ecosystem become card sources
+while credentials stay in the USER'S OWN server process (SmartBrain never holds a
+DB password).
+
+**Server registry** (NI-scoped v1):
+- Sealed store (feeds convention) of user-configured servers:
+  `{id, label, transport: "stdio"|"http", command?: str, args?: [str],
+  url?: str, enabled}`. CRUD is **desktop-local UI only** — no agent tool creates
+  or edits servers (the feeds "explicit UI act" law; a server config is
+  execution/connection authority).
+- `stdio`: SmartBrain launches the user's command per fetch — stripped
+  `SMARTBRAIN_*`/`ANTHROPIC_*` env (credential firewall), fresh process group,
+  watchdog kill + reap (claudecli hygiene), never persistent in v1.
+- `http`: connects to the URL the user typed. **This path deliberately does NOT
+  ride netguard** — the entire point is the user's own loopback/LAN server, which
+  netguard categorically (and rightly) blocks for anonymous fetches. The
+  consent-scoped exception lives HERE ONLY: the address was typed by the user in
+  a desktop-local act, is frozen thereafter, and nothing model-authored can ever
+  reach this code path with a different address. Redirects are refused by
+  constructing our own `httpx.AsyncClient(follow_redirects=False)` and passing it
+  in (the mcp package's default client hardcodes `follow_redirects=True`), so a
+  3xx surfaces as a plain transport error → `mcp_unavailable` before any request
+  re-issues to a rewritten host. Bounded timeouts + progressive 200 KB result cap
+  as below.
+
+**Result posture** (no raw byte-count read guard):
+- SmartBrain does NOT try to bound the raw MCP framing before parsing — the wall-
+  clock timeout is the containment. A hostile server is the user's own configured
+  code; making that assumption explicit is the point of the consent-scoped
+  exception above.
+- Per-item text cap: EACH `content` text item is truncated at 200 KB standalone
+  before joining, and the running joined size is tracked as we iterate so the
+  walk stops the moment the joined text hits 200 KB. A pathological many-item
+  result can't grow the pipeline past the payload ceiling.
+
+**Source spec**:
+```json
+{"type": "mcp_tool", "server_id": "<registry id>", "tool": "query",
+ "arguments": {"sql": "SELECT count(*) FROM orders"}}
+```
+- `tool` + `arguments` are FROZEN literal JSON (no `{{param:}}` in v1); any
+  change is a source change → re-consent. The create/install consent surface
+  shows `MCP: <server label> → <tool>` plus the full frozen arguments,
+  unmissably (the frozen-statement law from the design's db_query discussion:
+  the string the user approved is the only thing that ever runs).
+- Execution: one `tools/call` per engine run (MCP client from the already-shipped
+  `mcp` package — client code only, no server ambient config). Result content
+  items of type text are joined; if the joined text parses as JSON, the payload
+  is `{"data": <parsed>, "text": <raw ≤200KB>}`, else `{"text": ...}` —
+  deterministic either way. Errors map to host-free classes (`mcp_unavailable`,
+  `mcp_tool_error`, `mcp_timeout`).
+- Injection rules: server tool DESCRIPTIONS are never fetched into any prompt or
+  spec; the user picks the tool by NAME. Results are untrusted data — every
+  existing containment (P1-P7, output-channel law) applies unchanged.
+- Engine discipline: 20s call deadline inside the pass budget accounting;
+  per-run connect/spawn + teardown; failures ride the normal health ladder.
