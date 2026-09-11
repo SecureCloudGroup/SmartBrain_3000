@@ -964,6 +964,57 @@ def test_D5_failure_seals_last_failure_slot_with_excerpt_and_class() -> None:
     datetime.fromisoformat(body["ts"])  # ISO-8601 shape check
 
 
+def test_seal_last_failure_skips_excerpt_for_internal_ni_source() -> None:
+    """Phase 4c audit 2026-09-11 (finding #6): consent scope. ``internal.ni``
+    carries OTHER cards' data — its excerpt would smuggle that data into the L2
+    prompt of THIS item. The seal function must drop the excerpt to empty for
+    ``internal.*`` sources; class + detail still ride (they describe THIS item's
+    failure shape, host-free)."""
+    store, _c, _k = _store()
+    # A depth-0 target and a composite that references it — validate_spec accepts
+    # the composite scene (binds via the alias).
+    target = store.add_item(_basic_spec(title="Target"), {"note": "seed"})
+    composite_scene = {"type": "stack", "dir": "v", "gap": "sm", "children": [
+        {"type": "text", "value": "{{stock.title}}", "role": "title",
+         "tone": "default", "size": "md"},
+    ]}
+    composite_spec = _basic_spec(
+        source={"type": "internal.ni", "items": {"stock": target}},
+        pipeline=[], scene=composite_scene,
+    )
+    iid = store.add_item(
+        composite_spec,
+        {"stock": {"title": "T", "state": "live", "payload_at": None, "history": {}}},
+    )
+    exc = nimod.NIError("extract_miss", "path 'x' missing")
+    nimod._seal_last_failure_snapshot(store, iid, exc, "SECRET-OTHER-CARD-CONTENT")
+    snap = store.read_snapshot(iid, "last_failure")
+    assert snap is not None, "seal must land the slot"
+    body = snap["payload"]
+    assert body["excerpt"] == "", (
+        f"internal.* source must seal excerpt=='': {body['excerpt']!r}"
+    )
+    assert body["class"] == "extract_miss" and body["detail"] == "path 'x' missing"
+
+
+def test_seal_last_failure_keeps_excerpt_for_http_json_source() -> None:
+    """Phase 4c audit 2026-09-11 (finding #6): the internal.* skip is source-typed —
+    an http_json item still seals its excerpt (the payload came from a host the
+    operator consented to fetch, so L2 may cite it back)."""
+    store, _c, _k = _store()
+    http_spec = _basic_spec(
+        source={"type": "http_json", "url": "https://api.example.com/q",
+                "headers": {}},
+        pipeline=[{"op": "extract", "paths": {"note": "not.there"}}],
+    )
+    iid = store.add_item(http_spec, {"note": "seed"})
+    exc = nimod.NIError("extract_miss", "path 'not.there' missing")
+    nimod._seal_last_failure_snapshot(store, iid, exc, "PUBLIC-PAYLOAD-EXCERPT")
+    snap = store.read_snapshot(iid, "last_failure")
+    assert snap is not None, "seal must land the slot"
+    assert snap["payload"]["excerpt"] == "PUBLIC-PAYLOAD-EXCERPT"
+
+
 def test_D5_l2_prompt_contains_excerpt_and_class(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

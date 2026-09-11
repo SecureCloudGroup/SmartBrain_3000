@@ -59,4 +59,31 @@ describe("promotedLine", () => {
     expect(promotedLine("create_ni_item", { source: { type: "mcp_tool", tool: "query" } })).toBeNull();
     expect(promotedLine("create_ni_item", { source: { type: "mcp_tool", server_id: "srv-1" } })).toBeNull();
   });
+
+  it("names the referenced cards for an internal.ni composite source (§25)", () => {
+    const out = promotedLine(
+      "create_ni_item",
+      { source: { type: "internal.ni", items: { s: "id-1", b: "id-2" } } },
+      undefined,
+      ["AAPL Price", "Monthly Spend"],
+    );
+    expect(out).toBe("Combines: AAPL Price, Monthly Spend");
+  });
+
+  it("falls back to a generic phrase when composite titles weren't threaded through", () => {
+    const out = promotedLine("create_ni_item", {
+      source: { type: "internal.ni", items: { s: "id-1" } },
+    });
+    expect(out).toBe("Combines: other cards");
+  });
+
+  it("leaves non-composite sources unaffected when composite titles are supplied", () => {
+    const out = promotedLine(
+      "create_ni_item",
+      { source: { url: "https://example.com/x" } },
+      undefined,
+      ["some card"],
+    );
+    expect(out).toBe("Fetches: https://example.com/x");
+  });
 });

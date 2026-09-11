@@ -872,7 +872,11 @@ under the strictest consent in the system:
   failure classes (Phase 4b D5 audit 2026-09-11; absent slot degrades to
   class-only, matching the prior empty-string behavior). NEVER vault/KB content,
   never secret values, never headers/URLs beyond what the spec's own stages
-  contain (they contain none).
+  contain (they contain none). Consent scope (Phase 4c audit 2026-09-11
+  finding #6): items whose source is `internal.*` seal the failure with an EMPTY
+  excerpt — `internal.ni` carries other cards' data and `internal.kb` carries
+  library content, neither of which this item consented to egress; the L2 prompt
+  for such items rides on class+detail only.
 - **What comes back**: the L1 closed schema — `{extract?, transform?}` only,
   full candidate re-validation. Anything else = attempt failed, recorded.
 - **PARK-ONLY**: a valid proposal is NEVER applied. It is stored as sealed
@@ -898,3 +902,63 @@ under the strictest consent in the system:
   streak).
 - Every attempt/outcome is an `ni_runs` row (`repair_l2_proposed` /
   `repair_l2_failed`); Apply/Dismiss are audited.
+
+## 24. `http_image` source + `image` scene node (v4c — the pixel channel)
+
+Cards can watch an IMAGE the user consented to: a weather-radar frame, a webcam
+still, a status badge, a comic. Pixels are fetched, sealed, and re-served
+same-origin — the only CSP-legal path (`img-src 'self' data:`), and remote
+images never reach the page.
+
+`http_image`:
+```json
+{"type": "http_image", "url": "https://radar.example.com/latest.png",
+ "headers": {"X-Api-Key": {"$secret": "ni:<item_id>:api_key"}}}
+```
+- URL/param/header/credential/redirect rules IDENTICAL to `http_json` (§3, one
+  shared validator). Fetched via netguard with image content types, 4 MB cap,
+  wall-clock deadline (§15 drip-host rule).
+- The body must sniff as a real raster: magic-byte allowlist PNG / JPEG / GIF /
+  WebP — the served Content-Type header is IGNORED (attacker-controlled); the
+  SNIFFED type is what gets stored and later served. Anything else = run
+  failure `image_type`. No SVG (scriptable), no decoding/re-encoding in v1
+  (the app never parses the raster — the browser does, sandboxed by the page).
+- Bytes are sealed into the `image` snapshot slot (AAD-bound like every slot);
+  the pipeline payload is metadata only:
+  `{"image": {"bytes_len": int, "format": "png"|"jpeg"|"gif"|"webp"}}` —
+  pixels never enter the pipeline/scene/model surfaces.
+
+`image` scene node (un-reserved in v4c, server AND client):
+- Bound form written BY THE SERVER only:
+  `{"type": "image", "src": "/api/ni/items/<id>/image?v=<created_at>", "alt": str≤200}`
+  — the binder injects the item's OWN route; a spec's image node carries only
+  `alt` (plus optional `when`), never a src. Client validator refuses any src
+  that is not exactly the same-origin `/api/ni/items/` image path.
+- `GET /api/ni/items/{id}/image` (unlocked; 404 when no image): decrypts and
+  serves the sealed bytes with the SNIFFED content type,
+  `Cache-Control: no-store`, and the standard hardening headers. Registered
+  before the SPA catch-all like every /api route.
+
+## 25. `internal.ni` composite source (v4c — cards over cards, depth-1)
+
+```json
+{"type": "internal.ni", "items": {"stock": "<item-id>", "spend": "<item-id>"}}
+```
+- ≤ 5 referenced items, alias keys follow output-name rules. Zero egress.
+- **Depth-1 by construction**: a referenced item whose own source is
+  `internal.ni` is refused at create/update AND at run time (a later edit could
+  create the cycle) — class `composite_depth`.
+- Runtime payload per alias:
+  `{"<alias>": {"title", "state", "payload_at", "history": {name: [{t,v}]}}}`
+  — the referenced item's HISTORY SERIES (the numeric substance) plus health
+  metadata. Bound scenes/pixels of other cards are NOT exposed (presentation
+  is not data); a missing/never-run referenced item yields empty history +
+  state, never a failure (composites degrade, they don't break).
+- History `{t,v}` lists are ordinary list-of-objects: the existing aggregates
+  (`sum/avg/min/max/count` with key "v") and `spark` bind them directly —
+  cross-item math needs no new pipeline vocabulary.
+- Consent: the create/install card lists every referenced item BY TITLE
+  (promoted line: "Combines: <title>, <title>"); referenced-item DELETION
+  leaves the composite degrading gracefully (empty series) with its health
+  chip telling the truth. Referenced items' own consent is untouched — a
+  composite grants no new egress to anyone.

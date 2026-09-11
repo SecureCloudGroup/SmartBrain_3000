@@ -277,8 +277,15 @@ def _validate_template_spec_and_preview(template: dict, where: str) -> None:
     preview = template.get("preview_payload")
     if not isinstance(preview, dict):
         raise LibraryError(f"{where}.preview_payload must be an object")
+    # Phase 4c audit 2026-09-11: a template whose scene contains an image node MUST
+    # supply an image_ref to bind_scene or _bind_image_src raises image_missing here
+    # and the whole pack fails to parse. Use the template's own id as the item_id
+    # placeholder — there is no minted item yet, and _bind_image_src only formats
+    # the value into the src URL (never dereferenced).
+    image_ref = ni._preview_image_ref(validated, str(template.get("id") or "template"))
     try:
-        ni.bind_scene(validated["scene"], preview, history=ni._seed_history(validated))
+        ni.bind_scene(validated["scene"], preview, history=ni._seed_history(validated),
+                      image_ref=image_ref)
     except (ni.NIError, ValueError) as exc:
         raise LibraryError(f"{where}.preview_payload does not bind: {exc}") from None
 

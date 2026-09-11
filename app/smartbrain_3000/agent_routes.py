@@ -156,7 +156,8 @@ def invoke_tool(request: Request, body: InvokeIn) -> dict:
     return {"status": "awaiting_approval", "pending_id": pid, "tool": body.name, "tier": tool.tier.value}
 
 
-def _pending_tile(p: dict, *, mcp_label: str | None = None) -> dict:
+def _pending_tile(p: dict, *, mcp_label: str | None = None,
+                  composite_titles: list[str] | None = None) -> dict:
     """Shape a pending row for the UI tile: redacted args + Always-allow hints.
 
     ``remember_mode`` tells the UI which consent shape applies — ``"tool"`` for
@@ -170,6 +171,12 @@ def _pending_tile(p: dict, *, mcp_label: str | None = None) -> dict:
     entry's user-visible label and passes it here so the consent tile can show
     ``MCP: <label> → <tool>`` (the frozen-statement law from §22). Absent /
     unresolvable rows surface as ``None`` — the tile still renders.
+
+    ``composite_titles`` (§25): when the parked tool is create_ni_item /
+    update_ni_item with an ``internal.ni`` source, the caller resolves each
+    referenced item id to its title so the consent tile can promote a
+    "Combines: <title>, <title>" line. Missing / deleted references drop from
+    the list (never a fake title). Absent for non-composite sources.
     """
     tool = p["tool"]
     args = p["args"] if isinstance(p["args"], dict) else {}
@@ -190,6 +197,7 @@ def _pending_tile(p: dict, *, mcp_label: str | None = None) -> dict:
         "remember_mode": mode,
         "remember_host": host,
         "mcp_label": mcp_label,
+        "composite_titles": composite_titles,
     }
 
 
@@ -224,13 +232,52 @@ def _resolve_pending_mcp_label(p: dict, ni_store) -> str | None:
     return label if isinstance(label, str) and label else None
 
 
+def _resolve_pending_composite_titles(p: dict, ni_store) -> list[str] | None:
+    """Resolve referenced item titles for a parked create/update-ni-item with an
+    ``internal.ni`` source (§25). Returns the title list (order: alias iteration)
+    or None when the source isn't a composite or the store is locked.
+
+    Missing / deleted references drop out — the tile never shows a fabricated
+    title. The executor still uses the sealed item ids verbatim; this is a UI
+    side channel for the "Combines: …" promoted line.
+    """
+    assert isinstance(p, dict), "pending row must be a dict"
+    if ni_store is None:
+        return None
+    if p.get("tool") not in ("create_ni_item", "update_ni_item"):
+        return None
+    args = p.get("args") if isinstance(p.get("args"), dict) else {}
+    source = args.get("source") if isinstance(args.get("source"), dict) else {}
+    if source.get("type") != "internal.ni":
+        return None
+    items = source.get("items") if isinstance(source.get("items"), dict) else {}
+    titles: list[str] = []
+    for target_id in items.values():  # bounded by _MAX_COMPOSITE_ITEMS
+        if not isinstance(target_id, str) or not target_id:
+            continue
+        try:
+            target = ni_store.get_item(target_id)
+        except (ValueError, KeyError):
+            continue
+        if not isinstance(target, dict):
+            continue
+        title = (target.get("spec") or {}).get("title")
+        if isinstance(title, str) and title:
+            titles.append(title)
+    return titles
+
+
 @router.get("/api/agent/pending")
 def list_pending(request: Request) -> dict:
     """List actions awaiting approval (args redacted for the tile)."""
     approvals = _approvals(request)
     ni_store = getattr(request.app.state, "ni", None)
     return {"pending": [
-        _pending_tile(p, mcp_label=_resolve_pending_mcp_label(p, ni_store))
+        _pending_tile(
+            p,
+            mcp_label=_resolve_pending_mcp_label(p, ni_store),
+            composite_titles=_resolve_pending_composite_titles(p, ni_store),
+        )
         for p in approvals.list_pending()
     ]}
 

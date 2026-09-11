@@ -1778,7 +1778,7 @@
          always-allow, or deny without leaving chat. Resolving the last one resumes the
          turn automatically. Activity still lists everything. -->
     {#each pendingActions as p (p.id)}
-      <ActionCard icon={iconForTool(p.tool)} title={p.tool} tier={p.tier === "irreversible" ? "irreversible" : "reviewed"} promoted={promotedLine(p.tool, p.args, p.mcp_label) ?? ""} scope={fmtArgs(p.args)}>
+      <ActionCard icon={iconForTool(p.tool)} title={p.tool} tier={p.tier === "irreversible" ? "irreversible" : "reviewed"} promoted={promotedLine(p.tool, p.args, p.mcp_label, p.composite_titles) ?? ""} scope={fmtArgs(p.args)}>
         {#snippet actions()}
           {#if p.tier === "reviewed" && p.remember_mode === "tool"}
             <button class="ghost" disabled={approvalBusy !== "" || busy} title="Approve and stop asking for this tool" onclick={() => resolveApproval(p, "approve", true)}>Always allow</button>

@@ -162,6 +162,38 @@ def test_parse_pack_refuses_bad_preview_payload() -> None:
         ni_library.parse_pack(raw)
 
 
+def test_parse_pack_accepts_image_node_template_and_leaves_others_untouched() -> None:
+    """Phase 4c audit 2026-09-11 (finding #1): a template whose scene contains an
+    image node must parse — the per-template preview bind at parse time needs a
+    preview-style image_ref threaded in, or ``_bind_image_src`` raises
+    ``image_missing`` and the whole pack is refused. A non-image template in the
+    SAME pack must still parse (regression net: the fix does not accidentally
+    require image_ref for non-image scenes)."""
+    secrets, _, _, _ = _stores()
+    image_scene = {"type": "stack", "dir": "v", "gap": "sm", "children": [
+        {"type": "image", "alt": "radar frame"},
+    ]}
+    image_tpl = _template(
+        id="radar-image",
+        title="Radar image",
+        goal="show a radar frame",
+        spec_template={
+            "version": 1, "title": "Radar", "goal": "show a radar frame",
+            "params": {}, "pipeline": [],
+            "source": {"type": "http_image",
+                        "url": "https://cdn.example.com/radar.png", "headers": {}},
+            "scene": image_scene, "display": {"size": "small"}, "model": None,
+        },
+        preview_payload={"image": {"bytes_len": 0, "format": "png"}},
+    )
+    payload = _pack_payload(identity.public_key_b64(secrets, identity.NI_PUBLISHER_SECRET),
+                            templates=[image_tpl, _template(id="weather-basic")])
+    raw = _sign_pack(secrets, payload)
+    parsed = ni_library.parse_pack(raw)
+    ids = [t["id"] for t in parsed["templates"]]
+    assert ids == ["radar-image", "weather-basic"]
+
+
 def test_parse_pack_allows_empty_and_placeholder_secrets() -> None:
     """§19: string params ship empty, secret params ship 'ni:self:<name>'."""
     secrets, _, _, _ = _stores()
@@ -616,6 +648,176 @@ def test_export_refuses_credential_value_in_header_literal(
         r = client.get(f"/api/ni/items/{item_id}/export-template", headers=_LOCAL)
         assert r.status_code == 400
         assert "credential" in r.json()["detail"].lower()
+
+
+def _image_template() -> dict:
+    """Phase 4c audit 2026-09-11 (finding #1): an image-node template used by the
+    image-card roundtrip + apply-update tests below. Mirrors the _template()
+    shape but with an http_image source + image-node scene + preview metadata."""
+    image_scene = {"type": "stack", "dir": "v", "gap": "sm", "children": [
+        {"type": "image", "alt": "radar frame"},
+    ]}
+    return {
+        "id": "radar-image", "title": "Radar image",
+        "goal": "show a radar frame", "category": "weather",
+        "tags": ["radar"],
+        "spec_template": {
+            "version": 1, "title": "Radar", "goal": "show a radar frame",
+            "params": {}, "pipeline": [],
+            "source": {"type": "http_image",
+                        "url": "https://cdn.example.com/radar.png",
+                        "headers": {}},
+            "scene": image_scene, "display": {"size": "small"}, "model": None,
+        },
+        "preview_payload": {"image": {"bytes_len": 0, "format": "png"}},
+        "notes": "example image template",
+    }
+
+
+def test_library_install_refuses_composite_depth_violation(
+        tmp_path, monkeypatch) -> None:
+    """Phase 4c audit 2026-09-11 (finding #4): library_install must run the §25
+    depth guard BEFORE add_item. A composite template whose alias points at an
+    installed internal.ni item lands with the runtime guard as the sole defence
+    otherwise — every tick refuses fresh. Guard fires here as a clean 400."""
+    monkeypatch.setenv("SMARTBRAIN_DB_PATH", str(tmp_path / "install-depth.duckdb"))
+    from smartbrain_3000.main import create_app
+
+    with TestClient(create_app()) as client:
+        assert client.post("/api/account/setup",
+                            json={"passphrase": "correct-horse"}).status_code == 200
+        secrets_store = client.app.state.secret_store
+        # An existing internal.ni item on the desktop — no library needed for this row.
+        inner_id = client.app.state.ni.add_item(
+            _template()["spec_template"], {"title": "seed"})
+        composite_scene = {"type": "stack", "dir": "v", "gap": "sm", "children": [
+            {"type": "text", "value": "{{stock.title}}", "role": "title",
+             "tone": "default", "size": "md"},
+        ]}
+        composite_outer_id = client.app.state.ni.add_item(
+            {"version": 1, "title": "Aggregate", "goal": "aggregate a stock",
+             "params": {}, "pipeline": [], "scene": composite_scene,
+             "display": {"size": "small"}, "model": None,
+             "source": {"type": "internal.ni", "items": {"stock": inner_id}}},
+            {"stock": {"title": "T", "state": "live",
+                       "payload_at": None, "history": {}}},
+        )
+        # Publisher ships a composite template that (once install rewrites refs)
+        # would reference composite_outer_id — a composite-of-composite.
+        composite_tpl = {
+            "id": "composite-deep", "title": "Deep composite",
+            "goal": "aggregate an aggregate", "category": "weather", "tags": [],
+            "spec_template": {
+                "version": 1, "title": "Deep", "goal": "aggregate an aggregate",
+                "params": {}, "pipeline": [], "scene": composite_scene,
+                "display": {"size": "small"}, "model": None,
+                "source": {"type": "internal.ni",
+                            "items": {"stock": composite_outer_id}},
+            },
+            "preview_payload": {"stock": {"title": "T", "state": "live",
+                                            "payload_at": None, "history": {}}},
+            "notes": "installs into a composite-of-composite",
+        }
+        raw, _ = _build_pack(secrets_store, templates=[composite_tpl])
+        monkeypatch.setattr(netguard, "safe_fetch_ni_pack", lambda url, cap: raw)
+        client.post("/api/ni/library/connect", headers=_LOCAL,
+                    json={"url": "https://a.example.com/pack.json"})
+        r = client.post("/api/ni/library/install",
+                        json={"template_id": "composite-deep", "params": {}})
+        assert r.status_code == 400, r.text
+        assert "composite" in r.json()["detail"].lower()
+
+
+def test_export_template_of_image_card_round_trips_200(
+        tmp_path, monkeypatch) -> None:
+    """Phase 4c audit 2026-09-11 (finding #1): the export path validates the
+    exported template through parse_pack's per-template validator (P5). Without
+    the image_ref fix a scene carrying an image node fails that round-trip and
+    the route 400s. Success proves the fix reached the exporter too."""
+    monkeypatch.setenv("SMARTBRAIN_DB_PATH", str(tmp_path / "export-image.duckdb"))
+    from smartbrain_3000.main import create_app
+
+    with TestClient(create_app()) as client:
+        assert client.post("/api/account/setup",
+                            json={"passphrase": "correct-horse"}).status_code == 200
+        secrets_store = client.app.state.secret_store
+        raw, _ = _build_pack(secrets_store, templates=[_image_template()])
+        monkeypatch.setattr(netguard, "safe_fetch_ni_pack", lambda url, cap: raw)
+        client.post("/api/ni/library/connect", headers=_LOCAL,
+                    json={"url": "https://a.example.com/pack.json"})
+        r = client.post("/api/ni/library/install",
+                        json={"template_id": "radar-image", "params": {}})
+        assert r.status_code == 200, r.text
+        item_id = r.json()["item_id"]
+        r = client.get(f"/api/ni/items/{item_id}/export-template", headers=_LOCAL)
+        assert r.status_code == 200, r.text
+        assert r.json()["spec_template"]["source"]["type"] == "http_image"
+
+
+def test_library_status_row_binds_image_preview(
+        tmp_path, monkeypatch) -> None:
+    """Phase 4c audit 2026-09-11 (finding #1): _template_row binds the image
+    preview via bind_scene with a preview-style image_ref. Without the fix the
+    listing quietly renders an empty-stack fallback (the safety net); with the
+    fix the row carries the real bound image node."""
+    monkeypatch.setenv("SMARTBRAIN_DB_PATH", str(tmp_path / "row-image.duckdb"))
+    from smartbrain_3000.main import create_app
+
+    with TestClient(create_app()) as client:
+        assert client.post("/api/account/setup",
+                            json={"passphrase": "correct-horse"}).status_code == 200
+        secrets_store = client.app.state.secret_store
+        raw, _ = _build_pack(secrets_store, templates=[_image_template()])
+        monkeypatch.setattr(netguard, "safe_fetch_ni_pack", lambda url, cap: raw)
+        client.post("/api/ni/library/connect", headers=_LOCAL,
+                    json={"url": "https://a.example.com/pack.json"})
+        state = client.get("/api/ni/library").json()
+        rows = [t for t in state["templates"] if t["id"] == "radar-image"]
+        assert rows, state
+        preview = rows[0]["preview_payload"]
+        # Bound scene: outer stack contains the bound image node with an ?v=preview src.
+        assert preview["type"] == "stack"
+        image_node = preview["children"][0]
+        assert image_node["type"] == "image"
+        assert image_node["src"].endswith("?v=preview"), image_node
+
+
+def test_apply_template_update_on_image_template_rebinds_preview(
+        tmp_path, monkeypatch) -> None:
+    """Phase 4c audit 2026-09-11 (finding #1): apply-template-update rebinds the
+    preview snapshot via bind_scene — an image-node scene must pass through the
+    image_ref threading here too. Without the fix the route 500s; with it the
+    stored preview slot carries the rebound image src."""
+    monkeypatch.setenv("SMARTBRAIN_DB_PATH", str(tmp_path / "apply-image.duckdb"))
+    from smartbrain_3000.main import create_app
+
+    with TestClient(create_app()) as client:
+        assert client.post("/api/account/setup",
+                            json={"passphrase": "correct-horse"}).status_code == 200
+        secrets_store = client.app.state.secret_store
+        v1 = _image_template()
+        raw_v1, _ = _build_pack(secrets_store, seq=1, templates=[v1])
+        monkeypatch.setattr(netguard, "safe_fetch_ni_pack", lambda url, cap: raw_v1)
+        client.post("/api/ni/library/connect", headers=_LOCAL,
+                    json={"url": "https://a.example.com/pack.json"})
+        r = client.post("/api/ni/library/install",
+                        json={"template_id": "radar-image", "params": {}})
+        assert r.status_code == 200, r.text
+        item_id = r.json()["item_id"]
+        # v2 bumps a metadata field so spec_hash flips + apply is meaningful.
+        v2 = _image_template()
+        v2["spec_template"]["goal"] = "show a radar frame with a caption"
+        raw_v2, _ = _build_pack(secrets_store, seq=2, templates=[v2])
+        monkeypatch.setattr(netguard, "safe_fetch_ni_pack", lambda url, cap: raw_v2)
+        client.post("/api/ni/library/check")
+        r = client.post(f"/api/ni/items/{item_id}/apply-template-update")
+        assert r.status_code == 200, r.text
+        preview = client.app.state.ni.read_snapshot(item_id, "preview")
+        assert preview is not None
+        # Rebound scene carries the real per-item image src (not the placeholder).
+        image_node = preview["payload"]["children"][0]
+        assert image_node["type"] == "image"
+        assert image_node["src"].startswith(f"/api/ni/items/{item_id}/image?v=")
 
 
 def test_export_refuses_internal_schedule_source(

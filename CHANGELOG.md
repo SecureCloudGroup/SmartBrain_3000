@@ -86,6 +86,15 @@ to know when a release changes behavior.
   the card's validated contract, auto-reverted otherwise. What's sent is bounded (the
   card's goal, its data mappings, the failure class — never your library, never
   credentials), one proposal per breakage, everything in the card's run history.
+- **Neural Interface (phase 4c): picture cards and cards over cards.** Cards can now
+  watch an **image** — a weather-radar frame, a webcam still, a status badge — with the
+  same consent rules as every source; only real raster formats are accepted (checked by
+  file signature, never by what the server claims), pixels are stored encrypted and
+  re-served only from your own app, and a failed refresh keeps showing the last good
+  frame. And **composite cards** combine your other cards' histories — "my stock next to
+  my spending" — with zero network: they read only your own cards' recorded series,
+  can't nest, degrade gracefully if a referenced card goes away, and the approval card
+  names every card being combined.
 
 ## [0.9.38] - 2026-09-07
 

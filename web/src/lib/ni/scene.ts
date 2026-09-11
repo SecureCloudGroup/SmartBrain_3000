@@ -45,6 +45,11 @@ export interface NumberNode {
 export interface ChipNode { type: "chip"; value: string; kind: ChipKind }
 export interface BarNode { type: "bar"; value: number; max: number; tone: Tone }
 export interface IconNode { type: "icon"; name: string; tone: Tone }
+/** §24 image: bound form is server-written. `src` is ALWAYS the item's own
+ *  same-origin `/api/ni/items/<id>/image` route (versioned by `?v=`); the
+ *  validator refuses any other shape so a compromised binder can't slip in
+ *  a remote or `data:` URL. `alt` is capped at 200 chars. */
+export interface ImageNode { type: "image"; src: string; alt: string }
 
 /** Only used by the pre-bind server-side spec; the renderer REJECTS a surviving one. */
 export interface RepeatNode {
@@ -78,6 +83,7 @@ export type SceneNode =
   | ChipNode
   | BarNode
   | IconNode
+  | ImageNode
   | RepeatNode
   | SparkNode
   | GaugeNode;
@@ -88,6 +94,14 @@ const MAX_DEPTH = 8;
 const MAX_TEXT_CHARS = 2000;
 const MAX_SPARK_POINTS = 500;
 const MAX_LABEL_CHARS = 200;
+const MAX_ALT_CHARS = 200;
+
+// §24 image node: the binder writes the item's OWN same-origin route with a
+// version query. Anchored on both ends — no scheme, no protocol-relative `//`,
+// no `data:`, no foreign path can pass. Kept as strict as the server contract.
+// MIRROR: app/tests/test_ni.py freezes this exact pattern and asserts every server-
+// emitted ?v= shape matches it — change the two together or image cards go blank.
+const IMAGE_SRC_RE = /^\/api\/ni\/items\/[A-Za-z0-9-]+\/image(\?v=[\w.:+-]*)?$/;
 
 // Closed enums.
 const TEXT_ROLES: readonly TextRole[] = ["title", "label", "value", "caption"];
@@ -100,10 +114,11 @@ const NUMBER_FORMATS: readonly NumberFormat[] = ["plain", "compact", "percent", 
 const SPARK_KINDS: readonly SparkKind[] = ["line", "bars"];
 
 // Reserved-for-later types — MUST be refused so old clients don't mis-render new scenes.
-// `spark` and `gauge` graduated in v2 and are handled below. `when` also stays here so
-// {type: "when"} is refused with the same message (the `when` KEY on any node is
-// caught earlier by the surviving-key check — server strips it at bind time).
-const RESERVED_TYPES: ReadonlySet<string> = new Set(["image", "when", "on_tap"]);
+// `spark` and `gauge` graduated in v2 and are handled below; `image` graduated in v4c
+// (§24) and is validated by checkImage. `when` also stays here so {type: "when"} is
+// refused with the same message (the `when` KEY on any node is caught earlier by the
+// surviving-key check — server strips it at bind time).
+const RESERVED_TYPES: ReadonlySet<string> = new Set(["when", "on_tap"]);
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
@@ -177,6 +192,19 @@ function checkSpark(n: Record<string, unknown>): string | null {
   return null;
 }
 
+function checkImage(n: Record<string, unknown>): string | null {
+  console.assert(n.type === "image", "checkImage: type must be image");
+  console.assert(typeof n === "object", "checkImage: node must be an object");
+  // §24: src is server-written and points at the item's own /api/ni/items/<id>/image
+  // route (optionally versioned via ?v=<created_at>). A remote URL, protocol-relative
+  // URL, or data: URL never validates — the server would refuse it, and so do we.
+  if (typeof n.src !== "string") return "image.src must be string";
+  if (!IMAGE_SRC_RE.test(n.src)) return "image.src must be /api/ni/items/<id>/image";
+  if (typeof n.alt !== "string") return "image.alt must be string";
+  if (n.alt.length > MAX_ALT_CHARS) return "image.alt exceeds 200 chars";
+  return null;
+}
+
 function checkGauge(n: Record<string, unknown>): string | null {
   console.assert(n.type === "gauge", "checkGauge: type must be gauge");
   console.assert(typeof n === "object", "checkGauge: node must be an object");
@@ -209,6 +237,7 @@ function checkLeaf(n: Record<string, unknown>): string | null {
   if (t === "chip") return checkChip(n);
   if (t === "bar") return checkBar(n);
   if (t === "icon") return checkIcon(n);
+  if (t === "image") return checkImage(n);
   if (t === "spark") return checkSpark(n);
   if (t === "gauge") return checkGauge(n);
   if (t === "stack") {

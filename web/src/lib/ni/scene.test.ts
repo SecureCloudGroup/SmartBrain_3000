@@ -36,10 +36,8 @@ describe("validateBoundScene — refuses unknown + reserved node types", () => {
     expect(validateBoundScene({ type: "widget" })).toMatch(/unknown/);
   });
 
-  it("still refuses image + on_tap (behaviors reserved for later phases)", () => {
-    for (const t of ["image", "on_tap"]) {
-      expect(validateBoundScene({ type: t })).toMatch(/reserved/);
-    }
+  it("still refuses on_tap (behavior reserved for a later phase)", () => {
+    expect(validateBoundScene({ type: "on_tap" })).toMatch(/reserved/);
   });
 
   it("refuses a surviving `when` KEY on any node — server strips it at bind time (§5)", () => {
@@ -169,6 +167,43 @@ describe("validateBoundScene — v2 spark node", () => {
   it("refuses points that are neither number nor {t, v} object", () => {
     const node = { type: "spark", points: ["one", "two"], kind: "line" };
     expect(validateBoundScene(node)).toMatch(/spark\.points/);
+  });
+});
+
+describe("validateBoundScene — v4c image node (§24)", () => {
+  it("accepts a well-formed bound image with the item's own /api/ni/items route", () => {
+    const node = { type: "image", src: "/api/ni/items/abc-123/image?v=2026-09-11T00:00:00Z", alt: "radar" };
+    expect(validateBoundScene(node)).toBeNull();
+  });
+
+  it("accepts the versionless form (the ?v= query is optional)", () => {
+    const node = { type: "image", src: "/api/ni/items/abc-123/image", alt: "" };
+    expect(validateBoundScene(node)).toBeNull();
+  });
+
+  it("refuses an absolute-URL src — pixels must be re-served same-origin", () => {
+    const node = { type: "image", src: "https://radar.example.com/latest.png", alt: "x" };
+    expect(validateBoundScene(node)).toMatch(/image\.src/);
+  });
+
+  it("refuses a protocol-relative src — no // escape hatch", () => {
+    const node = { type: "image", src: "//attacker.example/api/ni/items/x/image", alt: "x" };
+    expect(validateBoundScene(node)).toMatch(/image\.src/);
+  });
+
+  it("refuses a data: src — the browser must fetch through the app's route", () => {
+    const node = { type: "image", src: "data:image/png;base64,AAA", alt: "x" };
+    expect(validateBoundScene(node)).toMatch(/image\.src/);
+  });
+
+  it("refuses a foreign same-origin path (not the /api/ni/items/<id>/image route)", () => {
+    const node = { type: "image", src: "/api/other/path", alt: "x" };
+    expect(validateBoundScene(node)).toMatch(/image\.src/);
+  });
+
+  it("refuses an alt longer than 200 chars", () => {
+    const node = { type: "image", src: "/api/ni/items/x/image", alt: "a".repeat(201) };
+    expect(validateBoundScene(node)).toMatch(/200/);
   });
 });
 
