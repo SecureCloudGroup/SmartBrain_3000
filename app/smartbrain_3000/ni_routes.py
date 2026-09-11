@@ -18,6 +18,7 @@ from urllib.parse import unquote, urlparse
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
+from starlette.responses import Response
 
 from . import gateway, netguard, ni, ni_library, ni_mcp, tools, vault_format
 from .account import _require_desktop_local
@@ -248,6 +249,29 @@ def list_notices(request: Request, limit: int = _DEFAULT_NOTICES) -> list[dict]:
         }
         for run in runs  # list_runs is newest-first and bounded by the clamp above
     ]
+
+
+@router.get("/api/ni/items/{item_id}/image")
+def get_item_image(request: Request, item_id: str) -> Response:
+    """§24: serve the sealed image bytes with the SNIFFED media type.
+
+    ``Cache-Control: no-store`` so a stale response never masks a fresh fetch;
+    the src carries ``?v=<created_at>`` for browser cache-busting when the same
+    URL is reused across renders. 404 when the item has no image slot yet
+    (draft, first-run pending, or a non-image source). 423 while locked.
+    Registered BEFORE ``GET /items/{item_id}`` per the schedule_routes ordering
+    convention — FastAPI matches most-specific first and the two paths differ,
+    but keeping literals first keeps the surface obvious to a reader.
+    """
+    store = _store(request)
+    if store.get_item(item_id) is None:
+        raise HTTPException(status_code=404, detail="item not found")
+    snap = store.read_image_snapshot(item_id)
+    if snap is None:
+        raise HTTPException(status_code=404, detail="image not available")
+    media_type = ni._IMAGE_MEDIA_BY_FORMAT.get(snap["format"], "application/octet-stream")
+    return Response(content=snap["bytes"], media_type=media_type,
+                    headers={"Cache-Control": "no-store"})
 
 
 @router.get("/api/ni/items/{item_id}")
@@ -637,9 +661,14 @@ def _template_row(t: dict) -> dict:
               for name, p in (spec_template.get("params") or {}).items()]
     raw_preview = t.get("preview_payload") or {}
     scene = spec_template.get("scene") or {}
+    # Phase 4c audit 2026-09-11: a template scene with an image node needs a
+    # preview-style image_ref or bind_scene raises image_missing (finding #1). No
+    # item yet — pass the template's own id as the item_id placeholder.
+    image_ref = ni._preview_image_ref(spec_template, str(t.get("id") or "template"))
     try:
         bound_preview = ni.bind_scene(scene, raw_preview,
-                                      history=ni._seed_history(spec_template))
+                                      history=ni._seed_history(spec_template),
+                                      image_ref=image_ref)
     except (ni.NIError, ValueError) as exc:  # defence-in-depth — never crash the listing
         log.warning("ni library: template %r preview bind failed: %s",
                     t.get("id"), exc)
@@ -829,6 +858,15 @@ def library_install(request: Request, body: LibraryInstallIn) -> dict:
     # pre-minted id so we get a single write, no re-seal race under _SPEC_LOCK.
     item_id = str(uuid.uuid4())
     ni_library.rewrite_self_refs(spec, item_id)
+    # Phase 4c audit 2026-09-11 (finding #4): the install route must run the §25
+    # composite-depth guard BEFORE add_item — otherwise a pack that ships an
+    # internal.ni template referencing another internal.ni item lands as a live
+    # dangling reference and the runtime guard fires per tick. Dangling references
+    # (target not present) still install fine — the guard skips them.
+    try:
+        ni.check_composite_depth(store, spec)
+    except ni.NIError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
     try:
         store.add_item(spec, template.get("preview_payload") or {},
                        origin="template", item_id=item_id)
@@ -893,9 +931,13 @@ def apply_template_update(request: Request, item_id: str) -> dict:
     # template so the card renders the new bound preview immediately (parse_pack proved
     # this binds — a raise here is a data-corruption bug, not user input).
     preview_payload = template.get("preview_payload") or {}
+    # Phase 4c audit 2026-09-11: an image-node template rebind needs a preview
+    # image_ref (finding #1). The item_id is already known here.
+    image_ref = ni._preview_image_ref(new_spec, item_id)
     try:
         bound = ni.bind_scene(new_spec["scene"], preview_payload,
-                              history=ni._seed_history(new_spec))
+                              history=ni._seed_history(new_spec),
+                              image_ref=image_ref)
     except (ni.NIError, ValueError) as exc:
         raise HTTPException(status_code=500,
                             detail=f"template preview bind failed: {exc}") from None

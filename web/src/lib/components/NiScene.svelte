@@ -140,6 +140,11 @@
   {:else}
     <span class="muted" title={`unknown icon: ${node.name}`}>·</span>
   {/if}
+{:else if node.type === "image"}
+  <!-- §24: src is server-written and already validated against
+       /^\/api\/ni\/items\/<id>\/image(\?v=…)?$/ by validateBoundScene. A broken
+       image shows the alt text natively — no onerror handler injects anything. -->
+  <img class="ni-image" src={node.src} alt={node.alt} loading="lazy" />
 {:else if node.type === "spark"}
   {#if node.points.length === 0}
     <span class="muted ni-spark-empty" role="img" aria-label="trend">—</span>
@@ -215,6 +220,13 @@
     width: 100%;
   }
   .ni-text, .ni-number { color: var(--text); line-height: var(--lh-ui); }
+  .ni-image {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    height: auto;
+    border-radius: var(--r-2);
+  }
   .ni-bad { font-size: var(--f-meta); font-style: italic; }
   .ni-bar {
     width: 100%;

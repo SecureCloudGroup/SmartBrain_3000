@@ -118,8 +118,26 @@ _AUTH_HEADER_TOKEN_SUBSTRINGS: tuple[str, ...] = ("token", "secret", "key")
 # Closed vocabularies — v1 refuses anything else, so old clients refuse new nodes rather
 # than mis-render them (the "reject reserved types" contract in ni-format §5).
 _SOURCE_TYPES: frozenset[str] = frozenset(
-    {"http_json", "http_page", "model", "internal.schedule", "internal.kb", "mcp_tool"}
+    {"http_json", "http_page", "http_image", "model", "internal.schedule",
+     "internal.kb", "internal.ni", "mcp_tool"}
 )
+# §24 http_image sniff allowlist (bytes-magic → format string). The served
+# Content-Type header is IGNORED for trust — the sniffed type is what gets
+# stored + later served. SVG (scriptable) is intentionally absent.
+_IMAGE_MAGIC: tuple[tuple[bytes, str], ...] = (
+    (b"\x89PNG\r\n\x1a\n", "png"),
+    (b"\xff\xd8\xff", "jpeg"),
+    (b"GIF87a", "gif"),
+    (b"GIF89a", "gif"),
+)
+_IMAGE_MEDIA_BY_FORMAT: dict[str, str] = {
+    "png": "image/png", "jpeg": "image/jpeg",
+    "gif": "image/gif", "webp": "image/webp",
+}
+_IMAGE_FETCH_DEADLINE_S = 15.0    # §24 drip-host wall-clock bound (mirrors http_page)
+_MAX_IMAGE_ALT = 200              # §24 alt text ceiling on the image scene node
+_MAX_COMPOSITE_ITEMS = 5          # §25 internal.ni references per item
+_MAX_COMPOSITE_ID = 60            # §25 alias key length ceiling
 # §22 mcp_tool grammar — tool names ride a strict slug + bounded frozen arguments.
 # NB: ``\Z`` (end of string) instead of ``$`` (which matches before a trailing newline
 # in Python's re) — a name like ``"query\n"`` would otherwise slip through and be
@@ -143,7 +161,7 @@ _STATES: frozenset[str] = frozenset(
 )
 _SLOTS: frozenset[str] = frozenset(
     {"latest", "last_good", "preview", "preview_data", "history", "alert_state",
-     "last_failure"}
+     "last_failure", "image"}
 )
 _REVISION_ORIGINS: frozenset[str] = frozenset(
     {"user", "agent", "repair_l1", "repair_l2", "template"}
@@ -157,11 +175,11 @@ _AGGREGATE_FNS: frozenset[str] = frozenset({"sum", "avg", "min", "max"})
 _SORT_DIRS: frozenset[str] = frozenset({"asc", "desc"})
 _SCENE_TYPES: frozenset[str] = frozenset(
     {"stack", "grid", "divider", "text", "number", "chip", "bar", "icon", "repeat",
-     "spark", "gauge"}
+     "spark", "gauge", "image"}
 )
-# Reserved for later phases — validators MUST reject in v1 so old apps refuse new scenes.
-# v2 promoted spark + gauge (§5 Added in v2) out of the reserved set into _SCENE_TYPES.
-_RESERVED_SCENE_TYPES: frozenset[str] = frozenset({"image", "on_tap"})
+# Reserved for later phases — validators MUST reject so old apps refuse new scenes.
+# v2 promoted spark + gauge; v4c promoted image (§24 pixel channel) — on_tap stays reserved.
+_RESERVED_SCENE_TYPES: frozenset[str] = frozenset({"on_tap"})
 _STACK_DIRS: frozenset[str] = frozenset({"v", "h"})
 _STACK_GAPS: frozenset[str] = frozenset({"sm", "md"})
 _TEXT_ROLES: frozenset[str] = frozenset({"title", "label", "value", "caption"})
@@ -364,6 +382,7 @@ def validate_spec(spec: object, *, allow_empty_params: bool = False) -> dict:
     _validate_source(body.get("source"))
     outputs = _validate_pipeline(body.get("pipeline") or [])
     validate_scene(body.get("scene"))
+    _validate_scene_source_context(body.get("scene"), body.get("source"))
     _validate_display(body.get("display") or {})
     # Phase 4b D2c (audit 2026-09-11): `repair_policy` is now OPTIONAL on the sealed
     # spec — a template pack never carries it (parse_pack refuses `repair_policy` in
@@ -544,10 +563,14 @@ def _validate_source(source: object) -> None:
         _validate_http_json_source(s)
     elif stype == "http_page":
         _validate_http_page_source(s)
+    elif stype == "http_image":
+        _validate_http_image_source(s)
     elif stype == "model":
         _validate_model_source(s)
     elif stype == "internal.kb":
         _validate_internal_kb_source(s)
+    elif stype == "internal.ni":
+        _validate_internal_ni_source(s)
     elif stype == "mcp_tool":
         _validate_mcp_source(s)
     else:
@@ -574,6 +597,48 @@ def _validate_http_page_source(s: dict) -> None:
     parsed inside the §16 subprocess jail; the pipeline payload is {"text", "title"}.
     """
     _validate_http_source_shape(s, "http_page")
+
+
+def _validate_http_image_source(s: dict) -> None:
+    """§24 http_image: {type, url, headers}. URL/param/header/credential rules are
+    IDENTICAL to http_json (§3 — frozen scheme+authority, percent-encoded params,
+    host-bound https-only secrets, auth-shaped header refusal). The response body
+    is sniff-gated to a raster magic (PNG/JPEG/GIF/WebP) at fetch time and the
+    SNIFFED type — not the served header — is what gets stored + later served.
+    """
+    _validate_http_source_shape(s, "http_image")
+
+
+def _validate_internal_ni_source(s: dict) -> None:
+    """§25 internal.ni composite: {type, items: {alias: item_id}}. Zero egress —
+    reads other items' health + history slots at run time.
+
+    ``items`` is closed: ≤ _MAX_COMPOSITE_ITEMS aliases, alias keys follow the
+    output-name rules (grammar-safe slug, not ``item`` / ``history``), values are
+    non-empty item-id strings. Depth-1 (cycle-free composites of composites) is
+    enforced at create/update AND at runtime — the reference target's OWN spec
+    isn't visible to a pure validator, so this refuses only shape here; the
+    call-site helper ``check_composite_depth`` runs the store-visible depth guard.
+    """
+    _closed_keys(s, {"type", "items"}, "spec.source (internal.ni)")
+    items = _require_dict(s.get("items"), "spec.source.items")
+    if not items or len(items) > _MAX_COMPOSITE_ITEMS:
+        raise ValueError(
+            f"spec.source.items must be 1..{_MAX_COMPOSITE_ITEMS} entries"
+        )
+    for alias, target in items.items():
+        if not isinstance(alias, str) or not _KEY_RE.match(alias):
+            raise ValueError(f"spec.source.items key {alias!r} malformed")
+        if len(alias) > _MAX_COMPOSITE_ID:
+            raise ValueError(f"spec.source.items.{alias} name too long")
+        if alias in _RESERVED_OUTPUT_NAMES:
+            raise ValueError(
+                f"spec.source.items.{alias}: {alias!r} is reserved (bind root)"
+            )
+        if not isinstance(target, str) or not target:
+            raise ValueError(f"spec.source.items.{alias} must be a non-empty string")
+        if len(target) > _MAX_PARAM_VALUE:
+            raise ValueError(f"spec.source.items.{alias} target too long")
 
 
 def _validate_http_source_shape(s: dict, type_label: str) -> None:
@@ -1042,6 +1107,49 @@ def validate_scene(scene: object) -> dict:
     return node
 
 
+def _validate_scene_source_context(scene: object, source: object) -> None:
+    """§24 cross-cut: an ``image`` scene node is meaningless without an ``http_image``
+    source, so refuse the pairing at spec time. Runs after ``validate_scene`` +
+    ``_validate_source`` so both shapes are already known-good; a bad source would
+    have raised already.
+    """
+    stype = source.get("type") if isinstance(source, object) and isinstance(source, dict) else None
+    if not isinstance(scene, dict):
+        return
+    if not _scene_contains_image(scene):
+        return
+    if stype != "http_image":
+        raise ValueError(
+            "spec.scene: 'image' node requires source.type 'http_image' — bytes "
+            "can only be served from the item's own image slot (§24)"
+        )
+
+
+def _scene_contains_image(scene: dict) -> bool:
+    """Iterative walk (POW10 #1) looking for a node whose type == 'image'.
+
+    Bounded by the pre-expansion scene node cap; the scene has already validated,
+    so children shapes / depths are known-safe.
+    """
+    assert isinstance(scene, dict), "scene must be a dict"
+    pending: list[object] = [scene]
+    for _ in range(2 * _MAX_SCENE_NODES_PRE_EXPAND):
+        if not pending:
+            return False
+        node = pending.pop()
+        if not isinstance(node, dict):
+            continue
+        if node.get("type") == "image":
+            return True
+        children = node.get("children")
+        if isinstance(children, list):
+            pending.extend(children)
+        template = node.get("template")
+        if isinstance(template, dict):
+            pending.append(template)
+    return False
+
+
 class _NodeCounter:
     """Mutable counter shared across the recursion-free tree walk (a plain int wouldn't
     survive parameter passing — closures are avoided per project style)."""
@@ -1093,6 +1201,7 @@ def _validate_scene_shape(node: dict) -> list[object]:
         "text": _validate_text, "number": _validate_number, "chip": _validate_chip,
         "bar": _validate_bar, "icon": _validate_icon, "repeat": _validate_repeat,
         "spark": _validate_spark, "gauge": _validate_gauge,
+        "image": _validate_image,
     }
     fn = dispatch[node["type"]]
     return fn(node)
@@ -1248,6 +1357,22 @@ def _validate_spark_literal_point(p: object, i: int) -> None:
             raise ValueError(f"scene spark.points[{i}].v must be a number")  # noqa: TRY004
         return
     raise ValueError(f"scene spark.points[{i}] must be a number or {{t,v}} object")
+
+
+def _validate_image(node: dict) -> list[object]:
+    """§24 image scene node: {type, alt, when?}. NO ``src`` accepted in a spec —
+    the binder injects it at bind time from the item's own /api/ni/items/{id}/image
+    route. ``alt`` is required plain text (≤ _MAX_IMAGE_ALT chars) so the picture
+    still communicates when it fails to load, or to a screen reader.
+    """
+    _closed_keys(node, {"type", "alt", "when"}, "scene image")
+    alt = node.get("alt")
+    if not isinstance(alt, str) or len(alt) > _MAX_IMAGE_ALT:
+        raise ValueError(f"scene image.alt must be a string <= {_MAX_IMAGE_ALT} chars")
+    # G1 mirror: alt may contain {{path}} interpolations resolved at bind time.
+    _check_interp_grammar(alt, "scene image.alt")
+    _validate_when(node, "scene image")
+    return []
 
 
 def _validate_gauge(node: dict) -> list[object]:
@@ -1829,7 +1954,8 @@ def _resolve_param_string(value: str, params: dict, *, path: str,
     return _PARAM_PLACEHOLDER.sub(_one, value)
 
 
-def bind_scene(scene: dict, data: dict, *, history: dict | None = None) -> dict:
+def bind_scene(scene: dict, data: dict, *, history: dict | None = None,
+               image_ref: dict | None = None) -> dict:
     """Return the scene with $bind + {{path}} resolved and repeat nodes expanded.
 
     Enforces the post-expansion caps (nodes <= 100, depth <= 8, text <= 2000). Any
@@ -1840,6 +1966,12 @@ def bind_scene(scene: dict, data: dict, *, history: dict | None = None) -> dict:
     ``$bind: history.price`` walks the standard resolver. The pipeline guarantees no
     top-level output is named ``history`` (see ``_RESERVED_OUTPUT_NAMES``), so the
     merge cannot shadow user data.
+
+    ``image_ref`` (§24): ``{"item_id": str, "created_at": str}`` for the image scene
+    node's server-injected ``src``. Absent when the item has no image slot yet OR
+    the scene has no image node; a scene carrying an image node while ``image_ref``
+    is None raises ``NIError('image_missing')`` — the run fails and last_good keeps
+    rendering (last-good semantics for pixels).
     """
     assert isinstance(scene, dict), "scene must be a dict"
     assert isinstance(data, dict), "data must be a dict"
@@ -1848,7 +1980,8 @@ def bind_scene(scene: dict, data: dict, *, history: dict | None = None) -> dict:
         assert isinstance(history, dict), "history must be a dict"
         merged["history"] = history
     counter = _NodeCounter()
-    bound = _bind_node(scene, merged, depth=1, item=None, counter=counter)
+    bound = _bind_node(scene, merged, depth=1, item=None, counter=counter,
+                       image_ref=image_ref)
     if bound is None:
         raise NIError("bind_type", "scene root cannot be hidden by when")
     if counter.count > _MAX_SCENE_NODES:
@@ -1857,12 +1990,15 @@ def bind_scene(scene: dict, data: dict, *, history: dict | None = None) -> dict:
 
 
 def _bind_node(node: object, data: dict, *, depth: int, item: Any,
-               counter: _NodeCounter) -> dict | None:
+               counter: _NodeCounter, image_ref: dict | None = None) -> dict | None:
     """Bind one scene node; returns None when a ``when`` rule set ``hidden: true``.
 
     Callers with a ``children`` list filter None entries so the hidden node is dropped
     from the bound payload entirely (§5 Conditions). ``when`` never survives binding —
     it is consumed here and no ``when`` key is copied into the output.
+
+    ``image_ref`` (§24) is threaded through so the recursive walk can inject the
+    server-owned ``src`` on ``image`` nodes.
     """
     assert counter is not None, "counter required"
     if not isinstance(node, dict):
@@ -1880,7 +2016,8 @@ def _bind_node(node: object, data: dict, *, depth: int, item: Any,
         raise NIError("bind_scene_too_large", f"{counter.count} nodes (max {_MAX_SCENE_NODES})")
     ntype = node.get("type")
     if ntype == "repeat":
-        return _bind_repeat(node, data, depth=depth, counter=counter)
+        return _bind_repeat(node, data, depth=depth, counter=counter,
+                            image_ref=image_ref)
     out: dict = {"type": ntype}
     for key, value in node.items():
         if key in ("type", "when"):
@@ -1888,18 +2025,39 @@ def _bind_node(node: object, data: dict, *, depth: int, item: Any,
         if key == "children":
             child_nodes: list[dict] = []
             for c in (value or []):  # bounded by scene node cap
-                bound_child = _bind_node(c, data, depth=depth + 1, item=item, counter=counter)
+                bound_child = _bind_node(c, data, depth=depth + 1, item=item,
+                                         counter=counter, image_ref=image_ref)
                 if bound_child is not None:
                     child_nodes.append(bound_child)
             out[key] = child_nodes
         else:
             out[key] = _bind_value(value, data, item=item)
+    if ntype == "image":
+        out["src"] = _bind_image_src(image_ref)
     if tone_override is not None:
         out["tone"] = tone_override
     return out
 
 
-def _bind_repeat(node: dict, data: dict, *, depth: int, counter: _NodeCounter) -> dict:
+def _bind_image_src(image_ref: dict | None) -> str:
+    """§24: build the same-origin ``/api/ni/items/{id}/image?v=<ts>`` src or raise.
+
+    ``image_ref`` MUST be a shape-checked dict when this fires (an image node is in
+    the scene and the run reached bind). Missing / malformed = NIError('image_missing');
+    the run fails, last_good keeps rendering pixels + everything else.
+    """
+    if not isinstance(image_ref, dict):
+        raise NIError("image_missing", "no image bytes to bind")
+    item_id = image_ref.get("item_id")
+    created_at = image_ref.get("created_at")
+    if not (isinstance(item_id, str) and item_id
+            and isinstance(created_at, str) and created_at):
+        raise NIError("image_missing", "image ref missing item_id or created_at")
+    return f"/api/ni/items/{item_id}/image?v={created_at}"
+
+
+def _bind_repeat(node: dict, data: dict, *, depth: int, counter: _NodeCounter,
+                 image_ref: dict | None = None) -> dict:
     """Expand a repeat into a stack of template clones bound to each list element.
 
     A ``when`` rule that hides a template clone drops that clone from the expansion
@@ -1914,7 +2072,8 @@ def _bind_repeat(node: dict, data: dict, *, depth: int, counter: _NodeCounter) -
     template = node["template"]
     children: list[dict] = []
     for entry in items[:max_n]:  # bounded by max_n <= _MAX_REPEAT_MAX
-        bound_child = _bind_node(template, data, depth=depth + 1, item=entry, counter=counter)
+        bound_child = _bind_node(template, data, depth=depth + 1, item=entry,
+                                 counter=counter, image_ref=image_ref)
         if bound_child is not None:
             children.append(bound_child)
     return {"type": "stack", "dir": "v", "gap": "sm", "children": children}
@@ -2218,11 +2377,6 @@ class NIStore:
         validated = validate_spec(spec)
         if origin not in _REVISION_ORIGINS:
             raise ValueError(f"origin must be one of {sorted(_REVISION_ORIGINS)}")
-        # H3 (audit 2026-09-09): seed empty history so a scene whose spark or delta_prev
-        # binds to ``history.<name>`` can render the preview (mirrors C1 first-run seeding).
-        bound = bind_scene(validated["scene"], preview_payload,
-                           history=_seed_history(validated))  # proves the preview renders
-        assert isinstance(bound, dict), "bind_scene must return a dict"
         count = self._conn.execute("SELECT COUNT(*) FROM ni_items;").fetchone()[0]
         if int(count) >= _MAX_ITEMS:
             raise ValueError(f"item limit reached ({_MAX_ITEMS})")
@@ -2230,6 +2384,16 @@ class NIStore:
             item_id = str(uuid.uuid4())
         else:
             assert isinstance(item_id, str) and item_id, "item_id must be a non-empty string"
+        # §24: an image node in the scene needs a bound src for the preview too.
+        # No image slot exists yet at draft time, so pass a ``preview`` version
+        # tag — the serving route 404s until a real run seals bytes, and the
+        # rendered draft simply shows the placeholder from the client renderer.
+        # H3 (audit 2026-09-09): seed empty history so a scene whose spark or delta_prev
+        # binds to ``history.<name>`` can render the preview (mirrors C1 first-run seeding).
+        bound = bind_scene(validated["scene"], preview_payload,
+                           history=_seed_history(validated),
+                           image_ref=_preview_image_ref(validated, item_id))  # proves the preview renders
+        assert isinstance(bound, dict), "bind_scene must return a dict"
         interval = self._clamp_interval(validated)
         nonce, ciphertext = self._seal_item(item_id, validated)
         self._conn.execute(
@@ -2390,6 +2554,68 @@ class NIStore:
         aad = f"ni_snapshot:{item_id}:{slot}".encode()
         body = json.loads(self._aes.decrypt(bytes(row[0]), bytes(row[1]), aad).decode("utf-8"))
         return {"payload": body, "ok": bool(row[2]), "created_at": str(row[3])}
+
+    def write_image_snapshot(self, item_id: str, image_bytes: bytes,
+                              image_format: str) -> None:
+        """§24: seal raw raster bytes + format under the ``image`` slot.
+
+        Bytes ride the ciphertext BLOB directly (no JSON round-trip) — the format
+        string is a short ASCII slug prepended with a NUL separator so the reader
+        can split them without a JSON envelope + 33% base64 tax. AAD is the same
+        ``ni_snapshot:<item_id>:image`` used by every other snapshot, so the sealed
+        payload is bound to this slot and item.
+        """
+        assert item_id, "item id required"
+        assert isinstance(image_bytes, (bytes, bytearray)), "image_bytes required"
+        assert image_format in _IMAGE_MEDIA_BY_FORMAT, "sniffed format required"
+        body = image_format.encode("ascii") + b"\x00" + bytes(image_bytes)
+        nonce = os.urandom(_NONCE_BYTES)
+        aad = f"ni_snapshot:{item_id}:image".encode()
+        ciphertext = self._aes.encrypt(nonce, body, aad)
+        self._conn.execute(
+            "INSERT INTO ni_snapshots (item_id, slot, nonce, ciphertext, ok) "
+            "VALUES (?, ?, ?, ?, ?) ON CONFLICT (item_id, slot) DO UPDATE SET "
+            "nonce = excluded.nonce, ciphertext = excluded.ciphertext, "
+            "ok = excluded.ok, created_at = now();",
+            [item_id, "image", nonce, ciphertext, True],
+        )
+
+    def read_image_snapshot(self, item_id: str) -> dict | None:
+        """§24: return ``{bytes, format, created_at}`` for the sealed image, or None.
+
+        Mirrors ``write_image_snapshot``; a corrupt sealed slot (decrypt failure
+        or malformed body) returns None so the serving route degrades to 404
+        instead of leaking a raw crypto exception past the route boundary.
+        """
+        assert item_id, "item id required"
+        row = self._conn.execute(
+            "SELECT nonce, ciphertext, created_at FROM ni_snapshots "
+            "WHERE item_id = ? AND slot = 'image';",
+            [item_id],
+        ).fetchone()
+        if row is None:
+            return None
+        aad = f"ni_snapshot:{item_id}:image".encode()
+        try:
+            plain = self._aes.decrypt(bytes(row[0]), bytes(row[1]), aad)
+        except Exception:  # corrupt sealed slot — never leak the crypto class
+            return None
+        sep = plain.find(b"\x00")
+        if sep <= 0 or sep > 16:
+            return None
+        try:
+            fmt = plain[:sep].decode("ascii")
+        except UnicodeDecodeError:
+            return None
+        if fmt not in _IMAGE_MEDIA_BY_FORMAT:
+            return None
+        # Phase 4c audit 2026-09-11 (finding #3): normalize via _to_utc(...).isoformat()
+        # so the ``?v=`` fragment never contains a space. DuckDB's ``str(TIMESTAMP)`` uses
+        # "YYYY-MM-DD HH:MM:SS…" (space separator); the client's IMAGE_SRC_RE at
+        # web/src/lib/ni/scene.ts only permits [\w.:+-] after ``?v=``, so a space would
+        # fail the shared-src validator on a prior-image re-render.
+        return {"bytes": plain[sep + 1:], "format": fmt,
+                "created_at": _to_utc(row[2]).isoformat()}
 
     def delete_snapshot(self, item_id: str, slot: str) -> None:
         """Drop ONE (item_id, slot) row. Idempotent — a missing slot is a no-op.
@@ -2999,6 +3225,7 @@ def run_item(store: NIStore, item_id: str, *, gateway_mod, secrets_store,
     started = time.monotonic()
     history: dict = {}
     raw_excerpt = ""  # §14 L1 needs a bounded excerpt of the fetched payload on failure
+    image_blob: dict | None = None  # §24: sealed only after a successful run
     try:
         # History (§11) is loaded ONCE per run, PRE-append: the binder + delta_prev see
         # the last completed run's series so a delta compares against the previous
@@ -3009,8 +3236,8 @@ def run_item(store: NIStore, item_id: str, *, gateway_mod, secrets_store,
         llm_call = None
         if _spec_has_llm_stage(spec):
             llm_call = _make_llm_call(store, spec, gateway_mod)
-        payload = _fetch_source(spec, item_id, gateway_mod, secrets_store,
-                                schedules_store, store, kb)
+        payload, image_blob = _fetch_source(spec, item_id, gateway_mod, secrets_store,
+                                             schedules_store, store, kb)
         raw_excerpt = _payload_excerpt_for_repair(payload)
         outputs = run_pipeline(spec.get("pipeline") or [], payload,
                                 history=history, llm_call=llm_call)
@@ -3031,7 +3258,8 @@ def run_item(store: NIStore, item_id: str, *, gateway_mod, secrets_store,
     # prior code didn't wrap (a raw ValueError from a serialize step used to skip the
     # ni_runs row entirely — audit finding G).
     try:
-        return _finalize_run(store, item, spec, outputs, started, history=history)
+        return _finalize_run(store, item, spec, outputs, started, history=history,
+                             image_blob=image_blob)
     except NIError as exc:
         _seal_last_failure_snapshot(store, item["id"], exc, raw_excerpt)
         _maybe_repair_l1(store, item, gateway_mod, raw_excerpt, exc,
@@ -3047,7 +3275,8 @@ def run_item(store: NIStore, item_id: str, *, gateway_mod, secrets_store,
 
 
 def _finalize_run(store: NIStore, item: dict, spec: dict, outputs: dict,
-                  started: float, *, history: dict) -> dict:
+                  started: float, *, history: dict,
+                  image_blob: dict | None = None) -> dict:
     """Contract-check (if applicable), bind, append history, write snapshots, record
     run + transition, THEN evaluate alerts (order matters — see M1a below).
 
@@ -3084,7 +3313,9 @@ def _finalize_run(store: NIStore, item: dict, spec: dict, outputs: dict,
             _handle_failure(store, item, exc, started, contract_ok=False)
             raise exc
     try:
-        bound = bind_scene(spec["scene"], outputs, history=history)
+        image_ref = _resolve_image_ref(store, item["id"], image_blob)
+        bound = bind_scene(spec["scene"], outputs, history=history,
+                            image_ref=image_ref)
         _enforce_bind_types(spec["scene"], bound)
         _enforce_payload_size(bound)
         _append_history_series(store, item, outputs, history)
@@ -3092,6 +3323,15 @@ def _finalize_run(store: NIStore, item: dict, spec: dict, outputs: dict,
         _handle_failure(store, item, exc, started, contract_ok=contract_ok)
         raise
     duration_ms = int((time.monotonic() - started) * 1000)
+    # §24: seal this run's image bytes BEFORE latest/last_good so the served image
+    # is consistent with the bound src. A failed bind above skips the seal, so
+    # last_good + the prior image slot keep rendering (pixel last-good semantics).
+    if image_blob is not None:
+        try:
+            store.write_image_snapshot(item["id"], image_blob["bytes"],
+                                        image_blob["format"])
+        except Exception:  # bookkeeping: never mask a completed run over an image write
+            log.warning("ni image seal skipped: item=%s", item["id"])
     store.write_snapshot(item["id"], "latest", bound, ok=True)
     store.write_snapshot(item["id"], "last_good", bound, ok=True)
     store.clear_failures(item["id"], "ok")
@@ -3113,6 +3353,43 @@ def _finalize_run(store: NIStore, item: dict, spec: dict, outputs: dict,
     repaired = _finalize_l1_trial_notice(store, item)
     return {"status": "ok", "duration_ms": duration_ms,
             "alerts": fired, "repaired": repaired}
+
+
+def _preview_image_ref(spec: dict, item_id: str) -> dict | None:
+    """§24: return a preview-only image_ref when the scene contains an image node.
+
+    A drafted item has no image slot yet; the preview src points at the same
+    route the future real image will serve from (``?v=preview`` is the version
+    tag). None when the scene has no image node — the binder skips injection.
+    """
+    assert isinstance(spec, dict) and item_id, "spec + id required"
+    scene = spec.get("scene")
+    if not isinstance(scene, dict):
+        return None
+    if not _scene_contains_image(scene):
+        return None
+    return {"item_id": item_id, "created_at": "preview"}
+
+
+def _resolve_image_ref(store: NIStore, item_id: str,
+                        image_blob: dict | None) -> dict | None:
+    """§24: build the binder's image_ref for this run.
+
+    When ``image_blob`` is present (a successful http_image fetch this run) we
+    generate a fresh ISO timestamp for the bound ``?v=`` — the src always
+    cache-busts on a new image. When no blob but a prior image slot exists, reuse
+    its ``created_at`` so a re-render (contract-only run of an already-imaged
+    item) still binds a valid src. Otherwise return None; the scene either has no
+    image node (fine) or an image node with no bytes yet (``_bind_image_src``
+    raises ``image_missing`` so the run fails cleanly).
+    """
+    assert store is not None and item_id, "store + id required"
+    if isinstance(image_blob, dict):
+        return {"item_id": item_id, "created_at": datetime.now(UTC).isoformat()}
+    prior = store.read_image_snapshot(item_id)
+    if isinstance(prior, dict):
+        return {"item_id": item_id, "created_at": str(prior.get("created_at") or "")}
+    return None
 
 
 def _seed_history(spec: dict) -> dict:
@@ -3325,6 +3602,8 @@ def _enforce_bind_types(scene: dict, bound: dict) -> None:
             _enforce_spark_points(node)
         elif ntype == "gauge":
             _enforce_gauge_bounds(node)
+        elif ntype == "image":
+            _enforce_image_shape(node)
         pending.extend(node.get("children") or [])  # bounded by _MAX_SCENE_NODES
     raise NIError("bind_type", "bound tree exceeded traversal bound")
 
@@ -3367,6 +3646,23 @@ def _enforce_spark_points(node: dict) -> None:
                 raise NIError("bind_type", "spark.points.t must be a string when present")
             continue
         raise NIError("bind_type", "spark.points needs numbers or {t,v} with numeric v")
+
+
+def _enforce_image_shape(node: dict) -> None:
+    """Post-bind check for §24 image: ``src`` MUST be the same-origin item route +
+    ``alt`` is a string ≤ _MAX_IMAGE_ALT. The client validator refuses anything
+    else, so this is the server-side mirror of that refusal.
+    """
+    assert isinstance(node, dict), "node must be a dict"
+    src = node.get("src")
+    if not isinstance(src, str) or not src.startswith("/api/ni/items/"):
+        raise NIError("bind_type",
+                      "image.src must be an /api/ni/items/{id}/image route")
+    if "/image?v=" not in src:
+        raise NIError("bind_type", "image.src must carry a version query")
+    alt = node.get("alt")
+    if not isinstance(alt, str) or len(alt) > _MAX_IMAGE_ALT:
+        raise NIError("bind_type", f"image.alt must be a string <= {_MAX_IMAGE_ALT}")
 
 
 def _enforce_gauge_bounds(node: dict) -> None:
@@ -4216,8 +4512,15 @@ def _record_l2_failed(store: NIStore, item_id: str, started: float,
 # --- source dispatch ------------------------------------------------------
 
 def _fetch_source(spec: dict, item_id: str, gateway_mod, secrets_store,
-                  schedules_store, store: NIStore, kb: object | None) -> dict:
-    """Dispatch by source type — each returns the payload the pipeline consumes.
+                  schedules_store, store: NIStore,
+                  kb: object | None) -> tuple[dict, dict | None]:
+    """Dispatch by source type — return ``(payload, image_blob)``.
+
+    ``payload`` is the pipeline-consumed value. ``image_blob`` is ``None`` for every
+    source except ``http_image`` (§24); for that source it carries the sniffed
+    raster bytes + format so ``_finalize_run`` can seal them into the image slot
+    ONLY after the run succeeds (pixel last-good semantics — a failed fetch or
+    bind leaves the prior image serving).
 
     ``kb`` is the caller-provided knowledge-base handle (``app.state.kb`` at tick
     time). When absent, the ``internal.kb`` source raises ``NIError('kb_unavailable')``;
@@ -4228,17 +4531,21 @@ def _fetch_source(spec: dict, item_id: str, gateway_mod, secrets_store,
     source = spec.get("source") or {}
     stype = source.get("type")
     if stype == "http_json":
-        return _fetch_http_json(source, item_id, secrets_store)
+        return _fetch_http_json(source, item_id, secrets_store), None
     if stype == "http_page":
-        return _fetch_http_page(source, item_id, secrets_store)
+        return _fetch_http_page(source, item_id, secrets_store), None
+    if stype == "http_image":
+        return _fetch_http_image(source, item_id, secrets_store)
     if stype == "model":
-        return _fetch_model(spec, source, gateway_mod, store)
+        return _fetch_model(spec, source, gateway_mod, store), None
     if stype == "internal.schedule":
-        return _fetch_internal_schedule(source, schedules_store)
+        return _fetch_internal_schedule(source, schedules_store), None
     if stype == "internal.kb":
-        return _fetch_internal_kb(source, kb)
+        return _fetch_internal_kb(source, kb), None
+    if stype == "internal.ni":
+        return _fetch_internal_ni(source, store), None
     if stype == "mcp_tool":
-        return _fetch_mcp(source, store)
+        return _fetch_mcp(source, store), None
     raise NIError("source_bad_type", str(stype))
 
 
@@ -4324,6 +4631,167 @@ def _fetch_http_page(source: dict, item_id: str, secrets_store) -> dict:
         return jailrun.run_extractor(bytes(body), url_hint=url)
     except jailrun.JailError as exc:
         raise NIError("extract_jail", exc.reason) from None
+
+
+def _fetch_http_image(source: dict, item_id: str,
+                       secrets_store) -> tuple[dict, dict]:
+    """§24 http_image: netguard-guarded raster fetch + magic-byte sniff allowlist.
+
+    Inherits the http_json credential-exfiltration guard verbatim: when ANY header
+    rides (secret or literal), ``allow_redirects=False`` is threaded through so a
+    3xx never re-sends the header to a rewritten host. The served Content-Type is
+    IGNORED for trust (attacker-controlled) — we sniff the first bytes against the
+    PNG / JPEG / GIF / WebP magic. Anything else — including SVG, which is
+    scriptable — raises ``NIError('image_type')``.
+
+    Returns ``(pipeline_payload, image_blob)``: the payload is metadata only
+    (``{"image": {"bytes_len", "format"}}`` — pixels never enter the pipeline);
+    the blob is the raw bytes + sniffed format the caller seals into the image
+    slot on a successful run.
+    """
+    from . import netguard  # lazy: keep netguard off ni's import graph edges
+
+    url = source["url"]
+    parsed = urlparse(url)
+    host = parsed.hostname or ""
+    scheme = (parsed.scheme or "").lower()
+    if not host:
+        raise NIError("source_bad_url", "no host")
+    resolved_headers: dict[str, str] = {}
+    for name, value in (source.get("headers") or {}).items():  # bounded by _MAX_HEADERS
+        if isinstance(value, dict) and "$secret" in value:
+            resolved_headers[name] = _load_credential(
+                secrets_store, value["$secret"], host,
+                item_id=item_id, request_scheme=scheme,
+            )
+        elif isinstance(value, str):
+            resolved_headers[name] = value
+    has_headers = bool(resolved_headers)
+    try:
+        got = netguard.safe_fetch_image(
+            url, headers=resolved_headers or None,
+            allow_redirects=not has_headers,
+            deadline_seconds=_IMAGE_FETCH_DEADLINE_S,
+        )
+    except netguard.FetchError as exc:
+        raise NIError("fetch_failed", exc.__class__.__name__) from None
+    body = got.get("content") if isinstance(got, dict) else None
+    if not isinstance(body, (bytes, bytearray)):
+        raise NIError("fetch_failed", "no bytes")
+    raw = bytes(body)
+    fmt = _sniff_image_format(raw)
+    if fmt is None:
+        raise NIError("image_type", "unrecognized raster magic")
+    payload = {"image": {"bytes_len": len(raw), "format": fmt}}
+    return payload, {"bytes": raw, "format": fmt}
+
+
+def _sniff_image_format(body: bytes) -> str | None:
+    """§24 magic-byte allowlist → format slug. WebP needs a RIFF ... WEBP framing
+    check (bytes 0..3 == 'RIFF', 8..11 == 'WEBP'); the rest match a fixed prefix.
+    Returns None on any mismatch — callers refuse the run cleanly.
+    """
+    assert isinstance(body, (bytes, bytearray)), "body must be bytes"
+    for magic, fmt in _IMAGE_MAGIC:  # bounded: 4 tuples
+        if body.startswith(magic):
+            return fmt
+    if len(body) >= 12 and body[:4] == b"RIFF" and body[8:12] == b"WEBP":
+        return "webp"
+    return None
+
+
+def _fetch_internal_ni(source: dict, store: NIStore) -> dict:
+    """§25 internal.ni composite: for each alias, look up the referenced item and
+    return its title / state / payload_at / decrypted history slot.
+
+    Depth-1 runtime guard (§25): a referenced item whose own source is
+    ``internal.ni`` raises ``NIError('composite_depth')`` — a later user edit
+    could otherwise re-create a cycle even after create-time validation passed.
+    A missing / never-run referenced item does NOT fail the run (composites
+    degrade — the alias yields empty history + ``state='missing'``, matching
+    §25's "composites degrade, they don't break").
+    """
+    assert store is not None, "store required for composite lookup"
+    items = source.get("items") or {}
+    out: dict[str, dict] = {}
+    for alias, target_id in items.items():  # bounded by _MAX_COMPOSITE_ITEMS
+        assert isinstance(alias, str) and alias, "alias required (validator invariant)"
+        if not isinstance(target_id, str) or not target_id:
+            raise NIError("composite_bad_ref", f"{alias}: missing id")
+        target = store.get_item(target_id)
+        if target is None:
+            out[alias] = {"title": "", "state": "missing",
+                          "payload_at": None, "history": {}}
+            continue
+        target_source = (target["spec"].get("source") or {}).get("type")
+        if target_source == "internal.ni":
+            raise NIError("composite_depth",
+                          f"{alias}: referenced item is itself internal.ni")
+        history = _read_composite_history(store, target_id)
+        latest = store.read_snapshot(target_id, "latest")
+        payload_at = latest["created_at"] if isinstance(latest, dict) else None
+        out[alias] = {
+            "title": str(target["spec"].get("title") or ""),
+            "state": str(target["state"]),
+            "payload_at": payload_at,
+            "history": history,
+        }
+    return out
+
+
+def _read_composite_history(store: NIStore, target_id: str) -> dict:
+    """Read the history slot of a referenced item; return ``{}`` on absent / corrupt.
+
+    History values are lists of ``{t, v}`` (§11) — the existing aggregate ops
+    (``sum/avg/min/max/count`` with key ``"v"``) and ``spark`` bind them directly,
+    so cross-item math needs no new pipeline vocabulary (§25).
+    """
+    assert store is not None and target_id, "store + id required"
+    try:
+        snap = store.read_snapshot(target_id, "history")
+    except Exception:  # corrupt sealed slot on the OTHER item — degrade gracefully
+        return {}
+    if not isinstance(snap, dict):
+        return {}
+    body = snap.get("payload")
+    return body if isinstance(body, dict) else {}
+
+
+def check_composite_depth(store: NIStore, spec: dict, *,
+                            updating_item_id: str | None = None) -> None:
+    """§25 create/update guard: refuse when any referenced item's own source is
+    ``internal.ni`` (composites of composites). Route/tool callers run this after
+    ``validate_spec`` so the sealed store lookup happens once the shape is known
+    to be a composite. NIError on any violation; the tool layer maps it to the
+    caller's normal error surface.
+
+    Phase 4c audit 2026-09-11 (finding #2): ``updating_item_id`` — when set,
+    refuse any target_id equal to it. A self-reference would otherwise slip past
+    (get_item returns the CURRENT sealed spec, whose source type has not been
+    replaced yet on the read-modify-write path) and land on the runtime guard
+    only.
+    """
+    assert store is not None and isinstance(spec, dict), "store + spec required"
+    assert updating_item_id is None or isinstance(updating_item_id, str), \
+        "updating_item_id must be a string or None"
+    source = spec.get("source") or {}
+    if source.get("type") != "internal.ni":
+        return
+    items = source.get("items") or {}
+    for alias, target_id in items.items():  # bounded by _MAX_COMPOSITE_ITEMS
+        assert isinstance(alias, str), "alias must be a string (validator invariant)"
+        if not isinstance(target_id, str) or not target_id:
+            continue
+        if updating_item_id is not None and target_id == updating_item_id:
+            raise NIError("composite_depth",
+                          f"{alias}: refuses to reference the item being updated")
+        target = store.get_item(target_id)
+        if target is None:
+            continue
+        target_source = (target["spec"].get("source") or {}).get("type")
+        if target_source == "internal.ni":
+            raise NIError("composite_depth",
+                          f"{alias}: referenced item is itself internal.ni")
 
 
 def _fetch_internal_kb(source: dict, kb: object | None) -> dict:
@@ -4475,13 +4943,25 @@ def _seal_last_failure_snapshot(store: NIStore, item_id: str, exc: NIError,
     repair. Writes are best-effort: a snapshot failure must NEVER shadow the real
     failure the tick is already recording (mirrors the ``latest`` marker in
     ``_handle_failure``).
+
+    Phase 4c audit 2026-09-11 (finding #6): when the item's source is ``internal.*``
+    the excerpt is skipped (empty string) — internal.ni carries OTHER cards' data
+    and internal.kb carries library content, neither of which the L2 prompt has
+    consent to send. Class + detail still seal (they are host-free and describe
+    THIS item's failure shape); the L2 prompt for such items renders class+detail
+    only.
     """
     assert store is not None and item_id and exc is not None, "args required"
     assert isinstance(raw_excerpt, str), "raw excerpt must be a string"
     if exc.kind not in _L1_SPEC_SHAPE_CLASSES:
         return
+    item = store.get_item(item_id)
+    source_type = ""
+    if isinstance(item, dict):
+        source_type = str((item["spec"].get("source") or {}).get("type") or "")
+    excerpt = "" if source_type.startswith("internal.") else raw_excerpt
     payload = {
-        "excerpt": raw_excerpt[:_MAX_L1_PAYLOAD_BYTES],
+        "excerpt": excerpt[:_MAX_L1_PAYLOAD_BYTES],
         "class": exc.kind[:_MAX_STATUS],
         "detail": (exc.detail or "")[:500],
         "ts": datetime.now(UTC).isoformat(),

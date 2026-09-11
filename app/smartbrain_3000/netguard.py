@@ -46,6 +46,10 @@ _ALLOWED_CT = ("text/", "application/json")
 # with a larger cap since documents are bigger than web pages.
 _INGEST_CT = ("text/", "application/json", "application/pdf", "application/xml", "application/octet-stream")
 _INGEST_MAX_BYTES = 25_000_000
+# §24 http_image: 4 MB cap on the sealed raster body. The sniffed magic bytes
+# gate the actual raster shape; content-type is attacker-controlled and ignored
+# for trust (an ``image/png`` header on non-PNG bytes still refuses the run).
+_IMAGE_MAX_BYTES = 4_000_000
 # Public-vault transport (subscribe-by-URL): archives are zips, but tree hosts
 # commonly serve them as generic binaries; manifests are JSON, but raw-file hosts
 # serve them as text/plain. Prefix match (str.startswith) covers charset suffixes.
@@ -399,6 +403,30 @@ def safe_fetch_page(url: str, headers: dict | None = None,
     got = _guarded_get(
         url, ("text/html", "application/xhtml+xml", "text/"),
         _MAX_BYTES, extra_headers=headers, allow_redirects=allow_redirects,
+        deadline_seconds=deadline_seconds,
+    )
+    return {"final_url": got["final_url"], "status": got["status"],
+            "content_type": got["content_type"], "content": got["content"]}
+
+
+def safe_fetch_image(url: str, headers: dict | None = None,
+                     allow_redirects: bool = True,
+                     deadline_seconds: float | None = None) -> dict:
+    """Guarded GET for the ``http_image`` NI source (§24) — raster bytes for sealing.
+
+    Same SSRF guard as every other fetcher, with the image content-type set
+    (``image/*``, plus ``application/octet-stream`` which raw-file hosts commonly
+    serve unknown image extensions as). 4 MB cap (§24), overall wall-clock deadline
+    against drip hosts (mirrors ``safe_fetch_page``). Returns ``{final_url, status,
+    content_type, content (bytes)}`` — the caller sniffs the magic bytes and refuses
+    anything but the §24 allowlist (PNG / JPEG / GIF / WebP), because the served
+    header is attacker-controlled and the sniffed type is what gets stored.
+    ``allow_redirects=False`` is threaded through when the NI caller attaches any
+    header (mirrors ``safe_fetch_json`` / ``safe_fetch_page``).
+    """
+    got = _guarded_get(
+        url, ("image/", "application/octet-stream"),
+        _IMAGE_MAX_BYTES, extra_headers=headers, allow_redirects=allow_redirects,
         deadline_seconds=deadline_seconds,
     )
     return {"final_url": got["final_url"], "status": got["status"],

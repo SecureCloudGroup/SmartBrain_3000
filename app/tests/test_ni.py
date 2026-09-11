@@ -1378,12 +1378,11 @@ def test_transform_delta_prev_compares_to_last_history_point() -> None:
 
 # --- Phase 2a: v2 scene nodes (§5 spark, gauge) --------------------------
 
-def test_reserved_scene_set_now_only_image_and_on_tap() -> None:
-    """§5 (v2): image + on_tap remain reserved; spark + gauge are accepted."""
-    for reserved in ("image", "on_tap"):
-        scene = {"type": "stack", "dir": "v", "gap": "sm", "children": [{"type": reserved}]}
-        with pytest.raises(ValueError, match="reserved"):
-            nimod.validate_scene(scene)
+def test_reserved_scene_set_now_only_on_tap() -> None:
+    """§24 (v4c): image un-reserved (pixel channel shipped); only on_tap stays reserved."""
+    scene = {"type": "stack", "dir": "v", "gap": "sm", "children": [{"type": "on_tap"}]}
+    with pytest.raises(ValueError, match="reserved"):
+        nimod.validate_scene(scene)
     # spark + gauge validate under the closed grammar (no exception).
     nimod.validate_scene({"type": "stack", "dir": "v", "gap": "sm", "children": [
         {"type": "spark", "points": {"$bind": "history.price"},
@@ -3308,3 +3307,361 @@ def test_post_ni_carrier_notices_neutralizes_forged_titles() -> None:
         assert not message.startswith("#")
     # The quoted leading-# variant survives as visibly quoted text, not a heading.
     assert "'#looks-like-heading'" in store.calls[1][1]
+
+
+# --- Phase 4c: §24 http_image + image scene node --------------------------
+
+_PNG_HEADER = b"\x89PNG\r\n\x1a\n"
+_JPEG_HEADER = b"\xff\xd8\xff\xe0\x00\x10JFIF"
+_GIF87 = b"GIF87a\x01\x00\x01\x00"
+_GIF89 = b"GIF89a\x01\x00\x01\x00"
+_WEBP_HEADER = b"RIFF\x24\x00\x00\x00WEBP"
+_SVG_BYTES = b'<svg xmlns="http://www.w3.org/2000/svg"><rect/></svg>'
+
+
+def _image_scene() -> dict:
+    """A minimal scene wrapping a single image node — the flagship §24 shape."""
+    return {"type": "stack", "dir": "v", "gap": "sm", "children": [
+        {"type": "image", "alt": "radar frame"},
+    ]}
+
+
+def _image_spec(**over) -> dict:
+    return _basic_spec(
+        source={"type": "http_image",
+                "url": "https://cdn.example.com/radar.png",
+                "headers": {}},
+        pipeline=[],
+        scene=_image_scene(),
+        **over,
+    )
+
+
+def test_http_image_source_shares_the_http_validator_verbatim() -> None:
+    """§24: http_image URL/header/credential rules are IDENTICAL to http_json.
+
+    Spot-check the shared §3 refusals: {{param:}} in the authority, an auth-shaped
+    literal header, and a $secret ref without the ``ni:`` prefix all refuse for
+    http_image exactly like http_json.
+    """
+    bad_url = _image_spec()
+    bad_url["source"]["url"] = "https://{{param:host}}/x"
+    with pytest.raises(ValueError, match="path or query"):
+        nimod.validate_spec(bad_url)
+    literal_auth = _image_spec()
+    literal_auth["source"]["headers"] = {"Authorization": "Bearer token"}
+    with pytest.raises(ValueError, match="auth-shaped"):
+        nimod.validate_spec(literal_auth)
+    bad_secret = _image_spec()
+    bad_secret["source"]["headers"] = {"X-Api-Key": {"$secret": "vault:x:y"}}
+    with pytest.raises(ValueError, match="ni:"):
+        nimod.validate_spec(bad_secret)
+
+
+def test_image_sniff_accepts_each_magic_and_refuses_content_type_lies() -> None:
+    """§24 sniff matrix: each accepted magic returns the format; a lying Content-Type
+    on non-magic bytes (or SVG) refuses cleanly with class ``image_type``."""
+    assert nimod._sniff_image_format(_PNG_HEADER + b"rest") == "png"
+    assert nimod._sniff_image_format(_JPEG_HEADER + b"rest") == "jpeg"
+    assert nimod._sniff_image_format(_GIF87 + b"x") == "gif"
+    assert nimod._sniff_image_format(_GIF89 + b"x") == "gif"
+    assert nimod._sniff_image_format(_WEBP_HEADER + b"VP8") == "webp"
+    # A pretending-to-be-PNG body refuses; SVG (scriptable) refuses.
+    assert nimod._sniff_image_format(b"not-really-png") is None
+    assert nimod._sniff_image_format(_SVG_BYTES) is None
+
+
+def test_fetch_http_image_returns_metadata_and_bytes(monkeypatch) -> None:
+    """§24: the pipeline sees {'image': {bytes_len, format}} only; raw bytes ride
+    the image_blob side channel so ``_finalize_run`` can seal them on success."""
+    from smartbrain_3000 import netguard
+
+    body = _PNG_HEADER + b"\x00" * 32
+    monkeypatch.setattr(netguard, "safe_fetch_image", lambda *_a, **_k: {
+        "final_url": "https://cdn.example.com/radar.png", "status": 200,
+        "content_type": "image/png", "content": body,
+    })
+    payload, blob = nimod._fetch_http_image(
+        {"type": "http_image", "url": "https://cdn.example.com/radar.png",
+         "headers": {}},
+        item_id="itemA", secrets_store=None,
+    )
+    assert payload == {"image": {"bytes_len": len(body), "format": "png"}}
+    assert blob["format"] == "png" and blob["bytes"] == body
+
+
+def test_fetch_http_image_refuses_bad_magic(monkeypatch) -> None:
+    """§24: content-type says image/png, bytes are SVG → NIError('image_type')."""
+    from smartbrain_3000 import netguard
+
+    monkeypatch.setattr(netguard, "safe_fetch_image", lambda *_a, **_k: {
+        "final_url": "https://cdn.example.com/x.png", "status": 200,
+        "content_type": "image/png", "content": _SVG_BYTES,
+    })
+    with pytest.raises(nimod.NIError) as excinfo:
+        nimod._fetch_http_image(
+            {"type": "http_image", "url": "https://cdn.example.com/x.png",
+             "headers": {}},
+            item_id="itemA", secrets_store=None,
+        )
+    assert excinfo.value.kind == "image_type"
+
+
+def test_image_scene_node_shape_and_source_context() -> None:
+    """§24: image node accepts {type, alt, when?}; refuses src; requires http_image."""
+    ok = _image_spec()
+    nimod.validate_spec(ok)  # passes
+    with_src = _image_spec()
+    with_src["scene"]["children"][0]["src"] = "/malicious"
+    with pytest.raises(ValueError, match="unknown keys"):
+        nimod.validate_spec(with_src)
+    long_alt = _image_spec()
+    long_alt["scene"]["children"][0]["alt"] = "x" * (nimod._MAX_IMAGE_ALT + 1)
+    with pytest.raises(ValueError, match="alt"):
+        nimod.validate_spec(long_alt)
+    # An image node with a non-http_image source is refused up front — pixels
+    # only ever come from the item's OWN image slot (§24).
+    wrong_source = _basic_spec(
+        source={"type": "model", "instruction": "hi"},
+        scene=_image_scene(),
+    )
+    with pytest.raises(ValueError, match="http_image"):
+        nimod.validate_spec(wrong_source)
+
+
+def test_image_bind_exact_src_and_enforcer_mirrors_it() -> None:
+    """§24: the binder injects the exact same-origin src; the enforcer refuses any
+    src that doesn't start with /api/ni/items/... — client parity."""
+    scene = _image_scene()
+    bound = nimod.bind_scene(scene, {}, image_ref={"item_id": "abc",
+                                                      "created_at": "2026-09-11T00:00:00+00:00"})
+    node = bound["children"][0]
+    assert node["src"] == "/api/ni/items/abc/image?v=2026-09-11T00:00:00+00:00"
+    # Enforcer accepts the well-formed shape.
+    nimod._enforce_bind_types(scene, bound)
+    # A hand-rewritten src refuses.
+    bound["children"][0]["src"] = "https://attacker.example.com/pixel.png"
+    with pytest.raises(nimod.NIError, match="bind_type"):
+        nimod._enforce_bind_types(scene, bound)
+
+
+def test_read_image_snapshot_created_at_iso_never_has_a_space() -> None:
+    """Phase 4c audit 2026-09-11 (finding #3): DuckDB's default ``str(TIMESTAMP)``
+    is "YYYY-MM-DD HH:MM:SS.ffffff+ZZ" (space between date + time). The client
+    IMAGE_SRC_RE only permits [\\w.:+-] after ``?v=``, so a raw stringification
+    would fail on the prior-slot re-render branch. read_image_snapshot must
+    normalize the DuckDB row via _to_utc(...).isoformat() before returning.
+    """
+    store, _c, _k = _store()
+    iid = store.add_item(_image_spec(), {"image": {"bytes_len": 0, "format": "png"}})
+    store.write_image_snapshot(iid, _PNG_HEADER + b"pixels", "png")
+    snap = store.read_image_snapshot(iid)
+    assert isinstance(snap, dict) and snap["created_at"], "snapshot must carry created_at"
+    assert " " not in snap["created_at"], \
+        f"created_at must be ISO-8601 with 'T' separator: {snap['created_at']!r}"
+    assert "T" in snap["created_at"], "created_at must include ISO 'T' separator"
+
+
+# Phase 4c audit 2026-09-11 (finding #3): COPIED VERBATIM from
+# web/src/lib/ni/scene.ts (search IMAGE_SRC_RE). Both sides must move together —
+# the server emits ``?v=`` values that this regex accepts (fresh isoformat,
+# prior-slot normalized, and the "preview" placeholder). Change one, change both.
+_IMAGE_SRC_RE = r"^/api/ni/items/[A-Za-z0-9-]+/image(\?v=[\w.:+-]*)?$"
+
+
+def test_image_src_regex_parity_covers_every_emitted_v_shape() -> None:
+    """Phase 4c audit 2026-09-11 (finding #3): freeze the shared vector — every
+    ``?v=`` shape the server EMITS must match the client's IMAGE_SRC_RE. Three
+    shapes exist today: a fresh ``datetime.now(UTC).isoformat()`` (microseconds
+    + offset), the normalized prior-slot value read out of read_image_snapshot,
+    and the literal ``preview`` placeholder written at draft time. If any of
+    these ever fails the client regex the image node stops rendering silently.
+    """
+    import re
+    from datetime import UTC
+    from datetime import datetime as _dt
+
+    client_re = re.compile(_IMAGE_SRC_RE)
+    store, _c, _k = _store()
+    iid = store.add_item(_image_spec(), {"image": {"bytes_len": 0, "format": "png"}})
+    # Shape 1: fresh isoformat with microseconds + offset (the successful-run branch).
+    fresh = _dt.now(UTC).isoformat()
+    src_fresh = f"/api/ni/items/{iid}/image?v={fresh}"
+    # Shape 2: read_image_snapshot's normalized form after a real seal.
+    store.write_image_snapshot(iid, _PNG_HEADER + b"pixels", "png")
+    prior = store.read_image_snapshot(iid)
+    assert isinstance(prior, dict), "seal must round-trip"
+    src_prior = f"/api/ni/items/{iid}/image?v={prior['created_at']}"
+    # Shape 3: the draft-time preview placeholder.
+    src_preview = f"/api/ni/items/{iid}/image?v=preview"
+    for src in (src_fresh, src_prior, src_preview):
+        assert client_re.match(src), f"client IMAGE_SRC_RE rejects server src: {src!r}"
+
+
+def test_run_item_seals_image_and_last_good_survives_failure(monkeypatch) -> None:
+    """§24 last-good semantics for pixels: a successful run seals the image slot
+    ALONGSIDE latest; a subsequent failed fetch leaves the prior image serving."""
+    from smartbrain_3000 import netguard
+
+    store, conn, key = _store()
+    secrets, schedules = SecretStore(conn, key), ScheduleStore(conn, key)
+    iid = store.add_item(_image_spec(), {"image": {"bytes_len": 0, "format": "png"}})
+    store.set_state(iid, "commissioning")
+
+    good_body = _PNG_HEADER + b"good"
+    monkeypatch.setattr(netguard, "safe_fetch_image", lambda *_a, **_k: {
+        "final_url": "u", "status": 200, "content_type": "image/png",
+        "content": good_body,
+    })
+    nimod.run_item(store, iid, gateway_mod=_FakeGateway(), secrets_store=secrets,
+                   schedules_store=schedules)
+    sealed = store.read_image_snapshot(iid)
+    assert sealed is not None and sealed["format"] == "png"
+    assert sealed["bytes"] == good_body
+
+    # A subsequent fetch failure leaves the prior sealed image intact — a
+    # runtime failure never overwrites the image slot (pixel last-good).
+    class _Fail(Exception):
+        pass
+
+    def boom(*_a, **_k):
+        raise netguard.FetchError("nope")
+    monkeypatch.setattr(netguard, "safe_fetch_image", boom)
+    with pytest.raises(nimod.NIError):
+        nimod.run_item(store, iid, gateway_mod=_FakeGateway(),
+                       secrets_store=secrets, schedules_store=schedules)
+    still = store.read_image_snapshot(iid)
+    assert still is not None and still["bytes"] == good_body
+
+
+# --- Phase 4c: §25 internal.ni composite ----------------------------------
+
+def _composite_source(**items: str) -> dict:
+    return {"type": "internal.ni", "items": dict(items)}
+
+
+def _composite_spec_using_alias(alias: str, target_id: str) -> dict:
+    scene = {"type": "stack", "dir": "v", "gap": "sm", "children": [
+        {"type": "text", "value": "{{" + alias + ".title}}",
+         "role": "title", "tone": "default", "size": "md"},
+    ]}
+    return _basic_spec(scene=scene, source=_composite_source(**{alias: target_id}))
+
+
+def test_internal_ni_source_validator_bounds_and_alias_rules() -> None:
+    """§25 shape: ≤5 items; alias keys follow output-name grammar + reserved refusals."""
+    ok = _composite_spec_using_alias("stock", "id-1")
+    nimod.validate_spec(ok)
+    too_many = _basic_spec(source=_composite_source(**{
+        f"a{i}": "id-x" for i in range(nimod._MAX_COMPOSITE_ITEMS + 1)
+    }))
+    with pytest.raises(ValueError, match="items"):
+        nimod.validate_spec(too_many)
+    reserved = _basic_spec(source=_composite_source(item="id-x"))
+    with pytest.raises(ValueError, match="reserved"):
+        nimod.validate_spec(reserved)
+    reserved_hist = _basic_spec(source=_composite_source(history="id-x"))
+    with pytest.raises(ValueError, match="reserved"):
+        nimod.validate_spec(reserved_hist)
+    empty_id = _basic_spec(source=_composite_source(stock=""))
+    with pytest.raises(ValueError, match="non-empty"):
+        nimod.validate_spec(empty_id)
+
+
+def test_composite_depth_refused_at_create_and_at_run() -> None:
+    """§25 depth-1: a composite whose reference is ANOTHER composite refuses at
+    the store guard AND at runtime (a later edit could recreate the cycle)."""
+    store, conn, key = _store()
+    inner_id = store.add_item(_basic_spec(), _fetching_preview())
+    outer_a_id = store.add_item(
+        _composite_spec_using_alias("stock", inner_id),
+        {"stock": {"title": "T", "state": "live", "payload_at": None, "history": {}}},
+    )
+    # Cycle candidate: outer_b references outer_a (itself internal.ni).
+    outer_b = _composite_spec_using_alias("aggregate", outer_a_id)
+    with pytest.raises(nimod.NIError) as excinfo:
+        nimod.check_composite_depth(store, outer_b)
+    assert excinfo.value.kind == "composite_depth"
+    # Runtime: even if the guard were bypassed the fetch itself refuses.
+    with pytest.raises(nimod.NIError) as run_exc:
+        nimod._fetch_internal_ni(
+            {"type": "internal.ni", "items": {"aggregate": outer_a_id}}, store,
+        )
+    assert run_exc.value.kind == "composite_depth"
+
+
+def test_composite_depth_refuses_self_reference_at_update_gate() -> None:
+    """Phase 4c audit 2026-09-11 (finding #2): an update that swings A's source
+    to internal.ni with the SAME item as a target must be refused at the tool
+    layer — the store lookup would otherwise see A's OLD source type and skip
+    the guard, leaving the runtime path as the sole (per-tick) defender.
+
+    Two assertions: check_composite_depth refuses when ``updating_item_id``
+    matches a target; the update_ni_item tool surfaces that refusal as ValueError.
+    """
+    ctx, _c, _k = _tool_ctx()
+    iid = _tool_call("create_ni_item", ctx, _tool_spec_args())["id"]
+    self_ref_spec = _composite_spec_using_alias("me", iid)
+    # Direct: the guard refuses only WITH the updating id threaded in.
+    nimod.check_composite_depth(ctx.ni, self_ref_spec)  # no updating id: passes
+    with pytest.raises(nimod.NIError) as exc:
+        nimod.check_composite_depth(ctx.ni, self_ref_spec, updating_item_id=iid)
+    assert exc.value.kind == "composite_depth"
+    # Tool: the update path threads the id and surfaces the refusal as ValueError.
+    with pytest.raises(ValueError, match="composite_depth"):
+        _tool_call("update_ni_item", ctx,
+                   {"item_id": iid,
+                    "source": {"type": "internal.ni", "items": {"me": iid}},
+                    "scene": self_ref_spec["scene"],
+                    "preview_payload": {
+                        "me": {"title": "T", "state": "live",
+                               "payload_at": None, "history": {}}}})
+
+
+def test_composite_runtime_payload_shape_and_missing_reference_degrades() -> None:
+    """§25 runtime: per alias {title, state, payload_at, history}; missing item ⇒
+    empty history + state 'missing' (never a run failure)."""
+    store, conn, key = _store()
+    referenced_id = store.add_item(_basic_spec(title="Price"), _fetching_preview())
+    # Seed a history slot on the referenced item so the composite has data.
+    store.write_snapshot(referenced_id, "history",
+                          {"priceLog": [{"t": "2026-09-11T00:00:00+00:00", "v": 3.0},
+                                         {"t": "2026-09-11T00:05:00+00:00", "v": 5.0}]},
+                          ok=True)
+    out = nimod._fetch_internal_ni(
+        {"type": "internal.ni",
+         "items": {"stock": referenced_id, "gone": "does-not-exist"}},
+        store,
+    )
+    assert out["stock"]["title"] == "Price"
+    assert out["stock"]["history"]["priceLog"][1]["v"] == 5.0
+    assert out["gone"] == {"title": "", "state": "missing",
+                            "payload_at": None, "history": {}}
+
+
+def test_composite_history_aggregate_via_run_pipeline() -> None:
+    """§25 promise: cross-item math works over history {t,v} lists with key 'v' —
+    no new pipeline vocabulary. A run_pipeline over the composite payload sums
+    the referenced item's price series."""
+    payload = {"stock": {
+        "title": "Price", "state": "live", "payload_at": None,
+        "history": {"priceLog": [{"t": "1", "v": 2.0}, {"t": "2", "v": 5.5}]},
+    }}
+    out = nimod.run_pipeline(
+        [{"op": "extract", "paths": {"points": "stock.history.priceLog"}},
+         {"op": "transform", "apply": [
+             {"fn": "sum", "field": "points", "key": "v", "as": "total"},
+         ]}],
+        payload,
+    )
+    assert out["total"] == 7.5
+
+
+def test_composite_capture_contract_over_composite_payload() -> None:
+    """§25: capture_contract handles list-of-dicts (history rows) — the shape line
+    reads ``rows[].v: number`` after an extract."""
+    outputs = {"rows": [{"t": "1", "v": 3.0}, {"t": "2", "v": 4.0}]}
+    contract = nimod.capture_contract(outputs)
+    assert contract["shape"]["rows[].v"] == "number"
+    ok, _ = nimod.check_contract(contract, outputs)
+    assert ok is True

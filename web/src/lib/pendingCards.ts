@@ -22,10 +22,17 @@ export function iconForTool(tool: string): IconName {
 //   http_json / http_page  → "Fetches: <url>"
 //   mcp_tool (§22)         → "MCP: <server label> → <tool>" (falls back to a generic
 //                             phrase when the caller didn't resolve a label yet)
+//   internal.ni (§25)      → "Combines: <title>, <title>" (falls back to "other cards"
+//                             when the caller hasn't threaded titles through yet)
 // Handles both an object (pending tiles) and a JSON string (history args_summary). A
 // params-substituted URL simply renders the template — that's fine; the template still
 // names the host. `arguments` themselves already render whole via fmtArgs.
-export function promotedLine(tool: string, args: unknown, mcpLabel?: string): string | null {
+export function promotedLine(
+  tool: string,
+  args: unknown,
+  mcpLabel?: string,
+  compositeTitles?: string[],
+): string | null {
   console.assert(typeof tool === "string", "promotedLine: tool is string");
   console.assert(args !== undefined, "promotedLine: args defined");
   const t = tool.toLowerCase();
@@ -45,6 +52,17 @@ export function promotedLine(tool: string, args: unknown, mcpLabel?: string): st
   const src = source as Record<string, unknown>;
   const url = src.url;
   if (typeof url === "string" && url.length > 0) return `Fetches: ${url}`;
+  // internal.ni (§25): the composite grants no new egress, so there's no host to
+  // name — instead, the consent surface names the CARDS this one depends on. The
+  // backend attaches their titles in alias order; the fallback keeps the card
+  // honest when the caller hasn't threaded titles through yet.
+  const sourceType = src.type;
+  if (sourceType === "internal.ni") {
+    const list = compositeTitles && compositeTitles.length > 0
+      ? compositeTitles.join(", ")
+      : "other cards";
+    return `Combines: ${list}`;
+  }
   // mcp_tool: name the SERVER (the backend attaches its human label to the pending
   // row) so the consent surface reads at a glance. Fallback keeps the card honest
   // when a caller hasn't threaded the label through yet.

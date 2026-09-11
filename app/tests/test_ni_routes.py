@@ -534,6 +534,143 @@ def test_notices_newest_first_and_ids_stable_monotonic(client: TestClient) -> No
     assert again == rows  # stable: the same rows answer with the same ids
 
 
+# --- Phase 4c: §24 image serve route --------------------------------------
+
+_PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+
+
+def _image_scene() -> dict:
+    return {"type": "stack", "dir": "v", "gap": "sm", "children": [
+        {"type": "image", "alt": "radar frame"},
+    ]}
+
+
+def _image_spec_body() -> dict:
+    return _spec_body(
+        source={"type": "http_image",
+                "url": "https://cdn.example.com/radar.png",
+                "headers": {}},
+        scene=_image_scene(),
+        preview_payload={"image": {"bytes_len": 0, "format": "png"}},
+    )
+
+
+def test_image_route_locked_returns_423(client: TestClient) -> None:
+    """§24: the serving route lives behind the standard 423 locked contract."""
+    assert client.get("/api/ni/items/anything/image").status_code == 423
+
+
+def test_image_route_404_when_absent(client: TestClient) -> None:
+    """§24: a draft item has no image slot yet; the route 404s cleanly."""
+    _unlock(client)
+    iid = _create_via_tool(client, **_image_spec_body())
+    r = client.get(f"/api/ni/items/{iid}/image")
+    assert r.status_code == 404
+
+
+def test_image_route_serves_sniffed_media_type_no_store(client: TestClient) -> None:
+    """§24: after sealing an image slot the route returns the SNIFFED type with
+    Cache-Control: no-store — never the served header, which is untrusted."""
+    _unlock(client)
+    iid = _create_via_tool(client, **_image_spec_body())
+    body = _PNG_MAGIC + b"\x00\x01\x02\x03pretend-pixels"
+    client.app.state.ni.write_image_snapshot(iid, body, "png")
+    r = client.get(f"/api/ni/items/{iid}/image")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("image/png")
+    assert r.headers["cache-control"] == "no-store"
+    # Phase 4c audit 2026-09-11 (finding #5): nosniff is the LOAD-BEARING polyglot
+    # defence — a PNG the sniffer accepted could still parse as HTML in a browser
+    # that ignores our declared Content-Type. The hardening middleware supplies
+    # the header globally; freezing it in this suite so a regression that
+    # short-circuits the middleware for this route fails LOUD.
+    assert r.headers["x-content-type-options"] == "nosniff"
+    assert r.content == body
+
+
+def test_update_ni_item_source_change_deletes_image_slot(
+    client: TestClient,
+) -> None:
+    """Phase 4c audit 2026-09-11 (finding #7): stale pixels must not survive a
+    source change — the re-consent point in the update tool clears the image
+    slot alongside setting the item back to commissioning. The route serves 404
+    until the next successful run seals fresh bytes.
+
+    Drives the tools chokepoint (real audited path) — approve a create_ni_item
+    with http_image, seal image bytes manually, approve an update that swings
+    the source elsewhere, and expect the image route to 404.
+    """
+    _unlock(client)
+    iid = _create_via_tool(client, **_image_spec_body())
+    body = _PNG_MAGIC + b"\x00\x01\x02\x03pretend-pixels"
+    client.app.state.ni.write_image_snapshot(iid, body, "png")
+    assert client.get(f"/api/ni/items/{iid}/image").status_code == 200
+    # Approve an update that swaps the source (type changes AWAY from http_image).
+    scene_text_only = {"type": "stack", "dir": "v", "gap": "sm", "children": [
+        {"type": "text", "value": "{{text}}", "role": "title",
+         "tone": "default", "size": "md"},
+    ]}
+    r = client.post("/api/tools/invoke",
+                    json={"name": "update_ni_item",
+                          "args": {"item_id": iid,
+                                    "source": {"type": "model",
+                                                "instruction": "hi"},
+                                    "scene": scene_text_only,
+                                    "preview_payload": {"text": "preview"}}})
+    assert r.status_code == 200 and r.json()["status"] == "awaiting_approval", r.text
+    pid = r.json()["pending_id"]
+    approve = client.post(f"/api/agent/pending/{pid}/approve",
+                          json={"confirm_tool": "update_ni_item"})
+    assert approve.status_code == 200, approve.text
+    assert approve.json()["result"]["state_reset"] == "commissioning"
+    # Image slot is gone; route now 404s until the next successful run seals bytes.
+    assert client.get(f"/api/ni/items/{iid}/image").status_code == 404
+
+
+def test_pending_tile_composite_titles_resolves_referenced_items(
+    client: TestClient,
+) -> None:
+    """§25: a parked create_ni_item with an internal.ni source has referenced
+    item ids resolved to titles for the tile's promoted "Combines: …" line."""
+    from smartbrain_3000 import agent_routes
+
+    _unlock(client)
+    a = _create_via_tool(client, title="Weather A")
+    b = _create_via_tool(client, title="Weather B")
+    store = client.app.state.ni
+    row = {"id": "p1", "tool": "create_ni_item",
+           "args": {"source": {"type": "internal.ni",
+                                "items": {"alpha": a, "beta": b}}}}
+    titles = agent_routes._resolve_pending_composite_titles(row, store)
+    assert set(titles) == {"Weather A", "Weather B"}
+
+
+def test_pending_tile_composite_titles_none_for_non_composite() -> None:
+    """§25 side channel: absent for a non-composite tool; the tile still renders."""
+    from smartbrain_3000 import agent_routes
+
+    row = {"id": "p1", "tool": "web_fetch",
+           "args": {"url": "https://example.com"}}
+    assert agent_routes._resolve_pending_composite_titles(row, None) is None
+
+
+def test_pending_tile_composite_titles_drops_missing_reference(
+    client: TestClient,
+) -> None:
+    """§25: a deleted / unknown reference silently drops from the list — the
+    tile never fabricates a title, and the resolver keeps the ones that exist."""
+    from smartbrain_3000 import agent_routes
+
+    _unlock(client)
+    live_id = _create_via_tool(client, title="Real")
+    store = client.app.state.ni
+    row = {"id": "p1", "tool": "update_ni_item",
+           "args": {"source": {"type": "internal.ni",
+                                "items": {"a": live_id, "b": "does-not-exist"}}}}
+    titles = agent_routes._resolve_pending_composite_titles(row, store)
+    assert titles == ["Real"]
+
+
 def test_notices_limit_clamped_and_defaulted(client: TestClient) -> None:
     _unlock(client)
     store = _notices_store(client)

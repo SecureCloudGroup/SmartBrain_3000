@@ -841,8 +841,16 @@ def _create_ni_item(ctx: ToolContext, args: dict) -> dict:
     # H3 (audit 2026-09-09): seed empty history series so a scene whose spark or
     # delta_prev binds to ``history.<name>`` can render the preview without dying on
     # ``extract_miss`` (mirrors the C1 seeding in ``_load_history_series``).
-    ni.bind_scene(spec["scene"], preview, history=ni._seed_history(spec))
+    # §24: pass a preview image_ref so a scene with an ``image`` node can bind at
+    # draft creation time (item_id is minted inside add_item; here we're only
+    # proving the scene binds, so use the same placeholder tag the store uses).
+    ni.bind_scene(spec["scene"], preview, history=ni._seed_history(spec),
+                  image_ref=ni._preview_image_ref(spec, "preview"))
     _validate_ni_public_url(spec)  # J: refuse a non-public / SSRF-shaped URL up front
+    try:  # §25: refuse composites of composites at create; class rides as ValueError
+        ni.check_composite_depth(ctx.ni, spec)
+    except ni.NIError as exc:
+        raise ValueError(str(exc)) from None
     item_id = ctx.ni.add_item(spec, preview, origin="agent")
     landing = _initial_ni_state(spec, bool(args.get("draft")))
     if landing != "draft":
@@ -882,6 +890,14 @@ def _update_ni_item(ctx: ToolContext, args: dict) -> dict:
             spec[key] = args[key]
     ni.validate_spec(spec)  # early raise before we touch the store
     _validate_ni_public_url(spec)  # J: same URL check as create
+    try:  # §25: refuse composites of composites at update; class rides as ValueError.
+        # Phase 4c audit 2026-09-11 (finding #2): thread the updating item's id so a
+        # self-reference (A → internal.ni references A) is caught here — the store
+        # lookup sees the OLD sealed source type, so the same-item case must be
+        # named explicitly, not inferred from get_item.
+        ni.check_composite_depth(ctx.ni, spec, updating_item_id=args["item_id"])
+    except ni.NIError as exc:
+        raise ValueError(str(exc)) from None
     source_changed = _ni_source_effectively_changed(current["spec"], spec)
     ctx.ni.update_spec(args["item_id"], spec, origin="agent")
     if "preview_payload" in args:  # K8: refresh the preview snapshot alongside the spec
@@ -889,9 +905,17 @@ def _update_ni_item(ctx: ToolContext, args: dict) -> dict:
         if not isinstance(preview, dict):
             raise ValueError("preview_payload must be a JSON object")
         # H3: seed history so a history-bound spark in the new scene renders on preview.
-        bound = ni.bind_scene(spec["scene"], preview, history=ni._seed_history(spec))
+        # §24: preview image_ref for a scene with an image node (item_id already known).
+        bound = ni.bind_scene(spec["scene"], preview, history=ni._seed_history(spec),
+                              image_ref=ni._preview_image_ref(spec, args["item_id"]))
         ctx.ni.write_snapshot(args["item_id"], "preview", bound, ok=True)
     if source_changed:
+        # Phase 4c audit 2026-09-11 (finding #7): stale image bytes must not survive
+        # a source change — the operator's re-consent point is where the pixel
+        # channel resets too. Same rule fires when source.type moves AWAY from
+        # http_image (a subset of source_changed, kept explicit for the audit).
+        # The image slot is best-effort; a delete failure never blocks the update.
+        ctx.ni.delete_snapshot(args["item_id"], "image")
         ctx.ni.commission(args["item_id"])  # A3: the approved update card is re-consent
     return {"ok": True, "id": args["item_id"],
             "state_reset": "commissioning" if source_changed else None}

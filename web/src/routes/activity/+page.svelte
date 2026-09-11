@@ -113,7 +113,7 @@
   {#if pending.length > 0}
     <h2>Awaiting your approval</h2>
     {#each pending as p (p.id)}
-      <ActionCard icon={iconForTool(p.tool)} title={p.tool} tier={p.tier === "irreversible" ? "irreversible" : "reviewed"} promoted={promotedLine(p.tool, p.args, p.mcp_label) ?? ""} scope={fmtArgs(p.args)}>
+      <ActionCard icon={iconForTool(p.tool)} title={p.tool} tier={p.tier === "irreversible" ? "irreversible" : "reviewed"} promoted={promotedLine(p.tool, p.args, p.mcp_label, p.composite_titles) ?? ""} scope={fmtArgs(p.args)}>
         {#snippet actions()}
           {#if p.tier === "reviewed" && p.remember_mode === "tool"}
             <button class="ghost" disabled={busy === p.id} title="Approve and stop asking for this tool" onclick={() => approve(p, true)}>Always allow</button>

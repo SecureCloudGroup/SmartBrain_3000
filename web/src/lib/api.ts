@@ -267,6 +267,10 @@ export interface PendingAction {
   // the human-friendly label of the MCP server the card would call. Lets the consent
   // surface name the exact destination instead of a generic phrase.
   mcp_label?: string;
+  // Set on a parked create_ni_item/update_ni_item whose source is `internal.ni` (§25):
+  // the titles of every referenced item, in alias order. The consent surface prints
+  // "Combines: <title>, <title>" so the user sees the composite's inputs by name.
+  composite_titles?: string[];
 }
 
 // One site-scoped consent entry: URL tools remember per-host, so the same tool can
