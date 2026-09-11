@@ -684,7 +684,9 @@ canonical(payload)`):
       "spec_template": { <§2 spec: params present with kind+label but EMPTY
                           values; secret params carry the "ni:self:<name>"
                           placeholder; contract null; repair fields absent;
-                          no credentials, no personal data> },
+                          repair_policy absent (installer's local choice —
+                          Phase 4b D2c audit 2026-09-11); no credentials,
+                          no personal data> },
       "preview_payload": { <bound scene, dummy data — §5-valid> },
       "notes": "one honest sentence"
    }]
@@ -720,7 +722,10 @@ canonical(payload)`):
   params (secrets via the credential path, never chat) → item created in
   `draft` with sealed provenance `_template = {pack_id, template_id, seq,
   spec_hash}` → the user's explicit **Activate** (commission) is the consent
-  event, same as any draft. Installing never auto-runs anything.
+  event, same as any draft. Installing never auto-runs anything. `repair_policy`
+  is FORCED at install time to the safe default `{l1:true, l2_frontier:false}`
+  regardless of what a template ships (Phase 4b D2c audit 2026-09-11 — L2
+  opt-in is the installer's local `/repair-policy` act, never a pack setting).
 - **Fleet healing**: when a pack update changes a template (spec_hash differs),
   every item carrying that `_template` provenance shows "Template update
   available" on its card. Applying is per-item and user-driven: the diff is
@@ -749,11 +754,15 @@ canonical(payload)`):
 - `GET /api/ni/items/{id}/export-template` (desktop-local): returns the §19
   template JSON for the item — sanitizer strips: secret VALUES (secret params
   reset to the `ni:self:` placeholder), string/number param values (emptied,
-  label kept), `contract`, `_c2_ok`, `_l1_*`, `_template`, and (H2 audit
-  2026-09-09) rewrites this item's `ni:<item_id>:<name>` refs (header `$secret`
-  values and secret param values) back to `ni:self:<name>` so the emitted
-  template installs cleanly for the next subscriber and never carries the
-  original item's UUID. The exporter REFUSES:
+  label kept), `contract`, `_c2_ok`, `_l1_*`, `_l2_*` (Phase 4b D2c audit
+  2026-09-11 — `_l2_proposal` / `_l2_last_attempt` are per-item engine state,
+  never a template's business), `repair_policy` (installer's local choice; the
+  install path forces the safe default `{l1:true, l2_frontier:false}` and the
+  template ships with none), `_template`, and (H2 audit 2026-09-09) rewrites
+  this item's `ni:<item_id>:<name>` refs (header `$secret` values and secret
+  param values) back to `ni:self:<name>` so the emitted template installs
+  cleanly for the next subscriber and never carries the original item's UUID.
+  The exporter REFUSES:
   - `internal.schedule` sources — machine-local schedule id is meaningless
     elsewhere;
   - `internal.kb` sources (M6 audit 2026-09-09) — `query` is personal search
@@ -836,3 +845,56 @@ DB password).
   existing containment (P1-P7, output-channel law) applies unchanged.
 - Engine discipline: 20s call deadline inside the pass budget accounting;
   per-run connect/spawn + teardown; failures ride the normal health ladder.
+
+## 23. L2 frontier repair (v4b — park-only, the ladder's last rung)
+
+When L1 has exhausted its one attempt in a failure streak (attempted and
+failed/reverted) and the item still fails, a FRONTIER model may propose a fix —
+under the strictest consent in the system:
+
+- **Gates (ALL required)**: `repair_policy.l2_frontier` true on the item
+  (per-item opt-in, default false; settable only via the tool chokepoint's
+  approval card OR the desktop-local `POST /api/ni/items/{id}/repair-policy` —
+  a template pack MAY NOT ship `repair_policy` and the export sanitizer strips
+  it, so repair policy is ALWAYS the installer's local choice, Phase 4b D2c
+  audit 2026-09-11); the Claude Code provider connected (its own serve-time
+  consent gate — a 403 skips silently); L1 EXHAUSTED this streak — either
+  `repair_policy.l1` is false (L1 will never fire, so exhausted by definition;
+  Phase 4b D6 audit 2026-09-11) OR `_l1_last_attempt` predates the streak
+  marker `first_failure_at`. Honest limitation: with `l1=true` and no local
+  model available, L2 stays gated until L1 gets a turn (the fix is to disable
+  L1 explicitly, not to widen the gate); one L2 attempt per streak
+  (`_l2_last_attempt`, same predating rule as L1).
+- **What is sent** (same envelope as L1, claudecode containment applies): goal,
+  current extract/transform stages, real failure class + detail, the contract,
+  and the ≤4KB fenced+neutralized raw-payload excerpt — all four read from the
+  sealed `last_failure` snapshot the run-failure path seals for spec-shape
+  failure classes (Phase 4b D5 audit 2026-09-11; absent slot degrades to
+  class-only, matching the prior empty-string behavior). NEVER vault/KB content,
+  never secret values, never headers/URLs beyond what the spec's own stages
+  contain (they contain none).
+- **What comes back**: the L1 closed schema — `{extract?, transform?}` only,
+  full candidate re-validation. Anything else = attempt failed, recorded.
+- **PARK-ONLY**: a valid proposal is NEVER applied. It is stored as sealed
+  `_l2_proposal = {stages, created_at, model}` on the item, surfaced on the /ni
+  card as "Fix proposed — review" with a stage-level diff and Apply / Dismiss,
+  plus a carrier notice ("<title>: a proposed fix is ready to review."). Apply
+  = the SAME trial discipline as L1 (revision origin `repair_l2`, contract as
+  the pass bar, auto-revert on the next failure); Dismiss clears the proposal
+  (no re-propose this streak). Apply REFUSES 409 when the item is `broken` —
+  the fix path is edit → re-commission; a stale proposal is dropped on the
+  broken hop (Phase 4b D4 audit 2026-09-11). A user spec edit voids a pending
+  proposal (the §14 D1 law); a clean run resets the streak AND voids the
+  proposal (Phase 4b D8 audit 2026-09-11 — a resolved item would otherwise
+  keep the "Fix proposed" chip forever); a failed trial's revert now carries
+  `_l2_last_attempt` onto the restored spec (Phase 4b D1 audit 2026-09-11 —
+  the one-attempt-per-streak marker survived the revert path, closing an
+  unbounded per-Apply re-fire).
+- **Engine hygiene**: the frontier call takes minutes (claudecode floor 300s) —
+  it must NEVER run inside the tick pass. The tick only marks eligibility; the
+  call runs on a single bounded daemon worker (one in flight process-wide,
+  agent_routes._spawn precedent), which writes the proposal when done. App
+  shutdown abandons it harmlessly (proposal generation is idempotent per
+  streak).
+- Every attempt/outcome is an `ni_runs` row (`repair_l2_proposed` /
+  `repair_l2_failed`); Apply/Dismiss are audited.

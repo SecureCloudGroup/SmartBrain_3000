@@ -43,6 +43,7 @@ describe("runStatusLabel", () => {
     expect(runStatusLabel("awaiting_approval")).toBe("Needs approval");
     expect(runStatusLabel("error")).toBe("Failed");
     expect(runStatusLabel("complete")).toBe("Done");
+    expect(runStatusLabel("proposal")).toBe("Fix proposed");
   });
 
   it("passes unknown statuses through", () => {

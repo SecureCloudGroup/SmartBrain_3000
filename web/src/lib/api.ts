@@ -654,6 +654,10 @@ export interface NiBoardItem {
   // is informational only: the library retired this template.
   template_update?: boolean;
   template_gone?: boolean;
+  // L2 frontier-repair proposal parked for review (ni-format §23). PARK-ONLY: a valid
+  // proposal is NEVER auto-applied — the card shows a "Fix proposed" chip; the review
+  // modal renders the diff and offers Apply (trial, may auto-revert) / Dismiss.
+  l2_proposal?: boolean;
 }
 
 // ni library (ni-format §19/§20) — the Global Library subscription: one hosted
@@ -1567,6 +1571,30 @@ export const api = {
   niApplyTemplateUpdate: (id: string) =>
     req<{ state: "draft" }>(`/api/ni/items/${encodeURIComponent(id)}/apply-template-update`, {
       method: "POST",
+    }),
+  // L2 frontier-repair review (ni-format §23). Apply runs the proposed stages as a
+  // TRIAL — the next refresh must pass this card's captured contract, else the engine
+  // auto-reverts. Dismiss clears the parked proposal (no re-propose this streak).
+  // Apply returns the new spec_rev so a client-cached detail view can drop stale spec.
+  niL2Apply: (id: string) =>
+    req<{ ok: boolean; spec_rev: number }>(
+      `/api/ni/items/${encodeURIComponent(id)}/l2-proposal/apply`,
+      { method: "POST" },
+    ),
+  niL2Dismiss: (id: string) =>
+    req<{ ok: boolean }>(
+      `/api/ni/items/${encodeURIComponent(id)}/l2-proposal/dismiss`,
+      { method: "POST" },
+    ),
+  // Per-card repair-policy toggle (§23). Desktop-local (x-sb-local; the WebRTC bridge
+  // strips it) — a paired phone must not enable outbound-frontier repair on this card.
+  // Omitted fields leave that lever unchanged; the server enforces default-off for
+  // l2_frontier and only pings Claude on real failure once opted in.
+  niRepairPolicy: (id: string, body: { l1?: boolean; l2_frontier?: boolean }) =>
+    req<{ ok: boolean }>(`/api/ni/items/${encodeURIComponent(id)}/repair-policy`, {
+      method: "POST",
+      headers: { "x-sb-local": "1" },
+      body: JSON.stringify(body),
     }),
 
   // device pairing (remote access via WebRTC)

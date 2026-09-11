@@ -251,12 +251,21 @@ def _validate_template_spec_and_preview(template: dict, where: str) -> None:
     all engine- or install-time state. ``build_installed_spec`` already strips them at
     install (belt); refusing them at parse (suspenders) means a hostile pack can't
     ship a self-attested consent by including ``_c2_ok: true`` inside spec_template.
+
+    Phase 4b audit 2026-09-11:
+      * §23 state (`_l2_last_attempt` / `_l2_proposal`) joins the forbidden set — a
+        pack could otherwise ship a pre-approved "proposal" for the installer to
+        Apply blind (D3 forged-proposal defence).
+      * `repair_policy` is refused wholesale (D2c) — repair policy is always the
+        INSTALLER'S local choice; letting a pack carry `l2_frontier: true`
+        invisibly flips a consent-bearing switch on every new install.
     """
     assert isinstance(template, dict) and where, "template + where required"
     spec = template.get("spec_template")
     if not isinstance(spec, dict):
         raise LibraryError(f"{where}.spec_template must be an object")
-    forbidden = {"contract", "_c2_ok", "_l1_last_attempt", "_l1_trial", "_template"}
+    forbidden = {"contract", "_c2_ok", "_l1_last_attempt", "_l1_trial", "_template",
+                 "_l2_last_attempt", "_l2_proposal", "repair_policy"}
     present = sorted(forbidden.intersection(spec.keys()))
     if present:
         raise LibraryError(
@@ -711,9 +720,13 @@ def _pack_cache_put(created_at: str,
 # --- install (build a spec from a template, fill params) --------------------------------
 
 # System keys that a template pack must NEVER carry into an installed item, per §20:
-# consent-bearing (contract, _c2_ok), engine-owned (_l1_*), and provenance itself
-# (`_template` — the install path stamps its own from the pack it read).
-_TEMPLATE_STRIP_KEYS = ("contract", "_c2_ok", "_l1_last_attempt", "_l1_trial", "_template")
+# consent-bearing (contract, _c2_ok), engine-owned (_l1_*, _l2_*), the installer's
+# LOCAL repair-policy choice (Phase 4b D2c — a pack cannot silently opt items into
+# `l2_frontier: true`), and provenance itself (`_template` — the install path stamps
+# its own from the pack it read).
+_TEMPLATE_STRIP_KEYS = ("contract", "_c2_ok", "_l1_last_attempt", "_l1_trial",
+                        "_l2_last_attempt", "_l2_proposal", "_template",
+                        "repair_policy")
 
 
 def build_installed_spec(template: dict, param_values: dict) -> dict:
@@ -725,9 +738,12 @@ def build_installed_spec(template: dict, param_values: dict) -> dict:
       * string/number param values are copied in verbatim (bounded by _MAX_PARAM_VALUE);
       * secret params keep their ``ni:self:<name>`` placeholder — the item's credential
         PUT stores the real value under ``ni:<item_id>:<name>`` post-creation;
-      * ``_c2_ok`` / ``contract`` / ``_l1_*`` / ``_template`` are stripped (belt-and-
-        suspenders — a template that carried them fails parse_pack's full-spec check;
-        this is the second gate at install time);
+      * ``_c2_ok`` / ``contract`` / ``_l1_*`` / ``_l2_*`` / ``_template`` and
+        ``repair_policy`` are stripped (belt-and-suspenders — a template that carried
+        them fails parse_pack's full-spec check; this is the second gate at install
+        time). Phase 4b D2c: ``repair_policy`` is REPLACED with the safe default
+        ``{"l1": true, "l2_frontier": false}`` — the installer's local /repair-policy
+        endpoint is the only way to opt into L2, per §23's consent posture;
       * every param declared by the template MUST be filled (empty string is OK only
         when the template shipped it empty AND the kind is string/number).
     """
@@ -739,6 +755,9 @@ def build_installed_spec(template: dict, param_values: dict) -> dict:
     spec = _deep_copy_json(spec_template)
     for key in _TEMPLATE_STRIP_KEYS:
         spec.pop(key, None)
+    # D2c: default repair policy is the installer's LOCAL choice; force the safe
+    # default here so an installed item never inherits an invisible l2_frontier flag.
+    spec["repair_policy"] = {"l1": True, "l2_frontier": False}
     _fill_params(spec, param_values)
     return spec
 

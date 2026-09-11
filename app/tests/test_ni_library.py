@@ -43,7 +43,9 @@ def _template(**over) -> dict:
 
     Deliberately OMITS ``contract`` / ``_c2_ok`` / ``_l1_*`` / ``_template`` from
     ``spec_template`` — LOW#6 (audit 2026-09-09) makes parse_pack REFUSE any
-    template that ships those engine/install-owned keys.
+    template that ships those engine/install-owned keys. Phase 4b D2c (audit
+    2026-09-11) extends the forbidden set to ``_l2_*`` and ``repair_policy``
+    (installer's local choice; the install path forces the safe default).
     """
     scene = {"type": "stack", "dir": "v", "gap": "sm", "children": [
         {"type": "text", "value": "{{title}}", "role": "title",
@@ -54,7 +56,6 @@ def _template(**over) -> dict:
         "params": {"zip": {"label": "ZIP", "kind": "string", "value": ""}},
         "source": {"type": "model", "instruction": "hi"},
         "pipeline": [], "scene": scene, "display": {"size": "small"},
-        "repair_policy": {"l1": True, "l2_frontier": False},
         "model": None,
     }
     template = {

@@ -870,8 +870,14 @@ def _update_ni_item(ctx: ToolContext, args: dict) -> dict:
     # or history change is a plain spec edit, NOT a source change (§11/§12), so the item
     # stays on its current state track. ``update_spec`` still strips ``_c2_ok`` /
     # ``contract`` per A3, which is right for any spec edit.
+    # Phase 4b D2a (audit 2026-09-11): ``repair_policy`` is REVIEWED-updatable via the
+    # tool chokepoint — the approval card renders the whole `{l1, l2_frontier}` dict
+    # (fmtArgs) so the operator sees + consents to the flag flip before it lands. The
+    # UI toggle at /repair-policy is the desktop-local equivalent; both share the
+    # spec's closed `{l1: bool, l2_frontier: bool}` shape (see _validate_repair_policy).
     for key in ("title", "goal", "params", "source", "pipeline", "scene",
-                "display", "model", "interval_minutes", "history", "alerts"):
+                "display", "model", "interval_minutes", "history", "alerts",
+                "repair_policy"):
         if key in args:
             spec[key] = args[key]
     ni.validate_spec(spec)  # early raise before we touch the store
@@ -1484,9 +1490,9 @@ _TOOLS: tuple[Tool, ...] = (
     Tool(
         name="update_ni_item",
         description="Edit an existing Neural Interface item (from list_ni_items) — partial: title, goal, params, "
-                    "source, pipeline, scene, display, interval_minutes, model. Any change to source (URL, "
-                    "headers, type, or model instruction) rewinds the item to DRAFT so the new source is "
-                    "re-consented before the engine touches it. Use set_ni_item_enabled to pause; "
+                    "source, pipeline, scene, display, interval_minutes, model, repair_policy. Any change to "
+                    "source (URL, headers, type, or model instruction) rewinds the item to DRAFT so the new "
+                    "source is re-consented before the engine touches it. Use set_ni_item_enabled to pause; "
                     "delete_ni_item to remove.",
         params_schema={
             "type": "object",
@@ -1508,6 +1514,12 @@ _TOOLS: tuple[Tool, ...] = (
                 # REVIEWED spec edit, NOT a source change (§11/§12 audit 2026-09-09).
                 "history": {"type": "object"},
                 "alerts": {"type": "array"},
+                # Phase 4b D2a (audit 2026-09-11): the approval card is the consent for
+                # any repair-policy flip — the shape is closed {l1: bool, l2_frontier:
+                # bool} (see ni._validate_repair_policy), so a reviewed approval
+                # renders the whole dict via fmtArgs and the operator sees the exact
+                # flags landing before Apply.
+                "repair_policy": {"type": "object"},
             },
             "required": ["item_id"],
         },

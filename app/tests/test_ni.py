@@ -660,7 +660,7 @@ def test_tick_no_op_when_locked() -> None:
     app = _fake_app(conn, key)
     app.state.master_key = None
     assert nimod.tick(app) == {"checked": 0, "alerts": [], "broken": [],
-                                "repaired": []}
+                                "repaired": [], "l2_candidates": []}
 
 
 # --- NI tool registry (Phase 1 wiring) -------------------------------------

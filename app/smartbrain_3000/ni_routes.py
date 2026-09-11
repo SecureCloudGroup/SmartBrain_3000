@@ -120,6 +120,9 @@ def _board_row(store: ni.NIStore, item: dict, *,
         "interpreted": interpreted,
         "template_update": update_flag,
         "template_gone": gone_flag,
+        # §23: True when a §14 frontier proposal is parked on this item — the card
+        # renders "Fix proposed — review" (Apply / Dismiss are per-item routes).
+        "l2_proposal": isinstance(item["spec"].get("_l2_proposal"), dict),
         "payload_slot": slot,
         "payload_at": snap["created_at"] if snap else None,
         "payload_ok": snap["ok"] if snap else None,
@@ -195,9 +198,14 @@ _MAX_NOTICES = 20  # §17: limit clamp for the launcher's notice poll
 _DEFAULT_NOTICES = 10
 _EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 # status -> kind (§17). post_ni_carrier_notices writes "complete" for fired
-# alerts, "broken" for broken transitions, "repaired" for §14 self-repairs;
-# anything unexpected reads as the mildest kind rather than being dropped.
-_NOTICE_KIND_BY_STATUS = {"broken": "broken", "repaired": "repaired"}
+# alerts, "broken" for broken transitions, "repaired" for §14 self-repairs,
+# "proposal" for §23 L2 proposals; anything unexpected reads as the mildest kind
+# rather than being dropped. The launcher's per-kind title switch (launcher/
+# notices.go) falls back to "SmartBrain alert" for unknown kinds — verified by
+# notices_test.go's unknown-kind fallback — so "proposal" surfaces on trays
+# without a launcher rebuild.
+_NOTICE_KIND_BY_STATUS = {"broken": "broken", "repaired": "repaired",
+                          "proposal": "proposal"}
 
 
 def _notice_id(ran_at: str) -> int:
@@ -434,6 +442,137 @@ def put_credential(request: Request, item_id: str, body: CredentialIn) -> dict:
         "user", "ni_credential", "reviewed", "executed", True,
         args_summary=tools.summarize({"item_id": item_id, "name": body.name, "host": body.host}),
         result_summary=tools.summarize({"stored": True}),
+    )
+    return {"ok": True}
+
+
+# --- Phase 4b D2b: repair-policy setter (desktop-local) ---------------------
+
+class RepairPolicyIn(BaseModel):
+    """Partial repair-policy update: either flag may be absent (unchanged).
+
+    Closed shape mirrors ``ni._validate_repair_policy``. The route is desktop-local:
+    an L2 opt-in is a consent-bearing switch (§23) and must never ride the bridged
+    phone response surface. The web UI's toggle lands here; the tool chokepoint's
+    ``update_ni_item`` handler is the agent-side equivalent (approval card = consent).
+    """
+
+    l1: bool | None = None
+    l2_frontier: bool | None = None
+
+
+@router.post("/api/ni/items/{item_id}/repair-policy")
+def set_repair_policy(request: Request, item_id: str, body: RepairPolicyIn) -> dict:
+    """Set `repair_policy` on the item (desktop-local; audited).
+
+    Metadata (the flags landed) is what rides the audit row; the sealed spec is the
+    truth. Uses ``update_spec`` so the update strips ``_c2_ok`` / ``contract`` (the
+    A3 rule) — a policy flip is a plain user edit and inherits the same posture.
+    Refuses when the item is missing (404); pydantic validates the shape.
+    """
+    _require_desktop_local(request)
+    store = _store(request)
+    current = store.get_item(item_id)
+    if current is None:
+        raise HTTPException(status_code=404, detail="item not found")
+    existing = dict(current["spec"].get("repair_policy") or {"l1": True,
+                                                              "l2_frontier": False})
+    if body.l1 is not None:
+        existing["l1"] = bool(body.l1)
+    if body.l2_frontier is not None:
+        existing["l2_frontier"] = bool(body.l2_frontier)
+    new_spec = dict(current["spec"])
+    new_spec["repair_policy"] = {"l1": bool(existing.get("l1", True)),
+                                  "l2_frontier": bool(existing.get("l2_frontier", False))}
+    try:
+        store.update_spec(item_id, new_spec, origin="user")
+    except (ValueError, ni.NIError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    request.app.state.audit.append(
+        "user", "ni_repair_policy_set", "reviewed", "executed", True,
+        args_summary=tools.summarize({"item_id": item_id,
+                                       "repair_policy": new_spec["repair_policy"]}),
+        result_summary=tools.summarize({"repair_policy": new_spec["repair_policy"]}),
+    )
+    return {"ok": True, "repair_policy": new_spec["repair_policy"]}
+
+
+# --- §23 L2 frontier proposal apply/dismiss ---------------------------------
+
+@router.post("/api/ni/items/{item_id}/l2-proposal/apply")
+def apply_l2_proposal(request: Request, item_id: str) -> dict:
+    """Apply a parked §23 L2 proposal via the §14 trial machinery.
+
+    409 unless a ``_l2_proposal`` is present on the sealed spec. Uses
+    ``apply_repair(origin='repair_l2', expected_rev=...)`` so a concurrent user
+    edit races the apply cleanly (returns None → 409). The proposal is stripped
+    FIRST (rev-preserving) so the pre-repair revision snapshot the trial revert
+    would restore does NOT re-instate the consumed proposal.
+    """
+    store = _store(request)
+    item = store.get_item(item_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="item not found")
+    # Phase 4b D4 (audit 2026-09-11): applying to a broken item would stamp
+    # ``_l1_trial`` on a spec whose engine path is stopped (``due_items`` excludes
+    # broken), so the trial's success/failure ballot never scores — the item is
+    # wedged and a later revert has no clean state to restore. A broken item's fix
+    # path is edit → re-commission; the parked proposal is stale context by then
+    # (see ni._transition_on_failure, which clears the proposal on the broken hop).
+    if item["state"] == "broken":
+        raise HTTPException(status_code=409,
+                            detail="item is broken — re-commission it first")
+    proposal = item["spec"].get("_l2_proposal")
+    if not isinstance(proposal, dict) or not isinstance(proposal.get("stages"), dict):
+        raise HTTPException(status_code=409, detail="no L2 proposal to apply")
+    stages = proposal["stages"]
+    try:
+        new_spec = ni._spec_with_repaired_stages(item["spec"], stages)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    # ``_spec_with_repaired_stages`` pops ``_l2_proposal`` alongside the _l1_*
+    # markers, so apply_repair's seal-write REPLACES the sealed spec with a
+    # proposal-free body atomically. On a spec_changed abort the sealed state
+    # is UNTOUCHED (proposal still parked), so the user can retry — dropping
+    # the proposal pre-apply would silently consume it on a race.
+    expected_rev = int(item["spec_rev"])
+    try:
+        applied_rev = store.apply_repair(item_id, new_spec, origin="repair_l2",
+                                          expected_rev=expected_rev)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    if applied_rev is None:
+        raise HTTPException(status_code=409,
+                            detail="spec changed since proposal — retry")
+    store.record_run(item_id, "repair_l2_applied", duration_ms=0,
+                     error=None, contract_ok=None)
+    request.app.state.audit.append(
+        "user", "ni_l2_proposal_apply", "reviewed", "executed", True,
+        args_summary=tools.summarize({"item_id": item_id}),
+        result_summary=tools.summarize({"spec_rev": applied_rev}),
+    )
+    return {"ok": True, "spec_rev": applied_rev}
+
+
+@router.post("/api/ni/items/{item_id}/l2-proposal/dismiss")
+def dismiss_l2_proposal(request: Request, item_id: str) -> dict:
+    """Dismiss a parked §23 L2 proposal — clears ``_l2_proposal`` (audited).
+
+    No re-propose this streak: ``_l2_last_attempt`` was stamped at proposal
+    time and stays past the dismiss, so the one-attempt-per-streak gate blocks
+    further tries until the streak resets (success/update/commission).
+    """
+    store = _store(request)
+    item = store.get_item(item_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="item not found")
+    if not isinstance(item["spec"].get("_l2_proposal"), dict):
+        raise HTTPException(status_code=409, detail="no L2 proposal to dismiss")
+    store.clear_l2_proposal(item_id)
+    request.app.state.audit.append(
+        "user", "ni_l2_proposal_dismiss", "reviewed", "executed", True,
+        args_summary=tools.summarize({"item_id": item_id}),
+        result_summary=tools.summarize({"dismissed": True}),
     )
     return {"ok": True}
 
@@ -854,7 +993,11 @@ def _build_export_template(store: ni.NIStore, item: dict, secrets_store) -> dict
     return template
 
 
-_EXPORT_STRIP_KEYS = ("contract", "_c2_ok", "_l1_last_attempt", "_l1_trial", "_template")
+# Phase 4b D2c (audit 2026-09-11): export strips `_l2_*` state (proposal + attempt
+# marker) AND `repair_policy` — repair policy is always the installer's local choice,
+# so a template ships with none and the install path forces the safe default.
+_EXPORT_STRIP_KEYS = ("contract", "_c2_ok", "_l1_last_attempt", "_l1_trial",
+                      "_l2_last_attempt", "_l2_proposal", "_template", "repair_policy")
 
 
 def _sanitize_spec_for_export(item: dict, secrets_store) -> dict:

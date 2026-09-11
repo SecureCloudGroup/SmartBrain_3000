@@ -708,34 +708,53 @@ def _auto_update_ni(app) -> None:
     alerts = result.get("alerts") or []
     broken = result.get("broken") or []
     repaired = result.get("repaired") or []
-    if not alerts and not broken and not repaired:
-        return
-    key = getattr(app.state, "master_key", None)
-    if key is None:
-        return
-    cursor = app.state.db.cursor()
-    try:
-        post_ni_carrier_notices(ScheduleStore(cursor, key), alerts, broken,
-                                repaired=repaired)
-    except Exception as exc:  # posting must never kill the schedule tick either
-        log.warning("ni carrier posting failed: %s", exc)
-    finally:
-        _close_cursor(cursor)
+    l2_candidates = result.get("l2_candidates") or []
+    if alerts or broken or repaired:
+        key = getattr(app.state, "master_key", None)
+        if key is not None:
+            cursor = app.state.db.cursor()
+            try:
+                post_ni_carrier_notices(ScheduleStore(cursor, key), alerts, broken,
+                                        repaired=repaired)
+            except Exception as exc:  # posting must never kill the schedule tick either
+                log.warning("ni carrier posting failed: %s", exc)
+            finally:
+                _close_cursor(cursor)
+    # §23: hand the marked candidates to the L2 worker (single-flight; if a
+    # worker is already running, this drop and next tick re-marks). The tick
+    # itself NEVER calls the frontier model — a claudecode turn takes minutes.
+    if l2_candidates:
+        try:
+            ni.spawn_l2_worker(app, list(l2_candidates))
+        except Exception as exc:  # spawning must never kill the schedule tick
+            log.warning("ni L2 worker spawn failed: %s", exc)
 
 
 def post_ni_carrier_notices(schedules_store, alerts: list, broken: list,
-                             *, repaired: list | None = None) -> None:
-    """Write each fired alert + broken transition + §14 repair notice to the NI carrier.
+                             *, repaired: list | None = None,
+                             proposed: list | None = None) -> None:
+    """Write each fired alert + broken transition + §14 repair notice + §23 L2
+    proposal notice to the NI carrier.
 
-    Called from ``_auto_update_ni`` (engine tick) and ``ni_routes.run_item`` (manual
-    /run) — both need the same carrier surface (M1b, audit 2026-09-09). LOW#4:
-    per-notice try/except so one failed ``record_ni_run`` never drops the rest;
-    posting is best-effort surfacing, not a run gate.
+    Called from ``_auto_update_ni`` (engine tick), ``ni_routes.run_item`` (manual
+    /run), and ``ni._post_l2_carrier_notice`` (§23 worker) — all need the same
+    carrier surface (M1b, audit 2026-09-09). LOW#4: per-notice try/except so one
+    failed ``record_ni_run`` never drops the rest; posting is best-effort
+    surfacing, not a run gate.
+
+    Status/kind mapping (§17): alerts ride "complete" (kind "alert"), broken
+    ride "broken" (kind "broken"), repairs ride "repaired" (kind "repaired"),
+    proposals ride "proposal" (kind "proposal"). The launcher's per-kind title
+    switch falls back to the mildest "SmartBrain alert" title for unrecognized
+    kinds (verified in launcher/notices_test.go), so "proposal" surfaces on
+    Windows/macOS/Linux trays without a launcher rebuild.
     """
     assert schedules_store is not None, "schedules store required"
     assert isinstance(alerts, list) and isinstance(broken, list), "alerts/broken must be lists"
     repaired_list = list(repaired or [])
+    proposed_list = list(proposed or [])
     assert isinstance(repaired_list, list), "repaired must be a list"
+    assert isinstance(proposed_list, list), "proposed must be a list"
 
     def _flat_title(notice: dict) -> str:
         # Titles are user/agent-authored spec text (≤300 chars, newlines legal) and
@@ -771,6 +790,18 @@ def post_ni_carrier_notices(schedules_store, alerts: list, broken: list,
             )
         except Exception as exc:
             log.warning("ni carrier repaired post failed: %s", exc)
+    for notice in proposed_list:  # bounded by _MAX_ITEMS_PER_PASS
+        try:
+            title = _flat_title(notice)
+            # Distinct §17 status "proposal" (kind "proposal"): the launcher
+            # falls back to "SmartBrain alert" for unknown kinds (see notices_test
+            # unknown-kind fallback) — no launcher rebuild needed for v1.
+            schedules_store.record_ni_run(
+                "proposal",
+                f"{title}: a proposed fix is ready to review.",
+            )
+        except Exception as exc:
+            log.warning("ni carrier proposal post failed: %s", exc)
 
 
 def eager_reindex(cursor, key: bytes) -> None:

@@ -79,6 +79,12 @@ _MAX_LLM_OUTPUTS = 6             # §13 llm stage output map size
 _MAX_LLM_STRING_CHARS = 2000     # §13 output strings capped like scene text
 _MAX_LLM_DATA_BYTES = 8 * 1024   # §13 fenced pipeline excerpt cap
 _MAX_L1_PAYLOAD_BYTES = 4 * 1024 # §14 raw-payload excerpt cap
+# §23 L2 frontier repair: hardcoded v1 model + timeout. Claude Code CLI contains the
+# call (empty-toolset agent, --setting-sources "", stdin-only content — see
+# claudecli.py module docstring); a call takes minutes, so the tick NEVER runs it —
+# a bounded daemon worker does (agent_routes._spawn precedent).
+_L2_FRONTIER_MODEL = "claudecode/sonnet"
+_L2_FRONTIER_TIMEOUT_S = 300.0
 _LLM_INTERVAL_FLOOR = 5          # §13 interval clamp for items with an llm stage
 _MAX_LLM_ITEMS_PER_PASS = 1      # §13 engine discipline: 1 llm item per tick
 _LLM_TRUNC_MARKER = "\n[truncated]"
@@ -136,7 +142,8 @@ _STATES: frozenset[str] = frozenset(
     {"draft", "commissioning", "live", "degraded", "failing", "broken", "paused"}
 )
 _SLOTS: frozenset[str] = frozenset(
-    {"latest", "last_good", "preview", "preview_data", "history", "alert_state"}
+    {"latest", "last_good", "preview", "preview_data", "history", "alert_state",
+     "last_failure"}
 )
 _REVISION_ORIGINS: frozenset[str] = frozenset(
     {"user", "agent", "repair_l1", "repair_l2", "template"}
@@ -346,7 +353,8 @@ def validate_spec(spec: object, *, allow_empty_params: bool = False) -> dict:
     allowed = {"version", "title", "goal", "params", "source", "pipeline", "scene",
                "display", "contract", "repair_policy", "model", "_c2_ok",
                "interval_minutes", "history", "alerts",
-               "_l1_last_attempt", "_l1_trial", "_template"}
+               "_l1_last_attempt", "_l1_trial", "_template",
+               "_l2_last_attempt", "_l2_proposal"}
     _closed_keys(body, allowed, "spec")
     if body.get("version") != 1:
         raise ValueError("spec.version must be 1")
@@ -357,7 +365,13 @@ def validate_spec(spec: object, *, allow_empty_params: bool = False) -> dict:
     outputs = _validate_pipeline(body.get("pipeline") or [])
     validate_scene(body.get("scene"))
     _validate_display(body.get("display") or {})
-    _validate_repair_policy(body.get("repair_policy") or {})
+    # Phase 4b D2c (audit 2026-09-11): `repair_policy` is now OPTIONAL on the sealed
+    # spec — a template pack never carries it (parse_pack refuses `repair_policy` in
+    # spec_template; install forces the safe default; export strips it). When absent
+    # from an item's spec, engine callers read via ``spec.get("repair_policy") or
+    # {}`` and both flags default to False (L1 off, L2 off) — a safe posture.
+    if body.get("repair_policy") is not None:
+        _validate_repair_policy(body["repair_policy"])
     _validate_model_override(body.get("model"))
     if "history" in body and body["history"] is not None:
         _validate_history_spec(body["history"], outputs)
@@ -368,6 +382,7 @@ def validate_spec(spec: object, *, allow_empty_params: bool = False) -> dict:
     if body.get("contract") is not None:
         _require_dict(body["contract"], "spec.contract")
     _validate_l1_system_keys(body)
+    _validate_l2_system_keys(body)
     _validate_template_provenance(body.get("_template"))
     return body
 
@@ -394,15 +409,30 @@ def _validate_l1_system_keys(body: dict) -> None:
     """D1/D2 (audit 2026-09-09): shape-check the system-only §14 sealed keys so an
     agent-authored spec cannot smuggle arbitrary shapes into ``_l1_trial`` /
     ``_l1_last_attempt`` and wedge the revert path.
+
+    Phase 4b cosmetic (audit 2026-09-11): ``_l1_trial`` may OPTIONALLY carry
+    ``origin`` — the revision origin of the trial's own apply
+    (``repair_l1``/``repair_l2``) — so a revert records the honest origin in the
+    audit spine (an Apply'd L2 proposal reverts under ``repair_l2``, not
+    ``repair_l1``). Keep the closed shape but add ``origin`` to the allowed keys.
     """
     assert isinstance(body, dict), "body must be a dict"
     if "_l1_trial" in body and body["_l1_trial"] is not None:
         trial = body["_l1_trial"]
-        if not isinstance(trial, dict) or set(trial) != {"rev_before"}:
-            raise ValueError("spec._l1_trial must be {'rev_before': int>=1}")
+        if not isinstance(trial, dict) or not (
+                {"rev_before"} <= set(trial) <= {"rev_before", "origin"}):
+            raise ValueError(
+                "spec._l1_trial must be {'rev_before': int>=1, 'origin'?: str}"
+            )
         rev_before = trial["rev_before"]
         if not isinstance(rev_before, int) or isinstance(rev_before, bool) or rev_before < 1:
             raise ValueError("spec._l1_trial.rev_before must be a positive int")
+        if "origin" in trial:
+            origin = trial["origin"]
+            if not isinstance(origin, str) or origin not in _REVISION_ORIGINS:
+                raise ValueError(
+                    f"spec._l1_trial.origin must be one of {sorted(_REVISION_ORIGINS)}"
+                )
     if "_l1_last_attempt" in body and body["_l1_last_attempt"] is not None:
         raw = body["_l1_last_attempt"]
         if not isinstance(raw, str) or not raw:
@@ -411,6 +441,47 @@ def _validate_l1_system_keys(body: dict) -> None:
             datetime.fromisoformat(raw)
         except ValueError as exc:
             raise ValueError(f"spec._l1_last_attempt not ISO-8601: {exc}") from None
+
+
+def _validate_l2_system_keys(body: dict) -> None:
+    """§23 shape check for the system-only sealed L2 keys — an agent-authored spec
+    must not smuggle arbitrary shapes into ``_l2_proposal`` / ``_l2_last_attempt``
+    (the 2b D1 lesson applied to L2: attacker-shaped system fields are refused).
+    """
+    assert isinstance(body, dict), "body must be a dict"
+    if "_l2_last_attempt" in body and body["_l2_last_attempt"] is not None:
+        raw = body["_l2_last_attempt"]
+        if not isinstance(raw, str) or not raw:
+            raise ValueError("spec._l2_last_attempt must be an ISO-8601 string")
+        try:
+            datetime.fromisoformat(raw)
+        except ValueError as exc:
+            raise ValueError(f"spec._l2_last_attempt not ISO-8601: {exc}") from None
+    if "_l2_proposal" in body and body["_l2_proposal"] is not None:
+        proposal = body["_l2_proposal"]
+        if not isinstance(proposal, dict):
+            raise ValueError("spec._l2_proposal must be an object")
+        _closed_keys(proposal, {"stages", "created_at", "model"}, "spec._l2_proposal")
+        stages = proposal.get("stages")
+        if not isinstance(stages, dict):
+            raise ValueError("spec._l2_proposal.stages must be an object")
+        _closed_keys(stages, {"extract", "transform"}, "spec._l2_proposal.stages")
+        if not stages:
+            raise ValueError("spec._l2_proposal.stages must have at least one of extract/transform")
+        if "extract" in stages and not isinstance(stages["extract"], dict):
+            raise ValueError("spec._l2_proposal.stages.extract must be an object")
+        if "transform" in stages and not isinstance(stages["transform"], list):
+            raise ValueError("spec._l2_proposal.stages.transform must be a list")
+        created_at = proposal.get("created_at")
+        if not isinstance(created_at, str) or not created_at:
+            raise ValueError("spec._l2_proposal.created_at must be an ISO-8601 string")
+        try:
+            datetime.fromisoformat(created_at)
+        except ValueError as exc:
+            raise ValueError(f"spec._l2_proposal.created_at not ISO-8601: {exc}") from None
+        model_name = proposal.get("model")
+        if not isinstance(model_name, str) or not model_name:
+            raise ValueError("spec._l2_proposal.model must be a non-empty string")
 
 
 _NI_SELF_PLACEHOLDER = "ni:self:"
@@ -872,11 +943,14 @@ def _validate_display(display: object) -> None:
 
 
 def _validate_repair_policy(policy: object) -> None:
+    """Closed shape ``{l1?: bool, l2_frontier?: bool}``. A missing key is treated as
+    False by the engine (see ``spec.get("repair_policy") or {}`` callers), so we only
+    enforce the boolean TYPE when a key is present — an empty dict is valid."""
     node = _require_dict(policy, "spec.repair_policy")
     _closed_keys(node, {"l1", "l2_frontier"}, "spec.repair_policy")
     for k in ("l1", "l2_frontier"):
-        if not isinstance(node.get(k), bool):
-            raise ValueError(f"spec.repair_policy.{k} must be bool")  # noqa: TRY004
+        if k in node and not isinstance(node[k], bool):
+            raise ValueError(f"spec.repair_policy.{k} must be bool")
 
 
 def _validate_model_override(model: object) -> None:
@@ -2226,6 +2300,11 @@ class NIStore:
         old contract (a consent-bypass regression). ``_l1_last_attempt`` STAYS
         (still one attempt per streak — the streak marker itself resets, so the next
         streak gets a fresh attempt regardless).
+
+        §23: also strips ``_l2_proposal`` — a user/agent edit VOIDS any pending L2
+        proposal (same D1 rationale extended to the frontier ladder: the proposal
+        described the pre-edit spec, so applying it after the edit would silently
+        undo the edit). ``_l2_last_attempt`` STAYS (one attempt per streak).
         """
         assert item_id, "item id required"
         assert isinstance(new_spec, dict), "spec must be a dict"
@@ -2238,6 +2317,7 @@ class NIStore:
             validated = validate_spec(new_spec)
             validated.pop("_c2_ok", None)
             validated.pop("_l1_trial", None)
+            validated.pop("_l2_proposal", None)
             validated["contract"] = None  # keep the key present so validators stay happy
             new_rev = int(current["spec_rev"]) + 1
             interval = self._clamp_interval(validated)
@@ -2310,6 +2390,21 @@ class NIStore:
         aad = f"ni_snapshot:{item_id}:{slot}".encode()
         body = json.loads(self._aes.decrypt(bytes(row[0]), bytes(row[1]), aad).decode("utf-8"))
         return {"payload": body, "ok": bool(row[2]), "created_at": str(row[3])}
+
+    def delete_snapshot(self, item_id: str, slot: str) -> None:
+        """Drop ONE (item_id, slot) row. Idempotent — a missing slot is a no-op.
+
+        Phase 4b D5 (audit 2026-09-11): used by ``_clear_last_failure_snapshot`` on
+        success + streak reset. The wildcard delete in ``NIStore.delete`` already
+        covers cascade at item-deletion time; this is the targeted per-slot version.
+        """
+        assert item_id, "item id required"
+        if slot not in _SLOTS:
+            raise ValueError(f"slot must be one of {sorted(_SLOTS)}")
+        self._conn.execute(
+            "DELETE FROM ni_snapshots WHERE item_id = ? AND slot = ?;",
+            [item_id, slot],
+        )
 
     def record_run(self, item_id: str, status: str, *, duration_ms: int,
                    error: str | None, contract_ok: bool | None) -> None:
@@ -2399,13 +2494,22 @@ class NIStore:
         return 0 if row is None else int(row[0])
 
     def clear_failures(self, item_id: str, status: str) -> None:
-        """Reset the failure counter on a good run (state transitions layer atop this)."""
+        """Reset the failure counter on a good run (state transitions layer atop this).
+
+        Phase 4b D8 (audit 2026-09-11): a clean run also VOIDS any parked
+        ``_l2_proposal`` — the proposal described the failing spec, and after a
+        successful run it's stale context (the card's "Fix proposed — review" chip
+        would keep flagging a resolved item forever). Same rationale as §14 D1's
+        "user edit voids the proposal" law, extended to the recovery path.
+        """
         assert item_id and isinstance(status, str), "item id + status required"
         self._conn.execute(
             "UPDATE ni_items SET consecutive_failures = 0, first_failure_at = NULL, "
             "last_checked = now(), last_status = ? WHERE id = ?;",
             [status[:_MAX_STATUS], item_id],
         )
+        # Strip a stale L2 proposal from the sealed spec (rev-preserving; idempotent).
+        self.clear_l2_proposal(item_id)
 
     def get_first_failure_at(self, item_id: str) -> datetime | None:
         """Return the streak marker (F), or None when no active streak exists."""
@@ -2472,16 +2576,18 @@ class NIStore:
     def apply_repair(self, item_id: str, new_spec: dict, *,
                       origin: str = "repair_l1",
                       expected_rev: int | None = None) -> int | None:
-        """§14: apply a repaired spec, keeping contract/_c2_ok/state/counters intact.
+        """§14/§23: apply a repaired spec, keeping contract/_c2_ok/state/counters intact.
 
         Unlike ``update_spec`` — which strips ``_c2_ok`` + ``contract`` because a
         content-shape change invalidates a spec-specific attestation — a repair MUST
         preserve both: §14 forbids the repair reply from touching consent-bearing
         fields (only ``extract`` / ``transform`` may be replaced), and the contract IS
         the repair target so clearing it would make the trial unmeasurable. Stamps
-        ``_l1_last_attempt`` (ISO now) + ``_l1_trial = {"rev_before": N}`` so the next
-        run's success/failure path scores the trial. Bumps ``spec_rev`` and appends a
-        revision (audit spine intact).
+        ``_l1_last_attempt`` (ISO now) + ``_l1_trial = {"rev_before": N, "origin": O}``
+        so the next run's success/failure path scores the trial AND the eventual revert
+        records the honest revision origin (Phase 4b cosmetic, audit 2026-09-11 — ``O``
+        is ``origin``, i.e. ``repair_l1`` for local L1 or ``repair_l2`` for an Apply'd
+        L2 proposal). Bumps ``spec_rev`` and appends a revision (audit spine intact).
 
         D3 (audit 2026-09-09): ``expected_rev`` guards the TOCTOU between the repair
         model call (multi-second) and the write. When set, the write aborts (returns
@@ -2507,7 +2613,11 @@ class NIStore:
             if current["spec"].get("_c2_ok") is True:
                 preserved["_c2_ok"] = True
             preserved["_l1_last_attempt"] = datetime.now(UTC).isoformat()
-            preserved["_l1_trial"] = {"rev_before": current_rev}
+            # Phase 4b cosmetic (audit 2026-09-11): stamp the trial with its own
+            # ``origin`` so a later revert records the honest revision origin —
+            # ``repair_l2`` when this apply came from the L2 proposal route,
+            # ``repair_l1`` for the local-model repair path.
+            preserved["_l1_trial"] = {"rev_before": current_rev, "origin": origin}
             new_rev = current_rev + 1
             nonce, ciphertext = self._seal_item(item_id, preserved)
             self._conn.execute(
@@ -2518,6 +2628,56 @@ class NIStore:
             self._write_revision(item_id, new_rev, preserved, origin)
             self._prune_revisions(item_id)
             return new_rev
+
+    def set_l2_proposal(self, item_id: str, proposal: dict, *,
+                         expected_rev: int) -> bool:
+        """§23: seal ``_l2_proposal`` onto the item's spec (rev-preserving).
+
+        Refuses (returns False) when the current ``spec_rev`` no longer matches
+        ``expected_rev`` — a concurrent user update landed while the multi-minute
+        frontier call was in flight (the 2b D3 lesson applied to L2). Rev is NOT
+        bumped: the proposal is bookkeeping, not a real spec change. Because the
+        revision snapshot at ``current_rev`` is untouched, a later trial revert
+        (post-apply) restores a pre-proposal spec — the consumed proposal cannot
+        re-materialize through the revert path.
+        """
+        assert item_id and isinstance(proposal, dict), "id + proposal required"
+        assert isinstance(expected_rev, int) and expected_rev >= 1, "expected_rev positive"
+        with _SPEC_LOCK:
+            current = self.get_item(item_id)
+            if current is None:
+                return False
+            if int(current["spec_rev"]) != expected_rev:
+                return False
+            spec = dict(current["spec"])
+            spec["_l2_proposal"] = proposal
+            nonce, ciphertext = self._seal_item(item_id, spec)
+            self._conn.execute(
+                "UPDATE ni_items SET nonce = ?, ciphertext = ?, "
+                "updated_at = now() WHERE id = ?;",
+                [nonce, ciphertext, item_id],
+            )
+            return True
+
+    def clear_l2_proposal(self, item_id: str) -> None:
+        """§23: strip ``_l2_proposal`` from the sealed spec (rev-preserving, idempotent).
+
+        No-op when no proposal is present. Rev unchanged (bookkeeping): apply/dismiss
+        route drops the proposal FIRST so a subsequent trial revert cannot restore it.
+        """
+        assert item_id, "item id required"
+        with _SPEC_LOCK:
+            current = self.get_item(item_id)
+            if current is None or "_l2_proposal" not in current["spec"]:
+                return
+            spec = dict(current["spec"])
+            spec.pop("_l2_proposal", None)
+            nonce, ciphertext = self._seal_item(item_id, spec)
+            self._conn.execute(
+                "UPDATE ni_items SET nonce = ?, ciphertext = ?, "
+                "updated_at = now() WHERE id = ?;",
+                [nonce, ciphertext, item_id],
+            )
 
     def get_revision(self, item_id: str, rev: int) -> dict | None:
         """Read one sealed revision (§14 revert needs to replay the pre-repair spec)."""
@@ -2686,17 +2846,21 @@ def tick(app, pass_budget_seconds: float = 20.0,
     and internal.schedule items are unaffected (they don't touch the gateway).
     Doc §8 already promises this behavior.
 
-    Returns ``{"checked": int, "alerts": list, "broken": list, "repaired": list}``:
-    fired alerts (§12), this-tick broken transitions (§6), and this-tick L1 trial
-    successes (§14) are collected here for the scheduler's ``_auto_update_ni`` to
-    post to the carrier row (§12/§14 both surface through the NI carrier).
+    Returns ``{"checked": int, "alerts": list, "broken": list, "repaired": list,
+    "l2_candidates": list}``: fired alerts (§12), this-tick broken transitions
+    (§6), this-tick L1 trial successes (§14) are collected here for the scheduler's
+    ``_auto_update_ni`` to post to the NI carrier; ``l2_candidates`` (§23) are
+    item ids the scheduler hands to ``ni.spawn_l2_worker`` — the tick itself NEVER
+    calls the frontier model (a claudecode turn takes minutes; the tick's budget
+    is 20s).
     """
     assert app is not None, "app required"
     assert pass_budget_seconds > 0, "pass budget must be positive"
     key = getattr(app.state, "master_key", None)
     if key is None:
         # locked — nothing can decrypt
-        return {"checked": 0, "alerts": [], "broken": [], "repaired": []}
+        return {"checked": 0, "alerts": [], "broken": [], "repaired": [],
+                "l2_candidates": []}
     from . import (
         gateway as gateway_mod,  # lazy: keep gateway off ni's import graph edges
     )
@@ -2708,6 +2872,7 @@ def tick(app, pass_budget_seconds: float = 20.0,
     fired: list[dict] = []
     broken: list[dict] = []
     repaired: list[dict] = []
+    l2_candidates: list[str] = []  # §23: item ids the scheduler hands to spawn_l2_worker
     # D5 (audit 2026-09-09): the tick owns local-model discipline for BOTH llm-stage
     # items and §14 repair attempts. ``llm_this_pass`` is the shared slot counter —
     # incremented eagerly when an llm-stage item is admitted to the pass, and again
@@ -2784,6 +2949,7 @@ def tick(app, pass_budget_seconds: float = 20.0,
                 log.warning("ni item run failed with unexpected error: item=%s", item["id"])
                 store.mark_checked(item["id"], "internal")
             _collect_broken_transition(store, item["id"], prior_state, item, broken)
+            _collect_l2_candidate(store, item["id"], l2_candidates)
             checked += 1
     finally:
         try:
@@ -2791,7 +2957,7 @@ def tick(app, pass_budget_seconds: float = 20.0,
         except Exception:
             pass
     return {"checked": checked, "alerts": fired, "broken": broken,
-            "repaired": repaired}
+            "repaired": repaired, "l2_candidates": l2_candidates}
 
 
 def _collect_broken_transition(store: NIStore, item_id: str, prior_state: str,
@@ -2850,12 +3016,14 @@ def run_item(store: NIStore, item_id: str, *, gateway_mod, secrets_store,
                                 history=history, llm_call=llm_call)
     except NIError as exc:
         _handle_failure(store, item, exc, started)
+        _seal_last_failure_snapshot(store, item["id"], exc, raw_excerpt)
         _maybe_repair_l1(store, item, gateway_mod, raw_excerpt, exc,
                          reserve_repair=reserve_repair)
         raise
     except Exception as exc:
         wrapped = NIError("internal", exc.__class__.__name__)
         _handle_failure(store, item, wrapped, started)
+        _seal_last_failure_snapshot(store, item["id"], wrapped, raw_excerpt)
         _maybe_repair_l1(store, item, gateway_mod, raw_excerpt, wrapped,
                          reserve_repair=reserve_repair)
         raise wrapped from None
@@ -2865,12 +3033,14 @@ def run_item(store: NIStore, item_id: str, *, gateway_mod, secrets_store,
     try:
         return _finalize_run(store, item, spec, outputs, started, history=history)
     except NIError as exc:
+        _seal_last_failure_snapshot(store, item["id"], exc, raw_excerpt)
         _maybe_repair_l1(store, item, gateway_mod, raw_excerpt, exc,
                          reserve_repair=reserve_repair)
         raise
     except Exception as exc:
         wrapped = NIError("internal", exc.__class__.__name__)
         _handle_failure(store, item, wrapped, started)
+        _seal_last_failure_snapshot(store, item["id"], wrapped, raw_excerpt)
         _maybe_repair_l1(store, item, gateway_mod, raw_excerpt, wrapped,
                          reserve_repair=reserve_repair)
         raise wrapped from None
@@ -2925,6 +3095,10 @@ def _finalize_run(store: NIStore, item: dict, spec: dict, outputs: dict,
     store.write_snapshot(item["id"], "latest", bound, ok=True)
     store.write_snapshot(item["id"], "last_good", bound, ok=True)
     store.clear_failures(item["id"], "ok")
+    # Phase 4b D5 (audit 2026-09-11): a successful run closes the streak, so the
+    # stale ``last_failure`` snapshot is no longer valid L2 context. Cleared here
+    # (mirrors clear_failures' streak-reset discipline).
+    _clear_last_failure_snapshot(store, item["id"])
     store.record_run(item["id"], "ok", duration_ms=duration_ms, error=None,
                      contract_ok=contract_ok)
     _transition_on_success(store, item, spec, outputs)
@@ -3300,18 +3474,26 @@ def _transition_on_failure(store: NIStore, item: dict, exc: NIError, count: int)
     """§6 failure transitions: degraded -> failing after threshold; broken on the
     escalation rule (8 failures across >=7 days FROM THE STREAK START, F) or a permanent
     refusal.
+
+    Phase 4b D4 (audit 2026-09-11): a broken hop STRIPS any parked ``_l2_proposal`` —
+    a broken item's fix path is edit → re-commission, so a stale proposal on the card
+    is misleading (Apply would 409 anyway; see ``ni_routes.apply_l2_proposal``).
+    Clearing the marker here matches update_spec's "user edit voids the proposal" rule
+    (§23) extended to the ladder's terminal state.
     """
     assert store is not None and item is not None and exc is not None, "args required"
     if exc.kind == "secret_host_mismatch":
         # A credential host mismatch is a permanent refusal — no schedule of retries
         # will ever resolve it (per §6). Escalate straight to broken.
         store.set_state(item["id"], "broken")
+        store.clear_l2_proposal(item["id"])
         return
     if count >= _BROKEN_FAILURE_COUNT:
         first = store.get_first_failure_at(item["id"])
         now = datetime.now(UTC)
         if first is not None and (now - first) >= timedelta(days=_BROKEN_MIN_DAYS):
             store.set_state(item["id"], "broken")
+            store.clear_l2_proposal(item["id"])
             return
     if item["state"] == "commissioning":
         return  # C1 failure stays commissioning per §6 (agent redrafts)
@@ -3553,6 +3735,11 @@ def _spec_with_repaired_stages(current_spec: dict, candidate: dict) -> dict:
     new_spec["pipeline"] = stages
     new_spec.pop("_l1_trial", None)
     new_spec.pop("_l1_last_attempt", None)
+    # §23: a repair CONSUMES any parked L2 proposal — the new pipeline is the
+    # answer, and carrying the proposal forward past apply would leave a stale
+    # "review" flag on the card. Popped alongside the _l1_* markers so the two
+    # ladders share the same "repair clears its own bookkeeping" rule.
+    new_spec.pop("_l2_proposal", None)
     return new_spec
 
 
@@ -3621,11 +3808,13 @@ def _clear_l1_trial(store: NIStore, item_id: str) -> None:
 
 def _revert_l1_trial_if_active(store: NIStore, item_id: str) -> None:
     """§14 trial failure: restore the pre-repair revision, clear ``_l1_trial``, KEEP
-    ``_l1_last_attempt`` (so no second attempt fires this streak).
+    the streak markers (``_l1_last_attempt`` and — Phase 4b D1 — ``_l2_last_attempt``)
+    so no second attempt fires this streak on either ladder.
 
     Reads the ``rev_before`` snapshot from ``ni_revisions`` via ``get_revision``;
-    writes a new revision under origin ``repair_l1`` (audit spine intact) then records
-    a ``repair_reverted`` ni_runs row.
+    writes a new revision under the trial's own origin (``repair_l1`` or ``repair_l2``
+    — Phase 4b cosmetic: the trial marker now carries ``origin``, so a revert of an
+    Apply'd L2 proposal lands under ``repair_l2`` and the audit spine reads honestly).
 
     D2 (audit 2026-09-09): the bail branches clear ``_l1_trial`` INLINE under the
     same lock — calling ``_clear_l1_trial`` would re-acquire the non-reentrant
@@ -3633,9 +3822,17 @@ def _revert_l1_trial_if_active(store: NIStore, item_id: str) -> None:
     ``get_revision`` is wrapped in try/except so a corrupt sealed revision or a
     revision-row that vanished can never leak past bookkeeping; both records the
     revert failure and drops the marker so the item doesn't wedge forever.
+
+    Phase 4b D1 (audit 2026-09-11): the restore branch carries ``_l2_last_attempt``
+    ONTO the restored spec (a rev-preserving system-only marker never lives in the
+    revision snapshot, so without this the revert silently ERASED the one-attempt-
+    per-streak marker and L2 re-fired the same streak, unbounded per Apply). Also
+    pops any ``_l2_proposal``: a proposal is stale context after its trial fails
+    (§23 mirrors §14 D1 — a spec change voids the parked proposal).
     """
     assert store is not None and item_id, "args required"
     revert_error: str | None = None
+    trial_origin = "repair_l1"
     with _SPEC_LOCK:
         current = store.get_item(item_id)
         if current is None:
@@ -3644,6 +3841,9 @@ def _revert_l1_trial_if_active(store: NIStore, item_id: str) -> None:
         if not isinstance(trial, dict):
             return
         rev_before = trial.get("rev_before")
+        candidate_origin = trial.get("origin")
+        if isinstance(candidate_origin, str) and candidate_origin in _REVISION_ORIGINS:
+            trial_origin = candidate_origin
         if not isinstance(rev_before, int) or rev_before < 1:
             _drop_trial_marker_inline(store, item_id, current["spec"])
             revert_error = "bad_rev_before"
@@ -3661,6 +3861,15 @@ def _revert_l1_trial_if_active(store: NIStore, item_id: str) -> None:
                 assert isinstance(prior, dict), "invariant: prior is a dict past this branch"
                 restored = dict(prior)
                 restored["_l1_last_attempt"] = current["spec"].get("_l1_last_attempt")
+                # D1 (Phase 4b): _l2_last_attempt is rev-preserving system state; it
+                # never lives in the revision snapshot, so we must carry it forward
+                # explicitly or L2 re-fires unbounded per Apply.
+                l2_stamp = current["spec"].get("_l2_last_attempt")
+                if l2_stamp is not None:
+                    restored["_l2_last_attempt"] = l2_stamp
+                else:
+                    restored.pop("_l2_last_attempt", None)
+                restored.pop("_l2_proposal", None)  # stale after a failed trial
                 restored.pop("_l1_trial", None)
                 new_rev = int(current["spec_rev"]) + 1
                 nonce, ciphertext = store._seal_item(item_id, restored)
@@ -3669,7 +3878,7 @@ def _revert_l1_trial_if_active(store: NIStore, item_id: str) -> None:
                     "updated_at = now() WHERE id = ?;",
                     [nonce, ciphertext, new_rev, item_id],
                 )
-                store._write_revision(item_id, new_rev, restored, "repair_l1")
+                store._write_revision(item_id, new_rev, restored, trial_origin)
                 store._prune_revisions(item_id)
     store.record_run(item_id, "repair_reverted", duration_ms=0,
                      error=revert_error, contract_ok=None)
@@ -3689,6 +3898,319 @@ def _drop_trial_marker_inline(store: NIStore, item_id: str, spec: dict) -> None:
         "UPDATE ni_items SET nonce = ?, ciphertext = ?, updated_at = now() WHERE id = ?;",
         [nonce, ciphertext, item_id],
     )
+
+
+# --- §23 L2 frontier repair (park-only) -----------------------------------
+#
+# The frontier call (claudecode/sonnet, MIN_TIMEOUT floor of 300s) NEVER runs
+# inside the tick — the pass budget is 20s. The tick MARKS eligibility only;
+# ``spawn_l2_worker`` is fired by the scheduler after the tick, a bounded daemon
+# thread (agent_routes._spawn precedent) processes at most one item, and the
+# result is a stored ``_l2_proposal`` (park-only — the user reviews before it
+# applies). Claude Code containment (empty-toolset agent, --setting-sources "",
+# stdin-only content — see claudecli.py module docstring) means the model has
+# no tool surface + no ambient settings for this call.
+
+_L2_WORKER_LOCK = threading.Lock()  # single-flight guard for the module-wide worker
+
+
+def _collect_l2_candidate(store: NIStore, item_id: str,
+                          candidates: list[str]) -> None:
+    """Mark eligibility ONLY — the tick must never call the frontier model itself.
+
+    A ``failing`` item that has already burned its one L1 attempt this streak +
+    opts into L2 + has no active L1 trial + has no L2 attempt this streak + no
+    pending proposal joins ``candidates``. The scheduler hands the list to
+    ``spawn_l2_worker`` after the tick returns; a per-tick recheck by the worker
+    keeps state honest across a slow model call.
+    """
+    assert store is not None and item_id, "store + id required"
+    assert isinstance(candidates, list), "candidates must be a list"
+    fresh = store.get_item(item_id)
+    if fresh is None:
+        return
+    if _l2_eligible(fresh, fresh["spec"]):
+        candidates.append(item_id)
+
+
+def _l2_eligible(item: dict, spec: dict) -> bool:
+    """§23 eligibility gate — every clause is silent on failure (a skipped item
+    stays failing on the ladder toward broken).
+
+    Gates (ALL required):
+      * state == "failing" (streak ongoing; §23 fires "after L1 exhausts");
+      * ``repair_policy.l2_frontier`` is True (per-item opt-in, default false);
+      * L1 exhausted this streak — either ``repair_policy.l1`` is False (L1 will
+        never fire, so the ladder is exhausted by definition) OR ``_l1_last_attempt``
+        is present AND at/after ``first_failure_at`` (Phase 4b D6, audit 2026-09-11 —
+        previously an L2-only item was UNREACHABLE because L1 never stamped);
+      * no ``_l1_trial`` active (an in-flight L1 trial hasn't scored yet);
+      * ``_l2_last_attempt`` absent OR strictly before ``first_failure_at``
+        (one L2 attempt per streak, same rule as L1);
+      * no ``_l2_proposal`` pending (waiting on the user to Apply/Dismiss).
+
+    NB (D6): with ``repair_policy.l1=True``, the L1-attempted clause still gates —
+    an item with L1 enabled but no local model available STAYS ineligible until L1
+    actually gets a turn. That limitation is honestly stated in §23; the fix here
+    reaches the specific case the audit named (L1 off, L2 on) without widening the
+    L2 door for items where L1 could still fire.
+    """
+    assert isinstance(item, dict) and isinstance(spec, dict), "item + spec required"
+    if item.get("state") != "failing":
+        return False
+    policy = spec.get("repair_policy") or {}
+    if not policy.get("l2_frontier"):
+        return False
+    first_failure = item.get("first_failure_at")
+    if first_failure is None:
+        return False
+    l1_enabled = bool(policy.get("l1"))
+    l1_attempted = _l1_already_tried_this_streak(
+        spec.get("_l1_last_attempt"), first_failure
+    )
+    if l1_enabled and not l1_attempted:
+        return False
+    if isinstance(spec.get("_l1_trial"), dict):
+        return False
+    if _l2_already_tried_this_streak(spec.get("_l2_last_attempt"), first_failure):
+        return False
+    return not isinstance(spec.get("_l2_proposal"), dict)
+
+
+def _l2_already_tried_this_streak(last_iso: object,
+                                   first_failure: datetime | None) -> bool:
+    """True when ``_l2_last_attempt`` exists and is at/after the streak start.
+
+    Mirrors ``_l1_already_tried_this_streak`` exactly — the two ladders share
+    the "one attempt per streak" bookkeeping shape.
+    """
+    assert isinstance(last_iso, (str, type(None))), "last must be str or None"
+    if not isinstance(last_iso, str) or not last_iso or first_failure is None:
+        return False
+    try:
+        last_dt = datetime.fromisoformat(last_iso)
+    except ValueError:
+        return False
+    if last_dt.tzinfo is None:
+        last_dt = last_dt.replace(tzinfo=UTC)
+    return last_dt >= first_failure
+
+
+def spawn_l2_worker(app, item_ids: list[str]) -> bool:
+    """Fire the module-wide L2 worker on a bounded daemon thread (single-flight).
+
+    Non-blocking tryacquire: when a worker is already running we DROP this call
+    silently — the candidates recur next tick, so nothing is lost, and only one
+    frontier call ever runs at a time process-wide (§23 engine hygiene: "one in
+    flight process-wide"). App shutdown abandons the thread harmlessly
+    (proposal generation is idempotent per streak; ``_l2_last_attempt`` is the
+    marker that would prevent a re-fire).
+    """
+    assert app is not None, "app required"
+    assert isinstance(item_ids, list), "item_ids must be a list"
+    if not item_ids:
+        return False
+    if not _L2_WORKER_LOCK.acquire(blocking=False):
+        return False  # another worker in flight — candidates recur next tick
+
+    def _run() -> None:
+        try:
+            _run_l2_worker(app, item_ids)
+        except Exception as exc:  # last-resort net: a worker error must not wedge the app
+            log.warning("ni L2 worker failed: %s", exc)
+        finally:
+            _L2_WORKER_LOCK.release()
+
+    # Phase 4b D7 (audit 2026-09-11): if the OS refuses to spawn a thread
+    # (RuntimeError: can't start new thread — resource exhaustion), release the
+    # single-flight lock so the next tick can retry. Without this the lock leaks
+    # permanently and L2 stops firing for the process's lifetime.
+    try:
+        threading.Thread(target=_run, name="ni-l2-worker", daemon=True).start()
+    except Exception as exc:
+        _L2_WORKER_LOCK.release()
+        log.warning("ni L2 worker spawn refused: %s", exc)
+        return False
+    return True
+
+
+def _run_l2_worker(app, item_ids: list[str]) -> None:
+    """Process AT MOST ONE still-eligible id from ``item_ids`` on this call.
+
+    Fresh per-thread cursor + fresh ``NIStore`` (DuckDB cursors are not thread-
+    safe — the same rule the scheduler uses in ``_run_one``). The eligibility
+    recheck runs against the fresh cursor so a user edit / prior worker landing
+    a proposal since ``_collect_l2_candidate`` marked the id is honored.
+    Carrier notice is posted from the worker directly (per-thread ScheduleStore
+    on the same cursor) since the call is async-detached from the scheduler.
+    """
+    assert app is not None, "app required"
+    assert isinstance(item_ids, list), "item_ids must be a list"
+    key = getattr(app.state, "master_key", None)
+    if key is None:
+        return  # locked between tick and worker — abandon; next tick re-marks
+    from . import (
+        gateway as gateway_mod,  # lazy: keep gateway off ni's import graph edges
+    )
+    from .scheduler import ScheduleStore
+
+    cursor = app.state.db.cursor()
+    try:
+        store = NIStore(cursor, key)
+        for item_id in item_ids[:_MAX_ITEMS_PER_PASS]:  # bounded: same cap as the tick
+            fresh = store.get_item(item_id)
+            if fresh is None or not _l2_eligible(fresh, fresh["spec"]):
+                continue
+            notice = _attempt_l2_repair(store, fresh, gateway_mod)
+            if notice is not None:
+                _post_l2_carrier_notice(ScheduleStore(cursor, key), notice)
+            return  # one item per spawn (§23)
+    finally:
+        try:
+            cursor.close()
+        except Exception:
+            pass
+
+
+def _post_l2_carrier_notice(schedules_store, notice: dict) -> None:
+    """Post the "<title>: a proposed fix is ready to review." notice via the NI
+    carrier (§17 kind "proposal", added to _NOTICE_KIND_BY_STATUS in ni_routes).
+
+    Best-effort — a failed record_ni_run must never leak past the worker.
+    """
+    assert schedules_store is not None and isinstance(notice, dict), "args required"
+    from .scheduler import post_ni_carrier_notices  # lazy: avoid circular import
+    try:
+        post_ni_carrier_notices(schedules_store, [], [], proposed=[notice])
+    except Exception as exc:  # never re-raise past the worker's own bookkeeping
+        log.warning("ni L2 carrier post failed: %s", exc)
+
+
+def _attempt_l2_repair(store: NIStore, item: dict, gateway_mod) -> dict | None:
+    """Run one frontier turn: stamp attempt → prompt → parse → validate →
+    seal proposal (park-only). Returns the carrier-notice dict on success, else
+    None.
+
+    Attempt-stamping is FIRST (under _SPEC_LOCK inside ``_stamp_l2_last_attempt``)
+    so one attempt burns even if the call crashes — mirrors §14's D5 discipline.
+    ``spec_rev`` is captured BEFORE the model call; the sealed write refuses
+    (returns False) when the current rev no longer matches (2b D3 lesson).
+
+    Failure taxonomy (all record repair_l2_failed rows):
+      * ``not_connected`` — Claude Code serve-time gate refused (GatewayError 403);
+      * ``call_failed`` — any other GatewayError from the CLI call;
+      * ``parse_or_shape`` — reply missing / not JSON / extra keys / bad type;
+      * ``structural`` — no matching stage kind in the pipeline to replace;
+      * ``invalid`` — candidate stages fail spec-level validation;
+      * ``spec_changed`` — TOCTOU: user updated the spec during the call.
+    """
+    assert store is not None and item is not None, "store + item required"
+    started = time.monotonic()
+    _stamp_l2_last_attempt(store, item["id"])  # one attempt per streak, crash-proof
+    expected_rev = int(item["spec_rev"])
+    # Phase 4b D5 (audit 2026-09-11): the L2 prompt now rides the SAME envelope §23
+    # promises — real failure class + detail + neutralized raw-payload excerpt — read
+    # out of the sealed ``last_failure`` slot the run-failure path seals for us.
+    # Absent slot (first-ever streak, or corrupt slot) degrades to class-only, matching
+    # the prior behavior of a bare last_status string; the prompt still parses.
+    failure = _read_last_failure_snapshot(store, item["id"])
+    if isinstance(failure, dict):
+        exc_kind = str(failure.get("class") or item.get("last_status") or "unknown")
+        exc_detail = str(failure.get("detail") or "")
+        raw_excerpt = str(failure.get("excerpt") or "")
+    else:
+        exc_kind = str(item.get("last_status") or "unknown")
+        exc_detail = ""
+        raw_excerpt = ""
+    exc_for_prompt = NIError(exc_kind, exc_detail)
+    prompt = _build_l1_repair_prompt(item["spec"], exc_for_prompt, raw_excerpt)
+    text = _l2_call(gateway_mod, prompt)
+    if text is None:  # already recorded (not_connected / call_failed)
+        _record_l2_failed(store, item["id"], started, "call_failed")
+        return None
+    if text == _L2_NOT_CONNECTED:
+        _record_l2_failed(store, item["id"], started, "not_connected")
+        return None
+    candidate = _parse_l1_repair_reply(text)
+    if candidate is None:
+        _record_l2_failed(store, item["id"], started, "parse_or_shape")
+        return None
+    try:
+        new_spec = _spec_with_repaired_stages(item["spec"], candidate)
+    except ValueError:
+        _record_l2_failed(store, item["id"], started, "structural")
+        return None
+    try:
+        validate_spec(new_spec)
+    except ValueError:
+        _record_l2_failed(store, item["id"], started, "invalid")
+        return None
+    proposal = {"stages": candidate, "created_at": datetime.now(UTC).isoformat(),
+                "model": _L2_FRONTIER_MODEL}
+    stored = store.set_l2_proposal(item["id"], proposal, expected_rev=expected_rev)
+    if not stored:
+        _record_l2_failed(store, item["id"], started, "spec_changed")
+        return None
+    duration_ms = int((time.monotonic() - started) * 1000)
+    store.record_run(item["id"], "repair_l2_proposed", duration_ms=duration_ms,
+                     error=None, contract_ok=None)
+    return {"item_id": item["id"], "title": str(item["spec"].get("title") or "")}
+
+
+# Sentinel returned by _l2_call for the "not connected" (403) branch — §23 says a
+# 403 skips silently. We still surface an audit row (repair_l2_failed, class
+# "not_connected") so the retry surface is honest without being loud.
+_L2_NOT_CONNECTED = "__L2_NOT_CONNECTED__"
+
+
+def _l2_call(gateway_mod, prompt: str) -> str | None:
+    """One frontier turn (claudecode/sonnet). Returns:
+      * the reply text on success;
+      * ``_L2_NOT_CONNECTED`` on GatewayError 403 (serve-time gate refused);
+      * ``None`` on any other GatewayError (mapped to ``call_failed``).
+    """
+    assert gateway_mod is not None, "gateway required"
+    assert isinstance(prompt, str) and prompt, "prompt required"
+    try:
+        data = gateway_mod.chat([{"role": "user", "content": prompt}],
+                                 _L2_FRONTIER_MODEL,
+                                 timeout=_L2_FRONTIER_TIMEOUT_S)
+    except gateway_mod.GatewayError as exc:
+        if getattr(exc, "status_code", 0) == 403:
+            return _L2_NOT_CONNECTED
+        return None
+    text = gateway_mod.completion_text(data) or ""
+    return text if isinstance(text, str) else ""
+
+
+def _stamp_l2_last_attempt(store: NIStore, item_id: str) -> None:
+    """Set ``_l2_last_attempt = now(iso)`` on the sealed spec (no rev bump —
+    bookkeeping). One attempt per streak, mirrors ``_stamp_l1_last_attempt``.
+    """
+    assert store is not None and item_id, "args required"
+    with _SPEC_LOCK:
+        current = store.get_item(item_id)
+        if current is None:
+            return
+        spec = dict(current["spec"])
+        spec["_l2_last_attempt"] = datetime.now(UTC).isoformat()
+        nonce, ciphertext = store._seal_item(item_id, spec)
+        store.conn.execute(
+            "UPDATE ni_items SET nonce = ?, ciphertext = ?, updated_at = now() "
+            "WHERE id = ?;",
+            [nonce, ciphertext, item_id],
+        )
+
+
+def _record_l2_failed(store: NIStore, item_id: str, started: float,
+                       reason: str) -> None:
+    """Append one ni_runs row for a §23 L2 attempt outcome. ``_l2_last_attempt``
+    is stamped by the caller (``_attempt_l2_repair``) BEFORE the call so one
+    attempt burns per streak even when the call crashes."""
+    assert store is not None and item_id and reason, "args required"
+    duration_ms = int((time.monotonic() - started) * 1000)
+    store.record_run(item_id, "repair_l2_failed", duration_ms=duration_ms,
+                     error=reason[:_MAX_STATUS], contract_ok=None)
 
 
 # --- source dispatch ------------------------------------------------------
@@ -3932,6 +4454,68 @@ def _payload_excerpt_for_repair(payload: object) -> str:
         return _serialize_and_truncate(payload, _MAX_L1_PAYLOAD_BYTES)
     except (TypeError, ValueError):
         return repr(payload)[:_MAX_L1_PAYLOAD_BYTES]
+
+
+# --- Phase 4b D5: last_failure snapshot (fresh L2 repair context) ----------
+#
+# When a run fails on a spec-shape class (the L1/L2 repair-eligible set), seal a
+# bounded snapshot of that failure — class + host-free detail + the neutralized
+# payload excerpt + ISO timestamp — so a later L2 worker call reads REAL failure
+# context out of storage instead of the empty strings the prior code sent (§23's
+# "what is sent" promise). Absent slot = current empty behavior (the worker degrades
+# to class-only). Cleared on success / streak reset (mirrors §14's "trial closes"
+# discipline). Cascades on delete via NIStore.delete's wildcard.
+
+def _seal_last_failure_snapshot(store: NIStore, item_id: str, exc: NIError,
+                                 raw_excerpt: str) -> None:
+    """Seal a bounded ``last_failure`` snapshot for spec-shape failures.
+
+    Silently skipped for transport-class failures (fetch_failed, secret_*, model_*,
+    llm_requires_local) — those are L0's / the user's domain and never reach L1/L2
+    repair. Writes are best-effort: a snapshot failure must NEVER shadow the real
+    failure the tick is already recording (mirrors the ``latest`` marker in
+    ``_handle_failure``).
+    """
+    assert store is not None and item_id and exc is not None, "args required"
+    assert isinstance(raw_excerpt, str), "raw excerpt must be a string"
+    if exc.kind not in _L1_SPEC_SHAPE_CLASSES:
+        return
+    payload = {
+        "excerpt": raw_excerpt[:_MAX_L1_PAYLOAD_BYTES],
+        "class": exc.kind[:_MAX_STATUS],
+        "detail": (exc.detail or "")[:500],
+        "ts": datetime.now(UTC).isoformat(),
+    }
+    try:
+        store.write_snapshot(item_id, "last_failure", payload, ok=False)
+    except Exception:  # bookkeeping must never mask the caller's own failure
+        log.warning("ni last_failure snapshot skipped: item=%s", item_id)
+
+
+def _clear_last_failure_snapshot(store: NIStore, item_id: str) -> None:
+    """Drop the ``last_failure`` snapshot for this item (streak-reset / success)."""
+    assert store is not None and item_id, "args required"
+    try:
+        store.delete_snapshot(item_id, "last_failure")
+    except Exception:  # a delete failure never blocks the success path
+        log.warning("ni last_failure snapshot clear skipped: item=%s", item_id)
+
+
+def _read_last_failure_snapshot(store: NIStore, item_id: str) -> dict | None:
+    """Return the sealed ``last_failure`` payload dict, or None when absent.
+
+    Wraps ``read_snapshot`` so a corrupt slot decrypt (best-effort read) never
+    leaks a raw crypto exception past the L2 worker's own bookkeeping.
+    """
+    assert store is not None and item_id, "args required"
+    try:
+        snap = store.read_snapshot(item_id, "last_failure")
+    except Exception:  # corrupt sealed slot — degrade to class-only prompt
+        return None
+    if not isinstance(snap, dict):
+        return None
+    body = snap.get("payload")
+    return body if isinstance(body, dict) else None
 
 
 def _fetch_internal_schedule(source: dict, schedules_store) -> dict:
