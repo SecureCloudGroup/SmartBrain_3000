@@ -263,6 +263,10 @@ export interface PendingAction {
   remember_mode?: "tool" | "site" | null;
   // The host parsed from this pending call's URL, when remember_mode is "site".
   remember_host?: string | null;
+  // Set on a parked create_ni_item/update_ni_item whose source is `mcp_tool` (§22):
+  // the human-friendly label of the MCP server the card would call. Lets the consent
+  // surface name the exact destination instead of a generic phrase.
+  mcp_label?: string;
 }
 
 // One site-scoped consent entry: URL tools remember per-host, so the same tool can
@@ -736,6 +740,38 @@ export interface NiItemDetail {
   spec_rev: number;
   runs: NiRun[];
 }
+
+// ni outbound MCP server registry (ni-format §22). Desktop-local CRUD — a server
+// config carries execution/connection authority (stdio spawns a user process; http
+// bypasses netguard on the user's own address), so it is entered via UI only,
+// never by an agent tool. Storage is sealed on the server; the client only handles
+// the plaintext shape below.
+export interface NiMcpServer {
+  id: string;
+  label: string;
+  transport: "stdio" | "http";
+  // Stdio-only: the command the user's server binary was reached at, plus its argv.
+  command?: string;
+  args?: string[];
+  // Http-only: the URL the user typed (frozen thereafter — §22 no netguard exception).
+  url?: string;
+  enabled: boolean;
+}
+
+// The two shapes the writes accept — the server enforces transport-consistency, the
+// client just types the payload so an omitted field is a compile error, not a 400.
+export interface NiMcpServerCreate {
+  label: string;
+  transport: "stdio" | "http";
+  command?: string;
+  args?: string[];
+  url?: string;
+  enabled: boolean;
+}
+// PUT replaces the row — the backend requires the full body (partial writes 422),
+// so this mirrors NiMcpServerCreate exactly; a "Partial<>" here would silently invite
+// the exact class of bug the toggle hit (a body missing label/transport).
+export type NiMcpServerUpdate = NiMcpServerCreate;
 
 export interface DeviceInfo {
   device_id: string;
@@ -1422,6 +1458,31 @@ export const api = {
   mcpToken: () => req<{ token: string | null }>("/api/mcp/token", { headers: { "x-sb-local": "1" } }),
   mcpNewToken: () => req<{ token: string }>("/api/mcp/token", { method: "POST", headers: { "x-sb-local": "1" } }),
   mcpRevokeToken: () => req<{ ok: boolean }>("/api/mcp/token", { method: "DELETE", headers: { "x-sb-local": "1" } }),
+
+  // ni outbound mcp (ni-format §22) — the user's configured MCP servers that Neural Interface
+  // cards may call as a source. Registry is server-local; SmartBrain never reads ambient
+  // `.mcp.json`. CRUD writes are Desktop-local (x-sb-local; the bridge strips it) — a server
+  // config is execution/connection authority (§22 "explicit UI act" law); the list read stays
+  // open so a paired phone can at least see what its Desktop is configured with.
+  niMcpServers: () => req<{ servers: NiMcpServer[] }>("/api/ni/mcp-servers"),
+  niMcpAdd: (body: NiMcpServerCreate) =>
+    req<{ id: string }>("/api/ni/mcp-servers", {
+      method: "POST",
+      headers: { "x-sb-local": "1" },
+      body: JSON.stringify(body),
+    }),
+  niMcpUpdate: (id: string, body: NiMcpServerUpdate) =>
+    req<{ ok: boolean }>(`/api/ni/mcp-servers/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      headers: { "x-sb-local": "1" },
+      body: JSON.stringify(body),
+    }),
+  // 409 with a detail sentence when items still reference this server (surfaced verbatim).
+  niMcpDelete: (id: string) =>
+    req<{ ok: boolean }>(`/api/ni/mcp-servers/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      headers: { "x-sb-local": "1" },
+    }),
 
   // neural interface (ni-format §10). All routes go through req<T> so 423 handling
   // (redirect to /unlock + client state flip) is automatic. The credential PUT is the

@@ -29,4 +29,34 @@ describe("promotedLine", () => {
     expect(promotedLine("create_ni_item", "not-json")).toBeNull();
     expect(promotedLine("create_ni_item", "")).toBeNull();
   });
+
+  it("names the server label + tool for an mcp_tool source so the consent surface reads at a glance (§22)", () => {
+    const out = promotedLine(
+      "create_ni_item",
+      { source: { type: "mcp_tool", server_id: "srv-1", tool: "query", arguments: { sql: "SELECT 1" } } },
+      "Home Postgres",
+    );
+    expect(out).toBe("MCP: Home Postgres → query");
+  });
+
+  it("falls back to a generic phrase when the caller hasn't threaded a label through", () => {
+    const out = promotedLine("create_ni_item", {
+      source: { type: "mcp_tool", server_id: "srv-1", tool: "query", arguments: { sql: "SELECT 1" } },
+    });
+    expect(out).toBe("MCP: your configured server → query");
+  });
+
+  it("handles a JSON-string args carrying an mcp_tool source (history args_summary shape)", () => {
+    const args = JSON.stringify({
+      source: { type: "mcp_tool", server_id: "srv-2", tool: "list_tables", arguments: {} },
+      title: "t",
+    });
+    const out = promotedLine("update_ni_item", args, "Home Postgres");
+    expect(out).toBe("MCP: Home Postgres → list_tables");
+  });
+
+  it("returns null for an mcp_tool source missing server_id or tool", () => {
+    expect(promotedLine("create_ni_item", { source: { type: "mcp_tool", tool: "query" } })).toBeNull();
+    expect(promotedLine("create_ni_item", { source: { type: "mcp_tool", server_id: "srv-1" } })).toBeNull();
+  });
 });
