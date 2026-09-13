@@ -3,7 +3,7 @@
 # winget marks the verified download as a trusted zone after checking this SHA256, which suppresses
 # the SmartScreen "Windows protected your PC" prompt for an unsigned exe. No code-signing cert needed.
 PackageIdentifier: SecureCloudGroup.SmartBrain
-PackageVersion: 0.9.38
+PackageVersion: 0.10.0
 InstallerType: zip
 NestedInstallerType: portable
 NestedInstallerFiles:
@@ -11,7 +11,7 @@ NestedInstallerFiles:
     PortableCommandAlias: smartbrain
 Installers:
   - Architecture: x64
-    InstallerUrl: https://github.com/SecureCloudGroup/SmartBrain_3000/releases/download/v0.9.38/SmartBrain-windows.zip
-    InstallerSha256: D11C1E7D673E0ABE67BF1016CD96DC8962DF9F9242886DB55BD78CCD8AA326A0
+    InstallerUrl: https://github.com/SecureCloudGroup/SmartBrain_3000/releases/download/v0.10.0/SmartBrain-windows.zip
+    InstallerSha256: 8C70C6BB8ADB355405DF259B94634CC1D0698DB275DCBA872BA1876BFE13F3DB
 ManifestType: installer
 ManifestVersion: 1.6.0
