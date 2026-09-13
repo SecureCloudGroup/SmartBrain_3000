@@ -24,6 +24,10 @@ export function iconForTool(tool: string): IconName {
 //                             phrase when the caller didn't resolve a label yet)
 //   internal.ni (§25)      → "Combines: <title>, <title>" (falls back to "other cards"
 //                             when the caller hasn't threaded titles through yet)
+// create_ni_item_from_recipe never carries a source object — the recipe's url_template
+// is resolved server-side from the sealed catalog. The consent surface prints
+// "Fetches: <recipeUrl>" (falls back to "a vetted catalog source" when the caller
+// hasn't threaded the resolved url through yet).
 // Handles both an object (pending tiles) and a JSON string (history args_summary). A
 // params-substituted URL simply renders the template — that's fine; the template still
 // names the host. `arguments` themselves already render whole via fmtArgs.
@@ -32,10 +36,17 @@ export function promotedLine(
   args: unknown,
   mcpLabel?: string,
   compositeTitles?: string[],
+  recipeUrl?: string,
 ): string | null {
   console.assert(typeof tool === "string", "promotedLine: tool is string");
   console.assert(args !== undefined, "promotedLine: args defined");
   const t = tool.toLowerCase();
+  if (t === "create_ni_item_from_recipe") {
+    const url = typeof recipeUrl === "string" && recipeUrl.length > 0
+      ? recipeUrl
+      : "a vetted catalog source";
+    return `Fetches: ${url}`;
+  }
   if (t !== "create_ni_item" && t !== "update_ni_item") return null;
   let obj: unknown = args;
   if (typeof args === "string") {

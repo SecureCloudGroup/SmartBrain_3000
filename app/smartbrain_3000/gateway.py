@@ -599,6 +599,7 @@ def chat_with_tools(
     *,
     client: httpx.Client | None = None,
     timeout: float = 60.0,
+    session: claudecli.TurnSession | None = None,
 ) -> dict:
     """Chat completion with OpenAI tool-calling enabled; return parsed JSON.
 
@@ -606,13 +607,17 @@ def chat_with_tools(
     upstream error, raises GatewayError with ``tools_unsupported`` set when the
     failure looks like the model/provider not supporting tools — so the agent
     loop can degrade to a plain completion instead of failing the turn.
+
+    ``session`` is used ONLY by the claudecode branch (turn-scoped CLI continuity —
+    see ``claudecli.TurnSession``); Bifrost-backed providers ignore it because
+    session state lives inside the CLI process.
     """
     assert messages, "messages must be non-empty"
     assert model, "model must be specified"
     assert tools_spec, "tools spec must be non-empty"
     if claudecli.is_claudecode(model):  # tool offers ride the text protocol (see claudecli)
         return claudecli.chat(messages, model, timeout=max(timeout, claudecli.MIN_TIMEOUT),
-                              tools_spec=tools_spec)
+                              tools_spec=tools_spec, session=session)
     client, owns_client = _resolve_client(client, timeout)
     try:
         # Pass timeout per-request: the pooled client (always installed in prod) has a

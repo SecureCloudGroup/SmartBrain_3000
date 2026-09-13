@@ -15,11 +15,22 @@ from __future__ import annotations
 
 import json
 import logging
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 
-from . import gateway, ingest, kbindex, netguard, ni, ni_catalog, search, vault_format
+from . import (
+    gateway,
+    ingest,
+    kbindex,
+    netguard,
+    ni,
+    ni_catalog,
+    ni_library,
+    search,
+    vault_format,
+)
 from . import (
     summarize as docsum,  # aliased: this module already defines a summarize() helper (line ~845)
 )
@@ -734,11 +745,33 @@ def _delete_schedule(ctx: ToolContext, args: dict) -> dict:
 _NI_SPEC_GUIDE = """\
 # Neural Interface (NI) spec grammar reference
 
-You are drafting create_ni_item / update_ni_item. The FULL spec is validated
-server-side; a malformed spec fails AFTER the user approves the card. Consult
-this reference to get the shape right on the first draft — the write tools
-also PREVALIDATE the spec before the card parks, so a bad draft comes back to
-you as an inline error, not a broken tile.
+Authoring order (§26/§27, mandated):
+
+1. **Recipes first (create_ni_item_from_recipe).** Every catalog entry from
+   list_ni_catalog is a fully-tested RECIPE — spec, pipeline, and scene are
+   already proven against a real response shape. Fill closed parameter slots;
+   never author extract paths.
+2. **Sample-grounded freeform (create_ni_item).** When no recipe fits: fetch
+   ONE real sample with the approval-gated web_fetch, pass it to
+   derive_ni_paths (already-parsed JSON goes as ``sample``; raw fetched TEXT
+   goes as ``sample_json`` — exactly one of the two), then build extract
+   stages ONLY from the paths that tool offers. Blind drafting from imagined
+   response shapes is the FIELD failure the recipes track exists to eliminate.
+3. **Never claim a card is live** you just created. The create tools return
+   the LANDING STATE — commissioning (needs a scheduler tick + user verdict)
+   or draft (needs a credential or explicit Activate). Any item with a
+   secret-kind param lands draft; the CARD is what the user activates.
+   read_ni_item returns ``state_explanation`` + ``user_next_action`` — read
+   them and report state truth, not "it's ready" or "it's showing data now".
+4. **Duplicate titles bounce.** create_ni_item / create_ni_item_from_recipe
+   refuse a case-insensitive title match against an existing card unless the
+   caller passes ``allow_duplicate: true``; the error names the existing
+   card and points at update_ni_item.
+
+The FULL spec is validated server-side; a malformed spec fails AFTER the user
+approves the card. Consult this reference to get the shape right on the first
+draft — the write tools also PREVALIDATE the spec before the card parks, so a
+bad draft comes back to you as an inline error, not a broken tile.
 
 ## Top-level spec fields
 - title (str, <=300), goal (str, <=5000), interval_minutes (int)
@@ -1000,13 +1033,17 @@ def _list_ni_items(ctx: ToolContext, args: dict) -> dict:
 
 
 def _read_ni_item(ctx: ToolContext, args: dict) -> dict:
-    """OBSERVE: read one NI item — spec (secret names only), health, and latest bound payload.
+    """OBSERVE: read one NI item — spec (secret names only), health, latest bound payload,
+    deterministic ``state_explanation`` / ``user_next_action``, journal (§28), and the
+    sealed ``last_failure`` excerpt (§27, http sources only) when present.
 
     The bound payload is fetched external content (or a model completion, or a prior
     scheduled-run message), so the result is prefixed with a provenance line naming
     the source — the "outside words are data" rule NI reuses from web_fetch / email_read.
     Secret values NEVER appear: the spec stores secret NAMES only (``$secret`` refs),
     and this handler returns the spec verbatim; nothing here resolves a credential.
+    ``state_explanation`` + ``user_next_action`` name state truth so the model reports
+    what the card actually is, not "it's live now" on a still-draft item.
     """
     assert ctx.ni is not None, "neural interface unavailable"
     assert args.get("item_id"), "item_id required"
@@ -1021,11 +1058,14 @@ def _read_ni_item(ctx: ToolContext, args: dict) -> dict:
         latest = ctx.ni.read_snapshot(item["id"], "latest")
         snap = latest if (latest and latest["ok"]) else ctx.ni.read_snapshot(item["id"], "last_good")
     line = external_provenance(_ni_source_provenance(item["spec"].get("source")))
+    explanation, next_action = _explain_state(item)
     return {
         "provenance": line,  # FIRST key — the warning is read before the payload
         "id": item["id"],
         "title": item["spec"].get("title", ""),
         "state": item["state"],
+        "state_explanation": explanation,
+        "user_next_action": next_action,
         "enabled": item["enabled"],
         "interval_minutes": item["interval_minutes"],
         "last_checked": item["last_checked"],
@@ -1035,7 +1075,128 @@ def _read_ni_item(ctx: ToolContext, args: dict) -> dict:
         "payload": snap["payload"] if snap else None,
         "payload_ok": snap["ok"] if snap else None,
         "payload_at": snap["created_at"] if snap else None,
+        "journal": ctx.ni.read_journal(item["id"]),
+        "last_failure": _last_failure_for_read(ctx.ni, item),
         "runs": ctx.ni.list_runs(item["id"], limit=20),
+    }
+
+
+def _secret_params(spec: dict) -> list[dict]:
+    """Return every declared secret-kind param as ``[{name, label}]``. Bounded by _MAX_PARAMS.
+
+    Shared by the create landing rule (any secret param -> draft), the read
+    explanation (missing credential wording), and the board row's
+    ``needs_credentials`` list on the route side.
+    """
+    assert isinstance(spec, dict), "spec must be a dict"
+    out: list[dict] = []
+    for name, param in (spec.get("params") or {}).items():  # bounded by _MAX_PARAMS
+        if not (isinstance(param, dict) and param.get("kind") == "secret"):
+            continue
+        label = param.get("label") if isinstance(param.get("label"), str) else ""
+        out.append({"name": str(name), "label": label or str(name)})
+    return out
+
+
+def _explain_state(item: dict) -> tuple[str, str]:
+    """§28: deterministic (explanation, next_action) strings per state.
+
+    The tool has no SecretStore (ctx.ni carries no credentials by design), so
+    ``draft`` with any secret param is described as "waiting for the user to add
+    the '<label>' key on the card" — the honest posture the field task called
+    for. Every state is covered so the caller never sees a blank explanation.
+    """
+    assert isinstance(item, dict), "item must be a dict"
+    state = item["state"]
+    spec = item["spec"] or {}
+    title = str(spec.get("title") or "")
+    secrets = _secret_params(spec)
+    status = str(item.get("last_status") or "")
+    fails = int(item.get("consecutive_failures") or 0)
+    if state == "draft":
+        if secrets:
+            label = secrets[0]["label"]
+            return (
+                "this card is a DRAFT with an unfilled secret parameter; "
+                "the engine never fetches a draft — do not describe this card as live",
+                f"waiting for the user to add the '{label}' key on the card "
+                "(you cannot do this for them); the card's Add key entry point "
+                "writes it, then Activate commissions the item",
+            )
+        return (
+            "this card is a DRAFT — the engine will NEVER fetch it until it is "
+            "commissioned; do not describe it as live",
+            "the user clicks Activate on the card to move it to commissioning",
+        )
+    if state == "commissioning":
+        if fails > 0:
+            return (
+                f"first run failed ({status or 'error'}) — the card is NOT live; "
+                "fix the spec or wait for the next scheduler pass",
+                "read read_ni_item for the last_failure excerpt, then update_ni_item "
+                "against the real payload shape, or wait for the next tick",
+            )
+        return (
+            "this card is COMMISSIONING — the engine has not yet completed the "
+            "first-run C1 check + user C2 verdict; it is NOT yet live",
+            "the user reviews the first result on the card and clicks 'Looks right' "
+            "(promotes toward live) or 'Something's wrong' (returns to draft)",
+        )
+    if state == "live":
+        return (
+            "this card is LIVE — the engine is fetching it on cadence and every "
+            "run passes the captured contract",
+            "no action required; use run_ni_item_now to force a refresh",
+        )
+    if state == "degraded":
+        return (
+            f"the latest run failed ({status or 'error'}) — the card is rendering "
+            "the LAST GOOD payload, not live data",
+            "read the last_failure excerpt, then update_ni_item to fix the spec "
+            "or wait for the next tick to retry",
+        )
+    if state == "failing":
+        return (
+            f"the last {fails} runs failed ({status or 'error'}) — the effective "
+            "cadence has doubled and the card is NOT rendering live data",
+            "read the last_failure excerpt and update_ni_item, or L1 self-repair "
+            "may run automatically if repair_policy.l1 is enabled",
+        )
+    if state == "broken":
+        return (
+            f"the card is BROKEN ({status or 'error'}) — the engine has STOPPED "
+            f"scheduling {title!r}; only user or agent action can revive it",
+            "update_ni_item to fix the spec (a source change re-consents) then "
+            "the item will re-enter commissioning",
+        )
+    return (
+        f"state {state!r} — see the ni-format documentation",
+        "no known action for this state",
+    )
+
+
+def _last_failure_for_read(store: object, item: dict) -> dict | None:
+    """§27: return the sealed ``last_failure`` excerpt (http sources only) for read_ni_item.
+
+    Kept deliberately narrow: an ``internal.*`` source seals an empty excerpt (§23
+    consent-scope rule; the excerpt would carry other cards' or library content
+    the item never consented to egress), so the fix-conversation surface stays
+    honest — class + detail + timestamp only for internal sources.
+    """
+    assert store is not None and isinstance(item, dict), "store + item required"
+    snap = ni._read_last_failure_snapshot(store, item["id"])
+    if snap is None:
+        return None
+    stype = str((item["spec"].get("source") or {}).get("type") or "")
+    excerpt = snap.get("excerpt") if isinstance(snap.get("excerpt"), str) else ""
+    return {
+        "class": snap.get("class"),
+        "detail": snap.get("detail"),
+        "ts": snap.get("ts"),
+        # Only http sources carry a meaningful excerpt (the seal path already
+        # zeros it for internal.*); mirror that stance in the read shape so a
+        # caller never treats an empty string as "no data".
+        "excerpt": excerpt if (stype.startswith("http_") and excerpt) else None,
     }
 
 
@@ -1096,6 +1257,30 @@ def _validate_create_ni_args(args: dict) -> None:
                   image_ref=ni._preview_image_ref(spec, "preview"))
 
 
+def _check_duplicate_title(store: object, title: str, allow_duplicate: bool) -> None:
+    """§28 Status truth: refuse a case-insensitive title match unless the caller
+    explicitly opts in with ``allow_duplicate: true``.
+
+    Store-visible (needs list_items); called at EXECUTE time (the prevalidate hook
+    has no ctx). Names the existing card in the error so the model can point the
+    user at the right card or call ``update_ni_item`` instead.
+    """
+    assert store is not None and isinstance(title, str), "store + title required"
+    if allow_duplicate or not title:
+        return
+    needle = title.strip().lower()
+    if not needle:
+        return
+    for item in store.list_items():  # bounded by NIStore._MAX_ITEMS
+        other = str(item["spec"].get("title") or "").strip().lower()
+        if other == needle:
+            raise ValueError(
+                f"a card named {item['spec'].get('title')!r} already exists "
+                f"(id={item['id']!r}) — use update_ni_item, or pass "
+                "allow_duplicate: true to keep two with the same title"
+            )
+
+
 def _prevalidate_create_ni(args: dict) -> None:
     """Pre-park hook for create_ni_item — raises ValueError with the guide pointer.
 
@@ -1120,12 +1305,19 @@ def _create_ni_item(ctx: ToolContext, args: dict) -> dict:
     never lands. Egress-flagged (source URL/instruction reaches out at commissioning);
     non-rememberable by consent.remember_mode's default rule.
 
-    Landing state (A1): the item lands in ``commissioning`` (due immediately -> C1 on
-    the next tick), because NI write tools are REVIEWED + egress + non-rememberable,
-    so the handler only ever runs after explicit human approval — approval IS consent.
-    Exceptions: (a) any ``secret``-kind param whose value is empty forces ``draft``
-    (a secret must be entered via the credential PUT before the engine tries), and
-    (b) an explicit ``draft: true`` from the agent's "show me first" affordance.
+    Landing state (§26/§28 Status truth): the item lands in ``commissioning`` unless
+    (a) an explicit ``draft: true`` from the agent's "show me first" affordance
+    forces draft, or (b) the spec declares ANY secret-kind param — chat-created
+    items with a secret ALWAYS land draft (the tool has no SecretStore so it cannot
+    honestly check whether a credential exists; forcing draft mirrors the install
+    path's landing rule and the S5 route check gates Activate anyway).
+
+    Deterministic-authoring parity (§26): pre-mint the item id + run
+    ``ni_library.rewrite_self_refs`` so a spec that ships with ``ni:self:<name>``
+    placeholders (recipe path) lands with the concrete ``ni:<item_id>:<name>``
+    refs — a single write, no re-seal race. Handler also enforces the §28
+    case-insensitive duplicate title guard (opt out via ``allow_duplicate``)
+    and appends a §28 ``created`` journal entry.
 
     A propose-time prevalidate (``_prevalidate_create_ni``) runs the same shape /
     spec / scene / preview-bind checks BEFORE the card parks so a bad draft returns
@@ -1134,6 +1326,8 @@ def _create_ni_item(ctx: ToolContext, args: dict) -> dict:
     assert ctx.ni is not None, "neural interface unavailable"
     assert isinstance(args, dict), "args must be a dict"
     _validate_create_ni_args(args)      # execute-time revalidation (same rules)
+    _check_duplicate_title(ctx.ni, str(args.get("title") or ""),
+                            bool(args.get("allow_duplicate")))
     spec = _assemble_spec(args)
     preview = args["preview_payload"]
     _validate_ni_public_url(spec)  # J: refuse a non-public / SSRF-shaped URL up front
@@ -1141,11 +1335,423 @@ def _create_ni_item(ctx: ToolContext, args: dict) -> dict:
         ni.check_composite_depth(ctx.ni, spec)
     except ni.NIError as exc:
         raise ValueError(str(exc)) from None
-    item_id = ctx.ni.add_item(spec, preview, origin="agent")
+    item_id = _add_item_with_rewrite(ctx.ni, spec, preview, origin="agent")
     landing = _initial_ni_state(spec, bool(args.get("draft")))
     if landing != "draft":
         ctx.ni.commission(item_id)  # draft -> commissioning (also clears any streak marker)
+    _journal_created(ctx.ni, item_id, spec, kind="created")
     return {"id": item_id, "state": landing}
+
+
+def _add_item_with_rewrite(store: object, spec: dict, preview: dict, *,
+                            origin: str) -> str:
+    """H2 parity with the install path: pre-mint id, rewrite ``ni:self:`` refs,
+    then ``add_item`` in one sealed write.
+
+    ``ni_library.rewrite_self_refs`` mutates the spec in place — safe here because
+    the spec is a fresh assembly from tool args, never a shared store copy.
+    """
+    assert store is not None and isinstance(spec, dict), "store + spec required"
+    assert isinstance(preview, dict), "preview must be a dict"
+    item_id = str(uuid.uuid4())
+    ni_library.rewrite_self_refs(spec, item_id)
+    return store.add_item(spec, preview, origin=origin, item_id=item_id)
+
+
+def _diff_updated_fields(old_spec: dict, new_spec: dict, args: dict) -> list[str]:
+    """Return the list of top-level spec fields the update actually changed.
+
+    Compares only fields the caller supplied in ``args`` so a spec re-serialization
+    order difference never fabricates a "changed" entry.
+    """
+    assert isinstance(old_spec, dict) and isinstance(new_spec, dict), "specs required"
+    assert isinstance(args, dict), "args required"
+    fields: list[str] = []
+    for key in ("title", "goal", "params", "source", "pipeline", "scene",
+                "display", "model", "interval_minutes", "history", "alerts",
+                "repair_policy"):
+        if key in args and old_spec.get(key) != new_spec.get(key):
+            fields.append(key)
+    return fields
+
+
+def _journal_updated(store: object, item_id: str, fields: list[str], *,
+                      source_changed: bool) -> None:
+    """§28 update-time journal entry.
+
+    Two kinds: ``source_changed`` (a re-consent event) OR ``updated`` (a plain
+    spec edit). Summary lists the changed fields deterministically. Best-effort:
+    a failing journal write never turns a successful update into a route error.
+    """
+    assert store is not None and item_id, "args required"
+    assert isinstance(fields, list), "fields must be a list"
+    if not fields:
+        return
+    kind = "source_changed" if source_changed else "updated"
+    summary = f"fields changed: {', '.join(fields)}"
+    try:
+        store.append_journal(item_id, kind, summary)
+    except Exception as exc:  # bookkeeping must never mask the update result
+        log.warning("ni journal append (update) skipped for %s: %s", item_id, exc)
+
+
+def _journal_created(store: object, item_id: str, spec: dict, *, kind: str,
+                     recipe_id: str | None = None) -> None:
+    """§28 create-time journal entry: ``created`` for freeform, ``recipe`` for from_recipe.
+
+    Summary is deterministic — code-composed from spec facts (source label, host),
+    never model-authored. Best-effort: a journal write failure never blocks
+    the create response.
+    """
+    assert store is not None and item_id and isinstance(spec, dict), "args required"
+    assert kind in ("created", "recipe"), "kind must be created or recipe"
+    source_label = _ni_source_provenance(spec.get("source"))
+    if kind == "recipe":
+        assert isinstance(recipe_id, str) and recipe_id, "recipe_id required"
+        summary = f"created from recipe {recipe_id!r}; source {source_label}"
+    else:
+        summary = f"created via chat; source {source_label}"
+    try:
+        store.append_journal(item_id, kind, summary)
+    except Exception as exc:  # bookkeeping must never mask the create result
+        log.warning("ni journal append skipped for %s: %s", item_id, exc)
+
+
+# ---- create_ni_item_from_recipe (§26) --------------------------------------
+
+def _validate_recipe_call(args: dict) -> None:
+    """Pure prevalidate: recipe exists, params match the recipe's declared slots.
+
+    Catalog is a static import — safe from a prevalidate context (no store). Rejects
+    unknown recipe_id up front; refuses caller-supplied secret VALUES (secrets ride
+    the credential PUT after creation, never chat args).
+    """
+    assert isinstance(args, dict), "args must be a dict"
+    recipe_id = args.get("recipe_id")
+    if not isinstance(recipe_id, str) or not recipe_id:
+        raise ValueError("recipe_id required (see list_ni_catalog)")
+    recipe = ni_catalog.get_recipe(recipe_id)
+    if recipe is None:
+        raise ValueError(
+            f"unknown recipe {recipe_id!r} — call list_ni_catalog for the "
+            "available recipes"
+        )
+    params = args.get("params") or {}
+    if not isinstance(params, dict):
+        raise ValueError("params must be an object")  # noqa: TRY004
+    declared = (recipe["spec_template"].get("params") or {})
+    unknown = sorted(set(params) - set(declared))
+    if unknown:
+        raise ValueError(f"unknown params: {unknown}")
+    for name, value in params.items():
+        decl = declared.get(name) or {}
+        if decl.get("kind") == "secret":
+            raise ValueError(
+                f"secret param {name!r} may not be supplied in from_recipe args "
+                "— use the credential PUT on the card after creation"
+            )
+        if not (isinstance(value, (str, int, float))
+                and not isinstance(value, bool)):
+            raise ValueError(  # noqa: TRY004 — one exception class per validator (mirrors ni.py)
+                f"params.{name} must be a string or number"
+            )
+    interval = args.get("interval_minutes")
+    if interval is not None and (not isinstance(interval, int)
+                                  or isinstance(interval, bool)):
+        raise ValueError("interval_minutes must be an integer")
+    title = args.get("title")
+    if title is not None and not isinstance(title, str):
+        raise ValueError("title must be a string")
+
+
+def _prevalidate_create_ni_from_recipe(args: dict) -> None:
+    """Pre-park hook for create_ni_item_from_recipe — surfaces the guide pointer inline."""
+    assert isinstance(args, dict), "args must be a dict"
+    try:
+        _validate_recipe_call(args)
+    except (ValueError, ni.NIError) as exc:
+        raise ValueError(str(exc) + _NI_GUIDE_POINTER) from None
+
+
+def _build_spec_from_recipe(recipe: dict, params: dict, *,
+                             title: str | None,
+                             interval_minutes: int | None) -> dict:
+    """Deterministic build (§26): deep-copy the recipe's spec_template, fill string /
+    number params from the caller (secret slots keep ``ni:self:<name>``), then apply
+    title / interval overrides.
+
+    Interval clamping happens at ``NIStore.add_item`` (``_clamp_interval``); the tool
+    forwards the raw value the caller supplied and lets the store enforce the floor.
+    """
+    assert isinstance(recipe, dict) and isinstance(params, dict), "recipe + params required"
+    spec = json.loads(json.dumps(recipe["spec_template"]))
+    decl = spec.get("params") or {}
+    for name, value in params.items():  # bounded by ni._MAX_PARAMS
+        if name in decl and isinstance(decl[name], dict):
+            decl[name]["value"] = value
+    if title is not None and title:
+        spec["title"] = title
+    if interval_minutes is not None:
+        spec["interval_minutes"] = int(interval_minutes)
+    elif "interval_minutes" not in spec:
+        spec["interval_minutes"] = 60  # match _assemble_spec default posture
+    if "repair_policy" not in spec:
+        # Install-path parity (Phase 4b D2c): safe default when a recipe omits it.
+        spec["repair_policy"] = {"l1": True, "l2_frontier": False}
+    return spec
+
+
+def _create_ni_item_from_recipe(ctx: ToolContext, args: dict) -> dict:
+    """REVIEWED (egress=True): create an NI item DETERMINISTICALLY from a catalog recipe (§26).
+
+    The model chooses a recipe and fills closed parameter slots; the spec is
+    assembled by code (never a model-authored pipeline or scene). Landing +
+    journal + duplicate rules are IDENTICAL to ``_create_ni_item``:
+    secret-kind params always land draft, the case-insensitive title guard
+    fires (opt out via ``allow_duplicate``), a §28 journal entry lands with
+    kind ``recipe`` naming the source recipe.
+
+    The card's approval surface (``source.url`` host + path) is unchanged: the
+    frontend renders it exactly as it does for any create card, because the
+    sealed source is identical to a hand-authored one.
+    """
+    assert ctx.ni is not None, "neural interface unavailable"
+    assert isinstance(args, dict), "args must be a dict"
+    _validate_recipe_call(args)
+    recipe = ni_catalog.get_recipe(str(args["recipe_id"]))
+    assert recipe is not None, "recipe existence already checked by prevalidate"
+    spec = _build_spec_from_recipe(
+        recipe,
+        args.get("params") or {},
+        title=args.get("title"),
+        interval_minutes=args.get("interval_minutes"),
+    )
+    preview = recipe.get("preview_payload") or {}
+    assert isinstance(preview, dict), "recipe preview_payload validated at import"
+    _check_duplicate_title(ctx.ni, str(spec.get("title") or ""),
+                            bool(args.get("allow_duplicate")))
+    # Full re-validation against the assembled spec (belt over the recipe's own
+    # import-time validation, which ran under allow_empty_params=True).
+    ni.validate_spec(spec)
+    _validate_ni_public_url(spec)
+    try:
+        ni.check_composite_depth(ctx.ni, spec)
+    except ni.NIError as exc:
+        raise ValueError(str(exc)) from None
+    item_id = _add_item_with_rewrite(ctx.ni, spec, preview, origin="agent")
+    landing = _initial_ni_state(spec, bool(args.get("draft")))
+    if landing != "draft":
+        ctx.ni.commission(item_id)
+    _journal_created(ctx.ni, item_id, spec, kind="recipe",
+                     recipe_id=str(args["recipe_id"]))
+    return {"id": item_id, "state": landing, "recipe_id": str(args["recipe_id"])}
+
+
+# ---- derive_ni_paths (§27) --------------------------------------------------
+
+_DERIVE_MAX_DEPTH = 6
+_DERIVE_MAX_CANDIDATES = 60
+_DERIVE_EXAMPLE_CHARS = 80
+_DERIVE_INPUT_BYTES = 32 * 1024  # matches §27 "sample ≤32KB"
+
+
+def _derive_ni_paths(ctx: ToolContext, args: dict) -> dict:
+    """OBSERVE: walk a fetched sample and return candidate §4.1 leaf paths.
+
+    Deterministic replacement for "the model imagines a path against a response
+    shape it has never seen". The sample is walked depth ≤ 6; each leaf yields
+    ``{path, type, example}`` in §4.1 grammar; keys that violate the grammar
+    (spaces, dots, special chars) are reported in ``unaddressable`` so the model
+    knows to pick a different source. Cap 60 candidates, numeric / short-string
+    leaves come first (they are the useful ones for scene binding).
+
+    Sample may be a JSON object / list OR a JSON STRING supplied through the
+    sibling ``sample_json`` arg (the model sometimes passes fetched TEXT
+    verbatim; the ``sample`` arg's schema is ``object`` at the validate_args
+    gate). Exactly one of the two args is required — passing both, or neither,
+    raises ValueError. No ctx access — pure function of its args, no store,
+    no egress.
+    """
+    assert isinstance(args, dict), "args must be a dict"
+    sample = _select_sample_arg(args)
+    parsed = _coerce_sample(sample)
+    candidates: list[dict] = []
+    unaddressable: list[str] = []
+    walk_truncated = _walk(parsed, "", depth=0, out=candidates, dead=unaddressable)
+    ordered = _order_candidates(candidates)[:_DERIVE_MAX_CANDIDATES]
+    return {
+        "paths": ordered,
+        "unaddressable": unaddressable[:_DERIVE_MAX_CANDIDATES],
+        # ``truncated`` is TRUE either when the candidate cap overflowed OR when
+        # the walker's iteration budget ran out with work still on the stack —
+        # the wide-shallow starvation case must never look like "no data".
+        "truncated": walk_truncated or len(candidates) > _DERIVE_MAX_CANDIDATES,
+    }
+
+
+def _select_sample_arg(args: dict) -> object:
+    """Enforce the exactly-one-of ``sample`` / ``sample_json`` rule at the handler.
+
+    The tool schema declares both as siblings (each optional; ``validate_args``
+    does not model unions), so the handler is the one place that guarantees the
+    invariant. A missing / oversize / non-string ``sample_json`` reads back to
+    the model as a clean ValueError, exactly like other arg rejects.
+    """
+    assert isinstance(args, dict), "args must be a dict"
+    has_sample = "sample" in args and args.get("sample") is not None
+    has_json = "sample_json" in args and args.get("sample_json") is not None
+    if has_sample and has_json:
+        raise ValueError("pass exactly one of 'sample' or 'sample_json', not both")
+    if not (has_sample or has_json):
+        raise ValueError("one of 'sample' or 'sample_json' is required")
+    if has_json:
+        text = args["sample_json"]
+        if not isinstance(text, str):
+            raise ValueError("sample_json must be a string")
+        return text
+    return args["sample"]
+
+
+def _coerce_sample(sample: object) -> object:
+    """Accept a JSON value or a JSON string (≤32KB). Reject anything else clearly."""
+    if isinstance(sample, str):
+        if len(sample.encode("utf-8")) > _DERIVE_INPUT_BYTES:
+            raise ValueError(f"sample exceeds {_DERIVE_INPUT_BYTES} bytes")
+        try:
+            return json.loads(sample)
+        except (ValueError, TypeError) as exc:
+            raise ValueError(f"sample string is not valid JSON: {exc}") from None
+    if isinstance(sample, (dict, list)):
+        # Roughly bound the walk cost — the walker itself is depth-capped, but
+        # a huge in-memory dict from the model still deserves a size gate.
+        encoded = json.dumps(sample)
+        if len(encoded.encode("utf-8")) > _DERIVE_INPUT_BYTES:
+            raise ValueError(f"sample exceeds {_DERIVE_INPUT_BYTES} bytes")
+        return sample
+    raise ValueError("sample must be a JSON object, array, or JSON string")
+
+
+# Fixed iteration ceiling for the walker. The §27 sample cap is 32KB; the smallest
+# meaningful node encoding in JSON is a few bytes ("k":n,), so an upper bound on the
+# total node count in a well-formed sample is well under 4096. Ranging up to 4096
+# lets depth (≤6) and candidate (≤60+1) caps be the effective binders in realistic
+# payloads (200 pad keys + a couple of real leaves under a shallow tree) — the old
+# ceiling of _DERIVE_MAX_CANDIDATES * 8 = 488 starved silently on that shape.
+_DERIVE_WALK_ITERATIONS = 4096
+
+
+def _walk(node: object, path: str, *, depth: int, out: list, dead: list) -> bool:
+    """Bounded, non-recursive-in-shape walk of ``node``; append leaves to ``out``.
+
+    Uses an explicit `for` over a work-stack sized by depth cap and node count
+    caps; recursion is disallowed by the project's power-of-10 rules.
+    Collects up to ``_DERIVE_MAX_CANDIDATES + 1`` leaves so the caller can set
+    ``truncated`` honestly (a walk that stopped exactly at the cap does not
+    prove there was overflow; one extra leaf does).
+
+    Returns True when the iteration budget was exhausted with work still on the
+    stack — the caller flags ``truncated`` on that too, so a pathological wide
+    sample never returns "no paths, no truncation" (the silent-starvation
+    condition the audit caught).
+    """
+    assert isinstance(out, list) and isinstance(dead, list), "out/dead lists required"
+    stack: list[tuple[object, str, int]] = [(node, path, depth)]
+    for _ in range(_DERIVE_WALK_ITERATIONS):  # fixed upper bound (P10 #2)
+        if not stack:
+            return False
+        if len(out) > _DERIVE_MAX_CANDIDATES:
+            return False
+        current, cur_path, cur_depth = stack.pop()
+        if cur_depth > _DERIVE_MAX_DEPTH:
+            continue
+        if isinstance(current, dict):
+            _walk_dict(current, cur_path, cur_depth, stack, dead)
+        elif isinstance(current, list):
+            _walk_list(current, cur_path, cur_depth, stack, out, dead)
+        else:
+            if cur_path:
+                out.append(_leaf(cur_path, current))
+    # Budget exhausted with work remaining — truncated even if fewer than
+    # _DERIVE_MAX_CANDIDATES leaves landed (the wide-shallow starvation case).
+    return bool(stack)
+
+
+def _walk_dict(current: dict, cur_path: str, cur_depth: int,
+               stack: list, dead: list) -> None:
+    """Enqueue every key of ``current``; report keys outside the §4.1 key grammar."""
+    for key, value in current.items():  # bounded by JSON input size (≤32KB)
+        if not (isinstance(key, str) and ni._KEY_RE.match(key)
+                and key not in ni._DENIED_PATH_KEYS):
+            dead.append(f"{cur_path}.{key}" if cur_path else str(key))
+            continue
+        new_path = f"{cur_path}.{key}" if cur_path else key
+        stack.append((value, new_path, cur_depth + 1))
+
+
+def _walk_list(current: list, cur_path: str, cur_depth: int,
+               stack: list, out: list, dead: list) -> None:
+    """Walk the FIRST element of a list (representative leaves) + record the list itself.
+
+    A whole scan of every element would explode the candidate budget with
+    identical shapes; the first element is enough for scene-binding purposes,
+    and the list root itself binds as a repeat source.
+    """
+    if cur_path:
+        out.append({"path": cur_path, "type": "list",
+                    "example": f"list ({len(current)} items)"})
+    if not current:
+        return
+    first_path = f"{cur_path}[0]" if cur_path else "[0]"
+    if not cur_path:
+        # A bare-list root cannot be addressed with the key-first §4.1 grammar
+        # (extract paths must start with a key). Record it explicitly.
+        dead.append("[0]: root array cannot be extract-addressed (§4.1 requires a key first)")
+        return
+    stack.append((current[0], first_path, cur_depth + 1))
+    _ = out
+    _ = dead
+
+
+def _leaf(path: str, value: object) -> dict:
+    """Format one leaf candidate: {path, type, example (truncated ≤80)}."""
+    assert isinstance(path, str) and path, "path required"
+    if isinstance(value, bool):
+        vtype = "boolean"
+    elif isinstance(value, (int, float)):
+        vtype = "number"
+    elif isinstance(value, str):
+        vtype = "string"
+    elif value is None:
+        vtype = "null"
+    else:
+        vtype = "unknown"
+    example = json.dumps(value, ensure_ascii=False)
+    if len(example) > _DERIVE_EXAMPLE_CHARS:
+        example = example[:_DERIVE_EXAMPLE_CHARS] + "…"
+    return {"path": path, "type": vtype, "example": example}
+
+
+def _order_candidates(candidates: list[dict]) -> list[dict]:
+    """Deterministic ordering: numeric > short-string > everything else, then by path.
+
+    The intuition is that a drafting model looking to build a scene binding will
+    almost always want the numeric leaves and the short-labelled strings first.
+    """
+    def _rank(entry: dict) -> tuple[int, str]:
+        t = entry["type"]
+        if t == "number":
+            return (0, entry["path"])
+        example = entry.get("example") or ""
+        if t == "string" and len(example) <= 40:
+            return (1, entry["path"])
+        if t == "string":
+            return (2, entry["path"])
+        if t == "boolean":
+            return (3, entry["path"])
+        if t == "list":
+            return (4, entry["path"])
+        return (5, entry["path"])
+    return sorted(candidates, key=_rank)
 
 
 def _validate_update_ni_patch(args: dict) -> None:
@@ -1237,7 +1843,9 @@ def _update_ni_item(ctx: ToolContext, args: dict) -> dict:
     except ni.NIError as exc:
         raise ValueError(str(exc)) from None
     source_changed = _ni_source_effectively_changed(current["spec"], spec)
+    changed_fields = _diff_updated_fields(current["spec"], spec, args)
     ctx.ni.update_spec(args["item_id"], spec, origin="agent")
+    _journal_updated(ctx.ni, args["item_id"], changed_fields, source_changed=source_changed)
     if "preview_payload" in args:  # K8: refresh the preview snapshot alongside the spec
         preview = args["preview_payload"]
         if not isinstance(preview, dict):
@@ -1265,13 +1873,23 @@ def _update_ni_item(ctx: ToolContext, args: dict) -> dict:
 
 
 def _initial_ni_state(spec: dict, draft_flag: bool) -> str:
-    """A1: 'commissioning' unless the caller asked for draft or a secret param is unfilled."""
+    """§26/§28 Status truth landing rule for the chat-created path.
+
+    ``draft`` when: (a) the caller passed ``draft: true`` explicitly (agent's
+    "show me first" affordance), OR (b) the spec declares ANY secret-kind
+    param. The tool has no SecretStore in ToolContext by design — it cannot
+    honestly determine whether the credential has been entered — so a
+    secret-param spec ALWAYS lands draft. The user's Add-key entry point on
+    the card writes the credential (host-bound); their explicit Activate
+    (commission route) then re-checks the store and moves it to
+    commissioning (§10 S5).
+    """
     assert isinstance(spec, dict), "spec must be a dict"
     if draft_flag:
         return "draft"
     for name, p in (spec.get("params") or {}).items():  # bounded by _MAX_PARAMS
         assert isinstance(name, str), "param name is a string post-validation"
-        if isinstance(p, dict) and p.get("kind") == "secret" and not p.get("value"):
+        if isinstance(p, dict) and p.get("kind") == "secret":
             return "draft"
     return "commissioning"
 
@@ -1875,8 +2493,13 @@ _TOOLS: tuple[Tool, ...] = (
                 "history": {"type": "object"},
                 "alerts": {"type": "array"},
                 # A1: agent opts INTO draft with the "show me first" affordance. Absent
-                # or false lands the item in commissioning (approval == consent).
+                # or false lands the item in commissioning (approval == consent) unless
+                # the spec declares a secret-kind param, in which case it always lands
+                # draft (§28 Status truth — the tool cannot check the credential store).
                 "draft": {"type": "boolean"},
+                # §28 duplicate guard: refuse a case-insensitive title match against an
+                # existing card unless the caller explicitly opts in.
+                "allow_duplicate": {"type": "boolean"},
             },
             "required": ["title", "goal", "source", "pipeline", "scene",
                          "display", "interval_minutes", "preview_payload"],
@@ -1885,6 +2508,71 @@ _TOOLS: tuple[Tool, ...] = (
         handler=_create_ni_item,
         egress=True,
         prevalidate=_prevalidate_create_ni,
+    ),
+    Tool(
+        name="create_ni_item_from_recipe",
+        description="MANDATED first-path Neural Interface creator (§26). Pick a recipe from "
+                    "list_ni_catalog and fill its parameter slots — the spec, pipeline, and "
+                    "scene are already proven against a real response shape, so the model "
+                    "never authors extract paths. Args: recipe_id, params (name -> "
+                    "string|number; secrets never in chat args — the user enters them via "
+                    "the credential PUT on the card AFTER creation), optional title / "
+                    "interval_minutes overrides, and allow_duplicate to skip the "
+                    "case-insensitive title guard. Landing rules mirror create_ni_item: any "
+                    "secret-kind param lands the item in draft (the tool has no SecretStore "
+                    "so the credential must be added on the card first). Reviewed egress "
+                    "(the card shows the fetched host unmissably); approval is consent.",
+        params_schema={
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "recipe_id": {"type": "string", "maxLength": 80},
+                # params values are simple scalars — the closed shape lives on the
+                # recipe's spec_template; per-param names are validated by handler.
+                "params": {"type": "object"},
+                "title": {"type": "string", "maxLength": 300},
+                "interval_minutes": {"type": "integer"},
+                "draft": {"type": "boolean"},
+                "allow_duplicate": {"type": "boolean"},
+            },
+            "required": ["recipe_id"],
+        },
+        tier=Tier.REVIEWED,
+        handler=_create_ni_item_from_recipe,
+        egress=True,
+        prevalidate=_prevalidate_create_ni_from_recipe,
+    ),
+    Tool(
+        name="derive_ni_paths",
+        description="Sample-grounded freeform authoring helper (§27). Walk one real fetched "
+                    "sample and return candidate leaf paths in the §4.1 grammar — {path, "
+                    "type, example} entries the model copies directly into an extract "
+                    "stage. NEVER a substitute for a recipe: when a recipe fits, use "
+                    "create_ni_item_from_recipe instead. Pass EXACTLY ONE of two args: "
+                    "``sample`` (a JSON object) OR ``sample_json`` (a JSON-encoded string, "
+                    "≤32KB — use this when web_fetch returned bytes/text you have not yet "
+                    "parsed). Keys outside the §4.1 grammar (spaces, dots, punctuation) "
+                    "are reported in an ``unaddressable`` list — pick a different source "
+                    "when the response uses those. Pure function, no ctx, no egress.",
+        params_schema={
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                # ``sample`` is a JSON OBJECT at the tool surface (walker also
+                # tolerates lists; a bare-list root is reported in
+                # ``unaddressable`` since §4.1 paths must start with a key).
+                "sample": {"type": "object"},
+                # ``sample_json`` is the STRING sibling for models that pass the
+                # unparsed body of a fetched page verbatim. Handler enforces
+                # exactly-one-of at execute time; ``validate_args`` can't model
+                # a union of scalar types with the flat-schema gate.
+                "sample_json": {"type": "string", "maxLength": _DERIVE_INPUT_BYTES},
+                "want": {"type": "string", "maxLength": 500},
+            },
+        },
+        tier=Tier.OBSERVE,
+        handler=_derive_ni_paths,
+        egress=False,
     ),
     Tool(
         name="update_ni_item",
@@ -1992,7 +2680,7 @@ _TOOLS: tuple[Tool, ...] = (
 
 # OBSERVE tools must be read-only + no egress; this allowlist is the structural
 # safety invariant checked at import.
-_OBSERVE_READONLY = frozenset({"kb_search", "read_document", "summarize_document", "list_documents", "list_tasks", "list_schedules", "read_schedule_output", "list_ni_catalog", "list_ni_items", "read_ni_item", "read_ni_spec_guide"})
+_OBSERVE_READONLY = frozenset({"kb_search", "read_document", "summarize_document", "list_documents", "list_tasks", "list_schedules", "read_schedule_output", "list_ni_catalog", "list_ni_items", "read_ni_item", "read_ni_spec_guide", "derive_ni_paths"})
 
 # REVIEWED tools that MUTATE schedules. A schedule creates/rewrites/re-enables an autonomous
 # agent turn, so these must NEVER auto-run (via remembered consent) inside a schedule-executed
@@ -2004,7 +2692,7 @@ SCHEDULE_WRITE_TOOLS = frozenset({"create_schedule", "update_schedule", "set_sch
 # (an NI item pulls its source on a timer, so an injected background prompt creating/rewriting
 # one could keep exfiltrating), so these join UNATTENDED_NEVER_AUTO below. delete_ni_item is
 # IRREVERSIBLE and always parks, so it isn't in the write set (mirrors SCHEDULE_WRITE_TOOLS).
-NI_WRITE_TOOLS = frozenset({"create_ni_item", "update_ni_item", "set_ni_item_enabled", "run_ni_item_now"})
+NI_WRITE_TOOLS = frozenset({"create_ni_item", "create_ni_item_from_recipe", "update_ni_item", "set_ni_item_enabled", "run_ni_item_now"})
 # Tools an UNATTENDED turn (scheduled run, its resume) may never run on a standing grant, however
 # the user answered in chat: schedule writes (self-perpetuation) and memory writes — a remembered
 # fact lands in the system prompt of every later turn, so a feed item or web page steering an

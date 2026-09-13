@@ -271,6 +271,11 @@ export interface PendingAction {
   // the titles of every referenced item, in alias order. The consent surface prints
   // "Combines: <title>, <title>" so the user sees the composite's inputs by name.
   composite_titles?: string[];
+  // Set on a parked create_ni_item_from_recipe: the recipe's url_template resolved
+  // server-side from the sealed catalog. The consent surface prints "Fetches: <url>"
+  // so the host the card would call is unmissable — the args themselves only carry
+  // the recipe id + params.
+  recipe_url?: string;
 }
 
 // One site-scoped consent entry: URL tools remember per-host, so the same tool can
@@ -662,6 +667,11 @@ export interface NiBoardItem {
   // proposal is NEVER auto-applied — the card shows a "Fix proposed" chip; the review
   // modal renders the diff and offers Apply (trial, may auto-revert) / Dismiss.
   l2_proposal?: boolean;
+  // Secret params whose credential is missing from the store (ni-format "Status truth"
+  // amendments). Rendered on the card as an "Add key" affordance opening the
+  // Desktop-local credential PUT (`name` is the spec's param name — the wire the
+  // PUT wants; `label` is the human name shown in the modal + on the card).
+  needs_credentials?: { name: string; label: string }[];
 }
 
 // ni library (ni-format §19/§20) — the Global Library subscription: one hosted

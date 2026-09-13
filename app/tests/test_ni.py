@@ -701,8 +701,11 @@ def test_ni_write_tools_are_never_auto_in_unattended_turns() -> None:
     from smartbrain_3000 import tools
 
     assert tools.NI_WRITE_TOOLS <= tools.UNATTENDED_NEVER_AUTO
+    # §26 added create_ni_item_from_recipe — same posture (REVIEWED egress, joins
+    # UNATTENDED_NEVER_AUTO, non-rememberable) as the freeform create tool.
     assert tools.NI_WRITE_TOOLS == {
-        "create_ni_item", "update_ni_item", "set_ni_item_enabled", "run_ni_item_now",
+        "create_ni_item", "create_ni_item_from_recipe",
+        "update_ni_item", "set_ni_item_enabled", "run_ni_item_now",
     }
 
 
@@ -716,9 +719,9 @@ def test_ni_tools_are_never_rememberable() -> None:
     """
     from smartbrain_3000 import consent
 
-    for name in ("list_ni_items", "read_ni_item",
-                 "create_ni_item", "update_ni_item",
-                 "set_ni_item_enabled", "run_ni_item_now",
+    for name in ("list_ni_items", "read_ni_item", "derive_ni_paths",
+                 "create_ni_item", "create_ni_item_from_recipe",
+                 "update_ni_item", "set_ni_item_enabled", "run_ni_item_now",
                  "delete_ni_item"):
         assert consent.remember_mode(name) is None, name
 
@@ -942,15 +945,20 @@ def test_create_ni_item_defaults_to_commissioning_and_secret_forces_draft() -> N
     out = _tool_call("create_ni_item", ctx, args)
     assert out["state"] == "commissioning"
     assert ctx.ni.get_item(out["id"])["state"] == "commissioning"
-    # An empty secret param forces draft even without draft=True.
+    # §26/§28 Status truth: ANY secret param forces draft (the tool has no
+    # SecretStore in ToolContext by design, so it cannot honestly check whether
+    # a credential has been entered — a placeholder or an empty value both land
+    # draft). Distinct title so the §28 duplicate guard doesn't fire against
+    # the first item.
     args2 = _tool_spec_args()
     args2.pop("draft")
+    args2["title"] = "Weather (keyed)"
     args2["params"] = {"api_key": {"label": "Key", "kind": "secret", "value": ""}}
     args2["source"] = {"type": "http_json",
                        "url": "https://api.example.com/q",
                        "headers": {"X-Api-Key": {"$secret": "ni:self:api_key"}}}
     out2 = _tool_call("create_ni_item", ctx, args2)
-    assert out2["state"] == "draft", "unfilled secret must force draft even without draft=True"
+    assert out2["state"] == "draft", "any secret param must force draft even without draft=True"
 
 
 def test_update_ni_item_strips_c2_ok_and_contract_and_resets_streak() -> None:

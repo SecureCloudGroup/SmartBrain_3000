@@ -1005,3 +1005,95 @@ images never reach the page.
   leaves the composite degrading gracefully (empty series) with its health
   chip telling the truth. Referenced items' own consent is untouched — a
   composite grants no new egress to anyone.
+
+## 26. Recipes — the model selects, it doesn't write (deterministic authoring)
+
+Field lesson (2026-09-13): the engine is deterministic; the AUTHORING edge was
+not — a model writing extract paths against a response shape it has never seen
+fails most of the time. Recipes make the primary creation path deterministic.
+
+- A **recipe** is a complete, tested item template living in the catalog: the
+  §19 template shape (spec_template with param slots + preview_payload) plus
+  catalog metadata (host, category, notes, auth) and an optional
+  `sample_response` (a trimmed REAL response the pipeline was written against).
+  The bundled catalog upgrades from URL templates to recipes; the same §19/§2
+  validators apply at import and in tests.
+- New REVIEWED egress tool `create_ni_item_from_recipe`:
+  `{recipe_id, params, title?, interval_minutes?}` → the spec is built
+  DETERMINISTICALLY from the recipe (the model authors nothing — it chooses a
+  recipe and fills closed parameter slots). Landing/credential/consent rules
+  identical to create. The host the card would call stays unmissable on the
+  approval surface: the tool args carry only the recipe id + params, so the
+  pending list resolves the recipe's `url_template` server-side from the
+  sealed catalog and threads it into each tile as `recipe_url` (the frontend
+  renders "Fetches: <url>"). The resolver never rewrites args; the executor
+  still reads the recipe itself, so the sealed source and the promoted URL
+  come from the same source of truth.
+- The guide + tool descriptions make recipes the MANDATED first path; freeform
+  `create_ni_item` is the fallback for requests no recipe covers, and §27
+  governs it.
+- Proving: repo tests validate every recipe structurally (never network);
+  `tools/ni-library/prove.py` fetches each recipe's endpoint LIVE and runs its
+  pipeline end-to-end — run before releases and nightly in the future registry
+  CI. A recipe that stops proving gets fixed or pulled; subscribers heal per
+  §20.
+
+## 27. Sample-grounded freeform authoring (the long tail)
+
+When no recipe fits, blind drafting is forbidden by protocol:
+
+- New OBSERVE tool `derive_ni_paths`: `{sample: <JSON ≤32KB>, want?: str}` →
+  DETERMINISTIC code walks the sample and returns candidate leaf paths with
+  types + example values (§4.1 grammar, ready to copy into extract stages).
+  No model in the loop — transcription replaces imagination.
+- Mandated flow (guide + descriptions): fetch ONE real sample via the existing
+  approval-gated web_fetch → `derive_ni_paths` → build extract stages ONLY
+  from offered paths → create.
+- C1-failure feedback: `read_ni_item` on an item whose `last_failure` slot is
+  populated returns the bounded, provenance-labeled excerpt (http sources
+  only, §23 internal.* rule) so a fix conversation corrects paths against the
+  REAL payload instead of guessing again.
+
+## 28. Item journal + cloud-path session continuity
+
+**Item journal** (per-item memory for any later model, any later session):
+- New sealed snapshot slot `journal`: an append-only list (pruned to newest
+  20) of DETERMINISTICALLY composed entries
+  `{ts, kind: created|updated|param_changed|commissioned|c2_wrong|repaired|
+  reverted|source_changed|recipe, summary}`. Summaries are built from
+  structured facts by code (plus the user's own C2 notes verbatim); models
+  never write journal entries. Written at each lifecycle event by the store/
+  tool layer; cascades on delete; excluded from export.
+- `read_ni_item` returns the journal (after the provenance line) plus two new
+  deterministic fields: `state_explanation` and `user_next_action` — exact
+  strings per state+condition (e.g. commissioning + missing credential →
+  "waiting for the user to add the '<label>' key on the card; you cannot do
+  this for them — do not describe this card as live"). The model reports
+  state truth instead of inventing it.
+
+**Cloud-path session continuity** (claudecode + any session-capable CLI):
+- Today every agent-loop step spawns a stateless CLI process — slow, and the
+  model re-reads the whole transcript each step. A turn-scoped session fixes
+  both: step 1 opens a session (flags VERIFIED against the live CLI before
+  implementation), steps 2..N resume it sending only the delta, and the turn's
+  end (or its watchdog) DELETES the session artifacts. Containment unchanged:
+  same empty-toolset agent, `--setting-sources ""`, strict MCP, stripped env;
+  session files live only inside our private 0700 dir and never survive the
+  turn. Stateless per-call remains the fallback when the flags are missing.
+
+## Status truth (amendments to §10/§6 — the card must never lie)
+
+- Board rows add: `needs_credentials: [labels]` (secret params whose key is
+  absent from the store) and the existing last_status/consecutive_failures are
+  RENDERED: a commissioning/degraded/failing card states plainly what happened
+  ("First run failed — couldn't find the expected data (extract_miss), 4
+  attempts; last tried 2m ago") instead of "Waiting for the first run…".
+- Cards with `needs_credentials` show an **Add key** entry point (host-bound
+  credential modal — the previously missing UI); any item declaring a
+  secret-kind param lands in `draft` (the chat create tool has no SecretStore
+  in its ToolContext by design, so it cannot honestly know whether the
+  credential has been entered — draft is the honest landing), and `ni:self:`
+  is rewritten at create for install parity.
+- `create_ni_item` refuses a title that case-insensitively matches an existing
+  item unless `allow_duplicate: true` — the error names the existing card and
+  points at `update_ni_item`.

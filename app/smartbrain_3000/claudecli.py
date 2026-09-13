@@ -28,6 +28,8 @@ import subprocess
 import tempfile
 import threading
 import time
+import uuid
+import weakref
 from collections import deque
 from collections.abc import Iterator
 
@@ -81,6 +83,13 @@ _HEADING_FORGERY = re.compile(
 
 _probe_lock = threading.Lock()
 _probe_cache: tuple[float, dict] | None = None
+# Turn-scoped session continuity (docs/internal/ni-format.md §28): step 1 opens a session
+# with a known UUID (via --session-id), steps 2..N resume it (via --resume) sending only
+# the delta content, and TurnSession.close() removes both the per-turn cwd and the CLI's
+# session-file mirror at ~/.claude/projects/<slug>. The session id is a uuid4 (not
+# conversation-derived) — safe to carry on argv alongside the static agent definition.
+_SESSION_CWD_PREFIX = "smartbrain-claudecli-turn-"
+_SLUG_SAFE = re.compile(r"[^A-Za-z0-9]+")
 
 # Last plan-window report from the CLI's rate_limit_event (emitted per chat run).
 # Single-reference swap under CPython — read/written whole, never mutated in place.
@@ -130,6 +139,138 @@ def _private_cwd() -> str:
         _work_dir = tempfile.mkdtemp(prefix="smartbrain-claudecli-")
     assert os.path.isdir(_work_dir), "work dir must exist"
     return _work_dir
+
+
+def _slug_for(path: str) -> str:
+    """The CLI's ``~/.claude/projects/<slug>/`` directory name for a given cwd.
+
+    Verified live against the CLI (v2.1.148): the slug is the RESOLVED absolute path
+    with every non-alnum run collapsed to a single ``-``. ``/var`` symlinks to
+    ``/private/var`` on macOS, so ``os.path.realpath`` is required — without it we'd
+    wipe the wrong directory (or none) on close.
+    """
+    assert isinstance(path, str) and path, "path required"
+    resolved = os.path.realpath(path)
+    assert resolved.startswith("/"), "session cwd must be absolute"
+    return _SLUG_SAFE.sub("-", resolved)
+
+
+def _wipe_session_dirs(cwd: str, session_id: str) -> None:
+    """Delete the per-turn cwd + the CLI's session-file mirror (best-effort, idempotent).
+
+    Split from ``TurnSession.close`` so ``weakref.finalize`` can drive it too — a
+    session forgotten past its finally still gets wiped at GC / interpreter exit.
+    """
+    assert isinstance(cwd, str) and cwd, "cwd required"
+    assert isinstance(session_id, str), "session id required"
+    slug_dir = os.path.join(os.path.expanduser("~/.claude/projects"), _slug_for(cwd))
+    for path in (cwd, slug_dir):  # exactly two known paths (P10 #2: fixed bound)
+        shutil.rmtree(path, ignore_errors=True)
+
+
+class TurnSession:
+    """One CLI session, scoped to a single agent turn.
+
+    First call: full ``_flatten`` prompt with ``--session-id <uuid>`` (persistence ON,
+    but confined — the session file lands under our unique per-turn cwd's slug dir,
+    which only this turn owns). Subsequent calls: ``--resume <uuid>`` sending only the
+    delta rendered by ``_flatten_delta``. ``close()`` wipes both the cwd and the CLI's
+    slug directory. On a resume failure, ``disable()`` flips the session inactive so the
+    remainder of the turn falls back to stateless — never a user-facing failure mode.
+    """
+
+    def __init__(self) -> None:
+        self.session_id = str(uuid.uuid4())
+        cwd = tempfile.mkdtemp(prefix=_SESSION_CWD_PREFIX)
+        os.chmod(cwd, 0o700)
+        self.cwd = cwd
+        self.sent_count = 0  # messages already delivered to this session
+        self.active = True   # cleared on close() or on fallback via disable()
+        self._closed = False
+        # Finalizer wipes the dirs at GC / interpreter exit if close() was missed;
+        # detached in close() so the wipe runs exactly once.
+        self._finalizer = weakref.finalize(self, _wipe_session_dirs, self.cwd, self.session_id)
+        assert self.session_id, "session id required"
+        assert os.path.isdir(self.cwd), "session cwd must exist"
+
+    def disable(self) -> None:
+        """Mark this session inactive after a resume failure (fallback path)."""
+        assert not self._closed, "cannot disable a closed session"
+        assert self.active, "session already inactive"
+        self.active = False
+
+    def close(self) -> None:
+        """Wipe the per-turn cwd + the CLI's session-file mirror (idempotent)."""
+        assert isinstance(self._closed, bool), "close flag must be a bool"
+        if self._closed:
+            return
+        self._closed = True
+        self.active = False
+        self._finalizer.detach()
+        _wipe_session_dirs(self.cwd, self.session_id)
+
+
+_ORPHAN_MAX_AGE_S = 86400.0  # sweep session dirs older than 1 day (stale by any measure)
+_ORPHAN_SCAN_CEILING = 4096  # fixed upper bound on the tempdir listing (P10 #2)
+
+
+def sweep_orphan_sessions() -> int:
+    """Delete stale per-turn CLI session dirs left behind by crashed processes.
+
+    A ``TurnSession`` normally wipes its cwd + the CLI's slug mirror in ``close()``
+    (and the ``weakref.finalize`` backstops that at GC), but a hard interpreter
+    exit or a container kill can leave a ``smartbrain-claudecli-turn-*`` dir behind
+    forever — the CLI's ``~/.claude/projects/<slug>/`` mirror grows unbounded on a
+    long-lived host. Called lazily from ``open_turn_session`` (cheap: at most a
+    listdir + a stat + a couple of shutil.rmtree calls per stale dir).
+
+    Ignores dirs younger than ``_ORPHAN_MAX_AGE_S`` so we never race a
+    still-running turn. Returns the count of dirs wiped (0 on a clean host).
+    Best-effort — never raises past this function's boundary.
+    """
+    root = tempfile.gettempdir()
+    try:
+        entries = os.listdir(root)
+    except OSError as exc:
+        log.debug("orphan sweep: listdir failed: %s", exc)
+        return 0
+    now = time.time()
+    wiped = 0
+    for count, name in enumerate(entries):  # bounded (P10 #2)
+        if count >= _ORPHAN_SCAN_CEILING:
+            break
+        if not name.startswith(_SESSION_CWD_PREFIX):
+            continue
+        path = os.path.join(root, name)
+        try:
+            age = now - os.stat(path).st_mtime
+        except OSError:
+            continue  # vanished between listdir and stat — someone else's win
+        if age < _ORPHAN_MAX_AGE_S:
+            continue
+        # No session_id to pass — pass "" so ``_wipe_session_dirs`` still drops the
+        # cwd + its slug mirror (the mirror path is derived from cwd, not from id).
+        _wipe_session_dirs(path, "")
+        wiped += 1
+    return wiped
+
+
+def open_turn_session() -> TurnSession:
+    """Open a fresh per-turn CLI session (see ``TurnSession`` for lifecycle).
+
+    Piggy-backs an orphan-session sweep here (§28 audit): a hard interpreter
+    exit or container kill can leave stale ``smartbrain-claudecli-turn-*`` dirs
+    behind, and this is the one place every turn passes through. Sweep failures
+    never block the new session.
+    """
+    try:
+        sweep_orphan_sessions()
+    except Exception as exc:  # never fail an actual turn on a housekeeping hiccup
+        log.debug("claudecli orphan sweep skipped: %s", exc)
+    session = TurnSession()
+    assert session.active and session.sent_count == 0, "new session must be active + empty"
+    assert os.path.isdir(session.cwd), "session cwd must exist"
+    return session
 
 
 def _cli_env() -> dict[str, str]:
@@ -330,17 +471,62 @@ def _flatten(messages: list[dict], tools_spec: list[dict] | None) -> str:
     return "## System instructions\n" + system + "\n\n## Conversation\n" + "\n\n".join(turns)
 
 
-def _command(model: str) -> list[str]:
+def _flatten_delta(new_messages: list[dict]) -> str:
+    """Render only the trailing NEW turn segments for a --resume call (no scaffolding).
+
+    The session already holds the ``## System instructions`` block, the tool protocol,
+    and every prior turn — sending them again would double-count. Assistant messages
+    are skipped because the CLI generated them itself in-session; we re-send only the
+    tool results / new user turns the caller has appended since the last CLI call.
+    Same ``### Role`` headings and heading-forgery neutralization as ``_flatten``, so
+    the session sees a uniform transcript.
+    """
+    assert isinstance(new_messages, list), "messages must be a list"
+    assert new_messages, "delta requires at least one new message"
+    turns: list[str] = []
+    for msg in new_messages[:_MAX_MESSAGES]:  # bounded (P10 #2)
+        role = msg.get("role")
+        if role in ("assistant", "system"):
+            continue  # CLI's own output / already in-session — never re-send
+        heading = "### Tool result" if role == "tool" else "### User"
+        turns.append(heading + "\n" + _neutralize(str(msg.get("content") or "")))
+    return "\n\n".join(turns)
+
+
+def _delta_text_or_empty(messages: list[dict], sent_count: int) -> str:
+    """Delta text for a --resume call; ``""`` when nothing new user/tool to send.
+
+    Returns empty when only assistant messages were appended since the last call —
+    the caller then falls through to a full stateless call for THIS step (rare).
+    """
+    assert isinstance(messages, list), "messages must be a list"
+    assert sent_count >= 0, "sent_count must be non-negative"
+    delta = messages[sent_count:]
+    if not delta:
+        return ""
+    return _flatten_delta(delta)
+
+
+def _command(model: str, *, session: TurnSession | None = None, resume: bool = False) -> list[str]:
     """Build the headless CLI command: empty-toolset agent, no persistence, no settings.
 
-    Argv carries NOTHING conversation-derived — only static flags and the static
-    agent definition (argv is world-readable via ``ps``). The real content goes
-    over stdin. ``--setting-sources ""`` loads no user/project settings: verified
-    live that without it the CLI injects the user's global CLAUDE.md. (The CLI
-    still tells the model the current date and the signed-in account's own email —
-    benign, documented in docs/02-models.md.)
+    Argv carries NOTHING conversation-derived — only static flags, the static agent
+    definition, and (in session mode) the per-turn session UUID. UUIDs are random
+    and unrelated to conversation content, so they are safe on argv (which is
+    world-readable via ``ps``). The real content goes over stdin. ``--setting-sources
+    ""`` loads no user/project settings: verified live that without it the CLI
+    injects the user's global CLAUDE.md. (The CLI still tells the model the current
+    date and the signed-in account's own email — benign, documented in
+    docs/02-models.md.)
+
+    Session mode (see ``TurnSession``): ``--no-session-persistence`` is DROPPED
+    (persistence is required for --resume), replaced by ``--session-id <uuid>`` on
+    the first call and ``--resume <uuid>`` on subsequent calls in the same turn.
+    Containment flags (--setting-sources, --strict-mcp-config, --agents/--agent)
+    stay on EVERY call so the second turn can't quietly widen access.
     """
     assert is_claudecode(model), "model must be claudecode/<alias>"
+    assert session is not None or not resume, "resume requires a session"
     if not _enabled:
         raise gateway.GatewayError(403, "Claude Code isn't connected — enable it under "
                                         "Settings → Local models first.")
@@ -349,11 +535,16 @@ def _command(model: str) -> list[str]:
         raise gateway.GatewayError(503, "Claude Code is not installed (Settings → Local models).")
     agents = json.dumps({_AGENT_NAME: {
         "description": "SmartBrain chat backend", "prompt": _AGENT_PROMPT, "tools": []}})
-    return [path, "-p", "--verbose", "--output-format", "stream-json",
-            "--include-partial-messages", "--no-session-persistence",
+    base = [path, "-p", "--verbose", "--output-format", "stream-json",
+            "--include-partial-messages",
             "--setting-sources", "", "--strict-mcp-config",
             "--model", model.split("/", 1)[1],
             "--agents", agents, "--agent", _AGENT_NAME]
+    if session is None:
+        return base + ["--no-session-persistence"]
+    if resume:
+        return base + ["--resume", session.session_id]
+    return base + ["--session-id", session.session_id]
 
 
 def _fail(returncode: int | None, tail: str) -> gateway.GatewayError:
@@ -386,12 +577,21 @@ def _feed_stdin(proc: subprocess.Popen, text: str) -> threading.Thread:
 
 
 def chat_stream(messages: list[dict], model: str, *, timeout: float = 300.0,
-                tools_spec: list[dict] | None = None) -> Iterator[dict]:
-    """Stream deltas from one CLI turn — same item shape as ``gateway.chat_stream``.
+                tools_spec: list[dict] | None = None,
+                session: TurnSession | None = None) -> Iterator[dict]:
+    """Stream deltas from one CLI call — same item shape as ``gateway.chat_stream``.
 
     Tool offers ride the text protocol (see ``_tool_instructions``); a fenced tool
     call streams as text and the agent stream path's suppress-and-recover logic
     handles it, so ``tool_calls`` here is always None.
+
+    Session mode (``session`` given): the first call opens the CLI session with
+    ``--session-id <uuid>`` and the full ``_flatten`` prompt; every later call in
+    the same turn uses ``--resume <uuid>`` and sends only the delta from
+    ``_flatten_delta`` (the CLI keeps context in-session, we skip re-ingesting the
+    transcript). A resume failure BEFORE the first chunk is a silent fallback: the
+    session is disabled and this call restarts stateless. A mid-stream failure
+    still raises (a partial stream can't be re-yielded from the fallback).
 
     Process hygiene: stderr is merged into stdout (a separate unread pipe can fill
     and wedge the child), stdin is fed from a helper thread, and a watchdog timer
@@ -400,10 +600,61 @@ def chat_stream(messages: list[dict], model: str, *, timeout: float = 300.0,
     """
     assert messages and model, "messages + model required"
     assert timeout > 0, "timeout must be positive"
+    if session is not None and session.active and session.sent_count > 0:
+        yielded = yield from _try_resume(messages, model, timeout, session)
+        if yielded:
+            return  # resume succeeded; sent_count updated inside _try_resume
+    # Fresh call: first-of-session (full flatten + --session-id) OR fully stateless.
+    use_session = session is not None and session.active
+    cwd = session.cwd if use_session else _private_cwd()
+    cmd = _command(model, session=(session if use_session else None))
     prompt = _flatten(messages, tools_spec)
-    proc = subprocess.Popen(_command(model), stdin=subprocess.PIPE,
-                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                            text=True, cwd=_private_cwd(), env=_cli_env(),
+    yield from _run_one_stream(cmd, prompt, timeout, cwd)
+    if use_session:
+        session.sent_count = len(messages)
+
+
+def _try_resume(messages: list[dict], model: str, timeout: float,
+                session: TurnSession) -> Iterator[dict]:
+    """Attempt a --resume call; returns True (via ``return``) iff a stream was yielded.
+
+    Empty delta or start-up failure returns False so the caller falls through to a
+    full stateless call. A mid-stream error still propagates (a partial stream can't
+    be replayed from the fallback path without double-yielding to the caller).
+    """
+    assert session.active and session.sent_count > 0, "resume needs an active in-session"
+    assert isinstance(messages, list), "messages must be a list"
+    delta_text = _delta_text_or_empty(messages, session.sent_count)
+    if not delta_text.strip():
+        return False  # nothing new to send — full call handles this step
+    cmd = _command(model, session=session, resume=True)
+    yielded = False
+    try:
+        for chunk in _run_one_stream(cmd, delta_text, timeout, session.cwd):
+            yielded = True
+            yield chunk
+    except gateway.GatewayError as exc:
+        if yielded:
+            raise  # partial stream already reached the caller — no safe fallback
+        log.warning("claudecli session resume failed (%s %s); falling back to stateless "
+                    "for the rest of this turn", exc.status_code, exc.message)
+        session.disable()
+        return False
+    session.sent_count = len(messages)
+    return True
+
+
+def _run_one_stream(cmd: list[str], prompt: str, timeout: float, cwd: str) -> Iterator[dict]:
+    """Spawn the CLI once, feed ``prompt`` on stdin, yield deltas until 'result' or watchdog.
+
+    Shared body of the fresh and --resume paths. Process hygiene: merged stderr,
+    threaded stdin write, watchdog-driven SIGKILL of the whole group — see
+    ``chat_stream`` for the why of each.
+    """
+    assert cmd and prompt, "cmd + prompt required"
+    assert timeout > 0 and os.path.isdir(cwd), "positive timeout + existing cwd required"
+    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT, text=True, cwd=cwd, env=_cli_env(),
                             start_new_session=(os.name == "posix"))
     timed_out = threading.Event()
 
@@ -414,44 +665,51 @@ def chat_stream(messages: list[dict], model: str, *, timeout: float = 300.0,
     watchdog = threading.Timer(timeout, _expire)
     watchdog.daemon = True
     watchdog.start()
-    noise: deque[str] = deque(maxlen=_NOISE_KEEP)  # non-JSON lines (incl. merged stderr)
-    saw_result = False
     try:
-        assert proc.stdout is not None, "stdout pipe must exist"
-        _feed_stdin(proc, prompt)
-        for count, line in enumerate(proc.stdout):  # unblocked by the watchdog's kill
-            if count > _MAX_STREAM_LINES:
-                raise gateway.GatewayError(502, "claude stream exceeded max output lines")
-            event = _parse_event(line)
-            if event is None:
-                if line.strip():
-                    noise.append(line.strip())
-                continue
-            if event.get("type") == "rate_limit_event":
-                _capture_rate_limit(event)
-                continue
-            if event.get("type") == "result":
-                saw_result = True
-                watchdog.cancel()  # the answer is complete — a late fire must not 504 it
-                if event.get("is_error"):
-                    raise _fail(None, "claude reported an error: "
-                                + str(event.get("result") or "")[:_OUTPUT_TAIL])
-                yield {"delta": "", "tool_calls": None, "finish_reason": "stop",
-                       "usage": _event_usage(event)}
-                break
-            text = _event_text_delta(event)
-            if text:
-                yield {"delta": text, "tool_calls": None, "finish_reason": None}
-        _reap(proc)
-        if timed_out.is_set():
-            raise gateway.GatewayError(504, "Claude Code took too long to answer — try again.")
-        if not saw_result:
-            raise _fail(proc.returncode, "\n".join(noise))
+        yield from _consume_stream(proc, prompt, watchdog, timed_out)
     finally:
         watchdog.cancel()
         if proc.poll() is None:
             _kill_tree(proc)
         _reap(proc)
+
+
+def _consume_stream(proc: subprocess.Popen, prompt: str, watchdog: threading.Timer,
+                    timed_out: threading.Event) -> Iterator[dict]:
+    """Read the child's stream, yielding OpenAI-shaped chunks; raise on failure."""
+    assert proc.stdout is not None, "stdout pipe must exist"
+    assert prompt, "prompt required"
+    noise: deque[str] = deque(maxlen=_NOISE_KEEP)  # non-JSON lines (incl. merged stderr)
+    saw_result = False
+    _feed_stdin(proc, prompt)
+    for count, line in enumerate(proc.stdout):  # unblocked by the watchdog's kill
+        if count > _MAX_STREAM_LINES:
+            raise gateway.GatewayError(502, "claude stream exceeded max output lines")
+        event = _parse_event(line)
+        if event is None:
+            if line.strip():
+                noise.append(line.strip())
+            continue
+        if event.get("type") == "rate_limit_event":
+            _capture_rate_limit(event)
+            continue
+        if event.get("type") == "result":
+            saw_result = True
+            watchdog.cancel()  # the answer is complete — a late fire must not 504 it
+            if event.get("is_error"):
+                raise _fail(None, "claude reported an error: "
+                            + str(event.get("result") or "")[:_OUTPUT_TAIL])
+            yield {"delta": "", "tool_calls": None, "finish_reason": "stop",
+                   "usage": _event_usage(event)}
+            break
+        text = _event_text_delta(event)
+        if text:
+            yield {"delta": text, "tool_calls": None, "finish_reason": None}
+    _reap(proc)
+    if timed_out.is_set():
+        raise gateway.GatewayError(504, "Claude Code took too long to answer — try again.")
+    if not saw_result:
+        raise _fail(proc.returncode, "\n".join(noise))
 
 
 def _kill_tree(proc: subprocess.Popen) -> None:
@@ -501,16 +759,20 @@ def _event_usage(event: dict) -> dict | None:
 
 
 def chat(messages: list[dict], model: str, *, timeout: float = 300.0,
-         tools_spec: list[dict] | None = None) -> dict:
-    """One CLI turn, returned OpenAI-shaped (``choices[0].message``) like ``gateway.chat``.
+         tools_spec: list[dict] | None = None,
+         session: TurnSession | None = None) -> dict:
+    """One CLI call, returned OpenAI-shaped (``choices[0].message``) like ``gateway.chat``.
 
     With ``tools_spec`` the reply may be a fenced tool call in plain text —
     ``agent._extract_text_tool_calls`` recovers it, exactly as for local models.
+    ``session`` (optional): turn-scoped continuity — see ``chat_stream`` and
+    ``TurnSession``. Same fallback semantics.
     """
     assert messages and model, "messages + model required"
     parts: list[str] = []
     usage: dict | None = None
-    for chunk in chat_stream(messages, model, timeout=timeout, tools_spec=tools_spec):
+    for chunk in chat_stream(messages, model, timeout=timeout,
+                             tools_spec=tools_spec, session=session):
         parts.append(chunk["delta"])
         usage = chunk.get("usage") or usage
     content = "".join(parts)
