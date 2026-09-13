@@ -11,6 +11,8 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-09-12
+
 ### Added
 - **Neural Interface (phase 1)** — a new dashboard, second only to Chat, of things you
   asked to watch. Describe what you want in Chat; the assistant designs a card (source →
