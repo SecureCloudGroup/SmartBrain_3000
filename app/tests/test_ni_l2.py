@@ -1233,3 +1233,51 @@ def test_cosmetic_apply_l2_stamps_trial_origin_repair_l2(client: TestClient) -> 
     assert trial.get("origin") == "repair_l2", (
         "cosmetic: L2-applied trial must carry origin='repair_l2'"
     )
+
+
+# --- Integrated audit (2026-09-12): L5 L2-proposal state guard ------------
+
+def test_L5_set_l2_proposal_refuses_after_recovery_reset_the_streak() -> None:
+    """L5: a worker call captures ``first_failure_at`` at eligibility mark
+    time. If a clean run resets the streak (state flips to live,
+    first_failure_at cleared) while the multi-minute frontier call is in
+    flight, ``set_l2_proposal`` MUST refuse — otherwise a stale proposal lands
+    on a healthy card and the ``l2_proposal`` chip freezes there forever.
+    """
+    store, _c, _k = _store()
+    iid, _s = _make_failing_item(store)
+    eligibility_first = store.get_item(iid)["first_failure_at"]
+    eligibility_rev = store.get_item(iid)["spec_rev"]
+    # Simulate a clean run mid-call: state → live, first_failure_at → NULL.
+    store.clear_failures(iid, "ok")
+    store.set_state(iid, "live")
+    ok = store.set_l2_proposal(iid, {
+        "stages": {"extract": {"note": "text"}},
+        "created_at": datetime.now(UTC).isoformat(),
+        "model": "claudecode/sonnet",
+    }, expected_rev=eligibility_rev,
+       expected_first_failure_at=eligibility_first)
+    assert ok is False, (
+        "L5: set_l2_proposal must refuse when state flipped away from failing"
+    )
+    assert "_l2_proposal" not in store.get_item(iid)["spec"]
+
+
+def test_L5_set_l2_proposal_refuses_after_broken_transition() -> None:
+    """L5: same guard on the broken hop — the failing→broken transition clears
+    a parked proposal (D4), and a mid-flight worker must not re-add one."""
+    store, _c, _k = _store()
+    iid, _s = _make_failing_item(store)
+    eligibility_first = store.get_item(iid)["first_failure_at"]
+    eligibility_rev = store.get_item(iid)["spec_rev"]
+    store.set_state(iid, "broken")  # ladder tripped mid-call
+    ok = store.set_l2_proposal(iid, {
+        "stages": {"extract": {"note": "text"}},
+        "created_at": datetime.now(UTC).isoformat(),
+        "model": "claudecode/sonnet",
+    }, expected_rev=eligibility_rev,
+       expected_first_failure_at=eligibility_first)
+    assert ok is False, (
+        "L5: set_l2_proposal must refuse when state moved to broken"
+    )
+    assert "_l2_proposal" not in store.get_item(iid)["spec"]

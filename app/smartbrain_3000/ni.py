@@ -57,6 +57,13 @@ _SPEC_LOCK = threading.Lock()
 _NONCE_BYTES = 12
 _MAX_ITEMS = 200                 # bound on ni_items rows (per-key decrypt scan)
 _MAX_ITEMS_PER_PASS = 3          # engine tick fires at most this many due items (feeds precedent)
+# L3 (audit 2026-09-12): the tick's oldest-first candidate cap. due_items now
+# returns more candidates than _MAX_ITEMS_PER_PASS so the tick can SKIP items
+# that would be silently withheld (breaker-open model item, busy llm slot) and
+# still fill the pass quota with attempts that WILL run. 50 keeps the per-tick
+# decrypt cost bounded (well below _MAX_ITEMS) while covering the realistic
+# case of a handful of model items ahead of a due http_json.
+_MAX_DUE_CANDIDATES = 50
 _MAX_REVISIONS = 10              # per-item revision history kept in ni_revisions
 _MAX_RUNS = 50                   # per-item ni_runs telemetry retained (pruned in code)
 _MAX_TITLE = 300
@@ -2448,7 +2455,8 @@ class NIStore:
         assert isinstance(rows, list), "fetchall must return a list"
         return [self._row(r) for r in rows]  # bounded by _MAX_ITEMS
 
-    def update_spec(self, item_id: str, new_spec: dict, *, origin: str = "user") -> int:
+    def update_spec(self, item_id: str, new_spec: dict, *, origin: str = "user",
+                    preserve_attestations: bool = False) -> int:
         """Validate + reseal + bump spec_rev; append a revision row and prune to 10.
 
         Any update ALWAYS strips ``_c2_ok`` and ``contract`` from the sealed spec (A3):
@@ -2469,9 +2477,23 @@ class NIStore:
         proposal (same D1 rationale extended to the frontier ladder: the proposal
         described the pre-edit spec, so applying it after the edit would silently
         undo the edit). ``_l2_last_attempt`` STAYS (one attempt per streak).
+
+        L2 (audit 2026-09-12): ``preserve_attestations`` skips the ``_c2_ok`` +
+        ``contract`` strip AND the streak reset. USED ONLY by callers whose edit
+        does NOT change the data shape — currently the PATCH display route and
+        the repair-policy setter route. Both edit fields the C1/C2 attestation
+        never fingerprinted (display size / policy flags), so stripping the
+        contract would kick a live item out of C3 for no functional reason —
+        creating a contract dead-end where the item drifts back to failing with
+        no L1 eligibility (the contract IS the repair target). ``_l1_trial`` /
+        ``_l2_proposal`` STILL strip because a data-mapping change is what those
+        markers describe — an unrelated cosmetic edit shouldn't touch them
+        either, but an in-flight trial referencing a rev that's about to bump
+        would still be void; safer to drop it.
         """
         assert item_id, "item id required"
         assert isinstance(new_spec, dict), "spec must be a dict"
+        assert isinstance(preserve_attestations, bool), "preserve flag must be bool"
         with _SPEC_LOCK:
             current = self.get_item(item_id)
             if current is None:
@@ -2479,18 +2501,32 @@ class NIStore:
             if origin not in _REVISION_ORIGINS:
                 raise ValueError(f"origin must be one of {sorted(_REVISION_ORIGINS)}")
             validated = validate_spec(new_spec)
-            validated.pop("_c2_ok", None)
             validated.pop("_l1_trial", None)
             validated.pop("_l2_proposal", None)
-            validated["contract"] = None  # keep the key present so validators stay happy
+            if preserve_attestations:
+                # L2: carry forward the sealed attestations + streak. Callers use
+                # this ONLY when the edit does not alter data shape.
+                existing_c2 = current["spec"].get("_c2_ok")
+                if existing_c2 is True:
+                    validated["_c2_ok"] = True
+                else:
+                    validated.pop("_c2_ok", None)
+                validated["contract"] = current["spec"].get("contract")
+                streak_clause = ""
+                streak_params: list = []
+            else:
+                validated.pop("_c2_ok", None)
+                validated["contract"] = None  # keep the key present so validators stay happy
+                streak_clause = "consecutive_failures = 0, first_failure_at = NULL, "
+                streak_params = []
             new_rev = int(current["spec_rev"]) + 1
             interval = self._clamp_interval(validated)
             nonce, ciphertext = self._seal_item(item_id, validated)
             self._conn.execute(
                 "UPDATE ni_items SET nonce = ?, ciphertext = ?, spec_rev = ?, "
-                "interval_minutes = ?, consecutive_failures = 0, "
-                "first_failure_at = NULL, updated_at = now() WHERE id = ?;",
-                [nonce, ciphertext, new_rev, interval, item_id],
+                f"interval_minutes = ?, {streak_clause}"
+                "updated_at = now() WHERE id = ?;",
+                [nonce, ciphertext, new_rev, interval, *streak_params, item_id],
             )
             self._write_revision(item_id, new_rev, validated, origin)
             self._prune_revisions(item_id)
@@ -2660,12 +2696,31 @@ class NIStore:
     def due_items(self) -> list[dict]:
         """§8 due query — enabled AND state NOT IN (draft, paused, broken), NULLS FIRST,
         oldest first. Effective interval (failing back-off, cap 24h) is computed here
-        because it's an exponential formula: SQL would tangle for no benefit."""
+        because it's an exponential formula: SQL would tangle for no benefit.
+
+        L3 (audit 2026-09-12): returns UP TO ``_MAX_DUE_CANDIDATES`` (not
+        ``_MAX_ITEMS_PER_PASS``) due items — the tick counts only ATTEMPTED
+        items against the per-pass quota, so silently-skipped candidates
+        (breaker-open model, busy llm slot) can no longer starve a due http_json
+        behind them. Fairness invariant preserved: oldest-first among returned
+        items, and the tick's own iteration respects that same order.
+
+        R3 (audit 2026-09-12): SQL pre-filter on the PLAINTEXT ``last_checked``
+        column (``NULL OR datediff('minute', last_checked, now()) >=
+        interval_minutes``) means an idle tick decrypts zero sealed specs. The
+        Python-side effective-interval doubling still runs for candidates the
+        SQL pre-filter admitted; ``interval_minutes`` is the base, and the
+        double-per-failure math (``effective_interval_minutes``) uses the
+        plaintext ``consecutive_failures`` column — the SQL floor is a superset
+        of the strict due set, and the Python check tightens it.
+        """
         rows = self._conn.execute(
             "SELECT id, enabled, state, interval_minutes, last_checked, last_status, "
             "consecutive_failures, first_failure_at, position, spec_rev, nonce, ciphertext, "
             "created_at, updated_at FROM ni_items "
             "WHERE enabled AND state NOT IN ('draft', 'paused', 'broken') "
+            "AND (last_checked IS NULL "
+            "     OR datediff('minute', last_checked, now()) >= interval_minutes) "
             "ORDER BY last_checked ASC NULLS FIRST LIMIT ?;",
             [_MAX_ITEMS],
         ).fetchall()
@@ -2675,7 +2730,7 @@ class NIStore:
             item = self._row(r)
             if _is_due(item, now):
                 out.append(item)
-            if len(out) >= _MAX_ITEMS_PER_PASS:
+            if len(out) >= _MAX_DUE_CANDIDATES:
                 break
         return out
 
@@ -2856,7 +2911,8 @@ class NIStore:
             return new_rev
 
     def set_l2_proposal(self, item_id: str, proposal: dict, *,
-                         expected_rev: int) -> bool:
+                         expected_rev: int,
+                         expected_first_failure_at: datetime | None = None) -> bool:
         """§23: seal ``_l2_proposal`` onto the item's spec (rev-preserving).
 
         Refuses (returns False) when the current ``spec_rev`` no longer matches
@@ -2866,6 +2922,17 @@ class NIStore:
         revision snapshot at ``current_rev`` is untouched, a later trial revert
         (post-apply) restores a pre-proposal spec — the consumed proposal cannot
         re-materialize through the revert path.
+
+        L5 (audit 2026-09-12): additionally REFUSE unless the current state is
+        ``failing`` AND ``first_failure_at`` matches the eligibility snapshot
+        (when the caller passes ``expected_first_failure_at``). The multi-minute
+        worker races two states worth blocking: (a) a clean run flipped the item
+        to live and reset the streak — landing a proposal there would freeze a
+        "Fix proposed" chip on a healthy card; (b) the failure ladder tripped
+        broken — Apply would 409 anyway (Phase 4b D4), but a park during broken
+        would leave a dead proposal on the card. ``expected_first_failure_at``
+        defaults to None for backward-compat with test seeders that call this
+        directly; the worker always passes both.
         """
         assert item_id and isinstance(proposal, dict), "id + proposal required"
         assert isinstance(expected_rev, int) and expected_rev >= 1, "expected_rev positive"
@@ -2875,6 +2942,12 @@ class NIStore:
                 return False
             if int(current["spec_rev"]) != expected_rev:
                 return False
+            if expected_first_failure_at is not None:
+                if current["state"] != "failing":
+                    return False  # L5: streak reset (recovery) or ladder broken
+                current_first = current.get("first_failure_at")
+                if current_first != expected_first_failure_at:
+                    return False  # L5: streak marker moved (different streak)
             spec = dict(current["spec"])
             spec["_l2_proposal"] = proposal
             nonce, ciphertext = self._seal_item(item_id, spec)
@@ -3138,22 +3211,29 @@ def tick(app, pass_budget_seconds: float = 20.0,
         secrets_store = SecretStore(cursor, key)
         schedules_store = ScheduleStore(cursor, key)
         started = time.monotonic()
-        for item in store.due_items():  # bounded by _MAX_ITEMS_PER_PASS
+        for item in store.due_items():  # bounded by _MAX_DUE_CANDIDATES
+            # L3 (audit 2026-09-12): count only ATTEMPTED items against the
+            # per-pass quota — a silently-skipped candidate (breaker-open model
+            # source, busy llm slot, no local model for an llm-stage item) must
+            # not consume a slot that a runnable item behind it needs. The
+            # per-pass wall-clock budget still bounds a slow attempt.
+            if checked >= _MAX_ITEMS_PER_PASS:
+                break  # quota filled by real attempts; remainder stays due
             if time.monotonic() - started > pass_budget_seconds:
                 break  # the rest stay due; next tick continues
             source_type = (item["spec"].get("source") or {}).get("type")
             has_llm_stage = _spec_has_llm_stage(item["spec"])
             touches_model = source_type == "model" or has_llm_stage
             if breaker_open is not None and breaker_open() and touches_model:
-                continue  # skip; item stays due for the next tick
+                continue  # skip; item stays due for the next tick — no quota cost (L3)
             if has_llm_stage:
                 # §13 engine discipline: at most 1 llm-stage item per pass, and only
                 # when the local slot is free (busy = stays due, same mechanism as
                 # model sources under the breaker).
                 if not gateway_mod.local_available():
-                    continue
+                    continue  # L3: no quota cost — a runnable non-llm item behind must run
                 if llm_this_pass >= _MAX_LLM_ITEMS_PER_PASS:
-                    continue
+                    continue  # L3: no quota cost — same reason
                 llm_this_pass += 1
             prior_state = item["state"]
             try:
@@ -3216,6 +3296,15 @@ def run_item(store: NIStore, item_id: str, *, gateway_mod, secrets_store,
     consulted only after every cheap eligibility check, so the shared llm slot is
     consumed only when a repair is actually about to run. ``None`` = manual /run
     path (user-invoked, singular; no tick discipline applies).
+
+    L1 (audit 2026-09-12): capture ``started_rev`` at the moment we read the item
+    and thread it through every finalize/handle-failure/transition site. A fetch
+    that ran for 30s under the OLD spec must NEVER apply its results to the NEW
+    spec if a user/agent update landed mid-run — a stale finalize could otherwise
+    C1-capture a contract against the new spec using old bytes, or bless/revert
+    an L1/L2 trial with a run that predates it. Stale finalize records a run row
+    with status ``"stale"`` and skips every state change / snapshot / history /
+    alert / repair-scoring side effect. The window matters: fetch + jail = ~35s.
     """
     assert store is not None and item_id, "store + id required"
     assert gateway_mod is not None and secrets_store is not None, "gateway + secrets required"
@@ -3223,6 +3312,7 @@ def run_item(store: NIStore, item_id: str, *, gateway_mod, secrets_store,
     if item is None:
         raise NIError("item_missing")
     started = time.monotonic()
+    started_rev = int(item["spec_rev"])
     history: dict = {}
     raw_excerpt = ""  # §14 L1 needs a bounded excerpt of the fetched payload on failure
     image_blob: dict | None = None  # §24: sealed only after a successful run
@@ -3242,14 +3332,14 @@ def run_item(store: NIStore, item_id: str, *, gateway_mod, secrets_store,
         outputs = run_pipeline(spec.get("pipeline") or [], payload,
                                 history=history, llm_call=llm_call)
     except NIError as exc:
-        _handle_failure(store, item, exc, started)
+        _handle_failure(store, item, exc, started, started_rev=started_rev)
         _seal_last_failure_snapshot(store, item["id"], exc, raw_excerpt)
         _maybe_repair_l1(store, item, gateway_mod, raw_excerpt, exc,
                          reserve_repair=reserve_repair)
         raise
     except Exception as exc:
         wrapped = NIError("internal", exc.__class__.__name__)
-        _handle_failure(store, item, wrapped, started)
+        _handle_failure(store, item, wrapped, started, started_rev=started_rev)
         _seal_last_failure_snapshot(store, item["id"], wrapped, raw_excerpt)
         _maybe_repair_l1(store, item, gateway_mod, raw_excerpt, wrapped,
                          reserve_repair=reserve_repair)
@@ -3259,7 +3349,7 @@ def run_item(store: NIStore, item_id: str, *, gateway_mod, secrets_store,
     # ni_runs row entirely — audit finding G).
     try:
         return _finalize_run(store, item, spec, outputs, started, history=history,
-                             image_blob=image_blob)
+                             image_blob=image_blob, started_rev=started_rev)
     except NIError as exc:
         _seal_last_failure_snapshot(store, item["id"], exc, raw_excerpt)
         _maybe_repair_l1(store, item, gateway_mod, raw_excerpt, exc,
@@ -3267,16 +3357,44 @@ def run_item(store: NIStore, item_id: str, *, gateway_mod, secrets_store,
         raise
     except Exception as exc:
         wrapped = NIError("internal", exc.__class__.__name__)
-        _handle_failure(store, item, wrapped, started)
+        _handle_failure(store, item, wrapped, started, started_rev=started_rev)
         _seal_last_failure_snapshot(store, item["id"], wrapped, raw_excerpt)
         _maybe_repair_l1(store, item, gateway_mod, raw_excerpt, wrapped,
                          reserve_repair=reserve_repair)
         raise wrapped from None
 
 
+def _current_spec_rev(store: NIStore, item_id: str) -> int | None:
+    """Return the item's current plaintext spec_rev (no decrypt). L1 helper.
+
+    Used by the finalize + handle-failure paths to detect a mid-run spec change
+    without paying the full sealed-body decrypt of ``get_item``. Returns None
+    when the item vanished (delete raced the run).
+    """
+    assert store is not None and item_id, "store + id required"
+    row = store.conn.execute(
+        "SELECT spec_rev FROM ni_items WHERE id = ?;", [item_id]
+    ).fetchone()
+    return None if row is None else int(row[0])
+
+
+def _record_stale_run(store: NIStore, item_id: str, started: float) -> None:
+    """L1: append one ni_runs row with status 'stale' and NO other side effects.
+
+    Duration is measured from ``started`` so the run row's ``duration_ms``
+    reflects the actual wall-clock — a stale run wasn't cheap, and the operator
+    reading run history sees where the ~35s went.
+    """
+    assert store is not None and item_id, "args required"
+    duration_ms = int((time.monotonic() - started) * 1000)
+    store.record_run(item_id, "stale", duration_ms=duration_ms,
+                     error="spec_rev_moved", contract_ok=None)
+
+
 def _finalize_run(store: NIStore, item: dict, spec: dict, outputs: dict,
                   started: float, *, history: dict,
-                  image_blob: dict | None = None) -> dict:
+                  image_blob: dict | None = None,
+                  started_rev: int | None = None) -> dict:
     """Contract-check (if applicable), bind, append history, write snapshots, record
     run + transition, THEN evaluate alerts (order matters — see M1a below).
 
@@ -3293,8 +3411,26 @@ def _finalize_run(store: NIStore, item: dict, spec: dict, outputs: dict,
     re-fire. Order is now: contract → bind/enforce → history append → snapshots →
     record_run → transition → alerts. ``_process_alerts`` writes its snapshot LAST,
     so an internal exception also leaves ``alert_state`` untouched.
+
+    L1 (audit 2026-09-12): ``started_rev`` is the ``spec_rev`` at run_item entry;
+    when passed and the current rev has moved, EVERY side effect is skipped and
+    a single ``stale`` ni_runs row is written. Callers that don't thread the arg
+    (tests) get the old behavior. L8 (audit 2026-09-12): alerts re-read the item
+    AFTER transition so an alert-state edge on a run that just flipped
+    degraded→live gets evaluated (the prior code passed the pre-transition
+    ``item`` and skipped alerts on any non-live snapshot).
     """
     assert isinstance(history, dict), "history required (pre-append)"
+    # L1: freshness guard. Skip the entire finalize side-effect path when the
+    # sealed spec has been updated since run_item read it; record a bare
+    # 'stale' row so telemetry stays honest.
+    if started_rev is not None:
+        current_rev = _current_spec_rev(store, item["id"])
+        if current_rev is None or current_rev != started_rev:
+            _record_stale_run(store, item["id"], started)
+            return {"status": "stale",
+                    "duration_ms": int((time.monotonic() - started) * 1000),
+                    "alerts": [], "repaired": []}
     contract = spec.get("contract")
     state = item["state"]
     contract_ok: bool | None = None
@@ -3310,7 +3446,8 @@ def _finalize_run(store: NIStore, item: dict, spec: dict, outputs: dict,
         contract_ok = ok
         if not ok:
             exc = NIError("contract_violation", violation)
-            _handle_failure(store, item, exc, started, contract_ok=False)
+            _handle_failure(store, item, exc, started, contract_ok=False,
+                             started_rev=started_rev)
             raise exc
     try:
         image_ref = _resolve_image_ref(store, item["id"], image_blob)
@@ -3320,7 +3457,8 @@ def _finalize_run(store: NIStore, item: dict, spec: dict, outputs: dict,
         _enforce_payload_size(bound)
         _append_history_series(store, item, outputs, history)
     except NIError as exc:
-        _handle_failure(store, item, exc, started, contract_ok=contract_ok)
+        _handle_failure(store, item, exc, started, contract_ok=contract_ok,
+                         started_rev=started_rev)
         raise
     duration_ms = int((time.monotonic() - started) * 1000)
     # §24: seal this run's image bytes BEFORE latest/last_good so the served image
@@ -3341,16 +3479,24 @@ def _finalize_run(store: NIStore, item: dict, spec: dict, outputs: dict,
     _clear_last_failure_snapshot(store, item["id"])
     store.record_run(item["id"], "ok", duration_ms=duration_ms, error=None,
                      contract_ok=contract_ok)
-    _transition_on_success(store, item, spec, outputs)
+    _transition_on_success(store, item, spec, outputs, started_rev=started_rev)
+    # L8 (audit 2026-09-12): alerts must see the POST-transition state — a
+    # recovery run that just flipped degraded→live has to evaluate its rules
+    # (and the ``_process_alerts`` LIVE-only gate would otherwise skip them
+    # against the stale pre-transition ``item["state"]``, letting an active-true
+    # alert never re-arm). Re-read once, past the state write; fall back to the
+    # existing pre-transition item if the row vanished (delete raced the run).
+    post_item = store.get_item(item["id"]) or item
     try:
-        fired = _process_alerts(store, item, outputs)
+        fired = _process_alerts(store, post_item, outputs)
     except NIError as exc:
-        _handle_failure(store, item, exc, started, contract_ok=contract_ok)
+        _handle_failure(store, item, exc, started, contract_ok=contract_ok,
+                         started_rev=started_rev)
         raise
     # §14 trial: a clean run (contract satisfied when applicable) closes an in-flight
     # repair trial and yields a carrier notice. Must run AFTER alerts commit so alert
     # state is a valid observation of a promoted spec — mirrors M1a's ordering rule.
-    repaired = _finalize_l1_trial_notice(store, item)
+    repaired = _finalize_l1_trial_notice(store, item, started_rev=started_rev)
     return {"status": "ok", "duration_ms": duration_ms,
             "alerts": fired, "repaired": repaired}
 
@@ -3539,13 +3685,13 @@ def _clamp_alert_cooldown(raw: object) -> int:
 def _interpolate_alert_message(template: str, outputs: dict, title: str) -> str:
     """{{title}} + {{path}} interpolation against outputs; cap at _MAX_ALERT_MESSAGE.
 
-    Heading-forgery guard (H1, audit 2026-09-09): each RESOLVED value has its
-    ``[\\r\\n]+`` runs collapsed to a single space (so a fetched string carrying
-    ``\\n\\n### Scheduled Item Y ###...`` can never forge a chat-notice boundary),
-    then the ASSEMBLED message is quoted with ``> `` when it starts with ``#`` —
-    after the newline-collapse there is only one line, so the leading-``#`` check
-    suffices (claudecli.py's ``_HEADING_FORGERY`` precedent, kept simple). The
-    ``_MAX_ALERT_MESSAGE`` cap applies AFTER sanitization.
+    Heading-forgery guard (H1, audit 2026-09-09; S2 audit 2026-09-12): each
+    RESOLVED value has its ``[\\r\\n]+`` runs collapsed to a single space (so a
+    fetched string carrying ``\\n\\n### Scheduled Item Y ###...`` can never forge a
+    chat-notice boundary), and the ASSEMBLED message runs through the same
+    collapse + leading-``#`` quote (S2 — a user-authored template LITERAL carrying
+    a raw ``\\n### forged block`` would otherwise slip through the resolver-only
+    guard). The ``_MAX_ALERT_MESSAGE`` cap applies AFTER sanitization.
     """
     assert isinstance(template, str), "template must be a string"
     assert isinstance(outputs, dict) and isinstance(title, str), "outputs + title required"
@@ -3562,6 +3708,10 @@ def _interpolate_alert_message(template: str, outputs: dict, title: str) -> str:
         return _ALERT_NEWLINE_RUN.sub(" ", str(resolved))
 
     out = _BIND_INTERP.sub(_one, template)
+    # S2: newline-collapse the ASSEMBLED message so a template literal carrying
+    # ``\n### ...`` is flattened AFTER interpolation (resolver-only collapse
+    # already handled interpolated values; the template itself is the S2 gap).
+    out = _ALERT_NEWLINE_RUN.sub(" ", out)
     if out.startswith("#"):  # neutralize leading heading — quote it so the ### stays inert
         out = "> " + out
     if len(out) > _MAX_ALERT_MESSAGE:
@@ -3694,15 +3844,26 @@ def _enforce_payload_size(bound: dict) -> None:
 
 
 def _handle_failure(store: NIStore, item: dict, exc: NIError, started: float, *,
-                    contract_ok: bool | None = None) -> None:
+                    contract_ok: bool | None = None,
+                    started_rev: int | None = None) -> None:
     """Bookkeeping for any failing outcome: run row + failure counter + state transition.
 
     Also writes a ``latest`` snapshot marked ``ok=False`` with an empty payload (G3) so
     the board's ``_pick_board_snapshot`` fallback (latest-if-ok else last_good) sees a
     real failure marker instead of silently keeping the previous latest — otherwise a
     degraded item shows its last-good in the "latest" slot until a manual /run fires.
+
+    L1 (audit 2026-09-12): when ``started_rev`` is passed and the current sealed
+    rev has moved, skip every side effect except the ``stale`` run row — a stale
+    failure must not bump the counter, must not flip state, and must not revert
+    an in-flight L1 trial (that trial belongs to the NEW rev, not this run).
     """
     assert store is not None and item is not None and exc is not None, "args required"
+    if started_rev is not None:
+        current_rev = _current_spec_rev(store, item["id"])
+        if current_rev is None or current_rev != started_rev:
+            _record_stale_run(store, item["id"], started)
+            return
     duration_ms = int((time.monotonic() - started) * 1000)
     store.record_run(item["id"], "error", duration_ms=duration_ms, error=exc.kind,
                      contract_ok=contract_ok)
@@ -3715,10 +3876,11 @@ def _handle_failure(store: NIStore, item: dict, exc: NIError, started: float, *,
     # §14 trial: any failure while a repair trial is in flight reverts the item to
     # the pre-repair revision (``_l1_last_attempt`` stands so no second attempt fires
     # this streak — the ladder continues toward broken).
-    _revert_l1_trial_if_active(store, item["id"])
+    _revert_l1_trial_if_active(store, item["id"], started_rev=started_rev)
 
 
-def _transition_on_success(store: NIStore, item: dict, spec: dict, outputs: dict) -> None:
+def _transition_on_success(store: NIStore, item: dict, spec: dict, outputs: dict,
+                            *, started_rev: int | None = None) -> None:
     """§6 success transitions: commissioning->live (C3 after C2 ok, contract satisfied);
     C1 contract capture with one-more-clean-run gate; degraded/failing/live -> live.
 
@@ -3726,8 +3888,24 @@ def _transition_on_success(store: NIStore, item: dict, spec: dict, outputs: dict
     NO contract yet, capture it now and STAY in commissioning (require one more clean
     run to reach live). If a contract IS present, the pre-bind check in ``_finalize_run``
     already verified it — a pass here moves the item to live.
+
+    L1 (audit 2026-09-12): a safety-net freshness recheck under ``_SPEC_LOCK`` —
+    ``_finalize_run`` already gated this call at entry, but the un-locked window
+    between that gate and this write is enough for a concurrent user update to
+    race in on a slow finalize. When stale, no-op (the finalize's own guard
+    already recorded the run row on the primary path).
+
+    L2 (audit 2026-09-12): a live item whose sealed contract is somehow None
+    (corruption, an earlier repair path that stripped it, a manual sealed edit)
+    is a dead-end — the pre-bind check would skip and the item drifts without
+    a contract forever. On the next clean run we recapture the contract with a
+    comment explaining why so the belt is visible in code review.
     """
     assert store is not None and item and spec, "args required"
+    if started_rev is not None:
+        current_rev = _current_spec_rev(store, item["id"])
+        if current_rev is None or current_rev != started_rev:
+            return  # L1 safety net: stale — finalize gate should have caught it
     state = item["state"]
     if state == "commissioning":
         if spec.get("_c2_ok") is True and item["spec"].get("contract") is not None:
@@ -3737,18 +3915,31 @@ def _transition_on_success(store: NIStore, item: dict, spec: dict, outputs: dict
         if spec.get("_c2_ok") is True and item["spec"].get("contract") is None:
             # First clean run AFTER C2 verdict — capture the contract and require ONE MORE
             # clean run (with the contract check active) before promoting to live.
-            _reseal_capture_contract(store, item, outputs)
+            _reseal_capture_contract(store, item, outputs, started_rev=started_rev)
             return
         # Pre-C2 (C1): capture the contract on first successful commissioning run;
         # user's C2 verdict still needed before we consider promotion.
-        _reseal_capture_contract(store, item, outputs)
+        _reseal_capture_contract(store, item, outputs, started_rev=started_rev)
         return
     if state in ("live", "degraded", "failing"):
         store.set_state(item["id"], "live")
+        # L2 belt: a live item without a contract cannot enforce C3 on future
+        # runs — recapture it against this clean payload. Only when the sealed
+        # spec has none (a stray audit / drift path); the normal C-flow above
+        # captures at commissioning and this branch is unreachable in the happy
+        # path. Kept as an explicit belt so L1 eligibility can recover.
+        if state == "live" and item["spec"].get("contract") is None:
+            _reseal_capture_contract(store, item, outputs, started_rev=started_rev)
 
 
-def _reseal_capture_contract(store: NIStore, item: dict, outputs: dict) -> None:
-    """Capture and re-seal the contract WITHOUT bumping spec_rev (system-written)."""
+def _reseal_capture_contract(store: NIStore, item: dict, outputs: dict,
+                              *, started_rev: int | None = None) -> None:
+    """Capture and re-seal the contract WITHOUT bumping spec_rev (system-written).
+
+    L1 (audit 2026-09-12): re-read under the lock AND refuse the write when the
+    current sealed rev has moved past ``started_rev`` — a contract captured
+    against this run's payload no longer describes the sealed spec.
+    """
     assert store is not None and item and outputs is not None, "args required"
     contract = capture_contract(outputs)
     with _SPEC_LOCK:
@@ -3757,6 +3948,8 @@ def _reseal_capture_contract(store: NIStore, item: dict, outputs: dict) -> None:
         fresh = store.get_item(item["id"])
         if fresh is None:
             return
+        if started_rev is not None and int(fresh["spec_rev"]) != started_rev:
+            return  # L1 safety net: stale — contract would describe a new spec
         updated = dict(fresh["spec"])
         updated["contract"] = contract
         nonce, ciphertext = store._seal_item(item["id"], updated)
@@ -3949,6 +4142,13 @@ def _build_l1_repair_prompt(spec: dict, exc: NIError, raw_excerpt: str) -> str:
     outputs), so a fetched string could smuggle a triple-backtick or a spoofed
     ``### Data ###`` heading through the sealed contract into the repair prompt —
     same claudecli-precedent injection surface as the raw excerpt.
+
+    S3 (audit 2026-09-12): the ``goal`` (user-typed spec text — free-form; ≤ 5000
+    chars) and the ``failure`` detail (assembled from the payload-derived exc.kind
+    + exc.detail, which for classes like ``extract_miss`` can echo user-controlled
+    substrings) ride through the SAME neutralizer as every other block. A goal
+    carrying ``### System note ###`` or a failure detail containing a triple-
+    backtick could otherwise forge a section boundary inside the prompt.
     """
     assert isinstance(spec, dict) and exc is not None, "spec + exc required"
     assert isinstance(raw_excerpt, str), "raw excerpt must be a string"
@@ -3961,7 +4161,10 @@ def _build_l1_repair_prompt(spec: dict, exc: NIError, raw_excerpt: str) -> str:
         _serialize_and_truncate(spec.get("contract") or {}, _MAX_LLM_DATA_BYTES)
     )
     data_body = _neutralize_llm_data_block(raw_excerpt)
-    goal = str(spec.get("goal") or "")
+    # S3: goal is user-typed spec text; a leading ``#`` line would otherwise land
+    # as a raw heading inside the prompt. Newline-collapse + fence-neutralize.
+    goal = _neutralize_llm_data_block(str(spec.get("goal") or ""))
+    failure_detail = _neutralize_llm_data_block(str(exc.detail or ""))
     return (
         "You repair the data-mapping stages of a Neural Interface item so its scene "
         "renders again. Reply with ONLY a JSON object with at most these two keys:\n"
@@ -3972,7 +4175,7 @@ def _build_l1_repair_prompt(spec: dict, exc: NIError, raw_excerpt: str) -> str:
         "shape is refused.\n\n"
         f"## Goal\n{goal}\n\n"
         f"## Current stages\n```json\n{stages_json}\n```\n\n"
-        f"## Failure\nclass: {exc.kind}\ndetail: {exc.detail}\n\n"
+        f"## Failure\nclass: {exc.kind}\ndetail: {failure_detail}\n\n"
         f"## Contract\n```json\n{contract_json}\n```\n\n"
         f"## Raw payload excerpt\n```json\n{data_body}\n```"
     )
@@ -4065,7 +4268,8 @@ def _stamp_l1_last_attempt(store: NIStore, item_id: str) -> None:
         )
 
 
-def _finalize_l1_trial_notice(store: NIStore, item: dict) -> list[dict]:
+def _finalize_l1_trial_notice(store: NIStore, item: dict,
+                               *, started_rev: int | None = None) -> list[dict]:
     """§14 trial success: if ``_l1_trial`` is set on the current sealed spec, clear it
     and return a single carrier notice (empty list otherwise).
 
@@ -4074,11 +4278,21 @@ def _finalize_l1_trial_notice(store: NIStore, item: dict) -> list[dict]:
     whenever a contract is present, and repair only fires on ``failing`` (which
     requires a captured contract). Clearing here — after every write in the finalize
     path — mirrors the alert-state's LAST-in-order commit rule (M1a).
+
+    L4 (audit 2026-09-12): score the trial ONLY when ``started_rev`` matches
+    ``trial.rev_before + 1`` — i.e., the run that finished IS the trial run.
+    A stale pre-apply run (started_rev == trial.rev_before) MUST NOT bless a
+    trial it never ran; leave the marker in place for the actual trial run.
     """
     assert store is not None and item is not None, "store + item required"
     fresh = store.get_item(item["id"])
     if fresh is None or not fresh["spec"].get("_l1_trial"):
         return []
+    trial = fresh["spec"].get("_l1_trial")
+    if started_rev is not None and isinstance(trial, dict):
+        rev_before = trial.get("rev_before")
+        if not isinstance(rev_before, int) or started_rev != rev_before + 1:
+            return []  # L4: this run did not execute the trial spec
     _clear_l1_trial(store, item["id"])
     title = str(fresh["spec"].get("title") or "")
     return [{"item_id": item["id"], "title": title}]
@@ -4102,7 +4316,8 @@ def _clear_l1_trial(store: NIStore, item_id: str) -> None:
         )
 
 
-def _revert_l1_trial_if_active(store: NIStore, item_id: str) -> None:
+def _revert_l1_trial_if_active(store: NIStore, item_id: str,
+                                *, started_rev: int | None = None) -> None:
     """§14 trial failure: restore the pre-repair revision, clear ``_l1_trial``, KEEP
     the streak markers (``_l1_last_attempt`` and — Phase 4b D1 — ``_l2_last_attempt``)
     so no second attempt fires this streak on either ladder.
@@ -4125,6 +4340,12 @@ def _revert_l1_trial_if_active(store: NIStore, item_id: str) -> None:
     per-streak marker and L2 re-fired the same streak, unbounded per Apply). Also
     pops any ``_l2_proposal``: a proposal is stale context after its trial fails
     (§23 mirrors §14 D1 — a spec change voids the parked proposal).
+
+    L4 (audit 2026-09-12): revert ONLY when ``started_rev == trial.rev_before + 1``
+    (this failing run WAS the trial run). A stale pre-apply run
+    (started_rev == trial.rev_before) MUST leave the marker in place — the actual
+    trial run at rev+1 hasn't happened yet, and reverting here would silently
+    undo the trial before it ever ran.
     """
     assert store is not None and item_id, "args required"
     revert_error: str | None = None
@@ -4140,6 +4361,12 @@ def _revert_l1_trial_if_active(store: NIStore, item_id: str) -> None:
         candidate_origin = trial.get("origin")
         if isinstance(candidate_origin, str) and candidate_origin in _REVISION_ORIGINS:
             trial_origin = candidate_origin
+        # L4: only the trial run scores the trial. When ``started_rev`` is
+        # threaded and does not match trial.rev_before + 1, leave the marker so
+        # the actual trial run can still take its turn.
+        if (started_rev is not None and isinstance(rev_before, int)
+                and started_rev != rev_before + 1):
+            return
         if not isinstance(rev_before, int) or rev_before < 1:
             _drop_trial_marker_inline(store, item_id, current["spec"])
             revert_error = "bad_rev_before"
@@ -4404,6 +4631,10 @@ def _attempt_l2_repair(store: NIStore, item: dict, gateway_mod) -> dict | None:
     started = time.monotonic()
     _stamp_l2_last_attempt(store, item["id"])  # one attempt per streak, crash-proof
     expected_rev = int(item["spec_rev"])
+    # L5 (audit 2026-09-12): capture the streak marker at eligibility time so
+    # set_l2_proposal refuses when a clean run reset the streak OR the ladder
+    # tripped broken while the multi-minute frontier call was in flight.
+    expected_first = item.get("first_failure_at")
     # Phase 4b D5 (audit 2026-09-11): the L2 prompt now rides the SAME envelope §23
     # promises — real failure class + detail + neutralized raw-payload excerpt — read
     # out of the sealed ``last_failure`` slot the run-failure path seals for us.
@@ -4443,7 +4674,8 @@ def _attempt_l2_repair(store: NIStore, item: dict, gateway_mod) -> dict | None:
         return None
     proposal = {"stages": candidate, "created_at": datetime.now(UTC).isoformat(),
                 "model": _L2_FRONTIER_MODEL}
-    stored = store.set_l2_proposal(item["id"], proposal, expected_rev=expected_rev)
+    stored = store.set_l2_proposal(item["id"], proposal, expected_rev=expected_rev,
+                                    expected_first_failure_at=expected_first)
     if not stored:
         _record_l2_failed(store, item["id"], started, "spec_changed")
         return None

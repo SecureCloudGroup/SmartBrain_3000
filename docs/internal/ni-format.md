@@ -35,12 +35,16 @@ Follows the house sealed-body + plaintext-operational-columns convention
   (streak marker; §6), `position INTEGER`, `spec_rev INTEGER`,
   `created_at TIMESTAMP`, `updated_at TIMESTAMP`; sealed body (AAD
   `ni_item:<id>`): the spec (§2).
-- `ni_snapshots` — `item_id TEXT`, `slot TEXT` (`latest` | `last_good` | `preview`;
-  v2 adds `history` (§11) and `alert_state` (§12) — the slot set is app-level, no
-  schema change),
+- `ni_snapshots` — `item_id TEXT`, `slot TEXT` (the full closed set is eight:
+  `latest` | `last_good` | `preview` | `preview_data` (§21) | `history` (§11) |
+  `alert_state` (§12) | `last_failure` (§23) | `image` (§24) — the slot set is
+  app-level, no schema change),
   `nonce BLOB`, `ciphertext BLOB` (AAD `ni_snapshot:<item_id>:<slot>`), `ok BOOLEAN`,
   `created_at TIMESTAMP`, `PRIMARY KEY (item_id, slot)`. Sealed body: the bound
-  payload (§4.3) — the data, not the scene.
+  payload (§4.3) — the data, not the scene. The table also carries two reserved-id
+  row families that are NOT items (no matching `ni_items` row, `__`-prefixed ids,
+  slot names outside the item set): `__library__` (`source` pin + verified `pack`,
+  §20) and `__mcp_servers__` (`servers` registry, §22).
 - `ni_revisions` — `item_id TEXT`, `rev INTEGER`, `nonce BLOB`, `ciphertext BLOB`
   (AAD `ni_revision:<item_id>:<rev>`), `origin TEXT` (`user` | `agent` |
   `repair_l1` | `repair_l2` | `template`), `created_at TIMESTAMP`, `PRIMARY KEY
@@ -84,7 +88,11 @@ No foreign keys; `NIStore.delete` cascades in code (feeds precedent).
   rejects specs carrying them (closed-key law) — that is the intended forward
   refusal.
 
-## 3. Sources (v1: three types, closed set)
+## 3. Sources (closed set — eight types)
+
+The full closed set (`_SOURCE_TYPES`; validators refuse anything else):
+`http_json`, `model`, `internal.schedule` (this section), `http_page` +
+`internal.kb` (§15), `mcp_tool` (§22), `http_image` (§24), `internal.ni` (§25).
 
 `http_json`:
 ```json
@@ -223,6 +231,13 @@ Added in v2:
   an arc gauge; `max > min` required, value clamped visually to [min, max]
   (clamping is presentation; the raw value still binds for conditions).
 
+Added in v4c:
+- `{"type": "image", "alt": "…≤200 chars…", "when"?: […]}` — the §24 pixel
+  channel. A spec's image node carries only `alt` (`{{path}}` interpolation
+  allowed) — never a `src`; the binder injects the server-owned same-origin
+  `/api/ni/items/<id>/image?v=…` src at bind time. Requires an `http_image`
+  source (refused at spec time otherwise).
+
 Conditions (v2, **bind-time — the client never sees them**): any CONTENT node may
 carry `"when": [rule…]` (≤ 5 rules):
 
@@ -247,14 +262,18 @@ Rules:
 - Caps: ≤ 100 nodes after repeat expansion, depth ≤ 8, text ≤ 2000 chars, repeat
   `max` ≤ 50. Enforced at bind time and again by the renderer.
 - Reserved for later phases (validators must REJECT, so old apps refuse new
-  scenes rather than mis-render them): `image`, `on_tap` (behaviors).
+  scenes rather than mis-render them): `on_tap` (behaviors) — the only
+  remaining reserved type. v2 promoted `spark`/`gauge`; v4c promoted `image`.
 
 ## 6. Lifecycle state machine (fully enumerated)
 
 States (plaintext `ni_items.state`):
-`draft → commissioning → live ⇄ degraded ⇄ failing → broken`, plus `paused`
-(user, from any post-draft state; resume returns to `commissioning` if the item
-was never live, else `live`).
+`draft → commissioning → live ⇄ degraded ⇄ failing → broken`. Pause is NOT a
+state: `enabled=false` is the pause (§2). The due query filters on `enabled`,
+and resume (`enabled=true`) touches nothing else — the item keeps its prior
+`state` and the next due pass simply picks it back up. The `'paused'` string
+sits in `_STATES` and the due query's `NOT IN` list reserved-but-unused: no
+code path writes it (`set_state('paused')` is never called).
 
 Approval IS consent. NI write tools are REVIEWED + egress + non-rememberable, so
 the create/update handler only ever runs after explicit human approval. The
@@ -318,7 +337,12 @@ Captured by the system at commissioning (C1 result, confirmed by C2):
  "bounds": {"price": {"min": 0}}}
 ```
 - `shape` — type fingerprint of every pipeline output the scene binds.
-- `bounds` — optional plausibility ranges (system-suggested, user-editable).
+- `bounds` — optional plausibility ranges, honored-if-present:
+  `check_contract` enforces min/max on numeric leaves whenever a `bounds` block
+  exists. But nothing captures them — `capture_contract` writes `shape` only —
+  and no route or tool exposes a bounds editor, so today `bounds` has NO write
+  path (tests and hand-sealed specs aside). The "system-suggested,
+  user-editable" design remains aspirational.
 Checked on every run after binding; a violation is a contract failure (run fails,
 item degrades) even when everything parsed. Repair (later phases) targets contract
 satisfaction, not mere parsing.
@@ -354,6 +378,7 @@ failure bump + `latest` ok=false snapshot fire on every failure path (a raw
 |---|---|---|
 | `list_ni_items` | OBSERVE | plaintext state + titles |
 | `read_ni_item` | OBSERVE | spec + health + latest bound payload (untrusted-data provenance line first, KB-tool precedent) |
+| `read_ni_spec_guide` | OBSERVE | compact NI spec-grammar reference (sources, pipeline ops, scene nodes, bindings, params, history/alerts, `preview_payload`) the drafting agent MUST consult before drafting a `create_ni_item` / `update_ni_item` spec |
 | `create_ni_item` | REVIEWED, egress | full spec + preview payload; validates everything; lands in `commissioning` (approval == consent) unless a secret param is unfilled or `draft: true` is passed |
 | `update_ni_item` | REVIEWED | partial; a source change (URL/headers/type/instruction OR the value of any param referenced by `source.url` via `{{param:}}`) sends the item to `commissioning` (re-consent). Optional `preview_payload` rewrites the preview snapshot alongside the spec — note the preview is stale until this is passed |
 | `set_ni_item_enabled` | REVIEWED | pause/resume |
@@ -364,6 +389,15 @@ failure bump + `latest` ok=false snapshot fire on every failure path (a raw
 `UNATTENDED_NEVER_AUTO`. None of the NI write tools are ever rememberable
 (consent.py returns `None` for unlisted egress tools by default — leave them
 unlisted on purpose).
+
+Propose-time validation (S6, field-blocking defect fix 2026-09-13):
+`create_ni_item` and `update_ni_item` carry a pure pre-park `prevalidate`
+that runs the same spec/scene/preview-bind checks the handler runs. A
+malformed draft is bounced INLINE to the model with the validator's exact
+message plus a pointer to `read_ni_spec_guide` — no card parks, the user is
+not asked to approve a spec that would fail post-approval, and the model
+gets the error in time to retry. Store-visible checks (composite depth,
+source-change re-consent) still run at execute time.
 
 The creation consent law: the ActionCard for `create_ni_item` must show the source
 URL host + path unmissably and the user must have picked the source in
@@ -612,7 +646,10 @@ modeled on claudecli.py's process hygiene:
   environment** (no `SMARTBRAIN_*`, no `ANTHROPIC_*`, minimal PATH — the
   claudecli `_cli_env` discipline), private cwd, `start_new_session=True`.
 - Input over stdin (bytes), output = one JSON object on stdout (size-capped);
-  stderr merged and discarded except for the failure class.
+  stderr goes to devnull — NOT merged into stdout (one dependency warning on a
+  merged stream would corrupt the JSON parse forever; an unread pipe could fill
+  and wedge the child). The failure class comes from exit/timeout/parse state
+  alone.
 - Resource limits in the child via `resource.setrlimit` (CPU seconds, address
   space, no core files) — platform-guarded (the `resource` module is
   POSIX-only; on Windows rely on the watchdog alone, and note it).
@@ -624,8 +661,14 @@ modeled on claudecli.py's process hygiene:
 
 - `GET /api/ni/notices?limit=N` — **desktop-local** (`x-sb-local`), unlocked
   only (423 otherwise). Returns the newest NI carrier-row entries
-  `[{id, kind: "alert"|"broken"|"repaired", body, ts}]`, newest first, limit
-  clamped ≤ 20. Bodies are sanitized at WRITE time: alert messages by the §12
+  `[{id, kind: "alert"|"broken"|"repaired"|"proposal", body, ts}]`, newest
+  first, limit clamped ≤ 20. Kind derives from the carrier run status
+  (`complete`→`alert`, `broken`, `repaired`, `proposal` — §23's "fix ready to
+  review"; unknown statuses read as `alert`). The §20 library block/rollback
+  notice posts under status `broken` — same kind, reusing the launcher's
+  existing tone + dedupe; the launcher's per-kind title switch falls back to
+  "SmartBrain alert" for kinds it doesn't know, so `proposal` surfaces without
+  a launcher rebuild. Bodies are sanitized at WRITE time: alert messages by the §12
   interpolation guard, and broken/repaired notices by the same newline-collapse
   + leading-`#` quote applied to the embedded item TITLE when the carrier row is
   posted (titles are user/agent-authored spec text and these bodies render

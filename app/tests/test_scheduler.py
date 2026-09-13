@@ -591,6 +591,43 @@ def test_record_vault_run_surfaces_in_the_feed_and_badge() -> None:
     assert store.unseen_count() == 2
 
 
+def test_R1_carrier_run_history_pruned_to_ceiling_and_user_history_kept() -> None:
+    """R1 (audit 2026-09-12): reserved carrier rows are pruned to the newest
+    ``_CARRIER_RUN_KEEP`` entries per carrier id; user schedules keep full
+    history. Uses a lowered ceiling so the assertion isn't a 500-row sweep.
+    """
+    store, conn, _ = _store()
+    keep = 3
+    original_keep = scheduler._CARRIER_RUN_KEEP
+    scheduler._CARRIER_RUN_KEEP = keep
+    try:
+        # Vault carrier: 5 rows in → newest 3 kept, oldest 2 dropped.
+        for i in range(5):  # bounded loop, small fixed count
+            store.record_vault_run("complete", f"carrier-{i}")
+        vault_rows = conn.execute(
+            "SELECT COUNT(*) FROM schedule_runs WHERE schedule_id = ?;",
+            [scheduler._VAULT_FEED_ID],
+        ).fetchone()[0]
+        assert vault_rows == keep, (
+            f"R1: carrier rows must be capped to {keep} (got {vault_rows})"
+        )
+        newest = [r["message"] for r in store.list_runs(scheduler._VAULT_FEED_ID)]
+        assert newest == ["carrier-4", "carrier-3", "carrier-2"], newest
+        # User schedule: same volume must keep every row (retention is theirs).
+        sid = store.add_schedule("u", "p", interval_minutes=0,
+                                  start_in_minutes=0, model=None)
+        for i in range(5):  # bounded loop, small fixed count
+            store.record_run(sid, "complete", message=f"user-{i}")
+        user_rows = conn.execute(
+            "SELECT COUNT(*) FROM schedule_runs WHERE schedule_id = ?;", [sid],
+        ).fetchone()[0]
+        assert user_rows == 5, (
+            f"R1: user schedules must keep full history (got {user_rows})"
+        )
+    finally:
+        scheduler._CARRIER_RUN_KEEP = original_keep
+
+
 def test_vault_carrier_is_hidden_from_the_schedule_list_and_get() -> None:
     # The carrier is not a user schedule: it must never appear in the Schedules list, and get_schedule
     # reads it as absent so no route can run, edit, or delete it.

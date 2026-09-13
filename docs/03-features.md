@@ -385,10 +385,12 @@ schedule.
 
 How a card comes to life:
 
-1. **You pick the source.** The assistant can suggest where the data could come
-   from, but the choice of source is always yours — the approval card shows the
-   exact address it will fetch, and that address is frozen: nothing can quietly
-   change it later without asking you again.
+1. **You pick the source.** The assistant suggests candidates — first from a
+   small **vetted catalog** of free, keyless public APIs, and it says so; a
+   source it found by web search is labeled that way instead. The choice is
+   always yours — the approval card shows the exact address it will fetch, and
+   that address is frozen: nothing can quietly change it later without asking
+   you again.
 2. **Preview first.** The assistant shows the card with sample data so you can
    approve the look ("make the total bigger" works — it's a conversation).
 3. **Commissioning.** After you approve, the system runs the real pipeline and
@@ -402,8 +404,88 @@ How a card comes to life:
 Cards render from a fixed set of safe building blocks (text, numbers, bars,
 chips, lists) — fetched content is displayed as plain text, never as links,
 markup, or instructions. Sources are fetched with the same network guard as
-feeds; a locked vault stops everything. Cards refresh about every N minutes (1
-minute is the floor), never in real time.
+feeds; a locked vault stops everything. Cards refresh about every N minutes,
+never in real time — 1 minute is the floor, or 5 minutes for a card with a
+language-model step in its pipeline (below).
+
+**Charts.** The engine can keep a rolling history per card — a few numeric
+series, a few hundred points each — and the card can draw it: a sparkline, a
+gauge, or a change-since-last-refresh delta with its direction.
+
+**Display rules and alerts.** A card can carry small conditions. A display rule
+(*"turn the delta red when it goes negative"*) is applied while the card is
+prepared, so what you see is still a pure function of the data. An alert
+(*"tell me when the price drops"*) fires a notice — but only when its condition
+*becomes* true: it then stays quiet until the condition has been false again,
+and never fires twice within its cooldown (an hour unless you set one; five
+minutes is the floor). Fired alerts — and "broken" and "repaired itself"
+notices — arrive exactly like scheduled-run output: a notice in your open Chat,
+the badge on the Chat tab, and a durable copy on **Info** under *Neural
+Interface*. On Mac and Linux the desktop app also shows a system notification.
+While the vault is locked, nothing is shown anywhere.
+
+**Interpreted cards.** A card's pipeline can include one language-model step —
+*"summarize these headlines in a sentence"*. It runs on your **local** model
+only, never a cloud fallback; the model sees the fetched data inside a guarded
+fence with no tools, and must answer in an exact shape or the run fails safely
+to the last good result. Any card whose content passed through a model — this
+step, or a card whose source *is* a model instruction — wears an
+**Interpreted** chip, so you can always tell a model's reading from pure
+arithmetic. Cards with a language-model step refresh at most every 5 minutes.
+
+**Self-repair.** When a card fails because the data's shape changed, a local
+model can propose new data mappings — it is structurally unable to touch the
+source address, headers, schedule, or anything else you consented to. The fix
+runs as a trial: kept only if the next refresh passes the card's validated
+contract, automatically reverted otherwise, one attempt per breakage, all of it
+in the card's run history. When a trial sticks, a *"repaired itself"* notice
+tells you. Each card's **Repair settings** let you turn this off — and hold the
+next level:
+
+**Frontier repair (off by default).** If local repair has had its one try and
+the card still fails, and you have *both* switched on frontier repair for that
+specific card *and* connected Claude Code, Claude can be asked for a second
+opinion. Its answer is **proposed, never applied**: the card shows *"Fix
+proposed — review"* with the current and proposed mappings side by side, and
+your **Apply** runs it as the same keep-or-revert trial; **Dismiss** drops it.
+What's sent is bounded — the card's goal, its data mappings, the failure, and a
+short excerpt of the failing data; never your knowledge, never credentials.
+
+**More than APIs.** A card can also watch an ordinary **web page** (the
+readable text is extracted in a locked-down helper process — hostile HTML is
+never parsed inside the app), your own **knowledge** (*"a card of my notes
+about X"* — zero network), or an **image**: a weather-radar frame, a webcam
+still, a status badge. Images are accepted only as real raster formats, checked
+by file signature rather than by what the server claims; the pixels are stored
+encrypted and served only from your own app, and a failed refresh keeps the
+last good frame. **Composite cards** put your other cards' histories side by
+side — *"my stock next to my spending"* — with zero network: they read only
+your own cards' recorded series, can't nest, and degrade gracefully if a card
+they reference goes away.
+
+**Your MCP servers as sources.** Cards can pull from MCP servers **you**
+configure on **Settings → Connections (MCP)** — which is how database cards
+work: your own Postgres/SQLite MCP server keeps its credentials in its own
+process, and SmartBrain calls exactly one tool with the exact arguments shown
+on the approval card, frozen thereafter (changing them means re-approval). It
+never reads MCP config from disk and never feeds a server's tool listings to a
+model. One honest exception rides here: your own server's address may be
+localhost or LAN — the single deliberate, user-typed exception to the app's
+public-addresses-only network guard. See [MCP](05-mcp.md).
+
+**The Library.** Connect to a signed template library and install ready-made
+cards. Trust works like vault subscriptions: the publisher's key is pinned on
+first contact, every pack is verified against it, and the **fingerprint** is
+the identity you check — version rollbacks are refused, and a changed key
+blocks updates until you confirm the new fingerprint with your passphrase.
+Installing shows every source address up front and lands as a **draft**; your
+**Activate** is still the consent — a library can never start traffic by
+itself. When the library updates a template you use, the card offers *"Update
+available"*: applying shows what changed and goes through draft → commissioning
+again. The app checks the one URL you connected about once a day. You can also
+export most cards as a shareable template — credentials and your filled-in
+values are stripped; cards built on your schedules or your knowledge refuse,
+because that content is yours.
 
 Each card offers **Run now**, **Pause**, and **Delete**; drafts are marked
 "Preview — sample data" until commissioned. On a phone, Neural sits second in

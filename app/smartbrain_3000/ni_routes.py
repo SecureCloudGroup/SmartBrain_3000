@@ -203,8 +203,10 @@ _EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 # "proposal" for §23 L2 proposals; anything unexpected reads as the mildest kind
 # rather than being dropped. The launcher's per-kind title switch (launcher/
 # notices.go) falls back to "SmartBrain alert" for unknown kinds — verified by
-# notices_test.go's unknown-kind fallback — so "proposal" surfaces on trays
-# without a launcher rebuild.
+# notices_test.go's unknown-kind fallback — so "proposal" surfaces on
+# macOS/Linux trays without a launcher rebuild (Windows has no Notify
+# implementation yet — stack.Notify is a no-op there, documented in
+# launcher/notices.go).
 _NOTICE_KIND_BY_STATUS = {"broken": "broken", "repaired": "repaired",
                           "proposal": "proposal"}
 
@@ -318,6 +320,15 @@ def commission_item(request: Request, item_id: str) -> dict:
     Refuses (409) when the current state is not ``draft`` and separately (409) when
     any ``secret``-kind param still has an empty value (the credential must be
     entered via PUT /credential before the engine attempts a run).
+
+    S5 (audit 2026-09-12): a secret param whose value is a ``ni:...`` placeholder
+    (installed-template shape) is treated as UNFILLED unless the SecretStore
+    actually holds a value under that key — so a template install that never had
+    its credential PUT'd refuses commission with the same clear detail instead
+    of dying on the next fetch with ``secret_missing``.
+
+    S6 (audit 2026-09-12): a successful commission writes an audit row so the
+    consent event is on the spine (metadata: item_id only — no titles / content).
     """
     store = _store(request)
     item = store.get_item(item_id)
@@ -326,14 +337,38 @@ def commission_item(request: Request, item_id: str) -> dict:
     if item["state"] != "draft":
         raise HTTPException(status_code=409,
                             detail=f"commission refused: state={item['state']!r}")
+    secrets = getattr(request.app.state, "secret_store", None)
     params = item["spec"].get("params") or {}
     for name, param in params.items():  # bounded by _MAX_PARAMS
-        if isinstance(param, dict) and param.get("kind") == "secret" and not param.get("value"):
+        if not (isinstance(param, dict) and param.get("kind") == "secret"):
+            continue
+        value = param.get("value")
+        if not value:
             raise HTTPException(
                 status_code=409,
                 detail=f"commission refused: secret param {name!r} not yet filled",
             )
+        # S5: a ``ni:...`` placeholder counts as filled ONLY when the SecretStore
+        # actually holds a value under that key. secrets=None means locked —
+        # _store() already 423'd, so this branch is defensive.
+        if isinstance(value, str) and value.startswith("ni:") and secrets is not None:
+            try:
+                stored = secrets.get(value)
+            except Exception:  # decrypt / catalog issue — treat as unfilled
+                stored = None
+            if not stored:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"commission refused: secret param {name!r} not yet filled"
+                    ),
+                )
     store.commission(item_id)
+    request.app.state.audit.append(
+        "user", "ni_commission", "reviewed", "executed", True,
+        args_summary=tools.summarize({"item_id": item_id}),
+        result_summary=tools.summarize({"state": "commissioning"}),
+    )
     return {"state": "commissioning"}
 
 
@@ -366,7 +401,14 @@ def run_item(request: Request, item_id: str) -> dict:
     secrets = _secret_store(request)
     schedules = getattr(state, "schedules", None) or ScheduleStore(state.dbx, state.master_key)
     prior_state = item["state"]
-    store.clear_last_checked(item_id)
+    # L7 (audit 2026-09-12): mark_checked BEFORE the synchronous run instead of
+    # clear_last_checked — clearing would leave the item due for the concurrent
+    # tick to pick up during our multi-second fetch (a double-run window). The
+    # tick's due gate reads last_checked; a fresh timestamp (with a distinct
+    # ``manual`` status so telemetry stays honest) keeps the item out of the
+    # next tick's due set until our own run stamps its own status via run_item's
+    # finalize path.
+    store.mark_checked(item_id, "manual")
     started = time.monotonic()
     try:
         # kb rides along so internal.kb items work on manual refresh too, not
@@ -434,16 +476,42 @@ def patch_item(request: Request, item_id: str, body: PatchIn) -> dict:
             raise HTTPException(status_code=400, detail=str(exc)) from None
         new_spec = dict(current["spec"])
         new_spec["display"] = body.display
-        store.update_spec(item_id, new_spec, origin="user")
+        # L2 (audit 2026-09-12): display is a purely cosmetic field the contract
+        # never fingerprinted — preserve the C1/C2 attestations and streak so a
+        # visual toggle can't kick a live item out of C3 into a contract
+        # dead-end.
+        store.update_spec(item_id, new_spec, origin="user",
+                          preserve_attestations=True)
     return {"ok": True}
 
 
 @router.delete("/api/ni/items/{item_id}")
 def delete_item(request: Request, item_id: str) -> dict:
-    """Permanent delete; cascades snapshots/revisions/runs in code (no FK — feeds precedent)."""
+    """Permanent delete; cascades snapshots/revisions/runs in code (no FK — feeds precedent).
+
+    L9 (audit 2026-09-12): also best-effort deletes every ``ni:<item_id>:<name>``
+    secret key stored under this item's namespace (from the sealed spec's secret
+    params). Without this, credentials outlive their owning item — unreachable by
+    the delete tool (no SecretStore in ToolContext by design) and invisible to the
+    Providers-only ``/api/secrets`` surface. Delete failures are swallowed so a
+    stuck secret never blocks the item cascade.
+    """
     store = _store(request)
     if store.get_item(item_id) is None:
         raise HTTPException(status_code=404, detail="item not found")
+    # Enumerate secret keys from the sealed spec BEFORE the item row disappears.
+    item = store.get_item(item_id)
+    params = (item["spec"].get("params") or {}) if item is not None else {}
+    secrets = getattr(request.app.state, "secret_store", None)
+    if secrets is not None and isinstance(params, dict):
+        for name, param in params.items():  # bounded by ni._MAX_PARAMS
+            if not (isinstance(param, dict) and param.get("kind") == "secret"):
+                continue
+            key = f"ni:{item_id}:{name}"
+            try:
+                secrets.delete(key)
+            except Exception as exc:  # best-effort: never block the item cascade
+                log.warning("ni delete: secret drop failed for %s: %s", key, exc)
     store.delete(item_id)
     return {"ok": True}
 
@@ -509,7 +577,12 @@ def set_repair_policy(request: Request, item_id: str, body: RepairPolicyIn) -> d
     new_spec["repair_policy"] = {"l1": bool(existing.get("l1", True)),
                                   "l2_frontier": bool(existing.get("l2_frontier", False))}
     try:
-        store.update_spec(item_id, new_spec, origin="user")
+        # L2 (audit 2026-09-12): repair_policy is a run-time behavior flag the
+        # contract never fingerprinted — preserve the attestations + streak so a
+        # user's policy flip can't kick the item out of C3 into a contract
+        # dead-end (which would leave L1 permanently ineligible).
+        store.update_spec(item_id, new_spec, origin="user",
+                          preserve_attestations=True)
     except (ValueError, ni.NIError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from None
     request.app.state.audit.append(

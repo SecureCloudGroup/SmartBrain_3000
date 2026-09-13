@@ -63,11 +63,14 @@ not. Being precise about the line matters more than claiming everything:
 
 - **Cloud model calls.** If you use an OpenAI/Anthropic/Google model, your prompts
   and the content you send go to that provider. Use a **local model** (Ollama/MLX)
-  to keep everything on-box. Four jobs use a model, and each is routed separately
-  under Settings → Model routing: chat, scheduled runs, embeddings for search, and
-  background document summaries. Point any of them at a cloud provider and that job's
-  content goes there — the embedding and summary slots are the easy ones to overlook,
-  because they run over your documents in the background rather than in front of you.
+  to keep everything on-box. Five jobs use a model, and each is routed separately
+  under Settings → Model routing: chat, scheduled runs, embeddings for search,
+  background document summaries, and Neural Interface cards that ask a model. Point
+  any of them at a cloud provider and that job's content goes there — the embedding
+  and summary slots are the easy ones to overlook, because they run over your
+  documents in the background rather than in front of you. (Two Neural Interface
+  jobs refuse to be cloud-routed at all: a card's in-pipeline language-model step
+  and local self-repair run on a local model or not at all.)
 - **Claude Code models.** The `claudecode/*` models send the conversation to Anthropic
   under your own Claude sign-in, exactly like a cloud provider — configured beside the
   local servers, but not local in the privacy sense. SmartBrain drives the `claude`
@@ -85,8 +88,40 @@ not. Being precise about the line matters more than claiming everything:
   who connected. See [Remote access](08-remote-access.md) for exactly what it sees.
 - **Public vaults (only if you subscribe).** Subscribing to a vault by URL — and any
   **Check for updates** or scheduled auto-update on it — fetches the vault from the host
-  in that URL (public internet hosts only, never localhost or LAN addresses). Recurring
-  checks happen only if you turned auto-update on.
+  in that URL (public internet hosts only — the network guard blocks localhost and LAN
+  everywhere, with exactly one carve-out: the MCP servers you configure yourself, below).
+  Recurring checks happen only if you turned auto-update on.
+- **Website feeds (only the ones you subscribed).** Each RSS/Atom feed you follow is
+  fetched about every six hours, directly from this machine, from the public URL you
+  pasted — and from nowhere else. **Refresh** on a feed's row fetches right now.
+  Unsubscribing stops the checking.
+- **Neural Interface cards (only the sources you approved).** Each card fetches its
+  own source — the exact address you saw frozen on the approval card — at the cadence
+  you set, through the same network guard as feeds. Nothing else is contacted: a
+  card watching a page fetches that page; a card watching an image fetches that
+  image; cards built on your schedules, your knowledge, or other cards fetch nothing
+  at all. A card with a credential sends it only to the host it was entered for,
+  only over HTTPS, and never follows a redirect while carrying it.
+- **The card template library (only if you connect one).** A connected library is
+  checked at the URL you pinned about once a day (plus your manual "Check now").
+  The check downloads the signed template pack; nothing about you or your cards is
+  sent — it is the same file anyone can fetch.
+- **Your MCP servers (the deliberate localhost/LAN exception).** The app's network
+  guard refuses private and internal addresses everywhere — with one exception,
+  stated plainly: an MCP server **you** add on Settings → Connections (MCP) may be
+  a loopback or LAN address, because pointing SmartBrain at your own server is the
+  entire point. The gates: the address is typed by you in a desktop-only act and
+  frozen; each card calls exactly one tool with arguments you approved and that
+  are frozen too; redirects are refused; nothing a model writes can ever reach or
+  change that address. What travels is the tool call and its reply — your database
+  credentials stay inside your own server process and are never held by SmartBrain.
+- **Frontier card repair (only per-card, only if you opted in).** If you switch on
+  "Frontier repair via Claude" for a specific card *and* Claude Code is connected,
+  a card that keeps failing sends Anthropic a bounded repair request: the card's
+  goal, its data mappings, the failure class, and a short excerpt of the failing
+  data — never your knowledge, never credentials, and for cards built on internal
+  sources not even the excerpt. The reply is only ever a parked proposal; nothing
+  is applied without your review.
 - **Web search & fetch (only when the assistant uses those tools).** A web search goes
   to the engine you chose — **DuckDuckGo by default**, or your own Brave/Tavily key or
   self-hosted SearXNG (Settings → Web search) — and a web fetch goes to that page's
@@ -113,10 +148,11 @@ not. Being precise about the line matters more than claiming everything:
 
 Two things that sound like they'd leave and don't:
 
-- **MCP.** A connected desktop AI client reads your knowledge over a loopback
-  connection on your own machine. SmartBrain sends nothing outward for it. What that
-  *client* then does with what it read is its business, not SmartBrain's — see
-  [MCP](05-mcp.md).
+- **MCP (inbound).** A connected desktop AI client reads your knowledge over a
+  loopback connection on your own machine. SmartBrain sends nothing outward for it.
+  What that *client* then does with what it read is its business, not SmartBrain's —
+  see [MCP](05-mcp.md). (The *outbound* direction — your own MCP servers as card
+  sources — is listed above, because that one does connect out.)
 - **Publishing a vault.** Export writes a file to your disk. Nothing is uploaded;
   where it goes afterwards is entirely your doing. See [Vaults](04-vaults.md).
 
