@@ -72,6 +72,13 @@ _SELFREVIEW_FEED_TITLE = "Self-review"
 _NI_FEED_ID = "neural-interface"
 _NI_FEED_TITLE = "Neural Interface"
 _CARRIER_IDS = (_VAULT_FEED_ID, _SELFREVIEW_FEED_ID, _NI_FEED_ID)  # every reserved non-user schedule
+# R1 (audit 2026-09-12): retention ceiling for carrier-schedule rows only. User
+# schedules keep full history as before (the user asked for the schedule and
+# curates its output tab); carriers are noisy background signals — a NI card
+# with an alert every 5 minutes fills the DB with hundreds of MB of sealed
+# ciphertext over months. 500-row keep on the newest per-carrier keeps a week
+# or two of context and the unseen badge working, while bounding the growth.
+_CARRIER_RUN_KEEP = 500
 # Belt-and-suspenders over netguard's per-fetch deadline: even several slow-but-under-deadline hosts
 # must not consume the whole tick and starve due prompts. This overall wall-clock budget on the
 # vault pass is checked BETWEEN the (≤2) vaults; remaining vaults are abandoned for this tick (their
@@ -246,7 +253,13 @@ class ScheduleStore:
             )
 
     def record_run(self, sid: str, status: str, message: str = "", error: str | None = None) -> str:
-        """Persist a run's outcome so the user can read scheduled output (and see failures)."""
+        """Persist a run's outcome so the user can read scheduled output (and see failures).
+
+        R1 (audit 2026-09-12): carrier-schedule rows are pruned to the newest
+        ``_CARRIER_RUN_KEEP`` per carrier id — a chatty NI alert would otherwise
+        grow the sealed history without bound over months. User schedules keep
+        full history (the user asked for the schedule; that history is theirs).
+        """
         assert sid and status, "schedule id + status required"
         rid = str(uuid.uuid4())
         nonce = os.urandom(_NONCE_BYTES)
@@ -257,7 +270,28 @@ class ScheduleStore:
             "INSERT INTO schedule_runs (id, schedule_id, status, nonce, ciphertext, seen) VALUES (?, ?, ?, ?, ?, false);",
             [rid, sid, status, nonce, ciphertext],
         )
+        if sid in _CARRIER_IDS:
+            self._prune_carrier_runs(sid)
         return rid
+
+    def _prune_carrier_runs(self, sid: str) -> None:
+        """R1: keep only the newest ``_CARRIER_RUN_KEEP`` rows for one carrier id.
+
+        Uses ORDER BY ran_at DESC + OFFSET to find the cutoff timestamp; anything
+        at or below that timestamp is dropped. Matches ``NIStore._prune_runs``.
+        """
+        assert sid in _CARRIER_IDS, "prune only fires for carrier ids"
+        row = self._conn.execute(
+            "SELECT ran_at FROM schedule_runs WHERE schedule_id = ? "
+            "ORDER BY ran_at DESC LIMIT 1 OFFSET ?;",
+            [sid, _CARRIER_RUN_KEEP],
+        ).fetchone()
+        if row is None:
+            return
+        self._conn.execute(
+            "DELETE FROM schedule_runs WHERE schedule_id = ? AND ran_at <= ?;",
+            [sid, row[0]],
+        )
 
     def record_vault_run(self, status: str, message: str) -> str:
         """Record a Stage E vault auto-update outcome into the scheduled-updates feed (decision #2).
@@ -795,7 +829,10 @@ def post_ni_carrier_notices(schedules_store, alerts: list, broken: list,
             title = _flat_title(notice)
             # Distinct §17 status "proposal" (kind "proposal"): the launcher
             # falls back to "SmartBrain alert" for unknown kinds (see notices_test
-            # unknown-kind fallback) — no launcher rebuild needed for v1.
+            # unknown-kind fallback) — no launcher rebuild needed for v1. Windows
+            # has no Notify implementation yet (stack.Notify is a no-op there —
+            # documented in launcher/notices.go), so "proposal" surfaces on
+            # macOS/Linux trays only.
             schedules_store.record_ni_run(
                 "proposal",
                 f"{title}: a proposed fix is ready to review.",

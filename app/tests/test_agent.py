@@ -1451,3 +1451,137 @@ def test_finalize_rescue_replays_tool_text_as_data_not_system() -> None:
     replay = [m for m in out if "Tool results gathered" in (m.get("content") or "")]
     assert replay and replay[0]["role"] == "user"
     assert "not instructions" in replay[0]["content"]
+
+
+# --- S6 propose-time validation: a bad NI spec bounces INLINE, never parks ---
+
+def _ni_wired():
+    """A ToolContext wired to a fresh NIStore so create_ni_item can actually run."""
+    from smartbrain_3000 import ni as nimod
+
+    conn = duckdb.connect(":memory:")
+    dbmod.run_migrations(conn)
+    key = gen_master_key()
+    ctx = tools.ToolContext(ni=nimod.NIStore(conn, key))
+    return ctx, AuditLog(conn, key), ApprovalStore(conn, key, "sess-ni"), conn
+
+
+def _good_create_ni_args() -> dict:
+    """A minimal valid create_ni_item args body — scene binds {{text}} to preview."""
+    return {
+        "title": "Weather",
+        "goal": "show the weather",
+        "params": {},
+        "source": {"type": "model", "instruction": "hi"},
+        "pipeline": [],
+        "scene": {"type": "stack", "dir": "v", "gap": "sm", "children": [
+            {"type": "text", "value": "{{text}}", "role": "title",
+             "tone": "default", "size": "md"},
+        ]},
+        "display": {"size": "small"},
+        "interval_minutes": 60,
+        "preview_payload": {"text": "sunny"},
+        "draft": True,
+    }
+
+
+def test_bad_create_ni_item_bounces_inline_and_second_valid_call_parks(monkeypatch) -> None:
+    """Field-blocking defect fix: the model's first, malformed create_ni_item call
+    goes INLINE with the validator message (no card parks), and its second, valid
+    call parks — no user is asked to approve a spec that would fail post-approval.
+    """
+    ctx, audit, approvals, _conn = _ni_wired()
+    bad_args = _good_create_ni_args()
+    bad_args["pipeline"] = [{"op": "extract", "path": "quote.latest", "as": "price"}]
+    good_args = _good_create_ni_args()
+    _script(monkeypatch, [
+        _toolcalls(("create_ni_item", bad_args)),   # bad → inline error, no park
+        _toolcalls(("create_ni_item", good_args)),  # good → parks
+    ])
+    r = agent.run_turn(
+        ctx, audit, approvals,
+        messages=[{"role": "user", "content": "make me a weather tile"}],
+        model="m", conversation_id=None, turn_id="t-ni-bad-then-good",
+    )
+    assert r["status"] == "awaiting_approval", (
+        "the SECOND (valid) call must park, proving the loop kept going after the bounce"
+    )
+    pending = approvals.list_pending()
+    # Only the good call parked — the bad one never landed a pending row.
+    assert [p["tool"] for p in pending] == ["create_ni_item"], (
+        f"exactly one pending row for the good call; got {[p['tool'] for p in pending]!r}"
+    )
+    good_pid = pending[0]["id"]
+    assert approvals.get(good_pid)["args"] == good_args, (
+        "the parked pending row belongs to the SECOND (good) call, not the first (bad)"
+    )
+    # No 'proposed' audit row for create_ni_item on the bad args (nothing parked).
+    proposed = [e for e in audit.list()
+                if e["tool"] == "create_ni_item" and e["decision"] == "proposed"]
+    assert len(proposed) == 1, (
+        f"exactly one 'proposed' row (for the valid call); got {len(proposed)}"
+    )
+
+
+def test_bad_create_ni_item_feeds_validator_message_and_guide_pointer_back(monkeypatch) -> None:
+    """The inline tool-result message the model sees is the validator's precise
+    text plus the read_ni_spec_guide pointer — the model must see WHAT was wrong
+    AND WHERE to look next.
+    """
+    ctx, audit, approvals, _conn = _ni_wired()
+    bad_args = _good_create_ni_args()
+    bad_args["pipeline"] = [{"op": "jmespath", "query": "q", "as": "x"}]
+    calls = _recorder(monkeypatch, [
+        _toolcalls(("create_ni_item", bad_args)),
+        _text("sorry, I had the spec wrong"),
+    ])
+    r = agent.run_turn(
+        ctx, audit, approvals,
+        messages=[{"role": "user", "content": "make me a tile"}],
+        model="m", conversation_id=None, turn_id="t-ni-guide-pointer",
+    )
+    assert r["status"] == "complete"
+    # The tool-result message fed BACK to the model on step 2 carries the error.
+    tool_msg = next(m for m in calls[-1] if m.get("role") == "tool")
+    payload = json.loads(tool_msg["content"])
+    assert "error" in payload, "the inline result must be an error, not a success"
+    assert "must be 'extract', 'transform', or 'llm'" in payload["error"], (
+        f"validator's precise message must survive; got: {payload['error']!r}"
+    )
+    assert "read_ni_spec_guide" in payload["error"], (
+        f"guide pointer must be appended; got: {payload['error']!r}"
+    )
+
+
+def test_update_ni_item_bad_patch_bounces_inline(monkeypatch) -> None:
+    """update_ni_item's prevalidate mirrors create's: a malformed patch bounces
+    INLINE before any card parks."""
+    ctx, audit, approvals, _conn = _ni_wired()
+    _script(monkeypatch, [
+        _toolcalls(("update_ni_item",
+                    {"item_id": "does-not-matter",
+                     "pipeline": [{"op": "jmespath", "as": "x"}]})),
+        _text("understood, spec was wrong"),
+    ])
+    r = agent.run_turn(
+        ctx, audit, approvals,
+        messages=[{"role": "user", "content": "edit my tile"}],
+        model="m", conversation_id=None, turn_id="t-ni-update-bad",
+    )
+    assert r["status"] == "complete", "the bad update must bounce inline, not park"
+    assert approvals.list_pending() == [], "no card ever parked for an unrunnable patch"
+
+
+def test_valid_create_ni_item_still_parks_as_before(monkeypatch) -> None:
+    """A well-formed create_ni_item spec parks exactly as before the fix — the
+    prevalidate hook is transparent for valid drafts.
+    """
+    ctx, audit, approvals, _conn = _ni_wired()
+    _script(monkeypatch, [_toolcalls(("create_ni_item", _good_create_ni_args()))])
+    r = agent.run_turn(
+        ctx, audit, approvals,
+        messages=[{"role": "user", "content": "make me a tile"}],
+        model="m", conversation_id=None, turn_id="t-ni-good",
+    )
+    assert r["status"] == "awaiting_approval", "a valid draft still parks"
+    assert [p["tool"] for p in approvals.list_pending()] == ["create_ni_item"]

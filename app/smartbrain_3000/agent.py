@@ -157,6 +157,24 @@ def _args_valid(tool: tools.Tool, args: dict) -> bool:
         return False
 
 
+def _prevalidate_error(tool: tools.Tool, args: dict) -> str | None:
+    """Run a tool's optional pre-park validator; return the error message or None.
+
+    Pure-args check (never touches the store or ctx) — a ValueError becomes an
+    inline tool error that goes BACK to the model, so a bad create_ni_item /
+    update_ni_item spec is fixed by the model instead of parking a card that
+    would fail post-approval. Tools without a prevalidate hook pass through.
+    """
+    assert isinstance(args, dict), "args must be a dict"
+    if tool.prevalidate is None:
+        return None
+    try:
+        tool.prevalidate(args)
+    except ValueError as exc:
+        return str(exc)
+    return None
+
+
 def _canonical_key(name: str, args: dict) -> str:
     """Deterministic (name, args) identity for same-turn denial matching.
 
@@ -184,9 +202,13 @@ def _execute_inline(ctx: tools.ToolContext, audit, tc: dict, conversation_id: st
     elif args is None or tool is None:
         content = json.dumps({"error": f"cannot run tool '{name}'"})
     elif tool.tier is not tools.Tier.OBSERVE and not remembered:
-        # A non-OBSERVE, un-remembered tool only reaches inline with invalid args
-        # (else it parks); never call its handler — feed the error back to the model.
-        content = json.dumps({"error": "invalid arguments for tool"})
+        # A non-OBSERVE, un-remembered tool reaches inline for one of two reasons:
+        # invalid args OR the tool's optional pre-park prevalidate raised. The
+        # prevalidate message is the validator's precise text plus a pointer to
+        # read_ni_spec_guide (see tools._prevalidate_create_ni) — surface it so
+        # the model can fix the spec instead of being told "invalid arguments".
+        prev_err = _prevalidate_error(tool, args)
+        content = json.dumps({"error": prev_err or "invalid arguments for tool"})
     else:
         try:
             claim = tools.GRANTED if remembered else None  # OBSERVE needs no claim; remembered is pre-authorized
@@ -308,8 +330,14 @@ def _classify(tool_calls: list[dict], auto_approve, denied) -> tuple[list[dict],
         # Park a valid dangerous call unless it's a remembered write OR the user
         # already denied this EXACT (name, args) earlier in the same turn — that
         # denied one takes the inline path so it returns an error instead of
-        # spawning another pending row (the deny/request loop).
-        if dangerous and not remembered and not already_denied and args is not None and _args_valid(tool, args):
+        # spawning another pending row (the deny/request loop). A tool with a
+        # pre-park prevalidate hook (create_ni_item / update_ni_item) whose args
+        # fail the pure spec/scene/preview check ALSO goes inline so the model
+        # gets the validator message back instead of parking a card that would
+        # fail post-approval.
+        if (dangerous and not remembered and not already_denied and args is not None
+                and _args_valid(tool, args)
+                and _prevalidate_error(tool, args) is None):
             parked.append(tc)
         else:
             inline.append(tc)

@@ -189,3 +189,53 @@ def test_list_secrets_filters_to_provider_keys(client: TestClient) -> None:
     assert not any(k.startswith("device:") for k in keys)
     assert not any("refresh_token" in k for k in keys)
     assert not any(k.startswith("mcp:") for k in keys)
+
+
+def test_D1_unlock_sweeps_orphaned_ni_secrets(tmp_path, monkeypatch) -> None:
+    """D1 (audit 2026-09-12): a pre-fix delete route left ``ni:<uuid>:*`` rows
+    behind (the tool path has no SecretStore in ToolContext by design). Unlock
+    sweeps them: any ``ni:<uuid>:*`` key whose uuid is not a live NI item is
+    dropped; live items' keys survive.
+    """
+    from smartbrain_3000 import account as acct_mod
+    monkeypatch.setenv("SMARTBRAIN_DB_PATH", str(tmp_path / "sweep.duckdb"))
+    from smartbrain_3000.main import create_app
+
+    with TestClient(create_app()) as c:
+        c.post("/api/account/setup", json={"passphrase": "correct-horse"})
+        secrets = c.app.state.secret_store
+        # Seed one live NI item so its keys are protected.
+        from smartbrain_3000 import ni as nimod
+        scene = {"type": "stack", "dir": "v", "gap": "sm", "children": [
+            {"type": "text", "value": "hi", "role": "title",
+             "tone": "default", "size": "md"},
+        ]}
+        live_iid = c.app.state.ni.add_item({
+            "version": 1, "title": "Live", "goal": "g", "params": {},
+            "source": {"type": "model", "instruction": "hi"},
+            "pipeline": [], "scene": scene, "display": {"size": "small"},
+            "contract": None, "repair_policy": {"l1": True, "l2_frontier": False},
+            "model": None, "interval_minutes": 60,
+        }, {})
+        # Live-item key: should survive.
+        nimod.put_credential(secrets, live_iid, "api_key", "live-cred",
+                              "api.example.com")
+        # Orphan keys: a uuid that does not match any ni_items row.
+        import uuid as _uuid
+        orphan_uuid = str(_uuid.uuid4())
+        nimod.put_credential(secrets, orphan_uuid, "token", "orphaned",
+                              "cdn.example.com")
+        # put_credential seals a JSON envelope {"value","host"}; decode to
+        # prove the raw values landed as expected before/after the sweep.
+        import json as _json
+        raw = secrets.get(f"ni:{orphan_uuid}:token")
+        assert raw is not None and _json.loads(raw)["value"] == "orphaned"
+        # Run the sweep directly (mirrors what _set_unlocked does at unlock).
+        acct_mod._sweep_orphaned_ni_secrets(secrets, c.app.state.ni)
+        assert secrets.get(f"ni:{orphan_uuid}:token") is None, (
+            "D1: orphan ni:<uuid>:* keys must be dropped"
+        )
+        raw_live = secrets.get(f"ni:{live_iid}:api_key")
+        assert raw_live is not None and _json.loads(raw_live)["value"] == "live-cred", (
+            "D1: live items' credentials must survive the sweep"
+        )

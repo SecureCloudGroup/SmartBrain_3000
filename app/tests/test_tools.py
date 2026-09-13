@@ -554,6 +554,30 @@ def test_read_schedule_output_tool_unknown_id_raises() -> None:
         _call("read_schedule_output", ctx, {"schedule_id": "nope"})
 
 
+def test_S4_read_schedule_output_stamps_ni_carrier_rows_with_provenance() -> None:
+    """S4 (audit 2026-09-12): rows on the reserved Neural Interface carrier
+    (schedule_id == ``_NI_FEED_ID``) carry alert / broken / repaired / proposal
+    bodies that echo fetched external content — read_schedule_output must
+    prefix each such row with the external-provenance sentence so the model
+    treats the body as data, not instructions.
+    """
+    from smartbrain_3000 import scheduler as _sch
+    ctx, store = _schedule_ctx()
+    # A NI carrier row + a plain user schedule row.
+    store.record_ni_run("alert", "hot: 42")
+    user_sid = store.add_schedule("User", "p", 60, 0, None)
+    store.record_run(user_sid, "complete", "user-body")
+    # Combined feed: carrier row gets the stamp; user row does not.
+    combined = _call("read_schedule_output", ctx, {})["runs"]
+    ni_rows = [r for r in combined if r["schedule_id"] == _sch._NI_FEED_ID]
+    user_rows = [r for r in combined if r["schedule_id"] == user_sid]
+    assert ni_rows and user_rows, combined
+    assert ni_rows[0].get("provenance"), "S4: NI carrier row must carry provenance"
+    assert "provenance" not in user_rows[0], "S4: user rows must not be stamped"
+    # get_schedule hides the reserved NI carrier, so the schedule_id filter
+    # path is unreachable via this tool — cover the combined-feed path only.
+
+
 def test_schedule_tools_require_store() -> None:
     # With no schedules store wired (locked/unavailable), every schedule tool refuses.
     ctx = tools.ToolContext(schedules=None)

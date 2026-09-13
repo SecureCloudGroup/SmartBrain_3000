@@ -67,8 +67,10 @@ to know when a release changes behavior.
   is still the consent** — a library can never start traffic by itself. When the library
   fixes a template you use, your card shows "Update available"; applying shows what
   changed and goes through draft → commissioning again (fixes are offered, never pushed).
-  You can also export any card as a shareable template — credentials and personal values
-  are stripped — for submission to the community registry.
+  You can also export most cards as a shareable template — credentials and personal
+  values are stripped — for submission to the community registry. Cards built on your
+  schedules or your notes can't be exported (that content is yours), and neither can
+  cards created before this release.
 - **Neural Interface (phase 4a): your MCP servers as card sources.** Cards can now pull
   from MCP servers **you** configure — which is how database cards work: your own
   postgres/sqlite MCP server keeps the credentials in its own process, and SmartBrain

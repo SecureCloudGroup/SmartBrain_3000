@@ -41,6 +41,14 @@ _MAX_OUTPUT_BYTES = 1 * 1024 * 1024   # capped read on the child's stdout (1 MB)
 _MAX_INPUT_BYTES = 2 * 1024 * 1024    # cap on bytes we ever write to the child
 _DEFAULT_TIMEOUT_S = 20.0             # wall-clock ceiling per extraction
 _REAP_TIMEOUT_S = 5.0                 # bounded wait for the child to exit after kill
+# R2 (audit 2026-09-12): bound concurrent jailed extractions across the whole
+# process so a burst of http_page items cannot fork an unbounded army of
+# subprocesses. Non-blocking acquire — over-cap surfaces as JailError("jail_busy")
+# → NIError('extract_jail','jail_busy'), which the tick treats like every other
+# extract_jail class (the item stays due, next tick with a free slot picks it up).
+# Same posture as ni_mcp._LIVE_CALLS (F5 audit precedent).
+_MAX_CONCURRENT_JAILS = 4
+_LIVE_JAILS = threading.Semaphore(_MAX_CONCURRENT_JAILS)
 # Minimal PATH — enough for ``sys.executable`` to find its own libs / entry, nothing
 # more (claudecli's ``_cli_env`` stripping stance: an inherited PATH could point at
 # an attacker-writable directory, and the child doesn't need arbitrary tools).
@@ -221,6 +229,9 @@ def run_extractor(html: bytes, url_hint: str, *,
         raise JailError("input_too_large", f"{len(html)}")
     if timeout_s <= 0:
         raise JailError("bad_timeout", f"{timeout_s}")
+    # R2: refuse over-cap before mkdtemp so a busy jail never orphans a temp dir.
+    if not _LIVE_JAILS.acquire(blocking=False):
+        raise JailError("jail_busy")
     cwd = tempfile.mkdtemp(prefix="smartbrain-jail-")
     try:
         os.chmod(cwd, 0o700)
@@ -234,6 +245,7 @@ def run_extractor(html: bytes, url_hint: str, *,
         return _drive_jailed_child(proc, bytes(html), timeout_s)
     finally:
         shutil.rmtree(cwd, ignore_errors=True)
+        _LIVE_JAILS.release()
 
 
 def _drive_jailed_child(proc: subprocess.Popen, blob: bytes,

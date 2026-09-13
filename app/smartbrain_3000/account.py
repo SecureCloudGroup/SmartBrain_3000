@@ -14,6 +14,7 @@ reads secret values internally (e.g. to call an LLM provider).
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 
 from fastapi import APIRouter, HTTPException, Request
@@ -122,6 +123,54 @@ def _set_unlocked(request: Request, master_key: bytes) -> None:
     # NOTE: the one-shot eager embeddings backfill (after the destructive 13->14
     # migration) runs on the scheduler's first tick (scheduler.eager_reindex), not a
     # per-unlock daemon thread — so it can't leak a DB cursor past teardown.
+    # L9+D1 (audit 2026-09-12): sweep orphaned NI credentials. A pre-fix delete
+    # route left ``ni:<uuid>:*`` rows in the SecretStore when the item vanished
+    # (the tool path had no SecretStore in ToolContext by design). Unlock time is
+    # the one moment we can safely enumerate: the SecretStore + NIStore are both
+    # built above, both use the master key, and the sweep runs once per unlock so
+    # a startup-only migration is unnecessary. Best-effort — never blocks unlock.
+    try:
+        _sweep_orphaned_ni_secrets(request.app.state.secret_store,
+                                    request.app.state.ni)
+    except Exception as exc:  # best-effort; a sweep failure never blocks unlock
+        log.warning("ni credential sweep skipped: %s", exc)
+
+
+_NI_SECRET_KEY_RE = re.compile(
+    r"^ni:([0-9a-fA-F-]+):[A-Za-z_][A-Za-z0-9_-]*$"
+)
+
+
+def _sweep_orphaned_ni_secrets(secrets: SecretStore, ni_store: NIStore) -> None:
+    """L9+D1 (audit 2026-09-12): drop ``ni:<uuid>:*`` rows whose item is gone.
+
+    Best-effort: enumerates ``list_keys()`` once, holds a set of live item ids
+    from ``ni_store.list_items()``, and deletes only the strict-shape orphans
+    (``ni:<uuid>:<name>``). Live items' keys are UNTOUCHED — the shape check
+    (item_id must match a live row) is the guardrail; namespaces outside the
+    ``ni:`` prefix are not enumerated. Bounded: ``list_keys()`` is bounded by
+    the secrets table size, ``list_items()`` by ``NIStore._MAX_ITEMS``.
+    """
+    assert secrets is not None, "secrets store required"
+    assert ni_store is not None, "ni store required"
+    live_ids = {item["id"] for item in ni_store.list_items()}
+    assert isinstance(live_ids, set), "live_ids must be a set"
+    dropped = 0
+    for key in secrets.list_keys():  # bounded by the secrets table size
+        if not key.startswith("ni:"):
+            continue
+        match = _NI_SECRET_KEY_RE.match(key)
+        if match is None:
+            continue
+        if match.group(1) in live_ids:
+            continue
+        try:
+            secrets.delete(key)
+            dropped += 1
+        except Exception as exc:  # a single failure never blocks the sweep
+            log.warning("ni credential sweep: delete failed for %s: %s", key, exc)
+    if dropped:
+        log.info("ni credential sweep: dropped %d orphan(s)", dropped)
 
 
 def _require_store(request: Request) -> SecretStore:

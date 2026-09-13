@@ -80,7 +80,15 @@ class ToolContext:
 
 @dataclass(frozen=True)
 class Tool:
-    """A declared tool: name, JSON-schema params, risk tier, handler, egress."""
+    """A declared tool: name, JSON-schema params, risk tier, handler, egress.
+
+    ``prevalidate`` (optional) is a PURE args-only check the agent runs BEFORE
+    parking a non-OBSERVE call: a ValueError becomes an inline tool-error result
+    fed back to the model (same shape as an OBSERVE handler failure) so the
+    model can fix the call BEFORE the user is asked to approve a spec that
+    would fail validation post-approval. Store-visible checks (composite depth,
+    row lookups) stay execute-time.
+    """
 
     name: str
     description: str
@@ -88,6 +96,7 @@ class Tool:
     tier: Tier
     handler: Callable[[ToolContext, dict], dict]
     egress: bool = False
+    prevalidate: Callable[[dict], None] | None = None
 
 
 _MAX_STR = 8000  # default cap on any string arg (a property may raise its own via schema "maxLength")
@@ -608,15 +617,47 @@ def _list_schedules(ctx: ToolContext, args: dict) -> dict:
 
 
 def _read_schedule_output(ctx: ToolContext, args: dict) -> dict:
-    """OBSERVE: recent scheduled-run output (newest first). ``schedule_id`` filters to one schedule."""
+    """OBSERVE: recent scheduled-run output (newest first). ``schedule_id`` filters to one schedule.
+
+    S4 (audit 2026-09-12): NI carrier rows (schedule_id == ``neural-interface``)
+    carry alert messages / broken / repaired / proposal notices whose BODIES echo
+    fetched external content (the alert template resolves against a run's outputs
+    — which came from an untrusted source). Stamp each such row with the
+    external-provenance line so the model treats the body as data, not
+    instructions — same rule feeds / email_read / web_fetch use.
+    """
     assert ctx.schedules is not None, "schedules unavailable"
     limit = min(max(int(args.get("limit", 10)), 1), 50)
     sid = args.get("schedule_id")
     if sid:
         if ctx.schedules.get_schedule(sid) is None:
             raise ValueError("schedule not found")
-        return {"runs": ctx.schedules.list_runs(sid, limit=limit)}
-    return {"runs": ctx.schedules.recent_runs(limit)}
+        runs = ctx.schedules.list_runs(sid, limit=limit)
+        _stamp_ni_carrier_provenance(runs, sid_hint=sid)
+        return {"runs": runs}
+    runs = ctx.schedules.recent_runs(limit)
+    _stamp_ni_carrier_provenance(runs, sid_hint=None)
+    return {"runs": runs}
+
+
+def _stamp_ni_carrier_provenance(runs: list[dict], *, sid_hint: str | None) -> None:
+    """S4: prefix each NI-carrier run with the external-provenance sentence.
+
+    Runs from ``recent_runs`` carry ``schedule_id`` — pick out ``_NI_FEED_ID`` rows
+    directly. Runs from ``list_runs(sid=...)`` don't carry the id, so the caller
+    passes ``sid_hint`` (the query argument) and every row gets the stamp when
+    that hint matches the NI carrier constant. In-place mutation matches
+    ``tag_imported`` above.
+    """
+    from .scheduler import _NI_FEED_ID  # lazy: keep scheduler off tools' top imports
+    assert isinstance(runs, list), "runs must be a list"
+    tag = external_provenance("your Neural Interface tiles")
+    hint_is_ni = sid_hint == _NI_FEED_ID
+    for run in runs:  # bounded by the caller's limit
+        assert isinstance(run, dict), "row must be a dict"
+        row_sid = run.get("schedule_id")
+        if hint_is_ni or row_sid == _NI_FEED_ID:
+            run["provenance"] = tag
 
 
 def _create_schedule(ctx: ToolContext, args: dict) -> dict:
@@ -674,13 +715,228 @@ def _delete_schedule(ctx: ToolContext, args: dict) -> dict:
 
 # --- Neural Interface (NI) tools ------------------------------------------
 #
-# The 7 NI tools land here as a group. All 4 WRITE tools (create/update/set_enabled/
+# The 8 NI tools land here as a group. All 4 WRITE tools (create/update/set_enabled/
 # run_now) are marked egress=True — consent.remember_mode returns None for any
 # REVIEWED egress tool that isn't explicitly carved into _FIXED_DESTINATION_EGRESS
 # or _SITE_SCOPED_EGRESS, so leaving them UNLISTED there is what makes them
 # non-rememberable by design (§9 rule). The task's assert-in-test verifies it.
 # UNATTENDED_NEVER_AUTO is additionally extended below with NI_WRITE_TOOLS so a
 # scheduled/resumed autonomous turn also can't run one on a standing grant.
+#
+# read_ni_spec_guide is an OBSERVE reference tool (no ctx, no egress) the
+# drafting agent MUST call before drafting a create/update spec — the FIELD
+# failure the write tools' prevalidate hooks catch was invented pipeline ops
+# and scene node types the model had never been shown. Guide + prevalidate
+# together turn a post-approval "errored" audit tail into an inline retry the
+# model sees BEFORE the user is asked to approve anything.
+
+
+_NI_SPEC_GUIDE = """\
+# Neural Interface (NI) spec grammar reference
+
+You are drafting create_ni_item / update_ni_item. The FULL spec is validated
+server-side; a malformed spec fails AFTER the user approves the card. Consult
+this reference to get the shape right on the first draft — the write tools
+also PREVALIDATE the spec before the card parks, so a bad draft comes back to
+you as an inline error, not a broken tile.
+
+## Top-level spec fields
+- title (str, <=300), goal (str, <=5000), interval_minutes (int)
+- params (dict, <=20), source (dict), pipeline (list of stages)
+- scene (dict), display (dict)
+- Optional: model (str "provider/model"), history (dict), alerts (list)
+- create_ni_item also takes preview_payload (see below).
+
+## Sources (spec.source.type = one of 8)
+- http_json    {"type": "http_json",  "url": "https://host/path?...", "headers": {...}}
+- http_page    {"type": "http_page",  "url": "https://host/...",      "headers": {...}}
+- http_image   {"type": "http_image", "url": "https://host/...",      "headers": {...}}
+- model        {"type": "model", "instruction": "..."}
+- internal.schedule {"type": "internal.schedule", "schedule_id": "..."}
+- internal.kb  {"type": "internal.kb", "query": "...", "limit": 1..10}
+- internal.ni  {"type": "internal.ni", "items": {"alias": "<item-id>"}}
+               (<=5 aliases; referenced item cannot itself be internal.ni)
+- mcp_tool     {"type": "mcp_tool", "server_id": "...", "tool": "...",
+                "arguments": {...}}    (arguments frozen literal - no {{param:}})
+
+URL rules (http_*):
+- Scheme + host must be LITERAL (no {{param:...}} in scheme/authority).
+- {{param:NAME}} placeholders allowed only inside path/query.
+- Header VALUES are a plain literal string OR a $secret ref
+  {"$secret": "ni:<item-id>:<name>"}. Auth-shaped header names
+  (authorization, x-api-key, cookie, or names containing token/secret/key)
+  REQUIRE a $secret ref - never a plain literal.
+
+## Params (spec.params.NAME)
+- {"label": str, "kind": "string" | "number" | "secret", "value": str-or-number}
+- A "secret" param stores an IDENTIFIER; the actual credential is entered
+  later on the card via a desktop-local API - the model never sees or
+  supplies a secret value. In an installable template the value is
+  "ni:self:<name>"; a real item's header ref is
+  {"$secret": "ni:<item-id>:<name>"}.
+
+## Pipeline (spec.pipeline = ORDERED list of stages)
+Each stage MUST be exactly one of these shapes. There is NO "number_format",
+"jmespath", or free-form op.
+
+extract: {"op": "extract",
+          "paths": {"OUTPUT_NAME": "path.into.payload", ...}}
+  - "paths" is a DICT (not a list); <=40 entries.
+  - There is NO "path"/"as" key form on an extract stage.
+  - Reserved names refused: "item", "history".
+  - Example: {"op": "extract",
+              "paths": {"price": "quote.latest",
+                        "vol":   "quote.rows[0].vol"}}
+
+transform: {"op": "transform", "apply": [ {op-dict}, ... ]}   (<=40 ops)
+  Each op is exactly one of these fn shapes (closed set):
+    {"fn": "round",   "field": "F", "digits": int}
+    {"fn": "scale",   "field": "F", "factor": number}
+    {"fn": "rename",  "field": "F", "to": "NEW"}
+    {"fn": "pick",    "field": "F", "keys": ["k1", ...]}
+    {"fn": "sort_by", "field": "F", "key": "K", "dir": "asc"|"desc"}
+    {"fn": "top_n",   "field": "F", "n": 1..50}
+    {"fn": "count",   "field": "F", "as": "OUT_NAME"}
+    {"fn": "sum"|"avg"|"min"|"max",
+                      "field": "F", "key": "K", "as": "OUT_NAME"}
+    {"fn": "delta_prev", "field": "F", "series": "S", "as": "OUT_NAME"}
+
+llm (<=1 per pipeline):
+  {"op": "llm",
+   "instruction": "... (<=2000 chars, no {{param:...}})",
+   "output": {"NAME": "string"|"number"|"boolean", ...}}     (1..6 fields)
+
+Path grammar (used in extract paths and in every $bind / {{path}}):
+  a, a.b, a[0], a[-1], items[0:5], q.rows[0].amount
+
+## Scene (spec.scene = ONE node tree)
+Every node has {"type": one of the 12 below, ...node props}. Nothing else is
+legal - there is NO "card", "stat", "kv", "content", "style", or "nodes"
+key ANYWHERE.
+
+- stack   {type, dir: "v"|"h", gap: "sm"|"md", children: [nodes]}
+- grid    {type, cols: 2..4, children: [nodes]}
+- divider {type}
+- text    {type, value: str-or-{{path}}-or-$bind,
+           role: "title"|"label"|"value"|"caption",
+           tone: "default"|"muted"|"accent"|"ok"|"warn"|"danger",
+           size: "sm"|"md"|"lg", when?: [rules]}
+- number  {type, value: num-or-$bind,
+           format: "plain"|"compact"|"percent"|"currency",
+           unit?: str, tone, size, when?}
+- chip    {type, value: str-or-$bind,
+           kind: ""|"accent"|"ok"|"warn"|"danger", when?}
+- bar     {type, value: num-or-$bind, max: num-or-$bind, tone, when?}
+- icon    {type, name: lowercase-kebab literal <=60, tone, when?}
+- repeat  {type, items: {"$bind": "path.to.list"}, max: 1..50,
+           template: <node>}     (template binds "item.<field>" per row)
+- spark   {type, points: {"$bind": "path"}-or-[numbers or {t,v}],
+           kind: "line"|"bars", tone, when?}
+- gauge   {type, value: num-or-$bind, min: num-or-$bind, max: num-or-$bind,
+           tone, label: str, when?}
+- image   {type, alt: str, when?}       (requires source.type "http_image";
+                                          the server injects "src")
+
+Reserved for later, refused today: "on_tap".
+
+Bindings inside a value:
+- {"$bind": "path"}     resolves a path against the pipeline outputs
+- "text {{path}} more"  inline interpolation inside a string
+- history.<series>      read-only namespace for tracked history series
+
+when rules (optional on any content node):
+  {"left":  {"$bind": "path"} | scalar,
+   "op":    "lt"|"le"|"gt"|"ge"|"eq"|"ne",
+   "right": {"$bind": "path"} | scalar,
+   "set":   {"tone": <tone>, "hidden": true}}
+  (chip nodes carry "kind", not "tone" - set.tone on a chip is refused.)
+
+## Two complete scene examples
+Value card (stack of text/number/text):
+  {"type": "stack", "dir": "v", "gap": "sm", "children": [
+    {"type": "text",   "value": "Bitcoin",           "role": "title",
+     "tone": "default", "size": "md"},
+    {"type": "number", "value": {"$bind": "price"},  "format": "currency",
+     "tone": "default", "size": "lg"},
+    {"type": "text",   "value": "last quote",        "role": "caption",
+     "tone": "muted",  "size": "sm"}
+  ]}
+
+List card (repeat over a list):
+  {"type": "stack", "dir": "v", "gap": "sm", "children": [
+    {"type": "text", "value": "Top items", "role": "title",
+     "tone": "default", "size": "md"},
+    {"type": "repeat", "items": {"$bind": "rows"}, "max": 5,
+     "template": {"type": "stack", "dir": "h", "gap": "sm", "children": [
+       {"type": "text",   "value": {"$bind": "item.name"},  "role": "label",
+        "tone": "default", "size": "md"},
+       {"type": "number", "value": {"$bind": "item.count"}, "format": "plain",
+        "tone": "default", "size": "md"}
+     ]}}
+  ]}
+
+## Display
+{"size": "small"} or {"size": "wide"}. There is NO display.width, .height,
+.cols, or free-form field on display.
+
+## History (optional)
+{"history": {"track": {"NAME": "path.to.number", ...},
+             "max_points"?: 1..500}}
+- <=4 series. Series names must not collide with a pipeline output.
+- After every successful run the engine appends a {t, v} point per series;
+  the binder exposes each series as history.<name> (a list of {t, v}) so
+  spark.points can bind history.<name>.
+
+## Alerts (optional)
+{"alerts": [{"name": "slug",
+             "left":  {"$bind": "path"} | scalar,
+             "op":    "lt"|"le"|"gt"|"ge"|"eq"|"ne",
+             "right": {"$bind": "path"} | scalar,
+             "message": "text with {{path}} allowed",
+             "cooldown_minutes"?: int >=5}]}
+- <=5 rules; unique names; message <=500 chars.
+
+## preview_payload  (create_ni_item, and optional on update_ni_item)
+A JSON OBJECT of RAW pipeline outputs the scene will bind against - the same
+shape a run's extract/transform stage would produce. It is NOT a bound scene
+tree. The engine calls bind_scene(scene, preview_payload) up front, so a
+spec whose scene cannot render against the preview never lands.
+
+Example matching the value-card scene above:  {"price": 65123.45}
+Example matching the list-card scene above:
+  {"rows": [{"name": "alpha", "count": 3},
+            {"name": "beta",  "count": 1}]}
+
+## Common mistakes named
+- pipeline stage {"op":"extract", "path": ..., "as": ...}  -> WRONG.
+  Correct: {"op":"extract", "paths": {"NAME": "path"}}
+- ops "number_format" / "jmespath"  DO NOT EXIST.
+  Correct: extract to a named output, then transform with
+  round / scale / rename / etc.
+- scene node types "card" / "stat" / "kv"  DO NOT EXIST.
+  Correct types are the 12 listed above; a value card is a "stack".
+- node keys "content" / "style" / "nodes"  DO NOT EXIST.
+  Correct: children (stack/grid), value (text/number/chip/bar),
+  template (repeat), points (spark).
+- display.width  DOES NOT EXIST.  Correct: display.size ("small" or "wide").
+- preview_payload is RAW DATA, not a bound scene tree.
+"""
+
+
+def _read_ni_spec_guide(ctx: ToolContext, args: dict) -> dict:
+    """OBSERVE: return the compact Neural Interface spec-grammar reference.
+
+    Consulted by the drafting agent BEFORE authoring a create_ni_item or
+    update_ni_item spec. The write tools also prevalidate a proposed spec
+    server-side and feed the validator's message back inline with a pointer
+    to this guide, so a bad draft comes back to the model instead of parking
+    a card that would fail post-approval.
+
+    Ctx is intentionally unused (same shape as other no-store OBSERVE handlers).
+    """
+    assert isinstance(args, dict), "args must be a dict"
+    assert _NI_SPEC_GUIDE, "spec guide must be non-empty"
+    return {"guide": _NI_SPEC_GUIDE}
 
 
 def _ni_source_provenance(source: dict | None) -> str:
@@ -812,6 +1068,48 @@ def _assemble_spec(args: dict) -> dict:
     return spec
 
 
+_NI_GUIDE_POINTER = " Consult read_ni_spec_guide for the exact spec grammar."
+
+
+def _validate_create_ni_args(args: dict) -> None:
+    """Pure (no store, no ctx) validation shared by the create handler and its
+    pre-park prevalidate hook: shape + spec + scene + preview binds.
+
+    Raises ValueError with the validator's precise message. The handler still
+    re-validates at execute time; this exists so a malformed spec bounces to
+    the model INLINE instead of parking a card that will fail post-approval.
+    """
+    assert isinstance(args, dict), "args must be a dict"
+    for key in ("title", "goal", "source", "pipeline", "scene", "display",
+                "interval_minutes", "preview_payload"):
+        if args.get(key) is None:
+            raise ValueError(f"{key} required")
+    spec = _assemble_spec(args)
+    ni.validate_spec(spec)              # closed schema + enums + pipeline shape
+    ni.validate_scene(spec["scene"])    # pre-expansion scene caps
+    preview = args["preview_payload"]
+    if not isinstance(preview, dict):
+        raise ValueError("preview_payload must be a JSON object")  # noqa: TRY004 — one exception class per validator (mirrors ni.py)
+    # H3 preview binding — seed history and pass a preview image_ref so a
+    # scene with a history-bound spark or an image node renders on preview.
+    ni.bind_scene(spec["scene"], preview, history=ni._seed_history(spec),
+                  image_ref=ni._preview_image_ref(spec, "preview"))
+
+
+def _prevalidate_create_ni(args: dict) -> None:
+    """Pre-park hook for create_ni_item — raises ValueError with the guide pointer.
+
+    ``bind_scene`` raises ``ni.NIError`` on a preview-bind failure (unresolved
+    binding, cap overrun); translate to ValueError so the agent-loop's uniform
+    "tool ValueError -> inline error to model" path fires either way.
+    """
+    assert isinstance(args, dict), "args must be a dict"
+    try:
+        _validate_create_ni_args(args)
+    except (ValueError, ni.NIError) as exc:
+        raise ValueError(str(exc) + _NI_GUIDE_POINTER) from None
+
+
 def _create_ni_item(ctx: ToolContext, args: dict) -> dict:
     """REVIEWED (egress=True): create a new NI item, ready for the engine to commission.
 
@@ -828,24 +1126,16 @@ def _create_ni_item(ctx: ToolContext, args: dict) -> dict:
     Exceptions: (a) any ``secret``-kind param whose value is empty forces ``draft``
     (a secret must be entered via the credential PUT before the engine tries), and
     (b) an explicit ``draft: true`` from the agent's "show me first" affordance.
+
+    A propose-time prevalidate (``_prevalidate_create_ni``) runs the same shape /
+    spec / scene / preview-bind checks BEFORE the card parks so a bad draft returns
+    inline to the model rather than failing after human approval.
     """
     assert ctx.ni is not None, "neural interface unavailable"
-    for key in ("title", "goal", "source", "pipeline", "scene", "display",
-                "interval_minutes", "preview_payload"):
-        assert args.get(key) is not None, f"{key} required"
+    assert isinstance(args, dict), "args must be a dict"
+    _validate_create_ni_args(args)      # execute-time revalidation (same rules)
     spec = _assemble_spec(args)
-    ni.validate_spec(spec)  # raise cleanly before the scene bind
-    ni.validate_scene(spec["scene"])
     preview = args["preview_payload"]
-    assert isinstance(preview, dict), "preview_payload must be a JSON object"
-    # H3 (audit 2026-09-09): seed empty history series so a scene whose spark or
-    # delta_prev binds to ``history.<name>`` can render the preview without dying on
-    # ``extract_miss`` (mirrors the C1 seeding in ``_load_history_series``).
-    # §24: pass a preview image_ref so a scene with an ``image`` node can bind at
-    # draft creation time (item_id is minted inside add_item; here we're only
-    # proving the scene binds, so use the same placeholder tag the store uses).
-    ni.bind_scene(spec["scene"], preview, history=ni._seed_history(spec),
-                  image_ref=ni._preview_image_ref(spec, "preview"))
     _validate_ni_public_url(spec)  # J: refuse a non-public / SSRF-shaped URL up front
     try:  # §25: refuse composites of composites at create; class rides as ValueError
         ni.check_composite_depth(ctx.ni, spec)
@@ -856,6 +1146,54 @@ def _create_ni_item(ctx: ToolContext, args: dict) -> dict:
     if landing != "draft":
         ctx.ni.commission(item_id)  # draft -> commissioning (also clears any streak marker)
     return {"id": item_id, "state": landing}
+
+
+def _validate_update_ni_patch(args: dict) -> None:
+    """Pure pre-park shape check for update_ni_item — validates the DEEP fields
+    that are present (pipeline, scene, history, alerts, preview_payload, display,
+    repair_policy) using the same closed-schema validators the merged spec faces
+    at execute time. Fields that need the store to validate (composite depth,
+    source-change re-consent) are checked at execute time.
+
+    ``preview_payload`` is bound against ``scene`` only when both are provided
+    (a preview-only patch can't be scene-bound without the sealed spec).
+    """
+    assert isinstance(args, dict), "args must be a dict"
+    if not args.get("item_id"):
+        raise ValueError("item_id required")
+    if "pipeline" in args:
+        ni._validate_pipeline(args["pipeline"] or [])
+    if "scene" in args:
+        ni.validate_scene(args["scene"])
+    if "history" in args and args["history"] is not None:
+        ni._validate_history_spec(args["history"], set())
+    if "alerts" in args and args["alerts"] is not None:
+        ni._validate_alerts_spec(args["alerts"])
+    if "display" in args:
+        ni._validate_display(args["display"] or {})
+    if "repair_policy" in args and args["repair_policy"] is not None:
+        ni._validate_repair_policy(args["repair_policy"])
+    if "params" in args:
+        ni._validate_params(args["params"] or {})
+    if "source" in args:
+        ni._validate_source(args["source"])
+    if "preview_payload" in args:
+        preview = args["preview_payload"]
+        if not isinstance(preview, dict):
+            raise ValueError("preview_payload must be a JSON object")
+        if "scene" in args:
+            ni.bind_scene(args["scene"], preview, history={},
+                          image_ref={"item_id": args["item_id"],
+                                     "created_at": "preview"})
+
+
+def _prevalidate_update_ni(args: dict) -> None:
+    """Pre-park hook for update_ni_item — raises ValueError with the guide pointer."""
+    assert isinstance(args, dict), "args must be a dict"
+    try:
+        _validate_update_ni_patch(args)
+    except (ValueError, ni.NIError) as exc:
+        raise ValueError(str(exc) + _NI_GUIDE_POINTER) from None
 
 
 def _update_ni_item(ctx: ToolContext, args: dict) -> dict:
@@ -909,6 +1247,11 @@ def _update_ni_item(ctx: ToolContext, args: dict) -> dict:
         bound = ni.bind_scene(spec["scene"], preview, history=ni._seed_history(spec),
                               image_ref=ni._preview_image_ref(spec, args["item_id"]))
         ctx.ni.write_snapshot(args["item_id"], "preview", bound, ok=True)
+        # L6 (audit 2026-09-12): refresh the RAW preview_data slot alongside the
+        # bound preview — export-as-template (§21) reads preview_data to emit a
+        # new template. Without this, a scene edit + preview change would leave
+        # the exporter round-tripping the STALE dummy data from add_item time.
+        ctx.ni.write_snapshot(args["item_id"], "preview_data", preview, ok=True)
     if source_changed:
         # Phase 4c audit 2026-09-11 (finding #7): stale image bytes must not survive
         # a source change — the operator's re-consent point is where the pixel
@@ -1428,6 +1771,20 @@ _TOOLS: tuple[Tool, ...] = (
         egress=False,
     ),
     Tool(
+        name="read_ni_spec_guide",
+        description="Read the compact Neural Interface (NI) spec-grammar reference — the closed source "
+                    "types, the exact pipeline op shapes, the scene node vocabulary + per-node props, "
+                    "bindings, params, history, alerts, display, and preview_payload. Call this BEFORE "
+                    "drafting a create_ni_item or update_ni_item spec so the pipeline / scene / display / "
+                    "preview_payload shape lands right on the first try (the write tools also prevalidate "
+                    "the spec server-side and bounce a bad draft back inline with the validator's message "
+                    "plus a pointer to this guide, so keep it handy).",
+        params_schema={"type": "object", "additionalProperties": False, "properties": {}},
+        tier=Tier.OBSERVE,
+        handler=_read_ni_spec_guide,
+        egress=False,
+    ),
+    Tool(
         name="list_ni_catalog",
         description="List the bundled catalog of VETTED public data sources for Neural Interface tiles — "
                     "keyless / free-tier JSON endpoints (finance, weather, news, crypto, misc), each with "
@@ -1476,12 +1833,14 @@ _TOOLS: tuple[Tool, ...] = (
     ),
     Tool(
         name="create_ni_item",
-        description="Create a new Neural Interface ITEM (a deterministic info tile) in DRAFT. Provide the "
-                    "spec pieces — title, goal (verbatim user words), source (http_json/model/internal.schedule), "
-                    "pipeline (ordered extract/transform ops), scene (closed node grammar), display, and "
-                    "interval_minutes — plus preview_payload: a DUMMY bound payload used to prove the scene "
-                    "renders. Reviewed egress (approving the card is the source consent); starts in draft so "
-                    "the user commissions it before the engine ever fetches.",
+        description="Call read_ni_spec_guide FIRST to see the exact spec grammar (the write tools "
+                    "prevalidate the spec server-side and bounce a malformed draft back inline). Create "
+                    "a new Neural Interface ITEM (a deterministic info tile). Provide the spec pieces — "
+                    "title, goal (verbatim user words), source (http_json/model/internal.schedule/etc.), "
+                    "pipeline (ordered extract/transform/llm stages), scene (closed node grammar), "
+                    "display, interval_minutes — plus preview_payload: a RAW dict of pipeline outputs "
+                    "used to prove the scene binds. Reviewed egress (approving the card is the source "
+                    "consent); lands in commissioning (or draft if a secret is unfilled or draft:true).",
         params_schema={
             "type": "object",
             "additionalProperties": False,
@@ -1490,9 +1849,24 @@ _TOOLS: tuple[Tool, ...] = (
                 "goal": {"type": "string", "maxLength": 5000},
                 "params": {"type": "object"},
                 "source": {"type": "object"},
-                "pipeline": {"type": "array"},
-                "scene": {"type": "object"},
-                "display": {"type": "object"},
+                # Schema hint: pipeline stages have a closed op enum (nothing else validates,
+                # e.g. no "number_format" / "jmespath"). Inner shape stays loose so the schema
+                # gate doesn't recheck what ni.validate_spec / prevalidate already enforce.
+                "pipeline": {"type": "array", "items": {
+                    "type": "object",
+                    "properties": {"op": {"type": "string",
+                                          "enum": ["extract", "transform", "llm"]}},
+                }},
+                # Schema hint: scene node "type" is a closed enum (no "card"/"stat"/"kv").
+                "scene": {"type": "object", "properties": {"type": {
+                    "type": "string",
+                    "enum": ["stack", "grid", "divider", "text", "number", "chip",
+                             "bar", "icon", "repeat", "spark", "gauge", "image"],
+                }}},
+                # Schema hint: display carries "size" (no display.width / .height).
+                "display": {"type": "object", "properties": {
+                    "size": {"type": "string", "enum": ["small", "wide"]},
+                }},
                 "interval_minutes": {"type": "integer"},
                 "model": {"type": "string"},
                 "preview_payload": {"type": "object"},
@@ -1510,14 +1884,18 @@ _TOOLS: tuple[Tool, ...] = (
         tier=Tier.REVIEWED,
         handler=_create_ni_item,
         egress=True,
+        prevalidate=_prevalidate_create_ni,
     ),
     Tool(
         name="update_ni_item",
-        description="Edit an existing Neural Interface item (from list_ni_items) — partial: title, goal, params, "
-                    "source, pipeline, scene, display, interval_minutes, model, repair_policy. Any change to "
-                    "source (URL, headers, type, or model instruction) rewinds the item to DRAFT so the new "
-                    "source is re-consented before the engine touches it. Use set_ni_item_enabled to pause; "
-                    "delete_ni_item to remove.",
+        description="Call read_ni_spec_guide FIRST to see the exact spec grammar (the write tools "
+                    "prevalidate the spec server-side and bounce a malformed draft back inline). Edit "
+                    "an existing Neural Interface item (from list_ni_items) — partial: title, goal, "
+                    "params, source, pipeline, scene, display, interval_minutes, model, history, "
+                    "alerts, repair_policy. Any change to source (URL, headers, type, model "
+                    "instruction, OR any param referenced by source.url) sends the item back to "
+                    "commissioning so the new source is re-consented before the engine touches it. "
+                    "Use set_ni_item_enabled to pause; delete_ni_item to remove.",
         params_schema={
             "type": "object",
             "additionalProperties": False,
@@ -1527,9 +1905,22 @@ _TOOLS: tuple[Tool, ...] = (
                 "goal": {"type": "string", "maxLength": 5000},
                 "params": {"type": "object"},
                 "source": {"type": "object"},
-                "pipeline": {"type": "array"},
-                "scene": {"type": "object"},
-                "display": {"type": "object"},
+                # Same closed-op hint as create_ni_item's pipeline schema.
+                "pipeline": {"type": "array", "items": {
+                    "type": "object",
+                    "properties": {"op": {"type": "string",
+                                          "enum": ["extract", "transform", "llm"]}},
+                }},
+                # Same scene-type enum as create_ni_item.
+                "scene": {"type": "object", "properties": {"type": {
+                    "type": "string",
+                    "enum": ["stack", "grid", "divider", "text", "number", "chip",
+                             "bar", "icon", "repeat", "spark", "gauge", "image"],
+                }}},
+                # Same display-size enum as create_ni_item.
+                "display": {"type": "object", "properties": {
+                    "size": {"type": "string", "enum": ["small", "wide"]},
+                }},
                 "interval_minutes": {"type": "integer"},
                 "model": {"type": "string"},
                 # K8: rewrite the preview snapshot alongside the spec (stale-preview note in doc).
@@ -1550,6 +1941,7 @@ _TOOLS: tuple[Tool, ...] = (
         tier=Tier.REVIEWED,
         handler=_update_ni_item,
         egress=True,
+        prevalidate=_prevalidate_update_ni,
     ),
     Tool(
         name="set_ni_item_enabled",
@@ -1600,7 +1992,7 @@ _TOOLS: tuple[Tool, ...] = (
 
 # OBSERVE tools must be read-only + no egress; this allowlist is the structural
 # safety invariant checked at import.
-_OBSERVE_READONLY = frozenset({"kb_search", "read_document", "summarize_document", "list_documents", "list_tasks", "list_schedules", "read_schedule_output", "list_ni_catalog", "list_ni_items", "read_ni_item"})
+_OBSERVE_READONLY = frozenset({"kb_search", "read_document", "summarize_document", "list_documents", "list_tasks", "list_schedules", "read_schedule_output", "list_ni_catalog", "list_ni_items", "read_ni_item", "read_ni_spec_guide"})
 
 # REVIEWED tools that MUTATE schedules. A schedule creates/rewrites/re-enables an autonomous
 # agent turn, so these must NEVER auto-run (via remembered consent) inside a schedule-executed

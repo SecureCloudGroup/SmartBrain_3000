@@ -681,3 +681,119 @@ def test_notices_limit_clamped_and_defaulted(client: TestClient) -> None:
     assert len(client.get("/api/ni/notices?limit=50", headers=local).json()) == 20  # clamp
     assert len(client.get("/api/ni/notices?limit=0", headers=local).json()) == 1  # floor
     assert len(client.get("/api/ni/notices?limit=5", headers=local).json()) == 5
+
+
+# --- Integrated audit (2026-09-12): route-side regressions ----------------
+
+def test_L7_manual_run_marks_checked_so_tick_skips_the_item(client: TestClient) -> None:
+    """L7: /api/ni/items/{id}/run must ``mark_checked`` BEFORE running so a
+    concurrent tick's ``due_items`` gate no longer includes the item — closes
+    the double-run window that ``clear_last_checked`` created. Assertion: the
+    item's ``last_status`` = 'manual' immediately after /run begins (we don't
+    complete the run; the store side-effect proves the ordering).
+    """
+    _unlock(client)
+    iid = _create_via_tool(client)
+    client.app.state.ni.commission(iid)
+
+    def spy_run_item(store, item_id, **_kw):
+        # Prove the manual mark landed BEFORE run_item was called.
+        item = store.get_item(item_id)
+        assert item["last_status"] == "manual", (
+            "L7: /run must mark_checked('manual') BEFORE running"
+        )
+        assert item["last_checked"] is not None, (
+            "L7: last_checked must be set (not NULL) at run entry"
+        )
+        return {"status": "ok", "duration_ms": 1}
+
+    import smartbrain_3000.ni as ni_mod
+    orig = ni_mod.run_item
+    ni_mod.run_item = spy_run_item
+    try:
+        r = client.post(f"/api/ni/items/{iid}/run")
+        assert r.status_code == 200, r.text
+    finally:
+        ni_mod.run_item = orig
+    # ni.due_items would NOT surface an item whose last_checked is fresh — invariant.
+    due = client.app.state.ni.due_items()
+    assert iid not in [i["id"] for i in due], (
+        "L7: an item with fresh last_checked must not appear in due_items"
+    )
+
+
+def test_S5_commission_refuses_when_template_placeholder_has_no_credential(
+    client: TestClient,
+) -> None:
+    """S5: an installed template with ``ni:self:api_key`` placeholder in the
+    secret param must refuse commission (409) until the credential is PUT."""
+    _unlock(client)
+    # Fabricate an item whose secret param carries a ``ni:...`` placeholder as
+    # if the install path had just landed. The real install rewrites ni:self →
+    # ni:<id>; simulate both shapes to prove the guard.
+    body = _spec_body(
+        params={"api_key": {"label": "Key", "kind": "secret",
+                             "value": "ni:self:api_key"}},
+        source={"type": "http_json",
+                 "url": "https://api.example.com/q",
+                 "headers": {"X-Api-Key": {"$secret": "ni:self:api_key"}}},
+    )
+    r = client.post("/api/tools/invoke", json={"name": "create_ni_item", "args": body})
+    pid = r.json()["pending_id"]
+    approve = client.post(f"/api/agent/pending/{pid}/approve",
+                          json={"confirm_tool": "create_ni_item"})
+    iid = approve.json()["result"]["id"]
+    # No credential entered yet — placeholder must be treated as unfilled.
+    r2 = client.post(f"/api/ni/items/{iid}/commission")
+    assert r2.status_code == 409 and "secret" in r2.json()["detail"], r2.text
+    # After the credential PUT lands, commission succeeds.
+    put = client.put(
+        f"/api/ni/items/{iid}/credential",
+        json={"name": "api_key", "value": "s3cret", "host": "api.example.com"},
+        headers={"X-SB-Local": "1"},
+    )
+    assert put.status_code == 200, put.text
+    # The item's spec param.value still carries the placeholder (only credential value
+    # went into the SecretStore); with the SecretStore now holding it, commission accepts.
+    # NB: create_ni_item rewrote ni:self → ni:<iid>, so verify the resolved key exists.
+    resolved_key = f"ni:{iid}:api_key"
+    stored = client.app.state.secret_store.get(resolved_key)
+    # put_credential seals a JSON envelope {"value","host"}; decode to prove
+    # the raw value made it under the expected item-scoped key.
+    assert stored is not None, (
+        f"S5 setup: credential must land under {resolved_key!r}"
+    )
+    import json as _json
+    assert _json.loads(stored)["value"] == "s3cret", (
+        f"S5 setup: credential value under {resolved_key!r} must be 's3cret'"
+    )
+    # Manually stamp the spec.params.value back to a ni:<iid>:api_key so the S5
+    # guard has something to look up — mirrors what real install rewrites.
+    store = client.app.state.ni
+    current = store.get_item(iid)["spec"]
+    current["params"]["api_key"]["value"] = resolved_key
+    store.conn.execute(
+        "UPDATE ni_items SET nonce = ?, ciphertext = ? WHERE id = ?;",
+        [*store._seal_item(iid, current), iid],
+    )
+    r3 = client.post(f"/api/ni/items/{iid}/commission")
+    assert r3.status_code == 200, r3.text
+
+
+def test_S6_commission_writes_audit_row_with_item_id_only(
+    client: TestClient,
+) -> None:
+    """S6: a successful commission writes an audit row (metadata: item_id
+    only — no titles / content)."""
+    _unlock(client)
+    iid = _create_via_tool(client)
+    r = client.post(f"/api/ni/items/{iid}/commission")
+    assert r.status_code == 200, r.text
+    entries = client.get("/api/audit").json()["entries"]
+    rows = [e for e in entries if e["tool"] == "ni_commission"]
+    assert rows, "S6: commission must write an audit row"
+    assert iid in rows[0]["args_summary"]
+    # No sealed titles / content ride the audit body.
+    import json as _json
+    body = _json.dumps(rows[0])
+    assert "Weather" not in body, "audit body must not carry the item's title"

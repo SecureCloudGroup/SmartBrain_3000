@@ -153,6 +153,39 @@ def test_run_extractor_tag_strip_fallback_when_trafilatura_empty() -> None:
     assert "Hi" in out["text"]
 
 
+def test_R2_over_cap_surfaces_as_jail_busy_without_orphan_tempdir(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """R2 (audit 2026-09-12): once ``_MAX_CONCURRENT_JAILS`` slots are held,
+    a further ``run_extractor`` refuses BEFORE mkdtemp with
+    ``JailError('jail_busy')`` — no orphan temp dir left behind.
+    """
+    import threading as _threading
+    # Drain every slot on a fresh semaphore so no other test races us.
+    tiny_sem = _threading.Semaphore(1)
+    monkeypatch.setattr(jailrun, "_LIVE_JAILS", tiny_sem)
+    assert tiny_sem.acquire(blocking=False), "R2 setup: slot must acquire"
+    tempdirs_before = _count_jail_tempdirs()
+    with pytest.raises(jailrun.JailError) as excinfo:
+        jailrun.run_extractor(_small_html(), url_hint="", timeout_s=1.0)
+    assert excinfo.value.reason == "jail_busy"
+    tempdirs_after = _count_jail_tempdirs()
+    assert tempdirs_after == tempdirs_before, (
+        f"R2: refused call must not create a jail tempdir "
+        f"(before={tempdirs_before}, after={tempdirs_after})"
+    )
+
+
+def _count_jail_tempdirs() -> int:
+    """Count ``smartbrain-jail-*`` entries under the system temp root (R2 helper)."""
+    import glob
+    import tempfile as _tempfile
+    root = _tempfile.gettempdir()
+    assert isinstance(root, str) and root, "temp root required"
+    matches = glob.glob(os.path.join(root, "smartbrain-jail-*"))
+    return len(matches)
+
+
 def test_jail_env_never_leaks_secrets() -> None:
     """Whitebox: ``_jail_env`` builds an env with NO ``SMARTBRAIN_``/``ANTHROPIC_`` keys."""
     env = jailrun._jail_env()

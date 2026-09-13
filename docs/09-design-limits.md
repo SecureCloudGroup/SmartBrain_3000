@@ -107,6 +107,34 @@ Dictation runs on your own machine, and three limits follow from that:
 recording and serializing transcription keeps memory and CPU predictable on an ordinary
 laptop; downloading the model without asking is what makes the mic simply work.
 
+## Neural Interface: bounded cards, bounded refresh
+
+The card dashboard is sized for a person, not a fleet, and every bound is a
+number you can check:
+
+- **200 cards** per vault, and the engine refreshes **at most 3 due cards per
+  pass** (a pass rides the same ~30-second background tick as feeds and
+  schedules, with its own time budget) — so a screenful of cards drains
+  steadily without ever crowding out your chat or your schedules.
+- **1 minute is the cadence floor** — cards are near-live, never real-time. A
+  card with a language-model step in its pipeline floors at **5 minutes**
+  instead, and only one such card runs per pass: the local model is a single
+  slot, and your chat has priority on it.
+- **An alert's cooldown is at least 5 minutes** (an hour unless you set one).
+  Alerts are edge-triggered on top of that — a condition that stays true fires
+  once, not every refresh.
+- **At most 10 MCP servers** can be configured as card sources, with one bounded
+  tool call per refresh.
+- **A library pack is at most 2 MB and 200 templates**, checked about once a
+  day against the one URL you pinned.
+- **An image card's picture is at most 4 MB** per fetch, and only real raster
+  formats (checked by file signature) are accepted.
+
+**Why:** a dashboard that watches things for you is a standing invitation to
+unbounded background traffic. Hard, small numbers keep the worst case knowable —
+on your machine, on your network, and on the hosts you point cards at — and a
+refusal at a bound is reported on the card rather than silently truncated.
+
 ## A turn is bounded
 
 One request to the assistant gets at most **eight tool steps**. When those run out — or when
