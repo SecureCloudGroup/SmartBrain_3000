@@ -11,6 +11,8 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-09-13
+
 ### Added
 - **Neural Interface: cards that work the first time.** Card creation is now
   deterministic-first: the assistant picks from **recipes** — complete, tested card
