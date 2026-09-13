@@ -2,114 +2,248 @@
   "version": 1,
   "sources": [
     {
-      "id": "open-meteo-forecast",
-      "title": "Open-Meteo current weather + forecast",
+      "id": "crypto-price-btc-usd",
+      "title": "Bitcoin price in USD (CoinGecko)",
+      "host": "api.coingecko.com",
+      "url_template": "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd",
+      "docs_url": "https://www.coingecko.com/api/documentation",
+      "auth": "none",
+      "category": "crypto",
+      "notes": "Keyless public tier is rate-limited (~10-30 req/min) and returns 429 when tripped; keep the cadence at 5 minutes or slower. Response shape is {\"bitcoin\":{\"usd\":<number>}} which drives the fixed extract path.",
+      "spec_template": {
+        "version": 1,
+        "title": "Bitcoin (USD)",
+        "goal": "show the current price of one bitcoin in US dollars",
+        "params": {},
+        "source": {
+          "type": "http_json",
+          "url": "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd"
+        },
+        "pipeline": [
+          {"op": "extract", "paths": {"price": "bitcoin.usd"}}
+        ],
+        "scene": {"type": "stack", "dir": "v", "gap": "sm", "children": [
+          {"type": "text", "value": "Bitcoin", "role": "title", "tone": "default", "size": "md"},
+          {"type": "number", "value": {"$bind": "price"}, "format": "currency", "unit": "USD", "tone": "default", "size": "lg"}
+        ]},
+        "display": {"size": "small"},
+        "contract": null,
+        "model": null
+      },
+      "preview_payload": {"price": 65000},
+      "sample_response": {"bitcoin": {"usd": 65000}},
+      "prove_params": {}
+    },
+    {
+      "id": "weather-open-meteo",
+      "title": "Open-Meteo current weather",
       "host": "api.open-meteo.com",
       "url_template": "https://api.open-meteo.com/v1/forecast?latitude={{param:latitude}}&longitude={{param:longitude}}&current=temperature_2m,wind_speed_10m",
       "docs_url": "https://open-meteo.com/en/docs",
       "auth": "none",
       "category": "weather",
-      "notes": "Keyless JSON weather; free non-commercial use. Latitude/longitude are decimal degrees; add other 'current' or 'hourly' fields as the docs list."
+      "notes": "Keyless JSON weather; latitude/longitude in decimal degrees. Response carries a top-level current.{temperature_2m, wind_speed_10m} object driven by the URL's current= parameter.",
+      "spec_template": {
+        "version": 1,
+        "title": "Weather",
+        "goal": "show the current temperature and wind speed at a location",
+        "params": {
+          "latitude":  {"label": "Latitude",  "kind": "number", "value": ""},
+          "longitude": {"label": "Longitude", "kind": "number", "value": ""}
+        },
+        "source": {
+          "type": "http_json",
+          "url": "https://api.open-meteo.com/v1/forecast?latitude={{param:latitude}}&longitude={{param:longitude}}&current=temperature_2m,wind_speed_10m"
+        },
+        "pipeline": [
+          {"op": "extract", "paths": {
+            "temperature": "current.temperature_2m",
+            "windspeed":   "current.wind_speed_10m"
+          }}
+        ],
+        "scene": {"type": "stack", "dir": "v", "gap": "sm", "children": [
+          {"type": "text",   "value": "Weather",                     "role": "title",  "tone": "default", "size": "md"},
+          {"type": "number", "value": {"$bind": "temperature"},      "format": "plain", "unit": "°C",   "tone": "default", "size": "lg"},
+          {"type": "number", "value": {"$bind": "windspeed"},        "format": "plain", "unit": "km/h",   "tone": "muted",   "size": "sm"}
+        ]},
+        "display": {"size": "small"},
+        "contract": null,
+        "model": null
+      },
+      "preview_payload": {"temperature": 18.4, "windspeed": 3.1},
+      "sample_response": {
+        "latitude": 37.75, "longitude": -122.44,
+        "current": {"time": "2026-09-13T12:00", "temperature_2m": 18.4, "wind_speed_10m": 3.1}
+      },
+      "prove_params": {"latitude": 37.77, "longitude": -122.42}
     },
     {
-      "id": "wttr-in-json",
-      "title": "wttr.in weather (JSON)",
+      "id": "weather-wttr",
+      "title": "wttr.in current weather (JSON)",
       "host": "wttr.in",
       "url_template": "https://wttr.in/{{param:location}}?format=j1",
       "docs_url": "https://github.com/chubin/wttr.in",
       "auth": "none",
       "category": "weather",
-      "notes": "Keyless plain-language weather; format=j1 returns JSON. Community-run and occasionally rate-limits or blocks on burst; keep the cadence gentle."
+      "notes": "Keyless plain-language weather; format=j1 returns JSON. Community-run and occasionally rate-limits or blocks on burst; keep the cadence gentle (10+ minutes). temp_C is a stringified number in the response.",
+      "spec_template": {
+        "version": 1,
+        "title": "Weather (wttr)",
+        "goal": "show the current conditions for a location via wttr.in",
+        "params": {
+          "location": {"label": "Location (name, ZIP, IATA)", "kind": "string", "value": ""}
+        },
+        "source": {
+          "type": "http_json",
+          "url": "https://wttr.in/{{param:location}}?format=j1"
+        },
+        "pipeline": [
+          {"op": "extract", "paths": {
+            "temp_c": "current_condition[0].temp_C",
+            "desc":   "current_condition[0].weatherDesc[0].value"
+          }}
+        ],
+        "scene": {"type": "stack", "dir": "v", "gap": "sm", "children": [
+          {"type": "text", "value": "Weather",             "role": "title",   "tone": "default", "size": "md"},
+          {"type": "text", "value": "{{temp_c}} °C",     "role": "value",   "tone": "default", "size": "lg"},
+          {"type": "text", "value": "{{desc}}",            "role": "caption", "tone": "muted",   "size": "sm"}
+        ]},
+        "display": {"size": "small"},
+        "contract": null,
+        "model": null
+      },
+      "preview_payload": {"temp_c": "18", "desc": "Clear"},
+      "sample_response": {
+        "current_condition": [
+          {"temp_C": "18", "weatherDesc": [{"value": "Clear"}]}
+        ]
+      },
+      "prove_params": {"location": "SFO"}
     },
     {
-      "id": "usgs-earthquakes-hour",
-      "title": "USGS earthquakes (past hour, all magnitudes)",
-      "host": "earthquake.usgs.gov",
-      "url_template": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_hour.geojson",
-      "docs_url": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/geojson.php",
+      "id": "fx-usd-eur",
+      "title": "USD to EUR exchange rate (Frankfurter / ECB)",
+      "host": "api.frankfurter.app",
+      "url_template": "https://api.frankfurter.app/latest?from=USD&to=EUR",
+      "docs_url": "https://www.frankfurter.app/docs/",
       "auth": "none",
-      "category": "misc",
-      "notes": "Keyless GeoJSON feed refreshed every minute; the response is a FeatureCollection with each quake under features[].properties (mag, place, time)."
+      "category": "finance",
+      "notes": "Keyless daily FX rates published by the ECB (weekdays only, no weekend/holiday update). Response is {\"base\":\"USD\",\"date\":\"YYYY-MM-DD\",\"rates\":{\"EUR\":<number>}}.",
+      "spec_template": {
+        "version": 1,
+        "title": "USD → EUR",
+        "goal": "show the current USD to EUR exchange rate (ECB daily)",
+        "params": {},
+        "source": {
+          "type": "http_json",
+          "url": "https://api.frankfurter.app/latest?from=USD&to=EUR"
+        },
+        "pipeline": [
+          {"op": "extract", "paths": {"rate": "rates.EUR", "date": "date"}}
+        ],
+        "scene": {"type": "stack", "dir": "v", "gap": "sm", "children": [
+          {"type": "text",   "value": "USD → EUR",      "role": "title",   "tone": "default", "size": "md"},
+          {"type": "number", "value": {"$bind": "rate"},  "format": "plain", "tone": "default", "size": "lg"},
+          {"type": "text",   "value": "as of {{date}}",   "role": "caption", "tone": "muted",   "size": "sm"}
+        ]},
+        "display": {"size": "small"},
+        "contract": null,
+        "model": null
+      },
+      "preview_payload": {"rate": 0.92, "date": "2026-09-13"},
+      "sample_response": {
+        "amount": 1.0, "base": "USD", "date": "2026-09-13",
+        "rates": {"EUR": 0.92}
+      },
+      "prove_params": {}
     },
     {
-      "id": "usgs-earthquakes-day",
+      "id": "quakes-day-25",
       "title": "USGS earthquakes (past day, magnitude 2.5+)",
       "host": "earthquake.usgs.gov",
       "url_template": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_day.geojson",
       "docs_url": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/geojson.php",
       "auth": "none",
       "category": "misc",
-      "notes": "Keyless GeoJSON feed; fewer quakes than the all-hour feed and a longer window — a better fit for a once-per-hour dashboard tile."
+      "notes": "Keyless GeoJSON feed refreshed every ~5 minutes. Response is a FeatureCollection with metadata.count and features[].properties.{mag, place, time}. The recipe surfaces the count plus the first feature's magnitude and place.",
+      "spec_template": {
+        "version": 1,
+        "title": "Recent quakes (M2.5+, 24h)",
+        "goal": "show how many magnitude-2.5+ earthquakes happened in the past day and where the top one was",
+        "params": {},
+        "source": {
+          "type": "http_json",
+          "url": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_day.geojson"
+        },
+        "pipeline": [
+          {"op": "extract", "paths": {
+            "count":     "metadata.count",
+            "top_place": "features[0].properties.place",
+            "top_mag":   "features[0].properties.mag"
+          }}
+        ],
+        "scene": {"type": "stack", "dir": "v", "gap": "sm", "children": [
+          {"type": "text",   "value": "Quakes (24h, M2.5+)",     "role": "title",   "tone": "default", "size": "md"},
+          {"type": "number", "value": {"$bind": "count"},        "format": "plain", "tone": "default", "size": "lg"},
+          {"type": "text",   "value": "top: M{{top_mag}} {{top_place}}", "role": "caption", "tone": "muted", "size": "sm"}
+        ]},
+        "display": {"size": "small"},
+        "contract": null,
+        "model": null
+      },
+      "preview_payload": {"count": 30, "top_place": "10km ENE of Anza, CA", "top_mag": 3.2},
+      "sample_response": {
+        "type": "FeatureCollection",
+        "metadata": {"count": 30, "title": "USGS 2.5+ past day"},
+        "features": [
+          {"type": "Feature",
+           "properties": {"mag": 3.2, "place": "10km ENE of Anza, CA", "time": 1700000000000}}
+        ]
+      },
+      "prove_params": {}
     },
     {
-      "id": "hn-top-stories",
-      "title": "Hacker News top stories (ids)",
-      "host": "hacker-news.firebaseio.com",
-      "url_template": "https://hacker-news.firebaseio.com/v0/topstories.json",
-      "docs_url": "https://github.com/HackerNews/API",
-      "auth": "none",
-      "category": "news",
-      "notes": "Keyless JSON array of up to 500 story ids, newest-ranked first. Fetching the story titles themselves is a per-id lookup via hn-item."
-    },
-    {
-      "id": "hn-item",
-      "title": "Hacker News item by id",
-      "host": "hacker-news.firebaseio.com",
-      "url_template": "https://hacker-news.firebaseio.com/v0/item/{{param:id}}.json",
-      "docs_url": "https://github.com/HackerNews/API",
-      "auth": "none",
-      "category": "news",
-      "notes": "Keyless JSON for one story/comment (title, url, score, by, time). Pair with hn-top-stories to render the top N titles."
-    },
-    {
-      "id": "coingecko-simple-price",
-      "title": "CoinGecko simple price",
-      "host": "api.coingecko.com",
-      "url_template": "https://api.coingecko.com/api/v3/simple/price?ids={{param:coin_id}}&vs_currencies={{param:vs_currency}}",
-      "docs_url": "https://www.coingecko.com/api/documentation",
-      "auth": "none",
-      "category": "crypto",
-      "notes": "Keyless public tier is rate-limited (~10-30 req/min) and returns 429 when tripped. coin_id is CoinGecko's slug (e.g. 'bitcoin'), vs_currency is a currency code (e.g. 'usd')."
-    },
-    {
-      "id": "coingecko-trending",
-      "title": "CoinGecko trending coins (24h)",
-      "host": "api.coingecko.com",
-      "url_template": "https://api.coingecko.com/api/v3/search/trending",
-      "docs_url": "https://www.coingecko.com/api/documentation",
-      "auth": "none",
-      "category": "crypto",
-      "notes": "Keyless list of the top-searched coins over the last 24 hours; same rate-limit caveat as the price endpoint (public tier, ~10-30 req/min)."
-    },
-    {
-      "id": "frankfurter-latest",
-      "title": "Frankfurter latest FX rates (ECB)",
-      "host": "api.frankfurter.app",
-      "url_template": "https://api.frankfurter.app/latest?base={{param:base}}",
-      "docs_url": "https://www.frankfurter.app/docs/",
-      "auth": "none",
+      "id": "stock-quote-finnhub",
+      "title": "Stock quote (Finnhub)",
+      "host": "finnhub.io",
+      "url_template": "https://finnhub.io/api/v1/quote?symbol={{param:symbol}}",
+      "docs_url": "https://finnhub.io/docs/api/quote",
+      "auth": "key",
       "category": "finance",
-      "notes": "Keyless daily FX rates published by the ECB (weekdays only, no weekend/holiday update). base is a 3-letter ISO code (e.g. 'EUR', 'USD')."
-    },
-    {
-      "id": "frankfurter-currencies",
-      "title": "Frankfurter currency list",
-      "host": "api.frankfurter.app",
-      "url_template": "https://api.frankfurter.app/currencies",
-      "docs_url": "https://www.frankfurter.app/docs/",
-      "auth": "none",
-      "category": "finance",
-      "notes": "Keyless map of every supported currency code to its display name. Useful for a params-picker; not for a live tile."
-    },
-    {
-      "id": "mempool-blocks-tip-height",
-      "title": "mempool.space Bitcoin chain tip height",
-      "host": "mempool.space",
-      "url_template": "https://mempool.space/api/blocks/tip/height",
-      "docs_url": "https://mempool.space/docs/api/rest",
-      "auth": "none",
-      "category": "crypto",
-      "notes": "Keyless single integer (the current block height). Public instance is community-run and best-effort; a gentle cadence is expected."
+      "notes": "Requires a free Finnhub API key entered as the api_key credential AFTER creation (the token rides the X-Finnhub-Token header via $secret, never the URL). Response is flat: {\"c\":<current>,\"h\":<high>,\"l\":<low>,\"o\":<open>,\"pc\":<prev close>,...}. Chosen over Alphavantage because Alphavantage's GLOBAL_QUOTE payload keys contain spaces (\"Global Quote\", \"05. price\") which the §4.1 path grammar cannot address.",
+      "spec_template": {
+        "version": 1,
+        "title": "Stock quote",
+        "goal": "show the current price and previous close for a stock symbol",
+        "params": {
+          "symbol":  {"label": "Ticker symbol", "kind": "string", "value": ""},
+          "api_key": {"label": "Finnhub API key", "kind": "secret", "value": "ni:self:api_key"}
+        },
+        "source": {
+          "type": "http_json",
+          "url": "https://finnhub.io/api/v1/quote?symbol={{param:symbol}}",
+          "headers": {"X-Finnhub-Token": {"$secret": "ni:self:api_key"}}
+        },
+        "pipeline": [
+          {"op": "extract", "paths": {
+            "price": "c", "high": "h", "low": "l", "prev": "pc"
+          }}
+        ],
+        "scene": {"type": "stack", "dir": "v", "gap": "sm", "children": [
+          {"type": "text",   "value": "Stock quote",              "role": "title",   "tone": "default", "size": "md"},
+          {"type": "number", "value": {"$bind": "price"},         "format": "currency", "tone": "default", "size": "lg"},
+          {"type": "text",   "value": "prev {{prev}} / hi {{high}} / lo {{low}}", "role": "caption", "tone": "muted", "size": "sm"}
+        ]},
+        "display": {"size": "small"},
+        "contract": null,
+        "model": null
+      },
+      "preview_payload": {"price": 210.5, "high": 212.0, "low": 209.0, "prev": 209.5},
+      "sample_response": {
+        "c": 210.5, "h": 212.0, "l": 209.0, "o": 211.0, "pc": 209.5,
+        "d": 1.0, "dp": 0.48, "t": 1700000000
+      },
+      "prove_params": {"symbol": "AAPL"}
     }
   ]
 }

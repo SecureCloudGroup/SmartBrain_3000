@@ -17,7 +17,7 @@ import re
 import time
 import uuid
 
-from . import consent, gateway, tools
+from . import claudecli, consent, gateway, tools
 
 log = logging.getLogger(__name__)
 
@@ -396,7 +396,8 @@ _TRANSIENT_STATUSES = frozenset({409, 429, 502, 503, 504})
 _TRANSIENT_RETRY_SECONDS = 3.0
 
 
-def _tools_call(messages: list[dict], model: str, *, timeout: float, usage_sink=None) -> dict:
+def _tools_call(messages: list[dict], model: str, *, timeout: float, usage_sink=None,
+                session: claudecli.TurnSession | None = None) -> dict:
     """One tools round-trip, retried ONCE on a transient server error.
 
     The retry exists to protect the trust rule. A transient failure used to fall through to
@@ -408,17 +409,23 @@ def _tools_call(messages: list[dict], model: str, *, timeout: float, usage_sink=
 
     A second failure still propagates, so the fallback remains for models that genuinely
     cannot use tools — this can only ever turn a downgraded turn into a proper one.
+
+    ``session`` is the per-turn CLI continuity handle (claudecode only; None otherwise);
+    the gateway forwards it to the claudecli branch so steps 2..N can resume instead of
+    re-ingesting the whole transcript.
     """
     assert messages and model, "messages + model required"
     try:
-        data = gateway.chat_with_tools(messages, model, tools.openai_tools_spec(), timeout=timeout)
+        data = gateway.chat_with_tools(messages, model, tools.openai_tools_spec(),
+                                       timeout=timeout, session=session)
     except gateway.GatewayError as exc:
         if exc.status_code not in _TRANSIENT_STATUSES:
             raise
         log.warning("tools call hit a transient %s (%s); retrying WITH tools",
                     exc.status_code, exc.message)
         time.sleep(_TRANSIENT_RETRY_SECONDS)
-        data = gateway.chat_with_tools(messages, model, tools.openai_tools_spec(), timeout=timeout)
+        data = gateway.chat_with_tools(messages, model, tools.openai_tools_spec(),
+                                       timeout=timeout, session=session)
     _emit_usage(usage_sink, model, data)
     return data
 
@@ -451,6 +458,32 @@ def run_turn(ctx, audit, approvals, *, messages, model, conversation_id, turn_id
     context_budget = int(result_cap * _FINALIZE_BUDGET_FACTOR)
     gathered = start_calls and sum(  # a resumed turn re-counts its existing tool results
         len(m.get("content") or "") for m in messages if m.get("role") == "tool") or 0
+    # Turn-scoped CLI session (docs/internal/ni-format.md §28): open ONE session for the
+    # whole turn's claudecode/* calls so steps 2..N resume instead of cold-starting +
+    # re-ingesting the transcript. Closed in the finally below — a parked turn's resume
+    # goes through run_turn again and gets a FRESH session (sessions never survive the
+    # approval wait). Non-claudecode models: session stays None and every branch no-ops.
+    session = claudecli.open_turn_session() if claudecli.is_claudecode(model) else None
+    try:
+        result = _run_turn_loop(ctx, audit, approvals, messages=messages, model=model,
+                                conversation_id=conversation_id, turn_id=turn_id,
+                                start_step=start_step, calls=calls, usage_sink=usage_sink,
+                                auto_approve=auto_approve, denied=denied, timeout=timeout,
+                                result_cap=result_cap, on_event=on_event, primed=primed,
+                                origin=origin, context_budget=context_budget,
+                                gathered=gathered, session=session)
+    finally:
+        if session is not None:
+            session.close()
+    return result
+
+
+def _run_turn_loop(ctx, audit, approvals, *, messages, model, conversation_id, turn_id,
+                   start_step, calls, usage_sink, auto_approve, denied, timeout, result_cap,
+                   on_event, primed, origin, context_budget, gathered, session) -> dict:
+    """The tool-calling loop body extracted so ``run_turn`` can wrap it in the session finally."""
+    assert audit is not None and approvals is not None, "unlocked stores required"
+    assert messages and model, "messages + model required"
     for step in range(start_step, _MAX_STEPS):  # fixed upper bound (P10 #2)
         if gathered >= context_budget:
             return _finalize_exhausted(messages, model, timeout=timeout, usage_sink=usage_sink,
@@ -462,7 +495,8 @@ def run_turn(ctx, audit, approvals, *, messages, model, conversation_id, turn_id
                 # asking again would re-prefill ~4,000 tokens for an identical answer.
                 data, primed = primed, None
             else:
-                data = _tools_call(messages, model, timeout=timeout, usage_sink=usage_sink)
+                data = _tools_call(messages, model, timeout=timeout, usage_sink=usage_sink,
+                                   session=session)
         except gateway.GatewayError as exc:
             if calls == 0:  # nothing ran yet: a model that can't use tools can still answer plainly
                 log.warning("tools call failed (%s); trying a plain answer: %s", exc.status_code, exc.message)

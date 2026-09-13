@@ -321,6 +321,30 @@ def test_credential_put_stores_and_never_echoes_value(client: TestClient) -> Non
     assert cred_rows[0]["decision"] == "executed" and cred_rows[0]["ok"] is True
 
 
+def test_credential_put_journals_param_changed_entry(client: TestClient) -> None:
+    """§28: a successful credential PUT lands a ``param_changed`` journal entry
+    naming the param's user-visible label — the card history shows
+    "credential '<label>' added". Value bytes never touch the summary.
+    """
+    _unlock(client)
+    iid = _create_via_tool(client, params={
+        "api_key": {"label": "Weather Provider Key",
+                    "kind": "secret", "value": "ni:self:api_key"},
+    }, source={"type": "http_json", "url": "https://api.example.com/x",
+                "headers": {"X-Api-Key": {"$secret": "ni:self:api_key"}}},
+               preview_payload={"text": "preview"})
+    r = client.put(f"/api/ni/items/{iid}/credential",
+                   json={"name": "api_key", "value": "s3cret", "host": "api.example.com"},
+                   headers={"X-SB-Local": "1"})
+    assert r.status_code == 200
+    journal = client.app.state.ni.read_journal(iid)
+    param_rows = [e for e in journal if e["kind"] == "param_changed"]
+    assert param_rows, "credential PUT must land a param_changed journal entry"
+    assert "Weather Provider Key" in param_rows[-1]["summary"]
+    assert "s3cret" not in param_rows[-1]["summary"]  # value never touches the summary
+    assert param_rows[-1]["origin"] == "system"
+
+
 # --- audit-finding route regressions --------------------------------------
 
 def test_commission_route_moves_draft_to_commissioning(client: TestClient) -> None:

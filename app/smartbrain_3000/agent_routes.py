@@ -29,6 +29,7 @@ from . import (
     docsummaries,
     gateway,
     metrics,
+    ni_catalog,
     optimizer,
     scheduler,
     search,
@@ -157,7 +158,8 @@ def invoke_tool(request: Request, body: InvokeIn) -> dict:
 
 
 def _pending_tile(p: dict, *, mcp_label: str | None = None,
-                  composite_titles: list[str] | None = None) -> dict:
+                  composite_titles: list[str] | None = None,
+                  recipe_url: str | None = None) -> dict:
     """Shape a pending row for the UI tile: redacted args + Always-allow hints.
 
     ``remember_mode`` tells the UI which consent shape applies — ``"tool"`` for
@@ -177,6 +179,13 @@ def _pending_tile(p: dict, *, mcp_label: str | None = None,
     referenced item id to its title so the consent tile can promote a
     "Combines: <title>, <title>" line. Missing / deleted references drop from
     the list (never a fake title). Absent for non-composite sources.
+
+    ``recipe_url`` (§26): when the parked tool is create_ni_item_from_recipe,
+    the caller resolves the sealed catalog entry's ``url_template`` and passes
+    it here so the consent tile can promote "Fetches: <url>" — the args
+    themselves only carry the recipe id + params, so without this side channel
+    the host the card would call would not be visible on the approval surface.
+    Unknown / dropped recipe → ``None`` (the tile still renders).
     """
     tool = p["tool"]
     args = p["args"] if isinstance(p["args"], dict) else {}
@@ -198,6 +207,7 @@ def _pending_tile(p: dict, *, mcp_label: str | None = None,
         "remember_host": host,
         "mcp_label": mcp_label,
         "composite_titles": composite_titles,
+        "recipe_url": recipe_url,
     }
 
 
@@ -267,6 +277,30 @@ def _resolve_pending_composite_titles(p: dict, ni_store) -> list[str] | None:
     return titles
 
 
+def _resolve_pending_recipe_source(p: dict) -> str | None:
+    """§26: resolve the recipe's ``url_template`` for a parked from_recipe tile.
+
+    The tool args carry only ``recipe_id`` + params (the spec is code-built at
+    execute time from the sealed catalog), so the consent surface has no host
+    to show without this side channel. Never rewrites args — the executor still
+    reads ``ni_catalog.get_recipe`` itself. Returns ``None`` for anything that
+    isn't create_ni_item_from_recipe, when the id is missing/blank, or when
+    the recipe has been dropped from the catalog.
+    """
+    assert isinstance(p, dict), "pending row must be a dict"
+    if p.get("tool") != "create_ni_item_from_recipe":
+        return None
+    args = p.get("args") if isinstance(p.get("args"), dict) else {}
+    recipe_id = args.get("recipe_id")
+    if not isinstance(recipe_id, str) or not recipe_id:
+        return None
+    recipe = ni_catalog.get_recipe(recipe_id)
+    if not isinstance(recipe, dict):
+        return None
+    url = recipe.get("url_template")
+    return url if isinstance(url, str) and url else None
+
+
 @router.get("/api/agent/pending")
 def list_pending(request: Request) -> dict:
     """List actions awaiting approval (args redacted for the tile)."""
@@ -277,6 +311,7 @@ def list_pending(request: Request) -> dict:
             p,
             mcp_label=_resolve_pending_mcp_label(p, ni_store),
             composite_titles=_resolve_pending_composite_titles(p, ni_store),
+            recipe_url=_resolve_pending_recipe_source(p),
         )
         for p in approvals.list_pending()
     ]}

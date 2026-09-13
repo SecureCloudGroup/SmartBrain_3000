@@ -168,8 +168,19 @@ _STATES: frozenset[str] = frozenset(
 )
 _SLOTS: frozenset[str] = frozenset(
     {"latest", "last_good", "preview", "preview_data", "history", "alert_state",
-     "last_failure", "image"}
+     "last_failure", "image", "journal"}
 )
+# §28 item journal: closed set of entry kinds + prune ceiling. Journal entries are
+# built DETERMINISTICALLY by code (models never author one). The store trims to the
+# newest _MAX_JOURNAL_ENTRIES per item; cascade-on-delete rides the wildcard in
+# NIStore.delete alongside every other slot.
+_JOURNAL_KINDS: frozenset[str] = frozenset(
+    {"created", "updated", "param_changed", "commissioned", "c2_wrong",
+     "repaired", "reverted", "source_changed", "recipe",
+     "apply_template_update"}
+)
+_MAX_JOURNAL_ENTRIES = 20
+_MAX_JOURNAL_SUMMARY = 500
 _REVISION_ORIGINS: frozenset[str] = frozenset(
     {"user", "agent", "repair_l1", "repair_l2", "template"}
 )
@@ -2653,6 +2664,63 @@ class NIStore:
         return {"bytes": plain[sep + 1:], "format": fmt,
                 "created_at": _to_utc(row[2]).isoformat()}
 
+    def append_journal(self, item_id: str, kind: str, summary: str) -> None:
+        """§28: append one entry to the sealed ``journal`` slot and prune to 20 newest.
+
+        Journal entries are DETERMINISTICALLY authored by code (see the writer sites
+        in tools.py + ni_routes.py); the ``summary`` argument is a short string —
+        either a code-composed sentence (created / updated / commissioned /
+        param_changed / …) or, for ``c2_wrong``, the user's verbatim note. Every
+        entry carries an ``origin`` field: ``"user"`` when the human wrote the
+        summary (only ``c2_wrong`` today) and ``"system"`` for every code-composed
+        entry — so a later reader can see the authorship at a glance.
+
+        Read-modify-write of the sealed ``journal`` slot runs under ``_SPEC_LOCK``
+        so a route thread's ``append_journal`` and a tick thread's post-run
+        journal append cannot both decrypt the same starting entries list and lose
+        one on the second seal (cheap atomicity — same lock the spec re-seal sites
+        already share).
+
+        Cascade-on-delete is inherited from ``NIStore.delete``'s wildcard row drop.
+        Excluded from export by the §21 export sanitizer (the exporter reads spec
+        only; journal is a snapshot slot).
+        """
+        assert item_id, "item id required"
+        if kind not in _JOURNAL_KINDS:
+            raise ValueError(f"journal kind must be one of {sorted(_JOURNAL_KINDS)}")
+        assert isinstance(summary, str), "summary must be a string"
+        entry = {
+            "ts": datetime.now(UTC).isoformat(),
+            "kind": kind,
+            # ``c2_wrong`` carries the user's verbatim note — mark it as such so
+            # a later reader (a model or the operator) can distinguish it from
+            # every code-composed summary next to it.
+            "origin": "user" if kind == "c2_wrong" else "system",
+            "summary": summary[:_MAX_JOURNAL_SUMMARY],
+        }
+        with _SPEC_LOCK:
+            existing = self.read_snapshot(item_id, "journal")
+            entries: list = []
+            if existing is not None:
+                body = existing.get("payload") or {}
+                raw = body.get("entries") if isinstance(body, dict) else None
+                if isinstance(raw, list):
+                    entries = list(raw)  # bounded by _MAX_JOURNAL_ENTRIES prior prune
+            entries.append(entry)
+            if len(entries) > _MAX_JOURNAL_ENTRIES:
+                entries = entries[-_MAX_JOURNAL_ENTRIES:]
+            self.write_snapshot(item_id, "journal", {"entries": entries}, ok=True)
+
+    def read_journal(self, item_id: str) -> list[dict]:
+        """§28: return the (already-pruned) journal entries or ``[]`` when absent."""
+        assert item_id, "item id required"
+        snap = self.read_snapshot(item_id, "journal")
+        if snap is None:
+            return []
+        body = snap.get("payload") or {}
+        raw = body.get("entries") if isinstance(body, dict) else None
+        return list(raw) if isinstance(raw, list) else []
+
     def delete_snapshot(self, item_id: str, slot: str) -> None:
         """Drop ONE (item_id, slot) row. Idempotent — a missing slot is a no-op.
 
@@ -2908,7 +2976,19 @@ class NIStore:
             )
             self._write_revision(item_id, new_rev, preserved, origin)
             self._prune_revisions(item_id)
-            return new_rev
+        # §28: journal the repair application. Only for the L1 tick path
+        # (origin=repair_l1) — the L2 Apply route writes its own "repaired"
+        # entry, and double-logging on the route path would create two rows
+        # for one user action. Best-effort: never mask the apply outcome.
+        if origin == "repair_l1":
+            try:
+                self.append_journal(item_id, "repaired",
+                                    "L1 self-repair applied a new extract/transform "
+                                    "(trial armed)")
+            except Exception as exc:
+                log.warning("ni journal (apply_repair L1) skipped: item=%s: %s",
+                            item_id, exc)
+        return new_rev
 
     def set_l2_proposal(self, item_id: str, proposal: dict, *,
                          expected_rev: int,
@@ -4405,6 +4485,17 @@ def _revert_l1_trial_if_active(store: NIStore, item_id: str,
                 store._prune_revisions(item_id)
     store.record_run(item_id, "repair_reverted", duration_ms=0,
                      error=revert_error, contract_ok=None)
+    # §28: journal the revert with the trial's own origin so a later reader can
+    # see whether the reverted apply came from L1 or L2. Best-effort — a journal
+    # failure here must never wedge the ladder's revert path.
+    try:
+        store.append_journal(
+            item_id, "reverted",
+            f"trial reverted (origin {trial_origin}"
+            f"{f'; error {revert_error}' if revert_error else ''})",
+        )
+    except Exception as exc:
+        log.warning("ni journal (revert) skipped: item=%s: %s", item_id, exc)
 
 
 def _drop_trial_marker_inline(store: NIStore, item_id: str, spec: dict) -> None:

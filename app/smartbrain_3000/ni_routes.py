@@ -90,7 +90,8 @@ def _pick_board_snapshot(store: ni.NIStore, item: dict) -> dict | None:
 def _board_row(store: ni.NIStore, item: dict, *,
                library_index: dict[str, dict] | None = None,
                library_pack_id: str | None = None,
-               spec_hashes: dict[str, str] | None = None) -> dict:
+               spec_hashes: dict[str, str] | None = None,
+               secrets_store=None) -> dict:
     """One board row: plaintext operational fields + display + the chosen snapshot's payload.
 
     ``interpreted`` (§13 honesty): True when a model reads the item's data — either a
@@ -102,6 +103,14 @@ def _board_row(store: ni.NIStore, item: dict, *,
     when the stored pack's current template has a different ``spec_hash`` (fleet
     healing); ``template_gone`` when the template id is no longer in the pack (a
     later pack removed it). Absent library ⇒ both False.
+
+    ``needs_credentials`` (§28 Status truth): list of ``{name, label}`` for every
+    secret-kind param whose ``ni:<item_id>:<name>`` key is NOT present in the
+    SecretStore. The frontend's Add-key modal uses ``name`` for the credential PUT
+    body while displaying ``label``. Empty list when the item declares no secret
+    params OR when every one has been filled. ``secrets_store=None`` (locked or
+    the route couldn't reach one) skips the check — the caller's 423 layer already
+    caught it, and an empty list is safer than a false-positive.
     """
     assert store is not None and item, "store + item required"
     snap = _pick_board_snapshot(store, item)
@@ -121,6 +130,7 @@ def _board_row(store: ni.NIStore, item: dict, *,
         "interpreted": interpreted,
         "template_update": update_flag,
         "template_gone": gone_flag,
+        "needs_credentials": _needs_credentials(item, secrets_store),
         # §23: True when a §14 frontier proposal is parked on this item — the card
         # renders "Fix proposed — review" (Apply / Dismiss are per-item routes).
         "l2_proposal": isinstance(item["spec"].get("_l2_proposal"), dict),
@@ -129,6 +139,36 @@ def _board_row(store: ni.NIStore, item: dict, *,
         "payload_ok": snap["ok"] if snap else None,
         "payload": snap["payload"] if snap else None,
     }
+
+
+def _needs_credentials(item: dict, secrets_store) -> list[dict]:
+    """§28 Status truth: return ``[{name, label}]`` for every secret param whose
+    ``ni:<item_id>:<name>`` key is ABSENT from the store.
+
+    Kept as a route-layer helper (not on the tool side) because the tool has no
+    SecretStore access by construction — the credential firewall §9 rule. The
+    board is Desktop-side and DOES have the store, so a truthful list is what
+    the card renders. A store-side read failure treats the key as ABSENT so the
+    card still nudges the user to add / re-add the credential (defence-in-depth
+    over the mirrored S5 route check at commission time).
+    """
+    assert isinstance(item, dict), "item required"
+    params = item["spec"].get("params") or {}
+    if not isinstance(params, dict) or secrets_store is None:
+        return []
+    out: list[dict] = []
+    for name, decl in params.items():  # bounded by ni._MAX_PARAMS
+        if not (isinstance(decl, dict) and decl.get("kind") == "secret"):
+            continue
+        label = decl.get("label") if isinstance(decl.get("label"), str) else ""
+        key = f"ni:{item['id']}:{name}"
+        try:
+            stored = secrets_store.get(key)
+        except Exception:  # unreadable/malformed — treat as absent, never a route error
+            stored = None
+        if not stored:
+            out.append({"name": str(name), "label": label or str(name)})
+    return out
 
 
 def _template_update_flags(item: dict, library_index: dict[str, dict] | None,
@@ -182,9 +222,14 @@ def board(request: Request) -> dict:
     """
     store = _store(request)
     library_index, library_pack_id, spec_hashes = _load_library_index(store)
+    # ``secret_store`` may be absent from ``app.state`` (a non-desktop context or
+    # a route hit before startup completes) — getattr keeps the board renderable
+    # even then; ``_needs_credentials`` degrades to an empty list.
+    secrets_store = getattr(request.app.state, "secret_store", None)
     return {"items": [
         _board_row(store, item, library_index=library_index,
-                   library_pack_id=library_pack_id, spec_hashes=spec_hashes)
+                   library_pack_id=library_pack_id, spec_hashes=spec_hashes,
+                   secrets_store=secrets_store)
         for item in store.list_items()  # bounded by ni._MAX_ITEMS
     ]}
 
@@ -310,6 +355,13 @@ def validate_item(request: Request, item_id: str, body: ValidateIn) -> dict:
         store.record_validation(item_id, body.ok, body.note or "")
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from None
+    if not body.ok:
+        # §28: the user's verbatim note rides the journal so a later reader (a
+        # model or the operator) sees the human authorship. Kind ``c2_wrong``
+        # names the verdict; the summary is the note (bounded by the store).
+        note = (body.note or "").strip() or "(no note)"
+        _journal_best_effort(store, item_id, "c2_wrong",
+                             f"user rejected first run: {note}")
     return {"ok": True, "state": store.get_item(item_id)["state"]}
 
 
@@ -364,12 +416,28 @@ def commission_item(request: Request, item_id: str) -> dict:
                     ),
                 )
     store.commission(item_id)
+    _journal_best_effort(store, item_id, "commissioned",
+                         "user activated the card (draft -> commissioning)")
     request.app.state.audit.append(
         "user", "ni_commission", "reviewed", "executed", True,
         args_summary=tools.summarize({"item_id": item_id}),
         result_summary=tools.summarize({"state": "commissioning"}),
     )
     return {"state": "commissioning"}
+
+
+def _journal_best_effort(store: ni.NIStore, item_id: str, kind: str,
+                          summary: str) -> None:
+    """§28 route-side journal writer. Never raises past the route boundary:
+    a store hiccup here would otherwise turn a successful commission /
+    validate / repair-policy edit into a 500.
+    """
+    assert store is not None and item_id and kind, "args required"
+    try:
+        store.append_journal(item_id, kind, summary)
+    except Exception as exc:  # bookkeeping only
+        log.warning("ni route journal append failed: item=%s kind=%s: %s",
+                    item_id, kind, exc)
 
 
 @router.post("/api/ni/items/{item_id}/run")
@@ -523,10 +591,16 @@ def put_credential(request: Request, item_id: str, body: CredentialIn) -> dict:
     The value is written under ``ni:<item_id>:<name>`` bound to ``host`` — a fetch to any
     other host refuses it (secret_host_mismatch → permanent broken). The audit row carries
     metadata only (item id + name + host); the VALUE never lands in a plaintext log.
+
+    §28 journal: a successful PUT lands a ``param_changed`` entry naming the
+    param's user-visible label (falling back to the param name), so the card
+    history shows "credential '<label>' added" when the user filled in a key.
+    Value bytes never touch the journal (summary is code-composed metadata).
     """
     _require_desktop_local(request)
     store = _store(request)
-    if store.get_item(item_id) is None:
+    item = store.get_item(item_id)
+    if item is None:
         raise HTTPException(status_code=404, detail="item not found")
     secrets = _secret_store(request)
     ni.put_credential(secrets, item_id, body.name, body.value, body.host)
@@ -535,7 +609,18 @@ def put_credential(request: Request, item_id: str, body: CredentialIn) -> dict:
         args_summary=tools.summarize({"item_id": item_id, "name": body.name, "host": body.host}),
         result_summary=tools.summarize({"stored": True}),
     )
+    _journal_best_effort(store, item_id, "param_changed",
+                         f"credential {_param_label(item, body.name)!r} added")
     return {"ok": True}
+
+
+def _param_label(item: dict, name: str) -> str:
+    """Return the user-visible label for a spec param, falling back to its name."""
+    assert isinstance(item, dict) and isinstance(name, str), "item + name required"
+    params = (item["spec"].get("params") or {}) if isinstance(item.get("spec"), dict) else {}
+    entry = params.get(name) if isinstance(params, dict) else None
+    label = entry.get("label") if isinstance(entry, dict) else None
+    return label if isinstance(label, str) and label else name
 
 
 # --- Phase 4b D2b: repair-policy setter (desktop-local) ---------------------
@@ -643,6 +728,8 @@ def apply_l2_proposal(request: Request, item_id: str) -> dict:
                             detail="spec changed since proposal — retry")
     store.record_run(item_id, "repair_l2_applied", duration_ms=0,
                      error=None, contract_ok=None)
+    _journal_best_effort(store, item_id, "repaired",
+                         "user applied L2 proposal (repair_l2 trial armed)")
     request.app.state.audit.append(
         "user", "ni_l2_proposal_apply", "reviewed", "executed", True,
         args_summary=tools.summarize({"item_id": item_id}),
@@ -1016,6 +1103,8 @@ def apply_template_update(request: Request, item_id: str) -> dict:
                             detail=f"template preview bind failed: {exc}") from None
     store.write_snapshot(item_id, "preview", bound, ok=True)
     store.write_snapshot(item_id, "preview_data", preview_payload, ok=True)
+    _journal_best_effort(store, item_id, "apply_template_update",
+                         f"applied template update to seq {int(pin['seq'])}")
     return {"ok": True, "state": "draft",
             "spec_hash": new_spec["_template"]["spec_hash"]}
 

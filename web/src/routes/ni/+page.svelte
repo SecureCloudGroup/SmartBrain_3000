@@ -24,6 +24,7 @@
   } from "$lib/api";
   import { confirmDialog } from "$lib/confirm.svelte";
   import { describeError } from "$lib/errors";
+  import { friendlyErrorClass } from "$lib/ni/errors";
   import {
     filterTemplates,
     formatFingerprint,
@@ -33,6 +34,8 @@
   } from "$lib/ni/library";
   import { formatStageJson, stagesFromSpec } from "$lib/ni/proposal";
   import { isStale, relTime } from "$lib/ni/time";
+  import { runStatusLabel } from "$lib/runs";
+  import { toast } from "$lib/toast.svelte";
 
   let items = $state<NiBoardItem[]>([]);
   let loaded = $state(false);
@@ -106,6 +109,27 @@
   let repairError = $state("");
   let repairL1 = $state(true);
   let repairL2Frontier = $state(false);
+
+  // Add-key modal (Status-truth amendments — the previously missing UI). Opens per
+  // missing secret from the card's needs_credentials list; the host is prefilled from
+  // the item detail's source.url hostname (§10 spec.source), and the value is a
+  // password-typed input that is NEVER echoed anywhere and cleared on close.
+  let credentialFor = $state<NiBoardItem | null>(null);
+  let credentialName = $state("");
+  let credentialLabel = $state("");
+  let credentialValue = $state("");
+  let credentialHost = $state("");
+  let credentialLoading = $state(false);
+  let credentialBusy = $state(false);
+  let credentialError = $state("");
+
+  // Read-only run-history modal — lists the item's `ni_runs` rows (§10 detail),
+  // newest first: ts (relTime) + runStatusLabel + friendly error class. Opened from
+  // the small "History" link in every card footer; lazily fetches item detail.
+  let historyFor = $state<NiBoardItem | null>(null);
+  let historyDetail = $state<NiItemDetail | null>(null);
+  let historyLoading = $state(false);
+  let historyError = $state("");
 
   // Filtered view of the pinned pack's templates — derived so the search input and category
   // dropdown re-render inline without any imperative "if changed then refilter" bookkeeping.
@@ -443,6 +467,143 @@
     }
   }
 
+  // Parse a hostname out of the item spec's source.url — best-effort, empty on
+  // anything the URL constructor refuses (unset, non-http source, malformed). The
+  // Add-key modal prefills this into an editable host field (the credential is
+  // host-bound; §3 secret_host_mismatch is the failure mode).
+  function hostFromSpec(detail: NiItemDetail | null): string {
+    console.assert(detail === null || typeof detail === "object", "hostFromSpec: detail is object|null");
+    console.assert(detail === null || typeof detail.spec === "object", "hostFromSpec: spec present when detail present");
+    if (!detail) return "";
+    const source = detail.spec.source;
+    if (!source || typeof source !== "object" || Array.isArray(source)) return "";
+    const url = (source as Record<string, unknown>).url;
+    if (typeof url !== "string" || url.length === 0) return "";
+    try {
+      return new URL(url).hostname;
+    } catch {
+      return "";
+    }
+  }
+
+  // Card status truth (§ "Status truth" amendments). Returns the sentence that
+  // replaces the old "Waiting for the first run…" lie, plus a boolean the template
+  // uses to gate rendering. A card that has run at least once (last_checked set) AND
+  // has no payload AND has a positive failure streak is showing a broken first-run
+  // truth: "First run failed — <friendly> (<raw>), N attempts · last tried Xm ago".
+  // Everything else keeps the honest "Waiting…" copy.
+  type FailureLine = { show: boolean; friendly: string; raw: string; attempts: number; tried: string };
+  function firstRunFailure(item: NiBoardItem): FailureLine {
+    console.assert(typeof item.state === "string", "firstRunFailure: state is string");
+    console.assert(typeof item.consecutive_failures === "number", "firstRunFailure: failures is number");
+    const eligibleState =
+      item.state === "commissioning" ||
+      item.state === "live" ||
+      item.state === "degraded" ||
+      item.state === "failing";
+    if (!eligibleState) return { show: false, friendly: "", raw: "", attempts: 0, tried: "" };
+    if (item.payload !== null) return { show: false, friendly: "", raw: "", attempts: 0, tried: "" };
+    if (item.consecutive_failures <= 0) return { show: false, friendly: "", raw: "", attempts: 0, tried: "" };
+    const raw = typeof item.last_status === "string" ? item.last_status : "";
+    return {
+      show: true,
+      friendly: friendlyErrorClass(raw),
+      raw,
+      attempts: item.consecutive_failures,
+      tried: relTime(item.last_checked),
+    };
+  }
+
+  // Card footer fresh line. When the item has a payload_at, keep the existing "Xm
+  // ago" — that's the moment the data on screen was fetched. Otherwise, if the
+  // engine tried at all (last_checked set), the amendments require "last tried
+  // <relTime>" so the footer stops rendering the "—" lie of "we haven't started yet".
+  function footerFresh(item: NiBoardItem): string {
+    console.assert(typeof item === "object" && item !== null, "footerFresh: item is object");
+    console.assert(item.last_checked === null || typeof item.last_checked === "string", "footerFresh: last_checked shape");
+    if (item.payload_at) return relTime(item.payload_at);
+    if (item.last_checked) return `last tried ${relTime(item.last_checked)}`;
+    return "—";
+  }
+
+  async function openCredential(item: NiBoardItem, entry: { name: string; label: string }): Promise<void> {
+    console.assert(typeof entry.name === "string", "openCredential: name is string");
+    console.assert(credentialFor === null, "openCredential: no other credential modal open");
+    credentialFor = item;
+    credentialName = entry.name;
+    credentialLabel = entry.label;
+    credentialValue = "";
+    credentialHost = "";
+    credentialError = "";
+    credentialLoading = true;
+    try {
+      const detail = await api.niItem(item.id);
+      credentialHost = hostFromSpec(detail);
+    } catch (err) {
+      // Prefill failure isn't fatal — the host field is editable — but surface it
+      // so the user knows they'll need to type the host themselves.
+      credentialError = describeError(err);
+    } finally {
+      credentialLoading = false;
+    }
+  }
+  function closeCredential(): void {
+    console.assert(credentialBusy === false, "closeCredential: not while save in flight");
+    console.assert(typeof credentialValue === "string", "closeCredential: value is string");
+    credentialFor = null;
+    credentialName = "";
+    credentialLabel = "";
+    credentialValue = ""; // never persist the secret past the modal's lifetime
+    credentialHost = "";
+    credentialError = "";
+  }
+  async function submitCredential(): Promise<void> {
+    console.assert(credentialFor !== null, "submitCredential: a target must be set");
+    console.assert(credentialBusy === false, "submitCredential: no concurrent save");
+    const target = credentialFor;
+    const value = credentialValue;
+    const host = credentialHost.trim();
+    if (!target || !value || !host || credentialBusy) return;
+    credentialBusy = true;
+    credentialError = "";
+    try {
+      await api.niPutCredential(target.id, credentialName, value, host);
+      const label = credentialLabel;
+      closeCredential();
+      toast(`Saved the ${label} key.`);
+      await load();
+    } catch (err) {
+      // 403 arrives when a paired phone tried the Desktop-local route; describeError
+      // passes the backend's human sentence through verbatim ("add keys on your desktop").
+      credentialError = describeError(err);
+    } finally {
+      credentialBusy = false;
+    }
+  }
+
+  async function openHistory(item: NiBoardItem): Promise<void> {
+    console.assert(typeof item.id === "string", "openHistory: id is string");
+    console.assert(historyFor === null, "openHistory: no other history modal open");
+    historyFor = item;
+    historyDetail = null;
+    historyError = "";
+    historyLoading = true;
+    try {
+      historyDetail = await api.niItem(item.id);
+    } catch (err) {
+      historyError = describeError(err);
+    } finally {
+      historyLoading = false;
+    }
+  }
+  function closeHistory(): void {
+    console.assert(typeof historyLoading === "boolean", "closeHistory: loading is boolean");
+    console.assert(historyFor === null || historyFor !== undefined, "closeHistory: target shape");
+    historyFor = null;
+    historyDetail = null;
+    historyError = "";
+  }
+
   async function load() {
     console.assert(typeof api.niBoard === "function", "load: niBoard method present");
     console.assert(Array.isArray(items), "load: items array");
@@ -713,9 +874,38 @@
             {#if item.payload}
               <NiScene node={item.payload} />
             {:else}
-              <p class="muted" style="margin:0; font-size:var(--f-label)">Waiting for the first run…</p>
+              {@const failure = firstRunFailure(item)}
+              {#if failure.show}
+                <!-- Status truth (§ amendments): a real failure class + attempt count +
+                     when it was tried — replaces the "Waiting for the first run…" lie. -->
+                <p class="ni-status-fail" style="margin:0; font-size:var(--f-label)">
+                  First run failed —
+                  <span class="ni-status-class">{failure.friendly} ({failure.raw})</span>,
+                  {failure.attempts} attempt{failure.attempts === 1 ? "" : "s"} · last tried {failure.tried}
+                </p>
+              {:else}
+                <p class="muted" style="margin:0; font-size:var(--f-label)">Waiting for the first run…</p>
+              {/if}
             {/if}
           </div>
+
+          {#if item.needs_credentials && item.needs_credentials.length > 0}
+            <!-- Add-key entry point (§ Status-truth amendments). One row per missing
+                 credential — the modal itself is host-bound + Desktop-local, so a
+                 paired phone gets a 403 the modal surfaces verbatim. -->
+            <div class="ni-needs-key">
+              {#each item.needs_credentials as need (need.name)}
+                <div class="ni-needs-row">
+                  <span class="ni-needs-copy">Needs your <strong>{need.label}</strong> key</span>
+                  <button
+                    class="secondary"
+                    disabled={busyId === item.id || credentialFor !== null}
+                    onclick={() => openCredential(item, need)}
+                  >Add key</button>
+                </div>
+              {/each}
+            </div>
+          {/if}
 
           {#if preview}
             <div class="ni-actions">
@@ -746,8 +936,14 @@
           {/if}
 
           <div class="ni-foot">
-            <span class="muted ni-fresh">{relTime(item.payload_at)}</span>
+            <span class="muted ni-fresh">{footerFresh(item)}</span>
             <span class="ni-actions">
+              <button
+                class="linklike ni-history"
+                disabled={busyId === item.id || historyFor !== null}
+                onclick={() => openHistory(item)}
+                title="Show recent runs"
+              >History</button>
               <button
                 class="ghost"
                 disabled={busyId === item.id}
@@ -921,6 +1117,91 @@
         <button disabled={repairBusy || repairLoading || !repairDetail} onclick={saveRepair}>
           {repairBusy ? "Saving…" : "Save"}
         </button>
+      </div>
+    </Modal>
+  {/if}
+
+  <!-- Add-key modal (§ Status-truth amendments). Desktop-local via x-sb-local — the
+       WebRTC bridge strips that header, so a paired phone gets a 403 the modal paints
+       verbatim. The value input is password-typed and NEVER echoed back into any DOM
+       node; closeCredential() zeroes it. -->
+  {#if credentialFor}
+    <Modal
+      open
+      label="Add key"
+      onclose={() => { if (!credentialBusy) closeCredential(); }}
+    >
+      <h2 class="modal-title">Add key — {credentialLabel}</h2>
+      <p class="modal-body">
+        Keys are stored on this computer only and used exactly for this card’s source
+        (host-bound). If you type them elsewhere, they won’t work.
+      </p>
+      {#if credentialLoading}
+        <Spinner block />
+      {:else}
+        <label class="cred-row" for="ni-cred-value">
+          <span>{credentialLabel}</span>
+          <input
+            id="ni-cred-value"
+            type="password"
+            autocomplete="off"
+            bind:value={credentialValue}
+            placeholder="Paste your key"
+            disabled={credentialBusy}
+          />
+        </label>
+        <label class="cred-row" for="ni-cred-host">
+          <span>Host</span>
+          <input
+            id="ni-cred-host"
+            type="text"
+            bind:value={credentialHost}
+            placeholder="api.example.com"
+            disabled={credentialBusy}
+          />
+        </label>
+        {#if credentialError}<p class="error" style="margin:var(--s-3) 0 0">{credentialError}</p>{/if}
+      {/if}
+      <div class="modal-actions" style="margin-top: var(--s-4)">
+        <button class="secondary" disabled={credentialBusy} onclick={closeCredential}>Cancel</button>
+        <button
+          disabled={credentialBusy || credentialLoading || !credentialValue || !credentialHost.trim()}
+          onclick={submitCredential}
+        >{credentialBusy ? "Saving…" : "Save"}</button>
+      </div>
+    </Modal>
+  {/if}
+
+  <!-- Run history modal (§10 GET /items/{id}). Read-only list of ni_runs rows in
+       reverse-chronological — ts (relTime) + runStatusLabel + friendly error class.
+       No verbs; the card footer already exposes Run now / Pause / Delete. -->
+  {#if historyFor}
+    <Modal
+      open
+      label="Run history"
+      onclose={closeHistory}
+    >
+      <h2 class="modal-title">Recent runs — “{historyFor.title}”</h2>
+      {#if historyLoading}
+        <Spinner block />
+      {:else if historyError && !historyDetail}
+        <p class="error">{historyError}</p>
+      {:else if !historyDetail || historyDetail.runs.length === 0}
+        <p class="muted">No runs recorded yet.</p>
+      {:else}
+        <ul class="hist-list">
+          {#each historyDetail.runs as run, i (i)}
+            {@const friendly = friendlyErrorClass(run.error)}
+            <li class="hist-row">
+              <span class="hist-when muted">{relTime(run.ts)}</span>
+              <span class="hist-status">{runStatusLabel(run.status)}</span>
+              {#if friendly}<span class="hist-error muted">— {friendly}</span>{/if}
+            </li>
+          {/each}
+        </ul>
+      {/if}
+      <div class="modal-actions" style="margin-top: var(--s-4)">
+        <button class="secondary" onclick={closeHistory}>Close</button>
       </div>
     </Modal>
   {/if}
@@ -1436,6 +1717,65 @@
     overflow-x: auto;
     max-height: 20rem;
   }
+  /* Status-truth first-run failure line: muted text with the class in the warn color
+     so the truth is legible without shouting. (§ Status-truth amendments.) */
+  .ni-status-fail {
+    color: var(--muted);
+  }
+  .ni-status-class {
+    color: var(--warn);
+  }
+  /* Needs-your-key row: sits between the body and any actions. Wraps on narrow cards
+     so the label stacks above the button rather than truncating. */
+  .ni-needs-key {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s-2);
+  }
+  .ni-needs-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--s-2);
+    padding: var(--s-2) var(--s-3);
+    background: var(--accent-tint);
+    border-radius: var(--r-1);
+    flex-wrap: wrap;
+  }
+  .ni-needs-copy { font-size: var(--f-label); }
+  /* History linklike sits inside the actions row — same size as the ghost buttons
+     around it so the baseline stays clean. */
+  .ni-history { font-size: var(--f-meta); }
+  /* Add-key modal form rows — label above input, matches the schedules field layout. */
+  .cred-row {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin: var(--s-3) 0 0;
+  }
+  .cred-row span { font-size: var(--f-meta); color: var(--muted); }
+  /* Run-history list — one row per run, tabular baseline (no zebra: the timestamps
+     already carry rhythm). */
+  .hist-list {
+    list-style: none;
+    padding: 0;
+    margin: var(--s-2) 0 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--s-1);
+    max-height: 24rem;
+    overflow-y: auto;
+  }
+  .hist-row {
+    display: flex;
+    align-items: baseline;
+    gap: var(--s-2);
+    font-size: var(--f-label);
+    flex-wrap: wrap;
+  }
+  .hist-when { min-width: 6rem; font-size: var(--f-meta); }
+  .hist-status { font-weight: 600; }
+  .hist-error { font-size: var(--f-meta); }
   /* The one warning panel this page owns (matches knowledge/ .warn treatment). */
   .warn {
     border: 1px solid var(--danger);

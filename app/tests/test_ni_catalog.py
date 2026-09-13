@@ -1,10 +1,13 @@
-"""Tests for the bundled Neural Interface source catalog (§18) and its OBSERVE tool.
+"""Tests for the bundled Neural Interface RECIPE catalog (§18/§26) and its OBSERVE tool.
 
 The catalog file is reviewed = trusted, so shape drift is a BUILD-time error: a bad
 entry makes ``smartbrain_3000.ni_catalog`` fail to import. Importing the module here
 IS the primary test — the assertions below cover the invariants the format contract
 promises (URL shape parity with ni.py, non-empty notes / docs_url, tool registered
-as OBSERVE with no egress, category filter behavior, unknown category is empty)."""
+as OBSERVE with no egress, category filter behavior, unknown category is empty,
+and — §26 — every recipe's spec_template validates + preview binds + sample runs
+its pipeline).
+"""
 
 from __future__ import annotations
 
@@ -12,17 +15,24 @@ import pytest
 
 from smartbrain_3000 import ni, ni_catalog, tools
 
+_REQUIRED = {"id", "title", "host", "url_template", "docs_url", "auth",
+             "category", "notes", "spec_template", "preview_payload"}
+_ALLOWED_OPTIONAL = {"sample_response", "prove_params"}
+
 
 def test_catalog_loads_at_import_and_is_non_empty() -> None:
     all_entries = ni_catalog.entries()
-    assert all_entries, "bundled catalog must have at least one source"
+    assert all_entries, "bundled catalog must have at least one recipe"
     assert isinstance(all_entries, list) and all(isinstance(s, dict) for s in all_entries)
 
 
 def test_every_entry_has_the_required_keys_and_non_empty_notes_and_docs_url() -> None:
-    required = {"id", "title", "host", "url_template", "docs_url", "auth", "category", "notes"}
     for src in ni_catalog.entries():
-        assert set(src.keys()) == required, f"{src.get('id')!r} has wrong keys: {set(src.keys())}"
+        keys = set(src.keys())
+        missing = _REQUIRED - keys
+        extra = keys - _REQUIRED - _ALLOWED_OPTIONAL
+        assert not missing, f"{src.get('id')!r} missing keys: {sorted(missing)}"
+        assert not extra, f"{src.get('id')!r} has unknown keys: {sorted(extra)}"
         for key in ("notes", "docs_url"):
             assert isinstance(src[key], str) and src[key].strip(), f"{src['id']}.{key} must be non-empty"
         assert src["auth"] in {"none", "key"}, f"{src['id']}.auth invalid"
@@ -70,6 +80,66 @@ def test_entries_returns_fresh_lists_so_callers_cannot_mutate_the_module_state()
 def test_ids_are_unique_across_the_catalog() -> None:
     ids = [s["id"] for s in ni_catalog.entries()]
     assert len(ids) == len(set(ids)), f"duplicate ids: {ids}"
+
+
+# --- §26 recipe determinism gates ------------------------------------------
+
+def test_every_recipe_spec_template_validates_with_empty_param_values() -> None:
+    """§26/§19: the recipe's spec_template must pass ni.validate_spec in template
+    mode (empty param values allowed). Import-time build gate already runs this;
+    this test names it in the suite so a regression in the validator surfaces here."""
+    for src in ni_catalog.entries():
+        ni.validate_spec(src["spec_template"], allow_empty_params=True)
+
+
+def test_every_recipe_preview_payload_binds_against_its_scene() -> None:
+    """§19 gate: preview_payload binds against the recipe's scene using seeded
+    history + a preview image_ref — matches the parse_pack contract."""
+    for src in ni_catalog.entries():
+        spec = src["spec_template"]
+        ni.bind_scene(spec["scene"], src["preview_payload"],
+                      history=ni._seed_history(spec),
+                      image_ref=ni._preview_image_ref(spec, src["id"]))
+
+
+def test_every_recipe_url_template_matches_spec_template_source_url() -> None:
+    """A recipe's operator-facing url_template must equal its spec_template.source.url
+    so the deterministic build path fetches exactly what the display promises."""
+    for src in ni_catalog.entries():
+        spec_url = (src["spec_template"].get("source") or {}).get("url")
+        assert spec_url == src["url_template"], (
+            f"{src['id']}: url_template != spec_template.source.url"
+        )
+
+
+def test_every_recipe_with_a_sample_response_survives_pipeline_and_bind() -> None:
+    """§26 determinism proof: sample_response → run_pipeline → bind_scene end-to-end.
+    A recipe that ships a sample must survive its own real-payload shape."""
+    for src in ni_catalog.entries():
+        sample = src.get("sample_response")
+        if sample is None:
+            continue
+        spec = src["spec_template"]
+        outputs = ni.run_pipeline(spec.get("pipeline") or [], sample)
+        ni.bind_scene(spec["scene"], outputs,
+                      history=ni._seed_history(spec),
+                      image_ref=ni._preview_image_ref(spec, src["id"]))
+
+
+def test_get_recipe_returns_a_fresh_deep_copy() -> None:
+    """get_recipe copies so a mutating caller (from_recipe fills param slots)
+    cannot corrupt module state."""
+    r = ni_catalog.get_recipe("weather-open-meteo")
+    assert r is not None
+    r["spec_template"]["params"]["latitude"]["value"] = "MUTATED"
+    fresh = ni_catalog.get_recipe("weather-open-meteo")
+    assert fresh is not None
+    assert fresh["spec_template"]["params"]["latitude"]["value"] == ""
+
+
+def test_get_recipe_unknown_id_returns_none() -> None:
+    assert ni_catalog.get_recipe("no-such-recipe") is None
+    assert ni_catalog.get_recipe("") is None
 
 
 # --- OBSERVE tool -------------------------------------------------------------

@@ -11,6 +11,46 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Added
+- **Neural Interface: cards that work the first time.** Card creation is now
+  deterministic-first: the assistant picks from **recipes** — complete, tested card
+  definitions proven against each API's real responses — and only fills in your blanks
+  (which stock, which city, how often). Six recipes ship (crypto, weather ×2, currency
+  rates, earthquakes, stocks via Finnhub). For requests no recipe covers, the assistant
+  must fetch one real sample first and build the data mapping from what's actually
+  there — a deterministic helper derives the candidate fields, so imagination is out of
+  the loop. Every card also keeps a **journal** — a factual history of when it was
+  created, changed, repaired, or corrected — that any model reads before fixing it, in
+  any later conversation.
+- **Cards that tell the truth.** "Waiting for the first run…" is gone when it's false:
+  cards say plainly what failed, how many times, and when last tried; a **History**
+  view lists recent runs; cards that need an API key say so and finally have an
+  **Add key** button (the previously missing piece). Cards with keys always start as
+  drafts until the key is in. The assistant now reports card states accurately (no more
+  premature "LIVE!"), fixes existing cards instead of creating duplicates, and
+  duplicate titles are refused outright.
+- **Faster cloud conversations.** When chatting via Claude Code, multi-step work now
+  keeps one session per turn instead of restarting the CLI cold for every step — same
+  containment (no tools, no settings, scrubbed environment), with the session's files
+  confined to a private per-turn directory and deleted when the turn ends.
+
+## [0.10.1] - 2026-09-13
+
+### Fixed
+- **Card creation no longer fails after you approve.** The assistant now has an exact,
+  drift-proof reference for the card format, invalid drafts bounce back to it privately
+  BEFORE any approval card appears, and the format hints are visible in its tools — the
+  root cause of every first-day field failure. (Recorded here retroactively: this
+  section was omitted when 0.10.1 shipped.)
+- Eighteen findings from a post-release integrated audit: an in-flight refresh can no
+  longer override a just-approved change; resizing or adjusting a card no longer
+  silently disables its data checks and repairs; cards no longer stall the whole board
+  when the local model is offline; deleting a card deletes its stored keys; notice
+  history is bounded; and more — each with a regression test.
+- Documentation caught up with reality: the features guide now covers everything the
+  Neural Interface shipped, and the privacy page's "what leaves your machine" list is
+  complete and honest again.
+
 ## [0.10.0] - 2026-09-12
 
 ### Added

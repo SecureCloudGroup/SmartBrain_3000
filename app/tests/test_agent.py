@@ -773,7 +773,7 @@ def test_turn_stops_asking_for_tools_once_context_budget_reached(monkeypatch) ->
     ctx, audit, approvals = _wired()
     calls = {"tools": 0}
 
-    def scripted(messages, model, spec, timeout=60.0):
+    def scripted(messages, model, spec, timeout=60.0, session=None):
         calls["tools"] += 1
         return _toolcalls(("kb_search", {"query": "x"}))
 

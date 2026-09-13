@@ -86,4 +86,38 @@ describe("promotedLine", () => {
     );
     expect(out).toBe("Fetches: https://example.com/x");
   });
+
+  it("names the resolved catalog url for create_ni_item_from_recipe (backend threaded recipe_url through)", () => {
+    const out = promotedLine(
+      "create_ni_item_from_recipe",
+      { recipe_id: "stock-quote", params: { symbol: "AAPL" } },
+      undefined,
+      undefined,
+      "https://api.example.com/quote?s=AAPL",
+    );
+    expect(out).toBe("Fetches: https://api.example.com/quote?s=AAPL");
+  });
+
+  it("falls back to a generic catalog phrase when recipe_url wasn't threaded through", () => {
+    const out = promotedLine(
+      "create_ni_item_from_recipe",
+      { recipe_id: "stock-quote", params: { symbol: "AAPL" } },
+    );
+    expect(out).toBe("Fetches: a vetted catalog source");
+  });
+
+  it("leaves other tools unaffected when a recipe_url is supplied", () => {
+    expect(
+      promotedLine("send_email", { to: "a@b" }, undefined, undefined, "https://api.example.com/x"),
+    ).toBeNull();
+    expect(
+      promotedLine(
+        "create_ni_item",
+        { source: { url: "https://example.com/y" } },
+        undefined,
+        undefined,
+        "https://api.example.com/x",
+      ),
+    ).toBe("Fetches: https://example.com/y");
+  });
 });
