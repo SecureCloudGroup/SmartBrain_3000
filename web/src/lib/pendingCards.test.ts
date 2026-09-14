@@ -120,4 +120,46 @@ describe("promotedLine", () => {
       ),
     ).toBe("Fetches: https://example.com/y");
   });
+
+  it("names the fetch host for start_ni_flow with a source_url", () => {
+    const out = promotedLine(
+      "start_ni_flow",
+      { request: "show AAPL every 5m", source_url: "https://api.example.com/quote?s=AAPL" },
+    );
+    expect(out).toBe("Fetches: https://api.example.com/quote?s=AAPL");
+  });
+
+  it("uses the 'no fetch until confirmed' line for start_ni_flow without a source_url", () => {
+    const out = promotedLine("start_ni_flow", { request: "show AAPL every 5m" });
+    expect(out).toBe("Builds a card from a vetted or user-chosen source — no fetch until one is confirmed");
+  });
+
+  it("names the fetch host for resume_ni_flow (which always carries a source_url)", () => {
+    const out = promotedLine(
+      "resume_ni_flow",
+      { item_id: "item-1", source_url: "https://api.example.com/quote?s=AAPL" },
+    );
+    expect(out).toBe("Fetches: https://api.example.com/quote?s=AAPL");
+  });
+
+  it("parses a JSON-string args for the flow tools (history args_summary shape)", () => {
+    const args = JSON.stringify({ item_id: "item-1", source_url: "https://api.example.com/x" });
+    expect(promotedLine("resume_ni_flow", args))
+      .toBe("Fetches: https://api.example.com/x");
+    const startArgs = JSON.stringify({ request: "show AAPL" });
+    expect(promotedLine("start_ni_flow", startArgs))
+      .toBe("Builds a card from a vetted or user-chosen source — no fetch until one is confirmed");
+  });
+
+  it("says re-mapping reuses the already-approved source for remap_ni_item", () => {
+    const out = promotedLine("remap_ni_item", { item_id: "item-1" });
+    expect(out).toBe("Re-maps this card against its already-approved source");
+  });
+});
+
+it("confirm_ni_flow_source promotes the recipe URL it would fetch", () => {
+  expect(
+    promotedLine("confirm_ni_flow_source",
+      { item_id: "x", source_url: "https://api.coingecko.com/api/v3/simple/price" }),
+  ).toBe("Fetches: https://api.coingecko.com/api/v3/simple/price");
 });

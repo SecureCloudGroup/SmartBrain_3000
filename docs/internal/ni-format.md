@@ -88,11 +88,12 @@ No foreign keys; `NIStore.delete` cascades in code (feeds precedent).
   rejects specs carrying them (closed-key law) — that is the intended forward
   refusal.
 
-## 3. Sources (closed set — eight types)
+## 3. Sources (closed set — nine types)
 
 The full closed set (`_SOURCE_TYPES`; validators refuse anything else):
 `http_json`, `model`, `internal.schedule` (this section), `http_page` +
-`internal.kb` (§15), `mcp_tool` (§22), `http_image` (§24), `internal.ni` (§25).
+`internal.kb` (§15), `mcp_tool` (§22), `http_image` (§24), `internal.ni` (§25),
+`computed` (§29 — pure clock, zero egress).
 
 `http_json`:
 ```json
@@ -144,6 +145,16 @@ The full closed set (`_SOURCE_TYPES`; validators refuse anything else):
 - Reads the newest `schedule_runs` row for that schedule (message only). Zero
   egress. Payload to the pipeline: `{"message": str, "status": str, "ts": str}`.
 
+`computed` (§29):
+```json
+{"type": "computed", "compute": "days_until", "date": "YYYY-MM-DD"}
+```
+- Pure-clock read, zero egress. `compute` ∈ `{days_until}` (v1 has one member).
+  Payload to the pipeline: `{"days": <int>}` = target date − today (UTC);
+  negative allowed (past dates read as negative counts). Cadence rules apply
+  as-is (daily-ish intervals are the natural choice — no special-case).
+  The `interpreted` chip stays OFF (no model reads the value).
+
 ## 4. Pipeline
 
 An ordered list of stages; each consumes and produces a JSON value. The implicit
@@ -190,6 +201,16 @@ Added in v2 (same closed-set discipline):
   of history series `series` (§11); writes `{value, direction: "up"|"down"|
   "flat"}` to `as`. When the series is empty (first run) it writes
   `{value: 0, direction: "flat"}` — never a failure, so commissioning passes.
+
+Added in v-next (§29 flow-engine phase):
+- `where(field, key, op, value)` — filter a list-of-objects in place (like
+  `sort_by` / `top_n`, ``field`` stays under the same name). ``key`` is a
+  single §4.1 segment; ``op`` ∈ `lt|le|gt|ge|eq|ne`; ``value`` is a JSON
+  scalar. Semantics mirror the §5 conditions: ordering ops require finite
+  numbers on both sides, eq/ne compare scalars strictly (bool ≠ number). A
+  non-numeric item under an ordering op — or a list entry missing ``key`` —
+  is silently EXCLUDED, not a failure (filtering is selection, not
+  validation). A non-list ``field`` is a stage failure `transform_type`.
 
 ### 4.3 Bind + render-validate (implicit, always last)
 
@@ -1097,3 +1118,117 @@ When no recipe fits, blind drafting is forbidden by protocol:
 - `create_ni_item` refuses a title that case-insensitively matches an existing
   item unless `allow_duplicate: true` — the error names the existing card and
   points at `update_ni_item`.
+
+## 29. The NI Flow Engine (deterministic creation, POC-validated)
+
+Field verdict (2026-09-13): the chat agent as ORCHESTRATOR is the flakiness —
+same request, same model: 16 minutes / ~10 approvals / 0 working cards via chat
+orchestration vs 4 seconds / 0 interventions / 10-of-10 diverse cases via the
+flow POC. Code owns the sequence; models fill exactly two narrow, validated
+blanks. The POC harness and its 10-case matrix are the acceptance bar.
+
+**States** (a flow record rides the item's journal + a sealed `flow` snapshot
+slot): `intent → source → confirm_source? → sampling → mapping → assembling →
+awaiting_credential? → ready(draft/commissioning per existing landing rules)`,
+plus terminal `unsupported(reason)` and `failed(class)`. The flow runs on a
+background worker (single-flight per item, L2-worker pattern); the draft card
+appears immediately and shows the live flow state; the tick never runs flows.
+A boot-time sweep (`_sweep_ni_flow_shells`, called from the NI tick) fails any
+non-terminal record older than 1h to `failed(stale)` so a worker that died
+between ticks never leaves a "Preparing card…" shell rendering forever (M3
+audit 2026-09-13).
+
+**Stages** (M = one bounded model call, closed schema, retry once; C = pure code):
+1. **Intent (M#1)**: request → `{kind: external_data|computed_only, subject,
+   cadence_minutes (default 15), wants[], threshold|null, display_hint}`.
+   `computed_only` routes to the computed source (below) when servable, else
+   `unsupported` with an honest sentence.
+2. **Source (C)**: consent-first ordering (C2 audit 2026-09-13). A user-
+   consented `known_url` (start_ni_flow / resume_ni_flow with a source_url)
+   ALWAYS wins and skips recipe matching — the frozen `spec.source.url`
+   equals the fetched URL byte-for-byte (invariant assertion). No known URL ⇒
+   recipe match over the catalog with a category-corroborated ticker heuristic
+   (a bare ALL-CAPS token no longer promotes past the threshold). Recipe hit
+   ⇒ the flow PAUSES in `confirm_source` with the recipe's `url_template` +
+   `title` sealed in the record; `confirm_ni_flow_source` (REVIEWED) is the
+   resume — the promoted "Fetches: <url>" line on that card is the operator's
+   consent, so the "no fetch until one is confirmed" pledge is literally true.
+   Recipe miss ⇒ pause in `source` with the `awaiting_pick` marker so chat
+   can surface candidates (consent moment #1 unchanged).
+3. **Sampling (C)**: one consented fetch; **deterministic downsampling** (every
+   list trimmed to 2 exemplars; re-trim to 1 if still >30KB) before derive.
+4. **Mapping (M#2)**: the menu is **pre-filtered by CODE to the field's expected
+   type** (harvested requirement — the model chose "°C" over 25.7 until the menu
+   forbade it); the model SELECTS paths only; code verifies membership + type,
+   retries once, else flow `failed(mapping)`. Fetched example strings in the
+   menu are newline-neutralized so a JSON body's `\n` cannot smuggle a fake
+   candidate line the model might parse as a real path.
+5. **Assembly (C)**: pipeline + scene built by code from templates per
+   display class (value/list); list exemplar paths generalized
+   (`hits[0].title` → repeat over `hits`, `item.title`). Typed output
+   verification against the sample. **Display degradation policy**: an
+   unsupported display_hint (map, …) proceeds with the supported form and
+   records an honest journal note; a list-class scene with extra wants also
+   notes the dropped fields. Never fails the flow.
+6. **Handoff (C)**: existing create landing rules verbatim (secret params ⇒
+   draft + awaiting_credential surfaced on the card; else commissioning).
+   The seal stamps a `_born` marker (M1 audit 2026-09-13; closed enum
+   `flow|recipe|chat`) — the §29 door reader (`is_flow_or_recipe_born`)
+   reads that spec-shape truth instead of a prunable journal entry (25-entry
+   churn used to defeat the door). Consent moment #2 is unchanged: the
+   approval card / Activate.
+
+**Model resolution** (C1 audit 2026-09-13): `run_flow` resolves its model
+LIVE via `gateway.resolve_model("ni", gateway.load_routes(store.conn))` with
+chat/agent fallbacks. **Local-preferred**: when the ni-resolved model is
+cloud AND a local chat/agent route exists, the flow prefers the local one —
+flows are frequent + cheap, and cloud stays fine when it's all the user has.
+No `flow-model` placeholder anywhere in the source (a grep test enforces it).
+
+**Chat's role shrinks to the front door**: a `start_ni_flow` REVIEWED tool
+(request text + optional source the user already named). Freeform
+create/update of source+pipeline on flow- or recipe-born cards is CLOSED —
+fixes re-enter the flow at **Sampling only** via `remap_ni_item` (H2 audit
+2026-09-13; never re-enters intent or recipe matching, always fetches the
+item's OWN frozen `spec.source.url`). Params, cadence, scene tweaks stay
+directly editable. A remap that fails on an item with a renderable payload
+does NOT mask the tile — `board_flow_field` returns None for a terminal
+flow record whenever the tile has a preview/latest/last_good snapshot.
+
+**Awaiting-credential cleanup** (H1 audit 2026-09-13): the flow's
+`awaiting_credential` slot is DROPPED as soon as every declared secret has a
+value in the SecretStore (checked at the credential PUT) OR the user
+Activates the card (commission route). Read_ni_item's `state_explanation`
+names the paused states so a chat model relays "waiting for you to approve
+fetching <host>" (confirm_source) / "waiting for a source pick" (source) /
+"needs your API key" (awaiting_credential) with the right resume tool.
+
+**Grammar additions this phase**:
+- `where` transform (list filtering): `{fn: "where", field, key, op:
+  lt|le|gt|ge|eq|ne, value}` — closed ops, §5 condition semantics, serves
+  threshold intents ("above magnitude 5").
+- `computed` source v1: `{type: "computed", compute: "days_until", date:
+  "YYYY-MM-DD"}` — zero egress, pure clock; payload `{days: int}`. Preview
+  computes the REAL day count at finalize (never a bare `0` on a future date).
+- `_born` sealed spec key (closed enum `flow|recipe|chat`): stamped at
+  create/finalize, validated by `validate_spec`, refused inside template
+  packs (`ni_library.parse_pack` + `_TEMPLATE_STRIP_KEYS`), stripped on
+  export. The §29 door reads it first, journal is fallback.
+
+**Testing contract (release gates)** (audit 2026-09-13):
+- `app/tests/fixtures/ni_flow/` holds the recorded 10-source corpus; the
+  pytest suite drives every flow stage END-TO-END against recordings with
+  the two model calls injected from recorded-correct selections (model-free,
+  deterministic, runs on every PR).
+- A phrasing matrix (≥5 paraphrases per case) exercises intent parsing in
+  the live-model suite.
+- Chaos drills: field renamed in a recording ⇒ mapping verification fails
+  ⇒ flow reports, never thrashes; source down ⇒ `failed(fetch)` honestly.
+- `tools/ni-flow-eval.py --engine` (M2 audit 2026-09-13) is the LIVE release
+  gate: 10-case matrix driving `ni_flow.run_flow` directly against a
+  bifrost-backed model + real sources. Required 10/10 before any NI release
+  tag, alongside prove.py. The old `--live` mode is retained for parity but
+  is NOT the release gate — it runs the eval's own graduated flow, not
+  the shipped engine. Docstring is honest: no CI wires this file up (CI
+  runs the pytest suite only); the module `ni_flow` is imported at top
+  level (`--engine` requires it).

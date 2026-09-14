@@ -33,6 +33,7 @@ from . import (
     gateway,
     ingest,
     ni,
+    ni_flow,
     ni_library,
     search,
     selfreview,
@@ -718,6 +719,28 @@ def _auto_update_ni_library(app) -> None:
         _close_cursor(cursor)
 
 
+def _sweep_ni_flow_shells(app) -> None:
+    """M3 (audit 2026-09-13): fail stranded flow shells (non-terminal + >1h old).
+
+    Called from ``_auto_update_ni`` once per tick — bounded by ``NIStore._MAX_ITEMS``
+    (list_items iteration) with a bounded per-record datetime parse. Best-effort:
+    a sweep failure logs and returns without disrupting the NI item pass.
+    """
+    key = getattr(app.state, "master_key", None)
+    if key is None:
+        return
+    ni_store = getattr(app.state, "ni", None)
+    if ni_store is None:
+        return
+    try:
+        swept = ni_flow.sweep_stranded_flows(ni_store)
+    except Exception as exc:  # must never stop the NI pass
+        log.warning("ni_flow sweep skipped: %s", exc)
+        return
+    if swept:
+        log.info("ni_flow: swept %d stranded flow record(s)", swept)
+
+
 def _auto_update_ni(app) -> None:
     """Neural Interface item pass — same isolation contract as _auto_update_feeds: its own
     cursor, per-item try/except inside, this guard for anything it doesn't catch. A slow or
@@ -730,7 +753,12 @@ def _auto_update_ni(app) -> None:
     Fired alerts + broken-transition notices returned by ``ni.tick`` (§12) are posted to
     the NI carrier row inside a bounded try/except — a posting failure never fails the
     tick (bookkeeping mirrors the vault/self-review carrier pattern).
+
+    M3 (audit 2026-09-13): sweep stranded flow records first — a shell whose
+    worker died between ticks would otherwise render "Preparing card…"
+    forever. Budgeted (bounded per NIStore._MAX_ITEMS), best-effort.
     """
+    _sweep_ni_flow_shells(app)
     try:
         result = ni.tick(app, pass_budget_seconds=_MAX_NI_PASS_SECONDS,
                          breaker_open=_breaker_open)

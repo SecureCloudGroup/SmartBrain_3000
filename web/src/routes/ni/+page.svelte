@@ -25,6 +25,7 @@
   import { confirmDialog } from "$lib/confirm.svelte";
   import { describeError } from "$lib/errors";
   import { friendlyErrorClass } from "$lib/ni/errors";
+  import { flowStageLabel, isFlowActive } from "$lib/ni/flow";
   import {
     filterTemplates,
     formatFingerprint,
@@ -659,6 +660,22 @@
     if (account.status?.unlocked) void load();
   });
 
+  // Bounded fast-poll: while ANY item is walking a creation/remap flow (seconds-to-
+  // a-minute in the backend), poll every 3s so the card's stage label tracks the
+  // engine's progress. The effect's cleanup tears the timer down the moment the last
+  // flow settles — no perpetual 3s poll on an idle board. Visible-tab + unlocked
+  // guards mirror the primary 10s timer's guard (load() itself bails if locked).
+  $effect(() => {
+    console.assert(Array.isArray(items), "$effect fast-poll: items array");
+    console.assert(typeof isFlowActive === "function", "$effect fast-poll: helper present");
+    const anyActive = items.some((it) => isFlowActive(it.flow ?? null));
+    if (!anyActive) return;
+    const fast = setInterval(() => {
+      if (document.visibilityState === "visible") void load();
+    }, 3_000);
+    return () => clearInterval(fast);
+  });
+
   // Health chip: state (+ stale check) collapses to one calm pill on the card header.
   type ChipDescriptor = { kind: "" | "accent" | "ok" | "warn" | "danger"; label: string };
   function healthChip(item: NiBoardItem): ChipDescriptor {
@@ -871,7 +888,23 @@
           {/if}
 
           <div class="ni-body">
-            {#if item.payload}
+            {#if item.flow}
+              <!-- Creation/remap flow in progress or ended abnormally: the progress
+                   line replaces the payload/first-run copy so the card tells one
+                   truth at a time. failed/unsupported render the honest error via
+                   friendlyErrorClass; every other state has a calm stage label. -->
+              {#if item.flow.state === "failed" || item.flow.state === "unsupported"}
+                {@const friendly = friendlyErrorClass(item.flow.error ?? "")}
+                <p class="ni-status-fail" style="margin:0; font-size:var(--f-label)">
+                  {item.flow.state === "unsupported" ? "Can’t build this card yet" : "Setup failed"}
+                  {#if friendly}
+                    — <span class="ni-status-class">{friendly}</span>
+                  {/if}
+                </p>
+              {:else}
+                <p class="muted" style="margin:0; font-size:var(--f-label)">{flowStageLabel(item.flow)}</p>
+              {/if}
+            {:else if item.payload}
               <NiScene node={item.payload} />
             {:else}
               {@const failure = firstRunFailure(item)}
