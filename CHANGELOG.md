@@ -11,6 +11,8 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-09-14
+
 ### Added
 - **Neural Interface: the Flow Engine.** Card creation is now a guided, code-driven
   flow instead of a model improvising with tools. Say what you want ("show me AAPL
@@ -34,6 +36,10 @@ to know when a release changes behavior.
   are derived from a real fetched sample, and a card field whose expected type
   contradicts the source's actual data (USGS serves times as epoch numbers) is
   reconciled from the sample instead of dead-ending the build.
+
+### Security
+- Web dependencies updated (DOMPurify 3.4.15 sanitizer hardening, plus lucide,
+  marked, and vite refreshes).
 
 ## [0.11.0] - 2026-09-13
 
