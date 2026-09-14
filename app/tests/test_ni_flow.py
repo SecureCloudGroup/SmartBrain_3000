@@ -259,9 +259,11 @@ def test_flow_end_to_end_aapl_value_card() -> None:
     assert result["state"] == "ready", f"got {result}"
     item = store.get_item(item_id)
     assert item is not None and item["state"] == "commissioning"
-    # Frozen source (spec.source.url) matches the consented URL and the preview
-    # data reflects the extracted numeric values.
-    assert item["spec"]["source"]["url"].startswith("https://query1.finance.yahoo.com")
+    # Frozen source (spec.source.url) is EXACTLY the consented URL (the C2
+    # invariant — never a prefix match) and the preview data reflects the
+    # extracted numeric values.
+    assert item["spec"]["source"]["url"] == \
+        "https://query1.finance.yahoo.com/v8/finance/chart/AAPL"
     preview_data = store.read_snapshot(item_id, "preview_data")
     assert preview_data is not None
     values = preview_data["payload"]
@@ -485,7 +487,8 @@ def test_start_ni_flow_creates_shell_and_flow_record(monkeypatch) -> None:
               "source_url": "https://query1.finance.yahoo.com/v8/finance/chart/AAPL"})
     assert out["state"] == "intent" and out["id"]
     assert fired["id"] == out["id"]
-    assert fired["source_url"].startswith("https://query1")
+    assert fired["source_url"] == \
+        "https://query1.finance.yahoo.com/v8/finance/chart/AAPL"
     record = ni_flow._flow_read(store, out["id"])
     assert record is not None and record["state"] == "intent"
 
@@ -532,7 +535,8 @@ def test_remap_ni_item_re_enters_flow(monkeypatch) -> None:
     # tool's returned state reports the true restart stage.
     assert out["state"] == "sampling"
     assert fired["id"] == item_id
-    assert fired["source_url"].startswith("https://query1")
+    assert fired["source_url"] == \
+        "https://query1.finance.yahoo.com/v8/finance/chart/AAPL"
 
 
 def test_board_flow_field_visible_and_hides_when_ready() -> None:
@@ -693,7 +697,8 @@ def test_c3_recipe_hit_pauses_at_confirm_source_no_fetch(monkeypatch) -> None:
     assert record["state"] == "confirm_source", f"got {record['state']!r}"
     assert record.get("error") == ni_flow.AWAITING_SOURCE_CONFIRM
     assert record.get("_recipe_id") == "stock-quote-finnhub"
-    assert record.get("source_url", "").startswith("https://finnhub.io/")
+    assert record.get("source_url") == \
+        "https://finnhub.io/api/v1/quote?symbol={{param:symbol}}"
     assert fetched == [], "no fetch until one is confirmed (§29 promoted line)"
 
 
