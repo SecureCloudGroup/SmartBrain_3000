@@ -637,6 +637,31 @@ export type NiState =
 
 export interface NiDisplay { size: "small" | "wide" }
 
+// Natural-Interface flow (creation/remap pipeline). Non-null on a board row while the
+// engine is actively assembling — or has ended abnormally — a card; null once the
+// item is settled (draft/live/etc rendered from spec + payload). `error` carries the
+// host-free class the friendlyErrorClass map explains (used by the failed/unsupported
+// paths on the card body).
+export type NiFlowState =
+  | "intent"
+  | "source"
+  // C3 (audit 2026-09-13): a recipe-matched flow pauses here until the operator
+  // approves the recipe's url_template via confirm_ni_flow_source. The card's
+  // stage label ("Waiting for you to approve the source") lives in flow.ts.
+  | "confirm_source"
+  | "sampling"
+  | "mapping"
+  | "assembling"
+  | "awaiting_credential"
+  | "ready"
+  | "unsupported"
+  | "failed";
+
+export interface NiItemFlow {
+  state: NiFlowState;
+  error?: string;
+}
+
 export interface NiBoardItem {
   id: string;
   title: string;
@@ -672,6 +697,11 @@ export interface NiBoardItem {
   // Desktop-local credential PUT (`name` is the spec's param name — the wire the
   // PUT wants; `label` is the human name shown in the modal + on the card).
   needs_credentials?: { name: string; label: string }[];
+  // Creation/remap flow status. Non-null while the engine is walking the intent →
+  // source → sampling → mapping → assembling → ready pipeline, or has ended in
+  // awaiting_credential / unsupported / failed. Null once the item is settled and
+  // the card should render its bound payload (or Waiting/first-run copy).
+  flow?: NiItemFlow | null;
 }
 
 // ni library (ni-format §19/§20) — the Global Library subscription: one hosted

@@ -36,7 +36,7 @@ import re
 import threading
 import time
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from urllib.parse import quote as _url_quote
 from urllib.parse import urlparse
@@ -126,8 +126,12 @@ _AUTH_HEADER_TOKEN_SUBSTRINGS: tuple[str, ...] = ("token", "secret", "key")
 # than mis-render them (the "reject reserved types" contract in ni-format §5).
 _SOURCE_TYPES: frozenset[str] = frozenset(
     {"http_json", "http_page", "http_image", "model", "internal.schedule",
-     "internal.kb", "internal.ni", "mcp_tool"}
+     "internal.kb", "internal.ni", "mcp_tool", "computed"}
 )
+# §29 computed source v1: closed compute set + strict YYYY-MM-DD date shape.
+# Same regex shape as vault_format._DATE_RE — no timezone / newline play.
+_COMPUTED_COMPUTES: frozenset[str] = frozenset({"days_until"})
+_COMPUTED_DATE_RE = re.compile(r"\A\d{4}-\d{2}-\d{2}\Z")
 # §24 http_image sniff allowlist (bytes-magic → format string). The served
 # Content-Type header is IGNORED for trust — the sniffed type is what gets
 # stored + later served. SVG (scriptable) is intentionally absent.
@@ -168,7 +172,7 @@ _STATES: frozenset[str] = frozenset(
 )
 _SLOTS: frozenset[str] = frozenset(
     {"latest", "last_good", "preview", "preview_data", "history", "alert_state",
-     "last_failure", "image", "journal"}
+     "last_failure", "image", "journal", "flow"}
 )
 # §28 item journal: closed set of entry kinds + prune ceiling. Journal entries are
 # built DETERMINISTICALLY by code (models never author one). The store trims to the
@@ -186,7 +190,7 @@ _REVISION_ORIGINS: frozenset[str] = frozenset(
 )
 _TRANSFORM_FNS: frozenset[str] = frozenset(
     {"round", "scale", "rename", "pick", "sort_by", "top_n",
-     "sum", "avg", "min", "max", "count", "delta_prev"}
+     "sum", "avg", "min", "max", "count", "delta_prev", "where"}
 )
 # v2 aggregate fns that fail with "empty_aggregate" on an empty input list (count does not).
 _AGGREGATE_FNS: frozenset[str] = frozenset({"sum", "avg", "min", "max"})
@@ -386,12 +390,17 @@ def validate_spec(spec: object, *, allow_empty_params: bool = False) -> dict:
     # change atomically with the source/scene it goes with.
     # ``_template`` (§19 install provenance): sealed alongside the spec so a board query
     # can compare an item's recorded template hash against the currently-stored pack.
+    # M1 (audit 2026-09-13): ``_born`` is a §29 door-closure marker sealed at
+    # creation — closed enum ("flow"|"recipe"|"chat"), refused inside a
+    # template pack (see ni_library._validate_template_spec_and_preview) and
+    # stripped on export (ni_routes._EXPORT_STRIP_KEYS).
     allowed = {"version", "title", "goal", "params", "source", "pipeline", "scene",
                "display", "contract", "repair_policy", "model", "_c2_ok",
                "interval_minutes", "history", "alerts",
                "_l1_last_attempt", "_l1_trial", "_template",
-               "_l2_last_attempt", "_l2_proposal"}
+               "_l2_last_attempt", "_l2_proposal", "_born"}
     _closed_keys(body, allowed, "spec")
+    _validate_born_marker(body.get("_born"))
     if body.get("version") != 1:
         raise ValueError("spec.version must be 1")
     _require_str(body.get("title"), "spec.title", max_len=_MAX_TITLE)
@@ -422,6 +431,24 @@ def validate_spec(spec: object, *, allow_empty_params: bool = False) -> dict:
     _validate_l2_system_keys(body)
     _validate_template_provenance(body.get("_template"))
     return body
+
+
+_BORN_MARKERS: frozenset[str] = frozenset({"flow", "recipe", "chat"})
+
+
+def _validate_born_marker(value: object) -> None:
+    """M1 (audit 2026-09-13): shape-check the ``_born`` door-closure marker.
+
+    Closed to {"flow", "recipe", "chat"} so a chat model cannot smuggle an
+    arbitrary string that reads as "flow-born" past ``is_flow_or_recipe_born``.
+    Absent = unmarked (item predates M1 or was authored on a code path that
+    hasn't been retrofitted); the reader's journal fallback still applies.
+    """
+    if value is None:
+        return
+    if not isinstance(value, str) or value not in _BORN_MARKERS:
+        raise ValueError(
+            f"spec._born must be one of {sorted(_BORN_MARKERS)} or absent")
 
 
 def _validate_template_provenance(value: object) -> None:
@@ -591,6 +618,8 @@ def _validate_source(source: object) -> None:
         _validate_internal_ni_source(s)
     elif stype == "mcp_tool":
         _validate_mcp_source(s)
+    elif stype == "computed":
+        _validate_computed_source(s)
     else:
         _validate_internal_schedule_source(s)
 
@@ -823,6 +852,30 @@ def _validate_internal_schedule_source(s: dict) -> None:
     _require_str(s.get("schedule_id"), "spec.source.schedule_id", max_len=100)
 
 
+def _validate_computed_source(s: dict) -> None:
+    """§29 computed source v1: {type, compute, date}. Zero egress — a pure clock read.
+
+    ``compute`` is a closed enum (``days_until`` in v1); ``date`` is a strict
+    ``YYYY-MM-DD`` calendar string (regex shape + ``date.fromisoformat``
+    round-trip so ``2026-02-30`` is refused). Cadence rules apply as-is — a
+    computed item is a normal daily-cadence tick, no interval special-case.
+    """
+    assert isinstance(s, dict), "source must be a dict"
+    _closed_keys(s, {"type", "compute", "date"}, "spec.source (computed)")
+    compute = s.get("compute")
+    if compute not in _COMPUTED_COMPUTES:
+        raise ValueError(
+            f"spec.source.compute must be one of {sorted(_COMPUTED_COMPUTES)}"
+        )
+    raw = s.get("date")
+    if not isinstance(raw, str) or not _COMPUTED_DATE_RE.match(raw):
+        raise ValueError("spec.source.date must be a YYYY-MM-DD calendar date")
+    try:
+        date.fromisoformat(raw)
+    except ValueError as exc:
+        raise ValueError(f"spec.source.date invalid calendar date: {exc}") from None
+
+
 def _validate_pipeline(pipeline: object) -> set[str]:
     """§4 pipeline stages — extract / transform / llm (§13), each with its own shape.
 
@@ -944,6 +997,8 @@ def _validate_transform_op(op: object, i: int, j: int, outputs: set[str]) -> Non
     elif fn == "count":
         _closed_keys(node, {"fn", "field", "as"}, where)
         _validate_transform_as(node.get("as"), where, outputs)
+    elif fn == "where":
+        _validate_transform_where(node, where)
     elif fn in _AGGREGATE_FNS:
         _closed_keys(node, {"fn", "field", "key", "as"}, where)
         key = node.get("key")
@@ -999,6 +1054,29 @@ def _spec_has_llm_stage(spec: dict) -> bool:
         if isinstance(stage, dict) and stage.get("op") == "llm":
             return True
     return False
+
+
+def _validate_transform_where(node: dict, where: str) -> None:
+    """§29 ``where`` transform: filter a list-of-objects in place by an item key + op.
+
+    Closed shape ``{fn, field, key, op, value}``: ``key`` follows §4.1 single-key
+    grammar, ``op`` ∈ ``_WHEN_OPS``, ``value`` is a JSON scalar (str / int / float
+    / bool — no dict / list / None). No new output name — the list stays under
+    ``field`` (like sort_by / top_n).
+    """
+    assert isinstance(node, dict), "node must be a dict"
+    assert isinstance(where, str) and where, "where required"
+    _closed_keys(node, {"fn", "field", "key", "op", "value"}, where)
+    key = node.get("key")
+    if not isinstance(key, str) or not _KEY_RE.match(key):
+        raise ValueError(f"{where}.key malformed")
+    if node.get("op") not in _WHEN_OPS:
+        raise ValueError(f"{where}.op must be one of {sorted(_WHEN_OPS)}")
+    value = node.get("value")
+    if not isinstance(value, (str, int, float, bool)):
+        raise ValueError(  # noqa: TRY004 — validator raises ValueError uniformly
+            f"{where}.value must be a JSON scalar (string/number/bool)"
+        )
 
 
 def _validate_transform_as(name: object, where: str, outputs: set[str]) -> None:
@@ -1620,6 +1698,8 @@ def _apply_transform_op(op: dict, payload: dict, *, history: dict) -> dict:
         out[field] = _txf_sort(payload[field], op.get("key"), op["dir"])
     elif fn == "top_n":
         out[field] = _txf_top_n(payload[field], op["n"])
+    elif fn == "where":
+        out[field] = _txf_where(payload[field], op["key"], op["op"], op["value"])
     elif fn == "count":
         out[op["as"]] = _txf_count(payload[field])
     elif fn in _AGGREGATE_FNS:
@@ -1682,6 +1762,59 @@ def _txf_top_n(value: object, n: int) -> list:
         raise NIError("transform_type", "top_n needs a list")
     assert 1 <= n <= _MAX_TOP_N, "n already validated"
     return value[:n]
+
+
+def _txf_where(value: object, key: str, op: str, right: object) -> list:
+    """§29 where(field, key, op, value): filter a list-of-objects in place.
+
+    Filtering-is-selection (not validation) — the ONLY failure is a non-list
+    ``field`` (``transform_type``). A list element that is not a dict, is
+    missing ``key``, or whose value fails the type rule for the op (ordering
+    ops require finite numeric on BOTH sides — bool refused; eq/ne strict
+    scalar with bool≠number) is silently excluded. This mirrors §5 condition
+    semantics without raising: users pick items, they don't validate shape.
+    """
+    if not isinstance(value, list):
+        raise NIError("transform_type", "where needs a list")
+    assert isinstance(key, str) and key, "key already validated"
+    assert op in _WHEN_OPS, "op already validated"
+    out: list = []
+    for entry in value:  # bounded by input length
+        if not isinstance(entry, dict) or key not in entry:
+            continue
+        if _where_match(entry[key], op, right):
+            out.append(entry)
+    return out
+
+
+def _where_match(left: object, op: str, right: object) -> bool:
+    """Filtering-is-selection comparator: same rules as ``_eval_when`` but any
+    type mismatch = False (excluded), never a stage failure."""
+    assert op in _WHEN_OPS, "op already validated"
+    if op in _ORDER_OPS:
+        if not _is_finite_number(left) or not _is_finite_number(right):
+            return False
+        lf, rf = float(left), float(right)  # type: ignore[arg-type]
+        if op == "lt":
+            return lf < rf
+        if op == "le":
+            return lf <= rf
+        if op == "gt":
+            return lf > rf
+        return lf >= rf
+    left_bool = isinstance(left, bool)
+    right_bool = isinstance(right, bool)
+    left_num = isinstance(left, (int, float)) and not left_bool
+    right_num = isinstance(right, (int, float)) and not right_bool
+    if (left_bool and right_num) or (left_num and right_bool):
+        return op == "ne"
+    if left_num and not math.isfinite(float(left)):
+        return op == "ne"
+    if right_num and not math.isfinite(float(right)):
+        return op == "ne"
+    if op == "eq":
+        return left == right
+    return left != right
 
 
 def _txf_count(value: object) -> int:
@@ -4869,6 +5002,8 @@ def _fetch_source(spec: dict, item_id: str, gateway_mod, secrets_store,
         return _fetch_internal_ni(source, store), None
     if stype == "mcp_tool":
         return _fetch_mcp(source, store), None
+    if stype == "computed":
+        return _fetch_computed(source), None
     raise NIError("source_bad_type", str(stype))
 
 
@@ -5319,6 +5454,32 @@ def _read_last_failure_snapshot(store: NIStore, item_id: str) -> dict | None:
         return None
     body = snap.get("payload")
     return body if isinstance(body, dict) else None
+
+
+def _computed_today() -> date:
+    """UTC today — module seam so a test can pin the clock."""
+    return datetime.now(UTC).date()
+
+
+def _fetch_computed(source: dict) -> dict:
+    """§29 computed source v1: pure-clock read, zero egress.
+
+    ``days_until``: returns ``{"days": <int>}`` = target date - today (UTC).
+    Negative allowed (past dates read as negative counts). No network, no
+    model, no netguard — the whole point of this source is that a countdown
+    is servable without an outbound fetch. Validation already refuses any
+    other ``compute`` value, so the enum branch here is exhaustive by
+    construction (a missing branch = raise).
+    """
+    assert isinstance(source, dict), "source must be a dict"
+    compute = source["compute"]
+    target_raw = source["date"]
+    assert isinstance(target_raw, str), "date already validated as string"
+    target = date.fromisoformat(target_raw)
+    if compute == "days_until":
+        delta = (target - _computed_today()).days
+        return {"days": int(delta)}
+    raise NIError("source_bad_compute", str(compute))
 
 
 def _fetch_internal_schedule(source: dict, schedules_store) -> dict:

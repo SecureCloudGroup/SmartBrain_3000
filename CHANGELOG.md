@@ -11,6 +11,30 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Added
+- **Neural Interface: the Flow Engine.** Card creation is now a guided, code-driven
+  flow instead of a model improvising with tools. Say what you want ("show me AAPL
+  every 5 minutes") and the engine runs the whole build itself: it reads your intent,
+  finds the source (a vetted recipe, or a URL you give it), fetches one real sample,
+  offers the model only real, correctly-typed fields to choose from, verifies every
+  choice against the sample, and hands the finished card to commissioning. Two model
+  calls, both narrow and checked; everything else is deterministic code. You're asked
+  exactly twice: once to confirm the source, once to approve the card — each showing
+  the exact URL that will be fetched. In live testing the engine took every request
+  from words to a working card in seconds, identically on every rerun.
+- **Cards can filter and count down.** The card grammar gains a `where` filter
+  ("earthquakes above magnitude 5" keeps only those) and a `computed` source for
+  fetch-free cards like day countdowns to a fixed date.
+- **Repair without re-consent games.** Fixing a broken card re-enters the same flow
+  against the card's *own* already-approved source — a repair can never swap in a new
+  URL, and flow- or recipe-born cards refuse freeform source edits outright.
+
+### Fixed
+- The chat model no longer authors card internals from imagination — the flow's menus
+  are derived from a real fetched sample, and a card field whose expected type
+  contradicts the source's actual data (USGS serves times as epoch numbers) is
+  reconciled from the sample instead of dead-ending the build.
+
 ## [0.11.0] - 2026-09-13
 
 ### Added

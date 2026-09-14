@@ -264,8 +264,13 @@ def _validate_template_spec_and_preview(template: dict, where: str) -> None:
     spec = template.get("spec_template")
     if not isinstance(spec, dict):
         raise LibraryError(f"{where}.spec_template must be an object")
+    # M1 (audit 2026-09-13): ``_born`` joins the forbidden set — a pack that
+    # tried to ship ``_born: "flow"`` would silently close the §29 door on
+    # every install (freeform update refuses source/pipeline edits on
+    # "flow-born" cards). Install stamps its own marker; template packs must
+    # never carry it.
     forbidden = {"contract", "_c2_ok", "_l1_last_attempt", "_l1_trial", "_template",
-                 "_l2_last_attempt", "_l2_proposal", "repair_policy"}
+                 "_l2_last_attempt", "_l2_proposal", "repair_policy", "_born"}
     present = sorted(forbidden.intersection(spec.keys()))
     if present:
         raise LibraryError(
@@ -733,7 +738,7 @@ def _pack_cache_put(created_at: str,
 # its own from the pack it read).
 _TEMPLATE_STRIP_KEYS = ("contract", "_c2_ok", "_l1_last_attempt", "_l1_trial",
                         "_l2_last_attempt", "_l2_proposal", "_template",
-                        "repair_policy")
+                        "repair_policy", "_born")
 
 
 def build_installed_spec(template: dict, param_values: dict) -> dict:
