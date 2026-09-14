@@ -28,6 +28,12 @@ export function iconForTool(tool: string): IconName {
 // is resolved server-side from the sealed catalog. The consent surface prints
 // "Fetches: <recipeUrl>" (falls back to "a vetted catalog source" when the caller
 // hasn't threaded the resolved url through yet).
+// start_ni_flow / resume_ni_flow / remap_ni_item are the NI flow parked tools — the
+// flow engine posts them for user approval when it needs a source confirmed or a card
+// re-mapped. start_ni_flow with a source_url promotes "Fetches: <url>"; without one
+// it names the flow's intent (a vetted or user-chosen source will be confirmed before
+// any fetch). resume_ni_flow always carries the picked source_url. remap_ni_item
+// re-runs the mapping stage against an already-approved source — no new egress.
 // Handles both an object (pending tiles) and a JSON string (history args_summary). A
 // params-substituted URL simply renders the template — that's fine; the template still
 // names the host. `arguments` themselves already render whole via fmtArgs.
@@ -46,6 +52,19 @@ export function promotedLine(
       ? recipeUrl
       : "a vetted catalog source";
     return `Fetches: ${url}`;
+  }
+  if (t === "remap_ni_item") {
+    // No new source is granted — the item's already-approved source is reused. The
+    // consent line says exactly that so a reviewer isn't asked to re-authorize the host.
+    return "Re-maps this card against its already-approved source";
+  }
+  if (t === "start_ni_flow" || t === "resume_ni_flow" || t === "confirm_ni_flow_source") {
+    const flowUrl = readSourceUrl(args);
+    if (flowUrl) return `Fetches: ${flowUrl}`;
+    // resume_ni_flow SHOULD always carry a source_url (the user just picked one). If
+    // the caller didn't thread it through, fall back to the same generic phrase — the
+    // args block below still shows what's being confirmed verbatim.
+    return "Builds a card from a vetted or user-chosen source — no fetch until one is confirmed";
   }
   if (t !== "create_ni_item" && t !== "update_ni_item") return null;
   let obj: unknown = args;
@@ -84,6 +103,27 @@ export function promotedLine(
     return `MCP: ${mcpLabel ?? "your configured server"} → ${toolName}`;
   }
   return null;
+}
+
+// Pull a top-level `source_url` string out of the args (object or JSON string). Used
+// by the NI flow tools whose args live at the top level, not under a `source` object.
+// Returns "" for any shape that doesn't carry a non-empty string — the caller then
+// paints the generic "no fetch until one is confirmed" line.
+function readSourceUrl(args: unknown): string {
+  console.assert(args !== undefined, "readSourceUrl: args defined");
+  console.assert(typeof args !== "function", "readSourceUrl: args not a function");
+  let obj: unknown = args;
+  if (typeof args === "string") {
+    if (!args.trim()) return "";
+    try {
+      obj = JSON.parse(args);
+    } catch {
+      return "";
+    }
+  }
+  if (!obj || typeof obj !== "object" || Array.isArray(obj)) return "";
+  const url = (obj as Record<string, unknown>).source_url;
+  return typeof url === "string" && url.length > 0 ? url : "";
 }
 
 // Show tool args as readable "key: value" lines instead of raw JSON. Accepts an

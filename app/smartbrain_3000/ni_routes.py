@@ -20,7 +20,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 from starlette.responses import Response
 
-from . import gateway, netguard, ni, ni_library, ni_mcp, tools, vault_format
+from . import gateway, netguard, ni, ni_flow, ni_library, ni_mcp, tools, vault_format
 from .account import _require_desktop_local
 from .data_routes import _reauthorize
 from .scheduler import _NI_FEED_ID, ScheduleStore, post_ni_carrier_notices
@@ -134,6 +134,10 @@ def _board_row(store: ni.NIStore, item: dict, *,
         # §23: True when a §14 frontier proposal is parked on this item — the card
         # renders "Fix proposed — review" (Apply / Dismiss are per-item routes).
         "l2_proposal": isinstance(item["spec"].get("_l2_proposal"), dict),
+        # §29 flow record: {state, error?} for any active / terminal-non-ready
+        # flow; None once the flow reaches ``ready`` so the tile renders
+        # normally. Read from the sealed ``flow`` slot via ni_flow.
+        "flow": ni_flow.board_flow_field(store, item["id"]),
         "payload_slot": slot,
         "payload_at": snap["created_at"] if snap else None,
         "payload_ok": snap["ok"] if snap else None,
@@ -418,6 +422,12 @@ def commission_item(request: Request, item_id: str) -> dict:
     store.commission(item_id)
     _journal_best_effort(store, item_id, "commissioned",
                          "user activated the card (draft -> commissioning)")
+    # H1 (audit 2026-09-13): a flow-authored item's ``awaiting_credential``
+    # slot lingered after the user Activated the card, so board_flow_field
+    # kept returning the stale flow state indefinitely. Commission is the
+    # honest terminal for the flow's lifecycle — drop the slot here so the
+    # board renders the tile normally from now on.
+    ni_flow.clear_flow_slot(store, item_id)
     request.app.state.audit.append(
         "user", "ni_commission", "reviewed", "executed", True,
         args_summary=tools.summarize({"item_id": item_id}),
@@ -611,7 +621,30 @@ def put_credential(request: Request, item_id: str, body: CredentialIn) -> dict:
     )
     _journal_best_effort(store, item_id, "param_changed",
                          f"credential {_param_label(item, body.name)!r} added")
+    # H1 (audit 2026-09-13): if the flow record is in ``awaiting_credential``
+    # AND every declared secret has now been filled in the SecretStore, drop
+    # the flow slot so the tile stops rendering "Needs your API key" the
+    # moment the last key lands. Best-effort — the credential PUT itself
+    # succeeded; a flow-slot clean-up failure never turns that into a route
+    # error (mirrors _journal_best_effort).
+    _clear_flow_when_credentials_satisfied(store, item, secrets)
     return {"ok": True}
+
+
+def _clear_flow_when_credentials_satisfied(store: ni.NIStore, item: dict,
+                                            secrets_store) -> None:
+    """H1 (audit 2026-09-13): drop the ``flow`` snapshot slot when
+    ``awaiting_credential`` no longer applies (every secret param has a value
+    in the SecretStore). Idempotent; a missing flow slot or store-read failure
+    logs at debug and returns.
+    """
+    assert store is not None and isinstance(item, dict), "args required"
+    record = ni_flow._flow_read(store, item["id"])
+    if record is None or str(record.get("state") or "") != "awaiting_credential":
+        return
+    if _needs_credentials(item, secrets_store):
+        return  # some secret is still unfilled — keep the flow record
+    ni_flow.clear_flow_slot(store, item["id"])
 
 
 def _param_label(item: dict, name: str) -> str:
@@ -1201,7 +1234,8 @@ def _build_export_template(store: ni.NIStore, item: dict, secrets_store) -> dict
 # marker) AND `repair_policy` — repair policy is always the installer's local choice,
 # so a template ships with none and the install path forces the safe default.
 _EXPORT_STRIP_KEYS = ("contract", "_c2_ok", "_l1_last_attempt", "_l1_trial",
-                      "_l2_last_attempt", "_l2_proposal", "_template", "repair_policy")
+                      "_l2_last_attempt", "_l2_proposal", "_template", "repair_policy",
+                      "_born")
 
 
 def _sanitize_spec_for_export(item: dict, secrets_store) -> dict:

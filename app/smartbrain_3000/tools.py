@@ -27,6 +27,7 @@ from . import (
     netguard,
     ni,
     ni_catalog,
+    ni_flow,
     ni_library,
     search,
     vault_format,
@@ -745,28 +746,39 @@ def _delete_schedule(ctx: ToolContext, args: dict) -> dict:
 _NI_SPEC_GUIDE = """\
 # Neural Interface (NI) spec grammar reference
 
-Authoring order (§26/§27, mandated):
+Authoring order (§29 flow-first; §26/§27 fallbacks):
 
-1. **Recipes first (create_ni_item_from_recipe).** Every catalog entry from
-   list_ni_catalog is a fully-tested RECIPE — spec, pipeline, and scene are
-   already proven against a real response shape. Fill closed parameter slots;
-   never author extract paths.
-2. **Sample-grounded freeform (create_ni_item).** When no recipe fits: fetch
-   ONE real sample with the approval-gated web_fetch, pass it to
-   derive_ni_paths (already-parsed JSON goes as ``sample``; raw fetched TEXT
-   goes as ``sample_json`` — exactly one of the two), then build extract
-   stages ONLY from the paths that tool offers. Blind drafting from imagined
-   response shapes is the FIELD failure the recipes track exists to eliminate.
-3. **Never claim a card is live** you just created. The create tools return
-   the LANDING STATE — commissioning (needs a scheduler tick + user verdict)
-   or draft (needs a credential or explicit Activate). Any item with a
-   secret-kind param lands draft; the CARD is what the user activates.
-   read_ni_item returns ``state_explanation`` + ``user_next_action`` — read
-   them and report state truth, not "it's ready" or "it's showing data now".
-4. **Duplicate titles bounce.** create_ni_item / create_ni_item_from_recipe
-   refuse a case-insensitive title match against an existing card unless the
-   caller passes ``allow_duplicate: true``; the error names the existing
-   card and points at update_ni_item.
+1. **Flow first (start_ni_flow).** For ANY new-card request the primary path
+   is ``start_ni_flow`` — code owns the sequence and models fill exactly two
+   narrow, validated blanks (intent + mapping). Pass the user's request text
+   verbatim as ``request``; add ``source_url`` when the user has already named
+   a specific http URL. The flow: matches a catalog recipe (deterministic),
+   samples once from the consented source, derives paths, picks scene fields,
+   assembles, verifies typed outputs, and hands off. A draft shell appears on
+   the board immediately so the card shows live flow state.
+2. **Resume / remap.** A flow with no recipe hit and no user URL pauses at
+   ``source``; present candidates and call ``resume_ni_flow`` with the URL the
+   user picked. To fix a flow- or recipe-born card, call ``remap_ni_item``
+   — it re-derives paths against the SAME consented URL. Freeform
+   source/pipeline edits on flow- or recipe-born cards are REFUSED at
+   ``update_ni_item``; params, cadence, scene tweaks stay directly editable.
+3. **Fallbacks.** ``create_ni_item_from_recipe`` fills a recipe deterministically
+   (still preferred for the model-driven install path); ``create_ni_item`` is
+   the sample-grounded freeform fallback (fetch a sample with web_fetch, use
+   derive_ni_paths, build extract stages ONLY from offered paths). Both keep
+   their case-insensitive duplicate-title guard.
+4. **Never claim a card is live** you just created. The tools return the
+   LANDING STATE — commissioning (needs a scheduler tick + user verdict) or
+   draft (needs a credential or explicit Activate). ``read_ni_item`` returns
+   ``state_explanation`` + ``user_next_action`` — read them and report state
+   truth, not "it's ready" or "it's showing data now".
+
+Grammar additions used by the flow (per §29):
+- ``where`` transform (list filtering): ``{fn: "where", field, key, op:
+  lt|le|gt|ge|eq|ne, value}`` — closed ops, §5 condition semantics.
+- ``computed`` source v1: ``{type: "computed", compute: "days_until",
+  date: "YYYY-MM-DD"}`` — zero egress; payload ``{days: int}``.
+- Duplicate-title rule unchanged.
 
 The FULL spec is validated server-side; a malformed spec fails AFTER the user
 approves the card. Consult this reference to get the shape right on the first
@@ -1058,7 +1070,8 @@ def _read_ni_item(ctx: ToolContext, args: dict) -> dict:
         latest = ctx.ni.read_snapshot(item["id"], "latest")
         snap = latest if (latest and latest["ok"]) else ctx.ni.read_snapshot(item["id"], "last_good")
     line = external_provenance(_ni_source_provenance(item["spec"].get("source")))
-    explanation, next_action = _explain_state(item)
+    flow = ni_flow.board_flow_field(ctx.ni, item["id"])
+    explanation, next_action = _explain_state_with_flow(item, flow)
     return {
         "provenance": line,  # FIRST key — the warning is read before the payload
         "id": item["id"],
@@ -1066,6 +1079,10 @@ def _read_ni_item(ctx: ToolContext, args: dict) -> dict:
         "state": item["state"],
         "state_explanation": explanation,
         "user_next_action": next_action,
+        # C3 (audit 2026-09-13): the active flow's state rides so the chat can
+        # relay "waiting for you to approve fetching <host>" and propose the
+        # right next tool (confirm_ni_flow_source / resume_ni_flow / remap).
+        "flow": flow,
         "enabled": item["enabled"],
         "interval_minutes": item["interval_minutes"],
         "last_checked": item["last_checked"],
@@ -1096,6 +1113,42 @@ def _secret_params(spec: dict) -> list[dict]:
         label = param.get("label") if isinstance(param.get("label"), str) else ""
         out.append({"name": str(name), "label": label or str(name)})
     return out
+
+
+def _explain_state_with_flow(item: dict, flow: dict | None) -> tuple[str, str]:
+    """C3 (audit 2026-09-13): explanation strings enriched by an active flow.
+
+    When the item is a flow-authored shell in draft AND the flow record is in
+    a paused state (``confirm_source`` / ``source`` / ``awaiting_credential``),
+    the chat model needs to name that condition and propose the resume tool
+    (``confirm_ni_flow_source`` / ``resume_ni_flow`` / add a credential).
+    Otherwise falls through to the base ``_explain_state``.
+    """
+    assert isinstance(item, dict), "item required"
+    if isinstance(flow, dict):
+        state = str(flow.get("state") or "")
+        if state == "confirm_source":
+            return (
+                "this card is a DRAFT with a flow paused awaiting SOURCE "
+                "confirmation — the engine has NOT fetched anything yet",
+                "propose confirm_ni_flow_source with the URL the flow record "
+                "shows; approving the parked card is the fetch consent",
+            )
+        if state == "source":
+            return (
+                "this card is a DRAFT with a flow paused awaiting a source "
+                "PICK — the engine has NOT fetched anything yet",
+                "propose resume_ni_flow with a source_url the user picks; the "
+                "chat surfaces candidates via list_ni_catalog / web_search",
+            )
+        if state in ("intent", "sampling", "mapping", "assembling"):
+            return (
+                f"this card is a DRAFT with a flow running in {state!r} — "
+                "do not describe it as live; the worker is still assembling",
+                "wait a few seconds and re-read the card; the flow reports its "
+                "own terminal state (ready / failed / unsupported)",
+            )
+    return _explain_state(item)
 
 
 def _explain_state(item: dict) -> tuple[str, str]:
@@ -1335,7 +1388,8 @@ def _create_ni_item(ctx: ToolContext, args: dict) -> dict:
         ni.check_composite_depth(ctx.ni, spec)
     except ni.NIError as exc:
         raise ValueError(str(exc)) from None
-    item_id = _add_item_with_rewrite(ctx.ni, spec, preview, origin="agent")
+    item_id = _add_item_with_rewrite(ctx.ni, spec, preview, origin="agent",
+                                       born="chat")
     landing = _initial_ni_state(spec, bool(args.get("draft")))
     if landing != "draft":
         ctx.ni.commission(item_id)  # draft -> commissioning (also clears any streak marker)
@@ -1344,17 +1398,24 @@ def _create_ni_item(ctx: ToolContext, args: dict) -> dict:
 
 
 def _add_item_with_rewrite(store: object, spec: dict, preview: dict, *,
-                            origin: str) -> str:
+                            origin: str, born: str | None = None) -> str:
     """H2 parity with the install path: pre-mint id, rewrite ``ni:self:`` refs,
     then ``add_item`` in one sealed write.
 
     ``ni_library.rewrite_self_refs`` mutates the spec in place — safe here because
     the spec is a fresh assembly from tool args, never a shared store copy.
+
+    M1 (audit 2026-09-13): stamp ``_born`` before sealing so the §29 door
+    reader (``ni_flow.is_flow_or_recipe_born``) never depends on a prunable
+    journal entry. Absent ``born`` = leave the marker unset (pre-M1 shape).
     """
     assert store is not None and isinstance(spec, dict), "store + spec required"
     assert isinstance(preview, dict), "preview must be a dict"
     item_id = str(uuid.uuid4())
     ni_library.rewrite_self_refs(spec, item_id)
+    if born is not None:
+        assert born in ni_flow.BORN_MARKERS, "born marker must be closed"
+        spec[ni_flow._BORN_KEY] = born
     return store.add_item(spec, preview, origin=origin, item_id=item_id)
 
 
@@ -1538,7 +1599,8 @@ def _create_ni_item_from_recipe(ctx: ToolContext, args: dict) -> dict:
         ni.check_composite_depth(ctx.ni, spec)
     except ni.NIError as exc:
         raise ValueError(str(exc)) from None
-    item_id = _add_item_with_rewrite(ctx.ni, spec, preview, origin="agent")
+    item_id = _add_item_with_rewrite(ctx.ni, spec, preview, origin="agent",
+                                       born="recipe")
     landing = _initial_ni_state(spec, bool(args.get("draft")))
     if landing != "draft":
         ctx.ni.commission(item_id)
@@ -1817,6 +1879,18 @@ def _update_ni_item(ctx: ToolContext, args: dict) -> dict:
     current = ctx.ni.get_item(args["item_id"])
     if current is None:
         raise ValueError("item not found")
+    # §29 door closure: flow- and recipe-born items refuse freeform source /
+    # pipeline edits — a fix re-enters the flow at Sampling via remap_ni_item
+    # (re-derive against the SAME consented URL) so the flow's determinism
+    # invariants (sample-grounded paths + typed verification) stay intact.
+    if ni_flow.is_flow_or_recipe_born(ctx.ni, args["item_id"]):
+        forbidden = {"source", "pipeline"} & set(args.keys())
+        if forbidden:
+            raise ValueError(
+                f"this card was created via the NI Flow ({sorted(forbidden)} "
+                "changes are not editable freeform); ask me to re-map it "
+                "(remap_ni_item) instead"
+            )
     spec = dict(current["spec"])  # shallow copy; we replace whole subtrees, never mutate in place
     # H3 (audit 2026-09-09): ``history`` + ``alerts`` are REVIEWED-updatable — an alerts
     # or history change is a plain spec edit, NOT a source change (§11/§12), so the item
@@ -1995,6 +2069,198 @@ def _delete_ni_item(ctx: ToolContext, args: dict) -> dict:
     assert args.get("item_id"), "item_id required"
     ctx.ni.delete(args["item_id"])
     return {"ok": True}
+
+
+# ---- §29 NI Flow Engine (front door) --------------------------------------
+
+_MAX_FLOW_REQUEST = 2000
+
+
+def _prevalidate_start_ni_flow(args: dict) -> None:
+    """Pre-park hook for start_ni_flow: bounded non-empty request; optional http source_url.
+
+    M4 (audit 2026-09-13): ``allow_duplicate`` is a plain boolean here — the
+    store-visible case-insensitive title match still fires at execute time
+    inside ``ni_flow.create_shell_item`` (prevalidate has no ctx).
+    """
+    assert isinstance(args, dict), "args must be a dict"
+    request = args.get("request")
+    if not isinstance(request, str) or not request.strip():
+        raise ValueError("request required (non-empty)")
+    if len(request) > _MAX_FLOW_REQUEST:
+        raise ValueError(f"request exceeds {_MAX_FLOW_REQUEST} chars")
+    source_url = args.get("source_url")
+    if source_url is not None:
+        if not isinstance(source_url, str) or not source_url:
+            raise ValueError("source_url must be a non-empty string")
+        try:
+            ni._validate_http_json_url_shape(source_url)
+        except ValueError as exc:
+            raise ValueError(f"source_url: {exc}") from None
+    if "allow_duplicate" in args and not isinstance(args["allow_duplicate"], bool):
+        raise ValueError("allow_duplicate must be a boolean")
+
+
+def _start_ni_flow(ctx: ToolContext, args: dict) -> dict:
+    """REVIEWED (egress=True): open a Neural Interface flow (§29).
+
+    Creates a DRAFT shell item so the card shows progress immediately, seals a
+    ``flow`` slot in state ``intent``, and spawns a single-flight background
+    worker that drives intent → source → sampling → mapping → assembling →
+    handoff. ``source_url`` (optional) is the user's already-named source; the
+    approval card renders it unmissably so the operator sees the exact host
+    the flow will fetch. Absent ``source_url``: recipe match ⇒ the flow pauses
+    at ``confirm_source`` (C3) awaiting the operator's approval of the
+    recipe's URL via ``confirm_ni_flow_source``; recipe miss ⇒ the flow pauses
+    at ``source`` and the chat presents candidates for a ``resume_ni_flow``
+    call.
+
+    M4 (audit 2026-09-13): the case-insensitive title guard fires at shell
+    creation (``create_shell_item`` mirrors ``_check_duplicate_title``);
+    ``allow_duplicate: true`` skips it exactly like the other create tools.
+    """
+    assert ctx.ni is not None, "neural interface unavailable"
+    assert isinstance(args, dict), "args must be a dict"
+    _prevalidate_start_ni_flow(args)
+    request = str(args["request"])
+    source_url = args.get("source_url")
+    allow_duplicate = bool(args.get("allow_duplicate"))
+    item_id = ni_flow.create_shell_item(ctx.ni, request,
+                                          allow_duplicate=allow_duplicate)
+    started = ni_flow.start_flow_worker(
+        ctx.ni, item_id,
+        source_url=source_url if isinstance(source_url, str) else None,
+    )
+    return {"id": item_id, "started": bool(started),
+            "state": "intent", "source_url": source_url}
+
+
+def _prevalidate_resume_ni_flow(args: dict) -> None:
+    """Pre-park hook for resume_ni_flow: item_id + http source_url required."""
+    assert isinstance(args, dict), "args must be a dict"
+    if not args.get("item_id"):
+        raise ValueError("item_id required")
+    source_url = args.get("source_url")
+    if not isinstance(source_url, str) or not source_url:
+        raise ValueError("source_url required (non-empty string)")
+    try:
+        ni._validate_http_json_url_shape(source_url)
+    except ValueError as exc:
+        raise ValueError(f"source_url: {exc}") from None
+
+
+def _resume_ni_flow(ctx: ToolContext, args: dict) -> dict:
+    """REVIEWED (egress=True): resume a paused flow with the user-picked source URL.
+
+    Refuses when the item has no active flow record. The approval card renders
+    the URL host + path (§29 consent moment #1: the user chose the source).
+    Spawns the background worker exactly like ``start_ni_flow``.
+    """
+    assert ctx.ni is not None, "neural interface unavailable"
+    assert args.get("item_id"), "item_id required"
+    _prevalidate_resume_ni_flow(args)
+    item_id = str(args["item_id"])
+    if ctx.ni.get_item(item_id) is None:
+        raise ValueError("item not found")
+    record = ni_flow._flow_read(ctx.ni, item_id)
+    if record is None:
+        raise ValueError("no active flow on this item — call start_ni_flow first")
+    source_url = str(args["source_url"])
+    # Minor (audit 2026-09-13): the resume returns the TRUE restart stage.
+    # The worker transitions the record to ``sampling`` the moment the flow
+    # begins fetching; before that, the sealed record still reads whatever
+    # state the pause left (``source``). We report ``sampling`` because that
+    # is what the worker's first action will write.
+    started = ni_flow.start_flow_worker(ctx.ni, item_id, source_url=source_url)
+    return {"id": item_id, "started": bool(started),
+            "state": "sampling", "source_url": source_url}
+
+
+def _prevalidate_remap_ni_item(args: dict) -> None:
+    """Pre-park hook for remap_ni_item: item_id required."""
+    assert isinstance(args, dict), "args must be a dict"
+    if not args.get("item_id"):
+        raise ValueError("item_id required")
+
+
+def _remap_ni_item(ctx: ToolContext, args: dict) -> dict:
+    """REVIEWED (egress=True): re-enter the flow at Sampling using the EXISTING consented source.
+
+    §29 repair-reentry: freeform ``update_ni_item`` on flow- / recipe-born items
+    is closed; a fix re-derives paths against the SAME URL the user already
+    consented to and re-selects. The item's current spec source URL rides —
+    no new source is requested, so this is not a re-consent, and the flow's
+    sampling stage runs against the same host the previous card used.
+
+    H2 (audit 2026-09-13): the remap flow now enters at ``sampling`` (not
+    ``intent``) and skips recipe matching entirely — a stamped ``_remap: True``
+    marker on the sealed flow record tells ``run_flow`` to jump straight to
+    ``_run_remap``. The reported ``state`` also matches: ``sampling`` is what
+    the worker's first transition writes, so a caller reading the tool result
+    sees the honest restart stage (minor: resume returns the true stage too).
+    """
+    assert ctx.ni is not None, "neural interface unavailable"
+    _prevalidate_remap_ni_item(args)
+    item_id = str(args["item_id"])
+    item = ctx.ni.get_item(item_id)
+    if item is None:
+        raise ValueError("item not found")
+    source = item["spec"].get("source") or {}
+    if not isinstance(source, dict) or source.get("type") != "http_json":
+        raise ValueError(
+            "remap_ni_item only re-derives http_json sources — for other source types "
+            "delete + recreate via start_ni_flow"
+        )
+    url = str(source.get("url") or "")
+    if not url:
+        raise ValueError("item has no source URL to remap against")
+    request = str(item["spec"].get("goal") or item["spec"].get("title") or "remap")
+    record = ni_flow._make_record(request, "sampling", source_url=url,
+                                    notes=["remap re-entering flow at sampling"])
+    record["_remap"] = True
+    ni_flow._flow_write(ctx.ni, item_id, record)
+    started = ni_flow.start_flow_worker(ctx.ni, item_id, source_url=url)
+    return {"id": item_id, "started": bool(started), "state": "sampling",
+            "source_url": url}
+
+
+def _prevalidate_confirm_ni_flow_source(args: dict) -> None:
+    """Pre-park hook for confirm_ni_flow_source: item_id + http source_url required."""
+    assert isinstance(args, dict), "args must be a dict"
+    if not args.get("item_id"):
+        raise ValueError("item_id required")
+    source_url = args.get("source_url")
+    if not isinstance(source_url, str) or not source_url:
+        raise ValueError("source_url required (non-empty string)")
+    try:
+        ni._validate_http_json_url_shape(source_url)
+    except ValueError as exc:
+        raise ValueError(f"source_url: {exc}") from None
+
+
+def _confirm_ni_flow_source(ctx: ToolContext, args: dict) -> dict:
+    """REVIEWED (egress=True): confirm a recipe-matched flow's proposed source URL (§29).
+
+    C3 (audit 2026-09-13): the missing consent moment for a recipe-matched
+    flow. When ``start_ni_flow`` matches a catalog recipe and the operator
+    did NOT already name a source, the flow now PAUSES in ``confirm_source``
+    state carrying the recipe's url_template + title. This tool is the
+    resume: the approval card's promoted line (``Fetches: <url>`` via the
+    ``source_url`` arg convention) shows the exact host, and on approval
+    ``ni_flow.continue_from_recipe_confirm`` runs ``_handoff_from_recipe``
+    with the sealed intent. Refuses if the flow is not awaiting confirmation
+    OR the confirmed URL differs from the pending recipe URL.
+    """
+    assert ctx.ni is not None, "neural interface unavailable"
+    assert isinstance(args, dict), "args must be a dict"
+    _prevalidate_confirm_ni_flow_source(args)
+    item_id = str(args["item_id"])
+    if ctx.ni.get_item(item_id) is None:
+        raise ValueError("item not found")
+    result = ni_flow.continue_from_recipe_confirm(ctx.ni, item_id,
+                                                    str(args["source_url"]))
+    return {"id": item_id, "state": str(result.get("state") or ""),
+            "source_url": args["source_url"]}
 
 
 _TOOLS: tuple[Tool, ...] = (
@@ -2662,6 +2928,102 @@ _TOOLS: tuple[Tool, ...] = (
         egress=True,
     ),
     Tool(
+        name="start_ni_flow",
+        description="§29 Neural Interface Flow Engine — the MANDATED first path for any new "
+                    "card request. Code owns intent → source → sampling → mapping → assembly "
+                    "→ handoff; models fill exactly two closed-schema blanks (intent + path "
+                    "mapping). Args: request (the user's words, ≤2000 chars) and optional "
+                    "source_url (an http URL the user already named — the approval card renders "
+                    "it unmissably). A draft shell appears on the board immediately with live "
+                    "flow state (intent / source / sampling / mapping / assembling / "
+                    "awaiting_credential / ready / unsupported / failed). Reviewed egress; "
+                    "approving is consent for the fetch.",
+        params_schema={
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "request": {"type": "string", "maxLength": _MAX_FLOW_REQUEST},
+                "source_url": {"type": "string", "maxLength": ni._MAX_URL},
+                # M4 (audit 2026-09-13): the case-insensitive duplicate-title
+                # guard mirrors ``create_ni_item`` / ``create_ni_item_from_recipe``;
+                # a caller who wants two shells with the same title opts in here.
+                "allow_duplicate": {"type": "boolean"},
+            },
+            "required": ["request"],
+        },
+        tier=Tier.REVIEWED,
+        handler=_start_ni_flow,
+        egress=True,
+        prevalidate=_prevalidate_start_ni_flow,
+    ),
+    Tool(
+        name="confirm_ni_flow_source",
+        description="§29 confirm a recipe-matched NI flow's proposed source URL. Use "
+                    "when start_ni_flow paused the flow at state=confirm_source (a "
+                    "catalog recipe matched but the operator has NOT yet approved the "
+                    "recipe's URL). The approval card renders the exact host + path "
+                    "via the source_url arg convention (promotedLine 'Fetches: <url>'). "
+                    "Args: item_id (from the paused flow) and source_url (the same URL "
+                    "the flow record proposed — the tool refuses a mismatch rather "
+                    "than sealing a source the user never saw). Reviewed egress; "
+                    "approving is consent for the fetch. Never used for freeform "
+                    "flows — resume_ni_flow covers the pick-a-source path.",
+        params_schema={
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "item_id": {"type": "string"},
+                "source_url": {"type": "string", "maxLength": ni._MAX_URL},
+            },
+            "required": ["item_id", "source_url"],
+        },
+        tier=Tier.REVIEWED,
+        handler=_confirm_ni_flow_source,
+        egress=True,
+        prevalidate=_prevalidate_confirm_ni_flow_source,
+    ),
+    Tool(
+        name="resume_ni_flow",
+        description="§29 resume a paused NI flow with a user-picked source URL. Use ONLY when "
+                    "start_ni_flow paused the flow at state=source (no recipe hit, no user URL "
+                    "supplied); the approval card renders the URL host + path unmissably. "
+                    "Args: item_id (from the paused flow) and source_url (http URL the user "
+                    "chose from your suggestions). Reviewed egress; approving is consent for "
+                    "the fetch.",
+        params_schema={
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "item_id": {"type": "string"},
+                "source_url": {"type": "string", "maxLength": ni._MAX_URL},
+            },
+            "required": ["item_id", "source_url"],
+        },
+        tier=Tier.REVIEWED,
+        handler=_resume_ni_flow,
+        egress=True,
+        prevalidate=_prevalidate_resume_ni_flow,
+    ),
+    Tool(
+        name="remap_ni_item",
+        description="§29 re-enter the NI flow at Sampling for a flow- or recipe-born card, "
+                    "re-deriving paths against the SAME consented URL (never a new source, so "
+                    "not a re-consent). Use to FIX a card that started failing after a source "
+                    "response shape changed. Args: item_id. Reviewed egress. For a genuine "
+                    "source change use update_ni_item (freeform source edits on flow- or "
+                    "recipe-born cards are refused — remap first, or delete + recreate).",
+        params_schema={
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {"item_id": {"type": "string"}},
+            "required": ["item_id"],
+        },
+        tier=Tier.REVIEWED,
+        handler=_remap_ni_item,
+        egress=True,
+        prevalidate=_prevalidate_remap_ni_item,
+    ),
+    Tool(
         name="delete_ni_item",
         description="Permanently delete a Neural Interface item by id (with its snapshots, revisions, and "
                     "run history). Cannot be undone. To just pause a tile, use set_ni_item_enabled with "
@@ -2692,7 +3054,7 @@ SCHEDULE_WRITE_TOOLS = frozenset({"create_schedule", "update_schedule", "set_sch
 # (an NI item pulls its source on a timer, so an injected background prompt creating/rewriting
 # one could keep exfiltrating), so these join UNATTENDED_NEVER_AUTO below. delete_ni_item is
 # IRREVERSIBLE and always parks, so it isn't in the write set (mirrors SCHEDULE_WRITE_TOOLS).
-NI_WRITE_TOOLS = frozenset({"create_ni_item", "create_ni_item_from_recipe", "update_ni_item", "set_ni_item_enabled", "run_ni_item_now"})
+NI_WRITE_TOOLS = frozenset({"create_ni_item", "create_ni_item_from_recipe", "update_ni_item", "set_ni_item_enabled", "run_ni_item_now", "start_ni_flow", "resume_ni_flow", "confirm_ni_flow_source", "remap_ni_item"})
 # Tools an UNATTENDED turn (scheduled run, its resume) may never run on a standing grant, however
 # the user answered in chat: schedule writes (self-perpetuation) and memory writes — a remembered
 # fact lands in the system prompt of every later turn, so a feed item or web page steering an

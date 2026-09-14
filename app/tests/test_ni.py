@@ -701,11 +701,15 @@ def test_ni_write_tools_are_never_auto_in_unattended_turns() -> None:
     from smartbrain_3000 import tools
 
     assert tools.NI_WRITE_TOOLS <= tools.UNATTENDED_NEVER_AUTO
-    # §26 added create_ni_item_from_recipe — same posture (REVIEWED egress, joins
+    # §26 added create_ni_item_from_recipe; §29 added start_ni_flow /
+    # resume_ni_flow / remap_ni_item; C3 audit 2026-09-13 added
+    # confirm_ni_flow_source — same posture (REVIEWED egress, joins
     # UNATTENDED_NEVER_AUTO, non-rememberable) as the freeform create tool.
     assert tools.NI_WRITE_TOOLS == {
         "create_ni_item", "create_ni_item_from_recipe",
         "update_ni_item", "set_ni_item_enabled", "run_ni_item_now",
+        "start_ni_flow", "resume_ni_flow", "confirm_ni_flow_source",
+        "remap_ni_item",
     }
 
 
@@ -722,7 +726,8 @@ def test_ni_tools_are_never_rememberable() -> None:
     for name in ("list_ni_items", "read_ni_item", "derive_ni_paths",
                  "create_ni_item", "create_ni_item_from_recipe",
                  "update_ni_item", "set_ni_item_enabled", "run_ni_item_now",
-                 "delete_ni_item"):
+                 "start_ni_flow", "resume_ni_flow", "confirm_ni_flow_source",
+                 "remap_ni_item", "delete_ni_item"):
         assert consent.remember_mode(name) is None, name
 
 
@@ -4303,4 +4308,218 @@ def test_prevalidate_accepts_bare_update_patch() -> None:
     from smartbrain_3000 import tools
 
     tools.get_tool("update_ni_item").prevalidate({"item_id": "any", "title": "Renamed"})
+
+
+# --- Phase v-next (§29 flow engine): where transform + computed source ----
+
+def test_transform_where_numeric_threshold_filters_in_place() -> None:
+    """§29 where: numeric ge threshold keeps items whose key value is >= value.
+
+    Mirrors the quakes case shape (features[].properties.mag >= 5) after a
+    prior extract has flattened features to a list-of-objects with a top-level
+    ``mag`` key — the filter stays under the same output name.
+    """
+    payload = {"quakes": [{"mag": 3.2}, {"mag": 5.0}, {"mag": 6.1}, {"mag": 4.9}]}
+    out = nimod.run_pipeline([
+        {"op": "transform", "apply": [
+            {"fn": "where", "field": "quakes", "key": "mag", "op": "ge", "value": 5},
+        ]},
+    ], payload)
+    assert out["quakes"] == [{"mag": 5.0}, {"mag": 6.1}]
+
+
+def test_transform_where_eq_on_strings_keeps_matching_items() -> None:
+    """§29 where: eq on strings does a strict scalar compare (no coercion)."""
+    payload = {"rows": [{"kind": "warn"}, {"kind": "ok"}, {"kind": "warn"}]}
+    out = nimod.run_pipeline([
+        {"op": "transform", "apply": [
+            {"fn": "where", "field": "rows", "key": "kind",
+             "op": "eq", "value": "warn"},
+        ]},
+    ], payload)
+    assert out["rows"] == [{"kind": "warn"}, {"kind": "warn"}]
+
+
+def test_transform_where_excludes_non_numeric_items_under_ordering_op() -> None:
+    """§29 where filtering-is-selection: an item whose key is non-numeric under
+    an ordering op is silently EXCLUDED (never a stage failure). Missing key
+    and non-dict entries are excluded too — no shape failure inside a filter.
+    """
+    payload = {"rows": [
+        {"mag": 5.0}, {"mag": "n/a"}, {"mag": True},
+        {"other": 9.0}, "not-a-dict", {"mag": 7.2},
+    ]}
+    out = nimod.run_pipeline([
+        {"op": "transform", "apply": [
+            {"fn": "where", "field": "rows", "key": "mag",
+             "op": "gt", "value": 4},
+        ]},
+    ], payload)
+    assert out["rows"] == [{"mag": 5.0}, {"mag": 7.2}]
+
+
+def test_transform_where_non_list_field_is_stage_failure() -> None:
+    """§29 where: a non-LIST ``field`` is a stage failure ``transform_type``
+    (shape mismatch is a real failure — only per-item type mismatch is silent)."""
+    with pytest.raises(nimod.NIError) as excinfo:
+        nimod.run_pipeline([
+            {"op": "transform", "apply": [
+                {"fn": "where", "field": "row", "key": "mag",
+                 "op": "ge", "value": 5},
+            ]},
+        ], {"row": {"mag": 6}})
+    assert excinfo.value.kind == "transform_type"
+
+
+def test_transform_where_validation_refuses_bad_op_and_bad_key() -> None:
+    """§29 where: op enum + §4.1 single-segment key grammar enforced at spec time."""
+    with pytest.raises(ValueError, match="op"):
+        nimod.validate_spec(_basic_spec(pipeline=[
+            {"op": "extract", "paths": {"rows": "rows"}},
+            {"op": "transform", "apply": [
+                {"fn": "where", "field": "rows", "key": "mag",
+                 "op": "in", "value": 5},  # not in _WHEN_OPS
+            ]},
+        ]))
+    with pytest.raises(ValueError, match="key"):
+        nimod.validate_spec(_basic_spec(pipeline=[
+            {"op": "extract", "paths": {"rows": "rows"}},
+            {"op": "transform", "apply": [
+                {"fn": "where", "field": "rows", "key": "a.b",  # dotted path refused
+                 "op": "ge", "value": 5},
+            ]},
+        ]))
+
+
+def test_transform_where_validation_refuses_non_scalar_value() -> None:
+    """§29 where: ``value`` must be a JSON scalar — dict/list/None all refused."""
+    for bad in ({"x": 1}, [1, 2], None):
+        with pytest.raises(ValueError, match="scalar"):
+            nimod.validate_spec(_basic_spec(pipeline=[
+                {"op": "extract", "paths": {"rows": "rows"}},
+                {"op": "transform", "apply": [
+                    {"fn": "where", "field": "rows", "key": "mag",
+                     "op": "eq", "value": bad},
+                ]},
+            ]))
+
+
+def test_transform_where_composes_with_top_n_and_count() -> None:
+    """§29 where feeds sort_by / top_n / count downstream — the list under
+    ``field`` is filtered in place, so later ops see the shorter list."""
+    payload = {"quakes": [
+        {"mag": 3.0}, {"mag": 5.5}, {"mag": 6.2}, {"mag": 4.4}, {"mag": 7.1},
+    ]}
+    out = nimod.run_pipeline([
+        {"op": "transform", "apply": [
+            {"fn": "where", "field": "quakes", "key": "mag",
+             "op": "ge", "value": 5},
+            {"fn": "sort_by", "field": "quakes", "key": "mag", "dir": "desc"},
+            {"fn": "top_n", "field": "quakes", "n": 2},
+            {"fn": "count", "field": "quakes", "as": "n"},
+        ]},
+    ], payload)
+    assert out["quakes"] == [{"mag": 7.1}, {"mag": 6.2}]
+    assert out["n"] == 2
+
+
+def test_computed_source_validates_days_until_with_iso_date() -> None:
+    """§29 computed v1: {type, compute, date} closed; ``days_until`` + ISO date OK."""
+    spec = _basic_spec(source={"type": "computed", "compute": "days_until",
+                                 "date": "2030-01-15"})
+    nimod.validate_spec(spec)
+
+
+def test_computed_source_validation_refuses_bad_compute_and_bad_date() -> None:
+    """§29 computed: compute enum + strict YYYY-MM-DD (regex + calendar validity)."""
+    with pytest.raises(ValueError, match="compute"):
+        nimod.validate_spec(_basic_spec(source={
+            "type": "computed", "compute": "sunrise", "date": "2030-01-15",
+        }))
+    for bad in ("2030-1-15", "01-15-2030", "not-a-date", "2030-01-15T00:00:00Z"):
+        with pytest.raises(ValueError, match="date"):
+            nimod.validate_spec(_basic_spec(source={
+                "type": "computed", "compute": "days_until", "date": bad,
+            }))
+    # A regex-shaped but calendar-invalid date is also refused (fromisoformat check).
+    with pytest.raises(ValueError, match="date"):
+        nimod.validate_spec(_basic_spec(source={
+            "type": "computed", "compute": "days_until", "date": "2026-02-30",
+        }))
+
+
+def test_computed_source_validation_refuses_extra_keys() -> None:
+    """§29 computed: closed-key shape refuses stray fields at spec time."""
+    with pytest.raises(ValueError):
+        nimod.validate_spec(_basic_spec(source={
+            "type": "computed", "compute": "days_until",
+            "date": "2030-01-15", "note": "birthday",
+        }))
+
+
+def test_fetch_computed_days_until_math_with_pinned_today(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    """§29 fetch: days_until = target - today (UTC). Negative allowed for past."""
+    import datetime as _dt
+
+    monkeypatch.setattr(nimod, "_computed_today",
+                        lambda: _dt.date(2026, 9, 13))
+    future = nimod._fetch_computed(
+        {"type": "computed", "compute": "days_until", "date": "2026-09-20"}
+    )
+    assert future == {"days": 7}
+    same = nimod._fetch_computed(
+        {"type": "computed", "compute": "days_until", "date": "2026-09-13"}
+    )
+    assert same == {"days": 0}
+    past = nimod._fetch_computed(
+        {"type": "computed", "compute": "days_until", "date": "2026-09-01"}
+    )
+    assert past == {"days": -12}
+
+
+def test_run_item_end_to_end_with_computed_source(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    """§29 computed: run_item drives a computed source through pipeline + scene
+    with no gateway/net calls. The bound payload carries the countdown."""
+    import datetime as _dt
+
+    monkeypatch.setattr(nimod, "_computed_today",
+                        lambda: _dt.date(2026, 9, 13))
+    store, conn, key = _store()
+    secrets, schedules = SecretStore(conn, key), ScheduleStore(conn, key)
+    scene = {"type": "stack", "dir": "v", "gap": "sm", "children": [
+        {"type": "text", "value": "{{days}} days to go", "role": "title",
+         "tone": "default", "size": "md"},
+    ]}
+    spec = _basic_spec(scene=scene, source={
+        "type": "computed", "compute": "days_until", "date": "2026-09-20",
+    })
+    iid = store.add_item(spec, {"days": 0})
+    store.set_state(iid, "commissioning")
+
+    nimod.run_item(store, iid, gateway_mod=_FakeGateway(),
+                    secrets_store=secrets, schedules_store=schedules)
+
+    snap = store.read_snapshot(iid, "latest")
+    assert snap is not None and snap["ok"] is True
+    text_node = snap["payload"]["children"][0]
+    assert text_node["value"] == "7 days to go"
+
+
+def test_computed_source_interpreted_flag_stays_off() -> None:
+    """§29 computed: the pixel/board chip stays OFF — no model reads the value."""
+    from smartbrain_3000 import ni_routes
+
+    store, conn, key = _store()
+    scene = {"type": "stack", "dir": "v", "gap": "sm", "children": [
+        {"type": "text", "value": "{{days}}", "role": "title",
+         "tone": "default", "size": "md"},
+    ]}
+    spec = _basic_spec(scene=scene, source={
+        "type": "computed", "compute": "days_until", "date": "2030-01-15",
+    })
+    iid = store.add_item(spec, {"days": 5})
+    row = ni_routes._board_row(store, store.get_item(iid))
+    assert row["interpreted"] is False
 
