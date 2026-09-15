@@ -1134,10 +1134,18 @@ def engine_gate_pass(results: list[dict]) -> bool:
     Mirrors ``live_gate_pass`` in strictness: 10-of-10, no exceptions, plus a
     check that the sealed spec's ``source.url`` equals the URL the case
     intended (the C2 frozen-URL invariant).
+
+    needs_params (2026-09-14): ``awaiting_params`` / ``awaiting_credential``
+    also PASS — a flow that settles at a user-input pause has done its whole
+    deterministic job; what remains is the user's value/key BY DESIGN (the
+    old gate graded kc-weather "ready" while silently sealing empty lat/lon
+    slots that would have fetched ``latitude=&longitude=``). The frozen-URL
+    invariant still applies to these rows.
     """
     assert isinstance(results, list), "results list required"
     if not results:
         return False
+    passing = ("ready", "awaiting_params", "awaiting_credential")
     seen: set[str] = set()
     for row in results:  # bounded by CASES length
         seen.add(str(row.get("id") or ""))
@@ -1149,7 +1157,7 @@ def engine_gate_pass(results: list[dict]) -> bool:
             continue
         if klass == "image":  # image cases fall out of the engine gate for now
             continue
-        if flow_state != "ready":
+        if flow_state not in passing:
             return False
         if not row.get("frozen_url_ok"):
             return False
@@ -1184,7 +1192,8 @@ def _run_engine(bifrost: str, model: str, only: set[str]) -> int:
         results.append(_run_case_engine(case, bifrost, model, duckdb, _db, _ni,
                                           _flow, _gen_key))
     passed = engine_gate_pass(results) if not only else all(
-        r.get("flow_state") == "ready" or r.get("klass") == "refuse"
+        r.get("flow_state") in ("ready", "awaiting_params", "awaiting_credential")
+        or r.get("klass") == "refuse"
         for r in results
     )
     print(f"\nENGINE GATE: {'PASS' if passed else 'FAIL'}")
@@ -1237,12 +1246,13 @@ def _run_case_engine(case: dict, bifrost: str, model: str, duckdb, dbmod,
             result = flowmod.continue_from_recipe_confirm(store, item_id, confirmed)
             out["flow_state"] = str(result.get("state") or "")
             source_url = confirmed  # the frozen-URL invariant now targets it
-        if out["flow_state"] == "ready" and isinstance(source_url, str):
+        settled = ("ready", "awaiting_params", "awaiting_credential")
+        if out["flow_state"] in settled and isinstance(source_url, str):
             item = store.get_item(item_id)
             frozen = (item["spec"].get("source") or {}).get("url", "")
             out["frozen_url_ok"] = frozen == source_url
         else:
-            out["frozen_url_ok"] = out["flow_state"] == "ready"
+            out["frozen_url_ok"] = out["flow_state"] in settled
     except Exception as exc:  # any crash = FAIL, not a raise
         out["notes"].append(f"{type(exc).__name__}: {str(exc)[:120]}")
     finally:

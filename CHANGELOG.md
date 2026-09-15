@@ -11,6 +11,25 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Changed
+- **Neural Interface: one door, and cards that can't lie about being empty.**
+  Field test of v0.12.0 found the assistant could still route around the Flow
+  Engine mid-build (it created a stock card through the old recipe tool with an
+  empty ticker — the card then showed $0.00 and called it "ok"). Four generic
+  fixes: (1) the flow is now the *only* way to create an external-JSON card —
+  the legacy recipe tool is gone and freeform creation refuses such sources
+  outright; (2) the flow tools wait the few seconds the engine needs and come
+  back with the real result plus exactly one next step, so there's no idle gap
+  for the assistant to wander off in; (3) a card with any unfilled blank (like
+  a ticker symbol) can never run, activate, or claim "ok" — it stays a draft
+  saying **Needs: Ticker symbol** with a Fill button, and the flow fills what
+  it can itself (the ticker you named fills the slot automatically); (4)
+  invented card ids bounce before they ever cost you an approval tap, and a
+  wrong id now returns the list of cards that actually exist.
+- Fixed: keyed cards built by the flow's recipe path stored their key
+  reference under the wrong name, so the card would have failed even after you
+  added the key. The reference is now bound to the card at creation.
+
 ## [0.12.0] - 2026-09-14
 
 ### Added

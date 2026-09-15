@@ -653,6 +653,7 @@ export type NiFlowState =
   | "mapping"
   | "assembling"
   | "awaiting_credential"
+  | "awaiting_params"
   | "ready"
   | "unsupported"
   | "failed";
@@ -697,6 +698,11 @@ export interface NiBoardItem {
   // Desktop-local credential PUT (`name` is the spec's param name — the wire the
   // PUT wants; `label` is the human name shown in the modal + on the card).
   needs_credentials?: { name: string; label: string }[];
+  // Non-secret params the spec references via {{param:X}} whose value is still
+  // empty (needs_params, 2026-09-14). The engine refuses runs (param_empty) and
+  // commission 409s while any remain; the card renders a "Fill" affordance
+  // opening the Desktop-local param PUT.
+  needs_params?: { name: string; label: string }[];
   // Creation/remap flow status. Non-null while the engine is walking the intent →
   // source → sampling → mapping → assembling → ready pipeline, or has ended in
   // awaiting_credential / unsupported / failed. Null once the item is settled and
@@ -1575,6 +1581,15 @@ export const api = {
       headers: { "x-sb-local": "1" },
       body: JSON.stringify({ name, value, host }),
     }),
+  // Fill a NON-secret param value (needs_params, 2026-09-14). Desktop-local like the
+  // credential PUT; secrets are refused server-side (they belong to niPutCredential).
+  niPutParam: (id: string, name: string, value: string) =>
+    req<{ ok: boolean; needs_params: { name: string; label: string }[] }>(
+      `/api/ni/items/${encodeURIComponent(id)}/param`, {
+        method: "PUT",
+        headers: { "x-sb-local": "1" },
+        body: JSON.stringify({ name, value }),
+      }),
 
   // ni library (ni-format §19/§20). Connect / disconnect / trust-key are Desktop-local
   // (x-sb-local; the WebRTC bridge strips it) — the paste IS the consent for background

@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import json
 import logging
+import re
+import time
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -746,32 +748,43 @@ def _delete_schedule(ctx: ToolContext, args: dict) -> dict:
 _NI_SPEC_GUIDE = """\
 # Neural Interface (NI) spec grammar reference
 
-Authoring order (§29 flow-first; §26/§27 fallbacks):
+Authoring order (§29 — the flow is the ONLY door for external JSON cards):
 
-1. **Flow first (start_ni_flow).** For ANY new-card request the primary path
-   is ``start_ni_flow`` — code owns the sequence and models fill exactly two
-   narrow, validated blanks (intent + mapping). Pass the user's request text
-   verbatim as ``request``; add ``source_url`` when the user has already named
+1. **Flow only (start_ni_flow).** For ANY new-card request the path is
+   ``start_ni_flow`` — code owns the sequence and models fill exactly two
+   narrow, validated blanks (intent + mapping). Pass the user's request in
+   THEIR OWN WORDS, verbatim — never paraphrase, never change a number or
+   cadence the user said; add ``source_url`` when the user has already named
    a specific http URL. The flow: matches a catalog recipe (deterministic),
    samples once from the consented source, derives paths, picks scene fields,
-   assembles, verifies typed outputs, and hands off. A draft shell appears on
-   the board immediately so the card shows live flow state.
-2. **Resume / remap.** A flow with no recipe hit and no user URL pauses at
-   ``source``; present candidates and call ``resume_ni_flow`` with the URL the
-   user picked. To fix a flow- or recipe-born card, call ``remap_ni_item``
-   — it re-derives paths against the SAME consented URL. Freeform
-   source/pipeline edits on flow- or recipe-born cards are REFUSED at
-   ``update_ni_item``; params, cadence, scene tweaks stay directly editable.
-3. **Fallbacks.** ``create_ni_item_from_recipe`` fills a recipe deterministically
-   (still preferred for the model-driven install path); ``create_ni_item`` is
-   the sample-grounded freeform fallback (fetch a sample with web_fetch, use
-   derive_ni_paths, build extract stages ONLY from offered paths). Both keep
-   their case-insensitive duplicate-title guard.
+   assembles, verifies typed outputs, and hands off. The tool WAITS for the
+   flow (a few seconds) and returns the resulting state with a ``next_step``
+   directive — follow that directive and do nothing else for this card. Do
+   NOT research sources with web_search, do NOT call create_ni_item, do NOT
+   start over while a flow is working.
+2. **Resume / confirm / remap.** ``state="source"`` ⇒ present candidates and
+   call ``resume_ni_flow`` with the URL the user picked. ``confirm_source`` ⇒
+   tell the user which vetted source the flow matched and call
+   ``confirm_ni_flow_source`` (the approval card shows the exact URL).
+   ``awaiting_credential`` ⇒ the user adds the key ON THE CARD (never in
+   chat). To fix a flow- or recipe-born card, call ``remap_ni_item`` — it
+   re-derives paths against the SAME consented URL. Freeform source/pipeline
+   edits on flow- or recipe-born cards are REFUSED at ``update_ni_item``;
+   params, cadence, scene tweaks stay directly editable.
+3. **create_ni_item is for NON-http_json sources only** (model, internal.*,
+   mcp_tool, http_page, http_image, computed). An ``http_json`` source is
+   REFUSED there — that is the flow's job. For http_page keep the
+   sample-grounded discipline (fetch a sample with web_fetch, use
+   derive_ni_paths, build extract stages ONLY from offered paths). The
+   case-insensitive duplicate-title guard applies.
 4. **Never claim a card is live** you just created. The tools return the
    LANDING STATE — commissioning (needs a scheduler tick + user verdict) or
    draft (needs a credential or explicit Activate). ``read_ni_item`` returns
    ``state_explanation`` + ``user_next_action`` — read them and report state
    truth, not "it's ready" or "it's showing data now".
+5. **item_id values come from tool results** (start_ni_flow, list_ni_items,
+   read_ni_item) — they are UUIDs. NEVER invent an id or slug a title; an
+   invented id wastes a user approval on a call that cannot work.
 
 Grammar additions used by the flow (per §29):
 - ``where`` transform (list filtering): ``{fn: "where", field, key, op:
@@ -1061,7 +1074,7 @@ def _read_ni_item(ctx: ToolContext, args: dict) -> dict:
     assert args.get("item_id"), "item_id required"
     item = ctx.ni.get_item(args["item_id"])
     if item is None:
-        raise ValueError("item not found")
+        raise _item_not_found(ctx.ni)
     # Pick the freshest slot the way the board does: preview for draft, else latest-if-ok
     # else last_good. Snapshot may be absent (a brand-new item before its first run).
     if item["state"] == "draft":
@@ -1175,6 +1188,20 @@ def _explain_state(item: dict) -> tuple[str, str]:
                 f"waiting for the user to add the '{label}' key on the card "
                 "(you cannot do this for them); the card's Add key entry point "
                 "writes it, then Activate commissions the item",
+            )
+        unfilled = ni.unfilled_referenced_params(spec)
+        if unfilled:
+            # needs_params (2026-09-14): name the missing slot exactly like a
+            # missing key — the model must direct the user to the card, never
+            # invent a value or re-create the item.
+            params = spec.get("params") or {}
+            decl = params.get(unfilled[0]) if isinstance(params, dict) else None
+            label = (decl or {}).get("label") or unfilled[0]
+            return (
+                f"this card is a DRAFT with an unfilled parameter ({label!r}); "
+                "the engine never fetches a draft — do not describe this card as live",
+                f"waiting for the user to fill '{label}' on the card (you cannot "
+                "do this for them); then Activate commissions the item",
             )
         return (
             "this card is a DRAFT — the engine will NEVER fetch it until it is "
@@ -1298,6 +1325,19 @@ def _validate_create_ni_args(args: dict) -> None:
                 "interval_minutes", "preview_payload"):
         if args.get(key) is None:
             raise ValueError(f"{key} required")
+    # One-door law (2026-09-14): an ``http_json`` card is the flow's job — the flow
+    # samples the real response and builds the mapping deterministically, so a
+    # model-authored http_json spec (the whole imagined-paths failure class) is
+    # refused HERE, at propose time, before any approval card parks. Every other
+    # source type (model, internal.*, mcp_tool, http_page, http_image, computed)
+    # keeps this tool as its door.
+    source = args.get("source")
+    if isinstance(source, dict) and source.get("type") == "http_json":
+        raise ValueError(
+            "create_ni_item refuses http_json sources — call start_ni_flow with "
+            "the user's request (and source_url if they named one); the flow "
+            "samples the real response and builds the card deterministically"
+        )
     spec = _assemble_spec(args)
     ni.validate_spec(spec)              # closed schema + enums + pipeline shape
     ni.validate_scene(spec["scene"])    # pre-expansion scene caps
@@ -1476,137 +1516,6 @@ def _journal_created(store: object, item_id: str, spec: dict, *, kind: str,
         store.append_journal(item_id, kind, summary)
     except Exception as exc:  # bookkeeping must never mask the create result
         log.warning("ni journal append skipped for %s: %s", item_id, exc)
-
-
-# ---- create_ni_item_from_recipe (§26) --------------------------------------
-
-def _validate_recipe_call(args: dict) -> None:
-    """Pure prevalidate: recipe exists, params match the recipe's declared slots.
-
-    Catalog is a static import — safe from a prevalidate context (no store). Rejects
-    unknown recipe_id up front; refuses caller-supplied secret VALUES (secrets ride
-    the credential PUT after creation, never chat args).
-    """
-    assert isinstance(args, dict), "args must be a dict"
-    recipe_id = args.get("recipe_id")
-    if not isinstance(recipe_id, str) or not recipe_id:
-        raise ValueError("recipe_id required (see list_ni_catalog)")
-    recipe = ni_catalog.get_recipe(recipe_id)
-    if recipe is None:
-        raise ValueError(
-            f"unknown recipe {recipe_id!r} — call list_ni_catalog for the "
-            "available recipes"
-        )
-    params = args.get("params") or {}
-    if not isinstance(params, dict):
-        raise ValueError("params must be an object")  # noqa: TRY004
-    declared = (recipe["spec_template"].get("params") or {})
-    unknown = sorted(set(params) - set(declared))
-    if unknown:
-        raise ValueError(f"unknown params: {unknown}")
-    for name, value in params.items():
-        decl = declared.get(name) or {}
-        if decl.get("kind") == "secret":
-            raise ValueError(
-                f"secret param {name!r} may not be supplied in from_recipe args "
-                "— use the credential PUT on the card after creation"
-            )
-        if not (isinstance(value, (str, int, float))
-                and not isinstance(value, bool)):
-            raise ValueError(  # noqa: TRY004 — one exception class per validator (mirrors ni.py)
-                f"params.{name} must be a string or number"
-            )
-    interval = args.get("interval_minutes")
-    if interval is not None and (not isinstance(interval, int)
-                                  or isinstance(interval, bool)):
-        raise ValueError("interval_minutes must be an integer")
-    title = args.get("title")
-    if title is not None and not isinstance(title, str):
-        raise ValueError("title must be a string")
-
-
-def _prevalidate_create_ni_from_recipe(args: dict) -> None:
-    """Pre-park hook for create_ni_item_from_recipe — surfaces the guide pointer inline."""
-    assert isinstance(args, dict), "args must be a dict"
-    try:
-        _validate_recipe_call(args)
-    except (ValueError, ni.NIError) as exc:
-        raise ValueError(str(exc) + _NI_GUIDE_POINTER) from None
-
-
-def _build_spec_from_recipe(recipe: dict, params: dict, *,
-                             title: str | None,
-                             interval_minutes: int | None) -> dict:
-    """Deterministic build (§26): deep-copy the recipe's spec_template, fill string /
-    number params from the caller (secret slots keep ``ni:self:<name>``), then apply
-    title / interval overrides.
-
-    Interval clamping happens at ``NIStore.add_item`` (``_clamp_interval``); the tool
-    forwards the raw value the caller supplied and lets the store enforce the floor.
-    """
-    assert isinstance(recipe, dict) and isinstance(params, dict), "recipe + params required"
-    spec = json.loads(json.dumps(recipe["spec_template"]))
-    decl = spec.get("params") or {}
-    for name, value in params.items():  # bounded by ni._MAX_PARAMS
-        if name in decl and isinstance(decl[name], dict):
-            decl[name]["value"] = value
-    if title is not None and title:
-        spec["title"] = title
-    if interval_minutes is not None:
-        spec["interval_minutes"] = int(interval_minutes)
-    elif "interval_minutes" not in spec:
-        spec["interval_minutes"] = 60  # match _assemble_spec default posture
-    if "repair_policy" not in spec:
-        # Install-path parity (Phase 4b D2c): safe default when a recipe omits it.
-        spec["repair_policy"] = {"l1": True, "l2_frontier": False}
-    return spec
-
-
-def _create_ni_item_from_recipe(ctx: ToolContext, args: dict) -> dict:
-    """REVIEWED (egress=True): create an NI item DETERMINISTICALLY from a catalog recipe (§26).
-
-    The model chooses a recipe and fills closed parameter slots; the spec is
-    assembled by code (never a model-authored pipeline or scene). Landing +
-    journal + duplicate rules are IDENTICAL to ``_create_ni_item``:
-    secret-kind params always land draft, the case-insensitive title guard
-    fires (opt out via ``allow_duplicate``), a §28 journal entry lands with
-    kind ``recipe`` naming the source recipe.
-
-    The card's approval surface (``source.url`` host + path) is unchanged: the
-    frontend renders it exactly as it does for any create card, because the
-    sealed source is identical to a hand-authored one.
-    """
-    assert ctx.ni is not None, "neural interface unavailable"
-    assert isinstance(args, dict), "args must be a dict"
-    _validate_recipe_call(args)
-    recipe = ni_catalog.get_recipe(str(args["recipe_id"]))
-    assert recipe is not None, "recipe existence already checked by prevalidate"
-    spec = _build_spec_from_recipe(
-        recipe,
-        args.get("params") or {},
-        title=args.get("title"),
-        interval_minutes=args.get("interval_minutes"),
-    )
-    preview = recipe.get("preview_payload") or {}
-    assert isinstance(preview, dict), "recipe preview_payload validated at import"
-    _check_duplicate_title(ctx.ni, str(spec.get("title") or ""),
-                            bool(args.get("allow_duplicate")))
-    # Full re-validation against the assembled spec (belt over the recipe's own
-    # import-time validation, which ran under allow_empty_params=True).
-    ni.validate_spec(spec)
-    _validate_ni_public_url(spec)
-    try:
-        ni.check_composite_depth(ctx.ni, spec)
-    except ni.NIError as exc:
-        raise ValueError(str(exc)) from None
-    item_id = _add_item_with_rewrite(ctx.ni, spec, preview, origin="agent",
-                                       born="recipe")
-    landing = _initial_ni_state(spec, bool(args.get("draft")))
-    if landing != "draft":
-        ctx.ni.commission(item_id)
-    _journal_created(ctx.ni, item_id, spec, kind="recipe",
-                     recipe_id=str(args["recipe_id"]))
-    return {"id": item_id, "state": landing, "recipe_id": str(args["recipe_id"])}
 
 
 # ---- derive_ni_paths (§27) --------------------------------------------------
@@ -1827,8 +1736,7 @@ def _validate_update_ni_patch(args: dict) -> None:
     (a preview-only patch can't be scene-bound without the sealed spec).
     """
     assert isinstance(args, dict), "args must be a dict"
-    if not args.get("item_id"):
-        raise ValueError("item_id required")
+    _require_item_id_shape(args)
     if "pipeline" in args:
         ni._validate_pipeline(args["pipeline"] or [])
     if "scene" in args:
@@ -1878,7 +1786,7 @@ def _update_ni_item(ctx: ToolContext, args: dict) -> dict:
     assert args.get("item_id"), "item_id required"
     current = ctx.ni.get_item(args["item_id"])
     if current is None:
-        raise ValueError("item not found")
+        raise _item_not_found(ctx.ni)
     # §29 door closure: flow- and recipe-born items refuse freeform source /
     # pipeline edits — a fix re-enters the flow at Sampling via remap_ni_item
     # (re-derive against the SAME consented URL) so the flow's determinism
@@ -1965,6 +1873,12 @@ def _initial_ni_state(spec: dict, draft_flag: bool) -> str:
         assert isinstance(name, str), "param name is a string post-validation"
         if isinstance(p, dict) and p.get("kind") == "secret":
             return "draft"
+    # needs_params (2026-09-14): an unfilled REFERENCED non-secret param also
+    # forces draft — a commissioning landing would fail ``param_empty`` on the
+    # first run, and the commission route refuses it anyway. The card collects
+    # the value first (mirrors ni_flow._landing_state).
+    if ni.unfilled_referenced_params(spec):
+        return "draft"
     return "commissioning"
 
 
@@ -1996,14 +1910,18 @@ def _ni_source_effectively_changed(old_spec: dict, new_spec: dict) -> bool:
 
 
 def _validate_ni_public_url(spec: dict) -> None:
-    """J: netguard.validate_public_url on the substituted http_json URL, if any.
+    """J: netguard.validate_public_url on the substituted http_* URL, if any.
 
     Skipped when a referenced string param is still empty (commission re-checks); a
     validation error is surfaced verbatim to the tool caller so the model can fix it.
+    One-door law (2026-09-14): extended from http_json-only to the whole http_*
+    family — http_page / http_image still author through create_ni_item and get
+    the same create-time LAN/SSRF precheck (http_json keeps it as defence-in-depth
+    behind the tool-level refusal).
     """
     assert isinstance(spec, dict), "spec must be a dict"
     source = spec.get("source") or {}
-    if source.get("type") != "http_json":
+    if source.get("type") not in ("http_json", "http_page", "http_image"):
         return
     url = str(source.get("url") or "")
     if not url:
@@ -2013,10 +1931,12 @@ def _validate_ni_public_url(spec: dict) -> None:
     for match in ni._PARAM_PLACEHOLDER.finditer(url):
         name = match.group(1)
         pval = (params.get(name) or {}).get("value") if isinstance(params.get(name), dict) else None
-        if isinstance(pval, str) and not pval:
+        if pval is None or not str(pval).strip():
             return
     try:
         filled = ni.substitute_params(spec)["source"]["url"]
+    except ni.NIError:
+        return  # a param emptied between the guard above and here — commission re-checks
     except ValueError as exc:
         raise ValueError(f"spec.source.url: {exc}") from None
     try:
@@ -2031,7 +1951,7 @@ def _set_ni_item_enabled(ctx: ToolContext, args: dict) -> dict:
     assert args.get("item_id"), "item_id required"
     assert "enabled" in args, "enabled required"
     if ctx.ni.get_item(args["item_id"]) is None:
-        raise ValueError("item not found")
+        raise _item_not_found(ctx.ni)
     ctx.ni.set_enabled(args["item_id"], bool(args["enabled"]))
     return {"ok": True, "id": args["item_id"], "enabled": bool(args["enabled"])}
 
@@ -2052,7 +1972,7 @@ def _run_ni_item_now(ctx: ToolContext, args: dict) -> dict:
     assert args.get("item_id"), "item_id required"
     item = ctx.ni.get_item(args["item_id"])
     if item is None:
-        raise ValueError("item not found")
+        raise _item_not_found(ctx.ni)
     if item["state"] == "draft":
         raise ValueError("cannot run a draft item — commission it first")
     if item["state"] == "broken":
@@ -2101,6 +2021,135 @@ def _prevalidate_start_ni_flow(args: dict) -> None:
         raise ValueError("allow_duplicate must be a boolean")
 
 
+# D5 (2026-09-14): the invented-id class. The model slugged card titles into
+# fake ids ("aapl-quote-every-30m") and minted plausible-looking UUIDs — each
+# one parking a REVIEWED approval card the user tapped for a call that could
+# never work. Two-layer fix: item_id args must be UUID-SHAPED at prevalidate
+# (pure, so the garbage bounces before any card parks), and an execute-time
+# miss returns the REAL card list so the model self-corrects in one step.
+_ITEM_ID_RE = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+    r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+
+
+def _require_item_id_shape(args: dict) -> None:
+    """Pure prevalidate: item_id present and UUID-shaped (ids are never invented)."""
+    assert isinstance(args, dict), "args must be a dict"
+    item_id = args.get("item_id")
+    if not item_id:
+        raise ValueError("item_id required")
+    if not isinstance(item_id, str) or not _ITEM_ID_RE.match(item_id):
+        raise ValueError(
+            f"item_id {str(item_id)[:60]!r} is not a card id — ids are UUIDs "
+            "returned by list_ni_items / read_ni_item / start_ni_flow; never "
+            "invent one or slug a title"
+        )
+
+
+def _item_not_found(store: object) -> ValueError:
+    """Execute-time miss: name the cards that DO exist so the model self-corrects."""
+    assert store is not None, "store required"
+    rows = []
+    try:
+        for item in store.list_items():  # bounded by NIStore._MAX_ITEMS
+            rows.append(f"{item['id']} = {str(item['spec'].get('title') or '')[:60]!r}")
+    except Exception:  # listing must never mask the original miss
+        rows = []
+    listing = ("; existing cards: " + ", ".join(rows[:20])) if rows else         "; there are no cards yet"
+    return ValueError("item not found" + listing)
+
+
+
+def _prevalidate_ni_item_id(args: dict) -> None:
+    """Pre-park hook for the item-addressed NI tools that need nothing beyond a
+    real-looking id: run_ni_item_now, set_ni_item_enabled, delete_ni_item,
+    read_ni_item. Bounces an invented id BEFORE an approval card parks (D5).
+    """
+    _require_item_id_shape(args)
+
+
+# One-door law (2026-09-14): the abandonment class. ``start_ni_flow`` used to
+# return ``{started: true}`` instantly — an async gap the chat model filled by
+# "helping" (web-searching sources, re-creating the card through other tools)
+# while the flow worked. The engine settles in 2-4s, so the tool now WAITS a
+# bounded few seconds and returns the flow's REAL resulting state plus a
+# ``next_step`` directive; the common case has no gap for the model to wander
+# into, and the timeout case says exactly what to do (poll read_ni_item) and
+# what not to do (everything else).
+_FLOW_WAIT_SECONDS = 8.0
+_FLOW_POLL_SECONDS = 0.25
+_FLOW_SETTLED_STATES: frozenset[str] = frozenset({
+    "ready", "confirm_source", "source", "awaiting_credential",
+    "awaiting_params", "failed", "unsupported",
+})
+
+
+def _await_flow_settle(store: object, item_id: str) -> dict | None:
+    """Poll the sealed flow record until it reaches a settled state or the
+    bounded wait elapses. Returns the last record read (None if unreadable).
+    """
+    assert store is not None and item_id, "store + id required"
+    deadline = time.monotonic() + _FLOW_WAIT_SECONDS
+    record = ni_flow._flow_read(store, item_id)
+    while time.monotonic() < deadline:  # bounded by _FLOW_WAIT_SECONDS
+        if record is not None and str(record.get("state") or "") in _FLOW_SETTLED_STATES:
+            return record
+        time.sleep(_FLOW_POLL_SECONDS)
+        record = ni_flow._flow_read(store, item_id)
+    return record
+
+
+def _flow_next_step(record: dict | None) -> str:
+    """The single directive the model should follow for a flow record's state."""
+    state = str((record or {}).get("state") or "")
+    if state == "ready":
+        return ("the card is built and commissioning — report its state truthfully "
+                "(NOT 'live'); the user validates the first real result on the card. "
+                "Do not create anything else for this request.")
+    if state == "confirm_source":
+        return ("a vetted source was matched — tell the user which one (see "
+                "source_url) and call confirm_ni_flow_source with this item_id and "
+                "that exact source_url. Do not research or create anything else.")
+    if state == "source":
+        return ("no vetted source matched — present the user 2-3 candidate source "
+                "URLs with provenance; when they pick one, call resume_ni_flow with "
+                "this item_id and their URL. Do not create a card any other way.")
+    if state == "awaiting_credential":
+        return ("the card needs an API key — tell the user to tap 'Add key' on the "
+                "card itself (keys are never entered in chat), then Activate it. "
+                "Nothing else to do in chat.")
+    if state == "awaiting_params":
+        return ("the card needs a value the flow could not derive (see the card's "
+                "'Needs:' line) — tell the user to tap 'Fill' on the card, then "
+                "Activate it. Never invent the value or re-create the card.")
+    if state == "failed":
+        detail = str((record or {}).get("error") or "")
+        return (f"the flow failed ({detail or 'see the card'}) — report this "
+                "honestly; retry start_ni_flow at most once if transient, or ask "
+                "the user for a different source.")
+    if state == "unsupported":
+        detail = str((record or {}).get("error") or "")
+        return (f"the flow declined this request ({detail or 'unsupported'}) — tell "
+                "the user why and what would make it workable.")
+    return ("the flow is still working in the background — call read_ni_item with "
+            "this id in a moment to see the result. Do NOT research sources, call "
+            "create_ni_item, or start another flow for this request meanwhile.")
+
+
+def _flow_tool_result(store: object, item_id: str, *, started: bool,
+                       fallback_url: object = None) -> dict:
+    """Shared result shape for the worker-spawning flow tools: wait, then report
+    the real state + next_step (+ the record's source_url when it carries one).
+    """
+    assert store is not None and item_id, "store + id required"
+    record = _await_flow_settle(store, item_id)
+    state = str((record or {}).get("state") or "intent")
+    url = (record or {}).get("source_url") or fallback_url
+    return {"id": item_id, "started": started, "state": state,
+            "source_url": url if isinstance(url, str) else None,
+            "next_step": _flow_next_step(record)}
+
+
 def _start_ni_flow(ctx: ToolContext, args: dict) -> dict:
     """REVIEWED (egress=True): open a Neural Interface flow (§29).
 
@@ -2131,15 +2180,14 @@ def _start_ni_flow(ctx: ToolContext, args: dict) -> dict:
         ctx.ni, item_id,
         source_url=source_url if isinstance(source_url, str) else None,
     )
-    return {"id": item_id, "started": bool(started),
-            "state": "intent", "source_url": source_url}
+    return _flow_tool_result(ctx.ni, item_id, started=bool(started),
+                              fallback_url=source_url)
 
 
 def _prevalidate_resume_ni_flow(args: dict) -> None:
     """Pre-park hook for resume_ni_flow: item_id + http source_url required."""
     assert isinstance(args, dict), "args must be a dict"
-    if not args.get("item_id"):
-        raise ValueError("item_id required")
+    _require_item_id_shape(args)
     source_url = args.get("source_url")
     if not isinstance(source_url, str) or not source_url:
         raise ValueError("source_url required (non-empty string)")
@@ -2161,26 +2209,23 @@ def _resume_ni_flow(ctx: ToolContext, args: dict) -> dict:
     _prevalidate_resume_ni_flow(args)
     item_id = str(args["item_id"])
     if ctx.ni.get_item(item_id) is None:
-        raise ValueError("item not found")
+        raise _item_not_found(ctx.ni)
     record = ni_flow._flow_read(ctx.ni, item_id)
     if record is None:
         raise ValueError("no active flow on this item — call start_ni_flow first")
     source_url = str(args["source_url"])
-    # Minor (audit 2026-09-13): the resume returns the TRUE restart stage.
-    # The worker transitions the record to ``sampling`` the moment the flow
-    # begins fetching; before that, the sealed record still reads whatever
-    # state the pause left (``source``). We report ``sampling`` because that
-    # is what the worker's first action will write.
+    # One-door law (2026-09-14): the resume now WAITS for the flow to settle
+    # (same bounded wait as start_ni_flow) and reports the real resulting
+    # state + next_step, not a prediction of the worker's first transition.
     started = ni_flow.start_flow_worker(ctx.ni, item_id, source_url=source_url)
-    return {"id": item_id, "started": bool(started),
-            "state": "sampling", "source_url": source_url}
+    return _flow_tool_result(ctx.ni, item_id, started=bool(started),
+                              fallback_url=source_url)
 
 
 def _prevalidate_remap_ni_item(args: dict) -> None:
     """Pre-park hook for remap_ni_item: item_id required."""
     assert isinstance(args, dict), "args must be a dict"
-    if not args.get("item_id"):
-        raise ValueError("item_id required")
+    _require_item_id_shape(args)
 
 
 def _remap_ni_item(ctx: ToolContext, args: dict) -> dict:
@@ -2204,7 +2249,7 @@ def _remap_ni_item(ctx: ToolContext, args: dict) -> dict:
     item_id = str(args["item_id"])
     item = ctx.ni.get_item(item_id)
     if item is None:
-        raise ValueError("item not found")
+        raise _item_not_found(ctx.ni)
     source = item["spec"].get("source") or {}
     if not isinstance(source, dict) or source.get("type") != "http_json":
         raise ValueError(
@@ -2220,15 +2265,14 @@ def _remap_ni_item(ctx: ToolContext, args: dict) -> dict:
     record["_remap"] = True
     ni_flow._flow_write(ctx.ni, item_id, record)
     started = ni_flow.start_flow_worker(ctx.ni, item_id, source_url=url)
-    return {"id": item_id, "started": bool(started), "state": "sampling",
-            "source_url": url}
+    return _flow_tool_result(ctx.ni, item_id, started=bool(started),
+                              fallback_url=url)
 
 
 def _prevalidate_confirm_ni_flow_source(args: dict) -> None:
     """Pre-park hook for confirm_ni_flow_source: item_id + http source_url required."""
     assert isinstance(args, dict), "args must be a dict"
-    if not args.get("item_id"):
-        raise ValueError("item_id required")
+    _require_item_id_shape(args)
     source_url = args.get("source_url")
     if not isinstance(source_url, str) or not source_url:
         raise ValueError("source_url required (non-empty string)")
@@ -2256,11 +2300,12 @@ def _confirm_ni_flow_source(ctx: ToolContext, args: dict) -> dict:
     _prevalidate_confirm_ni_flow_source(args)
     item_id = str(args["item_id"])
     if ctx.ni.get_item(item_id) is None:
-        raise ValueError("item not found")
+        raise _item_not_found(ctx.ni)
     result = ni_flow.continue_from_recipe_confirm(ctx.ni, item_id,
                                                     str(args["source_url"]))
     return {"id": item_id, "state": str(result.get("state") or ""),
-            "source_url": args["source_url"]}
+            "source_url": args["source_url"],
+            "next_step": _flow_next_step(result)}
 
 
 _TOOLS: tuple[Tool, ...] = (
@@ -2714,6 +2759,7 @@ _TOOLS: tuple[Tool, ...] = (
         tier=Tier.OBSERVE,
         handler=_read_ni_item,
         egress=False,
+        prevalidate=_prevalidate_ni_item_id,
     ),
     Tool(
         name="create_ni_item",
@@ -2776,45 +2822,12 @@ _TOOLS: tuple[Tool, ...] = (
         prevalidate=_prevalidate_create_ni,
     ),
     Tool(
-        name="create_ni_item_from_recipe",
-        description="MANDATED first-path Neural Interface creator (§26). Pick a recipe from "
-                    "list_ni_catalog and fill its parameter slots — the spec, pipeline, and "
-                    "scene are already proven against a real response shape, so the model "
-                    "never authors extract paths. Args: recipe_id, params (name -> "
-                    "string|number; secrets never in chat args — the user enters them via "
-                    "the credential PUT on the card AFTER creation), optional title / "
-                    "interval_minutes overrides, and allow_duplicate to skip the "
-                    "case-insensitive title guard. Landing rules mirror create_ni_item: any "
-                    "secret-kind param lands the item in draft (the tool has no SecretStore "
-                    "so the credential must be added on the card first). Reviewed egress "
-                    "(the card shows the fetched host unmissably); approval is consent.",
-        params_schema={
-            "type": "object",
-            "additionalProperties": False,
-            "properties": {
-                "recipe_id": {"type": "string", "maxLength": 80},
-                # params values are simple scalars — the closed shape lives on the
-                # recipe's spec_template; per-param names are validated by handler.
-                "params": {"type": "object"},
-                "title": {"type": "string", "maxLength": 300},
-                "interval_minutes": {"type": "integer"},
-                "draft": {"type": "boolean"},
-                "allow_duplicate": {"type": "boolean"},
-            },
-            "required": ["recipe_id"],
-        },
-        tier=Tier.REVIEWED,
-        handler=_create_ni_item_from_recipe,
-        egress=True,
-        prevalidate=_prevalidate_create_ni_from_recipe,
-    ),
-    Tool(
         name="derive_ni_paths",
         description="Sample-grounded freeform authoring helper (§27). Walk one real fetched "
                     "sample and return candidate leaf paths in the §4.1 grammar — {path, "
                     "type, example} entries the model copies directly into an extract "
-                    "stage. NEVER a substitute for a recipe: when a recipe fits, use "
-                    "create_ni_item_from_recipe instead. Pass EXACTLY ONE of two args: "
+                    "stage. NEVER a substitute for the flow: http_json cards go through "
+                    "start_ni_flow, which derives paths itself. Pass EXACTLY ONE of two args: "
                     "``sample`` (a JSON object) OR ``sample_json`` (a JSON-encoded string, "
                     "≤32KB — use this when web_fetch returned bytes/text you have not yet "
                     "parsed). Keys outside the §4.1 grammar (spaces, dots, punctuation) "
@@ -2911,6 +2924,7 @@ _TOOLS: tuple[Tool, ...] = (
         tier=Tier.REVIEWED,
         handler=_set_ni_item_enabled,
         egress=True,
+        prevalidate=_prevalidate_ni_item_id,
     ),
     Tool(
         name="run_ni_item_now",
@@ -2926,27 +2940,33 @@ _TOOLS: tuple[Tool, ...] = (
         tier=Tier.REVIEWED,
         handler=_run_ni_item_now,
         egress=True,
+        prevalidate=_prevalidate_ni_item_id,
     ),
     Tool(
         name="start_ni_flow",
-        description="§29 Neural Interface Flow Engine — the MANDATED first path for any new "
-                    "card request. Code owns intent → source → sampling → mapping → assembly "
-                    "→ handoff; models fill exactly two closed-schema blanks (intent + path "
-                    "mapping). Args: request (the user's words, ≤2000 chars) and optional "
-                    "source_url (an http URL the user already named — the approval card renders "
-                    "it unmissably). A draft shell appears on the board immediately with live "
-                    "flow state (intent / source / sampling / mapping / assembling / "
-                    "awaiting_credential / ready / unsupported / failed). Reviewed egress; "
-                    "approving is consent for the fetch.",
+        description="§29 Neural Interface Flow Engine — the ONLY path for a new card. "
+                    "Code owns intent → source → sampling → mapping → assembly → handoff; "
+                    "models fill exactly two closed-schema blanks (intent + path mapping). "
+                    "Args: request (the user's request IN THEIR OWN WORDS, verbatim — never "
+                    "paraphrase, never change a number or cadence they said; ≤2000 chars) "
+                    "and optional source_url (an http URL the user already named — the "
+                    "approval card renders it unmissably). The tool WAITS for the flow (a "
+                    "few seconds) and returns the resulting state plus a next_step "
+                    "directive — follow it and do nothing else for this card (no "
+                    "web_search for sources, no create_ni_item, no second flow). Reviewed "
+                    "egress; approving is consent for the fetch.",
         params_schema={
             "type": "object",
             "additionalProperties": False,
             "properties": {
+                # D4 (2026-09-14): the request is the intent stage's ONLY input —
+                # a paraphrase that turns "every 30 minutes" into "every 5" ships
+                # the wrong cadence into the sealed spec. Verbatim or nothing.
                 "request": {"type": "string", "maxLength": _MAX_FLOW_REQUEST},
                 "source_url": {"type": "string", "maxLength": ni._MAX_URL},
                 # M4 (audit 2026-09-13): the case-insensitive duplicate-title
-                # guard mirrors ``create_ni_item`` / ``create_ni_item_from_recipe``;
-                # a caller who wants two shells with the same title opts in here.
+                # guard mirrors ``create_ni_item``; a caller who wants two shells
+                # with the same title opts in here.
                 "allow_duplicate": {"type": "boolean"},
             },
             "required": ["request"],
@@ -3037,6 +3057,7 @@ _TOOLS: tuple[Tool, ...] = (
         tier=Tier.IRREVERSIBLE,
         handler=_delete_ni_item,
         egress=False,
+        prevalidate=_prevalidate_ni_item_id,
     ),
 )
 
@@ -3054,7 +3075,7 @@ SCHEDULE_WRITE_TOOLS = frozenset({"create_schedule", "update_schedule", "set_sch
 # (an NI item pulls its source on a timer, so an injected background prompt creating/rewriting
 # one could keep exfiltrating), so these join UNATTENDED_NEVER_AUTO below. delete_ni_item is
 # IRREVERSIBLE and always parks, so it isn't in the write set (mirrors SCHEDULE_WRITE_TOOLS).
-NI_WRITE_TOOLS = frozenset({"create_ni_item", "create_ni_item_from_recipe", "update_ni_item", "set_ni_item_enabled", "run_ni_item_now", "start_ni_flow", "resume_ni_flow", "confirm_ni_flow_source", "remap_ni_item"})
+NI_WRITE_TOOLS = frozenset({"create_ni_item", "update_ni_item", "set_ni_item_enabled", "run_ni_item_now", "start_ni_flow", "resume_ni_flow", "confirm_ni_flow_source", "remap_ni_item"})
 # Tools an UNATTENDED turn (scheduled run, its resume) may never run on a standing grant, however
 # the user answered in chat: schedule writes (self-perpetuation) and memory writes — a remembered
 # fact lands in the system prompt of every later turn, so a feed item or web page steering an

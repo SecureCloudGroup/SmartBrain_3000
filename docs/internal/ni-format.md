@@ -1039,20 +1039,27 @@ fails most of the time. Recipes make the primary creation path deterministic.
   `sample_response` (a trimmed REAL response the pipeline was written against).
   The bundled catalog upgrades from URL templates to recipes; the same §19/§2
   validators apply at import and in tests.
-- New REVIEWED egress tool `create_ni_item_from_recipe`:
-  `{recipe_id, params, title?, interval_minutes?}` → the spec is built
-  DETERMINISTICALLY from the recipe (the model authors nothing — it chooses a
-  recipe and fills closed parameter slots). Landing/credential/consent rules
-  identical to create. The host the card would call stays unmissable on the
-  approval surface: the tool args carry only the recipe id + params, so the
-  pending list resolves the recipe's `url_template` server-side from the
-  sealed catalog and threads it into each tile as `recipe_url` (the frontend
-  renders "Fetches: <url>"). The resolver never rewrites args; the executor
-  still reads the recipe itself, so the sealed source and the promoted URL
-  come from the same source of truth.
-- The guide + tool descriptions make recipes the MANDATED first path; freeform
-  `create_ni_item` is the fallback for requests no recipe covers, and §27
-  governs it.
+- **One-door law (2026-09-14)**: the `create_ni_item_from_recipe` tool is
+  RETIRED from the model registry. Field lesson: two coexisting authoring
+  doors meant the model picked the legacy one mid-flow and created a card
+  with an EMPTY `symbol` param — Finnhub answered sentinel zeros for
+  `?symbol=` and the card commissioned a lying $0.00 quote. Recipes now
+  install ONLY through the flow (§29): `match_recipe` → `confirm_source`
+  pause (the approval card renders the recipe's `url_template` verbatim) →
+  `confirm_ni_flow_source` → deterministic handoff. The handoff fills param
+  slots by CODE where derivable (a `symbol` slot takes the same corroborated
+  ticker token that matched the finance recipe); anything code cannot derive
+  stays empty ON PURPOSE — the landing rule then forces `draft` and the
+  card's needs_params affordance asks the user (never a guessed value, never
+  a model blank). `ni:self:<name>` refs rewrite to `ni:<item_id>:<name>` at
+  handoff (install-path parity). The pending-tile `recipe_url` side-channel
+  survives for historical tiles only.
+- The guide + tool descriptions make the flow the ONLY path for `http_json`;
+  `create_ni_item` REFUSES `http_json` sources at prevalidate and remains the
+  door for the source types the flow does not build (model, internal.*,
+  mcp_tool, http_page, http_image, computed) — §27 governs the http_page
+  long tail, and the create-time netguard precheck now covers the whole
+  http_* family.
 - Proving: repo tests validate every recipe structurally (never network);
   `tools/ni-library/prove.py` fetches each recipe's endpoint LIVE and runs its
   pipeline end-to-end — run before releases and nightly in the future registry
@@ -1118,6 +1125,19 @@ When no recipe fits, blind drafting is forbidden by protocol:
 - `create_ni_item` refuses a title that case-insensitively matches an existing
   item unless `allow_duplicate: true` — the error names the existing card and
   points at `update_ni_item`.
+- **needs_params (2026-09-14)** — the unfilled-slot posture, four layers deep:
+  a `{{param:X}}` that resolves to empty/None raises `param_empty` at
+  `substitute_params` (the engine NEVER fetches `?symbol=`); the landing rules
+  (`_initial_ni_state` / flow `_landing_state`) force `draft` while any
+  referenced non-secret param is empty; the commission route 409s naming the
+  param; board rows add `needs_params: [{name, label}]` and the card renders
+  a **Fill** affordance (Desktop-local `PUT /api/ni/items/{id}/param`; secrets
+  are refused there — they belong to the credential PUT). `param_empty` is
+  NOT L1-repairable: only the user can supply the value.
+- **item ids are never invented (2026-09-14)**: every item-addressed NI tool
+  prevalidates `item_id` as UUID-shaped (a slugged title bounces BEFORE an
+  approval card parks), and an execute-time miss returns the real card list
+  (id = title) so the model self-corrects in one step.
 
 ## 29. The NI Flow Engine (deterministic creation, POC-validated)
 
@@ -1232,3 +1252,18 @@ fetching <host>" (confirm_source) / "waiting for a source pick" (source) /
   the shipped engine. Docstring is honest: no CI wires this file up (CI
   runs the pytest suite only); the module `ni_flow` is imported at top
   level (`--engine` requires it).
+
+**Flow-tool wait + directives (2026-09-14)** — the abandonment fix: the
+worker-spawning flow tools (`start_ni_flow` / `resume_ni_flow` /
+`remap_ni_item`) WAIT a bounded few seconds (`_FLOW_WAIT_SECONDS`, 8s, 0.25s
+poll) for the flow to settle and return the REAL resulting state plus a
+`next_step` directive (ready / confirm_source / source / awaiting_credential /
+failed / unsupported each carry a specific instruction; a timeout says "call
+read_ni_item — do NOT research sources or create anything else meanwhile").
+Field lesson: the fire-and-forget `{started: true}` result left an async gap
+the chat model filled by web-searching Alpha Vantage and re-creating the card
+through the legacy recipe tool. The engine settles in 2-4s live, so the
+common case now has no gap at all. `start_ni_flow.request` is documented as
+the user's words VERBATIM (never paraphrase, never change a number — the
+intent stage's only input); the request text stays visible on the approval
+card so a distorted cadence is catchable at consent time.

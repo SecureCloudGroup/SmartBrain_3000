@@ -701,16 +701,18 @@ def test_ni_write_tools_are_never_auto_in_unattended_turns() -> None:
     from smartbrain_3000 import tools
 
     assert tools.NI_WRITE_TOOLS <= tools.UNATTENDED_NEVER_AUTO
-    # §26 added create_ni_item_from_recipe; §29 added start_ni_flow /
-    # resume_ni_flow / remap_ni_item; C3 audit 2026-09-13 added
-    # confirm_ni_flow_source — same posture (REVIEWED egress, joins
-    # UNATTENDED_NEVER_AUTO, non-rememberable) as the freeform create tool.
+    # §29 added start_ni_flow / resume_ni_flow / remap_ni_item; C3 audit
+    # 2026-09-13 added confirm_ni_flow_source — same posture (REVIEWED egress,
+    # joins UNATTENDED_NEVER_AUTO, non-rememberable) as the freeform create
+    # tool. One-door law 2026-09-14 RETIRED create_ni_item_from_recipe from
+    # the model registry (recipes ride inside the flow with a confirm pause).
     assert tools.NI_WRITE_TOOLS == {
-        "create_ni_item", "create_ni_item_from_recipe",
+        "create_ni_item",
         "update_ni_item", "set_ni_item_enabled", "run_ni_item_now",
         "start_ni_flow", "resume_ni_flow", "confirm_ni_flow_source",
         "remap_ni_item",
     }
+    assert "create_ni_item_from_recipe" not in {t.name for t in tools._TOOLS}
 
 
 def test_ni_tools_are_never_rememberable() -> None:
@@ -829,7 +831,7 @@ def test_update_ni_item_referenced_param_change_re_consents() -> None:
     ctx, _c, _k = _tool_ctx()
     args = _tool_spec_args()
     args["params"] = {"sym": {"label": "Ticker", "kind": "string", "value": "ACME"}}
-    args["source"] = {"type": "http_json",
+    args["source"] = {"type": "http_page",
                       "url": "https://api.example.com/q?sym={{param:sym}}",
                       "headers": {}}
     args["preview_payload"] = {"text": "preview"}
@@ -859,7 +861,7 @@ def test_read_ni_item_provenance_first_and_no_secret_value() -> None:
     """Provenance line is the FIRST key; header $secret refs return as NAMES, never values."""
     ctx, _c, _k = _tool_ctx()
     args = _tool_spec_args()
-    args["source"] = {"type": "http_json",
+    args["source"] = {"type": "http_page",
                       "url": "https://api.example.com/q",
                       "headers": {"X-Api-Key": {"$secret": "ni:x:api_key"}}}
     args["preview_payload"] = {"text": "preview"}
@@ -959,7 +961,7 @@ def test_create_ni_item_defaults_to_commissioning_and_secret_forces_draft() -> N
     args2.pop("draft")
     args2["title"] = "Weather (keyed)"
     args2["params"] = {"api_key": {"label": "Key", "kind": "secret", "value": ""}}
-    args2["source"] = {"type": "http_json",
+    args2["source"] = {"type": "http_page",
                        "url": "https://api.example.com/q",
                        "headers": {"X-Api-Key": {"$secret": "ni:self:api_key"}}}
     out2 = _tool_call("create_ni_item", ctx, args2)
@@ -1286,7 +1288,7 @@ def test_create_ni_item_url_validation_rejects_lan_host() -> None:
     ctx, _c, _k = _tool_ctx()
     args = _tool_spec_args()
     args.pop("draft")
-    args["source"] = {"type": "http_json",
+    args["source"] = {"type": "http_page",
                       "url": "http://127.0.0.1:9000/q",
                       "headers": {}}
     args["preview_payload"] = {"text": "preview"}
@@ -1910,7 +1912,7 @@ def test_create_ni_item_carries_history_and_alerts_through_tool(monkeypatch: pyt
     ctx, _c, _k = _tool_ctx()
     args = _tool_spec_args()
     args.pop("draft")
-    args["source"] = {"type": "http_json",
+    args["source"] = {"type": "http_page",
                       "url": "https://api.example.com/q",
                       "headers": {}}
     args["preview_payload"] = {"text": "preview"}
@@ -1936,7 +1938,7 @@ def test_create_ni_item_history_bound_spark_preview_renders(monkeypatch: pytest.
     ctx, _c, _k = _tool_ctx()
     args = _tool_spec_args()
     args.pop("draft")
-    args["source"] = {"type": "http_json",
+    args["source"] = {"type": "http_page",
                       "url": "https://api.example.com/q",
                       "headers": {}}
     args["pipeline"] = [{"op": "extract", "paths": {"price": "price"}}]
@@ -3982,7 +3984,7 @@ def test_L9_delete_route_removes_item_scoped_secret_keys() -> None:
                     "title": "Weather", "goal": "show the temp",
                     "params": {"api_key": {"label": "Key", "kind": "secret",
                                             "value": "ni:self:api_key"}},
-                    "source": {"type": "http_json",
+                    "source": {"type": "http_page",
                                 "url": "https://api.example.com/q",
                                 "headers": {"X-Api-Key": {"$secret": "ni:self:api_key"}}},
                     "pipeline": [], "scene": _scene_text("preview"),
@@ -4295,7 +4297,7 @@ def test_prevalidate_bounces_update_patch_with_bad_pipeline() -> None:
     update = tools.get_tool("update_ni_item")
     assert update.prevalidate is not None, "update_ni_item must carry a prevalidate hook"
     with pytest.raises(ValueError) as excinfo:
-        update.prevalidate({"item_id": "any",
+        update.prevalidate({"item_id": "12345678-1234-1234-1234-1234567890ab",
                              "pipeline": [{"op": "jmespath", "as": "x"}]})
     msg = str(excinfo.value)
     assert "extract" in msg and "read_ni_spec_guide" in msg, (
@@ -4307,7 +4309,8 @@ def test_prevalidate_accepts_bare_update_patch() -> None:
     """A tiny patch (title-only) has nothing deep to validate — prevalidate passes."""
     from smartbrain_3000 import tools
 
-    tools.get_tool("update_ni_item").prevalidate({"item_id": "any", "title": "Renamed"})
+    tools.get_tool("update_ni_item").prevalidate(
+        {"item_id": "12345678-1234-1234-1234-1234567890ab", "title": "Renamed"})
 
 
 # --- Phase v-next (§29 flow engine): where transform + computed source ----
@@ -4523,3 +4526,49 @@ def test_computed_source_interpreted_flag_stays_off() -> None:
     row = ni_routes._board_row(store, store.get_item(iid))
     assert row["interpreted"] is False
 
+
+
+# ---- needs_params wave (2026-09-14) ---------------------------------------
+
+def test_substitute_params_blocks_empty_referenced_param() -> None:
+    """D2: a ``{{param:X}}`` resolving to empty (or None) raises
+    NIError('param_empty') — the $0.00-Finnhub class: an unfilled slot must
+    never fetch, not substitute to ``?symbol=``."""
+    spec = _basic_spec(
+        params={"symbol": {"label": "Ticker", "kind": "string", "value": ""}},
+        source={"type": "http_json",
+                "url": "https://api.example.com/q?symbol={{param:symbol}}",
+                "headers": {}},
+    )
+    with pytest.raises(nimod.NIError) as excinfo:
+        nimod.substitute_params(spec)
+    assert excinfo.value.kind == "param_empty" and excinfo.value.detail == "symbol"
+    # None value blocks identically (never the literal string "None").
+    spec["params"]["symbol"]["value"] = None
+    with pytest.raises(nimod.NIError):
+        nimod.substitute_params(spec)
+    # A filled value substitutes as before.
+    spec["params"]["symbol"]["value"] = "AAPL"
+    filled = nimod.substitute_params(spec)
+    assert filled["source"]["url"].endswith("?symbol=AAPL")
+
+
+def test_run_item_records_param_empty_failure() -> None:
+    """D2 engine backstop: a run against an unfilled referenced param fails with
+    the ``param_empty`` class on the run row — never a 200-ok sentinel card."""
+    from smartbrain_3000 import gateway as gateway_mod
+    store, _conn, _k = _store()
+    spec = _basic_spec(
+        source={"type": "http_json",
+                "url": "https://api.example.com/q?symbol={{param:symbol}}",
+                "headers": {}},
+        params={"symbol": {"label": "Ticker", "kind": "string", "value": ""}},
+    )
+    item_id = store.add_item(spec, {"text": "preview"})
+    store.commission(item_id)
+    with pytest.raises(nimod.NIError) as excinfo:
+        nimod.run_item(store, item_id, gateway_mod=gateway_mod,
+                       secrets_store=object())
+    assert excinfo.value.kind == "param_empty"
+    runs = store.list_runs(item_id)
+    assert runs and str(runs[0]["error"]).startswith("param_empty")

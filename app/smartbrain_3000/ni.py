@@ -2034,6 +2034,34 @@ def _check_llm_field_type(value: object, kind: str) -> bool:
 
 # --- param substitution + bind (pure) -------------------------------------
 
+def unfilled_referenced_params(spec: dict) -> list[str]:
+    """needs_params (2026-09-14): names of NON-secret params the spec references
+    via ``{{param:X}}`` whose value is still empty/None — in declaration order.
+
+    The shared predicate behind the whole unfilled-slot posture: the engine
+    refuses the run (``param_empty``), landing rules force draft, commission
+    refuses activation, and the board surfaces the list. Referenced-ness is
+    computed over the spec MINUS the params block, so a declared-but-unused
+    slot never blocks anything.
+    """
+    assert isinstance(spec, dict), "spec must be a dict"
+    params = spec.get("params") or {}
+    if not isinstance(params, dict) or not params:
+        return []
+    body = json.dumps({k: v for k, v in spec.items() if k != "params"})
+    referenced = set(_PARAM_PLACEHOLDER.findall(body))
+    out: list[str] = []
+    for name, decl in params.items():  # bounded by _MAX_PARAMS
+        if not isinstance(decl, dict) or decl.get("kind") == "secret":
+            continue
+        if name not in referenced:
+            continue
+        value = decl.get("value")
+        if value is None or not str(value).strip():
+            out.append(str(name))
+    return out
+
+
 def substitute_params(spec: dict) -> dict:
     """Return a copy of ``spec`` with ``{{param:X}}`` filled from ``spec.params`` values.
 
@@ -2099,7 +2127,17 @@ def _resolve_param_string(value: str, params: dict, *, path: str,
             raise ValueError(f"{path}: param {name!r} malformed")
         if p["kind"] == "secret":
             raise ValueError(f"{path}: secret param {name!r} may not be substituted inline")
-        raw = str(p.get("value"))
+        # needs_params (2026-09-14): a referenced-but-unfilled param must BLOCK the
+        # run, not substitute to "" (or the literal "None"). A frozen Finnhub URL
+        # run as ``?symbol=`` returns sentinel zeros with status 200 — the card then
+        # commissions a lying $0.00 quote. Generic rule: every ``{{param:X}}`` that
+        # resolves to nothing is a hard, host-free failure the health surface can
+        # name — same posture as a missing credential, and NOT L1-repairable (only
+        # the user can supply the value).
+        value = p.get("value")
+        raw = "" if value is None else str(value)
+        if not raw.strip():
+            raise NIError("param_empty", name)
         return _url_quote(raw, safe="") if url_encode else raw
 
     return _PARAM_PLACEHOLDER.sub(_one, value)

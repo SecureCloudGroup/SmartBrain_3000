@@ -482,10 +482,12 @@ def test_start_ni_flow_creates_shell_and_flow_record(monkeypatch) -> None:
         return True
 
     monkeypatch.setattr(ni_flow, "start_flow_worker", _fake_spawn)
+    monkeypatch.setattr(tools, "_FLOW_WAIT_SECONDS", 0.05)
     out = tools.get_tool("start_ni_flow").handler(
         ctx, {"request": "show me AAPL",
               "source_url": "https://query1.finance.yahoo.com/v8/finance/chart/AAPL"})
     assert out["state"] == "intent" and out["id"]
+    assert "read_ni_item" in out["next_step"], "timeout directive must say how to poll"
     assert fired["id"] == out["id"]
     assert fired["source_url"] == \
         "https://query1.finance.yahoo.com/v8/finance/chart/AAPL"
@@ -530,6 +532,7 @@ def test_remap_ni_item_re_enters_flow(monkeypatch) -> None:
         return True
 
     monkeypatch.setattr(ni_flow, "start_flow_worker", _fake_spawn)
+    monkeypatch.setattr(tools, "_FLOW_WAIT_SECONDS", 0.05)
     out = tools.get_tool("remap_ni_item").handler(ctx, {"item_id": item_id})
     # H2 (audit 2026-09-13): remap re-enters at Sampling, never Intent — the
     # tool's returned state reports the true restart stage.
@@ -1032,3 +1035,103 @@ def test_quakes_flow_reaches_ready_on_recorded_fixture() -> None:
     assert result["state"] == "ready", f"state={result['state']} rec={result}"
     item = store.get_item(item_id)
     assert item["spec"]["source"]["url"] == url
+
+
+# ---- one-door law + needs_params wave (2026-09-14) -----------------------
+# Field failure: "30 min AAPL card" — the chat model started a flow, wandered
+# off during the async gap (web-searching sources), bypassed the flow via
+# create_ni_item_from_recipe with an EMPTY symbol param, and commissioned a
+# card rendering $0.00 "ok" (Finnhub returns sentinel zeros for empty symbol).
+
+def test_create_ni_item_refuses_http_json_at_prevalidate() -> None:
+    """D1: an http_json source bounces at propose time with a flow pointer —
+    the whole model-authored-external-fetch class closes before any card parks.
+    """
+    tool = tools.get_tool("create_ni_item")
+    args = {
+        "title": "X", "goal": "g",
+        "source": {"type": "http_json", "url": "https://api.example.com/q",
+                   "headers": {}},
+        "pipeline": [], "scene": {"type": "stack", "dir": "v", "gap": "sm",
+                                   "children": [{"type": "text", "value": "hi",
+                                                 "role": "title", "tone": "default",
+                                                 "size": "md"}]},
+        "display": {"size": "small"}, "interval_minutes": 30,
+        "preview_payload": {},
+    }
+    with pytest.raises(ValueError, match="start_ni_flow"):
+        tool.prevalidate(args)
+    store, _conn = _store()
+    with pytest.raises(ValueError, match="start_ni_flow"):
+        tool.handler(tools.ToolContext(ni=store), args)
+
+
+def test_recipe_tool_is_retired_from_model_registry() -> None:
+    """D1: create_ni_item_from_recipe no longer exists as a model tool —
+    recipes ride inside the flow behind the confirm_source pause."""
+    assert "create_ni_item_from_recipe" not in {t.name for t in tools._TOOLS}
+    assert tools.get_tool("create_ni_item_from_recipe") is None
+
+
+def test_flow_next_step_directives_cover_every_settled_state() -> None:
+    """D1: every settled flow state maps to a specific directive; unknown /
+    still-running states direct a read_ni_item poll and forbid side quests."""
+    for state, needle in [
+        ("ready", "commissioning"),
+        ("confirm_source", "confirm_ni_flow_source"),
+        ("source", "resume_ni_flow"),
+        ("awaiting_credential", "Add key"),
+        ("failed", "failed"),
+        ("unsupported", "declined"),
+    ]:
+        text = tools._flow_next_step({"state": state, "error": "boom"})
+        assert needle in text, f"{state}: {text}"
+    still = tools._flow_next_step({"state": "sampling"})
+    assert "read_ni_item" in still and "Do NOT" in still
+
+
+def test_start_ni_flow_returns_settled_state_when_worker_finishes(monkeypatch) -> None:
+    """D1: the bounded wait returns the flow's REAL resulting state (no async
+    gap in the common case) — a synchronous worker that settles to
+    ``confirm_source`` is reported as such, with the matching directive."""
+    store, _conn = _store()
+    ctx = tools.ToolContext(ni=store)
+
+    def _sync_worker(store_arg, iid, **_kwargs) -> bool:
+        ni_flow._transition(store_arg, iid, "confirm_source",
+                             source_url="https://api.example.com/vetted")
+        return True
+
+    monkeypatch.setattr(ni_flow, "start_flow_worker", _sync_worker)
+    out = tools.get_tool("start_ni_flow").handler(
+        ctx, {"request": "watch the example number"})
+    assert out["state"] == "confirm_source"
+    assert out["source_url"] == "https://api.example.com/vetted"
+    assert "confirm_ni_flow_source" in out["next_step"]
+
+
+def test_item_id_shape_prevalidate_bounces_invented_ids() -> None:
+    """D5: a slugged title or non-UUID id bounces at prevalidate on every
+    item-addressed tool — BEFORE any approval card parks."""
+    for name in ("run_ni_item_now", "set_ni_item_enabled", "delete_ni_item",
+                 "read_ni_item", "update_ni_item", "remap_ni_item",
+                 "resume_ni_flow", "confirm_ni_flow_source"):
+        tool = tools.get_tool(name)
+        assert tool.prevalidate is not None, f"{name} must carry a prevalidate"
+        with pytest.raises(ValueError, match="not a card id"):
+            tool.prevalidate({"item_id": "aapl-quote-every-30m",
+                              "source_url": "https://api.example.com/q",
+                              "enabled": True})
+
+
+def test_item_not_found_names_existing_cards() -> None:
+    """D5: an execute-time miss returns the real card list so the model
+    self-corrects in one step instead of guessing again."""
+    store, _conn = _store()
+    ctx = tools.ToolContext(ni=store)
+    item_id = ni_flow.create_shell_item(store, "my real card")
+    with pytest.raises(ValueError) as excinfo:
+        tools.get_tool("run_ni_item_now").handler(
+            ctx, {"item_id": "12345678-1234-1234-1234-1234567890ab"})
+    msg = str(excinfo.value)
+    assert item_id in msg and "existing cards" in msg
