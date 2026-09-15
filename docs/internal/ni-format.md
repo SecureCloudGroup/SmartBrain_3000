@@ -1267,3 +1267,23 @@ common case now has no gap at all. `start_ni_flow.request` is documented as
 the user's words VERBATIM (never paraphrase, never change a number — the
 intent stage's only input); the request text stays visible on the approval
 card so a distorted cadence is catchable at consent time.
+
+**Geocode-with-consent (2026-09-15, operator-approved)** — "allow the geocode,
+but only with user consent." A recipe may declare `geocode_fills` (closed map:
+geocode result field latitude/longitude → a declared non-secret param), and
+the intent schema gains an optional `place` (string|null, ≤120, same M#1
+call — no new model blank). When a matched recipe has fills, an empty target
+slot, and a named place, the `confirm_source` pause seals a `_geocode`
+disclosure `{query, host}` (host is the code literal
+`geocoding-api.open-meteo.com`, never data). Consent is the EXISTING confirm
+moment covering both fetches, both visible: the flow-tool result carries
+`geocode_lookup`/`geocode_query`, the approval card's promoted line reads
+"Fetches: <recipe url> · Looks up "<place>" to fill the location", and
+`confirm_ni_flow_source` REFUSES a confirm whose args do not echo the sealed
+query verbatim (args are display, never authority — execution always reads
+the sealed value). After approval, code performs the one lookup (percent-
+encoded query into the fixed endpoint, netguard-fetched), fills the
+coordinate params, and hands off; any failure degrades to empty slots →
+draft + `awaiting_params` → the card's Fill affordance. Flow-record
+transitions carry sealed underscore extras forward (`_recipe_id` /
+`_geocode` / `_remap`) — a note appended during a pause used to wipe them.

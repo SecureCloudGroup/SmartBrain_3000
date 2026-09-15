@@ -60,7 +60,16 @@ export function promotedLine(
   }
   if (t === "start_ni_flow" || t === "resume_ni_flow" || t === "confirm_ni_flow_source") {
     const flowUrl = readSourceUrl(args);
-    if (flowUrl) return `Fetches: ${flowUrl}`;
+    // geocode-consent (2026-09-15): a confirm that also covers a place lookup
+    // names it on the SAME promoted line — one approval, both fetches visible.
+    // The backend refuses a confirm whose args omit the sealed query, so this
+    // line can never silently under-disclose.
+    const lookup = readGeocodeQuery(args);
+    if (flowUrl) {
+      return lookup
+        ? `Fetches: ${flowUrl} · Looks up “${lookup}” to fill the location`
+        : `Fetches: ${flowUrl}`;
+    }
     // resume_ni_flow SHOULD always carry a source_url (the user just picked one). If
     // the caller didn't thread it through, fall back to the same generic phrase — the
     // args block below still shows what's being confirmed verbatim.
@@ -103,6 +112,24 @@ export function promotedLine(
     return `MCP: ${mcpLabel ?? "your configured server"} → ${toolName}`;
   }
   return null;
+}
+
+// Pull a top-level `geocode_query` string out of the args (object or JSON string) —
+// the display echo of a confirm's sealed place lookup (geocode-consent 2026-09-15).
+function readGeocodeQuery(args: unknown): string {
+  console.assert(args !== undefined, "readGeocodeQuery: args defined");
+  let obj: unknown = args;
+  if (typeof args === "string") {
+    if (!args.trim()) return "";
+    try {
+      obj = JSON.parse(args);
+    } catch {
+      return "";
+    }
+  }
+  if (!obj || typeof obj !== "object" || Array.isArray(obj)) return "";
+  const q = (obj as Record<string, unknown>).geocode_query;
+  return typeof q === "string" && q.length > 0 ? q : "";
 }
 
 // Pull a top-level `source_url` string out of the args (object or JSON string). Used

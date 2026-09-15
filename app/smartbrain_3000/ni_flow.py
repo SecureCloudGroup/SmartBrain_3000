@@ -211,6 +211,17 @@ def _transition(store: ni.NIStore, item_id: str, state: str, **fields: Any) -> d
         notes.append(extra_note[:_MAX_NOTE])
     record = _make_record(request, state, source_url=source_url, intent=intent,
                           error=error, notes=notes[-_MAX_NOTES:])
+    # geocode-consent fix (2026-09-15): carry sealed underscore extras
+    # (``_recipe_id`` / ``_recipe_title`` / ``_remap`` / ``_geocode``) forward —
+    # ``_make_record`` is closed-shape, so a note appended while a flow sat
+    # paused at ``confirm_source`` used to WIPE the recipe id and the later
+    # confirm died ``failed(confirm)``. Explicit ``fields`` still override.
+    for key, value in current.items():
+        if key.startswith("_") and key not in record:
+            record[key] = value
+    for key, value in fields.items():
+        if key.startswith("_"):
+            record[key] = value
     _flow_write(store, item_id, record)
     return record
 
@@ -302,6 +313,7 @@ _INTENT_PROMPT = (
     ' "cadence_minutes": <integer, use 15 if the user did not say>,\n'
     ' "wants": ["<field the user wants>", ...],\n'
     ' "threshold": <number or null>,\n'
+    ' "place": <"city or place name the request names" or null>,\n'
     ' "display_hint": "<value|list|map|image|none>"}\n'
     '"computed_only" = answerable from the calendar/clock alone, no data source '
     '(e.g. a countdown to a date). Otherwise "external_data".\n'
@@ -334,6 +346,13 @@ def _validate_intent(reply: dict) -> dict:
     wants = reply.get("wants")
     if not (isinstance(wants, list) and wants):
         raise ValueError("intent.wants must be a non-empty list")
+    # geocode-consent (2026-09-15): ``place`` is optional and bounded — it only
+    # ever becomes a percent-encoded geocode query behind the confirm card.
+    place = reply.get("place")
+    if place is not None and not isinstance(place, str):
+        raise ValueError("intent.place must be a string or null")
+    if isinstance(place, str) and len(place) > 120:
+        reply["place"] = place[:120]
     return reply
 
 
@@ -1015,7 +1034,9 @@ def _load_catalog() -> list[dict]:
 
 
 def continue_from_recipe_confirm(store: ni.NIStore, item_id: str,
-                                  confirmed_url: str) -> dict:
+                                  confirmed_url: str,
+                                  fetcher: Callable[[str], object] | None = None,
+                                  ) -> dict:
     """C3 (audit 2026-09-13): resume a ``confirm_source`` flow after the operator
     approved the recipe's url_template via ``confirm_ni_flow_source``.
 
@@ -1052,7 +1073,28 @@ def continue_from_recipe_confirm(store: ni.NIStore, item_id: str,
                      f"catalog no longer serves recipe {recipe_id!r}")
     intent = record.get("intent") if isinstance(record.get("intent"), dict) else {}
     request = str(record.get("request") or "")
-    return _handoff_from_recipe(store, item_id, request, intent, recipe)
+    # geocode-consent (2026-09-15): the approval the user just gave covered the
+    # sealed ``_geocode`` disclosure (place + host) — perform that ONE lookup
+    # now, code-owned endpoint, and fill the recipe's coordinate slots. Any
+    # failure degrades to empty slots (the card's Fill affordance asks), never
+    # a guessed value, never a raise past the flow boundary.
+    param_values: dict = {}
+    disclosure = record.get("_geocode")
+    fills = recipe.get("geocode_fills")
+    if isinstance(disclosure, dict) and isinstance(fills, dict) and fills:
+        do_fetch = fetcher if fetcher is not None else _netguard_mod.safe_fetch_json
+        located = _geocode_place(str(disclosure.get("query") or ""), do_fetch)
+        if located is None:
+            _append_note(store, item_id,
+                          "place lookup failed — fill the location on the card")
+        else:
+            for field, param_name in fills.items():  # bounded by fills size
+                if field in located:
+                    param_values[str(param_name)] = located[field]
+            _append_note(store, item_id,
+                          f"place lookup resolved {disclosure.get('query')!r}")
+    return _handoff_from_recipe(store, item_id, request, intent, recipe,
+                                 param_values=param_values or None)
 
 
 def _run_intent(store: ni.NIStore, item_id: str, request: str,
@@ -1174,7 +1216,15 @@ def _pause_for_recipe_confirm(store: ni.NIStore, item_id: str, intent: dict,
     # second write that includes ``_recipe_id`` alongside the standard record.
     record["_recipe_id"] = recipe_id[:80]
     record["_recipe_title"] = title[:_MAX_NOTE]
+    # geocode-consent (2026-09-15): seal the pending lookup so the approval the
+    # user is about to give covers it — and so the confirm tool can ENFORCE
+    # that the card displayed it (args.geocode_query must echo this query).
+    _stamp_geocode_disclosure(record, recipe, intent)
     _flow_write(store, item_id, record)
+    if isinstance(record.get("_geocode"), dict):
+        _append_note(store, item_id,
+                      f"confirm also covers a place lookup: "
+                      f"{record['_geocode']['query']!r} via {_GEOCODE_HOST}")
     return _flow_read(store, item_id) or {}
 
 
@@ -1278,14 +1328,80 @@ def _fill_recipe_params(spec: dict, request: str) -> None:
                 decl["value"] = ticker
 
 
+# geocode-consent (2026-09-15, operator-approved: "allow the geocode, but only
+# with user consent"): a recipe whose params are coordinates can fill them from
+# a place the user NAMED, via one fetch to a FIXED, code-owned geocoding
+# endpoint. The consent is the existing confirm_source card: the flow record
+# (and the confirm tool's args) disclose the lookup — place + host — alongside
+# the recipe URL, so the single approval covers both fetches, both visible.
+_GEOCODE_URL_TEMPLATE = (
+    "https://geocoding-api.open-meteo.com/v1/search?name={query}&count=1")
+_GEOCODE_HOST = "geocoding-api.open-meteo.com"
+
+
+def _geocode_place(query: str, do_fetch: Callable[[str], object]) -> dict | None:
+    """One consented lookup: place name → {latitude, longitude}, or None.
+
+    The endpoint is a code literal (never data); the query is percent-encoded
+    so a place string can never reshape the URL. Any failure — network, empty
+    results, non-numeric fields — returns None and the caller degrades to the
+    card's Fill affordance (awaiting_params), never a guessed coordinate.
+    """
+    assert isinstance(query, str) and query and callable(do_fetch), "args required"
+    from urllib.parse import quote
+    url = _GEOCODE_URL_TEMPLATE.format(query=quote(query, safe=""))
+    try:
+        data = do_fetch(url)
+    except Exception:  # transport class — degrade, never raise past the flow
+        return None
+    results = data.get("results") if isinstance(data, dict) else None
+    hit = results[0] if isinstance(results, list) and results else None
+    if not isinstance(hit, dict):
+        return None
+    lat, lon = hit.get("latitude"), hit.get("longitude")
+    if not (isinstance(lat, (int, float)) and isinstance(lon, (int, float))
+            and not isinstance(lat, bool) and not isinstance(lon, bool)):
+        return None
+    return {"latitude": lat, "longitude": lon}
+
+
+def _stamp_geocode_disclosure(record: dict, recipe: dict, intent: dict) -> None:
+    """Seal the pending lookup on the confirm_source record — the disclosure the
+    user's approval will cover. Stamped ONLY when the recipe declares
+    ``geocode_fills``, a target param is empty, and the intent carries a place.
+    """
+    assert isinstance(record, dict) and isinstance(recipe, dict), "args required"
+    fills = recipe.get("geocode_fills")
+    place = intent.get("place") if isinstance(intent, dict) else None
+    if not (isinstance(fills, dict) and fills
+            and isinstance(place, str) and place.strip()):
+        return
+    template = recipe.get("spec_template") or {}
+    params = template.get("params") if isinstance(template, dict) else {}
+    targets = [str(p) for p in fills.values()]
+    unfilled = [
+        p for p in targets
+        if isinstance((params or {}).get(p), dict)
+        and not str((params or {}).get(p, {}).get("value") or "").strip()
+    ]
+    if not unfilled:
+        return
+    record["_geocode"] = {"query": place.strip()[:120], "host": _GEOCODE_HOST}
+
+
 def _handoff_from_recipe(store: ni.NIStore, item_id: str, request: str,
-                          intent: dict, recipe: dict) -> dict:
+                          intent: dict, recipe: dict,
+                          param_values: dict | None = None) -> dict:
     """Deep-copy the recipe's spec_template and hand off.
 
     C3 (audit 2026-09-13): callable ONLY from ``confirm_ni_flow_source`` after
     the operator confirms the recipe's url_template — the promoted "no fetch
     until one is confirmed" line becomes literally true. The seal stamps
     ``_born: "recipe"`` per M1.
+
+    ``param_values`` (geocode-consent 2026-09-15): values code derived UNDER
+    the user's confirm (the geocode result), applied by param name after the
+    request-derived fill. Only empty declared non-secret slots accept a value.
     """
     assert isinstance(recipe, dict), "recipe required"
     spec_template = recipe.get("spec_template")
@@ -1293,6 +1409,11 @@ def _handoff_from_recipe(store: ni.NIStore, item_id: str, request: str,
         return _fail(store, item_id, "assembly", "recipe spec_template missing")
     spec = json.loads(json.dumps(spec_template))
     _fill_recipe_params(spec, request)
+    for name, value in (param_values or {}).items():  # bounded by fills size
+        decl = (spec.get("params") or {}).get(name)
+        if (isinstance(decl, dict) and decl.get("kind") != "secret"
+                and not str(decl.get("value") or "").strip()):
+            decl["value"] = value
     spec["title"] = str(intent.get("subject") or spec.get("title") or "New card")[:ni._MAX_TITLE]
     spec["goal"] = request[:ni._MAX_GOAL]
     cadence_raw = intent.get("cadence_minutes")

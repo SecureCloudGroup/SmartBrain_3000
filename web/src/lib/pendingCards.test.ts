@@ -163,3 +163,15 @@ it("confirm_ni_flow_source promotes the recipe URL it would fetch", () => {
       { item_id: "x", source_url: "https://api.coingecko.com/api/v3/simple/price" }),
   ).toBe("Fetches: https://api.coingecko.com/api/v3/simple/price");
 });
+
+it("confirm with a geocode echo names both fetches on one line", () => {
+  expect(
+    promotedLine("confirm_ni_flow_source", {
+      item_id: "x",
+      source_url: "https://api.open-meteo.com/v1/forecast",
+      geocode_query: "Kansas City",
+    }),
+  ).toBe(
+    "Fetches: https://api.open-meteo.com/v1/forecast · Looks up “Kansas City” to fill the location",
+  );
+});

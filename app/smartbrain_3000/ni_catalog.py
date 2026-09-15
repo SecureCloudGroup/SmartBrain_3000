@@ -39,7 +39,13 @@ _REQUIRED_KEYS: frozenset[str] = frozenset({
     "spec_template", "preview_payload",
 })
 # §26 optional fields — validators skip when absent, but reject unknown keys.
-_OPTIONAL_KEYS: frozenset[str] = frozenset({"sample_response", "prove_params"})
+# ``geocode_fills`` (geocode-consent, 2026-09-15, operator-approved): maps a
+# geocode RESULT field (latitude/longitude only) to a declared non-secret param
+# name, so the flow can fill coordinates from a place the user named — behind
+# the confirm_source consent card, which discloses the lookup host verbatim.
+_OPTIONAL_KEYS: frozenset[str] = frozenset({"sample_response", "prove_params",
+                                             "geocode_fills"})
+_GEOCODE_RESULT_FIELDS: frozenset[str] = frozenset({"latitude", "longitude"})
 _ALLOWED_KEYS: frozenset[str] = _REQUIRED_KEYS | _OPTIONAL_KEYS
 _AUTH_VALUES: frozenset[str] = frozenset({"none", "key"})
 _MAX_ID = 80
@@ -182,6 +188,20 @@ def _validate_entry(entry: object, index: int) -> dict:
     except ValueError as exc:
         raise AssertionError(f"sources[{index}].url_template: {exc}") from None
     validated_spec = _validate_recipe_spec(entry, index)
+    # geocode_fills (2026-09-15): closed map {geocode result field -> param name};
+    # every target must be a declared NON-secret param of the spec_template.
+    if "geocode_fills" in entry:
+        fills = entry["geocode_fills"]
+        assert isinstance(fills, dict) and fills, (
+            f"sources[{index}].geocode_fills must be a non-empty object")
+        declared = validated_spec.get("params") or {}
+        for field, param_name in fills.items():
+            assert field in _GEOCODE_RESULT_FIELDS, (
+                f"sources[{index}].geocode_fills key {field!r} not a geocode field")
+            decl = declared.get(param_name)
+            assert isinstance(decl, dict) and decl.get("kind") != "secret", (
+                f"sources[{index}].geocode_fills target {param_name!r} must be a "
+                "declared non-secret param")
     # A recipe's ``url_template`` MUST match its ``spec_template.source.url`` so a
     # reader of the operator-facing display sees exactly the URL the deterministic
     # build path would fetch (drift here would silently mis-describe the recipe).

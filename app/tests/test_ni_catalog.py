@@ -17,7 +17,7 @@ from smartbrain_3000 import ni, ni_catalog, tools
 
 _REQUIRED = {"id", "title", "host", "url_template", "docs_url", "auth",
              "category", "notes", "spec_template", "preview_payload"}
-_ALLOWED_OPTIONAL = {"sample_response", "prove_params"}
+_ALLOWED_OPTIONAL = {"sample_response", "prove_params", "geocode_fills"}
 
 
 def test_catalog_loads_at_import_and_is_non_empty() -> None:
