@@ -826,7 +826,11 @@
     console.assert(typeof item.id === "string", "validateLooksRight: id is string");
     busyId = item.id;
     try {
-      await api.niValidate(item.id, true);
+      const res = await api.niValidate(item.id, true);
+      // F1: the verdict kicks the C3 proof run server-side — say what happened.
+      toast(res.state === "live"
+        ? "Confirmed — the card is live."
+        : "Confirmed — verifying with a fresh refresh.");
       await load();
     } catch (err) {
       const msg = describeError(err);
@@ -1018,6 +1022,15 @@
           {/if}
 
           {#if item.state === "commissioning" && item.payload && item.payload_slot !== "preview"}
+            <!-- F2 (2026-09-15): after "Looks right" the verdict is recorded but the
+                 card may briefly stay commissioning while the C3 run verifies — the
+                 banner must acknowledge instead of re-asking (the field run logged a
+                 user tapping a "dead" button three times). -->
+            {#if item.c2_ok}
+              <div class="ni-commission">
+                <p style="margin:0; font-size:var(--f-label)">Confirmed — verifying, this card goes live after the next successful refresh.</p>
+              </div>
+            {:else}
             <div class="ni-commission">
               <p style="margin:0 0 var(--s-2); font-size:var(--f-label)">This is live data — is it right?</p>
               <div class="ni-actions">
@@ -1025,7 +1038,7 @@
                   class="secondary"
                   disabled={busyId === item.id}
                   onclick={() => validateLooksRight(item)}
-                >Looks right</button>
+                >{busyId === item.id ? "Checking…" : "Looks right"}</button>
                 <button
                   class="ghost"
                   disabled={busyId === item.id}
@@ -1033,6 +1046,7 @@
                 >Something’s wrong</button>
               </div>
             </div>
+            {/if}
           {/if}
 
           <div class="ni-foot">

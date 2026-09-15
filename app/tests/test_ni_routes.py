@@ -897,3 +897,91 @@ def test_param_put_refuses_secret_params_and_unknown_names(client: TestClient) -
                     json={"name": "nope", "value": "x"},
                     headers={"X-SB-Local": "1"})
     assert r2.status_code == 404
+
+
+# --- C2-feedback wave (2026-09-15) --------------------------------------------
+
+def _commissioned_model_item(client: TestClient) -> str:
+    """A commissioning item with a model source (no egress) + a latest snapshot."""
+    iid = _create_via_tool(client, title="C2 target", draft=True)
+    store = client.app.state.ni
+    store.commission(iid)
+    return iid
+
+
+def test_F1_looks_right_kicks_the_c3_run_immediately(client: TestClient,
+                                                      monkeypatch) -> None:
+    """F1: the ok=true verdict runs the item synchronously (the field run left
+    a 30-minute dead-button window); the response reports the post-run state."""
+    _unlock(client)
+    iid = _commissioned_model_item(client)
+    fired: dict = {}
+
+    def _fake_run(store, item_id, **kwargs):
+        fired["id"] = item_id
+        store.record_run(item_id, "ok", duration_ms=1, error=None, contract_ok=None)
+        return {"alerts": [], "repaired": []}
+
+    from smartbrain_3000 import ni as nimod2
+    monkeypatch.setattr(nimod2, "run_item", _fake_run)
+    r = client.post(f"/api/ni/items/{iid}/validate", json={"ok": True})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert fired.get("id") == iid, "the verdict must kick the C3 run"
+    assert body["run"] == "ok"
+    # The verdict is stamped regardless of what the run did.
+    assert client.app.state.ni.get_item(iid)["spec"].get("_c2_ok") is True
+
+
+def test_F1_run_failure_never_masks_the_recorded_verdict(client: TestClient,
+                                                          monkeypatch) -> None:
+    """A C3 kick failure reports run=error but the validate still succeeds."""
+    _unlock(client)
+    iid = _commissioned_model_item(client)
+
+    def _boom(store, item_id, **kwargs):
+        raise ni.NIError("fetch_failed")
+
+    from smartbrain_3000 import ni as nimod2
+    monkeypatch.setattr(nimod2, "run_item", _boom)
+    r = client.post(f"/api/ni/items/{iid}/validate", json={"ok": True})
+    assert r.status_code == 200, r.text
+    assert r.json()["run"] == "error"
+    assert client.app.state.ni.get_item(iid)["spec"].get("_c2_ok") is True
+
+
+def test_F1_wrong_verdict_never_runs(client: TestClient, monkeypatch) -> None:
+    """ok=false rewinds to draft and must NOT kick a run."""
+    _unlock(client)
+    iid = _commissioned_model_item(client)
+    fired: dict = {}
+
+    def _fake_run(store, item_id, **kwargs):
+        fired["id"] = item_id
+        return {}
+
+    from smartbrain_3000 import ni as nimod2
+    monkeypatch.setattr(nimod2, "run_item", _fake_run)
+    r = client.post(f"/api/ni/items/{iid}/validate",
+                    json={"ok": False, "note": "wrong number"})
+    assert r.status_code == 200
+    assert "id" not in fired, "a rejected first run must not refresh"
+    assert client.app.state.ni.get_item(iid)["state"] == "draft"
+
+
+def test_F2_board_row_exposes_c2_ok(client: TestClient, monkeypatch) -> None:
+    """F2: the sealed _c2_ok attestation rides the board row so the card stops
+    re-asking after the user answered."""
+    _unlock(client)
+    iid = _commissioned_model_item(client)
+    row = next(i for i in client.get("/api/ni/board").json()["items"]
+               if i["id"] == iid)
+    assert row["c2_ok"] is False
+    from smartbrain_3000 import ni as nimod2
+    monkeypatch.setattr(nimod2, "run_item",
+                        lambda store, item_id, **kw: {"alerts": [], "repaired": []})
+    assert client.post(f"/api/ni/items/{iid}/validate",
+                       json={"ok": True}).status_code == 200
+    row2 = next(i for i in client.get("/api/ni/board").json()["items"]
+                if i["id"] == iid)
+    assert row2["c2_ok"] is True

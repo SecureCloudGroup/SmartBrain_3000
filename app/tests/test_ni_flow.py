@@ -1404,3 +1404,58 @@ def test_stage_intent_code_cadence_overrides_model_value() -> None:
     intent = ni_flow.stage_intent("hourly EUR to USD exchange rate",
                                    lambda p: model("m", p))
     assert intent["cadence_minutes"] == 60
+
+
+def test_uncovered_wants_disclosed_on_recipe_confirm() -> None:
+    """F3 (C2-feedback wave): the NVDA field run asked for volume; the Finnhub
+    /quote recipe serves price/o/h/l/prev — the gap must be sealed on the
+    confirm record and noted, never a silent partial fulfillment."""
+    from smartbrain_3000 import ni_catalog
+    store, _conn = _store()
+    recipe = ni_catalog.get_recipe("stock-quote-finnhub")
+    assert recipe is not None
+    intent = {"subject": "NVDA", "cadence_minutes": 30, "place": None,
+              "wants": ["price", "open", "high", "low", "close", "volume"]}
+    item_id = ni_flow.create_shell_item(store, "NVDA every 30 minutes with OHLCV")
+    ni_flow._pause_for_recipe_confirm(store, item_id, intent, recipe)
+    record = ni_flow._flow_read(store, item_id)
+    assert record is not None
+    uncovered = record.get("_uncovered_wants")
+    assert uncovered and "volume" in uncovered, f"got {uncovered}"
+    assert "price" not in uncovered and "high" not in uncovered
+    assert any("does not appear to cover" in n for n in record.get("notes") or [])
+
+
+def test_covered_wants_stamp_nothing() -> None:
+    """A fully-served intent seals no coverage field — no noise on the happy path."""
+    from smartbrain_3000 import ni_catalog
+    store, _conn = _store()
+    recipe = ni_catalog.get_recipe("stock-quote-finnhub")
+    intent = {"subject": "AAPL", "cadence_minutes": 30, "place": None,
+              "wants": ["price", "high", "low"]}
+    item_id = ni_flow.create_shell_item(store, "AAPL stock price")
+    ni_flow._pause_for_recipe_confirm(store, item_id, intent, recipe)
+    record = ni_flow._flow_read(store, item_id)
+    assert record is not None and "_uncovered_wants" not in record
+
+
+def test_flow_tool_result_carries_not_covered(monkeypatch) -> None:
+    """The start_ni_flow result names the gap so the chat can disclose it."""
+    from smartbrain_3000 import ni_catalog
+    store, _conn = _store()
+    ctx = tools.ToolContext(ni=store)
+    recipe = ni_catalog.get_recipe("stock-quote-finnhub")
+
+    def _sync_worker(store_arg, iid, **_kwargs) -> bool:
+        ni_flow._pause_for_recipe_confirm(
+            store_arg, iid,
+            {"subject": "NVDA", "cadence_minutes": 30, "place": None,
+             "wants": ["price", "volume"]}, recipe)
+        return True
+
+    monkeypatch.setattr(ni_flow, "start_flow_worker", _sync_worker)
+    out = tools.get_tool("start_ni_flow").handler(
+        ctx, {"request": "NVDA price and volume every 30 minutes"})
+    assert out["state"] == "confirm_source"
+    assert out.get("not_covered") == ["volume"]
+    assert "does not cover" in out["next_step"]
