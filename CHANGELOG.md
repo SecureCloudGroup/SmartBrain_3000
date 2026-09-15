@@ -11,6 +11,8 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-09-15
+
 ### Changed
 - **Neural Interface: one door, and cards that can't lie about being empty.**
   Field test of v0.12.0 found the assistant could still route around the Flow
