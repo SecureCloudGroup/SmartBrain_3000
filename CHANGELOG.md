@@ -11,6 +11,22 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Added
+- **Neural Interface: weather cards find the place for you — with your say-so.**
+  Ask for "the weather in Kansas City" and the flow now looks up the
+  coordinates itself instead of asking you to type latitude and longitude. The
+  lookup happens only after you approve it: the same approval card that shows
+  the weather source also says exactly what will be looked up and where
+  ("Looks up 'Kansas City' to fill the location"), and a confirmation that
+  doesn't display the lookup is refused outright. If the lookup fails, the
+  card simply asks for the location with a Fill button — never a guessed
+  value.
+
+### Fixed
+- A note added to a card while its creation flow waited for your approval
+  could wipe the flow's memory of which vetted source it had matched, killing
+  the confirmation. Flow records now carry that context through every update.
+
 ## [0.13.0] - 2026-09-15
 
 ### Changed

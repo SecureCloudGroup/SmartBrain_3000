@@ -1135,3 +1135,17 @@ def test_item_not_found_names_existing_cards() -> None:
             ctx, {"item_id": "12345678-1234-1234-1234-1234567890ab"})
     msg = str(excinfo.value)
     assert item_id in msg and "existing cards" in msg
+
+
+def test_intent_place_field_validated() -> None:
+    """geocode-consent (2026-09-15): ``place`` is optional, string-or-null,
+    length-bounded."""
+    base = {"kind": "external_data", "subject": "x", "cadence_minutes": 15,
+            "wants": ["temp"], "threshold": None, "display_hint": "value"}
+    assert ni_flow._validate_intent(dict(base))["kind"] == "external_data"
+    ok = ni_flow._validate_intent({**base, "place": "Kansas City"})
+    assert ok["place"] == "Kansas City"
+    long = ni_flow._validate_intent({**base, "place": "x" * 500})
+    assert len(long["place"]) == 120
+    with pytest.raises(ValueError, match="place"):
+        ni_flow._validate_intent({**base, "place": 42})

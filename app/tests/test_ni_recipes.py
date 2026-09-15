@@ -635,3 +635,137 @@ def test_read_ni_item_returns_journal_entries_with_origin_field() -> None:
     read = _tool_call("read_ni_item", ctx, {"item_id": out["id"]})
     origins = {entry["origin"] for entry in read["journal"]}
     assert origins == {"system", "user"}
+
+
+# --- geocode-consent (2026-09-15, operator-approved) --------------------------
+
+def _kc_geocode_fixture() -> dict:
+    import pathlib
+    fx = pathlib.Path(__file__).parent / "fixtures" / "ni_flow" / "geocode_kc.json"
+    return json.loads(fx.read_text())
+
+
+def test_weather_recipe_declares_geocode_fills() -> None:
+    """The catalog validator accepted the weather recipe's geocode_fills map."""
+    recipe = ni_catalog.get_recipe("weather-open-meteo")
+    assert recipe is not None
+    assert recipe["geocode_fills"] == {"latitude": "latitude",
+                                        "longitude": "longitude"}
+
+
+def test_geocode_place_resolves_recorded_fixture_and_degrades() -> None:
+    from smartbrain_3000 import ni_flow
+    fixture = _kc_geocode_fixture()
+    out = ni_flow._geocode_place("Kansas City", lambda url: fixture)
+    assert out is not None
+    assert isinstance(out["latitude"], (int, float))
+    assert isinstance(out["longitude"], (int, float))
+    # Empty results / transport failure both degrade to None, never raise.
+    assert ni_flow._geocode_place("x", lambda url: {"results": []}) is None
+    def _boom(url):
+        raise OSError("down")
+    assert ni_flow._geocode_place("x", _boom) is None
+
+
+def test_confirm_pause_stamps_geocode_disclosure_only_with_place() -> None:
+    """The sealed record discloses the lookup ONLY when the recipe declares
+    fills, a target slot is empty, and the intent names a place."""
+    from smartbrain_3000 import ni_flow
+    ctx, _c, _k = _tool_ctx()
+    recipe = ni_catalog.get_recipe("weather-open-meteo")
+    # With a place: stamped.
+    iid = ni_flow.create_shell_item(ctx.ni, "weather in Kansas City")
+    ni_flow._pause_for_recipe_confirm(
+        ctx.ni, iid, {"subject": "KC weather", "place": "Kansas City",
+                      "cadence_minutes": 15}, recipe)
+    rec = ni_flow._flow_read(ctx.ni, iid)
+    assert rec["_geocode"] == {"query": "Kansas City",
+                                "host": "geocoding-api.open-meteo.com"}
+    # Without a place: not stamped.
+    iid2 = ni_flow.create_shell_item(ctx.ni, "weather please")
+    ni_flow._pause_for_recipe_confirm(
+        ctx.ni, iid2, {"subject": "weather", "place": None,
+                       "cadence_minutes": 15}, recipe)
+    rec2 = ni_flow._flow_read(ctx.ni, iid2)
+    assert "_geocode" not in rec2
+
+
+def test_confirm_executes_disclosed_lookup_and_lands_commissioning() -> None:
+    """The user's single confirm covers both fetches: coordinates fill from the
+    recorded geocode fixture and the keyless weather card lands commissioning
+    (no unfilled slots left)."""
+    from smartbrain_3000 import ni_flow
+    ctx, _c, _k = _tool_ctx()
+    recipe = ni_catalog.get_recipe("weather-open-meteo")
+    iid = ni_flow.create_shell_item(ctx.ni, "weather in Kansas City")
+    ni_flow._pause_for_recipe_confirm(
+        ctx.ni, iid, {"subject": "KC weather", "place": "Kansas City",
+                      "cadence_minutes": 15}, recipe)
+    fixture = _kc_geocode_fixture()
+    result = ni_flow.continue_from_recipe_confirm(
+        ctx.ni, iid, recipe["url_template"], fetcher=lambda url: fixture)
+    assert result.get("state") == "ready", result
+    item = ctx.ni.get_item(iid)
+    assert item["state"] == "commissioning"
+    assert nimod.unfilled_referenced_params(item["spec"]) == []
+    lat = item["spec"]["params"]["latitude"]["value"]
+    assert isinstance(lat, (int, float))
+
+
+def test_confirm_geocode_failure_degrades_to_awaiting_params() -> None:
+    """A failed lookup leaves the slots empty ON PURPOSE — draft +
+    awaiting_params, the card's Fill affordance asks; never a guessed value."""
+    from smartbrain_3000 import ni_flow
+    ctx, _c, _k = _tool_ctx()
+    recipe = ni_catalog.get_recipe("weather-open-meteo")
+    iid = ni_flow.create_shell_item(ctx.ni, "weather in Kansas City")
+    ni_flow._pause_for_recipe_confirm(
+        ctx.ni, iid, {"subject": "KC weather", "place": "Kansas City",
+                      "cadence_minutes": 15}, recipe)
+    def _boom(url):
+        raise OSError("down")
+    result = ni_flow.continue_from_recipe_confirm(
+        ctx.ni, iid, recipe["url_template"], fetcher=_boom)
+    assert result.get("state") == "awaiting_params", result
+    item = ctx.ni.get_item(iid)
+    assert item["state"] == "draft"
+    assert "latitude" in nimod.unfilled_referenced_params(item["spec"])
+
+
+def test_confirm_tool_enforces_geocode_query_display() -> None:
+    """Consent completeness: the confirm tool REFUSES when the sealed record
+    discloses a lookup but the args (= what the approval card displayed) do
+    not echo it verbatim; a stray geocode_query with no pending lookup is
+    refused too."""
+    from smartbrain_3000 import ni_flow
+    ctx, _c, _k = _tool_ctx()
+    recipe = ni_catalog.get_recipe("weather-open-meteo")
+    iid = ni_flow.create_shell_item(ctx.ni, "weather in Kansas City")
+    ni_flow._pause_for_recipe_confirm(
+        ctx.ni, iid, {"subject": "KC weather", "place": "Kansas City",
+                      "cadence_minutes": 15}, recipe)
+    tool = tools.get_tool("confirm_ni_flow_source")
+    with pytest.raises(ValueError, match="Kansas City"):
+        tool.handler(ctx, {"item_id": iid, "source_url": recipe["url_template"]})
+    # Stray geocode_query on a flow with NO pending lookup is refused.
+    iid2 = ni_flow.create_shell_item(ctx.ni, "bitcoin price")
+    btc = ni_catalog.get_recipe("crypto-price-btc-usd")
+    ni_flow._pause_for_recipe_confirm(
+        ctx.ni, iid2, {"subject": "BTC", "place": None, "cadence_minutes": 15}, btc)
+    with pytest.raises(ValueError, match="no pending place lookup"):
+        tool.handler(ctx, {"item_id": iid2, "source_url": btc["url_template"],
+                           "geocode_query": "Kansas City"})
+    # The matching echo proceeds (lookup via injected... the tool uses netguard;
+    # the degrade path still completes the flow honestly).
+    fixture = _kc_geocode_fixture()
+    import smartbrain_3000.ni_flow as flowmod
+    orig = flowmod._netguard_mod.safe_fetch_json
+    try:
+        flowmod._netguard_mod.safe_fetch_json = lambda url: fixture
+        out = tool.handler(ctx, {"item_id": iid, "source_url": recipe["url_template"],
+                                 "geocode_query": "Kansas City"})
+    finally:
+        flowmod._netguard_mod.safe_fetch_json = orig
+    assert out["state"] == "ready"
+    item = ctx.ni.get_item(iid)
+    assert item["state"] == "commissioning"

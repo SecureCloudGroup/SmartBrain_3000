@@ -765,7 +765,10 @@ Authoring order (§29 — the flow is the ONLY door for external JSON cards):
 2. **Resume / confirm / remap.** ``state="source"`` ⇒ present candidates and
    call ``resume_ni_flow`` with the URL the user picked. ``confirm_source`` ⇒
    tell the user which vetted source the flow matched and call
-   ``confirm_ni_flow_source`` (the approval card shows the exact URL).
+   ``confirm_ni_flow_source`` (the approval card shows the exact URL). If the
+   flow result carried ``geocode_lookup``, tell the user the card also covers
+   that one place lookup and pass ``geocode_query`` verbatim — a confirm
+   missing it is refused.
    ``awaiting_credential`` ⇒ the user adds the key ON THE CARD (never in
    chat). To fix a flow- or recipe-born card, call ``remap_ni_item`` — it
    re-derives paths against the SAME consented URL. Freeform source/pipeline
@@ -2107,9 +2110,14 @@ def _flow_next_step(record: dict | None) -> str:
                 "(NOT 'live'); the user validates the first real result on the card. "
                 "Do not create anything else for this request.")
     if state == "confirm_source":
-        return ("a vetted source was matched — tell the user which one (see "
+        base = ("a vetted source was matched — tell the user which one (see "
                 "source_url) and call confirm_ni_flow_source with this item_id and "
                 "that exact source_url. Do not research or create anything else.")
+        if isinstance((record or {}).get("_geocode"), dict):
+            base += (" This confirm ALSO covers a place lookup (see "
+                     "geocode_lookup) — pass geocode_query verbatim so the "
+                     "approval card displays it; a confirm without it is refused.")
+        return base
     if state == "source":
         return ("no vetted source matched — present the user 2-3 candidate source "
                 "URLs with provenance; when they pick one, call resume_ni_flow with "
@@ -2145,9 +2153,18 @@ def _flow_tool_result(store: object, item_id: str, *, started: bool,
     record = _await_flow_settle(store, item_id)
     state = str((record or {}).get("state") or "intent")
     url = (record or {}).get("source_url") or fallback_url
-    return {"id": item_id, "started": started, "state": state,
-            "source_url": url if isinstance(url, str) else None,
-            "next_step": _flow_next_step(record)}
+    out = {"id": item_id, "started": started, "state": state,
+           "source_url": url if isinstance(url, str) else None,
+           "next_step": _flow_next_step(record)}
+    # geocode-consent (2026-09-15): a confirm pause that also covers a place
+    # lookup names it here so the model can echo it into geocode_query — the
+    # handler REFUSES a confirm whose card did not display the lookup.
+    disclosure = (record or {}).get("_geocode")
+    if isinstance(disclosure, dict):
+        out["geocode_lookup"] = (f"{disclosure.get('query')} via "
+                                  f"{disclosure.get('host')}")
+        out["geocode_query"] = disclosure.get("query")
+    return out
 
 
 def _start_ni_flow(ctx: ToolContext, args: dict) -> dict:
@@ -2280,6 +2297,10 @@ def _prevalidate_confirm_ni_flow_source(args: dict) -> None:
         ni._validate_http_json_url_shape(source_url)
     except ValueError as exc:
         raise ValueError(f"source_url: {exc}") from None
+    geocode_query = args.get("geocode_query")
+    if geocode_query is not None and (not isinstance(geocode_query, str)
+                                       or len(geocode_query) > 120):
+        raise ValueError("geocode_query must be a string of at most 120 chars")
 
 
 def _confirm_ni_flow_source(ctx: ToolContext, args: dict) -> dict:
@@ -2301,6 +2322,24 @@ def _confirm_ni_flow_source(ctx: ToolContext, args: dict) -> dict:
     item_id = str(args["item_id"])
     if ctx.ni.get_item(item_id) is None:
         raise _item_not_found(ctx.ni)
+    # geocode-consent (2026-09-15): when the sealed record discloses a place
+    # lookup, the approval card MUST have displayed it — enforce by requiring
+    # args.geocode_query to echo the sealed query verbatim. The executed lookup
+    # always uses the SEALED value (args are display, never authority).
+    record = ni_flow._flow_read(ctx.ni, item_id) or {}
+    disclosure = record.get("_geocode")
+    if isinstance(disclosure, dict):
+        expected = str(disclosure.get("query") or "")
+        if str(args.get("geocode_query") or "") != expected:
+            raise ValueError(
+                "this confirm also covers a place lookup — pass geocode_query "
+                f"exactly as {expected!r} so the approval card displays it"
+            )
+    elif args.get("geocode_query"):
+        raise ValueError(
+            "geocode_query passed but this flow has no pending place lookup — "
+            "drop the arg"
+        )
     result = ni_flow.continue_from_recipe_confirm(ctx.ni, item_id,
                                                     str(args["source_url"]))
     return {"id": item_id, "state": str(result.get("state") or ""),
@@ -2985,15 +3024,22 @@ _TOOLS: tuple[Tool, ...] = (
                     "via the source_url arg convention (promotedLine 'Fetches: <url>'). "
                     "Args: item_id (from the paused flow) and source_url (the same URL "
                     "the flow record proposed — the tool refuses a mismatch rather "
-                    "than sealing a source the user never saw). Reviewed egress; "
-                    "approving is consent for the fetch. Never used for freeform "
-                    "flows — resume_ni_flow covers the pick-a-source path.",
+                    "than sealing a source the user never saw). When the flow result "
+                    "carried a geocode_lookup, ALSO pass geocode_query verbatim — the "
+                    "approval then covers one place lookup (fixed geocoding host) that "
+                    "fills the recipe's coordinates; a confirm missing it is refused. "
+                    "Reviewed egress; approving is consent for the fetch(es). Never "
+                    "used for freeform flows — resume_ni_flow covers the pick path.",
         params_schema={
             "type": "object",
             "additionalProperties": False,
             "properties": {
                 "item_id": {"type": "string"},
                 "source_url": {"type": "string", "maxLength": ni._MAX_URL},
+                # geocode-consent (2026-09-15): display-only echo of the sealed
+                # lookup query — the executed lookup always reads the SEALED
+                # value; this arg exists so the approval card shows it.
+                "geocode_query": {"type": "string", "maxLength": 120},
             },
             "required": ["item_id", "source_url"],
         },

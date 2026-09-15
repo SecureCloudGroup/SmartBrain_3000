@@ -1243,7 +1243,8 @@ def _run_case_engine(case: dict, bifrost: str, model: str, duckdb, dbmod,
             record = flowmod._flow_read(store, item_id) or {}
             confirmed = str(record.get("source_url") or "")
             out["notes"].append(f"auto-confirmed recipe source: {confirmed}")
-            result = flowmod.continue_from_recipe_confirm(store, item_id, confirmed)
+            result = flowmod.continue_from_recipe_confirm(
+                store, item_id, confirmed, fetcher=_fetch_json_live)
             out["flow_state"] = str(result.get("state") or "")
             source_url = confirmed  # the frozen-URL invariant now targets it
         settled = ("ready", "awaiting_params", "awaiting_credential")

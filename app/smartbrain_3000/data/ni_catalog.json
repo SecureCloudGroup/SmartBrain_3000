@@ -42,6 +42,7 @@
       "docs_url": "https://open-meteo.com/en/docs",
       "auth": "none",
       "category": "weather",
+      "geocode_fills": {"latitude": "latitude", "longitude": "longitude"},
       "notes": "Keyless JSON weather; latitude/longitude in decimal degrees. Response carries a top-level current.{temperature_2m, wind_speed_10m} object driven by the URL's current= parameter.",
       "spec_template": {
         "version": 1,
