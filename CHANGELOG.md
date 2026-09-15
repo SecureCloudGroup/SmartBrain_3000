@@ -11,6 +11,8 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-09-15
+
 ### Added
 - **Neural Interface: weather cards find the place for you — with your say-so.**
   Ask for "the weather in Kansas City" and the flow now looks up the
