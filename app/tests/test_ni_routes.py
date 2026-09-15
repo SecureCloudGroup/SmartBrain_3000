@@ -985,3 +985,21 @@ def test_F2_board_row_exposes_c2_ok(client: TestClient, monkeypatch) -> None:
     row2 = next(i for i in client.get("/api/ni/board").json()["items"]
                 if i["id"] == iid)
     assert row2["c2_ok"] is True
+
+
+def test_W2_commission_refuses_unfinalized_flow_shell(client: TestClient) -> None:
+    """W2 (field 2026-09-15): a user Activated a failed flow's shell; the
+    placeholder model source ran and reported 'ok' on a card rendering
+    'Preparing card…' forever. The commission door now refuses shells and the
+    board row carries the flag so the card hides Activate."""
+    from smartbrain_3000 import ni_flow
+    _unlock(client)
+    store = client.app.state.ni
+    iid = ni_flow.create_shell_item(store, "a flow that will never finish")
+    row = next(i for i in client.get("/api/ni/board").json()["items"]
+               if i["id"] == iid)
+    assert row["shell"] is True
+    r = client.post(f"/api/ni/items/{iid}/commission")
+    assert r.status_code == 409 and "never finished" in r.json()["detail"]
+    # A finalized card (spec replaced) commissions normally — proven across
+    # the existing flow suites; here we only pin the refusal.

@@ -689,6 +689,9 @@ export interface NiBoardItem {
   // is informational only: the library retired this template.
   template_update?: boolean;
   template_gone?: boolean;
+  // W2 (2026-09-15): true while the card is a flow shell whose creation never
+  // finished — the card hides Activate and directs to retry-in-chat or delete.
+  shell?: boolean;
   // C2 verdict already given (F2, 2026-09-15): true once the user tapped
   // "Looks right" — the card stops asking and shows "Confirmed — verifying"
   // until the C3 run promotes it to live.

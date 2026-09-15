@@ -1340,3 +1340,28 @@ would not change for 30 minutes):
   through its transition — a note appended during a paused state used to
   wipe `awaiting_confirm`/`awaiting_pick` (the underscore-extras lesson,
   error-field edition).
+
+**Remap/shell wave (field 2026-09-15)** — the second NVDA test round:
+- W2: `spec._shell` marks a flow's not-yet-finalized placeholder (validated
+  boolean-true-or-absent; forbidden in template packs like `_born`).
+  Commission REFUSES a shell ("creation never finished — retry in chat or
+  delete"); board rows carry `shell` and the card hides Activate. Field: a
+  failed flow's shell was Activated, the placeholder model source ran, and a
+  "Commissioning · ok" card rendered "Preparing card…" forever.
+- W1: shell titles bound to one readable line (a request paragraph was the
+  card name); a finished flow still titles from `intent.subject`.
+- R1/R2: remap sampling now runs the item's own source EXACTLY as the engine
+  would — params substituted, `$secret` headers resolved host-bound via a
+  desktop-wired secrets provider (`ni_flow.set_secrets_provider`, installed
+  at app startup; same trust position as the scheduler — used ONLY to
+  re-sample an item's own already-consented source; the §9 firewall on the
+  chat/tool context is untouched). The remap of a keyed recipe card used to
+  fetch the literal `{{param:symbol}}` template with no auth → FetchError.
+  The remap FINALIZE preserves the sealed source (template + headers) and
+  params — the rebuilt spec used to strip the credential header. A remap of
+  a post-draft card lands commissioning (its credential gate already
+  passed); unfilled params refuse the remap up front.
+- R3: the flow-born source-edit refusal and the guide now distinguish "fix
+  broken extraction → remap" from "different data → NEW card via
+  start_ni_flow" (a remap can never add fields the source does not serve),
+  and forbid confirm_ni_flow_source after a resume.

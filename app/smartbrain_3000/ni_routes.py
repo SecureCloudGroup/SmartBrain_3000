@@ -140,6 +140,9 @@ def _board_row(store: ni.NIStore, item: dict, *,
         # F2 (C2-feedback, 2026-09-15): the sealed _c2_ok attestation surfaces
         # so the card can stop asking "is it right?" after the user answered.
         "c2_ok": item["spec"].get("_c2_ok") is True,
+        # W2: True while the flow has not replaced the placeholder spec — the
+        # card hides Activate and says creation didn't finish.
+        "shell": item["spec"].get("_shell") is True,
         # §29 flow record: {state, error?} for any active / terminal-non-ready
         # flow; None once the flow reaches ``ready`` so the tile renders
         # normally. Read from the sealed ``flow`` slot via ni_flow.
@@ -434,6 +437,17 @@ def commission_item(request: Request, item_id: str) -> dict:
     if item["state"] != "draft":
         raise HTTPException(status_code=409,
                             detail=f"commission refused: state={item['state']!r}")
+    # W2 (field 2026-09-15): a flow shell whose creation never finished must
+    # not be activatable — the placeholder model source would run and report
+    # "ok" on a card that renders "Preparing card…" forever. The flow's
+    # finalize replaces the spec (dropping ``_shell``); until then the honest
+    # answers are retry-in-chat or delete.
+    if item["spec"].get("_shell") is True:
+        raise HTTPException(
+            status_code=409,
+            detail=("commission refused: this card's creation flow never "
+                    "finished — ask in chat to retry it, or delete the card"),
+        )
     secrets = getattr(request.app.state, "secret_store", None)
     params = item["spec"].get("params") or {}
     for name, param in params.items():  # bounded by _MAX_PARAMS
