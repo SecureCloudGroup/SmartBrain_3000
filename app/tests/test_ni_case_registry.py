@@ -18,7 +18,7 @@ import importlib.util
 import json
 import pathlib
 import sys
-from typing import Any, Callable
+from collections.abc import Callable
 
 import duckdb
 import pytest
@@ -39,8 +39,14 @@ pytestmark = pytest.mark.skipif(
 
 
 def _load_eval_module():
-    """Import tools/ni-flow-eval.py by path (the file isn't part of any package)."""
-    assert _EVAL_PATH.exists(), f"ni-flow-eval.py missing: {_EVAL_PATH}"
+    """Import tools/ni-flow-eval.py by path (the file isn't part of any package).
+
+    Returns None when tools/ is absent — the SHIPPED docker image carries
+    app/ only, and this module must still COLLECT there (the pytestmark
+    skipif then skips every test; module-level code cannot rely on it).
+    """
+    if not _EVAL_PATH.exists():
+        return None
     spec = importlib.util.spec_from_file_location("_ni_flow_eval", _EVAL_PATH)
     assert spec is not None and spec.loader is not None, "spec load must succeed"
     module = importlib.util.module_from_spec(spec)
@@ -78,7 +84,14 @@ def _testable(case: dict) -> bool:
     return case.get("url") is None  # url-null and not failed/source is still ok
 
 
-_CASES: list[dict] = [c for c in _load_registry() if _testable(c)]
+# Collection-safe in the shipped image (no tools/, possibly no registry): an
+# empty parametrize list collects zero tests and the pytestmark skip covers
+# the rest — module-level code must never assert paths that only exist in a
+# repo checkout.
+_CASES: list[dict] = (
+    [c for c in _load_registry() if _testable(c)]
+    if (_EVAL is not None and _REGISTRY_PATH.exists()) else []
+)
 
 
 def _store() -> tuple[nimod.NIStore, duckdb.DuckDBPyConnection]:

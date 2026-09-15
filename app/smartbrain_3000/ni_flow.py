@@ -373,17 +373,17 @@ def _validate_intent(reply: dict) -> dict:
 # phrase. Code owns the parse; the model's cadence is only the fallback when
 # no cadence phrase appears. Ordered patterns; first match wins.
 _CADENCE_PATTERNS: tuple[tuple[re.Pattern, object], ...] = (
-    (re.compile(r"\bevery\s+(\d+)\s*(?:minutes?|mins?)\b", re.I), lambda m: int(m.group(1))),
-    (re.compile(r"\bevery\s+(\d+)\s*(?:hours?|hrs?)\b", re.I), lambda m: int(m.group(1)) * 60),
-    (re.compile(r"\bevery\s+(\d+)\s*(?:seconds?|secs?)\b", re.I), lambda m: 1),
-    (re.compile(r"\bevery\s+minute\b|\bminute\s+by\s+minute\b|\beach\s+minute\b", re.I),
+    (re.compile(r"\bevery\s+(\d+)\s*(?:minutes?|mins?)\b", re.IGNORECASE), lambda m: int(m.group(1))),
+    (re.compile(r"\bevery\s+(\d+)\s*(?:hours?|hrs?)\b", re.IGNORECASE), lambda m: int(m.group(1)) * 60),
+    (re.compile(r"\bevery\s+(\d+)\s*(?:seconds?|secs?)\b", re.IGNORECASE), lambda m: 1),
+    (re.compile(r"\bevery\s+minute\b|\bminute\s+by\s+minute\b|\beach\s+minute\b", re.IGNORECASE),
      lambda m: 1),
-    (re.compile(r"\bhourly\b|\bevery\s+hour\b|\beach\s+hour\b|\bonce\s+an\s+hour\b", re.I),
+    (re.compile(r"\bhourly\b|\bevery\s+hour\b|\beach\s+hour\b|\bonce\s+an\s+hour\b", re.IGNORECASE),
      lambda m: 60),
-    (re.compile(r"\btwice\s+a\s+day\b", re.I), lambda m: 720),
-    (re.compile(r"\bdaily\b|\bevery\s+day\b|\bonce\s+a\s+day\b|\bevery\s+(?:morning|night|evening)\b", re.I),
+    (re.compile(r"\btwice\s+a\s+day\b", re.IGNORECASE), lambda m: 720),
+    (re.compile(r"\bdaily\b|\bevery\s+day\b|\bonce\s+a\s+day\b|\bevery\s+(?:morning|night|evening)\b", re.IGNORECASE),
      lambda m: 1440),
-    (re.compile(r"\bweekly\b|\bevery\s+week\b|\bonce\s+a\s+week\b", re.I), lambda m: 10080),
+    (re.compile(r"\bweekly\b|\bevery\s+week\b|\bonce\s+a\s+week\b", re.IGNORECASE), lambda m: 10080),
 )
 
 
