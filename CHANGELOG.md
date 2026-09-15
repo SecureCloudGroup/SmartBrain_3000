@@ -11,6 +11,8 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-09-15
+
 ### Fixed
 - **Neural Interface: "Fix it" now works on keyed cards, and unfinished cards
   can't pretend.** Re-mapping a card that uses an API key used to fail
