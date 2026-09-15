@@ -11,6 +11,15 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Changed
+- **Neural Interface: approving a card's source now happens on the card.**
+  When the flow finds a vetted source, the card itself immediately shows
+  exactly what will be fetched (plus any place lookup, and anything the
+  source can't provide) with **Approve source** / **Not this source** buttons
+  — one tap builds the card in seconds. The chat can still do it for you,
+  but a distracted assistant can no longer strand a half-built card: the
+  approval is always waiting on the board, produced by the engine itself.
+
 ## [0.15.0] - 2026-09-15
 
 ### Fixed

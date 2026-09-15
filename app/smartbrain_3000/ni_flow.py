@@ -2050,6 +2050,21 @@ def board_flow_field(store: ni.NIStore, item_id: str) -> dict | None:
     error = record.get("error")
     if isinstance(error, str) and error:
         out["error"] = error[:_MAX_ERROR]
+    # Card-consent (2026-09-15, operator: "bulletproof and deterministic"):
+    # a ``confirm_source`` pause renders its OWN approval affordance on the
+    # tile — the card needs the sealed disclosure verbatim: the exact URL,
+    # the optional geocode lookup, and the wants this source cannot serve.
+    # The chat model is no longer a required relay for the consent moment.
+    if state == "confirm_source":
+        out["source_url"] = str(record.get("source_url") or "")
+        out["recipe_title"] = str(record.get("_recipe_title") or "")
+        geocode = record.get("_geocode")
+        if isinstance(geocode, dict):
+            out["geocode_query"] = str(geocode.get("query") or "")
+            out["geocode_host"] = str(geocode.get("host") or "")
+        uncovered = record.get("_uncovered_wants")
+        if isinstance(uncovered, list) and uncovered:
+            out["not_covered"] = [str(w) for w in uncovered[:8]]
     return out
 
 

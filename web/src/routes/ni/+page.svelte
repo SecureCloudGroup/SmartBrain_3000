@@ -821,6 +821,37 @@
     }
   }
 
+  async function approveFlowSource(item: NiBoardItem) {
+    console.assert(item.flow?.state === "confirm_source", "approveFlowSource: pause required");
+    busyId = item.id;
+    try {
+      const res = await api.niFlowConfirmSource(item.id);
+      toast(res.state === "ready"
+        ? "Source approved — the card is being commissioned."
+        : "Source approved.");
+      await load();
+    } catch (err) {
+      const msg = describeError(err);
+      if (msg) error = msg;
+    } finally {
+      busyId = null;
+    }
+  }
+  async function declineFlowSource(item: NiBoardItem) {
+    console.assert(item.flow?.state === "confirm_source", "declineFlowSource: pause required");
+    busyId = item.id;
+    try {
+      await api.niFlowDeclineSource(item.id);
+      toast("Source declined — retry in chat with a different source, or delete the card.");
+      await load();
+    } catch (err) {
+      const msg = describeError(err);
+      if (msg) error = msg;
+    } finally {
+      busyId = null;
+    }
+  }
+
   async function validateLooksRight(item: NiBoardItem) {
     console.assert(item.state === "commissioning", "validateLooksRight: only commissioning");
     console.assert(typeof item.id === "string", "validateLooksRight: id is string");
@@ -953,6 +984,41 @@
                     — <span class="ni-status-class">{friendly}</span>
                   {/if}
                 </p>
+              {:else if item.flow.state === "confirm_source"}
+                <!-- Card-consent (2026-09-15): the flow's own approval affordance,
+                     rendered by CODE the instant the pause happens — the exact URL
+                     unmissable, the optional place lookup and any not-covered
+                     fields disclosed on the same surface the tap approves. -->
+                <div class="ni-commission">
+                  <p style="margin:0 0 var(--s-2); font-size:var(--f-label)">
+                    {item.flow.recipe_title ? `Vetted source: ${item.flow.recipe_title}` : "Source found"}
+                  </p>
+                  <p style="margin:0 0 var(--s-2); font-size:var(--f-label); word-break:break-all">
+                    Fetches: <strong>{item.flow.source_url}</strong>
+                  </p>
+                  {#if item.flow.geocode_query}
+                    <p class="muted" style="margin:0 0 var(--s-2); font-size:var(--f-label)">
+                      Also looks up “{item.flow.geocode_query}” via {item.flow.geocode_host} to fill the location.
+                    </p>
+                  {/if}
+                  {#if item.flow.not_covered && item.flow.not_covered.length > 0}
+                    <p class="muted" style="margin:0 0 var(--s-2); font-size:var(--f-label)">
+                      Won’t include: {item.flow.not_covered.join(", ")} (this source doesn’t provide it).
+                    </p>
+                  {/if}
+                  <div class="ni-actions">
+                    <button
+                      class="secondary"
+                      disabled={busyId === item.id}
+                      onclick={() => approveFlowSource(item)}
+                    >{busyId === item.id ? "Building…" : "Approve source"}</button>
+                    <button
+                      class="ghost"
+                      disabled={busyId === item.id}
+                      onclick={() => declineFlowSource(item)}
+                    >Not this source</button>
+                  </div>
+                </div>
               {:else}
                 <p class="muted" style="margin:0; font-size:var(--f-label)">{flowStageLabel(item.flow)}</p>
               {/if}

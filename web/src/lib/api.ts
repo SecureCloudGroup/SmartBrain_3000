@@ -661,6 +661,14 @@ export type NiFlowState =
 export interface NiItemFlow {
   state: NiFlowState;
   error?: string;
+  // Card-consent (2026-09-15): present ONLY on a confirm_source pause — the
+  // sealed disclosure the tile renders verbatim so the user approves on the
+  // card itself (the chat model is no longer a required relay).
+  source_url?: string;
+  recipe_title?: string;
+  geocode_query?: string;
+  geocode_host?: string;
+  not_covered?: string[];
 }
 
 export interface NiBoardItem {
@@ -1592,6 +1600,22 @@ export const api = {
       headers: { "x-sb-local": "1" },
       body: JSON.stringify({ name, value, host }),
     }),
+  // Card-consent (2026-09-15): approve / decline the flow's proposed source from
+  // the tile. Desktop-local; the server re-reads the SEALED record (no URL in
+  // the body — nothing to drift from what the card displayed). Approve runs the
+  // continuation synchronously (recipe handoff + consented geocode, seconds).
+  niFlowConfirmSource: (id: string) =>
+    req<{ ok: boolean; state: string; item_state?: string }>(
+      `/api/ni/items/${encodeURIComponent(id)}/flow/confirm-source`, {
+        method: "POST",
+        headers: { "x-sb-local": "1" },
+      }),
+  niFlowDeclineSource: (id: string) =>
+    req<{ ok: boolean; state: string }>(
+      `/api/ni/items/${encodeURIComponent(id)}/flow/decline-source`, {
+        method: "POST",
+        headers: { "x-sb-local": "1" },
+      }),
   // Fill a NON-secret param value (needs_params, 2026-09-14). Desktop-local like the
   // credential PUT; secrets are refused server-side (they belong to niPutCredential).
   niPutParam: (id: string, name: string, value: string) =>

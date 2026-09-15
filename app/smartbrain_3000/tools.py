@@ -764,11 +764,12 @@ Authoring order (§29 — the flow is the ONLY door for external JSON cards):
    start over while a flow is working.
 2. **Resume / confirm / remap.** ``state="source"`` ⇒ present candidates and
    call ``resume_ni_flow`` with the URL the user picked. ``confirm_source`` ⇒
-   tell the user which vetted source the flow matched and call
-   ``confirm_ni_flow_source`` (the approval card shows the exact URL). If the
-   flow result carried ``geocode_lookup``, tell the user the card also covers
-   that one place lookup and pass ``geocode_query`` verbatim — a confirm
-   missing it is refused.
+   the BOARD CARD itself now shows an 'Approve source' button with the exact
+   URL (and any place lookup / not-covered fields) — tell the user to approve
+   it there; that is the reliable path. Only if the user approves in chat,
+   call ``confirm_ni_flow_source`` (pass ``geocode_query`` verbatim when the
+   flow result carried ``geocode_lookup`` — a confirm missing it is refused).
+   NEVER research sources or start another flow while a confirm is pending.
    ``awaiting_credential`` ⇒ the user adds the key ON THE CARD (never in
    chat). To fix a flow- or recipe-born card, call ``remap_ni_item`` — it
    re-derives paths against the SAME consented URL (remap FIXES extraction;
@@ -2126,9 +2127,12 @@ def _flow_next_step(record: dict | None) -> str:
                 "(NOT 'live'); the user validates the first real result on the card. "
                 "Do not create anything else for this request.")
     if state == "confirm_source":
-        base = ("a vetted source was matched — tell the user which one (see "
-                "source_url) and call confirm_ni_flow_source with this item_id and "
-                "that exact source_url. Do not research or create anything else.")
+        base = ("a vetted source was matched and the CARD on the board now shows "
+                "an 'Approve source' button with the exact URL — tell the user to "
+                "tap it there (or, if they approve in chat, call "
+                "confirm_ni_flow_source with this item_id and that exact "
+                "source_url). Do not research, do not start another flow, do not "
+                "create anything else.")
         if isinstance((record or {}).get("_geocode"), dict):
             base += (" This confirm ALSO covers a place lookup (see "
                      "geocode_lookup) — pass geocode_query verbatim so the "
