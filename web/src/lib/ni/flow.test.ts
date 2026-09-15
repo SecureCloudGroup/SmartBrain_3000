@@ -68,3 +68,9 @@ describe("isFlowActive", () => {
     expect(isFlowActive(undefined)).toBe(false);
   });
 });
+
+it("awaiting_params labels as a needed detail (needs_params 2026-09-14)", () => {
+  expect(flowStageLabel({ state: "awaiting_params" })).toBe(
+    "Needs a detail from you",
+  );
+});

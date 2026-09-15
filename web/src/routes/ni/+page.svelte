@@ -124,6 +124,16 @@
   let credentialBusy = $state(false);
   let credentialError = $state("");
 
+  // Fill-param modal (needs_params, 2026-09-14) — the non-secret sibling of Add key.
+  // Opens per unfilled referenced param from the card's needs_params list; plain
+  // text input (values are ordinary spec data like a ticker or a city, never keys).
+  let paramFor = $state<NiBoardItem | null>(null);
+  let paramName = $state("");
+  let paramLabel = $state("");
+  let paramValue = $state("");
+  let paramBusy = $state(false);
+  let paramError = $state("");
+
   // Read-only run-history modal — lists the item's `ni_runs` rows (§10 detail),
   // newest first: ts (relTime) + runStatusLabel + friendly error class. Opened from
   // the small "History" link in every card footer; lazily fetches item detail.
@@ -582,6 +592,44 @@
     }
   }
 
+  function openParam(item: NiBoardItem, entry: { name: string; label: string }): void {
+    console.assert(typeof entry.name === "string", "openParam: name is string");
+    console.assert(paramFor === null, "openParam: no other param modal open");
+    paramFor = item;
+    paramName = entry.name;
+    paramLabel = entry.label;
+    paramValue = "";
+    paramError = "";
+  }
+  function closeParam(): void {
+    console.assert(paramBusy === false, "closeParam: not while save in flight");
+    paramFor = null;
+    paramName = "";
+    paramLabel = "";
+    paramValue = "";
+    paramError = "";
+  }
+  async function submitParam(): Promise<void> {
+    console.assert(paramFor !== null, "submitParam: a target must be set");
+    console.assert(paramBusy === false, "submitParam: no concurrent save");
+    const target = paramFor;
+    const value = paramValue.trim();
+    if (!target || !value || paramBusy) return;
+    paramBusy = true;
+    paramError = "";
+    try {
+      await api.niPutParam(target.id, paramName, value);
+      const label = paramLabel;
+      closeParam();
+      toast(`Saved ${label}.`);
+      await load();
+    } catch (err) {
+      paramError = describeError(err);
+    } finally {
+      paramBusy = false;
+    }
+  }
+
   async function openHistory(item: NiBoardItem): Promise<void> {
     console.assert(typeof item.id === "string", "openHistory: id is string");
     console.assert(historyFor === null, "openHistory: no other history modal open");
@@ -940,6 +988,25 @@
             </div>
           {/if}
 
+          {#if item.needs_params && item.needs_params.length > 0}
+            <!-- Fill-param entry point (needs_params, 2026-09-14). The non-secret
+                 sibling of Add key: the engine refuses runs and Activate 409s while
+                 any referenced slot is empty, so the card says exactly what it
+                 needs instead of "Waiting for the first run…". -->
+            <div class="ni-needs-key">
+              {#each item.needs_params as need (need.name)}
+                <div class="ni-needs-row">
+                  <span class="ni-needs-copy">Needs <strong>{need.label}</strong></span>
+                  <button
+                    class="secondary"
+                    disabled={busyId === item.id || paramFor !== null}
+                    onclick={() => openParam(item, need)}
+                  >Fill</button>
+                </div>
+              {/each}
+            </div>
+          {/if}
+
           {#if preview}
             <div class="ni-actions">
               <button
@@ -1201,6 +1268,42 @@
           disabled={credentialBusy || credentialLoading || !credentialValue || !credentialHost.trim()}
           onclick={submitCredential}
         >{credentialBusy ? "Saving…" : "Save"}</button>
+      </div>
+    </Modal>
+  {/if}
+
+  <!-- Fill-param modal (needs_params, 2026-09-14). Desktop-local like Add key, but
+       a plain text input — these are ordinary spec values (a ticker, a city), never
+       secrets (the server refuses secret params on this route). -->
+  {#if paramFor}
+    <Modal
+      open
+      label="Fill in"
+      onclose={() => { if (!paramBusy) closeParam(); }}
+    >
+      <h2 class="modal-title">Fill in — {paramLabel}</h2>
+      <p class="modal-body">
+        This card needs a value before it can run. It becomes part of the card’s
+        source and shows up in its address.
+      </p>
+      <label class="cred-row" for="ni-param-value">
+        <span>{paramLabel}</span>
+        <input
+          id="ni-param-value"
+          type="text"
+          autocomplete="off"
+          bind:value={paramValue}
+          placeholder="e.g. AAPL"
+          disabled={paramBusy}
+        />
+      </label>
+      {#if paramError}<p class="error" style="margin:var(--s-3) 0 0">{paramError}</p>{/if}
+      <div class="modal-actions" style="margin-top: var(--s-4)">
+        <button class="secondary" disabled={paramBusy} onclick={closeParam}>Cancel</button>
+        <button
+          disabled={paramBusy || !paramValue.trim()}
+          onclick={submitParam}
+        >{paramBusy ? "Saving…" : "Save"}</button>
       </div>
     </Modal>
   {/if}

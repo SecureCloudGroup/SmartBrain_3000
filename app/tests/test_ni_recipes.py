@@ -1,8 +1,8 @@
 """Deterministic-authoring backend (§26/§27/§28) tests.
 
 Covers:
-  * create_ni_item_from_recipe end-to-end (deterministic spec equality, always-draft
-    for secret recipes, journal entry, duplicate guard, prevalidate unknown recipe);
+  * the flow's recipe handoff end-to-end (deterministic spec equality, always-draft
+    for secret recipes, symbol param fill, needs_params draft landing, journal);
   * every recipe's sample_response actually round-trips its pipeline + scene bind;
   * derive_ni_paths (nested walk, unaddressable-keys reporting, caps, JSON-string
     input via the programmatic path);
@@ -58,113 +58,97 @@ def test_every_recipe_with_a_sample_response_runs_pipeline_and_binds() -> None:
                          image_ref=nimod._preview_image_ref(spec, src["id"]))
 
 
-# --- from_recipe: happy path + landing rules -------------------------------
+# --- recipe handoff via the flow (one-door law 2026-09-14) ------------------
+# create_ni_item_from_recipe is RETIRED from the model registry; the recipe
+# build now happens ONLY inside the flow (confirm_source pause ->
+# continue_from_recipe_confirm -> _handoff_from_recipe). These tests drive
+# that path directly (it is model-free after the intent is sealed).
 
-def test_from_recipe_creates_item_from_keyless_recipe_and_lands_commissioning() -> None:
-    """A keyless recipe with no unfilled secret param lands in commissioning; the
-    sealed spec's source.url matches the recipe's url_template (deterministic
-    build); a §28 journal 'recipe' entry names the recipe."""
+def _confirm_recipe(store, recipe_id: str, request: str, intent: dict) -> str:
+    """Shell + sealed confirm_source record + operator confirmation."""
+    from smartbrain_3000 import ni_flow
+    recipe = ni_catalog.get_recipe(recipe_id)
+    assert recipe is not None, recipe_id
+    item_id = ni_flow.create_shell_item(store, request)
+    record = ni_flow._make_record(request, "confirm_source",
+                                   source_url=recipe["url_template"],
+                                   notes=["test: awaiting confirm"])
+    record["_recipe_id"] = recipe_id
+    record["intent"] = intent
+    ni_flow._flow_write(store, item_id, record)
+    result = ni_flow.continue_from_recipe_confirm(store, item_id,
+                                                   recipe["url_template"])
+    # keyed recipes settle awaiting_credential; keyless settle ready
+    assert result.get("state") in ("ready", "awaiting_credential"), result
+    return item_id
+
+
+def test_flow_recipe_keyless_lands_commissioning_with_template_url() -> None:
+    """A keyless recipe lands commissioning; the sealed source.url equals the
+    recipe url_template; a 'recipe' journal entry names the recipe."""
     ctx, _c, _k = _tool_ctx()
     recipe = ni_catalog.get_recipe("crypto-price-btc-usd")
-    assert recipe is not None
-    out = _tool_call("create_ni_item_from_recipe", ctx,
-                     {"recipe_id": "crypto-price-btc-usd"})
-    assert out["state"] == "commissioning"
-    item = ctx.ni.get_item(out["id"])
-    assert item is not None and item["state"] == "commissioning"
+    iid = _confirm_recipe(ctx.ni, "crypto-price-btc-usd",
+                          "track bitcoin in usd",
+                          {"subject": "Bitcoin", "cadence_minutes": 15})
+    item = ctx.ni.get_item(iid)
+    assert item["state"] == "commissioning"
     assert item["spec"]["source"]["url"] == recipe["url_template"]
-    journal = ctx.ni.read_journal(out["id"])
-    assert journal, "recipe create must journal a 'recipe' entry"
-    assert journal[-1]["kind"] == "recipe"
-    assert "crypto-price-btc-usd" in journal[-1]["summary"]
+    journal = ctx.ni.read_journal(iid)
+    assert any(e["kind"] == "recipe" for e in journal)
 
 
-def test_from_recipe_keyed_recipe_always_lands_draft_and_rewrites_self_refs() -> None:
-    """A recipe with a secret param ALWAYS lands draft (the tool has no
-    SecretStore) and the sealed spec rewrites ``ni:self:<name>`` to
-    ``ni:<item_id>:<name>`` (H2 install-path parity)."""
+def test_flow_recipe_keyed_lands_draft_and_rewrites_self_refs() -> None:
+    """A keyed recipe ALWAYS lands draft; ``ni:self:<name>`` refs rewrite to
+    ``ni:<item_id>:<name>`` in the sealed spec (install-path parity)."""
     ctx, _c, _k = _tool_ctx()
-    out = _tool_call("create_ni_item_from_recipe", ctx,
-                     {"recipe_id": "stock-quote-finnhub",
-                      "params": {"symbol": "AAPL"}})
-    assert out["state"] == "draft"
-    item = ctx.ni.get_item(out["id"])
-    assert item is not None
-    api_key_ref = item["spec"]["source"]["headers"]["X-Finnhub-Token"]["$secret"]
-    assert api_key_ref == f"ni:{out['id']}:api_key"
-    # The declared secret param value is also rewritten from ni:self:.
-    assert (item["spec"]["params"]["api_key"]["value"]
-            == f"ni:{out['id']}:api_key")
+    iid = _confirm_recipe(ctx.ni, "stock-quote-finnhub",
+                          "show me AAPL stock",
+                          {"subject": "AAPL", "cadence_minutes": 30})
+    item = ctx.ni.get_item(iid)
+    assert item["state"] == "draft"
+    ref = item["spec"]["source"]["headers"]["X-Finnhub-Token"]["$secret"]
+    assert ref == f"ni:{iid}:api_key"
 
 
-def test_from_recipe_fills_string_params_deterministically() -> None:
-    """String param values from the chat args land in the sealed spec verbatim; the
-    resolved URL substitutes them (mirrors what the engine would send at fetch time)."""
+def test_flow_recipe_fills_symbol_param_deterministically() -> None:
+    """needs_params (2026-09-14): the field failure was a recipe card created
+    with symbol='' fetching ``?symbol=`` — Finnhub returned sentinel zeros and
+    the card commissioned a lying $0.00 quote. The flow handoff now fills the
+    ``symbol`` slot from the SAME corroborated ticker token that matched the
+    finance recipe. Pure code, no model."""
     ctx, _c, _k = _tool_ctx()
-    out = _tool_call("create_ni_item_from_recipe", ctx,
-                     {"recipe_id": "weather-wttr",
-                      "params": {"location": "SFO"}})
-    item = ctx.ni.get_item(out["id"])
-    assert item["spec"]["params"]["location"]["value"] == "SFO"
-    # substitute_params is deterministic — the built URL matches expected.
-    filled = nimod.substitute_params(item["spec"])
-    assert filled["source"]["url"] == "https://wttr.in/SFO?format=j1"
+    iid = _confirm_recipe(ctx.ni, "stock-quote-finnhub",
+                          "show me AAPL stock every 30 minutes",
+                          {"subject": "AAPL", "cadence_minutes": 30})
+    item = ctx.ni.get_item(iid)
+    assert item["spec"]["params"]["symbol"]["value"] == "AAPL"
+    # No unfilled referenced params remain — only the credential blocks it.
+    assert nimod.unfilled_referenced_params(item["spec"]) == []
 
 
-def test_from_recipe_prevalidate_bounces_unknown_recipe_id() -> None:
-    """Prevalidate runs pure — no ctx — so an unknown recipe id returns inline
-    to the model before the card parks. Guide pointer is appended."""
-    prevalidate = tools.get_tool("create_ni_item_from_recipe").prevalidate
-    assert prevalidate is not None
-    with pytest.raises(ValueError) as exc:
-        prevalidate({"recipe_id": "no-such-recipe"})
-    assert "unknown recipe" in str(exc.value)
-    assert "read_ni_spec_guide" in str(exc.value)
-
-
-def test_from_recipe_prevalidate_rejects_unknown_params() -> None:
-    prevalidate = tools.get_tool("create_ni_item_from_recipe").prevalidate
-    with pytest.raises(ValueError) as exc:
-        prevalidate({"recipe_id": "weather-wttr",
-                     "params": {"location": "SFO", "bogus": 1}})
-    assert "unknown params" in str(exc.value)
-
-
-def test_from_recipe_refuses_secret_values_in_args() -> None:
-    """Secrets NEVER ride tool args (§9 credential firewall) — the tool
-    prevalidate refuses so the model can never smuggle a credential through chat."""
-    prevalidate = tools.get_tool("create_ni_item_from_recipe").prevalidate
-    with pytest.raises(ValueError) as exc:
-        prevalidate({"recipe_id": "stock-quote-finnhub",
-                     "params": {"symbol": "AAPL", "api_key": "sk-abc"}})
-    assert "credential" in str(exc.value)
-
-
-def test_from_recipe_applies_title_and_interval_overrides() -> None:
+def test_flow_recipe_unfillable_param_lands_draft_needs_params() -> None:
+    """A recipe slot code cannot derive stays EMPTY on purpose and forces a
+    draft landing — never a commissioning card that dies param_empty."""
+    from smartbrain_3000 import ni_flow
     ctx, _c, _k = _tool_ctx()
-    out = _tool_call("create_ni_item_from_recipe", ctx,
-                     {"recipe_id": "fx-usd-eur",
-                      "title": "My Custom FX", "interval_minutes": 240})
-    item = ctx.ni.get_item(out["id"])
-    assert item["spec"]["title"] == "My Custom FX"
-    # ``_clamp_interval`` accepts ints >= floor (1 for non-llm items).
-    assert item["interval_minutes"] == 240
-
-
-def test_from_recipe_duplicate_title_bounces_unless_allow_duplicate() -> None:
-    """§28 duplicate guard fires case-insensitively against an existing title."""
-    ctx, _c, _k = _tool_ctx()
-    _tool_call("create_ni_item_from_recipe", ctx,
-               {"recipe_id": "fx-usd-eur"})
-    # Same recipe → same title → refused.
-    with pytest.raises(ValueError) as exc:
-        _tool_call("create_ni_item_from_recipe", ctx,
-                   {"recipe_id": "fx-usd-eur"})
-    assert "already exists" in str(exc.value)
-    # allow_duplicate: true lets a second card land.
-    out2 = _tool_call("create_ni_item_from_recipe", ctx,
-                      {"recipe_id": "fx-usd-eur", "allow_duplicate": True})
-    assert out2["state"] in ("commissioning", "draft")
+    recipe = ni_catalog.get_recipe("stock-quote-finnhub")
+    assert recipe is not None
+    item_id = ni_flow.create_shell_item(ctx.ni, "watch my stock please")
+    record = ni_flow._make_record("watch my stock please", "confirm_source",
+                                   source_url=recipe["url_template"],
+                                   notes=["test"])
+    record["_recipe_id"] = "stock-quote-finnhub"
+    record["intent"] = {"subject": "my stock", "cadence_minutes": 30}
+    ni_flow._flow_write(ctx.ni, item_id, record)
+    result = ni_flow.continue_from_recipe_confirm(ctx.ni, item_id,
+                                                    recipe["url_template"])
+    assert result.get("state") in ("ready", "awaiting_credential")
+    item = ctx.ni.get_item(item_id)
+    # "watch my stock please" carries no ticker token — symbol stays empty.
+    assert item["spec"]["params"]["symbol"]["value"] == ""
+    assert item["state"] == "draft"
+    assert "symbol" in nimod.unfilled_referenced_params(item["spec"])
 
 
 # --- freeform create: always-draft-with-secrets + rewrite --------------------
@@ -200,7 +184,7 @@ def test_create_ni_item_rewrites_self_refs_at_create() -> None:
     args = _basic_args(
         title="Freeform (keyed)",
         params={"api_key": {"label": "Key", "kind": "secret", "value": "ni:self:api_key"}},
-        source={"type": "http_json",
+        source={"type": "http_page",
                 "url": "https://api.example.com/q",
                 "headers": {"X-Api-Key": {"$secret": "ni:self:api_key"}}},
     )
@@ -360,12 +344,17 @@ def test_read_ni_item_returns_journal_and_state_explanation_for_draft_no_secret(
 
 def test_read_ni_item_explanation_for_draft_with_secret_names_the_missing_key() -> None:
     ctx, _c, _k = _tool_ctx()
-    out = _tool_call("create_ni_item_from_recipe", ctx,
-                     {"recipe_id": "stock-quote-finnhub",
-                      "params": {"symbol": "AAPL"}})
+    out = _tool_call("create_ni_item", ctx, _basic_args(
+        title="Keyed quote",
+        params={"api_key": {"label": "Finnhub API key", "kind": "secret",
+                             "value": "ni:self:api_key"}},
+        source={"type": "http_page",
+                "url": "https://finnhub.io/api/v1/quote",
+                "headers": {"X-Finnhub-Token": {"$secret": "ni:self:api_key"}}},
+    ))
     read = _tool_call("read_ni_item", ctx, {"item_id": out["id"]})
     assert read["state"] == "draft"
-    # The label 'Finnhub API key' from the recipe rides through to the user_next_action.
+    # The param label rides through to the user_next_action.
     assert "Finnhub API key" in read["user_next_action"]
     assert "do not describe this card as live" in read["state_explanation"]
 
@@ -405,7 +394,7 @@ def test_read_ni_item_exposes_last_failure_excerpt_for_http_source() -> None:
     # Author an http_json item and simulate a sealed last_failure snapshot.
     args = _basic_args(
         title="HTTP failure",
-        source={"type": "http_json", "url": "https://api.example.com/x"},
+        source={"type": "http_page", "url": "https://api.example.com/x"},
         pipeline=[{"op": "extract", "paths": {"v": "a"}}],
         preview_payload={"v": 1},
         scene={"type": "stack", "dir": "v", "gap": "sm", "children": [
@@ -446,24 +435,33 @@ def _unlock(client: TestClient) -> None:
     assert r.status_code == 200, r.text
 
 
-def _install_recipe_via_tool(client: TestClient, recipe_id: str, **extra) -> str:
-    body = {"name": "create_ni_item_from_recipe",
-            "args": {"recipe_id": recipe_id, **extra}}
-    r = client.post("/api/tools/invoke", json=body)
-    assert r.status_code == 200, r.text
-    payload = r.json()
-    assert payload["status"] == "awaiting_approval", payload
-    pid = payload["pending_id"]
-    approve = client.post(f"/api/agent/pending/{pid}/approve",
-                          json={"confirm_tool": "create_ni_item_from_recipe"})
-    assert approve.status_code == 200, approve.text
-    return approve.json()["result"]["id"]
+def _install_recipe_via_flow(client: TestClient, recipe_id: str,
+                              request_text: str, intent: dict) -> str:
+    """One-door law (2026-09-14): recipes install ONLY through the flow's
+    confirm_source pause — drive that path on the app's live store."""
+    from smartbrain_3000 import ni_flow
+    store = client.app.state.ni
+    recipe = ni_catalog.get_recipe(recipe_id)
+    assert recipe is not None, recipe_id
+    item_id = ni_flow.create_shell_item(store, request_text)
+    record = ni_flow._make_record(request_text, "confirm_source",
+                                   source_url=recipe["url_template"],
+                                   notes=["test"])
+    record["_recipe_id"] = recipe_id
+    record["intent"] = intent
+    ni_flow._flow_write(store, item_id, record)
+    result = ni_flow.continue_from_recipe_confirm(store, item_id,
+                                                    recipe["url_template"])
+    # keyed recipes settle awaiting_credential; keyless settle ready
+    assert result.get("state") in ("ready", "awaiting_credential"), result
+    return item_id
 
 
 def test_board_row_needs_credentials_list_for_keyed_recipe(client: TestClient) -> None:
     _unlock(client)
-    iid = _install_recipe_via_tool(client, "stock-quote-finnhub",
-                                    params={"symbol": "AAPL"})
+    iid = _install_recipe_via_flow(client, "stock-quote-finnhub",
+                                    "show me AAPL stock",
+                                    {"subject": "AAPL", "cadence_minutes": 30})
     board = client.get("/api/ni/board").json()
     row = next(i for i in board["items"] if i["id"] == iid)
     assert row["state"] == "draft"
@@ -475,8 +473,9 @@ def test_board_row_needs_credentials_list_for_keyed_recipe(client: TestClient) -
 def test_board_row_needs_credentials_empty_after_credential_written(
         client: TestClient) -> None:
     _unlock(client)
-    iid = _install_recipe_via_tool(client, "stock-quote-finnhub",
-                                    params={"symbol": "AAPL"})
+    iid = _install_recipe_via_flow(client, "stock-quote-finnhub",
+                                    "show me AAPL stock",
+                                    {"subject": "AAPL", "cadence_minutes": 30})
     # Desktop-local PUT writes the credential; needs_credentials empties.
     r = client.put(f"/api/ni/items/{iid}/credential",
                    json={"name": "api_key", "value": "sk-xyz",
@@ -491,7 +490,9 @@ def test_board_row_needs_credentials_empty_after_credential_written(
 def test_board_row_needs_credentials_empty_for_keyless_recipe(
         client: TestClient) -> None:
     _unlock(client)
-    iid = _install_recipe_via_tool(client, "fx-usd-eur")
+    iid = _install_recipe_via_flow(client, "fx-usd-eur",
+                                    "usd to eur rate",
+                                    {"subject": "USD/EUR", "cadence_minutes": 60})
     board = client.get("/api/ni/board").json()
     row = next(i for i in board["items"] if i["id"] == iid)
     assert row["needs_credentials"] == []

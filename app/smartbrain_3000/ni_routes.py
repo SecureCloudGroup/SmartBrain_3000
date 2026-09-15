@@ -131,6 +131,9 @@ def _board_row(store: ni.NIStore, item: dict, *,
         "template_update": update_flag,
         "template_gone": gone_flag,
         "needs_credentials": _needs_credentials(item, secrets_store),
+        # needs_params (2026-09-14): unfilled non-secret slots the spec references —
+        # the card renders a fill affordance and the engine refuses runs meanwhile.
+        "needs_params": _needs_params(item),
         # §23: True when a §14 frontier proposal is parked on this item — the card
         # renders "Fix proposed — review" (Apply / Dismiss are per-item routes).
         "l2_proposal": isinstance(item["spec"].get("_l2_proposal"), dict),
@@ -173,6 +176,23 @@ def _needs_credentials(item: dict, secrets_store) -> list[dict]:
         if not stored:
             out.append({"name": str(name), "label": label or str(name)})
     return out
+
+
+def _needs_params(item: dict) -> list[dict]:
+    """needs_params (2026-09-14): ``[{name, label}]`` for every NON-secret param that
+    the spec actually references via ``{{param:X}}`` but whose value is still empty.
+
+    The generic class behind the $0.00 Finnhub card: an item whose frozen URL (or any
+    other spec string) carries an unfilled slot must say so on the card — the engine
+    refuses the run (``param_empty``), commission refuses activation, and this list is
+    what the tile renders as a fill affordance. Referenced-ness is computed over the
+    whole spec MINUS the params block itself, so a declared-but-unused slot never
+    blocks anything.
+    """
+    assert isinstance(item, dict), "item required"
+    spec = item.get("spec") if isinstance(item.get("spec"), dict) else {}
+    return [{"name": name, "label": _param_label(item, name)}
+            for name in ni.unfilled_referenced_params(spec)]
 
 
 def _template_update_flags(item: dict, library_index: dict[str, dict] | None,
@@ -419,6 +439,22 @@ def commission_item(request: Request, item_id: str) -> dict:
                         f"commission refused: secret param {name!r} not yet filled"
                     ),
                 )
+    # needs_params (2026-09-14): the same refusal for NON-secret slots the spec
+    # references — commissioning an item whose frozen URL still reads
+    # ``?symbol={{param:symbol}}`` with an empty value produced a "commissioning ok"
+    # $0.00 card (Finnhub returns sentinel zeros for an empty symbol). The engine
+    # also refuses the run (``param_empty``); this check keeps the Activate tap
+    # honest instead of deferring the failure to the first run.
+    unfilled = _needs_params(item)
+    if unfilled:
+        first = unfilled[0]
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"commission refused: param {first['name']!r} ({first['label']}) "
+                "not yet filled"
+            ),
+        )
     store.commission(item_id)
     _journal_best_effort(store, item_id, "commissioned",
                          "user activated the card (draft -> commissioning)")
@@ -631,6 +667,56 @@ def put_credential(request: Request, item_id: str, body: CredentialIn) -> dict:
     return {"ok": True}
 
 
+class ParamIn(BaseModel):
+    """Fill one NON-secret parameter value (needs_params affordance, 2026-09-14)."""
+
+    name: str = Field(min_length=1, max_length=100)
+    value: str = Field(min_length=1, max_length=500)
+
+
+@router.put("/api/ni/items/{item_id}/param")
+def put_param(request: Request, item_id: str, body: ParamIn) -> dict:
+    """Fill a non-secret param value from the card (Desktop-local; audited).
+
+    The needs_params counterpart of the credential PUT: a recipe- or flow-born
+    card whose ``{{param:X}}`` slot code could not derive lands draft with a
+    "Needs: <label>" affordance; this route collects the value. Secrets are
+    REFUSED here (they belong to the credential PUT, host-bound, and their
+    values must never ride a plaintext spec). Writes through ``update_spec``
+    (origin=user), so the A3 rule applies — a param that shapes the effective
+    URL strips ``_c2_ok``/``contract`` and the card re-commissions honestly.
+    """
+    _require_desktop_local(request)
+    store = _store(request)
+    item = store.get_item(item_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="item not found")
+    params = item["spec"].get("params") or {}
+    decl = params.get(body.name) if isinstance(params, dict) else None
+    if not isinstance(decl, dict):
+        raise HTTPException(status_code=404,
+                            detail=f"param {body.name!r} not declared on this item")
+    if decl.get("kind") == "secret":
+        raise HTTPException(
+            status_code=409,
+            detail="secret params are filled via the credential PUT, never here")
+    new_spec = json.loads(json.dumps(item["spec"]))
+    new_spec["params"][body.name]["value"] = body.value
+    store.update_spec(item_id, new_spec, origin="user")
+    request.app.state.audit.append(
+        "user", "ni_param", "reviewed", "executed", True,
+        args_summary=tools.summarize({"item_id": item_id, "name": body.name}),
+        result_summary=tools.summarize({"filled": True}),
+    )
+    _journal_best_effort(store, item_id, "param_changed",
+                          f"param {_param_label(item, body.name)!r} filled")
+    refreshed = store.get_item(item_id)
+    # Mirror of the credential PUT's H1 clean-up: an ``awaiting_params`` flow
+    # slot drops the moment the last referenced slot is filled.
+    _clear_flow_when_credentials_satisfied(store, refreshed, None)
+    return {"ok": True, "needs_params": _needs_params(refreshed)}
+
+
 def _clear_flow_when_credentials_satisfied(store: ni.NIStore, item: dict,
                                             secrets_store) -> None:
     """H1 (audit 2026-09-13): drop the ``flow`` snapshot slot when
@@ -640,10 +726,13 @@ def _clear_flow_when_credentials_satisfied(store: ni.NIStore, item: dict,
     """
     assert store is not None and isinstance(item, dict), "args required"
     record = ni_flow._flow_read(store, item["id"])
-    if record is None or str(record.get("state") or "") != "awaiting_credential":
+    state = str((record or {}).get("state") or "")
+    if record is None or state not in ("awaiting_credential", "awaiting_params"):
         return
-    if _needs_credentials(item, secrets_store):
+    if state == "awaiting_credential" and _needs_credentials(item, secrets_store):
         return  # some secret is still unfilled — keep the flow record
+    if state == "awaiting_params" and _needs_params(item):
+        return  # some slot is still unfilled — keep the flow record
     ni_flow.clear_flow_slot(store, item["id"])
 
 

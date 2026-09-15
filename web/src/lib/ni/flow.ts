@@ -46,6 +46,7 @@ export function flowStageLabel(flow: NiItemFlow | null | undefined): string {
   if (s === "mapping") return "Choosing the data fields…";
   if (s === "assembling") return "Building the card…";
   if (s === "awaiting_credential") return "Needs your API key";
+  if (s === "awaiting_params") return "Needs a detail from you";
   if (s === "ready") return "Building the card…";
   // failed / unsupported: caller renders friendlyErrorClass(flow.error).
   return "";

@@ -39,7 +39,7 @@ log = logging.getLogger("smartbrain.ni.flow")
 
 FLOW_STATES: frozenset[str] = frozenset({
     "intent", "source", "confirm_source", "sampling", "mapping", "assembling",
-    "awaiting_credential", "ready", "unsupported", "failed",
+    "awaiting_credential", "awaiting_params", "ready", "unsupported", "failed",
 })
 # C2/C3/H3 (audit 2026-09-13): host-free error MARKERS the frontend labels
 # ("Waiting for you to pick a source in chat" / "Waiting for you to approve
@@ -354,6 +354,22 @@ def stage_intent(request: str, model_call: Callable[[str], str]) -> dict:
 
 
 # ---- stage 2: source (recipe scoring) ------------------------------------
+
+def _first_ticker(request: str) -> str | None:
+    """The first ticker-shaped non-stop-word token in the request, or None.
+
+    needs_params (2026-09-14): powers the deterministic recipe param fill —
+    the SAME token class whose corroborated hit selected the finance recipe
+    fills its ``symbol`` slot, so "show me AAPL stock" never lands a card
+    that asks the user to type AAPL a second time.
+    """
+    assert isinstance(request, str), "request required"
+    for match in _TICKER_RE.finditer(request):  # bounded by request length
+        token = match.group(0)
+        if token not in _TICKER_STOPWORDS:
+            return token
+    return None
+
 
 def _ticker_hit(request: str) -> bool:
     """C2 (audit 2026-09-13): a ticker-shaped token that is NOT a stop word.
@@ -1233,6 +1249,35 @@ def _scene_has_repeat(scene: object) -> bool:
     return False
 
 
+def _fill_recipe_params(spec: dict, request: str) -> None:
+    """Deterministically fill a recipe spec's empty param slots from the request.
+
+    needs_params (2026-09-14): the retired ``create_ni_item_from_recipe`` tool
+    had the MODEL fill param slots as args; the flow's recipe handoff never
+    inherited a fill step, so every recipe card landed with empty slots (the
+    $0.00 Finnhub card, via the flow this time). Filling stays pure code:
+    - ``symbol``: the first corroborated ticker token in the request — the same
+      token class whose hit selected a finance recipe in ``match_recipe``.
+    Anything code cannot derive stays empty ON PURPOSE: the landing rule then
+    forces draft and the card's needs_params affordance asks the user — never
+    a guessed value, never a model blank.
+    """
+    assert isinstance(spec, dict) and isinstance(request, str), "args required"
+    params = spec.get("params") or {}
+    if not isinstance(params, dict):
+        return
+    for name, decl in params.items():  # bounded by ni._MAX_PARAMS
+        if not isinstance(decl, dict) or decl.get("kind") == "secret":
+            continue
+        value = decl.get("value")
+        if value is not None and str(value).strip():
+            continue  # recipe shipped a default — keep it
+        if name == "symbol":
+            ticker = _first_ticker(request)
+            if ticker is not None:
+                decl["value"] = ticker
+
+
 def _handoff_from_recipe(store: ni.NIStore, item_id: str, request: str,
                           intent: dict, recipe: dict) -> dict:
     """Deep-copy the recipe's spec_template and hand off.
@@ -1247,6 +1292,7 @@ def _handoff_from_recipe(store: ni.NIStore, item_id: str, request: str,
     if not isinstance(spec_template, dict):
         return _fail(store, item_id, "assembly", "recipe spec_template missing")
     spec = json.loads(json.dumps(spec_template))
+    _fill_recipe_params(spec, request)
     spec["title"] = str(intent.get("subject") or spec.get("title") or "New card")[:ni._MAX_TITLE]
     spec["goal"] = request[:ni._MAX_GOAL]
     cadence_raw = intent.get("cadence_minutes")
@@ -1347,6 +1393,13 @@ def _finalize(store: ni.NIStore, item_id: str, spec: dict, preview: dict,
     assert born is None or born in BORN_MARKERS, "born marker must be closed"
     if born is not None:
         spec[_BORN_KEY] = born
+    # needs_params wave (2026-09-14): bind ``ni:self:<name>`` refs to the shell's
+    # concrete item id — the retired create_ni_item_from_recipe tool did this via
+    # ``_add_item_with_rewrite``; the flow's handoff never inherited it, so a
+    # keyed recipe card sealed ``ni:self:api_key`` and every fetch would have
+    # died ``secret_missing`` even after the user added the key.
+    from . import ni_library
+    ni_library.rewrite_self_refs(spec, item_id)
     try:
         ni.validate_spec(spec)
     except ValueError as exc:
@@ -1373,20 +1426,41 @@ def _finalize(store: ni.NIStore, item_id: str, spec: dict, preview: dict,
             # should be unreachable — record and continue if the store disagrees.
             _append_note(store, item_id, f"commission skipped: {exc}")
     else:
-        _append_note(store, item_id, "awaiting_credential: secret param unfilled")
-        _transition(store, item_id, "awaiting_credential", note=note)
+        # needs_params (2026-09-14): name the ACTUAL blocker. A secret param
+        # pauses ``awaiting_credential`` (Add key on the card); a non-secret
+        # referenced slot code could not derive pauses ``awaiting_params``
+        # (Fill on the card) — the Open-Meteo recipe has no key at all, and
+        # labeling its empty lat/lon "awaiting_credential" would send the
+        # user hunting for a key that does not exist.
+        if any(isinstance(d, dict) and d.get("kind") == "secret"
+               for d in (spec.get("params") or {}).values()):
+            _append_note(store, item_id, "awaiting_credential: secret param unfilled")
+            _transition(store, item_id, "awaiting_credential", note=note)
+        else:
+            unfilled = ni.unfilled_referenced_params(spec)
+            _append_note(store, item_id,
+                          f"awaiting_params: {', '.join(unfilled) or 'unfilled slot'}")
+            _transition(store, item_id, "awaiting_params", note=note)
         return _flow_read(store, item_id) or {}
     _transition(store, item_id, "ready", note=note)
     return _flow_read(store, item_id) or {}
 
 
 def _landing_state(spec: dict) -> str:
-    """Mirror of ``tools._initial_ni_state``: secret param present ⇒ draft."""
+    """Mirror of ``tools._initial_ni_state``: secret param present ⇒ draft.
+
+    needs_params (2026-09-14): an unfilled REFERENCED non-secret param also
+    forces draft — commissioning such a spec would immediately fail
+    ``param_empty`` at the first run (and the commission route now refuses
+    it). The card's needs_params affordance collects the value first.
+    """
     assert isinstance(spec, dict), "spec required"
     params = spec.get("params") or {}
     for decl in params.values():  # bounded by ni._MAX_PARAMS
         if isinstance(decl, dict) and decl.get("kind") == "secret":
             return "draft"
+    if ni.unfilled_referenced_params(spec):
+        return "draft"
     return "commissioning"
 
 
@@ -1570,7 +1644,7 @@ def sweep_stranded_flows(store: ni.NIStore) -> int:
         state = str(record.get("state") or "")
         if state in _TERMINAL_STATES or state == "ready":
             continue
-        if state == "awaiting_credential":
+        if state in ("awaiting_credential", "awaiting_params"):
             continue  # user-gated; not stranded even after an hour
         updated_at = record.get("updated_at")
         if not isinstance(updated_at, str) or not updated_at:

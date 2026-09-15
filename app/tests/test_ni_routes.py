@@ -140,7 +140,7 @@ def test_board_falls_back_to_last_good_when_degraded(client: TestClient) -> None
 def test_get_item_returns_spec_with_secret_names_only(client: TestClient) -> None:
     _unlock(client)
     iid = _create_via_tool(client, source={
-        "type": "http_json",
+        "type": "http_page",
         "url": "https://api.example.com/q",
         "headers": {"X-Api-Key": {"$secret": "ni:x:api_key"}},
     })
@@ -330,7 +330,7 @@ def test_credential_put_journals_param_changed_entry(client: TestClient) -> None
     iid = _create_via_tool(client, params={
         "api_key": {"label": "Weather Provider Key",
                     "kind": "secret", "value": "ni:self:api_key"},
-    }, source={"type": "http_json", "url": "https://api.example.com/x",
+    }, source={"type": "http_page", "url": "https://api.example.com/x",
                 "headers": {"X-Api-Key": {"$secret": "ni:self:api_key"}}},
                preview_payload={"text": "preview"})
     r = client.put(f"/api/ni/items/{iid}/credential",
@@ -363,7 +363,7 @@ def test_commission_route_refuses_when_secret_param_unfilled(client: TestClient)
     _unlock(client)
     body = _spec_body(
         params={"api_key": {"label": "Key", "kind": "secret", "value": ""}},
-        source={"type": "http_json",
+        source={"type": "http_page",
                 "url": "https://api.example.com/q",
                 "headers": {"X-Api-Key": {"$secret": "ni:self:api_key"}}},
     )
@@ -758,7 +758,7 @@ def test_S5_commission_refuses_when_template_placeholder_has_no_credential(
     body = _spec_body(
         params={"api_key": {"label": "Key", "kind": "secret",
                              "value": "ni:self:api_key"}},
-        source={"type": "http_json",
+        source={"type": "http_page",
                  "url": "https://api.example.com/q",
                  "headers": {"X-Api-Key": {"$secret": "ni:self:api_key"}}},
     )
@@ -821,3 +821,79 @@ def test_S6_commission_writes_audit_row_with_item_id_only(
     import json as _json
     body = _json.dumps(rows[0])
     assert "Weather" not in body, "audit body must not carry the item's title"
+
+
+# --- needs_params wave (2026-09-14) ------------------------------------------
+
+def _keyless_param_item(client: TestClient, value: str = "") -> str:
+    """A draft item whose http_page URL references a non-secret param."""
+    return _create_via_tool(
+        client,
+        title=f"Param card {value or 'empty'}",
+        params={"city": {"label": "City name", "kind": "string", "value": value}},
+        source={"type": "http_page",
+                "url": "https://api.example.com/w?city={{param:city}}",
+                "headers": {}},
+    )
+
+
+def test_board_row_carries_needs_params_for_unfilled_slot(client: TestClient) -> None:
+    """D2: an unfilled referenced non-secret param rides the board row so the
+    card can render the fill affordance (mirrors needs_credentials)."""
+    _unlock(client)
+    iid = _keyless_param_item(client)
+    board = client.get("/api/ni/board").json()
+    row = next(i for i in board["items"] if i["id"] == iid)
+    assert row["needs_params"] == [{"name": "city", "label": "City name"}]
+    filled = _keyless_param_item(client, value="Kansas City")
+    board = client.get("/api/ni/board").json()
+    row2 = next(i for i in board["items"] if i["id"] == filled)
+    assert row2["needs_params"] == []
+
+
+def test_commission_refuses_unfilled_nonsecret_param(client: TestClient) -> None:
+    """D2: Activate on a card whose referenced param is empty 409s with the
+    param named — the $0.00-Finnhub class never reaches the engine."""
+    _unlock(client)
+    iid = _keyless_param_item(client)
+    r = client.post(f"/api/ni/items/{iid}/commission")
+    assert r.status_code == 409
+    assert "city" in r.json()["detail"] and "City name" in r.json()["detail"]
+
+
+def test_param_put_fills_value_and_unblocks_commission(client: TestClient) -> None:
+    """D2: the param PUT collects the value (desktop-local), journals it, and
+    commission then succeeds."""
+    _unlock(client)
+    iid = _keyless_param_item(client)
+    r = client.put(f"/api/ni/items/{iid}/param",
+                   json={"name": "city", "value": "Kansas City"},
+                   headers={"X-SB-Local": "1"})
+    assert r.status_code == 200 and r.json()["needs_params"] == []
+    item = client.app.state.ni.get_item(iid)
+    assert item["spec"]["params"]["city"]["value"] == "Kansas City"
+    journal = client.app.state.ni.read_journal(iid)
+    assert any(e["kind"] == "param_changed" and "City name" in e["summary"]
+               for e in journal)
+    assert client.post(f"/api/ni/items/{iid}/commission").status_code == 200
+
+
+def test_param_put_refuses_secret_params_and_unknown_names(client: TestClient) -> None:
+    """D2: secrets belong to the credential PUT (409); unknown names 404."""
+    _unlock(client)
+    iid = _create_via_tool(
+        client,
+        title="Keyed param card",
+        params={"api_key": {"label": "Key", "kind": "secret",
+                             "value": "ni:self:api_key"}},
+        source={"type": "http_page", "url": "https://api.example.com/q",
+                "headers": {"X-Api-Key": {"$secret": "ni:self:api_key"}}},
+    )
+    r = client.put(f"/api/ni/items/{iid}/param",
+                   json={"name": "api_key", "value": "sk-x"},
+                   headers={"X-SB-Local": "1"})
+    assert r.status_code == 409
+    r2 = client.put(f"/api/ni/items/{iid}/param",
+                    json={"name": "nope", "value": "x"},
+                    headers={"X-SB-Local": "1"})
+    assert r2.status_code == 404
