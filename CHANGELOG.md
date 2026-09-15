@@ -12,6 +12,17 @@ to know when a release changes behavior.
 ## [Unreleased]
 
 ### Fixed
+- **Neural Interface: "Fix it" now works on keyed cards, and unfinished cards
+  can't pretend.** Re-mapping a card that uses an API key used to fail
+  instantly (it fetched the raw URL template with no key) and, even when it
+  could have worked, would have silently stripped the card's key reference.
+  Re-maps now run the card's own source exactly like a normal refresh — and a
+  card whose creation flow never finished can no longer be Activated into a
+  forever-"Preparing card…" zombie: it says plainly that creation didn't
+  finish, with retry-in-chat or delete as the ways out. Card titles are no
+  longer entire request paragraphs, and when you ask for data a card's source
+  simply doesn't have, the assistant now says to build a new card instead of
+  attempting doomed edits.
 - **Neural Interface: "Looks right" now does something you can see.** Field
   test: confirming a new card's first result looked like a dead button — the
   click was recorded each time, but the card kept asking the same question

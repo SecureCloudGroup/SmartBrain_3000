@@ -771,7 +771,11 @@ Authoring order (§29 — the flow is the ONLY door for external JSON cards):
    missing it is refused.
    ``awaiting_credential`` ⇒ the user adds the key ON THE CARD (never in
    chat). To fix a flow- or recipe-born card, call ``remap_ni_item`` — it
-   re-derives paths against the SAME consented URL. NEVER propose a
+   re-derives paths against the SAME consented URL (remap FIXES extraction;
+   it can never add fields the source does not serve — different data means
+   a NEW card via start_ni_flow). After a resume_ni_flow, NEVER call
+   confirm_ni_flow_source — the resume already carried the user's choice
+   and a late confirm is refused after costing an approval. NEVER propose a
    source or pipeline edit on a flow- or recipe-born card — it is REFUSED
    at ``update_ni_item`` and the refusal lands AFTER the user paid an
    approval tap; if the current source cannot serve a field the user wants
@@ -1808,8 +1812,11 @@ def _update_ni_item(ctx: ToolContext, args: dict) -> dict:
         if forbidden:
             raise ValueError(
                 f"this card was created via the NI Flow ({sorted(forbidden)} "
-                "changes are not editable freeform); ask me to re-map it "
-                "(remap_ni_item) instead"
+                "changes are not editable freeform). To FIX broken extraction "
+                "against the SAME source, use remap_ni_item. For DIFFERENT "
+                "data (new fields or another endpoint), create a NEW card "
+                "with start_ni_flow — a remap can never change what the "
+                "source serves."
             )
     spec = dict(current["spec"])  # shallow copy; we replace whole subtrees, never mutate in place
     # H3 (audit 2026-09-09): ``history`` + ``alerts`` are REVIEWED-updatable — an alerts
@@ -2297,6 +2304,15 @@ def _remap_ni_item(ctx: ToolContext, args: dict) -> dict:
     url = str(source.get("url") or "")
     if not url:
         raise ValueError("item has no source URL to remap against")
+    # R1 (field 2026-09-15): a remap samples the item's own source with its
+    # params substituted — an unfilled slot cannot fetch, so refuse up front
+    # with the same honest posture as the commission door.
+    unfilled = ni.unfilled_referenced_params(item["spec"])
+    if unfilled:
+        raise ValueError(
+            f"remap refused: param {unfilled[0]!r} is unfilled — the user "
+            "fills it on the card first"
+        )
     request = str(item["spec"].get("goal") or item["spec"].get("title") or "remap")
     record = ni_flow._make_record(request, "sampling", source_url=url,
                                     notes=["remap re-entering flow at sampling"])

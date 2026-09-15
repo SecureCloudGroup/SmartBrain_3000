@@ -27,6 +27,7 @@ from . import (
     devices,
     gateway,
     mcp_server,
+    ni_flow,
     runtime,
     scheduler,
     serving,
@@ -353,6 +354,12 @@ def _make_lifespan(mcp):
         _webrtc_mode = os.environ.get("SMARTBRAIN_WEBRTC_ENABLED", "")
         if _webrtc_mode == "1":
             application.state.webrtc_active.set()
+        # R2 (2026-09-15): the NI flow worker may re-sample an item's OWN
+        # consented keyed source during a remap — same trust position as the
+        # scheduler's runs. The provider reads the live app state so lock /
+        # unlock transitions are honored on every call.
+        ni_flow.set_secrets_provider(
+            lambda: getattr(application.state, "secret_store", None))
         async with mcp.session_manager.run():  # drive the MCP transport for this app
             runner = asyncio.create_task(_scheduler_loop(application))  # background scheduler
             webrtc = asyncio.create_task(_webrtc_loop(application)) if _webrtc_mode != "0" else None

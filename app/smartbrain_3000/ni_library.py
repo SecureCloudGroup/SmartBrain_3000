@@ -270,7 +270,8 @@ def _validate_template_spec_and_preview(template: dict, where: str) -> None:
     # "flow-born" cards). Install stamps its own marker; template packs must
     # never carry it.
     forbidden = {"contract", "_c2_ok", "_l1_last_attempt", "_l1_trial", "_template",
-                 "_l2_last_attempt", "_l2_proposal", "repair_policy", "_born"}
+                 "_l2_last_attempt", "_l2_proposal", "repair_policy", "_born",
+                 "_shell"}
     present = sorted(forbidden.intersection(spec.keys()))
     if present:
         raise LibraryError(
@@ -738,7 +739,7 @@ def _pack_cache_put(created_at: str,
 # its own from the pack it read).
 _TEMPLATE_STRIP_KEYS = ("contract", "_c2_ok", "_l1_last_attempt", "_l1_trial",
                         "_l2_last_attempt", "_l2_proposal", "_template",
-                        "repair_policy", "_born")
+                        "repair_policy", "_born", "_shell")
 
 
 def build_installed_spec(template: dict, param_values: dict) -> dict:

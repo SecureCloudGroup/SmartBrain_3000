@@ -1459,3 +1459,139 @@ def test_flow_tool_result_carries_not_covered(monkeypatch) -> None:
     assert out["state"] == "confirm_source"
     assert out.get("not_covered") == ["volume"]
     assert "does not cover" in out["next_step"]
+
+
+# ---- remap/shell wave (field 2026-09-15) ----------------------------------
+
+def test_shell_spec_carries_shell_marker_and_bounded_title() -> None:
+    """W1/W2: the placeholder spec is marked ``_shell`` and never titles a
+    whole request paragraph (the field board showed one as the card name)."""
+    long_request = ("Create a Neural Interface tile that fetches the current "
+                    "stock price and OHLCV data for NVIDIA from Finnhub using "
+                    "the provided API key. The item should update every 30 minutes.")
+    store, _conn = _store()
+    item_id = ni_flow.create_shell_item(store, long_request)
+    spec = store.get_item(item_id)["spec"]
+    assert spec.get("_shell") is True
+    assert len(spec["title"]) <= 80 and spec["title"].endswith("…")
+
+
+def test_finalize_drops_the_shell_marker() -> None:
+    """A finished flow replaces the spec wholesale — no ``_shell`` survives."""
+    store, _conn = _store()
+    fixture = _load("btc")
+    item_id = ni_flow.create_shell_item(store, "bitcoin price")
+    intent_reply = json.dumps({
+        "kind": "external_data", "subject": "Bitcoin", "cadence_minutes": 15,
+        "wants": ["price"], "threshold": None, "place": None,
+        "display_hint": "value",
+    })
+    mapping_reply = json.dumps({"price": "bitcoin.usd"})
+    model = _scripted_model([intent_reply, mapping_reply])
+    result = ni_flow.run_flow(
+        store, item_id, gateway_call=model, fetcher=lambda _u: fixture,
+        catalog=_empty_catalog(),
+        source_url="https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd")
+    assert result["state"] == "ready"
+    assert "_shell" not in store.get_item(item_id)["spec"]
+
+
+def test_remap_substitutes_params_and_attaches_credentials(monkeypatch) -> None:
+    """R1/R2: a recipe-born keyed card's remap fetches the SUBSTITUTED url with
+    its $secret header resolved — never the literal template (the field
+    FetchError) — and the finalized spec PRESERVES the template + params +
+    headers instead of stripping the credential."""
+    store, _conn = _store()
+    fixture = _load("aapl")
+    item_id = ni_flow.create_shell_item(store, "NVDA quote")
+    spec = dict(store.get_item(item_id)["spec"])
+    spec.pop("_shell", None)
+    spec["params"] = {"symbol": {"label": "Ticker", "kind": "string",
+                                  "value": "NVDA"},
+                      "api_key": {"label": "Key", "kind": "secret",
+                                   "value": f"ni:{item_id}:api_key"}}
+    spec["source"] = {
+        "type": "http_json",
+        "url": "https://finnhub.io/api/v1/quote?symbol={{param:symbol}}",
+        "headers": {"X-Finnhub-Token": {"$secret": f"ni:{item_id}:api_key"}},
+    }
+    # A realistic recipe card carries a pipeline — the remap derives its
+    # wanted fields from these extract names.
+    spec["pipeline"] = [{"op": "extract", "paths": {"price": "c"}}]
+    store.update_spec(item_id, spec, origin="agent")
+    store.set_state(item_id, "live")  # the field card was LIVE when remapped
+    fetched: dict = {}
+
+    def _fake_engine_fetch(source, iid, secrets_store):
+        fetched["url"] = source["url"]
+        fetched["headers"] = source.get("headers")
+        fetched["secrets"] = secrets_store
+        return fixture
+
+    monkeypatch.setattr(ni_flow.ni, "_fetch_http_json", _fake_engine_fetch)
+    ni_flow.set_secrets_provider(lambda: "SECRETS")
+    try:
+        record = ni_flow._make_record("remap", "sampling",
+                                       source_url=spec["source"]["url"],
+                                       notes=["test remap"])
+        record["_remap"] = True
+        ni_flow._flow_write(store, item_id, record)
+        mapping_reply = json.dumps({
+            "price": "chart.result[0].meta.regularMarketPrice"})
+        model = _scripted_model([mapping_reply])
+        result = ni_flow.run_flow(store, item_id,
+                                   gateway_call=model,
+                                   fetcher=lambda _u: (_ for _ in ()).throw(
+                                       AssertionError("raw fetcher must not run")),
+                                   catalog=[])
+    finally:
+        ni_flow.set_secrets_provider(None)
+    assert result["state"] == "ready", result
+    assert "{{param:" not in fetched["url"] and "NVDA" in fetched["url"]
+    assert fetched["secrets"] == "SECRETS"
+    final = store.get_item(item_id)["spec"]
+    assert final["source"]["url"] == "https://finnhub.io/api/v1/quote?symbol={{param:symbol}}"
+    assert final["source"]["headers"]["X-Finnhub-Token"]["$secret"] == f"ni:{item_id}:api_key"
+    assert final["params"]["symbol"]["value"] == "NVDA"
+
+
+def test_remap_without_secrets_provider_fails_honestly(monkeypatch) -> None:
+    """R2: a keyed remap with no wired provider fails with the honest class —
+    never a template fetch."""
+    store, _conn = _store()
+    item_id = ni_flow.create_shell_item(store, "keyed card")
+    spec = dict(store.get_item(item_id)["spec"])
+    spec.pop("_shell", None)
+    spec["params"] = {"symbol": {"label": "T", "kind": "string", "value": "X"},
+                      "api_key": {"label": "K", "kind": "secret",
+                                   "value": f"ni:{item_id}:api_key"}}
+    spec["source"] = {"type": "http_json",
+                       "url": "https://finnhub.io/api/v1/quote?symbol={{param:symbol}}",
+                       "headers": {"X-Finnhub-Token": {"$secret": f"ni:{item_id}:api_key"}}}
+    store.update_spec(item_id, spec, origin="agent")
+    ni_flow.set_secrets_provider(None)
+    record = ni_flow._make_record("remap", "sampling",
+                                   source_url=spec["source"]["url"], notes=[])
+    record["_remap"] = True
+    ni_flow._flow_write(store, item_id, record)
+    result = ni_flow.run_flow(store, item_id,
+                               gateway_call=lambda m, p: "{}",
+                               fetcher=lambda _u: {}, catalog=[])
+    assert result["state"] == "failed"
+    assert "secret store" in str(result.get("error") or "")
+
+
+def test_remap_tool_refuses_unfilled_params() -> None:
+    """R1 front door: an unfilled referenced param refuses the remap up front."""
+    store, _conn = _store()
+    ctx = tools.ToolContext(ni=store)
+    item_id = ni_flow.create_shell_item(store, "unfilled card")
+    spec = dict(store.get_item(item_id)["spec"])
+    spec.pop("_shell", None)
+    spec["params"] = {"symbol": {"label": "Ticker", "kind": "string", "value": ""}}
+    spec["source"] = {"type": "http_json",
+                       "url": "https://api.example.com/q?symbol={{param:symbol}}",
+                       "headers": {}}
+    store.update_spec(item_id, spec, origin="agent")
+    with pytest.raises(ValueError, match="unfilled"):
+        tools.get_tool("remap_ni_item").handler(ctx, {"item_id": item_id})
