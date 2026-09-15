@@ -85,142 +85,84 @@ from smartbrain_3000 import ni
 from smartbrain_3000 import tools as sbtools
 
 _FIXTURES = _REPO / "app" / "tests" / "fixtures" / "ni_flow"
+_REGISTRY_PATH = _FIXTURES / "cases.json"
 _DEFAULT_BIFROST = "http://127.0.0.1:38080"
 _DEFAULT_MODEL = "mlx/Qwen3.5-9B-MLX-4bit"
 _UA_HEADER = {"User-Agent": "SmartBrain-ni-flow-eval/1"}
 _FETCH_TIMEOUT_S = 25.0
 _LLM_TIMEOUT_S = 180.0
 _CHAOS_MODEL_CAP = 4  # intent(1..2) + mapping(1..2); any more = retry storm
+_KNOWN_CASE_KEYS: frozenset[str] = frozenset({
+    "id", "request", "dimension", "url", "fixture", "fields", "klass",
+    "expected", "intent", "phrasings", "cadence_free_phrasings", "record",
+    "geocode", "geocode_fixture", "pytest_source_url", "filter_threshold",
+})
+_ENGINE_STATES: frozenset[str] = frozenset({
+    "ready", "awaiting_params", "awaiting_credential",
+    "unsupported", "source", "failed",
+})
+_ENGINE_SETTLED: tuple[str, ...] = ("ready", "awaiting_params", "awaiting_credential")
 
-# --- fixed matrices --------------------------------------------------------------
+# --- registry loader -------------------------------------------------------------
 
-CASES: list[dict] = [
-    {"id": "aapl-5min", "request": "show me AAPL every 5 minutes",
-     "url": "https://query1.finance.yahoo.com/v8/finance/chart/AAPL?interval=1d&range=1d",
-     "fixture": "aapl.json",
-     "fields": {"price": "number", "prev_close": "number"},
-     "klass": "value", "expect": {"cadence": 5}},
-    {"id": "btc-vague", "request": "what's bitcoin worth right now, keep it updated",
-     "url": "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd",
-     "fixture": "btc.json",
-     "fields": {"price": "number"},
-     "klass": "value", "expect": {"cadence_default": True}},
-    {"id": "kc-weather",
-     "request": "track the weather in Kansas City - temperature and wind",
-     "url": None, "fixture": "kc_weather.json",
-     "fields": {"temperature": "number", "wind": "number"},
-     "klass": "value", "geocode": "Kansas City",
-     "geocode_fixture": "geocode_kc.json", "expect": {}},
-    {"id": "quakes-m5",
-     "request": "show me the latest earthquakes above magnitude 5",
-     "url": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson",
-     "fixture": "quakes.json",
-     "fields": {"place": "string"}, "klass": "list",
-     # 'where' feature-detected at run time: absent ⇒ PASS+GAP; present ⇒ PASS
-     # with magnitude filter. Case dispatcher branches on that at run time.
-     "expect": {"gap_when_no_where":
-                "no filter op in pipeline grammar (threshold intent unservable)"},
-     "filter_threshold": 5},
-    {"id": "people-space", "request": "how many people are in space right now",
-     "url": "http://api.open-notify.org/astros.json",
-     "fixture": "astros.json",
-     "fields": {"count": "number"}, "klass": "value", "expect": {}},
-    {"id": "eur-usd-hourly", "request": "EUR to USD exchange rate, update hourly",
-     "url": "https://api.frankfurter.app/latest?from=EUR&to=USD",
-     "fixture": "fx.json",
-     "fields": {"rate": "number"}, "klass": "value", "expect": {"cadence": 60}},
-    {"id": "hn-frontpage", "request": "top stories on Hacker News",
-     "url": "https://hn.algolia.com/api/v1/search?tags=front_page",
-     "fixture": "hn.json",
-     "fields": {"title": "string"}, "klass": "list", "expect": {}},
-    {"id": "iss-map", "request": "ISS location on a map, every minute",
-     "url": "https://api.wheretheiss.at/v1/satellites/25544",
-     "fixture": "iss.json",
-     "fields": {"latitude": "number", "longitude": "number"},
-     "klass": "value",
-     "expect": {"degrade":
-                "map display unsupported -> numbers card + honest note"}},
-    {"id": "xmas-countdown", "request": "my countdown to Christmas - days left",
-     "url": None, "fixture": None, "fields": {},
-     "klass": "refuse", "expect": {"refusal": True}},
-    {"id": "us-radar-image", "request": "show me the current US weather radar",
-     "url": "https://radar.weather.gov/ridge/standard/CONUS_0.gif",
-     "fixture": "radar.gif",
-     "fields": {}, "klass": "image", "expect": {}},
-]
 
-# 5 paraphrases per case — realistic user voice, same subject / cadence / kind.
+def load_registry(path: pathlib.Path = _REGISTRY_PATH) -> list[dict]:
+    """Load the case registry from JSON. The registry is the single source of truth.
+
+    Raises ``RuntimeError`` when the file is missing (a stale checkout must
+    fail loudly, not silently drop cases). Rejects any unknown top-level keys
+    and any ``expected.engine_state`` outside the closed vocabulary — the
+    registry is machine-read by two graders + one pytest suite, so drift is a
+    plumbing bug, not a data anomaly.
+    """
+    assert isinstance(path, pathlib.Path), "path must be a pathlib.Path"
+    if not path.exists():
+        raise RuntimeError(f"NI case registry missing: {path}")
+    with path.open(encoding="utf-8") as fp:
+        cases = json.load(fp)
+    if not isinstance(cases, list) or not cases:
+        raise RuntimeError(f"registry {path} must be a non-empty JSON array")
+    seen: set[str] = set()
+    for case in cases:  # bounded by registry size
+        _validate_case(case, seen)
+    return cases
+
+
+def _validate_case(case: object, seen: set[str]) -> None:
+    """Validate one registry row: required keys, closed engine_state, no dupes."""
+    assert isinstance(seen, set), "seen must be a set"
+    if not isinstance(case, dict):
+        raise RuntimeError(f"registry row must be an object; got {type(case)}")
+    unknown = set(case) - _KNOWN_CASE_KEYS
+    if unknown:
+        raise RuntimeError(f"registry row {case.get('id')!r} has unknown keys: {sorted(unknown)}")
+    for key in ("id", "request", "fields", "klass", "expected", "intent"):
+        if key not in case:
+            raise RuntimeError(f"registry row {case.get('id')!r} missing key: {key}")
+    cid = str(case["id"])
+    if cid in seen:
+        raise RuntimeError(f"duplicate registry id: {cid}")
+    seen.add(cid)
+    if case["klass"] not in ("value", "list", "refuse", "image"):
+        raise RuntimeError(f"row {cid}: unknown klass {case['klass']!r}")
+    engine_state = (case["expected"] or {}).get("engine_state")
+    allowed = _ENGINE_STATES | {"skipped"}  # image rows expect 'skipped'
+    if engine_state not in allowed:
+        raise RuntimeError(
+            f"row {cid}: expected.engine_state {engine_state!r} not in {sorted(allowed)}")
+
+
+CASES: list[dict] = load_registry()
+
+# Legacy per-case paraphrase and cadence-free maps derived from the registry.
+# Modes reference these dicts; the registry stays the single source of truth.
 PARAPHRASES: dict[str, list[str]] = {
-    "aapl-5min": [
-        "track Apple stock for me, refresh every 5 minutes",
-        "AAPL on my dashboard, updated every five minutes",
-        "keep an eye on apple shares, every 5 min",
-        "what's AAPL at? update it every 5 minutes",
-        "apple stock ticker card, 5-minute cadence",
-    ],
-    "btc-vague": [
-        "bitcoin price right now, keep it fresh",
-        "how much is BTC currently worth in USD",
-        "current bitcoin value, keep it updated",
-        "show me BTC price and keep refreshing it",
-        "keep track of what bitcoin costs today",
-    ],
-    "kc-weather": [
-        "Kansas City weather with temperature and wind",
-        "current temp and wind speed in Kansas City",
-        "what's the temperature and wind like in Kansas City",
-        "Kansas City temperature and windspeed on my dashboard",
-        "weather card for Kansas City showing temperature and wind",
-    ],
-    "quakes-m5": [
-        "recent earthquakes with magnitude over 5",
-        "list quakes stronger than magnitude 5",
-        "earthquakes above M5 today",
-        "big earthquakes only - above magnitude 5",
-        "show recent seismic events greater than magnitude 5",
-    ],
-    "people-space": [
-        "current number of astronauts in orbit",
-        "people in space count right now",
-        "how many astronauts up there right now",
-        "count of humans currently in space",
-        "astronaut headcount in space",
-    ],
-    "eur-usd-hourly": [
-        "hourly EUR to USD exchange rate",
-        "current EUR/USD rate updated every hour",
-        "euro to dollar exchange rate refreshed hourly",
-        "track EUR-USD rate on an hourly cadence",
-        "convert euros to dollars, updated each hour",
-    ],
-    "hn-frontpage": [
-        "Hacker News front page",
-        "current top HN stories",
-        "what's hot on Hacker News right now",
-        "top posts from Hacker News",
-        "HN front page headlines",
-    ],
-    "iss-map": [
-        "where is the International Space Station right now on a map",
-        "ISS position every minute on a map",
-        "track the ISS on a world map, minute by minute",
-        "show ISS lat/long on a map, refresh each minute",
-        "map of ISS location updated every minute",
-    ],
-    "xmas-countdown": [
-        "days until Christmas",
-        "how many days till Xmas",
-        "countdown to December 25",
-        "days remaining until Christmas Day",
-        "Christmas countdown card - days left",
-    ],
-    "us-radar-image": [
-        "current US weather radar image",
-        "CONUS weather radar picture",
-        "US national weather radar image",
-        "show me the latest weather radar for the United States",
-        "weather radar image, US-wide",
-    ],
+    c["id"]: list(c["phrasings"]) for c in CASES
+    if isinstance(c.get("phrasings"), list) and c["phrasings"]
+}
+CADENCE_FREE_PHRASINGS: dict[str, list[str]] = {
+    c["id"]: list(c["cadence_free_phrasings"]) for c in CASES
+    if isinstance(c.get("cadence_free_phrasings"), list) and c["cadence_free_phrasings"]
 }
 
 
@@ -387,6 +329,18 @@ def _stage_intent(request: str, llm: Callable[[str, int], str],
             counter.bump()
             reply = _parse_json_reply(llm(prompt, 300))
             _validate_intent(reply)
+            # Deterministic cadence override (2026-09-15): mirror the SHIPPED
+            # engine — code parses an explicit cadence phrase and wins over
+            # the model's number. The phrasing gate must measure what users
+            # actually get, not raw model wobble. Feature-detected for parity
+            # with stale checkouts (same pattern as the `where` detection).
+            try:
+                from smartbrain_3000 import ni_flow as _flowmod
+                parsed = _flowmod._cadence_from_text(request)
+                if parsed is not None:
+                    reply["cadence_minutes"] = parsed
+            except (ImportError, AttributeError):
+                pass
             return reply
         except Exception as exc:  # closed retry, then raise
             last_exc = exc
@@ -592,18 +546,18 @@ def _count_labels(node: object, budget: int = 500) -> int:
 
 
 def _apply_expectations(case: dict, intent: dict, ok: bool) -> tuple[bool, str | None]:
-    """Fold the case's ``expect`` block into the ok/status decision."""
+    """Fold the case's ``expected`` block into the ok/status decision."""
     assert isinstance(case, dict), "case required"
     assert isinstance(intent, dict), "intent required"
-    expect = case["expect"]
+    expected = case["expected"]
     ok_out = ok
-    if "cadence" in expect and intent["cadence_minutes"] != expect["cadence"]:
+    if "cadence" in expected and intent["cadence_minutes"] != expected["cadence"]:
         ok_out = False
-    if expect.get("cadence_default") and intent["cadence_minutes"] != 15:
+    if expected.get("cadence_default") and intent["cadence_minutes"] != 15:
         ok_out = False
     gap_reason: str | None = None
     if case["id"] == "quakes-m5" and not _has_where_op():
-        gap_reason = expect.get("gap_when_no_where")
+        gap_reason = expected.get("gap_when_no_where")
     return ok_out, gap_reason
 
 
@@ -625,7 +579,7 @@ def _run_case_live(case: dict, rep: int, llm: Callable[[str, int], str],
         if intent["kind"] != "external_data":
             out["status"] = "FAIL(misclassified as computed)"
             return out
-        if case["expect"].get("degrade") and intent.get("display_hint") == "map":
+        if case["expected"].get("degrade") and intent.get("display_hint") == "map":
             out["notes"].append("degrade: map hint noted, proceeding with numbers")
         if case["klass"] == "image":
             blob = _fetch_bytes_live(case["url"])
@@ -680,15 +634,24 @@ def _run_live_data_case(case: dict, intent: dict, sample: object, url: str,
 
 
 def _canonical_fake_intent(case: dict) -> dict:
-    """Grounded canonical intent per case — no model needed in recorded/chaos."""
+    """Grounded canonical intent per case — read from the registry when present.
+
+    Every registry row ships an explicit ``intent`` object (recorded + chaos
+    modes need it verbatim). Fall back to a synthesized shape only if a legacy
+    row omits it — the closed-schema validation in ``load_registry`` currently
+    requires it, so this branch is defence-in-depth.
+    """
     assert isinstance(case, dict), "case required"
+    registry_intent = case.get("intent")
+    if isinstance(registry_intent, dict) and registry_intent:
+        return json.loads(json.dumps(registry_intent))
     if case["klass"] == "refuse":
         return {"kind": "computed_only", "subject": case["id"],
                 "cadence_minutes": 1440, "wants": ["days"],
                 "threshold": None, "display_hint": "value"}
     hint = ("image" if case["klass"] == "image"
             else "list" if case["klass"] == "list" else "value")
-    cadence = case["expect"].get("cadence") or 15
+    cadence = case["expected"].get("cadence") or 15
     return {"kind": "external_data", "subject": case["id"],
             "cadence_minutes": cadence, "wants": list(case["fields"]) or [case["id"]],
             "threshold": case.get("filter_threshold"),
@@ -696,33 +659,73 @@ def _canonical_fake_intent(case: dict) -> dict:
 
 
 def _pick_ground_paths(cands: list[dict], fields: dict[str, str]) -> dict[str, str]:
-    """Deterministic 'previously-correct' pick — first candidate whose type matches.
+    """Deterministic 'previously-correct' pick — one candidate per field.
 
-    Also prefer a path whose leaf name contains the field name substring so
-    ``price`` binds to a price-like leaf when several numbers exist. This is
-    the fake model's ONE job in recorded/chaos modes.
+    Selection passes (each preferring UNUSED cands so multi-field cases like
+    ``crypto-pair`` — two ``*.usd`` numeric paths — resolve distinctly):
+
+    1. Type match AND (path tail contains the field name, or the
+       underscore-joined path segments contain it). The joined form aligns
+       ``bitcoin_usd`` with ``bitcoin.usd`` and ``rate`` with ``rates.USD``.
+    2. Type match, unused. Distinct-per-field fallback.
+    3. Type match. Legacy last-resort — may repeat a path when only one typed
+       candidate exists (kept so single-field rows never raise on scarce data).
     """
     assert isinstance(cands, list) and cands, "candidates required"
     assert isinstance(fields, dict) and fields, "fields required"
+    used: set[str] = set()
     out: dict[str, str] = {}
     for field, wanted in fields.items():
-        picked: str | None = None
-        for cand in cands:
-            if cand["type"] != wanted:
-                continue
-            tail = cand["path"].rsplit(".", 1)[-1].lower()
-            if field.lower() in tail:
-                picked = cand["path"]
-                break
-        if picked is None:
-            for cand in cands:
-                if cand["type"] == wanted:
-                    picked = cand["path"]
-                    break
+        picked = _pick_one_ground_path(cands, field, wanted, used)
         if picked is None:
             raise ValueError(f"no candidate matches field {field!r} type {wanted!r}")
+        used.add(picked)
         out[field] = picked
     return out
+
+
+def _pick_one_ground_path(cands: list[dict], field: str, wanted: str,
+                          used: set[str]) -> str | None:
+    """One field's three-pass pick — helper for ``_pick_ground_paths``.
+
+    Field-name variants are tried in pass 1 so ``stars`` still matches
+    ``stargazers_count`` (basic singularize: drop trailing ``s``); nothing
+    heavier than a suffix strip — production code is not in this loop.
+    """
+    assert isinstance(field, str) and field, "field required"
+    assert isinstance(wanted, str), "type required"
+    variants = _field_name_variants(field)
+    for cand in cands:  # pass 1: named affinity, distinct
+        if cand["type"] != wanted or cand["path"] in used:
+            continue
+        path_low = cand["path"].lower()
+        tail = path_low.rsplit(".", 1)[-1]
+        segments = [s for s in re.split(r"[\.\[\]]", path_low)
+                    if s and not s.isdigit()]
+        joined = "_".join(segments)
+        if any(v in tail or v in joined for v in variants):
+            return cand["path"]
+    for cand in cands:  # pass 2: unused typed cand
+        if cand["type"] == wanted and cand["path"] not in used:
+            return cand["path"]
+    for cand in cands:  # pass 3: legacy fallback (may repeat)
+        if cand["type"] == wanted:
+            return cand["path"]
+    return None
+
+
+def _field_name_variants(field: str) -> list[str]:
+    """Field-name variants for path matching: lowercased + singular fallback.
+
+    ``stars`` → ``["stars", "star"]`` so ``stargazers_count`` still resolves.
+    Never returns duplicates and never returns the empty string.
+    """
+    assert isinstance(field, str) and field, "field required"
+    low = field.lower()
+    variants = [low]
+    if len(low) > 3 and low.endswith("s"):
+        variants.append(low.rstrip("s"))
+    return variants
 
 
 def _fake_llm(replies: list[str], counter: _CallCounter) -> Callable[[str, int], str]:
@@ -748,6 +751,7 @@ def _run_case_recorded(case: dict) -> dict:
     out: dict[str, Any] = {"id": case["id"], "status": "?",
                            "notes": [], "secs": 0.0, "mode": "recorded"}
     counter = _CallCounter()
+    expected_state = str((case["expected"] or {}).get("engine_state") or "")
     try:
         intent = _canonical_fake_intent(case)
         out["intent"] = intent
@@ -759,6 +763,14 @@ def _run_case_recorded(case: dict) -> dict:
             fmt = ni._sniff_image_format(blob)
             out["image_format"] = fmt
             out["status"] = "PASS" if fmt else "FAIL(sniff)"
+            return out
+        # BY-DESIGN rows (per ni-cases.md §B): failed/source outcomes are the
+        # feature, not a bug. Grade the fixture (if any) against the honest class.
+        if expected_state == "source":
+            out["status"] = "PASS(source_pause_by_design)"
+            return out
+        if expected_state == "failed":
+            out["status"] = _recorded_failed_row(case, out)
             return out
         sample = _load_fixture(case["fixture"])
         cands = _derive_paths(sample)
@@ -778,6 +790,30 @@ def _run_case_recorded(case: dict) -> dict:
     finally:
         out["secs"] = round(time.time() - started, 1)
     return out
+
+
+def _recorded_failed_row(case: dict, out: dict) -> str:
+    """Grade a BY-DESIGN failed row in recorded mode. Returns a status string.
+
+    ``lan-refused`` / ``dead-endpoint`` (no fixture) → PASS by design; there is
+    nothing to replay hermetically and the LAN row must not attempt a fetch
+    even in recorded mode. ``xml-not-json`` (raw-bytes fixture) is verified by
+    attempting a JSON parse: a clean ``JSONDecodeError`` proves the flow's
+    fetch stage would fail honestly on the recorded body.
+    """
+    assert isinstance(case, dict) and isinstance(out, dict), "args required"
+    fixture_name = case.get("fixture")
+    if not fixture_name:
+        out["notes"].append(
+            "no fixture on a failed-class row (LAN/dead endpoints stay unrecorded)")
+        return "PASS(no_fixture_by_design)"
+    raw = (_FIXTURES / fixture_name).read_bytes()
+    try:
+        json.loads(raw)
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        out["notes"].append(f"clean_fail: {type(exc).__name__}: {str(exc)[:80]}")
+        return f"PASS(clean_fail: {type(exc).__name__})"
+    return "FAIL(non-JSON fixture parsed OK — failure-class fixture must not be valid JSON)"
 
 
 # --- chaos mutators (unit-testable) ---------------------------------------------
@@ -906,18 +942,65 @@ def _run_phrasing_matrix(llm: Callable[[str, int], str]) -> list[dict]:
     """
     assert callable(llm), "llm callable required"
     out: list[dict] = []
-    for case in CASES:  # bounded by CASES length (10)
-        results: list[dict] = []
-        for phrase in PARAPHRASES[case["id"]][:5]:  # bounded to 5
-            counter = _CallCounter()
-            try:
-                intent = _stage_intent(phrase, llm, counter)
-                results.append({"phrase": phrase, "intent": intent})
-            except Exception as exc:  # a phrasing failure is a RESULT
-                results.append({"phrase": phrase, "error": str(exc)[:120]})
-        out.append({"id": case["id"], "phrasings": results,
-                    "agreement": _phrasing_agreement(results)})
+    for case in CASES:  # bounded by registry size
+        cid = case["id"]
+        primary = PARAPHRASES.get(cid) or []
+        if not primary:
+            continue  # cases without a phrasings list skip this mode
+        results = _run_phrasings_for_case(primary[:5], llm)
+        row: dict = {"id": cid, "phrasings": results,
+                     "agreement": _phrasing_agreement(results)}
+        # A18/A19: cadence_free_phrasings CHANGE cadence legitimately, so grade
+        # them separately on kind/validity only (never cadence equality).
+        cadence_free = CADENCE_FREE_PHRASINGS.get(cid) or []
+        if cadence_free:
+            cf_results = _run_phrasings_for_case(cadence_free[:5], llm)
+            row["cadence_free_phrasings"] = cf_results
+            row["cadence_free_agreement"] = _cadence_free_agreement(cf_results)
+        out.append(row)
     return out
+
+
+def _run_phrasings_for_case(phrases: list[str],
+                             llm: Callable[[str, int], str]) -> list[dict]:
+    """Call the intent stage for each phrase in ``phrases`` (bounded to 5)."""
+    assert isinstance(phrases, list), "phrases required"
+    assert callable(llm), "llm callable required"
+    results: list[dict] = []
+    for phrase in phrases[:5]:  # bounded to 5
+        counter = _CallCounter()
+        try:
+            intent = _stage_intent(phrase, llm, counter)
+            results.append({"phrase": phrase, "intent": intent})
+        except Exception as exc:  # a phrasing failure is a RESULT
+            results.append({"phrase": phrase, "error": str(exc)[:120]})
+    return results
+
+
+def _cadence_free_agreement(results: list[dict]) -> dict:
+    """Agreement over cadence-free phrasings: kind + validity, cadence excluded.
+
+    These phrasings CHANGE the cadence deliberately (A18/A19: "every morning",
+    "every 10 seconds"), so the gate must not demand cadence equality — a
+    successful cadence PARSE that varies is the whole point.
+    """
+    assert isinstance(results, list) and results, "results list required"
+    kinds: set[str] = set()
+    valid = 0
+    parsed_cadences: list[int] = []
+    for entry in results:  # bounded by paraphrase count
+        intent = entry.get("intent")
+        if not isinstance(intent, dict):
+            continue
+        valid += 1
+        kinds.add(intent.get("kind", ""))
+        cadence = intent.get("cadence_minutes", 0)
+        if isinstance(cadence, int):
+            parsed_cadences.append(cadence)
+    total = max(1, len(results))
+    return {"valid": valid, "total": total,
+            "kind_agree": len(kinds) <= 1 and valid == total,
+            "parsed_cadences": parsed_cadences}
 
 
 def _phrasing_agreement(results: list[dict]) -> dict:
@@ -971,13 +1054,25 @@ def live_gate_pass(results: list[dict]) -> bool:
 
 
 def phrasing_gate_pass(rows: list[dict], threshold: float = 0.9) -> bool:
-    """Phrasing gate: >= threshold of cases fully agree on kind AND cadence."""
+    """Phrasing gate: >= threshold of cases agree.
+
+    A row agrees when its primary paraphrase set agrees on BOTH kind AND
+    cadence. A cadence-free set (A18/A19: cadence-changing phrasings, kept in
+    ``cadence_free_phrasings``) participates ONLY through kind agreement +
+    validity — cadence equality is not checked because the phrasings mean to
+    change cadence. A row with a cadence-free set that dissents on kind flips
+    the whole row out of the ratio.
+    """
     assert 0.0 < threshold <= 1.0, "threshold must be in (0,1]"
     assert isinstance(rows, list) and rows, "rows required"
     agreeing = 0
-    for row in rows:  # bounded by CASES length
+    for row in rows:  # bounded by registry size
         agreement = row.get("agreement") or {}
-        if agreement.get("kind_agree") and agreement.get("cadence_agree"):
+        primary_ok = bool(agreement.get("kind_agree")
+                          and agreement.get("cadence_agree"))
+        cf_agreement = row.get("cadence_free_agreement")
+        cf_ok = True if cf_agreement is None else bool(cf_agreement.get("kind_agree"))
+        if primary_ok and cf_ok:
             agreeing += 1
     ratio = agreeing / max(1, len(rows))
     return ratio >= threshold
@@ -1071,9 +1166,20 @@ def _run_phrasings(bifrost: str, model: str) -> int:
 
 
 def _run_chaos(only: set[str]) -> int:
-    """Chaos mode: three drills per data case; every drill must fail cleanly."""
+    """Chaos mode: three drills per happy data case; every drill must fail cleanly.
+
+    Only rows whose expected engine_state is settled (``ready`` /
+    ``awaiting_params`` / ``awaiting_credential``) AND that ship a JSON
+    fixture qualify — BY-DESIGN failed / source rows already ARE the failure
+    class; running mutation drills on non-JSON or missing fixtures wouldn't
+    surface a signal chaos didn't already have.
+    """
     assert isinstance(only, set), "only set required"
-    data_cases = [c for c in CASES if c["klass"] in ("value", "list")]
+    data_cases = [c for c in CASES
+                  if c["klass"] in ("value", "list")
+                  and str((c["expected"] or {}).get("engine_state") or "") in _ENGINE_SETTLED
+                  and isinstance(c.get("fixture"), str)
+                  and str(c["fixture"]).endswith(".json")]
     rows: list[dict] = []
     print("== NI Flow Engine eval · CHAOS (fixture mutation, fake model) ==\n")
     for case in data_cases:  # bounded by data-case count
@@ -1106,6 +1212,10 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         help="Drift drills against fixtures (rename/truncate/empty)")
     parser.add_argument("--engine", action="store_true",
                         help="M2: drive ni_flow.run_flow directly (LIVE release gate)")
+    parser.add_argument("--record", action="store_true",
+                        help="Fetch each registry row's record.url and write its fixture")
+    parser.add_argument("--record-all", action="store_true",
+                        help="Allow --record without --only (rewrites every recordable fixture)")
     parser.add_argument("--only", default="",
                         help="Comma-separated case ids to run (subset)")
     return parser.parse_args(argv)
@@ -1127,50 +1237,60 @@ def _check_ni_flow_module() -> str:
 
 
 def engine_gate_pass(results: list[dict]) -> bool:
-    """M2 (audit 2026-09-13): the engine-mode gate — every case reaches a
-    ``ready`` flow state (except the refusal case, which reaches
-    ``unsupported`` OR ``ready`` when the ``computed`` source is registered).
+    """Engine gate: every case reaches its registry-declared ``expected_state``.
 
-    Mirrors ``live_gate_pass`` in strictness: 10-of-10, no exceptions, plus a
-    check that the sealed spec's ``source.url`` equals the URL the case
-    intended (the C2 frozen-URL invariant).
+    Grading (per ni-cases.md §B — the honest outcome IS the feature for
+    safety-edge rows):
 
-    needs_params (2026-09-14): ``awaiting_params`` / ``awaiting_credential``
-    also PASS — a flow that settles at a user-input pause has done its whole
-    deterministic job; what remains is the user's value/key BY DESIGN (the
-    old gate graded kc-weather "ready" while silently sealing empty lat/lon
-    slots that would have fetched ``latitude=&longitude=``). The frozen-URL
-    invariant still applies to these rows.
+    - ``ready`` / ``awaiting_params`` / ``awaiting_credential`` rows also
+      require the C2 frozen-URL invariant (``spec.source.url`` == the URL the
+      case intended) when the case involved a URL.
+    - ``failed`` and ``source`` rows PASS on state match alone — a netguard
+      refusal (``lan-refused``), a non-JSON body (``xml-not-json``), a 404
+      (``dead-endpoint``), or an AWAITING_SOURCE_PICK pause (``no-source-pause``)
+      is BY DESIGN and the whole point of that row.
+    - ``refuse``-class rows accept ``unsupported`` OR ``ready`` (the computed
+      source landing on the branch flips the outcome without changing intent).
+    - ``image``-class rows are skipped in engine mode (exercised elsewhere).
     """
     assert isinstance(results, list), "results list required"
     if not results:
         return False
-    passing = ("ready", "awaiting_params", "awaiting_credential")
+    expected_ids = {c["id"] for c in CASES if c["klass"] != "image"}
     seen: set[str] = set()
-    for row in results:  # bounded by CASES length
+    for row in results:  # bounded by registry size
         seen.add(str(row.get("id") or ""))
         klass = row.get("klass")
-        flow_state = str(row.get("flow_state") or "")
-        if klass == "refuse":
-            if flow_state not in ("unsupported", "ready"):
-                return False
+        if klass == "image":
             continue
-        if klass == "image":  # image cases fall out of the engine gate for now
-            continue
-        if flow_state not in passing:
+        if not _grade_engine_row(row, klass):
             return False
-        if not row.get("frozen_url_ok"):
-            return False
-    return len(seen) >= len(CASES) - 1  # image case may be skipped
+    return expected_ids.issubset(seen)
+
+
+def _grade_engine_row(row: dict, klass: object) -> bool:
+    """Grade one engine-mode row against its registry ``expected_state``."""
+    assert isinstance(row, dict), "row required"
+    actual = str(row.get("flow_state") or "")
+    expected = str(row.get("expected_state") or "")
+    if klass == "refuse":
+        return actual in ("unsupported", "ready")
+    if actual != expected:
+        return False
+    if expected in _ENGINE_SETTLED:
+        return bool(row.get("frozen_url_ok"))
+    return True
 
 
 def _run_engine(bifrost: str, model: str, only: set[str]) -> int:
-    """M2 (audit 2026-09-13): engine mode. Drives ``ni_flow.run_flow`` per case.
+    """Engine mode. Drives ``ni_flow.run_flow`` per case against a temp NIStore.
 
     Each case gets a fresh in-memory NIStore (temp DuckDB), a real bifrost
-    call for the two model turns, and a real fetch for the sampling stage
-    (image cases and the refusal case are skipped — the engine's image path
-    is exercised by ``prove.py`` on shipped recipes).
+    call for the two model turns, and a fetcher picked per row: happy rows
+    use the eval's ``_fetch_json_live`` (eval-only public sources bypass the
+    runtime netguard); a ``failed`` row whose intent is netguard refusal
+    (e.g. ``lan-refused``) uses the SHIPPED netguard fetcher so the row
+    actually exercises the refusal path — nothing is fetched by design.
     """
     assert isinstance(bifrost, str) and bifrost, "bifrost URL required"
     assert isinstance(only, set), "only set required"
@@ -1186,18 +1306,62 @@ def _run_engine(bifrost: str, model: str, only: set[str]) -> int:
     import duckdb  # local import: engine mode is the only caller
     print(f"== NI Flow Engine eval · ENGINE · model={model} bifrost={bifrost} ==\n")
     results: list[dict] = []
-    for case in CASES:  # bounded by CASES length
+    for case in CASES:  # bounded by registry size
         if only and case["id"] not in only:
             continue
         results.append(_run_case_engine(case, bifrost, model, duckdb, _db, _ni,
                                           _flow, _gen_key))
-    passed = engine_gate_pass(results) if not only else all(
-        r.get("flow_state") in ("ready", "awaiting_params", "awaiting_credential")
-        or r.get("klass") == "refuse"
-        for r in results
-    )
+    if only:
+        passed = all(_grade_engine_row(r, r.get("klass"))
+                     or r.get("klass") in ("image", "refuse") for r in results)
+    else:
+        passed = engine_gate_pass(results)
     print(f"\nENGINE GATE: {'PASS' if passed else 'FAIL'}")
     return 0 if passed else 1
+
+
+def _pick_engine_fetcher(case: dict) -> Callable[[str], object]:
+    """Choose the engine-mode fetcher for one case.
+
+    Rows with ``expected.engine_state == 'failed'`` whose URL is a private/
+    reserved host route through the SHIPPED netguard fetcher so the row
+    actually verifies the runtime refusal path (LAN + link-local + loopback).
+    Every other row uses ``_fetch_json_live`` — the eval's public-source
+    fetcher that intentionally skips netguard on pre-vetted public URLs.
+    """
+    assert isinstance(case, dict), "case required"
+    expected_state = str((case["expected"] or {}).get("engine_state") or "")
+    if expected_state == "failed" and _is_private_url(case.get("url")):
+        from smartbrain_3000 import netguard as _netguard_mod  # noqa: N813
+        return _netguard_mod.safe_fetch_json
+    return _fetch_json_live
+
+
+def _is_private_url(url: object) -> bool:
+    """Cheap check: URL host resolves in a private / loopback / LAN range.
+
+    We only look for common ranges seen in the safety-edge registry rows
+    (192.168.*.*, 10.*.*.*, 172.16-31.*.*, 127.*.*.*, ::1, fe80::/10). A miss
+    is fine — the row still fails through some other honest failure class.
+    """
+    if not isinstance(url, str) or not url:
+        return False
+    from urllib.parse import urlparse
+    try:
+        host = (urlparse(url).hostname or "").lower()
+    except ValueError:
+        return False
+    if host in ("127.0.0.1", "localhost", "::1"):
+        return True
+    if host.startswith("192.168.") or host.startswith("10."):
+        return True
+    if host.startswith("172."):
+        parts = host.split(".")
+        if len(parts) == 4 and parts[1].isdigit() and 16 <= int(parts[1]) <= 31:
+            return True
+    if host.startswith("fe80:") or host.startswith("169.254."):
+        return True
+    return False
 
 
 def _run_case_engine(case: dict, bifrost: str, model: str, duckdb, dbmod,
@@ -1206,17 +1370,22 @@ def _run_case_engine(case: dict, bifrost: str, model: str, duckdb, dbmod,
 
     The eval's own ``_bifrost_llm`` builds the caller signature
     ``(model, prompt) -> reply`` that ``run_flow`` accepts as ``gateway_call``.
-    Fetches go through the eval's ``_fetch_json_live`` so we bypass the store's
-    netguard (this is an operator-run eval, not a runtime path).
+    Fetches go through ``_pick_engine_fetcher`` — public rows use the eval's
+    live fetcher (netguard-bypassing on vetted sources); private/LAN rows
+    (BY-DESIGN failed) use the shipped netguard fetcher so the row actually
+    exercises the refusal path.
     """
     assert isinstance(case, dict) and "id" in case, "case required"
+    expected_state = str((case["expected"] or {}).get("engine_state") or "")
     out: dict[str, Any] = {"id": case["id"], "klass": case["klass"],
                            "flow_state": "", "frozen_url_ok": False,
+                           "expected_state": expected_state,
                            "secs": 0.0, "notes": []}
     if case["klass"] == "image":
         out["flow_state"] = "skipped"
         return out
     started = time.time()
+    fetcher = _pick_engine_fetcher(case)
     try:
         conn = duckdb.connect(":memory:")
         dbmod.run_migrations(conn)
@@ -1231,7 +1400,7 @@ def _run_case_engine(case: dict, bifrost: str, model: str, duckdb, dbmod,
         source_url = case.get("url")
         result = flowmod.run_flow(
             store, item_id,
-            gateway_call=_bridge, fetcher=_fetch_json_live,
+            gateway_call=_bridge, fetcher=fetcher,
             source_url=source_url if isinstance(source_url, str) else None,
         )
         out["flow_state"] = str(result.get("state") or "")
@@ -1244,23 +1413,86 @@ def _run_case_engine(case: dict, bifrost: str, model: str, duckdb, dbmod,
             confirmed = str(record.get("source_url") or "")
             out["notes"].append(f"auto-confirmed recipe source: {confirmed}")
             result = flowmod.continue_from_recipe_confirm(
-                store, item_id, confirmed, fetcher=_fetch_json_live)
+                store, item_id, confirmed, fetcher=fetcher)
             out["flow_state"] = str(result.get("state") or "")
             source_url = confirmed  # the frozen-URL invariant now targets it
-        settled = ("ready", "awaiting_params", "awaiting_credential")
-        if out["flow_state"] in settled and isinstance(source_url, str):
+        if out["flow_state"] in _ENGINE_SETTLED and isinstance(source_url, str):
             item = store.get_item(item_id)
             frozen = (item["spec"].get("source") or {}).get("url", "")
             out["frozen_url_ok"] = frozen == source_url
         else:
-            out["frozen_url_ok"] = out["flow_state"] in settled
+            out["frozen_url_ok"] = out["flow_state"] in _ENGINE_SETTLED
     except Exception as exc:  # any crash = FAIL, not a raise
         out["notes"].append(f"{type(exc).__name__}: {str(exc)[:120]}")
     finally:
         out["secs"] = round(time.time() - started, 1)
     print(f"[{case['id']:>16}] engine flow_state={out['flow_state']!r} "
-          f"frozen_url_ok={out['frozen_url_ok']} {out['secs']:>5}s")
+          f"expected={expected_state!r} frozen_url_ok={out['frozen_url_ok']} "
+          f"{out['secs']:>5}s")
+    error = result.get("error") if isinstance(result, dict) else None
+    if error:
+        print(f"{'':>19}error={error!r}")
+    for note in out.get("notes", []):  # bounded by row shape
+        print(f"{'':>19}note={note}")
+    intent = result.get("intent") if isinstance(result, dict) else None
+    if isinstance(intent, dict):
+        print(f"{'':>19}intent.display_hint={intent.get('display_hint')!r} "
+              f"wants={intent.get('wants')!r}")
     return out
+
+
+def _run_record(only: set[str], record_all: bool) -> int:
+    """Recorder mode: fetch each registry row's ``record.url`` live, write fixtures.
+
+    Never runs against every recordable row without ``--record-all`` — the
+    default posture (with ``--only <ids>``) protects existing fixtures from
+    accidental wholesale rewrite. Non-JSON bodies (e.g. RSS XML) are written
+    as raw bytes; JSON bodies pretty-print.
+    """
+    assert isinstance(only, set), "only set required"
+    assert isinstance(record_all, bool), "record_all bool required"
+    if not only and not record_all:
+        print("--record refuses to overwrite everything: pass --only <ids> "
+              "or --record-all to force the wholesale rewrite", file=sys.stderr)
+        return 2
+    written = 0
+    for case in CASES:  # bounded by registry size
+        if only and case["id"] not in only:
+            continue
+        record = case.get("record")
+        if not isinstance(record, dict):
+            continue
+        fixture_name = case.get("fixture")
+        url = record.get("url")
+        max_bytes = int(record.get("max_bytes") or 400_000)
+        if not (isinstance(fixture_name, str) and isinstance(url, str)):
+            print(f"[{case['id']}] skip: record block missing url/fixture",
+                  file=sys.stderr)
+            continue
+        _record_one(case["id"], url, max_bytes, fixture_name)
+        written += 1
+    print(f"recorded {written} fixture(s)")
+    return 0 if written or only else 1
+
+
+def _record_one(case_id: str, url: str, max_bytes: int,
+                fixture_name: str) -> None:
+    """Fetch one URL live, trim to ``max_bytes``, write under ``fixture_name``."""
+    assert isinstance(case_id, str) and case_id, "case_id required"
+    assert isinstance(url, str) and url, "url required"
+    assert isinstance(max_bytes, int) and max_bytes > 0, "max_bytes > 0"
+    dst = _FIXTURES / fixture_name
+    req = urllib.request.Request(url, headers=_UA_HEADER)
+    with urllib.request.urlopen(req, timeout=_FETCH_TIMEOUT_S) as resp:
+        data = resp.read(max_bytes)
+    try:
+        parsed = json.loads(data)
+        dst.write_text(json.dumps(parsed, indent=2), encoding="utf-8")
+        wrote_kind = "json"
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        dst.write_bytes(data)
+        wrote_kind = "raw"
+    print(f"[{case_id:>16}] wrote {fixture_name} ({len(data)} bytes, {wrote_kind})")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1269,14 +1501,16 @@ def main(argv: list[str] | None = None) -> int:
     only = {s.strip() for s in args.only.split(",") if s.strip()}
     print(f"# ni_flow module: {_check_ni_flow_module()} · "
           f"where op in ni._TRANSFORM_FNS: {_has_where_op()}\n")
-    # M2 (audit 2026-09-13): mode arithmetic — at most one of the exclusive
-    # flags. --engine now joins the mutually-exclusive set alongside recorded /
-    # phrasings / chaos; --live is the default (no explicit flag).
-    modes = (args.recorded, args.phrasings, args.chaos, args.engine)
+    # Mode arithmetic — at most one of the exclusive flags. ``--record`` joins
+    # the mutually-exclusive set alongside recorded / phrasings / chaos /
+    # engine; ``--live`` is the default (no explicit flag).
+    modes = (args.recorded, args.phrasings, args.chaos, args.engine, args.record)
     if sum(1 for m in modes if m) > 1:
-        print("choose at most one of --recorded / --phrasings / --chaos / --engine",
-              file=sys.stderr)
+        print("choose at most one of --recorded / --phrasings / --chaos / "
+              "--engine / --record", file=sys.stderr)
         return 2
+    if args.record:
+        return _run_record(only, args.record_all)
     if args.recorded:
         return _run_recorded(only)
     if args.phrasings:

@@ -1,0 +1,543 @@
+[
+  {
+    "id": "aapl-5min",
+    "request": "show me AAPL every 5 minutes",
+    "dimension": "explicit-URL value card, cadence parse",
+    "url": "https://query1.finance.yahoo.com/v8/finance/chart/AAPL?interval=1d&range=1d",
+    "fixture": "aapl.json",
+    "fields": {
+      "price": "number",
+      "prev_close": "number"
+    },
+    "klass": "value",
+    "expected": {
+      "engine_state": "ready",
+      "cadence": 5
+    },
+    "intent": {
+      "kind": "external_data",
+      "subject": "aapl-5min",
+      "cadence_minutes": 5,
+      "wants": [
+        "price",
+        "prev_close"
+      ],
+      "threshold": null,
+      "display_hint": "value"
+    },
+    "phrasings": [
+      "track Apple stock for me, refresh every 5 minutes",
+      "AAPL on my dashboard, updated every five minutes",
+      "keep an eye on apple shares, every 5 min",
+      "what's AAPL at? update it every 5 minutes",
+      "apple stock ticker card, 5-minute cadence"
+    ],
+    "cadence_free_phrasings": [
+      "AAPL every 10 seconds"
+    ]
+  },
+  {
+    "id": "btc-vague",
+    "request": "what's bitcoin worth right now, keep it updated",
+    "dimension": "vague subject -> keyless recipe, default cadence",
+    "url": "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd",
+    "fixture": "btc.json",
+    "fields": {
+      "price": "number"
+    },
+    "klass": "value",
+    "expected": {
+      "engine_state": "ready",
+      "cadence_default": true
+    },
+    "intent": {
+      "kind": "external_data",
+      "subject": "btc-vague",
+      "cadence_minutes": 15,
+      "wants": [
+        "price"
+      ],
+      "threshold": null,
+      "display_hint": "value"
+    },
+    "phrasings": [
+      "bitcoin price right now, keep it fresh",
+      "how much is BTC currently worth in USD",
+      "current bitcoin value, keep it updated",
+      "show me BTC price and keep refreshing it",
+      "keep track of what bitcoin costs today"
+    ],
+    "cadence_free_phrasings": [
+      "bitcoin price every morning",
+      "bitcoin price twice a day"
+    ]
+  },
+  {
+    "id": "kc-weather",
+    "request": "track the weather in Kansas City - temperature and wind",
+    "dimension": "recipe confirm + consented geocode two-step",
+    "url": null,
+    "fixture": "kc_weather.json",
+    "geocode": "Kansas City",
+    "geocode_fixture": "geocode_kc.json",
+    "pytest_source_url": "https://api.open-meteo.com/v1/forecast?latitude=39.1&longitude=-94.58&current_weather=true",
+    "fields": {
+      "temperature": "number",
+      "wind": "number"
+    },
+    "klass": "value",
+    "expected": {
+      "engine_state": "ready"
+    },
+    "intent": {
+      "kind": "external_data",
+      "subject": "kc-weather",
+      "cadence_minutes": 15,
+      "wants": [
+        "temperature",
+        "wind"
+      ],
+      "threshold": null,
+      "display_hint": "value"
+    },
+    "phrasings": [
+      "Kansas City weather with temperature and wind",
+      "current temp and wind speed in Kansas City",
+      "what's the temperature and wind like in Kansas City",
+      "Kansas City temperature and windspeed on my dashboard",
+      "weather card for Kansas City showing temperature and wind"
+    ]
+  },
+  {
+    "id": "quakes-m5",
+    "request": "show me the latest earthquakes above magnitude 5",
+    "dimension": "list card, where threshold, payload-grounded type reconcile",
+    "url": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson",
+    "fixture": "quakes.json",
+    "fields": {
+      "place": "string"
+    },
+    "klass": "list",
+    "filter_threshold": 5,
+    "expected": {
+      "engine_state": "ready",
+      "gap_when_no_where": "no filter op in pipeline grammar (threshold intent unservable)"
+    },
+    "intent": {
+      "kind": "external_data",
+      "subject": "quakes-m5",
+      "cadence_minutes": 15,
+      "wants": [
+        "place"
+      ],
+      "threshold": 5,
+      "display_hint": "list"
+    },
+    "phrasings": [
+      "recent earthquakes with magnitude over 5",
+      "list quakes stronger than magnitude 5",
+      "earthquakes above M5 today",
+      "big earthquakes only - above magnitude 5",
+      "show recent seismic events greater than magnitude 5"
+    ]
+  },
+  {
+    "id": "people-space",
+    "request": "how many people are in space right now",
+    "dimension": "scalar count",
+    "url": "http://api.open-notify.org/astros.json",
+    "fixture": "astros.json",
+    "fields": {
+      "count": "number"
+    },
+    "klass": "value",
+    "expected": {
+      "engine_state": "ready"
+    },
+    "intent": {
+      "kind": "external_data",
+      "subject": "people-space",
+      "cadence_minutes": 15,
+      "wants": [
+        "count"
+      ],
+      "threshold": null,
+      "display_hint": "value"
+    },
+    "phrasings": [
+      "current number of astronauts in orbit",
+      "people in space count right now",
+      "how many astronauts up there right now",
+      "count of humans currently in space",
+      "astronaut headcount in space"
+    ]
+  },
+  {
+    "id": "eur-usd-hourly",
+    "request": "EUR to USD exchange rate, update hourly",
+    "dimension": "fx, cadence word",
+    "url": "https://api.frankfurter.app/latest?from=EUR&to=USD",
+    "fixture": "fx.json",
+    "fields": {
+      "rate": "number"
+    },
+    "klass": "value",
+    "expected": {
+      "engine_state": "ready",
+      "cadence": 60
+    },
+    "intent": {
+      "kind": "external_data",
+      "subject": "eur-usd-hourly",
+      "cadence_minutes": 60,
+      "wants": [
+        "rate"
+      ],
+      "threshold": null,
+      "display_hint": "value"
+    },
+    "phrasings": [
+      "hourly EUR to USD exchange rate",
+      "current EUR/USD rate updated every hour",
+      "euro to dollar exchange rate refreshed hourly",
+      "track EUR-USD rate on an hourly cadence",
+      "convert euros to dollars, updated each hour"
+    ]
+  },
+  {
+    "id": "hn-frontpage",
+    "request": "top stories on Hacker News",
+    "dimension": "list-of-objects, repeat scene",
+    "url": "https://hn.algolia.com/api/v1/search?tags=front_page",
+    "fixture": "hn.json",
+    "fields": {
+      "title": "string"
+    },
+    "klass": "list",
+    "expected": {
+      "engine_state": "ready"
+    },
+    "intent": {
+      "kind": "external_data",
+      "subject": "hn-frontpage",
+      "cadence_minutes": 15,
+      "wants": [
+        "title"
+      ],
+      "threshold": null,
+      "display_hint": "list"
+    },
+    "phrasings": [
+      "Hacker News front page",
+      "current top HN stories",
+      "what's hot on Hacker News right now",
+      "top posts from Hacker News",
+      "HN front page headlines"
+    ]
+  },
+  {
+    "id": "iss-map",
+    "request": "ISS location on a map, every minute",
+    "dimension": "display-hint degrade (map -> value, honest note)",
+    "url": "https://api.wheretheiss.at/v1/satellites/25544",
+    "fixture": "iss.json",
+    "fields": {
+      "latitude": "number",
+      "longitude": "number"
+    },
+    "klass": "value",
+    "expected": {
+      "engine_state": "ready",
+      "degrade": "map display unsupported -> numbers card + honest note"
+    },
+    "intent": {
+      "kind": "external_data",
+      "subject": "iss-map",
+      "cadence_minutes": 5,
+      "wants": [
+        "latitude",
+        "longitude"
+      ],
+      "threshold": null,
+      "display_hint": "map"
+    },
+    "phrasings": [
+      "ISS position every minute on a map",
+      "track the ISS on a world map, minute by minute",
+      "show ISS lat/long on a map, refresh each minute",
+      "map of ISS location updated every minute",
+      "current ISS position on a map, updated every minute"
+    ],
+    "cadence_free_phrasings": [
+      "where is the International Space Station right now on a map"
+    ]
+  },
+  {
+    "id": "xmas-countdown",
+    "request": "my countdown to Christmas - days left",
+    "dimension": "computed_only, unsupported without a literal date",
+    "url": null,
+    "fixture": null,
+    "fields": {},
+    "klass": "refuse",
+    "expected": {
+      "engine_state": "unsupported",
+      "refusal": true
+    },
+    "intent": {
+      "kind": "computed_only",
+      "subject": "xmas-countdown",
+      "cadence_minutes": 1440,
+      "wants": [
+        "days"
+      ],
+      "threshold": null,
+      "display_hint": "value"
+    },
+    "phrasings": [
+      "days until Christmas",
+      "how many days till Xmas",
+      "countdown to December 25",
+      "days remaining until Christmas Day",
+      "Christmas countdown card - days left"
+    ]
+  },
+  {
+    "id": "us-radar-image",
+    "request": "show me the current US weather radar",
+    "dimension": "image class (currently outside the engine gate)",
+    "url": "https://radar.weather.gov/ridge/standard/CONUS_0.gif",
+    "fixture": "radar.gif",
+    "fields": {},
+    "klass": "image",
+    "expected": {
+      "engine_state": "skipped"
+    },
+    "intent": {
+      "kind": "external_data",
+      "subject": "us-radar-image",
+      "cadence_minutes": 15,
+      "wants": [
+        "image"
+      ],
+      "threshold": null,
+      "display_hint": "image"
+    },
+    "phrasings": [
+      "current US weather radar image",
+      "CONUS weather radar picture",
+      "US national weather radar image",
+      "show me the latest weather radar for the United States",
+      "weather radar image, US-wide"
+    ]
+  },
+  {
+    "id": "crypto-pair",
+    "request": "track bitcoin and ethereum prices in USD",
+    "dimension": "multi-subject -> multi-field value card",
+    "url": "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum&vs_currencies=usd",
+    "fixture": "crypto_pair.json",
+    "fields": {
+      "bitcoin_usd": "number",
+      "ethereum_usd": "number"
+    },
+    "klass": "value",
+    "expected": {
+      "engine_state": "ready"
+    },
+    "intent": {
+      "kind": "external_data",
+      "subject": "crypto-pair",
+      "cadence_minutes": 15,
+      "wants": [
+        "bitcoin_usd",
+        "ethereum_usd"
+      ],
+      "threshold": null,
+      "display_hint": "value"
+    },
+    "phrasings": [
+      "BTC and ETH prices in dollars",
+      "current bitcoin and ethereum values in USD",
+      "show me bitcoin plus ethereum in dollars",
+      "how much are BTC and ETH worth in USD",
+      "track bitcoin AND ethereum prices in USD"
+    ],
+    "record": {
+      "url": "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum&vs_currencies=usd",
+      "max_bytes": 400000
+    }
+  },
+  {
+    "id": "github-stars",
+    "request": "how many stars does the torvalds/linux repo have",
+    "dimension": "needle-in-haystack selection (~100-key response)",
+    "url": "https://api.github.com/repos/torvalds/linux",
+    "fixture": "github_stars.json",
+    "fields": {
+      "stars": "number"
+    },
+    "klass": "value",
+    "expected": {
+      "engine_state": "ready"
+    },
+    "intent": {
+      "kind": "external_data",
+      "subject": "github-stars",
+      "cadence_minutes": 15,
+      "wants": [
+        "stars"
+      ],
+      "threshold": null,
+      "display_hint": "value"
+    },
+    "phrasings": [
+      "star count for torvalds/linux on github",
+      "how many github stars does torvalds/linux have",
+      "torvalds/linux repo star count",
+      "stars on the torvalds linux repo",
+      "github star count for linux (torvalds)"
+    ],
+    "record": {
+      "url": "https://api.github.com/repos/torvalds/linux",
+      "max_bytes": 400000
+    }
+  },
+  {
+    "id": "sunrise-times",
+    "request": "sunrise and sunset times for today",
+    "dimension": "string-typed value fields (ISO / clock-time strings)",
+    "url": "https://api.sunrise-sunset.org/json?lat=39.1&lng=-94.58",
+    "fixture": "sunrise_times.json",
+    "fields": {
+      "sunrise": "string",
+      "sunset": "string"
+    },
+    "klass": "value",
+    "expected": {
+      "engine_state": "ready"
+    },
+    "intent": {
+      "kind": "external_data",
+      "subject": "sunrise-times",
+      "cadence_minutes": 15,
+      "wants": [
+        "sunrise",
+        "sunset"
+      ],
+      "threshold": null,
+      "display_hint": "value"
+    },
+    "phrasings": [
+      "when does the sun rise and set today",
+      "today's sunrise and sunset",
+      "sunrise/sunset times for today",
+      "give me today's sun times",
+      "solar rise and set times today"
+    ],
+    "record": {
+      "url": "https://api.sunrise-sunset.org/json?lat=39.1&lng=-94.58",
+      "max_bytes": 400000
+    }
+  },
+  {
+    "id": "no-source-pause",
+    "request": "track my custom sensor feed please",
+    "dimension": "no URL, no recipe -> AWAITING_SOURCE_PICK pause",
+    "url": null,
+    "fixture": null,
+    "fields": {
+      "value": "number"
+    },
+    "klass": "value",
+    "expected": {
+      "engine_state": "source"
+    },
+    "intent": {
+      "kind": "external_data",
+      "subject": "no-source-pause",
+      "cadence_minutes": 15,
+      "wants": [
+        "value"
+      ],
+      "threshold": null,
+      "display_hint": "value"
+    }
+  },
+  {
+    "id": "lan-refused",
+    "request": "my router status",
+    "dimension": "netguard refusal (private IP) \u2014 never fetched",
+    "url": "http://192.168.1.1/api/status",
+    "fixture": null,
+    "fields": {
+      "status": "string"
+    },
+    "klass": "value",
+    "expected": {
+      "engine_state": "failed"
+    },
+    "intent": {
+      "kind": "external_data",
+      "subject": "lan-refused",
+      "cadence_minutes": 15,
+      "wants": [
+        "status"
+      ],
+      "threshold": null,
+      "display_hint": "value"
+    }
+  },
+  {
+    "id": "xml-not-json",
+    "request": "latest BBC headlines from their RSS feed",
+    "dimension": "non-JSON sample body -> honest failed(fetch)",
+    "url": "https://feeds.bbci.co.uk/news/rss.xml",
+    "fixture": "bbc_rss.xml",
+    "fields": {
+      "title": "string"
+    },
+    "klass": "list",
+    "expected": {
+      "engine_state": "failed"
+    },
+    "intent": {
+      "kind": "external_data",
+      "subject": "xml-not-json",
+      "cadence_minutes": 15,
+      "wants": [
+        "title"
+      ],
+      "threshold": null,
+      "display_hint": "list"
+    },
+    "record": {
+      "url": "https://feeds.bbci.co.uk/news/rss.xml",
+      "max_bytes": 4096
+    }
+  },
+  {
+    "id": "dead-endpoint",
+    "request": "track this feed",
+    "dimension": "404 / error body -> honest failed(fetch), one attempt",
+    "url": "https://api.github.com/repos/no-such-org-xyzq/no-such-repo-xyzq",
+    "fixture": null,
+    "fields": {
+      "value": "number"
+    },
+    "klass": "value",
+    "expected": {
+      "engine_state": "failed"
+    },
+    "intent": {
+      "kind": "external_data",
+      "subject": "dead-endpoint",
+      "cadence_minutes": 15,
+      "wants": [
+        "value"
+      ],
+      "threshold": null,
+      "display_hint": "value"
+    }
+  }
+]

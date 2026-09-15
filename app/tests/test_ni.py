@@ -4572,3 +4572,58 @@ def test_run_item_records_param_empty_failure() -> None:
     assert excinfo.value.kind == "param_empty"
     runs = store.list_runs(item_id)
     assert runs and str(runs[0]["error"]).startswith("param_empty")
+
+
+# --- A12 offset transform (case matrix) ----------------------------------
+
+def test_transform_offset_validator_accepts_and_rejects_shapes() -> None:
+    """The offset op mirrors scale exactly: fn + field + value (number)."""
+    outputs: set[str] = {"temp"}
+    # Accept a well-formed op (int and float values both fine).
+    nimod._validate_transform_op(
+        {"fn": "offset", "field": "temp", "value": 32}, 0, 0, outputs)
+    nimod._validate_transform_op(
+        {"fn": "offset", "field": "temp", "value": -1.5}, 0, 0, outputs)
+    # Reject a missing value / bool value / extra key.
+    with pytest.raises(ValueError, match="value must be number"):
+        nimod._validate_transform_op(
+            {"fn": "offset", "field": "temp", "value": True}, 0, 0, outputs)
+    with pytest.raises(ValueError, match="value must be number"):
+        nimod._validate_transform_op(
+            {"fn": "offset", "field": "temp", "value": "32"}, 0, 0, outputs)
+    with pytest.raises(ValueError):
+        nimod._validate_transform_op(
+            {"fn": "offset", "field": "temp", "value": 32, "extra": 1}, 0, 0, outputs)
+
+
+def test_transform_offset_applies_addend() -> None:
+    """run_pipeline adds the constant to the numeric field."""
+    out = nimod.run_pipeline(
+        [{"op": "transform", "apply": [
+            {"fn": "offset", "field": "temp", "value": 32}]}],
+        {"temp": 10.0},
+    )
+    assert out["temp"] == 42.0
+
+
+def test_transform_scale_then_offset_composes_celsius_to_fahrenheit() -> None:
+    """The A12 composition: scale 1.8 then offset 32 turns 20°C into 68°F."""
+    out = nimod.run_pipeline(
+        [{"op": "transform", "apply": [
+            {"fn": "scale", "field": "temperature", "factor": 1.8},
+            {"fn": "offset", "field": "temperature", "value": 32},
+        ]}],
+        {"temperature": 20.0},
+    )
+    assert out["temperature"] == pytest.approx(68.0)
+
+
+def test_transform_offset_non_numeric_field_raises_same_class_as_scale() -> None:
+    """A non-numeric field fails with the same NIError kind scale uses."""
+    with pytest.raises(nimod.NIError) as excinfo:
+        nimod.run_pipeline(
+            [{"op": "transform", "apply": [
+                {"fn": "offset", "field": "s", "value": 32}]}],
+            {"s": "not a number"},
+        )
+    assert excinfo.value.kind == "transform_type"

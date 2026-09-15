@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?><rss xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:atom="http://www.w3.org/2005/Atom" version="2.0" xmlns:media="http://search.yahoo.com/mrss/">
+    <channel>
+        <title><![CDATA[BBC News]]></title>
+        <description><![CDATA[BBC News - News Front Page]]></description>
+        <link>https://www.bbc.co.uk/news</link>
+        <image>
+            <url>https://news.bbcimg.co.uk/nol/shared/img/bbc_news_120x60.gif</url>
+            <title>BBC News</title>
+            <link>https://www.bbc.co.uk/news</link>
+        </image>
+        <generator>RSS for Node</generator>
+        <lastBuildDate>Tue, 15 Sep 2026 13:20:13 GMT</lastBuildDate>
+        <atom:link href="https://feeds.bbci.co.uk/news/rss.xml" rel="self" type="application/rss+xml"/>
+        <copyright><![CDATA[Copyright: (C) British Broadcasting Corporation, see https://www.bbc.co.uk/usingthebbc/terms-of-use/#15metadataandrssfeeds for terms and conditions of reuse.]]></copyright>
+        <language><![CDATA[en-gb]]></language>
+        <ttl>15</ttl>
+        <item>
+            <title><![CDATA[Key findings from Lucy Letby Thirlwall Inquiry]]></title>
+            <description><![CDATA[The inquiry found a "complete failure to protect babies on the neonatal unit" where the nurse worked.]]></description>
+            <link>https://www.bbc.co.uk/news/articles/c64g7wl30wygo?at_medium=RSS&amp;at_campaign=rss</link>
+            <guid isPermaLink="false">https://www.bbc.co.uk/news/articles/c64g7wl30wygo#1</guid>
+            <pubDate>Tue, 15 Sep 2026 12:37:11 GMT</pubDate>
+            <media:thumbnail width="240" height="136" url="https://ichef.bbci.co.uk/ace/standard/240/cpsprodpb/8230/live/82d26b60-b0ea-11f1-b1d1-571ed4d7ff2c.jpg"/>
+        </item>
+        <item>
+            <title><![CDATA[State pension likely to top £13,000 a year as UK wage growth slows to 3.9%]]></title>
+            <description><![CDATA[The increase has reignited the debate about the state pension's long-term affordability and generational fairness.]]></description>
+            <link>https://www.bbc.co.uk/news/articles/c2l8v7l0djqo?at_medium=RSS&amp;at_campaign=rss</link>
+            <guid isPermaLink="false">https://www.bbc.co.uk/news/articles/c2l8v7l0djqo#1</guid>
+            <pubDate>Tue, 15 Sep 2026 11:05:42 GMT</pubDate>
+            <media:thumbnail width="240" height="135" url="https://ichef.bbci.co.uk/ace/standard/240/cpsprodpb/635f/live/00df5c30-b0ea-11f1-a540-61c3f7fc4e6c.jpg"/>
+        </item>
+        <item>
+            <title><![CDATA[Denmark says Russian warship fired flares at military helicopter]]></title>
+            <description><![CDATA[The Danish prime minister has accused Russia of "reckless" behaviour, while the Kremlin is yet to comment.]]></description>
+            <link>https://www.bbc.co.uk/news/articles/cwn8mjl31p5yo?at_medium=RSS&amp;at_campaign=rss</link>
+            <guid isPermaLink="false">https://www.bbc.co.uk/news/articles/cwn8mjl31p5yo#1</guid>
+            <pubDate>Tue, 15 Sep 2026 11:40:00 GMT</pubDate>
+            <media:thumbnail width="240" height="134" url="https://ichef.bbci.co.uk/ace/standard/240/cpsprodpb/663f/live/010ff400-b0e8-11f1-ae0d-6f5ba3aa85ac.jpg"/>
+        </item>
+        <item>
+            <title><![CDATA[Five things you may not know about Emmy history-maker Matthew Rhys]]></title>
+            <description><![CDATA[The Welsh actor became the first person to win two lead acting prizes in one night at the Emmy Awards.]]></description>
+            <link>https://www.bbc.co.uk/news/articles/ck790x9d74vvo?at_medium=RSS&amp;at_campaign=rss</link>
+            <guid isPermaLink="false">https://www.bbc.co.uk/news/articles/ck790x9d74vvo#1</guid>
+            <pubDate>Tue, 15 Sep 2026 12:06:19 GMT</pubDate>
+            <media:thumbnail width="240" height="135" url="https://ichef.bbci.co.uk/ace/standard/240/cpsprodpb/f175/live/10dbc040-b0f1-11f1-9707-2187f52634c5.jpg"/>
+        </item>
+        <item>
+            <title><![CDATA[Political donors could face tougher residency

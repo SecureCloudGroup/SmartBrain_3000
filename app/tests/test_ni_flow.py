@@ -10,6 +10,7 @@ same code with real bifrost + real sources — this file is the fast path.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import duckdb
@@ -1149,3 +1150,257 @@ def test_intent_place_field_validated() -> None:
     assert len(long["place"]) == 120
     with pytest.raises(ValueError, match="place"):
         ni_flow._validate_intent({**base, "place": 42})
+
+
+# --- A12 / A13 (case matrix) — deterministic authoring hooks --------------
+
+def test_wants_fahrenheit_regex_hits_and_misses() -> None:
+    """Case-insensitive; the ``°F`` branch requires the degree glyph so a bare
+    ticker like ``F`` never trips the units cue."""
+    assert ni_flow._wants_fahrenheit("temperature in Kansas City in Fahrenheit")
+    assert ni_flow._wants_fahrenheit("show me the temp in °F please")
+    assert ni_flow._wants_fahrenheit("weather in °  F right now")
+    assert not ni_flow._wants_fahrenheit("track F stock")
+    assert not ni_flow._wants_fahrenheit("temperature in Celsius")
+
+
+def test_detect_alert_op_direction_words() -> None:
+    """Word-bounded lookup; lt wins when both classes appear (drops below)."""
+    assert ni_flow._detect_alert_op("alert me when bitcoin drops below 50000") == "lt"
+    assert ni_flow._detect_alert_op("bitcoin exceeds 60000") == "gt"
+    assert ni_flow._detect_alert_op("bitcoin more than 60000") == "gt"
+    assert ni_flow._detect_alert_op("bitcoin less than 50000") == "lt"
+    assert ni_flow._detect_alert_op("bitcoin overhead") is None
+    assert ni_flow._detect_alert_op("bitcoin price") is None
+
+
+def test_flow_fahrenheit_composes_scale_and_offset(monkeypatch) -> None:
+    """A12: kc_weather + a °F request ends ``ready`` with a pipeline carrying
+    scale 1.8 then offset 32 for the temperature field; preview > 60."""
+    store, _conn = _store()
+    fixture = _load("kc_weather")
+    request = "temperature in Kansas City in Fahrenheit"
+    item_id = ni_flow.create_shell_item(store, request)
+    intent_reply = json.dumps({
+        "kind": "external_data", "subject": "Kansas City temperature",
+        "cadence_minutes": 15, "wants": ["temperature"],
+        "threshold": None, "display_hint": "value",
+    })
+    mapping_reply = json.dumps({"temperature": "current_weather.temperature"})
+    model = _scripted_model([intent_reply, mapping_reply])
+    result = ni_flow.run_flow(
+        store, item_id, gateway_call=model,
+        fetcher=lambda _u: fixture, catalog=_empty_catalog(),
+        source_url="https://api.open-meteo.com/v1/forecast?latitude=39.1&longitude=-94.6&current_weather=true",
+    )
+    assert result["state"] == "ready", f"got {result}"
+    item = store.get_item(item_id)
+    assert item is not None
+    pipeline = item["spec"]["pipeline"]
+    # Extract stage plus one transform stage with scale then offset in that order.
+    assert len(pipeline) == 2, f"pipeline: {pipeline}"
+    assert pipeline[0]["op"] == "extract"
+    apply = pipeline[1]["apply"]
+    scale_op = next(o for o in apply if o["fn"] == "scale")
+    offset_op = next(o for o in apply if o["fn"] == "offset")
+    assert scale_op == {"fn": "scale", "field": "temperature", "factor": 1.8}
+    assert offset_op == {"fn": "offset", "field": "temperature", "value": 32}
+    # scale index < offset index — order matters (F = C*1.8 + 32).
+    assert apply.index(scale_op) < apply.index(offset_op)
+    preview_data = store.read_snapshot(item_id, "preview_data")
+    assert preview_data is not None
+    assert preview_data["payload"]["temperature"] > 60
+
+
+def test_flow_no_fahrenheit_conversion_when_not_asked(monkeypatch) -> None:
+    """A12: a non-°F temperature request receives NO scale/offset stages."""
+    store, _conn = _store()
+    fixture = _load("kc_weather")
+    request = "temperature in Kansas City"  # no fahrenheit / °F
+    item_id = ni_flow.create_shell_item(store, request)
+    intent_reply = json.dumps({
+        "kind": "external_data", "subject": "Kansas City temperature",
+        "cadence_minutes": 15, "wants": ["temperature"],
+        "threshold": None, "display_hint": "value",
+    })
+    mapping_reply = json.dumps({"temperature": "current_weather.temperature"})
+    model = _scripted_model([intent_reply, mapping_reply])
+    result = ni_flow.run_flow(
+        store, item_id, gateway_call=model,
+        fetcher=lambda _u: fixture, catalog=_empty_catalog(),
+        source_url="https://api.open-meteo.com/v1/forecast?latitude=39.1&longitude=-94.6&current_weather=true",
+    )
+    assert result["state"] == "ready"
+    item = store.get_item(item_id)
+    pipeline = item["spec"]["pipeline"]
+    # Only the extract stage — no transform authored.
+    assert len(pipeline) == 1 and pipeline[0]["op"] == "extract"
+
+
+def test_flow_alert_authored_on_value_card_with_threshold_direction(monkeypatch) -> None:
+    """A13: btc fixture + "alert me when bitcoin drops below 50000" ends
+    ``ready`` with exactly one lt alert bound to the mapped numeric field."""
+    store, _conn = _store()
+    fixture = _load("btc")
+    request = "alert me when bitcoin drops below 50000"
+    item_id = ni_flow.create_shell_item(store, request)
+    intent_reply = json.dumps({
+        "kind": "external_data", "subject": "Bitcoin",
+        "cadence_minutes": 15, "wants": ["price"],
+        "threshold": 50000, "display_hint": "value",
+    })
+    mapping_reply = json.dumps({"price": "bitcoin.usd"})
+    model = _scripted_model([intent_reply, mapping_reply])
+    result = ni_flow.run_flow(
+        store, item_id, gateway_call=model,
+        fetcher=lambda _u: fixture, catalog=_empty_catalog(),
+        source_url="https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd",
+    )
+    assert result["state"] == "ready", f"got {result}"
+    item = store.get_item(item_id)
+    alerts = item["spec"].get("alerts")
+    assert isinstance(alerts, list) and len(alerts) == 1, f"alerts: {alerts}"
+    rule = alerts[0]
+    assert rule["left"] == {"$bind": "price"}
+    assert rule["op"] == "lt"
+    assert rule["right"] == 50000
+    assert isinstance(rule["message"], str) and rule["message"]
+    assert re.match(r"^[a-z0-9-]{1,40}$", rule["name"]) is not None
+
+
+def test_flow_no_alert_without_threshold(monkeypatch) -> None:
+    """A13: no threshold ⇒ no alert (even when direction words are present)."""
+    store, _conn = _store()
+    fixture = _load("btc")
+    request = "bitcoin price"  # no threshold, no direction word
+    item_id = ni_flow.create_shell_item(store, request)
+    intent_reply = json.dumps({
+        "kind": "external_data", "subject": "Bitcoin",
+        "cadence_minutes": 15, "wants": ["price"],
+        "threshold": None, "display_hint": "value",
+    })
+    mapping_reply = json.dumps({"price": "bitcoin.usd"})
+    model = _scripted_model([intent_reply, mapping_reply])
+    result = ni_flow.run_flow(
+        store, item_id, gateway_call=model,
+        fetcher=lambda _u: fixture, catalog=_empty_catalog(),
+        source_url="https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd",
+    )
+    assert result["state"] == "ready"
+    item = store.get_item(item_id)
+    assert item["spec"].get("alerts") in (None, [], )
+
+
+def test_flow_list_class_threshold_never_authors_alert() -> None:
+    """A13 guard: the quakes list case (threshold + list class) still ends
+    ``ready`` without an alert — alerts are value-card-only. `where` filter
+    authoring belongs to a parallel wave; this test only owns the alert gate.
+    """
+    sample = _load("quakes")
+    store, _conn = _store()
+    request = "show me the latest earthquakes above magnitude 5"
+    url = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson"
+    item_id = ni_flow.create_shell_item(store, request)
+    intent_reply = json.dumps({
+        "kind": "external_data", "subject": "earthquakes",
+        "cadence_minutes": 15, "wants": ["magnitude", "location", "time"],
+        "threshold": 5, "display_hint": "list",
+    })
+    mapping_reply = json.dumps({
+        "magnitude": "features[0].properties.mag",
+        "location": "features[0].properties.place",
+        "time": "features[0].properties.time",
+    })
+    replies = iter([intent_reply, mapping_reply])
+
+    def gateway(_model: str, _prompt: str) -> str:
+        nxt = next(replies)
+        assert isinstance(nxt, str), "reply present"
+        return nxt
+
+    result = ni_flow.run_flow(
+        store, item_id, gateway_call=gateway,
+        fetcher=lambda _u: sample, source_url=url, catalog=_empty_catalog(),
+    )
+    assert result["state"] == "ready", f"got {result}"
+    item = store.get_item(item_id)
+    assert item["spec"].get("alerts") in (None, [], )
+
+
+def test_maybe_author_alert_slug_and_message_bound() -> None:
+    """The authored slug matches the §12 name regex and message stays ≤500."""
+    spec = {"alerts": None}
+    fields = {"price": "number"}
+    intent = {"subject": "Bitcoin", "threshold": 50000}
+    field = ni_flow._maybe_author_alert(
+        spec, fields, ni_flow._DISPLAY_VALUE,
+        "alert me when bitcoin drops below 50000", intent,
+    )
+    assert field == "price"
+    rule = spec["alerts"][0]
+    assert re.match(r"^[a-z0-9-]{1,40}$", rule["name"]) is not None
+    assert len(rule["message"]) <= 500
+    # Shape passes the §12 validator too — the invariant the flow assumes.
+    nimod._validate_alerts_spec(spec["alerts"])
+
+
+def test_list_hint_with_scalar_paths_degrades_to_value_card() -> None:
+    """A9/A11 (case matrix): a 'list' display hint whose picked mapping paths
+    carry no [N] step degrades to the value card deterministically — the data
+    decides, not the hint (crypto-pair / sunrise-times live-gate gap)."""
+    store, _conn = _store()
+    fixture = _load("btc")
+    request = "track bitcoin and ethereum prices in USD"
+    item_id = ni_flow.create_shell_item(store, request)
+    intent_reply = json.dumps({
+        "kind": "external_data", "subject": "BTC+ETH", "cadence_minutes": 15,
+        "wants": ["bitcoin price"], "threshold": None,
+        "place": None, "display_hint": "list",
+    })
+    mapping_reply = json.dumps({"bitcoin_price": "bitcoin.usd"})
+    model = _scripted_model([intent_reply, mapping_reply])
+    result = ni_flow.run_flow(
+        store, item_id, gateway_call=model,
+        fetcher=lambda _u: fixture, catalog=_empty_catalog(),
+        source_url="https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd",
+    )
+    assert result["state"] == "ready", f"got {result}"
+    item = store.get_item(item_id)
+    # Value scene, not a repeat/list scene.
+    scene_types = json.dumps(item["spec"]["scene"])
+    assert '"repeat"' not in scene_types
+    record = ni_flow._flow_read(store, item_id) or {}
+    assert any("no list-shaped data" in n for n in record.get("notes") or []), record
+
+
+def test_cadence_from_text_parses_the_phrase_classes() -> None:
+    """Deterministic cadence extraction (2026-09-15): code owns the textual
+    cadence; the model's value is only the fallback."""
+    cases = {
+        "AAPL every 5 minutes": 5,
+        "hourly EUR to USD exchange rate": 60,
+        "rate updated every hour": 60,
+        "ISS minute by minute": 1,
+        "refresh each minute": 1,
+        "every 2 hours": 120,
+        "every 10 seconds": 1,      # floor clamp, honest
+        "bitcoin twice a day": 720,
+        "news every morning": 1440,
+        "summary once a week": 10080,
+        "just show me bitcoin": None,
+    }
+    for text, want in cases.items():
+        assert ni_flow._cadence_from_text(text) == want, text
+
+
+def test_stage_intent_code_cadence_overrides_model_value() -> None:
+    """'hourly X' with a model that wrongly answers 15 still lands 60."""
+    reply = json.dumps({
+        "kind": "external_data", "subject": "EUR/USD", "cadence_minutes": 15,
+        "wants": ["rate"], "threshold": None, "place": None,
+        "display_hint": "value",
+    })
+    model = _scripted_model([reply])
+    intent = ni_flow.stage_intent("hourly EUR to USD exchange rate",
+                                   lambda p: model("m", p))
+    assert intent["cadence_minutes"] == 60
