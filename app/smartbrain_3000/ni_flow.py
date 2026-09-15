@@ -238,12 +238,19 @@ def _transition(store: ni.NIStore, item_id: str, state: str, **fields: Any) -> d
 
 
 def _append_note(store: ni.NIStore, item_id: str, note: str) -> None:
-    """Append one honest-degradation note to the flow record (bounded)."""
+    """Append one honest-degradation note to the flow record (bounded).
+
+    F3 fix (2026-09-15): carry the CURRENT error marker through — ``_transition``
+    defaults ``error`` to None, so a note appended while a flow sat paused
+    (``awaiting_confirm`` / ``awaiting_pick``) used to WIPE the marker the
+    frontend labels from (the underscore-extras lesson, error-field edition).
+    """
     assert store is not None and item_id and isinstance(note, str), "args required"
     current = _flow_read(store, item_id)
     if current is None:
         return
-    _transition(store, item_id, current.get("state", "intent"), note=note)
+    _transition(store, item_id, current.get("state", "intent"), note=note,
+                error=current.get("error"))
 
 
 # ---- shell item + provenance helpers -------------------------------------
@@ -1380,7 +1387,17 @@ def _pause_for_recipe_confirm(store: ni.NIStore, item_id: str, intent: dict,
     # user is about to give covers it — and so the confirm tool can ENFORCE
     # that the card displayed it (args.geocode_query must echo this query).
     _stamp_geocode_disclosure(record, recipe, intent)
+    # F3 (C2-feedback wave): disclose wants the recipe cannot serve BEFORE the
+    # user approves it — sealed on the record so the flow-tool result and the
+    # chat can name the gap ("no volume from this source").
+    uncovered = _uncovered_wants(recipe, intent)
+    if uncovered:
+        record["_uncovered_wants"] = uncovered[:8]
     _flow_write(store, item_id, record)
+    if uncovered:
+        _append_note(store, item_id,
+                      f"note: this source does not appear to cover: "
+                      f"{', '.join(uncovered[:8])}")
     if isinstance(record.get("_geocode"), dict):
         _append_note(store, item_id,
                       f"confirm also covers a place lookup: "
@@ -1523,6 +1540,42 @@ def _geocode_place(query: str, do_fetch: Callable[[str], object]) -> dict | None
             and not isinstance(lat, bool) and not isinstance(lon, bool)):
         return None
     return {"latitude": lat, "longitude": lon}
+
+
+def _recipe_output_names(recipe: dict) -> list[str]:
+    """The output field names a recipe's pipeline actually serves (extract keys)."""
+    assert isinstance(recipe, dict), "recipe required"
+    template = recipe.get("spec_template") or {}
+    out: list[str] = []
+    for stage in (template.get("pipeline") or []):  # bounded pipeline
+        if isinstance(stage, dict) and stage.get("op") == "extract":
+            out.extend(str(k) for k in (stage.get("paths") or {}))
+    return out
+
+
+def _uncovered_wants(recipe: dict, intent: dict) -> list[str]:
+    """F3 (C2-feedback wave, 2026-09-15): wants the recipe cannot serve.
+
+    The NVDA field run asked for "price, Open, High, Low, Close, Volume"; the
+    Finnhub /quote recipe serves everything but volume, matched anyway, and
+    the card silently under-delivered (the model then tried a source swap the
+    §29 door refused — a wasted approval tap). The match stays a match — a
+    mostly-right vetted source beats a research spree — but the gap is
+    DISCLOSED on the confirm pause so the user decides with open eyes.
+    Name affinity reuses ``_names_match`` (payload-grounding posture).
+    """
+    assert isinstance(recipe, dict) and isinstance(intent, dict), "args required"
+    served = [_slugify_field_name(n) for n in _recipe_output_names(recipe)]
+    uncovered: list[str] = []
+    for want in (intent.get("wants") or []):  # bounded by intent shape
+        if not isinstance(want, str) or not want:
+            continue
+        slug = _slugify_field_name(want)
+        if not slug:
+            continue
+        if not any(_names_match(slug, s) for s in served):
+            uncovered.append(want)
+    return uncovered
 
 
 def _stamp_geocode_disclosure(record: dict, recipe: dict, intent: dict) -> None:

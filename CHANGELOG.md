@@ -11,6 +11,21 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Fixed
+- **Neural Interface: "Looks right" now does something you can see.** Field
+  test: confirming a new card's first result looked like a dead button — the
+  click was recorded each time, but the card kept asking the same question
+  for up to a full refresh interval. Confirming now immediately runs the
+  verification refresh (cards typically go **Live** within seconds), the
+  banner switches to "Confirmed — verifying…", and a toast says what
+  happened. Rejecting still returns the card to draft, untouched.
+- **The assistant tells you when a source can't cover everything you asked
+  for.** "NVDA with volume" matched a source that serves everything but
+  volume — silently. The source-confirmation step now names exactly what a
+  vetted source does not cover, so you can proceed knowingly or pick a
+  different source; the assistant is also barred from proposing source swaps
+  that would only be refused after costing you an approval tap.
+
 ## [0.14.0] - 2026-09-15
 
 ### Added

@@ -689,6 +689,10 @@ export interface NiBoardItem {
   // is informational only: the library retired this template.
   template_update?: boolean;
   template_gone?: boolean;
+  // C2 verdict already given (F2, 2026-09-15): true once the user tapped
+  // "Looks right" — the card stops asking and shows "Confirmed — verifying"
+  // until the C3 run promotes it to live.
+  c2_ok?: boolean;
   // L2 frontier-repair proposal parked for review (ni-format §23). PARK-ONLY: a valid
   // proposal is NEVER auto-applied — the card shows a "Fix proposed" chip; the review
   // modal renders the diff and offers Apply (trial, may auto-revert) / Dismiss.
@@ -1544,11 +1548,15 @@ export const api = {
   // paired phone cannot enter or replace an item's secret.
   niBoard: () => req<{ items: NiBoardItem[] }>("/api/ni/board"),
   niItem: (id: string) => req<NiItemDetail>(`/api/ni/items/${encodeURIComponent(id)}`),
+  // F1 (2026-09-15): a "Looks right" verdict kicks the C3 proof run server-side;
+  // `state` is the POST-run state (often "live" already) and `run` reports the
+  // kick's outcome ("ok" | "error" | "skipped" — verdict recorded regardless).
   niValidate: (id: string, ok: boolean, note?: string) =>
-    req<{ ok: boolean; state: NiState }>(`/api/ni/items/${encodeURIComponent(id)}/validate`, {
-      method: "POST",
-      body: JSON.stringify(note ? { ok, note } : { ok }),
-    }),
+    req<{ ok: boolean; state: NiState; run?: string }>(
+      `/api/ni/items/${encodeURIComponent(id)}/validate`, {
+        method: "POST",
+        body: JSON.stringify(note ? { ok, note } : { ok }),
+      }),
   // Run once now. `status` is the outcome ("ok" or "error"); `kind` is the host-free
   // error class when status is "error" (e.g. "http_5xx", "contract"). 409 = draft /
   // broken / disabled — the caller surfaces the detail.

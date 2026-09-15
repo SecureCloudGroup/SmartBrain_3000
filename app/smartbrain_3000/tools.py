@@ -771,9 +771,13 @@ Authoring order (§29 — the flow is the ONLY door for external JSON cards):
    missing it is refused.
    ``awaiting_credential`` ⇒ the user adds the key ON THE CARD (never in
    chat). To fix a flow- or recipe-born card, call ``remap_ni_item`` — it
-   re-derives paths against the SAME consented URL. Freeform source/pipeline
-   edits on flow- or recipe-born cards are REFUSED at ``update_ni_item``;
-   params, cadence, scene tweaks stay directly editable.
+   re-derives paths against the SAME consented URL. NEVER propose a
+   source or pipeline edit on a flow- or recipe-born card — it is REFUSED
+   at ``update_ni_item`` and the refusal lands AFTER the user paid an
+   approval tap; if the current source cannot serve a field the user wants
+   (the flow result's ``not_covered`` list), SAY SO and offer either living
+   without it or a fresh flow with a different source — params, cadence,
+   scene tweaks stay directly editable.
 3. **create_ni_item is for NON-http_json sources only** (model, internal.*,
    mcp_tool, http_page, http_image, computed). An ``http_json`` source is
    REFUSED there — that is the flow's job. For http_page keep the
@@ -2122,6 +2126,12 @@ def _flow_next_step(record: dict | None) -> str:
             base += (" This confirm ALSO covers a place lookup (see "
                      "geocode_lookup) — pass geocode_query verbatim so the "
                      "approval card displays it; a confirm without it is refused.")
+        if isinstance((record or {}).get("_uncovered_wants"), list) \
+                and (record or {}).get("_uncovered_wants"):
+            gaps = ", ".join(str(w) for w in record["_uncovered_wants"])
+            base += (f" TELL THE USER this source does not cover: {gaps} — "
+                     "they may proceed without it or pick a different source "
+                     "(resume path); never try to swap the source afterwards.")
         return base
     if state == "source":
         return ("no vetted source matched — present the user 2-3 candidate source "
@@ -2169,6 +2179,12 @@ def _flow_tool_result(store: object, item_id: str, *, started: bool,
         out["geocode_lookup"] = (f"{disclosure.get('query')} via "
                                   f"{disclosure.get('host')}")
         out["geocode_query"] = disclosure.get("query")
+    # F3 (C2-feedback wave, 2026-09-15): name the wants this vetted source
+    # cannot serve so the chat DISCLOSES the gap before the user approves —
+    # never a silent partial fulfillment, never a source-swap attempt later.
+    uncovered = (record or {}).get("_uncovered_wants")
+    if isinstance(uncovered, list) and uncovered:
+        out["not_covered"] = uncovered
     return out
 
 

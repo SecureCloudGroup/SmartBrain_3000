@@ -137,6 +137,9 @@ def _board_row(store: ni.NIStore, item: dict, *,
         # §23: True when a §14 frontier proposal is parked on this item — the card
         # renders "Fix proposed — review" (Apply / Dismiss are per-item routes).
         "l2_proposal": isinstance(item["spec"].get("_l2_proposal"), dict),
+        # F2 (C2-feedback, 2026-09-15): the sealed _c2_ok attestation surfaces
+        # so the card can stop asking "is it right?" after the user answered.
+        "c2_ok": item["spec"].get("_c2_ok") is True,
         # §29 flow record: {state, error?} for any active / terminal-non-ready
         # flow; None once the flow reaches ``ready`` so the tile renders
         # normally. Read from the sealed ``flow`` slot via ni_flow.
@@ -386,7 +389,25 @@ def validate_item(request: Request, item_id: str, body: ValidateIn) -> dict:
         note = (body.note or "").strip() or "(no note)"
         _journal_best_effort(store, item_id, "c2_wrong",
                              f"user rejected first run: {note}")
-    return {"ok": True, "state": store.get_item(item_id)["state"]}
+        return {"ok": True, "state": store.get_item(item_id)["state"]}
+    # F1 (C2-feedback, 2026-09-15): "Looks right" used to leave the card in
+    # Commissioning until the NEXT scheduled run performed the C3 contract
+    # check — up to a full cadence window (the 30-minute NVDA card) with the
+    # SAME banner re-rendering, so the tap read as a dead button (the field
+    # run logged three 200s from one confused user). The verdict now kicks
+    # the C3 proof run immediately and synchronously; a run failure is
+    # reported honestly but never turns the recorded verdict into an error.
+    run_result: dict = {}
+    refreshed = store.get_item(item_id)
+    if refreshed is not None and refreshed["state"] == "commissioning"             and refreshed["enabled"]:
+        try:
+            run_result = _execute_manual_run(request, store, refreshed)
+        except Exception as exc:  # verdict already recorded — degrade honestly
+            log.warning("ni validate: C3 kick failed: %s", exc)
+            run_result = {"status": "error", "kind": "internal"}
+    final = store.get_item(item_id)
+    return {"ok": True, "state": final["state"] if final else "unknown",
+            "run": run_result.get("status") or "skipped"}
 
 
 @router.post("/api/ni/items/{item_id}/commission")
@@ -511,17 +532,26 @@ def run_item(request: Request, item_id: str) -> dict:
                             detail=f"run refused: state={item['state']!r}")
     if not item["enabled"]:
         raise HTTPException(status_code=409, detail="run refused: item paused")
+    return _execute_manual_run(request, store, item)
+
+
+def _execute_manual_run(request: Request, store: ni.NIStore, item: dict) -> dict:
+    """Shared synchronous run body for /run and the C2 validate kick (F1).
+
+    L7 (audit 2026-09-12): mark_checked BEFORE the synchronous run instead of
+    clear_last_checked — clearing would leave the item due for the concurrent
+    tick to pick up during our multi-second fetch (a double-run window). The
+    tick's due gate reads last_checked; a fresh timestamp (with a distinct
+    ``manual`` status so telemetry stays honest) keeps the item out of the
+    next tick's due set until our own run stamps its own status via run_item's
+    finalize path.
+    """
+    assert store is not None and isinstance(item, dict), "store + item required"
     state = request.app.state
     secrets = _secret_store(request)
     schedules = getattr(state, "schedules", None) or ScheduleStore(state.dbx, state.master_key)
+    item_id = item["id"]
     prior_state = item["state"]
-    # L7 (audit 2026-09-12): mark_checked BEFORE the synchronous run instead of
-    # clear_last_checked — clearing would leave the item due for the concurrent
-    # tick to pick up during our multi-second fetch (a double-run window). The
-    # tick's due gate reads last_checked; a fresh timestamp (with a distinct
-    # ``manual`` status so telemetry stays honest) keeps the item out of the
-    # next tick's due set until our own run stamps its own status via run_item's
-    # finalize path.
     store.mark_checked(item_id, "manual")
     started = time.monotonic()
     try:

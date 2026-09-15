@@ -1318,3 +1318,25 @@ transitions carry sealed underscore extras forward (`_recipe_id` /
   The lifecycle matrix (ni-cases.md §C, L1–L12) lives in
   `app/tests/test_ni_lifecycle.py`, model-free through the real tool
   registry and routes.
+
+**C2-feedback wave (2026-09-15)** — the accepted-action-with-invisible-effect
+class (field: three "Looks right" taps logged as three 200s on a card that
+would not change for 30 minutes):
+- F1: the ok=true C2 verdict KICKS THE C3 PROOF RUN synchronously (shared
+  `_execute_manual_run` body with /run, same L7 double-run guard + carrier
+  posting). The validate response reports the post-run `state` (often
+  already `live`) and a `run` outcome; a kick failure degrades honestly and
+  never masks the recorded verdict. ok=false rewinds to draft and never runs.
+- F2: board rows expose `c2_ok` (the sealed `_c2_ok` attestation) — after
+  the tap the card shows "Confirmed — verifying…" instead of re-asking, and
+  the frontend toasts the outcome.
+- F3: recipe matching discloses wants the recipe cannot serve — sealed as
+  `_uncovered_wants` on the confirm record, noted on the flow, surfaced as
+  `not_covered` in the flow-tool result, and the confirm directive tells the
+  chat to SAY SO (proceed without it, or a fresh flow with another source —
+  never a post-hoc source swap, which the §29 door refuses after a paid
+  approval tap; the guide now forbids proposing one at all).
+- Marker-drift fix: `_append_note` carries the current `error` marker
+  through its transition — a note appended during a paused state used to
+  wipe `awaiting_confirm`/`awaiting_pick` (the underscore-extras lesson,
+  error-field edition).
