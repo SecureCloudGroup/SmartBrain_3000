@@ -44,14 +44,14 @@ def _load_eval():
 
 
 def test_case_table_has_every_field_each_mode_relies_on() -> None:
-    """The 10-case matrix is the eval's spine — every entry must have the keys
-    both live/recorded/chaos runners read (silent KeyErrors would surface as
-    'FAIL(<klass>)' rows and hide broken plumbing).
+    """The registry is the eval's spine — every entry must have the keys
+    both live/recorded/chaos/engine runners read (silent KeyErrors would
+    surface as 'FAIL(<klass>)' rows and hide broken plumbing).
     """
     ev = _load_eval()
-    assert len(ev.CASES) == 10, "matrix must be exactly the graduated 10 cases"
+    assert len(ev.CASES) >= 10, "registry must include at least the graduated 10 cases"
     seen_ids: set[str] = set()
-    required = {"id", "request", "url", "fields", "klass", "expect"}
+    required = {"id", "request", "fields", "klass", "expected", "intent"}
     for case in ev.CASES:
         missing = required - set(case)
         assert not missing, f"case {case.get('id')} missing keys: {missing}"
@@ -59,23 +59,61 @@ def test_case_table_has_every_field_each_mode_relies_on() -> None:
             f"unknown klass in {case['id']}: {case['klass']}"
         assert case["id"] not in seen_ids, f"duplicate id: {case['id']}"
         seen_ids.add(case["id"])
+        engine_state = case["expected"].get("engine_state")
+        allowed = ev._ENGINE_STATES | {"skipped"}
+        assert engine_state in allowed, \
+            f"case {case['id']}: expected.engine_state {engine_state!r} not in {sorted(allowed)}"
     # Quakes case must carry a filter_threshold for the where-op branch.
     quakes = next(c for c in ev.CASES if c["id"] == "quakes-m5")
     assert isinstance(quakes.get("filter_threshold"), (int, float))
 
 
-def test_every_case_has_at_least_five_paraphrases() -> None:
-    """Phrasings mode drives 5 rephrasings per case; anything less breaks the
-    50-run intent stability matrix and the >=90% gate math below."""
+def test_every_phrasings_row_has_at_least_five_paraphrases() -> None:
+    """Phrasings mode drives 5 rephrasings per case with a phrasings block;
+    anything less breaks the intent-stability matrix and the >=90% gate math."""
     ev = _load_eval()
-    for case in ev.CASES:
-        rephrasings = ev.PARAPHRASES.get(case["id"])
-        assert isinstance(rephrasings, list), \
-            f"no paraphrase list for {case['id']}"
+    for cid, rephrasings in ev.PARAPHRASES.items():
+        assert isinstance(rephrasings, list), f"no paraphrase list for {cid}"
         assert len(rephrasings) >= 5, \
-            f"case {case['id']} has {len(rephrasings)} paraphrases (need >=5)"
+            f"case {cid} has {len(rephrasings)} paraphrases (need >=5)"
         assert len(set(rephrasings)) == len(rephrasings), \
-            f"paraphrase duplicates in {case['id']}"
+            f"paraphrase duplicates in {cid}"
+
+
+def test_registry_load_rejects_unknown_keys() -> None:
+    """load_registry must refuse a row with a top-level key outside the closed set."""
+    ev = _load_eval()
+    import json as _json
+    import pathlib as _pathlib
+    tmp = _pathlib.Path("/tmp/_ni_bad_registry.json")
+    row = {"id": "x", "request": "y", "fields": {}, "klass": "value",
+           "expected": {"engine_state": "ready"}, "intent": {},
+           "unexpected_key": True}
+    tmp.write_text(_json.dumps([row]))
+    with pytest.raises(RuntimeError) as exc:
+        ev.load_registry(tmp)
+    assert "unknown keys" in str(exc.value)
+
+
+def test_registry_load_rejects_unknown_engine_state() -> None:
+    """expected.engine_state must be in the closed vocabulary."""
+    ev = _load_eval()
+    import json as _json
+    import pathlib as _pathlib
+    tmp = _pathlib.Path("/tmp/_ni_bad_registry_state.json")
+    row = {"id": "x", "request": "y", "fields": {}, "klass": "value",
+           "expected": {"engine_state": "made_up"}, "intent": {}}
+    tmp.write_text(_json.dumps([row]))
+    with pytest.raises(RuntimeError) as exc:
+        ev.load_registry(tmp)
+    assert "engine_state" in str(exc.value)
+
+
+def test_record_arg_validation_refuses_wholesale_without_only_or_flag() -> None:
+    """--record without --only AND without --record-all must refuse (safety)."""
+    ev = _load_eval()
+    rc = ev._run_record(set(), record_all=False)
+    assert rc == 2, "wholesale --record must refuse (returns 2)"
 
 
 def test_chaos_rename_actually_renames_a_leaf_key() -> None:
@@ -116,7 +154,7 @@ def test_chaos_empty_returns_an_empty_object() -> None:
     assert isinstance(result, dict), "empty drill must be a dict for the walker"
 
 
-def test_live_gate_requires_all_ten_cases_passing_both_reps_with_stable_maps() -> None:
+def test_live_gate_requires_all_cases_passing_both_reps_with_stable_maps() -> None:
     """live_gate_pass is the release-tag gate; make sure it rejects the
     common near-misses (missing a rep, one FAIL, or unstable mapping)."""
     ev = _load_eval()
@@ -169,50 +207,76 @@ def test_chaos_gate_rejects_a_retry_storm_or_any_non_pass() -> None:
     assert not ev.chaos_gate_pass(over_cap)
 
 
-def test_engine_mode_is_the_fourth_exclusive_mode_flag() -> None:
-    """M2 (audit 2026-09-13): --engine joins the mutually-exclusive mode set
-    alongside --recorded / --phrasings / --chaos.
+def test_engine_mode_is_an_exclusive_mode_flag() -> None:
+    """--engine joins the mutually-exclusive mode set alongside --recorded /
+    --phrasings / --chaos / --record.
     """
     ev = _load_eval()
     ns = ev._parse_args(["--engine"])
     assert ns.engine is True
     # Every mode flag is False by default; --engine is the sole toggle here.
-    for flag in ("recorded", "phrasings", "chaos"):
+    for flag in ("recorded", "phrasings", "chaos", "record", "record_all"):
         assert getattr(ns, flag) is False, f"{flag} should default to False"
 
 
-def test_engine_gate_requires_ready_flow_state_and_frozen_url_match() -> None:
-    """M2 (audit 2026-09-13): engine_gate_pass demands every data case reach
-    ``ready`` AND stamps ``frozen_url_ok`` — the C2 invariant that the sealed
-    spec.source.url equals the URL the case intended.
+def test_engine_gate_grades_each_row_against_registry_expected_state() -> None:
+    """engine_gate_pass grades every case against its registry expected_state.
+
+    Per ni-cases.md §B: BY-DESIGN ``failed``/``source`` rows PASS on state
+    match alone (their honest outcome IS the feature). ``ready`` /
+    ``awaiting_params`` / ``awaiting_credential`` rows additionally require
+    the C2 frozen-URL invariant. ``refuse``-class rows accept either
+    ``unsupported`` OR ``ready`` (computed source may or may not be landed).
     """
     ev = _load_eval()
-    # A fully-green matrix: every data/list case ready + frozen match;
-    # the refusal case reaches unsupported; image is skipped.
+    # A fully-green matrix: each row hits its registry expected_state; image is skipped.
     good: list[dict] = []
     for case in ev.CASES:
         klass = case["klass"]
+        expected = case["expected"]["engine_state"]
         if klass == "image":
             good.append({"id": case["id"], "klass": klass,
-                         "flow_state": "skipped", "frozen_url_ok": False})
-        elif klass == "refuse":
+                         "flow_state": "skipped",
+                         "expected_state": expected, "frozen_url_ok": False})
+            continue
+        if klass == "refuse":
             good.append({"id": case["id"], "klass": klass,
-                         "flow_state": "unsupported", "frozen_url_ok": False})
-        else:
-            good.append({"id": case["id"], "klass": klass,
-                         "flow_state": "ready", "frozen_url_ok": True})
+                         "flow_state": "unsupported",
+                         "expected_state": expected, "frozen_url_ok": False})
+            continue
+        settled = expected in ev._ENGINE_SETTLED
+        good.append({"id": case["id"], "klass": klass,
+                     "flow_state": expected,
+                     "expected_state": expected,
+                     "frozen_url_ok": settled})
     assert ev.engine_gate_pass(good), "fully-green matrix must pass the engine gate"
-    # A single case that failed to ready trips the gate.
+    # A single settled case that failed trips the gate.
     bad = [dict(r) for r in good]
-    bad[0] = {**bad[0], "flow_state": "failed"}
+    for r in bad:
+        if r.get("expected_state") == "ready":
+            r["flow_state"] = "failed"
+            break
     assert not ev.engine_gate_pass(bad)
-    # A ready case with frozen_url_ok=False also fails (URL swap defect).
+    # A settled case with frozen_url_ok=False fails (URL swap defect).
     unfrozen = [dict(r) for r in good]
     for r in unfrozen:
-        if r["klass"] in ("value", "list"):
+        if r.get("expected_state") in ev._ENGINE_SETTLED:
             r["frozen_url_ok"] = False
             break
     assert not ev.engine_gate_pass(unfrozen)
+    # A BY-DESIGN failed row PASSES on state match — no URL invariant.
+    failed_row_registry = [c for c in ev.CASES
+                           if c["expected"]["engine_state"] == "failed"]
+    if failed_row_registry:
+        one = failed_row_registry[0]
+        by_design = [{"id": one["id"], "klass": one["klass"],
+                      "flow_state": "failed",
+                      "expected_state": "failed",
+                      "frozen_url_ok": False}]
+        # Also include a settled row so `expected_ids.issubset(seen)` doesn't trip.
+        # (engine_gate_pass wants every non-image case present; here we only
+        # check the failed-row semantics with a helper.)
+        assert ev._grade_engine_row(by_design[0], one["klass"]) is True
 
 
 def test_check_ni_flow_module_reports_present_on_this_branch() -> None:

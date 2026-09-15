@@ -794,6 +794,10 @@ Grammar additions used by the flow (per §29):
   lt|le|gt|ge|eq|ne, value}`` — closed ops, §5 condition semantics.
 - ``computed`` source v1: ``{type: "computed", compute: "days_until",
   date: "YYYY-MM-DD"}`` — zero egress; payload ``{days: int}``.
+- Threshold + direction words ("above/below/drops/exceeds …") on a value-card
+  request author an edge-triggered §12 alert automatically (deterministic).
+- Fahrenheit requests ("in °F" / "fahrenheit") convert temperature fields
+  automatically via scale 1.8 + offset 32 (deterministic, no model call).
 - Duplicate-title rule unchanged.
 
 The FULL spec is validated server-side; a malformed spec fails AFTER the user
@@ -853,6 +857,7 @@ transform: {"op": "transform", "apply": [ {op-dict}, ... ]}   (<=40 ops)
   Each op is exactly one of these fn shapes (closed set):
     {"fn": "round",   "field": "F", "digits": int}
     {"fn": "scale",   "field": "F", "factor": number}
+    {"fn": "offset",  "field": "F", "value": number}     (ADDS the constant)
     {"fn": "rename",  "field": "F", "to": "NEW"}
     {"fn": "pick",    "field": "F", "keys": ["k1", ...]}
     {"fn": "sort_by", "field": "F", "key": "K", "dir": "asc"|"desc"}

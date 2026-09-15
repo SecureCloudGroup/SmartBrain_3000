@@ -189,7 +189,7 @@ _REVISION_ORIGINS: frozenset[str] = frozenset(
     {"user", "agent", "repair_l1", "repair_l2", "template"}
 )
 _TRANSFORM_FNS: frozenset[str] = frozenset(
-    {"round", "scale", "rename", "pick", "sort_by", "top_n",
+    {"round", "scale", "offset", "rename", "pick", "sort_by", "top_n",
      "sum", "avg", "min", "max", "count", "delta_prev", "where"}
 )
 # v2 aggregate fns that fail with "empty_aggregate" on an empty input list (count does not).
@@ -968,6 +968,10 @@ def _validate_transform_op(op: object, i: int, j: int, outputs: set[str]) -> Non
         _closed_keys(node, {"fn", "field", "factor"}, where)
         if not isinstance(node.get("factor"), (int, float)) or isinstance(node.get("factor"), bool):
             raise ValueError(f"{where}.factor must be number")
+    elif fn == "offset":
+        _closed_keys(node, {"fn", "field", "value"}, where)
+        if not isinstance(node.get("value"), (int, float)) or isinstance(node.get("value"), bool):
+            raise ValueError(f"{where}.value must be number")
     elif fn == "rename":
         _closed_keys(node, {"fn", "field", "to"}, where)
         to = node.get("to")
@@ -1690,6 +1694,8 @@ def _apply_transform_op(op: dict, payload: dict, *, history: dict) -> dict:
         out[field] = _txf_round(payload[field], op["digits"])
     elif fn == "scale":
         out[field] = _txf_scale(payload[field], op["factor"])
+    elif fn == "offset":
+        out[field] = _txf_offset(payload[field], op["value"])
     elif fn == "rename":
         out = _txf_rename(out, field, op["to"])
     elif fn == "pick":
@@ -1722,6 +1728,14 @@ def _txf_scale(value: object, factor: object) -> float:
     assert isinstance(factor, (int, float)) and not isinstance(factor, bool), \
         "factor already validated as number"
     return float(value) * float(factor)
+
+
+def _txf_offset(value: object, addend: object) -> float:
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        raise NIError("transform_type", "offset needs a number")
+    assert isinstance(addend, (int, float)) and not isinstance(addend, bool), \
+        "value already validated as number"
+    return float(value) + float(addend)
 
 
 def _txf_rename(payload: dict, field: str, to: str) -> dict:

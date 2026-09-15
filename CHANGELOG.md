@@ -21,6 +21,21 @@ to know when a release changes behavior.
   doesn't display the lookup is refused outright. If the lookup fails, the
   card simply asks for the location with a Fill button — never a guessed
   value.
+- **Neural Interface: more requests just work, and the honest edges are
+  tested forever.** Cards can now convert units ("temperature in Fahrenheit"
+  converts automatically) and carry alerts ("alert me when bitcoin drops
+  below 50000" builds a card that notifies on the crossing — never spamming
+  while it stays true). Multi-subject asks ("bitcoin and ethereum"), deep
+  API responses (a repo's stars among ~100 fields), and string values
+  (sunrise/sunset times) all build correctly, and a request whose data isn't
+  actually a list quietly becomes a clean single-value card instead of
+  failing. The test bed behind this is now permanent: a single case registry
+  drives every gate (17 scenarios today — including the ones that must
+  *refuse*: private-network addresses, non-JSON feeds, dead endpoints), a
+  recorder refreshes real API fixtures on demand, and a 12-scenario
+  lifecycle suite covers everything you do to a card after it exists —
+  rename, re-schedule, pause, fix, delete, "is it live yet?". Adding a
+  future scenario is one registry row plus one recorded fixture.
 
 ### Fixed
 - A note added to a card while its creation flow waited for your approval

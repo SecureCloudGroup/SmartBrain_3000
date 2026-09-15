@@ -130,6 +130,17 @@ _MAX_CADENCE = 10080
 _THINK_RE = re.compile(r"<think>.*?</think>", flags=re.DOTALL)
 _JSON_OBJ_RE = re.compile(r"\{.*\}", flags=re.DOTALL)
 
+# Deterministic authoring hooks (A12, A13 — case matrix). Pure regex on the
+# ORIGINAL user request; no model involvement, no data-driven guessing. Kept
+# narrow on purpose: a bare ``F`` is not a fahrenheit signal (matches
+# ``track FTSE``), and the direction words below drive an alert only when the
+# intent already carried a numeric threshold.
+_FAHRENHEIT_RE = re.compile(r"fahrenheit|°\s*F\b", re.IGNORECASE)
+_ALERT_LT_RE = re.compile(r"\b(?:below|under|drops|falls|less\s+than)\b",
+                          re.IGNORECASE)
+_ALERT_GT_RE = re.compile(r"\b(?:above|over|exceeds|rises|more\s+than)\b",
+                          re.IGNORECASE)
+
 
 # ---- flow-slot helpers ---------------------------------------------------
 
@@ -356,15 +367,60 @@ def _validate_intent(reply: dict) -> dict:
     return reply
 
 
+# Deterministic cadence extraction (2026-09-15, phrasings-gate lesson): the
+# cadence is a TEXTUAL fact code can parse — "hourly EUR rate" wobbled to the
+# 15-minute default on the live model purely because the cadence word led the
+# phrase. Code owns the parse; the model's cadence is only the fallback when
+# no cadence phrase appears. Ordered patterns; first match wins.
+_CADENCE_PATTERNS: tuple[tuple[re.Pattern, object], ...] = (
+    (re.compile(r"\bevery\s+(\d+)\s*(?:minutes?|mins?)\b", re.IGNORECASE), lambda m: int(m.group(1))),
+    (re.compile(r"\bevery\s+(\d+)\s*(?:hours?|hrs?)\b", re.IGNORECASE), lambda m: int(m.group(1)) * 60),
+    (re.compile(r"\bevery\s+(\d+)\s*(?:seconds?|secs?)\b", re.IGNORECASE), lambda m: 1),
+    (re.compile(r"\bevery\s+minute\b|\bminute\s+by\s+minute\b|\beach\s+minute\b", re.IGNORECASE),
+     lambda m: 1),
+    (re.compile(r"\bhourly\b|\bevery\s+hour\b|\beach\s+hour\b|\bonce\s+an\s+hour\b", re.IGNORECASE),
+     lambda m: 60),
+    (re.compile(r"\btwice\s+a\s+day\b", re.IGNORECASE), lambda m: 720),
+    (re.compile(r"\bdaily\b|\bevery\s+day\b|\bonce\s+a\s+day\b|\bevery\s+(?:morning|night|evening)\b", re.IGNORECASE),
+     lambda m: 1440),
+    (re.compile(r"\bweekly\b|\bevery\s+week\b|\bonce\s+a\s+week\b", re.IGNORECASE), lambda m: 10080),
+)
+
+
+def _cadence_from_text(request: str) -> int | None:
+    """Parse an explicit cadence phrase from the request; None when absent.
+
+    Clamped to [_MIN_CADENCE, _MAX_CADENCE] — "every 10 seconds" honestly
+    lands the 1-minute floor (the store clamps again; this keeps the intent
+    truthful at the source).
+    """
+    assert isinstance(request, str), "request required"
+    for pattern, to_minutes in _CADENCE_PATTERNS:  # bounded tuple
+        match = pattern.search(request)
+        if match:
+            minutes = int(to_minutes(match))
+            return max(_MIN_CADENCE, min(_MAX_CADENCE, minutes))
+    return None
+
+
 def stage_intent(request: str, model_call: Callable[[str], str]) -> dict:
-    """Stage 1 (M#1): request → closed-schema intent. Retry once on parse/shape failure."""
+    """Stage 1 (M#1): request → closed-schema intent. Retry once on parse/shape failure.
+
+    Deterministic override (2026-09-15): when the request carries an explicit
+    cadence phrase, CODE's parse wins over the model's ``cadence_minutes`` —
+    same payload-over-prior posture as ``reconcile_field_types``.
+    """
     assert isinstance(request, str) and request, "request required"
     assert callable(model_call), "model_call required"
     prompt = _INTENT_PROMPT.replace("__REQUEST__", repr(request))
     for attempt in range(2):  # fixed upper bound (P10 #2)
         try:
             reply_text = model_call(prompt)
-            return _validate_intent(_parse_json_reply(reply_text))
+            intent = _validate_intent(_parse_json_reply(reply_text))
+            parsed = _cadence_from_text(request)
+            if parsed is not None:
+                intent["cadence_minutes"] = parsed
+            return intent
         except (ValueError, TypeError) as exc:
             if attempt == 1:
                 raise ValueError(f"intent stage failed after retry: {exc}") from None
@@ -803,6 +859,110 @@ def _typed_verify(preview: dict, fields: dict, klass: str) -> None:
                 raise ValueError(f"mapping: {name!r} is not a number (got {type(value).__name__})")
         elif ftype == "string" and not isinstance(value, str):
             raise ValueError(f"mapping: {name!r} is not a string (got {type(value).__name__})")
+
+
+def _wants_fahrenheit(request: str) -> bool:
+    """Deterministic detector for a °F conversion ask.
+
+    Case-insensitive; the ``°\\s*F`` branch requires the degree glyph so a bare
+    stock ticker like ``F`` (Ford Motor) can never be mistaken for a units cue.
+    """
+    assert isinstance(request, str), "request must be a string"
+    assert _FAHRENHEIT_RE is not None, "regex constant present"
+    return _FAHRENHEIT_RE.search(request) is not None
+
+
+def _maybe_author_fahrenheit(built: dict, fields: dict, klass: str,
+                              request: str, sample: object) -> list[str]:
+    """A12 (case matrix): if the request asked for Fahrenheit and a mapped
+    field's name contains ``temp``, append ``scale 1.8`` + ``offset 32`` to
+    the pipeline and refresh the preview. Value class only — a list-class
+    scene binds a single repeat root, not per-field numbers.
+
+    Returns the list of converted field names (empty when no conversion fires).
+    Mutates ``built`` in place: pipeline gains one transform stage and
+    ``preview_payload`` is re-derived from the fresh sample so the caller's
+    typed-verify + bind_scene still see grounded numbers.
+    """
+    assert isinstance(built, dict) and isinstance(fields, dict), "args required"
+    assert klass in (_DISPLAY_VALUE, _DISPLAY_LIST), "klass must be value or list"
+    if klass != _DISPLAY_VALUE or not _wants_fahrenheit(request):
+        return []
+    converted: list[str] = []
+    ops: list[dict] = []
+    for name, ftype in fields.items():  # bounded by _MAX_INTENT_FIELDS
+        if ftype != "number" or "temp" not in name.lower():
+            continue
+        ops.append({"fn": "scale", "field": name, "factor": 1.8})
+        ops.append({"fn": "offset", "field": name, "value": 32})
+        converted.append(name)
+    if not ops:
+        return []
+    built["pipeline"].append({"op": "transform", "apply": ops})
+    payload = sample if isinstance(sample, dict) else {"items": sample}
+    built["preview_payload"] = ni.run_pipeline(built["pipeline"], payload)
+    return converted
+
+
+def _detect_alert_op(request: str) -> str | None:
+    """Return ``lt`` / ``gt`` when the request carries a direction word, else None.
+
+    Deterministic word list (case-insensitive, word-bounded so ``overhead`` etc.
+    never trip the ``over`` branch). ``lt`` wins if both classes appear — the
+    "drops below" phrasing hits both LT patterns, never a GT one.
+    """
+    assert isinstance(request, str), "request must be a string"
+    if _ALERT_LT_RE.search(request):
+        return "lt"
+    if _ALERT_GT_RE.search(request):
+        return "gt"
+    return None
+
+
+def _maybe_author_alert(spec: dict, fields: dict, klass: str,
+                        request: str, intent: dict) -> str | None:
+    """A13 (case matrix): if the intent carries a numeric threshold AND the
+    request carries a direction word AND the display class is ``value``, attach
+    ONE §12 alert to ``spec``. Returns the field name the alert binds when it
+    fires, else None. Never authors on the list class (the quakes case uses
+    ``threshold`` for ``where`` filtering, which another agent owns).
+
+    Alert shape mirrors ``ni._validate_alerts_spec`` exactly:
+    name (slug ≤40), left {"$bind": <field>}, op ∈ {lt,gt}, right = threshold,
+    message ≤500 chars. cooldown_minutes stays absent so the engine's ≥5 clamp
+    at fire-time applies unchanged.
+    """
+    assert isinstance(spec, dict) and isinstance(fields, dict), "args required"
+    assert isinstance(intent, dict), "intent required"
+    if klass != _DISPLAY_VALUE:
+        return None
+    threshold = intent.get("threshold")
+    if not isinstance(threshold, (int, float)) or isinstance(threshold, bool):
+        return None
+    op = _detect_alert_op(request)
+    if op is None:
+        return None
+    numeric_field: str | None = None
+    for name, ftype in fields.items():  # bounded by _MAX_INTENT_FIELDS
+        if ftype == "number":
+            numeric_field = name
+            break
+    if numeric_field is None:
+        return None
+    subject = str(intent.get("subject") or numeric_field)[:80]
+    name_slug = f"alert-{numeric_field}"[:40].lower()
+    name_slug = re.sub(r"[^a-z0-9-]+", "-", name_slug).strip("-") or "alert"
+    direction = "below" if op == "lt" else "above"
+    message = f"{subject} {direction} {threshold}"[:500]
+    alert = {
+        "name": name_slug,
+        "left": {"$bind": numeric_field},
+        "op": op,
+        "right": threshold,
+        "message": message,
+    }
+    spec["alerts"] = [alert]
+    return numeric_field
 
 
 # ---- stage 6: handoff (create item = ready draft/commissioning) ---------
@@ -1469,6 +1629,17 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
     degrade_note = None
     if hint in ("map", "image") and klass == _DISPLAY_VALUE:
         degrade_note = f"display_hint {hint!r} unsupported; proceeding with value card"
+    # A9/A11 (case matrix, 2026-09-15): the data decides list-vs-value, not the
+    # hint. "bitcoin AND ethereum" / "sunrise TIMES" classify as list on some
+    # models, but the picked mapping paths carry no ``[N]`` step — a list scene
+    # would (correctly) die "not a list exemplar path" at assembly. Degrade to
+    # the value card deterministically and say so.
+    if klass == _DISPLAY_LIST and not any(
+        "[" in str(path) for path in mapping.values()
+    ):
+        klass = _DISPLAY_VALUE
+        extra = "display_hint 'list' but no list-shaped data; value card"
+        degrade_note = f"{degrade_note}; {extra}" if degrade_note else extra
     # Minor (audit 2026-09-13): a list-class scene binds ONE list exemplar
     # path (the repeat root) — extra fields the model picked are dropped.
     # Say so honestly on the flow record so the user knows only the first
@@ -1483,17 +1654,36 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
         built = assemble_from_mapping(mapping, fields, klass, sample)
     except ValueError as exc:
         return _fail(store, item_id, "assembly", str(exc))
+    # A12 (case matrix): deterministic °F conversion for temperature fields —
+    # mutates built.pipeline (adds one transform stage) and refreshes preview.
+    try:
+        converted = _maybe_author_fahrenheit(built, fields, klass, request, sample)
+    except (ni.NIError, ValueError) as exc:
+        return _fail(store, item_id, "assembly", f"fahrenheit conversion failed: {exc}")
     source = {"type": "http_json", "url": url}
     spec = build_final_spec(request, intent, source, intent["cadence_minutes"],
                             built["pipeline"], built["scene"])
+    # A13 (case matrix): deterministic edge-triggered alert authoring — only
+    # when threshold + direction + value class all line up. Adds spec.alerts.
+    alert_field = _maybe_author_alert(spec, fields, klass, request, intent)
     # C2 (audit 2026-09-13): the frozen source URL MUST equal the URL we
     # actually fetched — a mismatch is a code defect (someone rewrote the URL
     # between fetch and seal), not a user-facing failure.
     assert spec["source"]["url"] == url, "frozen source.url must match fetched url"
     born = "flow" if not remap else None
+    extra_notes: list[str] = []
+    for name in converted:  # bounded by _MAX_INTENT_FIELDS
+        extra_notes.append(f"converted {name} to °F")
+    if alert_field is not None:
+        alert_rule = spec["alerts"][0]
+        extra_notes.append(
+            f"alert set: {alert_field} {alert_rule['op']} {alert_rule['right']}"
+        )
+    handoff_note = degrade_note or "handoff from freeform mapping"
+    if extra_notes:
+        handoff_note = handoff_note + "; " + "; ".join(extra_notes)
     return _finalize(store, item_id, spec, built["preview_payload"],
-                     note=degrade_note or "handoff from freeform mapping",
-                     born=born)
+                     note=handoff_note, born=born)
 
 
 def _finalize(store: ni.NIStore, item_id: str, spec: dict, preview: dict,

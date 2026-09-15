@@ -1287,3 +1287,34 @@ coordinate params, and hands off; any failure degrades to empty slots →
 draft + `awaiting_params` → the card's Fill affordance. Flow-record
 transitions carry sealed underscore extras forward (`_recipe_id` /
 `_geocode` / `_remap`) — a note appended during a pause used to wipe them.
+
+**Case-matrix wave (2026-09-15)** — grammar + authoring + testing contract:
+- §4.2 transforms gain `offset(field, value)`: ADDS the numeric constant to a
+  numeric field; non-numeric ⇒ `transform_type` (same class as `scale`).
+  C→°F composes as `scale(t, 1.8)` then `offset(t, 32)`.
+- §29 freeform assembly authors two deterministic post-mapping artifacts:
+  a °F conversion when the ORIGINAL request matches `fahrenheit|°\s*F\b` and
+  a mapped field's name contains `temp` (value class; appends scale+offset);
+  and a §12 alert when the intent carries a numeric `threshold` AND the
+  request carries a direction word (below/under/drops/falls/less than → lt;
+  above/over/exceeds/rises/more than → gt) AND the class is value. Honest
+  flow notes both times. List-class thresholds stay `where` filters. The
+  flow-authored alert omits `cooldown_minutes` (engine's ≥5 clamp applies);
+  `left` binds the first numeric mapped field.
+- §29 display class: the DATA decides list-vs-value — a `list` hint whose
+  picked mapping paths carry no `[N]` step degrades to the value card with
+  an honest note (crypto-pair / sunrise-times live-gate lesson).
+- Testing contract: the case list lives in
+  `app/tests/fixtures/ni_flow/cases.json` (docs/internal/ni-cases.md is the
+  taxonomy map; the registry is the machine truth). The eval's recorded /
+  chaos / phrasings / engine modes AND `test_ni_case_registry.py` all load
+  it; `load_registry` rejects unknown keys and unknown `engine_state`
+  values. BY-DESIGN rows (`expected.engine_state` failed / source) PASS the
+  engine gate on state match — the honest refusal IS the feature; the C2
+  frozen-URL invariant applies to settled rows only. `--record --only <id>`
+  refreshes a row's fixture from the live source (`--record-all` guards
+  wholesale rewrites). `cadence_free_phrasings` rows gate kind+validity but
+  not cadence equality ("every morning" legitimately moves the cadence).
+  The lifecycle matrix (ni-cases.md §C, L1–L12) lives in
+  `app/tests/test_ni_lifecycle.py`, model-free through the real tool
+  registry and routes.
