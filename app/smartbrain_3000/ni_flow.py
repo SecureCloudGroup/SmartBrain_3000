@@ -270,11 +270,22 @@ def _empty_shell_spec(request: str, cadence: int) -> dict:
     # ``spec.title required``.
     first = request.splitlines()[0].strip() if request else ""
     title_line = first if first else "New card"
+    # W1 (field 2026-09-15): a paragraph-length request used to become the
+    # card TITLE verbatim (the flow failed before finalize could retitle from
+    # intent.subject) — bound the shell title to a readable line.
+    if len(title_line) > 80:
+        title_line = title_line[:77].rstrip() + "…"
     return {
         "version": 1,
         "title": title_line[:ni._MAX_TITLE],
         "goal": request[:ni._MAX_GOAL],
         "params": {},
+        # W2 (field 2026-09-15): ``_shell`` marks a spec the flow has NOT yet
+        # replaced — the commission door refuses it (a user Activated a failed
+        # flow's shell; the placeholder model source then ran and reported
+        # "ok" on a card that renders "Preparing card…" forever). ``_finalize``
+        # replaces the whole spec, so a finished card never carries it.
+        "_shell": True,
         "source": {"type": "model", "instruction": "flow shell placeholder"},
         "pipeline": [],
         "scene": {
@@ -1405,6 +1416,32 @@ def _pause_for_recipe_confirm(store: ni.NIStore, item_id: str, intent: dict,
     return _flow_read(store, item_id) or {}
 
 
+# R2 (field 2026-09-15): desktop-side secrets access for remap sampling ONLY.
+# The §9 credential firewall keeps SecretStore out of the chat/tool context;
+# the flow WORKER is engine-side (same trust position as the scheduler, which
+# already holds secrets for these exact fetches). main.py wires the provider
+# at startup; it is consulted solely to re-sample an item's OWN already-
+# consented source — never a new host, never surfaced to a model.
+_SECRETS_PROVIDER: Callable[[], object] | None = None
+
+
+def set_secrets_provider(provider: Callable[[], object] | None) -> None:
+    """Install the desktop-side SecretStore accessor (app startup; tests)."""
+    global _SECRETS_PROVIDER
+    assert provider is None or callable(provider), "provider must be callable"
+    _SECRETS_PROVIDER = provider
+
+
+def _resolve_secrets_store() -> object | None:
+    """The SecretStore for remap sampling, or None (locked / not wired)."""
+    if _SECRETS_PROVIDER is None:
+        return None
+    try:
+        return _SECRETS_PROVIDER()
+    except Exception:  # a locked store must degrade, never crash the worker
+        return None
+
+
 def _run_remap(store: ni.NIStore, item_id: str, record: dict,
                call_model: Callable[[str], str],
                do_fetch: Callable[[str], object]) -> dict:
@@ -1427,8 +1464,41 @@ def _run_remap(store: ni.NIStore, item_id: str, record: dict,
         return _fail(store, item_id, "remap", "item not found for remap")
     intent = _remap_intent_from_spec(item["spec"], record.get("request") or "")
     request = str(record.get("request") or item["spec"].get("goal") or "remap")
+    # R1/R2 (field 2026-09-15): the remap of a recipe-born keyed card fetched
+    # the LITERAL template (``?symbol={{param:symbol}}``, no auth header) and
+    # died FetchError — remap only ever worked for plain freeform URLs. The
+    # sampling fetch now runs the item's own source EXACTLY as the engine
+    # would: params substituted, ``$secret`` headers resolved host-bound via
+    # the desktop-wired secrets provider. Same consented source, same trust
+    # position as the scheduler's runs — no new host, no new consent.
+    spec = item["spec"]
+    source = spec.get("source") or {}
+    if source.get("type") == "http_json":
+        try:
+            filled = ni.substitute_params(spec)
+        except ni.NIError as exc:
+            return _fail(store, item_id, "remap",
+                          f"fill the card's '{exc.detail}' value before a remap")
+        filled_source = filled.get("source") or {}
+        if filled_source.get("headers"):
+            secrets_store = _resolve_secrets_store()
+            if secrets_store is None:
+                return _fail(store, item_id, "remap",
+                              "keyed source needs the desktop app's secret store")
+            def _authed_fetch(_u: str) -> object:
+                return ni._fetch_http_json(filled_source, item_id, secrets_store)
+            sample_fetch = _authed_fetch
+        else:
+            filled_url = str(filled_source.get("url") or url)
+            def _filled_fetch(_u: str) -> object:
+                return do_fetch(filled_url)
+            sample_fetch = _filled_fetch
+    else:
+        sample_fetch = do_fetch
     return _sample_and_map(store, item_id, request, intent, url,
-                            call_model, do_fetch, remap=True)
+                            call_model, sample_fetch, remap=True,
+                            keep_source=source if source.get("type") == "http_json" else None,
+                            keep_params=spec.get("params") or {})
 
 
 def _remap_intent_from_spec(spec: dict, request: str) -> dict:
@@ -1650,7 +1720,9 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
                     intent: dict, url: str,
                     call_model: Callable[[str], str],
                     do_fetch: Callable[[str], object],
-                    *, remap: bool = False) -> dict:
+                    *, remap: bool = False,
+                    keep_source: dict | None = None,
+                    keep_params: dict | None = None) -> dict:
     """Freeform branch: one consented fetch → derive → mapping → assemble.
 
     ``remap`` (H2 audit 2026-09-13) signals the caller is re-entering at
@@ -1713,9 +1785,15 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
         converted = _maybe_author_fahrenheit(built, fields, klass, request, sample)
     except (ni.NIError, ValueError) as exc:
         return _fail(store, item_id, "assembly", f"fahrenheit conversion failed: {exc}")
-    source = {"type": "http_json", "url": url}
+    # R1/R2 (2026-09-15): a remap of a recipe-born card must PRESERVE the
+    # sealed source object (url template + $secret headers) and params —
+    # rebuilding a bare {type, url} used to strip the credential header and
+    # the param structure from a keyed card even when the remap succeeded.
+    source = dict(keep_source) if keep_source else {"type": "http_json", "url": url}
     spec = build_final_spec(request, intent, source, intent["cadence_minutes"],
                             built["pipeline"], built["scene"])
+    if keep_params:
+        spec["params"] = json.loads(json.dumps(keep_params))
     # A13 (case matrix): deterministic edge-triggered alert authoring — only
     # when threshold + direction + value class all line up. Adds spec.alerts.
     alert_field = _maybe_author_alert(spec, fields, klass, request, intent)
@@ -1755,6 +1833,8 @@ def _finalize(store: ni.NIStore, item_id: str, spec: dict, preview: dict,
     """
     assert store is not None and item_id, "args required"
     assert born is None or born in BORN_MARKERS, "born marker must be closed"
+    prior = store.get_item(item_id)
+    prior_state = str(prior["state"]) if prior else "draft"
     if born is not None:
         spec[_BORN_KEY] = born
     # needs_params wave (2026-09-14): bind ``ni:self:<name>`` refs to the shell's
@@ -1782,7 +1862,18 @@ def _finalize(store: ni.NIStore, item_id: str, spec: dict, preview: dict,
     except (ValueError, ni.NIError) as exc:
         return _fail(store, item_id, "assembly", f"store update failed: {exc}")
     landing = _landing_state(spec)
-    if landing == "commissioning":
+    # R2 (field 2026-09-15): a REMAP (born=None) of a card already past draft
+    # keeps its credential gate — the key lives in the store untouched, so
+    # demoting to awaiting_credential/draft would ask the user for a key they
+    # already added. Fresh creations keep the honest draft landing.
+    if born is None and prior_state != "draft":
+        landing = "commissioning"
+        if prior_state != "commissioning":
+            try:
+                store.set_state(item_id, "commissioning")
+            except Exception:  # state write best-effort; transition below rules
+                pass
+    elif landing == "commissioning":
         try:
             store.commission(item_id)
         except ValueError as exc:

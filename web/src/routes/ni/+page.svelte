@@ -1011,7 +1011,14 @@
             </div>
           {/if}
 
-          {#if preview}
+          {#if preview && item.shell}
+            <!-- W2 (2026-09-15): a flow shell whose creation never finished must not
+                 offer Activate — the placeholder would run and claim "ok" forever.
+                 The backend refuses the commission too; this copy says what to do. -->
+            <p class="muted" style="margin:0; font-size:var(--f-label)">
+              Creation didn’t finish — ask in chat to retry it, or delete this card.
+            </p>
+          {:else if preview}
             <div class="ni-actions">
               <button
                 disabled={busyId === item.id}

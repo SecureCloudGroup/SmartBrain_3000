@@ -398,9 +398,13 @@ def validate_spec(spec: object, *, allow_empty_params: bool = False) -> dict:
                "display", "contract", "repair_policy", "model", "_c2_ok",
                "interval_minutes", "history", "alerts",
                "_l1_last_attempt", "_l1_trial", "_template",
-               "_l2_last_attempt", "_l2_proposal", "_born"}
+               "_l2_last_attempt", "_l2_proposal", "_born", "_shell"}
     _closed_keys(body, allowed, "spec")
     _validate_born_marker(body.get("_born"))
+    # W2 (2026-09-15): ``_shell`` is the flow's not-yet-finalized marker —
+    # boolean-true or absent, nothing else (the commission door reads it).
+    if "_shell" in body and body["_shell"] is not True:
+        raise ValueError("spec._shell must be true or absent")
     if body.get("version") != 1:
         raise ValueError("spec.version must be 1")
     _require_str(body.get("title"), "spec.title", max_len=_MAX_TITLE)
