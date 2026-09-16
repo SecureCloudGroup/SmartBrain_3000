@@ -711,6 +711,92 @@ def put_credential(request: Request, item_id: str, body: CredentialIn) -> dict:
     return {"ok": True}
 
 
+@router.post("/api/ni/items/{item_id}/flow/confirm-source")
+def confirm_flow_source(request: Request, item_id: str) -> dict:
+    """Card-consent (2026-09-15): the tile's own [Approve source] tap.
+
+    Deterministic by construction: the tap approves EXACTLY what the sealed
+    flow record holds — the card displayed ``source_url`` (+ geocode lookup +
+    not_covered) straight from that record via ``board_flow_field``, and this
+    route re-reads the record itself; no caller-supplied URL exists to drift.
+    The chat tool (``confirm_ni_flow_source``) remains as an alternative
+    surface, but a wandering chat model can no longer strand the consent —
+    the affordance renders the moment the flow pauses, from code alone.
+
+    Desktop-local (consent-bearing, like credential/param PUTs); audited as a
+    user consent event with the approved URL's host in the metadata. 409 when
+    the flow is not awaiting confirmation. Runs the continuation
+    synchronously (recipe handoff + optional consented geocode — seconds).
+    """
+    _require_desktop_local(request)
+    store = _store(request)
+    item = store.get_item(item_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="item not found")
+    record = ni_flow._flow_read(store, item_id)
+    state = str((record or {}).get("state") or "")
+    if record is None or state != "confirm_source":
+        raise HTTPException(
+            status_code=409,
+            detail=f"no source confirmation pending (flow state {state or 'none'!r})")
+    source_url = str(record.get("source_url") or "")
+    if not source_url:
+        raise HTTPException(status_code=409,
+                            detail="flow record carries no source URL")
+    try:
+        result = ni_flow.continue_from_recipe_confirm(store, item_id, source_url)
+    except ValueError as exc:  # raced by a concurrent confirm — report honestly
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    request.app.state.audit.append(
+        "user", "ni_flow_confirm_source", "reviewed", "executed", True,
+        args_summary=tools.summarize({"item_id": item_id,
+                                       "source_url": source_url}),
+        result_summary=tools.summarize({"state": str(result.get("state") or "")}),
+    )
+    _journal_best_effort(store, item_id, "source_changed",
+                          f"user approved the source on the card ({_host_of(source_url)})")
+    return {"ok": True, "state": str(result.get("state") or ""),
+            "item_state": (store.get_item(item_id) or {}).get("state")}
+
+
+@router.post("/api/ni/items/{item_id}/flow/decline-source")
+def decline_flow_source(request: Request, item_id: str) -> dict:
+    """Card-consent: the tile's [Not this source] tap — an honest terminal.
+
+    The flow fails ``declined`` (never a fetch), the shell stays a draft the
+    commission door refuses, and the card shows the creation-didn't-finish
+    copy with delete/retry as the ways out. Audited like the approval.
+    """
+    _require_desktop_local(request)
+    store = _store(request)
+    if store.get_item(item_id) is None:
+        raise HTTPException(status_code=404, detail="item not found")
+    record = ni_flow._flow_read(store, item_id)
+    state = str((record or {}).get("state") or "")
+    if record is None or state != "confirm_source":
+        raise HTTPException(
+            status_code=409,
+            detail=f"no source confirmation pending (flow state {state or 'none'!r})")
+    ni_flow._fail(store, item_id, "declined", "user declined the source on the card")
+    request.app.state.audit.append(
+        "user", "ni_flow_decline_source", "reviewed", "executed", True,
+        args_summary=tools.summarize({"item_id": item_id}),
+        result_summary=tools.summarize({"state": "failed"}),
+    )
+    _journal_best_effort(store, item_id, "c2_wrong",
+                          "user declined the proposed source")
+    return {"ok": True, "state": "failed"}
+
+
+def _host_of(url: str) -> str:
+    """Hostname for audit/journal lines (host-free-content rule: host only)."""
+    assert isinstance(url, str), "url required"
+    try:
+        return urlparse(url).hostname or "unknown"
+    except ValueError:
+        return "unknown"
+
+
 class ParamIn(BaseModel):
     """Fill one NON-secret parameter value (needs_params affordance, 2026-09-14)."""
 

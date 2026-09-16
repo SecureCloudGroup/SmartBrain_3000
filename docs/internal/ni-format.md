@@ -1365,3 +1365,26 @@ would not change for 30 minutes):
   broken extraction → remap" from "different data → NEW card via
   start_ni_flow" (a remap can never add fields the source does not serve),
   and forbid confirm_ni_flow_source after a resume.
+
+**Card-consent wave (2026-09-15, operator: "bulletproof and deterministic")**
+— the last model-dependent hand-off removed. Field: on v0.15.0 the engine
+paused correctly at ``confirm_source`` and the CHAT model still wandered
+(researched docs, tried a second flow — bounced by the duplicate guard),
+stranding a healthy pause. Now the pause renders its OWN consent on the
+tile, from code alone:
+- ``board_flow_field`` carries the sealed disclosure on a confirm pause —
+  ``source_url`` verbatim, ``recipe_title``, ``geocode_query``/``host``,
+  ``not_covered`` — and the card shows "Fetches: <url>" with
+  [Approve source] / [Not this source].
+- ``POST /api/ni/items/{id}/flow/confirm-source`` (desktop-local, audited
+  as a user consent event): re-reads the SEALED record itself (no body URL —
+  nothing can drift from what the card displayed) and runs the continuation
+  synchronously (handoff + consented geocode). ``.../flow/decline-source``
+  is the honest terminal: ``failed(declined)``, never a fetch, the shell
+  keeps refusing commission. Both 409 without a pending pause (raced second
+  taps included).
+- The chat tool ``confirm_ni_flow_source`` remains as an alternative
+  surface with its display-enforcement rules; the guide + next_step now
+  direct the model to point the user at the CARD first. A wandering model
+  can no longer strand a consent — the affordance exists the moment the
+  flow pauses.

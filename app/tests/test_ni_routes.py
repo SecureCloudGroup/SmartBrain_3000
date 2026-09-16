@@ -1003,3 +1003,87 @@ def test_W2_commission_refuses_unfinalized_flow_shell(client: TestClient) -> Non
     assert r.status_code == 409 and "never finished" in r.json()["detail"]
     # A finalized card (spec replaced) commissions normally — proven across
     # the existing flow suites; here we only pin the refusal.
+
+
+# --- card-consent wave (2026-09-15) --------------------------------------------
+
+def _paused_recipe_flow(client: TestClient, recipe_id: str = "crypto-price-btc-usd",
+                         request_text: str = "bitcoin price please",
+                         intent: dict | None = None) -> str:
+    """A shell item paused at confirm_source with the recipe's sealed disclosure."""
+    from smartbrain_3000 import ni_catalog, ni_flow
+    store = client.app.state.ni
+    recipe = ni_catalog.get_recipe(recipe_id)
+    assert recipe is not None
+    item_id = ni_flow.create_shell_item(store, request_text)
+    ni_flow._pause_for_recipe_confirm(
+        store, item_id,
+        intent or {"subject": "Bitcoin", "cadence_minutes": 15, "place": None,
+                   "wants": ["price"]},
+        recipe)
+    return item_id
+
+
+def test_card_consent_board_carries_the_sealed_disclosure(client: TestClient) -> None:
+    """The tile renders the consent from the SEALED record: exact URL, recipe
+    title, and any not-covered wants — no model relay involved."""
+    _unlock(client)
+    iid = _paused_recipe_flow(
+        client, "stock-quote-finnhub", "NVDA price and volume every 22 minutes",
+        {"subject": "NVDA", "cadence_minutes": 22, "place": None,
+         "wants": ["price", "volume"]})
+    row = next(i for i in client.get("/api/ni/board").json()["items"]
+               if i["id"] == iid)
+    flow = row["flow"]
+    assert flow["state"] == "confirm_source"
+    assert flow["source_url"].startswith("https://finnhub.io/api/v1/quote")
+    assert flow["recipe_title"], "recipe title must ride for the card copy"
+    assert flow["not_covered"] == ["volume"]
+
+
+def test_card_consent_approve_runs_the_flow_synchronously(client: TestClient) -> None:
+    """[Approve source] executes the continuation from the sealed record —
+    keyless recipe settles ready + commissioning in the same request."""
+    _unlock(client)
+    iid = _paused_recipe_flow(client)
+    r = client.post(f"/api/ni/items/{iid}/flow/confirm-source",
+                    headers={"X-SB-Local": "1"})
+    assert r.status_code == 200, r.text
+    assert r.json()["state"] == "ready"
+    item = client.app.state.ni.get_item(iid)
+    assert item["state"] == "commissioning"
+    assert "_shell" not in item["spec"]
+    journal = client.app.state.ni.read_journal(iid)
+    assert any(e["kind"] == "source_changed" and "approved the source" in e["summary"]
+               for e in journal)
+
+
+def test_card_consent_decline_is_an_honest_terminal(client: TestClient) -> None:
+    """[Not this source] fails the flow ('declined'), never fetches, and the
+    shell stays refusing commission."""
+    _unlock(client)
+    iid = _paused_recipe_flow(client)
+    r = client.post(f"/api/ni/items/{iid}/flow/decline-source",
+                    headers={"X-SB-Local": "1"})
+    assert r.status_code == 200 and r.json()["state"] == "failed"
+    item = client.app.state.ni.get_item(iid)
+    assert item["state"] == "draft" and item["spec"].get("_shell") is True
+    assert client.post(f"/api/ni/items/{iid}/commission").status_code == 409
+
+
+def test_card_consent_routes_409_without_a_pending_confirm(client: TestClient) -> None:
+    """No pause ⇒ 409 for both routes (idempotence: a raced second tap too)."""
+    _unlock(client)
+    iid = _create_via_tool(client)
+    for path in ("flow/confirm-source", "flow/decline-source"):
+        r = client.post(f"/api/ni/items/{iid}/{path}",
+                        headers={"X-SB-Local": "1"})
+        assert r.status_code == 409, (path, r.text)
+    # Approve once, then the second tap 409s honestly.
+    iid2 = _paused_recipe_flow(client, request_text="second bitcoin card",
+                                intent={"subject": "BTC2", "cadence_minutes": 15,
+                                        "place": None, "wants": ["price"]})
+    assert client.post(f"/api/ni/items/{iid2}/flow/confirm-source",
+                       headers={"X-SB-Local": "1"}).status_code == 200
+    assert client.post(f"/api/ni/items/{iid2}/flow/confirm-source",
+                       headers={"X-SB-Local": "1"}).status_code == 409
