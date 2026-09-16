@@ -467,10 +467,21 @@ def approve(request: Request, pid: str, body: ApproveIn) -> dict:
     except PermissionError:
         raise HTTPException(status_code=409, detail="approval already consumed") from None
     except Exception as exc:
-        # The claim was consumed (status=executed) but the handler failed — store
-        # the error so a parked agent turn resumes with the truth, not a success.
+        # Root cause of the 2026-09-16 field spiral: this branch used to raise
+        # HTTP 502 — which (a) the frontend blanket-maps to "I couldn't reach
+        # the model just now" (a lie: the model was never involved), and (b)
+        # SKIPPED the turn resume, so the model never saw the refusal it was
+        # supposed to self-correct from. Every deliberate post-approval guard
+        # (duplicate title, confirm-not-pending, flow-born refusals) therefore
+        # killed the turn and masqueraded as a model outage — identically on
+        # local and cloud models. A tool error after approval is a RESULT, not
+        # a transport failure: store it, resume the turn with the truth, and
+        # return 200 so the chat page's resume flow feeds the model the error
+        # inline (agent.resume_turn json-dumps the stored dict verbatim).
         approvals.store_result(pid, {"error": str(exc)})
-        raise HTTPException(status_code=502, detail=f"tool failed: {exc}") from None
+        resumed = _maybe_finish_scheduled_turn(request, row)
+        return {"status": "errored", "result": {"error": str(exc)},
+                "resumed_turn": resumed}
     approvals.store_result(pid, result)  # so a parked agent turn can resume with it
     resumed = _maybe_finish_scheduled_turn(request, row)
     return {"status": "executed", "result": result, "resumed_turn": resumed}

@@ -1388,3 +1388,20 @@ tile, from code alone:
   direct the model to point the user at the CARD first. A wandering model
   can no longer strand a consent — the affordance exists the moment the
   flow pauses.
+
+**Approve-resume + matcher-precision wave (field 2026-09-16)** — the root
+cause of every "I couldn't reach the model" report: a tool error AFTER
+approval raised HTTP 502 from ``/api/agent/pending/{id}/approve``, which the
+frontend blanket-maps to the model-unreachable sentence AND which skipped the
+turn resume — so every deliberate post-approval guard (duplicate title,
+confirm-not-pending, flow-born refusals) killed the turn, hid its own
+guidance from the model, and masqueraded as a model outage identically on
+local and cloud models. Fixed: a tool error on approval is a RESULT — 200
+``{status: "errored", result: {error}}``, stored for the parked turn
+(``agent.resume_turn`` feeds it to the model verbatim), scheduled turns
+resumed; 502 stays reserved for the gateway actually being unreachable.
+Matcher precision, two deterministic gates: a FIXED-subject recipe (no
+fillable params) matches only on a DISTINCTIVE title word (generic overlap —
+"price", "rate" — can never elect Bitcoin for "Google stock"; the field run
+sealed exactly that card), and the ticker bump applies only to recipes with
+a ``symbol`` param.

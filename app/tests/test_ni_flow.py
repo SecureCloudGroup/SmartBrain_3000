@@ -169,9 +169,13 @@ def test_match_recipe_ticker_needs_category_corroboration() -> None:
 
 def test_match_recipe_ticker_matches_when_stock_word_appears() -> None:
     """C2 (audit 2026-09-13): a corroborated ticker matches the stock recipe."""
+    # Matcher precision (2026-09-16): synthetic entries model the REAL catalog
+    # shape — the stock recipe takes a symbol param (ticker bump requires it);
+    # fx is fixed-subject (no params) and needs a distinctive word to compete.
     catalog = [
         {"id": "fx", "title": "USD to EUR exchange rate", "category": "finance"},
-        {"id": "stock", "title": "Stock quote", "category": "finance"},
+        {"id": "stock", "title": "Stock quote", "category": "finance",
+         "spec_template": {"params": {"symbol": {"label": "Ticker", "kind": "string", "value": ""}}}},
     ]
     got = ni_flow.match_recipe(catalog, "show me AAPL stock every 5 minutes",
                                 {"wants": ["price"]})
@@ -688,9 +692,12 @@ def test_c3_recipe_hit_pauses_at_confirm_source_no_fetch(monkeypatch) -> None:
 
     catalog = [{"id": "stock-quote-finnhub", "title": "Stock quote",
                 "category": "finance",
-                "spec_template": {"source": {
-                    "type": "http_json",
-                    "url": "https://finnhub.io/api/v1/quote?symbol={{param:symbol}}"}},
+                "spec_template": {
+                    "params": {"symbol": {"label": "Ticker", "kind": "string",
+                                           "value": ""}},
+                    "source": {
+                        "type": "http_json",
+                        "url": "https://finnhub.io/api/v1/quote?symbol={{param:symbol}}"}},
                 "url_template": "https://finnhub.io/api/v1/quote?symbol={{param:symbol}}"}]
     ni_flow.run_flow(
         store, item_id, gateway_call=lambda m, p: model(m, p),
@@ -1595,3 +1602,25 @@ def test_remap_tool_refuses_unfilled_params() -> None:
     store.update_spec(item_id, spec, origin="agent")
     with pytest.raises(ValueError, match="unfilled"):
         tools.get_tool("remap_ni_item").handler(ctx, {"item_id": item_id})
+
+
+def test_match_recipe_google_stock_never_elects_a_fixed_subject_recipe() -> None:
+    """Matcher precision (field 2026-09-16): 'Get stock price of Google' scored
+    the BITCOIN recipe 2 via the generic word 'price' and won on catalog
+    order — the user approved a Google card fetching BTC. Fixed-subject
+    recipes now require a distinctive title word; the symbol-parameterized
+    stock recipe wins instead (its subject is the slot)."""
+    from smartbrain_3000 import ni_catalog
+    catalog = ni_catalog.entries(None)
+    intent = {"wants": ["latest price", "open", "high", "low", "close"]}
+    got = ni_flow.match_recipe(
+        catalog, "Get stock price of Google every 22 minutes and show latest "
+                 "price, Open, High, Low, Close", intent)
+    assert got is not None and got["id"] == "stock-quote-finnhub", f"got {got}"
+    # The real subjects still elect their fixed recipes via distinctive words.
+    btc = ni_flow.match_recipe(catalog, "what's bitcoin worth right now",
+                                {"wants": ["price"]})
+    assert btc is not None and btc["id"] == "crypto-price-btc-usd"
+    fx = ni_flow.match_recipe(catalog, "EUR to USD exchange rate, update hourly",
+                               {"wants": ["rate"]})
+    assert fx is not None and fx["id"] == "fx-usd-eur"

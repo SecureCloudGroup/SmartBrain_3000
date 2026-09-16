@@ -528,14 +528,66 @@ def _category_corroborated(recipe: dict, request: str, intent: dict) -> bool:
     return False
 
 
+# Matcher precision (field 2026-09-16): title words too generic to identify a
+# SUBJECT — "price" alone let the Bitcoin recipe score 2 on "Get stock price
+# of Google" and win on catalog order; the user then approved a "Google" card
+# that fetches BTC. A FIXED-subject recipe (no fillable params) must show a
+# distinctive subject word before it may match at all.
+_GENERIC_TITLE_WORDS: frozenset[str] = frozenset({
+    "price", "prices", "current", "quote", "rate", "rates", "exchange",
+    "stock", "the", "and", "for", "with", "past", "day", "json", "data",
+})
+
+
+def _has_fillable_params(recipe: dict) -> bool:
+    """True when the recipe declares at least one non-secret param slot."""
+    assert isinstance(recipe, dict), "recipe required"
+    template = recipe.get("spec_template") or {}
+    params = template.get("params") if isinstance(template, dict) else {}
+    return any(isinstance(d, dict) and d.get("kind") != "secret"
+               for d in (params or {}).values())
+
+
+def _has_symbol_param(recipe: dict) -> bool:
+    """True when the recipe takes a ``symbol`` slot (ticker-parameterized)."""
+    assert isinstance(recipe, dict), "recipe required"
+    template = recipe.get("spec_template") or {}
+    params = template.get("params") if isinstance(template, dict) else {}
+    decl = (params or {}).get("symbol")
+    return isinstance(decl, dict) and decl.get("kind") != "secret"
+
+
+def _distinctive_title_hit(recipe: dict, request: str, intent: dict) -> bool:
+    """A title word that actually names the recipe's SUBJECT appears in the hay."""
+    assert isinstance(recipe, dict) and isinstance(request, str), "args required"
+    hay = set((request.lower() + " " + " ".join(
+        w for w in intent.get("wants") or [] if isinstance(w, str)
+    ).lower()).split())
+    for tw in str(recipe.get("title") or "").lower().split():  # bounded title
+        word = tw.strip("()/,.")
+        if len(word) >= 3 and word not in _GENERIC_TITLE_WORDS and word in hay:
+            return True
+    return False
+
+
 def match_recipe(catalog: list[dict], request: str, intent: dict) -> dict | None:
     """§29 source stage: score every catalog entry; ticker heuristic → finance.
 
     C2 (audit 2026-09-13): the ticker bump (+2, was +5) fires ONLY when the
     recipe's category is corroborated in the request text — a bare ALL-CAPS
-    token never carries a match on its own. Returns the winning recipe
-    (deep copy is caller's responsibility) or None when nothing clears
-    ``_RECIPE_SCORE_MIN``.
+    token never carries a match on its own.
+
+    Matcher precision (field 2026-09-16), two more deterministic gates:
+    - A FIXED-subject recipe (no fillable params — Bitcoin, USD/EUR, quakes)
+      matches only when a DISTINCTIVE title word appears in the request; the
+      generic overlap ("price", "rate") can never elect it for a different
+      subject. Parameterized recipes are exempt — their subject is the slot.
+    - The ticker bump applies only to recipes that TAKE a symbol param — a
+      corroborated GOOGL can boost the Finnhub quote, never a fixed-subject
+      recipe.
+
+    Returns the winning recipe (deep copy is caller's responsibility) or None
+    when nothing clears ``_RECIPE_SCORE_MIN``.
     """
     assert isinstance(catalog, list) and isinstance(request, str), "args required"
     assert isinstance(intent, dict), "intent must be a dict"
@@ -544,8 +596,12 @@ def match_recipe(catalog: list[dict], request: str, intent: dict) -> dict | None
     best_score = 0
     for recipe in catalog:  # bounded by ni_catalog._MAX_SOURCES
         assert isinstance(recipe, dict), "catalog entries must be dicts"
+        if not _has_fillable_params(recipe) and \
+                not _distinctive_title_hit(recipe, request, intent):
+            continue  # fixed subject, no subject word — never a candidate
         s = _score_recipe(recipe, request, intent)
         if (ticker_hit
+                and _has_symbol_param(recipe)
                 and str(recipe.get("category") or "").lower() == "finance"
                 and _category_corroborated(recipe, request, intent)):
             s += 2
