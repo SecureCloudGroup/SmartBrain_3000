@@ -11,6 +11,15 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Added
+- **Neural Interface: create cards right on the Neural page.** A new box at
+  the top of the board — type "NVDA stock price every 28 minutes" and the
+  card appears instantly, building itself in front of you. Approving the
+  source, adding a key, and confirming the first result are all taps on the
+  card, exactly as before. No chat conversation is needed to create a card
+  anymore (chat still works for asking about your cards). Failed creations
+  now carry a **Retry** button instead of needing a fresh request.
+
 ### Fixed
 - **Assistants can no longer fake actions in chat.** A model that printed
   tool calls as text — and then wrote its own fake "results" — could sail

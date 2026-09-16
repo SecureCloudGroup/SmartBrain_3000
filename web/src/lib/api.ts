@@ -1600,6 +1600,21 @@ export const api = {
       headers: { "x-sb-local": "1" },
       body: JSON.stringify({ name, value, host }),
     }),
+  // NI Foreman P1 (2026-09-16): the /ni composer — creation without chat. The
+  // request goes straight to the deterministic flow engine; the shell card
+  // appears immediately. Desktop-local (creation is consent-bearing).
+  niIntake: (request: string, sourceUrl?: string) =>
+    req<{ id: string; started: boolean }>("/api/ni/intake", {
+      method: "POST",
+      headers: { "x-sb-local": "1" },
+      body: JSON.stringify(sourceUrl ? { request, source_url: sourceUrl } : { request }),
+    }),
+  niFlowRetry: (id: string) =>
+    req<{ id: string; started: boolean }>(
+      `/api/ni/items/${encodeURIComponent(id)}/flow/retry`, {
+        method: "POST",
+        headers: { "x-sb-local": "1" },
+      }),
   // Card-consent (2026-09-15): approve / decline the flow's proposed source from
   // the tile. Desktop-local; the server re-reads the SEALED record (no URL in
   // the body — nothing to drift from what the card displayed). Approve runs the

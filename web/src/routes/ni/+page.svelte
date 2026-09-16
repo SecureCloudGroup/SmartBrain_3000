@@ -124,6 +124,44 @@
   let credentialBusy = $state(false);
   let credentialError = $state("");
 
+  // NI Foreman P1: composer state — the on-page creation surface.
+  let composerText = $state("");
+  let composerBusy = $state(false);
+  let composerError = $state("");
+
+  async function submitComposer(): Promise<void> {
+    console.assert(composerBusy === false, "submitComposer: no concurrent submit");
+    const text = composerText.trim();
+    if (text.length < 3 || composerBusy) return;
+    composerBusy = true;
+    composerError = "";
+    try {
+      await api.niIntake(text);
+      composerText = "";
+      toast("Card started — watch it build below.");
+      await load();
+    } catch (err) {
+      composerError = describeError(err);
+    } finally {
+      composerBusy = false;
+    }
+  }
+
+  async function retryFlow(item: NiBoardItem): Promise<void> {
+    console.assert(typeof item.id === "string", "retryFlow: id is string");
+    busyId = item.id;
+    try {
+      await api.niFlowRetry(item.id);
+      toast("Retrying the card build.");
+      await load();
+    } catch (err) {
+      const msg = describeError(err);
+      if (msg) error = msg;
+    } finally {
+      busyId = null;
+    }
+  }
+
   // Fill-param modal (needs_params, 2026-09-14) — the non-secret sibling of Add key.
   // Opens per unfilled referenced param from the card's needs_params list; plain
   // text input (values are ordinary spec data like a ticker or a city, never keys).
@@ -908,8 +946,30 @@
     <button class="ghost" onclick={openLibrary}>Library</button>
   </div>
   <p class="muted">
-    Live data you asked for, on one board. Ask in chat — “show me AAPL every 5 minutes”.
+    Live data you asked for, on one board. Type it below — “show me AAPL every 5 minutes”.
   </p>
+
+  <!-- NI Foreman P1 (2026-09-16): the composer IS the creation surface — the
+       request goes straight to the deterministic flow engine; the card appears
+       immediately and every later step is a tap on the card itself. No chat
+       model anywhere in the path. -->
+  <form
+    class="ni-composer"
+    onsubmit={(e) => { e.preventDefault(); void submitComposer(); }}
+  >
+    <input
+      type="text"
+      bind:value={composerText}
+      placeholder="What do you want to watch? — e.g. NVDA stock price every 28 minutes"
+      maxlength="2000"
+      disabled={composerBusy}
+      aria-label="Describe the card you want"
+    />
+    <button type="submit" disabled={composerBusy || composerText.trim().length < 3}>
+      {composerBusy ? "Starting…" : "Create card"}
+    </button>
+  </form>
+  {#if composerError}<p class="error" style="margin:var(--s-2) 0 0">{composerError}</p>{/if}
 
   {#if !loaded}
     <Spinner block />
@@ -917,7 +977,7 @@
     <EmptyState
       icon="monitor"
       title="Nothing on your Neural Interface yet"
-      body="Ask in chat — “show me AAPL every 5 minutes” — and approve the source. Items appear here."
+      body="Type what you want to watch in the box above — “show me AAPL every 5 minutes” — then approve the source on the card."
     >
       <button onclick={() => goto("/chat")}>Open chat</button>
     </EmptyState>
@@ -984,6 +1044,15 @@
                     — <span class="ni-status-class">{friendly}</span>
                   {/if}
                 </p>
+                {#if item.shell}
+                  <div class="ni-actions" style="margin-top: var(--s-2)">
+                    <button
+                      class="secondary"
+                      disabled={busyId === item.id}
+                      onclick={() => retryFlow(item)}
+                    >{busyId === item.id ? "Retrying…" : "Retry"}</button>
+                  </div>
+                {/if}
               {:else if item.flow.state === "confirm_source"}
                 <!-- Card-consent (2026-09-15): the flow's own approval affordance,
                      rendered by CODE the instant the pause happens — the exact URL
@@ -1950,6 +2019,15 @@
   }
   /* Needs-your-key row: sits between the body and any actions. Wraps on narrow cards
      so the label stacks above the button rather than truncating. */
+  .ni-composer {
+    display: flex;
+    gap: var(--s-2);
+    margin: var(--s-3) 0 var(--s-4);
+  }
+  .ni-composer input {
+    flex: 1;
+    min-width: 0;
+  }
   .ni-needs-key {
     display: flex;
     flex-direction: column;
