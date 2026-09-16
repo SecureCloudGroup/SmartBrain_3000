@@ -68,7 +68,13 @@ def _extract_text_tool_calls(content: str) -> list[dict]:
     or example blob simply isn't recovered. Bounded; ignores unrecognized tools.
     """
     assert isinstance(content, str), "content must be a string"
-    if '"name"' not in content or '"arguments"' not in content:
+    # P0 (NI Foreman, 2026-09-16): accept every observed spelling — "name" /
+    # "function" / "tool" for the callee, "arguments" / "parameters" / "args"
+    # for the args. Qwen2.5-Coder-style {"function": ..., "parameters": ...}
+    # used to fall through to the leak notice instead of executing.
+    if not any(f'"{k}"' in content for k in _CALLEE_KEYS):
+        return []
+    if not any(f'"{k}"' in content for k in _ARGS_KEYS):
         return []
     blocks = _TOOL_CALL_FENCE.findall(content)
     if not blocks:
@@ -80,12 +86,56 @@ def _extract_text_tool_calls(content: str) -> list[dict]:
             obj = json.loads(raw)
         except (ValueError, TypeError):
             continue
-        name = obj.get("name") if isinstance(obj, dict) else None
-        args = obj.get("arguments") if isinstance(obj, dict) else None
+        if not isinstance(obj, dict):
+            continue
+        name = next((obj[k] for k in _CALLEE_KEYS if isinstance(obj.get(k), str)), None)
+        args = next((obj[k] for k in _ARGS_KEYS if isinstance(obj.get(k), dict)), None)
         if isinstance(name, str) and isinstance(args, dict) and tools.get_tool(name) is not None:
             out.append({"id": f"text_{uuid.uuid4().hex[:8]}", "type": "function",
                         "function": {"name": name, "arguments": json.dumps(args)}})
     return out
+
+
+# P0 (NI Foreman, 2026-09-16): the sealed display channels ("### Scheduled
+# Item", and the claudecli text protocol's "### Tool result") are CODE-authored
+# vocabularies — a model typing them is impersonating the system (tonight a
+# model fabricated an entire tool exchange, results included, as prose). Any
+# model-authored line carrying that vocabulary is excised VISIBLY, never
+# rendered as if it were chrome. Line-anchored so prose that merely mentions
+# the words never matches.
+_SEALED_MARKER_RE = re.compile(
+    r"(?m)^[ \t]*#{1,6}[ \t]*(?:Tool result|Scheduled Item|End of Scheduled Item)\b[^\n]*$")
+_SEALED_EXCISED = "[unverified model-authored status block removed]"
+
+
+def sanitize_sealed_markers(content: str) -> str:
+    """Replace model-authored sealed-channel headings with a visible excision.
+
+    The heading line is replaced; an immediately following fenced block (the
+    fabricated "result" payload) is dropped with it. Bounded by message size.
+    """
+    assert isinstance(content, str), "content must be a string"
+    if "###" not in content:
+        return content
+    out = _SEALED_MARKER_RE.sub(_SEALED_EXCISED, content)
+    # Drop a fenced block that directly follows an excision marker — that is
+    # the fabricated payload the heading introduced.
+    out = re.sub(re.escape(_SEALED_EXCISED) + r"\s*\n```[a-z]*\n.*?\n```",
+                 _SEALED_EXCISED, out, flags=re.DOTALL)
+    return out
+
+
+def text_tool_probe(content: str) -> bool:
+    """True when a final text carries a runnable/attempted tool call OR sealed-
+    channel impersonation — the streaming route uses this to divert the reply
+    into run_turn (primed, no resample) instead of finalizing it as prose.
+    """
+    assert isinstance(content, str), "content must be a string"
+    if _SEALED_MARKER_RE.search(content):
+        return True
+    if _extract_text_tool_calls(content):
+        return True
+    return _looks_like_tool_attempt(content)
 
 
 def _looks_like_tool_call(content: str) -> bool:
@@ -506,7 +556,7 @@ def _run_turn_loop(ctx, audit, approvals, *, messages, model, conversation_id, t
                     raise exc from None  # plain also failed -> a real error; surface the original
                 _emit_usage(usage_sink, model, plain)
                 # sources is always [] here: this path only exists when NO tool ran.
-                return {"status": "complete", "message": _first_message(plain).get("content") or "", "degraded": True, "sources": []}
+                return {"status": "complete", "message": sanitize_sealed_markers(_first_message(plain).get("content") or ""), "degraded": True, "sources": []}
             raise  # a tool already ran -> fail closed, surface the error
         choice = _first_message(data)
         tool_calls = choice.get("tool_calls") or []
@@ -522,7 +572,7 @@ def _run_turn_loop(ctx, audit, approvals, *, messages, model, conversation_id, t
         if not tool_calls:
             # Citations ship with every completed answer (possibly []) so the UI can
             # always trust the field — extracted from tool results, never model prose.
-            return {"status": "complete", "message": content, "degraded": False, "steps": step + 1,
+            return {"status": "complete", "message": sanitize_sealed_markers(content), "degraded": False, "steps": step + 1,
                     "sources": _collect_sources(messages)}
         if calls + len(tool_calls) > _MAX_TOOL_CALLS:
             return _finalize_exhausted(messages, model, timeout=timeout, usage_sink=usage_sink,
@@ -622,7 +672,7 @@ def _finalize_exhausted(messages, model, *, timeout, usage_sink, reason: str, st
     content = _first_message(data).get("content") or ""
     if not content.strip() or _looks_like_tool_call(content):
         return {"status": "max_steps", "message": reason, "steps": steps}
-    return {"status": "complete", "message": content, "degraded": False, "steps": steps,
+    return {"status": "complete", "message": sanitize_sealed_markers(content), "degraded": False, "steps": steps,
             "sources": _collect_sources(messages)}
 
 

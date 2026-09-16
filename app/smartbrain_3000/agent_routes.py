@@ -913,6 +913,21 @@ def _stream_first_response(
                             ttft_ms = int((time.monotonic() - started) * 1000)  # first visible token
                         yield _sse_event("delta", {"text": "".join(text_parts)})  # flush buffered prefix
                         continue
+                    # P0 (NI Foreman, 2026-09-16): a prose-FIRST reply used to be
+                    # committed to raw streaming forever — tonight a model streamed
+                    # fenced tool calls AND fabricated '### Tool result' blocks
+                    # straight to the user with zero recovery (the one-char sniff
+                    # only inspects the opening character). Watch the tail as it
+                    # grows; on tool/fabrication vocabulary, stop emitting and
+                    # swallow to the end — the reply is then resolved via run_turn
+                    # with the captured text primed (never resampled).
+                    if any(ch in delta for ch in ('#', '"', '`')):
+                        tail = "".join(text_parts)[-600:]
+                        if ('"arguments"' in tail or '"parameters"' in tail
+                                or "### Tool result" in tail
+                                or "### Scheduled Item" in tail):
+                            suppress = True
+                            continue
                     yield _sse_event("delta", {"text": delta})
                 break  # stream finished (or broke on a tool turn)
             except gateway.GatewayError as exc:
@@ -937,8 +952,32 @@ def _stream_first_response(
                     client_messages,
                     {"choices": [{"message": {"role": "assistant", "content": "", "tool_calls": calls}}]},
                 )
+            elif saw_finish and client_messages is not None and text_parts:
+                # P0: text-emitted tool turn (claudecode et al) — replay the exact
+                # captured reply through run_turn's recovery instead of resampling
+                # (the old fallback could produce a materially different answer).
+                payload["primed"] = _stash_primed(
+                    client_messages,
+                    {"choices": [{"message": {"role": "assistant",
+                                               "content": "".join(text_parts)}}]},
+                )
             yield _sse_event("pending", payload)
             return
+        # P0: the reply finished as "plain prose" — but a prose-led message can
+        # still CARRY tool calls or sealed-channel impersonation the sniff never
+        # saw. Probe the final text; on a hit, divert to run_turn with the exact
+        # reply primed. Sanitize the sealed vocabulary either way (belt).
+        final_text = "".join(text_parts)
+        if agent.text_tool_probe(final_text):
+            payload = {"detail": "tool turn — fall back to /api/agent/turn", "model": model}
+            if saw_finish and client_messages is not None and text_parts:
+                payload["primed"] = _stash_primed(
+                    client_messages,
+                    {"choices": [{"message": {"role": "assistant", "content": final_text}}]},
+                )
+            yield _sse_event("pending", payload)
+            return
+        text_parts = [agent.sanitize_sealed_markers(final_text)]
         # Plain streamed answer completed here (no tool fallback) — record ONE turn_metrics row
         # with the true time-to-first-token. Bifrost's streamed deltas carry no usage block
         # (tokens are 0); a Claude Code stream reports its tokens on the final chunk, so

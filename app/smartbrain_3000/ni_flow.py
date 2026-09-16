@@ -29,6 +29,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from . import claudecli as _claudecli_mod
 from . import gateway as _gateway_mod
 from . import netguard as _netguard_mod
 from . import ni
@@ -80,7 +81,7 @@ _DOWNSAMPLE_MAX_BYTES = 30_000
 _MAPPING_MENU_CAP = 45          # POC used 45; keep parity for the recorded case corpus
 _LLM_MAX_TOKENS_INTENT = 400
 _LLM_MAX_TOKENS_MAPPING = 500
-_FLOW_MODEL_TIMEOUT_S = 60.0
+_FLOW_MODEL_TIMEOUT_S = 300.0  # P0 (2026-09-16): parity with the 300s cold-local-load budget every other background path gets — 60s failed cold loads
 
 # Word → (field name, type) mapping (§29 mapping stage): the model chose "°C"
 # over 25.7 until the menu was type-filtered — this table drives the filter.
@@ -1196,9 +1197,10 @@ def run_flow(store: ni.NIStore, item_id: str, *,
     def default_model(model: str, prompt: str) -> str:
         """Route through the process-wide gateway. Bounded timeout."""
         assert isinstance(model, str) and isinstance(prompt, str), "args required"
+        temp = None if _claudecli_mod.is_claudecode(model) else 0.0
         data = _gateway_mod.chat(
             [{"role": "user", "content": prompt}], model,
-            timeout=_FLOW_MODEL_TIMEOUT_S,
+            timeout=_FLOW_MODEL_TIMEOUT_S, temperature=temp,
         )
         return _gateway_mod.completion_text(data)
 
@@ -1253,12 +1255,15 @@ def _resolve_flow_model(store: ni.NIStore) -> str | None:
     ni_model = _gateway_mod.resolve_model("ni", routes)
     chat_model = _gateway_mod.resolve_model("chat", routes)
     agent_model = _gateway_mod.resolve_model("agent", routes)
-    if ni_model and _gateway_mod.is_local(ni_model):
+    # P0 (2026-09-16): an EXPLICIT ni route is the operator's word — honor it
+    # even when it is a cloud model (the local-preference below applies only
+    # to the fallback path, where no explicit choice exists).
+    if ni_model:
         return ni_model
     for candidate in (chat_model, agent_model):  # bounded to 2 (P10 #2)
         if candidate and _gateway_mod.is_local(candidate):
             return candidate
-    return ni_model or chat_model or agent_model
+    return chat_model or agent_model
 
 
 def _load_catalog() -> list[dict]:
