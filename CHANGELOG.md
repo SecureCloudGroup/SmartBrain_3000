@@ -11,6 +11,8 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-09-16
+
 ### Changed
 - **Neural Interface: approving a card's source now happens on the card.**
   When the flow finds a vetted source, the card itself immediately shows
