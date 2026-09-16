@@ -11,6 +11,19 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Fixed
+- **The false "I couldn't reach the model" is gone.** Any safety refusal that
+  fired after you approved an action (duplicate card names, expired
+  confirmations, protected edits) was reported as a model outage and silently
+  killed the assistant's turn — on every model, which is why switching models
+  never helped. Refusals now flow back to the assistant as normal results: it
+  reads the reason, explains, and corrects course in the same conversation.
+  That message now appears only when the model truly is unreachable.
+- **"Google stock" can never build a Bitcoin card again.** Fixed-subject
+  sources (Bitcoin, EUR/USD, earthquakes) now require their actual subject in
+  your request; ticker requests only ever boost sources that take a ticker.
+  If you approved the mismatched Google card earlier, delete it.
+
 ## [0.16.0] - 2026-09-16
 
 ### Changed

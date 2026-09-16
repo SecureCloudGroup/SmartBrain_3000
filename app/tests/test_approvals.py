@@ -244,3 +244,36 @@ def test_always_allow_actually_stops_asking(client: TestClient) -> None:
                       json={"name": "remember_fact", "args": {"text": "one"}}).json()["pending_id"]
     assert client.post(f"/api/agent/pending/{pid}/approve", json={"remember": True}).status_code == 200
     assert "remember_fact" in client.get("/api/agent/remembered").json()["tools"]
+
+
+def test_approve_tool_error_is_a_result_not_a_502(client: TestClient) -> None:
+    """Root cause of the 2026-09-16 field spiral: a tool error AFTER approval
+    raised HTTP 502 — the frontend blanket-maps 502 to "I couldn't reach the
+    model" (a lie), and the raise skipped the turn resume so no model ever
+    saw the refusal it should self-correct from. Every post-approval guard
+    (duplicate title, confirm-not-pending, flow-born refusals) therefore
+    looked like a model outage, identically for local and cloud models.
+
+    A tool error on approval is now a 200 RESULT: status "errored", the error
+    stored for the parked turn (agent.resume_turn feeds it to the model
+    verbatim), and the chat page's normal resume flow proceeds.
+    """
+    # start_ni_flow with a duplicate shell title = a real post-approval guard.
+    first = client.post("/api/tools/invoke",
+                        json={"name": "start_ni_flow",
+                              "args": {"request": "the same card twice"}})
+    pid1 = first.json()["pending_id"]
+    assert client.post(f"/api/agent/pending/{pid1}/approve",
+                       json={}).status_code == 200
+    second = client.post("/api/tools/invoke",
+                         json={"name": "start_ni_flow",
+                               "args": {"request": "the same card twice"}})
+    pid2 = second.json()["pending_id"]
+    r = client.post(f"/api/agent/pending/{pid2}/approve", json={})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["status"] == "errored"
+    assert "already exists" in body["result"]["error"]
+    # Approval is consumed — a second tap 409s, never re-runs.
+    assert client.post(f"/api/agent/pending/{pid2}/approve",
+                       json={}).status_code == 409
