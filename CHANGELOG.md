@@ -11,6 +11,8 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-09-16
+
 ### Fixed
 - **The false "I couldn't reach the model" is gone.** Any safety refusal that
   fired after you approved an action (duplicate card names, expired
