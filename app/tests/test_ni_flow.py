@@ -594,17 +594,22 @@ def test_c1_run_flow_resolves_model_via_gateway_no_placeholder(monkeypatch) -> N
     assert "flow-model" not in seen, "the placeholder must never reach the gateway"
 
 
-def test_c1_local_preferred_over_cloud_ni_route(monkeypatch) -> None:
-    """C1 (audit 2026-09-13): when the ni route is CLOUD but chat/agent points
-    at a local model, the flow prefers the local one — flows are frequent +
-    cheap and cloud stays fine when it's all the user has.
+def test_c1_explicit_ni_route_wins_local_preference_on_fallback(monkeypatch) -> None:
+    """P0 (2026-09-16, supersedes the C1 preference): an EXPLICIT ni route is
+    the operator's word and wins even when cloud; the local preference applies
+    only on the FALLBACK path where no explicit ni choice exists.
     """
     store, _conn = _store()
     from smartbrain_3000 import gateway as _gwmod
     monkeypatch.setattr(_gwmod, "load_routes", lambda conn: {
         "ni": "openai/gpt-4o", "chat": "mlx/qwen-local"})
     resolved = ni_flow._resolve_flow_model(store)
-    assert resolved == "mlx/qwen-local", f"local chat preferred; got {resolved!r}"
+    assert resolved == "openai/gpt-4o", f"explicit ni route must win; got {resolved!r}"
+    # Fallback path (no ni route): local chat preferred over cloud agent.
+    monkeypatch.setattr(_gwmod, "load_routes", lambda conn: {
+        "agent": "openai/gpt-4o", "chat": "mlx/qwen-local"})
+    resolved2 = ni_flow._resolve_flow_model(store)
+    assert resolved2 == "mlx/qwen-local", f"fallback stays local-first; got {resolved2!r}"
 
 
 def test_c1_no_placeholder_grep_in_source() -> None:

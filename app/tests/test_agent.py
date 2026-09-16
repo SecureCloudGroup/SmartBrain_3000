@@ -212,17 +212,20 @@ def test_extract_text_tool_call_preserves_url_arg() -> None:
     assert len(out) == 1 and json.loads(out[0]["function"]["arguments"])["url"] == "https://example.com/page"
 
 
-def test_function_keyed_tool_blob_gets_guidance_notice(monkeypatch) -> None:
-    # Qwen2.5-Coder-style leak: a {"function": ..., "arguments": ...} blob ("function"
-    # instead of "name", so unrecoverable). The reply is kept but a guidance notice is
-    # appended so the user blames the model, not the app.
+def test_function_keyed_tool_blob_is_recovered_and_runs(monkeypatch) -> None:
+    # P0 (2026-09-16): the Qwen2.5-Coder-style {"function": ..., "arguments": ...}
+    # dialect is now RECOVERED and executed instead of shown with a guidance
+    # notice — an UNKNOWN tool name still falls through to the notice path.
     ctx, audit, approvals = _wired()
     blob = '```json\n{"function": "read_document", "arguments": {"doc_id": "1"}}\n```'
-    _script(monkeypatch, [_text(blob)])
+    recovered = agent._extract_text_tool_calls(blob)
+    assert len(recovered) == 1
+    assert recovered[0]["function"]["name"] == "read_document"
+    unknown = '```json\n{"function": "no_such_tool_xyz", "arguments": {}}\n```'
+    _script(monkeypatch, [_text(unknown)])
     r = _run(ctx, audit, approvals)
     assert r["status"] == "complete"
-    assert r["message"].startswith(blob)  # original reply preserved
-    assert "Settings → Model routing" in r["message"]  # guidance appended
+    assert "Settings → Model routing" in r["message"]  # unknown tool keeps the notice
 
 
 def test_normal_prose_gets_no_tool_notice(monkeypatch) -> None:
@@ -1585,3 +1588,58 @@ def test_valid_create_ni_item_still_parks_as_before(monkeypatch) -> None:
     )
     assert r["status"] == "awaiting_approval", "a valid draft still parks"
     assert [p["tool"] for p in approvals.list_pending()] == ["create_ni_item"]
+
+
+# --- P0 NI-Foreman hygiene (field fabrication incident, 2026-09-16) -----------
+
+_FABRICATED_REPLY = '''On it! Starting the NI flow for your NVDA stock tile.
+
+```json
+{"name": "start_ni_flow", "arguments": {"request": "Get stock price for NVDA every 28 minutes"}}
+```
+
+### Tool result
+```json
+{"state": "live", "item_id": "ni_fHbxpIQxz0NzL6wC5S1M", "message": "Item is now live"}
+```
+
+Your NVDA Stock Quote tile is live!'''
+
+
+def test_text_probe_flags_the_field_fabrication_reply() -> None:
+    """The exact field transcript shape (prose-led, fenced call, fabricated
+    '### Tool result') must divert to run_turn — never finalize as prose."""
+    assert agent.text_tool_probe(_FABRICATED_REPLY) is True
+    # An ordinary prose answer never trips the probe.
+    assert agent.text_tool_probe("NVDA closed at $211.62 today, up 0.3%.") is False
+    # Prose that merely MENTIONS the words doesn't trip the sealed-marker arm.
+    assert agent.text_tool_probe(
+        "A scheduled item is a recurring run; tool results show in Activity.") is False
+
+
+def test_extract_recovers_the_fenced_call_from_mixed_prose() -> None:
+    """Recovery finds the KNOWN-tool call in the fabricated reply and skips the
+    fake result blob (no name/arguments pair)."""
+    calls = agent._extract_text_tool_calls(_FABRICATED_REPLY)
+    assert len(calls) == 1
+    assert calls[0]["function"]["name"] == "start_ni_flow"
+
+
+def test_extract_accepts_alternate_spellings() -> None:
+    """P0: 'function'/'parameters' spellings recover too (Qwen-coder dialect)."""
+    reply = '```json\n{"function": "list_ni_items", "parameters": {}}\n```'
+    calls = agent._extract_text_tool_calls(reply)
+    assert len(calls) == 1 and calls[0]["function"]["name"] == "list_ni_items"
+
+
+def test_sanitize_sealed_markers_excises_visibly() -> None:
+    """Model-authored sealed vocabulary renders as a visible excision, with the
+    fabricated payload block dropped alongside its heading."""
+    out = agent.sanitize_sealed_markers(_FABRICATED_REPLY)
+    assert "[unverified model-authored status block removed]" in out
+    assert "### Tool result" not in out
+    assert "ni_fHbxpIQxz0NzL6wC5S1M" not in out, "the fake payload must go with the heading"
+    assert "Your NVDA Stock Quote tile is live!" in out  # ordinary prose survives
+    # Untouched content passes through byte-identical.
+    plain = "Just a normal answer.\n\nWith two paragraphs."
+    assert agent.sanitize_sealed_markers(plain) == plain

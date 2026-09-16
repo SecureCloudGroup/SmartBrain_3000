@@ -1405,3 +1405,30 @@ fillable params) matches only on a DISTINCTIVE title word (generic overlap —
 "price", "rate" — can never elect Bitcoin for "Google stock"; the field run
 sealed exactly that card), and the ticker bump applies only to recipes with
 a ``symbol`` param.
+
+**NI Foreman P0 — chat-transport hygiene (2026-09-16, the fabrication
+incident)**. Field: a cloud model wrote fenced tool calls AND fabricated
+"### Tool result" blocks as prose; the SPA's default streaming path finalized
+it verbatim (its only tool detection was the reply's FIRST character), zero
+executions, and the user was told a card was live that never existed.
+Platform fixes (benefit every tool, not just NI):
+- The streaming route watches the growing tail for tool/fabrication
+  vocabulary mid-stream (stops emitting, swallows to end), probes the FINAL
+  text with ``agent.text_tool_probe`` before finalizing as prose, and on any
+  hit diverts to run_turn with the EXACT captured reply primed — never a
+  resample (the old suppress-fallback could produce a materially different
+  second answer). The client already discards the partial draft on pending.
+- ``agent.sanitize_sealed_markers``: model-authored sealed-channel vocabulary
+  ("### Tool result", "### Scheduled Item") is excised VISIBLY
+  ("[unverified model-authored status block removed]", fabricated payload
+  block dropped with its heading) at every run_turn return site and the
+  stream's done frame. Code-authored channels keep the truth monopoly.
+- Text-call recovery accepts every observed spelling ("name"/"function"/
+  "tool" × "arguments"/"parameters"/"args"), known-tool gate unchanged.
+- Flow step hygiene: temperature pinned 0 (non-claudecode), timeout 60s→300s
+  (cold-local-load parity), and an EXPLICIT ni route now wins even when cloud
+  (local preference applies only to the fallback path).
+This is P0 of the NI Foreman redesign (docs/internal/ni-cases.md companion;
+operator-ruled manager/step-agent architecture): P1 = /ni composer intake,
+P3 = complete card surfaces (source-pick, edit), P2 = NI write tools leave
+the model registry (chat keeps read + run-now).

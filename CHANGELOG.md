@@ -11,6 +11,20 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Fixed
+- **Assistants can no longer fake actions in chat.** A model that printed
+  tool calls as text — and then wrote its own fake "results" — could sail
+  straight to your screen through the streaming chat path, announcing work
+  that never happened. Streamed replies are now inspected for tool calls and
+  for imitations of SmartBrain's own status messages: real calls get executed
+  properly (using the exact reply already received — no silent re-ask), and
+  imitation status blocks are visibly removed rather than rendered as if the
+  system had said them. More tool-call dialects from local models are now
+  understood and executed instead of erroring.
+- Neural Interface engine hygiene: its model steps now pin deterministic
+  sampling, get the same cold-start time budget as every other background
+  task, and an explicitly configured NI model is always honored.
+
 ## [0.17.0] - 2026-09-16
 
 ### Fixed
