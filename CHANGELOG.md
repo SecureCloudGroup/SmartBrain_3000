@@ -11,6 +11,27 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Fixed
+- **Neural Interface: the GOOG-that-showed-NiSource bug.** "create new NI item
+  … GOOG" filled the ticker slot with "NI" (the product's own name!) and the
+  card faithfully showed NiSource's real quote. Product words can no longer be
+  mistaken for tickers — and, more fundamentally, the source-approval card now
+  shows the **exact filled URL** ("symbol=GOOG") and the values that will be
+  used, sealed at approval time, so a wrong fill is visible before you tap.
+- **Your API key is reused.** A new card that needs a key for a provider you
+  already gave one to (same host, same key name) picks it up automatically —
+  copied to the new card, noted in its history — instead of asking again.
+- Cards no longer show "creation didn't finish" while the flow is actually
+  waiting for your source approval, and "Finnhub API key key" reads correctly.
+- The Finnhub quote source now includes the day's **open**, so only close and
+  volume remain outside the free endpoint.
+
+### Changed
+- **Neural Interface board polish.** Cards size to their content (no more tall
+  empty middles), every card shows its cadence and freshness ("every 21m ·
+  just now"), and the footer condenses to History · Run now · a small ⋯ menu
+  holding Pause, Repair settings, and Delete.
+
 ## [0.18.0] - 2026-09-16
 
 ### Added

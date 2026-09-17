@@ -103,7 +103,12 @@ _TICKER_STOPWORDS: frozenset[str] = frozenset({
     "AND", "THE", "FOR", "PRO", "PRE", "MAX", "MIN", "USA", "USD", "EUR",
     "GBP", "JPY", "CNY", "HN", "US", "UK", "EU", "OK", "TV", "AM", "PM",
     "ISS", "NASA", "USGS", "SF", "NYC", "LA", "II", "III", "IV", "IX", "XI",
-    "GET", "SET", "PUT", "API", "URL", "JSON", "HTTP", "CSS", "HTML",
+    # W-D (field 2026-09-17): "create new NI item ..." filled symbol=NI — a
+    # REAL NiSource quote rendered on a card titled GOOG. The product's own
+    # vocabulary and request-phrasing tokens can never be tickers.
+    "NI", "API", "KEY", "URL", "JSON", "HTML", "HTTP", "HTTPS", "CSV", "XML",
+    "AI", "LLM", "CLI", "SDK", "APP", "ID", "OHLCV",
+    "GET", "SET", "PUT", "CSS",
 })
 
 # Recipe scoring (§29 source stage): category+keyword scoring, with the ticker
@@ -1318,6 +1323,9 @@ def continue_from_recipe_confirm(store: ni.NIStore, item_id: str,
     # failure degrades to empty slots (the card's Fill affordance asks), never
     # a guessed value, never a raise past the flow boundary.
     param_values: dict = {}
+    sealed_fills = record.get("_fills")
+    if isinstance(sealed_fills, dict):
+        param_values.update(sealed_fills)
     disclosure = record.get("_geocode")
     fills = recipe.get("geocode_fills")
     if isinstance(disclosure, dict) and isinstance(fills, dict) and fills:
@@ -1465,6 +1473,13 @@ def _pause_for_recipe_confirm(store: ni.NIStore, item_id: str, intent: dict,
     uncovered = _uncovered_wants(recipe, intent)
     if uncovered:
         record["_uncovered_wants"] = uncovered[:8]
+    # W-E (field 2026-09-17): SEAL the request-derived param fills at the
+    # pause and show the user the FILLED URL — "symbol=NI" on the consent
+    # card would have exposed the NiSource-for-GOOG bug at a glance. What is
+    # sealed here is exactly what the handoff applies after approval.
+    fills = _preview_recipe_fills(recipe, str(record.get("request") or ""))
+    if fills:
+        record["_fills"] = fills
     _flow_write(store, item_id, record)
     if uncovered:
         _append_note(store, item_id,
@@ -1605,6 +1620,37 @@ def _scene_has_repeat(scene: object) -> bool:
             if isinstance(children, list):
                 stack.extend(children)
     return False
+
+
+def _preview_recipe_fills(recipe: dict, request: str) -> dict:
+    """W-E: the param values ``_fill_recipe_params`` WOULD derive — computed on
+    a throwaway copy at pause time so the consent card can display them and
+    the handoff can apply the sealed values verbatim."""
+    assert isinstance(recipe, dict) and isinstance(request, str), "args required"
+    template = recipe.get("spec_template")
+    if not isinstance(template, dict):
+        return {}
+    probe = json.loads(json.dumps(template))
+    _fill_recipe_params(probe, request)
+    out: dict = {}
+    for name, decl in (probe.get("params") or {}).items():  # bounded
+        if not isinstance(decl, dict) or decl.get("kind") == "secret":
+            continue
+        original = ((template.get("params") or {}).get(name) or {}).get("value")
+        if decl.get("value") not in (None, "", original):
+            out[str(name)] = decl["value"]
+    return out
+
+
+def display_filled_url(url: str, fills: dict) -> str:
+    """W-E display helper: substitute ONLY the sealed fills into a template URL
+    (unfilled slots stay visible as placeholders). Never used for fetching —
+    the sealed template + fills remain the execution authority."""
+    assert isinstance(url, str) and isinstance(fills, dict), "args required"
+    out = url
+    for name, value in fills.items():  # bounded by _MAX_PARAMS
+        out = out.replace("{{param:" + str(name) + "}}", str(value))
+    return out
 
 
 def _fill_recipe_params(spec: dict, request: str) -> None:
@@ -1752,12 +1798,13 @@ def _handoff_from_recipe(store: ni.NIStore, item_id: str, request: str,
     if not isinstance(spec_template, dict):
         return _fail(store, item_id, "assembly", "recipe spec_template missing")
     spec = json.loads(json.dumps(spec_template))
-    _fill_recipe_params(spec, request)
+    # W-E: SEALED values (what the consent card displayed) apply FIRST and are
+    # the authority; the request-derived fill only covers still-empty slots.
     for name, value in (param_values or {}).items():  # bounded by fills size
         decl = (spec.get("params") or {}).get(name)
-        if (isinstance(decl, dict) and decl.get("kind") != "secret"
-                and not str(decl.get("value") or "").strip()):
+        if isinstance(decl, dict) and decl.get("kind") != "secret":
             decl["value"] = value
+    _fill_recipe_params(spec, request)
     spec["title"] = str(intent.get("subject") or spec.get("title") or "New card")[:ni._MAX_TITLE]
     spec["goal"] = request[:ni._MAX_GOAL]
     cadence_raw = intent.get("cadence_minutes")
@@ -1950,6 +1997,16 @@ def _finalize(store: ni.NIStore, item_id: str, spec: dict, preview: dict,
         # user hunting for a key that does not exist.
         if any(isinstance(d, dict) and d.get("kind") == "secret"
                for d in (spec.get("params") or {}).values()):
+            # W-F (field 2026-09-17): before asking for a key the user already
+            # gave another card, REUSE it — host-scoped, copy-based (stored
+            # under THIS item's own key; item-scoping stays intact), journaled.
+            if _try_reuse_credentials(store, item_id, spec):
+                try:
+                    store.commission(item_id)
+                except ValueError as exc:
+                    _append_note(store, item_id, f"commission skipped: {exc}")
+                _transition(store, item_id, "ready", note=note)
+                return _flow_read(store, item_id) or {}
             _append_note(store, item_id, "awaiting_credential: secret param unfilled")
             _transition(store, item_id, "awaiting_credential", note=note)
         else:
@@ -1960,6 +2017,51 @@ def _finalize(store: ni.NIStore, item_id: str, spec: dict, preview: dict,
         return _flow_read(store, item_id) or {}
     _transition(store, item_id, "ready", note=note)
     return _flow_read(store, item_id) or {}
+
+
+def _try_reuse_credentials(store: ni.NIStore, item_id: str, spec: dict) -> bool:
+    """W-F: fill every secret param from another card's SAME-host credential.
+
+    True only when EVERY secret param got a value (all-or-nothing — a card
+    with one reused and one missing key still honestly awaits). Uses the
+    desktop-wired secrets provider; absent provider = no reuse. The copy is
+    stored under this item's own ``ni:<item_id>:<name>`` key with the same
+    host binding, and the reuse is journaled so the card history names it.
+    """
+    assert store is not None and item_id and isinstance(spec, dict), "args required"
+    secrets_store = _resolve_secrets_store()
+    if secrets_store is None:
+        return False
+    source = spec.get("source") or {}
+    url = str(source.get("url") or "")
+    try:
+        from urllib.parse import urlparse
+        host = urlparse(url).hostname or ""
+    except ValueError:
+        return False
+    if not host:
+        return False
+    secret_names = [n for n, d in (spec.get("params") or {}).items()
+                    if isinstance(d, dict) and d.get("kind") == "secret"]
+    if not secret_names:
+        return False
+    for name in secret_names:  # bounded by ni._MAX_PARAMS
+        try:
+            existing = secrets_store.get(f"ni:{item_id}:{name}")
+        except Exception:
+            existing = None
+        if existing:
+            continue  # already present for this item
+        value = ni.find_reusable_credential(secrets_store, str(name), host)
+        if value is None:
+            return False
+        try:
+            ni.put_credential(secrets_store, item_id, str(name), value, host)
+        except Exception:  # store write failed — fall back to asking
+            return False
+        _try_journal(store, item_id, "param_changed",
+                      f"reused your existing {host} key for this card")
+    return True
 
 
 def _landing_state(spec: dict) -> str:
@@ -2119,6 +2221,10 @@ def board_flow_field(store: ni.NIStore, item_id: str) -> dict | None:
     if state == "confirm_source":
         out["source_url"] = str(record.get("source_url") or "")
         out["recipe_title"] = str(record.get("_recipe_title") or "")
+        fills = record.get("_fills")
+        if isinstance(fills, dict) and fills:
+            out["fills"] = {str(k): str(v) for k, v in fills.items()}
+            out["filled_url"] = display_filled_url(out["source_url"], fills)
         geocode = record.get("_geocode")
         if isinstance(geocode, dict):
             out["geocode_query"] = str(geocode.get("query") or "")

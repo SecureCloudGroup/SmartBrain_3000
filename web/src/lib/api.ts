@@ -666,6 +666,11 @@ export interface NiItemFlow {
   // card itself (the chat model is no longer a required relay).
   source_url?: string;
   recipe_title?: string;
+  // W-E (2026-09-17): the request-derived param fills sealed at the pause —
+  // the card shows the FILLED URL ("symbol=GOOG") so a wrong fill is visible
+  // at consent time; what is sealed is exactly what runs after approval.
+  fills?: Record<string, string>;
+  filled_url?: string;
   geocode_query?: string;
   geocode_host?: string;
   not_covered?: string[];

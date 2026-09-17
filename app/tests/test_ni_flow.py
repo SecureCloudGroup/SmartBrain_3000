@@ -1629,3 +1629,77 @@ def test_match_recipe_google_stock_never_elects_a_fixed_subject_recipe() -> None
     fx = ni_flow.match_recipe(catalog, "EUR to USD exchange rate, update hourly",
                                {"wants": ["rate"]})
     assert fx is not None and fx["id"] == "fx-usd-eur"
+
+
+# ---- P1-warts wave (field 2026-09-17) --------------------------------------
+
+def test_ticker_fill_skips_product_vocabulary() -> None:
+    """W-D: 'create new NI item ... GOOG symbol' filled symbol=NI — a REAL
+    NiSource quote rendered on a card titled GOOG. Product/tech tokens can
+    never be tickers; the fill lands on GOOG."""
+    request = "create new NI item to show stock price of GOOG symbol, update every 21 minutes"
+    assert ni_flow._first_ticker(request) == "GOOG"
+    assert ni_flow._first_ticker("get the API KEY for my URL JSON app") is None
+
+
+def test_confirm_pause_seals_fills_and_handoff_applies_them() -> None:
+    """W-E: the pause seals the request-derived fills; the board exposes the
+    FILLED url; the handoff applies the SEALED values (consent-what-runs)."""
+    from smartbrain_3000 import ni_catalog
+    store, _conn = _store()
+    recipe = ni_catalog.get_recipe("stock-quote-finnhub")
+    request = "show stock price of GOOG symbol, update every 21 minutes"
+    item_id = ni_flow.create_shell_item(store, request)
+    ni_flow._pause_for_recipe_confirm(
+        store, item_id,
+        {"subject": "GOOG", "cadence_minutes": 21, "place": None,
+         "wants": ["price"]}, recipe)
+    record = ni_flow._flow_read(store, item_id)
+    assert record["_fills"] == {"symbol": "GOOG"}
+    field = ni_flow.board_flow_field(store, item_id)
+    assert field["fills"] == {"symbol": "GOOG"}
+    assert field["filled_url"].endswith("symbol=GOOG")
+    result = ni_flow.continue_from_recipe_confirm(store, item_id,
+                                                   recipe["url_template"])
+    assert result.get("state") in ("ready", "awaiting_credential")
+    spec = store.get_item(item_id)["spec"]
+    assert spec["params"]["symbol"]["value"] == "GOOG"
+
+
+def test_credential_reuse_fills_same_host_key(monkeypatch) -> None:
+    """W-F: a second keyed card for the SAME host reuses the existing key —
+    copied under the new item's own namespace, journaled — and lands
+    commissioning instead of asking again. A different host never reuses."""
+    from smartbrain_3000 import ni_catalog
+    from smartbrain_3000.secrets import SecretStore
+    from smartbrain_3000.secrets import gen_master_key as _gk
+    store, conn = _store()
+    secrets = SecretStore(conn, _gk())
+    nimod.put_credential(secrets, "11111111-1111-1111-1111-111111111111",
+                           "api_key", "sk-live-abc", "finnhub.io")
+    ni_flow.set_secrets_provider(lambda: secrets)
+    try:
+        recipe = ni_catalog.get_recipe("stock-quote-finnhub")
+        item_id = ni_flow.create_shell_item(store, "MSFT stock price")
+        record = ni_flow._make_record("MSFT stock price", "confirm_source",
+                                       source_url=recipe["url_template"], notes=[])
+        record["_recipe_id"] = "stock-quote-finnhub"
+        record["intent"] = {"subject": "MSFT", "cadence_minutes": 15}
+        record["_fills"] = {"symbol": "MSFT"}
+        ni_flow._flow_write(store, item_id, record)
+        result = ni_flow.continue_from_recipe_confirm(store, item_id,
+                                                       recipe["url_template"])
+        assert result.get("state") == "ready", result
+        item = store.get_item(item_id)
+        assert item["state"] == "commissioning", "reused key skips the ask"
+        import json as _json
+        stored = _json.loads(secrets.get(f"ni:{item_id}:api_key"))
+        assert stored["value"] == "sk-live-abc" and stored["host"] == "finnhub.io"
+        journal = store.read_journal(item_id)
+        assert any("reused your existing finnhub.io key" in e["summary"]
+                   for e in journal)
+        # Different host: never reused.
+        assert nimod.find_reusable_credential(secrets, "api_key",
+                                               "other.example") is None
+    finally:
+        ni_flow.set_secrets_provider(None)

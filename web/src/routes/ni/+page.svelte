@@ -1063,8 +1063,15 @@
                     {item.flow.recipe_title ? `Vetted source: ${item.flow.recipe_title}` : "Source found"}
                   </p>
                   <p style="margin:0 0 var(--s-2); font-size:var(--f-label); word-break:break-all">
-                    Fetches: <strong>{item.flow.source_url}</strong>
+                    Fetches: <strong>{item.flow.filled_url ?? item.flow.source_url}</strong>
                   </p>
+                  {#if item.flow.fills}
+                    <p class="muted" style="margin:0 0 var(--s-2); font-size:var(--f-label)">
+                      {#each Object.entries(item.flow.fills) as [name, value] (name)}
+                        <span style="margin-right: var(--s-3)">{name}: <strong>{value}</strong></span>
+                      {/each}
+                    </p>
+                  {/if}
                   {#if item.flow.geocode_query}
                     <p class="muted" style="margin:0 0 var(--s-2); font-size:var(--f-label)">
                       Also looks up “{item.flow.geocode_query}” via {item.flow.geocode_host} to fill the location.
@@ -1116,7 +1123,7 @@
             <div class="ni-needs-key">
               {#each item.needs_credentials as need (need.name)}
                 <div class="ni-needs-row">
-                  <span class="ni-needs-copy">Needs your <strong>{need.label}</strong> key</span>
+                  <span class="ni-needs-copy">Needs your <strong>{need.label}</strong>{need.label.toLowerCase().endsWith("key") ? "" : " key"}</span>
                   <button
                     class="secondary"
                     disabled={busyId === item.id || credentialFor !== null}
@@ -1146,14 +1153,17 @@
             </div>
           {/if}
 
-          {#if preview && item.shell}
-            <!-- W2 (2026-09-15): a flow shell whose creation never finished must not
-                 offer Activate — the placeholder would run and claim "ok" forever.
-                 The backend refuses the commission too; this copy says what to do. -->
+          {#if preview && item.shell && (!item.flow || item.flow.state === "failed" || item.flow.state === "unsupported")}
+            <!-- W2 (2026-09-15) + W-A (2026-09-17): a flow shell whose creation
+                 never finished must not offer Activate — but this copy showed
+                 even while the flow was PAUSED awaiting the user's Approve tap
+                 (field: it rendered under the consent block and read as a
+                 contradiction). Terminal-or-absent flows only; Retry lives on
+                 the failure block above. -->
             <p class="muted" style="margin:0; font-size:var(--f-label)">
-              Creation didn’t finish — ask in chat to retry it, or delete this card.
+              Creation didn’t finish — retry above, or delete this card.
             </p>
-          {:else if preview}
+          {:else if preview && !item.shell}
             <div class="ni-actions">
               <button
                 disabled={busyId === item.id}
@@ -1192,7 +1202,15 @@
           {/if}
 
           <div class="ni-foot">
-            <span class="muted ni-fresh">{footerFresh(item)}</span>
+            <!-- W-G (2026-09-17): one calm meta line — cadence + freshness —
+                 and a condensed action row (the five-button spread wrapped to
+                 two noisy lines in the field). Rarely-used verbs live in a
+                 native details overflow: zero new state, keyboard accessible. -->
+            <span class="muted ni-fresh">
+              every {item.interval_minutes}m
+              {#if !item.enabled}· paused{/if}
+              · {footerFresh(item)}
+            </span>
             <span class="ni-actions">
               <button
                 class="linklike ni-history"
@@ -1206,24 +1224,26 @@
                 onclick={() => runNow(item)}
                 title="Run now"
               >{busyId === item.id ? "Running…" : "Run now"}</button>
-              <button
-                class="ghost"
-                disabled={busyId === item.id}
-                onclick={() => togglePause(item)}
-                title={item.enabled ? "Pause" : "Resume"}
-              >{item.enabled ? "Pause" : "Resume"}</button>
-              <button
-                class="ghost"
-                disabled={busyId === item.id}
-                onclick={() => openRepair(item)}
-                title="Repair settings — local vs frontier"
-              >Repair settings</button>
-              <button
-                class="ghost"
-                disabled={busyId === item.id}
-                onclick={() => remove(item)}
-                title="Delete"
-              >Delete</button>
+              <details class="ni-more">
+                <summary title="More actions" aria-label="More actions">⋯</summary>
+                <div class="ni-more-menu">
+                  <button
+                    class="ghost"
+                    disabled={busyId === item.id}
+                    onclick={() => togglePause(item)}
+                  >{item.enabled ? "Pause" : "Resume"}</button>
+                  <button
+                    class="ghost"
+                    disabled={busyId === item.id}
+                    onclick={() => openRepair(item)}
+                  >Repair settings</button>
+                  <button
+                    class="ghost ni-danger"
+                    disabled={busyId === item.id}
+                    onclick={() => remove(item)}
+                  >Delete</button>
+                </div>
+              </details>
             </span>
           </div>
         </div>
@@ -1720,6 +1740,10 @@
     grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
     gap: var(--s-3);
     margin: var(--s-4) 0;
+    /* W-G (2026-09-17): cards size to their content instead of stretching to
+       the row's tallest sibling — the field board showed short quote cards
+       with huge empty middles. */
+    align-items: start;
   }
   .ni-card {
     /* Card padding + border come from .card in app.css; we only add layout inside. */
@@ -1770,6 +1794,37 @@
     background: var(--accent-tint);
     border-radius: var(--r-1);
   }
+  .ni-more {
+    position: relative;
+    display: inline-block;
+  }
+  .ni-more > summary {
+    list-style: none;
+    cursor: pointer;
+    padding: 0 var(--s-2);
+    border-radius: var(--r-1);
+    color: var(--muted);
+    line-height: 1.6;
+  }
+  .ni-more > summary::-webkit-details-marker { display: none; }
+  .ni-more > summary:hover { background: var(--bg); }
+  .ni-more[open] > .ni-more-menu {
+    position: absolute;
+    right: 0;
+    bottom: 1.8rem;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 2px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--r-2);
+    padding: var(--s-1);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+    z-index: 5;
+    min-width: 10rem;
+  }
+  .ni-more-menu button { text-align: left; }
   .ni-foot {
     display: flex;
     align-items: center;

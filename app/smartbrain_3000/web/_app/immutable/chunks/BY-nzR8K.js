@@ -1,0 +1,1 @@
+import{Y as e}from"./CVB57I53.js";var t=e({items:[]}),n=0;function r(e,r=`ok`,a=4e3){let o=++n;return t.items.push({id:o,msg:e,kind:r}),a>0&&setTimeout(()=>i(o),a),o}function i(e){let n=t.items.findIndex(t=>t.id===e);n>=0&&t.items.splice(n,1)}export{r as n,t as r,i as t};
