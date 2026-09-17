@@ -711,6 +711,96 @@ def put_credential(request: Request, item_id: str, body: CredentialIn) -> dict:
     return {"ok": True}
 
 
+class IntakeIn(BaseModel):
+    """NI Foreman P1: the /ni composer's request — creation without chat."""
+
+    request: str = Field(min_length=3, max_length=2000)
+    source_url: str | None = Field(default=None, max_length=2000)
+    allow_duplicate: bool = False
+
+
+@router.post("/api/ni/intake")
+def intake(request: Request, body: IntakeIn) -> dict:
+    """NI Foreman P1 (2026-09-16): the composer on /ni — the PRIMARY creation
+    surface. The user's sentence goes straight to the deterministic flow
+    engine: shell card immediately (instant acknowledgment, before any model
+    call), single-flight worker, every subsequent step a card affordance
+    (Approve source / Add key / Fill / Activate / Looks right / Retry). No
+    chat model anywhere in the path — the operator-ruled manager posture.
+
+    Desktop-local (creation is consent-bearing); audited as a user action.
+    ``source_url`` (optional) is the user's own URL — validated for shape here
+    and by netguard at the sampling fetch.
+    """
+    _require_desktop_local(request)
+    store = _store(request)
+    text = body.request.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="request required")
+    source_url = (body.source_url or "").strip() or None
+    if source_url is not None:
+        try:
+            ni._validate_http_json_url_shape(source_url)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=f"source_url: {exc}") from None
+    try:
+        item_id = ni_flow.create_shell_item(store, text,
+                                             allow_duplicate=body.allow_duplicate)
+    except ValueError as exc:  # duplicate title — name the existing card
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    started = ni_flow.start_flow_worker(store, item_id, source_url=source_url)
+    request.app.state.audit.append(
+        "user", "ni_intake", "reviewed", "executed", True,
+        args_summary=tools.summarize({"request": text[:200],
+                                       "source_url": source_url}),
+        result_summary=tools.summarize({"id": item_id, "started": bool(started)}),
+    )
+    return {"id": item_id, "started": bool(started)}
+
+
+@router.post("/api/ni/items/{item_id}/flow/retry")
+def retry_flow(request: Request, item_id: str) -> dict:
+    """NI Foreman P1: the failed-creation card's Retry — re-run the flow with
+    the SAME sealed request (and optionally the same user URL). Allowed only
+    on a shell whose flow ended terminally (failed/unsupported); a healthy or
+    running flow refuses (409). Deterministic: nothing about the request or
+    consent state changes — this is 'try the same thing again', honestly.
+    """
+    _require_desktop_local(request)
+    store = _store(request)
+    item = store.get_item(item_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="item not found")
+    if item["spec"].get("_shell") is not True:
+        raise HTTPException(status_code=409,
+                            detail="retry is for unfinished creations only")
+    record = ni_flow._flow_read(store, item_id) or {}
+    state = str(record.get("state") or "")
+    if state not in ("failed", "unsupported"):
+        raise HTTPException(
+            status_code=409,
+            detail=f"nothing to retry (flow state {state or 'none'!r})")
+    request_text = str(record.get("request") or item["spec"].get("goal") or "")
+    if not request_text:
+        raise HTTPException(status_code=409, detail="flow record lost the request")
+    source_url = record.get("source_url")
+    # A failed SAMPLING url should not silently re-ride a retry that the user
+    # intends as a fresh start — but a user-named URL was their consent, so it
+    # stays. Heuristic: keep the URL only when the failure was NOT at fetch.
+    error = str(record.get("error") or "")
+    keep_url = isinstance(source_url, str) and source_url and \
+        not error.startswith("fetch")
+    ni_flow.clear_flow_slot(store, item_id)
+    started = ni_flow.start_flow_worker(
+        store, item_id, source_url=source_url if keep_url else None)
+    request.app.state.audit.append(
+        "user", "ni_intake_retry", "reviewed", "executed", True,
+        args_summary=tools.summarize({"item_id": item_id}),
+        result_summary=tools.summarize({"started": bool(started)}),
+    )
+    return {"id": item_id, "started": bool(started)}
+
+
 @router.post("/api/ni/items/{item_id}/flow/confirm-source")
 def confirm_flow_source(request: Request, item_id: str) -> dict:
     """Card-consent (2026-09-15): the tile's own [Approve source] tap.

@@ -1087,3 +1087,93 @@ def test_card_consent_routes_409_without_a_pending_confirm(client: TestClient) -
                        headers={"X-SB-Local": "1"}).status_code == 200
     assert client.post(f"/api/ni/items/{iid2}/flow/confirm-source",
                        headers={"X-SB-Local": "1"}).status_code == 409
+
+
+# --- NI Foreman P1: composer intake + retry (2026-09-16) ----------------------
+
+def test_intake_creates_shell_and_starts_worker(client: TestClient,
+                                                 monkeypatch) -> None:
+    """The composer's sentence goes straight to the flow: shell card first
+    (instant acknowledgment), worker spawned, audited as a user action."""
+    from smartbrain_3000 import ni_flow
+    _unlock(client)
+    fired: dict = {}
+    monkeypatch.setattr(ni_flow, "start_flow_worker",
+                        lambda store, iid, **kw: fired.update(id=iid, **kw) or True)
+    r = client.post("/api/ni/intake",
+                    json={"request": "NVDA stock price every 28 minutes"},
+                    headers={"X-SB-Local": "1"})
+    assert r.status_code == 200, r.text
+    iid = r.json()["id"]
+    assert fired["id"] == iid and fired.get("source_url") is None
+    item = client.app.state.ni.get_item(iid)
+    assert item is not None and item["state"] == "draft"
+    assert item["spec"].get("_shell") is True
+    entries = client.get("/api/audit").json()["entries"]
+    assert any(e["tool"] == "ni_intake" for e in entries)
+
+
+def test_intake_duplicate_title_409s_naming_the_card(client: TestClient,
+                                                      monkeypatch) -> None:
+    from smartbrain_3000 import ni_flow
+    _unlock(client)
+    monkeypatch.setattr(ni_flow, "start_flow_worker", lambda *a, **k: True)
+    body = {"request": "the exact same card"}
+    assert client.post("/api/ni/intake", json=body,
+                       headers={"X-SB-Local": "1"}).status_code == 200
+    r = client.post("/api/ni/intake", json=body, headers={"X-SB-Local": "1"})
+    assert r.status_code == 409 and "already exists" in r.json()["detail"]
+    # allow_duplicate opts in, mirroring the flow tools.
+    assert client.post("/api/ni/intake",
+                       json={**body, "allow_duplicate": True},
+                       headers={"X-SB-Local": "1"}).status_code == 200
+
+
+def test_intake_validates_source_url_shape(client: TestClient) -> None:
+    _unlock(client)
+    r = client.post("/api/ni/intake",
+                    json={"request": "watch this", "source_url": "ftp://nope"},
+                    headers={"X-SB-Local": "1"})
+    assert r.status_code == 400 and "source_url" in r.json()["detail"]
+
+
+def test_retry_reruns_a_failed_shell_flow(client: TestClient, monkeypatch) -> None:
+    """Retry re-runs the SAME sealed request; a fetch-class failure drops the
+    URL (fresh source resolution), a running/healthy flow refuses."""
+    from smartbrain_3000 import ni_flow
+    _unlock(client)
+    store = client.app.state.ni
+    fired: dict = {}
+    monkeypatch.setattr(ni_flow, "start_flow_worker",
+                        lambda s, iid, **kw: fired.update(id=iid, **kw) or True)
+    iid = client.post("/api/ni/intake", json={"request": "retry me please"},
+                      headers={"X-SB-Local": "1"}).json()["id"]
+    # Running flow (state intent) → 409.
+    assert client.post(f"/api/ni/items/{iid}/flow/retry",
+                       headers={"X-SB-Local": "1"}).status_code == 409
+    # Terminal fetch failure → retry WITHOUT the url.
+    ni_flow._fail(store, iid, "fetch", "sample fetch failed: FetchError")
+    record = ni_flow._flow_read(store, iid)
+    record["source_url"] = "https://query1.finance.yahoo.com/bad"
+    ni_flow._flow_write(store, iid, record)
+    fired.clear()
+    r = client.post(f"/api/ni/items/{iid}/flow/retry", headers={"X-SB-Local": "1"})
+    assert r.status_code == 200, r.text
+    assert fired["id"] == iid and fired.get("source_url") is None
+    # Terminal non-fetch failure keeps the user's URL.
+    ni_flow._fail(store, iid, "mapping", "mapping stage failed after retry")
+    record = ni_flow._flow_read(store, iid)
+    record["source_url"] = "https://api.example.com/mine"
+    ni_flow._flow_write(store, iid, record)
+    fired.clear()
+    assert client.post(f"/api/ni/items/{iid}/flow/retry",
+                       headers={"X-SB-Local": "1"}).status_code == 200
+    assert fired.get("source_url") == "https://api.example.com/mine"
+
+
+def test_retry_refuses_finished_cards(client: TestClient) -> None:
+    """A finalized (non-shell) card has nothing to retry — remap/fix owns it."""
+    _unlock(client)
+    iid = _create_via_tool(client)
+    r = client.post(f"/api/ni/items/{iid}/flow/retry", headers={"X-SB-Local": "1"})
+    assert r.status_code == 409 and "unfinished" in r.json()["detail"]

@@ -1432,3 +1432,16 @@ This is P0 of the NI Foreman redesign (docs/internal/ni-cases.md companion;
 operator-ruled manager/step-agent architecture): P1 = /ni composer intake,
 P3 = complete card surfaces (source-pick, edit), P2 = NI write tools leave
 the model registry (chat keeps read + run-now).
+
+**NI Foreman P1 — the composer (2026-09-16)**: creation without chat.
+``POST /api/ni/intake {request, source_url?, allow_duplicate?}``
+(desktop-local, audited) = the /ni composer's submit: shell card FIRST
+(instant acknowledgment, before any model call), then the standard
+single-flight flow worker; every later step is a card affordance. Duplicate
+titles 409 naming the existing card; a user-supplied source_url is
+shape-validated here and netguard-fetched at sampling as always.
+``POST /api/ni/items/{id}/flow/retry`` re-runs a TERMINALLY failed shell's
+flow with the same sealed request — a fetch-class failure drops the failed
+URL (fresh source resolution); any other failure keeps the user's URL
+(their consent). Running flows and finalized cards refuse (409). The board
+copy and empty state now point at the composer, not chat.
