@@ -1464,3 +1464,39 @@ creations surfaced five refinements:
   Finnhub recipe now serves ``open``.
 - W-G board polish: grid aligns start; cadence+freshness meta line; footer
   condensed with a native details overflow for Pause/Repair/Delete.
+
+**NI Foreman P2 — capability deletion (2026-09-17)**: the model registry
+keeps exactly four NI tools — ``list_ni_items`` / ``read_ni_item`` /
+``list_ni_catalog`` (OBSERVE) and ``run_ni_item_now`` (REVIEWED egress) —
+and ``NI_WRITE_TOOLS`` shrinks to ``{run_ni_item_now}``. Every other NI
+tool (create/update/delete/set_enabled, the flow trio, remap, derive,
+spec-guide) left the registry: a fabricated call now has NO executor — the
+loop answers ``cannot run tool '<name>'`` inline, nothing parks, and the
+turn continues (pinned in test_agent). The handlers survive as
+``tools.INTERNAL_NI_TOOLS`` (name → handler) +
+``tools.INTERNAL_NI_PREVALIDATE`` (name → prevalidate), the in-process/test
+factory the routes and suites drive — models cannot reach either. The
+retired names also left ``_OBSERVE_READONLY``. Chat's state-literacy texts
+now speak card language (Approve source / Fill / Fix / the composer) —
+chat reads and explains; the NI page owns every write.
+
+**NI Foreman P3 — complete card surfaces (2026-09-17)**: the last chat-only
+moments become card affordances, all desktop-local + audited:
+- ``source`` pause: ``board_flow_field`` now carries ``suggestions`` from
+  ``ni_flow.suggest_recipes`` (deterministic scorer over the signed catalog,
+  subject-precision gate, top 3, display-filled URLs) and the card renders
+  vetted picks + a paste-a-URL form. ``POST .../flow/pick-recipe`` routes a
+  tap into the STANDARD confirm_source pause (sealed intent + recipe; the
+  Approve-source card takes over — no fetch on the tap); ``POST
+  .../flow/pick-source`` resumes sampling with the user's pasted URL (their
+  paste is the consent; shape-validated here, netguard at fetch, 409 unless
+  paused at ``source``).
+- ``POST .../flow/fix`` = the card's Fix button on failing/broken/degraded
+  cards: ``ni_flow.begin_remap`` (shared entry with the retired chat tool)
+  re-enters sampling against the item's OWN frozen URL — http_json only,
+  unfilled params refuse, ``_remap`` record, ValueError guidance surfaces
+  as 409.
+- Edit modal on the card's ⋯ menu: PATCH gains ``title`` (≤300; sealed spec
+  rewrite, attestations preserved, journaled "renamed to …") and
+  ``interval_minutes`` (1..10080; operational cadence — attestations
+  preserved, store floor re-clamps, journaled).

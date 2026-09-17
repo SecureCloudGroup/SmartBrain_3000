@@ -321,7 +321,7 @@ def test_flow_resume_via_tool_completes(monkeypatch) -> None:
                          source_url=source_url)
         return True
     monkeypatch.setattr(ni_flow, "start_flow_worker", _sync_worker)
-    out = tmod.get_tool("resume_ni_flow").handler(
+    out = tmod.INTERNAL_NI_TOOLS["resume_ni_flow"](
         ctx, {"item_id": item_id,
               "source_url": "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd"})
     assert out["started"] is True
@@ -461,12 +461,12 @@ def test_worker_bounded_concurrency() -> None:
 # ---- tool surface + door closure ----------------------------------------
 
 def test_start_ni_flow_tool_registers_write_egress() -> None:
-    """The tool is REVIEWED, egress=True, and joins NI_WRITE_TOOLS / UNATTENDED_NEVER_AUTO."""
-    tool = tools.get_tool("start_ni_flow")
-    assert tool is not None
-    assert tool.tier is tools.Tier.REVIEWED and tool.egress is True
-    assert "start_ni_flow" in tools.NI_WRITE_TOOLS
-    assert "start_ni_flow" in tools.UNATTENDED_NEVER_AUTO
+    """NI Foreman P2: start_ni_flow (like every NI write tool) is NOT in the
+    model registry — a fabricated call has no executor. The internal factory
+    keeps the handler for in-process callers."""
+    assert tools.get_tool("start_ni_flow") is None
+    assert "start_ni_flow" in tools.INTERNAL_NI_TOOLS
+    assert "start_ni_flow" not in {t.name for t in tools._TOOLS}
 
 
 def test_start_ni_flow_rejects_bad_url() -> None:
@@ -488,7 +488,7 @@ def test_start_ni_flow_creates_shell_and_flow_record(monkeypatch) -> None:
 
     monkeypatch.setattr(ni_flow, "start_flow_worker", _fake_spawn)
     monkeypatch.setattr(tools, "_FLOW_WAIT_SECONDS", 0.05)
-    out = tools.get_tool("start_ni_flow").handler(
+    out = tools.INTERNAL_NI_TOOLS["start_ni_flow"](
         ctx, {"request": "show me AAPL",
               "source_url": "https://query1.finance.yahoo.com/v8/finance/chart/AAPL"})
     assert out["state"] == "intent" and out["id"]
@@ -509,7 +509,7 @@ def test_update_ni_item_refuses_source_change_on_flow_born(monkeypatch) -> None:
     # ``create_shell_item`` already writes a "created via flow" journal entry.
     assert ni_flow.is_flow_or_recipe_born(store, item_id)
     with pytest.raises(ValueError, match="remap"):
-        tools.get_tool("update_ni_item").handler(
+        tools.INTERNAL_NI_TOOLS["update_ni_item"](
             ctx, {"item_id": item_id,
                   "source": {"type": "model", "instruction": "different"}})
 
@@ -538,7 +538,7 @@ def test_remap_ni_item_re_enters_flow(monkeypatch) -> None:
 
     monkeypatch.setattr(ni_flow, "start_flow_worker", _fake_spawn)
     monkeypatch.setattr(tools, "_FLOW_WAIT_SECONDS", 0.05)
-    out = tools.get_tool("remap_ni_item").handler(ctx, {"item_id": item_id})
+    out = tools.INTERNAL_NI_TOOLS["remap_ni_item"](ctx, {"item_id": item_id})
     # H2 (audit 2026-09-13): remap re-enters at Sampling, never Intent — the
     # tool's returned state reports the true restart stage.
     assert out["state"] == "sampling"
@@ -747,11 +747,11 @@ def test_c3_confirm_tool_resumes_with_that_url() -> None:
     pending_url = record.get("source_url")
     # A mismatched URL refuses (never seals a source the user didn't see).
     with pytest.raises(ValueError, match="does not match"):
-        tmod.get_tool("confirm_ni_flow_source").handler(
+        tmod.INTERNAL_NI_TOOLS["confirm_ni_flow_source"](
             ctx, {"item_id": item_id,
                   "source_url": "https://api.example.com/other"})
     # The correct URL runs the handoff (item lands ready — no secret param).
-    out = tmod.get_tool("confirm_ni_flow_source").handler(
+    out = tmod.INTERNAL_NI_TOOLS["confirm_ni_flow_source"](
         ctx, {"item_id": item_id, "source_url": pending_url})
     assert out["state"] == "ready", f"expected ready; got {out}"
 
@@ -1060,7 +1060,8 @@ def test_create_ni_item_refuses_http_json_at_prevalidate() -> None:
     """D1: an http_json source bounces at propose time with a flow pointer —
     the whole model-authored-external-fetch class closes before any card parks.
     """
-    tool = tools.get_tool("create_ni_item")
+    handler = tools.INTERNAL_NI_TOOLS["create_ni_item"]
+    prevalidate = tools.INTERNAL_NI_PREVALIDATE["create_ni_item"]
     args = {
         "title": "X", "goal": "g",
         "source": {"type": "http_json", "url": "https://api.example.com/q",
@@ -1073,10 +1074,10 @@ def test_create_ni_item_refuses_http_json_at_prevalidate() -> None:
         "preview_payload": {},
     }
     with pytest.raises(ValueError, match="start_ni_flow"):
-        tool.prevalidate(args)
+        prevalidate(args)
     store, _conn = _store()
     with pytest.raises(ValueError, match="start_ni_flow"):
-        tool.handler(tools.ToolContext(ni=store), args)
+        handler(tools.ToolContext(ni=store), args)
 
 
 def test_recipe_tool_is_retired_from_model_registry() -> None:
@@ -1116,7 +1117,7 @@ def test_start_ni_flow_returns_settled_state_when_worker_finishes(monkeypatch) -
         return True
 
     monkeypatch.setattr(ni_flow, "start_flow_worker", _sync_worker)
-    out = tools.get_tool("start_ni_flow").handler(
+    out = tools.INTERNAL_NI_TOOLS["start_ni_flow"](
         ctx, {"request": "watch the example number"})
     assert out["state"] == "confirm_source"
     assert out["source_url"] == "https://api.example.com/vetted"
@@ -1124,17 +1125,20 @@ def test_start_ni_flow_returns_settled_state_when_worker_finishes(monkeypatch) -
 
 
 def test_item_id_shape_prevalidate_bounces_invented_ids() -> None:
-    """D5: a slugged title or non-UUID id bounces at prevalidate on every
-    item-addressed tool — BEFORE any approval card parks."""
-    for name in ("run_ni_item_now", "set_ni_item_enabled", "delete_ni_item",
-                 "read_ni_item", "update_ni_item", "remap_ni_item",
-                 "resume_ni_flow", "confirm_ni_flow_source"):
+    """D5: a slugged title or non-UUID id bounces at prevalidate — kept tools
+    via the registry, retired write tools via the internal prevalidates."""
+    bad = {"item_id": "aapl-quote-every-30m",
+           "source_url": "https://api.example.com/q",
+           "enabled": True}
+    for name in ("run_ni_item_now", "read_ni_item"):
         tool = tools.get_tool(name)
-        assert tool.prevalidate is not None, f"{name} must carry a prevalidate"
+        assert tool is not None and tool.prevalidate is not None, name
         with pytest.raises(ValueError, match="not a card id"):
-            tool.prevalidate({"item_id": "aapl-quote-every-30m",
-                              "source_url": "https://api.example.com/q",
-                              "enabled": True})
+            tool.prevalidate(bad)
+    for name in ("update_ni_item", "remap_ni_item", "resume_ni_flow",
+                 "confirm_ni_flow_source"):
+        with pytest.raises(ValueError, match="not a card id"):
+            tools.INTERNAL_NI_PREVALIDATE[name](bad)
 
 
 def test_item_not_found_names_existing_cards() -> None:
@@ -1466,7 +1470,7 @@ def test_flow_tool_result_carries_not_covered(monkeypatch) -> None:
         return True
 
     monkeypatch.setattr(ni_flow, "start_flow_worker", _sync_worker)
-    out = tools.get_tool("start_ni_flow").handler(
+    out = tools.INTERNAL_NI_TOOLS["start_ni_flow"](
         ctx, {"request": "NVDA price and volume every 30 minutes"})
     assert out["state"] == "confirm_source"
     assert out.get("not_covered") == ["volume"]
@@ -1606,7 +1610,7 @@ def test_remap_tool_refuses_unfilled_params() -> None:
                        "headers": {}}
     store.update_spec(item_id, spec, origin="agent")
     with pytest.raises(ValueError, match="unfilled"):
-        tools.get_tool("remap_ni_item").handler(ctx, {"item_id": item_id})
+        tools.INTERNAL_NI_TOOLS["remap_ni_item"](ctx, {"item_id": item_id})
 
 
 def test_match_recipe_google_stock_never_elects_a_fixed_subject_recipe() -> None:

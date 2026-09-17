@@ -671,6 +671,10 @@ export interface NiItemFlow {
   // at consent time; what is sealed is exactly what runs after approval.
   fills?: Record<string, string>;
   filled_url?: string;
+  // P3 (2026-09-17): the source-pick pause carries ranked vetted suggestions
+  // (deterministic scorer, every category) — the card renders them as taps
+  // routing into the normal Approve-source consent, plus paste-a-URL.
+  suggestions?: { recipe_id: string; title: string; host: string; url: string }[];
   geocode_query?: string;
   geocode_host?: string;
   not_covered?: string[];
@@ -1589,7 +1593,8 @@ export const api = {
       `/api/ni/items/${encodeURIComponent(id)}/commission`,
       { method: "POST" },
     ),
-  niPatch: (id: string, body: { enabled?: boolean; position?: number; display?: NiDisplay }) =>
+  niPatch: (id: string, body: { enabled?: boolean; position?: number; display?: NiDisplay;
+                                 title?: string; interval_minutes?: number }) =>
     req<{ ok: boolean }>(`/api/ni/items/${encodeURIComponent(id)}`, {
       method: "PATCH",
       body: JSON.stringify(body),
@@ -1614,6 +1619,31 @@ export const api = {
       headers: { "x-sb-local": "1" },
       body: JSON.stringify(sourceUrl ? { request, source_url: sourceUrl } : { request }),
     }),
+  // P3 (2026-09-17): the source-pick card's actions — paste-a-URL (the user's
+  // paste is the consent; netguard guards the fetch) and vetted-suggestion tap
+  // (routes into the standard Approve-source consent). Plus the card's Fix
+  // (remap against the card's OWN frozen source) and Edit (title/cadence via
+  // the PATCH surface).
+  niFlowPickSource: (id: string, url: string) =>
+    req<{ ok: boolean; started: boolean }>(
+      `/api/ni/items/${encodeURIComponent(id)}/flow/pick-source`, {
+        method: "POST",
+        headers: { "x-sb-local": "1" },
+        body: JSON.stringify({ url }),
+      }),
+  niFlowPickRecipe: (id: string, recipeId: string) =>
+    req<{ ok: boolean; state: string }>(
+      `/api/ni/items/${encodeURIComponent(id)}/flow/pick-recipe`, {
+        method: "POST",
+        headers: { "x-sb-local": "1" },
+        body: JSON.stringify({ recipe_id: recipeId }),
+      }),
+  niFlowFix: (id: string) =>
+    req<{ ok: boolean; started: boolean }>(
+      `/api/ni/items/${encodeURIComponent(id)}/flow/fix`, {
+        method: "POST",
+        headers: { "x-sb-local": "1" },
+      }),
   niFlowRetry: (id: string) =>
     req<{ id: string; started: boolean }>(
       `/api/ni/items/${encodeURIComponent(id)}/flow/retry`, {

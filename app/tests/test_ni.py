@@ -667,25 +667,29 @@ def test_tick_no_op_when_locked() -> None:
 # --- NI tool registry (Phase 1 wiring) -------------------------------------
 
 def test_ni_tools_registered_with_correct_tiers_and_egress() -> None:
-    """Every NI tool is present, tiered as §9 says, and OBSERVE tools stay non-egress."""
+    """NI Foreman P2: the model registry keeps ONLY the read tools plus
+    run_ni_item_now; every other NI tool is internal-only (no executor for a
+    fabricated call). Kept tools stay tiered as before."""
     from smartbrain_3000 import tools
 
     expected = {
         "list_ni_items": (tools.Tier.OBSERVE, False),
         "read_ni_item": (tools.Tier.OBSERVE, False),
-        "create_ni_item": (tools.Tier.REVIEWED, True),
-        "update_ni_item": (tools.Tier.REVIEWED, True),
-        "set_ni_item_enabled": (tools.Tier.REVIEWED, True),
+        "list_ni_catalog": (tools.Tier.OBSERVE, False),
         "run_ni_item_now": (tools.Tier.REVIEWED, True),
-        "delete_ni_item": (tools.Tier.IRREVERSIBLE, False),
     }
     for name, (tier, egress) in expected.items():
         tool = tools.get_tool(name)
         assert tool is not None, name
         assert tool.tier is tier, f"{name} tier {tool.tier} != {tier}"
         assert tool.egress is egress, f"{name} egress {tool.egress} != {egress}"
-        # closed schema — the whole-registry gate at import already asserts this too
         assert tool.params_schema["additionalProperties"] is False, name
+    for name in ("create_ni_item", "update_ni_item", "delete_ni_item",
+                 "set_ni_item_enabled", "start_ni_flow", "resume_ni_flow",
+                 "confirm_ni_flow_source", "remap_ni_item",
+                 "derive_ni_paths", "read_ni_spec_guide"):
+        assert tools.get_tool(name) is None, f"{name} must NOT be model-reachable"
+        assert name in tools.INTERNAL_NI_TOOLS, f"{name} must stay internal"
 
 
 def test_ni_observe_tools_are_in_the_readonly_allowlist() -> None:
@@ -697,22 +701,16 @@ def test_ni_observe_tools_are_in_the_readonly_allowlist() -> None:
 
 
 def test_ni_write_tools_are_never_auto_in_unattended_turns() -> None:
-    """NI_WRITE_TOOLS ⊆ UNATTENDED_NEVER_AUTO — the scheduler strips them from auto_approve."""
+    """NI_WRITE_TOOLS ⊆ UNATTENDED_NEVER_AUTO — the scheduler strips them from
+    auto_approve. NI Foreman P2 retired every other write tool from the model
+    registry (card buttons + the Foreman own creation/mutation now), so the
+    set holds only the one surviving write tool."""
     from smartbrain_3000 import tools
 
     assert tools.NI_WRITE_TOOLS <= tools.UNATTENDED_NEVER_AUTO
-    # §29 added start_ni_flow / resume_ni_flow / remap_ni_item; C3 audit
-    # 2026-09-13 added confirm_ni_flow_source — same posture (REVIEWED egress,
-    # joins UNATTENDED_NEVER_AUTO, non-rememberable) as the freeform create
-    # tool. One-door law 2026-09-14 RETIRED create_ni_item_from_recipe from
-    # the model registry (recipes ride inside the flow with a confirm pause).
-    assert tools.NI_WRITE_TOOLS == {
-        "create_ni_item",
-        "update_ni_item", "set_ni_item_enabled", "run_ni_item_now",
-        "start_ni_flow", "resume_ni_flow", "confirm_ni_flow_source",
-        "remap_ni_item",
-    }
+    assert tools.NI_WRITE_TOOLS == {"run_ni_item_now"}
     assert "create_ni_item_from_recipe" not in {t.name for t in tools._TOOLS}
+    assert "create_ni_item" not in {t.name for t in tools._TOOLS}
 
 
 def test_ni_tools_are_never_rememberable() -> None:
@@ -747,7 +745,11 @@ def _tool_call(name: str, ctx, args: dict) -> dict:
     from smartbrain_3000 import tools
 
     tool = tools.get_tool(name)
-    return tool.handler(ctx, tools.validate_args(tool, args))
+    if tool is not None:
+        return tool.handler(ctx, tools.validate_args(tool, args))
+    # NI Foreman P2: the write/authoring tools left the model registry; the
+    # suite drives them through the INTERNAL factory (handlers re-validate).
+    return tools.INTERNAL_NI_TOOLS[name](ctx, args)
 
 
 def _tool_spec_args() -> dict:
@@ -930,14 +932,18 @@ def test_delete_ni_item_cascades() -> None:
 
 
 def test_ni_tools_refuse_when_store_unavailable() -> None:
-    """A locked context (ctx.ni is None) refuses every NI tool cleanly (assert)."""
+    """A locked context (ctx.ni is None) refuses every NI tool cleanly (assert)
+    — registered reads via the registry, retired writes via the internal factory."""
     from smartbrain_3000 import tools
 
     ctx = tools.ToolContext(ni=None)
-    for name in ("list_ni_items", "read_ni_item", "create_ni_item", "update_ni_item",
-                 "set_ni_item_enabled", "run_ni_item_now", "delete_ni_item"):
+    for name in ("list_ni_items", "read_ni_item", "run_ni_item_now"):
         with pytest.raises(AssertionError):
             tools.get_tool(name).handler(ctx, {"item_id": "x"})
+    for name in ("create_ni_item", "update_ni_item", "set_ni_item_enabled",
+                 "delete_ni_item"):
+        with pytest.raises(AssertionError):
+            tools.INTERNAL_NI_TOOLS[name](ctx, {"item_id": "x"})
 
 
 # --- audit-finding regression tests ---------------------------------------
@@ -3993,12 +3999,9 @@ def test_L9_delete_route_removes_item_scoped_secret_keys() -> None:
                     "preview_payload": {"text": "preview"},
                     "draft": True,
                 }
-                r = client.post("/api/tools/invoke",
-                                 json={"name": "create_ni_item", "args": spec_body})
-                pid = r.json()["pending_id"]
-                approve = client.post(f"/api/agent/pending/{pid}/approve",
-                                       json={"confirm_tool": "create_ni_item"})
-                iid = approve.json()["result"]["id"]
+                from smartbrain_3000 import tools
+                ctx = tools.ToolContext(ni=client.app.state.ni)
+                iid = tools.INTERNAL_NI_TOOLS["create_ni_item"](ctx, spec_body)["id"]
                 client.put(f"/api/ni/items/{iid}/credential",
                             json={"name": "api_key", "value": "s3cret",
                                    "host": "api.example.com"},
@@ -4094,24 +4097,22 @@ def test_R3_idle_tick_performs_zero_decrypts(
 # --- S6 field-blocking defect: propose-time validation + spec-guide tool ---
 
 def test_read_ni_spec_guide_registered_as_observe_readonly_no_egress() -> None:
-    """The guide tool is OBSERVE + non-egress + in the read-only allowlist —
-    a write tool couldn't be reached at propose time by the drafting model."""
+    """NI Foreman P2: the guide tool left the model registry with the write
+    tools (the Foreman consumes the grammar in code); the handler survives in
+    the internal factory and the read-only allowlist no longer names it."""
     from smartbrain_3000 import tools
 
-    guide = tools.get_tool("read_ni_spec_guide")
-    assert guide is not None, "read_ni_spec_guide must be registered"
-    assert guide.tier is tools.Tier.OBSERVE, "guide is OBSERVE"
-    assert guide.egress is False, "guide has no egress"
-    assert "read_ni_spec_guide" in tools._OBSERVE_READONLY, (
-        "OBSERVE registration would fail import without membership"
-    )
+    assert tools.get_tool("read_ni_spec_guide") is None
+    assert "read_ni_spec_guide" in tools.INTERNAL_NI_TOOLS
+    assert "read_ni_spec_guide" not in tools._OBSERVE_READONLY
+    assert "derive_ni_paths" not in tools._OBSERVE_READONLY
 
 
 def test_read_ni_spec_guide_returns_the_grammar_text() -> None:
     """Handler ignores ctx, returns the module-level guide string."""
     from smartbrain_3000 import tools
 
-    out = tools.get_tool("read_ni_spec_guide").handler(tools.ToolContext(), {})
+    out = tools.INTERNAL_NI_TOOLS["read_ni_spec_guide"](tools.ToolContext(), {})
     assert isinstance(out, dict) and "guide" in out
     assert out["guide"] == tools._NI_SPEC_GUIDE
     assert "Neural Interface" in out["guide"], "guide text should look like the guide"
@@ -4209,10 +4210,9 @@ def test_prevalidate_bounces_pipeline_path_as_with_guide_pointer() -> None:
     """
     from smartbrain_3000 import tools
 
-    create = tools.get_tool("create_ni_item")
-    assert create.prevalidate is not None, "create_ni_item must carry a prevalidate hook"
+    create_prevalidate = tools.INTERNAL_NI_PREVALIDATE["create_ni_item"]
     with pytest.raises(ValueError) as excinfo:
-        create.prevalidate(_bad_pipeline_path_as_args())
+        create_prevalidate(_bad_pipeline_path_as_args())
     msg = str(excinfo.value)
     assert "pipeline" in msg and "unknown keys" in msg, (
         f"expected the closed-schema message for 'path'/'as', got: {msg!r}"
@@ -4226,9 +4226,9 @@ def test_prevalidate_bounces_invented_pipeline_op_with_guide_pointer() -> None:
     """
     from smartbrain_3000 import tools
 
-    create = tools.get_tool("create_ni_item")
+    create_prevalidate = tools.INTERNAL_NI_PREVALIDATE["create_ni_item"]
     with pytest.raises(ValueError) as excinfo:
-        create.prevalidate(_bad_pipeline_jmespath_args())
+        create_prevalidate(_bad_pipeline_jmespath_args())
     msg = str(excinfo.value)
     assert "must be 'extract', 'transform', or 'llm'" in msg, (
         f"expected the closed-op message for 'jmespath', got: {msg!r}"
@@ -4246,7 +4246,7 @@ def test_prevalidate_bounces_invented_scene_node() -> None:
         args = _tool_spec_args()
         args["scene"] = {"type": bogus, "content": []}
         with pytest.raises(ValueError) as excinfo:
-            tools.get_tool("create_ni_item").prevalidate(args)
+            tools.INTERNAL_NI_PREVALIDATE["create_ni_item"](args)
         msg = str(excinfo.value)
         assert bogus in msg and "read_ni_spec_guide" in msg, (
             f"expected guide-pointed refusal for scene type {bogus!r}, got: {msg!r}"
@@ -4260,7 +4260,7 @@ def test_prevalidate_bounces_display_width_typo() -> None:
     args = _tool_spec_args()
     args["display"] = {"width": "small"}    # real key is "size"
     with pytest.raises(ValueError) as excinfo:
-        tools.get_tool("create_ni_item").prevalidate(args)
+        tools.INTERNAL_NI_PREVALIDATE["create_ni_item"](args)
     msg = str(excinfo.value)
     assert "display" in msg and "read_ni_spec_guide" in msg, (
         f"expected the display-shape refusal, got: {msg!r}"
@@ -4275,7 +4275,7 @@ def test_prevalidate_bounces_bad_preview_payload() -> None:
     # scene $binds "text"; preview is missing it → NIError('extract_miss') at bind time
     args["preview_payload"] = {"nope": "sunny"}
     with pytest.raises(ValueError) as excinfo:
-        tools.get_tool("create_ni_item").prevalidate(args)
+        tools.INTERNAL_NI_PREVALIDATE["create_ni_item"](args)
     msg = str(excinfo.value)
     assert "read_ni_spec_guide" in msg, (
         f"expected the guide pointer on a preview-bind failure, got: {msg!r}"
@@ -4287,17 +4287,16 @@ def test_prevalidate_accepts_a_valid_create_spec() -> None:
     from smartbrain_3000 import tools
 
     # No raise → the hook is transparent for a valid draft.
-    tools.get_tool("create_ni_item").prevalidate(_tool_spec_args())
+    tools.INTERNAL_NI_PREVALIDATE["create_ni_item"](_tool_spec_args())
 
 
 def test_prevalidate_bounces_update_patch_with_bad_pipeline() -> None:
     """update_ni_item's prevalidate refuses a patch whose deep shape is malformed."""
     from smartbrain_3000 import tools
 
-    update = tools.get_tool("update_ni_item")
-    assert update.prevalidate is not None, "update_ni_item must carry a prevalidate hook"
+    update_prevalidate = tools.INTERNAL_NI_PREVALIDATE["update_ni_item"]
     with pytest.raises(ValueError) as excinfo:
-        update.prevalidate({"item_id": "12345678-1234-1234-1234-1234567890ab",
+        update_prevalidate({"item_id": "12345678-1234-1234-1234-1234567890ab",
                              "pipeline": [{"op": "jmespath", "as": "x"}]})
     msg = str(excinfo.value)
     assert "extract" in msg and "read_ni_spec_guide" in msg, (
@@ -4309,7 +4308,7 @@ def test_prevalidate_accepts_bare_update_patch() -> None:
     """A tiny patch (title-only) has nothing deep to validate — prevalidate passes."""
     from smartbrain_3000 import tools
 
-    tools.get_tool("update_ni_item").prevalidate(
+    tools.INTERNAL_NI_PREVALIDATE["update_ni_item"](
         {"item_id": "12345678-1234-1234-1234-1234567890ab", "title": "Renamed"})
 
 

@@ -20,6 +20,7 @@ from fastapi.testclient import TestClient
 from smartbrain_3000 import db as dbmod
 from smartbrain_3000 import ni as nimod
 from smartbrain_3000 import scheduler as sched
+from smartbrain_3000 import tools
 from smartbrain_3000.scheduler import ScheduleStore
 from smartbrain_3000.secrets import gen_master_key
 
@@ -465,14 +466,9 @@ def _seed_failing_with_proposal(client: TestClient) -> str:
         "preview_payload": {"note": "preview"},
         "draft": True,
     }
-    r = client.post("/api/tools/invoke", json={"name": "create_ni_item",
-                                                "args": body})
-    assert r.status_code == 200 and r.json()["status"] == "awaiting_approval", r.text
-    pid = r.json()["pending_id"]
-    approve = client.post(f"/api/agent/pending/{pid}/approve",
-                          json={"confirm_tool": "create_ni_item"})
-    assert approve.status_code == 200, approve.text
-    iid = approve.json()["result"]["id"]
+    # NI Foreman P2: creation left the model registry — internal factory.
+    _ctx = tools.ToolContext(ni=client.app.state.ni)
+    iid = tools.INTERNAL_NI_TOOLS["create_ni_item"](_ctx, body)["id"]
 
     store = client.app.state.ni
     current = store.get_item(iid)["spec"]
@@ -826,16 +822,12 @@ def test_D2a_update_ni_item_tool_lands_repair_policy_through_handler() -> None:
         "preview_payload": {"note": "preview"},
         "draft": True,
     }
-    create_tool = tools.get_tool("create_ni_item")
-    created = create_tool.handler(ctx, tools.validate_args(create_tool, create_args))
-    iid = created["id"]
+    iid = tools.INTERNAL_NI_TOOLS["create_ni_item"](ctx, create_args)["id"]
 
-    update_tool = tools.get_tool("update_ni_item")
-    validated = tools.validate_args(update_tool, {
+    tools.INTERNAL_NI_TOOLS["update_ni_item"](ctx, {
         "item_id": iid,
         "repair_policy": {"l1": True, "l2_frontier": True},
     })
-    update_tool.handler(ctx, validated)
 
     after = ctx.ni.get_item(iid)
     assert after["spec"]["repair_policy"] == {"l1": True, "l2_frontier": True}

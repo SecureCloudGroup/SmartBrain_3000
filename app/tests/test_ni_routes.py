@@ -12,7 +12,7 @@ from collections.abc import Iterator
 import pytest
 from fastapi.testclient import TestClient
 
-from smartbrain_3000 import ni
+from smartbrain_3000 import ni, tools
 
 
 @pytest.fixture()
@@ -58,15 +58,12 @@ def _spec_body(**over) -> dict:
 
 
 def _create_via_tool(client: TestClient, **over) -> str:
-    """Create an NI item through the audited tool chokepoint (parks then approves)."""
+    """Create an NI item via the INTERNAL factory (NI Foreman P2: creation left
+    the model registry — the composer/card routes are the user surfaces, and
+    the suite fabricates items in-process)."""
     body = _spec_body(**over)
-    r = client.post("/api/tools/invoke", json={"name": "create_ni_item", "args": body})
-    assert r.status_code == 200 and r.json()["status"] == "awaiting_approval", r.text
-    pid = r.json()["pending_id"]
-    approve = client.post(f"/api/agent/pending/{pid}/approve",
-                          json={"confirm_tool": "create_ni_item"})
-    assert approve.status_code == 200, approve.text
-    return approve.json()["result"]["id"]
+    ctx = tools.ToolContext(ni=client.app.state.ni)
+    return tools.INTERNAL_NI_TOOLS["create_ni_item"](ctx, body)["id"]
 
 
 # --- lock gate ------------------------------------------------------------
@@ -367,11 +364,8 @@ def test_commission_route_refuses_when_secret_param_unfilled(client: TestClient)
                 "url": "https://api.example.com/q",
                 "headers": {"X-Api-Key": {"$secret": "ni:self:api_key"}}},
     )
-    r = client.post("/api/tools/invoke", json={"name": "create_ni_item", "args": body})
-    pid = r.json()["pending_id"]
-    approve = client.post(f"/api/agent/pending/{pid}/approve",
-                          json={"confirm_tool": "create_ni_item"})
-    iid = approve.json()["result"]["id"]
+    ctx = tools.ToolContext(ni=client.app.state.ni)
+    iid = tools.INTERNAL_NI_TOOLS["create_ni_item"](ctx, body)["id"]
     # No credential entered yet — commission refuses with 409.
     r2 = client.post(f"/api/ni/items/{iid}/commission")
     assert r2.status_code == 409 and "secret" in r2.json()["detail"]
@@ -641,12 +635,16 @@ def test_update_ni_item_source_change_deletes_image_slot(
                                                 "instruction": "hi"},
                                     "scene": scene_text_only,
                                     "preview_payload": {"text": "preview"}}})
-    assert r.status_code == 200 and r.json()["status"] == "awaiting_approval", r.text
-    pid = r.json()["pending_id"]
-    approve = client.post(f"/api/agent/pending/{pid}/approve",
-                          json={"confirm_tool": "update_ni_item"})
-    assert approve.status_code == 200, approve.text
-    assert approve.json()["result"]["state_reset"] == "commissioning"
+    # NI Foreman P2: update left the registry — invoke 404s; drive the update
+    # via the internal factory (the state_reset contract is unchanged).
+    assert r.status_code == 404
+    ctx = tools.ToolContext(ni=client.app.state.ni)
+    out = tools.INTERNAL_NI_TOOLS["update_ni_item"](ctx, {
+        "item_id": iid,
+        "source": {"type": "model", "instruction": "hi"},
+        "scene": scene_text_only,
+        "preview_payload": {"text": "preview"}})
+    assert out["state_reset"] == "commissioning"
     # Image slot is gone; route now 404s until the next successful run seals bytes.
     assert client.get(f"/api/ni/items/{iid}/image").status_code == 404
 
@@ -762,11 +760,8 @@ def test_S5_commission_refuses_when_template_placeholder_has_no_credential(
                  "url": "https://api.example.com/q",
                  "headers": {"X-Api-Key": {"$secret": "ni:self:api_key"}}},
     )
-    r = client.post("/api/tools/invoke", json={"name": "create_ni_item", "args": body})
-    pid = r.json()["pending_id"]
-    approve = client.post(f"/api/agent/pending/{pid}/approve",
-                          json={"confirm_tool": "create_ni_item"})
-    iid = approve.json()["result"]["id"]
+    ctx = tools.ToolContext(ni=client.app.state.ni)
+    iid = tools.INTERNAL_NI_TOOLS["create_ni_item"](ctx, body)["id"]
     # No credential entered yet — placeholder must be treated as unfilled.
     r2 = client.post(f"/api/ni/items/{iid}/commission")
     assert r2.status_code == 409 and "secret" in r2.json()["detail"], r2.text
@@ -1177,3 +1172,165 @@ def test_retry_refuses_finished_cards(client: TestClient) -> None:
     iid = _create_via_tool(client)
     r = client.post(f"/api/ni/items/{iid}/flow/retry", headers={"X-SB-Local": "1"})
     assert r.status_code == 409 and "unfinished" in r.json()["detail"]
+
+
+# --- P3 card affordances: pick-source / pick-recipe / fix / rename+cadence --
+
+def _seed_source_pause(client: TestClient, monkeypatch, request_text: str) -> str:
+    """Intake a shell (worker stubbed) and force its flow to the ``source``
+    pick pause — the state the P3 card affordances operate on."""
+    from smartbrain_3000 import ni_flow
+    monkeypatch.setattr(ni_flow, "start_flow_worker", lambda s, iid, **kw: True)
+    iid = client.post("/api/ni/intake", json={"request": request_text},
+                      headers={"X-SB-Local": "1"}).json()["id"]
+    store = client.app.state.ni
+    record = ni_flow._flow_read(store, iid)
+    record["state"] = "source"
+    ni_flow._flow_write(store, iid, record)
+    return iid
+
+
+def test_pick_source_resumes_pause_with_user_pasted_url(
+        client: TestClient, monkeypatch) -> None:
+    """P3: the card's paste-a-URL form — the user's paste IS the consent; the
+    worker resumes sampling against exactly that URL."""
+    from smartbrain_3000 import ni_flow
+    _unlock(client)
+    iid = _seed_source_pause(client, monkeypatch, "show my metric")
+    fired: dict = {}
+    monkeypatch.setattr(ni_flow, "start_flow_worker",
+                        lambda s, i, **kw: fired.update(id=i, **kw) or True)
+    r = client.post(f"/api/ni/items/{iid}/flow/pick-source",
+                    json={"url": "https://api.example.com/metric.json"},
+                    headers={"X-SB-Local": "1"})
+    assert r.status_code == 200 and r.json()["started"] is True, r.text
+    assert fired["id"] == iid
+    assert fired["source_url"] == "https://api.example.com/metric.json"
+
+
+def test_pick_source_rejects_bad_url_shape_and_wrong_state(
+        client: TestClient, monkeypatch) -> None:
+    """P3: a non-https / non-URL paste bounces 400 with the validator text;
+    any flow state other than ``source`` refuses 409 (nothing to pick)."""
+    from smartbrain_3000 import ni_flow
+    _unlock(client)
+    iid = _seed_source_pause(client, monkeypatch, "show my metric")
+    r = client.post(f"/api/ni/items/{iid}/flow/pick-source",
+                    json={"url": "ftp://example.com/x"},
+                    headers={"X-SB-Local": "1"})
+    assert r.status_code == 400 and r.json()["detail"].startswith("url:"), r.text
+    store = client.app.state.ni
+    record = ni_flow._flow_read(store, iid)
+    record["state"] = "sampling"
+    ni_flow._flow_write(store, iid, record)
+    r2 = client.post(f"/api/ni/items/{iid}/flow/pick-source",
+                     json={"url": "https://api.example.com/metric.json"},
+                     headers={"X-SB-Local": "1"})
+    assert r2.status_code == 409 and "no source pick pending" in r2.json()["detail"]
+
+
+def test_pick_recipe_routes_into_confirm_source_pause(
+        client: TestClient, monkeypatch) -> None:
+    """P3: tapping a vetted suggestion never fetches — it lands the standard
+    Approve-source consent pause carrying the recipe's exact URL."""
+    from smartbrain_3000 import ni_flow
+    _unlock(client)
+    iid = _seed_source_pause(client, monkeypatch, "usd to eur rate")
+    # Unknown recipe id → 404, pause untouched (probe BEFORE the real pick —
+    # a successful pick consumes the ``source`` pause).
+    r0 = client.post(f"/api/ni/items/{iid}/flow/pick-recipe",
+                     json={"recipe_id": "no-such-recipe"},
+                     headers={"X-SB-Local": "1"})
+    assert r0.status_code == 404
+    r = client.post(f"/api/ni/items/{iid}/flow/pick-recipe",
+                    json={"recipe_id": "fx-usd-eur"},
+                    headers={"X-SB-Local": "1"})
+    assert r.status_code == 200 and r.json()["state"] == "confirm_source", r.text
+    record = ni_flow._flow_read(client.app.state.ni, iid)
+    assert record["state"] == "confirm_source"
+    assert "frankfurter.app" in str(record.get("source_url") or "")
+
+
+def test_board_source_pause_exposes_deterministic_suggestions(
+        client: TestClient, monkeypatch) -> None:
+    """P3: while paused at ``source`` the board row carries the scorer's
+    vetted suggestions (id/title/host/url) so the card renders them from code
+    alone — no chat model relay."""
+    _unlock(client)
+    iid = _seed_source_pause(client, monkeypatch, "bitcoin price in usd")
+    rows = client.get("/api/ni/board").json()["items"]
+    row = next(x for x in rows if x["id"] == iid)
+    suggestions = row["flow"]["suggestions"]
+    assert suggestions, "the pick pause must surface vetted suggestions"
+    assert {"recipe_id", "title", "host", "url"} <= set(suggestions[0])
+    assert any(s["recipe_id"] == "crypto-price-btc-usd" for s in suggestions)
+
+
+def test_fix_route_starts_remap_against_own_frozen_source(
+        client: TestClient, monkeypatch) -> None:
+    """P3: the card's Fix re-enters the flow at sampling with a ``_remap``
+    record bound to the item's OWN frozen URL — never a new host."""
+    from smartbrain_3000 import ni_flow
+    _unlock(client)
+    # One-door law: the create factory refuses http_json (flow-born only), so
+    # flip the finalized spec at store level — exactly what a flow finalize
+    # writes.
+    iid = _create_via_tool(client)
+    store = client.app.state.ni
+    spec = dict(store.get_item(iid)["spec"])
+    spec["source"] = {"type": "http_json", "url": "https://api.example.com/q"}
+    store.update_spec(iid, spec, origin="user")
+    fired: dict = {}
+    monkeypatch.setattr(ni_flow, "start_flow_worker",
+                        lambda s, i, **kw: fired.update(id=i, **kw) or True)
+    r = client.post(f"/api/ni/items/{iid}/flow/fix", headers={"X-SB-Local": "1"})
+    assert r.status_code == 200 and r.json()["started"] is True, r.text
+    record = ni_flow._flow_read(store, iid)
+    assert record["_remap"] is True and record["state"] == "sampling"
+    assert fired["source_url"] == "https://api.example.com/q"
+
+
+def test_fix_route_409_surfaces_begin_remap_guidance(
+        client: TestClient, monkeypatch) -> None:
+    """P3: begin_remap's refusals (non-http_json shell here) surface as 409
+    with the user-facing guidance, not a 500."""
+    _unlock(client)
+    iid = _seed_source_pause(client, monkeypatch, "fix a shell")
+    r = client.post(f"/api/ni/items/{iid}/flow/fix", headers={"X-SB-Local": "1"})
+    assert r.status_code == 409, r.text
+    assert "http_json" in r.json()["detail"]
+
+
+def test_patch_title_renames_card_and_journals(client: TestClient) -> None:
+    """P3 Edit modal: PATCH title rewrites the sealed spec title (attestations
+    preserved) and journals the rename."""
+    _unlock(client)
+    iid = _create_via_tool(client)
+    r = client.patch(f"/api/ni/items/{iid}", json={"title": "My Renamed Card"})
+    assert r.status_code == 200, r.text
+    item = client.app.state.ni.get_item(iid)
+    assert item["spec"]["title"] == "My Renamed Card"
+    journal = client.app.state.ni.read_journal(iid)
+    assert any("renamed to" in e["summary"] for e in journal)
+    # Pydantic bounds: an over-long title never reaches the store.
+    assert client.patch(f"/api/ni/items/{iid}",
+                        json={"title": "x" * 301}).status_code == 422
+
+
+def test_patch_interval_updates_cadence_and_journals(client: TestClient) -> None:
+    """P3 Edit modal: PATCH interval_minutes updates the sealed cadence
+    (operational field — attestations preserved) and journals it; out-of-range
+    values bounce at the schema."""
+    _unlock(client)
+    iid = _create_via_tool(client)
+    r = client.patch(f"/api/ni/items/{iid}", json={"interval_minutes": 21})
+    assert r.status_code == 200, r.text
+    item = client.app.state.ni.get_item(iid)
+    assert item["spec"]["interval_minutes"] == 21
+    assert item["interval_minutes"] == 21, "plaintext cadence column follows the spec"
+    journal = client.app.state.ni.read_journal(iid)
+    assert any("every 21m" in e["summary"] for e in journal)
+    assert client.patch(f"/api/ni/items/{iid}",
+                        json={"interval_minutes": 0}).status_code == 422
+    assert client.patch(f"/api/ni/items/{iid}",
+                        json={"interval_minutes": 10081}).status_code == 422

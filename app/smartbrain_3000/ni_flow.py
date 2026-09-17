@@ -576,6 +576,40 @@ def _distinctive_title_hit(recipe: dict, request: str, intent: dict) -> bool:
     return False
 
 
+def suggest_recipes(catalog: list[dict], request: str, intent: dict,
+                     top: int = 3) -> list[dict]:
+    """P3 (2026-09-17): ranked catalog candidates for the source-pick CARD.
+
+    The pause exists precisely when ``match_recipe`` cleared nobody — here the
+    same deterministic scorer runs WITHOUT the threshold so the card can offer
+    the closest vetted sources across EVERY category (weather, quakes, fx,
+    crypto, stocks alike — nothing subject-specific), each with its would-be
+    filled URL so the disclosure is concrete. Picking one routes through the
+    normal confirm_source consent; the card also always offers paste-a-URL.
+    """
+    assert isinstance(catalog, list) and isinstance(request, str), "args required"
+    assert isinstance(intent, dict) and top >= 1, "intent + top required"
+    scored: list[tuple[int, dict]] = []
+    for recipe in catalog:  # bounded by ni_catalog._MAX_SOURCES
+        if not isinstance(recipe, dict):
+            continue
+        if not _has_fillable_params(recipe) and                 not _distinctive_title_hit(recipe, request, intent):
+            continue  # the subject-precision gate holds here too
+        scored.append((_score_recipe(recipe, request, intent), recipe))
+    scored.sort(key=lambda pair: -pair[0])
+    out: list[dict] = []
+    for score, recipe in scored[:top]:  # bounded by top
+        url = str(recipe.get("url_template") or "")
+        fills = _preview_recipe_fills(recipe, request)
+        out.append({
+            "recipe_id": str(recipe.get("id") or ""),
+            "title": str(recipe.get("title") or ""),
+            "host": str(recipe.get("host") or ""),
+            "url": display_filled_url(url, fills) if fills else url,
+        })
+    return out
+
+
 def match_recipe(catalog: list[dict], request: str, intent: dict) -> dict | None:
     """§29 source stage: score every catalog entry; ticker heuristic → finance.
 
@@ -2218,6 +2252,16 @@ def board_flow_field(store: ni.NIStore, item_id: str) -> dict | None:
     # tile — the card needs the sealed disclosure verbatim: the exact URL,
     # the optional geocode lookup, and the wants this source cannot serve.
     # The chat model is no longer a required relay for the consent moment.
+    if state == "source":
+        # P3: the pick pause renders its own affordances — vetted suggestions
+        # (deterministic scorer, all categories) + paste-a-URL.
+        intent = record.get("intent") if isinstance(record.get("intent"), dict) else {}
+        try:
+            out["suggestions"] = suggest_recipes(
+                _load_catalog(), str(record.get("request") or ""), intent)
+        except Exception as exc:  # suggestions are best-effort display data
+            log.warning("ni_flow: suggest_recipes failed for %s: %s", item_id, exc)
+            out["suggestions"] = []
     if state == "confirm_source":
         out["source_url"] = str(record.get("source_url") or "")
         out["recipe_title"] = str(record.get("_recipe_title") or "")
@@ -2260,6 +2304,33 @@ def clear_flow_slot(store: ni.NIStore, item_id: str) -> None:
         store.delete_snapshot(item_id, "flow")
     except Exception as exc:  # bookkeeping only
         log.warning("ni_flow: clear_flow_slot failed for %s: %s", item_id, exc)
+
+
+def begin_remap(store: ni.NIStore, item: dict) -> bool:
+    """P3: shared remap entry — the card's Fix button and (until retired) the
+    chat tool both funnel here. Guards: http_json source only, params filled,
+    own frozen URL only. Writes the ``_remap`` record and spawns the worker.
+    Raises ValueError with user-facing guidance on refusal.
+    """
+    assert store is not None and isinstance(item, dict), "args required"
+    source = item["spec"].get("source") or {}
+    if not isinstance(source, dict) or source.get("type") != "http_json":
+        raise ValueError(
+            "Fix re-derives http_json sources only — recreate this card for "
+            "other source types")
+    url = str(source.get("url") or "")
+    if not url:
+        raise ValueError("this card has no source URL to fix against")
+    unfilled = ni.unfilled_referenced_params(item["spec"])
+    if unfilled:
+        raise ValueError(
+            f"fill the card's {unfilled[0]!r} value before fixing")
+    request = str(item["spec"].get("goal") or item["spec"].get("title") or "remap")
+    record = _make_record(request, "sampling", source_url=url,
+                           notes=["remap re-entering flow at sampling"])
+    record["_remap"] = True
+    _flow_write(store, item["id"], record)
+    return start_flow_worker(store, item["id"], source_url=url)
 
 
 def sweep_stranded_flows(store: ni.NIStore) -> int:
