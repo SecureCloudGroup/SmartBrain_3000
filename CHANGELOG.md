@@ -11,6 +11,8 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-09-17
+
 ### Added
 - **Neural Interface: every step now lives on the card.** When SmartBrain
   can't tell where your data should come from, the card itself offers vetted
