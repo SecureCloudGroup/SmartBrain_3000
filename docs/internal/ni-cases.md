@@ -43,7 +43,7 @@ gates AND the pytest suite — see "Adding a case" at the bottom). Status:
 |---|---|---|---|
 | B1 | "days until Christmas" (no literal date) | `unsupported` — computed needs YYYY-MM-DD; chat asks for the date | SHIPPED (xmas-countdown) |
 | B2 | "days until 2026-12-25" | computed source, zero egress, real day count | SHIPPED (pytest) |
-| B3 | "track my custom sensor feed" (no URL, no recipe) | pause at `source` (AWAITING_SOURCE_PICK); chat presents candidates | SHIPPED (no-source-pause) |
+| B3 | "track my custom sensor feed" (no URL, no recipe) | pause at `source`; the CARD renders vetted suggestions + paste-a-URL (P3); chat explains | SHIPPED (no-source-pause + P3 route tests) |
 | B4 | "my router status at http://192.168.1.1/..." | `failed(fetch)` — netguard refuses private ranges; never fetched | SHIPPED (lan-refused) |
 | B5 | "BBC headlines from their RSS feed" (XML endpoint) | `failed(fetch)` — non-JSON body, honest class, no thrash | SHIPPED (xml-not-json) |
 | B6 | a URL that 404s / returns an error body | `failed(fetch)`, one attempt, honest note | SHIPPED (dead-endpoint) |
@@ -57,22 +57,24 @@ gates AND the pytest suite — see "Adding a case" at the bottom). Status:
 
 ## C. Lifecycle — the card exists; the user talks about it
 
-All model-free (scripted through the REAL tool registry) in
-`app/tests/test_ni_lifecycle.py` — the matrix that catches the field pain the
-creation gates can't.
+All model-free in `app/tests/test_ni_lifecycle.py` — the matrix that
+catches the field pain the creation gates can't. Foreman P2 note: the write
+paths these rows exercise now live on the CARD (routes) and in
+`tools.INTERNAL_NI_TOOLS` — chat keeps read + run-now only; a chat "ask" in
+this table means the model explains and points at the card affordance.
 
 | # | Ask | What must happen | Status |
 |---|---|---|---|
 | L1 | "show me AAPL" when an AAPL card exists | duplicate-title guard names the card + points at update | SHIPPED (test_ni_lifecycle.py) |
-| L2 | "make my AAPL card hourly" | update_ni_item cadence-only; state untouched | SHIPPED (test_ni_lifecycle.py) |
-| L3 | "rename it to Apple Stock" | title-only update; state untouched | SHIPPED (test_ni_lifecycle.py) |
-| L4 | "pause / resume the bitcoin card" | set_ni_item_enabled both ways | SHIPPED (test_ni_lifecycle.py) |
+| L2 | "make my AAPL card hourly" | card Edit… → PATCH interval_minutes (attestations preserved); internal update handler still covered | SHIPPED (test_ni_lifecycle.py + P3 route tests) |
+| L3 | "rename it to Apple Stock" | card Edit… → PATCH title (journaled); internal update handler still covered | SHIPPED (test_ni_lifecycle.py + P3 route tests) |
+| L4 | "pause / resume the bitcoin card" | card ⋯ menu → PATCH enabled both ways (tool internal-only since P2) | SHIPPED (test_ni_lifecycle.py) |
 | L5 | "refresh it now" | run_ni_item_now; UUID-shape gate on invented ids | SHIPPED (test_ni_lifecycle.py) |
-| L6 | "my weather card is broken — fix it" | remap re-enters at sampling on the item's OWN frozen source | SHIPPED (test_ni_lifecycle.py) |
+| L6 | "my weather card is broken — fix it" | card Fix button → begin_remap re-enters at sampling on the item's OWN frozen source | SHIPPED (test_ni_lifecycle.py + P3 route tests) |
 | L7 | "change the source of my card" (flow-born) | refused with the remap pointer (the §29 door) | SHIPPED (test_ni_lifecycle.py) |
 | L8 | keyed card: add key → activate | credential PUT → commission succeeds; unfilled → 409 | SHIPPED (test_ni_lifecycle.py) |
 | L9 | "that number looks wrong" (C2) | validate wrong → back to draft, journal entry | SHIPPED (test_ni_lifecycle.py) |
-| L10 | "delete the bitcoin card" | IRREVERSIBLE tier; cascades snapshots/journal/secrets | SHIPPED (test_ni_lifecycle.py) |
+| L10 | "delete the bitcoin card" | card Delete (DELETE route); cascades snapshots/journal/secrets; tool internal-only since P2 | SHIPPED (test_ni_lifecycle.py) |
 | L11 | "what's on my dashboard?" / "is it live yet?" | list/read state literacy; never claims live prematurely | SHIPPED (test_ni_lifecycle.py) |
 | L12 | fill a needs_params slot from chat | model directs to the card's Fill (never invents the value) | SHIPPED (test_ni_lifecycle.py) |
 
@@ -82,7 +84,8 @@ creation gates can't.
   each shipped with its own phase suite (§18/§22/§25). The lifecycle matrix
   includes one composite-literacy row; deeper matrices stay in their suites.
 - ROADMAP: a flow path for internal sources ("make a card from my News
-  check") — today these author via create_ni_item, which remains their door.
+  check") — since P2 these author only via the internal factory (Library
+  install / in-process callers); chat cannot create them at all.
 
 ## E. Alerts & notification reach
 
