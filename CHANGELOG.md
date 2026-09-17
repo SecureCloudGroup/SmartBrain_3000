@@ -11,6 +11,8 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-09-16
+
 ### Added
 - **Neural Interface: create cards right on the Neural page.** A new box at
   the top of the board — type "NVDA stock price every 28 minutes" and the
