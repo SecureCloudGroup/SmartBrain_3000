@@ -2517,6 +2517,36 @@ def _normalize_host(host: str) -> str:
         return low
 
 
+def find_reusable_credential(secrets_store, name: str, host: str) -> str | None:
+    """W-F (field 2026-09-17): the VALUE of another card's credential with the
+    same param name bound to the SAME host, or None.
+
+    The user's ruling: adding the same provider key for every card is wrong.
+    Reuse is host-scoped and copy-based — the caller stores the value under
+    the NEW item's own ``ni:<item_id>:<name>`` key (item-scoping and the K2
+    loader prefix check stay intact), and journals the reuse. Never crosses
+    hosts: the stored binding must equal the new card's fetch host exactly.
+    """
+    assert secrets_store is not None, "secrets store required"
+    assert isinstance(name, str) and name and isinstance(host, str) and host, "args required"
+    wanted = _normalize_host(host)
+    suffix = f":{name}"
+    try:
+        keys = secrets_store.list_keys()
+    except Exception:  # a scan failure degrades to "no reuse", never an error
+        return None
+    for key in keys:  # bounded by store size
+        if not (isinstance(key, str) and key.startswith("ni:") and key.endswith(suffix)):
+            continue
+        try:
+            body = json.loads(secrets_store.get(key) or "")
+        except Exception:  # unreadable row — skip, never fail the scan
+            continue
+        if isinstance(body, dict) and body.get("host") == wanted and body.get("value"):
+            return str(body["value"])
+    return None
+
+
 def _load_credential(secrets_store, key: str, expected_host: str,
                      *, item_id: str, request_scheme: str) -> str:
     """Return the stored value iff its bound host matches ``expected_host``; else NIError.

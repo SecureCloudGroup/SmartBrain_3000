@@ -1445,3 +1445,22 @@ flow with the same sealed request — a fetch-class failure drops the failed
 URL (fresh source resolution); any other failure keeps the user's URL
 (their consent). Running flows and finalized cards refuse (409). The board
 copy and empty state now point at the composer, not chat.
+
+**P1-warts wave (field 2026-09-17)** — the first two fully successful field
+creations surfaced five refinements:
+- W-D: product/tech vocabulary joined the ticker stopwords ("create new NI
+  item ... GOOG" filled symbol=NI → a REAL NiSource quote on a GOOG card).
+- W-E consent-what-runs: the confirm pause SEALS the request-derived param
+  fills (``_fills`` on the record); the card renders the FILLED URL
+  ("symbol=GOOG") + the fill values; the handoff applies the SEALED values
+  first (request-derived fill covers only still-empty slots) — what the user
+  saw is exactly what runs.
+- W-F credential reuse: at finalize, a keyed card whose secret is absent
+  reuses another card's SAME-host, same-name credential via the desktop
+  secrets provider — copy-based under the new item's own key (item scoping +
+  K2 loader intact), journaled, all-or-nothing; different hosts never reuse.
+- W-A: the unfinished-shell copy renders only for terminal/absent flows
+  (it used to contradict the consent block mid-pause); W-B label fix; W-C
+  Finnhub recipe now serves ``open``.
+- W-G board polish: grid aligns start; cadence+freshness meta line; footer
+  condensed with a native details overflow for Pause/Repair/Delete.
