@@ -124,6 +124,93 @@
   let credentialBusy = $state(false);
   let credentialError = $state("");
 
+  // P3: source-pick + edit-modal state.
+  let pickUrlText = $state("");
+  let editFor = $state<NiBoardItem | null>(null);
+  let editTitle = $state("");
+  let editInterval = $state("");
+  let editBusy = $state(false);
+  let editError = $state("");
+
+  async function pickSource(item: NiBoardItem): Promise<void> {
+    console.assert(item.flow?.state === "source", "pickSource: pause required");
+    const url = pickUrlText.trim();
+    if (url.length < 8) return;
+    busyId = item.id;
+    try {
+      await api.niFlowPickSource(item.id, url);
+      pickUrlText = "";
+      toast("Source set — sampling it now.");
+      await load();
+    } catch (err) {
+      const msg = describeError(err);
+      if (msg) error = msg;
+    } finally {
+      busyId = null;
+    }
+  }
+  async function pickRecipe(item: NiBoardItem, recipeId: string): Promise<void> {
+    console.assert(item.flow?.state === "source", "pickRecipe: pause required");
+    busyId = item.id;
+    try {
+      await api.niFlowPickRecipe(item.id, recipeId);
+      toast("Vetted source proposed — approve it on the card.");
+      await load();
+    } catch (err) {
+      const msg = describeError(err);
+      if (msg) error = msg;
+    } finally {
+      busyId = null;
+    }
+  }
+  async function fixItem(item: NiBoardItem): Promise<void> {
+    busyId = item.id;
+    try {
+      await api.niFlowFix(item.id);
+      toast("Fixing — re-reading the card's source.");
+      await load();
+    } catch (err) {
+      const msg = describeError(err);
+      if (msg) error = msg;
+    } finally {
+      busyId = null;
+    }
+  }
+  function openEdit(item: NiBoardItem): void {
+    console.assert(editFor === null, "openEdit: no other edit open");
+    editFor = item;
+    editTitle = item.title;
+    editInterval = String(item.interval_minutes);
+    editError = "";
+  }
+  function closeEdit(): void {
+    console.assert(editBusy === false, "closeEdit: not while saving");
+    editFor = null; editTitle = ""; editInterval = ""; editError = "";
+  }
+  async function submitEdit(): Promise<void> {
+    console.assert(editFor !== null, "submitEdit: target required");
+    const target = editFor;
+    if (!target || editBusy) return;
+    const title = editTitle.trim();
+    const minutes = parseInt(editInterval, 10);
+    if (!title || !Number.isFinite(minutes) || minutes < 1) {
+      editError = "A name and a cadence of at least 1 minute are required.";
+      return;
+    }
+    editBusy = true;
+    editError = "";
+    try {
+      await api.niPatch(target.id, { title, interval_minutes: minutes });
+      closeEdit();
+      toast("Card updated.");
+      await load();
+    } catch (err) {
+      editError = describeError(err);
+    } finally {
+      editBusy = false;
+    }
+  }
+
   // NI Foreman P1: composer state — the on-page creation surface.
   let composerText = $state("");
   let composerBusy = $state(false);
@@ -1053,6 +1140,45 @@
                     >{busyId === item.id ? "Retrying…" : "Retry"}</button>
                   </div>
                 {/if}
+              {:else if item.flow.state === "source"}
+                <!-- P3 (2026-09-17): the source-pick pause renders its OWN
+                     affordances — vetted suggestions (every category) that
+                     route into the normal Approve-source consent, and a
+                     paste-a-URL field (the universal generic path; your paste
+                     is the consent, netguard guards the fetch). -->
+                <div class="ni-commission">
+                  <p style="margin:0 0 var(--s-2); font-size:var(--f-label)">
+                    No vetted source matched this request yet.
+                  </p>
+                  {#if item.flow.suggestions && item.flow.suggestions.length > 0}
+                    <div class="ni-suggestions">
+                      {#each item.flow.suggestions as sug (sug.recipe_id)}
+                        <button
+                          class="secondary"
+                          disabled={busyId === item.id}
+                          title={sug.url}
+                          onclick={() => pickRecipe(item, sug.recipe_id)}
+                        >{sug.title} — {sug.host}</button>
+                      {/each}
+                    </div>
+                  {/if}
+                  <form
+                    class="ni-pick-url"
+                    onsubmit={(e) => { e.preventDefault(); void pickSource(item); }}
+                  >
+                    <input
+                      type="url"
+                      bind:value={pickUrlText}
+                      placeholder="Or paste an API URL (https://…)"
+                      maxlength="2000"
+                      disabled={busyId === item.id}
+                      aria-label="Paste a source URL"
+                    />
+                    <button type="submit" class="secondary"
+                      disabled={busyId === item.id || pickUrlText.trim().length < 8}
+                    >Use this URL</button>
+                  </form>
+                </div>
               {:else if item.flow.state === "confirm_source"}
                 <!-- Card-consent (2026-09-15): the flow's own approval affordance,
                      rendered by CODE the instant the pause happens — the exact URL
@@ -1115,6 +1241,18 @@
               {/if}
             {/if}
           </div>
+
+          {#if !item.shell && !item.flow && (item.state === "failing" || item.state === "broken" || item.state === "degraded")}
+            <!-- P3: the card's Fix — re-derives against the card's OWN frozen
+                 source (never a new host). Generic across every http card. -->
+            <div class="ni-actions" style="margin-top: var(--s-2)">
+              <button
+                class="secondary"
+                disabled={busyId === item.id}
+                onclick={() => fixItem(item)}
+              >{busyId === item.id ? "Fixing…" : "Fix"}</button>
+            </div>
+          {/if}
 
           {#if item.needs_credentials && item.needs_credentials.length > 0}
             <!-- Add-key entry point (§ Status-truth amendments). One row per missing
@@ -1232,6 +1370,11 @@
                     disabled={busyId === item.id}
                     onclick={() => togglePause(item)}
                   >{item.enabled ? "Pause" : "Resume"}</button>
+                  <button
+                    class="ghost"
+                    disabled={busyId === item.id}
+                    onclick={() => openEdit(item)}
+                  >Edit…</button>
                   <button
                     class="ghost"
                     disabled={busyId === item.id}
@@ -1480,6 +1623,27 @@
           disabled={paramBusy || !paramValue.trim()}
           onclick={submitParam}
         >{paramBusy ? "Saving…" : "Save"}</button>
+      </div>
+    </Modal>
+  {/if}
+
+  {#if editFor}
+    <Modal open label="Edit card" onclose={() => { if (!editBusy) closeEdit(); }}>
+      <h2 class="modal-title">Edit — {editFor.title}</h2>
+      <label class="cred-row" for="ni-edit-title">
+        <span>Name</span>
+        <input id="ni-edit-title" type="text" bind:value={editTitle}
+               maxlength="300" disabled={editBusy} />
+      </label>
+      <label class="cred-row" for="ni-edit-interval">
+        <span>Update every (minutes)</span>
+        <input id="ni-edit-interval" type="number" min="1" max="10080"
+               bind:value={editInterval} disabled={editBusy} />
+      </label>
+      {#if editError}<p class="error" style="margin:var(--s-3) 0 0">{editError}</p>{/if}
+      <div class="modal-actions" style="margin-top: var(--s-4)">
+        <button class="secondary" disabled={editBusy} onclick={closeEdit}>Cancel</button>
+        <button disabled={editBusy} onclick={submitEdit}>{editBusy ? "Saving…" : "Save"}</button>
       </div>
     </Modal>
   {/if}
@@ -1793,6 +1957,20 @@
     padding: var(--s-3);
     background: var(--accent-tint);
     border-radius: var(--r-1);
+  }
+  .ni-suggestions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--s-2);
+    margin-bottom: var(--s-2);
+  }
+  .ni-pick-url {
+    display: flex;
+    gap: var(--s-2);
+  }
+  .ni-pick-url input {
+    flex: 1;
+    min-width: 0;
   }
   .ni-more {
     position: relative;

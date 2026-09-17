@@ -1161,15 +1161,15 @@ def _explain_state_with_flow(item: dict, flow: dict | None) -> tuple[str, str]:
             return (
                 "this card is a DRAFT with a flow paused awaiting SOURCE "
                 "confirmation — the engine has NOT fetched anything yet",
-                "propose confirm_ni_flow_source with the URL the flow record "
-                "shows; approving the parked card is the fetch consent",
+                "the card on the Neural page shows an 'Approve source' button "
+                "with the exact URL — tell the user to decide there",
             )
         if state == "source":
             return (
                 "this card is a DRAFT with a flow paused awaiting a source "
                 "PICK — the engine has NOT fetched anything yet",
-                "propose resume_ni_flow with a source_url the user picks; the "
-                "chat surfaces candidates via list_ni_catalog / web_search",
+                "the card on the Neural page offers vetted suggestions and a "
+                "paste-a-URL field — tell the user to pick there",
             )
         if state in ("intent", "sampling", "mapping", "assembling"):
             return (
@@ -1230,8 +1230,8 @@ def _explain_state(item: dict) -> tuple[str, str]:
             return (
                 f"first run failed ({status or 'error'}) — the card is NOT live; "
                 "fix the spec or wait for the next scheduler pass",
-                "read read_ni_item for the last_failure excerpt, then update_ni_item "
-                "against the real payload shape, or wait for the next tick",
+                "the card's Fix button re-derives it against the same source; "
+                "read_ni_item's last_failure excerpt explains what broke",
             )
         return (
             "this card is COMMISSIONING — the engine has not yet completed the "
@@ -1249,22 +1249,22 @@ def _explain_state(item: dict) -> tuple[str, str]:
         return (
             f"the latest run failed ({status or 'error'}) — the card is rendering "
             "the LAST GOOD payload, not live data",
-            "read the last_failure excerpt, then update_ni_item to fix the spec "
-            "or wait for the next tick to retry",
+            "the card's Fix button re-derives it against the same source, or "
+            "wait for the next tick to retry",
         )
     if state == "failing":
         return (
             f"the last {fails} runs failed ({status or 'error'}) — the effective "
             "cadence has doubled and the card is NOT rendering live data",
-            "read the last_failure excerpt and update_ni_item, or L1 self-repair "
-            "may run automatically if repair_policy.l1 is enabled",
+            "the card's Fix button re-derives it; L1 self-repair may also run "
+            "automatically if repair_policy.l1 is enabled",
         )
     if state == "broken":
         return (
             f"the card is BROKEN ({status or 'error'}) — the engine has STOPPED "
             f"scheduling {title!r}; only user or agent action can revive it",
-            "update_ni_item to fix the spec (a source change re-consents) then "
-            "the item will re-enter commissioning",
+            "the card's Fix button re-derives it against its approved source; "
+            "a different source means a NEW card from the composer",
         )
     return (
         f"state {state!r} — see the ni-format documentation",
@@ -1327,6 +1327,16 @@ def _assemble_spec(args: dict) -> dict:
 
 
 _NI_GUIDE_POINTER = " Consult read_ni_spec_guide for the exact spec grammar."
+
+
+# =============================================================================
+# NI Foreman P2 (2026-09-17): the NI authoring/write handlers below are
+# INTERNAL-ONLY — removed from the model registry (operator ruling: chat may
+# read NI, never create/update/delete). They remain as the in-process item
+# factory for the test suite and internal callers; the card routes in
+# ni_routes.py are the user-facing surfaces. A model can no longer reach any
+# of them — a fabricated call has no executor.
+# =============================================================================
 
 
 def _validate_create_ni_args(args: dict) -> None:
@@ -2780,20 +2790,6 @@ _TOOLS: tuple[Tool, ...] = (
         egress=False,
     ),
     Tool(
-        name="read_ni_spec_guide",
-        description="Read the compact Neural Interface (NI) spec-grammar reference — the closed source "
-                    "types, the exact pipeline op shapes, the scene node vocabulary + per-node props, "
-                    "bindings, params, history, alerts, display, and preview_payload. Call this BEFORE "
-                    "drafting a create_ni_item or update_ni_item spec so the pipeline / scene / display / "
-                    "preview_payload shape lands right on the first try (the write tools also prevalidate "
-                    "the spec server-side and bounce a bad draft back inline with the validator's message "
-                    "plus a pointer to this guide, so keep it handy).",
-        params_schema={"type": "object", "additionalProperties": False, "properties": {}},
-        tier=Tier.OBSERVE,
-        handler=_read_ni_spec_guide,
-        egress=False,
-    ),
-    Tool(
         name="list_ni_catalog",
         description="List the bundled catalog of VETTED public data sources for Neural Interface tiles — "
                     "keyless / free-tier JSON endpoints (finance, weather, news, crypto, misc), each with "
@@ -2842,171 +2838,6 @@ _TOOLS: tuple[Tool, ...] = (
         prevalidate=_prevalidate_ni_item_id,
     ),
     Tool(
-        name="create_ni_item",
-        description="Call read_ni_spec_guide FIRST to see the exact spec grammar (the write tools "
-                    "prevalidate the spec server-side and bounce a malformed draft back inline). Create "
-                    "a new Neural Interface ITEM (a deterministic info tile). Provide the spec pieces — "
-                    "title, goal (verbatim user words), source (http_json/model/internal.schedule/etc.), "
-                    "pipeline (ordered extract/transform/llm stages), scene (closed node grammar), "
-                    "display, interval_minutes — plus preview_payload: a RAW dict of pipeline outputs "
-                    "used to prove the scene binds. Reviewed egress (approving the card is the source "
-                    "consent); lands in commissioning (or draft if a secret is unfilled or draft:true).",
-        params_schema={
-            "type": "object",
-            "additionalProperties": False,
-            "properties": {
-                "title": {"type": "string", "maxLength": 300},
-                "goal": {"type": "string", "maxLength": 5000},
-                "params": {"type": "object"},
-                "source": {"type": "object"},
-                # Schema hint: pipeline stages have a closed op enum (nothing else validates,
-                # e.g. no "number_format" / "jmespath"). Inner shape stays loose so the schema
-                # gate doesn't recheck what ni.validate_spec / prevalidate already enforce.
-                "pipeline": {"type": "array", "items": {
-                    "type": "object",
-                    "properties": {"op": {"type": "string",
-                                          "enum": ["extract", "transform", "llm"]}},
-                }},
-                # Schema hint: scene node "type" is a closed enum (no "card"/"stat"/"kv").
-                "scene": {"type": "object", "properties": {"type": {
-                    "type": "string",
-                    "enum": ["stack", "grid", "divider", "text", "number", "chip",
-                             "bar", "icon", "repeat", "spark", "gauge", "image"],
-                }}},
-                # Schema hint: display carries "size" (no display.width / .height).
-                "display": {"type": "object", "properties": {
-                    "size": {"type": "string", "enum": ["small", "wide"]},
-                }},
-                "interval_minutes": {"type": "integer"},
-                "model": {"type": "string"},
-                "preview_payload": {"type": "object"},
-                # H3: history + alerts are first-class spec fields — the inner shape is
-                # validated by ni.validate_spec (§11/§12); the schema stays loose here.
-                "history": {"type": "object"},
-                "alerts": {"type": "array"},
-                # A1: agent opts INTO draft with the "show me first" affordance. Absent
-                # or false lands the item in commissioning (approval == consent) unless
-                # the spec declares a secret-kind param, in which case it always lands
-                # draft (§28 Status truth — the tool cannot check the credential store).
-                "draft": {"type": "boolean"},
-                # §28 duplicate guard: refuse a case-insensitive title match against an
-                # existing card unless the caller explicitly opts in.
-                "allow_duplicate": {"type": "boolean"},
-            },
-            "required": ["title", "goal", "source", "pipeline", "scene",
-                         "display", "interval_minutes", "preview_payload"],
-        },
-        tier=Tier.REVIEWED,
-        handler=_create_ni_item,
-        egress=True,
-        prevalidate=_prevalidate_create_ni,
-    ),
-    Tool(
-        name="derive_ni_paths",
-        description="Sample-grounded freeform authoring helper (§27). Walk one real fetched "
-                    "sample and return candidate leaf paths in the §4.1 grammar — {path, "
-                    "type, example} entries the model copies directly into an extract "
-                    "stage. NEVER a substitute for the flow: http_json cards go through "
-                    "start_ni_flow, which derives paths itself. Pass EXACTLY ONE of two args: "
-                    "``sample`` (a JSON object) OR ``sample_json`` (a JSON-encoded string, "
-                    "≤32KB — use this when web_fetch returned bytes/text you have not yet "
-                    "parsed). Keys outside the §4.1 grammar (spaces, dots, punctuation) "
-                    "are reported in an ``unaddressable`` list — pick a different source "
-                    "when the response uses those. Pure function, no ctx, no egress.",
-        params_schema={
-            "type": "object",
-            "additionalProperties": False,
-            "properties": {
-                # ``sample`` is a JSON OBJECT at the tool surface (walker also
-                # tolerates lists; a bare-list root is reported in
-                # ``unaddressable`` since §4.1 paths must start with a key).
-                "sample": {"type": "object"},
-                # ``sample_json`` is the STRING sibling for models that pass the
-                # unparsed body of a fetched page verbatim. Handler enforces
-                # exactly-one-of at execute time; ``validate_args`` can't model
-                # a union of scalar types with the flat-schema gate.
-                "sample_json": {"type": "string", "maxLength": _DERIVE_INPUT_BYTES},
-                "want": {"type": "string", "maxLength": 500},
-            },
-        },
-        tier=Tier.OBSERVE,
-        handler=_derive_ni_paths,
-        egress=False,
-    ),
-    Tool(
-        name="update_ni_item",
-        description="Call read_ni_spec_guide FIRST to see the exact spec grammar (the write tools "
-                    "prevalidate the spec server-side and bounce a malformed draft back inline). Edit "
-                    "an existing Neural Interface item (from list_ni_items) — partial: title, goal, "
-                    "params, source, pipeline, scene, display, interval_minutes, model, history, "
-                    "alerts, repair_policy. Any change to source (URL, headers, type, model "
-                    "instruction, OR any param referenced by source.url) sends the item back to "
-                    "commissioning so the new source is re-consented before the engine touches it. "
-                    "Use set_ni_item_enabled to pause; delete_ni_item to remove.",
-        params_schema={
-            "type": "object",
-            "additionalProperties": False,
-            "properties": {
-                "item_id": {"type": "string"},
-                "title": {"type": "string", "maxLength": 300},
-                "goal": {"type": "string", "maxLength": 5000},
-                "params": {"type": "object"},
-                "source": {"type": "object"},
-                # Same closed-op hint as create_ni_item's pipeline schema.
-                "pipeline": {"type": "array", "items": {
-                    "type": "object",
-                    "properties": {"op": {"type": "string",
-                                          "enum": ["extract", "transform", "llm"]}},
-                }},
-                # Same scene-type enum as create_ni_item.
-                "scene": {"type": "object", "properties": {"type": {
-                    "type": "string",
-                    "enum": ["stack", "grid", "divider", "text", "number", "chip",
-                             "bar", "icon", "repeat", "spark", "gauge", "image"],
-                }}},
-                # Same display-size enum as create_ni_item.
-                "display": {"type": "object", "properties": {
-                    "size": {"type": "string", "enum": ["small", "wide"]},
-                }},
-                "interval_minutes": {"type": "integer"},
-                "model": {"type": "string"},
-                # K8: rewrite the preview snapshot alongside the spec (stale-preview note in doc).
-                "preview_payload": {"type": "object"},
-                # H3: history + alerts are updatable — an alerts/history change is a plain
-                # REVIEWED spec edit, NOT a source change (§11/§12 audit 2026-09-09).
-                "history": {"type": "object"},
-                "alerts": {"type": "array"},
-                # Phase 4b D2a (audit 2026-09-11): the approval card is the consent for
-                # any repair-policy flip — the shape is closed {l1: bool, l2_frontier:
-                # bool} (see ni._validate_repair_policy), so a reviewed approval
-                # renders the whole dict via fmtArgs and the operator sees the exact
-                # flags landing before Apply.
-                "repair_policy": {"type": "object"},
-            },
-            "required": ["item_id"],
-        },
-        tier=Tier.REVIEWED,
-        handler=_update_ni_item,
-        egress=True,
-        prevalidate=_prevalidate_update_ni,
-    ),
-    Tool(
-        name="set_ni_item_enabled",
-        description="Pause or resume a Neural Interface item by id (from list_ni_items). enabled=false pauses "
-                    "it (kept, but the engine skips it); enabled=true resumes it. Reversible. Use this to pause "
-                    "rather than delete_ni_item (which permanently removes it).",
-        params_schema={
-            "type": "object",
-            "additionalProperties": False,
-            "properties": {"item_id": {"type": "string"}, "enabled": {"type": "boolean"}},
-            "required": ["item_id", "enabled"],
-        },
-        tier=Tier.REVIEWED,
-        handler=_set_ni_item_enabled,
-        egress=True,
-        prevalidate=_prevalidate_ni_item_id,
-    ),
-    Tool(
         name="run_ni_item_now",
         description="Mark a Neural Interface item due so the next engine tick refreshes it (clears "
                     "last_checked). Does not fetch synchronously from the chat turn — the engine runs it on "
@@ -3022,135 +2853,11 @@ _TOOLS: tuple[Tool, ...] = (
         egress=True,
         prevalidate=_prevalidate_ni_item_id,
     ),
-    Tool(
-        name="start_ni_flow",
-        description="§29 Neural Interface Flow Engine — the ONLY path for a new card. "
-                    "Code owns intent → source → sampling → mapping → assembly → handoff; "
-                    "models fill exactly two closed-schema blanks (intent + path mapping). "
-                    "Args: request (the user's request IN THEIR OWN WORDS, verbatim — never "
-                    "paraphrase, never change a number or cadence they said; ≤2000 chars) "
-                    "and optional source_url (an http URL the user already named — the "
-                    "approval card renders it unmissably). The tool WAITS for the flow (a "
-                    "few seconds) and returns the resulting state plus a next_step "
-                    "directive — follow it and do nothing else for this card (no "
-                    "web_search for sources, no create_ni_item, no second flow). Reviewed "
-                    "egress; approving is consent for the fetch.",
-        params_schema={
-            "type": "object",
-            "additionalProperties": False,
-            "properties": {
-                # D4 (2026-09-14): the request is the intent stage's ONLY input —
-                # a paraphrase that turns "every 30 minutes" into "every 5" ships
-                # the wrong cadence into the sealed spec. Verbatim or nothing.
-                "request": {"type": "string", "maxLength": _MAX_FLOW_REQUEST},
-                "source_url": {"type": "string", "maxLength": ni._MAX_URL},
-                # M4 (audit 2026-09-13): the case-insensitive duplicate-title
-                # guard mirrors ``create_ni_item``; a caller who wants two shells
-                # with the same title opts in here.
-                "allow_duplicate": {"type": "boolean"},
-            },
-            "required": ["request"],
-        },
-        tier=Tier.REVIEWED,
-        handler=_start_ni_flow,
-        egress=True,
-        prevalidate=_prevalidate_start_ni_flow,
-    ),
-    Tool(
-        name="confirm_ni_flow_source",
-        description="§29 confirm a recipe-matched NI flow's proposed source URL. Use "
-                    "when start_ni_flow paused the flow at state=confirm_source (a "
-                    "catalog recipe matched but the operator has NOT yet approved the "
-                    "recipe's URL). The approval card renders the exact host + path "
-                    "via the source_url arg convention (promotedLine 'Fetches: <url>'). "
-                    "Args: item_id (from the paused flow) and source_url (the same URL "
-                    "the flow record proposed — the tool refuses a mismatch rather "
-                    "than sealing a source the user never saw). When the flow result "
-                    "carried a geocode_lookup, ALSO pass geocode_query verbatim — the "
-                    "approval then covers one place lookup (fixed geocoding host) that "
-                    "fills the recipe's coordinates; a confirm missing it is refused. "
-                    "Reviewed egress; approving is consent for the fetch(es). Never "
-                    "used for freeform flows — resume_ni_flow covers the pick path.",
-        params_schema={
-            "type": "object",
-            "additionalProperties": False,
-            "properties": {
-                "item_id": {"type": "string"},
-                "source_url": {"type": "string", "maxLength": ni._MAX_URL},
-                # geocode-consent (2026-09-15): display-only echo of the sealed
-                # lookup query — the executed lookup always reads the SEALED
-                # value; this arg exists so the approval card shows it.
-                "geocode_query": {"type": "string", "maxLength": 120},
-            },
-            "required": ["item_id", "source_url"],
-        },
-        tier=Tier.REVIEWED,
-        handler=_confirm_ni_flow_source,
-        egress=True,
-        prevalidate=_prevalidate_confirm_ni_flow_source,
-    ),
-    Tool(
-        name="resume_ni_flow",
-        description="§29 resume a paused NI flow with a user-picked source URL. Use ONLY when "
-                    "start_ni_flow paused the flow at state=source (no recipe hit, no user URL "
-                    "supplied); the approval card renders the URL host + path unmissably. "
-                    "Args: item_id (from the paused flow) and source_url (http URL the user "
-                    "chose from your suggestions). Reviewed egress; approving is consent for "
-                    "the fetch.",
-        params_schema={
-            "type": "object",
-            "additionalProperties": False,
-            "properties": {
-                "item_id": {"type": "string"},
-                "source_url": {"type": "string", "maxLength": ni._MAX_URL},
-            },
-            "required": ["item_id", "source_url"],
-        },
-        tier=Tier.REVIEWED,
-        handler=_resume_ni_flow,
-        egress=True,
-        prevalidate=_prevalidate_resume_ni_flow,
-    ),
-    Tool(
-        name="remap_ni_item",
-        description="§29 re-enter the NI flow at Sampling for a flow- or recipe-born card, "
-                    "re-deriving paths against the SAME consented URL (never a new source, so "
-                    "not a re-consent). Use to FIX a card that started failing after a source "
-                    "response shape changed. Args: item_id. Reviewed egress. For a genuine "
-                    "source change use update_ni_item (freeform source edits on flow- or "
-                    "recipe-born cards are refused — remap first, or delete + recreate).",
-        params_schema={
-            "type": "object",
-            "additionalProperties": False,
-            "properties": {"item_id": {"type": "string"}},
-            "required": ["item_id"],
-        },
-        tier=Tier.REVIEWED,
-        handler=_remap_ni_item,
-        egress=True,
-        prevalidate=_prevalidate_remap_ni_item,
-    ),
-    Tool(
-        name="delete_ni_item",
-        description="Permanently delete a Neural Interface item by id (with its snapshots, revisions, and "
-                    "run history). Cannot be undone. To just pause a tile, use set_ni_item_enabled with "
-                    "enabled=false instead.",
-        params_schema={
-            "type": "object",
-            "additionalProperties": False,
-            "properties": {"item_id": {"type": "string"}},
-            "required": ["item_id"],
-        },
-        tier=Tier.IRREVERSIBLE,
-        handler=_delete_ni_item,
-        egress=False,
-        prevalidate=_prevalidate_ni_item_id,
-    ),
 )
 
 # OBSERVE tools must be read-only + no egress; this allowlist is the structural
 # safety invariant checked at import.
-_OBSERVE_READONLY = frozenset({"kb_search", "read_document", "summarize_document", "list_documents", "list_tasks", "list_schedules", "read_schedule_output", "list_ni_catalog", "list_ni_items", "read_ni_item", "read_ni_spec_guide", "derive_ni_paths"})
+_OBSERVE_READONLY = frozenset({"kb_search", "read_document", "summarize_document", "list_documents", "list_tasks", "list_schedules", "read_schedule_output", "list_ni_catalog", "list_ni_items", "read_ni_item"})
 
 # REVIEWED tools that MUTATE schedules. A schedule creates/rewrites/re-enables an autonomous
 # agent turn, so these must NEVER auto-run (via remembered consent) inside a schedule-executed
@@ -3162,7 +2869,11 @@ SCHEDULE_WRITE_TOOLS = frozenset({"create_schedule", "update_schedule", "set_sch
 # (an NI item pulls its source on a timer, so an injected background prompt creating/rewriting
 # one could keep exfiltrating), so these join UNATTENDED_NEVER_AUTO below. delete_ni_item is
 # IRREVERSIBLE and always parks, so it isn't in the write set (mirrors SCHEDULE_WRITE_TOOLS).
-NI_WRITE_TOOLS = frozenset({"create_ni_item", "update_ni_item", "set_ni_item_enabled", "run_ni_item_now", "start_ni_flow", "resume_ni_flow", "confirm_ni_flow_source", "remap_ni_item"})
+# NI Foreman P2 (2026-09-17): the model registry carries NO NI write surface
+# — creation/edit/repair/delete live on the Neural page (composer + card
+# routes). run_ni_item_now stays (a refresh the user approves per tap) and
+# keeps the unattended-never-auto posture.
+NI_WRITE_TOOLS = frozenset({"run_ni_item_now"})
 # Tools an UNATTENDED turn (scheduled run, its resume) may never run on a standing grant, however
 # the user answered in chat: schedule writes (self-perpetuation) and memory writes — a remembered
 # fact lands in the system prompt of every later turn, so a feed item or web page steering an
@@ -3189,6 +2900,32 @@ def _build_registry(tools: tuple[Tool, ...]) -> dict[str, Tool]:
 
 
 REGISTRY: dict[str, Tool] = _build_registry(_TOOLS)
+
+
+# NI Foreman P2: the internal item-factory index — the retired NI write
+# handlers by their old names, for in-process callers (the test suite, future
+# internal code). NOT a registry: nothing here is reachable by a model, none
+# of it appears in openai_tools_spec(), and get_tool() never returns these.
+INTERNAL_NI_PREVALIDATE: dict[str, Callable] = {
+    "create_ni_item": _prevalidate_create_ni,
+    "update_ni_item": _prevalidate_update_ni,
+    "start_ni_flow": _prevalidate_start_ni_flow,
+    "resume_ni_flow": _prevalidate_resume_ni_flow,
+    "confirm_ni_flow_source": _prevalidate_confirm_ni_flow_source,
+    "remap_ni_item": _prevalidate_remap_ni_item,
+}
+INTERNAL_NI_TOOLS: dict[str, Callable] = {
+    "create_ni_item": _create_ni_item,
+    "update_ni_item": _update_ni_item,
+    "delete_ni_item": _delete_ni_item,
+    "set_ni_item_enabled": _set_ni_item_enabled,
+    "start_ni_flow": _start_ni_flow,
+    "resume_ni_flow": _resume_ni_flow,
+    "confirm_ni_flow_source": _confirm_ni_flow_source,
+    "remap_ni_item": _remap_ni_item,
+    "derive_ni_paths": _derive_ni_paths,
+    "read_ni_spec_guide": _read_ni_spec_guide,
+}
 
 
 def get_tool(name: str) -> Tool | None:

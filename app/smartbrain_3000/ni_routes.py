@@ -20,7 +20,17 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 from starlette.responses import Response
 
-from . import gateway, netguard, ni, ni_flow, ni_library, ni_mcp, tools, vault_format
+from . import (
+    gateway,
+    netguard,
+    ni,
+    ni_catalog,
+    ni_flow,
+    ni_library,
+    ni_mcp,
+    tools,
+    vault_format,
+)
 from .account import _require_desktop_local
 from .data_routes import _reauthorize
 from .scheduler import _NI_FEED_ID, ScheduleStore, post_ni_carrier_notices
@@ -44,11 +54,15 @@ class ValidateIn(BaseModel):
 
 
 class PatchIn(BaseModel):
-    """Restricted PATCH surface: only enabled / position / display (§10 §9)."""
+    """Restricted PATCH surface: enabled / position / display, plus (P3,
+    2026-09-17) the card's Edit modal fields — title and interval_minutes.
+    Source/pipeline/scene NEVER ride this route (§10 §9)."""
 
     enabled: bool | None = None
     position: int | None = Field(default=None, ge=0, le=_MAX_POSITION)
     display: dict | None = None
+    title: str | None = Field(default=None, max_length=300)
+    interval_minutes: int | None = Field(default=None, ge=1, le=10080)
 
 
 class CredentialIn(BaseModel):
@@ -627,6 +641,27 @@ def patch_item(request: Request, item_id: str, body: PatchIn) -> dict:
         store.set_enabled(item_id, body.enabled)
     if body.position is not None:
         store.set_position(item_id, body.position)
+    if body.title is not None:
+        title = body.title.strip()
+        if not title:
+            raise HTTPException(status_code=400, detail="title must be non-empty")
+        new_spec = dict(current["spec"])
+        new_spec["title"] = title[:300]
+        store.update_spec(item_id, new_spec, origin="user",
+                          preserve_attestations=True)
+        _journal_best_effort(store, item_id, "updated",
+                              f"renamed to {title[:60]!r} on the card")
+        current = store.get_item(item_id)
+    if body.interval_minutes is not None:
+        new_spec = dict((store.get_item(item_id) or current)["spec"])
+        new_spec["interval_minutes"] = int(body.interval_minutes)
+        # Cadence is operational, not a source change — the contract
+        # fingerprints SHAPE, so the C1/C2 attestations survive (display-PATCH
+        # precedent); the store re-clamps to its floor on write.
+        store.update_spec(item_id, new_spec, origin="user",
+                          preserve_attestations=True)
+        _journal_best_effort(store, item_id, "updated",
+                              f"cadence set to every {int(body.interval_minutes)}m on the card")
     if body.display is not None:
         try:
             ni._validate_display(body.display)  # closed schema check before write
@@ -799,6 +834,105 @@ def retry_flow(request: Request, item_id: str) -> dict:
         result_summary=tools.summarize({"started": bool(started)}),
     )
     return {"id": item_id, "started": bool(started)}
+
+
+class PickSourceIn(BaseModel):
+    """P3: the source-pick card's paste-a-URL — the universal generic path."""
+
+    url: str = Field(min_length=8, max_length=2000)
+
+
+@router.post("/api/ni/items/{item_id}/flow/pick-source")
+def pick_flow_source(request: Request, item_id: str, body: PickSourceIn) -> dict:
+    """P3 (2026-09-17): resume a source-pick pause with a URL the USER pasted
+    on the card — their paste is the consent (the same posture the chat
+    resume tool carried); netguard guards the sampling fetch as always.
+    Desktop-local, audited. 409 unless the flow is paused at ``source``.
+    """
+    _require_desktop_local(request)
+    store = _store(request)
+    item = store.get_item(item_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="item not found")
+    record = ni_flow._flow_read(store, item_id)
+    state = str((record or {}).get("state") or "")
+    if record is None or state != "source":
+        raise HTTPException(
+            status_code=409,
+            detail=f"no source pick pending (flow state {state or 'none'!r})")
+    url = body.url.strip()
+    try:
+        ni._validate_http_json_url_shape(url)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"url: {exc}") from None
+    started = ni_flow.start_flow_worker(store, item_id, source_url=url)
+    request.app.state.audit.append(
+        "user", "ni_flow_pick_source", "reviewed", "executed", True,
+        args_summary=tools.summarize({"item_id": item_id, "url": url}),
+        result_summary=tools.summarize({"started": bool(started)}),
+    )
+    return {"ok": True, "started": bool(started)}
+
+
+class PickRecipeIn(BaseModel):
+    """P3: the source-pick card's vetted-suggestion tap."""
+
+    recipe_id: str = Field(min_length=1, max_length=80)
+
+
+@router.post("/api/ni/items/{item_id}/flow/pick-recipe")
+def pick_flow_recipe(request: Request, item_id: str, body: PickRecipeIn) -> dict:
+    """P3: route a source-pick pause into the standard ``confirm_source``
+    consent for a catalog recipe the user tapped — the Approve-source card
+    (exact URL, sealed fills, geocode/coverage disclosures) takes over from
+    there. Deterministic end to end; 409 unless paused at ``source``.
+    """
+    _require_desktop_local(request)
+    store = _store(request)
+    item = store.get_item(item_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="item not found")
+    record = ni_flow._flow_read(store, item_id)
+    state = str((record or {}).get("state") or "")
+    if record is None or state != "source":
+        raise HTTPException(
+            status_code=409,
+            detail=f"no source pick pending (flow state {state or 'none'!r})")
+    recipe = ni_catalog.get_recipe(body.recipe_id)
+    if recipe is None:
+        raise HTTPException(status_code=404, detail="unknown recipe")
+    intent = record.get("intent") if isinstance(record.get("intent"), dict) else {}
+    ni_flow._pause_for_recipe_confirm(store, item_id, intent, recipe)
+    request.app.state.audit.append(
+        "user", "ni_flow_pick_recipe", "reviewed", "executed", True,
+        args_summary=tools.summarize({"item_id": item_id,
+                                       "recipe_id": body.recipe_id}),
+        result_summary=tools.summarize({"state": "confirm_source"}),
+    )
+    return {"ok": True, "state": "confirm_source"}
+
+
+@router.post("/api/ni/items/{item_id}/flow/fix")
+def fix_item_flow(request: Request, item_id: str) -> dict:
+    """P3: the card's Fix — re-derive this card against its OWN frozen source
+    (the shared remap entry: http_json only, params filled, never a new
+    host). Desktop-local, audited. ValueError guidance surfaces as 409.
+    """
+    _require_desktop_local(request)
+    store = _store(request)
+    item = store.get_item(item_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="item not found")
+    try:
+        started = ni_flow.begin_remap(store, item)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    request.app.state.audit.append(
+        "user", "ni_flow_fix", "reviewed", "executed", True,
+        args_summary=tools.summarize({"item_id": item_id}),
+        result_summary=tools.summarize({"started": bool(started)}),
+    )
+    return {"ok": True, "started": bool(started)}
 
 
 @router.post("/api/ni/items/{item_id}/flow/confirm-source")

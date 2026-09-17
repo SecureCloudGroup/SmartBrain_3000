@@ -43,8 +43,10 @@ def _tool_ctx() -> tuple[tools.ToolContext, duckdb.DuckDBPyConnection, bytes]:
 
 def _tool_call(name: str, ctx: tools.ToolContext, args: dict) -> dict:
     tool = tools.get_tool(name)
-    assert tool is not None, f"tool {name!r} not registered"
-    return tool.handler(ctx, tools.validate_args(tool, args))
+    if tool is not None:
+        return tool.handler(ctx, tools.validate_args(tool, args))
+    # NI Foreman P2: retired write tools run via the internal factory.
+    return tools.INTERNAL_NI_TOOLS[name](ctx, args)
 
 
 def _basic_scene() -> dict:
@@ -358,16 +360,11 @@ def _spec_body(**over) -> dict:
 
 
 def _create_via_tool(client: TestClient, **over) -> str:
-    """Park + approve a create_ni_item through the real tool chokepoint."""
+    """NI Foreman P2: creation left the model registry — internal factory."""
+    from smartbrain_3000 import tools
     body = _spec_body(**over)
-    r = client.post("/api/tools/invoke",
-                    json={"name": "create_ni_item", "args": body})
-    assert r.status_code == 200 and r.json()["status"] == "awaiting_approval", r.text
-    pid = r.json()["pending_id"]
-    approve = client.post(f"/api/agent/pending/{pid}/approve",
-                          json={"confirm_tool": "create_ni_item"})
-    assert approve.status_code == 200, approve.text
-    return approve.json()["result"]["id"]
+    ctx = tools.ToolContext(ni=client.app.state.ni)
+    return tools.INTERNAL_NI_TOOLS["create_ni_item"](ctx, body)["id"]
 
 
 def test_L8_keyed_card_credential_flow_reaches_commissioning(

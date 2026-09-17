@@ -258,22 +258,19 @@ def test_approve_tool_error_is_a_result_not_a_502(client: TestClient) -> None:
     stored for the parked turn (agent.resume_turn feeds it to the model
     verbatim), and the chat page's normal resume flow proceeds.
     """
-    # start_ni_flow with a duplicate shell title = a real post-approval guard.
-    first = client.post("/api/tools/invoke",
-                        json={"name": "start_ni_flow",
-                              "args": {"request": "the same card twice"}})
-    pid1 = first.json()["pending_id"]
-    assert client.post(f"/api/agent/pending/{pid1}/approve",
-                       json={}).status_code == 200
-    second = client.post("/api/tools/invoke",
-                         json={"name": "start_ni_flow",
-                               "args": {"request": "the same card twice"}})
-    pid2 = second.json()["pending_id"]
-    r = client.post(f"/api/agent/pending/{pid2}/approve", json={})
+    # run_ni_item_now on a UUID-shaped id with no card behind it = a real
+    # post-approval guard (prevalidate only checks shape, the handler misses).
+    # NI Foreman P2 retired the flow tools this test originally used.
+    park = client.post("/api/tools/invoke",
+                       json={"name": "run_ni_item_now",
+                             "args": {"item_id":
+                                      "1b8e6c1a-2f3d-4a5b-8c9d-0e1f2a3b4c5d"}})
+    pid = park.json()["pending_id"]
+    r = client.post(f"/api/agent/pending/{pid}/approve", json={})
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["status"] == "errored"
-    assert "already exists" in body["result"]["error"]
+    assert "item not found" in body["result"]["error"]
     # Approval is consumed — a second tap 409s, never re-runs.
-    assert client.post(f"/api/agent/pending/{pid2}/approve",
+    assert client.post(f"/api/agent/pending/{pid}/approve",
                        json={}).status_code == 409

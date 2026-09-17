@@ -1488,107 +1488,99 @@ def _good_create_ni_args() -> dict:
     }
 
 
-def test_bad_create_ni_item_bounces_inline_and_second_valid_call_parks(monkeypatch) -> None:
-    """Field-blocking defect fix: the model's first, malformed create_ni_item call
-    goes INLINE with the validator message (no card parks), and its second, valid
-    call parks — no user is asked to approve a spec that would fail post-approval.
+def test_bad_run_ni_item_now_bounces_inline_and_second_valid_call_parks(monkeypatch) -> None:
+    """Field-blocking defect fix, retargeted for NI Foreman P2 (run_ni_item_now
+    is the surviving prevalidated write tool): the model's first, malformed
+    call goes INLINE with the validator message (no card parks), and its
+    second, valid call parks — no user is asked to approve an unrunnable call.
     """
     ctx, audit, approvals, _conn = _ni_wired()
-    bad_args = _good_create_ni_args()
-    bad_args["pipeline"] = [{"op": "extract", "path": "quote.latest", "as": "price"}]
-    good_args = _good_create_ni_args()
+    good_args = {"item_id": "1b8e6c1a-2f3d-4a5b-8c9d-0e1f2a3b4c5d"}
     _script(monkeypatch, [
-        _toolcalls(("create_ni_item", bad_args)),   # bad → inline error, no park
-        _toolcalls(("create_ni_item", good_args)),  # good → parks
+        _toolcalls(("run_ni_item_now", {"item_id": "aapl-quote-every-30m"})),  # bad → inline
+        _toolcalls(("run_ni_item_now", good_args)),                            # good → parks
     ])
     r = agent.run_turn(
         ctx, audit, approvals,
-        messages=[{"role": "user", "content": "make me a weather tile"}],
+        messages=[{"role": "user", "content": "refresh my tile"}],
         model="m", conversation_id=None, turn_id="t-ni-bad-then-good",
     )
     assert r["status"] == "awaiting_approval", (
         "the SECOND (valid) call must park, proving the loop kept going after the bounce"
     )
     pending = approvals.list_pending()
-    # Only the good call parked — the bad one never landed a pending row.
-    assert [p["tool"] for p in pending] == ["create_ni_item"], (
+    assert [p["tool"] for p in pending] == ["run_ni_item_now"], (
         f"exactly one pending row for the good call; got {[p['tool'] for p in pending]!r}"
     )
     good_pid = pending[0]["id"]
     assert approvals.get(good_pid)["args"] == good_args, (
         "the parked pending row belongs to the SECOND (good) call, not the first (bad)"
     )
-    # No 'proposed' audit row for create_ni_item on the bad args (nothing parked).
     proposed = [e for e in audit.list()
-                if e["tool"] == "create_ni_item" and e["decision"] == "proposed"]
+                if e["tool"] == "run_ni_item_now" and e["decision"] == "proposed"]
     assert len(proposed) == 1, (
         f"exactly one 'proposed' row (for the valid call); got {len(proposed)}"
     )
 
-
-def test_bad_create_ni_item_feeds_validator_message_and_guide_pointer_back(monkeypatch) -> None:
-    """The inline tool-result message the model sees is the validator's precise
-    text plus the read_ni_spec_guide pointer — the model must see WHAT was wrong
-    AND WHERE to look next.
+def test_bad_run_ni_item_now_feeds_validator_message_back(monkeypatch) -> None:
+    """The inline tool-result message the model sees is the prevalidator's
+    precise text — the model must see WHAT was wrong (invented id) and how ids
+    are actually obtained. (The create-spec guide-pointer variant of this test
+    retired with the create tool in NI Foreman P2.)
     """
     ctx, audit, approvals, _conn = _ni_wired()
-    bad_args = _good_create_ni_args()
-    bad_args["pipeline"] = [{"op": "jmespath", "query": "q", "as": "x"}]
     calls = _recorder(monkeypatch, [
-        _toolcalls(("create_ni_item", bad_args)),
-        _text("sorry, I had the spec wrong"),
+        _toolcalls(("run_ni_item_now", {"item_id": "nvda-price-card"})),
+        _text("sorry, I had the id wrong"),
     ])
     r = agent.run_turn(
         ctx, audit, approvals,
-        messages=[{"role": "user", "content": "make me a tile"}],
+        messages=[{"role": "user", "content": "refresh my tile"}],
         model="m", conversation_id=None, turn_id="t-ni-guide-pointer",
     )
     assert r["status"] == "complete"
-    # The tool-result message fed BACK to the model on step 2 carries the error.
     tool_msg = next(m for m in calls[-1] if m.get("role") == "tool")
     payload = json.loads(tool_msg["content"])
     assert "error" in payload, "the inline result must be an error, not a success"
-    assert "must be 'extract', 'transform', or 'llm'" in payload["error"], (
+    assert "not a card id" in payload["error"], (
         f"validator's precise message must survive; got: {payload['error']!r}"
     )
-    assert "read_ni_spec_guide" in payload["error"], (
-        f"guide pointer must be appended; got: {payload['error']!r}"
-    )
 
-
-def test_update_ni_item_bad_patch_bounces_inline(monkeypatch) -> None:
-    """update_ni_item's prevalidate mirrors create's: a malformed patch bounces
-    INLINE before any card parks."""
+def test_retired_ni_write_tool_call_bounces_inline_with_cannot_run(monkeypatch) -> None:
+    """NI Foreman P2 capability deletion, pinned at the loop: a model calling a
+    retired NI write tool (create_ni_item here — with args that were VALID
+    before P2) gets the inline cannot-run error, no card parks, and the turn
+    continues to prose. A fabricated call has no executor."""
     ctx, audit, approvals, _conn = _ni_wired()
-    _script(monkeypatch, [
-        _toolcalls(("update_ni_item",
-                    {"item_id": "does-not-matter",
-                     "pipeline": [{"op": "jmespath", "as": "x"}]})),
-        _text("understood, spec was wrong"),
+    calls = _recorder(monkeypatch, [
+        _toolcalls(("create_ni_item", _good_create_ni_args())),
+        _text("understood — I'll point you at the NI page composer instead"),
     ])
     r = agent.run_turn(
         ctx, audit, approvals,
-        messages=[{"role": "user", "content": "edit my tile"}],
-        model="m", conversation_id=None, turn_id="t-ni-update-bad",
+        messages=[{"role": "user", "content": "make me a tile"}],
+        model="m", conversation_id=None, turn_id="t-ni-retired-create",
     )
-    assert r["status"] == "complete", "the bad update must bounce inline, not park"
-    assert approvals.list_pending() == [], "no card ever parked for an unrunnable patch"
+    assert r["status"] == "complete", "the retired call must bounce inline, not park"
+    assert approvals.list_pending() == [], "no card ever parks for a retired tool"
+    tool_msg = next(m for m in calls[-1] if m.get("role") == "tool")
+    payload = json.loads(tool_msg["content"])
+    assert payload["error"] == "cannot run tool 'create_ni_item'"
 
-
-def test_valid_create_ni_item_still_parks_as_before(monkeypatch) -> None:
-    """A well-formed create_ni_item spec parks exactly as before the fix — the
-    prevalidate hook is transparent for valid drafts.
+def test_valid_run_ni_item_now_still_parks_as_before(monkeypatch) -> None:
+    """A well-formed run_ni_item_now call parks exactly as before — the
+    prevalidate hook is transparent for valid calls.
     """
     ctx, audit, approvals, _conn = _ni_wired()
-    _script(monkeypatch, [_toolcalls(("create_ni_item", _good_create_ni_args()))])
+    _script(monkeypatch, [_toolcalls(("run_ni_item_now",
+                                      {"item_id": "1b8e6c1a-2f3d-4a5b-8c9d-0e1f2a3b4c5d"}))])
     r = agent.run_turn(
         ctx, audit, approvals,
-        messages=[{"role": "user", "content": "make me a tile"}],
+        messages=[{"role": "user", "content": "refresh my tile"}],
         model="m", conversation_id=None, turn_id="t-ni-good",
     )
-    assert r["status"] == "awaiting_approval", "a valid draft still parks"
-    assert [p["tool"] for p in approvals.list_pending()] == ["create_ni_item"]
-
+    assert r["status"] == "awaiting_approval", "a valid call still parks"
+    assert [p["tool"] for p in approvals.list_pending()] == ["run_ni_item_now"]
 
 # --- P0 NI-Foreman hygiene (field fabrication incident, 2026-09-16) -----------
 
@@ -1617,13 +1609,19 @@ def test_text_probe_flags_the_field_fabrication_reply() -> None:
         "A scheduled item is a recurring run; tool results show in Activity.") is False
 
 
-def test_extract_recovers_the_fenced_call_from_mixed_prose() -> None:
-    """Recovery finds the KNOWN-tool call in the fabricated reply and skips the
-    fake result blob (no name/arguments pair)."""
-    calls = agent._extract_text_tool_calls(_FABRICATED_REPLY)
+def test_extract_skips_retired_tool_but_probe_still_diverts(monkeypatch) -> None:
+    """NI Foreman P2: start_ni_flow left the registry, so the field transcript
+    recovers NO runnable call (a fabricated call has no executor) — but the
+    reply still diverts (sealed-marker arm + unknown-tool attempt arm), so it
+    can never finalize as prose. Recovery itself still works for a KEPT tool."""
+    assert agent._extract_text_tool_calls(_FABRICATED_REPLY) == []
+    assert agent._looks_like_tool_attempt(_FABRICATED_REPLY) is True
+    assert agent.text_tool_probe(_FABRICATED_REPLY) is True
+    kept = ('```json\n{"name": "run_ni_item_now", '
+            '"arguments": {"item_id": "1b8e6c1a-2f3d-4a5b-8c9d-0e1f2a3b4c5d"}}\n```')
+    calls = agent._extract_text_tool_calls(kept)
     assert len(calls) == 1
-    assert calls[0]["function"]["name"] == "start_ni_flow"
-
+    assert calls[0]["function"]["name"] == "run_ni_item_now"
 
 def test_extract_accepts_alternate_spellings() -> None:
     """P0: 'function'/'parameters' spellings recover too (Qwen-coder dialect)."""

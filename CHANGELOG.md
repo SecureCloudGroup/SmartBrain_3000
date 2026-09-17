@@ -11,6 +11,20 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Added
+- **Neural Interface: every step now lives on the card.** When SmartBrain
+  can't tell where your data should come from, the card itself offers vetted
+  source suggestions to tap — or a field to paste a URL you trust. A
+  **Fix** button on failing cards rebuilds the card against its own source,
+  and **Edit…** in the card menu renames a card or changes how often it
+  updates. No chat conversation required for any of it.
+
+### Changed
+- **Chat reads your cards; the Neural page changes them.** Chat can still
+  list, explain, and refresh cards, but creating, editing, and deleting now
+  happen only on the Neural Interface page — a model can no longer invent a
+  card-changing action, because those actions simply don't exist for it.
+
 ### Fixed
 - **Neural Interface: the GOOG-that-showed-NiSource bug.** "create new NI item
   … GOOG" filled the ticker slot with "NI" (the product's own name!) and the

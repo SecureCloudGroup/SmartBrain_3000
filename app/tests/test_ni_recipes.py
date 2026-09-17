@@ -38,8 +38,10 @@ def _tool_ctx() -> tuple[tools.ToolContext, duckdb.DuckDBPyConnection, bytes]:
 
 def _tool_call(name: str, ctx: tools.ToolContext, args: dict) -> dict:
     tool = tools.get_tool(name)
-    assert tool is not None, f"tool {name!r} not registered"
-    return tool.handler(ctx, tools.validate_args(tool, args))
+    if tool is not None:
+        return tool.handler(ctx, tools.validate_args(tool, args))
+    # NI Foreman P2: retired write tools run via the internal factory.
+    return tools.INTERNAL_NI_TOOLS[name](ctx, args)
 
 
 # --- recipe catalog end-to-end determinism ----------------------------------
@@ -248,7 +250,7 @@ def test_derive_ni_paths_reports_unaddressable_keys() -> None:
 def test_derive_ni_paths_accepts_json_string_via_programmatic_call() -> None:
     """The gated tool surface takes an object; programmatic callers (tests,
     future MCP tool) can pass a JSON-encoded string via the handler directly."""
-    handler = tools.get_tool("derive_ni_paths").handler
+    handler = tools.INTERNAL_NI_TOOLS["derive_ni_paths"]
     encoded = json.dumps({"a": {"b": 1}})
     # Bypass validate_args (its schema requires object at the surface). The
     # handler's own _coerce_sample accepts a JSON string.
@@ -268,13 +270,13 @@ def test_derive_ni_paths_caps_output_at_60_and_flags_truncated() -> None:
 def test_derive_ni_paths_bare_list_root_reports_unaddressable() -> None:
     """A bare-list root cannot be extract-addressed (§4.1 requires a key first)."""
     # A list at the input root is legal input but §4.1 needs a key first.
-    handler = tools.get_tool("derive_ni_paths").handler
+    handler = tools.INTERNAL_NI_TOOLS["derive_ni_paths"]
     out = handler(tools.ToolContext(), {"sample": [{"a": 1}, {"a": 2}]})
     assert any("[0]" in u for u in out["unaddressable"])
 
 
 def test_derive_ni_paths_rejects_oversize_sample() -> None:
-    handler = tools.get_tool("derive_ni_paths").handler
+    handler = tools.INTERNAL_NI_TOOLS["derive_ni_paths"]
     huge = "x" * (33 * 1024)
     with pytest.raises(ValueError):
         handler(tools.ToolContext(), {"sample": huge})
@@ -744,16 +746,16 @@ def test_confirm_tool_enforces_geocode_query_display() -> None:
     ni_flow._pause_for_recipe_confirm(
         ctx.ni, iid, {"subject": "KC weather", "place": "Kansas City",
                       "cadence_minutes": 15}, recipe)
-    tool = tools.get_tool("confirm_ni_flow_source")
+    tool_handler = tools.INTERNAL_NI_TOOLS["confirm_ni_flow_source"]
     with pytest.raises(ValueError, match="Kansas City"):
-        tool.handler(ctx, {"item_id": iid, "source_url": recipe["url_template"]})
+        tool_handler(ctx, {"item_id": iid, "source_url": recipe["url_template"]})
     # Stray geocode_query on a flow with NO pending lookup is refused.
     iid2 = ni_flow.create_shell_item(ctx.ni, "bitcoin price")
     btc = ni_catalog.get_recipe("crypto-price-btc-usd")
     ni_flow._pause_for_recipe_confirm(
         ctx.ni, iid2, {"subject": "BTC", "place": None, "cadence_minutes": 15}, btc)
     with pytest.raises(ValueError, match="no pending place lookup"):
-        tool.handler(ctx, {"item_id": iid2, "source_url": btc["url_template"],
+        tool_handler(ctx, {"item_id": iid2, "source_url": btc["url_template"],
                            "geocode_query": "Kansas City"})
     # The matching echo proceeds (lookup via injected... the tool uses netguard;
     # the degrade path still completes the flow honestly).
@@ -762,7 +764,7 @@ def test_confirm_tool_enforces_geocode_query_display() -> None:
     orig = flowmod._netguard_mod.safe_fetch_json
     try:
         flowmod._netguard_mod.safe_fetch_json = lambda url: fixture
-        out = tool.handler(ctx, {"item_id": iid, "source_url": recipe["url_template"],
+        out = tool_handler(ctx, {"item_id": iid, "source_url": recipe["url_template"],
                                  "geocode_query": "Kansas City"})
     finally:
         flowmod._netguard_mod.safe_fetch_json = orig
