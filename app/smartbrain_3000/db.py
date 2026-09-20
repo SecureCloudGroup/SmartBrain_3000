@@ -444,6 +444,20 @@ _MIGRATIONS: tuple[tuple[int, str | Callable[[], str]], ...] = (
         " error TEXT,"
         " contract_ok BOOLEAN);",
     ),
+    # 41 — NI oversight plane v0 (design round 8): findings filed by watchers
+    # (W-CREATE first). Operational plaintext only: titles are code-authored,
+    # host-free strings (last_status posture); no sealed content lives here.
+    (
+        41,
+        "CREATE TABLE IF NOT EXISTS ni_findings ("
+        " id TEXT PRIMARY KEY,"
+        " created_at TIMESTAMP DEFAULT current_timestamp,"
+        " watcher TEXT NOT NULL,"
+        " severity TEXT NOT NULL,"
+        " title TEXT NOT NULL,"
+        " item_id TEXT,"
+        " status TEXT NOT NULL DEFAULT 'open');",
+    ),
 )
 
 

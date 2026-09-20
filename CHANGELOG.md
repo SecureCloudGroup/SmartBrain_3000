@@ -11,6 +11,26 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Added
+- **Neural Interface: no card is ever a dead end.** Every failed or paused
+  card now states, in plain words, exactly what happened and offers the way
+  forward on the card itself: declining a suggested source returns you to
+  the source picker (instead of killing the card), a countdown that needs a
+  date now *asks for the date* right on the card, and failed builds offer
+  Retry and "Pick a source" — with the real reason shown, never a generic
+  "didn't finish". A new health watcher runs in the background, spots stuck
+  or repeatedly-failing cards, and lists what it finds under Settings →
+  Status (serious issues also reach the notification feed).
+
+### Fixed
+- The card menu (⋯) now closes when you click anywhere else, and its actions
+  close it too.
+- The paste-a-URL box on the source picker no longer collapses to a sliver,
+  and errors from it show on the card instead of the bottom of the page.
+- The "Something's wrong" note no longer promises an automatic redraft that
+  didn't exist — your note is kept on the card's history and the card
+  returns to draft.
+
 ## [0.19.0] - 2026-09-17
 
 ### Added

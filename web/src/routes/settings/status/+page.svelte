@@ -8,7 +8,7 @@
   import Chip from "$lib/components/Chip.svelte";
   import Spinner from "$lib/components/Spinner.svelte";
   import { account } from "$lib/account.svelte";
-  import { api, ApiError, type AppStatus } from "$lib/api";
+  import { api, ApiError, type AppStatus, type NiFinding } from "$lib/api";
   import { Recorder } from "$lib/audio/recorder";
   import { loadWakeWord, matchWake, saveWakeWord } from "$lib/audio/wakeword";
   import { SPEECH_RATE_KEY, speechRate } from "$lib/audio/speaker";
@@ -16,12 +16,28 @@
 
   let status = $state<AppStatus | null>(null);
   let error = $state("");
+  // G1 oversight plane: open watcher findings (Neural Interface health).
+  let findings = $state<NiFinding[]>([]);
   let timer: ReturnType<typeof setInterval> | null = null;
 
   async function load() {
     try {
       status = await api.appStatus();
       error = "";
+    } catch (err) {
+      error = describeError(err);
+    }
+    try {
+      findings = (await api.niFindings()).findings;
+    } catch {
+      findings = []; // desktop-local only; remote views just skip the block
+    }
+  }
+
+  async function resolveFinding(id: string) {
+    try {
+      await api.niResolveFinding(id);
+      findings = findings.filter((f) => f.id !== id);
     } catch (err) {
       error = describeError(err);
     }
@@ -454,6 +470,21 @@
           <h2 class="row"><span>Feeds</span>{#if status.feeds.errors}<Chip kind="danger">{status.feeds.errors} failing</Chip>{/if}</h2>
           <div class="rows">
             <div class="srow"><span>Subscriptions</span><strong>{status.feeds.count}</strong></div>
+          </div>
+        </div>
+      {/if}
+      {#if findings.length}
+        <div class="card">
+          <h2 class="row"><span>Neural Interface health</span>
+            {#if findings.some((f) => f.severity === "high")}<Chip kind="danger">needs a look</Chip>{/if}
+          </h2>
+          <div class="rows">
+            {#each findings.slice(0, 8) as f (f.id)}
+              <div class="srow">
+                <span>{f.title}</span>
+                <button class="linklike" onclick={() => resolveFinding(f.id)}>Dismiss</button>
+              </div>
+            {/each}
           </div>
         </div>
       {/if}

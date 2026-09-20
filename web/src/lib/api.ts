@@ -678,6 +678,25 @@ export interface NiItemFlow {
   geocode_query?: string;
   geocode_host?: string;
   not_covered?: string[];
+  // G1 (rounds 7-8, single-writer law): terminal records carry the master's
+  // derivation — one honest reason sentence, an optional answerable question,
+  // and the reopen affordances. The card renders these verbatim; no more
+  // frontend-guessed failure copy.
+  reason?: string;
+  question?: { kind: string; prompt?: string };
+  reopen?: string[];
+}
+
+// G1 oversight plane: one watcher finding (ni_findings row, code-authored
+// host-free title). Severity high additionally rides the carrier row.
+export interface NiFinding {
+  id: string;
+  created_at: string | null;
+  watcher: string;
+  severity: "info" | "warn" | "high";
+  title: string;
+  item_id: string | null;
+  status: string;
 }
 
 export interface NiBoardItem {
@@ -1644,6 +1663,24 @@ export const api = {
         method: "POST",
         headers: { "x-sb-local": "1" },
       }),
+  niFlowAnswer: (id: string, kind: string, value: string) =>
+    req<{ ok: boolean; started: boolean }>(`/api/ni/items/${encodeURIComponent(id)}/flow/answer`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-SB-Local": "1" },
+      body: JSON.stringify({ kind, value }),
+    }),
+  niFlowReopen: (id: string) =>
+    req<{ ok: boolean; state: string }>(`/api/ni/items/${encodeURIComponent(id)}/flow/reopen`, {
+      method: "POST",
+      headers: { "X-SB-Local": "1" },
+    }),
+  niFindings: () =>
+    req<{ findings: NiFinding[] }>("/api/ni/findings", { headers: { "X-SB-Local": "1" } }),
+  niResolveFinding: (id: string) =>
+    req<{ ok: boolean }>(`/api/ni/findings/${encodeURIComponent(id)}/resolve`, {
+      method: "POST",
+      headers: { "X-SB-Local": "1" },
+    }),
   niFlowRetry: (id: string) =>
     req<{ id: string; started: boolean }>(
       `/api/ni/items/${encodeURIComponent(id)}/flow/retry`, {

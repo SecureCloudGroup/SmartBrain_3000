@@ -825,17 +825,28 @@ def test_h2_remap_never_re_enters_recipe_matching(monkeypatch) -> None:
         f"remap must fetch the item's own URL only; got {fetched}"
 
 
-def test_h2_terminal_flow_slot_hidden_when_payload_exists() -> None:
-    """H2 (audit 2026-09-13): a failed flow slot on an item with a
-    renderable payload does NOT mask the tile — board_flow_field returns None.
+def test_h2_terminal_flow_hidden_for_finalized_items_only() -> None:
+    """H2, G1-scoped: terminal-slot hiding protects FINALIZED tiles (a failed
+    remap must not mask the working card) — but a SHELL's only payload is its
+    sample preview, and hiding the terminal there erased the honest reason and
+    the way out (four field confusions, 2026-09-17). Shells always tell the
+    truth: reason + reopen, per the no-dead-end law.
     """
     store, _conn = _store()
-    item_id = ni_flow.create_shell_item(store, "some card")
-    # create_shell_item wrote a ``preview`` snapshot at add_item time, so the
-    # item already has a renderable payload the board can fall back to.
-    ni_flow._transition(store, item_id, "failed", error="mapping: no match")
-    assert ni_flow.board_flow_field(store, item_id) is None, \
-        "terminal slot must not mask the working card when a payload exists"
+    # Shell: terminal record EXPOSED with the master's derivation.
+    shell_id = ni_flow.create_shell_item(store, "some card")
+    ni_flow._transition(store, shell_id, "failed", error="mapping: no match")
+    field = ni_flow.board_flow_field(store, shell_id)
+    assert field is not None and field["state"] == "failed"
+    assert field["reason"], "shells must carry the honest reason"
+    assert field["reopen"], "shells must carry a way out"
+    # Finalized item (shell marker gone) with a payload: H2 hiding holds.
+    spec = dict(store.get_item(shell_id)["spec"])
+    spec.pop("_shell", None)
+    store.update_spec(shell_id, spec, origin="user")
+    ni_flow._transition(store, shell_id, "failed", error="mapping: no match")
+    assert ni_flow.board_flow_field(store, shell_id) is None, \
+        "terminal slot must not mask a finalized card with a payload"
 
 
 def test_h3_awaiting_pick_marker_on_source_state() -> None:
