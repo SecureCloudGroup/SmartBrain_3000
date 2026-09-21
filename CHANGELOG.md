@@ -11,6 +11,8 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-09-21
+
 ### Added
 - **Neural Interface: your notes now rebuild the card.** "Something's wrong →
   should be in Fahrenheit degrees" no longer dead-ends: the card re-reads its
