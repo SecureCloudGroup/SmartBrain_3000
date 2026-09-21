@@ -11,6 +11,8 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.20.1] - 2026-09-21
+
 ### Fixed
 - **Neural Interface: the Retry button now actually retries.** It had never
   worked — every tap crashed the rebuild and looped the card back to
