@@ -11,6 +11,8 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-09-21
+
 ### Added
 - **Neural Interface: paste any web page — not just APIs.** The URLs people
   actually find (news pages, harbor tide tables, the NHC outlook) now build
