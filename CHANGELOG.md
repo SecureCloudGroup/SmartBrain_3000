@@ -12,6 +12,14 @@ to know when a release changes behavior.
 ## [Unreleased]
 
 ### Added
+- **Neural Interface: your notes now rebuild the card.** "Something's wrong →
+  should be in Fahrenheit degrees" no longer dead-ends: the card re-reads its
+  own source and rebuilds with your note as part of the goal — the Fahrenheit
+  conversion is authored automatically and the built-in verifier checks the
+  result against your words. A new **Refine…** action in the card menu does
+  the same any time ("update every 10 minutes" changes the schedule on the
+  spot; "different source" returns you to the source picker). Cards whose
+  source type can't rebuild yet say so honestly instead of pretending.
 - **Neural Interface: five new built-in sources — and asks in plain words
   find them.** Hacker News front page, ISS position, Ethereum price, GitHub
   repository stars, and sunrise/sunset times join the vetted catalog

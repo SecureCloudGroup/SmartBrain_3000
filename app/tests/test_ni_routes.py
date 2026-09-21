@@ -1430,3 +1430,69 @@ def test_findings_routes_list_and_resolve(client: TestClient) -> None:
                        headers={"X-SB-Local": "1"}).status_code == 404
     finds2 = client.get("/api/ni/findings", headers={"X-SB-Local": "1"}).json()["findings"]
     assert not any(f["id"] == fid for f in finds2)
+
+
+# --- G4a: the Refine route + c2-wrong auto-refine ---------------------------
+
+def _refinable_card(client: TestClient) -> str:
+    """A finalized http_json card (post-shell) the refine paths accept."""
+    iid = _create_via_tool(client)
+    store = client.app.state.ni
+    spec = dict(store.get_item(iid)["spec"])
+    spec["goal"] = "track the weather"
+    spec["source"] = {"type": "http_json",
+                       "url": "https://api.example.com/weather.json"}
+    spec["pipeline"] = [{"op": "extract", "paths": {"temperature": "current.temp"}}]
+    store.update_spec(iid, spec, origin="user")
+    return iid
+
+
+def test_refine_route_rebuilds_from_note(client: TestClient, monkeypatch) -> None:
+    from smartbrain_3000 import ni_flow
+    _unlock(client)
+    fired: dict = {}
+    monkeypatch.setattr(ni_flow, "start_flow_worker",
+                        lambda s, iid, **kw: fired.update(id=iid, **kw) or True)
+    iid = _refinable_card(client)
+    r = client.post(f"/api/ni/items/{iid}/refine",
+                    json={"note": "should be in Fahrenheit degrees."},
+                    headers={"X-SB-Local": "1"})
+    assert r.status_code == 200 and r.json()["kind"] == "rebuild", r.text
+    record = ni_flow._flow_read(client.app.state.ni, iid)
+    assert record["_refine_note"] == "should be in Fahrenheit degrees."
+    assert fired["id"] == iid
+
+
+def test_refine_route_cadence_and_guidance(client: TestClient, monkeypatch) -> None:
+    from smartbrain_3000 import ni_flow
+    _unlock(client)
+    monkeypatch.setattr(ni_flow, "start_flow_worker", lambda *a, **kw: True)
+    iid = _refinable_card(client)
+    r = client.post(f"/api/ni/items/{iid}/refine",
+                    json={"note": "update every 45 minutes"},
+                    headers={"X-SB-Local": "1"})
+    assert r.status_code == 200 and r.json()["kind"] == "cadence"
+    assert client.app.state.ni.get_item(iid)["spec"]["interval_minutes"] == 45
+    # A model-source card refuses with guidance, not a 500.
+    iid2 = _create_via_tool(client, title="Haiku card")
+    r2 = client.post(f"/api/ni/items/{iid2}/refine",
+                     json={"note": "make it different"},
+                     headers={"X-SB-Local": "1"})
+    assert r2.status_code == 409 and "composer" in r2.json()["detail"]
+
+
+def test_validate_wrong_with_note_drives_the_rebuild(client: TestClient,
+                                                      monkeypatch) -> None:
+    """The modal's promise, finally true: Something's-wrong + a note on a
+    rebuildable card re-enters sampling with the note sealed."""
+    from smartbrain_3000 import ni_flow
+    _unlock(client)
+    monkeypatch.setattr(ni_flow, "start_flow_worker", lambda *a, **kw: True)
+    iid = _refinable_card(client)
+    store = client.app.state.ni
+    store.commission(iid)
+    r = client.post(f"/api/ni/items/{iid}/validate",
+                    json={"ok": False, "note": "should be in Fahrenheit degrees."})
+    assert r.status_code == 200 and r.json()["refine"] == "rebuild", r.text
+    record = ni_flow._flow_read(store, iid)
+    assert record["_refine_note"] == "should be in Fahrenheit degrees."

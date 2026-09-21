@@ -1601,3 +1601,27 @@ FROM WORDS, not works-when-handed-a-URL.
 - S2 live research (LOCATE's research strategy) remains DARK pending the D1
   probe-consent ruling; the catalog + relevance floor are its deterministic
   ground.
+
+**G4a — SUSTAIN.refine: the note acts (2026-09-21, rounds 7-8 wave 4a)**.
+The last original field failure (°F note ignored) closes as machinery:
+- ``ni_flow.begin_refine(store, item, note)`` — deterministic routing over a
+  closed rule set: a cadence note updates ``interval_minutes`` directly (no
+  worker); a source-change note re-enters the ``source`` pick (new consent as
+  ever); everything else re-enters sampling on the item's OWN frozen source
+  with ``_refine_note`` sealed on the remap record. Guards mirror
+  ``begin_remap`` (http_json only, params filled); other source types refuse
+  with composer guidance — honestly, never silently.
+- **The note joins the goal**: ``_run_remap`` appends the sealed note to the
+  request, so the °F/threshold authoring regexes read it AND the P8 judge
+  verifies the rebuilt card AGAINST it. The user's words drive the rebuild;
+  models serve them. (M-DELTA's classification slot stays reserved — the
+  deterministic router + note-augmented judge cover the observed field
+  classes; a model classifier joins only if the field shows misroutes.)
+- Surfaces: ``POST /api/ni/items/{id}/refine`` (desktop-local, audited) + a
+  ``Refine…`` card-menu modal; the C2 "Something's wrong" note now CALLS
+  ``begin_refine`` automatically — the modal's promise is finally true, and
+  its copy says exactly what happens.
+- End-to-end pin: a °F note on a °C weather card re-samples and ships a
+  pipeline carrying scale+offset (``test_g4a_fahrenheit_note_authors_the_
+  conversion_end_to_end``); field regressions 5/5b split the honest-refusal
+  (model source) and rebuild (http_json) classes.

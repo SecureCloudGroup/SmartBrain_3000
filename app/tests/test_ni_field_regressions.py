@@ -136,9 +136,11 @@ def test_field_4_hn_resolves_from_words_to_the_vetted_recipe(client) -> None:
 
 
 def test_field_5_wrong_value_note_is_journaled_and_rewinds_honestly(client) -> None:
-    """Field: weather card, "should be in Fahrenheit degrees" note → silent
-    rewind with a false redraft promise. G1 truth: the note rides the journal
-    verbatim, the card returns to draft. (The note DRIVING a redraft is G4.)"""
+    """Field: weather card, "should be in Fahrenheit degrees" note. This card
+    is MODEL-sourced, so the rebuild path refuses with guidance — the note
+    still rides the journal verbatim and the card returns to draft honestly.
+    (The http_json rebuild path is field_5b below — G4a made the promise
+    true for the class the field failure was actually in.)"""
     from smartbrain_3000 import tools
     ctx = tools.ToolContext(ni=client.app.state.ni)
     body = {
@@ -161,6 +163,42 @@ def test_field_5_wrong_value_note_is_journaled_and_rewinds_honestly(client) -> N
     journal = store.read_journal(iid)
     assert any("should be in Fahrenheit degrees." in e["summary"]
                for e in journal), "the user's words ride the journal verbatim"
+    assert any("could not drive a rebuild" in e["summary"] for e in journal), \
+        "the refusal is honest, never silent"
+
+
+def test_field_5b_fahrenheit_note_drives_the_rebuild(client) -> None:
+    """G4a closes the °F field failure for its real class: on an http_json
+    card, Something's-wrong + the note re-enters sampling with the note
+    sealed as part of the goal (the rebuild authors the conversion and the
+    judge verifies it — pinned end-to-end in test_ni_flow)."""
+    from smartbrain_3000 import tools
+    ctx = tools.ToolContext(ni=client.app.state.ni)
+    body = {
+        "title": "Weather in Charleston (http)", "goal": "track the weather",
+        "params": {},
+        "source": {"type": "model", "instruction": "placeholder"},
+        "pipeline": [],
+        "scene": {"type": "stack", "dir": "v", "gap": "sm", "children": [
+            {"type": "text", "value": "{{temperature}}", "role": "title",
+             "tone": "default", "size": "md"}]},
+        "display": {"size": "small"}, "interval_minutes": 15,
+        "preview_payload": {"temperature": "29.2"},
+    }
+    iid = tools.INTERNAL_NI_TOOLS["create_ni_item"](ctx, body)["id"]
+    store = client.app.state.ni
+    spec = dict(store.get_item(iid)["spec"])
+    spec["source"] = {"type": "http_json",
+                       "url": "https://api.open-meteo.com/v1/forecast?latitude=32.7&longitude=-79.9&current_weather=true"}
+    spec["pipeline"] = [{"op": "extract",
+                          "paths": {"temperature": "current_weather.temperature"}}]
+    store.update_spec(iid, spec, origin="user")
+    r = client.post(f"/api/ni/items/{iid}/validate",
+                    json={"ok": False, "note": "should be in Fahrenheit degrees."})
+    assert r.status_code == 200 and r.json()["refine"] == "rebuild", r.text
+    record = ni_flow._flow_read(store, iid)
+    assert record["_refine_note"] == "should be in Fahrenheit degrees."
+    assert record["state"] == "sampling"
 
 
 def test_field_6_stalled_build_is_swept_and_named(client) -> None:

@@ -1974,3 +1974,90 @@ def test_g2_judge_drops_cadence_shaped_gaps() -> None:
                                "gaps": ["5-minute interval data", "volume"],
                                "wrong": []}))
     assert out is not None and out["gaps"] == ["volume"], out
+
+
+# --- G4a: SUSTAIN.refine — the note acts --------------------------------------
+
+def _refine_card(store) -> dict:
+    """A finalized http_json card with a temperature field (the °F class)."""
+    item_id = ni_flow.create_shell_item(store, "weather card")
+    spec = dict(store.get_item(item_id)["spec"])
+    spec.pop("_shell", None)
+    spec["goal"] = "track the weather in Charleston"
+    spec["source"] = {"type": "http_json",
+                       "url": "https://api.open-meteo.com/v1/forecast?latitude=32.7&longitude=-79.9&current_weather=true"}
+    spec["pipeline"] = [{"op": "extract",
+                          "paths": {"temperature": "current_weather.temperature"}}]
+    store.update_spec(item_id, spec, origin="user")
+    return store.get_item(item_id)
+
+
+def test_g4a_refine_cadence_note_updates_interval_without_a_worker(monkeypatch) -> None:
+    store, _conn = _store()
+    item = _refine_card(store)
+    fired: dict = {}
+    monkeypatch.setattr(ni_flow, "start_flow_worker",
+                        lambda s, iid, **kw: fired.update(id=iid) or True)
+    out = ni_flow.begin_refine(store, item, "update every 10 minutes please")
+    assert out == {"kind": "cadence", "interval_minutes": 10}
+    assert store.get_item(item["id"])["spec"]["interval_minutes"] == 10
+    assert fired == {}, "a cadence note never spawns a worker"
+
+
+def test_g4a_refine_source_change_note_reenters_the_pick(monkeypatch) -> None:
+    store, _conn = _store()
+    item = _refine_card(store)
+    monkeypatch.setattr(ni_flow, "start_flow_worker", lambda *a, **kw: True)
+    out = ni_flow.begin_refine(store, item, "use a different source for this")
+    assert out == {"kind": "source_change"}
+    record = ni_flow._flow_read(store, item["id"])
+    assert record["state"] == "source"
+
+
+def test_g4a_refine_content_note_seals_and_rebuilds(monkeypatch) -> None:
+    store, _conn = _store()
+    item = _refine_card(store)
+    fired: dict = {}
+    monkeypatch.setattr(ni_flow, "start_flow_worker",
+                        lambda s, iid, **kw: fired.update(id=iid, **kw) or True)
+    out = ni_flow.begin_refine(store, item, "should be in Fahrenheit degrees.")
+    assert out == {"kind": "rebuild"}
+    record = ni_flow._flow_read(store, item["id"])
+    assert record["_remap"] is True
+    assert record["_refine_note"] == "should be in Fahrenheit degrees."
+    assert fired["source_url"] == item["spec"]["source"]["url"]
+
+
+def test_g4a_refine_refuses_unnotable_cards() -> None:
+    store, _conn = _store()
+    item_id = ni_flow.create_shell_item(store, "model card")
+    spec = dict(store.get_item(item_id)["spec"])
+    spec.pop("_shell", None)
+    spec["source"] = {"type": "model", "instruction": "write a haiku"}
+    store.update_spec(item_id, spec, origin="user")
+    item = store.get_item(item_id)
+    with pytest.raises(ValueError, match="composer"):
+        ni_flow.begin_refine(store, item, "make it about the sea")
+    with pytest.raises(ValueError, match="note drives"):
+        ni_flow.begin_refine(store, _refine_card(store), "   ")
+
+
+def test_g4a_fahrenheit_note_authors_the_conversion_end_to_end() -> None:
+    """The field case, closed: a °F note on a °C card re-samples the OWN
+    source and the rebuild AUTHORS the scale+offset conversion — because the
+    note joined the goal the authoring regexes and the judge read."""
+    store, _conn = _store()
+    item = _refine_card(store)
+    fixture = _load("kc_weather")
+    out = ni_flow.begin_refine(store, item, "should be in Fahrenheit degrees.")
+    assert out["kind"] == "rebuild"
+    mapping_reply = json.dumps({"temperature": "current_weather.temperature"})
+    model = _scripted_model([mapping_reply])  # remap: no intent call; judge starves
+    result = ni_flow.run_flow(store, item["id"], gateway_call=model,
+                               fetcher=lambda url: fixture, catalog=_empty_catalog())
+    assert result["state"] == "ready", result.get("error")
+    spec = store.get_item(item["id"])["spec"]
+    fns = [t.get("fn") for stage in spec["pipeline"] if stage.get("op") == "transform"
+           for t in stage.get("apply") or []]
+    assert "scale" in fns and "offset" in fns, (
+        f"°F conversion must be authored from the note; pipeline fns: {fns}")
