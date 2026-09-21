@@ -1053,14 +1053,21 @@ def test_card_consent_approve_runs_the_flow_synchronously(client: TestClient) ->
                for e in journal)
 
 
-def test_card_consent_decline_is_an_honest_terminal(client: TestClient) -> None:
-    """[Not this source] fails the flow ('declined'), never fetches, and the
-    shell stays refusing commission."""
+def test_card_consent_decline_reenters_the_source_pick(client: TestClient) -> None:
+    """G1: [Not this source] is a fork, not a death — the flow re-enters the
+    ``source`` pick pause (suggestions + paste-URL render from that state),
+    never fetches, and the shell stays refusing commission."""
     _unlock(client)
     iid = _paused_recipe_flow(client)
     r = client.post(f"/api/ni/items/{iid}/flow/decline-source",
                     headers={"X-SB-Local": "1"})
-    assert r.status_code == 200 and r.json()["state"] == "failed"
+    assert r.status_code == 200 and r.json()["state"] == "source"
+    from smartbrain_3000 import ni_flow
+    record = ni_flow._flow_read(client.app.state.ni, iid)
+    assert record["state"] == "source"
+    row = next(x for x in client.get("/api/ni/board").json()["items"]
+               if x["id"] == iid)
+    assert row["flow"]["state"] == "source" and "suggestions" in row["flow"]
     item = client.app.state.ni.get_item(iid)
     assert item["state"] == "draft" and item["spec"].get("_shell") is True
     assert client.post(f"/api/ni/items/{iid}/commission").status_code == 409
@@ -1334,3 +1341,91 @@ def test_patch_interval_updates_cadence_and_journals(client: TestClient) -> None
                         json={"interval_minutes": 0}).status_code == 422
     assert client.patch(f"/api/ni/items/{iid}",
                         json={"interval_minutes": 10081}).status_code == 422
+
+
+# --- G1: answer / reopen / findings routes ---------------------------------
+
+def test_answer_route_resumes_supply_date_terminal(client: TestClient, monkeypatch) -> None:
+    """G1: an answerable unsupported (computed ask, no date) exposes the
+    supply_date question on the board; the user's typed date resumes the flow
+    with ``_supplied`` stamped (their answer is the truth, never a model's)."""
+    from smartbrain_3000 import ni_flow
+    _unlock(client)
+    monkeypatch.setattr(ni_flow, "start_flow_worker", lambda s, iid, **kw: True)
+    iid = client.post("/api/ni/intake", json={"request": "countdown to the vote"},
+                      headers={"X-SB-Local": "1"}).json()["id"]
+    store = client.app.state.ni
+    ni_flow._terminate_unsupported(
+        store, iid,
+        "computed-only requires an explicit YYYY-MM-DD date in the request",
+        question={"kind": "supply_date",
+                   "prompt": "When is it? Add the date as YYYY-MM-DD."})
+    row = next(x for x in client.get("/api/ni/board").json()["items"]
+               if x["id"] == iid)
+    assert row["flow"]["question"]["kind"] == "supply_date"
+    assert row["flow"]["reason"]
+    # Malformed date bounces 400 with actionable text; the question stays.
+    bad = client.post(f"/api/ni/items/{iid}/flow/answer",
+                      json={"kind": "supply_date", "value": "November 3rd"},
+                      headers={"X-SB-Local": "1"})
+    assert bad.status_code == 400 and "YYYY-MM-DD" in bad.json()["detail"]
+    good = client.post(f"/api/ni/items/{iid}/flow/answer",
+                       json={"kind": "supply_date", "value": "2026-11-03"},
+                       headers={"X-SB-Local": "1"})
+    assert good.status_code == 200 and good.json()["started"] is True
+    record = ni_flow._flow_read(store, iid)
+    assert record["_supplied"]["date"] == "2026-11-03"
+    assert record["state"] == "intent"
+    # The question is consumed — answering again 409s.
+    assert client.post(f"/api/ni/items/{iid}/flow/answer",
+                       json={"kind": "supply_date", "value": "2026-01-01"},
+                       headers={"X-SB-Local": "1"}).status_code == 409
+
+
+def test_answer_route_409_when_no_question_pending(client: TestClient) -> None:
+    _unlock(client)
+    iid = _create_via_tool(client)
+    r = client.post(f"/api/ni/items/{iid}/flow/answer",
+                    json={"kind": "supply_date", "value": "2026-01-01"},
+                    headers={"X-SB-Local": "1"})
+    assert r.status_code == 409 and "not asking" in r.json()["detail"]
+
+
+def test_reopen_route_reenters_pick_for_failed_shells_only(
+        client: TestClient, monkeypatch) -> None:
+    """G1: reopen = the 'pick a different source' way out. Shell + terminal
+    only; finalized cards 409 toward Fix."""
+    from smartbrain_3000 import ni_flow
+    _unlock(client)
+    monkeypatch.setattr(ni_flow, "start_flow_worker", lambda s, iid, **kw: True)
+    iid = client.post("/api/ni/intake", json={"request": "a source that died"},
+                      headers={"X-SB-Local": "1"}).json()["id"]
+    store = client.app.state.ni
+    # Non-terminal → 409.
+    assert client.post(f"/api/ni/items/{iid}/flow/reopen",
+                       headers={"X-SB-Local": "1"}).status_code == 409
+    ni_flow._fail(store, iid, "fetch", "sample fetch failed: HTTPError")
+    r = client.post(f"/api/ni/items/{iid}/flow/reopen", headers={"X-SB-Local": "1"})
+    assert r.status_code == 200 and r.json()["state"] == "source"
+    row = next(x for x in client.get("/api/ni/board").json()["items"]
+               if x["id"] == iid)
+    assert row["flow"]["state"] == "source" and "suggestions" in row["flow"]
+    # Finalized card → 409 (Fix owns re-derivation).
+    iid2 = _create_via_tool(client)
+    assert client.post(f"/api/ni/items/{iid2}/flow/reopen",
+                       headers={"X-SB-Local": "1"}).status_code == 409
+
+
+def test_findings_routes_list_and_resolve(client: TestClient) -> None:
+    from smartbrain_3000 import ni_watch
+    _unlock(client)
+    conn = client.app.state.ni.conn
+    fid = ni_watch.file_finding(conn, "create", "warn", "a route-level finding")
+    finds = client.get("/api/ni/findings", headers={"X-SB-Local": "1"}).json()["findings"]
+    assert any(f["id"] == fid for f in finds)
+    assert client.post(f"/api/ni/findings/{fid}/resolve",
+                       headers={"X-SB-Local": "1"}).status_code == 200
+    assert client.post(f"/api/ni/findings/{fid}/resolve",
+                       headers={"X-SB-Local": "1"}).status_code == 404
+    finds2 = client.get("/api/ni/findings", headers={"X-SB-Local": "1"}).json()["findings"]
+    assert not any(f["id"] == fid for f in finds2)

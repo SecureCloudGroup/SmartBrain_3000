@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -28,6 +29,7 @@ from . import (
     ni_flow,
     ni_library,
     ni_mcp,
+    ni_watch,
     tools,
     vault_format,
 )
@@ -985,11 +987,12 @@ def confirm_flow_source(request: Request, item_id: str) -> dict:
 
 @router.post("/api/ni/items/{item_id}/flow/decline-source")
 def decline_flow_source(request: Request, item_id: str) -> dict:
-    """Card-consent: the tile's [Not this source] tap — an honest terminal.
+    """Card-consent: the tile's [Not this source] tap — a fork, not a death.
 
-    The flow fails ``declined`` (never a fetch), the shell stays a draft the
-    commission door refuses, and the card shows the creation-didn't-finish
-    copy with delete/retry as the ways out. Audited like the approval.
+    G1 (field 2026-09-17): declining used to fail the flow terminally and the
+    card went dead. Now the flow RE-ENTERS the ``source`` pick pause, so the
+    card immediately offers the other vetted suggestions plus paste-a-URL.
+    Never a fetch; audited like the approval.
     """
     _require_desktop_local(request)
     store = _store(request)
@@ -1001,15 +1004,106 @@ def decline_flow_source(request: Request, item_id: str) -> dict:
         raise HTTPException(
             status_code=409,
             detail=f"no source confirmation pending (flow state {state or 'none'!r})")
-    ni_flow._fail(store, item_id, "declined", "user declined the source on the card")
+    ni_flow.reenter_source_pick(store, item_id,
+                                 "user declined the source — picking again")
     request.app.state.audit.append(
         "user", "ni_flow_decline_source", "reviewed", "executed", True,
         args_summary=tools.summarize({"item_id": item_id}),
-        result_summary=tools.summarize({"state": "failed"}),
+        result_summary=tools.summarize({"state": "source"}),
     )
     _journal_best_effort(store, item_id, "c2_wrong",
                           "user declined the proposed source")
-    return {"ok": True, "state": "failed"}
+    return {"ok": True, "state": "source"}
+
+
+class AnswerIn(BaseModel):
+    """G1: the card's answer to a question the master asked (closed kinds)."""
+
+    kind: str = Field(min_length=1, max_length=40)
+    value: str = Field(min_length=1, max_length=200)
+
+
+@router.post("/api/ni/items/{item_id}/flow/answer")
+def answer_flow_question(request: Request, item_id: str, body: AnswerIn) -> dict:
+    """G1: resume an answerable terminal with the user's typed answer.
+
+    ``supply_date``: the user's date (YYYY-MM-DD) is stamped ``_supplied`` on
+    the flow record (their typed answer is the truth — never a model's guess)
+    and the worker re-runs the sealed request. 409 unless the record's stamped
+    question matches the answered kind. Desktop-local, audited.
+    """
+    _require_desktop_local(request)
+    store = _store(request)
+    item = store.get_item(item_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="item not found")
+    record = ni_flow._flow_read(store, item_id)
+    stamped = (record or {}).get("_question") if isinstance(record, dict) else None
+    if not isinstance(stamped, dict) or stamped.get("kind") != body.kind:
+        raise HTTPException(status_code=409,
+                            detail="this card is not asking that question")
+    if body.kind != "supply_date":
+        raise HTTPException(status_code=409, detail="unanswerable question kind")
+    value = body.value.strip()
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+        raise HTTPException(status_code=400,
+                            detail="date must be written as YYYY-MM-DD")
+    ni_flow._transition(store, item_id, "intent",
+                         note=f"user supplied the date {value}",
+                         _supplied={"date": value}, _question=None)
+    started = ni_flow.start_flow_worker(store, item_id)
+    request.app.state.audit.append(
+        "user", "ni_flow_answer", "reviewed", "executed", True,
+        args_summary=tools.summarize({"item_id": item_id, "kind": body.kind}),
+        result_summary=tools.summarize({"started": bool(started)}),
+    )
+    return {"ok": True, "started": bool(started)}
+
+
+@router.post("/api/ni/items/{item_id}/flow/reopen")
+def reopen_flow_pick(request: Request, item_id: str) -> dict:
+    """G1: a terminally failed SHELL re-enters the source pick — the "pick a
+    different source" way out the no-dead-end law promises. 409 for finalized
+    cards (Fix/remap owns those) and non-terminal flows.
+    """
+    _require_desktop_local(request)
+    store = _store(request)
+    item = store.get_item(item_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="item not found")
+    if not item["spec"].get("_shell"):
+        raise HTTPException(status_code=409,
+                            detail="finished cards reopen via Fix, not the source pick")
+    record = ni_flow._flow_read(store, item_id)
+    state = str((record or {}).get("state") or "")
+    if record is None or state not in ("failed", "unsupported"):
+        raise HTTPException(status_code=409,
+                            detail=f"nothing to reopen (flow state {state or 'none'!r})")
+    ni_flow.reenter_source_pick(store, item_id, "user reopened the source pick")
+    request.app.state.audit.append(
+        "user", "ni_flow_reopen", "reviewed", "executed", True,
+        args_summary=tools.summarize({"item_id": item_id}),
+        result_summary=tools.summarize({"state": "source"}),
+    )
+    return {"ok": True, "state": "source"}
+
+
+@router.get("/api/ni/findings")
+def get_findings(request: Request, limit: int = 50) -> dict:
+    """G1 oversight surface: open watcher findings, newest first (desktop-local)."""
+    _require_desktop_local(request)
+    store = _store(request)
+    return {"findings": ni_watch.list_findings(store.conn, limit=limit)}
+
+
+@router.post("/api/ni/findings/{finding_id}/resolve")
+def resolve_finding_route(request: Request, finding_id: str) -> dict:
+    """Mark one finding resolved from the Health surface. 404 when absent/closed."""
+    _require_desktop_local(request)
+    store = _store(request)
+    if not ni_watch.resolve_finding(store.conn, finding_id):
+        raise HTTPException(status_code=404, detail="finding not found or already resolved")
+    return {"ok": True}
 
 
 def _host_of(url: str) -> str:

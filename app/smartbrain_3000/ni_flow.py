@@ -32,7 +32,7 @@ from typing import Any
 from . import claudecli as _claudecli_mod
 from . import gateway as _gateway_mod
 from . import netguard as _netguard_mod
-from . import ni
+from . import ni, ni_master
 
 log = logging.getLogger("smartbrain.ni.flow")
 
@@ -239,6 +239,17 @@ def _transition(store: ni.NIStore, item_id: str, state: str, **fields: Any) -> d
     for key, value in fields.items():
         if key.startswith("_"):
             record[key] = value
+    # G1 (rounds 7-8): the append-only ledger rides the record — one hook here
+    # covers every stage entry and every terminal, and ni_master derives card
+    # copy and watcher verdicts from it (single-writer law).
+    outcome = "entered"
+    if state in ("failed", "unsupported"):
+        outcome = state
+    ni_master.ledger_append(
+        record, state, outcome,
+        error_class=(ni_master.error_class_of(error) if error else None),
+        decision=(extra_note if isinstance(extra_note, str) else None),
+    )
     _flow_write(store, item_id, record)
     return record
 
@@ -1405,11 +1416,22 @@ def _handle_computed(store: ni.NIStore, item_id: str, request: str,
     if not _has_source_type("computed"):
         return _terminate_unsupported(store, item_id,
                                        "computed-only requests need the computed source (not enabled)")
+    supplied = None
+    record_now = _flow_read(store, item_id) or {}
+    if isinstance(record_now.get("_supplied"), dict):
+        supplied = str(record_now["_supplied"].get("date") or "") or None
+    if supplied is not None and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", supplied):
+        supplied = None  # defence: the answer route validates too
     date_match = re.search(r"\b(\d{4}-\d{2}-\d{2})\b", request)
-    if not date_match:
-        return _terminate_unsupported(store, item_id,
-                                       "computed-only requires an explicit YYYY-MM-DD date in the request")
-    date_str = date_match.group(1)
+    if supplied is None and not date_match:
+        # G1: an answerable terminal — the card asks for the date instead of
+        # dead-ending (the user's typed answer is the truth; never a model's).
+        return _terminate_unsupported(
+            store, item_id,
+            "computed-only requires an explicit YYYY-MM-DD date in the request",
+            question={"kind": "supply_date",
+                       "prompt": "When is it? Add the date as YYYY-MM-DD."})
+    date_str = supplied or date_match.group(1)
     source = {"type": "computed", "compute": "days_until", "date": date_str}
     pipeline: list[dict] = []
     scene = value_scene(["days"])
@@ -2124,11 +2146,19 @@ def _fail(store: ni.NIStore, item_id: str, klass: str, detail: str) -> dict:
     return _flow_read(store, item_id) or {}
 
 
-def _terminate_unsupported(store: ni.NIStore, item_id: str, reason: str) -> dict:
-    """Terminal ``unsupported(reason)`` — the request is honest about what can't be served."""
+def _terminate_unsupported(store: ni.NIStore, item_id: str, reason: str,
+                            question: dict | None = None) -> dict:
+    """Terminal ``unsupported(reason)`` — the request is honest about what can't be served.
+
+    G1: ``question`` (a ni_master.QUESTION_KINDS stamp, e.g. supply_date) makes
+    the terminal ANSWERABLE — the card renders the ask and /flow/answer resumes.
+    """
     assert store is not None and item_id and isinstance(reason, str), "args required"
-    _transition(store, item_id, "unsupported", error=reason[:_MAX_ERROR],
-                note=f"unsupported: {reason}")
+    fields: dict = {"error": reason[:_MAX_ERROR], "note": f"unsupported: {reason}"}
+    if question is not None:
+        assert question.get("kind") in ni_master.QUESTION_KINDS, "unknown question kind"
+        fields["_question"] = question
+    _transition(store, item_id, "unsupported", **fields)
     return _flow_read(store, item_id) or {}
 
 
@@ -2233,10 +2263,15 @@ def board_flow_field(store: ni.NIStore, item_id: str) -> dict | None:
     state = str(record.get("state") or "")
     if state == "ready":
         return None
-    if state in _TERMINAL_STATES and _item_has_renderable_payload(store, item_id):
-        # Terminal flow record hiding: the failure is honestly reported on
-        # last_status; the tile keeps rendering its existing payload. Drop the
-        # slot so a later poll doesn't recompute this branch every second.
+    item = store.get_item(item_id)
+    shell = bool(item and item["spec"].get("_shell"))
+    if (state in _TERMINAL_STATES and not shell
+            and _item_has_renderable_payload(store, item_id)):
+        # Terminal flow record hiding — FINALIZED tiles only (H2's original
+        # intent): a failed remap must not mask the working card. G1 field
+        # lesson (four separate confusions): a SHELL's only "payload" is its
+        # sample preview, and hiding the terminal record there erased the
+        # honest reason AND the way out. Shells always tell the truth.
         try:
             store.delete_snapshot(item_id, "flow")
         except Exception as exc:  # bookkeeping only
@@ -2247,6 +2282,11 @@ def board_flow_field(store: ni.NIStore, item_id: str) -> dict | None:
     error = record.get("error")
     if isinstance(error, str) and error:
         out["error"] = error[:_MAX_ERROR]
+    if state in _TERMINAL_STATES:
+        # G1 single-writer law: the card renders ni_master's derivation —
+        # a user-facing reason plus a question or reopen affordances. Raw
+        # error detail stays available above for History/debugging.
+        out.update(ni_master.terminal_surface(state, record, shell=shell))
     # Card-consent (2026-09-15, operator: "bulletproof and deterministic"):
     # a ``confirm_source`` pause renders its OWN approval affordance on the
     # tile — the card needs the sealed disclosure verbatim: the exact URL,
@@ -2331,6 +2371,18 @@ def begin_remap(store: ni.NIStore, item: dict) -> bool:
     record["_remap"] = True
     _flow_write(store, item["id"], record)
     return start_flow_worker(store, item["id"], source_url=url)
+
+
+def reenter_source_pick(store: ni.NIStore, item_id: str, note: str) -> dict:
+    """G1: land (or re-land) the ``source`` pick pause — a decline or a failed
+    shell is a fork, not a death. The card's P3 affordances (vetted
+    suggestions + paste-a-URL) render from this state by construction.
+    """
+    assert store is not None and item_id and isinstance(note, str), "args required"
+    record = _flow_read(store, item_id) or _make_record("", "intent")
+    return _transition(store, item_id, "source",
+                        error=AWAITING_SOURCE_PICK, note=note[:_MAX_NOTE],
+                        request=record.get("request", ""))
 
 
 def sweep_stranded_flows(store: ni.NIStore) -> int:

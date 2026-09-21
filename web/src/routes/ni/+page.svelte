@@ -132,21 +132,70 @@
   let editBusy = $state(false);
   let editError = $state("");
 
+  // G1: per-card action errors render ON the card (a page-bottom error next
+  // to a form you just used reads as "nothing happened" — field lesson).
+  let flowActionError = $state<Record<string, string>>({});
+  let answerDateText = $state("");
+
   async function pickSource(item: NiBoardItem): Promise<void> {
     console.assert(item.flow?.state === "source", "pickSource: pause required");
     const url = pickUrlText.trim();
     if (url.length < 8) return;
     busyId = item.id;
+    flowActionError = { ...flowActionError, [item.id]: "" };
     try {
       await api.niFlowPickSource(item.id, url);
       pickUrlText = "";
       toast("Source set — sampling it now.");
       await load();
     } catch (err) {
-      const msg = describeError(err);
-      if (msg) error = msg;
+      flowActionError = { ...flowActionError, [item.id]: describeError(err) || "That didn’t work — check the URL." };
     } finally {
       busyId = null;
+    }
+  }
+
+  async function answerDate(item: NiBoardItem): Promise<void> {
+    console.assert(typeof item.id === "string", "answerDate: id required");
+    const value = answerDateText.trim();
+    if (!value) return;
+    busyId = item.id;
+    flowActionError = { ...flowActionError, [item.id]: "" };
+    try {
+      await api.niFlowAnswer(item.id, "supply_date", value);
+      answerDateText = "";
+      toast("Date set — building the card.");
+      await load();
+    } catch (err) {
+      flowActionError = { ...flowActionError, [item.id]: describeError(err) || "That date didn’t work — use YYYY-MM-DD." };
+    } finally {
+      busyId = null;
+    }
+  }
+
+  async function reopenPick(item: NiBoardItem): Promise<void> {
+    console.assert(typeof item.id === "string", "reopenPick: id required");
+    busyId = item.id;
+    flowActionError = { ...flowActionError, [item.id]: "" };
+    try {
+      await api.niFlowReopen(item.id);
+      toast("Okay — pick a source below.");
+      await load();
+    } catch (err) {
+      flowActionError = { ...flowActionError, [item.id]: describeError(err) || "Couldn’t reopen the pick." };
+    } finally {
+      busyId = null;
+    }
+  }
+
+  // G1: native <details> menus never close on their own — dismiss every open
+  // ⋯ menu when a click lands outside it (or on one of its actions).
+  function closeMenusOnOutsideClick(e: MouseEvent) {
+    const target = e.target as Element | null;
+    for (const d of document.querySelectorAll("details.ni-more[open]")) {
+      if (!target || !d.contains(target) || target.closest(".ni-more-menu")) {
+        (d as HTMLDetailsElement).open = false;
+      }
     }
   }
   async function pickRecipe(item: NiBoardItem, recipeId: string): Promise<void> {
@@ -967,7 +1016,7 @@
     busyId = item.id;
     try {
       await api.niFlowDeclineSource(item.id);
-      toast("Source declined — retry in chat with a different source, or delete the card.");
+      toast("Okay — pick a different source on the card.");
       await load();
     } catch (err) {
       const msg = describeError(err);
@@ -1023,6 +1072,8 @@
     }
   }
 </script>
+
+<svelte:window onclick={closeMenusOnOutsideClick} />
 
 {#if account.status?.unlocked}
   <div class="ni-page-head">
@@ -1124,21 +1175,51 @@
                    truth at a time. failed/unsupported render the honest error via
                    friendlyErrorClass; every other state has a calm stage label. -->
               {#if item.flow.state === "failed" || item.flow.state === "unsupported"}
+                <!-- G1 single-writer law: the card renders the MASTER's reason
+                     sentence, question, and reopen affordances verbatim — a
+                     terminal is never a dead end (retry / pick again / answer). -->
                 {@const friendly = friendlyErrorClass(item.flow.error ?? "")}
                 <p class="ni-status-fail" style="margin:0; font-size:var(--f-label)">
                   {item.flow.state === "unsupported" ? "Can’t build this card yet" : "Setup failed"}
-                  {#if friendly}
-                    — <span class="ni-status-class">{friendly}</span>
-                  {/if}
                 </p>
-                {#if item.shell}
-                  <div class="ni-actions" style="margin-top: var(--s-2)">
+                <p class="muted" style="margin:var(--s-1) 0 0; font-size:var(--f-label)">
+                  {item.flow.reason ?? friendly ?? "Creation didn’t finish."}
+                </p>
+                {#if item.flow.question?.kind === "supply_date"}
+                  <form
+                    class="ni-pick-url"
+                    style="margin-top: var(--s-2)"
+                    onsubmit={(e) => { e.preventDefault(); void answerDate(item); }}
+                  >
+                    <input
+                      type="date"
+                      bind:value={answerDateText}
+                      disabled={busyId === item.id}
+                      aria-label="Supply the date"
+                    />
+                    <button type="submit" class="secondary"
+                      disabled={busyId === item.id || !answerDateText}
+                    >Use this date</button>
+                  </form>
+                {/if}
+                <div class="ni-actions" style="margin-top: var(--s-2)">
+                  {#if item.shell && item.flow.reopen?.includes("retry")}
                     <button
                       class="secondary"
                       disabled={busyId === item.id}
                       onclick={() => retryFlow(item)}
                     >{busyId === item.id ? "Retrying…" : "Retry"}</button>
-                  </div>
+                  {/if}
+                  {#if item.shell && item.flow.reopen?.includes("pick_source")}
+                    <button
+                      class="ghost"
+                      disabled={busyId === item.id}
+                      onclick={() => reopenPick(item)}
+                    >Pick a source</button>
+                  {/if}
+                </div>
+                {#if flowActionError[item.id]}
+                  <p class="error" style="margin:var(--s-1) 0 0; font-size:var(--f-label)">{flowActionError[item.id]}</p>
                 {/if}
               {:else if item.flow.state === "source"}
                 <!-- P3 (2026-09-17): the source-pick pause renders its OWN
@@ -1178,6 +1259,9 @@
                       disabled={busyId === item.id || pickUrlText.trim().length < 8}
                     >Use this URL</button>
                   </form>
+                  {#if flowActionError[item.id]}
+                    <p class="error" style="margin:var(--s-1) 0 0; font-size:var(--f-label)">{flowActionError[item.id]}</p>
+                  {/if}
                 </div>
               {:else if item.flow.state === "confirm_source"}
                 <!-- Card-consent (2026-09-15): the flow's own approval affordance,
@@ -1299,7 +1383,7 @@
                  contradiction). Terminal-or-absent flows only; Retry lives on
                  the failure block above. -->
             <p class="muted" style="margin:0; font-size:var(--f-label)">
-              Creation didn’t finish — retry above, or delete this card.
+              Creation didn’t finish. Delete this card, or start again above.
             </p>
           {:else if preview && !item.shell}
             <div class="ni-actions">
@@ -1404,7 +1488,7 @@
     >
       <h2 class="modal-title">Something’s wrong</h2>
       <p class="modal-body">
-        Say what looked off — the assistant redrafts the item from your note.
+        Say what looked off — it goes on the card’s history, and the card returns to draft.
       </p>
       <textarea
         bind:value={noteText}
@@ -1965,12 +2049,18 @@
     margin-bottom: var(--s-2);
   }
   .ni-pick-url {
+    /* G1 field fix: a row layout collapsed the input to ~1ch inside card
+       width (the button won the flex fight) — stack instead. */
     display: flex;
+    flex-direction: column;
     gap: var(--s-2);
   }
   .ni-pick-url input {
-    flex: 1;
+    width: 100%;
     min-width: 0;
+  }
+  .ni-pick-url button {
+    align-self: flex-start;
   }
   .ni-more {
     position: relative;

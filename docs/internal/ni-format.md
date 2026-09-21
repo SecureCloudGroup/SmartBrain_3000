@@ -1500,3 +1500,38 @@ moments become card affordances, all desktop-local + audited:
   rewrite, attestations preserved, journaled "renamed to …") and
   ``interval_minutes`` (1..10080; operational cadence — attestations
   preserved, store floor re-clamps, journaled).
+
+**G1 — the Master skeleton + oversight plane v0 (2026-09-20, design rounds
+7-8)**. The generalization rebuild begins: execution stops being "a pipeline
+with branches" and becomes contracts + moves + a ledger, with watchers above.
+- ``ni_master.py``: the closed move set (advance/retry/reroute/ask_user/
+  research/degrade/finish/park), the ten-part anatomy (understand/plan/locate/
+  authorize/acquire/shape/judge/present/prove/sustain — G1 maps today's
+  stages onto it; PLAN/LOCATE/JUDGE interiors land G2/G3), the append-only
+  ``_ledger`` on every flow record (one ``_transition`` hook covers every
+  stage entry and terminal), and the **single-writer law**: terminal card
+  copy (a user-facing ``reason`` sentence, an optional closed-kind
+  ``question``, ``reopen`` affordances) is derived in ONE place and rendered
+  verbatim by the board.
+- **No-dead-end law** (the four field confusions, structurally closed): every
+  terminal surface must carry a reason + a question or reopen — property-
+  tested over the whole state×class×shell space with a law backstop for
+  error classes that don't exist yet. Shells are EXEMPT from H2 terminal-slot
+  hiding (their only "payload" is the sample preview; hiding the terminal
+  there erased the truth); finalized tiles keep H2.
+- **Forks, not deaths**: decline-source re-enters the ``source`` pick pause;
+  ``POST .../flow/reopen`` gives failed shells the same road; a computed ask
+  without a date terminates ANSWERABLE (``_question`` stamp → the card asks,
+  ``POST .../flow/answer`` validates YYYY-MM-DD, stamps ``_supplied`` — the
+  user's typed date is the truth, never a model's — and re-runs the worker).
+- **Oversight plane v0** (``ni_watch.py``, migration 41 ``ni_findings``):
+  W-CREATE rides the NI tick — absorbs the M3 stale sweep, audits the
+  dead-end law over live records (a violation = HIGH finding + carrier row),
+  clusters same-class failures across cards (≥3 in 24h = class-break
+  candidate). Findings are code-authored host-free strings (last_status
+  posture), edge-triggered by open-finding dedupe, surfaced on Settings →
+  Status with a Dismiss; ``GET /api/ni/findings`` + resolve route,
+  desktop-local.
+- Field regressions: the 2026-09-17 round is pinned in
+  ``test_ni_field_regressions.py`` — every ask asserts its card-state truth
+  (reason/question/reopen), model-free.

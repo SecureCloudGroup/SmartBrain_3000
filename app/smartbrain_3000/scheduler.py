@@ -33,8 +33,8 @@ from . import (
     gateway,
     ingest,
     ni,
-    ni_flow,
     ni_library,
+    ni_watch,
     search,
     selfreview,
     tools,
@@ -720,11 +720,13 @@ def _auto_update_ni_library(app) -> None:
 
 
 def _sweep_ni_flow_shells(app) -> None:
-    """M3 (audit 2026-09-13): fail stranded flow shells (non-terminal + >1h old).
+    """G1 (rounds 7-8): the W-CREATE oversight pass — absorbs the M3 stale
+    sweep and adds the dead-end-law audit + failure clustering (ni_watch).
 
-    Called from ``_auto_update_ni`` once per tick — bounded by ``NIStore._MAX_ITEMS``
-    (list_items iteration) with a bounded per-record datetime parse. Best-effort:
-    a sweep failure logs and returns without disrupting the NI item pass.
+    Called from ``_auto_update_ni`` once per tick — bounded by
+    ``NIStore._MAX_ITEMS``. Best-effort: a watcher failure logs and returns
+    without disrupting the NI item pass. A HIGH finding filed this pass rides
+    the NI carrier row (badge + /info) — same posture as fired alerts.
     """
     key = getattr(app.state, "master_key", None)
     if key is None:
@@ -733,12 +735,23 @@ def _sweep_ni_flow_shells(app) -> None:
     if ni_store is None:
         return
     try:
-        swept = ni_flow.sweep_stranded_flows(ni_store)
+        summary = ni_watch.watch_create(ni_store)
     except Exception as exc:  # must never stop the NI pass
-        log.warning("ni_flow sweep skipped: %s", exc)
+        log.warning("ni_watch pass skipped: %s", exc)
         return
-    if swept:
-        log.info("ni_flow: swept %d stranded flow record(s)", swept)
+    if summary.get("swept"):
+        log.info("ni_flow: swept %d stranded flow record(s)", summary["swept"])
+    if summary.get("filed"):
+        log.info("ni_watch: filed %d finding(s)", summary["filed"])
+    if summary.get("high"):
+        try:
+            store = ScheduleStore(app.state.db, key)
+            store.record_ni_run(
+                "error",
+                "Neural Interface health: a card is stuck without a way out — see the Health list.",
+            )
+        except Exception as exc:  # carrier post is bookkeeping, never fatal
+            log.warning("ni_watch carrier post failed: %s", exc)
 
 
 def _auto_update_ni(app) -> None:
