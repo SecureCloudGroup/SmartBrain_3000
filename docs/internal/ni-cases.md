@@ -19,8 +19,8 @@ gates AND the pytest suite — see "Adding a case" at the bottom). Status:
 |---|---|---|---|
 | A1 | "show me AAPL every 5 minutes" + a URL | explicit-URL value card, cadence parse | SHIPPED (aapl-5min) |
 | A2 | "what's bitcoin worth right now, keep it updated" | vague subject → keyless recipe, default cadence | SHIPPED (btc-vague) |
-| A3 | "track the weather in Kansas City" | recipe confirm + consented geocode two-step | SHIPPED (kc-weather) |
-| A4 | "latest earthquakes above magnitude 5" | list card, `where` threshold, payload-grounded type reconcile | SHIPPED (quakes-m5) |
+| A3 | "track the weather in Kansas City" | recipe confirm + consented geocode two-step; G2: US places seal °F/mph unit fills at the pause | SHIPPED (kc-weather + G2 tests) |
+| A4 | "latest earthquakes above magnitude 5" | list card, `where` threshold; G2: threshold over a fixed recipe ROUTES to freeform on the approved URL (no more silent M2.5 handoff) | SHIPPED (quakes-m5 + field regression 8) |
 | A5 | "how many people are in space right now" | scalar count | SHIPPED (people-space) |
 | A6 | "EUR to USD exchange rate, update hourly" | fx, cadence word | SHIPPED (eur-usd-hourly) |
 | A7 | "top stories on Hacker News" | list-of-objects, repeat scene | SHIPPED (hn-frontpage) |

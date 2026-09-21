@@ -23,6 +23,17 @@ to know when a release changes behavior.
   Status (serious issues also reach the notification feed).
 
 ### Fixed
+- **Neural Interface: cards now check their own work.** Before a card ships,
+  a verification step compares what it will display against what you asked
+  for — a wrong field gets re-picked once (and only kept if it's actually
+  better), and anything your card won't include is disclosed honestly.
+  "Earthquakes above magnitude 5" now builds a card that actually filters to
+  magnitude 5 instead of silently showing the 2.5+ count, and US locations
+  get Fahrenheit and mph by default ("weather in Charleston, SC" shows °F —
+  visible on the approval card before anything runs).
+- The approval card's "won't include" line no longer lists things the card
+  actually shows (magnitude and location were flagged missing on the
+  earthquake card while being displayed on it).
 - The card menu (⋯) now closes when you click anywhere else, and its actions
   close it too.
 - The paste-a-URL box on the source picker no longer collapses to a sliver,

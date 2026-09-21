@@ -71,7 +71,7 @@
       "id": "weather-open-meteo",
       "title": "Open-Meteo current weather",
       "host": "api.open-meteo.com",
-      "url_template": "https://api.open-meteo.com/v1/forecast?latitude={{param:latitude}}&longitude={{param:longitude}}&current=temperature_2m,wind_speed_10m",
+      "url_template": "https://api.open-meteo.com/v1/forecast?latitude={{param:latitude}}&longitude={{param:longitude}}&current=temperature_2m,wind_speed_10m&temperature_unit={{param:temperature_unit}}&wind_speed_unit={{param:wind_speed_unit}}",
       "docs_url": "https://open-meteo.com/en/docs",
       "auth": "none",
       "category": "weather",
@@ -94,11 +94,21 @@
             "label": "Longitude",
             "kind": "number",
             "value": ""
+          },
+          "temperature_unit": {
+            "label": "Temperature unit (celsius or fahrenheit)",
+            "kind": "string",
+            "value": ""
+          },
+          "wind_speed_unit": {
+            "label": "Wind speed unit (kmh or mph)",
+            "kind": "string",
+            "value": ""
           }
         },
         "source": {
           "type": "http_json",
-          "url": "https://api.open-meteo.com/v1/forecast?latitude={{param:latitude}}&longitude={{param:longitude}}&current=temperature_2m,wind_speed_10m"
+          "url": "https://api.open-meteo.com/v1/forecast?latitude={{param:latitude}}&longitude={{param:longitude}}&current=temperature_2m,wind_speed_10m&temperature_unit={{param:temperature_unit}}&wind_speed_unit={{param:wind_speed_unit}}"
         },
         "pipeline": [
           {
@@ -127,7 +137,7 @@
                 "$bind": "temperature"
               },
               "format": "plain",
-              "unit": "\u00b0C",
+              "unit": "°C",
               "tone": "default",
               "size": "lg"
             },
@@ -164,7 +174,9 @@
       },
       "prove_params": {
         "latitude": 37.77,
-        "longitude": -122.42
+        "longitude": -122.42,
+        "temperature_unit": "celsius",
+        "wind_speed_unit": "kmh"
       }
     },
     {
@@ -214,7 +226,7 @@
             },
             {
               "type": "text",
-              "value": "{{temp_c}} \u00b0C",
+              "value": "{{temp_c}} °C",
               "role": "value",
               "tone": "default",
               "size": "lg"
@@ -265,7 +277,7 @@
       "notes": "Keyless daily FX rates published by the ECB (weekdays only, no weekend/holiday update). Response is {\"base\":\"USD\",\"date\":\"YYYY-MM-DD\",\"rates\":{\"EUR\":<number>}}.",
       "spec_template": {
         "version": 1,
-        "title": "USD \u2192 EUR",
+        "title": "USD → EUR",
         "goal": "show the current USD to EUR exchange rate (ECB daily)",
         "params": {},
         "source": {
@@ -288,7 +300,7 @@
           "children": [
             {
               "type": "text",
-              "value": "USD \u2192 EUR",
+              "value": "USD → EUR",
               "role": "title",
               "tone": "default",
               "size": "md"
@@ -427,7 +439,7 @@
       "docs_url": "https://finnhub.io/docs/api/quote",
       "auth": "key",
       "category": "finance",
-      "notes": "Requires a free Finnhub API key entered as the api_key credential AFTER creation (the token rides the X-Finnhub-Token header via $secret, never the URL). Response is flat: {\"c\":<current>,\"h\":<high>,\"l\":<low>,\"o\":<open>,\"pc\":<prev close>,...}. Chosen over Alphavantage because Alphavantage's GLOBAL_QUOTE payload keys contain spaces (\"Global Quote\", \"05. price\") which the \u00a74.1 path grammar cannot address.",
+      "notes": "Requires a free Finnhub API key entered as the api_key credential AFTER creation (the token rides the X-Finnhub-Token header via $secret, never the URL). Response is flat: {\"c\":<current>,\"h\":<high>,\"l\":<low>,\"o\":<open>,\"pc\":<prev close>,...}. Chosen over Alphavantage because Alphavantage's GLOBAL_QUOTE payload keys contain spaces (\"Global Quote\", \"05. price\") which the §4.1 path grammar cannot address.",
       "spec_template": {
         "version": 1,
         "title": "Stock quote",
