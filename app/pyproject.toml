@@ -56,6 +56,11 @@ smartbrain_3000 = ["web/**/*", "data/**/*.json"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
+markers = [
+    # test_ni_flow's shared-connection worker guard: only a test whose real
+    # start_flow_worker call cannot spawn a thread may carry this.
+    "real_worker: opt out of the no-threaded-worker autouse stub",
+]
 
 # Ruff config is EXPLICIT so a ruff upgrade that promotes new default rules is a
 # deliberate decision, not a silent CI failure. See #191 for the drift this closes.

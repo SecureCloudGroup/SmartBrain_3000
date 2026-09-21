@@ -31,6 +31,21 @@ def _load(name: str) -> object:
         return json.load(fp)
 
 
+@pytest.fixture(autouse=True)
+def _no_threaded_worker(request, monkeypatch):
+    """Structural guard (docker-image suite caught this class TWICE): this
+    file's ``_store()`` is a plain shared DuckDB connection, and DuckDB
+    cursors are per-thread — a REAL ``start_flow_worker`` thread corrupts
+    fetches mid-test. Default every test to a no-op spawn; tests that need
+    capture or synchronous execution override with their own monkeypatch,
+    and the one test of the real claim semantics opts out via the
+    ``real_worker`` marker.
+    """
+    if request.node.get_closest_marker("real_worker"):
+        return
+    monkeypatch.setattr(ni_flow, "start_flow_worker", lambda *a, **kw: True)
+
+
 def _store() -> tuple[nimod.NIStore, duckdb.DuckDBPyConnection]:
     """Fresh in-memory NIStore for one test — bounded by pytest's process."""
     conn = duckdb.connect(":memory:")
@@ -889,9 +904,12 @@ def test_m1_born_marker_survives_journal_pruning() -> None:
     assert ni_flow.is_flow_or_recipe_born(store, item_id)
 
 
+@pytest.mark.real_worker
 def test_m3_worker_refusal_writes_failed_state(monkeypatch) -> None:
     """M3 (audit 2026-09-13): a claim collision writes ``failed(busy)`` on
-    the flow record instead of leaving a silent shell.
+    the flow record instead of leaving a silent shell. (real_worker: the
+    claim refusal happens BEFORE any thread spawns, so the shared-conn
+    guard's concern does not apply.)
     """
     store, _conn = _store()
     item_id = ni_flow.create_shell_item(store, "busy-drill")
@@ -2308,6 +2326,9 @@ def test_page_door_never_converts_a_remap(monkeypatch) -> None:
     honestly — never silently become an interpreted page card."""
     store, _conn = _store()
     item = _refine_card(store)
+    # DuckDB cursors are per-thread: begin_refine must NOT thread off with the
+    # shared test connection (the docker-image suite caught this class twice).
+    monkeypatch.setattr(ni_flow, "start_flow_worker", lambda *a, **kw: True)
     out = ni_flow.begin_refine(store, item, "should be in Fahrenheit degrees.")
     assert out["kind"] == "rebuild"
 
