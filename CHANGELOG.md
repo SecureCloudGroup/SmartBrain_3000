@@ -11,6 +11,16 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Changed
+- **Neural Interface: sources are now matched by meaning, not keywords.**
+  The assistant's own understanding picks the vetted source for your words —
+  "what is NVDA trading at", "how much is a share of Microsoft", "when does
+  the sun rise tomorrow" all land the right source with the normal approval
+  step. When it isn't sure, its best guesses appear as suggestions on the
+  picker (you decide, as always); keyword matching remains only as the
+  offline fallback. A new live release gate replays a paraphrase matrix so
+  "any phrasing" is a tested property, not a hope.
+
 ### Fixed
 - **Neural Interface: "show me the price of NVDA" now finds the stock
   source.** "Price" plus a ticker counts as a stock ask (it previously

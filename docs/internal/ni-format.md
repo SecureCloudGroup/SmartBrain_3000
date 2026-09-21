@@ -1625,3 +1625,28 @@ The last original field failure (°F note ignored) closes as machinery:
   pipeline carrying scale+offset (``test_g4a_fahrenheit_note_authors_the_
   conversion_end_to_end``); field regressions 5/5b split the honest-refusal
   (model source) and rebuild (http_json) classes.
+
+**M-RANK — LOCATE's real interior (2026-09-21, the field verdict)**. The
+operator's diagnosis was exact: resolution ran on a keyword scorer under the
+round-7 architecture's names, and "show me the price of NVDA" scoring ZERO
+was the proof. ``locate_rank`` replaces it as the authority:
+- One bounded call: the NEED (request verbatim + subject/wants/threshold)
+  against the CODE-BUILT corpus (id | title | category | notes per catalog
+  row, capped 40). Closed reply ``{best, confidence: high|medium,
+  alternates[≤3]}`` — ids only, every id validated against the catalog; an
+  invented id poisons the whole reply. The model can never name a URL or a
+  new source; a high pick lands the STANDARD consent pause (exact URL, user
+  decides); medium seals ``_ranked`` on the source pause and the card renders
+  the model's candidates as its suggestions; best=null → honest empty pick.
+- Any rank error → the deterministic keyword scorer (now the FALLBACK and
+  the recorded/offline path — scripted suites and the recorded gate ride it
+  by construction, so zero test churn).
+- **The resolve gate** (``ni-flow-eval.py --resolve``): a 16-row paraphrase
+  matrix run LIVE — every covered ask must reach its recipe at high
+  confidence in every phrasing; uncovered asks must never high-match
+  (medium suggestions are safe: the user vets). First live run: 16/16,
+  including four stock phrasings with no keyword overlap at all. Runs
+  before every NI release tag alongside --engine.
+- Param FILLS stay deterministic (W-D stopwords, W-E sealed fills) —
+  selection is semantic, execution values remain code-derived and
+  consent-displayed.

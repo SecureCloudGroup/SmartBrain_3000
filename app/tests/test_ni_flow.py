@@ -2065,3 +2065,97 @@ def test_g4a_fahrenheit_note_authors_the_conversion_end_to_end(monkeypatch) -> N
            for t in stage.get("apply") or []]
     assert "scale" in fns and "offset" in fns, (
         f"°F conversion must be authored from the note; pipeline fns: {fns}")
+
+
+# --- M-RANK: LOCATE's semantic interior (field verdict 2026-09-21) ----------
+
+def test_mrank_validates_ids_and_shape() -> None:
+    """The model may only return ids from the code-built corpus — an invented
+    id poisons the whole reply (fallback takes over); alternates are deduped,
+    capped, and id-checked; malformed replies return None."""
+    cat = [{"id": "a", "title": "A", "category": "x", "notes": ""},
+           {"id": "b", "title": "B", "category": "x", "notes": ""}]
+    intent = {"subject": "s", "wants": ["w"]}
+    good = ni_flow.locate_rank(cat, "req", intent,
+        lambda p: '{"best": "a", "confidence": "high", "alternates": ["b", "b", "a", "zzz"]}')
+    assert good == {"best": "a", "confidence": "high", "alternates": ["b"]}
+    none_pick = ni_flow.locate_rank(cat, "req", intent,
+        lambda p: '{"best": null, "confidence": "medium", "alternates": ["a"]}')
+    assert none_pick == {"best": None, "confidence": "medium", "alternates": ["a"]}
+    assert ni_flow.locate_rank(cat, "req", intent,
+        lambda p: '{"best": "invented", "confidence": "high", "alternates": []}') is None
+    assert ni_flow.locate_rank(cat, "req", intent,
+        lambda p: '{"best": "a", "confidence": "certain", "alternates": []}') is None
+    assert ni_flow.locate_rank(cat, "req", intent, lambda p: "not json") is None
+    assert ni_flow.locate_rank([], "req", intent, lambda p: "{}") is None
+    def _boom(p):
+        raise RuntimeError("model down")
+    assert ni_flow.locate_rank(cat, "req", intent, _boom) is None
+
+
+def test_mrank_high_lands_the_confirm_pause() -> None:
+    """A high-confidence pick routes into the STANDARD consent pause — the
+    model chose by meaning; the user still sees the exact URL and decides."""
+    from smartbrain_3000 import ni_catalog
+    store, _conn = _store()
+    item_id = ni_flow.create_shell_item(store, "what is NVDA trading at")
+    intent_reply = json.dumps({
+        "kind": "external_data", "subject": "NVDA", "cadence_minutes": 15,
+        "wants": ["price"], "threshold": None, "display_hint": "value",
+    })
+    rank_reply = json.dumps({"best": "stock-quote-finnhub",
+                              "confidence": "high", "alternates": []})
+    model = _scripted_model([intent_reply, rank_reply])
+    result = ni_flow.run_flow(store, item_id,
+                               gateway_call=model,
+                               fetcher=lambda url: {},
+                               catalog=list(ni_catalog.entries()))
+    assert result["state"] == "confirm_source", result
+    record = ni_flow._flow_read(store, item_id)
+    assert record["_recipe_id"] == "stock-quote-finnhub"
+
+
+def test_mrank_medium_seals_ranked_candidates_for_the_pick_card() -> None:
+    """Medium confidence never auto-matches — the ranked ids seal on the
+    source pause and the BOARD renders them as the card's suggestions."""
+    from smartbrain_3000 import ni_catalog
+    store, _conn = _store()
+    item_id = ni_flow.create_shell_item(store, "coastal conditions please")
+    intent_reply = json.dumps({
+        "kind": "external_data", "subject": "coast", "cadence_minutes": 15,
+        "wants": ["conditions"], "threshold": None, "display_hint": "value",
+    })
+    rank_reply = json.dumps({"best": "sunrise-sunset", "confidence": "medium",
+                              "alternates": ["weather-open-meteo"]})
+    model = _scripted_model([intent_reply, rank_reply])
+    result = ni_flow.run_flow(store, item_id,
+                               gateway_call=model,
+                               fetcher=lambda url: {},
+                               catalog=list(ni_catalog.entries()))
+    assert result["state"] == "source", result
+    record = ni_flow._flow_read(store, item_id)
+    assert record["_ranked"] == ["sunrise-sunset", "weather-open-meteo"]
+    field = ni_flow.board_flow_field(store, item_id)
+    ids = [s["recipe_id"] for s in field["suggestions"]]
+    assert ids == ["sunrise-sunset", "weather-open-meteo"]
+
+
+def test_mrank_invalid_reply_falls_back_to_the_scorer() -> None:
+    """A rank failure never strands the flow — the deterministic scorer takes
+    over (also the recorded/offline path), landing the same recipe the
+    keyword path always found."""
+    from smartbrain_3000 import ni_catalog
+    store, _conn = _store()
+    item_id = ni_flow.create_shell_item(store, "NVDA stock price every 28 minutes")
+    intent_reply = json.dumps({
+        "kind": "external_data", "subject": "NVDA", "cadence_minutes": 28,
+        "wants": ["price"], "threshold": None, "display_hint": "value",
+    })
+    model = _scripted_model([intent_reply, "utter garbage, not a rank reply"])
+    result = ni_flow.run_flow(store, item_id,
+                               gateway_call=model,
+                               fetcher=lambda url: {},
+                               catalog=list(ni_catalog.entries()))
+    assert result["state"] == "confirm_source", result
+    record = ni_flow._flow_read(store, item_id)
+    assert record["_recipe_id"] == "stock-quote-finnhub"

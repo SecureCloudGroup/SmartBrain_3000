@@ -633,6 +633,76 @@ def suggest_recipes(catalog: list[dict], request: str, intent: dict,
     return out
 
 
+_RANK_PROMPT = (
+    "A user wants a live-data card. Their request: __REQUEST__\n"
+    "Understood as: __INTENT__\n"
+    "These vetted data sources exist (id | title | category | notes):\n"
+    "__CORPUS__\n"
+    'Which source SERVES this request? Reply ONLY '
+    '{"best": "<id>" | null, "alternates": ["<id>", ...], '
+    '"confidence": "high" | "medium"}. '
+    "best=null when none of them serves it (do NOT force a pick); alternates "
+    "= up to 3 other plausible ids; confidence high only when the match is "
+    "unmistakable. Use ONLY ids from the list."
+)
+
+
+def locate_rank(catalog: list[dict], request: str, intent: dict,
+                call_model: Callable[[str], str]) -> dict | None:
+    """M-RANK (round 7, LOCATE's interior — built after the 2026-09-21 field
+    verdict): the model matches the NEED against the code-built corpus by
+    MEANING, not word overlap. "Price of NVDA", "what is NVDA trading at",
+    and "AAPL quote" all reach the stock source with zero keyword lists.
+
+    Containment (the standing rules): the model only returns IDS from the
+    corpus code hands it — never a URL, never a new source; every id is
+    validated against the catalog; the pick still lands the normal consent
+    pause where the user sees the exact URL. ANY error or invalid reply
+    returns None and the deterministic scorer takes over (fallback, and the
+    recorded/offline path).
+    """
+    assert isinstance(catalog, list) and isinstance(request, str), "args required"
+    assert isinstance(intent, dict) and callable(call_model), "intent + model"
+    if not catalog:
+        return None
+    ids = {str(r.get("id") or "") for r in catalog if isinstance(r, dict)}
+    ids.discard("")
+    if not ids:
+        return None
+    lines = []
+    for r in catalog[:40]:  # bounded corpus
+        if not isinstance(r, dict) or not r.get("id"):
+            continue
+        lines.append(f"- {r['id']} | {str(r.get('title') or '')[:80]} | "
+                     f"{str(r.get('category') or '')[:20]} | "
+                     f"{str(r.get('notes') or '')[:140]}")
+    goal = {k: intent.get(k) for k in ("subject", "wants", "threshold")
+            if intent.get(k) is not None}
+    prompt = (_RANK_PROMPT
+              .replace("__REQUEST__", request[:300].replace("\n", " "))
+              .replace("__INTENT__", json.dumps(goal, ensure_ascii=False)[:300])
+              .replace("__CORPUS__", "\n".join(lines)))
+    try:
+        obj = _parse_json_reply(call_model(prompt))
+        best = obj.get("best")
+        confidence = obj.get("confidence")
+        alternates = obj.get("alternates")
+        if best is not None and (not isinstance(best, str) or best not in ids):
+            return None  # invented id — the whole reply is untrusted
+        if confidence not in ("high", "medium"):
+            return None
+        clean_alts: list[str] = []
+        if isinstance(alternates, list):
+            for a in alternates[:3]:
+                if isinstance(a, str) and a in ids and a != best \
+                        and a not in clean_alts:
+                    clean_alts.append(a)
+        return {"best": best, "confidence": confidence,
+                "alternates": clean_alts}
+    except Exception:  # fallback is the deterministic scorer, never a crash
+        return None
+
+
 def match_recipe(catalog: list[dict], request: str, intent: dict) -> dict | None:
     """§29 source stage: score every catalog entry; ticker heuristic → finance.
 
@@ -1568,6 +1638,25 @@ def _run_external_flow(store: ni.NIStore, item_id: str, request: str,
     if known_url:
         return _sample_and_map(store, item_id, request, intent, known_url,
                                 call_model, do_fetch)
+    # M-RANK first (round 7 LOCATE): semantic selection over the corpus.
+    ranked = locate_rank(catalog_rows, request, intent, call_model)
+    if ranked is not None:
+        by_id = {str(r.get("id")): r for r in catalog_rows if isinstance(r, dict)}
+        if ranked["best"] and ranked["confidence"] == "high":
+            return _pause_for_recipe_confirm(store, item_id, intent,
+                                              by_id[ranked["best"]],
+                                              call_model=call_model)
+        # Medium confidence (or no best): the USER picks — the ranked ids seal
+        # on the record so the card shows the model's candidates, best first.
+        candidates = [i for i in ([ranked["best"]] if ranked["best"] else [])
+                      + ranked["alternates"] if i in by_id]
+        _transition(store, item_id, "source",
+                    error=AWAITING_SOURCE_PICK,
+                    note="paused: awaiting your source pick",
+                    _ranked=candidates)
+        return _flow_read(store, item_id) or {}
+    # Fallback (model unavailable / invalid reply / offline suites): the
+    # deterministic keyword scorer.
     recipe = match_recipe(catalog_rows, request, intent)
     if recipe is not None:
         return _pause_for_recipe_confirm(store, item_id, intent, recipe,
@@ -2594,12 +2683,31 @@ def board_flow_field(store: ni.NIStore, item_id: str) -> dict | None:
     # the optional geocode lookup, and the wants this source cannot serve.
     # The chat model is no longer a required relay for the consent moment.
     if state == "source":
-        # P3: the pick pause renders its own affordances — vetted suggestions
-        # (deterministic scorer, all categories) + paste-a-URL.
+        # P3 affordances: vetted suggestions + paste-a-URL. M-RANK's sealed
+        # candidates (model-picked at pause time, ids validated) render
+        # first; the deterministic scorer fills in when none were sealed.
         intent = record.get("intent") if isinstance(record.get("intent"), dict) else {}
         try:
-            out["suggestions"] = suggest_recipes(
-                _load_catalog(), str(record.get("request") or ""), intent)
+            ranked_ids = record.get("_ranked")
+            if isinstance(ranked_ids, list) and ranked_ids:
+                by_id = {str(r.get("id")): r for r in _load_catalog()
+                         if isinstance(r, dict)}
+                out["suggestions"] = []
+                for rid in ranked_ids[:3]:
+                    r = by_id.get(str(rid))
+                    if r is None:
+                        continue
+                    url = str(r.get("url_template") or "")
+                    fills = _preview_recipe_fills(r, str(record.get("request") or ""))
+                    out["suggestions"].append({
+                        "recipe_id": str(r.get("id") or ""),
+                        "title": str(r.get("title") or ""),
+                        "host": str(r.get("host") or ""),
+                        "url": display_filled_url(url, fills) if fills else url,
+                    })
+            else:
+                out["suggestions"] = suggest_recipes(
+                    _load_catalog(), str(record.get("request") or ""), intent)
         except Exception as exc:  # suggestions are best-effort display data
             log.warning("ni_flow: suggest_recipes failed for %s: %s", item_id, exc)
             out["suggestions"] = []
