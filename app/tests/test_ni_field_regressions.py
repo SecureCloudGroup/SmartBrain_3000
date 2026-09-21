@@ -124,7 +124,8 @@ def test_field_4_hn_resolves_from_words_to_the_vetted_recipe(client) -> None:
     ni_flow._pause_for_recipe_confirm(store, iid, intent, match)
     flow = _board_flow(client, iid)
     assert flow["state"] == "confirm_source"
-    assert "hn.algolia.com" in (flow.get("source_url") or "")
+    from urllib.parse import urlparse
+    assert urlparse(flow.get("source_url") or "").hostname == "hn.algolia.com"
     # And a truly uncovered ask still gets the honest empty pick pause.
     iid2 = client.post("/api/ni/intake",
                        json={"request": "show me the tides for Limehouse Boat Landing SC"},

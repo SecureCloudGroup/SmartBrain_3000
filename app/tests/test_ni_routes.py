@@ -1255,7 +1255,8 @@ def test_pick_recipe_routes_into_confirm_source_pause(
     assert r.status_code == 200 and r.json()["state"] == "confirm_source", r.text
     record = ni_flow._flow_read(client.app.state.ni, iid)
     assert record["state"] == "confirm_source"
-    assert "frankfurter.dev" in str(record.get("source_url") or "")
+    from urllib.parse import urlparse
+    assert urlparse(str(record.get("source_url") or "")).hostname == "api.frankfurter.dev"
 
 
 def test_board_source_pause_exposes_deterministic_suggestions(
