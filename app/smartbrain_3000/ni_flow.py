@@ -2284,6 +2284,16 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
     try:
         sample = do_fetch(url)
     except Exception as exc:
+        # G4b page door (field 2026-09-21: every URL the operator pasted was
+        # a normal WEBPAGE — nhc.noaa.gov, spacinsider, usharbors — and the
+        # JSON-only pick refused them all): a decode-class failure means the
+        # consented URL serves a page, not an API. The Phase-2c machinery
+        # (netguard fetch + subprocess-jailed extraction + the local-only llm
+        # stage) has had no flow door until now.
+        if type(exc).__name__ in ("JSONDecodeError", "ValueError") \
+                and not remap:
+            return _build_page_card(store, item_id, request, intent, url,
+                                     call_model)
         return _fail(store, item_id, "fetch", f"sample fetch failed: {type(exc).__name__}")
     try:
         cands = derive_paths(sample)
@@ -2416,6 +2426,87 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
         handoff_note = handoff_note + "; " + "; ".join(extra_notes)
     return _finalize(store, item_id, spec, built["preview_payload"],
                      note=handoff_note, born=born)
+
+
+def _page_llm_stage(intent: dict) -> dict:
+    """The one llm pipeline stage of an interpreted page card — code-built
+    from the WANTS (closed schema; the instruction never carries params or
+    fetched text; the engine data-fences the page text at run time)."""
+    assert isinstance(intent, dict), "intent required"
+    wants = [w for w in (intent.get("wants") or []) if isinstance(w, str) and w]
+    fields: list[str] = []
+    for w in wants[:6]:  # llm stage output cap
+        slug = _slugify_field_name(w)
+        if slug and slug not in fields:
+            fields.append(slug)
+    if not fields:
+        fields = ["summary"]
+    asked = ", ".join(wants[:6]) or "a concise summary"
+    instruction = (
+        "The input is the readable text of a web page. Extract exactly what "
+        f"the user asked for: {asked}. Keep each value concise (under 200 "
+        "characters). If the page does not contain something, use an empty "
+        "string for that field."
+    )[:1990]
+    return {"op": "llm", "instruction": instruction,
+            "output": {name: "string" for name in fields}}
+
+
+def _build_page_card(store: ni.NIStore, item_id: str, request: str,
+                      intent: dict, url: str,
+                      call_model: Callable[[str], str]) -> dict:
+    """G4b: build an INTERPRETED page card from a consented page URL.
+
+    Deterministic frame, models at the edges: the jailed extractor (Phase
+    2c) turns the page into ``{text, title}``; a code-built llm stage (§13 —
+    local-only at run time, one per pipeline, "Interpreted" badge) extracts
+    the asked-for fields; the P8 judge verifies the preview against the
+    goal. The sealed source is ``http_page`` with the EXACT consented URL —
+    the engine re-runs the same jail + llm on schedule.
+    """
+    assert isinstance(url, str) and url, "url required"
+    _transition(store, item_id, "sampling", source_url=url,
+                 note=f"page source — jailed read of {_host_hint(url)}")
+    try:
+        page = ni._fetch_http_page({"type": "http_page", "url": url},
+                                    item_id, None)
+    except ni.NIError as exc:
+        return _fail(store, item_id, "fetch",
+                      f"page fetch failed: {exc.kind}")
+    except Exception as exc:
+        return _fail(store, item_id, "fetch",
+                      f"page fetch failed: {type(exc).__name__}")
+    stage = _page_llm_stage(intent)
+    _transition(store, item_id, "assembling",
+                 note="interpreted page card — a local model reads the page "
+                      "each update")
+    try:
+        extracted = ni._apply_llm(stage, dict(page), call_model)
+    except ni.NIError as exc:
+        return _fail(store, item_id, "assembly",
+                      f"page interpretation failed: {exc.kind}")
+    except Exception as exc:  # the flow boundary never raises (harness lesson)
+        return _fail(store, item_id, "assembly",
+                      f"page interpretation failed: {type(exc).__name__}")
+    fields = list(stage["output"].keys())
+    preview = {name: extracted.get(name, "") for name in fields}
+    preview["title"] = str(page.get("title") or _host_hint(url))[:200]
+    scene = value_scene(fields)
+    spec = build_final_spec(request, intent,
+                             {"type": "http_page", "url": url},
+                             intent.get("cadence_minutes")
+                             if isinstance(intent.get("cadence_minutes"), int)
+                             else _DEFAULT_CADENCE,
+                             [stage], scene)
+    judge = _judge_build(request, intent, preview, call_model)
+    notes = ["interpreted page card: a local model reads this page each "
+             "update (values are its reading, not raw data)"]
+    if judge is not None and judge["gaps"]:
+        gap_note = "this card won't include: " + ", ".join(judge["gaps"])
+        notes.append(gap_note)
+        _try_journal(store, item_id, "updated", gap_note)
+    return _finalize(store, item_id, spec, preview,
+                      note="; ".join(notes), born="flow")
 
 
 def _finalize(store: ni.NIStore, item_id: str, spec: dict, preview: dict,

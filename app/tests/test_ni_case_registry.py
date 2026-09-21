@@ -196,7 +196,22 @@ def _pytest_source_url(case: dict) -> str | None:
 
 
 def _drive_flow(case: dict) -> dict:
-    """Set up a fresh store + a per-row fetcher / gateway, then run the flow."""
+    """Set up a fresh store + a per-row fetcher / gateway, then run the flow.
+
+    The whole body runs under a page-fetch save/restore: the xml row stubs
+    the jailed page fetch (the door must not reach the network from a unit
+    test) and the stub must never leak into sibling rows.
+    """
+    assert isinstance(case, dict), "case required"
+    from smartbrain_3000 import ni as _nimod
+    _orig_page_fetch = _nimod._fetch_http_page
+    try:
+        return _drive_flow_inner(case)
+    finally:
+        _nimod._fetch_http_page = _orig_page_fetch
+
+
+def _drive_flow_inner(case: dict) -> dict:
     assert isinstance(case, dict), "case required"
     store, _conn = _store()
     item_id = ni_flow.create_shell_item(store, case["request"])
@@ -210,6 +225,14 @@ def _drive_flow(case: dict) -> dict:
         fetcher = _lan_or_dead_fetcher("dead")
         gateway = _scripted_gateway([intent_reply])
     elif case["id"] == "xml-not-json":
+        # Page door, hermetically: the JSON decode fails as recorded, and the
+        # jailed page fetch is stubbed to refuse — the door fails HONESTLY
+        # (fetch class) instead of touching the network from a unit test.
+        from smartbrain_3000 import ni as _nimod
+
+        def _no_page(source, item_id, secrets):
+            raise _nimod.NIError("recorded", "page path unrecorded in hermetic mode")
+        _nimod._fetch_http_page = _no_page
         fetcher = _xml_fetcher(case)
         gateway = _scripted_gateway([intent_reply])
     elif expected_state == "source":
@@ -237,7 +260,8 @@ def _drive_flow(case: dict) -> dict:
 def test_registry_row_drives_run_flow_to_expected_state(case: dict) -> None:
     """Every registry row's flow terminates in its declared ``expected_state``."""
     assert isinstance(case, dict) and case.get("id"), "case required"
-    expected_state = str((case["expected"] or {}).get("engine_state") or "")
+    expected_state = str((case["expected"] or {}).get("recorded")
+                         or (case["expected"] or {}).get("engine_state") or "")
     assert expected_state, f"case {case['id']} missing expected.engine_state"
     result = _drive_flow(case)
     actual = str(result.get("state") or "")

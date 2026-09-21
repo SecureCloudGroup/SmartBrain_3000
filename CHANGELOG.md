@@ -11,6 +11,18 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Added
+- **Neural Interface: paste any web page — not just APIs.** The URLs people
+  actually find (news pages, harbor tide tables, the NHC outlook) now build
+  working cards: the page is read in a sandboxed process and a local model
+  extracts exactly what you asked for, refreshed on your schedule. These
+  cards carry the "Interpreted" badge — the values are the model's reading
+  of the page, and everything stays on your machine. Pasting an RSS/XML
+  feed works the same way.
+- **Active Atlantic storms as a built-in source.** "Any tropical storms or
+  hurricanes in the Atlantic" now resolves straight to the National
+  Hurricane Center's live feed — no paste needed.
+
 ## [0.20.1] - 2026-09-21
 
 ### Fixed

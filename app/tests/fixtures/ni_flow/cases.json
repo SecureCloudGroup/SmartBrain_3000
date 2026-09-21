@@ -491,7 +491,7 @@
   {
     "id": "xml-not-json",
     "request": "latest BBC headlines from their RSS feed",
-    "dimension": "non-JSON sample body -> honest failed(fetch)",
+    "dimension": "non-JSON body -> the page door: live builds an interpreted card; hermetic modes fail honestly (page path unrecorded)",
     "url": "https://feeds.bbci.co.uk/news/rss.xml",
     "fixture": "bbc_rss.xml",
     "fields": {
@@ -499,7 +499,8 @@
     },
     "klass": "list",
     "expected": {
-      "engine_state": "failed"
+      "engine_state": "ready",
+      "recorded": "failed"
     },
     "intent": {
       "kind": "external_data",

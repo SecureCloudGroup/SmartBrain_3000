@@ -294,3 +294,59 @@ def test_field_10_us_weather_defaults_to_fahrenheit_at_source(client) -> None:
     assert fills.get("temperature_unit") == "fahrenheit"
     assert fills.get("wind_speed_unit") == "mph"
     assert "temperature_unit=fahrenheit" in (row["flow"].get("filled_url") or "")
+
+
+def test_field_11_pasted_webpages_build_interpreted_cards(client, monkeypatch) -> None:
+    """Field round 2 (2026-09-21): EVERY URL the operator pasted was a normal
+    webpage (nhc.noaa.gov/gtwo.php, spacinsider.com/news, usharbors.com) and
+    the JSON-only pick refused them all. The page door turns each paste into
+    an interpreted http_page card."""
+    from smartbrain_3000 import ni as nimod
+    monkeypatch.setattr(nimod, "_fetch_http_page",
+                        lambda source, item_id, secrets: {
+                            "text": "page text with the asked-for info",
+                            "title": "Some Page"})
+    store = client.app.state.ni
+    pastes = [
+        ("show me a daily of any tropical storms or hurricanes in the Atlantic ocean",
+         "https://www.nhc.noaa.gov/gtwo.php?basin=atlc&fdays=7",
+         ["tropical storms", "hurricanes"]),
+        ("show me todays news on SPAC deSPAC",
+         "https://www.spacinsider.com/news", ["news"]),
+        ("show tides for Charleston, SC",
+         "https://www.usharbors.com/harbor/south-carolina/charleston-sc/tides",
+         ["tides"]),
+    ]
+    for request, url, wants in pastes:
+        iid = client.post("/api/ni/intake", json={"request": request},
+                          headers=_LOCAL).json()["id"]
+        intent = {"kind": "external_data", "subject": request[:40],
+                  "cadence_minutes": 60, "wants": wants,
+                  "threshold": None, "display_hint": "value"}
+        ni_flow._transition(store, iid, "intent", intent=intent)
+        fields = [ni_flow._slugify_field_name(w) for w in wants]
+        llm_reply = __import__("json").dumps({f: "extracted" for f in fields})
+
+        def fetch_html(u: str):
+            raise __import__("json").JSONDecodeError("Expecting value", "<html>", 0)
+
+        result = ni_flow._sample_and_map(store, iid, request, intent, url,
+                                          lambda p, _r=[llm_reply]: _r.pop(0)
+                                          if _r else "{}",
+                                          fetch_html)
+        assert result["state"] == "ready", (url, result.get("error"))
+        spec = store.get_item(iid)["spec"]
+        assert spec["source"] == {"type": "http_page", "url": url}
+        assert spec["pipeline"][0]["op"] == "llm"
+
+
+def test_field_12_tropical_storms_resolve_from_words(client) -> None:
+    """The hurricane ask resolves to the NHC recipe from words — no paste
+    needed at all (the government JSON feed the pasted page sits on)."""
+    from smartbrain_3000 import ni_catalog
+    m = ni_flow.match_recipe(
+        ni_catalog.entries(),
+        "show me a daily of any tropical storms or hurricanes in the Atlantic ocean",
+        {"subject": "Atlantic tropical storms",
+         "wants": ["tropical storms", "hurricanes"]})
+    assert m is not None and m["id"] == "nhc-atlantic-storms"
