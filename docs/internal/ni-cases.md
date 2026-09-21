@@ -18,16 +18,16 @@ gates AND the pytest suite — see "Adding a case" at the bottom). Status:
 | # | Ask (in the user's words) | Dimension exercised | Status |
 |---|---|---|---|
 | A1 | "show me AAPL every 5 minutes" + a URL | explicit-URL value card, cadence parse | SHIPPED (aapl-5min) |
-| A2 | "what's bitcoin worth right now, keep it updated" | vague subject → keyless recipe, default cadence | SHIPPED (btc-vague) |
+| A2 | "what's bitcoin worth right now, keep it updated" | vague subject → keyless recipe, default cadence | SHIPPED (btc-vague; resolves from words) |
 | A3 | "track the weather in Kansas City" | recipe confirm + consented geocode two-step; G2: US places seal °F/mph unit fills at the pause | SHIPPED (kc-weather + G2 tests) |
 | A4 | "latest earthquakes above magnitude 5" | list card, `where` threshold; G2: threshold over a fixed recipe ROUTES to freeform on the approved URL (no more silent M2.5 handoff) | SHIPPED (quakes-m5 + field regression 8) |
-| A5 | "how many people are in space right now" | scalar count | SHIPPED (people-space) |
+| A5 | "how many people are in space right now" | scalar count | SHIPPED (people-space, URL path only — open-notify has no TLS so it cannot join the https-only catalog; words land the pick pause) |
 | A6 | "EUR to USD exchange rate, update hourly" | fx, cadence word | SHIPPED (eur-usd-hourly) |
-| A7 | "top stories on Hacker News" | list-of-objects, repeat scene | SHIPPED (hn-frontpage) |
+| A7 | "top stories on Hacker News" | list-of-objects, repeat scene | SHIPPED (hn-frontpage; G3: resolves from words via hn-front-page recipe) |
 | A8 | "ISS location on a map, every minute" | display-hint degrade (map → value, honest note) | SHIPPED (iss-map) |
 | A9 | "track bitcoin and ethereum in USD" | multi-subject → multi-field value card | SHIPPED (crypto-pair; list-hint degrades to value when no path is list-shaped) |
-| A10 | "how many stars does <repo> have" | needle-in-haystack selection (~100-key response) | SHIPPED (github-stars) |
-| A11 | "sunrise and sunset times for today" | string-typed value fields (ISO times) | SHIPPED (sunrise-times) |
+| A10 | "how many stars does <repo> have" | needle-in-haystack selection (~100-key response) | SHIPPED (github-stars; G3: github-repo-stars recipe, owner/name params) |
+| A11 | "sunrise and sunset times for today" | string-typed value fields (ISO times) | SHIPPED (sunrise-times; G3: sunrise-sunset recipe w/ geocode fills — resolves from words) |
 | A12 | "temperature in Fahrenheit" | unit conversion (scale + offset transforms, authored from the request) | SHIPPED (offset op + deterministic °F authoring) |
 | A13 | "alert me when bitcoin drops below 50000" | alert-carrying card (threshold + direction → §12 alert, edge-triggered) | SHIPPED (threshold+direction → §12 alert, value class only) |
 | A14 | "today's temperature forecast as a chart" | series → spark scene | ROADMAP(assembler cannot author spark/series scenes; stress-POC proved selection works) |
@@ -43,7 +43,7 @@ gates AND the pytest suite — see "Adding a case" at the bottom). Status:
 |---|---|---|---|
 | B1 | "days until Christmas" (no literal date) | `unsupported` — computed needs YYYY-MM-DD; chat asks for the date | SHIPPED (xmas-countdown) |
 | B2 | "days until 2026-12-25" | computed source, zero egress, real day count | SHIPPED (pytest) |
-| B3 | "track my custom sensor feed" (no URL, no recipe) | pause at `source`; the CARD renders vetted suggestions + paste-a-URL (P3); chat explains | SHIPPED (no-source-pause + P3 route tests) |
+| B3 | "track my custom sensor feed" (no URL, no recipe) | pause at `source`; the CARD renders relevance-gated suggestions + paste-a-URL (an uncovered ask gets an HONEST empty list) | SHIPPED (no-source-pause + G3 floor tests) |
 | B4 | "my router status at http://192.168.1.1/..." | `failed(fetch)` — netguard refuses private ranges; never fetched | SHIPPED (lan-refused) |
 | B5 | "BBC headlines from their RSS feed" (XML endpoint) | `failed(fetch)` — non-JSON body, honest class, no thrash | SHIPPED (xml-not-json) |
 | B6 | a URL that 404s / returns an error body | `failed(fetch)`, one attempt, honest note | SHIPPED (dead-endpoint) |

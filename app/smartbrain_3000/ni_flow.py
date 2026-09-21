@@ -587,6 +587,11 @@ def _distinctive_title_hit(recipe: dict, request: str, intent: dict) -> bool:
     return False
 
 
+# G3: two title-word hits (or category + word) — below this a candidate is
+# unrelated to the ask and renders as noise on the pick card.
+_SUGGEST_MIN_SCORE = 4
+
+
 def suggest_recipes(catalog: list[dict], request: str, intent: dict,
                      top: int = 3) -> list[dict]:
     """P3 (2026-09-17): ranked catalog candidates for the source-pick CARD.
@@ -609,7 +614,8 @@ def suggest_recipes(catalog: list[dict], request: str, intent: dict,
         scored.append((_score_recipe(recipe, request, intent), recipe))
     scored.sort(key=lambda pair: -pair[0])
     out: list[dict] = []
-    for score, recipe in scored[:top]:  # bounded by top
+    relevant = [(sc, r) for sc, r in scored if sc >= _SUGGEST_MIN_SCORE]
+    for score, recipe in relevant[:top]:  # bounded by top
         url = str(recipe.get("url_template") or "")
         fills = _preview_recipe_fills(recipe, request)
         out.append({
