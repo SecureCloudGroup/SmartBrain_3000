@@ -1558,21 +1558,31 @@ def test_retry_never_promotes_an_unapproved_confirm_url(
         "a confirm-pause URL was never consented — retry must not fetch it")
 
 
-def test_sweep_never_kills_user_gated_pauses(client: TestClient) -> None:
+def test_sweep_never_kills_user_gated_pauses() -> None:
     """Audit: the 1h sweep executed live consent pauses ('creation stalled'
     on a card that was just waiting for the user). Every user-gated pause is
-    exempt now."""
+    exempt now.
+
+    STANDALONE store on purpose: the TestClient app runs a live scheduler
+    thread whose tick races this test's flow-record writes on the shared
+    DuckDB connection (TransactionException: Conflict on update — flaked in
+    the shipped-image suite). No app, no thread, no race.
+    """
     from datetime import UTC, datetime, timedelta
 
+    import duckdb
+
+    from smartbrain_3000 import db as dbmod
+    from smartbrain_3000 import ni as nimod
     from smartbrain_3000 import ni_flow
-    _unlock(client)
-    store = client.app.state.ni
+    from smartbrain_3000.secrets import gen_master_key
+    conn = duckdb.connect(":memory:")
+    dbmod.run_migrations(conn)
+    store = nimod.NIStore(conn, gen_master_key())
     old = (datetime.now(UTC) - timedelta(hours=3)).isoformat(timespec="seconds")
     for state, marker in (("source", ni_flow.AWAITING_SOURCE_PICK),
                            ("confirm_source", "awaiting_confirm")):
-        iid = client.post("/api/ni/intake",
-                          json={"request": f"pause guard {state}"},
-                          headers={"X-SB-Local": "1"}).json()["id"]
+        iid = ni_flow.create_shell_item(store, f"pause guard {state}")
         record = ni_flow._flow_read(store, iid)
         record["state"] = state
         record["error"] = marker
