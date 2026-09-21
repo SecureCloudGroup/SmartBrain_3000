@@ -1535,3 +1535,42 @@ with branches" and becomes contracts + moves + a ledger, with watchers above.
 - Field regressions: the 2026-09-17 round is pinned in
   ``test_ni_field_regressions.py`` — every ask asserts its card-state truth
   (reason/question/reopen), model-free.
+
+**G2 — the judgment steps (2026-09-20, rounds 7-8 wave 2)**. The parts that
+needed judgment get judgment — bounded, schema-validated, code-checked:
+- **P8 JUDGE (M-VERIFY)**: after assembly the flow judges the BUILT preview
+  against the goal (request + subject/wants/threshold) — one bounded call,
+  closed `{serves, gaps[], wrong[]}` reply, data-fenced payload. A ``wrong``
+  verdict earns ONE re-pick with the findings fed into the same closed menu
+  (``stage_mapping`` gains ``feedback``); the re-pick ships ONLY if the judge
+  scores it strictly better, else the first build is kept and the doubt noted
+  (trial-and-revert — the live probe caught a misfiring judge making the card
+  WORSE before this rule). Judge hallucination containment in CODE: a
+  ``wrong`` claim must name a displayed payload key; cadence-vocabulary
+  ``gaps`` ("5-minute interval data") are filtered — the refresh schedule is
+  the engine's job. A judge error is always advisory (never fails a build);
+  ``gaps`` ride the notes as "this card won't include: …". Mapping exhaust on
+  the first pass also rides the feedback loop once (2×2 bounded attempts)
+  before the honest ``failed(mapping)`` — absorbs the local-model temp-0
+  variance class the live gate exposed.
+- **Threshold-over-recipe routing**: a threshold ask over a fixed template
+  (no ``where`` op) no longer hands off verbatim — the confirm continuation
+  re-dispatches the APPROVED filled URL into freeform sampling
+  (``_threshold_route_url`` guards: numeric threshold, no template filter, no
+  headers, zero unresolved placeholders) with ``_reuse_intent`` so the sealed
+  intent is not re-derived. The quakes M2.5-for-M5 field failure now builds a
+  real filtered card.
+- **M-AFFINITY + synonyms**: the coverage matcher gains a code synonym table
+  (magnitude↔mag, location↔place, temperature↔temp, lat/lon, count) killing
+  the false "won't include: magnitude, location" disclosure, plus a bounded
+  model prune at pause time (may only CONFIRM coverage, validated as a subset
+  of the asked-for spellings; any error keeps code's answer). Wording is now
+  honest: "this card won't include: …" — the SOURCE provided those fields all
+  along.
+- **US units at source**: the open-meteo recipe's URL gains
+  ``temperature_unit``/``wind_speed_unit`` params; ``_unit_fills_for`` seals
+  fahrenheit/mph at the PAUSE when the request says °F or the place carries a
+  US state suffix (celsius/kmh otherwise) — the fills render on the consent
+  card (consent-what-runs), land as ordinary params (Fill-editable), and the
+  geocode country is deliberately NOT consulted (it resolves after approval —
+  too late to change what was consented).

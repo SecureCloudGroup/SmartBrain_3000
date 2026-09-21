@@ -422,9 +422,11 @@ def test_flow_chaos_drill_field_renamed_reports_honestly() -> None:
         "kind": "external_data", "subject": "AAPL", "cadence_minutes": 5,
         "wants": ["price"], "threshold": None, "display_hint": "value",
     })
-    # Both retries pick a path that isn't in the menu — mapping stage exhausts.
+    # Every pick names a path that isn't in the menu. G2: a first exhaust
+    # earns ONE more bounded round through the judge loop (2 internal retries
+    # x 2 rounds = 4 bad picks) before the honest failed(mapping).
     bad = json.dumps({"price": "chart.result[0].meta.regularMarketPrice"})
-    model = _scripted_model([intent_reply, bad, bad])
+    model = _scripted_model([intent_reply, bad, bad, bad, bad])
     result = ni_flow.run_flow(
         store, item_id, gateway_call=model,
         fetcher=lambda url: fixture, catalog=_empty_catalog(),
@@ -1450,7 +1452,8 @@ def test_uncovered_wants_disclosed_on_recipe_confirm() -> None:
     uncovered = record.get("_uncovered_wants")
     assert uncovered and "volume" in uncovered, f"got {uncovered}"
     assert "price" not in uncovered and "high" not in uncovered
-    assert any("does not appear to cover" in n for n in record.get("notes") or [])
+    # G2 wording: the SOURCE provides plenty — it is the CARD that omits.
+    assert any("won't include" in n for n in record.get("notes") or [])
 
 
 def test_covered_wants_stamp_nothing() -> None:
@@ -1718,3 +1721,256 @@ def test_credential_reuse_fills_same_host_key(monkeypatch) -> None:
                                                "other.example") is None
     finally:
         ni_flow.set_secrets_provider(None)
+
+
+# --- G2: synonyms, affinity, threshold routing, judge, unit fills -----------
+
+def test_g2_synonym_coverage_kills_the_false_disclosure() -> None:
+    """Field (quakes card): 'Won't include: location, magnitude' was FALSE —
+    the template serves them as top_place/top_mag. Synonyms fix the matcher;
+    depth/time stay honestly uncovered (the template really omits them)."""
+    from smartbrain_3000 import ni_catalog
+    recipe = ni_catalog.get_recipe("quakes-day-25")
+    intent = {"wants": ["location", "magnitude", "depth", "time"]}
+    assert ni_flow._uncovered_wants(recipe, intent) == ["depth", "time"]
+
+
+def test_g2_affinity_prune_validates_subset() -> None:
+    """M-AFFINITY may only CONFIRM coverage from the asked-for spellings —
+    a hallucinated confirmation for something never asked is ignored, and a
+    malformed reply keeps code's answer (advisory)."""
+    served = ["count", "top_place"]
+    uncovered = ["depth", "time"]
+    ok = ni_flow._affinity_prune(
+        uncovered, served,
+        lambda p: '{"covered": ["depth", "volume", 7]}')
+    assert ok == ["time"], "depth pruned; 'volume'/7 ignored (not asked/typed)"
+    bad = ni_flow._affinity_prune(uncovered, served, lambda p: "not json at all")
+    assert bad == uncovered
+    none = ni_flow._affinity_prune(uncovered, served, None)
+    assert none == uncovered
+
+
+def test_g2_threshold_routing_dispatches_freeform_on_confirm(monkeypatch) -> None:
+    """Field (quakes M2.5-for-M5): a threshold ask over a fixed template must
+    NOT hand off verbatim — the confirm continuation re-dispatches the
+    APPROVED URL into freeform sampling with the sealed intent reused."""
+    from smartbrain_3000 import ni_catalog
+    store, _conn = _store()
+    recipe = ni_catalog.get_recipe("quakes-day-25")
+    intent = {"kind": "external_data", "subject": "earthquakes",
+              "cadence_minutes": 15, "wants": ["magnitude"], "threshold": 5,
+              "display_hint": "list"}
+    item_id = ni_flow.create_shell_item(store, "latest earthquakes above magnitude 5")
+    ni_flow._transition(store, item_id, "intent", intent=intent)
+    ni_flow._pause_for_recipe_confirm(store, item_id, intent, recipe)
+    record = ni_flow._flow_read(store, item_id)
+    assert record["state"] == "confirm_source"
+    fired: dict = {}
+    monkeypatch.setattr(ni_flow, "start_flow_worker",
+                        lambda s, iid, **kw: fired.update(id=iid, **kw) or True)
+    out = ni_flow.continue_from_recipe_confirm(store, item_id,
+                                                record["source_url"])
+    assert out["state"] == "sampling"
+    assert fired["source_url"] == record["source_url"]
+    rec2 = ni_flow._flow_read(store, item_id)
+    assert rec2.get("_reuse_intent") is True
+    assert any("threshold" in n for n in rec2.get("notes") or [])
+
+
+def test_g2_threshold_routing_guards() -> None:
+    """No threshold / a filtering template / headers / unresolved params all
+    keep the verbatim handoff."""
+    from smartbrain_3000 import ni_catalog
+    quakes = ni_catalog.get_recipe("quakes-day-25")
+    assert ni_flow._threshold_route_url(quakes, {"threshold": None}, {}) is None
+    finnhub = ni_catalog.get_recipe("stock-quote-finnhub")
+    # Keyed recipe: $secret header refuses routing even with params filled.
+    assert ni_flow._threshold_route_url(
+        finnhub, {"threshold": 100}, {"symbol": "AAPL"}) is None
+    # A template that already filters (where op) keeps its handoff.
+    filtering = {"spec_template": {
+        "source": {"type": "http_json", "url": "https://api.example.com/x"},
+        "params": {},
+        "pipeline": [{"op": "transform", "apply": [
+            {"fn": "where", "field": "rows", "key": "v", "op": "ge", "value": 1}]}],
+    }}
+    assert ni_flow._threshold_route_url(filtering, {"threshold": 5}, {}) is None
+    # Unresolved placeholder refuses (would fetch a literal template).
+    holey = {"spec_template": {
+        "source": {"type": "http_json",
+                    "url": "https://api.example.com/q?s={{param:symbol}}"},
+        "params": {"symbol": {"label": "S", "kind": "string", "value": ""}},
+        "pipeline": [],
+    }}
+    assert ni_flow._threshold_route_url(holey, {"threshold": 5}, {}) is None
+
+
+def test_g2_run_flow_reuses_sealed_intent_when_stamped() -> None:
+    """The routed continuation must not re-derive intent — the scripted model
+    serves ONLY the mapping reply and the flow still reaches ready."""
+    store, _conn = _store()
+    fixture = _load("quakes")
+    intent = {"kind": "external_data", "subject": "earthquakes",
+              "cadence_minutes": 15, "wants": ["magnitude"], "threshold": 5,
+              "display_hint": "value"}
+    item_id = ni_flow.create_shell_item(store, "latest earthquakes above magnitude 5")
+    ni_flow._transition(store, item_id, "sampling", intent=intent,
+                         source_url="https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_day.geojson",
+                         _reuse_intent=True)
+    mapping_reply = json.dumps({"magnitude": "features[0].properties.mag"})
+    model = _scripted_model([mapping_reply])  # NO intent reply on offer
+    result = ni_flow.run_flow(
+        store, item_id, gateway_call=model,
+        fetcher=lambda url: fixture, catalog=_empty_catalog(),
+        source_url="https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_day.geojson",
+    )
+    assert result["state"] == "ready", result.get("error")
+
+
+def test_g2_judge_wrong_triggers_one_repick() -> None:
+    """A 'wrong' verdict re-picks ONCE with the findings fed back; the second
+    pick ships. The judge runs again and its OK verdict notes verification."""
+    store, _conn = _store()
+    fixture = _load("hn")
+    intent_reply = json.dumps({
+        "kind": "external_data", "subject": "HN", "cadence_minutes": 15,
+        "wants": ["title"], "threshold": None, "display_hint": "value",
+    })
+    first_map = json.dumps({"title": "hits[0].author"})
+    judge_wrong = json.dumps({"serves": False, "gaps": [],
+                               "wrong": ["title: shows an author name"]})
+    second_map = json.dumps({"title": "hits[0].title"})
+    judge_ok = json.dumps({"serves": True, "gaps": [], "wrong": []})
+    model = _scripted_model([intent_reply, first_map, judge_wrong,
+                             second_map, judge_ok])
+    item_id = ni_flow.create_shell_item(store, "top story title on HN")
+    result = ni_flow.run_flow(
+        store, item_id, gateway_call=model,
+        fetcher=lambda url: fixture, catalog=_empty_catalog(),
+        source_url="https://hn.algolia.com/api/v1/search?tags=front_page",
+    )
+    assert result["state"] == "ready", result.get("error")
+    item = store.get_item(item_id)
+    paths = item["spec"]["pipeline"][0]["paths"]
+    assert paths["title"] == "hits[0].title", "the RE-PICKED path ships"
+    notes = " ".join((ni_flow._flow_read(store, item_id) or {}).get("notes") or [])
+    assert "re-picking" in notes, notes
+    assert "verified against the request" in notes, notes
+
+
+def test_g2_judge_failure_is_advisory() -> None:
+    """A judge that errors (model exhausted) never fails a working build."""
+    store, _conn = _store()
+    fixture = _load("hn")
+    intent_reply = json.dumps({
+        "kind": "external_data", "subject": "HN", "cadence_minutes": 15,
+        "wants": ["title"], "threshold": None, "display_hint": "value",
+    })
+    mapping_reply = json.dumps({"title": "hits[0].title"})
+    model = _scripted_model([intent_reply, mapping_reply])  # judge starves
+    item_id = ni_flow.create_shell_item(store, "top story title")
+    result = ni_flow.run_flow(
+        store, item_id, gateway_call=model,
+        fetcher=lambda url: fixture, catalog=_empty_catalog(),
+        source_url="https://hn.algolia.com/api/v1/search?tags=front_page",
+    )
+    assert result["state"] == "ready"
+
+
+def test_g2_judge_gaps_ride_the_journal() -> None:
+    """Judge gaps become the honest won't-include note on the journal."""
+    store, _conn = _store()
+    fixture = _load("hn")
+    intent_reply = json.dumps({
+        "kind": "external_data", "subject": "HN", "cadence_minutes": 15,
+        "wants": ["title"], "threshold": None, "display_hint": "value",
+    })
+    mapping_reply = json.dumps({"title": "hits[0].title"})
+    judge_gap = json.dumps({"serves": True, "gaps": ["comment counts"],
+                             "wrong": []})
+    model = _scripted_model([intent_reply, mapping_reply, judge_gap])
+    item_id = ni_flow.create_shell_item(store, "titles with comment counts")
+    result = ni_flow.run_flow(
+        store, item_id, gateway_call=model,
+        fetcher=lambda url: fixture, catalog=_empty_catalog(),
+        source_url="https://hn.algolia.com/api/v1/search?tags=front_page",
+    )
+    assert result["state"] == "ready"
+    notes = " ".join((ni_flow._flow_read(store, item_id) or {}).get("notes") or [])
+    assert "won't include: comment counts" in notes, notes
+
+
+def test_g2_unit_fills_sealed_on_weather_pause() -> None:
+    """Field (°C for Charleston): a US place seals fahrenheit/mph unit fills
+    at the pause — the consent card shows them; a non-US place seals metric."""
+    from smartbrain_3000 import ni_catalog
+    store, _conn = _store()
+    recipe = ni_catalog.get_recipe("weather-open-meteo")
+    item_id = ni_flow.create_shell_item(store, "track the weather in Charleston, SC")
+    ni_flow._pause_for_recipe_confirm(
+        store, item_id,
+        {"wants": ["temperature"], "place": "Charleston, SC"}, recipe)
+    fills = (ni_flow._flow_read(store, item_id) or {}).get("_fills") or {}
+    assert fills.get("temperature_unit") == "fahrenheit"
+    assert fills.get("wind_speed_unit") == "mph"
+    item2 = ni_flow.create_shell_item(store, "track the weather in Berlin")
+    ni_flow._pause_for_recipe_confirm(
+        store, item2, {"wants": ["temperature"], "place": "Berlin"}, recipe)
+    fills2 = (ni_flow._flow_read(store, item2) or {}).get("_fills") or {}
+    assert fills2.get("temperature_unit") == "celsius"
+    assert fills2.get("wind_speed_unit") == "kmh"
+
+
+def test_g2_judge_repick_reverts_when_no_better() -> None:
+    """Field lesson (AAPL live probe): a misfiring judge must never make the
+    card WORSE — when the second pick scores no better, the FIRST build ships
+    and the doubt is noted. And a judge 'wrong' claim about a field the card
+    does not display is dropped as hallucination (closed-world check)."""
+    store, _conn = _store()
+    fixture = _load("hn")
+    intent_reply = json.dumps({
+        "kind": "external_data", "subject": "HN", "cadence_minutes": 15,
+        "wants": ["title"], "threshold": None, "display_hint": "value",
+    })
+    first_map = json.dumps({"title": "hits[0].title"})
+    judge_wrong = json.dumps({"serves": False, "gaps": [],
+                               "wrong": ["title: not the real title"]})
+    second_map = json.dumps({"title": "hits[0].author"})
+    model = _scripted_model([intent_reply, first_map, judge_wrong,
+                             second_map, judge_wrong])
+    item_id = ni_flow.create_shell_item(store, "top story title")
+    result = ni_flow.run_flow(
+        store, item_id, gateway_call=model,
+        fetcher=lambda url: fixture, catalog=_empty_catalog(),
+        source_url="https://hn.algolia.com/api/v1/search?tags=front_page",
+    )
+    assert result["state"] == "ready"
+    item = store.get_item(item_id)
+    assert item["spec"]["pipeline"][0]["paths"]["title"] == "hits[0].title", \
+        "no-better second pick must NOT ship — first build kept"
+    notes = " ".join((ni_flow._flow_read(store, item_id) or {}).get("notes") or [])
+    assert "kept the first build" in notes
+
+
+def test_g2_judge_drops_hallucinated_wrong_fields() -> None:
+    """A wrong-claim naming a field the payload does not display never
+    triggers a re-pick (the dataGranularity live-probe class)."""
+    out = ni_flow._judge_build(
+        "show me AAPL", {"wants": ["price"]}, {"aapl": 219.5},
+        lambda p: json.dumps({"serves": False, "gaps": [],
+                               "wrong": ["dataGranularity: shows 1m not 5m",
+                                          "aapl: looks stale"]}))
+    assert out is not None
+    assert out["wrong"] == ["aapl: looks stale"], out
+
+
+def test_g2_judge_drops_cadence_shaped_gaps() -> None:
+    """"Every 5 minutes" is a refresh schedule, not a data gap — cadence-
+    vocabulary gap claims are filtered in code (live-probe class)."""
+    out = ni_flow._judge_build(
+        "show me AAPL every 5 minutes", {"wants": ["price"]}, {"aapl": 219.5},
+        lambda p: json.dumps({"serves": False,
+                               "gaps": ["5-minute interval data", "volume"],
+                               "wrong": []}))
+    assert out is not None and out["gaps"] == ["volume"], out

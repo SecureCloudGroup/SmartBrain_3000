@@ -1289,7 +1289,7 @@
                   {/if}
                   {#if item.flow.not_covered && item.flow.not_covered.length > 0}
                     <p class="muted" style="margin:0 0 var(--s-2); font-size:var(--f-label)">
-                      Won’t include: {item.flow.not_covered.join(", ")} (this source doesn’t provide it).
+                      This card won’t include: {item.flow.not_covered.join(", ")}.
                     </p>
                   {/if}
                   <div class="ni-actions">

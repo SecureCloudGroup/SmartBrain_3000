@@ -176,3 +176,67 @@ def test_field_7_every_terminal_on_the_board_obeys_the_law(client) -> None:
         flow = _board_flow(client, iid)
         assert flow["reason"], f"{klass}: no reason"
         assert flow.get("question") or flow.get("reopen"), f"{klass}: dead end"
+
+
+def test_field_8_quakes_threshold_routes_instead_of_shipping_m25(client) -> None:
+    """G2 upgrade of the quakes field failure: approving the vetted USGS feed
+    for an above-magnitude-5 ask must NOT hand off the fixed M2.5 template —
+    the continuation re-dispatches the approved URL into freeform sampling
+    (where the where-filter is authored from the sealed intent)."""
+    from smartbrain_3000 import ni_catalog
+    iid = client.post("/api/ni/intake",
+                      json={"request": "latest earthquakes above magnitude 5"},
+                      headers=_LOCAL).json()["id"]
+    store = client.app.state.ni
+    intent = {"kind": "external_data", "subject": "earthquakes",
+              "cadence_minutes": 15, "wants": ["magnitude"], "threshold": 5,
+              "display_hint": "list"}
+    ni_flow._transition(store, iid, "intent", intent=intent)
+    ni_flow._pause_for_recipe_confirm(store, iid, intent,
+                                       ni_catalog.get_recipe("quakes-day-25"))
+    r = client.post(f"/api/ni/items/{iid}/flow/confirm-source", headers=_LOCAL)
+    assert r.status_code == 200, r.text
+    rec2 = ni_flow._flow_read(store, iid)
+    assert rec2["state"] == "sampling", "routed to freeform, not template handoff"
+    assert rec2.get("_reuse_intent") is True
+    item = store.get_item(iid)
+    assert item["spec"].get("_shell"), "no verbatim M2.5 card was sealed"
+
+
+def test_field_9_quakes_disclosure_no_longer_lies(client) -> None:
+    """G2: the confirm card's coverage line for the quakes recipe must not
+    claim magnitude/location are missing (top_mag/top_place serve them)."""
+    from smartbrain_3000 import ni_catalog
+    iid = client.post("/api/ni/intake",
+                      json={"request": "latest earthquakes"},
+                      headers=_LOCAL).json()["id"]
+    store = client.app.state.ni
+    ni_flow._pause_for_recipe_confirm(
+        store, iid, {"wants": ["location", "magnitude", "depth", "time"]},
+        ni_catalog.get_recipe("quakes-day-25"))
+    row = next(x for x in client.get("/api/ni/board").json()["items"]
+               if x["id"] == iid)
+    not_covered = row["flow"].get("not_covered") or []
+    assert "magnitude" not in not_covered and "location" not in not_covered
+    assert set(not_covered) == {"depth", "time"}
+
+
+def test_field_10_us_weather_defaults_to_fahrenheit_at_source(client) -> None:
+    """G2 upgrade of the °C-for-Charleston failure: the consent pause seals
+    fahrenheit/mph unit fills for a US place — what the card shows is what
+    will run."""
+    from smartbrain_3000 import ni_catalog
+    iid = client.post("/api/ni/intake",
+                      json={"request": "track the weather in Charleston, SC"},
+                      headers=_LOCAL).json()["id"]
+    store = client.app.state.ni
+    ni_flow._pause_for_recipe_confirm(
+        store, iid,
+        {"wants": ["temperature"], "place": "Charleston, SC"},
+        ni_catalog.get_recipe("weather-open-meteo"))
+    row = next(x for x in client.get("/api/ni/board").json()["items"]
+               if x["id"] == iid)
+    fills = row["flow"].get("fills") or {}
+    assert fills.get("temperature_unit") == "fahrenheit"
+    assert fills.get("wind_speed_unit") == "mph"
+    assert "temperature_unit=fahrenheit" in (row["flow"].get("filled_url") or "")
