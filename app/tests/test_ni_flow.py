@@ -2042,13 +2042,17 @@ def test_g4a_refine_refuses_unnotable_cards() -> None:
         ni_flow.begin_refine(store, _refine_card(store), "   ")
 
 
-def test_g4a_fahrenheit_note_authors_the_conversion_end_to_end() -> None:
+def test_g4a_fahrenheit_note_authors_the_conversion_end_to_end(monkeypatch) -> None:
     """The field case, closed: a °F note on a °C card re-samples the OWN
     source and the rebuild AUTHORS the scale+offset conversion — because the
     note joined the goal the authoring regexes and the judge read."""
     store, _conn = _store()
     item = _refine_card(store)
     fixture = _load("kc_weather")
+    # The worker must NOT thread off with the shared test connection —
+    # DuckDB cursors are per-thread; the run below drives the flow
+    # synchronously (the docker-image suite caught the race).
+    monkeypatch.setattr(ni_flow, "start_flow_worker", lambda *a, **kw: True)
     out = ni_flow.begin_refine(store, item, "should be in Fahrenheit degrees.")
     assert out["kind"] == "rebuild"
     mapping_reply = json.dumps({"temperature": "current_weather.temperature"})
