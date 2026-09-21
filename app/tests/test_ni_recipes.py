@@ -839,3 +839,25 @@ def test_g3_new_recipes_have_prove_params_for_every_param() -> None:
         proved = set(recipe.get("prove_params") or {})
         assert declared <= proved | set(), (
             f"{rid}: params {declared - proved} lack prove values")
+
+
+def test_field_price_of_ticker_resolves_to_the_stock_recipe() -> None:
+    """Field 2026-09-21 (v0.20.0 round, first ask): "show me the price of
+    NVDA every 30 minutes" resolved to NOTHING — "price" was excluded from
+    the finance corroboration set, and the G3 relevance floor then emptied
+    the suggestion box v0.19 would at least have filled. The corroborated
+    ticker+price now matches the symbol recipe; the guards that motivated
+    the exclusion still hold."""
+    from smartbrain_3000 import ni_catalog, ni_flow
+    cat = ni_catalog.entries()
+    m = ni_flow.match_recipe(cat, "show me the price of NVDA every 30 minutes",
+                              {"subject": "NVDA", "wants": ["price"]})
+    assert m is not None and m["id"] == "stock-quote-finnhub"
+    # The audit verdict stands: a bare ticker with NO finance word never matches.
+    assert ni_flow.match_recipe(cat, "show me AAPL every 5 minutes",
+                                 {"subject": "AAPL", "wants": ["AAPL"]}) is None
+    # Crypto tickers are ticker-SHAPED but never a stock symbol fill.
+    m2 = ni_flow.match_recipe(cat, "price of BTC please",
+                               {"subject": "BTC", "wants": ["price"]})
+    assert m2 is None or m2["id"] != "stock-quote-finnhub"
+    assert ni_flow._first_ticker("price of BTC please") is None

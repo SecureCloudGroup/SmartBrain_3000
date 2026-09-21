@@ -109,6 +109,9 @@ _TICKER_STOPWORDS: frozenset[str] = frozenset({
     "NI", "API", "KEY", "URL", "JSON", "HTML", "HTTP", "HTTPS", "CSV", "XML",
     "AI", "LLM", "CLI", "SDK", "APP", "ID", "OHLCV",
     "GET", "SET", "PUT", "CSS",
+    # Field 2026-09-21: major crypto tickers — ticker-SHAPED but never a stock
+    # symbol; without these "price of BTC" would elect the Finnhub quote.
+    "BTC", "ETH", "XRP", "DOGE", "SOL", "ADA", "BNB", "USDT", "USDC",
 })
 
 # Recipe scoring (§29 source stage): category+keyword scoring, with the ticker
@@ -537,11 +540,14 @@ def _category_corroborated(recipe: dict, request: str, intent: dict) -> bool:
         return True
     # A small per-category synonym set — narrow on purpose so a stray word does
     # not smuggle a match. Only finance today (the one bump gated on this rule).
-    # ``price`` is deliberately absent (too generic — every crypto/weather want
-    # carries it); the corroboration needs an explicitly finance-shaped word.
+    # Field 2026-09-21 ("show me the price of NVDA" resolved to NOTHING):
+    # ``price`` joins the set. It is safe HERE because this rule only ever
+    # gates the symbol-param ticker bump — a corroborated ALL-CAPS ticker must
+    # also be present — and the Google-elects-Bitcoin defect that once argued
+    # for excluding it is closed by the fixed-subject distinctive-word gate.
     if category == "finance":
         return any(w in hay for w in ("stock", "quote", "shares", "ticker",
-                                       "equity", "share"))
+                                       "equity", "share", "price", "prices"))
     return False
 
 
