@@ -11,6 +11,15 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Fixed
+- **Neural Interface: "show me the price of NVDA" now finds the stock
+  source.** "Price" plus a ticker counts as a stock ask (it previously
+  required the literal word "stock" or "quote"), so the card lands the
+  normal source-approval step with the symbol filled in. Crypto tickers
+  (BTC, ETH, …) are recognized as not-a-stock so they can never elect the
+  stock source, and the earlier "Google card fetching Bitcoin" guard still
+  holds.
+
 ## [0.20.0] - 2026-09-21
 
 ### Added
