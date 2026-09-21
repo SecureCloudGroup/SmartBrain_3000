@@ -176,7 +176,7 @@
     "id": "eur-usd-hourly",
     "request": "EUR to USD exchange rate, update hourly",
     "dimension": "fx, cadence word",
-    "url": "https://api.frankfurter.app/latest?from=EUR&to=USD",
+    "url": "https://api.frankfurter.dev/v1/latest?from=EUR&to=USD",
     "fixture": "fx.json",
     "fields": {
       "rate": "number"
@@ -467,7 +467,7 @@
   {
     "id": "lan-refused",
     "request": "my router status",
-    "dimension": "netguard refusal (private IP) \u2014 never fetched",
+    "dimension": "netguard refusal (private IP) — never fetched",
     "url": "http://192.168.1.1/api/status",
     "fixture": null,
     "fields": {

@@ -105,18 +105,34 @@ def test_field_3_tides_fetch_failure_names_itself_with_two_roads(client) -> None
                        headers=_LOCAL).json()["state"] == "source"
 
 
-def test_field_4_hn_without_a_recipe_lands_the_pick_question(client) -> None:
-    """Field: "top stories on Hacker News" (a words-path ask with no catalog
-    recipe) — the card must land the pick pause with its affordances, never a
-    dead shell. (Suggestion RELEVANCE is the G3 target.)"""
+def test_field_4_hn_resolves_from_words_to_the_vetted_recipe(client) -> None:
+    """Field: "top stories on Hacker News" failed as a words-path ask (the
+    catalog had no HN recipe; suggestions were weather-and-stocks noise).
+    G3: the promoted catalog resolves it deterministically to the vetted HN
+    recipe — the flow's source stage lands the STANDARD confirm pause."""
+    from smartbrain_3000 import ni_catalog
     iid = client.post("/api/ni/intake",
                       json={"request": "top stories on Hacker News"},
                       headers=_LOCAL).json()["id"]
-    ni_flow.reenter_source_pick(client.app.state.ni, iid,
-                                 "no recipe matched — user picks")
+    store = client.app.state.ni
+    intent = {"kind": "external_data", "subject": "Hacker News",
+              "cadence_minutes": 15, "wants": ["stories"], "threshold": None,
+              "display_hint": "list"}
+    match = ni_flow.match_recipe(ni_catalog.entries(),
+                                  "top stories on Hacker News", intent)
+    assert match is not None and match["id"] == "hn-front-page"
+    ni_flow._pause_for_recipe_confirm(store, iid, intent, match)
     flow = _board_flow(client, iid)
-    assert flow["state"] == "source"
-    assert isinstance(flow.get("suggestions"), list)
+    assert flow["state"] == "confirm_source"
+    from urllib.parse import urlparse
+    assert urlparse(flow.get("source_url") or "").hostname == "hn.algolia.com"
+    # And a truly uncovered ask still gets the honest empty pick pause.
+    iid2 = client.post("/api/ni/intake",
+                       json={"request": "show me the tides for Limehouse Boat Landing SC"},
+                       headers=_LOCAL).json()["id"]
+    ni_flow.reenter_source_pick(store, iid2, "no recipe matched — user picks")
+    flow2 = _board_flow(client, iid2)
+    assert flow2["state"] == "source" and flow2.get("suggestions") == []
 
 
 def test_field_5_wrong_value_note_is_journaled_and_rewinds_honestly(client) -> None:

@@ -12,6 +12,13 @@ to know when a release changes behavior.
 ## [Unreleased]
 
 ### Added
+- **Neural Interface: five new built-in sources — and asks in plain words
+  find them.** Hacker News front page, ISS position, Ethereum price, GitHub
+  repository stars, and sunrise/sunset times join the vetted catalog
+  (each live-proven), so "top stories on Hacker News" or "where is the
+  ISS" now builds straight from words — no URL needed. Suggestions on the
+  source picker are relevance-gated: an ask nothing covers gets an honest
+  empty list and the paste-a-URL field, never weather-suggestions-for-tides.
 - **Neural Interface: no card is ever a dead end.** Every failed or paused
   card now states, in plain words, exactly what happened and offers the way
   forward on the card itself: declining a suggested source returns you to
@@ -31,6 +38,8 @@ to know when a release changes behavior.
   magnitude 5 instead of silently showing the 2.5+ count, and US locations
   get Fahrenheit and mph by default ("weather in Charleston, SC" shows °F —
   visible on the approval card before anything runs).
+- The USD→EUR exchange-rate source moved with its upstream
+  (frankfurter.app → api.frankfurter.dev) — found by the live recipe prover.
 - The approval card's "won't include" line no longer lists things the card
   actually shows (magnitude and location were flagged missing on the
   earthquake card while being displayed on it).

@@ -771,3 +771,71 @@ def test_confirm_tool_enforces_geocode_query_display() -> None:
     assert out["state"] == "ready"
     item = ctx.ni.get_item(iid)
     assert item["state"] == "commissioning"
+
+
+# --- G3: words-path resolution over the promoted catalog --------------------
+
+def test_g3_words_resolve_to_promoted_recipes() -> None:
+    """The proven eval endpoints are now catalog recipes — the words path
+    (no URL) must resolve each ask to its vetted source deterministically.
+    This is the gate the HN field failure exposed: SHIPPED must mean
+    'resolves from words', not 'works when handed a URL'."""
+    from smartbrain_3000 import ni_catalog, ni_flow
+    cat = ni_catalog.entries()
+    expectations = [
+        ("top stories on Hacker News",
+         {"wants": ["stories"], "subject": "Hacker News"}, "hn-front-page"),
+        ("where is the ISS right now",
+         {"wants": ["location"], "subject": "ISS"}, "iss-position"),
+        ("sunrise and sunset times for today",
+         {"wants": ["sunrise", "sunset"], "subject": "sunrise"}, "sunrise-sunset"),
+        ("ethereum price please",
+         {"wants": ["price"], "subject": "ethereum"}, "crypto-price-eth-usd"),
+        ("how many stars does torvalds/linux have",
+         {"wants": ["stars"], "subject": "torvalds/linux"}, "github-repo-stars"),
+        ("what's bitcoin worth right now",
+         {"wants": ["price"], "subject": "bitcoin"}, "crypto-price-btc-usd"),
+        ("track the weather in Kansas City",
+         {"wants": ["temperature"], "subject": "weather",
+          "place": "Kansas City"}, "weather-open-meteo"),
+    ]
+    for request, intent, expected in expectations:
+        match = ni_flow.match_recipe(cat, request, intent)
+        assert match is not None and match["id"] == expected, (
+            f"{request!r} resolved to "
+            f"{match['id'] if match else None!r}, wanted {expected!r}")
+
+
+def test_g3_unrelated_asks_match_nothing_and_suggest_nothing() -> None:
+    """The tides class: no recipe covers it — match must clear nobody AND the
+    pick card must offer an honest empty list, never weather-for-tides."""
+    from smartbrain_3000 import ni_catalog, ni_flow
+    cat = ni_catalog.entries()
+    for request in ("show me the tides for Limehouse Boat Landing SC",
+                    "my kids' school lunch menu this week"):
+        intent = {"wants": ["data"], "subject": request}
+        assert ni_flow.match_recipe(cat, request, intent) is None, request
+        assert ni_flow.suggest_recipes(cat, request, intent) == [], request
+
+
+def test_g3_suggest_floor_keeps_relevant_candidates() -> None:
+    """The floor removes noise, not signal — a related ask still suggests."""
+    from smartbrain_3000 import ni_catalog, ni_flow
+    cat = ni_catalog.entries()
+    got = ni_flow.suggest_recipes(cat, "hacker news headlines",
+                                   {"wants": ["headlines"]})
+    assert any(s["recipe_id"] == "hn-front-page" for s in got), got
+
+
+def test_g3_new_recipes_have_prove_params_for_every_param() -> None:
+    """Every declared param on the promoted recipes carries a prove value —
+    the live prover must be able to exercise each without hand-editing."""
+    from smartbrain_3000 import ni_catalog
+    for rid in ("hn-front-page", "iss-position", "crypto-price-eth-usd",
+                "github-repo-stars", "sunrise-sunset"):
+        recipe = ni_catalog.get_recipe(rid)
+        assert recipe is not None, rid
+        declared = set(recipe["spec_template"].get("params") or {})
+        proved = set(recipe.get("prove_params") or {})
+        assert declared <= proved | set(), (
+            f"{rid}: params {declared - proved} lack prove values")
