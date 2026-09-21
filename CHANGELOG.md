@@ -12,6 +12,36 @@ to know when a release changes behavior.
 ## [Unreleased]
 
 ### Fixed
+- **Neural Interface: the Retry button now actually retries.** It had never
+  worked — every tap crashed the rebuild and looped the card back to
+  "Setup failed". Retrying now re-runs your original request for real, and
+  never re-uses a source URL you hadn't approved.
+- Cards waiting for YOU (approve-a-source, pick-a-source) are no longer
+  declared "stalled" and killed after an hour — only genuinely dead builds
+  are swept.
+- While a card is still searching for a source it now says "Finding a
+  source for this…" instead of prematurely showing the picker (whose taps
+  could corrupt the build in progress).
+- Refining or fixing a card while it's mid-build now says "busy building"
+  instead of silently losing your note.
+- The "won't include" line no longer lies in either direction: "ethereum
+  price" is disclosed as missing on a bitcoin card, and "Berlin weather" is
+  no longer flagged missing on the Berlin weather card.
+- Impossible dates ("days until 2026-13-45") ask for a real date instead of
+  failing with a generic message; verification notes ("this card won't
+  include …") now appear in the card's History.
+
+### Changed
+- **Neural Interface: sources are now matched by meaning, not keywords.**
+  The assistant's own understanding picks the vetted source for your words —
+  "what is NVDA trading at", "how much is a share of Microsoft", "when does
+  the sun rise tomorrow" all land the right source with the normal approval
+  step. When it isn't sure, its best guesses appear as suggestions on the
+  picker (you decide, as always); keyword matching remains only as the
+  offline fallback. A new live release gate replays a paraphrase matrix so
+  "any phrasing" is a tested property, not a hope.
+
+### Fixed
 - **Neural Interface: "show me the price of NVDA" now finds the stock
   source.** "Price" plus a ticker counts as a stock ask (it previously
   required the literal word "stock" or "quote"), so the card lands the

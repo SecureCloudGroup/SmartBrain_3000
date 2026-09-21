@@ -1193,6 +1193,7 @@ def _seed_source_pause(client: TestClient, monkeypatch, request_text: str) -> st
     store = client.app.state.ni
     record = ni_flow._flow_read(store, iid)
     record["state"] = "source"
+    record["error"] = ni_flow.AWAITING_SOURCE_PICK
     ni_flow._flow_write(store, iid, record)
     return iid
 
@@ -1233,7 +1234,7 @@ def test_pick_source_rejects_bad_url_shape_and_wrong_state(
     r2 = client.post(f"/api/ni/items/{iid}/flow/pick-source",
                      json={"url": "https://api.example.com/metric.json"},
                      headers={"X-SB-Local": "1"})
-    assert r2.status_code == 409 and "no source pick pending" in r2.json()["detail"]
+    assert r2.status_code == 409 and "asking for a source" in r2.json()["detail"]
 
 
 def test_pick_recipe_routes_into_confirm_source_pause(
@@ -1496,3 +1497,131 @@ def test_validate_wrong_with_note_drives_the_rebuild(client: TestClient,
     assert r.status_code == 200 and r.json()["refine"] == "rebuild", r.text
     record = ni_flow._flow_read(store, iid)
     assert record["_refine_note"] == "should be in Fahrenheit degrees."
+
+
+# --- Claims audit 2026-09-21: the mocked-mask class, unmasked ---------------
+
+def test_retry_reseeds_the_record_so_the_worker_can_actually_run(
+        client: TestClient, monkeypatch) -> None:
+    """THE audit finding: retry cleared the flow slot then spawned — run_flow
+    crashed 'no flow record' on every tap, forever, and the mocked worker in
+    the old test was the mask. Now: the route RE-SEEDS the record, and this
+    test runs the REAL run_flow continuation synchronously to prove the
+    worker path completes instead of crashing."""
+    from smartbrain_3000 import ni_flow
+    _unlock(client)
+    monkeypatch.setattr(ni_flow, "start_flow_worker", lambda *a, **kw: True)
+    iid = client.post("/api/ni/intake", json={"request": "retry me for real"},
+                      headers={"X-SB-Local": "1"}).json()["id"]
+    store = client.app.state.ni
+    ni_flow._fail(store, iid, "worker", "crash: ValueError")
+    r = client.post(f"/api/ni/items/{iid}/flow/retry", headers={"X-SB-Local": "1"})
+    assert r.status_code == 200, r.text
+    record = ni_flow._flow_read(store, iid)
+    assert record is not None, "retry must RE-SEED the record, never clear it"
+    assert record["state"] == "intent"
+    assert record["request"] == "retry me for real", "sealed request preserved"
+    # The REAL worker body now runs against the reseeded record — the old
+    # code path raised ValueError('no flow record') right here.
+    import json as _json
+    intent_reply = _json.dumps({
+        "kind": "external_data", "subject": "retry", "cadence_minutes": 15,
+        "wants": ["value"], "threshold": None, "display_hint": "value"})
+    result = ni_flow.run_flow(store, iid,
+                               gateway_call=lambda m, p: intent_reply,
+                               fetcher=lambda url: {}, catalog=[])
+    assert result["state"] == "source", (
+        "the retried flow must proceed (here: to the pick pause), not crash")
+
+
+def test_retry_never_promotes_an_unapproved_confirm_url(
+        client: TestClient, monkeypatch) -> None:
+    """Audit consent guard: a record that died at confirm_source carries a
+    recipe URL the user NEVER approved — retry must drop it."""
+    from smartbrain_3000 import ni_catalog, ni_flow
+    _unlock(client)
+    fired: dict = {}
+    monkeypatch.setattr(ni_flow, "start_flow_worker",
+                        lambda s, i, **kw: fired.update(id=i, **kw) or True)
+    iid = client.post("/api/ni/intake", json={"request": "unapproved url guard"},
+                      headers={"X-SB-Local": "1"}).json()["id"]
+    store = client.app.state.ni
+    ni_flow._pause_for_recipe_confirm(store, iid, {},
+                                       ni_catalog.get_recipe("crypto-price-btc-usd"))
+    record = ni_flow._flow_read(store, iid)
+    record["state"] = "failed"
+    record["error"] = "stale: flow record stranded"
+    ni_flow._flow_write(store, iid, record)
+    r = client.post(f"/api/ni/items/{iid}/flow/retry", headers={"X-SB-Local": "1"})
+    assert r.status_code == 200, r.text
+    assert fired.get("source_url") is None, (
+        "a confirm-pause URL was never consented — retry must not fetch it")
+
+
+def test_sweep_never_kills_user_gated_pauses(client: TestClient) -> None:
+    """Audit: the 1h sweep executed live consent pauses ('creation stalled'
+    on a card that was just waiting for the user). Every user-gated pause is
+    exempt now."""
+    from datetime import UTC, datetime, timedelta
+
+    from smartbrain_3000 import ni_flow
+    _unlock(client)
+    store = client.app.state.ni
+    old = (datetime.now(UTC) - timedelta(hours=3)).isoformat(timespec="seconds")
+    for state, marker in (("source", ni_flow.AWAITING_SOURCE_PICK),
+                           ("confirm_source", "awaiting_confirm")):
+        iid = client.post("/api/ni/intake",
+                          json={"request": f"pause guard {state}"},
+                          headers={"X-SB-Local": "1"}).json()["id"]
+        record = ni_flow._flow_read(store, iid)
+        record["state"] = state
+        record["error"] = marker
+        record["updated_at"] = old
+        ni_flow._flow_write(store, iid, record)
+    swept = ni_flow.sweep_stranded_flows(store)
+    assert swept == 0, "user-gated pauses must survive the sweep"
+
+
+def test_pick_routes_refuse_the_inflight_locating_window(
+        client: TestClient, monkeypatch) -> None:
+    """Audit: a bare state=source (mid-rank progress window) rendered the
+    full pick card and accepted taps that corrupted the live flow. The pick
+    routes now require the real pause marker; the board withholds
+    suggestions in the window."""
+    from smartbrain_3000 import ni_flow
+    _unlock(client)
+    monkeypatch.setattr(ni_flow, "start_flow_worker", lambda *a, **kw: True)
+    iid = client.post("/api/ni/intake", json={"request": "mid rank window"},
+                      headers={"X-SB-Local": "1"}).json()["id"]
+    store = client.app.state.ni
+    record = ni_flow._flow_read(store, iid)
+    record["state"] = "source"  # NO awaiting_pick marker: the in-flight window
+    ni_flow._flow_write(store, iid, record)
+    r = client.post(f"/api/ni/items/{iid}/flow/pick-source",
+                    json={"url": "https://api.example.com/x.json"},
+                    headers={"X-SB-Local": "1"})
+    assert r.status_code == 409 and "asking for a source" in r.json()["detail"]
+    r2 = client.post(f"/api/ni/items/{iid}/flow/pick-recipe",
+                     json={"recipe_id": "crypto-price-btc-usd"},
+                     headers={"X-SB-Local": "1"})
+    assert r2.status_code == 409
+    row = next(x for x in client.get("/api/ni/board").json()["items"]
+               if x["id"] == iid)
+    assert "suggestions" not in row["flow"], (
+        "the locating window must not dress up as the pick card")
+
+
+def test_refine_refuses_while_a_flow_is_running(client: TestClient,
+                                                 monkeypatch) -> None:
+    """Audit: refine during an active build silently lost the note."""
+    from smartbrain_3000 import ni_flow
+    _unlock(client)
+    monkeypatch.setattr(ni_flow, "start_flow_worker", lambda *a, **kw: True)
+    iid = _refinable_card(client)
+    store = client.app.state.ni
+    ni_flow._flow_write(store, iid,
+                         ni_flow._make_record("busy build", "sampling"))
+    r = client.post(f"/api/ni/items/{iid}/refine",
+                    json={"note": "should be in Fahrenheit degrees."},
+                    headers={"X-SB-Local": "1"})
+    assert r.status_code == 409 and "busy building" in r.json()["detail"]

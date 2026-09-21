@@ -175,9 +175,11 @@
     busyId = item.id;
     flowActionError = { ...flowActionError, [item.id]: "" };
     try {
-      await api.niFlowPickSource(item.id, url);
+      const out = await api.niFlowPickSource(item.id, url);
       pickUrlText = "";
-      toast("Source set — sampling it now.");
+      toast(out.started === false
+        ? "Source set — it starts as soon as a build slot frees up."
+        : "Source set — sampling it now.");
       await load();
     } catch (err) {
       flowActionError = { ...flowActionError, [item.id]: describeError(err) || "That didn’t work — check the URL." };
@@ -303,9 +305,11 @@
     composerBusy = true;
     composerError = "";
     try {
-      await api.niIntake(text);
+      const out = await api.niIntake(text);
       composerText = "";
-      toast("Card started — watch it build below.");
+      toast(out.started === false
+        ? "Card created — it starts as soon as a build slot frees up."
+        : "Card started — watch it build below.");
       await load();
     } catch (err) {
       composerError = describeError(err);
@@ -317,9 +321,12 @@
   async function retryFlow(item: NiBoardItem): Promise<void> {
     console.assert(typeof item.id === "string", "retryFlow: id is string");
     busyId = item.id;
+    flowActionError = { ...flowActionError, [item.id]: "" };
     try {
-      await api.niFlowRetry(item.id);
-      toast("Retrying the card build.");
+      const out = await api.niFlowRetry(item.id);
+      toast(out.started === false
+        ? "Retry queued — it starts as soon as a build slot frees up."
+        : "Retrying the card build.");
       await load();
     } catch (err) {
       const msg = describeError(err);
@@ -1148,7 +1155,7 @@
       title="Nothing on your Neural Interface yet"
       body="Type what you want to watch in the box above — “show me AAPL every 5 minutes” — then approve the source on the card."
     >
-      <button onclick={() => goto("/chat")}>Open chat</button>
+      <button onclick={() => goto("/chat")}>Ask for a card above</button>
     </EmptyState>
   {:else}
     <div class="ni-grid2">
@@ -1217,6 +1224,9 @@
                   {item.flow.reason ?? friendly ?? "Creation didn’t finish."}
                 </p>
                 {#if item.flow.question?.kind === "supply_date"}
+                  {#if item.flow.question.prompt}
+                    <p class="muted" style="margin:var(--s-1) 0 0; font-size:var(--f-label)">{item.flow.question.prompt}</p>
+                  {/if}
                   <form
                     class="ni-pick-url"
                     style="margin-top: var(--s-2)"
@@ -1234,6 +1244,18 @@
                   </form>
                 {/if}
                 <div class="ni-actions" style="margin-top: var(--s-2)">
+                  {#if !item.shell}
+                    <button
+                      class="secondary"
+                      disabled={busyId === item.id}
+                      onclick={() => fixItem(item)}
+                    >Fix</button>
+                    <button
+                      class="ghost"
+                      disabled={busyId === item.id}
+                      onclick={() => openRefine(item)}
+                    >Refine…</button>
+                  {/if}
                   {#if item.shell && item.flow.reopen?.includes("retry")}
                     <button
                       class="secondary"
@@ -1252,6 +1274,10 @@
                 {#if flowActionError[item.id]}
                   <p class="error" style="margin:var(--s-1) 0 0; font-size:var(--f-label)">{flowActionError[item.id]}</p>
                 {/if}
+              {:else if item.flow.state === "source" && item.flow.suggestions === undefined}
+                <p class="muted" style="margin:0; font-size:var(--f-label)">
+                  Finding a source for this…
+                </p>
               {:else if item.flow.state === "source"}
                 <!-- P3 (2026-09-17): the source-pick pause renders its OWN
                      affordances — vetted suggestions (every category) that
