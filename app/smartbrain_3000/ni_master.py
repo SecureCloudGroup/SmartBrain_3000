@@ -165,6 +165,13 @@ _REASONS: dict[str, str] = {
     "declined": "You declined the suggested source.",
     "computed-only": "This needs a specific date, written as YYYY-MM-DD.",
     "intent": "The request couldn't be understood well enough to build from.",
+    # Claims audit 2026-09-21: classes the flow actually writes that the map
+    # missed — the card showed the blind sentence for each of these.
+    "assembly": "The card couldn't be assembled from the mapped fields.",
+    "derive": "The data came back in a shape no card can read yet.",
+    "busy": "Another card was building — this one couldn't start.",
+    "worker": "The build crashed — retry runs it again from your request.",
+    "remap": "The rebuild couldn't start from this card's source.",
 }
 
 

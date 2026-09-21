@@ -1650,3 +1650,47 @@ was the proof. ``locate_rank`` replaces it as the authority:
 - Param FILLS stay deterministic (W-D stopwords, W-E sealed fills) —
   selection is semantic, execution values remain code-derived and
   consent-displayed.
+
+**Claims audit + fix wave (2026-09-21, pre-round assurance)**. Operator
+mandate: verify BUILT vs CLAIMED before the next field round — no more
+"I never built it". An independent adversarial audit (10 tasks, probes run
+against the real engine) produced the ledger; every field-relevant finding
+is FIXED and pinned:
+- **Retry never worked** (the flagship no-dead-end affordance): the route
+  cleared the flow slot then spawned; run_flow crashed "no flow record" on
+  every tap forever — masked by a route test whose mocked worker never ran
+  the real body. Fixed: retry RE-SEEDS the record with the sealed request;
+  the regression drives the REAL route + the REAL run_flow continuation.
+  Consent guard added: a URL from a record that died at confirm_source was
+  never approved — retry drops it (the latent bypass the fix would have
+  armed).
+- **The 1h sweep executed live consent pauses** (source/confirm_source) —
+  "creation stalled" on a card that was just waiting for the user, approval
+  destroyed, bogus finding filed. All user-gated pauses now exempt.
+- **The mid-rank locating window rendered the full pick card** ("No vetted
+  source matched" while M-RANK was still running) and its taps corrupted the
+  live flow. The pick affordances (board + both routes) now require the real
+  ``awaiting_pick`` marker; the window shows "Finding a source for this…".
+- **Refine/fix during an active build** silently lost the note → both now
+  409 "busy building" while a flow record is non-terminal.
+- **Coverage lied in both directions**: false-covered ("ethereum price"
+  claimed served by "price") and false-missing ("Berlin weather" flagged on
+  the Berlin card). Distinctive-token coverage: every non-generic token must
+  be served by outputs, synonyms, the recipe's own title, or the consented
+  place; generic tokens never carry coverage alone.
+- **Judge disclosures were invisible on /ni** (flow-slot notes hidden at
+  ready) → gaps/doubts now journal (History shows them).
+- **Blind reasons**: classes the flow writes (assembly/derive/busy/worker/
+  remap) joined the reason map; a calendar-invalid date (2026-13-45) now
+  terminates ANSWERABLE with the date question instead of dying at assembly.
+- Route-side pick-recipe pause now runs the M-AFFINITY prune (a
+  ``default_call_model`` helper); worker-refused starts surface honestly
+  ("starts as soon as a build slot frees up") instead of false success
+  toasts; non-shell terminal cards render Fix/Refine instead of nothing;
+  ``question.prompt`` renders; stale chat-era copy swept (pick label, empty-
+  state CTA, duplicate-title message, pause note).
+Known-and-accepted for the round (documented, not hidden): compound asks
+build the best single card with the unserved half disclosed at consent
+(true decomposition = PLAN, the next milestone); model-ish asks land the
+pick pause rather than an honest "cards can't write content yet" (PLAN's
+route classes); deeper build-slot queueing beyond honest copy.

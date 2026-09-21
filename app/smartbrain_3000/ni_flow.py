@@ -1286,8 +1286,8 @@ def _check_shell_title_duplicate(store: ni.NIStore, title: str) -> None:
         if other == needle:
             raise ValueError(
                 f"a card named {item['spec'].get('title')!r} already exists "
-                f"(id={item['id']!r}) — pass allow_duplicate: true to keep two "
-                "with the same title, or ask me to update the existing card"
+                f"(id={item['id']!r}) — use Refine… on that card to change "
+                "it, or rename or delete it before creating a twin"
             )
 
 
@@ -1587,6 +1587,14 @@ def _handle_computed(store: ni.NIStore, item_id: str, request: str,
             question={"kind": "supply_date",
                        "prompt": "When is it? Add the date as YYYY-MM-DD."})
     date_str = supplied or date_match.group(1)
+    try:
+        datetime.strptime(date_str, "%Y-%m-%d")
+    except ValueError:
+        return _terminate_unsupported(
+            store, item_id,
+            f"computed-only needs a real calendar date ({date_str} isn't one)",
+            question={"kind": "supply_date",
+                       "prompt": "That date doesn't exist — add it as YYYY-MM-DD."})
     source = {"type": "computed", "compute": "days_until", "date": date_str}
     pipeline: list[dict] = []
     scene = value_scene(["days"])
@@ -1663,7 +1671,7 @@ def _run_external_flow(store: ni.NIStore, item_id: str, request: str,
                                           call_model=call_model)
     _transition(store, item_id, "source",
                 error=AWAITING_SOURCE_PICK,
-                note="paused: awaiting a source URL (resume_ni_flow with source_url)")
+                note="paused: pick a source on the card, or paste an API URL")
     return _flow_read(store, item_id) or {}
 
 
@@ -2024,6 +2032,18 @@ def _synonym_forms(slug: str) -> list[str]:
     return forms
 
 
+# Tokens too generic to CARRY coverage of a want on their own — superset of
+# the title-word set plus the qualifier words asks are padded with. The
+# pause-time M-AFFINITY prune still rescues near-synonyms this code misses
+# (over-disclosure degrades honestly; false coverage lied).
+_COVERAGE_GENERIC: frozenset[str] = frozenset({
+    "price", "prices", "current", "quote", "rate", "rates", "exchange",
+    "stock", "the", "and", "for", "with", "past", "day", "json", "data",
+    "share", "shares", "value", "level", "amount", "latest", "live",
+    "today", "now", "of", "in", "my", "per",
+})
+
+
 def _uncovered_wants(recipe: dict, intent: dict) -> list[str]:
     """F3 (C2-feedback wave, 2026-09-15): wants the recipe cannot serve.
 
@@ -2044,8 +2064,31 @@ def _uncovered_wants(recipe: dict, intent: dict) -> list[str]:
         slug = _slugify_field_name(want)
         if not slug:
             continue
-        covered = any(_names_match(form, s)
-                      for form in _synonym_forms(slug) for s in served)
+        # Claims audit 2026-09-21 (false COVERAGE, the substring matcher's
+        # other face): "ethereum price" read as covered because "price"
+        # matched. Coverage now requires every DISTINCTIVE token of the want
+        # to be served; generic tokens (price/rate/current/…) can ride along
+        # but can never carry coverage by themselves. An all-generic want
+        # ("price") keeps the old any-match rule.
+        tokens = [t for t in slug.split("_") if t]
+        distinctive = [t for t in tokens if t not in _COVERAGE_GENERIC]
+        if distinctive:
+            # A recipe SERVES its own subject: "bitcoin" on the Bitcoin
+            # recipe is covered by the title, not the output names.
+            title_tokens = [w for w in
+                            _slugify_field_name(str(recipe.get("title") or "")).split("_")
+                            if len(w) >= 3]
+            place_tokens = [w for w in
+                            _slugify_field_name(str(intent.get("place") or "")).split("_")
+                            if len(w) >= 3]
+            universe = list(served) + title_tokens + place_tokens
+            covered = all(
+                any(_names_match(form, s)
+                    for form in _synonym_forms(t) for s in universe)
+                for t in distinctive)
+        else:
+            covered = any(_names_match(form, s)
+                          for form in _synonym_forms(slug) for s in served)
         if not covered:
             uncovered.append(want)
     return uncovered
@@ -2359,9 +2402,13 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
         if judge["wrong"]:
             extra_notes.append(
                 "verification still doubts: " + "; ".join(judge["wrong"]))
+            _try_journal(store, item_id, "c2_wrong",
+                          "verification doubts: " + "; ".join(judge["wrong"]))
         if judge["gaps"]:
             extra_notes.append(
                 "this card won't include: " + ", ".join(judge["gaps"]))
+            _try_journal(store, item_id, "updated",
+                          "this card won't include: " + ", ".join(judge["gaps"]))
         if judge["serves"] and not judge["wrong"] and not judge["gaps"]:
             extra_notes.append("verified against the request")
     handoff_note = degrade_note or "handoff from freeform mapping"
@@ -2584,6 +2631,32 @@ def _release(item_id: str) -> None:
         _INFLIGHT.discard(item_id)
 
 
+def default_call_model(store: ni.NIStore) -> Callable[[str], str] | None:
+    """A prompt→reply callable on the live-resolved flow model, or None.
+
+    Route-side callers (the card's pick-recipe pause) use this so the same
+    bounded model steps run there as in the worker; None degrades every
+    caller to its deterministic path.
+    """
+    assert store is not None, "store required"
+    try:
+        model = _resolve_flow_model(store)
+    except Exception:
+        return None
+    if not model:
+        return None
+
+    def _call(prompt: str) -> str:
+        temp = None if _claudecli_mod.is_claudecode(model) else 0.0
+        data = _gateway_mod.chat(
+            [{"role": "user", "content": prompt}], model,
+            timeout=_FLOW_MODEL_TIMEOUT_S, temperature=temp,
+        )
+        return _gateway_mod.completion_text(data)
+
+    return _call
+
+
 def start_flow_worker(store: ni.NIStore, item_id: str, *,
                        gateway_call: Callable[[str, str], str] | None = None,
                        fetcher: Callable[[str], object] | None = None,
@@ -2682,10 +2755,11 @@ def board_flow_field(store: ni.NIStore, item_id: str) -> dict | None:
     # tile — the card needs the sealed disclosure verbatim: the exact URL,
     # the optional geocode lookup, and the wants this source cannot serve.
     # The chat model is no longer a required relay for the consent moment.
-    if state == "source":
-        # P3 affordances: vetted suggestions + paste-a-URL. M-RANK's sealed
-        # candidates (model-picked at pause time, ids validated) render
-        # first; the deterministic scorer fills in when none were sealed.
+    if state == "source" and record.get("error") == AWAITING_SOURCE_PICK:
+        # P3 affordances: vetted suggestions + paste-a-URL — but ONLY on the
+        # real pick pause. A bare state=source is the in-flight locating
+        # window (claims audit 2026-09-21: the full pick card rendered while
+        # M-RANK was still running, and a tap corrupted the live flow).
         intent = record.get("intent") if isinstance(record.get("intent"), dict) else {}
         try:
             ranked_ids = record.get("_ranked")
@@ -2774,6 +2848,12 @@ def begin_remap(store: ni.NIStore, item: dict) -> bool:
     if unfilled:
         raise ValueError(
             f"fill the card's {unfilled[0]!r} value before fixing")
+    live = _flow_read(store, item["id"])
+    live_state = str((live or {}).get("state") or "")
+    if live is not None and live_state not in _TERMINAL_STATES \
+            and live_state != "ready":
+        raise ValueError(
+            "this card is busy building — wait for it to settle, then fix")
     request = str(item["spec"].get("goal") or item["spec"].get("title") or "remap")
     record = _make_record(request, "sampling", source_url=url,
                            notes=["remap re-entering flow at sampling"])
@@ -2844,6 +2924,12 @@ def begin_refine(store: ni.NIStore, item: dict, note: str) -> dict:
     if unfilled:
         raise ValueError(
             f"fill the card's {unfilled[0]!r} value before refining")
+    live = _flow_read(store, item["id"])
+    live_state = str((live or {}).get("state") or "")
+    if live is not None and live_state not in _TERMINAL_STATES \
+            and live_state != "ready":
+        raise ValueError(
+            "this card is busy building — wait for it to settle, then refine")
     request = str(item["spec"].get("goal") or item["spec"].get("title") or "refine")
     record = _make_record(request, "sampling", source_url=url,
                            notes=[f"rebuilding from your note: {text[:120]}"])
@@ -2874,8 +2960,13 @@ def sweep_stranded_flows(store: ni.NIStore) -> int:
         state = str(record.get("state") or "")
         if state in _TERMINAL_STATES or state == "ready":
             continue
-        if state in ("awaiting_credential", "awaiting_params"):
-            continue  # user-gated; not stranded even after an hour
+        if state in ("awaiting_credential", "awaiting_params",
+                      "source", "confirm_source"):
+            # User-gated pauses are never stranded — sweeping a live consent
+            # card after dinner told the user "creation stalled" (a lie),
+            # destroyed the pending approval, and filed a bogus finding
+            # (claims audit 2026-09-21).
+            continue
         updated_at = record.get("updated_at")
         if not isinstance(updated_at, str) or not updated_at:
             continue

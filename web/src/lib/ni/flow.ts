@@ -38,7 +38,7 @@ export function flowStageLabel(flow: NiItemFlow | null | undefined): string {
   if (s === "intent") return "Understanding your request…";
   if (s === "source") {
     return flow.error === AWAITING_SOURCE_PICK
-      ? "Waiting for you to pick a source in chat"
+      ? "Waiting for you to pick a source on the card"
       : "Finding the source…";
   }
   if (s === "confirm_source") return "Waiting for you to approve the source";

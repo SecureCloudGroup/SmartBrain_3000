@@ -837,9 +837,19 @@ def retry_flow(request: Request, item_id: str) -> dict:
     # intends as a fresh start — but a user-named URL was their consent, so it
     # stays. Heuristic: keep the URL only when the failure was NOT at fetch.
     error = str(record.get("error") or "")
-    keep_url = isinstance(source_url, str) and source_url and \
-        not error.startswith("fetch")
-    ni_flow.clear_flow_slot(store, item_id)
+    # Consent guard (claims audit 2026-09-21): a record that died at the
+    # confirm pause carries the recipe URL the user NEVER approved — a retry
+    # must not promote it to a consented fetch.
+    died_unapproved = "confirm" in error or bool(record.get("_recipe_id"))
+    keep_url = isinstance(source_url, str) and bool(source_url) and \
+        not error.startswith("fetch") and not died_unapproved
+    # Claims audit 2026-09-21: clear-then-spawn CRASHED the worker ("no flow
+    # record") — Retry never worked; the mocked route test was the mask.
+    # RE-SEED the record with the sealed request instead of clearing it.
+    ni_flow._flow_write(store, item_id, ni_flow._make_record(
+        request_text, "intent",
+        source_url=source_url if keep_url else None,
+        notes=["retrying the build with the same request"]))
     started = ni_flow.start_flow_worker(
         store, item_id, source_url=source_url if keep_url else None)
     request.app.state.audit.append(
@@ -870,10 +880,12 @@ def pick_flow_source(request: Request, item_id: str, body: PickSourceIn) -> dict
         raise HTTPException(status_code=404, detail="item not found")
     record = ni_flow._flow_read(store, item_id)
     state = str((record or {}).get("state") or "")
-    if record is None or state != "source":
+    if record is None or state != "source" \
+            or record.get("error") != ni_flow.AWAITING_SOURCE_PICK:
         raise HTTPException(
             status_code=409,
-            detail=f"no source pick pending (flow state {state or 'none'!r})")
+            detail="the card isn't asking for a source right now — it may "
+                   "still be searching; give it a moment")
     url = body.url.strip()
     try:
         ni._validate_http_json_url_shape(url)
@@ -908,15 +920,18 @@ def pick_flow_recipe(request: Request, item_id: str, body: PickRecipeIn) -> dict
         raise HTTPException(status_code=404, detail="item not found")
     record = ni_flow._flow_read(store, item_id)
     state = str((record or {}).get("state") or "")
-    if record is None or state != "source":
+    if record is None or state != "source" \
+            or record.get("error") != ni_flow.AWAITING_SOURCE_PICK:
         raise HTTPException(
             status_code=409,
-            detail=f"no source pick pending (flow state {state or 'none'!r})")
+            detail="the card isn't asking for a source right now — it may "
+                   "still be searching; give it a moment")
     recipe = ni_catalog.get_recipe(body.recipe_id)
     if recipe is None:
         raise HTTPException(status_code=404, detail="unknown recipe")
     intent = record.get("intent") if isinstance(record.get("intent"), dict) else {}
-    ni_flow._pause_for_recipe_confirm(store, item_id, intent, recipe)
+    ni_flow._pause_for_recipe_confirm(store, item_id, intent, recipe,
+                                       call_model=ni_flow.default_call_model(store))
     request.app.state.audit.append(
         "user", "ni_flow_pick_recipe", "reviewed", "executed", True,
         args_summary=tools.summarize({"item_id": item_id,

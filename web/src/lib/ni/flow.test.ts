@@ -19,7 +19,7 @@ describe("flowStageLabel", () => {
 
   it("splits the 'source' state into search vs waiting-for-pick via flow.error", () => {
     expect(flowStageLabel({ state: "source", error: AWAITING_SOURCE_PICK }))
-      .toBe("Waiting for you to pick a source in chat");
+      .toBe("Waiting for you to pick a source on the card");
     expect(flowStageLabel({ state: "source", error: "something_else" }))
       .toBe("Finding the source…");
   });
