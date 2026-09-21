@@ -1307,7 +1307,7 @@
                     <input
                       type="url"
                       bind:value={pickUrlText}
-                      placeholder="Or paste an API URL (https://…)"
+                      placeholder="Or paste any web page or API URL (https://…)"
                       maxlength="2000"
                       disabled={busyId === item.id}
                       aria-label="Paste a source URL"

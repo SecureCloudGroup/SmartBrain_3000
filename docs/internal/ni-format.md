@@ -1694,3 +1694,34 @@ build the best single card with the unserved half disclosed at consent
 (true decomposition = PLAN, the next milestone); model-ish asks land the
 pick pause rather than an honest "cards can't write content yet" (PLAN's
 route classes); deeper build-slot queueing beyond honest copy.
+
+**G4b — the page door (2026-09-21, field round 2)**. The activity log
+rewrote the "web search is failing" report: EVERY URL the operator pasted
+was a normal webpage (nhc.noaa.gov/gtwo.php, spacinsider.com/news,
+usharbors.com) and the JSON-only pick refused each one. The Phase-2c
+machinery (netguard page fetch + subprocess-jailed extraction) and the §13
+llm stage (local-only, one per pipeline, "Interpreted") existed with no flow
+door — now doored:
+- ``_sample_and_map``: a decode-class fetch failure on a CONSENTED url (the
+  paste/pick was the consent) routes to ``_build_page_card`` — never on a
+  remap (a JSON card whose source starts serving HTML fails honestly, never
+  silently converts).
+- ``_build_page_card``: jailed ``{text, title}`` → a CODE-BUILT llm stage
+  (instruction from the WANTS verbatim, ≤6 string outputs, no params) → the
+  stage runs once for the preview → P8 judge verifies against the goal
+  (gaps journal) → sealed spec = ``http_page`` source + the one llm stage +
+  a value scene. The engine re-runs the same jail + local llm on schedule.
+  Flow-boundary law: every exception class inside the door lands
+  ``failed(fetch|assembly)`` — never a raise.
+- ``xml-not-json`` case REPURPOSED: live = ``ready`` (the door built an
+  interpreted card from the real BBC RSS in the engine gate, 20s end to
+  end); hermetic modes = ``failed`` via the new per-mode
+  ``expected.recorded`` registry key (page path stays unrecorded — the
+  pytest harness stubs the jailed fetch under a save/restore so nothing
+  leaks between rows).
+- Catalog +1: ``nhc-atlantic-storms`` (NHC CurrentStorms.json, keyless
+  government JSON — the hurricane ask resolves from words, live-proven; a
+  live storm "Fay" was on the feed at generation time). GDELT was evaluated
+  for the news class and REJECTED for the vetted catalog: a 5-second global
+  rate limit flaps gates — news pages ride the page door instead.
+- Composer copy: "paste any web page or API URL".

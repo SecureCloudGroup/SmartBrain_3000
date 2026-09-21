@@ -2233,3 +2233,99 @@ def test_place_serves_its_own_card_in_coverage() -> None:
         weather, {"wants": ["NVDA price", "Berlin weather"],
                    "place": "Berlin"})
     assert out == ["NVDA price"], out
+
+
+# --- G4b: the page door (field 2026-09-21 — every pasted URL was a webpage) --
+
+def _page_stub(monkeypatch, text: str, title: str) -> None:
+    monkeypatch.setattr(nimod, "_fetch_http_page",
+                        lambda source, item_id, secrets: {"text": text,
+                                                           "title": title})
+
+
+def test_page_door_builds_an_interpreted_card(monkeypatch) -> None:
+    """A consented page URL (JSON decode fails) builds an http_page card with
+    ONE code-built llm stage extracting the asked-for fields — the shipped
+    jail + llm machinery, finally doored."""
+    store, _conn = _store()
+    _page_stub(monkeypatch, "Tropical Storm Fay, 40 kt. No hurricanes.",
+               "NHC Outlook")
+    llm_reply = json.dumps({"tropical_storms": "Tropical Storm Fay (40 kt)",
+                             "hurricanes": ""})
+    judge_ok = json.dumps({"serves": True, "gaps": [], "wrong": []})
+    replies = [llm_reply, judge_ok]
+    item_id = ni_flow.create_shell_item(store, "daily tropical storms")
+    intent = {"kind": "external_data", "subject": "storms",
+              "cadence_minutes": 1440,
+              "wants": ["tropical storms", "hurricanes"],
+              "threshold": None, "display_hint": "list"}
+    ni_flow._transition(store, item_id, "intent", intent=intent)
+
+    def fetch_html(url: str) -> object:
+        raise json.JSONDecodeError("Expecting value", "<html>", 0)
+
+    result = ni_flow._sample_and_map(store, item_id, "daily tropical storms",
+                                      intent, "https://www.nhc.noaa.gov/gtwo.php",
+                                      lambda p: replies.pop(0), fetch_html)
+    assert result["state"] == "ready", result.get("error")
+    spec = store.get_item(item_id)["spec"]
+    assert spec["source"] == {"type": "http_page",
+                               "url": "https://www.nhc.noaa.gov/gtwo.php"}
+    assert [st["op"] for st in spec["pipeline"]] == ["llm"]
+    assert set(spec["pipeline"][0]["output"]) == {"tropical_storms", "hurricanes"}
+    assert "{{param:" not in spec["pipeline"][0]["instruction"]
+    notes = " ".join((ni_flow._flow_read(store, item_id) or {}).get("notes") or [])
+    assert "interpreted page card" in notes
+
+
+def test_page_door_jail_failure_is_honest(monkeypatch) -> None:
+    """A page the jail can't read fails fetch-class with reason + reopen."""
+    store, _conn = _store()
+
+    def _boom(source, item_id, secrets):
+        raise nimod.NIError("extract_jail", "jail crashed")
+    monkeypatch.setattr(nimod, "_fetch_http_page", _boom)
+    item_id = ni_flow.create_shell_item(store, "unreadable page")
+    intent = {"kind": "external_data", "subject": "x", "cadence_minutes": 15,
+              "wants": ["value"], "threshold": None, "display_hint": "value"}
+    ni_flow._transition(store, item_id, "intent", intent=intent)
+
+    def fetch_html(url: str) -> object:
+        raise json.JSONDecodeError("Expecting value", "<html>", 0)
+
+    result = ni_flow._sample_and_map(store, item_id, "unreadable page", intent,
+                                      "https://example.com/page",
+                                      lambda p: "{}", fetch_html)
+    assert result["state"] == "failed"
+    assert result["error"].startswith("fetch")
+    surface = __import__("smartbrain_3000.ni_master", fromlist=["x"]).terminal_surface(
+        "failed", result, shell=True)
+    assert surface["reason"] and surface["reopen"]
+
+
+def test_page_door_never_converts_a_remap(monkeypatch) -> None:
+    """A JSON card whose source starts serving HTML must fail the remap
+    honestly — never silently become an interpreted page card."""
+    store, _conn = _store()
+    item = _refine_card(store)
+    out = ni_flow.begin_refine(store, item, "should be in Fahrenheit degrees.")
+    assert out["kind"] == "rebuild"
+
+    def fetch_html(url: str) -> object:
+        raise json.JSONDecodeError("Expecting value", "<html>", 0)
+
+    result = ni_flow.run_flow(store, item["id"],
+                               gateway_call=lambda m, p: "{}",
+                               fetcher=fetch_html, catalog=[])
+    assert result["state"] == "failed"
+    assert store.get_item(item["id"])["spec"]["source"]["type"] == "http_json"
+
+
+def test_page_llm_stage_shape_from_wants() -> None:
+    stage = ni_flow._page_llm_stage({"wants": ["24h volume", "top story",
+                                                 "top story"]})
+    assert stage["op"] == "llm"
+    assert list(stage["output"]) == ["f_24h_volume", "top_story"]
+    assert all(v == "string" for v in stage["output"].values())
+    empty = ni_flow._page_llm_stage({"wants": []})
+    assert list(empty["output"]) == ["summary"]

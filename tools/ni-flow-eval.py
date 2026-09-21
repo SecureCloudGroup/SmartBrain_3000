@@ -147,6 +147,11 @@ def _validate_case(case: object, seen: set[str]) -> None:
         raise RuntimeError(f"row {cid}: unknown klass {case['klass']!r}")
     engine_state = (case["expected"] or {}).get("engine_state")
     allowed = _ENGINE_STATES | {"skipped"}  # image rows expect 'skipped'
+    recorded_state = (case["expected"] or {}).get("recorded")
+    if recorded_state is not None and recorded_state not in allowed:
+        raise RuntimeError(
+            f"row {case.get('id')!r}: expected.recorded {recorded_state!r} "
+            f"not in {sorted(allowed)}")
     if engine_state not in allowed:
         raise RuntimeError(
             f"row {cid}: expected.engine_state {engine_state!r} not in {sorted(allowed)}")
@@ -751,7 +756,8 @@ def _run_case_recorded(case: dict) -> dict:
     out: dict[str, Any] = {"id": case["id"], "status": "?",
                            "notes": [], "secs": 0.0, "mode": "recorded"}
     counter = _CallCounter()
-    expected_state = str((case["expected"] or {}).get("engine_state") or "")
+    expected_state = str((case["expected"] or {}).get("recorded")
+                         or (case["expected"] or {}).get("engine_state") or "")
     try:
         intent = _canonical_fake_intent(case)
         out["intent"] = intent
@@ -1181,6 +1187,9 @@ _RESOLUTION_PHRASINGS: list[tuple[str, dict, str | None]] = [
      {"subject": "earthquakes", "wants": ["magnitude"]}, "quakes-day-25"),
     ("ethereum price please", {"subject": "ethereum", "wants": ["price"]},
      "crypto-price-eth-usd"),
+    ("show me a daily of any tropical storms or hurricanes in the Atlantic ocean",
+     {"subject": "Atlantic tropical storms",
+      "wants": ["tropical storms", "hurricanes"]}, "nhc-atlantic-storms"),
     ("show me the tides for Limehouse Boat Landing SC",
      {"subject": "tides", "wants": ["tides"]}, None),
     ("my kids' school lunch menu this week",

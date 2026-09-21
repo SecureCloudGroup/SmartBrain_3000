@@ -45,14 +45,14 @@ gates AND the pytest suite — see "Adding a case" at the bottom). Status:
 | B2 | "days until 2026-12-25" | computed source, zero egress, real day count | SHIPPED (pytest) |
 | B3 | "track my custom sensor feed" (no URL, no recipe) | pause at `source`; the CARD renders relevance-gated suggestions + paste-a-URL (an uncovered ask gets an HONEST empty list) | SHIPPED (no-source-pause + G3 floor tests) |
 | B4 | "my router status at http://192.168.1.1/..." | `failed(fetch)` — netguard refuses private ranges; never fetched | SHIPPED (lan-refused) |
-| B5 | "BBC headlines from their RSS feed" (XML endpoint) | `failed(fetch)` — non-JSON body, honest class, no thrash | SHIPPED (xml-not-json) |
+| B5 | "BBC headlines from their RSS feed" (XML endpoint) | G4b: the page door — live builds an INTERPRETED card (jail + local llm); hermetic modes fail honestly | SHIPPED (xml-not-json, per-mode expectations) |
 | B6 | a URL that 404s / returns an error body | `failed(fetch)`, one attempt, honest note | SHIPPED (dead-endpoint) |
 | B7 | API needing a key, sampled without one (401) | `failed(fetch)` at sampling — the sample IS the probe | SHIPPED (dead-endpoint class covers it) |
 | B8 | payload > 32KB sample cap | deterministic downsample, re-trim to 1 exemplar | SHIPPED (quakes + unit tests) |
 | B9 | API keys outside the §4.1 path grammar (spaced keys) | unaddressable report → pick a different source | SHIPPED (derive tests; the Alpha-Vantage lesson) |
 | B10 | "weather" recipe slot code can't derive, lookup fails | draft + `awaiting_params` → card Fill affordance, never a guess | SHIPPED (#429) |
 | B11 | "show me <thing with no conceivable public API>" | model-level: honest "no source" conversation, flow never starts | BY-DESIGN (chat behavior; not machine-testable, guide-covered) |
-| B12 | http_page scrape ask ("price from this webpage") | flow declines http_page; create_ni_item + §27 discipline is the door | BY-DESIGN (guide-covered; §27 suite owns it) |
+| B12 | http_page scrape ask ("price from this webpage") | G4b: paste the page URL on the pick card — the door builds an interpreted http_page card (jailed read + local llm each run) | SHIPPED (page-door tests + field regressions 11) |
 | B13 | image ask ("US weather radar") | recorded gate covers format; flow has NO image path — authored via create_ni_item | ROADMAP(decide: image class joins the flow, or stays documented exclusion) |
 
 ## C. Lifecycle — the card exists; the user talks about it
