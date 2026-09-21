@@ -459,7 +459,9 @@ def test_L9_validate_wrong_returns_to_draft_and_records_journal_entry(
     journal = client.app.state.ni.read_journal(iid)
     c2_rows = [e for e in journal if e["kind"] == "c2_wrong"]
     assert c2_rows, f"expected a c2_wrong journal entry; got {journal}"
-    assert "way off" in c2_rows[-1]["summary"], c2_rows[-1]
+    # G4a appends a rebuild-refusal row after the note (model-source card) —
+    # the note itself still rides verbatim on one of the c2_wrong rows.
+    assert any("way off" in e["summary"] for e in c2_rows), c2_rows
 
 
 # --- L10: delete cascade (handler) + route secret purge ---------------------

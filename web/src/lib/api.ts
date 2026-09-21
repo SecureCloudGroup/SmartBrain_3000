@@ -1663,6 +1663,12 @@ export const api = {
         method: "POST",
         headers: { "x-sb-local": "1" },
       }),
+  niRefine: (id: string, note: string) =>
+    req<{ ok: boolean; kind: string }>(`/api/ni/items/${encodeURIComponent(id)}/refine`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-SB-Local": "1" },
+      body: JSON.stringify({ note }),
+    }),
   niFlowAnswer: (id: string, kind: string, value: string) =>
     req<{ ok: boolean; started: boolean }>(`/api/ni/items/${encodeURIComponent(id)}/flow/answer`, {
       method: "POST",

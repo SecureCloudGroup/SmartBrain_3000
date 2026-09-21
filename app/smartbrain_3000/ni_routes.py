@@ -405,10 +405,22 @@ def validate_item(request: Request, item_id: str, body: ValidateIn) -> dict:
         # §28: the user's verbatim note rides the journal so a later reader (a
         # model or the operator) sees the human authorship. Kind ``c2_wrong``
         # names the verdict; the summary is the note (bounded by the store).
-        note = (body.note or "").strip() or "(no note)"
+        note = (body.note or "").strip()
         _journal_best_effort(store, item_id, "c2_wrong",
-                             f"user rejected first run: {note}")
-        return {"ok": True, "state": store.get_item(item_id)["state"]}
+                             f"user rejected first run: {note or '(no note)'}")
+        # G4a: a note ACTS — begin_refine routes it (cadence / new source /
+        # rebuild-with-note). A refusal (source type can't refine) degrades to
+        # the plain rewind with the guidance surfaced, never a 500.
+        refined = None
+        if note:
+            item_now = store.get_item(item_id)
+            try:
+                refined = ni_flow.begin_refine(store, item_now, note)
+            except ValueError as exc:
+                _journal_best_effort(store, item_id, "c2_wrong",
+                                     f"note could not drive a rebuild: {exc}")
+        return {"ok": True, "state": store.get_item(item_id)["state"],
+                "refine": (refined or {}).get("kind")}
     # F1 (C2-feedback, 2026-09-15): "Looks right" used to leave the card in
     # Commissioning until the NEXT scheduled run performed the C3 contract
     # check — up to a full cadence window (the 30-minute NVDA card) with the
@@ -1014,6 +1026,39 @@ def decline_flow_source(request: Request, item_id: str) -> dict:
     _journal_best_effort(store, item_id, "c2_wrong",
                           "user declined the proposed source")
     return {"ok": True, "state": "source"}
+
+
+class RefineIn(BaseModel):
+    """G4a: the card's Refine… note — the user's words drive a rebuild."""
+
+    note: str = Field(min_length=3, max_length=500)
+
+
+@router.post("/api/ni/items/{item_id}/refine")
+def refine_item(request: Request, item_id: str, body: RefineIn) -> dict:
+    """G4a (SUSTAIN.refine): rebuild this card from the user's note.
+
+    Deterministic routing (cadence note → interval update; source-change note
+    → the source pick pause; anything else → re-sample the item's OWN frozen
+    source with the note sealed as part of the goal, judge-verified).
+    Desktop-local, audited; ValueError guidance surfaces as 409.
+    """
+    _require_desktop_local(request)
+    store = _store(request)
+    item = store.get_item(item_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="item not found")
+    try:
+        result = ni_flow.begin_refine(store, item, body.note)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    request.app.state.audit.append(
+        "user", "ni_refine", "reviewed", "executed", True,
+        args_summary=tools.summarize({"item_id": item_id,
+                                       "note": body.note[:120]}),
+        result_summary=tools.summarize(result),
+    )
+    return {"ok": True, **result}
 
 
 class AnswerIn(BaseModel):

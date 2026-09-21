@@ -132,6 +132,37 @@
   let editBusy = $state(false);
   let editError = $state("");
 
+  // G4a: Refine… — a note that rebuilds the card (units, filters, fields).
+  let refineFor = $state<NiBoardItem | null>(null);
+  let refineText = $state("");
+  let refineBusy = $state(false);
+  function openRefine(item: NiBoardItem) {
+    console.assert(refineFor === null, "openRefine: one at a time");
+    refineFor = item;
+    refineText = "";
+  }
+  async function submitRefine() {
+    if (!refineFor || refineBusy) return;
+    const target = refineFor;
+    const note = refineText.trim();
+    if (note.length < 3) return;
+    refineBusy = true;
+    try {
+      const out = await api.niRefine(target.id, note);
+      refineFor = null;
+      refineText = "";
+      toast(out.kind === "cadence" ? "Update schedule changed."
+        : out.kind === "source_change" ? "Okay — pick a new source on the card."
+        : "Rebuilding the card from your note.");
+      await load();
+    } catch (err) {
+      const msg = describeError(err);
+      if (msg) error = msg;
+    } finally {
+      refineBusy = false;
+    }
+  }
+
   // G1: per-card action errors render ON the card (a page-bottom error next
   // to a form you just used reads as "nothing happened" — field lesson).
   let flowActionError = $state<Record<string, string>>({});
@@ -1459,6 +1490,13 @@
                     disabled={busyId === item.id}
                     onclick={() => openEdit(item)}
                   >Edit…</button>
+                  {#if !item.shell}
+                    <button
+                      class="ghost"
+                      disabled={busyId === item.id}
+                      onclick={() => openRefine(item)}
+                    >Refine…</button>
+                  {/if}
                   <button
                     class="ghost"
                     disabled={busyId === item.id}
@@ -1480,6 +1518,34 @@
 
   {#if error}<p class="error">{error}</p>{/if}
 
+  {#if refineFor}
+    <Modal
+      open
+      label="Refine this card"
+      onclose={() => { refineFor = null; refineText = ""; }}
+    >
+      <h2 class="modal-title">Refine…</h2>
+      <p class="modal-body">
+        Say what should change — units, a filter, an update schedule, or
+        "different source". The card rebuilds from your note.
+      </p>
+      <textarea
+        bind:value={refineText}
+        rows="3"
+        maxlength="500"
+        placeholder="e.g. should be in Fahrenheit"
+        disabled={refineBusy}
+      ></textarea>
+      <div class="modal-actions">
+        <button class="ghost" onclick={() => { refineFor = null; refineText = ""; }}>Cancel</button>
+        <button
+          disabled={refineBusy || refineText.trim().length < 3}
+          onclick={() => void submitRefine()}
+        >{refineBusy ? "Sending…" : "Rebuild"}</button>
+      </div>
+    </Modal>
+  {/if}
+
   {#if noteFor}
     <Modal
       open
@@ -1488,7 +1554,7 @@
     >
       <h2 class="modal-title">Something’s wrong</h2>
       <p class="modal-body">
-        Say what looked off — it goes on the card’s history, and the card returns to draft.
+        Say what looked off — the card rebuilds from your note (units, filters, fields), or returns to draft if it can’t.
       </p>
       <textarea
         bind:value={noteText}

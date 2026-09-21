@@ -1683,6 +1683,12 @@ def _run_remap(store: ni.NIStore, item_id: str, record: dict,
         return _fail(store, item_id, "remap", "item not found for remap")
     intent = _remap_intent_from_spec(item["spec"], record.get("request") or "")
     request = str(record.get("request") or item["spec"].get("goal") or "remap")
+    # G4a (SUSTAIN.refine): a sealed user note joins the goal — the °F
+    # authoring regexes read it, and the P8 judge verifies the rebuilt card
+    # AGAINST it. The user's words drive the rebuild; models only serve them.
+    note = str(record.get("_refine_note") or "").strip()
+    if note:
+        request = f"{request} — {note}"[:_MAX_REQUEST]
     # R1/R2 (field 2026-09-15): the remap of a recipe-born keyed card fetched
     # the LITERAL template (``?symbol={{param:symbol}}``, no auth header) and
     # died FetchError — remap only ever worked for plain freeform URLs. The
@@ -2672,6 +2678,67 @@ def reenter_source_pick(store: ni.NIStore, item_id: str, note: str) -> dict:
     return _transition(store, item_id, "source",
                         error=AWAITING_SOURCE_PICK, note=note[:_MAX_NOTE],
                         request=record.get("request", ""))
+
+
+_SOURCE_CHANGE_RE = re.compile(
+    r"different source|another source|instead of this source|change the source|"
+    r"new source|wrong source", re.IGNORECASE)
+
+
+def begin_refine(store: ni.NIStore, item: dict, note: str) -> dict:
+    """G4a (rounds 7-8, SUSTAIN.refine): a user note ACTS — deterministically
+    routed, model-verified. Returns ``{"kind": ...}`` naming the action taken.
+
+    Routing (code rules, closed):
+    - a cadence note ("every 10 minutes") updates the interval directly;
+    - a source-change note re-enters the source pick (new consent, as ever);
+    - everything else re-enters sampling on the item's OWN frozen source with
+      the note sealed on the record — the rebuild's °F/threshold authoring
+      reads it and the P8 judge verifies the result against it.
+    Raises ValueError with user-facing guidance when the card cannot refine
+    (non-http_json sources re-create via the composer for now).
+    """
+    assert store is not None and isinstance(item, dict), "args required"
+    assert isinstance(note, str), "note must be a string"
+    text = note.strip()[:500]
+    if not text:
+        raise ValueError("say what should change — the note drives the rebuild")
+    cadence = _cadence_from_text(text)
+    if cadence is not None:
+        spec = json.loads(json.dumps(item["spec"]))
+        spec["interval_minutes"] = int(cadence)
+        store.update_spec(item["id"], spec, origin="user",
+                          preserve_attestations=True)
+        _try_journal(store, item["id"], "updated",
+                      f"cadence set to every {int(cadence)}m from your note")
+        return {"kind": "cadence", "interval_minutes": int(cadence)}
+    if _SOURCE_CHANGE_RE.search(text):
+        reenter_source_pick(store, item["id"],
+                             "your note asked for a different source — pick below")
+        _try_journal(store, item["id"], "c2_wrong",
+                      f"refine note (new source wanted): {text}")
+        return {"kind": "source_change"}
+    source = item["spec"].get("source") or {}
+    if not isinstance(source, dict) or source.get("type") != "http_json":
+        raise ValueError(
+            "this card's source type can't rebuild from a note yet — "
+            "recreate it from the composer with the change included")
+    url = str(source.get("url") or "")
+    if not url:
+        raise ValueError("this card has no source URL to rebuild against")
+    unfilled = ni.unfilled_referenced_params(item["spec"])
+    if unfilled:
+        raise ValueError(
+            f"fill the card's {unfilled[0]!r} value before refining")
+    request = str(item["spec"].get("goal") or item["spec"].get("title") or "refine")
+    record = _make_record(request, "sampling", source_url=url,
+                           notes=[f"rebuilding from your note: {text[:120]}"])
+    record["_remap"] = True
+    record["_refine_note"] = text
+    _flow_write(store, item["id"], record)
+    _try_journal(store, item["id"], "c2_wrong", f"refine note: {text}")
+    start_flow_worker(store, item["id"], source_url=url)
+    return {"kind": "rebuild"}
 
 
 def sweep_stranded_flows(store: ni.NIStore) -> int:
