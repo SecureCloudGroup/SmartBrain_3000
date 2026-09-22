@@ -11,6 +11,8 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-09-22
+
 ### Fixed
 - **Neural Interface: pasting a real webpage URL now works everywhere it
   should.** The page reader only triggered for one narrow failure shape, so
