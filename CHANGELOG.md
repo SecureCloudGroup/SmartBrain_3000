@@ -11,6 +11,27 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Fixed
+- **Neural Interface: pasting a real webpage URL now works everywhere it
+  should.** The page reader only triggered for one narrow failure shape, so
+  most real pastes (tide tables, news pages) still failed with "not a JSON
+  API" — the trigger now keys on the guard's own verdict, and the exact
+  field URL (Wallace Creek tides) builds an interpreted card end to end.
+  Private-address and blocked URLs still refuse outright.
+
+### Added
+- **Interpreted cards check their numbers against the page.** Any figure a
+  page card displays must literally appear in the fetched page text —
+  invented numbers are dropped and noted in the card's History (words may
+  paraphrase; numbers may not).
+- **Unchanged pages skip the model.** On a live interpreted card the engine
+  hashes the fetched source each tick and skips the local-model reading when
+  nothing changed — faster ticks, no wasted work, freshness still updates
+  ("ok: unchanged"). Commissioning always runs the full path.
+- **Each reading knows the last one.** The previous values ride along when
+  the model re-reads a changed page, so updates can dedupe and frame what
+  changed instead of starting cold.
+
 ## [0.21.0] - 2026-09-21
 
 ### Added

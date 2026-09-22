@@ -1725,3 +1725,31 @@ door — now doored:
   for the news class and REJECTED for the vetted catalog: a 5-second global
   rate limit flaps gates — news pages ride the page door instead.
 - Composer copy: "paste any web page or API URL".
+
+**Grounded-monitor wave (2026-09-22, field: Wallace Creek + Hermes-comparison
+adoptions 1-3, operator-approved)**:
+- **Page-door trigger fixed at the root**: production fetches raise
+  ``netguard.FetchError`` (wrapping everything), so the door's
+  exception-name match NEVER fired outside tests — the operator's pasted
+  tide page failed on v0.21.0 with the JSON sentence. ``FetchError`` gains a
+  STABLE ``kind`` ("not_json" on invalid-JSON + content-type refusals; the
+  message text remains a non-contract), and the door keys on it. Security
+  refusals carry no kind and never page-retry. Regression raises the exact
+  production exception; the Wallace URL was verified live end-to-end
+  through the real fetcher.
+- **(1) Monitor-hash**: on a LIVE llm-stage card the engine hashes the
+  fetched source (canonical JSON) and, when unchanged vs the sealed
+  ``llm_state`` slot, skips pipeline+model entirely — run row status
+  ``unchanged``, ``clear_failures("ok: unchanged")`` keeps cadence/streak
+  semantics, zero model calls. Commissioning ALWAYS runs full (C1-C3
+  integrity).
+- **(2) Quote-grounding** (``ni.ground_llm_outputs``): every NUMBER an
+  http_page llm card displays must appear in the page text
+  (comma/space-insensitive); an invented figure is dropped to "" and the
+  fields are journaled ("unverified reading dropped"). Words may
+  paraphrase; numbers may not. Deterministic — no model.
+- **(3) Run continuity**: previous values (sealed ``llm_state.values``)
+  ride the stage INPUT as ``_previous`` (stripped from outputs before
+  contract/bind — shape never drifts), so re-reads dedupe and frame deltas.
+- New sealed slot ``llm_state`` {src_hash, values} joins ``_SLOTS`` (cascade
+  covered by the wildcard snapshot delete).

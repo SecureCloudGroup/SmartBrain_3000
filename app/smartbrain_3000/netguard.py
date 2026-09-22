@@ -93,11 +93,18 @@ class FetchError(Exception):
     generic dead host key on it — the guard's message text is not a stable contract.
     """
 
-    def __init__(self, message: str, *, status: int | None = None) -> None:
+    def __init__(self, message: str, *, status: int | None = None,
+                 kind: str | None = None) -> None:
         assert message, "message required"
         assert status is None or (100 <= status <= 599), "status must be an HTTP code"
         super().__init__(message)
         self.status = status
+        # ``kind`` is the STABLE routing token (field 2026-09-22: the NI page
+        # door matched exception class names and never fired in production
+        # because this guard wraps everything). "not_json" = the URL is alive
+        # and serving real content that simply isn't a JSON API — the one
+        # class a caller may legitimately retry through the page pipeline.
+        self.kind = kind
 
 
 def _unwrap(addr: ipaddress._BaseAddress) -> ipaddress._BaseAddress:
@@ -289,7 +296,8 @@ def _guarded_get(url: str, allowed_ct: tuple[str, ...], max_bytes: int,
                 ctype = response.headers.get("content-type", "")
                 ct_ok = ctype.startswith(allowed_ct)
                 if not ct_ok and not accept_zip_magic:
-                    raise FetchError(f"content-type not allowed: {ctype or 'unknown'}")
+                    raise FetchError(f"content-type not allowed: {ctype or 'unknown'}",
+                                     kind="not_json")
                 content = _read_capped(response, max_bytes, deadline_seconds)
                 # accept_zip_magic: the header didn't match, but a real .sbvault is a ZIP — accept it
                 # if the bytes prove it, else it's the host's HTML/error page, so refuse clearly.
@@ -366,7 +374,7 @@ def safe_fetch_json(url: str, headers: dict | None = None,
     try:
         return json.loads(got["content"].decode("utf-8", "replace"))
     except ValueError:
-        raise FetchError("upstream returned invalid JSON") from None
+        raise FetchError("upstream returned invalid JSON", kind="not_json") from None
 
 
 def safe_post_json(url: str, payload: dict, headers: dict | None = None) -> dict:
@@ -384,7 +392,7 @@ def safe_post_json(url: str, payload: dict, headers: dict | None = None) -> dict
     try:
         return json.loads(got["content"].decode("utf-8", "replace"))
     except ValueError:
-        raise FetchError("upstream returned invalid JSON") from None
+        raise FetchError("upstream returned invalid JSON", kind="not_json") from None
 
 
 def safe_fetch_page(url: str, headers: dict | None = None,

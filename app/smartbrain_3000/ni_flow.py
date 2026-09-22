@@ -2290,8 +2290,9 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
         # consented URL serves a page, not an API. The Phase-2c machinery
         # (netguard fetch + subprocess-jailed extraction + the local-only llm
         # stage) has had no flow door until now.
-        if type(exc).__name__ in ("JSONDecodeError", "ValueError") \
-                and not remap:
+        not_json = (getattr(exc, "kind", None) == "not_json"
+                    or type(exc).__name__ in ("JSONDecodeError", "ValueError"))
+        if not_json and not remap:
             return _build_page_card(store, item_id, request, intent, url,
                                      call_model)
         return _fail(store, item_id, "fetch", f"sample fetch failed: {type(exc).__name__}")
