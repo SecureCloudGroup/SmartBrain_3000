@@ -28,6 +28,7 @@ a host-free status string (feeds law).
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import math
@@ -172,7 +173,7 @@ _STATES: frozenset[str] = frozenset(
 )
 _SLOTS: frozenset[str] = frozenset(
     {"latest", "last_good", "preview", "preview_data", "history", "alert_state",
-     "last_failure", "image", "journal", "flow"}
+     "last_failure", "image", "journal", "flow", "llm_state"}
 )
 # §28 item journal: closed set of entry kinds + prune ceiling. Journal entries are
 # built DETERMINISTICALLY by code (models never author one). The store trims to the
@@ -3576,6 +3577,57 @@ def _collect_broken_transition(store: NIStore, item_id: str, prior_state: str,
     broken.append({"item_id": item_id, "title": title, "broken": True})
 
 
+def _source_hash(payload: object) -> str:
+    """Deterministic content hash of a fetched payload (monitor-mode skip).
+
+    Canonical JSON (sorted keys) so dict ordering never fakes a change; the
+    hash lives in the sealed ``llm_state`` slot and is compared before any
+    model runs — an unchanged source costs zero llm tokens on that tick.
+    """
+    try:
+        blob = json.dumps(payload, sort_keys=True, ensure_ascii=False,
+                           default=str)
+    except (TypeError, ValueError):
+        blob = repr(payload)
+    return hashlib.sha256(blob.encode("utf-8", errors="replace")).hexdigest()
+
+
+_GROUND_NUM_RE = re.compile(r"\d[\d,]*(?:\.\d+)?")
+
+
+def ground_llm_outputs(outputs: dict, source_text: str,
+                        llm_fields: set[str]) -> tuple[dict, list[str]]:
+    """Quote-grounding for interpreted values (number-token rule).
+
+    Every NUMBER an llm stage writes into a card must literally appear in the
+    fetched page text (comma/space-insensitive) — an invented figure is the
+    worst hallucination class for a data card. A value whose numbers cannot
+    all be grounded is replaced with "" and its field name reported; word
+    paraphrases are deliberately NOT policed (the llm stage exists to
+    rephrase). Deterministic; no model involved.
+    """
+    assert isinstance(outputs, dict) and isinstance(llm_fields, set), "args required"
+    haystack = re.sub(r"[\s,]", "", str(source_text or ""))
+    if not haystack:
+        return outputs, []
+    dropped: list[str] = []
+    cleaned = dict(outputs)
+    for name in sorted(llm_fields):  # bounded by _MAX_LLM_OUTPUTS
+        value = cleaned.get(name)
+        if not isinstance(value, str) or not value:
+            continue
+        numbers = _GROUND_NUM_RE.findall(value)
+        if not numbers:
+            continue
+        for num in numbers[:20]:  # bounded
+            needle = num.replace(",", "")
+            if needle not in haystack:
+                cleaned[name] = ""
+                dropped.append(name)
+                break
+    return cleaned, dropped
+
+
 def run_item(store: NIStore, item_id: str, *, gateway_mod, secrets_store,
              schedules_store=None, kb: object | None = None,
              reserve_repair: object | None = None) -> dict:
@@ -3628,8 +3680,59 @@ def run_item(store: NIStore, item_id: str, *, gateway_mod, secrets_store,
         payload, image_blob = _fetch_source(spec, item_id, gateway_mod, secrets_store,
                                              schedules_store, store, kb)
         raw_excerpt = _payload_excerpt_for_repair(payload)
+        # Hermes-comparison adoptions (operator-approved 2026-09-22), llm-stage
+        # cards only — the cards where a model run costs real time/tokens:
+        # (1) monitor-hash: an unchanged source skips the model entirely on a
+        #     LIVE card (commissioning always runs full — C1/C2/C3 integrity);
+        # (3) run continuity: the previous values ride the stage input so the
+        #     model can dedupe/frame deltas instead of re-deriving cold.
+        llm_fields: set[str] = set()
+        if llm_call is not None:
+            for _st in (spec.get("pipeline") or []):
+                if isinstance(_st, dict) and _st.get("op") == "llm":
+                    llm_fields = set((_st.get("output") or {}).keys())
+                    break
+            src_hash = _source_hash(payload)
+            prev_state = store.read_snapshot(item_id, "llm_state")
+            prev_values = (prev_state or {}).get("payload", {}).get("values")
+            if (item["state"] == "live" and prev_state is not None
+                    and prev_state.get("ok")
+                    and prev_state["payload"].get("src_hash") == src_hash
+                    and isinstance(prev_values, dict)):
+                duration_ms = int((time.monotonic() - started) * 1000)
+                store.record_run(item_id, "unchanged", duration_ms=duration_ms,
+                                 error=None, contract_ok=None)
+                store.clear_failures(item_id, "ok: unchanged")
+                return {"status": "unchanged", "duration_ms": duration_ms,
+                        "alerts": [], "repaired": []}
+            if isinstance(prev_values, dict) and prev_values:
+                payload = dict(payload) if isinstance(payload, dict) else payload
+                if isinstance(payload, dict):
+                    payload["_previous"] = prev_values
         outputs = run_pipeline(spec.get("pipeline") or [], payload,
                                 history=history, llm_call=llm_call)
+        if isinstance(outputs, dict):
+            outputs.pop("_previous", None)  # continuity input, never an output
+        # (2) quote-grounding: a number an interpreted card shows must appear
+        #     in the fetched page text — an invented figure is dropped and
+        #     named (deterministic; paraphrased WORDS are deliberately free).
+        if (llm_fields and isinstance(outputs, dict)
+                and (spec.get("source") or {}).get("type") == "http_page"):
+            outputs, dropped = ground_llm_outputs(
+                outputs, str(outputs.get("text") or ""), llm_fields)
+            if dropped:
+                try:
+                    store.append_journal(
+                        item_id, "updated",
+                        "unverified reading dropped (number not on the page): "
+                        + ", ".join(dropped))
+                except Exception:  # journaling never fails a run
+                    pass
+        if llm_call is not None and isinstance(outputs, dict):
+            store.write_snapshot(item_id, "llm_state", {
+                "src_hash": src_hash,
+                "values": {name: outputs.get(name) for name in llm_fields},
+            }, ok=True)
     except NIError as exc:
         _handle_failure(store, item, exc, started, started_rev=started_rev)
         _seal_last_failure_snapshot(store, item["id"], exc, raw_excerpt)

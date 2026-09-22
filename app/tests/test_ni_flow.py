@@ -2350,3 +2350,42 @@ def test_page_llm_stage_shape_from_wants() -> None:
     assert all(v == "string" for v in stage["output"].values())
     empty = ni_flow._page_llm_stage({"wants": []})
     assert list(empty["output"]) == ["summary"]
+
+
+def test_page_door_fires_on_the_PRODUCTION_exception(monkeypatch) -> None:
+    """Field 2026-09-22 (Wallace Creek tides, v0.21.0): the door matched raw
+    JSONDecodeError — but production's fetcher wraps everything in
+    netguard.FetchError, so the door NEVER fired outside tests. The trigger
+    now keys on the guard's typed kind; this regression raises the exact
+    production exception. And a security refusal must NEVER page-retry."""
+    from smartbrain_3000 import netguard
+    store, _conn = _store()
+    _page_stub(monkeypatch, "High tide 7:12am. Low 1:33pm.", "Wallace Creek Tides")
+    replies = [json.dumps({"tide_times": "High 7:12am; Low 1:33pm"}),
+               json.dumps({"serves": True, "gaps": [], "wrong": []})]
+    item_id = ni_flow.create_shell_item(store, "tide for Wallace Creek")
+    intent = {"kind": "external_data", "subject": "tides", "cadence_minutes": 60,
+              "wants": ["tide times"], "threshold": None, "display_hint": "value"}
+    ni_flow._transition(store, item_id, "intent", intent=intent)
+
+    def production_fetch(url: str) -> object:
+        raise netguard.FetchError("upstream returned invalid JSON", kind="not_json")
+
+    result = ni_flow._sample_and_map(store, item_id, "tide for Wallace Creek",
+                                      intent, "https://tides.example.com/x.html",
+                                      lambda p: replies.pop(0), production_fetch)
+    assert result["state"] == "ready", result.get("error")
+    assert store.get_item(item_id)["spec"]["source"]["type"] == "http_page"
+
+    # Security refusals carry NO kind — the door must stay shut.
+    item2 = ni_flow.create_shell_item(store, "router probe")
+    ni_flow._transition(store, item2, "intent", intent=intent)
+
+    def blocked_fetch(url: str) -> object:
+        raise netguard.FetchError("blocked non-global address: 192.168.1.1")
+
+    result2 = ni_flow._sample_and_map(store, item2, "router probe", intent,
+                                       "https://192.168.1.1/api",
+                                       lambda p: "{}", blocked_fetch)
+    assert result2["state"] == "failed"
+    assert result2["error"].startswith("fetch")

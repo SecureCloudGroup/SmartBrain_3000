@@ -4626,3 +4626,119 @@ def test_transform_offset_non_numeric_field_raises_same_class_as_scale() -> None
             {"s": "not a number"},
         )
     assert excinfo.value.kind == "transform_type"
+
+
+# --- Hermes-comparison adoptions (operator-approved 2026-09-22) --------------
+
+class _CountingGW(_FakeGateway):
+    """Replies with fixed JSON and counts model invocations."""
+
+    def __init__(self, text: str) -> None:
+        super().__init__(model="ollama/x", text=text)
+        self.calls = 0
+
+    def chat(self, *a, **kw):  # match _FakeGateway's surface
+        self.calls += 1
+        return super().chat(*a, **kw)
+
+
+def test_monitor_hash_skips_the_model_when_source_unchanged(monkeypatch) -> None:
+    """(1) Monitor-hash: a LIVE llm card whose fetched source is unchanged
+    runs ZERO model calls on the next tick — the run records 'unchanged',
+    freshness updates, and the failure streak clears. The beneficiary class
+    is http-sourced interpreted cards, so the fetch is stubbed static."""
+    gw = _CountingGW('{"summary": "hello", "count": 1}')
+    store, secrets, schedules, iid, gw = _run_llm_item_with_gateway(
+        gw, spec_overrides={"source": {"type": "http_json",
+                                         "url": "https://api.example.com/x"}})
+    monkeypatch.setattr(nimod, "_fetch_http_json",
+                        lambda source, item_id, secrets: {"record": "static"})
+    first = nimod.run_item(store, iid, gateway_mod=gw,
+                            secrets_store=secrets, schedules_store=schedules)
+    assert first["status"] == "ok"
+    calls_after_first = gw.calls
+    assert calls_after_first >= 1
+    state = store.read_snapshot(iid, "llm_state")
+    assert state is not None and state["payload"]["src_hash"]
+    assert state["payload"]["values"]["summary"] == "hello"
+    second = nimod.run_item(store, iid, gateway_mod=gw,
+                             secrets_store=secrets, schedules_store=schedules)
+    assert second["status"] == "unchanged"
+    assert gw.calls == calls_after_first, "no model call on an unchanged tick"
+    item = store.get_item(iid)
+    assert item["last_status"] == "ok: unchanged"
+    runs = [r for r in store.list_runs(iid)]
+    assert runs and runs[0]["status"] == "unchanged"
+    # A CHANGED source runs the full path again.
+    monkeypatch.setattr(nimod, "_fetch_http_json",
+                        lambda source, item_id, secrets: {"record": "different"})
+    third = nimod.run_item(store, iid, gateway_mod=gw,
+                            secrets_store=secrets, schedules_store=schedules)
+    assert third["status"] == "ok"
+    assert gw.calls > calls_after_first
+
+
+def test_monitor_hash_never_skips_commissioning() -> None:
+    """C1/C2/C3 integrity: a commissioning card ALWAYS runs the full path."""
+    gw = _CountingGW('{"summary": "hello", "count": 1}')
+    store, secrets, schedules, iid, gw = _run_llm_item_with_gateway(gw)
+    store.set_state(iid, "live")
+    nimod.run_item(store, iid, gateway_mod=gw,
+                    secrets_store=secrets, schedules_store=schedules)
+    store.set_state(iid, "commissioning")
+    result = nimod.run_item(store, iid, gateway_mod=gw,
+                             secrets_store=secrets, schedules_store=schedules)
+    assert result["status"] != "unchanged", "commissioning never hash-skips"
+
+
+def test_continuity_feeds_previous_values_into_the_stage_prompt() -> None:
+    """(3) Run continuity: the previous run's values ride the llm stage's
+    INPUT (visible in the prompt) and never leak into the OUTPUTS."""
+
+    class _PromptSpyGW(_FakeGateway):
+        def __init__(self) -> None:
+            super().__init__(model="ollama/x",
+                             text='{"summary": "second", "count": 2}')
+            self.prompts: list[str] = []
+
+        def chat(self, messages, model, **kw):
+            self.prompts.append(str(messages))
+            return super().chat(messages, model, **kw)
+
+    gw = _PromptSpyGW()
+    store, secrets, schedules, iid, gw = _run_llm_item_with_gateway(
+        gw, spec_overrides={"source": {"type": "http_json",
+                                         "url": "https://api.example.com/x"}})
+    fetches = iter([{"record": "v1"}, {"record": "v2"}])
+    import unittest.mock as _mock
+    with _mock.patch.object(nimod, "_fetch_http_json",
+                             side_effect=lambda *a: next(fetches)):
+        nimod.run_item(store, iid, gateway_mod=gw,
+                        secrets_store=secrets, schedules_store=schedules)
+        gw.prompts.clear()
+        nimod.run_item(store, iid, gateway_mod=gw,
+                        secrets_store=secrets, schedules_store=schedules)
+    joined = " ".join(gw.prompts)
+    assert "_previous" in joined and "second" in joined, \
+        "previous values must ride the stage input"
+    snap = store.read_snapshot(iid, "latest")
+    assert "_previous" not in str(snap["payload"]), "continuity never renders"
+
+
+def test_quote_grounding_drops_invented_numbers() -> None:
+    """(2) Quote-grounding: a number an interpreted page card shows must
+    appear in the page text; invented figures are dropped and journaled.
+    Paraphrased words are deliberately free."""
+    outputs = {"text": "High tide 5.4 ft at 7:12am. Pressure 1004.",
+               "title": "Tides", "tide": "High 5.4 ft at 7:12am",
+               "invented": "surge of 9.9 ft expected",
+               "words_only": "calm conditions expected"}
+    cleaned, dropped = nimod.ground_llm_outputs(
+        outputs, outputs["text"], {"tide", "invented", "words_only"})
+    assert cleaned["tide"] == "High 5.4 ft at 7:12am"
+    assert cleaned["invented"] == "" and dropped == ["invented"]
+    assert cleaned["words_only"] == "calm conditions expected"
+    # Comma-insensitive: "1,004" grounds against "1004".
+    cleaned2, dropped2 = nimod.ground_llm_outputs(
+        {"p": "pressure 1,004 mb"}, "Pressure 1004.", {"p"})
+    assert dropped2 == []
