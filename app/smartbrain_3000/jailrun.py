@@ -18,7 +18,8 @@ its process hygiene on ``claudecli.py``:
   pipe open past the SIGKILL, wedging the reader),
 - cwd is always ``rmtree``-d, child always reaped.
 
-Contract: ``run_extractor(html, url_hint) -> {"text": str, "title": str}``. Any
+Contract: ``run_extractor(html, url_hint) -> {"text", "title", + optional
+page-graph layers (entities/tables/feeds/meta/outline)}``. Any
 timeout, non-zero exit, malformed JSON, or oversize output raises ``JailError``;
 the caller (``ni._fetch_http_page``) maps it to ``NIError('extract_jail', <class>)``.
 """
@@ -197,6 +198,14 @@ def _spawn(cwd: str, env: dict[str, str], url_hint: str) -> subprocess.Popen:
     )
 
 
+_GRAPH_KEYS: dict[str, type] = {
+    # Page-graph layers (search platform P1) — optional, typed; the key set
+    # stays CLOSED so a compromised child cannot smuggle arbitrary fields.
+    "entities": list, "tables": list, "feeds": list, "meta": dict,
+    "outline": list,
+}
+
+
 def _validate_payload(text: str) -> dict:
     """Parse + shape-check the child's stdout; raise JailError on any deviation."""
     assert isinstance(text, str), "text must be a string"
@@ -207,10 +216,16 @@ def _validate_payload(text: str) -> dict:
         parsed = json.loads(stripped)
     except (ValueError, TypeError):
         raise JailError("malformed_json") from None
-    if not isinstance(parsed, dict) or set(parsed) != {"text", "title"}:
+    if not isinstance(parsed, dict):
+        raise JailError("bad_shape")
+    allowed = {"text", "title"} | set(_GRAPH_KEYS)
+    if not {"text", "title"} <= set(parsed) or set(parsed) - allowed:
         raise JailError("bad_shape")
     for name in ("text", "title"):
         if not isinstance(parsed[name], str):
+            raise JailError("bad_field_type", name)
+    for name, expected in _GRAPH_KEYS.items():
+        if name in parsed and not isinstance(parsed[name], expected):
             raise JailError("bad_field_type", name)
     return parsed
 

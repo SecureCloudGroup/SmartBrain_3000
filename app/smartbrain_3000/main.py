@@ -30,6 +30,7 @@ from . import (
     ni_flow,
     runtime,
     scheduler,
+    search,
     serving,
     stt_local,
 )
@@ -360,6 +361,22 @@ def _make_lifespan(mcp):
         # unlock transitions are honored on every call.
         ni_flow.set_secrets_provider(
             lambda: getattr(application.state, "secret_store", None))
+
+        # S2 (round 9/10): the flow worker's web-search service for source
+        # research on a catalog miss. Configured providers when the store is
+        # unlocked; the KEYLESS DuckDuckGo floor otherwise — search must work
+        # on a locked box. ``dbx`` hands each calling thread its own cursor.
+        def _ni_search_service() -> object:
+            try:
+                store = getattr(application.state, "secret_store", None)
+                if store is not None:
+                    return search.service_from(
+                        getattr(application.state, "dbx", None), store.get)
+            except Exception:
+                pass  # locked / missing config → keyless floor below
+            return search.SearchService()
+
+        ni_flow.set_search_provider(_ni_search_service)
         async with mcp.session_manager.run():  # drive the MCP transport for this app
             runner = asyncio.create_task(_scheduler_loop(application))  # background scheduler
             webrtc = asyncio.create_task(_webrtc_loop(application)) if _webrtc_mode != "0" else None

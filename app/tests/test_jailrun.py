@@ -30,7 +30,13 @@ def _small_html() -> bytes:
 def test_run_extractor_happy_path() -> None:
     """A real subprocess extracts title + main text from a tiny HTML page."""
     out = jailrun.run_extractor(_small_html(), url_hint="https://example.com/x")
-    assert set(out) == {"text", "title"}, out
+    # P1 page graph: the child now emits the structured layers alongside
+    # text/title — closed key set, typed (validator-enforced).
+    assert {"text", "title"} <= set(out), out
+    assert set(out) <= {"text", "title", "entities", "tables", "feeds",
+                         "meta", "outline"}, out
+    assert isinstance(out["entities"], list) and isinstance(out["tables"], list)
+    assert isinstance(out["meta"], dict)
     assert out["title"] == "Sample Title"
     assert "trafilatura" in out["text"] or "extractor path" in out["text"], out
 

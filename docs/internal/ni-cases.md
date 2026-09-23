@@ -43,7 +43,7 @@ gates AND the pytest suite — see "Adding a case" at the bottom). Status:
 |---|---|---|---|
 | B1 | "days until Christmas" (no literal date) | `unsupported` — computed needs YYYY-MM-DD; chat asks for the date | SHIPPED (xmas-countdown) |
 | B2 | "days until 2026-12-25" | computed source, zero egress, real day count | SHIPPED (pytest) |
-| B3 | "track my custom sensor feed" (no URL, no recipe) | pause at `source`; the CARD renders relevance-gated suggestions + paste-a-URL (an uncovered ask gets an HONEST empty list) | SHIPPED (no-source-pause + G3 floor tests) |
+| B3 | "track my custom sensor feed" (no URL, no recipe) | pause at `source`; the CARD renders relevance-gated suggestions + paste-a-URL — round-10 P1: a FULL catalog miss now also searches the user's own words and offers ≤3 web candidates with page-extracted evidence (tap = consent; zero results keep the honest empty pause) | SHIPPED (no-source-pause + G3 floor + S2 seal/board tests, `--s2` live smoke) |
 | B4 | "my router status at http://192.168.1.1/..." | `failed(fetch)` — netguard refuses private ranges; never fetched | SHIPPED (lan-refused) |
 | B5 | "BBC headlines from their RSS feed" (XML endpoint) | G4b: the page door — live builds an INTERPRETED card (jail + local llm); hermetic modes fail honestly | SHIPPED (xml-not-json, per-mode expectations) |
 | B6 | a URL that 404s / returns an error body | `failed(fetch)`, one attempt, honest note | SHIPPED (dead-endpoint) |

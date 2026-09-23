@@ -2389,3 +2389,233 @@ def test_page_door_fires_on_the_PRODUCTION_exception(monkeypatch) -> None:
                                        lambda p: "{}", blocked_fetch)
     assert result2["state"] == "failed"
     assert result2["error"].startswith("fetch")
+
+
+# ---- S2: web-source research on catalog miss (rounds 9/10, 2026-09-22) ----
+
+
+class _FakeSearchService:
+    """Duck-typed stand-in for search.SearchService (the provider seam is
+    deliberately import-free, so any .search(query, limit) object serves)."""
+
+    def __init__(self, results: list[dict] | None = None,
+                 raise_exc: bool = False) -> None:
+        self.queries: list[str] = []
+        self._results = results or []
+        self._raise = raise_exc
+
+    def search(self, query: str, limit: int = 10) -> dict:
+        self.queries.append(query)
+        if self._raise:
+            raise RuntimeError("provider down")
+        return {"results": list(self._results), "engine": "fake"}
+
+
+def _wire_search(monkeypatch, service) -> None:
+    monkeypatch.setattr(ni_flow, "_SEARCH_PROVIDER", lambda: service)
+
+
+def _no_page_fetch(monkeypatch) -> None:
+    """E-lite fetches nothing in these tests unless a test stubs its own."""
+    monkeypatch.setattr(ni_flow.pagegraph, "fetch_page_graph",
+                        lambda url, **kw: (_ for _ in ()).throw(RuntimeError("no fetch")))
+
+
+def test_s2_queries_come_from_the_users_words_only() -> None:
+    """Q1 = the request verbatim (normalized). Q2 = subject+place only when
+    every token already appears in the request — model-authored intent fields
+    may never write a query the user didn't type (containment)."""
+    q = ni_flow._s2_queries("show  me tide times\nfor Wallace Creek",
+                            {"subject": "tide times", "place": "Wallace Creek"})
+    assert q == ["show me tide times for Wallace Creek",
+                 "tide times Wallace Creek"]
+    # Subject token NOT in the request → Q2 suppressed.
+    q2 = ni_flow._s2_queries("show me tide times for Wallace Creek",
+                             {"subject": "NOAA tides", "place": ""})
+    assert q2 == ["show me tide times for Wallace Creek"]
+    # Q2 identical to Q1 → not repeated.
+    q3 = ni_flow._s2_queries("bitcoin price", {"subject": "bitcoin price"})
+    assert q3 == ["bitcoin price"]
+
+
+def test_s2_row_hygiene_https_title_oversize_hostdedupe_cap() -> None:
+    rows = [
+        {"title": "Good", "url": "https://a.example.org/x", "snippet": "s"},
+        {"title": "", "url": "https://empty-title.example.org/", "snippet": ""},
+        {"title": "Plain http", "url": "http://b.example.org/", "snippet": ""},
+        {"title": "Oversize", "url": "https://c.example.org/" + "p" * 3000,
+         "snippet": "a sliced URL would retarget the fetch"},
+        {"title": "Same host", "url": "https://a.example.org/other", "snippet": ""},
+    ] + [{"title": f"More {i}", "url": f"https://h{i}.example.org/", "snippet": ""}
+         for i in range(12)]
+    svc = _FakeSearchService(results=rows)
+    out = ni_flow._s2_search_candidates(svc, "anything at all", {})
+    hosts = [r["host"] for r in out]
+    assert "a.example.org" in hosts and hosts.count("a.example.org") == 1
+    assert all(r["url"].startswith("https://") and r["title"] for r in out)
+    assert not any(len(r["url"]) > 2000 for r in out)  # ni._MAX_URL exactly
+    assert len(out) == 10  # capped
+    assert set(out[0]) == {"title", "host", "url", "snippet"}
+
+
+def test_web_rank_validates_ids_and_keeps_code_order_on_failure() -> None:
+    rows = [{"title": f"T{i}", "host": f"h{i}", "url": f"https://h{i}/",
+             "snippet": "", "evidence": []} for i in range(3)]
+    good = json.dumps({"best": "r2", "alternates": ["r0"], "confidence": "high"})
+    assert ni_flow.rank_web_rows(rows, "req", {}, lambda p: good) == [2, 0, 1]
+    invented = json.dumps({"best": "r9", "alternates": [], "confidence": "high"})
+    assert ni_flow.rank_web_rows(rows, "req", {}, lambda p: invented) is None
+    bad_conf = json.dumps({"best": "r0", "alternates": [], "confidence": "sure"})
+    assert ni_flow.rank_web_rows(rows, "req", {}, lambda p: bad_conf) is None
+    assert ni_flow.rank_web_rows(rows, "req", {},
+                                 lambda p: "not json at all") is None
+
+
+def test_web_rank_prompt_carries_evidence_and_data_fence() -> None:
+    rows = [{"title": "Tides", "host": "tides.example.org",
+             "url": "https://tides.example.org/", "snippet": "daily tables",
+             "evidence": ["Tide: High 7:12 AM"]}]
+    seen: list[str] = []
+
+    def model(prompt: str) -> str:
+        seen.append(prompt)
+        return json.dumps({"best": "r0", "alternates": [], "confidence": "high"})
+
+    assert ni_flow.rank_web_rows(rows, "tide times", {}, model) == [0]
+    assert "Tide: High 7:12 AM" in seen[0]
+    assert "UNTRUSTED" in seen[0]  # web rows are data, never instructions
+
+
+def test_s2_evaluate_orders_by_page_evidence(monkeypatch) -> None:
+    """E-lite: candidate pages are fetched (≤4) and scored on what they
+    actually CONTAIN; a page that will not fetch stays offerable, unscored,
+    after the scored ones."""
+    graphs = {
+        "https://rich.example.org/": {
+            "url": "https://rich.example.org/", "title": "Tide Times",
+            "entities": [{"type": "Event", "name": "High Tide", "time": "7:12"}],
+            "tables": [], "feeds": [], "meta": {}, "outline": [], "text": "tide",
+        },
+        "https://bland.example.org/": {
+            "url": "https://bland.example.org/", "title": "Portal",
+            "entities": [], "tables": [], "feeds": [], "meta": {},
+            "outline": [], "text": "nothing relevant here",
+        },
+    }
+
+    def fake_fetch(url, **kw):
+        if url not in graphs:
+            raise RuntimeError("blocked")
+        return graphs[url]
+
+    monkeypatch.setattr(ni_flow.pagegraph, "fetch_page_graph", fake_fetch)
+    rows = [
+        {"title": "Bland", "host": "bland.example.org",
+         "url": "https://bland.example.org/", "snippet": ""},
+        {"title": "Blocked", "host": "blocked.example.org",
+         "url": "https://blocked.example.org/", "snippet": ""},
+        {"title": "Rich", "host": "rich.example.org",
+         "url": "https://rich.example.org/", "snippet": ""},
+    ]
+    out = ni_flow._s2_evaluate(rows, {"subject": "tides", "wants": ["tide times"]})
+    assert [r["host"] for r in out] == [
+        "rich.example.org", "bland.example.org", "blocked.example.org"]
+    assert out[0]["evidence"] == ["name: High Tide"]
+    assert out[0]["fitness"] > 0
+    assert "fitness" not in out[2]  # unfetchable: unscored, still offerable
+
+
+def test_catalog_miss_searches_seals_and_boards_web_candidates(monkeypatch) -> None:
+    """THE FIELD REGRESSION (tides class): words → no catalog fit → S2 search
+    → evidence → sealed ≤3 {title,host,url,evidence} — snippets are rank-time
+    only, NEVER sealed — and the board renders the rows verbatim as
+    kind:"web" suggestions."""
+    svc = _FakeSearchService(results=[
+        {"title": "Creek Tide Charts", "url": "https://tides.example.org/creek",
+         "snippet": "daily tide tables"},
+        {"title": "Boating Portal", "url": "https://boats.example.net/",
+         "snippet": "marina news"},
+    ])
+    _wire_search(monkeypatch, svc)
+    _no_page_fetch(monkeypatch)
+    store, _conn = _store()
+    item_id = ni_flow.create_shell_item(store, "tide times for the creek landing")
+    intent_reply = json.dumps({
+        "kind": "external_data", "subject": "tides", "cadence_minutes": 720,
+        "wants": ["tide times"], "threshold": None, "display_hint": "list",
+    })
+    no_fit = json.dumps({"best": None, "alternates": [], "confidence": "medium"})
+    web_rank = json.dumps({"best": "r0", "alternates": ["r1"],
+                           "confidence": "high"})
+    result = ni_flow.run_flow(store, item_id,
+                              gateway_call=_scripted_model(
+                                  [intent_reply, no_fit, web_rank]),
+                              fetcher=lambda url: {}, catalog=None)
+    assert result["state"] == "source"
+    record = ni_flow._flow_read(store, item_id)
+    assert record["error"] == ni_flow.AWAITING_SOURCE_PICK
+    sealed = record["_ranked_search"]
+    assert [set(r) for r in sealed] == [{"title", "host", "url", "evidence"}] * 2
+    assert sealed[0]["url"] == "https://tides.example.org/creek"
+    field = ni_flow.board_flow_field(store, item_id)
+    sugs = field["suggestions"]
+    assert [s["kind"] for s in sugs] == ["web", "web"]
+    assert [s["recipe_id"] for s in sugs] == ["", ""]
+    assert sugs[0]["url"] == "https://tides.example.org/creek"
+    assert svc.queries  # the search actually ran, from the user's words
+    assert svc.queries[0] == "tide times for the creek landing"
+
+
+def test_s2_never_runs_when_catalog_candidates_exist(monkeypatch) -> None:
+    """Medium-rank WITH candidates keeps yesterday's pause — search untouched."""
+    from smartbrain_3000 import ni_catalog
+    svc = _FakeSearchService(results=[
+        {"title": "X", "url": "https://x.example.org/", "snippet": ""}])
+    _wire_search(monkeypatch, svc)
+    _no_page_fetch(monkeypatch)
+    store, _conn = _store()
+    item_id = ni_flow.create_shell_item(store, "coastal conditions please")
+    intent_reply = json.dumps({
+        "kind": "external_data", "subject": "coast", "cadence_minutes": 15,
+        "wants": ["conditions"], "threshold": None, "display_hint": "value",
+    })
+    rank_reply = json.dumps({"best": "sunrise-sunset", "confidence": "medium",
+                             "alternates": ["weather-open-meteo"]})
+    result = ni_flow.run_flow(store, item_id,
+                              gateway_call=_scripted_model(
+                                  [intent_reply, rank_reply]),
+                              fetcher=lambda url: {},
+                              catalog=list(ni_catalog.entries()))
+    assert result["state"] == "source"
+    record = ni_flow._flow_read(store, item_id)
+    assert record["_ranked"] == ["sunrise-sunset", "weather-open-meteo"]
+    assert "_ranked_search" not in record
+    assert svc.queries == []
+
+
+def test_s2_failures_always_fall_to_the_plain_pause(monkeypatch) -> None:
+    """Zero rows, a raising provider, and an unwired provider all land the
+    exact plain pause of today — a search problem may never fail a flow."""
+    intent_reply = json.dumps({
+        "kind": "external_data", "subject": "obscurities", "cadence_minutes": 60,
+        "wants": ["numbers"], "threshold": None, "display_hint": "value",
+    })
+    no_fit = json.dumps({"best": None, "alternates": [], "confidence": "medium"})
+    for service in (_FakeSearchService(results=[]),
+                    _FakeSearchService(raise_exc=True),
+                    None):
+        if service is not None:
+            _wire_search(monkeypatch, service)
+        else:
+            monkeypatch.setattr(ni_flow, "_SEARCH_PROVIDER", None)
+        store, _conn = _store()
+        item_id = ni_flow.create_shell_item(store, "utterly uncatalogued need")
+        result = ni_flow.run_flow(store, item_id,
+                                  gateway_call=_scripted_model(
+                                      [intent_reply, no_fit]),
+                                  fetcher=lambda url: {}, catalog=None)
+        assert result["state"] == "source"
+        record = ni_flow._flow_read(store, item_id)
+        assert record["error"] == ni_flow.AWAITING_SOURCE_PICK
+        assert "_ranked_search" not in record
+        assert "pick a source on the card" in (record.get("notes") or [""])[-1]

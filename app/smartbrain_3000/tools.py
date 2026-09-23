@@ -556,7 +556,8 @@ def _web_search(ctx: ToolContext, args: dict) -> dict:
     assert args.get("query"), "query required"
     limit = min(max(int(args.get("limit", 5)), 1), 10)
     if ctx.websearch is not None:
-        return ctx.websearch.search(args["query"], limit)
+        out = ctx.websearch.search(args["query"], limit)
+        return {"provenance": external_provenance("web search results"), **out}
     return {"provenance": external_provenance("web search results"),
             "results": search.web_search(args["query"], limit), "engine": "ddg"}
 

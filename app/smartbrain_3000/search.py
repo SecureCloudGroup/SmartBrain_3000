@@ -12,6 +12,7 @@ first and fall back to the classic HTML endpoint; the parser handles both markup
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from html.parser import HTMLParser
 from urllib.parse import parse_qs, quote_plus, unquote, urlparse
@@ -19,11 +20,31 @@ from urllib.parse import parse_qs, quote_plus, unquote, urlparse
 from . import netguard
 
 # Tried in order; the first that returns results wins (resilience against an intermittent 403).
+# kp=1 = DuckDuckGo strict safe search. Safe search is ALWAYS ON across every
+# provider in this module (product ruling — there is no off switch).
 _ENDPOINTS = (
-    "https://lite.duckduckgo.com/lite/?q={q}",
-    "https://html.duckduckgo.com/html/?q={q}",
+    "https://lite.duckduckgo.com/lite/?q={q}&kp=1",
+    "https://html.duckduckgo.com/html/?q={q}&kp=1",
 )
 _MAX_RESULTS = 10
+
+# Local safe-search floor, applied to every provider's results (the only line
+# for providers with no upstream flag, defense-in-depth for the rest). Scoped
+# to host+title with word boundaries so e.g. "Sussex" never trips it.
+_SAFE_BLOCK_RE = re.compile(
+    r"\b(?:porn\w*|xxx|hentai|xvideos|xhamster|xnxx|redtube|youporn|onlyfans|nsfw)\b",
+    re.IGNORECASE)
+
+
+def _safe_filter(results: list[dict]) -> list[dict]:
+    """Drop results whose host or title trips the safe-search floor."""
+    kept = []
+    for r in results:
+        host = urlparse(str(r.get("url") or "")).hostname or ""
+        if _SAFE_BLOCK_RE.search(f"{host} {r.get('title') or ''}"):
+            continue
+        kept.append(r)
+    return kept
 
 
 class SearchError(Exception):
@@ -96,7 +117,7 @@ def web_search(query: str, limit: int = 5) -> list[dict]:
         except netguard.FetchError as exc:  # blocked/unavailable -> try the next endpoint
             last_err = exc
             continue
-        results = parse_results(page, limit)
+        results = _safe_filter(parse_results(page, limit))
         if results:
             return results
     if last_err is not None:
@@ -183,16 +204,18 @@ class SearchService:
         return chain
 
     def _searxng(self, query: str, limit: int) -> list[dict]:
-        url = f"{self.searxng_url}/search?q={quote_plus(query)}&format=json"
+        url = f"{self.searxng_url}/search?q={quote_plus(query)}&format=json&safesearch=2"
         return _parse_searxng(netguard.safe_fetch_json(url), limit)
 
     def _brave(self, query: str, limit: int) -> list[dict]:
-        url = f"https://api.search.brave.com/res/v1/web/search?q={quote_plus(query)}&count={limit}"
+        url = (f"https://api.search.brave.com/res/v1/web/search"
+               f"?q={quote_plus(query)}&count={limit}&safesearch=strict")
         data = netguard.safe_fetch_json(url, headers={"X-Subscription-Token": self._brave_key,
                                                       "Accept": "application/json"})
         return _parse_brave(data, limit)
 
     def _tavily(self, query: str, limit: int) -> list[dict]:
+        # Tavily has no safe-search flag; the local _safe_filter floor applies.
         data = netguard.safe_post_json("https://api.tavily.com/search",
                                        {"api_key": self._tavily_key, "query": query,
                                         "max_results": limit})
@@ -220,6 +243,7 @@ class SearchService:
             except Exception as exc:  # one provider down must never kill the chain
                 last_err = exc
                 continue
+            results = _safe_filter(results)
             if results:
                 return {"results": results, "engine": name}
         if last_err is not None:

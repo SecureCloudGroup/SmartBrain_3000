@@ -1598,9 +1598,10 @@ FROM WORDS, not works-when-handed-a-URL.
 - **Deterministic resolution suite**: ``test_g3_words_resolve_to_promoted_
   recipes`` pins words → recipe id for every promoted ask (model-free), and
   unrelated asks pin match=None + suggestions=[].
-- S2 live research (LOCATE's research strategy) remains DARK pending the D1
-  probe-consent ruling; the catalog + relevance floor are its deterministic
-  ground.
+- S2 live research (LOCATE's research strategy) stayed DARK through this
+  wave pending the consent ruling; the round-10 Search Platform P1 section
+  below LIT it (search-reads-pages ruling), on this catalog + relevance
+  floor as its deterministic ground.
 
 **G4a — SUSTAIN.refine: the note acts (2026-09-21, rounds 7-8 wave 4a)**.
 The last original field failure (°F note ignored) closes as machinery:
@@ -1753,3 +1754,63 @@ adoptions 1-3, operator-approved)**:
   contract/bind — shape never drifts), so re-reads dedupe and frame deltas.
 - New sealed slot ``llm_state`` {src_hash, values} joins ``_SLOTS`` (cascade
   covered by the wildcard snapshot delete).
+
+**Search Platform P1 — search + page graph + evidence (2026-09-22, round 10,
+operator-approved plan)**. The reusable page-understanding platform, phase 1
+of 4 (P2 compiler, P3 browser ladder, P4 platform spread follow). Operator
+rulings encoded: search-reads-pages consent (searching inherently includes
+reading/using the results; the TAP stays the consent for the recurring
+source), safe search ALWAYS ON with no off switch, acceptance = external
+rate frameworks (W1/W2/W3), never named asks.
+
+- **S — search hardened** (`search.py`): safe-search flags forced on per
+  provider (DDG `kp=1` on both endpoints, SearXNG `safesearch=2`, Brave
+  `safesearch=strict`; Tavily has no flag) PLUS `_safe_filter`, a local
+  word-boundary host+title floor applied to EVERY provider's results —
+  defense in depth, and Tavily's only line. No configuration can disable
+  any of it. Rider: the configured-service branch of the `web_search` tool
+  now carries the same external-provenance tag the keyless branch always
+  had (`tools._web_search`).
+- **G — page graph** (`pagegraph.py`, NEW platform module): any fetched page
+  becomes a deterministic PageGraph `{url, fetched_at, render_mode, text,
+  title, entities[], tables[], feeds[], meta{}, outline[]}`. ALL parsing
+  runs inside the subprocess jail (`jail_extract._GraphParser`: JSON-LD —
+  including `@graph` unwrap — OpenGraph/description meta, RSS/Atom
+  autodiscovery, h1-h3 outline, bounded typed tables); the parent validator
+  (`jailrun._validate_payload`) accepts the graph keys as a CLOSED set — a
+  compromised child cannot widen the payload. The engine's
+  `_fetch_http_page` still slices to `{text, title}` (page-card contracts
+  unchanged); graph consumers call `pagegraph.fetch_page_graph`.
+- **E-lite — evidence-based source ranking** (`ni_flow`): on a FULL catalog
+  miss (M-RANK empty-candidates branch AND scorer miss both route through
+  the shared `_pause_source_pick`; `suggest_recipes` empty), CODE searches
+  the user's OWN words (`_s2_queries`: request verbatim; subject+place only
+  under strict containment), hygienes rows (`_s2_search_candidates`:
+  https-only, titled, oversize-dropped — never truncated — one per host,
+  cap 10), fetches the top 4 pages (`_s2_evaluate`, search-reads-pages
+  ruling) into PageGraphs and scores what each page actually CONTAINS
+  (`pagegraph.graph_fitness`: structure-weighted, generic-token-proof;
+  evidence lines lifted VERBATIM from the page's own entities/tables —
+  grounded by construction). `rank_web_rows` (locate_rank's sibling — ids
+  only, validated, ANY failure → fitness order) orders the corpus; ≤3 rows
+  seal as `_ranked_search` `{title, host, url, evidence[≤2×90ch]}` —
+  snippets are rank-time only, NEVER sealed. The board renders sealed rows
+  verbatim as `kind:"web"` suggestions with their evidence ("On the page:
+  …"); a tap submits the sealed URL through the normal pick consent
+  (identical semantics to pasting it). Unfetchable pages stay offerable
+  unscored (bot-blocks are P3's fix). Search failures NEVER fail a flow —
+  zero rows, raising provider, or unwired provider all land today's plain
+  pause byte-identically.
+- **Provider seam**: `set_search_provider` mirrors the secrets provider;
+  `main.py` wires a per-call factory (configured chain when unlocked via
+  `state.dbx` + secret store, KEYLESS DDG floor otherwise — search works on
+  a locked box). `ni_flow` never imports `search` (duck-typed).
+- **Acceptance framework (external anchors, rates not named asks)**:
+  **W1** seed lives (`test_pagegraph.py`): extraction fidelity over
+  recorded pages (SWDE genre — event/`@graph`/plain/hostile classes) with
+  hand-verified ground truth, growing a row per page-template class.
+  **W2** (live benchmark slice, per release) begins with P3. **W3**
+  (operator-authored blind corpus, novel at test time) gates each
+  milestone. `--s2` on the eval tool is a MACHINERY smoke (keyless search →
+  hygiene → evidence on uncovered asks, PASS ≥2/3 with rows; evidence
+  counts diagnostic-only) — explicitly not acceptance.

@@ -674,7 +674,17 @@ export interface NiItemFlow {
   // P3 (2026-09-17): the source-pick pause carries ranked vetted suggestions
   // (deterministic scorer, every category) — the card renders them as taps
   // routing into the normal Approve-source consent, plus paste-a-URL.
-  suggestions?: { recipe_id: string; title: string; host: string; url: string }[];
+  // S2 (2026-09-22): on a full catalog miss the rows are WEB candidates
+  // (kind:"web", recipe_id "") found by searching the user's own words;
+  // evidence = values actually extracted from the page, shown pre-tap.
+  suggestions?: {
+    recipe_id: string;
+    title: string;
+    host: string;
+    url: string;
+    kind?: string;
+    evidence?: string[];
+  }[];
   geocode_query?: string;
   geocode_host?: string;
   not_covered?: string[];

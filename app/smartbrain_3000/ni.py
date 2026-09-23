@@ -5275,9 +5275,13 @@ def _fetch_http_page(source: dict, item_id: str, secrets_store) -> dict:
     if not isinstance(body, (bytes, bytearray)):
         raise NIError("fetch_failed", "no bytes")
     try:
-        return jailrun.run_extractor(bytes(body), url_hint=url)
+        extracted = jailrun.run_extractor(bytes(body), url_hint=url)
     except jailrun.JailError as exc:
         raise NIError("extract_jail", exc.reason) from None
+    # ENGINE contract stability: page-card pipelines (and their sealed C1
+    # contracts) fingerprint a {text, title} payload — the page-graph layers
+    # ride run_extractor for pagegraph.fetch_page_graph callers only.
+    return {"text": extracted.get("text", ""), "title": extracted.get("title", "")}
 
 
 def _fetch_http_image(source: dict, item_id: str,
