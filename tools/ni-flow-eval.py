@@ -1359,10 +1359,18 @@ def engine_gate_pass(results: list[dict]) -> bool:
 
 
 def _grade_engine_row(row: dict, klass: object) -> bool:
-    """Grade one engine-mode row against its registry ``expected_state``."""
+    """Grade one engine-mode row against its registry ``expected_state``.
+
+    2026-09-23: a ``ready`` row must ALSO survive the built card's first
+    engine run — "the flow reached ready" said nothing about whether the
+    card could ever go live (every flow-built value card with a text field
+    shipped unable to pass commissioning, invisible to this gate).
+    """
     assert isinstance(row, dict), "row required"
     actual = str(row.get("flow_state") or "")
     expected = str(row.get("expected_state") or "")
+    if actual == "ready" and row.get("engine_run") not in ("ok", "unchanged"):
+        return False
     if klass == "refuse":
         return actual in ("unsupported", "ready")
     if actual != expected:
@@ -1370,6 +1378,62 @@ def _grade_engine_row(row: dict, klass: object) -> bool:
     if expected in _ENGINE_SETTLED:
         return bool(row.get("frozen_url_ok"))
     return True
+
+
+class _EvalGateway:
+    """Gateway-module stand-in for ``ni.run_item``: the eval's own bifrost
+    model on a local route (llm-stage cards run exactly as the engine would)."""
+
+    class GatewayError(Exception):
+        def __init__(self, status_code: int = 502, message: str = "") -> None:
+            super().__init__(message)
+            self.status_code = status_code
+
+    def __init__(self, llm: Callable[[str, int], str], model: str) -> None:
+        self._llm, self._model = llm, model
+
+    def load_routes(self, _conn) -> dict:
+        return {"ni": self._model}
+
+    def resolve_model(self, capability: str, routes: dict) -> str | None:
+        return routes.get(capability)
+
+    def is_local(self, _model: str) -> bool:
+        return True
+
+    def local_available(self) -> bool:
+        return True
+
+    def chat(self, messages: list, _model: str, **_kw) -> dict:
+        try:
+            text = self._llm(str(messages[-1]["content"]), 800)
+        except Exception as exc:  # surfaces as the engine's llm_error class
+            raise self.GatewayError(502, type(exc).__name__) from None
+        return {"choices": [{"message": {"content": text}}]}
+
+    def completion_text(self, data: dict) -> str:
+        return data["choices"][0]["message"]["content"]
+
+
+def _engine_first_run(store, conn, item_id: str, llm, model: str, nimod,
+                      key: bytes) -> str:
+    """The product check the flow-only gate missed: run the BUILT card once
+    through the real engine (commissioning C1 — netguard fetch, jail, local
+    model). Returns the run status ("ok") or "<NIError kind>: <detail>".
+    ``key`` is the store's own master key, so a secret-bearing case can
+    decrypt through the same vault the flow wrote."""
+    from smartbrain_3000.scheduler import ScheduleStore
+    from smartbrain_3000.secrets import SecretStore
+    try:
+        res = nimod.run_item(store, item_id,
+                             gateway_mod=_EvalGateway(llm, model),
+                             secrets_store=SecretStore(conn, key),
+                             schedules_store=ScheduleStore(conn, key))
+        return str(res.get("status") or "")
+    except nimod.NIError as exc:
+        return f"{exc.kind}: {str(exc.detail or '')[:80]}"
+    except Exception as exc:  # a crash is a failed product check, never a raise
+        return f"crash: {type(exc).__name__}"
 
 
 def _run_engine(bifrost: str, model: str, only: set[str]) -> int:
@@ -1479,7 +1543,8 @@ def _run_case_engine(case: dict, bifrost: str, model: str, duckdb, dbmod,
     try:
         conn = duckdb.connect(":memory:")
         dbmod.run_migrations(conn)
-        store = nimod.NIStore(conn, gen_key())
+        key = gen_key()
+        store = nimod.NIStore(conn, key)
         item_id = flowmod.create_shell_item(store, case["request"])
         llm = _bifrost_llm(bifrost, model)
         # run_flow's gateway_call signature is (model, prompt) -> reply — wrap
@@ -1512,13 +1577,16 @@ def _run_case_engine(case: dict, bifrost: str, model: str, duckdb, dbmod,
             out["frozen_url_ok"] = frozen == source_url
         else:
             out["frozen_url_ok"] = out["flow_state"] in _ENGINE_SETTLED
+        if out["flow_state"] == "ready":
+            out["engine_run"] = _engine_first_run(store, conn, item_id, llm,
+                                                  model, nimod, key)
     except Exception as exc:  # any crash = FAIL, not a raise
         out["notes"].append(f"{type(exc).__name__}: {str(exc)[:120]}")
     finally:
         out["secs"] = round(time.time() - started, 1)
     print(f"[{case['id']:>16}] engine flow_state={out['flow_state']!r} "
           f"expected={expected_state!r} frozen_url_ok={out['frozen_url_ok']} "
-          f"{out['secs']:>5}s")
+          f"engine_run={out.get('engine_run', '-')!r} {out['secs']:>5}s")
     error = result.get("error") if isinstance(result, dict) else None
     if error:
         print(f"{'':>19}error={error!r}")

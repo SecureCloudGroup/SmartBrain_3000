@@ -1850,9 +1850,8 @@ platform's differentiator: a page card no longer needs a model every tick.
   cards; remap's page door fires when the card's OWN frozen source is a page
   (an http_json card that starts serving HTML still fails honestly) and
   `_remap_intent_from_spec` reads wants from `graph_extract`/`llm` output
-  names. Same consented URL, no new consent. AUTOMATIC recompile on drift
-  (an L-rung trial on the tick) is NOT built — `graph_drift` is not an L1
-  class; the user's Fix tap is the recompile trigger today.
+  names. Same consented URL, no new consent. (Automatic recompile — see the
+  2026-09-23 section below.)
 - **Jail capacity** (found by the live probe): tables now keep 500 rows
   (was 40 — a list page's row 150 was invisible to the whole platform), and
   the child's `_fit_output` halves table rows under a 900 KB soft budget
@@ -1863,3 +1862,58 @@ platform's differentiator: a page card no longer needs a model every tick.
   population (Iceland, row ~180) compiled correctly from table structure;
   python.org/downloads (no addressable data layer) fell to the interpreted
   tier as designed.
+
+**Engine-run fix + drift recompile (2026-09-23)**. Found while building the
+recompile rung: **every flow-built value card with a text field has failed
+its first engine run since #425** — `value_scene` bound every field into a
+`number` node, and the engine's post-bind check (`_enforce_bind_types`)
+rejects a string there (`bind_type`), so such cards never passed C1 and
+never went live. Scope: API cards with any string-typed field (`status`,
+`time`, `name`, `location`, …), every interpreted page card (G4b) and every
+compiled page card (P2). Numeric and list cards were unaffected. The
+creation-time preview binds without the type check, which is why those
+cards LOOKED built.
+- **Fix**: `value_scene(fields, labels, types)` — string fields bind into a
+  text node (`role: value`); numbers stay number nodes. `assemble_from_mapping`
+  passes the reconciled field types; both page-card tiers pass all-string.
+  Cards built before the fix carry the old scene: **Fix** rebuilds them
+  (http_json and http_page both accept Fix). A C1 failure stays
+  `commissioning` (§6), and the card's Fix rendered only for
+  failing/broken/degraded — so those stuck cards had NO Fix until the
+  week-long broken rule; the Fix condition now also covers
+  `commissioning` with `consecutive_failures > 0` (end-to-end pin:
+  `test_fix_rebuilds_a_card_stuck_by_the_old_scene`).
+- **The gap that hid it — closed**: every flow test stopped at "card built"
+  and the live `--engine` gate graded only `flow_state == ready`. Now (1) a
+  hermetic **engine-run matrix** (`test_engine_run_*`) builds each value /
+  text-field / list / compiled-page / interpreted-page card through the REAL
+  flow and runs the REAL `ni.run_item` on it — proven to fail on the unfixed
+  code (3 of 5) and pass on the fix; (2) `--engine` runs every `ready` row's
+  built card once through the real engine (netguard fetch, jail, local model
+  via `_EvalGateway`) and fails the row unless that run is `ok`.
+- **Drift recompile rung** (completes the P2 "recompile on drift" item):
+  `_maybe_repair_l1(..., graph=)` — a compiled card failing `graph_drift`
+  recompiles against the page graph THIS tick already fetched (no new
+  egress; selectors only — source/scene/schedule untouched), behind every
+  L1 gate (l1 on, `failing`, contract present, one attempt per streak,
+  local model only, the tick's repair slot). `_attempt_graph_recompile`
+  reuses the shared core (`pagegraph.compile_program`, moved out of ni_flow
+  so ni can call it without a cycle — creation behaviour unchanged except
+  one hardening: each want line in the prompt is whitespace-collapsed, so a
+  user's want can't forge a prompt line). No
+  judge runs unattended, so three deterministic gates precede the trial:
+  the captured contract; **value-kind continuity** (`pagegraph.value_kind`:
+  empty/time/date/numeric/text) against the card's build-time
+  `preview_data` — a TIME may not become a HEIGHT because the model picked
+  the neighbouring column (enforced only where the reference value is
+  non-empty); and an unchanged program is refused. Applied via
+  `apply_repair(origin="repair_l1")`: the next tick blesses the trial
+  ("repaired itself") or auto-reverts it. Failure reasons are
+  `call_failed | recompile_no_program | recompile_unchanged |
+  recompile_no_reference | recompile_value_kind | recompile_contract |
+  invalid | spec_changed`.
+- **`_born` survived no remap** (found by the stuck-card remedy test): a
+  remap rebuilds a FRESH spec and `_finalize(born=None)` never carried the
+  marker, so every Fix/refine since M1 dropped the §29 door's spec-shape
+  truth (falling back to the prunable journal) — API cards too, proven on
+  unfixed main. `_finalize` now carries the prior marker when `born` is None.
