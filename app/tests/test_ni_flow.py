@@ -2699,9 +2699,11 @@ _P2_INTENT = {"kind": "external_data", "subject": "creek tides",
 
 
 def _p2_menu_id(label_part: str) -> str:
+    """Menu id exactly as production enumerates it (WITH the wants — row-key
+    ordering depends on them)."""
     from smartbrain_3000 import pagegraph
-    return next(m["id"] for m in pagegraph.enumerate_menu(_P2_GRAPH)
-                if label_part in m["label"])
+    return next(m["id"] for m in pagegraph.enumerate_menu(
+        _P2_GRAPH, list(_P2_INTENT["wants"])) if label_part in m["label"])
 
 
 def _p2_build(monkeypatch, replies: list[str], graph: dict | None = None):
@@ -2738,8 +2740,13 @@ def test_p2_compiles_a_model_free_program_from_page_structure(monkeypatch) -> No
                               "url": "https://tides.example.org/c"}
     snap = store.read_snapshot(item_id, "preview_data")
     assert snap["payload"] == {"high_tide_time": "7:12 AM"}
-    texts = [c["value"] for c in spec["scene"]["children"] if c["type"] == "text"]
-    assert texts == ["high tide time"]
+    kids = spec["scene"]["children"]
+    assert [c["value"] for c in kids if c.get("role") in ("title", "label")] == [
+        "high tide time"]
+    # The reading binds into a TEXT value node (a string in a number node
+    # fails the engine's post-bind type check — see the engine-run matrix).
+    assert {"type": "text", "value": {"$bind": "high_tide_time"}, "role": "value",
+            "tone": "default", "size": "lg"} in kids
 
 
 def test_p2_engine_reruns_the_program_without_a_model(monkeypatch) -> None:
@@ -2853,3 +2860,347 @@ def test_p2_graph_extract_field_cap_matches_the_executor() -> None:
                 for i in range(pagegraph.MAX_PROGRAM_FIELDS + 1)}
     with pytest.raises(ValueError, match="entries"):
         nimod._validate_pipeline([{"op": "graph_extract", "fields": too_many}])
+
+
+# ---- Engine-run gate: every flow-built card class must survive its FIRST
+# engine run (2026-09-23). The structural miss this closes: every flow test
+# stopped at "card built", so a scene the ENGINE rejects (value_scene bound
+# every field into a number node; the engine's post-bind type check rejects
+# strings) shipped for every flow-built value card with a text field — page
+# cards, compiled cards, "status"/"time"/"name" API fields — since #425.
+# Each case builds through the REAL flow code, then runs the REAL
+# ``ni.run_item`` (commissioning C1) against the same data.
+
+
+class _EngineGW:
+    """Gateway stand-in for run_item: local route, scripted llm-stage reply."""
+
+    class GatewayError(Exception):
+        status_code = 500
+
+    def __init__(self, reply: str = "{}") -> None:
+        self._reply = reply
+
+    def load_routes(self, _conn) -> dict:
+        return {"ni": "mlx/local"}
+
+    def resolve_model(self, capability: str, routes: dict) -> str | None:
+        return routes.get(capability)
+
+    def is_local(self, model: str) -> bool:
+        return True
+
+    def local_available(self) -> bool:
+        return True
+
+    def chat(self, _messages, _model, **_kw) -> dict:
+        return {"choices": [{"message": {"content": self._reply}}]}
+
+    def completion_text(self, data: dict) -> str:
+        return data["choices"][0]["message"]["content"]
+
+
+def _by_prompt(mapping: dict | None = None, picks: dict | None = None,
+               reading: dict | None = None):
+    """Model stand-in dispatching on WHICH stage is asking (not call order)."""
+    def call(prompt: str) -> str:
+        if "Choose the best candidate path" in prompt:
+            return json.dumps(mapping or {})
+        if "verifying a data card BEFORE it ships" in prompt:
+            return json.dumps({"serves": True, "gaps": [], "wrong": []})
+        if "STRUCTURE of the page" in prompt:
+            return json.dumps({"picks": picks or {}})
+        if "readable text of a web page" in prompt:
+            return json.dumps(reading or {})
+        return "{}"
+    return call
+
+
+def _first_engine_run(store, conn, item_id, monkeypatch, *, json_sample=None,
+                      page=None, llm_reply: str = "{}") -> dict:
+    from smartbrain_3000.scheduler import ScheduleStore
+    from smartbrain_3000.secrets import SecretStore
+    if json_sample is not None:
+        monkeypatch.setattr(nimod, "_fetch_http_json",
+                            lambda source, item_id, secrets: json_sample)
+    if page is not None:
+        monkeypatch.setattr(
+            nimod, "_fetch_http_page",
+            lambda source, item_id, secrets, **kw: dict(page) if kw.get("full")
+            else {"text": page["text"], "title": page["title"]})
+    key = gen_master_key()
+    return nimod.run_item(store, item_id, gateway_mod=_EngineGW(llm_reply),
+                          secrets_store=SecretStore(conn, key),
+                          schedules_store=ScheduleStore(conn, key))
+
+
+def _flow_json_card(store, request: str, wants: list[str], sample: dict,
+                    mapping: dict, display_hint: str = "value") -> str:
+    item_id = ni_flow.create_shell_item(store, request)
+    intent = {"kind": "external_data", "subject": request, "cadence_minutes": 60,
+              "wants": wants, "threshold": None, "display_hint": display_hint}
+    ni_flow._transition(store, item_id, "intent", intent=intent)
+    result = ni_flow._sample_and_map(store, item_id, request, intent,
+                                     "https://api.example.org/x",
+                                     _by_prompt(mapping=mapping),
+                                     lambda url: sample)
+    assert result["state"] == "ready", result
+    return item_id
+
+
+def test_engine_run_numeric_api_card(monkeypatch) -> None:
+    store, conn = _store()
+    sample = {"station": {"water_temp": 18.4, "name": "Pier 7"}}
+    iid = _flow_json_card(store, "pier water temperature", ["water temp"],
+                          sample, {"water_temp": "station.water_temp"})
+    out = _first_engine_run(store, conn, iid, monkeypatch, json_sample=sample)
+    assert out["status"] == "ok", out
+
+
+def test_engine_run_api_card_with_a_text_field(monkeypatch) -> None:
+    """THE REGRESSION: a "status" field (typed string) used to bind into a
+    number node — bind_type on the first engine run, never live."""
+    store, conn = _store()
+    sample = {"station": {"status": "open", "water_temp": 18.4}}
+    iid = _flow_json_card(store, "pier status and water temperature",
+                          ["status", "water temp"], sample,
+                          {"status": "station.status",
+                           "water_temp": "station.water_temp"})
+    out = _first_engine_run(store, conn, iid, monkeypatch, json_sample=sample)
+    assert out["status"] == "ok", out
+    snap = store.read_snapshot(iid, "latest")
+    leaves = [c for c in snap["payload"]["children"] if c["type"] in ("text", "number")]
+    assert any(c["type"] == "text" and c["value"] == "open" for c in leaves)
+    assert any(c["type"] == "number" and c["value"] == 18.4 for c in leaves)
+
+
+def test_engine_run_list_card(monkeypatch) -> None:
+    store, conn = _store()
+    sample = {"hits": [{"title": "A story"}, {"title": "B story"}]}
+    iid = _flow_json_card(store, "top stories", ["title"], sample,
+                          {"title": "hits[0].title"}, display_hint="list")
+    out = _first_engine_run(store, conn, iid, monkeypatch, json_sample=sample)
+    assert out["status"] == "ok", out
+
+
+def _flow_page_card(store, picks_for_menu: bool, monkeypatch):
+    from smartbrain_3000 import pagegraph
+    graph = {"text": "Tide tables. High tide at 7:12 AM.", "title": "Creek Tides",
+             "entities": [], "feeds": [], "meta": {}, "outline": ["h1: Tides"],
+             "tables": [{"caption": "", "headers": ["Time", "Height", "Tide"],
+                         "rows": [["7:12 AM", "5.8 ft", "High"],
+                                  ["1:33 PM", "0.4 ft", "Low"]]}]}
+    intent = {"kind": "external_data", "subject": "creek tides",
+              "cadence_minutes": 720, "wants": ["high tide time"],
+              "threshold": None, "display_hint": "value"}
+    gid = next(m["id"] for m in pagegraph.enumerate_menu(graph, intent["wants"])
+               if "Time where Tide=High" in m["label"])
+    monkeypatch.setattr(
+        nimod, "_fetch_http_page",
+        lambda source, item_id, secrets, **kw: dict(graph) if kw.get("full")
+        else {"text": graph["text"], "title": graph["title"]})
+    item_id = ni_flow.create_shell_item(store, "creek tide times")
+    ni_flow._transition(store, item_id, "intent", intent=intent)
+    model = _by_prompt(picks={"high_tide_time": gid if picks_for_menu else None},
+                       reading={"high_tide_time": "7:12 AM"})
+    result = ni_flow._build_page_card(store, item_id, "creek tide times", intent,
+                                      "https://tides.example.org/c", model)
+    assert result["state"] == "ready", result
+    return item_id, graph
+
+
+def test_engine_run_compiled_page_card(monkeypatch) -> None:
+    store, conn = _store()
+    iid, graph = _flow_page_card(store, True, monkeypatch)
+    assert [s["op"] for s in store.get_item(iid)["spec"]["pipeline"]] == ["graph_extract"]
+    out = _first_engine_run(store, conn, iid, monkeypatch, page=graph)
+    assert out["status"] == "ok", out
+    snap = store.read_snapshot(iid, "latest")
+    assert any(c.get("value") == "7:12 AM" for c in snap["payload"]["children"])
+
+
+def test_engine_run_interpreted_page_card(monkeypatch) -> None:
+    store, conn = _store()
+    iid, graph = _flow_page_card(store, False, monkeypatch)
+    assert [s["op"] for s in store.get_item(iid)["spec"]["pipeline"]] == ["llm"]
+    out = _first_engine_run(store, conn, iid, monkeypatch, page=graph,
+                            llm_reply=json.dumps({"high_tide_time": "7:12 AM"}))
+    assert out["status"] == "ok", out
+
+
+# ---- P2 recompile rung: a drifted compiled card heals itself (2026-09-23) --
+
+
+def _drifted(graph: dict, **table_overrides) -> dict:
+    table = dict(graph["tables"][0])
+    table.update(table_overrides)
+    return dict(graph, tables=[table])
+
+
+def _go_failing(store, item_id: str) -> None:
+    """Push a card past the §6 failing threshold (the L1 gate)."""
+    store.conn.execute(
+        "UPDATE ni_items SET consecutive_failures = 3, "
+        "first_failure_at = now() - INTERVAL '10 MINUTES', state = 'failing' "
+        "WHERE id = ?;", [item_id])
+
+
+def _compiled_card_after_drift(monkeypatch, pick_label: str | None,
+                               local: bool = True):
+    """Compiled card built by the flow, commissioned (C1 contract captured),
+    then the site renames a column ("Tide" → "Type") and the card fails."""
+    from smartbrain_3000 import pagegraph
+    store, conn = _store()
+    iid, graph = _flow_page_card(store, True, monkeypatch)
+    assert _first_engine_run(store, conn, iid, monkeypatch, page=graph)["status"] == "ok"
+    assert store.get_item(iid)["spec"]["contract"]
+    _go_failing(store, iid)
+    drifted = _drifted(graph, headers=["Time", "Height", "Type"])
+    picks = {"high_tide_time": None}
+    if pick_label is not None:
+        picks["high_tide_time"] = next(
+            m["id"] for m in pagegraph.enumerate_menu(drifted, ["high tide time"])
+            if pick_label in m["label"])
+    gw = _EngineGW(json.dumps({"picks": picks}))
+    if not local:
+        gw.is_local = lambda model: False
+    before = store.get_item(iid)
+    monkeypatch.setattr(
+        nimod, "_fetch_http_page",
+        lambda source, item_id, secrets, **kw: dict(drifted))
+    from smartbrain_3000.scheduler import ScheduleStore
+    from smartbrain_3000.secrets import SecretStore
+    key = gen_master_key()
+    run = lambda: nimod.run_item(store, iid, gateway_mod=gw,
+                                 secrets_store=SecretStore(conn, key),
+                                 schedules_store=ScheduleStore(conn, key))
+    with pytest.raises(nimod.NIError) as exc:
+        run()
+    assert exc.value.kind == "graph_drift"
+    return store, iid, before, run, monkeypatch
+
+
+def test_recompile_heals_a_drifted_compiled_card_end_to_end(monkeypatch) -> None:
+    store, iid, before, run, _mp = _compiled_card_after_drift(
+        monkeypatch, "Time where Type=High")
+    after = store.get_item(iid)
+    assert after["spec_rev"] == before["spec_rev"] + 1
+    assert isinstance(after["spec"].get("_l1_trial"), dict)  # applied AS A TRIAL
+    sel = after["spec"]["pipeline"][0]["fields"]["high_tide_time"]
+    assert sel == {"kind": "table_lookup", "table": 0, "where": "Type",
+                   "equals": "High", "take": "Time"}
+    # Egress-inert: only the selectors moved.
+    for key in ("source", "scene", "contract", "display", "title", "goal"):
+        assert after["spec"].get(key) == before["spec"].get(key), key
+    assert any(r["status"] == "repair_applied"
+               for r in store.list_runs(iid, limit=5))
+    # The NEXT tick runs the trial: it succeeds, is blessed, and says so.
+    out = run()
+    assert out["status"] == "ok"
+    assert [n["item_id"] for n in out["repaired"]] == [iid]
+    assert "_l1_trial" not in store.get_item(iid)["spec"]
+
+
+def test_recompile_refuses_a_neighbouring_column_of_another_kind(monkeypatch) -> None:
+    """Unattended = no judge: value-kind continuity refuses a TIME card being
+    'repaired' into a HEIGHT (the model picked the wrong column)."""
+    store, iid, before, _run, _mp = _compiled_card_after_drift(
+        monkeypatch, "Height where Type=High")
+    after = store.get_item(iid)
+    assert after["spec_rev"] == before["spec_rev"]
+    assert after["spec"]["pipeline"] == before["spec"]["pipeline"]
+    runs = store.list_runs(iid, limit=5)
+    assert any(r["status"] == "repair_failed"
+               and r["error"] == "recompile_value_kind" for r in runs)
+    assert after["spec"].get("_l1_last_attempt")  # one attempt per streak
+
+
+def test_recompile_trial_reverts_when_the_next_tick_still_fails(monkeypatch) -> None:
+    store, iid, before, run, mp = _compiled_card_after_drift(
+        monkeypatch, "Time where Type=High")
+    original_program = before["spec"]["pipeline"]
+    mp.setattr(nimod, "_fetch_http_page",  # the page drifts AGAIN: table gone
+               lambda source, item_id, secrets, **kw: {
+                   "text": "", "title": "Creek Tides", "entities": [],
+                   "tables": [], "feeds": [], "meta": {}, "outline": []})
+    with pytest.raises(nimod.NIError):
+        run()
+    after = store.get_item(iid)
+    assert after["spec"]["pipeline"] == original_program  # auto-reverted
+    assert "_l1_trial" not in after["spec"]
+    assert after["spec"].get("_l1_last_attempt")  # no second attempt this streak
+
+
+def test_recompile_never_runs_on_a_cloud_route(monkeypatch) -> None:
+    """Skip-never-cloud (selfreview precedent): page data never leaves the box
+    for a repair."""
+    store, iid, before, _run, _mp = _compiled_card_after_drift(
+        monkeypatch, "Time where Type=High", local=False)
+    after = store.get_item(iid)
+    assert after["spec_rev"] == before["spec_rev"]
+    assert not any(r["status"] in ("repair_applied", "repair_failed")
+                   for r in store.list_runs(iid, limit=5))
+
+
+def test_fix_rebuilds_a_card_stuck_by_the_old_scene(monkeypatch) -> None:
+    """The remedy the release notes promise, end to end: a page card built
+    by an earlier version (text reading bound into a NUMBER node) fails its
+    first engine run and stays commissioning (§6); the card's Fix — now also
+    shown for that state — rebuilds it on the SAME frozen URL through the
+    real remap path (production not_json FetchError → page door), and the
+    rebuilt card passes the engine."""
+    from smartbrain_3000 import netguard
+    store, conn = _store()
+    iid, graph = _flow_page_card(store, False, monkeypatch)
+    old = store.get_item(iid)["spec"]
+    old["scene"]["children"] = [
+        c if c.get("role") != "value" else
+        {"type": "number", "value": c["value"], "format": "plain", "unit": "",
+         "tone": "default", "size": "lg"}
+        for c in old["scene"]["children"]]
+    store.conn.execute("UPDATE ni_items SET nonce = ?, ciphertext = ? WHERE id = ?;",
+                       [*store._seal_item(iid, old), iid])
+    with pytest.raises(nimod.NIError) as exc:
+        _first_engine_run(store, conn, iid, monkeypatch, page=graph,
+                          llm_reply=json.dumps({"high_tide_time": "7:12 AM"}))
+    assert exc.value.kind == "bind_type"
+    stuck = store.get_item(iid)
+    assert stuck["state"] == "commissioning" and stuck["consecutive_failures"] >= 1
+    # The card's Fix (UI: commissioning + failures) → the shared remap entry.
+    assert ni_flow.begin_remap(store, stuck) is True
+    record = ni_flow._flow_read(store, iid)
+
+    def _json_fetch(url):  # the production sampling fetcher meets a web page
+        raise netguard.FetchError("not JSON", kind="not_json")
+
+    result = ni_flow._run_remap(
+        store, iid, record,
+        _by_prompt(picks={"high_tide_time": None},
+                   reading={"high_tide_time": "7:12 AM"}),
+        _json_fetch)
+    assert result["state"] == "ready", result
+    rebuilt = store.get_item(iid)
+    assert rebuilt["spec"]["source"] == old["source"]  # same consented URL
+    assert rebuilt["spec"].get("_born") == old.get("_born")
+    assert any(c.get("type") == "text" and c.get("role") == "value"
+               for c in rebuilt["spec"]["scene"]["children"])
+    out = _first_engine_run(store, conn, iid, monkeypatch, page=graph,
+                            llm_reply=json.dumps({"high_tide_time": "7:12 AM"}))
+    assert out["status"] == "ok", out
+
+
+def test_remap_keeps_the_born_marker_on_api_cards(monkeypatch) -> None:
+    """Every remap rebuilt a fresh spec and dropped ``_born`` (the §29 door's
+    spec-shape truth) — API cards too, since M1. The rebuild carries it."""
+    store, _conn = _store()
+    sample = {"station": {"water_temp": 18.4}}
+    iid = _flow_json_card(store, "pier water temperature", ["water temp"],
+                          sample, {"water_temp": "station.water_temp"})
+    assert store.get_item(iid)["spec"].get("_born") == "flow"
+    assert ni_flow.begin_remap(store, store.get_item(iid)) is True
+    result = ni_flow._run_remap(
+        store, iid, ni_flow._flow_read(store, iid),
+        _by_prompt(mapping={"water_temp": "station.water_temp"}),
+        lambda url: sample)
+    assert result["state"] == "ready", result
+    assert store.get_item(iid)["spec"].get("_born") == "flow"

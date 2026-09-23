@@ -3720,6 +3720,7 @@ def run_item(store: NIStore, item_id: str, *, gateway_mod, secrets_store,
     history: dict = {}
     raw_excerpt = ""  # §14 L1 needs a bounded excerpt of the fetched payload on failure
     image_blob: dict | None = None  # §24: sealed only after a successful run
+    drift_graph: dict | None = None  # P2 recompile rung: this tick's fetched page graph
     try:
         # History (§11) is loaded ONCE per run, PRE-append: the binder + delta_prev see
         # the last completed run's series so a delta compares against the previous
@@ -3733,6 +3734,8 @@ def run_item(store: NIStore, item_id: str, *, gateway_mod, secrets_store,
         payload, image_blob = _fetch_source(spec, item_id, gateway_mod, secrets_store,
                                              schedules_store, store, kb)
         raw_excerpt = _payload_excerpt_for_repair(payload)
+        if isinstance(payload, dict) and _spec_has_graph_extract(spec):
+            drift_graph = payload
         # Hermes-comparison adoptions (operator-approved 2026-09-22), llm-stage
         # cards only — the cards where a model run costs real time/tokens:
         # (1) monitor-hash: an unchanged source skips the model entirely on a
@@ -3790,7 +3793,7 @@ def run_item(store: NIStore, item_id: str, *, gateway_mod, secrets_store,
         _handle_failure(store, item, exc, started, started_rev=started_rev)
         _seal_last_failure_snapshot(store, item["id"], exc, raw_excerpt)
         _maybe_repair_l1(store, item, gateway_mod, raw_excerpt, exc,
-                         reserve_repair=reserve_repair)
+                         reserve_repair=reserve_repair, graph=drift_graph)
         raise
     except Exception as exc:
         wrapped = NIError("internal", exc.__class__.__name__)
@@ -4451,7 +4454,8 @@ def _transition_on_failure(store: NIStore, item: dict, exc: NIError, count: int)
 
 def _maybe_repair_l1(store: NIStore, item: dict, gateway_mod,
                      raw_excerpt: str, exc: NIError, *,
-                     reserve_repair: object | None = None) -> None:
+                     reserve_repair: object | None = None,
+                     graph: dict | None = None) -> None:
     """Try one L1 repair attempt for this failure streak (§14).
 
     Fires ONLY on spec-shape failure classes when the item is currently ``failing``,
@@ -4474,10 +4478,18 @@ def _maybe_repair_l1(store: NIStore, item: dict, gateway_mod,
     D7 (audit 2026-09-09): a spec with ``contract`` still None has nothing to
     repair against (the contract IS the trial target; §14). Bail silently — the
     streak keeps advancing toward broken, which is right.
+
+    P2 recompile rung (round 10, 2026-09-23): a COMPILED page card failing
+    ``graph_drift`` recompiles its selector program against this tick's
+    already-fetched page graph (``graph``) — same gates, same one-attempt-
+    per-streak, same trial + auto-revert. Egress-inert by construction: only
+    the ``graph_extract`` selectors change; source, schedule and scene never.
     """
     assert store is not None and item is not None and exc is not None, "args required"
     assert gateway_mod is not None, "gateway required"
-    if exc.kind not in _L1_SPEC_SHAPE_CLASSES:
+    recompile = (exc.kind == "graph_drift" and isinstance(graph, dict)
+                 and _spec_has_graph_extract(item["spec"]))
+    if exc.kind not in _L1_SPEC_SHAPE_CLASSES and not recompile:
         return
     if not (item["spec"].get("repair_policy") or {}).get("l1"):
         return
@@ -4497,7 +4509,99 @@ def _maybe_repair_l1(store: NIStore, item: dict, gateway_mod,
         assert callable(reserve_repair), "reserve_repair must be callable or None"
         if not reserve_repair():
             return  # tick withheld the slot (breaker / slot busy / already fired)
+    if recompile:
+        _attempt_graph_recompile(store, fresh, gateway_mod, model, graph)
+        return
     _attempt_l1_repair(store, fresh, gateway_mod, model, raw_excerpt, exc)
+
+
+def _attempt_graph_recompile(store: NIStore, item: dict, gateway_mod,
+                              model: str, graph: dict) -> None:
+    """P2 recompile rung: rebuild a drifted compiled page card's program.
+
+    The card's own output keys are the wants (de-slugged back into words —
+    they re-slug identically), the spec goal is the request; the shared
+    ``pagegraph.compile_program`` core runs on the LOCAL model (menu ids
+    only, verify-by-execution, all-or-nothing). Unattended, so no judge —
+    instead three deterministic gates before a trial may land:
+      * the recompiled values satisfy the card's captured contract;
+      * value-kind continuity: every field keeps the coarse kind (time /
+        date / numeric / text) of the card's reference values from build
+        time (``preview_data``) — a model picking the neighbouring column
+        is refused, not shipped;
+      * a program identical to the failing one is refused (nothing to try).
+    Then ``apply_repair(origin="repair_l1")`` — the next tick blesses the
+    trial ("repaired itself") or auto-reverts it (§14 discipline, verbatim).
+    Failure reasons: call_failed (local model unreachable) |
+    recompile_no_program | recompile_unchanged | recompile_no_reference |
+    recompile_value_kind | recompile_contract | invalid | spec_changed.
+    """
+    from . import pagegraph  # lazy: keep the fetch stack off ni's import edges
+
+    assert store is not None and item is not None, "args required"
+    assert isinstance(model, str) and model and isinstance(graph, dict), "args required"
+    started = time.monotonic()
+    expected_rev = int(item["spec_rev"])
+    spec = item["spec"]
+    stage_i = next(i for i, st in enumerate(spec.get("pipeline") or [])
+                   if isinstance(st, dict) and st.get("op") == "graph_extract")
+    old_fields = spec["pipeline"][stage_i].get("fields") or {}
+    wants = {key: str(key).replace("_", " ") for key in old_fields}
+    request = str(spec.get("goal") or spec.get("title") or "")
+
+    call_failures: list[str] = []
+
+    def _call(prompt: str) -> str:
+        try:
+            return _l1_local_call(gateway_mod, model, prompt)
+        except NIError as exc:  # recorded as call_failed, not a menu miss
+            call_failures.append(exc.kind)
+            raise
+
+    compiled = pagegraph.compile_program(graph, wants, request, _call)
+    if compiled is None:
+        reason = "call_failed" if call_failures else "recompile_no_program"
+        _record_repair_failed(store, item["id"], started, reason)
+        return
+    if compiled["fields"] == old_fields:
+        _record_repair_failed(store, item["id"], started, "recompile_unchanged")
+        return
+    reference = store.read_snapshot(item["id"], "preview_data")
+    ref_values = (reference or {}).get("payload")
+    if not isinstance(ref_values, dict):
+        _record_repair_failed(store, item["id"], started, "recompile_no_reference")
+        return
+    for key, new_value in compiled["values"].items():
+        ref_kind = pagegraph.value_kind(ref_values.get(key))
+        # Continuity is enforced only where a reference kind EXISTS — an empty
+        # (or missing) build-time value would otherwise refuse every future
+        # candidate and leave the card permanently unrepairable.
+        if ref_kind != "empty" and ref_kind != pagegraph.value_kind(new_value):
+            _record_repair_failed(store, item["id"], started, "recompile_value_kind")
+            return
+    ok, _violation = check_contract(spec.get("contract") or {}, compiled["values"])
+    if not ok:
+        _record_repair_failed(store, item["id"], started, "recompile_contract")
+        return
+    new_spec = json.loads(json.dumps(spec))
+    new_spec["pipeline"][stage_i] = {"op": "graph_extract",
+                                     "fields": compiled["fields"]}
+    new_spec.pop("_l1_trial", None)
+    new_spec.pop("_l1_last_attempt", None)
+    new_spec.pop("_l2_proposal", None)
+    try:
+        validate_spec(new_spec)
+    except ValueError:
+        _record_repair_failed(store, item["id"], started, "invalid")
+        return
+    duration_ms = int((time.monotonic() - started) * 1000)
+    applied_rev = store.apply_repair(item["id"], new_spec, origin="repair_l1",
+                                      expected_rev=expected_rev)
+    if applied_rev is None:
+        _record_repair_failed(store, item["id"], started, "spec_changed")
+        return
+    store.record_run(item["id"], "repair_applied", duration_ms=duration_ms,
+                     error=None, contract_ok=None)
 
 
 def _l1_already_tried_this_streak(last_iso: object,
