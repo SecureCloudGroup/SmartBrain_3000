@@ -735,6 +735,10 @@ export interface NiBoardItem {
   // is informational only: the library retired this template.
   template_update?: boolean;
   template_gone?: boolean;
+  // P1 debt rider (2026-09-22): sealed _born marker ("flow" | "recipe" |
+  // "chat" | "") — the draft badge says "real data" for flow/recipe-born
+  // previews (the actual source was sampled) and "sample data" otherwise.
+  born?: string;
   // W2 (2026-09-15): true while the card is a flow shell whose creation never
   // finished — the card hides Activate and directs to retry-in-chat or delete.
   shell?: boolean;

@@ -159,6 +159,11 @@ def _board_row(store: ni.NIStore, item: dict, *,
         # W2: True while the flow has not replaced the placeholder spec — the
         # card hides Activate and says creation didn't finish.
         "shell": item["spec"].get("_shell") is True,
+        # P1 debt rider (2026-09-22): the sealed _born marker surfaces so the
+        # draft badge can tell REAL data (flow/recipe sampled the actual
+        # source) from a model-invented sample — a real fetch must never be
+        # labeled "sample data".
+        "born": item["spec"].get("_born") or "",
         # §29 flow record: {state, error?} for any active / terminal-non-ready
         # flow; None once the flow reaches ``ready`` so the tile renders
         # normally. Read from the sealed ``flow`` slot via ni_flow.

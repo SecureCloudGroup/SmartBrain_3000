@@ -2619,3 +2619,65 @@ def test_s2_failures_always_fall_to_the_plain_pause(monkeypatch) -> None:
         assert record["error"] == ni_flow.AWAITING_SOURCE_PICK
         assert "_ranked_search" not in record
         assert "pick a source on the card" in (record.get("notes") or [""])[-1]
+
+
+# ---- P1 debt riders (2026-09-22): human labels + honest preview badge ------
+
+
+def test_value_scene_renders_human_labels_never_slugs() -> None:
+    """The card's visible text is the user's words (or at worst a de-slugged
+    name) — "tropical_storms" must never appear on screen. Bindings keep the
+    slugs. Multi-field cards label each secondary value."""
+    from smartbrain_3000 import ni as nimod
+    scene = ni_flow.value_scene(
+        ["tropical_storms", "hurricanes"],
+        labels={"tropical_storms": "tropical storms"})
+    nimod.validate_scene(scene)  # label nodes are grammar-legal
+    texts = [c["value"] for c in scene["children"] if c["type"] == "text"]
+    assert texts == ["tropical storms", "hurricanes"]  # de-slug fallback too
+    binds = [c["value"]["$bind"] for c in scene["children"]
+             if c["type"] == "number"]
+    assert binds == ["tropical_storms", "hurricanes"]  # bindings unchanged
+
+
+def test_page_card_scene_labels_are_the_users_words() -> None:
+    """End-to-end: an interpreted page card built from the want
+    "tropical storms" titles the scene with those words, not the slug."""
+    store, _conn = _store()
+    item_id = ni_flow.create_shell_item(store, "watch the tropical storms page")
+    intent = {"kind": "external_data", "subject": "storms",
+              "cadence_minutes": 720, "wants": ["tropical storms"],
+              "threshold": None, "display_hint": "value"}
+    ni_flow._transition(store, item_id, "intent", intent=intent)
+    replies = [json.dumps({"tropical_storms": "Tropical Storm Fay"}),
+               json.dumps({"serves": True, "gaps": [], "wrong": []})]
+
+    def fake_page(source, item_id_, secrets):
+        return {"text": "Tropical Storm Fay, 40 kt.", "title": "NHC Outlook"}
+
+    orig = nimod_fetch = ni_flow.ni._fetch_http_page
+    ni_flow.ni._fetch_http_page = fake_page
+    try:
+        result = ni_flow._build_page_card(
+            store, item_id, "watch the tropical storms page", intent,
+            "https://storms.example.org/outlook", lambda p: replies.pop(0))
+    finally:
+        ni_flow.ni._fetch_http_page = orig
+    assert result["state"] == "ready", result
+    item = store.get_item(item_id)
+    scene_texts = [c["value"] for c in item["spec"]["scene"]["children"]
+                   if c["type"] == "text"]
+    assert "tropical storms" in scene_texts
+    assert "tropical_storms" not in scene_texts
+    assert nimod_fetch is orig  # restore sanity
+
+
+def test_board_row_carries_the_born_marker() -> None:
+    """The draft badge needs provenance: flow-born rows say born="flow" so
+    the frontend can say "real data" instead of "sample data"."""
+    from smartbrain_3000 import ni_routes
+    store, _conn = _store()
+    item_id = ni_flow.create_shell_item(store, "born marker probe")
+    item = store.get_item(item_id)
+    row = ni_routes._board_row(store, item)
+    assert row["born"] == "flow"  # create_shell_item stamps the flow marker

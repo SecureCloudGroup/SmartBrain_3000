@@ -1069,14 +1069,32 @@ def _generalize_list_path(exemplar: str) -> tuple[str, str]:
     return match.group(1), "item." + match.group(2)
 
 
-def value_scene(fields: list[str]) -> dict:
-    """Value-class scene: title + one primary number + smaller siblings."""
+def value_scene(fields: list[str], labels: dict[str, str] | None = None) -> dict:
+    """Value-class scene: title + one primary number + smaller siblings.
+
+    P1 debt rider (2026-09-22): visible text is HUMAN, never a slug — the
+    caller may pass ``labels`` (slug → the user's own words, e.g. the wants
+    an interpreted card was built from); without one, the slug is de-slugged
+    (underscores → spaces). Bindings stay the slugs. Multi-field cards label
+    each secondary value so siblings are tellable apart.
+    """
     assert isinstance(fields, list) and fields, "fields required"
+    assert labels is None or isinstance(labels, dict), "labels must be a dict"
+
+    def _label_of(field: str) -> str:
+        human = (labels or {}).get(field) or field.replace("_", " ")
+        return " ".join(str(human).split())[:200]
+
     children: list[dict] = [
-        {"type": "text", "value": fields[0], "role": "title",
+        {"type": "text", "value": _label_of(fields[0]), "role": "title",
          "tone": "default", "size": "md"},
     ]
     for i, field in enumerate(fields):  # bounded by _MAX_INTENT_FIELDS
+        if i > 0:
+            children.append({
+                "type": "text", "value": _label_of(field), "role": "label",
+                "tone": "muted", "size": "sm",
+            })
         children.append({
             "type": "number", "value": {"$bind": field}, "format": "plain",
             "unit": "", "tone": "default", "size": "lg" if i == 0 else "sm",
@@ -2724,7 +2742,15 @@ def _build_page_card(store: ni.NIStore, item_id: str, request: str,
     fields = list(stage["output"].keys())
     preview = {name: extracted.get(name, "") for name in fields}
     preview["title"] = str(page.get("title") or _host_hint(url))[:200]
-    scene = value_scene(fields)
+    # P1 debt rider: the card's visible labels are the USER'S OWN WORDS, not
+    # the slugs they hashed into ("tropical storms", never "tropical_storms").
+    labels = {}
+    for want in (intent.get("wants") or []):
+        if isinstance(want, str) and want:
+            slug = _slugify_field_name(want)
+            if slug in stage["output"] and slug not in labels:
+                labels[slug] = want
+    scene = value_scene(fields, labels=labels)
     spec = build_final_spec(request, intent,
                              {"type": "http_page", "url": url},
                              intent.get("cadence_minutes")

@@ -38,6 +38,18 @@ to know when a release changes behavior.
 - The `web_search` tool now tags results from configured providers
   (SearXNG/Brave/Tavily) with the same treat-as-data provenance marker
   keyless DuckDuckGo results always carried.
+- Neural Interface honesty riders: the empty board's button now focuses the
+  create box it points at (it used to route to Chat, which cannot create
+  cards); interpreted page cards label their values with your words
+  ("tropical storms"), never internal slugs ("tropical_storms"), and
+  multi-value cards label every value; a draft built by sampling your real
+  source now says "Preview — real data, not updating yet" instead of
+  wrongly calling real data "sample data".
+- User docs caught up with the card-first Neural Interface (creation happens
+  on the Neural page, not in Chat) and now disclose the new
+  catalog-miss web search — including the bounded pre-read of result pages
+  — in the privacy egress inventory, plus the always-on safe search and the
+  number-grounding checks on interpreted cards.
 
 ## [0.22.0] - 2026-09-22
 

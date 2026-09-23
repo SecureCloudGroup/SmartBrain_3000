@@ -299,6 +299,7 @@
   let composerText = $state("");
   let composerBusy = $state(false);
   let composerError = $state("");
+  let composerInput: HTMLInputElement | undefined = $state();
 
   async function submitComposer(): Promise<void> {
     console.assert(composerBusy === false, "submitComposer: no concurrent submit");
@@ -1138,6 +1139,7 @@
     <input
       type="text"
       bind:value={composerText}
+      bind:this={composerInput}
       placeholder="What do you want to watch? — e.g. NVDA stock price every 28 minutes"
       maxlength="2000"
       disabled={composerBusy}
@@ -1157,7 +1159,10 @@
       title="Nothing on your Neural Interface yet"
       body="Type what you want to watch in the box above — “show me AAPL every 5 minutes” — then approve the source on the card."
     >
-      <button onclick={() => goto("/chat")}>Ask for a card above</button>
+      <!-- P1 debt rider: the copy says "the box above" — the button must go
+           THERE (the composer on this page), not to chat. Chat has no NI
+           write tools since Foreman P2; routing there was a dead end. -->
+      <button onclick={() => composerInput?.focus()}>Ask for a card above</button>
     </EmptyState>
   {:else}
     <div class="ni-grid2">
@@ -1204,7 +1209,12 @@
 
           {#if preview}
             <div class="ni-preview-tag">
-              <Chip kind="">Preview — sample data</Chip>
+              <!-- P1 debt rider: flow/recipe-born previews hold data from the
+                   REAL source (C1 sample or recorded probe) — only a
+                   model-invented preview may be called "sample data". -->
+              <Chip kind="">{item.born === "flow" || item.born === "recipe"
+                ? "Preview — real data, not updating yet"
+                : "Preview — sample data"}</Chip>
             </div>
           {/if}
 
