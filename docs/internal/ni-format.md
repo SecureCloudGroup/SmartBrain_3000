@@ -1814,3 +1814,52 @@ rate frameworks (W1/W2/W3), never named asks.
   milestone. `--s2` on the eval tool is a MACHINERY smoke (keyless search →
   hygiene → evidence on uncovered asks, PASS ≥2/3 with rows; evidence
   counts diagnostic-only) — explicitly not acceptance.
+
+**Search Platform P2 — compiled page cards (2026-09-23, round 10)**. The
+platform's differentiator: a page card no longer needs a model every tick.
+- **Selector grammar** (`pagegraph`): closed kinds `title`, `meta{key}`,
+  `entity{etype, field}`, `outline{index}`, `table_cell{table,row,col}`,
+  `table_lookup{table, where, equals, take}` — `validate_selector` is the
+  single check (seal time, pipeline validation, library import). Addressing
+  is SEMANTIC where it can be: `table_lookup` keys on header NAMES and a row
+  key cell, `entity` on schema.org `@type`, so row/column reorders and extra
+  entities don't break a card. A selector that no longer resolves raises
+  `GraphDrift` — never a guessed value.
+- **Menu** (`enumerate_menu(graph, wants)`): code enumerates every
+  addressable value WITH its current value (≤80 entries; each table's share
+  capped at 20 so one big table can't starve entities/meta/title; row keys
+  matching a want token come first so row 150 of a list page is reachable;
+  only grammar-valid selectors are emitted — unnamed columns are skipped).
+- **Compiler** (`ni_flow.compile_page_program`): the model returns menu IDS
+  per want (M-RANK containment — never a selector, never a URL); ids are
+  validated; code re-executes the assembled program against the graph
+  (verify-by-execution); ALL-OR-NOTHING — one uncovered want → None. Pages
+  with no data-bearing layer (only title/headings) skip the model call.
+- **Tiers in `_build_page_card`**: one jailed read (`_fetch_http_page(...,
+  full=True)`) → tier 1 compiled (`graph_extract` stage, P8 judge must pass;
+  no `llm` stage → no Interpreted chip; values verbatim from the page) →
+  tier 2 interpreted (the G4b llm card, unchanged) when the compiler returns
+  None or the judge rejects the compiled reading (noted on the record).
+- **Engine**: `graph_extract` is a new pipeline op — first stage only,
+  `http_page` source only (validate_spec coupling). `_fetch_source` passes
+  `full=True` only for graph_extract pipelines, so interpreted cards keep the
+  `{text, title}` payload their llm stage and monitor hash were built on.
+  `_apply_graph_extract` → `run_program`; drift → `NIError("graph_drift")` →
+  normal failure ladder, last_good keeps rendering.
+- **Drift recovery**: the card's Fix (`begin_remap`) now accepts `http_page`
+  cards; remap's page door fires when the card's OWN frozen source is a page
+  (an http_json card that starts serving HTML still fails honestly) and
+  `_remap_intent_from_spec` reads wants from `graph_extract`/`llm` output
+  names. Same consented URL, no new consent. AUTOMATIC recompile on drift
+  (an L-rung trial on the tick) is NOT built — `graph_drift` is not an L1
+  class; the user's Fix tap is the recompile trigger today.
+- **Jail capacity** (found by the live probe): tables now keep 500 rows
+  (was 40 — a list page's row 150 was invisible to the whole platform), and
+  the child's `_fit_output` halves table rows under a 900 KB soft budget
+  (then drops graph layers) so the 1 MB pipe can never fail the text path.
+- `graph_extract` is deliberately NOT in the model-facing spec guide:
+  selectors are only ever picked from the code-built menu.
+- Live debug probe (not acceptance): Wikipedia tallest-buildings, country
+  population (Iceland, row ~180) compiled correctly from table structure;
+  python.org/downloads (no addressable data layer) fell to the interpreted
+  tier as designed.

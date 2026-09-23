@@ -1301,13 +1301,14 @@ def test_fix_route_starts_remap_against_own_frozen_source(
 
 def test_fix_route_409_surfaces_begin_remap_guidance(
         client: TestClient, monkeypatch) -> None:
-    """P3: begin_remap's refusals (non-http_json shell here) surface as 409
-    with the user-facing guidance, not a 500."""
+    """P3: begin_remap's refusals (a sourceless shell here) surface as 409
+    with the user-facing guidance, not a 500. (P2: page cards are fixable
+    too, so the guidance names both API and web-page sources.)"""
     _unlock(client)
     iid = _seed_source_pause(client, monkeypatch, "fix a shell")
     r = client.post(f"/api/ni/items/{iid}/flow/fix", headers={"X-SB-Local": "1"})
     assert r.status_code == 409, r.text
-    assert "http_json" in r.json()["detail"]
+    assert "web-page sources" in r.json()["detail"]
 
 
 def test_patch_title_renames_card_and_journals(client: TestClient) -> None:

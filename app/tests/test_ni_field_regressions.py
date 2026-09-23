@@ -303,7 +303,7 @@ def test_field_11_pasted_webpages_build_interpreted_cards(client, monkeypatch) -
     an interpreted http_page card."""
     from smartbrain_3000 import ni as nimod
     monkeypatch.setattr(nimod, "_fetch_http_page",
-                        lambda source, item_id, secrets: {
+                        lambda source, item_id, secrets, **kw: {
                             "text": "page text with the asked-for info",
                             "title": "Some Page"})
     store = client.app.state.ni

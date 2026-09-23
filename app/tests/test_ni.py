@@ -4230,7 +4230,7 @@ def test_prevalidate_bounces_invented_pipeline_op_with_guide_pointer() -> None:
     with pytest.raises(ValueError) as excinfo:
         create_prevalidate(_bad_pipeline_jmespath_args())
     msg = str(excinfo.value)
-    assert "must be 'extract', 'transform', or 'llm'" in msg, (
+    assert "must be 'extract', 'transform', 'llm', or 'graph_extract'" in msg, (
         f"expected the closed-op message for 'jmespath', got: {msg!r}"
     )
     assert "read_ni_spec_guide" in msg, "prevalidate must point the model at the guide"
