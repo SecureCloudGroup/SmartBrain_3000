@@ -1299,6 +1299,9 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         help="Drift drills against fixtures (rename/truncate/empty)")
     parser.add_argument("--engine", action="store_true",
                         help="M2: drive ni_flow.run_flow directly (LIVE release gate)")
+    parser.add_argument("--s2", action="store_true",
+                        help="LIVE S2 smoke: keyless search + page-evidence "
+                             "machinery on uncovered asks (no bifrost)")
     parser.add_argument("--record", action="store_true",
                         help="Fetch each registry row's record.url and write its fixture")
     parser.add_argument("--record-all", action="store_true",
@@ -1582,6 +1585,56 @@ def _record_one(case_id: str, url: str, max_bytes: int,
     print(f"[{case_id:>16}] wrote {fixture_name} ({len(data)} bytes, {wrote_kind})")
 
 
+def _run_s2() -> int:
+    """S2 live smoke (round 10 P1): keyless search → row hygiene → E-lite
+    page evidence, on asks no catalog recipe covers.
+
+    This is a MACHINERY smoke, not acceptance — the platform's acceptance is
+    the W1/W2/W3 rate framework (named asks are debug tools, never the bar).
+    PASS = ≥2/3 asks yield ≥1 hygienic candidate (DDG-flake tolerance);
+    page-evidence counts print as diagnostics only — pre-tap fetches may be
+    bot-blocked today (the P3 browser ladder is that fix), which must not
+    flake this gate.
+    """
+    try:
+        from smartbrain_3000 import ni_flow as _flow
+        from smartbrain_3000 import search as _search
+    except ImportError as exc:
+        print(f"--s2 requires smartbrain_3000 (import failed: {exc})",
+              file=sys.stderr)
+        return 2
+    asks = [
+        ("ferry schedule to nearby islands",
+         {"subject": "ferry schedule", "wants": ["departure times"]}),
+        ("public library opening hours",
+         {"subject": "library hours", "wants": ["opening hours"]}),
+        ("local farmers market days and times",
+         {"subject": "farmers market", "wants": ["market days"]}),
+    ]
+    print("== NI S2 smoke · LIVE keyless search + page evidence ==\n")
+    ok = 0
+    for request, intent in asks:
+        try:
+            rows = _flow._s2_search_candidates(_search.SearchService(),
+                                               request, intent)
+        except Exception as exc:  # a search outage is a ZERO row, not a crash
+            print(f"ZERO {request[:44]:46} search error: "
+                  f"{type(exc).__name__}")
+            continue
+        if rows:
+            ok += 1
+        evidenced = 0
+        if rows:
+            top = _flow._s2_evaluate(rows[:2], intent)
+            evidenced = sum(1 for r in top if r.get("evidence"))
+        print(f"{'ROWS' if rows else 'ZERO'} {request[:44]:46} "
+              f"rows={len(rows)} evidenced={evidenced}")
+    passed = ok >= 2
+    print(f"\nS2 GATE: {'PASS' if passed else 'FAIL'} "
+          f"({ok}/3 asks yielded candidates)")
+    return 0 if passed else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     """Route to the requested mode; return 0 iff its gate passed."""
     args = _parse_args(argv)
@@ -1592,11 +1645,13 @@ def main(argv: list[str] | None = None) -> int:
     # the mutually-exclusive set alongside recorded / phrasings / chaos /
     # engine; ``--live`` is the default (no explicit flag).
     modes = (args.recorded, args.phrasings, args.chaos, args.engine,
-             args.record, args.resolve)
+             args.record, args.resolve, args.s2)
     if sum(1 for m in modes if m) > 1:
         print("choose at most one of --recorded / --phrasings / --chaos / "
-              "--engine / --record / --resolve", file=sys.stderr)
+              "--engine / --record / --resolve / --s2", file=sys.stderr)
         return 2
+    if args.s2:
+        return _run_s2()
     if args.record:
         return _run_record(only, args.record_all)
     if args.recorded:

@@ -168,9 +168,11 @@
   let flowActionError = $state<Record<string, string>>({});
   let answerDateText = $state("");
 
-  async function pickSource(item: NiBoardItem): Promise<void> {
+  async function pickSource(item: NiBoardItem, urlOverride?: string): Promise<void> {
     console.assert(item.flow?.state === "source", "pickSource: pause required");
-    const url = pickUrlText.trim();
+    // S2: a web-candidate tap submits the sealed URL verbatim — the tap IS
+    // the consent, identical semantics to pasting that URL yourself.
+    const url = (urlOverride ?? pickUrlText).trim();
     if (url.length < 8) return;
     busyId = item.id;
     flowActionError = { ...flowActionError, [item.id]: "" };
@@ -1286,17 +1288,39 @@
                      is the consent, netguard guards the fetch). -->
                 <div class="ni-commission">
                   <p style="margin:0 0 var(--s-2); font-size:var(--f-label)">
-                    No vetted source matched this request yet.
+                    {item.flow.suggestions?.[0]?.kind === "web"
+                      ? "No vetted source matched — found on the web:"
+                      : "No vetted source matched this request yet."}
                   </p>
                   {#if item.flow.suggestions && item.flow.suggestions.length > 0}
                     <div class="ni-suggestions">
-                      {#each item.flow.suggestions as sug (sug.recipe_id)}
-                        <button
-                          class="secondary"
-                          disabled={busyId === item.id}
-                          title={sug.url}
-                          onclick={() => pickRecipe(item, sug.recipe_id)}
-                        >{sug.title} — {sug.host}</button>
+                      <!-- S2: web rows key on url (recipe_id is ""); a tap
+                           submits the sealed URL through the normal pick
+                           consent. Evidence = values our jailed reader
+                           actually extracted from that page, shown pre-tap. -->
+                      {#each item.flow.suggestions as sug (sug.recipe_id || sug.url)}
+                        {#if sug.kind === "web"}
+                          <div class="ni-web-sug">
+                            <button
+                              class="secondary"
+                              disabled={busyId === item.id}
+                              title={sug.url}
+                              onclick={() => pickSource(item, sug.url)}
+                            >{sug.title} — {sug.host}</button>
+                            {#if sug.evidence && sug.evidence.length > 0}
+                              <p class="muted" style="margin:2px 0 0; font-size:var(--f-label)">
+                                On the page: {sug.evidence.join(" · ")}
+                              </p>
+                            {/if}
+                          </div>
+                        {:else}
+                          <button
+                            class="secondary"
+                            disabled={busyId === item.id}
+                            title={sug.url}
+                            onclick={() => pickRecipe(item, sug.recipe_id)}
+                          >{sug.title} — {sug.host}</button>
+                        {/if}
                       {/each}
                     </div>
                   {/if}
@@ -2139,6 +2163,18 @@
     flex-wrap: wrap;
     gap: var(--s-2);
     margin-bottom: var(--s-2);
+  }
+  .ni-web-sug {
+    /* S2 web candidate: button + its on-page evidence line stack as one
+       unit and take the full row (evidence must sit under ITS button). */
+    flex-basis: 100%;
+    min-width: 0;
+  }
+  .ni-web-sug button {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .ni-pick-url {
     /* G1 field fix: a row layout collapsed the input to ~1ch inside card

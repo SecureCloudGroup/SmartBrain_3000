@@ -11,6 +11,34 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Added
+
+- Neural Interface: when no vetted source matches a request, the card now
+  searches the web from your own words, reads the top result pages, and
+  offers up to three candidates **with evidence extracted from each page**
+  ("On the page: …") — your tap on a candidate remains the consent for the
+  recurring source, exactly like pasting that URL yourself. Search problems
+  never fail a card build; with nothing found the card keeps today's honest
+  paste-a-URL pause.
+- New page-understanding platform module (`pagegraph`): any fetched page
+  becomes a deterministic structured graph (schema.org entities, tables,
+  feeds, OpenGraph meta, heading outline, main text), parsed entirely
+  inside the subprocess jail. Reused by the source-candidate evidence
+  above; the ground for the upcoming compiled page cards.
+
+### Changed
+
+- Web search now enforces safe search on every provider (DuckDuckGo,
+  SearXNG, Brave) plus a local result floor that also covers providers
+  without an upstream flag (Tavily). Always on; no configuration disables
+  it.
+
+### Fixed
+
+- The `web_search` tool now tags results from configured providers
+  (SearXNG/Brave/Tavily) with the same treat-as-data provenance marker
+  keyless DuckDuckGo results always carried.
+
 ## [0.22.0] - 2026-09-22
 
 ### Fixed
