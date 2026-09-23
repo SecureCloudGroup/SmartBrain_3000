@@ -11,6 +11,8 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-09-23
+
 ### Added
 
 - Neural Interface **compiled page cards**: when a web page carries its data
