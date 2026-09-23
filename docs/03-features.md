@@ -377,25 +377,35 @@ approval. Deleting a task is irreversible, so it asks every time.
 
 ## Neural Interface
 
-A dashboard of things you asked to watch. You describe what you want to see in
-Chat — *"show me AAPL every 5 minutes"*, *"a card with my open tasks by due
-date"* — and the assistant designs a card for it: where the data comes from, how
-it's processed, and how it's laid out. The engine then keeps it fresh on its own
-schedule.
+A dashboard of things you asked to watch. Type what you want into the box at
+the top of the **Neural** page — *"show me AAPL every 5 minutes"*, *"tide
+times for Wallace Creek"* — and a deterministic build engine turns your words
+into a card: where the data comes from, how it's processed, and how it's laid
+out. The card appears immediately and builds in front of you; every later step
+is a tap on the card itself. The engine then keeps it fresh on its own
+schedule. (Chat can *read* your cards and talk about them, but cards are
+created and changed on the Neural page — chat has no card-writing tools.)
 
 How a card comes to life:
 
-1. **You pick the source.** The assistant suggests candidates — first from a
-   small **vetted catalog** of free, keyless public APIs, and it says so; a
-   source it found by web search is labeled that way instead. The choice is
-   always yours — the approval card shows the exact address it will fetch, and
-   that address is frozen: nothing can quietly change it later without asking
-   you again.
-2. **Preview first.** The assistant shows the card with sample data so you can
-   approve the look ("make the total bigger" works — it's a conversation).
-3. **Commissioning.** After you approve, the system runs the real pipeline and
-   shows you the first live result — you confirm it's the *right* data, and one
-   more clean run at cadence proves it's stable. Only then is the card live.
+1. **You pick the source.** A match from the small **vetted catalog** of free,
+   keyless public APIs pauses the card to show you the exact address it wants
+   to fetch — your approval is the consent. When nothing vetted fits, the card
+   **searches the web from your own words** and offers up to three candidate
+   pages, each with evidence actually extracted from that page (*"On the page:
+   High tide 7:12 AM"*) so you can judge before you tap; the tap is the same
+   consent as pasting that address yourself. Pasting your own URL always
+   works. Whatever you approve is frozen: nothing can quietly change it later
+   without asking you again.
+2. **Built from real data.** The engine samples the approved source and builds
+   the pipeline and layout against what actually came back — the preview you
+   see is real data from your source, not an invention. If something looks
+   off, say so on the card (**Refine…** or *"Something's wrong"*): your note
+   re-enters the build against the same frozen source, and a note that needs a
+   *different* source goes back through the approval step.
+3. **Commissioning.** The system then proves the card: a clean real run, your
+   one-tap confirmation that it's the *right* data, and one more clean run at
+   cadence to prove it's stable. Only then is the card live.
 4. **It keeps itself honest.** Every refresh is checked against the shape of the
    data you validated. If the source changes or breaks, the card shows the last
    good result (dimmed, with a health chip) rather than something wrong — and a
@@ -428,10 +438,14 @@ While the vault is locked, nothing is shown anywhere.
 *"summarize these headlines in a sentence"*. It runs on your **local** model
 only, never a cloud fallback; the model sees the fetched data inside a guarded
 fence with no tools, and must answer in an exact shape or the run fails safely
-to the last good result. Any card whose content passed through a model — this
-step, or a card whose source *is* a model instruction — wears an
-**Interpreted** chip, so you can always tell a model's reading from pure
-arithmetic. Cards with a language-model step refresh at most every 5 minutes.
+to the last good result. Two honesty checks ride every refresh of a page-fed
+card: a **number the model reports must literally appear in the page's text**
+(an unverifiable figure is dropped, with a note in the card's history), and an
+**unchanged page skips the model entirely** — no re-reading, no drift. Any
+card whose content passed through a model — this step, or a card whose source
+*is* a model instruction — wears an **Interpreted** chip, so you can always
+tell a model's reading from pure arithmetic. Cards with a language-model step
+refresh at most every 5 minutes.
 
 **Self-repair.** When a card fails because the data's shape changed, a local
 model can propose new data mappings — it is structurally unable to touch the
@@ -487,9 +501,12 @@ export most cards as a shareable template — credentials and your filled-in
 values are stripped; cards built on your schedules or your knowledge refuse,
 because that content is yours.
 
-Each card offers **Run now**, **Pause**, and **Delete**; drafts are marked
-"Preview — sample data" until commissioned. On a phone, Neural sits second in
-the tab bar.
+Each card offers **Run now**, **Pause**, and **Delete**. Until a card is
+commissioned it wears a preview badge that says where its data came from:
+*"real data, not updating yet"* when the engine sampled your actual source,
+or *"sample data"* when the preview was invented for look purposes (library
+installs and hand-drafted cards). On a phone, Neural sits second in the tab
+bar.
 
 ## Schedules
 
@@ -588,7 +605,14 @@ The assistant's web tools search with **DuckDuckGo by default — no key needed*
   cloud-provider keys.
 - **DuckDuckGo** — no key, always available as the fallback.
 
-Searches only happen when the assistant actually uses the web tools in a turn; see
+**Safe search is always on** — every engine is asked for its strict filtering
+(DuckDuckGo, SearXNG, Brave), and a local filter backstops the results from
+all of them, including engines with no filter of their own (Tavily). There is
+no setting to turn this off.
+
+Searches happen when the assistant uses the web tools in a turn, and when a
+Neural Interface card you're creating finds no vetted source and searches your
+own words for candidates; see
 [Privacy & security](07-privacy-security.md) for exactly what leaves your machine.
 
 ## Self-improvement
