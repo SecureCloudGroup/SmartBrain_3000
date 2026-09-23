@@ -413,6 +413,9 @@ def validate_spec(spec: object, *, allow_empty_params: bool = False) -> dict:
     _validate_params(body.get("params") or {}, allow_empty=allow_empty_params)
     _validate_source(body.get("source"))
     outputs = _validate_pipeline(body.get("pipeline") or [])
+    if (_spec_has_graph_extract(body)
+            and (body.get("source") or {}).get("type") != "http_page"):
+        raise ValueError("spec.pipeline: graph_extract requires an http_page source")
     validate_scene(body.get("scene"))
     _validate_scene_source_context(body.get("scene"), body.get("source"))
     _validate_display(body.get("display") or {})
@@ -908,11 +911,44 @@ def _validate_pipeline(pipeline: object) -> set[str]:
                 raise ValueError(f"spec.pipeline[{i}]: at most one llm stage per pipeline")
             _validate_llm_stage(st, i, outputs)
             llm_seen = True
+        elif op == "graph_extract":
+            if i != 0:
+                raise ValueError(f"spec.pipeline[{i}]: graph_extract must be the first stage")
+            outputs = _validate_graph_extract_stage(st, i)
         else:
             raise ValueError(
-                f"spec.pipeline[{i}].op must be 'extract', 'transform', or 'llm'"
+                f"spec.pipeline[{i}].op must be 'extract', 'transform', 'llm', "
+                "or 'graph_extract'"
             )
     return outputs
+
+
+def _validate_graph_extract_stage(st: dict, i: int) -> set[str]:
+    """P2 compiled page card: {op, fields: {name: selector}} over the page
+    graph; every selector must parse under ``pagegraph``'s closed grammar."""
+    from . import pagegraph  # lazy: keep the fetch stack off ni's import edges
+
+    _closed_keys(st, {"op", "fields"}, f"spec.pipeline[{i}]")
+    fields = _require_dict(st.get("fields"), f"spec.pipeline[{i}].fields")
+    cap = pagegraph.MAX_PROGRAM_FIELDS  # the executor's own bound — one source
+    if not fields or len(fields) > cap:
+        raise ValueError(f"spec.pipeline[{i}].fields must be 1..{cap} entries")
+    for name, sel in fields.items():
+        if not isinstance(name, str) or not _KEY_RE.match(name):
+            raise ValueError(f"spec.pipeline[{i}].fields key {name!r} malformed")
+        if name in _RESERVED_OUTPUT_NAMES:
+            raise ValueError(f"spec.pipeline[{i}].fields.{name}: '{name}' is reserved")
+        pagegraph.validate_selector(sel, f"spec.pipeline[{i}].fields.{name}")
+    return set(fields)
+
+
+def _spec_has_graph_extract(spec: dict) -> bool:
+    """True when the pipeline is a compiled page program (P2)."""
+    assert isinstance(spec, dict), "spec must be a dict"
+    for stage in (spec.get("pipeline") or []):  # bounded by _MAX_PIPELINE_STAGES
+        if isinstance(stage, dict) and stage.get("op") == "graph_extract":
+            return True
+    return False
 
 
 def _validate_extract_stage(st: dict, i: int) -> None:
@@ -1661,11 +1697,28 @@ def run_pipeline(stages: list[dict], payload: object,
             if llm_call is None:
                 raise NIError("llm_unrouted", "no local model call available")
             current = _apply_llm(stage, current, llm_call)
+        elif op == "graph_extract":
+            current = _apply_graph_extract(stage.get("fields") or {}, current)
         else:
             raise NIError("pipeline_bad_stage", str(op))
     if not isinstance(current, dict):
         raise NIError("pipeline_bad_output", "final output is not an object")
     return current
+
+
+def _apply_graph_extract(fields: dict, payload: object) -> dict:
+    """P2: re-run the sealed selector program against this tick's page
+    graph — pure code, no model. A selector that no longer resolves is
+    ``graph_drift`` (the page changed shape; Fix recompiles on the same
+    consented URL), never a guessed value."""
+    from . import pagegraph  # lazy: keep the fetch stack off ni's import edges
+
+    if not isinstance(payload, dict):
+        raise NIError("graph_drift", "no page graph")
+    try:
+        return pagegraph.run_program(payload, fields)
+    except pagegraph.GraphDrift as exc:
+        raise NIError("graph_drift", str(exc)[:120]) from None
 
 
 def _apply_extract(paths: dict, payload: object) -> dict:
@@ -5178,7 +5231,8 @@ def _fetch_source(spec: dict, item_id: str, gateway_mod, secrets_store,
     if stype == "http_json":
         return _fetch_http_json(source, item_id, secrets_store), None
     if stype == "http_page":
-        return _fetch_http_page(source, item_id, secrets_store), None
+        return _fetch_http_page(source, item_id, secrets_store,
+                                full=_spec_has_graph_extract(spec)), None
     if stype == "http_image":
         return _fetch_http_image(source, item_id, secrets_store)
     if stype == "model":
@@ -5231,7 +5285,8 @@ def _fetch_http_json(source: dict, item_id: str, secrets_store) -> dict:
         raise NIError("fetch_failed", exc.__class__.__name__) from None
 
 
-def _fetch_http_page(source: dict, item_id: str, secrets_store) -> dict:
+def _fetch_http_page(source: dict, item_id: str, secrets_store, *,
+                     full: bool = False) -> dict:
     """§15 http_page: netguard-guarded HTML fetch + §16 subprocess-jailed extraction.
 
     Inherits the http_json credential-exfiltration guard verbatim: when ANY header
@@ -5278,9 +5333,11 @@ def _fetch_http_page(source: dict, item_id: str, secrets_store) -> dict:
         extracted = jailrun.run_extractor(bytes(body), url_hint=url)
     except jailrun.JailError as exc:
         raise NIError("extract_jail", exc.reason) from None
-    # ENGINE contract stability: page-card pipelines (and their sealed C1
-    # contracts) fingerprint a {text, title} payload — the page-graph layers
-    # ride run_extractor for pagegraph.fetch_page_graph callers only.
+    # Interpreted cards keep the {text, title} payload their llm stage and
+    # monitor hash were built on; ``full`` (compiled P2 cards) returns the
+    # whole jail-validated page graph their selector program addresses.
+    if full:
+        return dict(extracted)
     return {"text": extracted.get("text", ""), "title": extracted.get("title", "")}
 
 

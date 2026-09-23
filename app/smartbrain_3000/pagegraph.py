@@ -165,3 +165,219 @@ def graph_fitness(graph: dict, wants: list[str]) -> tuple[int, list[str]]:
     if score == 0 and _hit(graph.get("text") or ""):
         score = 1  # text-only mention: last-resort signal, never strong
     return score, evidence[:_MAX_EVIDENCE]
+
+
+# ---------------------------------------------------------------------------
+# Selector programs (P2 — compiled page cards). A program addresses the
+# STRUCTURED layers of a PageGraph with a closed selector grammar; the model
+# only ever picks selectors from the code-enumerated menu below, and the
+# engine re-executes the sealed program deterministically each tick — no
+# model in the run path. Table and entity addressing is SEMANTIC (header
+# names, @type) so cosmetic drift (row order, column order, extra entities)
+# does not break a compiled card; a selector that no longer resolves raises
+# GraphDrift, the honest recompile signal.
+# ---------------------------------------------------------------------------
+
+SELECTOR_KINDS: frozenset[str] = frozenset(
+    {"title", "meta", "entity", "outline", "table_cell", "table_lookup"})
+MAX_PROGRAM_FIELDS = 8  # public: ni's graph_extract validator shares it
+_MAX_MENU = 80
+_MAX_MENU_VALUE_CHARS = 120
+_MAX_LOOKUP_VALUES_PER_COL = 6
+_MAX_MENU_PER_TABLE = 20
+
+
+class GraphDrift(LookupError):
+    """A sealed selector no longer resolves against the fetched page."""
+
+
+def validate_selector(sel: object, where: str = "selector") -> dict:
+    """Validate ONE selector against the closed grammar; return it. Raises
+    ValueError with a placed message on any violation (sealed-spec parity:
+    the same check runs at seal time and on library import)."""
+    if not isinstance(sel, dict):
+        raise ValueError(f"{where} must be an object")  # noqa: TRY004
+    kind = sel.get("kind")
+    if kind not in SELECTOR_KINDS:
+        raise ValueError(f"{where}.kind must be one of {sorted(SELECTOR_KINDS)}")
+    shapes: dict[str, dict[str, type]] = {
+        "title": {},
+        "meta": {"key": str},
+        "entity": {"etype": str, "field": str},
+        "outline": {"index": int},
+        "table_cell": {"table": int, "row": int, "col": int},
+        "table_lookup": {"table": int, "where": str, "equals": str, "take": str},
+    }
+    wanted = shapes[str(kind)]
+    extra = set(sel) - {"kind"} - set(wanted)
+    if extra:
+        raise ValueError(f"{where} has unknown keys {sorted(extra)}")
+    for name, typ in wanted.items():
+        val = sel.get(name)
+        if not isinstance(val, typ) or isinstance(val, bool):
+            raise ValueError(f"{where}.{name} must be {typ.__name__}")  # noqa: TRY004 — sealed-spec grammar errors are ValueError by house convention
+        if typ is str and not (0 < len(val) <= 120):
+            raise ValueError(f"{where}.{name} must be 1..120 chars")
+        if typ is int and not (0 <= val <= 64):
+            raise ValueError(f"{where}.{name} out of range")
+    return sel
+
+
+def run_selector(graph: dict, sel: dict) -> str:
+    """Resolve one validated selector against a PageGraph; return the value
+    as a string. Raises GraphDrift when the addressed node is gone — the
+    engine maps that to its drift failure class (→ repair ladder)."""
+    assert isinstance(graph, dict) and isinstance(sel, dict), "args required"
+    kind = sel.get("kind")
+    if kind == "title":
+        title = str(graph.get("title") or "")
+        if not title:
+            raise GraphDrift("page has no title")
+        return title
+    if kind == "meta":
+        value = (graph.get("meta") or {}).get(sel["key"])
+        if not isinstance(value, str) or not value:
+            raise GraphDrift(f"meta key {sel['key']!r} gone")
+        return value
+    if kind == "entity":
+        for ent in graph.get("entities") or []:  # bounded by the jail caps
+            if isinstance(ent, dict) and ent.get("type") == sel["etype"]:
+                value = ent.get(sel["field"])
+                if isinstance(value, str) and value:
+                    return value
+                break
+        raise GraphDrift(f"entity {sel['etype']}.{sel['field']} gone")
+    if kind == "outline":
+        outline = graph.get("outline") or []
+        idx = sel["index"]
+        if not (0 <= idx < len(outline)):
+            raise GraphDrift("outline entry gone")
+        return str(outline[idx])
+    table = _table_at(graph, sel.get("table", -1))
+    headers = [str(h) for h in (table.get("headers") or [])]
+    rows = table.get("rows") or []
+    if kind == "table_cell":
+        r, c = sel["row"], sel["col"]
+        if not (0 <= r < len(rows)) or not (0 <= c < len(rows[r])):
+            raise GraphDrift("table cell gone")
+        return str(rows[r][c])
+    if kind == "table_lookup":
+        # Header-NAME addressing: survives column reorder, fails honestly
+        # when the named column truly leaves the page.
+        try:
+            where_i = headers.index(sel["where"])
+            take_i = headers.index(sel["take"])
+        except ValueError:
+            raise GraphDrift("lookup column gone") from None
+        for row in rows:  # bounded by the jail row cap
+            if where_i < len(row) and str(row[where_i]) == sel["equals"]:
+                if take_i < len(row):
+                    return str(row[take_i])
+                break
+        raise GraphDrift(f"no row where {sel['where']!r} = {sel['equals']!r}")
+    raise ValueError(f"unknown selector kind {kind!r}")  # validate_ catches first
+
+
+def _table_at(graph: dict, index: object) -> dict:
+    tables = graph.get("tables") or []
+    if not (isinstance(index, int) and 0 <= index < len(tables)):
+        raise GraphDrift("table gone")
+    table = tables[index]
+    return table if isinstance(table, dict) else {}
+
+
+def run_program(graph: dict, fields: dict) -> dict:
+    """Execute a whole {name: selector} program; all-or-drift per field."""
+    assert isinstance(fields, dict) and fields, "fields required"
+    assert len(fields) <= MAX_PROGRAM_FIELDS, "program too wide"
+    return {name: run_selector(graph, sel) for name, sel in fields.items()}
+
+
+def enumerate_menu(graph: dict, wants: list[str] | None = None) -> list[dict]:
+    """CODE-built selector menu over a PageGraph: [{id, selector, label,
+    value}] — everything a compiled program may address, with its CURRENT
+    value, so a model can pick by meaning and a human can audit the pick.
+
+    Bounded and deterministic. Every emitted selector passes
+    ``validate_selector`` (an unnamed column can't be addressed by name, so
+    it is skipped rather than emitted invalid). With ``wants``, table row
+    keys whose text carries a want token come FIRST (a want about row 50 of
+    a 200-row table is still reachable), and each table's share of the menu
+    is capped, and entities/meta/title are emitted first so no number of
+    tables can starve them.
+    """
+    assert isinstance(graph, dict), "graph required"
+    tokens = _want_tokens(list(wants or []))
+    out: list[dict] = []
+
+    def _add(selector: dict, label: str, value: str) -> bool:
+        if len(out) >= _MAX_MENU or not value:
+            return False
+        try:
+            validate_selector(selector)
+        except ValueError:
+            return False
+        out.append({"id": f"g{len(out)}", "selector": selector,
+                    "label": " ".join(label.split())[:80],
+                    "value": " ".join(str(value).split())[:_MAX_MENU_VALUE_CHARS]})
+        return True
+
+    def _relevant(text: str) -> bool:
+        low = str(text).lower()
+        return any(tok in low for tok in tokens)
+
+    for ent in graph.get("entities") or []:  # jail-capped ≤20
+        if not isinstance(ent, dict):
+            continue
+        etype = str(ent.get("type") or "")
+        if not etype:
+            continue
+        for field, value in ent.items():
+            if field != "type" and isinstance(value, str) and value:
+                _add({"kind": "entity", "etype": etype, "field": field},
+                     f"{etype} {field}", value)
+    # Meta + title BEFORE tables: however many big tables a page has, they
+    # can never starve these (they are few and bounded).
+    for key, value in (graph.get("meta") or {}).items():  # jail-capped ≤30
+        if isinstance(value, str):
+            _add({"kind": "meta", "key": str(key)}, f"meta {key}", value)
+    if graph.get("title"):
+        _add({"kind": "title"}, "page title", str(graph["title"]))
+    for t_i, table in enumerate(graph.get("tables") or []):  # jail-capped ≤8
+        if not isinstance(table, dict):
+            continue
+        headers = [str(h) for h in (table.get("headers") or [])]
+        rows = table.get("rows") or []
+        added = 0
+        if headers and rows:
+            for where_i, where_col in enumerate(headers):
+                keys: list[str] = []
+                for row in rows:  # want-matching keys first
+                    cell = str(row[where_i]) if where_i < len(row) else ""
+                    if cell and cell not in keys and _relevant(cell):
+                        keys.append(cell)
+                for row in rows[:3]:  # then the table's leading rows
+                    cell = str(row[where_i]) if where_i < len(row) else ""
+                    if cell and cell not in keys:
+                        keys.append(cell)
+                for equals in keys[:_MAX_LOOKUP_VALUES_PER_COL]:
+                    for take_i, take_col in enumerate(headers):
+                        if take_i == where_i or added >= _MAX_MENU_PER_TABLE:
+                            continue
+                        sel = {"kind": "table_lookup", "table": t_i,
+                               "where": where_col, "equals": equals,
+                               "take": take_col}
+                        try:
+                            value = run_selector(graph, sel)
+                        except GraphDrift:
+                            continue
+                        if _add(sel, f"table {take_col} where {where_col}={equals}",
+                                value):
+                            added += 1
+        elif rows:  # headerless grid: first-row cells only
+            for c_i, cell in enumerate(rows[0][:4]):
+                _add({"kind": "table_cell", "table": t_i, "row": 0, "col": c_i},
+                     f"table {t_i} cell 0,{c_i}", str(cell))
+    for o_i, line in enumerate((graph.get("outline") or [])[:5]):
+        _add({"kind": "outline", "index": o_i}, "heading", str(line))
+    return out

@@ -201,3 +201,135 @@ def test_graph_fitness_off_topic_page_scores_zero() -> None:
     g = _mini_graph(entities=[{"type": "Product", "name": "Blue Kayak"}],
                     text="paddling gear for sale")
     assert pagegraph.graph_fitness(g, ["tide times"])[0] == 0
+
+
+# ---- P2 selector programs (compiled page cards) ----------------------------
+
+
+_TIDE_GRAPH = _mini_graph(
+    title="Creek Tides",
+    meta={"og:description": "Daily tide predictions"},
+    entities=[{"type": "Event", "name": "High Tide", "startDate": "07:12"}],
+    tables=[{"caption": "", "headers": ["Time", "Height", "Tide"],
+             "rows": [["7:12 AM", "5.8 ft", "High"], ["1:33 PM", "0.4 ft", "Low"]]}],
+    outline=["h1: Tide Tables"])
+
+
+def test_selector_grammar_is_closed() -> None:
+    ok = {"kind": "table_lookup", "table": 0, "where": "Tide",
+          "equals": "High", "take": "Time"}
+    assert pagegraph.validate_selector(ok) is ok
+    bad = [
+        {"kind": "xpath", "expr": "//td"},                       # unknown kind
+        {"kind": "meta", "key": "x", "extra": 1},                 # unknown key
+        {"kind": "table_cell", "table": 0, "row": "0", "col": 0},  # wrong type
+        {"kind": "table_cell", "table": 0, "row": True, "col": 0},  # bool ≠ int
+        {"kind": "outline", "index": 999},                         # out of range
+        {"kind": "entity", "etype": "", "field": "name"},          # empty str
+        "not an object",
+    ]
+    for sel in bad:
+        with pytest.raises(ValueError):
+            pagegraph.validate_selector(sel)
+
+
+def test_menu_values_match_program_execution() -> None:
+    """Every menu entry's shown value is exactly what its selector yields —
+    the model picks by the value it SEES, and the engine gets that value."""
+    menu = pagegraph.enumerate_menu(_TIDE_GRAPH)
+    assert menu and len(menu) <= 80
+    assert {m["selector"]["kind"] for m in menu} >= {
+        "entity", "table_lookup", "meta", "title", "outline"}
+    for m in menu:
+        pagegraph.validate_selector(m["selector"])
+        assert pagegraph.run_selector(_TIDE_GRAPH, m["selector"]) == m["value"]
+
+
+def test_table_lookup_survives_cosmetic_drift_and_names_real_drift() -> None:
+    sel = {"kind": "table_lookup", "table": 0, "where": "Tide",
+           "equals": "High", "take": "Time"}
+    assert pagegraph.run_selector(_TIDE_GRAPH, sel) == "7:12 AM"
+    reordered = _mini_graph(tables=[{
+        "caption": "", "headers": ["Tide", "Time"],
+        "rows": [["Low", "1:33 PM"], ["High", "7:12 AM"]]}])
+    assert pagegraph.run_selector(reordered, sel) == "7:12 AM"  # rows+cols moved
+    for broken in (_mini_graph(tables=[]),
+                   _mini_graph(tables=[{"caption": "", "headers": ["When"],
+                                        "rows": [["7:12"]]}]),
+                   _mini_graph(tables=[{"caption": "", "headers": ["Tide", "Time"],
+                                        "rows": [["Low", "1:33 PM"]]}])):
+        with pytest.raises(pagegraph.GraphDrift):
+            pagegraph.run_selector(broken, sel)
+
+
+def test_entity_selector_is_type_addressed() -> None:
+    sel = {"kind": "entity", "etype": "Event", "field": "startDate"}
+    shuffled = _mini_graph(entities=[{"type": "Organization", "name": "X"},
+                                     {"type": "Event", "startDate": "08:01"}])
+    assert pagegraph.run_selector(shuffled, sel) == "08:01"
+    with pytest.raises(pagegraph.GraphDrift):
+        pagegraph.run_selector(_mini_graph(entities=[{"type": "Organization",
+                                                      "name": "X"}]), sel)
+
+
+def test_menu_reaches_deep_rows_by_want_and_never_emits_invalid() -> None:
+    """Live-probe findings (2026-09-23): (1) a big table starved the menu —
+    a want about row 150 was unreachable; (2) an unnamed column produced a
+    selector the grammar rejects. Want-matching row keys now come first,
+    each table's share is capped, and every entry validates."""
+    rows = [[str(i), f"Country{i}", f"{i * 1000}"] for i in range(200)]
+    rows[150] = ["150", "Iceland", "383,726"]
+    big = _mini_graph(
+        title="Populations", meta={"og:description": "By country"},
+        tables=[{"caption": "", "headers": ["", "Location", "Population"],
+                 "rows": rows}])
+    menu = pagegraph.enumerate_menu(big, ["Iceland population"])
+    for m in menu:
+        pagegraph.validate_selector(m["selector"])  # nothing invalid emitted
+        assert m["selector"].get("where") != ""
+    hit = [m for m in menu if m["value"] == "383,726"]
+    assert hit and hit[0]["selector"]["equals"] == "Iceland"
+    kinds = {m["selector"]["kind"] for m in menu}
+    assert {"meta", "title"} <= kinds  # the table did not starve the rest
+
+
+def test_w1_long_table_rows_reach_the_graph() -> None:
+    """List pages run long: row 150 of a real table must be addressable
+    (the old 40-row cap made it invisible to the whole platform)."""
+    rows = "".join(f"<tr><td>{i}</td><td>Place{i}</td><td>{i * 7}</td></tr>"
+                   for i in range(300))
+    page = (b"<html><head><title>Long</title></head><body><h1>Long</h1>"
+            b"<table><tr><th>Rank</th><th>Name</th><th>Score</th></tr>"
+            + rows.encode() + b"</table><p>Prose long enough to be kept by "
+            b"the extractor as the main text of this list page.</p></body></html>")
+    g = _graph_of(page)
+    names = [r[1] for r in g["tables"][0]["rows"]]
+    assert "Place150" in names and len(names) >= 300
+
+
+def test_w1_graph_overflow_trims_tables_never_the_text() -> None:
+    """A table big enough to blow the 1 MB jail pipe is trimmed in the child
+    — the text path survives; before, the overflow failed the whole read."""
+    cell = "x" * 110
+    rows = "".join("<tr>" + f"<td>{cell}</td>" * 12 + "</tr>" for _ in range(150))
+    tables = (b"<table><tr>" + b"".join(f"<th>h{c}</th>".encode() for c in range(12))
+              + b"</tr>" + rows.encode() + b"</table>") * 8
+    page = (b"<html><head><title>Huge</title></head><body><h1>Huge</h1>"
+            + tables + b"<p>The real prose of this enormous page must still "
+            b"come through the jail intact after the trim.</p></body></html>")
+    assert len(page) < 2 * 1024 * 1024  # under the parent's input cap
+    g = _graph_of(page)
+    assert g["title"] and isinstance(g["tables"], list)
+    total_rows = sum(len(t["rows"]) for t in g["tables"])
+    assert total_rows < 8 * 150  # trimmed, not fatal
+
+
+def test_many_tables_never_starve_meta_and_title() -> None:
+    """Review nit (2026-09-23): per-table caps alone let 4+ tables fill the
+    whole menu; meta/title are now emitted before tables."""
+    tables = [{"caption": "", "headers": ["K", "V"],
+               "rows": [[f"k{t}{r}", f"v{t}{r}"] for r in range(10)]}
+              for t in range(8)]
+    g = _mini_graph(title="T", meta={"og:description": "D"}, tables=tables)
+    kinds = {m["selector"]["kind"] for m in pagegraph.enumerate_menu(g)}
+    assert {"meta", "title"} <= kinds

@@ -44,7 +44,11 @@ _MAX_ENTITIES = 20
 _MAX_ENTITY_FIELDS = 24
 _MAX_FIELD_CHARS = 300
 _MAX_TABLES = 8
-_MAX_TABLE_ROWS = 40
+_MAX_TABLE_ROWS = 500   # list pages (rankings, schedules) run long
+# The parent reads at most 1 MB of stdout and fails the WHOLE extraction
+# on overflow — graph layers must never cost the text path, so main()
+# trims them under this soft budget before writing.
+_SOFT_OUTPUT_BYTES = 900_000
 _MAX_TABLE_COLS = 12
 _MAX_CELL_CHARS = 120
 _MAX_FEEDS = 6
@@ -303,6 +307,30 @@ def _cap(value: str, cap: int) -> str:
     return value[:cap]
 
 
+def _fit_output(payload: dict) -> str:
+    """Serialize under ``_SOFT_OUTPUT_BYTES``: halve table rows until the
+    payload fits (bounded — at most 10 halvings), then drop the graph layers
+    entirely. Text + title always survive intact."""
+    out = json.dumps(payload, ensure_ascii=False)
+    for _ in range(10):  # 500 rows → 0 in ≤10 halvings
+        if len(out.encode("utf-8")) <= _SOFT_OUTPUT_BYTES:
+            return out
+        tables = payload.get("tables") or []
+        if not any(t.get("rows") for t in tables):
+            break
+        for t in tables:
+            t["rows"] = t["rows"][: len(t["rows"]) // 2]
+        out = json.dumps(payload, ensure_ascii=False)
+    if len(out.encode("utf-8")) <= _SOFT_OUTPUT_BYTES:
+        return out
+    bare = {"text": payload["text"], "title": payload["title"]}
+    out = json.dumps(bare, ensure_ascii=False)
+    while len(out.encode("utf-8")) > _SOFT_OUTPUT_BYTES and bare["text"]:
+        bare["text"] = bare["text"][: len(bare["text"]) // 2]  # ≤18 halvings
+        out = json.dumps(bare, ensure_ascii=False)
+    return out
+
+
 def main() -> None:
     """Entry point: rlimits → read stdin → extract → dump JSON → exit 0.
 
@@ -326,7 +354,7 @@ def main() -> None:
     payload = {"text": _cap(text, _MAX_TEXT_CHARS),
                "title": _cap(title, _MAX_TITLE_CHARS)}
     payload.update(_page_graph_layers(html))
-    sys.stdout.write(json.dumps(payload, ensure_ascii=False))
+    sys.stdout.write(_fit_output(payload))
     sys.stdout.flush()
 
 

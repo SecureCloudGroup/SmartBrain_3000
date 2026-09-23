@@ -467,7 +467,11 @@ short excerpt of the failing data; never your knowledge, never credentials.
 
 **More than APIs.** A card can also watch an ordinary **web page** (the
 readable text is extracted in a locked-down helper process — hostile HTML is
-never parsed inside the app), your own **knowledge** (*"a card of my notes
+never parsed inside the app). When the page carries its data in structure — a
+table, schema.org data, page metadata — the card is *compiled*: it reads the
+exact cell or field you want on every refresh with no model involved, so its
+values are the page's own; otherwise it's an interpreted card. A card can
+also watch your own **knowledge** (*"a card of my notes
 about X"* — zero network), or an **image**: a weather-radar frame, a webcam
 still, a status badge. Images are accepted only as real raster formats, checked
 by file signature rather than by what the server claims; the pixels are stored

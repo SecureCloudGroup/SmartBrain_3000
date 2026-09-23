@@ -13,6 +13,13 @@ to know when a release changes behavior.
 
 ### Added
 
+- Neural Interface **compiled page cards**: when a web page carries its data
+  in structure (tables, schema.org data, page metadata), the card is built
+  as a small program over that structure and refreshes **without a model**
+  — values are read verbatim from the page every update, and the card
+  shows no Interpreted chip. Pages without usable structure still get an
+  interpreted card, as before. If the page changes shape, the card keeps
+  its last good value and **Fix** rebuilds it against the same page.
 - Neural Interface: when no vetted source matches a request, the card now
   searches the web from your own words, reads the top result pages, and
   offers up to three candidates **with evidence extracted from each page**
@@ -35,6 +42,10 @@ to know when a release changes behavior.
 
 ### Fixed
 
+- Web-page reading keeps long tables (up to 500 rows; rankings and
+  schedules were cut at 40), and an oversized page can no longer fail the
+  whole read — structured layers are trimmed first, the text always
+  survives.
 - The `web_search` tool now tags results from configured providers
   (SearXNG/Brave/Tavily) with the same treat-as-data provenance marker
   keyless DuckDuckGo results always carried.

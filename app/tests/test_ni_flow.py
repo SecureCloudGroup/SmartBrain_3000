@@ -2257,7 +2257,7 @@ def test_place_serves_its_own_card_in_coverage() -> None:
 
 def _page_stub(monkeypatch, text: str, title: str) -> None:
     monkeypatch.setattr(nimod, "_fetch_http_page",
-                        lambda source, item_id, secrets: {"text": text,
+                        lambda source, item_id, secrets, **kw: {"text": text,
                                                            "title": title})
 
 
@@ -2300,7 +2300,7 @@ def test_page_door_jail_failure_is_honest(monkeypatch) -> None:
     """A page the jail can't read fails fetch-class with reason + reopen."""
     store, _conn = _store()
 
-    def _boom(source, item_id, secrets):
+    def _boom(source, item_id, secrets, **kw):
         raise nimod.NIError("extract_jail", "jail crashed")
     monkeypatch.setattr(nimod, "_fetch_http_page", _boom)
     item_id = ni_flow.create_shell_item(store, "unreadable page")
@@ -2652,7 +2652,7 @@ def test_page_card_scene_labels_are_the_users_words() -> None:
     replies = [json.dumps({"tropical_storms": "Tropical Storm Fay"}),
                json.dumps({"serves": True, "gaps": [], "wrong": []})]
 
-    def fake_page(source, item_id_, secrets):
+    def fake_page(source, item_id_, secrets, **kw):
         return {"text": "Tropical Storm Fay, 40 kt.", "title": "NHC Outlook"}
 
     orig = nimod_fetch = ni_flow.ni._fetch_http_page
@@ -2681,3 +2681,175 @@ def test_board_row_carries_the_born_marker() -> None:
     item = store.get_item(item_id)
     row = ni_routes._board_row(store, item)
     assert row["born"] == "flow"  # create_shell_item stamps the flow marker
+
+
+# ---- P2: compiled page cards (round 10) ------------------------------------
+
+_P2_GRAPH = {
+    "text": "Tide tables for the creek. High tide at 7:12 AM, low at 1:33 PM.",
+    "title": "Creek Tides",
+    "entities": [], "feeds": [], "meta": {}, "outline": ["h1: Tide Tables"],
+    "tables": [{"caption": "", "headers": ["Time", "Height", "Tide"],
+                "rows": [["7:12 AM", "5.8 ft", "High"],
+                         ["1:33 PM", "0.4 ft", "Low"]]}],
+}
+_P2_INTENT = {"kind": "external_data", "subject": "creek tides",
+              "cadence_minutes": 720, "wants": ["high tide time"],
+              "threshold": None, "display_hint": "value"}
+
+
+def _p2_menu_id(label_part: str) -> str:
+    from smartbrain_3000 import pagegraph
+    return next(m["id"] for m in pagegraph.enumerate_menu(_P2_GRAPH)
+                if label_part in m["label"])
+
+
+def _p2_build(monkeypatch, replies: list[str], graph: dict | None = None):
+    store, _conn = _store()
+    monkeypatch.setattr(nimod, "_fetch_http_page",
+                        lambda source, item_id, secrets, **kw: dict(graph or _P2_GRAPH))
+    item_id = ni_flow.create_shell_item(store, "creek tide times")
+    ni_flow._transition(store, item_id, "intent", intent=_P2_INTENT)
+    queue = list(replies)
+    result = ni_flow._build_page_card(store, item_id, "creek tide times",
+                                      _P2_INTENT, "https://tides.example.org/c",
+                                      lambda prompt: queue.pop(0))
+    assert queue == [], f"unconsumed model replies: {queue}"
+    return store, item_id, result
+
+
+def test_p2_compiles_a_model_free_program_from_page_structure(monkeypatch) -> None:
+    """Every want maps onto a menu id → the card seals a graph_extract
+    program, no llm stage (no Interpreted chip), values verbatim from the
+    page, human labels on the scene."""
+    pick = _p2_menu_id("Time where Tide=High")
+    store, item_id, result = _p2_build(monkeypatch, [
+        json.dumps({"picks": {"high_tide_time": pick}}),
+        json.dumps({"serves": True, "gaps": [], "wrong": []}),
+    ])
+    assert result["state"] == "ready", result
+    spec = store.get_item(item_id)["spec"]
+    assert [st["op"] for st in spec["pipeline"]] == ["graph_extract"]
+    assert spec["pipeline"][0]["fields"]["high_tide_time"] == {
+        "kind": "table_lookup", "table": 0, "where": "Tide",
+        "equals": "High", "take": "Time"}
+    assert not nimod._spec_has_llm_stage(spec)
+    assert spec["source"] == {"type": "http_page",
+                              "url": "https://tides.example.org/c"}
+    snap = store.read_snapshot(item_id, "preview_data")
+    assert snap["payload"] == {"high_tide_time": "7:12 AM"}
+    texts = [c["value"] for c in spec["scene"]["children"] if c["type"] == "text"]
+    assert texts == ["high tide time"]
+
+
+def test_p2_engine_reruns_the_program_without_a_model(monkeypatch) -> None:
+    """The sealed program re-executes against a fresh graph: new values flow,
+    and a page that lost the addressed data raises graph_drift — never a
+    guessed value."""
+    fields = {"high_tide_time": {"kind": "table_lookup", "table": 0,
+                                 "where": "Tide", "equals": "High",
+                                 "take": "Time"}}
+    stages = [{"op": "graph_extract", "fields": fields}]
+    tomorrow = dict(_P2_GRAPH, tables=[{
+        "caption": "", "headers": ["Tide", "Time", "Height"],
+        "rows": [["Low", "2:20 PM", "0.3 ft"], ["High", "8:01 AM", "5.9 ft"]]}])
+    assert nimod.run_pipeline(stages, tomorrow) == {"high_tide_time": "8:01 AM"}
+    redesigned = dict(_P2_GRAPH, tables=[])
+    with pytest.raises(nimod.NIError) as exc:
+        nimod.run_pipeline(stages, redesigned)
+    assert exc.value.kind == "graph_drift"
+
+
+def test_p2_uncovered_want_falls_back_to_the_interpreted_tier(monkeypatch) -> None:
+    """All-or-nothing: a want the structure can't serve (null pick) never
+    yields a half-compiled card — the interpreted tier builds it."""
+    store, item_id, result = _p2_build(monkeypatch, [
+        json.dumps({"picks": {"high_tide_time": None}}),
+        json.dumps({"high_tide_time": "7:12 AM"}),           # llm stage
+        json.dumps({"serves": True, "gaps": [], "wrong": []}),
+    ])
+    assert result["state"] == "ready", result
+    ops = [st["op"] for st in store.get_item(item_id)["spec"]["pipeline"]]
+    assert ops == ["llm"]
+
+
+def test_p2_invented_menu_id_is_untrusted(monkeypatch) -> None:
+    store, item_id, result = _p2_build(monkeypatch, [
+        json.dumps({"picks": {"high_tide_time": "g999"}}),
+        json.dumps({"high_tide_time": "7:12 AM"}),
+        json.dumps({"serves": True, "gaps": [], "wrong": []}),
+    ])
+    assert result["state"] == "ready"
+    ops = [st["op"] for st in store.get_item(item_id)["spec"]["pipeline"]]
+    assert ops == ["llm"]
+
+
+def test_p2_judge_rejection_falls_back_and_says_so(monkeypatch) -> None:
+    pick = _p2_menu_id("Height where Tide=High")  # the WRONG column
+    store, item_id, result = _p2_build(monkeypatch, [
+        json.dumps({"picks": {"high_tide_time": pick}}),
+        json.dumps({"serves": False, "gaps": [],
+                    "wrong": [{"field": "high_tide_time", "why": "a height"}]}),
+        json.dumps({"high_tide_time": "7:12 AM"}),
+        json.dumps({"serves": True, "gaps": [], "wrong": []}),
+    ])
+    assert result["state"] == "ready"
+    ops = [st["op"] for st in store.get_item(item_id)["spec"]["pipeline"]]
+    assert ops == ["llm"]
+    record = ni_flow._flow_read(store, item_id) or {}
+    assert any("compiled reading rejected" in n for n in record.get("notes") or [])
+
+
+def test_p2_text_only_page_skips_the_compile_call(monkeypatch) -> None:
+    """No data-bearing layer → no compile model call at all (the replies
+    list proves it: only llm + judge are consumed)."""
+    bare = {"text": "High tide 7:12 AM.", "title": "Tides", "entities": [],
+            "tables": [], "feeds": [], "meta": {}, "outline": ["h1: Tides"]}
+    store, item_id, result = _p2_build(monkeypatch, [
+        json.dumps({"high_tide_time": "7:12 AM"}),
+        json.dumps({"serves": True, "gaps": [], "wrong": []}),
+    ], graph=bare)
+    assert result["state"] == "ready", result
+
+
+def test_p2_graph_extract_requires_http_page_and_first_position() -> None:
+    fields = {"v": {"kind": "title"}}
+    with pytest.raises(ValueError, match="first stage"):
+        nimod._validate_pipeline([{"op": "extract", "paths": {"a": "a"}},
+                                  {"op": "graph_extract", "fields": fields}])
+    with pytest.raises(ValueError):
+        nimod._validate_pipeline([{"op": "graph_extract",
+                                   "fields": {"v": {"kind": "xpath"}}}])
+    assert nimod._validate_pipeline(
+        [{"op": "graph_extract", "fields": fields}]) == {"v"}
+
+
+def test_p2_fix_accepts_page_cards_and_rederives_their_wants() -> None:
+    """Drift recovery: Fix re-enters sampling on the page card's OWN frozen
+    URL, and remap reconstructs the wants from the sealed program."""
+    store, _conn = _store()
+    item_id = ni_flow.create_shell_item(store, "page fix probe")
+    item = store.get_item(item_id)
+    spec = dict(item["spec"])
+    spec["source"] = {"type": "http_page", "url": "https://tides.example.org/c"}
+    spec["pipeline"] = [{"op": "graph_extract", "fields": {
+        "high_tide_time": {"kind": "title"}}}]
+    spec.pop("_shell", None)
+    store.update_spec(item_id, spec, origin="user")
+    store.delete_snapshot(item_id, "flow")  # a settled card, not a building shell
+    assert ni_flow.begin_remap(store, store.get_item(item_id)) is True
+    record = ni_flow._flow_read(store, item_id)
+    assert record["_remap"] is True
+    assert record["source_url"] == "https://tides.example.org/c"
+    intent = ni_flow._remap_intent_from_spec(spec, "x")
+    assert intent["wants"] == ["high tide time"]
+
+
+def test_p2_graph_extract_field_cap_matches_the_executor() -> None:
+    """Review nit: the validator accepted 40 fields, the executor asserted
+    ≤8 — a sealed 9-field program died at run time. One bound now."""
+    from smartbrain_3000 import pagegraph
+    too_many = {f"f{i}": {"kind": "title"}
+                for i in range(pagegraph.MAX_PROGRAM_FIELDS + 1)}
+    with pytest.raises(ValueError, match="entries"):
+        nimod._validate_pipeline([{"op": "graph_extract", "fields": too_many}])

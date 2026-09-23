@@ -230,7 +230,7 @@ def _drive_flow_inner(case: dict) -> dict:
         # (fetch class) instead of touching the network from a unit test.
         from smartbrain_3000 import ni as _nimod
 
-        def _no_page(source, item_id, secrets):
+        def _no_page(source, item_id, secrets, **kw):
             raise _nimod.NIError("recorded", "page path unrecorded in hermetic mode")
         _nimod._fetch_http_page = _no_page
         fetcher = _xml_fetcher(case)
