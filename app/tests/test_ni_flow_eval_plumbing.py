@@ -245,11 +245,27 @@ def test_engine_gate_grades_each_row_against_registry_expected_state() -> None:
                          "expected_state": expected, "frozen_url_ok": False})
             continue
         settled = expected in ev._ENGINE_SETTLED
-        good.append({"id": case["id"], "klass": klass,
-                     "flow_state": expected,
-                     "expected_state": expected,
-                     "frozen_url_ok": settled})
+        row = {"id": case["id"], "klass": klass,
+               "flow_state": expected,
+               "expected_state": expected,
+               "frozen_url_ok": settled}
+        if expected == "ready":
+            row["engine_run"] = "ok"  # the built card survived its first run
+        good.append(row)
     assert ev.engine_gate_pass(good), "fully-green matrix must pass the engine gate"
+    # 2026-09-23: "the flow reached ready" is not enough — a ready row whose
+    # BUILT card fails its first engine run trips the gate, and so does a
+    # ready row that never ran the engine at all.
+    for broken_run in ("bind_type: number.value must be a finite number", None):
+        dead = [dict(r) for r in good]
+        for r in dead:
+            if r.get("flow_state") == "ready":
+                if broken_run is None:
+                    r.pop("engine_run", None)
+                else:
+                    r["engine_run"] = broken_run
+                break
+        assert not ev.engine_gate_pass(dead), broken_run
     # A single settled case that failed trips the gate.
     bad = [dict(r) for r in good]
     for r in bad:

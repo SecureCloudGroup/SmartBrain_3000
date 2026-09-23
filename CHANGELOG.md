@@ -11,6 +11,16 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Added
+
+- Neural Interface: a card compiled from a web page's structure now
+  **repairs itself** when the site rearranges that structure (a renamed
+  column, a moved table). Using your local model only, it re-picks the
+  value from the page it just read, checks that the value is still the
+  same kind (a time stays a time), and tries the repair on the next
+  update — kept if it works, undone automatically if not. Nothing about
+  the card's source or schedule changes.
+
 ### Changed
 
 - SmartBrain now identifies itself honestly on every fetch it makes for you
@@ -23,6 +33,20 @@ to know when a release changes behavior.
 
 ### Fixed
 
+- **Neural Interface: cards showing text values now go live.** Since the
+  flow engine shipped, any card built from your words whose value is text
+  rather than a number — a status, a time, a name, and every card built
+  from a web page — looked finished but failed its first real update and
+  stayed stuck before going live. Text values now render as text. Cards
+  built on earlier versions keep the old layout: tap **Fix** on the card
+  to rebuild it against the same source (no new approval needed).
+- Rebuilding a card with **Fix** or a refine note no longer drops the
+  marker that records the card was built from your words — the marker that
+  keeps its source from being changed any way but on the card itself.
+- **Fix now appears on a card stuck before going live.** A card whose
+  first update failed stays in commissioning, and Fix only appeared once a
+  live card degraded — so the cards stuck by the issue above had no way to
+  rebuild short of deleting them.
 - Web search no longer returns DuckDuckGo's ads as results. On commercial
   searches about one result in five was an ad; the Neural Interface could
   offer one as a source candidate, and its pre-tap evidence read could

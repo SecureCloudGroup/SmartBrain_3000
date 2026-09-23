@@ -333,3 +333,16 @@ def test_many_tables_never_starve_meta_and_title() -> None:
     g = _mini_graph(title="T", meta={"og:description": "D"}, tables=tables)
     kinds = {m["selector"]["kind"] for m in pagegraph.enumerate_menu(g)}
     assert {"meta", "title"} <= kinds
+
+
+def test_value_kind_is_coarse_and_deterministic() -> None:
+    kind = pagegraph.value_kind
+    for v in ("7:12 AM", "13:05", "7:12 pm", "07:12:30"):
+        assert kind(v) == "time", v
+    for v in ("2026-10-03", "2026-10-03T09:00", "10/03/2026", "Oct 3, 2026", "3 October 2026"):
+        assert kind(v) == "date", v
+    for v in ("5.8 ft", "829.8 m", "1,429,404,000", "$1,234.56", "40 kt", "-3.2 °C", "12%", "18.4"):
+        assert kind(v) == "numeric", v
+    for v in ("Burj Khalifa", "High", "Tropical Storm Fay (40 kt, moving SSW)", "open"):
+        assert kind(v) == "text", v
+    assert kind("") == kind(None) == kind("   ") == "empty"

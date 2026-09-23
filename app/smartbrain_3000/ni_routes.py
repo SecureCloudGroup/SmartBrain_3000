@@ -949,8 +949,8 @@ def pick_flow_recipe(request: Request, item_id: str, body: PickRecipeIn) -> dict
 @router.post("/api/ni/items/{item_id}/flow/fix")
 def fix_item_flow(request: Request, item_id: str) -> dict:
     """P3: the card's Fix — re-derive this card against its OWN frozen source
-    (the shared remap entry: http_json only, params filled, never a new
-    host). Desktop-local, audited. ValueError guidance surfaces as 409.
+    (the shared remap entry: API and web-page sources, params filled, never
+    a new host). Desktop-local, audited. ValueError guidance surfaces as 409.
     """
     _require_desktop_local(request)
     store = _store(request)

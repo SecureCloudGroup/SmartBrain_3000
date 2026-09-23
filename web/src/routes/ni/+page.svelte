@@ -1417,9 +1417,12 @@
             {/if}
           </div>
 
-          {#if !item.shell && !item.flow && (item.state === "failing" || item.state === "broken" || item.state === "degraded")}
+          {#if !item.shell && !item.flow && (item.state === "failing" || item.state === "broken" || item.state === "degraded" || (item.state === "commissioning" && item.consecutive_failures > 0))}
             <!-- P3: the card's Fix — re-derives against the card's OWN frozen
-                 source (never a new host). Generic across every http card. -->
+                 source (never a new host). Generic across every http card.
+                 2026-09-23: also on a COMMISSIONING card whose run failed — a
+                 C1 failure stays commissioning (§6), so a card that never went
+                 live had no Fix until the week-long broken rule tripped. -->
             <div class="ni-actions" style="margin-top: var(--s-2)">
               <button
                 class="secondary"
