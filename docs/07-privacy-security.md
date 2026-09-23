@@ -154,6 +154,12 @@ not. Being precise about the line matters more than claiming everything:
   (if you enable it) is fully local by design: its reviews and learning run on your
   machine against a local model only — it never sends your activity anywhere.
 
+**What sites see when SmartBrain fetches.** Every fetch SmartBrain makes for you — card
+sources, feeds, vault updates, the assistant's web search and page reads — comes from your
+own IP address and identifies itself honestly as `SmartBrain/<version>` with a link to this
+project; it does not pretend to be a web browser. So a site you point it at can tell that a
+SmartBrain user, and which version, fetched it. Nothing else about you or your data is sent.
+
 Two things that sound like they'd leave and don't:
 
 - **MCP (inbound).** A connected desktop AI client reads your knowledge over a

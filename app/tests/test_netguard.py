@@ -321,11 +321,13 @@ def test_zip_magic_sniff_is_vault_only_not_page_ingest(monkeypatch) -> None:
         netguard.safe_fetch_bytes("http://tree.test/thing")
 
 
-def test_page_fetch_sends_browser_consistent_headers(monkeypatch) -> None:
-    # WAFs 403 a browser UA that arrives with httpx's bare defaults (no Accept-Language,
-    # `accept: */*`) — the fingerprint mismatch IS the bot signal (timeanddate.com,
-    # verified live). The guarded client must send the full browser-consistent set.
+def test_page_fetch_sends_an_honest_identity(monkeypatch) -> None:
+    # Operator ruling 2026-09-23: SmartBrain identifies itself honestly — no
+    # desktop-browser pose, no browser-navigation metadata; content negotiation
+    # stays (evidence in netguard's _FETCH_HEADERS comment).
     import httpx
+
+    from smartbrain_3000 import __version__
 
     _resolve_to(monkeypatch, "93.184.216.34")
     seen: dict = {}
@@ -336,11 +338,13 @@ def test_page_fetch_sends_browser_consistent_headers(monkeypatch) -> None:
 
     _serve(monkeypatch, handler)
     netguard.safe_fetch("http://example.test/page")
-    assert seen["user-agent"].startswith("Mozilla/5.0"), "browser UA"
-    assert "text/html" in seen["accept"], "a browser Accept list, not */*"
-    assert seen["accept-language"], "browsers always send Accept-Language"
-    assert seen["sec-fetch-mode"] == "navigate", "consistent Sec-Fetch set"
-    assert seen["upgrade-insecure-requests"] == "1"
+    ua = seen["user-agent"]
+    assert ua.startswith(f"SmartBrain/{__version__} "), ua
+    assert "+https://smartbrain.securecloudgroup.com" in ua
+    assert "Mozilla" not in ua and "Chrome" not in ua, "no browser pose"
+    assert "text/html" in seen["accept"] and seen["accept-language"]
+    assert not any(k.startswith("sec-fetch-") for k in seen), "no navigation metadata"
+    assert "upgrade-insecure-requests" not in seen
 
 
 def test_post_json_sends_body_and_headers(monkeypatch) -> None:

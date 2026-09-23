@@ -11,6 +11,23 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Changed
+
+- SmartBrain now identifies itself honestly on every fetch it makes for you
+  (card sources, feeds, vault updates, web search and page reads) as
+  `SmartBrain/<version>` with a link to the project, instead of posing as
+  a desktop Chrome browser. Across 43 public sites the honest identity
+  never did worse and got through on four that blocked the old one (for
+  example cdc.gov and Yahoo Finance's data API). Sites can now tell a
+  SmartBrain user fetched them; the privacy page says so.
+
+### Fixed
+
+- Web search no longer returns DuckDuckGo's ads as results. On commercial
+  searches about one result in five was an ad; the Neural Interface could
+  offer one as a source candidate, and its pre-tap evidence read could
+  follow the ad link — an ad click from your connection that nobody made.
+
 ## [0.23.0] - 2026-09-23
 
 ### Added
