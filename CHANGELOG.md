@@ -22,6 +22,10 @@ to know when a release changes behavior.
   center's feed lists every basin, so Pacific storms appeared on a card that
   asked for the Atlantic. The recipe now keeps the Atlantic basin. Existing
   storm cards keep the old list until rebuilt.
+- **Image cards show on a phone away from home.** Over the encrypted relay, a
+  card's picture was requested from the relay's server instead of your
+  Desktop, so it never loaded. Card images now travel over the same relay as
+  the rest of the app.
 
 ## [0.23.1] - 2026-09-24
 
