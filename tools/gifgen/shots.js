@@ -28,6 +28,7 @@ const THEMES = ["dark", "light"]; // the app honors prefers-color-scheme when no
         viewport: { width: vp.width, height: vp.height },
         colorScheme: theme,
         deviceScaleFactor: 2,
+        extraHTTPHeaders: process.env.SB_LOCAL_TOKEN ? { Authorization: `Bearer ${process.env.SB_LOCAL_TOKEN}` } : {}, // R14: desktop credential
       });
       const page = await ctx.newPage();
       for (const route of ROUTES) {

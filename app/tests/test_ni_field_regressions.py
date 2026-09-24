@@ -23,8 +23,6 @@ from fastapi.testclient import TestClient
 
 from smartbrain_3000 import ni_flow
 
-_LOCAL = {"X-SB-Local": "1"}
-
 
 @pytest.fixture()
 def client(tmp_path, monkeypatch) -> Iterator[TestClient]:
@@ -53,12 +51,11 @@ def test_field_1_bitcoin_decline_is_a_fork_not_a_death(client) -> None:
     went dead. Now: decline re-enters the pick pause with suggestions."""
     from smartbrain_3000 import ni_catalog
     iid = client.post("/api/ni/intake",
-                      json={"request": "what's bitcoin worth right now, keep it updated"},
-                      headers=_LOCAL).json()["id"]
+                      json={"request": "what's bitcoin worth right now, keep it updated"}).json()["id"]
     store = client.app.state.ni
     ni_flow._pause_for_recipe_confirm(store, iid, {},
                                        ni_catalog.get_recipe("crypto-price-btc-usd"))
-    r = client.post(f"/api/ni/items/{iid}/flow/decline-source", headers=_LOCAL)
+    r = client.post(f"/api/ni/items/{iid}/flow/decline-source")
     assert r.status_code == 200 and r.json()["state"] == "source"
     flow = _board_flow(client, iid)
     assert flow["state"] == "source"
@@ -70,8 +67,7 @@ def test_field_2_countdown_without_date_asks_instead_of_dying(client) -> None:
     'Creation didn't finish'. Now: the honest reason + a date question, and
     the typed answer resumes the build."""
     iid = client.post("/api/ni/intake",
-                      json={"request": "Show me a countdown of days until US mid-term election"},
-                      headers=_LOCAL).json()["id"]
+                      json={"request": "Show me a countdown of days until US mid-term election"}).json()["id"]
     store = client.app.state.ni
     ni_flow._terminate_unsupported(
         store, iid,
@@ -82,8 +78,7 @@ def test_field_2_countdown_without_date_asks_instead_of_dying(client) -> None:
     assert "date" in flow["reason"].lower()
     assert flow["question"]["kind"] == "supply_date"
     r = client.post(f"/api/ni/items/{iid}/flow/answer",
-                    json={"kind": "supply_date", "value": "2026-11-03"},
-                    headers=_LOCAL)
+                    json={"kind": "supply_date", "value": "2026-11-03"})
     assert r.status_code == 200 and r.json()["started"] is True
 
 
@@ -92,8 +87,7 @@ def test_field_3_tides_fetch_failure_names_itself_with_two_roads(client) -> None
     and the card showed nothing. Now: the failed shell names the fetch class
     and offers Retry AND pick-a-source."""
     iid = client.post("/api/ni/intake",
-                      json={"request": "show me the tides for Limehouse Boat Landing SC"},
-                      headers=_LOCAL).json()["id"]
+                      json={"request": "show me the tides for Limehouse Boat Landing SC"}).json()["id"]
     ni_flow._fail(client.app.state.ni, iid, "fetch",
                   "sample fetch failed: JSONDecodeError")
     flow = _board_flow(client, iid)
@@ -101,8 +95,7 @@ def test_field_3_tides_fetch_failure_names_itself_with_two_roads(client) -> None
     assert "fetched" in flow["reason"] or "fetch" in flow["reason"], flow
     assert set(flow["reopen"]) == {"retry", "pick_source"}
     # The pick_source road actually works.
-    assert client.post(f"/api/ni/items/{iid}/flow/reopen",
-                       headers=_LOCAL).json()["state"] == "source"
+    assert client.post(f"/api/ni/items/{iid}/flow/reopen").json()["state"] == "source"
 
 
 def test_field_4_hn_resolves_from_words_to_the_vetted_recipe(client) -> None:
@@ -112,8 +105,7 @@ def test_field_4_hn_resolves_from_words_to_the_vetted_recipe(client) -> None:
     recipe — the flow's source stage lands the STANDARD confirm pause."""
     from smartbrain_3000 import ni_catalog
     iid = client.post("/api/ni/intake",
-                      json={"request": "top stories on Hacker News"},
-                      headers=_LOCAL).json()["id"]
+                      json={"request": "top stories on Hacker News"}).json()["id"]
     store = client.app.state.ni
     intent = {"kind": "external_data", "subject": "Hacker News",
               "cadence_minutes": 15, "wants": ["stories"], "threshold": None,
@@ -128,8 +120,7 @@ def test_field_4_hn_resolves_from_words_to_the_vetted_recipe(client) -> None:
     assert urlparse(flow.get("source_url") or "").hostname == "hn.algolia.com"
     # And a truly uncovered ask still gets the honest empty pick pause.
     iid2 = client.post("/api/ni/intake",
-                       json={"request": "show me the tides for Limehouse Boat Landing SC"},
-                       headers=_LOCAL).json()["id"]
+                       json={"request": "show me the tides for Limehouse Boat Landing SC"}).json()["id"]
     ni_flow.reenter_source_pick(store, iid2, "no recipe matched — user picks")
     flow2 = _board_flow(client, iid2)
     assert flow2["state"] == "source" and flow2.get("suggestions") == []
@@ -205,8 +196,7 @@ def test_field_6_stalled_build_is_swept_and_named(client) -> None:
     """Field class: a worker dies and the card says "Preparing card…" forever.
     The sweep fails it honestly; the card then names the stall and offers the
     ways out (never the blind didn't-finish copy)."""
-    iid = client.post("/api/ni/intake", json={"request": "a build that stalls"},
-                      headers=_LOCAL).json()["id"]
+    iid = client.post("/api/ni/intake", json={"request": "a build that stalls"}).json()["id"]
     ni_flow._fail(client.app.state.ni, iid, "stale",
                   "flow record stranded >1h; failed by sweep")
     flow = _board_flow(client, iid)
@@ -224,8 +214,7 @@ def test_field_7_every_terminal_on_the_board_obeys_the_law(client) -> None:
     store = client.app.state.ni
     for klass, detail in classes:
         iid = client.post("/api/ni/intake",
-                          json={"request": f"law case {klass}"},
-                          headers=_LOCAL).json()["id"]
+                          json={"request": f"law case {klass}"}).json()["id"]
         ni_flow._fail(store, iid, klass, detail)
         flow = _board_flow(client, iid)
         assert flow["reason"], f"{klass}: no reason"
@@ -239,8 +228,7 @@ def test_field_8_quakes_threshold_routes_instead_of_shipping_m25(client) -> None
     (where the where-filter is authored from the sealed intent)."""
     from smartbrain_3000 import ni_catalog
     iid = client.post("/api/ni/intake",
-                      json={"request": "latest earthquakes above magnitude 5"},
-                      headers=_LOCAL).json()["id"]
+                      json={"request": "latest earthquakes above magnitude 5"}).json()["id"]
     store = client.app.state.ni
     intent = {"kind": "external_data", "subject": "earthquakes",
               "cadence_minutes": 15, "wants": ["magnitude"], "threshold": 5,
@@ -248,7 +236,7 @@ def test_field_8_quakes_threshold_routes_instead_of_shipping_m25(client) -> None
     ni_flow._transition(store, iid, "intent", intent=intent)
     ni_flow._pause_for_recipe_confirm(store, iid, intent,
                                        ni_catalog.get_recipe("quakes-day-25"))
-    r = client.post(f"/api/ni/items/{iid}/flow/confirm-source", headers=_LOCAL)
+    r = client.post(f"/api/ni/items/{iid}/flow/confirm-source")
     assert r.status_code == 200, r.text
     rec2 = ni_flow._flow_read(store, iid)
     assert rec2["state"] == "sampling", "routed to freeform, not template handoff"
@@ -262,8 +250,7 @@ def test_field_9_quakes_disclosure_no_longer_lies(client) -> None:
     claim magnitude/location are missing (top_mag/top_place serve them)."""
     from smartbrain_3000 import ni_catalog
     iid = client.post("/api/ni/intake",
-                      json={"request": "latest earthquakes"},
-                      headers=_LOCAL).json()["id"]
+                      json={"request": "latest earthquakes"}).json()["id"]
     store = client.app.state.ni
     ni_flow._pause_for_recipe_confirm(
         store, iid, {"wants": ["location", "magnitude", "depth", "time"]},
@@ -281,8 +268,7 @@ def test_field_10_us_weather_defaults_to_fahrenheit_at_source(client) -> None:
     will run."""
     from smartbrain_3000 import ni_catalog
     iid = client.post("/api/ni/intake",
-                      json={"request": "track the weather in Charleston, SC"},
-                      headers=_LOCAL).json()["id"]
+                      json={"request": "track the weather in Charleston, SC"}).json()["id"]
     store = client.app.state.ni
     ni_flow._pause_for_recipe_confirm(
         store, iid,
@@ -318,8 +304,7 @@ def test_field_11_pasted_webpages_build_interpreted_cards(client, monkeypatch) -
          ["tides"]),
     ]
     for request, url, wants in pastes:
-        iid = client.post("/api/ni/intake", json={"request": request},
-                          headers=_LOCAL).json()["id"]
+        iid = client.post("/api/ni/intake", json={"request": request}).json()["id"]
         intent = {"kind": "external_data", "subject": request[:40],
                   "cadence_minutes": 60, "wants": wants,
                   "threshold": None, "display_hint": "value"}

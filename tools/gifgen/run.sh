@@ -14,6 +14,10 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
 PORT=33096; GW=38099; U="http://127.0.0.1:$PORT"; PASS="correct-horse-battery"
+# R14: the demo container's local API token — the curls below and the recorder's browser
+# present it (Desktop authority), exactly as the real launcher would.
+export SB_LOCAL_TOKEN="${SB_LOCAL_TOKEN:-$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')}"
+AUTH="Authorization: Bearer $SB_LOCAL_TOKEN"
 # A case map, not `declare -A`: macOS ships bash 3.2, where -A degrades to an indexed array and
 # the octal-invalid subscript 08 aborts the assignment list — 08/09/10 silently never existed.
 name_of(){ case "$1" in
@@ -38,15 +42,16 @@ reset_demo(){ docker rm -f sb_gifdemo >/dev/null 2>&1 || true
   docker run -d --name sb_gifdemo -p 127.0.0.1:$PORT:33000 --add-host host.docker.internal:host-gateway \
     -v "$REPO/app:/app" ${SHIM[@]+"${SHIM[@]}"} -e SMARTBRAIN_DB_PATH=/tmp/demo.duckdb -e SMARTBRAIN_HOST=0.0.0.0 \
     -e SMARTBRAIN_WEBRTC_ENABLED=0 -e SMARTBRAIN_LLM_GATEWAY_URL=http://host.docker.internal:$GW \
+    -e SMARTBRAIN_LOCAL_TOKEN="$SB_LOCAL_TOKEN" \
     smartbrain_3000:dev >/dev/null
   # The header stamps "a modern launcher talks to this install" (persisted in meta), so the
   # demo never records the one-time legacy-launcher nudge banner a launcher-less container
   # would otherwise show in every clip.
-  for i in $(seq 1 40); do curl -fsS -H 'x-smartbrain-launcher: gifdemo' $U/api/health >/dev/null 2>&1 && break; sleep 1; done; }
+  for i in $(seq 1 40); do curl -fsS -H 'x-smartbrain-launcher: gifdemo' -H "$AUTH" $U/api/health >/dev/null 2>&1 && break; sleep 1; done; }
 setup(){ curl -fsS -X POST $U/api/account/setup -H 'content-type: application/json' -d "{\"passphrase\":\"$PASS\"}"; }
-connect(){ curl -fsS -X PUT $U/api/local-models/ollama -H 'content-type: application/json' -d '{"url":"http://host.docker.internal:11434"}' >/dev/null; }
-task(){ curl -fsS -X POST $U/api/tasks -H 'content-type: application/json' -d "$1" >/dev/null; }
-doc(){ curl -fsS -X POST $U/api/kb -H 'content-type: application/json' -d "$1" >/dev/null; }
+connect(){ curl -fsS -H "$AUTH" -X PUT $U/api/local-models/ollama -H 'content-type: application/json' -d '{"url":"http://host.docker.internal:11434"}' >/dev/null; }
+task(){ curl -fsS -H "$AUTH" -X POST $U/api/tasks -H 'content-type: application/json' -d "$1" >/dev/null; }
+doc(){ curl -fsS -H "$AUTH" -X POST $U/api/kb -H 'content-type: application/json' -d "$1" >/dev/null; }
 enc(){ local out="$1" fps="${2:-12}" scale="${3:-960}" lossy="${4:-55}" colors="${5:-120}" webm; cd "$HERE"; webm=$(ls -t video/*.webm|head -1)
   ffmpeg -y -loglevel error -i "$webm" -vf "fps=$fps,scale=$scale:-1:flags=lanczos,palettegen=max_colors=120:stats_mode=diff" /tmp/sbpal.png
   ffmpeg -y -loglevel error -i "$webm" -i /tmp/sbpal.png -lavfi "fps=$fps,scale=$scale:-1:flags=lanczos[x];[x][1:v]paletteuse=dither=none" /tmp/sbraw.gif

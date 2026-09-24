@@ -61,9 +61,12 @@ cask "smartbrain" do
   #   native/bifrost-data/ gateway config, which holds PROVISIONED PROVIDER KEYS — removing it on
   #                       uninstall is the point: leaving credentials behind would be worse
   #   native/current, native-mode, docker-compose.release.yml — launcher bookkeeping
+  #   local-api.token     the launcher's credential for the app's local API — a credential,
+  #                       so it goes for the same reason bifrost-data does
   zap trash: [
     "~/Library/Application Support/SmartBrain/docker-compose.release.yml",
     "~/Library/Application Support/SmartBrain/native-mode",
+    "~/Library/Application Support/SmartBrain/local-api.token",
     "~/Library/Application Support/SmartBrain/native/current",
     "~/Library/Application Support/SmartBrain/native/run",
     "~/Library/Application Support/SmartBrain/native/versions",

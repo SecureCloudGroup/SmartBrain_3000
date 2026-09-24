@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
   import { account } from "$lib/account.svelte";
+  import { inSession } from "$lib/api";
   import Spinner from "$lib/components/Spinner.svelte";
 
   // Dispatcher: route to setup / unlock based on vault state; Chat is the home page.
@@ -10,7 +11,7 @@
     const s = account.status;
     if (!s) return; // load failed — the retry UI below is shown
     if (!s.initialized) goto("/setup");
-    else if (!s.unlocked) goto("/unlock");
+    else if (!inSession(s)) goto("/unlock"); // R14: locked, or open but not in THIS browser yet
     else goto("/chat");
   }
 

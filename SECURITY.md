@@ -44,6 +44,19 @@ is true of the broker protocol and still leaves things worth knowing:
   is why the Homebrew cask clears the quarantine attribute (macOS would otherwise
   block a binary built in public CI) and why a browser download warns. Platform
   code-signing certificates are a paid, separate step and are on the roadmap.
+- **The local API needs a credential; your own account is the boundary.** Every
+  API request must present one of three: the browser session minted when you enter
+  your passphrase (an HttpOnly, SameSite=Strict cookie, held in memory by the app and
+  cleared on restart), the launcher's local token (a 0600 file in your account), or
+  the in-process credential the phone bridge adds after the encrypted connection has
+  authenticated the device. That keeps out other OS accounts on a shared computer and
+  web pages you visit, even while the app is unlocked. It does not keep out software
+  running under your own account, which can read the token file and your browser's
+  cookie store; we treat that as a compromised host (see Scope). In the from-source
+  LAN/HTTPS mode, a browser that signs in from your network gets phone permissions,
+  decided by the address it signed in on and fixed for that session. That limits your
+  phone's browser; it is not a barrier against someone on your network who knows your
+  passphrase and writes their own client.
 - **Secret redaction matches argument names, not values.** Tool arguments named like
   credentials (`api_key`, `token`, `password`, `passphrase`, `secret`, …) are
   redacted before display and audit. This is defence in depth on top of the

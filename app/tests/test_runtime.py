@@ -145,29 +145,40 @@ def test_update_handshake_and_desktop_local_install(tmp_path, monkeypatch) -> No
     """
     from fastapi.testclient import TestClient
     monkeypatch.setenv("SMARTBRAIN_DB_PATH", str(tmp_path / "upd.duckdb"))
+    from smartbrain_3000.auth import relay_headers
     from smartbrain_3000.main import create_app
 
     app = create_app()
+    launcher = {"X-SmartBrain-Launcher": "1.2.3"}  # the launcher identifies itself (+ its token)
     with TestClient(app) as client:
         # Nothing staged -> the page hears nothing, and there is nothing to install.
-        assert "update_ready" not in client.get("/api/health").json()
-        assert client.post("/api/update/install", headers={"x-sb-local": "1"}).status_code == 409
+        assert "update_ready" not in client.get("/api/health", headers=launcher).json()
+        assert client.post("/api/update/install").status_code == 409
 
-        # The launcher stamps what it has staged onto its probe.
-        body = client.get("/api/health", headers={"X-SmartBrain-Update": "9.9.9"}).json()
+        # The launcher stamps what it has staged onto its handshake.
+        body = client.get("/api/health", headers={**launcher, "X-SmartBrain-Update": "9.9.9"}).json()
         assert body["update_ready"] == "9.9.9"
         assert "update_requested" not in body, "nobody has asked for it yet"
 
+        # R14 fix: any OTHER poll — the page's own, a healthcheck — used to clear the offer
+        # before reading it, so the banner could never appear. Now it sees it...
+        assert client.get("/api/health").json()["update_ready"] == "9.9.9"
+        # ...and an unauthenticated caller can neither forge nor withdraw one.
+        anon = TestClient(app, sb_auth=False)
+        forged = anon.get("/api/health", headers={**launcher, "X-SmartBrain-Update": "6.6.6"}).json()
+        assert forged["update_ready"] == "9.9.9"
+        assert anon.get("/api/health").json()["update_ready"] == "9.9.9"
+
         # A paired phone may see it, but must not be able to restart the desk.
-        assert client.post("/api/update/install").status_code == 403
+        assert client.post("/api/update/install", headers=relay_headers("phone")).status_code == 403
 
         # The person at the desk asks; the launcher hears it on its next handshake.
-        assert client.post("/api/update/install", headers={"x-sb-local": "1"}).json()["version"] == "9.9.9"
-        after = client.get("/api/health", headers={"X-SmartBrain-Update": "9.9.9"}).json()
+        assert client.post("/api/update/install").json()["version"] == "9.9.9"
+        after = client.get("/api/health", headers={**launcher, "X-SmartBrain-Update": "9.9.9"}).json()
         assert after["update_requested"] == "9.9.9"
 
-        # The launcher withdrawing the offer (installed some other way) clears the mirror.
-        assert "update_ready" not in client.get("/api/health").json()
+        # The launcher withdrawing the offer (a handshake without it) clears the mirror.
+        assert "update_ready" not in client.get("/api/health", headers=launcher).json()
 
 
 def test_launcher_version_is_written_only_when_it_changes(tmp_path, monkeypatch) -> None:

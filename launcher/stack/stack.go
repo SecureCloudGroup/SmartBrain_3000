@@ -83,7 +83,8 @@ func (s Stack) composeArgs(args ...string) []string {
 
 func (s Stack) compose(ctx context.Context, args ...string) error {
 	cmd := exec.CommandContext(ctx, "docker", s.composeArgs(args...)...)
-	cmd.Dir = s.Dir // stable project name (compose derives it from the working dir's basename)
+	cmd.Dir = s.Dir        // stable project name (compose derives it from the working dir's basename)
+	cmd.Env = composeEnv() // hands the local API token to the app container (R14)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("docker %v: %w: %s", args, err, out)
@@ -200,6 +201,7 @@ func Handshake(ctx context.Context, port int, staged string) (running string, re
 	if staged != "" {
 		req.Header.Set("X-SmartBrain-Update", staged)
 	}
+	authorize(req) // R14: only a credentialed launcher may stamp or withdraw the offer
 	client := http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {

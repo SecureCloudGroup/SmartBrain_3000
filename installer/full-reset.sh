@@ -58,8 +58,11 @@ set -euo pipefail
 
 # The app serves on loopback port 33000 in every install mode (Docker and native).
 APP_URL="http://127.0.0.1:33000"
+# What a BROWSER is sent to: the address the launcher opens. A browser's sign-in cookie
+# belongs to one address, so 127.0.0.1 would ask for the passphrase again.
+BROWSER_URL="http://localhost:33000"
 # The Settings page that hands out the encrypted backup.
-BACKUP_PAGE_URL="$APP_URL/settings/account"
+BACKUP_PAGE_URL="$BROWSER_URL/settings/account"
 
 # The menu-bar launcher application bundle.
 APP_BUNDLE="/Applications/SmartBrain.app"
@@ -75,6 +78,7 @@ SB_DATA="$SB_HOME/data"                                   # YOUR DATA. Moved, ne
 SB_NATIVE="$SB_HOME/native"                               # downloaded runtime + gateway + run/ pids and logs.
 SB_COMPOSE_FILE="$SB_HOME/docker-compose.release.yml"     # written by the launcher on every start.
 SB_NATIVE_MARKER="$SB_HOME/native-mode"                   # remembers "this machine runs native mode".
+SB_TOKEN_FILE="$SB_HOME/local-api.token"                  # the launcher's local API credential; re-made on start.
 
 # The optional Apple-MLX embedding helper, if the user ever installed it by hand
 # from tools/mlx_embed_server. Label: com.securecloudgroup.smartbrain.mlx-embed.
@@ -312,6 +316,7 @@ report_line "YOUR DATA (encrypted vault)" "$SB_DATA"
 report_line "downloaded native runtime + gateway" "$SB_NATIVE"
 report_line "launcher-written compose file" "$SB_COMPOSE_FILE"
 report_line "native-mode marker" "$SB_NATIVE_MARKER"
+report_line "launcher's local API credential" "$SB_TOKEN_FILE"
 if [ -f "$SB_DATA/smartbrain.duckdb" ]; then
   printf '  present   %-58s %s bytes\n' "the vault file itself" \
     "$(stat -f %z "$SB_DATA/smartbrain.duckdb")"
@@ -753,6 +758,8 @@ remove_path "$SB_COMPOSE_FILE" \
   "the compose file the launcher writes on every start"
 remove_path "$SB_NATIVE_MARKER" \
   "the one-line marker recording this machine's stack mode"
+remove_path "$SB_TOKEN_FILE" \
+  "the launcher's credential for the app's local API -- a new one is made on the next start"
 # Whatever is left in the support directory now is empty or unknown; remove the
 # directory only if it is genuinely empty, so nothing unexpected is destroyed.
 if [ -d "$SB_HOME" ] && [ "$MODE" != "dry-run" ]; then
@@ -983,12 +990,24 @@ else
 
   say ""
   say "  Uploading the backup:"
-  # x-sb-local: 1 marks this as a request from the Desktop itself. The app
-  # refuses restore/backup/export from a paired remote device, and the WebRTC
-  # bridge strips this header, so a phone cannot forge it.
+  # Restore is Desktop-only: the app demands this install's local API token (R14).
+  # Read it NOW, after the fresh app came up — the launcher's copy first (it hands
+  # it to the app it starts), else the app's own beside the database.
+  LOCAL_TOKEN="${SMARTBRAIN_LOCAL_TOKEN:-}"
+  for token_file in "$SB_TOKEN_FILE" "$SB_DATA/local-api.token"; do
+    if [ -z "$LOCAL_TOKEN" ] && [ -f "$token_file" ]; then
+      LOCAL_TOKEN="$(tr -d '[:space:]' < "$token_file")"
+    fi
+  done
+  if [ -z "$LOCAL_TOKEN" ]; then
+    warn "Could not find this install's local API token, so the backup cannot be uploaded here."
+    warn "Open SmartBrain, set it up, and restore from Settings > Account instead."
+    warn "Your backup is at: $BACKUP_KEPT"
+    exit 1
+  fi
   restore_out="$(curl --silent --show-error --fail \
     --max-time 600 \
-    --header 'x-sb-local: 1' \
+    --header "Authorization: Bearer $LOCAL_TOKEN" \
     --header 'Content-Type: application/octet-stream' \
     --data-binary "@$BACKUP_KEPT" \
     "$APP_URL/api/restore" 2>&1)" || {
@@ -1100,7 +1119,7 @@ say "address you used it at (http://localhost:33000, http://127.0.0.1:33000,"
 say "and any https://<your-mac>:33000 you set up for your phone)."
 say ""
 say "The quick way, in Chrome, Edge or Safari:"
-say "  1. Open $APP_URL"
+say "  1. Open $BROWSER_URL"
 say "  2. Open the developer console (Cmd-Option-J in Chrome/Edge,"
 say "     Cmd-Option-C in Safari -- Safari needs the Develop menu enabled)."
 say "  3. Paste this, press Enter, then close the tab and reopen it:"

@@ -2,29 +2,36 @@
   import { onDestroy, onMount } from "svelte";
   import { goto } from "$app/navigation";
   import { account } from "$lib/account.svelte";
-  import { api, ApiError } from "$lib/api";
+  import { api, ApiError, inSession } from "$lib/api";
 
   let mode = $state<"passphrase" | "recovery">("passphrase");
   let value = $state("");
   let error = $state("");
   let busy = $state(false);
   let watchTimer: ReturnType<typeof setInterval> | null = null;
+  // R14: the vault is open (another browser or the phone unlocked it) but THIS
+  // browser holds no session yet — one passphrase entry opens it here.
+  const openHere = $derived(!!account.status?.unlocked && account.status?.session === false);
 
   onMount(async () => {
     if (account.status === null) await account.load();
     const s = account.status;
     if (s && !s.initialized) goto("/setup");
-    else if (s?.unlocked) goto("/chat");
+    else if (inSession(s)) goto("/chat");
     // One vault, one lock: unlocking from ANY device (the phone, another tab) unlocks
     // it here too — so this screen watches for that and walks in on its own instead of
-    // sitting locked until a manual refresh. Light poll, cleared on unmount.
+    // sitting locked until a manual refresh. R14: only a browser that already holds a
+    // session walks in; one that doesn't switches to "open it here". Light poll.
     watchTimer = setInterval(async () => {
       try {
-        if ((await api.accountStatus()).unlocked) {
+        const st = await api.accountStatus();
+        if (inSession(st)) {
           if (watchTimer) clearInterval(watchTimer);
           watchTimer = null;
           await account.load();
           goto("/chat");
+        } else if (account.status && account.status.unlocked !== st.unlocked) {
+          await account.load(); // the vault opened elsewhere: show "open it here"
         }
       } catch {
         /* backend restarting or offline — keep watching */
@@ -44,6 +51,12 @@
     try {
       await api.unlock(mode === "passphrase" ? { passphrase: value } : { recovery_key: value });
       await account.load();
+      if (account.status?.session === false) {
+        // Unlocked, but this browser didn't keep the session cookie (cookies blocked for
+        // this site) — say so instead of bouncing back here in silence.
+        error = "This browser didn't keep SmartBrain's sign-in. Allow cookies for this site, then try again.";
+        return;
+      }
       goto("/chat");
     } catch (err) {
       error = err instanceof ApiError && err.status === 401 ? "Incorrect credentials." : "Unlock failed.";
@@ -60,13 +73,21 @@
 </script>
 
 <div class="card">
-  <h1>Unlock</h1>
+  <h1>{openHere ? "Open SmartBrain here" : "Unlock"}</h1>
+  {#if openHere}
+    <p class="muted" style="margin-top:0">
+      SmartBrain is already unlocked on another device or browser. Enter your passphrase
+      once to open it in this browser too.
+    </p>
+  {/if}
   <form onsubmit={submit}>
     <label for="v">{mode === "passphrase" ? "Passphrase" : "Recovery key"}</label>
     <input id="v" type="password" bind:value autocomplete="current-password" />
     {#if error}<p class="error">{error}</p>{/if}
     <p style="margin-top:1rem; display:flex; gap:0.5rem; flex-wrap:wrap">
-      <button disabled={busy || !value} type="submit">{busy ? "Unlocking…" : "Unlock"}</button>
+      <button disabled={busy || !value} type="submit">
+        {busy ? (openHere ? "Opening…" : "Unlocking…") : (openHere ? "Open" : "Unlock")}
+      </button>
       <button type="button" class="secondary" onclick={toggle}>
         Use {mode === "passphrase" ? "recovery key" : "passphrase"}
       </button>
@@ -74,6 +95,7 @@
   </form>
   <p class="muted" style="margin-top:0.75rem; font-size:0.85rem">
     One vault, one lock: unlocking here also unlocks your paired phone — and unlocking
-    there unlocks here, on its own.
+    there brings this browser back in on its own, once it has opened SmartBrain since
+    the app last started.
   </p>
 </div>

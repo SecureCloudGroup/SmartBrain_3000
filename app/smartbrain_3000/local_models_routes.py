@@ -12,7 +12,7 @@ import logging
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from . import claudecli, gateway, voice
+from . import account, claudecli, gateway, voice
 
 router = APIRouter()
 log = logging.getLogger(__name__)
@@ -194,8 +194,7 @@ def update_claudecode(request: Request) -> dict:
     Desktop-local ONLY (mirrors /api/update/install): this installs software on the
     desktop, and the remote bridge forwards everything under /api — a paired phone
     must not be able to trigger installs."""
-    if request.headers.get("x-sb-local") != "1":
-        raise HTTPException(status_code=403, detail="this endpoint is Desktop-local only")
+    account._require_desktop_local(request)
     _store(request)  # unlock gate; the update itself touches no secrets
     result = claudecli.update()
     assert "ok" in result, "update must report ok"

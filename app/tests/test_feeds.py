@@ -14,8 +14,6 @@ from smartbrain_3000.kb import KnowledgeBase
 from smartbrain_3000.secrets import gen_master_key
 from smartbrain_3000.vaults import VaultStore
 
-_LOCAL = {"X-SB-Local": "1"}
-
 RSS = """<?xml version="1.0"?>
 <rss version="2.0"><channel><title>Test Blog</title>
 <item><title>First post</title><link>https://blog.example/1</link>
@@ -151,8 +149,7 @@ def test_feed_routes_full_lifecycle(client: TestClient, monkeypatch) -> None:
     monkeypatch.setattr(fr.netguard, "validate_public_url", lambda url: None)
     monkeypatch.setattr(fr.feedsmod, "fetch_and_parse", lambda url: feedsmod.parse_feed(RSS))
 
-    r = client.post("/api/feeds", json={"url": "https://blog.example/feed.xml", "tags": ["spac"]},
-                    headers=_LOCAL)
+    r = client.post("/api/feeds", json={"url": "https://blog.example/feed.xml", "tags": ["spac"]})
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["title"] == "Test Blog" and body["items"] == 2
@@ -169,7 +166,7 @@ def test_feed_routes_full_lifecycle(client: TestClient, monkeypatch) -> None:
     assert r.status_code == 200 and r.json()["items"] == 0
 
     # Delete keeping docs (default): grouping gone, documents stay.
-    r = client.delete(f"/api/feeds/{body['id']}", headers=_LOCAL)
+    r = client.delete(f"/api/feeds/{body['id']}")
     assert r.status_code == 200 and r.json()["docs_removed"] == 0
     assert client.get("/api/feeds").json()["feeds"] == []
     docs = client.get("/api/kb").json()
@@ -180,8 +177,8 @@ def test_feed_delete_can_remove_docs(client: TestClient, monkeypatch) -> None:
     import smartbrain_3000.feed_routes as fr
     monkeypatch.setattr(fr.netguard, "validate_public_url", lambda url: None)
     monkeypatch.setattr(fr.feedsmod, "fetch_and_parse", lambda url: feedsmod.parse_feed(RSS))
-    body = client.post("/api/feeds", json={"url": "https://blog.example/feed.xml"}, headers=_LOCAL).json()
-    r = client.delete(f"/api/feeds/{body['id']}?remove_docs=1", headers=_LOCAL)
+    body = client.post("/api/feeds", json={"url": "https://blog.example/feed.xml"}).json()
+    r = client.delete(f"/api/feeds/{body['id']}?remove_docs=1")
     assert r.status_code == 200 and r.json()["docs_removed"] == 2
     assert client.get("/api/kb").json()["documents"] == []
 
@@ -192,7 +189,7 @@ def test_feed_add_rejects_unfetchable(client: TestClient, monkeypatch) -> None:
     def boom(url):
         raise feedsmod.FeedError("not an RSS or Atom feed")
     monkeypatch.setattr(fr.feedsmod, "fetch_and_parse", boom)
-    r = client.post("/api/feeds", json={"url": "https://blog.example/nope"}, headers=_LOCAL)
+    r = client.post("/api/feeds", json={"url": "https://blog.example/nope"})
     assert r.status_code == 400
     assert client.get("/api/feeds").json()["feeds"] == []  # nothing half-created
 
@@ -208,9 +205,9 @@ def test_tick_refreshes_due_and_isolates_failures(client: TestClient, monkeypatc
     import smartbrain_3000.feed_routes as fr
     monkeypatch.setattr(fr.netguard, "validate_public_url", lambda url: None)
     monkeypatch.setattr(fr.feedsmod, "fetch_and_parse", lambda url: feedsmod.parse_feed(RSS))
-    good = client.post("/api/feeds", json={"url": "https://good.example/f.xml"}, headers=_LOCAL).json()
+    good = client.post("/api/feeds", json={"url": "https://good.example/f.xml"}).json()
     monkeypatch.setattr(fr.feedsmod, "fetch_and_parse", lambda url: feedsmod.parse_feed(ATOM))
-    bad = client.post("/api/feeds", json={"url": "https://bad.example/f.xml"}, headers=_LOCAL).json()
+    bad = client.post("/api/feeds", json={"url": "https://bad.example/f.xml"}).json()
 
     # Age both so they're due, then tick with a fetch that fails for one host only.
     app = client.app

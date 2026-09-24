@@ -21,15 +21,20 @@ type Notice struct {
 
 // FetchNotices reads the newest NI notices from the local app. Bounded and
 // forgiving like Handshake: any trouble at all — the app is down, the vault is
-// locked (423), a garbled body — reads as "no news" and the caller skips this
-// poll. The X-SB-Local header marks the request as originating on THIS machine;
-// the backend refuses the endpoint to bridged-in remote devices without it.
+// locked (423), no credential accepted (401), a garbled body — reads as "no news"
+// and the caller skips this poll. The endpoint is Desktop-only: the launcher's
+// local token (R14) is what proves the request comes from THIS machine.
 func FetchNotices(ctx context.Context, port int) ([]Notice, bool) {
 	url := fmt.Sprintf("http://127.0.0.1:%d/api/ni/notices", port)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, false
 	}
+	authorize(req)
+	// The old marker opens nothing on a current app, but an app from before the token
+	// (v0.23.0 and older) still gates this route on it — and that app keeps running
+	// after the launcher updates itself, until its own update installs. Drop this once
+	// that window has passed.
 	req.Header.Set("X-SB-Local", "1")
 	client := http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Do(req)

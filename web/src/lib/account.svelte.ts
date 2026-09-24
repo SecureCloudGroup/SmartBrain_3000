@@ -2,7 +2,7 @@
 // to guard their routes; `load()` refreshes it from the backend. Concurrent
 // callers (the root layout + a page guard on cold start) share one in-flight
 // request rather than firing duplicates.
-import { ApiError, type AccountStatus, api, registerLockedHandler } from "./api";
+import { ApiError, type AccountStatus, api, registerLockedHandler, registerNoSessionHandler } from "./api";
 
 class Account {
   status = $state<AccountStatus | null>(null);
@@ -39,4 +39,10 @@ export const account = new Account();
 // what breaks the 423-redirect stampede an open tab fell into after an update restart.
 registerLockedHandler(() => {
   if (account.status) account.status.unlocked = false;
+});
+
+// R14: a 401 "no_session" anywhere → this browser holds no session (the vault may still
+// be open elsewhere). The unlock page reads this to offer "open SmartBrain here".
+registerNoSessionHandler(() => {
+  if (account.status) account.status.session = false;
 });

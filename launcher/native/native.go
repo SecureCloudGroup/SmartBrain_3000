@@ -392,7 +392,7 @@ func (n Native) Up(ctx context.Context) error {
 	if runtime.GOOS == "windows" {
 		bifrost += ".exe"
 	}
-	gateway, err := n.spawn(ctx, "bifrost", bifrost,
+	gateway, err := n.spawn(ctx, "bifrost", nil, bifrost,
 		"-app-dir", n.bifrostData(), "-host", "127.0.0.1", "-port", strconv.Itoa(BifrostPort))
 	if err != nil {
 		return fmt.Errorf("native up: gateway: %w", err)
@@ -402,10 +402,11 @@ func (n Native) Up(ctx context.Context) error {
 		n.Down()
 		return fmt.Errorf("native up: gateway: %w", err)
 	}
-	// The app needs no forced env: Phase 0's native defaults point it at loopback Bifrost
-	// and the per-OS data dir on their own — running the defaults IS the test of them.
+	// The app needs no forced env beyond the launcher's local API token (R14): Phase 0's
+	// native defaults point it at loopback Bifrost and the per-OS data dir on their own —
+	// running the defaults IS the test of them.
 	py := filepath.Join(vdir, plat.pythonRel)
-	app, err := n.spawn(ctx, "app", py, "-m", "smartbrain_3000.serve")
+	app, err := n.spawn(ctx, "app", AppEnv, py, "-m", "smartbrain_3000.serve")
 	if err != nil {
 		n.Down()
 		return fmt.Errorf("native up: app: %w", err)
@@ -604,8 +605,13 @@ type child struct {
 	exited chan struct{}
 }
 
-// spawn starts a child with logs under run/ and its pid recorded.
-func (n Native) spawn(ctx context.Context, name, bin string, args ...string) (*child, error) {
+// AppEnv (set by main at startup) is extra environment for the APP child only — the
+// local API token the launcher owns (R14). Bifrost, a third-party binary, never gets it.
+var AppEnv []string
+
+// spawn starts a child with logs under run/ and its pid recorded. env, when non-empty,
+// is appended to the inherited environment.
+func (n Native) spawn(ctx context.Context, name string, env []string, bin string, args ...string) (*child, error) {
 	logFile, err := os.OpenFile(filepath.Join(n.runDir(), name+".log"),
 		os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
@@ -613,6 +619,9 @@ func (n Native) spawn(ctx context.Context, name, bin string, args ...string) (*c
 	}
 	cmd := exec.Command(bin, args...) // deliberately NOT CommandContext: ctx cancel must not kill the stack
 	cmd.SysProcAttr = detachAttr()    // survive launcher quit / terminal Ctrl-C (per-OS)
+	if len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...)
+	}
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	if err := cmd.Start(); err != nil {

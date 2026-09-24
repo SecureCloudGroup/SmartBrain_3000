@@ -167,7 +167,7 @@ UNIT
   systemctl --user enable --now smartbrain.service
   echo
   echo "SmartBrain is starting (first run downloads the app — give it a minute),"
-  echo "then serves at http://127.0.0.1:33000 on this machine."
+  echo "then serves at http://localhost:33000 on this machine."
   echo "To keep it running after you log out (and start it at boot):"
   echo "  sudo loginctl enable-linger $USER"
   echo "Manage it with: systemctl --user status|restart|stop smartbrain"

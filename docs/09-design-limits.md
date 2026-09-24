@@ -14,7 +14,9 @@ that.
 
 There is **one master key per running process**. When you unlock, the whole app
 is unlocked; there is no per-user isolation, no separate accounts, and no
-sandboxing of one "user" from another within the same instance.
+sandboxing of one "user" from another within the same instance. Being unlocked is
+not an open door, though: every request still needs a credential — a browser opened
+with your passphrase, the launcher's token, or your paired phone.
 
 **Why:** the product is a personal assistant for one owner on one machine.
 Adding multi-user identity, per-user keys, and access control would add a large

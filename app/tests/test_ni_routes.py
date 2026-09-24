@@ -13,6 +13,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from smartbrain_3000 import ni, tools
+from smartbrain_3000.auth import relay_headers
+
+_PHONE = relay_headers("phone-under-test")  # R14: phone authority (the relay credential)
 
 
 @pytest.fixture()
@@ -77,8 +80,7 @@ def test_routes_require_unlock(client: TestClient) -> None:
     assert client.delete("/api/ni/items/x").status_code == 423
     # Credential PUT also gates on unlock (Desktop-local check runs at handler entry).
     r = client.put("/api/ni/items/x/credential",
-                   json={"name": "n", "value": "v", "host": "h"},
-                   headers={"X-SB-Local": "1"})
+                   json={"name": "n", "value": "v", "host": "h"})
     assert r.status_code == 423
 
 
@@ -287,7 +289,7 @@ def test_credential_put_requires_desktop_local_header(client: TestClient) -> Non
     _unlock(client)
     iid = _create_via_tool(client)
     # Missing header → 403 (Desktop-local guard fires BEFORE the store touches the secret).
-    r = client.put(f"/api/ni/items/{iid}/credential",
+    r = client.put(f"/api/ni/items/{iid}/credential", headers=_PHONE,
                    json={"name": "api_key", "value": "s3cret", "host": "api.example.com"})
     assert r.status_code == 403
     # And no secret was stored.
@@ -298,8 +300,7 @@ def test_credential_put_stores_and_never_echoes_value(client: TestClient) -> Non
     _unlock(client)
     iid = _create_via_tool(client)
     r = client.put(f"/api/ni/items/{iid}/credential",
-                   json={"name": "api_key", "value": "s3cret", "host": "api.example.com"},
-                   headers={"X-SB-Local": "1"})
+                   json={"name": "api_key", "value": "s3cret", "host": "api.example.com"})
     assert r.status_code == 200
     # The value MUST NOT appear in the response body.
     assert "s3cret" not in r.text
@@ -331,8 +332,7 @@ def test_credential_put_journals_param_changed_entry(client: TestClient) -> None
                 "headers": {"X-Api-Key": {"$secret": "ni:self:api_key"}}},
                preview_payload={"text": "preview"})
     r = client.put(f"/api/ni/items/{iid}/credential",
-                   json={"name": "api_key", "value": "s3cret", "host": "api.example.com"},
-                   headers={"X-SB-Local": "1"})
+                   json={"name": "api_key", "value": "s3cret", "host": "api.example.com"})
     assert r.status_code == 200
     journal = client.app.state.ni.read_journal(iid)
     param_rows = [e for e in journal if e["kind"] == "param_changed"]
@@ -498,15 +498,15 @@ def _notices_store(client: TestClient):
     return sched.ScheduleStore(client.app.state.dbx, client.app.state.master_key)
 
 
-def test_notices_requires_desktop_local_header(client: TestClient) -> None:
-    """A bridged-in remote device must never pull notice bodies (403 without the marker)."""
+def test_notices_requires_desktop_authority(client: TestClient) -> None:
+    """A bridged-in remote device must never pull notice bodies (phone authority: 403)."""
     _unlock(client)
-    assert client.get("/api/ni/notices").status_code == 403
+    assert client.get("/api/ni/notices", headers=_PHONE).status_code == 403
 
 
 def test_notices_locked_returns_423(client: TestClient) -> None:
     """A locked vault yields no notices at all — the launcher reads 423 as 'skip'."""
-    r = client.get("/api/ni/notices", headers={"X-SB-Local": "1"})
+    r = client.get("/api/ni/notices")
     assert r.status_code == 423
 
 
@@ -523,7 +523,7 @@ def test_notices_kind_mapping_via_carrier_posts(client: TestClient) -> None:
         [{"item_id": "b", "title": "Doomed"}],
         repaired=[{"item_id": "c", "title": "Mended"}],
     )
-    rows = client.get("/api/ni/notices", headers={"X-SB-Local": "1"}).json()
+    rows = client.get("/api/ni/notices").json()
     assert len(rows) == 3
     by_kind = {r["kind"]: r for r in rows}
     assert set(by_kind) == {"alert", "broken", "repaired"}
@@ -545,10 +545,10 @@ def test_notices_newest_first_and_ids_stable_monotonic(client: TestClient) -> No
     store.record_ni_run("complete", "first")
     _time.sleep(0.002)  # distinct microsecond timestamps -> strictly ordered ids
     store.record_ni_run("complete", "second")
-    rows = client.get("/api/ni/notices", headers={"X-SB-Local": "1"}).json()
+    rows = client.get("/api/ni/notices").json()
     assert [r["body"] for r in rows] == ["second", "first"]
     assert rows[0]["id"] > rows[1]["id"]
-    again = client.get("/api/ni/notices", headers={"X-SB-Local": "1"}).json()
+    again = client.get("/api/ni/notices").json()
     assert again == rows  # stable: the same rows answer with the same ids
 
 
@@ -698,11 +698,10 @@ def test_notices_limit_clamped_and_defaulted(client: TestClient) -> None:
     store = _notices_store(client)
     for i in range(25):  # bounded: just past the ≤20 clamp
         store.record_ni_run("complete", f"m{i}")
-    local = {"X-SB-Local": "1"}
-    assert len(client.get("/api/ni/notices", headers=local).json()) == 10  # default
-    assert len(client.get("/api/ni/notices?limit=50", headers=local).json()) == 20  # clamp
-    assert len(client.get("/api/ni/notices?limit=0", headers=local).json()) == 1  # floor
-    assert len(client.get("/api/ni/notices?limit=5", headers=local).json()) == 5
+    assert len(client.get("/api/ni/notices").json()) == 10  # default
+    assert len(client.get("/api/ni/notices?limit=50").json()) == 20  # clamp
+    assert len(client.get("/api/ni/notices?limit=0").json()) == 1  # floor
+    assert len(client.get("/api/ni/notices?limit=5").json()) == 5
 
 
 # --- Integrated audit (2026-09-12): route-side regressions ----------------
@@ -769,7 +768,6 @@ def test_S5_commission_refuses_when_template_placeholder_has_no_credential(
     put = client.put(
         f"/api/ni/items/{iid}/credential",
         json={"name": "api_key", "value": "s3cret", "host": "api.example.com"},
-        headers={"X-SB-Local": "1"},
     )
     assert put.status_code == 200, put.text
     # The item's spec param.value still carries the placeholder (only credential value
@@ -862,8 +860,7 @@ def test_param_put_fills_value_and_unblocks_commission(client: TestClient) -> No
     _unlock(client)
     iid = _keyless_param_item(client)
     r = client.put(f"/api/ni/items/{iid}/param",
-                   json={"name": "city", "value": "Kansas City"},
-                   headers={"X-SB-Local": "1"})
+                   json={"name": "city", "value": "Kansas City"})
     assert r.status_code == 200 and r.json()["needs_params"] == []
     item = client.app.state.ni.get_item(iid)
     assert item["spec"]["params"]["city"]["value"] == "Kansas City"
@@ -885,12 +882,10 @@ def test_param_put_refuses_secret_params_and_unknown_names(client: TestClient) -
                 "headers": {"X-Api-Key": {"$secret": "ni:self:api_key"}}},
     )
     r = client.put(f"/api/ni/items/{iid}/param",
-                   json={"name": "api_key", "value": "sk-x"},
-                   headers={"X-SB-Local": "1"})
+                   json={"name": "api_key", "value": "sk-x"})
     assert r.status_code == 409
     r2 = client.put(f"/api/ni/items/{iid}/param",
-                    json={"name": "nope", "value": "x"},
-                    headers={"X-SB-Local": "1"})
+                    json={"name": "nope", "value": "x"})
     assert r2.status_code == 404
 
 
@@ -1041,8 +1036,7 @@ def test_card_consent_approve_runs_the_flow_synchronously(client: TestClient) ->
     keyless recipe settles ready + commissioning in the same request."""
     _unlock(client)
     iid = _paused_recipe_flow(client)
-    r = client.post(f"/api/ni/items/{iid}/flow/confirm-source",
-                    headers={"X-SB-Local": "1"})
+    r = client.post(f"/api/ni/items/{iid}/flow/confirm-source")
     assert r.status_code == 200, r.text
     assert r.json()["state"] == "ready"
     item = client.app.state.ni.get_item(iid)
@@ -1059,8 +1053,7 @@ def test_card_consent_decline_reenters_the_source_pick(client: TestClient) -> No
     never fetches, and the shell stays refusing commission."""
     _unlock(client)
     iid = _paused_recipe_flow(client)
-    r = client.post(f"/api/ni/items/{iid}/flow/decline-source",
-                    headers={"X-SB-Local": "1"})
+    r = client.post(f"/api/ni/items/{iid}/flow/decline-source")
     assert r.status_code == 200 and r.json()["state"] == "source"
     from smartbrain_3000 import ni_flow
     record = ni_flow._flow_read(client.app.state.ni, iid)
@@ -1078,17 +1071,14 @@ def test_card_consent_routes_409_without_a_pending_confirm(client: TestClient) -
     _unlock(client)
     iid = _create_via_tool(client)
     for path in ("flow/confirm-source", "flow/decline-source"):
-        r = client.post(f"/api/ni/items/{iid}/{path}",
-                        headers={"X-SB-Local": "1"})
+        r = client.post(f"/api/ni/items/{iid}/{path}")
         assert r.status_code == 409, (path, r.text)
     # Approve once, then the second tap 409s honestly.
     iid2 = _paused_recipe_flow(client, request_text="second bitcoin card",
                                 intent={"subject": "BTC2", "cadence_minutes": 15,
                                         "place": None, "wants": ["price"]})
-    assert client.post(f"/api/ni/items/{iid2}/flow/confirm-source",
-                       headers={"X-SB-Local": "1"}).status_code == 200
-    assert client.post(f"/api/ni/items/{iid2}/flow/confirm-source",
-                       headers={"X-SB-Local": "1"}).status_code == 409
+    assert client.post(f"/api/ni/items/{iid2}/flow/confirm-source").status_code == 200
+    assert client.post(f"/api/ni/items/{iid2}/flow/confirm-source").status_code == 409
 
 
 # --- NI Foreman P1: composer intake + retry (2026-09-16) ----------------------
@@ -1103,8 +1093,7 @@ def test_intake_creates_shell_and_starts_worker(client: TestClient,
     monkeypatch.setattr(ni_flow, "start_flow_worker",
                         lambda store, iid, **kw: fired.update(id=iid, **kw) or True)
     r = client.post("/api/ni/intake",
-                    json={"request": "NVDA stock price every 28 minutes"},
-                    headers={"X-SB-Local": "1"})
+                    json={"request": "NVDA stock price every 28 minutes"})
     assert r.status_code == 200, r.text
     iid = r.json()["id"]
     assert fired["id"] == iid and fired.get("source_url") is None
@@ -1121,21 +1110,18 @@ def test_intake_duplicate_title_409s_naming_the_card(client: TestClient,
     _unlock(client)
     monkeypatch.setattr(ni_flow, "start_flow_worker", lambda *a, **k: True)
     body = {"request": "the exact same card"}
-    assert client.post("/api/ni/intake", json=body,
-                       headers={"X-SB-Local": "1"}).status_code == 200
-    r = client.post("/api/ni/intake", json=body, headers={"X-SB-Local": "1"})
+    assert client.post("/api/ni/intake", json=body).status_code == 200
+    r = client.post("/api/ni/intake", json=body)
     assert r.status_code == 409 and "already exists" in r.json()["detail"]
     # allow_duplicate opts in, mirroring the flow tools.
     assert client.post("/api/ni/intake",
-                       json={**body, "allow_duplicate": True},
-                       headers={"X-SB-Local": "1"}).status_code == 200
+                       json={**body, "allow_duplicate": True}).status_code == 200
 
 
 def test_intake_validates_source_url_shape(client: TestClient) -> None:
     _unlock(client)
     r = client.post("/api/ni/intake",
-                    json={"request": "watch this", "source_url": "ftp://nope"},
-                    headers={"X-SB-Local": "1"})
+                    json={"request": "watch this", "source_url": "ftp://nope"})
     assert r.status_code == 400 and "source_url" in r.json()["detail"]
 
 
@@ -1148,18 +1134,16 @@ def test_retry_reruns_a_failed_shell_flow(client: TestClient, monkeypatch) -> No
     fired: dict = {}
     monkeypatch.setattr(ni_flow, "start_flow_worker",
                         lambda s, iid, **kw: fired.update(id=iid, **kw) or True)
-    iid = client.post("/api/ni/intake", json={"request": "retry me please"},
-                      headers={"X-SB-Local": "1"}).json()["id"]
+    iid = client.post("/api/ni/intake", json={"request": "retry me please"}).json()["id"]
     # Running flow (state intent) → 409.
-    assert client.post(f"/api/ni/items/{iid}/flow/retry",
-                       headers={"X-SB-Local": "1"}).status_code == 409
+    assert client.post(f"/api/ni/items/{iid}/flow/retry").status_code == 409
     # Terminal fetch failure → retry WITHOUT the url.
     ni_flow._fail(store, iid, "fetch", "sample fetch failed: FetchError")
     record = ni_flow._flow_read(store, iid)
     record["source_url"] = "https://query1.finance.yahoo.com/bad"
     ni_flow._flow_write(store, iid, record)
     fired.clear()
-    r = client.post(f"/api/ni/items/{iid}/flow/retry", headers={"X-SB-Local": "1"})
+    r = client.post(f"/api/ni/items/{iid}/flow/retry")
     assert r.status_code == 200, r.text
     assert fired["id"] == iid and fired.get("source_url") is None
     # Terminal non-fetch failure keeps the user's URL.
@@ -1168,8 +1152,7 @@ def test_retry_reruns_a_failed_shell_flow(client: TestClient, monkeypatch) -> No
     record["source_url"] = "https://api.example.com/mine"
     ni_flow._flow_write(store, iid, record)
     fired.clear()
-    assert client.post(f"/api/ni/items/{iid}/flow/retry",
-                       headers={"X-SB-Local": "1"}).status_code == 200
+    assert client.post(f"/api/ni/items/{iid}/flow/retry").status_code == 200
     assert fired.get("source_url") == "https://api.example.com/mine"
 
 
@@ -1177,7 +1160,7 @@ def test_retry_refuses_finished_cards(client: TestClient) -> None:
     """A finalized (non-shell) card has nothing to retry — remap/fix owns it."""
     _unlock(client)
     iid = _create_via_tool(client)
-    r = client.post(f"/api/ni/items/{iid}/flow/retry", headers={"X-SB-Local": "1"})
+    r = client.post(f"/api/ni/items/{iid}/flow/retry")
     assert r.status_code == 409 and "unfinished" in r.json()["detail"]
 
 
@@ -1188,8 +1171,7 @@ def _seed_source_pause(client: TestClient, monkeypatch, request_text: str) -> st
     pick pause — the state the P3 card affordances operate on."""
     from smartbrain_3000 import ni_flow
     monkeypatch.setattr(ni_flow, "start_flow_worker", lambda s, iid, **kw: True)
-    iid = client.post("/api/ni/intake", json={"request": request_text},
-                      headers={"X-SB-Local": "1"}).json()["id"]
+    iid = client.post("/api/ni/intake", json={"request": request_text}).json()["id"]
     store = client.app.state.ni
     record = ni_flow._flow_read(store, iid)
     record["state"] = "source"
@@ -1209,8 +1191,7 @@ def test_pick_source_resumes_pause_with_user_pasted_url(
     monkeypatch.setattr(ni_flow, "start_flow_worker",
                         lambda s, i, **kw: fired.update(id=i, **kw) or True)
     r = client.post(f"/api/ni/items/{iid}/flow/pick-source",
-                    json={"url": "https://api.example.com/metric.json"},
-                    headers={"X-SB-Local": "1"})
+                    json={"url": "https://api.example.com/metric.json"})
     assert r.status_code == 200 and r.json()["started"] is True, r.text
     assert fired["id"] == iid
     assert fired["source_url"] == "https://api.example.com/metric.json"
@@ -1224,16 +1205,14 @@ def test_pick_source_rejects_bad_url_shape_and_wrong_state(
     _unlock(client)
     iid = _seed_source_pause(client, monkeypatch, "show my metric")
     r = client.post(f"/api/ni/items/{iid}/flow/pick-source",
-                    json={"url": "ftp://example.com/x"},
-                    headers={"X-SB-Local": "1"})
+                    json={"url": "ftp://example.com/x"})
     assert r.status_code == 400 and r.json()["detail"].startswith("url:"), r.text
     store = client.app.state.ni
     record = ni_flow._flow_read(store, iid)
     record["state"] = "sampling"
     ni_flow._flow_write(store, iid, record)
     r2 = client.post(f"/api/ni/items/{iid}/flow/pick-source",
-                     json={"url": "https://api.example.com/metric.json"},
-                     headers={"X-SB-Local": "1"})
+                     json={"url": "https://api.example.com/metric.json"})
     assert r2.status_code == 409 and "asking for a source" in r2.json()["detail"]
 
 
@@ -1247,12 +1226,10 @@ def test_pick_recipe_routes_into_confirm_source_pause(
     # Unknown recipe id → 404, pause untouched (probe BEFORE the real pick —
     # a successful pick consumes the ``source`` pause).
     r0 = client.post(f"/api/ni/items/{iid}/flow/pick-recipe",
-                     json={"recipe_id": "no-such-recipe"},
-                     headers={"X-SB-Local": "1"})
+                     json={"recipe_id": "no-such-recipe"})
     assert r0.status_code == 404
     r = client.post(f"/api/ni/items/{iid}/flow/pick-recipe",
-                    json={"recipe_id": "fx-usd-eur"},
-                    headers={"X-SB-Local": "1"})
+                    json={"recipe_id": "fx-usd-eur"})
     assert r.status_code == 200 and r.json()["state"] == "confirm_source", r.text
     record = ni_flow._flow_read(client.app.state.ni, iid)
     assert record["state"] == "confirm_source"
@@ -1292,7 +1269,7 @@ def test_fix_route_starts_remap_against_own_frozen_source(
     fired: dict = {}
     monkeypatch.setattr(ni_flow, "start_flow_worker",
                         lambda s, i, **kw: fired.update(id=i, **kw) or True)
-    r = client.post(f"/api/ni/items/{iid}/flow/fix", headers={"X-SB-Local": "1"})
+    r = client.post(f"/api/ni/items/{iid}/flow/fix")
     assert r.status_code == 200 and r.json()["started"] is True, r.text
     record = ni_flow._flow_read(store, iid)
     assert record["_remap"] is True and record["state"] == "sampling"
@@ -1306,7 +1283,7 @@ def test_fix_route_409_surfaces_begin_remap_guidance(
     too, so the guidance names both API and web-page sources.)"""
     _unlock(client)
     iid = _seed_source_pause(client, monkeypatch, "fix a shell")
-    r = client.post(f"/api/ni/items/{iid}/flow/fix", headers={"X-SB-Local": "1"})
+    r = client.post(f"/api/ni/items/{iid}/flow/fix")
     assert r.status_code == 409, r.text
     assert "web-page sources" in r.json()["detail"]
 
@@ -1355,8 +1332,7 @@ def test_answer_route_resumes_supply_date_terminal(client: TestClient, monkeypat
     from smartbrain_3000 import ni_flow
     _unlock(client)
     monkeypatch.setattr(ni_flow, "start_flow_worker", lambda s, iid, **kw: True)
-    iid = client.post("/api/ni/intake", json={"request": "countdown to the vote"},
-                      headers={"X-SB-Local": "1"}).json()["id"]
+    iid = client.post("/api/ni/intake", json={"request": "countdown to the vote"}).json()["id"]
     store = client.app.state.ni
     ni_flow._terminate_unsupported(
         store, iid,
@@ -1369,28 +1345,24 @@ def test_answer_route_resumes_supply_date_terminal(client: TestClient, monkeypat
     assert row["flow"]["reason"]
     # Malformed date bounces 400 with actionable text; the question stays.
     bad = client.post(f"/api/ni/items/{iid}/flow/answer",
-                      json={"kind": "supply_date", "value": "November 3rd"},
-                      headers={"X-SB-Local": "1"})
+                      json={"kind": "supply_date", "value": "November 3rd"})
     assert bad.status_code == 400 and "YYYY-MM-DD" in bad.json()["detail"]
     good = client.post(f"/api/ni/items/{iid}/flow/answer",
-                       json={"kind": "supply_date", "value": "2026-11-03"},
-                       headers={"X-SB-Local": "1"})
+                       json={"kind": "supply_date", "value": "2026-11-03"})
     assert good.status_code == 200 and good.json()["started"] is True
     record = ni_flow._flow_read(store, iid)
     assert record["_supplied"]["date"] == "2026-11-03"
     assert record["state"] == "intent"
     # The question is consumed — answering again 409s.
     assert client.post(f"/api/ni/items/{iid}/flow/answer",
-                       json={"kind": "supply_date", "value": "2026-01-01"},
-                       headers={"X-SB-Local": "1"}).status_code == 409
+                       json={"kind": "supply_date", "value": "2026-01-01"}).status_code == 409
 
 
 def test_answer_route_409_when_no_question_pending(client: TestClient) -> None:
     _unlock(client)
     iid = _create_via_tool(client)
     r = client.post(f"/api/ni/items/{iid}/flow/answer",
-                    json={"kind": "supply_date", "value": "2026-01-01"},
-                    headers={"X-SB-Local": "1"})
+                    json={"kind": "supply_date", "value": "2026-01-01"})
     assert r.status_code == 409 and "not asking" in r.json()["detail"]
 
 
@@ -1401,22 +1373,19 @@ def test_reopen_route_reenters_pick_for_failed_shells_only(
     from smartbrain_3000 import ni_flow
     _unlock(client)
     monkeypatch.setattr(ni_flow, "start_flow_worker", lambda s, iid, **kw: True)
-    iid = client.post("/api/ni/intake", json={"request": "a source that died"},
-                      headers={"X-SB-Local": "1"}).json()["id"]
+    iid = client.post("/api/ni/intake", json={"request": "a source that died"}).json()["id"]
     store = client.app.state.ni
     # Non-terminal → 409.
-    assert client.post(f"/api/ni/items/{iid}/flow/reopen",
-                       headers={"X-SB-Local": "1"}).status_code == 409
+    assert client.post(f"/api/ni/items/{iid}/flow/reopen").status_code == 409
     ni_flow._fail(store, iid, "fetch", "sample fetch failed: HTTPError")
-    r = client.post(f"/api/ni/items/{iid}/flow/reopen", headers={"X-SB-Local": "1"})
+    r = client.post(f"/api/ni/items/{iid}/flow/reopen")
     assert r.status_code == 200 and r.json()["state"] == "source"
     row = next(x for x in client.get("/api/ni/board").json()["items"]
                if x["id"] == iid)
     assert row["flow"]["state"] == "source" and "suggestions" in row["flow"]
     # Finalized card → 409 (Fix owns re-derivation).
     iid2 = _create_via_tool(client)
-    assert client.post(f"/api/ni/items/{iid2}/flow/reopen",
-                       headers={"X-SB-Local": "1"}).status_code == 409
+    assert client.post(f"/api/ni/items/{iid2}/flow/reopen").status_code == 409
 
 
 def test_findings_routes_list_and_resolve(client: TestClient) -> None:
@@ -1424,13 +1393,11 @@ def test_findings_routes_list_and_resolve(client: TestClient) -> None:
     _unlock(client)
     conn = client.app.state.ni.conn
     fid = ni_watch.file_finding(conn, "create", "warn", "a route-level finding")
-    finds = client.get("/api/ni/findings", headers={"X-SB-Local": "1"}).json()["findings"]
+    finds = client.get("/api/ni/findings").json()["findings"]
     assert any(f["id"] == fid for f in finds)
-    assert client.post(f"/api/ni/findings/{fid}/resolve",
-                       headers={"X-SB-Local": "1"}).status_code == 200
-    assert client.post(f"/api/ni/findings/{fid}/resolve",
-                       headers={"X-SB-Local": "1"}).status_code == 404
-    finds2 = client.get("/api/ni/findings", headers={"X-SB-Local": "1"}).json()["findings"]
+    assert client.post(f"/api/ni/findings/{fid}/resolve").status_code == 200
+    assert client.post(f"/api/ni/findings/{fid}/resolve").status_code == 404
+    finds2 = client.get("/api/ni/findings").json()["findings"]
     assert not any(f["id"] == fid for f in finds2)
 
 
@@ -1457,8 +1424,7 @@ def test_refine_route_rebuilds_from_note(client: TestClient, monkeypatch) -> Non
                         lambda s, iid, **kw: fired.update(id=iid, **kw) or True)
     iid = _refinable_card(client)
     r = client.post(f"/api/ni/items/{iid}/refine",
-                    json={"note": "should be in Fahrenheit degrees."},
-                    headers={"X-SB-Local": "1"})
+                    json={"note": "should be in Fahrenheit degrees."})
     assert r.status_code == 200 and r.json()["kind"] == "rebuild", r.text
     record = ni_flow._flow_read(client.app.state.ni, iid)
     assert record["_refine_note"] == "should be in Fahrenheit degrees."
@@ -1471,15 +1437,13 @@ def test_refine_route_cadence_and_guidance(client: TestClient, monkeypatch) -> N
     monkeypatch.setattr(ni_flow, "start_flow_worker", lambda *a, **kw: True)
     iid = _refinable_card(client)
     r = client.post(f"/api/ni/items/{iid}/refine",
-                    json={"note": "update every 45 minutes"},
-                    headers={"X-SB-Local": "1"})
+                    json={"note": "update every 45 minutes"})
     assert r.status_code == 200 and r.json()["kind"] == "cadence"
     assert client.app.state.ni.get_item(iid)["spec"]["interval_minutes"] == 45
     # A model-source card refuses with guidance, not a 500.
     iid2 = _create_via_tool(client, title="Haiku card")
     r2 = client.post(f"/api/ni/items/{iid2}/refine",
-                     json={"note": "make it different"},
-                     headers={"X-SB-Local": "1"})
+                     json={"note": "make it different"})
     assert r2.status_code == 409 and "composer" in r2.json()["detail"]
 
 
@@ -1512,11 +1476,10 @@ def test_retry_reseeds_the_record_so_the_worker_can_actually_run(
     from smartbrain_3000 import ni_flow
     _unlock(client)
     monkeypatch.setattr(ni_flow, "start_flow_worker", lambda *a, **kw: True)
-    iid = client.post("/api/ni/intake", json={"request": "retry me for real"},
-                      headers={"X-SB-Local": "1"}).json()["id"]
+    iid = client.post("/api/ni/intake", json={"request": "retry me for real"}).json()["id"]
     store = client.app.state.ni
     ni_flow._fail(store, iid, "worker", "crash: ValueError")
-    r = client.post(f"/api/ni/items/{iid}/flow/retry", headers={"X-SB-Local": "1"})
+    r = client.post(f"/api/ni/items/{iid}/flow/retry")
     assert r.status_code == 200, r.text
     record = ni_flow._flow_read(store, iid)
     assert record is not None, "retry must RE-SEED the record, never clear it"
@@ -1544,8 +1507,7 @@ def test_retry_never_promotes_an_unapproved_confirm_url(
     fired: dict = {}
     monkeypatch.setattr(ni_flow, "start_flow_worker",
                         lambda s, i, **kw: fired.update(id=i, **kw) or True)
-    iid = client.post("/api/ni/intake", json={"request": "unapproved url guard"},
-                      headers={"X-SB-Local": "1"}).json()["id"]
+    iid = client.post("/api/ni/intake", json={"request": "unapproved url guard"}).json()["id"]
     store = client.app.state.ni
     ni_flow._pause_for_recipe_confirm(store, iid, {},
                                        ni_catalog.get_recipe("crypto-price-btc-usd"))
@@ -1553,7 +1515,7 @@ def test_retry_never_promotes_an_unapproved_confirm_url(
     record["state"] = "failed"
     record["error"] = "stale: flow record stranded"
     ni_flow._flow_write(store, iid, record)
-    r = client.post(f"/api/ni/items/{iid}/flow/retry", headers={"X-SB-Local": "1"})
+    r = client.post(f"/api/ni/items/{iid}/flow/retry")
     assert r.status_code == 200, r.text
     assert fired.get("source_url") is None, (
         "a confirm-pause URL was never consented — retry must not fetch it")
@@ -1602,19 +1564,16 @@ def test_pick_routes_refuse_the_inflight_locating_window(
     from smartbrain_3000 import ni_flow
     _unlock(client)
     monkeypatch.setattr(ni_flow, "start_flow_worker", lambda *a, **kw: True)
-    iid = client.post("/api/ni/intake", json={"request": "mid rank window"},
-                      headers={"X-SB-Local": "1"}).json()["id"]
+    iid = client.post("/api/ni/intake", json={"request": "mid rank window"}).json()["id"]
     store = client.app.state.ni
     record = ni_flow._flow_read(store, iid)
     record["state"] = "source"  # NO awaiting_pick marker: the in-flight window
     ni_flow._flow_write(store, iid, record)
     r = client.post(f"/api/ni/items/{iid}/flow/pick-source",
-                    json={"url": "https://api.example.com/x.json"},
-                    headers={"X-SB-Local": "1"})
+                    json={"url": "https://api.example.com/x.json"})
     assert r.status_code == 409 and "asking for a source" in r.json()["detail"]
     r2 = client.post(f"/api/ni/items/{iid}/flow/pick-recipe",
-                     json={"recipe_id": "crypto-price-btc-usd"},
-                     headers={"X-SB-Local": "1"})
+                     json={"recipe_id": "crypto-price-btc-usd"})
     assert r2.status_code == 409
     row = next(x for x in client.get("/api/ni/board").json()["items"]
                if x["id"] == iid)
@@ -1633,6 +1592,5 @@ def test_refine_refuses_while_a_flow_is_running(client: TestClient,
     ni_flow._flow_write(store, iid,
                          ni_flow._make_record("busy build", "sampling"))
     r = client.post(f"/api/ni/items/{iid}/refine",
-                    json={"note": "should be in Fahrenheit degrees."},
-                    headers={"X-SB-Local": "1"})
+                    json={"note": "should be in Fahrenheit degrees."})
     assert r.status_code == 409 and "busy building" in r.json()["detail"]

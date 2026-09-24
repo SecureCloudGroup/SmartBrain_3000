@@ -30,12 +30,13 @@ from fastapi.testclient import TestClient
 
 from smartbrain_3000 import agent, netguard, scheduler, vault_format, vault_sync
 from smartbrain_3000 import db as dbmod
+from smartbrain_3000.auth import relay_headers
 from smartbrain_3000.secrets import SecretStore, gen_master_key
 from smartbrain_3000.vaults import VaultStore
 
 _PASS_A = "alice-correct-horse"
 _PASS_B = "bob-correct-horse"
-_LOCAL = {"x-sb-local": "1"}  # export/trust-publisher are Desktop-local only
+_PHONE = relay_headers("phone-under-test")  # R14: phone authority (the relay credential)
 _ZIP_URL = "https://vaults.example.com/packs/expert-pack.sbvault"
 _TREE_BASE = "https://static.example.net/vault/"
 _TREE_URL = _TREE_BASE + "manifest.json"
@@ -75,7 +76,7 @@ def _make_vault(client: TestClient, docs: list[tuple[str, str]], name: str = "Ex
 
 def _export(client: TestClient, vid: str, passphrase: str, mode: str = "open") -> bytes:
     r = client.post(f"/api/vaults/{vid}/export",
-                    json={"passphrase": passphrase, "mode": mode}, headers=_LOCAL)
+                    json={"passphrase": passphrase, "mode": mode})
     assert r.status_code == 200, r.text
     return r.content
 
@@ -262,7 +263,7 @@ def test_non_subscribed_vaults_get_a_400_on_all_three(bob: TestClient) -> None:
     for path in (f"/api/vaults/{vid}/check-updates", f"/api/vaults/{vid}/update"):
         r = bob.post(path)
         assert r.status_code == 400 and "not a URL subscription" in r.json()["detail"], path
-    r = bob.post(f"/api/vaults/{vid}/trust-publisher", headers=_LOCAL,
+    r = bob.post(f"/api/vaults/{vid}/trust-publisher",
                  json={"passphrase": _PASS_B, "offered_pubkey": "AAAA"})
     assert r.status_code == 400 and "not a URL subscription" in r.json()["detail"]
     assert bob.post("/api/vaults/nope/check-updates").status_code == 404
@@ -390,15 +391,15 @@ def test_key_substitution_blocks_and_trust_publisher_unblocks(alice: TestClient,
 
     # Trusting the new key is the most consequential act in the system, so it gates like export.
     ok_body = {"passphrase": _PASS_B, "offered_pubkey": evil_pub}
-    assert bob.post(f"/api/vaults/{local_id}/trust-publisher", json=ok_body).status_code == 403
-    assert bob.post(f"/api/vaults/{local_id}/trust-publisher", headers=_LOCAL,
+    assert bob.post(f"/api/vaults/{local_id}/trust-publisher", json=ok_body, headers=_PHONE).status_code == 403
+    assert bob.post(f"/api/vaults/{local_id}/trust-publisher",
                     json={"passphrase": "wrong", "offered_pubkey": evil_pub}).status_code == 401
-    r = bob.post(f"/api/vaults/{local_id}/trust-publisher", headers=_LOCAL,
+    r = bob.post(f"/api/vaults/{local_id}/trust-publisher",
                  json={"passphrase": _PASS_B, "offered_pubkey": pinned_pub})
     assert r.status_code == 409, "a body naming any key but the blocked one is refused"
     assert _pin(bob, local_id)["source"]["blocked"], "still blocked after every refusal"
 
-    r = bob.post(f"/api/vaults/{local_id}/trust-publisher", headers=_LOCAL, json=ok_body)
+    r = bob.post(f"/api/vaults/{local_id}/trust-publisher", json=ok_body)
     assert r.status_code == 200 and r.json()["pinned_fingerprint"] == offered_fp
     pin = _pin(bob, local_id)["source"]
     assert pin["publisher_pubkey"] == evil_pub and "blocked" not in pin
@@ -426,12 +427,12 @@ def test_trust_publisher_refuses_a_stale_offered_key(alice: TestClient, bob: Tes
 
     _serve(monkeypatch, forged_b)
     assert bob.post(f"/api/vaults/{local_id}/check-updates").status_code == 409  # blocked on B
-    assert bob.post(f"/api/vaults/{local_id}/trust-publisher", headers=_LOCAL,
+    assert bob.post(f"/api/vaults/{local_id}/trust-publisher",
                     json={"passphrase": _PASS_B, "offered_pubkey": pub_b}).status_code == 200
     _serve(monkeypatch, forged_c)  # rotated again
     assert bob.post(f"/api/vaults/{local_id}/check-updates").status_code == 409  # re-blocked on C
 
-    r = bob.post(f"/api/vaults/{local_id}/trust-publisher", headers=_LOCAL,
+    r = bob.post(f"/api/vaults/{local_id}/trust-publisher",
                  json={"passphrase": _PASS_B, "offered_pubkey": pub_b})
     assert r.status_code == 409 and "changed since you confirmed" in r.json()["detail"]
     pin = _pin(bob, local_id)["source"]
@@ -627,8 +628,7 @@ def test_reimport_refusals_different_key_and_sealed_file(alice: TestClient, bob:
 
     # A SEALED export of a vault pinned as an OPEN subscription: a clear refusal, not a guess.
     sealed = _export(alice, vid, _PASS_A, mode="sealed")
-    key = alice.post(f"/api/vaults/{vid}/key", json={"passphrase": _PASS_A},
-                     headers=_LOCAL).json()["key"]
+    key = alice.post(f"/api/vaults/{vid}/key", json={"passphrase": _PASS_A}).json()["key"]
     r = bob.post(f"/api/vaults/import?key={key}", content=sealed)
     assert r.status_code == 409 and "public edition" in r.json()["detail"]
     assert _pin(bob, local_id)["source"]["seq"] == 2, "neither refusal moved the pin"
@@ -640,8 +640,7 @@ def test_import_vault_failure_keeps_nothing_and_a_retry_succeeds(alice: TestClie
     # strand a partial vault whose pin blocks every retry as a duplicate.
     vid, _ids = _make_vault(alice, [(t, c) for t, c in _DOCS[:2]])
     blob = _export(alice, vid, _PASS_A, mode="sealed")
-    key = alice.post(f"/api/vaults/{vid}/key", json={"passphrase": _PASS_A},
-                     headers=_LOCAL).json()["key"]
+    key = alice.post(f"/api/vaults/{vid}/key", json={"passphrase": _PASS_A}).json()["key"]
 
     knowledge = bob.app.state.kb
     real_add = knowledge.add

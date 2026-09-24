@@ -69,7 +69,7 @@ sudo loginctl enable-linger $USER
 
 Manage it with `systemctl --user status|restart|stop smartbrain` or the launcher's own
 verbs (`smartbrain status`, `smartbrain stop`). It serves this machine only
-(http://127.0.0.1:33000); to reach it from your other devices see
+(http://localhost:33000); to reach it from your other devices see
 [Remote access](08-remote-access.md).
 
 **Prefer containers?** The Docker stack stays first-class on Linux. Download the release
@@ -193,6 +193,10 @@ There is **one vault and one lock**: the Desktop and a paired phone share it. Un
 on the phone unlocks the Desktop; unlocking on the Desktop unlocks the phone — a screen
 sitting on the unlock page notices on its own and continues. Locking anywhere locks
 everywhere, for the same reason: the key lives (or doesn't) in exactly one place.
+
+Each browser still proves itself once. A browser that hasn't opened SmartBrain since the
+app last started asks for your passphrase (**Open SmartBrain here**) even when the vault
+is already unlocked; after that it follows the shared lock like any other screen.
 
 - Use **Lock**, at the bottom of the sidebar (under **More** on a phone), to drop the key
   from memory — your data is sealed until you unlock again. Locking also clears your

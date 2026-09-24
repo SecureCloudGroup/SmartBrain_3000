@@ -27,7 +27,6 @@ from smartbrain_3000.vaults import VaultStore
 
 _PASS_A = "alice-correct-horse"
 _PASS_B = "bob-correct-horse"
-_LOCAL = {"x-sb-local": "1"}  # export is Desktop-local only (the WebRTC bridge cannot forward this)
 _URL = "https://vaults.example.com/packs/expert-pack.sbvault"
 
 
@@ -64,7 +63,7 @@ def _make_vault(client: TestClient, docs: list[tuple[str, str]], name: str = "Ex
 
 def _export(client: TestClient, vid: str, passphrase: str, mode: str = "open") -> bytes:
     r = client.post(f"/api/vaults/{vid}/export",
-                    json={"passphrase": passphrase, "mode": mode}, headers=_LOCAL)
+                    json={"passphrase": passphrase, "mode": mode})
     assert r.status_code == 200, r.text
     return r.content
 
@@ -322,7 +321,7 @@ def test_file_import_also_records_member_provenance(alice: TestClient, bob: Test
     vid = _make_vault(alice, _DOCS)
     blob = _export(alice, vid, _PASS_A, mode="sealed")
     key = alice.post(f"/api/vaults/{vid}/key",
-                     json={"passphrase": _PASS_A}, headers=_LOCAL).json()["key"]
+                     json={"passphrase": _PASS_A}).json()["key"]
 
     body = bob.post(f"/api/vaults/import?key={key}", content=blob).json()
     assert body["added"] == 1 and body["duplicates"] == 1

@@ -25,9 +25,6 @@ from smartbrain_3000 import db as dbmod
 from smartbrain_3000 import identity, netguard, ni, ni_library, vault_format
 from smartbrain_3000.secrets import SecretStore, gen_master_key
 
-_LOCAL = {"x-sb-local": "1"}
-
-
 # --- helpers --------------------------------------------------------------
 
 def _stores() -> tuple[SecretStore, ni.NIStore, duckdb.DuckDBPyConnection, bytes]:
@@ -486,7 +483,7 @@ def test_board_template_update_flips_when_pack_bumps_spec_hash(tmp_path, monkeyp
         raw_v1, _ = _build_pack(secrets_store, seq=1, templates=[template])
         monkeypatch.setattr(netguard, "safe_fetch_ni_pack",
                             lambda url, cap: raw_v1)
-        r = client.post("/api/ni/library/connect", headers=_LOCAL,
+        r = client.post("/api/ni/library/connect",
                         json={"url": "https://a.example.com/pack.json"})
         assert r.status_code == 200, r.text
         # Install from v1
@@ -522,7 +519,7 @@ def test_board_template_gone_flag(tmp_path, monkeypatch) -> None:
         raw_v1, _ = _build_pack(secrets_store, seq=1, templates=[_template()])
         monkeypatch.setattr(netguard, "safe_fetch_ni_pack",
                             lambda url, cap: raw_v1)
-        client.post("/api/ni/library/connect", headers=_LOCAL,
+        client.post("/api/ni/library/connect",
                     json={"url": "https://a.example.com/pack.json"})
         client.post("/api/ni/library/install",
                     json={"template_id": "weather-basic", "params": {"zip": "94103"}})
@@ -551,7 +548,7 @@ def test_apply_template_update_carries_over_params_and_resets_to_draft(
         raw_v1, _ = _build_pack(secrets_store, seq=1, templates=[template])
         monkeypatch.setattr(netguard, "safe_fetch_ni_pack",
                             lambda url, cap: raw_v1)
-        client.post("/api/ni/library/connect", headers=_LOCAL,
+        client.post("/api/ni/library/connect",
                     json={"url": "https://a.example.com/pack.json"})
         r = client.post("/api/ni/library/install",
                         json={"template_id": "weather-basic",
@@ -591,7 +588,7 @@ def test_export_template_strips_secrets_and_empties_params(
             "label": "API key", "kind": "secret", "value": "ni:self:api_key"}
         raw, _ = _build_pack(secrets_store, templates=[template])
         monkeypatch.setattr(netguard, "safe_fetch_ni_pack", lambda url, cap: raw)
-        client.post("/api/ni/library/connect", headers=_LOCAL,
+        client.post("/api/ni/library/connect",
                     json={"url": "https://a.example.com/pack.json"})
         r = client.post("/api/ni/library/install",
                         json={"template_id": "weather-basic",
@@ -600,11 +597,10 @@ def test_export_template_strips_secrets_and_empties_params(
         # PUT a credential so the export sanitizer has a value to check for
         r = client.put(f"/api/ni/items/{item_id}/credential",
                        json={"name": "api_key", "value": "super-secret",
-                              "host": "example.com"},
-                       headers=_LOCAL)
+                              "host": "example.com"})
         assert r.status_code == 200, r.text
         # Export
-        r = client.get(f"/api/ni/items/{item_id}/export-template", headers=_LOCAL)
+        r = client.get(f"/api/ni/items/{item_id}/export-template")
         assert r.status_code == 200, r.text
         body = r.json()
         spec = body["spec_template"]
@@ -636,16 +632,15 @@ def test_export_refuses_credential_value_in_header_literal(
         }
         raw, _ = _build_pack(secrets_store, templates=[template])
         monkeypatch.setattr(netguard, "safe_fetch_ni_pack", lambda url, cap: raw)
-        client.post("/api/ni/library/connect", headers=_LOCAL,
+        client.post("/api/ni/library/connect",
                     json={"url": "https://a.example.com/pack.json"})
         r = client.post("/api/ni/library/install",
                         json={"template_id": "weather-basic", "params": {}})
         item_id = r.json()["item_id"]
         client.put(f"/api/ni/items/{item_id}/credential",
                    json={"name": "api_key", "value": "super-secret-value",
-                          "host": "example.com"},
-                   headers=_LOCAL)
-        r = client.get(f"/api/ni/items/{item_id}/export-template", headers=_LOCAL)
+                          "host": "example.com"})
+        r = client.get(f"/api/ni/items/{item_id}/export-template")
         assert r.status_code == 400
         assert "credential" in r.json()["detail"].lower()
 
@@ -720,7 +715,7 @@ def test_library_install_refuses_composite_depth_violation(
         }
         raw, _ = _build_pack(secrets_store, templates=[composite_tpl])
         monkeypatch.setattr(netguard, "safe_fetch_ni_pack", lambda url, cap: raw)
-        client.post("/api/ni/library/connect", headers=_LOCAL,
+        client.post("/api/ni/library/connect",
                     json={"url": "https://a.example.com/pack.json"})
         r = client.post("/api/ni/library/install",
                         json={"template_id": "composite-deep", "params": {}})
@@ -743,13 +738,13 @@ def test_export_template_of_image_card_round_trips_200(
         secrets_store = client.app.state.secret_store
         raw, _ = _build_pack(secrets_store, templates=[_image_template()])
         monkeypatch.setattr(netguard, "safe_fetch_ni_pack", lambda url, cap: raw)
-        client.post("/api/ni/library/connect", headers=_LOCAL,
+        client.post("/api/ni/library/connect",
                     json={"url": "https://a.example.com/pack.json"})
         r = client.post("/api/ni/library/install",
                         json={"template_id": "radar-image", "params": {}})
         assert r.status_code == 200, r.text
         item_id = r.json()["item_id"]
-        r = client.get(f"/api/ni/items/{item_id}/export-template", headers=_LOCAL)
+        r = client.get(f"/api/ni/items/{item_id}/export-template")
         assert r.status_code == 200, r.text
         assert r.json()["spec_template"]["source"]["type"] == "http_image"
 
@@ -769,7 +764,7 @@ def test_library_status_row_binds_image_preview(
         secrets_store = client.app.state.secret_store
         raw, _ = _build_pack(secrets_store, templates=[_image_template()])
         monkeypatch.setattr(netguard, "safe_fetch_ni_pack", lambda url, cap: raw)
-        client.post("/api/ni/library/connect", headers=_LOCAL,
+        client.post("/api/ni/library/connect",
                     json={"url": "https://a.example.com/pack.json"})
         state = client.get("/api/ni/library").json()
         rows = [t for t in state["templates"] if t["id"] == "radar-image"]
@@ -798,7 +793,7 @@ def test_apply_template_update_on_image_template_rebinds_preview(
         v1 = _image_template()
         raw_v1, _ = _build_pack(secrets_store, seq=1, templates=[v1])
         monkeypatch.setattr(netguard, "safe_fetch_ni_pack", lambda url, cap: raw_v1)
-        client.post("/api/ni/library/connect", headers=_LOCAL,
+        client.post("/api/ni/library/connect",
                     json={"url": "https://a.example.com/pack.json"})
         r = client.post("/api/ni/library/install",
                         json={"template_id": "radar-image", "params": {}})
@@ -841,7 +836,7 @@ def test_export_refuses_internal_schedule_source(
             "repair_policy": {"l1": True, "l2_frontier": False}, "model": None,
         }
         item_id = client.app.state.ni.add_item(spec, {}, origin="user")
-        r = client.get(f"/api/ni/items/{item_id}/export-template", headers=_LOCAL)
+        r = client.get(f"/api/ni/items/{item_id}/export-template")
         assert r.status_code == 400
         assert "internal.schedule" in r.json()["detail"]
 
@@ -1025,7 +1020,7 @@ def test_install_puts_credential_commissions_and_runs_end_to_end(
         }
         raw, _ = _build_pack(secrets_store, templates=[template])
         monkeypatch.setattr(_ng, "safe_fetch_ni_pack", lambda url, cap: raw)
-        client.post("/api/ni/library/connect", headers=_LOCAL,
+        client.post("/api/ni/library/connect",
                     json={"url": "https://a.example.com/pack.json"})
         r = client.post("/api/ni/library/install",
                         json={"template_id": "weather-basic", "params": {}})
@@ -1034,8 +1029,7 @@ def test_install_puts_credential_commissions_and_runs_end_to_end(
         # Store the credential — bound to the source host
         r = client.put(f"/api/ni/items/{item_id}/credential",
                        json={"name": "api_key", "value": "sk-live-42",
-                             "host": "api.example.com"},
-                       headers=_LOCAL)
+                             "host": "api.example.com"})
         assert r.status_code == 200, r.text
         r = client.post(f"/api/ni/items/{item_id}/commission")
         assert r.status_code == 200, r.text
@@ -1075,7 +1069,7 @@ def test_install_seals_rewritten_ni_self_refs_in_item_spec(
         }
         raw, _ = _build_pack(secrets_store, templates=[template])
         monkeypatch.setattr(netguard, "safe_fetch_ni_pack", lambda url, cap: raw)
-        client.post("/api/ni/library/connect", headers=_LOCAL,
+        client.post("/api/ni/library/connect",
                     json={"url": "https://a.example.com/pack.json"})
         item_id = client.post("/api/ni/library/install",
                               json={"template_id": "weather-basic",
@@ -1110,12 +1104,12 @@ def test_export_template_rewrites_item_refs_back_to_self(
         }
         raw, _ = _build_pack(secrets_store, templates=[template])
         monkeypatch.setattr(netguard, "safe_fetch_ni_pack", lambda url, cap: raw)
-        client.post("/api/ni/library/connect", headers=_LOCAL,
+        client.post("/api/ni/library/connect",
                     json={"url": "https://a.example.com/pack.json"})
         item_id = client.post("/api/ni/library/install",
                               json={"template_id": "weather-basic",
                                     "params": {}}).json()["item_id"]
-        r = client.get(f"/api/ni/items/{item_id}/export-template", headers=_LOCAL)
+        r = client.get(f"/api/ni/items/{item_id}/export-template")
         assert r.status_code == 200, r.text
         body_text = r.text
         # The item id must not appear anywhere in the exported JSON
@@ -1138,12 +1132,12 @@ def test_disconnect_via_delete_route(tmp_path, monkeypatch) -> None:
         secrets_store = client.app.state.secret_store
         raw, _ = _build_pack(secrets_store)
         monkeypatch.setattr(netguard, "safe_fetch_ni_pack", lambda url, cap: raw)
-        client.post("/api/ni/library/connect", headers=_LOCAL,
+        client.post("/api/ni/library/connect",
                     json={"url": "https://a.example.com/pack.json"})
-        r = client.delete("/api/ni/library", headers=_LOCAL)
+        r = client.delete("/api/ni/library")
         assert r.status_code == 200, r.text
         # Second delete with no source → 409
-        r = client.delete("/api/ni/library", headers=_LOCAL)
+        r = client.delete("/api/ni/library")
         assert r.status_code == 409
 
 
@@ -1163,7 +1157,7 @@ def test_library_template_preview_payload_is_bound_scene(
         secrets_store = client.app.state.secret_store
         raw, _ = _build_pack(secrets_store)
         monkeypatch.setattr(netguard, "safe_fetch_ni_pack", lambda url, cap: raw)
-        r = client.post("/api/ni/library/connect", headers=_LOCAL,
+        r = client.post("/api/ni/library/connect",
                         json={"url": "https://a.example.com/pack.json"})
         assert r.status_code == 200, r.text
         state = r.json()
@@ -1193,7 +1187,7 @@ def test_apply_template_update_drops_removed_and_re_kinded_params(
             "label": "Region", "kind": "string", "value": ""}
         raw_v1, _ = _build_pack(secrets_store, seq=1, templates=[v1])
         monkeypatch.setattr(netguard, "safe_fetch_ni_pack", lambda url, cap: raw_v1)
-        client.post("/api/ni/library/connect", headers=_LOCAL,
+        client.post("/api/ni/library/connect",
                     json={"url": "https://a.example.com/pack.json"})
         item_id = client.post("/api/ni/library/install",
                               json={"template_id": "weather-basic",
@@ -1223,14 +1217,13 @@ def _install_and_put_credential(client: TestClient, monkeypatch, template: dict,
     secrets_store = client.app.state.secret_store
     raw, _ = _build_pack(secrets_store, templates=[template])
     monkeypatch.setattr(netguard, "safe_fetch_ni_pack", lambda url, cap: raw)
-    client.post("/api/ni/library/connect", headers=_LOCAL,
+    client.post("/api/ni/library/connect",
                 json={"url": "https://a.example.com/pack.json"})
     item_id = client.post("/api/ni/library/install",
                           json={"template_id": "weather-basic",
                                 "params": {}}).json()["item_id"]
     client.put(f"/api/ni/items/{item_id}/credential",
-               json={"name": "api_key", "value": cred_value, "host": host},
-               headers=_LOCAL)
+               json={"name": "api_key", "value": cred_value, "host": host})
     return item_id
 
 
@@ -1253,7 +1246,7 @@ def test_export_refuses_credential_value_in_url_path_segment(
         }
         item_id = _install_and_put_credential(
             client, monkeypatch, template, "super-secret-value", "example.com")
-        r = client.get(f"/api/ni/items/{item_id}/export-template", headers=_LOCAL)
+        r = client.get(f"/api/ni/items/{item_id}/export-template")
         assert r.status_code == 400
         assert "URL" in r.json()["detail"]
 
@@ -1277,7 +1270,7 @@ def test_export_refuses_credential_value_percent_encoded_in_url(
         }
         item_id = _install_and_put_credential(
             client, monkeypatch, template, "sk-secret", "example.com")
-        r = client.get(f"/api/ni/items/{item_id}/export-template", headers=_LOCAL)
+        r = client.get(f"/api/ni/items/{item_id}/export-template")
         assert r.status_code == 400
         assert "URL" in r.json()["detail"]
 
@@ -1311,7 +1304,7 @@ def test_export_refuses_credential_value_in_llm_instruction(
         template["preview_payload"] = {"content": "x", "summary": "s"}
         item_id = _install_and_put_credential(
             client, monkeypatch, template, "my-cred", "example.com")
-        r = client.get(f"/api/ni/items/{item_id}/export-template", headers=_LOCAL)
+        r = client.get(f"/api/ni/items/{item_id}/export-template")
         assert r.status_code == 400
         assert "llm" in r.json()["detail"].lower()
 
@@ -1340,7 +1333,7 @@ def test_export_refuses_internal_kb_source(tmp_path, monkeypatch) -> None:
         # not the raw fetch payload — add_item calls bind_scene(scene, preview_payload).
         item_id = client.app.state.ni.add_item(
             spec, {"count": "x"}, origin="user")
-        r = client.get(f"/api/ni/items/{item_id}/export-template", headers=_LOCAL)
+        r = client.get(f"/api/ni/items/{item_id}/export-template")
         assert r.status_code == 400
         assert "internal.kb" in r.json()["detail"]
 
@@ -1371,6 +1364,6 @@ def test_export_pre_phase3_item_gives_named_error(tmp_path, monkeypatch) -> None
         client.app.state.db.execute(
             "DELETE FROM ni_snapshots WHERE item_id = ? AND slot = ?;",
             [item_id, "preview_data"])
-        r = client.get(f"/api/ni/items/{item_id}/export-template", headers=_LOCAL)
+        r = client.get(f"/api/ni/items/{item_id}/export-template")
         assert r.status_code == 400
         assert "before previews were stored" in r.json()["detail"]

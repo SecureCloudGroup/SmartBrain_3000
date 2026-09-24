@@ -2,11 +2,16 @@ package main
 
 import (
 	"context"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/SecureCloudGroup/SmartBrain_3000/launcher/stack"
 	"github.com/SecureCloudGroup/SmartBrain_3000/launcher/update"
 )
 
@@ -266,5 +271,27 @@ func TestPendingAssembledOffersOnlyWhatIsNewerThanRunning(t *testing.T) {
 		if got := pendingAssembled(c.current, c.running); got != c.want {
 			t.Fatalf("pendingAssembled(%q, %q) = %q, want %q", c.current, c.running, got, c.want)
 		}
+	}
+}
+
+// `smartbrain status` asks the app what it runs. Presenting the launcher's token with
+// nothing staged is how the app learns the launcher WITHDREW an update offer, so the
+// status probe must stay anonymous or the in-app banner vanishes until the next beat.
+func TestStatusProbeDoesNotSpeakAsTheLauncher(t *testing.T) {
+	var auth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		auth = r.Header.Get("Authorization")
+		_, _ = w.Write([]byte(`{"version":"1.2.3"}`))
+	}))
+	defer srv.Close()
+	prevSB, prevTok := sb, stack.LocalAPIToken
+	t.Cleanup(func() { sb, stack.LocalAPIToken = prevSB, prevTok })
+	sb = stack.Stack{Port: srv.Listener.Addr().(*net.TCPAddr).Port}
+	stack.LocalAPIToken = strings.Repeat("T", 40)
+	if code := cmdStatus(); code != 0 {
+		t.Fatalf("status exit = %d, want 0", code)
+	}
+	if auth != "" {
+		t.Errorf("status presented the launcher token %q", auth)
 	}
 }

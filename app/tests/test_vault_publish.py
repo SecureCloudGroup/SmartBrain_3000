@@ -22,10 +22,11 @@ import pytest
 from fastapi.testclient import TestClient
 
 from smartbrain_3000 import vault_format
+from smartbrain_3000.auth import relay_headers
 
 _PASS_A = "alice-correct-horse"
 _PASS_B = "bob-correct-horse"
-_LOCAL = {"x-sb-local": "1"}  # export is Desktop-local only (the WebRTC bridge cannot forward this)
+_PHONE = relay_headers("phone-under-test")  # R14: phone authority (the relay credential)
 
 
 def _app(tmp_path, monkeypatch, name: str, passphrase: str) -> TestClient:
@@ -61,7 +62,7 @@ def _make_vault(client: TestClient, docs: list[tuple[str, str]], name: str = "Ex
 
 def _export(client: TestClient, vid: str, passphrase: str, mode: str = "sealed") -> bytes:
     r = client.post(f"/api/vaults/{vid}/export",
-                    json={"passphrase": passphrase, "mode": mode}, headers=_LOCAL)
+                    json={"passphrase": passphrase, "mode": mode})
     assert r.status_code == 200, r.text
     return r.content
 
@@ -93,10 +94,11 @@ def test_open_export_is_desktop_local_and_needs_the_passphrase(alice: TestClient
     # Mirror of the sealed gate test: open hands out the PLAINTEXT, so it must never be one gate
     # weaker than sealed — no bridged device, no stale session, no passer-by.
     vid = _make_vault(alice, [("Doc", "body")])
-    r = alice.post(f"/api/vaults/{vid}/export", json={"passphrase": _PASS_A, "mode": "open"})
+    r = alice.post(f"/api/vaults/{vid}/export", json={"passphrase": _PASS_A, "mode": "open"},
+                   headers=_PHONE)
     assert r.status_code == 403, "a bridged (non-desktop-local) open export must be refused"
     r = alice.post(f"/api/vaults/{vid}/export",
-                   json={"passphrase": "wrong", "mode": "open"}, headers=_LOCAL)
+                   json={"passphrase": "wrong", "mode": "open"})
     assert r.status_code == 401, "an open export must re-verify the passphrase"
 
 
@@ -156,7 +158,7 @@ def test_a_sealed_then_open_flip_keeps_every_object_name(alice: TestClient) -> N
     assert _manifest(opened)["seq"] == _manifest(sealed)["seq"] + 1
 
     # The sealed key survives the flip: recipients of the old sealed file still need it.
-    k = alice.post(f"/api/vaults/{vid}/key", json={"passphrase": _PASS_A}, headers=_LOCAL)
+    k = alice.post(f"/api/vaults/{vid}/key", json={"passphrase": _PASS_A})
     assert k.status_code == 200 and k.json()["key"].startswith("SBVK1-")
 
     # And a LATER re-seal (which mints a fresh Vault Key) must not reshuffle the public tree:
@@ -172,7 +174,7 @@ def test_a_sealed_then_open_flip_keeps_every_object_name(alice: TestClient) -> N
 def test_the_key_route_409s_on_a_vault_only_published_open(alice: TestClient) -> None:
     vid = _make_vault(alice, [("Doc", "body")])
     _export(alice, vid, _PASS_A, "open")
-    r = alice.post(f"/api/vaults/{vid}/key", json={"passphrase": _PASS_A}, headers=_LOCAL)
+    r = alice.post(f"/api/vaults/{vid}/key", json={"passphrase": _PASS_A})
     assert r.status_code == 409
     assert "there is no key" in r.json()["detail"], "the refusal must say WHY there is no key"
     assert "anyone with the file can read it" in r.json()["detail"]
@@ -185,7 +187,7 @@ def test_an_open_export_mints_no_vault_key(alice: TestClient) -> None:
     blob = _export(alice, vid, _PASS_A, "open")
     manifest = _manifest(blob)
     assert manifest["mode"] == "open" and "crypto" not in manifest
-    r = alice.post(f"/api/vaults/{vid}/key", json={"passphrase": _PASS_A}, headers=_LOCAL)
+    r = alice.post(f"/api/vaults/{vid}/key", json={"passphrase": _PASS_A})
     assert r.status_code == 409
 
 
@@ -235,13 +237,13 @@ def test_an_imported_vault_re_exports_open_exactly_as_it_does_sealed(alice: Test
     vid = _make_vault(alice, [("Doc", "the QUOKKA clause")])
     blob = _export(alice, vid, _PASS_A)
     key = alice.post(f"/api/vaults/{vid}/key",
-                     json={"passphrase": _PASS_A}, headers=_LOCAL).json()["key"]
+                     json={"passphrase": _PASS_A}).json()["key"]
     imported = bob.post(f"/api/vaults/import?key={key}", content=blob).json()["id"]
 
     r_sealed = bob.post(f"/api/vaults/{imported}/export",
-                        json={"passphrase": _PASS_B}, headers=_LOCAL)
+                        json={"passphrase": _PASS_B})
     r_open = bob.post(f"/api/vaults/{imported}/export",
-                      json={"passphrase": _PASS_B, "mode": "open"}, headers=_LOCAL)
+                      json={"passphrase": _PASS_B, "mode": "open"})
     assert r_sealed.status_code == r_open.status_code == 200
     # Bob's republication is signed by BOB's key — provenance changes hands honestly.
     assert _manifest(r_open.content)["publisher"]["pubkey"] != _manifest(blob)["publisher"]["pubkey"]

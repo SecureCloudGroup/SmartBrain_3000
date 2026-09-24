@@ -60,8 +60,9 @@ async def _reap_unconnected(pc, phone_id: str, peers: dict) -> None:
 async def _on_offer(ws, msg: dict, get_store, http_client, ice_servers, peers: dict) -> None:
     """Answer one phone offer (if unlocked + under the peer cap) and return the SDP."""
     phone_id = str(msg.get("from") or "")
-    store = get_store()  # None while LOCKED: the peer still answers, so the phone can be
-    # told "your Desktop is locked" instead of timing out into "unreachable" (field).
+    # The peer gets the GETTER, not the store: it resolves per message, so it runs the
+    # locked exchange while LOCKED (the phone is told "your Desktop is locked" instead
+    # of timing out) and never holds the key-bearing store past a Lock (R14 ride-along).
     old = peers.pop(phone_id, None)  # a re-offer replaces its own prior peer (no orphan/leak)
     if old is not None:
         await old.close()
@@ -73,7 +74,7 @@ async def _on_offer(ws, msg: dict, get_store, http_client, ice_servers, peers: d
     resolved_ice = (await asyncio.to_thread(ice_servers)) if callable(ice_servers) else ice_servers
     try:
         pc, answer_sdp = await webrtc_peer.answer_offer(
-            str(msg.get("sdp") or ""), store=store, http_client=http_client, ice_servers=resolved_ice
+            str(msg.get("sdp") or ""), store=get_store, http_client=http_client, ice_servers=resolved_ice
         )
     except Exception as exc:  # malformed offer -> drop
         log.warning("webrtc: answer_offer failed: %s", type(exc).__name__)

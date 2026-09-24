@@ -13,7 +13,9 @@ async function open(opts = {}) {
   const browser = await chromium.launch();
   // colorScheme dark: the docs/videos are DARK canonical (operator decision) — without
   // this, Playwright's default prefers-color-scheme is LIGHT and the app follows it.
-  const ctx = await browser.newContext({ viewport: { width: W, height: H }, deviceScaleFactor: 2, colorScheme: "dark", recordVideo: { dir: "video", size: { width: W, height: H } }, ...opts });
+  const ctx = await browser.newContext({ viewport: { width: W, height: H }, deviceScaleFactor: 2, colorScheme: "dark", recordVideo: { dir: "video", size: { width: W, height: H } },
+    extraHTTPHeaders: process.env.SB_LOCAL_TOKEN ? { Authorization: `Bearer ${process.env.SB_LOCAL_TOKEN}` } : {}, // R14: desktop credential
+    ...opts });
   const page = await ctx.newPage();
   await page.goto(URL, { waitUntil: "networkidle" });
   const R = new Rec(page); await R.init();

@@ -13,8 +13,6 @@ from smartbrain_3000 import db as dbmod
 from smartbrain_3000 import gateway, voice
 from smartbrain_3000.secrets import SecretStore, gen_master_key
 
-_LOCAL = {"X-SB-Local": "1"}
-
 
 @pytest.fixture(autouse=True)
 def _fresh_server_skip():
@@ -243,13 +241,13 @@ def test_voice_status_and_settings_roundtrip(client: TestClient, monkeypatch) ->
 
     r = client.put("/api/local-models/voice", json={
         "url": "http://127.0.0.1:9999", "api_key": "k",
-        "stt_model": "whisper-small", "tts_model": "kokoro"}, headers=_LOCAL)
+        "stt_model": "whisper-small", "tts_model": "kokoro"})
     assert r.status_code == 200
     st = r.json()["status"]
     assert st["configured"] and st["source"] == "voice" and st["reachable"] is True
     assert st["stt_model"] == "whisper-small" and st["tts_model"] == "kokoro"
 
-    assert client.delete("/api/local-models/voice", headers=_LOCAL).status_code == 200
+    assert client.delete("/api/local-models/voice").status_code == 200
     assert client.get("/api/voice/status").json()["configured"] is False
 
 

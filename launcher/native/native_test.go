@@ -776,7 +776,7 @@ func TestUpCatchesASLOWSpawnDeath(t *testing.T) {
 	if err := os.MkdirAll(n.runDir(), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	c, err := n.spawn(context.Background(), "app", script)
+	c, err := n.spawn(context.Background(), "app", nil, script)
 	if err != nil {
 		t.Fatal(err)
 	}

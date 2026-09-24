@@ -21,12 +21,13 @@ from fastapi.testclient import TestClient
 
 from smartbrain_3000 import db as dbmod
 from smartbrain_3000 import identity, netguard, vault_format, vault_sync
+from smartbrain_3000.auth import relay_headers
 from smartbrain_3000.secrets import SecretStore, gen_master_key
 from smartbrain_3000.vaults import VaultStore
 
 _PASS_A = "alice-correct-horse"
 _PASS_B = "bob-correct-horse"
-_LOCAL = {"x-sb-local": "1"}
+_PHONE = relay_headers("phone-under-test")  # R14: phone authority (the relay credential)
 _ZIP_URL = "https://vaults.example.com/packs/expert-pack.sbvault"
 
 
@@ -73,7 +74,7 @@ def _make_vault(client: TestClient, docs: list[tuple[str, str]], name: str = "Ex
 
 def _export(client: TestClient, vid: str, passphrase: str, mode: str = "open") -> bytes:
     r = client.post(f"/api/vaults/{vid}/export",
-                    json={"passphrase": passphrase, "mode": mode}, headers=_LOCAL)
+                    json={"passphrase": passphrase, "mode": mode})
     assert r.status_code == 200, r.text
     return r.content
 
@@ -285,7 +286,7 @@ def test_sealed_re_export_records_shared_sealed_and_flags_key_rotation(alice: Te
     # export sets shared_sealed but is NOT a re-export (no key rotated header); the second is.
     vid, _ = _make_vault(alice, [("Doc", "body")])
     r1 = alice.post(f"/api/vaults/{vid}/export",
-                    json={"passphrase": _PASS_A, "mode": "sealed"}, headers=_LOCAL)
+                    json={"passphrase": _PASS_A, "mode": "sealed"})
     assert r1.status_code == 200
     assert r1.headers.get("x-sb-export-rotated-key") is None, "first sealed export never rotates"
     assert r1.headers.get("x-sb-export-mode") == "sealed"
@@ -295,7 +296,7 @@ def test_sealed_re_export_records_shared_sealed_and_flags_key_rotation(alice: Te
     assert vault["shared_sealed"] is True and vault["sealed_seq"] == 2
 
     r2 = alice.post(f"/api/vaults/{vid}/export",
-                    json={"passphrase": _PASS_A, "mode": "sealed"}, headers=_LOCAL)
+                    json={"passphrase": _PASS_A, "mode": "sealed"})
     assert r2.headers.get("x-sb-export-rotated-key") == "1", \
         "a second sealed export mints a fresh Vault Key — the UI must warn"
     assert alice.get(f"/api/vaults/{vid}").json()["sealed_seq"] == 3
@@ -308,17 +309,17 @@ def test_unchanged_republish_is_flagged_on_the_export_response(alice: TestClient
     vid, _ = _make_vault(alice, _DOCS)
 
     r1 = alice.post(f"/api/vaults/{vid}/export",
-                    json={"passphrase": _PASS_A, "mode": "open"}, headers=_LOCAL)
+                    json={"passphrase": _PASS_A, "mode": "open"})
     assert r1.headers.get("x-sb-export-unchanged") is None, "the first export has nothing to compare"
 
     r2 = alice.post(f"/api/vaults/{vid}/export",
-                    json={"passphrase": _PASS_A, "mode": "open"}, headers=_LOCAL)
+                    json={"passphrase": _PASS_A, "mode": "open"})
     assert r2.headers.get("x-sb-export-unchanged") == "1"
 
     new_id = alice.post("/api/kb", json={"title": "New", "content": "fresh KOALA rules"}).json()["id"]
     alice.post(f"/api/vaults/{vid}/documents", json={"doc_ids": [new_id]})
     r3 = alice.post(f"/api/vaults/{vid}/export",
-                    json={"passphrase": _PASS_A, "mode": "open"}, headers=_LOCAL)
+                    json={"passphrase": _PASS_A, "mode": "open"})
     assert r3.headers.get("x-sb-export-unchanged") is None, \
         "a content change must clear the unchanged flag"
 
@@ -332,12 +333,12 @@ def test_retire_route_produces_a_retired_open_blob_and_flips_the_publisher_flag(
     _export(alice, vid, _PASS_A, mode="open")  # v2
 
     # Same gate as /export: bridged is refused, wrong passphrase is refused.
-    r = alice.post(f"/api/vaults/{vid}/retire", json={"passphrase": _PASS_A})
+    r = alice.post(f"/api/vaults/{vid}/retire", json={"passphrase": _PASS_A}, headers=_PHONE)
     assert r.status_code == 403, "retire must be Desktop-local (a bridged retire is refused)"
-    r = alice.post(f"/api/vaults/{vid}/retire", json={"passphrase": "wrong"}, headers=_LOCAL)
+    r = alice.post(f"/api/vaults/{vid}/retire", json={"passphrase": "wrong"})
     assert r.status_code == 401
 
-    r = alice.post(f"/api/vaults/{vid}/retire", json={"passphrase": _PASS_A}, headers=_LOCAL)
+    r = alice.post(f"/api/vaults/{vid}/retire", json={"passphrase": _PASS_A})
     assert r.status_code == 200
     assert r.headers.get("x-sb-export-retired") == "1"
     assert r.headers.get("x-sb-export-mode") == "open"
@@ -356,7 +357,7 @@ def test_un_retire_by_a_later_normal_open_export(alice: TestClient) -> None:
     # Both the on-disk marker and the shipped manifest must reflect the un-retirement.
     vid, _ = _make_vault(alice, _DOCS)
     alice.post(f"/api/vaults/{vid}/retire",
-               json={"passphrase": _PASS_A}, headers=_LOCAL)
+               json={"passphrase": _PASS_A})
     assert alice.get(f"/api/vaults/{vid}").json()["retired_published"] is True
 
     resumed = _export(alice, vid, _PASS_A, mode="open")
@@ -386,7 +387,7 @@ def test_subscriber_applies_retirement_and_stops_auto_updating(
     bob.patch(f"/api/vaults/{local_id}/subscription", json={"auto_update": True})
     alice.app.state.kb.replace(ids[0], "Regulations", "the FINAL amended QUOKKA clause", {})
     retire_response = alice.post(f"/api/vaults/{vid}/retire",
-                                  json={"passphrase": _PASS_A}, headers=_LOCAL)
+                                  json={"passphrase": _PASS_A})
     _serve(monkeypatch, retire_response.content)
 
     check = bob.post(f"/api/vaults/{local_id}/check-updates").json()
@@ -418,7 +419,7 @@ def test_a_higher_seq_non_retired_manifest_un_retires_the_subscriber(
     # higher than the retire seq) clears retired on the subscriber's side too.
     vid, ids, local_id, _blob = _subscribed(alice, bob, monkeypatch)
     retire = alice.post(f"/api/vaults/{vid}/retire",
-                        json={"passphrase": _PASS_A}, headers=_LOCAL)
+                        json={"passphrase": _PASS_A})
     _serve(monkeypatch, retire.content)
     assert bob.post(f"/api/vaults/{local_id}/update").json()["retired"] is True
 
@@ -710,7 +711,7 @@ def test_verify_hosted_happy_path_matches(alice: TestClient, monkeypatch) -> Non
     vid, blob = _publish_and_set_hosted(alice)
     fetched = _serve(monkeypatch, blob)
 
-    r = alice.post(f"/api/vaults/{vid}/verify-hosted", headers=_LOCAL)
+    r = alice.post(f"/api/vaults/{vid}/verify-hosted")
     assert r.status_code == 200, r.text
     body = r.json()
     published_seq = alice.get(f"/api/vaults/{vid}").json()["published_seq"]
@@ -733,7 +734,7 @@ def test_verify_hosted_behind_case_is_the_classic_forgot_to_upload(
     assert published_seq == 3
 
     _serve(monkeypatch, blob_v2)  # host still on the OLD file
-    body = alice.post(f"/api/vaults/{vid}/verify-hosted", headers=_LOCAL).json()
+    body = alice.post(f"/api/vaults/{vid}/verify-hosted").json()
     assert body["reachable"] is True
     assert body["seq"] == 2
     assert body["matches"] is False and body["behind"] is True
@@ -759,7 +760,7 @@ def test_verify_hosted_newer_hosted_seq_is_the_anomaly_case(
     assert alice.get(f"/api/vaults/{vid}").json()["published_seq"] == 1
 
     _serve(monkeypatch, blob)  # hosted file is v2
-    body = alice.post(f"/api/vaults/{vid}/verify-hosted", headers=_LOCAL).json()
+    body = alice.post(f"/api/vaults/{vid}/verify-hosted").json()
     assert body["reachable"] is True
     assert body["seq"] == 2
     assert body["matches"] is False and body["behind"] is False
@@ -785,7 +786,7 @@ def test_verify_hosted_wrong_signature_says_the_signature_is_not_yours(
     offered_pub = vault_format.read_manifest(forged)["publisher"]["pubkey"]
     _serve(monkeypatch, forged)
 
-    body = alice.post(f"/api/vaults/{vid}/verify-hosted", headers=_LOCAL).json()
+    body = alice.post(f"/api/vaults/{vid}/verify-hosted").json()
     assert body["reachable"] is True
     assert body["matches"] is False and body["behind"] is False
     assert body["seq"] is None, "a stranger's seq is not this install's business"
@@ -804,18 +805,18 @@ def test_verify_hosted_unreachable_url_is_a_clean_reachable_false(
         raise netguard.FetchError("upstream returned HTTP 410", status=410)
 
     monkeypatch.setattr(netguard, "safe_fetch_vault", gone)
-    body = alice.post(f"/api/vaults/{vid}/verify-hosted", headers=_LOCAL).json()
+    body = alice.post(f"/api/vaults/{vid}/verify-hosted").json()
     assert body == {"reachable": False, "seq": None, "matches": False, "behind": False,
                     "retired": False, "detail": body["detail"]}
     assert body["detail"], "an honest detail must always be present"
 
 
 def test_verify_hosted_is_desktop_local_only_matching_export(alice: TestClient) -> None:
-    # Same fence as /export and /retire: a bridged request has no x-sb-local header, and this
+    # Same fence as /export and /retire: a bridged request has phone authority, and this
     # endpoint refuses. The publisher's identity key sits behind the fence for a reason — a
     # remote device must not be able to trigger a read that names it.
     vid, _blob = _publish_and_set_hosted(alice)
-    r = alice.post(f"/api/vaults/{vid}/verify-hosted")  # no _LOCAL header
+    r = alice.post(f"/api/vaults/{vid}/verify-hosted", headers=_PHONE)  # phone authority
     assert r.status_code == 403 and "Desktop-local" in r.json()["detail"]
 
 
@@ -823,5 +824,5 @@ def test_verify_hosted_without_hosted_url_is_a_clean_400(alice: TestClient) -> N
     # No hosted_url set: nothing to verify. Clear 400 that says what to do next, so the UI can
     # render it inline rather than surfacing a confusing empty response.
     vid, _ = _make_vault(alice, _DOCS)
-    r = alice.post(f"/api/vaults/{vid}/verify-hosted", headers=_LOCAL)
+    r = alice.post(f"/api/vaults/{vid}/verify-hosted")
     assert r.status_code == 400 and "hosted URL" in r.json()["detail"]

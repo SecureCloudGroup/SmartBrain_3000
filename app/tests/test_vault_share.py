@@ -19,10 +19,11 @@ import pytest
 from fastapi.testclient import TestClient
 
 from smartbrain_3000 import gateway, vault_format
+from smartbrain_3000.auth import relay_headers
 
 _PASS_A = "alice-correct-horse"
 _PASS_B = "bob-correct-horse"
-_LOCAL = {"x-sb-local": "1"}  # export is Desktop-local only (the WebRTC bridge cannot forward this)
+_PHONE = relay_headers("phone-under-test")  # R14: phone authority (the relay credential)
 
 
 def _app(tmp_path, monkeypatch, name: str, passphrase: str) -> TestClient:
@@ -57,9 +58,9 @@ def _make_vault(client: TestClient, docs: list[tuple[str, str]], name: str = "Ex
 
 
 def _export(client: TestClient, vid: str, passphrase: str) -> tuple[bytes, str]:
-    r = client.post(f"/api/vaults/{vid}/export", json={"passphrase": passphrase}, headers=_LOCAL)
+    r = client.post(f"/api/vaults/{vid}/export", json={"passphrase": passphrase})
     assert r.status_code == 200, r.text
-    k = client.post(f"/api/vaults/{vid}/key", json={"passphrase": passphrase}, headers=_LOCAL)
+    k = client.post(f"/api/vaults/{vid}/key", json={"passphrase": passphrase})
     return r.content, k.json()["key"]
 
 
@@ -284,8 +285,8 @@ def test_a_recovery_key_cannot_be_mistaken_for_a_vault_key() -> None:
 def test_export_is_desktop_local_and_needs_the_passphrase(alice: TestClient) -> None:
     # An export is plaintext-equivalent egress, so it gets the same gate as /api/backup.
     vid = _make_vault(alice, [("Doc", "body")])
-    assert alice.post(f"/api/vaults/{vid}/export", json={"passphrase": _PASS_A}).status_code == 403
-    r = alice.post(f"/api/vaults/{vid}/export", json={"passphrase": "wrong"}, headers=_LOCAL)
+    assert alice.post(f"/api/vaults/{vid}/export", json={"passphrase": _PASS_A}, headers=_PHONE).status_code == 403
+    r = alice.post(f"/api/vaults/{vid}/export", json={"passphrase": "wrong"})
     assert r.status_code == 401
 
 

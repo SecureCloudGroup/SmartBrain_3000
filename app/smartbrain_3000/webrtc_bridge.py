@@ -28,6 +28,8 @@ import os
 
 import httpx
 
+from . import auth
+
 LOOPBACK_BASE = "http://127.0.0.1:33000"  # default; loopback_client() matches the live scheme
 _LOOPBACK_TIMEOUT = 60.0
 _ALLOWED_PREFIX = "/api/"
@@ -75,8 +77,13 @@ def parse_request(frame: dict) -> dict:
     return {"method": method, "path": path, "headers": headers, "body": bytes(body)}
 
 
-def handle_frame(frame: dict, client) -> dict:
+def handle_frame(frame: dict, client, device_id: str = "") -> dict:
     """Proxy one request frame to the local app; return a response frame.
+
+    R14: after the peer's own device authentication, the relayed request carries
+    the in-process RELAY credential (``auth.relay_headers``) — phone authority. It
+    is added AFTER ``parse_request`` dropped every phone-supplied header outside the
+    allow-list, so a phone can never forge it (or a desktop credential).
 
     ``client`` is anything with ``.request(method, url, headers=, content=)`` that
     returns an httpx-style response — in production an ``httpx.Client`` bound to
@@ -91,8 +98,9 @@ def handle_frame(frame: dict, client) -> dict:
         req = parse_request(frame)
     except FrameError as exc:
         return _error_frame(rid, 400, str(exc))
+    headers = {**req["headers"], **auth.relay_headers(device_id)}
     try:
-        resp = client.request(req["method"], req["path"], headers=req["headers"], content=req["body"])
+        resp = client.request(req["method"], req["path"], headers=headers, content=req["body"])
     except Exception as exc:  # any local/transport failure -> clean error frame, never crash
         return _error_frame(rid, 502, f"upstream error: {type(exc).__name__}")
     assert resp is not None, "client.request must return a response"

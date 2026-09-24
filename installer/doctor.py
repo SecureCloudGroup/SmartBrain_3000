@@ -1333,8 +1333,29 @@ def _pull_embed_model() -> str:
     return f"{EMBED_MODEL_TAG} is ready. Open Knowledge and choose Reindex."
 
 
+def _local_token(m: Machine) -> str | None:
+    """This install's local API credential (R14) for Desktop-only calls: the launcher's
+    token (it owns one and hands it to the app it starts), else the app's own file beside
+    the database, else an explicit SMARTBRAIN_LOCAL_TOKEN."""
+    explicit = m.env.get("SMARTBRAIN_LOCAL_TOKEN", "").strip()
+    if explicit:
+        return explicit
+    for path in (m.launcher_dir / "local-api.token", m.data_dir / "local-api.token"):
+        try:
+            token = path.read_text(encoding="ascii").strip()
+        except (OSError, UnicodeDecodeError):
+            continue
+        if len(token) >= 32:
+            return token
+    return None
+
+
 def _request_install(m: Machine) -> str:
-    answer = http_json(m.app_url() + "/api/update/install", headers={"x-sb-local": "1"}, method="POST")
+    token = _local_token(m)
+    if token is None:
+        raise RuntimeError("could not find this install's local API token — install it from the menu instead")
+    answer = http_json(m.app_url() + "/api/update/install",
+                       headers={"Authorization": f"Bearer {token}"}, method="POST")
     if not answer or answer[0] not in (200, 201):
         raise RuntimeError("SmartBrain did not accept the request — install it from the menu instead")
     return "Asked the launcher to install it. SmartBrain restarts within about half a minute."

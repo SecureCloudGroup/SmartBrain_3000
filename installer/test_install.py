@@ -854,3 +854,25 @@ def test_headline_does_not_claim_a_running_version_when_no_install_here(tmp_path
     line = doctor.headline(m, snap)
     assert "0.8.13 running" not in line
     assert "no install here" in line.lower()
+
+
+def test_local_token_prefers_explicit_then_launcher_then_app(tmp_path) -> None:
+    """R14: doctor's Desktop-only call (install request) finds this install's local API
+    token the same way the product does — the launcher owns one and hands it to the app;
+    the app keeps its own beside the database when started without a launcher."""
+    m = _machine(tmp_path)
+    assert doctor._local_token(m) is None
+    m.data_dir.mkdir(parents=True)
+    (m.data_dir / "local-api.token").write_text("A" * 43 + "\n")
+    assert doctor._local_token(m) == "A" * 43
+    (m.launcher_dir / "local-api.token").write_text("L" * 43 + "\n")
+    assert doctor._local_token(m) == "L" * 43  # the launcher's wins: it started the app
+    (m.launcher_dir / "local-api.token").write_text("short\n")
+    assert doctor._local_token(m) == "A" * 43  # an unusable file is skipped, not trusted
+    m.env["SMARTBRAIN_LOCAL_TOKEN"] = "E" * 40
+    assert doctor._local_token(m) == "E" * 40
+
+
+def test_request_install_refuses_without_a_token(tmp_path) -> None:
+    with pytest.raises(RuntimeError, match="local API token"):
+        doctor._request_install(_machine(tmp_path))

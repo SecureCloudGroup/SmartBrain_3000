@@ -13,14 +13,16 @@ reads secret values internally (e.g. to call an LLM provider).
 
 from __future__ import annotations
 
+import hmac
 import logging
+import os
 import re
 import uuid
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
-from . import email_account, gateway, keyvault, stt_local
+from . import auth, email_account, gateway, keyvault, stt_local
 from .approvals import ApprovalStore
 from .audit import AuditLog
 from .feeds import FeedStore
@@ -55,6 +57,9 @@ class PassphraseChange(BaseModel):
 
 class PassphraseReset(BaseModel):
     new_passphrase: str = Field(min_length=_MIN_PASSPHRASE)
+    # R14 ride-along: the reset re-proves the Recovery Key (this is the forgot-my-
+    # passphrase path; a user who knows the passphrase uses the change form instead).
+    recovery_key: str = Field(min_length=1)
 
 
 class SecretValue(BaseModel):
@@ -181,41 +186,52 @@ def _require_store(request: Request) -> SecretStore:
     return store
 
 
-# B8: Desktop-local marker for security-sensitive admin endpoints.
-#
-# The WebRTC bridge (``webrtc_bridge.py``) accepts framed requests from paired
-# remote devices and replays them onto loopback via httpx. ``parse_request``
-# filters the peer's headers down to a tiny allowlist (currently only
-# ``content-type``, ``accept``, ``accept-language``), so any header outside that
-# allowlist CANNOT survive the bridge. We require the real Desktop UI to send
-# ``X-SB-Local: 1`` on destructive admin calls (restore, passphrase-reset); a
-# bridged-in request will not carry it and is refused with 403.
-_LOCAL_HEADER = "x-sb-local"
+# Desktop-only actions (backup, export, restore, pairing, the MCP token, installs,
+# passphrase reset, …). R14: the AUTHORITY of the request's credential decides —
+# a browser session on a loopback Host or the local token is ``desktop``; a phone
+# (relayed, or LAN-direct) is ``remote``. The old constant ``X-SB-Local: 1`` header
+# is no longer consulted: any local process could send it, so "Desktop-only" used
+# to mean only "not relayed from a phone". This is the ONE implementation.
 
 
 def _require_desktop_local(request: Request) -> None:
-    """Refuse requests that arrived via the WebRTC bridge (paired remote device)."""
+    """Refuse anything but a Desktop credential (403)."""
     assert request is not None, "request required"
-    marker = request.headers.get(_LOCAL_HEADER)
-    assert isinstance(marker, str) or marker is None, "header must be a string or absent"
-    if marker != "1":
+    if getattr(request.state, "sb_authority", None) != auth.DESKTOP:
         raise HTTPException(status_code=403, detail="this endpoint is Desktop-local only")
+
+
+def _mint_session(request: Request, response: Response) -> None:
+    """Give this browser its session for the rest of the app run (R14). A relayed
+    request (a paired phone, over the bridge) has its own credential: a cookie would
+    only land in the bridge's HTTP client and take a slot in the session table."""
+    if request.headers.get(auth.RELAY_HEADER):
+        return
+    token = auth.sessions(request.app).mint(auth.host_authority(request.headers.get("host", "")))
+    response.set_cookie(
+        auth.COOKIE_NAME, token, max_age=auth.COOKIE_MAX_AGE_S, path="/",
+        httponly=True, samesite="strict",
+        secure=bool(os.environ.get("SMARTBRAIN_TLS_CERT")),  # the LAN/TLS overlay
+    )
 
 
 @router.get("/api/account/status")
 def account_status(request: Request) -> dict[str, bool]:
-    """Report whether the vault is initialized, unlocked, and has a recovery key."""
+    """Report whether the vault is initialized, unlocked, and has a recovery key —
+    and whether THIS client holds a credential (``session``): an unlocked vault
+    with ``session: false`` means "open SmartBrain in this browser" (passphrase)."""
     conn = _conn(request)
     unlocked = getattr(request.app.state, "secret_store", None) is not None
     return {
         "initialized": keyvault.is_initialized(conn),
         "unlocked": unlocked,
         "has_recovery": keyvault.has_recovery(conn),
+        "session": getattr(request.state, "sb_authority", None) is not None,
     }
 
 
 @router.post("/api/account/setup")
-def account_setup(request: Request, body: SetupRequest) -> dict[str, str]:
+def account_setup(request: Request, response: Response, body: SetupRequest) -> dict[str, str]:
     """First run: set the passphrase, create a Recovery Key, return the kit once."""
     conn = _conn(request)
     if keyvault.is_initialized(conn):
@@ -223,6 +239,7 @@ def account_setup(request: Request, body: SetupRequest) -> dict[str, str]:
     master_key = keyvault.set_passphrase(conn, body.passphrase)
     recovery_key = keyvault.add_recovery_key(conn, master_key)
     _set_unlocked(request, master_key)
+    _mint_session(request, response)
     assert keyvault.has_recovery(conn), "recovery key must exist after setup"
     return {
         "recovery_key": recovery_key,
@@ -231,8 +248,14 @@ def account_setup(request: Request, body: SetupRequest) -> dict[str, str]:
 
 
 @router.post("/api/account/unlock")
-def account_unlock(request: Request, body: UnlockRequest) -> dict[str, bool]:
-    """Unlock with the passphrase or the recovery key; load the master key."""
+def account_unlock(request: Request, response: Response, body: UnlockRequest) -> dict[str, bool]:
+    """Unlock with the passphrase or the recovery key; load the master key.
+
+    Also the "open SmartBrain in this browser" door (R14): when the vault is ALREADY
+    unlocked, a correct credential only mints this browser's session — it does NOT
+    re-run the unlock (which would start a new unlock session and hide every pending
+    approval from the old one).
+    """
     conn = _conn(request)
     if not keyvault.is_initialized(conn):
         raise HTTPException(status_code=409, detail="not initialized; run setup")
@@ -247,7 +270,12 @@ def account_unlock(request: Request, body: UnlockRequest) -> dict[str, bool]:
         raise
     except Exception:
         raise HTTPException(status_code=401, detail="invalid credentials") from None
-    _set_unlocked(request, master_key)
+    current = getattr(request.app.state, "master_key", None)
+    if current is None:
+        _set_unlocked(request, master_key)
+    elif not hmac.compare_digest(current, master_key):  # cannot happen for a valid wrap
+        raise HTTPException(status_code=401, detail="invalid credentials")
+    _mint_session(request, response)
     return {"unlocked": True}
 
 
@@ -296,16 +324,23 @@ def change_passphrase(request: Request, body: PassphraseChange) -> dict[str, boo
 
 @router.post("/api/account/passphrase/reset")
 def reset_passphrase(request: Request, body: PassphraseReset) -> dict[str, bool]:
-    """Set a new passphrase without the current one — for a session unlocked via
-    the Recovery Key. Requires unlock (the in-memory master key is the authority).
+    """Set a new passphrase without the current one — the forgot-my-passphrase path
+    for a session unlocked via the Recovery Key.
 
-    Desktop-local only: a request bridged in from a paired remote device (over
-    WebRTC) MUST NOT be able to rotate the passphrase. See ``_require_desktop_local``.
+    Desktop-local only, and it RE-PROVES the Recovery Key (R14 ride-along): before,
+    an unlocked vault was enough, so any local process could rotate the passphrase.
+    The key must unwrap to the same master key this session holds.
     """
-    _require_desktop_local(request)  # B8: refuse bridged-in requests
+    _require_desktop_local(request)
     _require_store(request)  # must be unlocked
     master_key = getattr(request.app.state, "master_key", None)
     assert master_key is not None, "unlocked session must hold the master key"
+    try:
+        proven = keyvault.unlock_with_recovery(_conn(request), body.recovery_key)
+    except Exception:
+        raise HTTPException(status_code=401, detail="incorrect recovery key") from None
+    if not hmac.compare_digest(proven, master_key):
+        raise HTTPException(status_code=401, detail="incorrect recovery key")
     keyvault.reset_passphrase(_conn(request), master_key, body.new_passphrase)
     return {"ok": True}
 

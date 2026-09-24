@@ -1713,7 +1713,7 @@
 
   <!-- Per-card repair settings (§23). The board row deliberately doesn't carry
        repair_policy — this lever is a detail-view concern, so opening the modal
-       lazily fetches the item detail. Saving is Desktop-local (x-sb-local); a
+       lazily fetches the item detail. Saving is Desktop-only (server-checked); a
        paired phone gets a 403 the modal surfaces verbatim. -->
   {#if repairFor}
     <Modal
@@ -1753,8 +1753,8 @@
     </Modal>
   {/if}
 
-  <!-- Add-key modal (§ Status-truth amendments). Desktop-local via x-sb-local — the
-       WebRTC bridge strips that header, so a paired phone gets a 403 the modal paints
+  <!-- Add-key modal (§ Status-truth amendments). Desktop-only (server-checked), so a
+       paired phone gets a 403 the modal paints
        verbatim. The value input is password-typed and NEVER echoed back into any DOM
        node; closeCredential() zeroes it. -->
   {#if credentialFor}

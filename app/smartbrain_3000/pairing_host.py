@@ -15,6 +15,7 @@ import base64
 import json
 import logging
 import os
+from collections.abc import Callable
 
 from . import pairing_code, remote_config, webrtc_peer, webrtc_signaling
 
@@ -43,12 +44,25 @@ def _handle_phello(pc, channel, code_key: bytes, session: dict, msg: dict) -> No
     _send(channel, {"type": "phello_ok", "mac": _b64(mac_h), "nonce2": _b64(session["nonce2"])})
 
 
-def _handle_pconfirm(channel, code_key: bytes, payload: dict, session: dict, state: dict, msg: dict) -> None:
-    """Verify the app proved the code; on success send the payload, else count a wrong guess."""
+def _handle_pconfirm(channel, code_key: bytes, payload, session: dict, state: dict, msg: dict) -> None:
+    """Verify the app proved the code; on success send the payload, else count a wrong guess.
+
+    ``payload`` may be a FACTORY (production, R14 ride-along): the device credential
+    is minted only NOW, after the code is proven — an expired or abandoned code never
+    leaves an unused, non-expiring credential behind. A factory that fails (the
+    Desktop locked mid-session) ends the session honestly.
+    """
     got = base64.b64decode(str(msg.get("mac") or ""))
     expect = pairing_code.mac(code_key, "guest", session["nonce2"], session["binding"])
     if session["nonce2"] and pairing_code.mac_equal(got, expect):
-        _send(channel, {"type": "ppayload", "payload": json.dumps(payload)})
+        try:
+            data = payload() if callable(payload) else payload
+        except Exception as exc:
+            log.warning("pair: payload unavailable: %s", type(exc).__name__)
+            _send(channel, {"type": "perror", "detail": "the desktop is locked — unlock it and try again"})
+            state["done"].set()
+            return
+        _send(channel, {"type": "ppayload", "payload": json.dumps(data)})
         state["ok"] = True
         state["done"].set()
         return
@@ -58,7 +72,8 @@ def _handle_pconfirm(channel, code_key: bytes, payload: dict, session: dict, sta
         state["done"].set()
 
 
-def _wire_pairing_channel(pc, channel, code_key: bytes, payload: dict, state: dict) -> None:
+def _wire_pairing_channel(pc, channel, code_key: bytes, payload: dict | Callable[[], dict],
+                          state: dict) -> None:
     """Attach the code-auth -> payload handshake to the pairing DataChannel."""
     assert channel is not None, "channel required"
     session: dict = {"nonce2": b"", "binding": b""}
@@ -84,7 +99,8 @@ def _wire_pairing_channel(pc, channel, code_key: bytes, payload: dict, state: di
             log.warning("pair: handler failed: %s", type(exc).__name__)
 
 
-async def _answer(offer_sdp: str, ice_servers, code_key: bytes, payload: dict, state: dict):
+async def _answer(offer_sdp: str, ice_servers, code_key: bytes, payload: dict | Callable[[], dict],
+                  state: dict):
     """Create a peer for the app's pairing offer; return ``(pc, answer_sdp)``."""
     from aiortc import (
         RTCConfiguration,
@@ -126,7 +142,8 @@ def _send(channel, obj: dict) -> None:
 
 
 async def run_pairing_host(
-    *, signaling_url: str, token: str, code: str, payload: dict, stop=None, ice_servers=None, expiry_s: int = 300,
+    *, signaling_url: str, token: str, code: str, payload: dict | Callable[[], dict], stop=None, ice_servers=None,
+    expiry_s: int = 300,
     conn=None,
 ) -> bool:
     """Host one pairing session for ``code``, serving ``payload``. Returns True if a device
@@ -136,7 +153,7 @@ async def run_pairing_host(
     import websockets  # lazy: only when a session runs
 
     assert signaling_url and code, "signaling url + code required"  # token empty in hosted (tokenless) mode
-    assert isinstance(payload, dict), "payload must be a dict (PairingPayload)"
+    assert isinstance(payload, dict) or callable(payload), "payload must be a PairingPayload or its factory"
     room_id, code_key = pairing_code.derive(code)
     state: dict = {"done": asyncio.Event(), "ok": False, "guesses": 0}
     peers: dict = {}  # phone_id -> pc; bounded by _MAX_PEERS, reaped when the peer closes

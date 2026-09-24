@@ -13,6 +13,7 @@ deadlock fails in seconds instead of hanging CI.
 
 from __future__ import annotations
 
+import os
 import time
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -133,6 +134,10 @@ def _live_server(tmp_path, monkeypatch):
     return server, f"http://127.0.0.1:{port}"
 
 
+# R14: a raw httpx client is not a TestClient, so it presents the desktop bearer itself.
+_DESKTOP = {"Authorization": f"Bearer {os.environ['SMARTBRAIN_LOCAL_TOKEN']}"}
+
+
 def test_a_severed_stream_releases_the_model_slot(tmp_path, monkeypatch) -> None:
     """A browser that walks away mid-answer must not cost the machine its model.
 
@@ -150,10 +155,10 @@ def test_a_severed_stream_releases_the_model_slot(tmp_path, monkeypatch) -> None
 
     server, base = _live_server(tmp_path, monkeypatch)
     try:
-        with httpx.Client(base_url=base, timeout=20.0) as setup:
+        with httpx.Client(base_url=base, timeout=20.0, headers=_DESKTOP) as setup:
             assert setup.post("/api/account/setup", json={"passphrase": "correct-horse"}).status_code == 200
         for _ in range(2):  # connect, take one frame, hang up hard
-            c = httpx.Client(base_url=base, timeout=20.0)
+            c = httpx.Client(base_url=base, timeout=20.0, headers=_DESKTOP)
             with c.stream("POST", "/api/agent/turn/stream",
                           json={"messages": [{"role": "user", "content": "hi"}],
                                 "model": _LOCAL_MODEL}) as r:

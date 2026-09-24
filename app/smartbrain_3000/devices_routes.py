@@ -100,12 +100,21 @@ async def start_pair_code(request: Request, body: DeviceCreate) -> dict:
     Requires unlock + a configured signaling broker. One session at a time.
     """
     account._require_desktop_local(request)  # hosting a pairing session is Desktop-only
-    store = _store(request)
+    _store(request)  # unlock gate
     signaling = remote_config.signaling_url()
     token = os.environ.get("SMARTBRAIN_SIGNALING_TOKEN", "")  # empty in hosted (tokenless) mode
     if not signaling:
         raise HTTPException(status_code=503, detail="remote access (signaling broker) is not configured")
-    payload = _pairing_payload(store, request.app, body.label)
+    app, label = request.app, body.label
+
+    def payload() -> dict:
+        # Minted only when the phone PROVES the code (R14 ride-along): an expired or
+        # abandoned code leaves no unused, non-expiring credential behind.
+        current = getattr(app.state, "secret_store", None)
+        if current is None:
+            raise RuntimeError("locked")
+        return _pairing_payload(current, app, label)
+
     code = pairing_code.generate_code()
     _cancel_pair_session(request.app)
     stop = asyncio.Event()
