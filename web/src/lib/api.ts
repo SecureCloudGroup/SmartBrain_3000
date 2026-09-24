@@ -1,7 +1,8 @@
 // Thin same-origin client for the SmartBrain backend. Every call returns parsed
 // JSON or throws ApiError(status, detail) so callers can branch on status. The
-// backend never returns secret values — only names. A 423 (vault locked) is
-// handled centrally here (redirect to /unlock) so no page can forget it.
+// backend never returns secret values — only names. A 423 (vault locked) and a
+// 401 "no_session" (this browser hasn't opened SmartBrain since the app started —
+// R14) are handled centrally here (redirect to /unlock) so no page can forget them.
 
 import { goto } from "$app/navigation";
 
@@ -25,18 +26,45 @@ export function registerLockedHandler(fn: () => void): void {
 // raw-fetch endpoint. One handler, no copies to drift.
 function handleLocked(): void {
   onLocked?.(); // client state flips to locked BEFORE any effect can re-fire a fetch
+  toUnlockPage(); // vault locked mid-session — bounce to unlock (idempotent)
+}
+
+// R14: the vault may be open while THIS browser holds no session (another browser or
+// the phone unlocked it). Same bounce, different truth: the unlock page shows "open
+// SmartBrain in this browser" instead of "locked".
+let onNoSession: (() => void) | null = null;
+export function registerNoSessionHandler(fn: () => void): void {
+  onNoSession = fn;
+}
+
+function handleNoSession(): void {
+  onNoSession?.();
+  toUnlockPage();
+}
+
+function toUnlockPage(): void {
   const onUnlockPage =
     typeof window !== "undefined" && window.location.pathname.startsWith("/unlock");
   if (!onUnlockPage) {
-    goto("/unlock"); // vault locked mid-session — bounce to unlock (idempotent)
+    goto("/unlock");
   }
+}
+
+// One router for both auth bounces, used by req() AND every raw-fetch path. A 401
+// only counts when the server says "no_session" — a wrong passphrase is a 401 too,
+// and must stay an ordinary error on the page that asked.
+function routeAuthFailure(status: number, body: unknown): void {
+  if (status === 423) handleLocked();
+  else if (status === 401 && (body as { code?: string } | null)?.code === "no_session") handleNoSession();
 }
 
 export class ApiError extends Error {
   status: number;
-  constructor(status: number, message: string) {
+  code?: string; // machine-readable reason when the server sends one (e.g. "no_session")
+  constructor(status: number, message: string, code?: string) {
     super(message);
     this.status = status;
+    this.code = code;
     this.name = "ApiError";
   }
 }
@@ -50,10 +78,8 @@ async function req<T>(path: string, opts: RequestInit = {}): Promise<T> {
   const data = res.status === 204 ? null : await res.json().catch(() => null);
   if (!res.ok) {
     const detail = (data && (data as { detail?: string }).detail) || `request failed (${res.status})`;
-    if (res.status === 423) {
-      handleLocked();
-    }
-    throw new ApiError(res.status, detail);
+    routeAuthFailure(res.status, data);
+    throw new ApiError(res.status, detail, (data as { code?: string } | null)?.code);
   }
   return data as T;
 }
@@ -62,6 +88,16 @@ export interface AccountStatus {
   initialized: boolean;
   unlocked: boolean;
   has_recovery: boolean;
+  // R14: does THIS browser hold a session? unlocked && !session = "open it here".
+  // Absent from an older Desktop app, which has no sessions (see inSession).
+  session?: boolean;
+}
+
+// Is SmartBrain open in THIS browser? A missing `session` counts as yes: the phone app is
+// served from the newest release while the Desktop may still run an older one, and
+// treating its answer as "sign in here" would re-run that app's unlock on every launch.
+export function inSession(s: AccountStatus | null | undefined): boolean {
+  return !!s && s.unlocked && s.session !== false;
 }
 
 export interface EmergencyKit {
@@ -922,13 +958,12 @@ export const api = {
       headers: browserTimezone() ? { "x-smartbrain-timezone": browserTimezone() } : {},
     }),
   accountStatus: () => req<AccountStatus>("/api/account/status"),
-  // Ask the desktop launcher to install the update it has staged. Desktop-local only: the
-  // marker header is stripped by the phone bridge, so a paired device gets a 403 rather
-  // than the power to restart the machine.
+  // Ask the desktop launcher to install the update it has staged. Desktop-only: the server
+  // refuses a paired device's credential with a 403 rather than hand it the power to
+  // restart the machine.
   installUpdate: () =>
     req<{ ok: boolean; version: string }>("/api/update/install", {
       method: "POST",
-      headers: { "x-sb-local": "1" },
       body: JSON.stringify({}),
     }),
   setup: (passphrase: string) =>
@@ -941,30 +976,28 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ current_passphrase, new_passphrase }),
     }),
-  resetPassphrase: (new_passphrase: string) =>
+  // R14: the forgot-my-passphrase reset re-proves the Recovery Key (an unlocked vault
+  // alone is no longer enough). Desktop-only on the server (credential authority).
+  resetPassphrase: (new_passphrase: string, recovery_key: string) =>
     req<{ ok: boolean }>("/api/account/passphrase/reset", {
       method: "POST",
-      // X-SB-Local marks a Desktop-local request; the WebRTC bridge strips it, so a
-      // remote/paired device cannot reset the passphrase (Security B8/F7).
-      headers: { "x-sb-local": "1" },
-      body: JSON.stringify({ new_passphrase }),
+      body: JSON.stringify({ new_passphrase, recovery_key }),
     }),
 
   // data portability (export JSON, download an encrypted backup, restore one).
   // Export + backup are sensitive egress (decrypted plaintext / whole-vault file), so both
-  // are Desktop-local only (x-sb-local; the WebRTC bridge strips it) AND re-require the
+  // are Desktop-only (the server checks the credential's authority) AND re-require the
   // passphrase — passed in the POST body and re-verified server-side (Security B8/F7).
   exportData: (passphrase: string) =>
     req<Record<string, unknown>>("/api/export", {
       method: "POST",
-      headers: { "x-sb-local": "1" },
       body: JSON.stringify({ passphrase }),
     }),
   backup: async (passphrase: string): Promise<Blob> => {
     await remoteReady;
     const res = await fetch("/api/backup", {
       method: "POST",
-      headers: { "x-sb-local": "1", "content-type": "application/json" },
+      headers: { "content-type": "application/json" },
       body: JSON.stringify({ passphrase }),
     });
     if (!res.ok) {
@@ -975,9 +1008,9 @@ export const api = {
   },
   restore: async (file: File): Promise<{ ok: boolean; message: string }> => {
     await remoteReady;
-    // X-SB-Local: Desktop-local only — the WebRTC bridge strips it so a remote device
+    // Desktop-only (the server checks the credential's authority), so a remote device
     // cannot replace the vault (Security B8/F7).
-    const res = await fetch("/api/restore", { method: "POST", headers: { "x-sb-local": "1" }, body: file });
+    const res = await fetch("/api/restore", { method: "POST", body: file });
     const data = await res.json().catch(() => null);
     if (!res.ok) throw new ApiError(res.status, (data as { detail?: string })?.detail || `restore failed (${res.status})`);
     return data as { ok: boolean; message: string };
@@ -1036,12 +1069,11 @@ export const api = {
   // backend probes the local binary + `claude auth status`, never the model itself.
   putClaudeCode: () =>
     req<{ ok: boolean; gateway_synced?: boolean }>("/api/local-models/claudecode", { method: "PUT" }),
-  // Runs `claude update` on the host binary — Desktop-local only (x-sb-local; the WebRTC
-  // bridge strips it) so a paired phone cannot trigger a package install on the Desktop.
+  // Runs `claude update` on the host binary — Desktop-only (the server refuses a phone's
+  // credential) so a paired phone cannot trigger a package install on the Desktop.
   updateClaudeCode: () =>
     req<{ ok: boolean; output: string; version?: string }>("/api/local-models/claudecode/update", {
       method: "POST",
-      headers: { "x-sb-local": "1" },
     }),
   deleteLocalModel: (name: "ollama" | "mlx" | "mlxe" | "claudecode") =>
     req<{ ok: boolean; gateway_synced?: boolean }>(`/api/local-models/${name}`, { method: "DELETE" }),
@@ -1077,9 +1109,9 @@ export const api = {
       signal,
     });
     if (!res.ok) {
-      const detail = (await res.json().catch(() => null) as { detail?: string } | null)?.detail;
-      if (res.status === 423) handleLocked();
-      throw new ApiError(res.status, detail || `stream failed (${res.status})`);
+      const errBody = await res.json().catch(() => null) as { detail?: string } | null;
+      routeAuthFailure(res.status, errBody);
+      throw new ApiError(res.status, errBody?.detail || `stream failed (${res.status})`);
     }
     return res;
   },
@@ -1104,9 +1136,9 @@ export const api = {
       body: JSON.stringify(body),
     });
     if (!res.ok) {
-      const detail = (await res.json().catch(() => null) as { detail?: string } | null)?.detail;
-      if (res.status === 423) handleLocked();
-      throw new ApiError(res.status, detail || `turn failed (${res.status})`);
+      const errBody = await res.json().catch(() => null) as { detail?: string } | null;
+      routeAuthFailure(res.status, errBody);
+      throw new ApiError(res.status, errBody?.detail || `turn failed (${res.status})`);
     }
     return res;
   },
@@ -1218,7 +1250,7 @@ export const api = {
     }
     const data = await res.json().catch(() => null);
     if (!res.ok) {
-      if (res.status === 423) handleLocked();
+      routeAuthFailure(res.status, data);
       throw new ApiError(res.status, (data as { detail?: string })?.detail || `transcription failed (${res.status})`);
     }
     return data as { text: string };
@@ -1238,11 +1270,10 @@ export const api = {
   putVoiceConfig: (body: { url: string; api_key: string; stt_model: string; tts_model: string; tts_voice: string }) =>
     req<{ ok: boolean; status: VoiceStatus }>("/api/local-models/voice", {
       method: "PUT",
-      headers: { "x-sb-local": "1" },
       body: JSON.stringify(body),
     }),
   deleteVoiceConfig: () =>
-    req<{ ok: boolean }>("/api/local-models/voice", { method: "DELETE", headers: { "x-sb-local": "1" } }),
+    req<{ ok: boolean }>("/api/local-models/voice", { method: "DELETE" }),
 
   listPending: () => req<{ pending: PendingAction[] }>("/api/agent/pending"),
   approveAction: (id: string, confirmTool: string | null = null, remember = false) =>
@@ -1418,7 +1449,6 @@ export const api = {
   addFeed: (url: string, tags: string[] = []) =>
     req<{ id: string; title: string; vault_id: string; items: number }>("/api/feeds", {
       method: "POST",
-      headers: { "x-sb-local": "1" },
       body: JSON.stringify(tags.length ? { url, tags } : { url }),
     }),
   refreshFeed: (id: string) =>
@@ -1427,12 +1457,12 @@ export const api = {
   deleteFeed: (id: string, opts: { remove_docs?: boolean } = {}) =>
     req<{ deleted: boolean; docs_removed: number }>(
       `/api/feeds/${encodeURIComponent(id)}${opts.remove_docs ? "?remove_docs=1" : ""}`,
-      { method: "DELETE", headers: { "x-sb-local": "1" } },
+      { method: "DELETE" },
     ),
 
   // Export hands out content that is plaintext-equivalent to whoever holds the key — and in
   // "open" (public) mode IS the plaintext, with no key at all — so, like backup, it is
-  // Desktop-local (x-sb-local, which the WebRTC bridge cannot forward) and requires the
+  // Desktop-only (the server checks the credential's authority) and requires the
   // passphrase again. Returns the .sbvault file itself.
   exportVault: async (
     id: string,
@@ -1442,7 +1472,7 @@ export const api = {
     await remoteReady;
     const res = await fetch(`/api/vaults/${encodeURIComponent(id)}/export`, {
       method: "POST",
-      headers: { "x-sb-local": "1", "content-type": "application/json" },
+      headers: { "content-type": "application/json" },
       body: JSON.stringify({ passphrase, mode }),
     });
     if (!res.ok) {
@@ -1464,7 +1494,7 @@ export const api = {
     await remoteReady;
     const res = await fetch(`/api/vaults/${encodeURIComponent(id)}/retire`, {
       method: "POST",
-      headers: { "x-sb-local": "1", "content-type": "application/json" },
+      headers: { "content-type": "application/json" },
       body: JSON.stringify({ passphrase }),
     });
     if (!res.ok) {
@@ -1475,19 +1505,18 @@ export const api = {
     return { blob: await res.blob(), headers };
   },
   // Fetch the vault's hosted_url and check the hosted file against THIS install's last publish.
-  // Desktop-local only (x-sb-local; the bridge strips it) — the endpoint names this install's own
+  // Desktop-only (server-checked) — the endpoint names this install's own
   // publisher key in its verdict, so a paired device must not be able to trigger the read.
   // Read-only: never touches subscription state, never re-pins anything.
   verifyHostedVault: (id: string) =>
     req<VerifyHostedResult>(`/api/vaults/${encodeURIComponent(id)}/verify-hosted`, {
       method: "POST",
-      headers: { "x-sb-local": "1" },
     }),
   vaultKey: async (id: string, passphrase: string): Promise<string> => {
     await remoteReady;
     const res = await fetch(`/api/vaults/${encodeURIComponent(id)}/key`, {
       method: "POST",
-      headers: { "x-sb-local": "1", "content-type": "application/json" },
+      headers: { "content-type": "application/json" },
       body: JSON.stringify({ passphrase }),
     });
     const data = await res.json().catch(() => null);
@@ -1531,7 +1560,7 @@ export const api = {
       body: JSON.stringify(opts),
     }),
   // Re-pin a subscription to a NEW publisher key the user confirmed out-of-band. The most
-  // consequential act in the vault system, so it gates like export: Desktop-local (x-sb-local)
+  // consequential act in the vault system, so it gates like export: Desktop-only
   // + passphrase re-entry — and it names the exact key it blesses, so a host that rotated again
   // since the user checked is refused instead of silently trusted.
   trustVaultPublisher: (id: string, offered_pubkey: string, passphrase: string) =>
@@ -1539,7 +1568,6 @@ export const api = {
       `/api/vaults/${encodeURIComponent(id)}/trust-publisher`,
       {
         method: "POST",
-        headers: { "x-sb-local": "1" },
         body: JSON.stringify({ offered_pubkey, passphrase }),
       },
     ),
@@ -1563,41 +1591,38 @@ export const api = {
 
   // MCP access token (read-only Knowledge for external tools)
   mcpInfo: () => req<{ endpoint: string; enabled: boolean }>("/api/mcp"),
-  // The whole MCP-token verb-set is Desktop-local only (x-sb-local; the WebRTC bridge strips it):
+  // The whole MCP-token verb-set is Desktop-only (server-checked credential authority):
   // read + mint return the raw bearer token in the body, and revoke would let a paired phone rotate
   // away the operator's token — so a phone can neither exfiltrate nor DoS it (Security B8).
-  mcpToken: () => req<{ token: string | null }>("/api/mcp/token", { headers: { "x-sb-local": "1" } }),
-  mcpNewToken: () => req<{ token: string }>("/api/mcp/token", { method: "POST", headers: { "x-sb-local": "1" } }),
-  mcpRevokeToken: () => req<{ ok: boolean }>("/api/mcp/token", { method: "DELETE", headers: { "x-sb-local": "1" } }),
+  mcpToken: () => req<{ token: string | null }>("/api/mcp/token"),
+  mcpNewToken: () => req<{ token: string }>("/api/mcp/token", { method: "POST" }),
+  mcpRevokeToken: () => req<{ ok: boolean }>("/api/mcp/token", { method: "DELETE" }),
 
   // ni outbound mcp (ni-format §22) — the user's configured MCP servers that Neural Interface
   // cards may call as a source. Registry is server-local; SmartBrain never reads ambient
-  // `.mcp.json`. CRUD writes are Desktop-local (x-sb-local; the bridge strips it) — a server
+  // `.mcp.json`. CRUD writes are Desktop-only (server-checked) — a server
   // config is execution/connection authority (§22 "explicit UI act" law); the list read stays
   // open so a paired phone can at least see what its Desktop is configured with.
   niMcpServers: () => req<{ servers: NiMcpServer[] }>("/api/ni/mcp-servers"),
   niMcpAdd: (body: NiMcpServerCreate) =>
     req<{ id: string }>("/api/ni/mcp-servers", {
       method: "POST",
-      headers: { "x-sb-local": "1" },
       body: JSON.stringify(body),
     }),
   niMcpUpdate: (id: string, body: NiMcpServerUpdate) =>
     req<{ ok: boolean }>(`/api/ni/mcp-servers/${encodeURIComponent(id)}`, {
       method: "PUT",
-      headers: { "x-sb-local": "1" },
       body: JSON.stringify(body),
     }),
   // 409 with a detail sentence when items still reference this server (surfaced verbatim).
   niMcpDelete: (id: string) =>
     req<{ ok: boolean }>(`/api/ni/mcp-servers/${encodeURIComponent(id)}`, {
       method: "DELETE",
-      headers: { "x-sb-local": "1" },
     }),
 
   // neural interface (ni-format §10). All routes go through req<T> so 423 handling
   // (redirect to /unlock + client state flip) is automatic. The credential PUT is the
-  // one exception: it's Desktop-local (x-sb-local; the WebRTC bridge strips it), so a
+  // one exception: it's Desktop-only (server-checked), so a
   // paired phone cannot enter or replace an item's secret.
   niBoard: () => req<{ items: NiBoardItem[] }>("/api/ni/board"),
   niItem: (id: string) => req<NiItemDetail>(`/api/ni/items/${encodeURIComponent(id)}`),
@@ -1634,13 +1659,12 @@ export const api = {
     }),
   niDelete: (id: string) =>
     req<{ ok: boolean }>(`/api/ni/items/${encodeURIComponent(id)}`, { method: "DELETE" }),
-  // Enter a secret param value. Desktop-local (x-sb-local; the bridge strips it) — a
+  // Enter a secret param value. Desktop-only (server-checked) — a
   // paired phone cannot mint or rotate an NI credential (secrets never travel through
   // chat or tool args either — §10).
   niPutCredential: (id: string, name: string, value: string, host: string) =>
     req<{ ok: boolean }>(`/api/ni/items/${encodeURIComponent(id)}/credential`, {
       method: "PUT",
-      headers: { "x-sb-local": "1" },
       body: JSON.stringify({ name, value, host }),
     }),
   // NI Foreman P1 (2026-09-16): the /ni composer — creation without chat. The
@@ -1649,7 +1673,6 @@ export const api = {
   niIntake: (request: string, sourceUrl?: string) =>
     req<{ id: string; started: boolean }>("/api/ni/intake", {
       method: "POST",
-      headers: { "x-sb-local": "1" },
       body: JSON.stringify(sourceUrl ? { request, source_url: sourceUrl } : { request }),
     }),
   // P3 (2026-09-17): the source-pick card's actions — paste-a-URL (the user's
@@ -1661,51 +1684,45 @@ export const api = {
     req<{ ok: boolean; started: boolean }>(
       `/api/ni/items/${encodeURIComponent(id)}/flow/pick-source`, {
         method: "POST",
-        headers: { "x-sb-local": "1" },
         body: JSON.stringify({ url }),
       }),
   niFlowPickRecipe: (id: string, recipeId: string) =>
     req<{ ok: boolean; state: string }>(
       `/api/ni/items/${encodeURIComponent(id)}/flow/pick-recipe`, {
         method: "POST",
-        headers: { "x-sb-local": "1" },
         body: JSON.stringify({ recipe_id: recipeId }),
       }),
   niFlowFix: (id: string) =>
     req<{ ok: boolean; started: boolean }>(
       `/api/ni/items/${encodeURIComponent(id)}/flow/fix`, {
         method: "POST",
-        headers: { "x-sb-local": "1" },
       }),
   niRefine: (id: string, note: string) =>
     req<{ ok: boolean; kind: string }>(`/api/ni/items/${encodeURIComponent(id)}/refine`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "X-SB-Local": "1" },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ note }),
     }),
   niFlowAnswer: (id: string, kind: string, value: string) =>
     req<{ ok: boolean; started: boolean }>(`/api/ni/items/${encodeURIComponent(id)}/flow/answer`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "X-SB-Local": "1" },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ kind, value }),
     }),
   niFlowReopen: (id: string) =>
     req<{ ok: boolean; state: string }>(`/api/ni/items/${encodeURIComponent(id)}/flow/reopen`, {
       method: "POST",
-      headers: { "X-SB-Local": "1" },
     }),
   niFindings: () =>
-    req<{ findings: NiFinding[] }>("/api/ni/findings", { headers: { "X-SB-Local": "1" } }),
+    req<{ findings: NiFinding[] }>("/api/ni/findings"),
   niResolveFinding: (id: string) =>
     req<{ ok: boolean }>(`/api/ni/findings/${encodeURIComponent(id)}/resolve`, {
       method: "POST",
-      headers: { "X-SB-Local": "1" },
     }),
   niFlowRetry: (id: string) =>
     req<{ id: string; started: boolean }>(
       `/api/ni/items/${encodeURIComponent(id)}/flow/retry`, {
         method: "POST",
-        headers: { "x-sb-local": "1" },
       }),
   // Card-consent (2026-09-15): approve / decline the flow's proposed source from
   // the tile. Desktop-local; the server re-reads the SEALED record (no URL in
@@ -1715,13 +1732,11 @@ export const api = {
     req<{ ok: boolean; state: string; item_state?: string }>(
       `/api/ni/items/${encodeURIComponent(id)}/flow/confirm-source`, {
         method: "POST",
-        headers: { "x-sb-local": "1" },
       }),
   niFlowDeclineSource: (id: string) =>
     req<{ ok: boolean; state: string }>(
       `/api/ni/items/${encodeURIComponent(id)}/flow/decline-source`, {
         method: "POST",
-        headers: { "x-sb-local": "1" },
       }),
   // Fill a NON-secret param value (needs_params, 2026-09-14). Desktop-local like the
   // credential PUT; secrets are refused server-side (they belong to niPutCredential).
@@ -1729,19 +1744,17 @@ export const api = {
     req<{ ok: boolean; needs_params: { name: string; label: string }[] }>(
       `/api/ni/items/${encodeURIComponent(id)}/param`, {
         method: "PUT",
-        headers: { "x-sb-local": "1" },
         body: JSON.stringify({ name, value }),
       }),
 
-  // ni library (ni-format §19/§20). Connect / disconnect / trust-key are Desktop-local
-  // (x-sb-local; the WebRTC bridge strips it) — the paste IS the consent for background
+  // ni library (ni-format §19/§20). Connect / disconnect / trust-key are Desktop-only
+  // (server-checked) — the paste IS the consent for background
   // update checks, so it must come from the machine's owner; mirrors the feeds law.
   // Check-now + install run over any surface (unlock-only) — the pin is already made.
   niLibrary: () => req<NiLibraryState>("/api/ni/library"),
   niLibraryConnect: (url: string) =>
     req<NiLibraryState>("/api/ni/library/connect", {
       method: "POST",
-      headers: { "x-sb-local": "1" },
       body: JSON.stringify({ url }),
     }),
   niLibraryCheck: () =>
@@ -1749,14 +1762,12 @@ export const api = {
   niLibraryDisconnect: () =>
     req<{ ok: boolean }>("/api/ni/library", {
       method: "DELETE",
-      headers: { "x-sb-local": "1" },
     }),
   // Re-pin after KeyChanged — mirrors trustVaultPublisher: the offered fingerprint the
   // user just SAW rides along so a host that rotated AGAIN is refused, not silently pinned.
   niLibraryTrustKey: (offered_fingerprint: string, passphrase: string) =>
     req<NiLibraryState>("/api/ni/library/trust-key", {
       method: "POST",
-      headers: { "x-sb-local": "1" },
       body: JSON.stringify({ offered_fingerprint, passphrase }),
     }),
   // Install a template into the board — lands as a draft (§20 install law); Activate
@@ -1787,28 +1798,27 @@ export const api = {
       `/api/ni/items/${encodeURIComponent(id)}/l2-proposal/dismiss`,
       { method: "POST" },
     ),
-  // Per-card repair-policy toggle (§23). Desktop-local (x-sb-local; the WebRTC bridge
-  // strips it) — a paired phone must not enable outbound-frontier repair on this card.
+  // Per-card repair-policy toggle (§23). Desktop-only (server-checked) — a paired phone
+  // must not enable outbound-frontier repair on this card.
   // Omitted fields leave that lever unchanged; the server enforces default-off for
   // l2_frontier and only pings Claude on real failure once opted in.
   niRepairPolicy: (id: string, body: { l1?: boolean; l2_frontier?: boolean }) =>
     req<{ ok: boolean }>(`/api/ni/items/${encodeURIComponent(id)}/repair-policy`, {
       method: "POST",
-      headers: { "x-sb-local": "1" },
       body: JSON.stringify(body),
     }),
 
   // device pairing (remote access via WebRTC)
-  // Enrolling/revoking devices + hosting a pairing session are Desktop-local only (x-sb-local;
-  // the WebRTC bridge strips it), so a paired phone can't self-mint a credential or revoke the
+  // Enrolling/revoking devices + hosting a pairing session are Desktop-only (server-checked),
+  // so a paired phone can't self-mint a credential or revoke the
   // Desktop's devices (Security B8). The metadata reads (listDevices, pairCodeStatus) stay open.
   listDevices: () => req<{ devices: DeviceInfo[] }>("/api/devices"),
   createDevice: (label: string) =>
-    req<PairingResponse>("/api/devices", { method: "POST", headers: { "x-sb-local": "1" }, body: JSON.stringify({ label }) }),
+    req<PairingResponse>("/api/devices", { method: "POST", body: JSON.stringify({ label }) }),
   deleteDevice: (id: string) =>
-    req<{ ok: boolean }>(`/api/devices/${encodeURIComponent(id)}`, { method: "DELETE", headers: { "x-sb-local": "1" } }),
+    req<{ ok: boolean }>(`/api/devices/${encodeURIComponent(id)}`, { method: "DELETE" }),
   startPairCode: (label: string) =>
-    req<{ code: string; expires_in: number; signaling_url: string }>("/api/devices/pair-code", { method: "POST", headers: { "x-sb-local": "1" }, body: JSON.stringify({ label }) }),
-  cancelPairCode: () => req<{ ok: boolean }>("/api/devices/pair-code", { method: "DELETE", headers: { "x-sb-local": "1" } }),
+    req<{ code: string; expires_in: number; signaling_url: string }>("/api/devices/pair-code", { method: "POST", body: JSON.stringify({ label }) }),
+  cancelPairCode: () => req<{ ok: boolean }>("/api/devices/pair-code", { method: "DELETE" }),
   pairCodeStatus: () => req<{ state: "none" | "waiting" | "paired" | "expired" }>("/api/devices/pair-code"),
 };

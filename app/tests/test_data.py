@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 
 from smartbrain_3000 import db as dbmod
 from smartbrain_3000 import keyvault
+from smartbrain_3000.auth import relay_headers
 from smartbrain_3000.history import ChatHistory
 from smartbrain_3000.kb import KnowledgeBase
 from smartbrain_3000.memory import MemoryStore
@@ -19,9 +20,8 @@ from smartbrain_3000.planner import Planner
 from smartbrain_3000.scheduler import ScheduleStore
 from smartbrain_3000.secrets import SecretStore
 
-# B8: the Desktop-local marker the real UI sends; the WebRTC bridge filters it
-# out, so a bridged-in request lacks it and is refused with 403.
-_LOCAL = {"X-SB-Local": "1"}
+# B8: Desktop-only routes refuse a bridged-in request, which carries phone authority (R14).
+_PHONE = relay_headers("phone-under-test")  # R14: phone authority (the relay credential)
 
 
 @pytest.fixture()
@@ -80,7 +80,8 @@ def test_reset_passphrase_after_recovery_unlock(client: TestClient) -> None:
     kit = client.post("/api/account/setup", json={"passphrase": "correct-horse"}).json()
     client.post("/api/account/lock")
     assert client.post("/api/account/unlock", json={"recovery_key": kit["recovery_key"]}).json()["unlocked"]
-    assert client.post("/api/account/passphrase/reset", json={"new_passphrase": "brand-new-pass"}, headers=_LOCAL).json()["ok"]
+    assert client.post("/api/account/passphrase/reset",
+                       json={"new_passphrase": "brand-new-pass", "recovery_key": kit["recovery_key"]}).json()["ok"]
     client.post("/api/account/lock")
     assert client.post("/api/account/unlock", json={"passphrase": "correct-horse"}).status_code == 401
     assert client.post("/api/account/unlock", json={"passphrase": "brand-new-pass"}).json()["unlocked"]
@@ -89,16 +90,19 @@ def test_reset_passphrase_after_recovery_unlock(client: TestClient) -> None:
 def test_reset_passphrase_requires_unlock(client: TestClient) -> None:
     client.post("/api/account/setup", json={"passphrase": "correct-horse"})
     client.post("/api/account/lock")
-    assert client.post("/api/account/passphrase/reset", json={"new_passphrase": "brand-new-pass"}, headers=_LOCAL).status_code == 423
+    assert client.post("/api/account/passphrase/reset",
+                       json={"new_passphrase": "brand-new-pass", "recovery_key": "irrelevant-while-locked"}).status_code == 423
 
 
 def test_reset_passphrase_refused_from_bridge(client: TestClient) -> None:
-    # B8: a bridge-origin request (no X-SB-Local marker — the bridge strips it)
+    # B8: a bridge-origin request (phone authority — R14)
     # must be refused even though the session is unlocked.
     kit = client.post("/api/account/setup", json={"passphrase": "correct-horse"}).json()
     client.post("/api/account/lock")
     client.post("/api/account/unlock", json={"recovery_key": kit["recovery_key"]})
-    r = client.post("/api/account/passphrase/reset", json={"new_passphrase": "brand-new-pass"})
+    r = client.post("/api/account/passphrase/reset",
+                    json={"new_passphrase": "brand-new-pass", "recovery_key": kit["recovery_key"]},
+                    headers=_PHONE)
     assert r.status_code == 403
 
 
@@ -106,7 +110,7 @@ def test_reset_passphrase_refused_from_bridge(client: TestClient) -> None:
 
 def test_export_requires_unlock(client: TestClient) -> None:
     # Desktop-local but locked -> 423 (the unlock check precedes the passphrase re-auth).
-    assert client.post("/api/export", json={"passphrase": "x"}, headers=_LOCAL).status_code == 423
+    assert client.post("/api/export", json={"passphrase": "x"}).status_code == 423
 
 
 def test_export_contains_user_data(client: TestClient) -> None:
@@ -114,7 +118,7 @@ def test_export_contains_user_data(client: TestClient) -> None:
     client.post("/api/kb", json={"title": "Note", "content": "buy oat milk"})
     client.post("/api/tasks", json={"title": "call dentist", "notes": "", "due_date": None})
     client.post("/api/memories", json={"text": "likes tea"})
-    data = client.post("/api/export", json={"passphrase": "correct-horse"}, headers=_LOCAL).json()
+    data = client.post("/api/export", json={"passphrase": "correct-horse"}).json()
     assert data["schema"] == "smartbrain-export-v1"
     assert any(d["content"] == "buy oat milk" for d in data["knowledge"])
     assert any(t["title"] == "call dentist" for t in data["tasks"])
@@ -124,12 +128,12 @@ def test_export_contains_user_data(client: TestClient) -> None:
 # --- backup ---------------------------------------------------------------
 
 def test_backup_requires_unlock(client: TestClient) -> None:
-    assert client.post("/api/backup", json={"passphrase": "x"}, headers=_LOCAL).status_code == 423
+    assert client.post("/api/backup", json={"passphrase": "x"}).status_code == 423
 
 
 def test_backup_returns_duckdb_file(client: TestClient) -> None:
     client.post("/api/account/setup", json={"passphrase": "correct-horse"})
-    r = client.post("/api/backup", json={"passphrase": "correct-horse"}, headers=_LOCAL)
+    r = client.post("/api/backup", json={"passphrase": "correct-horse"})
     assert r.status_code == 200
     assert r.headers["content-disposition"].endswith('smartbrain-backup.duckdb"')
     assert len(r.content) > 0
@@ -139,28 +143,28 @@ def test_backup_returns_duckdb_file(client: TestClient) -> None:
 
 def test_restore_rejects_non_backup(client: TestClient) -> None:
     client.post("/api/account/setup", json={"passphrase": "correct-horse"})
-    assert client.post("/api/restore", content=b"not a duckdb file", headers=_LOCAL).status_code == 400
+    assert client.post("/api/restore", content=b"not a duckdb file").status_code == 400
 
 
 def test_restore_blocked_when_locked(client: TestClient) -> None:
     client.post("/api/account/setup", json={"passphrase": "correct-horse"})
     client.post("/api/account/lock")
-    assert client.post("/api/restore", content=b"anything", headers=_LOCAL).status_code == 423
+    assert client.post("/api/restore", content=b"anything").status_code == 423
 
 
 def test_restore_stages_a_valid_backup(client: TestClient) -> None:
     client.post("/api/account/setup", json={"passphrase": "correct-horse"})
-    backup = client.post("/api/backup", json={"passphrase": "correct-horse"}, headers=_LOCAL).content
-    r = client.post("/api/restore", content=backup, headers=_LOCAL)
+    backup = client.post("/api/backup", json={"passphrase": "correct-horse"}).content
+    r = client.post("/api/restore", content=backup)
     assert r.status_code == 200 and r.json()["ok"]
 
 
 def test_restore_refused_from_bridge(client: TestClient) -> None:
-    # B8: a bridge-origin restore (no X-SB-Local marker) must be refused — even
+    # B8: a bridge-origin restore (phone authority) must be refused — even
     # for a valid backup body — so a paired remote device cannot overwrite the vault.
     client.post("/api/account/setup", json={"passphrase": "correct-horse"})
-    backup = client.post("/api/backup", json={"passphrase": "correct-horse"}, headers=_LOCAL).content
-    r = client.post("/api/restore", content=backup)
+    backup = client.post("/api/backup", json={"passphrase": "correct-horse"}).content
+    r = client.post("/api/restore", content=backup, headers=_PHONE)
     assert r.status_code == 403
 
 
@@ -171,14 +175,14 @@ def test_restore_streams_large_body_without_buffering(client: TestClient, monkey
     client.post("/api/account/setup", json={"passphrase": "correct-horse"})
     # Obtain the backup BEFORE patching request.body (the POST /api/backup re-auth
     # body itself is parsed via request.body()); the patch targets only the restore.
-    backup = client.post("/api/backup", json={"passphrase": "correct-horse"}, headers=_LOCAL).content
+    backup = client.post("/api/backup", json={"passphrase": "correct-horse"}).content
     from starlette.requests import Request as StarletteRequest
 
     def _boom(self):
         raise AssertionError("restore must stream the body, not buffer it")
 
     monkeypatch.setattr(StarletteRequest, "body", _boom)
-    r = client.post("/api/restore", content=backup, headers=_LOCAL)
+    r = client.post("/api/restore", content=backup)
     assert r.status_code == 200 and r.json()["ok"]
 
 
@@ -238,7 +242,7 @@ def test_backup_works_with_hyphenated_db_path(tmp_path, monkeypatch) -> None:
 
     with TestClient(create_app()) as client:
         client.post("/api/account/setup", json={"passphrase": "correct-horse"})
-        r = client.post("/api/backup", json={"passphrase": "correct-horse"}, headers=_LOCAL)
+        r = client.post("/api/backup", json={"passphrase": "correct-horse"})
         assert r.status_code == 200 and len(r.content) > 0
 
 
@@ -251,7 +255,7 @@ def test_backup_cleans_up_temp_file(tmp_path, monkeypatch) -> None:
 
     with TestClient(create_app()) as client:
         client.post("/api/account/setup", json={"passphrase": "correct-horse"})
-        r = client.post("/api/backup", json={"passphrase": "correct-horse"}, headers=_LOCAL)
+        r = client.post("/api/backup", json={"passphrase": "correct-horse"})
         assert r.status_code == 200 and len(r.content) > 0
     # TestClient runs the BackgroundTask synchronously after the response is read.
     leftovers = [p.name for p in tmp_path.iterdir() if p.name.startswith("sb_backup_")]
@@ -589,7 +593,7 @@ def test_app_boots_and_serves_data_after_v12_upgrade(tmp_path, monkeypatch) -> N
     with TestClient(create_app()) as boot_client:
         assert boot_client.get("/api/health").json()["status"] == "ok"
         assert boot_client.post("/api/account/unlock", json={"passphrase": _UP_PASS}).status_code == 200
-        data = boot_client.post("/api/export", json={"passphrase": _UP_PASS}, headers=_LOCAL).json()
+        data = boot_client.post("/api/export", json={"passphrase": _UP_PASS}).json()
         assert any(d["content"] == _UP_DOC for d in data["knowledge"])
         assert any(t["title"] == _UP_TASK for t in data["tasks"])
         assert _UP_MEMORY in data["memories"]

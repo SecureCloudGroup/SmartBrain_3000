@@ -23,11 +23,12 @@ from fastapi.testclient import TestClient
 
 from smartbrain_3000 import db as dbmod
 from smartbrain_3000 import keyvault
+from smartbrain_3000.auth import relay_headers
 from smartbrain_3000.kb import KnowledgeBase
 from smartbrain_3000.memory import MemoryStore
 from smartbrain_3000.planner import Planner
 
-_LOCAL = {"X-SB-Local": "1"}  # Desktop-local marker required by /api/restore
+_PHONE = relay_headers("phone-under-test")  # R14: phone authority (the relay credential)
 
 _PASS = "backup-recovery-pass-123"
 # Distinctive sentinels so a confidentiality check can scan raw bytes for leaks.
@@ -71,8 +72,8 @@ def _seed_via_app(c: TestClient) -> None:
 
 
 def _export(c: TestClient, cred: dict | None = None) -> dict:
-    """POST /api/export with the Desktop-local marker + a re-auth credential."""
-    r = c.post("/api/export", json=(cred or {"passphrase": _PASS}), headers=_LOCAL)
+    """POST /api/export with Desktop authority + a re-auth credential."""
+    r = c.post("/api/export", json=(cred or {"passphrase": _PASS}))
     assert r.status_code == 200, r.text
     return r.json()
 
@@ -99,7 +100,7 @@ def _make_seeded_backup(path, monkeypatch) -> tuple[bytes, dict, dict]:
     with TestClient(create_app()) as ca:
         kit = ca.post("/api/account/setup", json={"passphrase": _PASS}).json()
         _seed_via_app(ca)
-        backup = ca.post("/api/backup", json={"passphrase": _PASS}, headers=_LOCAL)
+        backup = ca.post("/api/backup", json={"passphrase": _PASS})
         assert backup.status_code == 200 and backup.content
         src_counts = {
             t: ca.app.state.db.execute(f"SELECT COUNT(*) FROM {t};").fetchone()[0] for t in _TABLES
@@ -113,7 +114,7 @@ def _stage_restore(path, monkeypatch, backup_bytes: bytes) -> None:
     from smartbrain_3000.main import create_app
 
     with TestClient(create_app()) as cb:
-        r = cb.post("/api/restore", content=backup_bytes, headers=_LOCAL)
+        r = cb.post("/api/restore", content=backup_bytes)
         assert r.status_code == 200 and r.json()["ok"], r.text
     assert dbmod.staged_restore_path(path).exists()  # staged, awaiting next boot
 
@@ -231,7 +232,8 @@ def test_recovery_key_survives_passphrase_reset(client: TestClient) -> None:
     client.post("/api/account/lock")
     client.post("/api/account/unlock", json={"recovery_key": kit["recovery_key"]})
     assert client.post(
-        "/api/account/passphrase/reset", json={"new_passphrase": "brand-new-pass-xyz"}, headers=_LOCAL
+        "/api/account/passphrase/reset",
+        json={"new_passphrase": "brand-new-pass-xyz", "recovery_key": kit["recovery_key"]}
     ).json()["ok"]
     client.post("/api/account/lock")
     # The ORIGINAL Recovery Key still unlocks the re-wrapped vault, and data is intact.
@@ -258,7 +260,8 @@ def test_data_survives_passphrase_change_and_reset(client: TestClient) -> None:
     client.post("/api/account/lock")
     client.post("/api/account/unlock", json={"recovery_key": kit["recovery_key"]})
     assert client.post(
-        "/api/account/passphrase/reset", json={"new_passphrase": "reset-pass-2"}, headers=_LOCAL
+        "/api/account/passphrase/reset",
+        json={"new_passphrase": "reset-pass-2", "recovery_key": kit["recovery_key"]}
     ).json()["ok"]
     client.post("/api/account/lock")
     assert client.post("/api/account/unlock", json={"passphrase": "reset-pass-2"}).json()["unlocked"]
@@ -318,7 +321,7 @@ def test_backup_file_leaks_no_plaintext_client_data(client: TestClient, tmp_path
     client.post("/api/kb", json={"title": "Lease", "content": _DOC})
     client.post("/api/memories", json={"text": _MEM})
     client.app.state.secret_store.put(_SECRET_KEY, _SECRET_VAL)
-    backup = client.post("/api/backup", json={"passphrase": _PASS}, headers=_LOCAL).content
+    backup = client.post("/api/backup", json={"passphrase": _PASS}).content
     f = tmp_path / "leak.duckdb"
     f.write_bytes(backup)
 
@@ -430,8 +433,8 @@ def test_truncated_backup_rejected_live_db_intact(client: TestClient) -> None:
     # must never displace the live vault.
     client.post("/api/account/setup", json={"passphrase": _PASS})
     client.post("/api/kb", json={"title": "Lease", "content": _DOC})
-    backup = client.post("/api/backup", json={"passphrase": _PASS}, headers=_LOCAL).content
-    r = client.post("/api/restore", content=backup[:512], headers=_LOCAL)
+    backup = client.post("/api/backup", json={"passphrase": _PASS}).content
+    r = client.post("/api/restore", content=backup[:512])
     assert r.status_code == 400  # not a valid SmartBrain backup
     # Live vault still serves its data; nothing was staged.
     assert any(d["content"] == _DOC for d in _export(client)["knowledge"])
@@ -466,7 +469,7 @@ def test_restore_rejects_future_schema_backup(client: TestClient, tmp_path) -> N
     client.post("/api/kb", json={"title": "Lease", "content": _DOC})
     future = tmp_path / "future.duckdb"
     _make_future_schema_db(future)
-    r = client.post("/api/restore", content=future.read_bytes(), headers=_LOCAL)
+    r = client.post("/api/restore", content=future.read_bytes())
     assert r.status_code == 400 and "newer version" in r.json()["detail"]
     assert not dbmod.staged_restore_path(dbmod.resolve_db_path()).exists()  # never staged
     assert any(d["content"] == _DOC for d in _export(client)["knowledge"])  # live intact
@@ -475,29 +478,29 @@ def test_restore_rejects_future_schema_backup(client: TestClient, tmp_path) -> N
 # --- egress hardening: bridge guard + passphrase re-auth on backup/export ---
 
 def test_backup_and_export_refused_from_bridge(client: TestClient) -> None:
-    # A bridged-in paired remote device (no X-SB-Local marker) must never be able to
+    # A bridged-in paired remote device (phone authority) must never be able to
     # pull the whole vault file or the decrypted plaintext, even with a valid passphrase.
     client.post("/api/account/setup", json={"passphrase": _PASS})
-    assert client.post("/api/backup", json={"passphrase": _PASS}).status_code == 403
-    assert client.post("/api/export", json={"passphrase": _PASS}).status_code == 403
+    assert client.post("/api/backup", json={"passphrase": _PASS}, headers=_PHONE).status_code == 403
+    assert client.post("/api/export", json={"passphrase": _PASS}, headers=_PHONE).status_code == 403
 
 
 def test_backup_and_export_require_correct_passphrase(client: TestClient) -> None:
     # Desktop-local + unlocked is not enough: the passphrase must be re-entered.
     client.post("/api/account/setup", json={"passphrase": _PASS})
-    assert client.post("/api/backup", json={"passphrase": "wrong-pass"}, headers=_LOCAL).status_code == 401
-    assert client.post("/api/export", json={"passphrase": "wrong-pass"}, headers=_LOCAL).status_code == 401
-    assert client.post("/api/export", json={}, headers=_LOCAL).status_code == 400  # passphrase required
+    assert client.post("/api/backup", json={"passphrase": "wrong-pass"}).status_code == 401
+    assert client.post("/api/export", json={"passphrase": "wrong-pass"}).status_code == 401
+    assert client.post("/api/export", json={}).status_code == 400  # passphrase required
     # The correct passphrase still works.
-    assert client.post("/api/backup", json={"passphrase": _PASS}, headers=_LOCAL).status_code == 200
+    assert client.post("/api/backup", json={"passphrase": _PASS}).status_code == 200
 
 
 def test_backup_and_export_accept_recovery_key(client: TestClient) -> None:
     # A user who unlocked via the Recovery Key (forgot passphrase) can still re-auth egress.
     kit = client.post("/api/account/setup", json={"passphrase": _PASS}).json()
     assert client.post(
-        "/api/backup", json={"recovery_key": kit["recovery_key"]}, headers=_LOCAL
+        "/api/backup", json={"recovery_key": kit["recovery_key"]}
     ).status_code == 200
     assert client.post(
-        "/api/export", json={"recovery_key": kit["recovery_key"]}, headers=_LOCAL
+        "/api/export", json={"recovery_key": kit["recovery_key"]}
     ).status_code == 200

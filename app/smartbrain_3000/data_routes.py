@@ -26,6 +26,10 @@ from starlette.background import BackgroundTask
 
 from . import db, keyvault
 
+# Desktop-only check: ONE implementation, in account (R14 — credential authority,
+# not a header). Re-exported so feed_routes / vault_routes imports keep working.
+from .account import _require_desktop_local
+
 router = APIRouter()
 
 
@@ -37,21 +41,6 @@ class ReauthRequest(BaseModel):
 
 _RESTORE_MAX = 1024 * 1024 * 1024  # 1 GiB cap on an uploaded restore (bounded)
 _RESTORE_CHUNK = 1024 * 1024  # 1 MiB read chunk while streaming an upload to disk
-# B8: marker the real Desktop UI sets that the WebRTC bridge cannot forward. The
-# bridge (webrtc_bridge.parse_request) filters peer headers to a tiny allowlist
-# (content-type/accept/accept-language); anything else is dropped, so a bridged-in
-# request cannot carry this header. See ``account._require_desktop_local`` for
-# the matching helper used by the passphrase-reset endpoint.
-_LOCAL_HEADER = "x-sb-local"
-
-
-def _require_desktop_local(request: Request) -> None:
-    """Refuse requests that arrived via the WebRTC bridge (guards export/backup/restore)."""
-    assert request is not None, "request required"
-    marker = request.headers.get(_LOCAL_HEADER)
-    assert isinstance(marker, str) or marker is None, "header must be a string or absent"
-    if marker != "1":
-        raise HTTPException(status_code=403, detail="this endpoint is Desktop-local only")
 
 
 def _stores(request: Request):

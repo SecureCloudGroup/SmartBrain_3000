@@ -28,9 +28,10 @@ from fastapi.testclient import TestClient
 
 from smartbrain_3000 import db as dbmod
 from smartbrain_3000 import ni, ni_mcp
+from smartbrain_3000.auth import relay_headers
 from smartbrain_3000.secrets import gen_master_key
 
-_LOCAL = {"x-sb-local": "1"}
+_PHONE = relay_headers("phone-under-test")  # R14: phone authority (the relay credential)
 
 
 # --- fixtures ----------------------------------------------------------------
@@ -402,41 +403,40 @@ def test_routes_require_unlock(tmp_path, monkeypatch) -> None:
     with TestClient(create_app()) as tc:
         assert tc.get("/api/ni/mcp-servers").status_code == 423
         r = tc.post("/api/ni/mcp-servers", json={"label": "x", "transport": "stdio",
-                                                  "command": "/bin/true"},
-                    headers=_LOCAL)
+                                                  "command": "/bin/true"})
         assert r.status_code == 423
 
 
 def test_routes_desktop_local_on_writes(client: TestClient) -> None:
-    """POST/PUT/DELETE all require the desktop-local header (X-SB-Local)."""
-    # POST without the header → 403
-    r = client.post("/api/ni/mcp-servers",
+    """POST/PUT/DELETE all require Desktop authority (a phone is refused)."""
+    # POST from a phone → 403
+    r = client.post("/api/ni/mcp-servers", headers=_PHONE,
                     json={"label": "x", "transport": "stdio", "command": "/bin/true"})
     assert r.status_code == 403
-    # POST with the header succeeds
-    r = client.post("/api/ni/mcp-servers", headers=_LOCAL,
+    # POST from the Desktop succeeds
+    r = client.post("/api/ni/mcp-servers",
                     json={"label": "x", "transport": "stdio",
                           "command": "/bin/true", "args": []})
     assert r.status_code == 200, r.text
     sid = r.json()["id"]
-    # PUT without the header → 403
-    assert client.put(f"/api/ni/mcp-servers/{sid}",
+    # PUT from a phone → 403
+    assert client.put(f"/api/ni/mcp-servers/{sid}", headers=_PHONE,
                       json={"label": "y", "transport": "stdio",
                             "command": "/bin/true"}).status_code == 403
-    # DELETE without the header → 403
-    assert client.delete(f"/api/ni/mcp-servers/{sid}").status_code == 403
+    # DELETE from a phone → 403
+    assert client.delete(f"/api/ni/mcp-servers/{sid}", headers=_PHONE).status_code == 403
 
 
 def test_routes_crud_roundtrip(client: TestClient) -> None:
     """POST → list → PUT → list → DELETE walks the whole surface."""
-    r = client.post("/api/ni/mcp-servers", headers=_LOCAL,
+    r = client.post("/api/ni/mcp-servers",
                     json={"label": "a", "transport": "stdio",
                           "command": "/bin/true", "args": []})
     assert r.status_code == 200
     sid = r.json()["id"]
     listing = client.get("/api/ni/mcp-servers").json()
     assert len(listing["servers"]) == 1 and listing["servers"][0]["label"] == "a"
-    r = client.put(f"/api/ni/mcp-servers/{sid}", headers=_LOCAL,
+    r = client.put(f"/api/ni/mcp-servers/{sid}",
                    json={"label": "b", "transport": "stdio",
                          "command": "/bin/false", "args": ["--flag"],
                          "enabled": False})
@@ -444,14 +444,14 @@ def test_routes_crud_roundtrip(client: TestClient) -> None:
     listing = client.get("/api/ni/mcp-servers").json()
     assert listing["servers"][0]["command"] == "/bin/false"
     assert listing["servers"][0]["enabled"] is False
-    r = client.delete(f"/api/ni/mcp-servers/{sid}", headers=_LOCAL)
+    r = client.delete(f"/api/ni/mcp-servers/{sid}")
     assert r.status_code == 200
     assert client.get("/api/ni/mcp-servers").json()["servers"] == []
 
 
 def test_delete_in_use_returns_409(client: TestClient) -> None:
     """An item referencing this server pins its registry entry — DELETE returns 409."""
-    r = client.post("/api/ni/mcp-servers", headers=_LOCAL,
+    r = client.post("/api/ni/mcp-servers",
                     json={"label": "a", "transport": "stdio",
                           "command": "/bin/true", "args": []})
     sid = r.json()["id"]
@@ -468,19 +468,19 @@ def test_delete_in_use_returns_409(client: TestClient) -> None:
             "repair_policy": {"l1": True, "l2_frontier": False},
             "model": None}
     client.app.state.ni.add_item(spec, {"text": "preview"}, origin="user")
-    r = client.delete(f"/api/ni/mcp-servers/{sid}", headers=_LOCAL)
+    r = client.delete(f"/api/ni/mcp-servers/{sid}")
     assert r.status_code == 409
     assert "reference" in r.json()["detail"]
 
 
 def test_delete_unknown_returns_404(client: TestClient) -> None:
-    r = client.delete("/api/ni/mcp-servers/no-such-id", headers=_LOCAL)
+    r = client.delete("/api/ni/mcp-servers/no-such-id")
     assert r.status_code == 404
 
 
 def test_add_bad_config_returns_400(client: TestClient) -> None:
     """Registry ValueError classes surface as 400 through the route wrapper."""
-    r = client.post("/api/ni/mcp-servers", headers=_LOCAL,
+    r = client.post("/api/ni/mcp-servers",
                     json={"label": "x", "transport": "http",
                           "url": "not-a-url"})
     assert r.status_code == 400
@@ -488,7 +488,7 @@ def test_add_bad_config_returns_400(client: TestClient) -> None:
 
 def test_audit_row_metadata_only(client: TestClient) -> None:
     """§22: the audit trail may name label + transport, NEVER command / url."""
-    r = client.post("/api/ni/mcp-servers", headers=_LOCAL,
+    r = client.post("/api/ni/mcp-servers",
                     json={"label": "internal", "transport": "http",
                           "url": "http://10.0.0.5:9000/mcp/secret-endpoint"})
     assert r.status_code == 200, r.text

@@ -63,7 +63,7 @@
 
   // --- Outbound MCP servers (ni-format §22) --------------------------------------------------
   // A registry of MCP servers the operator explicitly configured so Neural Interface cards can
-  // call their tools as a source. Every write is Desktop-local (x-sb-local); the /settings tree
+  // call their tools as a source. Every write is Desktop-only (server-checked); the /settings tree
   // is already hidden behind the "manage on your Desktop" card for remote sessions, so no extra
   // gate here — a paired phone never sees this form. Add-form state lives beside the list.
   let servers = $state<NiMcpServer[]>([]);

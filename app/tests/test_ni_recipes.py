@@ -481,8 +481,7 @@ def test_board_row_needs_credentials_empty_after_credential_written(
     # Desktop-local PUT writes the credential; needs_credentials empties.
     r = client.put(f"/api/ni/items/{iid}/credential",
                    json={"name": "api_key", "value": "sk-xyz",
-                         "host": "finnhub.io"},
-                   headers={"X-SB-Local": "1"})
+                         "host": "finnhub.io"})
     assert r.status_code == 200, r.text
     board = client.get("/api/ni/board").json()
     row = next(i for i in board["items"] if i["id"] == iid)

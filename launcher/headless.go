@@ -143,6 +143,9 @@ func cmdStop() int {
 func cmdStatus() int {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	// A status probe is not the launcher's handshake: an authorized one with nothing
+	// staged tells the app the launcher WITHDREW its update offer (stack/token.go).
+	stack.LocalAPIToken = ""
 	running, _, ok := stack.Handshake(ctx, sb.Port, "")
 	if !ok {
 		fmt.Println("not running")

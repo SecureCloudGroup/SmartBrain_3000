@@ -44,8 +44,9 @@ ffmpeg + gifsicle. Copy `out/*.gif` into `docs/assets/gifs/` + `web/static/asset
   `/v1/chat/completions` with tool-calls, `/v1/embeddings`, Bifrost admin, Ollama `/api/tags`, `/reset`).
 - `clips.js` — the eleven storyboards (`node clips.js 01`…`10`).
 - `docshots.js` — the seven committed guide screenshots (docs/assets + web/static/assets); the
-  update-banner shot plays the launcher by stamping `x-smartbrain-update` on the page's own
-  health probes — recorder-only, nothing in the app is faked.
+  update-banner shot plays the launcher with its own handshake (the launcher header plus the
+  local token `run.sh` exports as `SB_LOCAL_TOKEN`, so run it through `run.sh`) — recorder-only,
+  nothing in the app is faked.
 - `run.sh` — per-clip demo state + record + encode.
 
 ## Conventions (see the planning spec in git history of c7c2112)

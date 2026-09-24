@@ -13,6 +13,11 @@ describe("describeError", () => {
     expect(describeError(new ApiError(423, "locked"))).toBe("");
   });
 
+  it("returns empty string for a 401 no_session (api.ts already navigated to /unlock)", () => {
+    expect(describeError(new ApiError(401, "session required", "no_session"))).toBe("");
+    expect(describeError(new ApiError(401, "incorrect recovery key"))).toBe("incorrect recovery key");
+  });
+
   it("maps 502/503/504 to the 'couldn't reach the model' sentence", () => {
     const msg = "I couldn't reach the model just now — try again in a moment.";
     expect(describeError(new ApiError(502, "bad gateway"))).toBe(msg);

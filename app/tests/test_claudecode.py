@@ -17,6 +17,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from smartbrain_3000 import claudecli, gateway
+from smartbrain_3000.auth import relay_headers
+
+_PHONE = relay_headers("phone-under-test")  # R14: phone authority (the relay credential)
 
 
 class _FakeStore:
@@ -579,7 +582,7 @@ def test_update_endpoint(client: TestClient, monkeypatch) -> None:
     _unlock(client)
     monkeypatch.setattr(claudecli, "update",
                         lambda **k: {"ok": True, "output": "already current", "version": "2.1.148"})
-    body = client.post("/api/local-models/claudecode/update", headers={"x-sb-local": "1"}).json()
+    body = client.post("/api/local-models/claudecode/update").json()
     assert body["ok"] is True and body["version"] == "2.1.148"
 
 
@@ -587,7 +590,7 @@ def test_update_endpoint_is_desktop_local_only(client: TestClient) -> None:
     """Installing software must not be reachable from a paired phone (the remote
     bridge forwards everything under /api) — mirrors /api/update/install."""
     _unlock(client)
-    assert client.post("/api/local-models/claudecode/update").status_code == 403
+    assert client.post("/api/local-models/claudecode/update", headers=_PHONE).status_code == 403
 
 
 # --- Turn-scoped session continuity (docs/internal/ni-format.md §28) ---------

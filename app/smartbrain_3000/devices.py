@@ -210,6 +210,11 @@ def verify_device(store, device_id: str, credential: str, now: datetime.datetime
         return False
     try:
         _stamp_last_seen(store, device_id, rec, now or datetime.datetime.now(datetime.UTC))
+        # Devices paired before the digest set existed (v0.9.35) have no digest, and a
+        # connected phone needs one once the Desktop locks (webrtc_peer: revocation is
+        # checked via the digests then) — record it on the first auth that proves it.
+        if not is_known_device_id(device_id):
+            _update_known(device_id, add=True)
     except Exception as exc:  # bookkeeping must never fail an otherwise valid auth
         log.warning("devices: last_seen stamp failed: %s", type(exc).__name__)
     return True

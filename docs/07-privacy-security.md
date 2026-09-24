@@ -23,6 +23,12 @@ control. Here's the model in plain terms, including the real world limits.
 - **Loopback-only.** The app binds to `localhost` and validates the request host,
   which blocks DNS-rebinding attacks from web pages you visit. It isn't exposed to
   your network.
+- **Every request needs a credential.** Being unlocked isn't enough on its own: each
+  call must come from a browser that opened SmartBrain with your passphrase (it gets a
+  session cookie other sites can't send, cleared when the app restarts), from the
+  launcher with its private token, or from your paired phone over its authenticated
+  connection. Another account on the same computer can't use the app, even while it's
+  unlocked.
 - **Approval gates.** The assistant can read freely but can't change data or reach
   out (send email, delete, fetch the web) without your explicit approval, with an
   extra confirm for irreversible actions. Everything it attempts is audited. A parked
@@ -173,7 +179,10 @@ Two things that sound like they'd leave and don't:
 ## Honest limits
 
 - **Your host machine.** If your computer or OS is compromised, local encryption
-  can't fully protect a running, unlocked session. Keep your machine secure.
+  can't fully protect a running, unlocked session. The request credential keeps other
+  accounts and web pages out, not software running under your own account: that can
+  read the launcher's token and your browser's cookies just as you can. Keep your
+  machine secure.
 - **No recovery backdoor.** Lose both your passphrase and Recovery Key and the data
   is unrecoverable — by design. Keep the Emergency Kit safe and offline.
 - **Prompt injection.** Content the assistant reads (web pages, emails, documents,

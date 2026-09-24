@@ -17,6 +17,7 @@
   let showReset = $state(false);
   let resetNext = $state("");
   let resetConfirm = $state("");
+  let resetKey = $state(""); // R14: the reset re-proves the Recovery Key
   let resetMsg = $state("");
 
   function focusById(id: string) {
@@ -60,6 +61,11 @@
       focusById("pw-reset-next");
       return;
     }
+    if (!resetKey.trim()) {
+      error = "Enter your Recovery Key to set a new passphrase.";
+      focusById("pw-reset-key");
+      return;
+    }
     if (resetNext !== resetConfirm) {
       error = "New passphrase and confirmation do not match.";
       focusById("pw-reset-confirm");
@@ -67,9 +73,9 @@
     }
     busy = true;
     try {
-      await api.resetPassphrase(resetNext);
+      await api.resetPassphrase(resetNext, resetKey.trim());
       resetMsg = "Passphrase set. You can now unlock with it.";
-      resetNext = resetConfirm = "";
+      resetNext = resetConfirm = resetKey = "";
       showReset = false;
     } catch (err) {
       error = describeError(err);
@@ -246,10 +252,11 @@
     </p>
   {:else}
     <form onsubmit={resetPassphrase} style="display:flex; flex-direction:column; gap:0.5rem; max-width:28rem; margin-top:0.75rem">
-      <p class="muted" style="margin:0">Set a new passphrase using your current unlocked session — no current passphrase needed.</p>
+      <p class="muted" style="margin:0">Set a new passphrase with your Recovery Key — no current passphrase needed.</p>
+      <input id="pw-reset-key" type="password" bind:value={resetKey} placeholder="Recovery Key" aria-label="Recovery Key" autocomplete="off" />
       <input id="pw-reset-next" type="password" bind:value={resetNext} placeholder="New passphrase (min 8)" aria-label="New passphrase" autocomplete="new-password" />
       <input id="pw-reset-confirm" type="password" bind:value={resetConfirm} placeholder="Confirm new passphrase" aria-label="Confirm new passphrase" autocomplete="new-password" />
-      <button disabled={busy || !resetNext} type="submit">Set new passphrase</button>
+      <button disabled={busy || !resetNext || !resetKey} type="submit">Set new passphrase</button>
     </form>
   {/if}
   {#if resetMsg}<p class="notice">{resetMsg}</p>{/if}

@@ -11,6 +11,44 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Security
+
+- **Every request to the app now needs a credential; being unlocked is no longer
+  enough.** Until now, while SmartBrain was unlocked, any program on the computer
+  could use the app through its local address, including one run by another
+  account on a shared machine. The actions meant only for the Desktop (pairing a
+  device, reading the MCP token, setting a new passphrase) trusted a fixed marker
+  that any program could send. Now each request carries one of three credentials:
+  the session a browser gets when you enter your passphrase (a cookie other sites
+  can't send; an app restart clears it), the launcher's private local token, or a
+  paired phone's authenticated connection. Desktop-only actions check which one it
+  is.
+  - **What you'll notice:** a second browser or browser profile asks for your
+    passphrase once per app run (**Open SmartBrain here**), even while the vault is
+    unlocked. Unlocking from your phone still brings a Desktop tab back in on its
+    own.
+  - **Breaking for scripts that call the app:** send `Authorization: Bearer
+    <token>`. The token is in `local-api.token` in the launcher's folder
+    (`~/Library/Application Support/SmartBrain` on a Mac, `~/.config/SmartBrain` on
+    Linux, `%AppData%\SmartBrain` on Windows). Without the launcher, it sits beside
+    the database (inside the data volume for a Docker stack you run by hand), or
+    you can set `SMARTBRAIN_LOCAL_TOKEN` for the app yourself (at least 32
+    characters, no spaces; the app won't start with a shorter one).
+  - **LAN/HTTPS setup (from source):** a browser that opens the app at a LAN
+    address now counts as a phone, and Desktop-only actions are refused there.
+  - Not covered: software running under your own account can read the token file
+    and your browser's cookies, as you can. See Privacy & security.
+- **Setting a new passphrase without the old one now asks for your Recovery Key
+  again.** It used to need only an unlocked vault.
+- The built-in API reference pages (`/docs`, `/redoc`, `/openapi.json`) are off.
+  `/docs` also loaded a script from a CDN.
+- **Pairing by code no longer creates the phone's credential in advance.** The
+  device record used to be created when the code was shown, and it stayed if the
+  code went unused. It is now created only after the phone proves the code, and a
+  Desktop that was locked in the meantime says so.
+- A connected phone no longer keeps a reference to the unlocked key store after
+  you Lock. It looks the store up for each message.
+
 ### Added
 
 - Neural Interface: a card compiled from a web page's structure now
@@ -33,6 +71,9 @@ to know when a release changes behavior.
 
 ### Fixed
 
+- **The in-app "update ready" banner now appears.** The page's own
+  once-a-minute check withdrew the launcher's offer every time it ran, so the
+  banner never showed. Only the launcher can set or withdraw the offer now.
 - **Neural Interface: cards showing text values now go live.** Since the
   flow engine shipped, any card built from your words whose value is text
   rather than a number — a status, a time, a name, and every card built

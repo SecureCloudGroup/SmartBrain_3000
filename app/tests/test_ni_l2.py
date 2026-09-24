@@ -21,8 +21,11 @@ from smartbrain_3000 import db as dbmod
 from smartbrain_3000 import ni as nimod
 from smartbrain_3000 import scheduler as sched
 from smartbrain_3000 import tools
+from smartbrain_3000.auth import relay_headers
 from smartbrain_3000.scheduler import ScheduleStore
 from smartbrain_3000.secrets import gen_master_key
+
+_PHONE = relay_headers("phone-under-test")  # R14: phone authority (the relay credential)
 
 # --- helpers --------------------------------------------------------------
 
@@ -579,7 +582,7 @@ def test_carrier_proposal_status_maps_to_proposal_kind(client: TestClient) -> No
     sched.post_ni_carrier_notices(
         store, [], [], proposed=[{"item_id": "x", "title": "Watch"}],
     )
-    rows = client.get("/api/ni/notices", headers={"X-SB-Local": "1"}).json()
+    rows = client.get("/api/ni/notices").json()
     assert len(rows) == 1
     assert rows[0]["kind"] == "proposal"
     assert "a proposed fix is ready to review" in rows[0]["body"]
@@ -759,8 +762,7 @@ def test_D2c_export_strips_repair_policy_and_l2_state(client: TestClient) -> Non
     opt-in."""
     _unlock(client)
     iid = _seed_failing_with_proposal(client)  # ships l2_frontier: True on the sealed spec
-    r = client.get(f"/api/ni/items/{iid}/export-template",
-                   headers={"X-SB-Local": "1"})
+    r = client.get(f"/api/ni/items/{iid}/export-template")
     assert r.status_code == 200, r.text
     exported_spec = r.json()["spec_template"]
     assert "repair_policy" not in exported_spec, (
@@ -772,19 +774,18 @@ def test_D2c_export_strips_repair_policy_and_l2_state(client: TestClient) -> Non
 
 def test_D2b_repair_policy_route_sets_flag(client: TestClient) -> None:
     """D2b: POST /repair-policy is the desktop-local setter — flips l2_frontier
-    end-to-end + refuses without the X-SB-Local marker."""
+    end-to-end + refuses a phone (Desktop authority only)."""
     _unlock(client)
     iid = _seed_failing_with_proposal(client)
     store = client.app.state.ni
 
     # 403 without desktop-local.
     r = client.post(f"/api/ni/items/{iid}/repair-policy",
-                    json={"l2_frontier": False})
+                    json={"l2_frontier": False}, headers=_PHONE)
     assert r.status_code == 403, r.text
 
     r = client.post(f"/api/ni/items/{iid}/repair-policy",
-                    json={"l2_frontier": False},
-                    headers={"X-SB-Local": "1"})
+                    json={"l2_frontier": False})
     assert r.status_code == 200, r.text
     assert r.json()["repair_policy"] == {"l1": True, "l2_frontier": False}
     after = store.get_item(iid)
@@ -794,8 +795,7 @@ def test_D2b_repair_policy_route_sets_flag(client: TestClient) -> None:
 def test_D2b_repair_policy_route_404_for_unknown_item(client: TestClient) -> None:
     _unlock(client)
     r = client.post("/api/ni/items/nope/repair-policy",
-                    json={"l2_frontier": True},
-                    headers={"X-SB-Local": "1"})
+                    json={"l2_frontier": True})
     assert r.status_code == 404, r.text
 
 

@@ -7,9 +7,6 @@ from collections.abc import Iterator
 import pytest
 from fastapi.testclient import TestClient
 
-# B8: header the real Desktop UI sends; the WebRTC bridge filters it out.
-_LOCAL = {"X-SB-Local": "1"}
-
 
 @pytest.fixture()
 def client(tmp_path, monkeypatch) -> Iterator[TestClient]:
@@ -23,7 +20,8 @@ def client(tmp_path, monkeypatch) -> Iterator[TestClient]:
 def test_status_fresh(client: TestClient) -> None:
     r = client.get("/api/account/status")
     assert r.status_code == 200
-    assert r.json() == {"initialized": False, "unlocked": False, "has_recovery": False}
+    assert r.json() == {"initialized": False, "unlocked": False, "has_recovery": False,
+                        "session": True}  # the suite presents the desktop bearer
 
 
 def test_setup_returns_kit_and_unlocks(client: TestClient) -> None:
@@ -33,7 +31,7 @@ def test_setup_returns_kit_and_unlocks(client: TestClient) -> None:
     assert body["recovery_key"]
     assert "Emergency Kit" in body["emergency_kit"]
     assert client.get("/api/account/status").json() == {
-        "initialized": True, "unlocked": True, "has_recovery": True
+        "initialized": True, "unlocked": True, "has_recovery": True, "session": True
     }
 
 

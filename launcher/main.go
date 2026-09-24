@@ -109,6 +109,17 @@ func main() {
 	// Homebrew — so `docker` would look "not installed". Fix PATH before any Docker check runs.
 	stack.EnsureDockerPath()
 	stack.LauncherVersion = launcherVersion // rides health probes: the modern-launcher handshake
+	// R14: the launcher owns this install's local API token and hands it to the app it
+	// starts. Without it the app still runs (with its own token) and the launcher's
+	// credentialed calls read as "no news" — degraded, never broken.
+	if sb0, err := stack.New(); err == nil {
+		if tok, err := stack.EnsureLocalToken(sb0.Dir); err == nil {
+			stack.LocalAPIToken = tok
+			native.AppEnv = []string{stack.TokenEnv + "=" + tok}
+		} else {
+			log.Printf("local API token unavailable: %v", err)
+		}
+	}
 	if verb, ok := cliVerb(os.Args); ok {
 		os.Exit(runVerb(verb))
 	}

@@ -33,6 +33,9 @@ services:
       # Bind all interfaces INSIDE the container so the loopback-only host mapping can reach it.
       SMARTBRAIN_HOST: 0.0.0.0
       SMARTBRAIN_LLM_GATEWAY_URL: http://bifrost:8080
+      # The desktop launcher's credential for this app's local API (R14). The launcher passes
+      # it; left empty, the app mints its own token file inside the data volume.
+      SMARTBRAIN_LOCAL_TOKEN: ${SMARTBRAIN_LOCAL_TOKEN:-}
       # Embedding model for semantic search. LOCAL by default — keep it local to keep your knowledge
       # on-box. Pointing this at a cloud provider sends KB content there on every reindex.
       SMARTBRAIN_EMBED_MODEL: ${SMARTBRAIN_EMBED_MODEL:-ollama/nomic-embed-text:v1.5}

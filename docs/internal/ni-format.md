@@ -680,7 +680,8 @@ modeled on claudecli.py's process hygiene:
 
 ## 17. Notices endpoint + tray notifications (v2c)
 
-- `GET /api/ni/notices?limit=N` — **desktop-local** (`x-sb-local`), unlocked
+- `GET /api/ni/notices?limit=N` — **desktop-local** (Desktop authority: the
+  launcher's local token or a loopback browser session — R14), unlocked
   only (423 otherwise). Returns the newest NI carrier-row entries
   `[{id, kind: "alert"|"broken"|"repaired"|"proposal", body, ts}]`, newest
   first, limit clamped ≤ 20. Kind derives from the carrier run status

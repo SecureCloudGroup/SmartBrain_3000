@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // installs goto as vi.fn(); we read it here to assert the 423 -> /unlock side-effect.
 const { goto } = await import("$app/navigation");
 const gotoSpy = goto as unknown as ReturnType<typeof vi.fn>;
-const { api, ApiError, parseExportHeaders } = await import("./api");
+const { api, ApiError, inSession, parseExportHeaders } = await import("./api");
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -25,6 +25,23 @@ beforeEach(() => {
 });
 afterEach(() => {
   globalThis.fetch = realFetch;
+});
+
+describe("inSession — is SmartBrain open in THIS browser?", () => {
+  const base = { initialized: true, has_recovery: true };
+  it("is false before status loads and while locked", () => {
+    expect(inSession(null)).toBe(false);
+    expect(inSession({ ...base, unlocked: false, session: true })).toBe(false);
+  });
+  it("is false for an unlocked vault this browser hasn't opened", () => {
+    expect(inSession({ ...base, unlocked: true, session: false })).toBe(false);
+  });
+  it("counts a missing session field as open — an older Desktop app has no sessions", () => {
+    // The phone app ships from the newest release; asking it to "open here" against an
+    // older Desktop would re-run that app's unlock on every launch.
+    expect(inSession({ ...base, unlocked: true })).toBe(true);
+    expect(inSession({ ...base, unlocked: true, session: true })).toBe(true);
+  });
 });
 
 describe("req wrapper (via api.health)", () => {
@@ -75,6 +92,30 @@ describe("req wrapper (via api.health)", () => {
     expect(onLocked).toHaveBeenCalledTimes(1);
   });
 
+  it("routes a 401 no_session to /unlock and tells the session handler (R14)", async () => {
+    const { registerNoSessionHandler } = await import("./api");
+    const onNoSession = vi.fn();
+    registerNoSessionHandler(onNoSession);
+    globalThis.fetch = vi.fn(async () =>
+      jsonResponse(401, { detail: "session required", code: "no_session" }),
+    ) as unknown as typeof globalThis.fetch;
+    await expect(api.health()).rejects.toMatchObject({ status: 401 });
+    expect(onNoSession).toHaveBeenCalledTimes(1);
+    expect(gotoSpy).toHaveBeenCalledWith("/unlock");
+  });
+
+  it("leaves any OTHER 401 (a wrong passphrase) to the page that asked", async () => {
+    const { registerNoSessionHandler } = await import("./api");
+    const onNoSession = vi.fn();
+    registerNoSessionHandler(onNoSession);
+    globalThis.fetch = vi.fn(async () =>
+      jsonResponse(401, { detail: "invalid credentials" }),
+    ) as unknown as typeof globalThis.fetch;
+    await expect(api.health()).rejects.toMatchObject({ status: 401 });
+    expect(onNoSession).not.toHaveBeenCalled();
+    expect(gotoSpy).not.toHaveBeenCalled();
+  });
+
   it("does NOT re-navigate when already on /unlock (no redirect loop)", async () => {
     // This suite runs DOM-less; stand in a minimal window to simulate the tab
     // already sitting on the unlock page.
@@ -100,9 +141,8 @@ describe("req wrapper (via api.health)", () => {
 });
 
 // Vault calls that do NOT go through req<T>: export/import hand-roll fetch (a Blob body, a raw
-// upload), so they carry their own headers and their own error path. Both are worth pinning —
-// a dropped x-sb-local header is a 403, and a dropped `vault` param silently searches EVERYTHING
-// instead of the one vault the user scoped to.
+// upload), so they carry their own headers and their own error path. Worth pinning — a
+// dropped `vault` param silently searches EVERYTHING instead of the one vault the user scoped to.
 describe("vault client calls", () => {
   // Typed params, so `mock.calls` is a real tuple rather than [] and the assertions below type-check.
   function captureFetch(status = 200, body: unknown = {}) {
@@ -123,14 +163,6 @@ describe("vault client calls", () => {
     const spy = captureFetch(200, { results: [] });
     await api.searchKb("lease", "hybrid", 10, "v-123");
     expect(String(spy.mock.calls[0][0])).toContain("vault=v-123");
-  });
-
-  it("marks an export Desktop-local (x-sb-local), so the phone bridge cannot forward it", async () => {
-    const spy = captureFetch(200, {});
-    await api.exportVault("v-1", "pw");
-    const init = spy.mock.calls[0][1]!;
-    expect((init.headers as Record<string, string>)["x-sb-local"]).toBe("1");
-    expect(init.method).toBe("POST");
   });
 
   it("returns { blob, headers } so the UI can warn on unchanged/rotated-key without a second call", async () => {
@@ -163,7 +195,7 @@ describe("vault client calls", () => {
     });
   });
 
-  it("retireVault posts to /retire with the passphrase body and the Desktop-local marker", async () => {
+  it("retireVault posts to /retire with the passphrase body", async () => {
     const spy = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) =>
       new Response(new Blob(["final"]), {
         status: 200,
@@ -179,7 +211,6 @@ describe("vault client calls", () => {
     expect(String(spy.mock.calls[0][0])).toBe("/api/vaults/v-1/retire");
     const init = spy.mock.calls[0][1]!;
     expect(init.method).toBe("POST");
-    expect((init.headers as Record<string, string>)["x-sb-local"]).toBe("1");
     expect(JSON.parse(String(init.body))).toEqual({ passphrase: "pw" });
     expect(headers.retired).toBe(true);
     expect(headers.mode).toBe("open");
@@ -223,10 +254,7 @@ describe("vault client calls", () => {
     });
   });
 
-  it("verifyHostedVault posts to /verify-hosted with the Desktop-local marker header", async () => {
-    // verify-hosted is Desktop-local (its verdict names this install's own publisher key). A
-    // dropped x-sb-local header is a 403 through the bridge — pin the header here so a phone
-    // regression turns into a red test rather than a broken UI on the phone.
+  it("verifyHostedVault posts to /verify-hosted", async () => {
     const spy = captureFetch(200, {
       reachable: true, seq: 4, matches: true, behind: false, retired: false,
       detail: "the hosted file matches what this install last published (v4)",
@@ -235,7 +263,6 @@ describe("vault client calls", () => {
     const [url, init] = spy.mock.calls[0];
     expect(String(url)).toBe("/api/vaults/v-1/verify-hosted");
     expect(init!.method).toBe("POST");
-    expect((init!.headers as Record<string, string>)["x-sb-local"]).toBe("1");
     expect(r).toEqual({
       reachable: true, seq: 4, matches: true, behind: false, retired: false,
       detail: "the hosted file matches what this install last published (v4)",

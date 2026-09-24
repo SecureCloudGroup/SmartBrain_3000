@@ -4,7 +4,7 @@
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import { account } from "$lib/account.svelte";
-  import { api } from "$lib/api";
+  import { api, inSession } from "$lib/api";
   import { resumeUpdateAction } from "$lib/update";
   import { displayVersion } from "$lib/version";
   import { theme, initTheme, cycleTheme } from "$lib/theme.svelte";
@@ -66,9 +66,9 @@
   // status arrives, fall back to the last session's nav state — wrong at most for one
   // frame after a lock elsewhere, and nav labels are not sensitive.
   const navHint = typeof localStorage !== "undefined" && localStorage.getItem("sbNav") === "1";
-  const showNav = $derived(account.status ? Boolean(account.status.unlocked) : navHint);
+  const showNav = $derived(account.status ? inSession(account.status) : navHint);
   $effect(() => {
-    if (account.status) localStorage.setItem("sbNav", account.status.unlocked ? "1" : "0");
+    if (account.status) localStorage.setItem("sbNav", inSession(account.status) ? "1" : "0");
   });
 
   const THEME_ICON = { system: "sun-moon", light: "sun", dark: "moon" } as const;
@@ -242,7 +242,7 @@
   $effect(() => {
     const path = page.url.pathname; // track navigation
     moreOpen = false; // navigating away always closes the sheet
-    if (account.status?.unlocked) {
+    if (inSession(account.status)) {
       refreshPending();
       // The Chat page pulls unseen updates into the conversation + clears the badge itself, so
       // skip the refresh on /chat — otherwise a stale in-flight unseen-count response could land
@@ -307,7 +307,7 @@
   {#if remoteSession}
     <button class="navitem" title="Forget this device's pairing" onclick={unpairDevice}><Icon name="link" /> Unpair</button>
   {/if}
-  {#if account.status?.unlocked}
+  {#if inSession(account.status)}
     <button class="navitem" disabled={locking} onclick={lock}><Icon name="lock" /> {locking ? "Locking…" : "Lock"}</button>
   {/if}
 {/snippet}

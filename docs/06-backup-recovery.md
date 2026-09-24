@@ -137,9 +137,9 @@ Kit you saved during setup:
 1. Lock / reopen the app and choose **Use recovery key**.
 2. Enter the key exactly as shown (dashes and letter case don't matter).
 3. Once in, go to **Settings → Account & Data → Change passphrase** and use
-   **"Forgot your current passphrase… Set a new one"** — that path sets a new
-   passphrase from your unlocked session, so you don't need the old one. (The
-   normal Change passphrase form still requires the current one.)
+   **"Forgot your current passphrase… Set a new one"** — enter your Recovery Key
+   again there, and it sets a new passphrase without the old one. (The normal
+   Change passphrase form still requires the current one.)
 
 If you lose **both** the passphrase and the Recovery Key, the data cannot be
 recovered — that's the cost of having no backdoor. Keep the Emergency Kit safe.

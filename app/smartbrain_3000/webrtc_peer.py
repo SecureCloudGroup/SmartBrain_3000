@@ -205,11 +205,19 @@ def _handle_channel_auth(channel, msg: dict, store, session: dict) -> None:
 
 
 async def _handle_request(channel, msg: dict, http_client, store, session: dict) -> None:
-    """Authed request path: revocation check + bounded in-flight + bridge dispatch."""
+    """Authed request path: revocation check + bounded in-flight + bridge dispatch.
+
+    ``store`` is the CURRENT store (None while locked): an authed session keeps
+    working across a Lock — that is how "tap to unlock from your phone" works — so
+    while locked, revocation is checked via the plaintext device-id digests that
+    revoke_device keeps in sync, and the API itself answers 423 for data routes.
+    """
     assert isinstance(msg, dict), "message dict required"
     assert session.get("authed"), "_handle_request requires an authed session"
     rid = str(msg.get("id") or "?")
-    if not devices.device_exists(store, session["device_id"]):  # revoked mid-session -> refuse
+    known = (devices.device_exists(store, session["device_id"]) if store is not None
+             else devices.is_known_device_id(session["device_id"]))
+    if not known:  # revoked mid-session -> refuse
         _safe_send(channel, _error_response(rid, 401, "device revoked"))
         return
     if session["inflight"] >= _MAX_INFLIGHT:  # backpressure: bound concurrent requests
@@ -225,7 +233,8 @@ async def _handle_request(channel, msg: dict, http_client, store, session: dict)
             "headers": msg.get("headers") or {},
             "body": base64.b64decode(msg.get("body_b64") or ""),
         }
-        resp = await asyncio.to_thread(webrtc_bridge.handle_frame, frame, http_client)
+        resp = await asyncio.to_thread(webrtc_bridge.handle_frame, frame, http_client,
+                                       session["device_id"])
         out = _encode_response(resp)
         if len(out) > _MAX_MESSAGE_BYTES:
             body_len = len(resp.get("body") or b"")
@@ -244,7 +253,13 @@ async def _handle_request(channel, msg: dict, http_client, store, session: dict)
 
 
 async def _serve_message(channel, raw_text: str, http_client, store, session: dict) -> None:
-    """Process one DataChannel message: route to channel-auth or request path."""
+    """Process one DataChannel message: route to channel-auth or request path.
+
+    ``store`` may be a GETTER (production: resolved per message, so a long-lived
+    peer never keeps the key-bearing SecretStore past a Lock — R14 ride-along) or a
+    store/None (tests).
+    """
+    store = store() if callable(store) else store
     try:
         msg = json.loads(raw_text)
         assert isinstance(msg, dict), "message must be a JSON object"
@@ -336,7 +351,8 @@ async def answer_offer(offer_sdp: str, *, store, http_client, ice_servers=None):
 
     assert offer_sdp, "offer sdp required"
     # store may be None (LOCKED): the channel then runs the locked_challenge/whoami
-    # exchange (module docstring) and closes — it never serves a request.
+    # exchange (module docstring) and closes. It may also be a getter (production),
+    # resolved per message — see _serve_message.
     servers = [RTCIceServer(**s) for s in (ice_servers or [])]
     pc = RTCPeerConnection(configuration=RTCConfiguration(iceServers=servers))
 

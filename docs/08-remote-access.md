@@ -76,7 +76,8 @@ A small **"Remote"** chip shows the connection state: **direct** (phone-to-Deskt
 **relayed** (through the encrypted relay), **Desktop locked** if your Desktop is up and
 the encrypted bridge is fine but its vault is locked — tap the chip to unlock from here
 (it's one shared lock: unlocking from the phone unlocks the Desktop too, and a Desktop
-sitting on its unlock screen walks in on its own),
+browser sitting on its unlock screen walks in on its own if it has opened SmartBrain
+since the app last started),
 **unreachable** if your Desktop is off, asleep, or otherwise can't be reached at all, or
 **BLOCKED** in red if your Desktop's identity can't be verified — re-pair if you reinstalled
 the app.
@@ -160,7 +161,15 @@ uses a local certificate so your phone trusts the connection.
    `SMARTBRAIN_ALLOWED_HOSTS=localhost,127.0.0.1,192.168.1.50,smartbrain.local`, then
    re-run `python3 installer/install.py install`. Once a cert exists the installer
    automatically serves HTTPS on your LAN.
-4. **On the phone (same Wi-Fi)** open `https://192.168.1.50:33000`.
+4. **On the phone (same Wi-Fi)** open `https://192.168.1.50:33000` and enter your
+   passphrase once (again after each app restart).
+
+A browser that reaches the app at a LAN address gets a phone's permissions, not the
+Desktop's: the Desktop-only actions listed above are refused there. It still shows the
+Desktop layout, so those controls appear, and they say so if you try one. On the Desktop
+itself, keep using `https://localhost:33000`. This keeps your phone's browser to a phone's
+permissions; it isn't a barrier against someone on your network who knows your passphrase
+and uses their own tools.
 
 > **Connecting Gmail over HTTPS.** Google's loopback OAuth redirect is `http://`, which the
 > HTTPS app can't serve directly. In HTTPS mode the app therefore also runs a tiny

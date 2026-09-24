@@ -4004,8 +4004,7 @@ def test_L9_delete_route_removes_item_scoped_secret_keys() -> None:
                 iid = tools.INTERNAL_NI_TOOLS["create_ni_item"](ctx, spec_body)["id"]
                 client.put(f"/api/ni/items/{iid}/credential",
                             json={"name": "api_key", "value": "s3cret",
-                                   "host": "api.example.com"},
-                            headers={"X-SB-Local": "1"})
+                                   "host": "api.example.com"})
                 # put_credential seals a JSON envelope {"value","host"}; decode
                 # the raw store value to prove the credential landed as expected.
                 raw = client.app.state.secret_store.get(f"ni:{iid}:api_key")

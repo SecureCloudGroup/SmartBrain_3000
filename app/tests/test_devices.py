@@ -9,12 +9,12 @@ import pytest
 from fastapi.testclient import TestClient
 
 from smartbrain_3000 import devices
+from smartbrain_3000.auth import relay_headers
 from smartbrain_3000.secrets import SecretStore, gen_master_key
 
-# B8: the Desktop-local marker the real UI sends; the WebRTC bridge strips it, so a
-# bridged-in (paired-phone) request lacks it and is refused with 403. Enrolling/revoking
-# devices is Desktop-only so a paired phone can't self-mint a credential or revoke the Desktop's.
-_LOCAL = {"X-SB-Local": "1"}
+# B8: enrolling/revoking devices is Desktop-only, so a paired phone (phone authority, R14)
+# can't self-mint a credential or revoke the Desktop's.
+_PHONE = relay_headers("phone-under-test")  # R14: phone authority (the relay credential)
 
 
 @pytest.fixture(autouse=True)
@@ -131,15 +131,15 @@ def client(tmp_path, monkeypatch) -> Iterator[TestClient]:
 
 
 def test_devices_endpoints_require_unlock(client: TestClient) -> None:
-    # Desktop-local marker present so the fence passes and we exercise the unlock (423) check.
+    # Desktop authority (the suite's default bearer) passes the fence, so we exercise the unlock (423) check.
     assert client.get("/api/devices").status_code == 423
-    assert client.post("/api/devices", json={"label": "Phone"}, headers=_LOCAL).status_code == 423
-    assert client.delete("/api/devices/abc", headers=_LOCAL).status_code == 423
+    assert client.post("/api/devices", json={"label": "Phone"}).status_code == 423
+    assert client.delete("/api/devices/abc").status_code == 423
 
 
 def test_create_list_revoke_flow(client: TestClient) -> None:
     client.post("/api/account/setup", json={"passphrase": "correct-horse"})
-    created = client.post("/api/devices", json={"label": "My Phone"}, headers=_LOCAL).json()
+    created = client.post("/api/devices", json={"label": "My Phone"}).json()
     assert created["device_id"] and created["credential"] and created["label"] == "My Phone"
     assert created["desktop_pubkey"]  # pinned by the phone to verify the Desktop over the channel
 
@@ -149,17 +149,17 @@ def test_create_list_revoke_flow(client: TestClient) -> None:
     assert "credential" not in listed[0]  # never leak the secret on read
     assert listed[0]["last_seen"] is None and listed[0]["created_at"]
 
-    assert client.delete(f"/api/devices/{created['device_id']}", headers=_LOCAL).status_code == 200
+    assert client.delete(f"/api/devices/{created['device_id']}").status_code == 200
     assert client.get("/api/devices").json()["devices"] == []
 
 
 def test_device_enroll_and_revoke_refused_from_bridge(client: TestClient) -> None:
-    # B8: a bridge-origin request (no X-SB-Local — the bridge strips it) must be refused even
+    # B8: a bridge-origin request (phone authority — R14) must be refused even
     # when unlocked, so a paired phone can't self-mint a persistent credential or revoke devices.
     client.post("/api/account/setup", json={"passphrase": "correct-horse"})
-    created = client.post("/api/devices", json={"label": "My Phone"}, headers=_LOCAL).json()
-    assert client.post("/api/devices", json={"label": "rogue"}).status_code == 403
-    assert client.delete(f"/api/devices/{created['device_id']}").status_code == 403
-    assert client.delete("/api/devices/pair-code").status_code == 403
+    created = client.post("/api/devices", json={"label": "My Phone"}).json()
+    assert client.post("/api/devices", json={"label": "rogue"}, headers=_PHONE).status_code == 403
+    assert client.delete(f"/api/devices/{created['device_id']}", headers=_PHONE).status_code == 403
+    assert client.delete("/api/devices/pair-code", headers=_PHONE).status_code == 403
     # the legit device is untouched by the refused revoke
     assert client.get("/api/devices").json()["devices"][0]["device_id"] == created["device_id"]

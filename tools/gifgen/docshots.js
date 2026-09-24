@@ -26,6 +26,7 @@ const W = 1380, H = 900;
     deviceScaleFactor: 2,
     colorScheme: "dark",
     serviceWorkers: "block", // the PWA worker would answer /api/health around page.route
+    extraHTTPHeaders: process.env.SB_LOCAL_TOKEN ? { Authorization: `Bearer ${process.env.SB_LOCAL_TOKEN}` } : {}, // R14: desktop credential
   });
   const page = await ctx.newPage();
   const go = async (route) => {
@@ -63,14 +64,16 @@ const W = 1380, H = 900;
     await page.waitForSelector("text=Remote access", { timeout: 8000 });
     await shot("06-remote-access.png");
 
-    // 07: the in-app update banner. The backend surfaces update_ready only while a
-    // launcher stamps it on every health probe, so the RECORDER plays the launcher:
-    // an injected header on the page's own /api/health calls. Nothing in the app is
-    // faked — the strip below is the real one users see. Cropped to the strip.
-    await page.route("**/api/health", (route) => {
-      const headers = { ...route.request().headers(), "x-smartbrain-update": "0.8.12" };
-      route.continue({ headers });
-    });
+    // 07: the in-app update banner. The backend holds update_ready only as stamped by
+    // the LAUNCHER's authenticated handshake (R14), so the RECORDER plays the launcher:
+    // the same health call a real launcher makes, with its identity + local token.
+    // Nothing in the app is faked — the strip below is the real one users see.
+    const handshake = (staged) => fetch(`${BASE}/api/health`, { headers: {
+      "x-smartbrain-launcher": "gifdemo",
+      ...(staged ? { "x-smartbrain-update": staged } : {}),
+      Authorization: `Bearer ${process.env.SB_LOCAL_TOKEN}`,
+    } });
+    await handshake("0.8.12");
     await go("/chat");
     const banner = page.locator("text=is ready to install");
     await banner.waitFor({ timeout: 8000 });
@@ -79,7 +82,7 @@ const W = 1380, H = 900;
       fullPage: false,
       clip: { x: 0, y: 0, width: W, height: Math.ceil(box.y + box.height + 16) },
     });
-    await page.unroute("**/api/health"); // next headerless probe withdraws the staged update
+    await handshake(""); // the launcher withdraws the staged update
 
     // 08: Always-allowed list with its Stop-allowing button — produced by the REAL flow:
     // ask for a change in Chat, then "Always allow" the proposed tool in Activity.

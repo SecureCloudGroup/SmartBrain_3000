@@ -393,7 +393,6 @@ def test_L8_keyed_card_credential_flow_reaches_commissioning(
     put = client.put(
         f"/api/ni/items/{iid}/credential",
         json={"name": "api_key", "value": "s3cret", "host": "api.example.com"},
-        headers={"X-SB-Local": "1"},
     )
     assert put.status_code == 200, put.text
 
@@ -427,8 +426,7 @@ def test_L8_needs_params_sibling_reaches_commissioning(
 
     # PUT the param (Desktop-local, non-secret).
     put = client.put(f"/api/ni/items/{iid}/param",
-                     json={"name": "city", "value": "Kansas City"},
-                     headers={"X-SB-Local": "1"})
+                     json={"name": "city", "value": "Kansas City"})
     assert put.status_code == 200, put.text
     assert put.json()["needs_params"] == []
 
@@ -520,7 +518,6 @@ def test_L10_delete_ni_item_route_purges_item_scoped_secret(
     put = client.put(
         f"/api/ni/items/{iid}/credential",
         json={"name": "api_key", "value": "s3cret", "host": "api.example.com"},
-        headers={"X-SB-Local": "1"},
     )
     assert put.status_code == 200, put.text
     stored_key = f"ni:{iid}:api_key"

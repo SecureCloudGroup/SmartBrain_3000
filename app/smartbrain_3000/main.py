@@ -23,6 +23,8 @@ from starlette.responses import PlainTextResponse
 
 from . import (
     __version__,
+    account,
+    auth,
     db,
     devices,
     gateway,
@@ -104,11 +106,11 @@ class HostGuard:
 class OriginGuard:
     """Reject API calls that a *different* site drove the browser into making.
 
-    The API authenticates by process state ("is the vault unlocked"), not by a
-    per-request credential, so any page the owner visits while unlocked could
-    otherwise POST to the local origin and have it act with full authority — no
-    preflight required for a form-style or text/plain body. Host validation does
-    not stop this: the attacker uses the real hostname.
+    A browser attaches the owner's session cookie to requests OTHER sites drive it
+    into making (SameSite=Strict narrows this, but defense in depth matters here),
+    so any page the owner visits could otherwise POST to the local origin and act
+    with their session. Host validation does not stop this: the attacker uses the
+    real hostname. (The per-request credential itself is auth.SessionGuard's job.)
 
     Two independent signals, either of which is conclusive when present:
 
@@ -330,6 +332,10 @@ def _make_lifespan(mcp):
         applied = db.run_migrations(conn)
         assert applied >= 0, "migration count must be non-negative"
         _init_app_state(application, conn)
+        # R14 local API credential: the launcher's token (env) or this install's own
+        # 0600 file beside the DB; browser sessions last this app run (auth.py).
+        application.state.local_token = auth.load_local_token(db_path)
+        application.state.sessions = auth.SessionTable()
         # Voice model: start the one-time background fetch at BOOT, not first unlock —
         # the files aren't user data and need no key, and by the time someone unlocks
         # and presses the mic, ready is the common case instead of the lucky one.
@@ -400,6 +406,8 @@ def _make_lifespan(mcp):
 def _install_routes(application: FastAPI) -> None:
     """Mount middleware + every API router on ``application`` (registration order matters)."""
     assert application is not None, "application required"
+    # Added FIRST = innermost: runs only after HostGuard + OriginGuard accepted the request.
+    application.add_middleware(auth.SessionGuard)  # R14: every /api request carries a credential
     application.add_middleware(HostGuard, allowed=_allowed_hosts())  # anti DNS-rebinding (case-insensitive)
     application.add_middleware(OriginGuard)  # anti cross-site drive-by against the local API
     serving.add_security_headers(application)  # tight CSP + hardening on every response
@@ -418,7 +426,10 @@ def create_app() -> FastAPI:
         lambda: getattr(app.state, "kb", None),
         lambda: getattr(app.state, "vaults", None),  # so MCP KB tools tag imported-vault content
     )
-    app = FastAPI(title="SmartBrain_3000", version=__version__, lifespan=_make_lifespan(mcp))
+    # No /docs, /redoc or /openapi.json: nothing uses them, and /docs pulled a CDN
+    # script onto a page the security-headers middleware doesn't cover (R14 ride-along).
+    app = FastAPI(title="SmartBrain_3000", version=__version__, lifespan=_make_lifespan(mcp),
+                  docs_url=None, redoc_url=None, openapi_url=None)
     _install_routes(app)
     # Read-only Knowledge for external tools; auth-gated by the MCP access token.
     app.mount("/mcp", mcp_server.auth_wrapped_app(mcp, lambda: _mcp_token(app)))
@@ -436,8 +447,13 @@ def create_app() -> FastAPI:
         """
         assert __version__, "version string must be non-empty"
         payload: dict[str, object] = {"status": "ok", "version": __version__}
+        # Health stays OPEN for liveness (launchers, container healthchecks, doctor);
+        # everything it WRITES needs a credential (R14) — the launcher identifies with
+        # its local token, the page with its session cookie.
+        authority = getattr(request.state, "sb_authority", None)
+        launcher = authority == auth.DESKTOP and bool(request.headers.get("x-smartbrain-launcher"))
         try:
-            handshake = request.headers.get("x-smartbrain-launcher", "")
+            handshake = request.headers.get("x-smartbrain-launcher", "") if launcher else ""
             conn = request.app.state.dbx
             if handshake and handshake[:32] != db.meta_get(conn, "launcher:version"):
                 db.meta_set(conn, "launcher:version", handshake[:32])  # write only on change
@@ -449,7 +465,7 @@ def create_app() -> FastAPI:
         try:
             # The SPA reports its IANA timezone the same way — it's what lets the
             # chat time note speak the user's local time instead of bare UTC.
-            tz = request.headers.get("x-smartbrain-timezone", "")
+            tz = request.headers.get("x-smartbrain-timezone", "") if authority else ""
             if tz and len(tz) <= 64:
                 conn = request.app.state.dbx
                 if tz != db.meta_get(conn, "user:timezone"):
@@ -462,11 +478,15 @@ def create_app() -> FastAPI:
         # in a menu behind a tray icon. Both facts live in PROCESS memory, never the
         # database: a restart is exactly what an install does, and clearing the request by
         # construction is what stops one restart from asking for another.
-        staged = request.headers.get("x-smartbrain-update", "")[:32]
-        if staged:
-            request.app.state.update_ready = staged
-        elif getattr(request.app.state, "update_ready", ""):
-            request.app.state.update_ready = ""  # the launcher withdrew it (installed elsewhere)
+        # ONLY the launcher's own handshake may set or withdraw it. Before R14 every
+        # headerless probe — the page's own 60 s poll, the container healthcheck, the
+        # native watchdog — cleared it before reading, so the banner could never appear.
+        if launcher:
+            staged = request.headers.get("x-smartbrain-update", "")[:32]
+            if staged:
+                request.app.state.update_ready = staged
+            elif getattr(request.app.state, "update_ready", ""):
+                request.app.state.update_ready = ""  # the launcher withdrew it (installed elsewhere)
         ready = getattr(request.app.state, "update_ready", "")
         if ready and ready != __version__:
             payload["update_ready"] = ready
@@ -481,16 +501,14 @@ def create_app() -> FastAPI:
         """Ask the desktop launcher to install the update it has staged.
 
         Desktop-local ONLY. The remote bridge forwards anything under /api, so without this
-        guard a paired phone — or any web page the owner happened to visit — could restart
-        the machine's stack. A phone is shown the update exists; installing it stays a
-        decision made at the desk.
+        guard a paired phone could restart the machine's stack. A phone is shown the update
+        exists; installing it stays a decision made at the desk.
 
         The request is a single string in process memory that the launcher claims on its
         next handshake (within ~30s). It cannot outlive a restart, which is precisely what
         an install is.
         """
-        if request.headers.get("x-sb-local") != "1":
-            raise HTTPException(status_code=403, detail="this endpoint is Desktop-local only")
+        account._require_desktop_local(request)
         ready = getattr(request.app.state, "update_ready", "")
         if not ready or ready == __version__:
             raise HTTPException(status_code=409, detail="no update is staged to install")
