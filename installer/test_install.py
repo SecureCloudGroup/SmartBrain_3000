@@ -873,6 +873,20 @@ def test_local_token_prefers_explicit_then_launcher_then_app(tmp_path) -> None:
     assert doctor._local_token(m) == "E" * 40
 
 
-def test_request_install_refuses_without_a_token(tmp_path) -> None:
-    with pytest.raises(RuntimeError, match="local API token"):
-        doctor._request_install(_machine(tmp_path))
+def test_request_install_speaks_to_the_running_app_old_or_new(tmp_path, monkeypatch) -> None:
+    """The running app is the OLDER one here, possibly from before the token (it gates
+    the route on the old marker): both go out, and a missing token isn't a refusal."""
+    sent: list[dict] = []
+
+    def fake(url, timeout=0, headers=None, method="GET"):
+        sent.append(dict(headers or {}))
+        return (200, {"ok": True})
+
+    monkeypatch.setattr(doctor, "http_json", fake)
+    m = _machine(tmp_path)
+    doctor._request_install(m)
+    assert sent[-1] == {"x-sb-local": "1"}
+    m.launcher_dir.mkdir(parents=True)
+    (m.launcher_dir / "local-api.token").write_text("L" * 43 + "\n")
+    doctor._request_install(m)
+    assert sent[-1] == {"x-sb-local": "1", "Authorization": "Bearer " + "L" * 43}

@@ -33,7 +33,9 @@ VOLUME = "sb_publisher_data"
 PORT = 34500
 BASE = f"http://127.0.0.1:{PORT}"
 # R14: the builder's throwaway container gets its local API token from us, and every
-# call presents it (Desktop authority — export is Desktop-only).
+# call presents it (Desktop authority — export is Desktop-only). IMAGE is the latest
+# PUBLISHED release, which can predate the token (the vault is rebuilt before a tag),
+# so calls also carry the old Desktop marker; a current app ignores it.
 TOKEN = secrets.token_urlsafe(32)
 VAULT_NAME = "SmartBrain Docs"
 # The description now travels to subscribers (the publisher's own description propagates on
@@ -57,7 +59,8 @@ def api(method: str, path: str, body: dict | None = None, raw: bool = False):
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(
         BASE + path, data=data, method=method,
-        headers={"Content-Type": "application/json", "Authorization": f"Bearer {TOKEN}"},
+        headers={"Content-Type": "application/json", "Authorization": f"Bearer {TOKEN}",
+                 "X-SB-Local": "1"},
     )
     with urllib.request.urlopen(req, timeout=120) as resp:
         payload = resp.read()
