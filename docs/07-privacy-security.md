@@ -76,7 +76,10 @@ not. Being precise about the line matters more than claiming everything:
   and summary slots are the easy ones to overlook, because they run over your
   documents in the background rather than in front of you. (Two Neural Interface
   jobs refuse to be cloud-routed at all: a card's in-pipeline language-model step
-  and local self-repair run on a local model or not at all.)
+  and local self-repair run on a local model or not at all.) **Building** a card
+  reads your request and samples of its source, so if that routing points off this
+  computer, the new card asks you first: build with that model (this card only; a
+  later Fix or refine doesn't ask again) or with your local model.
 - **Claude Code models.** The `claudecode/*` models send the conversation to Anthropic
   under your own Claude sign-in, exactly like a cloud provider — configured beside the
   local servers, but not local in the privacy sense. SmartBrain drives the `claude`

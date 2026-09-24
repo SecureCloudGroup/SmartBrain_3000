@@ -28,6 +28,15 @@ from smartbrain_3000 import ni as nimod
 from smartbrain_3000 import ni_flow, tools
 from smartbrain_3000.secrets import gen_master_key
 
+
+@pytest.fixture(autouse=True)
+def _local_build_model(monkeypatch):
+    """Ruling 2 (2026-09-24): a card builds on a local model unless its owner consented
+    to another. These tests exercise the flow, not that gate, so the default route
+    here is local (the consent tests set their own routes)."""
+    from smartbrain_3000 import gateway as _gateway
+    monkeypatch.setattr(_gateway, "DEFAULT_ROUTES", {"chat": "mlx/test-local"})
+
 FIXTURES = Path(__file__).parent / "fixtures" / "ni_flow"
 
 

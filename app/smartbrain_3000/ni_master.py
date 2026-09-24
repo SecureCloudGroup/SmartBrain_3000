@@ -69,6 +69,7 @@ QUESTION_KINDS: frozenset[str] = frozenset({
     "fill_params",     # awaiting_params: Fill modal
     "supply_date",     # computed ask without a literal date (G1 new)
     "validate",        # commissioning C2: Looks right / Something's wrong
+    "model_consent",   # ruling 2: build with a non-local model? (or the local one)
 })
 
 # Closed reopen affordances for terminal records. "retry" re-runs the sealed
@@ -199,9 +200,13 @@ def question_for(state: str, record: dict) -> dict | None:
         return {"kind": "fill_params"}
     stamped = record.get("_question")
     if isinstance(stamped, dict) and stamped.get("kind") in QUESTION_KINDS:
-        return {"kind": str(stamped["kind"]),
-                **({"prompt": str(stamped.get("prompt"))[:200]}
-                   if stamped.get("prompt") else {})}
+        question = {"kind": str(stamped["kind"]),
+                    **({"prompt": str(stamped.get("prompt"))[:200]}
+                       if stamped.get("prompt") else {})}
+        if stamped["kind"] == "model_consent":  # the card names both choices exactly
+            question["model"] = str(stamped.get("model") or "")[:200]
+            question["local"] = str(stamped.get("local") or "")[:200]
+        return question
     return None
 
 

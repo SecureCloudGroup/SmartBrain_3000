@@ -271,7 +271,7 @@ def _validate_template_spec_and_preview(template: dict, where: str) -> None:
     # never carry it.
     forbidden = {"contract", "_c2_ok", "_l1_last_attempt", "_l1_trial", "_template",
                  "_l2_last_attempt", "_l2_proposal", "repair_policy", "_born",
-                 "_shell"}
+                 "_shell", "_model_consent"}
     present = sorted(forbidden.intersection(spec.keys()))
     if present:
         raise LibraryError(
@@ -739,7 +739,7 @@ def _pack_cache_put(created_at: str,
 # its own from the pack it read).
 _TEMPLATE_STRIP_KEYS = ("contract", "_c2_ok", "_l1_last_attempt", "_l1_trial",
                         "_l2_last_attempt", "_l2_proposal", "_template",
-                        "repair_policy", "_born", "_shell")
+                        "repair_policy", "_born", "_shell", "_model_consent")
 
 
 def build_installed_spec(template: dict, param_values: dict) -> dict:

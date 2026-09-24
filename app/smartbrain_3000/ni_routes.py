@@ -936,7 +936,7 @@ def pick_flow_recipe(request: Request, item_id: str, body: PickRecipeIn) -> dict
         raise HTTPException(status_code=404, detail="unknown recipe")
     intent = record.get("intent") if isinstance(record.get("intent"), dict) else {}
     ni_flow._pause_for_recipe_confirm(store, item_id, intent, recipe,
-                                       call_model=ni_flow.default_call_model(store))
+                                       call_model=ni_flow.default_call_model(store, item_id))
     request.app.state.audit.append(
         "user", "ni_flow_pick_recipe", "reviewed", "executed", True,
         args_summary=tools.summarize({"item_id": item_id,
@@ -1107,6 +1107,8 @@ def answer_flow_question(request: Request, item_id: str, body: AnswerIn) -> dict
     if not isinstance(stamped, dict) or stamped.get("kind") != body.kind:
         raise HTTPException(status_code=409,
                             detail="this card is not asking that question")
+    if body.kind == "model_consent":
+        return _answer_model_consent(request, store, item_id, stamped, body.value.strip())
     if body.kind != "supply_date":
         raise HTTPException(status_code=409, detail="unanswerable question kind")
     value = body.value.strip()
@@ -1120,6 +1122,32 @@ def answer_flow_question(request: Request, item_id: str, body: AnswerIn) -> dict
     request.app.state.audit.append(
         "user", "ni_flow_answer", "reviewed", "executed", True,
         args_summary=tools.summarize({"item_id": item_id, "kind": body.kind}),
+        result_summary=tools.summarize({"started": bool(started)}),
+    )
+    return {"ok": True, "started": bool(started)}
+
+
+def _answer_model_consent(request: Request, store, item_id: str, stamped: dict,
+                          value: str) -> dict:
+    """Ruling 2: "allow" builds this card with the named non-local model (the consent
+    is sealed on the card, so Fix/refine don't re-ask); "local" builds it with the
+    local model the question offered."""
+    model = str(stamped.get("model") or "")
+    local = str(stamped.get("local") or "")
+    if value == "allow" and model:
+        fields: dict = {"_model_consent": model}
+    elif value == "local" and local:
+        fields = {"_use_local": True}
+    else:
+        raise HTTPException(status_code=400, detail="answer 'allow' or 'local'")
+    ni_flow._transition(store, item_id, "intent", _question=None, error=None,
+                         note=("user allowed " + model) if value == "allow"
+                         else "user chose the local model", **fields)
+    started = ni_flow.start_flow_worker(store, item_id)
+    request.app.state.audit.append(
+        "user", "ni_flow_answer", "reviewed", "executed", True,
+        args_summary=tools.summarize({"item_id": item_id, "kind": "model_consent",
+                                       "answer": value, "model": model if value == "allow" else local}),
         result_summary=tools.summarize({"started": bool(started)}),
     )
     return {"ok": True, "started": bool(started)}
@@ -1837,7 +1865,7 @@ def _build_export_template(store: ni.NIStore, item: dict, secrets_store) -> dict
 # so a template ships with none and the install path forces the safe default.
 _EXPORT_STRIP_KEYS = ("contract", "_c2_ok", "_l1_last_attempt", "_l1_trial",
                       "_l2_last_attempt", "_l2_proposal", "_template", "repair_policy",
-                      "_born")
+                      "_born", "_model_consent")
 
 
 def _sanitize_spec_for_export(item: dict, secrets_store) -> dict:

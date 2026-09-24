@@ -15,6 +15,15 @@ from fastapi.testclient import TestClient
 from smartbrain_3000 import ni, tools
 from smartbrain_3000.auth import relay_headers
 
+
+@pytest.fixture(autouse=True)
+def _local_build_model(monkeypatch):
+    """Ruling 2 (2026-09-24): a card builds on a local model unless its owner consented
+    to another. These tests exercise the flow, not that gate, so the default route
+    here is local (the consent tests set their own routes)."""
+    from smartbrain_3000 import gateway as _gateway
+    monkeypatch.setattr(_gateway, "DEFAULT_ROUTES", {"chat": "mlx/test-local"})
+
 _PHONE = relay_headers("phone-under-test")  # R14: phone authority (the relay credential)
 
 
@@ -1356,6 +1365,43 @@ def test_answer_route_resumes_supply_date_terminal(client: TestClient, monkeypat
     # The question is consumed — answering again 409s.
     assert client.post(f"/api/ni/items/{iid}/flow/answer",
                        json={"kind": "supply_date", "value": "2026-01-01"}).status_code == 409
+
+
+def test_answer_route_model_consent_allow_and_local(client: TestClient, monkeypatch) -> None:
+    """Ruling 2: the card names the non-local model and the local alternative;
+    "allow" records consent for THIS card, "local" switches the build to local."""
+    from smartbrain_3000 import ni_flow
+    _unlock(client)
+    monkeypatch.setattr(ni_flow, "start_flow_worker", lambda s, iid, **kw: True)
+    store = client.app.state.ni
+    ids = [client.post("/api/ni/intake", json={"request": f"bitcoin price {n}"}).json()["id"]
+           for n in (1, 2)]
+    for iid in ids:
+        ni_flow._ask_model_consent(store, iid, "openai/gpt-4o", "mlx/qwen-local")
+    row = next(x for x in client.get("/api/ni/board").json()["items"] if x["id"] == ids[0])
+    q = row["flow"]["question"]
+    assert q["kind"] == "model_consent" and q["model"] == "openai/gpt-4o"
+    assert q["local"] == "mlx/qwen-local" and "openai" in q["prompt"]
+    assert client.post(f"/api/ni/items/{ids[0]}/flow/answer",
+                       json={"kind": "model_consent", "value": "sure"}).status_code == 400
+    assert client.post(f"/api/ni/items/{ids[0]}/flow/answer",
+                       json={"kind": "model_consent", "value": "allow"}).status_code == 200
+    assert ni_flow._flow_read(store, ids[0])["_model_consent"] == "openai/gpt-4o"
+    assert client.post(f"/api/ni/items/{ids[1]}/flow/answer",
+                       json={"kind": "model_consent", "value": "local"}).status_code == 200
+    rec = ni_flow._flow_read(store, ids[1])
+    assert rec["_use_local"] is True and "_model_consent" not in rec
+
+
+def test_model_consent_local_refused_when_no_local_model_offered(client: TestClient,
+                                                                 monkeypatch) -> None:
+    from smartbrain_3000 import ni_flow
+    _unlock(client)
+    monkeypatch.setattr(ni_flow, "start_flow_worker", lambda s, iid, **kw: True)
+    iid = client.post("/api/ni/intake", json={"request": "bitcoin price"}).json()["id"]
+    ni_flow._ask_model_consent(client.app.state.ni, iid, "openai/gpt-4o", None)
+    assert client.post(f"/api/ni/items/{iid}/flow/answer",
+                       json={"kind": "model_consent", "value": "local"}).status_code == 400
 
 
 def test_answer_route_409_when_no_question_pending(client: TestClient) -> None:

@@ -18,8 +18,17 @@ import pytest
 
 from smartbrain_3000 import db as dbmod
 from smartbrain_3000 import ni as nimod
-from smartbrain_3000 import ni_flow, tools
+from smartbrain_3000 import ni_flow, ni_master, tools
 from smartbrain_3000.secrets import gen_master_key
+
+
+@pytest.fixture(autouse=True)
+def _local_build_model(monkeypatch):
+    """Ruling 2 (2026-09-24): a card builds on a local model unless its owner consented
+    to another. These tests exercise the flow, not that gate, so the default route
+    here is local (the consent tests set their own routes)."""
+    from smartbrain_3000 import gateway as _gateway
+    monkeypatch.setattr(_gateway, "DEFAULT_ROUTES", {"chat": "mlx/test-local"})
 
 FIXTURES = Path(__file__).parent / "fixtures" / "ni_flow"
 
@@ -627,6 +636,87 @@ def test_c1_explicit_ni_route_wins_local_preference_on_fallback(monkeypatch) -> 
         "agent": "openai/gpt-4o", "chat": "mlx/qwen-local"})
     resolved2 = ni_flow._resolve_flow_model(store)
     assert resolved2 == "mlx/qwen-local", f"fallback stays local-first; got {resolved2!r}"
+
+
+# ---- ruling 2 (2026-09-24): a non-local build model needs this card's consent ----
+
+def _intent_reply(model: str, prompt: str) -> str:
+    return json.dumps({"kind": "external_data", "subject": "x", "cadence_minutes": 15,
+                       "wants": ["price"], "threshold": None, "display_hint": "value"})
+
+
+def test_cloud_build_model_asks_this_card_before_any_model_call(monkeypatch) -> None:
+    store, _conn = _store()
+    from smartbrain_3000 import gateway as _gwmod
+    monkeypatch.setattr(_gwmod, "load_routes",
+                        lambda conn: {"ni": "openai/gpt-4o", "chat": "mlx/qwen-local"})
+    item_id = ni_flow.create_shell_item(store, "bitcoin price")
+    seen: list[str] = []
+    record = ni_flow.run_flow(store, item_id,
+                              gateway_call=lambda m, p: seen.append(m) or _intent_reply(m, p),
+                              fetcher=lambda url: {"price": 1.0}, catalog=[])
+    assert seen == [], "no model may run before the owner answers"
+    assert record["state"] == "unsupported"
+    question = ni_master.question_for("unsupported", record)
+    assert question["kind"] == "model_consent"
+    assert question["model"] == "openai/gpt-4o" and question["local"] == "mlx/qwen-local"
+
+
+def test_consent_builds_with_the_named_model_and_is_sealed_on_the_card(monkeypatch) -> None:
+    """Allowed once, the build runs on that model and the finished card carries the
+    consent, so a later Fix/refine (a fresh flow record) doesn't ask again."""
+    store, _conn = _store()
+    from smartbrain_3000 import gateway as _gwmod
+    monkeypatch.setattr(_gwmod, "load_routes", lambda conn: {"ni": "openai/gpt-4o"})
+    fixture = _load("aapl")
+    item_id = ni_flow.create_shell_item(store, "show me AAPL every 5 minutes")
+    ni_flow._transition(store, item_id, "intent", _model_consent="openai/gpt-4o")
+    model = _scripted_model([
+        json.dumps({"kind": "external_data", "subject": "AAPL", "cadence_minutes": 5,
+                    "wants": ["price", "prev_close"], "threshold": None,
+                    "display_hint": "value"}),
+        json.dumps({"price": "chart.result[0].meta.regularMarketPrice",
+                    "prev_close": "chart.result[0].meta.fulldayPrice"}),
+    ])
+    result = ni_flow.run_flow(store, item_id, gateway_call=model,
+                              fetcher=lambda url: fixture, catalog=_empty_catalog(),
+                              source_url="https://query1.finance.yahoo.com/v8/finance/chart/AAPL")
+    assert result["state"] == "ready", f"got {result}"
+    assert {c["model"] for c in model.calls} == {"openai/gpt-4o"}
+    assert store.get_item(item_id)["spec"]["_model_consent"] == "openai/gpt-4o"
+    assert ni_flow._model_consent_of(store, item_id, {}) == "openai/gpt-4o"
+
+
+def test_choosing_local_builds_with_the_local_model(monkeypatch) -> None:
+    store, _conn = _store()
+    from smartbrain_3000 import gateway as _gwmod
+    monkeypatch.setattr(_gwmod, "load_routes",
+                        lambda conn: {"ni": "openai/gpt-4o", "chat": "mlx/qwen-local"})
+    item_id = ni_flow.create_shell_item(store, "bitcoin price")
+    ni_flow._transition(store, item_id, "intent", _use_local=True)
+    seen: list[str] = []
+    ni_flow.run_flow(store, item_id,
+                     gateway_call=lambda m, p: seen.append(m) or _intent_reply(m, p),
+                     fetcher=lambda url: {"price": 1.0}, catalog=[])
+    assert seen and set(seen) == {"mlx/qwen-local"}
+
+
+def test_route_side_helper_never_uses_an_unconsented_cloud_model(monkeypatch) -> None:
+    store, _conn = _store()
+    from smartbrain_3000 import gateway as _gwmod
+    monkeypatch.setattr(_gwmod, "load_routes",
+                        lambda conn: {"ni": "openai/gpt-4o", "chat": "mlx/qwen-local"})
+    used: list[str] = []
+    monkeypatch.setattr(_gwmod, "chat", lambda msgs, model, **kw: used.append(model) or {})
+    monkeypatch.setattr(_gwmod, "completion_text", lambda data: "{}")
+    item_id = ni_flow.create_shell_item(store, "bitcoin price")
+    call = ni_flow.default_call_model(store, item_id)
+    assert call is not None
+    call("hello")
+    assert used == ["mlx/qwen-local"]
+    ni_flow._transition(store, item_id, "intent", _model_consent="openai/gpt-4o")
+    ni_flow.default_call_model(store, item_id)("hello")
+    assert used[-1] == "openai/gpt-4o"
 
 
 def test_c1_no_placeholder_grep_in_source() -> None:

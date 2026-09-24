@@ -26,6 +26,15 @@ to know when a release changes behavior.
   card's picture was requested from the relay's server instead of your
   Desktop, so it never loaded. Card images now travel over the same relay as
   the rest of the app.
+### Changed
+
+- **A Neural Interface card asks before a model outside this computer builds
+  it.** Building a card reads your request and samples of its source. If your
+  model routing points at a cloud model, a new card now shows "Build with a
+  model outside this computer?" and names that model. You can build with it,
+  for that card only, or use your local model. Before, the build simply used
+  the cloud model. The finished card still refreshes on this computer either
+  way, and a later Fix or refine doesn't ask again.
 
 ## [0.23.1] - 2026-09-24
 
