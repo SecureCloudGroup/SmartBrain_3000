@@ -96,13 +96,25 @@ class _ResultParser(HTMLParser):
         self._mode, self._tag = None, ""
 
 
+def _is_engine_link(url: str) -> bool:
+    """The search engine's own host is never a result: DuckDuckGo ad redirects
+    (``duckduckgo.com/y.js?ad_domain=…``) and internal links carry no target to
+    decode. Measured 2026-09-23: 12 of 60 keyless results on commercial queries
+    were ads — they reached NI's web candidates, and the pre-tap evidence read
+    FOLLOWED them (an ad click from the user's IP that nobody made)."""
+    host = (urlparse(url).hostname or "").lower()
+    return host == "duckduckgo.com" or host.endswith(".duckduckgo.com")
+
+
 def parse_results(html: str, limit: int) -> list[dict]:
     """Extract up to ``limit`` {title, url, snippet} results from DuckDuckGo HTML."""
     assert isinstance(html, str), "html must be str"
     assert 1 <= limit <= _MAX_RESULTS, "limit out of range"
     parser = _ResultParser()
     parser.feed(html)
-    return [r for r in parser.results if r["title"] and r["url"].startswith("http")][:limit]
+    return [r for r in parser.results
+            if r["title"] and r["url"].startswith("http")
+            and not _is_engine_link(r["url"])][:limit]
 
 
 def web_search(query: str, limit: int = 5) -> list[dict]:
