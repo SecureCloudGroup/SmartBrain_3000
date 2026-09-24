@@ -23,6 +23,14 @@ os.environ.setdefault("SMARTBRAIN_NO_VOICE_PREFETCH", "1")
 # local broker set the variable themselves.
 os.environ.setdefault("SMARTBRAIN_SIGNALING_URL", "")
 
+# Tests must NEVER reach a live model gateway either. Off Docker the default gateway
+# is http://127.0.0.1:38080 — the running SmartBrain's own Bifrost — and tests that
+# lock the vault clear its provider keys: a native run on a machine with SmartBrain
+# installed deleted every provider from the live gateway (2026-09-24). Port 9
+# (discard) refuses the connection. Tests that exercise the wire set the variable
+# to their own fake gateway (tests/_fakegateway.py).
+os.environ.setdefault("SMARTBRAIN_LLM_GATEWAY_URL", "http://127.0.0.1:9")
+
 # R14 local API credential. Every /api request now needs a credential, and the suite
 # has always acted AS THE DESKTOP — so every TestClient presents the desktop bearer
 # (the local token) by default, exactly like the launcher/doctor do. This default can
