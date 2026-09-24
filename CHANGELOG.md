@@ -11,6 +11,8 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.23.1] - 2026-09-24
+
 ### Security
 
 - **Every request to the app now needs a credential; being unlocked is no longer
