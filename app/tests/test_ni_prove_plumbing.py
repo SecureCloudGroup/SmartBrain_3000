@@ -47,7 +47,8 @@ def test_prove_keyless_recipe_url_substitution_and_pipeline_bind_succeed() -> No
     def _fake_fetch(url: str, headers: dict) -> object:
         calls.append((url, headers))
         # A sample known to bind for weather-open-meteo.
-        return {"current": {"temperature_2m": 21.0, "wind_speed_10m": 4.5}}
+        return {"current_units": {"temperature_2m": "°C", "wind_speed_10m": "km/h"},
+                "current": {"temperature_2m": 21.0, "wind_speed_10m": 4.5}}
 
     from smartbrain_3000 import ni_catalog
     recipe = ni_catalog.get_recipe("weather-open-meteo")

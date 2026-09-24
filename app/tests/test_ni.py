@@ -4329,6 +4329,27 @@ def test_transform_where_numeric_threshold_filters_in_place() -> None:
     assert out["quakes"] == [{"mag": 5.0}, {"mag": 6.1}]
 
 
+def test_transform_where_starts_with_keeps_prefix_matches_only() -> None:
+    """where starts_with: string prefix on both sides; anything else is excluded."""
+    payload = {"rows": [{"bin": "AT1"}, {"bin": "EP1"}, {"bin": "AT2"}, {"bin": 7},
+                        {"other": "AT"}]}
+    out = nimod.run_pipeline([
+        {"op": "transform", "apply": [
+            {"fn": "where", "field": "rows", "key": "bin", "op": "starts_with",
+             "value": "AT"},
+        ]},
+    ], payload)
+    assert out["rows"] == [{"bin": "AT1"}, {"bin": "AT2"}]
+
+
+@pytest.mark.parametrize("value", ["", 5, True])
+def test_transform_where_starts_with_needs_a_non_empty_string(value) -> None:
+    with pytest.raises(ValueError):
+        nimod._validate_transform_where(
+            {"fn": "where", "field": "rows", "key": "bin", "op": "starts_with",
+             "value": value}, "t")
+
+
 def test_transform_where_eq_on_strings_keeps_matching_items() -> None:
     """§29 where: eq on strings does a strict scalar compare (no coercion)."""
     payload = {"rows": [{"kind": "warn"}, {"kind": "ok"}, {"kind": "warn"}]}

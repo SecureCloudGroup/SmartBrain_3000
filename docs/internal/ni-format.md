@@ -211,6 +211,10 @@ Added in v-next (§29 flow-engine phase):
   non-numeric item under an ordering op — or a list entry missing ``key`` —
   is silently EXCLUDED, not a failure (filtering is selection, not
   validation). A non-list ``field`` is a stage failure `transform_type`.
+  ``op`` also takes `starts_with` (the where transform only, not §5
+  conditions): ``value`` must be a non-empty string and an item matches when
+  its string value starts with it; a non-string item is excluded. Feeds code
+  categories as prefixes (NHC basin bins `AT1`/`EP2`/`CP1`).
 
 ### 4.3 Bind + render-validate (implicit, always last)
 
@@ -1226,8 +1230,9 @@ fetching <host>" (confirm_source) / "waiting for a source pick" (source) /
 
 **Grammar additions this phase**:
 - `where` transform (list filtering): `{fn: "where", field, key, op:
-  lt|le|gt|ge|eq|ne, value}` — closed ops, §5 condition semantics, serves
-  threshold intents ("above magnitude 5").
+  lt|le|gt|ge|eq|ne|starts_with, value}` — closed ops, §5 condition
+  semantics (`starts_with`: string prefix), serves threshold intents ("above
+  magnitude 5") and prefix-coded categories.
 - `computed` source v1: `{type: "computed", compute: "days_until", date:
   "YYYY-MM-DD"}` — zero egress, pure clock; payload `{days: int}`. Preview
   computes the REAL day count at finalize (never a bare `0` on a future date).

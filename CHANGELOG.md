@@ -11,6 +11,18 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Neural Interface weather cards show the unit the source returned.** A
+  card built for °F and mph showed the Fahrenheit reading labelled "°C" and
+  the wind labelled "km/h", because the recipe fixed those labels. Units now
+  come from the weather service's reply. Existing weather cards keep the old
+  labels until rebuilt.
+- **The Atlantic storms card shows only Atlantic storms.** The hurricane
+  center's feed lists every basin, so Pacific storms appeared on a card that
+  asked for the Atlantic. The recipe now keeps the Atlantic basin. Existing
+  storm cards keep the old list until rebuilt.
+
 ## [0.23.1] - 2026-09-24
 
 ### Security
