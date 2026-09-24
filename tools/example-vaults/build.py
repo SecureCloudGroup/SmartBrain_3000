@@ -8,12 +8,16 @@ must be kept: deleting it orphans every subscriber (updates would look like key-
 tampering and be blocked). Passphrase rotation is safe (it re-wraps the master key, the
 publisher key is unchanged): use the app's Change passphrase against this instance.
 
+Because that instance holds the signing key, its image is BUILT from this checkout's HEAD,
+never pulled: HEAD must be on origin/main (merged, reviewed code), and app/ and docs/ must
+match it, so the vault is exactly one commit's docs exported by that commit's code.
+
 Usage:
     SB_PUBLISHER_PASS=<passphrase> python3 tools/example-vaults/build.py
 
 First run mints the instance and PRINTS THE RECOVERY KEY ONCE — save it. Re-runs unlock,
 re-sync changed docs, and export the next version (subscribers auto-pick up the delta).
-Stdlib-only on purpose: runs on any machine with Python 3 and Docker.
+Stdlib-only on purpose: runs on any machine with Python 3, git and Docker.
 """
 
 import datetime
@@ -27,15 +31,17 @@ import time
 import urllib.error
 import urllib.request
 
-IMAGE = "ghcr.io/securecloudgroup/smartbrain_3000:latest"
+# Built from HEAD by build_image(), never pulled: a registry tag can move (a swapped
+# `:latest` would run with the signing key), and `docker run` never refreshes a cached one
+# (the vault was exported by a months-old v0.8.23 image until 2026-09-24).
+IMAGE = "smartbrain-vault-builder:local"
+_LABEL = "com.securecloudgroup.smartbrain.vault-builder=1"  # scopes the old-image cleanup
 CONTAINER = "sb_vault_builder"
 VOLUME = "sb_publisher_data"
 PORT = 34500
 BASE = f"http://127.0.0.1:{PORT}"
-# R14: the builder's throwaway container gets its local API token from us, and every
-# call presents it (Desktop authority — export is Desktop-only). IMAGE is the latest
-# PUBLISHED release, which can predate the token (the vault is rebuilt before a tag),
-# so calls also carry the old Desktop marker; a current app ignores it.
+# R14: the builder's container gets its local API token from us, and every call presents
+# it (Desktop authority — export is Desktop-only).
 TOKEN = secrets.token_urlsafe(32)
 VAULT_NAME = "SmartBrain Docs"
 # The description now travels to subscribers (the publisher's own description propagates on
@@ -59,12 +65,44 @@ def api(method: str, path: str, body: dict | None = None, raw: bool = False):
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(
         BASE + path, data=data, method=method,
-        headers={"Content-Type": "application/json", "Authorization": f"Bearer {TOKEN}",
-                 "X-SB-Local": "1"},
+        headers={"Content-Type": "application/json", "Authorization": f"Bearer {TOKEN}"},
     )
     with urllib.request.urlopen(req, timeout=120) as resp:
         payload = resp.read()
     return payload if raw else (json.loads(payload) if payload else {})
+
+
+def _git(*args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", *args], cwd=REPO, capture_output=True, text=True, check=False)
+
+
+def build_image() -> bool:
+    """Build IMAGE from HEAD's committed tree; False (reason printed) when refused or failed."""
+    sha = _git("rev-parse", "HEAD").stdout.strip()
+    if not sha or _git("merge-base", "--is-ancestor", sha, "origin/main").returncode != 0:
+        print("HEAD is not on origin/main: the publisher runs only merged code "
+              "(check out main and pull).", file=sys.stderr)
+        return False
+    if _git("status", "--porcelain", "--", "app", "docs").stdout.strip():
+        print("app/ or docs/ has uncommitted changes: the vault must come from one commit.",
+              file=sys.stderr)
+        return False
+    print(f"building the publisher image from {sha[:12]}")
+    # Exactly the committed tree (never the working copy); the Dockerfile needs only app/.
+    archive = subprocess.Popen(["git", "archive", "--format=tar", sha, "Dockerfile", "app"],
+                               cwd=REPO, stdout=subprocess.PIPE)
+    built = subprocess.run(
+        ["docker", "build", "--pull", "--label", _LABEL,
+         "--label", f"org.opencontainers.image.revision={sha}", "-t", IMAGE, "-"],
+        stdin=archive.stdout, check=False)
+    archive.stdout.close()
+    if archive.wait() != 0 or built.returncode != 0:
+        print("building the publisher image failed", file=sys.stderr)
+        return False
+    # The previous build is untagged now; drop it (only images carrying our label).
+    subprocess.run(["docker", "image", "prune", "-f", "--filter", f"label={_LABEL}"],
+                   capture_output=True, check=False)
+    return True
 
 
 def main() -> int:
@@ -75,12 +113,16 @@ def main() -> int:
     if not DOCS:
         print("No docs/0*.md found — run from the repo.", file=sys.stderr)
         return 2
+    if not build_image():
+        return 1
 
     subprocess.run(["docker", "rm", "-f", CONTAINER], capture_output=True)
     subprocess.run(
         ["docker", "run", "-d", "--rm", "--name", CONTAINER,
          "-e", f"SMARTBRAIN_PORT={PORT}", "-e", "SMARTBRAIN_HOST=0.0.0.0",
          "-e", f"SMARTBRAIN_LOCAL_TOKEN={TOKEN}",
+         # The key-holding instance stays offline: no voice-model download, no broker link.
+         "-e", "SMARTBRAIN_NO_VOICE_PREFETCH=1", "-e", "SMARTBRAIN_SIGNALING_URL=",
          "-p", f"127.0.0.1:{PORT}:{PORT}", "-v", f"{VOLUME}:/app/data", IMAGE],
         check=True,
     )
