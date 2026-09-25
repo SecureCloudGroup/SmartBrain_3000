@@ -58,6 +58,9 @@ function routeAuthFailure(status: number, body: unknown): void {
   else if (status === 401 && (body as { code?: string } | null)?.code === "no_session") handleNoSession();
 }
 
+// The formats the server's §24 image route serves (ni._IMAGE_MEDIA_BY_FORMAT).
+const NI_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
+
 export class ApiError extends Error {
   status: number;
   code?: string; // machine-readable reason when the server sends one (e.g. "no_session")
@@ -1625,6 +1628,22 @@ export const api = {
   // one exception: it's Desktop-only (server-checked), so a
   // paired phone cannot enter or replace an item's secret.
   niBoard: () => req<{ items: NiBoardItem[] }>("/api/ni/board"),
+  // §24 card images, as a data: URL. Off the LAN only window.fetch rides the WebRTC
+  // relay; a plain <img src="/api/…"> would be asked of the relay's host instead (and
+  // fail). The CSP's img-src admits 'self' and data: only, so no blob: URLs.
+  niImageDataUrl: async (src: string): Promise<string> => {
+    await remoteReady;
+    const res = await fetch(src);
+    if (!res.ok) throw new ApiError(res.status, `image failed (${res.status})`);
+    const type = (res.headers.get("content-type") || "").split(";")[0].trim();
+    if (!NI_IMAGE_TYPES.has(type)) throw new ApiError(415, `unexpected image type ${type || "(none)"}`);
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    let binary = "";
+    for (let i = 0; i < bytes.length; i += 0x8000) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    }
+    return `data:${type};base64,${btoa(binary)}`;
+  },
   niItem: (id: string) => req<NiItemDetail>(`/api/ni/items/${encodeURIComponent(id)}`),
   // F1 (2026-09-15): a "Looks right" verdict kicks the C3 proof run server-side;
   // `state` is the POST-run state (often "live" already) and `run` reports the

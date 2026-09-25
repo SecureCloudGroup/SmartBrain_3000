@@ -143,6 +143,24 @@ describe("req wrapper (via api.health)", () => {
 // Vault calls that do NOT go through req<T>: export/import hand-roll fetch (a Blob body, a raw
 // upload), so they carry their own headers and their own error path. Worth pinning — a
 // dropped `vault` param silently searches EVERYTHING instead of the one vault the user scoped to.
+describe("niImageDataUrl — card images ride the relayed fetch", () => {
+  it("returns a data: URL of the served bytes and type", async () => {
+    const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+    const spy = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) =>
+      new Response(bytes, { status: 200, headers: { "content-type": "image/png" } }));
+    globalThis.fetch = spy as unknown as typeof globalThis.fetch;
+    const url = await api.niImageDataUrl("/api/ni/items/abc/image?v=2");
+    expect(String(spy.mock.calls[0][0])).toBe("/api/ni/items/abc/image?v=2");
+    expect(url).toBe("data:image/png;base64,iVBORw==");
+  });
+
+  it("refuses a type the image route never serves", async () => {
+    globalThis.fetch = (async () =>
+      new Response("<svg/>", { status: 200, headers: { "content-type": "image/svg+xml" } })) as unknown as typeof globalThis.fetch;
+    await expect(api.niImageDataUrl("/api/ni/items/abc/image")).rejects.toBeInstanceOf(ApiError);
+  });
+});
+
 describe("vault client calls", () => {
   // Typed params, so `mock.calls` is a real tuple rather than [] and the assertions below type-check.
   function captureFetch(status = 200, body: unknown = {}) {

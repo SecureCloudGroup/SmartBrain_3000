@@ -7,6 +7,7 @@
   // Svelte 5 replacement for svelte:self).
   import Chip from "./Chip.svelte";
   import Icon from "./Icon.svelte";
+  import NiImage from "./NiImage.svelte";
   import Self from "./NiScene.svelte";
   import { ICONS, type IconName } from "$lib/icons";
   import {
@@ -142,9 +143,9 @@
   {/if}
 {:else if node.type === "image"}
   <!-- §24: src is server-written and already validated against
-       /^\/api\/ni\/items\/<id>\/image(\?v=…)?$/ by validateBoundScene. A broken
-       image shows the alt text natively — no onerror handler injects anything. -->
-  <img class="ni-image" src={node.src} alt={node.alt} loading="lazy" />
+       /^\/api\/ni\/items\/<id>\/image(\?v=…)?$/ by validateBoundScene. NiImage loads
+       it through the relayed fetch (off-LAN safe) and shows the alt text on failure. -->
+  <NiImage src={node.src} alt={node.alt} />
 {:else if node.type === "spark"}
   {#if node.points.length === 0}
     <span class="muted ni-spark-empty" role="img" aria-label="trend">—</span>
@@ -220,13 +221,6 @@
     width: 100%;
   }
   .ni-text, .ni-number { color: var(--text); line-height: var(--lh-ui); }
-  .ni-image {
-    display: block;
-    width: 100%;
-    max-width: 100%;
-    height: auto;
-    border-radius: var(--r-2);
-  }
   .ni-bad { font-size: var(--f-meta); font-style: italic; }
   .ni-bar {
     width: 100%;
