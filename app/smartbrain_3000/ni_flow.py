@@ -1453,6 +1453,14 @@ def run_flow(store: ni.NIStore, item_id: str, *,
     resolved_model = ni_route_model if ni_route_model else _resolve_flow_model(store)
     if not resolved_model:
         return _fail(store, item_id, "intent", "no chat/ni/agent model route configured")
+    if not ni_route_model and not _gateway_mod.is_local(resolved_model):
+        # Ruling 2 (2026-09-24): building reads the user's words and samples of the
+        # source, so a model off this computer needs THIS card's consent.
+        local = _local_flow_model(store)
+        if record.get("_use_local") and local:
+            resolved_model = local
+        elif _model_consent_of(store, item_id, record) != resolved_model:
+            return _ask_model_consent(store, item_id, resolved_model, local)
 
     def call_model(prompt: str) -> str:
         assert isinstance(prompt, str), "prompt required"
@@ -1480,6 +1488,41 @@ def run_flow(store: ni.NIStore, item_id: str, *,
         return _handle_computed(store, item_id, request, intent)
     return _run_external_flow(store, item_id, request, intent, known_url,
                               call_model, do_fetch, catalog_rows)
+
+
+def _local_flow_model(store: ni.NIStore) -> str | None:
+    """The first LOCAL model on the ni / chat / agent routes, or None."""
+    assert store is not None, "store required"
+    routes = _gateway_mod.load_routes(store.conn) if hasattr(_gateway_mod, "load_routes") else {}
+    for capability in ("ni", "chat", "agent"):  # bounded to 3
+        model = _gateway_mod.resolve_model(capability, routes)
+        if model and _gateway_mod.is_local(model):
+            return model
+    return None
+
+
+def _model_consent_of(store: ni.NIStore, item_id: str, record: dict) -> str | None:
+    """The non-local model this card's owner allowed: this build's answer, else the
+    consent sealed on the card by an earlier build (so Fix/refine don't re-ask)."""
+    assert store is not None and item_id, "args required"
+    consent = record.get("_model_consent")
+    if isinstance(consent, str) and consent:
+        return consent
+    item = store.get_item(item_id)
+    sealed = (item or {}).get("spec", {}).get("_model_consent") if item else None
+    return sealed if isinstance(sealed, str) and sealed else None
+
+
+def _ask_model_consent(store: ni.NIStore, item_id: str, model: str,
+                       local: str | None) -> dict:
+    """Stop before any model call and ask the card's owner (ruling 2)."""
+    return _terminate_unsupported(
+        store, item_id,
+        f"building this card would use {model}, which runs outside this computer",
+        question={"kind": "model_consent", "model": model, "local": local or "",
+                  "prompt": f"This card is set to build with {model}. Building sends your "
+                            "request and samples from the source to that service; the "
+                            "finished card still refreshes on this computer."})
 
 
 def _resolve_flow_model(store: ni.NIStore) -> str | None:
@@ -2875,6 +2918,11 @@ def _finalize(store: ni.NIStore, item_id: str, spec: dict, preview: dict,
         # dropped it (found 2026-09-23 by the stuck-card remedy test) and the
         # §29 door fell back to the prunable journal M1 exists to avoid.
         spec[_BORN_KEY] = prior["spec"][_BORN_KEY]
+    record = _flow_read(store, item_id) or {}
+    consent = record.get("_model_consent") or (prior["spec"].get("_model_consent")
+                                                if prior is not None else None)
+    if isinstance(consent, str) and consent:
+        spec["_model_consent"] = consent  # ruling 2: consent lives with the card
     # needs_params wave (2026-09-14): bind ``ni:self:<name>`` refs to the shell's
     # concrete item id — the retired create_ni_item_from_recipe tool did this via
     # ``_add_item_with_rewrite``; the flow's handoff never inherited it, so a
@@ -3068,16 +3116,22 @@ def _release(item_id: str) -> None:
         _INFLIGHT.discard(item_id)
 
 
-def default_call_model(store: ni.NIStore) -> Callable[[str], str] | None:
+def default_call_model(store: ni.NIStore,
+                       item_id: str | None = None) -> Callable[[str], str] | None:
     """A prompt→reply callable on the live-resolved flow model, or None.
 
     Route-side callers (the card's pick-recipe pause) use this so the same
     bounded model steps run there as in the worker; None degrades every
-    caller to its deterministic path.
+    caller to its deterministic path. A non-local model is used only when
+    ``item_id``'s owner consented to it (ruling 2); otherwise the local one.
     """
     assert store is not None, "store required"
     try:
         model = _resolve_flow_model(store)
+        if model and not _gateway_mod.is_local(model):
+            record = (_flow_read(store, item_id) or {}) if item_id else {}
+            consented = item_id and _model_consent_of(store, item_id, record) == model
+            model = model if consented else _local_flow_model(store)
     except Exception:
         return None
     if not model:

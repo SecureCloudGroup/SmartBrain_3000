@@ -4348,6 +4348,17 @@ def test_transform_where_starts_with_needs_a_non_empty_string(value) -> None:
         nimod._validate_transform_where(
             {"fn": "where", "field": "rows", "key": "bin", "op": "starts_with",
              "value": value}, "t")
+@pytest.mark.parametrize("value,ok", [
+    ("openai/gpt-4o", True), (None, True), ("claudecode/opus", True),
+    ("no-slash", False), ("", False), ("openai/gpt 4o", False), (7, False),
+])
+def test_spec_model_consent_is_a_model_id_or_absent(value, ok) -> None:
+    """Ruling 2: the per-card build consent is a 'provider/model' id or absent."""
+    if ok:
+        nimod._validate_model_consent(value)
+    else:
+        with pytest.raises(ValueError):
+            nimod._validate_model_consent(value)
 
 
 def test_transform_where_eq_on_strings_keeps_matching_items() -> None:

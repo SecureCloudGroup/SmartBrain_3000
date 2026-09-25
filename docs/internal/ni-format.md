@@ -1240,6 +1240,17 @@ fetching <host>" (confirm_source) / "waiting for a source pick" (source) /
   create/finalize, validated by `validate_spec`, refused inside template
   packs (`ni_library.parse_pack` + `_TEMPLATE_STRIP_KEYS`), stripped on
   export. The §29 door reads it first, journal is fallback.
+- `_model_consent` sealed spec key (ruling 2, 2026-09-24): the non-local
+  'provider/model' id this card's owner allowed to BUILD it. When the flow's
+  resolved model is not local and differs from the card's consent, `run_flow`
+  stops before any model call with an answerable `unsupported` terminal whose
+  question is `model_consent` `{model, local, prompt}`; `/flow/answer`
+  `allow` stamps the consent on the record (`_finalize` seals it into the
+  spec, so Fix/refine don't re-ask), `local` builds with the first local
+  ni/chat/agent route. The route-side helper (`default_call_model`) uses an
+  unconsented cloud model never — it falls back to the local route. Refused
+  in template packs, stripped on export. The engine's llm stage stays
+  local-only regardless.
 
 **Testing contract (release gates)** (audit 2026-09-13):
 - `app/tests/fixtures/ni_flow/` holds the recorded 10-source corpus; the

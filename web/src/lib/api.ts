@@ -732,7 +732,8 @@ export interface NiItemFlow {
   // and the reopen affordances. The card renders these verbatim; no more
   // frontend-guessed failure copy.
   reason?: string;
-  question?: { kind: string; prompt?: string };
+  // model_consent (ruling 2) also names the non-local model and the local alternative.
+  question?: { kind: string; prompt?: string; model?: string; local?: string };
   reopen?: string[];
 }
 

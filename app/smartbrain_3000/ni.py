@@ -403,9 +403,11 @@ def validate_spec(spec: object, *, allow_empty_params: bool = False) -> dict:
                "display", "contract", "repair_policy", "model", "_c2_ok",
                "interval_minutes", "history", "alerts",
                "_l1_last_attempt", "_l1_trial", "_template",
-               "_l2_last_attempt", "_l2_proposal", "_born", "_shell"}
+               "_l2_last_attempt", "_l2_proposal", "_born", "_shell",
+               "_model_consent"}
     _closed_keys(body, allowed, "spec")
     _validate_born_marker(body.get("_born"))
+    _validate_model_consent(body.get("_model_consent"))
     # W2 (2026-09-15): ``_shell`` is the flow's not-yet-finalized marker —
     # boolean-true or absent, nothing else (the commission door reads it).
     if "_shell" in body and body["_shell"] is not True:
@@ -461,6 +463,20 @@ def _validate_born_marker(value: object) -> None:
     if not isinstance(value, str) or value not in _BORN_MARKERS:
         raise ValueError(
             f"spec._born must be one of {sorted(_BORN_MARKERS)} or absent")
+
+
+def _validate_model_consent(value: object) -> None:
+    """Ruling 2 (2026-09-24): the non-local model this card's owner allowed to BUILD it.
+
+    A 'provider/model' id or absent. Written only by the flow's consent answer and
+    carried across Fix/refine; stripped from exports and refused in template packs,
+    so consent is never shipped or installed.
+    """
+    if value is None:
+        return
+    if not (isinstance(value, str) and 3 <= len(value) <= 200 and "/" in value
+            and not any(c.isspace() for c in value)):
+        raise ValueError("spec._model_consent must be a 'provider/model' id or absent")
 
 
 def _validate_template_provenance(value: object) -> None:

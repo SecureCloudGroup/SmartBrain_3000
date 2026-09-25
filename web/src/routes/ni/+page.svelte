@@ -208,6 +208,21 @@
     }
   }
 
+  async function answerConsent(item: NiBoardItem, value: "allow" | "local"): Promise<void> {
+    console.assert(typeof item.id === "string", "answerConsent: id required");
+    busyId = item.id;
+    flowActionError = { ...flowActionError, [item.id]: "" };
+    try {
+      await api.niFlowAnswer(item.id, "model_consent", value);
+      toast(value === "allow" ? "Building the card." : "Building the card on your local model.");
+      await load();
+    } catch (err) {
+      flowActionError = { ...flowActionError, [item.id]: describeError(err) || "That didn’t go through — try again." };
+    } finally {
+      busyId = null;
+    }
+  }
+
   async function reopenPick(item: NiBoardItem): Promise<void> {
     console.assert(typeof item.id === "string", "reopenPick: id required");
     busyId = item.id;
@@ -1229,12 +1244,37 @@
                      sentence, question, and reopen affordances verbatim — a
                      terminal is never a dead end (retry / pick again / answer). -->
                 {@const friendly = friendlyErrorClass(item.flow.error ?? "")}
-                <p class="ni-status-fail" style="margin:0; font-size:var(--f-label)">
-                  {item.flow.state === "unsupported" ? "Can’t build this card yet" : "Setup failed"}
+                {@const consent = item.flow.question?.kind === "model_consent" ? item.flow.question : null}
+                <p class={consent ? "" : "ni-status-fail"} style="margin:0; font-size:var(--f-label); font-weight:600">
+                  {consent ? "Build with a model outside this computer?"
+                    : item.flow.state === "unsupported" ? "Can’t build this card yet" : "Setup failed"}
                 </p>
-                <p class="muted" style="margin:var(--s-1) 0 0; font-size:var(--f-label)">
-                  {item.flow.reason ?? friendly ?? "Creation didn’t finish."}
-                </p>
+                {#if !consent}
+                  <p class="muted" style="margin:var(--s-1) 0 0; font-size:var(--f-label)">
+                    {item.flow.reason ?? friendly ?? "Creation didn’t finish."}
+                  </p>
+                {/if}
+                {#if consent}
+                  <!-- Ruling 2 (2026-09-24): building reads the request and samples of the
+                       source, so a non-local model needs THIS card's consent. -->
+                  {#if consent.prompt}
+                    <p class="muted" style="margin:var(--s-1) 0 0; font-size:var(--f-label)">{consent.prompt}</p>
+                  {/if}
+                  <div class="ni-actions" style="margin-top: var(--s-2)">
+                    <button
+                      class="secondary"
+                      disabled={busyId === item.id}
+                      onclick={() => answerConsent(item, "allow")}
+                    >Build with {consent.model}</button>
+                    {#if consent.local}
+                      <button
+                        class="ghost"
+                        disabled={busyId === item.id}
+                        onclick={() => answerConsent(item, "local")}
+                      >Use my local model</button>
+                    {/if}
+                  </div>
+                {/if}
                 {#if item.flow.question?.kind === "supply_date"}
                   {#if item.flow.question.prompt}
                     <p class="muted" style="margin:var(--s-1) 0 0; font-size:var(--f-label)">{item.flow.question.prompt}</p>
@@ -1255,6 +1295,7 @@
                     >Use this date</button>
                   </form>
                 {/if}
+                {#if !consent}
                 <div class="ni-actions" style="margin-top: var(--s-2)">
                   {#if !item.shell}
                     <button
@@ -1283,6 +1324,7 @@
                     >Pick a source</button>
                   {/if}
                 </div>
+                {/if}
                 {#if flowActionError[item.id]}
                   <p class="error" style="margin:var(--s-1) 0 0; font-size:var(--f-label)">{flowActionError[item.id]}</p>
                 {/if}
@@ -1469,7 +1511,7 @@
             </div>
           {/if}
 
-          {#if preview && item.shell && (!item.flow || item.flow.state === "failed" || item.flow.state === "unsupported")}
+          {#if preview && item.shell && (!item.flow || item.flow.state === "failed" || item.flow.state === "unsupported") && item.flow?.question?.kind !== "model_consent"}
             <!-- W2 (2026-09-15) + W-A (2026-09-17): a flow shell whose creation
                  never finished must not offer Activate — but this copy showed
                  even while the flow was PAUSED awaiting the user's Approve tap
