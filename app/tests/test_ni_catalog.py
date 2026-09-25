@@ -126,6 +126,41 @@ def test_every_recipe_with_a_sample_response_survives_pipeline_and_bind() -> Non
                       image_ref=ni._preview_image_ref(spec, src["id"]))
 
 
+def _bound_texts(node: object, out: list[str]) -> list[str]:
+    if isinstance(node, dict):
+        if node.get("type") == "number":
+            out.append(f"{node.get('value')}{node.get('unit') or ''}")
+        for value in node.values():
+            _bound_texts(value, out)
+    elif isinstance(node, list):
+        for value in node:
+            _bound_texts(value, out)
+    return out
+
+
+def test_weather_units_follow_the_response_not_a_fixed_label() -> None:
+    """The unit params are the user's choice (°F / mph for Charleston); the card must
+    label what the source actually returned — it showed 69.7 °C for a °F reading."""
+    src = ni_catalog.get_recipe("weather-open-meteo")
+    spec = src["spec_template"]
+    reply = {"current_units": {"temperature_2m": "°F", "wind_speed_10m": "mp/h"},  # the API's own spelling
+             "current": {"temperature_2m": 69.7, "wind_speed_10m": 13.7}}
+    bound = ni.bind_scene(spec["scene"], ni.run_pipeline(spec["pipeline"], reply),
+                          history=ni._seed_history(spec))
+    assert _bound_texts(bound, []) == ["69.7°F", "13.7mp/h"]
+
+
+def test_atlantic_storms_recipe_keeps_only_atlantic_basin_bins() -> None:
+    """NHC's feed carries every basin; binNumber's prefix names it (AT/EP/CP)."""
+    spec = ni_catalog.get_recipe("nhc-atlantic-storms")["spec_template"]
+    feed = {"activeStorms": [
+        {"name": "Fay", "binNumber": "AT1"}, {"name": "Odalys", "binNumber": "EP1"},
+        {"name": "Polo", "binNumber": "EP2"}, {"name": "Nolo", "binNumber": "CP2"},
+        {"name": "Gert", "binNumber": "AT2"}]}
+    rows = ni.run_pipeline(spec["pipeline"], feed)["rows"]
+    assert [r["name"] for r in rows] == ["Fay", "Gert"]
+
+
 def test_get_recipe_returns_a_fresh_deep_copy() -> None:
     """get_recipe copies so a mutating caller (from_recipe fills param slots)
     cannot corrupt module state."""

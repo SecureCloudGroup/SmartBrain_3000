@@ -223,6 +223,10 @@ _DEFAULT_HISTORY_POINTS = 100    # per-series default when max_points is unset
 _MAX_WHEN_RULES = 5              # per §5 Conditions cap
 _WHEN_OPS: frozenset[str] = frozenset({"lt", "le", "gt", "ge", "eq", "ne"})
 _ORDER_OPS: frozenset[str] = frozenset({"lt", "le", "gt", "ge"})
+# The ``where`` transform also takes ``starts_with``: feeds code categories as prefixes
+# (NHC basin bins AT1/EP2/CP1). Scene conditions keep ``_WHEN_OPS`` (the client
+# evaluates those too).
+_WHERE_OPS: frozenset[str] = _WHEN_OPS | {"starts_with"}
 _MAX_ALERTS = 5                  # per-item alerts cap (§12)
 _MAX_ALERT_NAME = 40             # slug length ceiling
 _ALERT_NAME_RE = re.compile(r"^[a-z0-9-]{1,40}$")  # slug charset per §12
@@ -1115,9 +1119,11 @@ def _validate_transform_where(node: dict, where: str) -> None:
     key = node.get("key")
     if not isinstance(key, str) or not _KEY_RE.match(key):
         raise ValueError(f"{where}.key malformed")
-    if node.get("op") not in _WHEN_OPS:
-        raise ValueError(f"{where}.op must be one of {sorted(_WHEN_OPS)}")
+    if node.get("op") not in _WHERE_OPS:
+        raise ValueError(f"{where}.op must be one of {sorted(_WHERE_OPS)}")
     value = node.get("value")
+    if node.get("op") == "starts_with" and not (isinstance(value, str) and value):
+        raise ValueError(f"{where}.value must be a non-empty string for starts_with")
     if not isinstance(value, (str, int, float, bool)):
         raise ValueError(  # noqa: TRY004 — validator raises ValueError uniformly
             f"{where}.value must be a JSON scalar (string/number/bool)"
@@ -1849,7 +1855,7 @@ def _txf_where(value: object, key: str, op: str, right: object) -> list:
     if not isinstance(value, list):
         raise NIError("transform_type", "where needs a list")
     assert isinstance(key, str) and key, "key already validated"
-    assert op in _WHEN_OPS, "op already validated"
+    assert op in _WHERE_OPS, "op already validated"
     out: list = []
     for entry in value:  # bounded by input length
         if not isinstance(entry, dict) or key not in entry:
@@ -1862,7 +1868,9 @@ def _txf_where(value: object, key: str, op: str, right: object) -> list:
 def _where_match(left: object, op: str, right: object) -> bool:
     """Filtering-is-selection comparator: same rules as ``_eval_when`` but any
     type mismatch = False (excluded), never a stage failure."""
-    assert op in _WHEN_OPS, "op already validated"
+    assert op in _WHERE_OPS, "op already validated"
+    if op == "starts_with":
+        return isinstance(left, str) and isinstance(right, str) and left.startswith(right)
     if op in _ORDER_OPS:
         if not _is_finite_number(left) or not _is_finite_number(right):
             return False
