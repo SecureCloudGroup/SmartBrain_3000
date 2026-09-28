@@ -13,6 +13,13 @@ to know when a release changes behavior.
 
 ### Added
 
+- **New cards read CSV files, RSS/Atom news feeds and XML, not just JSON.**
+  When you pick a Library source that publishes a CSV download, an RSS or
+  Atom feed, an XML document or plain text, or paste a link to one, the card
+  samples it, finds the fields you asked for the same way it does for JSON
+  APIs, and refreshes on the card's schedule. Every file is read with size
+  limits, and XML that declares its own entities is refused.
+
 - **New cards find their source in the SmartBrain Library.** When you ask
   for a card, it now offers Library sources with the address already filled
   in from your words:

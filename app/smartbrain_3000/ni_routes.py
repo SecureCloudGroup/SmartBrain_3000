@@ -896,16 +896,23 @@ def pick_flow_source(request: Request, item_id: str, body: PickSourceIn) -> dict
         ni._validate_http_json_url_shape(url)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=f"url: {exc}") from None
-    started = ni_flow.start_flow_worker(store, item_id, source_url=url)
-    # R6: a tap on a Library candidate is a Yes — "a good source, because they said so" —
-    # recorded locally at once (sealed); sending it to the Library waits for the Library API
+    # R6 + textual formats: a tap on a Library candidate is a Yes AND (when the row
+    # named a non-JSON format) seals ``_format`` on the flow record so sampling +
+    # every subsequent refresh parse the fetched body the same way — CSV / RSS /
+    # XML / text, not just JSON. Both writes happen BEFORE the worker starts so
+    # the sampling fetcher sees the sealed format on first read.
     lib_row = next((r for r in (record.get("_ranked_library") or [])
                     if isinstance(r, dict) and r.get("url") == url), None)
     if lib_row:
+        lib_fmt = str(lib_row.get("format") or "").strip().lower()
+        if lib_fmt in ni._HTTP_JSON_FORMATS and lib_fmt != "json":
+            live = ni_flow._flow_read(store, item_id) or record
+            ni_flow._flow_write(store, item_id, {**live, "_format": lib_fmt})
         try:
             library_index.LocalSources(store).record_yes(str(lib_row.get("source_id") or ""))
         except Exception as exc:  # the vote must never break the pick
             log.warning("ni: recording a Library yes failed: %s", type(exc).__name__)
+    started = ni_flow.start_flow_worker(store, item_id, source_url=url)
     request.app.state.audit.append(
         "user", "ni_flow_pick_source", "reviewed", "executed", True,
         args_summary=tools.summarize({"item_id": item_id, "url": url}),

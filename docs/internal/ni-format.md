@@ -129,6 +129,25 @@ The full closed set (`_SOURCE_TYPES`; validators refuse anything else):
   rewritten host. Header-free requests keep the default redirect behavior.
 - Response caps: 2 MB, `application/json`/`text/` content types, 8s per-read
   timeout (netguard defaults).
+- **`format`** (optional; default `json`): names how the response body parses
+  for the pipeline. Closed set: `json`, `csv`, `feed` (RSS + Atom), `xml`,
+  `text`. Existing specs (no `format` key) run through
+  `netguard.safe_fetch_json` unchanged. Every non-JSON format flows through
+  `netguard.safe_fetch_text(url, fmt)` (same SSRF guard, same 2 MB cap, same
+  redirect discipline; content-type allowlist scoped per format) and parses
+  through `smartbrain_3000.formats` into the walker-shaped dict the pipeline
+  grammar already consumes:
+    - `csv` → `{"columns": [...], "rows": [{col: value}, ...]}` (delimiter
+      sniffed among `,;\t|`; header required; row cap 500; per-cell cap 4KB);
+    - `feed` → `{"title", "items": [{title, link, summary, published, guid}]}`
+      via the shipped `feeds.parse_feed` (stdlib ElementTree; `<!DOCTYPE>` /
+      `<!ENTITY>` refused before parse — entity-expansion defence);
+    - `xml` → xmltodict-shape `{root: {"@attr": ..., "_text": ..., child: ...}}`
+      (namespaces stripped; depth cap 12; node cap 5000; DOCTYPE refused);
+    - `text` → `{"text": "..."}` (cap 200 000 chars).
+  A parse failure surfaces as `NIError("fetch_failed", "not_<fmt>")` — the
+  `not_<fmt>` token comes from `netguard.format_error_kind` so the flow's
+  page-door / retry routing keys on it without matching message text.
 
 `model`:
 ```json
