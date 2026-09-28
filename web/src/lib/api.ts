@@ -679,6 +679,8 @@ export interface NiDisplay { size: "small" | "wide" }
 export type NiFlowState =
   | "intent"
   | "source"
+  // The picked source needs the user's own key and/or contact email (`access` says which).
+  | "awaiting_access"
   | "sampling"
   | "mapping"
   | "assembling"
@@ -702,6 +704,8 @@ export interface NiItemFlow {
     url: string;
     kind?: string;
     evidence?: string[];
+    // Library rows: what the tap asks for before the first fetch ("key", "contact")
+    needs?: string[];
   }[];
   // G1 (rounds 7-8, single-writer law): terminal records carry the master's
   // derivation — one honest reason sentence, an optional answerable question,
@@ -711,6 +715,13 @@ export interface NiItemFlow {
   // model_consent (ruling 2) also names the non-local model and the local alternative.
   question?: { kind: string; prompt?: string; model?: string; local?: string };
   reopen?: string[];
+  // awaiting_access: what the card asks for (from the sealed record — never a value).
+  access?: {
+    host: string;
+    provider: string;
+    key: { docs_url: string } | null;
+    contact: boolean;
+  };
 }
 
 // G1 oversight plane: one watcher finding (ni_findings row, code-authored
@@ -939,6 +950,8 @@ export interface LocalSourceInput {
   category: string; // "cat/sub"
   access_kind: LibraryAccessKind;
   needs_key: boolean;
+  // also suggest it to the SmartBrain Library (address template + description, never a value)
+  suggest?: boolean;
 }
 
 // A single run — telemetry (§1 ni_runs). Plaintext; host-free error class only.
@@ -1780,10 +1793,18 @@ export const api = {
   // (remap against the card's OWN frozen source) and Edit (title/cadence via
   // the PATCH surface).
   niFlowPickSource: (id: string, url: string) =>
-    req<{ ok: boolean; started: boolean }>(
+    req<{ ok: boolean; started: boolean; needs?: string[] }>(
       `/api/ni/items/${encodeURIComponent(id)}/flow/pick-source`, {
         method: "POST",
         body: JSON.stringify({ url }),
+      }),
+  // The picked source's key and/or the user's contact email, typed on the card.
+  niFlowAccess: (id: string, key?: string, email?: string) =>
+    req<{ ok: boolean; started: boolean; needs: string[] }>(
+      `/api/ni/items/${encodeURIComponent(id)}/flow/access`, {
+        method: "POST",
+        body: JSON.stringify({ ...(key !== undefined ? { key } : {}),
+                               ...(email !== undefined ? { email } : {}) }),
       }),
   niFlowFix: (id: string) =>
     req<{ ok: boolean; started: boolean }>(

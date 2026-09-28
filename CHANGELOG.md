@@ -30,6 +30,19 @@ to know when a release changes behavior.
   Web search runs only when the Library has nothing that fits. Each source
   you choose is counted as a good source on this device.
 
+- **Sources that need your own free key or a contact email work.** When the
+  best source for a card needs a free key from its provider, the card says so
+  before you tap it, then asks for the key with a link to get one. Sources that
+  work without a key are offered first. For the SEC and the Bureau of Labor
+  Statistics, which ask automated requests for a contact email, the card asks
+  for your email once and sends it only to those sources. A key you already
+  gave another card for the same provider is reused.
+
+- **Your Yes counts in the SmartBrain Library.** Tapping a Library source on a
+  card also sends the Library a vote (just that source and "yes"), and the
+  Add-a-source form can suggest your source to the Library for review. Both
+  are sent in the background and wait while you're offline.
+
 - **The Library page.** The Library button on the Neural Interface page now
   opens a page for the SmartBrain Library: about 8,600 US data sources
   (weather, tides, markets, sports, transit, government data and more) that

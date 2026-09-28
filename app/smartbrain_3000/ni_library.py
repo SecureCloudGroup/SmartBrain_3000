@@ -812,6 +812,17 @@ def _deep_copy_json(value: dict) -> dict:
 
 # --- ni:self: <-> ni:<item_id>: rewrites (§19/§20/§21) --------------------------------
 
+def _secret_ref_holders(spec: dict) -> list[dict]:
+    """Every ``{"$secret": ...}`` holder in an http source: headers and ``secret_query`` keys."""
+    source = spec.get("source") or {}
+    out: list[dict] = []
+    for key in ("headers", "secret_query"):
+        node = source.get(key) if isinstance(source, dict) else None
+        if isinstance(node, dict):
+            out.extend(v for v in node.values() if isinstance(v, dict))
+    return out
+
+
 def rewrite_self_refs(spec: dict, item_id: str) -> None:
     """Bind a template's ``ni:self:<name>`` refs to the concrete ``ni:<item_id>:<name>``.
 
@@ -829,15 +840,10 @@ def rewrite_self_refs(spec: dict, item_id: str) -> None:
     assert isinstance(spec, dict), "spec must be a dict"
     assert isinstance(item_id, str) and item_id, "item id required"
     prefix_new = f"ni:{item_id}:"
-    source = spec.get("source") or {}
-    headers = source.get("headers") if isinstance(source, dict) else None
-    if isinstance(headers, dict):
-        for value in headers.values():  # bounded by ni._MAX_HEADERS
-            if not isinstance(value, dict):
-                continue
-            ref = value.get("$secret")
-            if isinstance(ref, str) and ref.startswith(ni._NI_SELF_PLACEHOLDER):
-                value["$secret"] = prefix_new + ref[len(ni._NI_SELF_PLACEHOLDER):]
+    for value in _secret_ref_holders(spec):  # headers + secret_query, bounded
+        ref = value.get("$secret")
+        if isinstance(ref, str) and ref.startswith(ni._NI_SELF_PLACEHOLDER):
+            value["$secret"] = prefix_new + ref[len(ni._NI_SELF_PLACEHOLDER):]
     params = spec.get("params") or {}
     if isinstance(params, dict):
         for decl in params.values():  # bounded by ni._MAX_PARAMS
@@ -859,15 +865,10 @@ def rewrite_refs_to_self(spec: dict, item_id: str) -> None:
     assert isinstance(spec, dict), "spec must be a dict"
     assert isinstance(item_id, str) and item_id, "item id required"
     prefix_old = f"ni:{item_id}:"
-    source = spec.get("source") or {}
-    headers = source.get("headers") if isinstance(source, dict) else None
-    if isinstance(headers, dict):
-        for value in headers.values():  # bounded by ni._MAX_HEADERS
-            if not isinstance(value, dict):
-                continue
-            ref = value.get("$secret")
-            if isinstance(ref, str) and ref.startswith(prefix_old):
-                value["$secret"] = ni._NI_SELF_PLACEHOLDER + ref[len(prefix_old):]
+    for value in _secret_ref_holders(spec):  # headers + secret_query, bounded
+        ref = value.get("$secret")
+        if isinstance(ref, str) and ref.startswith(prefix_old):
+            value["$secret"] = ni._NI_SELF_PLACEHOLDER + ref[len(prefix_old):]
     params = spec.get("params") or {}
     if isinstance(params, dict):
         for decl in params.values():  # bounded by ni._MAX_PARAMS

@@ -40,7 +40,7 @@ import uuid
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from urllib.parse import quote as _url_quote
-from urllib.parse import urlparse
+from urllib.parse import urlencode, urlparse, urlunsplit
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
@@ -134,7 +134,15 @@ _SOURCE_TYPES: frozenset[str] = frozenset(
 # ``smartbrain_3000.formats`` turns into the walker-shaped dict the pipeline
 # grammar already consumes. Refused when absent from a candidate spec.
 _HTTP_JSON_FORMATS: frozenset[str] = frozenset({"json", "csv", "feed", "xml", "text"})
-_HTTP_JSON_EXTRA_KEYS: frozenset[str] = frozenset({"format"})
+_HTTP_JSON_EXTRA_KEYS: frozenset[str] = frozenset({"format", "secret_query", "contact_ua"})
+# The user's own key as a query parameter (most free-key APIs: ``?api_key=``): resolved
+# host-bound at fetch time exactly like a ``$secret`` header, never stored in the URL.
+_SECRET_QUERY_NAME_RE = re.compile(r"[A-Za-z0-9_.\-]{1,40}\Z")
+_MAX_SECRET_QUERY = 2
+# ``contact_ua``: providers that refuse automated requests without a contact email in the
+# User-Agent (SEC, www.bls.gov). The user types it once; it rides only these sources' requests.
+CONTACT_EMAIL_KEY = "contact:email"
+_EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]{1,64}@[A-Za-z0-9.\-]{1,190}\.[A-Za-z]{2,24}\Z")
 # §29 computed source v1: closed compute set + strict YYYY-MM-DD date shape.
 # Same regex shape as vault_format._DATE_RE — no timezone / newline play.
 _COMPUTED_COMPUTES: frozenset[str] = frozenset({"days_until"})
@@ -677,11 +685,27 @@ def _validate_http_json_source(s: dict) -> None:
     """
     _validate_http_source_shape(s, "http_json", extra_keys=_HTTP_JSON_EXTRA_KEYS)
     fmt = s.get("format")
-    if fmt is None:
-        return  # default is "json" — the historical shape
-    if fmt not in _HTTP_JSON_FORMATS:
+    if fmt is not None and fmt not in _HTTP_JSON_FORMATS:  # absent = "json", the historical shape
         raise ValueError(
             f"spec.source.format must be one of {sorted(_HTTP_JSON_FORMATS)}")
+    query = s.get("secret_query")
+    if query is not None:
+        node = _require_dict(query, "spec.source.secret_query")
+        if not node or len(node) > _MAX_SECRET_QUERY:
+            raise ValueError(f"spec.source.secret_query must hold 1..{_MAX_SECRET_QUERY} entries")
+        if not str(s.get("url") or "").lower().startswith("https://"):
+            raise ValueError("spec.source.secret_query needs an https:// url (a key never rides http)")
+        for name, ref in node.items():
+            if not isinstance(name, str) or not _SECRET_QUERY_NAME_RE.match(name):
+                raise ValueError(f"spec.source.secret_query key {name!r} malformed")
+            body = _require_dict(ref, f"spec.source.secret_query.{name}")
+            _closed_keys(body, {"$secret"}, f"spec.source.secret_query.{name}")
+            value = _require_str(body.get("$secret"), f"spec.source.secret_query.{name}.$secret",
+                                 max_len=_MAX_HEADER_VALUE)
+            if not value.startswith("ni:"):
+                raise ValueError(f"spec.source.secret_query.{name}.$secret must start with 'ni:'")
+    if s.get("contact_ua") is not None and not isinstance(s.get("contact_ua"), bool):
+        raise ValueError("spec.source.contact_ua must be true or false")
 
 
 def _validate_http_page_source(s: dict) -> None:
@@ -5417,22 +5441,9 @@ def _fetch_http_json(source: dict, item_id: str, secrets_store) -> dict:
     """
     from . import netguard  # lazy: keep netguard off ni's import graph edges
 
-    url = source["url"]
-    parsed = urlparse(url)
-    host = parsed.hostname or ""
-    scheme = (parsed.scheme or "").lower()
-    if not host:
-        raise NIError("source_bad_url", "no host")
-    resolved_headers: dict[str, str] = {}
-    for name, value in (source.get("headers") or {}).items():  # bounded by _MAX_HEADERS
-        if isinstance(value, dict) and "$secret" in value:
-            resolved_headers[name] = _load_credential(
-                secrets_store, value["$secret"], host,
-                item_id=item_id, request_scheme=scheme,
-            )
-        elif isinstance(value, str):
-            resolved_headers[name] = value
-    has_headers = bool(resolved_headers)
+    url, resolved_headers = http_request_parts(source, item_id, secrets_store)
+    # E: refuse any redirect hop while a header or a key rides the request
+    has_headers = bool(resolved_headers) or bool(source.get("secret_query"))
     fmt = source.get("format") or "json"
     if fmt == "json":
         try:
@@ -5443,6 +5454,58 @@ def _fetch_http_json(source: dict, item_id: str, secrets_store) -> dict:
         except netguard.FetchError as exc:
             raise NIError("fetch_failed", exc.__class__.__name__) from None
     return _fetch_http_textual(url, fmt, resolved_headers, has_headers)
+
+
+def http_request_parts(source: dict, item_id: str, secrets_store) -> tuple[str, dict[str, str]]:
+    """The exact URL and headers an http source is fetched with: ``$secret`` headers and
+    ``secret_query`` keys resolved host-bound and https-only (``_load_credential``), plus the
+    user's contact email in the User-Agent for ``contact_ua`` sources. Shared by the engine
+    and the flow's first sample so both send the same request."""
+    from . import netguard  # lazy: keep netguard off ni's import graph edges
+
+    url = source["url"]
+    parsed = urlparse(url)
+    host = parsed.hostname or ""
+    scheme = (parsed.scheme or "").lower()
+    if not host:
+        raise NIError("source_bad_url", "no host")
+    headers: dict[str, str] = {}
+    for name, value in (source.get("headers") or {}).items():  # bounded by _MAX_HEADERS
+        if isinstance(value, dict) and "$secret" in value:
+            headers[name] = _load_credential(secrets_store, value["$secret"], host,
+                                             item_id=item_id, request_scheme=scheme)
+        elif isinstance(value, str):
+            headers[name] = value
+    pairs = [(str(qname), _load_credential(secrets_store, ref["$secret"], host,
+                                           item_id=item_id, request_scheme=scheme))
+             for qname, ref in (source.get("secret_query") or {}).items()]  # bounded: ≤2
+    if pairs:
+        query = "&".join(x for x in (parsed.query, urlencode(pairs)) if x)
+        url = urlunsplit((parsed.scheme, parsed.netloc, parsed.path, query, ""))
+    if source.get("contact_ua"):
+        email = contact_email(secrets_store)
+        if not email:
+            raise NIError("contact_missing", "this provider asks for your contact email")
+        headers["User-Agent"] = f"{netguard.USER_AGENT} {email}"
+    return url, headers
+
+
+def contact_email(secrets_store) -> str | None:
+    """The contact email the user typed for ``contact_ua`` providers, or None."""
+    if secrets_store is None:
+        return None
+    raw = secrets_store.get(CONTACT_EMAIL_KEY)
+    return raw if isinstance(raw, str) and _EMAIL_RE.match(raw) else None
+
+
+def set_contact_email(secrets_store, email: str) -> str:
+    """Store the user's contact email (sealed). Raises ValueError for anything but one address."""
+    assert secrets_store is not None, "secrets store required"
+    value = str(email or "").strip()
+    if not _EMAIL_RE.match(value):
+        raise ValueError("enter one email address, like name@example.com")
+    secrets_store.put(CONTACT_EMAIL_KEY, value)
+    return value
 
 
 def _fetch_http_textual(url: str, fmt: str, resolved_headers: dict[str, str],

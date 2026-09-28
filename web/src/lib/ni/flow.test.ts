@@ -23,6 +23,10 @@ describe("flowStageLabel", () => {
       .toBe("Finding the source…");
   });
 
+  it("names the access pause", () => {
+    expect(flowStageLabel({ state: "awaiting_access" })).toBe("Needs your key or contact email");
+  });
+
   it("returns empty for terminal error states — caller renders friendlyErrorClass", () => {
     expect(flowStageLabel({ state: "failed", error: "fetch_failed" })).toBe("");
     expect(flowStageLabel({ state: "unsupported", error: "no_source" })).toBe("");

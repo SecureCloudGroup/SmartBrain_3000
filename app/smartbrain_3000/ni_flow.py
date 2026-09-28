@@ -40,7 +40,7 @@ log = logging.getLogger("smartbrain.ni.flow")
 # ---- flow state machine + slot layout ------------------------------------
 
 FLOW_STATES: frozenset[str] = frozenset({
-    "intent", "source", "sampling", "mapping", "assembling",
+    "intent", "source", "awaiting_access", "sampling", "mapping", "assembling",
     "awaiting_credential", "awaiting_params", "ready", "unsupported", "failed",
 })
 # C2/H3 (audit 2026-09-13): host-free error MARKER the frontend labels
@@ -1135,6 +1135,7 @@ def run_flow(store: ni.NIStore, item_id: str, *,
         return _gateway_mod.completion_text(data)
 
     sealed_fmt = str(record.get("_format") or "").strip().lower() or None
+    sealed_access = record.get("_access")
 
     def default_fetcher(url: str) -> object:
         """Fetch a sample under the netguard SSRF/redirect discipline.
@@ -1145,6 +1146,8 @@ def run_flow(store: ni.NIStore, item_id: str, *,
         sniff below opens the other formats when a user pastes their own link.
         """
         assert isinstance(url, str) and url, "url required"
+        if isinstance(sealed_access, dict) and sealed_access.get("url") == url:
+            return _fetch_with_access(url, sealed_fmt or "json", sealed_access, item_id)
         if sealed_fmt and sealed_fmt in ni._HTTP_JSON_FORMATS and sealed_fmt != "json":
             return _fetch_textual_sample(url, sealed_fmt)
         return _sniffed_fetch(url)
@@ -1383,6 +1386,20 @@ def _resolve_secrets_store() -> object | None:
 _SNIFF_HEAD_BYTES = 4096
 
 
+def _fetch_with_access(url: str, fmt: str, access: dict, item_id: str) -> object:
+    """The first sample of a picked source that needs the user's key or contact email: the
+    same request the engine will send (``ni.http_request_parts``), redirects refused."""
+    secrets_store = _resolve_secrets_store()
+    if secrets_store is None:
+        raise ni.NIError("secret_missing", "the key store is locked")
+    source = {"type": "http_json", "url": url, **_access_source(access, item_id)}
+    full_url, headers = ni.http_request_parts(source, item_id, secrets_store)
+    if fmt == "json":
+        return _netguard_mod.safe_fetch_json(full_url, headers=headers or None, allow_redirects=False)
+    got = _netguard_mod.safe_fetch_text(full_url, fmt, headers=headers or None, allow_redirects=False)
+    return _textual_parse(str(got.get("text") or ""), fmt)
+
+
 def _fetch_textual_sample(url: str, fmt: str) -> object:
     """Sampling fetch for a Library-picked textual format → walker-shaped dict."""
     assert isinstance(url, str) and url, "url required"
@@ -1507,8 +1524,109 @@ def _library_candidates(request: str) -> list[dict]:
              # Library candidates now name their textual format (csv / feed / xml /
              # text / json). The route stamps this onto the flow record as ``_format``
              # when the user taps that URL — the sampling fetch parses accordingly.
-             "format": str(c.get("format") or "json")[:20]}
+             "format": str(c.get("format") or "json")[:20],
+             # the tap asks for these before the first fetch (never filled in here)
+             "needs_key": _clean_key_need(c.get("needs_key")),
+             "needs_contact": bool(c.get("needs_contact"))}
             for c in cands if len(str(c.get("url") or "")) <= ni._MAX_URL]
+
+
+def _clean_key_need(need: object) -> dict | None:
+    """Where a Library source takes the user's key, bounded; None when it takes none."""
+    if not isinstance(need, dict) or need.get("in") not in ("query", "header"):
+        return None
+    docs = str(need.get("docs_url") or "")
+    return {"in": need["in"], "name": str(need.get("name") or "")[:40],
+            "prefix": str(need.get("prefix") or "")[:12],
+            "docs_url": docs[:300] if docs.startswith("https://") else ""}
+
+
+# ---- access: the user's own key / contact email for a picked Library source ----
+
+KEY_PARAM = "api_key"  # the same name older keyed cards use, so a same-host key is reused
+_MAX_KEY_LEN = 400
+
+
+def seal_access(store: ni.NIStore, item_id: str, url: str, row: dict) -> dict | None:
+    """Seal what a tapped Library row needs (its key placement, the contact email) on the
+    flow record, bound to that exact URL. None when the row needs neither."""
+    assert store is not None and item_id and isinstance(row, dict), "args required"
+    key = _clean_key_need(row.get("needs_key"))
+    contact = bool(row.get("needs_contact"))
+    access = None
+    if key is not None or contact:
+        from urllib.parse import urlparse
+        access = {"url": url, "host": (urlparse(url).hostname or "").lower(),
+                  "provider": str(row.get("provider") or "")[:120], "key": key, "contact": contact}
+    record = _flow_read(store, item_id) or {}
+    record["_access"] = access  # a new pick never inherits an earlier pick's needs
+    _flow_write(store, item_id, record)
+    return access
+
+
+def missing_access(store: ni.NIStore, item_id: str, secrets_store) -> list[str]:
+    """What the sealed ``_access`` still lacks: "key" and/or "contact". A key this user
+    already gave another card for the SAME host is reused (copied under this card)."""
+    access = (_flow_read(store, item_id) or {}).get("_access")
+    if not isinstance(access, dict):
+        return []
+    missing = []
+    if access.get("key"):
+        have = secrets_store is not None and bool(secrets_store.get(f"ni:{item_id}:{KEY_PARAM}"))
+        if not have and secrets_store is not None:
+            reuse = ni.find_reusable_credential(secrets_store, KEY_PARAM, access["host"])
+            if reuse is not None:
+                ni.put_credential(secrets_store, item_id, KEY_PARAM, reuse, access["host"])
+                _try_journal(store, item_id, "param_changed",
+                             f"reused your existing {access['host']} key for this card")
+                have = True
+        if not have:
+            missing.append("key")
+    if access.get("contact") and not ni.contact_email(secrets_store):
+        missing.append("contact")
+    return missing
+
+
+def pause_for_access(store: ni.NIStore, item_id: str, url: str, missing: list[str]) -> dict:
+    """The card asks for the key and/or the contact email — nothing is fetched until then."""
+    words = {"key": "your key", "contact": "your contact email"}
+    return _transition(store, item_id, "awaiting_access", source_url=url,
+                       note="paused: the source needs " + " and ".join(words[m] for m in missing))
+
+
+def give_access(store: ni.NIStore, item_id: str, secrets_store, *,
+                key: str | None, email: str | None) -> list[str]:
+    """Store what the user typed on the card (the key host-bound under this card, the email
+    sealed) and return what is STILL missing. Raises ValueError with the user-facing reason."""
+    assert store is not None and item_id and secrets_store is not None, "args required"
+    access = (_flow_read(store, item_id) or {}).get("_access")
+    if not isinstance(access, dict):
+        raise ValueError("this card isn't waiting for a key or an email")  # noqa: TRY004 — a user-facing refusal, not a type error
+    if key is not None and access.get("key"):
+        value = key.strip()
+        if not value or len(value) > _MAX_KEY_LEN or any(ch.isspace() or ord(ch) < 32 for ch in value):
+            raise ValueError("paste the key exactly as the provider shows it (no spaces)")
+        ni.put_credential(secrets_store, item_id, KEY_PARAM,
+                          str(access["key"].get("prefix") or "") + value, access["host"])
+        _try_journal(store, item_id, "param_changed", f"key for {access['host']} added")
+    if email is not None and access.get("contact"):
+        ni.set_contact_email(secrets_store, email)
+    return missing_access(store, item_id, secrets_store)
+
+
+def _access_source(access: dict, item_id: str) -> dict:
+    """The http_json source fields that carry a sealed ``_access`` (refs, never values)."""
+    extra: dict = {}
+    key = access.get("key")
+    if isinstance(key, dict):
+        ref = {"$secret": f"ni:{item_id}:{KEY_PARAM}"}
+        if key.get("in") == "header":
+            extra["headers"] = {key["name"]: ref}
+        else:
+            extra["secret_query"] = {key["name"]: ref}
+    if access.get("contact"):
+        extra["contact_ua"] = True
+    return extra
 
 
 def set_search_provider(provider: Callable[[], object] | None) -> None:
@@ -1702,7 +1820,8 @@ def _run_remap(store: ni.NIStore, item_id: str, record: dict,
             return _fail(store, item_id, "remap",
                           f"fill the card's '{exc.detail}' value before a remap")
         filled_source = filled.get("source") or {}
-        if filled_source.get("headers"):
+        if filled_source.get("headers") or filled_source.get("secret_query") \
+                or filled_source.get("contact_ua"):
             secrets_store = _resolve_secrets_store()
             if secrets_store is None:
                 return _fail(store, item_id, "remap",
@@ -1992,6 +2111,14 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
                             built["pipeline"], built["scene"])
     if keep_params:
         spec["params"] = json.loads(json.dumps(keep_params))
+    access = None if keep_source else (_flow_read(store, item_id) or {}).get("_access")
+    if isinstance(access, dict) and access.get("url") == url:
+        # the key / contact email the user gave on the card rides every refresh — as refs
+        spec["source"].update(_access_source(access, item_id))
+        if access.get("key"):
+            spec.setdefault("params", {})[KEY_PARAM] = {
+                "label": f"{access.get('provider') or access.get('host')} key"[:200],
+                "kind": "secret", "value": f"ni:{item_id}:{KEY_PARAM}"}
     # A13 (case matrix): deterministic edge-triggered alert authoring — only
     # when threshold + direction + value class all line up. Adds spec.alerts.
     alert_field = _maybe_author_alert(spec, fields, klass, request, intent)
@@ -2508,7 +2635,10 @@ def board_flow_field(store: ni.NIStore, item_id: str) -> dict | None:
                          " · ".join(x for x in (str(row.get("provider") or ""),
                                                 _AUTHORITY_WORDS.get(str(row.get("authority") or ""), ""))
                                     if x),
-                         str(row.get("label") or "")) if e]}
+                         str(row.get("label") or "")) if e],
+                     # what the tap will ask for before the first fetch
+                     "needs": [n for n, on in (("key", bool(row.get("needs_key"))),
+                                               ("contact", bool(row.get("needs_contact")))) if on]}
                     for row in ranked_lib[:3] if isinstance(row, dict)]
             elif isinstance(ranked_web, list) and ranked_web:
                 # S2 (round 9/10): sealed web candidates render VERBATIM —
@@ -2527,6 +2657,14 @@ def board_flow_field(store: ni.NIStore, item_id: str) -> dict | None:
         except Exception as exc:  # suggestions are best-effort display data
             log.warning("ni_flow: suggestions failed for %s: %s", item_id, exc)
             out["suggestions"] = []
+    access = record.get("_access")
+    if state == "awaiting_access" and isinstance(access, dict):
+        # what the card asks for, from the sealed record only (never a value)
+        key = access.get("key") if isinstance(access.get("key"), dict) else None
+        out["access"] = {"host": str(access.get("host") or ""),
+                         "provider": str(access.get("provider") or ""),
+                         "key": {"docs_url": str(key.get("docs_url") or "")} if key else None,
+                         "contact": bool(access.get("contact"))}
     return out
 
 
@@ -2695,7 +2833,7 @@ def sweep_stranded_flows(store: ni.NIStore) -> int:
         if state == _RETIRED_CONFIRM_STATE:
             reenter_source_pick(store, item["id"], _RETIRED_NOTE)
             continue
-        if state in ("awaiting_credential", "awaiting_params", "source"):
+        if state in ("awaiting_credential", "awaiting_params", "source", "awaiting_access"):
             # User-gated pauses are never stranded — sweeping a live consent
             # card after dinner told the user "creation stalled" (a lie),
             # destroyed the pending approval, and filed a bogus finding

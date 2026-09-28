@@ -103,7 +103,7 @@ SELECT s.id,
 FROM cand JOIN library_sources s ON s.id = cand.source_id LEFT JOIN hits h ON h.source_id = s.id
      LEFT JOIN catb c ON c.source_id = s.id
 WHERE s.role <> 'helper' AND {where}
-ORDER BY score DESC"""
+ORDER BY score DESC, (s.auth <> 'none'), s.prior DESC, s.id"""  # ties: keyless first, then the likelier
 
 # --- ranking context (a port of SmartBrain_Library sourcetool/build.py; the Library's eval sets are the contract)
 ENTITY_RESOLVERS = ("team_mlb", "team_nhl", "team_espn", "ticker", "crypto", "currency", "airport", "statuspage",
@@ -347,7 +347,8 @@ class LibraryIndex:
             pol = json.loads(row[0]) if row and row[0] else {}
             prefer, geo_policy = pol.get("prefer", []), pol.get("match") == "geo"
         words = set(norm(ask).split())
-        codes = set(re.findall(r"\b[A-Z]{3,5}\b", ask or ""))
+        # a code that names the ask's place ("NYC weather") is the place, not a ticker, unless a cue says so
+        codes = set(re.findall(r"\b[A-Z]{3,5}\b", ask or "")) - {w.upper() for w in self._place_words(res, ask)[0]}
         found: dict[str, dict] = {}
         for r in ENTITY_RESOLVERS:
             m = res.by_name(r, ask)
@@ -479,13 +480,18 @@ class LibraryIndex:
                                 "authority": rec["provider"].get("authority", ""), "url": u["url"],
                                 "host": urlsplit(u["url"]).hostname or "", "label": u["label"], "choice": u["choice"],
                                 "status": row["status"],
-                                "format": _FORMAT_BY_KIND.get(row["access_kind"], "json")})
-                if len(out) >= limit:
-                    break
+                                "format": _FORMAT_BY_KIND.get(row["access_kind"], "json"),
+                                "needs_key": u.get("needs_key"),
+                                "needs_contact": bool(u.get("needs_contact"))})
+                if sum(1 for c in out if not c["needs_key"]) >= limit:
+                    break  # keyed sources are gathered too, but enough keyless ones end the search
         # when something answers the asked subcategory exactly (tides, not water temperature), offer only those
         asked_sub = ctx["cats"][0] if ctx["cats"] else ""
         exact = [c for c in out if asked_sub and asked_sub in (c.get("categories") or [])]
-        return (exact or out)[:limit], skipped[:5]
+        # a source that works without the user's own key comes first; one that needs a key still shows
+        # when it is among the best fits, and the card says so before the tap
+        ordered = sorted(exact or out, key=lambda c: bool(c["needs_key"]))
+        return ordered[:limit], skipped[:5]
 
     @staticmethod
     def _serves_place(con, source_id: str, place_words: set[str]) -> bool:

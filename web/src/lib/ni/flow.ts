@@ -36,6 +36,7 @@ export function flowStageLabel(flow: NiItemFlow | null | undefined): string {
       ? "Waiting for you to pick a source on the card"
       : "Finding the source…";
   }
+  if (s === "awaiting_access") return "Needs your key or contact email";
   if (s === "sampling") return "Reading a sample…";
   if (s === "mapping") return "Choosing the data fields…";
   if (s === "assembling") return "Building the card…";

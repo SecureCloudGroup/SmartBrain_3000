@@ -1163,7 +1163,7 @@ def test_board_source_pause_renders_the_sealed_library_rows(
     assert suggestions == [{
         "kind": "library", "title": "Bitcoin price", "host": "api.coingecko.com",
         "url": "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd",
-        "evidence": ["CoinGecko · Aggregator"]}]
+        "evidence": ["CoinGecko · Aggregator"], "needs": []}]
 
 
 def test_fix_route_starts_remap_against_own_frozen_source(

@@ -2081,7 +2081,7 @@ def _prevalidate_ni_item_id(args: dict) -> None:
 _FLOW_WAIT_SECONDS = 8.0
 _FLOW_POLL_SECONDS = 0.25
 _FLOW_SETTLED_STATES: frozenset[str] = frozenset({
-    "ready", "source", "awaiting_credential",
+    "ready", "source", "awaiting_access", "awaiting_credential",
     "awaiting_params", "failed", "unsupported",
 })
 
@@ -2113,6 +2113,10 @@ def _flow_next_step(record: dict | None) -> str:
                 "Library (or web results) and a paste-a-link field — tell the user "
                 "to pick there; if they name a URL in chat, call resume_ni_flow "
                 "with this item_id and their URL. Do not create a card any other way.")
+    if state == "awaiting_access":
+        return ("the picked source needs the user's own free key and/or their contact "
+                "email — tell the user to enter it ON THE CARD (never in chat); the card "
+                "then builds on its own. Nothing else to do in chat.")
     if state == "awaiting_credential":
         return ("the card needs an API key — tell the user to tap 'Add key' on the "
                 "card itself (keys are never entered in chat), then Activate it. "

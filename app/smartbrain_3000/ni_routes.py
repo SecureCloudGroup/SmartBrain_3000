@@ -23,6 +23,7 @@ from starlette.responses import Response
 
 from . import (
     gateway,
+    library_client,
     library_index,
     netguard,
     ni,
@@ -909,16 +910,63 @@ def pick_flow_source(request: Request, item_id: str, body: PickSourceIn) -> dict
             live = ni_flow._flow_read(store, item_id) or record
             ni_flow._flow_write(store, item_id, {**live, "_format": lib_fmt})
         try:
-            library_index.LocalSources(store).record_yes(str(lib_row.get("source_id") or ""))
+            source_id = str(lib_row.get("source_id") or "")
+            library_index.LocalSources(store).record_yes(source_id)
+            library_client.queue_vote(store, source_id)  # sent by the tick (R6: a Yes is a vote)
         except Exception as exc:  # the vote must never break the pick
             log.warning("ni: recording a Library yes failed: %s", type(exc).__name__)
-    started = ni_flow.start_flow_worker(store, item_id, source_url=url)
+    # a source that takes the user's own key or contact email asks for it on the card
+    # BEFORE the first fetch; a same-host key the user already gave is reused
+    missing: list[str] = []
+    if lib_row and ni_flow.seal_access(store, item_id, url, lib_row) is not None:
+        missing = ni_flow.missing_access(store, item_id, getattr(request.app.state, "secret_store", None))
+    if missing:
+        ni_flow.pause_for_access(store, item_id, url, missing)
+        started = False
+    else:
+        started = ni_flow.start_flow_worker(store, item_id, source_url=url)
     request.app.state.audit.append(
         "user", "ni_flow_pick_source", "reviewed", "executed", True,
         args_summary=tools.summarize({"item_id": item_id, "url": url}),
-        result_summary=tools.summarize({"started": bool(started)}),
+        result_summary=tools.summarize({"started": bool(started), "needs": missing}),
     )
-    return {"ok": True, "started": bool(started)}
+    return {"ok": True, "started": bool(started), "needs": missing}
+
+
+class AccessIn(BaseModel):
+    """The picked source's key and/or the user's contact email, typed on the card."""
+
+    key: str | None = Field(default=None, max_length=400)
+    email: str | None = Field(default=None, max_length=254)
+
+
+@router.post("/api/ni/items/{item_id}/flow/access")
+def give_flow_access(request: Request, item_id: str, body: AccessIn) -> dict:
+    """Store what the card asked for — the key host-bound under this card, the email sealed —
+    then build. Desktop-local (a credential never travels chat); audited without values."""
+    _require_desktop_local(request)
+    store = _store(request)
+    if store.get_item(item_id) is None:
+        raise HTTPException(status_code=404, detail="item not found")
+    record = ni_flow._flow_read(store, item_id) or {}
+    if str(record.get("state") or "") != "awaiting_access":
+        raise HTTPException(status_code=409, detail="the card isn't asking for a key or an email")
+    secrets = _secret_store(request)
+    try:
+        missing = ni_flow.give_access(store, item_id, secrets, key=body.key, email=body.email)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    access = record.get("_access") or {}
+    started = False
+    if not missing:
+        started = ni_flow.start_flow_worker(store, item_id, source_url=str(access.get("url") or ""))
+    request.app.state.audit.append(
+        "user", "ni_flow_access", "reviewed", "executed", True,
+        args_summary=tools.summarize({"item_id": item_id, "host": access.get("host"),
+                                      "key": body.key is not None, "email": body.email is not None}),
+        result_summary=tools.summarize({"started": bool(started), "needs": missing}),
+    )
+    return {"ok": True, "started": bool(started), "needs": missing}
 
 
 @router.post("/api/ni/items/{item_id}/flow/fix")

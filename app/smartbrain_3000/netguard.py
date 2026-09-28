@@ -74,6 +74,7 @@ _ZIP_MAGIC = b"PK\x03\x04"
 # user-activation flag) would misdescribe a programmatic fetch. Privacy note: every
 # fetched site can tell a SmartBrain user fetched it (docs/07 discloses this).
 _USER_AGENT = f"SmartBrain/{__version__} (+https://smartbrain.securecloudgroup.com)"
+USER_AGENT = _USER_AGENT  # public: the honest identity every guarded request carries
 _FETCH_HEADERS = {
     "User-Agent": _USER_AGENT,
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",

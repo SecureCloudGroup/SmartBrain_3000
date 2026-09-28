@@ -126,6 +126,8 @@
 
   // P3: source-pick + edit-modal state.
   let pickUrlText = $state("");
+  let accessKeyText = $state("");
+  let accessEmailText = $state("");
   let editFor = $state<NiBoardItem | null>(null);
   let editTitle = $state("");
   let editInterval = $state("");
@@ -179,12 +181,39 @@
     try {
       const out = await api.niFlowPickSource(item.id, url);
       pickUrlText = "";
-      toast(out.started === false
-        ? "Source set — it starts as soon as a build slot frees up."
-        : "Source set — sampling it now.");
+      toast(out.needs && out.needs.length > 0
+        ? "This source needs one more thing — see the card."
+        : out.started === false
+          ? "Source set — it starts as soon as a build slot frees up."
+          : "Source set — sampling it now.");
       await load();
     } catch (err) {
       flowActionError = { ...flowActionError, [item.id]: describeError(err) || "That didn’t work — check the URL." };
+    } finally {
+      busyId = null;
+    }
+  }
+
+  // A picked source that needs the user's own key and/or contact email: one form, nothing
+  // fetched until it is sent. The values go to the desktop only (never chat).
+  async function giveAccess(item: NiBoardItem): Promise<void> {
+    console.assert(item.flow?.state === "awaiting_access", "giveAccess: pause required");
+    const access = item.flow?.access;
+    if (!access) return;
+    const key = accessKeyText.trim();
+    const email = accessEmailText.trim();
+    if ((access.key && !key) || (access.contact && !email)) return;
+    busyId = item.id;
+    flowActionError = { ...flowActionError, [item.id]: "" };
+    try {
+      const out = await api.niFlowAccess(item.id, access.key ? key : undefined,
+                                         access.contact ? email : undefined);
+      accessKeyText = "";
+      accessEmailText = "";
+      toast(out.started ? "Thanks — building the card now." : "Saved.");
+      await load();
+    } catch (err) {
+      flowActionError = { ...flowActionError, [item.id]: describeError(err) || "That didn’t work — try again." };
     } finally {
       busyId = null;
     }
@@ -1331,6 +1360,12 @@
                                 {sug.evidence.join(" — ")}
                               </p>
                             {/if}
+                            {#if sug.needs?.includes("key")}
+                              <p class="ni-sug-needs">Needs your own free key — you'll paste it next</p>
+                            {/if}
+                            {#if sug.needs?.includes("contact")}
+                              <p class="ni-sug-needs">Asks for your contact email once</p>
+                            {/if}
                           </div>
                         {:else}
                           <div class="ni-web-sug">
@@ -1370,6 +1405,60 @@
                     <p class="error" style="margin:var(--s-1) 0 0; font-size:var(--f-label)">{flowActionError[item.id]}</p>
                   {/if}
                 </div>
+              {:else if item.flow.state === "awaiting_access" && item.flow.access}
+                {@const access = item.flow.access}
+                <!-- The picked source needs the user's own free key and/or a contact email
+                     (SEC, BLS). Nothing is fetched until this is sent; each value goes only to
+                     the source's own host. -->
+                <form
+                  class="ni-commission ni-pick-url"
+                  onsubmit={(e) => { e.preventDefault(); void giveAccess(item); }}
+                >
+                  {#if access.key}
+                    <p style="margin:0; font-size:var(--f-label)">
+                      {access.provider || access.host} needs your own free key.
+                      {#if access.key.docs_url}
+                        <a href={access.key.docs_url} target="_blank" rel="noopener noreferrer">Get one here</a>,
+                        then paste it below.
+                      {:else}
+                        Get one from {access.provider || access.host}, then paste it below.
+                      {/if}
+                      SmartBrain sends it only to {access.host}, over a secure connection.
+                    </p>
+                    <input
+                      type="password"
+                      autocomplete="off"
+                      bind:value={accessKeyText}
+                      placeholder="Your {access.provider || access.host} key"
+                      maxlength="400"
+                      disabled={busyId === item.id}
+                      aria-label="Your key for {access.host}"
+                    />
+                  {/if}
+                  {#if access.contact}
+                    <p style="margin:0; font-size:var(--f-label)">
+                      {access.provider || access.host} asks automated requests for a contact
+                      email. SmartBrain sends yours only to sources with this rule, and asks once.
+                    </p>
+                    <input
+                      type="email"
+                      autocomplete="email"
+                      bind:value={accessEmailText}
+                      placeholder="you@example.com"
+                      maxlength="254"
+                      disabled={busyId === item.id}
+                      aria-label="Your contact email"
+                    />
+                  {/if}
+                  <button type="submit" class="secondary"
+                    disabled={busyId === item.id
+                      || (!!access.key && accessKeyText.trim().length === 0)
+                      || (access.contact && accessEmailText.trim().length < 6)}
+                  >{busyId === item.id ? "Saving…" : "Continue"}</button>
+                  {#if flowActionError[item.id]}
+                    <p class="error" style="margin:0; font-size:var(--f-label)">{flowActionError[item.id]}</p>
+                  {/if}
+                </form>
               {:else}
                 <p class="muted" style="margin:0; font-size:var(--f-label)">{flowStageLabel(item.flow)}</p>
               {/if}
@@ -2162,6 +2251,11 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .ni-sug-needs {
+    margin: 2px 0 0;
+    font-size: var(--f-label);
+    color: var(--warn);
   }
   .ni-pick-url {
     /* G1 field fix: a row layout collapsed the input to ~1ch inside card

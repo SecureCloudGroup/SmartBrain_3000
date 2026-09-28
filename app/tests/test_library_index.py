@@ -335,6 +335,13 @@ def test_route_flow_install_browse_add_remove(client: TestClient) -> None:
     assert bad.status_code == 400 and "https://" in bad.json()["detail"]
     added = client.post("/api/library/local", json=_form()).json()
     assert added["tier"] == "local"
+    from smartbrain_3000 import library_client
+    assert library_client.pending(client.app.state.ni) == 0  # a private source is never sent
+    suggested = client.post("/api/library/local", json=_form(name="Suggested gauge",
+                                                             url="https://harbor.example.org/other",
+                                                             suggest=True))
+    assert suggested.status_code == 200 and library_client.pending(client.app.state.ni) == 1
+    client.delete(f"/api/library/local/{suggested.json()['id']}")
     mine = client.get("/api/library/sources", params={"q": "harbor"}).json()["local"]
     assert [r["id"] for r in mine] == [added["id"]]
     assert client.get(f"/api/library/sources/{added['id']}").json()["tier"] == "local"
@@ -390,18 +397,41 @@ def test_candidate_urls_fill_from_words_clock_and_resolvers(lib) -> None:
         assert "Melbourne Causeway" in urls[0]["label"]
 
 
-def test_candidate_urls_refuse_what_needs_a_key_a_helper_or_an_unnamed_thing(lib) -> None:
+def test_candidate_urls_refuse_a_helper_or_an_unnamed_thing(lib) -> None:
     with lib._conn() as con:
         r = library_resolve.Resolver(con)
         get = lambda sid: json.loads(con.execute("SELECT record FROM library_sources WHERE id=?",
                                                  [sid]).fetchone()[0])
-        assert library_resolve.candidate_urls(get("keyed-quote"), "bitcoin quote", {}, r)[1].startswith(
-            "needs your own key")
         assert library_resolve.candidate_urls(get("helper-stations"), "tide stations", {}, r)[1].startswith(
             "a lookup helper")
         assert "doesn't name" in library_resolve.candidate_urls(get("statuspage-summary"), "is it down", {}, r)[1]
-        contact = {**get("coingecko-price"), "access": {**get("coingecko-price")["access"], "contact_ua": True}}
-        assert "contact email" in library_resolve.candidate_urls(contact, "bitcoin price", {}, r)[1]
+
+
+def test_a_keyed_source_is_offered_without_its_key_and_says_where_the_key_goes(lib) -> None:
+    """The address never carries a key; ``needs_key`` tells the card what to ask for."""
+    with lib._conn() as con:
+        r = library_resolve.Resolver(con)
+        rec = json.loads(con.execute("SELECT record FROM library_sources WHERE id='keyed-quote'").fetchone()[0])
+        urls, why = library_resolve.candidate_urls(rec, "bitcoin quote", {}, r)
+        assert why == "" and urls[0]["url"] == "https://keyed.example.org/q"
+        assert urls[0]["needs_key"] == {"in": "query", "name": "apikey", "prefix": "", "docs_url": ""}
+        coin = json.loads(con.execute("SELECT record FROM library_sources WHERE id='coingecko-price'").fetchone()[0])
+        contact = {**coin, "access": {**coin["access"], "contact_ua": True}}
+        urls, _ = library_resolve.candidate_urls(contact, "bitcoin price", {}, r)
+        assert urls and urls[0]["needs_contact"] is True and "needs_key" not in urls[0]
+
+
+@pytest.mark.parametrize(("access", "want"), [
+    ({"url_template": "https://a.example.org/x?zip={zip}&API_KEY={key}"}, {"in": "query", "name": "API_KEY", "prefix": ""}),
+    ({"url_template": "https://a.example.org/x", "headers": {"X-eBirdApiToken": "{key}"}},
+     {"in": "header", "name": "X-eBirdApiToken", "prefix": ""}),
+    ({"url_template": "https://a.example.org/x", "headers": {"Authorization": "Token {key}"}},
+     {"in": "header", "name": "Authorization", "prefix": "Token "}),
+    ({"url_template": "https://a.example.org/{key}/x"}, None),  # a key in the path would sit in logs
+    ({"url_template": "https://a.example.org/x", "headers": {"X-K": "{key}-suffix"}}, None),
+])
+def test_key_placement(access, want) -> None:
+    assert library_resolve.key_placement(access, "key") == want
 
 
 def test_ambiguous_reading_expands_together_and_duplicates_are_refused() -> None:
@@ -423,7 +453,9 @@ def test_candidates_for_the_card_flow(lib) -> None:
     braves, _ = lib.candidates("next Braves game")
     assert braves[0]["url"] == "https://statsapi.mlb.com/api/v1/schedule?teamId=144"
     coins, skipped = lib.candidates("bitcoin price")
-    assert [c["source_id"] for c in coins] == ["coingecko-price"]  # keyed + failed sources stay off the card
+    # a failed source stays off the card; a keyed one shows AFTER the keyless one, saying it needs a key
+    assert [c["source_id"] for c in coins] == ["coingecko-price", "keyed-quote"]
+    assert coins[0]["needs_key"] is None and coins[1]["needs_key"]["in"] == "query"
     nothing, _ = lib.candidates("tides in Denver CO")
     assert nothing == []  # no station within range: the flow falls through to web search, honestly
 

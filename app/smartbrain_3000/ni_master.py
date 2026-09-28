@@ -49,6 +49,7 @@ PARTS: tuple[str, ...] = (
 STAGE_PART: dict[str, str] = {
     "intent": "understand",
     "source": "locate",
+    "awaiting_access": "authorize",
     "sampling": "acquire",
     "mapping": "shape",
     "assembling": "present",
@@ -63,6 +64,7 @@ STAGE_PART: dict[str, str] = {
 # affordance the frontend already has or gains in G1.
 QUESTION_KINDS: frozenset[str] = frozenset({
     "pick_source",     # source pause: Library/web suggestions + paste-a-URL
+    "give_access",     # awaiting_access: the picked source's key and/or contact email
     "add_key",         # awaiting_credential: credential PUT
     "fill_params",     # awaiting_params: Fill modal
     "supply_date",     # computed ask without a literal date (G1 new)
@@ -190,6 +192,8 @@ def question_for(state: str, record: dict) -> dict | None:
     assert isinstance(record, dict), "record required"
     if state == "source":
         return {"kind": "pick_source"}
+    if state == "awaiting_access":
+        return {"kind": "give_access"}
     if state == "awaiting_credential":
         return {"kind": "add_key"}
     if state == "awaiting_params":

@@ -393,7 +393,10 @@ How a card comes to life:
    how official it is — and offers up to three whose address it could fill
    from your own words (*"Tide predictions — NOAA · Official — Melbourne
    Causeway, FL"*). When your words fit more than one thing (two stations, two
-   cities), each choice is named so the tap answers it. When the Library has
+   cities), each choice is named so the tap answers it. Sources that work
+   without a key come first; one that needs a free key from its provider (or,
+   for the SEC and BLS, your contact email) says so, and the card asks for it
+   before the first fetch. When the Library has
    nothing, the card **searches the web from your own words** and offers up to
    three candidate pages, each with evidence actually extracted from that page
    (*"On the page: High tide 7:12 AM"*). Your tap is the consent, the same as

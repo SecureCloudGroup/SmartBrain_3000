@@ -10,7 +10,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
-from . import db, library_index, tools
+from . import db, library_client, library_index, tools
 
 router = APIRouter()
 
@@ -24,6 +24,8 @@ class LocalSourceIn(BaseModel):
     category: str = Field(min_length=1, max_length=80)
     access_kind: str = Field(default="http_json", max_length=20)
     needs_key: bool = False
+    # also suggest it to the SmartBrain Library (the address template and description, never a value)
+    suggest: bool = False
 
 
 def _unlocked_ni(request: Request):
@@ -127,6 +129,8 @@ def library_local_add(request: Request, body: LocalSourceIn) -> dict:
         library_index.LocalSources(store).add(record)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from None
+    if body.suggest:
+        library_client.queue_suggestion(store, record)
     request.app.state.audit.append(
         "user", "library_local_add", "reviewed", "executed", True,
         args_summary=tools.summarize({"host": record["provider"]["name"], "category": record["categories"][0]}),
