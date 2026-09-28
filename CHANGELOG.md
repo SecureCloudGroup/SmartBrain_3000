@@ -43,6 +43,10 @@ to know when a release changes behavior.
   Add-a-source form can suggest your source to the Library for review. Both
   are sent in the background and wait while you're offline.
 
+- **City nicknames work.** "NYC", "LA", "SF", "Philly", "Vegas", "DC",
+  "NOLA" and more find the right city for a new card, while "Lafayette LA"
+  still means Louisiana.
+
 - **The Library page.** The Library button on the Neural Interface page now
   opens a page for the SmartBrain Library: about 8,600 US data sources
   (weather, tides, markets, sports, transit, government data and more) that

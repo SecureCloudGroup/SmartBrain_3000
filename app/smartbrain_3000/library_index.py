@@ -35,12 +35,12 @@ log = logging.getLogger(__name__)
 
 # --- the pinned pack (ruling R12: the app release pins the exact bytes) ----------------------------
 PACK = {
-    "tag": "v1.1.0",
-    "url": "https://github.com/SecureCloudGroup/SmartBrain_Library/releases/download/v1.1.0/library.duckdb.gz",
-    "sha256": "1940bccf581fae9456395fc84ae1b7519810e280f3c20cb79b1218be9e095554",
+    "tag": "v1.2.0",
+    "url": "https://github.com/SecureCloudGroup/SmartBrain_Library/releases/download/v1.2.0/library.duckdb.gz",
+    "sha256": "ddfb0f40bcd469073c0ccd7c5d3f351f13a9a7d91b506ccaf3713f712eb91d63",
 }
-MAX_PACK_GZ_BYTES = 60_000_000       # the download cap (the v1.1 gzip is ~18 MB)
-MAX_PACK_BYTES = 600_000_000         # the unpacked cap (the v1.1 file is ~80 MB)
+MAX_PACK_GZ_BYTES = 60_000_000       # the download cap (the v1.2 gzip is ~18 MB)
+MAX_PACK_BYTES = 600_000_000         # the unpacked cap (the v1.2 file is ~80 MB)
 
 LOCAL_RESERVED_ID = "__library_local__"
 LOCAL_SLOT = "sources"
