@@ -23,6 +23,7 @@ from starlette.responses import Response
 
 from . import (
     gateway,
+    library_index,
     netguard,
     ni,
     ni_catalog,
@@ -897,6 +898,15 @@ def pick_flow_source(request: Request, item_id: str, body: PickSourceIn) -> dict
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=f"url: {exc}") from None
     started = ni_flow.start_flow_worker(store, item_id, source_url=url)
+    # R6: a tap on a Library candidate is a Yes — "a good source, because they said so" —
+    # recorded locally at once (sealed); sending it to the Library waits for the Library API
+    lib_row = next((r for r in (record.get("_ranked_library") or [])
+                    if isinstance(r, dict) and r.get("url") == url), None)
+    if lib_row:
+        try:
+            library_index.LocalSources(store).record_yes(str(lib_row.get("source_id") or ""))
+        except Exception as exc:  # the vote must never break the pick
+            log.warning("ni: recording a Library yes failed: %s", type(exc).__name__)
     request.app.state.audit.append(
         "user", "ni_flow_pick_source", "reviewed", "executed", True,
         args_summary=tools.summarize({"item_id": item_id, "url": url}),

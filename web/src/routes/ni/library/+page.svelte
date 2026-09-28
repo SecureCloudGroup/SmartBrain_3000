@@ -2,7 +2,7 @@
   // SmartBrain Library — the registry of US data sources the NI page's header
   // Library button navigates to. Every enum from /api/library/* maps to plain
   // words through $lib/ni/libraryPage.ts (never a raw "http_json" on screen).
-  // The pack (~8 MB) downloads on first use through the install panel; the
+  // The pack (~18 MB) downloads on first use through the install panel; the
   // browse surface only paints once /api/library/status says installed.
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
@@ -372,7 +372,7 @@
         markets, sports, transit, government open data — you can browse, add to
         your Neural Interface, or extend with your own.
       </p>
-      <p class="muted">About 8&nbsp;MB. Takes a few seconds on a normal connection.</p>
+      <p class="muted">About 18&nbsp;MB. Takes a few seconds on a normal connection.</p>
       {#if installError}<p class="error">{installError}</p>{/if}
       <p class="lib-install-actions">
         <button onclick={startInstall} disabled={installBusy}>

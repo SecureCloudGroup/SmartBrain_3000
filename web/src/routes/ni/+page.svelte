@@ -1348,9 +1348,11 @@
                      is the consent, netguard guards the fetch). -->
                 <div class="ni-commission">
                   <p style="margin:0 0 var(--s-2); font-size:var(--f-label)">
-                    {item.flow.suggestions?.[0]?.kind === "web"
-                      ? "No vetted source matched — found on the web:"
-                      : "No vetted source matched this request yet."}
+                    {item.flow.suggestions?.[0]?.kind === "library"
+                      ? "From the SmartBrain Library — tap the one that fits:"
+                      : item.flow.suggestions?.[0]?.kind === "web"
+                        ? "No vetted source matched — found on the web:"
+                        : "No vetted source matched this request yet."}
                   </p>
                   {#if item.flow.suggestions && item.flow.suggestions.length > 0}
                     <div class="ni-suggestions">
@@ -1359,7 +1361,25 @@
                            consent. Evidence = values our jailed reader
                            actually extracted from that page, shown pre-tap. -->
                       {#each item.flow.suggestions as sug (sug.recipe_id || sug.url)}
-                        {#if sug.kind === "web"}
+                        {#if sug.kind === "library"}
+                          <!-- Library candidate (R8): a real Library source with its address already
+                               filled from your words; the line under it names the provider and, when
+                               your words fit several (two stations, two cities), which one this is.
+                               The tap is your Yes (R6) and the consent for this exact address. -->
+                          <div class="ni-web-sug">
+                            <button
+                              class="secondary"
+                              disabled={busyId === item.id}
+                              title={sug.url}
+                              onclick={() => pickSource(item, sug.url)}
+                            >{sug.title}</button>
+                            {#if sug.evidence && sug.evidence.length > 0}
+                              <p class="muted" style="margin:2px 0 0; font-size:var(--f-label)">
+                                {sug.evidence.join(" — ")}
+                              </p>
+                            {/if}
+                          </div>
+                        {:else if sug.kind === "web"}
                           <div class="ni-web-sug">
                             <button
                               class="secondary"

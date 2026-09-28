@@ -1913,6 +1913,50 @@ _S2_SEAL_ROWS = 3          # candidates sealed on the pause record
 _S2_EVAL_FETCHES = 4       # E-lite: top-K pages fetched for evidence (≤1/host)
 
 
+# SmartBrain Library (R8/R9): layer 1 of source finding. main.py wires a factory returning the
+# installed ``library_index.LibraryIndex`` (installing the pinned pack on first need); unwired
+# (hermetic suites, recorded gates) the pick pause is byte-identical to before.
+_LIBRARY_PROVIDER: Callable[[], object] | None = None
+
+
+_AUTHORITY_WORDS = {"official": "Official", "primary": "Primary source", "aggregator": "Aggregator",
+                    "community": "Community"}
+
+
+def set_library_provider(provider: Callable[[], object] | None) -> None:
+    """Install the Library factory (app startup; tests)."""
+    global _LIBRARY_PROVIDER
+    assert provider is None or callable(provider), "provider must be callable"
+    _LIBRARY_PROVIDER = provider
+
+
+def _resolve_library() -> object | None:
+    """The installed Library, or None (not wired / not installable / factory failed)."""
+    if _LIBRARY_PROVIDER is None:
+        return None
+    try:
+        return _LIBRARY_PROVIDER()
+    except Exception:  # a broken Library must degrade to web search / the plain pause
+        return None
+
+
+def _library_candidates(request: str) -> list[dict]:
+    """Library sources whose parameters all fill from the user's words, as sealable rows."""
+    lib = _resolve_library()
+    if lib is None:
+        return []
+    try:
+        cands, _skipped = lib.candidates(request)
+    except Exception as exc:
+        log.warning("ni_flow: library candidates failed: %s", type(exc).__name__)
+        return []
+    return [{"source_id": str(c["source_id"])[:120], "title": str(c["title"])[:160],
+             "host": str(c["host"])[:120], "url": str(c["url"])[:ni._MAX_URL],
+             "provider": str(c["provider"])[:120], "authority": str(c["authority"])[:20],
+             "label": str(c.get("label") or "")[:160], "choice": bool(c.get("choice"))}
+            for c in cands if len(str(c.get("url") or "")) <= ni._MAX_URL]
+
+
 def set_search_provider(provider: Callable[[], object] | None) -> None:
     """Install the web-search service factory (app startup; tests)."""
     global _SEARCH_PROVIDER
@@ -2036,12 +2080,20 @@ def _pause_source_pick(store: ni.NIStore, item_id: str, request: str,
         # Provider first: unwired (every hermetic suite and recorded gate)
         # skips even the catalog rescore — the plain pause needs neither.
         service = _resolve_search_service()
-        if service is not None:
-            try:
-                if suggest_recipes(_load_catalog(), request, intent):
-                    service = None  # catalog candidates render — no search
-            except Exception:
-                pass
+        catalog_hit = False
+        try:
+            catalog_hit = bool(suggest_recipes(_load_catalog(), request, intent))
+        except Exception:
+            pass
+        if catalog_hit:
+            service = None  # catalog candidates render — no Library, no search
+        library = [] if catalog_hit else _library_candidates(request)
+        if library:
+            _transition(store, item_id, "source",
+                        error=AWAITING_SOURCE_PICK,
+                        note="paused: sources from the SmartBrain Library are on the card",
+                        _ranked_library=library)
+            return _flow_read(store, item_id) or {}
         if service is not None:
             web = _s2_search_candidates(service, request, intent)
             if web:
@@ -3255,7 +3307,22 @@ def board_flow_field(store: ni.NIStore, item_id: str) -> dict | None:
         try:
             ranked_web = record.get("_ranked_search")
             ranked_ids = record.get("_ranked")
-            if isinstance(ranked_web, list) and ranked_web:
+            ranked_lib = record.get("_ranked_library")
+            if isinstance(ranked_lib, list) and ranked_lib:
+                # Library candidates (R8): sealed rows render VERBATIM — provider + authority are the
+                # provenance; ``label`` names the reading when the ask was ambiguous (the tap answers it)
+                out["suggestions"] = [
+                    {"recipe_id": "", "kind": "library",
+                     "title": str(row.get("title") or ""),
+                     "host": str(row.get("host") or ""),
+                     "url": str(row.get("url") or ""),
+                     "evidence": [e for e in (
+                         " · ".join(x for x in (str(row.get("provider") or ""),
+                                                _AUTHORITY_WORDS.get(str(row.get("authority") or ""), ""))
+                                    if x),
+                         str(row.get("label") or "")) if e]}
+                    for row in ranked_lib[:3] if isinstance(row, dict)]
+            elif isinstance(ranked_web, list) and ranked_web:
                 # S2 (round 9/10): sealed web candidates render VERBATIM —
                 # the sealed row IS the provenance (title/host/url/evidence
                 # exactly as ranked at pause time; no recompute, no refill).
