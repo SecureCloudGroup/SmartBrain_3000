@@ -126,6 +126,8 @@
 
   // P3: source-pick + edit-modal state.
   let pickUrlText = $state("");
+  let accessKeyText = $state("");
+  let accessEmailText = $state("");
   let editFor = $state<NiBoardItem | null>(null);
   let editTitle = $state("");
   let editInterval = $state("");
@@ -179,12 +181,39 @@
     try {
       const out = await api.niFlowPickSource(item.id, url);
       pickUrlText = "";
-      toast(out.started === false
-        ? "Source set — it starts as soon as a build slot frees up."
-        : "Source set — sampling it now.");
+      toast(out.needs && out.needs.length > 0
+        ? "This source needs one more thing — see the card."
+        : out.started === false
+          ? "Source set — it starts as soon as a build slot frees up."
+          : "Source set — sampling it now.");
       await load();
     } catch (err) {
       flowActionError = { ...flowActionError, [item.id]: describeError(err) || "That didn’t work — check the URL." };
+    } finally {
+      busyId = null;
+    }
+  }
+
+  // A picked source that needs the user's own key and/or contact email: one form, nothing
+  // fetched until it is sent. The values go to the desktop only (never chat).
+  async function giveAccess(item: NiBoardItem): Promise<void> {
+    console.assert(item.flow?.state === "awaiting_access", "giveAccess: pause required");
+    const access = item.flow?.access;
+    if (!access) return;
+    const key = accessKeyText.trim();
+    const email = accessEmailText.trim();
+    if ((access.key && !key) || (access.contact && !email)) return;
+    busyId = item.id;
+    flowActionError = { ...flowActionError, [item.id]: "" };
+    try {
+      const out = await api.niFlowAccess(item.id, access.key ? key : undefined,
+                                         access.contact ? email : undefined);
+      accessKeyText = "";
+      accessEmailText = "";
+      toast(out.started ? "Thanks — building the card now." : "Saved.");
+      await load();
+    } catch (err) {
+      flowActionError = { ...flowActionError, [item.id]: describeError(err) || "That didn’t work — try again." };
     } finally {
       busyId = null;
     }
@@ -246,20 +275,6 @@
       if (!target || !d.contains(target) || target.closest(".ni-more-menu")) {
         (d as HTMLDetailsElement).open = false;
       }
-    }
-  }
-  async function pickRecipe(item: NiBoardItem, recipeId: string): Promise<void> {
-    console.assert(item.flow?.state === "source", "pickRecipe: pause required");
-    busyId = item.id;
-    try {
-      await api.niFlowPickRecipe(item.id, recipeId);
-      toast("Vetted source proposed — approve it on the card.");
-      await load();
-    } catch (err) {
-      const msg = describeError(err);
-      if (msg) error = msg;
-    } finally {
-      busyId = null;
     }
   }
   async function fixItem(item: NiBoardItem): Promise<void> {
@@ -1058,37 +1073,6 @@
     }
   }
 
-  async function approveFlowSource(item: NiBoardItem) {
-    console.assert(item.flow?.state === "confirm_source", "approveFlowSource: pause required");
-    busyId = item.id;
-    try {
-      const res = await api.niFlowConfirmSource(item.id);
-      toast(res.state === "ready"
-        ? "Source approved — the card is being commissioned."
-        : "Source approved.");
-      await load();
-    } catch (err) {
-      const msg = describeError(err);
-      if (msg) error = msg;
-    } finally {
-      busyId = null;
-    }
-  }
-  async function declineFlowSource(item: NiBoardItem) {
-    console.assert(item.flow?.state === "confirm_source", "declineFlowSource: pause required");
-    busyId = item.id;
-    try {
-      await api.niFlowDeclineSource(item.id);
-      toast("Okay — pick a different source on the card.");
-      await load();
-    } catch (err) {
-      const msg = describeError(err);
-      if (msg) error = msg;
-    } finally {
-      busyId = null;
-    }
-  }
-
   async function validateLooksRight(item: NiBoardItem) {
     console.assert(item.state === "commissioning", "validateLooksRight: only commissioning");
     console.assert(typeof item.id === "string", "validateLooksRight: id is string");
@@ -1341,26 +1325,24 @@
                   Finding a source for this…
                 </p>
               {:else if item.flow.state === "source"}
-                <!-- P3 (2026-09-17): the source-pick pause renders its OWN
-                     affordances — vetted suggestions (every category) that
-                     route into the normal Approve-source consent, and a
-                     paste-a-URL field (the universal generic path; your paste
-                     is the consent, netguard guards the fetch). -->
+                <!-- The source-pick pause renders its OWN affordances — SmartBrain
+                     Library sources first (web results only when the Library has
+                     none), and a paste-a-URL field. The tap or paste is the
+                     consent; netguard guards the fetch. -->
                 <div class="ni-commission">
                   <p style="margin:0 0 var(--s-2); font-size:var(--f-label)">
                     {item.flow.suggestions?.[0]?.kind === "library"
                       ? "From the SmartBrain Library — tap the one that fits:"
                       : item.flow.suggestions?.[0]?.kind === "web"
-                        ? "No vetted source matched — found on the web:"
-                        : "No vetted source matched this request yet."}
+                        ? "The Library has no source for this — found on the web:"
+                        : "No source found for this yet — paste a link to the data:"}
                   </p>
                   {#if item.flow.suggestions && item.flow.suggestions.length > 0}
                     <div class="ni-suggestions">
-                      <!-- S2: web rows key on url (recipe_id is ""); a tap
-                           submits the sealed URL through the normal pick
-                           consent. Evidence = values our jailed reader
-                           actually extracted from that page, shown pre-tap. -->
-                      {#each item.flow.suggestions as sug (sug.recipe_id || sug.url)}
+                      <!-- Rows key on url; a tap submits the sealed URL through the
+                           normal pick consent. Web evidence = values our jailed
+                           reader actually extracted from that page, shown pre-tap. -->
+                      {#each item.flow.suggestions as sug (sug.url)}
                         {#if sug.kind === "library"}
                           <!-- Library candidate (R8): a real Library source with its address already
                                filled from your words; the line under it names the provider and, when
@@ -1378,8 +1360,14 @@
                                 {sug.evidence.join(" — ")}
                               </p>
                             {/if}
+                            {#if sug.needs?.includes("key")}
+                              <p class="ni-sug-needs">Needs your own free key — you'll paste it next</p>
+                            {/if}
+                            {#if sug.needs?.includes("contact")}
+                              <p class="ni-sug-needs">Asks for your contact email once</p>
+                            {/if}
                           </div>
-                        {:else if sug.kind === "web"}
+                        {:else}
                           <div class="ni-web-sug">
                             <button
                               class="secondary"
@@ -1393,13 +1381,6 @@
                               </p>
                             {/if}
                           </div>
-                        {:else}
-                          <button
-                            class="secondary"
-                            disabled={busyId === item.id}
-                            title={sug.url}
-                            onclick={() => pickRecipe(item, sug.recipe_id)}
-                          >{sug.title} — {sug.host}</button>
                         {/if}
                       {/each}
                     </div>
@@ -1424,48 +1405,60 @@
                     <p class="error" style="margin:var(--s-1) 0 0; font-size:var(--f-label)">{flowActionError[item.id]}</p>
                   {/if}
                 </div>
-              {:else if item.flow.state === "confirm_source"}
-                <!-- Card-consent (2026-09-15): the flow's own approval affordance,
-                     rendered by CODE the instant the pause happens — the exact URL
-                     unmissable, the optional place lookup and any not-covered
-                     fields disclosed on the same surface the tap approves. -->
-                <div class="ni-commission">
-                  <p style="margin:0 0 var(--s-2); font-size:var(--f-label)">
-                    {item.flow.recipe_title ? `Vetted source: ${item.flow.recipe_title}` : "Source found"}
-                  </p>
-                  <p style="margin:0 0 var(--s-2); font-size:var(--f-label); word-break:break-all">
-                    Fetches: <strong>{item.flow.filled_url ?? item.flow.source_url}</strong>
-                  </p>
-                  {#if item.flow.fills}
-                    <p class="muted" style="margin:0 0 var(--s-2); font-size:var(--f-label)">
-                      {#each Object.entries(item.flow.fills) as [name, value] (name)}
-                        <span style="margin-right: var(--s-3)">{name}: <strong>{value}</strong></span>
-                      {/each}
+              {:else if item.flow.state === "awaiting_access" && item.flow.access}
+                {@const access = item.flow.access}
+                <!-- The picked source needs the user's own free key and/or a contact email
+                     (SEC, BLS). Nothing is fetched until this is sent; each value goes only to
+                     the source's own host. -->
+                <form
+                  class="ni-commission ni-pick-url"
+                  onsubmit={(e) => { e.preventDefault(); void giveAccess(item); }}
+                >
+                  {#if access.key}
+                    <p style="margin:0; font-size:var(--f-label)">
+                      {access.provider || access.host} needs your own free key.
+                      {#if access.key.docs_url}
+                        <a href={access.key.docs_url} target="_blank" rel="noopener noreferrer">Get one here</a>,
+                        then paste it below.
+                      {:else}
+                        Get one from {access.provider || access.host}, then paste it below.
+                      {/if}
+                      SmartBrain sends it only to {access.host}, over a secure connection.
                     </p>
-                  {/if}
-                  {#if item.flow.geocode_query}
-                    <p class="muted" style="margin:0 0 var(--s-2); font-size:var(--f-label)">
-                      Also looks up “{item.flow.geocode_query}” via {item.flow.geocode_host} to fill the location.
-                    </p>
-                  {/if}
-                  {#if item.flow.not_covered && item.flow.not_covered.length > 0}
-                    <p class="muted" style="margin:0 0 var(--s-2); font-size:var(--f-label)">
-                      This card won’t include: {item.flow.not_covered.join(", ")}.
-                    </p>
-                  {/if}
-                  <div class="ni-actions">
-                    <button
-                      class="secondary"
+                    <input
+                      type="password"
+                      autocomplete="off"
+                      bind:value={accessKeyText}
+                      placeholder="Your {access.provider || access.host} key"
+                      maxlength="400"
                       disabled={busyId === item.id}
-                      onclick={() => approveFlowSource(item)}
-                    >{busyId === item.id ? "Building…" : "Approve source"}</button>
-                    <button
-                      class="ghost"
+                      aria-label="Your key for {access.host}"
+                    />
+                  {/if}
+                  {#if access.contact}
+                    <p style="margin:0; font-size:var(--f-label)">
+                      {access.provider || access.host} asks automated requests for a contact
+                      email. SmartBrain sends yours only to sources with this rule, and asks once.
+                    </p>
+                    <input
+                      type="email"
+                      autocomplete="email"
+                      bind:value={accessEmailText}
+                      placeholder="you@example.com"
+                      maxlength="254"
                       disabled={busyId === item.id}
-                      onclick={() => declineFlowSource(item)}
-                    >Not this source</button>
-                  </div>
-                </div>
+                      aria-label="Your contact email"
+                    />
+                  {/if}
+                  <button type="submit" class="secondary"
+                    disabled={busyId === item.id
+                      || (!!access.key && accessKeyText.trim().length === 0)
+                      || (access.contact && accessEmailText.trim().length < 6)}
+                  >{busyId === item.id ? "Saving…" : "Continue"}</button>
+                  {#if flowActionError[item.id]}
+                    <p class="error" style="margin:0; font-size:var(--f-label)">{flowActionError[item.id]}</p>
+                  {/if}
+                </form>
               {:else}
                 <p class="muted" style="margin:0; font-size:var(--f-label)">{flowStageLabel(item.flow)}</p>
               {/if}
@@ -2258,6 +2251,11 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .ni-sug-needs {
+    margin: 2px 0 0;
+    font-size: var(--f-label);
+    color: var(--warn);
   }
   .ni-pick-url {
     /* G1 field fix: a row layout collapsed the input to ~1ch inside card

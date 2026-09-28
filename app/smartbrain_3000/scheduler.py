@@ -683,6 +683,19 @@ def _auto_update_feeds(app) -> None:
 _MAX_LIBRARY_PASS_SECONDS = 20.0  # NI library pass shares the tick — same feed law
 
 
+def _auto_send_library_outbox(app) -> None:
+    """Send due SmartBrain Library votes / suggestions (a few per tick, backed off when the
+    service is away). Isolated like every pass: nothing here can stop a due schedule."""
+    store = getattr(app.state, "ni", None)
+    if store is None:
+        return
+    try:
+        from . import library_client
+        library_client.flush(store)
+    except Exception as exc:  # must never kill the schedule tick
+        log.warning("library outbox pass failed: %s", type(exc).__name__)
+
+
 def _auto_update_ni_library(app) -> None:
     """One NI library check per tick when due (§20 cadence). Isolated exactly like the
     other passes: its own cursor, its own try/except, per-fetch failure counted
@@ -985,6 +998,7 @@ def tick(app) -> int:
         _auto_update_vaults(app)    # Stage E: apply due subscription updates (model-independent)
         _auto_update_feeds(app)     # RSS/Atom subscriptions: same isolation contract
         _auto_update_ni_library(app)  # NI global library (§20): same isolation contract
+        _auto_send_library_outbox(app)  # SmartBrain Library votes/suggestions (R6/R7)
         _auto_update_ni(app)        # Neural Interface items: same isolation contract
         try:  # self-review (Phase 2): 8h-cadence scorecard, self-gated (kill-switch + due),
             # pure SQL in this phase so it needs no model; isolated like the trash purge.

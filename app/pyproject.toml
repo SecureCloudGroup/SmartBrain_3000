@@ -49,9 +49,7 @@ include = ["smartbrain_3000*"]
 [tool.setuptools.package-data]
 # Recursive: the SvelteKit build nests hashed bundles under web/_app/** — a
 # non-recursive glob would omit them from the wheel (the app would 404 its JS).
-# ``data/**/*.json`` ships the bundled NI source catalog (§18) — read at import
-# by ``smartbrain_3000.ni_catalog``, so an unshipped file breaks module load.
-smartbrain_3000 = ["web/**/*", "data/**/*.json"]
+smartbrain_3000 = ["web/**/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

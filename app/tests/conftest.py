@@ -33,6 +33,7 @@ os.environ.setdefault("SMARTBRAIN_LLM_GATEWAY_URL", "http://127.0.0.1:9")
 # ...and never download the SmartBrain Library pack on a test flow's behalf (Library tests wire
 # their own local pack through ni_flow.set_library_provider)
 os.environ.setdefault("SMARTBRAIN_LIBRARY_AUTOINSTALL", "0")
+os.environ.setdefault("SMARTBRAIN_LIBRARY_API", "")  # never send Library votes from a test
 
 # R14 local API credential. Every /api request now needs a credential, and the suite
 # has always acted AS THE DESKTOP — so every TestClient presents the desktop bearer

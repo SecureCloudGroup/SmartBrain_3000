@@ -5,6 +5,18 @@
 # Activated by the docker-compose.landing.yml overlay, which mounts this file and the landing content
 # and sets LANDING_DOMAIN. Point LANDING_DOMAIN's DNS A record at this VPS first.
 {$LANDING_DOMAIN} {
+	# SmartBrain Library API (github.com/SecureCloudGroup/SmartBrain_Library, service/README.md): votes and
+	# suggestions from the app. The service runs on the host (systemd), reached on the docker0 address; until
+	# it is deployed these paths answer 502 and the app simply keeps its outbox for later.
+	handle /library/v1/* {
+		request_body {
+			max_size 16KB
+		}
+		reverse_proxy 172.17.0.1:8095 {
+			# one entry, the address Caddy saw: the service rate-limits on it and never stores it
+			header_up X-Forwarded-For {client_ip}
+		}
+	}
 	root * /srv/landing
 	encode gzip
 	file_server

@@ -14,11 +14,6 @@ import type { NiItemFlow } from "$lib/api";
 // user picking between candidate sources (a resume_ni_flow approval will be parked
 // on the pending list). Kept as a constant so a rename shows up at every call site.
 export const AWAITING_SOURCE_PICK = "awaiting_pick";
-// C3 (audit 2026-09-13): a new `confirm_source` state pauses a recipe-matched flow
-// until the operator approves the recipe's url_template via `confirm_ni_flow_source`.
-// The backend seals `error: "awaiting_confirm"` on that record; the label reads as
-// a distinct sentence so a reviewer sees the difference from a pick-a-source pause.
-export const AWAITING_SOURCE_CONFIRM = "awaiting_confirm";
 
 /** Return the calm, human sentence for this flow's current stage, or "" for the
  *  terminal error states (unsupported/failed — the caller composes those with
@@ -41,7 +36,7 @@ export function flowStageLabel(flow: NiItemFlow | null | undefined): string {
       ? "Waiting for you to pick a source on the card"
       : "Finding the source…";
   }
-  if (s === "confirm_source") return "Waiting for you to approve the source";
+  if (s === "awaiting_access") return "Needs your key or contact email";
   if (s === "sampling") return "Reading a sample…";
   if (s === "mapping") return "Choosing the data fields…";
   if (s === "assembling") return "Building the card…";

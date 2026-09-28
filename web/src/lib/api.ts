@@ -310,11 +310,6 @@ export interface PendingAction {
   // the titles of every referenced item, in alias order. The consent surface prints
   // "Combines: <title>, <title>" so the user sees the composite's inputs by name.
   composite_titles?: string[];
-  // Set on a parked create_ni_item_from_recipe: the recipe's url_template resolved
-  // server-side from the sealed catalog. The consent surface prints "Fetches: <url>"
-  // so the host the card would call is unmissable — the args themselves only carry
-  // the recipe id + params.
-  recipe_url?: string;
 }
 
 // One site-scoped consent entry: URL tools remember per-host, so the same tool can
@@ -684,10 +679,8 @@ export interface NiDisplay { size: "small" | "wide" }
 export type NiFlowState =
   | "intent"
   | "source"
-  // C3 (audit 2026-09-13): a recipe-matched flow pauses here until the operator
-  // approves the recipe's url_template via confirm_ni_flow_source. The card's
-  // stage label ("Waiting for you to approve the source") lives in flow.ts.
-  | "confirm_source"
+  // The picked source needs the user's own key and/or contact email (`access` says which).
+  | "awaiting_access"
   | "sampling"
   | "mapping"
   | "assembling"
@@ -700,36 +693,20 @@ export type NiFlowState =
 export interface NiItemFlow {
   state: NiFlowState;
   error?: string;
-  // Card-consent (2026-09-15): present ONLY on a confirm_source pause — the
-  // sealed disclosure the tile renders verbatim so the user approves on the
-  // card itself (the chat model is no longer a required relay).
-  source_url?: string;
-  recipe_title?: string;
-  // W-E (2026-09-17): the request-derived param fills sealed at the pause —
-  // the card shows the FILLED URL ("symbol=GOOG") so a wrong fill is visible
-  // at consent time; what is sealed is exactly what runs after approval.
-  fills?: Record<string, string>;
-  filled_url?: string;
-  // P3 (2026-09-17): the source-pick pause carries ranked vetted suggestions
-  // (deterministic scorer, every category) — the card renders them as taps
-  // routing into the normal Approve-source consent, plus paste-a-URL.
-  // S2 (2026-09-22): on a full catalog miss the rows are WEB candidates
-  // (kind:"web", recipe_id "") found by searching the user's own words;
-  // Library (R8, 2026-09-28): kind:"library" rows are SmartBrain Library sources with the
+  // The source-pick pause: kind:"library" rows are SmartBrain Library sources with the
   // address already filled from the user's words (evidence = provider · authority, and the
-  // reading when the words fit several — the tap answers it);
-  // evidence = values actually extracted from the page, shown pre-tap.
+  // reading when the words fit several — the tap answers it). When the Library has none,
+  // kind:"web" rows are found by searching the user's own words (evidence = values actually
+  // extracted from the page, shown pre-tap). A tap is the consent; paste-a-URL always works.
   suggestions?: {
-    recipe_id: string;
     title: string;
     host: string;
     url: string;
     kind?: string;
     evidence?: string[];
+    // Library rows: what the tap asks for before the first fetch ("key", "contact")
+    needs?: string[];
   }[];
-  geocode_query?: string;
-  geocode_host?: string;
-  not_covered?: string[];
   // G1 (rounds 7-8, single-writer law): terminal records carry the master's
   // derivation — one honest reason sentence, an optional answerable question,
   // and the reopen affordances. The card renders these verbatim; no more
@@ -738,6 +715,13 @@ export interface NiItemFlow {
   // model_consent (ruling 2) also names the non-local model and the local alternative.
   question?: { kind: string; prompt?: string; model?: string; local?: string };
   reopen?: string[];
+  // awaiting_access: what the card asks for (from the sealed record — never a value).
+  access?: {
+    host: string;
+    provider: string;
+    key: { docs_url: string } | null;
+    contact: boolean;
+  };
 }
 
 // G1 oversight plane: one watcher finding (ni_findings row, code-authored
@@ -966,6 +950,8 @@ export interface LocalSourceInput {
   category: string; // "cat/sub"
   access_kind: LibraryAccessKind;
   needs_key: boolean;
+  // also suggest it to the SmartBrain Library (address template + description, never a value)
+  suggest?: boolean;
 }
 
 // A single run — telemetry (§1 ni_runs). Plaintext; host-free error class only.
@@ -1801,22 +1787,24 @@ export const api = {
       method: "POST",
       body: JSON.stringify(sourceUrl ? { request, source_url: sourceUrl } : { request }),
     }),
-  // P3 (2026-09-17): the source-pick card's actions — paste-a-URL (the user's
-  // paste is the consent; netguard guards the fetch) and vetted-suggestion tap
-  // (routes into the standard Approve-source consent). Plus the card's Fix
+  // P3 (2026-09-17): the source-pick card's action — a tapped suggestion or a
+  // pasted URL (the user's tap/paste is the consent; netguard guards the fetch).
+  // Plus the card's Fix
   // (remap against the card's OWN frozen source) and Edit (title/cadence via
   // the PATCH surface).
   niFlowPickSource: (id: string, url: string) =>
-    req<{ ok: boolean; started: boolean }>(
+    req<{ ok: boolean; started: boolean; needs?: string[] }>(
       `/api/ni/items/${encodeURIComponent(id)}/flow/pick-source`, {
         method: "POST",
         body: JSON.stringify({ url }),
       }),
-  niFlowPickRecipe: (id: string, recipeId: string) =>
-    req<{ ok: boolean; state: string }>(
-      `/api/ni/items/${encodeURIComponent(id)}/flow/pick-recipe`, {
+  // The picked source's key and/or the user's contact email, typed on the card.
+  niFlowAccess: (id: string, key?: string, email?: string) =>
+    req<{ ok: boolean; started: boolean; needs: string[] }>(
+      `/api/ni/items/${encodeURIComponent(id)}/flow/access`, {
         method: "POST",
-        body: JSON.stringify({ recipe_id: recipeId }),
+        body: JSON.stringify({ ...(key !== undefined ? { key } : {}),
+                               ...(email !== undefined ? { email } : {}) }),
       }),
   niFlowFix: (id: string) =>
     req<{ ok: boolean; started: boolean }>(
@@ -1848,20 +1836,6 @@ export const api = {
   niFlowRetry: (id: string) =>
     req<{ id: string; started: boolean }>(
       `/api/ni/items/${encodeURIComponent(id)}/flow/retry`, {
-        method: "POST",
-      }),
-  // Card-consent (2026-09-15): approve / decline the flow's proposed source from
-  // the tile. Desktop-local; the server re-reads the SEALED record (no URL in
-  // the body — nothing to drift from what the card displayed). Approve runs the
-  // continuation synchronously (recipe handoff + consented geocode, seconds).
-  niFlowConfirmSource: (id: string) =>
-    req<{ ok: boolean; state: string; item_state?: string }>(
-      `/api/ni/items/${encodeURIComponent(id)}/flow/confirm-source`, {
-        method: "POST",
-      }),
-  niFlowDeclineSource: (id: string) =>
-    req<{ ok: boolean; state: string }>(
-      `/api/ni/items/${encodeURIComponent(id)}/flow/decline-source`, {
         method: "POST",
       }),
   // Fill a NON-secret param value (needs_params, 2026-09-14). Desktop-local like the
@@ -1958,7 +1932,7 @@ export const api = {
     req<LibrarySourceDetail>(`/api/library/sources/${encodeURIComponent(id)}`),
   libraryLocal: () => req<{ sources: LibrarySourceRow[] }>("/api/library/local"),
   libraryLocalAdd: (body: LocalSourceInput) =>
-    req<LibrarySourceRow>("/api/library/local", { method: "POST", body: JSON.stringify(body) }),
+    req<LibrarySourceRow & { suggested?: boolean }>("/api/library/local", { method: "POST", body: JSON.stringify(body) }),
   libraryLocalDelete: (id: string) =>
     req<{ ok: boolean }>(`/api/library/local/${encodeURIComponent(id)}`, { method: "DELETE" }),
 

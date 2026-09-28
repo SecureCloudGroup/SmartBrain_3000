@@ -111,14 +111,35 @@ not. Being precise about the line matters more than claiming everything:
   image; cards built on your schedules, your knowledge, or other cards fetch nothing
   at all. A card with a credential sends it only to the host it was entered for,
   only over HTTPS, and never follows a redirect while carrying it.
-- **Card creation, when no vetted source fits (a bounded search).** While you are
-  *creating* a card and nothing in the vetted catalog matches, the build engine
+- **The SmartBrain Library (a one-time download, then looked up on your
+  machine).** The first time a card needs a source, the app downloads the
+  Library's data file (about 18 MB) from its GitHub release and refuses it unless
+  it matches the fingerprint this app release pins. Finding sources for your
+  words then happens entirely on your machine; nothing about your request is
+  sent. Sources you add yourself stay sealed on your machine.
+- **Your Yes, and your suggestions, to the SmartBrain Library.** When you tap a
+  Library source on a card, the app sends the Library a vote in the background:
+  that source's id, "yes", and the app version. It never sends your request, the
+  filled-in address, a place, or a key. A source you add yourself is sent only if
+  you tick **Also suggest it to the SmartBrain Library**, and then only its name,
+  description, category and address pattern, with every value you filled in
+  removed. Both go to `smartbrain.securecloudgroup.com`, which keeps no account,
+  cookie, device id or IP address: a vote is stored with the day it arrived.
+- **A source that needs your own key or contact email.** Some Library sources
+  need a free key from their provider; a few providers (the SEC, the Bureau of
+  Labor Statistics) ask automated requests for a contact email. The card asks
+  before its first fetch. The key is sealed on your machine, bound to that
+  provider's host, and sent only to that host over HTTPS; a redirect elsewhere is
+  refused. The email is sealed too and is sent only to sources with that rule, in
+  the request's User-Agent header.
+- **Card creation, when the Library has nothing (a bounded search).** While you
+  are *creating* a card and the Library has no source for it, the build engine
   searches **your own words** through the web-search engine below and reads up to
   four of the result pages — once, through the same network guard, with safe
   search forced on — to show you candidates with evidence from each page. That
   pre-read is part of the search; the address a card fetches *recurringly* is
-  still only the one you tap or paste. No search happens when a vetted source
-  matched, when you pasted a URL, or after the card exists.
+  still only the one you tap or paste. No search happens when the Library had a
+  source, when you pasted a URL, or after the card exists.
 - **The card template library (only if you connect one).** A connected library is
   checked at the URL you pinned about once a day (plus your manual "Check now").
   The check downloads the signed template pack; nothing about you or your cards is

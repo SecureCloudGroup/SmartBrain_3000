@@ -13,15 +13,35 @@ to know when a release changes behavior.
 
 ### Added
 
-- **New cards find their source in the SmartBrain Library first.** When you ask
-  for a card that the built-in recipes don't cover, the card now offers
-  Library sources with the address already filled in from your words:
+- **New cards read CSV files, RSS/Atom news feeds and XML, not just JSON.**
+  When you pick a Library source that publishes a CSV download, an RSS or
+  Atom feed, an XML document or plain text, or paste a link to one, the card
+  samples it, finds the fields you asked for the same way it does for JSON
+  APIs, and refreshes on the card's schedule. Every file is read with size
+  limits, and XML that declares its own entities is refused.
+
+- **New cards find their source in the SmartBrain Library.** When you ask
+  for a card, it now offers Library sources with the address already filled
+  in from your words:
   the right tide station for your town, your team's schedule, the coin or
   currency pair you named, the service whose status you asked about. When
   your words fit more than one thing (two Portlands, two nearby tide
   stations on different water), each one is offered and your tap picks it.
   Web search runs only when the Library has nothing that fits. Each source
   you choose is counted as a good source on this device.
+
+- **Sources that need your own free key or a contact email work.** When the
+  best source for a card needs a free key from its provider, the card says so
+  before you tap it, then asks for the key with a link to get one. Sources that
+  work without a key are offered first. For the SEC and the Bureau of Labor
+  Statistics, which ask automated requests for a contact email, the card asks
+  for your email once and sends it only to those sources. A key you already
+  gave another card for the same provider is reused.
+
+- **Your Yes counts in the SmartBrain Library.** Tapping a Library source on a
+  card also sends the Library a vote (just that source and "yes"), and the
+  Add-a-source form can suggest your source to the Library for review. Both
+  are sent in the background and wait while you're offline.
 
 - **The Library page.** The Library button on the Neural Interface page now
   opens a page for the SmartBrain Library: about 8,600 US data sources
@@ -33,6 +53,16 @@ to know when a release changes behavior.
   page it downloads the Library (about 18 MB); the download must match the
   exact file this release was built with, or it is refused. Card templates
   are still available from a link on the page.
+
+### Removed
+
+- **The 12 built-in card sources are gone.** The SmartBrain Library replaces
+  them, so a new card no longer stops at an "Approve source" step for a
+  built-in source. It offers Library sources (or web results when the Library
+  has none) and your tap picks one. Cards you already built from a built-in
+  source keep working unchanged. A card that was waiting at "Approve source"
+  when you upgrade now shows the Library's choices instead. Chat no longer has
+  a "list the catalog" tool.
 
 ### Fixed
 

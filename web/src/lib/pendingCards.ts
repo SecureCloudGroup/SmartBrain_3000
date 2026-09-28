@@ -24,14 +24,10 @@ export function iconForTool(tool: string): IconName {
 //                             phrase when the caller didn't resolve a label yet)
 //   internal.ni (§25)      → "Combines: <title>, <title>" (falls back to "other cards"
 //                             when the caller hasn't threaded titles through yet)
-// create_ni_item_from_recipe never carries a source object — the recipe's url_template
-// is resolved server-side from the sealed catalog. The consent surface prints
-// "Fetches: <recipeUrl>" (falls back to "a vetted catalog source" when the caller
-// hasn't threaded the resolved url through yet).
 // start_ni_flow / resume_ni_flow / remap_ni_item are the NI flow parked tools — the
 // flow engine posts them for user approval when it needs a source confirmed or a card
 // re-mapped. start_ni_flow with a source_url promotes "Fetches: <url>"; without one
-// it names the flow's intent (a vetted or user-chosen source will be confirmed before
+// it names the flow's intent (the user picks the source before
 // any fetch). resume_ni_flow always carries the picked source_url. remap_ni_item
 // re-runs the mapping stage against an already-approved source — no new egress.
 // Handles both an object (pending tiles) and a JSON string (history args_summary). A
@@ -42,38 +38,22 @@ export function promotedLine(
   args: unknown,
   mcpLabel?: string,
   compositeTitles?: string[],
-  recipeUrl?: string,
 ): string | null {
   console.assert(typeof tool === "string", "promotedLine: tool is string");
   console.assert(args !== undefined, "promotedLine: args defined");
   const t = tool.toLowerCase();
-  if (t === "create_ni_item_from_recipe") {
-    const url = typeof recipeUrl === "string" && recipeUrl.length > 0
-      ? recipeUrl
-      : "a vetted catalog source";
-    return `Fetches: ${url}`;
-  }
   if (t === "remap_ni_item") {
     // No new source is granted — the item's already-approved source is reused. The
     // consent line says exactly that so a reviewer isn't asked to re-authorize the host.
     return "Re-maps this card against its already-approved source";
   }
-  if (t === "start_ni_flow" || t === "resume_ni_flow" || t === "confirm_ni_flow_source") {
+  if (t === "start_ni_flow" || t === "resume_ni_flow") {
     const flowUrl = readSourceUrl(args);
-    // geocode-consent (2026-09-15): a confirm that also covers a place lookup
-    // names it on the SAME promoted line — one approval, both fetches visible.
-    // The backend refuses a confirm whose args omit the sealed query, so this
-    // line can never silently under-disclose.
-    const lookup = readGeocodeQuery(args);
-    if (flowUrl) {
-      return lookup
-        ? `Fetches: ${flowUrl} · Looks up “${lookup}” to fill the location`
-        : `Fetches: ${flowUrl}`;
-    }
+    if (flowUrl) return `Fetches: ${flowUrl}`;
     // resume_ni_flow SHOULD always carry a source_url (the user just picked one). If
     // the caller didn't thread it through, fall back to the same generic phrase — the
     // args block below still shows what's being confirmed verbatim.
-    return "Builds a card from a vetted or user-chosen source — no fetch until one is confirmed";
+    return "Builds a card from a source you pick — no fetch until you pick one";
   }
   if (t !== "create_ni_item" && t !== "update_ni_item") return null;
   let obj: unknown = args;
@@ -112,24 +92,6 @@ export function promotedLine(
     return `MCP: ${mcpLabel ?? "your configured server"} → ${toolName}`;
   }
   return null;
-}
-
-// Pull a top-level `geocode_query` string out of the args (object or JSON string) —
-// the display echo of a confirm's sealed place lookup (geocode-consent 2026-09-15).
-function readGeocodeQuery(args: unknown): string {
-  console.assert(args !== undefined, "readGeocodeQuery: args defined");
-  let obj: unknown = args;
-  if (typeof args === "string") {
-    if (!args.trim()) return "";
-    try {
-      obj = JSON.parse(args);
-    } catch {
-      return "";
-    }
-  }
-  if (!obj || typeof obj !== "object" || Array.isArray(obj)) return "";
-  const q = (obj as Record<string, unknown>).geocode_query;
-  return typeof q === "string" && q.length > 0 ? q : "";
 }
 
 // Pull a top-level `source_url` string out of the args (object or JSON string). Used

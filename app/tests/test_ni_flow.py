@@ -170,64 +170,7 @@ def test_stage_intent_gives_up_after_retry() -> None:
         ni_flow.stage_intent("q", lambda p: model("m", p))
 
 
-# ---- recipe matching -----------------------------------------------------
-
-def test_match_recipe_ticker_needs_category_corroboration() -> None:
-    """C2 (audit 2026-09-13): a bare ticker no longer wins on its own.
-
-    "show me AAPL every 5 minutes" carries no "finance" / "stock" / "price" /
-    "quote" word — the ticker bump is category-gated, so nothing scores past
-    the threshold and the flow pauses at ``source`` instead of silently
-    matching fx-usd-eur (the audit's reproduction).
-    """
-    catalog = [
-        {"id": "fx", "title": "USD to EUR exchange rate", "category": "finance"},
-        {"id": "quakes", "title": "USGS earthquakes", "category": "misc"},
-        {"id": "stock", "title": "Stock quote", "category": "finance"},
-    ]
-    # Bare ticker + no corroborating word: nothing wins.
-    got = ni_flow.match_recipe(catalog, "show me AAPL every 5 minutes",
-                                {"wants": ["price"]})
-    assert got is None, f"bare ticker must NOT match; got {got}"
-
-
-def test_match_recipe_ticker_matches_when_stock_word_appears() -> None:
-    """C2 (audit 2026-09-13): a corroborated ticker matches the stock recipe."""
-    # Matcher precision (2026-09-16): synthetic entries model the REAL catalog
-    # shape — the stock recipe takes a symbol param (ticker bump requires it);
-    # fx is fixed-subject (no params) and needs a distinctive word to compete.
-    catalog = [
-        {"id": "fx", "title": "USD to EUR exchange rate", "category": "finance"},
-        {"id": "stock", "title": "Stock quote", "category": "finance",
-         "spec_template": {"params": {"symbol": {"label": "Ticker", "kind": "string", "value": ""}}}},
-    ]
-    got = ni_flow.match_recipe(catalog, "show me AAPL stock every 5 minutes",
-                                {"wants": ["price"]})
-    assert got is not None and got["id"] == "stock", f"expected stock, got {got}"
-
-
-def test_match_recipe_audit_reproductions_return_none() -> None:
-    """C2 (audit 2026-09-13): the audit's stated wrong-match reproductions
-    now return None (no false-positive fx / stock match, no ticker leak).
-    """
-    catalog = [
-        {"id": "fx", "title": "USD to EUR exchange rate", "category": "finance"},
-        {"id": "quakes", "title": "USGS earthquakes", "category": "misc"},
-        {"id": "stock", "title": "Stock quote", "category": "finance"},
-        {"id": "weather", "title": "Weather", "category": "weather"},
-    ]
-    for req in ("days until I retire",
-                "track the S&P 500",
-                "show me what I spent this month"):
-        assert ni_flow.match_recipe(catalog, req, {"wants": ["value"]}) is None, \
-            f"audit reproduction should match nothing: {req!r}"
-
-
-def test_match_recipe_no_hit_returns_none() -> None:
-    """Below the score minimum → None (the flow pauses at ``source``)."""
-    catalog = [{"id": "x", "title": "totally unrelated", "category": "z"}]
-    assert ni_flow.match_recipe(catalog, "some vague request", {"wants": ["q"]}) is None
-
+# ---- source pick ----------------------------------------------------------
 
 # ---- mapping stage guarantees -------------------------------------------
 
@@ -255,11 +198,6 @@ def test_stage_mapping_rejects_wrong_type() -> None:
 
 # ---- end-to-end (recorded) -----------------------------------------------
 
-def _empty_catalog() -> list[dict]:
-    """An empty catalog forces the freeform path in end-to-end recorded cases."""
-    return []
-
-
 def test_flow_end_to_end_aapl_value_card() -> None:
     """AAPL fixture → shell → mapping → ready draft/commissioning with a working preview."""
     store, _conn = _store()
@@ -282,7 +220,6 @@ def test_flow_end_to_end_aapl_value_card() -> None:
         store, item_id,
         gateway_call=model,
         fetcher=lambda url: fixture,
-        catalog=_empty_catalog(),
         source_url="https://query1.finance.yahoo.com/v8/finance/chart/AAPL",
     )
     assert result["state"] == "ready", f"got {result}"
@@ -300,8 +237,8 @@ def test_flow_end_to_end_aapl_value_card() -> None:
     assert isinstance(values.get("prev_close"), (int, float))
 
 
-def test_flow_paused_at_source_when_no_recipe_no_url() -> None:
-    """No recipe hit + no user URL ⇒ flow pauses at ``source`` state."""
+def test_flow_paused_at_source_when_no_library_source_no_url() -> None:
+    """No Library source + no user URL ⇒ flow pauses at ``source`` state."""
     store, _conn = _store()
     request = "custom feed I have not named yet"
     item_id = ni_flow.create_shell_item(store, request)
@@ -314,8 +251,7 @@ def test_flow_paused_at_source_when_no_recipe_no_url() -> None:
         store, item_id,
         gateway_call=model,
         fetcher=lambda url: {},   # unused — no fetch happens on the pause
-        catalog=_empty_catalog(),
-    )
+        )
     record = ni_flow._flow_read(store, item_id)
     assert record is not None and record["state"] == "source"
 
@@ -341,8 +277,7 @@ def test_flow_resume_via_tool_completes(monkeypatch) -> None:
     # Override the worker spawn to run synchronously so the assertion sees a final state.
     def _sync_worker(store_arg, iid, *, source_url=None, **_):
         ni_flow.run_flow(store_arg, iid, gateway_call=model,
-                         fetcher=lambda url: fixture, catalog=_empty_catalog(),
-                         source_url=source_url)
+                         fetcher=lambda url: fixture, source_url=source_url)
         return True
     monkeypatch.setattr(ni_flow, "start_flow_worker", _sync_worker)
     out = tmod.INTERNAL_NI_TOOLS["resume_ni_flow"](
@@ -367,8 +302,7 @@ def test_flow_hn_list_end_to_end() -> None:
     model = _scripted_model([intent_reply, mapping_reply])
     result = ni_flow.run_flow(
         store, item_id, gateway_call=model,
-        fetcher=lambda url: fixture, catalog=_empty_catalog(),
-        source_url="https://hn.algolia.com/api/v1/search?tags=front_page",
+        fetcher=lambda url: fixture, source_url="https://hn.algolia.com/api/v1/search?tags=front_page",
     )
     assert result["state"] == "ready"
     item = store.get_item(item_id)
@@ -395,8 +329,7 @@ def test_flow_iss_map_degrades_to_value_with_note() -> None:
     model = _scripted_model([intent_reply, mapping_reply])
     result = ni_flow.run_flow(
         store, item_id, gateway_call=model,
-        fetcher=lambda url: fixture, catalog=_empty_catalog(),
-        source_url="https://api.wheretheiss.at/v1/satellites/25544",
+        fetcher=lambda url: fixture, source_url="https://api.wheretheiss.at/v1/satellites/25544",
     )
     assert result["state"] == "ready"
     record = ni_flow._flow_read(store, item_id)
@@ -424,8 +357,7 @@ def test_flow_computed_unsupported_or_supported() -> None:
     model = _scripted_model([intent_reply])
     result = ni_flow.run_flow(
         store, item_id, gateway_call=model,
-        fetcher=lambda url: {}, catalog=_empty_catalog(),
-    )
+        fetcher=lambda url: {}, )
     if "computed" in nimod._SOURCE_TYPES:
         assert result["state"] == "ready"
     else:
@@ -453,8 +385,7 @@ def test_flow_chaos_drill_field_renamed_reports_honestly() -> None:
     model = _scripted_model([intent_reply, bad, bad, bad, bad])
     result = ni_flow.run_flow(
         store, item_id, gateway_call=model,
-        fetcher=lambda url: fixture, catalog=_empty_catalog(),
-        source_url="https://query1.finance.yahoo.com/v8/finance/chart/AAPL",
+        fetcher=lambda url: fixture, source_url="https://query1.finance.yahoo.com/v8/finance/chart/AAPL",
     )
     assert result["state"] == "failed"
     assert (result.get("error") or "").startswith("mapping")
@@ -611,8 +542,7 @@ def test_c1_run_flow_resolves_model_via_gateway_no_placeholder(monkeypatch) -> N
                         lambda conn: {"ni": "mlx/qwen-local", "chat": "openai/gpt-4o"})
     result = ni_flow.run_flow(
         store, item_id, gateway_call=_fake_gateway,
-        fetcher=lambda url: {"price": 1.0}, catalog=[],
-    )
+        fetcher=lambda url: {"price": 1.0}, )
     assert result is not None, "run_flow must return a record"
     # First call hit the resolved model, never the placeholder.
     assert seen, "gateway_call was never invoked"
@@ -654,7 +584,7 @@ def test_cloud_build_model_asks_this_card_before_any_model_call(monkeypatch) -> 
     seen: list[str] = []
     record = ni_flow.run_flow(store, item_id,
                               gateway_call=lambda m, p: seen.append(m) or _intent_reply(m, p),
-                              fetcher=lambda url: {"price": 1.0}, catalog=[])
+                              fetcher=lambda url: {"price": 1.0})
     assert seen == [], "no model may run before the owner answers"
     assert record["state"] == "unsupported"
     question = ni_master.question_for("unsupported", record)
@@ -679,8 +609,7 @@ def test_consent_builds_with_the_named_model_and_is_sealed_on_the_card(monkeypat
                     "prev_close": "chart.result[0].meta.fulldayPrice"}),
     ])
     result = ni_flow.run_flow(store, item_id, gateway_call=model,
-                              fetcher=lambda url: fixture, catalog=_empty_catalog(),
-                              source_url="https://query1.finance.yahoo.com/v8/finance/chart/AAPL")
+                              fetcher=lambda url: fixture, source_url="https://query1.finance.yahoo.com/v8/finance/chart/AAPL")
     assert result["state"] == "ready", f"got {result}"
     assert {c["model"] for c in model.calls} == {"openai/gpt-4o"}
     assert store.get_item(item_id)["spec"]["_model_consent"] == "openai/gpt-4o"
@@ -697,26 +626,8 @@ def test_choosing_local_builds_with_the_local_model(monkeypatch) -> None:
     seen: list[str] = []
     ni_flow.run_flow(store, item_id,
                      gateway_call=lambda m, p: seen.append(m) or _intent_reply(m, p),
-                     fetcher=lambda url: {"price": 1.0}, catalog=[])
+                     fetcher=lambda url: {"price": 1.0})
     assert seen and set(seen) == {"mlx/qwen-local"}
-
-
-def test_route_side_helper_never_uses_an_unconsented_cloud_model(monkeypatch) -> None:
-    store, _conn = _store()
-    from smartbrain_3000 import gateway as _gwmod
-    monkeypatch.setattr(_gwmod, "load_routes",
-                        lambda conn: {"ni": "openai/gpt-4o", "chat": "mlx/qwen-local"})
-    used: list[str] = []
-    monkeypatch.setattr(_gwmod, "chat", lambda msgs, model, **kw: used.append(model) or {})
-    monkeypatch.setattr(_gwmod, "completion_text", lambda data: "{}")
-    item_id = ni_flow.create_shell_item(store, "bitcoin price")
-    call = ni_flow.default_call_model(store, item_id)
-    assert call is not None
-    call("hello")
-    assert used == ["mlx/qwen-local"]
-    ni_flow._transition(store, item_id, "intent", _model_consent="openai/gpt-4o")
-    ni_flow.default_call_model(store, item_id)("hello")
-    assert used[-1] == "openai/gpt-4o"
 
 
 def test_c1_no_placeholder_grep_in_source() -> None:
@@ -754,13 +665,9 @@ def test_c2_known_url_always_wins_and_freezes_verbatim(monkeypatch) -> None:
     })
     mapping_reply = json.dumps({"price": "price"})
     model = _scripted_model([intent_reply, mapping_reply])
-    # A permissive catalog: even with a "stock" recipe, known_url must win.
-    catalog = [{"id": "stock", "title": "Stock quote", "category": "finance",
-                "spec_template": {"source": {"type": "http_json",
-                                              "url": "https://other/host"}}}]
     result = ni_flow.run_flow(
         store, item_id, gateway_call=lambda m, p: model(m, p),
-        fetcher=_cap, catalog=catalog, source_url=approved,
+        fetcher=_cap, source_url=approved,
     )
     assert result["state"] == "ready", f"got {result}"
     item = store.get_item(item_id)
@@ -768,99 +675,6 @@ def test_c2_known_url_always_wins_and_freezes_verbatim(monkeypatch) -> None:
     assert item["spec"]["source"]["url"] == approved, \
         "the frozen source URL must equal the approved URL (C2 invariant)"
     assert fetched == [approved], f"fetcher must be called with the approved URL only; got {fetched}"
-
-
-def test_c2_matcher_rejects_audit_reproductions() -> None:
-    """C2 (audit 2026-09-13): the audit's specific misclassifications are
-    now clean refusals — "days until I retire", "track the S&P 500", "show
-    me what I spent this month" all return None.
-    """
-    from smartbrain_3000 import ni_catalog
-    catalog = ni_catalog.entries()
-    for req in ("days until I retire",
-                "track the S&P 500",
-                "show me what I spent this month"):
-        got = ni_flow.match_recipe(catalog, req, {"wants": ["value"]})
-        assert got is None, f"expected no match for {req!r}; got {got and got['id']!r}"
-
-
-def test_c3_recipe_hit_pauses_at_confirm_source_no_fetch(monkeypatch) -> None:
-    """C3 (audit 2026-09-13): recipe match + no user URL ⇒ pause in
-    ``confirm_source`` with the recipe URL in the flow record; no fetch runs.
-    """
-    store, _conn = _store()
-    request = "show me AAPL stock every 5 minutes"
-    item_id = ni_flow.create_shell_item(store, request)
-    intent_reply = json.dumps({
-        "kind": "external_data", "subject": "AAPL", "cadence_minutes": 5,
-        "wants": ["price"], "threshold": None, "display_hint": "value",
-    })
-    model = _scripted_model([intent_reply])
-    fetched: list[str] = []
-
-    def _refuse(url: str) -> dict:
-        fetched.append(url)
-        raise AssertionError(f"fetch attempted before confirmation: {url}")
-
-    catalog = [{"id": "stock-quote-finnhub", "title": "Stock quote",
-                "category": "finance",
-                "spec_template": {
-                    "params": {"symbol": {"label": "Ticker", "kind": "string",
-                                           "value": ""}},
-                    "source": {
-                        "type": "http_json",
-                        "url": "https://finnhub.io/api/v1/quote?symbol={{param:symbol}}"}},
-                "url_template": "https://finnhub.io/api/v1/quote?symbol={{param:symbol}}"}]
-    ni_flow.run_flow(
-        store, item_id, gateway_call=lambda m, p: model(m, p),
-        fetcher=_refuse, catalog=catalog,
-    )
-    record = ni_flow._flow_read(store, item_id)
-    assert record is not None
-    assert record["state"] == "confirm_source", f"got {record['state']!r}"
-    assert record.get("error") == ni_flow.AWAITING_SOURCE_CONFIRM
-    assert record.get("_recipe_id") == "stock-quote-finnhub"
-    assert record.get("source_url") == \
-        "https://finnhub.io/api/v1/quote?symbol={{param:symbol}}"
-    assert fetched == [], "no fetch until one is confirmed (§29 promoted line)"
-
-
-def test_c3_confirm_tool_resumes_with_that_url() -> None:
-    """C3 (audit 2026-09-13): confirm_ni_flow_source resumes with the pending
-    URL — mismatched URLs are refused; matching URL runs handoff against the
-    shipped recipe.
-
-    Uses ``fx-usd-eur`` (no secret params) so the resumed flow lands READY.
-    """
-    from smartbrain_3000 import tools as tmod
-    store, _conn = _store()
-    ctx = tmod.ToolContext(ni=store)
-    request = "USD to EUR exchange rate hourly"
-    item_id = ni_flow.create_shell_item(store, request)
-    intent_reply = json.dumps({
-        "kind": "external_data", "subject": "USD to EUR", "cadence_minutes": 60,
-        "wants": ["rate"], "threshold": None, "display_hint": "value",
-    })
-    model = _scripted_model([intent_reply])
-    # Let match_recipe read the shipped catalog so the confirm-tool's later
-    # ni_catalog.get_recipe(...) lookup sees the same recipe.
-    ni_flow.run_flow(
-        store, item_id, gateway_call=lambda m, p: model(m, p),
-        fetcher=lambda url: {"rates": {"EUR": 0.9}, "date": "2026-09-13"},
-    )
-    record = ni_flow._flow_read(store, item_id)
-    assert record is not None and record["state"] == "confirm_source", \
-        f"expected confirm_source; got {record!r}"
-    pending_url = record.get("source_url")
-    # A mismatched URL refuses (never seals a source the user didn't see).
-    with pytest.raises(ValueError, match="does not match"):
-        tmod.INTERNAL_NI_TOOLS["confirm_ni_flow_source"](
-            ctx, {"item_id": item_id,
-                  "source_url": "https://api.example.com/other"})
-    # The correct URL runs the handoff (item lands ready — no secret param).
-    out = tmod.INTERNAL_NI_TOOLS["confirm_ni_flow_source"](
-        ctx, {"item_id": item_id, "source_url": pending_url})
-    assert out["state"] == "ready", f"expected ready; got {out}"
 
 
 def test_h1_credential_put_clears_flow_slot_when_secrets_filled() -> None:
@@ -914,10 +728,6 @@ def test_h2_remap_never_re_enters_recipe_matching(monkeypatch) -> None:
         "price": "chart.result[0].meta.regularMarketPrice",
     })
     model = _scripted_model([mapping_reply])
-    # A populated catalog would normally match — the remap path skips it.
-    catalog = [{"id": "always-wins", "title": "AAPL Stock", "category": "finance",
-                "spec_template": {"source": {"type": "http_json",
-                                              "url": "https://other/host"}}}]
 
     def _cap(url: str) -> object:
         fetched.append(url)
@@ -925,8 +735,7 @@ def test_h2_remap_never_re_enters_recipe_matching(monkeypatch) -> None:
 
     result = ni_flow.run_flow(
         store, item_id, gateway_call=lambda m, p: model(m, p),
-        fetcher=_cap, catalog=catalog,
-    )
+        fetcher=_cap, )
     assert result["state"] in ("ready", "failed"), f"got {result}"
     assert fetched == [frozen_url], \
         f"remap must fetch the item's own URL only; got {fetched}"
@@ -969,8 +778,7 @@ def test_h3_awaiting_pick_marker_on_source_state() -> None:
     model = _scripted_model([intent_reply])
     ni_flow.run_flow(
         store, item_id, gateway_call=lambda m, p: model(m, p),
-        fetcher=lambda url: {}, catalog=[],
-    )
+        fetcher=lambda url: {}, )
     record = ni_flow._flow_read(store, item_id)
     assert record is not None and record["state"] == "source"
     assert record.get("error") == ni_flow.AWAITING_SOURCE_PICK, \
@@ -1081,8 +889,7 @@ def test_minor_computed_preview_uses_real_days() -> None:
     model = _scripted_model([intent_reply])
     result = ni_flow.run_flow(
         store, item_id, gateway_call=lambda m, p: model(m, p),
-        fetcher=lambda url: {}, catalog=[],
-    )
+        fetcher=lambda url: {}, )
     assert result["state"] == "ready"
     preview = store.read_snapshot(item_id, "preview_data")
     assert preview is not None
@@ -1164,8 +971,7 @@ def test_quakes_flow_reaches_ready_on_recorded_fixture() -> None:
 
     result = ni_flow.run_flow(
         store, item_id, gateway_call=gateway,
-        fetcher=lambda _u: sample, source_url=url, catalog=[],
-    )
+        fetcher=lambda _u: sample, source_url=url, )
     assert result["state"] == "ready", f"state={result['state']} rec={result}"
     item = store.get_item(item_id)
     assert item["spec"]["source"]["url"] == url
@@ -1201,11 +1007,14 @@ def test_create_ni_item_refuses_http_json_at_prevalidate() -> None:
         handler(tools.ToolContext(ni=store), args)
 
 
-def test_recipe_tool_is_retired_from_model_registry() -> None:
-    """D1: create_ni_item_from_recipe no longer exists as a model tool —
-    recipes ride inside the flow behind the confirm_source pause."""
-    assert "create_ni_item_from_recipe" not in {t.name for t in tools._TOOLS}
-    assert tools.get_tool("create_ni_item_from_recipe") is None
+def test_the_built_in_recipe_catalog_is_gone_from_every_tool_surface() -> None:
+    """The SmartBrain Library replaced the 12 built-in recipes: no recipe tool,
+    no catalog listing, no recipe-confirm step anywhere a model or card can reach."""
+    names = {t.name for t in tools._TOOLS}
+    for gone in ("create_ni_item_from_recipe", "list_ni_catalog", "confirm_ni_flow_source"):
+        assert gone not in names and tools.get_tool(gone) is None, gone
+        assert gone not in tools.INTERNAL_NI_TOOLS, gone
+    assert "confirm_source" not in ni_flow.FLOW_STATES
 
 
 def test_flow_next_step_directives_cover_every_settled_state() -> None:
@@ -1213,7 +1022,6 @@ def test_flow_next_step_directives_cover_every_settled_state() -> None:
     still-running states direct a read_ni_item poll and forbid side quests."""
     for state, needle in [
         ("ready", "commissioning"),
-        ("confirm_source", "confirm_ni_flow_source"),
         ("source", "resume_ni_flow"),
         ("awaiting_credential", "Add key"),
         ("failed", "failed"),
@@ -1227,22 +1035,21 @@ def test_flow_next_step_directives_cover_every_settled_state() -> None:
 
 def test_start_ni_flow_returns_settled_state_when_worker_finishes(monkeypatch) -> None:
     """D1: the bounded wait returns the flow's REAL resulting state (no async
-    gap in the common case) — a synchronous worker that settles to
-    ``confirm_source`` is reported as such, with the matching directive."""
+    gap in the common case) — a synchronous worker that settles at the
+    source-pick pause is reported as such, with the matching directive."""
     store, _conn = _store()
     ctx = tools.ToolContext(ni=store)
 
     def _sync_worker(store_arg, iid, **_kwargs) -> bool:
-        ni_flow._transition(store_arg, iid, "confirm_source",
-                             source_url="https://api.example.com/vetted")
+        ni_flow._transition(store_arg, iid, "source",
+                             error=ni_flow.AWAITING_SOURCE_PICK)
         return True
 
     monkeypatch.setattr(ni_flow, "start_flow_worker", _sync_worker)
     out = tools.INTERNAL_NI_TOOLS["start_ni_flow"](
         ctx, {"request": "watch the example number"})
-    assert out["state"] == "confirm_source"
-    assert out["source_url"] == "https://api.example.com/vetted"
-    assert "confirm_ni_flow_source" in out["next_step"]
+    assert out["state"] == "source"
+    assert "resume_ni_flow" in out["next_step"]
 
 
 def test_item_id_shape_prevalidate_bounces_invented_ids() -> None:
@@ -1256,8 +1063,7 @@ def test_item_id_shape_prevalidate_bounces_invented_ids() -> None:
         assert tool is not None and tool.prevalidate is not None, name
         with pytest.raises(ValueError, match="not a card id"):
             tool.prevalidate(bad)
-    for name in ("update_ni_item", "remap_ni_item", "resume_ni_flow",
-                 "confirm_ni_flow_source"):
+    for name in ("update_ni_item", "remap_ni_item", "resume_ni_flow"):
         with pytest.raises(ValueError, match="not a card id"):
             tools.INTERNAL_NI_PREVALIDATE[name](bad)
 
@@ -1327,8 +1133,7 @@ def test_flow_fahrenheit_composes_scale_and_offset(monkeypatch) -> None:
     model = _scripted_model([intent_reply, mapping_reply])
     result = ni_flow.run_flow(
         store, item_id, gateway_call=model,
-        fetcher=lambda _u: fixture, catalog=_empty_catalog(),
-        source_url="https://api.open-meteo.com/v1/forecast?latitude=39.1&longitude=-94.6&current_weather=true",
+        fetcher=lambda _u: fixture, source_url="https://api.open-meteo.com/v1/forecast?latitude=39.1&longitude=-94.6&current_weather=true",
     )
     assert result["state"] == "ready", f"got {result}"
     item = store.get_item(item_id)
@@ -1364,8 +1169,7 @@ def test_flow_no_fahrenheit_conversion_when_not_asked(monkeypatch) -> None:
     model = _scripted_model([intent_reply, mapping_reply])
     result = ni_flow.run_flow(
         store, item_id, gateway_call=model,
-        fetcher=lambda _u: fixture, catalog=_empty_catalog(),
-        source_url="https://api.open-meteo.com/v1/forecast?latitude=39.1&longitude=-94.6&current_weather=true",
+        fetcher=lambda _u: fixture, source_url="https://api.open-meteo.com/v1/forecast?latitude=39.1&longitude=-94.6&current_weather=true",
     )
     assert result["state"] == "ready"
     item = store.get_item(item_id)
@@ -1390,8 +1194,7 @@ def test_flow_alert_authored_on_value_card_with_threshold_direction(monkeypatch)
     model = _scripted_model([intent_reply, mapping_reply])
     result = ni_flow.run_flow(
         store, item_id, gateway_call=model,
-        fetcher=lambda _u: fixture, catalog=_empty_catalog(),
-        source_url="https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd",
+        fetcher=lambda _u: fixture, source_url="https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd",
     )
     assert result["state"] == "ready", f"got {result}"
     item = store.get_item(item_id)
@@ -1420,8 +1223,7 @@ def test_flow_no_alert_without_threshold(monkeypatch) -> None:
     model = _scripted_model([intent_reply, mapping_reply])
     result = ni_flow.run_flow(
         store, item_id, gateway_call=model,
-        fetcher=lambda _u: fixture, catalog=_empty_catalog(),
-        source_url="https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd",
+        fetcher=lambda _u: fixture, source_url="https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd",
     )
     assert result["state"] == "ready"
     item = store.get_item(item_id)
@@ -1457,8 +1259,7 @@ def test_flow_list_class_threshold_never_authors_alert() -> None:
 
     result = ni_flow.run_flow(
         store, item_id, gateway_call=gateway,
-        fetcher=lambda _u: sample, source_url=url, catalog=_empty_catalog(),
-    )
+        fetcher=lambda _u: sample, source_url=url, )
     assert result["state"] == "ready", f"got {result}"
     item = store.get_item(item_id)
     assert item["spec"].get("alerts") in (None, [], )
@@ -1498,8 +1299,7 @@ def test_list_hint_with_scalar_paths_degrades_to_value_card() -> None:
     model = _scripted_model([intent_reply, mapping_reply])
     result = ni_flow.run_flow(
         store, item_id, gateway_call=model,
-        fetcher=lambda _u: fixture, catalog=_empty_catalog(),
-        source_url="https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd",
+        fetcher=lambda _u: fixture, source_url="https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd",
     )
     assert result["state"] == "ready", f"got {result}"
     item = store.get_item(item_id)
@@ -1543,62 +1343,6 @@ def test_stage_intent_code_cadence_overrides_model_value() -> None:
     assert intent["cadence_minutes"] == 60
 
 
-def test_uncovered_wants_disclosed_on_recipe_confirm() -> None:
-    """F3 (C2-feedback wave): the NVDA field run asked for volume; the Finnhub
-    /quote recipe serves price/o/h/l/prev — the gap must be sealed on the
-    confirm record and noted, never a silent partial fulfillment."""
-    from smartbrain_3000 import ni_catalog
-    store, _conn = _store()
-    recipe = ni_catalog.get_recipe("stock-quote-finnhub")
-    assert recipe is not None
-    intent = {"subject": "NVDA", "cadence_minutes": 30, "place": None,
-              "wants": ["price", "open", "high", "low", "close", "volume"]}
-    item_id = ni_flow.create_shell_item(store, "NVDA every 30 minutes with OHLCV")
-    ni_flow._pause_for_recipe_confirm(store, item_id, intent, recipe)
-    record = ni_flow._flow_read(store, item_id)
-    assert record is not None
-    uncovered = record.get("_uncovered_wants")
-    assert uncovered and "volume" in uncovered, f"got {uncovered}"
-    assert "price" not in uncovered and "high" not in uncovered
-    # G2 wording: the SOURCE provides plenty — it is the CARD that omits.
-    assert any("won't include" in n for n in record.get("notes") or [])
-
-
-def test_covered_wants_stamp_nothing() -> None:
-    """A fully-served intent seals no coverage field — no noise on the happy path."""
-    from smartbrain_3000 import ni_catalog
-    store, _conn = _store()
-    recipe = ni_catalog.get_recipe("stock-quote-finnhub")
-    intent = {"subject": "AAPL", "cadence_minutes": 30, "place": None,
-              "wants": ["price", "high", "low"]}
-    item_id = ni_flow.create_shell_item(store, "AAPL stock price")
-    ni_flow._pause_for_recipe_confirm(store, item_id, intent, recipe)
-    record = ni_flow._flow_read(store, item_id)
-    assert record is not None and "_uncovered_wants" not in record
-
-
-def test_flow_tool_result_carries_not_covered(monkeypatch) -> None:
-    """The start_ni_flow result names the gap so the chat can disclose it."""
-    from smartbrain_3000 import ni_catalog
-    store, _conn = _store()
-    ctx = tools.ToolContext(ni=store)
-    recipe = ni_catalog.get_recipe("stock-quote-finnhub")
-
-    def _sync_worker(store_arg, iid, **_kwargs) -> bool:
-        ni_flow._pause_for_recipe_confirm(
-            store_arg, iid,
-            {"subject": "NVDA", "cadence_minutes": 30, "place": None,
-             "wants": ["price", "volume"]}, recipe)
-        return True
-
-    monkeypatch.setattr(ni_flow, "start_flow_worker", _sync_worker)
-    out = tools.INTERNAL_NI_TOOLS["start_ni_flow"](
-        ctx, {"request": "NVDA price and volume every 30 minutes"})
-    assert out["state"] == "confirm_source"
-    assert out.get("not_covered") == ["volume"]
-    assert "does not cover" in out["next_step"]
-
-
 # ---- remap/shell wave (field 2026-09-15) ----------------------------------
 
 def test_shell_spec_carries_shell_marker_and_bounded_title() -> None:
@@ -1628,7 +1372,6 @@ def test_finalize_drops_the_shell_marker() -> None:
     model = _scripted_model([intent_reply, mapping_reply])
     result = ni_flow.run_flow(
         store, item_id, gateway_call=model, fetcher=lambda _u: fixture,
-        catalog=_empty_catalog(),
         source_url="https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd")
     assert result["state"] == "ready"
     assert "_shell" not in store.get_item(item_id)["spec"]
@@ -1680,8 +1423,7 @@ def test_remap_substitutes_params_and_attaches_credentials(monkeypatch) -> None:
         result = ni_flow.run_flow(store, item_id,
                                    gateway_call=model,
                                    fetcher=lambda _u: (_ for _ in ()).throw(
-                                       AssertionError("raw fetcher must not run")),
-                                   catalog=[])
+                                       AssertionError("raw fetcher must not run")))
     finally:
         ni_flow.set_secrets_provider(None)
     assert result["state"] == "ready", result
@@ -1714,7 +1456,7 @@ def test_remap_without_secrets_provider_fails_honestly(monkeypatch) -> None:
     ni_flow._flow_write(store, item_id, record)
     result = ni_flow.run_flow(store, item_id,
                                gateway_call=lambda m, p: "{}",
-                               fetcher=lambda _u: {}, catalog=[])
+                               fetcher=lambda _u: {})
     assert result["state"] == "failed"
     assert "secret store" in str(result.get("error") or "")
 
@@ -1735,68 +1477,12 @@ def test_remap_tool_refuses_unfilled_params() -> None:
         tools.INTERNAL_NI_TOOLS["remap_ni_item"](ctx, {"item_id": item_id})
 
 
-def test_match_recipe_google_stock_never_elects_a_fixed_subject_recipe() -> None:
-    """Matcher precision (field 2026-09-16): 'Get stock price of Google' scored
-    the BITCOIN recipe 2 via the generic word 'price' and won on catalog
-    order — the user approved a Google card fetching BTC. Fixed-subject
-    recipes now require a distinctive title word; the symbol-parameterized
-    stock recipe wins instead (its subject is the slot)."""
-    from smartbrain_3000 import ni_catalog
-    catalog = ni_catalog.entries(None)
-    intent = {"wants": ["latest price", "open", "high", "low", "close"]}
-    got = ni_flow.match_recipe(
-        catalog, "Get stock price of Google every 22 minutes and show latest "
-                 "price, Open, High, Low, Close", intent)
-    assert got is not None and got["id"] == "stock-quote-finnhub", f"got {got}"
-    # The real subjects still elect their fixed recipes via distinctive words.
-    btc = ni_flow.match_recipe(catalog, "what's bitcoin worth right now",
-                                {"wants": ["price"]})
-    assert btc is not None and btc["id"] == "crypto-price-btc-usd"
-    fx = ni_flow.match_recipe(catalog, "EUR to USD exchange rate, update hourly",
-                               {"wants": ["rate"]})
-    assert fx is not None and fx["id"] == "fx-usd-eur"
-
-
 # ---- P1-warts wave (field 2026-09-17) --------------------------------------
-
-def test_ticker_fill_skips_product_vocabulary() -> None:
-    """W-D: 'create new NI item ... GOOG symbol' filled symbol=NI — a REAL
-    NiSource quote rendered on a card titled GOOG. Product/tech tokens can
-    never be tickers; the fill lands on GOOG."""
-    request = "create new NI item to show stock price of GOOG symbol, update every 21 minutes"
-    assert ni_flow._first_ticker(request) == "GOOG"
-    assert ni_flow._first_ticker("get the API KEY for my URL JSON app") is None
-
-
-def test_confirm_pause_seals_fills_and_handoff_applies_them() -> None:
-    """W-E: the pause seals the request-derived fills; the board exposes the
-    FILLED url; the handoff applies the SEALED values (consent-what-runs)."""
-    from smartbrain_3000 import ni_catalog
-    store, _conn = _store()
-    recipe = ni_catalog.get_recipe("stock-quote-finnhub")
-    request = "show stock price of GOOG symbol, update every 21 minutes"
-    item_id = ni_flow.create_shell_item(store, request)
-    ni_flow._pause_for_recipe_confirm(
-        store, item_id,
-        {"subject": "GOOG", "cadence_minutes": 21, "place": None,
-         "wants": ["price"]}, recipe)
-    record = ni_flow._flow_read(store, item_id)
-    assert record["_fills"] == {"symbol": "GOOG"}
-    field = ni_flow.board_flow_field(store, item_id)
-    assert field["fills"] == {"symbol": "GOOG"}
-    assert field["filled_url"].endswith("symbol=GOOG")
-    result = ni_flow.continue_from_recipe_confirm(store, item_id,
-                                                   recipe["url_template"])
-    assert result.get("state") in ("ready", "awaiting_credential")
-    spec = store.get_item(item_id)["spec"]
-    assert spec["params"]["symbol"]["value"] == "GOOG"
-
 
 def test_credential_reuse_fills_same_host_key(monkeypatch) -> None:
     """W-F: a second keyed card for the SAME host reuses the existing key —
     copied under the new item's own namespace, journaled — and lands
     commissioning instead of asking again. A different host never reuses."""
-    from smartbrain_3000 import ni_catalog
     from smartbrain_3000.secrets import SecretStore
     from smartbrain_3000.secrets import gen_master_key as _gk
     store, conn = _store()
@@ -1805,16 +1491,20 @@ def test_credential_reuse_fills_same_host_key(monkeypatch) -> None:
                            "api_key", "sk-live-abc", "finnhub.io")
     ni_flow.set_secrets_provider(lambda: secrets)
     try:
-        recipe = ni_catalog.get_recipe("stock-quote-finnhub")
         item_id = ni_flow.create_shell_item(store, "MSFT stock price")
-        record = ni_flow._make_record("MSFT stock price", "confirm_source",
-                                       source_url=recipe["url_template"], notes=[])
-        record["_recipe_id"] = "stock-quote-finnhub"
-        record["intent"] = {"subject": "MSFT", "cadence_minutes": 15}
-        record["_fills"] = {"symbol": "MSFT"}
-        ni_flow._flow_write(store, item_id, record)
-        result = ni_flow.continue_from_recipe_confirm(store, item_id,
-                                                       recipe["url_template"])
+        spec = {
+            "version": 1, "title": "MSFT", "goal": "MSFT stock price",
+            "params": {"api_key": {"label": "Finnhub API key", "kind": "secret",
+                                   "value": "ni:self:api_key"}},
+            "source": {"type": "http_json",
+                       "url": "https://finnhub.io/api/v1/quote?symbol=MSFT",
+                       "headers": {"X-Finnhub-Token": {"$secret": "ni:self:api_key"}}},
+            "pipeline": [{"op": "extract", "paths": {"price": "c"}}],
+            "scene": ni_flow.value_scene(["price"]),
+            "display": {"size": "small"}, "interval_minutes": 15,
+        }
+        result = ni_flow._finalize(store, item_id, spec, {"price": 1.0},
+                                   note="test", born="flow")
         assert result.get("state") == "ready", result
         item = store.get_item(item_id)
         assert item["state"] == "commissioning", "reused key skips the ask"
@@ -1832,109 +1522,6 @@ def test_credential_reuse_fills_same_host_key(monkeypatch) -> None:
 
 
 # --- G2: synonyms, affinity, threshold routing, judge, unit fills -----------
-
-def test_g2_synonym_coverage_kills_the_false_disclosure() -> None:
-    """Field (quakes card): 'Won't include: location, magnitude' was FALSE —
-    the template serves them as top_place/top_mag. Synonyms fix the matcher;
-    depth/time stay honestly uncovered (the template really omits them)."""
-    from smartbrain_3000 import ni_catalog
-    recipe = ni_catalog.get_recipe("quakes-day-25")
-    intent = {"wants": ["location", "magnitude", "depth", "time"]}
-    assert ni_flow._uncovered_wants(recipe, intent) == ["depth", "time"]
-
-
-def test_g2_affinity_prune_validates_subset() -> None:
-    """M-AFFINITY may only CONFIRM coverage from the asked-for spellings —
-    a hallucinated confirmation for something never asked is ignored, and a
-    malformed reply keeps code's answer (advisory)."""
-    served = ["count", "top_place"]
-    uncovered = ["depth", "time"]
-    ok = ni_flow._affinity_prune(
-        uncovered, served,
-        lambda p: '{"covered": ["depth", "volume", 7]}')
-    assert ok == ["time"], "depth pruned; 'volume'/7 ignored (not asked/typed)"
-    bad = ni_flow._affinity_prune(uncovered, served, lambda p: "not json at all")
-    assert bad == uncovered
-    none = ni_flow._affinity_prune(uncovered, served, None)
-    assert none == uncovered
-
-
-def test_g2_threshold_routing_dispatches_freeform_on_confirm(monkeypatch) -> None:
-    """Field (quakes M2.5-for-M5): a threshold ask over a fixed template must
-    NOT hand off verbatim — the confirm continuation re-dispatches the
-    APPROVED URL into freeform sampling with the sealed intent reused."""
-    from smartbrain_3000 import ni_catalog
-    store, _conn = _store()
-    recipe = ni_catalog.get_recipe("quakes-day-25")
-    intent = {"kind": "external_data", "subject": "earthquakes",
-              "cadence_minutes": 15, "wants": ["magnitude"], "threshold": 5,
-              "display_hint": "list"}
-    item_id = ni_flow.create_shell_item(store, "latest earthquakes above magnitude 5")
-    ni_flow._transition(store, item_id, "intent", intent=intent)
-    ni_flow._pause_for_recipe_confirm(store, item_id, intent, recipe)
-    record = ni_flow._flow_read(store, item_id)
-    assert record["state"] == "confirm_source"
-    fired: dict = {}
-    monkeypatch.setattr(ni_flow, "start_flow_worker",
-                        lambda s, iid, **kw: fired.update(id=iid, **kw) or True)
-    out = ni_flow.continue_from_recipe_confirm(store, item_id,
-                                                record["source_url"])
-    assert out["state"] == "sampling"
-    assert fired["source_url"] == record["source_url"]
-    rec2 = ni_flow._flow_read(store, item_id)
-    assert rec2.get("_reuse_intent") is True
-    assert any("threshold" in n for n in rec2.get("notes") or [])
-
-
-def test_g2_threshold_routing_guards() -> None:
-    """No threshold / a filtering template / headers / unresolved params all
-    keep the verbatim handoff."""
-    from smartbrain_3000 import ni_catalog
-    quakes = ni_catalog.get_recipe("quakes-day-25")
-    assert ni_flow._threshold_route_url(quakes, {"threshold": None}, {}) is None
-    finnhub = ni_catalog.get_recipe("stock-quote-finnhub")
-    # Keyed recipe: $secret header refuses routing even with params filled.
-    assert ni_flow._threshold_route_url(
-        finnhub, {"threshold": 100}, {"symbol": "AAPL"}) is None
-    # A template that already filters (where op) keeps its handoff.
-    filtering = {"spec_template": {
-        "source": {"type": "http_json", "url": "https://api.example.com/x"},
-        "params": {},
-        "pipeline": [{"op": "transform", "apply": [
-            {"fn": "where", "field": "rows", "key": "v", "op": "ge", "value": 1}]}],
-    }}
-    assert ni_flow._threshold_route_url(filtering, {"threshold": 5}, {}) is None
-    # Unresolved placeholder refuses (would fetch a literal template).
-    holey = {"spec_template": {
-        "source": {"type": "http_json",
-                    "url": "https://api.example.com/q?s={{param:symbol}}"},
-        "params": {"symbol": {"label": "S", "kind": "string", "value": ""}},
-        "pipeline": [],
-    }}
-    assert ni_flow._threshold_route_url(holey, {"threshold": 5}, {}) is None
-
-
-def test_g2_run_flow_reuses_sealed_intent_when_stamped() -> None:
-    """The routed continuation must not re-derive intent — the scripted model
-    serves ONLY the mapping reply and the flow still reaches ready."""
-    store, _conn = _store()
-    fixture = _load("quakes")
-    intent = {"kind": "external_data", "subject": "earthquakes",
-              "cadence_minutes": 15, "wants": ["magnitude"], "threshold": 5,
-              "display_hint": "value"}
-    item_id = ni_flow.create_shell_item(store, "latest earthquakes above magnitude 5")
-    ni_flow._transition(store, item_id, "sampling", intent=intent,
-                         source_url="https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_day.geojson",
-                         _reuse_intent=True)
-    mapping_reply = json.dumps({"magnitude": "features[0].properties.mag"})
-    model = _scripted_model([mapping_reply])  # NO intent reply on offer
-    result = ni_flow.run_flow(
-        store, item_id, gateway_call=model,
-        fetcher=lambda url: fixture, catalog=_empty_catalog(),
-        source_url="https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_day.geojson",
-    )
-    assert result["state"] == "ready", result.get("error")
-
 
 def test_g2_judge_wrong_triggers_one_repick() -> None:
     """A 'wrong' verdict re-picks ONCE with the findings fed back; the second
@@ -1955,8 +1542,7 @@ def test_g2_judge_wrong_triggers_one_repick() -> None:
     item_id = ni_flow.create_shell_item(store, "top story title on HN")
     result = ni_flow.run_flow(
         store, item_id, gateway_call=model,
-        fetcher=lambda url: fixture, catalog=_empty_catalog(),
-        source_url="https://hn.algolia.com/api/v1/search?tags=front_page",
+        fetcher=lambda url: fixture, source_url="https://hn.algolia.com/api/v1/search?tags=front_page",
     )
     assert result["state"] == "ready", result.get("error")
     item = store.get_item(item_id)
@@ -1980,8 +1566,7 @@ def test_g2_judge_failure_is_advisory() -> None:
     item_id = ni_flow.create_shell_item(store, "top story title")
     result = ni_flow.run_flow(
         store, item_id, gateway_call=model,
-        fetcher=lambda url: fixture, catalog=_empty_catalog(),
-        source_url="https://hn.algolia.com/api/v1/search?tags=front_page",
+        fetcher=lambda url: fixture, source_url="https://hn.algolia.com/api/v1/search?tags=front_page",
     )
     assert result["state"] == "ready"
 
@@ -2001,33 +1586,11 @@ def test_g2_judge_gaps_ride_the_journal() -> None:
     item_id = ni_flow.create_shell_item(store, "titles with comment counts")
     result = ni_flow.run_flow(
         store, item_id, gateway_call=model,
-        fetcher=lambda url: fixture, catalog=_empty_catalog(),
-        source_url="https://hn.algolia.com/api/v1/search?tags=front_page",
+        fetcher=lambda url: fixture, source_url="https://hn.algolia.com/api/v1/search?tags=front_page",
     )
     assert result["state"] == "ready"
     notes = " ".join((ni_flow._flow_read(store, item_id) or {}).get("notes") or [])
     assert "won't include: comment counts" in notes, notes
-
-
-def test_g2_unit_fills_sealed_on_weather_pause() -> None:
-    """Field (°C for Charleston): a US place seals fahrenheit/mph unit fills
-    at the pause — the consent card shows them; a non-US place seals metric."""
-    from smartbrain_3000 import ni_catalog
-    store, _conn = _store()
-    recipe = ni_catalog.get_recipe("weather-open-meteo")
-    item_id = ni_flow.create_shell_item(store, "track the weather in Charleston, SC")
-    ni_flow._pause_for_recipe_confirm(
-        store, item_id,
-        {"wants": ["temperature"], "place": "Charleston, SC"}, recipe)
-    fills = (ni_flow._flow_read(store, item_id) or {}).get("_fills") or {}
-    assert fills.get("temperature_unit") == "fahrenheit"
-    assert fills.get("wind_speed_unit") == "mph"
-    item2 = ni_flow.create_shell_item(store, "track the weather in Berlin")
-    ni_flow._pause_for_recipe_confirm(
-        store, item2, {"wants": ["temperature"], "place": "Berlin"}, recipe)
-    fills2 = (ni_flow._flow_read(store, item2) or {}).get("_fills") or {}
-    assert fills2.get("temperature_unit") == "celsius"
-    assert fills2.get("wind_speed_unit") == "kmh"
 
 
 def test_g2_judge_repick_reverts_when_no_better() -> None:
@@ -2050,8 +1613,7 @@ def test_g2_judge_repick_reverts_when_no_better() -> None:
     item_id = ni_flow.create_shell_item(store, "top story title")
     result = ni_flow.run_flow(
         store, item_id, gateway_call=model,
-        fetcher=lambda url: fixture, catalog=_empty_catalog(),
-        source_url="https://hn.algolia.com/api/v1/search?tags=front_page",
+        fetcher=lambda url: fixture, source_url="https://hn.algolia.com/api/v1/search?tags=front_page",
     )
     assert result["state"] == "ready"
     item = store.get_item(item_id)
@@ -2169,7 +1731,7 @@ def test_g4a_fahrenheit_note_authors_the_conversion_end_to_end(monkeypatch) -> N
     mapping_reply = json.dumps({"temperature": "current_weather.temperature"})
     model = _scripted_model([mapping_reply])  # remap: no intent call; judge starves
     result = ni_flow.run_flow(store, item["id"], gateway_call=model,
-                               fetcher=lambda url: fixture, catalog=_empty_catalog())
+                               fetcher=lambda url: fixture)
     assert result["state"] == "ready", result.get("error")
     spec = store.get_item(item["id"])["spec"]
     fns = [t.get("fn") for stage in spec["pipeline"] if stage.get("op") == "transform"
@@ -2179,121 +1741,6 @@ def test_g4a_fahrenheit_note_authors_the_conversion_end_to_end(monkeypatch) -> N
 
 
 # --- M-RANK: LOCATE's semantic interior (field verdict 2026-09-21) ----------
-
-def test_mrank_validates_ids_and_shape() -> None:
-    """The model may only return ids from the code-built corpus — an invented
-    id poisons the whole reply (fallback takes over); alternates are deduped,
-    capped, and id-checked; malformed replies return None."""
-    cat = [{"id": "a", "title": "A", "category": "x", "notes": ""},
-           {"id": "b", "title": "B", "category": "x", "notes": ""}]
-    intent = {"subject": "s", "wants": ["w"]}
-    good = ni_flow.locate_rank(cat, "req", intent,
-        lambda p: '{"best": "a", "confidence": "high", "alternates": ["b", "b", "a", "zzz"]}')
-    assert good == {"best": "a", "confidence": "high", "alternates": ["b"]}
-    none_pick = ni_flow.locate_rank(cat, "req", intent,
-        lambda p: '{"best": null, "confidence": "medium", "alternates": ["a"]}')
-    assert none_pick == {"best": None, "confidence": "medium", "alternates": ["a"]}
-    assert ni_flow.locate_rank(cat, "req", intent,
-        lambda p: '{"best": "invented", "confidence": "high", "alternates": []}') is None
-    assert ni_flow.locate_rank(cat, "req", intent,
-        lambda p: '{"best": "a", "confidence": "certain", "alternates": []}') is None
-    assert ni_flow.locate_rank(cat, "req", intent, lambda p: "not json") is None
-    assert ni_flow.locate_rank([], "req", intent, lambda p: "{}") is None
-    def _boom(p):
-        raise RuntimeError("model down")
-    assert ni_flow.locate_rank(cat, "req", intent, _boom) is None
-
-
-def test_mrank_high_lands_the_confirm_pause() -> None:
-    """A high-confidence pick routes into the STANDARD consent pause — the
-    model chose by meaning; the user still sees the exact URL and decides."""
-    from smartbrain_3000 import ni_catalog
-    store, _conn = _store()
-    item_id = ni_flow.create_shell_item(store, "what is NVDA trading at")
-    intent_reply = json.dumps({
-        "kind": "external_data", "subject": "NVDA", "cadence_minutes": 15,
-        "wants": ["price"], "threshold": None, "display_hint": "value",
-    })
-    rank_reply = json.dumps({"best": "stock-quote-finnhub",
-                              "confidence": "high", "alternates": []})
-    model = _scripted_model([intent_reply, rank_reply])
-    result = ni_flow.run_flow(store, item_id,
-                               gateway_call=model,
-                               fetcher=lambda url: {},
-                               catalog=list(ni_catalog.entries()))
-    assert result["state"] == "confirm_source", result
-    record = ni_flow._flow_read(store, item_id)
-    assert record["_recipe_id"] == "stock-quote-finnhub"
-
-
-def test_mrank_medium_seals_ranked_candidates_for_the_pick_card() -> None:
-    """Medium confidence never auto-matches — the ranked ids seal on the
-    source pause and the BOARD renders them as the card's suggestions."""
-    from smartbrain_3000 import ni_catalog
-    store, _conn = _store()
-    item_id = ni_flow.create_shell_item(store, "coastal conditions please")
-    intent_reply = json.dumps({
-        "kind": "external_data", "subject": "coast", "cadence_minutes": 15,
-        "wants": ["conditions"], "threshold": None, "display_hint": "value",
-    })
-    rank_reply = json.dumps({"best": "sunrise-sunset", "confidence": "medium",
-                              "alternates": ["weather-open-meteo"]})
-    model = _scripted_model([intent_reply, rank_reply])
-    result = ni_flow.run_flow(store, item_id,
-                               gateway_call=model,
-                               fetcher=lambda url: {},
-                               catalog=list(ni_catalog.entries()))
-    assert result["state"] == "source", result
-    record = ni_flow._flow_read(store, item_id)
-    assert record["_ranked"] == ["sunrise-sunset", "weather-open-meteo"]
-    field = ni_flow.board_flow_field(store, item_id)
-    ids = [s["recipe_id"] for s in field["suggestions"]]
-    assert ids == ["sunrise-sunset", "weather-open-meteo"]
-
-
-def test_mrank_invalid_reply_falls_back_to_the_scorer() -> None:
-    """A rank failure never strands the flow — the deterministic scorer takes
-    over (also the recorded/offline path), landing the same recipe the
-    keyword path always found."""
-    from smartbrain_3000 import ni_catalog
-    store, _conn = _store()
-    item_id = ni_flow.create_shell_item(store, "NVDA stock price every 28 minutes")
-    intent_reply = json.dumps({
-        "kind": "external_data", "subject": "NVDA", "cadence_minutes": 28,
-        "wants": ["price"], "threshold": None, "display_hint": "value",
-    })
-    model = _scripted_model([intent_reply, "utter garbage, not a rank reply"])
-    result = ni_flow.run_flow(store, item_id,
-                               gateway_call=model,
-                               fetcher=lambda url: {},
-                               catalog=list(ni_catalog.entries()))
-    assert result["state"] == "confirm_source", result
-    record = ni_flow._flow_read(store, item_id)
-    assert record["_recipe_id"] == "stock-quote-finnhub"
-
-
-def test_coverage_never_lies_in_either_direction() -> None:
-    """Claims audit 2026-09-21: the substring matcher had two faces — false
-    MISSING (magnitude flagged while displayed, fixed in G2) and false
-    COVERED ("ethereum price" claimed covered by "price"). Coverage now
-    requires distinctive tokens to be served (outputs, synonyms, or the
-    recipe's own subject); generic tokens never carry coverage alone."""
-    from smartbrain_3000 import ni_catalog
-    btc = ni_catalog.get_recipe("crypto-price-btc-usd")
-    # The compound ask's unserved half is disclosed; the served half is not.
-    assert ni_flow._uncovered_wants(
-        btc, {"wants": ["bitcoin price", "ethereum price"]}) == ["ethereum price"]
-    # A recipe serves its own subject — no false gap on the plain ask.
-    assert ni_flow._uncovered_wants(btc, {"wants": ["bitcoin price"]}) == []
-    # All-generic wants keep the any-match rule.
-    assert ni_flow._uncovered_wants(btc, {"wants": ["price"]}) == []
-    # The G2 verdicts stand.
-    quakes = ni_catalog.get_recipe("quakes-day-25")
-    assert ni_flow._uncovered_wants(
-        quakes, {"wants": ["location", "magnitude", "depth", "time"]}) == ["depth", "time"]
-    fin = ni_catalog.get_recipe("stock-quote-finnhub")
-    assert ni_flow._uncovered_wants(fin, {"wants": ["price", "volume"]}) == ["volume"]
-
 
 def test_malformed_computed_date_asks_instead_of_crashing_later() -> None:
     """Audit: '2026-13-45' passed the shape regex and died at assembly with
@@ -2325,22 +1772,10 @@ def test_judge_disclosures_land_in_the_journal() -> None:
     item_id = ni_flow.create_shell_item(store, "titles with comment counts")
     result = ni_flow.run_flow(
         store, item_id, gateway_call=model,
-        fetcher=lambda url: fixture, catalog=_empty_catalog(),
-        source_url="https://hn.algolia.com/api/v1/search?tags=front_page")
+        fetcher=lambda url: fixture, source_url="https://hn.algolia.com/api/v1/search?tags=front_page")
     assert result["state"] == "ready"
     journal = " ".join(e["summary"] for e in store.read_journal(item_id))
     assert "won't include: comment counts" in journal
-
-
-def test_place_serves_its_own_card_in_coverage() -> None:
-    """Audit: 'Berlin weather' was flagged missing ON the Berlin weather card
-    — the consented place now joins the coverage universe."""
-    from smartbrain_3000 import ni_catalog
-    weather = ni_catalog.get_recipe("weather-open-meteo")
-    out = ni_flow._uncovered_wants(
-        weather, {"wants": ["NVDA price", "Berlin weather"],
-                   "place": "Berlin"})
-    assert out == ["NVDA price"], out
 
 
 # --- G4b: the page door (field 2026-09-21 — every pasted URL was a webpage) --
@@ -2427,7 +1862,7 @@ def test_page_door_never_converts_a_remap(monkeypatch) -> None:
 
     result = ni_flow.run_flow(store, item["id"],
                                gateway_call=lambda m, p: "{}",
-                               fetcher=fetch_html, catalog=[])
+                               fetcher=fetch_html)
     assert result["state"] == "failed"
     assert store.get_item(item["id"])["spec"]["source"]["type"] == "http_json"
 
@@ -2481,7 +1916,7 @@ def test_page_door_fires_on_the_PRODUCTION_exception(monkeypatch) -> None:
     assert result2["error"].startswith("fetch")
 
 
-# ---- S2: web-source research on catalog miss (rounds 9/10, 2026-09-22) ----
+# ---- S2: web-source research when the Library has none (rounds 9/10) -------
 
 
 class _FakeSearchService:
@@ -2615,8 +2050,8 @@ def test_s2_evaluate_orders_by_page_evidence(monkeypatch) -> None:
     assert "fitness" not in out[2]  # unfetchable: unscored, still offerable
 
 
-def test_catalog_miss_searches_seals_and_boards_web_candidates(monkeypatch) -> None:
-    """THE FIELD REGRESSION (tides class): words → no catalog fit → S2 search
+def test_library_miss_searches_seals_and_boards_web_candidates(monkeypatch) -> None:
+    """THE FIELD REGRESSION (tides class): words → no Library source → S2 search
     → evidence → sealed ≤3 {title,host,url,evidence} — snippets are rank-time
     only, NEVER sealed — and the board renders the rows verbatim as
     kind:"web" suggestions."""
@@ -2634,13 +2069,12 @@ def test_catalog_miss_searches_seals_and_boards_web_candidates(monkeypatch) -> N
         "kind": "external_data", "subject": "tides", "cadence_minutes": 720,
         "wants": ["tide times"], "threshold": None, "display_hint": "list",
     })
-    no_fit = json.dumps({"best": None, "alternates": [], "confidence": "medium"})
     web_rank = json.dumps({"best": "r0", "alternates": ["r1"],
                            "confidence": "high"})
     result = ni_flow.run_flow(store, item_id,
                               gateway_call=_scripted_model(
-                                  [intent_reply, no_fit, web_rank]),
-                              fetcher=lambda url: {}, catalog=None)
+                                  [intent_reply, web_rank]),
+                              fetcher=lambda url: {})
     assert result["state"] == "source"
     record = ni_flow._flow_read(store, item_id)
     assert record["error"] == ni_flow.AWAITING_SOURCE_PICK
@@ -2650,37 +2084,9 @@ def test_catalog_miss_searches_seals_and_boards_web_candidates(monkeypatch) -> N
     field = ni_flow.board_flow_field(store, item_id)
     sugs = field["suggestions"]
     assert [s["kind"] for s in sugs] == ["web", "web"]
-    assert [s["recipe_id"] for s in sugs] == ["", ""]
     assert sugs[0]["url"] == "https://tides.example.org/creek"
     assert svc.queries  # the search actually ran, from the user's words
     assert svc.queries[0] == "tide times for the creek landing"
-
-
-def test_s2_never_runs_when_catalog_candidates_exist(monkeypatch) -> None:
-    """Medium-rank WITH candidates keeps yesterday's pause — search untouched."""
-    from smartbrain_3000 import ni_catalog
-    svc = _FakeSearchService(results=[
-        {"title": "X", "url": "https://x.example.org/", "snippet": ""}])
-    _wire_search(monkeypatch, svc)
-    _no_page_fetch(monkeypatch)
-    store, _conn = _store()
-    item_id = ni_flow.create_shell_item(store, "coastal conditions please")
-    intent_reply = json.dumps({
-        "kind": "external_data", "subject": "coast", "cadence_minutes": 15,
-        "wants": ["conditions"], "threshold": None, "display_hint": "value",
-    })
-    rank_reply = json.dumps({"best": "sunrise-sunset", "confidence": "medium",
-                             "alternates": ["weather-open-meteo"]})
-    result = ni_flow.run_flow(store, item_id,
-                              gateway_call=_scripted_model(
-                                  [intent_reply, rank_reply]),
-                              fetcher=lambda url: {},
-                              catalog=list(ni_catalog.entries()))
-    assert result["state"] == "source"
-    record = ni_flow._flow_read(store, item_id)
-    assert record["_ranked"] == ["sunrise-sunset", "weather-open-meteo"]
-    assert "_ranked_search" not in record
-    assert svc.queries == []
 
 
 def test_s2_failures_always_fall_to_the_plain_pause(monkeypatch) -> None:
@@ -2690,7 +2096,6 @@ def test_s2_failures_always_fall_to_the_plain_pause(monkeypatch) -> None:
         "kind": "external_data", "subject": "obscurities", "cadence_minutes": 60,
         "wants": ["numbers"], "threshold": None, "display_hint": "value",
     })
-    no_fit = json.dumps({"best": None, "alternates": [], "confidence": "medium"})
     for service in (_FakeSearchService(results=[]),
                     _FakeSearchService(raise_exc=True),
                     None):
@@ -2701,14 +2106,13 @@ def test_s2_failures_always_fall_to_the_plain_pause(monkeypatch) -> None:
         store, _conn = _store()
         item_id = ni_flow.create_shell_item(store, "utterly uncatalogued need")
         result = ni_flow.run_flow(store, item_id,
-                                  gateway_call=_scripted_model(
-                                      [intent_reply, no_fit]),
-                                  fetcher=lambda url: {}, catalog=None)
+                                  gateway_call=_scripted_model([intent_reply]),
+                                  fetcher=lambda url: {})
         assert result["state"] == "source"
         record = ni_flow._flow_read(store, item_id)
         assert record["error"] == ni_flow.AWAITING_SOURCE_PICK
-        assert "_ranked_search" not in record
-        assert "pick a source on the card" in (record.get("notes") or [""])[-1]
+        assert not record.get("_ranked_search")
+        assert "paste a link" in (record.get("notes") or [""])[-1]
 
 
 # ---- P1 debt riders (2026-09-22): human labels + honest preview badge ------

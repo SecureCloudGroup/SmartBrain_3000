@@ -675,7 +675,6 @@ def test_ni_tools_registered_with_correct_tiers_and_egress() -> None:
     expected = {
         "list_ni_items": (tools.Tier.OBSERVE, False),
         "read_ni_item": (tools.Tier.OBSERVE, False),
-        "list_ni_catalog": (tools.Tier.OBSERVE, False),
         "run_ni_item_now": (tools.Tier.REVIEWED, True),
     }
     for name, (tier, egress) in expected.items():
@@ -686,7 +685,7 @@ def test_ni_tools_registered_with_correct_tiers_and_egress() -> None:
         assert tool.params_schema["additionalProperties"] is False, name
     for name in ("create_ni_item", "update_ni_item", "delete_ni_item",
                  "set_ni_item_enabled", "start_ni_flow", "resume_ni_flow",
-                 "confirm_ni_flow_source", "remap_ni_item",
+                 "remap_ni_item",
                  "derive_ni_paths", "read_ni_spec_guide"):
         assert tools.get_tool(name) is None, f"{name} must NOT be model-reachable"
         assert name in tools.INTERNAL_NI_TOOLS, f"{name} must stay internal"

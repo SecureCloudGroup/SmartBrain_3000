@@ -101,6 +101,11 @@ class Resolver:
             aliases_of.setdefault(e["id"], []).append(r[10])
         upper = set(re.findall(r"\b[A-Z0-9$]{1,6}\b", ask or ""))
         states = states_in(ask)
+        # a capitalised state code that is also a place's nickname ("LA", "DC") names that place only when
+        # no other place is named: "LA weather" is Los Angeles, "Lafayette LA" is Lafayette, Louisiana
+        codes = {c.lower() for c in re.findall(r"\b([A-Z]{2})\b", ask or "") if c in US_STATES} \
+            if resolver == "place" else set()
+        via_other: set[str] = set()  # candidates named by something other than a bare state code
         text = f" {' '.join(tokens)} "
         scored: dict[str, float] = {}
         first_at: dict[str, int] = {}
@@ -119,16 +124,23 @@ class Resolver:
                 if n == 1 and e["kind"] == "crypto_asset" and gram != norm(e["name"]) and not e["rank"] \
                         and gram.upper() not in upper:
                     continue
+                if n == 1 and e["kind"] == "place" and len(gram) <= 2 and gram.upper() not in upper:
+                    continue  # a two-letter place nickname counts only in capitals ("LA", never the word "la")
                 score = (2.0 * spec - (0.5 if partial else 0.0) + (0.5 if gram == norm(e["name"]) else 0.0)
                          + RANK_WEIGHT.get(resolver, 0.05) * e["rank"])
-                if states:
-                    score += 3.0 if e["state"] in states else (-3.0 if e["state"] else 0.0)
+                said = states - {gram.upper()} if n == 1 and gram in codes else states
+                if said:
+                    score += 3.0 if e["state"] in said else (-3.0 if e["state"] else 0.0)
+                if not (n == 1 and gram in codes):
+                    via_other.add(eid)
                 for k in ATTR_CONTEXT:
                     v = norm(str(e["attrs"].get(k) or ""))
                     if v and any(f" {w} " in text for w in {v, v.replace("college ", "")} if w):
                         score += 1.5
                 scored[eid] = max(scored.get(eid, -1e9), score)
                 first_at[eid] = min(first_at.get(eid, 99), i)
+        if via_other and codes:  # another place is named, so the code is its state ("Lafayette LA")
+            scored = {i: sc for i, sc in scored.items() if i in via_other}
         if not scored:
             return {"status": "none", "best": None, "candidates": [], "reason": f"nothing in {resolver} matches"}
         ranked = sorted(scored.items(), key=lambda kv: -kv[1])
@@ -223,14 +235,17 @@ def _text_fill(fill: dict, ask: str, own_words: set[str] = frozenset()) -> str:
 
 def candidate_urls(record: dict, ask: str, policy: dict, resolver: Resolver,
                    now: datetime | None = None) -> tuple[list[dict], str]:
-    """Every concrete reading of ``record`` for ``ask``: [{url, label, choice}], or ([], reason)."""
+    """Every concrete reading of ``record`` for ``ask``: [{url, label, choice}], or ([], reason).
+
+    A source that takes the user's own key returns its address WITHOUT the key plus ``needs_key``
+    (where the key goes); one whose provider wants a contact email carries ``needs_contact``. The
+    card asks for either before the first fetch — neither is ever filled in here."""
     now = now or datetime.now().astimezone()  # the card's own local clock
     access = record.get("access") or {}
     if record.get("role") == "helper":
         return [], "a lookup helper, not an answer"
-    if access.get("contact_ua"):
-        return [], "needs your contact email (set it once to use this provider)"
     params = access.get("params") or []
+    key_param = ""
     values: dict[str, list[tuple[str, str]]] = {}  # name -> [(value, label)]
     groups: dict[str, str] = {}  # name -> the reading it came from (lat+lon of one place vary together)
     cache: dict[str, dict] = {}
@@ -315,14 +330,54 @@ def candidate_urls(record: dict, ask: str, policy: dict, resolver: Resolver,
                     return [], f"{p['name']}: no value for that {res.replace('_', ' ')}"
                 values[p["name"]] = opts
                 groups.setdefault(p["name"], res)
-        else:  # vault_key, source, gap
-            return [], {"vault_key": "needs your own key for this provider",
-                        "source": "needs another lookup before your consent"}.get(
+        elif src == "vault_key" and not key_param:
+            key_param = p["name"]
+            values[p["name"]] = [(_KEY_MARK, "")]
+        else:  # source, gap
+            return [], {"source": "needs another lookup before your consent"}.get(
                 src, f"{p['name']}: {fill.get('reason') or 'not fillable yet'}")
     urls = _expand(access.get("url_template") or "", values, groups)
     if len({u["url"] for u in urls}) < len(urls):
         return [], "can't tell the readings apart (the address has no room for which one)"
+    if key_param:
+        where = key_placement(access, key_param)
+        if where is None:
+            return [], "this provider takes its key somewhere SmartBrain can't send it safely"
+        for u in urls:
+            u["url"] = _without_key(u["url"])
+            u["needs_key"] = {**where, "docs_url": str(access.get("docs_url") or record.get("docs_url") or "")}
+    if access.get("contact_ua"):
+        for u in urls:
+            u["needs_contact"] = True
     return urls, ""
+
+
+_KEY_MARK = "SBKEYSLOT"  # survives quoting; never leaves this module
+
+
+def key_placement(access: dict, key_param: str) -> dict | None:
+    """Where the provider takes the user's key: a query parameter or a request header (with any
+    literal prefix, "Token {key}"). None for anything else (a key in the path would sit in logs)."""
+    slot = "{" + key_param + "}"
+    for name, value in (access.get("headers") or {}).items():
+        value = str(value)
+        if slot in value:
+            prefix = value.replace(slot, "")
+            if not value.endswith(slot) or not re.fullmatch(r"[A-Za-z]*\s?", prefix):
+                return None
+            return {"in": "header", "name": str(name), "prefix": prefix}
+    template = str(access.get("url_template") or "")
+    m = re.search(r"[?&]([A-Za-z0-9_.\-]{1,40})=" + re.escape(slot) + r"(?:&|$)", template)
+    return {"in": "query", "name": m.group(1), "prefix": ""} if m else None
+
+
+def _without_key(url: str) -> str:
+    """The address with the key's query pair removed (the engine adds the stored key at fetch time)."""
+    parts = urlsplit(url)
+    kept = [q for q in parts.query.split("&") if q and _KEY_MARK not in q]
+    out = parts._replace(query="&".join(kept)).geturl()
+    assert _KEY_MARK not in out, "a key slot outside the query or headers never reaches here"
+    return out
 
 
 def _near_label(e: dict) -> str:

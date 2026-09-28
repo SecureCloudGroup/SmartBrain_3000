@@ -46,22 +46,6 @@ def _board_flow(client: TestClient, iid: str) -> dict:
     return row["flow"]
 
 
-def test_field_1_bitcoin_decline_is_a_fork_not_a_death(client) -> None:
-    """Field: "what's bitcoin worth right now" → [Not this source] → the card
-    went dead. Now: decline re-enters the pick pause with suggestions."""
-    from smartbrain_3000 import ni_catalog
-    iid = client.post("/api/ni/intake",
-                      json={"request": "what's bitcoin worth right now, keep it updated"}).json()["id"]
-    store = client.app.state.ni
-    ni_flow._pause_for_recipe_confirm(store, iid, {},
-                                       ni_catalog.get_recipe("crypto-price-btc-usd"))
-    r = client.post(f"/api/ni/items/{iid}/flow/decline-source")
-    assert r.status_code == 200 and r.json()["state"] == "source"
-    flow = _board_flow(client, iid)
-    assert flow["state"] == "source"
-    assert "suggestions" in flow, "the pick pause renders its affordances"
-
-
 def test_field_2_countdown_without_date_asks_instead_of_dying(client) -> None:
     """Field: "countdown of days until US mid-term election" → generic
     'Creation didn't finish'. Now: the honest reason + a date question, and
@@ -96,34 +80,6 @@ def test_field_3_tides_fetch_failure_names_itself_with_two_roads(client) -> None
     assert set(flow["reopen"]) == {"retry", "pick_source"}
     # The pick_source road actually works.
     assert client.post(f"/api/ni/items/{iid}/flow/reopen").json()["state"] == "source"
-
-
-def test_field_4_hn_resolves_from_words_to_the_vetted_recipe(client) -> None:
-    """Field: "top stories on Hacker News" failed as a words-path ask (the
-    catalog had no HN recipe; suggestions were weather-and-stocks noise).
-    G3: the promoted catalog resolves it deterministically to the vetted HN
-    recipe — the flow's source stage lands the STANDARD confirm pause."""
-    from smartbrain_3000 import ni_catalog
-    iid = client.post("/api/ni/intake",
-                      json={"request": "top stories on Hacker News"}).json()["id"]
-    store = client.app.state.ni
-    intent = {"kind": "external_data", "subject": "Hacker News",
-              "cadence_minutes": 15, "wants": ["stories"], "threshold": None,
-              "display_hint": "list"}
-    match = ni_flow.match_recipe(ni_catalog.entries(),
-                                  "top stories on Hacker News", intent)
-    assert match is not None and match["id"] == "hn-front-page"
-    ni_flow._pause_for_recipe_confirm(store, iid, intent, match)
-    flow = _board_flow(client, iid)
-    assert flow["state"] == "confirm_source"
-    from urllib.parse import urlparse
-    assert urlparse(flow.get("source_url") or "").hostname == "hn.algolia.com"
-    # And a truly uncovered ask still gets the honest empty pick pause.
-    iid2 = client.post("/api/ni/intake",
-                       json={"request": "show me the tides for Limehouse Boat Landing SC"}).json()["id"]
-    ni_flow.reenter_source_pick(store, iid2, "no recipe matched — user picks")
-    flow2 = _board_flow(client, iid2)
-    assert flow2["state"] == "source" and flow2.get("suggestions") == []
 
 
 def test_field_5_wrong_value_note_is_journaled_and_rewinds_honestly(client) -> None:
@@ -221,67 +177,6 @@ def test_field_7_every_terminal_on_the_board_obeys_the_law(client) -> None:
         assert flow.get("question") or flow.get("reopen"), f"{klass}: dead end"
 
 
-def test_field_8_quakes_threshold_routes_instead_of_shipping_m25(client) -> None:
-    """G2 upgrade of the quakes field failure: approving the vetted USGS feed
-    for an above-magnitude-5 ask must NOT hand off the fixed M2.5 template —
-    the continuation re-dispatches the approved URL into freeform sampling
-    (where the where-filter is authored from the sealed intent)."""
-    from smartbrain_3000 import ni_catalog
-    iid = client.post("/api/ni/intake",
-                      json={"request": "latest earthquakes above magnitude 5"}).json()["id"]
-    store = client.app.state.ni
-    intent = {"kind": "external_data", "subject": "earthquakes",
-              "cadence_minutes": 15, "wants": ["magnitude"], "threshold": 5,
-              "display_hint": "list"}
-    ni_flow._transition(store, iid, "intent", intent=intent)
-    ni_flow._pause_for_recipe_confirm(store, iid, intent,
-                                       ni_catalog.get_recipe("quakes-day-25"))
-    r = client.post(f"/api/ni/items/{iid}/flow/confirm-source")
-    assert r.status_code == 200, r.text
-    rec2 = ni_flow._flow_read(store, iid)
-    assert rec2["state"] == "sampling", "routed to freeform, not template handoff"
-    assert rec2.get("_reuse_intent") is True
-    item = store.get_item(iid)
-    assert item["spec"].get("_shell"), "no verbatim M2.5 card was sealed"
-
-
-def test_field_9_quakes_disclosure_no_longer_lies(client) -> None:
-    """G2: the confirm card's coverage line for the quakes recipe must not
-    claim magnitude/location are missing (top_mag/top_place serve them)."""
-    from smartbrain_3000 import ni_catalog
-    iid = client.post("/api/ni/intake",
-                      json={"request": "latest earthquakes"}).json()["id"]
-    store = client.app.state.ni
-    ni_flow._pause_for_recipe_confirm(
-        store, iid, {"wants": ["location", "magnitude", "depth", "time"]},
-        ni_catalog.get_recipe("quakes-day-25"))
-    row = next(x for x in client.get("/api/ni/board").json()["items"]
-               if x["id"] == iid)
-    not_covered = row["flow"].get("not_covered") or []
-    assert "magnitude" not in not_covered and "location" not in not_covered
-    assert set(not_covered) == {"depth", "time"}
-
-
-def test_field_10_us_weather_defaults_to_fahrenheit_at_source(client) -> None:
-    """G2 upgrade of the °C-for-Charleston failure: the consent pause seals
-    fahrenheit/mph unit fills for a US place — what the card shows is what
-    will run."""
-    from smartbrain_3000 import ni_catalog
-    iid = client.post("/api/ni/intake",
-                      json={"request": "track the weather in Charleston, SC"}).json()["id"]
-    store = client.app.state.ni
-    ni_flow._pause_for_recipe_confirm(
-        store, iid,
-        {"wants": ["temperature"], "place": "Charleston, SC"},
-        ni_catalog.get_recipe("weather-open-meteo"))
-    row = next(x for x in client.get("/api/ni/board").json()["items"]
-               if x["id"] == iid)
-    fills = row["flow"].get("fills") or {}
-    assert fills.get("temperature_unit") == "fahrenheit"
-    assert fills.get("wind_speed_unit") == "mph"
-    assert "temperature_unit=fahrenheit" in (row["flow"].get("filled_url") or "")
-
-
 def test_field_11_pasted_webpages_build_interpreted_cards(client, monkeypatch) -> None:
     """Field round 2 (2026-09-21): EVERY URL the operator pasted was a normal
     webpage (nhc.noaa.gov/gtwo.php, spacinsider.com/news, usharbors.com) and
@@ -324,14 +219,3 @@ def test_field_11_pasted_webpages_build_interpreted_cards(client, monkeypatch) -
         assert spec["source"] == {"type": "http_page", "url": url}
         assert spec["pipeline"][0]["op"] == "llm"
 
-
-def test_field_12_tropical_storms_resolve_from_words(client) -> None:
-    """The hurricane ask resolves to the NHC recipe from words — no paste
-    needed at all (the government JSON feed the pasted page sits on)."""
-    from smartbrain_3000 import ni_catalog
-    m = ni_flow.match_recipe(
-        ni_catalog.entries(),
-        "show me a daily of any tropical storms or hurricanes in the Atlantic ocean",
-        {"subject": "Atlantic tropical storms",
-         "wants": ["tropical storms", "hurricanes"]})
-    assert m is not None and m["id"] == "nhc-atlantic-storms"

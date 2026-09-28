@@ -15,6 +15,14 @@ gates AND the pytest suite — see "Adding a case" at the bottom). Status:
 
 ## A. Creation — external JSON through the flow
 
+> **2026-09-28: the built-in recipe catalog is gone.** The SmartBrain Library
+> (github.com/SecureCloudGroup/SmartBrain_Library, ~8,600 US sources) replaced
+> it as the flow's source step. Rows below whose status says "resolves from
+> words" via a named recipe now resolve through the Library's lookup
+> (measured in that repo: `evallookup` dev 45/45, holdout 38/40, sealed
+> 30/30); the explicit-URL rows are unchanged. The recipe-confirm pause, the
+> geocode two-step and threshold-over-recipe routing no longer exist.
+
 | # | Ask (in the user's words) | Dimension exercised | Status |
 |---|---|---|---|
 | A1 | "show me AAPL every 5 minutes" + a URL | explicit-URL value card, cadence parse | SHIPPED (aapl-5min) |

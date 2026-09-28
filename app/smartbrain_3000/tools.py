@@ -28,7 +28,6 @@ from . import (
     kbindex,
     netguard,
     ni,
-    ni_catalog,
     ni_flow,
     ni_library,
     search,
@@ -756,32 +755,26 @@ Authoring order (§29 — the flow is the ONLY door for external JSON cards):
    narrow, validated blanks (intent + mapping). Pass the user's request in
    THEIR OWN WORDS, verbatim — never paraphrase, never change a number or
    cadence the user said; add ``source_url`` when the user has already named
-   a specific http URL. The flow: matches a catalog recipe (deterministic),
-   samples once from the consented source, derives paths, picks scene fields,
+   a specific http URL. The flow: offers SmartBrain Library sources on the
+   card (the user's tap is the consent), samples once from the chosen source, derives paths, picks scene fields,
    assembles, verifies typed outputs, and hands off. The tool WAITS for the
    flow (a few seconds) and returns the resulting state with a ``next_step``
    directive — follow that directive and do nothing else for this card. Do
    NOT research sources with web_search, do NOT call create_ni_item, do NOT
    start over while a flow is working.
-2. **Resume / confirm / remap.** ``state="source"`` ⇒ present candidates and
-   call ``resume_ni_flow`` with the URL the user picked. ``confirm_source`` ⇒
-   the BOARD CARD itself now shows an 'Approve source' button with the exact
-   URL (and any place lookup / not-covered fields) — tell the user to approve
-   it there; that is the reliable path. Only if the user approves in chat,
-   call ``confirm_ni_flow_source`` (pass ``geocode_query`` verbatim when the
-   flow result carried ``geocode_lookup`` — a confirm missing it is refused).
-   NEVER research sources or start another flow while a confirm is pending.
+2. **Resume / remap.** ``state="source"`` ⇒ the BOARD CARD offers Library
+   sources and a paste-a-link field — tell the user to pick there; if they
+   name a URL in chat, call ``resume_ni_flow`` with it. NEVER research
+   sources or start another flow while a pick is pending.
    ``awaiting_credential`` ⇒ the user adds the key ON THE CARD (never in
    chat). To fix a flow- or recipe-born card, call ``remap_ni_item`` — it
    re-derives paths against the SAME consented URL (remap FIXES extraction;
    it can never add fields the source does not serve — different data means
-   a NEW card via start_ni_flow). After a resume_ni_flow, NEVER call
-   confirm_ni_flow_source — the resume already carried the user's choice
-   and a late confirm is refused after costing an approval. NEVER propose a
+   a NEW card via start_ni_flow). NEVER propose a
    source or pipeline edit on a flow- or recipe-born card — it is REFUSED
    at ``update_ni_item`` and the refusal lands AFTER the user paid an
-   approval tap; if the current source cannot serve a field the user wants
-   (the flow result's ``not_covered`` list), SAY SO and offer either living
+   approval tap; if the current source cannot serve a field the user wants,
+   SAY SO and offer either living
    without it or a fresh flow with a different source — params, cadence,
    scene tweaks stay directly editable.
 3. **create_ni_item is for NON-http_json sources only** (model, internal.*,
@@ -1046,21 +1039,6 @@ def _ni_source_provenance(source: dict | None) -> str:
     return "the NI item source"
 
 
-def _list_ni_catalog(ctx: ToolContext, args: dict) -> dict:
-    """OBSERVE: list the bundled Neural Interface source catalog (§18) — vetted, keyless/free-tier
-    public endpoints the drafting agent should prefer over open web research.
-
-    Static data (no ctx access — ctx is intentionally ignored, same shape as other
-    no-store OBSERVE handlers). Optional ``category`` filters the list; an unknown
-    category returns ``[]`` — never an error — so the model can pass through the
-    user's word without a pre-check.
-    """
-    assert isinstance(args, dict), "args must be a dict"
-    category = args.get("category")
-    assert category is None or isinstance(category, str), "category must be a string"
-    return {"sources": ni_catalog.entries(category)}
-
-
 def _list_ni_items(ctx: ToolContext, args: dict) -> dict:
     """OBSERVE: list the user's Neural Interface items (id/title/state/enabled/interval)."""
     assert ctx.ni is not None, "neural interface unavailable"
@@ -1111,8 +1089,8 @@ def _read_ni_item(ctx: ToolContext, args: dict) -> dict:
         "state_explanation": explanation,
         "user_next_action": next_action,
         # C3 (audit 2026-09-13): the active flow's state rides so the chat can
-        # relay "waiting for you to approve fetching <host>" and propose the
-        # right next tool (confirm_ni_flow_source / resume_ni_flow / remap).
+        # relay what the card is waiting for and propose the right next tool
+        # (resume_ni_flow / remap).
         "flow": flow,
         "enabled": item["enabled"],
         "interval_minutes": item["interval_minutes"],
@@ -1150,27 +1128,20 @@ def _explain_state_with_flow(item: dict, flow: dict | None) -> tuple[str, str]:
     """C3 (audit 2026-09-13): explanation strings enriched by an active flow.
 
     When the item is a flow-authored shell in draft AND the flow record is in
-    a paused state (``confirm_source`` / ``source`` / ``awaiting_credential``),
-    the chat model needs to name that condition and propose the resume tool
-    (``confirm_ni_flow_source`` / ``resume_ni_flow`` / add a credential).
+    a paused state (``source`` / ``awaiting_credential``), the chat model needs
+    to name that condition and propose the next step (``resume_ni_flow`` / add
+    a credential on the card).
     Otherwise falls through to the base ``_explain_state``.
     """
     assert isinstance(item, dict), "item required"
     if isinstance(flow, dict):
         state = str(flow.get("state") or "")
-        if state == "confirm_source":
-            return (
-                "this card is a DRAFT with a flow paused awaiting SOURCE "
-                "confirmation — the engine has NOT fetched anything yet",
-                "the card on the Neural page shows an 'Approve source' button "
-                "with the exact URL — tell the user to decide there",
-            )
         if state == "source":
             return (
                 "this card is a DRAFT with a flow paused awaiting a source "
                 "PICK — the engine has NOT fetched anything yet",
-                "the card on the Neural page offers vetted suggestions and a "
-                "paste-a-URL field — tell the user to pick there",
+                "the card on the Neural page offers SmartBrain Library sources "
+                "and a paste-a-URL field — tell the user to pick there",
             )
         if state in ("intent", "sampling", "mapping", "assembling"):
             return (
@@ -2110,7 +2081,7 @@ def _prevalidate_ni_item_id(args: dict) -> None:
 _FLOW_WAIT_SECONDS = 8.0
 _FLOW_POLL_SECONDS = 0.25
 _FLOW_SETTLED_STATES: frozenset[str] = frozenset({
-    "ready", "confirm_source", "source", "awaiting_credential",
+    "ready", "source", "awaiting_access", "awaiting_credential",
     "awaiting_params", "failed", "unsupported",
 })
 
@@ -2137,28 +2108,15 @@ def _flow_next_step(record: dict | None) -> str:
         return ("the card is built and commissioning — report its state truthfully "
                 "(NOT 'live'); the user validates the first real result on the card. "
                 "Do not create anything else for this request.")
-    if state == "confirm_source":
-        base = ("a vetted source was matched and the CARD on the board now shows "
-                "an 'Approve source' button with the exact URL — tell the user to "
-                "tap it there (or, if they approve in chat, call "
-                "confirm_ni_flow_source with this item_id and that exact "
-                "source_url). Do not research, do not start another flow, do not "
-                "create anything else.")
-        if isinstance((record or {}).get("_geocode"), dict):
-            base += (" This confirm ALSO covers a place lookup (see "
-                     "geocode_lookup) — pass geocode_query verbatim so the "
-                     "approval card displays it; a confirm without it is refused.")
-        if isinstance((record or {}).get("_uncovered_wants"), list) \
-                and (record or {}).get("_uncovered_wants"):
-            gaps = ", ".join(str(w) for w in record["_uncovered_wants"])
-            base += (f" TELL THE USER this source does not cover: {gaps} — "
-                     "they may proceed without it or pick a different source "
-                     "(resume path); never try to swap the source afterwards.")
-        return base
     if state == "source":
-        return ("no vetted source matched — present the user 2-3 candidate source "
-                "URLs with provenance; when they pick one, call resume_ni_flow with "
-                "this item_id and their URL. Do not create a card any other way.")
+        return ("the CARD on the board now offers sources from the SmartBrain "
+                "Library (or web results) and a paste-a-link field — tell the user "
+                "to pick there; if they name a URL in chat, call resume_ni_flow "
+                "with this item_id and their URL. Do not create a card any other way.")
+    if state == "awaiting_access":
+        return ("the picked source needs the user's own free key and/or their contact "
+                "email — tell the user to enter it ON THE CARD (never in chat); the card "
+                "then builds on its own. Nothing else to do in chat.")
     if state == "awaiting_credential":
         return ("the card needs an API key — tell the user to tap 'Add key' on the "
                 "card itself (keys are never entered in chat), then Activate it. "
@@ -2193,20 +2151,6 @@ def _flow_tool_result(store: object, item_id: str, *, started: bool,
     out = {"id": item_id, "started": started, "state": state,
            "source_url": url if isinstance(url, str) else None,
            "next_step": _flow_next_step(record)}
-    # geocode-consent (2026-09-15): a confirm pause that also covers a place
-    # lookup names it here so the model can echo it into geocode_query — the
-    # handler REFUSES a confirm whose card did not display the lookup.
-    disclosure = (record or {}).get("_geocode")
-    if isinstance(disclosure, dict):
-        out["geocode_lookup"] = (f"{disclosure.get('query')} via "
-                                  f"{disclosure.get('host')}")
-        out["geocode_query"] = disclosure.get("query")
-    # F3 (C2-feedback wave, 2026-09-15): name the wants this vetted source
-    # cannot serve so the chat DISCLOSES the gap before the user approves —
-    # never a silent partial fulfillment, never a source-swap attempt later.
-    uncovered = (record or {}).get("_uncovered_wants")
-    if isinstance(uncovered, list) and uncovered:
-        out["not_covered"] = uncovered
     return out
 
 
@@ -2218,11 +2162,9 @@ def _start_ni_flow(ctx: ToolContext, args: dict) -> dict:
     worker that drives intent → source → sampling → mapping → assembling →
     handoff. ``source_url`` (optional) is the user's already-named source; the
     approval card renders it unmissably so the operator sees the exact host
-    the flow will fetch. Absent ``source_url``: recipe match ⇒ the flow pauses
-    at ``confirm_source`` (C3) awaiting the operator's approval of the
-    recipe's URL via ``confirm_ni_flow_source``; recipe miss ⇒ the flow pauses
-    at ``source`` and the chat presents candidates for a ``resume_ni_flow``
-    call.
+    the flow will fetch. Absent ``source_url``: the flow pauses at ``source``
+    with SmartBrain Library (else web) candidates on the card; the user's tap,
+    or a ``resume_ni_flow`` with the URL they name, continues it.
 
     M4 (audit 2026-09-13): the case-insensitive title guard fires at shell
     creation (``create_shell_item`` mirrors ``_check_duplicate_title``);
@@ -2336,67 +2278,6 @@ def _remap_ni_item(ctx: ToolContext, args: dict) -> dict:
     started = ni_flow.start_flow_worker(ctx.ni, item_id, source_url=url)
     return _flow_tool_result(ctx.ni, item_id, started=bool(started),
                               fallback_url=url)
-
-
-def _prevalidate_confirm_ni_flow_source(args: dict) -> None:
-    """Pre-park hook for confirm_ni_flow_source: item_id + http source_url required."""
-    assert isinstance(args, dict), "args must be a dict"
-    _require_item_id_shape(args)
-    source_url = args.get("source_url")
-    if not isinstance(source_url, str) or not source_url:
-        raise ValueError("source_url required (non-empty string)")
-    try:
-        ni._validate_http_json_url_shape(source_url)
-    except ValueError as exc:
-        raise ValueError(f"source_url: {exc}") from None
-    geocode_query = args.get("geocode_query")
-    if geocode_query is not None and (not isinstance(geocode_query, str)
-                                       or len(geocode_query) > 120):
-        raise ValueError("geocode_query must be a string of at most 120 chars")
-
-
-def _confirm_ni_flow_source(ctx: ToolContext, args: dict) -> dict:
-    """REVIEWED (egress=True): confirm a recipe-matched flow's proposed source URL (§29).
-
-    C3 (audit 2026-09-13): the missing consent moment for a recipe-matched
-    flow. When ``start_ni_flow`` matches a catalog recipe and the operator
-    did NOT already name a source, the flow now PAUSES in ``confirm_source``
-    state carrying the recipe's url_template + title. This tool is the
-    resume: the approval card's promoted line (``Fetches: <url>`` via the
-    ``source_url`` arg convention) shows the exact host, and on approval
-    ``ni_flow.continue_from_recipe_confirm`` runs ``_handoff_from_recipe``
-    with the sealed intent. Refuses if the flow is not awaiting confirmation
-    OR the confirmed URL differs from the pending recipe URL.
-    """
-    assert ctx.ni is not None, "neural interface unavailable"
-    assert isinstance(args, dict), "args must be a dict"
-    _prevalidate_confirm_ni_flow_source(args)
-    item_id = str(args["item_id"])
-    if ctx.ni.get_item(item_id) is None:
-        raise _item_not_found(ctx.ni)
-    # geocode-consent (2026-09-15): when the sealed record discloses a place
-    # lookup, the approval card MUST have displayed it — enforce by requiring
-    # args.geocode_query to echo the sealed query verbatim. The executed lookup
-    # always uses the SEALED value (args are display, never authority).
-    record = ni_flow._flow_read(ctx.ni, item_id) or {}
-    disclosure = record.get("_geocode")
-    if isinstance(disclosure, dict):
-        expected = str(disclosure.get("query") or "")
-        if str(args.get("geocode_query") or "") != expected:
-            raise ValueError(
-                "this confirm also covers a place lookup — pass geocode_query "
-                f"exactly as {expected!r} so the approval card displays it"
-            )
-    elif args.get("geocode_query"):
-        raise ValueError(
-            "geocode_query passed but this flow has no pending place lookup — "
-            "drop the arg"
-        )
-    result = ni_flow.continue_from_recipe_confirm(ctx.ni, item_id,
-                                                    str(args["source_url"]))
-    return {"id": item_id, "state": str(result.get("state") or ""),
-            "source_url": args["source_url"],
-            "next_step": _flow_next_step(result)}
 
 
 _TOOLS: tuple[Tool, ...] = (
@@ -2791,25 +2672,6 @@ _TOOLS: tuple[Tool, ...] = (
         egress=False,
     ),
     Tool(
-        name="list_ni_catalog",
-        description="List the bundled catalog of VETTED public data sources for Neural Interface tiles — "
-                    "keyless / free-tier JSON endpoints (finance, weather, news, crypto, misc), each with "
-                    "id/title/host/url_template/docs_url/auth/category/notes. When drafting a create_ni_item "
-                    "PREFER a catalog entry over live web research and tell the user the suggestion is 'from "
-                    "SmartBrain's vetted catalog'; if you fall back to web_search / web_research to find a "
-                    "different source, describe it as 'found via web search' so the difference is visible. "
-                    "Optional 'category' filters to one category (unknown category returns an empty list, not "
-                    "an error).",
-        params_schema={
-            "type": "object",
-            "additionalProperties": False,
-            "properties": {"category": {"type": "string"}},
-        },
-        tier=Tier.OBSERVE,
-        handler=_list_ni_catalog,
-        egress=False,
-    ),
-    Tool(
         name="list_ni_items",
         description="List the user's Neural Interface ITEMS (little always-on info tiles rendered from a "
                     "closed scene grammar), each with id/title/state/enabled/interval_minutes and health. "
@@ -2858,7 +2720,7 @@ _TOOLS: tuple[Tool, ...] = (
 
 # OBSERVE tools must be read-only + no egress; this allowlist is the structural
 # safety invariant checked at import.
-_OBSERVE_READONLY = frozenset({"kb_search", "read_document", "summarize_document", "list_documents", "list_tasks", "list_schedules", "read_schedule_output", "list_ni_catalog", "list_ni_items", "read_ni_item"})
+_OBSERVE_READONLY = frozenset({"kb_search", "read_document", "summarize_document", "list_documents", "list_tasks", "list_schedules", "read_schedule_output", "list_ni_items", "read_ni_item"})
 
 # REVIEWED tools that MUTATE schedules. A schedule creates/rewrites/re-enables an autonomous
 # agent turn, so these must NEVER auto-run (via remembered consent) inside a schedule-executed
@@ -2912,7 +2774,6 @@ INTERNAL_NI_PREVALIDATE: dict[str, Callable] = {
     "update_ni_item": _prevalidate_update_ni,
     "start_ni_flow": _prevalidate_start_ni_flow,
     "resume_ni_flow": _prevalidate_resume_ni_flow,
-    "confirm_ni_flow_source": _prevalidate_confirm_ni_flow_source,
     "remap_ni_item": _prevalidate_remap_ni_item,
 }
 INTERNAL_NI_TOOLS: dict[str, Callable] = {
@@ -2922,7 +2783,6 @@ INTERNAL_NI_TOOLS: dict[str, Callable] = {
     "set_ni_item_enabled": _set_ni_item_enabled,
     "start_ni_flow": _start_ni_flow,
     "resume_ni_flow": _resume_ni_flow,
-    "confirm_ni_flow_source": _confirm_ni_flow_source,
     "remap_ni_item": _remap_ni_item,
     "derive_ni_paths": _derive_ni_paths,
     "read_ni_spec_guide": _read_ni_spec_guide,

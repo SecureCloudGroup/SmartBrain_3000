@@ -259,8 +259,7 @@ def _drive_flow_inner(case: dict) -> dict:
 
     result = ni_flow.run_flow(
         store, item_id,
-        gateway_call=gateway, fetcher=fetcher, catalog=[],
-        source_url=_pytest_source_url(case),
+        gateway_call=gateway, fetcher=fetcher, source_url=_pytest_source_url(case),
     )
     return result
 

@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  AWAITING_SOURCE_CONFIRM,
   AWAITING_SOURCE_PICK,
   flowStageLabel,
   isFlowActive,
@@ -24,15 +23,8 @@ describe("flowStageLabel", () => {
       .toBe("Finding the source…");
   });
 
-  // C3 (audit 2026-09-13): a recipe-matched flow pauses in confirm_source with the
-  // AWAITING_SOURCE_CONFIRM marker until confirm_ni_flow_source lands the approval.
-  it("labels the new confirm_source state distinctly from the pick-a-source pause", () => {
-    expect(flowStageLabel({ state: "confirm_source", error: AWAITING_SOURCE_CONFIRM }))
-      .toBe("Waiting for you to approve the source");
-    // Marker absent (older backend) still renders the same sentence — the state name
-    // alone is enough to distinguish this from every other stage.
-    expect(flowStageLabel({ state: "confirm_source" }))
-      .toBe("Waiting for you to approve the source");
+  it("names the access pause", () => {
+    expect(flowStageLabel({ state: "awaiting_access" })).toBe("Needs your key or contact email");
   });
 
   it("returns empty for terminal error states — caller renders friendlyErrorClass", () => {
@@ -47,10 +39,9 @@ describe("flowStageLabel", () => {
 });
 
 describe("isFlowActive", () => {
-  it("is true for every progressing state (including awaiting_credential + confirm_source)", () => {
+  it("is true for every progressing state (including awaiting_credential)", () => {
     expect(isFlowActive({ state: "intent" })).toBe(true);
     expect(isFlowActive({ state: "source" })).toBe(true);
-    expect(isFlowActive({ state: "confirm_source" })).toBe(true);
     expect(isFlowActive({ state: "sampling" })).toBe(true);
     expect(isFlowActive({ state: "mapping" })).toBe(true);
     expect(isFlowActive({ state: "assembling" })).toBe(true);

@@ -129,6 +129,25 @@ The full closed set (`_SOURCE_TYPES`; validators refuse anything else):
   rewritten host. Header-free requests keep the default redirect behavior.
 - Response caps: 2 MB, `application/json`/`text/` content types, 8s per-read
   timeout (netguard defaults).
+- **`format`** (optional; default `json`): names how the response body parses
+  for the pipeline. Closed set: `json`, `csv`, `feed` (RSS + Atom), `xml`,
+  `text`. Existing specs (no `format` key) run through
+  `netguard.safe_fetch_json` unchanged. Every non-JSON format flows through
+  `netguard.safe_fetch_text(url, fmt)` (same SSRF guard, same 2 MB cap, same
+  redirect discipline; content-type allowlist scoped per format) and parses
+  through `smartbrain_3000.formats` into the walker-shaped dict the pipeline
+  grammar already consumes:
+    - `csv` → `{"columns": [...], "rows": [{col: value}, ...]}` (delimiter
+      sniffed among `,;\t|`; header required; row cap 500; per-cell cap 4KB);
+    - `feed` → `{"title", "items": [{title, link, summary, published, guid}]}`
+      via the shipped `feeds.parse_feed` (stdlib ElementTree; `<!DOCTYPE>` /
+      `<!ENTITY>` refused before parse — entity-expansion defence);
+    - `xml` → xmltodict-shape `{root: {"@attr": ..., "_text": ..., child: ...}}`
+      (namespaces stripped; depth cap 12; node cap 5000; DOCTYPE refused);
+    - `text` → `{"text": "..."}` (cap 200 000 chars).
+  A parse failure surfaces as `NIError("fetch_failed", "not_<fmt>")` — the
+  `not_<fmt>` token comes from `netguard.format_error_kind` so the flow's
+  page-door / retry routing keys on it without matching message text.
 
 `model`:
 ```json
@@ -709,7 +728,7 @@ modeled on claudecli.py's process hygiene:
 - A locked vault produces no notifications at all (the endpoint 423s) — tray
   notices never leak sealed content past the unlock boundary.
 
-## 18. Source catalog (v2c: bundled seed; remote pack rides Phase 3 trust machinery)
+## 18. Source catalog (RETIRED 2026-09-28 — replaced by the SmartBrain Library, §30)
 
 The curated ground for "AI suggests, user picks" (creation-flow law, §9).
 
@@ -1032,7 +1051,7 @@ images never reach the page.
   chip telling the truth. Referenced items' own consent is untouched — a
   composite grants no new egress to anyone.
 
-## 26. Recipes — the model selects, it doesn't write (deterministic authoring)
+## 26. Recipes (RETIRED 2026-09-28 — replaced by the SmartBrain Library, §30)
 
 Field lesson (2026-09-13): the engine is deterministic; the AUTHORING edge was
 not — a model writing extract paths against a response shape it has never seen
@@ -1934,3 +1953,59 @@ cards LOOKED built.
   marker, so every Fix/refine since M1 dropped the §29 door's spec-shape
   truth (falling back to the prunable journal) — API cards too, proven on
   unfixed main. `_finalize` now carries the prior marker when `born` is None.
+
+## 30. The SmartBrain Library replaces the built-in catalog (2026-09-28)
+
+The 12 bundled recipes (§18, §26) and everything that existed only for them
+are removed: `ni_catalog.py` + `data/ni_catalog.json`, M-RANK over the catalog
+(`locate_rank`), the keyword scorer (`match_recipe` / `suggest_recipes`), the
+`confirm_source` pause and its Approve / Not-this-source card, the recipe
+geocode two-step, unit fills, threshold-over-recipe routing, the
+`not_covered` disclosure, the `list_ni_catalog` and `confirm_ni_flow_source`
+tools, the pick-recipe / confirm-source / decline-source routes, and
+`tools/ni-library/prove.py`.
+
+The source step is now one pause (`_pause_source_pick`): SmartBrain Library
+candidates whose parameters all fill from the user's words seal as
+`_ranked_library` (≤3, provider + authority + the reading when the words fit
+several); when the Library has none, S2 web search runs as before; otherwise
+the plain pause (paste a link). A tap is the consent and a Library tap is
+recorded as a Yes. Re-entering the pick (refine asking for another source)
+re-offers the Library's rows. A flow record a pre-Library build left at
+`confirm_source` re-lands as the pick pause (board read or the tick sweep).
+Cards already built from recipes keep working: their specs are self-contained
+and the `recipe` born marker stays readable.
+
+
+## 31. The user's own key and contact email for Library sources (2026-09-28)
+
+- **Library side.** `library_resolve.candidate_urls` no longer refuses a source whose
+  parameter fills `from: vault_key`: it returns the address WITHOUT the key plus
+  `needs_key: {in: query|header, name, prefix, docs_url}` (`key_placement`; a key in
+  the path is refused — it would sit in logs). `contact_ua` sources carry
+  `needs_contact`. `library_index.candidates` keeps gathering keyed sources but stops
+  on `limit` keyless ones and orders keyless first; exact lookup ties break
+  keyless-first, prior, id (same in the Library's `build.lookup`).
+- **Spec.** `http_json` gains `secret_query: {<query name>: {"$secret": "ni:<id>:<name>"}}`
+  (≤2, https-only, validated closed) and `contact_ua: true`.
+  `ni.http_request_parts(source, item_id, secrets)` is the one request builder for the
+  engine AND the flow's first sample: `$secret` headers + `secret_query` resolved
+  through `_load_credential` (host-bound, https-only, item-scoped); `contact_ua` adds
+  the user's email to the honest User-Agent (`NIError("contact_missing")` when unset).
+  Any header or key ⇒ redirects refused. `rewrite_self_refs` / `rewrite_refs_to_self`
+  cover `secret_query`.
+- **Flow.** A tap on a Library row that needs a key or email seals `_access` (bound to
+  that exact URL) and pauses at `awaiting_access` (question `give_access`) — nothing is
+  fetched. `POST /api/ni/items/{id}/flow/access {key?, email?}` (desktop-local, audited
+  without values) stores the key as `ni:<id>:api_key` bound to the host (header prefix
+  such as `Token ` prepended) and the email as SecretStore `contact:email`, then starts
+  the worker. A same-host `api_key` another card holds is reused. Sampling
+  (`_fetch_with_access`) and assembly attach the key only when the URL equals the
+  sealed `_access.url`; the built spec carries refs and an `api_key` secret param,
+  never a value.
+- **Library API client** (`library_client.py`). A Library tap queues a vote
+  `{source_id, "yes", app_version}`; the add form's `suggest` queues the record with
+  parameter values, headers, tier, origin and votes removed. A sealed outbox (reserved
+  row, slot `outbox`, ≤200, oldest votes dropped first) is sent by the scheduler pass
+  `_auto_send_library_outbox` (≤10 per tick, backoff 15 min doubling to 24 h, drop on
+  400/413/415/422 or after 8 tries). `SMARTBRAIN_LIBRARY_API=""` switches sending off.

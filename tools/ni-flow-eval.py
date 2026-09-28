@@ -9,9 +9,8 @@ matrix (mapping/parse/derive failure classes under fixture mutation).
 
 WHEN TO RUN
 -----------
-- **Pre-tag, alongside ``tools/ni-library/prove.py``**. A green ``--engine``
-  live run is the LIVE release gate for any NI-touching release tag; prove.py
-  covers the shipped recipes, ``--engine`` covers the ACTUAL flow engine
+- **Pre-tag**. A green ``--engine`` live run is the LIVE release gate for any
+  NI-touching release tag; ``--engine`` covers the ACTUAL flow engine
   (``ni_flow.run_flow``) driving cards from a request under real model + real
   sources.
 - Operator-run only. CI does NOT invoke this file; the fast pytest suite
@@ -51,8 +50,8 @@ HONEST NOTES
   Open-Notify, Frankfurter, HN Algolia, wheretheiss.at, radar.weather.gov,
   Open-Meteo, and Open-Meteo Geocoding are **eval-only sources**. This tool
   hits them to prove the flow's mechanics survive real-world payload shapes.
-  The shipped recipes are separate (see ``prove.py``); a live PASS here is
-  NOT a recommendation to add these endpoints to the shipped catalog.
+  Source finding is the SmartBrain Library's job (its own lookup/resolution
+  evals); a live PASS here is NOT a recommendation of these endpoints.
 - The ``quakes-m5`` case's expected verdict depends on whether the ``where``
   transform is registered in ``ni._TRANSFORM_FNS`` at run time. Present ⇒ PASS
   with a magnitude filter; absent ⇒ PASS+GAP (the pre-flow-engine baseline).
@@ -1153,84 +1152,6 @@ def _run_recorded(only: set[str]) -> int:
     return 0 if ok else 1
 
 
-# Resolution-phrasing matrix (field 2026-09-21: "show me the price of NVDA"
-# resolved to NOTHING under keyword matching). Every paraphrase must reach its
-# recipe via M-RANK at high confidence; `None` rows must NOT high-match
-# anything (medium suggestions are fine — the user picks, consent unchanged).
-_RESOLUTION_PHRASINGS: list[tuple[str, dict, str | None]] = [
-    ("show me the price of NVDA every 30 minutes",
-     {"subject": "NVDA", "wants": ["price"]}, "stock-quote-finnhub"),
-    ("what is NVDA trading at right now",
-     {"subject": "NVDA", "wants": ["price"]}, "stock-quote-finnhub"),
-    ("how much is a share of Microsoft",
-     {"subject": "Microsoft", "wants": ["share price"]}, "stock-quote-finnhub"),
-    ("AAPL quote please", {"subject": "AAPL", "wants": ["quote"]},
-     "stock-quote-finnhub"),
-    ("what's bitcoin worth right now",
-     {"subject": "bitcoin", "wants": ["price"]}, "crypto-price-btc-usd"),
-    ("top stories on hacker news",
-     {"subject": "Hacker News", "wants": ["stories"]}, "hn-front-page"),
-    ("what's on the HN front page",
-     {"subject": "HN", "wants": ["front page"]}, "hn-front-page"),
-    ("current temperature in Berlin",
-     {"subject": "weather", "wants": ["temperature"], "place": "Berlin"},
-     "weather-open-meteo"),
-    ("where is the space station right now",
-     {"subject": "ISS", "wants": ["location"]}, "iss-position"),
-    ("when does the sun rise tomorrow",
-     {"subject": "sunrise", "wants": ["sunrise time"]}, "sunrise-sunset"),
-    ("how many stars does torvalds/linux have",
-     {"subject": "torvalds/linux", "wants": ["stars"]}, "github-repo-stars"),
-    ("euro to dollar exchange rate",
-     {"subject": "EUR/USD", "wants": ["rate"]}, "fx-usd-eur"),
-    ("biggest earthquakes in the last day",
-     {"subject": "earthquakes", "wants": ["magnitude"]}, "quakes-day-25"),
-    ("ethereum price please", {"subject": "ethereum", "wants": ["price"]},
-     "crypto-price-eth-usd"),
-    ("show me a daily of any tropical storms or hurricanes in the Atlantic ocean",
-     {"subject": "Atlantic tropical storms",
-      "wants": ["tropical storms", "hurricanes"]}, "nhc-atlantic-storms"),
-    ("show me the tides for Limehouse Boat Landing SC",
-     {"subject": "tides", "wants": ["tides"]}, None),
-    ("my kids' school lunch menu this week",
-     {"subject": "lunch menu", "wants": ["menu"]}, None),
-]
-
-
-def _run_resolve(bifrost: str, model: str) -> int:
-    """LIVE resolution gate: M-RANK must reach the recipe for EVERY paraphrase.
-
-    Pass rules: an expected recipe must come back as ``best`` at HIGH
-    confidence (that is what auto-lands the consent pause); a ``None`` row
-    passes unless something high-matches it (medium = a suggestion the user
-    vets — safe by design).
-    """
-    from smartbrain_3000 import ni_catalog, ni_flow
-    llm = _bifrost_llm(bifrost, model)
-    catalog = ni_catalog.entries()
-    print(f"== NI resolution gate · {len(_RESOLUTION_PHRASINGS)} phrasings · "
-          f"model={model} ==\n")
-    failures = 0
-    for request, intent, expected in _RESOLUTION_PHRASINGS:
-        out = ni_flow.locate_rank(catalog, request, intent,
-                                   lambda p: llm(p, 300))
-        best = out.get("best") if out else None
-        conf = out.get("confidence") if out else "-"
-        if expected is None:
-            ok = not (out is not None and best is not None
-                      and conf == "high")
-        else:
-            ok = out is not None and best == expected and conf == "high"
-        mark = "PASS" if ok else "FAIL"
-        if not ok:
-            failures += 1
-        print(f"[{mark}] {request[:52]:54} -> {best!r} ({conf}) "
-              f"want {expected!r}")
-    verdict = "PASS" if failures == 0 else "FAIL"
-    print(f"\nRESOLVE GATE: {verdict}")
-    return 0 if failures == 0 else 1
-
-
 def _run_phrasings(bifrost: str, model: str) -> int:
     """Phrasings mode: 50 intent runs, >=90% per-case field agreement."""
     assert isinstance(bifrost, str) and bifrost, "bifrost URL required"
@@ -1290,9 +1211,6 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         help=f"Model id (default {_DEFAULT_MODEL})")
     parser.add_argument("--recorded", action="store_true",
                         help="Recorded smoke (fixtures + fake model, no network)")
-    parser.add_argument("--resolve", action="store_true",
-                        help="LIVE resolution gate: M-RANK over the phrasing "
-                             "matrix — every paraphrase must reach its recipe")
     parser.add_argument("--phrasings", action="store_true",
                         help="Intent-stage-only paraphrase matrix (needs bifrost)")
     parser.add_argument("--chaos", action="store_true",
@@ -1559,18 +1477,6 @@ def _run_case_engine(case: dict, bifrost: str, model: str, duckdb, dbmod,
             source_url=source_url if isinstance(source_url, str) else None,
         )
         out["flow_state"] = str(result.get("state") or "")
-        # A recipe hit with no user URL pauses in ``confirm_source`` (C3 fix)
-        # awaiting the operator's tap on the approval card. The eval IS the
-        # operator here: simulate exactly what ``confirm_ni_flow_source`` does
-        # — approve the URL the flow record shows — and grade the final state.
-        if out["flow_state"] == "confirm_source":
-            record = flowmod._flow_read(store, item_id) or {}
-            confirmed = str(record.get("source_url") or "")
-            out["notes"].append(f"auto-confirmed recipe source: {confirmed}")
-            result = flowmod.continue_from_recipe_confirm(
-                store, item_id, confirmed, fetcher=fetcher)
-            out["flow_state"] = str(result.get("state") or "")
-            source_url = confirmed  # the frozen-URL invariant now targets it
         if out["flow_state"] in _ENGINE_SETTLED and isinstance(source_url, str):
             item = store.get_item(item_id)
             frozen = (item["spec"].get("source") or {}).get("url", "")
@@ -1655,7 +1561,7 @@ def _record_one(case_id: str, url: str, max_bytes: int,
 
 def _run_s2() -> int:
     """S2 live smoke (round 10 P1): keyless search → row hygiene → E-lite
-    page evidence, on asks no catalog recipe covers.
+    page evidence, on asks the Library has no source for.
 
     This is a MACHINERY smoke, not acceptance — the platform's acceptance is
     the W1/W2/W3 rate framework (named asks are debug tools, never the bar).
@@ -1713,10 +1619,10 @@ def main(argv: list[str] | None = None) -> int:
     # the mutually-exclusive set alongside recorded / phrasings / chaos /
     # engine; ``--live`` is the default (no explicit flag).
     modes = (args.recorded, args.phrasings, args.chaos, args.engine,
-             args.record, args.resolve, args.s2)
+             args.record, args.s2)
     if sum(1 for m in modes if m) > 1:
         print("choose at most one of --recorded / --phrasings / --chaos / "
-              "--engine / --record / --resolve / --s2", file=sys.stderr)
+              "--engine / --record / --s2", file=sys.stderr)
         return 2
     if args.s2:
         return _run_s2()
@@ -1726,8 +1632,6 @@ def main(argv: list[str] | None = None) -> int:
         return _run_recorded(only)
     if args.phrasings:
         return _run_phrasings(args.bifrost, args.model)
-    if args.resolve:
-        return _run_resolve(args.bifrost, args.model)
     if args.chaos:
         return _run_chaos(only)
     if args.engine:

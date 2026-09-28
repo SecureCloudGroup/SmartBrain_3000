@@ -87,40 +87,6 @@ describe("promotedLine", () => {
     expect(out).toBe("Fetches: https://example.com/x");
   });
 
-  it("names the resolved catalog url for create_ni_item_from_recipe (backend threaded recipe_url through)", () => {
-    const out = promotedLine(
-      "create_ni_item_from_recipe",
-      { recipe_id: "stock-quote", params: { symbol: "AAPL" } },
-      undefined,
-      undefined,
-      "https://api.example.com/quote?s=AAPL",
-    );
-    expect(out).toBe("Fetches: https://api.example.com/quote?s=AAPL");
-  });
-
-  it("falls back to a generic catalog phrase when recipe_url wasn't threaded through", () => {
-    const out = promotedLine(
-      "create_ni_item_from_recipe",
-      { recipe_id: "stock-quote", params: { symbol: "AAPL" } },
-    );
-    expect(out).toBe("Fetches: a vetted catalog source");
-  });
-
-  it("leaves other tools unaffected when a recipe_url is supplied", () => {
-    expect(
-      promotedLine("send_email", { to: "a@b" }, undefined, undefined, "https://api.example.com/x"),
-    ).toBeNull();
-    expect(
-      promotedLine(
-        "create_ni_item",
-        { source: { url: "https://example.com/y" } },
-        undefined,
-        undefined,
-        "https://api.example.com/x",
-      ),
-    ).toBe("Fetches: https://example.com/y");
-  });
-
   it("names the fetch host for start_ni_flow with a source_url", () => {
     const out = promotedLine(
       "start_ni_flow",
@@ -131,7 +97,7 @@ describe("promotedLine", () => {
 
   it("uses the 'no fetch until confirmed' line for start_ni_flow without a source_url", () => {
     const out = promotedLine("start_ni_flow", { request: "show AAPL every 5m" });
-    expect(out).toBe("Builds a card from a vetted or user-chosen source — no fetch until one is confirmed");
+    expect(out).toBe("Builds a card from a source you pick — no fetch until you pick one");
   });
 
   it("names the fetch host for resume_ni_flow (which always carries a source_url)", () => {
@@ -148,30 +114,11 @@ describe("promotedLine", () => {
       .toBe("Fetches: https://api.example.com/x");
     const startArgs = JSON.stringify({ request: "show AAPL" });
     expect(promotedLine("start_ni_flow", startArgs))
-      .toBe("Builds a card from a vetted or user-chosen source — no fetch until one is confirmed");
+      .toBe("Builds a card from a source you pick — no fetch until you pick one");
   });
 
   it("says re-mapping reuses the already-approved source for remap_ni_item", () => {
     const out = promotedLine("remap_ni_item", { item_id: "item-1" });
     expect(out).toBe("Re-maps this card against its already-approved source");
   });
-});
-
-it("confirm_ni_flow_source promotes the recipe URL it would fetch", () => {
-  expect(
-    promotedLine("confirm_ni_flow_source",
-      { item_id: "x", source_url: "https://api.coingecko.com/api/v3/simple/price" }),
-  ).toBe("Fetches: https://api.coingecko.com/api/v3/simple/price");
-});
-
-it("confirm with a geocode echo names both fetches on one line", () => {
-  expect(
-    promotedLine("confirm_ni_flow_source", {
-      item_id: "x",
-      source_url: "https://api.open-meteo.com/v1/forecast",
-      geocode_query: "Kansas City",
-    }),
-  ).toBe(
-    "Fetches: https://api.open-meteo.com/v1/forecast · Looks up “Kansas City” to fill the location",
-  );
 });

@@ -674,8 +674,7 @@ def test_flow_end_to_end_astros_scalar_count_fixture() -> None:
     model = _scripted_model([intent_reply, mapping_reply])
     result = ni_flow.run_flow(
         store, item_id, gateway_call=model,
-        fetcher=lambda _u: fixture, catalog=_empty_catalog(),
-        source_url=url,
+        fetcher=lambda _u: fixture, source_url=url,
     )
     assert result["state"] == "ready", result
     item = store.get_item(item_id)
@@ -717,8 +716,7 @@ def test_flow_end_to_end_fx_rate_fixture() -> None:
     model = _scripted_model([intent_reply, mapping_reply])
     result = ni_flow.run_flow(
         store, item_id, gateway_call=model,
-        fetcher=lambda _u: fixture, catalog=_empty_catalog(),
-        source_url=url,
+        fetcher=lambda _u: fixture, source_url=url,
     )
     assert result["state"] == "ready", result
     item = store.get_item(item_id)

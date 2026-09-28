@@ -84,6 +84,7 @@
   let addSubcategory = $state("");
   let addKind = $state<LocalSourceInput["access_kind"]>("http_json");
   let addNeedsKey = $state(false);
+  let addSuggest = $state(false);
   let addBusy = $state(false);
   let addError = $state("");
 
@@ -96,6 +97,7 @@
     category: addSubcategory ? `${addCategory}/${addSubcategory}` : addCategory,
     access_kind: addKind,
     needs_key: addNeedsKey,
+    suggest: addSuggest,
   });
   const addFormError = $derived(validateLocalForm(addFormValue));
 
@@ -301,6 +303,7 @@
     addSubcategory = "";
     addKind = "http_json";
     addNeedsKey = false;
+    addSuggest = false;
     addError = "";
   }
 
@@ -318,8 +321,12 @@
     addBusy = true;
     addError = "";
     try {
-      await api.libraryLocalAdd(addFormValue);
-      toast("Added to your sources.");
+      const added = await api.libraryLocalAdd(addFormValue);
+      toast(!addFormValue.suggest
+        ? "Added to your sources."
+        : added.suggested
+          ? "Added — your suggestion goes to the Library in the background."
+          : "Added to your sources. Too many suggestions are still waiting to send — suggest this one later.");
       addOpen = false;
       await runSearch();
     } catch (err) {
@@ -714,9 +721,20 @@
         </span>
       </label>
 
+      <label class="lib-checkbox-row">
+        <input type="checkbox" bind:checked={addSuggest} />
+        <span>
+          Also suggest it to the SmartBrain Library
+          <span class="fhint">Sends the name, description, category and address pattern for review —
+            never a key, and nothing you filled into the address.</span>
+        </span>
+      </label>
+
       {#if addError}<p class="error lib-form-error">{addError}</p>{/if}
 
-      <p class="muted lib-form-note">Your sources stay on this device.</p>
+      <p class="muted lib-form-note">{addSuggest
+        ? "Your copy stays on this device; the suggestion is sent in the background."
+        : "Your sources stay on this device."}</p>
 
       <div class="lib-detail-actions">
         <button type="submit" disabled={addBusy || addFormError !== null}>
