@@ -862,6 +862,109 @@ export interface NiInstallResult {
   needs_credentials?: string[];
 }
 
+// SmartBrain Library (R8/R9/R12) — the registry of US data sources the NI Library
+// page browses. The pack is pinned public catalog data (~8 MB), fetched + verified
+// on first use and read-only afterwards. Local sources are the user's own additions
+// (sealed under the vault; stay on this device). Every enum below is a plain string
+// the API returns verbatim; the page maps them to plain-language labels via the
+// helpers in $lib/ni/libraryPage.ts — never printed raw on screen.
+export interface LibraryStatus {
+  installed: boolean;
+  tag: string;
+  records?: number;
+  built_at?: string;
+  by_status?: Record<string, number>;
+}
+export type LibraryAuthority = "official" | "primary" | "aggregator" | "community";
+export type LibraryTier = "curated" | "provider_trusted" | "harvested" | "local";
+export type LibrarySourceStatus = "ok" | "degraded" | "failed" | "refused" | "unvalidated";
+export type LibraryAuth = "none" | "free_key" | "oauth" | "user_account";
+export type LibraryTerms = "public_domain" | "open_license" | "terms_allow" | "unverified";
+export type LibraryAccessKind =
+  | "http_json" | "http_csv" | "http_xml" | "rss" | "atom" | "gtfs" | "gtfs_rt"
+  | "gbfs" | "ics" | "html" | "image" | "text";
+export interface LibrarySourceRow {
+  id: string;
+  name: string;
+  description: string;
+  provider: string;
+  authority: LibraryAuthority;
+  tier: LibraryTier;
+  geo: string;
+  access_kind: LibraryAccessKind;
+  auth: LibraryAuth;
+  terms: LibraryTerms;
+  cadence: string;
+  status: LibrarySourceStatus;
+  categories: string[]; // "cat/sub" strings
+  url_template?: string;
+}
+export interface LibrarySourceParam {
+  name: string;
+  kind: string;
+  example: string | null;
+  required: boolean;
+}
+export interface LibrarySourceDetail {
+  id: string;
+  name: string;
+  description: string;
+  provider: { id: string; name: string; url: string; authority: LibraryAuthority };
+  tier: LibraryTier;
+  categories: string[];
+  kinds: string[];
+  coverage: { geo: string; entity: string };
+  access: {
+    kind: LibraryAccessKind;
+    url_template: string;
+    params: LibrarySourceParam[];
+    auth: LibraryAuth;
+    headers: Record<string, string>;
+    docs_url: string;
+    contact_ua?: string;
+  };
+  terms: { status: LibraryTerms; note: string; terms_url: string };
+  freshness: { cadence: string };
+  examples: string[];
+  validation: {
+    status: LibrarySourceStatus;
+    checked_at?: string;
+    http?: number;
+    robots?: string;
+    note?: string;
+  };
+  votes: { yes: number; no: number };
+  signals?: unknown;
+}
+export interface LibraryTaxonomySub { id: string; label: string; count: number }
+export interface LibraryTaxonomyCat {
+  id: string; label: string; count: number;
+  subcategories: LibraryTaxonomySub[];
+}
+export interface LibrarySearchQuery {
+  q?: string;
+  category?: string;
+  subcategory?: string;
+  tier?: LibraryTier | "";
+  status?: LibrarySourceStatus | "";
+  offset?: number;
+  limit?: number;
+}
+export interface LibrarySearchResult {
+  total: number;
+  offset: number;
+  results: LibrarySourceRow[];
+  local: LibrarySourceRow[];
+}
+export interface LocalSourceInput {
+  name: string;
+  url: string;
+  description: string;
+  category: string; // "cat/sub"
+  access_kind: LibraryAccessKind;
+  needs_key: boolean;
+}
+
 // A single run — telemetry (§1 ni_runs). Plaintext; host-free error class only.
 // error is null on success; contract_ok is null when the payload didn't reach the
 // contract stage (e.g. a fetch/transform failure short-circuited the run).
@@ -1827,6 +1930,34 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+
+  // SmartBrain Library (R8/R9/R12) — the registry of US data sources the /ni/library
+  // page renders. `libraryStatus` says whether the pinned pack is downloaded; `libraryInstall`
+  // fetches + verifies + unpacks it (~8 MB; several seconds; 502 with a plain-words `detail`
+  // on failure). Taxonomy/search 409 until the pack is installed. Local sources are the
+  // user's own additions (add/list/delete); the server 400s add with a user-facing sentence.
+  libraryStatus: () => req<LibraryStatus>("/api/library/status"),
+  libraryInstall: () => req<LibraryStatus>("/api/library/install", { method: "POST" }),
+  libraryTaxonomy: () => req<{ categories: LibraryTaxonomyCat[] }>("/api/library/taxonomy"),
+  librarySources: (q: LibrarySearchQuery = {}) => {
+    const qs = new URLSearchParams();
+    if (q.q) qs.set("q", q.q);
+    if (q.category) qs.set("category", q.category);
+    if (q.subcategory) qs.set("subcategory", q.subcategory);
+    if (q.tier) qs.set("tier", q.tier);
+    if (q.status) qs.set("status", q.status);
+    if (q.offset !== undefined) qs.set("offset", String(q.offset));
+    if (q.limit !== undefined) qs.set("limit", String(q.limit));
+    const s = qs.toString();
+    return req<LibrarySearchResult>(`/api/library/sources${s ? `?${s}` : ""}`);
+  },
+  librarySource: (id: string) =>
+    req<LibrarySourceDetail>(`/api/library/sources/${encodeURIComponent(id)}`),
+  libraryLocal: () => req<{ sources: LibrarySourceRow[] }>("/api/library/local"),
+  libraryLocalAdd: (body: LocalSourceInput) =>
+    req<LibrarySourceRow>("/api/library/local", { method: "POST", body: JSON.stringify(body) }),
+  libraryLocalDelete: (id: string) =>
+    req<{ ok: boolean }>(`/api/library/local/${encodeURIComponent(id)}`, { method: "DELETE" }),
 
   // device pairing (remote access via WebRTC)
   // Enrolling/revoking devices + hosting a pairing session are Desktop-only (server-checked),

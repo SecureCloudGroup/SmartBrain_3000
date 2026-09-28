@@ -924,6 +924,13 @@
       if (document.visibilityState === "visible") void load();
     }, 10_000);
     document.addEventListener("visibilitychange", onVisible);
+    // "Card templates" link on /ni/library sends the user back here with #templates;
+    // open the template-install sheet, then clear the hash so a reload doesn't
+    // re-open it on top of an intentional navigation.
+    if (typeof location !== "undefined" && location.hash === "#templates") {
+      history.replaceState(null, "", location.pathname + location.search);
+      void openLibrary();
+    }
   });
   onDestroy(() => {
     if (timer) clearInterval(timer);
@@ -1134,10 +1141,11 @@
 {#if account.status?.unlocked}
   <div class="ni-page-head">
     <h1>Neural Interface</h1>
-    <!-- The Library ghost button opens the Global Library sheet (§20). Ghost so it
-         reads as "browse" not "primary action" — the primary act is still "ask in
-         chat"; installing a curated template is the shortcut. -->
-    <button class="ghost" onclick={openLibrary}>Library</button>
+    <!-- The Library button now navigates to /ni/library — the browse surface for
+         the SmartBrain Library (US data sources registry). The old template-install
+         sheet still opens from that page via a "Card templates" link (which drops us
+         back at /ni#templates and the onMount hash handler opens the sheet). -->
+    <button class="ghost" onclick={() => goto("/ni/library")}>Library</button>
   </div>
   <p class="muted">
     Live data you asked for, on one board. Type it below — “show me AAPL every 5 minutes”.
