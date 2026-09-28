@@ -28,6 +28,7 @@ from . import (
     db,
     devices,
     gateway,
+    library_index,
     mcp_server,
     ni_flow,
     runtime,
@@ -384,6 +385,20 @@ def _make_lifespan(mcp):
             return search.SearchService()
 
         ni_flow.set_search_provider(_ni_search_service)
+
+        # SmartBrain Library (R8): layer 1 of source finding. The pinned pack installs on first need
+        # (verified against this release's sha256); any failure degrades to web search.
+        def _ni_library() -> object | None:
+            idx = getattr(application.state, "library_index", None)
+            if idx is None:
+                idx = library_index.LibraryIndex(db_path.parent)
+                application.state.library_index = idx
+            if not idx.installed():
+                if os.environ.get("SMARTBRAIN_LIBRARY_AUTOINSTALL", "1") == "0":
+                    return None  # tests and offline setups: never download on a flow's behalf
+                idx.install()
+            return idx
+        ni_flow.set_library_provider(_ni_library)
         async with mcp.session_manager.run():  # drive the MCP transport for this app
             runner = asyncio.create_task(_scheduler_loop(application))  # background scheduler
             webrtc = asyncio.create_task(_webrtc_loop(application)) if _webrtc_mode != "0" else None

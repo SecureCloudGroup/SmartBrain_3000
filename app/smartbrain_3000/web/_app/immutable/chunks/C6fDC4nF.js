@@ -1,0 +1,1 @@
+import{Z as e}from"./D2h9mWrh.js";import{n as t}from"./C7vwwSki.js";var n=e({count:0});async function r(){try{n.count=(await t.unseenScheduleUpdates()).count}catch{}}export{n,r as t};

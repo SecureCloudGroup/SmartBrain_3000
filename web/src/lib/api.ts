@@ -715,6 +715,9 @@ export interface NiItemFlow {
   // routing into the normal Approve-source consent, plus paste-a-URL.
   // S2 (2026-09-22): on a full catalog miss the rows are WEB candidates
   // (kind:"web", recipe_id "") found by searching the user's own words;
+  // Library (R8, 2026-09-28): kind:"library" rows are SmartBrain Library sources with the
+  // address already filled from the user's words (evidence = provider · authority, and the
+  // reading when the words fit several — the tap answers it);
   // evidence = values actually extracted from the page, shown pre-tap.
   suggestions?: {
     recipe_id: string;

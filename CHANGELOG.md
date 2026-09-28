@@ -13,14 +13,24 @@ to know when a release changes behavior.
 
 ### Added
 
+- **New cards find their source in the SmartBrain Library first.** When you ask
+  for a card that the built-in recipes don't cover, the card now offers
+  Library sources with the address already filled in from your words:
+  the right tide station for your town, your team's schedule, the coin or
+  currency pair you named, the service whose status you asked about. When
+  your words fit more than one thing (two Portlands, two nearby tide
+  stations on different water), each one is offered and your tap picks it.
+  Web search runs only when the Library has nothing that fits. Each source
+  you choose is counted as a good source on this device.
+
 - **The Library page.** The Library button on the Neural Interface page now
-  opens a page for the SmartBrain Library: about 9,000 US data sources
+  opens a page for the SmartBrain Library: about 8,600 US data sources
   (weather, tides, markets, sports, transit, government data and more) that
   you can browse by category or search. Each source shows who publishes it,
   how official it is, its terms, how often it updates and whether it was
   working when last checked. **Add a source** saves your own source to this
   device, encrypted with the rest of your data. The first time you open the
-  page it downloads the Library (about 8 MB); the download must match the
+  page it downloads the Library (about 18 MB); the download must match the
   exact file this release was built with, or it is refused. Card templates
   are still available from a link on the page.
 

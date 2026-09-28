@@ -35,17 +35,25 @@ log = logging.getLogger(__name__)
 
 # --- the pinned pack (ruling R12: the app release pins the exact bytes) ----------------------------
 PACK = {
-    "tag": "v1.0.0",
-    "url": "https://github.com/SecureCloudGroup/SmartBrain_Library/releases/download/v1.0.0/library.duckdb.gz",
-    "sha256": "554b97630122c702ce48827e213f6fb535e3a1a2b8b6cca8dd1fee4d10de2e77",
+    "tag": "v1.1.0",
+    "url": "https://github.com/SecureCloudGroup/SmartBrain_Library/releases/download/v1.1.0/library.duckdb.gz",
+    "sha256": "1940bccf581fae9456395fc84ae1b7519810e280f3c20cb79b1218be9e095554",
 }
-MAX_PACK_GZ_BYTES = 40_000_000       # the download cap (the v1 gzip is ~8 MB)
-MAX_PACK_BYTES = 400_000_000         # the unpacked cap (the v1 file is ~34 MB)
+MAX_PACK_GZ_BYTES = 60_000_000       # the download cap (the v1.1 gzip is ~18 MB)
+MAX_PACK_BYTES = 600_000_000         # the unpacked cap (the v1.1 file is ~80 MB)
 
 LOCAL_RESERVED_ID = "__library_local__"
 LOCAL_SLOT = "sources"
+VOTES_SLOT = "votes"  # R6: this user's Yes taps on Library sources (sealed)
 MAX_LOCAL_SOURCES = 500
 MAX_PAGE = 50
+# formats the card flow can sample after a tap (JSON APIs; web pages through the page door).
+# CSV files and RSS/Atom feeds are not sampled by the flow yet — named, not silently dropped.
+_FLOW_KINDS = ("http_json", "html")
+_STATE_CODES = frozenset({"AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "DC", "FL", "GA", "HI", "ID", "IL", "IN",
+                          "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH",
+                          "NJ", "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT",
+                          "VT", "VA", "WA", "WV", "WI", "WY", "PR"})
 
 ACCESS_KINDS = ("http_json", "http_csv", "http_xml", "rss", "atom", "gtfs", "gtfs_rt", "gbfs", "ics", "html",
                 "image", "text")
@@ -66,12 +74,81 @@ WITH q(term) AS (SELECT unnest(?::VARCHAR[])),
 hits AS (SELECT t.source_id, sum(t.weight) AS rel FROM library_terms t JOIN q ON t.term = q.term
          GROUP BY t.source_id),
 catb AS (SELECT source_id, max(CASE WHEN category || '/' || subcategory IN (SELECT unnest(?::VARCHAR[]))
-                               THEN 1.5 ELSE 0 END) AS cb
-         FROM library_source_categories GROUP BY source_id)
-SELECT s.id, (h.rel / (SELECT max(rel) FROM hits)) * 4 + coalesce(c.cb, 0) + s.prior AS score
-FROM hits h JOIN library_sources s ON s.id = h.source_id LEFT JOIN catb c ON c.source_id = s.id
-WHERE {where}
+                               THEN 2.5 ELSE 0 END) AS cb
+         FROM library_source_categories GROUP BY source_id),
+pref(authority, pos) AS (SELECT unnest(?::VARCHAR[]), generate_subscripts(?::VARCHAR[], 1)),
+ent AS (SELECT DISTINCT source_id FROM library_source_resolvers WHERE resolver IN (SELECT unnest(?::VARCHAR[]))),
+geo AS (SELECT DISTINCT r.source_id FROM library_source_resolvers r JOIN catb c ON c.source_id = r.source_id
+        WHERE c.cb > 0 AND r.resolver IN (SELECT unnest(?::VARCHAR[]))),
+cand AS (SELECT source_id FROM ent
+         UNION SELECT source_id FROM hits WHERE NOT EXISTS (SELECT 1 FROM ent))
+SELECT s.id,
+       coalesce(h.rel / (SELECT max(rel) FROM hits), 0) * 4
+         * (CASE s.tier WHEN 'harvested' THEN 0.7 WHEN 'provider_trusted' THEN 0.9 ELSE 1.0 END)
+         + coalesce(c.cb, 0) + s.prior
+         - (CASE WHEN s.audience <> '' AND NOT list_contains(?::VARCHAR[], s.audience) THEN 1.5 ELSE 0 END)
+         + coalesce((SELECT 0.6 - 0.3 * (p.pos - 1) FROM pref p WHERE p.authority = s.authority), 0)
+         + (CASE WHEN s.id IN (SELECT source_id FROM ent) THEN 3.5 ELSE 0 END)
+         + (CASE WHEN s.id IN (SELECT source_id FROM geo) THEN 1.5 ELSE 0 END)
+         + (CASE WHEN list_has_any(s.kinds, ?::VARCHAR[]) THEN 1.0 ELSE 0 END) AS score
+FROM cand JOIN library_sources s ON s.id = cand.source_id LEFT JOIN hits h ON h.source_id = s.id
+     LEFT JOIN catb c ON c.source_id = s.id
+WHERE s.role <> 'helper' AND {where}
 ORDER BY score DESC"""
+
+# --- ranking context (a port of SmartBrain_Library sourcetool/build.py; the Library's eval sets are the contract)
+ENTITY_RESOLVERS = ("team_mlb", "team_nhl", "team_espn", "ticker", "crypto", "currency", "airport", "statuspage",
+                    "soccer_competition", "fr_agency", "spending_agency")  # a ZIP is a location, not a subject
+GEO_RESOLVERS = ("place", "zip", "county", "us_state", "tide_station", "buoy", "airport", "radar_site", "nwps_gauge")
+ENTITY_CUES = {
+    "airport": {"airport", "airports", "flight", "flights", "delay", "delays", "delayed", "tsa", "ground", "gate",
+                "departures", "arrivals", "runway"},
+    "ticker": {"stock", "stocks", "share", "shares", "ticker", "trading", "earnings", "filings", "filing", "sec",
+               "dividend", "market", "nasdaq", "nyse", "etf", "fund", "10k", "10q", "8k", "quote"},
+    "crypto": {"crypto", "coin", "coins", "token", "tokens", "cryptocurrency", "btc", "eth", "blockchain"},
+    "currency": {"exchange", "rate", "rates", "fx", "forex", "currency", "currencies", "convert", "conversion",
+                 "to", "vs", "per"},
+    "soccer_competition": {"table", "standings", "fixtures", "league", "match", "matches", "game", "games", "score",
+                           "scores", "cup", "season"},
+    "fr_agency": {"rule", "rules", "regulation", "regulations", "register", "notice", "notices", "federal",
+                  "proposed", "comment", "comments"},
+    "spending_agency": {"spending", "spent", "budget", "contract", "contracts", "award", "awards", "grant",
+                        "grants", "obligations", "outlays"},
+    "zip": set(),
+    "team_espn": {"game", "games", "score", "scores", "schedule", "standings", "play", "plays", "won", "win", "lost",
+                  "vs", "match", "season", "roster", "football", "basketball", "baseball", "hockey", "soccer"},
+    "statuspage": {"down", "status", "outage", "outages", "incident", "working", "up"},
+}
+AUDIENCE_CUES = {
+    "aviation": r"\b(aviation|airport|flight|flights|pilot|pilots|metar|taf|runway)\b",
+    "marine": r"\b(marine|boat|boating|sailing|offshore|coastal waters|small craft|buoy|mariners?|surf|waves?)\b",
+}
+KIND_CUES = [
+    ("trend", r"\b(chart|history|historical|trend|over time|since|past \d+|last \d+|this year|over the)\b"),
+    ("ranking", r"\b(top \d*|best|standings|table|ranking|rankings|leaders|leaderboard|most)\b"),
+    ("next_event", r"\b(next|when is|when does|when will|upcoming|countdown)\b"),
+    ("schedule", r"\b(schedule|calendar|fixtures|this week|tonight|lineup)\b"),
+    ("alerts", r"\b(alert|alerts|warning|warnings|advisory|watch)\b"),
+    ("latest_items", r"\b(latest|new|recent|headlines|news|feed)\b"),
+    ("count", r"\b(how many|number of|count)\b"),
+    ("status", r"\b(status|down|outage|open|closed|delays?|delayed)\b"),
+    ("forecast", r"\b(forecast|tomorrow|will it|this weekend|next week)\b"),
+]
+
+
+def question_kinds(ask: str) -> list[str]:
+    low = (ask or "").lower()
+    return [k for k, rx in KIND_CUES if re.search(rx, low)] or ["current_value"]
+
+
+def audiences(ask: str) -> list[str]:
+    return [a for a, rx in AUDIENCE_CUES.items() if re.search(rx, (ask or "").lower())]
+
+
+def _aliases_in(res, entry_id: str, low: str) -> list[str]:
+    rows = res._con.execute("SELECT alias FROM library_resolver_aliases WHERE entry_id = ? AND NOT partial",
+                            [entry_id]).fetchall()
+    return sorted((a for (a,) in rows if f" {a} " in low), key=len, reverse=True)
 
 
 class LibraryIndexError(Exception):
@@ -79,7 +156,7 @@ class LibraryIndexError(Exception):
 
 
 def tokens(text: str) -> list[str]:
-    return [t for t in re.findall(r"[a-z0-9][a-z0-9.+-]*", (text or "").lower()) if t not in _STOP and len(t) > 1]
+    return [t for t in re.findall(r"[a-z0-9][a-z0-9.+]*", (text or "").lower()) if t not in _STOP and len(t) > 1]
 
 
 def _now() -> str:
@@ -215,8 +292,10 @@ class LibraryIndex:
         with self._conn() as con:
             terms = tokens(q)
             if terms:
+                ctx = self._context(con, q)
                 sql = _LOOKUP_SQL.format(where=cond)
-                ranked = con.execute(sql, [terms, self.classify(q)] + args).fetchall()
+                ranked = con.execute(sql, [ctx["terms"], ctx["cats"], ctx["prefer"], ctx["prefer"], ctx["entities"],
+                                           ctx["geo"], ctx["audiences"], ctx["kinds"]] + args).fetchall()
             else:
                 # browsing: reviewed sources first, then in taxonomy order (weather, hazards, water...),
                 # then by quality, so the page opens on a spread of everyday needs, not an alphabet
@@ -230,7 +309,7 @@ class LibraryIndex:
             page = [r[0] for r in ranked[offset:offset + limit]]
             rows = {r[0]: r for r in con.execute(
                 "SELECT id, name, description, provider_name, authority, tier, geo, access_kind, auth, "
-                "terms_status, cadence, validation_status FROM library_sources WHERE id IN (SELECT unnest(?))",
+                "terms_status, cadence, validation_status, kinds FROM library_sources WHERE id IN (SELECT unnest(?))",
                 [page]).fetchall()} if page else {}
             cats = {}
             for sid, cat, sub in con.execute(
@@ -242,8 +321,171 @@ class LibraryIndex:
             r = rows[sid]
             results.append({"id": r[0], "name": r[1], "description": r[2], "provider": r[3], "authority": r[4],
                             "tier": r[5], "geo": r[6], "access_kind": r[7], "auth": r[8], "terms": r[9],
-                            "cadence": r[10], "status": r[11], "categories": cats.get(sid, [])})
+                            "cadence": r[10], "status": r[11], "categories": cats.get(sid, []),
+                            "kinds": list(r[12] or [])})
         return {"total": total, "offset": offset, "results": results}
+
+    def _context(self, con, ask: str) -> dict:
+        """What the ask is about: category, the subcategory's trust order, named subjects, a location
+        (a parameter, not a relevance word), question kind and audience — the Library's lookup, ported."""
+        from .library_resolve import Resolver, norm
+        res = Resolver(con)
+        cats = self.classify(ask)
+        prefer, geo_policy = [], False
+        if cats:
+            row = con.execute("SELECT policy FROM library_taxonomy WHERE category = ? AND subcategory = ?",
+                              [*cats[0].split("/", 1)]).fetchone()
+            pol = json.loads(row[0]) if row and row[0] else {}
+            prefer, geo_policy = pol.get("prefer", []), pol.get("match") == "geo"
+        words = set(norm(ask).split())
+        codes = set(re.findall(r"\b[A-Z]{3,5}\b", ask or ""))
+        found: dict[str, dict] = {}
+        for r in ENTITY_RESOLVERS:
+            m = res.by_name(r, ask)
+            if m["status"] == "none":
+                continue
+            best = m["best"] or (m["candidates"] or [{}])[0]
+            kind = "team_espn" if r.startswith("team_") else r
+            cue = ENTITY_CUES.get(kind)
+            typed = (best.get("key", "").upper() in codes and kind in ("ticker", "crypto", "currency")) or kind == "zip"
+            known = (kind == "crypto" and (best.get("rank") or 0) > 0 and norm(best.get("name", "")) in norm(ask)
+                     and norm(best.get("name", "")) not in self._vocabulary_outside("markets/crypto"))
+            if cue is not None and not (words & cue) and not typed and not known:
+                continue
+            found[r] = best
+        if "crypto" in found and "ticker" in found and not (found["crypto"].get("rank") or 0) > 0:
+            found.pop("crypto")
+        if "ticker" in found and "crypto" in found and (found["crypto"].get("rank") or 0) > 0 \
+                and not found["ticker"].get("attrs", {}).get("sp500"):
+            found.pop("ticker")
+        pwords, has_place = self._place_words(res, ask)
+        terms = [t for t in tokens(ask) if t not in pwords] or tokens(ask)
+        return {"terms": terms, "cats": cats, "prefer": prefer, "entities": list(found),
+                "geo": list(GEO_RESOLVERS) if (has_place and geo_policy) else [],
+                "audiences": audiences(ask), "kinds": question_kinds(ask)}
+
+    def _vocabulary_outside(self, subcategory: str) -> set[str]:
+        out: set[str] = set()
+        for c in self.taxonomy():
+            for sc in c["subcategories"]:
+                if f"{c['id']}/{sc['id']}" != subcategory:
+                    for kw in sc["keywords"]:
+                        out.update(kw.lower().split())
+        return out
+
+    @staticmethod
+    def _place_words(res, ask: str) -> tuple[set[str], bool]:
+        from .library_resolve import norm, states_in
+        low = f" {norm(ask)} "
+        if re.search(r"\b\d{5}\b", ask or ""):
+            return set(), True
+        st = res.by_name("us_state", ask)
+        state_words = set(norm(st["best"]["name"]).split()) if st["status"] == "resolved" else set()
+        r = res.by_name("place", ask)
+        words: set[str] = set()
+        if r["status"] != "none":
+            for c in (r["candidates"] or [])[:3]:
+                nm = norm(c["name"])
+                said = nm if f" {nm} " in low else next((w for w in _aliases_in(res, c["id"], low)), "")
+                if not said:
+                    continue
+                big = (c.get("attrs", {}).get("pop") or 0) >= 100_000
+                prep = re.search(rf" (in|at|near|for|around|of) {re.escape(said)} ", low)
+                if big or prep or states_in(ask):
+                    words |= set(said.split())
+        return words | state_words, bool(words or state_words)
+
+    def candidates(self, ask: str, limit: int = 3) -> tuple[list[dict], list[str]]:
+        """Up to ``limit`` consentable Library candidates for the card flow: the best-ranked sources whose
+        parameters all fill from the ask (an ambiguous entity -> one candidate per reading). Also returns
+        the honest reasons the top sources were skipped."""
+        from .library_resolve import ENGLISH as ENGLISH_WORDS
+        from .library_resolve import Resolver, candidate_urls, norm
+        out, skipped = [], []
+        with self._conn() as con:
+            ranked = self.search(ask, limit=12)["results"]
+            res = Resolver(con)
+            ctx = self._context(con, ask)
+            asked_top = {ctx["cats"][0].split("/")[0]} if ctx["cats"] else set()
+            subjects = set(ctx["entities"])
+            # only STRONG kinds filter ("next", "trend", "top"…); "latest X" is often a current value
+            kinds = set(ctx["kinds"]) & {"next_event", "trend", "ranking", "alerts", "status", "count"}
+            audience = set(ctx["audiences"])
+            # the words that say WHAT the user wants: real words, not state codes, ZIPs or clitics ("what's")
+            distinctive = [w for w in norm(ask).split() if w not in ENGLISH_WORDS and len(w) >= 2
+                           and not w.isdigit() and w.upper() not in _STATE_CODES]
+            named_place = bool(ctx["geo"])
+            place_words = self._place_words(res, ask)[0]
+            for row in ranked:
+                if row["access_kind"] not in _FLOW_KINDS or row["status"] in ("failed", "refused"):
+                    continue
+                # a candidate must be about what was asked: the asked category, the asked kind of question,
+                # and — when a place is named — able to take a location or be about that place
+                if asked_top and not asked_top & {c.split("/")[0] for c in row["categories"]}:
+                    continue
+                if kinds and not kinds & set(row.get("kinds") or []):
+                    continue
+                if named_place and not self._serves_place(con, row["id"], place_words):
+                    continue
+                aud = (con.execute("SELECT audience FROM library_sources WHERE id = ?", [row["id"]]).fetchone()
+                       or [""])[0]
+                if aud and aud not in audience:
+                    continue  # an aviation or marine source only when the ask speaks to that audience
+                need = [w for w in distinctive if w not in place_words]
+                takes_subject = bool(subjects) and bool(con.execute(
+                    "SELECT count(*) FROM library_source_resolvers WHERE source_id = ? AND resolver IN "
+                    "(SELECT unnest(?::VARCHAR[]))", [row["id"], list(subjects)]).fetchone()[0])
+                if need and not takes_subject:
+                    # what the source is about: its own words plus its categories' vocabulary
+                    kw = " ".join(k for c in self.taxonomy() for sc in c["subcategories"]
+                                  if f"{c['id']}/{sc['id']}" in row["categories"] for k in sc["keywords"])
+                    rec_text = norm(" ".join([row["name"], row["description"], kw, " ".join(json.loads(
+                        con.execute("SELECT record FROM library_sources WHERE id = ?", [row["id"]]).fetchone()[0]
+                    ).get("examples", []))]))
+                    if not any(w[:5] in rec_text for w in need):
+                        continue  # nothing the user named is what this source is about
+                if row["tier"] == "harvested":
+                    # harvested classification is keyword-drafted: the dataset itself must name every
+                    # distinctive word of the ask (a restaurant-inspection set is not "egg prices")
+                    text = norm(f"{row['name']} {row['description']}")
+                    need = [w for w in distinctive if w not in place_words]
+                    if not need or not all(w[:5] in text for w in need):
+                        continue
+                rec = json.loads(con.execute("SELECT record FROM library_sources WHERE id = ?",
+                                             [row["id"]]).fetchone()[0])
+                cats = rec.get("categories") or []
+                pol = {}
+                if cats:
+                    prow = con.execute("SELECT policy FROM library_taxonomy WHERE category = ? AND subcategory = ?",
+                                       [*cats[0].split("/", 1)]).fetchone()
+                    pol = json.loads(prow[0]) if prow and prow[0] else {}
+                urls, why = candidate_urls(rec, ask, pol, res)
+                if not urls:
+                    skipped.append(f"{rec['name']}: {why}")
+                    continue
+                if rec.get("tier") == "harvested" and any(o["tier"] != "harvested" for o in out):
+                    continue  # reviewed sources first; a harvested dataset only when none fits
+                for u in urls:
+                    out.append({"source_id": rec["id"], "tier": rec.get("tier", ""), "categories": rec.get("categories") or [], "title": rec["name"], "provider": rec["provider"]["name"],
+                                "authority": rec["provider"].get("authority", ""), "url": u["url"],
+                                "host": urlsplit(u["url"]).hostname or "", "label": u["label"], "choice": u["choice"],
+                                "status": row["status"]})
+                if len(out) >= limit:
+                    break
+        # when something answers the asked subcategory exactly (tides, not water temperature), offer only those
+        asked_sub = ctx["cats"][0] if ctx["cats"] else ""
+        exact = [c for c in out if asked_sub and asked_sub in (c.get("categories") or [])]
+        return (exact or out)[:limit], skipped[:5]
+
+    @staticmethod
+    def _serves_place(con, source_id: str, place_words: set[str]) -> bool:
+        takes = con.execute("SELECT count(*) FROM library_source_resolvers WHERE source_id = ? AND resolver IN "
+                            "(SELECT unnest(?::VARCHAR[]))", [source_id, list(GEO_RESOLVERS)]).fetchone()[0]
+        if takes:
+            return True
+        entity = (con.execute("SELECT entity || ' ' || name FROM library_sources WHERE id = ?",
+                              [source_id]).fetchone() or [""])[0].lower()
+        return bool(place_words) and all(w in entity for w in place_words)
 
     def get(self, source_id: str) -> dict | None:
         with self._conn() as con:
@@ -322,6 +564,24 @@ class LocalSources:
         rows.append(record)
         self._ni.write_reserved_snapshot(LOCAL_RESERVED_ID, LOCAL_SLOT, {"sources": rows})
         return record
+
+    def record_yes(self, source_id: str) -> int:
+        """R6: the user said Yes to a Library source — count it (sealed, this device only)."""
+        assert source_id, "source_id required"
+        row = self._ni.read_reserved_snapshot(LOCAL_RESERVED_ID, VOTES_SLOT)
+        votes = dict(row["payload"].get("yes", {})) if row else {}
+        entry = dict(votes.get(source_id) or {"count": 0})
+        entry["count"] = int(entry.get("count", 0)) + 1
+        entry["last"] = _now()
+        votes[source_id] = entry
+        if len(votes) > MAX_LOCAL_SOURCES * 4:  # bounded: keep the most recent
+            votes = dict(sorted(votes.items(), key=lambda kv: kv[1].get("last", ""))[-MAX_LOCAL_SOURCES * 4:])
+        self._ni.write_reserved_snapshot(LOCAL_RESERVED_ID, VOTES_SLOT, {"yes": votes})
+        return entry["count"]
+
+    def yes_votes(self) -> dict[str, dict]:
+        row = self._ni.read_reserved_snapshot(LOCAL_RESERVED_ID, VOTES_SLOT)
+        return dict(row["payload"].get("yes", {})) if row else {}
 
     def delete(self, source_id: str) -> bool:
         rows = self.list()

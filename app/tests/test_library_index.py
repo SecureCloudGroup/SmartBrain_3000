@@ -7,6 +7,7 @@ from __future__ import annotations
 import gzip
 import hashlib
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 
 import duckdb
@@ -14,23 +15,71 @@ import pytest
 from fastapi.testclient import TestClient
 
 from smartbrain_3000 import db as dbmod
-from smartbrain_3000 import library_index, netguard, ni
+from smartbrain_3000 import library_index, library_resolve, netguard, ni
 from smartbrain_3000.secrets import gen_master_key
 
-_TAXONOMY = [
-    ("water", "tides", "Water & Coast › Tides", ["tide", "tides", "high tide"]),
-    ("markets", "crypto", "Markets & Money › Crypto", ["bitcoin", "crypto"]),
-    ("tech", "service_status", "Tech & Internet › Service status", ["status", "down"]),
+_POLICY_GEO = {"prefer": ["official", "primary", "aggregator", "community"], "match": "geo", "resolvers": ["place"],
+               "max_km": 30, "differ_on": ["water"], "max_age": "1d", "cross_check": False, "ask_if_ambiguous": True}
+_POLICY_NAME = {**_POLICY_GEO, "match": "name", "max_km": None, "differ_on": []}
+_TAXONOMY = [  # category, subcategory, label, keywords, policy
+    ("water", "tides", "Water & Coast › Tides", ["tide", "tides", "high tide"], _POLICY_GEO),
+    ("markets", "crypto", "Markets & Money › Crypto", ["bitcoin", "crypto"], _POLICY_NAME),
+    ("tech", "service_status", "Tech & Internet › Service status", ["status", "down"], _POLICY_NAME),
+    ("sports", "schedules", "Sports › Schedules & fixtures", ["schedule", "next game"], _POLICY_NAME),
 ]
-_SOURCES = [  # id, name, tier, status, prior, category, terms
+
+
+def _param(name, kind, fill):
+    return {"name": name, "kind": kind, "example": None, "required": True, "fill": fill}
+
+
+_TIDE_URL = "https://api.tidesandcurrents.noaa.gov/api/prod/datagetter?station={station}&begin_date={begin}"
+_SOURCES = [  # id, name, tier, status, prior, category, terms, kinds, access extras, extra record fields
     ("coops-tide-hilo", "NOAA tide predictions", "curated", "ok", 2.0, ("water", "tides"),
-     {"tide": 3.0, "tides": 3.0, "noaa": 1.5, "predictions": 3.0}),
+     {"tide": 3.0, "tides": 3.0, "noaa": 1.5, "predictions": 3.0}, ["next_event", "schedule"],
+     {"url_template": _TIDE_URL, "params": [
+         _param("station", "station", {"from": "resolver", "resolver": "tide_station", "field": "key"}),
+         _param("begin", "date", {"from": "clock", "format": "%Y%m%d", "offset_days": 0})]}, {}),
     ("coingecko-price", "CoinGecko coin price", "curated", "ok", 1.8, ("markets", "crypto"),
-     {"bitcoin": 2.5, "price": 3.0, "coin": 3.0}),
+     {"bitcoin": 2.5, "price": 3.0, "coin": 3.0}, ["current_value"],
+     {"url_template": "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin", "params": []}, {}),
     ("dead-crypto", "Dead crypto feed", "harvested", "failed", -1.0, ("markets", "crypto"),
-     {"bitcoin": 5.0, "price": 5.0}),
+     {"bitcoin": 5.0, "price": 5.0}, ["current_value"], {"url_template": "https://dead.example.org/x"}, {}),
     ("statuspage-summary", "Service status", "curated", "ok", 1.5, ("tech", "service_status"),
-     {"status": 3.0, "github": 2.0, "down": 2.5}),
+     {"status": 3.0, "github": 2.0, "down": 2.5}, ["status", "alerts"],
+     {"url_template": "https://{status_host}/api/v2/summary.json", "params": [
+         _param("status_host", "service", {"from": "resolver", "resolver": "statuspage", "field": "key"})]}, {}),
+    ("mlb-team-schedule", "MLB team schedule", "curated", "ok", 1.6, ("sports", "schedules"),
+     {"schedule": 3.0, "mlb": 2.0, "team": 1.0}, ["schedule", "next_event"],
+     {"url_template": "https://statsapi.mlb.com/api/v1/schedule?teamId={team}", "params": [
+         _param("team", "team", {"from": "resolver", "resolver": "team_mlb", "field": "key"})]}, {}),
+    ("keyed-quote", "Keyed quote", "curated", "ok", 1.9, ("markets", "crypto"),
+     {"bitcoin": 2.0, "quote": 3.0}, ["current_value"],
+     {"url_template": "https://keyed.example.org/q?apikey={key}", "params": [
+         _param("key", "key", {"from": "vault_key"})]}, {}),
+    ("helper-stations", "Tide station list", "curated", "ok", 1.0, ("water", "tides"),
+     {"tide": 2.0, "tides": 2.0, "stations": 3.0}, ["lookup"],
+     {"url_template": "https://api.tidesandcurrents.noaa.gov/mdapi/stations.json"}, {"role": "helper"}),
+]
+_RESOLVER_ENTRIES = [  # id, resolver, kind, key, name, lat, lon, state, attrs, rank, aliases
+    ("place:1", "place", "place", "1", "Portland", 45.5, -122.6, "OR", {"pop": 650000}, 5.8,
+     ["portland", "portland or", "portland oregon"]),
+    ("place:2", "place", "place", "2", "Portland", 43.6, -70.2, "ME", {"pop": 68000}, 4.8,
+     ["portland", "portland me", "portland maine"]),
+    ("place:3", "place", "place", "3", "Melbourne", 28.1, -80.64, "FL", {"pop": 90000}, 4.9,
+     ["melbourne", "melbourne fl", "melbourne florida"]),
+    ("place:4", "place", "place", "4", "Denver", 39.7, -104.9, "CO", {"pop": 716000}, 5.9, ["denver", "denver co"]),
+    ("place:5", "place", "place", "5", "Denver", 42.67, -92.3, "IA", {"pop": 1900}, 3.3, ["denver", "denver ia"]),
+    ("tide_station:872", "tide_station", "station", "872", "Melbourne Causeway", 28.08, -80.60, "FL",
+     {"water": "Indian River"}, 1.0, ["melbourne causeway"]),
+    ("tide_station:873", "tide_station", "station", "873", "Eau Gallie", 28.16, -80.63, "FL",
+     {"water": "Indian River"}, 1.0, ["eau gallie"]),
+    ("tide_station:900", "tide_station", "station", "900", "Sebastian Inlet", 27.86, -80.45, "FL",
+     {"water": "Atlantic"}, 1.0, ["sebastian inlet"]),
+    ("statuspage:www.githubstatus.com", "statuspage", "service", "www.githubstatus.com", "GitHub", None, None, "",
+     {}, 1.0, ["github"]),
+    ("team_mlb:144", "team_mlb", "team", "144", "Atlanta Braves", None, None, "", {"league": "mlb"}, 1.0,
+     ["atlanta braves", "braves", "atl"]),
 ]
 
 
@@ -40,24 +89,41 @@ def _build_pack(path: Path) -> None:
         id VARCHAR PRIMARY KEY, name VARCHAR, description VARCHAR, provider_id VARCHAR, provider_name VARCHAR,
         authority VARCHAR, tier VARCHAR, geo VARCHAR, entity VARCHAR, access_kind VARCHAR, url_template VARCHAR,
         docs_url VARCHAR, auth VARCHAR, terms_status VARCHAR, cadence VARCHAR, validation_status VARCHAR,
-        robots VARCHAR, votes_yes INTEGER, votes_no INTEGER, prior DOUBLE, record JSON)""")
+        robots VARCHAR, votes_yes INTEGER, votes_no INTEGER, prior DOUBLE, record JSON, kinds VARCHAR[],
+        role VARCHAR, audience VARCHAR)""")
     con.execute("CREATE TABLE library_source_categories(source_id VARCHAR, category VARCHAR, subcategory VARCHAR)")
     con.execute("CREATE TABLE library_terms(term VARCHAR, source_id VARCHAR, weight DOUBLE)")
     con.execute("CREATE TABLE library_taxonomy(category VARCHAR, subcategory VARCHAR, label VARCHAR, "
-                "kinds VARCHAR[], params VARCHAR[], keywords VARCHAR[])")
+                "kinds VARCHAR[], params VARCHAR[], keywords VARCHAR[], policy JSON)")
     con.execute("CREATE TABLE library_meta(key VARCHAR, value VARCHAR)")
-    for cat, sub, label, kw in _TAXONOMY:
-        con.execute("INSERT INTO library_taxonomy VALUES (?,?,?,?,?,?)", (cat, sub, label, [], [], kw))
-    for sid, name, tier, status, prior, (cat, sub), terms in _SOURCES:
-        rec = {"id": sid, "name": name, "tier": tier, "categories": [f"{cat}/{sub}"]}
-        con.execute("INSERT INTO library_sources VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+    con.execute("CREATE TABLE library_resolver_entries(id VARCHAR PRIMARY KEY, resolver VARCHAR, kind VARCHAR, "
+                "key VARCHAR, name VARCHAR, lat DOUBLE, lon DOUBLE, state VARCHAR, attrs JSON, rank DOUBLE)")
+    con.execute("CREATE TABLE library_resolver_aliases(alias VARCHAR, entry_id VARCHAR, partial BOOLEAN)")
+    con.execute("CREATE TABLE library_source_resolvers(source_id VARCHAR, resolver VARCHAR)")
+    for cat, sub, label, kw, pol in _TAXONOMY:
+        con.execute("INSERT INTO library_taxonomy VALUES (?,?,?,?,?,?,?)", (cat, sub, label, [], [], kw,
+                                                                              json.dumps(pol)))
+    for sid, name, tier, status, prior, (cat, sub), terms, kinds, access, extra in _SOURCES:
+        acc = {"kind": "http_json", "auth": "none", "headers": {}, "params": [], **access}
+        rec = {"id": sid, "name": name, "description": f"{name} description", "tier": tier,
+               "categories": [f"{cat}/{sub}"], "kinds": kinds, "access": acc, "examples": [],
+               "provider": {"id": "p", "name": "Provider", "authority": "official"}, **extra}
+        con.execute("INSERT INTO library_sources VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (sid, name, f"{name} description", "p", "Provider", "official", tier, "US", "", "http_json",
-                     "https://example.org/x", "https://example.org", "none", "public_domain", "hourly", status,
-                     "allow", 0, 0, prior, json.dumps(rec)))
+                     acc["url_template"], "https://example.org", "none", "public_domain", "hourly", status,
+                     "allow", 0, 0, prior, json.dumps(rec), kinds, extra.get("role", ""), ""))
         con.execute("INSERT INTO library_source_categories VALUES (?,?,?)", (sid, cat, sub))
         for t, w in terms.items():
             con.execute("INSERT INTO library_terms VALUES (?,?,?)", (t, sid, w))
-    con.execute("INSERT INTO library_meta VALUES ('built_at','2026-09-28T00:00:00Z'), ('records','4'), "
+        for p in acc.get("params", []):
+            if p["fill"]["from"] == "resolver":
+                con.execute("INSERT INTO library_source_resolvers VALUES (?,?)", (sid, p["fill"]["resolver"]))
+    for eid, res, kind, key, name, lat, lon, st, attrs, rank, aliases in _RESOLVER_ENTRIES:
+        con.execute("INSERT INTO library_resolver_entries VALUES (?,?,?,?,?,?,?,?,?,?)",
+                    (eid, res, kind, key, name, lat, lon, st, json.dumps(attrs), rank))
+        for a in aliases:
+            con.execute("INSERT INTO library_resolver_aliases VALUES (?,?,?)", (a, eid, False))
+    con.execute("INSERT INTO library_meta VALUES ('built_at','2026-09-28T00:00:00Z'), ('records','7'), "
                 "('schema','1')")
     con.close()
 
@@ -97,7 +163,7 @@ def test_install_verifies_hash_then_reads(tmp_path, pack_bytes) -> None:
     idx.install()  # idempotent: no second download
     assert net.calls == 1
     st = idx.status()
-    assert st["installed"] and st["records"] == 4 and st["by_status"]["ok"] == 3
+    assert st["installed"] and st["records"] == 7 and st["by_status"]["ok"] == 6
 
 
 def test_install_refuses_a_hash_mismatch_and_writes_nothing(tmp_path, pack_bytes) -> None:
@@ -140,8 +206,8 @@ def test_taxonomy_counts_exclude_broken_sources(tmp_path, pack_bytes) -> None:
     idx, _ = _index(tmp_path, pack_bytes)
     idx.install()
     cats = {c["id"]: c for c in idx.taxonomy()}
-    assert cats["markets"]["count"] == 1  # dead-crypto (failed) is not counted
-    assert cats["water"]["subcategories"][0] == {"id": "tides", "label": "Tides", "count": 1,
+    assert cats["markets"]["count"] == 2  # coin price + keyed quote; dead-crypto (failed) is not counted
+    assert cats["water"]["subcategories"][0] == {"id": "tides", "label": "Tides", "count": 2,
                                                  "keywords": ["tide", "tides", "high tide"]}
 
 
@@ -149,7 +215,8 @@ def test_search_ranks_by_relevance_and_hides_failed(tmp_path, pack_bytes) -> Non
     idx, _ = _index(tmp_path, pack_bytes)
     idx.install()
     r = idx.search("bitcoin price")
-    assert [x["id"] for x in r["results"]] == ["coingecko-price"]  # the failed feed never shows by default
+    ids = [x["id"] for x in r["results"]]
+    assert ids[0] == "coingecko-price" and "dead-crypto" not in ids  # the failed feed never shows by default
     assert idx.search("tides for Charleston today")["results"][0]["id"] == "coops-tide-hilo"
     assert idx.search("is github down")["results"][0]["id"] == "statuspage-summary"
     assert idx.search("bitcoin", status="failed")["results"][0]["id"] == "dead-crypto"
@@ -158,12 +225,14 @@ def test_search_ranks_by_relevance_and_hides_failed(tmp_path, pack_bytes) -> Non
 def test_browse_without_query_orders_by_prior_and_filters(tmp_path, pack_bytes) -> None:
     idx, _ = _index(tmp_path, pack_bytes)
     idx.install()
-    assert [x["id"] for x in idx.search()["results"]] == ["coops-tide-hilo", "coingecko-price",
-                                                          "statuspage-summary"]
+    ids = [x["id"] for x in idx.search()["results"]]
+    # reviewed sources first, in taxonomy order: water, markets, tech, sports
+    assert ids.index("coops-tide-hilo") < ids.index("coingecko-price") < ids.index("statuspage-summary") \
+        < ids.index("mlb-team-schedule")
     only = idx.search(category="markets", subcategory="crypto")
-    assert only["total"] == 1 and only["results"][0]["categories"] == ["markets/crypto"]
+    assert only["total"] == 2 and {r["categories"][0] for r in only["results"]} == {"markets/crypto"}
     page = idx.search(offset=1, limit=1)
-    assert page["total"] == 3 and [x["id"] for x in page["results"]] == ["coingecko-price"]
+    assert page["total"] == 6 and len(page["results"]) == 1  # failed sources never browse
     assert idx.get("coops-tide-hilo")["name"] == "NOAA tide predictions"
     assert idx.get("nope") is None
 
@@ -254,12 +323,12 @@ def test_route_flow_install_browse_add_remove(client: TestClient) -> None:
     assert client.get("/api/library/status").json()["installed"] is False
     assert client.get("/api/library/sources").status_code == 409
     st = client.post("/api/library/install").json()
-    assert st["installed"] and st["records"] == 4
+    assert st["installed"] and st["records"] == 7
     cats = client.get("/api/library/taxonomy").json()["categories"]
-    assert {c["id"] for c in cats} == {"water", "markets", "tech"}
+    assert {c["id"] for c in cats} == {"water", "markets", "tech", "sports"}
     assert "keywords" not in cats[0]["subcategories"][0]
     hits = client.get("/api/library/sources", params={"q": "bitcoin price"}).json()
-    assert [r["id"] for r in hits["results"]] == ["coingecko-price"] and hits["local"] == []
+    assert hits["results"][0]["id"] == "coingecko-price" and hits["local"] == []
     assert client.get("/api/library/sources/coops-tide-hilo").json()["name"] == "NOAA tide predictions"
     assert client.get("/api/library/sources/nope").status_code == 404
     bad = client.post("/api/library/local", json=_form(url="http://x.example.com/a"))
@@ -272,3 +341,121 @@ def test_route_flow_install_browse_add_remove(client: TestClient) -> None:
     assert [r["id"] for r in client.get("/api/library/local").json()["sources"]] == [added["id"]]
     assert client.delete(f"/api/library/local/{added['id']}").json() == {"ok": True}
     assert client.delete(f"/api/library/local/{added['id']}").status_code == 404
+
+
+# --- resolvers + fills + candidates (the card flow's layer 1) -------------------------------------
+
+
+
+@pytest.fixture()
+def lib(tmp_path, pack_bytes):
+    idx, _ = _index(tmp_path, pack_bytes)
+    idx.install()
+    return idx
+
+
+def test_resolver_by_name_ask_on_ties_pick_by_population(lib) -> None:
+    with lib._conn() as con:
+        r = library_resolve.Resolver(con)
+        assert r.by_name("place", "weather in Portland")["status"] == "ambiguous"  # OR vs ME: ~10x, ask
+        amb = r.by_name("place", "weather in Portland")
+        assert [c["state"] for c in amb["candidates"]][:2] == ["OR", "ME"]  # likeliest readings first
+        assert r.by_name("place", "weather in Portland Oregon")["best"]["state"] == "OR"
+        assert r.by_name("place", "rain in Denver")["best"]["state"] == "CO"  # 377x bigger: what people mean
+        assert r.by_name("statuspage", "is GitHub down")["best"]["key"] == "www.githubstatus.com"
+        assert r.by_name("team_mlb", "next Braves game")["best"]["key"] == "144"
+        assert r.by_name("team_mlb", "is it sunny")["status"] == "none"
+
+
+def test_resolver_near_asks_when_close_choices_differ(lib) -> None:
+    with lib._conn() as con:
+        r = library_resolve.Resolver(con)
+        near = r.near("tide_station", 28.1, -80.64, 30, ("water",))
+        assert near["status"] == "resolved" and near["best"]["key"] == "872"  # both close ones are Indian River
+        mixed = r.near("tide_station", 27.97, -80.53, 30, ("water",))  # between the lagoon and the inlet
+        assert mixed["status"] == "ambiguous"
+        assert {c["attrs"]["water"] for c in mixed["candidates"]} == {"Indian River", "Atlantic"}
+        assert r.near("tide_station", 39.7, -104.9, 30, ("water",))["status"] == "none"  # Denver: honest
+
+
+def test_candidate_urls_fill_from_words_clock_and_resolvers(lib) -> None:
+    with lib._conn() as con:
+        r = library_resolve.Resolver(con)
+        rec = json.loads(con.execute("SELECT record FROM library_sources WHERE id='coops-tide-hilo'").fetchone()[0])
+        urls, why = library_resolve.candidate_urls(rec, "tides for Melbourne FL", _POLICY_GEO, r,
+                                                   now=datetime(2026, 9, 28, 9, tzinfo=UTC))
+        assert not why and len(urls) == 1
+        assert urls[0]["url"] == ("https://api.tidesandcurrents.noaa.gov/api/prod/datagetter?station=872"
+                                  "&begin_date=20260928")
+        assert "Melbourne Causeway" in urls[0]["label"]
+
+
+def test_candidate_urls_refuse_what_needs_a_key_a_helper_or_an_unnamed_thing(lib) -> None:
+    with lib._conn() as con:
+        r = library_resolve.Resolver(con)
+        get = lambda sid: json.loads(con.execute("SELECT record FROM library_sources WHERE id=?",
+                                                 [sid]).fetchone()[0])
+        assert library_resolve.candidate_urls(get("keyed-quote"), "bitcoin quote", {}, r)[1].startswith(
+            "needs your own key")
+        assert library_resolve.candidate_urls(get("helper-stations"), "tide stations", {}, r)[1].startswith(
+            "a lookup helper")
+        assert "doesn't name" in library_resolve.candidate_urls(get("statuspage-summary"), "is it down", {}, r)[1]
+        contact = {**get("coingecko-price"), "access": {**get("coingecko-price")["access"], "contact_ua": True}}
+        assert "contact email" in library_resolve.candidate_urls(contact, "bitcoin price", {}, r)[1]
+
+
+def test_ambiguous_reading_expands_together_and_duplicates_are_refused() -> None:
+    values = {"lat": [("45.5", "Portland (OR)"), ("43.6", "Portland (ME)")],
+              "lon": [("-122.6", "Portland (OR)"), ("-70.2", "Portland (ME)")]}
+    urls = library_resolve._expand("https://x.example.org/f?lat={lat}&lon={lon}", values,
+                                   {"lat": "place", "lon": "place"})
+    assert [u["url"] for u in urls] == ["https://x.example.org/f?lat=45.5&lon=-122.6",
+                                        "https://x.example.org/f?lat=43.6&lon=-70.2"]  # never mixed readings
+    assert all(u["choice"] for u in urls)
+
+
+def test_candidates_for_the_card_flow(lib) -> None:
+    tides, _ = lib.candidates("tides for Melbourne FL")
+    assert [c["source_id"] for c in tides] == ["coops-tide-hilo"]  # the helper list is never a card
+    assert tides[0]["url"].startswith("https://api.tidesandcurrents.noaa.gov/") and "station=872" in tides[0]["url"]
+    status, _ = lib.candidates("is GitHub down")
+    assert status[0]["url"] == "https://www.githubstatus.com/api/v2/summary.json"
+    braves, _ = lib.candidates("next Braves game")
+    assert braves[0]["url"] == "https://statsapi.mlb.com/api/v1/schedule?teamId=144"
+    coins, skipped = lib.candidates("bitcoin price")
+    assert [c["source_id"] for c in coins] == ["coingecko-price"]  # keyed + failed sources stay off the card
+    nothing, _ = lib.candidates("tides in Denver CO")
+    assert nothing == []  # no station within range: the flow falls through to web search, honestly
+
+
+# --- the flow: Library candidates on the pick card, and a tap is a Yes (R6) ------------------------
+
+def test_flow_pick_pause_seals_library_candidates_and_a_tap_records_yes(tmp_path, pack_bytes, monkeypatch) -> None:
+    from smartbrain_3000 import ni_flow
+    idx, _ = _index(tmp_path, pack_bytes)
+    idx.install()
+    monkeypatch.setattr(ni_flow, "_LIBRARY_PROVIDER", lambda: idx)
+    conn = duckdb.connect(":memory:")
+    dbmod.run_migrations(conn)
+    store = ni.NIStore(conn, gen_master_key())
+    item_id = ni_flow.create_shell_item(store, "tides for Melbourne FL")
+    ni_flow._flow_write(store, item_id, ni_flow._make_record("tides for Melbourne FL", "source"))
+    ni_flow._pause_source_pick(store, item_id, "tides for Melbourne FL", {"kind": "external_data"},
+                               call_model=lambda _p: "{}")
+    rec = ni_flow._flow_read(store, item_id)
+    assert rec["error"] == ni_flow.AWAITING_SOURCE_PICK and rec["_ranked_library"][0]["source_id"] == "coops-tide-hilo"
+    field = ni_flow.board_flow_field(store, item_id)
+    sug = field["suggestions"][0]
+    assert sug["kind"] == "library" and "station=872" in sug["url"]
+    assert any("Melbourne Causeway" in e for e in sug["evidence"])
+    local = library_index.LocalSources(store)
+    assert local.record_yes("coops-tide-hilo") == 1 and local.record_yes("coops-tide-hilo") == 2
+    raw = conn.execute("SELECT ciphertext FROM ni_snapshots WHERE item_id = ? AND slot = 'votes'",
+                       [library_index.LOCAL_RESERVED_ID]).fetchone()[0]
+    assert b"coops" not in bytes(raw)  # the user's choices are sealed at rest
+
+
+def test_flow_without_a_library_is_unchanged(monkeypatch) -> None:
+    from smartbrain_3000 import ni_flow
+    monkeypatch.setattr(ni_flow, "_LIBRARY_PROVIDER", None)
+    assert ni_flow._library_candidates("tides for Melbourne FL") == []
