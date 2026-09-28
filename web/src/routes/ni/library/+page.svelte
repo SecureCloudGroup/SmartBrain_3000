@@ -321,8 +321,12 @@
     addBusy = true;
     addError = "";
     try {
-      await api.libraryLocalAdd(addFormValue);
-      toast("Added to your sources.");
+      const added = await api.libraryLocalAdd(addFormValue);
+      toast(!addFormValue.suggest
+        ? "Added to your sources."
+        : added.suggested
+          ? "Added — your suggestion goes to the Library in the background."
+          : "Added to your sources. Too many suggestions are still waiting to send — suggest this one later.");
       addOpen = false;
       await runSearch();
     } catch (err) {

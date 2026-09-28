@@ -129,13 +129,12 @@ def library_local_add(request: Request, body: LocalSourceIn) -> dict:
         library_index.LocalSources(store).add(record)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from None
-    if body.suggest:
-        library_client.queue_suggestion(store, record)
+    suggested = bool(body.suggest) and library_client.queue_suggestion(store, record)
     request.app.state.audit.append(
         "user", "library_local_add", "reviewed", "executed", True,
         args_summary=tools.summarize({"host": record["provider"]["name"], "category": record["categories"][0]}),
         result_summary=tools.summarize({"id": record["id"]}))
-    return _local_row(record)
+    return {**_local_row(record), "suggested": suggested}
 
 
 @router.delete("/api/library/local/{source_id}")

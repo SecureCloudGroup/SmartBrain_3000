@@ -308,3 +308,12 @@ def test_sniffed_fetch_reraises_security_refusal(monkeypatch) -> None:
     monkeypatch.setattr(netguard, "safe_fetch_json", refuse)
     with pytest.raises(netguard.FetchError, match="blocked"):
         ni_flow._sniffed_fetch("https://ex.test/x")
+
+
+def test_an_entity_declaration_padded_past_the_head_is_still_refused() -> None:
+    from smartbrain_3000 import formats
+    body = "<?xml version='1.0'?>" + " " * 10_000 + \
+        "<!DOCTYPE r [<!ENTITY a 'aaaa'>]><r>&a;&a;</r>"
+    for parse in (formats.parse_xml, formats.parse_feed):
+        with pytest.raises(formats.FormatError):
+            parse(body)

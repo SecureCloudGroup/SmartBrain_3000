@@ -1932,7 +1932,7 @@ export const api = {
     req<LibrarySourceDetail>(`/api/library/sources/${encodeURIComponent(id)}`),
   libraryLocal: () => req<{ sources: LibrarySourceRow[] }>("/api/library/local"),
   libraryLocalAdd: (body: LocalSourceInput) =>
-    req<LibrarySourceRow>("/api/library/local", { method: "POST", body: JSON.stringify(body) }),
+    req<LibrarySourceRow & { suggested?: boolean }>("/api/library/local", { method: "POST", body: JSON.stringify(body) }),
   libraryLocalDelete: (id: string) =>
     req<{ ok: boolean }>(`/api/library/local/${encodeURIComponent(id)}`, { method: "DELETE" }),
 

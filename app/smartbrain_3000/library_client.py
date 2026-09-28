@@ -51,19 +51,24 @@ def _write(store, items: list[dict]) -> None:
     store.write_reserved_snapshot(LOCAL_RESERVED_ID, OUTBOX_SLOT, {"items": items})
 
 
-def _add(store, item: dict) -> None:
+def _add(store, item: dict) -> bool:
+    """Queue ``item``. When full, the oldest VOTE makes room; suggestions are never dropped to make
+    room — a new item that finds only suggestions ahead of it is refused (False)."""
     with _LOCK:
         items = _read(store) + [{**item, "id": uuid.uuid4().hex}]
         while len(items) > MAX_OUTBOX:
-            oldest_vote = next((i for i, x in enumerate(items) if x["path"] == "votes"), 0)
+            oldest_vote = next((i for i, x in enumerate(items) if x["path"] == "votes"), None)
+            if oldest_vote is None:
+                return False
             items.pop(oldest_vote)
         _write(store, items)
+        return True
 
 
-def queue_vote(store, source_id: str, verdict: str = "yes") -> None:
+def queue_vote(store, source_id: str, verdict: str = "yes") -> bool:
     """A tap on a Library source (R6). Only the source's id and the verdict are ever sent."""
     assert source_id and verdict in ("yes", "no", "broken"), "a Library id and a verdict"
-    _add(store, {"path": "votes", "body": {"source_id": source_id[:120], "verdict": verdict,
+    return _add(store, {"path": "votes", "body": {"source_id": source_id[:120], "verdict": verdict,
                                             "app_version": __version__[:32]},
                  "tries": 0, "next": _now().isoformat()})
 
@@ -85,10 +90,11 @@ def suggestion_record(record: dict) -> dict:
     return out
 
 
-def queue_suggestion(store, record: dict, via: str = "form") -> None:
-    """The user asked to suggest their source to the Library."""
+def queue_suggestion(store, record: dict, via: str = "form") -> bool:
+    """The user asked to suggest their source to the Library. False when the outbox is full of
+    unsent suggestions (the caller tells the user)."""
     assert via in ("form", "yes"), "via is form or yes"
-    _add(store, {"path": "suggestions", "body": {"record": suggestion_record(record), "via": via,
+    return _add(store, {"path": "suggestions", "body": {"record": suggestion_record(record), "via": via,
                                                   "app_version": __version__[:32]},
                  "tries": 0, "next": _now().isoformat()})
 

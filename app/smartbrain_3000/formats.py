@@ -256,9 +256,9 @@ def _refuse_doctype(text: str) -> None:
     """Refuse XML/feed bytes that name a DOCTYPE or ENTITY (entity-expansion defence)."""
     assert isinstance(text, str), "text required"
     assert _XML_UNSAFE_DECL_RE is not None, "regex loaded"
-    # scan only the head — legitimate declarations always appear before the root
-    head = text[:4096].encode("utf-8", "replace")
-    if _XML_UNSAFE_DECL_RE.search(head):
+    # the whole body (already size-capped by netguard): a head-only scan is bypassed by
+    # padding the declaration past it with whitespace or comments
+    if _XML_UNSAFE_DECL_RE.search(text.encode("utf-8", "replace")):
         raise FormatError("XML DOCTYPE / ENTITY declarations are refused")
 
 

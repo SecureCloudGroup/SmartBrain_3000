@@ -1976,3 +1976,36 @@ re-offers the Library's rows. A flow record a pre-Library build left at
 Cards already built from recipes keep working: their specs are self-contained
 and the `recipe` born marker stays readable.
 
+
+## 31. The user's own key and contact email for Library sources (2026-09-28)
+
+- **Library side.** `library_resolve.candidate_urls` no longer refuses a source whose
+  parameter fills `from: vault_key`: it returns the address WITHOUT the key plus
+  `needs_key: {in: query|header, name, prefix, docs_url}` (`key_placement`; a key in
+  the path is refused — it would sit in logs). `contact_ua` sources carry
+  `needs_contact`. `library_index.candidates` keeps gathering keyed sources but stops
+  on `limit` keyless ones and orders keyless first; exact lookup ties break
+  keyless-first, prior, id (same in the Library's `build.lookup`).
+- **Spec.** `http_json` gains `secret_query: {<query name>: {"$secret": "ni:<id>:<name>"}}`
+  (≤2, https-only, validated closed) and `contact_ua: true`.
+  `ni.http_request_parts(source, item_id, secrets)` is the one request builder for the
+  engine AND the flow's first sample: `$secret` headers + `secret_query` resolved
+  through `_load_credential` (host-bound, https-only, item-scoped); `contact_ua` adds
+  the user's email to the honest User-Agent (`NIError("contact_missing")` when unset).
+  Any header or key ⇒ redirects refused. `rewrite_self_refs` / `rewrite_refs_to_self`
+  cover `secret_query`.
+- **Flow.** A tap on a Library row that needs a key or email seals `_access` (bound to
+  that exact URL) and pauses at `awaiting_access` (question `give_access`) — nothing is
+  fetched. `POST /api/ni/items/{id}/flow/access {key?, email?}` (desktop-local, audited
+  without values) stores the key as `ni:<id>:api_key` bound to the host (header prefix
+  such as `Token ` prepended) and the email as SecretStore `contact:email`, then starts
+  the worker. A same-host `api_key` another card holds is reused. Sampling
+  (`_fetch_with_access`) and assembly attach the key only when the URL equals the
+  sealed `_access.url`; the built spec carries refs and an `api_key` secret param,
+  never a value.
+- **Library API client** (`library_client.py`). A Library tap queues a vote
+  `{source_id, "yes", app_version}`; the add form's `suggest` queues the record with
+  parameter values, headers, tier, origin and votes removed. A sealed outbox (reserved
+  row, slot `outbox`, ≤200, oldest votes dropped first) is sent by the scheduler pass
+  `_auto_send_library_outbox` (≤10 per tick, backoff 15 min doubling to 24 h, drop on
+  400/413/415/422 or after 8 tries). `SMARTBRAIN_LIBRARY_API=""` switches sending off.

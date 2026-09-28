@@ -114,3 +114,14 @@ def test_a_suggestion_carries_the_template_never_a_value() -> None:
     assert not {"id", "tier", "origin", "votes", "validation"} & set(rec)
     assert rec["access"]["params"] == [{"name": "site", "kind": "none", "required": True, "example": None}]
     assert rec["access"]["url_template"] == "https://water.example.org/g?site={site}"
+
+
+def test_a_full_outbox_drops_old_votes_never_suggestions(store, monkeypatch) -> None:
+    monkeypatch.setattr(library_client, "MAX_OUTBOX", 3)
+    assert library_client.queue_vote(store, "old-vote")
+    assert library_client.queue_suggestion(store, _local_record())
+    assert library_client.queue_suggestion(store, _local_record())
+    assert library_client.queue_suggestion(store, _local_record())  # the vote makes room
+    assert [x["path"] for x in library_client._read(store)] == ["suggestions"] * 3
+    assert library_client.queue_suggestion(store, _local_record()) is False  # refused, none lost
+    assert library_client.pending(store) == 3
