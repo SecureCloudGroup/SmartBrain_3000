@@ -510,6 +510,21 @@ def safe_fetch_ni_pack(url: str, max_bytes: int) -> bytes:
                         _VAULT_FETCH_DEADLINE_SECONDS)["content"]
 
 
+_LIBRARY_PACK_CT = ("application/octet-stream", "application/gzip", "application/x-gzip")
+
+
+def safe_fetch_library_pack(url: str, max_bytes: int) -> bytes:
+    """Fetch the SmartBrain Library pack (a gzip of a DuckDB file) behind the SSRF guard — RAW bytes.
+
+    The caller verifies the bytes against the sha256 this app release pins (ruling R12), so the
+    content type is not a trust signal; GitHub release assets redirect to a CDN host, which the
+    guard re-validates on every hop. Streamed byte cap + the vault fetchers' wall-clock deadline.
+    """
+    assert 0 < max_bytes, "cap must be positive"
+    return _guarded_get(_strip_fragment(url), _LIBRARY_PACK_CT, max_bytes,
+                        _VAULT_FETCH_DEADLINE_SECONDS)["content"]
+
+
 def safe_fetch_vault_object(url: str, max_bytes: int) -> bytes:
     """Fetch one tree-hosted vault entry (index.bin / objects/*.bin) behind the SSRF guard.
 

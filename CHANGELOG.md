@@ -11,6 +11,19 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Added
+
+- **The Library page.** The Library button on the Neural Interface page now
+  opens a page for the SmartBrain Library: about 9,000 US data sources
+  (weather, tides, markets, sports, transit, government data and more) that
+  you can browse by category or search. Each source shows who publishes it,
+  how official it is, its terms, how often it updates and whether it was
+  working when last checked. **Add a source** saves your own source to this
+  device, encrypted with the rest of your data. The first time you open the
+  page it downloads the Library (about 8 MB); the download must match the
+  exact file this release was built with, or it is refused. Card templates
+  are still available from a link on the page.
+
 ### Fixed
 
 - **Neural Interface weather cards show the unit the source returned.** A
