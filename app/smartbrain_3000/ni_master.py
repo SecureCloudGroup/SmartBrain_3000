@@ -49,7 +49,6 @@ PARTS: tuple[str, ...] = (
 STAGE_PART: dict[str, str] = {
     "intent": "understand",
     "source": "locate",
-    "confirm_source": "authorize",
     "sampling": "acquire",
     "mapping": "shape",
     "assembling": "present",
@@ -63,8 +62,7 @@ STAGE_PART: dict[str, str] = {
 # Closed question kinds a paused/terminal card may ask. Each maps to one card
 # affordance the frontend already has or gains in G1.
 QUESTION_KINDS: frozenset[str] = frozenset({
-    "pick_source",     # source pause: vetted suggestions + paste-a-URL
-    "approve_source",  # confirm pause: Approve / Not this source
+    "pick_source",     # source pause: Library/web suggestions + paste-a-URL
     "add_key",         # awaiting_credential: credential PUT
     "fill_params",     # awaiting_params: Fill modal
     "supply_date",     # computed ask without a literal date (G1 new)
@@ -192,8 +190,6 @@ def question_for(state: str, record: dict) -> dict | None:
     assert isinstance(record, dict), "record required"
     if state == "source":
         return {"kind": "pick_source"}
-    if state == "confirm_source":
-        return {"kind": "approve_source"}
     if state == "awaiting_credential":
         return {"kind": "add_key"}
     if state == "awaiting_params":

@@ -122,7 +122,6 @@ def test_terminal_surface_rejects_unknown_stamped_kind() -> None:
 
 @pytest.mark.parametrize("state,kind", [
     ("source", "pick_source"),
-    ("confirm_source", "approve_source"),
     ("awaiting_credential", "add_key"),
     ("awaiting_params", "fill_params"),
 ])

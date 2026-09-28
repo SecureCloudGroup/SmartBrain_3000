@@ -248,20 +248,6 @@
       }
     }
   }
-  async function pickRecipe(item: NiBoardItem, recipeId: string): Promise<void> {
-    console.assert(item.flow?.state === "source", "pickRecipe: pause required");
-    busyId = item.id;
-    try {
-      await api.niFlowPickRecipe(item.id, recipeId);
-      toast("Vetted source proposed — approve it on the card.");
-      await load();
-    } catch (err) {
-      const msg = describeError(err);
-      if (msg) error = msg;
-    } finally {
-      busyId = null;
-    }
-  }
   async function fixItem(item: NiBoardItem): Promise<void> {
     busyId = item.id;
     try {
@@ -1058,37 +1044,6 @@
     }
   }
 
-  async function approveFlowSource(item: NiBoardItem) {
-    console.assert(item.flow?.state === "confirm_source", "approveFlowSource: pause required");
-    busyId = item.id;
-    try {
-      const res = await api.niFlowConfirmSource(item.id);
-      toast(res.state === "ready"
-        ? "Source approved — the card is being commissioned."
-        : "Source approved.");
-      await load();
-    } catch (err) {
-      const msg = describeError(err);
-      if (msg) error = msg;
-    } finally {
-      busyId = null;
-    }
-  }
-  async function declineFlowSource(item: NiBoardItem) {
-    console.assert(item.flow?.state === "confirm_source", "declineFlowSource: pause required");
-    busyId = item.id;
-    try {
-      await api.niFlowDeclineSource(item.id);
-      toast("Okay — pick a different source on the card.");
-      await load();
-    } catch (err) {
-      const msg = describeError(err);
-      if (msg) error = msg;
-    } finally {
-      busyId = null;
-    }
-  }
-
   async function validateLooksRight(item: NiBoardItem) {
     console.assert(item.state === "commissioning", "validateLooksRight: only commissioning");
     console.assert(typeof item.id === "string", "validateLooksRight: id is string");
@@ -1341,26 +1296,24 @@
                   Finding a source for this…
                 </p>
               {:else if item.flow.state === "source"}
-                <!-- P3 (2026-09-17): the source-pick pause renders its OWN
-                     affordances — vetted suggestions (every category) that
-                     route into the normal Approve-source consent, and a
-                     paste-a-URL field (the universal generic path; your paste
-                     is the consent, netguard guards the fetch). -->
+                <!-- The source-pick pause renders its OWN affordances — SmartBrain
+                     Library sources first (web results only when the Library has
+                     none), and a paste-a-URL field. The tap or paste is the
+                     consent; netguard guards the fetch. -->
                 <div class="ni-commission">
                   <p style="margin:0 0 var(--s-2); font-size:var(--f-label)">
                     {item.flow.suggestions?.[0]?.kind === "library"
                       ? "From the SmartBrain Library — tap the one that fits:"
                       : item.flow.suggestions?.[0]?.kind === "web"
-                        ? "No vetted source matched — found on the web:"
-                        : "No vetted source matched this request yet."}
+                        ? "The Library has no source for this — found on the web:"
+                        : "No source found for this yet — paste a link to the data:"}
                   </p>
                   {#if item.flow.suggestions && item.flow.suggestions.length > 0}
                     <div class="ni-suggestions">
-                      <!-- S2: web rows key on url (recipe_id is ""); a tap
-                           submits the sealed URL through the normal pick
-                           consent. Evidence = values our jailed reader
-                           actually extracted from that page, shown pre-tap. -->
-                      {#each item.flow.suggestions as sug (sug.recipe_id || sug.url)}
+                      <!-- Rows key on url; a tap submits the sealed URL through the
+                           normal pick consent. Web evidence = values our jailed
+                           reader actually extracted from that page, shown pre-tap. -->
+                      {#each item.flow.suggestions as sug (sug.url)}
                         {#if sug.kind === "library"}
                           <!-- Library candidate (R8): a real Library source with its address already
                                filled from your words; the line under it names the provider and, when
@@ -1379,7 +1332,7 @@
                               </p>
                             {/if}
                           </div>
-                        {:else if sug.kind === "web"}
+                        {:else}
                           <div class="ni-web-sug">
                             <button
                               class="secondary"
@@ -1393,13 +1346,6 @@
                               </p>
                             {/if}
                           </div>
-                        {:else}
-                          <button
-                            class="secondary"
-                            disabled={busyId === item.id}
-                            title={sug.url}
-                            onclick={() => pickRecipe(item, sug.recipe_id)}
-                          >{sug.title} — {sug.host}</button>
                         {/if}
                       {/each}
                     </div>
@@ -1423,48 +1369,6 @@
                   {#if flowActionError[item.id]}
                     <p class="error" style="margin:var(--s-1) 0 0; font-size:var(--f-label)">{flowActionError[item.id]}</p>
                   {/if}
-                </div>
-              {:else if item.flow.state === "confirm_source"}
-                <!-- Card-consent (2026-09-15): the flow's own approval affordance,
-                     rendered by CODE the instant the pause happens — the exact URL
-                     unmissable, the optional place lookup and any not-covered
-                     fields disclosed on the same surface the tap approves. -->
-                <div class="ni-commission">
-                  <p style="margin:0 0 var(--s-2); font-size:var(--f-label)">
-                    {item.flow.recipe_title ? `Vetted source: ${item.flow.recipe_title}` : "Source found"}
-                  </p>
-                  <p style="margin:0 0 var(--s-2); font-size:var(--f-label); word-break:break-all">
-                    Fetches: <strong>{item.flow.filled_url ?? item.flow.source_url}</strong>
-                  </p>
-                  {#if item.flow.fills}
-                    <p class="muted" style="margin:0 0 var(--s-2); font-size:var(--f-label)">
-                      {#each Object.entries(item.flow.fills) as [name, value] (name)}
-                        <span style="margin-right: var(--s-3)">{name}: <strong>{value}</strong></span>
-                      {/each}
-                    </p>
-                  {/if}
-                  {#if item.flow.geocode_query}
-                    <p class="muted" style="margin:0 0 var(--s-2); font-size:var(--f-label)">
-                      Also looks up “{item.flow.geocode_query}” via {item.flow.geocode_host} to fill the location.
-                    </p>
-                  {/if}
-                  {#if item.flow.not_covered && item.flow.not_covered.length > 0}
-                    <p class="muted" style="margin:0 0 var(--s-2); font-size:var(--f-label)">
-                      This card won’t include: {item.flow.not_covered.join(", ")}.
-                    </p>
-                  {/if}
-                  <div class="ni-actions">
-                    <button
-                      class="secondary"
-                      disabled={busyId === item.id}
-                      onclick={() => approveFlowSource(item)}
-                    >{busyId === item.id ? "Building…" : "Approve source"}</button>
-                    <button
-                      class="ghost"
-                      disabled={busyId === item.id}
-                      onclick={() => declineFlowSource(item)}
-                    >Not this source</button>
-                  </div>
                 </div>
               {:else}
                 <p class="muted" style="margin:0; font-size:var(--f-label)">{flowStageLabel(item.flow)}</p>

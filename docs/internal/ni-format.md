@@ -709,7 +709,7 @@ modeled on claudecli.py's process hygiene:
 - A locked vault produces no notifications at all (the endpoint 423s) — tray
   notices never leak sealed content past the unlock boundary.
 
-## 18. Source catalog (v2c: bundled seed; remote pack rides Phase 3 trust machinery)
+## 18. Source catalog (RETIRED 2026-09-28 — replaced by the SmartBrain Library, §30)
 
 The curated ground for "AI suggests, user picks" (creation-flow law, §9).
 
@@ -1032,7 +1032,7 @@ images never reach the page.
   chip telling the truth. Referenced items' own consent is untouched — a
   composite grants no new egress to anyone.
 
-## 26. Recipes — the model selects, it doesn't write (deterministic authoring)
+## 26. Recipes (RETIRED 2026-09-28 — replaced by the SmartBrain Library, §30)
 
 Field lesson (2026-09-13): the engine is deterministic; the AUTHORING edge was
 not — a model writing extract paths against a response shape it has never seen
@@ -1934,3 +1934,26 @@ cards LOOKED built.
   marker, so every Fix/refine since M1 dropped the §29 door's spec-shape
   truth (falling back to the prunable journal) — API cards too, proven on
   unfixed main. `_finalize` now carries the prior marker when `born` is None.
+
+## 30. The SmartBrain Library replaces the built-in catalog (2026-09-28)
+
+The 12 bundled recipes (§18, §26) and everything that existed only for them
+are removed: `ni_catalog.py` + `data/ni_catalog.json`, M-RANK over the catalog
+(`locate_rank`), the keyword scorer (`match_recipe` / `suggest_recipes`), the
+`confirm_source` pause and its Approve / Not-this-source card, the recipe
+geocode two-step, unit fills, threshold-over-recipe routing, the
+`not_covered` disclosure, the `list_ni_catalog` and `confirm_ni_flow_source`
+tools, the pick-recipe / confirm-source / decline-source routes, and
+`tools/ni-library/prove.py`.
+
+The source step is now one pause (`_pause_source_pick`): SmartBrain Library
+candidates whose parameters all fill from the user's words seal as
+`_ranked_library` (≤3, provider + authority + the reading when the words fit
+several); when the Library has none, S2 web search runs as before; otherwise
+the plain pause (paste a link). A tap is the consent and a Library tap is
+recorded as a Yes. Re-entering the pick (refine asking for another source)
+re-offers the Library's rows. A flow record a pre-Library build left at
+`confirm_source` re-lands as the pick pause (board read or the tick sweep).
+Cards already built from recipes keep working: their specs are self-contained
+and the `recipe` born marker stays readable.
+

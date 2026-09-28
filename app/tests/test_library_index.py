@@ -459,3 +459,65 @@ def test_flow_without_a_library_is_unchanged(monkeypatch) -> None:
     from smartbrain_3000 import ni_flow
     monkeypatch.setattr(ni_flow, "_LIBRARY_PROVIDER", None)
     assert ni_flow._library_candidates("tides for Melbourne FL") == []
+
+
+class _NoSearch:
+    """A search service that must never be asked (the Library already answered)."""
+
+    def __init__(self) -> None:
+        self.queries: list[str] = []
+
+    def search(self, query: str, limit: int = 10) -> dict:
+        self.queries.append(query)
+        return {"results": [{"title": "Web", "url": "https://web.example.org/", "snippet": ""}]}
+
+
+def _flow_store(tmp_path, pack_bytes, monkeypatch):
+    from smartbrain_3000 import ni_flow
+    idx, _ = _index(tmp_path, pack_bytes)
+    idx.install()
+    monkeypatch.setattr(ni_flow, "_LIBRARY_PROVIDER", lambda: idx)
+    conn = duckdb.connect(":memory:")
+    dbmod.run_migrations(conn)
+    return ni.NIStore(conn, gen_master_key())
+
+
+def test_the_library_answers_first_and_web_search_never_runs(tmp_path, pack_bytes, monkeypatch) -> None:
+    """Layer 1 is the Library: when it has a source, no web search is made and no web rows seal."""
+    from smartbrain_3000 import ni_flow
+    store = _flow_store(tmp_path, pack_bytes, monkeypatch)
+    svc = _NoSearch()
+    monkeypatch.setattr(ni_flow, "_SEARCH_PROVIDER", lambda: svc)
+    item_id = ni_flow.create_shell_item(store, "tides for Melbourne FL")
+    ni_flow._pause_source_pick(store, item_id, "tides for Melbourne FL", {"kind": "external_data"},
+                               call_model=lambda _p: "{}")
+    rec = ni_flow._flow_read(store, item_id)
+    assert rec["_ranked_library"] and not rec.get("_ranked_search")
+    assert svc.queries == []
+
+
+def test_a_declined_or_refined_source_repicks_from_the_library(tmp_path, pack_bytes, monkeypatch) -> None:
+    """Re-entering the pick (a note asking for another source) offers the Library's rows again."""
+    from smartbrain_3000 import ni_flow
+    store = _flow_store(tmp_path, pack_bytes, monkeypatch)
+    item_id = ni_flow.create_shell_item(store, "tides for Melbourne FL")
+    ni_flow._flow_write(store, item_id, ni_flow._make_record("tides for Melbourne FL", "failed"))
+    ni_flow.reenter_source_pick(store, item_id, "pick again")
+    field = ni_flow.board_flow_field(store, item_id)
+    assert field["state"] == "source" and field["suggestions"][0]["kind"] == "library"
+
+
+def test_a_retired_catalog_confirm_pause_relands_as_a_library_pick(tmp_path, pack_bytes, monkeypatch) -> None:
+    """A card left waiting at the retired built-in catalog's confirm step after an upgrade
+    becomes a normal pick card with the Library's sources — never a dead state."""
+    from smartbrain_3000 import ni_flow
+    store = _flow_store(tmp_path, pack_bytes, monkeypatch)
+    item_id = ni_flow.create_shell_item(store, "tides for Melbourne FL")
+    record = ni_flow._make_record("tides for Melbourne FL", "source")
+    record.update(state="confirm_source", error="awaiting_confirm", _recipe_id="tides-x",
+                  source_url="https://example.org/old")
+    store.write_snapshot(item_id, "flow", record, ok=True)  # as a pre-Library build wrote it
+    field = ni_flow.board_flow_field(store, item_id)
+    assert field["state"] == "source" and field["error"] == ni_flow.AWAITING_SOURCE_PICK
+    assert field["suggestions"][0]["kind"] == "library"
+    assert ni_flow._flow_read(store, item_id)["state"] == "source"

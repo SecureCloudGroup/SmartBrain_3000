@@ -4,16 +4,16 @@ Field verdict 2026-09-13: a chat model orchestrating the NI lifecycle produced a
 16-minute doom-loop; the same model doing two bounded jobs inside a code-owned
 state machine produced correct cards in seconds. This module is that state
 machine. Every model call is closed-schema, retry-once, fail-clean; every other
-stage is pure code (recipe scoring, sample fetch + downsample, deterministic
+stage is pure code (Library lookup, sample fetch + downsample, deterministic
 path derivation, type-filtered mapping menu, template-based scene assembly,
 typed verification, handoff into the same store internals ``create_ni_item``
 already uses).
 
 Stages per §29: intent (M#1) → source (C) → sampling (C) → mapping (M#2) →
-assembly (C) → handoff (C). Consent moments are preserved: a recipe match rides
-the vetted-catalog URL; a user-named URL rides ``start_ni_flow`` args (REVIEWED);
-no source ⇒ the flow pauses at ``source`` for chat-supplied candidates and
-resumes via ``resume_ni_flow`` (REVIEWED) once the user picks.
+assembly (C) → handoff (C). Consent moments are preserved: a user-named URL
+rides ``start_ni_flow`` args (REVIEWED); otherwise the flow pauses at ``source``
+with SmartBrain Library (else web) candidates on the card and resumes once the
+user taps one or pastes a link — the tap is the consent.
 
 Freeform ``update_ni_item`` on flow- or recipe-born items is closed at the tool
 surface (§29): fixes re-enter the flow at Sampling via ``remap_ni_item``.
@@ -40,15 +40,17 @@ log = logging.getLogger("smartbrain.ni.flow")
 # ---- flow state machine + slot layout ------------------------------------
 
 FLOW_STATES: frozenset[str] = frozenset({
-    "intent", "source", "confirm_source", "sampling", "mapping", "assembling",
+    "intent", "source", "sampling", "mapping", "assembling",
     "awaiting_credential", "awaiting_params", "ready", "unsupported", "failed",
 })
-# C2/C3/H3 (audit 2026-09-13): host-free error MARKERS the frontend labels
-# ("Waiting for you to pick a source in chat" / "Waiting for you to approve
-# the source"). Sealed alongside a paused non-terminal state (source /
-# confirm_source), where a normal error string would be a lie.
+# C2/H3 (audit 2026-09-13): host-free error MARKER the frontend labels
+# ("Waiting for you to pick a source"). Sealed alongside the paused ``source``
+# state, where a normal error string would be a lie.
 AWAITING_SOURCE_PICK = "awaiting_pick"
-AWAITING_SOURCE_CONFIRM = "awaiting_confirm"
+# The retired built-in recipe catalog paused at ``confirm_source``; a record
+# still sitting there after an upgrade re-lands the pick pause (Library first).
+_RETIRED_CONFIRM_STATE = "confirm_source"
+_RETIRED_NOTE = "the built-in source list was retired — pick a source below"
 # M1 (audit 2026-09-13): §29 door-closure marker sealed into the spec at
 # creation. is_flow_or_recipe_born reads this FIRST, journal is a fallback for
 # pre-M1 items whose seal predates the key.
@@ -94,32 +96,6 @@ _STRING_FIELD_WORDS: frozenset[str] = frozenset({
     "city", "state", "country", "region", "message", "status", "label",
     "description", "summary", "text", "url", "link", "when", "time",
 })
-# C2 (audit 2026-09-13): the POC's ``\b[A-Z]{1,5}\b`` matched single letters
-# ("I", "A") and every ALL-CAPS shout ("HN", "US"), then rode a category-blind
-# +5 bump — "show me AAPL every 5 minutes" matched fx-usd-eur as easily as
-# stock-quote-finnhub. Fix: min 2 chars, explicit stop-word list, and the bump
-# ONLY fires when a category keyword also lands (see _score_recipe below).
-_TICKER_RE = re.compile(r"\b[A-Z]{2,5}\b")
-_TICKER_STOPWORDS: frozenset[str] = frozenset({
-    "AND", "THE", "FOR", "PRO", "PRE", "MAX", "MIN", "USA", "USD", "EUR",
-    "GBP", "JPY", "CNY", "HN", "US", "UK", "EU", "OK", "TV", "AM", "PM",
-    "ISS", "NASA", "USGS", "SF", "NYC", "LA", "II", "III", "IV", "IX", "XI",
-    # W-D (field 2026-09-17): "create new NI item ..." filled symbol=NI — a
-    # REAL NiSource quote rendered on a card titled GOOG. The product's own
-    # vocabulary and request-phrasing tokens can never be tickers.
-    "NI", "API", "KEY", "URL", "JSON", "HTML", "HTTP", "HTTPS", "CSV", "XML",
-    "AI", "LLM", "CLI", "SDK", "APP", "ID", "OHLCV",
-    "GET", "SET", "PUT", "CSS",
-    # Field 2026-09-21: major crypto tickers — ticker-SHAPED but never a stock
-    # symbol; without these "price of BTC" would elect the Finnhub quote.
-    "BTC", "ETH", "XRP", "DOGE", "SOL", "ADA", "BNB", "USDT", "USDC",
-})
-
-# Recipe scoring (§29 source stage): category+keyword scoring, with the ticker
-# bump gated on category corroboration (C2). Threshold at 2 keeps the fx / hn
-# / iss reproductions from the audit at NONE.
-_RECIPE_SCORE_MIN = 2
-
 # Display class per §29: value / list / (map/image degraded). ``value`` scenes
 # stack a title + one primary number + smaller siblings; ``list`` scenes use a
 # repeat over a generalized list path.
@@ -232,11 +208,9 @@ def _transition(store: ni.NIStore, item_id: str, state: str, **fields: Any) -> d
         notes.append(extra_note[:_MAX_NOTE])
     record = _make_record(request, state, source_url=source_url, intent=intent,
                           error=error, notes=notes[-_MAX_NOTES:])
-    # geocode-consent fix (2026-09-15): carry sealed underscore extras
-    # (``_recipe_id`` / ``_recipe_title`` / ``_remap`` / ``_geocode``) forward —
-    # ``_make_record`` is closed-shape, so a note appended while a flow sat
-    # paused at ``confirm_source`` used to WIPE the recipe id and the later
-    # confirm died ``failed(confirm)``. Explicit ``fields`` still override.
+    # Carry sealed underscore extras (``_remap``, ``_ranked_library``, …)
+    # forward — ``_make_record`` is closed-shape, so a note appended while a
+    # flow sat paused used to WIPE them. Explicit ``fields`` still override.
     for key, value in current.items():
         if key.startswith("_") and key not in record:
             record[key] = value
@@ -467,243 +441,6 @@ def stage_intent(request: str, model_call: Callable[[str], str]) -> dict:
     raise RuntimeError("unreachable — retry loop bounded to 2 attempts")
 
 
-# ---- stage 2: source (recipe scoring) ------------------------------------
-
-def _first_ticker(request: str) -> str | None:
-    """The first ticker-shaped non-stop-word token in the request, or None.
-
-    needs_params (2026-09-14): powers the deterministic recipe param fill —
-    the SAME token class whose corroborated hit selected the finance recipe
-    fills its ``symbol`` slot, so "show me AAPL stock" never lands a card
-    that asks the user to type AAPL a second time.
-    """
-    assert isinstance(request, str), "request required"
-    for match in _TICKER_RE.finditer(request):  # bounded by request length
-        token = match.group(0)
-        if token not in _TICKER_STOPWORDS:
-            return token
-    return None
-
-
-def _ticker_hit(request: str) -> bool:
-    """C2 (audit 2026-09-13): a ticker-shaped token that is NOT a stop word.
-
-    Splits by whitespace so ``S&P`` (5 chars but punctuation-fenced) never
-    trips the finance path — the regex operates on the original request, but a
-    stop-word check on each matched span filters "US", "AND", "HN", etc.
-    """
-    assert isinstance(request, str), "request required"
-    for match in _TICKER_RE.finditer(request):  # bounded by request length
-        token = match.group(0)
-        if token not in _TICKER_STOPWORDS:
-            return True
-    return False
-
-
-def _score_recipe(recipe: dict, request: str, intent: dict) -> int:
-    """Deterministic keyword+category scorer.
-
-    Base score: +2 per title word (>=3 chars) present in the request/wants hay,
-    +3 when the recipe's category name appears in the hay. Ticker bump lives
-    at the caller (match_recipe) and is category-gated per C2.
-    """
-    assert isinstance(recipe, dict) and isinstance(request, str), "args required"
-    haystack_words = (request.lower() + " " + " ".join(
-        w for w in intent.get("wants") or [] if isinstance(w, str)
-    ).lower()).split()
-    hay = set(haystack_words)
-    title_words = str(recipe.get("title") or "").lower().split()
-    category = str(recipe.get("category") or "").lower()
-    score = 0
-    for tw in title_words:  # bounded by title length
-        if tw in hay and len(tw) >= 3:
-            score += 2
-    if category and category in hay:
-        score += 3
-    return score
-
-
-def _category_corroborated(recipe: dict, request: str, intent: dict) -> bool:
-    """C2 (audit 2026-09-13): True iff the recipe's category (or a category-
-    keyword synonym for finance) appears in the request/wants hay.
-
-    Requiring corroboration means "show me AAPL every 5 minutes" — with no
-    "stock" / "quote" / "price" / "finance" word — reaches NO recipe (the
-    audit's stated verdict). "show me AAPL stock" corroborates and matches
-    the stock-quote-finnhub recipe.
-    """
-    assert isinstance(recipe, dict) and isinstance(request, str), "args required"
-    hay = (request.lower() + " " + " ".join(
-        w for w in intent.get("wants") or [] if isinstance(w, str)
-    ).lower())
-    category = str(recipe.get("category") or "").lower()
-    if category and category in hay:
-        return True
-    # A small per-category synonym set — narrow on purpose so a stray word does
-    # not smuggle a match. Only finance today (the one bump gated on this rule).
-    # Field 2026-09-21 ("show me the price of NVDA" resolved to NOTHING):
-    # ``price`` joins the set. It is safe HERE because this rule only ever
-    # gates the symbol-param ticker bump — a corroborated ALL-CAPS ticker must
-    # also be present — and the Google-elects-Bitcoin defect that once argued
-    # for excluding it is closed by the fixed-subject distinctive-word gate.
-    if category == "finance":
-        return any(w in hay for w in ("stock", "quote", "shares", "ticker",
-                                       "equity", "share", "price", "prices"))
-    return False
-
-
-# Matcher precision (field 2026-09-16): title words too generic to identify a
-# SUBJECT — "price" alone let the Bitcoin recipe score 2 on "Get stock price
-# of Google" and win on catalog order; the user then approved a "Google" card
-# that fetches BTC. A FIXED-subject recipe (no fillable params) must show a
-# distinctive subject word before it may match at all.
-_GENERIC_TITLE_WORDS: frozenset[str] = frozenset({
-    "price", "prices", "current", "quote", "rate", "rates", "exchange",
-    "stock", "the", "and", "for", "with", "past", "day", "json", "data",
-})
-
-
-def _has_fillable_params(recipe: dict) -> bool:
-    """True when the recipe declares at least one non-secret param slot."""
-    assert isinstance(recipe, dict), "recipe required"
-    template = recipe.get("spec_template") or {}
-    params = template.get("params") if isinstance(template, dict) else {}
-    return any(isinstance(d, dict) and d.get("kind") != "secret"
-               for d in (params or {}).values())
-
-
-def _has_symbol_param(recipe: dict) -> bool:
-    """True when the recipe takes a ``symbol`` slot (ticker-parameterized)."""
-    assert isinstance(recipe, dict), "recipe required"
-    template = recipe.get("spec_template") or {}
-    params = template.get("params") if isinstance(template, dict) else {}
-    decl = (params or {}).get("symbol")
-    return isinstance(decl, dict) and decl.get("kind") != "secret"
-
-
-def _distinctive_title_hit(recipe: dict, request: str, intent: dict) -> bool:
-    """A title word that actually names the recipe's SUBJECT appears in the hay."""
-    assert isinstance(recipe, dict) and isinstance(request, str), "args required"
-    hay = set((request.lower() + " " + " ".join(
-        w for w in intent.get("wants") or [] if isinstance(w, str)
-    ).lower()).split())
-    for tw in str(recipe.get("title") or "").lower().split():  # bounded title
-        word = tw.strip("()/,.")
-        if len(word) >= 3 and word not in _GENERIC_TITLE_WORDS and word in hay:
-            return True
-    return False
-
-
-# G3: two title-word hits (or category + word) — below this a candidate is
-# unrelated to the ask and renders as noise on the pick card.
-_SUGGEST_MIN_SCORE = 4
-
-
-def suggest_recipes(catalog: list[dict], request: str, intent: dict,
-                     top: int = 3) -> list[dict]:
-    """P3 (2026-09-17): ranked catalog candidates for the source-pick CARD.
-
-    The pause exists precisely when ``match_recipe`` cleared nobody — here the
-    same deterministic scorer runs WITHOUT the threshold so the card can offer
-    the closest vetted sources across EVERY category (weather, quakes, fx,
-    crypto, stocks alike — nothing subject-specific), each with its would-be
-    filled URL so the disclosure is concrete. Picking one routes through the
-    normal confirm_source consent; the card also always offers paste-a-URL.
-    """
-    assert isinstance(catalog, list) and isinstance(request, str), "args required"
-    assert isinstance(intent, dict) and top >= 1, "intent + top required"
-    scored: list[tuple[int, dict]] = []
-    for recipe in catalog:  # bounded by ni_catalog._MAX_SOURCES
-        if not isinstance(recipe, dict):
-            continue
-        if not _has_fillable_params(recipe) and                 not _distinctive_title_hit(recipe, request, intent):
-            continue  # the subject-precision gate holds here too
-        scored.append((_score_recipe(recipe, request, intent), recipe))
-    scored.sort(key=lambda pair: -pair[0])
-    out: list[dict] = []
-    relevant = [(sc, r) for sc, r in scored if sc >= _SUGGEST_MIN_SCORE]
-    for score, recipe in relevant[:top]:  # bounded by top
-        url = str(recipe.get("url_template") or "")
-        fills = _preview_recipe_fills(recipe, request)
-        out.append({
-            "recipe_id": str(recipe.get("id") or ""),
-            "title": str(recipe.get("title") or ""),
-            "host": str(recipe.get("host") or ""),
-            "url": display_filled_url(url, fills) if fills else url,
-        })
-    return out
-
-
-_RANK_PROMPT = (
-    "A user wants a live-data card. Their request: __REQUEST__\n"
-    "Understood as: __INTENT__\n"
-    "These vetted data sources exist (id | title | category | notes):\n"
-    "__CORPUS__\n"
-    'Which source SERVES this request? Reply ONLY '
-    '{"best": "<id>" | null, "alternates": ["<id>", ...], '
-    '"confidence": "high" | "medium"}. '
-    "best=null when none of them serves it (do NOT force a pick); alternates "
-    "= up to 3 other plausible ids; confidence high only when the match is "
-    "unmistakable. Use ONLY ids from the list."
-)
-
-
-def locate_rank(catalog: list[dict], request: str, intent: dict,
-                call_model: Callable[[str], str]) -> dict | None:
-    """M-RANK (round 7, LOCATE's interior — built after the 2026-09-21 field
-    verdict): the model matches the NEED against the code-built corpus by
-    MEANING, not word overlap. "Price of NVDA", "what is NVDA trading at",
-    and "AAPL quote" all reach the stock source with zero keyword lists.
-
-    Containment (the standing rules): the model only returns IDS from the
-    corpus code hands it — never a URL, never a new source; every id is
-    validated against the catalog; the pick still lands the normal consent
-    pause where the user sees the exact URL. ANY error or invalid reply
-    returns None and the deterministic scorer takes over (fallback, and the
-    recorded/offline path).
-    """
-    assert isinstance(catalog, list) and isinstance(request, str), "args required"
-    assert isinstance(intent, dict) and callable(call_model), "intent + model"
-    if not catalog:
-        return None
-    ids = {str(r.get("id") or "") for r in catalog if isinstance(r, dict)}
-    ids.discard("")
-    if not ids:
-        return None
-    lines = []
-    for r in catalog[:40]:  # bounded corpus
-        if not isinstance(r, dict) or not r.get("id"):
-            continue
-        lines.append(f"- {r['id']} | {str(r.get('title') or '')[:80]} | "
-                     f"{str(r.get('category') or '')[:20]} | "
-                     f"{str(r.get('notes') or '')[:140]}")
-    goal = {k: intent.get(k) for k in ("subject", "wants", "threshold")
-            if intent.get(k) is not None}
-    prompt = (_RANK_PROMPT
-              .replace("__REQUEST__", request[:300].replace("\n", " "))
-              .replace("__INTENT__", json.dumps(goal, ensure_ascii=False)[:300])
-              .replace("__CORPUS__", "\n".join(lines)))
-    try:
-        obj = _parse_json_reply(call_model(prompt))
-        best = obj.get("best")
-        confidence = obj.get("confidence")
-        alternates = obj.get("alternates")
-        if best is not None and (not isinstance(best, str) or best not in ids):
-            return None  # invented id — the whole reply is untrusted
-        if confidence not in ("high", "medium"):
-            return None
-        clean_alts: list[str] = []
-        if isinstance(alternates, list):
-            for a in alternates[:3]:
-                if isinstance(a, str) and a in ids and a != best \
-                        and a not in clean_alts:
-                    clean_alts.append(a)
-        return {"best": best, "confidence": confidence,
-                "alternates": clean_alts}
-    except Exception:  # fallback is the deterministic scorer, never a crash
-        return None
-
-
 _WEB_RANK_PROMPT = (
     "A user wants a live-data card. Their request: __REQUEST__\n"
     "Understood as: __INTENT__\n"
@@ -722,7 +459,7 @@ def rank_web_rows(rows: list[dict], request: str, intent: dict,
                   call_model: Callable[[str], str]) -> list[int] | None:
     """S2 rank (round 9/10): order code-fetched web rows by fit, by MEANING.
 
-    Sibling of ``locate_rank``, same containment: the model sees a code-built
+    Containment: the model sees a code-built
     corpus (titles/hosts/snippets plus any page-graph evidence) and returns
     only ROW IDS; every id is validated against the emitted set; ANY failure
     returns None and the caller keeps code order (fitness-then-search order).
@@ -765,49 +502,6 @@ def rank_web_rows(rows: list[dict], request: str, intent: dict,
         return order
     except Exception:  # code order stands, never a crash
         return None
-
-
-def match_recipe(catalog: list[dict], request: str, intent: dict) -> dict | None:
-    """§29 source stage: score every catalog entry; ticker heuristic → finance.
-
-    C2 (audit 2026-09-13): the ticker bump (+2, was +5) fires ONLY when the
-    recipe's category is corroborated in the request text — a bare ALL-CAPS
-    token never carries a match on its own.
-
-    Matcher precision (field 2026-09-16), two more deterministic gates:
-    - A FIXED-subject recipe (no fillable params — Bitcoin, USD/EUR, quakes)
-      matches only when a DISTINCTIVE title word appears in the request; the
-      generic overlap ("price", "rate") can never elect it for a different
-      subject. Parameterized recipes are exempt — their subject is the slot.
-    - The ticker bump applies only to recipes that TAKE a symbol param — a
-      corroborated GOOGL can boost the Finnhub quote, never a fixed-subject
-      recipe.
-
-    Returns the winning recipe (deep copy is caller's responsibility) or None
-    when nothing clears ``_RECIPE_SCORE_MIN``.
-    """
-    assert isinstance(catalog, list) and isinstance(request, str), "args required"
-    assert isinstance(intent, dict), "intent must be a dict"
-    ticker_hit = _ticker_hit(request)
-    best: dict | None = None
-    best_score = 0
-    for recipe in catalog:  # bounded by ni_catalog._MAX_SOURCES
-        assert isinstance(recipe, dict), "catalog entries must be dicts"
-        if not _has_fillable_params(recipe) and \
-                not _distinctive_title_hit(recipe, request, intent):
-            continue  # fixed subject, no subject word — never a candidate
-        s = _score_recipe(recipe, request, intent)
-        if (ticker_hit
-                and _has_symbol_param(recipe)
-                and str(recipe.get("category") or "").lower() == "finance"
-                and _category_corroborated(recipe, request, intent)):
-            s += 2
-        if s > best_score:
-            best_score = s
-            best = recipe
-    if best is None or best_score < _RECIPE_SCORE_MIN:
-        return None
-    return best
 
 
 # ---- stage 3: sampling (fetch + downsample + derive) --------------------
@@ -1408,7 +1102,6 @@ def _try_journal(store: ni.NIStore, item_id: str, kind: str, summary: str) -> No
 def run_flow(store: ni.NIStore, item_id: str, *,
              gateway_call: Callable[[str, str], str] | None = None,
              fetcher: Callable[[str], object] | None = None,
-             catalog: list[dict] | None = None,
              ni_route_model: str | None = None,
              source_url: str | None = None) -> dict:
     """§29 flow engine — SYNCHRONOUS main entry, drives the state machine end to end.
@@ -1421,8 +1114,7 @@ def run_flow(store: ni.NIStore, item_id: str, *,
     ``gateway_call(model, prompt)`` returns the model reply text; defaults to
     ``gateway.chat`` on the LIVE-resolved model (see ``_resolve_flow_model``).
     ``fetcher(url)`` returns a Python-decoded sample; defaults to
-    ``netguard.safe_fetch_json``. ``catalog`` defaults to
-    ``ni_catalog.entries()``. ``ni_route_model`` bypasses live resolution for
+    ``netguard.safe_fetch_json``. ``ni_route_model`` bypasses live resolution for
     tests; production callers leave it None.
     """
     assert store is not None and item_id, "store + id required"
@@ -1449,7 +1141,6 @@ def run_flow(store: ni.NIStore, item_id: str, *,
 
     call = gateway_call if gateway_call is not None else default_model
     do_fetch = fetcher if fetcher is not None else default_fetcher
-    catalog_rows = catalog if catalog is not None else _load_catalog()
     resolved_model = ni_route_model if ni_route_model else _resolve_flow_model(store)
     if not resolved_model:
         return _fail(store, item_id, "intent", "no chat/ni/agent model route configured")
@@ -1467,27 +1158,19 @@ def run_flow(store: ni.NIStore, item_id: str, *,
         return call(resolved_model, prompt)
 
     # H2 (audit 2026-09-13): a remap flow enters at ``sampling`` and re-uses the
-    # item's own frozen source — never re-enter intent/source, never re-match a
-    # recipe (the audit's "failed remap masked a working card" defect).
+    # item's own frozen source — never re-enter intent/source, never re-locate
+    # a source (the audit's "failed remap masked a working card" defect).
     if record.get("_remap"):
         return _run_remap(store, item_id, record, call_model, do_fetch)
-    # G2 threshold routing: the confirm continuation stamped ``_reuse_intent``
-    # when it re-dispatched a recipe consent into freeform sampling — the
-    # sealed intent is the SAME ask; re-deriving it would burn a model call
-    # and risk drift after the user already approved on its terms.
-    sealed_intent = record.get("intent") if record.get("_reuse_intent") else None
-    if isinstance(sealed_intent, dict) and sealed_intent.get("kind"):
-        intent = sealed_intent
-    else:
-        try:
-            intent = _run_intent(store, item_id, request, call_model)
-        except ValueError as exc:
-            return _fail(store, item_id, "intent", str(exc))
+    try:
+        intent = _run_intent(store, item_id, request, call_model)
+    except ValueError as exc:
+        return _fail(store, item_id, "intent", str(exc))
 
     if intent.get("kind") == "computed_only":
         return _handle_computed(store, item_id, request, intent)
     return _run_external_flow(store, item_id, request, intent, known_url,
-                              call_model, do_fetch, catalog_rows)
+                              call_model, do_fetch)
 
 
 def _local_flow_model(store: ni.NIStore) -> str | None:
@@ -1553,135 +1236,6 @@ def _resolve_flow_model(store: ni.NIStore) -> str | None:
         if candidate and _gateway_mod.is_local(candidate):
             return candidate
     return chat_model or agent_model
-
-
-def _load_catalog() -> list[dict]:
-    """Late-import the catalog to keep the module's import graph shallow."""
-    from . import ni_catalog
-    return ni_catalog.entries()
-
-
-def continue_from_recipe_confirm(store: ni.NIStore, item_id: str,
-                                  confirmed_url: str,
-                                  fetcher: Callable[[str], object] | None = None,
-                                  ) -> dict:
-    """C3 (audit 2026-09-13): resume a ``confirm_source`` flow after the operator
-    approved the recipe's url_template via ``confirm_ni_flow_source``.
-
-    Reads the flow record's ``_recipe_id`` + ``source_url``; refuses when the
-    confirmed URL does NOT equal the recipe's url_template (a mismatched URL
-    is a code defect, not a user error — the frontend renders the recipe URL
-    verbatim on the approval card). Then runs ``_handoff_from_recipe`` using
-    the sealed intent, so the flow completes without ever asking the user a
-    second question about the source they already saw.
-
-    Never raises past this boundary: a bad state or missing recipe returns a
-    ``failed`` record, keeping parity with every other flow terminal.
-    """
-    assert store is not None and item_id and isinstance(confirmed_url, str), "args required"
-    record = _flow_read(store, item_id)
-    if record is None:
-        raise ValueError("no active flow on this item")
-    if str(record.get("state") or "") != "confirm_source":
-        raise ValueError(
-            "flow is not awaiting a source confirmation (state != confirm_source)")
-    expected = str(record.get("source_url") or "")
-    if not expected or expected != confirmed_url:
-        raise ValueError(
-            "confirmed URL does not match the pending recipe URL — refuse rather "
-            "than seal a source the operator never saw")
-    recipe_id = str(record.get("_recipe_id") or "")
-    if not recipe_id:
-        return _fail(store, item_id, "confirm",
-                     "flow record missing recipe id; retry via start_ni_flow")
-    from . import ni_catalog
-    recipe = ni_catalog.get_recipe(recipe_id)
-    if recipe is None:
-        return _fail(store, item_id, "confirm",
-                     f"catalog no longer serves recipe {recipe_id!r}")
-    intent = record.get("intent") if isinstance(record.get("intent"), dict) else {}
-    request = str(record.get("request") or "")
-    # geocode-consent (2026-09-15): the approval the user just gave covered the
-    # sealed ``_geocode`` disclosure (place + host) — perform that ONE lookup
-    # now, code-owned endpoint, and fill the recipe's coordinate slots. Any
-    # failure degrades to empty slots (the card's Fill affordance asks), never
-    # a guessed value, never a raise past the flow boundary.
-    param_values: dict = {}
-    sealed_fills = record.get("_fills")
-    if isinstance(sealed_fills, dict):
-        param_values.update(sealed_fills)
-    disclosure = record.get("_geocode")
-    fills = recipe.get("geocode_fills")
-    if isinstance(disclosure, dict) and isinstance(fills, dict) and fills:
-        do_fetch = fetcher if fetcher is not None else _netguard_mod.safe_fetch_json
-        located = _geocode_place(str(disclosure.get("query") or ""), do_fetch)
-        if located is None:
-            _append_note(store, item_id,
-                          "place lookup failed — fill the location on the card")
-        else:
-            for field, param_name in fills.items():  # bounded by fills size
-                if field in located:
-                    param_values[str(param_name)] = located[field]
-            _append_note(store, item_id,
-                          f"place lookup resolved {disclosure.get('query')!r}")
-    # G2 (field: "earthquakes above magnitude 5" counted M2.5+): when the ask
-    # carries a threshold the recipe's FIXED template cannot express (no
-    # list-shaped extraction to filter), the verbatim handoff silently drops
-    # the user's condition. Route the APPROVED URL into freeform sampling
-    # instead — the sampler derives the real shape and the assembler authors
-    # the where-filter from the sealed intent. Consent is unchanged: the
-    # filled URL the card displayed is exactly what samples.
-    routed_url = _threshold_route_url(recipe, intent, param_values)
-    if routed_url is not None:
-        _transition(store, item_id, "sampling", source_url=routed_url,
-                     note="threshold ask — sampling the approved source to "
-                          "author the filter",
-                     _reuse_intent=True)
-        start_flow_worker(store, item_id, source_url=routed_url)
-        return _flow_read(store, item_id) or {}
-    return _handoff_from_recipe(store, item_id, request, intent, recipe,
-                                 param_values=param_values or None)
-
-
-def _threshold_route_url(recipe: dict, intent: dict,
-                          param_values: dict) -> str | None:
-    """G2: the concrete URL to freeform-sample for a threshold ask a fixed
-    recipe template cannot serve — or None to keep the verbatim handoff.
-
-    Guards (all must hold): the intent carries a numeric threshold; no
-    template extract path is list-shaped (nothing to filter server-side);
-    the template source carries no headers (freeform sampling has no
-    credential machinery mid-flow); and every ``{{param:}}`` slot resolves
-    from the template's own values plus the sealed/geocode fills — a leftover
-    placeholder would fetch a literal template.
-    """
-    assert isinstance(recipe, dict) and isinstance(intent, dict), "args required"
-    threshold = intent.get("threshold")
-    if not isinstance(threshold, (int, float)) or isinstance(threshold, bool):
-        return None
-    template = recipe.get("spec_template") or {}
-    for stage in (template.get("pipeline") or []):  # bounded pipeline
-        if isinstance(stage, dict) and stage.get("op") == "transform":
-            fns = [str((t or {}).get("fn") or "") for t in (stage.get("apply") or [])]
-            if "where" in fns:
-                return None  # the template already filters — handoff serves it
-    source = template.get("source") or {}
-    if source.get("headers"):
-        return None
-    url = str(source.get("url") or "")
-    if not url:
-        return None
-    values: dict = {}
-    for name, decl in (template.get("params") or {}).items():  # bounded
-        preset = str((decl or {}).get("value") or "")
-        if preset:
-            values[name] = preset
-    for name, value in (param_values or {}).items():
-        values[str(name)] = value
-    filled = display_filled_url(url, values)
-    if "{{param:" in filled:
-        return None
-    return filled
 
 
 def _run_intent(store: ni.NIStore, item_id: str, request: str,
@@ -1766,113 +1320,19 @@ def _days_until(date_str: str) -> int:
 def _run_external_flow(store: ni.NIStore, item_id: str, request: str,
                        intent: dict, known_url: str | None,
                        call_model: Callable[[str], str],
-                       do_fetch: Callable[[str], object],
-                       catalog_rows: list[dict]) -> dict:
-    """External-data branch: recipe match → sampling → mapping → assembly → handoff.
+                       do_fetch: Callable[[str], object]) -> dict:
+    """External-data branch: locate → sampling → mapping → assembly → handoff.
 
-    C2/C3 ordering (audit 2026-09-13):
-      1. If ``known_url`` is present (start_ni_flow / resume_ni_flow with an
-         explicit user URL), the user has ALREADY consented — recipe matching
-         is SKIPPED, we sample directly against that URL, and an invariant
-         assertion after finalize confirms the frozen spec.source.url equals
-         the fetched URL (never a silent recipe-URL swap).
-      2. Otherwise, try to match a catalog recipe — a hit pauses in the new
-         ``confirm_source`` state carrying the recipe's url_template + title
-         (`confirm_ni_flow_source` resumes with the operator's approval).
-      3. Neither known_url nor a recipe hit ⇒ pause in ``source`` state with
-         ``AWAITING_SOURCE_PICK`` so the chat can present candidates.
+    A ``known_url`` (the user named or tapped it) is the consent: sample it
+    directly. Otherwise the source-pick pause offers SmartBrain Library
+    sources first, web results when the Library has none, and paste-a-URL
+    always — the user's tap is the consent for the first fetch.
     """
     assert isinstance(intent, dict), "intent required"
     if known_url:
         return _sample_and_map(store, item_id, request, intent, known_url,
                                 call_model, do_fetch)
-    # M-RANK first (round 7 LOCATE): semantic selection over the corpus.
-    ranked = locate_rank(catalog_rows, request, intent, call_model)
-    if ranked is not None:
-        by_id = {str(r.get("id")): r for r in catalog_rows if isinstance(r, dict)}
-        if ranked["best"] and ranked["confidence"] == "high":
-            return _pause_for_recipe_confirm(store, item_id, intent,
-                                              by_id[ranked["best"]],
-                                              call_model=call_model)
-        # Medium confidence (or no best): the USER picks — the ranked ids seal
-        # on the record so the card shows the model's candidates, best first.
-        # An EMPTY candidate list falls through to the shared pause, where S2
-        # web research runs (round 9: this branch, not the scorer miss, was
-        # the real field path to the dead empty card).
-        candidates = [i for i in ([ranked["best"]] if ranked["best"] else [])
-                      + ranked["alternates"] if i in by_id]
-        return _pause_source_pick(store, item_id, request, intent, call_model,
-                                  ranked_ids=candidates)
-    # Fallback (model unavailable / invalid reply / offline suites): the
-    # deterministic keyword scorer.
-    recipe = match_recipe(catalog_rows, request, intent)
-    if recipe is not None:
-        return _pause_for_recipe_confirm(store, item_id, intent, recipe,
-                                          call_model=call_model)
     return _pause_source_pick(store, item_id, request, intent, call_model)
-
-
-def _pause_for_recipe_confirm(store: ni.NIStore, item_id: str, intent: dict,
-                               recipe: dict,
-                               call_model: Callable[[str], str] | None = None) -> dict:
-    """C3 (audit 2026-09-13): pause a recipe-matched flow at ``confirm_source``.
-
-    The recipe's url_template + title are stamped on the flow record so the
-    chat model can name the exact host it's proposing to fetch and the
-    frontend renders the ``AWAITING_SOURCE_CONFIRM`` marker. The recipe id
-    stays sealed too so ``confirm_ni_flow_source`` can look the recipe up
-    without re-running the scorer against a potentially mutated request.
-    """
-    assert isinstance(intent, dict) and isinstance(recipe, dict), "args required"
-    template = recipe.get("spec_template") or {}
-    src = template.get("source") if isinstance(template, dict) else {}
-    url = str((src or {}).get("url") or recipe.get("url_template") or "")
-    title = str(recipe.get("title") or "")
-    recipe_id = str(recipe.get("id") or "")
-    _transition(store, item_id, "confirm_source",
-                source_url=url,
-                error=AWAITING_SOURCE_CONFIRM,
-                intent=intent,
-                note=(f"awaiting confirmation of {title!r} "
-                      f"(confirm_ni_flow_source with source_url)"))
-    record = _flow_read(store, item_id) or {}
-    # Extra sealed fields — the base record shape stays closed, so widen via a
-    # second write that includes ``_recipe_id`` alongside the standard record.
-    record["_recipe_id"] = recipe_id[:80]
-    record["_recipe_title"] = title[:_MAX_NOTE]
-    # geocode-consent (2026-09-15): seal the pending lookup so the approval the
-    # user is about to give covers it — and so the confirm tool can ENFORCE
-    # that the card displayed it (args.geocode_query must echo this query).
-    _stamp_geocode_disclosure(record, recipe, intent)
-    # F3 (C2-feedback wave): disclose wants the recipe cannot serve BEFORE the
-    # user approves it — sealed on the record so the flow-tool result and the
-    # chat can name the gap ("no volume from this source").
-    uncovered = _uncovered_wants(recipe, intent)
-    if uncovered:
-        served = [_slugify_field_name(n) for n in _recipe_output_names(recipe)]
-        uncovered = _affinity_prune(uncovered, served, call_model)
-    if uncovered:
-        record["_uncovered_wants"] = uncovered[:8]
-    # W-E (field 2026-09-17): SEAL the request-derived param fills at the
-    # pause and show the user the FILLED URL — "symbol=NI" on the consent
-    # card would have exposed the NiSource-for-GOOG bug at a glance. What is
-    # sealed here is exactly what the handoff applies after approval.
-    fills = _preview_recipe_fills(recipe, str(record.get("request") or ""))
-    unit_fills = _unit_fills_for(recipe, str(record.get("request") or ""),
-                                  intent.get("place") if isinstance(intent, dict) else None)
-    for name, value in unit_fills.items():
-        fills.setdefault(name, value)
-    if fills:
-        record["_fills"] = fills
-    _flow_write(store, item_id, record)
-    if uncovered:
-        _append_note(store, item_id,
-                      f"note: this card won't include: {', '.join(uncovered[:8])}")
-    if isinstance(record.get("_geocode"), dict):
-        _append_note(store, item_id,
-                      f"confirm also covers a place lookup: "
-                      f"{record['_geocode']['query']!r} via {_GEOCODE_HOST}")
-    return _flow_read(store, item_id) or {}
 
 
 # R2 (field 2026-09-15): desktop-side secrets access for remap sampling ONLY.
@@ -2063,64 +1523,44 @@ def _s2_evaluate(rows: list[dict], intent: dict) -> list[dict]:
 
 
 def _pause_source_pick(store: ni.NIStore, item_id: str, request: str,
-                       intent: dict, call_model: Callable[[str], str],
-                       ranked_ids: list[str] | None = None) -> dict:
-    """The ONE source-pick pause (round 9: both former branches route here).
-
-    With catalog candidates (M-RANK medium picks, or the scorer's would-be
-    suggestions) the pause is byte-identical to yesterday's — per-branch note
-    text included. With NONE — the real path to the dead empty card — S2
-    searches the user's own words, E-lite scores what the result pages
-    contain, the model ranks the corpus, and ≤3 web candidates seal on the
-    record with their evidence. Zero rows, provider unwired, or total
-    failure → today's plain pause, never a failed flow.
+                       intent: dict, call_model: Callable[[str], str]) -> dict:
+    """The ONE source-pick pause. Layer 1 is the SmartBrain Library: sources
+    whose parameters all fill from the user's words seal on the record. When
+    the Library has none, S2 searches the user's own words, E-lite scores what
+    the result pages contain, the model ranks the corpus, and ≤3 web
+    candidates seal with their evidence. Nothing found, providers unwired, or
+    total failure → the plain pause (paste a URL), never a failed flow.
     """
-    ranked_ids = [str(i) for i in (ranked_ids or []) if i]
-    if not ranked_ids:
-        # Provider first: unwired (every hermetic suite and recorded gate)
-        # skips even the catalog rescore — the plain pause needs neither.
-        service = _resolve_search_service()
-        catalog_hit = False
-        try:
-            catalog_hit = bool(suggest_recipes(_load_catalog(), request, intent))
-        except Exception:
-            pass
-        if catalog_hit:
-            service = None  # catalog candidates render — no Library, no search
-        library = [] if catalog_hit else _library_candidates(request)
-        if library:
+    library = _library_candidates(request)
+    if library:
+        _transition(store, item_id, "source",
+                    error=AWAITING_SOURCE_PICK,
+                    note="paused: sources from the SmartBrain Library are on the card",
+                    _ranked_library=library, _ranked_search=None)
+        return _flow_read(store, item_id) or {}
+    service = _resolve_search_service()
+    if service is not None:
+        web = _s2_search_candidates(service, request, intent)
+        if web:
+            web = _s2_evaluate(web, intent)
+            order = rank_web_rows(web, request, intent, call_model)
+            if order:
+                web = [web[i] for i in order if 0 <= i < len(web)]
+            sealed = [{"title": r["title"], "host": r["host"],
+                       "url": r["url"],
+                       "evidence": [str(e)[:90] for e in
+                                    (r.get("evidence") or [])[:2]]}
+                      for r in web[:_S2_SEAL_ROWS]]
             _transition(store, item_id, "source",
                         error=AWAITING_SOURCE_PICK,
-                        note="paused: sources from the SmartBrain Library are on the card",
-                        _ranked_library=library)
+                        note="paused: the Library has no source for this — "
+                             "web candidates are on the card",
+                        _ranked_search=sealed, _ranked_library=None)
             return _flow_read(store, item_id) or {}
-        if service is not None:
-            web = _s2_search_candidates(service, request, intent)
-            if web:
-                web = _s2_evaluate(web, intent)
-                order = rank_web_rows(web, request, intent, call_model)
-                if order:
-                    web = [web[i] for i in order if 0 <= i < len(web)]
-                sealed = [{"title": r["title"], "host": r["host"],
-                           "url": r["url"],
-                           "evidence": [str(e)[:90] for e in
-                                        (r.get("evidence") or [])[:2]]}
-                          for r in web[:_S2_SEAL_ROWS]]
-                _transition(store, item_id, "source",
-                            error=AWAITING_SOURCE_PICK,
-                            note="paused: no vetted source matched — "
-                                 "web candidates are on the card",
-                            _ranked_search=sealed)
-                return _flow_read(store, item_id) or {}
-    if ranked_ids:  # yesterday's medium-rank pause, note text included
-        _transition(store, item_id, "source",
-                    error=AWAITING_SOURCE_PICK,
-                    note="paused: awaiting your source pick",
-                    _ranked=ranked_ids)
-    else:
-        _transition(store, item_id, "source",
-                    error=AWAITING_SOURCE_PICK,
-                    note="paused: pick a source on the card, or paste an API URL")
+    _transition(store, item_id, "source",
+                error=AWAITING_SOURCE_PICK,
+                note="paused: no source found — paste a link to the data on the card",
+                _ranked_library=None, _ranked_search=None)
     return _flow_read(store, item_id) or {}
 
 
@@ -2241,326 +1681,6 @@ def _scene_has_repeat(scene: object) -> bool:
             if isinstance(children, list):
                 stack.extend(children)
     return False
-
-
-# G2: US-unit defaulting, deterministic. A recipe that declares unit params
-# (temperature_unit / wind_speed_unit — the open-meteo shape) gets them filled
-# at PAUSE time so the consent card shows exactly what will run: fahrenheit/
-# mph when the request says so or the place reads as a US location (state-code
-# suffix), celsius/kmh otherwise. The geocode country is not consulted — it
-# resolves only after approval, too late to change what the user consented to.
-_US_PLACE_RE = re.compile(
-    r",\s*(A[KLRZ]|C[AOT]|D[CE]|FL|GA|HI|I[ADLN]|K[SY]|LA|M[ADEINOST]|"
-    r"N[CDEHJMVY]|O[HKR]|PA|RI|S[CD]|T[NX]|UT|V[AT]|W[AIVY])\.?$"
-    r"|\bUSA?\b|\bUnited States\b", re.IGNORECASE)
-
-_UNIT_PARAM_FILLS = {
-    "temperature_unit": ("fahrenheit", "celsius"),
-    "wind_speed_unit": ("mph", "kmh"),
-}
-
-
-def _unit_fills_for(recipe: dict, request: str, place: str | None) -> dict:
-    """Fill values for declared unit params — imperial on a US signal."""
-    assert isinstance(recipe, dict) and isinstance(request, str), "args required"
-    params = ((recipe.get("spec_template") or {}).get("params") or {})
-    declared = [n for n in _UNIT_PARAM_FILLS if n in params]
-    if not declared:
-        return {}
-    us = bool(_FAHRENHEIT_RE.search(request)) or bool(
-        place and _US_PLACE_RE.search(place.strip()))
-    return {name: _UNIT_PARAM_FILLS[name][0 if us else 1] for name in declared}
-
-
-def _preview_recipe_fills(recipe: dict, request: str) -> dict:
-    """W-E: the param values ``_fill_recipe_params`` WOULD derive — computed on
-    a throwaway copy at pause time so the consent card can display them and
-    the handoff can apply the sealed values verbatim."""
-    assert isinstance(recipe, dict) and isinstance(request, str), "args required"
-    template = recipe.get("spec_template")
-    if not isinstance(template, dict):
-        return {}
-    probe = json.loads(json.dumps(template))
-    _fill_recipe_params(probe, request)
-    out: dict = {}
-    for name, decl in (probe.get("params") or {}).items():  # bounded
-        if not isinstance(decl, dict) or decl.get("kind") == "secret":
-            continue
-        original = ((template.get("params") or {}).get(name) or {}).get("value")
-        if decl.get("value") not in (None, "", original):
-            out[str(name)] = decl["value"]
-    return out
-
-
-def display_filled_url(url: str, fills: dict) -> str:
-    """W-E display helper: substitute ONLY the sealed fills into a template URL
-    (unfilled slots stay visible as placeholders). Never used for fetching —
-    the sealed template + fills remain the execution authority."""
-    assert isinstance(url, str) and isinstance(fills, dict), "args required"
-    out = url
-    for name, value in fills.items():  # bounded by _MAX_PARAMS
-        out = out.replace("{{param:" + str(name) + "}}", str(value))
-    return out
-
-
-def _fill_recipe_params(spec: dict, request: str) -> None:
-    """Deterministically fill a recipe spec's empty param slots from the request.
-
-    needs_params (2026-09-14): the retired ``create_ni_item_from_recipe`` tool
-    had the MODEL fill param slots as args; the flow's recipe handoff never
-    inherited a fill step, so every recipe card landed with empty slots (the
-    $0.00 Finnhub card, via the flow this time). Filling stays pure code:
-    - ``symbol``: the first corroborated ticker token in the request — the same
-      token class whose hit selected a finance recipe in ``match_recipe``.
-    Anything code cannot derive stays empty ON PURPOSE: the landing rule then
-    forces draft and the card's needs_params affordance asks the user — never
-    a guessed value, never a model blank.
-    """
-    assert isinstance(spec, dict) and isinstance(request, str), "args required"
-    params = spec.get("params") or {}
-    if not isinstance(params, dict):
-        return
-    for name, decl in params.items():  # bounded by ni._MAX_PARAMS
-        if not isinstance(decl, dict) or decl.get("kind") == "secret":
-            continue
-        value = decl.get("value")
-        if value is not None and str(value).strip():
-            continue  # recipe shipped a default — keep it
-        if name == "symbol":
-            ticker = _first_ticker(request)
-            if ticker is not None:
-                decl["value"] = ticker
-
-
-# geocode-consent (2026-09-15, operator-approved: "allow the geocode, but only
-# with user consent"): a recipe whose params are coordinates can fill them from
-# a place the user NAMED, via one fetch to a FIXED, code-owned geocoding
-# endpoint. The consent is the existing confirm_source card: the flow record
-# (and the confirm tool's args) disclose the lookup — place + host — alongside
-# the recipe URL, so the single approval covers both fetches, both visible.
-_GEOCODE_URL_TEMPLATE = (
-    "https://geocoding-api.open-meteo.com/v1/search?name={query}&count=1")
-_GEOCODE_HOST = "geocoding-api.open-meteo.com"
-
-
-def _geocode_place(query: str, do_fetch: Callable[[str], object]) -> dict | None:
-    """One consented lookup: place name → {latitude, longitude}, or None.
-
-    The endpoint is a code literal (never data); the query is percent-encoded
-    so a place string can never reshape the URL. Any failure — network, empty
-    results, non-numeric fields — returns None and the caller degrades to the
-    card's Fill affordance (awaiting_params), never a guessed coordinate.
-    """
-    assert isinstance(query, str) and query and callable(do_fetch), "args required"
-    from urllib.parse import quote
-    url = _GEOCODE_URL_TEMPLATE.format(query=quote(query, safe=""))
-    try:
-        data = do_fetch(url)
-    except Exception:  # transport class — degrade, never raise past the flow
-        return None
-    results = data.get("results") if isinstance(data, dict) else None
-    hit = results[0] if isinstance(results, list) and results else None
-    if not isinstance(hit, dict):
-        return None
-    lat, lon = hit.get("latitude"), hit.get("longitude")
-    if not (isinstance(lat, (int, float)) and isinstance(lon, (int, float))
-            and not isinstance(lat, bool) and not isinstance(lon, bool)):
-        return None
-    return {"latitude": lat, "longitude": lon}
-
-
-def _recipe_output_names(recipe: dict) -> list[str]:
-    """The output field names a recipe's pipeline actually serves (extract keys)."""
-    assert isinstance(recipe, dict), "recipe required"
-    template = recipe.get("spec_template") or {}
-    out: list[str] = []
-    for stage in (template.get("pipeline") or []):  # bounded pipeline
-        if isinstance(stage, dict) and stage.get("op") == "extract":
-            out.extend(str(k) for k in (stage.get("paths") or {}))
-    return out
-
-
-# G2: field-name synonyms the substring matcher missed in the field —
-# "magnitude" IS served by ``top_mag``, "location" by ``top_place``. Code
-# first (deterministic, render-safe); the bounded model affinity step below
-# handles the tail at pause time only.
-_NAME_SYNONYMS: dict[str, str] = {
-    "magnitude": "mag", "location": "place", "temperature": "temp",
-    "latitude": "lat", "longitude": "lon", "quantity": "count",
-}
-
-
-def _synonym_forms(slug: str) -> list[str]:
-    """The slug plus its canonical synonym form (both directions)."""
-    forms = [slug]
-    if slug in _NAME_SYNONYMS:
-        forms.append(_NAME_SYNONYMS[slug])
-    for long, short in _NAME_SYNONYMS.items():
-        if slug == short:
-            forms.append(long)
-    return forms
-
-
-# Tokens too generic to CARRY coverage of a want on their own — superset of
-# the title-word set plus the qualifier words asks are padded with. The
-# pause-time M-AFFINITY prune still rescues near-synonyms this code misses
-# (over-disclosure degrades honestly; false coverage lied).
-_COVERAGE_GENERIC: frozenset[str] = frozenset({
-    "price", "prices", "current", "quote", "rate", "rates", "exchange",
-    "stock", "the", "and", "for", "with", "past", "day", "json", "data",
-    "share", "shares", "value", "level", "amount", "latest", "live",
-    "today", "now", "of", "in", "my", "per",
-})
-
-
-def _uncovered_wants(recipe: dict, intent: dict) -> list[str]:
-    """F3 (C2-feedback wave, 2026-09-15): wants the recipe cannot serve.
-
-    The NVDA field run asked for "price, Open, High, Low, Close, Volume"; the
-    Finnhub /quote recipe serves everything but volume, matched anyway, and
-    the card silently under-delivered (the model then tried a source swap the
-    §29 door refused — a wasted approval tap). The match stays a match — a
-    mostly-right vetted source beats a research spree — but the gap is
-    DISCLOSED on the confirm pause so the user decides with open eyes.
-    Name affinity reuses ``_names_match`` (payload-grounding posture).
-    """
-    assert isinstance(recipe, dict) and isinstance(intent, dict), "args required"
-    served = [_slugify_field_name(n) for n in _recipe_output_names(recipe)]
-    uncovered: list[str] = []
-    for want in (intent.get("wants") or []):  # bounded by intent shape
-        if not isinstance(want, str) or not want:
-            continue
-        slug = _slugify_field_name(want)
-        if not slug:
-            continue
-        # Claims audit 2026-09-21 (false COVERAGE, the substring matcher's
-        # other face): "ethereum price" read as covered because "price"
-        # matched. Coverage now requires every DISTINCTIVE token of the want
-        # to be served; generic tokens (price/rate/current/…) can ride along
-        # but can never carry coverage by themselves. An all-generic want
-        # ("price") keeps the old any-match rule.
-        tokens = [t for t in slug.split("_") if t]
-        distinctive = [t for t in tokens if t not in _COVERAGE_GENERIC]
-        if distinctive:
-            # A recipe SERVES its own subject: "bitcoin" on the Bitcoin
-            # recipe is covered by the title, not the output names.
-            title_tokens = [w for w in
-                            _slugify_field_name(str(recipe.get("title") or "")).split("_")
-                            if len(w) >= 3]
-            place_tokens = [w for w in
-                            _slugify_field_name(str(intent.get("place") or "")).split("_")
-                            if len(w) >= 3]
-            universe = list(served) + title_tokens + place_tokens
-            covered = all(
-                any(_names_match(form, s)
-                    for form in _synonym_forms(t) for s in universe)
-                for t in distinctive)
-        else:
-            covered = any(_names_match(form, s)
-                          for form in _synonym_forms(slug) for s in served)
-        if not covered:
-            uncovered.append(want)
-    return uncovered
-
-
-def _affinity_prune(uncovered: list[str], served: list[str],
-                     call_model: Callable[[str], str] | None) -> list[str]:
-    """G2 M-AFFINITY: one bounded model call prunes false "won't include"
-    claims the code matcher missed (advisory — any error keeps code's answer).
-
-    The model may only CONFIRM coverage from the closed served list; its reply
-    is validated as a subset of the uncovered wants. It can never add claims.
-    """
-    assert isinstance(uncovered, list) and isinstance(served, list), "args required"
-    if not uncovered or not served or call_model is None:
-        return uncovered
-    prompt = (
-        "A data card will output these fields: "
-        + json.dumps(served[:12])
-        + ". The user also asked for: " + json.dumps(uncovered[:8])
-        + '. Which of the asked-for items ARE covered by an output field '
-        '(same meaning, different name)? Reply ONLY {"covered": ["<asked-for item>", ...]} '
-        "using the asked-for spellings; [] if none."
-    )
-    try:
-        reply = call_model(prompt)
-        obj = _parse_json_reply(reply)
-        covered = obj.get("covered")
-        if not isinstance(covered, list):
-            return uncovered
-        confirmed = {str(c) for c in covered if isinstance(c, str)}
-        return [w for w in uncovered if w not in confirmed]
-    except Exception:  # advisory step: code's answer stands
-        return uncovered
-
-
-def _stamp_geocode_disclosure(record: dict, recipe: dict, intent: dict) -> None:
-    """Seal the pending lookup on the confirm_source record — the disclosure the
-    user's approval will cover. Stamped ONLY when the recipe declares
-    ``geocode_fills``, a target param is empty, and the intent carries a place.
-    """
-    assert isinstance(record, dict) and isinstance(recipe, dict), "args required"
-    fills = recipe.get("geocode_fills")
-    place = intent.get("place") if isinstance(intent, dict) else None
-    if not (isinstance(fills, dict) and fills
-            and isinstance(place, str) and place.strip()):
-        return
-    template = recipe.get("spec_template") or {}
-    params = template.get("params") if isinstance(template, dict) else {}
-    targets = [str(p) for p in fills.values()]
-    unfilled = [
-        p for p in targets
-        if isinstance((params or {}).get(p), dict)
-        and not str((params or {}).get(p, {}).get("value") or "").strip()
-    ]
-    if not unfilled:
-        return
-    record["_geocode"] = {"query": place.strip()[:120], "host": _GEOCODE_HOST}
-
-
-def _handoff_from_recipe(store: ni.NIStore, item_id: str, request: str,
-                          intent: dict, recipe: dict,
-                          param_values: dict | None = None) -> dict:
-    """Deep-copy the recipe's spec_template and hand off.
-
-    C3 (audit 2026-09-13): callable ONLY from ``confirm_ni_flow_source`` after
-    the operator confirms the recipe's url_template — the promoted "no fetch
-    until one is confirmed" line becomes literally true. The seal stamps
-    ``_born: "recipe"`` per M1.
-
-    ``param_values`` (geocode-consent 2026-09-15): values code derived UNDER
-    the user's confirm (the geocode result), applied by param name after the
-    request-derived fill. Only empty declared non-secret slots accept a value.
-    """
-    assert isinstance(recipe, dict), "recipe required"
-    spec_template = recipe.get("spec_template")
-    if not isinstance(spec_template, dict):
-        return _fail(store, item_id, "assembly", "recipe spec_template missing")
-    spec = json.loads(json.dumps(spec_template))
-    # W-E: SEALED values (what the consent card displayed) apply FIRST and are
-    # the authority; the request-derived fill only covers still-empty slots.
-    for name, value in (param_values or {}).items():  # bounded by fills size
-        decl = (spec.get("params") or {}).get(name)
-        if isinstance(decl, dict) and decl.get("kind") != "secret":
-            decl["value"] = value
-    _fill_recipe_params(spec, request)
-    spec["title"] = str(intent.get("subject") or spec.get("title") or "New card")[:ni._MAX_TITLE]
-    spec["goal"] = request[:ni._MAX_GOAL]
-    cadence_raw = intent.get("cadence_minutes")
-    cadence = int(cadence_raw) if isinstance(cadence_raw, int) else _DEFAULT_CADENCE
-    spec["interval_minutes"] = max(_MIN_CADENCE, cadence)
-    spec["repair_policy"] = {"l1": True, "l2_frontier": False}
-    preview = recipe.get("preview_payload") or {}
-    if not isinstance(preview, dict):
-        return _fail(store, item_id, "assembly", "recipe preview_payload malformed")
-    _transition(store, item_id, "assembling",
-                note=f"matched recipe {recipe.get('id')!r}", intent=intent)
-    result = _finalize(store, item_id, spec, preview,
-                       note=f"handoff from recipe {recipe.get('id')!r}",
-                       born="recipe")
-    _try_journal(store, item_id, "recipe",
-                 f"flow matched recipe {recipe.get('id')!r}")
-    return result
 
 
 _JUDGE_PROMPT = (
@@ -3168,38 +2288,6 @@ def _release(item_id: str) -> None:
         _INFLIGHT.discard(item_id)
 
 
-def default_call_model(store: ni.NIStore,
-                       item_id: str | None = None) -> Callable[[str], str] | None:
-    """A prompt→reply callable on the live-resolved flow model, or None.
-
-    Route-side callers (the card's pick-recipe pause) use this so the same
-    bounded model steps run there as in the worker; None degrades every
-    caller to its deterministic path. A non-local model is used only when
-    ``item_id``'s owner consented to it (ruling 2); otherwise the local one.
-    """
-    assert store is not None, "store required"
-    try:
-        model = _resolve_flow_model(store)
-        if model and not _gateway_mod.is_local(model):
-            record = (_flow_read(store, item_id) or {}) if item_id else {}
-            consented = item_id and _model_consent_of(store, item_id, record) == model
-            model = model if consented else _local_flow_model(store)
-    except Exception:
-        return None
-    if not model:
-        return None
-
-    def _call(prompt: str) -> str:
-        temp = None if _claudecli_mod.is_claudecode(model) else 0.0
-        data = _gateway_mod.chat(
-            [{"role": "user", "content": prompt}], model,
-            timeout=_FLOW_MODEL_TIMEOUT_S, temperature=temp,
-        )
-        return _gateway_mod.completion_text(data)
-
-    return _call
-
-
 def start_flow_worker(store: ni.NIStore, item_id: str, *,
                        gateway_call: Callable[[str, str], str] | None = None,
                        fetcher: Callable[[str], object] | None = None,
@@ -3252,8 +2340,8 @@ def board_flow_field(store: ni.NIStore, item_id: str) -> dict | None:
     """Return the ``{state, error?}`` compact flow view for the board row.
 
     ``None`` when no flow slot exists OR the flow reached ``ready``. In-progress
-    states (intent/source/confirm_source/sampling/mapping/assembling/
-    awaiting_credential) always ride.
+    states (intent/source/sampling/mapping/assembling/awaiting_credential/
+    awaiting_params) always ride.
 
     H2 (audit 2026-09-13): a TERMINAL flow record (``failed`` / ``unsupported``)
     is HIDDEN when the item has a renderable payload — a failed remap must not
@@ -3267,6 +2355,9 @@ def board_flow_field(store: ni.NIStore, item_id: str) -> dict | None:
     if record is None:
         return None
     state = str(record.get("state") or "")
+    if state == _RETIRED_CONFIRM_STATE:
+        record = reenter_source_pick(store, item_id, _RETIRED_NOTE)
+        state = "source"
     if state == "ready":
         return None
     item = store.get_item(item_id)
@@ -3293,26 +2384,19 @@ def board_flow_field(store: ni.NIStore, item_id: str) -> dict | None:
         # a user-facing reason plus a question or reopen affordances. Raw
         # error detail stays available above for History/debugging.
         out.update(ni_master.terminal_surface(state, record, shell=shell))
-    # Card-consent (2026-09-15, operator: "bulletproof and deterministic"):
-    # a ``confirm_source`` pause renders its OWN approval affordance on the
-    # tile — the card needs the sealed disclosure verbatim: the exact URL,
-    # the optional geocode lookup, and the wants this source cannot serve.
-    # The chat model is no longer a required relay for the consent moment.
     if state == "source" and record.get("error") == AWAITING_SOURCE_PICK:
-        # P3 affordances: vetted suggestions + paste-a-URL — but ONLY on the
-        # real pick pause. A bare state=source is the in-flight locating
-        # window (claims audit 2026-09-21: the full pick card rendered while
-        # M-RANK was still running, and a tap corrupted the live flow).
-        intent = record.get("intent") if isinstance(record.get("intent"), dict) else {}
+        # P3 affordances: suggestions + paste-a-URL — but ONLY on the real
+        # pick pause. A bare state=source is the in-flight locating window
+        # (claims audit 2026-09-21: the full pick card rendered while the
+        # source was still being located, and a tap corrupted the live flow).
         try:
             ranked_web = record.get("_ranked_search")
-            ranked_ids = record.get("_ranked")
             ranked_lib = record.get("_ranked_library")
             if isinstance(ranked_lib, list) and ranked_lib:
                 # Library candidates (R8): sealed rows render VERBATIM — provider + authority are the
                 # provenance; ``label`` names the reading when the ask was ambiguous (the tap answers it)
                 out["suggestions"] = [
-                    {"recipe_id": "", "kind": "library",
+                    {"kind": "library",
                      "title": str(row.get("title") or ""),
                      "host": str(row.get("host") or ""),
                      "url": str(row.get("url") or ""),
@@ -3327,49 +2411,18 @@ def board_flow_field(store: ni.NIStore, item_id: str) -> dict | None:
                 # the sealed row IS the provenance (title/host/url/evidence
                 # exactly as ranked at pause time; no recompute, no refill).
                 out["suggestions"] = [
-                    {"recipe_id": "", "kind": "web",
+                    {"kind": "web",
                      "title": str(row.get("title") or ""),
                      "host": str(row.get("host") or ""),
                      "url": str(row.get("url") or ""),
                      "evidence": [str(e) for e in
                                   (row.get("evidence") or [])[:2]]}
                     for row in ranked_web[:3] if isinstance(row, dict)]
-            elif isinstance(ranked_ids, list) and ranked_ids:
-                by_id = {str(r.get("id")): r for r in _load_catalog()
-                         if isinstance(r, dict)}
-                out["suggestions"] = []
-                for rid in ranked_ids[:3]:
-                    r = by_id.get(str(rid))
-                    if r is None:
-                        continue
-                    url = str(r.get("url_template") or "")
-                    fills = _preview_recipe_fills(r, str(record.get("request") or ""))
-                    out["suggestions"].append({
-                        "recipe_id": str(r.get("id") or ""),
-                        "title": str(r.get("title") or ""),
-                        "host": str(r.get("host") or ""),
-                        "url": display_filled_url(url, fills) if fills else url,
-                    })
             else:
-                out["suggestions"] = suggest_recipes(
-                    _load_catalog(), str(record.get("request") or ""), intent)
+                out["suggestions"] = []
         except Exception as exc:  # suggestions are best-effort display data
-            log.warning("ni_flow: suggest_recipes failed for %s: %s", item_id, exc)
+            log.warning("ni_flow: suggestions failed for %s: %s", item_id, exc)
             out["suggestions"] = []
-    if state == "confirm_source":
-        out["source_url"] = str(record.get("source_url") or "")
-        out["recipe_title"] = str(record.get("_recipe_title") or "")
-        fills = record.get("_fills")
-        if isinstance(fills, dict) and fills:
-            out["fills"] = {str(k): str(v) for k, v in fills.items()}
-            out["filled_url"] = display_filled_url(out["source_url"], fills)
-        geocode = record.get("_geocode")
-        if isinstance(geocode, dict):
-            out["geocode_query"] = str(geocode.get("query") or "")
-            out["geocode_host"] = str(geocode.get("host") or "")
-        uncovered = record.get("_uncovered_wants")
-        if isinstance(uncovered, list) and uncovered:
-            out["not_covered"] = [str(w) for w in uncovered[:8]]
     return out
 
 
@@ -3436,14 +2489,17 @@ def begin_remap(store: ni.NIStore, item: dict) -> bool:
 
 def reenter_source_pick(store: ni.NIStore, item_id: str, note: str) -> dict:
     """G1: land (or re-land) the ``source`` pick pause — a decline or a failed
-    shell is a fork, not a death. The card's P3 affordances (vetted
-    suggestions + paste-a-URL) render from this state by construction.
+    shell is a fork, not a death. The card offers the Library's sources for the
+    sealed request (a local lookup, no egress) plus paste-a-URL.
     """
     assert store is not None and item_id and isinstance(note, str), "args required"
     record = _flow_read(store, item_id) or _make_record("", "intent")
+    request = str(record.get("request") or "")
     return _transition(store, item_id, "source",
                         error=AWAITING_SOURCE_PICK, note=note[:_MAX_NOTE],
-                        request=record.get("request", ""))
+                        request=request,
+                        _ranked_library=_library_candidates(request) or None,
+                        _ranked_search=None)
 
 
 _SOURCE_CHANGE_RE = re.compile(
@@ -3532,8 +2588,10 @@ def sweep_stranded_flows(store: ni.NIStore) -> int:
         state = str(record.get("state") or "")
         if state in _TERMINAL_STATES or state == "ready":
             continue
-        if state in ("awaiting_credential", "awaiting_params",
-                      "source", "confirm_source"):
+        if state == _RETIRED_CONFIRM_STATE:
+            reenter_source_pick(store, item["id"], _RETIRED_NOTE)
+            continue
+        if state in ("awaiting_credential", "awaiting_params", "source"):
             # User-gated pauses are never stranded — sweeping a live consent
             # card after dinner told the user "creation stalled" (a lie),
             # destroyed the pending approval, and filed a bogus finding

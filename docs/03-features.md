@@ -388,21 +388,25 @@ created and changed on the Neural page — chat has no card-writing tools.)
 
 How a card comes to life:
 
-1. **You pick the source.** A match from the small **vetted catalog** of free,
-   keyless public APIs pauses the card to show you the exact address it wants
-   to fetch — your approval is the consent. When nothing vetted fits, the card
-   **searches the web from your own words** and offers up to three candidate
-   pages, each with evidence actually extracted from that page (*"On the page:
-   High tide 7:12 AM"*) so you can judge before you tap; the tap is the same
-   consent as pasting that address yourself. Pasting your own URL always
-   works. Whatever you approve is frozen: nothing can quietly change it later
-   without asking you again.
+1. **You pick the source.** The card first looks in the **SmartBrain
+   Library** — about 8,600 US public data sources, each with its provider and
+   how official it is — and offers up to three whose address it could fill
+   from your own words (*"Tide predictions — NOAA · Official — Melbourne
+   Causeway, FL"*). When your words fit more than one thing (two stations, two
+   cities), each choice is named so the tap answers it. When the Library has
+   nothing, the card **searches the web from your own words** and offers up to
+   three candidate pages, each with evidence actually extracted from that page
+   (*"On the page: High tide 7:12 AM"*). Your tap is the consent, the same as
+   pasting that address yourself; pasting your own URL always works. Whatever
+   you pick is frozen: nothing can quietly change it later without asking you
+   again. Browse the Library, or add your own sources, from the **Library**
+   link on the Neural page.
 2. **Built from real data.** The engine samples the approved source and builds
    the pipeline and layout against what actually came back — the preview you
    see is real data from your source, not an invention. If something looks
    off, say so on the card (**Refine…** or *"Something's wrong"*): your note
    re-enters the build against the same frozen source, and a note that needs a
-   *different* source goes back through the approval step.
+   *different* source goes back to the source pick.
 3. **Commissioning.** The system then proves the card: a clean real run, your
    one-tap confirmation that it's the *right* data, and one more clean run at
    cadence to prove it's stable. Only then is the card live.
@@ -617,8 +621,8 @@ all of them, including engines with no filter of their own (Tavily). There is
 no setting to turn this off.
 
 Searches happen when the assistant uses the web tools in a turn, and when a
-Neural Interface card you're creating finds no vetted source and searches your
-own words for candidates; see
+Neural Interface card you're creating finds nothing in the SmartBrain Library
+and searches your own words for candidates; see
 [Privacy & security](07-privacy-security.md) for exactly what leaves your machine.
 
 ## Self-improvement

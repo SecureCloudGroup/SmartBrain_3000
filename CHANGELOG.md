@@ -13,9 +13,9 @@ to know when a release changes behavior.
 
 ### Added
 
-- **New cards find their source in the SmartBrain Library first.** When you ask
-  for a card that the built-in recipes don't cover, the card now offers
-  Library sources with the address already filled in from your words:
+- **New cards find their source in the SmartBrain Library.** When you ask
+  for a card, it now offers Library sources with the address already filled
+  in from your words:
   the right tide station for your town, your team's schedule, the coin or
   currency pair you named, the service whose status you asked about. When
   your words fit more than one thing (two Portlands, two nearby tide
@@ -33,6 +33,16 @@ to know when a release changes behavior.
   page it downloads the Library (about 18 MB); the download must match the
   exact file this release was built with, or it is refused. Card templates
   are still available from a link on the page.
+
+### Removed
+
+- **The 12 built-in card sources are gone.** The SmartBrain Library replaces
+  them, so a new card no longer stops at an "Approve source" step for a
+  built-in source. It offers Library sources (or web results when the Library
+  has none) and your tap picks one. Cards you already built from a built-in
+  source keep working unchanged. A card that was waiting at "Approve source"
+  when you upgrade now shows the Library's choices instead. Chat no longer has
+  a "list the catalog" tool.
 
 ### Fixed
 

@@ -1006,90 +1006,6 @@ def test_W2_commission_refuses_unfinalized_flow_shell(client: TestClient) -> Non
 
 # --- card-consent wave (2026-09-15) --------------------------------------------
 
-def _paused_recipe_flow(client: TestClient, recipe_id: str = "crypto-price-btc-usd",
-                         request_text: str = "bitcoin price please",
-                         intent: dict | None = None) -> str:
-    """A shell item paused at confirm_source with the recipe's sealed disclosure."""
-    from smartbrain_3000 import ni_catalog, ni_flow
-    store = client.app.state.ni
-    recipe = ni_catalog.get_recipe(recipe_id)
-    assert recipe is not None
-    item_id = ni_flow.create_shell_item(store, request_text)
-    ni_flow._pause_for_recipe_confirm(
-        store, item_id,
-        intent or {"subject": "Bitcoin", "cadence_minutes": 15, "place": None,
-                   "wants": ["price"]},
-        recipe)
-    return item_id
-
-
-def test_card_consent_board_carries_the_sealed_disclosure(client: TestClient) -> None:
-    """The tile renders the consent from the SEALED record: exact URL, recipe
-    title, and any not-covered wants — no model relay involved."""
-    _unlock(client)
-    iid = _paused_recipe_flow(
-        client, "stock-quote-finnhub", "NVDA price and volume every 22 minutes",
-        {"subject": "NVDA", "cadence_minutes": 22, "place": None,
-         "wants": ["price", "volume"]})
-    row = next(i for i in client.get("/api/ni/board").json()["items"]
-               if i["id"] == iid)
-    flow = row["flow"]
-    assert flow["state"] == "confirm_source"
-    assert flow["source_url"].startswith("https://finnhub.io/api/v1/quote")
-    assert flow["recipe_title"], "recipe title must ride for the card copy"
-    assert flow["not_covered"] == ["volume"]
-
-
-def test_card_consent_approve_runs_the_flow_synchronously(client: TestClient) -> None:
-    """[Approve source] executes the continuation from the sealed record —
-    keyless recipe settles ready + commissioning in the same request."""
-    _unlock(client)
-    iid = _paused_recipe_flow(client)
-    r = client.post(f"/api/ni/items/{iid}/flow/confirm-source")
-    assert r.status_code == 200, r.text
-    assert r.json()["state"] == "ready"
-    item = client.app.state.ni.get_item(iid)
-    assert item["state"] == "commissioning"
-    assert "_shell" not in item["spec"]
-    journal = client.app.state.ni.read_journal(iid)
-    assert any(e["kind"] == "source_changed" and "approved the source" in e["summary"]
-               for e in journal)
-
-
-def test_card_consent_decline_reenters_the_source_pick(client: TestClient) -> None:
-    """G1: [Not this source] is a fork, not a death — the flow re-enters the
-    ``source`` pick pause (suggestions + paste-URL render from that state),
-    never fetches, and the shell stays refusing commission."""
-    _unlock(client)
-    iid = _paused_recipe_flow(client)
-    r = client.post(f"/api/ni/items/{iid}/flow/decline-source")
-    assert r.status_code == 200 and r.json()["state"] == "source"
-    from smartbrain_3000 import ni_flow
-    record = ni_flow._flow_read(client.app.state.ni, iid)
-    assert record["state"] == "source"
-    row = next(x for x in client.get("/api/ni/board").json()["items"]
-               if x["id"] == iid)
-    assert row["flow"]["state"] == "source" and "suggestions" in row["flow"]
-    item = client.app.state.ni.get_item(iid)
-    assert item["state"] == "draft" and item["spec"].get("_shell") is True
-    assert client.post(f"/api/ni/items/{iid}/commission").status_code == 409
-
-
-def test_card_consent_routes_409_without_a_pending_confirm(client: TestClient) -> None:
-    """No pause ⇒ 409 for both routes (idempotence: a raced second tap too)."""
-    _unlock(client)
-    iid = _create_via_tool(client)
-    for path in ("flow/confirm-source", "flow/decline-source"):
-        r = client.post(f"/api/ni/items/{iid}/{path}")
-        assert r.status_code == 409, (path, r.text)
-    # Approve once, then the second tap 409s honestly.
-    iid2 = _paused_recipe_flow(client, request_text="second bitcoin card",
-                                intent={"subject": "BTC2", "cadence_minutes": 15,
-                                        "place": None, "wants": ["price"]})
-    assert client.post(f"/api/ni/items/{iid2}/flow/confirm-source").status_code == 200
-    assert client.post(f"/api/ni/items/{iid2}/flow/confirm-source").status_code == 409
-
-
 # --- NI Foreman P1: composer intake + retry (2026-09-16) ----------------------
 
 def test_intake_creates_shell_and_starts_worker(client: TestClient,
@@ -1225,40 +1141,29 @@ def test_pick_source_rejects_bad_url_shape_and_wrong_state(
     assert r2.status_code == 409 and "asking for a source" in r2.json()["detail"]
 
 
-def test_pick_recipe_routes_into_confirm_source_pause(
+def test_board_source_pause_renders_the_sealed_library_rows(
         client: TestClient, monkeypatch) -> None:
-    """P3: tapping a vetted suggestion never fetches — it lands the standard
-    Approve-source consent pause carrying the recipe's exact URL."""
+    """While paused at ``source`` the board row carries the sealed Library
+    candidates verbatim (title/host/url + provider · authority) so the card
+    renders them from code alone — no chat model relay."""
     from smartbrain_3000 import ni_flow
     _unlock(client)
-    iid = _seed_source_pause(client, monkeypatch, "usd to eur rate")
-    # Unknown recipe id → 404, pause untouched (probe BEFORE the real pick —
-    # a successful pick consumes the ``source`` pause).
-    r0 = client.post(f"/api/ni/items/{iid}/flow/pick-recipe",
-                     json={"recipe_id": "no-such-recipe"})
-    assert r0.status_code == 404
-    r = client.post(f"/api/ni/items/{iid}/flow/pick-recipe",
-                    json={"recipe_id": "fx-usd-eur"})
-    assert r.status_code == 200 and r.json()["state"] == "confirm_source", r.text
-    record = ni_flow._flow_read(client.app.state.ni, iid)
-    assert record["state"] == "confirm_source"
-    from urllib.parse import urlparse
-    assert urlparse(str(record.get("source_url") or "")).hostname == "api.frankfurter.dev"
-
-
-def test_board_source_pause_exposes_deterministic_suggestions(
-        client: TestClient, monkeypatch) -> None:
-    """P3: while paused at ``source`` the board row carries the scorer's
-    vetted suggestions (id/title/host/url) so the card renders them from code
-    alone — no chat model relay."""
-    _unlock(client)
     iid = _seed_source_pause(client, monkeypatch, "bitcoin price in usd")
+    store = client.app.state.ni
+    record = ni_flow._flow_read(store, iid)
+    record["_ranked_library"] = [{
+        "source_id": "coingecko-simple-price", "title": "Bitcoin price",
+        "host": "api.coingecko.com", "provider": "CoinGecko", "authority": "aggregator",
+        "url": "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd",
+        "label": "", "choice": False}]
+    ni_flow._flow_write(store, iid, record)
     rows = client.get("/api/ni/board").json()["items"]
     row = next(x for x in rows if x["id"] == iid)
     suggestions = row["flow"]["suggestions"]
-    assert suggestions, "the pick pause must surface vetted suggestions"
-    assert {"recipe_id", "title", "host", "url"} <= set(suggestions[0])
-    assert any(s["recipe_id"] == "crypto-price-btc-usd" for s in suggestions)
+    assert suggestions == [{
+        "kind": "library", "title": "Bitcoin price", "host": "api.coingecko.com",
+        "url": "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd",
+        "evidence": ["CoinGecko · Aggregator"]}]
 
 
 def test_fix_route_starts_remap_against_own_frozen_source(
@@ -1539,27 +1444,26 @@ def test_retry_reseeds_the_record_so_the_worker_can_actually_run(
         "wants": ["value"], "threshold": None, "display_hint": "value"})
     result = ni_flow.run_flow(store, iid,
                                gateway_call=lambda m, p: intent_reply,
-                               fetcher=lambda url: {}, catalog=[])
+                               fetcher=lambda url: {})
     assert result["state"] == "source", (
         "the retried flow must proceed (here: to the pick pause), not crash")
 
 
 def test_retry_never_promotes_an_unapproved_confirm_url(
         client: TestClient, monkeypatch) -> None:
-    """Audit consent guard: a record that died at confirm_source carries a
-    recipe URL the user NEVER approved — retry must drop it."""
-    from smartbrain_3000 import ni_catalog, ni_flow
+    """Audit consent guard: a record that died at the retired catalog's
+    confirm pause carries a URL the user NEVER approved — retry must drop it."""
+    from smartbrain_3000 import ni_flow
     _unlock(client)
     fired: dict = {}
     monkeypatch.setattr(ni_flow, "start_flow_worker",
                         lambda s, i, **kw: fired.update(id=i, **kw) or True)
     iid = client.post("/api/ni/intake", json={"request": "unapproved url guard"}).json()["id"]
     store = client.app.state.ni
-    ni_flow._pause_for_recipe_confirm(store, iid, {},
-                                       ni_catalog.get_recipe("crypto-price-btc-usd"))
-    record = ni_flow._flow_read(store, iid)
-    record["state"] = "failed"
-    record["error"] = "stale: flow record stranded"
+    record = ni_flow._make_record(
+        "unapproved url guard", "failed", error="stale: flow record stranded",
+        source_url="https://api.coingecko.com/api/v3/simple/price?ids=bitcoin")
+    record["_recipe_id"] = "crypto-price-btc-usd"  # written by a pre-Library build
     ni_flow._flow_write(store, iid, record)
     r = client.post(f"/api/ni/items/{iid}/flow/retry")
     assert r.status_code == 200, r.text
@@ -1589,16 +1493,25 @@ def test_sweep_never_kills_user_gated_pauses() -> None:
     dbmod.run_migrations(conn)
     store = nimod.NIStore(conn, gen_master_key())
     old = (datetime.now(UTC) - timedelta(hours=3)).isoformat(timespec="seconds")
-    for state, marker in (("source", ni_flow.AWAITING_SOURCE_PICK),
-                           ("confirm_source", "awaiting_confirm")):
-        iid = ni_flow.create_shell_item(store, f"pause guard {state}")
-        record = ni_flow._flow_read(store, iid)
-        record["state"] = state
-        record["error"] = marker
-        record["updated_at"] = old
-        ni_flow._flow_write(store, iid, record)
+    iid = ni_flow.create_shell_item(store, "pause guard source")
+    record = ni_flow._flow_read(store, iid)
+    record["state"] = "source"
+    record["error"] = ni_flow.AWAITING_SOURCE_PICK
+    record["updated_at"] = old
+    ni_flow._flow_write(store, iid, record)
+    # A pre-Library build's confirm pause (the retired catalog) re-lands the
+    # pick pause instead of being swept as stalled. Written raw: the state is
+    # no longer writable through _flow_write.
+    legacy = ni_flow.create_shell_item(store, "legacy confirm pause")
+    record = ni_flow._flow_read(store, legacy)
+    record.update(state="confirm_source", error="awaiting_confirm", updated_at=old,
+                  source_url="https://api.coingecko.com/api/v3/simple/price")
+    store.write_snapshot(legacy, "flow", record, ok=True)
     swept = ni_flow.sweep_stranded_flows(store)
     assert swept == 0, "user-gated pauses must survive the sweep"
+    relanded = ni_flow._flow_read(store, legacy)
+    assert relanded["state"] == "source"
+    assert relanded["error"] == ni_flow.AWAITING_SOURCE_PICK
 
 
 def test_pick_routes_refuse_the_inflight_locating_window(
@@ -1618,9 +1531,6 @@ def test_pick_routes_refuse_the_inflight_locating_window(
     r = client.post(f"/api/ni/items/{iid}/flow/pick-source",
                     json={"url": "https://api.example.com/x.json"})
     assert r.status_code == 409 and "asking for a source" in r.json()["detail"]
-    r2 = client.post(f"/api/ni/items/{iid}/flow/pick-recipe",
-                     json={"recipe_id": "crypto-price-btc-usd"})
-    assert r2.status_code == 409
     row = next(x for x in client.get("/api/ni/board").json()["items"]
                if x["id"] == iid)
     assert "suggestions" not in row["flow"], (

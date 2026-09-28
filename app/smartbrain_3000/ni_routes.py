@@ -26,7 +26,6 @@ from . import (
     library_index,
     netguard,
     ni,
-    ni_catalog,
     ni_flow,
     ni_library,
     ni_mcp,
@@ -844,8 +843,8 @@ def retry_flow(request: Request, item_id: str) -> dict:
     # stays. Heuristic: keep the URL only when the failure was NOT at fetch.
     error = str(record.get("error") or "")
     # Consent guard (claims audit 2026-09-21): a record that died at the
-    # confirm pause carries the recipe URL the user NEVER approved — a retry
-    # must not promote it to a consented fetch.
+    # retired catalog's confirm pause carries a URL the user NEVER approved —
+    # a retry must not promote it to a consented fetch.
     died_unapproved = "confirm" in error or bool(record.get("_recipe_id"))
     keep_url = isinstance(source_url, str) and bool(source_url) and \
         not error.startswith("fetch") and not died_unapproved
@@ -915,47 +914,6 @@ def pick_flow_source(request: Request, item_id: str, body: PickSourceIn) -> dict
     return {"ok": True, "started": bool(started)}
 
 
-class PickRecipeIn(BaseModel):
-    """P3: the source-pick card's vetted-suggestion tap."""
-
-    recipe_id: str = Field(min_length=1, max_length=80)
-
-
-@router.post("/api/ni/items/{item_id}/flow/pick-recipe")
-def pick_flow_recipe(request: Request, item_id: str, body: PickRecipeIn) -> dict:
-    """P3: route a source-pick pause into the standard ``confirm_source``
-    consent for a catalog recipe the user tapped — the Approve-source card
-    (exact URL, sealed fills, geocode/coverage disclosures) takes over from
-    there. Deterministic end to end; 409 unless paused at ``source``.
-    """
-    _require_desktop_local(request)
-    store = _store(request)
-    item = store.get_item(item_id)
-    if item is None:
-        raise HTTPException(status_code=404, detail="item not found")
-    record = ni_flow._flow_read(store, item_id)
-    state = str((record or {}).get("state") or "")
-    if record is None or state != "source" \
-            or record.get("error") != ni_flow.AWAITING_SOURCE_PICK:
-        raise HTTPException(
-            status_code=409,
-            detail="the card isn't asking for a source right now — it may "
-                   "still be searching; give it a moment")
-    recipe = ni_catalog.get_recipe(body.recipe_id)
-    if recipe is None:
-        raise HTTPException(status_code=404, detail="unknown recipe")
-    intent = record.get("intent") if isinstance(record.get("intent"), dict) else {}
-    ni_flow._pause_for_recipe_confirm(store, item_id, intent, recipe,
-                                       call_model=ni_flow.default_call_model(store, item_id))
-    request.app.state.audit.append(
-        "user", "ni_flow_pick_recipe", "reviewed", "executed", True,
-        args_summary=tools.summarize({"item_id": item_id,
-                                       "recipe_id": body.recipe_id}),
-        result_summary=tools.summarize({"state": "confirm_source"}),
-    )
-    return {"ok": True, "state": "confirm_source"}
-
-
 @router.post("/api/ni/items/{item_id}/flow/fix")
 def fix_item_flow(request: Request, item_id: str) -> dict:
     """P3: the card's Fix — re-derive this card against its OWN frozen source
@@ -978,84 +936,6 @@ def fix_item_flow(request: Request, item_id: str) -> dict:
     )
     return {"ok": True, "started": bool(started)}
 
-
-@router.post("/api/ni/items/{item_id}/flow/confirm-source")
-def confirm_flow_source(request: Request, item_id: str) -> dict:
-    """Card-consent (2026-09-15): the tile's own [Approve source] tap.
-
-    Deterministic by construction: the tap approves EXACTLY what the sealed
-    flow record holds — the card displayed ``source_url`` (+ geocode lookup +
-    not_covered) straight from that record via ``board_flow_field``, and this
-    route re-reads the record itself; no caller-supplied URL exists to drift.
-    The chat tool (``confirm_ni_flow_source``) remains as an alternative
-    surface, but a wandering chat model can no longer strand the consent —
-    the affordance renders the moment the flow pauses, from code alone.
-
-    Desktop-local (consent-bearing, like credential/param PUTs); audited as a
-    user consent event with the approved URL's host in the metadata. 409 when
-    the flow is not awaiting confirmation. Runs the continuation
-    synchronously (recipe handoff + optional consented geocode — seconds).
-    """
-    _require_desktop_local(request)
-    store = _store(request)
-    item = store.get_item(item_id)
-    if item is None:
-        raise HTTPException(status_code=404, detail="item not found")
-    record = ni_flow._flow_read(store, item_id)
-    state = str((record or {}).get("state") or "")
-    if record is None or state != "confirm_source":
-        raise HTTPException(
-            status_code=409,
-            detail=f"no source confirmation pending (flow state {state or 'none'!r})")
-    source_url = str(record.get("source_url") or "")
-    if not source_url:
-        raise HTTPException(status_code=409,
-                            detail="flow record carries no source URL")
-    try:
-        result = ni_flow.continue_from_recipe_confirm(store, item_id, source_url)
-    except ValueError as exc:  # raced by a concurrent confirm — report honestly
-        raise HTTPException(status_code=409, detail=str(exc)) from None
-    request.app.state.audit.append(
-        "user", "ni_flow_confirm_source", "reviewed", "executed", True,
-        args_summary=tools.summarize({"item_id": item_id,
-                                       "source_url": source_url}),
-        result_summary=tools.summarize({"state": str(result.get("state") or "")}),
-    )
-    _journal_best_effort(store, item_id, "source_changed",
-                          f"user approved the source on the card ({_host_of(source_url)})")
-    return {"ok": True, "state": str(result.get("state") or ""),
-            "item_state": (store.get_item(item_id) or {}).get("state")}
-
-
-@router.post("/api/ni/items/{item_id}/flow/decline-source")
-def decline_flow_source(request: Request, item_id: str) -> dict:
-    """Card-consent: the tile's [Not this source] tap — a fork, not a death.
-
-    G1 (field 2026-09-17): declining used to fail the flow terminally and the
-    card went dead. Now the flow RE-ENTERS the ``source`` pick pause, so the
-    card immediately offers the other vetted suggestions plus paste-a-URL.
-    Never a fetch; audited like the approval.
-    """
-    _require_desktop_local(request)
-    store = _store(request)
-    if store.get_item(item_id) is None:
-        raise HTTPException(status_code=404, detail="item not found")
-    record = ni_flow._flow_read(store, item_id)
-    state = str((record or {}).get("state") or "")
-    if record is None or state != "confirm_source":
-        raise HTTPException(
-            status_code=409,
-            detail=f"no source confirmation pending (flow state {state or 'none'!r})")
-    ni_flow.reenter_source_pick(store, item_id,
-                                 "user declined the source — picking again")
-    request.app.state.audit.append(
-        "user", "ni_flow_decline_source", "reviewed", "executed", True,
-        args_summary=tools.summarize({"item_id": item_id}),
-        result_summary=tools.summarize({"state": "source"}),
-    )
-    _journal_best_effort(store, item_id, "c2_wrong",
-                          "user declined the proposed source")
-    return {"ok": True, "state": "source"}
 
 
 class RefineIn(BaseModel):
