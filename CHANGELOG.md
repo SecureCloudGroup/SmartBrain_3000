@@ -13,6 +13,14 @@ to know when a release changes behavior.
 
 ### Added
 
+- **New cards read CSV files, RSS/Atom news feeds and XML, not just JSON.**
+  When you pick a Library source that publishes as a CSV download, an RSS
+  or Atom feed, an XML document or plain text — or paste a link to one on
+  the source-pick card — Neural Interface samples it, maps the fields the
+  same way it does for JSON APIs and refreshes it on the card's schedule.
+  Every parse is bounded (row / cell / depth / size caps) and XML DOCTYPE /
+  ENTITY declarations are refused before parse (entity-expansion defence).
+
 - **New cards find their source in the SmartBrain Library first.** When you ask
   for a card that the built-in recipes don't cover, the card now offers
   Library sources with the address already filled in from your words:

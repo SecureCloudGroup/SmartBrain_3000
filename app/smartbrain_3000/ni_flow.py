@@ -1442,10 +1442,20 @@ def run_flow(store: ni.NIStore, item_id: str, *,
         )
         return _gateway_mod.completion_text(data)
 
+    sealed_fmt = str(record.get("_format") or "").strip().lower() or None
+
     def default_fetcher(url: str) -> object:
-        """Fetch a JSON sample under the netguard SSRF/redirect discipline."""
+        """Fetch a sample under the netguard SSRF/redirect discipline.
+
+        A sealed ``_format`` on the flow record (stamped by ``pick_flow_source``
+        when the user tapped a Library CSV / RSS / XML / text row) drives the
+        parser; otherwise the JSON path runs as before, and the paste-URL
+        sniff below opens the other formats when a user pastes their own link.
+        """
         assert isinstance(url, str) and url, "url required"
-        return _netguard_mod.safe_fetch_json(url)
+        if sealed_fmt and sealed_fmt in ni._HTTP_JSON_FORMATS and sealed_fmt != "json":
+            return _fetch_textual_sample(url, sealed_fmt)
+        return _sniffed_fetch(url)
 
     call = gateway_call if gateway_call is not None else default_model
     do_fetch = fetcher if fetcher is not None else default_fetcher
@@ -1901,6 +1911,86 @@ def _resolve_secrets_store() -> object | None:
         return None
 
 
+# --- textual-format sampling (§3 http_json.format = csv / feed / xml / text) ----
+#
+# The sampling fetcher's two-branch dispatch: a sealed ``_format`` on the
+# record (Library tap) drives the parser directly; otherwise the paste-URL
+# path fetches JSON first (the vast majority of NI sources) and, on
+# ``FetchError.kind == "not_json"``, sniffs the served content-type + first
+# bytes to pick the right textual parser. Both helpers reuse the SAME
+# netguard machinery (``safe_fetch_json`` / ``safe_fetch_text``) that the
+# engine's ``_fetch_http_json`` does — one code path, one set of caps.
+_SNIFF_HEAD_BYTES = 4096
+
+
+def _fetch_textual_sample(url: str, fmt: str) -> object:
+    """Sampling fetch for a Library-picked textual format → walker-shaped dict."""
+    assert isinstance(url, str) and url, "url required"
+    assert fmt in ni._HTTP_JSON_FORMATS and fmt != "json", "fmt must be a textual format"
+    got = _netguard_mod.safe_fetch_text(url, fmt)
+    text = got.get("text") if isinstance(got, dict) else ""
+    if not isinstance(text, str):
+        raise _netguard_mod.FetchError(f"no text body for {fmt}",
+                                        kind=_netguard_mod.format_error_kind(fmt))
+    return _textual_parse(text, fmt)
+
+
+def _sniffed_fetch(url: str) -> object:
+    """Paste-URL fetch: try JSON first; on a shape refusal, sniff + parse.
+
+    Historical / catalog / recipe URLs are almost all JSON APIs — the JSON
+    path stays the default so nothing about existing behaviour changes. A
+    ``FetchError(kind="not_json")`` is the honest "the URL is alive, but the
+    body isn't JSON" signal; we then read the head bytes to sniff feed / xml /
+    csv and re-parse. Every other FetchError (SSRF refusal, timeout, upstream
+    4xx) rides straight through — those are not "wrong format", they are the
+    fetch failing outright.
+    """
+    from . import formats as _formats
+    assert isinstance(url, str) and url, "url required"
+    try:
+        return _netguard_mod.safe_fetch_json(url)
+    except _netguard_mod.FetchError as exc:
+        if getattr(exc, "kind", None) != "not_json":
+            raise
+    got = _netguard_mod.safe_fetch_text(url, "text")
+    text = got.get("text") if isinstance(got, dict) else ""
+    if not isinstance(text, str):
+        raise _netguard_mod.FetchError("no text body", kind="not_json") from None
+    ct = str(got.get("content_type") or "")
+    sniffed = _formats.sniff_format(ct, text[:_SNIFF_HEAD_BYTES])
+    if sniffed == "json":
+        # A body that sniffs back as JSON while the guard refused it is a
+        # server that lied about its content-type but really did serve JSON.
+        # Re-parse in-process — the netguard fetch has already run, so this
+        # only decodes bytes we already hold.
+        try:
+            return json.loads(text)
+        except ValueError as exc:
+            raise _netguard_mod.FetchError(f"upstream JSON reparse failed: {exc}",
+                                            kind="not_json") from None
+    return _textual_parse(text, sniffed)
+
+
+def _textual_parse(text: str, fmt: str) -> object:
+    """Parse ``text`` per ``fmt``; a parse failure surfaces as FetchError kind=not_<fmt>."""
+    from . import formats as _formats
+    assert isinstance(text, str) and isinstance(fmt, str), "args required"
+    assert fmt in ni._HTTP_JSON_FORMATS and fmt != "json", "fmt must be a textual format"
+    try:
+        if fmt == "csv":
+            return _formats.parse_csv(text)
+        if fmt == "feed":
+            return _formats.parse_feed(text)
+        if fmt == "xml":
+            return _formats.parse_xml(text)
+        return _formats.parse_text(text)
+    except _formats.FormatError as exc:
+        raise _netguard_mod.FetchError(
+            f"parse failed for {fmt}: {exc}",
+            kind=_netguard_mod.format_error_kind(fmt)) from None
+
+
 # S2 (round 9/10): the search-provider seam, mirroring the secrets provider.
 # main.py wires a factory returning a duck-typed service with
 # ``.search(query, limit) -> {"results": [{title,url,snippet}], ...}``;
@@ -1953,7 +2043,11 @@ def _library_candidates(request: str) -> list[dict]:
     return [{"source_id": str(c["source_id"])[:120], "title": str(c["title"])[:160],
              "host": str(c["host"])[:120], "url": str(c["url"])[:ni._MAX_URL],
              "provider": str(c["provider"])[:120], "authority": str(c["authority"])[:20],
-             "label": str(c.get("label") or "")[:160], "choice": bool(c.get("choice"))}
+             "label": str(c.get("label") or "")[:160], "choice": bool(c.get("choice")),
+             # Library candidates now name their textual format (csv / feed / xml /
+             # text / json). The route stamps this onto the flow record as ``_format``
+             # when the user taps that URL — the sampling fetch parses accordingly.
+             "format": str(c.get("format") or "json")[:20]}
             for c in cands if len(str(c.get("url") or "")) <= ni._MAX_URL]
 
 
@@ -2764,6 +2858,16 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
     # rebuilding a bare {type, url} used to strip the credential header and
     # the param structure from a keyed card even when the remap succeeded.
     source = dict(keep_source) if keep_source else {"type": "http_json", "url": url}
+    # Non-JSON textual formats (csv / feed / xml / text): the flow record's
+    # sealed ``_format`` (stamped by ``pick_flow_source`` or the paste-URL
+    # sniffer) rides onto the fresh source dict so the engine's dispatch parses
+    # every future refresh the same way sampling did. ``keep_source`` already
+    # carries its own frozen format (recipe / remap paths — never overwritten).
+    if not keep_source:
+        live = _flow_read(store, item_id) or {}
+        pick_fmt = str(live.get("_format") or "").strip().lower()
+        if pick_fmt and pick_fmt in ni._HTTP_JSON_FORMATS and pick_fmt != "json":
+            source["format"] = pick_fmt
     spec = build_final_spec(request, intent, source, intent["cadence_minutes"],
                             built["pipeline"], built["scene"])
     if keep_params:

@@ -47,9 +47,18 @@ LOCAL_SLOT = "sources"
 VOTES_SLOT = "votes"  # R6: this user's Yes taps on Library sources (sealed)
 MAX_LOCAL_SOURCES = 500
 MAX_PAGE = 50
-# formats the card flow can sample after a tap (JSON APIs; web pages through the page door).
-# CSV files and RSS/Atom feeds are not sampled by the flow yet — named, not silently dropped.
-_FLOW_KINDS = ("http_json", "html")
+# formats the card flow can sample after a tap: JSON APIs, JSON discovery docs (gbfs),
+# CSV downloads, RSS/Atom news feeds, XML documents, plain-text pages, and web pages
+# (the page door parses HTML separately). Each kind maps to the ``format`` a candidate
+# row carries so the sampling fetch parses accordingly. ``docs_only`` / ``internal`` /
+# the transit / calendar / image kinds still stay off the card — they need consent
+# machinery a card flow does not have yet (protobuf, gtfs zip archives, ical, images).
+_FLOW_KINDS = ("http_json", "gbfs", "http_csv", "rss", "atom", "http_xml", "text", "html")
+_FORMAT_BY_KIND: dict[str, str] = {
+    "http_json": "json", "gbfs": "json", "http_csv": "csv",
+    "rss": "feed", "atom": "feed", "http_xml": "xml",
+    "text": "text", "html": "html",
+}
 _STATE_CODES = frozenset({"AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "DC", "FL", "GA", "HI", "ID", "IL", "IN",
                           "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH",
                           "NJ", "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT",
@@ -469,7 +478,8 @@ class LibraryIndex:
                     out.append({"source_id": rec["id"], "tier": rec.get("tier", ""), "categories": rec.get("categories") or [], "title": rec["name"], "provider": rec["provider"]["name"],
                                 "authority": rec["provider"].get("authority", ""), "url": u["url"],
                                 "host": urlsplit(u["url"]).hostname or "", "label": u["label"], "choice": u["choice"],
-                                "status": row["status"]})
+                                "status": row["status"],
+                                "format": _FORMAT_BY_KIND.get(row["access_kind"], "json")})
                 if len(out) >= limit:
                     break
         # when something answers the asked subcategory exactly (tides, not water temperature), offer only those

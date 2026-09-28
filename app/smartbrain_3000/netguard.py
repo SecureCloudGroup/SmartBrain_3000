@@ -453,6 +453,55 @@ def safe_fetch_feed(url: str) -> dict:
             "text": got["content"].decode("utf-8", "replace")}
 
 
+# --- textual NI sources (§3 http_json ``format``: csv / feed / xml / text) ------
+#
+# Same SSRF machinery + streamed cap as safe_fetch_json; only the content-type
+# allowlist changes, matched to what the format's real hosts actually serve.
+# The redirect discipline is threaded through by the caller (NI's engine opts
+# out of redirects whenever ANY header is attached — verbatim mirror of
+# safe_fetch_json's credential-exfiltration guard).
+_CSV_CT = ("text/csv", "application/csv", "text/plain",
+           "application/octet-stream", "text/")
+_FEED_CT = ("application/", "text/")
+_XML_CT = ("application/", "text/")
+_TEXT_CT = ("text/",)
+_FORMAT_CT: dict[str, tuple[str, ...]] = {
+    "csv": _CSV_CT, "feed": _FEED_CT, "xml": _XML_CT, "text": _TEXT_CT,
+}
+_FORMAT_KIND: dict[str, str] = {
+    "csv": "not_csv", "feed": "not_feed", "xml": "not_xml", "text": "not_text",
+}
+
+
+def safe_fetch_text(url: str, fmt: str, headers: dict | None = None,
+                    allow_redirects: bool = True) -> dict:
+    """Guarded GET returning ``{final_url, status, content_type, text}`` for a
+    non-JSON textual NI source (``format`` ∈ {csv, feed, xml, text}).
+
+    Same SSRF guard + streamed byte cap as ``safe_fetch_json``; the content-type
+    allowlist is scoped per-format (see ``_FORMAT_CT``). The caller (NI's
+    ``_fetch_http_json`` dispatch) is responsible for the redirect discipline —
+    ``allow_redirects=False`` whenever ANY header is attached, mirroring the
+    credential-exfiltration guard on the JSON path. Bad-shape parse failures
+    downstream translate to ``FetchError(kind="not_<fmt>")``, keyed off
+    ``_FORMAT_KIND`` so callers can route "the URL is alive but wrong shape"
+    without matching on message text.
+    """
+    assert isinstance(fmt, str) and fmt in _FORMAT_CT, "fmt must be a supported textual format"
+    assert isinstance(url, str) and url, "url required"
+    got = _guarded_get(url, _FORMAT_CT[fmt], _MAX_BYTES,
+                       extra_headers=headers, allow_redirects=allow_redirects)
+    return {"final_url": got["final_url"], "status": got["status"],
+            "content_type": got["content_type"],
+            "text": got["content"].decode("utf-8", "replace")}
+
+
+def format_error_kind(fmt: str) -> str:
+    """Return the ``FetchError.kind`` a parse failure of ``fmt`` should carry."""
+    assert isinstance(fmt, str) and fmt in _FORMAT_KIND, "fmt must be a supported textual format"
+    return _FORMAT_KIND[fmt]
+
+
 def safe_fetch_bytes(url: str) -> dict:
     """Fetch ``url`` behind the SSRF guard, returning raw bytes (for ingestion).
 

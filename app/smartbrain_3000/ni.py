@@ -129,6 +129,12 @@ _SOURCE_TYPES: frozenset[str] = frozenset(
     {"http_json", "http_page", "http_image", "model", "internal.schedule",
      "internal.kb", "internal.ni", "mcp_tool", "computed"}
 )
+# §3 http_json ``format`` (optional; default ``json`` — existing specs unchanged
+# byte-for-byte). Every entry names a stdlib-parseable textual shape that
+# ``smartbrain_3000.formats`` turns into the walker-shaped dict the pipeline
+# grammar already consumes. Refused when absent from a candidate spec.
+_HTTP_JSON_FORMATS: frozenset[str] = frozenset({"json", "csv", "feed", "xml", "text"})
+_HTTP_JSON_EXTRA_KEYS: frozenset[str] = frozenset({"format"})
 # §29 computed source v1: closed compute set + strict YYYY-MM-DD date shape.
 # Same regex shape as vault_format._DATE_RE — no timezone / newline play.
 _COMPUTED_COMPUTES: frozenset[str] = frozenset({"days_until"})
@@ -653,7 +659,7 @@ def _validate_source(source: object) -> None:
 
 
 def _validate_http_json_source(s: dict) -> None:
-    """§3 http_json: {type, url, headers}. URL is user-consented; $secret refs live here.
+    """§3 http_json: {type, url, headers, format?}. URL is user-consented; $secret refs live here.
 
     URL structure is frozen at consent time: the raw template's scheme + authority must be
     literal (no ``{{param:``), so a filled-in param value can never rewrite the host or port
@@ -661,8 +667,21 @@ def _validate_http_json_source(s: dict) -> None:
     are literals or ``$secret`` refs — never templated — so a param value can't smuggle
     auth-shaped bytes into a header. Auth-shaped literal header names are refused unless
     the value is a $secret ref (the credential belongs in the SecretStore).
+
+    ``format`` (optional, default ``json``) names how the fetched body is parsed for
+    the pipeline: ``json`` / ``csv`` / ``feed`` (RSS + Atom) / ``xml`` / ``text``.
+    Existing specs (``format`` absent) are unchanged byte-for-byte — the JSON path
+    is the default. Every other format flows through ``netguard.safe_fetch_text``
+    with its own content-type allowlist and turns into the same walker-shaped
+    dict the extract/transform grammar already consumes.
     """
-    _validate_http_source_shape(s, "http_json")
+    _validate_http_source_shape(s, "http_json", extra_keys=_HTTP_JSON_EXTRA_KEYS)
+    fmt = s.get("format")
+    if fmt is None:
+        return  # default is "json" — the historical shape
+    if fmt not in _HTTP_JSON_FORMATS:
+        raise ValueError(
+            f"spec.source.format must be one of {sorted(_HTTP_JSON_FORMATS)}")
 
 
 def _validate_http_page_source(s: dict) -> None:
@@ -716,15 +735,20 @@ def _validate_internal_ni_source(s: dict) -> None:
             raise ValueError(f"spec.source.items.{alias} target too long")
 
 
-def _validate_http_source_shape(s: dict, type_label: str) -> None:
+def _validate_http_source_shape(s: dict, type_label: str,
+                                extra_keys: frozenset[str] = frozenset()) -> None:
     """Shared URL + header shape check for the §3 http_json and §15 http_page sources.
 
     Kept as one implementation so the two source types cannot drift on the load-bearing
     rules — auth-shaped header refusal, ``$secret`` scoping, {{param:}}-in-authority
     refusal, and header literal restrictions all apply to BOTH sources verbatim.
+    ``extra_keys`` widens the closed-key set for callers that carry additional
+    validated fields (http_json's optional ``format``); it never relaxes any of
+    the load-bearing checks above.
     """
     assert isinstance(type_label, str) and type_label, "type_label required"
-    _closed_keys(s, {"type", "url", "headers"}, f"spec.source ({type_label})")
+    assert isinstance(extra_keys, frozenset), "extra_keys must be a frozenset"
+    _closed_keys(s, {"type", "url", "headers", *extra_keys}, f"spec.source ({type_label})")
     url = _require_str(s.get("url"), "spec.source.url", max_len=_MAX_URL)
     _validate_http_json_url_shape(url)
     headers = s.get("headers") or {}
@@ -5379,12 +5403,17 @@ def _fetch_source(spec: dict, item_id: str, gateway_mod, secrets_store,
 
 
 def _fetch_http_json(source: dict, item_id: str, secrets_store) -> dict:
-    """Guarded JSON fetch; headers with ``$secret`` are host-bound at storage time.
+    """Guarded fetch for the §3 http_json source; parses by ``source.format``.
 
-    Redirects are refused whenever ANY header is attached (E): auth headers must never
-    re-send to a rewritten host, and a hostile server could otherwise 302 to itself and
-    harvest the credential. When no headers are attached we keep the default redirect
-    following (parity with feed/vault fetchers).
+    ``format`` (§3, optional; default ``json``) selects the parser: ``json`` runs
+    the historical path (byte-identical to before); ``csv`` / ``feed`` / ``xml`` /
+    ``text`` fetch via ``netguard.safe_fetch_text`` and parse through
+    ``smartbrain_3000.formats`` into the walker-shaped dict the pipeline grammar
+    already consumes. Redirects are refused whenever ANY header is attached (E):
+    auth headers must never re-send to a rewritten host, and a hostile server
+    could otherwise 302 to itself and harvest the credential. When no headers
+    are attached we keep the default redirect following (parity with the
+    feed/vault fetchers).
     """
     from . import netguard  # lazy: keep netguard off ni's import graph edges
 
@@ -5404,13 +5433,52 @@ def _fetch_http_json(source: dict, item_id: str, secrets_store) -> dict:
         elif isinstance(value, str):
             resolved_headers[name] = value
     has_headers = bool(resolved_headers)
+    fmt = source.get("format") or "json"
+    if fmt == "json":
+        try:
+            return netguard.safe_fetch_json(
+                url, headers=resolved_headers or None,
+                allow_redirects=not has_headers,  # E: refuse hop when carrying any header
+            )
+        except netguard.FetchError as exc:
+            raise NIError("fetch_failed", exc.__class__.__name__) from None
+    return _fetch_http_textual(url, fmt, resolved_headers, has_headers)
+
+
+def _fetch_http_textual(url: str, fmt: str, resolved_headers: dict[str, str],
+                        has_headers: bool) -> dict:
+    """Non-JSON textual formats: guarded fetch → stdlib parser → walker-shaped dict.
+
+    Split out of ``_fetch_http_json`` to keep either branch under the per-function
+    line cap. Same redirect discipline (headers ⇒ no redirects, mirroring the
+    JSON path). A parse failure surfaces as ``NIError('fetch_failed',
+    'not_<fmt>')`` — the ``not_<fmt>`` token comes from ``netguard.format_error_kind``
+    so the flow's page-door / retry routing can key on it without matching text.
+    """
+    from . import formats, netguard  # lazy: keep both off ni's import graph edges
+
+    assert isinstance(url, str) and url, "url required"
+    assert isinstance(fmt, str) and fmt != "json", "fmt must be a non-json textual format"
     try:
-        return netguard.safe_fetch_json(
-            url, headers=resolved_headers or None,
-            allow_redirects=not has_headers,  # E: refuse hop when carrying any header
+        got = netguard.safe_fetch_text(
+            url, fmt, headers=resolved_headers or None,
+            allow_redirects=not has_headers,
         )
     except netguard.FetchError as exc:
         raise NIError("fetch_failed", exc.__class__.__name__) from None
+    text = got.get("text") if isinstance(got, dict) else ""
+    if not isinstance(text, str):
+        raise NIError("fetch_failed", "no text")
+    try:
+        if fmt == "csv":
+            return formats.parse_csv(text)
+        if fmt == "feed":
+            return formats.parse_feed(text)
+        if fmt == "xml":
+            return formats.parse_xml(text)
+        return formats.parse_text(text)
+    except formats.FormatError:
+        raise NIError("fetch_failed", netguard.format_error_kind(fmt)) from None
 
 
 def _fetch_http_page(source: dict, item_id: str, secrets_store, *,
