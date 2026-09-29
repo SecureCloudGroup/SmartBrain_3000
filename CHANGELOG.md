@@ -11,6 +11,8 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-09-28
+
 ### Added
 
 - **New cards read CSV files, RSS/Atom news feeds and XML, not just JSON.**
