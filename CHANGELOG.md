@@ -11,6 +11,8 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.24.1] - 2026-09-29
+
 ### Fixed
 
 - **Cards built from a web page work again.** Since 0.24.0 an ordinary web
