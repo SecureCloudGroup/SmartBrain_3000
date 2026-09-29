@@ -697,3 +697,21 @@ def test_a_row_filter_may_compare_with_a_fixed_status_word() -> None:
     sample = {"rows": [{"team": "Yankees", "state": "Preview"}, {"team": "Orioles", "state": "Final"}]}
     built = ni_flow.build_from_answers([answer], sample, "t")
     assert [r["team"] for r in built["preview_payload"]["rows"]] == ["Orioles"]
+
+
+def test_a_time_declared_utc_is_shown_in_local_time() -> None:
+    """Live 2026-09-29: TheSportsDB's strTimestamp is UTC with no zone mark; shown as written, the
+    Lakers' 7 PM Pacific tip-off read "2:00 AM". A time answer can say its zoneless values are UTC."""
+    from datetime import UTC, datetime
+    a = ni_flow._clean_answer({"kind": "value", "name": "start", "label": "Start", "words": ["when"],
+                               "path": "events[0].strTimestamp", "type": "time", "utc": True})
+    assert a is not None and a["utc"] is True
+    built = ni_flow.build_from_answers([a], {"events": [{"strTimestamp": "2026-10-06T02:00:00"}]}, "t")
+    want = nimod.local_time(datetime(2026, 10, 6, 2, 0, tzinfo=UTC).isoformat())
+    assert built["preview_payload"]["start"] == want
+    # utc belongs to time only; anything else is refused
+    assert ni_flow._clean_answer({**{"kind": "value", "name": "x", "label": "X", "words": [],
+                                     "path": "a", "type": "text"}, "utc": True}) is None
+    with pytest.raises(ValueError):
+        nimod._validate_pipeline([{"op": "extract", "paths": {"t": "a"}},
+                                  {"op": "transform", "apply": [{"fn": "date", "field": "t", "utc": True}]}])

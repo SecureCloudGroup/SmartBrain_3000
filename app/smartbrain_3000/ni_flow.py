@@ -1105,12 +1105,12 @@ def _typed_verify(preview: dict, fields: dict, klass: str) -> None:
 _ANSWER_NAME_RE = re.compile(r"[a-z][a-z0-9_]{0,39}")
 _ANSWER_KEYS: dict[str, frozenset[str]] = {
     "value": frozenset({"name", "label", "words", "primary", "kind", "path", "type", "unit",
-                        "unit_path", "codes"}),
+                        "unit_path", "codes", "utc"}),
     "list": frozenset({"name", "label", "words", "primary", "kind", "path", "row", "newest_first",
                        "may_be_empty", "filter"}),
     "columns": frozenset({"name", "label", "words", "primary", "kind", "columns", "limit"}),
 }
-_ANSWER_CELL_KEYS = frozenset({"path", "label", "type", "unit", "unit_path", "codes"})
+_ANSWER_CELL_KEYS = frozenset({"path", "label", "type", "unit", "unit_path", "codes", "utc"})
 _ANSWER_VALUE_TYPES = ("number", "text", "time", "date", "count")
 _ANSWER_CELL_TYPES = ("number", "text", "time", "date")
 # a whole path segment naming one of the source's parameters: ``rates.{quote}``, ``{coin}.usd``
@@ -1127,6 +1127,11 @@ _ANSWER_STOP = frozenset({
 _ANSWER_MANY_RE = re.compile(
     r"\b(forecast|forecasts|weekend|week|daily|hourly|days|hours|latest|recent|upcoming|schedule|list)\b",
     re.IGNORECASE)
+
+
+def _utc_ok(decl: dict) -> bool:
+    """``utc`` (zoneless times are UTC) is a boolean, on a time value / cell only."""
+    return "utc" not in decl or (isinstance(decl["utc"], bool) and decl.get("type") == "time")
 
 
 def _clean_answer(raw: object) -> dict | None:
@@ -1147,9 +1152,12 @@ def _clean_answer(raw: object) -> dict | None:
     if kind == "value":
         if not isinstance(raw.get("path"), str) or raw.get("type") not in _ANSWER_VALUE_TYPES \
                 or raw.get("codes") not in (None, "wmo_weather") \
-                or (raw.get("unit") is not None and raw.get("unit_path") is not None):
+                or (raw.get("unit") is not None and raw.get("unit_path") is not None) \
+                or not _utc_ok(raw):
             return None  # a literal unit OR a unit read from the response, never both
         out.update({k: raw[k] for k in ("path", "type", "unit", "unit_path", "codes") if raw.get(k) is not None})
+        if raw.get("utc") is True:
+            out["utc"] = True
         return out
     if kind == "list":
         cells = raw.get("row")
@@ -1178,9 +1186,10 @@ def _clean_answer(raw: object) -> dict | None:
                 and isinstance(cell.get("path"), str) and cell.get("type") in _ANSWER_CELL_TYPES
                 and cell.get("codes") in (None, "wmo_weather")
                 and "{" not in cell["path"]  # {param} belongs in the list's own path, not a row cell
-                and not (cell.get("unit") is not None and cell.get("unit_path") is not None)):
+                and not (cell.get("unit") is not None and cell.get("unit_path") is not None)
+                and _utc_ok(cell)):
             return None
-        clean_cells.append({k: v for k, v in cell.items() if v is not None})
+        clean_cells.append({k: v for k, v in cell.items() if v is not None and not (k == "utc" and v is False)})
     out["cells"] = clean_cells
     return out
 
@@ -1346,7 +1355,7 @@ def _build_value_answers(chosen: list[dict], payload: dict) -> dict:
                 ops.append({"fn": "number", "field": name})
                 fields[name] = "number"
             elif a["type"] in ("time", "date"):
-                ops.append({"fn": a["type"], "field": name})
+                ops.append({"fn": a["type"], "field": name, **({"utc": True} if a.get("utc") else {})})
                 fields[name] = "string"
             else:
                 fields[name] = "string"
@@ -1376,7 +1385,7 @@ def _cell_ops(cell: dict, key: str) -> list[dict]:
     if cell["type"] == "number":
         return [{"fn": "number", "field": "rows", "key": key}]
     if cell["type"] in ("time", "date"):
-        return [{"fn": cell["type"], "field": "rows", "key": key}]
+        return [{"fn": cell["type"], "field": "rows", "key": key, **({"utc": True} if cell.get("utc") else {})}]
     return []
 
 
