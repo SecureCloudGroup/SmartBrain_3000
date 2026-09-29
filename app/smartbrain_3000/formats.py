@@ -24,7 +24,7 @@ from . import feeds
 # --- bounds (every one refuses with a clean FormatError when exceeded) ---------
 
 MAX_TEXT_CHARS = 200_000          # plain-text bodies (>= _MAX_SUMMARY per item)
-MAX_CSV_ROWS = 500                # first N data rows (header row is separate)
+MAX_CSV_ROWS = 500                # N data rows kept (a date series keeps the newest)
 MAX_CSV_COLUMNS = 60              # a wide spreadsheet is still a spreadsheet
 MAX_CSV_CELL = 4_000              # per-cell character cap
 MAX_XML_DEPTH = 12                # element nesting cap
@@ -61,7 +61,10 @@ def parse_csv(text: str) -> dict:
     Header row is required (a headerless CSV is refused — the pipeline needs
     named fields). Delimiter is sniffed among ``,;\\t|``. Numeric-looking cells
     stay strings — the extract/transform grammar owns coercion, and the CSV
-    parser has no schema. Row cap = MAX_CSV_ROWS; cell length cap = MAX_CSV_CELL.
+    parser has no schema. A time series whose first column is a date running
+    oldest→newest is returned NEWEST FIRST, so ``rows[0]`` is the latest value
+    (field 2026-09-28: FRED unemployment showed 1948's 3.4). Row cap =
+    MAX_CSV_ROWS (the newest rows are kept); cell length cap = MAX_CSV_CELL.
     """
     assert isinstance(text, str), "text required"
     assert len(text) >= 0, "text length invariant"
@@ -76,12 +79,15 @@ def parse_csv(text: str) -> dict:
     columns = _slug_columns(header)
     if not columns:
         raise FormatError("CSV header row has no usable columns")
-    rows: list[dict] = []
-    for i, raw in enumerate(reader):  # bounded by MAX_CSV_ROWS below
-        if i >= MAX_CSV_ROWS:
-            break
-        rows.append(_csv_row(columns, raw))
-    return {"columns": columns, "rows": rows}
+    rows = [_csv_row(columns, raw) for raw in reader]  # bounded by netguard's body cap
+    first = columns[0]
+    dates = [str(r.get(first) or "") for r in rows if r.get(first)]
+    if len(dates) > 1 and all(_DATE_RE.match(d) for d in dates[:50]) and dates[0] < dates[-1]:
+        rows.reverse()  # a series stored oldest first: the latest value leads
+    return {"columns": columns, "rows": rows[:MAX_CSV_ROWS]}
+
+
+_DATE_RE = re.compile(r"\d{4}-\d{2}(-\d{2})?([ T]\d{2}:\d{2}(:\d{2})?)?")
 
 
 def _sniff_csv_delimiter(text: str) -> str:
@@ -244,10 +250,29 @@ def _local_tag(tag: str) -> str:
 # --- plain text -------------------------------------------------------------------
 
 def parse_text(text: str) -> dict:
-    """Return ``{"text": "..."}`` bounded to MAX_TEXT_CHARS."""
+    """Return ``{"text": "..."}`` bounded to MAX_TEXT_CHARS. A whitespace table (a header line —
+    ``#`` allowed, as NOAA's buoy and station files use — then rows with the same number of
+    columns; a second ``#`` line of units is skipped) also comes back as ``columns`` + ``rows``,
+    so its values can be picked like any CSV's; the text is then kept short."""
     assert isinstance(text, str), "text required"
     assert MAX_TEXT_CHARS > 0, "text cap positive"
-    return {"text": text[:MAX_TEXT_CHARS]}
+    table = _whitespace_table(text)
+    if table is None:
+        return {"text": text[:MAX_TEXT_CHARS]}
+    return {"text": text[:2000], **table}
+
+
+def _whitespace_table(text: str) -> dict | None:
+    lines = [ln for ln in text.splitlines()[:MAX_CSV_ROWS + 5] if ln.strip()]
+    if len(lines) < 4:
+        return None
+    header = lines[0].lstrip("#").split()
+    body = [ln for ln in lines[1:] if not ln.startswith("#")]
+    if len(header) < 3 or len(body) < 3 or any(len(ln.split()) != len(header) for ln in body[:20]):
+        return None
+    columns = _slug_columns(header)
+    rows = [dict(zip(columns, ln.split(), strict=False)) for ln in body if len(ln.split()) == len(header)]
+    return {"columns": columns, "rows": rows[:MAX_CSV_ROWS]}
 
 
 # --- shared defence ---------------------------------------------------------------

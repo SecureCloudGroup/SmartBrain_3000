@@ -548,6 +548,19 @@ def _deep_copy_json(value: object) -> object:
     return json.loads(json.dumps(value))
 
 
+def _clip_strings(node: object, depth: int = 0) -> object:
+    """Long text only needs its start to be picked by path (a 200 KB report never fits the menu)."""
+    if depth > 12:
+        return node
+    if isinstance(node, str):
+        return node[:500]
+    if isinstance(node, list):
+        return [_clip_strings(x, depth + 1) for x in node]
+    if isinstance(node, dict):
+        return {k: _clip_strings(v, depth + 1) for k, v in node.items()}
+    return node
+
+
 def derive_paths(sample: object) -> list[dict]:
     """POC-parity: wrap a bare-list root, downsample, then call tools.walker.
 
@@ -558,7 +571,7 @@ def derive_paths(sample: object) -> list[dict]:
     assert sample is not None, "sample required"
     from . import tools as _sbtools
     wrapped = sample if isinstance(sample, dict) else {"items": sample}
-    obj = downsample(wrapped)
+    obj = _clip_strings(downsample(wrapped))
     if len(json.dumps(obj)) > _DOWNSAMPLE_MAX_BYTES:
         obj = downsample(obj, list_keep=1)
     result = _sbtools._derive_ni_paths(None, {"sample": obj, "want": "dashboard fields"})
@@ -586,7 +599,7 @@ def infer_fields(intent: dict) -> dict:
         key = _slugify_field_name(want)
         if not key or key in out:
             continue
-        vtype = "string" if key in _STRING_FIELD_WORDS else "number"
+        vtype = "string" if _is_text_want(key) else "number"
         out[key] = vtype
         if len(out) >= _MAX_INTENT_FIELDS:
             break
@@ -594,6 +607,29 @@ def infer_fields(intent: dict) -> dict:
         out["value"] = "number"
     assert 1 <= len(out) <= _MAX_INTENT_FIELDS, "fields count in [1, 4]"
     return out
+
+
+def _is_text_want(slug: str) -> bool:
+    """A want is text when it, or any of its words (singular or plural), is a text word:
+    "tide_times", "headlines", "station_name" — not only the exact slug."""
+    words = [slug, *slug.split("_")]
+    return any(w in _STRING_FIELD_WORDS or (w.endswith("s") and w[:-1] in _STRING_FIELD_WORDS)
+               for w in words if w)
+
+
+_NUMERIC_TEXT_RE = re.compile(r"-?\d+(?:\.\d+)?")
+
+
+def _numeric_text(example: object) -> bool:
+    """A sampled string that is really a number ("6.904", "-3", "42") — many APIs and every
+    CSV send numbers as text. Leading zeros ("02134", an id or ZIP) stay text."""
+    raw = example
+    if isinstance(raw, str) and raw.startswith('"') and raw.endswith('"'):
+        raw = raw[1:-1]  # the walker's examples are JSON-encoded
+    if not isinstance(raw, str) or not _NUMERIC_TEXT_RE.fullmatch(raw.strip()):
+        return False
+    digits = raw.strip().lstrip("-")
+    return not (len(digits) > 1 and digits[0] == "0" and digits[1] != ".")
 
 
 def _slugify_field_name(raw: str) -> str:
@@ -658,6 +694,8 @@ def reconcile_field_types(fields: dict, candidates: list[dict]) -> dict:
         ctype = cand.get("type")
         if ctype in tails and isinstance(cand.get("path"), str):
             tails[ctype].add(_path_tail_slug(cand["path"]))
+            if ctype == "string" and _numeric_text(cand.get("example")):
+                tails["number"].add(_path_tail_slug(cand["path"]))  # a number sent as text
     out: dict = {}
     for name, vtype in fields.items():  # bounded by _MAX_INTENT_FIELDS
         other = "number" if vtype == "string" else "string"
@@ -665,6 +703,8 @@ def reconcile_field_types(fields: dict, candidates: list[dict]) -> dict:
                 and not any(_names_match(name, t) for t in tails[vtype])
                 and any(_names_match(name, t) for t in tails[other])):
             out[name] = other
+        elif not tails.get(vtype) and tails.get(other):
+            out[name] = other  # the sample has nothing of the guessed type: the data decides
         else:
             out[name] = vtype
     return out
@@ -677,7 +717,11 @@ _MAPPING_PROMPT = (
 )
 
 
-def build_mapping_menu(candidates: list[dict], fields: dict) -> tuple[list[dict], str]:
+_COUNT_CUE_RE = re.compile(r"\b(how many|count|number of|any|are there|is there)\b", re.IGNORECASE)
+
+
+def build_mapping_menu(candidates: list[dict], fields: dict,
+                       count_words: str = "") -> tuple[list[dict], str]:
     """Filter the derive output to candidates matching the requested field types.
 
     Returns ``(usable_candidates, menu_string)`` — the menu is the only content
@@ -687,9 +731,20 @@ def build_mapping_menu(candidates: list[dict], fields: dict) -> tuple[list[dict]
     assert isinstance(candidates, list) and isinstance(fields, dict), "args required"
     want_types = set(fields.values())
     usable = [c for c in candidates if isinstance(c, dict) and c.get("type") in want_types]
+    if "number" in want_types:  # a number the source sends as text; assembly converts it
+        usable += [{**c, "type": "number", "as_text": True} for c in candidates
+                   if isinstance(c, dict) and c.get("type") == "string" and _numeric_text(c.get("example"))]
+        # how many items a list holds ("any active storms?" → 0) — only when the ask is about how many,
+        # or names the list itself (field 2026-09-28: "Philly forecast" became 168, the hourly count)
+        asks_count = bool(_COUNT_CUE_RE.search(count_words))
+        usable += [{**c, "type": "number", "count": True, "example": "the number of items"}
+                   for c in candidates if isinstance(c, dict) and c.get("type") == "list"
+                   and (asks_count or any(_names_match(f, _path_tail_slug(c["path"])) for f in fields))]
     usable = usable[:_MAPPING_MENU_CAP]
     lines = [
-        f"- {c['path']}  ({c['type']}, e.g. {_neutralize_example(c.get('example'))})"
+        f"- {c['path']}  ({c['type']}{', sent as text' if c.get('as_text') else ''}"
+        f"{', count of items' if c.get('count') else ''}, "
+        f"e.g. {_neutralize_example(c.get('example'))})"
         for c in usable
     ]
     return usable, "\n".join(lines)
@@ -717,10 +772,13 @@ def stage_mapping(intent: dict, candidates: list[dict], fields: dict,
     """
     assert isinstance(intent, dict) and isinstance(fields, dict), "args required"
     assert isinstance(candidates, list) and callable(model_call), "args required"
-    usable, menu = build_mapping_menu(candidates, fields)
+    words = " ".join([str(intent.get("request") or ""), str(intent.get("subject") or ""),
+                      *[str(w) for w in intent.get("wants") or []]])
+    usable, menu = build_mapping_menu(candidates, fields, count_words=words)
     if not usable:
         raise ValueError("mapping stage: no candidates match the intent's field types")
     offered = {c["path"]: c for c in usable}
+    lists = {c["path"] for c in candidates if isinstance(c, dict) and c.get("type") == "list"}
     shape = ", ".join(f'"{name}": "<{ftype} path>"' for name, ftype in fields.items())
     prompt = _MAPPING_PROMPT.format(intent_json=json.dumps(intent), shape=shape, menu=menu)
     if feedback:
@@ -728,7 +786,7 @@ def stage_mapping(intent: dict, candidates: list[dict], fields: dict,
             "\nPick different paths for those fields."
     for attempt in range(2):  # fixed upper bound (P10 #2)
         try:
-            reply = _parse_json_reply(model_call(prompt))
+            reply = _count_spellings(_parse_json_reply(model_call(prompt)), offered, lists)
             _verify_mapping(reply, offered, fields)
             return reply
         except (ValueError, TypeError, KeyError) as exc:
@@ -736,6 +794,27 @@ def stage_mapping(intent: dict, candidates: list[dict], fields: dict,
                 raise ValueError(f"mapping stage failed after retry: {exc}") from None
             prompt = prompt + f"\nPrevious reply invalid ({exc}). Copy paths exactly."
     raise RuntimeError("unreachable — retry loop bounded to 2 attempts")
+
+
+_COUNT_SPELLING_RE = re.compile(r"^(?:len\((?P<a>.+)\)|count\((?P<b>.+)\)|(?P<c>.+?)\.(?:length|count|size|len))$")
+
+
+def _count_spellings(reply: dict, offered: dict, lists: set[str] | None = None) -> dict:
+    """Models write "the number of items in X" as ``X.length`` / ``len(X)``: when X is a list in the
+    sample, that is a deliberate count pick (field 2026-09-28: hurricanes → ``activeStorms.length``) and
+    it joins the offered menu as one."""
+    if not isinstance(reply, dict):
+        return reply
+    out = {}
+    for name, path in reply.items():
+        m = _COUNT_SPELLING_RE.match(path) if isinstance(path, str) and path not in offered else None
+        base = next((g for g in (m.groups() if m else ()) if g), None)
+        if base and (offered.get(base, {}).get("count") or base in (lists or set())):
+            offered.setdefault(base, {"path": base, "type": "number", "count": True})
+            out[name] = base
+        else:
+            out[name] = path
+    return out
 
 
 def _verify_mapping(reply: dict, offered: dict, fields: dict) -> None:
@@ -811,21 +890,99 @@ def value_scene(fields: list[str], labels: dict[str, str] | None = None,
     return {"type": "stack", "dir": "v", "gap": "sm", "children": children}
 
 
-def list_scene(items_path: str, item_field: str) -> dict:
-    """List-class scene: repeat over a generalized list path (up to 5 rows)."""
+_TIME_WORDS = ("time", "date", "updated", "published", "sunset", "sunrise", "start", "end", "at")
+
+
+def _is_timestamp(value: object, name: str) -> bool:
+    """An ISO timestamp, or an epoch under a time-like name (a bare big number is not a time)."""
+    if isinstance(value, str):
+        return bool(ni._ISO_TIME_RE.fullmatch(value.strip()))
+    if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 1e8:
+        return any(w in str(name).lower().split("_") or str(name).lower().endswith(w) for w in _TIME_WORDS)
+    return False
+
+
+def list_scene(items_path: str, item_field: str | list[str], title: str | None = None) -> dict:
+    """List-class scene: repeat over a generalized list path (up to 5 rows); each row shows its
+    item's fields ("09:48 · 6.904 · H"), under the card's own subject rather than a stock title."""
     assert isinstance(items_path, str) and items_path, "items_path required"
-    assert isinstance(item_field, str) and item_field.startswith("item."), "item_field required"
+    item_fields = [item_field] if isinstance(item_field, str) else list(item_field)
+    assert item_fields and all(f.startswith("item.") for f in item_fields), "item fields required"
+    heading = " ".join(str(title or "Latest").replace("_", " ").split())[:200] or "Latest"
     return {"type": "stack", "dir": "v", "gap": "sm", "children": [
-        {"type": "text", "value": "Top items", "role": "title",
+        {"type": "text", "value": heading, "role": "title",
          "tone": "default", "size": "md"},
         {"type": "repeat", "items": {"$bind": items_path}, "max": 5,
-         "template": {"type": "text", "value": f"{{{{{item_field}}}}}",
+         "template": {"type": "text", "value": " · ".join(f"{{{{{f}}}}}" for f in item_fields),
                       "role": "label", "tone": "default", "size": "sm"}},
     ]}
 
 
+_MAX_ROW_FIELDS = 3
+_ROW_SKIP_KEYS = frozenset({"id", "ids", "uuid", "guid", "code", "url", "href", "link",
+                            "detail", "details", "net", "sources", "icon"})
+_ID_LIKE_RE = re.compile(r"(?=.*\d)(?=.*[a-z])[a-z0-9_-]{6,}", re.IGNORECASE)
+
+
+def _dig(node: object, dotted: str) -> object:
+    for part in dotted.split("."):  # bounded by the path depth
+        node = node.get(part) if isinstance(node, dict) else None
+    return node
+
+
+def _constant_across(rows: list, parent_path: list[str], key: str) -> bool:
+    """True when ``key`` holds one value in every row: no information for a reader."""
+    seen = set()
+    for row in rows[:20]:  # bounded
+        node = row
+        for part in parent_path:
+            node = node.get(part) if isinstance(node, dict) else None
+        seen.add(json.dumps(node.get(key) if isinstance(node, dict) else None, default=str))
+    return len(rows) > 1 and len(seen) == 1
+
+
+def _row_fields(items_path: str, item_field: str, mapping: dict, rows: object) -> list[str]:
+    """What a list row shows: every picked field that lives in this list, first; then — when fewer
+    than three were picked — readable siblings from the picked field's OWN record (a quake's place
+    and magnitude, a tide's time and height), in the source's order. Ids, codes, links and
+    epoch-style numbers are never padding, nor a field with the same value in every row (every
+    quake is a "Feature"; a tide's H/L varies and stays)."""
+    picked = [item_field]
+    for path in mapping.values():  # bounded by _MAX_INTENT_FIELDS
+        try:
+            other_items, other_field = _generalize_list_path(str(path))
+        except ValueError:
+            continue
+        if other_items == items_path and other_field not in picked:
+            picked.append(other_field)
+    first = rows[0] if isinstance(rows, list) and rows else None
+    parent_path = item_field.split(".")[1:-1]
+    parent = first
+    for key in parent_path:  # bounded by the path depth
+        parent = parent.get(key) if isinstance(parent, dict) else None
+    siblings: list[str] = []
+    if isinstance(parent, dict):
+        prefix = ".".join(["item", *parent_path])
+        for key, value in parent.items():  # bounded by the record size
+            name = f"{prefix}.{key}"
+            if name in picked or str(key).lower() in _ROW_SKIP_KEYS or str(key).lower().endswith("_id") \
+                    or not ni._KEY_RE.match(str(key)):
+                continue
+            if isinstance(value, bool) or value is None or _constant_across(rows, parent_path, key):
+                continue
+            short_number = isinstance(value, (int, float)) and abs(value) < 1e9
+            short_text = isinstance(value, str) and 0 < len(value) <= 40 \
+                and not _ID_LIKE_RE.fullmatch(value) and not value.startswith("http")
+            if short_number or short_text:
+                siblings.append(name)
+    fields = picked + siblings[:max(0, _MAX_ROW_FIELDS - len(picked))]
+    if isinstance(parent, dict):  # the source's own order reads naturally: time, height, H/L
+        order = {f"{'.'.join(['item', *parent_path])}.{k}": i for i, k in enumerate(parent)}
+        fields.sort(key=lambda f: order.get(f, -1))
+    return fields
+
 def assemble_from_mapping(mapping: dict, fields: dict, klass: str,
-                          fresh_sample: object) -> dict:
+                          fresh_sample: object, title: str | None = None) -> dict:
     """Build the (pipeline, scene, preview_payload) triple + verify types.
 
     Runs the pipeline against ``fresh_sample`` and binds the scene — the same
@@ -841,12 +998,37 @@ def assemble_from_mapping(mapping: dict, fields: dict, klass: str,
         first_field = next(iter(fields))
         items_path, item_field = _generalize_list_path(mapping[first_field])
         stages = [{"op": "extract", "paths": {"rows": items_path}}]
-        scene = list_scene("rows", item_field)
         preview = ni.run_pipeline(stages, payload)
+        row_fields = _row_fields(items_path, item_field, mapping, preview.get("rows"))
+        rows = preview.get("rows") if isinstance(preview.get("rows"), list) else []
+        first = rows[0] if rows and isinstance(rows[0], dict) else {}
+        timed = [f[5:] for f in row_fields if _is_timestamp(_dig(first, f[5:]), f[5:].rsplit(".", 1)[-1])]
+        if timed:  # show the rows' timestamps in the user's local time, on every refresh
+            stages.append({"op": "transform", "apply": [{"fn": "time", "field": "rows", "key": k} for k in timed]})
+            preview = ni.run_pipeline(stages, payload)
+        scene = list_scene("rows", row_fields, title=title)
     else:
         stages = [{"op": "extract", "paths": dict(mapping)}]
         scene = value_scene(list(fields), types=dict(fields))
         preview = ni.run_pipeline(stages, payload)
+        counted = [n for n, t in fields.items() if t == "number" and isinstance(preview.get(n), list)]
+        if counted:  # a number field picked a list: the card shows how many items it holds
+            stages = [{"op": "extract", "paths": {(f"{n}_items" if n in counted else n): pth
+                                                  for n, pth in mapping.items()}},
+                      {"op": "transform", "apply": [{"fn": "count", "field": f"{n}_items", "as": n}
+                                                    for n in counted]}]
+            preview = ni.run_pipeline(stages, payload)
+        timed = [n for n in fields if _is_timestamp(preview.get(n), n)]
+        if timed:  # a timestamp reads as the user's local time ("6:48 PM"), on every refresh
+            stages.append({"op": "transform", "apply": [{"fn": "time", "field": n} for n in timed]})
+            fields = {**fields, **{n: "string" for n in timed}}
+            scene = value_scene(list(fields), types=dict(fields))
+            preview = ni.run_pipeline(stages, payload)
+        as_text = [n for n, t in fields.items() if t == "number" and isinstance(preview.get(n), str)
+                   and _numeric_text(preview.get(n))]
+        if as_text:  # the source sends these numbers as text: convert them on every refresh
+            stages.append({"op": "transform", "apply": [{"fn": "number", "field": n} for n in as_text]})
+            preview = ni.run_pipeline(stages, payload)
     _typed_verify(preview, fields, klass)
     return {"pipeline": stages, "scene": scene, "preview_payload": preview}
 
@@ -1423,18 +1605,32 @@ def _sniffed_fetch(url: str) -> object:
     4xx) rides straight through — those are not "wrong format", they are the
     fetch failing outright.
     """
-    from . import formats as _formats
     assert isinstance(url, str) and url, "url required"
     try:
         return _netguard_mod.safe_fetch_json(url)
     except _netguard_mod.FetchError as exc:
         if getattr(exc, "kind", None) != "not_json":
             raise
+        page = exc  # the URL is alive but isn't JSON: a data file, or an ordinary web page
+    try:
+        return _sniffed_textual(url)
+    except _netguard_mod.FetchError:
+        # an ordinary web page (field 2026-09-28: HTML sniffed as XML failed to parse and never
+        # reached the page reader) — the not_json refusal routes the flow to the page door
+        raise page from None
+
+
+def _sniffed_textual(url: str) -> object:
+    """Fetch as text and parse by what it really is; HTML is refused (the page door reads pages)."""
+    from . import formats as _formats
     got = _netguard_mod.safe_fetch_text(url, "text")
     text = got.get("text") if isinstance(got, dict) else ""
     if not isinstance(text, str):
         raise _netguard_mod.FetchError("no text body", kind="not_json") from None
     ct = str(got.get("content_type") or "")
+    head = text[:_SNIFF_HEAD_BYTES].lstrip().lower()
+    if "html" in ct.lower() or head.startswith(("<!doctype html", "<html")):
+        raise _netguard_mod.FetchError("an HTML page", kind="not_text")
     sniffed = _formats.sniff_format(ct, text[:_SNIFF_HEAD_BYTES])
     if sniffed == "json":
         # A body that sniffs back as JSON while the guard refused it is a
@@ -1711,10 +1907,12 @@ def _s2_evaluate(rows: list[dict], intent: dict) -> list[dict]:
     attaches a deterministic score plus ≤2 grounded evidence lines (verbatim
     from the page's own entities/tables) that the pick card shows BEFORE any
     tap. Pre-tap fetches run under the search-reads-pages consent ruling; the
-    tap stays the consent for the RECURRING source. A page that won't fetch
-    keeps score None — still offerable (it may simply block bots; the tap +
-    page door can still win). Rows come back fitness-ordered, fetch failures
-    and unfetched rows after, original order preserved within each band.
+    tap stays the consent for the RECURRING source. A page that REFUSES us
+    (401/403/429 — bot walls) is dropped: the tap would send the same honest
+    request and be refused again (field 2026-09-28: a 403 AccuWeather page was
+    offered first, tapped, and the card failed). Other fetch failures keep
+    score None and sort last. Rows come back fitness-ordered, original order
+    preserved within each band.
     """
     wants = [str(w) for w in (intent.get("wants") or []) if isinstance(w, str)]
     subject = str(intent.get("subject") or "")
@@ -1726,7 +1924,11 @@ def _s2_evaluate(rows: list[dict], intent: dict) -> list[dict]:
                 graph = pagegraph.fetch_page_graph(row["url"])
                 fitness, evidence = pagegraph.graph_fitness(graph, probe_wants)
                 row = dict(row, fitness=fitness, evidence=evidence)
-            except Exception:  # unfetchable pre-tap ≠ unusable post-tap
+            except _netguard_mod.FetchError as exc:
+                if getattr(exc, "status", None) in (401, 403, 429) \
+                        or getattr(exc, "kind", None) in ("refused", "challenge", "rate_limited"):
+                    continue  # it refuses us: never offer a page we already know we can't read
+            except Exception:  # a transient failure: still offerable, sorted last
                 pass
         scored.append((-(row.get("fitness") if row.get("fitness")
                          is not None else -1), i, row))
@@ -1750,11 +1952,27 @@ def _pause_source_pick(store: ni.NIStore, item_id: str, request: str,
                     note="paused: sources from the SmartBrain Library are on the card",
                     _ranked_library=library, _ranked_search=None)
         return _flow_read(store, item_id) or {}
+    web = _pause_with_web(store, item_id, request, intent, call_model)
+    if web is not None:
+        return web
+    _transition(store, item_id, "source",
+                error=AWAITING_SOURCE_PICK,
+                note="paused: no source found — paste a link to the data on the card",
+                _ranked_library=None, _ranked_search=None)
+    return _flow_read(store, item_id) or {}
+
+
+def _pause_with_web(store: ni.NIStore, item_id: str, request: str, intent: dict,
+                    call_model: Callable[[str], str]) -> dict | None:
+    """S2: search the user's own words, read the result pages, seal ≤3 readable candidates. None
+    when search is unwired or finds nothing."""
     service = _resolve_search_service()
     if service is not None:
         web = _s2_search_candidates(service, request, intent)
         if web:
             web = _s2_evaluate(web, intent)
+            read = [r for r in web if r.get("fitness") is not None]
+            web = read or web  # offer pages we actually read; unread ones only when none could be read
             order = rank_web_rows(web, request, intent, call_model)
             if order:
                 web = [web[i] for i in order if 0 <= i < len(web)]
@@ -1769,11 +1987,7 @@ def _pause_source_pick(store: ni.NIStore, item_id: str, request: str,
                              "web candidates are on the card",
                         _ranked_search=sealed, _ranked_library=None)
             return _flow_read(store, item_id) or {}
-    _transition(store, item_id, "source",
-                error=AWAITING_SOURCE_PICK,
-                note="paused: no source found — paste a link to the data on the card",
-                _ranked_library=None, _ranked_search=None)
-    return _flow_read(store, item_id) or {}
+    return None
 
 
 def _run_remap(store: ni.NIStore, item_id: str, record: dict,
@@ -2003,6 +2217,13 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
             # that starts serving HTML still fails honestly.
             return _build_page_card(store, item_id, request, intent, url,
                                      call_model, remap=remap)
+        if not remap and getattr(exc, "status", None) in (401, 403, 429):  # Library or web row
+            refused = _repick_without(store, item_id, url)
+            if refused is not None:
+                if not refused.get("_ranked_library") and not refused.get("_ranked_search"):
+                    web = _pause_with_web(store, item_id, request, intent, call_model)  # nothing left
+                    return web if web is not None else refused
+                return refused
         return _fail(store, item_id, "fetch", f"sample fetch failed: {type(exc).__name__}")
     try:
         cands = derive_paths(sample)
@@ -2027,7 +2248,7 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
     feedback: str | None = None
     for judged_attempt in range(2):  # fixed upper bound (P10 #2)
         try:
-            mapping = stage_mapping(intent, cands, fields, call_model,
+            mapping = stage_mapping({**intent, "request": request[:300]}, cands, fields, call_model,
                                     feedback=feedback)
         except ValueError as exc:
             # G2: a mapping exhaust on the FIRST pass earns one more bounded
@@ -2048,22 +2269,26 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
             degrade_note = f"display_hint {hint!r} unsupported; proceeding with value card"
         # A9/A11 (case matrix, 2026-09-15): the data decides list-vs-value, not the
         # hint — no ``[N]`` step in the picked paths degrades to the value card.
-        if klass == _DISPLAY_LIST and not any(
-            "[" in str(path) for path in mapping.values()
+        if klass == _DISPLAY_LIST and not all(
+            _LIST_EXEMPLAR_RE.match(str(path)) for path in list(mapping.values())[:1]
         ):
             klass = _DISPLAY_VALUE
             extra = "display_hint 'list' but no list-shaped data; value card"
             degrade_note = f"{degrade_note}; {extra}" if degrade_note else extra
-        # Minor (audit 2026-09-13): a list-class scene binds ONE list exemplar
-        # path — extra fields the model picked are dropped; say so honestly.
+        # A list row shows the fields that live in the first field's list; any
+        # picked field from a different list is dropped — say so honestly.
         if klass == _DISPLAY_LIST and len(fields) > 1:
-            dropped = list(fields.keys())[1:]
-            extra = f"list-class scene keeps the first field; dropped: {dropped}"
-            degrade_note = f"{degrade_note}; {extra}" if degrade_note else extra
+            first_items = str(mapping.get(next(iter(fields)), "")).split("[", 1)[0]
+            dropped = [n for n, pth in mapping.items()
+                       if str(pth).split("[", 1)[0] != first_items]
+            if dropped:
+                extra = f"list rows show one list; dropped: {dropped}"
+                degrade_note = f"{degrade_note}; {extra}" if degrade_note else extra
         _transition(store, item_id, "assembling",
                     note=degrade_note or "assembling scene + pipeline")
         try:
-            built = assemble_from_mapping(mapping, fields, klass, sample)
+            built = assemble_from_mapping(mapping, fields, klass, sample,
+                                          title=str(intent.get("subject") or request)[:120])
         except ValueError as exc:
             return _fail(store, item_id, "assembly", str(exc))
         # A12 (case matrix): deterministic °F conversion for temperature fields.
@@ -2727,6 +2952,25 @@ def begin_remap(store: ni.NIStore, item: dict) -> bool:
     record["_remap"] = True
     _flow_write(store, item["id"], record)
     return start_flow_worker(store, item["id"], source_url=url)
+
+
+def _repick_without(store: ni.NIStore, item_id: str, url: str) -> dict | None:
+    """A tapped source (Library or web) refused SmartBrain's request (401/403/429 — a bot wall or rate limit):
+    back to the pick with the other choices and an honest note, instead of a dead card (field
+    2026-09-28: ESPN refused, the card failed). None when the refused URL wasn't a Library row."""
+    record = _flow_read(store, item_id) or {}
+    for slot in ("_ranked_library", "_ranked_search"):
+        rows = [r for r in record.get(slot) or [] if isinstance(r, dict)]
+        gone = next((r for r in rows if r.get("url") == url), None)
+        if gone is None:
+            continue
+        rest = [r for r in rows if r.get("url") != url]
+        other = "_ranked_search" if slot == "_ranked_library" else "_ranked_library"
+        return _transition(store, item_id, "source", error=AWAITING_SOURCE_PICK,
+                           note=f"{gone.get('provider') or gone.get('host')} refused SmartBrain's request — "
+                                + ("pick another source" if rest else "paste a link to the data"),
+                           **{slot: rest or None, other: None}, _access=None, _format=None)
+    return None
 
 
 def reenter_source_pick(store: ni.NIStore, item_id: str, note: str) -> dict:

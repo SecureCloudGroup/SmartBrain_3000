@@ -268,6 +268,28 @@ class LibraryIndex:
         self._taxonomy_cache = list(cats.values())
         return self._taxonomy_cache
 
+    @staticmethod
+    def _expand_short_words(con, text: str) -> str:
+        """People type short forms ("temp", "precip", "humid"): a word the Library doesn't know, of 4+
+        letters, becomes the most common Library term it begins ("temperature"). Never a place,
+        team, ticker or other resolver name, never an English filler word, never a rare term."""
+        from .library_resolve import ENGLISH as ENGLISH_WORDS
+        words = []
+        for word in (text or "").split():  # bounded by the ask length
+            low = word.lower().strip(".,?!:;'\"")
+            base = low[:-1] if low.endswith("s") and len(low) > 4 else low
+            if len(low) >= 4 and low.isalpha() and low not in ENGLISH_WORDS \
+                    and not con.execute("SELECT 1 FROM library_terms WHERE term IN (?, ?) LIMIT 1",
+                                        [low, base]).fetchone() \
+                    and not con.execute("SELECT 1 FROM library_resolver_aliases WHERE alias IN (?, ?) LIMIT 1",
+                                        [low, base]).fetchone():
+                row = con.execute("SELECT term, count(*) AS n FROM library_terms WHERE term LIKE ? "
+                                  "GROUP BY term ORDER BY n DESC, term LIMIT 1", [base + "%"]).fetchone()
+                if row and row[1] >= 5 and row[0].isalpha():
+                    word = row[0]
+            words.append(word)
+        return " ".join(words)
+
     def classify(self, text: str, limit: int = 3) -> list[str]:
         low = " " + re.sub(r"[^a-z0-9.&+ ]+", " ", (text or "").lower()) + " "
         scored = []
@@ -299,6 +321,7 @@ class LibraryIndex:
             where.append("s.validation_status NOT IN ('failed', 'refused')")
         cond = " AND ".join(where)
         with self._conn() as con:
+            q = self._expand_short_words(con, q)
             terms = tokens(q)
             if terms:
                 ctx = self._context(con, q)
@@ -349,6 +372,12 @@ class LibraryIndex:
         words = set(norm(ask).split())
         # a code that names the ask's place ("NYC weather") is the place, not a ticker, unless a cue says so
         codes = set(re.findall(r"\b[A-Z]{3,5}\b", ask or "")) - {w.upper() for w in self._place_words(res, ask)[0]}
+        # an acronym that names a data provider (NASA, NOAA, USGS, FAA) is that provider, not a ticker
+        codes = {c for c in codes if not con.execute(
+            "SELECT 1 FROM library_sources WHERE provider_name = ? OR provider_name LIKE ? LIMIT 1",
+            [c, f"%({c})%"]).fetchone() and not con.execute(
+            "SELECT 1 FROM library_sources WHERE regexp_matches(provider_name, ?) LIMIT 1",
+            [rf"\b{c}\b"]).fetchone()}
         found: dict[str, dict] = {}
         for r in ENTITY_RESOLVERS:
             m = res.by_name(r, ask)
@@ -413,6 +442,7 @@ class LibraryIndex:
         from .library_resolve import Resolver, candidate_urls, norm
         out, skipped = [], []
         with self._conn() as con:
+            ask = self._expand_short_words(con, ask)
             ranked = self.search(ask, limit=12)["results"]
             res = Resolver(con)
             ctx = self._context(con, ask)
@@ -488,9 +518,17 @@ class LibraryIndex:
         # when something answers the asked subcategory exactly (tides, not water temperature), offer only those
         asked_sub = ctx["cats"][0] if ctx["cats"] else ""
         exact = [c for c in out if asked_sub and asked_sub in (c.get("categories") or [])]
-        # a source that works without the user's own key comes first; one that needs a key still shows
-        # when it is among the best fits, and the card says so before the tap
-        ordered = sorted(exact or out, key=lambda c: bool(c["needs_key"]))
+        # the BEST source leads even when it needs the user's key (the card asks for it); a keyless source
+        # goes ahead of it only when it is the same kind of source (shares its category) — "better if the
+        # best source doesn't need a key", never a worse fit just because it is keyless
+        ordered = list(exact or out)
+        if ordered and ordered[0]["needs_key"]:
+            top_cats = set(ordered[0].get("categories") or [])
+            same = next((c for c in ordered if not c["needs_key"] and top_cats & set(c.get("categories") or [])),
+                        None)
+            if same is not None:
+                ordered.remove(same)
+                ordered.insert(0, same)
         return ordered[:limit], skipped[:5]
 
     @staticmethod
