@@ -72,6 +72,15 @@ to know when a release changes behavior.
   the whole card.
 - **Temperature asks go to the forecast** ("temp in Denver", "how hot is it in
   Tucson"), while "water temp" and "ocean temperature" keep their water sources.
+- **A source is only offered for what it is about.** "Gold price per ounce" no
+  longer shows crude oil just because both are commodities; when no source
+  covers what you asked, the card says so and searches the web.
+- **The place or team you name leads the card:** "delays at Newark airport"
+  shows Newark, not every delayed airport in the country.
+- **A web page has to show a number when you ask for one:** a gas-price card
+  never shows a sentence where the price should be.
+- **Tables that show a date show just the time beside it** ("Mon Sep 28 ·
+  7:56 AM · 7:36 PM").
 
 ## [0.24.0] - 2026-09-28
 
