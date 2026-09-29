@@ -11,6 +11,14 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Added
+
+- **Cards from Library sources that declare their answers show the right
+  values.** When a SmartBrain Library source says which of its fields answer
+  which questions, the card is built from those: the right values, with
+  labels and units ("Rain chance tomorrow 80%", a 7-day forecast, weather
+  described in words).
+
 ### Fixed
 
 - **Cards built from a web page work again.** Since 0.24.0 an ordinary web

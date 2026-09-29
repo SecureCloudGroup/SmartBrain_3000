@@ -415,5 +415,7 @@ def _expand(template: str, values: dict[str, list[tuple[str, str]]], groups: dic
         url = re.sub(r"\{([a-z_][a-z0-9_]*)\}", sub, template)
         labels = [v[i][1] if n in members and i < len(v) else v[0][1] for n, v in values.items()]
         out.append({"url": url, "label": " · ".join(dict.fromkeys(x for x in labels if x)),
-                    "choice": bool(members)})
+                    "choice": bool(members),
+                    # the values this reading filled (never the key slot): answers paths name them
+                    "params": {n: v for n, v in chosen.items() if v != _KEY_MARK}})
     return out

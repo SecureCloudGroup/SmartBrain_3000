@@ -235,6 +235,26 @@ Added in v-next (§29 flow-engine phase):
   its string value starts with it; a non-string item is excluded. Feeds code
   categories as prefixes (NHC basin bins `AT1`/`EP2`/`CP1`).
 
+Added for Library answers (§32, 2026-09-29) — same closed-set discipline, all pure:
+- `number(field, key?)`, `time(field, key?)` and `date(field, key?)` — a number sent
+  as text → a number; an ISO / epoch timestamp → the user's local time ("6:48 PM",
+  "Tue 6:48 PM", "Oct 3, 6:48 PM"); a `YYYY-MM-DD` date → "Tue Sep 29" within a
+  week, else "Sep 29" (", 2027" in another year), never shifted by time zones.
+  `key` (dotted, `[n]` positions allowed: `games[0].gameDate`) converts that field
+  of every list row.
+- `zip(field, with, as)` — `field` and each name in `with` (1..7 distinct other
+  outputs) are lists of the SAME length (else `transform_type`; a missing name is
+  `transform_miss`); writes `as` = rows `[{field: a0, with1: b0, …}, …]` (≤500 rows).
+  A table stored as parallel arrays (Open-Meteo `daily`) becomes a list.
+- `label(field, table, key?)` — an integer code → words from a table the APP ships
+  (`table` ∈ `wmo_weather` only: the WMO weather interpretation codes Open-Meteo
+  serves — 0 Clear sky, 1 Mainly clear, 2 Partly cloudy, 3 Overcast, 45 Fog,
+  48 Freezing fog, 51/53/55 drizzle, 56/57 freezing drizzle, 61/63/65 rain,
+  66/67 freezing rain, 71/73/75 snow, 77 Snow grains, 80/81/82 rain showers,
+  85/86 snow showers, 95 Thunderstorm, 96/99 thunderstorm with light / heavy hail).
+  A code not in the table is `transform_type`, never a guess.
+- `reverse(field)` — a list in reverse order (a source listing oldest first).
+
 ### 4.3 Bind + render-validate (implicit, always last)
 
 Binding walks the scene, resolves every `{"$bind": path}` and `{{path}}`
@@ -2009,3 +2029,33 @@ and the `recipe` born marker stays readable.
   row, slot `outbox`, ≤200, oldest votes dropped first) is sent by the scheduler pass
   `_auto_send_library_outbox` (≤10 per tick, backoff 15 min doubling to 24 h, drop on
   400/413/415/422 or after 8 tries). `SMARTBRAIN_LIBRARY_API=""` switches sending off.
+
+
+## 32. Cards built from a Library source's declared answers (2026-09-29)
+
+- **Record field.** A curated Library record may carry `answers` (Library spec v1.1):
+  `value` (one path; type `number` | `text` | `time` | `date` | `count`; `unit` or
+  `unit_path`; `codes: wmo_weather`), `list` (rows at `path`, 1–4 row cells relative to
+  one item, `newest_first`, `may_be_empty`, `filter: {path, equals: "{param}"}`) and
+  `columns` (2–4 parallel arrays, `limit`). Paths may hold whole `{param}` segments.
+  `LibraryIndex.answers(id)` returns them; `ni_flow._clean_answer` drops any answer
+  that breaks the closed shape (the rest still serve).
+- **Seal.** A Library tap (`pick_flow_source` and `tools/ni-live-e2e.py`, both through
+  `ni_flow.seal_library_pick`) seals `_library_source`, `_library_url` and
+  `_library_params` (the values the URL was filled with — candidate rows now carry
+  `params`, never the key slot) next to `_format`.
+- **Build.** `_sample_and_map` on a fresh build (never a remap) whose fetched URL equals
+  `_library_url` builds from the answers before any derive / mapping call:
+  `select_answers` (the user's words first; ties → declared order; a list/columns
+  answer alone when it wins or the ask is for many things; otherwise wants-named then
+  `primary` value answers, ≤4), `{param}` segments filled, then extract + typed
+  transforms (`number`, `time`, `date`, `count`, `label`, `zip` + `top_n` (7 daily /
+  12 hourly), `reverse`, `where` eq for a filter). `unit_path` is read once and frozen
+  as a literal (number node `unit`; a row suffix in list scenes). The pipeline runs on
+  the sample, every shown value is typed-checked, and the draft spec validates and
+  binds; ANY misfit notes "the Library's declared answers didn't fit…" and the model
+  mapping path runs unchanged. The note and journal say "built from the Library's
+  declared answers: <labels>"; the P8 judge still runs but only logs.
+- **Bare lists.** The engine now wraps a bare-list response as `{"items": [...]}`
+  before the pipeline, exactly as the flow samples it (no path can address a bare
+  list root, so no existing card changes).

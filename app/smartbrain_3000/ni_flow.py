@@ -867,7 +867,8 @@ def _generalize_list_path(exemplar: str) -> tuple[str, str]:
 
 
 def value_scene(fields: list[str], labels: dict[str, str] | None = None,
-                types: dict[str, str] | None = None) -> dict:
+                types: dict[str, str] | None = None,
+                units: dict[str, str] | None = None) -> dict:
     """Value-class scene: title + one primary value + smaller siblings.
 
     P1 debt rider (2026-09-22): visible text is HUMAN, never a slug — the
@@ -883,6 +884,8 @@ def value_scene(fields: list[str], labels: dict[str, str] | None = None,
     text field ("status", "time", a page reading) fail its first engine run
     and never go live. Absent types default to number (numeric cards are
     unchanged).
+
+    ``units`` (field → unit text, e.g. "°F", "mph"): shown with that number (Library answers).
     """
     assert isinstance(fields, list) and fields, "fields required"
     assert labels is None or isinstance(labels, dict), "labels must be a dict"
@@ -909,7 +912,7 @@ def value_scene(fields: list[str], labels: dict[str, str] | None = None,
         else:
             children.append({
                 "type": "number", "value": {"$bind": field}, "format": "plain",
-                "unit": "", "tone": "default", "size": size,
+                "unit": (units or {}).get(field, ""), "tone": "default", "size": size,
             })
     return {"type": "stack", "dir": "v", "gap": "sm", "children": children}
 
@@ -926,18 +929,22 @@ def _is_timestamp(value: object, name: str) -> bool:
     return False
 
 
-def list_scene(items_path: str, item_field: str | list[str], title: str | None = None) -> dict:
-    """List-class scene: repeat over a generalized list path (up to 5 rows); each row shows its
-    item's fields ("09:48 · 6.904 · H"), under the card's own subject rather than a stock title."""
+def list_scene(items_path: str, item_field: str | list[str], title: str | None = None,
+               suffixes: dict[str, str] | None = None, max_rows: int = 5) -> dict:
+    """List-class scene: repeat over a generalized list path (up to ``max_rows`` rows); each row shows
+    its item's fields ("09:48 · 6.904 · H"), under the card's own subject rather than a stock title.
+    ``suffixes`` (item field → text shown right after its value, e.g. "°F" or " mph") carries units."""
     assert isinstance(items_path, str) and items_path, "items_path required"
     item_fields = [item_field] if isinstance(item_field, str) else list(item_field)
     assert item_fields and all(f.startswith("item.") for f in item_fields), "item fields required"
+    assert 1 <= max_rows <= ni._MAX_REPEAT_MAX, "max_rows in the repeat bound"
     heading = " ".join(str(title or "Latest").replace("_", " ").split())[:200] or "Latest"
     return {"type": "stack", "dir": "v", "gap": "sm", "children": [
         {"type": "text", "value": heading, "role": "title",
          "tone": "default", "size": "md"},
-        {"type": "repeat", "items": {"$bind": items_path}, "max": 5,
-         "template": {"type": "text", "value": " · ".join(f"{{{{{f}}}}}" for f in item_fields),
+        {"type": "repeat", "items": {"$bind": items_path}, "max": max_rows,
+         "template": {"type": "text", "value": " · ".join(f"{{{{{f}}}}}{(suffixes or {}).get(f, '')}"
+                                                          for f in item_fields),
                       "role": "label", "tone": "default", "size": "sm"}},
     ]}
 
@@ -1084,6 +1091,377 @@ def _typed_verify(preview: dict, fields: dict, klass: str) -> None:
                 raise ValueError(f"mapping: {name!r} is not a number (got {type(value).__name__})")
         elif ftype == "string" and not isinstance(value, str):
             raise ValueError(f"mapping: {name!r} is not a string (got {type(value).__name__})")
+
+
+# ---- Library answers: a source's declared, verified answer fields ----------
+#
+# A curated Library record may carry ``answers`` (Library spec v1): which response paths answer
+# which questions, with labels and units, checked against a real response by the Library's
+# authors. When the user tapped such a source, the card is built FROM those answers — the
+# pipeline and scene below are pure code over the declaration, no model picks a path. Anything
+# that doesn't fit the live response falls back to the model mapping path, never a dead card.
+
+_ANSWER_NAME_RE = re.compile(r"[a-z][a-z0-9_]{0,39}")
+_ANSWER_KEYS: dict[str, frozenset[str]] = {
+    "value": frozenset({"name", "label", "words", "primary", "kind", "path", "type", "unit",
+                        "unit_path", "codes"}),
+    "list": frozenset({"name", "label", "words", "primary", "kind", "path", "row", "newest_first",
+                       "may_be_empty", "filter"}),
+    "columns": frozenset({"name", "label", "words", "primary", "kind", "columns", "limit"}),
+}
+_ANSWER_CELL_KEYS = frozenset({"path", "label", "type", "unit", "unit_path", "codes"})
+_ANSWER_VALUE_TYPES = ("number", "text", "time", "date", "count")
+_ANSWER_CELL_TYPES = ("number", "text", "time", "date")
+# a whole path segment naming one of the source's parameters: ``rates.{quote}``, ``{coin}.usd``
+_PARAM_SEGMENT_RE = re.compile(r"(?:^|(?<=\.))\{([a-z_][a-z0-9_]*)\}(?=$|\.|\[)")
+_MAX_ANSWERS = 20
+_MAX_VALUE_ANSWERS = 4
+_MAX_ANSWER_CELLS = 4
+_ANSWER_STOP = frozenset({
+    "a", "an", "the", "of", "in", "on", "at", "for", "to", "and", "or", "is", "are", "was", "be", "by",
+    "with", "from", "as", "it", "its", "this", "that", "what", "whats", "how", "when", "where", "who",
+    "which", "my", "me", "i", "show", "get", "give", "tell", "will", "do", "does", "there", "please", "s",
+})
+# an ask for several things over time or a set of items: a list/columns answer serves it
+_ANSWER_MANY_RE = re.compile(
+    r"\b(forecast|forecasts|weekend|week|daily|hourly|days|hours|latest|recent|upcoming|schedule|list)\b",
+    re.IGNORECASE)
+
+
+def _clean_answer(raw: object) -> dict | None:
+    """One declared answer, closed-key checked; None when it breaks the contract (it is skipped).
+    List / columns cells land under ``cells``."""
+    if not isinstance(raw, dict):
+        return None
+    kind = raw.get("kind")
+    if kind not in _ANSWER_KEYS or not set(raw) <= _ANSWER_KEYS[kind]:
+        return None
+    name, label, words = raw.get("name"), raw.get("label"), raw.get("words") or []
+    if not (isinstance(name, str) and _ANSWER_NAME_RE.fullmatch(name) and isinstance(label, str)
+            and 0 < len(label.strip()) <= 40 and isinstance(words, list)
+            and all(isinstance(w, str) for w in words)):
+        return None
+    out = {"name": name, "label": " ".join(label.split()), "words": [w.lower() for w in words[:15]],
+           "primary": raw.get("primary") is True, "kind": kind}
+    if kind == "value":
+        if not isinstance(raw.get("path"), str) or raw.get("type") not in _ANSWER_VALUE_TYPES \
+                or raw.get("codes") not in (None, "wmo_weather"):
+            return None
+        out.update({k: raw[k] for k in ("path", "type", "unit", "unit_path", "codes") if raw.get(k) is not None})
+        return out
+    if kind == "list":
+        cells = raw.get("row")
+        if not isinstance(raw.get("path"), str):
+            return None
+        out.update(path=raw["path"], newest_first=raw.get("newest_first") is True,
+                   may_be_empty=raw.get("may_be_empty") is True)
+        flt = raw.get("filter")
+        if flt is not None:
+            if not (isinstance(flt, dict) and set(flt) == {"path", "equals"}
+                    and isinstance(flt["path"], str) and isinstance(flt["equals"], str)):
+                return None
+            out["filter"] = dict(flt)
+    else:
+        cells = raw.get("columns")
+        limit = raw.get("limit")
+        if limit is not None and not (isinstance(limit, int) and not isinstance(limit, bool)
+                                      and 1 <= limit <= ni._MAX_TOP_N):
+            return None
+        out["limit"] = limit
+    if not isinstance(cells, list) or not 1 <= len(cells) <= _MAX_ANSWER_CELLS:
+        return None
+    clean_cells = []
+    for cell in cells:  # bounded by _MAX_ANSWER_CELLS
+        if not (isinstance(cell, dict) and set(cell) <= _ANSWER_CELL_KEYS
+                and isinstance(cell.get("path"), str) and cell.get("type") in _ANSWER_CELL_TYPES
+                and cell.get("codes") in (None, "wmo_weather")):
+            return None
+        clean_cells.append({k: v for k, v in cell.items() if v is not None})
+    out["cells"] = clean_cells
+    return out
+
+
+def _library_answers(source_id: str) -> list[dict]:
+    """The picked Library source's declared answers, cleaned; [] when it has none (or no Library)."""
+    lib = _resolve_library()
+    if lib is None or not source_id:
+        return []
+    try:
+        raw = lib.answers(source_id)
+    except Exception as exc:  # a broken Library degrades to the model mapping path
+        log.warning("ni_flow: library answers failed: %s", type(exc).__name__)
+        return []
+    cleaned = [_clean_answer(a) for a in (raw or [])[:_MAX_ANSWERS]]
+    return [a for a in cleaned if a is not None]
+
+
+def _answer_tokens(text: str) -> set[str]:
+    """Lowercased words, fillers dropped, a simple plural folded to its singular."""
+    out = set()
+    for word in re.findall(r"[a-z0-9]+", str(text).lower()):  # bounded by the text
+        if word in _ANSWER_STOP:
+            continue
+        if len(word) > 3 and word.endswith("s") and not word.endswith("ss"):
+            word = word[:-1]
+        out.add(word)
+    return out
+
+
+def _answer_score(answer: dict, ask: set[str]) -> float:
+    """How well an answer's words / label / name cover the ask: one point per ask word it names,
+    plus half a point per multi-word phrase of its ``words`` said in full ("rain tomorrow")."""
+    own: set[str] = set()
+    for text in [*answer["words"], answer["label"], answer["name"].replace("_", " ")]:
+        own |= _answer_tokens(text)
+    phrases = sum(1 for w in answer["words"] if len(_answer_tokens(w)) > 1 and _answer_tokens(w) <= ask)
+    return len(ask & own) + 0.5 * phrases
+
+
+def select_answers(answers: list[dict], request: str, wants: list) -> list[dict]:
+    """Which declared answers the card shows — deterministic, no model:
+
+    1. The user's own words decide. Each answer scores by the words it shares with the request
+       (``_answer_score``); the answers tied at the best score win. When the first of them is a
+       list / columns answer (a list goes first on a tie when the ask asks for many things —
+       "forecast", "this weekend", "latest") the card shows that one answer; otherwise the
+       tied value answers (≤4, in the source's declared order).
+    2. The request names none of them: an ask for many things takes the first list / columns
+       answer (a primary one first).
+    3. Otherwise the value answers the model's ``wants`` name, then the source's ``primary``
+       answers, ≤4 ("NYC weather" → current temperature, conditions, high / low today). With no
+       value answer there, the primary list / columns answer (else the first answer).
+    """
+    assert isinstance(answers, list) and answers, "answers required"
+    listy = [a for a in answers if a["kind"] != "value"]
+    many = bool(_ANSWER_MANY_RE.search(request or ""))
+    ask = _answer_tokens(request or "")
+    scored = [(_answer_score(a, ask), a) for a in answers]
+    best = max(s for s, _ in scored)
+    if best > 0:
+        top = [a for s, a in scored if s == best]
+        top.sort(key=lambda a: not (many and a["kind"] != "value"))  # stable: declared order within
+        if top[0]["kind"] != "value":
+            return [top[0]]
+        return [a for a in top if a["kind"] == "value"][:_MAX_VALUE_ANSWERS]
+    if many and listy:
+        return [next((a for a in listy if a["primary"]), listy[0])]
+    want_words: set[str] = set()
+    for w in (wants or [])[:_MAX_INTENT_FIELDS]:
+        want_words |= _answer_tokens(str(w))
+    values = [a for a in answers if a["kind"] == "value"]
+    chosen = [a for a in values if want_words and _answer_score(a, want_words) > 0]
+    chosen += [a for a in values if a["primary"] and a not in chosen]
+    if chosen:
+        return chosen[:_MAX_VALUE_ANSWERS]
+    return [next((a for a in listy if a["primary"]), answers[0])]
+
+
+def _answer_unit(decl: dict, payload: object, first_row: object = None) -> str:
+    """The unit an answer shows: its literal ``unit``, else the string at ``unit_path`` in this
+    response (read at build time, frozen into the scene). A ``unit_path`` that doesn't resolve is a
+    failed check (the caller falls back)."""
+    unit = decl.get("unit")
+    if unit is None and decl.get("unit_path"):
+        unit = _dig(payload, str(decl["unit_path"]))
+        if not isinstance(unit, str) and first_row is not None:
+            unit = _dig(first_row, str(decl["unit_path"]))
+        if not isinstance(unit, str):
+            raise ValueError(f"answers: unit_path {decl['unit_path']!r} is not in this response")
+    return re.sub(r"[{}]", "", str(unit or "")).strip()[:20]
+
+
+def _unit_suffix(unit: str) -> str:
+    """How a unit follows a value in a row: symbols attach ("72°F", "40%"), words space ("12 mph")."""
+    return (" " + unit) if unit and unit[0].isalpha() else unit
+
+
+def _nonempty(value: object) -> bool:
+    return value is not None and not (isinstance(value, str) and not value.strip())
+
+
+def _build_value_answers(chosen: list[dict], payload: dict) -> dict:
+    """Value answers → extract + typed transforms + the value scene (first answer = headline)."""
+    paths: dict = {}
+    ops: list[dict] = []
+    fields: dict[str, str] = {}
+    labels: dict[str, str] = {}
+    units: dict[str, str] = {}
+    for a in chosen:  # bounded by _MAX_VALUE_ANSWERS
+        name = a["name"] + "_v" if a["name"] in ni._RESERVED_OUTPUT_NAMES else a["name"]
+        if a["type"] == "count":  # the card shows how many items the list holds (may be 0)
+            paths[f"{name}_items"] = a["path"]
+            ops.append({"fn": "count", "field": f"{name}_items", "as": name})
+            fields[name] = "number"
+        else:
+            paths[name] = a["path"]
+            if a.get("codes"):
+                ops.append({"fn": "label", "field": name, "table": a["codes"]})
+                fields[name] = "string"
+            elif a["type"] == "number":
+                ops.append({"fn": "number", "field": name})
+                fields[name] = "number"
+            elif a["type"] in ("time", "date"):
+                ops.append({"fn": a["type"], "field": name})
+                fields[name] = "string"
+            else:
+                fields[name] = "string"
+        labels[name] = a["label"]
+        unit = _answer_unit(a, payload)
+        if unit:
+            units[name] = unit
+    stages: list[dict] = [{"op": "extract", "paths": paths}]
+    if ops:
+        stages.append({"op": "transform", "apply": ops})
+    preview = ni.run_pipeline(stages, payload)
+    for name, ftype in fields.items():  # bounded by _MAX_VALUE_ANSWERS
+        value = preview.get(name)
+        if ftype == "number" and not (isinstance(value, (int, float)) and not isinstance(value, bool)):
+            raise ValueError(f"answers: {labels[name]!r} is not a number here")
+        if ftype == "string" and not (isinstance(value, str) and value.strip()):
+            raise ValueError(f"answers: {labels[name]!r} is empty here")
+    scene = value_scene(list(fields), labels=labels, types=fields, units=units)
+    return {"pipeline": stages, "scene": scene, "preview_payload": preview,
+            "fields": fields, "klass": _DISPLAY_VALUE}
+
+
+def _cell_ops(cell: dict, key: str) -> list[dict]:
+    """The per-row conversions one list / columns cell declares."""
+    if cell.get("codes"):
+        return [{"fn": "label", "field": "rows", "table": cell["codes"], "key": key}]
+    if cell["type"] == "number":
+        return [{"fn": "number", "field": "rows", "key": key}]
+    if cell["type"] in ("time", "date"):
+        return [{"fn": cell["type"], "field": "rows", "key": key}]
+    return []
+
+
+def _build_rows_answer(answer: dict, payload: dict, title: str) -> dict:
+    """A list answer (rows at ``path``, cell paths relative to one item) or a columns answer
+    (parallel arrays zipped into rows) → rows pipeline + the list scene, cells in declared order."""
+    cells = answer["cells"]
+    ops: list[dict] = []
+    if answer["kind"] == "list":
+        keys = [c["path"] for c in cells]
+        stages: list[dict] = [{"op": "extract", "paths": {"rows": answer["path"]}}]
+        flt = answer.get("filter")
+        if flt:  # only the rows for what was asked (the airport the address names), every run
+            if not ni._KEY_RE.match(flt["path"]):
+                raise ValueError("answers: a row filter path must be one key")
+            ops.append({"fn": "where", "field": "rows", "key": flt["path"], "op": "eq",
+                        "value": flt["equals"]})
+        if answer.get("newest_first"):
+            ops.append({"fn": "reverse", "field": "rows"})
+        limit = 5
+    else:
+        keys = []
+        for i, c in enumerate(cells):  # bounded by _MAX_ANSWER_CELLS
+            slug = _slugify_field_name(c.get("label") or "")
+            bad = not slug or not ni._KEY_RE.match(slug) or slug in keys or slug == "rows" \
+                or slug in ni._RESERVED_OUTPUT_NAMES
+            keys.append(f"col{i}" if bad else slug)
+        if len(keys) < 2:
+            raise ValueError("answers: a columns answer needs at least two columns")
+        stages = [{"op": "extract", "paths": {k: c["path"] for k, c in zip(keys, cells, strict=True)}}]
+        hourly = any("hourly" in c["path"] for c in cells)
+        limit = answer.get("limit") or (12 if hourly else 7)
+        ops.append({"fn": "zip", "field": keys[0], "with": keys[1:], "as": "rows"})
+        ops.append({"fn": "top_n", "field": "rows", "n": limit})
+    for cell, key in zip(cells, keys, strict=True):  # bounded by _MAX_ANSWER_CELLS
+        ops.extend(_cell_ops(cell, key))
+    if ops:
+        stages.append({"op": "transform", "apply": ops})
+    preview = ni.run_pipeline(stages, payload)
+    rows = preview.get("rows")
+    if not isinstance(rows, list):
+        raise ValueError("answers: the list isn't a list here")  # noqa: TRY004 — a misfit, the caller falls back
+    if not rows and not answer.get("may_be_empty"):
+        raise ValueError("answers: the list is empty here")
+    first = rows[0] if rows else None
+    if first is not None and not all(_nonempty(_dig(first, k)) for k in keys):
+        raise ValueError("answers: a row field is missing here")
+    item_fields = [f"item.{k}" for k in keys]
+    suffixes = {f"item.{k}": _unit_suffix(_answer_unit(c, payload, first))
+                for c, k in zip(cells, keys, strict=True)}
+    scene = list_scene("rows", item_fields, title=title, suffixes=suffixes,
+                       max_rows=min(limit, ni._MAX_REPEAT_MAX))
+    return {"pipeline": stages, "scene": scene, "preview_payload": preview,
+            "fields": {}, "klass": _DISPLAY_LIST}
+
+
+def _fill_param_segments(path: str, params: dict[str, str]) -> str:
+    """``rates.{quote}`` → ``rates.EUR``: whole ``{param}`` segments take the value the card's address
+    was filled with, so the frozen spec carries a literal path. Unfilled → a misfit."""
+    def sub(match: re.Match) -> str:
+        value = params.get(match.group(1))
+        if value is None or not ni._KEY_RE.match(value):
+            raise ValueError(f"answers: no usable value for {{{match.group(1)}}}")
+        return value
+    out = _PARAM_SEGMENT_RE.sub(sub, path)
+    if "{" in out or "}" in out:
+        raise ValueError("answers: a parameter inside a path segment")
+    return out
+
+
+def _fill_answer(answer: dict, params: dict[str, str]) -> dict:
+    """One answer with every ``{param}`` path segment (and a filter's ``"{param}"``) filled."""
+    out = dict(answer)
+    for key in ("path", "unit_path"):
+        if isinstance(out.get(key), str):
+            out[key] = _fill_param_segments(out[key], params)
+    if "cells" in out:
+        out["cells"] = [{**c, **{k: _fill_param_segments(c[k], params)
+                                 for k in ("path", "unit_path") if isinstance(c.get(k), str)}}
+                        for c in out["cells"]]
+    flt = out.get("filter")
+    if flt:
+        m = re.fullmatch(r"\{([a-z_][a-z0-9_]*)\}", flt["equals"])
+        if m and m.group(1) not in params:
+            raise ValueError(f"answers: no value for the filter's {flt['equals']}")
+        out["filter"] = {"path": _fill_param_segments(flt["path"], params),
+                         "equals": params[m.group(1)] if m else flt["equals"]}
+    return out
+
+
+def build_from_answers(chosen: list[dict], sample: object, title: str,
+                       params: dict[str, str] | None = None) -> dict:
+    """Build ``{pipeline, scene, preview_payload, fields, klass}`` from the chosen declared answers,
+    running the pipeline on ``sample`` and checking every shown value is there with its type.
+    ``params`` are the values the card's address was filled with (``{param}`` path segments).
+    A bare-list response is addressed as ``{"items": [...]}`` — the flow's sampling wrap, and the
+    engine's on every refresh. Raises ValueError / ``ni.NIError`` when the live response doesn't
+    fit the declaration."""
+    assert isinstance(chosen, list) and chosen, "chosen answers required"
+    chosen = [_fill_answer(a, params or {}) for a in chosen]
+    payload = sample if isinstance(sample, dict) else {"items": sample}
+    if chosen[0]["kind"] == "value":
+        return _build_value_answers([a for a in chosen if a["kind"] == "value"], payload)
+    return _build_rows_answer(chosen[0], payload, title)
+
+
+def _try_answers_build(store: ni.NIStore, item_id: str, request: str, intent: dict,
+                       url: str, sample: object) -> dict | None:
+    """When the user tapped a Library source that declares answers (sealed ``_library_source`` for
+    exactly this URL), build the card from them. None → the model mapping path runs, unchanged."""
+    live = _flow_read(store, item_id) or {}
+    source_id = str(live.get("_library_source") or "")
+    if not source_id or live.get("_library_url") != url:
+        return None
+    answers = _library_answers(source_id)
+    if not answers:
+        return None
+    chosen = select_answers(answers, request, list(intent.get("wants") or []))
+    try:
+        built = build_from_answers(chosen, sample, str(intent.get("subject") or request)[:120],
+                                   params=_clean_params(live.get("_library_params")))
+        ni.validate_spec(build_final_spec(request, intent, {"type": "http_json", "url": url},
+                                          _DEFAULT_CADENCE, built["pipeline"], built["scene"]))
+        ni._enforce_bind_types(built["scene"], ni.bind_scene(built["scene"], built["preview_payload"]))
+    except (ni.NIError, ValueError, KeyError, TypeError) as exc:
+        _append_note(store, item_id, "the Library's declared answers didn't fit this response "
+                                     f"({str(exc)[:90]}); mapping instead")
+        return None
+    built["labels"] = [a["label"] for a in chosen]
+    return built
 
 
 def _wants_fahrenheit(request: str) -> bool:
@@ -1759,8 +2137,18 @@ def _library_candidates(request: str) -> list[dict]:
              "format": str(c.get("format") or "json")[:20],
              # the tap asks for these before the first fetch (never filled in here)
              "needs_key": _clean_key_need(c.get("needs_key")),
-             "needs_contact": bool(c.get("needs_contact"))}
+             "needs_contact": bool(c.get("needs_contact")),
+             # the values the URL was filled with: a declared answer's ``{param}`` path segment
+             "params": _clean_params(c.get("params"))}
             for c in cands if len(str(c.get("url") or "")) <= ni._MAX_URL]
+
+
+def _clean_params(params: object) -> dict[str, str]:
+    """A candidate's filled parameter values, bounded (names are Library param slugs)."""
+    if not isinstance(params, dict):
+        return {}
+    return {str(k)[:40]: str(v)[:200] for k, v in list(params.items())[:10]
+            if re.fullmatch(r"[a-z_][a-z0-9_]*", str(k))}
 
 
 def _clean_key_need(need: object) -> dict | None:
@@ -1777,6 +2165,23 @@ def _clean_key_need(need: object) -> dict | None:
 
 KEY_PARAM = "api_key"  # the same name older keyed cards use, so a same-host key is reused
 _MAX_KEY_LEN = 400
+
+
+def seal_library_pick(store: ni.NIStore, item_id: str, url: str, row: dict) -> None:
+    """A tap on a Library row seals, before the worker starts: the row's non-JSON ``_format`` (the
+    sampling fetch and every refresh parse it that way) and ``_library_source`` + ``_library_url``
+    + ``_library_params`` (the source's declared answers build the card only when this exact URL
+    is sampled, with its ``{param}`` path segments filled from the values that URL carries). The pick
+    route and the live harness both call this, so they stay in step."""
+    assert store is not None and item_id and isinstance(row, dict), "args required"
+    record = _flow_read(store, item_id) or {}
+    fmt = str(row.get("format") or "").strip().lower()
+    if fmt in ni._HTTP_JSON_FORMATS and fmt != "json":
+        record["_format"] = fmt
+    record["_library_source"] = str(row.get("source_id") or "")[:120] or None
+    record["_library_url"] = url
+    record["_library_params"] = _clean_params(row.get("params"))
+    _flow_write(store, item_id, record)
 
 
 def seal_access(store: ni.NIStore, item_id: str, url: str, row: dict) -> dict | None:
@@ -2261,6 +2666,18 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
                     return web if web is not None else refused
                 return refused
         return _fail(store, item_id, "fetch", f"sample fetch failed: {type(exc).__name__}")
+    # A tapped Library source that declares its answers builds the card from them — no model
+    # path-guessing. Fresh builds only (a Fix re-derives); a misfit falls through to mapping.
+    answered = None if remap else _try_answers_build(store, item_id, request, intent, url, sample)
+    if answered is not None:
+        note = "built from the Library's declared answers: " + ", ".join(answered["labels"])
+        _transition(store, item_id, "assembling", source_url=url, note=note)
+        _try_journal(store, item_id, "updated", note)
+        # the judge still reads the card, but a deterministic build is never re-picked: logged only
+        judge = _judge_build(request, intent, answered["preview_payload"], call_model)
+        return _handoff(store, item_id, request, intent, url, answered, answered["fields"],
+                        answered["klass"], converted=[], judge=judge, degrade_note=note,
+                        remap=remap, keep_source=keep_source, keep_params=keep_params)
     try:
         cands = derive_paths(sample)
     except Exception as exc:  # walker errors carry a ValueError message
@@ -2353,6 +2770,17 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
             _append_note(store, item_id,
                           "second pick scored no better; kept the first build")
         break
+    return _handoff(store, item_id, request, intent, url, built, fields, klass,
+                    converted=converted, judge=judge, degrade_note=degrade_note,
+                    remap=remap, keep_source=keep_source, keep_params=keep_params)
+
+
+def _handoff(store: ni.NIStore, item_id: str, request: str, intent: dict, url: str,
+             built: dict, fields: dict, klass: str, *, converted: list, judge: dict | None,
+             degrade_note: str | None, remap: bool, keep_source: dict | None,
+             keep_params: dict | None) -> dict:
+    """The built pipeline + scene → the sealed spec (source, format, access, alert, notes) →
+    ``_finalize``. Shared by the model mapping path and the Library-answers path."""
     # R1/R2 (2026-09-15): a remap of a recipe-born card must PRESERVE the
     # sealed source object (url template + $secret headers) and params —
     # rebuilding a bare {type, url} used to strip the credential header and

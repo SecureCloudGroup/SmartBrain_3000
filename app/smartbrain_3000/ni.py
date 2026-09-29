@@ -205,7 +205,8 @@ _REVISION_ORIGINS: frozenset[str] = frozenset(
 )
 _TRANSFORM_FNS: frozenset[str] = frozenset(
     {"round", "scale", "offset", "rename", "pick", "sort_by", "top_n",
-     "sum", "avg", "min", "max", "count", "delta_prev", "where", "number", "time"}
+     "sum", "avg", "min", "max", "count", "delta_prev", "where", "number", "time",
+     "date", "zip", "label", "reverse"}
 )
 # v2 aggregate fns that fail with "empty_aggregate" on an empty input list (count does not).
 _AGGREGATE_FNS: frozenset[str] = frozenset({"sum", "avg", "min", "max"})
@@ -1069,13 +1070,36 @@ def _validate_transform_op(op: object, i: int, j: int, outputs: set[str]) -> Non
     if not isinstance(field, str) or not _KEY_RE.match(field):
         raise ValueError(f"spec.pipeline[{i}].apply[{j}].field malformed")
     where = f"spec.pipeline[{i}].apply[{j}]"
-    if fn in ("number", "time"):
+    if fn in ("number", "time", "date"):
         # number: a number the source sends as text ("6.904"); time: an ISO / epoch timestamp shown in
-        # the user's local time. ``key`` converts that key in each list row.
+        # the user's local time; date: a calendar date shown as written (never shifted by time zones).
+        # ``key`` converts that key in each list row.
         _closed_keys(node, {"fn", "field", "key"}, where)
         if node.get("key") is not None and not (isinstance(node["key"], str) and len(node["key"]) <= 120
                                                  and _ROW_KEY_RE.fullmatch(node["key"])):
             raise ValueError(f"{where}.key malformed")
+        return
+    if fn == "zip":
+        # parallel arrays (a table stored as columns) → one list of rows keyed by the column names
+        _closed_keys(node, {"fn", "field", "with", "as"}, where)
+        others = node.get("with")
+        if not isinstance(others, list) or not 1 <= len(others) <= _MAX_ZIP_WITH or not all(
+                isinstance(w, str) and _KEY_RE.match(w) and w != field for w in others) \
+                or len(set(others)) != len(others):
+            raise ValueError(f"{where}.with must be 1..{_MAX_ZIP_WITH} distinct other output names")
+        _validate_transform_as(node.get("as"), where, outputs)
+        return
+    if fn == "label":
+        # a code → the words the app ships for it (``key``: that key of each list row)
+        _closed_keys(node, {"fn", "field", "table", "key"}, where)
+        if node.get("table") not in LABEL_TABLES:
+            raise ValueError(f"{where}.table must be one of {sorted(LABEL_TABLES)}")
+        if node.get("key") is not None and not (isinstance(node["key"], str) and len(node["key"]) <= 120
+                                                 and _ROW_KEY_RE.fullmatch(node["key"])):
+            raise ValueError(f"{where}.key malformed")
+        return
+    if fn == "reverse":
+        _closed_keys(node, {"fn", "field"}, where)
         return
     if fn == "round":
         _closed_keys(node, {"fn", "field", "digits"}, where)
@@ -1830,6 +1854,17 @@ def _apply_transform_op(op: dict, payload: dict, *, history: dict) -> dict:
         out[field] = _txf_number(payload[field], op.get("key"))
     elif fn == "time":
         out[field] = _txf_rows(payload[field], op.get("key"), local_time)
+    elif fn == "date":
+        out[field] = _txf_rows(payload[field], op.get("key"), local_date)
+    elif fn == "zip":
+        out[op["as"]] = _txf_zip(payload, field, op["with"])
+    elif fn == "label":
+        table = LABEL_TABLES[op["table"]]
+        out[field] = _txf_rows(payload[field], op.get("key"), lambda v: _txf_label(table, v))
+    elif fn == "reverse":
+        if not isinstance(payload[field], list):
+            raise NIError("transform_type", "reverse needs a list")
+        out[field] = list(reversed(payload[field]))
     elif fn == "round":
         out[field] = _txf_round(payload[field], op["digits"])
     elif fn == "scale":
@@ -1868,6 +1903,24 @@ def _to_number(value: object) -> float | int:
 
 
 # a row field for number/time steps: dotted names with list positions ("games[0].gameDate")
+_MAX_ZIP_WITH = 7
+_MAX_ZIP_ROWS = 500
+# The code tables ``label`` may use — shipped with the app, never fetched. ``wmo_weather`` is the WMO
+# weather interpretation code set (WMO 4677 subset) Open-Meteo serves as ``weather_code``.
+LABEL_TABLES: dict[str, dict[int, str]] = {
+    "wmo_weather": {
+        0: "Clear sky", 1: "Mainly clear", 2: "Partly cloudy", 3: "Overcast",
+        45: "Fog", 48: "Freezing fog",
+        51: "Light drizzle", 53: "Drizzle", 55: "Heavy drizzle",
+        56: "Light freezing drizzle", 57: "Heavy freezing drizzle",
+        61: "Light rain", 63: "Rain", 65: "Heavy rain",
+        66: "Light freezing rain", 67: "Heavy freezing rain",
+        71: "Light snow", 73: "Snow", 75: "Heavy snow", 77: "Snow grains",
+        80: "Light rain showers", 81: "Rain showers", 82: "Violent rain showers",
+        85: "Light snow showers", 86: "Heavy snow showers",
+        95: "Thunderstorm", 96: "Thunderstorm with light hail", 99: "Thunderstorm with heavy hail",
+    },
+}
 _ROW_KEY_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_-]*(\[\d{1,3}\])?(\.[A-Za-z_][A-Za-z0-9_-]*(\[\d{1,3}\])?){0,7}")
 _ISO_TIME_RE = re.compile(r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?")
 
@@ -1894,6 +1947,27 @@ def local_time(value: object) -> str:
     return f"{moment.strftime('%b')} {moment.day}, {clock}"
 
 
+_DATE_RE = re.compile(r"(\d{4})-(\d{2})-(\d{2})(?:[T ][\d:.]+(?:Z|[+-]\d{2}:?\d{2})?)?")
+
+
+def local_date(value: object) -> str:
+    """A calendar date ("2026-09-29", or the date part of a timestamp) shown as written — never
+    shifted by time zones: "Tue Sep 29" within a week of today, else "Sep 29" (", 2027" when the
+    year differs)."""
+    match = _DATE_RE.fullmatch(value.strip()) if isinstance(value, str) else None
+    try:
+        day = date(int(match.group(1)), int(match.group(2)), int(match.group(3))) if match else None
+    except ValueError:
+        day = None
+    if day is None:
+        raise NIError("transform_type", "date needs a YYYY-MM-DD date")
+    today = datetime.now().astimezone().date()
+    if abs((day - today).days) < 7:
+        return f"{day.strftime('%a %b')} {day.day}"
+    text = f"{day.strftime('%b')} {day.day}"
+    return text if day.year == today.year else f"{text}, {day.year}"
+
+
 def _txf_rows(value: object, key: object, convert) -> object:
     """Convert ``value``, or with ``key`` (dotted: ``games.gameDate``) that field of every list row."""
     if key is None:
@@ -1918,13 +1992,33 @@ def _set_in(node: object, parts: list[str], convert) -> object:
 
 
 def _txf_number(value: object, key: object) -> object:
-    """A number the source sends as text → a number; with ``key``, that key of every list row."""
-    if key is None:
-        return _to_number(value)
-    if not isinstance(value, list):
+    """A number the source sends as text → a number; with ``key`` (dotted, like ``time``), that
+    field of every list row."""
+    if key is not None and not isinstance(value, list):
         raise NIError("transform_type", "number with a key needs a list")
-    return [({**row, key: _to_number(row.get(key))} if isinstance(row, dict) else row)
-            for row in value]  # bounded: the list is already capped by the extract stage
+    return _txf_rows(value, key, _to_number)
+
+
+def _txf_zip(payload: dict, field: str, others: list) -> list:
+    """Parallel arrays of equal length → rows ``[{field: a0, other: b0, ...}, ...]`` (≤ _MAX_ZIP_ROWS)."""
+    names = [field, *others]
+    for name in others:  # bounded by _MAX_ZIP_WITH
+        if name not in payload:
+            raise NIError("transform_miss", f"field {name!r}")
+    columns = [payload[n] for n in names]
+    if not all(isinstance(c, list) for c in columns):
+        raise NIError("transform_type", "zip needs lists")
+    if len({len(c) for c in columns}) != 1:
+        raise NIError("transform_type", "zip needs lists of the same length")
+    return [dict(zip(names, cells, strict=True)) for cells in zip(*columns, strict=True)][:_MAX_ZIP_ROWS]
+
+
+def _txf_label(table: dict, value: object) -> str:
+    """A code → its words from a table the app ships; a code not in the table is a stage failure."""
+    code = int(value) if isinstance(value, float) and value.is_integer() else value
+    if isinstance(code, bool) or not isinstance(code, int) or code not in table:
+        raise NIError("transform_type", f"label: {str(value)[:20]!r} is not a known code")
+    return table[code]
 
 
 def _txf_round(value: object, digits: int) -> float:
@@ -3889,6 +3983,10 @@ def run_item(store: NIStore, item_id: str, *, gateway_mod, secrets_store,
             llm_call = _make_llm_call(store, spec, gateway_mod)
         payload, image_blob = _fetch_source(spec, item_id, gateway_mod, secrets_store,
                                              schedules_store, store, kb)
+        if isinstance(payload, list):
+            # a bare-list response: the card was built over it as {"items": [...]} (the flow's
+            # sampling wrap, and Library answers paths) — no path can address a bare list root
+            payload = {"items": payload}
         raw_excerpt = _payload_excerpt_for_repair(payload)
         if isinstance(payload, dict) and _spec_has_graph_extract(spec):
             drift_graph = payload

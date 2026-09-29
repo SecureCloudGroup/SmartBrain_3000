@@ -14,6 +14,11 @@ state with the wrong data is still a failure.
 
 Usage (operator's machine; uses the gateway at 127.0.0.1:38080 for model calls only):
     PYTHONPATH=app python3 tools/ni-live-e2e.py --pack-dir <dir with library/> [--set dev|holdout] [--only N]
+        [--answers-dir <dir holding answers/<source_id>.json files>]
+
+``--answers-dir`` overlays authored answers files onto the installed pack's records at lookup time
+(a monkeypatch inside this harness process only) so a source's answers are live-tested before the
+Library pack is rebuilt. Each card prints the answers it was built from.
 """
 from __future__ import annotations
 
@@ -69,6 +74,19 @@ def _pack(pack_dir: pathlib.Path) -> library_index.LibraryIndex:
     return idx
 
 
+def _overlay_answers(answers_dir: pathlib.Path) -> None:
+    """Test-only seam: ``<dir>/<source_id>.json`` answers win over the pack's for that source."""
+    shipped = library_index.LibraryIndex.answers
+
+    def answers(self, source_id: str) -> list[dict]:
+        path = answers_dir / f"{source_id}.json"
+        if path.is_file():
+            return list(json.loads(path.read_text()).get("answers") or [])
+        return shipped(self, source_id)
+
+    library_index.LibraryIndex.answers = answers
+
+
 def _tap_first(store, item_id: str, secrets) -> tuple[str | None, str]:
     """Tap the first suggestion the way ``pick_flow_source`` does. Returns (url, what)."""
     field = ni_flow.board_flow_field(store, item_id) or {}
@@ -80,9 +98,7 @@ def _tap_first(store, item_id: str, secrets) -> tuple[str | None, str]:
     record = ni_flow._flow_read(store, item_id) or {}
     row = next((r for r in record.get("_ranked_library") or [] if r.get("url") == url), None)
     if row:
-        fmt = str(row.get("format") or "")
-        if fmt in ni._HTTP_JSON_FORMATS and fmt != "json":
-            ni_flow._flow_write(store, item_id, {**(ni_flow._flow_read(store, item_id) or {}), "_format": fmt})
+        ni_flow.seal_library_pick(store, item_id, url, row)
         if ni_flow.seal_access(store, item_id, url, row) is not None:
             missing = ni_flow.missing_access(store, item_id, secrets)
             if missing:
@@ -118,6 +134,8 @@ def run_one(ask: str, idx, llm, model: str) -> dict:
         if state != "ready":
             out["outcome"] = "failed" if state in ("failed", "unsupported") else state
             return out
+        out["answers"] = next((str(n) for n in reversed(rec.get("notes") or [])
+                               if "declared answers" in str(n)), "")
         snap = store.read_snapshot(item_id, "preview_data")
         out["preview"] = snap["payload"] if snap else None
         run = _eval._engine_first_run(store, conn, item_id, llm, model, ni, key)
@@ -158,7 +176,10 @@ def main() -> int:
     ap.add_argument("--model", default=_eval._DEFAULT_MODEL)
     ap.add_argument("--bifrost", default=_eval._DEFAULT_BIFROST)
     ap.add_argument("--out", type=pathlib.Path)
+    ap.add_argument("--answers-dir", type=pathlib.Path)
     args = ap.parse_args()
+    if args.answers_dir:
+        _overlay_answers(args.answers_dir)
     idx = _pack(args.pack_dir)
     llm = _eval._bifrost_llm(args.bifrost, args.model)
     asks = SETS[args.set]
@@ -171,6 +192,8 @@ def main() -> int:
         print(f"[{r['outcome']:>12}] {ask:<36} {r['secs']:>5}s  {r['source'][:60]}", flush=True)
         if r["detail"]:
             print(f"{'':>15}detail: {r['detail']}", flush=True)
+        if r.get("answers"):
+            print(f"{'':>15}answers: {r['answers'][:200]}", flush=True)
         if r.get("scene_text"):
             print(f"{'':>15}card:   {' | '.join(r['scene_text'])[:200]}", flush=True)
     counts: dict[str, int] = {}

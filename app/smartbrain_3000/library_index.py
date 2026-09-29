@@ -511,7 +511,7 @@ class LibraryIndex:
                                 "host": urlsplit(u["url"]).hostname or "", "label": u["label"], "choice": u["choice"],
                                 "status": row["status"],
                                 "format": _FORMAT_BY_KIND.get(row["access_kind"], "json"),
-                                "needs_key": u.get("needs_key"),
+                                "needs_key": u.get("needs_key"), "params": u.get("params") or {},
                                 "needs_contact": bool(u.get("needs_contact"))})
                 if sum(1 for c in out if not c["needs_key"]) >= limit:
                     break  # keyed sources are gathered too, but enough keyless ones end the search
@@ -545,6 +545,12 @@ class LibraryIndex:
         with self._conn() as con:
             row = con.execute("SELECT record FROM library_sources WHERE id = ?", [source_id]).fetchone()
         return None if row is None else json.loads(row[0])
+
+    def answers(self, source_id: str) -> list[dict]:
+        """The record's declared ``answers`` (which response paths answer which questions), or []."""
+        rec = self.get(source_id) if source_id else None
+        got = (rec or {}).get("answers")
+        return [a for a in got if isinstance(a, dict)] if isinstance(got, list) else []
 
 
 # --- local sources (user data, sealed) ---------------------------------------------------------

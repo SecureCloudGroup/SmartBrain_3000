@@ -900,15 +900,13 @@ def pick_flow_source(request: Request, item_id: str, body: PickSourceIn) -> dict
     # R6 + textual formats: a tap on a Library candidate is a Yes AND (when the row
     # named a non-JSON format) seals ``_format`` on the flow record so sampling +
     # every subsequent refresh parse the fetched body the same way — CSV / RSS /
-    # XML / text, not just JSON. Both writes happen BEFORE the worker starts so
+    # XML / text, not just JSON — plus the Library source it came from (its declared
+    # answers build the card). Both writes happen BEFORE the worker starts so
     # the sampling fetcher sees the sealed format on first read.
     lib_row = next((r for r in (record.get("_ranked_library") or [])
                     if isinstance(r, dict) and r.get("url") == url), None)
     if lib_row:
-        lib_fmt = str(lib_row.get("format") or "").strip().lower()
-        if lib_fmt in ni._HTTP_JSON_FORMATS and lib_fmt != "json":
-            live = ni_flow._flow_read(store, item_id) or record
-            ni_flow._flow_write(store, item_id, {**live, "_format": lib_fmt})
+        ni_flow.seal_library_pick(store, item_id, url, lib_row)
         try:
             source_id = str(lib_row.get("source_id") or "")
             library_index.LocalSources(store).record_yes(source_id)
