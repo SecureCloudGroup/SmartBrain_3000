@@ -11,6 +11,39 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Cards built from a web page work again.** Since 0.24.0 an ordinary web
+  page (a news site, Hacker News) was mistaken for an XML file and the card
+  failed; pages go back to the page reader.
+- **A source that refuses SmartBrain is never offered, and never a dead
+  end.** Web results that turn SmartBrain away (AccuWeather, AP News) are no
+  longer offered, and only pages SmartBrain could actually read are. If a
+  source you tap refuses anyway, the card goes back to the choices and says
+  so, and searches the web when no source is left.
+- **Numbers that sources send as text work.** Tide heights from NOAA, and
+  every CSV value, are text in the source; cards now read them as numbers on
+  every update instead of failing to build.
+- **Series show the latest value.** Unemployment, gas prices, mortgage rates
+  and other series stored oldest-first showed their first value from decades
+  ago; they now lead with the newest.
+- **Short words find their source.** "temp", "precip" and "humid" find
+  temperature, precipitation and humidity sources in the Library.
+- **"Next game" and schedules look ahead,** not at the past month.
+- **Times read as your local time** ("9:48 AM", "Tue 4:19 AM") instead of raw
+  timestamps.
+- **List cards show useful rows under your subject:** a tide row is its time,
+  height and high/low; an earthquake row is its magnitude and place. Ids,
+  codes and links are left out.
+- **"How many" asks count,** and a count is only offered when you ask how many.
+- **The best Library source stays first even when it needs a free key.** A
+  source that needs no key goes first only when it is the same kind of source.
+- **"NASA", "NOAA" and other agency names are not stock tickers.**
+- **Buoy and station text tables work,** and very long text no longer stops a
+  card from building.
+- **A card never "builds" with nothing to show.** If the chosen fields or
+  page come back empty, the card says so and offers the other sources.
+
 ## [0.24.0] - 2026-09-28
 
 ### Added

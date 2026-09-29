@@ -205,7 +205,7 @@ _REVISION_ORIGINS: frozenset[str] = frozenset(
 )
 _TRANSFORM_FNS: frozenset[str] = frozenset(
     {"round", "scale", "offset", "rename", "pick", "sort_by", "top_n",
-     "sum", "avg", "min", "max", "count", "delta_prev", "where"}
+     "sum", "avg", "min", "max", "count", "delta_prev", "where", "number", "time"}
 )
 # v2 aggregate fns that fail with "empty_aggregate" on an empty input list (count does not).
 _AGGREGATE_FNS: frozenset[str] = frozenset({"sum", "avg", "min", "max"})
@@ -1069,6 +1069,14 @@ def _validate_transform_op(op: object, i: int, j: int, outputs: set[str]) -> Non
     if not isinstance(field, str) or not _KEY_RE.match(field):
         raise ValueError(f"spec.pipeline[{i}].apply[{j}].field malformed")
     where = f"spec.pipeline[{i}].apply[{j}]"
+    if fn in ("number", "time"):
+        # number: a number the source sends as text ("6.904"); time: an ISO / epoch timestamp shown in
+        # the user's local time. ``key`` converts that key in each list row.
+        _closed_keys(node, {"fn", "field", "key"}, where)
+        if node.get("key") is not None and not (isinstance(node["key"], str) and len(node["key"]) <= 120
+                                                 and _ROW_KEY_RE.fullmatch(node["key"])):
+            raise ValueError(f"{where}.key malformed")
+        return
     if fn == "round":
         _closed_keys(node, {"fn", "field", "digits"}, where)
         if not isinstance(node.get("digits"), int) or isinstance(node.get("digits"), bool):
@@ -1818,7 +1826,11 @@ def _apply_transform_op(op: dict, payload: dict, *, history: dict) -> dict:
     if field not in payload and fn != "rename":
         raise NIError("transform_miss", f"field {field!r}")
     out = dict(payload)
-    if fn == "round":
+    if fn == "number":
+        out[field] = _txf_number(payload[field], op.get("key"))
+    elif fn == "time":
+        out[field] = _txf_rows(payload[field], op.get("key"), local_time)
+    elif fn == "round":
         out[field] = _txf_round(payload[field], op["digits"])
     elif fn == "scale":
         out[field] = _txf_scale(payload[field], op["factor"])
@@ -1841,6 +1853,78 @@ def _apply_transform_op(op: dict, payload: dict, *, history: dict) -> dict:
     else:  # delta_prev
         out[op["as"]] = _txf_delta_prev(payload[field], op["series"], history)
     return out
+
+
+_NUMBER_TEXT_RE = re.compile(r"\s*-?\d+(?:\.\d+)?\s*")
+
+
+def _to_number(value: object) -> float | int:
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return value
+    if isinstance(value, str) and _NUMBER_TEXT_RE.fullmatch(value):
+        number = float(value)
+        return int(number) if number.is_integer() and "." not in value else number
+    raise NIError("transform_type", "number needs a number or a number written as text")
+
+
+# a row field for number/time steps: dotted names with list positions ("games[0].gameDate")
+_ROW_KEY_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_-]*(\[\d{1,3}\])?(\.[A-Za-z_][A-Za-z0-9_-]*(\[\d{1,3}\])?){0,7}")
+_ISO_TIME_RE = re.compile(r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?")
+
+
+def local_time(value: object) -> str:
+    """An ISO timestamp or epoch (seconds or milliseconds) → the user's local time, readably:
+    "6:48 PM" today, "Tue 6:48 PM" this week, "Oct 3, 6:48 PM" further out. A timestamp without a
+    zone is the source's local time and shown as written."""
+    now = datetime.now().astimezone()
+    if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 1e8:
+        moment = datetime.fromtimestamp(value / 1000 if value > 1e11 else value, tz=UTC).astimezone()
+    elif isinstance(value, str) and _ISO_TIME_RE.fullmatch(value.strip()):
+        text = value.strip().replace(" ", "T", 1).replace("Z", "+00:00")
+        parsed = datetime.fromisoformat(text)
+        moment = parsed.astimezone() if parsed.tzinfo else parsed.replace(tzinfo=now.tzinfo)
+    else:
+        raise NIError("transform_type", "time needs an ISO timestamp or an epoch")
+    clock = moment.strftime("%I:%M %p").lstrip("0")
+    days = (moment.date() - now.date()).days
+    if days == 0:
+        return clock
+    if 0 < days < 7 or -7 < days < 0:
+        return f"{moment.strftime('%a')} {clock}"
+    return f"{moment.strftime('%b')} {moment.day}, {clock}"
+
+
+def _txf_rows(value: object, key: object, convert) -> object:
+    """Convert ``value``, or with ``key`` (dotted: ``games.gameDate``) that field of every list row."""
+    if key is None:
+        return convert(value)
+    if not isinstance(value, list):
+        raise NIError("transform_type", "a keyed conversion needs a list")
+    parts = re.findall(r"[^.\[\]]+|\[\d+\]", str(key))
+    return [_set_in(row, parts, convert) for row in value]
+
+
+def _set_in(node: object, parts: list[str], convert) -> object:
+    """Convert the value at ``parts`` (names and ``[n]`` positions) inside a copy of ``node``."""
+    if not parts:
+        return convert(node)
+    head, rest = parts[0], parts[1:]
+    if head.startswith("[") and isinstance(node, list):
+        i = int(head[1:-1])
+        return [(_set_in(x, rest, convert) if j == i else x) for j, x in enumerate(node)]
+    if not head.startswith("[") and isinstance(node, dict) and head in node:
+        return {**node, head: _set_in(node[head], rest, convert)}
+    return node
+
+
+def _txf_number(value: object, key: object) -> object:
+    """A number the source sends as text → a number; with ``key``, that key of every list row."""
+    if key is None:
+        return _to_number(value)
+    if not isinstance(value, list):
+        raise NIError("transform_type", "number with a key needs a list")
+    return [({**row, key: _to_number(row.get(key))} if isinstance(row, dict) else row)
+            for row in value]  # bounded: the list is already capped by the extract stage
 
 
 def _txf_round(value: object, digits: int) -> float:

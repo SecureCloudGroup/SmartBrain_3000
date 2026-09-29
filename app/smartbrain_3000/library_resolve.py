@@ -211,6 +211,19 @@ def _field(entry: dict, field: str) -> str:
     return str(entry.get(field) if entry.get(field) is not None else "")
 
 
+def _clock_offset(record: dict, fill: dict, params: list[dict]) -> int:
+    """A date window looks BACK by default (history: "the last 30 days"). A source that answers
+    "next game" or a schedule looks FORWARD: the window's start becomes today and its end moves
+    ahead by the same span (field 2026-09-28: "next Dodgers game" asked for the past month)."""
+    offset = int(fill.get("offset_days") or 0)
+    if not {"next_event", "schedule"} & set(record.get("kinds") or []):
+        return offset
+    offsets = [int((q.get("fill") or {}).get("offset_days") or 0) for q in params
+               if (q.get("fill") or {}).get("from") == "clock"]
+    span = -min(offsets) if offsets and min(offsets) < 0 else 0
+    return 0 if offset < 0 else offset + span
+
+
 def _clock(fmt: str, offset_days: int, now: datetime) -> str:
     t = now + timedelta(days=offset_days)
     # %-m / %-d are not portable (Windows): expand them by hand
@@ -263,7 +276,7 @@ def candidate_urls(record: dict, ask: str, policy: dict, resolver: Resolver,
         if src == "default":
             values[p["name"]] = [(str(fill["value"]), "")]
         elif src == "clock":
-            values[p["name"]] = [(_clock(fill["format"], int(fill.get("offset_days") or 0), now), "")]
+            values[p["name"]] = [(_clock(fill["format"], _clock_offset(record, fill, params), now), "")]
         elif src == "text":
             # the source's own vocabulary (name + description, NOT its example asks, whose subjects are
             # samples like "react") is never the thing the user named
