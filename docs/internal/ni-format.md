@@ -245,9 +245,10 @@ Added in v-next (§29 flow-engine phase):
   categories as prefixes (NHC basin bins `AT1`/`EP2`/`CP1`).
 
 Added for Library answers (§32, 2026-09-29) — same closed-set discipline, all pure:
-- `number(field, key?)`, `time(field, key?)` and `date(field, key?)` — a number sent
+- `number(field, key?)`, `time(field, key?, utc?)` and `date(field, key?)` — a number sent
   as text → a number; an ISO / RFC 2822 (RSS `pubDate`) / epoch timestamp → the
-  user's local time ("6:48 PM",
+  user's local time (a zoneless ISO time is the source's local clock, or UTC with
+  `utc: true`) ("6:48 PM",
   "Tue 6:48 PM", "Oct 3, 6:48 PM"); a `YYYY-MM-DD` date → "Tue Sep 29" within a
   week, else "Sep 29" (", 2027" in another year), never shifted by time zones.
   `key` (dotted, `[n]` positions allowed: `games[0].gameDate`) converts that field
@@ -2045,8 +2046,10 @@ and the `recipe` born marker stays readable.
 
 - **Record field.** A curated Library record may carry `answers` (Library spec v1.1):
   `value` (one path; type `number` | `text` | `time` | `date` | `count`; `unit` or
-  `unit_path`; `codes: wmo_weather`), `list` (rows at `path`, 1–4 row cells relative to
-  one item, `newest_first`, `may_be_empty`, `filter: {path, equals: "{param}"}`) and
+  `unit_path`; `codes: wmo_weather`; a `time` may say `utc: true` — its zoneless values are
+  UTC, not the source's local clock), `list` (rows at `path`, 1–4 row cells relative to
+  one item, `newest_first`, `may_be_empty`, `filter: {path, equals}` where `equals` is a
+  `"{param}"` or a short fixed value the response uses, e.g. `"Final"`) and
   `columns` (2–4 parallel arrays, `limit`). Paths may hold whole `{param}` segments,
   filled at build as quoted keys (§4.1): `near_earth_objects.{date}` →
   `near_earth_objects["2026-09-27"]`.
@@ -2065,9 +2068,21 @@ and the `recipe` born marker stays readable.
   12 hourly), `reverse`, `where` eq for a filter). `unit_path` is read once and frozen
   as a literal (number node `unit`; a row suffix in list scenes). The pipeline runs on
   the sample, every shown value is typed-checked, and the draft spec validates and
-  binds; ANY misfit notes "the Library's declared answers didn't fit…" and the model
-  mapping path runs unchanged. The note and journal say "built from the Library's
-  declared answers: <labels>"; the P8 judge still runs but only logs.
+  binds. A list fits when every cell is present in SOME row; a row missing a cell shows
+  "—" there (a cell missing from EVERY row is drift: the run fails, repair fires). A
+  `may_be_empty` list counts its rows and shows "No <label> right now" while empty.
+- **Nothing here → the next source.** When the response holds none of the chosen answers
+  (TheSportsDB listing no games) or an asked value is missing (a buoy not measuring waves),
+  the pick re-lands on the other offered sources with "<provider> has nothing for this right
+  now" (web search when none is left). With no other source, an asked value that's missing
+  falls back to the source's other `primary` answers, named "not reported by this source
+  right now"; otherwise the model mapping path runs, noted. Any other misfit notes "the
+  Library's declared answers didn't fit…" and mapping runs unchanged.
+- **No model judge.** The build is deterministic, so the P8 judge doesn't run (its gap
+  guesses were false on cards that showed the very thing). The note says "built from the
+  Library's declared answers: <labels>" plus, computed by code, "this source doesn't
+  report: <want>" for a want the user's own words named that no declared answer speaks to
+  (a filled value — team, place — never counts).
 - **Bare lists.** The engine now wraps a bare-list response as `{"items": [...]}`
   before the pipeline, exactly as the flow samples it (no path can address a bare
   list root, so no existing card changes).

@@ -55,6 +55,23 @@ to know when a release changes behavior.
   card from building.
 - **A card never "builds" with nothing to show.** If the chosen fields or
   page come back empty, the card says so and offers the other sources.
+- **A web-page card never goes blank on an update.** An update that reads none
+  of the card's values counts as a failed update, and the last good values
+  stay on the card.
+- **A source with nothing for your ask hands over to the next one.** When a
+  source has no games listed, or its station doesn't measure what you asked
+  for, the card moves on to the other sources instead of failing or showing
+  something else.
+- **No more false "this card won't include…" notes** on cards built from a
+  Library source's answers; the card only says what the source really doesn't
+  report ("score" on a schedule).
+- **Small numbers keep their digits:** yen to dollar reads 0.00637, not 0.01.
+- **Game times from UTC sources show in your time zone** (a 7 PM Pacific
+  tip-off no longer reads 2:00 AM).
+- **A list row the source left a field out of shows "—"** instead of failing
+  the whole card.
+- **Temperature asks go to the forecast** ("temp in Denver", "how hot is it in
+  Tucson"), while "water temp" and "ocean temperature" keep their water sources.
 
 ## [0.24.0] - 2026-09-28
 
