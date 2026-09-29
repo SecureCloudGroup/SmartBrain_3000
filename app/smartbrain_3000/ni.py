@@ -1132,12 +1132,15 @@ def _validate_transform_op(op: object, i: int, j: int, outputs: set[str]) -> Non
         # the user's local time; date: a calendar date shown as written (never shifted by time zones).
         # ``key`` converts that key in each list row.
         # time's ``utc``: the source sends zoneless timestamps in UTC (TheSportsDB strTimestamp)
-        _closed_keys(node, {"fn", "field", "key", "utc"} if fn == "time" else {"fn", "field", "key"}, where)
+        # time's ``clock``: the row already shows its date, so only the clock ("7:56 AM")
+        _closed_keys(node, {"fn", "field", "key", "utc", "clock"} if fn == "time" else {"fn", "field", "key"},
+                     where)
         if node.get("key") is not None and not (isinstance(node["key"], str) and len(node["key"]) <= 120
                                                  and _ROW_KEY_RE.fullmatch(node["key"])):
             raise ValueError(f"{where}.key malformed")
-        if node.get("utc") is not None and not isinstance(node["utc"], bool):
-            raise ValueError(f"{where}.utc must be true or false")
+        for flag in ("utc", "clock"):
+            if node.get(flag) is not None and not isinstance(node[flag], bool):
+                raise ValueError(f"{where}.{flag} must be true or false")
         return
     if fn == "zip":
         # parallel arrays (a table stored as columns) → one list of rows keyed by the column names
@@ -1914,7 +1917,8 @@ def _apply_transform_op(op: dict, payload: dict, *, history: dict) -> dict:
     if fn == "number":
         out[field] = _txf_number(payload[field], op.get("key"))
     elif fn == "time":
-        convert = (lambda v: local_time(v, naive_utc=True)) if op.get("utc") else local_time
+        utc, clock = bool(op.get("utc")), bool(op.get("clock"))
+        convert = lambda v: local_time(v, naive_utc=utc, clock_only=clock)  # noqa: E731
         out[field] = _txf_rows(payload[field], op.get("key"), convert)
     elif fn == "date":
         out[field] = _txf_rows(payload[field], op.get("key"), local_date)
@@ -1993,11 +1997,12 @@ _RFC2822_RE = re.compile(r"(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s*)?\d{1,2}\s+"
                          r"(?:\s+(?:[A-Za-z]{1,5}|[+-]\d{4}))?")
 
 
-def local_time(value: object, *, naive_utc: bool = False) -> str:
+def local_time(value: object, *, naive_utc: bool = False, clock_only: bool = False) -> str:
     """An ISO timestamp, an RFC 2822 date (RSS ``pubDate``) or an epoch (seconds or milliseconds) →
     the user's local time, readably: "6:48 PM" today, "Tue 6:48 PM" this week, "Oct 3, 6:48 PM"
     further out. An ISO timestamp without a zone is the source's local time and shown as written —
-    unless ``naive_utc`` (the source declares its zoneless times are UTC)."""
+    unless ``naive_utc`` (the source declares its zoneless times are UTC). ``clock_only``: just
+    "6:48 PM" (a table row that already shows its date)."""
     now = datetime.now().astimezone()
     if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 1e8:
         moment = datetime.fromtimestamp(value / 1000 if value > 1e11 else value, tz=UTC).astimezone()
@@ -2017,7 +2022,7 @@ def local_time(value: object, *, naive_utc: bool = False) -> str:
         raise NIError("transform_type", "time needs an ISO timestamp, an RFC 2822 date or an epoch")
     clock = moment.strftime("%I:%M %p").lstrip("0")
     days = (moment.date() - now.date()).days
-    if days == 0:
+    if days == 0 or clock_only:
         return clock
     if 0 < days < 7 or -7 < days < 0:
         return f"{moment.strftime('%a')} {clock}"

@@ -757,3 +757,14 @@ def test_a_quantity_want_is_a_number_on_a_page() -> None:
     assert ni_flow._is_quantity_want("gas_prices") and ni_flow._is_quantity_want("snowfall")
     assert not ni_flow._is_quantity_want("pollen_count") and not ni_flow._is_quantity_want("headlines")
     assert not ni_flow._is_quantity_want("price_date")  # the date of a price is a date, not a quantity
+
+
+def test_a_row_with_its_date_shows_times_as_the_clock() -> None:
+    """Blind 2026-09-29 (sunrise and sunset Anchorage): "Mon Sep 28 · Mon 7:56 AM · Mon 7:36 PM" — the
+    row already says the day, so its times are the clock only."""
+    answer = ni_flow._clean_answer({"kind": "columns", "name": "sun", "label": "Sunrise and sunset", "words": ["sun"],
+                                    "columns": [{"path": "daily.time", "label": "Day", "type": "date"},
+                                                {"path": "daily.sunrise", "label": "Sunrise", "type": "time"}]})
+    built = ni_flow.build_from_answers([answer], {"daily": {"time": ["2026-10-03"],
+                                                            "sunrise": ["2026-10-03T07:56"]}}, "t")
+    assert built["preview_payload"]["rows"][0]["sunrise"] == "7:56 AM"

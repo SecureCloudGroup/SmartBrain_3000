@@ -1391,14 +1391,16 @@ def _build_value_answers(chosen: list[dict], payload: dict) -> dict:
             "fields": fields, "klass": _DISPLAY_VALUE, "missing": missing}
 
 
-def _cell_ops(cell: dict, key: str) -> list[dict]:
-    """The per-row conversions one list / columns cell declares."""
+def _cell_ops(cell: dict, key: str, clock: bool = False) -> list[dict]:
+    """The per-row conversions one list / columns cell declares (``clock``: times as the clock only)."""
     if cell.get("codes"):
         return [{"fn": "label", "field": "rows", "table": cell["codes"], "key": key}]
     if cell["type"] == "number":
         return [{"fn": "number", "field": "rows", "key": key}]
     if cell["type"] in ("time", "date"):
-        return [{"fn": cell["type"], "field": "rows", "key": key, **({"utc": True} if cell.get("utc") else {})}]
+        flags = {**({"utc": True} if cell.get("utc") else {}),
+                 **({"clock": True} if clock and cell["type"] == "time" else {})}
+        return [{"fn": cell["type"], "field": "rows", "key": key, **flags}]
     return []
 
 
@@ -1433,8 +1435,9 @@ def _build_rows_answer(answer: dict, payload: dict, title: str) -> dict:
         limit = answer.get("limit") or (12 if hourly else 7)
         ops.append({"fn": "zip", "field": keys[0], "with": keys[1:], "as": "rows"})
         ops.append({"fn": "top_n", "field": "rows", "n": limit})
+    dated = any(c["type"] == "date" for c in cells)  # a row that shows its date: its times show the clock
     for cell, key in zip(cells, keys, strict=True):  # bounded by _MAX_ANSWER_CELLS
-        ops.extend(_cell_ops(cell, key))
+        ops.extend(_cell_ops(cell, key, clock=dated))
     if answer.get("may_be_empty"):  # "no delays right now" is an answer: count the rows each run
         ops.append({"fn": "count", "field": "rows", "as": "rows_count"})
     if ops:
