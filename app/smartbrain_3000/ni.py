@@ -4131,6 +4131,10 @@ def run_item(store: NIStore, item_id: str, *, gateway_mod, secrets_store,
                         + ", ".join(dropped))
                 except Exception:  # journaling never fails a run
                     pass
+        # (3) a page refresh that read NONE of the card's values is a failed run (last_good keeps
+        #     rendering), never a blank card marked ok (live field 2026-09-29: Lakers next game)
+        if (spec.get("source") or {}).get("type") == "http_page" and isinstance(outputs, dict):
+            _refuse_blank_page_run(spec, outputs, llm_fields)
         if llm_call is not None and isinstance(outputs, dict):
             store.write_snapshot(item_id, "llm_state", {
                 "src_hash": src_hash,
@@ -4194,6 +4198,18 @@ def _record_stale_run(store: NIStore, item_id: str, started: float) -> None:
     duration_ms = int((time.monotonic() - started) * 1000)
     store.record_run(item_id, "stale", duration_ms=duration_ms,
                      error="spec_rev_moved", contract_ok=None)
+
+
+def _refuse_blank_page_run(spec: dict, outputs: dict, llm_fields: set[str]) -> None:
+    """Raise ``extract_miss`` when a page card's run produced none of its values (every
+    interpreted / compiled field empty). A card with no page fields is left alone."""
+    fields = set(llm_fields)
+    for stage in spec.get("pipeline") or []:  # bounded by _MAX_PIPELINE_STAGES
+        if isinstance(stage, dict) and stage.get("op") == "graph_extract":
+            fields |= set((stage.get("fields") or {}).keys())
+    if fields and not any(outputs.get(name) is not None and str(outputs.get(name)).strip()
+                          for name in fields):
+        raise NIError("extract_miss", "the page held none of this card's values this time")
 
 
 def _finalize_run(store: NIStore, item: dict, spec: dict, outputs: dict,

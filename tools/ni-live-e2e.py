@@ -145,6 +145,7 @@ def run_one(ask: str, idx, llm, model: str) -> dict:
         item = store.get_item(item_id)
         latest = store.read_snapshot(item_id, "latest")
         out["scene_text"] = _texts(latest["payload"] if latest else None)
+        out["pipeline"], out["latest"] = item["spec"].get("pipeline"), latest["payload"] if latest else None
         out["source"] = out["source"] or item["spec"]["source"].get("url", "")
     except Exception as exc:  # a crash is a failed ask, never a stopped run
         import traceback
@@ -157,11 +158,30 @@ def run_one(ask: str, idx, llm, model: str) -> dict:
     return out
 
 
+def _number_text(value: float, fmt: str, unit) -> str:
+    """What web/src/lib/ni/scene.ts formatNumber shows (en-US), so the printed card is the seen card."""
+    if fmt == "percent":
+        return f"{value * 100:,.1f}".rstrip("0").rstrip(".") + "%"
+    if fmt == "currency":
+        return f"${value:,.2f}"
+    if fmt == "compact" and abs(value) >= 1000:
+        for size, suffix in ((1e12, "T"), (1e9, "B"), (1e6, "M"), (1e3, "K")):
+            if abs(value) >= size:
+                base = f"{value / size:.1f}".rstrip("0").rstrip(".") + suffix
+                break
+    else:
+        base = f"{value:,.2f}".rstrip("0").rstrip(".")
+    u = unit.strip() if isinstance(unit, str) else ""
+    return f"{base} {u}" if u else base
+
+
 def _texts(node, acc=None) -> list[str]:
     """The words a person would read on the rendered card."""
     acc = [] if acc is None else acc
-    if isinstance(node, dict):
-        if isinstance(node.get("value"), (str, int, float)) and node.get("type") in ("text", "number"):
+    if isinstance(node, dict) and not node.get("hidden"):
+        if node.get("type") == "number" and isinstance(node.get("value"), (int, float)):
+            acc.append(_number_text(node["value"], node.get("format", "plain"), node.get("unit")))
+        elif node.get("type") == "text" and isinstance(node.get("value"), (str, int, float)):
             acc.append(str(node["value"]))
         for child in node.get("children") or []:
             _texts(child, acc)

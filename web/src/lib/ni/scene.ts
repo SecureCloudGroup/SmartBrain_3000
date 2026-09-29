@@ -289,6 +289,8 @@ const compactFmt = new Intl.NumberFormat(undefined, { notation: "compact", maxim
 const percentFmt = new Intl.NumberFormat(undefined, { style: "percent", maximumFractionDigits: 1 });
 const currencyFmt = new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" });
 const plainFmt = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
+// below 1, two decimals erase the value (0.00637 yen per dollar read "0.01"): keep 3 significant digits
+const smallFmt = new Intl.NumberFormat(undefined, { maximumSignificantDigits: 3 });
 
 /** Format a number for the scene's `number` node. `unit` is appended to plain/compact
  *  only — percent/currency carry their own suffix. Pure; safe for any locale. */
@@ -298,7 +300,8 @@ export function formatNumber(value: number, format: NumberFormat, unit?: string)
   if (!Number.isFinite(value)) return "—";
   if (format === "percent") return percentFmt.format(value);
   if (format === "currency") return currencyFmt.format(value);
-  const base = format === "compact" ? compactFmt.format(value) : plainFmt.format(value);
+  const small = value !== 0 && Math.abs(value) < 1;
+  const base = format === "compact" ? compactFmt.format(value) : (small ? smallFmt : plainFmt).format(value);
   const u = typeof unit === "string" ? unit.trim() : "";
   return u ? `${base} ${u}` : base;
 }

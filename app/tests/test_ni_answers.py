@@ -445,10 +445,10 @@ def test_the_flow_builds_from_answers_without_a_mapping_call(lib, monkeypatch) -
     out = ni_flow._sample_and_map(store, item_id, "NYC weather", _INTENT, WEATHER_URL, model,
                                   lambda _u: copy.deepcopy(OPEN_METEO))
     assert out["state"] == "ready"
-    assert len(prompts) == 1  # the judge read the card once; it never re-picked
+    assert prompts == []  # a deterministic build: no mapping call, no model judge
     notes = " | ".join(out["notes"])
     assert "built from the Library's declared answers: Temperature, Conditions, High today, Low today" in notes
-    assert "verification still doubts: temperature: looks odd" in notes
+    assert "verification" not in notes and "won't include" not in notes
     spec = store.get_item(item_id)["spec"]
     assert spec["pipeline"][0]["paths"]["conditions"] == "current.weather_code"
     assert spec["source"] == {"type": "http_json", "url": WEATHER_URL}
@@ -601,3 +601,19 @@ def test_a_nested_row_filter_and_the_none_right_now_line() -> None:
         return out
     assert shown("ORD")[-1] == "No ground delay program right now"
     assert "wind" in shown("BOS") and "No ground delay program right now" not in shown("BOS")
+
+
+def test_unanswered_wants_are_only_what_the_user_said_and_no_answer_speaks_to() -> None:
+    answers = [ni_flow._clean_answer({
+        "kind": "list", "name": "upcoming", "label": "Next games", "path": "dates",
+        "words": ["next game", "schedule", "upcoming"],
+        "row": [{"path": "gameDate", "label": "Start", "type": "time"},
+                {"path": "venue.name", "label": "Venue", "type": "text"}]})]
+    # "score" was said and nothing declares it; the team is a filled value, never a gap
+    assert ni_flow._unanswered_wants(answers, "Yankees score", ["score", "Yankees"],
+                                     ["New York Yankees"]) == ["score"]
+    # "time" / "location" were inferred, not said: never reported (live 2026-09-29 false notes)
+    assert ni_flow._unanswered_wants(answers, "next Dodgers game", ["time", "location"],
+                                     ["Los Angeles Dodgers"]) == []
+    # said and declared (a row label) → answered
+    assert ni_flow._unanswered_wants(answers, "Red Sox schedule venue", ["venue"], ["Boston Red Sox"]) == []

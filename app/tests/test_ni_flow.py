@@ -2522,6 +2522,20 @@ def test_engine_run_interpreted_page_card(monkeypatch) -> None:
     assert out["status"] == "ok", out
 
 
+def test_engine_run_page_card_that_reads_nothing_fails_not_blank(monkeypatch) -> None:
+    """Live field 2026-09-29 (Lakers next game): the build read real values, the first refresh
+    read none — the card went ok with every value blank. Now that run fails; nothing blank lands."""
+    store, conn = _store()
+    iid, graph = _flow_page_card(store, False, monkeypatch)
+    with pytest.raises(nimod.NIError) as err:
+        _first_engine_run(store, conn, iid, monkeypatch, page=graph,
+                          llm_reply=json.dumps({"high_tide_time": ""}))
+    assert err.value.kind == "extract_miss"
+    latest = store.read_snapshot(iid, "latest")
+    assert latest is None or (latest["ok"] is False and not latest["payload"])
+    assert store.read_snapshot(iid, "last_good") is None
+
+
 # ---- P2 recompile rung: a drifted compiled card heals itself (2026-09-23) --
 
 

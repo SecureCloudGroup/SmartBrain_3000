@@ -1527,7 +1527,31 @@ def _try_answers_build(store: ni.NIStore, item_id: str, request: str, intent: di
         return None
     missing = set(built.get("missing") or [])
     built["labels"] = [a["label"] for a in chosen if a["label"] not in missing]
+    built["unanswered"] = _unanswered_wants(answers, request, list(intent.get("wants") or []),
+                                            [*params.values(), str(intent.get("place") or "")])
     return built
+
+
+def _unanswered_wants(answers: list[dict], request: str, wants: list, filled: list[str]) -> list[str]:
+    """The wants the user's OWN words asked for that no declared answer of this source speaks to
+    ("Yankees score" on a schedule source → ["score"]). Deterministic: a want counts only through
+    its words that are in the request and aren't a filled value (team, place); it is unanswered
+    when none of those words appears in any answer's words / label / name / row or column labels.
+    A want the model inferred but the user never said is never reported."""
+    ask = _answer_tokens(request or "")
+    for value in filled:  # bounded by the params + place
+        ask -= _answer_tokens(value)
+    covered: set[str] = set()
+    for a in answers:  # bounded by _MAX_ANSWERS
+        for text in [*a["words"], a["label"], a["name"].replace("_", " "),
+                     *[c.get("label", "") for c in a.get("cells") or []]]:
+            covered |= _answer_tokens(text)
+    out: list[str] = []
+    for want in (wants or [])[:_MAX_INTENT_FIELDS]:
+        said = _answer_tokens(str(want).replace("_", " ")) & ask
+        if said and not (said & covered):
+            out.append(str(want).replace("_", " "))
+    return out
 
 
 def _wants_fahrenheit(request: str) -> bool:
@@ -2739,12 +2763,14 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
         note = "built from the Library's declared answers: " + ", ".join(answered["labels"])
         if answered.get("missing"):
             note += "; not reported by this source right now: " + ", ".join(answered["missing"])
+        if answered.get("unanswered"):
+            note += "; this source doesn't report: " + ", ".join(answered["unanswered"])
         _transition(store, item_id, "assembling", source_url=url, note=note)
         _try_journal(store, item_id, "updated", note)
-        # the judge still reads the card, but a deterministic build is never re-picked: logged only
-        judge = _judge_build(request, intent, answered["preview_payload"], call_model)
+        # no model judge on a deterministic build: its gap guesses were wrong on cards that showed
+        # the very thing (live 2026-09-29); what the source can't answer is computed above
         return _handoff(store, item_id, request, intent, url, answered, answered["fields"],
-                        answered["klass"], converted=[], judge=judge, degrade_note=note,
+                        answered["klass"], converted=[], judge=None, degrade_note=note,
                         remap=remap, keep_source=keep_source, keep_params=keep_params)
     try:
         cands = derive_paths(sample)
