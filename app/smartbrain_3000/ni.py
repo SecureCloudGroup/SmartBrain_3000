@@ -1918,7 +1918,7 @@ def _apply_transform_op(op: dict, payload: dict, *, history: dict) -> dict:
         out[field] = _txf_number(payload[field], op.get("key"))
     elif fn == "time":
         utc, clock = bool(op.get("utc")), bool(op.get("clock"))
-        convert = lambda v: local_time(v, naive_utc=utc, clock_only=clock)  # noqa: E731
+        convert = lambda v: local_time(v, naive_utc=utc, clock_only=clock)
         out[field] = _txf_rows(payload[field], op.get("key"), convert)
     elif fn == "date":
         out[field] = _txf_rows(payload[field], op.get("key"), local_date)
