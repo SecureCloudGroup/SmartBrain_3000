@@ -2675,12 +2675,33 @@ def _bind_repeat(node: dict, data: dict, *, depth: int, counter: _NodeCounter,
     max_n = int(node.get("max", _MAX_REPEAT_MAX))
     template = node["template"]
     children: list[dict] = []
+    sparse, first_miss = 0, None
     for entry in items[:max_n]:  # bounded by max_n <= _MAX_REPEAT_MAX
-        bound_child = _bind_node(template, data, depth=depth + 1, item=entry,
-                                 counter=counter, image_ref=image_ref)
+        try:
+            bound_child = _bind_node(template, data, depth=depth + 1, item=entry,
+                                     counter=counter, image_ref=image_ref)
+        except NIError as exc:
+            if exc.kind != "extract_miss":
+                raise
+            # a sparse row (the source left a field out of this one) shows "—" for it; the
+            # same miss on EVERY row is drift and fails the run below, so repair still fires
+            sparse, first_miss = sparse + 1, first_miss or exc
+            bound_child = _bind_node(template, data, depth=depth + 1, item=_SparseRow(entry),
+                                     counter=counter, image_ref=image_ref)
         if bound_child is not None:
             children.append(bound_child)
+    if first_miss is not None and sparse == len(items[:max_n]):
+        raise first_miss
     return {"type": "stack", "dir": "v", "gap": "sm", "children": children}
+
+
+class _SparseRow:
+    """A repeat element bound leniently: an ``item.<x>`` it lacks reads as "—" (text only)."""
+
+    __slots__ = ("entry",)
+
+    def __init__(self, entry: object) -> None:
+        self.entry = entry
 
 
 def _bind_value(value: object, data: dict, *, item: Any) -> object:
@@ -2701,6 +2722,13 @@ def _resolve_bind(steps: list[tuple], data: dict, *, item: Any) -> object:
     if steps[0] == ("key", "item"):
         if item is None:
             raise NIError("bind_miss", "item.* outside a repeat")
+        if isinstance(item, _SparseRow):
+            try:
+                return _resolve_bind(steps, data, item=item.entry)
+            except NIError as exc:
+                if exc.kind != "extract_miss":
+                    raise
+                return "—"
         root = item
         steps = steps[1:]
         if not steps:

@@ -391,10 +391,30 @@ def test_number_with_a_nested_row_key() -> None:
     assert nimod._txf_number([{"p": {"m": "4.5"}}], "p.m") == [{"p": {"m": 4.5}}]
 
 
-def test_the_engine_wraps_a_bare_list_response_like_the_flow() -> None:
-    import inspect
-    src = inspect.getsource(nimod.run_item)
-    assert 'payload = {"items": payload}' in src
+def test_the_engine_wraps_a_bare_list_response_like_the_flow(monkeypatch) -> None:
+    """A card built over a bare-list sample ({"items": [...]} in the flow) refreshes over the same
+    wrap: the engine run on a bare-list response lands the rows, not an extract miss."""
+    from smartbrain_3000.scheduler import ScheduleStore
+    from smartbrain_3000.secrets import SecretStore
+    answer = ni_flow._clean_answer({"kind": "list", "name": "rows", "label": "Rows", "path": "items",
+                                    "words": ["rows"], "row": [{"path": "t", "label": "T", "type": "text"}]})
+    sample = [{"t": "first"}, {"t": "second"}]
+    built = ni_flow.build_from_answers([answer], sample, "t")
+    conn = duckdb.connect(":memory:")
+    dbmod.run_migrations(conn)
+    key = gen_master_key()
+    store = nimod.NIStore(conn, key)
+    spec = ni_flow.build_final_spec("rows", {"subject": "rows"}, {"type": "http_json", "url": WEATHER_URL},
+                                    60, built["pipeline"], built["scene"])
+    iid = store.add_item(spec, built["preview_payload"])
+    store.set_state(iid, "commissioning")
+    monkeypatch.setattr(nimod, "_fetch_http_json", lambda source, item_id, secrets: [{"t": "fresh"}])
+    out = nimod.run_item(store, iid, gateway_mod=object(), secrets_store=SecretStore(conn, key),
+                         schedules_store=ScheduleStore(conn, key))
+    assert out["status"] == "ok", out
+    latest = store.read_snapshot(iid, "latest")["payload"]
+    stack = next(c for c in latest["children"] if c.get("type") == "stack")
+    assert [c["value"] for c in stack["children"]] == ["fresh"]
 
 
 # --- the flow --------------------------------------------------------------------------------------
@@ -617,3 +637,22 @@ def test_unanswered_wants_are_only_what_the_user_said_and_no_answer_speaks_to() 
                                      ["Los Angeles Dodgers"]) == []
     # said and declared (a row label) → answered
     assert ni_flow._unanswered_wants(answers, "Red Sox schedule venue", ["venue"], ["Boston Red Sox"]) == []
+
+
+def test_a_sparse_row_shows_a_dash_and_a_field_gone_from_every_row_fails() -> None:
+    answer = ni_flow._clean_answer({"kind": "list", "name": "rows", "label": "Rows", "path": "rows",
+                                    "words": ["rows"],
+                                    "row": [{"path": "a", "label": "A", "type": "text"},
+                                            {"path": "b", "label": "B", "type": "text"}]})
+    built = ni_flow.build_from_answers([answer], {"rows": [{"a": "first", "b": "x"}, {"a": "second"}]}, "t")
+    scene = built["scene"]
+
+    def rows(payload):
+        out = nimod.run_pipeline(built["pipeline"], payload)
+        bound = nimod.bind_scene(scene, out)
+        stack = next(c for c in bound["children"] if c.get("type") == "stack")
+        return [c["value"] for c in stack["children"]]
+    assert rows({"rows": [{"a": "first", "b": "x"}, {"a": "second"}]}) == ["first · x", "second · —"]
+    with pytest.raises(nimod.NIError) as err:  # drift: the field is gone everywhere
+        rows({"rows": [{"a": "first"}, {"a": "second"}]})
+    assert err.value.kind == "extract_miss"
