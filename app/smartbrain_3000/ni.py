@@ -1983,7 +1983,8 @@ _ISO_TIME_RE = re.compile(r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|
 
 
 # an RFC 2822 date as RSS feeds publish them: "Tue, 29 Sep 2026 01:00:00 GMT", "... +0000"
-_RFC2822_RE = re.compile(r"(?:[A-Za-z]{3},\s*)?\d{1,2}\s+[A-Za-z]{3}\s+\d{2,4}\s+\d{1,2}:\d{2}(?::\d{2})?"
+_RFC2822_RE = re.compile(r"(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s*)?\d{1,2}\s+"
+                         r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{2,4}\s+\d{1,2}:\d{2}(?::\d{2})?"
                          r"(?:\s+(?:[A-Za-z]{1,5}|[+-]\d{4}))?")
 
 

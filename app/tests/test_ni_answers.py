@@ -561,3 +561,17 @@ def test_a_value_the_source_is_not_reporting_is_left_off_and_named() -> None:
 def test_a_row_missing_a_number_shows_a_dash() -> None:
     from smartbrain_3000 import ni as nimod
     assert nimod._txf_number([{"a": "1.5"}, {"a": None}, {"a": "MM"}], "a") == [{"a": 1.5}, {"a": "—"}, {"a": "—"}]
+
+
+def test_review_guards_on_declared_answers() -> None:
+    base = {"kind": "value", "name": "t", "label": "T", "path": "a", "type": "number", "words": ["t"]}
+    assert ni_flow._clean_answer({**base, "unit": "°F", "unit_path": "u"}) is None
+    row = {"kind": "list", "name": "l", "label": "L", "path": "rows", "words": ["l"],
+           "row": [{"path": "x.{coin}", "label": "X", "type": "number"}]}
+    assert ni_flow._clean_answer(row) is None
+
+
+def test_rfc2822_needs_a_real_month() -> None:
+    from smartbrain_3000 import ni as nimod
+    assert nimod._RFC2822_RE.fullmatch("Tue, 29 Sep 2026 01:00:00 GMT")
+    assert not nimod._RFC2822_RE.fullmatch("42 Xyz 2026 12:34")

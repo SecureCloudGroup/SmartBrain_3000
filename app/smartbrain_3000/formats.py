@@ -113,7 +113,7 @@ def _strip_csv_preamble(text: str) -> str:
     while start < len(lines) and (not lines[start].strip() or lines[start].lstrip().startswith("#")):
         start += 1  # bounded by the line count
     body = [(i, ln) for i, ln in enumerate(lines[start:start + _CSV_PREAMBLE_SCAN], start) if ln.strip()]
-    for k, (i, line) in enumerate(body[:10]):  # bounded: a header within the first 10 lines
+    for k, (i, line) in enumerate(body):  # bounded by _CSV_PREAMBLE_SCAN
         delimiter = max(_CSV_DELIMITERS, key=line.count)
         width = _csv_cells(line, delimiter)
         follow = [_csv_cells(ln, delimiter) for _, ln in body[k + 1:k + 4]]

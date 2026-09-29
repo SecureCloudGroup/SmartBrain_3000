@@ -1146,8 +1146,9 @@ def _clean_answer(raw: object) -> dict | None:
            "primary": raw.get("primary") is True, "kind": kind}
     if kind == "value":
         if not isinstance(raw.get("path"), str) or raw.get("type") not in _ANSWER_VALUE_TYPES \
-                or raw.get("codes") not in (None, "wmo_weather"):
-            return None
+                or raw.get("codes") not in (None, "wmo_weather") \
+                or (raw.get("unit") is not None and raw.get("unit_path") is not None):
+            return None  # a literal unit OR a unit read from the response, never both
         out.update({k: raw[k] for k in ("path", "type", "unit", "unit_path", "codes") if raw.get(k) is not None})
         return out
     if kind == "list":
@@ -1175,7 +1176,9 @@ def _clean_answer(raw: object) -> dict | None:
     for cell in cells:  # bounded by _MAX_ANSWER_CELLS
         if not (isinstance(cell, dict) and set(cell) <= _ANSWER_CELL_KEYS
                 and isinstance(cell.get("path"), str) and cell.get("type") in _ANSWER_CELL_TYPES
-                and cell.get("codes") in (None, "wmo_weather")):
+                and cell.get("codes") in (None, "wmo_weather")
+                and "{" not in cell["path"]  # {param} belongs in the list's own path, not a row cell
+                and not (cell.get("unit") is not None and cell.get("unit_path") is not None)):
             return None
         clean_cells.append({k: v for k, v in cell.items() if v is not None})
     out["cells"] = clean_cells
@@ -1192,8 +1195,10 @@ def _library_answers(source_id: str) -> list[dict]:
     except Exception as exc:  # a broken Library degrades to the model mapping path
         log.warning("ni_flow: library answers failed: %s", type(exc).__name__)
         return []
-    cleaned = [_clean_answer(a) for a in (raw or [])[:_MAX_ANSWERS]]
-    return [a for a in cleaned if a is not None]
+    cleaned = [a for a in (_clean_answer(x) for x in (raw or [])[:_MAX_ANSWERS]) if a is not None]
+    names = {a["name"] for a in cleaned}
+    # a count answer's list lands under "<name>_items": never on top of another answer's name
+    return [a for a in cleaned if not (a.get("type") == "count" and f"{a['name']}_items" in names)]
 
 
 def _answer_tokens(text: str) -> set[str]:
