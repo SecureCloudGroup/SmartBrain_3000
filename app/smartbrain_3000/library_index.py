@@ -434,7 +434,8 @@ class LibraryIndex:
                 if not said:
                     continue
                 big = (c.get("attrs", {}).get("pop") or 0) >= 100_000
-                prep = re.search(rf" (in|at|near|for|around|of) {re.escape(said)} ", low)
+                # "of" is not a place cue: "price of silver" is a metal, not Silver City (live 2026-09-29)
+                prep = re.search(rf" (in|at|near|for|around) {re.escape(said)} ", low)
                 if big or prep or states_in(ask):
                     words |= set(said.split())
         return words | state_words, bool(words or state_words)

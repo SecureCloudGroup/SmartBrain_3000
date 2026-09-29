@@ -577,3 +577,13 @@ def test_a_source_is_about_its_own_words_not_its_categorys(lib) -> None:
     assert "coingecko-price" not in [c["source_id"] for c in rows]
     rows, _ = lib.candidates("bitcoin price")
     assert rows and rows[0]["source_id"] == "coingecko-price"
+
+
+def test_of_is_not_a_place_cue(lib) -> None:
+    """Live 2026-09-29: "price of silver" read "of silver" as Silver City. A small place is the ask's
+    place only after in / at / near / for / around."""
+    from smartbrain_3000.library_resolve import Resolver
+    with lib._conn() as con:
+        res = Resolver(con)
+        assert lib._place_words(res, "value of Melbourne")[0] == set()
+        assert "melbourne" in lib._place_words(res, "tides in Melbourne")[0]
