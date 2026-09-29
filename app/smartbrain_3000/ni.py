@@ -2061,10 +2061,18 @@ def _set_in(node: object, parts: list[str], convert) -> object:
 
 def _txf_number(value: object, key: object) -> object:
     """A number the source sends as text → a number; with ``key`` (dotted, like ``time``), that
-    field of every list row."""
+    field of every list row — where a row that lacks the value (null, "", "MM") shows "—" rather
+    than failing the whole card."""
     if key is not None and not isinstance(value, list):
         raise NIError("transform_type", "number with a key needs a list")
-    return _txf_rows(value, key, _to_number)
+    return _txf_rows(value, key, _to_number if key is None else _row_number)
+
+
+def _row_number(value: object) -> object:
+    try:
+        return _to_number(value)
+    except NIError:
+        return "—"
 
 
 def _txf_zip(payload: dict, field: str, others: list) -> list:

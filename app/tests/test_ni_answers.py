@@ -467,7 +467,7 @@ def _mapping_model(prompts: list[str]):
     return model
 
 
-def test_a_path_missing_from_the_live_response_falls_back_to_mapping(lib, monkeypatch) -> None:
+def test_a_path_missing_from_the_live_response_is_left_off_and_named(lib, monkeypatch) -> None:
     store = _store()
     item_id = _picked(store, lib, monkeypatch)
     sample = copy.deepcopy(OPEN_METEO)
@@ -476,9 +476,19 @@ def test_a_path_missing_from_the_live_response_falls_back_to_mapping(lib, monkey
     out = ni_flow._sample_and_map(store, item_id, "NYC weather", {**_INTENT, "wants": ["temperature"]},
                                   WEATHER_URL, _mapping_model(prompts), lambda _u: sample)
     assert out["state"] == "ready"
-    assert any("Choose the best candidate path" in p for p in prompts)
-    assert any("declared answers didn't fit" in n for n in out["notes"])
-    assert store.get_item(item_id)["spec"]["pipeline"][0]["paths"] == {"temperature": "current.temperature_2m"}
+    assert not any("Choose the best candidate path" in p for p in prompts)  # no model path-guessing
+    assert any("not reported by this source right now: Conditions" in n for n in out["notes"])
+    assert "conditions" not in store.get_item(item_id)["spec"]["pipeline"][0]["paths"]
+
+
+def test_when_no_chosen_answer_is_in_the_response_it_falls_back_to_mapping(lib, monkeypatch) -> None:
+    store = _store()
+    item_id = _picked(store, lib, monkeypatch)
+    sample = {"latitude": 40.7, "current": {"unrelated": 1}, "hourly": {"time": ["2026-09-28T00:00"]}}
+    prompts: list[str] = []
+    ni_flow._sample_and_map(store, item_id, "NYC weather", {**_INTENT, "wants": ["temperature"]},
+                            WEATHER_URL, _mapping_model(prompts), lambda _u: sample)
+    assert any("declared answers didn't fit" in n for n in (ni_flow._flow_read(store, item_id) or {}).get("notes", []))
 
 
 def test_answers_build_only_for_the_sealed_url(lib, monkeypatch) -> None:
@@ -519,3 +529,35 @@ def test_no_library_or_no_answers_changes_nothing(lib, monkeypatch) -> None:
     assert ni_flow._try_answers_build(store, item_id, "NYC weather", _INTENT, WEATHER_URL, OPEN_METEO) is None
     monkeypatch.setattr(ni_flow, "_LIBRARY_PROVIDER", None)
     assert ni_flow._library_answers("open-meteo-forecast") == []
+
+
+def test_a_general_ask_that_reaches_one_headline_answer_shows_them_all() -> None:
+    answers = [
+        {"kind": "value", "name": "temperature", "label": "Temperature", "path": "t", "type": "number",
+         "words": ["temperature", "temp", "hot", "cold"], "primary": True},
+        {"kind": "value", "name": "conditions", "label": "Conditions", "path": "c", "type": "text",
+         "words": ["conditions", "weather", "sky"], "primary": True},
+        {"kind": "value", "name": "rain_tomorrow", "label": "Rain chance tomorrow", "path": "r", "type": "number",
+         "words": ["rain tomorrow", "tomorrow", "rain"], "primary": False}]
+    for a in answers:
+        a.setdefault("unit", None)
+    picked = ni_flow.select_answers(answers, "NYC weather", ["weather"])
+    assert [a["name"] for a in picked] == ["temperature", "conditions"]
+    picked = ni_flow.select_answers(answers, "will it rain tomorrow in Seattle", ["rain"])
+    assert [a["name"] for a in picked] == ["rain_tomorrow"]
+
+
+def test_a_value_the_source_is_not_reporting_is_left_off_and_named() -> None:
+    chosen = [{"kind": "value", "name": "wave_height", "label": "Wave height", "path": "rows[0].WVHT",
+               "type": "number", "words": ["waves"], "primary": True},
+              {"kind": "value", "name": "wind", "label": "Wind", "path": "rows[0].WSPD",
+               "type": "number", "words": ["wind"], "primary": True}]
+    built = ni_flow._build_value_answers(chosen, {"rows": [{"WVHT": "MM", "WSPD": "5.0"}]})
+    assert built["missing"] == ["Wave height"] and built["preview_payload"]["wind"] == 5
+    with pytest.raises(ValueError):
+        ni_flow._build_value_answers(chosen[:1], {"rows": [{"WVHT": "MM"}]})
+
+
+def test_a_row_missing_a_number_shows_a_dash() -> None:
+    from smartbrain_3000 import ni as nimod
+    assert nimod._txf_number([{"a": "1.5"}, {"a": None}, {"a": "MM"}], "a") == [{"a": 1.5}, {"a": "—"}, {"a": "—"}]

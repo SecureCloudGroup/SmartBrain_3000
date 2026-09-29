@@ -1243,7 +1243,15 @@ def select_answers(answers: list[dict], request: str, wants: list) -> list[dict]
         top.sort(key=lambda a: not (many and a["kind"] != "value"))  # stable: declared order within
         if top[0]["kind"] != "value":
             return [top[0]]
-        return [a for a in top if a["kind"] == "value"][:_MAX_VALUE_ANSWERS]
+        values = [a for a in top if a["kind"] == "value"]
+        named = any(n.startswith(t) for a in values
+                    for n in _answer_tokens(f"{a['name'].replace('_', ' ')} {a['label']}")
+                    for t in ask if len(t) >= 3)  # "temp" names Temperature; "weather" names nothing
+        if not named and all(a["primary"] for a in values):
+            # the ask reached headline answers only through a general word ("NYC weather" matched
+            # "Conditions" by "weather"): a general ask shows every headline answer, source's order
+            return [a for a in answers if a["kind"] == "value" and a["primary"]][:_MAX_VALUE_ANSWERS]
+        return values[:_MAX_VALUE_ANSWERS]
     if many and listy:
         return [next((a for a in listy if a["primary"]), listy[0])]
     want_words: set[str] = set()
@@ -1288,8 +1296,31 @@ def _nonempty(value: object) -> bool:
     return value is not None and not (isinstance(value, str) and not value.strip())
 
 
+_MISSING = frozenset({"", "mm", "n/a", "na", "-", "--", "—", "null", "none", "missing"})
+
+
+def _answer_present(a: dict, payload: dict) -> bool:
+    """Is this answer's value really in this response? (a buoy that isn't measuring waves sends
+    "MM"; an empty string or null is not a value)"""
+    raw = _resolve_or_none(payload, a["path"])
+    if a["type"] == "count":
+        return isinstance(raw, list)
+    if raw is None or (isinstance(raw, str) and raw.strip().lower() in _MISSING):
+        return False
+    if a["type"] == "number" and not a.get("codes"):
+        return (isinstance(raw, (int, float)) and not isinstance(raw, bool)) or \
+            (isinstance(raw, str) and _numeric_text(json.dumps(raw)))
+    return True
+
+
 def _build_value_answers(chosen: list[dict], payload: dict) -> dict:
-    """Value answers → extract + typed transforms + the value scene (first answer = headline)."""
+    """Value answers → extract + typed transforms + the value scene (first answer = headline).
+    An answer the source isn't reporting right now is left off (named in ``missing``); with none
+    left the build fails and the caller falls back."""
+    missing = [a["label"] for a in chosen if not _answer_present(a, payload)]
+    chosen = [a for a in chosen if _answer_present(a, payload)]
+    if not chosen:
+        raise ValueError("answers: none of the chosen answers is in this response: " + ", ".join(missing))
     paths: dict = {}
     ops: list[dict] = []
     fields: dict[str, str] = {}
@@ -1330,7 +1361,7 @@ def _build_value_answers(chosen: list[dict], payload: dict) -> dict:
             raise ValueError(f"answers: {labels[name]!r} is empty here")
     scene = value_scene(list(fields), labels=labels, types=fields, units=units)
     return {"pipeline": stages, "scene": scene, "preview_payload": preview,
-            "fields": fields, "klass": _DISPLAY_VALUE}
+            "fields": fields, "klass": _DISPLAY_VALUE, "missing": missing}
 
 
 def _cell_ops(cell: dict, key: str) -> list[dict]:
@@ -1460,9 +1491,21 @@ def _try_answers_build(store: ni.NIStore, item_id: str, request: str, intent: di
     if not answers:
         return None
     chosen = select_answers(answers, request, list(intent.get("wants") or []))
+    title, params = str(intent.get("subject") or request)[:120], _clean_params(live.get("_library_params"))
     try:
-        built = build_from_answers(chosen, sample, str(intent.get("subject") or request)[:120],
-                                   params=_clean_params(live.get("_library_params")))
+        try:
+            built = build_from_answers(chosen, sample, title, params=params)
+        except ValueError as exc:
+            if "none of the chosen answers is in this response" not in str(exc):
+                raise
+            # what was asked isn't reported right now (a buoy not measuring waves): the source's other
+            # headline answers, with the asked ones named — never a model guess at a different field
+            fallback = [a for a in answers if a["kind"] == "value" and a["primary"] and a not in chosen]
+            if not fallback:
+                raise
+            built = build_from_answers(fallback, sample, title, params=params)
+            built["missing"] = [a["label"] for a in chosen] + list(built.get("missing") or [])
+            chosen = fallback
         ni.validate_spec(build_final_spec(request, intent, {"type": "http_json", "url": url},
                                           _DEFAULT_CADENCE, built["pipeline"], built["scene"]))
         ni._enforce_bind_types(built["scene"], ni.bind_scene(built["scene"], built["preview_payload"]))
@@ -1470,7 +1513,8 @@ def _try_answers_build(store: ni.NIStore, item_id: str, request: str, intent: di
         _append_note(store, item_id, "the Library's declared answers didn't fit this response "
                                      f"({str(exc)[:90]}); mapping instead")
         return None
-    built["labels"] = [a["label"] for a in chosen]
+    missing = set(built.get("missing") or [])
+    built["labels"] = [a["label"] for a in chosen if a["label"] not in missing]
     return built
 
 
@@ -2681,6 +2725,8 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
     answered = None if remap else _try_answers_build(store, item_id, request, intent, url, sample)
     if answered is not None:
         note = "built from the Library's declared answers: " + ", ".join(answered["labels"])
+        if answered.get("missing"):
+            note += "; not reported by this source right now: " + ", ".join(answered["missing"])
         _transition(store, item_id, "assembling", source_url=url, note=note)
         _try_journal(store, item_id, "updated", note)
         # the judge still reads the card, but a deterministic build is never re-picked: logged only
