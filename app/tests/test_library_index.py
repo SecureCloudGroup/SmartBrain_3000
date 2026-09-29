@@ -600,3 +600,18 @@ def test_of_is_not_a_place_cue(lib) -> None:
         res = Resolver(con)
         assert lib._place_words(res, "value of Melbourne")[0] == set()
         assert "melbourne" in lib._place_words(res, "tides in Melbourne")[0]
+
+
+def test_a_formatted_resolver_fill(lib) -> None:
+    """Coinbase takes "BTC-USD": the Library's fill is the entry's symbol through "{UPPER}-USD". The app
+    only knew a bare "{UPPER}", so Coinbase was never offered (live 2026-09-29)."""
+    rec = {"id": "pair-src", "name": "Pair", "tier": "curated", "categories": ["markets/crypto"],
+           "access": {"kind": "http_json", "url_template": "https://x.example.org/p/{pair}", "params": [
+               {"name": "pair", "kind": "place", "required": True,
+                "fill": {"from": "resolver", "resolver": "place", "field": "state", "format": "{UPPER}-USD"}}]}}
+    with lib._conn() as con:
+        r = library_resolve.Resolver(con)
+        urls, why = library_resolve.candidate_urls(rec, "Denver CO", {}, r)
+        assert not why and urls[0]["url"] == "https://x.example.org/p/CO-USD"
+        rec["access"]["params"][0]["fill"]["format"] = "{LOWER}"  # still refused, honestly
+        assert library_resolve.candidate_urls(rec, "Denver CO", {}, r)[1].endswith("isn't supported yet")

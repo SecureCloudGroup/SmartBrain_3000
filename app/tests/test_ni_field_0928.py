@@ -304,3 +304,23 @@ def test_time_step_keys_follow_list_positions() -> None:
 def test_a_count_want_stays_a_number_when_the_sample_has_no_numbers() -> None:
     cands = ni_flow.derive_paths({"activeStorms": [], "note": "none"})
     assert ni_flow.reconcile_field_types({"count": "number"}, cands) == {"count": "number"}
+
+
+def test_a_refusing_host_takes_its_other_addresses_with_it() -> None:
+    """Live 2026-09-29: CoinGecko's price API answered 403 and the card re-picked CoinGecko's price
+    history, behind the same wall; a guessed field there showed a timestamp as the bitcoin price."""
+    store = _store()
+    item_id = ni_flow.create_shell_item(store, "bitcoin price")
+    record = ni_flow._make_record("bitcoin price", "sampling")
+    record["_ranked_library"] = [
+        {"source_id": "coingecko-price", "provider": "CoinGecko", "url": "https://api.coingecko.com/api/v3/simple/price"},
+        {"source_id": "coingecko-chart", "provider": "CoinGecko", "url": "https://api.coingecko.com/api/v3/coins/x/chart"},
+        {"source_id": "coinbase-spot", "provider": "Coinbase", "url": "https://api.coinbase.com/v2/prices/BTC-USD/spot"}]
+    ni_flow._flow_write(store, item_id, record)
+    out = ni_flow._repick_without(store, item_id, "https://api.coingecko.com/api/v3/simple/price")
+    assert [r["source_id"] for r in out["_ranked_library"]] == ["coinbase-spot"]
+    # "has nothing for this" is about that one address, not the host: the others stay
+    ni_flow._flow_write(store, item_id, {**ni_flow._flow_read(store, item_id), "_ranked_library": record["_ranked_library"]})
+    out = ni_flow._repick_without(store, item_id, "https://api.coingecko.com/api/v3/simple/price",
+                                  why="has nothing for this right now")
+    assert [r["source_id"] for r in out["_ranked_library"]] == ["coingecko-chart", "coinbase-spot"]

@@ -3604,6 +3604,9 @@ def _repick_without(store: ni.NIStore, item_id: str, url: str,
         if gone is None:
             continue
         rest = [r for r in rows if r.get("url") != url]
+        if why.startswith("refused"):  # a host that turned SmartBrain away does so for all its addresses
+            host = (urlparse(url).hostname or "").lower()
+            rest = [r for r in rest if (urlparse(str(r.get("url") or "")).hostname or "").lower() != host]
         other = "_ranked_search" if slot == "_ranked_library" else "_ranked_library"
         return _transition(store, item_id, "source", error=AWAITING_SOURCE_PICK,
                            note=f"{gone.get('provider') or gone.get('host')} {why} — "

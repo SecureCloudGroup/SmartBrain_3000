@@ -333,9 +333,10 @@ def candidate_urls(record: dict, ask: str, policy: dict, resolver: Resolver,
                 opts = []
                 for e in picks:
                     v = _field(e, fill.get("field", "key"))
-                    if fill.get("format") == "{UPPER}":
-                        v = v.upper()
-                    elif fill.get("format"):
+                    fmt = fill.get("format")
+                    if fmt and "{UPPER}" in fmt and fmt.count("{") == 1 and v:
+                        v = fmt.replace("{UPPER}", v.upper())  # "{UPPER}", or "{UPPER}-USD" (a Coinbase pair)
+                    elif fmt:
                         return [], "this provider's parameter format isn't supported yet"
                     if v:
                         opts.append((v, _label(e)))
