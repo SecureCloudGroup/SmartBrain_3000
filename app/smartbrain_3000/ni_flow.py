@@ -617,6 +617,19 @@ def _is_text_want(slug: str) -> bool:
                for w in words if w)
 
 
+# wants that can only be answered by a number ("gas_prices", "snowfall") — a pollen "count" of "Very High"
+# or a "ranking" may be words, so they are not here
+_QUANTITY_WORDS = frozenset({"price", "cost", "rate", "temperature", "temp", "amount", "height", "depth",
+                             "speed", "total", "percent", "percentage", "snowfall", "rainfall", "jackpot"})
+
+
+def _is_quantity_want(slug: str) -> bool:
+    """A want whose words name a quantity, and none a text word or a date ("price_date")."""
+    words = [w[:-1] if w.endswith("s") and w[:-1] in _QUANTITY_WORDS else w for w in slug.split("_") if w]
+    dated = any(w in ("date", "day", "week", "month", "year", "updated") for w in words)
+    return any(w in _QUANTITY_WORDS for w in words) and not dated and not _is_text_want(slug)
+
+
 _NUMERIC_TEXT_RE = re.compile(r"-?\d+(?:\.\d+)?")
 
 
@@ -1503,6 +1516,15 @@ def build_from_answers(chosen: list[dict], sample: object, title: str,
     return _build_rows_answer(chosen[0], payload, title)
 
 
+def _names_a_param(answer: dict, params: dict) -> bool:
+    """True when the answer is scoped to a value the address was filled with: its filter or a path
+    names one of those ``{param}``s (the airport's rows, ``rates.{quote}``)."""
+    texts = [answer.get("path") or "", str((answer.get("filter") or {}).get("path", "")),
+             str((answer.get("filter") or {}).get("equals", ""))]
+    texts += [c.get("path", "") for c in answer.get("cells") or []]
+    return any("{" + name + "}" in t for name in params for t in texts)  # bounded: few params x few texts
+
+
 def _other_sources_left(record: dict, url: str) -> bool:
     """True when the pick this card came from offered another source besides ``url``."""
     return any(isinstance(r, dict) and r.get("url") != url
@@ -1524,8 +1546,13 @@ def _try_answers_build(store: ni.NIStore, item_id: str, request: str, intent: di
     answers = _library_answers(source_id)
     if not answers:
         return None
-    chosen = select_answers(answers, request, list(intent.get("wants") or []))
     title, params = str(intent.get("subject") or request)[:120], _clean_params(live.get("_library_params"))
+    # the answers about what the user NAMED (the airport, the team) come first: "delays at Newark airport"
+    # is Newark's delays, not the nationwide list (live 2026-09-29)
+    scoped = [a for a in answers if _names_a_param(a, params)]
+    chosen = select_answers(scoped, request, list(intent.get("wants") or [])) if scoped else []
+    if not chosen or not any(_answer_score(a, _answer_tokens(request)) > 0 for a in chosen):
+        chosen = select_answers(answers, request, list(intent.get("wants") or []))
     try:
         try:
             built = build_from_answers(chosen, sample, title, params=params)
@@ -3090,6 +3117,11 @@ def _build_page_card(store: ni.NIStore, item_id: str, request: str,
                       f"page interpretation failed: {type(exc).__name__}")
     fields = list(stage["output"].keys())
     preview = {name: extracted.get(name, "") for name in fields}
+    for name in fields:  # bounded by the stage's fields
+        # a number-shaped want ("gas prices", "snowfall") that came back as words is not a reading
+        # (live 2026-09-29: "Prices run near the national average…"): empty, so the next page is tried
+        if _is_quantity_want(name) and not re.search(r"\d", str(preview.get(name) or "")):
+            preview[name] = ""
     if not any(str(v).strip() for v in preview.values() if v is not None):
         # the page holds nothing the ask wants: say so, never "build" a blank card (field 2026-09-28)
         if not remap:

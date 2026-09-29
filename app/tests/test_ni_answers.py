@@ -715,3 +715,45 @@ def test_a_time_declared_utc_is_shown_in_local_time() -> None:
     with pytest.raises(ValueError):
         nimod._validate_pipeline([{"op": "extract", "paths": {"t": "a"}},
                                   {"op": "transform", "apply": [{"fn": "date", "field": "t", "utc": True}]}])
+
+
+def test_answers_scoped_to_what_the_user_named_come_first() -> None:
+    """Live 2026-09-29: "delays at Newark airport" showed the nationwide "Airports with FAA delays" list
+    (its words "airport delays" matched best). With the airport named, the airport's own answers lead."""
+    def a(name, label, words, flt=None):
+        raw = {"kind": "list", "name": name, "label": label, "words": words, "path": "items",
+               "row": [{"path": "x", "label": "X", "type": "text"}]}
+        if flt:
+            raw["filter"] = flt
+        return ni_flow._clean_answer(raw)
+    answers = [a("ground_delay", "Ground delay program", ["delays", "ground delay"],
+                 {"path": "airportId", "equals": "{airport}"}),
+               a("airports", "Airports with FAA delays", ["airport delays", "which airports"])]
+    params = {"airport": "EWR"}
+    scoped = [x for x in answers if ni_flow._names_a_param(x, params)]
+    assert [x["name"] for x in scoped] == ["ground_delay"]
+    assert ni_flow._names_a_param(answers[1], params) is False
+    assert ni_flow._names_a_param(answers[0], {}) is False  # nothing named: nothing is scoped
+
+
+def test_the_build_for_a_named_airport_uses_its_own_answer(lib, monkeypatch) -> None:
+    store = _store()
+    item_id = _picked(store, lib, monkeypatch, request="delays at Newark airport", params={"airport": "EWR"})
+    raws = [{"kind": "list", "name": "ground_delay", "label": "Ground delay program", "words": ["delays"],
+             "path": "items", "filter": {"path": "airportId", "equals": "{airport}"},
+             "row": [{"path": "reason", "label": "Reason", "type": "text"}]},
+            {"kind": "list", "name": "airports", "label": "Airports with FAA delays",
+             "words": ["airport delays", "which airports"], "path": "items",
+             "row": [{"path": "airportId", "label": "Airport", "type": "text"}]}]
+    monkeypatch.setattr(ni_flow, "_library_answers", lambda _sid: [ni_flow._clean_answer(r) for r in raws])
+    sample = {"items": [{"airportId": "EWR", "reason": "wind"}, {"airportId": "LAX", "reason": "fog"}]}
+    built = ni_flow._try_answers_build(store, item_id, "delays at Newark airport", _INTENT, WEATHER_URL, sample)
+    assert built["labels"] == ["Ground delay program"]
+    assert [r["reason"] for r in built["preview_payload"]["rows"]] == ["wind"]
+
+
+def test_a_quantity_want_is_a_number_on_a_page() -> None:
+    """Live 2026-09-29 ("gas prices in Ohio"): a page card showed a sentence where a price was asked."""
+    assert ni_flow._is_quantity_want("gas_prices") and ni_flow._is_quantity_want("snowfall")
+    assert not ni_flow._is_quantity_want("pollen_count") and not ni_flow._is_quantity_want("headlines")
+    assert not ni_flow._is_quantity_want("price_date")  # the date of a price is a date, not a quantity
