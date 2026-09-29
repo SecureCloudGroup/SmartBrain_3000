@@ -1270,7 +1270,8 @@ def _validate_transform_where(node: dict, where: str) -> None:
     assert isinstance(where, str) and where, "where required"
     _closed_keys(node, {"fn", "field", "key", "op", "value"}, where)
     key = node.get("key")
-    if not isinstance(key, str) or not _KEY_RE.match(key):
+    # a row key, dotted for nested rows ("groundDelay.airportId", as number/time steps take)
+    if not isinstance(key, str) or len(key) > 120 or not _ROW_KEY_RE.fullmatch(key):
         raise ValueError(f"{where}.key malformed")
     if node.get("op") not in _WHERE_OPS:
         raise ValueError(f"{where}.op must be one of {sorted(_WHERE_OPS)}")
@@ -2175,13 +2176,28 @@ def _txf_where(value: object, key: str, op: str, right: object) -> list:
         raise NIError("transform_type", "where needs a list")
     assert isinstance(key, str) and key, "key already validated"
     assert op in _WHERE_OPS, "op already validated"
+    parts = re.findall(r"[^.\[\]]+|\[\d+\]", key)
     out: list = []
     for entry in value:  # bounded by input length
-        if not isinstance(entry, dict) or key not in entry:
-            continue
-        if _where_match(entry[key], op, right):
+        found, got = _row_lookup(entry, parts)
+        if found and _where_match(got, op, right):
             out.append(entry)
     return out
+
+
+def _row_lookup(node: object, parts: list[str]) -> tuple[bool, object]:
+    """Follow row-key ``parts`` (names and ``[n]``); (False, None) when any step is missing."""
+    for part in parts:  # bounded by the key's depth
+        if part.startswith("["):
+            i = int(part[1:-1])
+            if not isinstance(node, list) or i >= len(node):
+                return False, None
+            node = node[i]
+        elif isinstance(node, dict) and part in node:
+            node = node[part]
+        else:
+            return False, None
+    return True, node
 
 
 def _where_match(left: object, op: str, right: object) -> bool:

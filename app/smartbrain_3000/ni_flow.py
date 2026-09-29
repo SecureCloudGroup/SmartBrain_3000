@@ -1390,8 +1390,8 @@ def _build_rows_answer(answer: dict, payload: dict, title: str) -> dict:
         stages: list[dict] = [{"op": "extract", "paths": {"rows": answer["path"]}}]
         flt = answer.get("filter")
         if flt:  # only the rows for what was asked (the airport the address names), every run
-            if not ni._KEY_RE.match(flt["path"]):
-                raise ValueError("answers: a row filter path must be one key")
+            if not ni._ROW_KEY_RE.fullmatch(flt["path"]):
+                raise ValueError("answers: a row filter path must be a row key")
             ops.append({"fn": "where", "field": "rows", "key": flt["path"], "op": "eq",
                         "value": flt["equals"]})
         if answer.get("newest_first"):
@@ -1413,6 +1413,8 @@ def _build_rows_answer(answer: dict, payload: dict, title: str) -> dict:
         ops.append({"fn": "top_n", "field": "rows", "n": limit})
     for cell, key in zip(cells, keys, strict=True):  # bounded by _MAX_ANSWER_CELLS
         ops.extend(_cell_ops(cell, key))
+    if answer.get("may_be_empty"):  # "no delays right now" is an answer: count the rows each run
+        ops.append({"fn": "count", "field": "rows", "as": "rows_count"})
     if ops:
         stages.append({"op": "transform", "apply": ops})
     preview = ni.run_pipeline(stages, payload)
@@ -1429,6 +1431,11 @@ def _build_rows_answer(answer: dict, payload: dict, title: str) -> dict:
                 for c, k in zip(cells, keys, strict=True)}
     scene = list_scene("rows", item_fields, title=title, suffixes=suffixes,
                        max_rows=min(limit, ni._MAX_REPEAT_MAX))
+    if answer.get("may_be_empty"):  # shown only while the list is empty, on every refresh
+        scene["children"].append({
+            "type": "text", "value": f"No {answer['label'].lower()} right now", "role": "label",
+            "tone": "muted", "size": "sm",
+            "when": [{"left": {"$bind": "rows_count"}, "op": "gt", "right": 0, "set": {"hidden": True}}]})
     return {"pipeline": stages, "scene": scene, "preview_payload": preview,
             "fields": {}, "klass": _DISPLAY_LIST}
 

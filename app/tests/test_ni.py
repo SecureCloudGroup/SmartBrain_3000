@@ -4404,7 +4404,7 @@ def test_transform_where_non_list_field_is_stage_failure() -> None:
 
 
 def test_transform_where_validation_refuses_bad_op_and_bad_key() -> None:
-    """§29 where: op enum + §4.1 single-segment key grammar enforced at spec time."""
+    """§29 where: op enum + the row-key grammar (dotted nested keys allowed, malformed refused)."""
     with pytest.raises(ValueError, match="op"):
         nimod.validate_spec(_basic_spec(pipeline=[
             {"op": "extract", "paths": {"rows": "rows"}},
@@ -4417,7 +4417,7 @@ def test_transform_where_validation_refuses_bad_op_and_bad_key() -> None:
         nimod.validate_spec(_basic_spec(pipeline=[
             {"op": "extract", "paths": {"rows": "rows"}},
             {"op": "transform", "apply": [
-                {"fn": "where", "field": "rows", "key": "a.b",  # dotted path refused
+                {"fn": "where", "field": "rows", "key": "a..b",  # malformed path refused
                  "op": "ge", "value": 5},
             ]},
         ]))

@@ -575,3 +575,29 @@ def test_rfc2822_needs_a_real_month() -> None:
     from smartbrain_3000 import ni as nimod
     assert nimod._RFC2822_RE.fullmatch("Tue, 29 Sep 2026 01:00:00 GMT")
     assert not nimod._RFC2822_RE.fullmatch("42 Xyz 2026 12:34")
+
+
+def test_a_nested_row_filter_and_the_none_right_now_line() -> None:
+    from smartbrain_3000 import ni as nimod
+    answer = ni_flow._clean_answer({
+        "kind": "list", "name": "ground_delay", "label": "Ground delay program", "path": "items",
+        "words": ["delays", "ground delay"], "may_be_empty": True,
+        "filter": {"path": "groundDelay.airportId", "equals": "{airport}"},
+        "row": [{"path": "groundDelay.impactingCondition", "label": "Reason", "type": "text"}]})
+    sample = {"items": [{"airportId": "BOS", "groundDelay": {"airportId": "BOS", "impactingCondition": "wind"}}]}
+
+    def shown(airport):
+        built = ni_flow.build_from_answers([answer], sample, "delays", params={"airport": airport})
+        bound = nimod.bind_scene(built["scene"], built["preview_payload"])
+        out = []
+
+        def walk(n):
+            if isinstance(n, dict):
+                if n.get("type") == "text" and not n.get("hidden"):
+                    out.append(n["value"])
+                for c in n.get("children") or []:
+                    walk(c)
+        walk(bound)
+        return out
+    assert shown("ORD")[-1] == "No ground delay program right now"
+    assert "wind" in shown("BOS") and "No ground delay program right now" not in shown("BOS")
