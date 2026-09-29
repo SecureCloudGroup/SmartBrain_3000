@@ -710,8 +710,8 @@ def test_a_time_declared_utc_is_shown_in_local_time() -> None:
     want = nimod.local_time(datetime(2026, 10, 6, 2, 0, tzinfo=UTC).isoformat())
     assert built["preview_payload"]["start"] == want
     # utc belongs to time only; anything else is refused
-    assert ni_flow._clean_answer({**{"kind": "value", "name": "x", "label": "X", "words": [],
-                                     "path": "a", "type": "text"}, "utc": True}) is None
+    assert ni_flow._clean_answer({"kind": "value", "name": "x", "label": "X", "words": [],
+                                  "path": "a", "type": "text", "utc": True}) is None
     with pytest.raises(ValueError):
         nimod._validate_pipeline([{"op": "extract", "paths": {"t": "a"}},
                                   {"op": "transform", "apply": [{"fn": "date", "field": "t", "utc": True}]}])
