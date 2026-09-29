@@ -106,7 +106,8 @@ def _build_pack(path: Path) -> None:
     for sid, name, tier, status, prior, (cat, sub), terms, kinds, access, extra in _SOURCES:
         acc = {"kind": "http_json", "auth": "none", "headers": {}, "params": [], **access}
         rec = {"id": sid, "name": name, "description": f"{name} description", "tier": tier,
-               "categories": [f"{cat}/{sub}"], "kinds": kinds, "access": acc, "examples": [],
+               "categories": [f"{cat}/{sub}"], "kinds": kinds, "access": acc,
+               "examples": [" ".join(terms)],  # a real record's examples feed its index terms
                "provider": {"id": "p", "name": "Provider", "authority": "official"}, **extra}
         con.execute("INSERT INTO library_sources VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (sid, name, f"{name} description", "p", "Provider", "official", tier, "US", "", "http_json",
@@ -566,3 +567,13 @@ def test_classify_the_longest_keyword_wins(tmp_path) -> None:
     assert idx.classify("water temp Charleston") == ["water/water_temp"]
     assert idx.classify("ocean temperature San Diego") == ["water/water_temp"]
     assert idx.classify("temp in Denver") == ["weather/forecast"]
+
+
+def test_a_source_is_about_its_own_words_not_its_categorys(lib) -> None:
+    """Live 2026-09-29: "gold price per ounce" got WTI crude oil — "gold" is a commodities keyword, and
+    the relevance check counted the category's vocabulary as the source's own. Only the source's own
+    words (name, description, examples, declared answers) say what it is about."""
+    rows, _ = lib.candidates("crypto fear price")  # "crypto" is the category's word, never CoinGecko's own
+    assert "coingecko-price" not in [c["source_id"] for c in rows]
+    rows, _ = lib.candidates("bitcoin price")
+    assert rows and rows[0]["source_id"] == "coingecko-price"

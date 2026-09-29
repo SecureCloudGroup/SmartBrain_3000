@@ -480,13 +480,17 @@ class LibraryIndex:
                 takes_subject = bool(subjects) and bool(con.execute(
                     "SELECT count(*) FROM library_source_resolvers WHERE source_id = ? AND resolver IN "
                     "(SELECT unnest(?::VARCHAR[]))", [row["id"], list(subjects)]).fetchone()[0])
+                record = json.loads(con.execute("SELECT record FROM library_sources WHERE id = ?",
+                                                [row["id"]]).fetchone()[0])
                 if need and not takes_subject:
-                    # what the source is about: its own words plus its categories' vocabulary
-                    kw = " ".join(k for c in self.taxonomy() for sc in c["subcategories"]
-                                  if f"{c['id']}/{sc['id']}" in row["categories"] for k in sc["keywords"])
-                    rec_text = norm(" ".join([row["name"], row["description"], kw, " ".join(json.loads(
-                        con.execute("SELECT record FROM library_sources WHERE id = ?", [row["id"]]).fetchone()[0]
-                    ).get("examples", []))]))
+                    # what the source is about, in ITS OWN words (name, description, examples, declared
+                    # answers) — never its category's vocabulary: "gold" is a commodities word, and WTI crude
+                    # is a commodities source, but WTI crude is not about gold (live 2026-09-29)
+                    own = [row["name"], row["description"], " ".join(record.get("examples", []))]
+                    for a in record.get("answers") or []:  # bounded by the Library's answers limit
+                        if isinstance(a, dict):
+                            own += [str(a.get("label", "")), " ".join(str(w) for w in a.get("words") or [])]
+                    rec_text = norm(" ".join(own))
                     if not any(w[:5] in rec_text for w in need):
                         continue  # nothing the user named is what this source is about
                 if row["tier"] == "harvested":
@@ -496,8 +500,7 @@ class LibraryIndex:
                     need = [w for w in distinctive if w not in place_words]
                     if not need or not all(w[:5] in text for w in need):
                         continue
-                rec = json.loads(con.execute("SELECT record FROM library_sources WHERE id = ?",
-                                             [row["id"]]).fetchone()[0])
+                rec = record
                 cats = rec.get("categories") or []
                 pol = {}
                 if cats:
