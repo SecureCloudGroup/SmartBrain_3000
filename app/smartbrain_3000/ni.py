@@ -306,6 +306,8 @@ def parse_path(path: str) -> list[tuple]:
     assert isinstance(path, str), "path must be a string"
     if not path:
         raise ValueError("path may not be empty")
+    if '"' in path:
+        return _parse_quoted_path(path)
     if any(ch.isspace() for ch in path):
         raise ValueError("path may not contain whitespace")
     out: list[tuple] = []
@@ -322,6 +324,60 @@ def parse_path(path: str) -> list[tuple]:
         out.append(("key", key))
         out.extend(subs)
     assert out, "parsed path must be non-empty"
+    return out
+
+
+_MAX_QUOTED_KEY = 200
+_PLAIN_KEY_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_-]*")
+
+
+def quote_path_key(key: str) -> str:
+    """``2026-09-27`` → ``["2026-09-27"]``: a key the plain grammar can't spell (a date, "5", "0GUSD")."""
+    if not isinstance(key, str) or not 1 <= len(key) <= _MAX_QUOTED_KEY or '"' in key \
+            or any(ord(ch) < 32 or ord(ch) == 127 for ch in key) or key in _DENIED_PATH_KEYS:
+        raise ValueError(f"key can't be quoted: {str(key)[:40]!r}")
+    return f'["{key}"]'
+
+
+def _parse_quoted_path(path: str) -> list[tuple]:
+    """A path holding quoted keys: ``near_earth_objects["2026-09-27"][0].name``, ``["bitcoin"].usd``.
+    A quoted key follows a key or subscript directly (or opens the path), never a dot; its body is
+    1..200 characters, no ``"`` and no control characters. Outside quotes, the plain grammar holds."""
+    out: list[tuple] = []
+    pos = 0
+    for _ in range(4 * len(path) + 1):  # bounded: every step consumes at least one character
+        if pos >= len(path):
+            break
+        if path.startswith('["', pos):
+            end = path.find('"]', pos + 2)
+            if end < 0:
+                raise ValueError(f"unclosed quoted key in {path!r}")
+            key = path[pos + 2:end]
+            quote_path_key(key)  # the same rules that write one
+            out.append(("key", key))
+            pos = end + 2
+        elif path[pos] == "[":
+            close = path.find("]", pos)
+            inner = path[pos + 1:close] if close > 0 else ""
+            if not out or close < 0 or any(ch.isspace() for ch in inner):
+                raise ValueError(f"bad subscript in {path!r}")
+            out.append(_parse_subscript(inner, path))
+            pos = close + 1
+        elif path[pos] == "." or pos == 0:
+            start = pos + 1 if path[pos] == "." else pos
+            if path[pos] == "." and not out:
+                raise ValueError("empty path segment")
+            m = _PLAIN_KEY_RE.match(path, start)
+            if m is None:
+                raise ValueError(f"bad path key in {path!r}")
+            if m.group(0) in _DENIED_PATH_KEYS:
+                raise ValueError(f"denied path key: {m.group(0)}")
+            out.append(("key", m.group(0)))
+            pos = m.end()
+        else:
+            raise ValueError(f"unexpected {path[pos]!r} in {path!r}")
+    if not out or path.endswith("."):
+        raise ValueError(f"bad path {path!r}")
     return out
 
 

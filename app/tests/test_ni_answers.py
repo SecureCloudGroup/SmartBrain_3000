@@ -272,7 +272,7 @@ def test_param_segments_and_row_filters_take_the_filled_values(lib) -> None:
     rates = [ni_flow._clean_answer(a) for a in lib.answers("fx-rates")]
     built = ni_flow.build_from_answers(rates, {"rates": {"EUR": "0.91", "JPY": 149.2}}, "euro",
                                        params={"quote": "EUR"})
-    assert built["pipeline"][0]["paths"] == {"rate": "rates.EUR"} and built["preview_payload"]["rate"] == 0.91
+    assert built["pipeline"][0]["paths"] == {"rate": 'rates["EUR"]'} and built["preview_payload"]["rate"] == 0.91
     with pytest.raises(ValueError, match="quote"):
         ni_flow.build_from_answers(rates, {"rates": {"EUR": 1}}, "euro", params={})
     faa = [ni_flow._clean_answer(a) for a in lib.answers("faa-status")]
@@ -286,13 +286,53 @@ def test_param_segments_and_row_filters_take_the_filled_values(lib) -> None:
     assert nimod.run_pipeline(built["pipeline"], {"items": sample})["rows"][0]["ARPT"] == "ORD"
 
 
-def test_param_segments_are_whole_segments_only() -> None:
-    assert ni_flow._fill_param_segments("{coin}.usd", {"coin": "bitcoin"}) == "bitcoin.usd"
-    assert ni_flow._fill_param_segments("a.{x}[0].b", {"x": "k"}) == "a.k[0].b"
+def test_param_segments_are_whole_segments_filled_as_quoted_keys() -> None:
+    assert ni_flow._fill_param_segments("{coin}.usd", {"coin": "bitcoin"}) == '["bitcoin"].usd'
+    assert ni_flow._fill_param_segments("a.{x}[0].b", {"x": "5"}) == 'a["5"][0].b'
+    assert ni_flow._fill_param_segments("rates.{q}", {"q": "a.b"}) == 'rates["a.b"]'  # never re-segments
     with pytest.raises(ValueError):
         ni_flow._fill_param_segments("rates.x{quote}", {"quote": "EUR"})
     with pytest.raises(ValueError):
-        ni_flow._fill_param_segments("rates.{quote}", {"quote": "a.b"})  # never re-segments a path
+        ni_flow._fill_param_segments("rates.{quote}", {"quote": 'EU"R'})
+
+
+NEOWS = {"element_count": 2, "near_earth_objects": {"2026-09-27": [
+    {"name": "(2026 AB)", "estimated_diameter": {"meters": {"estimated_diameter_max": 41.2}}},
+    {"name": "(2019 XY)", "estimated_diameter": {"meters": {"estimated_diameter_max": 12.0}}}]}}
+
+
+def test_a_neows_date_keyed_response_builds_through_a_quoted_key() -> None:
+    answers = [ni_flow._clean_answer({
+        "name": "asteroids", "label": "Asteroids today", "kind": "list", "primary": True,
+        "words": ["asteroids", "near earth"], "path": "near_earth_objects.{date}",
+        "row": [{"path": "name", "label": "Name", "type": "text"},
+                {"path": "estimated_diameter.meters.estimated_diameter_max", "label": "Size",
+                 "type": "number", "unit": "m"}]})]
+    built = ni_flow.build_from_answers(answers, NEOWS, "asteroids", params={"date": "2026-09-27"})
+    _valid(built)
+    assert built["pipeline"][0] == {"op": "extract", "paths": {"rows": 'near_earth_objects["2026-09-27"]'}}
+    assert built["preview_payload"]["rows"][0]["name"] == "(2026 AB)"
+    assert _bound_texts(built)[1] == "(2026 AB) · 41.2 m"
+
+
+@pytest.mark.parametrize(("path", "steps"), [
+    ('near_earth_objects["2026-09-27"][0].name',
+     [("key", "near_earth_objects"), ("key", "2026-09-27"), ("index", 0), ("key", "name")]),
+    ('["bitcoin"].usd', [("key", "bitcoin"), ("key", "usd")]),
+    ('lines["5"]["a b.c"]', [("key", "lines"), ("key", "5"), ("key", "a b.c")]),
+])
+def test_quoted_path_keys_parse_and_extract(path, steps) -> None:
+    assert nimod.parse_path(path) == steps
+    assert nimod.parse_path("a.b[0].c") == [("key", "a"), ("key", "b"), ("index", 0), ("key", "c")]
+
+
+@pytest.mark.parametrize("path", [
+    'a["x', 'a["x"y"]', 'a.["x"]', 'a["x"]b', 'a["x"].', 'a[""]', 'a["x\ny"]', 'a["__proto__"]',
+    '"x"', 'a["x"][ 0]', 'a["' + "k" * 201 + '"]', '.["x"]',
+])
+def test_malformed_quoted_keys_are_refused(path) -> None:
+    with pytest.raises(ValueError):
+        nimod.parse_path(path)
 
 
 # --- engine transforms ---------------------------------------------------------------------------------

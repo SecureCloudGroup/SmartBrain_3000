@@ -1113,7 +1113,7 @@ _ANSWER_CELL_KEYS = frozenset({"path", "label", "type", "unit", "unit_path", "co
 _ANSWER_VALUE_TYPES = ("number", "text", "time", "date", "count")
 _ANSWER_CELL_TYPES = ("number", "text", "time", "date")
 # a whole path segment naming one of the source's parameters: ``rates.{quote}``, ``{coin}.usd``
-_PARAM_SEGMENT_RE = re.compile(r"(?:^|(?<=\.))\{([a-z_][a-z0-9_]*)\}(?=$|\.|\[)")
+_PARAM_SEGMENT_RE = re.compile(r"(?:^|\.)\{([a-z_][a-z0-9_]*)\}(?=$|\.|\[)")  # the dot goes too
 _MAX_ANSWERS = 20
 _MAX_VALUE_ANSWERS = 4
 _MAX_ANSWER_CELLS = 4
@@ -1262,12 +1262,20 @@ def _answer_unit(decl: dict, payload: object, first_row: object = None) -> str:
     failed check (the caller falls back)."""
     unit = decl.get("unit")
     if unit is None and decl.get("unit_path"):
-        unit = _dig(payload, str(decl["unit_path"]))
+        unit = _resolve_or_none(payload, str(decl["unit_path"]))
         if not isinstance(unit, str) and first_row is not None:
-            unit = _dig(first_row, str(decl["unit_path"]))
+            unit = _resolve_or_none(first_row, str(decl["unit_path"]))
         if not isinstance(unit, str):
             raise ValueError(f"answers: unit_path {decl['unit_path']!r} is not in this response")
     return re.sub(r"[{}]", "", str(unit or "")).strip()[:20]
+
+
+def _resolve_or_none(node: object, path: str) -> object:
+    """The engine's own path resolution (quoted keys included); None on any miss."""
+    try:
+        return ni._resolve_path(node, ni.parse_path(path))
+    except (ni.NIError, ValueError):
+        return None
 
 
 def _unit_suffix(unit: str) -> str:
@@ -1389,17 +1397,18 @@ def _build_rows_answer(answer: dict, payload: dict, title: str) -> dict:
 
 
 def _fill_param_segments(path: str, params: dict[str, str]) -> str:
-    """``rates.{quote}`` → ``rates.EUR``: whole ``{param}`` segments take the value the card's address
-    was filled with, so the frozen spec carries a literal path. Unfilled → a misfit."""
+    """``rates.{quote}`` → ``rates["EUR"]``: whole ``{param}`` segments take the value the card's
+    address was filled with — always as a quoted key (a date, "5", "0GUSD" are keys the plain grammar
+    can't spell) — so the frozen spec carries a literal path. Unfilled → a misfit."""
     def sub(match: re.Match) -> str:
         value = params.get(match.group(1))
-        if value is None or not ni._KEY_RE.match(value):
-            raise ValueError(f"answers: no usable value for {{{match.group(1)}}}")
-        return value
-    out = _PARAM_SEGMENT_RE.sub(sub, path)
-    if "{" in out or "}" in out:
+        if value is None:
+            raise ValueError(f"answers: no value for {{{match.group(1)}}}")
+        return ni.quote_path_key(value)
+    rest = _PARAM_SEGMENT_RE.sub("", path)
+    if "{" in rest or "}" in rest:
         raise ValueError("answers: a parameter inside a path segment")
-    return out
+    return _PARAM_SEGMENT_RE.sub(sub, path)
 
 
 def _fill_answer(answer: dict, params: dict[str, str]) -> dict:

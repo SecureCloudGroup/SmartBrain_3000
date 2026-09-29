@@ -193,6 +193,15 @@ key      = [A-Za-z_][A-Za-z0-9_-]*
 index    = "-"? digits
 slice    = digits? ":" digits?
 ```
+Quoted keys (2026-09-29, for keys the plain grammar can't spell — a date
+`2026-09-27`, `5`, `0GUSD`, `a b`): `qkey = '["' qchars '"]'`, where `qchars` is 1..200
+characters with no `"` and no control characters (whitespace is allowed inside the
+quotes only). A quoted key opens a path or follows a key / subscript directly, never
+a dot: `near_earth_objects["2026-09-27"][0].name`, `["bitcoin"].usd`. Denied keys stay
+denied; anything else (`a.["x"]`, `a["x"]b`, an unclosed quote) is refused. Paths
+without `"` parse exactly as before. Library answers always emit a filled `{param}`
+segment in this quoted form.
+
 A path that fails to resolve is a stage failure (→ run fails, §6). Output is the
 object of named extracts; downstream stages and the scene see only these names.
 
@@ -2037,7 +2046,9 @@ and the `recipe` born marker stays readable.
   `value` (one path; type `number` | `text` | `time` | `date` | `count`; `unit` or
   `unit_path`; `codes: wmo_weather`), `list` (rows at `path`, 1–4 row cells relative to
   one item, `newest_first`, `may_be_empty`, `filter: {path, equals: "{param}"}`) and
-  `columns` (2–4 parallel arrays, `limit`). Paths may hold whole `{param}` segments.
+  `columns` (2–4 parallel arrays, `limit`). Paths may hold whole `{param}` segments,
+  filled at build as quoted keys (§4.1): `near_earth_objects.{date}` →
+  `near_earth_objects["2026-09-27"]`.
   `LibraryIndex.answers(id)` returns them; `ni_flow._clean_answer` drops any answer
   that breaks the closed shape (the rest still serve).
 - **Seal.** A Library tap (`pick_flow_source` and `tools/ni-live-e2e.py`, both through
