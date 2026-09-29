@@ -1424,8 +1424,11 @@ def _build_rows_answer(answer: dict, payload: dict, title: str) -> dict:
     if not rows and not answer.get("may_be_empty"):
         raise ValueError("answers: the list is empty here")
     first = rows[0] if rows else None
-    if first is not None and not all(_nonempty(_dig(first, k)) for k in keys):
+    # every cell must be in SOME row (a declaration that fits); a row the source left one out of
+    # (today's unplayed game has no score yet) shows "—" there, on every refresh
+    if rows and not all(any(_nonempty(_dig(r, k)) for r in rows) for k in keys):
         raise ValueError("answers: a row field is missing here")
+    first = next((r for r in rows if all(_nonempty(_dig(r, k)) for k in keys)), first)
     item_fields = [f"item.{k}" for k in keys]
     suffixes = {f"item.{k}": _unit_suffix(_answer_unit(c, payload, first))
                 for c, k in zip(cells, keys, strict=True)}
@@ -1491,6 +1494,16 @@ def build_from_answers(chosen: list[dict], sample: object, title: str,
     return _build_rows_answer(chosen[0], payload, title)
 
 
+def _other_sources_left(record: dict, url: str) -> bool:
+    """True when the pick this card came from offered another source besides ``url``."""
+    return any(isinstance(r, dict) and r.get("url") != url
+               for slot in ("_ranked_library", "_ranked_search") for r in record.get(slot) or [])
+
+
+# a declared-answers build that failed because the response holds nothing right now (not a misfit)
+_ANSWERS_NOTHING = ("none of the chosen answers is in this response", "the list is empty here")
+
+
 def _try_answers_build(store: ni.NIStore, item_id: str, request: str, intent: dict,
                        url: str, sample: object) -> dict | None:
     """When the user tapped a Library source that declares answers (sealed ``_library_source`` for
@@ -1513,8 +1526,8 @@ def _try_answers_build(store: ni.NIStore, item_id: str, request: str, intent: di
             # what was asked isn't reported right now (a buoy not measuring waves): the source's other
             # headline answers, with the asked ones named — never a model guess at a different field
             fallback = [a for a in answers if a["kind"] == "value" and a["primary"] and a not in chosen]
-            if not fallback:
-                raise
+            if not fallback or _other_sources_left(live, url):
+                raise  # another source may have what was asked: the caller moves on to it
             built = build_from_answers(fallback, sample, title, params=params)
             built["missing"] = [a["label"] for a in chosen] + list(built.get("missing") or [])
             chosen = fallback
@@ -1522,6 +1535,8 @@ def _try_answers_build(store: ni.NIStore, item_id: str, request: str, intent: di
                                           _DEFAULT_CADENCE, built["pipeline"], built["scene"]))
         ni._enforce_bind_types(built["scene"], ni.bind_scene(built["scene"], built["preview_payload"]))
     except (ni.NIError, ValueError, KeyError, TypeError) as exc:
+        if isinstance(exc, ValueError) and any(m in str(exc) for m in _ANSWERS_NOTHING):
+            return {"nothing": True}
         _append_note(store, item_id, "the Library's declared answers didn't fit this response "
                                      f"({str(exc)[:90]}); mapping instead")
         return None
@@ -2759,6 +2774,19 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
     # A tapped Library source that declares its answers builds the card from them — no model
     # path-guessing. Fresh builds only (a Fix re-derives); a misfit falls through to mapping.
     answered = None if remap else _try_answers_build(store, item_id, request, intent, url, sample)
+    if answered is not None and answered.get("nothing"):
+        # the source's declared answers were verified on a real response; finding none of them now
+        # means it holds nothing for this ask today (no listed games) — the next source, not a model
+        # guess over an empty response (live 2026-09-29: TheSportsDB had no Dodgers games)
+        moved = _repick_without(store, item_id, url, why="has nothing for this right now")
+        if moved is not None:
+            if not moved.get("_ranked_library") and not moved.get("_ranked_search"):
+                web = _pause_with_web(store, item_id, request, intent, call_model)
+                return web if web is not None else moved
+            return moved
+        _append_note(store, item_id, "the Library's declared answers found nothing in this response "
+                                     "and no other source was offered; mapping instead")
+        answered = None
     if answered is not None:
         note = "built from the Library's declared answers: " + ", ".join(answered["labels"])
         if answered.get("missing"):
@@ -3520,7 +3548,8 @@ def begin_remap(store: ni.NIStore, item: dict) -> bool:
     return start_flow_worker(store, item["id"], source_url=url)
 
 
-def _repick_without(store: ni.NIStore, item_id: str, url: str) -> dict | None:
+def _repick_without(store: ni.NIStore, item_id: str, url: str,
+                    why: str = "refused SmartBrain's request") -> dict | None:
     """A tapped source (Library or web) refused SmartBrain's request (401/403/429 — a bot wall or rate limit):
     back to the pick with the other choices and an honest note, instead of a dead card (field
     2026-09-28: ESPN refused, the card failed). None when the refused URL wasn't a Library row."""
@@ -3533,7 +3562,7 @@ def _repick_without(store: ni.NIStore, item_id: str, url: str) -> dict | None:
         rest = [r for r in rows if r.get("url") != url]
         other = "_ranked_search" if slot == "_ranked_library" else "_ranked_library"
         return _transition(store, item_id, "source", error=AWAITING_SOURCE_PICK,
-                           note=f"{gone.get('provider') or gone.get('host')} refused SmartBrain's request — "
+                           note=f"{gone.get('provider') or gone.get('host')} {why} — "
                                 + ("pick another source" if rest else "paste a link to the data"),
                            **{slot: rest or None, other: None}, _access=None, _format=None)
     return None

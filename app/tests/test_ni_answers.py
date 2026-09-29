@@ -508,7 +508,8 @@ def test_when_no_chosen_answer_is_in_the_response_it_falls_back_to_mapping(lib, 
     prompts: list[str] = []
     ni_flow._sample_and_map(store, item_id, "NYC weather", {**_INTENT, "wants": ["temperature"]},
                             WEATHER_URL, _mapping_model(prompts), lambda _u: sample)
-    assert any("declared answers didn't fit" in n for n in (ni_flow._flow_read(store, item_id) or {}).get("notes", []))
+    notes = (ni_flow._flow_read(store, item_id) or {}).get("notes", [])
+    assert any("declared answers found nothing in this response" in n for n in notes)  # no other source: map
 
 
 def test_answers_build_only_for_the_sealed_url(lib, monkeypatch) -> None:
@@ -656,3 +657,43 @@ def test_a_sparse_row_shows_a_dash_and_a_field_gone_from_every_row_fails() -> No
     with pytest.raises(nimod.NIError) as err:  # drift: the field is gone everywhere
         rows({"rows": [{"a": "first"}, {"a": "second"}]})
     assert err.value.kind == "extract_miss"
+
+
+def test_a_source_with_nothing_for_the_ask_moves_to_the_next_source(lib, monkeypatch) -> None:
+    """Live 2026-09-29: TheSportsDB listed no Dodgers games ({"events": null}); the card fell to a model
+    guess over an empty response and failed. Now the pick re-lands on the other sources, named honestly."""
+    store = _store()
+    item_id = _picked(store, lib, monkeypatch)
+    other = "https://api.example.org/other"
+    rec = ni_flow._flow_read(store, item_id)
+    rec["_ranked_library"] = [{"url": WEATHER_URL, "provider": "Open-Meteo"},
+                              {"url": other, "provider": "Other"}]
+    ni_flow._flow_write(store, item_id, rec)
+    out = ni_flow._sample_and_map(store, item_id, "NYC weather", _INTENT, WEATHER_URL,
+                                  lambda _p: "{}", lambda _u: {"current": {}, "daily": {}})
+    assert out["state"] == "source"
+    assert [r["url"] for r in ni_flow._flow_read(store, item_id)["_ranked_library"]] == [other]
+    assert "Open-Meteo has nothing for this right now" in " | ".join(out["notes"])
+
+
+def test_a_row_missing_from_the_newest_game_still_builds_with_a_dash() -> None:
+    """Live 2026-09-29 (Yankees score): today's unplayed game has no score yet; the build insisted the
+    first row carry every field and fell to the model. A field present in SOME row fits."""
+    answer = ni_flow._clean_answer({"kind": "list", "name": "results", "label": "Results", "path": "rows",
+                                    "words": ["score"],
+                                    "row": [{"path": "team", "label": "Team", "type": "text"},
+                                            {"path": "runs", "label": "Runs", "type": "number"}]})
+    sample = {"rows": [{"team": "Yankees"}, {"team": "Orioles", "runs": 10}]}
+    built = ni_flow.build_from_answers([answer], sample, "t")
+    bound = nimod.bind_scene(built["scene"], built["preview_payload"])
+    stack = next(c for c in bound["children"] if c.get("type") == "stack")
+    assert [c["value"] for c in stack["children"]] == ["Yankees · —", "Orioles · 10"]
+
+
+def test_a_row_filter_may_compare_with_a_fixed_status_word() -> None:
+    answer = ni_flow._clean_answer({"kind": "list", "name": "results", "label": "Results", "path": "rows",
+                                    "words": ["score"], "filter": {"path": "state", "equals": "Final"},
+                                    "row": [{"path": "team", "label": "Team", "type": "text"}]})
+    sample = {"rows": [{"team": "Yankees", "state": "Preview"}, {"team": "Orioles", "state": "Final"}]}
+    built = ni_flow.build_from_answers([answer], sample, "t")
+    assert [r["team"] for r in built["preview_payload"]["rows"]] == ["Orioles"]

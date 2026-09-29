@@ -13,7 +13,7 @@ Previews are printed so a human judges whether the card shows what was asked —
 state with the wrong data is still a failure.
 
 Usage (operator's machine; uses the gateway at 127.0.0.1:38080 for model calls only):
-    PYTHONPATH=app python3 tools/ni-live-e2e.py --pack-dir <dir with library/> [--set dev|holdout] [--only N]
+    PYTHONPATH=app python3 tools/ni-live-e2e.py --pack-dir <dir with library/> [--set dev|holdout | --asks-file F] [--only N]
         [--answers-dir <dir holding answers/<source_id>.json files>]
 
 ``--answers-dir`` overlays authored answers files onto the installed pack's records at lookup time
@@ -169,6 +169,8 @@ def _number_text(value: float, fmt: str, unit) -> str:
             if abs(value) >= size:
                 base = f"{value / size:.1f}".rstrip("0").rstrip(".") + suffix
                 break
+    elif value and abs(value) < 1:  # 3 significant digits below 1, like the web
+        base = f"{value:.3g}"
     else:
         base = f"{value:,.2f}".rstrip("0").rstrip(".")
     u = unit.strip() if isinstance(unit, str) else ""
@@ -193,6 +195,8 @@ def main() -> int:
     ap.add_argument("--pack-dir", required=True, type=pathlib.Path)
     ap.add_argument("--set", default="dev", choices=sorted(SETS))
     ap.add_argument("--only", default="")
+    ap.add_argument("--asks-file", type=pathlib.Path,
+                    help="a JSON list of asks (strings or {ask: ...}) — a fresh blind set instead of --set")
     ap.add_argument("--model", default=_eval._DEFAULT_MODEL)
     ap.add_argument("--bifrost", default=_eval._DEFAULT_BIFROST)
     ap.add_argument("--out", type=pathlib.Path)
@@ -203,6 +207,8 @@ def main() -> int:
     idx = _pack(args.pack_dir)
     llm = _eval._bifrost_llm(args.bifrost, args.model)
     asks = SETS[args.set]
+    if args.asks_file:
+        asks = [a if isinstance(a, str) else a["ask"] for a in json.loads(args.asks_file.read_text())]
     if args.only:
         asks = [a for a in asks if args.only.lower() in a.lower()]
     results = []
