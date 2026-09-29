@@ -292,14 +292,19 @@ class LibraryIndex:
 
     def classify(self, text: str, limit: int = 3) -> list[str]:
         low = " " + re.sub(r"[^a-z0-9.&+ ]+", " ", (text or "").lower()) + " "
-        scored = []
+        matched: list[tuple[str, str]] = []
         for c in self.taxonomy():
             for s in c["subcategories"]:
-                hits = sum(1 for kw in s["keywords"] if f" {kw} " in low or (len(kw) > 5 and kw in low))
-                if hits:
-                    scored.append((hits, f"{c['id']}/{s['id']}"))
-        scored.sort(key=lambda x: -x[0])
-        return [cid for _, cid in scored[:limit]]
+                matched += [(kw, f"{c['id']}/{s['id']}") for kw in s["keywords"]
+                            if f" {kw} " in low or (len(kw) > 5 and kw in low)]
+        # the longest match wins: "temp" inside a matched "water temp" says nothing about weather
+        said = {kw for kw, _ in matched}
+        counts: dict[str, int] = {}
+        for kw, cid in matched:  # bounded by the taxonomy's keywords
+            if not any(kw != longer and f" {kw} " in f" {longer} " for longer in said):
+                counts[cid] = counts.get(cid, 0) + 1
+        scored = sorted(counts.items(), key=lambda x: -x[1])
+        return [cid for cid, _ in scored[:limit]]
 
     def search(self, q: str = "", category: str = "", subcategory: str = "", tier: str = "", status: str = "",
                offset: int = 0, limit: int = 20) -> dict:

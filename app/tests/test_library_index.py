@@ -553,3 +553,16 @@ def test_a_retired_catalog_confirm_pause_relands_as_a_library_pick(tmp_path, pac
     assert field["state"] == "source" and field["error"] == ni_flow.AWAITING_SOURCE_PICK
     assert field["suggestions"][0]["kind"] == "library"
     assert ni_flow._flow_read(store, item_id)["state"] == "source"
+
+
+def test_classify_the_longest_keyword_wins(tmp_path) -> None:
+    """Live 2026-09-29: with "temp" a weather word, "water temp Charleston" tied water with weather and
+    got the forecast. A keyword inside a longer matched keyword doesn't count on its own."""
+    idx = library_index.LibraryIndex(tmp_path)
+    idx._taxonomy_cache = [
+        {"id": "weather", "subcategories": [{"id": "forecast", "keywords": ["temp", "temperature"]}]},
+        {"id": "water", "subcategories": [{"id": "water_temp", "keywords": ["water temp", "ocean temperature"]}]},
+    ]
+    assert idx.classify("water temp Charleston") == ["water/water_temp"]
+    assert idx.classify("ocean temperature San Diego") == ["water/water_temp"]
+    assert idx.classify("temp in Denver") == ["weather/forecast"]
