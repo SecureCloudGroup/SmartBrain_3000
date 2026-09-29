@@ -70,6 +70,8 @@ _RESOLVER_ENTRIES = [  # id, resolver, kind, key, name, lat, lon, state, attrs, 
      ["melbourne", "melbourne fl", "melbourne florida"]),
     ("place:4", "place", "place", "4", "Denver", 39.7, -104.9, "CO", {"pop": 716000}, 5.9, ["denver", "denver co"]),
     ("place:5", "place", "place", "5", "Denver", 42.67, -92.3, "IA", {"pop": 1900}, 3.3, ["denver", "denver ia"]),
+    ("place:6", "place", "place", "6", "South Lake Tahoe", 38.9, -120.0, "CA", {"pop": 21225, "nicknames": ["tahoe"]},
+     3.0, ["south lake tahoe", "tahoe"]),
     ("tide_station:872", "tide_station", "station", "872", "Melbourne Causeway", 28.08, -80.60, "FL",
      {"water": "Indian River"}, 1.0, ["melbourne causeway"]),
     ("tide_station:873", "tide_station", "station", "873", "Eau Gallie", 28.16, -80.63, "FL",
@@ -577,6 +579,17 @@ def test_a_source_is_about_its_own_words_not_its_categorys(lib) -> None:
     assert "coingecko-price" not in [c["source_id"] for c in rows]
     rows, _ = lib.candidates("bitcoin price")
     assert rows and rows[0]["source_id"] == "coingecko-price"
+
+
+def test_a_reviewed_area_name_is_a_place_without_a_cue(lib) -> None:
+    """Blind 2026-09-29: "how much snow is Tahoe getting this week" had no place — South Lake Tahoe is
+    small, and "Tahoe" came without "in". A reviewed nickname is a place on its own; a plain small-town
+    name still needs its cue."""
+    from smartbrain_3000.library_resolve import Resolver
+    with lib._conn() as con:
+        res = Resolver(con)
+        assert lib._place_words(res, "Tahoe weather")[0] == {"tahoe"}
+        assert lib._place_words(res, "Melbourne weather")[0] == set()
 
 
 def test_of_is_not_a_place_cue(lib) -> None:

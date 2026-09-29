@@ -436,7 +436,9 @@ class LibraryIndex:
                 big = (c.get("attrs", {}).get("pop") or 0) >= 100_000
                 # "of" is not a place cue: "price of silver" is a metal, not Silver City (live 2026-09-29)
                 prep = re.search(rf" (in|at|near|for|around) {re.escape(said)} ", low)
-                if big or prep or states_in(ask):
+                # a reviewed area name ("tahoe", "obx", "cape cod") is a place on its own
+                nickname = said in ((c.get("attrs") or {}).get("nicknames") or [])
+                if big or prep or nickname or states_in(ask):
                     words |= set(said.split())
         return words | state_words, bool(words or state_words)
 
