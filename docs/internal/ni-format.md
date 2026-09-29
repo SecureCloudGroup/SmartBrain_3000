@@ -246,7 +246,8 @@ Added in v-next (§29 flow-engine phase):
 
 Added for Library answers (§32, 2026-09-29) — same closed-set discipline, all pure:
 - `number(field, key?)`, `time(field, key?)` and `date(field, key?)` — a number sent
-  as text → a number; an ISO / epoch timestamp → the user's local time ("6:48 PM",
+  as text → a number; an ISO / RFC 2822 (RSS `pubDate`) / epoch timestamp → the
+  user's local time ("6:48 PM",
   "Tue 6:48 PM", "Oct 3, 6:48 PM"); a `YYYY-MM-DD` date → "Tue Sep 29" within a
   week, else "Sep 29" (", 2027" in another year), never shifted by time zones.
   `key` (dotted, `[n]` positions allowed: `games[0].gameDate`) converts that field

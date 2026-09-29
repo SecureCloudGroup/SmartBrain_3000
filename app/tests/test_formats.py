@@ -317,3 +317,76 @@ def test_an_entity_declaration_padded_past_the_head_is_still_refused() -> None:
     for parse in (formats.parse_xml, formats.parse_feed):
         with pytest.raises(formats.FormatError):
             parse(body)
+
+
+# --- preambles and leading whitespace (field 2026-09-29) ------------------------------------------
+
+GISS = ("Land-Ocean: Global Means\n"
+        "Year,Jan,Feb,Mar,J-D\n"
+        "1880,-.18,-.24,-.09,-.17\n"
+        "1881,-.19,-.14,.03,-.09\n"
+        "1882,.16,.14,.04,-.11\n")
+CO2 = ("# --------------------------------------------------------------------\n"
+       "# USE OF NOAA GML DATA\n"
+       "#\n"
+       "year,month,decimal date,average,deseasonalized\n"
+       "1958,3,1958.2027,315.71,314.44\n"
+       "1958,4,1958.2877,317.45,315.16\n")
+
+
+def test_a_csv_title_line_before_the_header_is_skipped() -> None:
+    out = formats.parse_csv(GISS)
+    assert out["columns"] == ["Year", "Jan", "Feb", "Mar", "J-D"]
+    assert out["rows"][0]["Year"] == "1880" and out["rows"][0]["J-D"] == "-.17"
+
+
+def test_csv_comment_lines_before_the_header_are_skipped() -> None:
+    out = formats.parse_csv(CO2)
+    assert out["columns"] == ["year", "month", "decimal_date", "average", "deseasonalized"]
+    assert [r["average"] for r in out["rows"]] == ["315.71", "317.45"]
+
+
+def test_a_preamble_keeps_the_newest_first_series_rule() -> None:
+    text = "Monthly series, from the source\n\ndate,value,note\n2026-07-01,4.1,a\n2026-08-01,4.2,b\n" \
+           "2026-09-01,4.3,c\n"
+    out = formats.parse_csv(text)
+    assert out["columns"] == ["date", "value", "note"] and out["rows"][0]["date"] == "2026-09-01"
+
+
+def test_a_plain_or_ragged_csv_is_unchanged() -> None:
+    assert formats._strip_csv_preamble("a,b\n1,2\n") == "a,b\n1,2\n"
+    ragged = "a,b,c\n1,2\n3,4\n5,6\n"  # data rows shorter than the header: the header stays
+    assert formats._strip_csv_preamble(ragged) == ragged
+    assert formats.parse_csv("value\n1\n2\n")["columns"] == ["value"]  # one column
+
+
+FEED = ("<?xml version='1.0'?><rss version='2.0'><channel><title>T</title>"
+        "<item><title>A</title><link>https://ex.test/a</link>"
+        "<pubDate>Tue, 29 Sep 2026 01:00:00 GMT</pubDate></item></channel></rss>")
+
+
+def test_blank_lines_or_a_bom_before_the_xml_declaration_parse() -> None:
+    for lead in ("\n\n  ", "﻿", "﻿\r\n"):
+        assert formats.parse_feed(lead + FEED)["items"][0]["title"] == "A"
+        assert "rss" in formats.parse_xml(lead + FEED)
+
+
+@pytest.mark.parametrize("value", ["Tue, 29 Sep 2026 01:00:00 GMT", "Tue, 29 Sep 2026 01:00:00 +0000",
+                                   "29 Sep 2026 01:00 -0400", "Tue, 29 Sep 2026 01:00:00 -0000"])
+def test_rss_dates_are_times(value) -> None:
+    shown = ni.local_time(value)
+    assert shown.endswith(("AM", "PM")) and "2026" not in shown
+    assert ni_flow._is_timestamp(value, "published")
+
+
+def test_a_feed_card_shows_published_as_local_time() -> None:
+    built = ni_flow.assemble_from_mapping({"title": "items[0].title"}, {"title": "string"}, "list",
+                                          formats.parse_feed(FEED))
+    assert {"fn": "time", "field": "rows", "key": "published"} in built["pipeline"][-1]["apply"]
+    assert built["preview_payload"]["rows"][0]["published"].endswith(("AM", "PM"))
+
+
+def test_not_an_rss_date() -> None:
+    with pytest.raises(ni.NIError):
+        ni.local_time("Tue, 31 Feb 2026 01:00:00 GMT")
+    assert not ni_flow._is_timestamp("sometime next week", "published")

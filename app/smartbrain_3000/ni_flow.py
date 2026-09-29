@@ -921,9 +921,10 @@ _TIME_WORDS = ("time", "date", "updated", "published", "sunset", "sunrise", "sta
 
 
 def _is_timestamp(value: object, name: str) -> bool:
-    """An ISO timestamp, or an epoch under a time-like name (a bare big number is not a time)."""
+    """An ISO timestamp, an RFC 2822 date (RSS ``published``), or an epoch under a time-like name (a
+    bare big number is not a time)."""
     if isinstance(value, str):
-        return bool(ni._ISO_TIME_RE.fullmatch(value.strip()))
+        return bool(ni._ISO_TIME_RE.fullmatch(value.strip()) or ni._RFC2822_RE.fullmatch(value.strip()))
     if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 1e8:
         return any(w in str(name).lower().split("_") or str(name).lower().endswith(w) for w in _TIME_WORDS)
     return False

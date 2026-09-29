@@ -61,13 +61,18 @@ def parse_csv(text: str) -> dict:
     Header row is required (a headerless CSV is refused — the pipeline needs
     named fields). Delimiter is sniffed among ``,;\\t|``. Numeric-looking cells
     stay strings — the extract/transform grammar owns coercion, and the CSV
-    parser has no schema. A time series whose first column is a date running
+    parser has no schema. A preamble before the header — ``#`` comment lines (NOAA GML),
+    a title line (NASA GISS "Land-Ocean: Global Means") — is skipped (``_strip_csv_preamble``).
+    A time series whose first column is a date running
     oldest→newest is returned NEWEST FIRST, so ``rows[0]`` is the latest value
     (field 2026-09-28: FRED unemployment showed 1948's 3.4). Row cap =
     MAX_CSV_ROWS (the newest rows are kept); cell length cap = MAX_CSV_CELL.
     """
     assert isinstance(text, str), "text required"
     assert len(text) >= 0, "text length invariant"
+    if not text.strip():
+        raise FormatError("empty CSV")
+    text = _strip_csv_preamble(text)
     if not text.strip():
         raise FormatError("empty CSV")
     delimiter = _sniff_csv_delimiter(text)
@@ -88,6 +93,34 @@ def parse_csv(text: str) -> dict:
 
 
 _DATE_RE = re.compile(r"\d{4}-\d{2}(-\d{2})?([ T]\d{2}:\d{2}(:\d{2})?)?")
+_CSV_PREAMBLE_SCAN = 30  # lines looked at for a preamble; a header deeper than this isn't found
+
+
+def _csv_cells(line: str, delimiter: str) -> int:
+    """How many cells one line holds under ``delimiter`` (quotes respected)."""
+    try:
+        return len(next(csv.reader([line], delimiter=delimiter), []))
+    except csv.Error:
+        return 0
+
+
+def _strip_csv_preamble(text: str) -> str:
+    """Drop what comes before the header: leading ``#`` comment and blank lines, then leading lines
+    with FEWER cells than the header — the first line (≥2 cells) whose cell count the next 1–3
+    non-empty lines share. No such line (a one-column CSV) → only the comments go."""
+    lines = text.splitlines(keepends=True)
+    start = 0
+    while start < len(lines) and (not lines[start].strip() or lines[start].lstrip().startswith("#")):
+        start += 1  # bounded by the line count
+    body = [(i, ln) for i, ln in enumerate(lines[start:start + _CSV_PREAMBLE_SCAN], start) if ln.strip()]
+    for k, (i, line) in enumerate(body[:10]):  # bounded: a header within the first 10 lines
+        delimiter = max(_CSV_DELIMITERS, key=line.count)
+        width = _csv_cells(line, delimiter)
+        follow = [_csv_cells(ln, delimiter) for _, ln in body[k + 1:k + 4]]
+        if width >= 2 and follow and all(n == width for n in follow) \
+                and all(_csv_cells(ln, delimiter) < width for _, ln in body[:k]):
+            return "".join(lines[i:])
+    return "".join(lines[start:])
 
 
 def _sniff_csv_delimiter(text: str) -> str:
@@ -163,7 +196,7 @@ def parse_feed(text: str) -> dict:
     assert len(text) >= 0, "text length invariant"
     _refuse_doctype(text)
     try:
-        return feeds.parse_feed(text)
+        return feeds.parse_feed(_xml_start(text))
     except feeds.FeedError as exc:
         raise FormatError(str(exc)) from None
 
@@ -184,7 +217,7 @@ def parse_xml(text: str) -> dict:
     assert MAX_XML_DEPTH > 0, "depth cap positive"
     _refuse_doctype(text)
     try:
-        root = ET.fromstring(text)
+        root = ET.fromstring(_xml_start(text))
     except ET.ParseError as exc:
         raise FormatError(f"XML did not parse: {exc}") from None
     root_key = _slug_key(_local_tag(root.tag)) or "root"
@@ -276,6 +309,12 @@ def _whitespace_table(text: str) -> dict | None:
 
 
 # --- shared defence ---------------------------------------------------------------
+
+def _xml_start(text: str) -> str:
+    """Blank lines or a byte-order mark before ``<?xml`` make the parser refuse a good document
+    (politifact's feed); the declaration must open the text."""
+    return text.lstrip("\ufeff \t\r\n")
+
 
 def _refuse_doctype(text: str) -> None:
     """Refuse XML/feed bytes that name a DOCTYPE or ENTITY (entity-expansion defence)."""

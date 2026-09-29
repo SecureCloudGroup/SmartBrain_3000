@@ -38,6 +38,7 @@ import threading
 import time
 import uuid
 from datetime import UTC, date, datetime, timedelta
+from email.utils import parsedate_to_datetime
 from typing import Any
 from urllib.parse import quote as _url_quote
 from urllib.parse import urlencode, urlparse, urlunsplit
@@ -1981,10 +1982,15 @@ _ROW_KEY_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_-]*(\[\d{1,3}\])?(\.[A-Za-z_][A-Z
 _ISO_TIME_RE = re.compile(r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?")
 
 
+# an RFC 2822 date as RSS feeds publish them: "Tue, 29 Sep 2026 01:00:00 GMT", "... +0000"
+_RFC2822_RE = re.compile(r"(?:[A-Za-z]{3},\s*)?\d{1,2}\s+[A-Za-z]{3}\s+\d{2,4}\s+\d{1,2}:\d{2}(?::\d{2})?"
+                         r"(?:\s+(?:[A-Za-z]{1,5}|[+-]\d{4}))?")
+
+
 def local_time(value: object) -> str:
-    """An ISO timestamp or epoch (seconds or milliseconds) → the user's local time, readably:
-    "6:48 PM" today, "Tue 6:48 PM" this week, "Oct 3, 6:48 PM" further out. A timestamp without a
-    zone is the source's local time and shown as written."""
+    """An ISO timestamp, an RFC 2822 date (RSS ``pubDate``) or an epoch (seconds or milliseconds) →
+    the user's local time, readably: "6:48 PM" today, "Tue 6:48 PM" this week, "Oct 3, 6:48 PM"
+    further out. An ISO timestamp without a zone is the source's local time and shown as written."""
     now = datetime.now().astimezone()
     if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 1e8:
         moment = datetime.fromtimestamp(value / 1000 if value > 1e11 else value, tz=UTC).astimezone()
@@ -1992,8 +1998,14 @@ def local_time(value: object) -> str:
         text = value.strip().replace(" ", "T", 1).replace("Z", "+00:00")
         parsed = datetime.fromisoformat(text)
         moment = parsed.astimezone() if parsed.tzinfo else parsed.replace(tzinfo=now.tzinfo)
+    elif isinstance(value, str) and _RFC2822_RE.fullmatch(value.strip()):
+        try:
+            parsed = parsedate_to_datetime(value.strip())
+        except (TypeError, ValueError):
+            raise NIError("transform_type", "time: not a real date") from None
+        moment = (parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)).astimezone()  # "-0000" is UTC
     else:
-        raise NIError("transform_type", "time needs an ISO timestamp or an epoch")
+        raise NIError("transform_type", "time needs an ISO timestamp, an RFC 2822 date or an epoch")
     clock = moment.strftime("%I:%M %p").lstrip("0")
     days = (moment.date() - now.date()).days
     if days == 0:

@@ -21,6 +21,10 @@ to know when a release changes behavior.
 
 ### Fixed
 
+- **More data files and feeds read.** CSV files that open with a title or
+  `#` comment lines (NASA temperature, NOAA CO2) and feeds with blank lines
+  before their first line now load, and news cards show each story's time
+  as your local time.
 - **Cards built from a web page work again.** Since 0.24.0 an ordinary web
   page (a news site, Hacker News) was mistaken for an XML file and the card
   failed; pages go back to the page reader.
