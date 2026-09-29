@@ -1074,7 +1074,7 @@ def _validate_transform_op(op: object, i: int, j: int, outputs: set[str]) -> Non
         # the user's local time. ``key`` converts that key in each list row.
         _closed_keys(node, {"fn", "field", "key"}, where)
         if node.get("key") is not None and not (isinstance(node["key"], str) and len(node["key"]) <= 120
-                                                 and all(_KEY_RE.match(k) for k in node["key"].split("."))):
+                                                 and _ROW_KEY_RE.fullmatch(node["key"])):
             raise ValueError(f"{where}.key malformed")
         return
     if fn == "round":
@@ -1867,6 +1867,8 @@ def _to_number(value: object) -> float | int:
     raise NIError("transform_type", "number needs a number or a number written as text")
 
 
+# a row field for number/time steps: dotted names with list positions ("games[0].gameDate")
+_ROW_KEY_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_-]*(\[\d{1,3}\])?(\.[A-Za-z_][A-Za-z0-9_-]*(\[\d{1,3}\])?){0,7}")
 _ISO_TIME_RE = re.compile(r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?")
 
 
@@ -1898,17 +1900,21 @@ def _txf_rows(value: object, key: object, convert) -> object:
         return convert(value)
     if not isinstance(value, list):
         raise NIError("transform_type", "a keyed conversion needs a list")
-    parts = str(key).split(".")
-    return [_set_in(row, parts, convert) if isinstance(row, dict) else row for row in value]
+    parts = re.findall(r"[^.\[\]]+|\[\d+\]", str(key))
+    return [_set_in(row, parts, convert) for row in value]
 
 
-def _set_in(row: dict, parts: list[str], convert) -> dict:
-    out = dict(row)
-    if len(parts) == 1:
-        out[parts[0]] = convert(row.get(parts[0]))
-    elif isinstance(row.get(parts[0]), dict):
-        out[parts[0]] = _set_in(row[parts[0]], parts[1:], convert)
-    return out
+def _set_in(node: object, parts: list[str], convert) -> object:
+    """Convert the value at ``parts`` (names and ``[n]`` positions) inside a copy of ``node``."""
+    if not parts:
+        return convert(node)
+    head, rest = parts[0], parts[1:]
+    if head.startswith("[") and isinstance(node, list):
+        i = int(head[1:-1])
+        return [(_set_in(x, rest, convert) if j == i else x) for j, x in enumerate(node)]
+    if not head.startswith("[") and isinstance(node, dict) and head in node:
+        return {**node, head: _set_in(node[head], rest, convert)}
+    return node
 
 
 def _txf_number(value: object, key: object) -> object:

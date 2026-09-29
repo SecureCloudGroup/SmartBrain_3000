@@ -260,3 +260,47 @@ def test_when_every_library_source_refuses_the_card_searches_the_web(monkeypatch
     out = ni_flow._sample_and_map(store, item_id, "Yankees score", {"wants": ["score"]},
                                   "https://site.api.espn.com/x", lambda p: "{}", refused)
     assert calls == ["Yankees score"] and out["_ranked_search"][0]["host"] == "mlb.com"
+
+
+def test_a_card_with_nothing_to_show_is_not_built() -> None:
+    with pytest.raises(ValueError, match="empty"):
+        ni_flow.assemble_from_mapping({"score": "s"}, {"score": "string"}, "value", {"s": ""})
+
+
+def test_a_path_off_the_menu_that_resolves_in_the_sample_is_accepted() -> None:
+    offered: dict = {}
+    sample = {"dates": [{"officialDate": "2026-10-03"}]}
+    ni_flow._offer_resolving_paths({"date": "dates[0].officialDate", "x": "nope.path"}, offered,
+                                   {"date": "string", "x": "string"}, sample)
+    assert list(offered) == ["dates[0].officialDate"]
+
+
+def test_a_list_card_with_blank_rows_is_not_built() -> None:
+    with pytest.raises(ValueError, match="empty"):
+        ni_flow.assemble_from_mapping({"d": "rows[0].level"}, {"d": "string"}, "list",
+                                      {"rows": [{"level": ""}, {"level": ""}]})
+
+
+def test_dig_follows_list_positions() -> None:
+    row = {"games": [{"gameDate": "2026-10-03T23:10:00Z"}], "teams": {"home": {"name": "LAD"}}}
+    assert ni_flow._dig(row, "games[0].gameDate") == "2026-10-03T23:10:00Z"
+    assert ni_flow._dig(row, "teams.home.name") == "LAD" and ni_flow._dig(row, "games[3].x") is None
+
+
+def test_a_list_picked_for_a_number_is_its_count() -> None:
+    offered: dict = {}
+    ni_flow._offer_resolving_paths({"storms": "activeStorms"}, offered, {"storms": "number"},
+                                   {"activeStorms": []})
+    assert offered["activeStorms"]["count"] is True
+
+
+def test_time_step_keys_follow_list_positions() -> None:
+    rows = [{"games": [{"gameDate": "2026-10-03T23:10:00Z"}]}]
+    out = nimod._txf_rows(rows, "games[0].gameDate", nimod.local_time)
+    assert "2026-" not in out[0]["games"][0]["gameDate"]
+    assert nimod._ROW_KEY_RE.fullmatch("games[0].gameDate") and not nimod._ROW_KEY_RE.fullmatch("a..b")
+
+
+def test_a_count_want_stays_a_number_when_the_sample_has_no_numbers() -> None:
+    cands = ni_flow.derive_paths({"activeStorms": [], "note": "none"})
+    assert ni_flow.reconcile_field_types({"count": "number"}, cands) == {"count": "number"}

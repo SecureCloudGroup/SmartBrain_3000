@@ -703,7 +703,7 @@ def reconcile_field_types(fields: dict, candidates: list[dict]) -> dict:
                 and not any(_names_match(name, t) for t in tails[vtype])
                 and any(_names_match(name, t) for t in tails[other])):
             out[name] = other
-        elif not tails.get(vtype) and tails.get(other):
+        elif not tails.get(vtype) and tails.get(other) and not _COUNT_NAME_RE.search(name):
             out[name] = other  # the sample has nothing of the guessed type: the data decides
         else:
             out[name] = vtype
@@ -717,6 +717,7 @@ _MAPPING_PROMPT = (
 )
 
 
+_COUNT_NAME_RE = re.compile(r"(^|_)(count|number|total|how_many|num)(_|$)")
 _COUNT_CUE_RE = re.compile(r"\b(how many|count|number of|any|are there|is there)\b", re.IGNORECASE)
 
 
@@ -763,7 +764,7 @@ def _neutralize_example(value: object) -> str:
 
 def stage_mapping(intent: dict, candidates: list[dict], fields: dict,
                   model_call: Callable[[str], str],
-                  feedback: str | None = None) -> dict:
+                  feedback: str | None = None, sample: object = None) -> dict:
     """Stage 4 (M#2): the model picks paths from the type-filtered menu. Retry once.
 
     G2: ``feedback`` carries the judge's wrong-field findings into a re-pick —
@@ -787,6 +788,7 @@ def stage_mapping(intent: dict, candidates: list[dict], fields: dict,
     for attempt in range(2):  # fixed upper bound (P10 #2)
         try:
             reply = _count_spellings(_parse_json_reply(model_call(prompt)), offered, lists)
+            _offer_resolving_paths(reply, offered, fields, sample)
             _verify_mapping(reply, offered, fields)
             return reply
         except (ValueError, TypeError, KeyError) as exc:
@@ -815,6 +817,28 @@ def _count_spellings(reply: dict, offered: dict, lists: set[str] | None = None) 
         else:
             out[name] = path
     return out
+
+
+def _offer_resolving_paths(reply: dict, offered: dict, fields: dict, sample: object) -> None:
+    """A path the short menu didn't list but that RESOLVES in the real sample to a value of the right
+    type is a fair pick (field 2026-09-28: the Red Sox schedule's ``dates[0].officialDate`` exists, but
+    the menu cap hid it). Verified by executing the extract — never by trusting the model."""
+    if sample is None or not isinstance(reply, dict):
+        return
+    payload = sample if isinstance(sample, dict) else {"items": sample}
+    for name, path in reply.items():  # bounded by fields (<=4)
+        if not isinstance(path, str) or path in offered or name not in fields:
+            continue
+        try:
+            value = ni.run_pipeline([{"op": "extract", "paths": {"v": path}}], payload).get("v")
+        except (ni.NIError, ValueError, KeyError, TypeError):
+            continue
+        kind = "number" if isinstance(value, (int, float)) and not isinstance(value, bool) else \
+            "string" if isinstance(value, str) and value.strip() else None
+        if kind == fields[name] or (fields[name] == "number" and kind == "string" and _numeric_text(value)):
+            offered[path] = {"path": path, "type": fields[name]}
+        elif fields[name] == "number" and isinstance(value, list):  # a list picked for a number: its count
+            offered[path] = {"path": path, "type": "number", "count": True}
 
 
 def _verify_mapping(reply: dict, offered: dict, fields: dict) -> None:
@@ -925,8 +949,13 @@ _ID_LIKE_RE = re.compile(r"(?=.*\d)(?=.*[a-z])[a-z0-9_-]{6,}", re.IGNORECASE)
 
 
 def _dig(node: object, dotted: str) -> object:
-    for part in dotted.split("."):  # bounded by the path depth
-        node = node.get(part) if isinstance(node, dict) else None
+    """Follow ``a.b[0].c`` through dicts and lists; None when any step is missing."""
+    for part in re.findall(r"[^.\[\]]+|\[\d+\]", dotted):  # bounded by the path depth
+        if part.startswith("["):
+            i = int(part[1:-1])
+            node = node[i] if isinstance(node, list) and i < len(node) else None
+        else:
+            node = node.get(part) if isinstance(node, dict) else None
     return node
 
 
@@ -1006,6 +1035,9 @@ def assemble_from_mapping(mapping: dict, fields: dict, klass: str,
         if timed:  # show the rows' timestamps in the user's local time, on every refresh
             stages.append({"op": "transform", "apply": [{"fn": "time", "field": "rows", "key": k} for k in timed]})
             preview = ni.run_pipeline(stages, payload)
+        shown = [_dig(r, f[5:]) for r in rows[:5] if isinstance(r, dict) for f in row_fields]
+        if rows and not any(v not in (None, "") and str(v).strip() for v in shown):
+            raise ValueError("mapping: the picked list's rows are empty in the sample")
         scene = list_scene("rows", row_fields, title=title)
     else:
         stages = [{"op": "extract", "paths": dict(mapping)}]
@@ -1041,6 +1073,10 @@ def _typed_verify(preview: dict, fields: dict, klass: str) -> None:
         if not (isinstance(rows, list) and rows):
             raise ValueError("mapping: list stage produced an empty rows list")
         return
+    if all(preview.get(n) in (None, "") or (isinstance(preview.get(n), str) and not preview.get(n).strip())
+           for n in fields):
+        # field 2026-09-28: Lakers / drought / Seahawks cards "built" with nothing to show
+        raise ValueError("mapping: the picked fields are empty in the sample")
     for name, ftype in fields.items():  # bounded by _MAX_INTENT_FIELDS
         value = preview.get(name)
         if ftype == "number":
@@ -2249,7 +2285,7 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
     for judged_attempt in range(2):  # fixed upper bound (P10 #2)
         try:
             mapping = stage_mapping({**intent, "request": request[:300]}, cands, fields, call_model,
-                                    feedback=feedback)
+                                    feedback=feedback, sample=sample)
         except ValueError as exc:
             # G2: a mapping exhaust on the FIRST pass earns one more bounded
             # round through this same loop with the error as feedback — the
@@ -2495,6 +2531,14 @@ def _build_page_card(store: ni.NIStore, item_id: str, request: str,
                       f"page interpretation failed: {type(exc).__name__}")
     fields = list(stage["output"].keys())
     preview = {name: extracted.get(name, "") for name in fields}
+    if not any(str(v).strip() for v in preview.values() if v is not None):
+        # the page holds nothing the ask wants: say so, never "build" a blank card (field 2026-09-28)
+        if not remap:
+            refused = _repick_without(store, item_id, url)
+            if refused is not None:
+                return refused
+        return _fail(store, item_id, "assembly",
+                      "the page didn't contain what you asked for — pick another source")
     preview["title"] = str(page.get("title") or _host_hint(url))[:200]
     # P1 debt rider: the card's visible labels are the USER'S OWN WORDS, not
     # the slugs they hashed into ("tropical storms", never "tropical_storms").

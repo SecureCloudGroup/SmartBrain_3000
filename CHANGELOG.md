@@ -41,6 +41,8 @@ to know when a release changes behavior.
 - **"NASA", "NOAA" and other agency names are not stock tickers.**
 - **Buoy and station text tables work,** and very long text no longer stops a
   card from building.
+- **A card never "builds" with nothing to show.** If the chosen fields or
+  page come back empty, the card says so and offers the other sources.
 
 ## [0.24.0] - 2026-09-28
 
