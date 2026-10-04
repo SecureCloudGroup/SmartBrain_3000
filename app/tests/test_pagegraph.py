@@ -487,8 +487,9 @@ def test_real_jail_reads_the_official_widget() -> None:
 
 
 # F2a (review 2026-10-04): a reader doesn't see <select>/<option>/<datalist>
-# content, [hidden] / aria-hidden="true" elements, or display:none/visibility:hidden
-# — the jail parser must drop those from body text (nesting handled).
+# content, [hidden] elements, or display:none/visibility:hidden. aria-hidden
+# hides from assistive tech, not a sighted reader, so its content IS visible
+# (review3: MLB standings rows and USWDS banner icons were being dropped).
 def test_jail_body_text_skips_invisible_elements() -> None:
     body_para = (b"<p>" + b" ".join([b"Service status page prose covering every region "
                                      b"and component we run, long enough for an article "
@@ -500,16 +501,92 @@ def test_jail_body_text_skips_invisible_elements() -> None:
             b"<div hidden>Hidden by attribute</div>"
             b"<div style='display:none'>Hidden by display none</div>"
             b"<div style=\"visibility: hidden\">Hidden by visibility hidden</div>"
-            b"<div aria-hidden=\"true\">Hidden by aria</div>"
+            b"<div aria-hidden=\"true\">Visible aria-hidden paragraph</div>"
             b"<datalist><option>list item</option></datalist>"
-            b"<div style='display:none'><p>Nested visible-looking paragraph</p></div>"
+            b"<div style='display:none'><p>Nested display-none paragraph</p></div>"
             b"</body></html>")
     text = jail_extract.extract(html, "https://example.test/")["text"]
     assert "Service status page prose" in text
+    assert "Visible aria-hidden paragraph" in text
     for hidden in ("Operational", "Major outage", "Hidden by attribute",
                    "Hidden by display none", "Hidden by visibility hidden",
-                   "Hidden by aria", "list item", "Nested visible-looking paragraph"):
+                   "list item", "Nested display-none paragraph"):
         assert hidden not in text, hidden
+
+
+# F2b (review3 2026-10-04): the hidden-region stack must not leak on void
+# elements (one <img aria-hidden> / <hr aria-hidden> / <input hidden> / an
+# <img style='display:none'> hid the entire rest of a real recorded page),
+# on unclosed <option>/<datalist> (an aggregator's <select><option>…<option>
+# left the hidden state alive for the whole body), on inner tags whose
+# siblings are still visible, or on React Server Components streaming divs
+# (``<div hidden id="S:N">`` / ``id="B:N">`` carry the real page content
+# that is swapped in on hydration — field: wmata lost ~21 kB).
+def test_jail_body_text_void_hidden_does_not_hide_siblings() -> None:
+    html = (b"<html><head><title>t</title></head><body>"
+            b"<header><img src='/logo.png' alt='' aria-hidden='true'></header>"
+            b"<main><h1>Powerball</h1>"
+            b"<p>Winning numbers: 5 12 33 41 60 Powerball 7.</p>"
+            b"<hr aria-hidden='true'>"
+            b"<p>All Systems Operational on every region we run.</p>"
+            b"<img style='display: none;'>"
+            b"<p>Gas price today reads three dollars and nineteen cents.</p>"
+            b"<form><input type='hidden' name='csrf' value='x'><input hidden>"
+            b"<p>Form section is still visible after the hidden input.</p></form>"
+            b"</main></body></html>")
+    text = jail_extract.extract(html, "https://example.test/")["text"]
+    for keeper in ("Winning numbers: 5 12 33 41 60", "All Systems Operational",
+                   "Gas price today reads three dollars",
+                   "Form section is still visible"):
+        assert keeper in text, keeper
+
+
+def test_jail_body_text_option_without_end_tag_closes_at_select() -> None:
+    html = ("<form><select name='s'>"
+            "<option>Major outage"
+            "<option>Minor</select></form>"
+            "<h2>Current status</h2>"
+            "<p>All systems operational across every tracked service today.</p>")
+    _, body = jail_extract._page_graph_layers(html)
+    assert "All systems operational across every tracked service" in body
+    assert "Major outage" not in body and "Minor" not in body
+
+
+def test_jail_body_text_react_streaming_ssr_divs_are_visible() -> None:
+    html = ("<div hidden id='S:0'><h1>Line status</h1>"
+            "<p>Service Advisory: track work in the tunnel this weekend.</p></div>"
+            "<div hidden id='B:1'><p>Boundary payload content is the page.</p></div>"
+            "<div hidden>Really hidden template that should not read.</div>")
+    _, body = jail_extract._page_graph_layers(html)
+    assert "Service Advisory: track work in the tunnel" in body
+    assert "Boundary payload content is the page" in body
+    assert "Really hidden template" not in body
+
+
+def test_jail_body_text_hidden_ancestor_pops_on_outer_end_tag() -> None:
+    # <span> never closes before </div> — the hidden state must still exit
+    # when the outer <div hidden> closes, so sibling body text reads.
+    html = ("<div hidden><span>should stay hidden across sibling tags "
+            "and never leak</div>"
+            "<p>Visible sibling after the hidden ancestor region closes.</p>")
+    _, body = jail_extract._page_graph_layers(html)
+    assert "Visible sibling after the hidden ancestor" in body
+    assert "should stay hidden" not in body
+
+
+# F2c (review3 2026-10-04): the recorded pages must keep the real body text
+# that the hidden-stack leak was dropping. The signals asserted below each
+# live inside the base extractor output but fell out of HEAD once hidden
+# attributes started pushing to the stack.
+@pytest.mark.parametrize(("page", "needle"), [
+    ("githubstatus", "Incident with Pull Requests"),
+    ("art_cdc_flu", "A .gov website belongs to an official government organization"),
+    ("isitdown_slack", "Confirmed outages"),
+    ("wmata_red_status", "Sign up for Metro service alerts"),
+    ("mlb_standings_wc", "Los Angeles Angels"),
+])
+def test_recorded_pages_keep_hidden_sibling_body_text(page, needle) -> None:
+    assert needle in _recorded(page)["text"], (page, needle)
 
 
 def test_challenge_page_never_reads_as_its_script() -> None:
@@ -606,6 +683,18 @@ def test_first_party_fallback_is_the_subject_in_the_host() -> None:
     ("wmata.netlify.app", "WMATA", "", False),
     ("foo.github.io", "GitHub", "", False),
     ("something.vercel.app", "GitHub", "", False),
+    # F3 (review3 2026-10-04): a hyphenated brand name must match its hyphenated
+    # host label as a prefix of the parts ("T-Mobile" → t-mobile.com), while
+    # junk / aggregator parts after the brand still disqualify the host.
+    ("t-mobile.com", "T-Mobile", "is T-Mobile down", True),
+    ("www.t-mobile.com", "T-Mobile status", "T-Mobile outage", True),
+    ("coca-cola.com", "Coca-Cola", "Coca-Cola stock", True),
+    ("www.mercedes-benz.com", "Mercedes-Benz", "Mercedes-Benz recalls", True),
+    ("www.harley-davidson.com", "Harley-Davidson", "Harley-Davidson news", True),
+    ("www.rolls-royce.com", "Rolls-Royce", "Rolls-Royce news", True),
+    ("www.chick-fil-a.com", "Chick-fil-A", "is Chick-fil-A open", True),
+    ("www.7-eleven.com", "7-Eleven", "7-Eleven hours", True),
+    ("www.usa-mobile.com", "T-Mobile", "is T-Mobile down", False),  # brand not the prefix
 ])
 def test_first_party_fallback_needs_a_named_entity(host, subject, ask, expect) -> None:
     assert pagegraph.first_party(host, subject, {}, ask=ask) is expect

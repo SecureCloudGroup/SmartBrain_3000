@@ -69,6 +69,23 @@ _HIDDEN_STYLE_RE = re.compile(r"(?:display\s*:\s*none|visibility\s*:\s*hidden)",
                               re.IGNORECASE)
 # Guard against malformed HTML stacking an unbounded number of hidden opens.
 _MAX_HIDDEN_STACK = 256
+# HTML void elements — no content and no end tag. A ``hidden``/``display:none``
+# on them hides nothing (they carry no body text); pushing them onto the
+# hidden stack leaks the state across every following sibling (field 2026-10-04:
+# one ``<img style='display:none'>`` on githubstatus and the USWDS banner
+# ``<img aria-hidden>`` on every .gov page zeroed the rest of the body).
+_VOID_TAGS = frozenset({"area", "base", "br", "col", "embed", "hr", "img",
+                        "input", "link", "meta", "source", "track", "wbr"})
+# React Server Components streaming writes real body content into a template
+# ``<div hidden id="S:N">`` / ``id="B:N">`` that is swapped in on hydration —
+# the content IS the page (field 2026-10-04: wmata lost ~21 kB of real
+# status alerts to the stock [hidden] rule). Any other hidden div stays hidden.
+_REACT_STREAM_ID_RE = re.compile(r"^[SB]:\d+$")
+# Tags that auto-close a prior sibling of the same name per the HTML parsing
+# spec: a new ``<option>`` closes the previous one, same for ``<li>``,
+# ``<p>``, ``<dt>``, ``<dd>``. Without this a ``<select><option>a<option>b``
+# leaves the first option open on the hidden stack and hides the body below.
+_IMPLICIT_CLOSE: frozenset[str] = frozenset({"option", "li", "p", "dt", "dd"})
 _INLINE_BREAKS = frozenset({"a", "span", "img", "input"})
 _META_CHARSET_RE = re.compile(rb"<meta[^>]{0,200}?charset\s*=\s*[\"']?\s*([A-Za-z0-9_.:-]{2,40})",
                               re.IGNORECASE)
@@ -197,14 +214,17 @@ def _extra_text(article: str, body: str) -> str:
 
 
 def _is_invisible_attrs(a: dict) -> bool:
-    """A start tag whose attributes hide it from a reader: ``hidden`` (any
-    value, per the HTML spec), ``aria-hidden="true"``, or an inline style with
-    ``display:none`` / ``visibility:hidden``. Nesting is handled by the stack
-    in ``_GraphParser.handle_starttag``."""
+    """A start tag whose attributes hide it from a sighted reader: ``hidden``
+    (any value, per the HTML spec) or an inline style with ``display:none`` /
+    ``visibility:hidden``. ``aria-hidden`` is for assistive tech, not sighted
+    readers (field 2026-10-04: MLB standings rows + USWDS banner icons were
+    dropped). React Server Components streaming writes real content into a
+    ``<div hidden id="S:N">`` / ``id="B:N">`` template that is swapped in on
+    hydration — treat that id convention as visible (field: wmata lost ~21 kB).
+    Nesting is handled by the stack in ``_GraphParser.handle_starttag``."""
     if "hidden" in a:
-        return True
-    if (a.get("aria-hidden") or "").strip().lower() == "true":
-        return True
+        rid = (a.get("id") or "").strip()
+        return not (rid and _REACT_STREAM_ID_RE.match(rid))
     style = a.get("style") or ""
     return bool(_HIDDEN_STYLE_RE.search(style))
 
@@ -258,7 +278,13 @@ class _GraphParser(HTMLParser):
 
     def handle_starttag(self, tag: str, attrs: list) -> None:
         a = dict(attrs)
-        if tag in _INVISIBLE_TAGS or _is_invisible_attrs(a):
+        opens_hidden = ((tag in _INVISIBLE_TAGS or _is_invisible_attrs(a))
+                        and tag not in _VOID_TAGS)
+        if opens_hidden:
+            if (tag in _IMPLICIT_CLOSE and self._hidden_stack
+                    and self._hidden_stack[-1] == tag):
+                self._hidden_stack.pop()  # HTML spec: a sibling of the same name
+                self._hidden -= 1          # auto-closes its predecessor
             if len(self._hidden_stack) < _MAX_HIDDEN_STACK:
                 self._hidden_stack.append(tag)
                 self._hidden += 1
@@ -311,9 +337,17 @@ class _GraphParser(HTMLParser):
             self._cell.append(data)
 
     def handle_endtag(self, tag: str) -> None:
-        if self._hidden_stack and self._hidden_stack[-1] == tag:
-            self._hidden_stack.pop()
-            self._hidden -= 1
+        # Pop down to the matching ancestor — malformed markup (an unclosed
+        # <option>, a <span> that never closed before </div>) must never leak
+        # the hidden state across the rest of the body. Bounded by the stack cap.
+        if tag in self._hidden_stack:
+            for _ in range(_MAX_HIDDEN_STACK):
+                if not self._hidden_stack:
+                    break
+                popped = self._hidden_stack.pop()
+                self._hidden -= 1
+                if popped == tag:
+                    break
         elif tag in _BLOCK_TAGS:
             self._body_break()
         if tag == "script" and self._in_jsonld:

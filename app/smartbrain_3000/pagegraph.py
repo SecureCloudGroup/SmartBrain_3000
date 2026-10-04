@@ -416,6 +416,28 @@ def _name_tokens(subject: str, ask: str) -> list[str]:
             if len(t) >= 3 and t in named and t not in _FIRST_PARTY_GENERIC]
 
 
+def _subject_hyphen_parts(subject: str, ask: str) -> list[str]:
+    """The hyphen-split parts of a hyphenated brand name as it was written in
+    the subject or the ask ("T-Mobile" → ["t","mobile"]; "Chick-fil-A" →
+    ["chick","fil","a"]; "7-Eleven" → ["7","eleven"]). Empty when neither the
+    subject nor the ask carries a hyphenated proper name. Short parts bypass
+    the ``_name_tokens`` ≥3 filter because a brand's own hyphen token
+    sequence is the key (field 2026-10-04: t-mobile.com, coca-cola.com,
+    mercedes-benz.com and the other hyphenated brands all missed the name)."""
+    for text in (str(subject or ""), str(ask or "")):
+        if text == text.upper():  # a shouted ask names nothing (D10)
+            continue
+        for word in re.findall(r"\S+", text):
+            if "-" not in word or not re.search(r"[A-Z]", word):
+                continue
+            parts = [p.lower() for p in word.split("-")]
+            if (len(parts) >= 2
+                    and all(re.fullmatch(r"[a-z0-9]+", p) for p in parts)
+                    and not any(p in _FIRST_PARTY_GENERIC for p in parts)):
+                return parts
+    return []
+
+
 def first_party(host: str, subject: str, official_hosts: dict, *, ask: str = "") -> bool:
     """Is ``host`` the subject's OWN site? With an ``official_hosts`` entry
     for the subject ({subject words: [hosts]}, e.g. the Library's official-site
@@ -443,6 +465,12 @@ def first_party(host: str, subject: str, official_hosts: dict, *, ask: str = "")
     parts = labels[0].split("-")
     if any(p in _AGGREGATOR_PARTS for p in parts):
         return False
+    # A hyphenated brand ("T-Mobile", "Coca-Cola", "7-Eleven") matches as a
+    # whole hyphen-token prefix of the host label — the junk-after-brand test
+    # (``_OWN_SUFFIXES``) still disqualifies e.g. ``tesla-stock-forecast.com``.
+    brand_parts = _subject_hyphen_parts(subject, ask)
+    if brand_parts and parts[: len(brand_parts)] == brand_parts:
+        return all(p in _OWN_SUFFIXES for p in parts[len(brand_parts):])
     first = parts[0]
     rest_own = all(p in _OWN_SUFFIXES for p in parts[1:])
     return rest_own and any(first.startswith(tok) and first[len(tok):] in _OWN_SUFFIXES
