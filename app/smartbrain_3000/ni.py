@@ -182,7 +182,16 @@ _MCP_SERVER_ID_RE = re.compile(r"[A-Za-z0-9_-]{1,40}\Z")
 _MAX_KB_QUERY = 500
 _MAX_KB_LIMIT = 10
 _MAX_KB_SNIPPET = 500
-_PARAM_KINDS: frozenset[str] = frozenset({"string", "number", "secret"})
+_PARAM_KINDS: frozenset[str] = frozenset({"string", "number", "secret", "clock"})
+# F1 (2026-10-04): clock-kind params carry a date / time filled from the current clock on every
+# fetch — never a literal baked into the URL at card creation (which froze dates for life). The
+# grammar below bounds the strftime format to date/time chars + the few literals real sources use;
+# ``offset_days`` is clamped so a card can never ask for anything far outside the window axis.
+_CLOCK_FORMAT_RE = re.compile(r"[A-Za-z%:\- _,./]{1,40}")
+_CLOCK_FORMAT_CODES: frozenset[str] = frozenset(
+    {"%Y", "%m", "%d", "%H", "%M", "%S", "%y", "%j", "%u", "%w",
+     "%-m", "%-d", "%B", "%b", "%A", "%a"})
+_MAX_CLOCK_OFFSET_DAYS = 400  # enough for next-event / schedule look-ahead + history looks-back
 _DISPLAY_SIZES: frozenset[str] = frozenset({"small", "wide"})
 _STATES: frozenset[str] = frozenset(
     {"draft", "commissioning", "live", "degraded", "failing", "broken", "paused"}
@@ -212,7 +221,7 @@ _TRANSFORM_FNS: frozenset[str] = frozenset(
 )
 # the rows a ``window`` transform keeps, by their own local date / time (C7 — "this weekend",
 # "tonight", "on Saturday"): a closed enum, the numbers bounded (Open-Meteo forecasts 16 days)
-_WINDOW_RE = re.compile(r"(now|today|tonight|tomorrow|weekend|dow:(mon|tue|wed|thu|fri|sat|sun)"
+_WINDOW_RE = re.compile(r"(now|today|tonight|tomorrow|weekend|upcoming|dow:(mon|tue|wed|thu|fri|sat|sun)"
                         r"|next_days:([1-9]\d?)|next_hours:([1-9]\d{0,2}))")
 _MAX_WINDOW_DAYS = 16
 _MAX_WINDOW_HOURS = 168
@@ -676,11 +685,51 @@ def _validate_params(params: object, *, allow_empty: bool = False) -> None:
         if len(name) > _MAX_PARAM_NAME:
             raise ValueError(f"spec.params.{name} name too long")
         p = _require_dict(raw, f"spec.params.{name}")
-        _closed_keys(p, {"label", "kind", "value"}, f"spec.params.{name}")
+        allowed = {"label", "kind", "format", "offset_days"} if p.get("kind") == "clock" \
+            else {"label", "kind", "value"}
+        _closed_keys(p, allowed, f"spec.params.{name}")
         _require_str(p.get("label"), f"spec.params.{name}.label", max_len=200)
         if p.get("kind") not in _PARAM_KINDS:
             raise ValueError(f"spec.params.{name}.kind must be one of {sorted(_PARAM_KINDS)}")
-        _validate_param_value(name, p, allow_empty=allow_empty)
+        if p["kind"] == "clock":
+            _validate_clock_param(name, p)
+        else:
+            _validate_param_value(name, p, allow_empty=allow_empty)
+
+
+def _validate_clock_param(name: str, p: dict) -> None:
+    """F1 (2026-10-04): a clock-kind param carries ``format`` (strftime, closed grammar + known codes)
+    and ``offset_days`` (bounded int). The engine substitutes its value at every fetch from the current
+    clock — a date is never a literal in the sealed URL (which froze schedule / forecast cards to the
+    creation day).
+    """
+    assert isinstance(name, str) and name, "param name required"
+    assert isinstance(p, dict), "param body must be a dict"
+    fmt = p.get("format")
+    if not isinstance(fmt, str) or not fmt or not _CLOCK_FORMAT_RE.fullmatch(fmt):
+        raise ValueError(f"spec.params.{name}.format must be a strftime pattern")
+    # every % escape in the format must be a code the engine knows (closed set), so a sealed card
+    # never asks for a format the engine can't fill or that could surface host info
+    seen = set(re.findall(r"%-?[A-Za-z]", fmt))
+    unknown = seen - _CLOCK_FORMAT_CODES
+    if unknown:
+        raise ValueError(f"spec.params.{name}.format uses unknown codes {sorted(unknown)}")
+    offset = p.get("offset_days")
+    if not isinstance(offset, int) or isinstance(offset, bool) \
+            or abs(offset) > _MAX_CLOCK_OFFSET_DAYS:
+        raise ValueError(
+            f"spec.params.{name}.offset_days must be an int in "
+            f"[-{_MAX_CLOCK_OFFSET_DAYS}, {_MAX_CLOCK_OFFSET_DAYS}]")
+
+
+def _render_clock_param(p: dict, now: datetime) -> str:
+    """One clock-kind param's current value from ``now`` and the format / offset — portable %-m/%-d
+    (Windows doesn't accept them in strftime, so they expand by hand), same as library_resolve."""
+    assert isinstance(p, dict) and p.get("kind") == "clock", "clock param required"
+    assert isinstance(now, datetime), "now must be a datetime"
+    t = now + timedelta(days=int(p["offset_days"]))
+    fmt = str(p["format"]).replace("%-m", str(t.month)).replace("%-d", str(t.day))
+    return t.strftime(fmt)
 
 
 def _validate_param_value(name: str, p: dict, *, allow_empty: bool) -> None:
@@ -1311,15 +1360,19 @@ def _validate_transform_where(node: dict, where: str) -> None:
 
 def _validate_transform_window(node: dict, where: str) -> None:
     """C7 ``window`` transform: keep the rows of a list whose own local date / time falls in the asked
-    window, evaluated on every run. Closed shape ``{fn, field, key, window, zone?}``: ``key`` is the row
-    key holding the date / time (§4.1 single-key grammar, dotted for nested rows, as ``where`` takes),
-    ``window`` one of ``now | today | tonight | tomorrow | weekend | dow:<mon..sun> | next_days:N
-    (1..16) | next_hours:N (1..168)``, ``zone`` (optional) the top-level output holding the source's
-    time zone — an IANA name or a UTC offset in seconds (Open-Meteo ``timezone`` /
-    ``utc_offset_seconds``). No new output name — the list stays under ``field``."""
+    window, evaluated on every run. Closed shape ``{fn, field, key, window, zone?, utc?, unless?,
+    step?}``: ``key`` is the row key holding the date / time (§4.1 single-key grammar, dotted for
+    nested rows, as ``where`` takes), ``window`` one of ``now | today | tonight | tomorrow | weekend
+    | upcoming | dow:<mon..sun> | next_days:N (1..16) | next_hours:N (1..168)``, ``zone`` (optional)
+    the top-level output holding the source's time zone — an IANA name or a UTC offset in seconds
+    (Open-Meteo ``timezone`` / ``utc_offset_seconds``). ``utc`` (F3): the source's zoneless times are
+    UTC. ``unless`` (F9/C15): a row key whose flag says the start is a placeholder — the row is
+    windowed as a day row on its written date. ``step``: the axis step (``hour`` default, ``day``,
+    ``period``) — day-step rows keep the whole date even with a clock. No new output name — the list
+    stays under ``field``."""
     assert isinstance(node, dict), "node must be a dict"
     assert isinstance(where, str) and where, "where required"
-    _closed_keys(node, {"fn", "field", "key", "window", "zone"}, where)
+    _closed_keys(node, {"fn", "field", "key", "window", "zone", "utc", "unless", "step"}, where)
     key = node.get("key")
     if not isinstance(key, str) or len(key) > 120 or not _ROW_KEY_RE.fullmatch(key):
         raise ValueError(f"{where}.key malformed")
@@ -1327,11 +1380,22 @@ def _validate_transform_window(node: dict, where: str) -> None:
     match = _WINDOW_RE.fullmatch(window) if isinstance(window, str) else None
     if match is None or int(match.group(3) or 1) > _MAX_WINDOW_DAYS \
             or int(match.group(4) or 1) > _MAX_WINDOW_HOURS:
-        raise ValueError(f"{where}.window must be now|today|tonight|tomorrow|weekend|dow:<mon..sun>"
-                         f"|next_days:1..{_MAX_WINDOW_DAYS}|next_hours:1..{_MAX_WINDOW_HOURS}")
+        raise ValueError(f"{where}.window must be now|today|tonight|tomorrow|weekend|upcoming"
+                         f"|dow:<mon..sun>|next_days:1..{_MAX_WINDOW_DAYS}"
+                         f"|next_hours:1..{_MAX_WINDOW_HOURS}")
     zone = node.get("zone")
     if zone is not None and not (isinstance(zone, str) and _KEY_RE.match(zone)):
         raise ValueError(f"{where}.zone must name a top-level output")
+    utc = node.get("utc")
+    if utc is not None and not isinstance(utc, bool):
+        raise ValueError(f"{where}.utc must be a bool")
+    unless = node.get("unless")
+    if unless is not None and (not isinstance(unless, str) or len(unless) > 120
+                                or not _ROW_KEY_RE.fullmatch(unless)):
+        raise ValueError(f"{where}.unless must be a row key")
+    step = node.get("step")
+    if step is not None and step not in ("hour", "day", "period"):
+        raise ValueError(f"{where}.step must be one of hour|day|period")
 
 
 def _validate_transform_as(name: object, where: str, outputs: set[str]) -> None:
@@ -1972,7 +2036,9 @@ def _apply_transform_op(op: dict, payload: dict, *, history: dict) -> dict:
         if zone is not None and zone not in payload:
             raise NIError("transform_miss", f"field {zone!r}")
         out[field] = _txf_window(payload[field], op["key"], op["window"],
-                                 None if zone is None else payload[zone])
+                                 None if zone is None else payload[zone],
+                                 utc=bool(op.get("utc")), unless=op.get("unless"),
+                                 step=str(op.get("step") or "hour"))
     elif fn == "date":
         out[field] = _txf_rows(payload[field], op.get("key"), local_date)
     elif fn == "zip":
@@ -2050,8 +2116,33 @@ _RFC2822_RE = re.compile(r"(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s*)?\d{1,2}\s+"
                          r"(?:\s+(?:[A-Za-z]{1,5}|[+-]\d{4}))?")
 
 
+_user_timezone: ZoneInfo | None = None  # F15: set from meta ``user:timezone`` at startup / handshake
+
+
+def set_user_timezone(name: str | None) -> None:
+    """F15 (2026-10-04): the SPA reports the user's IANA zone via the ``x-smartbrain-timezone``
+    header (``main.py`` writes it to ``meta user:timezone``). ``_clock`` reads that zone — a Docker
+    install has no TZ env, so without this seam every window and shown time was on the UTC calendar.
+    An unknown / invalid name clears the cache (``_clock`` falls back to ``astimezone``)."""
+    global _user_timezone
+    if not isinstance(name, str) or not name.strip() or len(name) > 64:
+        _user_timezone = None
+        return
+    try:
+        _user_timezone = ZoneInfo(name.strip())
+    except (ZoneInfoNotFoundError, ValueError):  # unknown IANA zone — stay with the server's own
+        _user_timezone = None
+
+
 def _clock() -> datetime:
-    """The user's clock, in the user's zone (one seam, so tests can freeze it)."""
+    """The user's clock, in the user's zone (one seam, so tests can freeze it).
+
+    F16 (2026-10-04): the previous ``datetime.now().astimezone()`` returned a datetime with a FIXED
+    offset (``timezone(timedelta(seconds=offset))``), so calendar math across a DST boundary landed
+    on the wrong day — a Z row near midnight on a DST weekend was off by one. With a user zone
+    pinned (F15), the tzinfo is a real ZoneInfo and date arithmetic is honest."""
+    if _user_timezone is not None:
+        return datetime.now(tz=_user_timezone)
     return datetime.now().astimezone()
 
 
@@ -2227,29 +2318,44 @@ def next_event_stale(value: object, now: datetime, grace_minutes: int = 15) -> b
     return moment < now - timedelta(minutes=grace_minutes)
 
 
-def _txf_window(value: object, key: str, window: str, zone: object) -> list:
-    """C7 window(field, key, window, zone): keep the rows whose own local date / time falls in the
-    asked window, judged against the clock on every run (so "this weekend" stays this weekend).
+def _txf_window(value: object, key: str, window: str, zone: object, *,
+                utc: bool = False, unless: str | None = None,
+                step: str = "hour") -> list:
+    """C7 window(field, key, window, zone, utc?, unless?, step?): keep the rows whose own local
+    date / time falls in the asked window, judged against the clock on every run.
 
     A row's time reads as the source wrote it: a zoneless ISO value is the source's local time, one
-    with an offset is local to that offset, an epoch is placed in the source's zone. "Today" is the
-    source's today: in ``zone`` when the spec names one, else in the offset of the row nearest now,
-    else on the user's clock. A day row (a date, no clock) answers day windows only. Like ``where``,
-    selection is not validation: a row whose time can't be read is left out; only a non-list fails."""
+    with an offset is local to that offset, an epoch is placed in the source's zone. ``utc: true``:
+    the source's zoneless times are UTC (same semantic as the ``time`` fn), so the row's day is the
+    user's — "tonight" in LA keeps a 20:00Z-written row. ``unless`` (C15): a row key whose flag
+    says the time is a placeholder (MLB ``status.startTimeTBD``) is a day row on its written date,
+    never a timed row — never a tonight / next_hours hit. ``step`` ("hour" default, "day" / "period"):
+    an hour-stepped list cuts past hours on ``today`` / ``tonight`` (C11, field 2026-10-04); a
+    day-stepped one keeps the whole day's row even if the cell has a clock."""
     if not isinstance(value, list):
         raise NIError("transform_type", "window needs a list")
     assert _WINDOW_RE.fullmatch(window), "window already validated"
     now = _clock()
     tz = _window_zone(zone)
     parts = _key_parts(key)
-    stamps = [_row_stamp(row, parts, tz, tz or now.tzinfo) for row in value]
+    flag_parts = _key_parts(unless) if unless else None
+    stamps = [_row_stamp(row, parts, tz, tz or now.tzinfo, naive_utc=utc,
+                          as_day=_row_is_tbd(row, flag_parts)) for row in value]
     local_now = now.astimezone(tz or _nearest_offset(stamps, now) or now.tzinfo)
     if window == "now":
         keep = _now_slot(stamps, local_now)
     else:
-        test = _window_test(window, local_now)
+        test = _window_test(window, local_now, step=step)
         keep = [st is not None and test(st) for st in stamps]
     return [row for row, kept in zip(value, keep, strict=True) if kept]
+
+
+def _row_is_tbd(row: object, flag_parts: list[str] | None) -> bool:
+    """A row whose ``unless`` flag is set reads as a day row (C15 / F9)."""
+    if flag_parts is None:
+        return False
+    found, raw = _row_lookup(row, flag_parts)
+    return found and _flag_set(raw)
 
 
 def rows_all_past(rows: object, key: str) -> bool:
@@ -2285,7 +2391,12 @@ def _window_zone(zone: object) -> tzinfo | None:
     raise NIError("transform_type", "window: the source's time zone isn't one the app knows")
 
 
-def _row_stamp(row: object, parts: list[str], tz: tzinfo | None, epoch_tz: tzinfo) -> _Stamp | None:
+def _row_stamp(row: object, parts: list[str], tz: tzinfo | None, epoch_tz: tzinfo,
+                *, naive_utc: bool = False, as_day: bool = False) -> _Stamp | None:
+    """One row's time as a window-ready stamp. ``naive_utc``: the source's zoneless ISO value is UTC
+    (declared by the answer's ``utc: true``), so its day is the user's — a 2026-10-21T02:30:00 game
+    from TheSportsDB (zoneless, UTC) in LA is Tuesday 7:30 PM. ``as_day``: F9 — a row with a TBD
+    placeholder flag reads as a DAY row on its written date, never a timed row."""
     found, raw = _row_lookup(row, parts)
     if not found:
         return None
@@ -2294,6 +2405,8 @@ def _row_stamp(row: object, parts: list[str], tz: tzinfo | None, epoch_tz: tzinf
             instant = datetime.fromtimestamp(raw / 1000 if raw > 1e11 else raw, tz=UTC).astimezone(epoch_tz)
         except (OverflowError, OSError, ValueError):
             return None
+        if as_day:
+            return instant.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None), None, False
         return instant.replace(tzinfo=None), instant, True
     text = raw.strip() if isinstance(raw, str) else ""
     try:
@@ -2304,6 +2417,11 @@ def _row_stamp(row: object, parts: list[str], tz: tzinfo | None, epoch_tz: tzinf
         parsed = datetime.fromisoformat(text.replace(" ", "T", 1))
     except ValueError:
         return None
+    if as_day:  # F9 — a TBD row is a day row on its own written date, never windowed by the sentinel
+        return parsed.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None), None, False
+    if parsed.tzinfo is None and naive_utc:
+        # the answer declared zoneless times are UTC: anchor to UTC, then read on the user's day
+        parsed = parsed.replace(tzinfo=UTC)
     if parsed.tzinfo is None:
         return parsed, None, True
     if tz is None and parsed.utcoffset() == timedelta(0):
@@ -2335,19 +2453,37 @@ def _now_slot(stamps: list[_Stamp | None], local_now: datetime) -> list[bool]:
     return [a is not None and a == best for a in ages]
 
 
-def _window_test(window: str, local_now: datetime):
-    """The row test for every window but ``now``, at the source's local ``local_now``."""
+def _window_test(window: str, local_now: datetime, step: str = "hour"):
+    """The row test for every window but ``now``, at the source's local ``local_now``.
+
+    C11 (field 2026-10-04): hour-row cuts for ``today`` / ``tonight`` floor at the current hour so
+    the first row the card shows is the one happening now (never a morning scroll back from 10 PM).
+    ``tonight`` read before 06:00 is the end of the current night (now..06:00), never the next one.
+    ``step`` ("hour" default, "day" / "period"): on a day-stepped list a timed cell is still a day
+    row (an MLB game sits on its calendar date), so the floor doesn't apply."""
     day = local_now.date()
+    wall_hour = local_now.replace(minute=0, second=0, microsecond=0, tzinfo=None)
+    hourly = step == "hour"
+    if window == "upcoming":  # a next-event / schedule list with no asked window: just the future
+        hour = local_now.replace(minute=0, second=0, microsecond=0).astimezone(UTC)
+        return lambda st: (hour <= st[1].astimezone(UTC) if st[2] and st[1] is not None
+                            else wall_hour <= st[0] if st[2] else day <= st[0].date())
     if window == "tonight":  # 18:00 today → 06:00 tomorrow, on the source's wall clock
-        start = local_now.replace(hour=18, minute=0, second=0, microsecond=0, tzinfo=None)
-        return lambda st: st[2] and start <= st[0] < start + timedelta(hours=12)
+        night = local_now.replace(hour=18, minute=0, second=0, microsecond=0, tzinfo=None)
+        if hourly and local_now.hour < 6:  # read before dawn: the current night ends at 06:00 today
+            start, end = wall_hour, local_now.replace(hour=6, minute=0, second=0,
+                                                       microsecond=0, tzinfo=None)
+        else:  # otherwise 18:00..06:00, floored at the current hour on hour rows
+            start, end = (max(night, wall_hour) if hourly else night), night + timedelta(hours=12)
+        return lambda st: st[2] and start <= st[0] < end
     if window.startswith("next_hours:"):
         hours = timedelta(hours=int(window.split(":")[1]))
-        wall_hour = local_now.replace(minute=0, second=0, microsecond=0, tzinfo=None)
         hour = local_now.replace(minute=0, second=0, microsecond=0).astimezone(UTC)  # real hours, in UTC
         return lambda st: st[2] and (hour <= st[1].astimezone(UTC) < hour + hours if st[1] is not None
                                      else wall_hour <= st[0] < wall_hour + hours)
     days = _window_days(window, day)
+    if window == "today" and hourly:  # hour rows cut past hours; day rows keep today's whole row
+        return lambda st: st[0].date() in days and (not st[2] or st[0] >= wall_hour)
     return lambda st: st[0].date() in days
 
 
@@ -2771,7 +2907,8 @@ def unfilled_referenced_params(spec: dict) -> list[str]:
     referenced = set(_PARAM_PLACEHOLDER.findall(body))
     out: list[str] = []
     for name, decl in params.items():  # bounded by _MAX_PARAMS
-        if not isinstance(decl, dict) or decl.get("kind") == "secret":
+        if not isinstance(decl, dict) or decl.get("kind") in ("secret", "clock"):
+            # a clock param is always filled by the engine from the current clock, never by the user
             continue
         if name not in referenced:
             continue
@@ -2846,6 +2983,13 @@ def _resolve_param_string(value: str, params: dict, *, path: str,
             raise ValueError(f"{path}: param {name!r} malformed")
         if p["kind"] == "secret":
             raise ValueError(f"{path}: secret param {name!r} may not be substituted inline")
+        if p["kind"] == "clock":
+            # F1: the engine fills a clock-kind param at every fetch from the current clock;
+            # the format + offset_days are store-validated and bounded. The URL is never
+            # frozen with the creation day's literal, so a schedule / forecast card walks
+            # forward on day 2, day 3, ...
+            raw = _render_clock_param(p, _clock())
+            return _url_quote(raw, safe="") if url_encode else raw
         # needs_params (2026-09-14): a referenced-but-unfilled param must BLOCK the
         # run, not substitute to "" (or the literal "None"). A frozen Finnhub URL
         # run as ``?symbol=`` returns sentinel zeros with status 200 — the card then
@@ -6298,8 +6442,13 @@ def _fetch_http_page(source: dict, item_id: str, secrets_store, *,
     body = got.get("content") if isinstance(got, dict) else None
     if not isinstance(body, (bytes, bytearray)):
         raise NIError("fetch_failed", "no bytes")
+    # F4: forward the HTTP header's charset to the jail so a page with no BOM
+    # and no <meta charset> still decodes correctly ("Content-Type:
+    # text/html; charset=ISO-8859-1" on real latin-1 bytes).
+    charset = netguard._declared_charset(str(got.get("content_type") or ""))
     try:
-        extracted = jailrun.run_extractor(bytes(body), url_hint=url)
+        extracted = jailrun.run_extractor(bytes(body), url_hint=url,
+                                           declared_charset=charset)
     except jailrun.JailError as exc:
         raise NIError("extract_jail", exc.reason) from None
     # Interpreted cards keep the {text, title} payload their llm stage and

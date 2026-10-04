@@ -200,10 +200,8 @@ def test_remote_access_lazy_activates_on_pairing(tmp_path, monkeypatch) -> None:
         assert app.state.webrtc_active.is_set()  # pairing is the opt-in -> remote activates
 
 
-def test_the_library_lookup_embeds_with_the_knowledge_embedder(app_client: TestClient) -> None:
-    """locate v2 ranks Library sources with the SAME model as the knowledge base: the user's routed
-    "embedding" model, resolved through gateway.embed_model like kb_routes does."""
-    from smartbrain_3000 import gateway, library_embed
-    emb = library_embed.current_embedder()
-    assert emb is not None
-    assert emb.model == gateway.embed_model(app_client.app.state.dbx)
+def test_the_library_lookup_runs_on_keywords(app_client: TestClient) -> None:
+    """The app wires no locate embedder: the Library lookup ranks on the keyword frame (the embedder
+    ranking measured no better on clean labeled asks), so no ask text reaches any embedding model."""
+    from smartbrain_3000 import library_embed
+    assert library_embed.current_embedder() is None

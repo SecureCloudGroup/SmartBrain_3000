@@ -110,23 +110,27 @@ def _hours(day: int, hours) -> list[str]:
 
 @pytest.mark.parametrize("today", range(7))
 def test_hourly_rows_keep_the_asked_hours_on_every_weekday(monkeypatch, today) -> None:
-    """The Library's Open-Meteo url: 168 hourly rows from 00:00 today, local labels (timezone=auto)."""
+    """The Library's Open-Meteo url: 168 hourly rows from 00:00 today, local labels (timezone=auto).
+
+    C11 (field 2026-10-04): hour-row cuts for ``today`` / ``tonight`` floor at the current hour, so
+    at 20:30 ``today`` is 20:00..23:00 (not the morning scrolled back) and ``tonight`` starts at 20:00.
+    Day rows still keep whichever day the window names: a 7-day daily list is one row per day."""
     _freeze(monkeypatch, _evening(today))
     for window, days in zip(_DATE_WINDOWS, _EXPECTED_DAYS[today], strict=True):
-        want = [t for i in days for t in _hours(i, range(24))]
+        want = [t for i in days for t in _hours(i, range(24) if window != "today" else range(20, 24))]
         assert _om_rows(AUSTIN, "hourly", window) == want, (DAYS[today], window)
     after = today + 1 if today < 6 else None
     assert _om_rows(AUSTIN, "hourly", "now") == _hours(today, [20])
     assert _om_rows(AUSTIN, "hourly", "tonight") == (
-        _hours(today, range(18, 24)) + (_hours(after, range(6)) if after else []))
+        _hours(today, range(20, 24)) + (_hours(after, range(6)) if after else []))
     assert _om_rows(AUSTIN, "hourly", "next_hours:6") == (
         _hours(today, range(20, 24)) + (_hours(after, range(2)) if after else []))
 
 
-def test_tonight_before_dawn_is_the_coming_night(monkeypatch) -> None:
-    """tonight = 18:00 today → 06:00 tomorrow, whatever the hour of the ask."""
+def test_tonight_before_dawn_is_the_end_of_the_current_night(monkeypatch) -> None:
+    """tonight read before 06:00 means now..06:00 today — the current night, not the next one."""
     _freeze(monkeypatch, datetime(2026, 10, 3, 2, 0, tzinfo=CHICAGO))  # Sat 02:00
-    assert _om_rows(AUSTIN, "hourly", "tonight") == _hours(4, range(18, 24)) + _hours(5, range(6))
+    assert _om_rows(AUSTIN, "hourly", "tonight") == _hours(4, range(2, 6))
     assert _om_rows(AUSTIN, "hourly", "now") == _hours(4, [2])
 
 
@@ -151,13 +155,16 @@ def test_now_keeps_nothing_when_every_row_is_in_the_future(monkeypatch) -> None:
 # --- non-UTC zones: the source's zone, not the user's -------------------------------------------
 
 def test_the_source_zone_decides_today_for_a_user_elsewhere(monkeypatch) -> None:
-    """Honolulu labels (zoneless, the place's time); the user is in Denver where it's already tomorrow."""
+    """Honolulu labels (zoneless, the place's time); the user is in Denver where it's already tomorrow.
+
+    C11 (field 2026-10-04): ``today`` / ``tonight`` on hour rows floor at the source's current hour
+    (21:00 HST). Day windows and ``now`` unchanged."""
     sample = _load("open_meteo_honolulu_48h.json")
     _freeze(monkeypatch, datetime(2026, 9, 30, 1, 0, tzinfo=ZoneInfo("America/Denver")))  # 21:00 HST 9/29
     assert _om_rows(sample, "hourly", "now", zone="tz") == ["2026-09-29T21:00"]
-    assert _om_rows(sample, "hourly", "today", zone="tz") == [f"2026-09-29T{h:02d}:00" for h in range(5, 24)]
+    assert _om_rows(sample, "hourly", "today", zone="tz") == [f"2026-09-29T{h:02d}:00" for h in range(21, 24)]
     assert _om_rows(sample, "hourly", "tonight", zone="tz") == (
-        [f"2026-09-29T{h:02d}:00" for h in range(18, 24)] + [f"2026-09-30T{h:02d}:00" for h in range(6)])
+        [f"2026-09-29T{h:02d}:00" for h in range(21, 24)] + [f"2026-09-30T{h:02d}:00" for h in range(6)])
     assert _om_rows(sample, "daily", "tomorrow", zone="offset") == ["2026-09-30"]
     # no zone named: a zoneless label is compared with the user's own clock (Denver: already 9/30)
     assert _om_rows(sample, "daily", "today") == ["2026-09-30"]
@@ -180,17 +187,20 @@ def _nws_rows(window: str) -> list[str]:
 
 
 def test_rows_with_offsets_use_the_sources_own_zone(monkeypatch) -> None:
-    """NWS periods carry -06:00; the user is in Honolulu, where it is still the day before."""
+    """NWS periods carry -06:00; the user is in Honolulu, where it is still the day before.
+
+    C11 (field 2026-10-04): ``today`` on hour rows cuts past hours — the day starts at the current
+    hour (01:00 Denver here); day windows and ``now`` / ``next_hours`` unchanged."""
     _freeze(monkeypatch, datetime(2026, 9, 30, 1, 30, tzinfo=ZoneInfo("America/Denver"))
             .astimezone(ZoneInfo("Pacific/Honolulu")))  # Tue 21:30 HST
     today = _nws_rows("today")
-    assert today[0] == "2026-09-30T00:00:00-06:00" and today[-1] == "2026-09-30T23:00:00-06:00"
-    assert len(today) == 24
+    assert today[0] == "2026-09-30T01:00:00-06:00" and today[-1] == "2026-09-30T23:00:00-06:00"
+    assert len(today) == 23
     assert _nws_rows("now") == ["2026-09-30T01:00:00-06:00"]
     assert _nws_rows("next_hours:3") == ["2026-09-30T01:00:00-06:00", "2026-09-30T02:00:00-06:00",
                                          "2026-09-30T03:00:00-06:00"]
-    assert _nws_rows("tonight") == [f"2026-09-30T{h:02d}:00:00-06:00" for h in range(18, 24)] + [
-        f"2026-10-01T{h:02d}:00:00-06:00" for h in range(6)]
+    # C11: tonight read before 06:00 is the end of the current night — now..06:00 today
+    assert _nws_rows("tonight") == [f"2026-09-30T{h:02d}:00:00-06:00" for h in range(1, 6)]
     weekend = _nws_rows("weekend")
     assert {t[:10] for t in weekend} == {"2026-10-03", "2026-10-04"} and len(weekend) == 48
 
@@ -214,10 +224,12 @@ def _walls(epochs: list[int]) -> list[str]:
 
 
 def test_spring_forward_day_has_23_hours(monkeypatch) -> None:
+    """C11 (field 2026-10-04): ``today`` on hour rows cuts past hours — at noon Denver the kept rows
+    start at 12:00, the DST hour 02:00 is still missing from the real-hours forecast."""
     _freeze(monkeypatch, datetime(2026, 3, 8, 12, 0, tzinfo=DENVER))
     today = _walls(_dst_epochs("today"))
-    assert len(today) == 23 and "03-08 02:00" not in today
-    assert today[0] == "03-08 00:00" and today[-1] == "03-08 23:00"
+    assert len(today) == 12 and "03-08 02:00" not in today
+    assert today[0] == "03-08 12:00" and today[-1] == "03-08 23:00"
 
 
 def test_next_hours_across_spring_forward_counts_real_hours(monkeypatch) -> None:
@@ -227,9 +239,10 @@ def test_next_hours_across_spring_forward_counts_real_hours(monkeypatch) -> None
 
 
 def test_tonight_across_spring_forward_is_one_hour_shorter(monkeypatch) -> None:
+    """C11: ``tonight`` on hour rows starts at the current hour (20:00 here, not 18:00)."""
     _freeze(monkeypatch, datetime(2026, 3, 7, 20, 0, tzinfo=DENVER))  # Sat 20:00 MST
     tonight = _walls(_dst_epochs("tonight"))
-    assert tonight == [f"03-07 {h:02d}:00" for h in range(18, 24)] + [
+    assert tonight == [f"03-07 {h:02d}:00" for h in range(20, 24)] + [
         "03-08 00:00", "03-08 01:00", "03-08 03:00", "03-08 04:00", "03-08 05:00"]
     assert _walls(_dst_epochs("weekend"))[0] == "03-07 00:00"
     assert len(_dst_epochs("weekend")) == 24 + 23
@@ -258,7 +271,8 @@ def test_rows_with_offsets_across_spring_forward(monkeypatch) -> None:
 
     _freeze(monkeypatch, datetime(2026, 3, 7, 23, 30, tzinfo=DENVER))
     today = keep("today")
-    assert {t[:10] for t in today} == {"2026-03-07"} and len(today) == 24
+    # C11: ``today`` on hour rows floors at the current hour (23:00) — one row left of Saturday
+    assert {t[:10] for t in today} == {"2026-03-07"} and len(today) == 1
     _freeze(monkeypatch, datetime(2026, 3, 8, 0, 30, tzinfo=DENVER))
     assert keep("next_hours:4") == ["2026-03-08T00:00:00-07:00", "2026-03-08T01:00:00-07:00",
                                     "2026-03-08T03:00:00-06:00", "2026-03-08T04:00:00-06:00"]
@@ -529,7 +543,8 @@ _GAMES = [  # Saturday 2026-10-03 (New York): 1:05 PM, 7:10 PM, 9:40 PM; Sunday:
 
 
 def _games(window: str, zone: str | None = None) -> list[str]:
-    op = {"fn": "window", "field": "rows", "key": "gameDate", "window": window}
+    # MLB rows are a day-step axis — a timed gameDate still sits on its calendar date
+    op = {"fn": "window", "field": "rows", "key": "gameDate", "window": window, "step": "day"}
     paths = {"rows": "games"}
     if zone:
         op["zone"], paths["zone"] = "zone", "zone"

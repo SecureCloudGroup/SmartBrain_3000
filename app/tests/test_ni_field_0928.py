@@ -307,8 +307,10 @@ def test_a_count_want_stays_a_number_when_the_sample_has_no_numbers() -> None:
 
 
 def test_a_refusing_host_takes_its_other_addresses_with_it() -> None:
-    """Live 2026-09-29: CoinGecko's price API answered 403 and the card re-picked CoinGecko's price
-    history, behind the same wall; a guessed field there showed a timestamp as the bitcoin price."""
+    """FETCH-F6 (2026-10-04): a host-wide signal (429 / challenge / 403 with a bot-wall body) drops
+    every row on the host; a plain 401 / 403 drops just that URL — a multi-tenant host (arcgis.com,
+    s3.amazonaws.com) still has readable tenants. The sampler sets ``host_wide`` based on exc.kind
+    and status; the default here is URL-only."""
     store = _store()
     item_id = ni_flow.create_shell_item(store, "bitcoin price")
     record = ni_flow._make_record("bitcoin price", "sampling")
@@ -317,7 +319,8 @@ def test_a_refusing_host_takes_its_other_addresses_with_it() -> None:
         {"source_id": "coingecko-chart", "provider": "CoinGecko", "url": "https://api.coingecko.com/api/v3/coins/x/chart"},
         {"source_id": "coinbase-spot", "provider": "Coinbase", "url": "https://api.coinbase.com/v2/prices/BTC-USD/spot"}]
     ni_flow._flow_write(store, item_id, record)
-    out = ni_flow._repick_without(store, item_id, "https://api.coingecko.com/api/v3/simple/price")
+    out = ni_flow._repick_without(store, item_id, "https://api.coingecko.com/api/v3/simple/price",
+                                   host_wide=True)
     assert [r["source_id"] for r in out["_ranked_library"]] == ["coinbase-spot"]
     # "has nothing for this" is about that one address, not the host: the others stay
     ni_flow._flow_write(store, item_id, {**ni_flow._flow_read(store, item_id), "_ranked_library": record["_ranked_library"]})

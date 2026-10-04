@@ -587,9 +587,15 @@ def test_a_row_missing_a_number_shows_a_dash() -> None:
 def test_review_guards_on_declared_answers() -> None:
     base = {"kind": "value", "name": "t", "label": "T", "path": "a", "type": "number", "words": ["t"]}
     assert ni_flow._clean_answer({**base, "unit": "°F", "unit_path": "u"}) is None
+    # F14 (2026-10-04): SCHEMA allows a WHOLE {param} segment in a row cell path; _fill_answer fills
+    # cells too, so fred-gas-region's row-level date column (`{date}.value`) is a valid declaration.
     row = {"kind": "list", "name": "l", "label": "L", "path": "rows", "words": ["l"],
            "row": [{"path": "x.{coin}", "label": "X", "type": "number"}]}
-    assert ni_flow._clean_answer(row) is None
+    assert ni_flow._clean_answer(row) is not None
+    # a {param} spliced INSIDE a segment ("pre{bad}suf") is still refused — only whole segments.
+    row_bad = {"kind": "list", "name": "l", "label": "L", "path": "rows", "words": ["l"],
+               "row": [{"path": "x.pre{bad}suf", "label": "X", "type": "number"}]}
+    assert ni_flow._clean_answer(row_bad) is None
 
 
 def test_rfc2822_needs_a_real_month() -> None:

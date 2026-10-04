@@ -28,7 +28,6 @@ from . import (
     db,
     devices,
     gateway,
-    library_embed,
     library_index,
     mcp_server,
     ni_flow,
@@ -400,10 +399,9 @@ def _make_lifespan(mcp):
                 idx.install()
             return idx
         ni_flow.set_library_provider(_ni_library)
-        # locate v2: the Library lookup ranks with the SAME embedder as the knowledge base (the user's routed
-        # "embedding" model); no embedder or any failure leaves the keyword lookup, never a broken one
-        library_embed.set_provider(
-            lambda: library_embed.gateway_embedder(gateway.embed_model(getattr(application.state, "dbx", None))))
+        # The Library lookup runs on the keyword frame. The local-embedder ranking (library_embed) is not
+        # wired: on clean labeled asks it measured no better than keywords (2026-10-04), so it stays off
+        # until it does.
         async with mcp.session_manager.run():  # drive the MCP transport for this app
             runner = asyncio.create_task(_scheduler_loop(application))  # background scheduler
             webrtc = asyncio.create_task(_webrtc_loop(application)) if _webrtc_mode != "0" else None
@@ -492,6 +490,11 @@ def create_app() -> FastAPI:
                 if tz != db.meta_get(conn, "user:timezone"):
                     zoneinfo.ZoneInfo(tz)  # validates; garbage raises -> not stored
                     db.meta_set(conn, "user:timezone", tz)
+                # F15 (2026-10-04): the NI engine's clock reads this cache — a Docker install has no
+                # TZ env, so every window / shown time rode the UTC calendar until the SPA reported
+                # its zone. Set EACH handshake (process restart loses it) + on store install below.
+                from . import ni as _ni_mod
+                _ni_mod.set_user_timezone(tz)
         except Exception:
             pass
         # The launcher's half of the update handshake. It rides this probe (~every 30s) so

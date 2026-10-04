@@ -75,9 +75,15 @@ No foreign keys; `NIStore.delete` cascades in code (feeds precedent).
 }
 ```
 
-- `params.*.kind` ∈ `string | number | secret`. A `secret` param's `value` is always
+- `params.*.kind` ∈ `string | number | secret | clock`. A `secret` param's `value` is always
   a SecretStore key name in the `ni:<item_id>:` namespace, never the secret itself.
   `{{param:NAME}}` placeholders may appear only where a field's schema says so.
+- A **`clock`-kind** param (F1 2026-10-04) carries `{label, kind: "clock", format, offset_days}`
+  INSTEAD of `value`: the engine fills it from the current clock on every fetch (`format` is a
+  strftime pattern from the engine's closed `%A-Za-z%:- _,./` chars using the closed code set
+  `%Y %m %d %H %M %S %y %j %u %w %-m %-d %B %b %A %a`; `offset_days` is a bounded int). Library
+  schedule / forecast cards (startDate=today, endDate=today+N) use this so day 2 reads day-2's date
+  instead of the creation day's literal.
 - `display.size` ∈ `small | wide` (wide spans two grid columns).
 - `contract` is system-written at commissioning (§7); the agent may never set it.
 - `model` optionally overrides the `ni` route for `model` sources (schedules.model
@@ -2055,6 +2061,28 @@ the handoff, and a deterministic check stands where the judge was removed.
   "<provider> isn't specific to <place>"; when the Library's taxonomy
   carries `expects`, the components no answer of the source reports are
   named ("this source doesn't report: wind").
+- **Second review round (2026-10-04).** The source-level checks (category,
+  other subject, place, stray topic) run before EVERY build path — the
+  model-mapping fallback included, which a source whose declared answers
+  don't fit the response used to reach unchecked. Two refusals join (e):
+  every want the user said is unanswered refuses even when a subject word
+  overlaps ("gas inventories" on retail gas prices); and a general source
+  (no `coverage.entity`, no geo parameter) refuses a named topic none of its
+  own words, readings or filters take ("latest news on Ukraine" on top
+  headlines). `_other_subject` subtracts only the readings this source took
+  or covers, never another row's. A `{param}` value filled into a host must
+  be a plain host (no credentials, port, fragment or IP literal; a feed path
+  keeps its query); a value a same-host lookup pulls is a bounded id
+  (`[A-Za-z0-9,._:-]{1,64}`, never `.`/`..`). A plain 401/403 drops that
+  address only; a challenge or 429 drops the host.
+- **Locate runs on the keyword frame.** The hybrid ranking (`library_embed`:
+  route and source asks embedded by a LOCAL model, never a cloud one) is
+  built but not wired: on 95 clean labeled asks (no overlap with the
+  Library's example asks, enforced by the Library's overlap gate) keywords
+  picked 76 right / 2 wrong / 1 missed, the embedder 75 / 3 / 3, and the
+  embedder as a reorder only 76 / 2 / 1 — no gain for a ~4.8k-text build on
+  the local model. It is wired again only when it measures better on a
+  larger clean set.
 - **Named subjects (review round, 2026-10-03; `_other_subject`).** A source
   with a declared `coverage.entity` is about that subject: it serves the ask
   when the ask names it (the entity's capitalized / numbered words, its
@@ -2208,16 +2236,26 @@ and the `recipe` born marker stays readable.
   "—" there (a cell missing from EVERY row is drift: the run fails, repair fires). A
   `may_be_empty` list counts its rows and shows "No <label> right now" while empty.
   With a window and an `axis`, the engine's `window` transform (keyed by the axis cell,
-  `zone` extracted from the source's top-level `timezone` / `utc_offset_seconds`)
+  `zone` extracted from the source's top-level `timezone` / `utc_offset_seconds`, plus
+  `utc` / `unless` / `step` carried from the axis cell — F3/F9/F11 2026-10-04)
   replaces `top_n` and runs before the cells' conversions, so "this weekend" stays Sat +
   Sun on every refresh. "Today" is the source's today (its named zone, else the offset
   of the row nearest now) — except that a UTC stamp (`Z` / `+00:00`) with no zone named
   says when, not where: its day is the user's (MLB / NHL starts; at 21:30 in New York
-  "today" keeps tonight's 9:40 PM game). Day rows answer "tonight" as today; a window
-  ahead over rows that all lie in the past isn't applied (the latest rows show). `tbd_if` becomes the `time` transform's `unless` (a value's flag
-  is extracted as `<name>_tbd` when the sample carries it): the card shows the date +
-  "time TBD". For a next-event / schedule ask, a value answer's time node is marked
-  `next`, so a time that has passed shows "no current prediction".
+  "today" keeps tonight's 9:40 PM game). The axis cell's `utc: true` flag rides onto the
+  window op so a zoneless time declared UTC is a UTC instant (TheSportsDB `strTimestamp`,
+  SWPC `time_tag` — a zoneless 03:00 is 8 PM PDT, kept by `tonight` in LA). A row whose
+  `tbd_if` flag is set becomes a day row on its written date (`unless` on the window op):
+  an MLB TBD start sentinel 07:33Z never slips into `tonight`. On an hour-step axis
+  `today` / `tonight` floor at the current hour so the first row the card shows is the
+  one happening now (`tonight` before 06:00 is the current night, now..06:00); day-step
+  rows keep the whole date even when the cell has a clock. A next-event / schedule list
+  on a time axis with no asked window still gets a forward cut (`upcoming`) every run.
+  Day rows answer "tonight" as today; a window ahead over rows that all lie in the past
+  isn't applied (the latest rows show). `tbd_if` also becomes the `time` transform's
+  `unless` (a value's flag is extracted as `<name>_tbd` when the sample carries it): the
+  card shows the date + "time TBD". For a next-event / schedule ask, a value answer's
+  time node is marked `next`, so a time that has passed shows "no current prediction".
 - **Nothing here → the next source.** When the response holds none of the chosen answers
   (TheSportsDB listing no games) or an asked value is missing (a buoy not measuring waves),
   the pick re-lands on the other offered sources with "<provider> has nothing for this right

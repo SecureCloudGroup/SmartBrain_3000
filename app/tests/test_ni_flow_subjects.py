@@ -279,12 +279,13 @@ def test_a_word_of_a_phrase_is_no_topic_unless_the_phrase_was_said(lib) -> None:
     source = ni_flow._picked_source({"_library_source": "mlb-schedule"})
     answers = ni_flow._library_answers("mlb-schedule")
     ask = "MLB scores for the Red Sox and Yankees"
-    assert ni_flow._stray_topics(frame, source, answers, ask, _intent(ask, "Red Sox Yankees", ["scores"])) == set()
+    assert ni_flow._stray_topics(frame, source, {}, answers, ask,
+                                  _intent(ask, "Red Sox Yankees", ["scores"])) == set()
     # said whole, the phrase is a topic ("red flag warning" is a weather alert, not a forecast)
     ask = "red flag warning near Boise"
     stray = ni_flow._stray_topics(ni_flow._frame_of(ask, _intent(ask, "red flag warning", ["warning"])),
                                   ni_flow._picked_source({"_library_source": "fred-gasregw"}),
-                                  ni_flow._library_answers("fred-gasregw"), ask,
+                                  {}, ni_flow._library_answers("fred-gasregw"), ask,
                                   _intent(ask, "red flag warning", ["warning"]))
     assert {"red", "flag"} <= stray
 

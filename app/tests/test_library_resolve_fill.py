@@ -189,7 +189,11 @@ def test_a_same_host_helper_chain_works_for_any_record_and_an_unknown_helper_is_
     [cand] = lr.candidate_urls(rec, "Tulsa forecast", {}, r)[0]
     assert cand["url"] == "https://api.example.org/f/{g}"
     assert cand["lookup"] == [{"url": "https://api.example.org/p/36.127949,-95.902316", "path": "p.g", "param": "g"}]
-    assert lr.resolve_lookup(cand, lambda url: {"p": {"g": "a b/c"}}) == "https://api.example.org/f/a%20b%2Fc"
+    # FETCH-F5 (2026-10-04): a helper's value is a bounded safe id — the quote step still runs,
+    # but the untrusted JSON can't rewrite path segments or deliver a surprise URL.
+    assert lr.resolve_lookup(cand, lambda url: {"p": {"g": "ABC-1,2"}}) == "https://api.example.org/f/ABC-1,2"
+    with pytest.raises(ValueError):
+        lr.resolve_lookup(cand, lambda url: {"p": {"g": "a b/c"}})
     # the helper's own refusal is the honest reason when the ask names no place
     assert lr.candidate_urls(rec, "forecast tonight", {}, r) == ([], "the ask doesn't name a place")
 

@@ -269,14 +269,16 @@ def _clock(fmt: str, offset_days: int, now: datetime) -> str:
 
 def _text_fill(fill: dict, ask: str, own_words: set[str] = frozenset()) -> str:
     """The thing the user named, as typed: what's left after generic words AND the source's own
-    vocabulary ("latest react version" for "npm package latest version" -> "react")."""
+    vocabulary ("latest react version" for "npm package latest version" -> "react"). F8 (2026-10-04):
+    ``norm`` splits a contraction into a word + leftover ("what's" → "what s"); drop single-char
+    tokens so the fill never ships a stray "s" (tvmaze?q=s)."""
     pat = fill.get("pattern")
     if pat:
         m = re.search(pat, ask or "", re.IGNORECASE)
         if not m:
             raise Unfillable("the ask doesn't name it")
         return m.group(1) if m.groups() else m.group(0)
-    words = [w for w in norm(ask).split() if w not in ENGLISH and w not in own_words]
+    words = [w for w in norm(ask).split() if len(w) > 1 and w not in ENGLISH and w not in own_words]
     if not words:
         raise Unfillable("the ask doesn't name it")
     return " ".join(words[:4])
@@ -303,6 +305,9 @@ def candidate_urls(record: dict, ask: str, policy: dict, resolver: Resolver,
     cache: dict[str, dict] = {}
     place_cache: dict = {}
     marine = _marine_only(record)
+    # F1 (2026-10-04): clock-fill params ride as metadata ({name: {format, offset_days}}) so the engine
+    # refills them from the current clock on every refresh — never a literal baked into the URL.
+    clock_params: dict[str, dict] = {}
 
     def place() -> dict:
         if "r" not in place_cache:
@@ -317,7 +322,12 @@ def candidate_urls(record: dict, ask: str, policy: dict, resolver: Resolver,
         if src == "default":
             values[p["name"]] = [(str(fill["value"]), "")]
         elif src == "clock":
-            values[p["name"]] = [(_clock(fill["format"], _clock_offset(record, fill, params), now), "")]
+            offset = _clock_offset(record, fill, params)
+            # the filled value rides the display URL at consent; the engine refills every tick from
+            # ``clock_params`` so day 2 reads day-2's date, never the creation day's literal
+            values[p["name"]] = [(_clock(fill["format"], offset, now), "")]
+            clock_params[p["name"]] = {"format": str(fill["format"]), "offset_days": int(offset),
+                                       "label": str(p.get("label") or p["name"])[:200]}
         elif src == "text":
             # the source's own vocabulary (name + description, NOT its example asks, whose subjects are
             # samples like "react") is never the thing the user named
@@ -394,7 +404,8 @@ def candidate_urls(record: dict, ask: str, policy: dict, resolver: Resolver,
         else:  # source, gap
             return [], {"source": "needs another lookup before your consent"}.get(
                 src, f"{p['name']}: {fill.get('reason') or 'not fillable yet'}")
-    urls = _expand(access.get("url_template") or "", values, groups, keep={c["param"] for c in chain})
+    urls = _expand(access.get("url_template") or "", values, groups,
+                   keep={c["param"] for c in chain}, clock=clock_params)
     if chain:
         urls, why = _with_lookup(record, urls, chain, ask, policy, resolver, now)
         if not urls:
@@ -463,10 +474,18 @@ def _at_path(doc, path: str):
     return doc
 
 
+_LOOKUP_VALUE_RE = re.compile(r"[A-Za-z0-9,._:-]+")
+_LOOKUP_VALUE_MAX = 64
+
+
 def resolve_lookup(candidate: dict, fetch_json) -> str:
     """Run a sealed candidate's ``lookup`` chain through ``fetch_json(url) -> parsed JSON`` (each helper
     address fetched once), fill its parameters and return the final address. ValueError when a step
-    leaves the source's host or its path holds no plain value; the fetch's own errors propagate."""
+    leaves the source's host or its path holds no plain value; the fetch's own errors propagate.
+
+    FETCH-F5 (2026-10-04): the helper's JSON is untrusted. Each pulled value must be a bounded single
+    identifier (≤ ``_LOOKUP_VALUE_MAX`` chars of ``[A-Za-z0-9,._:-]``); ``.`` / ``..`` are refused
+    (they'd rewrite path segments), and a value that fails is a ValueError rather than a surprise URL."""
     url = str(candidate["url"])
     host = _host(url)
     docs: dict[str, object] = {}
@@ -478,7 +497,10 @@ def resolve_lookup(candidate: dict, fetch_json) -> str:
         v = _at_path(docs[step["url"]], step["path"])
         if v is None or isinstance(v, (bool, dict, list)) or str(v) == "":
             raise ValueError(f"{step['param']}: the lookup has no {step['path']}")
-        url = url.replace("{" + step["param"] + "}", quote(str(v), safe=",.-_:~"))
+        text = str(v)
+        if text in (".", "..") or len(text) > _LOOKUP_VALUE_MAX or not _LOOKUP_VALUE_RE.fullmatch(text):
+            raise ValueError(f"{step['param']}: the lookup value {text[:16]!r} is not a safe id")
+        url = url.replace("{" + step["param"] + "}", quote(text, safe=",.-_:~"))
     return url
 
 
@@ -537,16 +559,26 @@ def _without_key(url: str) -> str:
     return out
 
 
+# FETCH-F3 (2026-10-04): a host-param value must be a bare DNS host, optionally with a path (and that
+# path's query — feed URLs carry ``?outputType=xml``), with no userinfo, no port, no fragment, no IP
+# literal. ``_expand`` drops a non-matching value.
+_HOST_PARAM_RE = re.compile(r"[a-z0-9][a-z0-9.-]*(?:/[^#@\s]*)?")
+_IP_LITERAL_RE = re.compile(r"\d+\.\d+\.\d+\.\d+")
+
+
 def _near_label(e: dict) -> str:
     water = e.get("attrs", {}).get("water") or e.get("attrs", {}).get("river") or ""
     return e["name"] + (f" ({water})" if water and water.lower() not in e["name"].lower() else "")
 
 
 def _expand(template: str, values: dict[str, list[tuple[str, str]]], groups: dict[str, str],
-            keep: set[str] = frozenset()) -> list[dict]:
+            keep: set[str] = frozenset(), clock: dict[str, dict] | None = None) -> list[dict]:
     """One URL per reading of the ONE ambiguous entity; parameters filled from that same reading (a
     place's lat AND lon) take the same index, so a URL never mixes two readings. A ``keep`` parameter
-    stays a {placeholder} (a same-host lookup fills it after consent)."""
+    stays a {placeholder} (a same-host lookup fills it after consent). A clock parameter is filled
+    with its current value in ``url`` (shown at consent) and KEPT as ``{{param:name}}`` in
+    ``url_template`` (the sealed spec URL; the engine refills every tick)."""
+    clock = clock or {}
     choice_group = next((groups.get(n, n) for n, v in values.items() if len(v) > 1), None)
     members = [n for n in values if groups.get(n, n) == choice_group] if choice_group else []
     count = min(len(values[members[0]]), MAX_CHOICES) if members else 1
@@ -554,16 +586,34 @@ def _expand(template: str, values: dict[str, list[tuple[str, str]]], groups: dic
     out = []
     for i in range(count):
         chosen = {n: (v[i][0] if n in members and i < len(v) else v[0][0]) for n, v in values.items()}
+        # FETCH-F3 (2026-10-04): a host-parameter fills raw into the URL's netloc; a value with
+        # userinfo (@), a port (:n), a query (?x), a fragment (#f), or an IP literal would relocate
+        # the fetch (or carry credentials). Only a bare DNS host (optionally a path) is allowed.
+        if host_param is not None:
+            host_value = chosen.get(host_param.group(1), "")
+            if not _HOST_PARAM_RE.fullmatch(host_value) or _IP_LITERAL_RE.fullmatch(host_value.split("/")[0]):
+                continue  # the resolver falls to the next reading; a sibling source may still work
 
         def sub(m, chosen=chosen):
             if m.group(1) in keep:
                 return m.group(0)
             v = chosen.get(m.group(1), "")
             return v if host_param and m.group(1) == host_param.group(1) else quote(v, safe=",.-_:~")
+
+        def sub_template(m, chosen=chosen):
+            # F1: a clock-fill param stays a {{param:name}} slot in the sealed URL
+            if m.group(1) in clock:
+                return "{{param:" + m.group(1) + "}}"
+            return sub(m, chosen=chosen)
         url = re.sub(r"\{([a-z_][a-z0-9_]*)\}", sub, template)
+        url_template = re.sub(r"\{([a-z_][a-z0-9_]*)\}", sub_template, template) if clock else url
         labels = [v[i][1] if n in members and i < len(v) else v[0][1] for n, v in values.items()]
-        out.append({"url": url, "label": " · ".join(dict.fromkeys(x for x in labels if x)),
-                    "choice": bool(members),
-                    # the values this reading filled (never the key slot): answers paths name them
-                    "params": {n: v for n, v in chosen.items() if v != _KEY_MARK}})
+        row: dict = {"url": url, "label": " · ".join(dict.fromkeys(x for x in labels if x)),
+                     "choice": bool(members),
+                     # the values this reading filled (never the key slot): answers paths name them
+                     "params": {n: v for n, v in chosen.items() if v != _KEY_MARK}}
+        if clock:
+            row["url_template"] = url_template
+            row["clock_params"] = dict(clock)
+        out.append(row)
     return out
