@@ -118,18 +118,23 @@ _UTC_OFFSET_RE = re.compile(r"\(UTC([+-])(\d{2}):?(\d{2})\)")
 
 def verify_page_reading(graph: dict, preview: dict, *, frame_kind: str | None,
                         wants: list[str], subject: str, now: datetime,
-                        many: bool) -> list[str]:
+                        many: bool, tier: str = "interpreted") -> list[str]:
     """Reasons a page reading can't ship (empty list = accept).
 
     ``graph`` is the PageGraph the reading came from (``pagegraph`` shape —
     ``ni._fetch_http_page(full=True)`` output works too); ``preview`` maps
     field → value (a string, number, list, or ``rows``), and its ``title`` key
     (the card title the flow adds) is never treated as a reading. ``now`` must
-    be timezone-aware (the user's clock). Deterministic; no model.
+    be timezone-aware (the user's clock). ``tier`` is ``"interpreted"`` (the
+    local-model reader, default: the model saw only text + tables, so grounding
+    checks only those) or ``"compiled"`` (the P2 selector program lifts values
+    verbatim from entities / meta / tables and grounds against all of them).
+    Deterministic; no model.
     """
     assert isinstance(graph, dict) and isinstance(preview, dict), "graph + preview required"
     assert isinstance(wants, list) and isinstance(subject, str), "wants + subject required"
     assert isinstance(now, datetime) and now.tzinfo is not None, "now must be aware"
+    assert tier in ("interpreted", "compiled"), "tier must be interpreted or compiled"
     readable = graph.get("readability") or pagegraph.readability(graph)
     if not readable.get("readable"):
         return [f"the page couldn't be read ({readable.get('kind')})"]
@@ -137,9 +142,10 @@ def verify_page_reading(graph: dict, preview: dict, *, frame_kind: str | None,
     if not values:
         return ["the reading is empty"]
     page_text = _page_text(graph)
+    ground_text = page_text if tier == "compiled" else _ground_text(graph)
     reasons: list[str] = []
     reasons += _chrome_reasons(graph, values, wants)
-    reasons += _grounding_reasons(values, page_text)
+    reasons += _grounding_reasons(values, ground_text)
     if many and not _has_rows(values):
         reasons.append(f"one value for a list ask (need at least {_MANY_ROWS} rows)")
     tz = _page_zone(graph, now)
@@ -241,6 +247,15 @@ def _page_text(graph: dict) -> str:
         if isinstance(ent, dict):
             parts += [str(v) for k, v in ent.items() if k != "type"]
     return "\n".join(parts)
+
+
+def _ground_text(graph: dict) -> str:
+    """What a local-model reader was actually shown: the body text and the
+    visible table cells. Meta descriptions and JSON-LD entity values never
+    reached the model, so a value grounded only there is not grounded (field
+    2026-10-04: an interpreted reading matched only against the page's own
+    JSON-LD ``offers.price``, which the model never saw)."""
+    return "\n".join([str(graph.get("text") or ""), _table_text(graph)])
 
 
 def _norm(text: str) -> str:

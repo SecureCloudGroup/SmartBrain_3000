@@ -72,7 +72,12 @@ def fetch_page_graph(url: str, *, fetcher=None) -> dict:
     body = got.get("content") if isinstance(got, dict) else None
     if not isinstance(body, (bytes, bytearray)):
         raise netguard.FetchError("no bytes in page response")
-    extracted = jailrun.run_extractor(bytes(body), url_hint=url)
+    # F4: forward the HTTP header's charset so a page with no BOM and no
+    # <meta charset> still decodes correctly.
+    charset = netguard._declared_charset(str(got.get("content_type") or "")) \
+        if isinstance(got, dict) else ""
+    extracted = jailrun.run_extractor(bytes(body), url_hint=url,
+                                       declared_charset=charset)
     return graph_from_extract(url, extracted)
 
 
@@ -344,6 +349,16 @@ _AGGREGATOR_PARTS: frozenset[str] = frozenset({
     "detector", "results", "numbers", "news", "report", "reports", "fans",
     "tips", "map", "now", "live", "watch", "monitor",
 })
+# Shared-hosting suffixes whose subdomains are separate owners: a brand-shaped
+# subdomain on one is whoever rented the slot, not the subject (field 2026-10-04:
+# ``slackstatus.herokuapp.com``, ``wmata.netlify.app``). An official_hosts
+# listing still wins — a service that actually publishes on one is accepted
+# through the listing path.
+_SHARED_HOSTING_SUFFIXES: frozenset[str] = frozenset({
+    "github.io", "gitlab.io", "herokuapp.com", "netlify.app", "vercel.app",
+    "pages.dev", "web.app", "firebaseapp.com", "blogspot.com", "wordpress.com",
+    "azurewebsites.net", "cloudfront.net", "amazonaws.com", "substack.com",
+})
 # What may follow a subject's name inside its own host label ("githubstatus").
 _OWN_SUFFIXES: frozenset[str] = frozenset({
     "", "status", "hq", "app", "inc", "corp", "online", "official", "lottery",
@@ -407,10 +422,14 @@ def first_party(host: str, subject: str, official_hosts: dict, *, ask: str = "")
     resolver) the registrable domains must match. With none, a NAMED entity
     of the subject (a proper name in the subject or the original ``ask``,
     never a topic word: "Tesla" in "Tesla stock", not "stock") is the
-    registrable domain's own label, or opens it followed only by a status-ish
-    word ("slack-status.com", "githubstatus.com") — never next to an
-    aggregator part ("powerball-checker.com", "awsdown.com"). Subdomains are
-    the domain owner's, never the subject's ("charleston.tides.net")."""
+    registrable domain's own-label FIRST part followed only by status-ish
+    _OWN_SUFFIXES words ("slack-status.com", "githubstatus.com") — never a
+    brand hidden behind junk ("free-coinbase-giveaway.com",
+    "tesla-stock-forecast.com") or next to an aggregator part
+    ("powerball-checker.com", "awsdown.com"). Subdomains are the domain
+    owner's, never the subject's ("charleston.tides.net"), and a shared-hosting
+    suffix (``*.netlify.app``, ``*.herokuapp.com``, ``*.github.io``) is never
+    first-party in the fallback — the subdomain is whoever rented it."""
     assert isinstance(host, str) and isinstance(ask, str), "host + ask must be strings"
     reg = registrable_domain(host)
     if not reg:
@@ -418,11 +437,16 @@ def first_party(host: str, subject: str, official_hosts: dict, *, ask: str = "")
     listed = _official_hosts_for(subject, official_hosts)
     if listed is not None:
         return reg in {registrable_domain(h) for h in listed}
-    parts = reg.split(".")[0].split("-")
+    labels = reg.split(".")
+    if ".".join(labels[-2:]) in _SHARED_HOSTING_SUFFIXES:
+        return False  # rented subdomain of a shared host — not the subject's own site
+    parts = labels[0].split("-")
     if any(p in _AGGREGATOR_PARTS for p in parts):
         return False
-    return any(p.startswith(tok) and p[len(tok):] in _OWN_SUFFIXES
-               for tok in _name_tokens(subject, ask) for p in parts)
+    first = parts[0]
+    rest_own = all(p in _OWN_SUFFIXES for p in parts[1:])
+    return rest_own and any(first.startswith(tok) and first[len(tok):] in _OWN_SUFFIXES
+                             for tok in _name_tokens(subject, ask))
 
 
 def authority_leads(first: bool, evidence: list | None) -> bool:

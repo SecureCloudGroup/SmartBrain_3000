@@ -471,6 +471,16 @@ def test_decode_body_windows_1252_punctuation_and_the_utf8_fallback() -> None:
     assert netguard.decode_body(b"", "application/json") == ""
 
 
+# F8 (review 2026-10-04): a stray NUL in the first 64 bytes used to flip the
+# undeclared decoder to UTF-16, mangling a UTF-8 JSON body. Guess UTF-16 only
+# when NULs sit at one parity in a ≥25% density of the head AND strict decode
+# is clean; else fall through to UTF-8.
+def test_decode_body_sparse_nul_is_not_utf16() -> None:
+    body = b'{"a":"x\x00","price":"42"}'
+    assert netguard.decode_body(body, "application/json") == body.decode("utf-8", "replace")
+    assert netguard.decode_body(b"ok\x00rest", "text/plain") == "ok\x00rest"
+
+
 # The AWS Health Dashboard's official feed (health.aws.amazon.com/public/currentevents), shape as
 # served 2026-09-28: 'application/json;charset=utf-16', a UTF-16 LE body with a BOM.
 _AWS_CURRENTEVENTS = [

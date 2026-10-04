@@ -3028,9 +3028,11 @@ def test_fetch_http_page_merges_jail_payload(monkeypatch: pytest.MonkeyPatch) ->
         return {"final_url": url, "status": 200, "content_type": "text/html",
                 "content": b"<html>...</html>"}
 
-    def fake_extract(html: bytes, url_hint: str, *, timeout_s: float = 20.0) -> dict:
+    def fake_extract(html: bytes, url_hint: str, *, timeout_s: float = 20.0,
+                     declared_charset: str = "") -> dict:
         captured["html"] = html
         captured["url_hint"] = url_hint
+        captured["declared_charset"] = declared_charset
         return {"text": "extracted body", "title": "Extracted"}
 
     monkeypatch.setattr(netguard, "safe_fetch_page", fake_page)
@@ -3043,6 +3045,7 @@ def test_fetch_http_page_merges_jail_payload(monkeypatch: pytest.MonkeyPatch) ->
     assert captured["url"] == "https://example.com/x"
     assert captured["html"] == b"<html>...</html>"
     assert captured["url_hint"] == "https://example.com/x"
+    assert captured["declared_charset"] == ""  # text/html with no charset: the page's own meta decides
 
 
 def test_fetch_http_page_redirect_discipline(monkeypatch: pytest.MonkeyPatch) -> None:

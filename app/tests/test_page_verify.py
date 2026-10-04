@@ -294,6 +294,24 @@ def test_preview_title_key_is_not_a_reading() -> None:
     assert _check(g, {"status": "No issues", "title": "Example Status Page"}) == []
 
 
+# F2b (review 2026-10-04): the interpreted tier (default) grounds only against
+# what the model was shown — body text + tables; a value found only in meta or
+# JSON-LD entities isn't grounded. The compiled tier still reads those (it lifts
+# values verbatim from entities / tables / meta).
+def test_interpreted_tier_does_not_ground_against_meta_or_entities() -> None:
+    g = _graph("Powerball jackpot information updated for every drawing.",
+                entities=[{"type": "Event", "name": "Powerball drawing",
+                           "offers.price": "777"}],
+                meta={"og:description": "Jackpot 999 Million"})
+    kw = {"frame": "current_value", "wants": ["jackpot"], "subject": "Powerball"}
+    assert _check(g, {"jackpot": "777"}, **kw)              # only in entities
+    assert _check(g, {"jackpot": "999 Million"}, **kw)      # only in meta
+    compiled = page_verify.verify_page_reading(
+        g, {"jackpot": "777"}, frame_kind="current_value", wants=["jackpot"],
+        subject="Powerball", now=_NOW, many=False, tier="compiled")
+    assert compiled == []
+
+
 # ---- has_evidence: the pre-model check -------------------------------------
 
 

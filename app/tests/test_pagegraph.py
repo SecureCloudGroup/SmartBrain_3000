@@ -459,11 +459,57 @@ def test_utf16_and_latin1_pages_decode() -> None:
     assert "caf\u00e9 is open" in _graph_of(latin)["text"]
 
 
+# F4 (review 2026-10-04): a page served with a Content-Type header charset but
+# no BOM or <meta charset> declaration must still decode correctly \u2014 the HTTP
+# header's charset is threaded into the jail child so the common Apache default
+# ("Content-Type: text/html; charset=ISO-8859-1" on real latin-1 bytes) reads
+# as the characters, not mojibake.
+def test_header_only_charset_reaches_the_jail() -> None:
+    page = ("<html><head><title>Caf\u00e9 du Monde</title></head><body>"
+            + "<p>Caf\u00e9 du Monde hours: open daily at the caf\u00e9, "
+              "8 a.m. to 6 p.m. for every visitor.</p>" * 4 +
+            "</body></html>")
+    raw = page.encode("latin-1")
+    text = jail_extract.extract(raw, "https://x.test/",
+                                declared_charset="ISO-8859-1")["text"]
+    assert "Caf\u00e9 du Monde" in text
+    # No charset given + no meta: UTF-8-with-replacement path. The latin-1
+    # ``\xe9`` isn't valid UTF-8 so the e-acute becomes the replacement char.
+    fallback = jail_extract.extract(raw, "https://x.test/")["text"]
+    assert "Caf\ufffd" in fallback
+
+
 def test_real_jail_reads_the_official_widget() -> None:
     """End to end through the subprocess jail: the recorded powerball.com page."""
     raw = gzip.decompress((_PAGES / "powerball_home.html.gz").read_bytes())
     g = _graph_of(raw, url=_MANIFEST["powerball_home"]["url"])
     assert "$409 Million" in g["text"] and g["readability"]["readable"]
+
+
+# F2a (review 2026-10-04): a reader doesn't see <select>/<option>/<datalist>
+# content, [hidden] / aria-hidden="true" elements, or display:none/visibility:hidden
+# — the jail parser must drop those from body text (nesting handled).
+def test_jail_body_text_skips_invisible_elements() -> None:
+    body_para = (b"<p>" + b" ".join([b"Service status page prose covering every region "
+                                     b"and component we run, long enough for an article "
+                                     b"extractor to keep as the primary text."] * 4) + b"</p>")
+    html = (b"<html><head><title>t</title></head><body>"
+            + body_para +
+            b"<form><select><option>Operational</option>"
+            b"<option>Major outage</option></select></form>"
+            b"<div hidden>Hidden by attribute</div>"
+            b"<div style='display:none'>Hidden by display none</div>"
+            b"<div style=\"visibility: hidden\">Hidden by visibility hidden</div>"
+            b"<div aria-hidden=\"true\">Hidden by aria</div>"
+            b"<datalist><option>list item</option></datalist>"
+            b"<div style='display:none'><p>Nested visible-looking paragraph</p></div>"
+            b"</body></html>")
+    text = jail_extract.extract(html, "https://example.test/")["text"]
+    assert "Service status page prose" in text
+    for hidden in ("Operational", "Major outage", "Hidden by attribute",
+                   "Hidden by display none", "Hidden by visibility hidden",
+                   "Hidden by aria", "list item", "Nested visible-looking paragraph"):
+        assert hidden not in text, hidden
 
 
 def test_challenge_page_never_reads_as_its_script() -> None:
@@ -548,6 +594,18 @@ def test_first_party_fallback_is_the_subject_in_the_host() -> None:
     ("status.zoom.us", "zoom", "IS ZOOM DOWN", False),       # shouting is not a name
     ("slack-status.com", "Slack", "is slack down", True),    # the model wrote the name
     ("www.powerball.com", "Powerball jackpot", "", True),
+    # F1 (review 2026-10-04): the brand must be the host label's FIRST part with every other
+    # part a status-ish _OWN_SUFFIXES word; junk parts ("giveaway", "mirror", "forecast") never
+    # count. And a shared-hosting suffix (github.io, herokuapp.com, netlify.app, vercel.app,
+    # pages.dev, web.app) is never first-party in the no-listing fallback — the subdomain is
+    # whoever rented it, not the subject.
+    ("free-coinbase-giveaway.com", "Coinbase", "", False),
+    ("tesla-stock-forecast.com", "Tesla stock", "", False),
+    ("github-status-mirror.xyz", "GitHub", "", False),
+    ("slackstatus.herokuapp.com", "Slack", "is slack down", False),
+    ("wmata.netlify.app", "WMATA", "", False),
+    ("foo.github.io", "GitHub", "", False),
+    ("something.vercel.app", "GitHub", "", False),
 ])
 def test_first_party_fallback_needs_a_named_entity(host, subject, ask, expect) -> None:
     assert pagegraph.first_party(host, subject, {}, ask=ask) is expect

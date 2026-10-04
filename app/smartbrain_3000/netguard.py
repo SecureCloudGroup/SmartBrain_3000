@@ -116,13 +116,19 @@ def _declared_charset(content_type: str) -> str:
 
 def _utf16_order(content: bytes) -> str | None:
     """The byte order of BOM-less UTF-16 text, from where its NULs sit (ASCII in UTF-16 has one
-    NUL per character); None when the bytes show no such pattern."""
+    NUL per character); None when the bytes show no such pattern. Needs a dense (≥25% of the head)
+    one-parity NUL run — a stray NUL in a UTF-8 body is not UTF-16 (field 2026-10-04)."""
     head = content[:64]
+    if not head:
+        return None
     even = sum(1 for i in range(0, len(head), 2) if head[i] == 0)
     odd = sum(1 for i in range(1, len(head), 2) if head[i] == 0)
-    if even == odd:
-        return None
-    return "utf-16-be" if even > odd else "utf-16-le"
+    min_nuls = max(len(head) // 4, 1)
+    if even >= min_nuls and even > odd:
+        return "utf-16-be"
+    if odd >= min_nuls and odd > even:
+        return "utf-16-le"
+    return None
 
 
 def _is_json_type(content_type: str) -> bool:
@@ -139,10 +145,17 @@ def decode_body(content: bytes, content_type: str = "") -> str:
         if content.startswith(bom):
             return content[len(bom):].decode(codec, "replace")
     declared = _declared_charset(content_type)
-    if declared in _UTF16 or (not declared and b"\x00" in content[:64]):
+    if declared in _UTF16:
         order = _UTF16.get(declared) or _utf16_order(content)
         if order:
             return content.decode(order, "replace")
+    elif not declared:
+        order = _utf16_order(content)  # F8: dense NUL run in one parity + strict decode confirms
+        if order:
+            try:
+                return content.decode(order)
+            except UnicodeDecodeError:
+                pass
     if declared in _EIGHT_BIT:
         try:
             return content.decode("utf-8")

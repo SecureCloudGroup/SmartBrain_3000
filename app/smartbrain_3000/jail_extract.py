@@ -52,18 +52,29 @@ _RLIMIT_AS_BYTES = 768 * 1024 * 1024  # 768 MB address-space cap
 PAGE_EXTRA_MARK = "\n\n[more text on the page]\n"  # public: pagegraph splits on it
 _MAX_EXTRA_CHARS = 8_000         # bound on the appended visible-text remainder
 _MAX_BODY_CHARS = 120_000        # bound on visible text collected from the body
-# Elements whose content a reader never sees as page text.
+# Elements whose content a reader never sees as page text. ``select``,
+# ``option`` and ``datalist`` carry filter choices, not the page's reading
+# (field 2026-10-04: an aggregator's ``<option>Major outage</option>`` was
+# grounding readings).
 _INVISIBLE_TAGS = frozenset({"script", "style", "noscript", "template", "svg",
-                             "title", "iframe", "object", "canvas", "math"})
+                             "title", "iframe", "object", "canvas", "math",
+                             "select", "option", "datalist"})
 _BLOCK_TAGS = frozenset({
     "p", "div", "br", "li", "ul", "ol", "tr", "td", "th", "table", "h1", "h2",
     "h3", "h4", "h5", "h6", "section", "article", "header", "footer", "nav",
     "main", "aside", "dt", "dd", "dl", "blockquote", "pre", "form", "fieldset",
-    "figure", "figcaption", "hr", "address", "details", "summary", "option",
+    "figure", "figcaption", "hr", "address", "details", "summary",
     "label", "button", "caption"})
+_HIDDEN_STYLE_RE = re.compile(r"(?:display\s*:\s*none|visibility\s*:\s*hidden)",
+                              re.IGNORECASE)
+# Guard against malformed HTML stacking an unbounded number of hidden opens.
+_MAX_HIDDEN_STACK = 256
 _INLINE_BREAKS = frozenset({"a", "span", "img", "input"})
 _META_CHARSET_RE = re.compile(rb"<meta[^>]{0,200}?charset\s*=\s*[\"']?\s*([A-Za-z0-9_.:-]{2,40})",
                               re.IGNORECASE)
+# A charset token the parent may forward from the HTTP response Content-Type.
+# Strict and bounded so a hostile parent (there isn't one) can't smuggle data.
+_CHARSET_TOKEN_RE = re.compile(r"^[A-Za-z0-9_.:-]{2,40}$")
 # Page-graph layer bounds (search platform P1) — hostile input, everything capped.
 _MAX_ENTITIES = 20
 _MAX_ENTITY_FIELDS = 24
@@ -140,14 +151,22 @@ def _extract_with_trafilatura(html: str, url_hint: str) -> tuple[str, str]:
     return title.strip(), text.strip()
 
 
-def _decode_html(raw: bytes) -> str:
+def _decode_html(raw: bytes, declared_charset: str = "") -> str:
     """Bytes → text: byte-order mark, then the page's own ``<meta>`` charset,
-    then UTF-8 with replacement (``netguard.decode_body``, the one decode rule
-    every fetch path shares). The HTTP header never reaches the jail, so the
-    declared charset is the document's own."""
+    then the HTTP header's declared charset (forwarded from the parent — field
+    2026-10-04: Apache's "Content-Type: text/html; charset=ISO-8859-1" with no
+    ``<meta>`` on real latin-1 bytes read as mojibake), then UTF-8 with
+    replacement (``netguard.decode_body``, the one decode rule every fetch
+    path shares)."""
     assert isinstance(raw, (bytes, bytearray)), "raw must be bytes"
+    assert isinstance(declared_charset, str), "charset must be a string"
     match = _META_CHARSET_RE.search(bytes(raw[:4096]))
-    content_type = f"text/html; charset={match.group(1).decode('ascii')}" if match else "text/html"
+    if match:
+        content_type = f"text/html; charset={match.group(1).decode('ascii')}"
+    elif declared_charset and _CHARSET_TOKEN_RE.match(declared_charset):
+        content_type = f"text/html; charset={declared_charset}"
+    else:
+        content_type = "text/html"
     from .netguard import decode_body  # lazy: the shared decode rule, only in the child
     return decode_body(bytes(raw), content_type)
 
@@ -177,6 +196,19 @@ def _extra_text(article: str, body: str) -> str:
     return "\n".join(out)
 
 
+def _is_invisible_attrs(a: dict) -> bool:
+    """A start tag whose attributes hide it from a reader: ``hidden`` (any
+    value, per the HTML spec), ``aria-hidden="true"``, or an inline style with
+    ``display:none`` / ``visibility:hidden``. Nesting is handled by the stack
+    in ``_GraphParser.handle_starttag``."""
+    if "hidden" in a:
+        return True
+    if (a.get("aria-hidden") or "").strip().lower() == "true":
+        return True
+    style = a.get("style") or ""
+    return bool(_HIDDEN_STYLE_RE.search(style))
+
+
 class _GraphParser(HTMLParser):
     """One pass over the raw HTML collecting the structured layers.
 
@@ -204,7 +236,11 @@ class _GraphParser(HTMLParser):
         self._header_row = False
         self.body: list[str] = []   # visible text, block tags as line breaks
         self._body_size = 0
-        self._hidden = 0            # depth inside _INVISIBLE_TAGS
+        self._hidden = 0            # depth inside hidden regions
+        # Tag names of start tags that opened a hidden region (either an
+        # _INVISIBLE_TAGS tag or an attribute-hidden element). Matched on name
+        # at endtag — malformed markup leaves at most _MAX_HIDDEN_STACK entries.
+        self._hidden_stack: list[str] = []
 
     def _body_break(self, sep: str = "\n") -> None:
         if not self.body:
@@ -221,13 +257,15 @@ class _GraphParser(HTMLParser):
         self.handle_endtag(tag)
 
     def handle_starttag(self, tag: str, attrs: list) -> None:
-        if tag in _INVISIBLE_TAGS:
-            self._hidden += 1
+        a = dict(attrs)
+        if tag in _INVISIBLE_TAGS or _is_invisible_attrs(a):
+            if len(self._hidden_stack) < _MAX_HIDDEN_STACK:
+                self._hidden_stack.append(tag)
+                self._hidden += 1
         elif tag in _BLOCK_TAGS:
             self._body_break()
         elif tag in _INLINE_BREAKS:
             self._body_break(" ")  # adjacent links/spans are separate words on screen
-        a = dict(attrs)
         if tag == "script" and (a.get("type") or "").strip().lower() == "application/ld+json":
             if len(self.jsonld_blobs) < _MAX_ENTITIES:
                 self._in_jsonld, self._jsonld_buf = True, []
@@ -273,7 +311,8 @@ class _GraphParser(HTMLParser):
             self._cell.append(data)
 
     def handle_endtag(self, tag: str) -> None:
-        if tag in _INVISIBLE_TAGS and self._hidden:
+        if self._hidden_stack and self._hidden_stack[-1] == tag:
+            self._hidden_stack.pop()
             self._hidden -= 1
         elif tag in _BLOCK_TAGS:
             self._body_break()
@@ -428,13 +467,15 @@ def _fit_output(payload: dict) -> str:
     return out
 
 
-def extract(raw: bytes, url_hint: str) -> dict:
+def extract(raw: bytes, url_hint: str, *, declared_charset: str = "") -> dict:
     """Bytes → the jail payload ``{"text", "title", <graph layers>}``. Pure and
     in-process-callable (tests parse recorded pages with it); ``main`` runs it
-    inside the subprocess jail for every real fetch."""
+    inside the subprocess jail for every real fetch. ``declared_charset`` is
+    the HTTP Content-Type charset (bounded token, falls through on BOM / meta)."""
     assert isinstance(raw, (bytes, bytearray)), "raw must be bytes"
     assert isinstance(url_hint, str), "url hint must be a string"
-    html = _decode_html(bytes(raw))
+    assert isinstance(declared_charset, str), "charset must be a string"
+    html = _decode_html(bytes(raw), declared_charset)
     title, text = "", ""
     try:
         title, text = _extract_with_trafilatura(html, url_hint)
@@ -457,8 +498,10 @@ def main() -> None:
     _apply_rlimits()
     argv = sys.argv[1:]
     url_hint = argv[0] if argv else ""
+    declared_charset = argv[1] if len(argv) > 1 else ""
     assert isinstance(url_hint, str), "url hint must be a string"
-    payload = extract(_read_stdin_bytes(), url_hint)
+    assert isinstance(declared_charset, str), "charset must be a string"
+    payload = extract(_read_stdin_bytes(), url_hint, declared_charset=declared_charset)
     sys.stdout.write(_fit_output(payload))
     sys.stdout.flush()
 

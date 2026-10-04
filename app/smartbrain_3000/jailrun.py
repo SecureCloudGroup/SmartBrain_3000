@@ -29,6 +29,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -64,6 +65,10 @@ _PACKAGE_PARENT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # real code in ``jail_extract`` (not this ``-c`` string) means the child is properly
 # importable + testable and the ``-c`` payload stays a stable one-liner.
 _CHILD_BOOTSTRAP = "from smartbrain_3000.jail_extract import main; main()"
+# Charset tokens forwarded to the child are bounded (RFC 2978 / IANA names stay
+# in this shape); anything else is dropped before argv so a hostile Content-Type
+# can't smuggle argv content past the parent.
+_CHARSET_TOKEN_RE = re.compile(r"^[A-Za-z0-9_.:-]{2,40}$")
 
 
 class JailError(Exception):
@@ -172,22 +177,26 @@ def _reap(proc: subprocess.Popen) -> None:
             log.warning("jail: child failed to exit after kill (pid=%s)", proc.pid)
 
 
-def _spawn(cwd: str, env: dict[str, str], url_hint: str) -> subprocess.Popen:
+def _spawn(cwd: str, env: dict[str, str], url_hint: str,
+            declared_charset: str) -> subprocess.Popen:
     """Start the child interpreter with ``-c`` bootstrap in a fresh process group.
 
     ``url_hint`` rides argv (under ``-c``, ``sys.argv[1:]`` carries trailing args)
     so trafilatura gets the page URL for extraction quality — argv is ps-visible,
     which is fine: the URL is user-consented spec content, never a secret.
+    ``declared_charset`` rides as a second argv entry so the child can honor the
+    HTTP header charset when no BOM or ``<meta>`` declares one (bounded token).
     """
     assert cwd and os.path.isdir(cwd), "cwd must exist"
     assert env and "PATH" in env, "env must include a PATH"
     assert isinstance(url_hint, str), "url_hint must be a string"
+    assert isinstance(declared_charset, str), "charset must be a string"
     return subprocess.Popen(
         # ``-s`` skips user site-packages so a user-writable ``~/.local`` can't inject
         # imports into the child; we deliberately do NOT pass ``-I`` (isolated mode)
         # because it also strips PYTHONPATH, and a source-tree runner (tests, editable
         # install) needs it to import ``smartbrain_3000.jail_extract``.
-        [sys.executable, "-s", "-c", _CHILD_BOOTSTRAP, url_hint],
+        [sys.executable, "-s", "-c", _CHILD_BOOTSTRAP, url_hint, declared_charset],
         stdin=subprocess.PIPE, stdout=subprocess.PIPE,
         # DEVNULL, not STDOUT: a merged stream means one dependency warning on
         # stderr corrupts the JSON parse forever; devnull can't wedge the child
@@ -231,19 +240,25 @@ def _validate_payload(text: str) -> dict:
 
 
 def run_extractor(html: bytes, url_hint: str, *,
+                  declared_charset: str = "",
                   timeout_s: float = _DEFAULT_TIMEOUT_S) -> dict:
     """Run one jailed extraction; return ``{"text": str, "title": str}``.
 
+    ``declared_charset`` is the HTTP response's Content-Type charset (strict
+    IANA-name shape, else dropped) — the child uses it when the page has no
+    BOM / ``<meta charset>`` so a header-only declaration still reaches decode.
     Every failure — timeout, non-zero exit, malformed / oversize stdout, or a spawn
     error — raises ``JailError``. The caller maps to ``NIError('extract_jail', ...)``.
     Never propagates a raw subprocess exception past this boundary.
     """
     assert isinstance(html, (bytes, bytearray)), "html must be bytes"
     assert isinstance(url_hint, str), "url hint must be a string"
+    assert isinstance(declared_charset, str), "charset must be a string"
     if len(html) > _MAX_INPUT_BYTES:
         raise JailError("input_too_large", f"{len(html)}")
     if timeout_s <= 0:
         raise JailError("bad_timeout", f"{timeout_s}")
+    charset = declared_charset if _CHARSET_TOKEN_RE.match(declared_charset) else ""
     # R2: refuse over-cap before mkdtemp so a busy jail never orphans a temp dir.
     if not _LIVE_JAILS.acquire(blocking=False):
         raise JailError("jail_busy")
@@ -254,7 +269,7 @@ def run_extractor(html: bytes, url_hint: str, *,
         pass  # best-effort: mkdtemp already yields 0o700 on POSIX
     try:
         try:
-            proc = _spawn(cwd, _jail_env(), url_hint)
+            proc = _spawn(cwd, _jail_env(), url_hint, charset)
         except (OSError, ValueError) as exc:
             raise JailError("spawn_failed", exc.__class__.__name__) from None
         return _drive_jailed_child(proc, bytes(html), timeout_s)
