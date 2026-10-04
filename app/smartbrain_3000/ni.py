@@ -4621,6 +4621,19 @@ def run_item(store: NIStore, item_id: str, *, gateway_mod, secrets_store,
     item = store.get_item(item_id)
     if item is None:
         raise NIError("item_missing")
+    # F1 (2026-10-04 field): a Library card created on v0.24.0 / v0.24.1 sealed the creation
+    # day's clock date into source.url as a literal. Rewrite to the ``{{param:name}}`` + clock-
+    # kind-param shape so day 2 reads day-2's date. One-time + idempotent + revision-tracked;
+    # any failure inside leaves the card alone (host-free log) so a broken upgrade can never
+    # brick a tick.
+    try:
+        from . import ni_flow as _ni_flow_mod
+        upgraded = _ni_flow_mod.upgrade_pre_f1_literal_dates(store, item)
+    except Exception:  # defensive: the upgrade is best-effort, never a run blocker
+        log.info("ni upgrade: pre-F1 literal-date rewrite raised; card left untouched")
+        upgraded = None
+    if upgraded is not None:
+        item = upgraded
     started = time.monotonic()
     started_rev = int(item["spec_rev"])
     history: dict = {}

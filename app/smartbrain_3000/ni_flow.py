@@ -28,7 +28,7 @@ import threading
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 from . import claudecli as _claudecli_mod
 from . import gateway as _gateway_mod
@@ -3405,6 +3405,174 @@ def _offset_from_filled(value: object, fmt: str, now: datetime) -> int | None:
         return None
     delta = (when - now.date()).days
     return delta if abs(delta) <= ni._MAX_CLOCK_OFFSET_DAYS else None
+
+
+# F1 upgrade (2026-10-04 field): a Library card created on v0.24.0 / v0.24.1 sealed the clock-filled
+# date straight into ``source.url`` as a literal (the creation day's). The engine would then re-fetch
+# that same literal forever. ``upgrade_pre_f1_literal_dates`` rewrites the sealed URL to the templated
+# shape (``{{param:name}}``) + adds a clock-kind spec param per date on the card's first tick, so day
+# 2 reads day-2's date. Idempotent (the ``{{param:`` marker is the gate), bounded O(1) after the
+# first run, revision-tracked (origin ``repair_l1``, ``preserve_attestations=True`` — the fetched
+# bytes at creation time are byte-for-byte unchanged, so ``_c2_ok`` and ``contract`` still describe
+# the card). A mismatch between the derived template and the stored URL leaves the card untouched.
+
+_F1_PLACEHOLDER_RE = re.compile(r"\{\{param:([a-z_][a-z0-9_]*)\}\}")
+
+
+def upgrade_pre_f1_literal_dates(store: ni.NIStore, item: dict) -> dict | None:
+    """One-time rewrite of a pre-F1 Library card's sealed URL from a literal creation-day date to
+    the ``{{param:name}}`` + clock-kind-param shape. Returns the refreshed item on upgrade, None
+    otherwise (not Library-sealed, already templated, Library record missing / without clock
+    params, verify mismatch, non-http_json source). Called by ``ni.run_item`` once per tick; the
+    gate at the top is O(1), so steady-state carries no cost."""
+    assert store is not None and isinstance(item, dict), "store + item required"
+    assert "id" in item and "spec" in item, "item must carry id + spec"
+    spec = item["spec"]
+    source = spec.get("source") or {}
+    url = str(source.get("url") or "")
+    if source.get("type") != "http_json" or not url or "{{param:" in url:
+        return None  # not a target shape, or already upgraded (idempotency)
+    record = _flow_read(store, item["id"]) or {}
+    source_id = str(record.get("_library_source") or "")
+    if not source_id:
+        return None  # not Library-sealed — no record to read the clock-fill shape from
+    lib = _resolve_library()
+    if lib is None:
+        return None
+    try:
+        lib_record = lib.get(source_id)
+    except Exception:  # a broken Library must never fail a tick
+        return None
+    if not isinstance(lib_record, dict):
+        return None  # Library not installed, or the source id has aged out
+    clock_meta = _f1_clock_meta_from_record(lib_record)
+    if not clock_meta:
+        return None  # the record has no clock-fill params — nothing to rewrite
+    when = _f1_item_creation_local(item.get("created_at"))
+    if when is None:
+        return None
+    template = _f1_templatize_literal(url, clock_meta, when)
+    if template == url:
+        return None  # no clock value matched the stored literal — likely a different clock day
+    new_spec = _f1_merge_clock_params(spec, template, clock_meta)
+    if _f1_render_url_at(new_spec, when) != url:
+        log.info("ni upgrade: pre-F1 clock-template verify mismatch; card left untouched")
+        return None
+    orig_u, new_u = urlparse(url), urlparse(template)
+    assert orig_u.hostname == new_u.hostname, "upgrade must preserve host"
+    assert orig_u.scheme == new_u.scheme, "upgrade must preserve scheme"
+    try:
+        store.update_spec(item["id"], new_spec, origin="repair_l1",
+                           preserve_attestations=True)
+    except (ValueError, ni.NIError):
+        return None
+    return store.get_item(item["id"])
+
+
+def _f1_clock_meta_from_record(lib_record: dict) -> dict[str, dict]:
+    """Clock-fill params the record declares, with ``library_resolve._clock_offset`` applied so
+    schedule / next_event records look forward — same adjustment the live ``_expand`` path emits
+    at seal time, so the derived template matches what the user originally fetched."""
+    assert isinstance(lib_record, dict), "library record required"
+    access = lib_record.get("access") or {}
+    assert isinstance(access, dict), "record.access must be a dict"
+    from .library_resolve import _clock_offset as lib_clock_offset
+    params = list(access.get("params") or [])
+    out: dict[str, dict] = {}
+    for p in params[:10]:  # bounded (match _clean_clock_params + _derive_clock_template)
+        fill = p.get("fill") if isinstance(p, dict) else None
+        if not isinstance(fill, dict) or fill.get("from") != "clock":
+            continue
+        name = str(p.get("name") or "")
+        if not re.fullmatch(r"[a-z_][a-z0-9_]*", name):
+            continue
+        fmt = str(fill.get("format") or "")
+        if not fmt:
+            continue
+        offset = int(lib_clock_offset(lib_record, fill, params))
+        out[name] = {"format": fmt[:40], "offset_days": offset,
+                      "label": str(p.get("label") or name)[:200]}
+    return out
+
+
+def _f1_item_creation_local(created_at: object) -> datetime | None:
+    """The item's creation moment in the user's current zone (DuckDB stores created_at as UTC).
+    None when the stored timestamp can't be parsed — the upgrade declines rather than guess."""
+    assert created_at is None or isinstance(created_at, (str, datetime)), "created_at type"
+    assert ni._MAX_CLOCK_OFFSET_DAYS > 0, "clock-offset bound sanity"
+    if created_at is None:
+        return None
+    try:
+        raw = created_at if isinstance(created_at, datetime) \
+            else datetime.fromisoformat(str(created_at).replace(" ", "T"))
+    except ValueError:
+        return None
+    if raw.tzinfo is None:
+        raw = raw.replace(tzinfo=UTC)
+    tz = ni._clock().tzinfo
+    return raw.astimezone(tz) if tz is not None else raw
+
+
+def _f1_templatize_literal(url: str, clock_meta: dict[str, dict],
+                            when: datetime) -> str:
+    """Replace each clock value's rendered creation-day literal in ``url`` with ``{{param:name}}``.
+    Tries the raw rendering first, then the URL-encoded form (``source.url`` is substituted with
+    ``quote(..., safe="")``; a date-only format reproduces either way, a space-bearing one differs
+    and the encoded form matches the stored literal). ``url`` is returned unchanged when no literal
+    matches — the caller then declines the upgrade."""
+    assert isinstance(url, str) and url, "url required"
+    assert isinstance(when, datetime), "when must be a datetime"
+    out = url
+    for name, meta in clock_meta.items():
+        p = {"kind": "clock", "format": meta["format"],
+             "offset_days": int(meta["offset_days"])}
+        raw = ni._render_clock_param(p, when)
+        if not raw:
+            continue
+        placeholder = "{{param:" + name + "}}"
+        if raw in out:
+            out = out.replace(raw, placeholder, 1)
+        elif quote(raw, safe="") in out:
+            out = out.replace(quote(raw, safe=""), placeholder, 1)
+    return out
+
+
+def _f1_merge_clock_params(spec: dict, template: str,
+                            clock_meta: dict[str, dict]) -> dict:
+    """A deep-copy of ``spec`` with ``source.url`` rewritten to ``template`` and a clock-kind
+    spec param added for each ``clock_meta`` entry (merging with any pre-existing params —
+    credentials and declared-answer values stay)."""
+    assert isinstance(spec, dict) and isinstance(template, str), "args required"
+    assert isinstance(clock_meta, dict) and clock_meta, "clock_meta required"
+    new_spec = json.loads(json.dumps(spec))
+    new_spec["source"]["url"] = template
+    merged = dict(new_spec.get("params") or {})
+    for name, meta in clock_meta.items():
+        merged[name] = {"label": meta["label"], "kind": "clock",
+                         "format": meta["format"], "offset_days": int(meta["offset_days"])}
+    new_spec["params"] = merged
+    return new_spec
+
+
+def _f1_render_url_at(spec: dict, when: datetime) -> str:
+    """What ``ni.substitute_params(spec)['source']['url']`` would yield with the engine clock set
+    to ``when`` — the verify gate reads this and refuses the upgrade on any byte mismatch with
+    the stored literal (same semantics ``_handoff``'s C2 assert uses, but for a chosen moment)."""
+    assert isinstance(spec, dict), "spec required"
+    assert isinstance(when, datetime), "when must be a datetime"
+    params = (spec.get("params") or {})
+    url = str((spec.get("source") or {}).get("url") or "")
+
+    def _one(m: re.Match) -> str:
+        name = m.group(1)
+        p = params.get(name) or {}
+        if p.get("kind") == "clock":
+            raw = ni._render_clock_param(p, when)
+        else:
+            raw = str(p.get("value") or "")
+        return quote(raw, safe="")
+
+    return _F1_PLACEHOLDER_RE.sub(_one, url)
 
 
 def _clean_key_need(need: object) -> dict | None:

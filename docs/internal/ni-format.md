@@ -84,6 +84,12 @@ No foreign keys; `NIStore.delete` cascades in code (feeds precedent).
   `%Y %m %d %H %M %S %y %j %u %w %-m %-d %B %b %A %a`; `offset_days` is a bounded int). Library
   schedule / forecast cards (startDate=today, endDate=today+N) use this so day 2 reads day-2's date
   instead of the creation day's literal.
+- Pre-F1 Library cards (installed on v0.24.0 / v0.24.1) sealed the creation day's clock date into
+  `source.url` as a literal. On their first tick, `ni_flow.upgrade_pre_f1_literal_dates` rewrites
+  the URL to the `{{param:name}}` shape + adds a clock-kind spec param per date — one-time,
+  idempotent (the `{{param:` marker gates it), revision-tracked (origin `repair_l1`,
+  `preserve_attestations=True`; the fetched URL at creation time reproduces byte-for-byte, so
+  `_c2_ok` and `contract` still describe the card). A verify mismatch leaves the card untouched.
 - `display.size` ∈ `small | wide` (wide spans two grid columns).
 - `contract` is system-written at commissioning (§7); the agent may never set it.
 - `model` optionally overrides the `ni` route for `model` sources (schedules.model
