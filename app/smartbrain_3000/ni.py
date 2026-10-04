@@ -37,11 +37,12 @@ import re
 import threading
 import time
 import uuid
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta, timezone, tzinfo
 from email.utils import parsedate_to_datetime
 from typing import Any
 from urllib.parse import quote as _url_quote
 from urllib.parse import urlencode, urlparse, urlunsplit
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
@@ -207,8 +208,16 @@ _REVISION_ORIGINS: frozenset[str] = frozenset(
 _TRANSFORM_FNS: frozenset[str] = frozenset(
     {"round", "scale", "offset", "rename", "pick", "sort_by", "top_n",
      "sum", "avg", "min", "max", "count", "delta_prev", "where", "number", "time",
-     "date", "zip", "label", "reverse"}
+     "date", "zip", "label", "reverse", "window"}
 )
+# the rows a ``window`` transform keeps, by their own local date / time (C7 — "this weekend",
+# "tonight", "on Saturday"): a closed enum, the numbers bounded (Open-Meteo forecasts 16 days)
+_WINDOW_RE = re.compile(r"(now|today|tonight|tomorrow|weekend|dow:(mon|tue|wed|thu|fri|sat|sun)"
+                        r"|next_days:([1-9]\d?)|next_hours:([1-9]\d{0,2}))")
+_MAX_WINDOW_DAYS = 16
+_MAX_WINDOW_HOURS = 168
+_DOW_NAMES = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+_NOW_SLOT = timedelta(hours=12)  # a row that started longer ago than this isn't "now"
 # v2 aggregate fns that fail with "empty_aggregate" on an empty input list (count does not).
 _AGGREGATE_FNS: frozenset[str] = frozenset({"sum", "avg", "min", "max"})
 _SORT_DIRS: frozenset[str] = frozenset({"asc", "desc"})
@@ -1133,14 +1142,24 @@ def _validate_transform_op(op: object, i: int, j: int, outputs: set[str]) -> Non
         # ``key`` converts that key in each list row.
         # time's ``utc``: the source sends zoneless timestamps in UTC (TheSportsDB strTimestamp)
         # time's ``clock``: the row already shows its date, so only the clock ("7:56 AM")
-        _closed_keys(node, {"fn", "field", "key", "utc", "clock"} if fn == "time" else {"fn", "field", "key"},
-                     where)
+        # time's ``unless``: the flag that says the time is a placeholder (MLB ``status.startTimeTBD``) —
+        # a row key with ``key``, else a top-level output; when it is set the card shows the date +
+        # "time TBD", never the sentinel clock
+        _closed_keys(node, {"fn", "field", "key", "utc", "clock", "unless"} if fn == "time"
+                     else {"fn", "field", "key"}, where)
         if node.get("key") is not None and not (isinstance(node["key"], str) and len(node["key"]) <= 120
                                                  and _ROW_KEY_RE.fullmatch(node["key"])):
             raise ValueError(f"{where}.key malformed")
         for flag in ("utc", "clock"):
             if node.get(flag) is not None and not isinstance(node[flag], bool):
                 raise ValueError(f"{where}.{flag} must be true or false")
+        unless = node.get("unless")
+        if unless is not None and not (isinstance(unless, str) and len(unless) <= 120 and (
+                _ROW_KEY_RE.fullmatch(unless) if node.get("key") is not None else _KEY_RE.match(unless))):
+            raise ValueError(f"{where}.unless malformed")
+        return
+    if fn == "window":
+        _validate_transform_window(node, where)
         return
     if fn == "zip":
         # parallel arrays (a table stored as columns) → one list of rows keyed by the column names
@@ -1288,6 +1307,31 @@ def _validate_transform_where(node: dict, where: str) -> None:
         raise ValueError(  # noqa: TRY004 — validator raises ValueError uniformly
             f"{where}.value must be a JSON scalar (string/number/bool)"
         )
+
+
+def _validate_transform_window(node: dict, where: str) -> None:
+    """C7 ``window`` transform: keep the rows of a list whose own local date / time falls in the asked
+    window, evaluated on every run. Closed shape ``{fn, field, key, window, zone?}``: ``key`` is the row
+    key holding the date / time (§4.1 single-key grammar, dotted for nested rows, as ``where`` takes),
+    ``window`` one of ``now | today | tonight | tomorrow | weekend | dow:<mon..sun> | next_days:N
+    (1..16) | next_hours:N (1..168)``, ``zone`` (optional) the top-level output holding the source's
+    time zone — an IANA name or a UTC offset in seconds (Open-Meteo ``timezone`` /
+    ``utc_offset_seconds``). No new output name — the list stays under ``field``."""
+    assert isinstance(node, dict), "node must be a dict"
+    assert isinstance(where, str) and where, "where required"
+    _closed_keys(node, {"fn", "field", "key", "window", "zone"}, where)
+    key = node.get("key")
+    if not isinstance(key, str) or len(key) > 120 or not _ROW_KEY_RE.fullmatch(key):
+        raise ValueError(f"{where}.key malformed")
+    window = node.get("window")
+    match = _WINDOW_RE.fullmatch(window) if isinstance(window, str) else None
+    if match is None or int(match.group(3) or 1) > _MAX_WINDOW_DAYS \
+            or int(match.group(4) or 1) > _MAX_WINDOW_HOURS:
+        raise ValueError(f"{where}.window must be now|today|tonight|tomorrow|weekend|dow:<mon..sun>"
+                         f"|next_days:1..{_MAX_WINDOW_DAYS}|next_hours:1..{_MAX_WINDOW_HOURS}")
+    zone = node.get("zone")
+    if zone is not None and not (isinstance(zone, str) and _KEY_RE.match(zone)):
+        raise ValueError(f"{where}.zone must name a top-level output")
 
 
 def _validate_transform_as(name: object, where: str, outputs: set[str]) -> None:
@@ -1543,8 +1587,13 @@ def _validate_divider(node: dict) -> list[object]:
 
 
 def _validate_text(node: dict) -> list[object]:
-    _closed_keys(node, {"type", "value", "role", "tone", "size", "when"}, "scene text")
+    _closed_keys(node, {"type", "value", "role", "tone", "size", "when", "next"}, "scene text")
     _validate_bindable(node.get("value"), "scene text.value", allow_string=True, max_len=_MAX_TEXT_CHARS)
+    # ``next``: the bound value is a next-event time; once it has passed, the card says so (C9)
+    if "next" in node and not isinstance(node["next"], bool):
+        raise ValueError("scene text.next must be true or false")
+    if node.get("next") is True and not (isinstance(node.get("value"), dict) and "$bind" in node["value"]):
+        raise ValueError("scene text.next needs a bound value ($bind)")
     if node.get("role") not in _TEXT_ROLES:
         raise ValueError(f"scene text.role must be one of {sorted(_TEXT_ROLES)}")
     if node.get("tone") not in _TEXT_TONES:
@@ -1917,9 +1966,13 @@ def _apply_transform_op(op: dict, payload: dict, *, history: dict) -> dict:
     if fn == "number":
         out[field] = _txf_number(payload[field], op.get("key"))
     elif fn == "time":
-        utc, clock = bool(op.get("utc")), bool(op.get("clock"))
-        convert = lambda v: local_time(v, naive_utc=utc, clock_only=clock)
-        out[field] = _txf_rows(payload[field], op.get("key"), convert)
+        out[field] = _txf_time(payload, field, op)
+    elif fn == "window":
+        zone = op.get("zone")
+        if zone is not None and zone not in payload:
+            raise NIError("transform_miss", f"field {zone!r}")
+        out[field] = _txf_window(payload[field], op["key"], op["window"],
+                                 None if zone is None else payload[zone])
     elif fn == "date":
         out[field] = _txf_rows(payload[field], op.get("key"), local_date)
     elif fn == "zip":
@@ -1997,29 +2050,42 @@ _RFC2822_RE = re.compile(r"(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s*)?\d{1,2}\s+"
                          r"(?:\s+(?:[A-Za-z]{1,5}|[+-]\d{4}))?")
 
 
+def _clock() -> datetime:
+    """The user's clock, in the user's zone (one seam, so tests can freeze it)."""
+    return datetime.now().astimezone()
+
+
+def _time_moment(value: object, *, naive_utc: bool = False) -> datetime:
+    """An ISO timestamp, an RFC 2822 date or an epoch (seconds or milliseconds) → an aware moment in
+    the user's zone. A zoneless ISO timestamp is the source's local time, taken as written."""
+    if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 1e8:
+        return datetime.fromtimestamp(value / 1000 if value > 1e11 else value, tz=UTC).astimezone()
+    if isinstance(value, str) and _ISO_TIME_RE.fullmatch(value.strip()):
+        text = value.strip().replace(" ", "T", 1).replace("Z", "+00:00")
+        parsed = datetime.fromisoformat(text)
+        if parsed.tzinfo is None and naive_utc:
+            parsed = parsed.replace(tzinfo=UTC)
+        return parsed.astimezone() if parsed.tzinfo else parsed.replace(tzinfo=_clock().tzinfo)
+    if isinstance(value, str) and _RFC2822_RE.fullmatch(value.strip()):
+        try:
+            parsed = parsedate_to_datetime(value.strip())
+        except (TypeError, ValueError):
+            raise NIError("transform_type", "time: not a real date") from None
+        return (parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)).astimezone()  # "-0000" is UTC
+    raise NIError("transform_type", "time needs an ISO timestamp, an RFC 2822 date or an epoch")
+
+
 def local_time(value: object, *, naive_utc: bool = False, clock_only: bool = False) -> str:
     """An ISO timestamp, an RFC 2822 date (RSS ``pubDate``) or an epoch (seconds or milliseconds) →
     the user's local time, readably: "6:48 PM" today, "Tue 6:48 PM" this week, "Oct 3, 6:48 PM"
     further out. An ISO timestamp without a zone is the source's local time and shown as written —
     unless ``naive_utc`` (the source declares its zoneless times are UTC). ``clock_only``: just
     "6:48 PM" (a table row that already shows its date)."""
-    now = datetime.now().astimezone()
-    if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 1e8:
-        moment = datetime.fromtimestamp(value / 1000 if value > 1e11 else value, tz=UTC).astimezone()
-    elif isinstance(value, str) and _ISO_TIME_RE.fullmatch(value.strip()):
-        text = value.strip().replace(" ", "T", 1).replace("Z", "+00:00")
-        parsed = datetime.fromisoformat(text)
-        if parsed.tzinfo is None and naive_utc:
-            parsed = parsed.replace(tzinfo=UTC)
-        moment = parsed.astimezone() if parsed.tzinfo else parsed.replace(tzinfo=now.tzinfo)
-    elif isinstance(value, str) and _RFC2822_RE.fullmatch(value.strip()):
-        try:
-            parsed = parsedate_to_datetime(value.strip())
-        except (TypeError, ValueError):
-            raise NIError("transform_type", "time: not a real date") from None
-        moment = (parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)).astimezone()  # "-0000" is UTC
-    else:
-        raise NIError("transform_type", "time needs an ISO timestamp, an RFC 2822 date or an epoch")
+    return _moment_text(_time_moment(value, naive_utc=naive_utc), clock_only)
+
+
+def _moment_text(moment: datetime, clock_only: bool) -> str:
+    now = _clock()
     clock = moment.strftime("%I:%M %p").lstrip("0")
     days = (moment.date() - now.date()).days
     if days == 0 or clock_only:
@@ -2043,7 +2109,7 @@ def local_date(value: object) -> str:
         day = None
     if day is None:
         raise NIError("transform_type", "date needs a YYYY-MM-DD date")
-    today = datetime.now().astimezone().date()
+    today = _clock().date()
     if abs((day - today).days) < 7:
         return f"{day.strftime('%a %b')} {day.day}"
     text = f"{day.strftime('%b')} {day.day}"
@@ -2071,6 +2137,232 @@ def _set_in(node: object, parts: list[str], convert) -> object:
     if not head.startswith("[") and isinstance(node, dict) and head in node:
         return {**node, head: _set_in(node[head], rest, convert)}
     return node
+
+
+class _TimeText(str):
+    """A time shown as text ("Tue 6:48 PM") that still knows its ``moment``, so a scene value marked
+    ``next`` can tell, on the run that binds it, that a next-event time has passed (C9)."""
+
+    moment: datetime
+
+
+def _time_text(text: str, moment: datetime) -> _TimeText:
+    out = _TimeText(text)
+    out.moment = moment
+    return out
+
+
+def _txf_time(payload: dict, field: str, op: dict) -> object:
+    """``time``: timestamps → the user's local time. With ``unless``, a time whose flag is set (a row
+    key with ``key``, else a top-level output) is a placeholder: the card shows its date + "time TBD"
+    (C15: MLB postseason games carry a sentinel start until the league sets one)."""
+    utc, clock, key, unless = bool(op.get("utc")), bool(op.get("clock")), op.get("key"), op.get("unless")
+
+    def shown(value: object) -> _TimeText:
+        moment = _time_moment(value, naive_utc=utc)
+        return _time_text(_moment_text(moment, clock), moment)
+
+    def tbd(value: object) -> _TimeText:
+        return _tbd_text(value, naive_utc=utc, clock_only=clock)
+
+    if unless is None:
+        return _txf_rows(payload[field], key, shown)
+    if key is None:
+        if unless not in payload:
+            raise NIError("transform_miss", f"field {unless!r}")
+        return tbd(payload[field]) if _flag_set(payload[unless]) else shown(payload[field])
+    if not isinstance(payload[field], list):
+        raise NIError("transform_type", "a keyed conversion needs a list")
+    parts, flag = _key_parts(key), _key_parts(unless)
+    out: list = []
+    for row in payload[field]:  # bounded by input length
+        found, value = _row_lookup(row, flag)
+        out.append(_set_in(row, parts, tbd if found and _flag_set(value) else shown))
+    return out
+
+
+def _key_parts(key: str) -> list[str]:
+    return re.findall(r"[^.\[\]]+|\[\d+\]", key)
+
+
+def _flag_set(value: object) -> bool:
+    """A source's yes/no flag: true, or text that says so ("true", "Y", "TBD", "TBA")."""
+    if isinstance(value, str):
+        return value.strip().lower() in ("true", "yes", "y", "1", "tbd", "tba")
+    return value is True
+
+
+def _tbd_text(value: object, *, naive_utc: bool, clock_only: bool) -> _TimeText:
+    """A placeholder start time → the date as the source wrote it (the sentinel clock could shift it a
+    day) + "time TBD"; its moment is the end of that day, so it stays the next event all day."""
+    if isinstance(value, str) and _DATE_RE.fullmatch(value.strip()):
+        day_text = value.strip()[:10]
+    else:
+        day_text = _time_moment(value, naive_utc=naive_utc).date().isoformat()
+    shown = local_date(day_text)  # validates the date
+    day = date.fromisoformat(day_text)
+    end = datetime(day.year, day.month, day.day, 23, 59, 59, tzinfo=_clock().tzinfo)
+    return _time_text("time TBD" if clock_only else f"{shown} · time TBD", end)
+
+
+def next_event_stale(value: object, now: datetime, grace_minutes: int = 15) -> bool:
+    """True when a next-event time is more than ``grace_minutes`` before ``now``: a "next eruption
+    9:52 AM" read at noon is no longer a prediction (C9). ``value`` is a raw timestamp (ISO, RFC 2822,
+    epoch), a datetime, or a ``time`` transform's text (which keeps its moment). A value with no
+    readable moment is never stale — there is nothing to judge."""
+    assert isinstance(now, datetime), "now must be a datetime"
+    if isinstance(value, _TimeText):
+        moment = getattr(value, "moment", None)
+    elif isinstance(value, datetime):
+        moment = value
+    else:
+        try:
+            moment = _time_moment(value)
+        except (NIError, ValueError, OverflowError, OSError):
+            return False
+    if not isinstance(moment, datetime):
+        return False
+    now = now if now.tzinfo else now.astimezone()
+    moment = moment if moment.tzinfo else moment.replace(tzinfo=now.tzinfo)
+    return moment < now - timedelta(minutes=grace_minutes)
+
+
+def _txf_window(value: object, key: str, window: str, zone: object) -> list:
+    """C7 window(field, key, window, zone): keep the rows whose own local date / time falls in the
+    asked window, judged against the clock on every run (so "this weekend" stays this weekend).
+
+    A row's time reads as the source wrote it: a zoneless ISO value is the source's local time, one
+    with an offset is local to that offset, an epoch is placed in the source's zone. "Today" is the
+    source's today: in ``zone`` when the spec names one, else in the offset of the row nearest now,
+    else on the user's clock. A day row (a date, no clock) answers day windows only. Like ``where``,
+    selection is not validation: a row whose time can't be read is left out; only a non-list fails."""
+    if not isinstance(value, list):
+        raise NIError("transform_type", "window needs a list")
+    assert _WINDOW_RE.fullmatch(window), "window already validated"
+    now = _clock()
+    tz = _window_zone(zone)
+    parts = _key_parts(key)
+    stamps = [_row_stamp(row, parts, tz, tz or now.tzinfo) for row in value]
+    local_now = now.astimezone(tz or _nearest_offset(stamps, now) or now.tzinfo)
+    if window == "now":
+        keep = _now_slot(stamps, local_now)
+    else:
+        test = _window_test(window, local_now)
+        keep = [st is not None and test(st) for st in stamps]
+    return [row for row, kept in zip(value, keep, strict=True) if kept]
+
+
+def rows_all_past(rows: object, key: str) -> bool:
+    """Is every readable row time at ``key`` before today, on the calendar the window transform reads it
+    on (an observation-date series: FRED's recent weeks)? False when no row time can be read."""
+    if not isinstance(rows, list):
+        return False
+    now = _clock()
+    parts = _key_parts(key)
+    stamps = [st for st in (_row_stamp(row, parts, None, now.tzinfo) for row in rows[:500]) if st is not None]
+    today = now.astimezone(_nearest_offset(stamps, now) or now.tzinfo).date()
+    return bool(stamps) and all(st[0].date() < today for st in stamps)
+
+
+_DAY_ONLY_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
+_ZONE_NAME_RE = re.compile(r"[A-Za-z][A-Za-z0-9_+-]*(/[A-Za-z0-9_+-]+){0,2}")
+# one row's time for a window: (wall clock as the source means it, the instant when known, has a clock)
+_Stamp = tuple[datetime, datetime | None, bool]
+
+
+def _window_zone(zone: object) -> tzinfo | None:
+    """The source's zone from its own field: an IANA name, or a UTC offset in seconds."""
+    if zone is None:
+        return None
+    if isinstance(zone, (int, float)) and not isinstance(zone, bool) and math.isfinite(zone) \
+            and float(zone).is_integer() and abs(zone) < 86400:
+        return timezone(timedelta(seconds=int(zone)))
+    if isinstance(zone, str) and len(zone) <= 64 and _ZONE_NAME_RE.fullmatch(zone):
+        try:
+            return ZoneInfo(zone)
+        except (ZoneInfoNotFoundError, ValueError):
+            pass
+    raise NIError("transform_type", "window: the source's time zone isn't one the app knows")
+
+
+def _row_stamp(row: object, parts: list[str], tz: tzinfo | None, epoch_tz: tzinfo) -> _Stamp | None:
+    found, raw = _row_lookup(row, parts)
+    if not found:
+        return None
+    if isinstance(raw, (int, float)) and not isinstance(raw, bool) and raw > 1e8:
+        try:
+            instant = datetime.fromtimestamp(raw / 1000 if raw > 1e11 else raw, tz=UTC).astimezone(epoch_tz)
+        except (OverflowError, OSError, ValueError):
+            return None
+        return instant.replace(tzinfo=None), instant, True
+    text = raw.strip() if isinstance(raw, str) else ""
+    try:
+        if _DAY_ONLY_RE.fullmatch(text):
+            return datetime.fromisoformat(text), None, False
+        if not _ISO_TIME_RE.fullmatch(text):
+            return None
+        parsed = datetime.fromisoformat(text.replace(" ", "T", 1))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed, None, True
+    if tz is None and parsed.utcoffset() == timedelta(0):
+        # a "Z" says when, not where (MLB / NHL send every start in UTC): with no zone named, the row's
+        # day is the user's ("today" at 21:30 in New York keeps tonight's 9:40 PM game)
+        return parsed.astimezone(epoch_tz).replace(tzinfo=None), parsed, True
+    return (parsed.astimezone(tz) if tz else parsed).replace(tzinfo=None), parsed, True
+
+
+def _nearest_offset(stamps: list[_Stamp | None], now: datetime) -> tzinfo | None:
+    """The zone of the row nearest now (its offset is the one in force now, even across a DST change).
+    A UTC stamp names no zone (see ``_row_stamp``): it leaves the day to the user's clock."""
+    instants = [st[1] for st in stamps if st is not None and st[1] is not None and st[1].utcoffset() != timedelta(0)]
+    return min(instants, key=lambda m: abs(m - now)).tzinfo if instants else None
+
+
+def _now_slot(stamps: list[_Stamp | None], local_now: datetime) -> list[bool]:
+    """``now``: the timed row that started most recently, not in the future and under 12 hours ago."""
+    ages: list[timedelta | None] = []
+    for st in stamps:  # bounded by input length
+        if st is None or not st[2]:
+            ages.append(None)
+            continue
+        # instants subtract in UTC (same-zone aware arithmetic is wall-clock, wrong across DST)
+        age = (local_now.astimezone(UTC) - st[1].astimezone(UTC) if st[1] is not None
+               else local_now.replace(tzinfo=None) - st[0])
+        ages.append(age if timedelta(0) <= age < _NOW_SLOT else None)
+    best = min((a for a in ages if a is not None), default=None)
+    return [a is not None and a == best for a in ages]
+
+
+def _window_test(window: str, local_now: datetime):
+    """The row test for every window but ``now``, at the source's local ``local_now``."""
+    day = local_now.date()
+    if window == "tonight":  # 18:00 today → 06:00 tomorrow, on the source's wall clock
+        start = local_now.replace(hour=18, minute=0, second=0, microsecond=0, tzinfo=None)
+        return lambda st: st[2] and start <= st[0] < start + timedelta(hours=12)
+    if window.startswith("next_hours:"):
+        hours = timedelta(hours=int(window.split(":")[1]))
+        wall_hour = local_now.replace(minute=0, second=0, microsecond=0, tzinfo=None)
+        hour = local_now.replace(minute=0, second=0, microsecond=0).astimezone(UTC)  # real hours, in UTC
+        return lambda st: st[2] and (hour <= st[1].astimezone(UTC) < hour + hours if st[1] is not None
+                                     else wall_hour <= st[0] < wall_hour + hours)
+    days = _window_days(window, day)
+    return lambda st: st[0].date() in days
+
+
+def _window_days(window: str, day: date) -> set[date]:
+    """The calendar days a day window keeps, from the source's ``day`` (today)."""
+    if window in ("today", "tomorrow"):
+        return {day + timedelta(days=int(window == "tomorrow"))}
+    if window == "weekend":  # the coming Sat + Sun; on Saturday both, on Sunday what's left: Sunday
+        if day.weekday() == 6:
+            return {day}
+        saturday = day + timedelta(days=5 - day.weekday())
+        return {saturday, saturday + timedelta(days=1)}
+    if window.startswith("dow:"):  # the next such day, today included
+        return {day + timedelta(days=(_DOW_NAMES.index(window[4:]) - day.weekday()) % 7)}
+    return {day + timedelta(days=i) for i in range(int(window.split(":")[1]))}  # next_days:N
 
 
 def _txf_number(value: object, key: object) -> object:
@@ -2570,6 +2862,9 @@ def _resolve_param_string(value: str, params: dict, *, path: str,
     return _PARAM_PLACEHOLDER.sub(_one, value)
 
 
+_NO_CURRENT_PREDICTION = "no current prediction"
+
+
 def bind_scene(scene: dict, data: dict, *, history: dict | None = None,
                image_ref: dict | None = None) -> dict:
     """Return the scene with $bind + {{path}} resolved and repeat nodes expanded.
@@ -2636,7 +2931,7 @@ def _bind_node(node: object, data: dict, *, depth: int, item: Any,
                             image_ref=image_ref)
     out: dict = {"type": ntype}
     for key, value in node.items():
-        if key in ("type", "when"):
+        if key in ("type", "when", "next"):
             continue
         if key == "children":
             child_nodes: list[dict] = []
@@ -2650,6 +2945,8 @@ def _bind_node(node: object, data: dict, *, depth: int, item: Any,
             out[key] = _bind_value(value, data, item=item)
     if ntype == "image":
         out["src"] = _bind_image_src(image_ref)
+    if node.get("next") is True and next_event_stale(out.get("value"), _clock()):
+        out["value"] = _NO_CURRENT_PREDICTION
     if tone_override is not None:
         out["tone"] = tone_override
     return out
@@ -4062,6 +4359,88 @@ def ground_llm_outputs(outputs: dict, source_text: str,
                 dropped.append(name)
                 break
     return cleaned, dropped
+
+
+_GROUND_WINDOW = 400  # a word value's words must sit together: one stretch of this many characters
+_GROUND_MAX_TOKENS = 24
+_GROUND_WORD_RE = re.compile(r"[^\W\d_]+")
+_GROUND_STOPWORDS: frozenset[str] = frozenset(
+    {"a", "an", "the", "of", "in", "on", "at", "to", "for", "and", "or", "is", "are", "was", "were",
+     "be", "by", "with", "from", "as", "it", "its", "this", "that"}
+)
+
+
+def ground_values(values: dict, text: str) -> dict[str, bool]:
+    """Build-time grounding for values read off a page (C9): per value, True when the page text holds
+    it — every number exactly (1,409 = 1409; 40 never matches 409; a time or score like 07:25 / 49-18
+    as the whole run, never its parts) and every word but a stopword, all inside one 400-character
+    stretch of the text, ignoring case. An empty value claims nothing (True); on an empty page nothing
+    is grounded. The number rule is ``ground_llm_outputs``' tightened to whole numbers, plus words.
+    Deterministic; no model."""
+    assert isinstance(values, dict), "values must be a dict"
+    page = str(text or "").casefold()
+    index: dict[object, list[int]] = {}
+    for token, pos in _ground_tokens(page, runs_whole=False):  # bounded by the page length
+        index.setdefault(token, []).append(pos)
+    return {name: _value_grounded(value, index, bool(page.strip())) for name, value in values.items()}
+
+
+# a run of numbers joined by ':' '-' '/' (a clock, a score, a date): grounded as a whole
+_GROUND_RUN_RE = re.compile(r"\d+(?:\s?[:/\-\u2013\u2014]\s?\d+)+")
+
+
+def _ground_tokens(text: str, *, runs_whole: bool) -> list[tuple[object, int]]:
+    """(token, position) for every number run, number and word in ``text``. ``runs_whole``: a run's
+    own numbers are not claimed separately (a value's "07:25" needs "07:25", not a 7 and a 25)."""
+    out: list[tuple[object, int]] = []
+    spans: list[tuple[int, int]] = []
+    for m in _GROUND_RUN_RE.finditer(text):
+        parts = re.findall(r"\d+|[:/-]", re.sub(r"[\u2013\u2014]", "-", m.group()))
+        run = "".join(x if x in ":/-" else str(int(x)) for x in parts)
+        out.append((("run", run), m.start()))
+        if not runs_whole and run.count(":") == 2:  # the page's 19:52:58 grounds a reading of 19:52
+            out.append((("run", run.rsplit(":", 1)[0]), m.start()))
+        spans.append(m.span())
+    for m in _GROUND_NUM_RE.finditer(text):
+        if not (runs_whole and any(a <= m.start() < b for a, b in spans)):
+            out.append((float(m.group().replace(",", "")), m.start()))
+    out.extend((m.group(), m.start()) for m in _GROUND_WORD_RE.finditer(text))
+    return out
+
+
+def _value_grounded(value: object, index: dict, has_text: bool) -> bool:
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return True
+    if not has_text:
+        return False
+    if isinstance(value, list):
+        return all(_value_grounded(v, index, has_text) for v in value[:50])
+    if isinstance(value, bool) or not isinstance(value, (str, int, float)):
+        return False
+    if isinstance(value, (int, float)):
+        return bool(index.get(float(value)))
+    claims = [index.get(token, []) for token in dict.fromkeys(  # distinct, in order
+        t for t, _ in _ground_tokens(str(value).casefold(), runs_whole=True)
+        if t not in _GROUND_STOPWORDS)][:_GROUND_MAX_TOKENS]
+    return all(claims) and _one_stretch(claims, _GROUND_WINDOW)
+
+
+def _one_stretch(claims: list[list[int]], width: int) -> bool:
+    """True when one position from every list fits inside ``width`` characters (sliding window)."""
+    events = sorted((pos, i) for i, positions in enumerate(claims) for pos in positions[:500])
+    seen: dict[int, int] = {}
+    lo = 0
+    for pos, i in events:  # bounded by _GROUND_MAX_TOKENS × 500
+        seen[i] = seen.get(i, 0) + 1
+        while events[lo][0] < pos - width:
+            j = events[lo][1]
+            seen[j] -= 1
+            if not seen[j]:
+                del seen[j]
+            lo += 1
+        if len(seen) == len(claims):
+            return True
+    return False
 
 
 def run_item(store: NIStore, item_id: str, *, gateway_mod, secrets_store,

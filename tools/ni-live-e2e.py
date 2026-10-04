@@ -87,8 +87,9 @@ def _overlay_answers(answers_dir: pathlib.Path) -> None:
     library_index.LibraryIndex.answers = answers
 
 
-def _tap_first(store, item_id: str, secrets) -> tuple[str | None, str]:
-    """Tap the first suggestion the way ``pick_flow_source`` does. Returns (url, what)."""
+def _tap_first(store, item_id: str, secrets, tapped: list) -> tuple[str | None, str]:
+    """Tap the first suggestion the way ``pick_flow_source`` does. Returns (url, what); the tapped
+    reading (its label and filled params, which place / team it is) is appended to ``tapped``."""
     field = ni_flow.board_flow_field(store, item_id) or {}
     sugs = field.get("suggestions") or []
     if not sugs:
@@ -97,6 +98,8 @@ def _tap_first(store, item_id: str, secrets) -> tuple[str | None, str]:
     url = first["url"]
     record = ni_flow._flow_read(store, item_id) or {}
     row = next((r for r in record.get("_ranked_library") or [] if r.get("url") == url), None)
+    tapped.append({"title": first.get("title"), "url": url, "label": (row or {}).get("label") or "",
+                   "params": (row or {}).get("params") or {}, "scope": (row or {}).get("scope")})
     if row:
         ni_flow.seal_library_pick(store, item_id, url, row)
         if ni_flow.seal_access(store, item_id, url, row) is not None:
@@ -115,7 +118,8 @@ def run_one(ask: str, idx, llm, model: str) -> dict:
     ni_flow.set_search_provider(lambda: search.SearchService())
     ni_flow.set_secrets_provider(lambda: secrets)
     bridge = lambda _m, prompt: llm(prompt, 600)  # noqa: E731
-    out: dict = {"ask": ask, "outcome": "", "source": "", "detail": "", "preview": None}
+    out: dict = {"ask": ask, "outcome": "", "source": "", "detail": "", "preview": None, "tapped": [],
+                 "notes": []}
     started = time.time()
     try:
         item_id = ni_flow.create_shell_item(store, ask)
@@ -123,7 +127,7 @@ def run_one(ask: str, idx, llm, model: str) -> dict:
         for _tap in range(3):  # a source that refuses us re-lands the pick: tap the next one, like a person
             if rec.get("state") != "source":
                 break
-            url, what = _tap_first(store, item_id, secrets)
+            url, what = _tap_first(store, item_id, secrets, out["tapped"])
             out["source"] = (out["source"] + " → " if out["source"] else "") + what
             if url is None:
                 out["outcome"] = what.split(" ")[0] if what.startswith("needs-") else "no-source"
@@ -131,6 +135,7 @@ def run_one(ask: str, idx, llm, model: str) -> dict:
             rec = ni_flow.run_flow(store, item_id, gateway_call=bridge, ni_route_model=model, source_url=url)
         state = str(rec.get("state") or "")
         out["detail"] = str(rec.get("error") or "")[:160]
+        out["notes"] = [str(n) for n in rec.get("notes") or []]  # the flow's own account: frame, verify
         if state != "ready":
             out["outcome"] = "failed" if state in ("failed", "unsupported") else state
             return out

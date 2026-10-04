@@ -1780,9 +1780,16 @@ def test_judge_disclosures_land_in_the_journal() -> None:
 
 # --- G4b: the page door (field 2026-09-21 — every pasted URL was a webpage) --
 
+# C9 (2026-10-03): a page with next to no readable text is a JS shell and is never read; the stubs
+# carry a page's ordinary prose around the data they test
+_PAGE_PROSE = ("\nThis page is updated through the day by the office that publishes it. Readings are "
+               "posted as they come in, and the times shown are local. Check back later for the next "
+               "update to these readings, or contact the office with questions about them.")
+
+
 def _page_stub(monkeypatch, text: str, title: str) -> None:
     monkeypatch.setattr(nimod, "_fetch_http_page",
-                        lambda source, item_id, secrets, **kw: {"text": text,
+                        lambda source, item_id, secrets, **kw: {"text": text + _PAGE_PROSE,
                                                            "title": title})
 
 
@@ -1791,7 +1798,7 @@ def test_page_door_builds_an_interpreted_card(monkeypatch) -> None:
     ONE code-built llm stage extracting the asked-for fields — the shipped
     jail + llm machinery, finally doored."""
     store, _conn = _store()
-    _page_stub(monkeypatch, "Tropical Storm Fay, 40 kt. No hurricanes.",
+    _page_stub(monkeypatch, "Tropical storms: Tropical Storm Fay, 40 kt. No hurricanes.",
                "NHC Outlook")
     llm_reply = json.dumps({"tropical_storms": "Tropical Storm Fay (40 kt)",
                              "hurricanes": ""})
@@ -2019,12 +2026,12 @@ def test_s2_evaluate_orders_by_page_evidence(monkeypatch) -> None:
         "https://rich.example.org/": {
             "url": "https://rich.example.org/", "title": "Tide Times",
             "entities": [{"type": "Event", "name": "High Tide", "time": "7:12"}],
-            "tables": [], "feeds": [], "meta": {}, "outline": [], "text": "tide",
+            "tables": [], "feeds": [], "meta": {}, "outline": [], "text": "tide" + _PAGE_PROSE,
         },
         "https://bland.example.org/": {
             "url": "https://bland.example.org/", "title": "Portal",
             "entities": [], "tables": [], "feeds": [], "meta": {},
-            "outline": [], "text": "nothing relevant here",
+            "outline": [], "text": "nothing relevant here" + _PAGE_PROSE,
         },
     }
 
@@ -2147,7 +2154,7 @@ def test_page_card_scene_labels_are_the_users_words() -> None:
                json.dumps({"serves": True, "gaps": [], "wrong": []})]
 
     def fake_page(source, item_id_, secrets, **kw):
-        return {"text": "Tropical Storm Fay, 40 kt.", "title": "NHC Outlook"}
+        return {"text": "Tropical storms: Tropical Storm Fay, 40 kt." + _PAGE_PROSE, "title": "NHC Outlook"}
 
     orig = nimod_fetch = ni_flow.ni._fetch_http_page
     ni_flow.ni._fetch_http_page = fake_page
@@ -2304,7 +2311,7 @@ def test_p2_judge_rejection_falls_back_and_says_so(monkeypatch) -> None:
 def test_p2_text_only_page_skips_the_compile_call(monkeypatch) -> None:
     """No data-bearing layer → no compile model call at all (the replies
     list proves it: only llm + judge are consumed)."""
-    bare = {"text": "High tide 7:12 AM.", "title": "Tides", "entities": [],
+    bare = {"text": "Creek tides. High tide 7:12 AM." + _PAGE_PROSE, "title": "Tides", "entities": [],
             "tables": [], "feeds": [], "meta": {}, "outline": ["h1: Tides"]}
     store, item_id, result = _p2_build(monkeypatch, [
         json.dumps({"high_tide_time": "7:12 AM"}),

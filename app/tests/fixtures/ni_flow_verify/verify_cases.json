@@ -1,0 +1,653 @@
+[
+{
+"ask": "Chiefs next game",
+"sample": "chiefs",
+"subject": "Kansas City Chiefs",
+"wants": [
+"next game"
+],
+"place": null,
+"expect": "accept",
+"note": null
+},
+{
+"ask": "when do the Chiefs play next",
+"sample": "chiefs",
+"subject": "Kansas City Chiefs",
+"wants": [
+"next game time"
+],
+"place": null,
+"expect": "accept",
+"note": null
+},
+{
+"ask": "Bills next opponent",
+"sample": "bills",
+"subject": "Buffalo Bills",
+"wants": [
+"opponent"
+],
+"place": null,
+"expect": "accept",
+"note": null
+},
+{
+"ask": "what time is the Packers game",
+"sample": "packers",
+"subject": "Green Bay Packers",
+"wants": [
+"game time"
+],
+"place": null,
+"expect": "accept",
+"note": null
+},
+{
+"ask": "Bills schedule",
+"sample": "bills",
+"subject": "Buffalo Bills",
+"wants": [
+"next game"
+],
+"place": null,
+"expect": "accept",
+"note": null
+},
+{
+"ask": "Bills score",
+"sample": "bills",
+"subject": "Buffalo Bills",
+"wants": [
+"score"
+],
+"place": null,
+"expect": "reject",
+"note": null
+},
+{
+"ask": "Packers score",
+"sample": "packers",
+"subject": "Green Bay Packers",
+"wants": [
+"score"
+],
+"place": null,
+"expect": "reject",
+"note": null
+},
+{
+"ask": "did the Chiefs win",
+"sample": "chiefs",
+"subject": "Kansas City Chiefs",
+"wants": [
+"result"
+],
+"place": null,
+"expect": "reject",
+"note": null
+},
+{
+"ask": "Chiefs final score",
+"sample": "chiefs",
+"subject": "Kansas City Chiefs",
+"wants": [
+"final score"
+],
+"place": null,
+"expect": "reject",
+"note": null
+},
+{
+"ask": "how did the Bills do",
+"sample": "bills",
+"subject": "Buffalo Bills",
+"wants": [
+"result"
+],
+"place": null,
+"expect": "reject",
+"note": null
+},
+{
+"ask": "Packers result",
+"sample": "packers",
+"subject": "Green Bay Packers",
+"wants": [
+"result"
+],
+"place": null,
+"expect": "reject",
+"note": null
+},
+{
+"ask": "where is the ISS right now",
+"sample": "iss",
+"subject": "ISS",
+"wants": [
+"location"
+],
+"place": null,
+"expect": "accept",
+"note": null
+},
+{
+"ask": "ISS location",
+"sample": "iss",
+"subject": "ISS",
+"wants": [
+"latitude",
+"longitude"
+],
+"place": null,
+"expect": "accept",
+"note": null
+},
+{
+"ask": "how high is the space station",
+"sample": "iss",
+"subject": "ISS",
+"wants": [
+"altitude"
+],
+"place": null,
+"expect": "accept",
+"note": null
+},
+{
+"ask": "when can I see the ISS from Kansas City",
+"sample": "iss",
+"subject": "ISS visibility",
+"wants": [
+"next pass time"
+],
+"place": "Kansas City",
+"expect": "reject",
+"note": null
+},
+{
+"ask": "next ISS pass over Denver",
+"sample": "iss",
+"subject": "ISS",
+"wants": [
+"next pass"
+],
+"place": "Denver",
+"expect": "reject",
+"note": null
+},
+{
+"ask": "when will the ISS fly over Chicago",
+"sample": "iss",
+"subject": "ISS",
+"wants": [
+"flyover time"
+],
+"place": "Chicago",
+"expect": "reject",
+"note": null
+},
+{
+"ask": "northern lights in Fairbanks tonight",
+"sample": "kp_forecast",
+"subject": "northern lights",
+"wants": [
+"kp index"
+],
+"place": "Fairbanks",
+"expect": "accept",
+"note": "isn't specific to Fairbanks"
+},
+{
+"ask": "kp forecast",
+"sample": "kp_forecast",
+"subject": "kp index",
+"wants": [
+"kp forecast"
+],
+"place": null,
+"expect": "accept",
+"note": null
+},
+{
+"ask": "geomagnetic storm tonight",
+"sample": "kp_forecast",
+"subject": "geomagnetic storm",
+"wants": [
+"kp"
+],
+"place": null,
+"expect": "accept",
+"note": null
+},
+{
+"ask": "aurora forecast",
+"sample": "kp_forecast",
+"subject": "aurora",
+"wants": [
+"kp forecast"
+],
+"place": null,
+"expect": "accept",
+"note": null
+},
+{
+"ask": "is it gonna storm in Tulsa tonight",
+"sample": "kp_forecast",
+"subject": "weather",
+"wants": [
+"storm chance"
+],
+"place": "Tulsa",
+"expect": "reject",
+"note": null
+},
+{
+"ask": "will there be thunderstorms in Dallas this afternoon",
+"sample": "kp_forecast",
+"subject": "weather",
+"wants": [
+"thunderstorms"
+],
+"place": "Dallas",
+"expect": "reject",
+"note": null
+},
+{
+"ask": "Atlanta ice storm",
+"sample": "kp_forecast",
+"subject": "ice storm",
+"wants": [
+"ice storm"
+],
+"place": "Atlanta",
+"expect": "reject",
+"note": null
+},
+{
+"ask": "any hurricanes in the Atlantic",
+"sample": "storms",
+"subject": "hurricanes",
+"wants": [
+"active hurricanes"
+],
+"place": null,
+"expect": "accept",
+"note": null
+},
+{
+"ask": "how many hurricanes are active",
+"sample": "storms",
+"subject": "hurricanes",
+"wants": [
+"number of hurricanes"
+],
+"place": null,
+"expect": "accept",
+"note": null
+},
+{
+"ask": "active tropical storms",
+"sample": "storms",
+"subject": "tropical storms",
+"wants": [
+"storms"
+],
+"place": null,
+"expect": "accept",
+"note": null
+},
+{
+"ask": "any hurricanes headed for Tampa?",
+"sample": "storms",
+"subject": "hurricanes",
+"wants": [
+"hurricanes"
+],
+"place": "Tampa",
+"expect": "reject",
+"note": null
+},
+{
+"ask": "KC storms tonight",
+"sample": "storms",
+"subject": "weather",
+"wants": [
+"storms"
+],
+"place": "Kansas City",
+"expect": "reject",
+"note": null
+},
+{
+"ask": "NYC weather",
+"sample": "open_meteo_charleston",
+"subject": "weather",
+"wants": [
+"temperature",
+"conditions"
+],
+"place": "New York City",
+"expect": "accept",
+"note": null
+},
+{
+"ask": "weather this weekend in Austin",
+"sample": "open_meteo_charleston",
+"subject": "weather",
+"wants": [
+"forecast"
+],
+"place": "Austin",
+"expect": "accept",
+"note": null
+},
+{
+"ask": "high in Denver on Saturday",
+"sample": "open_meteo_charleston",
+"subject": "weather",
+"wants": [
+"high temperature"
+],
+"place": "Denver",
+"expect": "accept",
+"note": null
+},
+{
+"ask": "will it rain tomorrow in Seattle",
+"sample": "open_meteo_charleston",
+"subject": "weather",
+"wants": [
+"rain chance"
+],
+"place": "Seattle",
+"expect": "accept",
+"note": null
+},
+{
+"ask": "frost tonight in Boise",
+"sample": "open_meteo_charleston",
+"subject": "weather",
+"wants": [
+"low temperature"
+],
+"place": "Boise",
+"expect": "accept",
+"note": null
+},
+{
+"ask": "is it gonna rain in Seattle tonight",
+"sample": "open_meteo_charleston",
+"subject": "weather",
+"wants": [
+"rain chance"
+],
+"place": "Seattle",
+"expect": "accept",
+"note": null
+},
+{
+"ask": "Bills score",
+"sample": "open_meteo_charleston",
+"subject": "Buffalo Bills",
+"wants": [
+"score"
+],
+"place": null,
+"expect": "reject",
+"note": null
+},
+{
+"ask": "kp index tonight",
+"sample": "open_meteo_charleston",
+"subject": "kp index",
+"wants": [
+"kp"
+],
+"place": null,
+"expect": "reject",
+"note": null
+},
+{
+"ask": "how's the surf at Virginia Beach",
+"sample": "marine_charleston",
+"subject": "surf",
+"wants": [
+"wave height"
+],
+"place": "Virginia Beach",
+"expect": "accept",
+"note": "doesn't report: wind"
+},
+{
+"ask": "water temp Charleston",
+"sample": "marine_charleston",
+"subject": "water temperature",
+"wants": [
+"water temperature"
+],
+"place": "Charleston",
+"expect": "accept",
+"note": null
+},
+{
+"ask": "surf tomorrow Outer Banks",
+"sample": "marine_charleston",
+"subject": "surf",
+"wants": [
+"wave height"
+],
+"place": "Outer Banks",
+"expect": "accept",
+"note": null
+},
+{
+"ask": "wind at Virginia Beach",
+"sample": "marine_charleston",
+"subject": "wind",
+"wants": [
+"wind speed"
+],
+"place": "Virginia Beach",
+"expect": "reject",
+"note": null
+},
+{
+"ask": "AL East standings",
+"sample": "standings",
+"subject": "AL East standings",
+"wants": [
+"standings"
+],
+"place": null,
+"expect": "accept",
+"note": null
+},
+{
+"ask": "MLB standings",
+"sample": "standings",
+"subject": "MLB standings",
+"wants": [
+"standings"
+],
+"place": null,
+"expect": "accept",
+"note": null
+},
+{
+"ask": "Yankees score",
+"sample": "standings",
+"subject": "New York Yankees",
+"wants": [
+"score"
+],
+"place": null,
+"expect": "reject",
+"note": null
+},
+{
+"ask": "next Yankees game",
+"sample": "standings",
+"subject": "New York Yankees",
+"wants": [
+"next game"
+],
+"place": null,
+"expect": "reject",
+"note": null
+},
+{
+"ask": "latest CPI",
+"sample": "cpi",
+"subject": "CPI",
+"wants": [
+"cpi"
+],
+"place": null,
+"expect": "accept",
+"note": null
+},
+{
+"ask": "consumer price index",
+"sample": "cpi",
+"subject": "consumer price index",
+"wants": [
+"index"
+],
+"place": null,
+"expect": "accept",
+"note": null
+},
+{
+"ask": "CPI history",
+"sample": "cpi",
+"subject": "CPI",
+"wants": [
+"cpi history"
+],
+"place": null,
+"expect": "accept",
+"note": null
+},
+{
+"ask": "unemployment rate",
+"sample": "cpi",
+"subject": "unemployment rate",
+"wants": [
+"unemployment rate"
+],
+"place": null,
+"expect": "reject",
+"note": null
+},
+{
+"ask": "earthquakes near San Francisco",
+"sample": "quakes_sf",
+"subject": "earthquakes",
+"wants": [
+"earthquakes"
+],
+"place": "San Francisco",
+"expect": "accept",
+"note": null
+},
+{
+"ask": "how many earthquakes near SF",
+"sample": "quakes_sf",
+"subject": "earthquakes",
+"wants": [
+"number of earthquakes"
+],
+"place": "San Francisco",
+"expect": "accept",
+"note": null
+},
+{
+"ask": "latest earthquake near San Francisco",
+"sample": "quakes_sf",
+"subject": "earthquakes",
+"wants": [
+"latest earthquake"
+],
+"place": "San Francisco",
+"expect": "accept",
+"note": null
+},
+{
+"ask": "volcano near San Francisco",
+"sample": "quakes_sf",
+"subject": "volcano",
+"wants": [
+"volcano activity"
+],
+"place": "San Francisco",
+"expect": "reject",
+"note": null
+},
+{
+"ask": "next Braves game",
+"sample": "mets_schedule",
+"subject": "Atlanta Braves",
+"wants": [
+"next game"
+],
+"place": null,
+"expect": "accept",
+"note": null
+},
+{
+"ask": "Braves schedule",
+"sample": "mets_schedule",
+"subject": "Atlanta Braves",
+"wants": [
+"schedule"
+],
+"place": null,
+"expect": "accept",
+"note": null
+},
+{
+"ask": "Braves score",
+"sample": "mets_schedule",
+"subject": "Atlanta Braves",
+"wants": [
+"score"
+],
+"place": null,
+"expect": "reject",
+"note": null
+},
+{
+"ask": "did the Braves win",
+"sample": "mets_schedule",
+"subject": "Atlanta Braves",
+"wants": [
+"result"
+],
+"place": null,
+"expect": "reject",
+"note": null
+},
+{
+"ask": "any hurricanes headed for Tampa",
+"sample": "tropical_alerts",
+"subject": "hurricanes",
+"wants": [
+"hurricane warnings"
+],
+"place": "Tampa",
+"expect": "accept",
+"note": null
+},
+{
+"ask": "tropical storm warning Houston",
+"sample": "tropical_alerts",
+"subject": "tropical storm",
+"wants": [
+"warnings"
+],
+"place": "Houston",
+"expect": "accept",
+"note": null
+}
+]

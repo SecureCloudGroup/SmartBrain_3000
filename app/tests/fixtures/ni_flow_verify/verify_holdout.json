@@ -1,0 +1,354 @@
+[
+{
+"ask": "who do the Packers play next",
+"sample": "packers",
+"subject": "Green Bay Packers",
+"wants": [
+"next opponent"
+],
+"place": null,
+"expect": "accept",
+"note": null
+},
+{
+"ask": "Chiefs kickoff time",
+"sample": "chiefs",
+"subject": "Kansas City Chiefs",
+"wants": [
+"kickoff time"
+],
+"place": null,
+"expect": "accept",
+"note": null
+},
+{
+"ask": "where is the next Bills game",
+"sample": "bills",
+"subject": "Buffalo Bills",
+"wants": [
+"venue"
+],
+"place": null,
+"expect": "accept",
+"note": null
+},
+{
+"ask": "Packers final",
+"sample": "packers",
+"subject": "Green Bay Packers",
+"wants": [
+"final score"
+],
+"place": null,
+"expect": "reject",
+"note": null
+},
+{
+"ask": "who won the Chiefs game",
+"sample": "chiefs",
+"subject": "Kansas City Chiefs",
+"wants": [
+"winner"
+],
+"place": null,
+"expect": "reject",
+"note": null
+},
+{
+"ask": "Bills points last game",
+"sample": "bills",
+"subject": "Buffalo Bills",
+"wants": [
+"points"
+],
+"place": null,
+"expect": "reject",
+"note": null
+},
+{
+"ask": "how fast is the ISS going",
+"sample": "iss",
+"subject": "ISS",
+"wants": [
+"speed"
+],
+"place": null,
+"expect": "accept",
+"note": null
+},
+{
+"ask": "ISS coordinates",
+"sample": "iss",
+"subject": "ISS",
+"wants": [
+"coordinates"
+],
+"place": null,
+"expect": "accept",
+"note": null
+},
+{
+"ask": "when is the next ISS sighting in Boston",
+"sample": "iss",
+"subject": "ISS",
+"wants": [
+"sighting time"
+],
+"place": "Boston",
+"expect": "reject",
+"note": null
+},
+{
+"ask": "ISS visible tonight over Seattle",
+"sample": "iss",
+"subject": "ISS",
+"wants": [
+"visible pass"
+],
+"place": "Seattle",
+"expect": "reject",
+"note": null
+},
+{
+"ask": "aurora tonight",
+"sample": "kp_forecast",
+"subject": "aurora",
+"wants": [
+"kp"
+],
+"place": null,
+"expect": "accept",
+"note": null
+},
+{
+"ask": "northern lights forecast Anchorage",
+"sample": "kp_forecast",
+"subject": "northern lights",
+"wants": [
+"kp forecast"
+],
+"place": "Anchorage",
+"expect": "accept",
+"note": "isn't specific to Anchorage"
+},
+{
+"ask": "severe thunderstorms in Omaha tonight",
+"sample": "kp_forecast",
+"subject": "weather",
+"wants": [
+"thunderstorms"
+],
+"place": "Omaha",
+"expect": "reject",
+"note": null
+},
+{
+"ask": "hail storm Denver this afternoon",
+"sample": "kp_forecast",
+"subject": "weather",
+"wants": [
+"hail"
+],
+"place": "Denver",
+"expect": "reject",
+"note": null
+},
+{
+"ask": "are there any hurricanes",
+"sample": "storms",
+"subject": "hurricanes",
+"wants": [
+"hurricanes"
+],
+"place": null,
+"expect": "accept",
+"note": null
+},
+{
+"ask": "number of named storms active",
+"sample": "storms",
+"subject": "named storms",
+"wants": [
+"number of storms"
+],
+"place": null,
+"expect": "accept",
+"note": null
+},
+{
+"ask": "is a hurricane coming to Miami",
+"sample": "storms",
+"subject": "hurricane",
+"wants": [
+"hurricane"
+],
+"place": "Miami",
+"expect": "reject",
+"note": null
+},
+{
+"ask": "Chicago weather",
+"sample": "open_meteo_charleston",
+"subject": "weather",
+"wants": [
+"temperature"
+],
+"place": "Chicago",
+"expect": "accept",
+"note": null
+},
+{
+"ask": "rain chance Sunday in Portland",
+"sample": "open_meteo_charleston",
+"subject": "weather",
+"wants": [
+"rain chance"
+],
+"place": "Portland",
+"expect": "accept",
+"note": null
+},
+{
+"ask": "next 3 days forecast Raleigh",
+"sample": "open_meteo_charleston",
+"subject": "weather",
+"wants": [
+"forecast"
+],
+"place": "Raleigh",
+"expect": "accept",
+"note": null
+},
+{
+"ask": "Yankees standings",
+"sample": "open_meteo_charleston",
+"subject": "New York Yankees",
+"wants": [
+"standings"
+],
+"place": null,
+"expect": "reject",
+"note": null
+},
+{
+"ask": "wave height Charleston",
+"sample": "marine_charleston",
+"subject": "waves",
+"wants": [
+"wave height"
+],
+"place": "Charleston",
+"expect": "accept",
+"note": null
+},
+{
+"ask": "swell size at Folly Beach",
+"sample": "marine_charleston",
+"subject": "swell",
+"wants": [
+"swell height"
+],
+"place": "Folly Beach",
+"expect": "accept",
+"note": null
+},
+{
+"ask": "wind gusts at Folly Beach",
+"sample": "marine_charleston",
+"subject": "wind",
+"wants": [
+"wind gusts"
+],
+"place": "Folly Beach",
+"expect": "reject",
+"note": null
+},
+{
+"ask": "NL West standings",
+"sample": "standings",
+"subject": "NL West standings",
+"wants": [
+"standings"
+],
+"place": null,
+"expect": "accept",
+"note": null
+},
+{
+"ask": "Dodgers final score",
+"sample": "standings",
+"subject": "Los Angeles Dodgers",
+"wants": [
+"final score"
+],
+"place": null,
+"expect": "reject",
+"note": null
+},
+{
+"ask": "inflation index latest",
+"sample": "cpi",
+"subject": "CPI",
+"wants": [
+"index value"
+],
+"place": null,
+"expect": "accept",
+"note": null
+},
+{
+"ask": "gas prices",
+"sample": "cpi",
+"subject": "gas prices",
+"wants": [
+"gas price"
+],
+"place": null,
+"expect": "reject",
+"note": null
+},
+{
+"ask": "any earthquakes near San Francisco today",
+"sample": "quakes_sf",
+"subject": "earthquakes",
+"wants": [
+"earthquakes"
+],
+"place": "San Francisco",
+"expect": "accept",
+"note": null
+},
+{
+"ask": "wildfires near San Francisco",
+"sample": "quakes_sf",
+"subject": "wildfires",
+"wants": [
+"wildfires"
+],
+"place": "San Francisco",
+"expect": "reject",
+"note": null
+},
+{
+"ask": "when do the Braves play next",
+"sample": "mets_schedule",
+"subject": "Atlanta Braves",
+"wants": [
+"next game"
+],
+"place": null,
+"expect": "accept",
+"note": null
+},
+{
+"ask": "Braves final score",
+"sample": "mets_schedule",
+"subject": "Atlanta Braves",
+"wants": [
+"final score"
+],
+"place": null,
+"expect": "reject",
+"note": null
+}
+]

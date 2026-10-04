@@ -1,0 +1,2671 @@
+{
+ "thesportsdb-team-next": {
+  "id": "thesportsdb-team-next",
+  "name": "Team's next matchup (TheSportsDB)",
+  "categories": [
+   "sports/schedules"
+  ],
+  "kinds": [
+   "next_event"
+  ],
+  "provider": {
+   "authority": "community",
+   "id": "thesportsdb",
+   "name": "TheSportsDB",
+   "url": "https://www.thesportsdb.com"
+  },
+  "coverage": {
+   "entity": "NFL, NBA, WNBA, MLB, NHL and MLS teams (not St. Louis's Cardinals or CITY SC: TheSportsDB's team search misses them)",
+   "geo": "US"
+  },
+  "answers": [
+   {
+    "name": "next_game",
+    "label": "Next game",
+    "words": [
+     "next game",
+     "next match",
+     "who do they play",
+     "opponent",
+     "play next",
+     "matchup",
+     "next"
+    ],
+    "primary": true,
+    "kind": "value",
+    "path": "events[0].strEvent",
+    "type": "text",
+    "window": "latest"
+   },
+   {
+    "name": "start",
+    "label": "Start",
+    "words": [
+     "when",
+     "what time",
+     "start time",
+     "kickoff",
+     "tip-off",
+     "date",
+     "game time",
+     "next game",
+     "play next"
+    ],
+    "primary": true,
+    "kind": "value",
+    "path": "events[0].strTimestamp",
+    "type": "time",
+    "utc": true,
+    "window": "latest"
+   },
+   {
+    "name": "venue",
+    "label": "Venue",
+    "words": [
+     "where",
+     "venue",
+     "stadium",
+     "arena",
+     "field",
+     "next game",
+     "play next"
+    ],
+    "primary": true,
+    "kind": "value",
+    "path": "events[0].strVenue",
+    "type": "text",
+    "window": "latest"
+   },
+   {
+    "name": "home",
+    "label": "Home team",
+    "words": [
+     "home",
+     "home team",
+     "home game",
+     "at home"
+    ],
+    "kind": "value",
+    "path": "events[0].strHomeTeam",
+    "type": "text",
+    "window": "latest"
+   },
+   {
+    "name": "away",
+    "label": "Away team",
+    "words": [
+     "away",
+     "away team",
+     "away game",
+     "on the road",
+     "visitors"
+    ],
+    "kind": "value",
+    "path": "events[0].strAwayTeam",
+    "type": "text",
+    "window": "latest"
+   }
+  ],
+  "tier": "curated",
+  "access": {
+   "kind": "http_json",
+   "url_template": "https://www.thesportsdb.com/api/v1/json/123/eventsnext.php?id={team}",
+   "params": [
+    {
+     "example": "134949",
+     "fill": {
+      "field": "attrs.tsdb_id",
+      "from": "resolver",
+      "resolver": "team_espn"
+     },
+     "kind": "team",
+     "name": "team",
+     "required": true
+    }
+   ],
+   "auth": "none"
+  }
+ },
+ "swpc-kp-forecast": {
+  "id": "swpc-kp-forecast",
+  "name": "Planetary K-index forecast (aurora outlook)",
+  "categories": [
+   "hazards/space_weather"
+  ],
+  "kinds": [
+   "forecast"
+  ],
+  "provider": {
+   "authority": "official",
+   "id": "swpc",
+   "name": "NOAA Space Weather Prediction Center",
+   "url": "https://www.swpc.noaa.gov"
+  },
+  "coverage": {
+   "entity": "planetary Kp forecast for the next 3 days in 3-hour windows (aurora outlook)",
+   "geo": "global"
+  },
+  "answers": [
+   {
+    "name": "forecast",
+    "label": "Forecast Kp (3-hour windows)",
+    "words": [
+     "forecast",
+     "tonight",
+     "tomorrow",
+     "aurora",
+     "northern lights",
+     "kp forecast",
+     "kp",
+     "geomagnetic storm",
+     "will i see",
+     "next 3 days"
+    ],
+    "primary": true,
+    "kind": "list",
+    "path": "items",
+    "filter": {
+     "path": "observed",
+     "equals": "predicted"
+    },
+    "row": [
+     {
+      "path": "time_tag",
+      "label": "Window starts",
+      "type": "time",
+      "utc": true
+     },
+     {
+      "path": "kp",
+      "label": "Kp",
+      "type": "number"
+     }
+    ],
+    "axis": {
+     "cell": "time_tag",
+     "step": "hour"
+    }
+   },
+   {
+    "name": "today",
+    "label": "Kp estimate today",
+    "words": [
+     "today",
+     "right now",
+     "now",
+     "current kp",
+     "estimated"
+    ],
+    "kind": "list",
+    "path": "items",
+    "filter": {
+     "path": "observed",
+     "equals": "estimated"
+    },
+    "row": [
+     {
+      "path": "time_tag",
+      "label": "Window starts",
+      "type": "time",
+      "utc": true
+     },
+     {
+      "path": "kp",
+      "label": "Kp",
+      "type": "number"
+     }
+    ],
+    "may_be_empty": true,
+    "axis": {
+     "cell": "time_tag",
+     "step": "hour"
+    }
+   },
+   {
+    "name": "observed",
+    "label": "Kp observed (last week)",
+    "words": [
+     "observed",
+     "last night",
+     "past week",
+     "history",
+     "recent"
+    ],
+    "kind": "list",
+    "path": "items",
+    "filter": {
+     "path": "observed",
+     "equals": "observed"
+    },
+    "row": [
+     {
+      "path": "time_tag",
+      "label": "Window starts",
+      "type": "time",
+      "utc": true
+     },
+     {
+      "path": "kp",
+      "label": "Kp",
+      "type": "number"
+     }
+    ],
+    "newest_first": true,
+    "axis": {
+     "cell": "time_tag",
+     "step": "hour"
+    }
+   }
+  ],
+  "tier": "curated",
+  "access": {
+   "kind": "http_json",
+   "url_template": "https://services.swpc.noaa.gov/products/noaa-planetary-k-index-forecast.json",
+   "params": [],
+   "auth": "none"
+  }
+ },
+ "wheretheiss-now": {
+  "id": "wheretheiss-now",
+  "name": "ISS position now",
+  "categories": [
+   "sky/iss"
+  ],
+  "kinds": [
+   "current_value",
+   "map"
+  ],
+  "provider": {
+   "authority": "community",
+   "id": "wheretheiss",
+   "name": "Where the ISS at?",
+   "url": "https://wheretheiss.at"
+  },
+  "coverage": {
+   "entity": "",
+   "geo": "global"
+  },
+  "answers": [
+   {
+    "name": "latitude",
+    "label": "Latitude",
+    "words": [
+     "where is the iss",
+     "space station location",
+     "latitude",
+     "lat",
+     "position",
+     "where"
+    ],
+    "primary": true,
+    "kind": "value",
+    "path": "latitude",
+    "type": "number",
+    "unit": "\u00b0",
+    "window": "now"
+   },
+   {
+    "name": "longitude",
+    "label": "Longitude",
+    "words": [
+     "where is the iss",
+     "space station location",
+     "longitude",
+     "lon",
+     "position",
+     "where"
+    ],
+    "primary": true,
+    "kind": "value",
+    "path": "longitude",
+    "type": "number",
+    "unit": "\u00b0",
+    "window": "now"
+   },
+   {
+    "name": "altitude",
+    "label": "Altitude",
+    "words": [
+     "altitude",
+     "how high",
+     "height",
+     "orbit",
+     "above earth"
+    ],
+    "primary": true,
+    "kind": "value",
+    "path": "altitude",
+    "type": "number",
+    "unit": "km",
+    "window": "now"
+   },
+   {
+    "name": "velocity",
+    "label": "Speed",
+    "words": [
+     "speed",
+     "velocity",
+     "how fast",
+     "orbital speed"
+    ],
+    "primary": false,
+    "kind": "value",
+    "path": "velocity",
+    "type": "number",
+    "unit": "km/h",
+    "window": "now"
+   },
+   {
+    "name": "visibility",
+    "label": "Sunlight",
+    "words": [
+     "visible",
+     "visibility",
+     "daylight",
+     "eclipsed",
+     "in sunlight"
+    ],
+    "primary": false,
+    "kind": "value",
+    "path": "visibility",
+    "type": "text",
+    "window": "now"
+   },
+   {
+    "name": "as_of",
+    "label": "Position time",
+    "words": [
+     "when",
+     "time",
+     "as of",
+     "updated"
+    ],
+    "primary": false,
+    "kind": "value",
+    "path": "timestamp",
+    "type": "time",
+    "window": "now"
+   }
+  ],
+  "tier": "curated",
+  "access": {
+   "kind": "http_json",
+   "url_template": "https://api.wheretheiss.at/v1/satellites/25544",
+   "params": [],
+   "auth": "none"
+  }
+ },
+ "nhc-current-storms": {
+  "id": "nhc-current-storms",
+  "name": "NHC active tropical storms",
+  "categories": [
+   "hazards/tropical_storms"
+  ],
+  "kinds": [
+   "latest_items",
+   "alerts"
+  ],
+  "provider": {
+   "authority": "official",
+   "id": "nhc",
+   "name": "National Hurricane Center (NOAA)",
+   "url": "https://www.nhc.noaa.gov"
+  },
+  "coverage": {
+   "entity": "",
+   "geo": "US"
+  },
+  "answers": [
+   {
+    "name": "storms",
+    "label": "Active tropical storms",
+    "words": [
+     "hurricanes",
+     "hurricane",
+     "tropical storms",
+     "storms",
+     "cyclones",
+     "name",
+     "category",
+     "wind",
+     "active storms",
+     "any hurricanes",
+     "any storms",
+     "tropics",
+     "named storms"
+    ],
+    "primary": true,
+    "kind": "list",
+    "path": "activeStorms",
+    "row": [
+     {
+      "path": "name",
+      "label": "Storm",
+      "type": "text"
+     },
+     {
+      "path": "classification",
+      "label": "Type",
+      "type": "text"
+     },
+     {
+      "path": "intensity",
+      "label": "Max wind",
+      "type": "number",
+      "unit": "kt"
+     },
+     {
+      "path": "lastUpdate",
+      "label": "Updated",
+      "type": "time"
+     }
+    ],
+    "may_be_empty": true
+   },
+   {
+    "name": "storm_count",
+    "label": "Active storms",
+    "words": [
+     "how many",
+     "count",
+     "number of storms",
+     "how many hurricanes",
+     "how many storms"
+    ],
+    "primary": false,
+    "kind": "value",
+    "path": "activeStorms",
+    "type": "count",
+    "window": "now"
+   }
+  ],
+  "tier": "curated",
+  "access": {
+   "kind": "http_json",
+   "url_template": "https://www.nhc.noaa.gov/CurrentStorms.json",
+   "params": [],
+   "auth": "none"
+  }
+ },
+ "nws-tropical-alerts-point": {
+  "id": "nws-tropical-alerts-point",
+  "name": "NWS hurricane and tropical storm alerts for a location",
+  "categories": [
+   "hazards/tropical_storms"
+  ],
+  "kinds": [
+   "alerts"
+  ],
+  "provider": {
+   "authority": "official",
+   "id": "nws",
+   "name": "National Weather Service (NOAA)",
+   "url": "https://www.weather.gov"
+  },
+  "coverage": {
+   "entity": "",
+   "geo": "US"
+  },
+  "answers": [
+   {
+    "name": "warnings",
+    "label": "Tropical watches and warnings",
+    "words": [
+     "hurricane",
+     "hurricane warning",
+     "hurricane watch",
+     "tropical storm",
+     "tropical storm warning",
+     "storm surge",
+     "surge",
+     "headed for",
+     "coming toward",
+     "going to hit",
+     "landfall",
+     "threat",
+     "in the path",
+     "any hurricanes",
+     "evacuate"
+    ],
+    "primary": true,
+    "kind": "list",
+    "path": "features",
+    "row": [
+     {
+      "path": "properties.event",
+      "label": "Alert",
+      "type": "text"
+     },
+     {
+      "path": "properties.areaDesc",
+      "label": "Area",
+      "type": "text"
+     },
+     {
+      "path": "properties.severity",
+      "label": "Severity",
+      "type": "text"
+     },
+     {
+      "path": "properties.expires",
+      "label": "Until",
+      "type": "time"
+     }
+    ],
+    "may_be_empty": true
+   }
+  ],
+  "tier": "curated",
+  "access": {
+   "kind": "http_json",
+   "url_template": "https://api.weather.gov/alerts/active?point={lat},{lon}&event=Hurricane%20Warning,Hurricane%20Watch,Tropical%20Storm%20Warning,Tropical%20Storm%20Watch,Storm%20Surge%20Warning,Storm%20Surge%20Watch,Extreme%20Wind%20Warning,Hurricane%20Local%20Statement",
+   "params": [
+    {
+     "example": "27.9477",
+     "fill": {
+      "field": "lat",
+      "from": "resolver",
+      "resolver": "place"
+     },
+     "kind": "place",
+     "name": "lat",
+     "required": true
+    },
+    {
+     "example": "-82.4584",
+     "fill": {
+      "field": "lon",
+      "from": "resolver",
+      "resolver": "place"
+     },
+     "kind": "place",
+     "name": "lon",
+     "required": true
+    }
+   ],
+   "auth": "none"
+  }
+ },
+ "mlb-standings": {
+  "id": "mlb-standings",
+  "name": "MLB standings",
+  "categories": [
+   "sports/standings"
+  ],
+  "kinds": [
+   "ranking"
+  ],
+  "provider": {
+   "authority": "primary",
+   "id": "mlb",
+   "name": "MLB Stats API",
+   "url": "https://statsapi.mlb.com"
+  },
+  "coverage": {
+   "entity": "MLB",
+   "geo": "US"
+  },
+  "answers": [
+   {
+    "name": "al_east_standings",
+    "label": "AL East standings",
+    "words": [
+     "al east",
+     "american league east",
+     "al east standings",
+     "standings",
+     "division",
+     "mlb standings",
+     "table"
+    ],
+    "primary": true,
+    "kind": "list",
+    "path": "records[0].teamRecords",
+    "row": [
+     {
+      "path": "team.name",
+      "label": "Team",
+      "type": "text"
+     },
+     {
+      "path": "wins",
+      "label": "W",
+      "type": "number"
+     },
+     {
+      "path": "losses",
+      "label": "L",
+      "type": "number"
+     },
+     {
+      "path": "gamesBack",
+      "label": "GB",
+      "type": "text"
+     }
+    ]
+   },
+   {
+    "name": "al_central_standings",
+    "label": "AL Central standings",
+    "words": [
+     "al central",
+     "american league central",
+     "al central standings",
+     "standings",
+     "division"
+    ],
+    "primary": false,
+    "kind": "list",
+    "path": "records[1].teamRecords",
+    "row": [
+     {
+      "path": "team.name",
+      "label": "Team",
+      "type": "text"
+     },
+     {
+      "path": "wins",
+      "label": "W",
+      "type": "number"
+     },
+     {
+      "path": "losses",
+      "label": "L",
+      "type": "number"
+     },
+     {
+      "path": "gamesBack",
+      "label": "GB",
+      "type": "text"
+     }
+    ]
+   },
+   {
+    "name": "al_west_standings",
+    "label": "AL West standings",
+    "words": [
+     "al west",
+     "american league west",
+     "al west standings",
+     "standings",
+     "division"
+    ],
+    "primary": false,
+    "kind": "list",
+    "path": "records[2].teamRecords",
+    "row": [
+     {
+      "path": "team.name",
+      "label": "Team",
+      "type": "text"
+     },
+     {
+      "path": "wins",
+      "label": "W",
+      "type": "number"
+     },
+     {
+      "path": "losses",
+      "label": "L",
+      "type": "number"
+     },
+     {
+      "path": "gamesBack",
+      "label": "GB",
+      "type": "text"
+     }
+    ]
+   },
+   {
+    "name": "nl_east_standings",
+    "label": "NL East standings",
+    "words": [
+     "nl east",
+     "national league east",
+     "nl east standings",
+     "standings",
+     "division"
+    ],
+    "primary": false,
+    "kind": "list",
+    "path": "records[3].teamRecords",
+    "row": [
+     {
+      "path": "team.name",
+      "label": "Team",
+      "type": "text"
+     },
+     {
+      "path": "wins",
+      "label": "W",
+      "type": "number"
+     },
+     {
+      "path": "losses",
+      "label": "L",
+      "type": "number"
+     },
+     {
+      "path": "gamesBack",
+      "label": "GB",
+      "type": "text"
+     }
+    ]
+   },
+   {
+    "name": "nl_central_standings",
+    "label": "NL Central standings",
+    "words": [
+     "nl central",
+     "national league central",
+     "nl central standings",
+     "standings",
+     "division"
+    ],
+    "primary": false,
+    "kind": "list",
+    "path": "records[4].teamRecords",
+    "row": [
+     {
+      "path": "team.name",
+      "label": "Team",
+      "type": "text"
+     },
+     {
+      "path": "wins",
+      "label": "W",
+      "type": "number"
+     },
+     {
+      "path": "losses",
+      "label": "L",
+      "type": "number"
+     },
+     {
+      "path": "gamesBack",
+      "label": "GB",
+      "type": "text"
+     }
+    ]
+   },
+   {
+    "name": "nl_west_standings",
+    "label": "NL West standings",
+    "words": [
+     "nl west",
+     "national league west",
+     "nl west standings",
+     "standings",
+     "division"
+    ],
+    "primary": false,
+    "kind": "list",
+    "path": "records[5].teamRecords",
+    "row": [
+     {
+      "path": "team.name",
+      "label": "Team",
+      "type": "text"
+     },
+     {
+      "path": "wins",
+      "label": "W",
+      "type": "number"
+     },
+     {
+      "path": "losses",
+      "label": "L",
+      "type": "number"
+     },
+     {
+      "path": "gamesBack",
+      "label": "GB",
+      "type": "text"
+     }
+    ]
+   }
+  ],
+  "tier": "curated",
+  "access": {
+   "kind": "http_json",
+   "url_template": "https://statsapi.mlb.com/api/v1/standings?leagueId=103,104&standingsTypes=regularSeason",
+   "params": [],
+   "auth": "none"
+  }
+ },
+ "open-meteo-forecast": {
+  "id": "open-meteo-forecast",
+  "name": "Open-Meteo forecast",
+  "categories": [
+   "weather/forecast",
+   "weather/current"
+  ],
+  "kinds": [
+   "forecast",
+   "current_value",
+   "trend"
+  ],
+  "provider": {
+   "authority": "primary",
+   "id": "open-meteo",
+   "name": "Open-Meteo",
+   "url": "https://open-meteo.com"
+  },
+  "coverage": {
+   "entity": "",
+   "geo": "global"
+  },
+  "answers": [
+   {
+    "name": "temperature",
+    "label": "Temperature",
+    "words": [
+     "temperature",
+     "temp",
+     "degrees",
+     "hot",
+     "cold",
+     "warm",
+     "how hot",
+     "how cold",
+     "now",
+     "current"
+    ],
+    "primary": true,
+    "kind": "value",
+    "path": "current.temperature_2m",
+    "type": "number",
+    "unit_path": "current_units.temperature_2m",
+    "window": "now",
+    "measure": "temperature"
+   },
+   {
+    "name": "feels_like",
+    "label": "Feels like",
+    "words": [
+     "feels like",
+     "feel like",
+     "real feel",
+     "apparent temperature",
+     "heat index",
+     "wind chill"
+    ],
+    "primary": false,
+    "kind": "value",
+    "path": "current.apparent_temperature",
+    "type": "number",
+    "unit_path": "current_units.apparent_temperature",
+    "window": "now",
+    "measure": "feels_like"
+   },
+   {
+    "name": "conditions",
+    "label": "Conditions",
+    "words": [
+     "conditions",
+     "sky",
+     "sunny",
+     "cloudy",
+     "clear",
+     "outside",
+     "what's it like",
+     "weather now",
+     "storm",
+     "thunderstorm",
+     "lightning",
+     "hail",
+     "fog",
+     "sleet",
+     "drizzle"
+    ],
+    "primary": true,
+    "kind": "value",
+    "path": "current.weather_code",
+    "type": "number",
+    "codes": "wmo_weather",
+    "window": "now",
+    "measure": "conditions"
+   },
+   {
+    "name": "high_today",
+    "label": "High today",
+    "words": [
+     "high",
+     "high today",
+     "max",
+     "maximum",
+     "how hot today",
+     "warmest"
+    ],
+    "primary": true,
+    "kind": "value",
+    "path": "daily.temperature_2m_max[0]",
+    "type": "number",
+    "unit_path": "daily_units.temperature_2m_max",
+    "window": "today",
+    "measure": "temperature"
+   },
+   {
+    "name": "low_today",
+    "label": "Low today",
+    "words": [
+     "low",
+     "low today",
+     "min",
+     "minimum",
+     "coldest",
+     "overnight low"
+    ],
+    "primary": true,
+    "kind": "value",
+    "path": "daily.temperature_2m_min[0]",
+    "type": "number",
+    "unit_path": "daily_units.temperature_2m_min",
+    "window": "today",
+    "measure": "temperature"
+   },
+   {
+    "name": "humidity",
+    "label": "Humidity",
+    "words": [
+     "humidity",
+     "humid",
+     "muggy",
+     "sticky",
+     "damp"
+    ],
+    "primary": false,
+    "kind": "value",
+    "path": "current.relative_humidity_2m",
+    "type": "number",
+    "unit_path": "current_units.relative_humidity_2m",
+    "window": "now",
+    "measure": "humidity"
+   },
+   {
+    "name": "wind",
+    "label": "Wind speed",
+    "words": [
+     "wind",
+     "windy",
+     "breeze",
+     "wind speed",
+     "gusts",
+     "gusty",
+     "how windy"
+    ],
+    "primary": false,
+    "kind": "value",
+    "path": "current.wind_speed_10m",
+    "type": "number",
+    "unit": "mph",
+    "window": "now",
+    "measure": "wind"
+   },
+   {
+    "name": "rain_today",
+    "label": "Rain chance today",
+    "words": [
+     "rain",
+     "rain chance",
+     "chance of rain",
+     "precipitation",
+     "umbrella",
+     "showers",
+     "rain today"
+    ],
+    "primary": false,
+    "kind": "value",
+    "path": "daily.precipitation_probability_max[0]",
+    "type": "number",
+    "unit_path": "daily_units.precipitation_probability_max",
+    "window": "today",
+    "measure": "precip_chance"
+   },
+   {
+    "name": "rain_tomorrow",
+    "label": "Rain chance tomorrow",
+    "words": [
+     "tomorrow",
+     "rain tomorrow",
+     "chance of rain tomorrow",
+     "will it rain tomorrow",
+     "umbrella tomorrow"
+    ],
+    "primary": false,
+    "kind": "value",
+    "path": "daily.precipitation_probability_max[1]",
+    "type": "number",
+    "unit_path": "daily_units.precipitation_probability_max",
+    "window": "tomorrow",
+    "measure": "precip_chance"
+   },
+   {
+    "name": "tonight",
+    "label": "Tonight, hour by hour",
+    "words": [
+     "tonight",
+     "overnight",
+     "this evening",
+     "later tonight",
+     "tonight's forecast",
+     "storm tonight",
+     "thunderstorms tonight",
+     "rain tonight",
+     "frost tonight",
+     "fog tonight",
+     "snow tonight",
+     "hourly",
+     "by hour",
+     "hour by hour",
+     "next few hours"
+    ],
+    "primary": false,
+    "kind": "columns",
+    "columns": [
+     {
+      "path": "hourly.time",
+      "label": "Time",
+      "type": "time"
+     },
+     {
+      "path": "hourly.weather_code",
+      "label": "Conditions",
+      "type": "number",
+      "codes": "wmo_weather"
+     },
+     {
+      "path": "hourly.temperature_2m",
+      "label": "Temperature",
+      "type": "number",
+      "unit_path": "hourly_units.temperature_2m"
+     },
+     {
+      "path": "hourly.precipitation_probability",
+      "label": "Rain chance",
+      "type": "number",
+      "unit_path": "hourly_units.precipitation_probability"
+     }
+    ],
+    "limit": 24,
+    "axis": {
+     "cell": "hourly.time",
+     "step": "hour"
+    }
+   },
+   {
+    "name": "daily_forecast",
+    "label": "Daily forecast",
+    "words": [
+     "forecast",
+     "this week",
+     "7 day",
+     "week",
+     "weekend",
+     "next few days",
+     "daily forecast",
+     "outlook",
+     "rain chance this weekend",
+     "storms this week",
+     "freeze",
+     "frost",
+     "freezing rain",
+     "ice"
+    ],
+    "primary": false,
+    "kind": "columns",
+    "columns": [
+     {
+      "path": "daily.time",
+      "label": "Day",
+      "type": "date"
+     },
+     {
+      "path": "daily.weather_code",
+      "label": "Conditions",
+      "type": "number",
+      "codes": "wmo_weather"
+     },
+     {
+      "path": "daily.temperature_2m_max",
+      "label": "High",
+      "type": "number",
+      "unit_path": "daily_units.temperature_2m_max"
+     },
+     {
+      "path": "daily.precipitation_probability_max",
+      "label": "Rain chance",
+      "type": "number",
+      "unit_path": "daily_units.precipitation_probability_max"
+     }
+    ],
+    "limit": 7,
+    "axis": {
+     "cell": "daily.time",
+     "step": "day"
+    }
+   },
+   {
+    "name": "snow_forecast",
+    "label": "Snow forecast",
+    "words": [
+     "snow",
+     "snowfall",
+     "snow forecast",
+     "flurries",
+     "how much snow",
+     "will it snow",
+     "snow accumulation",
+     "inches of snow",
+     "blizzard"
+    ],
+    "primary": false,
+    "kind": "columns",
+    "columns": [
+     {
+      "path": "daily.time",
+      "label": "Day",
+      "type": "date"
+     },
+     {
+      "path": "daily.snowfall_sum",
+      "label": "Snowfall",
+      "type": "number",
+      "unit_path": "daily_units.snowfall_sum"
+     },
+     {
+      "path": "daily.temperature_2m_min",
+      "label": "Low",
+      "type": "number",
+      "unit_path": "daily_units.temperature_2m_min"
+     },
+     {
+      "path": "daily.weather_code",
+      "label": "Conditions",
+      "type": "number",
+      "codes": "wmo_weather"
+     }
+    ],
+    "limit": 7,
+    "axis": {
+     "cell": "daily.time",
+     "step": "day"
+    }
+   }
+  ],
+  "tier": "curated",
+  "access": {
+   "kind": "http_json",
+   "url_template": "https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m&hourly=temperature_2m,precipitation_probability,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,snowfall_sum,sunrise,sunset&temperature_unit=fahrenheit&wind_speed_unit=mph&precipitation_unit=inch&timezone=auto",
+   "params": [
+    {
+     "example": "32.7765",
+     "fill": {
+      "field": "lat",
+      "from": "resolver",
+      "resolver": "place"
+     },
+     "kind": "place",
+     "name": "lat",
+     "required": true
+    },
+    {
+     "example": "-79.9311",
+     "fill": {
+      "field": "lon",
+      "from": "resolver",
+      "resolver": "place"
+     },
+     "kind": "place",
+     "name": "lon",
+     "required": true
+    }
+   ],
+   "auth": "none"
+  }
+ },
+ "open-meteo-marine": {
+  "id": "open-meteo-marine",
+  "name": "Open-Meteo marine",
+  "categories": [
+   "water/surf_waves",
+   "water/water_temperature"
+  ],
+  "kinds": [
+   "current_value",
+   "forecast"
+  ],
+  "provider": {
+   "authority": "primary",
+   "id": "open-meteo",
+   "name": "Open-Meteo",
+   "url": "https://open-meteo.com"
+  },
+  "coverage": {
+   "entity": "",
+   "geo": "global",
+   "water": "ocean_coastal"
+  },
+  "answers": [
+   {
+    "name": "wave_height",
+    "label": "Wave height",
+    "words": [
+     "waves",
+     "wave height",
+     "surf",
+     "surf report",
+     "how big are the waves",
+     "seas",
+     "surf height",
+     "how's the surf",
+     "surf conditions"
+    ],
+    "primary": true,
+    "kind": "value",
+    "path": "current.wave_height",
+    "type": "number",
+    "unit_path": "current_units.wave_height",
+    "window": "now",
+    "measure": "waves"
+   },
+   {
+    "name": "wave_period",
+    "label": "Wave period",
+    "words": [
+     "wave period",
+     "period",
+     "swell period",
+     "seconds between waves",
+     "surf quality"
+    ],
+    "primary": true,
+    "kind": "value",
+    "path": "current.wave_period",
+    "type": "number",
+    "unit_path": "current_units.wave_period",
+    "window": "now"
+   },
+   {
+    "name": "wave_direction",
+    "label": "Wave direction",
+    "words": [
+     "wave direction",
+     "direction",
+     "which way",
+     "waves from",
+     "coming from"
+    ],
+    "primary": false,
+    "kind": "value",
+    "path": "current.wave_direction",
+    "type": "number",
+    "window": "now",
+    "unit": "\u00b0",
+    "measure": "wave_direction"
+   },
+   {
+    "name": "swell",
+    "label": "Swell height",
+    "words": [
+     "swell",
+     "swell height",
+     "ground swell",
+     "how big is the swell",
+     "swell size"
+    ],
+    "primary": false,
+    "kind": "value",
+    "path": "current.swell_wave_height",
+    "type": "number",
+    "window": "now",
+    "unit_path": "current_units.swell_wave_height",
+    "measure": "swell"
+   },
+   {
+    "name": "swell_period",
+    "label": "Swell period",
+    "words": [
+     "swell period",
+     "period",
+     "seconds",
+     "swell interval"
+    ],
+    "primary": false,
+    "kind": "value",
+    "path": "current.swell_wave_period",
+    "type": "number",
+    "window": "now",
+    "unit_path": "current_units.swell_wave_period"
+   },
+   {
+    "name": "swell_direction",
+    "label": "Swell direction",
+    "words": [
+     "swell direction",
+     "swell from",
+     "swell angle"
+    ],
+    "primary": false,
+    "kind": "value",
+    "path": "current.swell_wave_direction",
+    "type": "number",
+    "window": "now",
+    "unit": "\u00b0",
+    "measure": "wave_direction"
+   },
+   {
+    "name": "water_temp",
+    "label": "Sea surface temperature",
+    "words": [
+     "water temperature",
+     "water temp",
+     "sea temperature",
+     "ocean temperature",
+     "how warm is the water",
+     "sst"
+    ],
+    "primary": true,
+    "kind": "value",
+    "path": "current.sea_surface_temperature",
+    "type": "number",
+    "unit_path": "current_units.sea_surface_temperature",
+    "window": "now",
+    "measure": "water_temp"
+   },
+   {
+    "name": "waves_tomorrow_noon",
+    "label": "Wave height tomorrow noon",
+    "words": [
+     "tomorrow",
+     "wave height tomorrow",
+     "surf tomorrow",
+     "waves tomorrow"
+    ],
+    "primary": false,
+    "kind": "value",
+    "path": "hourly.wave_height[36]",
+    "type": "number",
+    "unit_path": "hourly_units.wave_height",
+    "window": "tomorrow",
+    "measure": "waves"
+   },
+   {
+    "name": "waves_hourly",
+    "label": "Wave height by hour",
+    "words": [
+     "by hour",
+     "hourly",
+     "later today",
+     "forecast",
+     "surf forecast",
+     "tonight"
+    ],
+    "primary": false,
+    "kind": "columns",
+    "columns": [
+     {
+      "path": "hourly.time",
+      "label": "Time",
+      "type": "time"
+     },
+     {
+      "path": "hourly.wave_height",
+      "label": "Wave height",
+      "type": "number",
+      "unit_path": "hourly_units.wave_height"
+     }
+    ],
+    "limit": 24,
+    "axis": {
+     "cell": "hourly.time",
+     "step": "hour"
+    }
+   }
+  ],
+  "tier": "curated",
+  "access": {
+   "kind": "http_json",
+   "url_template": "https://marine-api.open-meteo.com/v1/marine?latitude={lat}&longitude={lon}&current=wave_height,wave_direction,wave_period,swell_wave_height,swell_wave_direction,swell_wave_period,sea_surface_temperature&hourly=wave_height&length_unit=imperial&temperature_unit=fahrenheit&timezone=auto",
+   "params": [
+    {
+     "example": "32.7765",
+     "fill": {
+      "field": "lat",
+      "from": "resolver",
+      "resolver": "place"
+     },
+     "kind": "place",
+     "name": "lat",
+     "required": true
+    },
+    {
+     "example": "-79.80",
+     "fill": {
+      "field": "lon",
+      "from": "resolver",
+      "resolver": "place"
+     },
+     "kind": "place",
+     "name": "lon",
+     "required": true
+    }
+   ],
+   "auth": "none"
+  }
+ },
+ "fred-cpiaucsl": {
+  "id": "fred-cpiaucsl",
+  "name": "Consumer Price Index (all items) (FRED)",
+  "categories": [
+   "economy/inflation"
+  ],
+  "kinds": [
+   "trend",
+   "current_value"
+  ],
+  "provider": {
+   "authority": "official",
+   "id": "fred",
+   "name": "Federal Reserve Bank of St. Louis (FRED)",
+   "url": "https://fred.stlouisfed.org"
+  },
+  "coverage": {
+   "entity": "CPIAUCSL",
+   "geo": "US"
+  },
+  "answers": [
+   {
+    "name": "latest",
+    "label": "Consumer Price Index (all items)",
+    "kind": "value",
+    "primary": true,
+    "words": [
+     "consumer price index (all items)",
+     "consumer price index",
+     "cpi this month",
+     "cpi index level",
+     "latest",
+     "current",
+     "now",
+     "today"
+    ],
+    "path": "rows[0].CPIAUCSL",
+    "type": "number",
+    "unit": "index 1982-84=100",
+    "window": "latest"
+   },
+   {
+    "name": "as_of",
+    "label": "As of",
+    "kind": "value",
+    "words": [
+     "as of",
+     "when",
+     "date",
+     "last updated",
+     "updated"
+    ],
+    "path": "rows[0].observation_date",
+    "type": "date",
+    "window": "latest"
+   },
+   {
+    "name": "recent",
+    "label": "Recent readings",
+    "kind": "list",
+    "words": [
+     "recent",
+     "history",
+     "trend",
+     "past",
+     "over time",
+     "chart",
+     "last few"
+    ],
+    "path": "rows",
+    "row": [
+     {
+      "path": "observation_date",
+      "label": "Date",
+      "type": "date"
+     },
+     {
+      "path": "CPIAUCSL",
+      "label": "Consumer Price Index (all items)",
+      "type": "number",
+      "unit": "index 1982-84=100"
+     }
+    ],
+    "axis": {
+     "cell": "observation_date",
+     "step": "day"
+    }
+   }
+  ],
+  "tier": "curated",
+  "access": {
+   "kind": "http_csv",
+   "url_template": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=CPIAUCSL",
+   "params": [],
+   "auth": "none"
+  }
+ },
+ "usgs-quakes-near": {
+  "id": "usgs-quakes-near",
+  "name": "USGS earthquakes near a place",
+  "categories": [
+   "hazards/earthquakes"
+  ],
+  "kinds": [
+   "latest_items",
+   "count",
+   "alerts"
+  ],
+  "provider": {
+   "authority": "official",
+   "id": "usgs",
+   "name": "US Geological Survey",
+   "url": "https://www.usgs.gov"
+  },
+  "coverage": {
+   "entity": "",
+   "geo": "global"
+  },
+  "answers": [
+   {
+    "name": "quakes",
+    "label": "Earthquakes",
+    "words": [
+     "earthquakes",
+     "quakes",
+     "earthquake",
+     "magnitude",
+     "where",
+     "latest",
+     "recent",
+     "shaking",
+     "near",
+     "nearby",
+     "within"
+    ],
+    "primary": true,
+    "kind": "list",
+    "path": "features",
+    "row": [
+     {
+      "path": "properties.mag",
+      "label": "Magnitude",
+      "type": "number"
+     },
+     {
+      "path": "properties.place",
+      "label": "Place",
+      "type": "text"
+     },
+     {
+      "path": "properties.time",
+      "label": "Time",
+      "type": "time"
+     }
+    ],
+    "may_be_empty": true
+   },
+   {
+    "name": "quake_count",
+    "label": "Number of earthquakes",
+    "words": [
+     "how many",
+     "count",
+     "number of earthquakes",
+     "total"
+    ],
+    "primary": false,
+    "kind": "value",
+    "path": "features",
+    "type": "count",
+    "window": "now"
+   }
+  ],
+  "tier": "curated",
+  "access": {
+   "kind": "http_json",
+   "url_template": "https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&latitude={lat}&longitude={lon}&maxradiuskm={radius_km}&minmagnitude={min_mag}&starttime={start}&orderby=time",
+   "params": [
+    {
+     "example": "37.77",
+     "fill": {
+      "field": "lat",
+      "from": "resolver",
+      "resolver": "place"
+     },
+     "kind": "place",
+     "name": "lat",
+     "required": true
+    },
+    {
+     "example": "-122.42",
+     "fill": {
+      "field": "lon",
+      "from": "resolver",
+      "resolver": "place"
+     },
+     "kind": "place",
+     "name": "lon",
+     "required": true
+    },
+    {
+     "example": "200",
+     "fill": {
+      "from": "default",
+      "value": "200"
+     },
+     "kind": "none",
+     "name": "radius_km",
+     "required": true
+    },
+    {
+     "example": "2.5",
+     "fill": {
+      "from": "default",
+      "value": "2.5"
+     },
+     "kind": "none",
+     "name": "min_mag",
+     "required": true
+    },
+    {
+     "example": "2026-09-01",
+     "fill": {
+      "format": "%Y-%m-%d",
+      "from": "clock",
+      "offset_days": -30
+     },
+     "kind": "date",
+     "name": "start",
+     "required": true
+    }
+   ],
+   "auth": "none"
+  }
+ },
+ "mlb-team-schedule": {
+  "id": "mlb-team-schedule",
+  "name": "MLB team schedule",
+  "categories": [
+   "sports/schedules"
+  ],
+  "kinds": [
+   "schedule",
+   "next_event"
+  ],
+  "provider": {
+   "authority": "primary",
+   "id": "mlb",
+   "name": "MLB Stats API",
+   "url": "https://statsapi.mlb.com"
+  },
+  "coverage": {
+   "entity": "",
+   "geo": "US"
+  },
+  "answers": [
+   {
+    "name": "next_game_time",
+    "label": "Game time",
+    "words": [
+     "game time",
+     "start time",
+     "what time",
+     "first pitch",
+     "when"
+    ],
+    "primary": false,
+    "kind": "value",
+    "path": "dates[0].games[0].gameDate",
+    "type": "time",
+    "window": "latest",
+    "tbd_if": {
+     "path": "dates[0].games[0].status.startTimeTBD",
+     "equals": true
+    }
+   },
+   {
+    "name": "next_away",
+    "label": "Away team",
+    "words": [
+     "opponent",
+     "against",
+     "who",
+     "versus",
+     "vs",
+     "away"
+    ],
+    "primary": false,
+    "kind": "value",
+    "path": "dates[0].games[0].teams.away.team.name",
+    "type": "text",
+    "window": "latest"
+   },
+   {
+    "name": "next_home",
+    "label": "Home team",
+    "words": [
+     "opponent",
+     "against",
+     "who",
+     "versus",
+     "vs",
+     "home"
+    ],
+    "primary": false,
+    "kind": "value",
+    "path": "dates[0].games[0].teams.home.team.name",
+    "type": "text",
+    "window": "latest"
+   },
+   {
+    "name": "next_venue",
+    "label": "Venue",
+    "words": [
+     "where",
+     "venue",
+     "stadium",
+     "ballpark",
+     "park"
+    ],
+    "primary": false,
+    "kind": "value",
+    "path": "dates[0].games[0].venue.name",
+    "type": "text",
+    "window": "latest"
+   },
+   {
+    "name": "next_series",
+    "label": "Series",
+    "words": [
+     "series",
+     "playoffs",
+     "postseason",
+     "wild card",
+     "division series",
+     "which game",
+     "game 1"
+    ],
+    "primary": false,
+    "kind": "value",
+    "path": "dates[0].games[0].seriesDescription",
+    "type": "text",
+    "window": "latest"
+   },
+   {
+    "name": "upcoming",
+    "label": "Next games",
+    "words": [
+     "next game",
+     "next games",
+     "next",
+     "schedule",
+     "upcoming",
+     "play next",
+     "games",
+     "fixtures",
+     "this week"
+    ],
+    "primary": true,
+    "kind": "list",
+    "path": "dates",
+    "row": [
+     {
+      "path": "games[0].gameDate",
+      "label": "Start",
+      "type": "time",
+      "tbd_if": {
+       "path": "games[0].status.startTimeTBD",
+       "equals": true
+      }
+     },
+     {
+      "path": "games[0].teams.away.team.name",
+      "label": "Away",
+      "type": "text"
+     },
+     {
+      "path": "games[0].teams.home.team.name",
+      "label": "Home",
+      "type": "text"
+     },
+     {
+      "path": "games[0].venue.name",
+      "label": "Venue",
+      "type": "text"
+     }
+    ],
+    "axis": {
+     "cell": "games[0].gameDate",
+     "step": "hour"
+    }
+   }
+  ],
+  "tier": "curated",
+  "access": {
+   "kind": "http_json",
+   "url_template": "https://statsapi.mlb.com/api/v1/schedule?sportId=1&teamId={team}&startDate={start}&endDate={end}",
+   "params": [
+    {
+     "example": "144",
+     "fill": {
+      "field": "key",
+      "from": "resolver",
+      "resolver": "team_mlb"
+     },
+     "kind": "team",
+     "name": "team",
+     "required": true
+    },
+    {
+     "example": "2026-09-27",
+     "fill": {
+      "format": "%Y-%m-%d",
+      "from": "clock",
+      "offset_days": -30
+     },
+     "kind": "date",
+     "name": "start",
+     "required": true
+    },
+    {
+     "example": "2026-10-10",
+     "fill": {
+      "format": "%Y-%m-%d",
+      "from": "clock",
+      "offset_days": 0
+     },
+     "kind": "date",
+     "name": "end",
+     "required": true
+    }
+   ],
+   "auth": "none"
+  }
+ },
+ "nws-forecast": {
+  "id": "nws-forecast",
+  "name": "NWS 7-day forecast",
+  "categories": [
+   "weather/forecast"
+  ],
+  "kinds": [
+   "forecast"
+  ],
+  "provider": {
+   "authority": "official",
+   "id": "nws",
+   "name": "National Weather Service (NOAA)",
+   "url": "https://www.weather.gov"
+  },
+  "coverage": {
+   "entity": "",
+   "geo": "US"
+  },
+  "answers": [
+   {
+    "name": "periods",
+    "label": "Forecast periods",
+    "words": [
+     "forecast",
+     "this week",
+     "7 day",
+     "week",
+     "weekend",
+     "next few days",
+     "daily forecast",
+     "outlook",
+     "will it rain tomorrow",
+     "tomorrow",
+     "snow this week",
+     "storms this weekend"
+    ],
+    "primary": true,
+    "kind": "list",
+    "path": "properties.periods",
+    "row": [
+     {
+      "path": "startTime",
+      "label": "Period",
+      "type": "time"
+     },
+     {
+      "path": "temperature",
+      "label": "Temperature",
+      "type": "number",
+      "unit": "\u00b0F"
+     },
+     {
+      "path": "shortForecast",
+      "label": "Conditions",
+      "type": "text"
+     },
+     {
+      "path": "probabilityOfPrecipitation.value",
+      "label": "Rain chance",
+      "type": "number",
+      "unit": "%"
+     }
+    ],
+    "axis": {
+     "cell": "startTime",
+     "step": "period"
+    }
+   },
+   {
+    "name": "tonight",
+    "label": "Tonight",
+    "words": [
+     "tonight",
+     "overnight",
+     "this evening",
+     "later tonight",
+     "tonight's forecast",
+     "low tonight",
+     "storm tonight",
+     "thunderstorms tonight",
+     "rain tonight",
+     "frost tonight",
+     "freeze tonight",
+     "fog tonight",
+     "snow tonight"
+    ],
+    "primary": false,
+    "kind": "list",
+    "path": "properties.periods",
+    "row": [
+     {
+      "path": "startTime",
+      "label": "Starts",
+      "type": "time"
+     },
+     {
+      "path": "temperature",
+      "label": "Low",
+      "type": "number",
+      "unit": "\u00b0F"
+     },
+     {
+      "path": "shortForecast",
+      "label": "Conditions",
+      "type": "text"
+     },
+     {
+      "path": "probabilityOfPrecipitation.value",
+      "label": "Rain chance",
+      "type": "number",
+      "unit": "%"
+     }
+    ],
+    "filter": {
+     "path": "name",
+     "equals": "Tonight"
+    },
+    "may_be_empty": true,
+    "axis": {
+     "cell": "startTime",
+     "step": "period"
+    }
+   },
+   {
+    "name": "today",
+    "label": "Today",
+    "words": [
+     "today",
+     "this afternoon",
+     "later today",
+     "today's forecast",
+     "high today",
+     "rain today",
+     "storms today",
+     "this morning",
+     "thunderstorms today",
+     "snow today",
+     "fog this morning"
+    ],
+    "primary": false,
+    "kind": "list",
+    "path": "properties.periods",
+    "row": [
+     {
+      "path": "startTime",
+      "label": "Period",
+      "type": "time"
+     },
+     {
+      "path": "temperature",
+      "label": "Temperature",
+      "type": "number",
+      "unit": "\u00b0F"
+     },
+     {
+      "path": "shortForecast",
+      "label": "Conditions",
+      "type": "text"
+     },
+     {
+      "path": "probabilityOfPrecipitation.value",
+      "label": "Rain chance",
+      "type": "number",
+      "unit": "%"
+     }
+    ],
+    "axis": {
+     "cell": "startTime",
+     "step": "period"
+    }
+   },
+   {
+    "name": "next_period",
+    "label": "Next forecast period",
+    "words": [
+     "now",
+     "next",
+     "today",
+     "tonight",
+     "this afternoon"
+    ],
+    "primary": false,
+    "kind": "value",
+    "path": "properties.periods[0].name",
+    "type": "text",
+    "window": "now"
+   },
+   {
+    "name": "next_temp",
+    "label": "Temperature (next period)",
+    "words": [
+     "temperature",
+     "temp",
+     "degrees",
+     "hot",
+     "cold",
+     "warm",
+     "how hot",
+     "how cold"
+    ],
+    "primary": false,
+    "kind": "value",
+    "path": "properties.periods[0].temperature",
+    "type": "number",
+    "unit": "\u00b0F",
+    "window": "now",
+    "measure": "temperature"
+   },
+   {
+    "name": "next_conditions",
+    "label": "Conditions (next period)",
+    "words": [
+     "conditions",
+     "sky",
+     "sunny",
+     "cloudy",
+     "clear",
+     "outside",
+     "what's it like",
+     "thunderstorm",
+     "hail",
+     "fog",
+     "frost",
+     "sleet",
+     "freezing rain",
+     "snow",
+     "storm"
+    ],
+    "primary": false,
+    "kind": "value",
+    "path": "properties.periods[0].shortForecast",
+    "type": "text",
+    "window": "now",
+    "measure": "conditions"
+   },
+   {
+    "name": "next_rain",
+    "label": "Rain chance (next period)",
+    "words": [
+     "rain",
+     "rain chance",
+     "chance of rain",
+     "precipitation",
+     "umbrella",
+     "showers",
+     "rain today"
+    ],
+    "primary": false,
+    "kind": "value",
+    "path": "properties.periods[0].probabilityOfPrecipitation.value",
+    "type": "number",
+    "unit": "%",
+    "window": "now",
+    "measure": "precip_chance"
+   },
+   {
+    "name": "next_wind",
+    "label": "Wind (next period)",
+    "words": [
+     "wind",
+     "windy",
+     "breeze",
+     "wind speed",
+     "gusts",
+     "gusty"
+    ],
+    "primary": false,
+    "kind": "value",
+    "path": "properties.periods[0].windSpeed",
+    "type": "text",
+    "window": "now",
+    "measure": "wind"
+   },
+   {
+    "name": "next_detail",
+    "label": "Forecast details (next period)",
+    "words": [
+     "details",
+     "detailed forecast",
+     "summary",
+     "describe",
+     "full forecast"
+    ],
+    "primary": false,
+    "kind": "value",
+    "path": "properties.periods[0].detailedForecast",
+    "type": "text",
+    "window": "now"
+   }
+  ],
+  "tier": "curated",
+  "access": {
+   "kind": "http_json",
+   "url_template": "https://api.weather.gov/gridpoints/{office}/{grid_x},{grid_y}/forecast",
+   "params": [
+    {
+     "example": "CHS",
+     "fill": {
+      "from": "source",
+      "path": "properties.gridId",
+      "source": "nws-points"
+     },
+     "kind": "place",
+     "name": "office",
+     "required": true
+    },
+    {
+     "example": "87",
+     "fill": {
+      "from": "source",
+      "path": "properties.gridX",
+      "source": "nws-points"
+     },
+     "kind": "place",
+     "name": "grid_x",
+     "required": true
+    },
+    {
+     "example": "77",
+     "fill": {
+      "from": "source",
+      "path": "properties.gridY",
+      "source": "nws-points"
+     },
+     "kind": "place",
+     "name": "grid_y",
+     "required": true
+    }
+   ],
+   "auth": "none"
+  }
+ },
+ "nws-points": {
+  "id": "nws-points",
+  "name": "NWS point lookup",
+  "categories": [
+   "weather/forecast"
+  ],
+  "kinds": [
+   "lookup"
+  ],
+  "provider": {
+   "authority": "official",
+   "id": "nws",
+   "name": "National Weather Service (NOAA)",
+   "url": "https://www.weather.gov"
+  },
+  "coverage": {
+   "entity": "",
+   "geo": "US"
+  },
+  "answers": [
+   {
+    "name": "office",
+    "label": "Forecast office",
+    "words": [
+     "weather office",
+     "forecast office",
+     "nws office",
+     "office",
+     "wfo",
+     "which office"
+    ],
+    "primary": true,
+    "kind": "value",
+    "path": "properties.gridId",
+    "type": "text",
+    "window": "latest"
+   },
+   {
+    "name": "city",
+    "label": "Nearest city",
+    "words": [
+     "city",
+     "town",
+     "nearest city",
+     "where",
+     "location"
+    ],
+    "primary": true,
+    "kind": "value",
+    "path": "properties.relativeLocation.properties.city",
+    "type": "text",
+    "window": "latest"
+   },
+   {
+    "name": "state",
+    "label": "State",
+    "words": [
+     "state",
+     "region",
+     "where",
+     "location"
+    ],
+    "primary": true,
+    "kind": "value",
+    "path": "properties.relativeLocation.properties.state",
+    "type": "text",
+    "window": "latest"
+   },
+   {
+    "name": "grid_x",
+    "label": "Grid X",
+    "words": [
+     "grid",
+     "grid x",
+     "gridpoint",
+     "grid point"
+    ],
+    "primary": false,
+    "kind": "value",
+    "path": "properties.gridX",
+    "type": "number",
+    "window": "latest"
+   },
+   {
+    "name": "grid_y",
+    "label": "Grid Y",
+    "words": [
+     "grid",
+     "grid y",
+     "gridpoint",
+     "grid point"
+    ],
+    "primary": false,
+    "kind": "value",
+    "path": "properties.gridY",
+    "type": "number",
+    "window": "latest"
+   },
+   {
+    "name": "time_zone",
+    "label": "Time zone",
+    "words": [
+     "time zone",
+     "timezone",
+     "zone",
+     "local time"
+    ],
+    "primary": false,
+    "kind": "value",
+    "path": "properties.timeZone",
+    "type": "text",
+    "window": "latest"
+   },
+   {
+    "name": "radar",
+    "label": "Nearest radar",
+    "words": [
+     "radar",
+     "radar station",
+     "radar site",
+     "nexrad"
+    ],
+    "primary": false,
+    "kind": "value",
+    "path": "properties.radarStation",
+    "type": "text",
+    "window": "latest"
+   },
+   {
+    "name": "forecast_url",
+    "label": "Forecast link",
+    "words": [
+     "forecast link",
+     "forecast url",
+     "link",
+     "api url"
+    ],
+    "primary": false,
+    "kind": "value",
+    "path": "properties.forecast",
+    "type": "text",
+    "window": "latest"
+   }
+  ],
+  "tier": "curated",
+  "access": {
+   "kind": "http_json",
+   "url_template": "https://api.weather.gov/points/{lat},{lon}",
+   "params": [
+    {
+     "example": "32.7765",
+     "fill": {
+      "field": "lat",
+      "from": "resolver",
+      "resolver": "place"
+     },
+     "kind": "place",
+     "name": "lat",
+     "required": true
+    },
+    {
+     "example": "-79.9311",
+     "fill": {
+      "field": "lon",
+      "from": "resolver",
+      "resolver": "place"
+     },
+     "kind": "place",
+     "name": "lon",
+     "required": true
+    }
+   ],
+   "auth": "none"
+  }
+ },
+ "nws-alerts-point": {
+  "id": "nws-alerts-point",
+  "name": "NWS active alerts for a location",
+  "categories": [
+   "weather/alerts"
+  ],
+  "kinds": [
+   "alerts"
+  ],
+  "provider": {
+   "authority": "official",
+   "id": "nws",
+   "name": "National Weather Service (NOAA)",
+   "url": "https://www.weather.gov"
+  },
+  "coverage": {
+   "entity": "",
+   "geo": "US"
+  },
+  "answers": [
+   {
+    "name": "alerts",
+    "label": "Active weather alerts",
+    "words": [
+     "alerts",
+     "warnings",
+     "watches",
+     "advisories",
+     "severe weather",
+     "any warnings",
+     "near me",
+     "tornado warning",
+     "severe thunderstorm warning",
+     "flood warning",
+     "flash flood",
+     "winter storm warning",
+     "blizzard warning",
+     "heat advisory",
+     "red flag warning"
+    ],
+    "primary": true,
+    "kind": "list",
+    "path": "features",
+    "row": [
+     {
+      "path": "properties.event",
+      "label": "Alert",
+      "type": "text"
+     },
+     {
+      "path": "properties.severity",
+      "label": "Severity",
+      "type": "text"
+     },
+     {
+      "path": "properties.areaDesc",
+      "label": "Area",
+      "type": "text"
+     },
+     {
+      "path": "properties.expires",
+      "label": "Expires",
+      "type": "time"
+     }
+    ],
+    "may_be_empty": true
+   },
+   {
+    "name": "alert_count",
+    "label": "Active alerts",
+    "words": [
+     "how many",
+     "count",
+     "number of alerts",
+     "how many warnings",
+     "how many alerts"
+    ],
+    "primary": false,
+    "kind": "value",
+    "path": "features",
+    "type": "count",
+    "window": "now",
+    "measure": "alerts"
+   }
+  ],
+  "tier": "curated",
+  "access": {
+   "kind": "http_json",
+   "url_template": "https://api.weather.gov/alerts/active?point={lat},{lon}",
+   "params": [
+    {
+     "example": "32.7765",
+     "fill": {
+      "field": "lat",
+      "from": "resolver",
+      "resolver": "place"
+     },
+     "kind": "place",
+     "name": "lat",
+     "required": true
+    },
+    {
+     "example": "-79.9311",
+     "fill": {
+      "field": "lon",
+      "from": "resolver",
+      "resolver": "place"
+     },
+     "kind": "place",
+     "name": "lon",
+     "required": true
+    }
+   ],
+   "auth": "none"
+  }
+ },
+ "mlb-team-results": {
+  "id": "mlb-team-results",
+  "name": "MLB team recent results",
+  "categories": [
+   "sports/results"
+  ],
+  "kinds": [
+   "result",
+   "latest_items"
+  ],
+  "provider": {
+   "authority": "primary",
+   "id": "mlb",
+   "name": "MLB Stats API",
+   "url": "https://statsapi.mlb.com"
+  },
+  "coverage": {
+   "entity": "",
+   "geo": "US"
+  },
+  "answers": [
+   {
+    "name": "results",
+    "label": "Recent results",
+    "words": [
+     "score",
+     "scores",
+     "result",
+     "results",
+     "final",
+     "last game",
+     "did they win",
+     "won",
+     "lost",
+     "last night"
+    ],
+    "primary": true,
+    "kind": "list",
+    "path": "dates",
+    "row": [
+     {
+      "path": "games[0].teams.away.team.name",
+      "label": "Away",
+      "type": "text"
+     },
+     {
+      "path": "games[0].teams.away.score",
+      "label": "Away runs",
+      "type": "number"
+     },
+     {
+      "path": "games[0].teams.home.team.name",
+      "label": "Home",
+      "type": "text"
+     },
+     {
+      "path": "games[0].teams.home.score",
+      "label": "Home runs",
+      "type": "number"
+     }
+    ],
+    "newest_first": true,
+    "filter": {
+     "path": "games[0].status.detailedState",
+     "equals": "Final"
+    },
+    "may_be_empty": true
+   },
+   {
+    "name": "recent_games",
+    "label": "Recent games",
+    "words": [
+     "when",
+     "date",
+     "which day",
+     "last week",
+     "status",
+     "postponed",
+     "cancelled",
+     "rained out"
+    ],
+    "kind": "list",
+    "path": "dates",
+    "row": [
+     {
+      "path": "date",
+      "label": "Date",
+      "type": "date"
+     },
+     {
+      "path": "games[0].teams.away.team.name",
+      "label": "Away",
+      "type": "text"
+     },
+     {
+      "path": "games[0].teams.home.team.name",
+      "label": "Home",
+      "type": "text"
+     },
+     {
+      "path": "games[0].status.detailedState",
+      "label": "Status",
+      "type": "text"
+     }
+    ],
+    "newest_first": true,
+    "may_be_empty": true,
+    "axis": {
+     "cell": "date",
+     "step": "day"
+    }
+   }
+  ],
+  "tier": "curated",
+  "access": {
+   "kind": "http_json",
+   "url_template": "https://statsapi.mlb.com/api/v1/schedule?sportId=1&teamId={team}&startDate={since}&endDate={until}",
+   "params": [
+    {
+     "example": "147",
+     "fill": {
+      "field": "key",
+      "from": "resolver",
+      "resolver": "team_mlb"
+     },
+     "kind": "team",
+     "name": "team",
+     "required": true
+    },
+    {
+     "example": "2026-09-21",
+     "fill": {
+      "format": "%Y-%m-%d",
+      "from": "clock",
+      "offset_days": -7
+     },
+     "kind": "date",
+     "name": "since",
+     "required": true
+    },
+    {
+     "example": "2026-09-28",
+     "fill": {
+      "format": "%Y-%m-%d",
+      "from": "clock",
+      "offset_days": 0
+     },
+     "kind": "date",
+     "name": "until",
+     "required": true
+    }
+   ],
+   "auth": "none"
+  }
+ }
+}

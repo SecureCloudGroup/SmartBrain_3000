@@ -1985,6 +1985,123 @@ cards LOOKED built.
   truth (falling back to the prunable journal) — API cards too, proven on
   unfixed main. `_finalize` now carries the prior marker when `born` is None.
 
+**The frame and the verify step (2026-10-03, Rounds 14–18).** The blind runs
+of 2026-09-29 traced most wrong cards to one gap: the steps after intent
+re-derived what the ask wants from raw words, and nothing checked the build
+against the ask before handoff. The flow now carries a FRAME from stage 1 to
+the handoff, and a deterministic check stands where the judge was removed.
+- **Frame fields (stage 1, code wins).** The intent reply gains `frame_kind`,
+  closed to the Library kinds (`current_value | next_event | schedule |
+  forecast | result | trend | ranking | latest_items | alerts | status |
+  count`); anything else is null. Code's parse
+  (`library_index.frame_kind_from_text`, a closed cue table) overrides the
+  model's, as the cadence does. `intent.window` is code-only
+  (`ni_flow._window_from_text`): the engine's closed `window` enum (`now |
+  today | tonight | tomorrow | weekend | dow:<mon..sun> | next_days:N |
+  next_hours:N`, counts clamped to 16 days / 168 hours) or null; a stretch
+  already behind us ("last weekend", "past 24 hours") is no window.
+- **Locate gets the frame.** `_library_candidates(request, intent)` passes
+  `hint={subject, wants, place, frame_kind, window}` to
+  `LibraryIndex.candidates` from the pick pause and from
+  `reenter_source_pick` (a Library that fails, a `TypeError` inside it
+  included, offers nothing — it is never retried without the hint). When
+  locate offers no row (it found no source about the ask; its skip reasons
+  are not read), the web stage runs. Rows carry `categories`, `scope`
+  (`place` | `global`), the reading `label` and a same-host `lookup`; a row
+  whose lookup leaves its host is dropped.
+- **Seal.** `seal_library_pick` also seals `_library_format` (what the row
+  promised), `_library_provider`, `_library_scope`, `_library_lookup`, the
+  tapped row's reading (`_library_label`, "Miami Marlins (mlb)") and
+  `_library_readings`: the readings of every non-place row of the pick,
+  kept across re-picks (how the Library read the ask's named subjects;
+  locate checked each row it offered against them).
+- **Sampling (C12/C13).** A sealed same-host lookup runs first
+  (`library_resolve.resolve_lookup` over the flow's own fetcher — NWS points
+  → its forecast grid); the final address replaces `_library_url` and is
+  the card's frozen source. A step off the host, or a lookup that fails,
+  moves on. A Library row that promised JSON and answers with a page
+  (`not_json`) moves on with "did not return its data" — it never becomes a
+  page card.
+- **Verify (C8, `_verify_frame`, before `_handoff` on every declared-answers
+  build).** Deterministic, no model. Refused when (a) the source's
+  categories share no top level with the ask's — only when the Library's
+  classify of the ask AND of the intent's subject + wants are both
+  non-empty and both disjoint from the source's, and the source isn't known
+  by every naming word of the subject (its name, its example asks, the
+  values its address took: "oil stocks report" is an example ask of the
+  EIA's petroleum stocks, though "stocks" classifies as markets) unless the
+  intent itself names the asked kind ("weather": "KC storms tonight" stays
+  refused on the hurricane list); (a2) the source is about a different
+  named subject (`_other_subject`, below); (b) the ask names a place
+  (the intent's place, only when the user's words say it), the category's
+  policy is about places or unknown, and the address never took it (not
+  offered for the place, no geo parameter, coverage doesn't name it); (c)
+  the chosen answers can't be this kind of question — a next event needs a
+  time still to come (an observation's own "as of" doesn't count; the
+  build adds the source's event time when the chosen answers lack one), a
+  result needs a score; rows whose cells hold the month and the day as
+  numbers carry a date (USNO's moon phases and seasons); (d) an older
+  record's answer is labeled for another day than the asked window ("High
+  today" for "on Saturday"); (e) nothing chosen speaks to the words the
+  user asked about and an asked want is unanswered; (f) a topic word of
+  the subject is filed only under subcategories the source isn't, and none
+  of its own words (name, description, entity, example asks, answers) say
+  it. A topic word is one the taxonomy uses on its own — a subcategory's
+  name ("TV shows"), a one-word keyword, or a multi-word keyword said whole
+  ("red" alone isn't "red flag warning": the Red Sox' scores stand). A
+  refusal re-lands the pick without that source ("<provider> doesn't
+  answer this (<reason>)"), then the web, then an honest `unsupported`; it
+  never hands off. A place-free source under a place-free policy ships with
+  "<provider> isn't specific to <place>"; when the Library's taxonomy
+  carries `expects`, the components no answer of the source reports are
+  named ("this source doesn't report: wind").
+- **Named subjects (review round, 2026-10-03; `_other_subject`).** A source
+  with a declared `coverage.entity` is about that subject: it serves the ask
+  when the ask names it (the entity's capitalized / numbered words, its
+  name, or its example asks' words that aren't the words of its kind:
+  "baseball" names MLB, "jobs" payrolls); otherwise only when every naming
+  word the user said is among its own words and it isn't bound to one region
+  (`coverage.geo` like `US-CA`: "subway delays" isn't BART's). Even when
+  named, another one of its kind refuses it: another number ("2 year
+  yield" on the 10-year) or — when the ask doesn't call it by its proper
+  name — a one-word keyword of its subcategory none of its words say
+  ("wmata" on the CTA's alerts; never a word of the subcategory's own name,
+  "inflation" on the CPI). Words the pick's readings name (a team the
+  Library resolved: "New York Yankees") were checked by locate and don't
+  count. A source whose address a resolver filled from the subject (a team,
+  a ticker) is "about the named subject" only when that resolver is one the
+  policy of a category the subject + wants classify as resolves ("Phoenix"
+  fills a ballclub; "the space station over Phoenix" is sky data), and its
+  reading must hold every naming word of the subject ("Miami Marlins" for
+  "Inter Miami" → refused; an acronym of the reading counts: "epl").
+- **Windows that hold (review round, D5).** A name with a day word is no
+  window ("Saturday Night Live", "Monday Night Football", "Black Friday",
+  "Super Tuesday", "Cyber Monday", "Good Friday", "Fat Tuesday", …). When
+  no answer serves the window as declared, `select_answers` takes what
+  holds for it: a slow-moving value (no weather-like `measure`: a moon
+  phase, a weekly price, a jackpot) declared `today` / `latest` for
+  tonight, `latest` for this week (next_days ≤ 7); a list with no axis for
+  this week (a chart, the recent quakes); day rows for tonight (cut as
+  today) — rows that cut to the window ahead of values. A window ahead
+  (tonight, tomorrow, the weekend, a weekday, next days / hours) never cuts
+  rows that all lie in the past (`ni.rows_all_past`: FRED's observation
+  dates) — the card shows the latest rows instead of nothing.
+- **Page path (C9–C11).** `_s2_evaluate` drops pages `pagegraph.readability`
+  can't read (challenge, JS shell, modal, binary), marks the subject's own
+  site official (`pagegraph.first_party` over the subject and the user's own
+  words, the Library's `official_hosts` when it has them) and puts it first
+  only with evidence its page serves the ask (`pagegraph.authority_leads`; a
+  zero-evidence official page ranks by fitness like any other), and weighs
+  fitness by `refreshability`; the rank prompt shows an authority column. `_build_page_card` wraps the jail payload with
+  `graph_from_extract`, skips a page with no want/subject word before any
+  model call (`page_verify.has_evidence`), and runs
+  `page_verify.verify_page_reading` on BOTH tiers; the judge's
+  `serves:false` / `wrong` binds in the interpreted tier too. Any refusal,
+  and an llm reply that won't parse, moves on to the next page of the pick
+  (never a re-search that offers it again); a pasted link ends honestly.
+- **Harness.** `tools/ni-live-e2e.py` records every tapped reading (label,
+  filled params, scope) and the flow's notes for each ask.
+
 ## 30. The SmartBrain Library replaces the built-in catalog (2026-09-28)
 
 The 12 bundled recipes (§18, §26) and everything that existed only for them
@@ -2055,10 +2172,29 @@ and the `recipe` born marker stays readable.
   `near_earth_objects["2026-09-27"]`.
   `LibraryIndex.answers(id)` returns them; `ni_flow._clean_answer` drops any answer
   that breaks the closed shape (the rest still serve).
+- **Spec v1.2 — what an answer delivers (2026-10-03).** Optional, closed: a value's
+  `window` (`now | today | tonight | tomorrow | latest`, the newest reading not tied to
+  the clock) and `measure` (`temperature | feels_like | precip_chance | precip_amount |
+  conditions | thunderstorm | snow | wind | humidity | waves | swell | wave_direction |
+  water_temp | alerts | kp | uv | air_quality | tide | sunrise | sunset`); a list's or
+  columns answer's `axis: {cell, step: day|hour|period}` (the cell is one of its own
+  time/date cells: the rows are indexed by time and can be cut); `tbd_if: {path, equals}`
+  on a `time` value (path from the root) or a list row's `time` cell (row-relative) —
+  `equals` is `true` or a flag word ("TBD", "TBA").
 - **Seal.** A Library tap (`pick_flow_source` and `tools/ni-live-e2e.py`, both through
   `ni_flow.seal_library_pick`) seals `_library_source`, `_library_url` and
   `_library_params` (the values the URL was filled with — candidate rows now carry
   `params`, never the key slot) next to `_format`.
+- **Pick by the frame (C7).** For a source that declares v1.2 keys, `select_answers(…,
+  window, frame_kind)` first narrows to what can show the asked window: a value declared
+  for it (`now` also takes `latest`; `today` takes `now` and `latest`), rows whose axis step
+  can cut it (day rows never cut hours), a list with no axis only for now / today /
+  tonight; the best-fitting rows lead, and the window's own words leave the scoring. A
+  measure the ask names ("wind") that no answer reports, or no answer for the window, is
+  nothing — the next source, "<provider> doesn't give <the weekend>" / "doesn't report
+  wind", never the headline answers instead. A `count` answer only serves "how many /
+  number of"; "any …?" takes the list that may be empty. A general ask for a stretch of
+  time takes the best-fitting rows. Older records keep word-only selection.
 - **Build.** `_sample_and_map` on a fresh build (never a remap) whose fetched URL equals
   `_library_url` builds from the answers before any derive / mapping call:
   `select_answers` (the user's words first; ties → declared order; a list/columns
@@ -2071,6 +2207,17 @@ and the `recipe` born marker stays readable.
   binds. A list fits when every cell is present in SOME row; a row missing a cell shows
   "—" there (a cell missing from EVERY row is drift: the run fails, repair fires). A
   `may_be_empty` list counts its rows and shows "No <label> right now" while empty.
+  With a window and an `axis`, the engine's `window` transform (keyed by the axis cell,
+  `zone` extracted from the source's top-level `timezone` / `utc_offset_seconds`)
+  replaces `top_n` and runs before the cells' conversions, so "this weekend" stays Sat +
+  Sun on every refresh. "Today" is the source's today (its named zone, else the offset
+  of the row nearest now) — except that a UTC stamp (`Z` / `+00:00`) with no zone named
+  says when, not where: its day is the user's (MLB / NHL starts; at 21:30 in New York
+  "today" keeps tonight's 9:40 PM game). Day rows answer "tonight" as today; a window
+  ahead over rows that all lie in the past isn't applied (the latest rows show). `tbd_if` becomes the `time` transform's `unless` (a value's flag
+  is extracted as `<name>_tbd` when the sample carries it): the card shows the date +
+  "time TBD". For a next-event / schedule ask, a value answer's time node is marked
+  `next`, so a time that has passed shows "no current prediction".
 - **Nothing here → the next source.** When the response holds none of the chosen answers
   (TheSportsDB listing no games) or an asked value is missing (a buoy not measuring waves),
   the pick re-lands on the other offered sources with "<provider> has nothing for this right
@@ -2078,11 +2225,14 @@ and the `recipe` born marker stays readable.
   falls back to the source's other `primary` answers, named "not reported by this source
   right now"; otherwise the model mapping path runs, noted. Any other misfit notes "the
   Library's declared answers didn't fit…" and mapping runs unchanged.
-- **No model judge.** The build is deterministic, so the P8 judge doesn't run (its gap
-  guesses were false on cards that showed the very thing). The note says "built from the
-  Library's declared answers: <labels>" plus, computed by code, "this source doesn't
-  report: <want>" for a want the user's own words named that no declared answer speaks to
-  (a filled value — team, place — never counts).
+- **Verify replaces the judge.** The build is deterministic, so the P8 judge doesn't run
+  (its gap guesses were false on cards that showed the very thing); `_verify_frame` (§29
+  "The frame and the verify step") checks the build against the ask's frame instead and
+  refuses what can't answer it. The note says "built from the Library's declared answers:
+  <labels>" plus, computed by code, "this source doesn't report: <want>" for a want the
+  user's own words named that no declared answer speaks to (a filled value — the URL's
+  params only; a place the address never took is not filled) and for the subcategory's
+  `expects` components none of the source's answers reports.
 - **Bare lists.** The engine now wraps a bare-list response as `{"items": [...]}`
   before the pipeline, exactly as the flow samples it (no path can address a bare
   list root, so no existing card changes).
