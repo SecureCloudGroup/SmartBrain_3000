@@ -2016,12 +2016,15 @@ of 2026-09-29 traced most wrong cards to one gap: the steps after intent
 re-derived what the ask wants from raw words, and nothing checked the build
 against the ask before handoff. The flow now carries a FRAME from stage 1 to
 the handoff, and a deterministic check stands where the judge was removed.
-- **Frame fields (stage 1, code wins).** The intent reply gains `frame_kind`,
-  closed to the Library kinds (`current_value | next_event | schedule |
-  forecast | result | trend | ranking | latest_items | alerts | status |
-  count`); anything else is null. Code's parse
-  (`library_index.frame_kind_from_text`, a closed cue table) overrides the
-  model's, as the cadence does. `intent.window` is code-only
+- **Frame fields (stage 1, code only).** `intent.frame_kind` is code's parse
+  (`library_index.frame_kind_from_text`, a closed cue table) over the Library
+  kinds (`current_value | next_event | schedule | forecast | result | trend |
+  ranking | latest_items | alerts | status | count`); words that state no
+  kind leave it null — the model is not asked for one. (Live 2026-10-04: the
+  model's fallback guess "latest_items" for a bare "gas prices" gated locate,
+  verify and the page shape check, shipping Colorado's natural-gas dataset;
+  across the dev + holdout asks with no stated kind, no guessed kind ever
+  improved the first Library row.) `intent.window` is code-only
   (`ni_flow._window_from_text`): the engine's closed `window` enum (`now |
   today | tonight | tomorrow | weekend | dow:<mon..sun> | next_days:N |
   next_hours:N`, counts clamped to 16 days / 168 hours) or null; a stretch

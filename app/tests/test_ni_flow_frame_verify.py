@@ -200,14 +200,14 @@ def test_code_owns_the_frame_kind_and_the_window() -> None:
     # the model says current_value; the words say a result: code wins (as with the cadence)
     intent = ni_flow.stage_intent("Bills score", model({**base, "frame_kind": "current_value"}))
     assert intent["frame_kind"] == "result" and intent["window"] is None
-    # no cue in the words: the model's kind stands when it is one of the closed kinds
+    # no cue in the words: the kind is open — a model's guess is never the frame (live 2026-10-04)
     intent = ni_flow.stage_intent("Buffalo Bills", model({**base, "frame_kind": "next_event"}))
-    assert intent["frame_kind"] == "next_event"
+    assert intent["frame_kind"] is None
     intent = ni_flow.stage_intent("Buffalo Bills", model({**base, "frame_kind": "a vibe"}))
     assert intent["frame_kind"] is None
     intent = ni_flow.stage_intent("weather this weekend in Austin", model({**base, "frame_kind": None}))
     assert intent["window"] == "weekend"
-    assert "frame_kind" in ni_flow._INTENT_PROMPT
+    assert "frame_kind" not in ni_flow._INTENT_PROMPT
 
 
 def test_locate_gets_the_intents_frame_at_every_call_site(monkeypatch) -> None:

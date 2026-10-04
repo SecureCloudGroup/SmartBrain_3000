@@ -398,6 +398,7 @@ class LibraryIndex:
         self._has_route_asks_cache: bool | None = None
         self._takes_cache: dict[str, set[str]] | None = None
         self._own_cache: dict[str, set[str]] | None = None
+        self._names_cache: list[tuple[str, set[str]]] | None = None
 
     # --- install -----------------------------------------------------------------------------
 
@@ -637,7 +638,7 @@ class LibraryIndex:
                 if subs and subs <= far and not typed:
                     found.pop(r)
                     said_by.pop(r)
-        cats, cats_from = self._frame_cats(con, ask, hint, set(found), frame, route)
+        cats, cats_from = self._frame_cats(con, ask, hint, set(found), frame, route, pwords)
         if cats_from != "entity":
             # L9: when a route is active, allow entities from BOTH the route's cats and the ask's keyword
             # classify (an airport entity the top route doesn't take must not be dropped when "airport
@@ -670,7 +671,9 @@ class LibraryIndex:
                 "found": found, "said": said_by, "leagues": leagues, "explained": explained, "routed": route is not None,
                 "geo": list(GEO_RESOLVERS) if has_place else [], "place_words": pwords, "has_place": has_place,
                 "place_status": place_status, "audiences": audiences(ask), "kinds": question_kinds(ask),
-                "frame": frame, "asked": norm(ask)}
+                "frame": frame, "asked": norm(ask),
+                # the sources the ask names, when only their names framed it: the ask is about those
+                "named": set(self._named_sources(con, ask, pwords)) if cats_from == "name" else set()}
 
     def _entities(self, con, res, ask: str, frame: str | None,
                   pwords: set[str]) -> tuple[dict[str, dict], dict[str, list[str]], set[str]]:
@@ -744,10 +747,11 @@ class LibraryIndex:
         return found, said_by, spelled
 
     def _frame_cats(self, con, ask: str, hint: dict, found: set[str], frame: str | None,
-                    route: dict | None = None) -> tuple[list[str], str]:
-        """The asked subcategories and where they came from ('ask', 'hint' or 'entity'). With an embedding
-        ``route`` that is confident, the route is the category; a weak one leaves it to the ask's keywords. The kind decides between sibling subcategories: "next Dodgers game" is a schedule, not a
-        score."""
+                    route: dict | None = None, place_words: set[str] | None = None) -> tuple[list[str], str]:
+        """The asked subcategories and where they came from ('ask', 'hint', 'entity' or 'name'). With an
+        embedding ``route`` that is confident, the route is the category; a weak one leaves it to the ask's
+        keywords. When nothing else names one, a reviewed source the ask names by its own name does. The kind
+        decides between sibling subcategories: "next Dodgers game" is a schedule, not a score."""
         if route is not None and route["confident"]:
             cats, cats_from = [route["route"]], "ask"
         else:  # no route, or a weak one: the ask's keywords (with vectors, evidence of relevance, never a gate)
@@ -757,6 +761,8 @@ class LibraryIndex:
                                                       *(str(w) for w in hint.get("wants") or [])])), "hint"
         if not cats and found:
             cats, cats_from = self._implied_cats(con, found, frame, ask), "entity"
+        if not cats:
+            cats, cats_from = self._named_source_cats(con, ask, place_words or set()), "name"
         subs = self._subcategories(con)
         if frame and cats and not self._serves(con, frame) & set(subs.get(cats[0], ([], {}))[0]):
             top = cats[0].split("/")[0]
@@ -765,6 +771,25 @@ class LibraryIndex:
             if fits:
                 cats = [fits[0]] + [c for c in cats if c != fits[0]]
         return cats, cats_from
+
+    def _named_sources(self, con, ask: str, place_words: set[str]) -> list[str]:
+        """The reviewed sources the ask names by their own name: every word the user said (the place aside)
+        is a word of the source's name — "NASA picture of the day" is NASA's Astronomy Picture of the Day,
+        though no category keyword is said (live 2026-10-04: the keyword path failed closed on it)."""
+        if self._names_cache is None:
+            self._names_cache = [(sid, {_fold(t) for t in tokens(name)}) for sid, name in con.execute(
+                "SELECT id, name FROM library_sources WHERE tier <> 'harvested' AND coalesce(role, '') <> 'helper' "
+                "AND validation_status NOT IN ('failed', 'refused') ORDER BY prior DESC, id").fetchall()]
+        said = {_fold(t) for t in tokens(ask) if t not in place_words}
+        return [sid for sid, words in self._names_cache if said and said <= words]  # bounded by the pack
+
+    def _named_source_cats(self, con, ask: str, place_words: set[str]) -> list[str]:
+        """The subcategories of the sources the ask names (``_named_sources``), theirs in filing order."""
+        named = self._named_sources(con, ask, place_words)
+        cats = [f"{c}/{sub}" for sid in named for c, sub in con.execute(
+            "SELECT category, subcategory FROM library_source_categories WHERE source_id = ? ORDER BY rowid",
+            [sid]).fetchall()]
+        return list(dict.fromkeys(cats))[:3]
 
     def _allowed(self, con, cats: list[str], found: dict[str, dict], said_by: dict[str, list[str]],
                  spelled: set[str]) -> dict[str, dict]:
@@ -974,6 +999,8 @@ class LibraryIndex:
                     continue
                 record = records[sid]
                 why, about = self._off_frame(con, row, record, ctx)
+                if not why and ctx["named"] and sid not in ctx["named"]:
+                    why = "not the source the ask names"
                 # relevance: a source about the named subject is. Without vectors (WP1), its own words must name
                 # something the user named, unless the ask names only everyday words (the category gate decides).
                 # With them, one near the ask is; a member of the asked category passes as WP1's does; any other

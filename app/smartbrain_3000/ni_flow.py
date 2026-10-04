@@ -34,7 +34,7 @@ from . import claudecli as _claudecli_mod
 from . import gateway as _gateway_mod
 from . import netguard as _netguard_mod
 from . import ni, ni_master, page_verify, pagegraph
-from .library_index import FRAME_KINDS, GEO_RESOLVERS, frame_kind_from_text
+from .library_index import GEO_RESOLVERS, frame_kind_from_text
 from .library_resolve import ENGLISH as LIBRARY_ENGLISH
 from .library_resolve import resolve_lookup
 
@@ -341,10 +341,7 @@ _INTENT_PROMPT = (
     ' "wants": ["<field the user wants>", ...],\n'
     ' "threshold": <number or null>,\n'
     ' "place": <"city or place name the request names" or null>,\n'
-    ' "display_hint": "<value|list|map|image|none>",\n'
-    ' "frame_kind": "<' + "|".join(FRAME_KINDS) + '>" or null}\n'
-    '"frame_kind" = the kind of question: a value now, the next event, a schedule, a forecast, a '
-    "result (a score, who won), a trend, a ranking, the latest items, alerts, a status or a count.\n"
+    ' "display_hint": "<value|list|map|image|none>"}\n'
     '"computed_only" = answerable from the calendar/clock alone, no data source '
     '(e.g. a countdown to a date). Otherwise "external_data".\n'
     "Request: __REQUEST__\n"
@@ -383,9 +380,6 @@ def _validate_intent(reply: dict) -> dict:
         raise ValueError("intent.place must be a string or null")
     if isinstance(place, str) and len(place) > 120:
         reply["place"] = place[:120]
-    # the frame's kind is closed: anything outside FRAME_KINDS is no kind ("a vibe" never reaches locate)
-    kind = str(reply.get("frame_kind") or "").strip().lower().replace(" ", "_")
-    reply["frame_kind"] = kind if kind in FRAME_KINDS else None
     return reply
 
 
@@ -511,8 +505,10 @@ def stage_intent(request: str, model_call: Callable[[str], str]) -> dict:
             if parsed is not None:
                 intent["cadence_minutes"] = parsed
             # the frame (§29 stage 1): the kind of question and the window are textual facts code
-            # parses; the model's kind is only the fallback when the words state none
-            intent["frame_kind"] = frame_kind_from_text(request) or intent["frame_kind"]
+            # parses. Words that state no kind leave it open — a model's guess is never the frame: it
+            # gated locate, verify and the page shape check on a kind the user never asked for (live
+            # 2026-10-04: "gas prices" guessed as latest items shipped Colorado's natural-gas dataset)
+            intent["frame_kind"] = frame_kind_from_text(request)
             intent["window"] = _window_from_text(request)
             return intent
         except (ValueError, TypeError) as exc:
@@ -1031,6 +1027,18 @@ def _is_timestamp(value: object, name: str) -> bool:
     return False
 
 
+# a timestamp at 00:00 (zoneless, UTC or an offset) — a date written as a timestamp
+_MIDNIGHT_RE = re.compile(r"\d{4}-\d{2}-\d{2}[T ]00:00(?::00(?:\.0+)?)?(?:Z|[+-]\d{2}:?\d{2})?")
+
+
+def _time_fn(values: list) -> str:
+    """``date`` when every sampled timestamp sits at midnight (Socrata's floating "2001-01-15T00:00:00.000"
+    is a day, never "Jan 15, 12:00 AM" — live 2026-10-04), else ``time``."""
+    shown = [v for v in values if v not in (None, "")]
+    return "date" if shown and all(isinstance(v, str) and _MIDNIGHT_RE.fullmatch(v.strip()) for v in shown) \
+        else "time"
+
+
 def list_scene(items_path: str, item_field: str | list[str], title: str | None = None,
                suffixes: dict[str, str] | None = None, max_rows: int = 5) -> dict:
     """List-class scene: repeat over a generalized list path (up to ``max_rows`` rows); each row shows
@@ -1142,7 +1150,9 @@ def assemble_from_mapping(mapping: dict, fields: dict, klass: str,
         first = rows[0] if rows and isinstance(rows[0], dict) else {}
         timed = [f[5:] for f in row_fields if _is_timestamp(_dig(first, f[5:]), f[5:].rsplit(".", 1)[-1])]
         if timed:  # show the rows' timestamps in the user's local time, on every refresh
-            stages.append({"op": "transform", "apply": [{"fn": "time", "field": "rows", "key": k} for k in timed]})
+            stages.append({"op": "transform", "apply": [
+                {"fn": _time_fn([_dig(r, k) for r in rows[:50] if isinstance(r, dict)]), "field": "rows", "key": k}
+                for k in timed]})
             preview = ni.run_pipeline(stages, payload)
         shown = [_dig(r, f[5:]) for r in rows[:5] if isinstance(r, dict) for f in row_fields]
         if rows and not any(v not in (None, "") and str(v).strip() for v in shown):
@@ -1161,7 +1171,8 @@ def assemble_from_mapping(mapping: dict, fields: dict, klass: str,
             preview = ni.run_pipeline(stages, payload)
         timed = [n for n in fields if _is_timestamp(preview.get(n), n)]
         if timed:  # a timestamp reads as the user's local time ("6:48 PM"), on every refresh
-            stages.append({"op": "transform", "apply": [{"fn": "time", "field": n} for n in timed]})
+            stages.append({"op": "transform", "apply": [{"fn": _time_fn([preview.get(n)]), "field": n}
+                                                        for n in timed]})
             fields = {**fields, **{n: "string" for n in timed}}
             scene = value_scene(list(fields), types=dict(fields))
             preview = ni.run_pipeline(stages, payload)
@@ -4494,12 +4505,20 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
                 moved = _move_on(store, item_id, pick_url, why, request, intent, call_model)
                 return moved if moved is not None else _terminate_unsupported(
                     store, item_id, f"{live.get('_library_provider') or 'the source'} {why}")
+    def misfit(stage: str, message: str) -> dict:
+        # a source the mapping can't read for this ask hands over to the next row of the pick, as a
+        # refusal does (live 2026-10-04: one web row's mapping error ended "pollen count in Atlanta"
+        # FAILED with two rows left); a pasted link or a Fix still fails honestly
+        moved = None if remap else _move_on(store, item_id, pick_url, "couldn't be read for this ask", request,
+                                             intent, call_model, research=picked)
+        return moved if moved is not None else _fail(store, item_id, stage, message)
+
     try:
         cands = derive_paths(sample)
     except Exception as exc:  # walker errors carry a ValueError message
-        return _fail(store, item_id, "derive", f"derive failed: {exc}")
+        return misfit("derive", f"derive failed: {exc}")
     if not cands:
-        return _fail(store, item_id, "derive", "no candidate paths in sample")
+        return misfit("derive", "no candidate paths in sample")
     fields = reconcile_field_types(infer_fields(intent), cands)
     _transition(store, item_id, "mapping", source_url=url,
                 note=f"{len(cands)} candidates; mapping to {sorted(fields)}")
@@ -4530,7 +4549,7 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
                 _append_note(store, item_id,
                               "mapping needed another pass; re-picking")
                 continue
-            return _fail(store, item_id, "mapping", str(exc))
+            return misfit("mapping", str(exc))
         klass = _pick_display_class(intent)
         hint = str(intent.get("display_hint") or "").lower()
         degrade_note = None
@@ -4559,7 +4578,7 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
             built = assemble_from_mapping(mapping, fields, klass, sample,
                                           title=str(intent.get("subject") or request)[:120])
         except ValueError as exc:
-            return _fail(store, item_id, "assembly", str(exc))
+            return misfit("assembly", str(exc))
         # A12 (case matrix): deterministic °F conversion for temperature fields.
         try:
             converted = _maybe_author_fahrenheit(built, fields, klass, request, sample)
