@@ -180,3 +180,15 @@ def test_the_pick_s_own_provider_is_not_stray() -> None:
     stray = ni_flow._stray_topics(frame, source, {}, [], "NPR business headlines",
                                    {"subject": "NPR business", "wants": ["headlines"], "names": []})
     assert "npr" not in stray, stray
+
+
+def test_a_provider_phrase_is_its_whole_name_and_never_only_generic_words() -> None:
+    """A provider counts as named only when its WHOLE name is in the ask, and a name made only of
+    generic words never counts: "HG Weather" / "US Weather" / "News" / "PC World" matched every
+    weather or news ask and refused right cards as "isn't about hg / pc" (live 2026-10-04)."""
+    from smartbrain_3000 import library_index as li
+    phrase = li.LibraryIndex._provider_phrase
+    assert phrase("HG Weather") == " hg weather "  # every part, short ones included
+    assert phrase("US Weather") is None and phrase("News") is None  # only generic words
+    assert phrase("PC World") == " pc world "  # "bbc world news" doesn't hold " pc world "
+    assert phrase("Fox News") == " fox news "

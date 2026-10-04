@@ -34,6 +34,12 @@ from . import library_embed, netguard, ni
 log = logging.getLogger(__name__)
 
 # --- the pinned pack (ruling R12: the app release pins the exact bytes) ----------------------------
+# words that name no outlet on their own: a provider called only these ("US Weather", "News") is
+# never "named" by an ask that uses them
+_GENERIC_PROVIDER_WORDS = frozenset({
+    "a", "an", "and", "the", "of", "us", "usa", "uk", "news", "weather", "world", "daily", "live",
+    "data", "info", "online", "today", "times", "now", "top", "latest", "service", "services",
+    "network", "media", "group", "report", "reports", "update", "updates"})
 PACK = {
     "tag": "v1.3.0",
     "url": "https://github.com/SecureCloudGroup/SmartBrain_Library/releases/download/v1.3.0/library.duckdb.gz",
@@ -985,6 +991,16 @@ class LibraryIndex:
                 out.add(name)
         return out
 
+    @staticmethod
+    def _provider_phrase(name: str) -> str | None:
+        """The phrase an ask must hold to name this provider: its WHOLE folded name (every part,
+        short ones too), or None when every part is a generic word ("US Weather", "News") — such a
+        name names no outlet, and a partial match ("weather" for "HG Weather") is no mention."""
+        tokens = re.findall(r"[A-Za-z0-9]+", (name or "").lower())
+        if not tokens or all(t in _GENERIC_PROVIDER_WORDS for t in tokens):
+            return None
+        return " " + " ".join(tokens) + " "
+
     def _provider_names(self) -> list[tuple[str, str]]:
         """Cached (``name``, " ".join(folded_tokens) " ") pairs for every distinct provider name
         with at least one folded token of length ≥ 3 (so "Fox News" rides but a single stop like
@@ -999,10 +1015,9 @@ class LibraryIndex:
                 "WHERE provider_name IS NOT NULL AND provider_name <> ''").fetchall()
         pairs: list[tuple[str, str]] = []
         for (name,) in rows:  # bounded by the pack's distinct providers
-            tokens = [t for t in re.findall(r"[A-Za-z0-9]+", (name or "").lower()) if len(t) >= 3]
-            if not tokens:
-                continue
-            pairs.append((name, " " + " ".join(tokens) + " "))
+            phrase = self._provider_phrase(name or "")
+            if phrase:
+                pairs.append((name, phrase))
         self._provider_names_cache = pairs
         return pairs
 
