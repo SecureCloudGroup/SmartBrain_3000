@@ -2140,7 +2140,8 @@ def _try_answers_build(store: ni.NIStore, item_id: str, request: str, intent: di
     # "every other content word is covered by the source" check doesn't trip on the place name a
     # geo resolver turned into lat/lon.
     built["unanswered"] = _unanswered_wants(answers, request, wants,
-                                            [*params.values(), intent.get("place") or ""])
+                                            [*params.values(), intent.get("place") or ""],
+                                            label=str(live.get("_library_label") or ""))
     return built
 
 
@@ -2182,13 +2183,22 @@ _WANT_SYNONYMS: dict[str, frozenset[str]] = {
 _QUANTITY_WANTS = frozenset({"level", "value", "number", "amount", "worth", "reading"})
 
 
-def _unanswered_wants(answers: list[dict], request: str, wants: list, filled: list[str]) -> list[str]:
+def _unanswered_wants(answers: list[dict], request: str, wants: list, filled: list[str],
+                      *, label: str = "") -> list[str]:
     """The wants the user's OWN words asked for that no declared answer of this source speaks to
     ("Yankees score" on a schedule source → ["score"]). Deterministic: a want counts only through
     its words that are in the request and aren't a filled value (team, place); it is unanswered
     when none of those words appears in any answer's words / label / name / row or column labels
     (``_WANT_SYNONYMS`` covers the canonical word-pairs that mean the same thing).
-    A want the model inferred but the user never said is never reported."""
+    A want the model inferred but the user never said is never reported.
+
+    R9 (yen→dollar, 2026-10-04): ``label`` is the pick row's own reading — the resolver's
+    read of what the source TOOK (Frankfurter with base=JPY/quote=USD → "Japanese yen · US
+    dollar"). Its tokens cover the wants the user named as subjects of those params ("yen",
+    "dollar") so a right source isn't told it doesn't report them.
+    """
+    assert isinstance(request, str) and isinstance(wants, list), "request + wants required"
+    assert isinstance(filled, list) and isinstance(label, str), "filled list; label str"
     ask = _answer_tokens(request or "")
     for value in filled:  # bounded by the params + place
         ask -= _answer_tokens(value)
@@ -2204,6 +2214,7 @@ def _unanswered_wants(answers: list[dict], request: str, wants: list, filled: li
             primary_covered |= tokens
         if _event_time(a) or _dated_rows(a):  # a time or a month + day answers "when" / "date"
             covered |= {"date", "time", "when", "day"}
+    covered |= _answer_tokens(_amp(label))  # R9: the resolver's own reading on the pick row
     has_primary_value = any(a.get("kind") == "value" and a.get("primary") for a in answers)
     out: list[str] = []
     for want in (wants or [])[:_MAX_INTENT_FIELDS]:
@@ -2717,24 +2728,17 @@ def _about_named(frame: dict, source: dict, params: dict) -> bool:
 
 
 _SUBNATIONAL_RE = re.compile(r"^[A-Z]{2}-[A-Z0-9]{1,3}$")
-_READING_TAG_RE = re.compile(r"\(([^)]+)\)")
 
 
 def _own_readings(source: dict) -> list[str]:
-    """The pick's readings that pertain to THIS source (R8, 2026-10-04): its own row's reading, or a
-    reading whose parenthetical tag names its ``coverage.entity`` (an "(mlb)" reading does not cover
-    an "(nfl)" source). Other sources' readings don't excuse this one's naming check."""
+    """The pick row's OWN reading (R8, 2026-10-04 — revised R9 live 2026-10-04): its row's
+    label alone. A reading sealed from a SIBLING row of the pick names what THAT row's
+    resolver took; a league-wide source without its own label (no team filter) does not own a
+    sibling team row's "Boston Red Sox (mlb)". ``_other_subject``'s sibling-readings check
+    runs separately so this source still has to carry those names or honestly refuse."""
+    assert isinstance(source, dict), "source must be a dict"
     own_label = str(source.get("label") or "").strip()
-    if own_label:
-        return [own_label]
-    entity = str((source.get("coverage") or {}).get("entity") or "").strip().lower()
-    out: list[str] = []
-    for reading in (source.get("readings") or [])[:8]:  # bounded: _library_readings cap
-        tag_match = _READING_TAG_RE.search(str(reading))
-        tag = tag_match.group(1).strip().lower() if tag_match else ""
-        if tag and entity and (tag == entity or tag in entity.split() or entity in tag.split()):
-            out.append(str(reading))
-    return out
+    return [own_label] if own_label else []
 
 
 def _other_subject(frame: dict, source: dict, params: dict, answers: list[dict], request: str, intent: dict,
@@ -2745,6 +2749,8 @@ def _other_subject(frame: dict, source: dict, params: dict, answers: list[dict],
     one of its own words (and it isn't bound to one region: "subway delays" isn't BART's). A source whose
     address the user's named subject filled (a team, a ticker) must be about THAT subject: its reading
     ("Miami Marlins") holds every naming word the subject said ("Inter Miami" → refused)."""
+    assert isinstance(source, dict) and isinstance(params, dict), "source + params required"
+    assert isinstance(request, str) and isinstance(intent, dict), "request + intent required"
     cov = source.get("coverage") or {}
     entity = " ".join(str(cov.get("entity") or "").split())
     subject = " ".join([str(intent.get("subject") or ""), *(str(w) for w in intent.get("wants") or [])])
@@ -2752,6 +2758,20 @@ def _other_subject(frame: dict, source: dict, params: dict, answers: list[dict],
     for value in params.values():  # bounded by the params
         taken |= _answer_tokens(value)
     own = _own_words(source, answers)
+    # R9 (2026-10-04, yen→dollar + Red Sox): a reading sealed from a SIBLING row of the pick (an earlier
+    # pick's resolver label like "Japanese yen · US dollar", "Boston Red Sox (mlb)") names a subject the
+    # ask has resolved; this source must carry it (own words / params / own label) or refuse. A league-
+    # wide source after a team-source re-pick never ships for the named team; a FRED euro series after a
+    # Frankfurter yen re-pick never ships for yen. Its own row's reading is excluded (that is the row's
+    # own filter — the entity_params branch below carries the own-label check).
+    own_label_key = str(source.get("label") or "").split(" (")[0].strip().lower()
+    for reading in (source.get("readings") or [])[:8]:  # bounded: _library_readings cap
+        rkey = str(reading).split(" (")[0].strip()
+        if not rkey or rkey.lower() == own_label_key:
+            continue  # this source's own reading, not a sibling's
+        rtokens = _answer_tokens(_amp(rkey)) - _NAME_STOP - taken
+        if rtokens and not (rtokens <= own):
+            return f"it isn't about {rkey[:60]}"
     if source.get("entity_params"):
         label = str(source.get("label") or "").split(" (")[0].strip()
         if not about_named or not label:
@@ -2761,7 +2781,13 @@ def _other_subject(frame: dict, source: dict, params: dict, answers: list[dict],
         named = ((_answer_tokens(_amp(request)) & _answer_tokens(_amp(subject)))
                  | _proper_tokens(str(intent.get("subject") or ""))) - _NAME_STOP - taken
         initials = "".join(w[0] for w in re.findall(r"[A-Za-z0-9]+", label)).lower()
-        stray = {t for t in named - own if t != initials and not _names_hit({t}, _answer_tokens(_amp(label)))}
+        # R9 (2026-10-04, yen→dollar history): drop stray words that describe the source's KIND
+        # (markets/fx keywords: "currency", "forex") — the model title-cases its subject
+        # ("Currency Conversion") and ``_proper_tokens`` pulls those category words even when the user
+        # never said them. A kind word is not a different-entity signal.
+        kind = _kind_tokens(frame.get("lib"), [str(c) for c in source.get("categories") or []])
+        stray = {t for t in named - own - kind
+                 if t != initials and not _names_hit({t}, _answer_tokens(_amp(label)))}
         return f"it is about {label}, not {' '.join(sorted(stray))}" if stray else None
     if not entity:
         return None
@@ -2776,10 +2802,10 @@ def _other_subject(frame: dict, source: dict, params: dict, answers: list[dict],
     by_name = _names_hit(said, _proper_tokens(f"{entity} {source.get('name') or ''}") - _NAME_STOP)
     if _names_hit(said, names) and not _other_of_kind(frame, source, said, own, names, cats, by_name):
         return None
-    # R8 (2026-10-04): the readings sealed on the record cover every row of the pick; subtracting a
-    # reading from another source (another league's team) excuses this one unfairly. Keep only the
-    # readings this source actually took — its own row's label, or a reading whose parenthetical tag
-    # names its coverage.entity (a soccer "(usa.1)" row doesn't cover an "(mlb)" source).
+    # R8 (2026-10-04, revised R9 live): only the source's OWN row's reading subtracts from the
+    # user's naming words. Sibling-row readings (another pick's team / currency) are handled by
+    # the sibling-readings refusal at the top of this function — a league-wide source after a
+    # team re-pick never ships for the team even when its sibling "(mlb)" tag matches.
     for reading in _own_readings(source):  # bounded: the pick's rows
         said -= _answer_tokens(_amp(reading.split(" (")[0]))
     short = entity.split(",")[0] if len(entity.split(",")[0]) <= 40 else str(source.get("name") or "").split(" (")[0]

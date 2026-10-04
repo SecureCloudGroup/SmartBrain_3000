@@ -149,6 +149,16 @@ WRONG_SUBJECT = [
     ("diesel price average", "diesel", ["price"], "fred-gasregw", {}),
     ("Saturday Night Live schedule", "Saturday Night Live", ["schedule"], "mlb-schedule", {}),
     ("score of Monday Night Football", "Monday Night Football", ["score"], "nhl-score-now", {}),
+    # R9 (yen→dollar + Red Sox, 2026-10-04): a league-wide source never ships for an ask that
+    # names ONE team unless it filters to that team. A sibling team row sealed as a reading on
+    # the pick (team-source re-pick, hand-tapped siblings) does not excuse the league source.
+    ("Yankees score", "New York Yankees", ["score"], "mlb-schedule", {"others": (_YANKEES,)}),
+    ("Blue Jays score tonight", "Toronto Blue Jays", ["score"], "mlb-schedule",
+     {"others": (("Toronto Blue Jays (mlb)", {"team": "141"}),)}),
+    ("how did the Red Sox do last night", "Boston Red Sox", ["score"], "mlb-schedule",
+     {"others": (("Boston Red Sox (mlb)", {"team": "111"}),)}),
+    ("Red Wings score", "Detroit Red Wings", ["score"], "nhl-score-now",
+     {"others": (("Detroit Red Wings (nhl)", {"team": "17"}),)}),
 ]
 
 
@@ -171,7 +181,8 @@ RIGHT_SUBJECT = [
     ("how's the S&P doing today", "S&P 500", ["price", "change"], "fred-sp500", {}),
     ("latest Android version", "Android", ["latest version"], "eol-android", {}),
     ("baseball games tonight", "baseball", ["games"], "mlb-schedule", {}),
-    ("Yankees score", "New York Yankees", ["score"], "mlb-schedule", {"others": (_YANKEES,)}),
+    # R9 (2026-10-04): "Yankees score" with a team-source sibling now REFUSES on mlb-schedule
+    # (league-wide, no team filter). See WRONG_SUBJECT.
     ("MLB scores for the Red Sox and Yankees", "Red Sox Yankees MLB scores", ["scores"], "mlb-schedule", {}),
     ("what was the Rangers hockey score", "New York Rangers", ["score"], "nhl-score-now", {}),
     ("Marlins next game", "Miami Marlins", ["next game"], "mlb-team-schedule",
@@ -295,13 +306,9 @@ PHRASE_WORDS = [
     ("MLB scores for the Red Sox and Yankees", "Red Sox Yankees MLB scores", ["scores"], "mlb-schedule", {}),
     ("wildfires in California", "California wildfires", ["fires"], "nifc-current-fires",
      {"params": {"state": "CA"}, "label": "California (CA)"}),
-    # new asks of the same class
-    ("Blue Jays score tonight", "Toronto Blue Jays", ["score"], "mlb-schedule",
-     {"others": (("Toronto Blue Jays (mlb)", {"team": "141"}),)}),
-    ("how did the Red Sox do last night", "Boston Red Sox", ["score"], "mlb-schedule",
-     {"others": (("Boston Red Sox (mlb)", {"team": "111"}),)}),
-    ("Red Wings score", "Detroit Red Wings", ["score"], "nhl-score-now",
-     {"others": (("Detroit Red Wings (nhl)", {"team": "17"}),)}),
+    # R9 (2026-10-04): "Blue Jays tonight" / "Red Sox last night" / "Red Wings score" on a
+    # league-wide source with a team-source SIBLING sealed as a reading now refuses — a
+    # league source without the team filter never ships for the named team (see WRONG_SUBJECT).
     ("southern California wildfires", "southern California wildfires", ["fires"], "nifc-current-fires",
      {"params": {"state": "CA"}, "label": "California (CA)"}),
     ("Blue Origin launch schedule", "Blue Origin launches", ["next launch"], "jolpica-f1-next", {}),
