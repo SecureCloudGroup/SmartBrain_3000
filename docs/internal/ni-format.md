@@ -2075,7 +2075,12 @@ the handoff, and a deterministic check stands where the judge was removed.
   overlaps ("gas inventories" on retail gas prices); and a general source
   (no `coverage.entity`, no geo parameter) refuses a named topic none of its
   own words, readings or filters take ("latest news on Ukraine" on top
-  headlines). `_other_subject` subtracts only the readings this source took
+  headlines). A named topic comes only from the user's raw words: a capitalized
+  word not at a sentence start, or a sentence-initial one that isn't an English,
+  topic or generic word ("Any big news today" ships; "Ukraine news" doesn't) —
+  never from the model's casing. A list-entity source (a city's local news) still
+  refuses another named outlet or team. Generic quantity wants (level, value,
+  number, amount, worth, reading) are answered by a source's main value. `_other_subject` subtracts only the readings this source took
   or covers, never another row's. A `{param}` value filled into a host must
   be a plain host (no credentials, port, fragment or IP literal; a feed path
   keeps its query); a value a same-host lookup pulls is a bounded id
@@ -2256,7 +2261,11 @@ and the `recipe` born marker stays readable.
   `today` / `tonight` floor at the current hour so the first row the card shows is the
   one happening now (`tonight` before 06:00 is the current night, now..06:00); day-step
   rows keep the whole date even when the cell has a clock. A next-event / schedule list
-  on a time axis with no asked window still gets a forward cut (`upcoming`) every run.
+  on a time axis with no asked window still gets a forward cut (`upcoming`) every run:
+  rows from now − 15 min on (`ni._UPCOMING_GRACE`), the same floor `next_event_stale`
+  judges a "next" card by, so a kept row is never refused and an event 50 minutes past
+  is never "next". The engine clock is the user's zone as the DESKTOP reports it
+  (`meta user:timezone`, loaded at unlock); a phone's zone never sets it.
   Day rows answer "tonight" as today; a window ahead over rows that all lie in the past
   isn't applied (the latest rows show). `tbd_if` also becomes the `time` transform's
   `unless` (a value's flag is extracted as `<name>_tbd` when the sample carries it): the
