@@ -2197,6 +2197,18 @@ the handoff, and a deterministic check stands where the judge was removed.
   `serves:false` / `wrong` binds in the interpreted tier too. Any refusal,
   and an llm reply that won't parse, moves on to the next page of the pick
   (never a re-search that offers it again); a pasted link ends honestly.
+  fix7-page (2026-10-04) adds four class fixes to the gate: (a) a reading
+  that is a whole-word substring of the page's own title (digits riding
+  along) is chrome, not a value — Yahoo "S&P 500 INDEX (^SPX)" refuses;
+  (b) a list / collection entity's own `name` is a label FOR the list, not
+  an item in it — findarepo's `ItemList.name` refuses on both tiers; (c)
+  a current/status/schedule reading that is a bare clock timestamp parsed
+  past now refuses, unless the reading itself names a status word (a burn
+  ban's "As of 8/11/26, outdoor burning is prohibited" still ships); (d)
+  a 'right now' ask against a page carrying no freshness signal (no
+  `dateModified` within 48 h, no `article:modified_time`, no 'as of' /
+  'updated' / 'N minutes ago' phrase, no today's date) refuses — the
+  intent's `window` rides through `_page_reasons`.
 - **Harness.** `tools/ni-live-e2e.py` records every tapped reading (label,
   filled params, scope) and the flow's notes for each ask.
 

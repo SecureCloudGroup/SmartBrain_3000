@@ -100,10 +100,11 @@ def _graph(text: str = "", **layers) -> dict:
 
 def _check(graph: dict, preview: dict, *, frame: str | None = "status",
            wants: list[str] | None = None, subject: str = "Example",
-           many: bool = False, now: datetime = _NOW) -> list[str]:
+           many: bool = False, now: datetime = _NOW,
+           window: str | None = None, tier: str = "interpreted") -> list[str]:
     return page_verify.verify_page_reading(
         graph, preview, frame_kind=frame, wants=wants or ["status"],
-        subject=subject, now=now, many=many)
+        subject=subject, now=now, many=many, tier=tier, window=window)
 
 
 _STATUS_TEXT = ("Example service status\nAll systems are running normally today. "
@@ -202,6 +203,79 @@ def test_next_event_grace_and_horizon() -> None:
     assert _check(g, {"launch_time": "2026-09-29T14:50:00Z"}, now=now, **kw) == []  # grace
     assert _check(g, {"launch_time": "2028-01-01T00:00:00Z"}, now=now, **kw)        # > 400 d
     assert _check(g, {"launch_time": "soon"}, now=now, **kw)                        # no time
+
+
+# fix7-page (blind-6): Yahoo Finance shipped "S&P 500 INDEX (^SPX)" as the value
+# for "how's the S&P doing today" — a whole-word substring of the page's own title
+# that embeds a digit (500). The chrome check must still refuse it; a lone number
+# ("65") still ships (3+ alpha-char requirement).
+def test_chrome_substring_with_embedded_digits_refused_but_pure_number_ships() -> None:
+    g = _graph("Chicago Options - Delayed Quote USD. S&P 500 INDEX (^SPX) 7,722.72 +56.27.",
+               title="S&P 500 INDEX (^SPX) Charts, Data & News - Yahoo Finance")
+    assert _check(g, {"value": "S&P 500 INDEX (^SPX)"},
+                  frame="current_value", wants=["value"], subject="S&P 500")
+    # a bare number isn't a chrome fragment, even if it appears inside the title
+    assert _check(g, {"value": "7,722.72"},
+                  frame="current_value", wants=["value"], subject="S&P 500") == []
+
+
+# fix7-page (blind-6): findarepo compiled card picked an ItemList entity's own
+# ``name`` field ("Trending Python repositories") — a LABEL for the list, not an
+# item of it. List/collection-type entities must count as chrome.
+def test_list_entity_name_is_chrome_label_not_a_reading() -> None:
+    g = _graph("Trending Python Repos — Daily Star Rankings.\nTheAlgorithms/Python.",
+               title="Trending Python GitHub Repos — Daily Star Rankings | findarepo",
+               entities=[{"type": "ItemList", "name": "Trending Python repositories"}])
+    assert _check(g, {"trending_python_repos": "Trending Python repositories"},
+                  frame="latest_items", wants=["trending python repos"],
+                  subject="Python repositories", tier="compiled")
+
+
+# fix7-page (blind-6): flight-status.com shipped "San Francisco (SFO) 2026-06-30T07:00"
+# for "flight status DL 405" — a 96-day-stale flight time. A current/status reading
+# that is a bare clock-timestamped event parsed well past now must refuse; a status
+# word in the reading ("prohibited" on a burn-ban "As of 8/11/26, ...") keeps the
+# standing-order reading from refusing.
+def test_stale_clock_timestamp_in_current_reading_refuses() -> None:
+    text = ("DL 405 takes off from San Francisco (SFO) 2026-06-30T07:00 to JFK. "
+            "As of 8/11/26, outdoor burning is prohibited in Travis County. "
+            "In effect since 8/11/26.")
+    g = _graph(text, title="Delta DL405 Flight Status : Live Tracking & Updates",
+               subject="DL 405")
+    now = datetime.fromisoformat("2026-10-04T10:00:00+00:00")
+    kw = {"frame": "status", "wants": ["status"], "subject": "DL 405", "now": now}
+    assert _check(g, {"status": "San Francisco (SFO) 2026-06-30T07:00"}, **kw)
+    # a status word in the reading rides through: a burn ban still ships
+    assert _check(g, {"status": "As of 8/11/26, outdoor burning is prohibited in Travis County."},
+                  **kw) == []
+    # date-only readings (no clock) ride through too — not a bare timestamp
+    assert _check(g, {"status": "In effect since 8/11/26"}, **kw) == []
+
+
+# fix7-page (blind-6): cityvibe.me's static guide answered "line at Franklin Barbecue
+# right now" with "50 to 100 people" — a page with NO freshness signal. A "right now"
+# ask against a current/status frame requires an updated / as-of / minutes-ago phrase
+# or an entity date within 48 h or today's date on the page.
+def test_right_now_ask_against_page_with_no_freshness_signal_refuses() -> None:
+    text = ("Franklin Barbecue is famous for its long lines, especially during "
+            "peak hours. 50 to 100 people typically wait in the morning.")
+    g = _graph(text, title="How long is the line at Franklin Barbecue?")
+    now = datetime.fromisoformat("2026-10-04T10:00:00+00:00")
+    kw = {"frame": "current_value", "wants": ["current line length"],
+          "subject": "Franklin Barbecue", "now": now, "window": "now"}
+    assert _check(g, {"current_line_length": "50 to 100 people"}, **kw)
+    # a page that carries an updated phrase ships (an 'as of' line is a freshness signal)
+    g_fresh = _graph(text + "\nLast updated 15 minutes ago.",
+                     title="How long is the line at Franklin Barbecue?")
+    assert _check(g_fresh, {"current_line_length": "50 to 100 people"}, **kw) == []
+    # a page that carries an entity dateModified within 48 h ships
+    g_mod = _graph(text, entities=[{"type": "WebPage",
+                                     "dateModified": "2026-10-04T08:00:00+00:00"}])
+    assert _check(g_mod, {"current_line_length": "50 to 100 people"}, **kw) == []
+    # an ask that doesn't name a 'right now' window never fires the check
+    kw_no_window = {**kw, "window": None}
+    assert _check(g, {"current_line_length": "50 to 100 people"},
+                  **kw_no_window) == []
 
 
 # F6-ISS (blind-5): "ISS passes over Tucson" shipped "Saturday, Oct 10" (a date, no

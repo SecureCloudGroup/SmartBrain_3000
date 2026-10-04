@@ -2047,6 +2047,12 @@ def _names_a_param(answer: dict, params: dict) -> bool:
 _PLACE_CELL_LABELS = frozenset({"port", "station", "city", "state", "county", "country", "location",
                                 "site", "place", "venue", "airport", "region"})
 
+# fix7-lib (2026-10-04): subdivision words name a non-place categorical scope — a NAMED
+# value of a row's column (NHL "metropolitan division" is divisionName="Metropolitan").
+# Rows a declared cell doesn't label but the raw payload carries can still scope the list.
+_SUBDIVISION_WORDS = frozenset({"division", "conference", "group", "league", "sector",
+                                 "class", "bracket", "flight"})
+
 
 def _place_cell(cells: list[dict]) -> dict | None:
     """A text row cell whose label (singular, lowercased) names a place; None → no cell names one."""
@@ -2101,21 +2107,103 @@ def _scope_rows_to_place(answer: dict, sample: object, place: str) -> dict:
     list whose rows declare a place column (Port, Station, City, State) is scoped by code the same
     way an entity-filled answer is scoped by its ``{param}`` — the row filter rides the sealed
     pipeline, so every refresh keeps only the named place's rows. CBP border waits + "San Ysidro"
-    (fix6-rows 2026-10-04)."""
+    (fix6-rows 2026-10-04).
+
+    fix7-lib (2026-10-04): a declared cell doesn't have to label the scope — a NAMED subdivision
+    value ("metropolitan division" on NHL standings) scopes by a raw row key whose own name holds
+    the subdivision keyword (``divisionName``). The subdivision ask refuses when no row names
+    the value (the sports/standings policy wants a specific subset, never a nationwide list)."""
     assert isinstance(answer, dict) and isinstance(place, str), "args required"
     if answer.get("kind") != "list" or answer.get("filter"):
-        return answer
-    cell = _place_cell(answer.get("cells") or [])
-    if cell is None:
         return answer
     payload = sample if isinstance(sample, dict) else {"items": sample}
     rows = _dig(payload, answer["path"])
     if not isinstance(rows, list):
         return answer  # the list isn't a list here — the build itself will say so
-    canonical = _match_place_in_rows(rows, cell["path"], place)
-    if canonical is None:
+    cell = _place_cell(answer.get("cells") or [])
+    if cell is not None:
+        canonical = _match_place_in_rows(rows, cell["path"], place)
+        if canonical is None:
+            raise ValueError(f"answers: has nothing for {place[:60]}")
+        return {**answer, "filter": {"path": cell["path"], "equals": canonical}}
+    sub = _subdivision_in(place)
+    if sub is None:
+        return answer  # no declared place cell and no subdivision word: the note path runs
+    hit = _match_subdivision_in_rows(rows, sub[0], sub[1])
+    if hit is None:
         raise ValueError(f"answers: has nothing for {place[:60]}")
-    return {**answer, "filter": {"path": cell["path"], "equals": canonical}}
+    return {**answer, "filter": {"path": hit[0], "equals": hit[1]}}
+
+
+def _subdivision_in(place: str) -> tuple[str, str] | None:
+    """When ``place`` names a subdivision ("metropolitan division", "eastern conference"): the
+    (type_word, value) pair — ``type_word`` is the subdivision keyword, ``value`` is the rest of
+    the words. None → ``place`` is geographic or empty or lacks either part ("division" alone is
+    no scope, "metropolitan" alone is no subdivision ask). Casefolded, bounded by the length of
+    ``place`` (already clipped to 80 chars by ``_frame_place``)."""
+    assert isinstance(place, str), "place must be a string"
+    words = re.findall(r"[A-Za-z0-9]+", place.lower())
+    sub_words = [w for w in words if w in _SUBDIVISION_WORDS]
+    rest = [w for w in words if w not in _SUBDIVISION_WORDS]
+    if not sub_words or not rest:
+        return None
+    return sub_words[0], " ".join(rest)
+
+
+def _match_subdivision_in_rows(rows: list, type_word: str, value: str) -> tuple[str, str] | None:
+    """A (row_key, canonical) pair whose ``row_key`` is a raw key of the first row with ``type_word``
+    (case-folded substring) in its name AND whose value in some row matches ``value`` (whole words,
+    case-folded). None → no row names it. Bounded by the first row's keys (120) and ``_MAX_SCAN_ROWS``.
+
+    A row key with a nested string value ({"default": "Metropolitan"}) rides as ``key.default``;
+    the engine's ``where`` op already walks that path (R3-E filtered the airport-rows the same way)."""
+    assert isinstance(type_word, str) and isinstance(value, str), "args required"
+    needle = value.casefold().strip()
+    if not needle:
+        return None
+    first = next((r for r in rows if isinstance(r, dict)), None)
+    if first is None:
+        return None
+    candidates: list[str] = []
+    for key, val in list(first.items())[:120]:  # bounded: a first row's keys
+        if type_word not in key.lower():
+            continue
+        if isinstance(val, str):
+            candidates.append(key)
+        elif isinstance(val, dict):
+            for nested in list(val.keys())[:8]:  # bounded: nested dict keys ({"default": ...})
+                if isinstance(val.get(nested), str):
+                    candidates.append(f"{key}.{nested}")
+    for cand in candidates:  # bounded: few candidates
+        for row in rows[:_MAX_SCAN_ROWS]:
+            if not isinstance(row, dict):
+                continue
+            at = _dig(row, cand)
+            if isinstance(at, str) and at.casefold().strip() == needle:
+                return cand, at
+    return None
+
+
+def _scoping_names_place(chosen: list[dict], place: str) -> bool:
+    """True when a chosen list answer's row filter equals (case-folded, whole-word overlap) a
+    word of ``place``: the data IS scoped to the ask's named value, so the subcategory policy's
+    "isn't specific to" note is no longer honest. Bounded by ``chosen`` (few) and the folded
+    word count of each side (``_MAX_WORDS`` only clipped the input texts).
+
+    fix7-lib (2026-10-04): the CBP "San Ysidro" scope and the NHL "Metropolitan" subdivision
+    scope both use the same ``filter.equals`` seal; this check is their shared gate."""
+    assert isinstance(place, str), "place must be a string"
+    place_words = {w.casefold() for w in re.findall(r"[A-Za-z0-9]+", place) if len(w) >= 3}
+    if not place_words:
+        return False
+    for a in chosen[:_MAX_VALUE_ANSWERS]:  # bounded
+        flt = (a.get("filter") or {}).get("equals")
+        if not isinstance(flt, str):
+            continue
+        flt_words = {w.casefold() for w in re.findall(r"[A-Za-z0-9]+", flt) if len(w) >= 3}
+        if flt_words & place_words:
+            return True
+    return False
 
 
 def _other_sources_left(record: dict, url: str) -> bool:
@@ -2545,6 +2633,15 @@ def _verify_frame(frame: dict, source: dict, params: dict, built: dict, request:
     is unanswered — refused also when every want the user said is unanswered."""
     chosen, answers = built["chosen"], built["answers"]
     reasons, notes = _verify_source(frame, source, params, answers, request, intent)
+    # fix7-lib (2026-10-04): a chosen answer with a row filter that names the ask's named value
+    # (CBP "San Ysidro", NHL "Metropolitan") scopes the data to it; the "isn't specific to" note
+    # the source-level place check would ship from the subcategory policy is no longer honest,
+    # and a subdivision ask whose rows the source doesn't carry has already refused upstream.
+    if frame["place"] and _scoping_names_place(chosen, frame["place"]):
+        tag_note = f"isn't specific to {frame['place']}"
+        tag_reason = f"it isn't for {frame['place']}"
+        notes = [n for n in notes if tag_note not in n]
+        reasons = [r for r in reasons if r != tag_reason]
     asked = frame["categories"]
     cats = [str(c) for c in source.get("categories") or []]
     sub = next((c for c in asked if c in cats), None) \
@@ -2742,7 +2839,46 @@ def _stray_topics(frame: dict, source: dict, params: dict, answers: list[dict], 
             proper -= _answer_tokens(value)
         proper -= _entity_vocabulary(lib, entity)
         stray |= (proper & said) - own
+    # fix7-lib (2026-10-04): a Library provider named in the ask that isn't this source's
+    # provider is stray even when the intent's ``names`` blank missed it (a lowercase outlet
+    # the model didn't flag). Reads the pack's own provider vocabulary — no network, no model.
+    # Tokens shared with this source's own words (NPR Business holds "news") never land in
+    # stray; same for a param value or the ask's named place.
+    stray |= _foreign_providers_in(lib, request, source, own, params, intent)
     return stray
+
+
+def _foreign_providers_in(lib: object, request: str, source: dict, own: set[str],
+                            params: dict, intent: dict) -> set[str]:
+    """The folded tokens of every Library provider name the ask carries that doesn't match this
+    source's own provider, less tokens the source already covers (``own``), the filled params,
+    and the ask's named place. {} when the Library has no ``providers_named_in`` method, the
+    pack knows no providers, or every named provider IS this source's. Bounded by the pack's
+    distinct providers.
+
+    fix7-lib (2026-10-04): "reuters business news" shipped from NPR Business because the intent
+    model missed the lowercase outlet; this backstop reads the Library vocabulary so an ask that
+    names any pack-known outlet the pick isn't from refuses honestly."""
+    assert isinstance(source, dict) and isinstance(params, dict), "source + params required"
+    getter = getattr(lib, "providers_named_in", None)
+    if not callable(getter):
+        return set()
+    try:
+        named = getter(request)
+    except Exception:  # a broken Library: the stray check falls back to the taxonomy path alone
+        return set()
+    if not named:
+        return set()
+    own_pname = str(source.get("provider") or "").strip().lower()
+    taken = _answer_tokens(str(intent.get("place") or ""))
+    for value in params.values():  # bounded by the params
+        taken |= _answer_tokens(value)
+    out: set[str] = set()
+    for provider in named:  # bounded by the pack's providers (few match any one ask)
+        if provider.strip().lower() == own_pname:
+            continue
+        out |= _answer_tokens(_amp(str(provider))) - _NAME_STOP - own - taken
+    return out
 
 
 def _entity_vocabulary(lib: object, entity: str) -> set[str]:
@@ -2947,10 +3083,13 @@ def _other_subject(frame: dict, source: dict, params: dict, answers: list[dict],
         label = str(source.get("label") or "").split(" (")[0].strip()
         if not about_named or not label:
             return None
-        # the naming words of the subject: those the user said, and the subject's proper name ("New York
-        # Rangers": "york" — the Texas Rangers' reading doesn't hold it)
-        named = ((_answer_tokens(_amp(request)) & _answer_tokens(_amp(subject)))
-                 | _proper_tokens(str(intent.get("subject") or ""))) - _NAME_STOP - taken
+        # fix7-lib (2026-10-04): the stray-subject check reads the words the USER said — never
+        # tokens that only live in the model's subject. The model title-cases a category phrasing
+        # ("Currency Conversion" for "USD to MXN") and the title case alone pulled "conversion"
+        # into named, refusing a right pick. The Rangers hockey (team-row) case still refuses the
+        # Texas Rangers' row from a request "Rangers hockey score": "hockey" is the user's own
+        # word and the Library's keywords for sports/results don't carry it.
+        named = _answer_tokens(_amp(request)) - _NAME_STOP - taken
         initials = "".join(w[0] for w in re.findall(r"[A-Za-z0-9]+", label)).lower()
         # R9 (2026-10-04, yen→dollar history): drop stray words that describe the source's KIND
         # (markets/fx keywords: "currency", "forex") — the model title-cases its subject
@@ -5186,12 +5325,15 @@ def _page_reasons(graph: dict, preview: dict, intent: dict,
     """The page verify gate (C9, page_verify): why this reading can't ship ([] = it can).
     ``tier`` is ``"compiled"`` for a P2 selector-program reading (which legitimately
     lifts from entities / meta / tables) or ``"interpreted"`` for the llm-stage
-    reading (grounded only against what the model was shown — body text + tables)."""
+    reading (grounded only against what the model was shown — body text + tables).
+    The ``intent.window`` ride-through (fix7-page 2026-10-04) lets a 'right now' ask
+    refuse a static guide page that carries no freshness signal."""
+    window = intent.get("window") if isinstance(intent.get("window"), str) else None
     return page_verify.verify_page_reading(
         graph, preview, frame_kind=intent.get("frame_kind"),
         wants=[str(w) for w in intent.get("wants") or [] if isinstance(w, str)],
         subject=str(intent.get("subject") or ""), now=ni._clock(),
-        many=_many_ask(intent), tier=tier)
+        many=_many_ask(intent), tier=tier, window=window)
 
 
 def _page_refused(store: ni.NIStore, item_id: str, url: str, reason: str, request: str, intent: dict,

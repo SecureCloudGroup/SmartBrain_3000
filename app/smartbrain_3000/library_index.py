@@ -35,9 +35,9 @@ log = logging.getLogger(__name__)
 
 # --- the pinned pack (ruling R12: the app release pins the exact bytes) ----------------------------
 PACK = {
-    "tag": "v1.2.0",
-    "url": "https://github.com/SecureCloudGroup/SmartBrain_Library/releases/download/v1.2.0/library.duckdb.gz",
-    "sha256": "ddfb0f40bcd469073c0ccd7c5d3f351f13a9a7d91b506ccaf3713f712eb91d63",
+    "tag": "v1.3.0",
+    "url": "https://github.com/SecureCloudGroup/SmartBrain_Library/releases/download/v1.3.0/library.duckdb.gz",
+    "sha256": "73772a56f202f27883488a25c2c151835287910f291159f5d17409a55be1d411",
 }
 MAX_PACK_GZ_BYTES = 60_000_000       # the download cap (the v1.2 gzip is ~18 MB)
 MAX_PACK_BYTES = 600_000_000         # the unpacked cap (the v1.2 file is ~80 MB)
@@ -400,6 +400,7 @@ class LibraryIndex:
         self._own_cache: dict[str, set[str]] | None = None
         self._names_cache: list[tuple[str, set[str]]] | None = None
         self._entity_vocab_cache: dict[str, set[str]] = {}
+        self._provider_names_cache: list[tuple[str, str]] | None = None
 
     # --- install -----------------------------------------------------------------------------
 
@@ -447,6 +448,7 @@ class LibraryIndex:
             self._has_route_asks_cache = None
             self._takes_cache = self._own_cache = None
             self._entity_vocab_cache = {}
+            self._provider_names_cache = None
             return meta
 
     def _conn(self) -> duckdb.DuckDBPyConnection:
@@ -646,7 +648,8 @@ class LibraryIndex:
             # classify (an airport entity the top route doesn't take must not be dropped when "airport
             # delay" is a keyword hit — faa-nas-status had B-max 0.837 for "any delays at boston logan").
             extra_cats = [c for c in self.classify(ask) if route is not None and c not in cats]
-            found = self._allowed(con, cats + extra_cats, found, said_by, spelled)
+            ask_words = set(norm(ask).split())
+            found = self._allowed(con, cats + extra_cats, found, said_by, spelled, ask_words)
             # an entity the ask spells by code outside what its words asked is the frame ("delays at ORD" is
             # airport delays, not transit alerts); one said only by the place's words is already filtered out
             # above (L1), so the check here guards taxonomy routing, not place-only readings.
@@ -794,20 +797,42 @@ class LibraryIndex:
         return list(dict.fromkeys(cats))[:3]
 
     def _allowed(self, con, cats: list[str], found: dict[str, dict], said_by: dict[str, list[str]],
-                 spelled: set[str]) -> dict[str, dict]:
+                 spelled: set[str], ask_words: set[str] = frozenset()) -> dict[str, dict]:
         """An entity the asked subcategories don't take is not the subject ("DC metro" is no airport) — unless
         the ask spells its code or a name that says its kind, its kind of data sits beside what was asked, and
         nothing the asked subcategories take reads the same words ("delays at ORD" and "delays at Newark
-        airport" are the airport; "USD" is the currency)."""
+        airport" are the airport; "USD" is the currency). An ask-level cue word outside the entity's own name
+        counts too (fix7-page 2026-10-04: "delays at O'Hare" said "delays", an airport cue — the entity said_by
+        span is just the name "o hare", so the pre-fix check missed it and the FAA source wasn't offered). An
+        entity named ONLY by a word that is a sibling category's own keyword ("Mesquite Metro Airport" for "DC
+        metro red line delays": "metro" is a transit keyword) is the sibling's subject, not this one."""
         takes = set().union(*(self._takes(con, c) for c in cats))
         if not takes:
             return found
         top = cats[0].split("/")[0]
         near = set().union(*(self._takes(con, c) for c in self._subcategories(con) if c.startswith(f"{top}/")))
+        cat_vocab = {_fold(w) for c in cats for kw in self._keywords(c) for w in kw.split()}
 
         def typed(r: str) -> bool:
             cue = ENTITY_CUES.get("team_espn" if r.startswith("team_") else r) or set()
-            return r in spelled or any(w in cue for a in said_by[r] for w in a.split())
+            if r in spelled:
+                return True
+            name_words = {w for a in said_by[r] for w in a.split()}
+            if any(w in cue for w in name_words):
+                return True
+            if not (ask_words & cue) - name_words:
+                return False
+            # Guard the ask-level cue bypass against entities named only by their
+            # short lowercase code (airport "RED" matching Mifflin on "red"): a
+            # single said token under 5 chars isn't a real name mention, and the
+            # ask never spelled the code in capitals.
+            if len(name_words) < 2 and all(len(w) < 5 for w in name_words):
+                return False
+            # Guard it against entities whose SAID name sits inside a sibling
+            # category's vocabulary ("metro" said → Mesquite Metro Airport, but
+            # "metro" is a transit_alerts keyword).
+            return not (cat_vocab and name_words
+                        and {_fold(w) for w in name_words} <= cat_vocab)
         return {r: e for r, e in found.items() if r in takes or (
             typed(r) and r in near and not any(o in takes and set(said_by[o]) & set(said_by[r])
                                                for o in found if o != r))}
@@ -936,6 +961,50 @@ class LibraryIndex:
                     "ON e.id = a.entry_id WHERE e.resolver = 'sports_league' AND NOT a.partial").fetchall()
                 if len(a) >= 3 and a not in ENGLISH_WORDS]
         return self._league_aliases
+
+    def providers_named_in(self, request: str) -> set[str]:
+        """The Library provider names (case-folded, bounded by the pack's providers) that appear
+        as a whole-phrase substring of ``request`` (case-folded). An outlet named ("Fox News",
+        "Associated Press", "NPR") the intent's ``names`` blank missed is still caught here —
+        every pack provider gives a vocabulary the stray-topic check can consult. {} when the
+        Library isn't installed or holds no providers.
+
+        fix7-lib (2026-10-04): "reuters business news" shipped from NPR Business because the
+        intent's model didn't flag "reuters" as a proper name — the deterministic backstop in
+        ``_stray_topics`` reads this vocabulary so an ask that names a provider the pick isn't
+        from refuses.
+        """
+        assert isinstance(request, str), "request must be a string"
+        low = " " + " ".join(re.findall(r"[A-Za-z0-9]+", request.lower())) + " "
+        if not low.strip():
+            return set()
+        names = self._provider_names()
+        out: set[str] = set()
+        for name, phrase in names:  # bounded by the pack's distinct providers
+            if phrase in low:
+                out.add(name)
+        return out
+
+    def _provider_names(self) -> list[tuple[str, str]]:
+        """Cached (``name``, " ".join(folded_tokens) " ") pairs for every distinct provider name
+        with at least one folded token of length ≥ 3 (so "Fox News" rides but a single stop like
+        "a" doesn't bind on every ask). The second element is the pre-wrapped phrase the lookup
+        matches against ``" <folded-request> "``.
+        """
+        if self._provider_names_cache is not None:
+            return self._provider_names_cache
+        with self._conn() as con:
+            rows = con.execute(
+                "SELECT DISTINCT provider_name FROM library_sources "
+                "WHERE provider_name IS NOT NULL AND provider_name <> ''").fetchall()
+        pairs: list[tuple[str, str]] = []
+        for (name,) in rows:  # bounded by the pack's distinct providers
+            tokens = [t for t in re.findall(r"[A-Za-z0-9]+", (name or "").lower()) if len(t) >= 3]
+            if not tokens:
+                continue
+            pairs.append((name, " " + " ".join(tokens) + " "))
+        self._provider_names_cache = pairs
+        return pairs
 
     @staticmethod
     def _place_words(res, ask: str) -> tuple[set[str], bool]:

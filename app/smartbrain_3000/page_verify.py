@@ -81,6 +81,31 @@ _NEWS_TYPES: frozenset[str] = frozenset({
     "NewsArticle", "ReportageNewsArticle", "AnalysisNewsArticle",
     "OpinionNewsArticle", "BlogPosting", "LiveBlogPosting",
 })
+# List / collection entities whose ``name`` is a label FOR the list (not an
+# item in it): a compiled card lifting it is picking a label, not a value.
+_LIST_LABEL_TYPES: frozenset[str] = frozenset({
+    "ItemList", "OfferCatalog", "Collection", "DataFeed", "DefinedTermSet",
+    "CategoryCodeSet",
+})
+# A reading that reads as a current state (not a bare timestamp): the
+# ``_stale_reasons`` rule keeps shipping these even when they name a past
+# clock time ("Operational since 2026-09-27T10:00", a burn ban "As of 8/11/26,
+# outdoor burning is prohibited").
+_STATUS_WORDS: frozenset[str] = frozenset({
+    "operational", "degraded", "down", "up", "normal", "healthy", "unhealthy",
+    "available", "unavailable", "limited", "ongoing", "resolved", "running",
+    "stopped", "halted", "active", "inactive", "online", "offline", "open",
+    "closed", "prohibited", "allowed", "banned", "clear", "cleared",
+    "elevated", "low", "high", "medium", "moderate", "warn", "warning",
+    "advisory", "monitor", "incident", "outage", "yes", "no", "none",
+    "delayed", "delay", "cancelled", "canceled", "diverted", "arrived",
+    "landed", "departed", "early", "ontime", "scheduled",
+})
+_STALE_GRACE = timedelta(hours=36)
+_FRESH_WINDOW = timedelta(hours=48)
+_FRESH_PHRASE_RE = re.compile(
+    r"\b(last updated|updated|as of|refreshed|just now|moments ago|"
+    r"\d+\s*(minutes?|hours?)\s+ago)\b", re.IGNORECASE)
 _TIME_FRAMES = ("next_event", "schedule")
 _CURRENT_FRAMES = ("current_value", "status", "alerts", "count")
 _NORMALS_FRAMES = ("current_value", "forecast")
@@ -126,7 +151,8 @@ _UTC_OFFSET_RE = re.compile(r"\(UTC([+-])(\d{2}):?(\d{2})\)")
 
 def verify_page_reading(graph: dict, preview: dict, *, frame_kind: str | None,
                         wants: list[str], subject: str, now: datetime,
-                        many: bool, tier: str = "interpreted") -> list[str]:
+                        many: bool, tier: str = "interpreted",
+                        window: str | None = None) -> list[str]:
     """Reasons a page reading can't ship (empty list = accept).
 
     ``graph`` is the PageGraph the reading came from (``pagegraph`` shape —
@@ -137,6 +163,8 @@ def verify_page_reading(graph: dict, preview: dict, *, frame_kind: str | None,
     local-model reader, default: the model saw only text + tables, so grounding
     checks only those) or ``"compiled"`` (the P2 selector program lifts values
     verbatim from entities / meta / tables and grounds against all of them).
+    ``window`` is the ask's parsed window (``"now"`` for a 'right now' ask): a
+    right-now ask requires the page to carry a freshness signal.
     Deterministic; no model.
     """
     assert isinstance(graph, dict) and isinstance(preview, dict), "graph + preview required"
@@ -163,6 +191,9 @@ def verify_page_reading(graph: dict, preview: dict, *, frame_kind: str | None,
         reasons += _result_reasons(values)
     reasons += _subject_reasons(subject, page_text)
     reasons += _currency_reasons(graph, values, frame_kind, now, tz)
+    reasons += _stale_reasons(values, frame_kind, now, tz)
+    if window == "now" and frame_kind in _CURRENT_FRAMES:
+        reasons += _freshness_reasons(graph, now)
     return list(dict.fromkeys(reasons))
 
 
@@ -346,7 +377,11 @@ def _grounding_reasons(values: dict, page_text: str) -> list[str]:
 
 def _chrome_names(graph: dict) -> list[str]:
     """The page's names for itself: title (and its segments), site name,
-    og/twitter title, and its JSON-LD self-entities' names."""
+    og/twitter title, and its JSON-LD self-entities' names. A list/collection
+    entity's own ``name`` is a label describing the list (not an item of it)
+    — a compiled card that lifts it is picking the heading, not a value
+    (fix7-page 2026-10-04: findarepo's ItemList.name shipped as 'trending
+    python repositories')."""
     names: list[str] = []
     title = str(graph.get("title") or "")
     names.append(title)
@@ -357,8 +392,13 @@ def _chrome_names(graph: dict) -> list[str]:
             names.append(str(meta[key]))
             names += re.split(r"\s+[|–—\-·:]\s+", str(meta[key]))
     for ent in graph.get("entities") or []:
-        if isinstance(ent, dict) and ent.get("type") in pagegraph.SELF_TYPES:
+        if not isinstance(ent, dict):
+            continue
+        etype = ent.get("type")
+        if etype in pagegraph.SELF_TYPES:
             names += [str(ent[k]) for k in ("name", "headline", "alternateName") if ent.get(k)]
+        elif etype in _LIST_LABEL_TYPES:
+            names += [str(ent[k]) for k in ("name", "alternateName") if ent.get(k)]
     return [n for n in (_norm(x) for x in names) if n]
 
 
@@ -384,9 +424,13 @@ def _chrome_reasons(graph: dict, values: dict, wants: list[str]) -> list[str]:
             words = set(_TOKEN_RE.findall(norm))
             if norm in names or norm in labels:
                 reasons.append(f"'{_quote(text)}' is the page's own name, not a reading")
-            elif (not has_digit and len(norm) >= 3
+            elif (len(norm) >= 3 and sum(ch.isalpha() for ch in norm) >= 3
                   and any(norm != n and re.search(rf"(?<!\w){re.escape(norm)}(?!\w)", n)
                           for n in names)):
+                # fix7-page 2026-10-04: a value that sits whole inside a chrome name
+                # is chrome whether or not a stock-ticker-shaped digit rides along
+                # ("S&P 500 INDEX (^SPX)" lives inside the Yahoo title); a lone
+                # number ("65") has <3 alpha chars and still ships.
                 reasons.append(f"'{_quote(text)}' is part of the page's name, not a reading")
             elif not has_digit and norm in headings and words & want_words:
                 reasons.append(f"'{_quote(text)}' is a label on the page, not its value")
@@ -600,3 +644,109 @@ def _currency_reasons(graph: dict, values: dict, frame: str | None,
                 if len(dates) >= 2 and all(d < today for d in dates):
                     reasons.append(f"'{_quote(text)}' lists past records, not what's happening now")
     return reasons
+
+
+# ---- freshness ------------------------------------------------------------------
+
+
+def _reading_has_status_word(text: str) -> bool:
+    """True when a reading reads as a current state (not a bare timestamp):
+    'operational', 'Open sunrise to sunset', a burn ban 'is prohibited'.
+    Keeps _stale_reasons from refusing live status readings that name a
+    past declaration date."""
+    low = str(text or "").lower()
+    for tok in _TOKEN_RE.findall(low):  # bounded by the reading
+        if tok in _STATUS_WORDS:
+            return True
+    return False
+
+
+def _stale_reasons(values: dict, frame: str | None, now: datetime,
+                   tz: tzinfo) -> list[str]:
+    """A current/status/schedule reading that is just a clock-timestamped
+    event, parsed well past now (fix7-page 2026-10-04: flight-status.com
+    shipped 'San Francisco (SFO) 2026-06-30T07:00' as the flight status 96
+    days after the fact). A reading with a status word rides through: a
+    burn ban 'As of 8/11/26, outdoor burning is prohibited' states today's
+    condition, not a stale timestamp."""
+    if frame not in _CURRENT_FRAMES and frame not in _TIME_FRAMES:
+        return []
+    reasons: list[str] = []
+    for value in values.values():
+        if not isinstance(value, str):
+            continue  # list/row readings go through their own frame checks
+        if _reading_has_status_word(value):
+            continue
+        got = parse_when(value, now, tz)
+        if got is None:
+            continue
+        when, has_clock = got
+        if has_clock and when < now - _STALE_GRACE:
+            reasons.append(f"'{_quote(value)}' names a time that is already past")
+    return reasons
+
+
+def _entity_dates(graph: dict) -> list[datetime]:
+    """Every ISO-8601 datetime a JSON-LD field names (dateModified /
+    datePublished / lastReviewed / uploadDate): the structured freshness
+    signals a page carries, with no model."""
+    out: list[datetime] = []
+    for ent in (graph.get("entities") or [])[:40]:  # jail-capped list
+        if not isinstance(ent, dict):
+            continue
+        for key in ("dateModified", "datePublished", "lastReviewed", "uploadDate"):
+            value = ent.get(key)
+            if not isinstance(value, str) or not value:
+                continue
+            try:
+                got = datetime.fromisoformat(value)
+            except ValueError:
+                continue
+            if got.tzinfo is None:
+                got = got.replace(tzinfo=UTC)
+            out.append(got)
+    return out
+
+
+def _meta_dates(graph: dict) -> list[datetime]:
+    """Every ISO-8601 datetime an HTML meta tag names (article:modified_time,
+    og:updated_time): the page's own freshness markup, no model."""
+    out: list[datetime] = []
+    for key in ("article:modified_time", "article:published_time",
+                "og:updated_time", "og:article:modified_time"):
+        value = (graph.get("meta") or {}).get(key)
+        if not isinstance(value, str) or not value:
+            continue
+        try:
+            got = datetime.fromisoformat(value)
+        except ValueError:
+            continue
+        if got.tzinfo is None:
+            got = got.replace(tzinfo=UTC)
+        out.append(got)
+    return out
+
+
+def _freshness_reasons(graph: dict, now: datetime) -> list[str]:
+    """A 'right now' ask against a page that carries no freshness signal
+    (fix7-page 2026-10-04: cityvibe.me's Franklin Barbecue guide answered
+    'how long is the line right now' with a static '50 to 100 people' —
+    the page has no updated timestamp, no 'minutes ago', no today's date).
+
+    Signals: an entity date within 48 h, a meta modified time within 48 h,
+    an 'updated / as of / N minutes ago' phrase in the page text, or
+    today's ISO date in the page text / outline."""
+    cutoff = now - _FRESH_WINDOW
+    for got in _entity_dates(graph) + _meta_dates(graph):
+        if got >= cutoff:
+            return []
+    text = (str(graph.get("title") or "") + "\n" + str(graph.get("text") or "")
+            + "\n" + " ".join(str(line) for line in graph.get("outline") or [])
+            + "\n" + _table_text(graph))
+    if _FRESH_PHRASE_RE.search(text):
+        return []
+    today = now.date().isoformat()
+    if today in text:
+        return []
+    return ["the page has no freshness signal — no 'as of' / updated time, "
+            "no 'minutes ago', no today's date"]

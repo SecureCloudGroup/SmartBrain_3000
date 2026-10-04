@@ -422,6 +422,19 @@ def test_an_entity_the_category_does_not_take_is_not_the_subject(lib) -> None:
     assert _ids(lib, "delays at O'Hare airport") == ["faa-nas-status"]
 
 
+# fix7-page defect 4 (blind-6): "delays at O'Hare" (no "flight" / "airport" word)
+# offered CTA / BART instead of FAA — _allowed's cue check only read the entity's
+# own name span, missing the ask-level "delays" cue for the O'Hare airport.
+def test_an_airport_entity_cued_by_an_ask_level_word_survives_allowed(lib) -> None:
+    assert _ids(lib, "delays at O'Hare")[0] == "faa-nas-status"
+    # the Mifflin-airport short-code guard: a short lowercase code "red" alone
+    # is never the entity's name — the ask-level cue bypass is barred.
+    assert "faa-nas-status" not in _ids(lib, "WMATA red line delays")
+    # the sibling-vocabulary guard: "metro" is a transit_alerts keyword, so a
+    # Mesquite-Metro airport match is dropped under the transit frame.
+    assert "faa-nas-status" not in _ids(lib, "DC metro red line delays")
+
+
 def test_an_entity_said_only_by_the_place_is_not_the_subject_on_any_path(lib) -> None:
     """L1: a place word that also names a team (Kansas City) must not stay the subject on routed paths —
     the ISS question for Kansas City offered MLB/NBA schedules because the Chiefs' alias "kansas city"
