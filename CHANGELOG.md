@@ -36,8 +36,6 @@ to know when a release changes behavior.
   longer shows MLB's games, "gas inventories" no longer shows gas prices,
   and "any aurora tonight?" shows the night's forecast instead of earlier
   readings. The card offers the next source, then the web, then says so.
-- **Finding a source never sends your question anywhere.** The Library lookup
-  runs on this computer from the Library's own words.
 - **Web-page values must be on the page as you see it.** A value found only
   in a hidden element, a filter menu or the page's metadata isn't used, and
   a site is treated as a brand's official site only when it really is
