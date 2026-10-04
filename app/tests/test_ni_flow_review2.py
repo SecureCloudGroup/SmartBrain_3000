@@ -211,6 +211,15 @@ _F7_SHIPS = [
     ("abc news headlines", "ABC News", ["headlines"], "abc-top"),
     ("baseball games tonight", "baseball", ["games"], "mlb-schedule"),
     ("latest world headlines", "world news", ["headlines"], "bbc-world"),
+    # F7-B class fix (2026-10-04): a sentence-initial auto-capital that is a taxonomy / English /
+    # suffix-English word is not a proper noun; the model's Title-Case subject is never a proper
+    # noun; both used to refuse general headline feeds.
+    ("Biggest stories today", "biggest stories", ["headlines"], "abc-top"),  # Biggest = sentence-initial autocap
+    ("Business headlines", "business headlines", ["headlines"], "abc-top"),  # Business = taxonomy
+    ("Nightly news", "nightly news", ["headlines"], "abc-top"),              # Nightly = -ly English suffix
+    ("Celebrity news", "celebrity news", ["headlines"], "abc-top"),          # Celebrity = -ity English suffix
+    # the model's Title-Case subject must not drive F7 — only the user's raw casing in the request:
+    ("business headlines", "Business Headlines", ["headlines"], "abc-top"),
 ]
 
 
@@ -234,6 +243,63 @@ def test_f7_right_asks_still_ship(ask, subject, wants, sid) -> None:
     reasons, _notes = ni_flow._verify_frame(ni_flow._frame_of(ask, intent), ni_flow._picked_source(live),
                                             {}, built, ask, intent, _NOW)
     assert reasons == [], f"{sid} refused for {ask!r}: {reasons}"
+
+
+# F7-B class fix: a sentence-initial proper noun that is NOT an English/taxonomy/generic word still refuses
+def test_f7_sentence_initial_proper_noun_still_refuses_a_general_feed() -> None:
+    """"Ukraine news" with Ukraine first: a phone auto-cap, but "Ukraine" isn't in English/taxonomy/
+    generic — it is a naming word and no part of abc-top takes it."""
+    ask = "Ukraine news"
+    intent = _intent(ask, "Ukraine news", ["headlines"])
+    answers = ni_flow._library_answers("abc-top")
+    assert answers, "abc-top has answers"
+    chosen = ni_flow.select_answers(answers, ask, intent["wants"], intent["window"], intent["frame_kind"])
+    assert chosen, "something is chosen"
+    row = {"source_id": "abc-top", "url": "https://abcnews.go.com/abcnews/topstories", "label": "",
+           "params": {}, "scope": "global"}
+    store = _store()
+    item_id = ni_flow.create_shell_item(store, ask)
+    rec = ni_flow._make_record(ask, "source", intent=intent)
+    rec["_ranked_library"] = [row]
+    ni_flow._flow_write(store, item_id, rec)
+    ni_flow.seal_library_pick(store, item_id, row["url"], row)
+    live = {**ni_flow._flow_read(store, item_id), "_library_source": "abc-top"}
+    built = {"chosen": chosen, "answers": answers, "preview_payload": {},
+             "unanswered": ni_flow._unanswered_wants(answers, ask, intent["wants"], [])}
+    reasons, _notes = ni_flow._verify_frame(ni_flow._frame_of(ask, intent), ni_flow._picked_source(live),
+                                            {}, built, ask, intent, _NOW)
+    assert reasons, f"abc-top shipped for sentence-initial 'Ukraine news': {reasons}"
+
+
+# F7-J class fix: a source with coverage.entity (e.g. local-news-metro declares a long list of
+# covered cities) stops shipping a brand name its entity doesn't take ("Chicago Tribune", "Chicago
+# Bears"). The current F7 block exempts the whole source when ANY entity is set, so the brand is
+# never caught; fix: the entity exemption only covers naming words the entity itself takes.
+def test_f7_j_entity_source_still_catches_a_stray_brand_name() -> None:
+    """A local-news-metro-shaped source: entity is a list of covered cities, no entity_params. The
+    ask names "Chicago Tribune"; "chicago" is in the entity (so passes), "tribune" is not — it is
+    a brand the source doesn't take and must refuse."""
+    ask = "Chicago Tribune news"
+    intent = _intent(ask, "Chicago Tribune", ["headlines"])
+    answers = ni_flow._library_answers("abc-top") or []
+    assert answers, "abc-top has answers"
+    chosen = ni_flow.select_answers(answers, ask, intent["wants"], intent["window"], intent["frame_kind"])
+    assert chosen, "something is chosen"
+    # a local-news-metro-shaped source dict (entity set, no entity_params, filed under news).
+    # The entity is a semicolon-separated LIST of metros (the live local-news-metro shape) — a
+    # list entity still runs F7, so "Chicago" is covered (own) but "Tribune" is caught.
+    source = {"categories": ["news/local_news", "news/headlines"], "name": "Local news (metro)",
+              "description": "metro newsrooms",
+              "examples": ["chicago news", "local news", "city news"],
+              "coverage": {"entity": "Local newsrooms in US metros: Chicago; Washington DC; "
+                                     "Los Angeles; New York; Boston; Miami"},
+              "entity_params": {}, "label": "", "readings": [], "provider": "", "scope": "global"}
+    built = {"chosen": chosen, "answers": answers, "preview_payload": {},
+             "unanswered": ni_flow._unanswered_wants(answers, ask, intent["wants"], [])}
+    reasons, _notes = ni_flow._verify_frame(ni_flow._frame_of(ask, intent), source, {}, built,
+                                            ask, intent, _NOW)
+    assert any("tribune" in r.lower() for r in reasons), \
+        f"local-news-metro-shaped source shipped for 'Chicago Tribune news': {reasons}"
 
 
 # ---- F10: an hour-axis list cut to a day window must size the cap to the window -----------------
@@ -282,6 +348,38 @@ def test_f12_a_source_whose_overlap_is_only_the_subject_word_refuses_when_all_wa
     reasons, _notes = ni_flow._verify_frame(ni_flow._frame_of(ask, intent), ni_flow._picked_source(live),
                                             {}, built, ask, intent, _NOW)
     assert reasons, f"fred-gasregw shipped for 'gas inventories this week': {reasons}"
+
+
+# F12 class fix: a generic quantity want (level/value/number/amount/worth/reading) is answered by a
+# source's primary value answer; a specific want ("illumination", "repos", "inventories") is not.
+_F12_QUANTITY_SHIPS = [
+    ("S&P 500 level", "S&P 500", ["level"], "fred-sp500"),
+    ("Nasdaq value", "Nasdaq", ["value"], "fred-nasdaqcom"),
+]
+
+
+@pytest.mark.parametrize("ask, subject, wants, sid", _F12_QUANTITY_SHIPS)
+def test_f12_generic_quantity_want_is_covered_by_a_primary_value_answer(ask, subject, wants, sid) -> None:
+    """"S&P 500 level" asks for the index's value; the FRED series' primary value answer IS that
+    value. "level" / "value" / "number" / "amount" / "worth" / "reading" are generic quantity words."""
+    answers = ni_flow._library_answers(sid)
+    assert answers, sid
+    intent = _intent(ask, subject, wants)
+    chosen = ni_flow.select_answers(answers, ask, wants, intent["window"], intent["frame_kind"])
+    assert chosen, f"nothing chosen for {ask!r}"
+    row = {"source_id": sid, "url": "https://example.org/x", "label": "", "params": {}, "scope": "global"}
+    store = _store()
+    item_id = ni_flow.create_shell_item(store, ask)
+    rec = ni_flow._make_record(ask, "source", intent=intent)
+    rec["_ranked_library"] = [row]
+    ni_flow._flow_write(store, item_id, rec)
+    ni_flow.seal_library_pick(store, item_id, row["url"], row)
+    live = {**ni_flow._flow_read(store, item_id), "_library_source": sid}
+    built = {"chosen": chosen, "answers": answers, "preview_payload": {},
+             "unanswered": ni_flow._unanswered_wants(answers, ask, wants, [])}
+    reasons, _notes = ni_flow._verify_frame(ni_flow._frame_of(ask, intent), ni_flow._picked_source(live),
+                                            {}, built, ask, intent, _NOW)
+    assert reasons == [], f"{sid} refused for {ask!r}: {reasons}"
 
 
 # ---- F14: _clean_answer accepts whole {param} segments in row cells ------------------------------

@@ -25,6 +25,13 @@ def test_f8_text_fill_drops_contraction_leftovers_before_real_tokens() -> None:
     assert out == "nbc", out
 
 
+def test_f8_text_fill_keeps_single_char_non_contraction_tokens() -> None:
+    """K-R (2026-10-04): a genuine 1-char subject word (R, Q, X) is NOT a contraction fragment and
+    must not be dropped — "latest R version" asks for the R language's version, not "latest version"."""
+    assert lr._text_fill({"from": "text"}, "latest R version",
+                        own_words=frozenset({"version"})) == "r"
+
+
 # ---- FETCH-F3: host-parameter values must be a bare host ------------------------------------
 
 def test_fetch_f3_host_param_refuses_userinfo_port_and_ip_literals() -> None:

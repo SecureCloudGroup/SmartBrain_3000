@@ -1184,6 +1184,12 @@ def put_param(request: Request, item_id: str, body: ParamIn) -> dict:
         raise HTTPException(
             status_code=409,
             detail="secret params are filled via the credential PUT, never here")
+    if decl.get("kind") == "clock":
+        # R3-H (field 2026-10-04): a clock param walks forward from ``format`` + ``offset_days``;
+        # the user never fills it (the engine does, every tick).
+        raise HTTPException(
+            status_code=409,
+            detail="clock params are filled by the engine every refresh, never here")
     new_spec = json.loads(json.dumps(item["spec"]))
     new_spec["params"][body.name]["value"] = body.value
     store.update_spec(item_id, new_spec, origin="user")
@@ -1845,14 +1851,19 @@ def _sanitize_spec_for_export(item: dict, secrets_store) -> dict:
 
 def _empty_param_values(spec: dict) -> None:
     """Zero out param VALUES per §21 (labels + kinds kept). Secrets become the ni:self
-    placeholder so subscribers know they must enter a credential."""
+    placeholder so subscribers know they must enter a credential. R3-H (field 2026-10-04): a
+    clock-kind param carries ``format`` + ``offset_days`` and no user value — stamping ``value: ""``
+    on it would ship an invalid param decl (round-trip "unknown keys: ['value']")."""
     assert isinstance(spec, dict), "spec must be a dict"
     params = spec.get("params") or {}
+    assert isinstance(params, dict), "params must be a dict"
     for name, decl in params.items():  # bounded by ni._MAX_PARAMS
         if not isinstance(decl, dict):
             continue
         if decl.get("kind") == "secret":
             decl["value"] = f"{ni._NI_SELF_PLACEHOLDER}{name}"
+        elif decl.get("kind") == "clock":
+            continue  # a spec-level clock param has no user value to zero
         else:
             decl["value"] = ""
 

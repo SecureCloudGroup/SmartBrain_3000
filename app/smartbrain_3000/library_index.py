@@ -990,7 +990,9 @@ class LibraryIndex:
                 if not why:
                     cats = record.get("categories") or []
                     pol = self._subcategories(con).get(cats[0], ([], {}))[1] if cats else {}
-                    urls, why = candidate_urls(record, fill_ask, pol, res)
+                    # R3-A (field 2026-10-04): pass the engine's clock so clock-filled URLs read the
+                    # user's zone (not the server's) and the sealed URL template rides through.
+                    urls, why = candidate_urls(record, fill_ask, pol, res, now=ni._clock())
                 if not urls:
                     skipped.append(f"{row['name']}: {why}")
                     continue
@@ -1009,6 +1011,12 @@ class LibraryIndex:
                                 "format": _FORMAT_BY_KIND.get(row["access_kind"], "json"),
                                 "needs_key": u.get("needs_key"), "params": u.get("params") or {},
                                 "needs_contact": bool(u.get("needs_contact")), "lookup": u.get("lookup"),
+                                # R3-A (field 2026-10-04): the sealed clock-template URL + its
+                                # clock-fill metadata ride through so the engine refills every tick
+                                # (seal was deriving a template from the filled values, mis-reading
+                                # year codes and URL-encoded separators).
+                                "url_template": u.get("url_template") or u["url"],
+                                "clock_params": u.get("clock_params") or {},
                                 "scope": scope, "frame_kind": ctx["frame"]})
                 # keyed sources are gathered too, but enough keyless ones end the search (for a named place,
                 # enough keyless ones FOR that place: a place-scoped source may rank below global ones)

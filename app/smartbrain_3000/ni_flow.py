@@ -1891,22 +1891,65 @@ def _fill_answer(answer: dict, params: dict[str, str]) -> dict:
     return out
 
 
+def _reslot_clock_params_in_pipeline(stages: list[dict], params: dict[str, str],
+                                       clock_params: frozenset[str]) -> list[dict]:
+    """R3-E (2026-10-04): a clock param that filled an answer's quoted-key segment at BUILD time
+    reads one date in the sample; the sealed pipeline must walk forward on every refresh. Swap
+    each clock param's filled literal (``["2026-10-04"]``) in every stage's extract-paths and
+    where-value for its ``["{{param:name}}"]`` slot — ``substitute_params`` refills from the
+    current clock. Bounded: a few stages, few params, few paths each."""
+    assert isinstance(stages, list), "stages must be a list"
+    assert isinstance(clock_params, (set, frozenset)), "clock_params must be a set"
+    if not clock_params:
+        return stages
+    out: list[dict] = []
+    for stage in stages[:ni._MAX_PIPELINE_STAGES]:
+        copied = json.loads(json.dumps(stage))
+        for name in clock_params:
+            raw = params.get(name)
+            if not raw:
+                continue
+            literal = ni.quote_path_key(raw)
+            slot = ni.quote_path_key("{{param:" + name + "}}")
+            if copied.get("op") == "extract":
+                paths = copied.get("paths") or {}
+                if isinstance(paths, dict):
+                    copied["paths"] = {k: v.replace(literal, slot) if isinstance(v, str) else v
+                                        for k, v in paths.items()}
+            if copied.get("op") == "transform":
+                for apply in copied.get("apply") or []:
+                    if isinstance(apply, dict) and apply.get("fn") == "where" \
+                            and isinstance(apply.get("value"), str) and apply["value"] == raw:
+                        apply["value"] = "{{param:" + name + "}}"
+        out.append(copied)
+    return out
+
+
 def build_from_answers(chosen: list[dict], sample: object, title: str,
                        params: dict[str, str] | None = None, window: str | None = None,
-                       next_event: bool = False) -> dict:
+                       next_event: bool = False,
+                       clock_params: frozenset[str] = frozenset()) -> dict:
     """Build ``{pipeline, scene, preview_payload, fields, klass}`` from the chosen declared answers,
     running the pipeline on ``sample`` and checking every shown value is there with its type.
-    ``params`` are the values the card's address was filled with (``{param}`` path segments).
+    ``params`` are the values the card's address was filled with (``{param}`` path segments);
+    ``clock_params`` names those filled from the clock — their quoted-key paths ride through as
+    ``["{{param:name}}"]`` slots after the build, so the sealed pipeline walks forward (R3-E).
     A bare-list response is addressed as ``{"items": [...]}`` — the flow's sampling wrap, and the
     engine's on every refresh. Raises ValueError / ``ni.NIError`` when the live response doesn't
     fit the declaration. ``window``: the asked stretch of time (rows indexed by time are cut to it);
     ``next_event``: the ask is for the next event (its time says so once it has passed)."""
     assert isinstance(chosen, list) and chosen, "chosen answers required"
+    assert isinstance(clock_params, (set, frozenset)), "clock_params must be a set"
     chosen = [_fill_answer(a, params or {}) for a in chosen]
     payload = sample if isinstance(sample, dict) else {"items": sample}
     if chosen[0]["kind"] == "value":
-        return _build_value_answers([a for a in chosen if a["kind"] == "value"], payload, next_event)
-    return _build_rows_answer(chosen[0], payload, title, window, next_event=next_event)
+        built = _build_value_answers([a for a in chosen if a["kind"] == "value"], payload, next_event)
+    else:
+        built = _build_rows_answer(chosen[0], payload, title, window, next_event=next_event)
+    if clock_params:
+        built["pipeline"] = _reslot_clock_params_in_pipeline(built["pipeline"], params or {},
+                                                               frozenset(clock_params))
+    return built
 
 
 def _names_a_param(answer: dict, params: dict) -> bool:
@@ -1944,6 +1987,10 @@ def _try_answers_build(store: ni.NIStore, item_id: str, request: str, intent: di
     title, params = str(intent.get("subject") or request)[:120], _clean_params(live.get("_library_params"))
     wants, window, kind = list(intent.get("wants") or []), intent.get("window"), intent.get("frame_kind")
     next_event = kind in ("next_event", "schedule")
+    # R3-E (2026-10-04): names of clock-filled params ride through so an answer path indexed by a
+    # date (``near_earth_objects.{date}``) stays a slot in the sealed pipeline — the engine refills
+    # every tick, so day 2 reads day 2's slice instead of extract-missing on the frozen day-1 key.
+    clock_names = frozenset(_clean_clock_params(live.get("_library_clock_params")))
     # the answers about what the user NAMED (the airport, the team) come first: "delays at Newark airport"
     # is Newark's delays, not the nationwide list (live 2026-09-29)
     scoped = [a for a in answers if _names_a_param(a, params)]
@@ -1961,7 +2008,7 @@ def _try_answers_build(store: ni.NIStore, item_id: str, request: str, intent: di
     try:
         try:
             built = build_from_answers(chosen, sample, title, params=params, window=window,
-                                       next_event=next_event)
+                                       next_event=next_event, clock_params=clock_names)
         except ValueError as exc:
             if "the list is empty here" in str(exc) and chosen[0]["kind"] == "list":
                 # F3 retry (2026-10-04): a sibling list answer on the same source may have rows for
@@ -1972,7 +2019,8 @@ def _try_answers_build(store: ni.NIStore, item_id: str, request: str, intent: di
                 if sibling is not None:
                     try:
                         built = build_from_answers([sibling], sample, title, params=params,
-                                                     window=window, next_event=next_event)
+                                                     window=window, next_event=next_event,
+                                                     clock_params=clock_names)
                         chosen = [sibling]
                     except ValueError:
                         raise exc from None  # the first error is the better message
@@ -1988,7 +2036,7 @@ def _try_answers_build(store: ni.NIStore, item_id: str, request: str, intent: di
                 if not fallback or _other_sources_left(live, url):
                     raise  # another source may have what was asked: the caller moves on to it
                 built = build_from_answers(fallback, sample, title, params=params, window=window,
-                                           next_event=next_event)
+                                           next_event=next_event, clock_params=clock_names)
                 built["missing"] = [a["label"] for a in chosen] + list(built.get("missing") or [])
                 chosen = fallback
             else:
@@ -2042,6 +2090,10 @@ _WANT_SYNONYMS: dict[str, frozenset[str]] = {
     "coordinate": frozenset({"latitude", "longitude", "position", "lat", "lon"}),
     "coordinates": frozenset({"latitude", "longitude", "position"}),
 }
+# F12 class fix (2026-10-04): generic quantity words — a want of just these ("level", "value") is
+# the primary number any value-kind source reports; a primary ``value`` answer covers them. "price"
+# stays OFF the list on purpose — "price of X" on a non-price source must still refuse.
+_QUANTITY_WANTS = frozenset({"level", "value", "number", "amount", "worth", "reading"})
 
 
 def _unanswered_wants(answers: list[dict], request: str, wants: list, filled: list[str]) -> list[str]:
@@ -2061,11 +2113,14 @@ def _unanswered_wants(answers: list[dict], request: str, wants: list, filled: li
             covered |= _answer_tokens(text)
         if _event_time(a) or _dated_rows(a):  # a time or a month + day answers "when" / "date"
             covered |= {"date", "time", "when", "day"}
+    has_primary_value = any(a.get("kind") == "value" and a.get("primary") for a in answers)
     out: list[str] = []
     for want in (wants or [])[:_MAX_INTENT_FIELDS]:
         said = _answer_tokens(str(want).replace("_", " ")) & ask
         synonyms = {t for s in said for t in _WANT_SYNONYMS.get(s, frozenset())}
         if said and not (said & covered) and not (synonyms & covered):
+            if has_primary_value and said and said <= _QUANTITY_WANTS:
+                continue  # a generic quantity want IS what a primary value answer reports
             out.append(str(want).replace("_", " "))
     return out
 
@@ -2365,17 +2420,65 @@ def _stray_topics(frame: dict, source: dict, params: dict, answers: list[dict], 
     stray = {t for t in said - own if t in eligible and t in topics and not topics[t] & filed}
     # F7 (2026-10-04): a proper-noun subject word the user said that no part of this source takes
     # (own words, readings, params, filter) is stray even when the Library's taxonomy doesn't carry
-    # it ("Ukraine" on a general US headline feed). Scoped to sources that (a) have no declared
-    # ``coverage.entity`` and (b) take no geo parameter — a league / provider entity ("MLB", "CTA")
-    # already covers unlisted team or nickname words; a geo-filled source (a buoy near Chicago, a
-    # station near a place) is place-specific and the water-body / nickname of its area isn't stray.
+    # it ("Ukraine" on a general US headline feed). Scoped to sources that (a) have no single-name
+    # entity (a league / provider "MLB", "CTA" already covers unlisted team / nickname words — the
+    # ask's teams are its subject area), and (b) take no geo parameter — a geo-filled station is
+    # place-specific and the water-body of its area isn't stray. A LIST entity (local-news-metro's
+    # semicolon-separated metros) still runs: the exemption only covers names the entity actually
+    # takes (``own`` already holds them); a brand it doesn't take ("Tribune", "Post") is stray.
+    # F7-B class fix (2026-10-04): the request's RAW casing — never the model's Title-Case subject
+    # (phones auto-capitalize sentence-initial, the model Title-Cases its subject). A sentence-
+    # initial cap is a proper noun only when its folded token is NOT an English / taxonomy / generic
+    # word (an English suffix -ly / -est / -ity / -ing / -ness / -tion covers "Nightly" / "Biggest"
+    # / "Celebrity" / "Trending" / "Business" / "Election" when the taxonomy omits them).
     entity = str((source.get("coverage") or {}).get("entity") or "").strip()
-    if not entity and not (set(params) & _GEO_PARAMS):
-        proper = _proper_tokens(_amp(request)) | _proper_tokens(_amp(str(intent.get("subject") or "")))
+    if (not entity or ";" in entity) and not (set(params) & _GEO_PARAMS):
+        exempt_initial = _NAME_STOP | set(topics)
+        proper = _request_proper(request, exempt_initial)
         proper -= _answer_tokens(" ".join(str(r) for r in (source.get("readings") or [])))
         proper -= _answer_tokens(str(intent.get("place") or ""))
+        for value in params.values():  # bounded by the params
+            proper -= _answer_tokens(value)
         stray |= (proper & said) - own
     return stray
+
+
+# English suffixes a sentence-initial capital may carry when it is a common adjective / noun / verb
+# (Nightly, Biggest, Celebrity, Trending, Business, Election). Not applied mid-sentence — a cap in
+# the middle of the ask is explicit user casing. Length guard keeps "lily"/"toby" short names safe.
+_ENGLISH_SUFFIXES = ("ly", "est", "ing", "ity", "ness", "tion", "sion", "ful", "less", "ous", "ive")
+_MIN_SUFFIX_LEN = 5
+
+
+def _request_proper(request: str, exempt_initial: set[str]) -> set[str]:
+    """Capitalized subject tokens in the RAW request (never the model's subject casing). A sentence
+    initial token (first word, or first after . ! ?) is skipped when its folded form is a known
+    English / taxonomy / generic word or carries a common English suffix — phones auto-capitalize
+    the start of every ask and that cap is not alone a proper-noun signal; mid-sentence caps are."""
+    assert isinstance(request, str), "request must be a string"
+    assert isinstance(exempt_initial, (set, frozenset)), "exempt_initial must be a set"
+    text = _amp(request)
+    out: set[str] = set()
+    # the start of the ask and anything after a sentence-ending . ! ? begins a sentence; the first
+    # [A-Za-z0-9]+ word that follows is the sentence-initial one.
+    for sentence in re.split(r"[.!?]+\s*", text):  # bounded by the ask length
+        words = re.findall(r"[A-Za-z0-9]+", sentence)
+        for idx, word in enumerate(words):  # bounded by the sentence length
+            if not (word[0].isupper() or any(ch.isdigit() for ch in word)):
+                continue
+            folded = _answer_tokens(word)
+            if idx == 0 and (folded <= exempt_initial or _looks_english(word.lower())):
+                continue  # auto-cap at sentence start, not a naming word
+            out |= folded
+    return out
+
+
+def _looks_english(word: str) -> bool:
+    """A lowercase token that ends in a common English suffix and is long enough to make the ending
+    meaningful (``nightly`` / ``biggest`` / ``celebrity`` / ``trending``); not applied mid-sentence."""
+    assert isinstance(word, str), "word must be a string"
+    assert _MIN_SUFFIX_LEN >= 1, "min length must be positive"
+    return len(word) >= _MIN_SUFFIX_LEN and word.endswith(_ENGLISH_SUFFIXES)
 
 
 # words that say what KIND of data a source gives (its name's "service alerts", "latest version") or fill an ask
@@ -3347,7 +3450,15 @@ def _derive_clock_template(source_id: str, url: str, filled_params: dict[str, st
     """F1: a row that reached seal time without clock metadata (hand-built pick, older harness, L1
     repair) still needs its URL date to walk forward. Look up the Library record, read its clock-fill
     params, and swap each filled date in ``url`` with ``{{param:name}}`` — same semantics the
-    _expand path emits. Returns ("", {}) when no clock params or no record (the URL stays literal)."""
+    _expand path emits. Returns ("", {}) when no clock params or no record (the URL stays literal).
+
+    R3-A (field 2026-10-04): the offset is the RECORD's adjusted ``_clock_offset`` whenever that
+    reproduces the filled value at the engine's current clock — a %Y value "2026" rendered from
+    offset 0 matches "2026", so year codes never get re-inferred as -276 days ago. Only a
+    date-exact format whose filled value doesn't match the record's offset falls back to inferring
+    (an older sample built from a different clock). Every occurrence of the filled value is swapped,
+    and the URL-encoded form is tried too — the derived template reproduces the fetched URL
+    byte-for-byte on day D and walks forward on day D+1."""
     lib = _resolve_library()
     if lib is None:
         return "", {}
@@ -3375,28 +3486,39 @@ def _derive_clock_template(source_id: str, url: str, filled_params: dict[str, st
         fmt = str(fill.get("format") or "")
         if not fmt:
             continue
-        # the engine's stored offset must EQUAL the one that produced the row's filled value: a row
-        # built from an older sample (different clock) keeps its value. Prefer the row's value when
-        # it reads back as a day offset from now; else fall back to the record's adjusted offset.
-        offset = _offset_from_filled(filled_params.get(name), fmt, now)
-        if offset is None:
-            offset = int(lib_clock_offset(record, fill, params))
+        record_offset = int(lib_clock_offset(record, fill, params))
+        filled = filled_params.get(name)
+        # the record's offset is the right one when it reproduces the filled value at today's clock
+        # (a %Y whose value is this year, a %Y-%m-%d whose value is today for an offset-0 param).
+        if filled and lib_clock(fmt, record_offset, now) == filled:
+            offset = record_offset
+        else:
+            inferred = _offset_from_filled(filled, fmt, now)
+            offset = inferred if inferred is not None else record_offset
         out[name] = {"format": fmt[:40], "offset_days": offset,
                       "label": str(p.get("label") or name)[:200]}
     if not out:
         return "", {}
-    # Swap each filled clock value in ``url`` with the ``{{param:name}}`` slot.
+    # Swap each filled clock value's EVERY occurrence (raw + URL-encoded) with the ``{{param:name}}``
+    # slot: a URL that holds the same date twice, or encodes a separator, still templates cleanly.
     template = url
     for name, meta in out.items():
         value = filled_params.get(name) or lib_clock(meta["format"], int(meta["offset_days"]), now)
-        if value and value in template:
-            template = template.replace(value, "{{param:" + name + "}}", 1)
+        if not value:
+            continue
+        slot = "{{param:" + name + "}}"
+        if value in template:
+            template = template.replace(value, slot)
+        encoded = quote(value, safe="")
+        if encoded != value and encoded in template:
+            template = template.replace(encoded, slot)
     return (template, out) if template != url else ("", {})
 
 
 def _offset_from_filled(value: object, fmt: str, now: datetime) -> int | None:
     """F1: a clock-filled value as whole-day offset from ``now``, or None when it isn't a date in the
-    declared ``fmt`` — the caller falls back to the record's adjusted offset_days."""
+    declared ``fmt`` — used ONLY when the record's offset doesn't reproduce the filled value
+    (R3-A: a schedule's sample URL from a different clock day)."""
     if not isinstance(value, str) or not value:
         return None
     try:

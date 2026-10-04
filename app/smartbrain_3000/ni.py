@@ -2296,12 +2296,20 @@ def _tbd_text(value: object, *, naive_utc: bool, clock_only: bool) -> _TimeText:
     return _time_text("time TBD" if clock_only else f"{shown} · time TBD", end)
 
 
+_UPCOMING_GRACE = timedelta(minutes=15)  # an event moment this recent still leads a next/schedule list
+
+
 def next_event_stale(value: object, now: datetime, grace_minutes: int = 15) -> bool:
-    """True when a next-event time is more than ``grace_minutes`` before ``now``: a "next eruption
-    9:52 AM" read at noon is no longer a prediction (C9). ``value`` is a raw timestamp (ISO, RFC 2822,
-    epoch), a datetime, or a ``time`` transform's text (which keeps its moment). A value with no
-    readable moment is never stale — there is nothing to judge."""
+    """True when a next-event time is before the forward-cut floor: a "next eruption 9:52 AM" read
+    at noon is no longer a prediction (C9). ``value`` is a raw timestamp (ISO, RFC 2822, epoch), a
+    datetime, or a ``time`` transform's text (which keeps its moment). A value with no readable
+    moment is never stale — there is nothing to judge.
+
+    R3-C (2026-10-04): the floor is ``now - grace_minutes``, the same forward cut the ``upcoming``
+    row filter makes (``_UPCOMING_GRACE``), so a row the cut keeps is never judged stale. Rows are
+    event moments (a tide, a launch, a first pitch): one 50 minutes past is not "next"."""
     assert isinstance(now, datetime), "now must be a datetime"
+    assert grace_minutes >= 0, "grace_minutes must be non-negative"
     if isinstance(value, _TimeText):
         moment = getattr(value, "moment", None)
     elif isinstance(value, datetime):
@@ -2464,10 +2472,11 @@ def _window_test(window: str, local_now: datetime, step: str = "hour"):
     day = local_now.date()
     wall_hour = local_now.replace(minute=0, second=0, microsecond=0, tzinfo=None)
     hourly = step == "hour"
-    if window == "upcoming":  # a next-event / schedule list with no asked window: just the future
-        hour = local_now.replace(minute=0, second=0, microsecond=0).astimezone(UTC)
-        return lambda st: (hour <= st[1].astimezone(UTC) if st[2] and st[1] is not None
-                            else wall_hour <= st[0] if st[2] else day <= st[0].date())
+    if window == "upcoming":  # a next-event / schedule list with no asked window: from now - grace on
+        floor = local_now - _UPCOMING_GRACE  # the same floor next_event_stale judges by
+        wall_floor = floor.replace(tzinfo=None)
+        return lambda st: (floor.astimezone(UTC) <= st[1].astimezone(UTC) if st[2] and st[1] is not None
+                            else wall_floor <= st[0] if st[2] else day <= st[0].date())
     if window == "tonight":  # 18:00 today → 06:00 tomorrow, on the source's wall clock
         night = local_now.replace(hour=18, minute=0, second=0, microsecond=0, tzinfo=None)
         if hourly and local_now.hour < 6:  # read before dawn: the current night ends at 06:00 today

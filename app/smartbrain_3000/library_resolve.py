@@ -270,18 +270,25 @@ def _clock(fmt: str, offset_days: int, now: datetime) -> str:
 def _text_fill(fill: dict, ask: str, own_words: set[str] = frozenset()) -> str:
     """The thing the user named, as typed: what's left after generic words AND the source's own
     vocabulary ("latest react version" for "npm package latest version" -> "react"). F8 (2026-10-04):
-    ``norm`` splits a contraction into a word + leftover ("what's" → "what s"); drop single-char
-    tokens so the fill never ships a stray "s" (tvmaze?q=s)."""
+    ``norm`` splits a contraction into a word + leftover ("what's" → "what s"); drop only the
+    contraction fragments so the fill never ships a stray "s" (tvmaze?q=s) but keeps a genuine
+    1-char name ("latest R version" -> "r"). K-R (2026-10-04)."""
     pat = fill.get("pattern")
     if pat:
         m = re.search(pat, ask or "", re.IGNORECASE)
         if not m:
             raise Unfillable("the ask doesn't name it")
         return m.group(1) if m.groups() else m.group(0)
-    words = [w for w in norm(ask).split() if len(w) > 1 and w not in ENGLISH and w not in own_words]
+    words = [w for w in norm(ask).split() if w not in _CONTRACTION_FRAGMENTS
+             and w not in ENGLISH and w not in own_words]
     if not words:
         raise Unfillable("the ask doesn't name it")
     return " ".join(words[:4])
+
+
+# the leftovers ``norm`` produces when it splits an apostrophe out of a contraction ("what's" ->
+# "what s"): never a 1-char subject the user named ("R", "Q", "X").
+_CONTRACTION_FRAGMENTS = frozenset({"s", "t", "d", "ll", "re", "ve", "m"})
 
 
 def candidate_urls(record: dict, ask: str, policy: dict, resolver: Resolver,
@@ -418,6 +425,10 @@ def candidate_urls(record: dict, ask: str, policy: dict, resolver: Resolver,
             return [], "this provider takes its key somewhere SmartBrain can't send it safely"
         for u in urls:
             u["url"] = _without_key(u["url"])
+            # R3-A (field 2026-10-04): the sealed clock-template URL carries the same key slot;
+            # strip it there too so the engine's refills on day 2+ never ship ``api_key=SBKEYSLOT``.
+            if "url_template" in u:
+                u["url_template"] = _without_key(u["url_template"])
             u["needs_key"] = {**where, "docs_url": str(access.get("docs_url") or record.get("docs_url") or "")}
     if access.get("contact_ua"):
         for u in urls:

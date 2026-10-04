@@ -484,7 +484,11 @@ def create_app() -> FastAPI:
         try:
             # The SPA reports its IANA timezone the same way — it's what lets the
             # chat time note speak the user's local time instead of bare UTC.
-            tz = request.headers.get("x-smartbrain-timezone", "") if authority else ""
+            # R3-I (field 2026-10-04): only the DESKTOP authority sets the engine's zone — a paired
+            # phone on another coast must never alternate the clock (every refresh flipped the
+            # ``user:timezone`` meta between the two devices, so NI windows cut on the wrong day).
+            tz = (request.headers.get("x-smartbrain-timezone", "")
+                   if authority == auth.DESKTOP else "")
             if tz and len(tz) <= 64:
                 conn = request.app.state.dbx
                 if tz != db.meta_get(conn, "user:timezone"):
