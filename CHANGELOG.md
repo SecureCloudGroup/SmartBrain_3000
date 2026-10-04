@@ -21,6 +21,30 @@ to know when a release changes behavior.
 
 ### Fixed
 
+- **"Today" and "tonight" cards follow the calendar.** A card whose source
+  is asked for a date ("MLB scores today", "moon phase tonight", "what's on
+  TV tonight", tides, asteroids) asks for the current date on every update.
+  Since 0.24.0 such cards kept asking for the day they were made; existing
+  cards are corrected on their next update.
+- **Card times follow your time zone, also in Docker,** and windows read
+  sources that send UTC times correctly: "kp index tonight" shows tonight's
+  hours, a game whose start is still to be decided doesn't show up as
+  tonight, "tonight" at 10 PM no longer starts with hours already past, and
+  a "next game" list never leads with a game already played.
+- **A card that can't answer what you asked isn't built.** "Latest news on
+  Ukraine" no longer shows general headlines, "Inter Miami games today" no
+  longer shows MLB's games, "gas inventories" no longer shows gas prices,
+  and "any aurora tonight?" shows the night's forecast instead of earlier
+  readings. The card offers the next source, then the web, then says so.
+- **Finding a source never sends your question anywhere.** The Library lookup
+  runs on this computer from the Library's own words.
+- **Web-page values must be on the page as you see it.** A value found only
+  in a hidden element, a filter menu or the page's metadata isn't used, and
+  a site is treated as a brand's official site only when it really is
+  (not "brand-giveaway.com" or a free hosting subdomain). Pages that state
+  their character set only in the server's headers read correctly.
+- **One refusing address no longer drops other sources on the same host,**
+  and a day forecast over hourly data shows the whole day.
 - **A web-page card never goes blank on an update.** An update that reads none
   of the card's values counts as a failed update, and the last good values
   stay on the card.
