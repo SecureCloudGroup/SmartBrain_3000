@@ -2083,6 +2083,14 @@ def _match_place_in_rows(rows: list, cell_path: str, place: str) -> str | None:
 _MAX_SCAN_ROWS = 500
 
 
+def _rows_need_place_scope(live: dict, params: dict) -> bool:
+    """True when a list's rows still need scoping to the ask's named place: the Library didn't offer
+    the source FOR the place (scope "place" — its address took it, e.g. USGS earthquakes in a state)
+    and no geo parameter filled the address. Either one already scopes the data, and a row's place
+    cell then names the row ("62 km WNW of Elfin Cove, Alaska"), not what the ask filters on."""
+    return live.get("_library_scope") != "place" and not (set(params or {}) & _GEO_PARAMS)
+
+
 def _scope_rows_to_place(answer: dict, sample: object, place: str) -> dict:
     """``answer`` with a sealed filter narrowing rows to the ask's named place when the row has a
     place-naming cell and the sample's rows carry it. Raises ``ValueError`` with the Library's
@@ -2154,7 +2162,7 @@ def _try_answers_build(store: ni.NIStore, item_id: str, request: str, intent: di
     # geo-filled address (lat/lon/zip/…) already scopes the data; a row's "place" cell there names
     # the row (its nearest city) not what the ask filters on, so the scoping stays off.
     place = _frame_place(request, intent)
-    if place and not (set(params) & _GEO_PARAMS):
+    if place and _rows_need_place_scope(live, params):
         try:
             chosen = [_scope_rows_to_place(a, sample, place) for a in chosen]
         except ValueError as exc:

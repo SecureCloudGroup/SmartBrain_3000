@@ -239,3 +239,13 @@ def test_expand_still_branches_when_the_url_takes_the_choice_param() -> None:
                                    values, groups={"airport": "airport"})
     assert len(out) == 2
     assert {u["params"]["airport"] for u in out} == {"KMCO", "KSFB"}
+
+
+def test_rows_are_not_rescoped_when_the_address_already_took_the_place() -> None:
+    """A source the Library offered FOR the named place (scope "place": its address took the place —
+    USGS earthquakes in a state) is already scoped; its rows' place cells name each row ("62 km WNW of
+    Elfin Cove, Alaska"), so re-filtering them by the place would empty a right card (live holdout
+    2026-10-04). A global list (CBP's ports) and a geo-filled address keep their current behavior."""
+    assert ni_flow._rows_need_place_scope({"_library_scope": "place"}, {"state": "AK"}) is False
+    assert ni_flow._rows_need_place_scope({"_library_scope": "global"}, {}) is True
+    assert ni_flow._rows_need_place_scope({"_library_scope": "global"}, {"lat": "1", "lon": "2"}) is False
