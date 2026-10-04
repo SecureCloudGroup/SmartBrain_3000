@@ -2,9 +2,9 @@
 
 Invoked by ``jailrun.run_extractor`` as ``sys.executable -c
 "from smartbrain_3000.jail_extract import main; main()"``. Reads HTML bytes from
-stdin, extracts main-article text + title with trafilatura (mirroring
-``ingest._extract_html``), falls back to a plain tag-strip when trafilatura returns
-nothing, and prints ONE JSON object to stdout:
+stdin, decodes them (byte-order mark, then the page's declared ``<meta>`` charset,
+then UTF-8), extracts main-article text + title with trafilatura (mirroring
+``ingest._extract_html``), and prints ONE JSON object to stdout:
 
 ``{"text", "title", "entities", "tables", "feeds", "meta", "outline"}``
 
@@ -13,6 +13,16 @@ JSON-LD entities, ``<table>`` grids, feed autodiscovery links, OpenGraph/meta
 pairs, and an h1-h3 outline — all parsed HERE, inside the jail, because HTML
 is hostile input. Every layer is bounded; legacy callers keep reading only
 ``text``/``title``.
+
+``text`` is the article text, then — after ``PAGE_EXTRA_MARK`` — the page's other
+visible text (script/style/SVG never count) that the article extractor dropped,
+bounded. An article extractor throws away small data widgets, and on status,
+lottery, scoreboard and dashboard pages those widgets ARE the answer (field
+2026-09-29: powerball.com's "Estimated Jackpot $409 Million" never reached the
+reader). The same text feeds the build and every refresh, so a card built on a
+widget value can re-read it. When trafilatura finds no article, the visible
+text alone is the text — never the raw tag-strip of scripts and CSS (field:
+a JS proof-of-work challenge was read as the page).
 
 Every path caps ``text`` at ``_MAX_TEXT_CHARS`` and ``title`` at ``_MAX_TITLE_CHARS``.
 Any exception → exit 1; the parent maps every failure (timeout, non-zero exit,
@@ -38,7 +48,22 @@ _MAX_TITLE_CHARS = 500           # bound on the extracted title (short human lin
 _MAX_INPUT_BYTES = 4 * 1024 * 1024  # hard stdin cap (parent already caps at 2 MB)
 _RLIMIT_CPU_SECONDS = 15         # CPU seconds inside the child (wall-clock is watchdog)
 _RLIMIT_AS_BYTES = 768 * 1024 * 1024  # 768 MB address-space cap
-_TAG_STRIP_RE = re.compile(r"<[^>]+>")  # crude fallback when trafilatura returns nothing
+# The rest of the page's visible text, appended after the article text.
+PAGE_EXTRA_MARK = "\n\n[more text on the page]\n"  # public: pagegraph splits on it
+_MAX_EXTRA_CHARS = 8_000         # bound on the appended visible-text remainder
+_MAX_BODY_CHARS = 120_000        # bound on visible text collected from the body
+# Elements whose content a reader never sees as page text.
+_INVISIBLE_TAGS = frozenset({"script", "style", "noscript", "template", "svg",
+                             "title", "iframe", "object", "canvas", "math"})
+_BLOCK_TAGS = frozenset({
+    "p", "div", "br", "li", "ul", "ol", "tr", "td", "th", "table", "h1", "h2",
+    "h3", "h4", "h5", "h6", "section", "article", "header", "footer", "nav",
+    "main", "aside", "dt", "dd", "dl", "blockquote", "pre", "form", "fieldset",
+    "figure", "figcaption", "hr", "address", "details", "summary", "option",
+    "label", "button", "caption"})
+_INLINE_BREAKS = frozenset({"a", "span", "img", "input"})
+_META_CHARSET_RE = re.compile(rb"<meta[^>]{0,200}?charset\s*=\s*[\"']?\s*([A-Za-z0-9_.:-]{2,40})",
+                              re.IGNORECASE)
 # Page-graph layer bounds (search platform P1) — hostile input, everything capped.
 _MAX_ENTITIES = 20
 _MAX_ENTITY_FIELDS = 24
@@ -115,15 +140,41 @@ def _extract_with_trafilatura(html: str, url_hint: str) -> tuple[str, str]:
     return title.strip(), text.strip()
 
 
-def _tag_strip_fallback(html: str) -> str:
-    """Plain tag-strip fallback when trafilatura returns nothing.
+def _decode_html(raw: bytes) -> str:
+    """Bytes → text: byte-order mark, then the page's own ``<meta>`` charset,
+    then UTF-8 with replacement (``netguard.decode_body``, the one decode rule
+    every fetch path shares). The HTTP header never reaches the jail, so the
+    declared charset is the document's own."""
+    assert isinstance(raw, (bytes, bytearray)), "raw must be bytes"
+    match = _META_CHARSET_RE.search(bytes(raw[:4096]))
+    content_type = f"text/html; charset={match.group(1).decode('ascii')}" if match else "text/html"
+    from .netguard import decode_body  # lazy: the shared decode rule, only in the child
+    return decode_body(bytes(raw), content_type)
 
-    A bounded regex strip is safer than a second HTML parser in the same child —
-    the strip only ever produces at most ``len(html)`` bytes, and the caller caps
-    the result before it leaves the subprocess.
-    """
-    assert isinstance(html, str), "html must be a string"
-    return _TAG_STRIP_RE.sub(" ", html).strip()
+
+def _norm(text: str) -> str:
+    return " ".join(text.split())
+
+
+def _extra_text(article: str, body: str) -> str:
+    """The visible body lines the article text does not already carry, in page
+    order, deduplicated, bounded by ``_MAX_EXTRA_CHARS``."""
+    assert isinstance(article, str) and isinstance(body, str), "text required"
+    art = _norm(article)
+    art_lines = {_norm(line) for line in article.splitlines()}
+    out: list[str] = []
+    seen: set[str] = set()
+    size = 0
+    for raw_line in body.splitlines():  # bounded by _MAX_BODY_CHARS
+        line = _norm(raw_line)
+        if len(line) < 2 or line in seen or line in art_lines or line in art:
+            continue
+        seen.add(line)
+        if size + len(line) + 1 > _MAX_EXTRA_CHARS:
+            break
+        out.append(line)
+        size += len(line) + 1
+    return "\n".join(out)
 
 
 class _GraphParser(HTMLParser):
@@ -151,8 +202,31 @@ class _GraphParser(HTMLParser):
         self._cell: list[str] | None = None
         self._cell_is_header = False
         self._header_row = False
+        self.body: list[str] = []   # visible text, block tags as line breaks
+        self._body_size = 0
+        self._hidden = 0            # depth inside _INVISIBLE_TAGS
+
+    def _body_break(self, sep: str = "\n") -> None:
+        if not self.body:
+            return
+        if not self.body[-1].isspace():
+            self.body.append(sep)
+        elif sep == "\n":
+            self.body[-1] = "\n"  # a block edge outranks a word gap
+
+    def handle_startendtag(self, tag: str, attrs: list) -> None:
+        if tag in _INVISIBLE_TAGS:
+            return  # a self-closed <svg/> hides nothing
+        self.handle_starttag(tag, attrs)
+        self.handle_endtag(tag)
 
     def handle_starttag(self, tag: str, attrs: list) -> None:
+        if tag in _INVISIBLE_TAGS:
+            self._hidden += 1
+        elif tag in _BLOCK_TAGS:
+            self._body_break()
+        elif tag in _INLINE_BREAKS:
+            self._body_break(" ")  # adjacent links/spans are separate words on screen
         a = dict(attrs)
         if tag == "script" and (a.get("type") or "").strip().lower() == "application/ld+json":
             if len(self.jsonld_blobs) < _MAX_ENTITIES:
@@ -184,6 +258,13 @@ class _GraphParser(HTMLParser):
                 self._cell = None
 
     def handle_data(self, data: str) -> None:
+        if not self._hidden and self._body_size < _MAX_BODY_CHARS:
+            if data.strip():
+                chunk = data[:_MAX_BODY_CHARS - self._body_size]
+                self.body.append(chunk)
+                self._body_size += len(chunk)
+            else:
+                self._body_break(" ")
         if self._in_jsonld:
             self._jsonld_buf.append(data)
         if self._heading is not None:
@@ -192,6 +273,10 @@ class _GraphParser(HTMLParser):
             self._cell.append(data)
 
     def handle_endtag(self, tag: str) -> None:
+        if tag in _INVISIBLE_TAGS and self._hidden:
+            self._hidden -= 1
+        elif tag in _BLOCK_TAGS:
+            self._body_break()
         if tag == "script" and self._in_jsonld:
             blob = "".join(self._jsonld_buf)
             if 0 < len(blob) <= _MAX_JSONLD_BYTES:
@@ -277,13 +362,15 @@ def _entities_from_jsonld(blobs: list[str]) -> list[dict]:
     return entities[:_MAX_ENTITIES]
 
 
-def _page_graph_layers(html: str) -> dict:
-    """Run the graph parser; a failure in any layer degrades to empty layers."""
+def _page_graph_layers(html: str) -> tuple[dict, str]:
+    """Run the graph parser; return (layers, visible body text). A failure in
+    any layer degrades to empty layers and whatever body text was read."""
     assert isinstance(html, str), "html must be a string"
     parser = _GraphParser()
     empty = {"entities": [], "tables": [], "feeds": [], "meta": {}, "outline": []}
     try:
         parser.feed(html)
+        parser.close()
         # Entity flattening runs INSIDE the guard too: a hostile JSON-LD blob
         # failing here must lose the graph layers only — never text/title
         # (the pre-existing page-door path rides the same child process).
@@ -293,9 +380,19 @@ def _page_graph_layers(html: str) -> dict:
             "feeds": parser.feeds[:_MAX_FEEDS],
             "meta": parser.meta,
             "outline": parser.outline[:_MAX_OUTLINE],
-        }
+        }, "".join(parser.body)
     except Exception:  # hostile markup must never kill the text path
-        return empty
+        return empty, "".join(parser.body)
+
+
+def _page_text(article: str, body: str) -> str:
+    """The article text plus the visible text it dropped (after
+    ``PAGE_EXTRA_MARK``); the visible text alone when there is no article."""
+    assert isinstance(article, str) and isinstance(body, str), "text required"
+    if not article:
+        return "\n".join(line for line in (_norm(x) for x in body.splitlines()) if line)
+    extra = _extra_text(article, body)
+    return article + PAGE_EXTRA_MARK + extra if extra else article
 
 
 def _cap(value: str, cap: int) -> str:
@@ -331,6 +428,25 @@ def _fit_output(payload: dict) -> str:
     return out
 
 
+def extract(raw: bytes, url_hint: str) -> dict:
+    """Bytes → the jail payload ``{"text", "title", <graph layers>}``. Pure and
+    in-process-callable (tests parse recorded pages with it); ``main`` runs it
+    inside the subprocess jail for every real fetch."""
+    assert isinstance(raw, (bytes, bytearray)), "raw must be bytes"
+    assert isinstance(url_hint, str), "url hint must be a string"
+    html = _decode_html(bytes(raw))
+    title, text = "", ""
+    try:
+        title, text = _extract_with_trafilatura(html, url_hint)
+    except Exception:  # hostile HTML (lxml errors, recursion): the visible text still reads
+        title, text = "", ""
+    layers, body = _page_graph_layers(html)
+    payload = {"text": _cap(_page_text(text, body), _MAX_TEXT_CHARS),
+               "title": _cap(title, _MAX_TITLE_CHARS)}
+    payload.update(layers)
+    return payload
+
+
 def main() -> None:
     """Entry point: rlimits → read stdin → extract → dump JSON → exit 0.
 
@@ -342,18 +458,7 @@ def main() -> None:
     argv = sys.argv[1:]
     url_hint = argv[0] if argv else ""
     assert isinstance(url_hint, str), "url hint must be a string"
-    raw = _read_stdin_bytes()
-    html = raw.decode("utf-8", errors="replace")
-    title, text = "", ""
-    try:
-        title, text = _extract_with_trafilatura(html, url_hint)
-    except Exception:  # hostile HTML (lxml errors, recursion): fall through to plain tag-strip
-        title, text = "", ""
-    if not text:
-        text = _tag_strip_fallback(html)
-    payload = {"text": _cap(text, _MAX_TEXT_CHARS),
-               "title": _cap(title, _MAX_TITLE_CHARS)}
-    payload.update(_page_graph_layers(html))
+    payload = extract(_read_stdin_bytes(), url_hint)
     sys.stdout.write(_fit_output(payload))
     sys.stdout.flush()
 

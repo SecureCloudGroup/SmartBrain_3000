@@ -11,11 +11,13 @@ process parses hostile HTML, the parent validates the closed payload.
 
 from __future__ import annotations
 
+import gzip
 import json
+from pathlib import Path
 
 import pytest
 
-from smartbrain_3000 import jailrun, netguard, pagegraph
+from smartbrain_3000 import jail_extract, jailrun, netguard, pagegraph
 
 # ---- W1 recorded pages (ground truth beside each) -------------------------
 
@@ -135,7 +137,9 @@ def test_w1_jsonld_recursion_bomb_cannot_kill_extraction() -> None:
 def test_fetch_page_graph_contract_shape() -> None:
     g = _graph_of(RECORDED_EVENT_PAGE)
     assert set(g) == {"url", "fetched_at", "render_mode", "text", "title",
-                      "entities", "tables", "feeds", "meta", "outline"}
+                      "entities", "tables", "feeds", "meta", "outline",
+                      "readability"}
+    assert g["readability"] == {"readable": True, "kind": "ok"}
     assert g["url"] == "https://example.org/page"
 
 
@@ -346,3 +350,258 @@ def test_value_kind_is_coarse_and_deterministic() -> None:
     for v in ("Burj Khalifa", "High", "Tropical Storm Fay (40 kt, moving SSW)", "open"):
         assert kind(v) == "text", v
     assert kind("") == kind(None) == kind("   ") == "empty"
+
+
+# ---- recorded pages (C10/C11): 50 real pages, 2026-09-29 --------------------
+# Recorded with the app's own guarded fetch (honest UA); manifest.json names
+# each page's URL. readability.json labels the expected kind per page and the
+# widget values an official data page must NOT lose to article extraction.
+
+_PAGES = Path(__file__).parent / "fixtures" / "pages"
+_MANIFEST = json.loads((_PAGES / "manifest.json").read_text())
+_LABELS = json.loads((_PAGES / "readability.json").read_text(encoding="utf-8"))
+_FIRST_PARTY = json.loads((_PAGES / "first_party.json").read_text())
+_RECORDED: dict[str, dict] = {}
+
+
+def _recorded(name: str) -> dict:
+    if name not in _RECORDED:
+        raw = gzip.decompress((_PAGES / f"{name}.html.gz").read_bytes())
+        url = _MANIFEST[name]["url"]
+        _RECORDED[name] = pagegraph.graph_from_extract(
+            url, jail_extract.extract(raw, url))
+    return _RECORDED[name]
+
+
+def test_recorded_set_is_broad() -> None:
+    assert len(_MANIFEST) >= 30
+    assert len(_LABELS["normal_articles"]) >= 10
+
+
+def test_widget_values_survive_the_read() -> None:
+    """W1 page fidelity: the data widgets of status / lottery / scoreboard /
+    tracker pages reach the text (field: powerball.com's '$409 Million' was
+    dropped by the article extractor, so the official page looked empty)."""
+    missing = [(page, value) for page, values in _LABELS["widgets"].items()
+               for value in values if value not in _recorded(page)["text"]]
+    total = sum(len(v) for v in _LABELS["widgets"].values())
+    assert total >= 30
+    assert missing == [], missing
+
+
+def test_article_text_comes_first_and_extra_is_bounded() -> None:
+    g = _recorded("powerball_home")
+    article, extra = pagegraph.split_text(g["text"])
+    assert "Powerball" in article and "$409 Million" not in article
+    assert "$409 Million" in extra
+    assert len(extra) <= jail_extract._MAX_EXTRA_CHARS
+    assert pagegraph.split_text("plain text") == ("plain text", "")
+
+
+def test_readability_kinds_on_recorded_pages() -> None:
+    """Unreadable detection 100% on the labeled pages; normal pages read ok."""
+    wrong = {name: _recorded(name)["readability"]["kind"]
+             for name, kind in _LABELS["kinds"].items()
+             if _recorded(name)["readability"]["kind"] != kind}
+    assert wrong == {}, wrong
+    for name, kind in _LABELS["kinds"].items():
+        assert _recorded(name)["readability"]["readable"] is (kind == "ok")
+
+
+def test_normal_articles_read_ok() -> None:
+    bad = [n for n in _LABELS["normal_articles"]
+           if not _recorded(n)["readability"]["readable"]]
+    assert len(bad) <= 1, bad
+
+
+_CLOUDFLARE = b"""<!DOCTYPE html><html lang="en-US"><head><title>Just a moment...</title>
+<meta http-equiv="refresh" content="390"><style>body{font-family:system-ui}</style>
+<script src="/cdn-cgi/challenge-platform/h/b/orchestrate/chl_page/v1"></script></head>
+<body><div class="main-wrapper"><div class="main-content"><h1>www.example.com</h1>
+<h2 id="challenge-running">Verify you are human by completing the action below.</h2>
+<noscript><div>Enable JavaScript and cookies to continue</div></noscript>
+<div id="challenge-body-text">www.example.com needs to review the security of your
+connection before proceeding.</div></div></div>
+<div class="footer">Ray ID: <code>8c1f2a3b4d5e6f70</code> Performance &amp; security by
+Cloudflare</div></body></html>"""
+
+_SPA_SHELL = b"""<!doctype html><html><head><title>Transit Status</title>
+<script src="/static/js/main.4f2a.js"></script></head><body>
+<noscript>You need to enable JavaScript to run this app.</noscript>
+<div id="root"></div></body></html>"""
+
+_SPA_LOADING = b"""<html><head><title>Line Status</title></head><body>
+<h1>Line status</h1><div id="status">Loading current service status...</div>
+<footer>Privacy | Terms | Contact</footer></body></html>"""
+
+
+def test_readability_challenge_shell_modal_binary() -> None:
+    assert _graph_of(_CLOUDFLARE)["readability"] == {"readable": False,
+                                                     "kind": "challenge"}
+    assert _graph_of(_SPA_SHELL)["readability"]["kind"] == "shell"
+    assert _graph_of(_SPA_LOADING)["readability"]["kind"] == "shell"
+    assert _recorded("flightaware_aal100")["readability"]["kind"] == "modal"
+    mojibake = pagegraph.readability(_mini_graph(
+        text="".join(chr(c) for c in range(0x80, 0x2c0)) * 4 + "\ufffd" * 400))
+    assert mojibake == {"readable": False, "kind": "binary"}
+    compressed = _graph_of(gzip.compress(RECORDED_EVENT_PAGE * 20))
+    assert compressed["readability"]["kind"] == "binary"
+
+
+def test_utf16_and_latin1_pages_decode() -> None:
+    """Decode by BOM, then the page's declared charset, then UTF-8."""
+    page = ("<html><head><title>Caf\u00e9 status</title></head><body><h1>Caf\u00e9"
+            "</h1>" + "<p>The caf\u00e9 is open until 9 PM today with all services "
+            "running normally for every visitor.</p>" * 3 + "</body></html>")
+    g16 = _graph_of(page.encode("utf-16"))  # BOM
+    assert "caf\u00e9 is open" in g16["text"] and g16["readability"]["readable"]
+    latin = page.replace("<head>", '<head><meta charset="iso-8859-1">').encode("latin-1")
+    assert "caf\u00e9 is open" in _graph_of(latin)["text"]
+
+
+def test_real_jail_reads_the_official_widget() -> None:
+    """End to end through the subprocess jail: the recorded powerball.com page."""
+    raw = gzip.decompress((_PAGES / "powerball_home.html.gz").read_bytes())
+    g = _graph_of(raw, url=_MANIFEST["powerball_home"]["url"])
+    assert "$409 Million" in g["text"] and g["readability"]["readable"]
+
+
+def test_challenge_page_never_reads_as_its_script() -> None:
+    """A JS proof-of-work page reads as nothing, never as its code (field:
+    Reddit's challenge was read as the page and its title shipped)."""
+    g = _recorded("reddit_worldnews_new")
+    assert "addEventListener" not in g["text"] and "{" not in g["text"]
+    assert g["readability"]["readable"] is False
+
+
+# ---- fitness: identity metadata is never evidence (C11) --------------------
+
+
+def test_identity_only_jsonld_scores_zero() -> None:
+    g = _mini_graph(entities=[
+        {"type": "WebPage", "name": "Is Slack down? Slack status",
+         "url": "https://agg.example/slack", "isPartOf.@id": "https://agg.example/#site"},
+        {"type": "WebPageElement", "about.name": "Slack", "url": "https://agg.example/x"},
+        {"type": "Organization", "name": "Slack status checker"},
+        {"type": "NewsArticle", "headline": "Slack status today"}])
+    assert pagegraph.graph_fitness(g, ["slack status"]) == (0, [])
+
+
+def test_value_fields_still_count() -> None:
+    g = _mini_graph(entities=[{"type": "Event", "name": "High Tide",
+                               "url": "https://x/tide", "startDate": "07:12"}])
+    score, evidence = pagegraph.graph_fitness(g, ["tide times"])
+    assert score > 0 and evidence == ["name: High Tide"]
+
+
+@pytest.mark.parametrize("page", ["isitdown_slack", "lagcheck_slack",
+                                  "dcmetromap_alerts", "powerball_checker",
+                                  "lotteryusa_powerball"])
+def test_aggregator_identity_evidence_is_gone(page) -> None:
+    """The recorded aggregators whose rank came from their own JSON-LD name,
+    url, about and isPartOf (field: isitdown 31, dcmetromap 40)."""
+    wants = ["status", "slack", "delays", "dc metro red line", "jackpot", "powerball"]
+    _, evidence = pagegraph.graph_fitness(_recorded(page), wants)
+    for line in evidence:
+        field = line.split(":", 1)[0]
+        assert field.split(".")[0] not in pagegraph.IDENTITY_FIELDS, (page, line)
+
+
+# ---- first party + refreshability (C11) -------------------------------------
+
+
+def test_first_party_labeled_rows() -> None:
+    official = _FIRST_PARTY["official_hosts"]
+    wrong = [r for r in _FIRST_PARTY["rows"]
+             if pagegraph.first_party(r["host"], r["subject"], official) is not r["expect"]]
+    assert wrong == []
+    assert len(_FIRST_PARTY["rows"]) >= 40
+
+
+def test_first_party_fallback_is_the_subject_in_the_host() -> None:
+    wrong = [r for r in _FIRST_PARTY["fallback_rows"]
+             if pagegraph.first_party(r["host"], r["subject"], {}) is not r["expect"]]
+    assert wrong == []
+
+
+# D10 (review 2026-10-03): with no official listing, only a NAMED entity of the
+# subject (a company / organization / product / service, written as a proper
+# name in the subject or the ask) can be a host's own name; topic words never.
+@pytest.mark.parametrize(("host", "subject", "ask", "expect"), [
+    ("bitcoin.org", "bitcoin price", "", False),            # review inputs
+    ("tides.net", "Charleston tides", "", False),
+    ("stock.com", "Tesla stock", "", False),
+    ("mortgage-rates.com", "mortgage rates", "", False),
+    ("bitcoin.org", "Bitcoin price", "What is the Bitcoin price", False),  # a currency topic
+    ("www.mortgagerates.com", "Mortgage Rates", "", False),
+    ("eggs.com", "eggs", "price of eggs", False),           # lowercase: not a name
+    ("gold.org", "Gold price", "", False),
+    ("weather.com", "Boston weather", "", False),
+    ("hurricanes.com", "Hurricanes", "", False),
+    ("charleston.tides.net", "Charleston tides", "", False),  # a subdomain is the site's, not the subject's
+    ("www.news.com", "Tesla news", "", False),
+    ("www.tesla.com", "Tesla stock", "", True),
+    ("www.coinbase.com", "Coinbase stock", "", True),
+    ("slack.com", "slack", "is Slack down?", True),         # capitalized in the ask
+    ("status.zoom.us", "zoom", "Is Zoom down", True),
+    ("status.zoom.us", "zoom", "is zoom down", False),       # no proper name anywhere
+    ("status.zoom.us", "zoom", "IS ZOOM DOWN", False),       # shouting is not a name
+    ("slack-status.com", "Slack", "is slack down", True),    # the model wrote the name
+    ("www.powerball.com", "Powerball jackpot", "", True),
+])
+def test_first_party_fallback_needs_a_named_entity(host, subject, ask, expect) -> None:
+    assert pagegraph.first_party(host, subject, {}, ask=ask) is expect
+
+
+def test_official_listing_still_decides_when_present() -> None:
+    official = _FIRST_PARTY["official_hosts"]
+    assert pagegraph.first_party("www.nps.gov", "old faithful", official, ask="old faithful") is True
+    assert pagegraph.first_party("bitcoin.org", "bitcoin price", official) is False
+
+
+def test_first_party_without_evidence_does_not_lead() -> None:
+    """The _s2_evaluate order: authority leads only with evidence of serving
+    the ask; a zero-evidence first-party row sorts by fitness like the rest."""
+    rows = [
+        {"host": "aggregator.example", "first": False, "fitness": 3, "evidence": ["Jackpot: $409M"]},
+        {"host": "bitcoin.org", "first": True, "fitness": 0, "evidence": []},
+        {"host": "www.powerball.com", "first": True, "fitness": 2, "evidence": ["Jackpot: $409M"]},
+        {"host": "unfetched.example", "first": True},
+    ]
+    keyed = sorted(
+        ((not pagegraph.authority_leads(r["first"], r.get("evidence")),
+          -(r["fitness"] if r.get("fitness") is not None else -1.0), i, r)
+         for i, r in enumerate(rows)), key=lambda t: t[:3])
+    assert [t[-1]["host"] for t in keyed] == [
+        "www.powerball.com", "aggregator.example", "bitcoin.org", "unfetched.example"]
+    assert pagegraph.authority_leads(True, ["a: b"]) is True
+    assert pagegraph.authority_leads(True, []) is False
+    assert pagegraph.authority_leads(True, None) is False
+    assert pagegraph.authority_leads(False, ["a: b"]) is False
+
+
+def test_registrable_domain() -> None:
+    assert pagegraph.registrable_domain("health.aws.amazon.com") == "amazon.com"
+    assert pagegraph.registrable_domain("www.bbc.co.uk") == "bbc.co.uk"
+    assert pagegraph.registrable_domain("tfl.gov.uk") == "tfl.gov.uk"
+    assert pagegraph.registrable_domain("azure.status.microsoft") == "status.microsoft"
+    assert pagegraph.registrable_domain("WWW.WMATA.COM.") == "wmata.com"
+
+
+@pytest.mark.parametrize(("page", "url", "low"), [
+    ("cbsnews_noreaster", None, True),                  # NewsArticle
+    ("art_usatoday_powerball", None, True),             # dated story URL
+    ("powerball_home", None, False),
+    ("wmata_red_status", None, False),
+    ("slack_status", None, False),
+    ("espn_cfb_scoreboard", None, False),
+    ("mlb_standings_wc", None, False),
+    ("slack_status", "https://www.tuscaloosanews.com/story/sports/college/"
+     "football/2026/09/26/alabama-football-vs-south-carolina-score-analysis/1/", True),
+    ("slack_status", "https://example.com/recap/alabama-vs-south-carolina-final", True),
+])
+def test_refreshability(page, url, low) -> None:
+    g = _recorded(page)
+    score = pagegraph.refreshability(g, url or g["url"])
+    assert 0.0 <= score <= 1.0
+    assert (score < 0.5) is low, (page, score)

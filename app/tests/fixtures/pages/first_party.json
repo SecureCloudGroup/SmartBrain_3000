@@ -1,0 +1,320 @@
+{
+ "official_hosts": {
+  "slack": [
+   "slack-status.com",
+   "slack.com"
+  ],
+  "aws": [
+   "health.aws.amazon.com",
+   "aws.amazon.com"
+  ],
+  "github": [
+   "githubstatus.com",
+   "github.com"
+  ],
+  "zoom": [
+   "status.zoom.us",
+   "zoom.us"
+  ],
+  "azure": [
+   "azure.status.microsoft"
+  ],
+  "google cloud": [
+   "status.cloud.google.com"
+  ],
+  "powerball": [
+   "powerball.com"
+  ],
+  "mega millions": [
+   "megamillions.com"
+  ],
+  "wmata": [
+   "wmata.com"
+  ],
+  "dc metro": [
+   "wmata.com"
+  ],
+  "bart": [
+   "bart.gov"
+  ],
+  "mbta": [
+   "mbta.com"
+  ],
+  "cta": [
+   "transitchicago.com"
+  ],
+  "nj transit": [
+   "njtransit.com"
+  ],
+  "old faithful": [
+   "nps.gov"
+  ],
+  "tfl": [
+   "tfl.gov.uk"
+  ]
+ },
+ "rows": [
+  {
+   "subject": "Slack",
+   "host": "slack-status.com",
+   "expect": true
+  },
+  {
+   "subject": "Slack",
+   "host": "isitdown.now",
+   "expect": false
+  },
+  {
+   "subject": "Slack",
+   "host": "lagcheck.com",
+   "expect": false
+  },
+  {
+   "subject": "Slack",
+   "host": "downforeveryoneorjustme.com",
+   "expect": false
+  },
+  {
+   "subject": "Slack",
+   "host": "statusgator.com",
+   "expect": false
+  },
+  {
+   "subject": "Slack",
+   "host": "slack.com",
+   "expect": true
+  },
+  {
+   "subject": "AWS us-east-1",
+   "host": "health.aws.amazon.com",
+   "expect": true
+  },
+  {
+   "subject": "AWS us-east-1",
+   "host": "statusgator.com",
+   "expect": false
+  },
+  {
+   "subject": "AWS",
+   "host": "awsdown.com",
+   "expect": false
+  },
+  {
+   "subject": "AWS",
+   "host": "downdetector.com",
+   "expect": false
+  },
+  {
+   "subject": "AWS",
+   "host": "aws-server-status.s3-ap-northeast-1.amazonaws.com",
+   "expect": false
+  },
+  {
+   "subject": "Powerball",
+   "host": "www.powerball.com",
+   "expect": true
+  },
+  {
+   "subject": "Powerball",
+   "host": "www.lotteryusa.com",
+   "expect": false
+  },
+  {
+   "subject": "Powerball",
+   "host": "powerball-checker.com",
+   "expect": false
+  },
+  {
+   "subject": "Powerball",
+   "host": "www.powerball.net",
+   "expect": false
+  },
+  {
+   "subject": "Powerball",
+   "host": "powerball-megamillions.com",
+   "expect": false
+  },
+  {
+   "subject": "Powerball",
+   "host": "www.usatoday.com",
+   "expect": false
+  },
+  {
+   "subject": "DC metro red line",
+   "host": "www.wmata.com",
+   "expect": true
+  },
+  {
+   "subject": "DC metro red line",
+   "host": "dcmetromap.com",
+   "expect": false
+  },
+  {
+   "subject": "DC metro red line",
+   "host": "nextmetro.live",
+   "expect": false
+  },
+  {
+   "subject": "DC metro red line",
+   "host": "metrowashington.org",
+   "expect": false
+  },
+  {
+   "subject": "WMATA",
+   "host": "www.wmata.com",
+   "expect": true
+  },
+  {
+   "subject": "GitHub",
+   "host": "www.githubstatus.com",
+   "expect": true
+  },
+  {
+   "subject": "GitHub",
+   "host": "isdown.app",
+   "expect": false
+  },
+  {
+   "subject": "Zoom",
+   "host": "status.zoom.us",
+   "expect": true
+  },
+  {
+   "subject": "Zoom",
+   "host": "downdetector.com",
+   "expect": false
+  },
+  {
+   "subject": "Azure",
+   "host": "azure.status.microsoft",
+   "expect": true
+  },
+  {
+   "subject": "Azure",
+   "host": "statusgator.com",
+   "expect": false
+  },
+  {
+   "subject": "Google Cloud",
+   "host": "status.cloud.google.com",
+   "expect": true
+  },
+  {
+   "subject": "Mega Millions",
+   "host": "www.megamillions.com",
+   "expect": true
+  },
+  {
+   "subject": "Mega Millions",
+   "host": "www.lotteryusa.com",
+   "expect": false
+  },
+  {
+   "subject": "BART",
+   "host": "www.bart.gov",
+   "expect": true
+  },
+  {
+   "subject": "BART",
+   "host": "x.com",
+   "expect": false
+  },
+  {
+   "subject": "MBTA red line",
+   "host": "www.mbta.com",
+   "expect": true
+  },
+  {
+   "subject": "CTA blue line",
+   "host": "www.transitchicago.com",
+   "expect": true
+  },
+  {
+   "subject": "NJ Transit",
+   "host": "www.njtransit.com",
+   "expect": true
+  },
+  {
+   "subject": "Old Faithful",
+   "host": "www.nps.gov",
+   "expect": true
+  },
+  {
+   "subject": "Old Faithful",
+   "host": "www.geysertimes.org",
+   "expect": false
+  },
+  {
+   "subject": "TfL",
+   "host": "tfl.gov.uk",
+   "expect": true
+  },
+  {
+   "subject": "TfL",
+   "host": "www.bbc.co.uk",
+   "expect": false
+  }
+ ],
+ "fallback_rows": [
+  {
+   "subject": "Slack",
+   "host": "slack-status.com",
+   "expect": true
+  },
+  {
+   "subject": "Slack",
+   "host": "isitdown.now",
+   "expect": false
+  },
+  {
+   "subject": "Slack",
+   "host": "lagcheck.com",
+   "expect": false
+  },
+  {
+   "subject": "GitHub",
+   "host": "www.githubstatus.com",
+   "expect": true
+  },
+  {
+   "subject": "AWS",
+   "host": "health.aws.amazon.com",
+   "expect": false
+  },
+  {
+   "subject": "AWS",
+   "host": "awsdown.com",
+   "expect": false
+  },
+  {
+   "subject": "Powerball",
+   "host": "powerball-checker.com",
+   "expect": false
+  },
+  {
+   "subject": "Powerball",
+   "host": "www.powerball.com",
+   "expect": true
+  },
+  {
+   "subject": "Discord",
+   "host": "discordstatus.com",
+   "expect": true
+  },
+  {
+   "subject": "Discord",
+   "host": "downdetector.com",
+   "expect": false
+  },
+  {
+   "subject": "Reddit",
+   "host": "www.redditstatus.com",
+   "expect": true
+  },
+  {
+   "subject": "Reddit",
+   "host": "redlite.app",
+   "expect": false
+  }
+ ]
+}

@@ -1,0 +1,352 @@
+{
+ "art_bls_cpi": {
+  "bytes": 90388,
+  "content_type": "text/html",
+  "fetched_at": "2026-09-29T15:44:40Z",
+  "status": 200,
+  "url": "https://www.bls.gov/news.release/cpi.nr0.htm"
+ },
+ "art_cbs_noreaster_track": {
+  "bytes": 669794,
+  "content_type": "text/html; charset=UTF-8",
+  "fetched_at": "2026-09-29T15:44:55Z",
+  "status": 200,
+  "url": "https://www.cbsnews.com/boston/news/noreaster-track-boston-weather-forecast/"
+ },
+ "art_cdc_flu": {
+  "bytes": 73392,
+  "content_type": "text/html",
+  "fetched_at": "2026-09-29T15:44:49Z",
+  "status": 200,
+  "url": "https://www.cdc.gov/flu/about/index.html"
+ },
+ "art_mocoshow_redline": {
+  "bytes": 108488,
+  "content_type": "text/html; charset=UTF-8",
+  "fetched_at": "2026-09-29T15:44:44Z",
+  "status": 200,
+  "url": "https://mocoshow.com/2026/08/24/wmata-provides-updated-details-on-red-line-closure-through-september-6/"
+ },
+ "art_nasa_mars": {
+  "bytes": 407258,
+  "content_type": "text/html; charset=UTF-8",
+  "fetched_at": "2026-09-29T15:45:32Z",
+  "status": 200,
+  "url": "https://science.nasa.gov/mars/"
+ },
+ "art_npr_text": {
+  "bytes": 6046,
+  "content_type": "text/html; charset=utf-8",
+  "fetched_at": "2026-09-29T15:45:35Z",
+  "status": 200,
+  "url": "https://text.npr.org/"
+ },
+ "art_nps_old_faithful": {
+  "bytes": 88417,
+  "content_type": "text/html;charset=UTF-8",
+  "fetched_at": "2026-09-29T15:45:38Z",
+  "status": 200,
+  "url": "https://www.nps.gov/yell/planyourvisit/exploreoldfaithful.htm"
+ },
+ "art_nws_lightning": {
+  "bytes": 27897,
+  "content_type": "text/html; charset=UTF-8",
+  "fetched_at": "2026-09-29T15:44:51Z",
+  "status": 200,
+  "url": "https://www.weather.gov/safety/lightning"
+ },
+ "art_python_tutorial": {
+  "bytes": 71957,
+  "content_type": "text/html",
+  "fetched_at": "2026-09-29T15:44:42Z",
+  "status": 200,
+  "url": "https://docs.python.org/3/tutorial/introduction.html"
+ },
+ "art_technically_aws": {
+  "bytes": 248083,
+  "content_type": "text/html; charset=utf-8",
+  "fetched_at": "2026-09-29T15:44:45Z",
+  "status": 200,
+  "url": "https://technical.ly/entrepreneurship/aws-us-east-1-outage-explainer/"
+ },
+ "art_usatoday_powerball": {
+  "bytes": 211874,
+  "content_type": "text/html; charset=utf-8",
+  "fetched_at": "2026-09-29T15:44:47Z",
+  "status": 200,
+  "url": "https://www.usatoday.com/story/money/lottery/2026/09/26/powerball-jackpot-sept-26-2026/91960446007/"
+ },
+ "art_wiki_old_faithful": {
+  "bytes": 220894,
+  "content_type": "text/html; charset=UTF-8",
+  "fetched_at": "2026-09-29T15:45:36Z",
+  "status": 200,
+  "url": "https://en.wikipedia.org/wiki/Old_Faithful"
+ },
+ "art_wiki_powerball": {
+  "bytes": 448204,
+  "content_type": "text/html; charset=UTF-8",
+  "fetched_at": "2026-09-29T15:44:38Z",
+  "status": 200,
+  "url": "https://en.wikipedia.org/wiki/Powerball"
+ },
+ "art_wiki_red_line": {
+  "bytes": 576210,
+  "content_type": "text/html; charset=UTF-8",
+  "fetched_at": "2026-09-29T15:44:37Z",
+  "status": 200,
+  "url": "https://en.wikipedia.org/wiki/Red_Line_(Washington_Metro)"
+ },
+ "awsdown_status": {
+  "bytes": 59548,
+  "content_type": "text/html; charset=utf-8",
+  "fetched_at": "2026-09-29T15:43:54Z",
+  "status": 200,
+  "url": "https://awsdown.com/status"
+ },
+ "bart_advisories": {
+  "bytes": 78875,
+  "content_type": "text/html; charset=UTF-8",
+  "fetched_at": "2026-09-29T15:44:35Z",
+  "status": 200,
+  "url": "https://www.bart.gov/schedules/advisories"
+ },
+ "cbsnews_noreaster": {
+  "bytes": 659583,
+  "content_type": "text/html; charset=UTF-8",
+  "fetched_at": "2026-09-29T15:44:00Z",
+  "status": 200,
+  "url": "https://www.cbsnews.com/boston/news/boston-weather-noreaster-maps-rain-flooding-wind/"
+ },
+ "cleatz_playoff_picture": {
+  "bytes": 196935,
+  "content_type": "text/html; charset=UTF-8",
+  "fetched_at": "2026-09-29T15:43:58Z",
+  "status": 200,
+  "url": "https://cleatz.com/mlb-playoff-picture/"
+ },
+ "dcmetromap_alerts": {
+  "bytes": 32775,
+  "content_type": "text/html; charset=utf-8",
+  "fetched_at": "2026-09-29T15:43:49Z",
+  "status": 200,
+  "url": "https://dcmetromap.com/alerts/"
+ },
+ "docs_aws_health_dashboard": {
+  "bytes": 17776,
+  "content_type": "text/html",
+  "fetched_at": "2026-09-29T15:43:47Z",
+  "status": 200,
+  "url": "https://docs.aws.amazon.com/health/latest/ug/aws-health-dashboard-status.html"
+ },
+ "espn_cfb_scoreboard": {
+  "bytes": 923638,
+  "content_type": "text/html; charset=utf-8",
+  "fetched_at": "2026-09-29T15:45:41Z",
+  "status": 200,
+  "url": "https://www.espn.com/college-football/scoreboard"
+ },
+ "flight_status_aa100": {
+  "bytes": 55059,
+  "content_type": "text/html; charset=utf-8",
+  "fetched_at": "2026-09-29T15:44:31Z",
+  "status": 200,
+  "url": "https://flight-status.com/american-airlines/aa-100/"
+ },
+ "flightaware_aal100": {
+  "bytes": 506340,
+  "content_type": "text/html;charset=utf-8",
+  "fetched_at": "2026-09-29T15:43:44Z",
+  "status": 200,
+  "url": "https://www.flightaware.com/live/flight/AAL100"
+ },
+ "flightstats_aa100": {
+  "bytes": 108943,
+  "content_type": "text/html; charset=utf-8",
+  "fetched_at": "2026-09-29T15:44:30Z",
+  "status": 200,
+  "url": "https://www.flightstats.com/v2/flight-tracker/AA/0100"
+ },
+ "gasbuddy_home": {
+  "bytes": 110802,
+  "content_type": "text/html; charset=utf-8",
+  "fetched_at": "2026-09-29T15:45:31Z",
+  "status": 200,
+  "url": "https://www.gasbuddy.com/"
+ },
+ "geysertimes_old_faithful": {
+  "bytes": 89709,
+  "content_type": "text/html; charset=utf-8",
+  "fetched_at": "2026-09-29 (diag capture)",
+  "status": 200,
+  "url": "https://www.geysertimes.org/geyser.php?id=OldFaithful"
+ },
+ "githubstatus": {
+  "bytes": 163940,
+  "content_type": "text/html; charset=utf-8",
+  "fetched_at": "2026-09-29T15:44:33Z",
+  "status": 200,
+  "url": "https://www.githubstatus.com/"
+ },
+ "health_aws_status": {
+  "bytes": 3384,
+  "content_type": "text/html;charset=UTF-8",
+  "fetched_at": "2026-09-29T15:43:45Z",
+  "status": 200,
+  "url": "https://health.aws.amazon.com/health/status"
+ },
+ "heavens_above_iss": {
+  "bytes": 15961,
+  "content_type": "text/html",
+  "fetched_at": "2026-09-29 (diag capture)",
+  "status": 200,
+  "url": "https://www.heavens-above.com/PassSummary.aspx"
+ },
+ "isitdown_slack": {
+  "bytes": 107893,
+  "content_type": "text/html; charset=utf-8",
+  "fetched_at": "2026-09-29T15:43:52Z",
+  "status": 200,
+  "url": "https://isitdown.now/status/slack.com"
+ },
+ "lagcheck_slack": {
+  "bytes": 26292,
+  "content_type": "text/html; charset=utf-8",
+  "fetched_at": "2026-09-29T15:43:50Z",
+  "status": 200,
+  "url": "https://lagcheck.com/status/slack"
+ },
+ "ll2_browsable_api": {
+  "bytes": 98897,
+  "content_type": "text/html",
+  "fetched_at": "2026-09-29 (diag capture)",
+  "status": 200,
+  "url": "https://ll.thespacedevs.com/2.3.0/launches/upcoming/?location__ids=&lsp__id=121"
+ },
+ "lotteryusa_powerball": {
+  "bytes": 318146,
+  "content_type": "text/html; charset=UTF-8",
+  "fetched_at": "2026-09-29T15:44:20Z",
+  "status": 200,
+  "url": "https://www.lotteryusa.com/powerball/"
+ },
+ "megamillions_home": {
+  "bytes": 24407,
+  "content_type": "text/html; charset=utf-8",
+  "fetched_at": "2026-09-29T15:44:24Z",
+  "status": 200,
+  "url": "https://www.megamillions.com/"
+ },
+ "mlb_standings_wc": {
+  "bytes": 690713,
+  "content_type": "text/html; charset=utf-8",
+  "fetched_at": "2026-09-29T15:45:39Z",
+  "status": 200,
+  "url": "https://www.mlb.com/standings/wild-card"
+ },
+ "nextmetro_alerts": {
+  "bytes": 28330,
+  "content_type": "text/html",
+  "fetched_at": "2026-09-29T15:45:26Z",
+  "status": 200,
+  "url": "https://nextmetro.live/alerts/"
+ },
+ "nps_geyser_activity": {
+  "bytes": 74127,
+  "content_type": "text/html",
+  "fetched_at": "2026-09-29 (diag capture)",
+  "status": 200,
+  "url": "https://www.nps.gov/yell/planyourvisit/geyser-activity.htm"
+ },
+ "nps_geyser_predictions": {
+  "bytes": 7078,
+  "content_type": "text/html",
+  "fetched_at": "2026-09-29 (diag capture)",
+  "status": 200,
+  "url": "https://www.nps.gov/features/yell/live/Geysers.html"
+ },
+ "pollentracker_raleigh": {
+  "bytes": 140685,
+  "content_type": "text/html; charset=utf-8",
+  "fetched_at": "2026-09-29T15:45:25Z",
+  "status": 200,
+  "url": "https://pollentracker.app/"
+ },
+ "powerball_checker": {
+  "bytes": 74686,
+  "content_type": "text/html; charset=UTF-8",
+  "fetched_at": "2026-09-29T15:44:18Z",
+  "status": 200,
+  "url": "https://powerball-checker.com/jackpot"
+ },
+ "powerball_home": {
+  "bytes": 30374,
+  "content_type": "text/html; charset=utf-8",
+  "fetched_at": "2026-09-29T15:44:23Z",
+  "status": 200,
+  "url": "https://www.powerball.com/"
+ },
+ "reddit_worldnews_new": {
+  "bytes": 8413,
+  "content_type": "text/html",
+  "fetched_at": "2026-09-29T15:43:41Z",
+  "status": 200,
+  "url": "https://www.reddit.com/r/worldnews/new/?feedViewType=classicView"
+ },
+ "redlite_worldnews": {
+  "bytes": 372341,
+  "content_type": "text/html; charset=utf-8",
+  "fetched_at": "2026-09-29T15:45:29Z",
+  "status": 200,
+  "url": "https://redlite.app/r/worldnews"
+ },
+ "slack_status": {
+  "bytes": 27281,
+  "content_type": "text/html; charset=utf-8",
+  "fetched_at": "2026-09-29T15:44:21Z",
+  "status": 200,
+  "url": "https://slack-status.com/"
+ },
+ "snoflo_sierra_tahoe": {
+  "bytes": 412796,
+  "content_type": "text/html; charset=utf-8",
+  "fetched_at": "2026-09-29T15:44:16Z",
+  "status": 200,
+  "url": "https://snoflo.org/ski-area/sierra-at-tahoe"
+ },
+ "spot_the_station": {
+  "bytes": 322659,
+  "content_type": "text/html",
+  "fetched_at": "2026-09-29 (diag capture)",
+  "status": 200,
+  "url": "https://spotthestation.nasa.gov/"
+ },
+ "statusgator_aws_use1": {
+  "bytes": 418748,
+  "content_type": "text/html; charset=utf-8",
+  "fetched_at": "2026-09-29T15:43:57Z",
+  "status": 200,
+  "url": "https://statusgator.com/services/hashicorp/aws-us-east-1"
+ },
+ "wmata_red_status": {
+  "bytes": 442777,
+  "content_type": "text/html; charset=utf-8",
+  "fetched_at": "2026-09-29T15:44:27Z",
+  "status": 200,
+  "url": "https://www.wmata.com/ridertools/us-en/line/red/status"
+ },
+ "wtpb_houston": {
+  "bytes": 42939,
+  "content_type": "text/html; charset=utf-8",
+  "fetched_at": "2026-09-29T15:44:13Z",
+  "status": 200,
+  "url": "https://whensthepowerback.com/outage/tx/harris/houston"
+ },
+ "x_sfbartalert": {
+  "bytes": 155603,
+  "content_type": "text/html; charset=UTF-8",
+  "fetched_at": "2026-09-29T15:45:23Z",
+  "status": 200,
+  "url": "https://x.com/SFBARTalert"
+ }
+}
