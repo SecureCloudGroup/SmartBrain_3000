@@ -316,8 +316,10 @@ def test_a_weak_route_restricts_nothing(lib) -> None:
 def test_a_weak_route_still_rules_out_a_reading_it_is_sure_is_not_the_subject(lib) -> None:
     """Blind: "when is sunset in Denver" became the Rockies' schedule — an event question about a word that is
     also a team. A weak route names no category, but a reading whose every subcategory trails the top route by
-    the confident gap is not the subject; one that might be the route is kept."""
-    ask = "when is the next storm in Tulsa"
+    the confident gap is not the subject; one that might be the route is kept. The ask names the team with a
+    non-place word of its name so L1's place-only drop can't settle it on its own — the weak-route distance
+    ruling is what rules it in or out here."""
+    ask = "Tulsa Oilers roster"
     weak = {"route": "weather/forecast", "runner_up": "hazards/space_weather", "gap": 0.01, "confident": False,
             "threshold": 0.1, "behind": {"weather/forecast": 0.0, "hazards/space_weather": 0.01,
                                          "markets/crypto": 0.3, "sky/launches": 0.3, "sports/schedules": 0.3}}
@@ -439,9 +441,10 @@ def test_the_gateway_embedder_is_the_knowledge_embedder(monkeypatch) -> None:
     """The Knowledge base's own path: gateway.embed with the task, keyed by its #tp1 storage identity."""
     seen = []
     monkeypatch.setattr(library_embed.gateway, "embed",
-                        lambda text, model, task, timeout: seen.append((text, model, task)) or [1.0, 0.0])
+                        lambda text, model, task, timeout, acquire_timeout=None:
+                        seen.append((text, model, task)) or [1.0, 0.0])
     emb = library_embed.gateway_embedder("mlx/nomicai-modernbert-embed-base-bf16")
-    assert emb.scheme == "mlx/nomicai-modernbert-embed-base-bf16#tp1"
+    assert emb is not None and emb.scheme == "mlx/nomicai-modernbert-embed-base-bf16#tp1"
     assert emb.embed_one("bitcoin price", "query") == [1.0, 0.0]
     assert seen == [("bitcoin price", "mlx/nomicai-modernbert-embed-base-bf16", "query")]
 
@@ -538,3 +541,165 @@ def test_with_vectors_a_word_only_the_category_says_is_not_enough(lib) -> None:
     _wire(lib, _Stub())
     rows, skipped = lib.candidates("geomagnetic rocket forecast")  # no source is about both
     assert rows == [] or all(r["source_id"] != "ll2-upcoming-launches" for r in rows)
+
+
+# --- review2 findings: locate must fail closed, never confidently wrong ----------------------------------
+
+def test_locate_refuses_a_cloud_embedding_model_and_falls_back_to_keywords(lib, monkeypatch) -> None:
+    """L3 (privacy): locate must never embed the user's ask (or the Library's cards) with a cloud embedder.
+    ``gateway_embedder`` returns None for a non-local model id; ``current_embedder`` reports None; locate
+    runs the keyword ranking without any gateway.embed call."""
+    seen = []
+    monkeypatch.setattr(library_embed.gateway, "embed",
+                        lambda text, model, task, timeout, acquire_timeout=None:
+                        seen.append((text, model, task)) or [1.0, 0.0])
+    # cloud model id: provider returns None (no egress possible)
+    assert library_embed.gateway_embedder("openai/text-embedding-3-small") is None
+    library_embed.set_provider(lambda: library_embed.gateway_embedder("openai/text-embedding-3-small"))
+    assert library_embed.current_embedder() is None
+    rows, _ = lib.candidates("is my ex still living at 42 elm street")
+    assert isinstance(rows, list) and seen == []  # keyword path only; no embed call made
+    # a locally-routed id DOES return an embedder (the gate is strictly cloud-only)
+    local = library_embed.gateway_embedder("mlx/some-local-embed")
+    assert local is not None
+
+
+def test_a_confident_route_requires_the_floor_before_admitting_its_nearest_member(lib) -> None:
+    """L2: a confident route must not admit its nearest category member whatever the similarity. "price of
+    a used honda civic" admitted bestbuy at B-max 0.393 (far under FLOOR 0.828). The nearest-of-route is
+    only added to the ``near`` set when its B-max clears FLOOR."""
+    import numpy as np
+    v = _wire(lib, _Stub())
+    q = np.zeros(v.cards.shape[1], dtype=np.float32)
+    q[0] = 1.0  # an orthogonal query: B-max is near zero for every stored vector
+    v.threshold = -1.0  # make every route "confident" so the nearest branch runs
+    bm = v.bmax(q)
+    assert float(bm.max()) < library_embed.FLOOR, "an orthogonal query must be well below the floor"
+    route = v.route(q)
+    assert route is not None and route["confident"]
+    near = v.similar(q)
+    members = [i for i, c in enumerate(v.cats) if route["route"] in c]
+    assert members, "the route must have at least one member in the pack"
+    top = max(members, key=lambda i: bm[i])
+    # mirror candidates()'s admission rule: nearest-of-route only joins ``near`` when bmax >= FLOOR
+    if bm[top] >= library_embed.FLOOR:
+        near.add(v.ids[top])
+    assert near == set(), (near, bm[top])
+
+
+def test_a_routed_member_with_no_distinguishing_word_is_not_admitted(lib) -> None:
+    """L2: on a routed path, if the ask carries distinguishing words (``ctx['left']``) that NO member of
+    the asked category names (``ctx['telling']`` is empty), membership alone is not evidence — the
+    ``_off_words`` fallback returns 'not about what was asked' instead of silently admitting every
+    category member. When ``left`` is empty too (the ask said only the category's keyword), membership
+    still answers (unchanged from WP1)."""
+    class _Row(dict):
+        pass
+    row = _Row(name="Open-Meteo forecast", tier="curated", categories=["weather/forecast"])
+    record = {"description": "", "answers": [], "examples": [], "name": "Open-Meteo forecast"}
+    # ask has distinguishing words left (cat, video) that no member names
+    ctx = {"cats": ["weather/forecast"], "match": "geo", "telling": set(), "left": {"cat", "video"},
+           "routed": True, "explained": set(), "frame": None, "asked": "cat video"}
+    assert lib._off_words(row, record, ctx, {"cat", "video"}, [], "cat video") == "not about what was asked"
+    # left empty: the ask said only the category's own keyword, membership still answers
+    ctx_only_keyword = {**ctx, "left": set()}
+    assert lib._off_words(row, record, ctx_only_keyword, {"cat"}, [], "cat") == ""
+    # without routing (WP1), telling-empty + left non-empty still admits (unchanged)
+    ctx_wp1 = {**ctx, "routed": False}
+    assert lib._off_words(row, record, ctx_wp1, {"cat", "video"}, [], "cat video") == ""
+
+
+def test_a_corrupt_sidecar_is_discarded_and_locate_rebuilds(lib, tmp_path) -> None:
+    """L7: a sidecar whose zip is truncated/corrupt must not permanently poison locate (``candidates()`` would
+    return [] for every ask under the same pack+embedder key). ``load`` catches any exception, deletes the
+    bad file, so the next ``ready`` rebuilds it."""
+    path = lib._dir / library_embed.SIDECAR
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"not a zip at all")
+    stub = _Stub()
+    library_embed.set_provider(stub.embedder)
+    key = library_embed._key(lib.installed()["sha256"], stub.embedder())
+    assert library_embed.load(path, key) is None
+    assert not path.exists()  # discarded so the next build can land cleanly
+    got = library_embed.ready(lib._dir, lib.installed()["sha256"], lib._conn, wait=True)
+    assert got is not None and path.exists()
+
+
+def test_a_query_of_a_different_dimension_falls_back_to_keywords(lib, monkeypatch) -> None:
+    """L7: a query embedding of a different dimension than the sidecar's vectors (an embedder tag that moved
+    weights under the same provider/model id) would raise ValueError on the first matmul and leave candidates
+    = []. ``candidates`` validates the query dim and falls back to the keyword ranking for that ask."""
+    stub = _Stub()
+    _wire(lib, stub)
+    # the next embed_query returns a different-dim vector than the cards were built with
+    import numpy as np
+    original = library_embed.embed_query
+    monkeypatch.setattr(library_embed, "embed_query",
+                        lambda emb, ask: np.ones(_DIM + 1, dtype=np.float32) / float(np.sqrt(_DIM + 1)))
+    rows, skipped = lib.candidates("bitcoin price")  # must not raise, must not return []
+    assert rows, "a dim mismatch must fall back to the keyword ranking, not fail closed"
+    assert any(r["source_id"] == "coingecko-price" for r in rows)
+    monkeypatch.setattr(library_embed, "embed_query", original)
+
+
+def test_a_pack_without_route_asks_does_not_embed_or_build(tmp_path) -> None:
+    """L8: with no library_route_asks table (v2 is inert without a router), ``candidates`` must not build the
+    sidecar or embed any ask — the earlier behaviour was to embed every card + every ask for a path that then
+    discarded the vectors."""
+    lib = _install(tmp_path, with_asks=False)
+    stub = _Stub()
+    library_embed.set_provider(stub.embedder)
+    rows, _ = lib.candidates("bitcoin price")
+    assert stub.calls == 0  # no build, no query embed
+    assert rows and rows[0]["source_id"] == "coingecko-price"
+    assert not (lib._dir / library_embed.SIDECAR).exists()
+
+
+def test_the_build_yields_to_a_waiting_foreground_call(monkeypatch) -> None:
+    """L5: ``_embed_all`` polls ``gateway.local_waiters()`` between texts and sleeps while a foreground acquirer
+    is pending — so a background Library build never starves the next chat embed on a non-FIFO semaphore."""
+    polls = []
+    pending = [3]  # three "foreground" acquires queue up and then drop one at a time
+
+    def waiters_fn() -> int:
+        n = pending[0]
+        polls.append(n)
+        if n:
+            pending[0] -= 1  # one more foreground caller got served after this poll
+        return n
+    monkeypatch.setattr(library_embed.gateway, "local_waiters", waiters_fn)
+    monkeypatch.setattr(library_embed.gateway, "local_available", lambda: True)
+    monkeypatch.setattr(library_embed, "YIELD_SLEEP", 0.0)
+    e = library_embed.Embedder("mlx/x", lambda text, task: [1.0, 0.0])
+    library_embed._embed_all(e, ["a"], "document")
+    # polled until waiters dropped to 0 — the build backed off instead of racing for the semaphore
+    assert polls and polls[-1] == 0 and any(p > 0 for p in polls), polls
+
+
+def test_embed_query_returns_none_when_the_local_serializer_is_busy() -> None:
+    """L6: ``embed_query`` runs through ``gateway.embed`` with a short ``acquire_timeout``; a busy local
+    serializer raises ``LocalBusy``, which ``embed_query``'s existing except catches and returns None for.
+    The ask ranks on keywords for that one call (busy is a fallback, not a failure)."""
+    import threading
+    import time
+
+    from smartbrain_3000 import gateway
+    emb = library_embed.gateway_embedder("mlx/nomicai-modernbert-embed-base-bf16")
+    assert emb is not None
+    held = threading.Event()
+    release = threading.Event()
+
+    def hold() -> None:
+        with gateway._serialized("mlx/nomicai-modernbert-embed-base-bf16"):
+            held.set()
+            release.wait(2.0)
+    t = threading.Thread(target=hold); t.start()
+    try:
+        assert held.wait(2.0)
+        # the semaphore is held by another thread — a query-path embed through gateway_embedder
+        # fails fast (short acquire_timeout) and embed_query returns None for the keyword fallback
+        t0 = time.monotonic()
+        assert library_embed.embed_query(emb, "bitcoin price") is None
+        assert time.monotonic() - t0 < 2.0, "query must not wait on the foreground stream"
+    finally:
+        release.set(); t.join()

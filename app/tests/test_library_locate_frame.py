@@ -422,6 +422,26 @@ def test_an_entity_the_category_does_not_take_is_not_the_subject(lib) -> None:
     assert _ids(lib, "delays at O'Hare airport") == ["faa-nas-status"]
 
 
+def test_an_entity_said_only_by_the_place_is_not_the_subject_on_any_path(lib) -> None:
+    """L1: a place word that also names a team (Kansas City) must not stay the subject on routed paths —
+    the ISS question for Kansas City offered MLB/NBA schedules because the Chiefs' alias "kansas city"
+    bypassed every category gate via ``about``. The entity is dropped in ``_context`` whatever the path,
+    unless the ask spells its code or says one of the entity's cue words; the ``mlb-team-schedule`` /
+    ``thesportsdb-team-next`` / ``nhl-score-now`` admissions must not appear."""
+    with lib._conn() as con:
+        got = lib._context(con, "when can I see the ISS from Kansas City", {}, None)
+        assert "team_espn" not in got["found"], got["found"]
+    # Chiefs with a sports cue ("score") still names the team — L1 only drops place-only readings
+    with lib._conn() as con:
+        got = lib._context(con, "Chiefs score in Kansas City", {}, None)
+        assert "team_espn" in got["found"]
+    # end-to-end candidates: an ISS question with the KC alias does not admit any sports source
+    rows = _ids(lib, "when can I see the ISS from Kansas City")
+    assert not any(r.startswith(("mlb-", "nhl-")) or r == "thesportsdb-team-next" for r in rows), rows
+    rows = _ids(lib, "when can I see the ISS passing over Kansas City")
+    assert not any(r.startswith(("mlb-", "nhl-")) or r == "thesportsdb-team-next" for r in rows), rows
+
+
 def test_a_reading_said_by_part_of_its_name_joins_the_one_named_in_full(lib) -> None:
     """Corpus: "Champions League results" lost football-data-matches — the competition's own "champions
     league" alias is a partial one, so only the league reading was kept."""

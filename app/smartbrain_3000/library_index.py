@@ -395,6 +395,7 @@ class LibraryIndex:
         self._subcats_cache: dict[str, tuple[list[str], dict]] | None = None
         self._league_aliases: list[tuple[str, str]] | None = None
         self._has_result: bool | None = None
+        self._has_route_asks_cache: bool | None = None
         self._takes_cache: dict[str, set[str]] | None = None
         self._own_cache: dict[str, set[str]] | None = None
 
@@ -441,6 +442,7 @@ class LibraryIndex:
             meta = {"tag": self._pack["tag"], "sha256": self._pack["sha256"], "installed_at": _now()}
             self._meta.write_text(json.dumps(meta))
             self._taxonomy_cache = self._subcats_cache = self._league_aliases = self._has_result = None
+            self._has_route_asks_cache = None
             self._takes_cache = self._own_cache = None
             return meta
 
@@ -608,6 +610,21 @@ class LibraryIndex:
         frame = frame_kind_from_text(ask) or (hint.get("frame_kind") if hint.get("frame_kind") in FRAME_KINDS else None)
         pwords, has_place, place_status = named_place(res, ask, hint.get("place"))
         found, said_by, spelled = self._entities(con, res, ask, frame, pwords)
+        # L1: an entity whose only said words ARE the ask's place is not the subject on any path, unless
+        # the ask spells its code or an ask word is in its cue set. "ISS passes over Denver" is not the
+        # Rockies ({denver} ⊆ {denver}, no team cue said); "Chiefs score in Kansas City" is the Chiefs
+        # (said={chiefs} is not place; team_espn cue "score" said). Applied every path (routed or not).
+        if pwords:
+            words_said = {t for t in tokens(ask)}
+            for r in list(found):
+                span = {w for a in said_by.get(r) or [] for w in a.split()}
+                if not span or not (span <= pwords) or r in spelled:
+                    continue
+                cue = ENTITY_CUES.get("team_espn" if r.startswith("team_") else r) or set()
+                if words_said & cue:
+                    continue
+                found.pop(r)
+                said_by.pop(r)
         if route is not None and not route["confident"]:
             # a weak route names no category, but it still rules out readings: one whose every subcategory trails
             # the top route by the confident gap or more is not the subject ("sunset in Denver" is not the Rockies,
@@ -622,10 +639,14 @@ class LibraryIndex:
                     said_by.pop(r)
         cats, cats_from = self._frame_cats(con, ask, hint, set(found), frame, route)
         if cats_from != "entity":
-            found = self._allowed(con, cats, found, said_by, spelled)
+            # L9: when a route is active, allow entities from BOTH the route's cats and the ask's keyword
+            # classify (an airport entity the top route doesn't take must not be dropped when "airport
+            # delay" is a keyword hit — faa-nas-status had B-max 0.837 for "any delays at boston logan").
+            extra_cats = [c for c in self.classify(ask) if route is not None and c not in cats]
+            found = self._allowed(con, cats + extra_cats, found, said_by, spelled)
             # an entity the ask spells by code outside what its words asked is the frame ("delays at ORD" is
-            # airport delays, not transit alerts); one said only by the place's words is not ("when can I see the
-            # ISS from Kansas City" is not the Royals)
+            # airport delays, not transit alerts); one said only by the place's words is already filtered out
+            # above (L1), so the check here guards taxonomy routing, not place-only readings.
             takes = set().union(*(self._takes(con, c) for c in cats))
             outside = {r for r in found if r not in takes and not {w for a in said_by[r] for w in a.split()} <= pwords}
             if outside:
@@ -815,6 +836,19 @@ class LibraryIndex:
                 "SELECT 1 FROM library_sources WHERE list_contains(kinds, 'result') LIMIT 1").fetchone())
         return _SERVES[frame] | ({"current_value"} if frame == "result" and not self._has_result else set())
 
+    def _has_route_asks(self) -> bool:
+        """True when the installed pack carries a ``library_route_asks`` table with at least one row —
+        locate v2's vectors are inert without it, so a pack that lacks it skips the sidecar build (L8)."""
+        assert self._pack is not None, "pack metadata required"
+        if self._has_route_asks_cache is None:
+            try:
+                with self._conn() as con:
+                    row = con.execute("SELECT 1 FROM library_route_asks LIMIT 1").fetchone()
+                self._has_route_asks_cache = row is not None
+            except (duckdb.CatalogException, LibraryIndexError):
+                self._has_route_asks_cache = False
+        return bool(self._has_route_asks_cache)
+
     def _leagues_named(self, con, text: str) -> set[str]:
         """The sports leagues a text names (by the league resolver's own names)."""
         from .library_resolve import ENGLISH as ENGLISH_WORDS
@@ -870,9 +904,21 @@ class LibraryIndex:
         # the kind is read from the words as typed (a short-word expansion can turn "passes" into another word)
         hint = {**(hint or {}), "frame_kind": frame_kind_from_text(ask) or (hint or {}).get("frame_kind")}
         meta = self.installed()
-        got = library_embed.ready(self._dir, meta["sha256"], self._conn) if meta else None
+        # L8: skip the sidecar build/load entirely when the pack has no route asks (v2 is inert without
+        # a router) — otherwise every first use would embed ~4.8k cards+asks and every ask would embed a
+        # query for a path that discards them.
+        got = library_embed.ready(self._dir, meta["sha256"], self._conn) \
+            if meta and self._has_route_asks() else None
         q = library_embed.embed_query(got[1], ask) if got else None
         vectors = got[0] if got and q is not None else None
+        # L7: a query of a different dimension to the sidecar's vectors would raise ValueError on the
+        # first matmul (route/dense/bmax). Treat it as the embedder having changed under us — drop to
+        # the keyword path for this ask; the next ready() call will rebuild under the new scheme.
+        if vectors is not None and (q.ndim != 1 or vectors.cards.shape[0] == 0
+                                    or vectors.cards.shape[1] != q.shape[0]):
+            log.info("library_embed: query dim %s does not match sidecar dim %s; falling back",
+                     None if q is None else q.shape, vectors.cards.shape)
+            vectors = None
         with self._conn() as con:
             ask = self._expand_short_words(con, ask)
             route = vectors.route(q) if vectors is not None else None
@@ -884,9 +930,15 @@ class LibraryIndex:
                 ranked = vectors.fuse(keyword, vectors.dense(q), route)
                 near = vectors.similar(q)
                 if route is not None and route["confident"]:
-                    # the confident route's member nearest the ask is about it: the route says the category, the
-                    # embedding says which of its members ("when does winter start" is USNO's seasons)
-                    near |= {vectors.nearest(q, route["route"])} - {None}
+                    # the confident route's member nearest the ask is about it ONLY when it also clears the
+                    # similarity FLOOR: without a floor every ask admits its route's nearest member whatever
+                    # the match ("price of a used honda civic" admitted bestbuy at B-max 0.393) — L2
+                    bmax = vectors.bmax(q)
+                    members = [i for i, c in enumerate(vectors.cats) if route["route"] in c]
+                    if members:
+                        top = max(members, key=lambda i: bmax[i])
+                        if bmax[top] >= library_embed.FLOOR:
+                            near.add(vectors.ids[top])
             elif not ctx["cats"]:
                 return [], ["couldn't tell what kind of data this is"]
             else:
@@ -912,6 +964,10 @@ class LibraryIndex:
                 ctx["cats"][0] in rows[s]["categories"] and rows[s]["tier"] != "harvested" and _speaks_to(
                     {w}, str((records[s].get("coverage") or {}).get("entity") or ""), [], ask, rows[s]["name"])
                 for s in rows)}
+            # the ask's distinguishing words (not category keywords, not place): _off_words needs this to
+            # tell "nothing distinguishing was said" (membership is fine) from "distinguishing words were
+            # said but no member names any of them" (routed membership isn't evidence)
+            ctx["left"] = left
             for sid in ranked:  # bounded by two rankings of RRF_DEPTH, or the keyword page
                 row = rows.get(sid)
                 if row is None:
@@ -990,7 +1046,15 @@ class LibraryIndex:
             return f"for {aud} users", False  # unless it is filed under what was asked (a buoy reports surf)
         takes = {r for (r,) in con.execute("SELECT resolver FROM library_source_resolvers WHERE source_id = ?",
                                            [row["id"]]).fetchall()}
-        return self._off_subject(con, record, takes, ctx)
+        why, about = self._off_subject(con, record, takes, ctx)
+        # L1: on a routed path, an "about" admission must not bypass relevance when the source is in a
+        # different top category than the route's — the ask said what kind of data, which outranks the
+        # entity reading. The caller still admits a highly-similar source via ``near``.
+        if about and ctx["routed"] and ctx["cats"]:
+            top = ctx["cats"][0].split("/")[0]
+            if top not in {c.split("/")[0] for c in cats}:
+                about = False
+        return why, about
 
     def _off_subject(self, con, record: dict, takes: set[str], ctx: dict) -> tuple[str, bool]:
         """The named subject (a team, ticker, league, airport…) must be one the source can take or is about."""
@@ -1030,9 +1094,17 @@ class LibraryIndex:
         if ctx["cats"] and ctx["match"] not in ("none", "name") and ctx["cats"][0] in row["categories"]:
             # a member answers for what the user named, except a word that names one of its siblings: "BART
             # delays" is not the CTA's alerts, but "blizzard warning" is every alerts source's
-            need = need & ctx["telling"]
-            if not need:
+            reduced = need & ctx["telling"]
+            if not reduced:
+                # L2: on a routed path, if the ask has distinguishing words (``ctx['left']``) that NO member
+                # of the asked category names, membership alone is not evidence ("price of a used honda
+                # civic" admitted bestbuy because every member passed telling-empty). When ``left`` is empty
+                # too (the ask named only the category's own keyword, "temp in Charleston"), membership
+                # still answers.
+                if ctx["routed"] and ctx.get("left"):
+                    return "not about what was asked"
                 return ""
+            need = reduced
         text, declared = _own_words(record)
         return "" if _speaks_to(need, text, phrases + declared, ask, row["name"]) else "not about what was asked"
 

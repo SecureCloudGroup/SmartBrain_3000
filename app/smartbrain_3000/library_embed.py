@@ -53,6 +53,9 @@ MAX_CARD_CHARS = 1500     # a source's declared coverage is cut here (the spike'
 FLOOR = 0.828
 RETRY_SECONDS = 600.0     # after a failed build, wait this long before trying again
 QUERY_TIMEOUT = 15.0      # one ask embed; a failure falls back to the keyword ranking
+# the request-path ask embed never waits long behind a foreground stream: a busy semaphore is not a
+# failure, it's a fallback to the keyword ranking for that one ask (L6)
+QUERY_ACQUIRE_TIMEOUT = 0.25
 YIELD_SLEEP, YIELD_POLLS = 0.05, 2400   # a build waits up to 2 minutes per text for a busy local model
 
 
@@ -68,12 +71,20 @@ class Embedder:
         return gateway.embedding_scheme(self.model)
 
 
-def gateway_embedder(model: str) -> Embedder:
-    """The Knowledge base's embedder: ``gateway.embed`` with the model's task prefixes."""
+def gateway_embedder(model: str) -> Embedder | None:
+    """The Knowledge base's embedder: ``gateway.embed`` with the model's task prefixes. Returns None
+    for a cloud-routed model (L3 privacy): locate must never send the user's ask or the Library's
+    cards to an off-box embedder; the keyword ranking runs instead. The query path uses a short
+    ``acquire_timeout`` so a busy local serializer falls back for that ask (L6) rather than blocking."""
     assert model and "/" in model, "embed model must be 'provider/model'"
+    if not gateway.is_local(model):
+        return None
 
     def embed_one(text: str, task: str) -> list[float]:
-        return gateway.embed(text, model, task=task, timeout=QUERY_TIMEOUT)
+        assert text, "text must be non-empty"
+        assert task in ("document", "query"), "task must be 'document' or 'query'"
+        return gateway.embed(text, model, task=task, timeout=QUERY_TIMEOUT,
+                             acquire_timeout=QUERY_ACQUIRE_TIMEOUT if task == "query" else None)
     return Embedder(model, embed_one)
 
 
@@ -253,12 +264,16 @@ class Vectors:
 
 
 def _embed_all(emb: Embedder, items: list[str], task: str) -> np.ndarray:
+    assert isinstance(items, list), "items must be a list"
+    assert task in ("document", "query"), "task must be 'document' or 'query'"
     out = []
     for text in items:  # bounded by the pack
-        # a build gives way to a foreground call on the local model between texts (its semaphore has no
-        # queue fairness: a waiting chat could keep losing the race to the next embed)
+        # a build gives way to a foreground call on the local model between texts: the semaphore has no
+        # queue fairness, so without a hand-off a waiting chat/embed could keep losing the race (L5).
+        # ``local_waiters`` counts callers currently blocked on the local serializer; back off until the
+        # count is zero AND the semaphore is free.
         for _ in range(YIELD_POLLS):
-            if gateway.local_available():
+            if gateway.local_waiters() == 0 and gateway.local_available():
                 break
             time.sleep(YIELD_SLEEP)
         v = emb.embed_one(text, task)
@@ -311,7 +326,13 @@ def _meta(z) -> dict:
 
 
 def load(path: Path, key: dict) -> Vectors | None:
-    """The sidecar if it was built from ``key`` (this pack, this embedder, this format), else None."""
+    """The sidecar if it was built from ``key`` (this pack, this embedder, this format), else None.
+
+    A corrupt or truncated file, a wrong-shape array or a non-finite value yields None and the sidecar
+    is deleted so the next ``ready`` rebuilds it (L7): a bad sidecar must never permanently poison
+    locate's candidates path."""
+    assert path is not None, "path required"
+    assert isinstance(key, dict) and key, "key must be a non-empty dict"
     try:
         with np.load(path, allow_pickle=False) as z:
             meta = _meta(z)
@@ -321,11 +342,33 @@ def load(path: Path, key: dict) -> Vectors | None:
             cards, asks, owner = z["cards"], z["asks"], z["owner"]
             routes, centroids = [str(x) for x in z["routes"]], z["centroids"]
             cats = [set(str(c).split("|")) - {""} for c in z["cats"]]
-    except (OSError, ValueError, KeyError) as exc:
-        if not isinstance(exc, FileNotFoundError):
-            log.info("library_embed: unreadable sidecar (%s)", type(exc).__name__)
+    except FileNotFoundError:
         return None
-    if len(ids) != len(cards) or len(cats) != len(ids) or len(owner) != len(asks) or len(routes) != len(centroids):
+    except Exception as exc:  # a BadZipFile / unpickling-blocked / malformed array / anything
+        log.info("library_embed: unreadable sidecar (%s), discarding", type(exc).__name__)
+        try:
+            Path(path).unlink()
+        except OSError:
+            pass  # best-effort; the next build will overwrite atomically either way
+        return None
+    if len(ids) != len(cards) or len(cats) != len(ids) or len(owner) != len(asks) \
+            or len(routes) != len(centroids):
+        return None
+    dim = cards.shape[1] if cards.ndim == 2 and cards.shape[0] else 0
+    for arr, label in ((cards, "cards"), (asks, "asks"), (centroids, "centroids")):
+        if arr.size and (arr.ndim != 2 or arr.shape[1] != dim or not np.isfinite(arr).all()):
+            log.info("library_embed: sidecar %s shape/finite-ness invalid, discarding", label)
+            try:
+                Path(path).unlink()
+            except OSError:
+                pass
+            return None
+    if len(owner) and (owner.min() < 0 or owner.max() >= len(ids)):
+        log.info("library_embed: sidecar owner index out of range, discarding")
+        try:
+            Path(path).unlink()
+        except OSError:
+            pass
         return None
     th = meta.get("threshold")
     return Vectors(key=key, ids=ids, cats=cats, cards=cards, asks=asks, owner=owner, routes=routes,
