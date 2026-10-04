@@ -347,7 +347,9 @@ _INTENT_PROMPT = (
     '(e.g. a countdown to a date). Otherwise "external_data".\n'
     '"names" lists the proper names (people, companies, organizations, agencies, '
     'places, products, teams, events) the user mentioned, each copied EXACTLY from '
-    "the request; [] when the request names none.\n"
+    "the request; [] when the request names none. A proper name is one specific thing's "
+    "own name (Boeing, Ukraine, NASA, Taylor Swift) - never a common word for a kind of "
+    "topic or a describing word (celebrity, business, weather, biggest, active).\n"
     "Request: __REQUEST__\n"
 )
 
