@@ -65,6 +65,17 @@ _BLOCK_TAGS = frozenset({
     "main", "aside", "dt", "dd", "dl", "blockquote", "pre", "form", "fieldset",
     "figure", "figcaption", "hr", "address", "details", "summary",
     "label", "button", "caption"})
+# HTML spec's "close a p element" start-tag list — the ONLY starts that
+# implicitly close an open <p>. _BLOCK_TAGS is wider (it also drives body
+# line breaks) and must not be used here: <br>, <label>, <button>, <td>,
+# <th>, <tr>, <caption> never close a paragraph (field 2026-10-04:
+# ``<p hidden>S1<br>S2</p>`` leaked S2 as visible because <br> popped the
+# hidden <p>).
+_P_CLOSERS = frozenset({
+    "address", "article", "aside", "blockquote", "details", "dialog", "div",
+    "dl", "fieldset", "figcaption", "figure", "footer", "form", "h1", "h2",
+    "h3", "h4", "h5", "h6", "header", "hgroup", "hr", "main", "menu", "nav",
+    "ol", "p", "pre", "search", "section", "table", "ul"})
 _HIDDEN_STYLE_RE = re.compile(r"(?:display\s*:\s*none|visibility\s*:\s*hidden)",
                               re.IGNORECASE)
 # Guard against malformed HTML stacking an unbounded number of open elements.
@@ -275,6 +286,13 @@ class _GraphParser(HTMLParser):
         # hidden element's name (field 2026-10-04: ``<div><span hidden>x</div>``
         # left ``span hidden`` live for the rest of the body).
         self._open: list[tuple[str, bool]] = []
+        # Per-tag count of hidden-maker starts that could not be pushed
+        # because the open stack hit ``_MAX_OPEN_STACK``. Fail closed:
+        # script / style / [hidden] / display:none past the cap must still
+        # hide their content, and their matching end tag releases a slot
+        # (field 2026-10-04: 300 unclosed <span> uncovered <script>SECRET,
+        # <style>CSS, and <div hidden>text, all read as visible body).
+        self._overflow_hidden: dict[str, int] = {}
 
     def _body_break(self, sep: str = "\n") -> None:
         if not self.body:
@@ -296,14 +314,14 @@ class _GraphParser(HTMLParser):
     def _implicit_close_before(self, tag: str) -> None:
         """Apply HTML's generate-implied-end-tags before pushing ``tag``.
 
-        A block-level start closes an open ``<p>`` on top; a same-category
-        peer (``<li>``, ``<p>``, ``<dt>``/``<dd>``, ``<tr>``, ``<td>``/
-        ``<th>``, ``<option>``) closes any run of open peers on top. Bounded
-        by ``_MAX_OPEN_STACK``.
+        A start tag in the HTML spec's "close a p element" list closes an
+        open ``<p>`` on top; a same-category peer (``<li>``, ``<p>``,
+        ``<dt>``/``<dd>``, ``<tr>``, ``<td>``/``<th>``, ``<option>``)
+        closes any run of open peers on top. Bounded by ``_MAX_OPEN_STACK``.
         """
         assert isinstance(tag, str), "tag must be a string"
         assert len(self._open) <= _MAX_OPEN_STACK, "open stack bounded"
-        if (tag in _BLOCK_TAGS and tag != "p"
+        if (tag in _P_CLOSERS and tag != "p"
                 and self._open and self._open[-1][0] == "p"):
             self._pop_one()
         peers = _PEER_IMPLICIT_CLOSE.get(tag)
@@ -324,9 +342,13 @@ class _GraphParser(HTMLParser):
         a = dict(attrs)
         self._implicit_close_before(tag)
         is_hidden = tag in _INVISIBLE_TAGS or _is_invisible_attrs(a)
-        if tag not in _VOID_TAGS and len(self._open) < _MAX_OPEN_STACK:
-            self._open.append((tag, is_hidden))
-            if is_hidden:
+        if tag not in _VOID_TAGS:
+            if len(self._open) < _MAX_OPEN_STACK:
+                self._open.append((tag, is_hidden))
+                if is_hidden:
+                    self._hidden += 1
+            elif is_hidden:
+                self._overflow_hidden[tag] = self._overflow_hidden.get(tag, 0) + 1
                 self._hidden += 1
         if not is_hidden:
             if tag in _BLOCK_TAGS:
@@ -393,6 +415,12 @@ class _GraphParser(HTMLParser):
                 name = self._open[-1][0]
                 if self._pop_one() and name == tag:
                     hidden_self_popped = True
+        elif self._overflow_hidden.get(tag, 0) > 0:
+            # Matching end tag for an un-pushed hidden-maker: release one
+            # slot of its overflow depth so its hidden region closes.
+            self._overflow_hidden[tag] -= 1
+            self._hidden -= 1
+            hidden_self_popped = True
         if tag in _BLOCK_TAGS and not hidden_self_popped:
             self._body_break()
         if tag == "script" and self._in_jsonld:

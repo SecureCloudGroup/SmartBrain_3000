@@ -600,6 +600,16 @@ def test_jail_body_text_hidden_ancestor_pops_on_outer_end_tag() -> None:
      ("VIS_LI", "REST"), ("x",)),
     ("<div hidden><div>inner</div>LEAK</div><p>REST</p>",
      ("REST",), ("inner", "LEAK")),
+    # F2e (review5 2026-10-04): a start tag that is NOT in the HTML spec's
+    # "close a p element" list — <br>, <label>, <button>, <td>, <th>, <tr>,
+    # <caption> — must not close an open <p hidden>. Before the fix, every
+    # tag in _BLOCK_TAGS closed <p>, which leaked the rest of the paragraph.
+    ("<p hidden>S1<br>S2</p><p>REST</p>",
+     ("REST",), ("S1", "S2")),
+    ("<p hidden>S1 <label>L</label> S2</p>SHOWN",
+     ("SHOWN",), ("S1", "L", "S2")),
+    ("<p hidden>S1 <button>B</button> S2</p>SHOWN",
+     ("SHOWN",), ("S1", "B", "S2")),
 ])
 def test_jail_body_text_implicit_close_before_hidden_sibling(
         html, visible, hidden) -> None:
@@ -609,6 +619,29 @@ def test_jail_body_text_implicit_close_before_hidden_sibling(
         assert keeper in body, (html, keeper)
     for miss in hidden:
         assert miss not in body, (html, miss)
+
+
+# F2f (review5 2026-10-04): once the open-element stack hits its cap, an
+# un-pushable hidden-maker (script/style/[hidden]/display:none) must still
+# hide its content — a counter per tag name tracks the overflowed depth and
+# the matching end tag releases it. Before the fix, 300 unclosed <span>
+# pushed the cap, then <script>/<style>/[hidden] silently became "visible"
+# and leaked SECRET_JS, CSS source, and hidden-template text.
+def test_jail_body_text_overflowed_stack_still_hides_script_and_style() -> None:
+    many_spans = "<span>a" * 300  # exceeds _MAX_OPEN_STACK (256)
+    html = (
+        "<body>" + many_spans
+        + "<script>var SECRET_JS=1</script>"
+        + "<style>.secret_css{color:red}</style>"
+        + "<div hidden>HIDDEN_DIV_TEMPLATE</div>"
+        + "<div style='display:none'>HIDDEN_STYLE_TEMPLATE</div>"
+        + "<p>END_VISIBLE</p>"
+    )
+    _, body = jail_extract._page_graph_layers(html)
+    assert "END_VISIBLE" in body
+    for leak in ("SECRET_JS", ".secret_css", "HIDDEN_DIV_TEMPLATE",
+                 "HIDDEN_STYLE_TEMPLATE"):
+        assert leak not in body, leak
 
 
 # F2c (review3 2026-10-04): the recorded pages must keep the real body text
