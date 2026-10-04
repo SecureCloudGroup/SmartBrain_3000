@@ -70,6 +70,8 @@ _RESOLVER_ENTRIES = [  # id, resolver, kind, key, name, lat, lon, state, attrs, 
      ["melbourne", "melbourne fl", "melbourne florida"]),
     ("place:4", "place", "place", "4", "Denver", 39.7, -104.9, "CO", {"pop": 716000}, 5.9, ["denver", "denver co"]),
     ("place:5", "place", "place", "5", "Denver", 42.67, -92.3, "IA", {"pop": 1900}, 3.3, ["denver", "denver ia"]),
+    ("place:7", "place", "place", "7", "Cape Canaveral", 28.4, -80.6, "FL", {"pop": 10000}, 2.0,
+     ["cape canaveral", "cape canaveral fl"]),
     ("place:6", "place", "place", "6", "South Lake Tahoe", 38.9, -120.0, "CA", {"pop": 21225, "nicknames": ["tahoe"]},
      3.0, ["south lake tahoe", "tahoe"]),
     ("tide_station:872", "tide_station", "station", "872", "Melbourne Causeway", 28.08, -80.60, "FL",
@@ -590,6 +592,16 @@ def test_a_reviewed_area_name_is_a_place_without_a_cue(lib) -> None:
         res = Resolver(con)
         assert lib._place_words(res, "Tahoe weather")[0] == {"tahoe"}
         assert lib._place_words(res, "Melbourne weather")[0] == set()
+
+
+def test_a_small_places_full_multiword_name_is_a_place_without_a_cue(lib) -> None:
+    """Live 2026-10-03: "wave heights Cape Canaveral" lost its place (a 10k town, no "in"), so every marine
+    source was refused. A full name of two or more words is unmistakable; a one-word name still needs a cue."""
+    from smartbrain_3000.library_resolve import Resolver
+    with lib._conn() as con:
+        res = Resolver(con)
+        assert lib._place_words(res, "wave heights Cape Canaveral")[0] == {"cape", "canaveral"}
+        assert lib._place_words(res, "Melbourne weather")[0] == set()  # one word, small: still needs "in"
 
 
 def test_of_is_not_a_place_cue(lib) -> None:

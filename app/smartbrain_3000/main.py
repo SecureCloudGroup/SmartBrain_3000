@@ -28,6 +28,7 @@ from . import (
     db,
     devices,
     gateway,
+    library_embed,
     library_index,
     mcp_server,
     ni_flow,
@@ -399,6 +400,10 @@ def _make_lifespan(mcp):
                 idx.install()
             return idx
         ni_flow.set_library_provider(_ni_library)
+        # locate v2: the Library lookup ranks with the SAME embedder as the knowledge base (the user's routed
+        # "embedding" model); no embedder or any failure leaves the keyword lookup, never a broken one
+        library_embed.set_provider(
+            lambda: library_embed.gateway_embedder(gateway.embed_model(getattr(application.state, "dbx", None))))
         async with mcp.session_manager.run():  # drive the MCP transport for this app
             runner = asyncio.create_task(_scheduler_loop(application))  # background scheduler
             webrtc = asyncio.create_task(_webrtc_loop(application)) if _webrtc_mode != "0" else None
