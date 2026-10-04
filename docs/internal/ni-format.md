@@ -90,6 +90,20 @@ No foreign keys; `NIStore.delete` cascades in code (feeds precedent).
   idempotent (the `{{param:` marker gates it), revision-tracked (origin `repair_l1`,
   `preserve_attestations=True`; the fetched URL at creation time reproduces byte-for-byte, so
   `_c2_ok` and `contract` still describe the card). A verify mismatch leaves the card untouched.
+  R4-4 (2026-10-04): the upgrade tries the creation moment in UTC, the user's zone, and the
+  local-machine zone and accepts whichever reproduces the stored literal — a Docker install
+  renders the literal in UTC while the user is in LA / NZ, and the user-zone-only probe would
+  decline. R4-5: the upgrade reslots the pipeline too — a `near_earth_objects["2026-10-01"]`
+  literal rides forward alongside the URL so day 2 extracts without a miss.
+- R4-2 (2026-10-04): one `now` per build. `_sample_and_map` freezes `fetch_now = ni._clock()` at
+  entry, rebuilds the fetch URL from the sealed `_library_url_template` at that moment (a stale
+  `_library_url` from a tap-then-midnight-cross resume is realigned), and threads `fetch_now` into
+  `_handoff`; the C2 verify reads the sealed spec at the same `fetch_now` so a build crossing
+  midnight never crashes on a `_clock()` advance.
+- R4-11 (2026-10-04): `_handoff` scans the sealed `spec.params` for clock-kind entries and runs
+  `_reslot_clock_params_in_pipeline` on the pipeline — a mapping-path (freeform or remap) extract
+  path or `where` value holding a clock-filled literal walks forward instead of freezing on the
+  sample day. The reslot is idempotent (an already-slotted path has no literal to match).
 - `display.size` ∈ `small | wide` (wide spans two grid columns).
 - `contract` is system-written at commissioning (§7); the agent may never set it.
 - `model` optionally overrides the `ni` route for `model` sources (schedules.model
@@ -2258,14 +2272,23 @@ and the `recipe` born marker stays readable.
   SWPC `time_tag` — a zoneless 03:00 is 8 PM PDT, kept by `tonight` in LA). A row whose
   `tbd_if` flag is set becomes a day row on its written date (`unless` on the window op):
   an MLB TBD start sentinel 07:33Z never slips into `tonight`. On an hour-step axis
-  `today` / `tonight` floor at the current hour so the first row the card shows is the
-  one happening now (`tonight` before 06:00 is the current night, now..06:00); day-step
-  rows keep the whole date even when the cell has a clock. A next-event / schedule list
-  on a time axis with no asked window still gets a forward cut (`upcoming`) every run:
-  rows from now − 15 min on (`ni._UPCOMING_GRACE`), the same floor `next_event_stale`
-  judges a "next" card by, so a kept row is never refused and an event 50 minutes past
-  is never "next". The engine clock is the user's zone as the DESKTOP reports it
-  (`meta user:timezone`, loaded at unlock); a phone's zone never sets it.
+  `today` / `tonight` floor at the current hour FOR FORECAST-STYLE SERIES (columns kind
+  — hourly weather); event / schedule / result / next_event lists (list kind) keep the
+  whole asked period (R4-6 2026-10-04: `_window_op` with `floor_hour=False` passes `step:
+  period` so the engine's non-floor branch runs). `tonight` before 06:00 is still the
+  current night (now..06:00) on forecast series. Day-step rows keep the whole date even
+  when the cell has a clock. A next-event / schedule list on a time axis with no asked
+  window still gets a forward cut (`upcoming`) every run: rows from now − 15 min on
+  (`ni._UPCOMING_GRACE`), the same floor `next_event_stale` judges a "next" card by, so
+  a kept row is never refused and an event 50 minutes past is never "next"; on an
+  explicit day / night window (`today`, `tonight`) the stale-first check does NOT fire
+  — "MLB schedule today" at 10 PM intentionally shows the Finals from earlier (R4-6).
+  The engine clock is the user's zone as the DESKTOP reports it (`meta user:timezone`,
+  loaded at unlock); R4-3 (2026-10-04): a REMOTE device may SEED the zone when none is
+  stored yet so a headless / LAN-only / phone-only install still runs on the user's
+  calendar instead of UTC — `meta user:timezone_by` records which authority last wrote
+  (`desktop` | `remote`) so a desktop handshake always overrides and a remote probe
+  never overrides a desktop-set value.
   Day rows answer "tonight" as today; a window ahead over rows that all lie in the past
   isn't applied (the latest rows show). `tbd_if` also becomes the `time` transform's
   `unless` (a value's flag is extracted as `<name>_tbd` when the sample carries it): the

@@ -1741,6 +1741,10 @@ def _build_rows_answer(answer: dict, payload: dict, title: str, window: str | No
     cut = "today" if axis and axis["step"] == "day" and window == "tonight" else (window or "upcoming")
     axis_cell = next((c for c in cells if axis and c["path"] == axis["cell"]), None) if axis else None
     step = axis["step"] if axis else None
+    # R4-6 (2026-10-04): the current-hour floor on ``today`` / ``tonight`` is a FORECAST rule — an
+    # event / schedule / result / next_event list keeps the whole asked period, so an 8:01 AM low
+    # on a tide list reads at 14:10, and a Final game stays on a "today" schedule at 22:30.
+    floor_hour = answer["kind"] != "list"
     if answer["kind"] == "list":
         keys = [c["path"] for c in cells]
         stages: list[dict] = [{"op": "extract", "paths": {"rows": answer["path"]}}]
@@ -1754,7 +1758,7 @@ def _build_rows_answer(answer: dict, payload: dict, title: str, window: str | No
             ops.append({"fn": "reverse", "field": "rows"})
         if axis and _cuts(window or "upcoming", stages, ops, payload, axis["cell"]):
             ops.append(_window_op(axis["cell"], cut, payload, stages,
-                                   axis_cell=axis_cell, step=step))
+                                   axis_cell=axis_cell, step=step, floor_hour=floor_hour))
         # F10 (2026-10-04): a list on an hour / period axis cut to a day or multi-day window needs
         # a cap that spans the window — a 24h Saturday on hour rows was clipped to 12-4 AM at 5.
         limit = _list_cap(window, step) if (axis and window) else 5
@@ -1773,7 +1777,8 @@ def _build_rows_answer(answer: dict, payload: dict, title: str, window: str | No
         ops.append({"fn": "zip", "field": keys[0], "with": keys[1:], "as": "rows"})
         key = next((k for c, k in zip(cells, keys, strict=True) if axis and c["path"] == axis["cell"]), None)
         if key is not None and _cuts(window or "upcoming", stages, ops, payload, key):
-            ops.append(_window_op(key, cut, payload, stages, axis_cell=axis_cell, step=step))
+            ops.append(_window_op(key, cut, payload, stages, axis_cell=axis_cell, step=step,
+                                   floor_hour=floor_hour))
         else:
             ops.append({"fn": "top_n", "field": "rows", "n": limit})
     # a row that shows its date (own cell) or sits inside a tight hour-step window ("tonight",
@@ -1830,7 +1835,8 @@ def _cuts(window: str, stages: list[dict], ops: list[dict], payload: dict, key: 
 
 
 def _window_op(key: str, window: str, payload: dict, stages: list[dict], *,
-                axis_cell: dict | None = None, step: str | None = None) -> dict:
+                axis_cell: dict | None = None, step: str | None = None,
+                floor_hour: bool = True) -> dict:
     """The engine's ``window`` transform over ``rows`` by the row's own time at ``key``. A source that
     names its time zone at the top (Open-Meteo ``timezone``, else ``utc_offset_seconds``) has it
     extracted as ``zone``, so "today" is the place's today, not the reader's.
@@ -1838,7 +1844,12 @@ def _window_op(key: str, window: str, payload: dict, stages: list[dict], *,
     ``axis_cell`` (F3 / F9): the answer's axis cell carries ``utc: true`` (zoneless times are UTC)
     and ``tbd_if: {path}`` (a row's placeholder flag turns it into a day row) — both ride onto the op
     so every refresh reads the window the same way. ``step`` (F11): the axis step; day-step rows keep
-    the whole date even with a clock."""
+    the whole date even with a clock. ``floor_hour`` (R4-6, 2026-10-04): default True floors ``today``
+    / ``tonight`` on hour axes at the current hour (forecast series); False keeps the whole asked
+    period (event / schedule / result / next_event lists) — the step rides as ``period`` so the
+    engine's existing non-floor branch handles it."""
+    assert isinstance(key, str) and isinstance(window, str), "args required"
+    assert isinstance(floor_hour, bool), "floor_hour must be a bool"
     op: dict = {"fn": "window", "field": "rows", "key": key, "window": window}
     for top in ("timezone", "utc_offset_seconds"):  # bounded: two names
         if isinstance(payload.get(top), (str, int)) and not isinstance(payload.get(top), bool):
@@ -1852,7 +1863,7 @@ def _window_op(key: str, window: str, payload: dict, stages: list[dict], *,
         if isinstance(tbd, dict) and isinstance(tbd.get("path"), str):
             op["unless"] = tbd["path"]
     if step in ("day", "hour", "period"):
-        op["step"] = step
+        op["step"] = step if (step != "hour" or floor_hour) else "period"
     return op
 
 
@@ -2053,8 +2064,12 @@ def _try_answers_build(store: ni.NIStore, item_id: str, request: str, intent: di
     missing = set(built.get("missing") or [])
     built["labels"] = [a["label"] for a in chosen if a["label"] not in missing]
     built["chosen"], built["answers"] = chosen, answers
-    # C5: "filled" is what the address really carries — a place the URL never took is not answered
-    built["unanswered"] = _unanswered_wants(answers, request, wants, list(params.values()))
+    # C5: "filled" is what the address really carries — a place the URL never took is not answered.
+    # R4-12 (2026-10-04): the intent's place rides as filled too so the quantity-want shortcut's
+    # "every other content word is covered by the source" check doesn't trip on the place name a
+    # geo resolver turned into lat/lon.
+    built["unanswered"] = _unanswered_wants(answers, request, wants,
+                                            [*params.values(), intent.get("place") or ""])
     return built
 
 
@@ -2107,10 +2122,15 @@ def _unanswered_wants(answers: list[dict], request: str, wants: list, filled: li
     for value in filled:  # bounded by the params + place
         ask -= _answer_tokens(value)
     covered: set[str] = set()
+    primary_covered: set[str] = set()
     for a in answers:  # bounded by _MAX_ANSWERS
+        tokens: set[str] = set()
         for text in [*a["words"], a["label"], a["name"].replace("_", " "),
                      *[c.get("label", "") for c in a.get("cells") or []]]:
-            covered |= _answer_tokens(text)
+            tokens |= _answer_tokens(text)
+        covered |= tokens
+        if a.get("primary"):
+            primary_covered |= tokens
         if _event_time(a) or _dated_rows(a):  # a time or a month + day answers "when" / "date"
             covered |= {"date", "time", "when", "day"}
     has_primary_value = any(a.get("kind") == "value" and a.get("primary") for a in answers)
@@ -2119,7 +2139,12 @@ def _unanswered_wants(answers: list[dict], request: str, wants: list, filled: li
         said = _answer_tokens(str(want).replace("_", " ")) & ask
         synonyms = {t for s in said for t in _WANT_SYNONYMS.get(s, frozenset())}
         if said and not (said & covered) and not (synonyms & covered):
-            if has_primary_value and said and said <= _QUANTITY_WANTS:
+            # R4-12 (2026-10-04): the generic quantity shortcut applies only when every other ask
+            # word (minus filled + place) is a generic stop word or is PRIMARY-covered — a content
+            # word the source doesn't name as its primary ("snow" against a general forecast whose
+            # primary is temperature / conditions) qualifies "level" into a specific measure.
+            if has_primary_value and said and said <= _QUANTITY_WANTS \
+                    and (ask - said - _NAME_STOP) <= primary_covered:
                 continue  # a generic quantity want IS what a primary value answer reports
             out.append(str(want).replace("_", " "))
     return out
@@ -2232,7 +2257,8 @@ def _dated_rows(a: dict) -> bool:
     return any("month" in t for t in said) and any("day" in t for t in said)
 
 
-def _frame_gap(kind: str | None, chosen: list[dict], preview: dict, now: datetime) -> str | None:
+def _frame_gap(kind: str | None, chosen: list[dict], preview: dict, now: datetime,
+                window: str | None = None) -> str | None:
     """What the chosen answers can't be for this kind of question: a next event needs a time still to
     come; a result needs a score."""
     if kind in ("next_event", "schedule"):
@@ -2245,7 +2271,11 @@ def _frame_gap(kind: str | None, chosen: list[dict], preview: dict, now: datetim
         # F5 (2026-10-04): judge the FIRST SHOWN moment — a "next" card whose first row is a past
         # event is wrong even when later rows are future. The forward cut in _build_rows_answer
         # removes past rows every refresh; this is the belt-and-braces for a build without one.
-        if moments and ni.next_event_stale(moments[0], now):
+        # R4-6 (2026-10-04): an explicit day/night window ("today", "tonight") asks for the WHOLE
+        # period including past-but-today rows (an MLB schedule at 10 PM includes the Finals from
+        # earlier) — the stale-first check only fires on an open "next" window.
+        in_period = window in ("today", "tonight")
+        if moments and not in_period and ni.next_event_stale(moments[0], now):
             return "its next time has already passed"
     if kind == "result":
         words: set[str] = set()
@@ -2347,7 +2377,8 @@ def _verify_frame(frame: dict, source: dict, params: dict, built: dict, request:
         or next((c for c in asked if c.split("/")[0] in {x.split("/")[0] for x in cats}), None) \
         or (asked[0] if asked else "")
     info = _subcategory(frame["lib"], sub) if frame["lib"] is not None and sub else {}
-    gap = _frame_gap(frame["kind"], chosen, built["preview_payload"], now)         or _legacy_window_gap(frame["window"], chosen, answers)
+    gap = _frame_gap(frame["kind"], chosen, built["preview_payload"], now,
+                      window=frame.get("window"))         or _legacy_window_gap(frame["window"], chosen, answers)
     if gap:
         reasons.append(gap)
     about: set[str] = set()
@@ -2428,12 +2459,15 @@ def _stray_topics(frame: dict, source: dict, params: dict, answers: list[dict], 
     # takes (``own`` already holds them); a brand it doesn't take ("Tribune", "Post") is stray.
     # F7-B class fix (2026-10-04): the request's RAW casing — never the model's Title-Case subject
     # (phones auto-capitalize sentence-initial, the model Title-Cases its subject). A sentence-
-    # initial cap is a proper noun only when its folded token is NOT an English / taxonomy / generic
-    # word (an English suffix -ly / -est / -ity / -ing / -ness / -tion covers "Nightly" / "Biggest"
-    # / "Celebrity" / "Trending" / "Business" / "Election" when the taxonomy omits them).
+    # initial cap is a proper noun only when its folded token is NOT an English / taxonomy word
+    # the topic check itself evaluates (``eligible``: single-word kw / sub.label / whole-phrase
+    # multi-word kw the ask carries). R4-1 fix (2026-10-04): using ``set(topics)`` here exempted
+    # every token of every multi-word kw phrase ("nasa launch" → nasa; "fda approval" → fda) so a
+    # proper-noun subject the user named escaped. ``eligible`` is the scoped set the topic check
+    # already uses — a word NOT in it isn't a topic the Library teaches for this ask.
     entity = str((source.get("coverage") or {}).get("entity") or "").strip()
     if (not entity or ";" in entity) and not (set(params) & _GEO_PARAMS):
-        exempt_initial = _NAME_STOP | set(topics)
+        exempt_initial = _NAME_STOP | eligible
         proper = _request_proper(request, exempt_initial)
         proper -= _answer_tokens(" ".join(str(r) for r in (source.get("readings") or [])))
         proper -= _answer_tokens(str(intent.get("place") or ""))
@@ -2443,18 +2477,13 @@ def _stray_topics(frame: dict, source: dict, params: dict, answers: list[dict], 
     return stray
 
 
-# English suffixes a sentence-initial capital may carry when it is a common adjective / noun / verb
-# (Nightly, Biggest, Celebrity, Trending, Business, Election). Not applied mid-sentence — a cap in
-# the middle of the ask is explicit user casing. Length guard keeps "lily"/"toby" short names safe.
-_ENGLISH_SUFFIXES = ("ly", "est", "ing", "ity", "ness", "tion", "sion", "ful", "less", "ous", "ive")
-_MIN_SUFFIX_LEN = 5
-
-
 def _request_proper(request: str, exempt_initial: set[str]) -> set[str]:
     """Capitalized subject tokens in the RAW request (never the model's subject casing). A sentence
-    initial token (first word, or first after . ! ?) is skipped when its folded form is a known
-    English / taxonomy / generic word or carries a common English suffix — phones auto-capitalize
-    the start of every ask and that cap is not alone a proper-noun signal; mid-sentence caps are."""
+    initial token (first word, or first after . ! ?) is skipped only when its folded form is in
+    ``exempt_initial`` (_NAME_STOP + the taxonomy words the topic check evaluates) — phones auto-
+    capitalize the start of every ask and that cap is not alone a proper-noun signal when the word
+    is generic; a lowercase-suffix lookalike ("Boeing" / "Everest" / "Guinness") is still a name
+    (R4-1, 2026-10-04); mid-sentence caps are always proper."""
     assert isinstance(request, str), "request must be a string"
     assert isinstance(exempt_initial, (set, frozenset)), "exempt_initial must be a set"
     text = _amp(request)
@@ -2467,18 +2496,10 @@ def _request_proper(request: str, exempt_initial: set[str]) -> set[str]:
             if not (word[0].isupper() or any(ch.isdigit() for ch in word)):
                 continue
             folded = _answer_tokens(word)
-            if idx == 0 and (folded <= exempt_initial or _looks_english(word.lower())):
+            if idx == 0 and folded <= exempt_initial:
                 continue  # auto-cap at sentence start, not a naming word
             out |= folded
     return out
-
-
-def _looks_english(word: str) -> bool:
-    """A lowercase token that ends in a common English suffix and is long enough to make the ending
-    meaningful (``nightly`` / ``biggest`` / ``celebrity`` / ``trending``); not applied mid-sentence."""
-    assert isinstance(word, str), "word must be a string"
-    assert _MIN_SUFFIX_LEN >= 1, "min length must be positive"
-    return len(word) >= _MIN_SUFFIX_LEN and word.endswith(_ENGLISH_SUFFIXES)
 
 
 # words that say what KIND of data a source gives (its name's "service alerts", "latest version") or fill an ask
@@ -3456,9 +3477,12 @@ def _derive_clock_template(source_id: str, url: str, filled_params: dict[str, st
     reproduces the filled value at the engine's current clock — a %Y value "2026" rendered from
     offset 0 matches "2026", so year codes never get re-inferred as -276 days ago. Only a
     date-exact format whose filled value doesn't match the record's offset falls back to inferring
-    (an older sample built from a different clock). Every occurrence of the filled value is swapped,
-    and the URL-encoded form is tried too — the derived template reproduces the fetched URL
-    byte-for-byte on day D and walks forward on day D+1."""
+    (an older sample built from a different clock). The derived template reproduces the fetched URL
+    byte-for-byte on day D and walks forward on day D+1.
+
+    R4-9 (2026-10-04): the swap walks the Library's ``access.url_template`` by POSITION — a
+    date whose day equals the month (10/10, 11/11, 2026-01-01) binds each slot to its own
+    placeholder instead of collapsing onto the first value match."""
     lib = _resolve_library()
     if lib is None:
         return "", {}
@@ -3470,6 +3494,9 @@ def _derive_clock_template(source_id: str, url: str, filled_params: dict[str, st
         return "", {}
     access = record.get("access") or {}
     params = list(access.get("params") or [])
+    lib_template = str(access.get("url_template") or "")
+    if not lib_template:
+        return "", {}  # R4-9: without the record's own template we can't align by position
     # the record's own offset adjustment (schedule / next_event cards flip look-back to look-ahead):
     # the engine must store the SAME adjusted offset or substitute_params won't reproduce the URL
     from .library_resolve import _clock as lib_clock  # local: engine-internal module
@@ -3499,20 +3526,49 @@ def _derive_clock_template(source_id: str, url: str, filled_params: dict[str, st
                       "label": str(p.get("label") or name)[:200]}
     if not out:
         return "", {}
-    # Swap each filled clock value's EVERY occurrence (raw + URL-encoded) with the ``{{param:name}}``
-    # slot: a URL that holds the same date twice, or encodes a separator, still templates cleanly.
-    template = url
-    for name, meta in out.items():
-        value = filled_params.get(name) or lib_clock(meta["format"], int(meta["offset_days"]), now)
-        if not value:
-            continue
-        slot = "{{param:" + name + "}}"
-        if value in template:
-            template = template.replace(value, slot)
-        encoded = quote(value, safe="")
-        if encoded != value and encoded in template:
-            template = template.replace(encoded, slot)
-    return (template, out) if template != url else ("", {})
+    # R4-9: walk the Library template's placeholders in position order. Each ``{name}`` segment
+    # emits either a clock slot (``{{param:name}}``) or the already-filled non-clock value from
+    # ``filled_params``; a URL whose host/path/query doesn't align with the record is left as-is.
+    template = _templatize_url_by_position(url, lib_template, out, filled_params)
+    return (template, out) if template and template != url else ("", {})
+
+
+def _templatize_url_by_position(url: str, lib_template: str, clock_meta: dict[str, dict],
+                                  filled_params: dict[str, str]) -> str:
+    """Build the sealed URL template by aligning ``lib_template``'s ``{name}`` placeholders against
+    ``url`` by POSITION — a clock placeholder emits ``{{param:name}}``, a non-clock placeholder
+    emits the value as the record filled it. Returns ``""`` when the two templates can't be aligned
+    (a non-literal chunk fails to match ``url``) so the caller leaves the URL untouched."""
+    assert isinstance(url, str) and isinstance(lib_template, str), "args required"
+    assert isinstance(clock_meta, dict) and isinstance(filled_params, dict), "metas required"
+    pattern = re.compile(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}")
+    parts: list[tuple[str, str | None]] = []  # (literal_before, placeholder_name_or_None)
+    pos = 0
+    for m in pattern.finditer(lib_template):  # bounded by template length
+        parts.append((lib_template[pos:m.start()], m.group(1)))
+        pos = m.end()
+    parts.append((lib_template[pos:], None))
+    out: list[str] = []
+    cursor = 0
+    for i, (lit, name) in enumerate(parts):  # bounded (one entry per placeholder + tail)
+        if not url.startswith(lit, cursor):
+            return ""  # a non-matching literal chunk — the record's template drifted
+        out.append(lit)
+        cursor += len(lit)
+        if name is None:
+            break
+        next_lit = parts[i + 1][0] if i + 1 < len(parts) else ""
+        end = url.find(next_lit, cursor) if next_lit else len(url)
+        if end < 0:
+            return ""
+        if name in clock_meta:
+            out.append("{{param:" + name + "}}")
+        else:
+            out.append(url[cursor:end])  # non-clock value stays as the record filled it
+        cursor = end
+    if cursor != len(url):
+        return ""  # trailing bytes in url that aren't in the template
+    return "".join(out)
 
 
 def _offset_from_filled(value: object, fmt: str, now: datetime) -> int | None:
@@ -3570,16 +3626,36 @@ def upgrade_pre_f1_literal_dates(store: ni.NIStore, item: dict) -> dict | None:
     clock_meta = _f1_clock_meta_from_record(lib_record)
     if not clock_meta:
         return None  # the record has no clock-fill params — nothing to rewrite
-    when = _f1_item_creation_local(item.get("created_at"))
-    if when is None:
+    # R4-4 (2026-10-04): a v0.24.x Docker card was filled on the SERVER's calendar (UTC) while the
+    # reader is in LA / NZ — the user-zone creation moment renders the wrong date and the verify
+    # declines forever. Try the creation moment in UTC, the user's zone, and the server's zone
+    # (astimezone fallback); accept whichever reproduces the stored URL byte-for-byte.
+    candidates = _f1_creation_candidates(item.get("created_at"))
+    if not candidates:
         return None
-    template = _f1_templatize_literal(url, clock_meta, when)
-    if template == url:
-        return None  # no clock value matched the stored literal — likely a different clock day
-    new_spec = _f1_merge_clock_params(spec, template, clock_meta)
-    if _f1_render_url_at(new_spec, when) != url:
+    when: datetime | None = None
+    template = ""
+    for cand in candidates[:3]:  # bounded (UTC + user + server)
+        tried = _f1_templatize_literal(url, clock_meta, cand)
+        if tried == url:
+            continue
+        probe_spec = _f1_merge_clock_params(spec, tried, clock_meta)
+        if _f1_render_url_at(probe_spec, cand) == url:
+            when, template = cand, tried
+            break
+    if when is None or not template:
         log.info("ni upgrade: pre-F1 clock-template verify mismatch; card left untouched")
         return None
+    new_spec = _f1_merge_clock_params(spec, template, clock_meta)
+    # R4-5 (2026-10-04): a NEOWS-shaped pipeline path (``near_earth_objects["2026-10-01"]``) is a
+    # literal that freezes on day 2 unless reslotted alongside the URL — the same creation-day
+    # values the URL swap used ride into the pipeline's quoted keys and where-value slots.
+    new_spec["pipeline"] = _reslot_clock_params_in_pipeline(
+        new_spec.get("pipeline") or [],
+        {name: ni._render_clock_param(
+            {"kind": "clock", "format": m["format"], "offset_days": int(m["offset_days"])}, when)
+         for name, m in clock_meta.items()},
+        frozenset(clock_meta.keys()))
     orig_u, new_u = urlparse(url), urlparse(template)
     assert orig_u.hostname == new_u.hostname, "upgrade must preserve host"
     assert orig_u.scheme == new_u.scheme, "upgrade must preserve scheme"
@@ -3633,6 +3709,38 @@ def _f1_item_creation_local(created_at: object) -> datetime | None:
         raw = raw.replace(tzinfo=UTC)
     tz = ni._clock().tzinfo
     return raw.astimezone(tz) if tz is not None else raw
+
+
+def _f1_creation_candidates(created_at: object) -> list[datetime]:
+    """R4-4 (2026-10-04): the creation moment viewed in each of the zones a Docker install may
+    have rendered the literal in — UTC (server with no TZ), the user's current zone, and the
+    local machine's zone (``astimezone`` fallback). Each candidate is bounded; dedup preserves
+    order (UTC-first, then user, then server) so a tie binds to the simplest explanation."""
+    assert created_at is None or isinstance(created_at, (str, datetime)), "created_at type"
+    assert ni._MAX_CLOCK_OFFSET_DAYS > 0, "clock-offset bound sanity"
+    if created_at is None:
+        return []
+    try:
+        raw = created_at if isinstance(created_at, datetime) \
+            else datetime.fromisoformat(str(created_at).replace(" ", "T"))
+    except ValueError:
+        return []
+    if raw.tzinfo is None:
+        raw = raw.replace(tzinfo=UTC)
+    out: list[datetime] = [raw.astimezone(UTC)]  # server (Docker) rendered in UTC
+    user_tz = ni._clock().tzinfo
+    if user_tz is not None:
+        out.append(raw.astimezone(user_tz))
+    out.append(raw.astimezone())  # local-machine fallback
+    seen: set[str] = set()
+    unique: list[datetime] = []
+    for cand in out[:3]:  # bounded (3 candidates)
+        key = cand.strftime("%Y-%m-%dT%H:%M:%z")
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(cand)
+    return unique
 
 
 def _f1_templatize_literal(url: str, clock_meta: dict[str, dict],
@@ -3695,6 +3803,35 @@ def _f1_render_url_at(spec: dict, when: datetime) -> str:
         return quote(raw, safe="")
 
     return _F1_PLACEHOLDER_RE.sub(_one, url)
+
+
+def _realign_url_to_now(store: ni.NIStore, item_id: str, live: dict, url: str,
+                         now: datetime) -> str:
+    """R4-2 (2026-10-04): a Library pick whose record carries a clock template rebuilds the fetch
+    URL at ``now``. A tap at 23:59, a paused-for-access resume days later, or a zone change
+    mid-flow all left the sealed ``_library_url`` from an earlier clock — the handoff's C2 verify
+    then crashed when the current clock rendered a different date. Rebuilding here, and verifying
+    at the same ``now`` in ``_handoff``, keeps the fetch URL and the sealed template in step.
+
+    Mutates ``live`` in place (writes the realigned URL back) so the ``picked`` gate downstream
+    still matches. A pick without a template leaves ``url`` and ``live`` untouched."""
+    assert store is not None and item_id, "store + id required"
+    assert isinstance(live, dict) and isinstance(url, str), "live + url required"
+    assert isinstance(now, datetime), "now must be a datetime"
+    clock_params = live.get("_library_clock_params")
+    template = str(live.get("_library_url_template") or "")
+    if not template or not isinstance(clock_params, dict) or not clock_params:
+        return url
+    probe = {"params": {name: {"label": cp.get("label") or name, "kind": "clock",
+                                "format": cp["format"], "offset_days": int(cp["offset_days"])}
+                         for name, cp in clock_params.items()},
+             "source": {"url": template}}
+    rebuilt = _f1_render_url_at(probe, now)
+    if not rebuilt or rebuilt == url:
+        return url
+    live["_library_url"] = rebuilt
+    _flow_write(store, item_id, live)
+    return rebuilt
 
 
 def _clean_key_need(need: object) -> dict | None:
@@ -4240,9 +4377,15 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
     ``_born`` marker only when the item was NOT flow-born originally.
     """
     assert isinstance(url, str) and url, "url required"
+    live = {} if remap else (_flow_read(store, item_id) or {})
+    # R4-2 (2026-10-04): freeze one ``now`` per build. A pick carrying a sealed clock template
+    # rebuilds its fetch URL at this moment (stale ``_library_url`` from a tap-then-midnight-cross
+    # resume is realigned to today's date), and the handoff's verify reads the sealed spec at this
+    # SAME moment — so a build straddling midnight never crashes the C2 assert on a stale URL.
+    fetch_now = ni._clock()
+    url = _realign_url_to_now(store, item_id, live, url, fetch_now) if not remap else url
     _transition(store, item_id, "sampling", source_url=url,
                 note=f"fetching consented source ({_host_hint(url)})")
-    live = {} if remap else (_flow_read(store, item_id) or {})
     picked = bool(live.get("_library_source")) and live.get("_library_url") == url
     pick_url = url  # the address as the pick offered it (the row a move-on drops)
     if picked and live.get("_library_lookup"):
@@ -4334,7 +4477,8 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
         # the very thing (live 2026-09-29); what the source can't answer is computed above
         return _handoff(store, item_id, request, intent, url, answered, answered["fields"],
                         answered["klass"], converted=[], judge=None, degrade_note=note,
-                        remap=remap, keep_source=keep_source, keep_params=keep_params)
+                        remap=remap, keep_source=keep_source, keep_params=keep_params,
+                        fetch_now=fetch_now)
     # F6 (2026-10-04): a declared-answers build that misfits (answered is None) used to fall to
     # the model mapping path with no frame verify — "next Yankees game" shipped off the Braves
     # schedule. The source-level checks (category, other subject, place, stray topic) still apply:
@@ -4444,15 +4588,20 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
         break
     return _handoff(store, item_id, request, intent, url, built, fields, klass,
                     converted=converted, judge=judge, degrade_note=degrade_note,
-                    remap=remap, keep_source=keep_source, keep_params=keep_params)
+                    remap=remap, keep_source=keep_source, keep_params=keep_params,
+                    fetch_now=fetch_now)
 
 
 def _handoff(store: ni.NIStore, item_id: str, request: str, intent: dict, url: str,
              built: dict, fields: dict, klass: str, *, converted: list, judge: dict | None,
              degrade_note: str | None, remap: bool, keep_source: dict | None,
-             keep_params: dict | None) -> dict:
+             keep_params: dict | None, fetch_now: datetime | None = None) -> dict:
     """The built pipeline + scene → the sealed spec (source, format, access, alert, notes) →
-    ``_finalize``. Shared by the model mapping path and the Library-answers path."""
+    ``_finalize``. Shared by the model mapping path and the Library-answers path.
+
+    ``fetch_now`` (R4-2, 2026-10-04): the frozen clock the sampler used to render the fetch URL;
+    the C2 verify reads the sealed spec at this SAME moment so a build that crosses midnight
+    between fetch and handoff never crashes the assert on a stale ``_clock()`` advance."""
     # R1/R2 (2026-09-15): a remap of a recipe-born card must PRESERVE the
     # sealed source object (url template + $secret headers) and params —
     # rebuilding a bare {type, url} used to strip the credential header and
@@ -4494,14 +4643,34 @@ def _handoff(store: ni.NIStore, item_id: str, request: str, intent: dict, url: s
     # A13 (case matrix): deterministic edge-triggered alert authoring — only
     # when threshold + direction + value class all line up. Adds spec.alerts.
     alert_field = _maybe_author_alert(spec, fields, klass, request, intent)
+    # R4-11 (2026-10-04): a mapping-path pipeline (freeform or remap) whose extract-paths or
+    # where-values hold a clock-filled literal (``near_earth_objects["2026-10-05"]``) freezes on
+    # the sample day unless reslotted the same way the declared-answers path does. Scan the
+    # sealed params for clock-kind entries and run the reslot — a card remapped on a Library
+    # source with clock params still walks forward.
+    sealed_params = spec.get("params") or {}
+    clock_names = frozenset(name for name, p in sealed_params.items()
+                              if isinstance(p, dict) and p.get("kind") == "clock")
+    if clock_names:
+        reslot_at = fetch_now or ni._clock()
+        clock_values = {name: ni._render_clock_param(sealed_params[name], reslot_at)
+                          for name in clock_names}
+        spec["pipeline"] = _reslot_clock_params_in_pipeline(
+            spec.get("pipeline") or [], clock_values, clock_names)
     # C2 (audit 2026-09-13): the frozen source URL MUST equal the URL we
     # actually fetched — a mismatch is a code defect (someone rewrote the URL
     # between fetch and seal), not a user-facing failure. F1 (2026-10-04): a
     # Library pick with clock params seals the TEMPLATED URL; substituting the
     # clock values with the current clock must reproduce the URL the sample
-    # fetch used.
+    # fetch used. R4-2 (2026-10-04): the substitute runs at ``fetch_now`` (the
+    # moment the sampler rendered the fetch URL) so a build crossing midnight
+    # between fetch and seal never asserts on a stale ``_clock()`` advance.
+    verify_at = fetch_now if (clock_params and fetch_now is not None) else None
     assert spec["source"]["url"] == url \
-        or (clock_params and ni.substitute_params(spec)["source"]["url"] == url), \
+        or (clock_params and verify_at is not None
+            and _f1_render_url_at(spec, verify_at) == url) \
+        or (clock_params and verify_at is None
+            and ni.substitute_params(spec)["source"]["url"] == url), \
         "frozen source.url must match fetched url"
     born = "flow" if not remap else None
     extra_notes: list[str] = []

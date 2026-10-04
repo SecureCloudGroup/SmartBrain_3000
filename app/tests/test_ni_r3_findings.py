@@ -303,11 +303,15 @@ def test_e_clock_param_in_answer_path_rides_through_to_the_engine() -> None:
     assert rows_extract["paths"]["rows"] == f'near_earth_objects["{tomorrow}"]'
 
 
-# ---- I: only the DESKTOP authority writes the engine's user zone --------------------------------
+# ---- I: a REMOTE device sets the zone when none is stored; a DESKTOP always wins ---------------
+# R4-3 (field 2026-10-04): the old R3-I rule (DESKTOP-only) stranded headless / LAN-only /
+# phone-only installs on UTC — those users never get a desktop handshake. The new rule allows a
+# REMOTE device to set the zone when nothing is stored yet, records the setter on meta
+# ``user:timezone_by``, and keeps a DESKTOP-set zone immune to remote overrides.
 
-def test_i_remote_authority_does_not_set_the_user_timezone(tmp_path, monkeypatch) -> None:
-    """A paired phone's handshake must not alternate the stored zone with the desktop's — the engine's
-    clock meta is sealed to the desktop."""
+def test_i_remote_authority_does_not_override_the_desktop_timezone(tmp_path, monkeypatch) -> None:
+    """A paired phone's handshake must not alternate a desktop-set zone — the engine's clock meta
+    stays sealed to the desktop once the desktop has written it."""
     import os
 
     from fastapi.testclient import TestClient
@@ -319,11 +323,12 @@ def test_i_remote_authority_does_not_set_the_user_timezone(tmp_path, monkeypatch
     monkeypatch.setenv("SMARTBRAIN_DB_PATH", str(tmp_path / "tz.duckdb"))
     app = create_app()
     with TestClient(app) as c:
-        # desktop probe: zone is written
+        # desktop probe: zone is written and tagged as desktop-set
         desk_auth = {"Authorization": f"Bearer {os.environ['SMARTBRAIN_LOCAL_TOKEN']}",
                       "X-SmartBrain-Timezone": "America/New_York"}
         assert c.get("/api/health", headers=desk_auth).json()["status"] == "ok"
         assert dbmod.meta_get(app.state.dbx, "user:timezone") == "America/New_York"
+        assert dbmod.meta_get(app.state.dbx, "user:timezone_by") == "desktop"
         # phone (relay credential) probes with a different zone; the stored zone stays NY
         relay = {**auth.relay_headers("device-abc"),
                   "X-SmartBrain-Timezone": "America/Los_Angeles"}
@@ -331,6 +336,63 @@ def test_i_remote_authority_does_not_set_the_user_timezone(tmp_path, monkeypatch
         c.headers.pop("Authorization", None)
         assert c.get("/api/health", headers=relay).status_code == 200
         assert dbmod.meta_get(app.state.dbx, "user:timezone") == "America/New_York"
+        assert dbmod.meta_get(app.state.dbx, "user:timezone_by") == "desktop"
+
+
+def test_i_remote_authority_seeds_the_zone_when_none_is_stored(tmp_path, monkeypatch) -> None:
+    """A headless / LAN-only install never sees a desktop handshake — a REMOTE device's reported
+    zone seeds the engine's clock (R4-3) so NI windows cut on the user's day instead of UTC."""
+    from fastapi.testclient import TestClient
+
+    from smartbrain_3000 import auth
+    from smartbrain_3000 import db as dbmod
+    from smartbrain_3000.main import create_app
+
+    monkeypatch.setenv("SMARTBRAIN_DB_PATH", str(tmp_path / "tz.duckdb"))
+    app = create_app()
+    with TestClient(app) as c:
+        c.headers.pop("Authorization", None)  # no desktop credential
+        # an anonymous probe (no credential at all) never seeds the zone
+        assert c.get("/api/health", headers={"X-SmartBrain-Timezone": "Europe/Paris"}).status_code == 200
+        assert not dbmod.meta_get(app.state.dbx, "user:timezone")
+        relay = {**auth.relay_headers("device-abc"),
+                  "X-SmartBrain-Timezone": "Asia/Tokyo"}
+        assert c.get("/api/health", headers=relay).status_code == 200
+        assert dbmod.meta_get(app.state.dbx, "user:timezone") == "Asia/Tokyo"
+        assert dbmod.meta_get(app.state.dbx, "user:timezone_by") == "remote"
+        # another remote probe with a DIFFERENT zone updates the stored zone (no desktop has
+        # claimed it yet) — the setter stays "remote".
+        relay2 = {**auth.relay_headers("device-xyz"),
+                   "X-SmartBrain-Timezone": "America/Chicago"}
+        assert c.get("/api/health", headers=relay2).status_code == 200
+        assert dbmod.meta_get(app.state.dbx, "user:timezone") in ("Asia/Tokyo", "America/Chicago")
+
+
+def test_i_desktop_always_overrides_a_remote_set_zone(tmp_path, monkeypatch) -> None:
+    """A later DESKTOP handshake wins over a remote-set zone — the desktop is the authoritative
+    source once it joins."""
+    import os
+
+    from fastapi.testclient import TestClient
+
+    from smartbrain_3000 import auth
+    from smartbrain_3000 import db as dbmod
+    from smartbrain_3000.main import create_app
+
+    monkeypatch.setenv("SMARTBRAIN_DB_PATH", str(tmp_path / "tz.duckdb"))
+    app = create_app()
+    with TestClient(app) as c:
+        c.headers.pop("Authorization", None)
+        relay = {**auth.relay_headers("device-abc"),
+                  "X-SmartBrain-Timezone": "America/Los_Angeles"}
+        assert c.get("/api/health", headers=relay).status_code == 200
+        assert dbmod.meta_get(app.state.dbx, "user:timezone") == "America/Los_Angeles"
+        # desktop joins and reports a different zone — the stored zone flips to NY, setter desktop
+        desk_auth = {"Authorization": f"Bearer {os.environ['SMARTBRAIN_LOCAL_TOKEN']}",
+                      "X-SmartBrain-Timezone": "America/New_York"}
+        assert c.get("/api/health", headers=desk_auth).json()["status"] == "ok"
+        assert dbmod.meta_get(app.state.dbx, "user:timezone") == "America/New_York"
+        assert dbmod.meta_get(app.state.dbx, "user:timezone_by") == "desktop"
 
 
 # ---- H: export skips clock params (no empty ``value`` added to a clock-kind decl) --------------

@@ -211,13 +211,11 @@ _F7_SHIPS = [
     ("abc news headlines", "ABC News", ["headlines"], "abc-top"),
     ("baseball games tonight", "baseball", ["games"], "mlb-schedule"),
     ("latest world headlines", "world news", ["headlines"], "bbc-world"),
-    # F7-B class fix (2026-10-04): a sentence-initial auto-capital that is a taxonomy / English /
-    # suffix-English word is not a proper noun; the model's Title-Case subject is never a proper
-    # noun; both used to refuse general headline feeds.
-    ("Biggest stories today", "biggest stories", ["headlines"], "abc-top"),  # Biggest = sentence-initial autocap
-    ("Business headlines", "business headlines", ["headlines"], "abc-top"),  # Business = taxonomy
-    ("Nightly news", "nightly news", ["headlines"], "abc-top"),              # Nightly = -ly English suffix
-    ("Celebrity news", "celebrity news", ["headlines"], "abc-top"),          # Celebrity = -ity English suffix
+    # R4-1 class fix (2026-10-04): a sentence-initial auto-capital that folds to a word the taxonomy
+    # evaluates for this ask AND belongs to a subcategory this source is filed under still ships —
+    # the user named this source's own topic, not a proper noun.
+    ("Breaking news", "breaking news", ["headlines"], "abc-top"),    # "breaking" is a kw of news/headlines
+    ("Top stories today", "top stories", ["headlines"], "abc-top"),  # "top stories" is a kw of news/headlines
     # the model's Title-Case subject must not drive F7 — only the user's raw casing in the request:
     ("business headlines", "Business Headlines", ["headlines"], "abc-top"),
 ]
@@ -481,3 +479,85 @@ def test_d13_library_candidates_logs_an_unexpected_exception_and_still_returns_e
     assert got == []
     assert logs, "an unexpected exception must be logged (host-free)"
     assert "RuntimeError" in logs[0][1]
+
+
+# ---- R4-1 (2026-10-04): the previous F7-B exempt_initial = _NAME_STOP | set(topics) + a suffix
+# heuristic let NASA / FDA / SEC / TSA / Fed through (every token of every multi-word kw phrase was
+# an exempt topic) and Boeing / Beijing / Sterling / Budapest / Bucharest / Everest / Guinness /
+# Activision through (English suffix match). Class fix: the sentence-initial exemption covers only
+# genuinely generic words — _NAME_STOP and the ``eligible`` set the topic check itself evaluates
+# (sub.label + single-word kws + whole-phrase multi-word kws the ask carries) — never every token
+# of multi-word keyword phrases; the suffix heuristic is dropped.
+_R4_1_REFUSES = [
+    # topics path: taxonomy multi-word kw tokens (nasa launch / fda approval / sec filing / tsa wait /
+    # fed funds / southern california edison / falcon 9 / dominion energy / mercury retrograde) must
+    # NOT exempt the sentence-initial auto-cap of the user's named subject.
+    "NASA news", "FDA news", "SEC news", "TSA news", "Fed news",
+    "Edison news", "Falcon news", "Dominion news", "Mercury news",
+    # suffix path: proper names that happen to end in -ing / -est / -ness / -sion must refuse.
+    "Boeing news", "Beijing news", "Sterling news", "Activision news",
+    "Budapest news", "Bucharest news", "Everest news", "Guinness news",
+]
+
+
+@pytest.mark.parametrize("ask", _R4_1_REFUSES)
+def test_r4_1_proper_noun_subject_refuses_abc_top(ask) -> None:
+    """A sentence-initial auto-cap of a proper-noun subject (phones auto-cap "Boeing" / "NASA" /
+    "FDA") that is not a generic topic word must refuse the general US headline feed."""
+    subject = ask.split(" ")[0].lower() + " news"
+    intent = _intent(ask, subject, ["headlines"])
+    answers = ni_flow._library_answers("abc-top")
+    assert answers, "abc-top has answers"
+    chosen = ni_flow.select_answers(answers, ask, intent["wants"], intent["window"], intent["frame_kind"])
+    assert chosen, f"nothing chosen for {ask!r}"
+    row = {"source_id": "abc-top", "url": "https://abcnews.go.com/abcnews/topstories", "label": "",
+           "params": {}, "scope": "global"}
+    store = _store()
+    item_id = ni_flow.create_shell_item(store, ask)
+    rec = ni_flow._make_record(ask, "source", intent=intent)
+    rec["_ranked_library"] = [row]
+    ni_flow._flow_write(store, item_id, rec)
+    ni_flow.seal_library_pick(store, item_id, row["url"], row)
+    live = {**ni_flow._flow_read(store, item_id), "_library_source": "abc-top"}
+    built = {"chosen": chosen, "answers": answers, "preview_payload": {},
+             "unanswered": ni_flow._unanswered_wants(answers, ask, intent["wants"], [])}
+    reasons, _notes = ni_flow._verify_frame(ni_flow._frame_of(ask, intent), ni_flow._picked_source(live),
+                                            {}, built, ask, intent, _NOW)
+    assert reasons, f"abc-top shipped for {ask!r}: {reasons}"
+
+
+# ---- R4-12 (2026-10-04): a generic quantity want ("level", "value", "number") counts as answered
+# by a primary value answer only when it is the WHOLE user ask (no other content word qualifying
+# it). "snow level" is a specific measure, not the generic quantity "level"; shipping an open-meteo
+# tonight forecast for "snow level Tahoe" was confidently wrong.
+
+def test_r4_12_snow_level_want_is_not_the_generic_level() -> None:
+    """A ``level`` want next to another content word in the ask ("snow") is a specific measure, not
+    the generic ``_QUANTITY_WANTS`` shortcut. The want stays unanswered."""
+    answers = [{"name": "temperature", "label": "Temperature", "words": ["temperature"],
+                "kind": "value", "primary": True, "unit": "°F"}]
+    out = ni_flow._unanswered_wants(answers, "snow level tahoe", ["level"], ["tahoe"])
+    assert "level" in out, out
+
+
+def test_r4_12_bare_level_want_still_covered_by_primary_value() -> None:
+    """A ``level`` want with no other content word in the ask IS the generic quantity any primary
+    value answer reports. The want is covered."""
+    answers = [{"name": "temperature", "label": "Temperature", "words": ["temperature"],
+                "kind": "value", "primary": True, "unit": "°F"}]
+    out = ni_flow._unanswered_wants(answers, "lake tahoe level", ["level"], ["lake", "tahoe"])
+    assert out == [], out
+
+
+def test_r4_12_uv_level_at_place_is_covered_by_a_uv_primary_value() -> None:
+    """"UV level in Miami": the only non-filled, non-generic ask word ("uv") IS primary-covered by
+    an open-meteo-uv shaped source. The want is covered. ``_sample_and_map`` rides the intent's
+    place as a filled value for exactly this reason — a geo resolver's lat/lon leaves the place
+    name in the ask otherwise."""
+    answers = [{"name": "uv_max_today", "label": "UV index today (max)",
+                "words": ["uv", "uv index", "uv today"], "kind": "value", "primary": True},
+               {"name": "uv_now", "label": "UV index right now",
+                "words": ["uv now", "uv index", "right now"], "kind": "value", "primary": True}]
+    # production _sample_and_map passes [*params.values(), intent.get("place")]; the place rides
+    out = ni_flow._unanswered_wants(answers, "UV level in Miami", ["level"], ["25.78", "-80.19", "Miami"])
+    assert out == [], out

@@ -418,23 +418,29 @@ def _name_tokens(subject: str, ask: str) -> list[str]:
 
 def _subject_hyphen_parts(subject: str, ask: str) -> list[str]:
     """The hyphen-split parts of a hyphenated brand name as it was written in
-    the subject or the ask ("T-Mobile" → ["t","mobile"]; "Chick-fil-A" →
-    ["chick","fil","a"]; "7-Eleven" → ["7","eleven"]). Empty when neither the
-    subject nor the ask carries a hyphenated proper name. Short parts bypass
-    the ``_name_tokens`` ≥3 filter because a brand's own hyphen token
-    sequence is the key (field 2026-10-04: t-mobile.com, coca-cola.com,
-    mercedes-benz.com and the other hyphenated brands all missed the name)."""
-    for text in (str(subject or ""), str(ask or "")):
-        if text == text.upper():  # a shouted ask names nothing (D10)
+    the SUBJECT ("T-Mobile" → ["t","mobile"]; "Chick-fil-A" →
+    ["chick","fil","a"]; "7-Eleven" → ["7","eleven"]). Empty when the
+    subject carries no hyphenated proper name. Short parts bypass the
+    ``_name_tokens`` ≥3 filter because a brand's own hyphen token sequence
+    is the key (field 2026-10-04: t-mobile.com, coca-cola.com,
+    mercedes-benz.com and the other hyphenated brands all missed the name).
+    R4-8 (2026-10-04): the hyphen word must live in the SUBJECT (same rule
+    _name_tokens uses). An ask-only hyphen is never a brand of the subject
+    ("Verizon vs T-Mobile outage" with subject "Verizon outage" used to ship
+    t-mobile.com for Verizon; "Real-time NVDA price", "COVID-19 cases in
+    Ohio", "is X-Men on Disney+", "New-York news" all did similar)."""
+    text = str(subject or "")
+    if text == text.upper():  # a shouted ask names nothing (D10)
+        return []
+    _ = ask  # ask retained for signature compat with callers that pass it
+    for word in re.findall(r"\S+", text):
+        if "-" not in word or not re.search(r"[A-Z]", word):
             continue
-        for word in re.findall(r"\S+", text):
-            if "-" not in word or not re.search(r"[A-Z]", word):
-                continue
-            parts = [p.lower() for p in word.split("-")]
-            if (len(parts) >= 2
-                    and all(re.fullmatch(r"[a-z0-9]+", p) for p in parts)
-                    and not any(p in _FIRST_PARTY_GENERIC for p in parts)):
-                return parts
+        parts = [p.lower() for p in word.split("-")]
+        if (len(parts) >= 2
+                and all(re.fullmatch(r"[a-z0-9]+", p) for p in parts)
+                and not any(p in _FIRST_PARTY_GENERIC for p in parts)):
+            return parts
     return []
 
 

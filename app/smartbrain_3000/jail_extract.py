@@ -67,11 +67,11 @@ _BLOCK_TAGS = frozenset({
     "label", "button", "caption"})
 _HIDDEN_STYLE_RE = re.compile(r"(?:display\s*:\s*none|visibility\s*:\s*hidden)",
                               re.IGNORECASE)
-# Guard against malformed HTML stacking an unbounded number of hidden opens.
-_MAX_HIDDEN_STACK = 256
+# Guard against malformed HTML stacking an unbounded number of open elements.
+_MAX_OPEN_STACK = 256
 # HTML void elements — no content and no end tag. A ``hidden``/``display:none``
 # on them hides nothing (they carry no body text); pushing them onto the
-# hidden stack leaks the state across every following sibling (field 2026-10-04:
+# open stack leaks the state across every following sibling (field 2026-10-04:
 # one ``<img style='display:none'>`` on githubstatus and the USWDS banner
 # ``<img aria-hidden>`` on every .gov page zeroed the rest of the body).
 _VOID_TAGS = frozenset({"area", "base", "br", "col", "embed", "hr", "img",
@@ -81,11 +81,22 @@ _VOID_TAGS = frozenset({"area", "base", "br", "col", "embed", "hr", "img",
 # the content IS the page (field 2026-10-04: wmata lost ~21 kB of real
 # status alerts to the stock [hidden] rule). Any other hidden div stays hidden.
 _REACT_STREAM_ID_RE = re.compile(r"^[SB]:\d+$")
-# Tags that auto-close a prior sibling of the same name per the HTML parsing
-# spec: a new ``<option>`` closes the previous one, same for ``<li>``,
-# ``<p>``, ``<dt>``, ``<dd>``. Without this a ``<select><option>a<option>b``
-# leaves the first option open on the hidden stack and hides the body below.
-_IMPLICIT_CLOSE: frozenset[str] = frozenset({"option", "li", "p", "dt", "dd"})
+# HTML's implied end tags: a new start tag closes any open peer of the same
+# category sitting on top of the stack (field 2026-10-04: ``<li hidden>a<li>b``,
+# ``<p hidden>x<p>y``, ``<tr hidden>…<tr>``, ``<td hidden>…<td>``,
+# ``<dt hidden>…<dd>`` all left the first hidden element open and swallowed
+# the rest of the body). We also close any open ``<p>`` when a block-level
+# element starts, matching the spec's generate-implied-end-tags step.
+_PEER_IMPLICIT_CLOSE: dict[str, frozenset[str]] = {
+    "p": frozenset({"p"}),
+    "li": frozenset({"li"}),
+    "option": frozenset({"option"}),
+    "dt": frozenset({"dt", "dd"}),
+    "dd": frozenset({"dt", "dd"}),
+    "tr": frozenset({"tr", "td", "th"}),
+    "td": frozenset({"td", "th"}),
+    "th": frozenset({"td", "th"}),
+}
 _INLINE_BREAKS = frozenset({"a", "span", "img", "input"})
 _META_CHARSET_RE = re.compile(rb"<meta[^>]{0,200}?charset\s*=\s*[\"']?\s*([A-Za-z0-9_.:-]{2,40})",
                               re.IGNORECASE)
@@ -257,10 +268,13 @@ class _GraphParser(HTMLParser):
         self.body: list[str] = []   # visible text, block tags as line breaks
         self._body_size = 0
         self._hidden = 0            # depth inside hidden regions
-        # Tag names of start tags that opened a hidden region (either an
-        # _INVISIBLE_TAGS tag or an attribute-hidden element). Matched on name
-        # at endtag — malformed markup leaves at most _MAX_HIDDEN_STACK entries.
-        self._hidden_stack: list[str] = []
+        # Parallel open-element stack: (tag, is_hidden). We track EVERY open
+        # element so implicit end tags and ancestor end tags pop the right
+        # hidden entries — a hidden stack keyed on name alone leaked state
+        # across every well-formed sibling that happened to share the
+        # hidden element's name (field 2026-10-04: ``<div><span hidden>x</div>``
+        # left ``span hidden`` live for the rest of the body).
+        self._open: list[tuple[str, bool]] = []
 
     def _body_break(self, sep: str = "\n") -> None:
         if not self.body:
@@ -270,6 +284,36 @@ class _GraphParser(HTMLParser):
         elif sep == "\n":
             self.body[-1] = "\n"  # a block edge outranks a word gap
 
+    def _pop_one(self) -> bool:
+        """Pop the topmost open element; return its hidden flag."""
+        assert self._open, "open stack must be non-empty when popping"
+        assert self._hidden >= 0, "hidden depth cannot go negative"
+        _, was_hidden = self._open.pop()
+        if was_hidden:
+            self._hidden -= 1
+        return was_hidden
+
+    def _implicit_close_before(self, tag: str) -> None:
+        """Apply HTML's generate-implied-end-tags before pushing ``tag``.
+
+        A block-level start closes an open ``<p>`` on top; a same-category
+        peer (``<li>``, ``<p>``, ``<dt>``/``<dd>``, ``<tr>``, ``<td>``/
+        ``<th>``, ``<option>``) closes any run of open peers on top. Bounded
+        by ``_MAX_OPEN_STACK``.
+        """
+        assert isinstance(tag, str), "tag must be a string"
+        assert len(self._open) <= _MAX_OPEN_STACK, "open stack bounded"
+        if (tag in _BLOCK_TAGS and tag != "p"
+                and self._open and self._open[-1][0] == "p"):
+            self._pop_one()
+        peers = _PEER_IMPLICIT_CLOSE.get(tag)
+        if not peers:
+            return
+        for _ in range(_MAX_OPEN_STACK):
+            if not self._open or self._open[-1][0] not in peers:
+                return
+            self._pop_one()
+
     def handle_startendtag(self, tag: str, attrs: list) -> None:
         if tag in _INVISIBLE_TAGS:
             return  # a self-closed <svg/> hides nothing
@@ -278,20 +322,17 @@ class _GraphParser(HTMLParser):
 
     def handle_starttag(self, tag: str, attrs: list) -> None:
         a = dict(attrs)
-        opens_hidden = ((tag in _INVISIBLE_TAGS or _is_invisible_attrs(a))
-                        and tag not in _VOID_TAGS)
-        if opens_hidden:
-            if (tag in _IMPLICIT_CLOSE and self._hidden_stack
-                    and self._hidden_stack[-1] == tag):
-                self._hidden_stack.pop()  # HTML spec: a sibling of the same name
-                self._hidden -= 1          # auto-closes its predecessor
-            if len(self._hidden_stack) < _MAX_HIDDEN_STACK:
-                self._hidden_stack.append(tag)
+        self._implicit_close_before(tag)
+        is_hidden = tag in _INVISIBLE_TAGS or _is_invisible_attrs(a)
+        if tag not in _VOID_TAGS and len(self._open) < _MAX_OPEN_STACK:
+            self._open.append((tag, is_hidden))
+            if is_hidden:
                 self._hidden += 1
-        elif tag in _BLOCK_TAGS:
-            self._body_break()
-        elif tag in _INLINE_BREAKS:
-            self._body_break(" ")  # adjacent links/spans are separate words on screen
+        if not is_hidden:
+            if tag in _BLOCK_TAGS:
+                self._body_break()
+            elif tag in _INLINE_BREAKS:
+                self._body_break(" ")  # adjacent links/spans are separate words
         if tag == "script" and (a.get("type") or "").strip().lower() == "application/ld+json":
             if len(self.jsonld_blobs) < _MAX_ENTITIES:
                 self._in_jsonld, self._jsonld_buf = True, []
@@ -337,18 +378,22 @@ class _GraphParser(HTMLParser):
             self._cell.append(data)
 
     def handle_endtag(self, tag: str) -> None:
-        # Pop down to the matching ancestor — malformed markup (an unclosed
-        # <option>, a <span> that never closed before </div>) must never leak
-        # the hidden state across the rest of the body. Bounded by the stack cap.
-        if tag in self._hidden_stack:
-            for _ in range(_MAX_HIDDEN_STACK):
-                if not self._hidden_stack:
-                    break
-                popped = self._hidden_stack.pop()
-                self._hidden -= 1
-                if popped == tag:
-                    break
-        elif tag in _BLOCK_TAGS:
+        # Pop down to the matching ancestor on the full open-element stack —
+        # malformed markup (an unclosed <span> that never closed before </div>,
+        # a <td hidden> left open at </tr>) must never leak the hidden state
+        # across the rest of the body. Bounded by _MAX_OPEN_STACK.
+        found_at = -1
+        for i in range(len(self._open) - 1, -1, -1):
+            if self._open[i][0] == tag:
+                found_at = i
+                break
+        hidden_self_popped = False
+        if found_at >= 0:
+            for _ in range(len(self._open) - found_at):
+                name = self._open[-1][0]
+                if self._pop_one() and name == tag:
+                    hidden_self_popped = True
+        if tag in _BLOCK_TAGS and not hidden_self_popped:
             self._body_break()
         if tag == "script" and self._in_jsonld:
             blob = "".join(self._jsonld_buf)

@@ -232,3 +232,236 @@ def test_f15_unknown_zone_clears_the_cache() -> None:
         assert nimod._user_timezone is None
     finally:
         nimod.set_user_timezone(None)
+
+
+# ---- R4-6: an event-list on an hour axis keeps the whole asked period --------------------------
+
+def test_r4_6_window_op_list_kind_disables_the_hour_floor() -> None:
+    """``_window_op`` with ``floor_hour=False`` maps a hour-step axis to ``period`` so the engine's
+    non-floor branch handles ``today`` / ``tonight`` — event / schedule / result lists keep the
+    whole asked period, past-but-today rows included."""
+    from smartbrain_3000 import ni_flow
+
+    op = ni_flow._window_op("t", "today", {}, [{"paths": {}}], step="hour", floor_hour=False)
+    assert op["step"] == "period"
+    # the default (forecast series) still floors
+    op = ni_flow._window_op("t", "today", {}, [{"paths": {}}], step="hour")
+    assert op["step"] == "hour"
+
+
+def test_r4_6_period_step_keeps_past_hour_rows_on_today(monkeypatch) -> None:
+    """At 14:10 the ``period`` branch of ``_window_test`` keeps the 8:01 AM row — a tide list
+    reading "tide times today" shows the morning low alongside the afternoon highs."""
+    _freeze(monkeypatch, datetime(2026, 10, 4, 14, 10, tzinfo=NY))
+    rows = [{"t": "2026-10-04T08:01:00"}, {"t": "2026-10-04T14:05:00"},
+            {"t": "2026-10-04T20:20:00"}]
+    out = nimod.run_pipeline([{"op": "transform", "apply": [
+        {"fn": "window", "field": "rows", "key": "t", "window": "today", "step": "period"}]}],
+        {"rows": rows})
+    assert [r["t"] for r in out["rows"]] == [
+        "2026-10-04T08:01:00", "2026-10-04T14:05:00", "2026-10-04T20:20:00"]
+
+
+def test_r4_6_frame_gap_skips_stale_first_on_today(monkeypatch) -> None:
+    """A ``schedule`` ask with ``window="today"`` keeps past-today events — the stale-first check
+    (which refuses a next_event whose first row has passed) must not fire on an explicit day
+    window, so a 10 PM "MLB schedule today" still ships the Final games from earlier."""
+    from smartbrain_3000 import ni_flow
+    from smartbrain_3000.ni import _TimeText
+
+    now = datetime(2026, 9, 29, 22, 30, tzinfo=NY)
+    _freeze(monkeypatch, now)
+    chosen = [{"kind": "list", "name": "schedule", "label": "games", "cells": [{"type": "time"}],
+                "axis": {"cell": "gameDate", "step": "hour"}}]
+    # a stale moment inside a time-transform output — the same shape the engine builds every refresh
+    stale_moment = datetime(2026, 9, 29, 17, 5, tzinfo=NY)
+    stale = _TimeText("1:05 PM")
+    stale.moment = stale_moment
+    preview = {"rows": [{"t": stale}]}
+    # with window=today: no gap (past-but-today is intentional)
+    assert ni_flow._frame_gap("schedule", chosen, preview, now, window="today") is None
+    # without window (ambient "next event"): the stale-first check still fires
+    assert ni_flow._frame_gap("schedule", chosen, preview, now) == "its next time has already passed"
+
+
+# ---- R4-9: slot-by-position swap even when day == month ----------------------------------------
+
+def test_r4_9_derive_clock_template_binds_by_position_on_mm_eq_dd() -> None:
+    """A URL like ``.../onthisday/events/10/10`` has two params that render the SAME value — the
+    position-aligned swap binds each placeholder to its own slot instead of a value replace that
+    collapses mm and dd into one."""
+    from smartbrain_3000 import ni_flow
+
+    class _Lib:
+        def get(self, _sid):
+            return {"access": {
+                "url_template": "https://ex.test/onthisday/events/{m}/{d}",
+                "params": [
+                    {"name": "m", "fill": {"from": "clock", "format": "%m", "offset_days": 0}},
+                    {"name": "d", "fill": {"from": "clock", "format": "%d", "offset_days": 0}}]},
+                "kinds": []}
+
+    import pytest
+    monkeypatch = pytest.MonkeyPatch()
+    try:
+        monkeypatch.setattr(ni_flow, "_LIBRARY_PROVIDER", lambda: _Lib())
+        _freeze(monkeypatch, datetime(2026, 10, 10, 9, 0, tzinfo=NY))
+        template, meta = ni_flow._derive_clock_template(
+            "demo", "https://ex.test/onthisday/events/10/10",
+            {"m": "10", "d": "10"})
+        assert template == "https://ex.test/onthisday/events/{{param:m}}/{{param:d}}"
+        assert set(meta) == {"m", "d"}
+    finally:
+        monkeypatch.undo()
+
+
+# ---- R4-4: a Docker card rendered the literal in UTC — the upgrade tries multiple zones --------
+
+def test_r4_4_upgrade_tries_server_zone_then_user_zone(monkeypatch) -> None:
+    """A card created at 02:00 UTC = 7 PM PDT the previous day: the user-zone render returns
+    yesterday's date, but the server (Docker) rendered today's. The upgrade tries UTC first and
+    accepts whichever reproduces the stored literal byte-for-byte."""
+    import duckdb
+
+    from smartbrain_3000 import db as dbmod
+    from smartbrain_3000 import ni_flow
+    from smartbrain_3000.secrets import gen_master_key
+
+    class _Lib:
+        def get(self, _sid):
+            return {"access": {
+                "url_template": "https://ex.test/schedule?date={date}",
+                "params": [{"name": "date", "label": "date",
+                              "fill": {"from": "clock", "format": "%Y-%m-%d",
+                                        "offset_days": 0}}]}, "kinds": []}
+
+    monkeypatch.setattr(ni_flow, "_LIBRARY_PROVIDER", lambda: _Lib())
+    conn = duckdb.connect(":memory:")
+    dbmod.run_migrations(conn)
+    store = nimod.NIStore(conn, gen_master_key())
+    _freeze(monkeypatch, datetime(2026, 10, 4, 19, 0, tzinfo=LA))
+    url = "https://ex.test/schedule?date=2026-10-05"  # Docker (UTC) rendered 10/5 at 02:00Z
+    spec = {"version": 1, "title": "t", "goal": "g", "params": {},
+             "source": {"type": "http_json", "url": url, "headers": {}},
+             "pipeline": [], "scene": {"type": "stack", "dir": "v", "gap": "sm",
+                                         "children": [{"type": "text", "value": "x",
+                                                        "role": "title", "tone": "default",
+                                                        "size": "md"}]},
+             "display": {"size": "small"}, "contract": None,
+             "repair_policy": {"l1": True, "l2_frontier": False}, "model": None}
+    item_id = store.add_item(spec, {})
+    ni_flow._flow_write(store, item_id, {"state": "ready", "request": "r",
+                                          "updated_at": "2026-10-03T12:00:00Z",
+                                          "notes": [], "_library_source": "demo"})
+    from datetime import UTC
+    item = dict(store.get_item(item_id))
+    item["created_at"] = datetime(2026, 10, 5, 2, 0, tzinfo=UTC).isoformat()
+    assert ni_flow.upgrade_pre_f1_literal_dates(store, item) is not None
+    assert "{{param:date}}" in store.get_item(item_id)["spec"]["source"]["url"]
+
+
+# ---- R4-5: the upgrade reslots the pipeline too ------------------------------------------------
+
+def test_r4_5_upgrade_reslots_a_date_keyed_pipeline(monkeypatch) -> None:
+    """A NEOWS-shape pipeline (``near_earth_objects["2026-10-01"]``) must have its creation-day
+    literal swapped for the clock slot alongside the URL — otherwise day 2 extract-misses."""
+    import duckdb
+
+    from smartbrain_3000 import db as dbmod
+    from smartbrain_3000 import ni_flow
+    from smartbrain_3000.secrets import gen_master_key
+
+    class _Lib:
+        def get(self, _sid):
+            return {"access": {
+                "url_template": "https://ex.test/feed?start_date={date}",
+                "params": [{"name": "date", "label": "date",
+                              "fill": {"from": "clock", "format": "%Y-%m-%d",
+                                        "offset_days": 0}}]}, "kinds": []}
+
+    monkeypatch.setattr(ni_flow, "_LIBRARY_PROVIDER", lambda: _Lib())
+    conn = duckdb.connect(":memory:")
+    dbmod.run_migrations(conn)
+    store = nimod.NIStore(conn, gen_master_key())
+    _freeze(monkeypatch, datetime(2026, 10, 1, 15, 0, tzinfo=NY))
+    url = "https://ex.test/feed?start_date=2026-10-01"
+    pipeline = [{"op": "extract",
+                   "paths": {"rows": 'near_earth_objects["2026-10-01"]'}}]
+    spec = {"version": 1, "title": "t", "goal": "g", "params": {},
+             "source": {"type": "http_json", "url": url, "headers": {}},
+             "pipeline": pipeline,
+             "scene": {"type": "stack", "dir": "v", "gap": "sm",
+                         "children": [{"type": "text", "value": "x",
+                                         "role": "title", "tone": "default", "size": "md"}]},
+             "display": {"size": "small"}, "contract": None,
+             "repair_policy": {"l1": True, "l2_frontier": False}, "model": None}
+    item_id = store.add_item(spec, {})
+    ni_flow._flow_write(store, item_id, {"state": "ready", "request": "r",
+                                          "updated_at": "2026-10-01T12:00:00Z",
+                                          "notes": [], "_library_source": "demo"})
+    from datetime import UTC
+    item = dict(store.get_item(item_id))
+    item["created_at"] = datetime(2026, 10, 1, 19, 0, tzinfo=UTC).isoformat()
+    assert ni_flow.upgrade_pre_f1_literal_dates(store, item) is not None
+    sealed_pipe = store.get_item(item_id)["spec"]["pipeline"]
+    assert sealed_pipe[0]["paths"]["rows"] == 'near_earth_objects["{{param:date}}"]'
+
+
+# ---- R4-2: a build crossing midnight never crashes the C2 verify -------------------------------
+
+def test_r4_2_handoff_verify_uses_fetch_now_not_live_clock(monkeypatch) -> None:
+    """A build whose fetch runs at 23:59 and whose seal runs at 00:01 must still pass the C2
+    verify — ``_handoff``'s ``fetch_now`` kwarg pins the substitute to the sampler's moment."""
+    from smartbrain_3000 import ni_flow
+
+    spec = {"params": {"d": {"label": "d", "kind": "clock", "format": "%Y-%m-%d",
+                              "offset_days": 0}},
+             "source": {"url": "https://ex.test/?d={{param:d}}"}}
+    fetch_now = datetime(2026, 9, 28, 23, 59, 30, tzinfo=NY)
+    # even if the live clock has advanced past midnight, the frozen fetch_now still reproduces
+    # the fetch URL byte-for-byte
+    _freeze(monkeypatch, datetime(2026, 9, 29, 0, 1, 0, tzinfo=NY))
+    assert ni_flow._f1_render_url_at(spec, fetch_now) == "https://ex.test/?d=2026-09-28"
+
+
+def test_r4_2_realign_url_rebuilds_from_template_at_now(monkeypatch) -> None:
+    """A resumed build whose sealed ``_library_url`` is stale (yesterday's) is rebuilt from the
+    template at the current clock before the fetch — the handoff verify at the same moment
+    reproduces that rebuilt URL."""
+    import duckdb
+
+    from smartbrain_3000 import db as dbmod
+    from smartbrain_3000 import ni_flow
+    from smartbrain_3000.secrets import gen_master_key
+
+    conn = duckdb.connect(":memory:")
+    dbmod.run_migrations(conn)
+    store = nimod.NIStore(conn, gen_master_key())
+    item_id = ni_flow.create_shell_item(store, "r")
+    live = {"state": "sampling", "request": "r", "updated_at": "", "notes": [],
+             "_library_source": "demo",
+             "_library_url_template": "https://ex.test/?d={{param:d}}",
+             "_library_clock_params": {"d": {"format": "%Y-%m-%d", "offset_days": 0,
+                                               "label": "d"}}}
+    ni_flow._flow_write(store, item_id, live)
+    _freeze(monkeypatch, datetime(2026, 10, 10, 9, 0, tzinfo=NY))
+    rebuilt = ni_flow._realign_url_to_now(store, item_id, live, "https://ex.test/?d=2026-10-09",
+                                            nimod._clock())
+    assert rebuilt == "https://ex.test/?d=2026-10-10"
+    assert ni_flow._flow_read(store, item_id)["_library_url"] == rebuilt
+
+
+# ---- R4-11: the mapping path's pipeline reslots clock-filled literals too ----------------------
+
+def test_r4_11_reslot_runs_on_sealed_params_with_clock_kind(monkeypatch) -> None:
+    """A pipeline whose extract-path or where-value holds a clock-filled literal is reslotted into
+    the ``{{param:name}}`` slot form whenever the sealed spec params include a clock-kind entry
+    — the shared ``_reslot_clock_params_in_pipeline`` the answers path already uses."""
+    from smartbrain_3000 import ni_flow
+
+    _freeze(monkeypatch, datetime(2026, 10, 5, 12, 0, tzinfo=NY))
+    stages = [{"op": "extract",
+                 "paths": {"rows": 'near_earth_objects["2026-10-05"]'}}]
+    out = ni_flow._reslot_clock_params_in_pipeline(stages, {"d": "2026-10-05"},
+                                                     frozenset({"d"}))
+    assert out[0]["paths"]["rows"] == 'near_earth_objects["{{param:d}}"]'

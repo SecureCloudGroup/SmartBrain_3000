@@ -574,6 +574,43 @@ def test_jail_body_text_hidden_ancestor_pops_on_outer_end_tag() -> None:
     assert "should stay hidden" not in body
 
 
+# F2d (review4 2026-10-04): malformed hidden markup must not swallow the
+# body. The HTML spec's implied end tags (a sibling <li>/<p>/<dt>/<dd>/<tr>/
+# <td>/<th>/<option> start closes the open peer; a block-level start closes
+# an open <p>) and ancestor-pop on any end tag keep a hidden region bounded
+# to its own sub-tree, so the sibling that follows reads again.
+@pytest.mark.parametrize(("html", "visible", "hidden"), [
+    ("<ul><li hidden>a<li>VIS_B<li>VIS_C</ul><p>REST</p>",
+     ("VIS_B", "VIS_C", "REST"), ("a",)),
+    ("<ul><li hidden>a<li hidden>b<li>VIS_C</ul><p>REST</p>",
+     ("VIS_C", "REST"), ("a", "b")),
+    ("<p style='display:none'>x<p>VIS_P</p><div>REST</div>",
+     ("VIS_P", "REST"), ("x",)),
+    ("<p hidden>x<div>VIS_DIV</div><section>REST</section>",
+     ("VIS_DIV", "REST"), ("x",)),
+    ("<table><tr hidden><td>x<tr><td>VIS_Y</table><p>REST</p>",
+     ("VIS_Y", "REST"), ("x",)),
+    ("<table><tr><td hidden>x<td>VIS_Y</tr></table><p>REST</p>",
+     ("VIS_Y", "REST"), ("x",)),
+    ("<dl><dt hidden>a<dd>VIS_DD<dt>VIS_DT</dl><p>REST</p>",
+     ("VIS_DD", "VIS_DT", "REST"), ("a",)),
+    ("<div><span hidden>x</div><p>REST</p>",
+     ("REST",), ("x",)),
+    ("<p hidden>x<ul><li>VIS_LI</ul><p>REST</p>",
+     ("VIS_LI", "REST"), ("x",)),
+    ("<div hidden><div>inner</div>LEAK</div><p>REST</p>",
+     ("REST",), ("inner", "LEAK")),
+])
+def test_jail_body_text_implicit_close_before_hidden_sibling(
+        html, visible, hidden) -> None:
+    _, body = jail_extract._page_graph_layers(html)
+    assert isinstance(body, str), "body must be a string"
+    for keeper in visible:
+        assert keeper in body, (html, keeper)
+    for miss in hidden:
+        assert miss not in body, (html, miss)
+
+
 # F2c (review3 2026-10-04): the recorded pages must keep the real body text
 # that the hidden-stack leak was dropping. The signals asserted below each
 # live inside the base extractor output but fell out of HEAD once hidden
@@ -695,6 +732,17 @@ def test_first_party_fallback_is_the_subject_in_the_host() -> None:
     ("www.chick-fil-a.com", "Chick-fil-A", "is Chick-fil-A open", True),
     ("www.7-eleven.com", "7-Eleven", "7-Eleven hours", True),
     ("www.usa-mobile.com", "T-Mobile", "is T-Mobile down", False),  # brand not the prefix
+    # R4-8 (2026-10-04): the hyphen-brand match must require the hyphenated word to live in the
+    # SUBJECT (the same ``_name_tokens`` rule for non-hyphen names). An ask-only hyphen is never
+    # a brand of the subject: "Verizon vs T-Mobile outage" with subject "Verizon outage" ships
+    # t-mobile.com for Verizon; "Real-time NVDA price" / "COVID-19 cases in Ohio" / "is X-Men on
+    # Disney+" / "Hong-Kong weather" / "New-York news" / "Los-Angeles news" all do similar.
+    ("t-mobile.com", "Verizon outage", "Verizon vs T-Mobile outage", False),
+    ("real-time.com", "NVDA price", "Real-time NVDA price", False),
+    ("x-men.com", "Disney+ schedule", "is X-Men on Disney+", False),
+    ("hong-kong.com", "Hong Kong weather", "Hong-Kong weather", False),
+    ("new-york.com", "New York news", "New-York news", False),
+    ("los-angeles-times.com", "LA Times", "Los-Angeles news", False),
 ])
 def test_first_party_fallback_needs_a_named_entity(host, subject, ask, expect) -> None:
     assert pagegraph.first_party(host, subject, {}, ask=ask) is expect
