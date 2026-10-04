@@ -237,16 +237,18 @@ def test_f15_unknown_zone_clears_the_cache() -> None:
 # ---- R4-6: an event-list on an hour axis keeps the whole asked period --------------------------
 
 def test_r4_6_window_op_list_kind_disables_the_hour_floor() -> None:
-    """``_window_op`` with ``floor_hour=False`` maps a hour-step axis to ``period`` so the engine's
-    non-floor branch handles ``today`` / ``tonight`` — event / schedule / result lists keep the
-    whole asked period, past-but-today rows included."""
+    """R5-4 (2026-10-04): ``_window_op`` with ``floor_hour=False`` keeps ``step="hour"`` and marks
+    ``floor: false`` on the op; the engine then keeps the whole asked period while the dawn rule
+    still fires (the earlier hour→period rewrite silently dropped that rule)."""
     from smartbrain_3000 import ni_flow
 
     op = ni_flow._window_op("t", "today", {}, [{"paths": {}}], step="hour", floor_hour=False)
-    assert op["step"] == "period"
-    # the default (forecast series) still floors
+    assert op["step"] == "hour"
+    assert op["floor"] is False
+    # the default (forecast series) still floors — no explicit flag
     op = ni_flow._window_op("t", "today", {}, [{"paths": {}}], step="hour")
     assert op["step"] == "hour"
+    assert "floor" not in op
 
 
 def test_r4_6_period_step_keeps_past_hour_rows_on_today(monkeypatch) -> None:
@@ -465,3 +467,203 @@ def test_r4_11_reslot_runs_on_sealed_params_with_clock_kind(monkeypatch) -> None
     out = ni_flow._reslot_clock_params_in_pipeline(stages, {"d": "2026-10-05"},
                                                      frozenset({"d"}))
     assert out[0]["paths"]["rows"] == 'near_earth_objects["{{param:d}}"]'
+
+
+# ---- R5-1: next_event + today keeps the forward floor + stale check -----------------------------
+
+def test_r5_1_frame_gap_fires_stale_on_next_event_today(monkeypatch) -> None:
+    """A next_event ask with window=today still refuses when the first shown moment is in the past
+    — only a schedule / result list keeps past-today rows."""
+    from smartbrain_3000 import ni_flow
+    from smartbrain_3000.ni import _TimeText
+
+    now = datetime(2026, 10, 4, 22, 30, tzinfo=NY)
+    _freeze(monkeypatch, now)
+    chosen = [{"kind": "list", "name": "tides", "label": "tides",
+                "cells": [{"type": "time"}], "axis": {"cell": "t", "step": "hour"}}]
+    stale = _TimeText("8:01 AM")
+    stale.moment = datetime(2026, 10, 4, 8, 1, tzinfo=NY)
+    preview = {"rows": [{"t": stale}]}
+    # next_event + today: stale check fires
+    assert ni_flow._frame_gap("next_event", chosen, preview, now, window="today") \
+        == "its next time has already passed"
+    # schedule + today: the whole period, no gap
+    assert ni_flow._frame_gap("schedule", chosen, preview, now, window="today") is None
+
+
+def test_r5_1_build_rows_floor_hour_true_on_next_event_list(monkeypatch) -> None:
+    """``_build_rows_answer`` floors a next_event LIST on today / tonight (R5-1): a 22:30 "next
+    tide today" cuts the 8:01 AM row even though the answer is a list — a schedule list keeps it."""
+    from smartbrain_3000 import ni_flow
+
+    _freeze(monkeypatch, datetime(2026, 10, 4, 15, 0, tzinfo=NY))
+    answer = {"kind": "list", "name": "tides", "label": "tides", "path": "predictions",
+              "cells": [{"type": "time", "path": "t", "label": "time"},
+                         {"type": "text", "path": "type", "label": "type"}],
+              "axis": {"cell": "t", "step": "hour"}}
+    payload = {"predictions": [
+        {"t": "2026-10-04T08:01:00", "type": "L"},
+        {"t": "2026-10-04T14:05:00", "type": "H"},
+        {"t": "2026-10-04T20:20:00", "type": "L"}]}
+    # schedule: all three rows kept (floor_hour=False, step=hour, no floor flag)
+    sched = ni_flow._build_rows_answer(answer, payload, "tides", window="today",
+                                        next_event=True, frame_kind="schedule")
+    sched_times = [str(r["t"]) for r in sched["preview_payload"]["rows"]]
+    assert any("8:01 AM" in t for t in sched_times), sched_times
+    assert len(sched_times) == 3
+    # next_event at 15:00: the 8:01 AM row drops (forward floor on today), 20:20 PM kept
+    nxt = ni_flow._build_rows_answer(answer, payload, "tides", window="today",
+                                      next_event=True, frame_kind="next_event")
+    nxt_times = [str(r["t"]) for r in nxt["preview_payload"]["rows"]]
+    assert not any("8:01 AM" in t for t in nxt_times), nxt_times
+
+
+# ---- R5-4: floor flag preserves dawn rule --------------------------------------------------------
+
+def test_r5_4_floor_false_tonight_before_dawn_keeps_dawn_rule(monkeypatch) -> None:
+    """A list window ``tonight`` at 01:30 with ``floor: false`` STILL fires the dawn rule
+    (now..06:00) — the earlier hour→period rewrite silently dropped it."""
+    _freeze(monkeypatch, datetime(2026, 10, 5, 1, 30, tzinfo=NY))
+    rows = [{"t": f"2026-10-05T{h:02d}:00:00"} for h in range(24)]
+    out = nimod.run_pipeline([{"op": "transform", "apply": [
+        {"fn": "window", "field": "rows", "key": "t", "window": "tonight", "floor": False}]}],
+        {"rows": rows})
+    assert [r["t"] for r in out["rows"]] == [f"2026-10-05T{h:02d}:00:00" for h in range(1, 6)]
+
+
+def test_r5_4_floor_false_today_keeps_past_today_rows(monkeypatch) -> None:
+    """``today`` with ``floor: false`` on hour rows keeps the whole day (an event / schedule list
+    at 22:30 still shows the 2 PM Final game)."""
+    _freeze(monkeypatch, datetime(2026, 10, 4, 22, 30, tzinfo=NY))
+    rows = [{"t": "2026-10-04T08:01:00"}, {"t": "2026-10-04T14:05:00"},
+            {"t": "2026-10-04T20:20:00"}]
+    out = nimod.run_pipeline([{"op": "transform", "apply": [
+        {"fn": "window", "field": "rows", "key": "t", "window": "today", "floor": False}]}],
+        {"rows": rows})
+    assert [r["t"] for r in out["rows"]] == [
+        "2026-10-04T08:01:00", "2026-10-04T14:05:00", "2026-10-04T20:20:00"]
+
+
+# ---- R5-2: midnight realign binds access + repick -----------------------------------------------
+
+def test_r5_2_realign_rebuilds_access_url(monkeypatch) -> None:
+    """A sealed ``_access`` tied to the pre-realign URL is rewritten to the realigned fetch URL —
+    the handoff's access check and the fetcher both match the new URL."""
+    import duckdb
+
+    from smartbrain_3000 import db as dbmod
+    from smartbrain_3000 import ni_flow
+    from smartbrain_3000.secrets import gen_master_key
+
+    conn = duckdb.connect(":memory:")
+    dbmod.run_migrations(conn)
+    store = nimod.NIStore(conn, gen_master_key())
+    iid = ni_flow.create_shell_item(store, "r")
+    pre_url = "https://ex.test/?d=2026-10-09"
+    live = {"state": "sampling", "request": "r", "updated_at": "", "notes": [],
+             "_library_source": "demo",
+             "_library_url": pre_url,
+             "_library_url_template": "https://ex.test/?d={{param:d}}",
+             "_library_clock_params": {"d": {"format": "%Y-%m-%d", "offset_days": 0,
+                                               "label": "d"}},
+             "_access": {"url": pre_url, "host": "ex.test", "provider": "p",
+                          "key": {"in": "query", "name": "api_key", "prefix": "",
+                                   "docs_url": ""}, "contact": False}}
+    ni_flow._flow_write(store, iid, live)
+    _freeze(monkeypatch, datetime(2026, 10, 10, 9, 0, tzinfo=NY))
+    rebuilt = ni_flow._realign_url_to_now(store, iid, live, pre_url, nimod._clock())
+    assert rebuilt == "https://ex.test/?d=2026-10-10"
+    assert ni_flow._flow_read(store, iid)["_access"]["url"] == rebuilt
+
+
+def test_r5_2_repick_without_matches_by_source_id(monkeypatch) -> None:
+    """After a URL realign the ranked row's literal URL and ``_library_url`` differ by day —
+    ``_repick_without`` must bind by sealed ``_library_source`` so a 403 after midnight still
+    hands off to the next source."""
+    import duckdb
+
+    from smartbrain_3000 import db as dbmod
+    from smartbrain_3000 import ni_flow
+    from smartbrain_3000.secrets import gen_master_key
+
+    conn = duckdb.connect(":memory:")
+    dbmod.run_migrations(conn)
+    store = nimod.NIStore(conn, gen_master_key())
+    iid = ni_flow.create_shell_item(store, "r")
+    pre_url, post_url = "https://ex.test/?d=2026-10-09", "https://ex.test/?d=2026-10-10"
+    ni_flow._flow_write(store, iid, {
+        "state": "sampling", "request": "r", "updated_at": "", "notes": [],
+        "_library_source": "demo", "_library_url": post_url,
+        "_ranked_library": [
+            {"source_id": "demo", "url": pre_url, "label": "a", "provider": "p",
+             "host": "ex.test"},
+            {"source_id": "other", "url": "https://y.test/", "label": "b",
+             "provider": "q", "host": "y.test"}]})
+    moved = ni_flow._repick_without(store, iid, post_url, why="t")
+    assert moved is not None
+    rest = (ni_flow._flow_read(store, iid) or {}).get("_ranked_library") or []
+    assert [r["source_id"] for r in rest] == ["other"]
+
+
+# ---- R5-5: _f1_templatize_literal walks the record by position ----------------------------------
+
+def test_r5_5_templatize_by_position_slots_all_clock_occurrences(monkeypatch) -> None:
+    """A pre-F1 URL whose record repeats a clock placeholder gets EVERY occurrence slotted — the
+    count-1 value replace left the second one frozen."""
+    from smartbrain_3000 import ni_flow
+
+    rec = {"access": {
+        "url_template": "https://ex.test/{year}/x?year={year}",
+        "params": [{"name": "year", "label": "year",
+                     "fill": {"from": "clock", "format": "%Y", "offset_days": 0}}]}}
+    _freeze(monkeypatch, datetime(2026, 10, 4, 15, 0, tzinfo=NY))
+    tried = ni_flow._f1_templatize_literal(
+        "https://ex.test/2026/x?year=2026",
+        {"year": {"format": "%Y", "offset_days": 0, "label": "year"}},
+        datetime(2026, 10, 4, 15, 0, tzinfo=NY), lib_record=rec)
+    assert tried == "https://ex.test/{{param:year}}/x?year={{param:year}}"
+
+
+def test_r5_5_templatize_rejects_partial_on_day_eq_month(monkeypatch) -> None:
+    """A date whose day equals the month (10/10) binds each placeholder to its OWN slot — the
+    position walk never collapses mm and dd onto one match."""
+    from smartbrain_3000 import ni_flow
+
+    rec = {"access": {
+        "url_template": "https://ex.test/{mm}/{dd}",
+        "params": [{"name": "mm", "label": "mm",
+                     "fill": {"from": "clock", "format": "%m", "offset_days": 0}},
+                    {"name": "dd", "label": "dd",
+                     "fill": {"from": "clock", "format": "%d", "offset_days": 0}}]}}
+    _freeze(monkeypatch, datetime(2026, 10, 10, 9, 0, tzinfo=NY))
+    tried = ni_flow._f1_templatize_literal(
+        "https://ex.test/10/10",
+        {"mm": {"format": "%m", "offset_days": 0, "label": "mm"},
+         "dd": {"format": "%d", "offset_days": 0, "label": "dd"}},
+        datetime(2026, 10, 10, 9, 0, tzinfo=NY), lib_record=rec)
+    assert tried == "https://ex.test/{{param:mm}}/{{param:dd}}"
+
+
+# ---- R5-8: keyed clock sources drop vault_key segments before alignment -------------------------
+
+def test_r5_8_derive_clock_template_strips_vault_key_segments(monkeypatch) -> None:
+    """A keyed clock source (neows, finnhub, FEC) ships its URL with the ``{key}`` segment stripped;
+    the position-aligned derive must drop that segment from the Library template too, or the walk
+    fails on the trailing ``&token={key}`` the URL legitimately lacks."""
+    from smartbrain_3000 import ni_flow
+
+    class _Lib:
+        def get(self, _sid):
+            return {"access": {
+                "url_template": "https://ex.test/feed?start_date={date}&api_key={key}",
+                "params": [{"name": "date", "label": "date",
+                              "fill": {"from": "clock", "format": "%Y-%m-%d",
+                                        "offset_days": 0}},
+                            {"name": "key", "fill": {"from": "vault_key"}}]}}
+
+    monkeypatch.setattr(ni_flow, "_LIBRARY_PROVIDER", lambda: _Lib())
+    _freeze(monkeypatch, datetime(2026, 10, 4, 15, 0, tzinfo=NY))
+    template, meta = ni_flow._derive_clock_template(
+        "demo", "https://ex.test/feed?start_date=2026-10-04", {"date": "2026-10-04"})
+    assert template == "https://ex.test/feed?start_date={{param:date}}"
+    assert list(meta) == ["date"]

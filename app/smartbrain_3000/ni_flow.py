@@ -341,9 +341,13 @@ _INTENT_PROMPT = (
     ' "wants": ["<field the user wants>", ...],\n'
     ' "threshold": <number or null>,\n'
     ' "place": <"city or place name the request names" or null>,\n'
+    ' "names": ["<proper name the request mentions>", ...],\n'
     ' "display_hint": "<value|list|map|image|none>"}\n'
     '"computed_only" = answerable from the calendar/clock alone, no data source '
     '(e.g. a countdown to a date). Otherwise "external_data".\n'
+    '"names" lists the proper names (people, companies, organizations, agencies, '
+    'places, products, teams, events) the user mentioned, each copied EXACTLY from '
+    "the request; [] when the request names none.\n"
     "Request: __REQUEST__\n"
 )
 
@@ -361,9 +365,51 @@ def _parse_json_reply(text: str) -> dict:
     return json.loads(match.group(0))
 
 
-def _validate_intent(reply: dict) -> dict:
-    """POC-parity closed-schema validation for the intent reply. Raises ValueError."""
+_INTENT_NAME_WORD_RE = re.compile(r"[A-Za-z0-9]+")
+_MAX_INTENT_NAMES = 5
+_MAX_INTENT_NAME_CHARS = 60
+
+
+def _clean_intent_names(raw: object, request: str) -> list[str]:
+    """Validated intent ``names``: a list of strings, each a case-insensitive whole-word
+    substring of ``request``. Non-list or non-string entries drop; dupes drop; empty
+    when nothing survives (a hallucinated name is dropped — code's sentence-initial
+    branch degrades to "not a name" rather than fabricating a proper-noun gate)."""
+    assert isinstance(request, str), "request must be a string"
+    assert _MAX_INTENT_NAMES >= 1 and _MAX_INTENT_NAME_CHARS >= 1, "bounds > 0"
+    if not isinstance(raw, (list, tuple)):
+        return []  # shape error: empty, never a raise — the gate degrades honestly
+    low_words = [w.lower() for w in _INTENT_NAME_WORD_RE.findall(request)]
+    low_text = " " + " ".join(low_words) + " "
+    out: list[str] = []
+    for value in list(raw)[:_MAX_INTENT_NAMES * 4]:  # bounded scan
+        if not isinstance(value, str):
+            continue
+        name = value.strip()
+        if not name or len(name) > _MAX_INTENT_NAME_CHARS:
+            continue
+        name_words = [w.lower() for w in _INTENT_NAME_WORD_RE.findall(name)]
+        if not name_words:
+            continue
+        if " " + " ".join(name_words) + " " not in low_text:
+            continue  # hallucinated — never typed
+        if name not in out:
+            out.append(name)
+        if len(out) >= _MAX_INTENT_NAMES:
+            break
+    return out
+
+
+def _validate_intent(reply: dict, request: str = "") -> dict:
+    """POC-parity closed-schema validation for the intent reply. Raises ValueError.
+
+    ``request`` (named-topics, 2026-10-04): the raw ask; ``names`` are kept only
+    when case-insensitively present as whole words in it. Omitted ``request``
+    empties ``names`` — unit tests that don't need the proper-noun gate stay
+    one-liners.
+    """
     assert isinstance(reply, dict), "reply must be a dict"
+    assert isinstance(request, str), "request must be a string"
     if reply.get("kind") not in ("external_data", "computed_only"):
         raise ValueError("intent.kind must be external_data or computed_only")
     cadence = reply.get("cadence_minutes")
@@ -380,6 +426,7 @@ def _validate_intent(reply: dict) -> dict:
         raise ValueError("intent.place must be a string or null")
     if isinstance(place, str) and len(place) > 120:
         reply["place"] = place[:120]
+    reply["names"] = _clean_intent_names(reply.get("names"), request)
     return reply
 
 
@@ -500,7 +547,7 @@ def stage_intent(request: str, model_call: Callable[[str], str]) -> dict:
     for attempt in range(2):  # fixed upper bound (P10 #2)
         try:
             reply_text = model_call(prompt)
-            intent = _validate_intent(_parse_json_reply(reply_text))
+            intent = _validate_intent(_parse_json_reply(reply_text), request)
             parsed = _cadence_from_text(request)
             if parsed is not None:
                 intent["cadence_minutes"] = parsed
@@ -1735,7 +1782,7 @@ def _list_cap(window: str | None, step: str | None) -> int:
 
 
 def _build_rows_answer(answer: dict, payload: dict, title: str, window: str | None = None,
-                        next_event: bool = False) -> dict:
+                        next_event: bool = False, frame_kind: str | None = None) -> dict:
     """A list answer (rows at ``path``, cell paths relative to one item) or a columns answer
     (parallel arrays zipped into rows) → rows pipeline + the list scene, cells in declared order.
     With an asked ``window`` and rows indexed by time (``axis``), the engine's ``window`` transform
@@ -1753,9 +1800,11 @@ def _build_rows_answer(answer: dict, payload: dict, title: str, window: str | No
     axis_cell = next((c for c in cells if axis and c["path"] == axis["cell"]), None) if axis else None
     step = axis["step"] if axis else None
     # R4-6 (2026-10-04): the current-hour floor on ``today`` / ``tonight`` is a FORECAST rule — an
-    # event / schedule / result / next_event list keeps the whole asked period, so an 8:01 AM low
-    # on a tide list reads at 14:10, and a Final game stays on a "today" schedule at 22:30.
-    floor_hour = answer["kind"] != "list"
+    # event / schedule / result list keeps the whole asked period, so an 8:01 AM low on a tide list
+    # reads at 14:10, and a Final game stays on a "today" schedule at 22:30. R5-1 (2026-10-04): a
+    # NEXT-EVENT ask (as opposed to a schedule/result) still floors — "when is the next tide today"
+    # at 22:30 shows the next tide, not this morning's low.
+    floor_hour = answer["kind"] != "list" or frame_kind == "next_event"
     if answer["kind"] == "list":
         keys = [c["path"] for c in cells]
         stages: list[dict] = [{"op": "extract", "paths": {"rows": answer["path"]}}]
@@ -1857,8 +1906,9 @@ def _window_op(key: str, window: str, payload: dict, stages: list[dict], *,
     so every refresh reads the window the same way. ``step`` (F11): the axis step; day-step rows keep
     the whole date even with a clock. ``floor_hour`` (R4-6, 2026-10-04): default True floors ``today``
     / ``tonight`` on hour axes at the current hour (forecast series); False keeps the whole asked
-    period (event / schedule / result / next_event lists) — the step rides as ``period`` so the
-    engine's existing non-floor branch handles it."""
+    period (event / schedule / result list) — R5-4 (2026-10-04): rides as a separate ``floor: false``
+    flag so the hour step keeps its dawn rule ("tonight" at 01:30 = now..06:00) while only the floor
+    itself is disabled; the previous hour→period rewrite silently dropped that rule."""
     assert isinstance(key, str) and isinstance(window, str), "args required"
     assert isinstance(floor_hour, bool), "floor_hour must be a bool"
     op: dict = {"fn": "window", "field": "rows", "key": key, "window": window}
@@ -1874,7 +1924,9 @@ def _window_op(key: str, window: str, payload: dict, stages: list[dict], *,
         if isinstance(tbd, dict) and isinstance(tbd.get("path"), str):
             op["unless"] = tbd["path"]
     if step in ("day", "hour", "period"):
-        op["step"] = step if (step != "hour" or floor_hour) else "period"
+        op["step"] = step
+    if step == "hour" and not floor_hour:
+        op["floor"] = False
     return op
 
 
@@ -1950,7 +2002,8 @@ def _reslot_clock_params_in_pipeline(stages: list[dict], params: dict[str, str],
 def build_from_answers(chosen: list[dict], sample: object, title: str,
                        params: dict[str, str] | None = None, window: str | None = None,
                        next_event: bool = False,
-                       clock_params: frozenset[str] = frozenset()) -> dict:
+                       clock_params: frozenset[str] = frozenset(),
+                       frame_kind: str | None = None) -> dict:
     """Build ``{pipeline, scene, preview_payload, fields, klass}`` from the chosen declared answers,
     running the pipeline on ``sample`` and checking every shown value is there with its type.
     ``params`` are the values the card's address was filled with (``{param}`` path segments);
@@ -1959,7 +2012,9 @@ def build_from_answers(chosen: list[dict], sample: object, title: str,
     A bare-list response is addressed as ``{"items": [...]}`` — the flow's sampling wrap, and the
     engine's on every refresh. Raises ValueError / ``ni.NIError`` when the live response doesn't
     fit the declaration. ``window``: the asked stretch of time (rows indexed by time are cut to it);
-    ``next_event``: the ask is for the next event (its time says so once it has passed)."""
+    ``next_event``: the ask is for the next event (its time says so once it has passed);
+    ``frame_kind``: the ask's frame kind — a next_event list still floors to upcoming on today /
+    tonight (R5-1, 2026-10-04), while a schedule list keeps the whole period."""
     assert isinstance(chosen, list) and chosen, "chosen answers required"
     assert isinstance(clock_params, (set, frozenset)), "clock_params must be a set"
     chosen = [_fill_answer(a, params or {}) for a in chosen]
@@ -1967,7 +2022,8 @@ def build_from_answers(chosen: list[dict], sample: object, title: str,
     if chosen[0]["kind"] == "value":
         built = _build_value_answers([a for a in chosen if a["kind"] == "value"], payload, next_event)
     else:
-        built = _build_rows_answer(chosen[0], payload, title, window, next_event=next_event)
+        built = _build_rows_answer(chosen[0], payload, title, window, next_event=next_event,
+                                     frame_kind=frame_kind)
     if clock_params:
         built["pipeline"] = _reslot_clock_params_in_pipeline(built["pipeline"], params or {},
                                                                frozenset(clock_params))
@@ -2030,7 +2086,8 @@ def _try_answers_build(store: ni.NIStore, item_id: str, request: str, intent: di
     try:
         try:
             built = build_from_answers(chosen, sample, title, params=params, window=window,
-                                       next_event=next_event, clock_params=clock_names)
+                                       next_event=next_event, clock_params=clock_names,
+                                       frame_kind=kind)
         except ValueError as exc:
             if "the list is empty here" in str(exc) and chosen[0]["kind"] == "list":
                 # F3 retry (2026-10-04): a sibling list answer on the same source may have rows for
@@ -2042,7 +2099,7 @@ def _try_answers_build(store: ni.NIStore, item_id: str, request: str, intent: di
                     try:
                         built = build_from_answers([sibling], sample, title, params=params,
                                                      window=window, next_event=next_event,
-                                                     clock_params=clock_names)
+                                                     clock_params=clock_names, frame_kind=kind)
                         chosen = [sibling]
                     except ValueError:
                         raise exc from None  # the first error is the better message
@@ -2058,7 +2115,8 @@ def _try_answers_build(store: ni.NIStore, item_id: str, request: str, intent: di
                 if not fallback or _other_sources_left(live, url):
                     raise  # another source may have what was asked: the caller moves on to it
                 built = build_from_answers(fallback, sample, title, params=params, window=window,
-                                           next_event=next_event, clock_params=clock_names)
+                                           next_event=next_event, clock_params=clock_names,
+                                           frame_kind=kind)
                 built["missing"] = [a["label"] for a in chosen] + list(built.get("missing") or [])
                 chosen = fallback
             else:
@@ -2282,10 +2340,12 @@ def _frame_gap(kind: str | None, chosen: list[dict], preview: dict, now: datetim
         # F5 (2026-10-04): judge the FIRST SHOWN moment — a "next" card whose first row is a past
         # event is wrong even when later rows are future. The forward cut in _build_rows_answer
         # removes past rows every refresh; this is the belt-and-braces for a build without one.
-        # R4-6 (2026-10-04): an explicit day/night window ("today", "tonight") asks for the WHOLE
-        # period including past-but-today rows (an MLB schedule at 10 PM includes the Finals from
-        # earlier) — the stale-first check only fires on an open "next" window.
-        in_period = window in ("today", "tonight")
+        # R4-6 (2026-10-04): an explicit day/night window on a SCHEDULE ("MLB schedule today")
+        # asks for the WHOLE period including past-but-today rows; the stale-first check skips.
+        # R5-1 (2026-10-04): a NEXT-EVENT ask with the same window ("when is the next tide today")
+        # still wants only upcoming — the stale check must fire so an 8:01 AM low at 22:30 never
+        # leads the card.
+        in_period = kind == "schedule" and window in ("today", "tonight")
         if moments and not in_period and ni.next_event_stale(moments[0], now):
             return "its next time has already passed"
     if kind == "result":
@@ -2427,6 +2487,45 @@ def _said_wants(request: str, wants: list, filled: list[str]) -> list[str]:
     return out
 
 
+def _judge_wants_unanswered(judge: dict | None, request: str, intent: dict,
+                              filled: list[str], preview: object) -> list[str]:
+    """Which said wants the model-mapping JUDGE's gaps say the card won't include. Same posture
+    as ``_unanswered_wants``: a want is unanswered when its request-said tokens overlap any gap
+    token (``_WANT_SYNONYMS`` covers canonical word-pairs). Generic quantity wants (``level``,
+    ``value``, …) answered by any shown preview key / value are not reported — a primary number
+    is still what the card displays. Used by ``_sample_and_map``'s mapping-path refusal (R5-11,
+    2026-10-04): "won't include: <every want the user said>" means the pick was wrong, not a
+    useful disclosure on a mapped build."""
+    assert isinstance(request, str) and isinstance(intent, dict), "args required"
+    assert isinstance(filled, list), "filled must be a list"
+    if not judge or not judge.get("gaps"):
+        return []
+    ask = _answer_tokens(request or "")
+    for value in filled:  # bounded by params + place
+        ask -= _answer_tokens(value)
+    gap_tokens: set[str] = set()
+    for gap in judge["gaps"]:  # bounded (judge caps gaps to 6)
+        gap_tokens |= _answer_tokens(str(gap).replace("_", " "))
+    shown: set[str] = set()
+    if isinstance(preview, dict):
+        for key, value in list(preview.items())[:20]:  # bounded preview walk
+            shown |= _answer_tokens(str(key).replace("_", " "))
+            if value is not None and not isinstance(value, (dict, list)):
+                shown |= _answer_tokens(str(value))
+    out: list[str] = []
+    for want in (intent.get("wants") or [])[:_MAX_INTENT_FIELDS]:
+        said = _answer_tokens(str(want).replace("_", " ")) & ask
+        if not said:
+            continue
+        synonyms = {t for s in said for t in _WANT_SYNONYMS.get(s, frozenset())}
+        if not ((said & gap_tokens) or (synonyms & gap_tokens)):
+            continue
+        if said <= _QUANTITY_WANTS and (said & shown):
+            continue  # a generic quantity want is what the preview's primary field reports
+        out.append(str(want).replace("_", " "))
+    return out
+
+
 def _stray_topics(frame: dict, source: dict, params: dict, answers: list[dict], request: str, intent: dict) -> set[str]:
     """The subject's topic words (taxonomy keywords the user said) that belong only to subcategories this
     source isn't filed under and that nothing of the source mentions. A word the Library doesn't know as
@@ -2469,17 +2568,14 @@ def _stray_topics(frame: dict, source: dict, params: dict, answers: list[dict], 
     # semicolon-separated metros) still runs: the exemption only covers names the entity actually
     # takes (``own`` already holds them); a brand it doesn't take ("Tribune", "Post") is stray.
     # F7-B class fix (2026-10-04): the request's RAW casing — never the model's Title-Case subject
-    # (phones auto-capitalize sentence-initial, the model Title-Cases its subject). A sentence-
-    # initial cap is a proper noun only when its folded token is NOT an English / taxonomy word
-    # the topic check itself evaluates (``eligible``: single-word kw / sub.label / whole-phrase
-    # multi-word kw the ask carries). R4-1 fix (2026-10-04): using ``set(topics)`` here exempted
-    # every token of every multi-word kw phrase ("nasa launch" → nasa; "fda approval" → fda) so a
-    # proper-noun subject the user named escaped. ``eligible`` is the scoped set the topic check
-    # already uses — a word NOT in it isn't a topic the Library teaches for this ask.
+    # (phones auto-capitalize sentence-initial, the model Title-Cases its subject). Named-topics
+    # (2026-10-04): the sentence-initial cap is a name ONLY when the intent's validated ``names``
+    # include it — the local model fills that narrow closed blank, code validates every entry is a
+    # whole-word substring of the ask, and the proper-noun check consumes the result (never guesses
+    # by capitalization alone). Mid-sentence caps and all-caps acronyms stay proper.
     entity = str((source.get("coverage") or {}).get("entity") or "").strip()
     if (not entity or ";" in entity) and not (set(params) & _GEO_PARAMS):
-        exempt_initial = _NAME_STOP | eligible
-        proper = _request_proper(request, exempt_initial)
+        proper = _request_proper(request, intent.get("names") or ())
         proper -= _answer_tokens(" ".join(str(r) for r in (source.get("readings") or [])))
         proper -= _answer_tokens(str(intent.get("place") or ""))
         for value in params.values():  # bounded by the params
@@ -2488,17 +2584,22 @@ def _stray_topics(frame: dict, source: dict, params: dict, answers: list[dict], 
     return stray
 
 
-def _request_proper(request: str, exempt_initial: set[str]) -> set[str]:
-    """Capitalized subject tokens in the RAW request (never the model's subject casing). A sentence
-    initial token (first word, or first after . ! ?) is skipped only when its folded form is in
-    ``exempt_initial`` (_NAME_STOP + the taxonomy words the topic check evaluates) — phones auto-
-    capitalize the start of every ask and that cap is not alone a proper-noun signal when the word
-    is generic; a lowercase-suffix lookalike ("Boeing" / "Everest" / "Guinness") is still a name
-    (R4-1, 2026-10-04); mid-sentence caps are always proper."""
+def _request_proper(request: str, intent_names: list[str] | tuple = ()) -> set[str]:
+    """Proper-noun tokens in the RAW request (never the model's subject casing). Three disjoint
+    sources: (a) the validated intent ``names`` — the model's narrow closed blank (named topics,
+    2026-10-04); (b) capitalized tokens NOT at a sentence start — mid-sentence caps are always
+    proper; (c) all-caps acronyms of two or more letters that aren't a stop word — "FDA", "SEC",
+    "TSA" survive even sentence-initial.
+
+    A sentence-initial capitalized word is proper ONLY when the intent named it: phones auto-
+    capitalize the start of every ask ("Biggest earthquakes today"), and without a corroborating
+    name from the model that cap is no signal on its own. With no intent names (no model, or a
+    hallucinated name was dropped), sentence-initial capitals are not names."""
     assert isinstance(request, str), "request must be a string"
-    assert isinstance(exempt_initial, (set, frozenset)), "exempt_initial must be a set"
+    assert isinstance(intent_names, (list, tuple)), "intent_names must be a list"
     text = _amp(request)
-    out: set[str] = set()
+    named = _answer_tokens(_amp(" ".join(str(n) for n in intent_names)))
+    out: set[str] = set(named)
     # the start of the ask and anything after a sentence-ending . ! ? begins a sentence; the first
     # [A-Za-z0-9]+ word that follows is the sentence-initial one.
     for sentence in re.split(r"[.!?]+\s*", text):  # bounded by the ask length
@@ -2507,9 +2608,12 @@ def _request_proper(request: str, exempt_initial: set[str]) -> set[str]:
             if not (word[0].isupper() or any(ch.isdigit() for ch in word)):
                 continue
             folded = _answer_tokens(word)
-            if idx == 0 and folded <= exempt_initial:
-                continue  # auto-cap at sentence start, not a naming word
-            out |= folded
+            if word.isupper() and len(word) >= 2 and word.isalpha() and not folded <= _NAME_STOP:
+                out |= folded  # acronym (c): "FDA", "SEC", "TSA" — never a stop word
+                continue
+            if idx == 0 and not (folded <= named):
+                continue  # (a) sentence-initial caps are proper only when the intent named them
+            out |= folded  # (b) mid-sentence cap
     return out
 
 
@@ -3001,7 +3105,6 @@ def run_flow(store: ni.NIStore, item_id: str, *,
         return _gateway_mod.completion_text(data)
 
     sealed_fmt = str(record.get("_format") or "").strip().lower() or None
-    sealed_access = record.get("_access")
 
     def default_fetcher(url: str) -> object:
         """Fetch a sample under the netguard SSRF/redirect discipline.
@@ -3010,10 +3113,17 @@ def run_flow(store: ni.NIStore, item_id: str, *,
         when the user tapped a Library CSV / RSS / XML / text row) drives the
         parser; otherwise the JSON path runs as before, and the paste-URL
         sniff below opens the other formats when a user pastes their own link.
+
+        R5-2 (2026-10-04): the sealed ``_access`` is read from the flow record at
+        FETCH time (not captured at ``run_flow`` entry) so a midnight realign that
+        rebuilt both ``_library_url`` and ``_access.url`` still fetches with the
+        user's key — a captured snapshot would carry the old access URL and the
+        keyed path would silently fall through to the plain fetch.
         """
         assert isinstance(url, str) and url, "url required"
-        if isinstance(sealed_access, dict) and sealed_access.get("url") == url:
-            return _fetch_with_access(url, sealed_fmt or "json", sealed_access, item_id)
+        current_access = (_flow_read(store, item_id) or {}).get("_access")
+        if isinstance(current_access, dict) and current_access.get("url") == url:
+            return _fetch_with_access(url, sealed_fmt or "json", current_access, item_id)
         if sealed_fmt and sealed_fmt in ni._HTTP_JSON_FORMATS and sealed_fmt != "json":
             return _fetch_textual_sample(url, sealed_fmt)
         return _sniffed_fetch(url)
@@ -3478,6 +3588,25 @@ def _clean_params(params: object) -> dict[str, str]:
             if re.fullmatch(r"[a-z_][a-z0-9_]*", str(k))}
 
 
+def _strip_vault_key_segments(lib_template: str, params: list) -> str:
+    """R5-8 (2026-10-04): drop ``?``/``&`` query segments naming vault_key params from
+    ``lib_template``. The live fetch URL has the ``{key}`` / SBKEYSLOT marker stripped by
+    ``library_resolve._expand`` (keyed clock sources: fec-candidates, finnhub-earnings-calendar,
+    nasa-neows-feed), so the position-aligned template walk must see the same shape or a trailing
+    ``&token={key}`` leaves the URL unaligned."""
+    assert isinstance(lib_template, str), "lib_template required"
+    assert isinstance(params, list), "params must be a list"
+    vault_names = {str(p.get("name") or "") for p in params[:10]
+                    if isinstance(p, dict) and isinstance(p.get("fill"), dict)
+                    and p["fill"].get("from") == "vault_key"}
+    if not vault_names or "?" not in lib_template:
+        return lib_template
+    head, _, query = lib_template.partition("?")
+    kept = [seg for seg in query.split("&")
+            if not any("{" + name + "}" in seg for name in vault_names)]
+    return head + ("?" + "&".join(kept) if kept else "")
+
+
 def _derive_clock_template(source_id: str, url: str, filled_params: dict[str, str]) -> tuple[str, dict]:
     """F1: a row that reached seal time without clock metadata (hand-built pick, older harness, L1
     repair) still needs its URL date to walk forward. Look up the Library record, read its clock-fill
@@ -3508,6 +3637,11 @@ def _derive_clock_template(source_id: str, url: str, filled_params: dict[str, st
     lib_template = str(access.get("url_template") or "")
     if not lib_template:
         return "", {}  # R4-9: without the record's own template we can't align by position
+    # R5-8 (2026-10-04): the live fetch URL has vault_key / SBKEYSLOT query segments
+    # stripped before we see it (library_resolve._expand); the Library template still
+    # names those params. Drop them from the template too so the position-aligned walk
+    # doesn't trip on a trailing ``&token={key}`` the URL legitimately lacks.
+    lib_template = _strip_vault_key_segments(lib_template, params)
     # the record's own offset adjustment (schedule / next_event cards flip look-back to look-ahead):
     # the engine must store the SAME adjusted offset or substitute_params won't reproduce the URL
     from .library_resolve import _clock as lib_clock  # local: engine-internal module
@@ -3647,7 +3781,7 @@ def upgrade_pre_f1_literal_dates(store: ni.NIStore, item: dict) -> dict | None:
     when: datetime | None = None
     template = ""
     for cand in candidates[:3]:  # bounded (UTC + user + server)
-        tried = _f1_templatize_literal(url, clock_meta, cand)
+        tried = _f1_templatize_literal(url, clock_meta, cand, lib_record=lib_record)
         if tried == url:
             continue
         probe_spec = _f1_merge_clock_params(spec, tried, clock_meta)
@@ -3755,14 +3889,31 @@ def _f1_creation_candidates(created_at: object) -> list[datetime]:
 
 
 def _f1_templatize_literal(url: str, clock_meta: dict[str, dict],
-                            when: datetime) -> str:
-    """Replace each clock value's rendered creation-day literal in ``url`` with ``{{param:name}}``.
-    Tries the raw rendering first, then the URL-encoded form (``source.url`` is substituted with
-    ``quote(..., safe="")``; a date-only format reproduces either way, a space-bearing one differs
-    and the encoded form matches the stored literal). ``url`` is returned unchanged when no literal
-    matches — the caller then declines the upgrade."""
+                            when: datetime, lib_record: dict | None = None) -> str:
+    """Rewrite ``url``'s creation-day clock literals as ``{{param:name}}`` slots.
+
+    R5-5 (2026-10-04): the swap walks the Library record's ``access.url_template`` by POSITION
+    (same semantics ``_templatize_url_by_position`` emits at live seal) — a count-1 value replace
+    collapses repeating slots (treasury-yield-curve's duplicated ``{year}``) and matches a day
+    whose number equals the month (wikimedia 10/10). Every clock placeholder in the record's
+    template must land on a value that reproduces ``raw``; a URL whose shape has drifted from the
+    record (hand-edited, pasted) still falls back to the raw / percent-encoded value replace so
+    the pre-R5 cards keep upgrading. Returns the templated URL, or ``url`` unchanged when nothing
+    could be slotted — the caller then declines the upgrade."""
     assert isinstance(url, str) and url, "url required"
     assert isinstance(when, datetime), "when must be a datetime"
+    assert lib_record is None or isinstance(lib_record, dict), "lib_record type"
+    if isinstance(lib_record, dict):
+        access = lib_record.get("access") or {}
+        params = list(access.get("params") or [])
+        lib_template = _strip_vault_key_segments(str(access.get("url_template") or ""), params)
+        if lib_template:
+            tried = _templatize_url_by_position(url, lib_template, clock_meta, {})
+            if tried and tried != url and all(
+                    "{{param:" + name + "}}" in tried for name in clock_meta):
+                return tried
+    # Fallback for a URL whose shape doesn't align with the record: the pre-R5-5 raw / percent-
+    # encoded replace, used only when the position walk declined — still better than freezing a card.
     out = url
     for name, meta in clock_meta.items():
         p = {"kind": "clock", "format": meta["format"],
@@ -3825,7 +3976,10 @@ def _realign_url_to_now(store: ni.NIStore, item_id: str, live: dict, url: str,
     at the same ``now`` in ``_handoff``, keeps the fetch URL and the sealed template in step.
 
     Mutates ``live`` in place (writes the realigned URL back) so the ``picked`` gate downstream
-    still matches. A pick without a template leaves ``url`` and ``live`` untouched."""
+    still matches. R5-2 (2026-10-04): also rewrites ``_access.url`` when sealed on the same URL —
+    the handoff's access check and the fetcher both match the realigned fetch URL, so a keyed
+    source resumed after midnight still fetches with the user's key. A pick without a template
+    leaves ``url`` and ``live`` untouched."""
     assert store is not None and item_id, "store + id required"
     assert isinstance(live, dict) and isinstance(url, str), "live + url required"
     assert isinstance(now, datetime), "now must be a datetime"
@@ -3841,6 +3995,9 @@ def _realign_url_to_now(store: ni.NIStore, item_id: str, live: dict, url: str,
     if not rebuilt or rebuilt == url:
         return url
     live["_library_url"] = rebuilt
+    access = live.get("_access")
+    if isinstance(access, dict) and access.get("url") == url:
+        access["url"] = rebuilt
     _flow_write(store, item_id, live)
     return rebuilt
 
@@ -4447,6 +4604,15 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
                                call_model, host_wide=host_wide)
             if refused is not None:
                 return refused
+        # R5-12 (2026-10-04, diag-live): a non-401/403/429 fetch failure on a picked Library row
+        # (404, 5xx, timeout, resolve_fail) used to end the card instead of handing over to the next
+        # row — move on like a refusal does, web search only when the dropped row was a Library row.
+        # ``_move_on`` returns None for a pasted link / Fix / remap (no row to drop) → fail honestly.
+        if not remap:
+            moved = _move_on(store, item_id, pick_url, "couldn't be fetched", request, intent,
+                             call_model, research=picked)
+            if moved is not None:
+                return moved
         return _fail(store, item_id, "fetch", f"sample fetch failed: {type(exc).__name__}")
     # A tapped Library source that declares its answers builds the card from them — no model
     # path-guessing. Fresh builds only (a Fix re-derives); a misfit falls through to mapping.
@@ -4605,6 +4771,29 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
             _append_note(store, item_id,
                           "second pick scored no better; kept the first build")
         break
+    # R5-11 (2026-10-04): the mapping path shipped a card even when the judge named
+    # "won't include: <every want the user said>" — the Colorado gas card shipped
+    # with only "current_price" as a gap, its only want. Mirror the declared-answers
+    # path's F12 all-wants-unanswered refusal: the pick was wrong, not a useful
+    # disclosure on a mapped build. Remap / Fix / pasted-link paths still fail
+    # honestly (``_move_on`` returns None for them, as the misfit helper does).
+    live_params = _clean_params((live or {}).get("_library_params"))
+    filled: list[str] = list(live_params.values())
+    place = str(intent.get("place") or "").strip()
+    if place:
+        filled.append(place)
+    said_wants = _said_wants(request, intent.get("wants") or [], filled)
+    gap_wants = _judge_wants_unanswered(judge, request, intent, filled,
+                                           built.get("preview_payload") or {})
+    if said_wants and len(gap_wants) >= len(said_wants):
+        why = "won't include " + ", ".join(gap_wants)[:140]
+        moved = None if remap else _move_on(store, item_id, pick_url, why, request,
+                                              intent, call_model, research=picked)
+        if moved is not None:
+            return moved
+        return _terminate_unsupported(
+            store, item_id,
+            f"{(live or {}).get('_library_provider') or 'the source'} {why}")
     return _handoff(store, item_id, request, intent, url, built, fields, klass,
                     converted=converted, judge=judge, degrade_note=degrade_note,
                     remap=remap, keep_source=keep_source, keep_params=keep_params,
@@ -4826,9 +5015,22 @@ def _build_page_card(store: ni.NIStore, item_id: str, request: str,
         graph = pagegraph.graph_from_extract(url, ni._fetch_http_page(
             {"type": "http_page", "url": url}, item_id, None, full=True))
     except ni.NIError as exc:
+        # R5-12 (2026-10-04): a page fetch failure hands over to the next row of the pick,
+        # same posture as _sample_and_map's non-401/403/429 branch; a pasted link / Fix /
+        # remap still fails honestly (``_move_on`` returns None for them).
+        if not remap:
+            moved = _move_on(store, item_id, url, "couldn't be fetched",
+                             request, intent, call_model)
+            if moved is not None:
+                return moved
         return _fail(store, item_id, "fetch",
                       f"page fetch failed: {exc.kind}")
     except Exception as exc:
+        if not remap:
+            moved = _move_on(store, item_id, url, "couldn't be fetched",
+                             request, intent, call_model)
+            if moved is not None:
+                return moved
         return _fail(store, item_id, "fetch",
                       f"page fetch failed: {type(exc).__name__}")
     born = None if remap else "flow"
@@ -5369,14 +5571,22 @@ def _repick_without(store: ni.NIStore, item_id: str, url: str,
 
     FETCH-F6 (2026-10-04): ``host_wide`` drops EVERY row sharing the refused host; a plain 401 / 403
     with no host-wide signal drops just the one URL — a multi-tenant host (services.arcgis.com,
-    s3.amazonaws.com, raw.githubusercontent.com) still has other tenants we can read."""
+    s3.amazonaws.com, raw.githubusercontent.com) still has other tenants we can read.
+
+    R5-2 (2026-10-04): the pick row is matched by ``source_id`` first (the sealed
+    ``_library_source``), then by literal URL — a midnight realign rebuilds ``_library_url`` and a
+    bind-by-URL would then no longer find the refused row, so the move-on would silently return
+    None and the card would die instead of handing off to the next source."""
     record = _flow_read(store, item_id) or {}
+    sealed_sid = str(record.get("_library_source") or "")
     for slot in ("_ranked_library", "_ranked_search"):
         rows = [r for r in record.get(slot) or [] if isinstance(r, dict)]
-        gone = next((r for r in rows if r.get("url") == url), None)
+        gone = next((r for r in rows
+                     if (sealed_sid and r.get("source_id") == sealed_sid)
+                     or r.get("url") == url), None)
         if gone is None:
             continue
-        rest = [r for r in rows if r.get("url") != url]
+        rest = [r for r in rows if r is not gone]
         if host_wide:
             host = (urlparse(url).hostname or "").lower()
             rest = [r for r in rest if (urlparse(str(r.get("url") or "")).hostname or "").lower() != host]

@@ -65,9 +65,13 @@ def _store() -> nimod.NIStore:
     return nimod.NIStore(conn, gen_master_key())
 
 
-def _intent(ask: str, subject: str, wants: list[str], place: str | None = None) -> dict:
+def _intent(ask: str, subject: str, wants: list[str], place: str | None = None,
+            names: list[str] | None = None) -> dict:
+    """Named-topics (2026-10-04): ``names`` stands in for the model's narrow closed blank;
+    tests that exercise the proper-noun gate pass the names the production model would."""
     return {"kind": "external_data", "subject": subject, "cadence_minutes": 15, "wants": wants, "threshold": None,
-            "place": place, "display_hint": "value", "frame_kind": library_index.frame_kind_from_text(ask),
+            "place": place, "display_hint": "value", "names": list(names or []),
+            "frame_kind": library_index.frame_kind_from_text(ask),
             "window": ni_flow._window_from_text(ask)}
 
 
@@ -248,7 +252,7 @@ def test_f7_sentence_initial_proper_noun_still_refuses_a_general_feed() -> None:
     """"Ukraine news" with Ukraine first: a phone auto-cap, but "Ukraine" isn't in English/taxonomy/
     generic — it is a naming word and no part of abc-top takes it."""
     ask = "Ukraine news"
-    intent = _intent(ask, "Ukraine news", ["headlines"])
+    intent = _intent(ask, "Ukraine news", ["headlines"], names=["Ukraine"])
     answers = ni_flow._library_answers("abc-top")
     assert answers, "abc-top has answers"
     chosen = ni_flow.select_answers(answers, ask, intent["wants"], intent["window"], intent["frame_kind"])
@@ -503,9 +507,11 @@ _R4_1_REFUSES = [
 @pytest.mark.parametrize("ask", _R4_1_REFUSES)
 def test_r4_1_proper_noun_subject_refuses_abc_top(ask) -> None:
     """A sentence-initial auto-cap of a proper-noun subject (phones auto-cap "Boeing" / "NASA" /
-    "FDA") that is not a generic topic word must refuse the general US headline feed."""
+    "FDA") that is not a generic topic word must refuse the general US headline feed. Named-
+    topics (2026-10-04): ``names`` is the model's narrow closed blank — the ask's first word is
+    the proper noun the production model would emit here."""
     subject = ask.split(" ")[0].lower() + " news"
-    intent = _intent(ask, subject, ["headlines"])
+    intent = _intent(ask, subject, ["headlines"], names=[ask.split(" ")[0]])
     answers = ni_flow._library_answers("abc-top")
     assert answers, "abc-top has answers"
     chosen = ni_flow.select_answers(answers, ask, intent["wants"], intent["window"], intent["frame_kind"])

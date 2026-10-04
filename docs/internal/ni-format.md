@@ -104,6 +104,29 @@ No foreign keys; `NIStore.delete` cascades in code (feeds precedent).
   `_reslot_clock_params_in_pipeline` on the pipeline — a mapping-path (freeform or remap) extract
   path or `where` value holding a clock-filled literal walks forward instead of freezing on the
   sample day. The reslot is idempotent (an already-slotted path has no literal to match).
+- R5-1 (2026-10-04): a `next_event` ask with `window="today"` / `"tonight"` keeps the forward
+  floor and the stale-first check — `_frame_gap`'s in-period exemption applies only to `schedule`
+  (a "tide times today" table keeps the whole day); `_build_rows_answer`'s `floor_hour` is True
+  for a next_event list too, so "when is the next tide today" at 22:30 never leads with 8:01 AM.
+- R5-2 (2026-10-04): `_realign_url_to_now` also rewrites `_access.url` when it matched the pre-
+  realign URL, and `default_fetcher` reads `_access` from the record at fetch time (not captured
+  at `run_flow` entry) — a tap at 23:58 and user-key given at 00:05 still fetches with the key.
+  `_repick_without` binds the pick row by sealed `_library_source` (then falls back to literal
+  URL) so a 403 after midnight hands off to the next source instead of returning None.
+- R5-4 (2026-10-04): `_window_op` with `floor_hour=False` keeps `step="hour"` and marks `floor:
+  false` on the op; the engine's `window` transform validator accepts an optional `floor` bool,
+  and `_window_test` disables the current-hour floor without rewriting the step — the dawn rule
+  ("tonight" at 01:30 is now..06:00, never the next evening) still fires on list cards.
+- R5-5 (2026-10-04): `_f1_templatize_literal` walks the Library record's `access.url_template`
+  by position (shared with `_derive_clock_template`) — a count-1 value replace collapsed
+  duplicated slots (treasury-yield-curve's repeated `{year}`) and bound the wrong position on a
+  day whose number equals the month (wikimedia 10/10); every clock placeholder must slot or the
+  position walk declines and the pre-R5 raw / percent-encoded replace is the fallback.
+- R5-8 (2026-10-04): `_derive_clock_template` strips `?`/`&` query segments naming vault_key
+  params from the Library template before position-aligning against the live URL — the live URL
+  has those segments stripped by `library_resolve._expand`, so a trailing `&token={key}` left in
+  the template would otherwise fail the walk for keyed clock sources (nasa-neows-feed,
+  finnhub-earnings-calendar, fec-candidates).
 - `display.size` ∈ `small | wide` (wide spans two grid columns).
 - `contract` is system-written at commissioning (§7); the agent may never set it.
 - `model` optionally overrides the `ni` route for `model` sources (schedules.model
@@ -2092,17 +2115,36 @@ the handoff, and a deterministic check stands where the judge was removed.
   overlaps ("gas inventories" on retail gas prices); and a general source
   (no `coverage.entity`, no geo parameter) refuses a named topic none of its
   own words, readings or filters take ("latest news on Ukraine" on top
-  headlines). A named topic comes only from the user's raw words: a capitalized
-  word not at a sentence start, or a sentence-initial one that isn't an English,
-  topic or generic word ("Any big news today" ships; "Ukraine news" doesn't) —
-  never from the model's casing. A list-entity source (a city's local news) still
-  refuses another named outlet or team. Generic quantity wants (level, value,
-  number, amount, worth, reading) are answered by a source's main value. `_other_subject` subtracts only the readings this source took
+  headlines). A named topic comes from THREE places in the user's raw words:
+  (a) the validated intent `names` — a narrow closed blank the local model
+  fills (people, companies, organizations, agencies, places, products, teams,
+  events; each entry must be a case-insensitive whole-word substring of the
+  ask or code drops it as a hallucination); (b) capitalized tokens that aren't
+  at the sentence start — mid-sentence caps are always proper; (c) all-caps
+  acronyms of two or more letters that aren't a stop word ("FDA", "SEC",
+  "TSA") — proper even at the sentence start. A sentence-initial capitalized
+  word is a name ONLY when the intent named it: phones auto-capitalize every
+  ask, and without a corroborating model name "Biggest earthquakes today"
+  ships the same source as the lowercased variant. Review-5 (2026-10-04) adds
+  the `names` field; the suffix / topic lookalike heuristics are removed. A
+  list-entity source (a city's local news) still refuses another named outlet
+  or team. Generic quantity wants (level, value, number, amount, worth,
+  reading) are answered by a source's main value. `_other_subject` subtracts
+  only the readings this source took
   or covers, never another row's. A `{param}` value filled into a host must
   be a plain host (no credentials, port, fragment or IP literal; a feed path
   keeps its query); a value a same-host lookup pulls is a bounded id
   (`[A-Za-z0-9,._:-]{1,64}`, never `.`/`..`). A plain 401/403 drops that
-  address only; a challenge or 429 drops the host.
+  address only; a challenge or 429 drops the host. A non-401/403/429 fetch
+  failure (404, 5xx, timeout) on a picked Library row and a page-fetch
+  failure in `_build_page_card` hand over to the next row of the pick —
+  "couldn't be fetched — pick another source" — with a web search only when
+  the dropped row was a Library row; a pasted link / Fix still fails
+  honestly (`_move_on` returns None for a URL that wasn't a pick row). A
+  mapped card whose judge flagged EVERY said want as a gap ("won't include:
+  current_price" when the user asked for the price) refuses and moves on —
+  the pick was wrong, not a useful disclosure; same posture as the
+  declared-answers path's all-wants-unanswered refusal.
 - **Locate runs on the keyword frame.** The hybrid ranking (`library_embed`:
   route and source asks embedded by a LOCAL model, never a cloud one) is
   built but not wired: on 95 clean labeled asks (no overlap with the
@@ -2276,16 +2318,20 @@ and the `recipe` born marker stays readable.
   `tbd_if` flag is set becomes a day row on its written date (`unless` on the window op):
   an MLB TBD start sentinel 07:33Z never slips into `tonight`. On an hour-step axis
   `today` / `tonight` floor at the current hour FOR FORECAST-STYLE SERIES (columns kind
-  — hourly weather); event / schedule / result / next_event lists (list kind) keep the
-  whole asked period (R4-6 2026-10-04: `_window_op` with `floor_hour=False` passes `step:
-  period` so the engine's non-floor branch runs). `tonight` before 06:00 is still the
-  current night (now..06:00) on forecast series. Day-step rows keep the whole date even
-  when the cell has a clock. A next-event / schedule list on a time axis with no asked
-  window still gets a forward cut (`upcoming`) every run: rows from now − 15 min on
-  (`ni._UPCOMING_GRACE`), the same floor `next_event_stale` judges a "next" card by, so
-  a kept row is never refused and an event 50 minutes past is never "next"; on an
-  explicit day / night window (`today`, `tonight`) the stale-first check does NOT fire
-  — "MLB schedule today" at 10 PM intentionally shows the Finals from earlier (R4-6).
+  — hourly weather); event / schedule / result lists (list kind) keep the whole asked period
+  (R4-6 2026-10-04 / R5-4 2026-10-04: `_window_op` with `floor_hour=False` keeps `step="hour"`
+  and marks `floor: false` on the op; the engine's `window` transform honors the flag without
+  rewriting the step, so the dawn rule still fires on hour axes). A next-event list (R5-1
+  2026-10-04) still floors — "when is the next tide today" at 22:30 cuts the morning low.
+  `tonight` before 06:00 is the current night (now..06:00) on any hour-step axis, regardless of
+  `floor`. Day-step rows keep the whole date even when the cell has a clock. A next-event /
+  schedule list on a time axis with no asked window still gets a forward cut (`upcoming`) every
+  run: rows from now − 15 min on (`ni._UPCOMING_GRACE`), the same floor `next_event_stale`
+  judges a "next" card by, so a kept row is never refused and an event 50 minutes past is never
+  "next"; on an explicit day / night window (`today`, `tonight`) the stale-first check does NOT
+  fire for a schedule — "MLB schedule today" at 10 PM intentionally shows the Finals from
+  earlier (R4-6); it DOES fire for a next_event (R5-1) so "the next tide today" never leads
+  with a past tide.
   The engine clock is the user's zone as the DESKTOP reports it (`meta user:timezone`,
   loaded at unlock); R4-3 (2026-10-04): a REMOTE device may SEED the zone when none is
   stored yet so a headless / LAN-only / phone-only install still runs on the user's

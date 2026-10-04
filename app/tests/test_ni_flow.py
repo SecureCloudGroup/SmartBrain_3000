@@ -1095,6 +1095,62 @@ def test_intent_place_field_validated() -> None:
         ni_flow._validate_intent({**base, "place": 42})
 
 
+def test_intent_names_substring_rule_drops_hallucinated() -> None:
+    """named-topics (2026-10-04): ``names`` entries must be case-insensitive whole-
+    word substrings of the request; a hallucinated name (never typed) is dropped."""
+    base = {"kind": "external_data", "subject": "x", "cadence_minutes": 15,
+            "wants": ["news"], "threshold": None, "display_hint": "value"}
+    out = ni_flow._validate_intent({**base, "names": ["Boeing", "Lockheed"]},
+                                     "Boeing news today")
+    assert out["names"] == ["Boeing"], out["names"]
+    out = ni_flow._validate_intent({**base, "names": ["BOEING"]},
+                                     "boeing news today")
+    assert out["names"] == ["BOEING"], "case-insensitive match keeps model casing"
+    out = ni_flow._validate_intent({**base, "names": "not a list"},
+                                     "Boeing news")
+    assert out["names"] == [], "shape error → empty list, never a raise"
+
+
+def test_intent_names_bounded_and_deduped() -> None:
+    """named-topics: at most 5 names kept, dupes drop, 60-char cap on each."""
+    base = {"kind": "external_data", "subject": "x", "cadence_minutes": 15,
+            "wants": ["news"], "threshold": None, "display_hint": "value"}
+    request = "a b c d e f g h"
+    raw = ["a", "b", "c", "d", "e", "f", "g"]
+    out = ni_flow._validate_intent({**base, "names": raw}, request)
+    assert out["names"] == ["a", "b", "c", "d", "e"], out["names"]
+    out = ni_flow._validate_intent({**base, "names": ["Boeing", "Boeing", "Boeing"]},
+                                     "Boeing news")
+    assert out["names"] == ["Boeing"], "exact-string dedupe"
+    too_long = "x" * 61
+    out = ni_flow._validate_intent({**base, "names": [too_long]},
+                                     f"abc {too_long} def")
+    assert out["names"] == [], "over the 60-char cap drops"
+
+
+def test_request_proper_sentence_initial_needs_intent_name() -> None:
+    """named-topics: a sentence-initial cap is proper ONLY when the intent named it;
+    mid-sentence caps and all-caps acronyms stay proper regardless."""
+    # Sentence-initial auto-cap, no intent names → NOT proper (phone auto-cap).
+    assert "biggest" not in ni_flow._request_proper("Biggest earthquakes today")
+    assert "nightly" not in ni_flow._request_proper("Nightly news")
+    # Sentence-initial, intent named it → proper.
+    assert "boeing" in ni_flow._request_proper("Boeing news", ["Boeing"])
+    assert "ukraine" in ni_flow._request_proper("Ukraine news", ["Ukraine"])
+    # Mid-sentence caps are always proper (no intent names needed).
+    assert "boeing" in ni_flow._request_proper("show me Boeing news")
+    # All-caps acronyms are proper even sentence-initial, even without names.
+    assert "fda" in ni_flow._request_proper("FDA news")
+    assert "sec" in ni_flow._request_proper("SEC news")
+    assert "tsa" in ni_flow._request_proper("TSA news")
+
+
+def test_request_proper_includes_validated_intent_names() -> None:
+    """named-topics: the intent's validated names are always in the output set."""
+    proper = ni_flow._request_proper("news about Beijing today", ["Beijing"])
+    assert "beijing" in proper
+
+
 # --- A12 / A13 (case matrix) — deterministic authoring hooks --------------
 
 def test_wants_fahrenheit_regex_hits_and_misses() -> None:
@@ -1756,6 +1812,49 @@ def test_malformed_computed_date_asks_instead_of_crashing_later() -> None:
     assert "date" in surface["reason"].lower()
 
 
+def test_judge_wants_unanswered_matches_canonical_overlap() -> None:
+    """R5-11 (2026-10-04): the mapping-path helper reads judge["gaps"] and reports
+    the user's said wants a gap mentions; synonyms covered by ``_WANT_SYNONYMS``."""
+    judge = {"serves": True, "gaps": ["current_price"], "wrong": []}
+    intent = {"wants": ["current_price"]}
+    out = ni_flow._judge_wants_unanswered(judge, "Colorado gas prices", intent,
+                                             [], {"headline": "x"})
+    assert out == ["current price"], out
+    # a gap that doesn't name any said want returns nothing (and the all-unanswered
+    # branch stays off)
+    out = ni_flow._judge_wants_unanswered(
+        {"serves": True, "gaps": ["comment counts"], "wrong": []},
+        "latest posts titles", {"wants": ["title"]}, [], {"title": "x"})
+    assert out == []
+    # a generic quantity want ("value") answered by a shown preview field: skip
+    out = ni_flow._judge_wants_unanswered(
+        {"serves": True, "gaps": ["value field"], "wrong": []},
+        "the value today", {"wants": ["value"]}, [], {"value": 42})
+    assert out == []
+
+
+def test_mapping_path_refuses_when_all_wants_are_gaps(monkeypatch) -> None:
+    """R5-11 (2026-10-04): a mapped card whose judge flagged EVERY said want as a
+    gap used to ship ("won't include: current_price" on the sole want); the pick
+    was wrong, not a useful disclosure — refuse and let the next source try."""
+    store, _conn = _store()
+    fixture = _load("hn")
+    intent_reply = json.dumps({
+        "kind": "external_data", "subject": "gas", "cadence_minutes": 15,
+        "wants": ["current_price"], "threshold": None, "display_hint": "value",
+    })
+    mapping_reply = json.dumps({"current_price": "hits[0].points"})
+    judge_reply = json.dumps({"serves": False, "gaps": ["current_price"],
+                                "wrong": []})
+    model = _scripted_model([intent_reply, mapping_reply, judge_reply])
+    item_id = ni_flow.create_shell_item(store, "price of gas")
+    result = ni_flow.run_flow(
+        store, item_id, gateway_call=model,
+        fetcher=lambda url: fixture,
+        source_url="https://hn.algolia.com/api/v1/search?tags=front_page")
+    assert result["state"] != "ready", f"expected a refusal, got {result['state']}"
+
+
 def test_judge_disclosures_land_in_the_journal() -> None:
     """Audit: judge gaps lived only in flow-slot notes the board hides at
     ready — History (journal) now carries them."""
@@ -1826,6 +1925,27 @@ def test_page_door_builds_an_interpreted_card(monkeypatch) -> None:
     assert "{{param:" not in spec["pipeline"][0]["instruction"]
     notes = " ".join((ni_flow._flow_read(store, item_id) or {}).get("notes") or [])
     assert "interpreted page card" in notes
+
+
+def test_pasted_link_fetch_failure_still_fails_honestly(monkeypatch) -> None:
+    """R5-12 (2026-10-04): a 404 / timeout / 5xx on a pasted URL (no Library row
+    to drop) still fails honestly — ``_move_on`` returns None for a URL that
+    wasn't a pick row and the caller falls through to ``_fail``."""
+    from smartbrain_3000 import netguard
+    store, _conn = _store()
+    item_id = ni_flow.create_shell_item(store, "random api")
+    intent = {"kind": "external_data", "subject": "x", "cadence_minutes": 15,
+              "wants": ["value"], "threshold": None, "display_hint": "value"}
+    ni_flow._transition(store, item_id, "intent", intent=intent)
+
+    def dead(url: str) -> object:
+        raise netguard.FetchError("not found", status=404)
+
+    result = ni_flow._sample_and_map(store, item_id, "random api", intent,
+                                      "https://example.com/missing",
+                                      lambda p: "{}", dead)
+    assert result["state"] == "failed", result
+    assert result["error"].startswith("fetch")
 
 
 def test_page_door_jail_failure_is_honest(monkeypatch) -> None:

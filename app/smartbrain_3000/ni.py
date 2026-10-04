@@ -1372,7 +1372,8 @@ def _validate_transform_window(node: dict, where: str) -> None:
     stays under ``field``."""
     assert isinstance(node, dict), "node must be a dict"
     assert isinstance(where, str) and where, "where required"
-    _closed_keys(node, {"fn", "field", "key", "window", "zone", "utc", "unless", "step"}, where)
+    _closed_keys(node, {"fn", "field", "key", "window", "zone", "utc", "unless", "step", "floor"},
+                 where)
     key = node.get("key")
     if not isinstance(key, str) or len(key) > 120 or not _ROW_KEY_RE.fullmatch(key):
         raise ValueError(f"{where}.key malformed")
@@ -1396,6 +1397,9 @@ def _validate_transform_window(node: dict, where: str) -> None:
     step = node.get("step")
     if step is not None and step not in ("hour", "day", "period"):
         raise ValueError(f"{where}.step must be one of hour|day|period")
+    floor = node.get("floor")
+    if floor is not None and not isinstance(floor, bool):
+        raise ValueError(f"{where}.floor must be a bool")
 
 
 def _validate_transform_as(name: object, where: str, outputs: set[str]) -> None:
@@ -2038,7 +2042,8 @@ def _apply_transform_op(op: dict, payload: dict, *, history: dict) -> dict:
         out[field] = _txf_window(payload[field], op["key"], op["window"],
                                  None if zone is None else payload[zone],
                                  utc=bool(op.get("utc")), unless=op.get("unless"),
-                                 step=str(op.get("step") or "hour"))
+                                 step=str(op.get("step") or "hour"),
+                                 floor=bool(op.get("floor", True)))
     elif fn == "date":
         out[field] = _txf_rows(payload[field], op.get("key"), local_date)
     elif fn == "zip":
@@ -2328,9 +2333,9 @@ def next_event_stale(value: object, now: datetime, grace_minutes: int = 15) -> b
 
 def _txf_window(value: object, key: str, window: str, zone: object, *,
                 utc: bool = False, unless: str | None = None,
-                step: str = "hour") -> list:
-    """C7 window(field, key, window, zone, utc?, unless?, step?): keep the rows whose own local
-    date / time falls in the asked window, judged against the clock on every run.
+                step: str = "hour", floor: bool = True) -> list:
+    """C7 window(field, key, window, zone, utc?, unless?, step?, floor?): keep the rows whose own
+    local date / time falls in the asked window, judged against the clock on every run.
 
     A row's time reads as the source wrote it: a zoneless ISO value is the source's local time, one
     with an offset is local to that offset, an epoch is placed in the source's zone. ``utc: true``:
@@ -2339,7 +2344,10 @@ def _txf_window(value: object, key: str, window: str, zone: object, *,
     says the time is a placeholder (MLB ``status.startTimeTBD``) is a day row on its written date,
     never a timed row — never a tonight / next_hours hit. ``step`` ("hour" default, "day" / "period"):
     an hour-stepped list cuts past hours on ``today`` / ``tonight`` (C11, field 2026-10-04); a
-    day-stepped one keeps the whole day's row even if the cell has a clock."""
+    day-stepped one keeps the whole day's row even if the cell has a clock. ``floor`` (R5-4,
+    2026-10-04): default True floors the hour-step window at the current hour; False keeps the
+    whole asked period (event / schedule / result lists) while still honoring the dawn rule
+    ("tonight" at 01:30 is now..06:00, never the next evening)."""
     if not isinstance(value, list):
         raise NIError("transform_type", "window needs a list")
     assert _WINDOW_RE.fullmatch(window), "window already validated"
@@ -2353,7 +2361,7 @@ def _txf_window(value: object, key: str, window: str, zone: object, *,
     if window == "now":
         keep = _now_slot(stamps, local_now)
     else:
-        test = _window_test(window, local_now, step=step)
+        test = _window_test(window, local_now, step=step, floor=floor)
         keep = [st is not None and test(st) for st in stamps]
     return [row for row, kept in zip(value, keep, strict=True) if kept]
 
@@ -2461,21 +2469,23 @@ def _now_slot(stamps: list[_Stamp | None], local_now: datetime) -> list[bool]:
     return [a is not None and a == best for a in ages]
 
 
-def _window_test(window: str, local_now: datetime, step: str = "hour"):
+def _window_test(window: str, local_now: datetime, step: str = "hour", floor: bool = True):
     """The row test for every window but ``now``, at the source's local ``local_now``.
 
     C11 (field 2026-10-04): hour-row cuts for ``today`` / ``tonight`` floor at the current hour so
     the first row the card shows is the one happening now (never a morning scroll back from 10 PM).
     ``tonight`` read before 06:00 is the end of the current night (now..06:00), never the next one.
     ``step`` ("hour" default, "day" / "period"): on a day-stepped list a timed cell is still a day
-    row (an MLB game sits on its calendar date), so the floor doesn't apply."""
+    row (an MLB game sits on its calendar date), so the floor doesn't apply. ``floor`` (R5-4,
+    2026-10-04): default True floors the hour-step cut at the current hour; False keeps the whole
+    asked period on hour rows (event / schedule / result lists) while the dawn rule still fires."""
     day = local_now.date()
     wall_hour = local_now.replace(minute=0, second=0, microsecond=0, tzinfo=None)
     hourly = step == "hour"
     if window == "upcoming":  # a next-event / schedule list with no asked window: from now - grace on
-        floor = local_now - _UPCOMING_GRACE  # the same floor next_event_stale judges by
-        wall_floor = floor.replace(tzinfo=None)
-        return lambda st: (floor.astimezone(UTC) <= st[1].astimezone(UTC) if st[2] and st[1] is not None
+        fence = local_now - _UPCOMING_GRACE  # the same floor next_event_stale judges by
+        wall_floor = fence.replace(tzinfo=None)
+        return lambda st: (fence.astimezone(UTC) <= st[1].astimezone(UTC) if st[2] and st[1] is not None
                             else wall_floor <= st[0] if st[2] else day <= st[0].date())
     if window == "tonight":  # 18:00 today → 06:00 tomorrow, on the source's wall clock
         night = local_now.replace(hour=18, minute=0, second=0, microsecond=0, tzinfo=None)
@@ -2483,7 +2493,8 @@ def _window_test(window: str, local_now: datetime, step: str = "hour"):
             start, end = wall_hour, local_now.replace(hour=6, minute=0, second=0,
                                                        microsecond=0, tzinfo=None)
         else:  # otherwise 18:00..06:00, floored at the current hour on hour rows
-            start, end = (max(night, wall_hour) if hourly else night), night + timedelta(hours=12)
+            start, end = (max(night, wall_hour) if (hourly and floor) else night), \
+                         night + timedelta(hours=12)
         return lambda st: st[2] and start <= st[0] < end
     if window.startswith("next_hours:"):
         hours = timedelta(hours=int(window.split(":")[1]))
@@ -2491,7 +2502,7 @@ def _window_test(window: str, local_now: datetime, step: str = "hour"):
         return lambda st: st[2] and (hour <= st[1].astimezone(UTC) < hour + hours if st[1] is not None
                                      else wall_hour <= st[0] < wall_hour + hours)
     days = _window_days(window, day)
-    if window == "today" and hourly:  # hour rows cut past hours; day rows keep today's whole row
+    if window == "today" and hourly and floor:  # hour rows cut past hours; day rows keep today's whole row
         return lambda st: st[0].date() in days and (not st[2] or st[0] >= wall_hour)
     return lambda st: st[0].date() in days
 
