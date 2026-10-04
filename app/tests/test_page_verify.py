@@ -140,6 +140,23 @@ def test_heading_equal_value_is_data_unless_it_is_the_wants_label() -> None:
                   wants=["jackpot"]) == []
 
 
+# F6-A (blind-5): a compiled page card shipped "h3: Traffic & Road Conditions" for
+# "I-70 road conditions Colorado". The outline label carried its jail "h3:" prefix,
+# and the chrome check didn't normalize the prefix off the value when comparing to
+# the (prefix-stripped) heading set — so a heading restating the ask slipped past.
+def test_heading_label_with_h_level_prefix_is_refused_as_a_label() -> None:
+    g = _graph("Interstate 70 - Colorado.\nTraffic and Road Conditions.\n"
+               "Open with chains advised.",
+               outline=["h1: Interstate 70", "h3: Traffic & Road Conditions"])
+    assert _check(g, {"road_conditions": "h3: Traffic & Road Conditions"},
+                  frame="status", wants=["road conditions"],
+                  subject="Interstate 70")
+    # the actual data line still ships
+    assert _check(g, {"road_conditions": "Open with chains advised"},
+                  frame="status", wants=["road conditions"],
+                  subject="Interstate 70") == []
+
+
 def test_ungrounded_words_and_numbers_refused() -> None:
     g = _graph(_STATUS_TEXT)
     assert _check(g, {"status": "Operational"})               # word not on the page
@@ -185,6 +202,19 @@ def test_next_event_grace_and_horizon() -> None:
     assert _check(g, {"launch_time": "2026-09-29T14:50:00Z"}, now=now, **kw) == []  # grace
     assert _check(g, {"launch_time": "2028-01-01T00:00:00Z"}, now=now, **kw)        # > 400 d
     assert _check(g, {"launch_time": "soon"}, now=now, **kw)                        # no time
+
+
+# F6-ISS (blind-5): "ISS passes over Tucson" shipped "Saturday, Oct 10" (a date, no
+# clock) for a next_event pass want. C9: a next event needs a time still to come —
+# a date-only reading on a time-typed key must refuse under next_event / schedule.
+def test_next_event_date_only_reading_on_time_typed_key_refuses() -> None:
+    g = _graph("ISS passes over Tucson. Next pass Saturday, Oct 10 at 6:12 PM.",
+               title="ISS over Tucson")
+    kw = {"frame": "next_event", "wants": ["pass"], "subject": "ISS over Tucson"}
+    now = datetime.fromisoformat("2026-10-04T10:00:00-07:00")
+    assert _check(g, {"pass": "Saturday, Oct 10"}, now=now, **kw)
+    # a time of day on the same ask ships
+    assert _check(g, {"pass": "Saturday, Oct 10 at 6:12 PM"}, now=now, **kw) == []
 
 
 def test_result_needs_teams_points_and_date() -> None:

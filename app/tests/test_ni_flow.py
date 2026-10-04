@@ -1855,6 +1855,52 @@ def test_mapping_path_refuses_when_all_wants_are_gaps(monkeypatch) -> None:
     assert result["state"] != "ready", f"expected a refusal, got {result['state']}"
 
 
+# F6-C (blind-5, 2026-10-04): "flu levels in Texas" shipped MS/NJ/VA/AL/KS rows
+# — a mapping-path card over state-keyed data (CDC NHSN) must refuse when the
+# named place's state code is nowhere in the preview rows but other states are.
+# The judge couldn't call this out reliably on a small model; this is the code
+# check in its place. The row-filter work (fix6-rows) still owns the drop; this
+# refuses when filtering is impossible (no row for the asked state).
+def test_rows_contradict_place_detects_other_states_only() -> None:
+    rows = [{"jurisdiction": "MS", "count": "32"},
+            {"jurisdiction": "NJ", "count": "126"},
+            {"jurisdiction": "Virginia", "count": "52"}]
+    assert ni_flow._rows_contradict_place({"rows": rows}, "Texas") is True
+    assert ni_flow._rows_contradict_place({"rows": rows}, "Mississippi") is False
+    # a reading with no state cells at all does not fire (it just doesn't name
+    # the place in a way the check can see; the normal wants/subject gates handle it)
+    numeric_only = [{"time": "2026-10-04T00:00", "temp": "68"}]
+    assert ni_flow._rows_contradict_place({"rows": numeric_only}, "Texas") is False
+    # no place in the intent → always False
+    assert ni_flow._rows_contradict_place({"rows": rows}, "") is False
+    # a place that isn't a US state → always False (another gate handles it)
+    assert ni_flow._rows_contradict_place({"rows": rows}, "Tokyo") is False
+
+
+def test_mapping_path_refuses_when_rows_name_other_states_only(monkeypatch) -> None:
+    """F6-C: a Socrata-shaped list whose extracted rows cell-name US states
+    OTHER than the asked place (and never the asked one) must refuse at the
+    mapping path's exit — not ship a card about MS/NJ/VA under 'Texas'."""
+    store, _conn = _store()
+    sample = {"items": [{"jurisdiction": "MS", "count": 32},
+                        {"jurisdiction": "NJ", "count": 126},
+                        {"jurisdiction": "VA", "count": 52}]}
+    intent_reply = json.dumps({
+        "kind": "external_data", "subject": "flu", "cadence_minutes": 15,
+        "wants": ["status"], "threshold": None, "display_hint": "list",
+        "place": "Texas",
+    })
+    mapping_reply = json.dumps({"status": "items[0].jurisdiction"})
+    judge_ok = json.dumps({"serves": True, "gaps": [], "wrong": []})
+    model = _scripted_model([intent_reply, mapping_reply, judge_ok])
+    item_id = ni_flow.create_shell_item(store, "flu status in Texas")
+    result = ni_flow.run_flow(
+        store, item_id, gateway_call=model,
+        fetcher=lambda url: sample,
+        source_url="https://data.cdc.gov/resource/vdzy-6i9v.json")
+    assert result["state"] != "ready", f"expected refusal, got {result['state']}"
+
+
 def test_judge_disclosures_land_in_the_journal() -> None:
     """Audit: judge gaps lived only in flow-slot notes the board hides at
     ready — History (journal) now carries them."""

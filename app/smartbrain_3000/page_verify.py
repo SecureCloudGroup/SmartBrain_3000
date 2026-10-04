@@ -68,6 +68,14 @@ _TIME_WANT_WORDS: frozenset[str] = frozenset({
     "departure", "depart", "arrival", "arrive", "eta", "kickoff", "tipoff",
     "eruption", "launch", "pass", "sunrise", "sunset", "drawing", "draw",
 })
+# F6-ISS (blind-5): a next-event want whose referent is a punctual minute
+# needs a clock — a date alone is not useful ("Saturday, Oct 10" as the next
+# ISS pass). The narrow subset below triggers the clock-required refusal
+# under next_event / schedule; the broader ``_TIME_WANT_WORDS`` continues to
+# accept date-only readings on scheduled days (drawing, game, kickoff).
+_CLOCK_REQUIRED_WORDS: frozenset[str] = frozenset({
+    "pass", "flyover", "sunrise", "sunset", "time", "times", "eta",
+})
 # Page self-descriptions (the JSON-LD a site emits about itself).
 _NEWS_TYPES: frozenset[str] = frozenset({
     "NewsArticle", "ReportageNewsArticle", "AnalysisNewsArticle",
@@ -364,7 +372,12 @@ def _chrome_reasons(graph: dict, values: dict, wants: list[str]) -> list[str]:
     reasons: list[str] = []
     for value in values.values():
         for text in _strings(value):
-            norm = _norm(text)
+            # F6-A (blind-5): a reading that still carries the jail "h<n>: "
+            # label (an outline-selector leak) is never the page's value — the
+            # heading comparison normalizes it off so a label restating the ask
+            # ("h3: Traffic & Road Conditions" for "road conditions") refuses.
+            bare = re.sub(r"^h\d:\s*", "", str(text))
+            norm = _norm(bare)
             if not norm:
                 continue
             has_digit = any(ch.isdigit() for ch in norm)
@@ -449,6 +462,12 @@ def _time_typed(key: str) -> bool:
     return bool(set(_TOKEN_RE.findall(key.lower().replace("_", " "))) & _TIME_WANT_WORDS)
 
 
+def _clock_required(key: str) -> bool:
+    """A key whose want is a punctual minute (ISS pass, sunrise, flyover) — a
+    date alone can't ship under next_event / schedule."""
+    return bool(set(_TOKEN_RE.findall(key.lower().replace("_", " "))) & _CLOCK_REQUIRED_WORDS)
+
+
 def _time_reasons(values: dict, now: datetime, tz: tzinfo) -> list[str]:
     reasons: list[str] = []
     for key, value in values.items():
@@ -460,6 +479,14 @@ def _time_reasons(values: dict, now: datetime, tz: tzinfo) -> list[str]:
                 reasons.append(f"no time in '{_quote(value)}'")
             continue
         when, has_clock = got
+        # F6-ISS (blind-5): a next-event / schedule reading whose key names a
+        # punctual minute (``pass``, ``sunrise``, ``flyover``) needs a time of
+        # day — the whole-day grace would otherwise ship "Saturday, Oct 10" as
+        # the next ISS pass over Tucson. Date-only on scheduled-day wants
+        # (``drawing``, ``game``, ``next``) still ships, as before.
+        if not has_clock and _clock_required(key):
+            reasons.append(f"no time in '{_quote(value)}'")
+            continue
         if not has_clock:  # a date: the whole day counts
             when = when.replace(hour=23, minute=59, second=59)
         if when < now - _GRACE:

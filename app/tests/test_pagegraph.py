@@ -276,6 +276,23 @@ def test_entity_selector_is_type_addressed() -> None:
                                                       "name": "X"}]), sel)
 
 
+# F6-A (blind-5): the outline list stores "<tag>: <text>" so a page audit can
+# read the heading level. A compiled page card lifts the value verbatim — the
+# jail label is NOT the heading's text and must never ride onto the card.
+def test_outline_selector_strips_the_jail_h_level_prefix() -> None:
+    g = _mini_graph(outline=["h1: Interstate 70",
+                             "h3: Traffic & Road Conditions"])
+    assert pagegraph.run_selector(g, {"kind": "outline", "index": 0}) == \
+        "Interstate 70"
+    assert pagegraph.run_selector(g, {"kind": "outline", "index": 1}) == \
+        "Traffic & Road Conditions"
+    menu = pagegraph.enumerate_menu(g)
+    outline_entries = [m for m in menu if m["selector"]["kind"] == "outline"]
+    assert outline_entries, "expected outline menu entries"
+    for entry in outline_entries:
+        assert not entry["value"].startswith(("h1:", "h2:", "h3:"))
+
+
 def test_menu_reaches_deep_rows_by_want_and_never_emits_invalid() -> None:
     """Live-probe findings (2026-09-23): (1) a big table starved the menu —
     a want about row 150 was unreachable; (2) an unnamed column produced a

@@ -189,7 +189,7 @@ _FRAME_CUES = [
                 r"best sellers?|(music|song|album|billboard) charts?|playoff picture|league table)\b"),
     ("trend", r"\b(charts?|history|historical|trends?|over time|since (19|20)\d\d|(past|last) \d+ "
               r"(days|weeks|months|years)|over the (past|last))\b"),
-    ("status", r"\b(status|down|outages?|delays?|delayed|running|closures?)\b"),
+    ("status", r"\b(status|down|outages?|delays?|delayed|running|closures?|trackers?)\b"),
     # "right now" is a window, not a kind: "hurricanes right now" wants the list of storms
     ("current_value", r"\b(price of|how much (is|are|does)|where is|where's|how('s| is| are) .{1,40} doing)\b"),
     ("latest_items", r"\b(news|headlines|breaking|stories|articles|posts)\b"),
@@ -399,6 +399,7 @@ class LibraryIndex:
         self._takes_cache: dict[str, set[str]] | None = None
         self._own_cache: dict[str, set[str]] | None = None
         self._names_cache: list[tuple[str, set[str]]] | None = None
+        self._entity_vocab_cache: dict[str, set[str]] = {}
 
     # --- install -----------------------------------------------------------------------------
 
@@ -445,6 +446,7 @@ class LibraryIndex:
             self._taxonomy_cache = self._subcats_cache = self._league_aliases = self._has_result = None
             self._has_route_asks_cache = None
             self._takes_cache = self._own_cache = None
+            self._entity_vocab_cache = {}
             return meta
 
     def _conn(self) -> duckdb.DuckDBPyConnection:
@@ -876,17 +878,9 @@ class LibraryIndex:
 
     def _leagues_named(self, con, text: str) -> set[str]:
         """The sports leagues a text names (by the league resolver's own names)."""
-        from .library_resolve import ENGLISH as ENGLISH_WORDS
         from .library_resolve import norm
-        if self._league_aliases is None:
-            self._league_aliases = [
-                (a, _league_of({"attrs": json.loads(attrs) if attrs else {}}))
-                for a, attrs in con.execute(
-                    "SELECT a.alias, e.attrs FROM library_resolver_aliases a JOIN library_resolver_entries e "
-                    "ON e.id = a.entry_id WHERE e.resolver = 'sports_league' AND NOT a.partial").fetchall()
-                if len(a) >= 3 and a not in ENGLISH_WORDS]
         low = f" {norm(text)} "
-        return {lg for a, lg in self._league_aliases if lg and f" {a} " in low}
+        return {lg for a, lg in self._load_league_aliases(con) if lg and f" {a} " in low}
 
     def _vocabulary_outside(self, subcategory: str) -> set[str]:
         out: set[str] = set()
@@ -896,6 +890,52 @@ class LibraryIndex:
                     for kw in sc["keywords"]:
                         out.update(kw.lower().split())
         return out
+
+    def entity_vocabulary(self, entity: str) -> set[str]:
+        """Tokens the ``entity``'s domain names (a league / provider's own words). For a sports
+        league entity ("MLB", "NFL"): the sports_league aliases of that league plus every team
+        alias whose ``attrs.league`` matches it (team_mlb, team_nhl, team_espn) — the ask may name
+        a team of that league without the source having to list each one. {} for a non-league
+        entity: the fix6-rows F7-C class fix (2026-10-04) relies on readings / own words to cover
+        those; sports leagues need the resolver because a league-wide source lists divisions, not
+        teams.
+        """
+        assert isinstance(entity, str), "entity must be a string"
+        from .library_resolve import norm
+        text = norm(entity).strip()
+        if not text:
+            return set()
+        if text in self._entity_vocab_cache:
+            return self._entity_vocab_cache[text]
+        with self._conn() as con:
+            league = next((lg for a, lg in self._load_league_aliases(con) if lg and a == text), "")
+            if not league:
+                self._entity_vocab_cache[text] = set()
+                return set()
+            rows = con.execute(
+                "SELECT a.alias, e.attrs FROM library_resolver_aliases a "
+                "JOIN library_resolver_entries e ON e.id = a.entry_id "
+                "WHERE e.resolver IN ('sports_league','team_mlb','team_nhl','team_espn') AND NOT a.partial"
+            ).fetchall()
+        out: set[str] = set()
+        for alias, attrs in rows:  # bounded by the pack's team aliases
+            attr_lg = _league_of({"attrs": json.loads(attrs) if attrs else {}})
+            if attr_lg == league:
+                out |= {t for t in re.findall(r"[a-z0-9]+", str(alias).lower()) if len(t) >= 2}
+        self._entity_vocab_cache[text] = out
+        return out
+
+    def _load_league_aliases(self, con) -> list[tuple[str, str]]:
+        """The sports_league alias → league pairs, cached (shared with ``_leagues_named``)."""
+        from .library_resolve import ENGLISH as ENGLISH_WORDS
+        if self._league_aliases is None:
+            self._league_aliases = [
+                (a, _league_of({"attrs": json.loads(attrs) if attrs else {}}))
+                for a, attrs in con.execute(
+                    "SELECT a.alias, e.attrs FROM library_resolver_aliases a JOIN library_resolver_entries e "
+                    "ON e.id = a.entry_id WHERE e.resolver = 'sports_league' AND NOT a.partial").fetchall()
+                if len(a) >= 3 and a not in ENGLISH_WORDS]
+        return self._league_aliases
 
     @staticmethod
     def _place_words(res, ask: str) -> tuple[set[str], bool]:

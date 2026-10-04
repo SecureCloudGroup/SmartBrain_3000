@@ -2041,6 +2041,75 @@ def _names_a_param(answer: dict, params: dict) -> bool:
     return any("{" + name + "}" in t for name in params for t in texts)  # bounded: few params x few texts
 
 
+# a row cell whose label names a place (its value is the row's place): "Port", "Station", "City",
+# "State" and the like. A rows-list that carries such a cell can be scoped to the ask's named place
+# just as an entity-scoped answer is scoped to a {param} fill — the fix6-rows class fix (2026-10-04).
+_PLACE_CELL_LABELS = frozenset({"port", "station", "city", "state", "county", "country", "location",
+                                "site", "place", "venue", "airport", "region"})
+
+
+def _place_cell(cells: list[dict]) -> dict | None:
+    """A text row cell whose label (singular, lowercased) names a place; None → no cell names one."""
+    assert isinstance(cells, list), "cells must be a list"
+    for cell in cells[:_MAX_ANSWER_CELLS]:
+        if cell.get("type") != "text":
+            continue
+        label = str(cell.get("label", "")).strip().lower().rstrip("s")
+        if label in _PLACE_CELL_LABELS:
+            return cell
+    return None
+
+
+def _match_place_in_rows(rows: list, cell_path: str, place: str) -> str | None:
+    """The exact cell value of the first row whose place cell names ``place`` (case-folded, exact or
+    starts-with); None → nothing in the sample names it. Bounded by ``_MAX_SCAN_ROWS``."""
+    assert isinstance(cell_path, str) and isinstance(place, str), "args required"
+    needle = place.casefold().strip()
+    if not needle:
+        return None
+    partial: str | None = None
+    for row in rows[:_MAX_SCAN_ROWS]:
+        value = _dig(row, cell_path) if isinstance(row, dict) else None
+        if not isinstance(value, str):
+            continue
+        folded = value.casefold().strip()
+        if folded == needle:
+            return value
+        if partial is None and folded.startswith(needle + " "):
+            partial = value
+    return partial
+
+
+_MAX_SCAN_ROWS = 500
+
+
+def _scope_rows_to_place(answer: dict, sample: object, place: str) -> dict:
+    """``answer`` with a sealed filter narrowing rows to the ask's named place when the row has a
+    place-naming cell and the sample's rows carry it. Raises ``ValueError`` with the Library's
+    nothing-signal when no row names the place. Returns ``answer`` unchanged when there is no place
+    cell (the answer doesn't scope by place) or when the answer already filters its rows.
+
+    Extends the §32 entity-scoped mechanism (``_names_a_param``, the airport-rows ``filter``): a
+    list whose rows declare a place column (Port, Station, City, State) is scoped by code the same
+    way an entity-filled answer is scoped by its ``{param}`` — the row filter rides the sealed
+    pipeline, so every refresh keeps only the named place's rows. CBP border waits + "San Ysidro"
+    (fix6-rows 2026-10-04)."""
+    assert isinstance(answer, dict) and isinstance(place, str), "args required"
+    if answer.get("kind") != "list" or answer.get("filter"):
+        return answer
+    cell = _place_cell(answer.get("cells") or [])
+    if cell is None:
+        return answer
+    payload = sample if isinstance(sample, dict) else {"items": sample}
+    rows = _dig(payload, answer["path"])
+    if not isinstance(rows, list):
+        return answer  # the list isn't a list here — the build itself will say so
+    canonical = _match_place_in_rows(rows, cell["path"], place)
+    if canonical is None:
+        raise ValueError(f"answers: has nothing for {place[:60]}")
+    return {**answer, "filter": {"path": cell["path"], "equals": canonical}}
+
+
 def _other_sources_left(record: dict, url: str) -> bool:
     """True when the pick this card came from offered another source besides ``url``."""
     return any(isinstance(r, dict) and r.get("url") != url
@@ -2079,6 +2148,19 @@ def _try_answers_build(store: ni.NIStore, item_id: str, request: str, intent: di
         chosen = select_answers(answers, request, wants, window, kind)
     if not chosen:  # nothing here serves the asked window / measure: the next source, never a headline
         return {"nothing": True, "why": _nothing_why(answers, request, window)}
+    # fix6-rows (2026-10-04): a list whose rows declare a place column (CBP ports, state-coded CDC
+    # tables) is scoped to the ask's named place like an entity-filled answer is scoped to its
+    # `{param}`. No row names the place → the source has nothing for it, the next source runs. A
+    # geo-filled address (lat/lon/zip/…) already scopes the data; a row's "place" cell there names
+    # the row (its nearest city) not what the ask filters on, so the scoping stays off.
+    place = _frame_place(request, intent)
+    if place and not (set(params) & _GEO_PARAMS):
+        try:
+            chosen = [_scope_rows_to_place(a, sample, place) for a in chosen]
+        except ValueError as exc:
+            if "has nothing for" in str(exc):
+                return {"nothing": True, "why": str(exc).split("answers: ", 1)[-1]}
+            raise
     if next_event and chosen[0]["kind"] == "value" and not any(_event_time(a) for a in chosen):
         # a next event shows WHEN ("Bills next opponent": the matchup and its start), and the verify
         # step needs that time to tell a coming event from a past one
@@ -2500,6 +2582,58 @@ def _said_wants(request: str, wants: list, filled: list[str]) -> list[str]:
     return out
 
 
+# F6-C (blind-5, 2026-10-04): "flu levels in Texas" shipped a mapping-path card
+# whose rows named MS/NJ/VA/AL/KS with no Texas row — the model judge couldn't
+# tell. ``_rows_contradict_place`` is the code check: when the asked place names
+# a US state and the built rows carry state cells for OTHER states but none for
+# the asked one, the pick was wrong, not a useful disclosure. Fires only on
+# clearly state-keyed rows, so a per-hour forecast with no state cells is not
+# affected. The row-filter work (fix6-rows) owns the drop; this refuses when
+# filtering is impossible (nothing for the asked state is on the source today).
+_MAX_CHECKED_ROWS = 50
+_MAX_CHECKED_CELLS = 30
+
+
+def _rows_contradict_place(preview: object, place: str) -> bool:
+    """True iff ``preview['rows']`` names US states OTHER than ``place`` and
+    never the asked one. Bounded, pure-code, no model."""
+    assert isinstance(place, str), "place must be a string"
+    asked_code = _state_code_of(place)
+    if asked_code is None:
+        return False
+    rows = (preview or {}).get("rows") if isinstance(preview, dict) else None
+    if not isinstance(rows, list) or not rows:
+        return False
+    from .library_resolve import US_STATES  # local import: avoid a module cycle
+    seen: set[str] = set()
+    for row in rows[:_MAX_CHECKED_ROWS]:
+        if not isinstance(row, dict):
+            continue
+        for value in list(row.values())[:_MAX_CHECKED_CELLS]:
+            if not isinstance(value, str):
+                continue
+            raw = value.strip()
+            if len(raw) == 2 and raw.upper() in US_STATES:
+                seen.add(raw.upper())
+                continue
+            code = _state_code_of(raw)
+            if code is not None:
+                seen.add(code)
+    return bool(seen) and asked_code not in seen
+
+
+def _state_code_of(place: str) -> str | None:
+    """The two-letter US state code the string names, or None."""
+    assert isinstance(place, str), "place must be a string"
+    from .library_resolve import _STATE_BY_NAME, US_STATES  # local: no cycle
+    raw = place.strip()
+    if not raw:
+        return None
+    if len(raw) == 2 and raw.upper() in US_STATES:
+        return raw.upper()
+    return _STATE_BY_NAME.get(raw.lower())
+
+
 def _judge_wants_unanswered(judge: dict | None, request: str, intent: dict,
                               filled: list[str], preview: object) -> list[str]:
     """Which said wants the model-mapping JUDGE's gaps say the card won't include. Same posture
@@ -2587,14 +2721,43 @@ def _stray_topics(frame: dict, source: dict, params: dict, answers: list[dict], 
     # whole-word substring of the ask, and the proper-noun check consumes the result (never guesses
     # by capitalization alone). Mid-sentence caps and all-caps acronyms stay proper.
     entity = str((source.get("coverage") or {}).get("entity") or "").strip()
-    if (not entity or ";" in entity) and not (set(params) & _GEO_PARAMS):
+    if not (set(params) & _GEO_PARAMS) and (not entity or ";" in entity
+                                             or _entity_vocabulary(lib, entity)):
+        # fix6-rows F7-C (2026-10-04): a single-entity league source still refuses a proper token
+        # its entity's domain doesn't take ("NFC East" on MLB standings) — the exemption subtracts
+        # team / league aliases of that league (Yankees, AL East) rather than skipping the whole
+        # check. For non-sports entities the exemption stays as it was (readings / own cover them).
         proper = _request_proper(request, intent.get("names") or ())
         proper -= _answer_tokens(" ".join(str(r) for r in (source.get("readings") or [])))
         proper -= _answer_tokens(str(intent.get("place") or ""))
         for value in params.values():  # bounded by the params
             proper -= _answer_tokens(value)
+        proper -= _entity_vocabulary(lib, entity)
         stray |= (proper & said) - own
     return stray
+
+
+def _entity_vocabulary(lib: object, entity: str) -> set[str]:
+    """Tokens the ``entity``'s domain names (team / league aliases for a sports league entity),
+    folded as ``_answer_tokens`` folds them (plurals → singular, filler stop) so the subtraction
+    reads the same vocabulary the proper-noun check does. {} when the Library has no such method
+    or the entity isn't a league. The fix6-rows F7-C class fix (2026-10-04) subtracts these from
+    the proper-noun check so a single-entity league source still accepts a team ask it covers
+    while refusing a foreign conference ask."""
+    assert isinstance(entity, str), "entity must be a string"
+    getter = getattr(lib, "entity_vocabulary", None)
+    if not callable(getter) or not entity:
+        return set()
+    try:
+        got = getter(entity)
+    except Exception:  # a broken Library: the proper check falls back to no league subtraction
+        return set()
+    if not isinstance(got, set):
+        return set()
+    folded: set[str] = set()
+    for word in got:  # bounded by the league's team / sport_league aliases
+        folded |= _answer_tokens(str(word))
+    return folded
 
 
 def _request_proper(request: str, intent_names: list[str] | tuple = ()) -> set[str]:
@@ -2808,6 +2971,13 @@ def _other_subject(frame: dict, source: dict, params: dict, answers: list[dict],
     # team re-pick never ships for the team even when its sibling "(mlb)" tag matches.
     for reading in _own_readings(source):  # bounded: the pick's rows
         said -= _answer_tokens(_amp(reading.split(" (")[0]))
+    # fix6-rows F7-C (2026-10-04): a league-wide source lists every team of its league in its
+    # rows ("Yankees standings" → the AL East table includes the Yankees' row). The entity's
+    # vocabulary (team_mlb / sports_league aliases) stands for that coverage so a team the ask
+    # names doesn't look like a stray subject. The sibling-readings refusal above still fires
+    # when ANOTHER row of the pick was for the team (a team-source re-pick); this subtraction
+    # only loosens the final name check for the league-wide pick itself.
+    said -= _entity_vocabulary(frame.get("lib"), entity)
     short = entity.split(",")[0] if len(entity.split(",")[0]) <= 40 else str(source.get("name") or "").split(" (")[0]
     other = _other_of_kind(frame, source, said, own, names, cats, by_name)
     if other:
@@ -4817,6 +4987,19 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
         why = "won't include " + ", ".join(gap_wants)[:140]
         moved = None if remap else _move_on(store, item_id, pick_url, why, request,
                                               intent, call_model, research=picked)
+        if moved is not None:
+            return moved
+        return _terminate_unsupported(
+            store, item_id,
+            f"{(live or {}).get('_library_provider') or 'the source'} {why}")
+    # F6-C (blind-5, 2026-10-04): a mapping-path list whose rows name US states
+    # OTHER than the asked place but never the asked one is the wrong source
+    # for this ask ("flu levels in Texas" shipped MS/NJ/VA/AL/KS). The next
+    # source gets a shot; a pasted link / Fix fails honestly.
+    if place and _rows_contradict_place(built.get("preview_payload"), place):
+        why = f"doesn't report for {place}"
+        moved = None if remap else _move_on(store, item_id, pick_url, why, request,
+                                             intent, call_model, research=picked)
         if moved is not None:
             return moved
         return _terminate_unsupported(

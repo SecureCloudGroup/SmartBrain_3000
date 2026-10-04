@@ -18,6 +18,7 @@ import json
 import re
 from datetime import datetime
 from pathlib import Path
+from typing import ClassVar
 from zoneinfo import ZoneInfo
 
 import duckdb
@@ -79,6 +80,16 @@ class _Lib:
             cats.setdefault(cat, {"id": cat, "subcategories": []})["subcategories"].append(
                 {"id": sid, "keywords": t["keywords"]})
         return list(cats.values())
+
+    # fix6-rows F7-C (2026-10-04): the real LibraryIndex reads this from the pack's resolver
+    # tables. The stub names a handful of league teams the frame_verify fixtures ever test — the
+    # standings cases need "yankees" in MLB's vocab so the proper check still passes them.
+    _VOCAB: ClassVar[dict[str, set[str]]] = {
+        "mlb": {"yankees", "mets", "red", "sox", "dodgers", "cubs", "orioles",
+                "major", "league", "baseball"}}
+
+    def entity_vocabulary(self, entity: str) -> set[str]:
+        return set(self._VOCAB.get(entity.strip().lower(), set()))
 
     def subcategory(self, sub: str) -> dict | None:
         t = self.tax.get(sub)

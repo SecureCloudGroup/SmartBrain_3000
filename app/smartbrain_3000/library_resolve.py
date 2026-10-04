@@ -592,6 +592,13 @@ def _expand(template: str, values: dict[str, list[tuple[str, str]]], groups: dic
     clock = clock or {}
     choice_group = next((groups.get(n, n) for n, v in values.items() if len(v) > 1), None)
     members = [n for n in values if groups.get(n, n) == choice_group] if choice_group else []
+    # fix6-rows E (2026-10-04): a resolver param that isn't a {placeholder} in the url_template
+    # (FAA airport-events: ``{airport}`` lives in ``params`` only, as a filter the answers read)
+    # reads the SAME URL for every reading, so expanding across them just dedup-fails at the
+    # caller. Keep the first reading only; its label shows which airport was taken, the ask stays
+    # one URL. "delays at Orlando airport" → the FAA source ships for KMCO (its first reading).
+    if members and not any("{" + m + "}" in template for m in members):
+        members = []
     count = min(len(values[members[0]]), MAX_CHOICES) if members else 1
     host_param = re.fullmatch(r"\{([a-z_][a-z0-9_]*)\}", urlsplit(template).netloc)
     out = []

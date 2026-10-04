@@ -607,7 +607,11 @@ def run_selector(graph: dict, sel: dict) -> str:
         idx = sel["index"]
         if not (0 <= idx < len(outline)):
             raise GraphDrift("outline entry gone")
-        return str(outline[idx])
+        # F6-A (blind-5, 2026-10-04): the outline list stores "<tag>: <text>"
+        # so a page audit can read the level. A compiled page card lifts the
+        # value verbatim onto the card — strip the jail label so an "I-70 road
+        # conditions" build shows "Traffic & Road Conditions", not "h3: …".
+        return re.sub(r"^h\d:\s*", "", str(outline[idx]))
     table = _table_at(graph, sel.get("table", -1))
     headers = [str(h) for h in (table.get("headers") or [])]
     rows = table.get("rows") or []
@@ -734,7 +738,11 @@ def enumerate_menu(graph: dict, wants: list[str] | None = None) -> list[dict]:
                 _add({"kind": "table_cell", "table": t_i, "row": 0, "col": c_i},
                      f"table {t_i} cell 0,{c_i}", str(cell))
     for o_i, line in enumerate((graph.get("outline") or [])[:5]):
-        _add({"kind": "outline", "index": o_i}, "heading", str(line))
+        # F6-A: the menu's shown value equals what the selector yields — strip
+        # the jail "h<n>: " label here too so a human / model picks on the
+        # heading's words, not on the markup token.
+        _add({"kind": "outline", "index": o_i}, "heading",
+             re.sub(r"^h\d:\s*", "", str(line)))
     return out
 
 

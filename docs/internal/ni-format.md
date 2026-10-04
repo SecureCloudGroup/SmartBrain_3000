@@ -2361,3 +2361,14 @@ and the `recipe` born marker stays readable.
 - **Bare lists.** The engine now wraps a bare-list response as `{"items": [...]}`
   before the pipeline, exactly as the flow samples it (no path can address a bare
   list root, so no existing card changes).
+- **Place-row scoping (fix6-rows, 2026-10-04).** A list whose row declares a cell naming a place
+  (`port`, `station`, `city`, `state`, `county`, `country`, `location`, `site`, `place`, `venue`,
+  `airport`, `region`) is scoped to the ask's named place like an entity-filled answer is scoped
+  to its `{param}`: `_try_answers_build` calls `_scope_rows_to_place(answer, sample, place)`,
+  which finds the first row whose place cell matches (case-folded exact, else starts-with) and
+  seals a `where eq` filter with that row's exact value onto the answer. No row names the place
+  → the source has nothing for it ("CBP border wait times has nothing for Pembina") and the next
+  source runs. A source already filled from a geo parameter (lat/lon/zip/station) stays off the
+  scoping (its rows describe where each row lives relative to its city — "4 km W of Yountville,
+  CA" is not what the ask filters on). "San Ysidro border wait" ships only San Ysidro's rows;
+  "flu levels in Texas" ships only Texas rows on the model-mapping path (handled in parallel).
