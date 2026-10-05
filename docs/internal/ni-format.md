@@ -1911,11 +1911,12 @@ rate frameworks (W1/W2/W3), never named asks.
   evidence lines lifted VERBATIM from the page's own entities/tables —
   grounded by construction). `rank_web_rows` (locate_rank's sibling — ids
   only, validated, ANY failure → fitness order) orders the corpus; ≤3 rows
-  seal as `_ranked_search` `{title, host, url, evidence[≤2×90ch]}` —
-  snippets are rank-time only, NEVER sealed. The board renders sealed rows
-  verbatim as `kind:"web"` suggestions with their evidence ("On the page:
-  …"); a tap submits the sealed URL through the normal pick consent
-  (identical semantics to pasting it). Unfetchable pages stay offerable
+  seal as `_ranked_search` `{title, host, url}` — snippets and evidence
+  are rank-time only, NEVER sealed. AMENDED 2026-10-05 (§33 "Library cards; web as links"): the board
+  renders sealed rows verbatim as `kind:"link"`, `found:"page"` suggestions
+  (title + host, nothing read off the page); a tap on one never builds — the
+  pick route refuses it (409) and `run_flow` re-lands the pause. The same
+  page PASTED by the user builds (held for YES, §33). Unfetchable pages stay offerable
   unscored (bot-blocks are P3's fix). Search failures NEVER fail a flow —
   zero rows, raising provider, or unwired provider all land today's plain
   pause byte-identically.
@@ -2112,7 +2113,11 @@ the handoff, and a deterministic check stands where the judge was removed.
 - **Second review round (2026-10-04).** The source-level checks (category,
   other subject, place, stray topic) run before EVERY build path — the
   model-mapping fallback included, which a source whose declared answers
-  don't fit the response used to reach unchecked. Two refusals join (e):
+  don't fit the response used to reach unchecked (AMENDED 2026-10-05, §33:
+  a tapped Library row never reaches the mapping path any more — a misfit
+  moves on — so that call site, and the mapping path's fix8
+  `_source_contradicts_place` check, are gone; the function stays for its
+  tests and the gate). Two refusals join (e):
   every want the user said is unanswered refuses even when a subject word
   overlaps ("gas inventories" on retail gas prices); and a general source
   (no `coverage.entity`, no geo parameter) refuses a named topic none of its
@@ -2362,8 +2367,9 @@ and the `recipe` born marker stays readable.
   the pick re-lands on the other offered sources with "<provider> has nothing for this right
   now" (web search when none is left). With no other source, an asked value that's missing
   falls back to the source's other `primary` answers, named "not reported by this source
-  right now"; otherwise the model mapping path runs, noted. Any other misfit notes "the
-  Library's declared answers didn't fit…" and mapping runs unchanged.
+  right now"; otherwise the card ends honestly (`unsupported`). Any other misfit notes "the
+  Library's declared answers didn't fit…" and moves on to the next source (§33, amended 2026-10-05: a
+  tapped Library row is never model-mapped).
 - **Verify replaces the judge.** The build is deterministic, so the P8 judge doesn't run
   (its gap guesses were false on cards that showed the very thing); `_verify_frame` (§29
   "The frame and the verify step") checks the build against the ask's frame instead and
@@ -2391,6 +2397,10 @@ and the `recipe` born marker stays readable.
 
 "Hold open paths for a YES." Across three sealed blind runs every confidently wrong card came
 from the two open paths; every card built from a Library source's declared answers was right.
+AMENDED 2026-10-05 ("Library cards; web as links", below): the flow no longer builds from a web
+search result or a Library source without declared answers, so a link the user PASTES is the only
+new card that reaches the page / mapping paths and waits for the YES. Cards held before the
+amendment keep their hold and their YES / NO.
 
 - **Seal.** `_finalize` seals `_built_from: {path, host, title}` (closed; `ni._validate_built_from`)
   on every flow build: `declared` (the §32 declared-answers build — `_handoff(path="declared")`),
@@ -2430,3 +2440,46 @@ from the two open paths; every card built from a Library source's declared answe
 - **Live harness.** `tools/ni-live-e2e.py` reports a held card as `awaiting-yes` and prints its
   reading (the preview scene's words), host, title and kind, so a human judges whether the YES
   would be right; declared cards report as before.
+
+### Amendment — "Library cards; web as links" (operator ruling 2026-10-05)
+
+Across the last two sealed blind runs 9 of 15 readings pulled from web pages / datasets were wrong
+even behind the YES gate. This release, cards are built only from Library sources that DECLARE their
+answers (§32); everything else is offered as a link, named honestly, with nothing read off it.
+
+- **Rows.** `_library_candidates` marks each row (`_mark_links`): `answers: true` when
+  `_library_answers(source_id)` is non-empty (a tap builds); otherwise `answers: false` plus `page` —
+  the page a person opens about the source (`_human_page`: the record's `access.docs_url`, else
+  `provider.url`; never the API address / `url_template`, a machine file (`.json`, `.yaml`, `.xml`,
+  `.zip`, `.csv`, feeds…) or a terms / legal / policy page). A row with no such page is dropped.
+  Buildable rows come first. A row sealed before the ruling carries no mark and counts as buildable
+  (`_buildable`); the build below still moves on from a source without answers.
+- **Pause.** Any buildable row → the Library pick as before (its link rows ride along, no web
+  search). None → S2 runs (unchanged ranking: `_s2_evaluate` + `rank_web_rows`) and ≤3 pages seal
+  as `_ranked_search {title, host, url}` (no evidence) next to the Library's link rows; nothing
+  found → the plain pause, note "no SmartBrain Library source answers this yet". A move-on with no
+  buildable row left searches the web the same way (`_move_on`, links carried).
+- **Board.** `suggestions`: buildable Library rows `kind:"library"` (as before), then
+  `{kind:"link", found:"dataset", title, host, url: page}`, then `{kind:"link", found:"page",
+  title, host, url}`.
+- **Never built.** `POST …/flow/pick-source` answers 409 ("that page is offered as a link —
+  SmartBrain can't keep a live card from it yet; open it, or paste a link to the data") for a URL
+  that is a link row (a web row's url, a dataset row's page or API url) unless the body says
+  `pasted: true` (the card's paste form): then `ni_flow.mark_pasted` seals `_pasted` and it builds
+  like any pasted link (held for YES). `run_flow` itself re-lands the pause for a link-row URL that
+  isn't `_pasted` — the live harness, a retry and the chat resume tool can't build one either.
+  Only buildable rows seal a Library pick (`seal_library_pick`, vote).
+- **Build.** A tapped Library row builds ONLY from its declared answers: `_try_answers_build`
+  → None (no answers, or they don't fit the response) moves on ("doesn't declare its answers" /
+  "didn't fit its declared answers"); "nothing for this right now" with no other row ends
+  `unsupported`; a Library row that answers with a page (`not_json`, any format) moves on — never a
+  page card. The model mapping path now serves only a pasted JSON link and Fix / remap.
+- **Card (/ni).** `pickRows` (web/src/lib/ni/flow.ts) splits the rows: Library sources are tap
+  buttons; links render under "Pages that may help — SmartBrain can't keep a live card from these
+  yet:" as plain `<a target="_blank" rel="noopener noreferrer">` rows (title, then "host · dataset"
+  / "host · web page", `linkWhat`). Heading: "From the SmartBrain Library — tap the one that fits:" /
+  "No SmartBrain Library source answers this yet." / "… — paste a link to the data:". The paste
+  form sends `pasted: true`.
+- **Live harness.** `tools/ni-live-e2e.py` taps only `kind:"library"` rows; a pause that offers
+  only links reports outcome `links` and prints each as `host — title`.
+

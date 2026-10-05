@@ -902,9 +902,11 @@ def retry_flow(request: Request, item_id: str) -> dict:
 
 
 class PickSourceIn(BaseModel):
-    """P3: the source-pick card's paste-a-URL — the universal generic path."""
+    """P3: the source-pick card's tap on a Library row, or its paste-a-URL (``pasted``)."""
 
     url: str = Field(min_length=8, max_length=2000)
+    # the user typed / pasted this link themselves (the card's paste form), not a tapped row
+    pasted: bool = False
 
 
 @router.post("/api/ni/items/{item_id}/flow/pick-source")
@@ -913,6 +915,10 @@ def pick_flow_source(request: Request, item_id: str, body: PickSourceIn) -> dict
     on the card — their paste is the consent (the same posture the chat
     resume tool carried); netguard guards the sampling fetch as always.
     Desktop-local, audited. 409 unless the flow is paused at ``source``.
+
+    Ruling 2026-10-05 ("Library cards; web as links"): a row the card offers only as a link (a web
+    page, a Library source without declared answers) is refused (409) — it never builds a card. The
+    same page PASTED by the user is theirs: it builds and waits for their YES (§33).
     """
     _require_desktop_local(request)
     store = _store(request)
@@ -932,14 +938,21 @@ def pick_flow_source(request: Request, item_id: str, body: PickSourceIn) -> dict
         ni._validate_http_json_url_shape(url)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=f"url: {exc}") from None
+    if ni_flow.link_row_for(record, url) is not None:
+        if not body.pasted:
+            raise HTTPException(
+                status_code=409,
+                detail="that page is offered as a link — SmartBrain can't keep a live card from it "
+                       "yet; open it, or paste a link to the data")
+        ni_flow.mark_pasted(store, item_id, url)
     # R6 + textual formats: a tap on a Library candidate is a Yes AND (when the row
     # named a non-JSON format) seals ``_format`` on the flow record so sampling +
     # every subsequent refresh parse the fetched body the same way — CSV / RSS /
     # XML / text, not just JSON — plus the Library source it came from (its declared
     # answers build the card). Both writes happen BEFORE the worker starts so
     # the sampling fetcher sees the sealed format on first read.
-    lib_row = next((r for r in (record.get("_ranked_library") or [])
-                    if isinstance(r, dict) and r.get("url") == url), None)
+    lib_row = next((r for r in ni_flow._buildable(record.get("_ranked_library"))
+                    if r.get("url") == url), None)
     if lib_row:
         ni_flow.seal_library_pick(store, item_id, url, lib_row)
         try:

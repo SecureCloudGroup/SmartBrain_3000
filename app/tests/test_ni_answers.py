@@ -501,15 +501,17 @@ def test_a_path_missing_from_the_live_response_is_left_off_and_named(lib, monkey
     assert "conditions" not in store.get_item(item_id)["spec"]["pipeline"][0]["paths"]
 
 
-def test_when_no_chosen_answer_is_in_the_response_it_falls_back_to_mapping(lib, monkeypatch) -> None:
+def test_when_no_chosen_answer_is_in_the_response_it_ends_honestly_never_mapping(lib, monkeypatch) -> None:
+    """Ruling 2026-10-05: a tapped Library row builds only from its declared answers — with none of them
+    in the response and no other source offered, the card ends honestly; the model mapping never runs."""
     store = _store()
     item_id = _picked(store, lib, monkeypatch)
     sample = {"latitude": 40.7, "current": {"unrelated": 1}, "hourly": {"time": ["2026-09-28T00:00"]}}
     prompts: list[str] = []
-    ni_flow._sample_and_map(store, item_id, "NYC weather", {**_INTENT, "wants": ["temperature"]},
-                            WEATHER_URL, _mapping_model(prompts), lambda _u: sample)
-    notes = (ni_flow._flow_read(store, item_id) or {}).get("notes", [])
-    assert any("declared answers found nothing in this response" in n for n in notes)  # no other source: map
+    out = ni_flow._sample_and_map(store, item_id, "NYC weather", {**_INTENT, "wants": ["temperature"]},
+                                  WEATHER_URL, _mapping_model(prompts), lambda _u: sample)
+    assert out["state"] == "unsupported" and "has nothing for this right now" in out["error"]
+    assert not any("Choose the best candidate path" in p for p in prompts)
 
 
 def test_answers_build_only_for_the_sealed_url(lib, monkeypatch) -> None:

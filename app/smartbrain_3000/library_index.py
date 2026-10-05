@@ -149,6 +149,11 @@ ENTITY_CUES = {
                   "vs", "match", "season", "roster", "football", "basketball", "baseball", "hockey", "soccer"},
     "statuspage": {"down", "status", "outage", "outages", "incident", "working", "up"},
 }
+# Cardinal-direction tokens that may be the whole said-name of a pack alias (Northeast Philadelphia
+# Airport's "northeast") but on their own never name a specific entity — the ask-level cue bypass
+# refuses to admit an entity named by a direction word alone (fix12-lib 2026-10-05).
+_DIRECTION_WORDS = frozenset({"north", "south", "east", "west", "central", "upper", "lower",
+                                "northeast", "northwest", "southeast", "southwest"})
 AUDIENCE_CUES = {
     "aviation": r"\b(aviation|airport|flight|flights|pilot|pilots|metar|taf|runway)\b",
     "marine": r"\b(marine|boat|boating|sailing|offshore|coastal waters|small craft|buoy|mariners?|surf|waves?)\b",
@@ -866,6 +871,15 @@ class LibraryIndex:
             # single said token under 5 chars isn't a real name mention, and the
             # ask never spelled the code in capitals.
             if len(name_words) < 2 and all(len(w) < 5 for w in name_words):
+                return False
+            # fix12-lib (2026-10-05): a single cardinal-direction word is a generic
+            # qualifier the pack lists as a short alias ("northeast" is a non-partial
+            # alias for Northeast Philadelphia Airport), but on its own it never names
+            # a specific airport. "amtrak northeast regional delays" shipped FAA NAS
+            # because "delays" (a transit-shared cue) and "northeast" (one 9-char word)
+            # passed; the airport source must only ride through when the ask names an
+            # airport by more than a direction alone.
+            if len(name_words) < 2 and {_fold(w) for w in name_words} <= _DIRECTION_WORDS:
                 return False
             # Guard it against entities whose SAID name sits inside a sibling
             # category's vocabulary ("metro" said → Mesquite Metro Airport, but

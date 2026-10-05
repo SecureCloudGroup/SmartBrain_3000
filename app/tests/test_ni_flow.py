@@ -2343,9 +2343,9 @@ def test_s2_evaluate_orders_by_page_evidence(monkeypatch) -> None:
 
 def test_library_miss_searches_seals_and_boards_web_candidates(monkeypatch) -> None:
     """THE FIELD REGRESSION (tides class): words → no Library source → S2 search
-    → evidence → sealed ≤3 {title,host,url,evidence} — snippets are rank-time
-    only, NEVER sealed — and the board renders the rows verbatim as
-    kind:"web" suggestions."""
+    → evidence (rank-time only) → sealed ≤3 {title,host,url} — snippets and
+    evidence are NEVER sealed — and the board renders the rows verbatim as
+    links (ruling 2026-10-05: kind "link", found "page"; never tapped to build)."""
     svc = _FakeSearchService(results=[
         {"title": "Creek Tide Charts", "url": "https://tides.example.org/creek",
          "snippet": "daily tide tables"},
@@ -2370,11 +2370,11 @@ def test_library_miss_searches_seals_and_boards_web_candidates(monkeypatch) -> N
     record = ni_flow._flow_read(store, item_id)
     assert record["error"] == ni_flow.AWAITING_SOURCE_PICK
     sealed = record["_ranked_search"]
-    assert [set(r) for r in sealed] == [{"title", "host", "url", "evidence"}] * 2
+    assert [set(r) for r in sealed] == [{"title", "host", "url"}] * 2
     assert sealed[0]["url"] == "https://tides.example.org/creek"
     field = ni_flow.board_flow_field(store, item_id)
     sugs = field["suggestions"]
-    assert [s["kind"] for s in sugs] == ["web", "web"]
+    assert [(s["kind"], s["found"]) for s in sugs] == [("link", "page")] * 2
     assert sugs[0]["url"] == "https://tides.example.org/creek"
     assert svc.queries  # the search actually ran, from the user's words
     assert svc.queries[0] == "tide times for the creek landing"

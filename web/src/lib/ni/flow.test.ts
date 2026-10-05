@@ -4,6 +4,8 @@ import {
   awaitingYesSource,
   flowStageLabel,
   isFlowActive,
+  linkWhat,
+  pickRows,
 } from "./flow";
 
 describe("flowStageLabel", () => {
@@ -85,5 +87,46 @@ describe("awaitingYesSource (ruling 2026-10-04: hold open paths for a YES)", () 
   it("never renders an empty host", () => {
     expect(awaitingYesSource({ from: "page", host: "", title: "Tides" })).toBe("From the web page “Tides”");
     expect(awaitingYesSource({ from: "dataset", host: "", title: "" })).toBe("From a dataset");
+  });
+});
+
+describe("pickRows (ruling 2026-10-05: Library cards; web as links)", () => {
+  const lib = { kind: "library" as const, title: "USGS gauge", host: "waterservices.usgs.gov",
+                url: "https://waterservices.usgs.gov/x" };
+  const dataset = { kind: "link" as const, found: "dataset" as const, title: "Gauges", host: "data.ny.gov",
+                    url: "https://data.ny.gov/d/abcd" };
+  const page = { kind: "link" as const, found: "page" as const, title: "River levels", host: "rivers.example.org",
+                 url: "https://rivers.example.org/now" };
+
+  it("taps Library sources and offers the rest as links", () => {
+    const out = pickRows([lib, dataset, page]);
+    expect(out.sources).toEqual([lib]);
+    expect(out.links).toEqual([dataset, page]);
+    expect(out.heading).toBe("From the SmartBrain Library — tap the one that fits:");
+  });
+
+  it("says plainly when no Library source answers", () => {
+    expect(pickRows([page]).heading).toBe("No SmartBrain Library source answers this yet.");
+    expect(pickRows([]).heading)
+      .toBe("No SmartBrain Library source answers this yet — paste a link to the data:");
+    expect(pickRows(undefined).sources).toEqual([]);
+  });
+
+  it("never offers an unknown kind as a tap, nor a link that isn't https", () => {
+    const out = pickRows([{ ...page, kind: undefined }, { ...page, url: "javascript:alert(1)" }]);
+    expect(out.sources).toEqual([]);
+    expect(out.links).toEqual([]);
+  });
+
+  it("lists each address once", () => {
+    const out = pickRows([lib, { ...lib }, dataset, { ...dataset, title: "Other dataset" }]);
+    expect(out.sources).toEqual([lib]);
+    expect(out.links).toEqual([dataset]);
+  });
+
+  it("names where a link goes and what it is", () => {
+    expect(linkWhat(dataset)).toBe("data.ny.gov · dataset");
+    expect(linkWhat(page)).toBe("rivers.example.org · web page");
+    expect(linkWhat({ ...page, host: " " })).toBe("web page");
   });
 });

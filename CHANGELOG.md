@@ -13,6 +13,22 @@ to know when a release changes behavior.
 
 ### Changed
 
+- **A US-national number is no longer shipped as if it were your state's.**
+  When you name a state (or a city in one) on an ask that only has a
+  national series — unemployment rate, GDP, CPI — the card refuses that
+  source and lets the next one try, instead of showing the national
+  figure with a quiet note that it isn't specific to your place.
+- **An airport-status card won't show up for a train or transit ask.** An
+  ask that names a rail or transit brand ("Amtrak Northeast Regional
+  delays", "WMATA red line delays") no longer gets an airport-status
+  reading on a cue word alone — the card only reads from the airport
+  source when the ask actually names an airport.
+- **Earthquakes for a state now come from the state's own feed.** When you
+  ask about earthquakes in a US state the card no longer picks a city of
+  the same name in a different state ("California, PA" for "earthquakes
+  in California"); it refuses that reading and lets the state-bounded
+  USGS feed answer. Earthquakes near a specific city or town still read
+  from the near-a-place feed.
 - **A team you named by city or state keeps the right team on the card.**
   When your ask names a place word next to a team nickname ("Durham Bulls",
   "NY Rangers") and the resolved team's own city or state doesn't carry
@@ -41,14 +57,17 @@ to know when a release changes behavior.
   number for a value that has a unit, the card refuses it ("no unit on
   '9.5'") and the next source is tried. AQI, UV, Kp, pollen level and
   percentages still ship unitless.
-- **A card read from a web page or an unlisted dataset waits for your yes.**
-  When a card's values come from a web page, or from a data source the
-  SmartBrain Library hasn't described, the card shows the reading it found
-  and where it came from (the site and the page or dataset title) and asks
-  "Is this what you asked for?". It starts updating only after you tap
-  **Yes, that's it**. **No, try another source** takes it back to the
-  source choice without that source. Cards built from a Library source's
-  described answers work as before, and existing cards don't change.
+- **Cards come from SmartBrain Library sources that describe their answers;
+  web pages are offered as links.** Readings pulled from web pages and from
+  datasets the Library hasn't described were too often wrong, so the card no
+  longer builds from them. When no Library source answers your ask yet, the
+  card says so and lists the pages that may help — web pages a search found
+  and datasets the Library knows about, each named with its site — as plain
+  links that open in a new tab. A link you paste yourself still builds a
+  card: it shows the reading it found and where it came from, asks "Is this
+  what you asked for?", and starts updating only after you tap **Yes, that's
+  it** (**No, try another source** takes it back to the source choice
+  without that link). Existing cards don't change.
 
 ### Added
 

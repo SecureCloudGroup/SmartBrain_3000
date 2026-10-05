@@ -3,15 +3,17 @@
 
 For every ask: the REAL flow (``ni_flow.run_flow``) on the real local model through the
 gateway, the real SmartBrain Library pack, real keyless web search, real network fetches.
-When the card pauses at the source pick, the harness taps the FIRST suggestion exactly as
-the pick route does (Library row → format + access sealed first). A built card then runs
+When the card pauses at the source pick, the harness taps the FIRST Library suggestion exactly as
+the pick route does (Library row → format + access sealed first). It never taps a link (a web page or a
+Library source without declared answers — ruling 2026-10-05: those are offered as links, never built). A built card then runs
 once through the real engine (``ni.run_item``) — the refresh every card lives on.
 
 Outcomes per ask: ``live`` (built AND its first engine run is ok), ``built-no-run``,
 ``awaiting-yes`` (built from a web page or a model-mapped dataset: the card holds for the user's YES —
 its reading, host and page / dataset title print so a human judges whether the YES would be right;
-ruling 2026-10-04), ``needs-key`` / ``needs-email`` (an honest pause the user answers), ``no-source``,
-``failed``.
+ruling 2026-10-04 — only a link the user pastes builds one now, so a harness run never reports it),
+``links`` (no Library source declares answers for the ask: the pause offers only links — each prints as
+host — title), ``needs-key`` / ``needs-email`` (an honest pause the user answers), ``no-source``, ``failed``.
 Previews are printed so a human judges whether the card shows what was asked — a green
 state with the wrong data is still a failure.
 
@@ -90,14 +92,18 @@ def _overlay_answers(answers_dir: pathlib.Path) -> None:
     library_index.LibraryIndex.answers = answers
 
 
-def _tap_first(store, item_id: str, secrets, tapped: list) -> tuple[str | None, str]:
-    """Tap the first suggestion the way ``pick_flow_source`` does. Returns (url, what); the tapped
-    reading (its label and filled params, which place / team it is) is appended to ``tapped``."""
+def _tap_first(store, item_id: str, secrets, tapped: list, links: list) -> tuple[str | None, str]:
+    """Tap the first Library suggestion the way ``pick_flow_source`` does. Returns (url, what); the tapped
+    reading (its label and filled params, which place / team it is) is appended to ``tapped``. A link row
+    is never tapped: when the pause offers only links they are copied to ``links`` and what is "links"."""
     field = ni_flow.board_flow_field(store, item_id) or {}
     sugs = field.get("suggestions") or []
-    if not sugs:
-        return None, "no suggestions"
-    first = sugs[0]
+    sources = [s for s in sugs if s.get("kind") == "library"]
+    if not sources:
+        links[:] = [{"host": s.get("host") or "", "title": s.get("title") or "", "url": s.get("url") or "",
+                     "found": s.get("found") or ""} for s in sugs if s.get("kind") == "link"]
+        return None, "links" if links else "no suggestions"
+    first = sources[0]
     url = first["url"]
     record = ni_flow._flow_read(store, item_id) or {}
     row = next((r for r in record.get("_ranked_library") or [] if r.get("url") == url), None)
@@ -122,7 +128,7 @@ def run_one(ask: str, idx, llm, model: str) -> dict:
     ni_flow.set_secrets_provider(lambda: secrets)
     bridge = lambda _m, prompt: llm(prompt, 600)  # noqa: E731
     out: dict = {"ask": ask, "outcome": "", "source": "", "detail": "", "preview": None, "tapped": [],
-                 "notes": []}
+                 "links": [], "notes": []}
     started = time.time()
     try:
         item_id = ni_flow.create_shell_item(store, ask)
@@ -130,10 +136,11 @@ def run_one(ask: str, idx, llm, model: str) -> dict:
         for _tap in range(3):  # a source that refuses us re-lands the pick: tap the next one, like a person
             if rec.get("state") != "source":
                 break
-            url, what = _tap_first(store, item_id, secrets, out["tapped"])
+            url, what = _tap_first(store, item_id, secrets, out["tapped"], out["links"])
             out["source"] = (out["source"] + " → " if out["source"] else "") + what
             if url is None:
-                out["outcome"] = what.split(" ")[0] if what.startswith("needs-") else "no-source"
+                out["outcome"] = what.split(" ")[0] if what.startswith(("needs-", "links")) else "no-source"
+                out["notes"] = [str(n) for n in rec.get("notes") or []]
                 return out
             rec = ni_flow.run_flow(store, item_id, gateway_call=bridge, ni_route_model=model, source_url=url)
         state = str(rec.get("state") or "")
@@ -243,6 +250,8 @@ def main() -> int:
                   flush=True)
         elif r.get("scene_text"):
             print(f"{'':>15}card:   {' | '.join(r['scene_text'])[:200]}", flush=True)
+        for link in r.get("links") or []:  # offered as links, never built (ruling 2026-10-05)
+            print(f"{'':>15}link:   {link['host']} — {link['title'] or '(no title)'}", flush=True)
     counts: dict[str, int] = {}
     for r in results:
         counts[r["outcome"]] = counts.get(r["outcome"], 0) + 1

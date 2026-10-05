@@ -34,12 +34,16 @@ def _param(name, kind, fill):
 
 
 _TIDE_URL = "https://api.tidesandcurrents.noaa.gov/api/prod/datagetter?station={station}&begin_date={begin}"
+_TIDE_ANSWER = {"name": "tides", "label": "Tides", "kind": "list", "primary": True, "words": ["tide", "tides"],
+                "path": "predictions", "row": [{"path": "t", "label": "Time", "type": "time"},
+                                               {"path": "type", "label": "Tide", "type": "text"}]}
 _SOURCES = [  # id, name, tier, status, prior, category, terms, kinds, access extras, extra record fields
     ("coops-tide-hilo", "NOAA tide predictions", "curated", "ok", 2.0, ("water", "tides"),
      {"tide": 3.0, "tides": 3.0, "noaa": 1.5, "predictions": 3.0}, ["next_event", "schedule"],
      {"url_template": _TIDE_URL, "params": [
          _param("station", "station", {"from": "resolver", "resolver": "tide_station", "field": "key"}),
-         _param("begin", "date", {"from": "clock", "format": "%Y%m%d", "offset_days": 0})]}, {}),
+         _param("begin", "date", {"from": "clock", "format": "%Y%m%d", "offset_days": 0})]},
+     {"answers": [_TIDE_ANSWER]}),  # declares its answers: a tap builds a card (ruling 2026-10-05)
     ("coingecko-price", "CoinGecko coin price", "curated", "ok", 1.8, ("markets", "crypto"),
      {"bitcoin": 2.5, "price": 3.0, "coin": 3.0}, ["current_value"],
      {"url_template": "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin", "params": []}, {}),

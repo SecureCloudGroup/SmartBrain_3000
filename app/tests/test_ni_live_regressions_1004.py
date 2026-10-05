@@ -176,7 +176,8 @@ def test_a_mapping_misfit_hands_over_to_the_next_row(monkeypatch, sample) -> Non
                                   lambda _p: "{}", lambda _u: sample)
     assert out["state"] == "source" and out["error"] == ni_flow.AWAITING_SOURCE_PICK
     assert [r["url"] for r in out["_ranked_search"]] == [_WEB[1]["url"]]
-    assert "pick another source" in out["notes"][-1]
+    # ruling 2026-10-05: the web rows left are links, not sources to pick — the note says paste a link
+    assert "paste a link to the data" in out["notes"][-1]
     # the last row: an honest pause, never a failed card
     out = ni_flow._sample_and_map(store, item_id, "pollen count in Atlanta", intent, _WEB[1]["url"],
                                   lambda _p: "{}", lambda _u: sample)

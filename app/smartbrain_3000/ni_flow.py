@@ -2256,7 +2256,8 @@ def _try_answers_build(store: ni.NIStore, item_id: str, request: str, intent: di
                        url: str, sample: object) -> dict | None:
     """When the user tapped a Library source that declares answers (sealed ``_library_source`` for
     exactly this URL), build the card from them, inside the ask's frame (its window and kind of
-    question). None → the model mapping path runs, unchanged. ``{"nothing": True, "why": …}`` → this
+    question). None → not a declared build (not a Library tap, no declared answers, or they don't fit
+    this response: a tapped row moves on, ruling 2026-10-05). ``{"nothing": True, "why": …}`` → this
     source has nothing for the ask (the caller moves on to the next source)."""
     live = _flow_read(store, item_id) or {}
     source_id = str(live.get("_library_source") or "")
@@ -2345,7 +2346,7 @@ def _try_answers_build(store: ni.NIStore, item_id: str, request: str, intent: di
         if isinstance(exc, ValueError) and any(m in str(exc) for m in _ANSWERS_NOTHING):
             return {"nothing": True, "why": "has nothing for this right now"}
         _append_note(store, item_id, "the Library's declared answers didn't fit this response "
-                                     f"({str(exc)[:90]}); mapping instead")
+                                     f"({str(exc)[:90]})")
         return None
     missing = set(built.get("missing") or [])
     built["labels"] = [a["label"] for a in chosen if a["label"] not in missing]
@@ -2583,6 +2584,50 @@ def _place_taken(place: str, source: dict, params: dict) -> bool:
     return all(t in own.casefold() for t in place.casefold().split())
 
 
+_LABEL_STATE_RE = re.compile(r"\(([A-Z]{2})\)\s*$")
+
+
+def _label_state_code(label: str) -> str | None:
+    """The US state code the Library's ``_label`` suffixed to a place reading ("California (PA)"
+    → "PA"), or None. The resolver appends "(STATE_CODE)" for every place/zip fill so a US-state
+    ask that landed on a same-named city of a different state refuses honestly."""
+    assert isinstance(label, str), "label must be a string"
+    from .library_resolve import US_STATES  # local import: avoid a module cycle
+    m = _LABEL_STATE_RE.search(label.strip())
+    if m is None or m.group(1) not in US_STATES:
+        return None
+    return m.group(1)
+
+
+def _national_us_misses_place(source: dict, place: str, request: str) -> bool:
+    """True iff the source is a national-US series (``coverage.geo == "US"``) and the asked place
+    names a US sub-national area (a state the ask spelled, or a city/county the pack's place
+    resolver lands in a US state). Shipping the national figure as the asked place's reading would
+    be a confidently wrong card ("unemployment rate in Ohio" over the FRED national UNRATE); the
+    verify step refuses so the next source gets a shot. Deterministic; no model."""
+    assert isinstance(source, dict) and isinstance(place, str), "args required"
+    assert isinstance(request, str), "request must be a string"
+    if ((source.get("coverage") or {}).get("geo") or "") != "US":
+        return False
+    return bool(_place_states_via_resolver(place, request))
+
+
+def _resolver_landed_outside_state(source: dict, place: str, request: str) -> bool:
+    """True iff the ask names a US state (direct state-name/state-code match) but the source's
+    place resolver landed on a reading whose ``_label`` suffix is a DIFFERENT state ("earthquakes
+    in california" → California, PA). ``states_in`` only reads words the ask spelled, so an
+    ambiguous "California" won't drag in every California-named town's state. Deterministic; no
+    model."""
+    assert isinstance(source, dict) and isinstance(place, str), "args required"
+    assert isinstance(request, str), "request must be a string"
+    from .library_resolve import states_in  # local import: avoid a module cycle
+    label_state = _label_state_code(str(source.get("label") or ""))
+    if label_state is None:
+        return False
+    ask_states = set(states_in(f"{request} {place}"))
+    return bool(ask_states) and label_state not in ask_states
+
+
 def _times_in(value: object, out: list) -> None:
     """Every time-transform output (it keeps its moment) inside a built value or row (bounded walk)."""
     if getattr(value, "moment", None) is not None:
@@ -2699,10 +2744,25 @@ def _verify_source(frame: dict, source: dict, params: dict, answers: list[dict],
     info = _subcategory(frame["lib"], sub) if frame["lib"] is not None and sub else {}
     place = frame["place"]
     if place and not _place_taken(place, source, params):
-        if (info.get("policy") or {}).get("match") in ("none", "name"):
+        # fix12-lib (2026-10-05): a NAMED US-state (or city the resolver lands in a US state) on a
+        # national-US series ("Unemployment rate (FRED)", coverage.geo="US") is a place the address
+        # never took — the national cut shown as the asked place's reading is a confidently wrong
+        # card. Refuse even when the subcategory's policy says the topic is place-free, so the
+        # next source gets a shot. A truly place-free subject (aurora Kp over a region) still rides
+        # through as a note because its source's coverage isn't US-national.
+        policy_match = (info.get("policy") or {}).get("match")
+        if policy_match in ("none", "name") and not _national_us_misses_place(source, place, request):
             notes.append(f"{source.get('provider') or 'this source'} isn't specific to {place}")
         else:
             reasons.append(f"it isn't for {place}")
+    elif place and _resolver_landed_outside_state(source, place, request):
+        # fix12-lib (2026-10-05): a US-state ask whose ``place`` resolver landed on a same-named
+        # city of A DIFFERENT state ("earthquakes in california" → California, PA) is the wrong
+        # read; the resolver's own ``_label`` suffixes "(STATE_CODE)" so a mismatch tells us to
+        # refuse. The state-bounded sibling source ("USGS earthquakes in a state", us_state
+        # resolver) gets a shot; "earthquakes near Pinnacles CA" keeps the near-a-place source
+        # because its label still says "(CA)".
+        reasons.append(f"it isn't for {place}")
     stray = sorted(_stray_topics(frame, source, params, answers, request, intent))
     if stray and not about_named:
         reasons.append("it isn't about " + ", ".join(stray))
@@ -3666,6 +3726,13 @@ def run_flow(store: ni.NIStore, item_id: str, *,
         raise ValueError("no flow record for item; call start_flow first")
     request = str(record.get("request") or "")
     known_url = source_url or record.get("source_url")
+    if known_url and not record.get("_remap") and record.get("_pasted") != known_url \
+            and link_row_for(record, known_url) is not None:
+        # Ruling 2026-10-05 ("Library cards; web as links"): a page offered as a link never builds a
+        # card — whoever asks (the pick route refuses it too; the live harness never taps one).
+        return _transition(store, item_id, "source", error=AWAITING_SOURCE_PICK,
+                           note=f"paused: {_host_hint(known_url)} is offered as a link — SmartBrain "
+                                "can't keep a live card from it yet")
 
     def default_model(model: str, prompt: str) -> str:
         """Route through the process-wide gateway. Bounded timeout."""
@@ -3887,8 +3954,9 @@ def _run_external_flow(store: ni.NIStore, item_id: str, request: str,
 
     A ``known_url`` (the user named or tapped it) is the consent: sample it
     directly. Otherwise the source-pick pause offers SmartBrain Library
-    sources first, web results when the Library has none, and paste-a-URL
-    always — the user's tap is the consent for the first fetch.
+    sources first (a tap builds only from one that declares its answers), links
+    to pages that may help when none does, and paste-a-URL always — the user's
+    tap or paste is the consent for the first fetch.
     """
     assert isinstance(intent, dict), "intent required"
     if known_url:
@@ -4080,7 +4148,7 @@ def _library_hint(intent: dict | None) -> dict:
 def _library_candidates(request: str, intent: dict | None = None) -> list[dict]:
     """Library sources whose parameters all fill from the user's words, as sealable rows. The intent's
     frame rides as the hint (C1). No row (locate found no source about the ask, or the Library failed)
-    → the web stage runs."""
+    → the web stage runs. Each row says whether its source declares its answers (ruling 2026-10-05)."""
     lib = _resolve_library()
     if lib is None:
         return []
@@ -4089,7 +4157,49 @@ def _library_candidates(request: str, intent: dict | None = None) -> list[dict]:
     except Exception as exc:
         log.warning("ni_flow: library candidates failed: %s", type(exc).__name__)
         return []
-    return _library_rows(cands)
+    return _mark_links(lib, _library_rows(cands))
+
+
+# a file a program reads (an API spec, a feed, an archive), not a page a person reads
+_MACHINE_FILE_RE = re.compile(r"\.(json|geojson|ya?ml|xml|rss|atom|zip|gz|csv|tsv|txt|ics|pbf)$", re.IGNORECASE)
+# a terms / legal page is not the page about the data
+_TERMS_PAGE_RE = re.compile(r"terms|legal|disclaimer|polic(y|ies)|privacy|conditions", re.IGNORECASE)
+
+
+def _human_page(record: dict | None, api_urls: set[str]) -> str:
+    """The page a person opens to see a dataset (ruling 2026-10-05: a Library source without declared
+    answers is offered as a link): its documentation page, else its provider's home page — never the API
+    address, a machine file or a terms page. "" when it has none."""
+    record = record if isinstance(record, dict) else {}
+    access = record.get("access") if isinstance(record.get("access"), dict) else {}
+    provider = record.get("provider") if isinstance(record.get("provider"), dict) else {}
+    for raw in (access.get("docs_url"), provider.get("url")):  # bounded: two places
+        url = str(raw or "").strip()
+        if (url.startswith("https://") and len(url) <= ni._MAX_URL and url not in api_urls
+                and not _MACHINE_FILE_RE.search(urlparse(url).path) and not _TERMS_PAGE_RE.search(url)):
+            return url
+    return ""
+
+
+def _mark_links(lib: object, rows: list[dict]) -> list[dict]:
+    """Ruling 2026-10-05 ("Library cards; web as links"): a row whose source declares its answers builds
+    a card (``answers: True``); any other row is offered only as a link to the page about it (``page``;
+    a row with no such page is dropped). The rows that build come first."""
+    built, links = [], []
+    for row in rows:  # bounded: locate's few rows
+        if _library_answers(row["source_id"]):
+            built.append({**row, "answers": True})
+            continue
+        try:
+            record = lib.get(row["source_id"])
+        except Exception:  # a broken record offers no page
+            record = None
+        api = {row["url"], row["url_template"],
+               str(((record or {}).get("access") or {}).get("url_template") or "")}
+        page = _human_page(record, api)
+        if page:
+            links.append({**row, "answers": False, "page": page})
+    return built + links
 
 
 def _library_rows(cands: list[dict]) -> list[dict]:
@@ -4971,33 +5081,70 @@ def _page_wrong_outlet(url: str, request: str, intent: dict) -> str:
 def _pause_source_pick(store: ni.NIStore, item_id: str, request: str,
                        intent: dict, call_model: Callable[[str], str]) -> dict:
     """The ONE source-pick pause. Layer 1 is the SmartBrain Library: sources
-    whose parameters all fill from the user's words seal on the record. When
-    the Library has none, S2 searches the user's own words, E-lite scores what
-    the result pages contain, the model ranks the corpus, and ≤3 web
-    candidates seal with their evidence. Nothing found, providers unwired, or
-    total failure → the plain pause (paste a URL), never a failed flow.
+    whose parameters all fill from the user's words seal on the record. Ruling
+    2026-10-05 ("Library cards; web as links"): only a source that declares its
+    answers builds a card; one that doesn't is offered as a link to its page.
+    When no Library source declares answers for the ask, S2 searches the user's
+    own words, E-lite scores what the result pages contain, the model ranks the
+    corpus, and ≤3 web pages seal — as links, next to the Library's. Nothing
+    found, providers unwired, or total failure → the plain pause (paste a URL),
+    never a failed flow.
     """
     library = _without_declined(store, item_id, _library_candidates(request, intent))
-    if library:
+    if _buildable(library):
         _transition(store, item_id, "source",
                     error=AWAITING_SOURCE_PICK,
                     note="paused: sources from the SmartBrain Library are on the card",
                     _ranked_library=library, _ranked_search=None)
         return _flow_read(store, item_id) or {}
-    web = _pause_with_web(store, item_id, request, intent, call_model)
+    web = _pause_with_web(store, item_id, request, intent, call_model, links=library)
     if web is not None:
         return web
     _transition(store, item_id, "source",
                 error=AWAITING_SOURCE_PICK,
-                note="paused: no source found — paste a link to the data on the card",
-                _ranked_library=None, _ranked_search=None)
+                note=_NO_ANSWERING_SOURCE + (" — pages that may help are on the card" if library else
+                                             " — paste a link to the data on the card"),
+                _ranked_library=library or None, _ranked_search=None)
     return _flow_read(store, item_id) or {}
 
 
+_NO_ANSWERING_SOURCE = "paused: no SmartBrain Library source answers this yet"
+
+
+def _buildable(rows: list | None) -> list[dict]:
+    """The pick rows a tap builds a card from: Library rows whose source declares its answers (ruling
+    2026-10-05). A row sealed before the ruling carries no mark and counts — the build itself still moves
+    on from a source without declared answers (``_sample_and_map``)."""
+    return [r for r in rows or [] if isinstance(r, dict) and r.get("answers") is not False]
+
+
+def link_row_for(record: dict, url: str) -> dict | None:
+    """The pick row offered only as a LINK (a web page, or a Library source without declared answers) that
+    ``url`` names — its address or its page — else None. A tap on one never builds (ruling 2026-10-05)."""
+    for row in record.get("_ranked_search") or []:  # bounded: ≤3 sealed rows
+        if isinstance(row, dict) and row.get("url") == url:
+            return row
+    for row in record.get("_ranked_library") or []:  # bounded: locate's few rows
+        if isinstance(row, dict) and row.get("answers") is False and url in (row.get("url"), row.get("page")):
+            return row
+    return None
+
+
+def mark_pasted(store: ni.NIStore, item_id: str, url: str) -> None:
+    """The user pasted ``url`` on the pick card: it is theirs to build from (a page card waits for their
+    YES, §33) even when the card also offered it as a link."""
+    assert store is not None and item_id and url, "args required"
+    record = _flow_read(store, item_id) or {}
+    _flow_write(store, item_id, {**record, "_pasted": url})
+
+
 def _pause_with_web(store: ni.NIStore, item_id: str, request: str, intent: dict,
-                    call_model: Callable[[str], str], drop_why: str | None = None) -> dict | None:
-    """S2: search the user's own words, read the result pages, seal ≤3 readable candidates. None
-    when search is unwired or finds nothing.
+                    call_model: Callable[[str], str], drop_why: str | None = None,
+                    links: list | None = None) -> dict | None:
+    """S2: search the user's own words, read the result pages, seal ≤3 readable pages. None when
+    search is unwired or finds nothing. Ruling 2026-10-05: the pages are offered as LINKS (title +
+    host; nothing read off them is shown), next to ``links`` — the Library's sources without
+    declared answers.
 
     fix9-zone (2026-10-04): ``drop_why`` names the reason the previously tapped Library row was
     dropped — it rides into the pause note so a silent-drop ("the Library has no source for this")
@@ -5012,17 +5159,14 @@ def _pause_with_web(store: ni.NIStore, item_id: str, request: str, intent: dict,
             order = rank_web_rows(web, request, intent, call_model)
             if order:
                 web = [web[i] for i in order if 0 <= i < len(web)]
-            sealed = [{"title": r["title"], "host": r["host"],
-                       "url": r["url"],
-                       "evidence": [str(e)[:90] for e in
-                                    (r.get("evidence") or [])[:2]]}
+            sealed = [{"title": r["title"], "host": r["host"], "url": r["url"]}
                       for r in web[:_S2_SEAL_ROWS]]
             prefix = f"the previous source {drop_why}; " if drop_why else ""
             _transition(store, item_id, "source",
                         error=AWAITING_SOURCE_PICK,
-                        note=("paused: " + prefix + "the Library has no more sources for this — "
-                              "web candidates are on the card")[:_MAX_NOTE],
-                        _ranked_search=sealed, _ranked_library=None)
+                        note=(_NO_ANSWERING_SOURCE.replace("paused: ", "paused: " + prefix)
+                              + " — pages that may help are on the card")[:_MAX_NOTE],
+                        _ranked_search=sealed, _ranked_library=links or None)
             return _flow_read(store, item_id) or {}
     return None
 
@@ -5270,8 +5414,9 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
         own = store.get_item(item_id) if remap else None
         own_page = bool(own) and \
             (own["spec"].get("source") or {}).get("type") == "http_page"
-        if not_json and picked and live.get("_library_format", "json") == "json":
-            # C12: a Library row promised JSON; HTML back is a broken contract, never a page card
+        if not_json and picked:
+            # C12: a Library row promised its data; a page back is a broken contract, never a page
+            # card (ruling 2026-10-05: a tapped Library row builds only from its declared answers)
             moved = _move_on(store, item_id, pick_url, "did not return its data", request, intent, call_model)
             return moved if moved is not None else \
                 _fail(store, item_id, "fetch", "the source did not return its data")
@@ -5302,8 +5447,16 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
                 return moved
         return _fail(store, item_id, "fetch", f"sample fetch failed: {type(exc).__name__}")
     # A tapped Library source that declares its answers builds the card from them — no model
-    # path-guessing. Fresh builds only (a Fix re-derives); a misfit falls through to mapping.
+    # path-guessing. Fresh builds only (a Fix re-derives). Ruling 2026-10-05 ("Library cards; web as
+    # links"): a tapped Library row builds ONLY from its declared answers — a source without them, or
+    # whose answers don't fit this response, moves on (next source, else the links); never the mapping.
     answered = None if remap else _try_answers_build(store, item_id, request, intent, url, sample)
+    if answered is None and picked:
+        why = ("didn't fit its declared answers" if _library_answers(str(live.get("_library_source") or ""))
+               else "doesn't declare its answers")
+        moved = _move_on(store, item_id, pick_url, why, request, intent, call_model)
+        return moved if moved is not None else _terminate_unsupported(
+            store, item_id, f"{live.get('_library_provider') or 'the source'} {why}")
     if answered is not None and answered.get("nothing"):
         # the source's declared answers were verified on a real response; finding none of them now
         # means it holds nothing for this ask today (no listed games) — the next source, not a model
@@ -5311,13 +5464,8 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
         # can't show the asked window or measure has nothing either: never its headline instead.
         why = answered.get("why") or "has nothing for this right now"
         moved = _move_on(store, item_id, pick_url, why, request, intent, call_model)
-        if moved is not None:
-            return moved
-        if why != "has nothing for this right now":
-            return _terminate_unsupported(store, item_id, f"{live.get('_library_provider') or 'the source'} {why}")
-        _append_note(store, item_id, "the Library's declared answers found nothing in this response "
-                                     "and no other source was offered; mapping instead")
-        answered = None
+        return moved if moved is not None else _terminate_unsupported(
+            store, item_id, f"{live.get('_library_provider') or 'the source'} {why}")
     if answered is not None:
         reasons, frame_notes = _verify_frame(_frame_of(request, intent), _picked_source(live),
                                              _clean_params(live.get("_library_params")), answered, request,
@@ -5343,21 +5491,8 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
                         answered["klass"], converted=[], judge=None, degrade_note=note,
                         remap=remap, keep_source=keep_source, keep_params=keep_params,
                         fetch_now=fetch_now, path="declared")
-    # F6 (2026-10-04): a declared-answers build that misfits (answered is None) used to fall to
-    # the model mapping path with no frame verify — "next Yankees game" shipped off the Braves
-    # schedule. The source-level checks (category, other subject, place, stray topic) still apply:
-    # mapping cannot excuse a wrong source.
-    if picked and live.get("_library_source"):
-        picked_answers = _library_answers(str(live["_library_source"]))
-        if picked_answers:
-            src_reasons, _src_notes = _verify_source(_frame_of(request, intent), _picked_source(live),
-                                                     _clean_params(live.get("_library_params")),
-                                                     picked_answers, request, intent)
-            if src_reasons:
-                why = "doesn't answer this (" + "; ".join(src_reasons)[:140] + ")"
-                moved = _move_on(store, item_id, pick_url, why, request, intent, call_model)
-                return moved if moved is not None else _terminate_unsupported(
-                    store, item_id, f"{live.get('_library_provider') or 'the source'} {why}")
+    # The model mapping path below now serves only a link the user pasted (held for their YES, §33)
+    # and a Fix / remap of an existing card — a tapped Library row never reaches it (above).
     def misfit(stage: str, message: str) -> dict:
         # a source the mapping can't read for this ask hands over to the next row of the pick, as a
         # refusal does (live 2026-10-04: one web row's mapping error ended "pollen count in Atlanta"
@@ -5486,20 +5621,6 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
     # for this ask ("flu levels in Texas" shipped MS/NJ/VA/AL/KS). The next
     # source gets a shot; a pasted link / Fix fails honestly.
     if place and _rows_contradict_place(built.get("preview_payload"), place):
-        why = f"doesn't report for {place}"
-        moved = None if remap else _move_on(store, item_id, pick_url, why, request,
-                                             intent, call_model, research=picked)
-        if moved is not None:
-            return moved
-        return _terminate_unsupported(
-            store, item_id,
-            f"{(live or {}).get('_library_provider') or 'the source'} {why}")
-    # fix8 (blind-7, 2026-10-04): a dataset whose own name/coverage names a
-    # specific US state different from the ask's place is the wrong source
-    # even when the rows don't cell-name states ("covid wastewater levels
-    # king county" shipped the Delaware COVID wastewater dataset). The pack's
-    # place resolver tells city/county picks apart.
-    if place and picked and _source_contradicts_place(_picked_source(live), place, request):
         why = f"doesn't report for {place}"
         moved = None if remap else _move_on(store, item_id, pick_url, why, request,
                                              intent, call_model, research=picked)
@@ -6229,39 +6350,41 @@ def board_flow_field(store: ni.NIStore, item_id: str) -> dict | None:
         # (claims audit 2026-09-21: the full pick card rendered while the
         # source was still being located, and a tap corrupted the live flow).
         try:
-            ranked_web = record.get("_ranked_search")
-            ranked_lib = record.get("_ranked_library")
-            if isinstance(ranked_lib, list) and ranked_lib:
-                # Library candidates (R8): sealed rows render VERBATIM — provider + authority are the
-                # provenance; ``label`` names the reading when the ask was ambiguous (the tap answers it)
-                out["suggestions"] = [
-                    {"kind": "library",
-                     "title": str(row.get("title") or ""),
-                     "host": str(row.get("host") or ""),
-                     "url": str(row.get("url") or ""),
-                     "evidence": [e for e in (
-                         " · ".join(x for x in (str(row.get("provider") or ""),
-                                                _AUTHORITY_WORDS.get(str(row.get("authority") or ""), ""))
-                                    if x),
-                         str(row.get("label") or "")) if e],
-                     # what the tap will ask for before the first fetch
-                     "needs": [n for n, on in (("key", bool(row.get("needs_key"))),
-                                               ("contact", bool(row.get("needs_contact")))) if on]}
-                    for row in ranked_lib[:3] if isinstance(row, dict)]
-            elif isinstance(ranked_web, list) and ranked_web:
-                # S2 (round 9/10): sealed web candidates render VERBATIM —
-                # the sealed row IS the provenance (title/host/url/evidence
-                # exactly as ranked at pause time; no recompute, no refill).
-                out["suggestions"] = [
-                    {"kind": "web",
-                     "title": str(row.get("title") or ""),
-                     "host": str(row.get("host") or ""),
-                     "url": str(row.get("url") or ""),
-                     "evidence": [str(e) for e in
-                                  (row.get("evidence") or [])[:2]]}
-                    for row in ranked_web[:3] if isinstance(row, dict)]
-            else:
-                out["suggestions"] = []
+            ranked_web = [r for r in record.get("_ranked_search") or [] if isinstance(r, dict)][:3]
+            ranked_lib = [r for r in record.get("_ranked_library") or [] if isinstance(r, dict)][:3]
+            # Library candidates (R8): sealed rows render VERBATIM — provider + authority are the
+            # provenance; ``label`` names the reading when the ask was ambiguous (the tap answers it)
+            out["suggestions"] = [
+                {"kind": "library",
+                 "title": str(row.get("title") or ""),
+                 "host": str(row.get("host") or ""),
+                 "url": str(row.get("url") or ""),
+                 "evidence": [e for e in (
+                     " · ".join(x for x in (str(row.get("provider") or ""),
+                                            _AUTHORITY_WORDS.get(str(row.get("authority") or ""), ""))
+                                if x),
+                     str(row.get("label") or "")) if e],
+                 # what the tap will ask for before the first fetch
+                 "needs": [n for n, on in (("key", bool(row.get("needs_key"))),
+                                           ("contact", bool(row.get("needs_contact")))) if on]}
+                for row in _buildable(ranked_lib)]
+            # Ruling 2026-10-05 ("Library cards; web as links"): a Library source without declared
+            # answers (its page, never its API address) and the web pages the search found are LINKS —
+            # named for what they are, nothing read off them, never tapped to build.
+            links = [
+                {"kind": "link", "found": "dataset", "title": str(row.get("title") or ""),
+                 "host": (urlparse(str(row["page"])).hostname or "").lower(), "url": str(row["page"])}
+                for row in ranked_lib if row.get("answers") is False and row.get("page")]
+            links += [
+                {"kind": "link", "found": "page", "title": str(row.get("title") or ""),
+                 "host": str(row.get("host") or ""), "url": str(row.get("url") or "")}
+                for row in ranked_web]
+            # one row per page: two datasets of one provider can share its home page
+            seen = {s["url"] for s in out["suggestions"]}
+            for link in links:  # bounded: ≤6 rows
+                if link["url"] not in seen:
+                    seen.add(link["url"])
+                    out["suggestions"].append(link)
         except Exception as exc:  # suggestions are best-effort display data
             log.warning("ni_flow: suggestions failed for %s: %s", item_id, exc)
             out["suggestions"] = []
@@ -6368,7 +6491,8 @@ def _repick_without(store: ni.NIStore, item_id: str, url: str,
         other = "_ranked_search" if slot == "_ranked_library" else "_ranked_library"
         return _transition(store, item_id, "source", error=AWAITING_SOURCE_PICK,
                            note=f"{gone.get('provider') or gone.get('host')} {why} — "
-                                + ("pick another source" if rest else "paste a link to the data"),
+                                + ("pick another source" if slot == "_ranked_library" and _buildable(rest)
+                                   else "paste a link to the data"),
                            **{slot: rest or None, other: None}, _access=None, _format=None)
     return None
 
@@ -6382,11 +6506,15 @@ def _move_on(store: ni.NIStore, item_id: str, url: str, why: str, request: str, 
 
     fix9-zone (2026-10-04): a Library source dropped by code and no other library rows left used to
     land on a generic "the Library has no source for this" web pause — the honest why from the
-    repick disappeared. ``_pause_with_web`` now reads the why so every move-on says why."""
+    repick disappeared. ``_pause_with_web`` now reads the why so every move-on says why.
+
+    Ruling 2026-10-05: "no source left" means no Library source that declares its answers — the
+    Library's link rows stay on the card next to the web pages the search finds."""
     moved = _repick_without(store, item_id, url, why=why, host_wide=host_wide)
-    if moved is None or not research or moved.get("_ranked_library") or moved.get("_ranked_search"):
+    if moved is None or not research or _buildable(moved.get("_ranked_library")) or moved.get("_ranked_search"):
         return moved
-    web = _pause_with_web(store, item_id, request, intent, call_model, drop_why=why)
+    web = _pause_with_web(store, item_id, request, intent, call_model, drop_why=why,
+                          links=moved.get("_ranked_library"))
     return web if web is not None else moved
 
 

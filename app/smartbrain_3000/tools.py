@@ -2120,7 +2120,8 @@ def _flow_next_step(record: dict | None) -> str:
                 "Do not create anything else for this request.")
     if state == "source":
         return ("the CARD on the board now offers sources from the SmartBrain "
-                "Library (or web results) and a paste-a-link field — tell the user "
+                "Library (or, when none answers this yet, links to pages that may help — "
+                "those can't build a card) and a paste-a-link field — tell the user "
                 "to pick there; if they name a URL in chat, call resume_ni_flow "
                 "with this item_id and their URL. Do not create a card any other way.")
     if state == "awaiting_access":

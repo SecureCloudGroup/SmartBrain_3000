@@ -254,7 +254,7 @@ def test_when_every_library_source_refuses_the_card_searches_the_web(monkeypatch
 
     calls = []
     monkeypatch.setattr(ni_flow, "_pause_with_web",
-                        lambda s, i, r, it, cm, drop_why=None: calls.append(r) or ni_flow._transition(
+                        lambda s, i, r, it, cm, drop_why=None, links=None: calls.append(r) or ni_flow._transition(
                             s, i, "source", error=ni_flow.AWAITING_SOURCE_PICK, _ranked_search=[
                                 {"title": "MLB", "host": "mlb.com", "url": "https://www.mlb.com/yankees", "evidence": []}]))
     out = ni_flow._sample_and_map(store, item_id, "Yankees score", {"wants": ["score"]},
