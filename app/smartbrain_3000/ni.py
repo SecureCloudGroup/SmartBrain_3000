@@ -46,6 +46,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
+from .zones import zone_named
+
 log = logging.getLogger("smartbrain.ni")
 
 # Cheap race mitigation for the sealed-spec read-modify-write sites (update_spec,
@@ -2491,10 +2493,9 @@ def _window_zone(zone: object) -> tzinfo | None:
             and float(zone).is_integer() and abs(zone) < 86400:
         return timezone(timedelta(seconds=int(zone)))
     if isinstance(zone, str) and len(zone) <= 64 and _ZONE_NAME_RE.fullmatch(zone):
-        try:
-            return ZoneInfo(zone)
-        except (ZoneInfoNotFoundError, ValueError):
-            pass
+        named = zone_named(zone)  # legacy names ('US/Eastern') read the same in every image
+        if named is not None:
+            return named
     raise NIError("transform_type", "window: the source's time zone isn't one the app knows")
 
 

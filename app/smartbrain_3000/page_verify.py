@@ -35,6 +35,7 @@ import re
 from datetime import UTC, datetime, timedelta, timezone, tzinfo
 
 from . import pagegraph
+from .zones import zone_named
 
 _GRACE = timedelta(minutes=15)
 _HORIZON = timedelta(days=400)
@@ -509,11 +510,9 @@ def _page_zone(graph: dict, now: datetime) -> tzinfo:
         match = _IANA_RE.search(text)
         named = match.group(1) if match else None
     if named:
-        try:
-            from zoneinfo import ZoneInfo
-            return ZoneInfo(str(named))
-        except Exception:  # unknown zone name: fall through to the offset / user clock
-            pass
+        zone = zone_named(str(named))  # legacy names ('US/Mountain') read the same in every image
+        if zone is not None:
+            return zone
     match = _UTC_OFFSET_RE.search(text)
     if match:
         sign = 1 if match.group(1) == "+" else -1
