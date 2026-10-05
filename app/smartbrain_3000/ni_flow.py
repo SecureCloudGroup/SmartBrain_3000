@@ -3877,10 +3877,21 @@ def run_flow(store: ni.NIStore, item_id: str, *,
     except ValueError as exc:
         return _fail(store, item_id, "intent", str(exc))
 
-    if intent.get("kind") == "computed_only":
+    # code owns the route: the computed source builds countdowns only, so the model's computed_only is
+    # taken only when the ask's own words carry a countdown cue or a date ('moon phase' is data)
+    if intent.get("kind") == "computed_only" and _countdown_ask(request):
         return _handle_computed(store, item_id, request, intent)
     return _run_external_flow(store, item_id, request, intent, known_url,
                               call_model, do_fetch)
+
+
+_COUNTDOWN_RE = re.compile(r"\b(count ?down|days? (until|till|til|to|left)|how (many days|long) (until|till|til|"
+                           r"to|before)|until|till)\b|\b\d{4}-\d{2}-\d{2}\b", re.IGNORECASE)
+
+
+def _countdown_ask(request: str) -> bool:
+    """Do the ask's own words ask for a countdown (a cue word, or a YYYY-MM-DD date)?"""
+    return bool(_COUNTDOWN_RE.search(request or ""))
 
 
 def _local_flow_model(store: ni.NIStore) -> str | None:
