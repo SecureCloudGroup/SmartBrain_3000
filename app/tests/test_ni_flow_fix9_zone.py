@@ -20,7 +20,7 @@ from smartbrain_3000 import ni_flow
 DENVER = ZoneInfo("America/Denver")
 NY = ZoneInfo("America/New_York")
 
-_FIXTURE = Path.home() / "SmartBrain-eval" / "gate" / "fixtures" / "openmeteo_sun_denver.json"
+_FIXTURE = Path(__file__).parent / "fixtures" / "ni_zone" / "openmeteo_sun_denver.json"  # Open-Meteo, Denver, recorded once
 
 
 def _freeze(monkeypatch, moment: datetime) -> None:
