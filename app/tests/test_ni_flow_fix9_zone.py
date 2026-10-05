@@ -86,19 +86,75 @@ def test_value_answers_sunset_ships_at_2013_edt(monkeypatch) -> None:
     assert "6:36 PM" in built["preview_payload"]["sunset_today"]
 
 
-def test_value_answers_sunset_refuses_well_past_dusk(monkeypatch) -> None:
-    """Well past dusk (19:00 MDT, 24 minutes past the 18:36 sunset) the stale-first check
-    (grace = 15 minutes) refuses the card as the existing C9 rule intends."""
-    _freeze(monkeypatch, datetime(2026, 10, 4, 19, 0, tzinfo=DENVER))
-    answer = {"name": "sunset_today", "label": "Sunset today",
-              "kind": "value", "primary": True, "type": "time",
-              "path": "daily.sunset[0]", "words": ["sunset"], "window": "today",
-              "measure": "sunset"}
-    built = ni_flow.build_from_answers([answer], _sun_payload(), "Sunset today",
+_SUNSET_TODAY = {"name": "sunset_today", "label": "Sunset today",
+                 "kind": "value", "primary": True, "type": "time",
+                 "path": "daily.sunset[0]", "words": ["sunset", "when is sunset"],
+                 "window": "today", "measure": "sunset"}
+_SUNSET_TOMORROW = {"name": "sunset_tomorrow", "label": "Sunset tomorrow",
+                    "kind": "value", "primary": False, "type": "time",
+                    "path": "daily.sunset[1]", "words": ["sunset tomorrow"],
+                    "window": "tomorrow", "measure": "sunset"}
+
+
+# ---- ruling-next-occurrence (2026-10-04) ----------------------------------------------------
+
+def test_value_answers_sunset_swaps_to_tomorrow_well_past_dusk(monkeypatch) -> None:
+    """A next-event ask with no explicit day window ("when is sunset") whose "sunset today" has
+    already passed yields to the source's "sunset tomorrow" sibling of the same measure — the
+    card ships the next occurrence (clock 6:35 PM on Mon) instead of refusing as stale."""
+    now = datetime(2026, 10, 4, 19, 0, tzinfo=DENVER)
+    _freeze(monkeypatch, now)
+    answers = [_SUNSET_TODAY, _SUNSET_TOMORROW]
+    chosen = ni_flow.select_answers(answers, "when is sunset in Denver", [],
+                                     None, "next_event")
+    assert chosen[0]["name"] == "sunset_today"
+    swapped = ni_flow._swap_stale_next_event(chosen, answers, _sun_payload(),
+                                              None, True, now)
+    assert swapped[0]["name"] == "sunset_tomorrow"
+    built = ni_flow.build_from_answers(swapped, _sun_payload(), swapped[0]["label"],
                                         next_event=True, frame_kind="next_event")
-    frame_gap = ni_flow._frame_gap("next_event", [answer], built["preview_payload"],
-                                    datetime(2026, 10, 4, 19, 0, tzinfo=DENVER))
-    assert frame_gap == "its next time has already passed", f"unexpected: {frame_gap!r}"
+    assert ni_flow._frame_gap("next_event", swapped, built["preview_payload"], now) is None
+    shown = built["preview_payload"]["sunset_tomorrow"]
+    assert "6:35 PM" in shown, f"expected tomorrow 6:35 PM, got {shown!r}"
+
+
+def test_value_answers_sunset_today_explicit_still_refuses(monkeypatch) -> None:
+    """When the user said "sunset today" (window = "today") the honest past handling stands:
+    the swap doesn't fire and ``_frame_gap`` refuses the card as the existing C9 rule intends."""
+    now = datetime(2026, 10, 4, 19, 0, tzinfo=DENVER)
+    _freeze(monkeypatch, now)
+    answers = [_SUNSET_TODAY, _SUNSET_TOMORROW]
+    chosen = ni_flow.select_answers(answers, "sunset today", [],
+                                     "today", "next_event")
+    swapped = ni_flow._swap_stale_next_event(chosen, answers, _sun_payload(),
+                                              "today", True, now)
+    assert swapped[0]["name"] == "sunset_today", "window=today keeps the honest past path"
+    built = ni_flow.build_from_answers(swapped, _sun_payload(), swapped[0]["label"],
+                                        window="today", next_event=True,
+                                        frame_kind="next_event")
+    gap = ni_flow._frame_gap("next_event", swapped, built["preview_payload"], now)
+    assert gap == "its next time has already passed", f"unexpected: {gap!r}"
+
+
+def test_swap_leaves_a_future_today_alone(monkeypatch) -> None:
+    """Before dusk the "sunset today" value is still future: the swap doesn't fire."""
+    now = datetime(2026, 10, 4, 17, 0, tzinfo=DENVER)  # 1h36m before 18:36
+    _freeze(monkeypatch, now)
+    answers = [_SUNSET_TODAY, _SUNSET_TOMORROW]
+    swapped = ni_flow._swap_stale_next_event([_SUNSET_TODAY], answers, _sun_payload(),
+                                              None, True, now)
+    assert swapped[0]["name"] == "sunset_today"
+
+
+def test_swap_without_sibling_leaves_chosen_alone(monkeypatch) -> None:
+    """A source whose stale "today" value has no sibling of the same measure declared for
+    "tomorrow" keeps the chosen answer: the swap only fires when the next occurrence is there."""
+    now = datetime(2026, 10, 4, 19, 0, tzinfo=DENVER)
+    _freeze(monkeypatch, now)
+    answers = [_SUNSET_TODAY]  # no sibling here
+    swapped = ni_flow._swap_stale_next_event([_SUNSET_TODAY], answers, _sun_payload(),
+                                              None, True, now)
+    assert swapped[0]["name"] == "sunset_today"
 
 
 # ---- siblings are unchanged -----------------------------------------------------------------

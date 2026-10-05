@@ -2299,6 +2299,7 @@ def _try_answers_build(store: ni.NIStore, item_id: str, request: str, intent: di
         when = next((a for a in answers if a["kind"] == "value" and _event_time(a)), None)
         if when is not None:
             chosen = [*chosen[:_MAX_VALUE_ANSWERS - 1], when]
+    chosen = _swap_stale_next_event(chosen, answers, sample, window, next_event, ni._clock())
     try:
         try:
             built = build_from_answers(chosen, sample, title, params=params, window=window,
@@ -2363,6 +2364,55 @@ def _try_answers_build(store: ni.NIStore, item_id: str, request: str, intent: di
 def _event_time(a: dict) -> bool:
     """A time an event happens at (not an observation's own "as of", which is window now)."""
     return a.get("type") in ("time", "date") and a.get("window") != "now"
+
+
+def _swap_stale_next_event(chosen: list[dict], answers: list[dict], sample: object,
+                            window: str | None, next_event: bool,
+                            now: datetime) -> list[dict]:
+    """Ruling-next-occurrence (2026-10-04): a next-event value answer declared for "today" whose
+    live moment is already past yields to the source's sibling of the same measure declared for
+    "tomorrow" when the ask names no explicit day — "when is sunset" at 20:04 MDT after today's
+    18:36 sunset ships "Sunset tomorrow · Mon 6:35 PM", not the honest "no current prediction"
+    refusal the stale-first rule would otherwise return. A user who said "sunset today" set
+    ``window`` and keeps the honest past handling the C9 rule intends."""
+    assert isinstance(chosen, list) and isinstance(answers, list), "lists required"
+    assert isinstance(now, datetime), "now must be a datetime"
+    if not next_event or window is not None or not chosen:
+        return chosen
+    payload = sample if isinstance(sample, dict) else {"items": sample}
+    zone_field = _source_zone_field(payload)
+    zone_value = _resolve_or_none(payload, zone_field) if zone_field else None
+    try:
+        zone = ni._window_zone(zone_value) if zone_value is not None else None
+    except ni.NIError:
+        zone = None
+    swapped: list[dict] = list(chosen)
+    for a in list(swapped)[:_MAX_VALUE_ANSWERS]:
+        if a.get("kind") != "value" or a.get("type") not in ("time", "date") \
+                or a.get("window") != "today" or not a.get("measure"):
+            continue
+        raw = _resolve_or_none(payload, a["path"])
+        try:
+            moment = ni._time_moment(raw, zone=zone) if raw is not None else None
+        except (ni.NIError, ValueError, OverflowError, OSError):
+            moment = None
+        if moment is None or not ni.next_event_stale(moment, now):
+            continue
+        sibling = next((s for s in answers if s is not a and s.get("kind") == "value"
+                         and s.get("type") == a["type"]
+                         and s.get("measure") == a["measure"]
+                         and s.get("window") == "tomorrow"), None)
+        if sibling is None:
+            continue
+        # when select_answers already tied the sibling in beside the stale "today" (both answers
+        # share the measure's words), just drop the stale answer; else replace it in place so the
+        # headline stays its slot.
+        idx = swapped.index(a)
+        if sibling in swapped:
+            swapped.pop(idx)
+        else:
+            swapped[idx] = sibling
+    return swapped
 
 
 def _window_words(window: str) -> str:
