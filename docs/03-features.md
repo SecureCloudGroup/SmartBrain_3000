@@ -412,7 +412,11 @@ How a card comes to life:
    *different* source goes back to the source pick.
 3. **Commissioning.** The system then proves the card: a clean real run, your
    one-tap confirmation that it's the *right* data, and one more clean run at
-   cadence to prove it's stable. Only then is the card live.
+   cadence to prove it's stable. Only then is the card live. A card read from
+   a web page, or from a source the Library hasn't described, shows the
+   reading it found and where it came from, and doesn't update at all until
+   you tap **Yes, that's it**; **No, try another source** goes back to the
+   source pick without that source.
 4. **It keeps itself honest.** Every refresh is checked against the shape of the
    data you validated. If the source changes or breaks, the card shows the last
    good result (dimmed, with a health chip) rather than something wrong — and a

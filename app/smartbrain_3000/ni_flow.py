@@ -497,8 +497,15 @@ _WINDOW_PATTERNS: tuple[tuple[re.Pattern, Callable[[re.Match], str]], ...] = (
      lambda m: f"dow:{_DAY_NAMES[m.group(1)]}"),
     (re.compile(r"\b(?:tonight|tonite|this evening|this eve|overnight)\b"), lambda m: "tonight"),
     (re.compile(r"\b(?:today|todays|this morning|this afternoon|later today)\b"), lambda m: "today"),
-    (re.compile(r"\b(?:right now|now|currently|at the moment|at present|as we speak|current)\b(?!s)"),
+    # fix8 (blind-7, 2026-10-04): "rn" / "atm" / "right this (minute|second|moment|instant)" / "this instant"
+    # name a 'now' window the field used to miss ("line at Franklin Barbecue rn" shipped a guide's typical
+    # 3-to-5-hour average because the freshness check keyed on window=now). 'live' alone stays out: "live
+    # oak weather", "live music tonight", "is my package live" would overtrigger. Short tokens ("rn", "atm")
+    # match only at the end of the ask so an ATM-machine ask ("open atm near me") doesn't trigger.
+    (re.compile(r"\b(?:right now|now|currently|at the moment|at present|as we speak|current"
+                r"|right this (?:second|minute|moment|instant)|this (?:second|instant))\b(?!s)"),
      lambda m: "now"),
+    (re.compile(r"\b(?:rn|atm)\s*$"), lambda m: "now"),
 )
 
 
@@ -2739,6 +2746,64 @@ def _state_code_of(place: str) -> str | None:
     return _STATE_BY_NAME.get(raw.lower())
 
 
+# fix8 (blind-7, 2026-10-04): "covid wastewater levels king county" shipped the
+# "Delaware COVID-19 Wastewater Viral Activity Levels" dataset — the source's
+# OWN name named a different state than the ask's place. The row-level check
+# (``_rows_contradict_place``) only catches rows that cell-name states; a
+# single-state dataset whose rows are week+level reads needs the TITLE-level
+# check this helper adds.
+def _place_states_via_resolver(place: str, request: str) -> set[str]:
+    """Every US state the ask's place could land in, via the pack's place
+    resolver (candidates include ambiguous ones). Explicit state codes/names
+    in the ask ride through ``states_in``. {} when no Library is wired, the
+    pack has no place resolver, or the resolver raises. Bounded by the pack's
+    MAX_CHOICES candidates."""
+    assert isinstance(place, str) and isinstance(request, str), "args required"
+    from .library_resolve import Resolver, states_in  # local: avoid a cycle
+    found: set[str] = set(states_in(f"{request} {place}"))
+    stripped = place.strip()
+    if not stripped:
+        return found
+    lib = _resolve_library()
+    conn = getattr(lib, "_conn", None) if lib is not None else None
+    if not callable(conn):
+        return found
+    try:
+        with conn() as con:  # read-only; same posture as library_index's own callers
+            res = Resolver(con)
+            r = res.by_name("place", stripped) or {}
+    except Exception:  # a broken Library or an older pack: the state-code path stands alone
+        return found
+    best = r.get("best") or {}
+    if best.get("state"):
+        found.add(str(best["state"]).upper())
+    for cand in (r.get("candidates") or [])[:5]:  # pack caps candidates
+        if isinstance(cand, dict) and cand.get("state"):
+            found.add(str(cand["state"]).upper())
+    return {s for s in found if s}
+
+
+def _source_contradicts_place(source: dict, place: str, request: str) -> bool:
+    """True iff the picked source's own name / coverage names a specific US
+    state and the ask's place can't land in it. The row-level fix6-map check
+    reads the preview; this reads the SOURCE record so a single-state dataset
+    with no state-keyed rows is still refused for a different-state ask.
+    Deterministic; no model."""
+    assert isinstance(source, dict) and isinstance(place, str), "args required"
+    assert isinstance(request, str), "request must be a string"
+    from .library_resolve import states_in  # local: avoid a cycle
+    source_text = " ".join([str(source.get("name") or ""),
+                             str((source.get("coverage") or {}).get("entity") or ""),
+                             str((source.get("coverage") or {}).get("geo") or "")])
+    source_states = states_in(source_text)
+    if len(source_states) != 1:
+        return False  # a nationwide / unknown-coverage source: this check doesn't fire
+    if not place.strip():
+        return False  # no asked place: nothing to contradict
+    ask_states = _place_states_via_resolver(place, request)
+    return bool(ask_states) and bool(source_states.isdisjoint(ask_states))
+
+
 def _judge_wants_unanswered(judge: dict | None, request: str, intent: dict,
                               filled: list[str], preview: object) -> list[str]:
     """Which said wants the model-mapping JUDGE's gaps say the card won't include. Same posture
@@ -2850,23 +2915,35 @@ def _stray_topics(frame: dict, source: dict, params: dict, answers: list[dict], 
 
 def _foreign_providers_in(lib: object, request: str, source: dict, own: set[str],
                             params: dict, intent: dict) -> set[str]:
-    """The folded tokens of every Library provider name the ask carries that doesn't match this
-    source's own provider, less tokens the source already covers (``own``), the filled params,
-    and the ask's named place. {} when the Library has no ``providers_named_in`` method, the
-    pack knows no providers, or every named provider IS this source's. Bounded by the pack's
-    distinct providers.
+    """The folded tokens of every outlet name the ask carries that doesn't match this source's
+    own provider, less tokens the source already covers (``own``), the filled params, and the
+    ask's named place. The outlet names come from (a) the pack's ``providers_named_in``, (b)
+    intent.names whose words end in a publisher suffix ("Weather Channel"), and (c) a bounded
+    well-known-outlet set the pack hasn't indexed yet ("Axios Denver"). {} when nothing matches
+    or every named outlet IS this source's. Bounded by the pack's providers + intent.names cap.
 
     fix7-lib (2026-10-04): "reuters business news" shipped from NPR Business because the intent
     model missed the lowercase outlet; this backstop reads the Library vocabulary so an ask that
-    names any pack-known outlet the pick isn't from refuses honestly."""
+    names any pack-known outlet the pick isn't from refuses honestly.
+    fix8 (blind-7, 2026-10-04): "Weather Channel 10 day for Asheville" shipped NWS; the pack
+    doesn't index Weather Channel. The outlet-suffix set and well-known-outlet set together
+    catch outlet names the pack hasn't indexed yet."""
     assert isinstance(source, dict) and isinstance(params, dict), "source + params required"
     getter = getattr(lib, "providers_named_in", None)
-    if not callable(getter):
-        return set()
-    try:
-        named = getter(request)
-    except Exception:  # a broken Library: the stray check falls back to the taxonomy path alone
-        return set()
+    named: set[str] = set()
+    if callable(getter):
+        try:
+            got = getter(request)
+        except Exception:  # a broken Library: fall through to intent.names
+            got = None
+        if got:
+            named = {str(p) for p in got}
+    for name in (intent.get("names") or [])[:_MAX_INTENT_NAMES]:
+        if not isinstance(name, str) or not name:
+            continue
+        words = {w for w in re.findall(r"[a-z0-9]+", name.lower()) if len(w) >= 2}
+        if words & (_OUTLET_SUFFIX_WORDS | _KNOWN_OUTLET_WORDS):
+            named.add(name)
     if not named:
         return set()
     own_pname = str(source.get("provider") or "").strip().lower()
@@ -4631,6 +4708,73 @@ def _official_hosts(subject: str) -> dict:
     return got if isinstance(got, dict) else {}
 
 
+# fix8 (blind-7, 2026-10-04): "Axios Denver latest" shipped a Rocky Mountain
+# Voice page (that only mentioned Axios Denver); "Fox News headlines" is the
+# same class but is caught via the Library's providers_named_in (fix7-lib).
+# A page card for an ask that NAMES an outlet must be from THAT outlet's own
+# site. The signal is: pack providers_named_in + outlet-shaped intent.names
+# (ends in a publisher word, or is one of a bounded well-known-outlet set
+# the pack hasn't indexed yet).
+_OUTLET_SUFFIX_WORDS: frozenset[str] = frozenset({
+    "news", "times", "post", "journal", "herald", "tribune", "chronicle",
+    "gazette", "daily", "weekly", "observer", "dispatch", "sentinel",
+    "press", "mail", "report", "digest", "media", "channel", "network",
+    "radio", "wire",
+})
+_KNOWN_OUTLET_WORDS: frozenset[str] = frozenset({
+    "axios", "reuters", "bloomberg", "politico", "vox", "vice", "verge",
+    "economist", "forbes", "cnn", "cbs", "nbc", "abc", "msnbc", "npr", "pbs",
+    "huffpost", "cnet", "techcrunch", "engadget", "wired", "nyt", "wsj",
+    "newsweek", "slate", "salon",
+})
+
+
+def _named_outlets(request: str, intent: dict) -> list[str]:
+    """The outlet-shaped names the ask carries: Library providers_named_in
+    first (pack vocabulary), then intent.names entries whose words land in a
+    publisher-suffix set ("Weather Channel") or a bounded well-known-outlet
+    set ("Axios Denver"). Bounded by intent.names cap. Deterministic."""
+    assert isinstance(request, str) and isinstance(intent, dict), "args required"
+    outlets: list[str] = []
+    lib = _resolve_library()
+    fn = getattr(lib, "providers_named_in", None) if lib is not None else None
+    if callable(fn):
+        try:
+            got = fn(request)
+        except Exception:  # a broken Library: fall through to intent.names
+            got = None
+        for name in got or ():  # bounded by the pack's providers
+            if isinstance(name, str) and name and name not in outlets:
+                outlets.append(name)
+    for name in (intent.get("names") or [])[:_MAX_INTENT_NAMES]:
+        if not isinstance(name, str) or not name or name in outlets:
+            continue
+        words = {w for w in re.findall(r"[a-z0-9]+", name.lower()) if len(w) >= 2}
+        if words & (_OUTLET_SUFFIX_WORDS | _KNOWN_OUTLET_WORDS):
+            outlets.append(name)
+    return outlets
+
+
+def _page_wrong_outlet(url: str, request: str, intent: dict) -> str:
+    """The named outlet the page's host doesn't come from, or "". When the
+    ask names one or more outlets (``_named_outlets``), the page's host
+    must be first_party for at least one of them — a page on another host
+    that merely mentions the outlet refuses (fix8 blind-7, 2026-10-04:
+    rockymountainvoice.com shipped for "Axios Denver latest")."""
+    assert isinstance(url, str) and isinstance(intent, dict), "args required"
+    outlets = _named_outlets(request, intent)
+    if not outlets:
+        return ""
+    host = urlparse(url).hostname or ""
+    subject = str(intent.get("subject") or "")
+    if subject and pagegraph.first_party(host, subject, _official_hosts(subject), ask=request):
+        return ""
+    for outlet in outlets:
+        if pagegraph.first_party(host, outlet, _official_hosts(outlet), ask=request):
+            return ""
+    return outlets[0]
+
+
 def _pause_source_pick(store: ni.NIStore, item_id: str, request: str,
                        intent: dict, call_model: Callable[[str], str]) -> dict:
     """The ONE source-pick pause. Layer 1 is the SmartBrain Library: sources
@@ -4640,7 +4784,7 @@ def _pause_source_pick(store: ni.NIStore, item_id: str, request: str,
     candidates seal with their evidence. Nothing found, providers unwired, or
     total failure → the plain pause (paste a URL), never a failed flow.
     """
-    library = _library_candidates(request, intent)
+    library = _without_declined(store, item_id, _library_candidates(request, intent))
     if library:
         _transition(store, item_id, "source",
                     error=AWAITING_SOURCE_PICK,
@@ -4663,7 +4807,7 @@ def _pause_with_web(store: ni.NIStore, item_id: str, request: str, intent: dict,
     when search is unwired or finds nothing."""
     service = _resolve_search_service()
     if service is not None:
-        web = _s2_search_candidates(service, request, intent)
+        web = _without_declined(store, item_id, _s2_search_candidates(service, request, intent))
         if web:
             web = _s2_evaluate(web, intent, request)
             read = [r for r in web if r.get("fitness") is not None]
@@ -5000,7 +5144,7 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
         return _handoff(store, item_id, request, intent, url, answered, answered["fields"],
                         answered["klass"], converted=[], judge=None, degrade_note=note,
                         remap=remap, keep_source=keep_source, keep_params=keep_params,
-                        fetch_now=fetch_now)
+                        fetch_now=fetch_now, path="declared")
     # F6 (2026-10-04): a declared-answers build that misfits (answered is None) used to fall to
     # the model mapping path with no frame verify — "next Yankees game" shipped off the Braves
     # schedule. The source-level checks (category, other subject, place, stray topic) still apply:
@@ -5152,6 +5296,20 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
         return _terminate_unsupported(
             store, item_id,
             f"{(live or {}).get('_library_provider') or 'the source'} {why}")
+    # fix8 (blind-7, 2026-10-04): a dataset whose own name/coverage names a
+    # specific US state different from the ask's place is the wrong source
+    # even when the rows don't cell-name states ("covid wastewater levels
+    # king county" shipped the Delaware COVID wastewater dataset). The pack's
+    # place resolver tells city/county picks apart.
+    if place and picked and _source_contradicts_place(_picked_source(live), place, request):
+        why = f"doesn't report for {place}"
+        moved = None if remap else _move_on(store, item_id, pick_url, why, request,
+                                             intent, call_model, research=picked)
+        if moved is not None:
+            return moved
+        return _terminate_unsupported(
+            store, item_id,
+            f"{(live or {}).get('_library_provider') or 'the source'} {why}")
     return _handoff(store, item_id, request, intent, url, built, fields, klass,
                     converted=converted, judge=judge, degrade_note=degrade_note,
                     remap=remap, keep_source=keep_source, keep_params=keep_params,
@@ -5161,9 +5319,14 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
 def _handoff(store: ni.NIStore, item_id: str, request: str, intent: dict, url: str,
              built: dict, fields: dict, klass: str, *, converted: list, judge: dict | None,
              degrade_note: str | None, remap: bool, keep_source: dict | None,
-             keep_params: dict | None, fetch_now: datetime | None = None) -> dict:
+             keep_params: dict | None, fetch_now: datetime | None = None,
+             path: str = "mapping") -> dict:
     """The built pipeline + scene → the sealed spec (source, format, access, alert, notes) →
     ``_finalize``. Shared by the model mapping path and the Library-answers path.
+
+    ``path`` (ruling 2026-10-04): ``declared`` for the Library-answers build, ``mapping`` for the
+    model mapping path (fresh or remap) — sealed as ``_built_from``; a mapping card waits for the
+    user's YES (``ni.awaits_yes``).
 
     ``fetch_now`` (R4-2, 2026-10-04): the frozen clock the sampler used to render the fetch URL;
     the C2 verify reads the sealed spec at this SAME moment so a build that crosses midnight
@@ -5264,7 +5427,8 @@ def _handoff(store: ni.NIStore, item_id: str, request: str, intent: dict, url: s
     if extra_notes:
         handoff_note = handoff_note + "; " + "; ".join(extra_notes)
     return _finalize(store, item_id, spec, built["preview_payload"],
-                     note=handoff_note, born=born)
+                     note=handoff_note, born=born,
+                     built_from=_built_from_of(store, item_id, path, url))
 
 
 def _page_llm_stage(intent: dict) -> dict:
@@ -5404,6 +5568,15 @@ def _build_page_card(store: ni.NIStore, item_id: str, request: str,
         reason = f"the page couldn't be read ({readable.get('kind')})" if not readable.get("readable", True) \
             else "the page doesn't mention what you asked"
         return _page_refused(store, item_id, url, reason, request, intent, call_model, remap)
+    # fix8 (blind-7, 2026-10-04): the ask names an outlet / brand (pack providers,
+    # outlet-shaped intent.names, or a bounded well-known-outlet set) and the page
+    # isn't first-party for it: a page that only MENTIONS the named outlet refuses
+    # ("Axios Denver latest" shipped a Rocky Mountain Voice page). Fires before
+    # compile / interpret so no model work is spent on a page that can't ship.
+    wrong = _page_wrong_outlet(url, request, intent)
+    if wrong:
+        return _page_refused(store, item_id, url, f"isn't {wrong}'s own site",
+                              request, intent, call_model, remap)
     compiled = compile_page_program(graph, intent, request, call_model)
     if compiled is not None:
         preview = dict(compiled["values"])
@@ -5427,7 +5600,9 @@ def _build_page_card(store: ni.NIStore, item_id: str, request: str,
                 notes.append(gap_note)
                 _try_journal(store, item_id, "updated", gap_note)
             return _finalize(store, item_id, spec, preview,
-                              note="; ".join(notes), born=born)
+                              note="; ".join(notes), born=born,
+                              built_from=_built_from_of(store, item_id, "page", url,
+                                                        str(graph.get("title") or "")))
         _append_note(store, item_id,
                      "compiled reading rejected by the check — "
                      "falling back to an interpreted card")
@@ -5486,11 +5661,37 @@ def _build_page_card(store: ni.NIStore, item_id: str, request: str,
         notes.append(gap_note)
         _try_journal(store, item_id, "updated", gap_note)
     return _finalize(store, item_id, spec, preview,
-                      note="; ".join(notes), born=born)
+                      note="; ".join(notes), born=born,
+                      built_from=_built_from_of(store, item_id, "page", url,
+                                                str(graph.get("title") or "")))
+
+
+def _built_from_of(store: ni.NIStore, item_id: str, path: str, url: str, title: str = "") -> dict:
+    """The sealed ``_built_from`` marker (ruling 2026-10-04): which path built the card, the host
+    its reading came from, and the page / dataset title the user judges it by — the page's own
+    title, else the title of the pick row the user tapped (Library or web), else "" (a pasted
+    link names only its host)."""
+    assert path in ni._BUILT_FROM_PATHS, "path must be closed"
+    host = (urlparse(url).hostname or "").lower()[:ni._MAX_BUILT_FROM_HOST]
+    if not title.strip():
+        record = _flow_read(store, item_id) or {}
+        sealed_sid = str(record.get("_library_source") or "")
+        for slot in ("_ranked_library", "_ranked_search"):  # bounded: the sealed pick rows
+            row = next((r for r in record.get(slot) or [] if isinstance(r, dict)
+                        and (r.get("url") == url
+                             or (slot == "_ranked_library" and sealed_sid
+                                 and r.get("source_id") == sealed_sid
+                                 and record.get("_library_url") == url))), None)
+            if row is not None:
+                title = str(row.get("title") or "")
+                break
+    return {"path": path, "host": host,
+            "title": " ".join(title.split())[:ni._MAX_BUILT_FROM_TITLE]}
 
 
 def _finalize(store: ni.NIStore, item_id: str, spec: dict, preview: dict,
-              *, note: str, born: str | None = None) -> dict:
+              *, note: str, born: str | None = None,
+              built_from: dict | None = None) -> dict:
     """Rewrite the shell item's spec in place; write preview + preview_data; commission.
 
     Landing rule mirrors ``_initial_ni_state`` from tools.py: a spec declaring
@@ -5502,9 +5703,15 @@ def _finalize(store: ni.NIStore, item_id: str, spec: dict, preview: dict,
     ``is_flow_or_recipe_born`` reads a spec-shape truth instead of the prunable
     journal (a 25-entry churn used to defeat the §29 door). None on remap
     (the item's existing ``_born`` value stays intact).
+
+    ``built_from`` (ruling 2026-10-04): sealed as ``_built_from`` — a web-page or model-mapped
+    card lands ``commissioning`` like every card but waits for the user's YES there
+    (``ni.awaits_yes``: no cadence runs, the board asks). None (computed) seals nothing.
     """
     assert store is not None and item_id, "args required"
     assert born is None or born in BORN_MARKERS, "born marker must be closed"
+    if built_from is not None:
+        spec["_built_from"] = built_from
     prior = store.get_item(item_id)
     prior_state = str(prior["state"]) if prior else "draft"
     if born is not None:
@@ -5970,6 +6177,53 @@ def _move_on(store: ni.NIStore, item_id: str, url: str, why: str, request: str, 
         return moved
     web = _pause_with_web(store, item_id, request, intent, call_model)
     return web if web is not None else moved
+
+
+# ---- NO to a reading (ruling 2026-10-04: "hold open paths for a YES") ------------------------
+
+_MAX_DECLINED = 10
+# the per-pick seal a declined source leaves on the record; a later pick seals its own
+_PICK_SEAL_KEYS = ("_library_source", "_library_url", "_library_params", "_library_url_template",
+                   "_library_clock_params", "_access", "_format")
+
+
+def _without_declined(store: ni.NIStore, item_id: str, rows: list | None) -> list:
+    """Candidate rows minus every address the user said NO to on this card."""
+    declined = set((_flow_read(store, item_id) or {}).get("_declined") or [])
+    return [r for r in rows or [] if not (isinstance(r, dict) and r.get("url") in declined)]
+
+
+def decline_reading(store: ni.NIStore, item_id: str) -> dict:
+    """The user said NO to an open-path card's reading: back to the source pick without that source.
+
+    The declined address is remembered on the flow record (``_declined``) so no later pick on this
+    card offers it again. Other offered rows left → the pick re-lands at once (``repick``, the same
+    ``_repick_without`` a refusing source takes). None left, or a pasted link → the flow re-runs from
+    the user's words with the declined address excluded: the Library's other sources, then the web,
+    then paste-a-link (``relocate``). Never a dead end."""
+    assert store is not None and item_id, "args required"
+    item = store.get_item(item_id)
+    if item is None:
+        raise ValueError("item not found")
+    url = str((item["spec"].get("source") or {}).get("url") or "")
+    record = _flow_read(store, item_id) or {}
+    declined = [u for u in record.get("_declined") or [] if isinstance(u, str) and u != url]
+    declined = (declined + [url] if url else declined)[-_MAX_DECLINED:]
+    _flow_write(store, item_id, {**record, "_declined": declined})
+    moved = _repick_without(store, item_id, url, why="isn't what you wanted (you said no)") if url else None
+    if moved is not None and (moved.get("_ranked_library") or moved.get("_ranked_search")):
+        _transition(store, item_id, "source", error=AWAITING_SOURCE_PICK,
+                    **{key: None for key in _PICK_SEAL_KEYS})
+        return {"kind": "repick"}
+    request = str(record.get("request") or item["spec"].get("goal") or "")
+    fresh = _make_record(request, "intent", notes=["you said no to that reading — finding another source"])
+    for key in ("_declined", "_model_consent", "_use_local"):  # the card's own answers ride along
+        current = (_flow_read(store, item_id) or {}).get(key)
+        if current is not None:
+            fresh[key] = current
+    _flow_write(store, item_id, fresh)
+    start_flow_worker(store, item_id)
+    return {"kind": "relocate"}
 
 
 def reenter_source_pick(store: ni.NIStore, item_id: str, note: str) -> dict:

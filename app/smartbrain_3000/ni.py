@@ -494,9 +494,10 @@ def validate_spec(spec: object, *, allow_empty_params: bool = False) -> dict:
                "interval_minutes", "history", "alerts",
                "_l1_last_attempt", "_l1_trial", "_template",
                "_l2_last_attempt", "_l2_proposal", "_born", "_shell",
-               "_model_consent"}
+               "_model_consent", "_built_from"}
     _closed_keys(body, allowed, "spec")
     _validate_born_marker(body.get("_born"))
+    _validate_built_from(body.get("_built_from"))
     _validate_model_consent(body.get("_model_consent"))
     # W2 (2026-09-15): ``_shell`` is the flow's not-yet-finalized marker —
     # boolean-true or absent, nothing else (the commission door reads it).
@@ -553,6 +554,43 @@ def _validate_born_marker(value: object) -> None:
     if not isinstance(value, str) or value not in _BORN_MARKERS:
         raise ValueError(
             f"spec._born must be one of {sorted(_BORN_MARKERS)} or absent")
+
+
+# Ruling 2026-10-04 ("hold open paths for a YES"): where a flow-built card's reading came from.
+# ``declared`` = a Library source's declared answers (goes live as before); ``page`` (a web page,
+# compiled or interpreted) and ``mapping`` (the model mapped a dataset / any source without
+# declared answers) are OPEN paths: the card waits for the user's YES (``awaits_yes``).
+_BUILT_FROM_PATHS: frozenset[str] = frozenset({"declared", "page", "mapping"})
+_OPEN_PATHS: frozenset[str] = frozenset({"page", "mapping"})
+_MAX_BUILT_FROM_HOST = 253
+_MAX_BUILT_FROM_TITLE = 200
+
+
+def _validate_built_from(value: object) -> None:
+    """Shape-check the sealed ``_built_from`` marker: absent, or exactly ``{path, host, title}``.
+
+    Written only by the flow's finalize; stripped on export and refused in template packs, so a
+    template can neither claim nor shed it."""
+    if value is None:
+        return
+    if not (isinstance(value, dict) and set(value) == {"path", "host", "title"}
+            and value["path"] in _BUILT_FROM_PATHS
+            and isinstance(value["host"], str) and len(value["host"]) <= _MAX_BUILT_FROM_HOST
+            and isinstance(value["title"], str) and len(value["title"]) <= _MAX_BUILT_FROM_TITLE):
+        raise ValueError("spec._built_from must be {path: declared|page|mapping, host, title} or absent")
+
+
+def awaits_yes(item: dict) -> bool:
+    """True while an open-path card (web page / model-mapped dataset) waits for the user's YES.
+
+    Only a ``commissioning`` card is held: the YES is the C2 verdict (``_c2_ok``), the one thing
+    no unattended path writes. Cards without the marker (every card built before the ruling)
+    are never held; a card past commissioning (live / degraded / failing) already had its YES."""
+    assert isinstance(item, dict), "item must be a dict"
+    spec = item.get("spec") or {}
+    built = spec.get("_built_from")
+    return (item.get("state") == "commissioning" and isinstance(built, dict)
+            and built.get("path") in _OPEN_PATHS and spec.get("_c2_ok") is not True)
 
 
 def _validate_model_consent(value: object) -> None:
@@ -3913,7 +3951,8 @@ class NIStore:
         out: list[dict] = []
         for r in rows:  # bounded by _MAX_ITEMS
             item = self._row(r)
-            if _is_due(item, now):
+            # ruling 2026-10-04: an open-path card waiting for the user's YES never refreshes on its own
+            if _is_due(item, now) and not awaits_yes(item):
                 out.append(item)
             if len(out) >= _MAX_DUE_CANDIDATES:
                 break

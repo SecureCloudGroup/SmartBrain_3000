@@ -534,7 +534,9 @@ conversation before the card is parked. Approving the card is what moves
   payload (`preview` for drafts, else `latest` ok / `last_good`).
 - `GET  /api/ni/items/{id}` — spec (secrets as names), health, run history.
 - `POST /api/ni/items/{id}/validate` — C2 verdict `{ok: bool, note?: str}`.
-  Refuses 409 unless the item is currently `commissioning`.
+  Refuses 409 unless the item is currently `commissioning`. On a card awaiting the
+  user's YES (§33) ok=true is the YES and ok=false re-lands the source pick without
+  that source (response `repick: "repick" | "relocate"`).
 - `POST /api/ni/items/{id}/commission` — the Activate button on the drafted
   card: `draft` → `commissioning`. Refuses 409 unless state is `draft`, and
   409 with a clear detail when any secret param is still unfilled. Response
@@ -2384,3 +2386,47 @@ and the `recipe` born marker stays readable.
   scoping (its rows describe where each row lives relative to its city — "4 km W of Yountville,
   CA" is not what the ask filters on). "San Ysidro border wait" ships only San Ysidro's rows;
   "flu levels in Texas" ships only Texas rows on the model-mapping path (handled in parallel).
+
+## 33. Open paths wait for the user's YES (operator ruling 2026-10-04)
+
+"Hold open paths for a YES." Across three sealed blind runs every confidently wrong card came
+from the two open paths; every card built from a Library source's declared answers was right.
+
+- **Seal.** `_finalize` seals `_built_from: {path, host, title}` (closed; `ni._validate_built_from`)
+  on every flow build: `declared` (the §32 declared-answers build — `_handoff(path="declared")`),
+  `page` (an `http_page` card, compiled or interpreted tier) or `mapping` (the model-mapping path:
+  a harvested dataset, a Library source without declared answers, a pasted JSON link, and every
+  remap / Fix). `host` is the fetched URL's host; `title` is the page's own title, else the title of
+  the pick row the user tapped (Library or web), else "". Computed cards seal nothing. Export
+  strips it (`_EXPORT_STRIP_KEYS`), template packs may not carry it (refused at parse, stripped at
+  install), so a template can neither claim nor shed it. No migration: a card without the marker
+  (every card built before the ruling) is never held.
+- **Held.** `ni.awaits_yes(item)` = state `commissioning` AND `_built_from.path` ∈ {page, mapping}
+  AND no `_c2_ok`. Held cards land `commissioning` like every card (§6) and differ only in: the
+  due query skips them (no cadence fetch until the YES); the board shows the reading the flow
+  found (`preview`; a manual run's ok `latest` wins) with `awaiting_yes: {from: page|dataset,
+  host, title}`; the chat status tool says the card waits for the user's YES. live still needs
+  `_c2_ok`, which only `POST /validate ok=true` writes — scheduler, manual run, repair (L1/L2 keep
+  state + attestations), export/import, template install and template update never set it, and
+  `update_spec` strips it. A card past commissioning (live / degraded / failing) already had its
+  YES and is never re-held by an edit; a Fix / remap or a source-changing edit returns it to
+  commissioning and therefore to the YES.
+- **YES** = the C2 verdict (`/validate ok=true`): `_c2_ok` sealed, the C3 kick runs at once
+  (contract captured), and `last_checked` is cleared so the C3 proof runs on the next tick
+  (a held card had no C1 run before the YES) → live.
+- **NO** = `/validate ok=false` on a held card: a `c2_wrong` journal row ("user said no to the
+  reading from <host>"), state `draft`, then `ni_flow.decline_reading`: the declined URL joins the
+  flow record's `_declined` (≤10, never offered on this card again — `_pause_source_pick` and
+  `_pause_with_web` filter it) and the per-pick seal (`_library_*`, `_access`, `_format`) clears.
+  Other offered rows left → the pick re-lands at once (`repick`, via `_repick_without`); none left
+  or a pasted link → the flow re-runs from the user's words with the declined address excluded
+  (Library → web → paste-a-link; `relocate`). The next pick builds a fresh card that waits for
+  its own YES (or goes live as before if it is a declared build). Never a dead end.
+- **Card (/ni).** Health chip "Needs your OK"; dashed border (not live yet); the reading renders
+  as the card's own scene; under it "Is this what you asked for?", "From the web page <host> —
+  <title>" / "From the dataset <host> — <title>" (`awaitingYesSource`, web/src/lib/ni/flow.ts),
+  and **Yes, that's it** / **No, try another source**; the footer says "not updating yet".
+  While a flow speaks on a draft (the re-pick after NO) Activate and the preview tag hide.
+- **Live harness.** `tools/ni-live-e2e.py` reports a held card as `awaiting-yes` and prints its
+  reading (the preview scene's words), host, title and kind, so a human judges whether the YES
+  would be right; declared cards report as before.

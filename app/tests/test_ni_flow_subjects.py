@@ -346,6 +346,29 @@ def test_a_name_with_a_day_word_is_no_window(ask, window) -> None:
     assert ni_flow._window_from_text(ask) == window
 
 
+# fix8 (blind-7, 2026-10-04): the ask said "rn" and the freshness gate missed
+# it. "rn" / "atm" slang + "right this (minute|second|moment|instant)" / "this
+# instant" are now 'now'. Short tokens match only at utterance end so an ATM
+# machine ("open atm near me") doesn't false-trigger.
+@pytest.mark.parametrize("ask, window", [
+    ("how long is the line at Franklin Barbecue rn", "now"),
+    ("line at Franklin Barbecue atm", "now"),
+    ("line rn.", "now"),
+    ("temperature right this minute", "now"),
+    ("price right this second", "now"),
+    ("weather this instant", "now"),
+    # false-positive guards
+    ("open atm near me", None),
+    ("the atms are empty", None),
+    ("rn traffic", None),
+    ("live oak weather", None),
+    ("live music tonight", "tonight"),
+    ("is my package live", None),
+])
+def test_slang_now_parses_without_overtriggering(ask, window) -> None:
+    assert ni_flow._window_from_text(ask) == window
+
+
 def _pick(ask: str, sid: str, wants: tuple = ()) -> list[str]:
     answers = ni_flow._library_answers(sid)
     window = ni_flow._window_from_text(ask)

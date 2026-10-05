@@ -8,7 +8,10 @@ the pick route does (Library row → format + access sealed first). A built card
 once through the real engine (``ni.run_item``) — the refresh every card lives on.
 
 Outcomes per ask: ``live`` (built AND its first engine run is ok), ``built-no-run``,
-``needs-key`` / ``needs-email`` (an honest pause the user answers), ``no-source``, ``failed``.
+``awaiting-yes`` (built from a web page or a model-mapped dataset: the card holds for the user's YES —
+its reading, host and page / dataset title print so a human judges whether the YES would be right;
+ruling 2026-10-04), ``needs-key`` / ``needs-email`` (an honest pause the user answers), ``no-source``,
+``failed``.
 Previews are printed so a human judges whether the card shows what was asked — a green
 state with the wrong data is still a failure.
 
@@ -143,8 +146,16 @@ def run_one(ask: str, idx, llm, model: str) -> dict:
                                if "declared answers" in str(n)), "")
         snap = store.read_snapshot(item_id, "preview_data")
         out["preview"] = snap["payload"] if snap else None
+        built = store.get_item(item_id)
+        if ni.awaits_yes(built):
+            # an open path: the card shows this reading and waits for the user's YES
+            found = store.read_snapshot(item_id, "preview")
+            origin = built["spec"].get("_built_from") or {}
+            out["reading"] = _texts(found["payload"] if found else None)
+            out["from"] = {"kind": "web page" if origin.get("path") == "page" else "dataset",
+                           "host": origin.get("host") or "", "title": origin.get("title") or ""}
         run = _eval._engine_first_run(store, conn, item_id, llm, model, ni, key)
-        out["outcome"] = "live" if run == "ok" else "built-no-run"
+        out["outcome"] = "awaiting-yes" if out.get("from") else "live" if run == "ok" else "built-no-run"
         if run != "ok":
             out["detail"] = run
         item = store.get_item(item_id)
@@ -225,7 +236,12 @@ def main() -> int:
             print(f"{'':>15}detail: {r['detail']}", flush=True)
         if r.get("answers"):
             print(f"{'':>15}answers: {r['answers'][:200]}", flush=True)
-        if r.get("scene_text"):
+        if r.get("from"):
+            src = r["from"]
+            print(f"{'':>15}reading: {' | '.join(r.get('reading') or [])[:200]}", flush=True)
+            print(f"{'':>15}from:    {src['host']} — {src['title'] or '(no title)'} ({src['kind']})",
+                  flush=True)
+        elif r.get("scene_text"):
             print(f"{'':>15}card:   {' | '.join(r['scene_text'])[:200]}", flush=True)
     counts: dict[str, int] = {}
     for r in results:

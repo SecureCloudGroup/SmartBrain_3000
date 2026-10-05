@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   AWAITING_SOURCE_PICK,
+  awaitingYesSource,
   flowStageLabel,
   isFlowActive,
 } from "./flow";
@@ -64,4 +65,25 @@ it("awaiting_params labels as a needed detail (needs_params 2026-09-14)", () => 
   expect(flowStageLabel({ state: "awaiting_params" })).toBe(
     "Needs a detail from you",
   );
+});
+
+describe("awaitingYesSource (ruling 2026-10-04: hold open paths for a YES)", () => {
+  it("names the host and the page or dataset title", () => {
+    expect(awaitingYesSource({ from: "page", host: "www.nhc.noaa.gov", title: "NHC Outlook" }))
+      .toBe("From the web page www.nhc.noaa.gov — NHC Outlook");
+    expect(awaitingYesSource({ from: "dataset", host: "data.cdc.gov", title: "Flu levels by state" }))
+      .toBe("From the dataset data.cdc.gov — Flu levels by state");
+  });
+
+  it("leaves off a missing title or one that only repeats the host", () => {
+    expect(awaitingYesSource({ from: "dataset", host: "api.example.org", title: "" }))
+      .toBe("From the dataset at api.example.org");
+    expect(awaitingYesSource({ from: "page", host: "example.org", title: " Example.org " }))
+      .toBe("From the web page at example.org");
+  });
+
+  it("never renders an empty host", () => {
+    expect(awaitingYesSource({ from: "page", host: "", title: "Tides" })).toBe("From the web page “Tides”");
+    expect(awaitingYesSource({ from: "dataset", host: "", title: "" })).toBe("From a dataset");
+  });
 });

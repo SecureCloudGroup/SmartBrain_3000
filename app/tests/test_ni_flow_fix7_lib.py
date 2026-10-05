@@ -167,6 +167,35 @@ def test_a_library_provider_named_in_the_ask_backstops_a_mismatched_pick() -> No
     assert "fox" in stray, stray
 
 
+# fix8 (blind-7, 2026-10-04): "Weather Channel 10 day for Asheville" shipped NWS
+# because the pack doesn't index Weather Channel. The suffix / known-outlet set
+# backstops the pack vocabulary — the stray-check refuses when the picked source
+# isn't from the named outlet, even for outlets the pack hasn't indexed.
+def test_outlet_suffix_name_backstops_pack_vocabulary() -> None:
+    """"Weather Channel 10 day for Asheville" vs an NWS pick: 'channel' is an
+    outlet-suffix word, so the backstop refuses NWS as a Weather Channel pick."""
+    source = {"categories": ["weather"], "name": "NWS 7-day forecast",
+              "description": "National Weather Service.", "examples": [],
+              "coverage": {}, "entity_params": {},
+              "readings": [], "label": "", "provider": "National Weather Service"}
+    stray = ni_flow._foreign_providers_in(
+        _ProviderLib([]), "Weather Channel 10 day for Asheville", source, set(),
+        {}, {"names": ["Weather Channel"], "subject": "Asheville weather", "place": "Asheville"})
+    assert "channel" in stray, stray
+
+
+def test_outlet_suffix_on_its_own_source_is_not_stray() -> None:
+    """An ask for Weather Channel against a TWC pick does not refuse itself."""
+    source = {"categories": ["weather"], "name": "TWC forecast",
+              "description": "Weather Channel.", "examples": [],
+              "coverage": {}, "entity_params": {},
+              "readings": [], "label": "", "provider": "Weather Channel"}
+    stray = ni_flow._foreign_providers_in(
+        _ProviderLib([]), "Weather Channel 10 day for Asheville", source, set(),
+        {}, {"names": ["Weather Channel"], "subject": "Weather Channel", "place": "Asheville"})
+    assert "channel" not in stray, stray
+
+
 def test_the_pick_s_own_provider_is_not_stray() -> None:
     """An NPR Business pick for an ask that says "NPR" does not refuse itself — the backstop
     only reports providers that AREN'T this source's provider."""
@@ -192,3 +221,44 @@ def test_a_provider_phrase_is_its_whole_name_and_never_only_generic_words() -> N
     assert phrase("US Weather") is None and phrase("News") is None  # only generic words
     assert phrase("PC World") == " pc world "  # "bbc world news" doesn't hold " pc world "
     assert phrase("Fox News") == " fox news "
+
+
+# fix8 (blind-7, 2026-10-04): a page card for an ask that names an outlet must
+# come from that outlet's own site. The named-outlet set includes pack providers
+# (``providers_named_in``) + an outlet-suffix set ("Weather Channel") + a bounded
+# well-known-outlet set ("Axios Denver"). The first-party check accepts the
+# outlet's own host and refuses a third-party page that merely mentions it.
+def test_named_outlets_from_pack_providers_outlet_suffix_and_known_names(monkeypatch) -> None:
+    monkeypatch.setattr(ni_flow, "_resolve_library",
+                         lambda: _ProviderLib(["Fox News", "BBC"]))
+    # pack provider named in the ask
+    assert "Fox News" in ni_flow._named_outlets(
+        "Fox News headlines",
+        {"names": [], "subject": "Fox News"})
+    # outlet-suffix word on intent.names ("Weather Channel" → "channel")
+    assert "Weather Channel" in ni_flow._named_outlets(
+        "Weather Channel 10 day for Asheville",
+        {"names": ["Weather Channel"], "subject": "Asheville weather"})
+    # bounded known-outlet set (pack doesn't know Axios yet)
+    assert "Axios Denver" in ni_flow._named_outlets(
+        "Axios Denver latest",
+        {"names": ["Axios Denver"], "subject": "Axios Denver"})
+    # a plain subject like NYC weather is NOT an outlet
+    assert ni_flow._named_outlets(
+        "NYC weather",
+        {"names": ["NYC"], "subject": "NYC weather"}) == []
+
+
+def test_page_wrong_outlet_refuses_third_party_host_and_accepts_first_party(monkeypatch) -> None:
+    """A rockymountainvoice.com page for "Axios Denver" is wrong; axios.com for
+    the same ask passes first_party and ships."""
+    monkeypatch.setattr(ni_flow, "_resolve_library", lambda: _ProviderLib([]))
+    intent = {"names": ["Axios Denver"], "subject": "Axios Denver"}
+    assert ni_flow._page_wrong_outlet(
+        "https://rockymountainvoice.com/category/axios-denver/",
+        "Axios Denver latest", intent) == "Axios Denver"
+    assert ni_flow._page_wrong_outlet(
+        "https://www.axios.com/local/denver", "Axios Denver latest", intent) == ""
+    # no outlet named → empty (the check doesn't fire for ordinary asks)
+    assert ni_flow._page_wrong_outlet(
+        "https://news.example.com/", "something else", {"names": [], "subject": "x"}) == ""

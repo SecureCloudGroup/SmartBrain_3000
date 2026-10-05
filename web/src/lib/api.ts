@@ -736,6 +736,12 @@ export interface NiFinding {
   status: string;
 }
 
+export interface NiAwaitingYes {
+  from: "page" | "dataset";
+  host: string;
+  title: string; // "" when the source had none (a pasted link)
+}
+
 export interface NiBoardItem {
   id: string;
   title: string;
@@ -773,6 +779,11 @@ export interface NiBoardItem {
   // "Looks right" — the card stops asking and shows "Confirmed — verifying"
   // until the C3 run promotes it to live.
   c2_ok?: boolean;
+  // Ruling 2026-10-04 ("hold open paths for a YES"): set while a card built from a web page
+  // or a model-mapped dataset waits for the user's YES — the card shows its reading (payload)
+  // and where it came from. YES = niValidate(id, true); NO = niValidate(id, false), which
+  // re-lands the source pick without that source. null/absent for every other card.
+  awaiting_yes?: NiAwaitingYes | null;
   // L2 frontier-repair proposal parked for review (ni-format §23). PARK-ONLY: a valid
   // proposal is NEVER auto-applied — the card shows a "Fix proposed" chip; the review
   // modal renders the diff and offers Apply (trial, may auto-revert) / Dismiss.
@@ -1741,8 +1752,10 @@ export const api = {
   // F1 (2026-09-15): a "Looks right" verdict kicks the C3 proof run server-side;
   // `state` is the POST-run state (often "live" already) and `run` reports the
   // kick's outcome ("ok" | "error" | "skipped" — verdict recorded regardless).
+  // `repick` (NO on a card awaiting the user's YES): "repick" = the pick re-landed with the
+  // other sources; "relocate" = looking again without the declined one.
   niValidate: (id: string, ok: boolean, note?: string) =>
-    req<{ ok: boolean; state: NiState; run?: string }>(
+    req<{ ok: boolean; state: NiState; run?: string; repick?: string }>(
       `/api/ni/items/${encodeURIComponent(id)}/validate`, {
         method: "POST",
         body: JSON.stringify(note ? { ok, note } : { ok }),

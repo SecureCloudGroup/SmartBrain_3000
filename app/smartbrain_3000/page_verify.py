@@ -117,6 +117,24 @@ _NORMALS_RE = re.compile(
     r"\b(annual|annually|per year|a year|yearly|on average|typically"
     r"|historically|all-time|climatology)\b", re.IGNORECASE)
 _SLUG_RE = re.compile(r"^[a-z]+(?:_[a-z]+)+$")
+# fix8 (blind-7, 2026-10-04): a reading that is a link / download label — not a
+# value. "2026 Schedule (PDF)" is an anchor the user hasn't followed; the same
+# for "Download", "Click here", "Learn more", "View details", "Open PDF". The
+# file-ext suffix catches the first class; the call-to-action set catches the
+# bare label. Trailing/leading punctuation is normalized off before the match.
+_FILE_EXT_SUFFIX_RE = re.compile(
+    r"\(\s*(?:pdf|docx?|xlsx?|pptx?|csv|tsv|json|xml|rss|ics|zip|txt)\s*\)\s*$",
+    re.IGNORECASE)
+_CTA_LABEL_WORDS: frozenset[str] = frozenset({
+    "download", "download pdf", "download the schedule", "download schedule",
+    "download the full schedule", "download full schedule", "download now",
+    "download here", "click here", "click", "tap here", "learn more",
+    "read more", "see more", "view more", "view all", "view details",
+    "view schedule", "view the schedule", "view full schedule", "see schedule",
+    "see all", "see details", "open pdf", "open", "more info", "more",
+    "get the schedule", "get schedule", "full schedule", "printable schedule",
+    "printable version", "printable pdf", "see printable schedule",
+})
 _CLOCK_RE = re.compile(r"\d{1,2}:\d{2}|\b\d{1,2}\s*(?:am|pm|a\.m\.|p\.m\.)(?!\w)|\bnoon\b|\bmidnight\b",
                        re.IGNORECASE)
 _MONTHS = ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct",
@@ -194,6 +212,18 @@ def verify_page_reading(graph: dict, preview: dict, *, frame_kind: str | None,
     reasons += _stale_reasons(values, frame_kind, now, tz)
     if window == "now" and frame_kind in _CURRENT_FRAMES:
         reasons += _freshness_reasons(graph, now)
+    # fix8 (blind-7, 2026-10-04): a 'now' ask against a reading phrased as a
+    # typical / average / usually value is a GUIDE answer, not what's happening
+    # right now ("line at Franklin Barbecue rn" → "on average, 3 to 5 hours
+    # long"). Fires regardless of frame_kind so an ambiguous frame still gates.
+    if window == "now":
+        reasons += _normals_reasons(values)
+    # fix8 (blind-7, 2026-10-04): a day-window ask against a page whose own title
+    # names a specific date / day that doesn't match the window ("pollen count
+    # atlanta tomorrow" → "Pollen Count on 2026-10-04 | Atlanta Allergy &
+    # Asthma", today's date). The title's own date is pure code to parse.
+    if window and window not in ("now",):
+        reasons += _window_mismatch_reasons(graph, window, now, tz)
     return list(dict.fromkeys(reasons))
 
 
@@ -436,6 +466,16 @@ def _chrome_reasons(graph: dict, values: dict, wants: list[str]) -> list[str]:
                 reasons.append(f"'{_quote(text)}' is a label on the page, not its value")
             elif _SLUG_RE.match(text.strip()):
                 reasons.append(f"'{_quote(text)}' is not page text")
+            # fix8 (blind-7, 2026-10-04): mlb.com shipped "2026 Schedule (PDF)" as
+            # the Durham Bulls schedule value — anchor text / download label, not
+            # a value. The file-ext suffix "(PDF)" / "(ICS)" / "(XLSX)" / … catches
+            # the first class; a bare call-to-action label ("Download", "View
+            # schedule", "Click here", "Learn more") catches the second. Fires on
+            # both tiers (interpreted + compiled).
+            elif _FILE_EXT_SUFFIX_RE.search(bare):
+                reasons.append(f"'{_quote(text)}' is a download link label, not a value")
+            elif norm in _CTA_LABEL_WORDS:
+                reasons.append(f"'{_quote(text)}' is a link label, not a value")
     return reasons
 
 
@@ -725,6 +765,94 @@ def _meta_dates(graph: dict) -> list[datetime]:
             got = got.replace(tzinfo=UTC)
         out.append(got)
     return out
+
+
+def _normals_reasons(values: dict) -> list[str]:
+    """A 'right now' ask against a reading phrased as a normal / typical /
+    average / usual value — a guide answer, not current state (fix8 blind-7,
+    2026-10-04: eathealthy365's Franklin Barbecue guide answered 'how long is
+    the line rn' with 'on average, 3 to 5 hours long'). The ``_NORMALS_RE``
+    phrase set already catches the forecast-frame overreach; this gates the
+    same phrases on a 'now' ask under any frame_kind."""
+    assert isinstance(values, dict), "values must be a dict"
+    reasons: list[str] = []
+    for value in values.values():
+        for text in _strings(value):
+            if _NORMALS_RE.search(text):
+                reasons.append(f"'{_quote(text)}' is a typical value, not what's happening now")
+    return reasons
+
+
+_WINDOW_LABEL = {"today": "today", "tonight": "tonight", "tomorrow": "tomorrow",
+                 "weekend": "the weekend"}
+_DOW_FULL = {"mon": "Monday", "tue": "Tuesday", "wed": "Wednesday", "thu": "Thursday",
+             "fri": "Friday", "sat": "Saturday", "sun": "Sunday"}
+
+
+def _window_target_dates(window: str, local_today) -> set:
+    """The calendar dates a day-named ``window`` points at, in the user's zone.
+    ``today`` / ``tonight`` = today; ``tomorrow`` = tomorrow; ``weekend`` = the
+    next Sat + Sun; ``dow:<day>`` = the next date on that day of the week.
+    None / open windows (``now``, ``next_days:N`` / ``next_hours:N``, 'upcoming')
+    return set() so the mismatch check doesn't fire."""
+    assert isinstance(window, str), "window must be a string"
+    if window in ("today", "tonight"):
+        return {local_today}
+    if window == "tomorrow":
+        return {local_today + timedelta(days=1)}
+    if window == "weekend":
+        # ahead to Sat and Sun (today counts when today IS the weekend)
+        out: set = set()
+        for i in range(8):  # bounded: one week ahead at most
+            d = local_today + timedelta(days=i)
+            if d.weekday() in (5, 6):
+                out.add(d)
+                if len(out) >= 2:
+                    break
+        return out
+    if window.startswith("dow:"):
+        want = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4,
+                "sat": 5, "sun": 6}.get(window[4:])
+        if want is None:
+            return set()
+        for i in range(8):  # bounded: this week's instance
+            d = local_today + timedelta(days=i)
+            if d.weekday() == want:
+                return {d}
+    return set()
+
+
+def _title_dates(graph: dict, now: datetime, tz: tzinfo) -> set:
+    """Calendar dates the page's TITLE names (ISO date, "October 4", "Oct 4
+    2026", "4 Oct"). The title is the page's own name for what it shows; a
+    specific date there is the day the page is about. Body text isn't read —
+    an article dated last week often names other dates in passing."""
+    title = str(graph.get("title") or "")
+    return _dates_in(title, now, tz)
+
+
+def _window_mismatch_reasons(graph: dict, window: str, now: datetime,
+                               tz: tzinfo) -> list[str]:
+    """A day-window ask against a page whose own TITLE names a specific date
+    that doesn't match the window (fix8 blind-7, 2026-10-04: 'pollen count
+    atlanta tomorrow' shipped from a page titled 'Pollen Count on 2026-10-04'
+    — today's date, not tomorrow's). ``window`` is one of the day forms
+    (today / tonight / tomorrow / weekend / dow:<day>); other windows don't
+    fire the check. Deterministic; no model."""
+    assert isinstance(window, str) and isinstance(graph, dict), "args required"
+    local_today = now.astimezone(tz).date()
+    want_dates = _window_target_dates(window, local_today)
+    if not want_dates:
+        return []
+    page_dates = _title_dates(graph, now, tz)
+    if not page_dates:
+        return []
+    if page_dates & want_dates:
+        return []
+    shown = min(page_dates).isoformat()
+    label = _WINDOW_LABEL.get(window) or _DOW_FULL.get(window[4:], window) \
+        if window.startswith("dow:") or window in _WINDOW_LABEL else window
+    return [f"the page shows {shown}, not {label}"]
 
 
 def _freshness_reasons(graph: dict, now: datetime) -> list[str]:

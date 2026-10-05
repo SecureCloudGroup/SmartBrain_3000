@@ -11,6 +11,17 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Changed
+
+- **A card read from a web page or an unlisted dataset waits for your yes.**
+  When a card's values come from a web page, or from a data source the
+  SmartBrain Library hasn't described, the card shows the reading it found
+  and where it came from (the site and the page or dataset title) and asks
+  "Is this what you asked for?". It starts updating only after you tap
+  **Yes, that's it**. **No, try another source** takes it back to the
+  source choice without that source. Cards built from a Library source's
+  described answers work as before, and existing cards don't change.
+
 ### Added
 
 - **Cards from Library sources that declare their answers show the right
@@ -58,6 +69,22 @@ to know when a release changes behavior.
   tip-off no longer reads 2:00 AM).
 - **A list row the source left a field out of shows "—"** instead of failing
   the whole card.
+- **A card doesn't show a link label as its value.** A download label
+  ("2026 Schedule (PDF)", "Download", "View schedule", "Click here", "Learn
+  more") is a link to follow, not a reading, and the card asks another source.
+- **"rn" and "atm" count as "now".** A card asked for right now ("line at
+  Franklin Barbecue rn") no longer shows a page's typical / average value as
+  the current reading, and a page with no freshness signal moves on.
+- **A page dated another day doesn't answer a day-named ask.** A page titled
+  "Pollen Count on 2026-10-04" doesn't ship for an ask about tomorrow; the
+  card asks another source instead.
+- **A page card for a named outlet must be the outlet's own site.** An ask
+  that names an outlet ("Axios Denver latest", "Fox News headlines") only
+  ships from that outlet's own host; a page on another site that merely
+  mentions the outlet moves on.
+- **A state-named dataset doesn't ship for a different state's place.**
+  "covid wastewater levels king county" no longer shows a Delaware COVID
+  dataset; the card asks another source instead.
 - **Temperature asks go to the forecast** ("temp in Denver", "how hot is it in
   Tucson"), while "water temp" and "ocean temperature" keep their water sources.
 - **A source is only offered for what it is about.** "Gold price per ounce" no

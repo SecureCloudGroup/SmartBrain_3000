@@ -443,3 +443,77 @@ def test_grounding_is_the_engines_rule() -> None:
     kw = {"frame": "current_value", "wants": ["jackpot"], "subject": "Powerball"}
     assert _check(g, {"jackpot": "$409 Million"}, **kw) == []
     assert _check(g, {"jackpot": "$410 Million"}, **kw)
+
+
+# fix8 (blind-7, 2026-10-04): mlb.com shipped "2026 Schedule (PDF)" as the Durham
+# Bulls schedule value — a download-link label, not a value. The file-ext suffix
+# refuses any reading ending in "(PDF)" / "(ICS)" / "(XLSX)" / …; call-to-action
+# labels ("Download", "View schedule", "Click here", "Learn more") refuse too.
+def test_file_ext_suffix_reading_is_refused_as_a_download_label() -> None:
+    text = ("Durham Bulls 2026 Schedule. The season begins in April. "
+            "Download the full schedule or view game-by-game dates. 2026 Schedule (PDF)")
+    g = _graph(text, title="Durham Bulls Schedule")
+    kw = {"frame": "schedule", "wants": ["schedule"], "subject": "Durham Bulls"}
+    assert _check(g, {"schedule": "2026 Schedule (PDF)"}, **kw)
+    assert _check(g, {"schedule": "2026 Schedule (ICS)"}, **kw)
+    # a real data line still ships (grounded, not a label)
+    assert _check(g, {"schedule": "The season begins in April"}, **kw) == []
+
+
+@pytest.mark.parametrize("label", [
+    "Download", "Click here", "Learn more", "View schedule", "View all",
+    "See more", "Open PDF", "View details",
+])
+def test_bare_call_to_action_labels_are_refused(label: str) -> None:
+    text = f"Durham Bulls Schedule page.\n{label}\nThe season begins in April."
+    g = _graph(text, title="Durham Bulls Schedule")
+    kw = {"frame": "schedule", "wants": ["schedule"], "subject": "Durham Bulls"}
+    assert _check(g, {"schedule": label}, **kw)
+
+
+# fix8 (blind-7, 2026-10-04): "line at Franklin Barbecue rn" shipped "on average,
+# 3 to 5 hours long" because the freshness gate keyed on window=now. The window
+# now parses "rn" / "atm" / "right this minute"; and a reading phrased as a
+# typical / average value never answers a 'now' ask, under any frame_kind.
+def test_right_now_ask_against_typical_average_reading_refuses() -> None:
+    text = ("Franklin Barbecue is famous for its long lines. The line for lunch "
+            "is, on average, 3 to 5 hours long. Last updated 15 minutes ago. "
+            "There are about 30 people in line this morning. Typically 50 to 100 "
+            "people wait in the morning.")
+    g = _graph(text, title="How long is the line at Franklin Barbecue?")
+    now = datetime.fromisoformat("2026-10-04T10:00:00+00:00")
+    kw = {"frame": "current_value", "wants": ["line length"],
+          "subject": "Franklin Barbecue", "now": now, "window": "now"}
+    # 'on average' refuses even with a fresh signal on the page
+    assert _check(g, {"line_length": "on average, 3 to 5 hours long"}, **kw)
+    assert _check(g, {"line_length": "typically 50 to 100 people"}, **kw)
+    # a non-'now' ask (no window) doesn't fire the check
+    kw_no_window = {**kw, "window": None, "frame": "forecast"}
+    assert _check(g, {"line_length": "on average, 3 to 5 hours long"}, **kw_no_window)
+    # a straight current reading still ships
+    assert _check(g, {"line_length": "about 30 people in line"}, **kw) == []
+
+
+# fix8 (blind-7, 2026-10-04): "pollen count atlanta tomorrow" shipped a page titled
+# "Pollen Count on 2026-10-04" — today's date, not tomorrow's. The title's own date
+# is pure code to parse; a day-window ask against a page whose title names a date
+# that doesn't match must refuse.
+def test_day_window_mismatch_against_page_title_date_refuses() -> None:
+    text = ("Atlanta pollen count published daily. Today's count is 0/5.\n"
+            "The pollen count for the day is reported each morning.")
+    g = _graph(text, title="Pollen Count on 2026-10-04 | Atlanta Allergy & Asthma")
+    now = datetime.fromisoformat("2026-10-04T10:00:00-04:00")
+    kw = {"frame": "current_value", "wants": ["pollen count"],
+          "subject": "Atlanta pollen", "now": now, "window": "tomorrow"}
+    reasons = _check(g, {"pollen_count": "0/5"}, **kw)
+    assert reasons and any("2026-10-04" in r for r in reasons), reasons
+    # a 'today' ask matches today's dated page
+    kw_today = {**kw, "window": "today"}
+    assert _check(g, {"pollen_count": "0/5"}, **kw_today) == []
+    # a page with no date on it doesn't fire the check
+    g_no_date = _graph(text, title="Atlanta Pollen Count Today")
+    assert _check(g_no_date, {"pollen_count": "0/5"}, **kw) == []
+    # a weekend ask against a dated Saturday page ships
+    g_sat = _graph(text, title="Pollen Count on 2026-10-10 | Atlanta Allergy & Asthma")
+    kw_wkd = {**kw, "window": "weekend"}
+    assert _check(g_sat, {"pollen_count": "0/5"}, **kw_wkd) == []
