@@ -1095,6 +1095,62 @@ def test_intent_place_field_validated() -> None:
         ni_flow._validate_intent({**base, "place": 42})
 
 
+def test_intent_names_substring_rule_drops_hallucinated() -> None:
+    """named-topics (2026-10-04): ``names`` entries must be case-insensitive whole-
+    word substrings of the request; a hallucinated name (never typed) is dropped."""
+    base = {"kind": "external_data", "subject": "x", "cadence_minutes": 15,
+            "wants": ["news"], "threshold": None, "display_hint": "value"}
+    out = ni_flow._validate_intent({**base, "names": ["Boeing", "Lockheed"]},
+                                     "Boeing news today")
+    assert out["names"] == ["Boeing"], out["names"]
+    out = ni_flow._validate_intent({**base, "names": ["BOEING"]},
+                                     "boeing news today")
+    assert out["names"] == ["BOEING"], "case-insensitive match keeps model casing"
+    out = ni_flow._validate_intent({**base, "names": "not a list"},
+                                     "Boeing news")
+    assert out["names"] == [], "shape error → empty list, never a raise"
+
+
+def test_intent_names_bounded_and_deduped() -> None:
+    """named-topics: at most 5 names kept, dupes drop, 60-char cap on each."""
+    base = {"kind": "external_data", "subject": "x", "cadence_minutes": 15,
+            "wants": ["news"], "threshold": None, "display_hint": "value"}
+    request = "a b c d e f g h"
+    raw = ["a", "b", "c", "d", "e", "f", "g"]
+    out = ni_flow._validate_intent({**base, "names": raw}, request)
+    assert out["names"] == ["a", "b", "c", "d", "e"], out["names"]
+    out = ni_flow._validate_intent({**base, "names": ["Boeing", "Boeing", "Boeing"]},
+                                     "Boeing news")
+    assert out["names"] == ["Boeing"], "exact-string dedupe"
+    too_long = "x" * 61
+    out = ni_flow._validate_intent({**base, "names": [too_long]},
+                                     f"abc {too_long} def")
+    assert out["names"] == [], "over the 60-char cap drops"
+
+
+def test_request_proper_sentence_initial_needs_intent_name() -> None:
+    """named-topics: a sentence-initial cap is proper ONLY when the intent named it;
+    mid-sentence caps and all-caps acronyms stay proper regardless."""
+    # Sentence-initial auto-cap, no intent names → NOT proper (phone auto-cap).
+    assert "biggest" not in ni_flow._request_proper("Biggest earthquakes today")
+    assert "nightly" not in ni_flow._request_proper("Nightly news")
+    # Sentence-initial, intent named it → proper.
+    assert "boeing" in ni_flow._request_proper("Boeing news", ["Boeing"])
+    assert "ukraine" in ni_flow._request_proper("Ukraine news", ["Ukraine"])
+    # Mid-sentence caps are always proper (no intent names needed).
+    assert "boeing" in ni_flow._request_proper("show me Boeing news")
+    # All-caps acronyms are proper even sentence-initial, even without names.
+    assert "fda" in ni_flow._request_proper("FDA news")
+    assert "sec" in ni_flow._request_proper("SEC news")
+    assert "tsa" in ni_flow._request_proper("TSA news")
+
+
+def test_request_proper_includes_validated_intent_names() -> None:
+    """named-topics: the intent's validated names are always in the output set."""
+    proper = ni_flow._request_proper("news about Beijing today", ["Beijing"])
+    assert "beijing" in proper
+
+
 # --- A12 / A13 (case matrix) — deterministic authoring hooks --------------
 
 def test_wants_fahrenheit_regex_hits_and_misses() -> None:
@@ -1756,6 +1812,213 @@ def test_malformed_computed_date_asks_instead_of_crashing_later() -> None:
     assert "date" in surface["reason"].lower()
 
 
+def test_judge_wants_unanswered_matches_canonical_overlap() -> None:
+    """R5-11 (2026-10-04): the mapping-path helper reads judge["gaps"] and reports
+    the user's said wants a gap mentions; synonyms covered by ``_WANT_SYNONYMS``."""
+    judge = {"serves": True, "gaps": ["current_price"], "wrong": []}
+    intent = {"wants": ["current_price"]}
+    out = ni_flow._judge_wants_unanswered(judge, "Colorado gas prices", intent,
+                                             [], {"headline": "x"})
+    assert out == ["current price"], out
+    # a gap that doesn't name any said want returns nothing (and the all-unanswered
+    # branch stays off)
+    out = ni_flow._judge_wants_unanswered(
+        {"serves": True, "gaps": ["comment counts"], "wrong": []},
+        "latest posts titles", {"wants": ["title"]}, [], {"title": "x"})
+    assert out == []
+    # a generic quantity want ("value") answered by a shown preview field: skip
+    out = ni_flow._judge_wants_unanswered(
+        {"serves": True, "gaps": ["value field"], "wrong": []},
+        "the value today", {"wants": ["value"]}, [], {"value": 42})
+    assert out == []
+
+
+def test_mapping_path_refuses_when_all_wants_are_gaps(monkeypatch) -> None:
+    """R5-11 (2026-10-04): a mapped card whose judge flagged EVERY said want as a
+    gap used to ship ("won't include: current_price" on the sole want); the pick
+    was wrong, not a useful disclosure — refuse and let the next source try."""
+    store, _conn = _store()
+    fixture = _load("hn")
+    intent_reply = json.dumps({
+        "kind": "external_data", "subject": "gas", "cadence_minutes": 15,
+        "wants": ["current_price"], "threshold": None, "display_hint": "value",
+    })
+    mapping_reply = json.dumps({"current_price": "hits[0].points"})
+    judge_reply = json.dumps({"serves": False, "gaps": ["current_price"],
+                                "wrong": []})
+    model = _scripted_model([intent_reply, mapping_reply, judge_reply])
+    item_id = ni_flow.create_shell_item(store, "price of gas")
+    result = ni_flow.run_flow(
+        store, item_id, gateway_call=model,
+        fetcher=lambda url: fixture,
+        source_url="https://hn.algolia.com/api/v1/search?tags=front_page")
+    assert result["state"] != "ready", f"expected a refusal, got {result['state']}"
+
+
+# F6-C (blind-5, 2026-10-04): "flu levels in Texas" shipped MS/NJ/VA/AL/KS rows
+# — a mapping-path card over state-keyed data (CDC NHSN) must refuse when the
+# named place's state code is nowhere in the preview rows but other states are.
+# The judge couldn't call this out reliably on a small model; this is the code
+# check in its place. The row-filter work (fix6-rows) still owns the drop; this
+# refuses when filtering is impossible (no row for the asked state).
+def test_rows_contradict_place_detects_other_states_only() -> None:
+    rows = [{"jurisdiction": "MS", "count": "32"},
+            {"jurisdiction": "NJ", "count": "126"},
+            {"jurisdiction": "Virginia", "count": "52"}]
+    assert ni_flow._rows_contradict_place({"rows": rows}, "Texas") is True
+    assert ni_flow._rows_contradict_place({"rows": rows}, "Mississippi") is False
+    # a reading with no state cells at all does not fire (it just doesn't name
+    # the place in a way the check can see; the normal wants/subject gates handle it)
+    numeric_only = [{"time": "2026-10-04T00:00", "temp": "68"}]
+    assert ni_flow._rows_contradict_place({"rows": numeric_only}, "Texas") is False
+    # no place in the intent → always False
+    assert ni_flow._rows_contradict_place({"rows": rows}, "") is False
+    # a place that isn't a US state → always False (another gate handles it)
+    assert ni_flow._rows_contradict_place({"rows": rows}, "Tokyo") is False
+
+
+# fix8 (blind-7, 2026-10-04): a dataset whose own NAME names a specific US state
+# different from the ask's place is the wrong source even when the rows don't
+# cell-name states ("covid wastewater levels king county" shipped the Delaware
+# COVID wastewater dataset). The source-contradict check reads title + coverage.
+def test_source_contradicts_place_names_state_in_title_or_coverage(monkeypatch) -> None:
+    """A Delaware-specific dataset refuses an ask whose place can't land in DE."""
+    captured: dict = {}
+
+    class _Lib:
+        def _conn(self):  # pragma: no cover - unused in these cases
+            raise RuntimeError("not called")
+
+    monkeypatch.setattr(ni_flow, "_resolve_library", lambda: None)
+    source = {"name": "Delaware COVID-19 Wastewater Viral Activity Levels",
+              "coverage": {"entity": "data.delaware.gov", "geo": "US"}}
+    # explicit state code in the ask → refuse
+    assert ni_flow._source_contradicts_place(source, "Texas",
+                                               "covid wastewater levels Texas") is True
+    # no asked place → never refuse
+    assert ni_flow._source_contradicts_place(source, "",
+                                               "covid wastewater levels") is False
+    # a nationwide / unknown-coverage source: no title state → never refuse
+    nationwide = {"name": "CDC COVID-19 Wastewater", "coverage": {"geo": "US"}}
+    assert ni_flow._source_contradicts_place(nationwide, "Texas",
+                                               "covid wastewater levels Texas") is False
+    # an asked state that matches the dataset's state → do NOT refuse
+    assert ni_flow._source_contradicts_place(source, "Delaware",
+                                               "covid wastewater levels Delaware") is False
+    # with the pack's place resolver, "king county" resolves to a non-DE place,
+    # so this is wrong — but with no resolver this falls back to states_in which
+    # finds no state in "king county", so the check doesn't fire. The resolver
+    # path is exercised by the gate's fixture; here we assert the fallback.
+    captured["ok"] = True
+    assert captured["ok"]
+
+
+# fix10 (blind-8, 2026-10-04): the dataset-place check extended to the publisher host
+# (data.ny.gov, data.pa.gov, data.texas.gov, data.cityofchicago.org) and to row cells
+# naming counties. "flu activity in texas" shipped health.data.ny.gov with NY counties.
+def test_source_contradicts_place_reads_publisher_host(monkeypatch) -> None:
+    """A dataset whose host names a US state refuses an ask for another state."""
+    monkeypatch.setattr(ni_flow, "_resolve_library", lambda: None)
+    assert ni_flow._source_host_states({
+        "coverage": {"entity": "health.data.ny.gov"}}) == {"NY"}
+    assert ni_flow._source_host_states({"coverage": {"entity": "data.pa.gov"}}) == {"PA"}
+    assert ni_flow._source_host_states({"coverage": {"entity": "data.texas.gov"}}) == {"TX"}
+    assert ni_flow._source_host_states({"coverage": {"entity": "data.cdc.gov"}}) == set()
+    # a Socrata dataset whose own NAME doesn't name a state but its host does -> refuse
+    source = {"name": "Influenza Laboratory-Confirmed Cases by County: Beginning 2009-10 Season",
+              "coverage": {"entity": "health.data.ny.gov", "geo": "US"}}
+    assert ni_flow._source_contradicts_place(source, "Texas",
+                                               "flu activity in texas") is True
+    # regression: an ask for the dataset's own state ships
+    assert ni_flow._source_contradicts_place(source, "New York",
+                                               "flu activity in new york") is False
+    # regression: a nationwide-host dataset never fires
+    cdc = {"name": "CDC Influenza Weekly", "coverage": {"entity": "data.cdc.gov", "geo": "US"}}
+    assert ni_flow._source_contradicts_place(cdc, "Texas",
+                                               "flu activity in texas") is False
+
+
+def test_rows_contradict_place_detects_county_cells(monkeypatch) -> None:
+    """fix10 (blind-8, 2026-10-04): rows that cell-name counties mapped via the
+    place resolver to a state other than the ask's refuse — "flu activity in
+    texas" shipped NY-county rows (OTSEGO, NIAGARA, ST LAWRENCE)."""
+    def _states(place: str, request: str) -> set[str]:
+        return {"NY"} if "otsego" in place.lower() or "niagara" in place.lower() \
+            or "lawrence" in place.lower() else set()
+    monkeypatch.setattr(ni_flow, "_place_states_via_resolver", _states)
+    rows = [{"county": "OTSEGO", "count": "0"},
+            {"county": "NIAGARA", "count": "1"},
+            {"county": "ST LAWRENCE", "count": "8"}]
+    assert ni_flow._rows_contradict_place({"rows": rows}, "Texas") is True
+    # the same rows for a NY ask: a resolver hit on the asked state keeps the check from firing
+    assert ni_flow._rows_contradict_place({"rows": rows}, "New York") is False
+    # a rowset with no county cells doesn't change behavior
+    forecast_rows = [{"time": "08:00", "temp": "68"}, {"time": "09:00", "temp": "70"}]
+    assert ni_flow._rows_contradict_place({"rows": forecast_rows}, "Texas") is False
+
+
+# fix10 (blind-8, 2026-10-04): "AWS us-east-1 status" shipped a statusgator page titled
+# "HashiCorp AWS-us-east-1 Status" — HashiCorp's own aggregator view of their AWS
+# integration. _page_wrong_brand reads the Library's official-site vocabulary against the
+# page's title and the ask's subject / names.
+def test_page_wrong_brand_refuses_other_brand_in_title(monkeypatch) -> None:
+    """A title brand with a different host-set than the ask's subject refuses."""
+    class _Lib:
+        def __init__(self, aliases: dict) -> None:
+            self._aliases = aliases
+
+        def official_hosts(self, text: str) -> dict:
+            low = " " + " ".join(re.findall(r"[a-z0-9]+", text.lower())) + " "
+            return {a: list(h) for a, h in self._aliases.items() if f" {a} " in low}
+
+    aliases = {"aws": ["aws.amazon.com", "health.aws.amazon.com"],
+                "amazon web services": ["aws.amazon.com", "health.aws.amazon.com"],
+                "hashicorp": ["status.hashicorp.com"]}
+    monkeypatch.setattr(ni_flow, "_resolve_library", lambda: _Lib(aliases))
+    graph = {"title": "HashiCorp AWS-us-east-1 Status. Check if HashiCorp AWS-us-east-1 is down. | StatusGator"}
+    assert ni_flow._page_wrong_brand(graph, "AWS us-east-1 status",
+                                       {"subject": "AWS us-east-1", "names": ["AWS"]}) == "hashicorp"
+    # regression: an AWS-only title doesn't refuse
+    graph_ok = {"title": "AWS Health Dashboard"}
+    assert ni_flow._page_wrong_brand(graph_ok, "AWS us-east-1 status",
+                                       {"subject": "AWS us-east-1", "names": ["AWS"]}) == ""
+    # regression: an ask that names BOTH brands keeps the hashicorp page shipping
+    assert ni_flow._page_wrong_brand(graph, "HashiCorp AWS status",
+                                       {"subject": "HashiCorp AWS", "names": ["HashiCorp", "AWS"]}) == ""
+    # regression: the Library synonym (Amazon Web Services) counts as the same brand
+    graph_syn = {"title": "Amazon Web Services us-east-1 Status"}
+    assert ni_flow._page_wrong_brand(graph_syn, "AWS us-east-1 status",
+                                       {"subject": "AWS us-east-1", "names": ["AWS"]}) == ""
+    # no library wired -> the check doesn't fire
+    monkeypatch.setattr(ni_flow, "_resolve_library", lambda: None)
+    assert ni_flow._page_wrong_brand(graph, "AWS us-east-1 status",
+                                       {"subject": "AWS us-east-1", "names": ["AWS"]}) == ""
+
+
+def test_mapping_path_refuses_when_rows_name_other_states_only(monkeypatch) -> None:
+    """F6-C: a Socrata-shaped list whose extracted rows cell-name US states
+    OTHER than the asked place (and never the asked one) must refuse at the
+    mapping path's exit — not ship a card about MS/NJ/VA under 'Texas'."""
+    store, _conn = _store()
+    sample = {"items": [{"jurisdiction": "MS", "count": 32},
+                        {"jurisdiction": "NJ", "count": 126},
+                        {"jurisdiction": "VA", "count": 52}]}
+    intent_reply = json.dumps({
+        "kind": "external_data", "subject": "flu", "cadence_minutes": 15,
+        "wants": ["status"], "threshold": None, "display_hint": "list",
+        "place": "Texas",
+    })
+    mapping_reply = json.dumps({"status": "items[0].jurisdiction"})
+    judge_ok = json.dumps({"serves": True, "gaps": [], "wrong": []})
+    model = _scripted_model([intent_reply, mapping_reply, judge_ok])
+    item_id = ni_flow.create_shell_item(store, "flu status in Texas")
+    result = ni_flow.run_flow(
+        store, item_id, gateway_call=model,
+        fetcher=lambda url: sample,
+        source_url="https://data.cdc.gov/resource/vdzy-6i9v.json")
+    assert result["state"] != "ready", f"expected refusal, got {result['state']}"
+
+
 def test_judge_disclosures_land_in_the_journal() -> None:
     """Audit: judge gaps lived only in flow-slot notes the board hides at
     ready — History (journal) now carries them."""
@@ -1780,9 +2043,16 @@ def test_judge_disclosures_land_in_the_journal() -> None:
 
 # --- G4b: the page door (field 2026-09-21 — every pasted URL was a webpage) --
 
+# C9 (2026-10-03): a page with next to no readable text is a JS shell and is never read; the stubs
+# carry a page's ordinary prose around the data they test
+_PAGE_PROSE = ("\nThis page is updated through the day by the office that publishes it. Readings are "
+               "posted as they come in, and the times shown are local. Check back later for the next "
+               "update to these readings, or contact the office with questions about them.")
+
+
 def _page_stub(monkeypatch, text: str, title: str) -> None:
     monkeypatch.setattr(nimod, "_fetch_http_page",
-                        lambda source, item_id, secrets, **kw: {"text": text,
+                        lambda source, item_id, secrets, **kw: {"text": text + _PAGE_PROSE,
                                                            "title": title})
 
 
@@ -1791,7 +2061,7 @@ def test_page_door_builds_an_interpreted_card(monkeypatch) -> None:
     ONE code-built llm stage extracting the asked-for fields — the shipped
     jail + llm machinery, finally doored."""
     store, _conn = _store()
-    _page_stub(monkeypatch, "Tropical Storm Fay, 40 kt. No hurricanes.",
+    _page_stub(monkeypatch, "Tropical storms: Tropical Storm Fay, 40 kt. No hurricanes.",
                "NHC Outlook")
     llm_reply = json.dumps({"tropical_storms": "Tropical Storm Fay (40 kt)",
                              "hurricanes": ""})
@@ -1819,6 +2089,27 @@ def test_page_door_builds_an_interpreted_card(monkeypatch) -> None:
     assert "{{param:" not in spec["pipeline"][0]["instruction"]
     notes = " ".join((ni_flow._flow_read(store, item_id) or {}).get("notes") or [])
     assert "interpreted page card" in notes
+
+
+def test_pasted_link_fetch_failure_still_fails_honestly(monkeypatch) -> None:
+    """R5-12 (2026-10-04): a 404 / timeout / 5xx on a pasted URL (no Library row
+    to drop) still fails honestly — ``_move_on`` returns None for a URL that
+    wasn't a pick row and the caller falls through to ``_fail``."""
+    from smartbrain_3000 import netguard
+    store, _conn = _store()
+    item_id = ni_flow.create_shell_item(store, "random api")
+    intent = {"kind": "external_data", "subject": "x", "cadence_minutes": 15,
+              "wants": ["value"], "threshold": None, "display_hint": "value"}
+    ni_flow._transition(store, item_id, "intent", intent=intent)
+
+    def dead(url: str) -> object:
+        raise netguard.FetchError("not found", status=404)
+
+    result = ni_flow._sample_and_map(store, item_id, "random api", intent,
+                                      "https://example.com/missing",
+                                      lambda p: "{}", dead)
+    assert result["state"] == "failed", result
+    assert result["error"].startswith("fetch")
 
 
 def test_page_door_jail_failure_is_honest(monkeypatch) -> None:
@@ -2019,12 +2310,12 @@ def test_s2_evaluate_orders_by_page_evidence(monkeypatch) -> None:
         "https://rich.example.org/": {
             "url": "https://rich.example.org/", "title": "Tide Times",
             "entities": [{"type": "Event", "name": "High Tide", "time": "7:12"}],
-            "tables": [], "feeds": [], "meta": {}, "outline": [], "text": "tide",
+            "tables": [], "feeds": [], "meta": {}, "outline": [], "text": "tide" + _PAGE_PROSE,
         },
         "https://bland.example.org/": {
             "url": "https://bland.example.org/", "title": "Portal",
             "entities": [], "tables": [], "feeds": [], "meta": {},
-            "outline": [], "text": "nothing relevant here",
+            "outline": [], "text": "nothing relevant here" + _PAGE_PROSE,
         },
     }
 
@@ -2052,9 +2343,9 @@ def test_s2_evaluate_orders_by_page_evidence(monkeypatch) -> None:
 
 def test_library_miss_searches_seals_and_boards_web_candidates(monkeypatch) -> None:
     """THE FIELD REGRESSION (tides class): words → no Library source → S2 search
-    → evidence → sealed ≤3 {title,host,url,evidence} — snippets are rank-time
-    only, NEVER sealed — and the board renders the rows verbatim as
-    kind:"web" suggestions."""
+    → evidence (rank-time only) → sealed ≤3 {title,host,url} — snippets and
+    evidence are NEVER sealed — and the board renders the rows verbatim as
+    links (ruling 2026-10-05: kind "link", found "page"; never tapped to build)."""
     svc = _FakeSearchService(results=[
         {"title": "Creek Tide Charts", "url": "https://tides.example.org/creek",
          "snippet": "daily tide tables"},
@@ -2079,11 +2370,11 @@ def test_library_miss_searches_seals_and_boards_web_candidates(monkeypatch) -> N
     record = ni_flow._flow_read(store, item_id)
     assert record["error"] == ni_flow.AWAITING_SOURCE_PICK
     sealed = record["_ranked_search"]
-    assert [set(r) for r in sealed] == [{"title", "host", "url", "evidence"}] * 2
+    assert [set(r) for r in sealed] == [{"title", "host", "url"}] * 2
     assert sealed[0]["url"] == "https://tides.example.org/creek"
     field = ni_flow.board_flow_field(store, item_id)
     sugs = field["suggestions"]
-    assert [s["kind"] for s in sugs] == ["web", "web"]
+    assert [(s["kind"], s["found"]) for s in sugs] == [("link", "page")] * 2
     assert sugs[0]["url"] == "https://tides.example.org/creek"
     assert svc.queries  # the search actually ran, from the user's words
     assert svc.queries[0] == "tide times for the creek landing"
@@ -2147,7 +2438,7 @@ def test_page_card_scene_labels_are_the_users_words() -> None:
                json.dumps({"serves": True, "gaps": [], "wrong": []})]
 
     def fake_page(source, item_id_, secrets, **kw):
-        return {"text": "Tropical Storm Fay, 40 kt.", "title": "NHC Outlook"}
+        return {"text": "Tropical storms: Tropical Storm Fay, 40 kt." + _PAGE_PROSE, "title": "NHC Outlook"}
 
     orig = nimod_fetch = ni_flow.ni._fetch_http_page
     ni_flow.ni._fetch_http_page = fake_page
@@ -2304,7 +2595,7 @@ def test_p2_judge_rejection_falls_back_and_says_so(monkeypatch) -> None:
 def test_p2_text_only_page_skips_the_compile_call(monkeypatch) -> None:
     """No data-bearing layer → no compile model call at all (the replies
     list proves it: only llm + judge are consumed)."""
-    bare = {"text": "High tide 7:12 AM.", "title": "Tides", "entities": [],
+    bare = {"text": "Creek tides. High tide 7:12 AM." + _PAGE_PROSE, "title": "Tides", "entities": [],
             "tables": [], "feeds": [], "meta": {}, "outline": ["h1: Tides"]}
     store, item_id, result = _p2_build(monkeypatch, [
         json.dumps({"high_tide_time": "7:12 AM"}),
@@ -2520,6 +2811,20 @@ def test_engine_run_interpreted_page_card(monkeypatch) -> None:
     out = _first_engine_run(store, conn, iid, monkeypatch, page=graph,
                             llm_reply=json.dumps({"high_tide_time": "7:12 AM"}))
     assert out["status"] == "ok", out
+
+
+def test_engine_run_page_card_that_reads_nothing_fails_not_blank(monkeypatch) -> None:
+    """Live field 2026-09-29 (Lakers next game): the build read real values, the first refresh
+    read none — the card went ok with every value blank. Now that run fails; nothing blank lands."""
+    store, conn = _store()
+    iid, graph = _flow_page_card(store, False, monkeypatch)
+    with pytest.raises(nimod.NIError) as err:
+        _first_engine_run(store, conn, iid, monkeypatch, page=graph,
+                          llm_reply=json.dumps({"high_tide_time": ""}))
+    assert err.value.kind == "extract_miss"
+    latest = store.read_snapshot(iid, "latest")
+    assert latest is None or (latest["ok"] is False and not latest["payload"])
+    assert store.read_snapshot(iid, "last_good") is None
 
 
 # ---- P2 recompile rung: a drifted compiled card heals itself (2026-09-23) --

@@ -1,0 +1,1026 @@
+[
+ {
+  "id": "reddit_title",
+  "set": "seed",
+  "page": "reddit_worldnews_new",
+  "ask": "reddit worldnews top posts",
+  "subject": "r/worldnews",
+  "wants": [
+   "top posts"
+  ],
+  "frame_kind": "latest_items",
+  "many": true,
+  "now": "2026-09-29T10:15:00-05:00",
+  "preview": {
+   "top_posts": "Reddit"
+  },
+  "expect": "reject",
+  "note": "challenge page; the value is the page title; one string for a many-want"
+ },
+ {
+  "id": "flightaware_modal",
+  "set": "seed",
+  "page": "flightaware_aal100",
+  "ask": "flight status AA 100",
+  "subject": "AA 100",
+  "wants": [
+   "status"
+  ],
+  "frame_kind": "status",
+  "many": false,
+  "now": "2026-09-29T10:15:00-05:00",
+  "preview": {
+   "status": "feedback_collection"
+  },
+  "expect": "reject",
+  "note": "feedback modal; value not on the page"
+ },
+ {
+  "id": "aws_docs_heading",
+  "set": "seed",
+  "page": "docs_aws_health_dashboard",
+  "ask": "AWS us-east-1 status",
+  "subject": "AWS us-east-1",
+  "wants": [
+   "status"
+  ],
+  "frame_kind": "status",
+  "many": false,
+  "now": "2026-09-29T10:15:00-05:00",
+  "preview": {
+   "status": "Service health"
+  },
+  "expect": "reject",
+  "note": "documentation page; us-east-1 never named"
+ },
+ {
+  "id": "dcmetromap_glossary",
+  "set": "seed",
+  "page": "dcmetromap_alerts",
+  "ask": "DC metro red line delays",
+  "subject": "DC metro red line",
+  "wants": [
+   "delays"
+  ],
+  "frame_kind": "alerts",
+  "many": false,
+  "now": "2026-09-29T10:15:00-05:00",
+  "preview": {
+   "delays": "Trains running behind normal spacing due to incidents, out-of-service trains, or speed restrictions."
+  },
+  "expect": "reject",
+  "note": "JS-loaded alerts; a glossary definition read as the status"
+ },
+ {
+  "id": "geysertimes_note",
+  "set": "seed",
+  "page": "geysertimes_old_faithful",
+  "ask": "Old Faithful next eruption",
+  "subject": "Old Faithful",
+  "wants": [
+   "next eruption time"
+  ],
+  "frame_kind": "next_event",
+  "many": false,
+  "now": "2026-09-29T09:15:00-06:00",
+  "preview": {
+   "next_eruption_time": "21 Jun 2026 @ 2054"
+  },
+  "expect": "reject",
+  "note": "a June user note, in the past"
+ },
+ {
+  "id": "iss_stale_pass",
+  "set": "seed",
+  "page": "heavens_above_iss",
+  "ask": "when can I see the ISS from Kansas City",
+  "subject": "ISS",
+  "wants": [
+   "next pass time"
+  ],
+  "frame_kind": "next_event",
+  "many": false,
+  "now": "2026-09-30T06:00:00-05:00",
+  "preview": {
+   "next_pass_time": "29 Sep 19:49:41"
+  },
+  "expect": "reject",
+  "note": "a pass list read after the pass"
+ },
+ {
+  "id": "cleatz_nonanswer",
+  "set": "seed",
+  "page": "cleatz_playoff_picture",
+  "ask": "MLB wild card standings",
+  "subject": "MLB wild card",
+  "wants": [
+   "standings"
+  ],
+  "frame_kind": "ranking",
+  "many": true,
+  "now": "2026-09-29T10:15:00-05:00",
+  "preview": {
+   "standings": "No live standings data available in the provided text."
+  },
+  "expect": "reject",
+  "note": "a model non-answer as the value"
+ },
+ {
+  "id": "cbs_news_forecast",
+  "set": "seed",
+  "page": "cbsnews_noreaster",
+  "ask": "Boston weather this weekend",
+  "subject": "Boston weather",
+  "wants": [
+   "forecast"
+  ],
+  "frame_kind": "forecast",
+  "many": false,
+  "now": "2026-09-29T10:15:00-05:00",
+  "preview": {
+   "forecast": "Nor'easter arrives in Boston area this weekend with impacts including rain, wind, and coastal flooding."
+  },
+  "expect": "reject",
+  "note": "a news article sentence as the forecast"
+ },
+ {
+  "id": "espn_bare_score",
+  "set": "seed",
+  "page": "espn_cfb_scoreboard",
+  "ask": "Alabama football score",
+  "subject": "Alabama football",
+  "wants": [
+   "score"
+  ],
+  "frame_kind": "result",
+  "many": false,
+  "now": "2026-09-29T10:15:00-05:00",
+  "preview": {
+   "score": "4-0"
+  },
+  "expect": "reject",
+  "note": "bare score: no teams, no date"
+ },
+ {
+  "id": "lagcheck_ungrounded",
+  "set": "seed",
+  "page": "lagcheck_slack",
+  "ask": "is Slack down",
+  "subject": "Slack",
+  "wants": [
+   "status"
+  ],
+  "frame_kind": "status",
+  "many": false,
+  "now": "2026-09-29T10:15:00-05:00",
+  "preview": {
+   "status": "Operational"
+  },
+  "expect": "reject",
+  "note": "'Operational' is not on the page"
+ },
+ {
+  "id": "houston_history",
+  "set": "seed",
+  "page": "wtpb_houston",
+  "ask": "power outages in Houston",
+  "subject": "Houston power outages",
+  "wants": [
+   "power outages"
+  ],
+  "frame_kind": "status",
+  "many": false,
+  "now": "2026-09-29T10:15:00-05:00",
+  "preview": {
+   "power_outages": "Sep 28: 4,333 customers out, restored in 12 hours; Sep 28: 151 customers out, restored in 8 hours; Sep 19: 7,129 customers out, restored in 8.7 days"
+  },
+  "expect": "reject",
+  "note": "a list of past outages for 'now'"
+ },
+ {
+  "id": "tahoe_annual",
+  "set": "seed",
+  "page": "snoflo_sierra_tahoe",
+  "ask": "how much snow is Tahoe getting this week",
+  "subject": "Tahoe snow",
+  "wants": [
+   "snowfall"
+  ],
+  "frame_kind": "forecast",
+  "many": false,
+  "now": "2026-09-29T10:15:00-05:00",
+  "preview": {
+   "snowfall": "2,000 acres of skiing terrain with over 200 inches of annual snowfall."
+  },
+  "expect": "reject",
+  "note": "annual normal, not this week"
+ },
+ {
+  "id": "ll2_past_date",
+  "set": "seed",
+  "page": "ll2_browsable_api",
+  "ask": "next SpaceX launch",
+  "subject": "SpaceX launch",
+  "wants": [
+   "next launch time"
+  ],
+  "frame_kind": "next_event",
+  "many": false,
+  "now": "2026-09-29T10:15:00-05:00",
+  "preview": {
+   "next_launch_time": "2026-09-22T22:15:06Z"
+  },
+  "expect": "reject",
+  "note": "a record's last_updated stamp, in the past"
+ },
+ {
+  "id": "wmata_title_chrome",
+  "set": "seed",
+  "page": "wmata_red_status",
+  "ask": "DC metro red line delays",
+  "subject": "DC metro red line",
+  "wants": [
+   "delays"
+  ],
+  "frame_kind": "alerts",
+  "many": false,
+  "now": "2026-09-29T10:15:00-05:00",
+  "preview": {
+   "delays": "Status"
+  },
+  "expect": "reject",
+  "note": "the page title"
+ },
+ {
+  "id": "lotteryusa_title",
+  "set": "seed",
+  "page": "lotteryusa_powerball",
+  "ask": "Powerball jackpot",
+  "subject": "Powerball",
+  "wants": [
+   "jackpot"
+  ],
+  "frame_kind": "current_value",
+  "many": false,
+  "now": "2026-09-29T10:15:00-05:00",
+  "preview": {
+   "jackpot": "Powerball"
+  },
+  "expect": "reject",
+  "note": "the page title / game name"
+ },
+ {
+  "id": "slack_ok",
+  "set": "seed",
+  "page": "slack_status",
+  "ask": "is Slack down",
+  "subject": "Slack",
+  "wants": [
+   "status"
+  ],
+  "frame_kind": "status",
+  "many": false,
+  "now": "2026-09-29T10:15:00-05:00",
+  "preview": {
+   "status": "No issues"
+  },
+  "expect": "accept",
+  "note": "official status page"
+ },
+ {
+  "id": "wmata_ok",
+  "set": "seed",
+  "page": "wmata_red_status",
+  "ask": "DC metro red line delays",
+  "subject": "DC metro red line",
+  "wants": [
+   "delays"
+  ],
+  "frame_kind": "alerts",
+  "many": false,
+  "now": "2026-09-29T10:15:00-05:00",
+  "preview": {
+   "delays": "No current alerts for this line"
+  },
+  "expect": "accept",
+  "note": "official line status"
+ },
+ {
+  "id": "powerball_ok",
+  "set": "seed",
+  "page": "powerball_home",
+  "ask": "Powerball jackpot",
+  "subject": "Powerball",
+  "wants": [
+   "jackpot"
+  ],
+  "frame_kind": "current_value",
+  "many": false,
+  "now": "2026-09-29T10:15:00-05:00",
+  "preview": {
+   "jackpot": "$409 Million"
+  },
+  "expect": "accept",
+  "note": "official widget value (read fix)"
+ },
+ {
+  "id": "flightstats_ok",
+  "set": "seed",
+  "page": "flightstats_aa100",
+  "ask": "flight status AA 100",
+  "subject": "AA 100",
+  "wants": [
+   "status"
+  ],
+  "frame_kind": "status",
+  "many": false,
+  "now": "2026-09-29T10:15:00-05:00",
+  "preview": {
+   "status": "On time"
+  },
+  "expect": "accept",
+  "note": "tracker row"
+ },
+ {
+  "id": "geysertimes_ok",
+  "set": "seed",
+  "page": "geysertimes_old_faithful",
+  "ask": "Old Faithful next eruption",
+  "subject": "Old Faithful",
+  "wants": [
+   "next eruption time"
+  ],
+  "frame_kind": "next_event",
+  "many": false,
+  "now": "2026-09-29T09:15:00-06:00",
+  "preview": {
+   "next_eruption_time": "Today at 0952 ± 13 minutes"
+  },
+  "expect": "accept",
+  "note": "future prediction"
+ },
+ {
+  "id": "isitdown_ungrounded",
+  "set": "holdout",
+  "page": "isitdown_slack",
+  "ask": "is Slack down right now",
+  "subject": "Slack",
+  "wants": [
+   "status"
+  ],
+  "frame_kind": "status",
+  "many": false,
+  "now": "2026-09-29T10:15:00-05:00",
+  "preview": {
+   "status": "Operational"
+  },
+  "expect": "reject",
+  "note": "'Operational' is not on the page"
+ },
+ {
+  "id": "health_aws_empty",
+  "set": "holdout",
+  "page": "health_aws_status",
+  "ask": "AWS status",
+  "subject": "AWS",
+  "wants": [
+   "status"
+  ],
+  "frame_kind": "status",
+  "many": false,
+  "now": "2026-09-29T10:15:00-05:00",
+  "preview": {
+   "status": "All services operating normally"
+  },
+  "expect": "reject",
+  "note": "empty SPA shell"
+ },
+ {
+  "id": "nps_loading",
+  "set": "holdout",
+  "page": "nps_geyser_predictions",
+  "ask": "Old Faithful next eruption",
+  "subject": "Old Faithful",
+  "wants": [
+   "next eruption"
+  ],
+  "frame_kind": "next_event",
+  "many": false,
+  "now": "2026-09-29T09:15:00-06:00",
+  "preview": {
+   "next_eruption": "Loading…"
+  },
+  "expect": "reject",
+  "note": "JS placeholder"
+ },
+ {
+  "id": "redlite_count",
+  "set": "holdout",
+  "page": "redlite_worldnews",
+  "ask": "worldnews top posts",
+  "subject": "r/worldnews",
+  "wants": [
+   "posts"
+  ],
+  "frame_kind": "latest_items",
+  "many": true,
+  "now": "2026-09-29T10:15:00-05:00",
+  "preview": {
+   "posts": "277"
+  },
+  "expect": "reject",
+  "note": "a vote count for a many-want"
+ },
+ {
+  "id": "mlb_one_team",
+  "set": "holdout",
+  "page": "mlb_standings_wc",
+  "ask": "AL wild card standings",
+  "subject": "AL wild card",
+  "wants": [
+   "standings"
+  ],
+  "frame_kind": "ranking",
+  "many": true,
+  "now": "2026-09-29T10:15:00-05:00",
+  "preview": {
+   "standings": "Tampa Bay Rays"
+  },
+  "expect": "reject",
+  "note": "one team for a standings list"
+ },
+ {
+  "id": "usatoday_old_jackpot",
+  "set": "holdout",
+  "page": "art_usatoday_powerball",
+  "ask": "Powerball jackpot",
+  "subject": "Powerball",
+  "wants": [
+   "jackpot"
+  ],
+  "frame_kind": "current_value",
+  "many": false,
+  "now": "2026-09-29T10:15:00-05:00",
+  "preview": {
+   "jackpot": "$389M"
+  },
+  "expect": "reject",
+  "note": "a dated news story, not the current jackpot"
+ },
+ {
+  "id": "nextmetro_faq",
+  "set": "holdout",
+  "page": "nextmetro_alerts",
+  "ask": "DC metro delays",
+  "subject": "DC metro",
+  "wants": [
+   "delays"
+  ],
+  "frame_kind": "alerts",
+  "many": false,
+  "now": "2026-09-29T10:15:00-05:00",
+  "preview": {
+   "delays": "Single tracking means trains in both directions share one track instead of the usual two."
+  },
+  "expect": "reject",
+  "note": "FAQ definition"
+ },
+ {
+  "id": "geysertimes_last",
+  "set": "holdout",
+  "page": "geysertimes_old_faithful",
+  "ask": "when does Old Faithful erupt next",
+  "subject": "Old Faithful",
+  "wants": [
+   "next eruption"
+  ],
+  "frame_kind": "next_event",
+  "many": false,
+  "now": "2026-09-29T09:15:00-06:00",
+  "preview": {
+   "next_eruption": "29 Sep 2026 @ 0807"
+  },
+  "expect": "reject",
+  "note": "the last eruption, in the past"
+ },
+ {
+  "id": "slack_title",
+  "set": "holdout",
+  "page": "slack_status",
+  "ask": "Slack status",
+  "subject": "Slack",
+  "wants": [
+   "status"
+  ],
+  "frame_kind": "status",
+  "many": false,
+  "now": "2026-09-29T10:15:00-05:00",
+  "preview": {
+   "status": "Slack System Status"
+  },
+  "expect": "reject",
+  "note": "the page title"
+ },
+ {
+  "id": "checker_heading",
+  "set": "holdout",
+  "page": "powerball_checker",
+  "ask": "current Powerball jackpot",
+  "subject": "Powerball",
+  "wants": [
+   "jackpot"
+  ],
+  "frame_kind": "current_value",
+  "many": false,
+  "now": "2026-09-29T10:15:00-05:00",
+  "preview": {
+   "jackpot": "Powerball Jackpot"
+  },
+  "expect": "reject",
+  "note": "the page's heading"
+ },
+ {
+  "id": "megamillions_label",
+  "set": "holdout",
+  "page": "megamillions_home",
+  "ask": "Mega Millions jackpot",
+  "subject": "Mega Millions",
+  "wants": [
+   "jackpot"
+  ],
+  "frame_kind": "current_value",
+  "many": false,
+  "now": "2026-09-29T10:15:00-05:00",
+  "preview": {
+   "jackpot": "Next Estimated Jackpot"
+  },
+  "expect": "reject",
+  "note": "a widget label whose value loads by JS"
+ },
+ {
+  "id": "cleatz_title",
+  "set": "holdout",
+  "page": "cleatz_playoff_picture",
+  "ask": "MLB playoff picture",
+  "subject": "MLB playoff",
+  "wants": [
+   "standings"
+  ],
+  "frame_kind": "ranking",
+  "many": true,
+  "now": "2026-09-29T10:15:00-05:00",
+  "preview": {
+   "standings": "MLB Playoff Picture 2026: Live Wild Card Standings & Bracket"
+  },
+  "expect": "reject",
+  "note": "the page title"
+ },
+ {
+  "id": "snoflo_sitename",
+  "set": "holdout",
+  "page": "snoflo_sierra_tahoe",
+  "ask": "Sierra at Tahoe snow forecast",
+  "subject": "Sierra at Tahoe",
+  "wants": [
+   "snow forecast"
+  ],
+  "frame_kind": "forecast",
+  "many": false,
+  "now": "2026-09-29T10:15:00-05:00",
+  "preview": {
+   "snow_forecast": "Snoflo"
+  },
+  "expect": "reject",
+  "note": "the site name"
+ },
+ {
+  "id": "flightaware_word",
+  "set": "holdout",
+  "page": "flightaware_aal100",
+  "ask": "AA100 flight status",
+  "subject": "AA100",
+  "wants": [
+   "status"
+  ],
+  "frame_kind": "status",
+  "many": false,
+  "now": "2026-09-29T10:15:00-05:00",
+  "preview": {
+   "status": "Live Surface Map"
+  },
+  "expect": "reject",
+  "note": "modal text only"
+ },
+ {
+  "id": "heavens_past",
+  "set": "holdout",
+  "page": "heavens_above_iss",
+  "ask": "next ISS pass Kansas City",
+  "subject": "ISS",
+  "wants": [
+   "next pass"
+  ],
+  "frame_kind": "next_event",
+  "many": false,
+  "now": "2026-10-02T07:00:00-05:00",
+  "preview": {
+   "next_pass": "1 Oct 19:53:04"
+  },
+  "expect": "reject",
+  "note": "pass after the list's horizon has passed"
+ },
+ {
+  "id": "reddit_posts_word",
+  "set": "holdout",
+  "page": "reddit_worldnews_new",
+  "ask": "top posts on r/worldnews",
+  "subject": "r/worldnews",
+  "wants": [
+   "posts"
+  ],
+  "frame_kind": "latest_items",
+  "many": true,
+  "now": "2026-09-29T10:15:00-05:00",
+  "preview": {
+   "posts": [
+    "Reddit"
+   ]
+  },
+  "expect": "reject",
+  "note": "challenge page"
+ },
+ {
+  "id": "x_accept",
+  "set": "holdout",
+  "page": "x_sfbartalert",
+  "ask": "BART delays?",
+  "subject": "BART",
+  "wants": [
+   "delays"
+  ],
+  "frame_kind": "alerts",
+  "many": false,
+  "now": "2026-09-29T10:15:00-05:00",
+  "preview": {
+   "delays": "There is a 10-minute delay on the San Francisco line in the East Bay direction due to an earlier equipment problem on the track between Balboa Park and Daly City."
+  },
+  "expect": "accept",
+  "note": "current alert text"
+ },
+ {
+  "id": "flightstatus_ok",
+  "set": "holdout",
+  "page": "flight_status_aa100",
+  "ask": "AA100 status",
+  "subject": "AA100",
+  "wants": [
+   "status"
+  ],
+  "frame_kind": "status",
+  "many": false,
+  "now": "2026-09-29T10:15:00-05:00",
+  "preview": {
+   "status": "Scheduled On time"
+  },
+  "expect": "accept",
+  "note": "tracker sentence"
+ },
+ {
+  "id": "slack_h1_ok",
+  "set": "holdout",
+  "page": "slack_status",
+  "ask": "is slack working",
+  "subject": "Slack",
+  "wants": [
+   "status"
+  ],
+  "frame_kind": "status",
+  "many": false,
+  "now": "2026-09-29T10:15:00-05:00",
+  "preview": {
+   "status": "Slack is up and running"
+  },
+  "expect": "accept",
+  "note": "the page's own status headline"
+ },
+ {
+  "id": "github_ok",
+  "set": "holdout",
+  "page": "githubstatus",
+  "ask": "is GitHub down",
+  "subject": "GitHub",
+  "wants": [
+   "status"
+  ],
+  "frame_kind": "status",
+  "many": false,
+  "now": "2026-09-29T10:15:00-05:00",
+  "preview": {
+   "status": "All Systems Operational"
+  },
+  "expect": "accept",
+  "note": "official status headline"
+ },
+ {
+  "id": "powerball_two_ok",
+  "set": "holdout",
+  "page": "powerball_home",
+  "ask": "Powerball jackpot and cash value",
+  "subject": "Powerball",
+  "wants": [
+   "jackpot",
+   "cash value"
+  ],
+  "frame_kind": "current_value",
+  "many": false,
+  "now": "2026-09-29T10:15:00-05:00",
+  "preview": {
+   "jackpot": "$409 Million",
+   "cash_value": "$170.2 Million"
+  },
+  "expect": "accept",
+  "note": "official widget"
+ },
+ {
+  "id": "powerball_draw_ok",
+  "set": "holdout",
+  "page": "powerball_home",
+  "ask": "next Powerball drawing",
+  "subject": "Powerball",
+  "wants": [
+   "next drawing"
+  ],
+  "frame_kind": "next_event",
+  "many": false,
+  "now": "2026-09-29T10:15:00-05:00",
+  "preview": {
+   "next_drawing": "Wed, Sep 30, 2026"
+  },
+  "expect": "accept",
+  "note": "future drawing date"
+ },
+ {
+  "id": "lotteryusa_ok",
+  "set": "holdout",
+  "page": "lotteryusa_powerball",
+  "ask": "Powerball jackpot",
+  "subject": "Powerball",
+  "wants": [
+   "jackpot"
+  ],
+  "frame_kind": "current_value",
+  "many": false,
+  "now": "2026-09-29T10:15:00-05:00",
+  "preview": {
+   "jackpot": "$409 Million"
+  },
+  "expect": "accept",
+  "note": "grounded widget"
+ },
+ {
+  "id": "checker_ok",
+  "set": "holdout",
+  "page": "powerball_checker",
+  "ask": "Powerball jackpot",
+  "subject": "Powerball",
+  "wants": [
+   "jackpot"
+  ],
+  "frame_kind": "current_value",
+  "many": false,
+  "now": "2026-09-29T10:15:00-05:00",
+  "preview": {
+   "jackpot": "$409 Million"
+  },
+  "expect": "accept",
+  "note": "grounded"
+ },
+ {
+  "id": "ll2_ok",
+  "set": "holdout",
+  "page": "ll2_browsable_api",
+  "ask": "next SpaceX launch",
+  "subject": "SpaceX launch",
+  "wants": [
+   "next launch time"
+  ],
+  "frame_kind": "next_event",
+  "many": false,
+  "now": "2026-09-29T10:15:00-05:00",
+  "preview": {
+   "next_launch_time": "2026-10-01T15:10:06Z"
+  },
+  "expect": "accept",
+  "note": "future NET"
+ },
+ {
+  "id": "heavens_ok",
+  "set": "holdout",
+  "page": "heavens_above_iss",
+  "ask": "when can I see the ISS from Kansas City",
+  "subject": "ISS",
+  "wants": [
+   "next pass time"
+  ],
+  "frame_kind": "next_event",
+  "many": false,
+  "now": "2026-09-29T08:19:00-05:00",
+  "preview": {
+   "next_pass_time": "29 Sep 19:49:41"
+  },
+  "expect": "accept",
+  "note": "tonight's pass"
+ },
+ {
+  "id": "bart_list_ok",
+  "set": "holdout",
+  "page": "bart_advisories",
+  "ask": "BART advisories",
+  "subject": "BART",
+  "wants": [
+   "advisories"
+  ],
+  "frame_kind": "alerts",
+  "many": true,
+  "now": "2026-09-29T10:15:00-05:00",
+  "preview": {
+   "advisories": [
+    "Single Tracking Alert: Late night work on the Yellow Line in Contra Costa County to support BART’s Digital Railway",
+    "Single Tracking Alert: Late night rail work on the Yellow Line in Contra Costa County",
+    "24th St. Mission Station elevator out of service July 13 to October 23"
+   ]
+  },
+  "expect": "accept",
+  "note": "a list of current advisories"
+ },
+ {
+  "id": "mlb_list_ok",
+  "set": "holdout",
+  "page": "mlb_standings_wc",
+  "ask": "AL wild card standings",
+  "subject": "AL wild card",
+  "wants": [
+   "standings"
+  ],
+  "frame_kind": "ranking",
+  "many": true,
+  "now": "2026-09-29T10:15:00-05:00",
+  "preview": {
+   "standings": [
+    "New York Yankees 93-68",
+    "Boston Red Sox 87-75",
+    "Chicago White Sox 84-78"
+   ]
+  },
+  "expect": "accept",
+  "note": "three rows"
+ },
+ {
+  "id": "lagcheck_ok",
+  "set": "holdout",
+  "page": "lagcheck_slack",
+  "ask": "is Slack down",
+  "subject": "Slack",
+  "wants": [
+   "status"
+  ],
+  "frame_kind": "status",
+  "many": false,
+  "now": "2026-09-29T10:15:00-05:00",
+  "preview": {
+   "status": "No — Slack is working normally"
+  },
+  "expect": "accept",
+  "note": "grounded sentence"
+ },
+ {
+  "id": "isitdown_ok",
+  "set": "holdout",
+  "page": "isitdown_slack",
+  "ask": "is Slack down",
+  "subject": "Slack",
+  "wants": [
+   "status"
+  ],
+  "frame_kind": "status",
+  "many": false,
+  "now": "2026-09-29T10:15:00-05:00",
+  "preview": {
+   "status": "No problems detected"
+  },
+  "expect": "accept",
+  "note": "grounded heading"
+ },
+ {
+  "id": "awsdown_ok",
+  "set": "holdout",
+  "page": "awsdown_status",
+  "ask": "is AWS down",
+  "subject": "AWS",
+  "wants": [
+   "status"
+  ],
+  "frame_kind": "status",
+  "many": false,
+  "now": "2026-09-29T10:15:00-05:00",
+  "preview": {
+   "status": "AWS is experiencing degraded performance"
+  },
+  "expect": "accept",
+  "note": "grounded (authority is a ranking matter)"
+ },
+ {
+  "id": "espn_next_ok",
+  "set": "holdout",
+  "page": "espn_cfb_scoreboard",
+  "ask": "Alabama football next game",
+  "subject": "Alabama football",
+  "wants": [
+   "next game"
+  ],
+  "frame_kind": "next_event",
+  "many": false,
+  "now": "2026-09-29T10:15:00-05:00",
+  "preview": {
+   "next_game": "Saturday, October 3, 2026"
+  },
+  "expect": "accept",
+  "note": "future game date"
+ },
+ {
+  "id": "bls_ok",
+  "set": "holdout",
+  "page": "art_bls_cpi",
+  "ask": "CPI inflation latest",
+  "subject": "CPI inflation",
+  "wants": [
+   "inflation rate"
+  ],
+  "frame_kind": "current_value",
+  "many": false,
+  "now": "2026-09-29T10:15:00-05:00",
+  "preview": {
+   "inflation_rate": "3.4 percent over the last 12 months"
+  },
+  "expect": "accept",
+  "note": "official release"
+ },
+ {
+  "id": "npr_list_ok",
+  "set": "holdout",
+  "page": "art_npr_text",
+  "ask": "top news headlines",
+  "subject": "news",
+  "wants": [
+   "headlines"
+  ],
+  "frame_kind": "latest_items",
+  "many": true,
+  "now": "2026-09-29T10:15:00-05:00",
+  "preview": {
+   "headlines": [
+    "As the U.S. signals a smaller Middle East footprint, Turkey is ready to step in",
+    "The Senate passes the Protect College Sports Act, but the bill's future is unclear",
+    "Cornell fraternity rape case reopened as new details emerge"
+   ]
+  },
+  "expect": "accept",
+  "note": "headline list"
+ },
+ {
+  "id": "wmata_red_ok",
+  "set": "holdout",
+  "page": "wmata_red_status",
+  "ask": "red line status",
+  "subject": "red line",
+  "wants": [
+   "status"
+  ],
+  "frame_kind": "status",
+  "many": false,
+  "now": "2026-09-29T10:15:00-05:00",
+  "preview": {
+   "status": "No current alerts for this line"
+  },
+  "expect": "accept",
+  "note": "official line status"
+ },
+ {
+  "id": "flightstats_time_ok",
+  "set": "holdout",
+  "page": "flightstats_aa100",
+  "ask": "when does AA 100 depart",
+  "subject": "AA 100",
+  "wants": [
+   "departure time"
+  ],
+  "frame_kind": "next_event",
+  "many": false,
+  "now": "2026-09-29T10:15:00-05:00",
+  "preview": {
+   "departure_time": "29-Sep-2026 18:20 EDT"
+  },
+  "expect": "accept",
+  "note": "scheduled departure later today"
+ }
+]

@@ -185,7 +185,11 @@ def test_field_11_pasted_webpages_build_interpreted_cards(client, monkeypatch) -
     from smartbrain_3000 import ni as nimod
     monkeypatch.setattr(nimod, "_fetch_http_page",
                         lambda source, item_id, secrets, **kw: {
-                            "text": "page text with the asked-for info",
+                            # C9 (2026-10-03): a reading must be on a readable page about the ask
+                            "text": "Tropical storms and hurricanes in the Atlantic. SPAC and deSPAC news "
+                                    "today. Tides for Charleston, SC. Here is the asked-for info. This page "
+                                    "is updated through the day by the office that publishes it; readings "
+                                    "are posted as they come in and the times shown are local.",
                             "title": "Some Page"})
     store = client.app.state.ni
     pastes = [
@@ -200,12 +204,12 @@ def test_field_11_pasted_webpages_build_interpreted_cards(client, monkeypatch) -
     ]
     for request, url, wants in pastes:
         iid = client.post("/api/ni/intake", json={"request": request}).json()["id"]
-        intent = {"kind": "external_data", "subject": request[:40],
+        intent = {"kind": "external_data", "subject": " ".join(wants),
                   "cadence_minutes": 60, "wants": wants,
                   "threshold": None, "display_hint": "value"}
         ni_flow._transition(store, iid, "intent", intent=intent)
         fields = [ni_flow._slugify_field_name(w) for w in wants]
-        llm_reply = __import__("json").dumps({f: "extracted" for f in fields})
+        llm_reply = __import__("json").dumps({f: "the asked-for info" for f in fields})
 
         def fetch_html(u: str):
             raise __import__("json").JSONDecodeError("Expecting value", "<html>", 0)

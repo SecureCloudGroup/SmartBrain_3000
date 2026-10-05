@@ -396,14 +396,17 @@ How a card comes to life:
    cities), each choice is named so the tap answers it. Sources that work
    without a key come first; one that needs a free key from its provider (or,
    for the SEC and BLS, your contact email) says so, and the card asks for it
-   before the first fetch. When the Library has
-   nothing, the card **searches the web from your own words** and offers up to
-   three candidate pages, each with evidence actually extracted from that page
-   (*"On the page: High tide 7:12 AM"*). Your tap is the consent, the same as
-   pasting that address yourself; pasting your own URL always works. Whatever
-   you pick is frozen: nothing can quietly change it later without asking you
-   again. Browse the Library, or add your own sources, from the **Library**
-   link on the Neural page.
+   before the first fetch. Only a Library source that describes its answers
+   (which of its values answer which questions) builds a card; your tap is the
+   consent. When no Library source answers your ask yet, the card says so —
+   *"No SmartBrain Library source answers this yet"* — and lists **pages that
+   may help**: up to three web pages found by **searching your own words**, and
+   any dataset the Library knows about but hasn't described, each named with
+   its site. They are plain links that open in a new tab; SmartBrain can't keep
+   a live card from them yet, and it shows nothing it read off them. Pasting
+   your own link always works. Whatever you pick is frozen: nothing can
+   quietly change it later without asking you again. Browse the Library, or
+   add your own sources, from the **Library** link on the Neural page.
 2. **Built from real data.** The engine samples the approved source and builds
    the pipeline and layout against what actually came back — the preview you
    see is real data from your source, not an invention. If something looks
@@ -412,7 +415,10 @@ How a card comes to life:
    *different* source goes back to the source pick.
 3. **Commissioning.** The system then proves the card: a clean real run, your
    one-tap confirmation that it's the *right* data, and one more clean run at
-   cadence to prove it's stable. Only then is the card live.
+   cadence to prove it's stable. Only then is the card live. A card built from
+   a link you pasted yourself shows the reading it found and where it came
+   from, and doesn't update at all until you tap **Yes, that's it**; **No, try
+   another source** goes back to the source pick without that link.
 4. **It keeps itself honest.** Every refresh is checked against the shape of the
    data you validated. If the source changes or breaks, the card shows the last
    good result (dimmed, with a health chip) rather than something wrong — and a
@@ -472,8 +478,8 @@ your **Apply** runs it as the same keep-or-revert trial; **Dismiss** drops it.
 What's sent is bounded — the card's goal, its data mappings, the failure, and a
 short excerpt of the failing data; never your knowledge, never credentials.
 
-**More than APIs.** A card can also watch an ordinary **web page** (the
-readable text is extracted in a locked-down helper process — hostile HTML is
+**More than APIs.** A card can also watch an ordinary **web page** whose link
+you paste (the readable text is extracted in a locked-down helper process — hostile HTML is
 never parsed inside the app). When the page carries its data in structure — a
 table, schema.org data, page metadata — the card is *compiled*: it reads the
 exact cell or field you want on every refresh with no model involved, so its
@@ -624,8 +630,8 @@ all of them, including engines with no filter of their own (Tavily). There is
 no setting to turn this off.
 
 Searches happen when the assistant uses the web tools in a turn, and when a
-Neural Interface card you're creating finds nothing in the SmartBrain Library
-and searches your own words for candidates; see
+Neural Interface card you're creating finds no SmartBrain Library source that answers
+it and searches your own words for pages that may help (offered as links); see
 [Privacy & security](07-privacy-security.md) for exactly what leaves your machine.
 
 ## Self-improvement

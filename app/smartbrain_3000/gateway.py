@@ -127,6 +127,11 @@ _LOCAL_PROVIDER_NAMES = frozenset(("ollama", "mlx", "mlxe"))
 # Bounded, so an accidental double-release fails loud instead of silently allowing two callers.
 # Every local call is one acquire + one release (no nesting), so re-entrancy isn't needed.
 _LOCAL_SEM = threading.BoundedSemaphore(1)
+# How many callers are waiting on ``_LOCAL_SEM.acquire`` right now. The Library's background sidecar
+# build polls this between texts so a foreground embed/chat/stream doesn't lose the race for the next
+# acquire (the semaphore is not FIFO). Advisory only — serialization still happens through _serialized.
+_LOCAL_WAITERS = 0
+_LOCAL_WAITERS_LOCK = threading.Lock()
 
 
 def _is_local(model: str) -> bool:
@@ -142,11 +147,36 @@ def is_local(model: str) -> bool:
     return _is_local(model)
 
 
+class LocalBusy(Exception):
+    """A local-model call could not acquire the serializer within its acquire_timeout."""
+
+
+def _bump_waiters(delta: int) -> None:
+    """Atomically add ``delta`` to the local-waiters counter (used by _serialized's gated acquires)."""
+    assert delta in (-1, 1), "delta must be +/- 1"
+    assert _LOCAL_WAITERS_LOCK is not None, "waiters lock must be initialised"
+    global _LOCAL_WAITERS
+    with _LOCAL_WAITERS_LOCK:
+        _LOCAL_WAITERS += delta
+
+
 @contextmanager
-def _serialized(model: str) -> Iterator[None]:
-    """Hold the local-model semaphore for a call to a local provider; a no-op for cloud models."""
+def _serialized(model: str, *, acquire_timeout: float | None = None) -> Iterator[None]:
+    """Hold the local-model semaphore for a call to a local provider; a no-op for cloud models.
+
+    ``acquire_timeout`` is for callers who prefer failing fast over waiting (the Library's request-path
+    ask embed: busy is not a failure, it's a fallback to the keyword ranking). A None waits forever."""
+    assert model is not None, "model required"
+    assert acquire_timeout is None or acquire_timeout > 0, "acquire_timeout must be positive"
     if _is_local(model):
-        _LOCAL_SEM.acquire()
+        _bump_waiters(1)
+        try:
+            got = _LOCAL_SEM.acquire(timeout=acquire_timeout) if acquire_timeout is not None \
+                else _LOCAL_SEM.acquire()
+        finally:
+            _bump_waiters(-1)
+        if not got:
+            raise LocalBusy("local model busy")
         try:
             yield
         finally:
@@ -176,6 +206,13 @@ def local_available() -> bool:
         _LOCAL_SEM.release()
         return True
     return False
+
+
+def local_waiters() -> int:
+    """How many callers are currently waiting on the local-model semaphore (not holding). The
+    Library's build polls this between texts so a foreground acquire doesn't keep losing the race."""
+    assert _LOCAL_WAITERS >= 0, "waiter count must be non-negative"
+    return _LOCAL_WAITERS
 
 
 def default_chat_for(catalog: list[dict]) -> str | None:
@@ -702,6 +739,7 @@ def embed(
     task: str = "document",
     client: httpx.Client | None = None,
     timeout: float = 15.0,
+    acquire_timeout: float | None = None,
 ) -> list[float]:
     """Embed text through Bifrost's /v1/embeddings; return the float vector.
 
@@ -709,6 +747,9 @@ def embed(
     nomic-embed-text and other prefix-capable models this prepends the model's expected
     task prefix ("search_document: " / "search_query: ") — a free retrieval-quality win
     the model was trained on. Non-prefix models see byte-identical wire behavior.
+
+    ``acquire_timeout`` short-circuits the local-model serializer (``LocalBusy``) for callers
+    that would rather fall back than block (the Library's request-path ask embed). None waits.
 
     Raises ``GatewayError`` on the upstream error envelope, a non-JSON body, or
     a malformed 200 (empty data, missing/empty embedding, non-finite element).
@@ -727,7 +768,7 @@ def embed(
         # Per-request timeout: a cold local embed model can take ~50s to load on its first call,
         # far past a pooled/short client default — only the per-call value lets a backfill wait it
         # out. Serialize local-provider calls so a background embed can't overlap a foreground chat.
-        with _serialized(model):
+        with _serialized(model, acquire_timeout=acquire_timeout):
             resp = client.post("/v1/embeddings", json={"model": model, "input": input_text}, timeout=timeout)
         try:
             data = resp.json()

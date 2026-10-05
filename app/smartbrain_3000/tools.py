@@ -1205,6 +1205,16 @@ def _explain_state(item: dict) -> tuple[str, str]:
                 "the card's Fix button re-derives it against the same source; "
                 "read_ni_item's last_failure excerpt explains what broke",
             )
+        if ni.awaits_yes(item):
+            built = spec.get("_built_from") or {}
+            origin = "a web page" if built.get("path") == "page" else "a dataset"
+            return (
+                f"this card was built from {origin} ({built.get('host') or 'unknown host'}) and is "
+                "WAITING FOR THE USER'S YES — it does not refresh and is NOT live until they confirm "
+                "the reading it found",
+                "the user checks the reading on the card and taps 'Yes, that's it' (goes live) or "
+                "'No, try another source' (back to the source pick without it)",
+            )
         return (
             "this card is COMMISSIONING — the engine has not yet completed the "
             "first-run C1 check + user C2 verdict; it is NOT yet live",
@@ -2110,7 +2120,8 @@ def _flow_next_step(record: dict | None) -> str:
                 "Do not create anything else for this request.")
     if state == "source":
         return ("the CARD on the board now offers sources from the SmartBrain "
-                "Library (or web results) and a paste-a-link field — tell the user "
+                "Library (or, when none answers this yet, links to pages that may help — "
+                "those can't build a card) and a paste-a-link field — tell the user "
                 "to pick there; if they name a URL in chat, call resume_ni_flow "
                 "with this item_id and their URL. Do not create a card any other way.")
     if state == "awaiting_access":

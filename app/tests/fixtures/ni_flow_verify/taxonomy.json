@@ -1,0 +1,1868 @@
+{
+ "weather/forecast": {
+  "kinds": [
+   "forecast"
+  ],
+  "policy": {
+   "prefer": [
+    "official",
+    "primary",
+    "aggregator",
+    "community"
+   ],
+   "match": "geo",
+   "resolvers": [
+    "place"
+   ],
+   "max_km": 25,
+   "differ_on": [],
+   "max_age": "1h",
+   "cross_check": false,
+   "ask_if_ambiguous": true
+  },
+  "expects": [
+   "temperature",
+   "precip_chance",
+   "conditions"
+  ],
+  "keywords": [
+   "forecast",
+   "weather",
+   "temperature",
+   "rain",
+   "precipitation",
+   "snow",
+   "hourly",
+   "wind",
+   "temp",
+   "hot",
+   "cold",
+   "degrees",
+   "warm",
+   "storm",
+   "storms",
+   "thunderstorm",
+   "tstorms",
+   "hail",
+   "fog",
+   "foggy",
+   "frost",
+   "freeze",
+   "sleet",
+   "freezing rain",
+   "gusts",
+   "gusty",
+   "windy",
+   "lightning strikes",
+   "lightning near",
+   "lightning expected",
+   "any lightning",
+   "chance of rain",
+   "rain chance",
+   "humid",
+   "muggy",
+   "high today",
+   "low tonight",
+   "rainy",
+   "showers",
+   "drizzle",
+   "snowfall",
+   "snowstorm",
+   "highs",
+   "lows",
+   "high temp",
+   "low temp",
+   "heat wave",
+   "cold front",
+   "freezing",
+   "below freezing",
+   "umbrella",
+   "jacket",
+   "sunny",
+   "cloudy",
+   "overcast",
+   "clear skies",
+   "heat index",
+   "wind chill",
+   "precip",
+   "wx",
+   "t storm",
+   "t storms"
+  ]
+ },
+ "weather/current": {
+  "kinds": [
+   "current_value"
+  ],
+  "policy": {
+   "prefer": [
+    "official",
+    "primary",
+    "aggregator",
+    "community"
+   ],
+   "match": "geo",
+   "resolvers": [
+    "place",
+    "airport"
+   ],
+   "max_km": 40,
+   "differ_on": [],
+   "max_age": "1h",
+   "cross_check": true,
+   "ask_if_ambiguous": true
+  },
+  "expects": [],
+  "keywords": [
+   "current weather",
+   "conditions",
+   "observation",
+   "temperature now",
+   "humidity",
+   "dew point",
+   "metar",
+   "snowing",
+   "wind speed",
+   "feels like",
+   "currently",
+   "is it raining",
+   "is it snowing",
+   "outside",
+   "current temp",
+   "current temperature",
+   "temp now",
+   "barometric pressure",
+   "visibility",
+   "how hot is it",
+   "how cold is it",
+   "how warm is it"
+  ]
+ },
+ "weather/alerts": {
+  "kinds": [
+   "alerts",
+   "status"
+  ],
+  "policy": {
+   "prefer": [
+    "official",
+    "primary",
+    "aggregator",
+    "community"
+   ],
+   "match": "geo",
+   "resolvers": [
+    "place",
+    "county",
+    "us_state"
+   ],
+   "max_km": 40,
+   "differ_on": [],
+   "max_age": "15m",
+   "cross_check": false,
+   "ask_if_ambiguous": true
+  },
+  "expects": [],
+  "keywords": [
+   "alert",
+   "warning",
+   "advisory",
+   "severe",
+   "tornado",
+   "flood warning",
+   "heat advisory",
+   "alerts",
+   "warnings",
+   "weather alert",
+   "weather alerts",
+   "nws alerts",
+   "wind advisory",
+   "winter weather advisory",
+   "winter storm warning",
+   "winter storm watch",
+   "freeze warning",
+   "frost advisory",
+   "blizzard",
+   "tornado warning",
+   "tornado watch",
+   "tornadoes",
+   "severe thunderstorm warning",
+   "severe thunderstorm watch",
+   "severe weather",
+   "flash flood warning",
+   "flood watch",
+   "red flag warning",
+   "dense fog advisory",
+   "excessive heat warning",
+   "heat warning",
+   "watches and warnings",
+   "ice storm warning",
+   "high wind warning",
+   "high wind watch",
+   "special weather statement",
+   "tornado sirens"
+  ]
+ },
+ "weather/air_quality": {
+  "kinds": [
+   "current_value",
+   "forecast"
+  ],
+  "policy": {
+   "prefer": [
+    "official",
+    "primary",
+    "aggregator",
+    "community"
+   ],
+   "match": "geo",
+   "resolvers": [
+    "zip",
+    "place"
+   ],
+   "max_km": 25,
+   "differ_on": [],
+   "max_age": "1h",
+   "cross_check": false,
+   "ask_if_ambiguous": true
+  },
+  "expects": [
+   "air_quality",
+   "observed_time"
+  ],
+  "keywords": [
+   "air quality",
+   "aqi",
+   "pm2.5",
+   "ozone",
+   "smoke",
+   "pollution",
+   "air quality forecast",
+   "smoky",
+   "haze",
+   "aqi forecast",
+   "wildfire smoke",
+   "air pollution",
+   "smog",
+   "particulates",
+   "pm 2.5",
+   "pm25"
+  ]
+ },
+ "weather/pollen": {
+  "kinds": [
+   "current_value",
+   "forecast"
+  ],
+  "policy": {
+   "prefer": [
+    "official",
+    "primary",
+    "aggregator",
+    "community"
+   ],
+   "match": "geo",
+   "resolvers": [
+    "zip",
+    "place"
+   ],
+   "max_km": 40,
+   "differ_on": [],
+   "max_age": "1h",
+   "cross_check": false,
+   "ask_if_ambiguous": true
+  },
+  "expects": [],
+  "keywords": [
+   "pollen",
+   "allergy",
+   "allergen",
+   "mold",
+   "allergies",
+   "allergy forecast",
+   "pollen forecast",
+   "pollen count",
+   "ragweed",
+   "hay fever",
+   "tree pollen",
+   "mold count",
+   "allergy season",
+   "cedar fever",
+   "cedar pollen"
+  ]
+ },
+ "weather/uv": {
+  "kinds": [
+   "current_value",
+   "forecast"
+  ],
+  "policy": {
+   "prefer": [
+    "official",
+    "primary",
+    "aggregator",
+    "community"
+   ],
+   "match": "geo",
+   "resolvers": [
+    "zip",
+    "place"
+   ],
+   "max_km": 40,
+   "differ_on": [],
+   "max_age": "1d",
+   "cross_check": false,
+   "ask_if_ambiguous": true
+  },
+  "expects": [],
+  "keywords": [
+   "uv index",
+   "sunburn",
+   "ultraviolet",
+   "uv",
+   "uv level",
+   "uv forecast",
+   "sunscreen",
+   "sun strength",
+   "strong is the sun",
+   "spf"
+  ]
+ },
+ "weather/radar_imagery": {
+  "kinds": [
+   "image",
+   "map"
+  ],
+  "policy": {
+   "prefer": [
+    "official",
+    "primary",
+    "aggregator",
+    "community"
+   ],
+   "match": "geo",
+   "resolvers": [
+    "place",
+    "radar_site"
+   ],
+   "max_km": 250,
+   "differ_on": [],
+   "max_age": "15m",
+   "cross_check": false,
+   "ask_if_ambiguous": true
+  },
+  "expects": [],
+  "keywords": [
+   "radar",
+   "satellite",
+   "imagery",
+   "loop"
+  ]
+ },
+ "weather/climate_records": {
+  "kinds": [
+   "trend",
+   "lookup"
+  ],
+  "policy": {
+   "prefer": [
+    "official",
+    "primary",
+    "aggregator",
+    "community"
+   ],
+   "match": "geo",
+   "resolvers": [
+    "place"
+   ],
+   "max_km": 40,
+   "differ_on": [],
+   "max_age": "1d",
+   "cross_check": false,
+   "ask_if_ambiguous": true
+  },
+  "expects": [],
+  "keywords": [
+   "climate",
+   "record high",
+   "normals",
+   "historical weather",
+   "drought"
+  ]
+ },
+ "weather/drought": {
+  "kinds": [
+   "current_value",
+   "map"
+  ],
+  "policy": {
+   "prefer": [
+    "official",
+    "primary",
+    "aggregator",
+    "community"
+   ],
+   "match": "geo",
+   "resolvers": [
+    "us_state",
+    "county"
+   ],
+   "max_km": 40,
+   "differ_on": [],
+   "max_age": "7d",
+   "cross_check": false,
+   "ask_if_ambiguous": true
+  },
+  "expects": [],
+  "keywords": [
+   "drought",
+   "dry",
+   "drought monitor"
+  ]
+ },
+ "hazards/earthquakes": {
+  "kinds": [
+   "latest_items",
+   "alerts",
+   "count",
+   "map"
+  ],
+  "policy": {
+   "prefer": [
+    "official",
+    "primary",
+    "aggregator",
+    "community"
+   ],
+   "match": "geo",
+   "resolvers": [
+    "place",
+    "us_state"
+   ],
+   "max_km": 300,
+   "differ_on": [],
+   "max_age": "15m",
+   "cross_check": false,
+   "ask_if_ambiguous": true
+  },
+  "expects": [],
+  "keywords": [
+   "earthquake",
+   "quake",
+   "seismic",
+   "magnitude",
+   "tremor",
+   "quakes",
+   "shaking",
+   "aftershock",
+   "aftershocks",
+   "temblor",
+   "richter"
+  ]
+ },
+ "hazards/tropical_storms": {
+  "kinds": [
+   "latest_items",
+   "alerts",
+   "map"
+  ],
+  "policy": {
+   "prefer": [
+    "official",
+    "primary",
+    "aggregator",
+    "community"
+   ],
+   "match": "geo",
+   "resolvers": [
+    "place",
+    "zip"
+   ],
+   "max_km": 200,
+   "differ_on": [],
+   "max_age": "1h",
+   "cross_check": false,
+   "ask_if_ambiguous": true
+  },
+  "expects": [],
+  "keywords": [
+   "hurricane",
+   "tropical storm",
+   "cyclone",
+   "nhc",
+   "hurricane watch",
+   "hurricane warning",
+   "tropical storm watch",
+   "tropical storm warning",
+   "tropical depression",
+   "tropics",
+   "tropical",
+   "named storm",
+   "hurricane season",
+   "in the atlantic",
+   "in the gulf",
+   "typhoon",
+   "storm track",
+   "spaghetti models",
+   "landfall",
+   "hurricane center"
+  ]
+ },
+ "hazards/wildfires": {
+  "kinds": [
+   "latest_items",
+   "map",
+   "status"
+  ],
+  "policy": {
+   "prefer": [
+    "official",
+    "primary",
+    "aggregator",
+    "community"
+   ],
+   "match": "geo",
+   "resolvers": [
+    "place",
+    "us_state"
+   ],
+   "max_km": 200,
+   "differ_on": [],
+   "max_age": "1h",
+   "cross_check": false,
+   "ask_if_ambiguous": true
+  },
+  "expects": [],
+  "keywords": [
+   "wildfire",
+   "containment",
+   "burn",
+   "smoke",
+   "fires",
+   "fire near",
+   "fires near",
+   "forest fire",
+   "brush fire",
+   "fire danger",
+   "evacuation",
+   "evacuations",
+   "blaze",
+   "acres burned",
+   "fire map",
+   "burning"
+  ]
+ },
+ "hazards/floods_rivers": {
+  "kinds": [
+   "current_value",
+   "forecast",
+   "alerts"
+  ],
+  "policy": {
+   "prefer": [
+    "official",
+    "primary",
+    "aggregator",
+    "community"
+   ],
+   "match": "geo",
+   "resolvers": [
+    "place",
+    "nwps_gauge"
+   ],
+   "max_km": 25,
+   "differ_on": [
+    "river"
+   ],
+   "max_age": "1h",
+   "cross_check": false,
+   "ask_if_ambiguous": true
+  },
+  "expects": [],
+  "keywords": [
+   "river level",
+   "flood",
+   "stage",
+   "gauge",
+   "streamflow",
+   "discharge",
+   "floods",
+   "flooding",
+   "flooded",
+   "river crest",
+   "crest forecast",
+   "river forecast",
+   "flood stage",
+   "high water",
+   "river levels",
+   "river height",
+   "creek",
+   "levee",
+   "river"
+  ]
+ },
+ "hazards/volcanoes": {
+  "kinds": [
+   "status",
+   "latest_items"
+  ],
+  "policy": {
+   "prefer": [
+    "official",
+    "primary",
+    "aggregator",
+    "community"
+   ],
+   "match": "none",
+   "resolvers": [],
+   "max_km": null,
+   "differ_on": [],
+   "max_age": "1h",
+   "cross_check": false,
+   "ask_if_ambiguous": true
+  },
+  "expects": [],
+  "keywords": [
+   "volcano",
+   "eruption",
+   "volcanic",
+   "volcanoes",
+   "volcano alert",
+   "volcano alert level",
+   "ash advisory",
+   "volcanic ash",
+   "ashfall",
+   "active volcano",
+   "kilauea",
+   "mauna loa",
+   "mount st helens",
+   "mount rainier",
+   "mount shasta",
+   "mount spurr"
+  ]
+ },
+ "hazards/tsunami": {
+  "kinds": [
+   "alerts"
+  ],
+  "policy": {
+   "prefer": [
+    "official",
+    "primary",
+    "aggregator",
+    "community"
+   ],
+   "match": "none",
+   "resolvers": [],
+   "max_km": null,
+   "differ_on": [],
+   "max_age": "15m",
+   "cross_check": false,
+   "ask_if_ambiguous": true
+  },
+  "expects": [],
+  "keywords": [
+   "tsunami",
+   "tsunamis",
+   "tsunami warning",
+   "tsunami advisory",
+   "tsunami watch"
+  ]
+ },
+ "hazards/space_weather": {
+  "kinds": [
+   "current_value",
+   "forecast",
+   "alerts"
+  ],
+  "policy": {
+   "prefer": [
+    "official",
+    "primary",
+    "aggregator",
+    "community"
+   ],
+   "match": "none",
+   "resolvers": [],
+   "max_km": null,
+   "differ_on": [],
+   "max_age": "1h",
+   "cross_check": false,
+   "ask_if_ambiguous": true
+  },
+  "expects": [],
+  "keywords": [
+   "aurora",
+   "northern lights",
+   "aurora forecast",
+   "northern lights forecast",
+   "geomagnetic",
+   "kp index",
+   "solar flare",
+   "space weather",
+   "space weather forecast",
+   "geomagnetic storm",
+   "solar storm",
+   "solar storms",
+   "kp",
+   "cme",
+   "coronal mass ejection",
+   "x class flare",
+   "flare",
+   "flares",
+   "aurora borealis",
+   "sunspot",
+   "sunspots",
+   "solar wind",
+   "radio blackout",
+   "space weather alert",
+   "solar activity",
+   "space weather alerts"
+  ]
+ },
+ "hazards/emergencies": {
+  "kinds": [
+   "latest_items"
+  ],
+  "policy": {
+   "prefer": [
+    "official",
+    "primary",
+    "aggregator",
+    "community"
+   ],
+   "match": "name",
+   "resolvers": [
+    "us_state"
+   ],
+   "max_km": null,
+   "differ_on": [],
+   "max_age": "1d",
+   "cross_check": false,
+   "ask_if_ambiguous": true
+  },
+  "expects": [],
+  "keywords": [
+   "disaster declaration",
+   "fema",
+   "emergency"
+  ]
+ },
+ "water/tides": {
+  "kinds": [
+   "next_event",
+   "schedule"
+  ],
+  "policy": {
+   "prefer": [
+    "official",
+    "primary",
+    "aggregator",
+    "community"
+   ],
+   "match": "geo",
+   "resolvers": [
+    "place",
+    "tide_station"
+   ],
+   "max_km": 80,
+   "differ_on": [
+    "water"
+   ],
+   "max_age": "1d",
+   "cross_check": false,
+   "ask_if_ambiguous": true
+  },
+  "expects": [],
+  "keywords": [
+   "tide",
+   "tides",
+   "high tide",
+   "low tide",
+   "tide table",
+   "tide chart",
+   "tide times"
+  ]
+ },
+ "water/water_levels": {
+  "kinds": [
+   "current_value",
+   "trend"
+  ],
+  "policy": {
+   "prefer": [
+    "official",
+    "primary",
+    "aggregator",
+    "community"
+   ],
+   "match": "geo",
+   "resolvers": [
+    "place",
+    "tide_station"
+   ],
+   "max_km": 80,
+   "differ_on": [
+    "water"
+   ],
+   "max_age": "15m",
+   "cross_check": false,
+   "ask_if_ambiguous": true
+  },
+  "expects": [],
+  "keywords": [
+   "water level",
+   "storm surge",
+   "sea level",
+   "storm surge forecast",
+   "storm surge warning",
+   "surge",
+   "tide gauge",
+   "sunny day flooding",
+   "king tide",
+   "king tides",
+   "coastal flooding",
+   "tidal flooding",
+   "flood at high tide",
+   "high tide flooding"
+  ]
+ },
+ "water/surf_waves": {
+  "kinds": [
+   "current_value",
+   "forecast"
+  ],
+  "policy": {
+   "prefer": [
+    "official",
+    "primary",
+    "aggregator",
+    "community"
+   ],
+   "match": "geo",
+   "resolvers": [
+    "place",
+    "buoy"
+   ],
+   "max_km": 80,
+   "differ_on": [],
+   "max_age": "1h",
+   "cross_check": false,
+   "ask_if_ambiguous": true,
+   "measure": {
+    "buoy": "WVHT"
+   }
+  },
+  "expects": [
+   "waves",
+   "wave_period",
+   "wave_direction",
+   "wind"
+  ],
+  "keywords": [
+   "surf",
+   "wave height",
+   "swell",
+   "buoy",
+   "waves",
+   "wave",
+   "surfing",
+   "surf report",
+   "surf forecast",
+   "swell forecast",
+   "surf conditions",
+   "breakers",
+   "wave period",
+   "glassy",
+   "blown out",
+   "head high",
+   "waist high",
+   "knee high",
+   "surfable",
+   "rideable",
+   "surf check",
+   "flat",
+   "big wave",
+   "wave forecast"
+  ]
+ },
+ "water/water_temperature": {
+  "kinds": [
+   "current_value"
+  ],
+  "policy": {
+   "prefer": [
+    "official",
+    "primary",
+    "aggregator",
+    "community"
+   ],
+   "match": "geo",
+   "resolvers": [
+    "place",
+    "tide_station",
+    "buoy"
+   ],
+   "max_km": 80,
+   "differ_on": [
+    "water"
+   ],
+   "max_age": "1h",
+   "cross_check": false,
+   "ask_if_ambiguous": true,
+   "measure": {
+    "buoy": "WTMP"
+   }
+  },
+  "expects": [
+   "water_temp",
+   "observed_time"
+  ],
+  "keywords": [
+   "water temperature",
+   "sea temperature",
+   "water temp",
+   "ocean temperature",
+   "sea surface temperature",
+   "ocean temp",
+   "sea temp",
+   "lake temp",
+   "lake temperature",
+   "water cold",
+   "water warm",
+   "swimming temperature",
+   "warm is the water",
+   "cold is the water",
+   "warm enough to swim",
+   "warm is the ocean",
+   "warm is the lake",
+   "cold to swim",
+   "too cold to swim"
+  ]
+ },
+ "water/marine_forecast": {
+  "kinds": [
+   "forecast",
+   "alerts"
+  ],
+  "policy": {
+   "prefer": [
+    "official",
+    "primary",
+    "aggregator",
+    "community"
+   ],
+   "match": "geo",
+   "resolvers": [
+    "place"
+   ],
+   "max_km": 60,
+   "differ_on": [],
+   "max_age": "1h",
+   "cross_check": false,
+   "ask_if_ambiguous": true
+  },
+  "expects": [],
+  "keywords": [
+   "marine forecast",
+   "small craft",
+   "boating",
+   "boating forecast",
+   "coastal waters",
+   "coastal waters forecast",
+   "nearshore",
+   "nearshore forecast",
+   "offshore forecast",
+   "gale warning",
+   "small craft advisory",
+   "seas",
+   "choppy",
+   "sea state",
+   "fishing forecast",
+   "sea conditions",
+   "offshore",
+   "marine weather",
+   "marine conditions",
+   "boat out",
+   "boat"
+  ]
+ },
+ "water/beach_quality": {
+  "kinds": [
+   "status"
+  ],
+  "policy": {
+   "prefer": [
+    "official",
+    "primary",
+    "aggregator",
+    "community"
+   ],
+   "match": "geo",
+   "resolvers": [
+    "place"
+   ],
+   "max_km": 30,
+   "differ_on": [],
+   "max_age": "1d",
+   "cross_check": false,
+   "ask_if_ambiguous": true
+  },
+  "expects": [],
+  "keywords": [
+   "beach closure",
+   "water quality",
+   "bacteria",
+   "swim advisory"
+  ]
+ },
+ "water/currents": {
+  "kinds": [
+   "forecast",
+   "schedule"
+  ],
+  "policy": {
+   "prefer": [
+    "official",
+    "primary",
+    "aggregator",
+    "community"
+   ],
+   "match": "geo",
+   "resolvers": [
+    "place"
+   ],
+   "max_km": 30,
+   "differ_on": [
+    "water"
+   ],
+   "max_age": "1d",
+   "cross_check": false,
+   "ask_if_ambiguous": true
+  },
+  "expects": [],
+  "keywords": [
+   "currents",
+   "tidal current",
+   "current prediction",
+   "slack water",
+   "ebb",
+   "flood current"
+  ]
+ },
+ "sky/launches": {
+  "kinds": [
+   "next_event",
+   "schedule"
+  ],
+  "policy": {
+   "prefer": [
+    "official",
+    "primary",
+    "aggregator",
+    "community"
+   ],
+   "match": "none",
+   "resolvers": [],
+   "max_km": null,
+   "differ_on": [],
+   "max_age": "1d",
+   "cross_check": false,
+   "ask_if_ambiguous": true
+  },
+  "expects": [],
+  "keywords": [
+   "launch",
+   "spacex",
+   "nasa launch",
+   "liftoff",
+   "rocket launch",
+   "blue origin",
+   "rocket lab",
+   "starship",
+   "falcon 9",
+   "artemis",
+   "cape canaveral",
+   "vandenberg",
+   "launches"
+  ]
+ },
+ "sky/sun_moon": {
+  "kinds": [
+   "next_event",
+   "current_value"
+  ],
+  "policy": {
+   "prefer": [
+    "official",
+    "primary",
+    "aggregator",
+    "community"
+   ],
+   "match": "geo",
+   "resolvers": [
+    "place"
+   ],
+   "max_km": 100,
+   "differ_on": [],
+   "max_age": "1d",
+   "cross_check": false,
+   "ask_if_ambiguous": true
+  },
+  "expects": [],
+  "keywords": [
+   "sunrise",
+   "sunset",
+   "moon phase",
+   "moonrise",
+   "daylight",
+   "day length",
+   "sundown",
+   "moon",
+   "get dark",
+   "gets dark",
+   "twilight",
+   "golden hour",
+   "dusk",
+   "dawn",
+   "full moon",
+   "new moon",
+   "sun come up",
+   "sun go down",
+   "sun set"
+  ]
+ },
+ "sky/iss": {
+  "kinds": [
+   "current_value",
+   "next_event",
+   "map"
+  ],
+  "policy": {
+   "prefer": [
+    "official",
+    "primary",
+    "aggregator",
+    "community"
+   ],
+   "match": "none",
+   "resolvers": [],
+   "max_km": null,
+   "differ_on": [],
+   "max_age": "15m",
+   "cross_check": false,
+   "ask_if_ambiguous": true
+  },
+  "expects": [],
+  "keywords": [
+   "iss",
+   "space station",
+   "astronauts",
+   "people in space",
+   "pass over"
+  ]
+ },
+ "sky/sky_events": {
+  "kinds": [
+   "schedule",
+   "next_event"
+  ],
+  "policy": {
+   "prefer": [
+    "official",
+    "primary",
+    "aggregator",
+    "community"
+   ],
+   "match": "none",
+   "resolvers": [],
+   "max_km": null,
+   "differ_on": [],
+   "max_age": "1d",
+   "cross_check": false,
+   "ask_if_ambiguous": true
+  },
+  "expects": [],
+  "keywords": [
+   "eclipse",
+   "meteor shower",
+   "planet",
+   "conjunction",
+   "comet",
+   "meteor",
+   "meteors",
+   "perseids",
+   "geminids",
+   "orionids",
+   "leonids",
+   "quadrantids",
+   "lyrids",
+   "retrograde",
+   "mercury retrograde",
+   "sky events",
+   "planets",
+   "visible planets",
+   "stargazing",
+   "blood moon",
+   "shooting stars",
+   "venus",
+   "jupiter",
+   "saturn",
+   "comets"
+  ]
+ },
+ "sky/space_images": {
+  "kinds": [
+   "image"
+  ],
+  "policy": {
+   "prefer": [
+    "official",
+    "primary",
+    "aggregator",
+    "community"
+   ],
+   "match": "none",
+   "resolvers": [],
+   "max_km": null,
+   "differ_on": [],
+   "max_age": "1d",
+   "cross_check": false,
+   "ask_if_ambiguous": true
+  },
+  "expects": [],
+  "keywords": [
+   "astronomy picture",
+   "apod",
+   "mars rover",
+   "space photo"
+  ]
+ },
+ "sky/near_earth": {
+  "kinds": [
+   "latest_items",
+   "next_event"
+  ],
+  "policy": {
+   "prefer": [
+    "official",
+    "primary",
+    "aggregator",
+    "community"
+   ],
+   "match": "none",
+   "resolvers": [],
+   "max_km": null,
+   "differ_on": [],
+   "max_age": "1d",
+   "cross_check": false,
+   "ask_if_ambiguous": true
+  },
+  "expects": [],
+  "keywords": [
+   "asteroid",
+   "near earth",
+   "neo",
+   "close approach"
+  ]
+ },
+ "economy/inflation": {
+  "kinds": [
+   "current_value",
+   "trend"
+  ],
+  "policy": {
+   "prefer": [
+    "official",
+    "primary",
+    "aggregator",
+    "community"
+   ],
+   "match": "none",
+   "resolvers": [],
+   "max_km": null,
+   "differ_on": [],
+   "max_age": "40d",
+   "cross_check": false,
+   "ask_if_ambiguous": true
+  },
+  "expects": [],
+  "keywords": [
+   "inflation",
+   "cpi",
+   "consumer price",
+   "pce",
+   "consumer price index",
+   "price index",
+   "ppi",
+   "producer price",
+   "producer prices",
+   "cost of living"
+  ]
+ },
+ "economy/jobs": {
+  "kinds": [
+   "current_value",
+   "trend"
+  ],
+  "policy": {
+   "prefer": [
+    "official",
+    "primary",
+    "aggregator",
+    "community"
+   ],
+   "match": "none",
+   "resolvers": [
+    "us_state"
+   ],
+   "max_km": null,
+   "differ_on": [],
+   "max_age": "40d",
+   "cross_check": false,
+   "ask_if_ambiguous": true
+  },
+  "expects": [],
+  "keywords": [
+   "unemployment",
+   "jobs report",
+   "payrolls",
+   "jobless claims",
+   "labor"
+  ]
+ },
+ "economy/gdp": {
+  "kinds": [
+   "current_value",
+   "trend"
+  ],
+  "policy": {
+   "prefer": [
+    "official",
+    "primary",
+    "aggregator",
+    "community"
+   ],
+   "match": "none",
+   "resolvers": [],
+   "max_km": null,
+   "differ_on": [],
+   "max_age": "40d",
+   "cross_check": false,
+   "ask_if_ambiguous": true
+  },
+  "expects": [],
+  "keywords": [
+   "gdp",
+   "economic growth",
+   "recession"
+  ]
+ },
+ "economy/housing": {
+  "kinds": [
+   "current_value",
+   "trend"
+  ],
+  "policy": {
+   "prefer": [
+    "official",
+    "primary",
+    "aggregator",
+    "community"
+   ],
+   "match": "geo",
+   "resolvers": [
+    "place",
+    "us_state"
+   ],
+   "max_km": 50,
+   "differ_on": [],
+   "max_age": "40d",
+   "cross_check": false,
+   "ask_if_ambiguous": true
+  },
+  "expects": [],
+  "keywords": [
+   "home price",
+   "housing starts",
+   "rent",
+   "house price index",
+   "mortgage"
+  ]
+ },
+ "economy/fuel_prices": {
+  "kinds": [
+   "current_value",
+   "trend"
+  ],
+  "policy": {
+   "prefer": [
+    "official",
+    "primary",
+    "aggregator",
+    "community"
+   ],
+   "match": "geo",
+   "resolvers": [
+    "us_state"
+   ],
+   "max_km": null,
+   "differ_on": [],
+   "max_age": "7d",
+   "cross_check": true,
+   "ask_if_ambiguous": true
+  },
+  "expects": [],
+  "keywords": [
+   "gas price",
+   "gasoline",
+   "diesel",
+   "fuel price",
+   "gas",
+   "cheapest gas",
+   "gas prices",
+   "price of gas",
+   "average gas",
+   "gallon",
+   "fuel"
+  ]
+ },
+ "economy/food_prices": {
+  "kinds": [
+   "current_value",
+   "trend"
+  ],
+  "policy": {
+   "prefer": [
+    "official",
+    "primary",
+    "aggregator",
+    "community"
+   ],
+   "match": "none",
+   "resolvers": [],
+   "max_km": null,
+   "differ_on": [],
+   "max_age": "40d",
+   "cross_check": true,
+   "ask_if_ambiguous": true
+  },
+  "expects": [],
+  "keywords": [
+   "egg prices",
+   "grocery",
+   "food price",
+   "milk price"
+  ]
+ },
+ "economy/government_finance": {
+  "kinds": [
+   "current_value",
+   "trend"
+  ],
+  "policy": {
+   "prefer": [
+    "official",
+    "primary",
+    "aggregator",
+    "community"
+   ],
+   "match": "none",
+   "resolvers": [],
+   "max_km": null,
+   "differ_on": [],
+   "max_age": "40d",
+   "cross_check": false,
+   "ask_if_ambiguous": true
+  },
+  "expects": [],
+  "keywords": [
+   "national debt",
+   "deficit",
+   "federal spending",
+   "treasury"
+  ]
+ },
+ "economy/trade": {
+  "kinds": [
+   "current_value",
+   "trend"
+  ],
+  "policy": {
+   "prefer": [
+    "official",
+    "primary",
+    "aggregator",
+    "community"
+   ],
+   "match": "none",
+   "resolvers": [],
+   "max_km": null,
+   "differ_on": [],
+   "max_age": "40d",
+   "cross_check": false,
+   "ask_if_ambiguous": true
+  },
+  "expects": [],
+  "keywords": [
+   "trade deficit",
+   "imports",
+   "exports",
+   "tariff"
+  ]
+ },
+ "economy/economic_calendar": {
+  "kinds": [
+   "schedule",
+   "next_event"
+  ],
+  "policy": {
+   "prefer": [
+    "official",
+    "primary",
+    "aggregator",
+    "community"
+   ],
+   "match": "none",
+   "resolvers": [],
+   "max_km": null,
+   "differ_on": [],
+   "max_age": "7d",
+   "cross_check": false,
+   "ask_if_ambiguous": true
+  },
+  "expects": [],
+  "keywords": [
+   "release schedule",
+   "fomc",
+   "economic calendar",
+   "fed meeting"
+  ]
+ },
+ "sports/scores": {
+  "kinds": [
+   "current_value",
+   "latest_items"
+  ],
+  "policy": {
+   "prefer": [
+    "primary",
+    "official",
+    "aggregator",
+    "community"
+   ],
+   "match": "name",
+   "resolvers": [
+    "team_mlb",
+    "team_nhl",
+    "team_espn",
+    "sports_league"
+   ],
+   "max_km": null,
+   "differ_on": [],
+   "max_age": "15m",
+   "cross_check": false,
+   "ask_if_ambiguous": true
+  },
+  "expects": [
+   "score",
+   "opponent"
+  ],
+  "keywords": [
+   "score",
+   "live score",
+   "final",
+   "scores",
+   "whos winning",
+   "who s winning",
+   "winning",
+   "up or down",
+   "vs",
+   "box score",
+   "halftime",
+   "live scores",
+   "game over"
+  ]
+ },
+ "sports/schedules": {
+  "kinds": [
+   "schedule",
+   "next_event"
+  ],
+  "policy": {
+   "prefer": [
+    "primary",
+    "official",
+    "aggregator",
+    "community"
+   ],
+   "match": "name",
+   "resolvers": [
+    "team_mlb",
+    "team_nhl",
+    "team_espn",
+    "sports_league"
+   ],
+   "max_km": null,
+   "differ_on": [],
+   "max_age": "15m",
+   "cross_check": false,
+   "ask_if_ambiguous": true
+  },
+  "expects": [
+   "opponent",
+   "start_time"
+  ],
+  "keywords": [
+   "schedule",
+   "fixtures",
+   "next game",
+   "kickoff",
+   "game",
+   "games",
+   "game time",
+   "next match",
+   "upcoming matches",
+   "upcoming games",
+   "play next",
+   "playing",
+   "play tonight",
+   "who plays",
+   "home games",
+   "first pitch",
+   "puck drop",
+   "mnf",
+   "monday night football",
+   "thursday night football",
+   "sunday night football",
+   "matchup",
+   "tip off",
+   "play today",
+   "play",
+   "plays"
+  ]
+ },
+ "sports/standings": {
+  "kinds": [
+   "ranking"
+  ],
+  "policy": {
+   "prefer": [
+    "primary",
+    "official",
+    "aggregator",
+    "community"
+   ],
+   "match": "name",
+   "resolvers": [
+    "team_mlb",
+    "team_nhl",
+    "team_espn",
+    "sports_league"
+   ],
+   "max_km": null,
+   "differ_on": [],
+   "max_age": "1d",
+   "cross_check": false,
+   "ask_if_ambiguous": true
+  },
+  "expects": [
+   "rank",
+   "record"
+  ],
+  "keywords": [
+   "standings",
+   "table",
+   "rankings",
+   "playoff picture",
+   "magic number",
+   "division",
+   "wild card",
+   "wildcard",
+   "who leads",
+   "first place",
+   "games back",
+   "playoff race",
+   "seeding",
+   "clinched",
+   "elimination number",
+   "top 25"
+  ]
+ },
+ "sports/player_stats": {
+  "kinds": [
+   "current_value",
+   "ranking"
+  ],
+  "policy": {
+   "prefer": [
+    "primary",
+    "official",
+    "aggregator",
+    "community"
+   ],
+   "match": "name",
+   "resolvers": [
+    "team_mlb",
+    "team_nhl",
+    "team_espn",
+    "sports_league"
+   ],
+   "max_km": null,
+   "differ_on": [],
+   "max_age": "1d",
+   "cross_check": false,
+   "ask_if_ambiguous": true
+  },
+  "expects": [],
+  "keywords": [
+   "player stats",
+   "leaders",
+   "top scorer",
+   "batting average"
+  ]
+ },
+ "sports/results": {
+  "kinds": [
+   "latest_items"
+  ],
+  "policy": {
+   "prefer": [
+    "primary",
+    "official",
+    "aggregator",
+    "community"
+   ],
+   "match": "name",
+   "resolvers": [
+    "team_mlb",
+    "team_nhl",
+    "team_espn",
+    "sports_league"
+   ],
+   "max_km": null,
+   "differ_on": [],
+   "max_age": "15m",
+   "cross_check": false,
+   "ask_if_ambiguous": true
+  },
+  "expects": [],
+  "keywords": [
+   "results",
+   "who won",
+   "final score",
+   "win",
+   "won",
+   "lose",
+   "lost",
+   "beat",
+   "result",
+   "how did",
+   "win loss record"
+  ]
+ },
+ "sports/injuries_news": {
+  "kinds": [
+   "latest_items"
+  ],
+  "policy": {
+   "prefer": [
+    "primary",
+    "official",
+    "aggregator",
+    "community"
+   ],
+   "match": "name",
+   "resolvers": [
+    "team_mlb",
+    "team_nhl",
+    "team_espn",
+    "sports_league"
+   ],
+   "max_km": null,
+   "differ_on": [],
+   "max_age": "15m",
+   "cross_check": false,
+   "ask_if_ambiguous": true
+  },
+  "expects": [],
+  "keywords": [
+   "injury report",
+   "team news",
+   "roster"
+  ]
+ },
+ "sports/college": {
+  "kinds": [
+   "schedule",
+   "ranking",
+   "latest_items"
+  ],
+  "policy": {
+   "prefer": [
+    "primary",
+    "official",
+    "aggregator",
+    "community"
+   ],
+   "match": "name",
+   "resolvers": [
+    "team_espn",
+    "sports_league"
+   ],
+   "max_km": null,
+   "differ_on": [],
+   "max_age": "1h",
+   "cross_check": false,
+   "ask_if_ambiguous": true
+  },
+  "expects": [],
+  "keywords": [
+   "college football",
+   "ncaa",
+   "march madness",
+   "ap poll",
+   "college basketball",
+   "cfb",
+   "ncaaf",
+   "ncaab",
+   "bowl game",
+   "heisman",
+   "crimson tide",
+   "college"
+  ]
+ },
+ "sports/motorsport_golf_other": {
+  "kinds": [
+   "ranking",
+   "schedule",
+   "latest_items"
+  ],
+  "policy": {
+   "prefer": [
+    "primary",
+    "official",
+    "aggregator",
+    "community"
+   ],
+   "match": "name",
+   "resolvers": [
+    "team_espn"
+   ],
+   "max_km": null,
+   "differ_on": [],
+   "max_age": "15m",
+   "cross_check": false,
+   "ask_if_ambiguous": true
+  },
+  "expects": [],
+  "keywords": [
+   "f1",
+   "nascar",
+   "pga",
+   "golf leaderboard",
+   "tennis",
+   "ufc"
+  ]
+ }
+}

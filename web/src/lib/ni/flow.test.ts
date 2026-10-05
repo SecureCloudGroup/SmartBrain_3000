@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   AWAITING_SOURCE_PICK,
+  awaitingYesSource,
   flowStageLabel,
   isFlowActive,
+  linkWhat,
+  pickRows,
 } from "./flow";
 
 describe("flowStageLabel", () => {
@@ -64,4 +67,66 @@ it("awaiting_params labels as a needed detail (needs_params 2026-09-14)", () => 
   expect(flowStageLabel({ state: "awaiting_params" })).toBe(
     "Needs a detail from you",
   );
+});
+
+describe("awaitingYesSource (ruling 2026-10-04: hold open paths for a YES)", () => {
+  it("names the host and the page or dataset title", () => {
+    expect(awaitingYesSource({ from: "page", host: "www.nhc.noaa.gov", title: "NHC Outlook" }))
+      .toBe("From the web page www.nhc.noaa.gov — NHC Outlook");
+    expect(awaitingYesSource({ from: "dataset", host: "data.cdc.gov", title: "Flu levels by state" }))
+      .toBe("From the dataset data.cdc.gov — Flu levels by state");
+  });
+
+  it("leaves off a missing title or one that only repeats the host", () => {
+    expect(awaitingYesSource({ from: "dataset", host: "api.example.org", title: "" }))
+      .toBe("From the dataset at api.example.org");
+    expect(awaitingYesSource({ from: "page", host: "example.org", title: " Example.org " }))
+      .toBe("From the web page at example.org");
+  });
+
+  it("never renders an empty host", () => {
+    expect(awaitingYesSource({ from: "page", host: "", title: "Tides" })).toBe("From the web page “Tides”");
+    expect(awaitingYesSource({ from: "dataset", host: "", title: "" })).toBe("From a dataset");
+  });
+});
+
+describe("pickRows (ruling 2026-10-05: Library cards; web as links)", () => {
+  const lib = { kind: "library" as const, title: "USGS gauge", host: "waterservices.usgs.gov",
+                url: "https://waterservices.usgs.gov/x" };
+  const dataset = { kind: "link" as const, found: "dataset" as const, title: "Gauges", host: "data.ny.gov",
+                    url: "https://data.ny.gov/d/abcd" };
+  const page = { kind: "link" as const, found: "page" as const, title: "River levels", host: "rivers.example.org",
+                 url: "https://rivers.example.org/now" };
+
+  it("taps Library sources and offers the rest as links", () => {
+    const out = pickRows([lib, dataset, page]);
+    expect(out.sources).toEqual([lib]);
+    expect(out.links).toEqual([dataset, page]);
+    expect(out.heading).toBe("From the SmartBrain Library — tap the one that fits:");
+  });
+
+  it("says plainly when no Library source answers", () => {
+    expect(pickRows([page]).heading).toBe("No SmartBrain Library source answers this yet.");
+    expect(pickRows([]).heading)
+      .toBe("No SmartBrain Library source answers this yet — paste a link to the data:");
+    expect(pickRows(undefined).sources).toEqual([]);
+  });
+
+  it("never offers an unknown kind as a tap, nor a link that isn't https", () => {
+    const out = pickRows([{ ...page, kind: undefined }, { ...page, url: "javascript:alert(1)" }]);
+    expect(out.sources).toEqual([]);
+    expect(out.links).toEqual([]);
+  });
+
+  it("lists each address once", () => {
+    const out = pickRows([lib, { ...lib }, dataset, { ...dataset, title: "Other dataset" }]);
+    expect(out.sources).toEqual([lib]);
+    expect(out.links).toEqual([dataset]);
+  });
+
+  it("names where a link goes and what it is", () => {
+    expect(linkWhat(dataset)).toBe("data.ny.gov · dataset");
+    expect(linkWhat(page)).toBe("rivers.example.org · web page");
+    expect(linkWhat({ ...page, host: " " })).toBe("web page");
+  });
 });

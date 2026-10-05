@@ -262,6 +262,9 @@ describe("formatNumber", () => {
   it("plain: appends a unit when given", () => {
     expect(formatNumber(42, "plain", "MB")).toBe("42 MB");
     expect(formatNumber(42, "plain")).toBe("42");
+    expect(formatNumber(3.35302, "plain", "%")).toBe("3.35 %");
+    expect(formatNumber(0.00637, "plain")).toBe("0.00637");
+    expect(formatNumber(-0.123456, "plain")).toBe("-0.123");
   });
 
   it("returns an em-dash for non-finite inputs so the card still renders", () => {

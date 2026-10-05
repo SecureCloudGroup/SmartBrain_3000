@@ -57,3 +57,19 @@ def _init_with_desktop_credential(self, *args, sb_auth: bool = True, **kwargs):
 
 
 _TestClient.__init__ = _init_with_desktop_credential
+
+
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _no_leaked_library_embedder():
+    """Every app start wires the Library lookup's embedder (main.py). Reset the provider AND the cached
+    sidecar/build state (``forget()``) around each test, so a test that started the app never makes a
+    later Library test embed against the refused test gateway or inherit stale in-memory vectors."""
+    from smartbrain_3000 import library_embed
+    library_embed.set_provider(None)
+    library_embed.forget()
+    yield
+    library_embed.set_provider(None)
+    library_embed.forget()

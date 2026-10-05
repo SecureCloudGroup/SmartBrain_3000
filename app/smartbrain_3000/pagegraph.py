@@ -8,7 +8,8 @@ fetch + one jailed parse yields a deterministic PageGraph:
      tables[],     # {caption, headers[], rows[][]} typed grids
      feeds[],      # RSS/Atom autodiscovery hrefs
      meta{},       # OpenGraph/description pairs
-     outline[]}    # h1-h3 headings
+     outline[],    # h1-h3 headings
+     readability}  # {readable, kind}: ok | challenge | shell | modal | binary
 
 Consumers: the NI flow's search-evaluate step (rank candidates by what their
 pages actually CONTAIN, with evidence previews), the P2 compiler (selector
@@ -20,16 +21,24 @@ output. ``render_mode`` is "static" until the P3 browser ladder lands.
 ``graph_fitness`` is the deterministic scorer the evaluate step uses: how
 well a page's STRUCTURED content serves a set of wants, with grounded
 evidence strings (label: value pairs lifted verbatim from the page's own
-entities/tables — never model-authored).
+entities/tables — never model-authored). A page's description of ITSELF
+(its JSON-LD name, url, about, isPartOf; WebPage/Article/Organization
+entities) is identity, never evidence — SEO pages emit plenty of it (field
+2026-09-29: an 'is it down' aggregator outranked Slack's own status page on
+'about.name: Slack'). ``readability``, ``first_party`` and ``refreshability``
+are the other deterministic page signals the web step ranks and gates with.
 """
 
 from __future__ import annotations
 
 import json
 import re
+import unicodedata
 from datetime import UTC, datetime
+from urllib.parse import urlparse
 
 from . import jailrun, netguard
+from .jail_extract import PAGE_EXTRA_MARK
 
 _FETCH_DEADLINE_S = 15.0
 _MAX_WANT_TOKENS = 24
@@ -63,8 +72,19 @@ def fetch_page_graph(url: str, *, fetcher=None) -> dict:
     body = got.get("content") if isinstance(got, dict) else None
     if not isinstance(body, (bytes, bytearray)):
         raise netguard.FetchError("no bytes in page response")
-    extracted = jailrun.run_extractor(bytes(body), url_hint=url)
-    return {
+    # F4: forward the HTTP header's charset so a page with no BOM and no
+    # <meta charset> still decodes correctly.
+    charset = netguard._declared_charset(str(got.get("content_type") or "")) \
+        if isinstance(got, dict) else ""
+    extracted = jailrun.run_extractor(bytes(body), url_hint=url,
+                                       declared_charset=charset)
+    return graph_from_extract(url, extracted)
+
+
+def graph_from_extract(url: str, extracted: dict) -> dict:
+    """A jail payload → the PageGraph, with its readability verdict."""
+    assert isinstance(url, str) and isinstance(extracted, dict), "url + payload required"
+    graph = {
         "url": url,
         "fetched_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "render_mode": "static",
@@ -76,6 +96,15 @@ def fetch_page_graph(url: str, *, fetcher=None) -> dict:
         "meta": dict(extracted.get("meta") or {}),
         "outline": list(extracted.get("outline") or []),
     }
+    graph["readability"] = readability(graph)
+    return graph
+
+
+def split_text(text: str) -> tuple[str, str]:
+    """(article text, the page's other visible text) — the jail appends the
+    second after ``PAGE_EXTRA_MARK``."""
+    article, _, extra = str(text or "").partition(PAGE_EXTRA_MARK)
+    return article, extra
 
 
 def _want_tokens(wants: list[str]) -> list[str]:
@@ -97,6 +126,39 @@ def _evidence_line(label: str, value: str) -> str:
     label = " ".join(str(label).split())[:40]
     value = " ".join(str(value).split())[:_MAX_EVIDENCE_CHARS]
     return f"{label}: {value}" if label else value
+
+
+# JSON-LD a page emits about ITSELF: identity, never evidence of serving a
+# want. Self-entity types never count; on any other entity (an Event, a
+# Product, a Dataset) the identity fields don't — its ``name`` does, since the
+# thing's name is what a data page is about.
+SELF_TYPES: frozenset[str] = frozenset({
+    "WebPage", "WebSite", "WebPageElement", "CollectionPage", "ItemPage",
+    "AboutPage", "ContactPage", "SearchResultsPage", "ProfilePage", "FAQPage",
+    "QAPage", "Article", "NewsArticle", "BlogPosting", "ReportageNewsArticle",
+    "AnalysisNewsArticle", "OpinionNewsArticle", "TechArticle",
+    "LiveBlogPosting", "Organization", "NewsMediaOrganization", "Corporation",
+    "BreadcrumbList", "SiteNavigationElement", "WPHeader", "WPFooter",
+    "WPSideBar", "ImageObject", "VideoObject", "SearchAction", "Brand",
+    "SoftwareApplication", "MobileApplication", "WebApplication",
+})
+IDENTITY_FIELDS: frozenset[str] = frozenset({
+    "alternateName", "headline", "alternativeHeadline", "description", "url",
+    "@id", "id", "about", "isPartOf", "mainEntityOfPage", "sameAs", "image",
+    "logo", "thumbnailUrl", "publisher", "author", "creator", "inLanguage",
+    "keywords", "breadcrumb", "potentialAction", "copyrightHolder",
+    "sourceOrganization", "provider", "primaryImageOfPage", "significantLink",
+    "relatedLink", "speakable", "datePublished", "dateModified", "dateCreated",
+    "articleSection", "wordCount", "license",
+})
+
+
+def _evidence_fields(ent: dict) -> list[tuple[str, object]]:
+    """An entity's value-bearing fields (identity and self-entities dropped)."""
+    if ent.get("type") in SELF_TYPES:
+        return []
+    return [(k, v) for k, v in ent.items()
+            if k != "type" and k.split(".")[0] not in IDENTITY_FIELDS]
 
 
 def graph_fitness(graph: dict, wants: list[str]) -> tuple[int, list[str]]:
@@ -122,8 +184,7 @@ def graph_fitness(graph: dict, wants: list[str]) -> tuple[int, list[str]]:
     for ent in graph.get("entities") or []:  # bounded by the jail's caps
         if not isinstance(ent, dict):
             continue
-        matched = [(k, v) for k, v in ent.items()
-                   if k != "type" and (_hit(k) or _hit(v))]
+        matched = [(k, v) for k, v in _evidence_fields(ent) if _hit(k) or _hit(v)]
         if matched:
             score += 5 + 2 * min(len(matched), 3)
             if len(evidence) < _MAX_EVIDENCE:
@@ -166,6 +227,299 @@ def graph_fitness(graph: dict, wants: list[str]) -> tuple[int, list[str]]:
     if score == 0 and _hit(graph.get("text") or ""):
         score = 1  # text-only mention: last-resort signal, never strong
     return score, evidence[:_MAX_EVIDENCE]
+
+
+# ---------------------------------------------------------------------------
+# Page signals (C10/C11): deterministic reads of a PageGraph the web step uses
+# to gate (readability) and rank (first_party, refreshability) — no model.
+# ---------------------------------------------------------------------------
+
+_BINARY_RATIO = 0.08       # replacement / control / unassigned chars → undecodable
+_SHORT_ARTICLE = 400       # article chars under which a marker page is a shell/modal
+_MARKER_TOP = 600          # a loading marker this near the top: the data loads by JS
+_MIN_READABLE = 200        # less readable text than this (and no table rows): a shell
+_CHALLENGE_TEXT = 1500     # challenge pages are short
+_CHALLENGE_MARKERS = (
+    "verify you are human", "checking your browser", "checking if the site connection",
+    "needs to review the security of your connection", "just a moment",
+    "are you a robot", "unusual traffic from your computer", "complete the security check",
+    "attention required", "please complete the captcha",
+    "enable javascript and cookies to continue", "ddos protection by",
+    "bot verification", "press & hold", "access denied",
+)
+_MODAL_MARKERS = (
+    "this dialogue will close", "this dialog will close", "collect your feedback",
+    "we value your privacy", "accept all cookies", "manage consent",
+    "cookie preferences",
+)
+_SHELL_MARKER_RE = re.compile(
+    r"\bloading\b[^\n]{0,40}?(?:…|\.\.\.)|enable javascript|javascript is (?:not available|"
+    r"disabled|required)|you need to enable javascript|please turn on javascript",
+    re.IGNORECASE)
+_CODE_LINE_RE = re.compile(r"[{};=<>()\[\]]")
+
+
+def _odd_char_ratio(text: str) -> float:
+    """Share of characters that are undecodable in practice: U+FFFD, control
+    characters, private-use, surrogate or unassigned code points."""
+    sample = text[:20000]
+    if not sample:
+        return 0.0
+    odd = 0
+    for ch in sample:  # bounded by the sample cap
+        if ch in "\n\r\t":
+            continue
+        if ch == "�" or unicodedata.category(ch) in ("Cc", "Co", "Cs", "Cn"):
+            odd += 1
+    return odd / len(sample)
+
+
+def _readable_lines(text: str) -> str:
+    """Text lines that read as prose/data: code-like runs and marker lines out."""
+    keep = []
+    for line in text.splitlines():  # bounded by the jail's text cap
+        stripped = line.strip()
+        if not stripped or _SHELL_MARKER_RE.search(stripped):
+            continue
+        if len(_CODE_LINE_RE.findall(stripped)) > max(3, len(stripped) // 12):
+            continue
+        keep.append(stripped)
+    return "\n".join(keep)
+
+
+def _placeholder_top(article: str) -> bool:
+    """The data slot near the top of the article is a JS placeholder: a
+    marker that names what it loads ('Loading current advisories…') or
+    several of them ('Old Faithful Loading…', 'Castle Loading…'). One bare
+    'Loading...' beside real values is a spinner, not a shell."""
+    found = list(_SHELL_MARKER_RE.finditer(article[:_MARKER_TOP]))
+    named = any(re.search(r"loading\s+\w", m.group(0), re.IGNORECASE)
+                or "javascript" in m.group(0).lower() for m in found)
+    return named or len(found) >= 2
+
+
+def readability(graph: dict) -> dict:
+    """Can this page be READ as content? ``{"readable": bool, "kind": ...}``.
+
+    kind: ``ok``; ``binary`` (undecodable bytes read as text); ``challenge``
+    (a bot check / interstitial); ``modal`` (a dialog or consent wall is all
+    the page shows); ``shell`` (a JS app whose data isn't in the served HTML:
+    next to no readable text, or a 'Loading…' / 'enable JavaScript'
+    placeholder where the data belongs). Field 2026-09-29: a Reddit challenge,
+    FlightAware's feedback modal, health.aws's empty shell and a 'Loading
+    current advisories…' page were all read as content.
+    """
+    assert isinstance(graph, dict), "graph required"
+    text = str(graph.get("text") or "")
+    title = str(graph.get("title") or "")
+    if len(text) >= 100 and _odd_char_ratio(text) > _BINARY_RATIO:
+        return {"readable": False, "kind": "binary"}
+    article, _ = split_text(text)
+    readable_article = _readable_lines(article)
+    head = (title + "\n" + article[:2000]).lower()
+    if len(readable_article) < _CHALLENGE_TEXT and any(m in head for m in _CHALLENGE_MARKERS):
+        return {"readable": False, "kind": "challenge"}
+    if len(readable_article) < _SHORT_ARTICLE and any(m in article.lower() for m in _MODAL_MARKERS):
+        return {"readable": False, "kind": "modal"}
+    if _placeholder_top(article) or (
+            len(readable_article) < _SHORT_ARTICLE and _SHELL_MARKER_RE.search(text)):
+        return {"readable": False, "kind": "shell"}
+    has_rows = any(isinstance(t, dict) and t.get("rows") for t in graph.get("tables") or [])
+    if len(_readable_lines(text)) < _MIN_READABLE and not has_rows:
+        return {"readable": False, "kind": "shell"}
+    return {"readable": True, "kind": "ok"}
+
+
+# Two-label public suffixes (and shared hosting suffixes whose subdomains are
+# separate owners) — enough of the Public Suffix List for "same site" checks.
+_MULTI_SUFFIXES: frozenset[str] = frozenset({
+    "co.uk", "org.uk", "gov.uk", "ac.uk", "me.uk", "ltd.uk", "plc.uk", "nhs.uk",
+    "police.uk", "com.au", "net.au", "org.au", "gov.au", "edu.au", "co.nz",
+    "govt.nz", "org.nz", "co.jp", "ne.jp", "or.jp", "go.jp", "co.in", "gov.in",
+    "com.br", "gov.br", "com.mx", "gob.mx", "co.za", "gov.za", "com.cn",
+    "gov.cn", "com.sg", "gov.sg", "com.hk", "gov.hk", "co.kr", "go.kr",
+    "com.tr", "gov.tr", "co.il", "gov.il", "com.ar", "gob.ar", "gc.ca",
+    "github.io", "gitlab.io", "herokuapp.com", "netlify.app", "vercel.app",
+    "pages.dev", "web.app", "firebaseapp.com", "blogspot.com", "wordpress.com",
+    "azurewebsites.net", "cloudfront.net", "amazonaws.com", "substack.com",
+})
+# Host-label parts that mark a third-party page ABOUT a subject.
+_AGGREGATOR_PARTS: frozenset[str] = frozenset({
+    "checker", "tracker", "down", "isdown", "isitdown", "outage", "outages",
+    "detector", "results", "numbers", "news", "report", "reports", "fans",
+    "tips", "map", "now", "live", "watch", "monitor",
+})
+# Shared-hosting suffixes whose subdomains are separate owners: a brand-shaped
+# subdomain on one is whoever rented the slot, not the subject (field 2026-10-04:
+# ``slackstatus.herokuapp.com``, ``wmata.netlify.app``). An official_hosts
+# listing still wins — a service that actually publishes on one is accepted
+# through the listing path.
+_SHARED_HOSTING_SUFFIXES: frozenset[str] = frozenset({
+    "github.io", "gitlab.io", "herokuapp.com", "netlify.app", "vercel.app",
+    "pages.dev", "web.app", "firebaseapp.com", "blogspot.com", "wordpress.com",
+    "azurewebsites.net", "cloudfront.net", "amazonaws.com", "substack.com",
+})
+# What may follow a subject's name inside its own host label ("githubstatus").
+_OWN_SUFFIXES: frozenset[str] = frozenset({
+    "", "status", "hq", "app", "inc", "corp", "online", "official", "lottery",
+    "transit", "usa", "us",
+})
+_FIRST_PARTY_GENERIC: frozenset[str] = frozenset({
+    "the", "and", "status", "down", "red", "blue", "green", "orange", "yellow",
+    "silver", "line", "lines", "metro", "jackpot", "delays", "alerts", "news",
+    "weather", "score", "next",
+    # topic words: what an ask is ABOUT, never whose site it is (D10: bitcoin.org
+    # for "bitcoin price", tides.net for "Charleston tides", stock.com for "Tesla stock")
+    "price", "prices", "stock", "stocks", "share", "shares", "market", "markets",
+    "tide", "tides", "mortgage", "mortgages", "rate", "rates", "forecast",
+    "bitcoin", "btc", "crypto", "ethereum", "gold", "oil", "gas", "storm",
+    "storms", "hurricane", "hurricanes", "earthquake", "earthquakes", "traffic",
+    "flight", "flights", "scores",
+})
+
+
+def registrable_domain(host: str) -> str:
+    """eTLD+1 of a host ("health.aws.amazon.com" → "amazon.com",
+    "www.bbc.co.uk" → "bbc.co.uk")."""
+    labels = [x for x in str(host or "").lower().strip().rstrip(".").split(".") if x]
+    if len(labels) <= 2:
+        return ".".join(labels)
+    suffix_len = 2 if ".".join(labels[-2:]) in _MULTI_SUFFIXES else 1
+    return ".".join(labels[-(suffix_len + 1):])
+
+
+def _official_hosts_for(subject: str, official_hosts: dict) -> list[str] | None:
+    """The listed hosts of the longest official_hosts key the subject names
+    (whole words), or None when no key applies."""
+    low = " ".join(str(subject or "").lower().split())
+    best: str | None = None
+    for key in official_hosts or {}:
+        k = " ".join(str(key).lower().split())
+        longer = best is None or len(k) > len(" ".join(best.lower().split()))
+        if k and longer and re.search(rf"(?<![a-z0-9]){re.escape(k)}(?![a-z0-9])", low):
+            best = key
+    if best is None:
+        return None
+    hosts = official_hosts[best]
+    return [hosts] if isinstance(hosts, str) else [str(h) for h in hosts]
+
+
+def _name_tokens(subject: str, ask: str) -> list[str]:
+    """The subject's named-entity tokens: written as a proper name (any
+    capital) in the subject or the ask, and not a topic word. A shouted
+    (all-caps) ask names nothing."""
+    names = set(re.findall(r"[A-Za-z0-9]*[A-Z][A-Za-z0-9]*", str(subject or "")))
+    if ask != ask.upper():
+        names |= set(re.findall(r"[A-Za-z0-9]*[A-Z][A-Za-z0-9]*", ask))
+    named = {n.lower() for n in names}
+    return [t for t in re.findall(r"[a-z0-9]+", str(subject or "").lower())
+            if len(t) >= 3 and t in named and t not in _FIRST_PARTY_GENERIC]
+
+
+def _subject_hyphen_parts(subject: str, ask: str) -> list[str]:
+    """The hyphen-split parts of a hyphenated brand name as it was written in
+    the SUBJECT ("T-Mobile" → ["t","mobile"]; "Chick-fil-A" →
+    ["chick","fil","a"]; "7-Eleven" → ["7","eleven"]). Empty when the
+    subject carries no hyphenated proper name. Short parts bypass the
+    ``_name_tokens`` ≥3 filter because a brand's own hyphen token sequence
+    is the key (field 2026-10-04: t-mobile.com, coca-cola.com,
+    mercedes-benz.com and the other hyphenated brands all missed the name).
+    R4-8 (2026-10-04): the hyphen word must live in the SUBJECT (same rule
+    _name_tokens uses). An ask-only hyphen is never a brand of the subject
+    ("Verizon vs T-Mobile outage" with subject "Verizon outage" used to ship
+    t-mobile.com for Verizon; "Real-time NVDA price", "COVID-19 cases in
+    Ohio", "is X-Men on Disney+", "New-York news" all did similar)."""
+    text = str(subject or "")
+    if text == text.upper():  # a shouted ask names nothing (D10)
+        return []
+    _ = ask  # ask retained for signature compat with callers that pass it
+    for word in re.findall(r"\S+", text):
+        if "-" not in word or not re.search(r"[A-Z]", word):
+            continue
+        parts = [p.lower() for p in word.split("-")]
+        if (len(parts) >= 2
+                and all(re.fullmatch(r"[a-z0-9]+", p) for p in parts)
+                and not any(p in _FIRST_PARTY_GENERIC for p in parts)):
+            return parts
+    return []
+
+
+def first_party(host: str, subject: str, official_hosts: dict, *, ask: str = "") -> bool:
+    """Is ``host`` the subject's OWN site? With an ``official_hosts`` entry
+    for the subject ({subject words: [hosts]}, e.g. the Library's official-site
+    resolver) the registrable domains must match. With none, a NAMED entity
+    of the subject (a proper name in the subject or the original ``ask``,
+    never a topic word: "Tesla" in "Tesla stock", not "stock") is the
+    registrable domain's own-label FIRST part followed only by status-ish
+    _OWN_SUFFIXES words ("slack-status.com", "githubstatus.com") — never a
+    brand hidden behind junk ("free-coinbase-giveaway.com",
+    "tesla-stock-forecast.com") or next to an aggregator part
+    ("powerball-checker.com", "awsdown.com"). Subdomains are the domain
+    owner's, never the subject's ("charleston.tides.net"), and a shared-hosting
+    suffix (``*.netlify.app``, ``*.herokuapp.com``, ``*.github.io``) is never
+    first-party in the fallback — the subdomain is whoever rented it."""
+    assert isinstance(host, str) and isinstance(ask, str), "host + ask must be strings"
+    reg = registrable_domain(host)
+    if not reg:
+        return False
+    listed = _official_hosts_for(subject, official_hosts)
+    if listed is not None:
+        return reg in {registrable_domain(h) for h in listed}
+    labels = reg.split(".")
+    if ".".join(labels[-2:]) in _SHARED_HOSTING_SUFFIXES:
+        return False  # rented subdomain of a shared host — not the subject's own site
+    parts = labels[0].split("-")
+    if any(p in _AGGREGATOR_PARTS for p in parts):
+        return False
+    # A hyphenated brand ("T-Mobile", "Coca-Cola", "7-Eleven") matches as a
+    # whole hyphen-token prefix of the host label — the junk-after-brand test
+    # (``_OWN_SUFFIXES``) still disqualifies e.g. ``tesla-stock-forecast.com``.
+    brand_parts = _subject_hyphen_parts(subject, ask)
+    if brand_parts and parts[: len(brand_parts)] == brand_parts:
+        return all(p in _OWN_SUFFIXES for p in parts[len(brand_parts):])
+    first = parts[0]
+    rest_own = all(p in _OWN_SUFFIXES for p in parts[1:])
+    return rest_own and any(first.startswith(tok) and first[len(tok):] in _OWN_SUFFIXES
+                             for tok in _name_tokens(subject, ask))
+
+
+def authority_leads(first: bool, evidence: list | None) -> bool:
+    """Does a first-party row sort ahead of the fitness order? Only with
+    evidence that its page serves the ask — a zero-evidence official page
+    (unfetched, or no want on it) ranks by fitness like any other row."""
+    return bool(first) and bool(evidence)
+
+
+_NEWS_ENTITY_TYPES: frozenset[str] = frozenset({
+    "NewsArticle", "ReportageNewsArticle", "AnalysisNewsArticle",
+    "OpinionNewsArticle", "BlogPosting", "LiveBlogPosting", "Article",
+})
+_DATED_PATH_RE = re.compile(
+    r"/(?:19|20)\d\d/\d{1,2}(?:/\d{1,2})?/|/(?:19|20)\d\d-\d\d-\d\d"
+    r"|(?<![0-9])(?:19|20)\d\d(?:0[1-9]|1[0-2])(?:[0-2]\d|3[01])(?![0-9])")
+_EVENT_SLUG_RE = re.compile(
+    r"(?:^|[-_/])(?:vs|v|at)[-_](?=[a-z])|(?:^|[-_/])(?:recap|preview|"
+    r"score-analysis|final-score|takeaways|highlights)(?:[-_/.]|$)")
+
+
+def refreshability(graph: dict, url: str) -> float:
+    """0..1: how well a page serves a RECURRING card (1 = a standing page that
+    updates in place). An article / news story entity, a dated URL path or an
+    event slug ('alabama-vs-south-carolina', 'recap') marks a page about one
+    moment — right today, confidently wrong after the next game."""
+    assert isinstance(graph, dict), "graph required"
+    score = 1.0
+    types = {str(e.get("type")) for e in graph.get("entities") or [] if isinstance(e, dict)}
+    if types & _NEWS_ENTITY_TYPES:
+        score -= 0.6
+    elif str((graph.get("meta") or {}).get("og:type") or "").lower() == "article":
+        score -= 0.3
+    path = urlparse(str(url or "")).path.lower()
+    if _DATED_PATH_RE.search(path):
+        score -= 0.5
+    if _EVENT_SLUG_RE.search(path):
+        score -= 0.6
+    return max(0.0, min(1.0, score))
 
 
 # ---------------------------------------------------------------------------
@@ -253,7 +607,11 @@ def run_selector(graph: dict, sel: dict) -> str:
         idx = sel["index"]
         if not (0 <= idx < len(outline)):
             raise GraphDrift("outline entry gone")
-        return str(outline[idx])
+        # F6-A (blind-5, 2026-10-04): the outline list stores "<tag>: <text>"
+        # so a page audit can read the level. A compiled page card lifts the
+        # value verbatim onto the card — strip the jail label so an "I-70 road
+        # conditions" build shows "Traffic & Road Conditions", not "h3: …".
+        return re.sub(r"^h\d:\s*", "", str(outline[idx]))
     table = _table_at(graph, sel.get("table", -1))
     headers = [str(h) for h in (table.get("headers") or [])]
     rows = table.get("rows") or []
@@ -380,7 +738,11 @@ def enumerate_menu(graph: dict, wants: list[str] | None = None) -> list[dict]:
                 _add({"kind": "table_cell", "table": t_i, "row": 0, "col": c_i},
                      f"table {t_i} cell 0,{c_i}", str(cell))
     for o_i, line in enumerate((graph.get("outline") or [])[:5]):
-        _add({"kind": "outline", "index": o_i}, "heading", str(line))
+        # F6-A: the menu's shown value equals what the selector yields — strip
+        # the jail "h<n>: " label here too so a human / model picks on the
+        # heading's words, not on the markup token.
+        _add({"kind": "outline", "index": o_i}, "heading",
+             re.sub(r"^h\d:\s*", "", str(line)))
     return out
 
 

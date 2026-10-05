@@ -1,0 +1,442 @@
+[
+[
+"weather this weekend in Austin",
+"weekend"
+],
+[
+"Boston weather this weekend",
+"weekend"
+],
+[
+"will it rain over the weekend in Seattle",
+"weekend"
+],
+[
+"Sat and Sun forecast Denver",
+"weekend"
+],
+[
+"forecast for saturday and sunday in Miami",
+"weekend"
+],
+[
+"weekend forecast Chicago",
+"weekend"
+],
+[
+"high in Denver on Saturday",
+"dow:sat"
+],
+[
+"rain in Denver Friday",
+"dow:fri"
+],
+[
+"will it snow on Tuesday in Boise",
+"dow:tue"
+],
+[
+"Phoenix high this Thursday",
+"dow:thu"
+],
+[
+"what's the weather Monday in Austin",
+"dow:mon"
+],
+[
+"is it going to rain next Wednesday",
+"dow:wed"
+],
+[
+"Sunday forecast for Atlanta",
+"dow:sun"
+],
+[
+"Friday night weather in Dallas",
+"dow:fri"
+],
+[
+"Saturday morning surf Santa Cruz",
+"dow:sat"
+],
+[
+"weather in Denver tomorrow",
+"tomorrow"
+],
+[
+"will it rain tomorrow in Seattle",
+"tomorrow"
+],
+[
+"surf tomorrow Outer Banks",
+"tomorrow"
+],
+[
+"tmrw weather nyc",
+"tomorrow"
+],
+[
+"sunrise tomorrow Anchorage",
+"tomorrow"
+],
+[
+"tomorrow night low in Fargo",
+"tomorrow"
+],
+[
+"Fargo wind tomorrow",
+"tomorrow"
+],
+[
+"Buffalo snow tomorrow",
+"tomorrow"
+],
+[
+"Phoenix high tomorrow",
+"tomorrow"
+],
+[
+"Chiefs game tomorrow?",
+"tomorrow"
+],
+[
+"is it gonna rain in Seattle tonight",
+"tonight"
+],
+[
+"will it storm in Tulsa tonight",
+"tonight"
+],
+[
+"frost tonight in Boise",
+"tonight"
+],
+[
+"northern lights tonight?",
+"tonight"
+],
+[
+"Miami rain tonight",
+"tonight"
+],
+[
+"low tonight Denver",
+"tonight"
+],
+[
+"this evening's weather in Portland",
+"tonight"
+],
+[
+"overnight temps in Minneapolis",
+"tonight"
+],
+[
+"any storms tonite in Omaha",
+"tonight"
+],
+[
+"Lakers game tonight",
+"tonight"
+],
+[
+"Houston weather today",
+"today"
+],
+[
+"sunrise Bar Harbor today",
+"today"
+],
+[
+"rain today in Boston",
+"today"
+],
+[
+"will it thunderstorm in Houston today",
+"today"
+],
+[
+"any hail in Denver this afternoon",
+"today"
+],
+[
+"fog this morning in San Francisco",
+"today"
+],
+[
+"later today rain chance Charlotte",
+"today"
+],
+[
+"what's the high today in Phoenix",
+"today"
+],
+[
+"any earthquakes near LA today",
+"today"
+],
+[
+"today's forecast Kansas City",
+"today"
+],
+[
+"temperature right now in Chicago",
+"now"
+],
+[
+"what's the temp now",
+"now"
+],
+[
+"is it raining in Portland right now",
+"now"
+],
+[
+"current temperature Denver",
+"now"
+],
+[
+"wind speed at the moment in Corpus Christi",
+"now"
+],
+[
+"hurricanes right now",
+"now"
+],
+[
+"lightning near Miami right now",
+"now"
+],
+[
+"how's the surf currently at Huntington Beach",
+"now"
+],
+[
+"air quality now in LA",
+"now"
+],
+[
+"next 3 days forecast Austin",
+"next_days:3"
+],
+[
+"weather for the next three days in Reno",
+"next_days:3"
+],
+[
+"next few days in Denver",
+"next_days:3"
+],
+[
+"Denver next 5 days",
+"next_days:5"
+],
+[
+"7 day forecast Raleigh",
+"next_days:7"
+],
+[
+"10-day forecast for Tampa",
+"next_days:10"
+],
+[
+"weather this week in Boston",
+"next_days:7"
+],
+[
+"rain chances this week Atlanta",
+"next_days:7"
+],
+[
+"next couple days in Seattle",
+"next_days:2"
+],
+[
+"today and tomorrow weather in Tucson",
+"next_days:2"
+],
+[
+"weather next week in Chicago",
+"next_days:7"
+],
+[
+"14 day forecast Orlando",
+"next_days:14"
+],
+[
+"next 6 hours rain Seattle",
+"next_hours:6"
+],
+[
+"will it rain in the next hour",
+"next_hours:1"
+],
+[
+"next few hours weather Boston",
+"next_hours:3"
+],
+[
+"next 24 hours forecast Dallas",
+"next_hours:24"
+],
+[
+"48 hour forecast Minneapolis",
+"next_hours:48"
+],
+[
+"rain in the next couple hours in Austin",
+"next_hours:2"
+],
+[
+"hourly forecast for the next 12 hours Tampa",
+"next_hours:12"
+],
+[
+"over the next 2 hours any storms",
+"next_hours:2"
+],
+[
+"NYC weather",
+null
+],
+[
+"Bills score",
+null
+],
+[
+"Chiefs next game",
+null
+],
+[
+"AL East standings",
+null
+],
+[
+"latest CPI",
+null
+],
+[
+"earthquakes near San Francisco",
+null
+],
+[
+"when can I see the ISS from Kansas City",
+null
+],
+[
+"any hurricanes headed for Tampa?",
+null
+],
+[
+"how's the surf at Virginia Beach",
+null
+],
+[
+"Powerball jackpot",
+null
+],
+[
+"price of gold",
+null
+],
+[
+"snow forecast Mammoth Mountain",
+null
+],
+[
+"Lakers final score last night",
+null
+],
+[
+"Yankees score yesterday",
+null
+],
+[
+"unemployment rate past 12 months",
+null
+],
+[
+"what happened last weekend in the NFL",
+null
+],
+[
+"pollen count Raleigh",
+null
+],
+[
+"water temperature at Lake Michigan Milwaukee",
+null
+],
+[
+"ocean currents near Miami",
+null
+],
+[
+"hourly bitcoin price",
+null
+],
+[
+"daily covid cases",
+null
+],
+[
+"Old Faithful next eruption",
+null
+],
+[
+"is Slack down",
+null
+],
+[
+"current events in Ukraine",
+null
+],
+[
+"how much snow is Tahoe getting",
+null
+],
+[
+"Monday Night Football score",
+null
+],
+[
+"SAT scores by state",
+null
+],
+[
+"sunrise and sunset Anchorage",
+null
+],
+[
+"tide times Charleston",
+null
+],
+[
+"what's the weather like",
+null
+],
+[
+"nasdaq",
+null
+],
+[
+"dow jones today",
+"today"
+],
+[
+"mortgage rates this week",
+"next_days:7"
+],
+[
+"flights delayed at ORD now",
+"now"
+],
+[
+"traffic on I-70 right now",
+"now"
+],
+[
+"gas prices in Ohio today",
+"today"
+]
+]

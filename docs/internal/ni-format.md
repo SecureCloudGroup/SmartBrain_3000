@@ -75,9 +75,58 @@ No foreign keys; `NIStore.delete` cascades in code (feeds precedent).
 }
 ```
 
-- `params.*.kind` ∈ `string | number | secret`. A `secret` param's `value` is always
+- `params.*.kind` ∈ `string | number | secret | clock`. A `secret` param's `value` is always
   a SecretStore key name in the `ni:<item_id>:` namespace, never the secret itself.
   `{{param:NAME}}` placeholders may appear only where a field's schema says so.
+- A **`clock`-kind** param (F1 2026-10-04) carries `{label, kind: "clock", format, offset_days}`
+  INSTEAD of `value`: the engine fills it from the current clock on every fetch (`format` is a
+  strftime pattern from the engine's closed `%A-Za-z%:- _,./` chars using the closed code set
+  `%Y %m %d %H %M %S %y %j %u %w %-m %-d %B %b %A %a`; `offset_days` is a bounded int). Library
+  schedule / forecast cards (startDate=today, endDate=today+N) use this so day 2 reads day-2's date
+  instead of the creation day's literal.
+- Pre-F1 Library cards (installed on v0.24.0 / v0.24.1) sealed the creation day's clock date into
+  `source.url` as a literal. On their first tick, `ni_flow.upgrade_pre_f1_literal_dates` rewrites
+  the URL to the `{{param:name}}` shape + adds a clock-kind spec param per date — one-time,
+  idempotent (the `{{param:` marker gates it), revision-tracked (origin `repair_l1`,
+  `preserve_attestations=True`; the fetched URL at creation time reproduces byte-for-byte, so
+  `_c2_ok` and `contract` still describe the card). A verify mismatch leaves the card untouched.
+  R4-4 (2026-10-04): the upgrade tries the creation moment in UTC, the user's zone, and the
+  local-machine zone and accepts whichever reproduces the stored literal — a Docker install
+  renders the literal in UTC while the user is in LA / NZ, and the user-zone-only probe would
+  decline. R4-5: the upgrade reslots the pipeline too — a `near_earth_objects["2026-10-01"]`
+  literal rides forward alongside the URL so day 2 extracts without a miss.
+- R4-2 (2026-10-04): one `now` per build. `_sample_and_map` freezes `fetch_now = ni._clock()` at
+  entry, rebuilds the fetch URL from the sealed `_library_url_template` at that moment (a stale
+  `_library_url` from a tap-then-midnight-cross resume is realigned), and threads `fetch_now` into
+  `_handoff`; the C2 verify reads the sealed spec at the same `fetch_now` so a build crossing
+  midnight never crashes on a `_clock()` advance.
+- R4-11 (2026-10-04): `_handoff` scans the sealed `spec.params` for clock-kind entries and runs
+  `_reslot_clock_params_in_pipeline` on the pipeline — a mapping-path (freeform or remap) extract
+  path or `where` value holding a clock-filled literal walks forward instead of freezing on the
+  sample day. The reslot is idempotent (an already-slotted path has no literal to match).
+- R5-1 (2026-10-04): a `next_event` ask with `window="today"` / `"tonight"` keeps the forward
+  floor and the stale-first check — `_frame_gap`'s in-period exemption applies only to `schedule`
+  (a "tide times today" table keeps the whole day); `_build_rows_answer`'s `floor_hour` is True
+  for a next_event list too, so "when is the next tide today" at 22:30 never leads with 8:01 AM.
+- R5-2 (2026-10-04): `_realign_url_to_now` also rewrites `_access.url` when it matched the pre-
+  realign URL, and `default_fetcher` reads `_access` from the record at fetch time (not captured
+  at `run_flow` entry) — a tap at 23:58 and user-key given at 00:05 still fetches with the key.
+  `_repick_without` binds the pick row by sealed `_library_source` (then falls back to literal
+  URL) so a 403 after midnight hands off to the next source instead of returning None.
+- R5-4 (2026-10-04): `_window_op` with `floor_hour=False` keeps `step="hour"` and marks `floor:
+  false` on the op; the engine's `window` transform validator accepts an optional `floor` bool,
+  and `_window_test` disables the current-hour floor without rewriting the step — the dawn rule
+  ("tonight" at 01:30 is now..06:00, never the next evening) still fires on list cards.
+- R5-5 (2026-10-04): `_f1_templatize_literal` walks the Library record's `access.url_template`
+  by position (shared with `_derive_clock_template`) — a count-1 value replace collapsed
+  duplicated slots (treasury-yield-curve's repeated `{year}`) and bound the wrong position on a
+  day whose number equals the month (wikimedia 10/10); every clock placeholder must slot or the
+  position walk declines and the pre-R5 raw / percent-encoded replace is the fallback.
+- R5-8 (2026-10-04): `_derive_clock_template` strips `?`/`&` query segments naming vault_key
+  params from the Library template before position-aligning against the live URL — the live URL
+  has those segments stripped by `library_resolve._expand`, so a trailing `&token={key}` left in
+  the template would otherwise fail the walk for keyed clock sources (nasa-neows-feed,
+  finnhub-earnings-calendar, fec-candidates).
 - `display.size` ∈ `small | wide` (wide spans two grid columns).
 - `contract` is system-written at commissioning (§7); the agent may never set it.
 - `model` optionally overrides the `ni` route for `model` sources (schedules.model
@@ -193,6 +242,15 @@ key      = [A-Za-z_][A-Za-z0-9_-]*
 index    = "-"? digits
 slice    = digits? ":" digits?
 ```
+Quoted keys (2026-09-29, for keys the plain grammar can't spell — a date
+`2026-09-27`, `5`, `0GUSD`, `a b`): `qkey = '["' qchars '"]'`, where `qchars` is 1..200
+characters with no `"` and no control characters (whitespace is allowed inside the
+quotes only). A quoted key opens a path or follows a key / subscript directly, never
+a dot: `near_earth_objects["2026-09-27"][0].name`, `["bitcoin"].usd`. Denied keys stay
+denied; anything else (`a.["x"]`, `a["x"]b`, an unclosed quote) is refused. Paths
+without `"` parse exactly as before. Library answers always emit a filled `{param}`
+segment in this quoted form.
+
 A path that fails to resolve is a stage failure (→ run fails, §6). Output is the
 object of named extracts; downstream stages and the scene see only these names.
 
@@ -234,6 +292,28 @@ Added in v-next (§29 flow-engine phase):
   conditions): ``value`` must be a non-empty string and an item matches when
   its string value starts with it; a non-string item is excluded. Feeds code
   categories as prefixes (NHC basin bins `AT1`/`EP2`/`CP1`).
+
+Added for Library answers (§32, 2026-09-29) — same closed-set discipline, all pure:
+- `number(field, key?)`, `time(field, key?, utc?)` and `date(field, key?)` — a number sent
+  as text → a number; an ISO / RFC 2822 (RSS `pubDate`) / epoch timestamp → the
+  user's local time (a zoneless ISO time is the source's local clock, or UTC with
+  `utc: true`) ("6:48 PM",
+  "Tue 6:48 PM", "Oct 3, 6:48 PM"); a `YYYY-MM-DD` date → "Tue Sep 29" within a
+  week, else "Sep 29" (", 2027" in another year), never shifted by time zones.
+  `key` (dotted, `[n]` positions allowed: `games[0].gameDate`) converts that field
+  of every list row.
+- `zip(field, with, as)` — `field` and each name in `with` (1..7 distinct other
+  outputs) are lists of the SAME length (else `transform_type`; a missing name is
+  `transform_miss`); writes `as` = rows `[{field: a0, with1: b0, …}, …]` (≤500 rows).
+  A table stored as parallel arrays (Open-Meteo `daily`) becomes a list.
+- `label(field, table, key?)` — an integer code → words from a table the APP ships
+  (`table` ∈ `wmo_weather` only: the WMO weather interpretation codes Open-Meteo
+  serves — 0 Clear sky, 1 Mainly clear, 2 Partly cloudy, 3 Overcast, 45 Fog,
+  48 Freezing fog, 51/53/55 drizzle, 56/57 freezing drizzle, 61/63/65 rain,
+  66/67 freezing rain, 71/73/75 snow, 77 Snow grains, 80/81/82 rain showers,
+  85/86 snow showers, 95 Thunderstorm, 96/99 thunderstorm with light / heavy hail).
+  A code not in the table is `transform_type`, never a guess.
+- `reverse(field)` — a list in reverse order (a source listing oldest first).
 
 ### 4.3 Bind + render-validate (implicit, always last)
 
@@ -454,7 +534,9 @@ conversation before the card is parked. Approving the card is what moves
   payload (`preview` for drafts, else `latest` ok / `last_good`).
 - `GET  /api/ni/items/{id}` — spec (secrets as names), health, run history.
 - `POST /api/ni/items/{id}/validate` — C2 verdict `{ok: bool, note?: str}`.
-  Refuses 409 unless the item is currently `commissioning`.
+  Refuses 409 unless the item is currently `commissioning`. On a card awaiting the
+  user's YES (§33) ok=true is the YES and ok=false re-lands the source pick without
+  that source (response `repick: "repick" | "relocate"`).
 - `POST /api/ni/items/{id}/commission` — the Activate button on the drafted
   card: `draft` → `commissioning`. Refuses 409 unless state is `draft`, and
   409 with a clear detail when any secret param is still unfilled. Response
@@ -1829,11 +1911,12 @@ rate frameworks (W1/W2/W3), never named asks.
   evidence lines lifted VERBATIM from the page's own entities/tables —
   grounded by construction). `rank_web_rows` (locate_rank's sibling — ids
   only, validated, ANY failure → fitness order) orders the corpus; ≤3 rows
-  seal as `_ranked_search` `{title, host, url, evidence[≤2×90ch]}` —
-  snippets are rank-time only, NEVER sealed. The board renders sealed rows
-  verbatim as `kind:"web"` suggestions with their evidence ("On the page:
-  …"); a tap submits the sealed URL through the normal pick consent
-  (identical semantics to pasting it). Unfetchable pages stay offerable
+  seal as `_ranked_search` `{title, host, url}` — snippets and evidence
+  are rank-time only, NEVER sealed. AMENDED 2026-10-05 (§33 "Library cards; web as links"): the board
+  renders sealed rows verbatim as `kind:"link"`, `found:"page"` suggestions
+  (title + host, nothing read off the page); a tap on one never builds — the
+  pick route refuses it (409) and `run_flow` re-lands the pause. The same
+  page PASTED by the user builds (held for YES, §33). Unfetchable pages stay offerable
   unscored (bot-blocks are P3's fix). Search failures NEVER fail a flow —
   zero rows, raising provider, or unwired provider all land today's plain
   pause byte-identically.
@@ -1954,6 +2037,188 @@ cards LOOKED built.
   truth (falling back to the prunable journal) — API cards too, proven on
   unfixed main. `_finalize` now carries the prior marker when `born` is None.
 
+**The frame and the verify step (2026-10-03, Rounds 14–18).** The blind runs
+of 2026-09-29 traced most wrong cards to one gap: the steps after intent
+re-derived what the ask wants from raw words, and nothing checked the build
+against the ask before handoff. The flow now carries a FRAME from stage 1 to
+the handoff, and a deterministic check stands where the judge was removed.
+- **Frame fields (stage 1, code only).** `intent.frame_kind` is code's parse
+  (`library_index.frame_kind_from_text`, a closed cue table) over the Library
+  kinds (`current_value | next_event | schedule | forecast | result | trend |
+  ranking | latest_items | alerts | status | count`); words that state no
+  kind leave it null — the model is not asked for one. (Live 2026-10-04: the
+  model's fallback guess "latest_items" for a bare "gas prices" gated locate,
+  verify and the page shape check, shipping Colorado's natural-gas dataset;
+  across the dev + holdout asks with no stated kind, no guessed kind ever
+  improved the first Library row.) `intent.window` is code-only
+  (`ni_flow._window_from_text`): the engine's closed `window` enum (`now |
+  today | tonight | tomorrow | weekend | dow:<mon..sun> | next_days:N |
+  next_hours:N`, counts clamped to 16 days / 168 hours) or null; a stretch
+  already behind us ("last weekend", "past 24 hours") is no window.
+- **Locate gets the frame.** `_library_candidates(request, intent)` passes
+  `hint={subject, wants, place, frame_kind, window}` to
+  `LibraryIndex.candidates` from the pick pause and from
+  `reenter_source_pick` (a Library that fails, a `TypeError` inside it
+  included, offers nothing — it is never retried without the hint). When
+  locate offers no row (it found no source about the ask; its skip reasons
+  are not read), the web stage runs. Rows carry `categories`, `scope`
+  (`place` | `global`), the reading `label` and a same-host `lookup`; a row
+  whose lookup leaves its host is dropped.
+- **Seal.** `seal_library_pick` also seals `_library_format` (what the row
+  promised), `_library_provider`, `_library_scope`, `_library_lookup`, the
+  tapped row's reading (`_library_label`, "Miami Marlins (mlb)") and
+  `_library_readings`: the readings of every non-place row of the pick,
+  kept across re-picks (how the Library read the ask's named subjects;
+  locate checked each row it offered against them).
+- **Sampling (C12/C13).** A sealed same-host lookup runs first
+  (`library_resolve.resolve_lookup` over the flow's own fetcher — NWS points
+  → its forecast grid); the final address replaces `_library_url` and is
+  the card's frozen source. A step off the host, or a lookup that fails,
+  moves on. A Library row that promised JSON and answers with a page
+  (`not_json`) moves on with "did not return its data" — it never becomes a
+  page card.
+- **Verify (C8, `_verify_frame`, before `_handoff` on every declared-answers
+  build).** Deterministic, no model. Refused when (a) the source's
+  categories share no top level with the ask's — only when the Library's
+  classify of the ask AND of the intent's subject + wants are both
+  non-empty and both disjoint from the source's, and the source isn't known
+  by every naming word of the subject (its name, its example asks, the
+  values its address took: "oil stocks report" is an example ask of the
+  EIA's petroleum stocks, though "stocks" classifies as markets) unless the
+  intent itself names the asked kind ("weather": "KC storms tonight" stays
+  refused on the hurricane list); (a2) the source is about a different
+  named subject (`_other_subject`, below); (b) the ask names a place
+  (the intent's place, only when the user's words say it), the category's
+  policy is about places or unknown, and the address never took it (not
+  offered for the place, no geo parameter, coverage doesn't name it); (c)
+  the chosen answers can't be this kind of question — a next event needs a
+  time still to come (an observation's own "as of" doesn't count; the
+  build adds the source's event time when the chosen answers lack one), a
+  result needs a score; rows whose cells hold the month and the day as
+  numbers carry a date (USNO's moon phases and seasons); (d) an older
+  record's answer is labeled for another day than the asked window ("High
+  today" for "on Saturday"); (e) nothing chosen speaks to the words the
+  user asked about and an asked want is unanswered; (f) a topic word of
+  the subject is filed only under subcategories the source isn't, and none
+  of its own words (name, description, entity, example asks, answers) say
+  it. A topic word is one the taxonomy uses on its own — a subcategory's
+  name ("TV shows"), a one-word keyword, or a multi-word keyword said whole
+  ("red" alone isn't "red flag warning": the Red Sox' scores stand). A
+  refusal re-lands the pick without that source ("<provider> doesn't
+  answer this (<reason>)"), then the web, then an honest `unsupported`; it
+  never hands off. A place-free source under a place-free policy ships with
+  "<provider> isn't specific to <place>"; when the Library's taxonomy
+  carries `expects`, the components no answer of the source reports are
+  named ("this source doesn't report: wind").
+- **Second review round (2026-10-04).** The source-level checks (category,
+  other subject, place, stray topic) run before EVERY build path — the
+  model-mapping fallback included, which a source whose declared answers
+  don't fit the response used to reach unchecked (AMENDED 2026-10-05, §33:
+  a tapped Library row never reaches the mapping path any more — a misfit
+  moves on — so that call site, and the mapping path's fix8
+  `_source_contradicts_place` check, are gone; the function stays for its
+  tests and the gate). Two refusals join (e):
+  every want the user said is unanswered refuses even when a subject word
+  overlaps ("gas inventories" on retail gas prices); and a general source
+  (no `coverage.entity`, no geo parameter) refuses a named topic none of its
+  own words, readings or filters take ("latest news on Ukraine" on top
+  headlines). A named topic comes from THREE places in the user's raw words:
+  (a) the validated intent `names` — a narrow closed blank the local model
+  fills (people, companies, organizations, agencies, places, products, teams,
+  events; each entry must be a case-insensitive whole-word substring of the
+  ask or code drops it as a hallucination); (b) capitalized tokens that aren't
+  at the sentence start — mid-sentence caps are always proper; (c) all-caps
+  acronyms of two or more letters that aren't a stop word ("FDA", "SEC",
+  "TSA") — proper even at the sentence start. A sentence-initial capitalized
+  word is a name ONLY when the intent named it: phones auto-capitalize every
+  ask, and without a corroborating model name "Biggest earthquakes today"
+  ships the same source as the lowercased variant. Review-5 (2026-10-04) adds
+  the `names` field; the suffix / topic lookalike heuristics are removed. A
+  list-entity source (a city's local news) still refuses another named outlet
+  or team. Generic quantity wants (level, value, number, amount, worth,
+  reading) are answered by a source's main value. `_other_subject` subtracts
+  only the readings this source took
+  or covers, never another row's. A `{param}` value filled into a host must
+  be a plain host (no credentials, port, fragment or IP literal; a feed path
+  keeps its query); a value a same-host lookup pulls is a bounded id
+  (`[A-Za-z0-9,._:-]{1,64}`, never `.`/`..`). A plain 401/403 drops that
+  address only; a challenge or 429 drops the host. A non-401/403/429 fetch
+  failure (404, 5xx, timeout) on a picked Library row and a page-fetch
+  failure in `_build_page_card` hand over to the next row of the pick —
+  "couldn't be fetched — pick another source" — with a web search only when
+  the dropped row was a Library row; a pasted link / Fix still fails
+  honestly (`_move_on` returns None for a URL that wasn't a pick row). A
+  mapped card whose judge flagged EVERY said want as a gap ("won't include:
+  current_price" when the user asked for the price) refuses and moves on —
+  the pick was wrong, not a useful disclosure; same posture as the
+  declared-answers path's all-wants-unanswered refusal.
+- **Locate runs on the keyword frame.** The hybrid ranking (`library_embed`:
+  route and source asks embedded by a LOCAL model, never a cloud one) is
+  built but not wired: on 95 clean labeled asks (no overlap with the
+  Library's example asks, enforced by the Library's overlap gate) keywords
+  picked 76 right / 2 wrong / 1 missed, the embedder 75 / 3 / 3, and the
+  embedder as a reorder only 76 / 2 / 1 — no gain for a ~4.8k-text build on
+  the local model. It is wired again only when it measures better on a
+  larger clean set.
+- **Named subjects (review round, 2026-10-03; `_other_subject`).** A source
+  with a declared `coverage.entity` is about that subject: it serves the ask
+  when the ask names it (the entity's capitalized / numbered words, its
+  name, or its example asks' words that aren't the words of its kind:
+  "baseball" names MLB, "jobs" payrolls); otherwise only when every naming
+  word the user said is among its own words and it isn't bound to one region
+  (`coverage.geo` like `US-CA`: "subway delays" isn't BART's). Even when
+  named, another one of its kind refuses it: another number ("2 year
+  yield" on the 10-year) or — when the ask doesn't call it by its proper
+  name — a one-word keyword of its subcategory none of its words say
+  ("wmata" on the CTA's alerts; never a word of the subcategory's own name,
+  "inflation" on the CPI). Words the pick's readings name (a team the
+  Library resolved: "New York Yankees") were checked by locate and don't
+  count. A source whose address a resolver filled from the subject (a team,
+  a ticker) is "about the named subject" only when that resolver is one the
+  policy of a category the subject + wants classify as resolves ("Phoenix"
+  fills a ballclub; "the space station over Phoenix" is sky data), and its
+  reading must hold every naming word of the subject ("Miami Marlins" for
+  "Inter Miami" → refused; an acronym of the reading counts: "epl").
+- **Windows that hold (review round, D5).** A name with a day word is no
+  window ("Saturday Night Live", "Monday Night Football", "Black Friday",
+  "Super Tuesday", "Cyber Monday", "Good Friday", "Fat Tuesday", …). When
+  no answer serves the window as declared, `select_answers` takes what
+  holds for it: a slow-moving value (no weather-like `measure`: a moon
+  phase, a weekly price, a jackpot) declared `today` / `latest` for
+  tonight, `latest` for this week (next_days ≤ 7); a list with no axis for
+  this week (a chart, the recent quakes); day rows for tonight (cut as
+  today) — rows that cut to the window ahead of values. A window ahead
+  (tonight, tomorrow, the weekend, a weekday, next days / hours) never cuts
+  rows that all lie in the past (`ni.rows_all_past`: FRED's observation
+  dates) — the card shows the latest rows instead of nothing.
+- **Page path (C9–C11).** `_s2_evaluate` drops pages `pagegraph.readability`
+  can't read (challenge, JS shell, modal, binary), marks the subject's own
+  site official (`pagegraph.first_party` over the subject and the user's own
+  words, the Library's `official_hosts` when it has them) and puts it first
+  only with evidence its page serves the ask (`pagegraph.authority_leads`; a
+  zero-evidence official page ranks by fitness like any other), and weighs
+  fitness by `refreshability`; the rank prompt shows an authority column. `_build_page_card` wraps the jail payload with
+  `graph_from_extract`, skips a page with no want/subject word before any
+  model call (`page_verify.has_evidence`), and runs
+  `page_verify.verify_page_reading` on BOTH tiers; the judge's
+  `serves:false` / `wrong` binds in the interpreted tier too. Any refusal,
+  and an llm reply that won't parse, moves on to the next page of the pick
+  (never a re-search that offers it again); a pasted link ends honestly.
+  fix7-page (2026-10-04) adds four class fixes to the gate: (a) a reading
+  that is a whole-word substring of the page's own title (digits riding
+  along) is chrome, not a value — Yahoo "S&P 500 INDEX (^SPX)" refuses;
+  (b) a list / collection entity's own `name` is a label FOR the list, not
+  an item in it — findarepo's `ItemList.name` refuses on both tiers; (c)
+  a current/status/schedule reading that is a bare clock timestamp parsed
+  past now refuses, unless the reading itself names a status word (a burn
+  ban's "As of 8/11/26, outdoor burning is prohibited" still ships); (d)
+  a 'right now' ask against a page carrying no freshness signal (no
+  `dateModified` within 48 h, no `article:modified_time`, no 'as of' /
+  'updated' / 'N minutes ago' phrase, no today's date) refuses — the
+  intent's `window` rides through `_page_reasons`.
+- **Harness.** `tools/ni-live-e2e.py` records every tapped reading (label,
+  filled params, scope) and the flow's notes for each ask.
+
 ## 30. The SmartBrain Library replaces the built-in catalog (2026-09-28)
 
 The 12 bundled recipes (§18, §26) and everything that existed only for them
@@ -2009,3 +2274,212 @@ and the `recipe` born marker stays readable.
   row, slot `outbox`, ≤200, oldest votes dropped first) is sent by the scheduler pass
   `_auto_send_library_outbox` (≤10 per tick, backoff 15 min doubling to 24 h, drop on
   400/413/415/422 or after 8 tries). `SMARTBRAIN_LIBRARY_API=""` switches sending off.
+
+
+## 32. Cards built from a Library source's declared answers (2026-09-29)
+
+- **Record field.** A curated Library record may carry `answers` (Library spec v1.1):
+  `value` (one path; type `number` | `text` | `time` | `date` | `count`; `unit` or
+  `unit_path`; `codes: wmo_weather`; a `time` may say `utc: true` — its zoneless values are
+  UTC, not the source's local clock), `list` (rows at `path`, 1–4 row cells relative to
+  one item, `newest_first`, `may_be_empty`, `filter: {path, equals}` where `equals` is a
+  `"{param}"` or a short fixed value the response uses, e.g. `"Final"`) and
+  `columns` (2–4 parallel arrays, `limit`). Paths may hold whole `{param}` segments,
+  filled at build as quoted keys (§4.1): `near_earth_objects.{date}` →
+  `near_earth_objects["2026-09-27"]`.
+  `LibraryIndex.answers(id)` returns them; `ni_flow._clean_answer` drops any answer
+  that breaks the closed shape (the rest still serve).
+- **Spec v1.2 — what an answer delivers (2026-10-03).** Optional, closed: a value's
+  `window` (`now | today | tonight | tomorrow | latest`, the newest reading not tied to
+  the clock) and `measure` (`temperature | feels_like | precip_chance | precip_amount |
+  conditions | thunderstorm | snow | wind | humidity | waves | swell | wave_direction |
+  water_temp | alerts | kp | uv | air_quality | tide | sunrise | sunset`); a list's or
+  columns answer's `axis: {cell, step: day|hour|period}` (the cell is one of its own
+  time/date cells: the rows are indexed by time and can be cut); `tbd_if: {path, equals}`
+  on a `time` value (path from the root) or a list row's `time` cell (row-relative) —
+  `equals` is `true` or a flag word ("TBD", "TBA").
+- **Seal.** A Library tap (`pick_flow_source` and `tools/ni-live-e2e.py`, both through
+  `ni_flow.seal_library_pick`) seals `_library_source`, `_library_url` and
+  `_library_params` (the values the URL was filled with — candidate rows now carry
+  `params`, never the key slot) next to `_format`.
+- **Pick by the frame (C7).** For a source that declares v1.2 keys, `select_answers(…,
+  window, frame_kind)` first narrows to what can show the asked window: a value declared
+  for it (`now` also takes `latest`; `today` takes `now` and `latest`), rows whose axis step
+  can cut it (day rows never cut hours), a list with no axis only for now / today /
+  tonight; the best-fitting rows lead, and the window's own words leave the scoring. A
+  measure the ask names ("wind") that no answer reports, or no answer for the window, is
+  nothing — the next source, "<provider> doesn't give <the weekend>" / "doesn't report
+  wind", never the headline answers instead. A `count` answer only serves "how many /
+  number of"; "any …?" takes the list that may be empty. A general ask for a stretch of
+  time takes the best-fitting rows. Older records keep word-only selection.
+- **Build.** `_sample_and_map` on a fresh build (never a remap) whose fetched URL equals
+  `_library_url` builds from the answers before any derive / mapping call:
+  `select_answers` (the user's words first; ties → declared order; a list/columns
+  answer alone when it wins or the ask is for many things; otherwise wants-named then
+  `primary` value answers, ≤4), `{param}` segments filled, then extract + typed
+  transforms (`number`, `time`, `date`, `count`, `label`, `zip` + `top_n` (7 daily /
+  12 hourly), `reverse`, `where` eq for a filter). `unit_path` is read once and frozen
+  as a literal (number node `unit`; a row suffix in list scenes). The pipeline runs on
+  the sample, every shown value is typed-checked, and the draft spec validates and
+  binds. A list fits when every cell is present in SOME row; a row missing a cell shows
+  "—" there (a cell missing from EVERY row is drift: the run fails, repair fires). A
+  `may_be_empty` list counts its rows and shows "No <label> right now" while empty.
+  With a window and an `axis`, the engine's `window` transform (keyed by the axis cell,
+  `zone` extracted from the source's top-level `timezone` / `utc_offset_seconds`, plus
+  `utc` / `unless` / `step` carried from the axis cell — F3/F9/F11 2026-10-04)
+  replaces `top_n` and runs before the cells' conversions, so "this weekend" stays Sat +
+  Sun on every refresh. "Today" is the source's today (its named zone, else the offset
+  of the row nearest now) — except that a UTC stamp (`Z` / `+00:00`) with no zone named
+  says when, not where: its day is the user's (MLB / NHL starts; at 21:30 in New York
+  "today" keeps tonight's 9:40 PM game). The axis cell's `utc: true` flag rides onto the
+  window op so a zoneless time declared UTC is a UTC instant (TheSportsDB `strTimestamp`,
+  SWPC `time_tag` — a zoneless 03:00 is 8 PM PDT, kept by `tonight` in LA). A row whose
+  `tbd_if` flag is set becomes a day row on its written date (`unless` on the window op):
+  an MLB TBD start sentinel 07:33Z never slips into `tonight`. On an hour-step axis
+  `today` / `tonight` floor at the current hour FOR FORECAST-STYLE SERIES (columns kind
+  — hourly weather); event / schedule / result lists (list kind) keep the whole asked period
+  (R4-6 2026-10-04 / R5-4 2026-10-04: `_window_op` with `floor_hour=False` keeps `step="hour"`
+  and marks `floor: false` on the op; the engine's `window` transform honors the flag without
+  rewriting the step, so the dawn rule still fires on hour axes). A next-event list (R5-1
+  2026-10-04) still floors — "when is the next tide today" at 22:30 cuts the morning low.
+  `tonight` before 06:00 is the current night (now..06:00) on any hour-step axis, regardless of
+  `floor`. Day-step rows keep the whole date even when the cell has a clock. A next-event /
+  schedule list on a time axis with no asked window still gets a forward cut (`upcoming`) every
+  run: rows from now − 15 min on (`ni._UPCOMING_GRACE`), the same floor `next_event_stale`
+  judges a "next" card by, so a kept row is never refused and an event 50 minutes past is never
+  "next"; on an explicit day / night window (`today`, `tonight`) the stale-first check does NOT
+  fire for a schedule — "MLB schedule today" at 10 PM intentionally shows the Finals from
+  earlier (R4-6); it DOES fire for a next_event (R5-1) so "the next tide today" never leads
+  with a past tide.
+  The engine clock is the user's zone as the DESKTOP reports it (`meta user:timezone`,
+  loaded at unlock); R4-3 (2026-10-04): a REMOTE device may SEED the zone when none is
+  stored yet so a headless / LAN-only / phone-only install still runs on the user's
+  calendar instead of UTC — `meta user:timezone_by` records which authority last wrote
+  (`desktop` | `remote`) so a desktop handshake always overrides and a remote probe
+  never overrides a desktop-set value.
+  Day rows answer "tonight" as today; a window ahead over rows that all lie in the past
+  isn't applied (the latest rows show). `tbd_if` also becomes the `time` transform's
+  `unless` (a value's flag is extracted as `<name>_tbd` when the sample carries it): the
+  card shows the date + "time TBD". For a next-event / schedule ask, a value answer's
+  time node is marked `next`, so a time that has passed shows "no current prediction".
+- **Nothing here → the next source.** When the response holds none of the chosen answers
+  (TheSportsDB listing no games) or an asked value is missing (a buoy not measuring waves),
+  the pick re-lands on the other offered sources with "<provider> has nothing for this right
+  now" (web search when none is left). With no other source, an asked value that's missing
+  falls back to the source's other `primary` answers, named "not reported by this source
+  right now"; otherwise the card ends honestly (`unsupported`). Any other misfit notes "the
+  Library's declared answers didn't fit…" and moves on to the next source (§33, amended 2026-10-05: a
+  tapped Library row is never model-mapped).
+- **Verify replaces the judge.** The build is deterministic, so the P8 judge doesn't run
+  (its gap guesses were false on cards that showed the very thing); `_verify_frame` (§29
+  "The frame and the verify step") checks the build against the ask's frame instead and
+  refuses what can't answer it. The note says "built from the Library's declared answers:
+  <labels>" plus, computed by code, "this source doesn't report: <want>" for a want the
+  user's own words named that no declared answer speaks to (a filled value — the URL's
+  params only; a place the address never took is not filled) and for the subcategory's
+  `expects` components none of the source's answers reports.
+- **Bare lists.** The engine now wraps a bare-list response as `{"items": [...]}`
+  before the pipeline, exactly as the flow samples it (no path can address a bare
+  list root, so no existing card changes).
+- **Place-row scoping (fix6-rows, 2026-10-04).** A list whose row declares a cell naming a place
+  (`port`, `station`, `city`, `state`, `county`, `country`, `location`, `site`, `place`, `venue`,
+  `airport`, `region`) is scoped to the ask's named place like an entity-filled answer is scoped
+  to its `{param}`: `_try_answers_build` calls `_scope_rows_to_place(answer, sample, place)`,
+  which finds the first row whose place cell matches (case-folded exact, else starts-with) and
+  seals a `where eq` filter with that row's exact value onto the answer. No row names the place
+  → the source has nothing for it ("CBP border wait times has nothing for Pembina") and the next
+  source runs. A source already filled from a geo parameter (lat/lon/zip/station) stays off the
+  scoping (its rows describe where each row lives relative to its city — "4 km W of Yountville,
+  CA" is not what the ask filters on). "San Ysidro border wait" ships only San Ysidro's rows;
+  "flu levels in Texas" ships only Texas rows on the model-mapping path (handled in parallel).
+
+## 33. Open paths wait for the user's YES (operator ruling 2026-10-04)
+
+"Hold open paths for a YES." Across three sealed blind runs every confidently wrong card came
+from the two open paths; every card built from a Library source's declared answers was right.
+AMENDED 2026-10-05 ("Library cards; web as links", below): the flow no longer builds from a web
+search result or a Library source without declared answers, so a link the user PASTES is the only
+new card that reaches the page / mapping paths and waits for the YES. Cards held before the
+amendment keep their hold and their YES / NO.
+
+- **Seal.** `_finalize` seals `_built_from: {path, host, title}` (closed; `ni._validate_built_from`)
+  on every flow build: `declared` (the §32 declared-answers build — `_handoff(path="declared")`),
+  `page` (an `http_page` card, compiled or interpreted tier) or `mapping` (the model-mapping path:
+  a harvested dataset, a Library source without declared answers, a pasted JSON link, and every
+  remap / Fix). `host` is the fetched URL's host; `title` is the page's own title, else the title of
+  the pick row the user tapped (Library or web), else "". Computed cards seal nothing. Export
+  strips it (`_EXPORT_STRIP_KEYS`), template packs may not carry it (refused at parse, stripped at
+  install), so a template can neither claim nor shed it. No migration: a card without the marker
+  (every card built before the ruling) is never held.
+- **Held.** `ni.awaits_yes(item)` = state `commissioning` AND `_built_from.path` ∈ {page, mapping}
+  AND no `_c2_ok`. Held cards land `commissioning` like every card (§6) and differ only in: the
+  due query skips them (no cadence fetch until the YES); the board shows the reading the flow
+  found (`preview`; a manual run's ok `latest` wins) with `awaiting_yes: {from: page|dataset,
+  host, title}`; the chat status tool says the card waits for the user's YES. live still needs
+  `_c2_ok`, which only `POST /validate ok=true` writes — scheduler, manual run, repair (L1/L2 keep
+  state + attestations), export/import, template install and template update never set it, and
+  `update_spec` strips it. A card past commissioning (live / degraded / failing) already had its
+  YES and is never re-held by an edit; a Fix / remap or a source-changing edit returns it to
+  commissioning and therefore to the YES.
+- **YES** = the C2 verdict (`/validate ok=true`): `_c2_ok` sealed, the C3 kick runs at once
+  (contract captured), and `last_checked` is cleared so the C3 proof runs on the next tick
+  (a held card had no C1 run before the YES) → live.
+- **NO** = `/validate ok=false` on a held card: a `c2_wrong` journal row ("user said no to the
+  reading from <host>"), state `draft`, then `ni_flow.decline_reading`: the declined URL joins the
+  flow record's `_declined` (≤10, never offered on this card again — `_pause_source_pick` and
+  `_pause_with_web` filter it) and the per-pick seal (`_library_*`, `_access`, `_format`) clears.
+  Other offered rows left → the pick re-lands at once (`repick`, via `_repick_without`); none left
+  or a pasted link → the flow re-runs from the user's words with the declined address excluded
+  (Library → web → paste-a-link; `relocate`). The next pick builds a fresh card that waits for
+  its own YES (or goes live as before if it is a declared build). Never a dead end.
+- **Card (/ni).** Health chip "Needs your OK"; dashed border (not live yet); the reading renders
+  as the card's own scene; under it "Is this what you asked for?", "From the web page <host> —
+  <title>" / "From the dataset <host> — <title>" (`awaitingYesSource`, web/src/lib/ni/flow.ts),
+  and **Yes, that's it** / **No, try another source**; the footer says "not updating yet".
+  While a flow speaks on a draft (the re-pick after NO) Activate and the preview tag hide.
+- **Live harness.** `tools/ni-live-e2e.py` reports a held card as `awaiting-yes` and prints its
+  reading (the preview scene's words), host, title and kind, so a human judges whether the YES
+  would be right; declared cards report as before.
+
+### Amendment — "Library cards; web as links" (operator ruling 2026-10-05)
+
+Across the last two sealed blind runs 9 of 15 readings pulled from web pages / datasets were wrong
+even behind the YES gate. This release, cards are built only from Library sources that DECLARE their
+answers (§32); everything else is offered as a link, named honestly, with nothing read off it.
+
+- **Rows.** `_library_candidates` marks each row (`_mark_links`): `answers: true` when
+  `_library_answers(source_id)` is non-empty (a tap builds); otherwise `answers: false` plus `page` —
+  the page a person opens about the source (`_human_page`: the record's `access.docs_url`, else
+  `provider.url`; never the API address / `url_template`, a machine file (`.json`, `.yaml`, `.xml`,
+  `.zip`, `.csv`, feeds…) or a terms / legal / policy page). A row with no such page is dropped.
+  Buildable rows come first. A row sealed before the ruling carries no mark and counts as buildable
+  (`_buildable`); the build below still moves on from a source without answers.
+- **Pause.** Any buildable row → the Library pick as before (its link rows ride along, no web
+  search). None → S2 runs (unchanged ranking: `_s2_evaluate` + `rank_web_rows`) and ≤3 pages seal
+  as `_ranked_search {title, host, url}` (no evidence) next to the Library's link rows; nothing
+  found → the plain pause, note "no SmartBrain Library source answers this yet". A move-on with no
+  buildable row left searches the web the same way (`_move_on`, links carried).
+- **Board.** `suggestions`: buildable Library rows `kind:"library"` (as before), then
+  `{kind:"link", found:"dataset", title, host, url: page}`, then `{kind:"link", found:"page",
+  title, host, url}`.
+- **Never built.** `POST …/flow/pick-source` answers 409 ("that page is offered as a link —
+  SmartBrain can't keep a live card from it yet; open it, or paste a link to the data") for a URL
+  that is a link row (a web row's url, a dataset row's page or API url) unless the body says
+  `pasted: true` (the card's paste form): then `ni_flow.mark_pasted` seals `_pasted` and it builds
+  like any pasted link (held for YES). `run_flow` itself re-lands the pause for a link-row URL that
+  isn't `_pasted` — the live harness, a retry and the chat resume tool can't build one either.
+  Only buildable rows seal a Library pick (`seal_library_pick`, vote).
+- **Build.** A tapped Library row builds ONLY from its declared answers: `_try_answers_build`
+  → None (no answers, or they don't fit the response) moves on ("doesn't declare its answers" /
+  "didn't fit its declared answers"); "nothing for this right now" with no other row ends
+  `unsupported`; a Library row that answers with a page (`not_json`, any format) moves on — never a
+  page card. The model mapping path now serves only a pasted JSON link and Fix / remap.
+- **Card (/ni).** `pickRows` (web/src/lib/ni/flow.ts) splits the rows: Library sources are tap
+  buttons; links render under "Pages that may help — SmartBrain can't keep a live card from these
+  yet:" as plain `<a target="_blank" rel="noopener noreferrer">` rows (title, then "host · dataset"
+  / "host · web page", `linkWhat`). Heading: "From the SmartBrain Library — tap the one that fits:" /
+  "No SmartBrain Library source answers this yet." / "… — paste a link to the data:". The paste
+  form sends `pasted: true`.
+- **Live harness.** `tools/ni-live-e2e.py` taps only `kind:"library"` rows; a pause that offers
+  only links reports outcome `links` and prints each as `host — title`.
+

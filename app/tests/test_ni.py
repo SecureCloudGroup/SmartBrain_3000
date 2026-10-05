@@ -3028,9 +3028,11 @@ def test_fetch_http_page_merges_jail_payload(monkeypatch: pytest.MonkeyPatch) ->
         return {"final_url": url, "status": 200, "content_type": "text/html",
                 "content": b"<html>...</html>"}
 
-    def fake_extract(html: bytes, url_hint: str, *, timeout_s: float = 20.0) -> dict:
+    def fake_extract(html: bytes, url_hint: str, *, timeout_s: float = 20.0,
+                     declared_charset: str = "") -> dict:
         captured["html"] = html
         captured["url_hint"] = url_hint
+        captured["declared_charset"] = declared_charset
         return {"text": "extracted body", "title": "Extracted"}
 
     monkeypatch.setattr(netguard, "safe_fetch_page", fake_page)
@@ -3043,6 +3045,7 @@ def test_fetch_http_page_merges_jail_payload(monkeypatch: pytest.MonkeyPatch) ->
     assert captured["url"] == "https://example.com/x"
     assert captured["html"] == b"<html>...</html>"
     assert captured["url_hint"] == "https://example.com/x"
+    assert captured["declared_charset"] == ""  # text/html with no charset: the page's own meta decides
 
 
 def test_fetch_http_page_redirect_discipline(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -4404,7 +4407,7 @@ def test_transform_where_non_list_field_is_stage_failure() -> None:
 
 
 def test_transform_where_validation_refuses_bad_op_and_bad_key() -> None:
-    """§29 where: op enum + §4.1 single-segment key grammar enforced at spec time."""
+    """§29 where: op enum + the row-key grammar (dotted nested keys allowed, malformed refused)."""
     with pytest.raises(ValueError, match="op"):
         nimod.validate_spec(_basic_spec(pipeline=[
             {"op": "extract", "paths": {"rows": "rows"}},
@@ -4417,7 +4420,7 @@ def test_transform_where_validation_refuses_bad_op_and_bad_key() -> None:
         nimod.validate_spec(_basic_spec(pipeline=[
             {"op": "extract", "paths": {"rows": "rows"}},
             {"op": "transform", "apply": [
-                {"fn": "where", "field": "rows", "key": "a.b",  # dotted path refused
+                {"fn": "where", "field": "rows", "key": "a..b",  # malformed path refused
                  "op": "ge", "value": 5},
             ]},
         ]))
