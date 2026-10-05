@@ -2355,7 +2355,8 @@ def _try_answers_build(store: ni.NIStore, item_id: str, request: str, intent: di
     # geo resolver turned into lat/lon.
     built["unanswered"] = _unanswered_wants(answers, request, wants,
                                             [*params.values(), intent.get("place") or ""],
-                                            label=str(live.get("_library_label") or ""))
+                                            label=str(live.get("_library_label") or ""),
+                                            kind=_kind_label_tokens(_resolve_library(), source_id))
     return built
 
 
@@ -2398,7 +2399,7 @@ _QUANTITY_WANTS = frozenset({"level", "value", "number", "amount", "worth", "rea
 
 
 def _unanswered_wants(answers: list[dict], request: str, wants: list, filled: list[str],
-                      *, label: str = "") -> list[str]:
+                      *, label: str = "", kind: frozenset[str] | set[str] = frozenset()) -> list[str]:
     """The wants the user's OWN words asked for that no declared answer of this source speaks to
     ("Yankees score" on a schedule source → ["score"]). Deterministic: a want counts only through
     its words that are in the request and aren't a filled value (team, place); it is unanswered
@@ -2429,6 +2430,7 @@ def _unanswered_wants(answers: list[dict], request: str, wants: list, filled: li
         if _event_time(a) or _dated_rows(a):  # a time or a month + day answers "when" / "date"
             covered |= {"date", "time", "when", "day"}
     covered |= _answer_tokens(_amp(label))  # R9: the resolver's own reading on the pick row
+    covered |= set(kind)  # a want that names the source's own category ("weather" on a forecast)
     has_primary_value = any(a.get("kind") == "value" and a.get("primary") for a in answers)
     out: list[str] = []
     for want in (wants or [])[:_MAX_INTENT_FIELDS]:
@@ -3071,6 +3073,25 @@ def _names_hit(said: set[str], names: set[str]) -> bool:
     ("fed" → "federal", "gas" → "gasoline")."""
     return any(a == n or (len(a) >= 3 and len(n) >= 3 and (a.startswith(n) or n.startswith(a)))
                for a in said for n in names)
+
+
+def _kind_label_tokens(lib: object, source_id: str) -> set[str]:
+    """The words of the LABELS of the category and subcategory a source is filed under ("Weather &
+    Air", "Forecast"): a want that only names the source's own kind is what the source reports.
+    Labels only, never the keyword lists ("tornado" is a weather keyword, not a forecast's answer)."""
+    try:
+        record = lib.get(source_id) if lib is not None and source_id else None
+        taxonomy = lib.taxonomy() if record else []
+    except Exception:  # an older or broken Library: no kind facts
+        return set()
+    cats = set((record or {}).get("categories") or [])
+    out: set[str] = set()
+    for cat in taxonomy:  # bounded by the taxonomy
+        for sub in cat.get("subcategories") or []:
+            if f"{cat.get('id')}/{sub.get('id')}" in cats:
+                out |= _answer_tokens(_amp(str(cat.get("label") or "")))
+                out |= _answer_tokens(_amp(str(sub.get("label") or "")))
+    return out
 
 
 def _kind_tokens(lib: object, cats: list[str]) -> set[str]:

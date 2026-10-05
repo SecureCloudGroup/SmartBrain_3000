@@ -206,3 +206,19 @@ def test_pause_with_web_names_why_the_library_row_dropped() -> None:
     assert pause is not None
     note = (pause.get("notes") or [""])[-1]
     assert "its next time has already passed" in note, f"missing why in: {note!r}"
+
+
+def test_a_want_that_names_the_sources_own_category_is_answered() -> None:
+    """'weather this weekend in Austin' on the NWS 7-day forecast was refused "it doesn't report
+    weather" (live holdout 2026-10-04): the want named the source's own category. The words of its
+    category / subcategory LABELS ("Weather & Air" / "Forecast") answer such a want; their keyword
+    lists don't (a forecast must not pass for "tornado warnings")."""
+    answers = [{"name": "periods", "label": "Forecast periods", "words": ["forecast", "rain chance"],
+                "kind": "list", "primary": True, "cells": []}]
+    kind = {"weather", "air", "forecast"}
+    assert ni_flow._unanswered_wants(answers, "weather this weekend in Austin", ["weather"],
+                                     ["Austin"], kind=kind) == []
+    assert ni_flow._unanswered_wants(answers, "tornado warnings in Austin", ["tornado warnings"],
+                                     ["Austin"], kind=kind) == ["tornado warnings"]
+    assert ni_flow._unanswered_wants(answers, "weather this weekend in Austin", ["weather"],
+                                     ["Austin"]) == ["weather"]  # without the kind: unchanged
