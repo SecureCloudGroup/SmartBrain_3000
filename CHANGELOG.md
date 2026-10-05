@@ -11,6 +11,8 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-10-05
+
 ### Changed
 
 - **Cards come from SmartBrain Library sources that describe their answers;
