@@ -13,6 +13,15 @@ to know when a release changes behavior.
 
 ### Changed
 
+- **Earthquakes for a US state no longer show rows from a neighbor.** When you
+  ask about earthquakes in a US state, the state's bounding box covers nearby
+  land in neighbors — western Nevada sits inside California's box, so the
+  live card used to lead with "22 km NNE of Yerington, Nevada". The card now
+  drops rows whose place reads name only another US state, and keeps rows
+  naming the asked state (or no state). When nothing happened in your state
+  today the card says so, instead of showing a neighbor. "Earthquakes in
+  California today" also cuts to today in your zone; a no-window ask keeps
+  the recent list.
 - **A US-national number is no longer shipped as if it were your state's.**
   When you name a state (or a city in one) on an ask that only has a
   national series — unemployment rate, GDP, CPI — the card refuses that

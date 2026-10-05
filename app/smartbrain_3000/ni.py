@@ -258,9 +258,37 @@ _MAX_WHEN_RULES = 5              # per §5 Conditions cap
 _WHEN_OPS: frozenset[str] = frozenset({"lt", "le", "gt", "ge", "eq", "ne"})
 _ORDER_OPS: frozenset[str] = frozenset({"lt", "le", "gt", "ge"})
 # The ``where`` transform also takes ``starts_with``: feeds code categories as prefixes
-# (NHC basin bins AT1/EP2/CP1). Scene conditions keep ``_WHEN_OPS`` (the client
-# evaluates those too).
-_WHERE_OPS: frozenset[str] = _WHEN_OPS | {"starts_with"}
+# (NHC basin bins AT1/EP2/CP1). ``state_scope`` (fix14-bbox, 2026-10-05): a bbox-filled
+# source whose rows carry a place-text column (USGS state feed, "22 km NNE of Yerington,
+# Nevada") drops rows naming ONLY other US states so a California card never ships Nevada
+# rows. Scene conditions keep ``_WHEN_OPS`` (the client evaluates those too).
+_WHERE_OPS: frozenset[str] = _WHEN_OPS | {"starts_with", "state_scope"}
+# fix14-bbox (2026-10-05): the US-state table the ``state_scope`` op reads — hardcoded in
+# the engine so the row test is self-contained (no cross-module import at pipeline time).
+# Codes include the 50 states + DC + US territories (same set as library_resolve.US_STATES).
+_US_STATE_NAMES: dict[str, str] = {
+    "AL": "Alabama", "AK": "Alaska", "AZ": "Arizona", "AR": "Arkansas", "CA": "California",
+    "CO": "Colorado", "CT": "Connecticut", "DE": "Delaware", "DC": "District of Columbia",
+    "FL": "Florida", "GA": "Georgia", "HI": "Hawaii", "ID": "Idaho", "IL": "Illinois",
+    "IN": "Indiana", "IA": "Iowa", "KS": "Kansas", "KY": "Kentucky", "LA": "Louisiana",
+    "ME": "Maine", "MD": "Maryland", "MA": "Massachusetts", "MI": "Michigan", "MN": "Minnesota",
+    "MS": "Mississippi", "MO": "Missouri", "MT": "Montana", "NE": "Nebraska", "NV": "Nevada",
+    "NH": "New Hampshire", "NJ": "New Jersey", "NM": "New Mexico", "NY": "New York",
+    "NC": "North Carolina", "ND": "North Dakota", "OH": "Ohio", "OK": "Oklahoma",
+    "OR": "Oregon", "PA": "Pennsylvania", "RI": "Rhode Island", "SC": "South Carolina",
+    "SD": "South Dakota", "TN": "Tennessee", "TX": "Texas", "UT": "Utah", "VT": "Vermont",
+    "VA": "Virginia", "WA": "Washington", "WV": "West Virginia", "WI": "Wisconsin",
+    "WY": "Wyoming", "PR": "Puerto Rico", "GU": "Guam", "VI": "U.S. Virgin Islands",
+    "AS": "American Samoa", "MP": "Northern Mariana Islands",
+}
+_US_STATE_CODES: frozenset[str] = frozenset(_US_STATE_NAMES)
+# full names, longest first so "North Carolina" matches before "North" / "Carolina" fragments
+_STATE_NAME_RE = re.compile(
+    r"\b(" + "|".join(re.escape(n) for n in sorted(_US_STATE_NAMES.values(), key=len, reverse=True)) + r")\b",
+    re.IGNORECASE)
+# a code appears only after ", " (USGS place strings: "..., NV") — a bare "NE" word is a
+# compass heading, not Nebraska
+_STATE_CODE_SUFFIX_RE = re.compile(r",\s*([A-Z]{2})\b")
 _MAX_ALERTS = 5                  # per-item alerts cap (§12)
 _MAX_ALERT_NAME = 40             # slug length ceiling
 _ALERT_NAME_RE = re.compile(r"^[a-z0-9-]{1,40}$")  # slug charset per §12
@@ -1396,6 +1424,8 @@ def _validate_transform_where(node: dict, where: str) -> None:
     value = node.get("value")
     if node.get("op") == "starts_with" and not (isinstance(value, str) and value):
         raise ValueError(f"{where}.value must be a non-empty string for starts_with")
+    if node.get("op") == "state_scope" and not (isinstance(value, str) and value in _US_STATE_CODES):
+        raise ValueError(f"{where}.value must be a 2-letter US state code for state_scope")
     if not isinstance(value, (str, int, float, bool)):
         raise ValueError(  # noqa: TRY004 — validator raises ValueError uniformly
             f"{where}.value must be a JSON scalar (string/number/bool)"
@@ -2727,6 +2757,8 @@ def _where_match(left: object, op: str, right: object) -> bool:
     assert op in _WHERE_OPS, "op already validated"
     if op == "starts_with":
         return isinstance(left, str) and isinstance(right, str) and left.startswith(right)
+    if op == "state_scope":
+        return isinstance(left, str) and isinstance(right, str) and _state_scope_keeps(left, right)
     if op in _ORDER_OPS:
         if not _is_finite_number(left) or not _is_finite_number(right):
             return False
@@ -2751,6 +2783,27 @@ def _where_match(left: object, op: str, right: object) -> bool:
     if op == "eq":
         return left == right
     return left != right
+
+
+def _state_scope_keeps(text: str, code: str) -> bool:
+    """fix14-bbox (2026-10-05): True iff ``text`` names the asked state ``code`` (as its full
+    name whole-word, case-insensitive, or as ", CODE" after a comma) OR names no US state at
+    all. A row whose text names only OTHER US states is dropped — the state's bounding box
+    covers neighbors (western Nevada reads inside California's box; USGS writes "22 km NNE
+    of Yerington, Nevada") but a California card never ships Nevada rows. Bounded: two regex
+    sweeps of a row's text."""
+    assert isinstance(text, str) and isinstance(code, str), "args required"
+    mentioned: set[str] = set()
+    for match in _STATE_NAME_RE.finditer(text):  # bounded by text length
+        name = match.group(1)
+        key = next((k for k, v in _US_STATE_NAMES.items() if v.lower() == name.lower()), None)
+        if key is not None:
+            mentioned.add(key)
+    for match in _STATE_CODE_SUFFIX_RE.finditer(text):  # bounded by text length
+        found = match.group(1)
+        if found in _US_STATE_CODES:
+            mentioned.add(found)
+    return not mentioned or code in mentioned
 
 
 def _txf_count(value: object) -> int:

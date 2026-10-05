@@ -1802,6 +1802,21 @@ def _list_cap(window: str | None, step: str | None) -> int:
     return max(5, min(hours // per_row, ni._MAX_REPEAT_MAX))
 
 
+def _inferred_axis(cells: list[dict], window: str | None) -> dict | None:
+    """fix14-bbox (2026-10-05): a list that holds exactly one time / date cell but declares no
+    axis still cuts to an asked window — the time cell rides as an inferred ``hour`` axis so an
+    event list (USGS state earthquakes) cuts "today" to today's rows. None when no window is
+    asked (nothing to cut), or when the row carries more than one time cell (ambiguous — the
+    pack owns which cell indexes the list)."""
+    assert isinstance(cells, list), "cells must be a list"
+    if not window:
+        return None
+    time_cells = [c for c in cells[:_MAX_ANSWER_CELLS] if c["type"] in ("time", "date")]
+    if len(time_cells) != 1:
+        return None
+    return {"cell": time_cells[0]["path"], "step": "hour"}
+
+
 def _build_rows_answer(answer: dict, payload: dict, title: str, window: str | None = None,
                         next_event: bool = False, frame_kind: str | None = None) -> dict:
     """A list answer (rows at ``path``, cell paths relative to one item) or a columns answer
@@ -1810,10 +1825,15 @@ def _build_rows_answer(answer: dict, payload: dict, title: str, window: str | No
     keeps the asked stretch on every run ("this weekend" stays Sat + Sun) instead of the first N.
 
     F5-time (field 2026-10-04): a next-event / schedule list on a time axis with no asked window
-    still gets a forward cut (``upcoming``) every run, so past rows never lead the card."""
+    still gets a forward cut (``upcoming``) every run, so past rows never lead the card.
+
+    fix14-bbox (2026-10-05): a list that holds exactly one time / date cell but declares no axis
+    still cuts to an asked window — the first time cell rides as an inferred ``hour`` axis so a
+    "today" ask on an event list (USGS state earthquakes) keeps today's rows only. The
+    forward-only ``_cuts`` guard still protects a past-events list from a forward window."""
     cells = answer["cells"]
     ops: list[dict] = []
-    answer_axis = answer.get("axis")
+    answer_axis = answer.get("axis") or _inferred_axis(cells, window)
     forward = next_event and answer_axis is not None and not window
     axis = answer_axis if (window or forward) else None
     # day rows can't cut hours: tonight is today's row
@@ -1835,6 +1855,16 @@ def _build_rows_answer(answer: dict, payload: dict, title: str, window: str | No
                 raise ValueError("answers: a row filter path must be a row key")
             ops.append({"fn": "where", "field": "rows", "key": flt["path"], "op": "eq",
                         "value": flt["equals"]})
+        # fix14-bbox (2026-10-05): a bbox-filled source whose state's box covers neighbors
+        # (USGS state feed, western Nevada inside California's box) rides a state_scope op
+        # so rows naming ONLY other US states are dropped, rows naming the asked state (or no
+        # state) ride on; sealed in the pipeline so every refresh keeps the filter honest.
+        state = answer.get("state_scope")
+        if state:
+            if not ni._ROW_KEY_RE.fullmatch(state["path"]):
+                raise ValueError("answers: a state scope path must be a row key")
+            ops.append({"fn": "where", "field": "rows", "key": state["path"], "op": "state_scope",
+                        "value": state["code"]})
         if answer.get("newest_first"):
             ops.append({"fn": "reverse", "field": "rows"})
         if axis and _cuts(window or "upcoming", stages, ops, payload, axis["cell"]):
@@ -2220,6 +2250,45 @@ def _match_subdivision_in_rows(rows: list, type_word: str, value: str) -> tuple[
     return None
 
 
+# fix14-bbox (2026-10-05): the bbox-marker params a us_state resolver fills — "a state's
+# bounding box" is min_lat/max_lat/min_lon/max_lon together. The USGS state feed uses them
+# verbatim; a state's box covers neighbors (western Nevada reads inside California's box),
+# so the row's place text can name another state.
+_BBOX_PARAMS = frozenset({"min_lat", "max_lat", "min_lon", "max_lon"})
+
+
+def _rows_need_state_scope(live: dict, params: dict) -> bool:
+    """fix14-bbox (2026-10-05): True iff the picked source is place-scoped by a US-state
+    bounding box (every bbox marker among the filled params) — a state's box covers
+    neighbors, so the row's place text can name another state. A geo-parameter fill
+    (lat/lon/zip/station) already scopes the row to one place; a non-bbox place scope
+    already filters by the row's own place cell (CBP ports, NHL divisions)."""
+    return live.get("_library_scope") == "place" and _BBOX_PARAMS <= set(params or {})
+
+
+def _scope_rows_to_state_bbox(answer: dict, place: str, request: str) -> dict:
+    """fix14-bbox (2026-10-05): ``answer`` with a sealed ``state_scope`` filter so rows naming
+    ONLY other US states are dropped (USGS state feed, "22 km NNE of Yerington, Nevada" on a
+    California ask). Rows naming the asked state or no state ride on; the filter rides inside
+    the pipeline, so every refresh keeps the row test honest.
+
+    Returns ``answer`` unchanged when: not a list, already filtered, no place-naming cell, or
+    the ask names no US state (the resolver dropped on another signal). The row-filter is a
+    DIFFERENT scope from ``_scope_rows_to_place`` — no exact row match, every passing row
+    keeps riding."""
+    assert isinstance(answer, dict) and isinstance(place, str), "args required"
+    assert isinstance(request, str), "request must be a string"
+    if answer.get("kind") != "list" or answer.get("state_scope"):
+        return answer
+    cell = _place_cell(answer.get("cells") or [])
+    if cell is None:
+        return answer
+    code = _state_code_of(place) or next(iter(_place_states_via_resolver(place, request)), None)
+    if code is None:
+        return answer
+    return {**answer, "state_scope": {"path": cell["path"], "code": code}}
+
+
 def _scoping_names_place(chosen: list[dict], place: str) -> bool:
     """True when a chosen list answer's row filter equals (case-folded, whole-word overlap) a
     word of ``place``: the data IS scoped to the ask's named value, so the subcategory policy's
@@ -2294,6 +2363,12 @@ def _try_answers_build(store: ni.NIStore, item_id: str, request: str, intent: di
             if "has nothing for" in str(exc):
                 return {"nothing": True, "why": str(exc).split("answers: ", 1)[-1]}
             raise
+    elif place and _rows_need_state_scope(live, params):
+        # fix14-bbox (2026-10-05): a bbox-filled state source (USGS state feed) covers neighbors
+        # (western Nevada reads inside California's box); the row's place cell drops rows naming
+        # ONLY other US states so a California card never ships Nevada rows. The sealed
+        # state_scope filter rides on every refresh — never a confidently wrong card.
+        chosen = [_scope_rows_to_state_bbox(a, place, request) for a in chosen]
     if next_event and chosen[0]["kind"] == "value" and not any(_event_time(a) for a in chosen):
         # a next event shows WHEN ("Bills next opponent": the matchup and its start), and the verify
         # step needs that time to tell a coming event from a past one
