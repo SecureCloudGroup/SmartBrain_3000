@@ -127,6 +127,10 @@ _SOURCES = [
     _src("faa-nas-status", "FAA airport status", "travel/airport_delays", ["status", "alerts"],
          "https://nasstatus.faa.gov/api/airport-status-information?airport={k}", _res("airport"),
          words=["delays", "ground stop"]),
+    # fix13-state (2026-10-05): a state-bounded source — alerts across a whole US state (SAME code)
+    _src("nws-alerts-state", "NWS alerts across a state", "weather/alerts", ["alerts"],
+         "https://api.weather.gov/alerts/active?area={k}", _res("us_state", "key"), authority="official",
+         words=["warnings", "alerts"]),
 ]
 
 _ENTRIES = [  # id, resolver, key, name, lat, lon, state, attrs, rank, aliases
@@ -176,6 +180,19 @@ _ENTRIES = [  # id, resolver, key, name, lat, lon, state, attrs, rank, aliases
      ["mesquite metro", "metro"]),
     ("airport:ORD", "airport", "ORD", "Chicago O'Hare International Airport", 41.97, -87.9, "IL", {}, 1.0,
      ["ord", "o hare", "o hare airport"]),
+    # fix13-state (2026-10-05): same-named small towns + their us_state entry — California (PA/MO/KY),
+    # Florida (NY), Washington (WA, state-only). A big same-named New York place lets "weather in New
+    # York" stay the city; the state entries answer the state-bounded source.
+    ("place:ca-pa", "place", "ca-pa", "California", 40.07, -79.9, "PA", {"pop": 4628}, 3.67, ["california"]),
+    ("place:ca-mo", "place", "ca-mo", "California", 38.63, -92.6, "MO", {"pop": 4522}, 3.66, ["california"]),
+    ("place:ca-ky", "place", "ca-ky", "California", 38.92, -84.3, "KY", {"pop": 85}, 1.93, ["california"]),
+    ("place:fl-ny", "place", "fl-ny", "Florida", 41.33, -74.4, "NY", {"pop": 2868}, 3.0, ["florida"]),
+    ("place:nyc", "place", "nyc", "New York", 40.71, -74.0, "NY", {"pop": 8478072}, 6.0,
+     ["new york", "new york city", "nyc"]),
+    ("us_state:CA", "us_state", "CA", "California", None, None, "CA", {}, 0.0, ["california", "ca"]),
+    ("us_state:FL", "us_state", "FL", "Florida", None, None, "FL", {}, 0.0, ["florida", "fl"]),
+    ("us_state:WA", "us_state", "WA", "Washington", None, None, "WA", {}, 0.0, ["washington", "wa"]),
+    ("us_state:NY", "us_state", "NY", "New York", None, None, "NY", {}, 0.0, ["new york", "ny"]),
     # the competition's "champions league" is a partial alias (a prefix of "champions league ucl"); the
     # league reading names it in full
     ("soccer_competition:CL", "soccer_competition", "CL", "UEFA Champions League", None, None, "", {}, 1.0,
@@ -385,6 +402,53 @@ def test_locate_and_fill_agree_on_the_place(lib) -> None:
     rows, skipped = lib.candidates("tornado warning today")
     assert rows == [] and any("name the place" in s for s in skipped)
     assert _ids(lib, "tornado warning in Tulsa") == ["nws-alerts-point"]
+
+
+# fix13-state (2026-10-05): a US state name whose only same-named place readings are small towns
+# (California PA/MO/KY, Florida NY) must not be read as those towns — the state-bounded source
+# answers; a big same-named city (Washington DC) keeps the place reading unless the ask says
+# "{state} state"; two named states ("California PA") keep the town.
+def test_a_states_name_leads_to_the_state_source_when_only_small_towns_share_it(lib) -> None:
+    """"warning in California" (small California towns, no big) hands off to nws-alerts-state for CA;
+    the ask would otherwise be read as the California PA / MO / KY towns ("the right source was never
+    offered" per fix13-state 2026-10-05)."""
+    rows, skipped = lib.candidates("warning in California")
+    assert rows and rows[0]["source_id"] == "nws-alerts-state"
+    assert "California (CA)" in (rows[0]["label"] or "")
+    assert all(r["source_id"] != "nws-alerts-point" for r in rows)
+    assert any("doesn't name a place" in s for s in skipped), skipped
+    rows, _ = lib.candidates("warning in Florida")
+    assert rows and rows[0]["source_id"] == "nws-alerts-state"
+
+
+def test_a_qualifier_keeps_the_town_when_two_states_are_named(lib) -> None:
+    """"warning in California PA" names two states; the eclipse must not fire — the California PA town
+    stays the place."""
+    rows, _ = lib.candidates("warning in California PA")
+    assert rows and rows[0]["source_id"] == "nws-alerts-point"
+    assert "California (PA)" in (rows[0]["label"] or "")
+
+
+def test_a_big_same_named_city_keeps_the_place_but_state_cue_overrides(lib) -> None:
+    """"warning in Washington" reads Washington DC (big) as today; "warning in Washington state" asks
+    for the state (the "{state} state" cue overrides the big-city carveout)."""
+    rows, _ = lib.candidates("warning in Washington")
+    assert rows and rows[0]["source_id"] == "nws-alerts-point"
+    assert "Washington (DC)" in (rows[0]["label"] or "")
+    rows, _ = lib.candidates("warning in Washington state")
+    assert rows and rows[0]["source_id"] == "nws-alerts-state"
+    assert "Washington (WA)" in (rows[0]["label"] or "")
+
+
+def test_kansas_city_stays_a_city_and_new_york_stays_the_place(lib) -> None:
+    """``states_in`` excludes "Kansas City" so the eclipse never fires; "weather in New York" keeps the
+    big NY place reading."""
+    rows, _ = lib.candidates("warning in Kansas City")
+    assert rows and rows[0]["source_id"] == "nws-alerts-point"
+    assert "Kansas City (MO)" in (rows[0]["label"] or "")
+    rows, _ = lib.candidates("warning in New York")
+    assert rows and rows[0]["source_id"] == "nws-alerts-point"
+    assert "New York (NY)" in (rows[0]["label"] or "")
 
 
 # --- C5: a named place is part of the frame whatever the policy -------------------------------------

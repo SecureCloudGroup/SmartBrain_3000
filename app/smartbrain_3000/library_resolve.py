@@ -320,6 +320,7 @@ def candidate_urls(record: dict, ask: str, policy: dict, resolver: Resolver,
         if "r" not in place_cache:
             z = resolver.by_name("zip", ask) if re.search(r"\b\d{5}\b", ask or "") else {"status": "none"}
             r = z if z["status"] == "resolved" else resolver.by_name("place", ask)
+            r = _state_eclipses_place(ask, r, resolver)
             place_cache["r"] = _coastal_readings(r) if marine else r
         return place_cache["r"]
 
@@ -543,6 +544,38 @@ def _coastal_readings(r: dict) -> dict:
                 "inland": f"{_label(readings[0])} isn't on the coast; this source covers the ocean and coast"}
     return {**r, "status": "resolved" if len(kept) == 1 else r["status"], "best": kept[0] if len(kept) == 1
             else None, "candidates": kept}
+
+
+# fix13-state (2026-10-05): when an ask names exactly one US state as its full name (``states_in``
+# excludes "Kansas City" / "Lake Michigan" already), same-named small towns are not read as the ask's
+# place; a big same-named city stays ("Washington" keeps DC), unless the ask says "{state} state".
+_BIG_POP = 100_000
+
+
+def _state_eclipses_place(ask: str, pl: dict, resolver: Resolver) -> dict:
+    """Drop same-named small-town place readings when the ask names exactly one US state as a
+    contiguous whole name. "earthquakes in California" eclipses the California PA / MO / KY towns;
+    "California, PA" names two states (fix skips); "weather in Washington" keeps DC (big) unless the
+    ask says "Washington state"."""
+    assert isinstance(ask, str), "ask must be a string"
+    assert isinstance(pl, dict), "pl must be a resolver reading dict"
+    if pl["status"] == "none":
+        return pl
+    codes = states_in(ask, resolver)
+    if len(codes) != 1:
+        return pl
+    name = US_STATES[next(iter(codes))].lower()
+    low = f" {norm(ask)} "
+    if f" {name} " not in low:
+        return pl
+    readings = list(pl.get("candidates") or [])
+    same = [c for c in readings if norm(c.get("name") or "") == name]
+    if not same or len(same) < len(readings):
+        return pl  # a non-same-named reading (the actual place) stays
+    if f" {name} state " not in low and any(((c.get("attrs") or {}).get("pop") or 0) >= _BIG_POP for c in same):
+        return pl  # a big same-named city keeps the place reading; "{state} state" overrides
+    return {"status": "none", "best": None, "candidates": [],
+            "reason": f"{name.title()} is the state, not any same-named town"}
 
 
 def key_placement(access: dict, key_param: str) -> dict | None:

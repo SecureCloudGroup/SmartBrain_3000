@@ -26,9 +26,10 @@ to know when a release changes behavior.
 - **Earthquakes for a state now come from the state's own feed.** When you
   ask about earthquakes in a US state the card no longer picks a city of
   the same name in a different state ("California, PA" for "earthquakes
-  in California"); it refuses that reading and lets the state-bounded
-  USGS feed answer. Earthquakes near a specific city or town still read
-  from the near-a-place feed.
+  in California"); the state-bounded USGS feed is the one offered, and
+  the same-named towns are not read. "California, PA" (two states named)
+  still reads the town, and earthquakes near a specific city or town
+  still read from the near-a-place feed.
 - **A team you named by city or state keeps the right team on the card.**
   When your ask names a place word next to a team nickname ("Durham Bulls",
   "NY Rangers") and the resolved team's own city or state doesn't carry

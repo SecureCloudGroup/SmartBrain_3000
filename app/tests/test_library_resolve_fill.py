@@ -276,3 +276,75 @@ def test_states_in_without_a_water_body_resolver_is_unchanged() -> None:
     con = _con(water=False)
     assert lr.states_in("Lake Michigan water temp Milwaukee", lr.Resolver(con)) == {"MI"}
     assert lr.states_in("Lake Michigan water temp Milwaukee") == {"MI"}
+
+
+# --- fix13-state (2026-10-05): a US state name eclipses its same-named small towns --------------------
+
+def _state_pack_con():
+    """A tiny pack with California towns (all small), Washington DC (big) + Washington UT (small),
+    New York (big), Kansas City (big), and the matching us_state entries. Enough to exercise the
+    eclipse rule across the hard cases."""
+    con = duckdb.connect(":memory:")
+    con.execute("CREATE TABLE library_resolver_entries(id VARCHAR PRIMARY KEY, resolver VARCHAR, kind VARCHAR, "
+                "key VARCHAR, name VARCHAR, lat DOUBLE, lon DOUBLE, state VARCHAR, attrs JSON, rank DOUBLE)")
+    con.execute("CREATE TABLE library_resolver_aliases(alias VARCHAR, entry_id VARCHAR, partial BOOLEAN)")
+    rows = [
+        ("place:ca-pa", "place", "place", "p1", "California", 40.0, -79.9, "PA", {"pop": 4628}, 3.67, ["california"]),
+        ("place:ca-mo", "place", "place", "p2", "California", 38.6, -92.5, "MO", {"pop": 4522}, 3.66, ["california"]),
+        ("place:ca-ky", "place", "place", "p3", "California", 38.9, -84.2, "KY", {"pop": 85}, 1.93, ["california"]),
+        ("place:fl-ny", "place", "place", "p4", "Florida", 41.3, -74.3, "NY", {"pop": 2868}, 3.0, ["florida"]),
+        ("place:wa-dc", "place", "place", "p5", "Washington", 38.9, -77.0, "DC", {"pop": 702250}, 5.0,
+         ["washington", "washington dc", "dc"]),
+        ("place:wa-ut", "place", "place", "p6", "Washington", 37.1, -113.5, "UT", {"pop": 35501}, 4.0, ["washington"]),
+        ("place:ny", "place", "place", "p7", "New York", 40.7, -74.0, "NY", {"pop": 8478072}, 6.0,
+         ["new york", "new york city", "nyc"]),
+        ("place:kc-mo", "place", "place", "p8", "Kansas City", 39.1, -94.6, "MO", {"pop": 516000}, 5.0,
+         ["kansas city"]),
+        ("place:kc-ks", "place", "place", "p9", "Kansas City", 39.1, -94.6, "KS", {"pop": 156000}, 5.0,
+         ["kansas city"]),
+        ("us_state:CA", "us_state", "state", "CA", "California", None, None, "CA", {}, 0.0,
+         ["california", "ca"]),
+        ("us_state:FL", "us_state", "state", "FL", "Florida", None, None, "FL", {}, 0.0, ["florida", "fl"]),
+        ("us_state:WA", "us_state", "state", "WA", "Washington", None, None, "WA", {}, 0.0,
+         ["washington", "wa"]),
+        ("us_state:KS", "us_state", "state", "KS", "Kansas", None, None, "KS", {}, 0.0, ["kansas", "ks"]),
+        ("us_state:NY", "us_state", "state", "NY", "New York", None, None, "NY", {}, 0.0, ["new york", "ny"]),
+        ("us_state:PA", "us_state", "state", "PA", "Pennsylvania", None, None, "PA", {}, 0.0,
+         ["pennsylvania", "pa"]),
+    ]
+    for eid, resv, kind, key, name, lat, lon, st, attrs, rank, aliases in rows:
+        con.execute("INSERT INTO library_resolver_entries VALUES (?,?,?,?,?,?,?,?,?,?)",
+                    (eid, resv, kind, key, name, lat, lon, st, json.dumps(attrs), rank))
+        for a in aliases:
+            con.execute("INSERT INTO library_resolver_aliases VALUES (?,?,?)", (a, eid, False))
+    return con
+
+
+@pytest.mark.parametrize(("ask", "expect"), [
+    ("earthquakes in california last 24 hrs", "none"),    # all California towns are small -> eclipse
+    ("earthquakes in florida", "none"),                   # all Florida towns are small -> eclipse
+    ("weather in Washington", "ambiguous"),               # Washington DC is big -> keep (unchanged)
+    ("weather in Washington state", "none"),              # "{state} state" cue -> eclipse DC + UT
+    ("weather in Kansas City", "ambiguous"),              # states_in excludes "Kansas City" -> keep
+    ("weather in New York", "resolved"),                  # big same-named city -> keep (unchanged)
+    ("weather in California PA", "resolved"),             # two states named -> keep (California PA town)
+    ("weather in California, PA", "resolved"),            # same, with punctuation
+    ("earthquakes in CA", "none"),                        # bare code; no "california" word to eclipse
+])
+def test_state_eclipses_place_rule(ask, expect) -> None:
+    """fix13-state: an ask whose place-words are exactly a US state name reads as the state (so
+    sources that take ``us_state`` lead); a big same-named city or a second named state keeps the
+    town reading. ``_state_eclipses_place`` returns status ``none`` when the eclipse fires."""
+    r = lr.Resolver(_state_pack_con())
+    pl = r.by_name("zip", ask) if any(c.isdigit() for c in ask) else {"status": "none"}
+    pl = pl if pl["status"] == "resolved" else r.by_name("place", ask)
+    assert lr._state_eclipses_place(ask, pl, r)["status"] == expect, ask
+
+
+def test_state_eclipses_place_leaves_a_non_same_named_place() -> None:
+    """A reading whose name differs from the state name is the ask's place; the eclipse must not drop
+    it ("earthquakes in Alaska Fairbanks" → Fairbanks)."""
+    r = lr.Resolver(_state_pack_con())
+    pl = {"status": "resolved", "best": {"name": "Fairbanks", "attrs": {}}, "candidates": [
+        {"name": "Fairbanks", "attrs": {}}]}
+    assert lr._state_eclipses_place("earthquakes in Alaska Fairbanks", pl, r)["status"] == "resolved"
