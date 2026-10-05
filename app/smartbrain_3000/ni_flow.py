@@ -2620,12 +2620,18 @@ def _resolver_landed_outside_state(source: dict, place: str, request: str) -> bo
     model."""
     assert isinstance(source, dict) and isinstance(place, str), "args required"
     assert isinstance(request, str), "request must be a string"
-    from .library_resolve import states_in  # local import: avoid a module cycle
-    label_state = _label_state_code(str(source.get("label") or ""))
+    # local import: avoid a module cycle
+    from .library_resolve import US_STATES, states_in
+    label = str(source.get("label") or "")
+    label_state = _label_state_code(label)
     if label_state is None:
         return False
-    ask_states = set(states_in(f"{request} {place}"))
-    return bool(ask_states) and label_state not in ask_states
+    # only a same-named town of a state the ask names ("California (PA)" for "california"): a reading
+    # whose place is called something else ("Los Angeles (CA)" for "LA", which is also Louisiana's
+    # code) was read from the ask's own place words, not mistaken for a state
+    label_name = label.rsplit(" (", 1)[0].strip().lower()
+    named = {code for code in states_in(f"{request} {place}") if US_STATES[code].lower() == label_name}
+    return bool(named) and label_state not in states_in(f"{request} {place}")
 
 
 def _times_in(value: object, out: list) -> None:

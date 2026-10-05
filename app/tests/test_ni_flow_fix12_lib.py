@@ -179,3 +179,15 @@ def test_label_state_code_extracts_the_trailing_state_in_parens() -> None:
     assert ni_flow._label_state_code("Alaska (AK)") == "AK"
     assert ni_flow._label_state_code("California") is None
     assert ni_flow._label_state_code("Pinnacles (XX)") is None  # XX is not a US state code
+
+
+def test_a_city_nickname_that_is_a_state_code_is_not_a_state() -> None:
+    """'air quality in LA' read Los Angeles (CA) and was refused 'it isn't for LA' because LA is also
+    Louisiana's code (live dev 2026-10-05). The landed-in-another-state rule is for a same-named town
+    of the state the ask names ('California (PA)' for 'california'), nothing wider."""
+    landed = ni_flow._resolver_landed_outside_state
+    assert landed({"label": "Los Angeles (CA)"}, "LA", "air quality in LA") is False
+    assert landed({"label": "California (PA)"}, "california", "earthquakes in california") is True
+    assert landed({"label": "California (PA)"}, "California PA", "weather in California PA") is False
+    assert landed({"label": "Pinnacles (CA)"}, "Pinnacles CA", "earthquakes near Pinnacles CA") is False
+    assert landed({"label": "Portland (OR)"}, "Portland", "Portland weather") is False
