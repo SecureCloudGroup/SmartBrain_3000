@@ -399,6 +399,9 @@ def _make_lifespan(mcp):
                 idx.install()
             return idx
         ni_flow.set_library_provider(_ni_library)
+        # The Library lookup runs on the keyword frame. The local-embedder ranking (library_embed) is not
+        # wired: on clean labeled asks it measured no better than keywords (2026-10-04), so it stays off
+        # until it does.
         async with mcp.session_manager.run():  # drive the MCP transport for this app
             runner = asyncio.create_task(_scheduler_loop(application))  # background scheduler
             webrtc = asyncio.create_task(_webrtc_loop(application)) if _webrtc_mode != "0" else None
@@ -481,12 +484,33 @@ def create_app() -> FastAPI:
         try:
             # The SPA reports its IANA timezone the same way — it's what lets the
             # chat time note speak the user's local time instead of bare UTC.
-            tz = request.headers.get("x-smartbrain-timezone", "") if authority else ""
+            # R4-3 (field 2026-10-04): a DESKTOP handshake always wins (and overrides a remote
+            # setter); a REMOTE device may set the zone when none is stored yet (a headless /
+            # LAN-only / phone-only install never gets a desktop handshake, so the engine ran on
+            # UTC forever). ``user:timezone_by`` records which authority last wrote the zone, so a
+            # remote probe never overrides a desktop-set value — the alternating-zone defect that
+            # motivated R3-I stays closed.
+            tz = request.headers.get("x-smartbrain-timezone", "")
             if tz and len(tz) <= 64:
                 conn = request.app.state.dbx
-                if tz != db.meta_get(conn, "user:timezone"):
-                    zoneinfo.ZoneInfo(tz)  # validates; garbage raises -> not stored
+                zoneinfo.ZoneInfo(tz)  # validates; garbage raises -> not stored
+                current = db.meta_get(conn, "user:timezone") or ""
+                setter = db.meta_get(conn, "user:timezone_by") or ""
+                is_desktop = authority == auth.DESKTOP
+                # an anonymous probe (no credential) never writes; a remote device only seeds
+                may_write = is_desktop or (authority == auth.REMOTE and not current and setter != "desktop")
+                if may_write and tz != current:
                     db.meta_set(conn, "user:timezone", tz)
+                    db.meta_set(conn, "user:timezone_by", "desktop" if is_desktop else "remote")
+                # F15 (2026-10-04): the NI engine's clock reads this cache — a Docker install has
+                # no TZ env, so every window / shown time rode the UTC calendar until the SPA
+                # reported its zone. Set EACH handshake (process restart loses it) + on store
+                # install below. Only the stored zone pins the engine — a remote probe for a zone
+                # it isn't allowed to write never changes what NI reads.
+                stored = db.meta_get(conn, "user:timezone")
+                if stored:
+                    from . import ni as _ni_mod
+                    _ni_mod.set_user_timezone(stored)
         except Exception:
             pass
         # The launcher's half of the update handshake. It rides this probe (~every 30s) so

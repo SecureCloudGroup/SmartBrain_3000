@@ -690,23 +690,30 @@ export type NiFlowState =
   | "unsupported"
   | "failed";
 
+export interface NiSuggestion {
+  title: string;
+  host: string;
+  url: string;
+  kind?: "library" | "link";
+  // kind:"link" rows: what was found — a Library dataset or a web page
+  found?: "dataset" | "page";
+  evidence?: string[];
+  // Library rows: what the tap asks for before the first fetch ("key", "contact")
+  needs?: string[];
+}
+
 export interface NiItemFlow {
   state: NiFlowState;
   error?: string;
-  // The source-pick pause: kind:"library" rows are SmartBrain Library sources with the
-  // address already filled from the user's words (evidence = provider · authority, and the
-  // reading when the words fit several — the tap answers it). When the Library has none,
-  // kind:"web" rows are found by searching the user's own words (evidence = values actually
-  // extracted from the page, shown pre-tap). A tap is the consent; paste-a-URL always works.
-  suggestions?: {
-    title: string;
-    host: string;
-    url: string;
-    kind?: string;
-    evidence?: string[];
-    // Library rows: what the tap asks for before the first fetch ("key", "contact")
-    needs?: string[];
-  }[];
+  // The source-pick pause: kind:"library" rows are SmartBrain Library sources that declare
+  // their answers, with the address already filled from the user's words (evidence = provider
+  // · authority, and the reading when the words fit several — the tap answers it). A tap is
+  // the consent and builds the card. kind:"link" rows (ruling 2026-10-05: "Library cards; web
+  // as links") are pages that may help — a Library dataset without declared answers
+  // (found:"dataset", its page, never its API address) or a web page the search found
+  // (found:"page"). They open in a new tab and never build a card (the pick route refuses
+  // them); paste-a-URL always works.
+  suggestions?: NiSuggestion[];
   // G1 (rounds 7-8, single-writer law): terminal records carry the master's
   // derivation — one honest reason sentence, an optional answerable question,
   // and the reopen affordances. The card renders these verbatim; no more
@@ -734,6 +741,12 @@ export interface NiFinding {
   title: string;
   item_id: string | null;
   status: string;
+}
+
+export interface NiAwaitingYes {
+  from: "page" | "dataset";
+  host: string;
+  title: string; // "" when the source had none (a pasted link)
 }
 
 export interface NiBoardItem {
@@ -773,6 +786,11 @@ export interface NiBoardItem {
   // "Looks right" — the card stops asking and shows "Confirmed — verifying"
   // until the C3 run promotes it to live.
   c2_ok?: boolean;
+  // Ruling 2026-10-04 ("hold open paths for a YES"): set while a card built from a web page
+  // or a model-mapped dataset waits for the user's YES — the card shows its reading (payload)
+  // and where it came from. YES = niValidate(id, true); NO = niValidate(id, false), which
+  // re-lands the source pick without that source. null/absent for every other card.
+  awaiting_yes?: NiAwaitingYes | null;
   // L2 frontier-repair proposal parked for review (ni-format §23). PARK-ONLY: a valid
   // proposal is NEVER auto-applied — the card shows a "Fix proposed" chip; the review
   // modal renders the diff and offers Apply (trial, may auto-revert) / Dismiss.
@@ -1741,8 +1759,10 @@ export const api = {
   // F1 (2026-09-15): a "Looks right" verdict kicks the C3 proof run server-side;
   // `state` is the POST-run state (often "live" already) and `run` reports the
   // kick's outcome ("ok" | "error" | "skipped" — verdict recorded regardless).
+  // `repick` (NO on a card awaiting the user's YES): "repick" = the pick re-landed with the
+  // other sources; "relocate" = looking again without the declined one.
   niValidate: (id: string, ok: boolean, note?: string) =>
-    req<{ ok: boolean; state: NiState; run?: string }>(
+    req<{ ok: boolean; state: NiState; run?: string; repick?: string }>(
       `/api/ni/items/${encodeURIComponent(id)}/validate`, {
         method: "POST",
         body: JSON.stringify(note ? { ok, note } : { ok }),
@@ -1792,11 +1812,13 @@ export const api = {
   // Plus the card's Fix
   // (remap against the card's OWN frozen source) and Edit (title/cadence via
   // the PATCH surface).
-  niFlowPickSource: (id: string, url: string) =>
+  // `pasted`: the user typed / pasted the link themselves (it builds even when the card
+  // offered the same page as a link; the card then waits for their YES).
+  niFlowPickSource: (id: string, url: string, pasted = false) =>
     req<{ ok: boolean; started: boolean; needs?: string[] }>(
       `/api/ni/items/${encodeURIComponent(id)}/flow/pick-source`, {
         method: "POST",
-        body: JSON.stringify({ url }),
+        body: JSON.stringify(pasted ? { url, pasted } : { url }),
       }),
   // The picked source's key and/or the user's contact email, typed on the card.
   niFlowAccess: (id: string, key?: string, email?: string) =>

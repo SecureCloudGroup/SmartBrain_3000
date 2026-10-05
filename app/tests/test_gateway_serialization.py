@@ -116,6 +116,64 @@ def test_local_available_reflects_an_in_flight_call() -> None:
     assert gateway.local_available() is True  # free again
 
 
+def test_local_waiters_counts_pending_acquires() -> None:
+    """L5: the Library's build polls ``local_waiters`` between texts so a foreground chat/embed doesn't
+    keep losing the race on a non-FIFO semaphore. The counter rises for every ``_serialized`` acquire
+    that is still waiting and clears when it gets served."""
+    assert gateway.local_waiters() == 0
+    holding = threading.Event()
+    release = threading.Event()
+
+    def hold() -> None:
+        with gateway._serialized("mlx/foo"):
+            holding.set()
+            release.wait(3.0)
+    held = threading.Thread(target=hold); held.start()
+    assert holding.wait(3.0)
+    # the semaphore is held; two more callers queue up and show as waiters
+    waiting_in = threading.Event()
+    done = threading.Event()
+
+    def waiter() -> None:
+        waiting_in.set()
+        with gateway._serialized("mlx/foo"):
+            pass
+        done.set()
+    w1 = threading.Thread(target=waiter); w2 = threading.Thread(target=waiter)
+    w1.start(); w2.start()
+    for _ in range(50):  # bounded poll until both are blocked on acquire
+        if gateway.local_waiters() >= 2:
+            break
+        time.sleep(0.01)
+    assert gateway.local_waiters() == 2
+    release.set(); held.join(); w1.join(); w2.join()
+    assert gateway.local_waiters() == 0
+
+
+def test_serialized_acquire_timeout_fails_fast_with_local_busy() -> None:
+    """L6: a short ``acquire_timeout`` lets the Library's request-path ask embed fall back to the keyword
+    ranking (busy is not a failure) instead of blocking behind a foreground chat stream. The call raises
+    ``LocalBusy`` within the budget, so the pooled httpx client is never POSTed to."""
+    import pytest
+    holding = threading.Event()
+    release = threading.Event()
+
+    def hold() -> None:
+        with gateway._serialized("mlx/foo"):
+            holding.set()
+            release.wait(3.0)
+    t = threading.Thread(target=hold); t.start()
+    try:
+        assert holding.wait(3.0)
+        t0 = time.monotonic()
+        with pytest.raises(gateway.LocalBusy), gateway._serialized("mlx/foo", acquire_timeout=0.05):
+            pass
+        waited = time.monotonic() - t0
+        assert waited < 0.75, waited  # bounded by the acquire_timeout, not the stream
+    finally:
+        release.set(); t.join()
+
+
 @pytest.fixture()
 def client(tmp_path, monkeypatch) -> Iterator[TestClient]:
     monkeypatch.setenv("SMARTBRAIN_DB_PATH", str(tmp_path / "s.duckdb"))

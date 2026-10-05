@@ -198,3 +198,10 @@ def test_remote_access_lazy_activates_on_pairing(tmp_path, monkeypatch) -> None:
         assert not app.state.webrtc_active.is_set()  # unlocked, no devices -> still off
         assert client.post("/api/devices", json={"label": "phone"}).status_code == 200
         assert app.state.webrtc_active.is_set()  # pairing is the opt-in -> remote activates
+
+
+def test_the_library_lookup_runs_on_keywords(app_client: TestClient) -> None:
+    """The app wires no locate embedder: the Library lookup ranks on the keyword frame (the embedder
+    ranking measured no better on clean labeled asks), so no ask text reaches any embedding model."""
+    from smartbrain_3000 import library_embed
+    assert library_embed.current_embedder() is None

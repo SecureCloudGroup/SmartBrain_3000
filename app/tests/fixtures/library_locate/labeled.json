@@ -1,0 +1,1629 @@
+{
+ "description": "WP1 locate labeled set: asks drawn from the root-cause class test sets, labeled {admit: any of these in the top 3, first: the top one, forbid: never offered (a trailing * is a prefix), tops: every offer is in one of these top-level categories, frame: frame_kind_from_text, place: named_place words, scope: the top offer's scope}. Written before the fix; labels are what is right on the pinned pack, not what the code does.",
+ "rows": [
+  {
+   "cls": "C1",
+   "ask": "is it gonna storm in Tulsa tonight",
+   "forbid": [
+    "swpc-*"
+   ],
+   "tops": [
+    "weather"
+   ],
+   "frame": "forecast"
+  },
+  {
+   "cls": "C1",
+   "ask": "is it gonna storm in Tulsa tonight",
+   "hint": {
+    "subject": "weather",
+    "wants": [
+     "storm chance"
+    ],
+    "place": "Tulsa",
+    "frame_kind": "forecast",
+    "window": null
+   },
+   "admit": [
+    "open-meteo-forecast",
+    "nws-forecast",
+    "nws-forecast-hourly",
+    "wttr-in",
+    "nws-alerts-point",
+    "nws-alerts-state"
+   ],
+   "forbid": [
+    "swpc-*"
+   ],
+   "tops": [
+    "weather"
+   ]
+  },
+  {
+   "cls": "C1",
+   "ask": "will it thunderstorm in Houston today",
+   "hint": {
+    "subject": "weather forecast",
+    "wants": [
+     "thunderstorm chance"
+    ],
+    "place": "Houston",
+    "frame_kind": null,
+    "window": null
+   },
+   "admit": [
+    "open-meteo-forecast",
+    "nws-forecast",
+    "nws-forecast-hourly",
+    "wttr-in",
+    "nws-alerts-point",
+    "nws-alerts-state"
+   ],
+   "forbid": [
+    "swpc-*"
+   ],
+   "tops": [
+    "weather"
+   ],
+   "frame": "forecast"
+  },
+  {
+   "cls": "C1",
+   "ask": "any hail in Denver this afternoon",
+   "hint": {
+    "subject": "weather",
+    "wants": [
+     "hail"
+    ],
+    "place": "Denver",
+    "frame_kind": null,
+    "window": null
+   },
+   "admit": [
+    "open-meteo-forecast",
+    "nws-forecast",
+    "nws-forecast-hourly",
+    "wttr-in",
+    "nws-alerts-point",
+    "nws-alerts-state"
+   ],
+   "tops": [
+    "weather"
+   ]
+  },
+  {
+   "cls": "C1",
+   "ask": "is a tornado coming to Oklahoma City",
+   "admit": [
+    "nws-alerts-point",
+    "nws-alerts-state"
+   ],
+   "tops": [
+    "weather"
+   ]
+  },
+  {
+   "cls": "C1",
+   "ask": "foggy in San Francisco tomorrow morning?",
+   "hint": {
+    "subject": "weather",
+    "wants": [
+     "fog"
+    ],
+    "place": "San Francisco",
+    "frame_kind": "forecast",
+    "window": null
+   },
+   "admit": [
+    "open-meteo-forecast",
+    "nws-forecast",
+    "nws-forecast-hourly",
+    "wttr-in"
+   ],
+   "tops": [
+    "weather"
+   ]
+  },
+  {
+   "cls": "C1",
+   "ask": "frost tonight in Boise",
+   "hint": {
+    "subject": "weather forecast",
+    "wants": [
+     "frost"
+    ],
+    "place": "Boise",
+    "frame_kind": "forecast",
+    "window": null
+   },
+   "admit": [
+    "open-meteo-forecast",
+    "nws-forecast",
+    "nws-forecast-hourly",
+    "wttr-in"
+   ],
+   "tops": [
+    "weather"
+   ]
+  },
+  {
+   "cls": "C1",
+   "ask": "blizzard warning Buffalo",
+   "admit": [
+    "nws-alerts-point",
+    "nws-alerts-state"
+   ],
+   "tops": [
+    "weather"
+   ],
+   "frame": "alerts"
+  },
+  {
+   "cls": "C1",
+   "ask": "geomagnetic storm tonight",
+   "admit": [
+    "swpc-kp",
+    "swpc-kp-forecast",
+    "swpc-alerts",
+    "swpc-aurora",
+    "swpc-3day"
+   ],
+   "forbid": [
+    "nws-*",
+    "open-meteo-*"
+   ],
+   "tops": [
+    "hazards"
+   ]
+  },
+  {
+   "cls": "C1",
+   "ask": "solar storm this week",
+   "hint": {
+    "subject": "space weather",
+    "wants": [
+     "solar storm"
+    ],
+    "place": null,
+    "frame_kind": null,
+    "window": null
+   },
+   "admit": [
+    "swpc-kp",
+    "swpc-kp-forecast",
+    "swpc-alerts",
+    "swpc-aurora",
+    "swpc-3day"
+   ],
+   "forbid": [
+    "nws-*"
+   ],
+   "tops": [
+    "hazards"
+   ]
+  },
+  {
+   "cls": "C1",
+   "ask": "when does Old Faithful erupt",
+   "forbid": [
+    "finnhub-earnings-calendar",
+    "usgs-elevated-volcanoes"
+   ],
+   "frame": "next_event"
+  },
+  {
+   "cls": "C1",
+   "ask": "Old Faithful next eruption",
+   "forbid": [
+    "usgs-elevated-volcanoes",
+    "nasa-eonet-events"
+   ],
+   "frame": "next_event"
+  },
+  {
+   "cls": "C1",
+   "ask": "what time is high tide in Savannah",
+   "admit": [
+    "coops-tide-hilo"
+   ],
+   "tops": [
+    "water"
+   ],
+   "frame": "next_event"
+  },
+  {
+   "cls": "C1",
+   "ask": "when do the Cubs play",
+   "admit": [
+    "mlb-team-schedule",
+    "thesportsdb-team-next"
+   ],
+   "tops": [
+    "sports"
+   ],
+   "frame": "next_event"
+  },
+  {
+   "cls": "C1",
+   "ask": "Lakers game time",
+   "admit": [
+    "thesportsdb-team-next"
+   ],
+   "tops": [
+    "sports"
+   ],
+   "frame": "next_event"
+  },
+  {
+   "cls": "C1",
+   "ask": "latest macOS version",
+   "forbid": [
+    "npm-latest",
+    "pypi-package",
+    "crates-crate",
+    "homebrew-formula",
+    "dockerhub-tags"
+   ],
+   "tops": [
+    "tech"
+   ]
+  },
+  {
+   "cls": "C1",
+   "ask": "latest episode of Radiolab",
+   "tops": [
+    "news"
+   ],
+   "forbid": [
+    "open-meteo-*",
+    "nws-*",
+    "wttr-in"
+   ]
+  },
+  {
+   "cls": "C1",
+   "ask": "latest episode of The Daily podcast",
+   "tops": [
+    "news"
+   ],
+   "forbid": [
+    "open-meteo-*",
+    "nws-*",
+    "wttr-in"
+   ]
+  },
+  {
+   "cls": "C1",
+   "ask": "ice hockey scores tonight",
+   "admit": [
+    "nhl-score-now"
+   ],
+   "forbid": [
+    "nsidc-arctic-ice"
+   ],
+   "tops": [
+    "sports"
+   ],
+   "frame": "result"
+  },
+  {
+   "cls": "C1",
+   "ask": "BART delays?",
+   "admit": [
+    "bart-advisories"
+   ],
+   "tops": [
+    "travel"
+   ],
+   "frame": "status"
+  },
+  {
+   "cls": "C1",
+   "ask": "what's the weather in Tulsa this weekend",
+   "admit": [
+    "open-meteo-forecast",
+    "nws-forecast",
+    "nws-forecast-hourly",
+    "wttr-in"
+   ],
+   "tops": [
+    "weather"
+   ],
+   "control": true
+  },
+  {
+   "cls": "C1",
+   "ask": "space weather today",
+   "admit": [
+    "swpc-kp",
+    "swpc-kp-forecast",
+    "swpc-alerts",
+    "swpc-aurora",
+    "swpc-3day"
+   ],
+   "tops": [
+    "hazards"
+   ]
+  },
+  {
+   "cls": "C1",
+   "ask": "is it going to rain in Seattle tomorrow",
+   "admit": [
+    "open-meteo-forecast",
+    "nws-forecast",
+    "nws-forecast-hourly",
+    "wttr-in"
+   ],
+   "tops": [
+    "weather"
+   ],
+   "frame": "forecast",
+   "control": true
+  },
+  {
+   "cls": "C2",
+   "ask": "storm surge Galveston",
+   "admit": [
+    "coops-water-level"
+   ],
+   "forbid": [
+    "swpc-*"
+   ],
+   "tops": [
+    "water"
+   ]
+  },
+  {
+   "cls": "C2",
+   "ask": "how's the surf at Virginia Beach",
+   "admit": [
+    "ndbc-buoy-realtime",
+    "open-meteo-marine"
+   ],
+   "tops": [
+    "water"
+   ]
+  },
+  {
+   "cls": "C2",
+   "ask": "Lake Michigan water temp Milwaukee",
+   "admit": [
+    "ndbc-buoy-realtime",
+    "open-meteo-marine",
+    "coops-water-temp"
+   ],
+   "tops": [
+    "water"
+   ]
+  },
+  {
+   "cls": "C2",
+   "ask": "waves at Huntington Beach",
+   "hint": {
+    "subject": "surf",
+    "wants": [
+     "wave height"
+    ],
+    "place": "Huntington Beach",
+    "frame_kind": null,
+    "window": null
+   },
+   "admit": [
+    "ndbc-buoy-realtime",
+    "open-meteo-marine"
+   ],
+   "tops": [
+    "water"
+   ]
+  },
+  {
+   "cls": "C2",
+   "ask": "Lake Erie water temp Cleveland",
+   "admit": [
+    "ndbc-buoy-realtime",
+    "open-meteo-marine",
+    "coops-water-temp"
+   ],
+   "tops": [
+    "water"
+   ]
+  },
+  {
+   "cls": "C2",
+   "ask": "ice storm Atlanta",
+   "forbid": [
+    "nsidc-arctic-ice"
+   ]
+  },
+  {
+   "cls": "C2",
+   "ask": "Tampa Bay Lightning score",
+   "forbid": [
+    "open-meteo-*",
+    "nws-*",
+    "wttr-in"
+   ],
+   "tops": [
+    "sports"
+   ]
+  },
+  {
+   "cls": "C2",
+   "ask": "freeze warning Fresno",
+   "admit": [
+    "nws-alerts-point",
+    "nws-alerts-state"
+   ],
+   "forbid": [
+    "openfda-*"
+   ],
+   "tops": [
+    "weather"
+   ]
+  },
+  {
+   "cls": "C2",
+   "ask": "will it be windy in Chicago",
+   "hint": {
+    "subject": "weather",
+    "wants": [
+     "wind speed"
+    ],
+    "place": "Chicago",
+    "frame_kind": "forecast",
+    "window": null
+   },
+   "admit": [
+    "open-meteo-forecast",
+    "nws-forecast",
+    "nws-forecast-hourly",
+    "wttr-in"
+   ],
+   "tops": [
+    "weather"
+   ]
+  },
+  {
+   "cls": "C2",
+   "ask": "hail in Denver today",
+   "hint": {
+    "subject": "weather",
+    "wants": [
+     "hail"
+    ],
+    "place": "Denver",
+    "frame_kind": null,
+    "window": null
+   },
+   "admit": [
+    "open-meteo-forecast",
+    "nws-forecast",
+    "nws-forecast-hourly",
+    "wttr-in",
+    "nws-alerts-point",
+    "nws-alerts-state"
+   ],
+   "tops": [
+    "weather"
+   ]
+  },
+  {
+   "cls": "C2",
+   "ask": "will there be thunderstorms in Dallas this afternoon",
+   "forbid": [
+    "faa-nas-status",
+    "openfda-*"
+   ],
+   "tops": [
+    "weather"
+   ]
+  },
+  {
+   "cls": "C2",
+   "ask": "when will the ISS pass over Denver",
+   "forbid": [
+    "nasa-neows-feed",
+    "wheretheiss-now"
+   ],
+   "frame": "next_event"
+  },
+  {
+   "cls": "C2",
+   "ask": "gold price per ounce",
+   "first": [
+    "goldapi-spot"
+   ],
+   "forbid": [
+    "fred-dcoilwtico",
+    "eia-spot-crude"
+   ],
+   "control": true
+  },
+  {
+   "cls": "C2",
+   "ask": "price of silver",
+   "admit": [
+    "goldapi-spot"
+   ],
+   "forbid": [
+    "fred-dcoilwtico"
+   ],
+   "control": true
+  },
+  {
+   "cls": "C2",
+   "ask": "crude oil price",
+   "admit": [
+    "fred-dcoilwtico",
+    "eia-spot-crude"
+   ],
+   "forbid": [
+    "goldapi-spot"
+   ]
+  },
+  {
+   "cls": "C2",
+   "ask": "earthquakes near San Francisco",
+   "admit": [
+    "usgs-quakes-near"
+   ],
+   "tops": [
+    "hazards"
+   ],
+   "control": true
+  },
+  {
+   "cls": "C2",
+   "ask": "rain chance this weekend in Atlanta",
+   "admit": [
+    "open-meteo-forecast",
+    "nws-forecast",
+    "nws-forecast-hourly",
+    "wttr-in"
+   ],
+   "tops": [
+    "weather"
+   ],
+   "control": true
+  },
+  {
+   "cls": "C2",
+   "ask": "UV index in Phoenix today",
+   "admit": [
+    "open-meteo-uv",
+    "epa-uv-daily",
+    "epa-uv-hourly"
+   ],
+   "tops": [
+    "weather"
+   ]
+  },
+  {
+   "cls": "C2",
+   "ask": "is GitHub down",
+   "admit": [
+    "statuspage-summary"
+   ],
+   "control": true
+  },
+  {
+   "cls": "C2",
+   "ask": "pollen count Raleigh",
+   "tops": [
+    "weather"
+   ]
+  },
+  {
+   "cls": "C2",
+   "ask": "near miss asteroid this week",
+   "admit": [
+    "nasa-neows-feed",
+    "jpl-close-approaches"
+   ],
+   "tops": [
+    "sky"
+   ]
+  },
+  {
+   "cls": "C2",
+   "ask": "does the Library have hurricane data",
+   "forbid": [
+    "finnhub-earnings-calendar"
+   ]
+  },
+  {
+   "cls": "C3",
+   "ask": "Bills score",
+   "forbid": [
+    "thesportsdb-team-next"
+   ],
+   "tops": [
+    "sports"
+   ],
+   "frame": "result"
+  },
+  {
+   "cls": "C3",
+   "ask": "Packers score",
+   "forbid": [
+    "thesportsdb-team-next"
+   ],
+   "tops": [
+    "sports"
+   ],
+   "frame": "result"
+  },
+  {
+   "cls": "C3",
+   "ask": "did the Chiefs win",
+   "forbid": [
+    "thesportsdb-team-next"
+   ],
+   "frame": "result"
+  },
+  {
+   "cls": "C3",
+   "ask": "Lakers final score last night",
+   "forbid": [
+    "thesportsdb-team-next"
+   ],
+   "frame": "result"
+  },
+  {
+   "cls": "C3",
+   "ask": "Yankees score",
+   "admit": [
+    "mlb-team-results",
+    "mlb-schedule"
+   ],
+   "forbid": [
+    "thesportsdb-team-next",
+    "mlb-team-schedule",
+    "nhl-club-schedule"
+   ],
+   "frame": "result"
+  },
+  {
+   "cls": "C3",
+   "ask": "Maple Leafs score",
+   "admit": [
+    "nhl-score-now"
+   ],
+   "forbid": [
+    "thesportsdb-team-next",
+    "mlb-team-schedule",
+    "nhl-club-schedule"
+   ],
+   "frame": "result"
+  },
+  {
+   "cls": "C3",
+   "ask": "how did the Eagles do",
+   "forbid": [
+    "thesportsdb-team-next"
+   ],
+   "frame": "result"
+  },
+  {
+   "cls": "C3",
+   "ask": "Liberty score",
+   "forbid": [
+    "thesportsdb-team-next"
+   ],
+   "frame": "result"
+  },
+  {
+   "cls": "C3",
+   "ask": "Chiefs next game",
+   "first": [
+    "thesportsdb-team-next"
+   ],
+   "frame": "next_event",
+   "control": true
+  },
+  {
+   "cls": "C3",
+   "ask": "when do the Celtics play next",
+   "admit": [
+    "thesportsdb-team-next"
+   ],
+   "frame": "next_event",
+   "control": true
+  },
+  {
+   "cls": "C3",
+   "ask": "Seahawks schedule",
+   "admit": [
+    "thesportsdb-team-next"
+   ],
+   "frame": "schedule"
+  },
+  {
+   "cls": "C3",
+   "ask": "when can I see the ISS from Denver",
+   "forbid": [
+    "wheretheiss-now"
+   ],
+   "frame": "next_event"
+  },
+  {
+   "cls": "C3",
+   "ask": "when can I see the ISS from Kansas City",
+   "forbid": [
+    "wheretheiss-now"
+   ],
+   "frame": "next_event"
+  },
+  {
+   "cls": "C3",
+   "ask": "where is the ISS right now",
+   "first": [
+    "wheretheiss-now"
+   ],
+   "frame": "current_value",
+   "control": true
+  },
+  {
+   "cls": "C3",
+   "ask": "where is the ISS",
+   "first": [
+    "wheretheiss-now"
+   ],
+   "control": true
+  },
+  {
+   "cls": "C3",
+   "ask": "next SpaceX launch",
+   "admit": [
+    "ll2-upcoming-launches",
+    "rocketlaunch-next5"
+   ],
+   "frame": "next_event"
+  },
+  {
+   "cls": "C3",
+   "ask": "last SpaceX launch",
+   "forbid": [
+    "ll2-upcoming-launches",
+    "rocketlaunch-next5"
+   ],
+   "frame": "result"
+  },
+  {
+   "cls": "C3",
+   "ask": "Braves schedule",
+   "admit": [
+    "mlb-team-schedule",
+    "thesportsdb-team-next"
+   ],
+   "frame": "schedule"
+  },
+  {
+   "cls": "C3",
+   "ask": "Dodgers score last night",
+   "admit": [
+    "mlb-team-results"
+   ],
+   "forbid": [
+    "thesportsdb-team-next",
+    "mlb-team-schedule",
+    "nhl-club-schedule"
+   ],
+   "frame": "result"
+  },
+  {
+   "cls": "C3",
+   "ask": "NHL scores tonight",
+   "admit": [
+    "nhl-score-now"
+   ],
+   "forbid": [
+    "thesportsdb-team-next",
+    "mlb-team-schedule",
+    "nhl-club-schedule"
+   ],
+   "frame": "result"
+  },
+  {
+   "cls": "C3",
+   "ask": "who won the Bruins game",
+   "forbid": [
+    "thesportsdb-team-next",
+    "mlb-team-schedule",
+    "nhl-club-schedule"
+   ],
+   "frame": "result"
+  },
+  {
+   "cls": "C3",
+   "ask": "when is the next jobs report",
+   "admit": [
+    "bls-release-calendar"
+   ],
+   "forbid": [
+    "fred-payems"
+   ],
+   "frame": "next_event"
+  },
+  {
+   "cls": "C3",
+   "ask": "what time is it in Tokyo",
+   "forbid": [
+    "usno-oneday",
+    "open-meteo-sun"
+   ],
+   "frame": null
+  },
+  {
+   "cls": "C3",
+   "ask": "how many days until Christmas",
+   "forbid": [
+    "usgs-*"
+   ],
+   "frame": "next_event"
+  },
+  {
+   "cls": "C3",
+   "ask": "how many earthquakes today",
+   "admit": [
+    "usgs-quakes-all-day",
+    "usgs-quakes-25-day",
+    "usgs-quakes-45-week",
+    "usgs-quakes-significant-month"
+   ],
+   "frame": "count"
+  },
+  {
+   "cls": "C3",
+   "ask": "tidal current at the Golden Gate",
+   "forbid": [
+    "swpc-*"
+   ],
+   "frame": null
+  },
+  {
+   "cls": "C3",
+   "ask": "tide table Charleston",
+   "admit": [
+    "coops-tide-hilo"
+   ],
+   "frame": null,
+   "control": true
+  },
+  {
+   "cls": "C4",
+   "ask": "Boston weather this weekend",
+   "admit": [
+    "open-meteo-forecast",
+    "nws-forecast",
+    "nws-forecast-hourly",
+    "wttr-in"
+   ],
+   "tops": [
+    "weather"
+   ],
+   "label_has": "(MA)"
+  },
+  {
+   "cls": "C4",
+   "ask": "Detroit weather tomorrow",
+   "admit": [
+    "open-meteo-forecast",
+    "nws-forecast",
+    "nws-forecast-hourly",
+    "wttr-in"
+   ],
+   "tops": [
+    "weather"
+   ],
+   "label_has": "(MI)"
+  },
+  {
+   "cls": "C4",
+   "ask": "Philadelphia forecast",
+   "admit": [
+    "open-meteo-forecast",
+    "nws-forecast",
+    "nws-forecast-hourly",
+    "wttr-in"
+   ],
+   "tops": [
+    "weather"
+   ],
+   "label_has": "(PA)"
+  },
+  {
+   "cls": "C4",
+   "ask": "Charlotte rain chance",
+   "admit": [
+    "open-meteo-forecast",
+    "nws-forecast",
+    "nws-forecast-hourly",
+    "wttr-in"
+   ],
+   "tops": [
+    "weather"
+   ],
+   "label_has": "(NC)"
+  },
+  {
+   "cls": "C4",
+   "ask": "Omaha weather",
+   "admit": [
+    "open-meteo-forecast",
+    "nws-forecast",
+    "nws-forecast-hourly",
+    "wttr-in"
+   ],
+   "tops": [
+    "weather"
+   ],
+   "label_has": "(NE)"
+  },
+  {
+   "cls": "C4",
+   "ask": "Oakland weather this weekend",
+   "admit": [
+    "open-meteo-forecast",
+    "nws-forecast",
+    "nws-forecast-hourly",
+    "wttr-in"
+   ],
+   "tops": [
+    "weather"
+   ],
+   "label_has": "(CA)"
+  },
+  {
+   "cls": "C4",
+   "ask": "weather in Raleigh",
+   "admit": [
+    "open-meteo-forecast",
+    "nws-forecast",
+    "nws-forecast-hourly",
+    "wttr-in"
+   ],
+   "tops": [
+    "weather"
+   ],
+   "label_has": "(NC)"
+  },
+  {
+   "cls": "C4",
+   "ask": "Houston weather",
+   "admit": [
+    "open-meteo-forecast",
+    "nws-forecast",
+    "nws-forecast-hourly",
+    "wttr-in"
+   ],
+   "tops": [
+    "weather"
+   ],
+   "label_has": "(TX)"
+  },
+  {
+   "cls": "C4",
+   "ask": "Milwaukee weather tomorrow",
+   "admit": [
+    "open-meteo-forecast",
+    "nws-forecast",
+    "nws-forecast-hourly",
+    "wttr-in"
+   ],
+   "tops": [
+    "weather"
+   ],
+   "label_has": "(WI)"
+  },
+  {
+   "cls": "C4",
+   "ask": "Columbus weather",
+   "admit": [
+    "open-meteo-forecast",
+    "nws-forecast",
+    "nws-forecast-hourly",
+    "wttr-in"
+   ],
+   "tops": [
+    "weather"
+   ],
+   "label_has": null
+  },
+  {
+   "cls": "C4",
+   "ask": "San Jose weather this weekend",
+   "admit": [
+    "open-meteo-forecast",
+    "nws-forecast",
+    "nws-forecast-hourly",
+    "wttr-in"
+   ],
+   "tops": [
+    "weather"
+   ],
+   "label_has": "(CA)"
+  },
+  {
+   "cls": "C4",
+   "ask": "Puget Sound tides Seattle",
+   "admit": [
+    "coops-tide-hilo"
+   ],
+   "place": [
+    "seattle"
+   ]
+  },
+  {
+   "cls": "C4",
+   "ask": "Chesapeake Bay water temp Annapolis",
+   "admit": [
+    "ndbc-buoy-realtime",
+    "open-meteo-marine",
+    "coops-water-temp"
+   ],
+   "place": [
+    "annapolis"
+   ]
+  },
+  {
+   "cls": "C4",
+   "ask": "Lake Michigan water temp Milwaukee",
+   "place": [
+    "milwaukee"
+   ]
+  },
+  {
+   "cls": "C4",
+   "ask": "Lake Tahoe snow this week",
+   "place": [
+    "tahoe"
+   ]
+  },
+  {
+   "cls": "C4",
+   "ask": "Mississippi River level St. Louis",
+   "place": [
+    "st",
+    "louis"
+   ]
+  },
+  {
+   "cls": "C4",
+   "ask": "pollen count Raleigh",
+   "place": [
+    "raleigh"
+   ]
+  },
+  {
+   "cls": "C4",
+   "ask": "Springfield weather",
+   "place": [
+    "springfield"
+   ]
+  },
+  {
+   "cls": "C4",
+   "ask": "Portland forecast",
+   "place": [
+    "portland"
+   ]
+  },
+  {
+   "cls": "C4",
+   "ask": "premier league table",
+   "admit": [
+    "football-data-standings",
+    "thesportsdb-league-table"
+   ],
+   "scope": "global"
+  },
+  {
+   "cls": "C4",
+   "ask": "price of silver",
+   "place": []
+  },
+  {
+   "cls": "C4",
+   "ask": "Mercury retrograde",
+   "place": []
+  },
+  {
+   "cls": "C4",
+   "ask": "Chase bank hours",
+   "place": []
+  },
+  {
+   "cls": "C4",
+   "ask": "Mountain Dew price",
+   "place": []
+  },
+  {
+   "cls": "C4",
+   "ask": "gold price per ounce",
+   "place": []
+  },
+  {
+   "cls": "C4",
+   "ask": "bitcoin price",
+   "place": []
+  },
+  {
+   "cls": "C4",
+   "ask": "Lakers score",
+   "place": []
+  },
+  {
+   "cls": "C4",
+   "ask": "the Dow today",
+   "place": []
+  },
+  {
+   "cls": "C4",
+   "ask": "tech news",
+   "place": []
+  },
+  {
+   "cls": "C5",
+   "ask": "any hurricanes headed for Tampa?",
+   "admit": [
+    "nhc-current-storms",
+    "nhc-atlantic-rss",
+    "nhc-pacific-rss",
+    "nasa-eonet-events"
+   ],
+   "tops": [
+    "hazards"
+   ],
+   "scope": "global"
+  },
+  {
+   "cls": "C5",
+   "ask": "is a tropical storm going to hit Houston",
+   "admit": [
+    "nhc-current-storms",
+    "nhc-atlantic-rss",
+    "nhc-pacific-rss",
+    "nasa-eonet-events"
+   ],
+   "tops": [
+    "hazards"
+   ],
+   "scope": "global"
+  },
+  {
+   "cls": "C5",
+   "ask": "hurricane threatening Charleston",
+   "admit": [
+    "nhc-current-storms",
+    "nhc-atlantic-rss",
+    "nhc-pacific-rss",
+    "nasa-eonet-events"
+   ],
+   "tops": [
+    "hazards"
+   ],
+   "scope": "global"
+  },
+  {
+   "cls": "C5",
+   "ask": "any hurricanes in the Atlantic",
+   "admit": [
+    "nhc-current-storms",
+    "nhc-atlantic-rss",
+    "nhc-pacific-rss",
+    "nasa-eonet-events"
+   ],
+   "tops": [
+    "hazards"
+   ],
+   "control": true
+  },
+  {
+   "cls": "C5",
+   "ask": "volcano near Seattle",
+   "admit": [
+    "usgs-elevated-volcanoes",
+    "nasa-eonet-events"
+   ],
+   "scope": "global"
+  },
+  {
+   "cls": "C5",
+   "ask": "northern lights in Fairbanks tonight",
+   "admit": [
+    "swpc-kp",
+    "swpc-kp-forecast",
+    "swpc-alerts",
+    "swpc-aurora",
+    "swpc-3day"
+   ],
+   "scope": "global"
+  },
+  {
+   "cls": "C5",
+   "ask": "ISS passes over Denver",
+   "forbid": [
+    "wheretheiss-now"
+   ]
+  },
+  {
+   "cls": "C5",
+   "ask": "tornado warning Tulsa",
+   "first": [
+    "nws-alerts-point"
+   ],
+   "scope": "place"
+  },
+  {
+   "cls": "C5",
+   "ask": "tsunami warning Honolulu",
+   "admit": [
+    "nws-alerts-point",
+    "ntwc-atom"
+   ]
+  },
+  {
+   "cls": "C5",
+   "ask": "earthquakes near San Francisco",
+   "first": [
+    "usgs-quakes-near"
+   ],
+   "scope": "place",
+   "control": true
+  },
+  {
+   "cls": "C5",
+   "ask": "flood warning near Houston",
+   "admit": [
+    "nws-alerts-point",
+    "nws-alerts-state",
+    "nwps-gauge-stageflow",
+    "usgs-water-iv"
+   ],
+   "scope": "place"
+  },
+  {
+   "cls": "C5",
+   "ask": "air quality in Denver",
+   "first": [
+    "open-meteo-air-quality"
+   ],
+   "scope": "place"
+  },
+  {
+   "cls": "C5",
+   "ask": "sunset time in Chicago",
+   "admit": [
+    "open-meteo-sun",
+    "usno-oneday"
+   ],
+   "scope": "place"
+  },
+  {
+   "cls": "C5",
+   "ask": "earthquakes in Alaska today",
+   "admit": [
+    "usgs-quakes-state"
+   ],
+   "scope": "place"
+  },
+  {
+   "cls": "C5",
+   "ask": "wildfire near Boulder",
+   "scope_all": "place"
+  },
+  {
+   "cls": "C6",
+   "ask": "MLB wild card standings",
+   "first": [
+    "mlb-standings",
+    "mlb-wildcard-standings"
+   ],
+   "forbid": [
+    "nhl-standings-now",
+    "jolpica-f1-standings"
+   ]
+  },
+  {
+   "cls": "C6",
+   "ask": "AL wild card race",
+   "forbid": [
+    "nhl-standings-now",
+    "nhl-score-now",
+    "nhl-club-schedule"
+   ]
+  },
+  {
+   "cls": "C6",
+   "ask": "NHL wild card standings",
+   "admit": [
+    "nhl-standings-now"
+   ],
+   "forbid": [
+    "mlb-standings"
+   ]
+  },
+  {
+   "cls": "C6",
+   "ask": "NBA standings",
+   "forbid": [
+    "mlb-standings",
+    "nhl-standings-now",
+    "jolpica-f1-standings"
+   ]
+  },
+  {
+   "cls": "C6",
+   "ask": "NFL standings",
+   "forbid": [
+    "mlb-standings",
+    "nhl-standings-now",
+    "jolpica-f1-standings"
+   ]
+  },
+  {
+   "cls": "C6",
+   "ask": "Minnesota Wild score",
+   "admit": [
+    "nhl-score-now"
+   ],
+   "forbid": [
+    "mlb-*"
+   ],
+   "control": true
+  },
+  {
+   "cls": "C6",
+   "ask": "Miami Heat next game",
+   "first": [
+    "thesportsdb-team-next"
+   ],
+   "control": true
+  },
+  {
+   "cls": "C6",
+   "ask": "Orlando Magic schedule",
+   "admit": [
+    "thesportsdb-team-next"
+   ],
+   "control": true
+  },
+  {
+   "cls": "C6",
+   "ask": "how's the Nasdaq doing today",
+   "first": [
+    "fred-nasdaqcom"
+   ],
+   "forbid": [
+    "finnhub-quote",
+    "alphavantage-quote",
+    "alphavantage-daily",
+    "sec-submissions",
+    "sec-companyfacts"
+   ]
+  },
+  {
+   "cls": "C6",
+   "ask": "Nasdaq composite",
+   "first": [
+    "fred-nasdaqcom"
+   ],
+   "forbid": [
+    "finnhub-quote",
+    "alphavantage-quote",
+    "alphavantage-daily",
+    "sec-submissions",
+    "sec-companyfacts"
+   ]
+  },
+  {
+   "cls": "C6",
+   "ask": "the Dow today",
+   "first": [
+    "fred-djia"
+   ],
+   "forbid": [
+    "finnhub-quote",
+    "alphavantage-quote",
+    "alphavantage-daily",
+    "sec-submissions",
+    "sec-companyfacts"
+   ]
+  },
+  {
+   "cls": "C6",
+   "ask": "S&P 500 today",
+   "first": [
+    "fred-sp500"
+   ]
+  },
+  {
+   "cls": "C6",
+   "ask": "how is the stock market doing",
+   "forbid": [
+    "finnhub-quote",
+    "alphavantage-quote",
+    "alphavantage-daily",
+    "sec-submissions",
+    "sec-companyfacts"
+   ]
+  },
+  {
+   "cls": "C6",
+   "ask": "Nasdaq Inc stock",
+   "admit": [
+    "finnhub-quote",
+    "alphavantage-quote"
+   ],
+   "control": true
+  },
+  {
+   "cls": "C6",
+   "ask": "NDAQ",
+   "admit": [
+    "finnhub-quote",
+    "alphavantage-quote",
+    "alphavantage-daily",
+    "sec-submissions",
+    "sec-companyfacts"
+   ],
+   "control": true
+  },
+  {
+   "cls": "C6",
+   "ask": "AAPL",
+   "admit": [
+    "finnhub-quote",
+    "alphavantage-quote",
+    "alphavantage-daily",
+    "sec-submissions",
+    "sec-companyfacts"
+   ],
+   "control": true
+  },
+  {
+   "cls": "C6",
+   "ask": "Dow Inc stock",
+   "first": [
+    "finnhub-quote",
+    "alphavantage-quote",
+    "alphavantage-daily"
+   ]
+  },
+  {
+   "cls": "C6",
+   "ask": "DC metro red line delays",
+   "forbid": [
+    "faa-nas-status",
+    "awc-metar",
+    "nws-observation-latest"
+   ]
+  },
+  {
+   "cls": "C6",
+   "ask": "ohio state football ranking",
+   "forbid": [
+    "mlb-standings",
+    "nhl-standings-now",
+    "jolpica-f1-standings"
+   ]
+  },
+  {
+   "cls": "C6",
+   "ask": "NFL scores",
+   "admit": [
+    "thesportsdb-last-league"
+   ],
+   "forbid": [
+    "mlb-schedule",
+    "nhl-score-now"
+   ]
+  },
+  {
+   "cls": "C6",
+   "ask": "Premier League table",
+   "admit": [
+    "thesportsdb-league-table",
+    "football-data-standings"
+   ],
+   "forbid": [
+    "mlb-standings",
+    "nhl-standings-now"
+   ]
+  },
+  {
+   "cls": "C6",
+   "ask": "bitcoin price",
+   "first": [
+    "coingecko-price",
+    "coinbase-spot",
+    "kraken-ticker"
+   ],
+   "control": true
+  },
+  {
+   "cls": "C6",
+   "ask": "delays at ORD",
+   "admit": [
+    "faa-nas-status"
+   ],
+   "control": true
+  },
+  {
+   "cls": "C6",
+   "ask": "yen to dollar",
+   "admit": [
+    "frankfurter-latest"
+   ],
+   "control": true
+  },
+  {
+   "cls": "C6",
+   "ask": "NBA scores",
+   "forbid": [
+    "mlb-schedule",
+    "nhl-score-now"
+   ]
+  },
+  {
+   "cls": "C1",
+   "ask": "Is it raining in Seattle right now?",
+   "admit": [
+    "open-meteo-forecast",
+    "nws-forecast",
+    "nws-forecast-hourly",
+    "wttr-in"
+   ],
+   "tops": [
+    "weather"
+   ],
+   "scope": "place"
+  },
+  {
+   "cls": "C4",
+   "ask": "when is high tide in Seattle",
+   "admit": [
+    "coops-tide-hilo"
+   ],
+   "scope": "place",
+   "control": true
+  },
+  {
+   "cls": "C6",
+   "ask": "Champions League results",
+   "admit": [
+    "football-data-matches"
+   ],
+   "scope": "global"
+  },
+  {
+   "cls": "C6",
+   "ask": "delays at Newark airport",
+   "first": [
+    "faa-nas-status"
+   ]
+  },
+  {
+   "cls": "C15",
+   "ask": "next Dodgers game",
+   "first": [
+    "mlb-team-schedule"
+   ]
+  },
+  {
+   "cls": "C15",
+   "ask": "Phillies next game",
+   "first": [
+    "mlb-team-schedule"
+   ]
+  },
+  {
+   "cls": "C15",
+   "ask": "Maple Leafs next game",
+   "first": [
+    "nhl-club-schedule"
+   ]
+  }
+ ]
+}

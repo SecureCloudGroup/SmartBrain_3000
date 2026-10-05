@@ -80,6 +80,89 @@ _FETCH_HEADERS = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
 }
+# The JSON readers ask for JSON first (field 2026-09-29): a content-negotiating API (Django REST
+# Framework — Launch Library 2, jolpica, usaspending) answers the browser Accept above with its HTML
+# page, so a live JSON source read as "not_json" and was sent to the page door. The page reader keeps
+# the HTML Accept. A caller's own Accept (any case) wins; two Accept headers are never sent.
+JSON_ACCEPT = "application/json, text/plain;q=0.5, */*;q=0.1"
+
+
+def _json_headers(headers: dict | None) -> dict:
+    headers = dict(headers or {})
+    if not any(str(k).lower() == "accept" for k in headers):
+        headers["Accept"] = JSON_ACCEPT
+    return headers
+
+
+# Charset-aware decode (field 2026-09-28: AWS's official status feed is 'application/json;charset=utf-16'
+# and read as not_json under a UTF-8-only decode). Order: a byte-order mark, then the declared charset,
+# then UTF-8 with replacement. A declared 8-bit charset over bytes that are valid UTF-8 is a wrong header
+# (valid non-ASCII UTF-8 is essentially never real Latin-1), and a declared UTF-16 with no NUL pattern
+# is 8-bit text under a wrong header too.
+_BOMS = ((b"\xef\xbb\xbf", "utf-8"), (b"\xff\xfe", "utf-16-le"), (b"\xfe\xff", "utf-16-be"))
+_UTF16 = {"utf-16": None, "utf16": None, "utf-16le": "utf-16-le", "utf-16-le": "utf-16-le",
+          "utf-16be": "utf-16-be", "utf-16-be": "utf-16-be"}
+_EIGHT_BIT = {"latin-1": "latin-1", "latin1": "latin-1", "iso-8859-1": "latin-1", "iso8859-1": "latin-1",
+              "windows-1252": "cp1252", "cp1252": "cp1252"}
+
+
+def _declared_charset(content_type: str) -> str:
+    for part in (content_type or "").split(";")[1:]:
+        name, _, value = part.strip().partition("=")
+        if name.strip().lower() == "charset":
+            return value.strip().strip("'\"").lower()
+    return ""
+
+
+def _utf16_order(content: bytes) -> str | None:
+    """The byte order of BOM-less UTF-16 text, from where its NULs sit (ASCII in UTF-16 has one
+    NUL per character); None when the bytes show no such pattern. Needs a dense (≥25% of the head)
+    one-parity NUL run — a stray NUL in a UTF-8 body is not UTF-16 (field 2026-10-04)."""
+    head = content[:64]
+    if not head:
+        return None
+    even = sum(1 for i in range(0, len(head), 2) if head[i] == 0)
+    odd = sum(1 for i in range(1, len(head), 2) if head[i] == 0)
+    min_nuls = max(len(head) // 4, 1)
+    if even >= min_nuls and even > odd:
+        return "utf-16-be"
+    if odd >= min_nuls and odd > even:
+        return "utf-16-le"
+    return None
+
+
+def _is_json_type(content_type: str) -> bool:
+    """A structured-syntax JSON type (RFC 6839: application/geo+json, ld+json, vnd.api+json…) is JSON.
+    api.weather.gov serves every document as application/geo+json whatever the Accept (verified
+    2026-09-29), so a JSON reader that took only application/json refused the whole NWS API."""
+    media = (content_type or "").split(";", 1)[0].strip().lower()
+    return media.startswith("application/") and media.endswith("+json")
+
+
+def decode_body(content: bytes, content_type: str = "") -> str:
+    """A fetched body as text: BOM -> declared charset -> UTF-8 (with replacement). Never raises."""
+    for bom, codec in _BOMS:
+        if content.startswith(bom):
+            return content[len(bom):].decode(codec, "replace")
+    declared = _declared_charset(content_type)
+    if declared in _UTF16:
+        order = _UTF16.get(declared) or _utf16_order(content)
+        if order:
+            return content.decode(order, "replace")
+    elif not declared:
+        order = _utf16_order(content)  # F8: dense NUL run in one parity + strict decode confirms
+        if order:
+            try:
+                return content.decode(order)
+            except UnicodeDecodeError:
+                pass
+    if declared in _EIGHT_BIT:
+        try:
+            return content.decode("utf-8")
+        except UnicodeDecodeError:
+            return content.decode(_EIGHT_BIT[declared], "replace")
+    return content.decode("utf-8", "replace")
+
 
 # RFC 6052 NAT64 well-known prefix — an IPv6 in this /96 wraps an IPv4 in its
 # low 32 bits (e.g. 64:ff9b::7f00:1 -> 127.0.0.1, a real loopback bypass).
@@ -295,7 +378,7 @@ def _guarded_get(url: str, allowed_ct: tuple[str, ...], max_bytes: int,
                     raise FetchError(f"upstream returned HTTP {response.status_code}",
                                      status=response.status_code)
                 ctype = response.headers.get("content-type", "")
-                ct_ok = ctype.startswith(allowed_ct)
+                ct_ok = ctype.startswith(allowed_ct) or ("application/json" in allowed_ct and _is_json_type(ctype))
                 if not ct_ok and not accept_zip_magic:
                     raise FetchError(f"content-type not allowed: {ctype or 'unknown'}",
                                      kind="not_json")
@@ -354,7 +437,8 @@ def validate_public_url(url: str) -> None:
 def safe_fetch(url: str) -> dict:
     """Fetch ``url`` behind the SSRF guard; return {final_url, status, text}."""
     got = _guarded_get(url, _ALLOWED_CT, _MAX_BYTES)
-    return {"final_url": got["final_url"], "status": got["status"], "text": got["content"].decode("utf-8", "replace")}
+    return {"final_url": got["final_url"], "status": got["status"],
+            "text": decode_body(got["content"], got["content_type"])}
 
 
 def safe_fetch_json(url: str, headers: dict | None = None,
@@ -371,9 +455,9 @@ def safe_fetch_json(url: str, headers: dict | None = None,
     import json
 
     got = _guarded_get(url, ("application/json", "text/"), _MAX_BYTES,
-                       extra_headers=headers, allow_redirects=allow_redirects)
+                       extra_headers=_json_headers(headers), allow_redirects=allow_redirects)
     try:
-        return json.loads(got["content"].decode("utf-8", "replace"))
+        return json.loads(decode_body(got["content"], got["content_type"]))
     except ValueError:
         raise FetchError("upstream returned invalid JSON", kind="not_json") from None
 
@@ -388,10 +472,10 @@ def safe_post_json(url: str, payload: dict, headers: dict | None = None) -> dict
 
     body = json.dumps(payload).encode("utf-8")
     got = _guarded_get(url, ("application/json", "text/"), _MAX_BYTES, method="POST",
-                       content=body, extra_headers={"Content-Type": "application/json",
-                                                    **(headers or {})})
+                       content=body, extra_headers=_json_headers({"Content-Type": "application/json",
+                                                                  **(headers or {})}))
     try:
-        return json.loads(got["content"].decode("utf-8", "replace"))
+        return json.loads(decode_body(got["content"], got["content_type"]))
     except ValueError:
         raise FetchError("upstream returned invalid JSON", kind="not_json") from None
 
@@ -451,7 +535,7 @@ def safe_fetch_feed(url: str) -> dict:
     """
     got = _guarded_get(url, ("application/", "text/"), _MAX_BYTES)
     return {"final_url": got["final_url"], "status": got["status"],
-            "text": got["content"].decode("utf-8", "replace")}
+            "text": decode_body(got["content"], got["content_type"])}
 
 
 # --- textual NI sources (§3 http_json ``format``: csv / feed / xml / text) ------
@@ -494,7 +578,7 @@ def safe_fetch_text(url: str, fmt: str, headers: dict | None = None,
                        extra_headers=headers, allow_redirects=allow_redirects)
     return {"final_url": got["final_url"], "status": got["status"],
             "content_type": got["content_type"],
-            "text": got["content"].decode("utf-8", "replace")}
+            "text": decode_body(got["content"], got["content_type"])}
 
 
 def format_error_kind(fmt: str) -> str:

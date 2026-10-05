@@ -254,7 +254,7 @@ def test_when_every_library_source_refuses_the_card_searches_the_web(monkeypatch
 
     calls = []
     monkeypatch.setattr(ni_flow, "_pause_with_web",
-                        lambda s, i, r, it, cm: calls.append(r) or ni_flow._transition(
+                        lambda s, i, r, it, cm, drop_why=None, links=None: calls.append(r) or ni_flow._transition(
                             s, i, "source", error=ni_flow.AWAITING_SOURCE_PICK, _ranked_search=[
                                 {"title": "MLB", "host": "mlb.com", "url": "https://www.mlb.com/yankees", "evidence": []}]))
     out = ni_flow._sample_and_map(store, item_id, "Yankees score", {"wants": ["score"]},
@@ -304,3 +304,26 @@ def test_time_step_keys_follow_list_positions() -> None:
 def test_a_count_want_stays_a_number_when_the_sample_has_no_numbers() -> None:
     cands = ni_flow.derive_paths({"activeStorms": [], "note": "none"})
     assert ni_flow.reconcile_field_types({"count": "number"}, cands) == {"count": "number"}
+
+
+def test_a_refusing_host_takes_its_other_addresses_with_it() -> None:
+    """FETCH-F6 (2026-10-04): a host-wide signal (429 / challenge / 403 with a bot-wall body) drops
+    every row on the host; a plain 401 / 403 drops just that URL — a multi-tenant host (arcgis.com,
+    s3.amazonaws.com) still has readable tenants. The sampler sets ``host_wide`` based on exc.kind
+    and status; the default here is URL-only."""
+    store = _store()
+    item_id = ni_flow.create_shell_item(store, "bitcoin price")
+    record = ni_flow._make_record("bitcoin price", "sampling")
+    record["_ranked_library"] = [
+        {"source_id": "coingecko-price", "provider": "CoinGecko", "url": "https://api.coingecko.com/api/v3/simple/price"},
+        {"source_id": "coingecko-chart", "provider": "CoinGecko", "url": "https://api.coingecko.com/api/v3/coins/x/chart"},
+        {"source_id": "coinbase-spot", "provider": "Coinbase", "url": "https://api.coinbase.com/v2/prices/BTC-USD/spot"}]
+    ni_flow._flow_write(store, item_id, record)
+    out = ni_flow._repick_without(store, item_id, "https://api.coingecko.com/api/v3/simple/price",
+                                   host_wide=True)
+    assert [r["source_id"] for r in out["_ranked_library"]] == ["coinbase-spot"]
+    # "has nothing for this" is about that one address, not the host: the others stay
+    ni_flow._flow_write(store, item_id, {**ni_flow._flow_read(store, item_id), "_ranked_library": record["_ranked_library"]})
+    out = ni_flow._repick_without(store, item_id, "https://api.coingecko.com/api/v3/simple/price",
+                                  why="has nothing for this right now")
+    assert [r["source_id"] for r in out["_ranked_library"]] == ["coingecko-chart", "coinbase-spot"]

@@ -11,6 +11,86 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Changed
+
+- **Cards come from SmartBrain Library sources that describe their answers;
+  web pages are offered as links.** Readings pulled from web pages and from
+  datasets the Library hasn't described were too often wrong, so a card is no
+  longer built from them. When no Library source answers your ask yet, the
+  card says so and lists pages that may help, each named with its site, as
+  links that open in a new tab. A link you paste yourself still builds a
+  card: it shows the reading it found and where it came from, asks "Is this
+  what you asked for?", and starts updating only after you tap **Yes, that's
+  it** (**No, try another source** takes it back to the source choice).
+  Existing cards don't change.
+- **Stock and company quotes are offered as links for now.** The Library's
+  quote sources don't describe their answers yet, so "TSLA" or "Microsoft
+  stock price" lists Alpha Vantage, Finnhub and quote pages as links.
+
+### Added
+
+- **Cards from Library sources that declare their answers show the right
+  values.** When a SmartBrain Library source says which of its fields answer
+  which questions, the card is built from those: the right values, with
+  labels and units ("Rain chance tomorrow 80%", a 7-day forecast, weather
+  described in words).
+
+### Fixed
+
+- **"Today" and "tonight" cards follow the calendar.** A card whose source
+  is asked for a date ("MLB scores today", "moon phase tonight", "what's on
+  TV tonight", tides, asteroids) asks for the current date on every update.
+  Since 0.24.0 such cards kept asking for the day they were made; existing
+  cards are corrected on their next update.
+- **Card times follow your time zone, also in Docker,** and sources that send
+  UTC or local times are read in their own zone: "kp index tonight" shows
+  tonight's hours, Denver's sunset reads right from New York, a game whose
+  start is still to be decided doesn't show up as tonight, "tonight" at 10 PM
+  doesn't start with hours already past, and a "next game" list never leads
+  with a game already played. After today's sunset, "when is sunset" shows
+  tomorrow's.
+- **A card that can't answer what you asked isn't built.** "Latest news on
+  Ukraine" no longer shows general headlines, "Inter Miami games today" no
+  longer shows MLB's games, "Fox News headlines" no longer shows ABC's,
+  "NFC East standings" no longer shows baseball, "gas inventories" no longer
+  shows gas prices, and "any aurora tonight?" shows the night's forecast. The
+  card offers the next source, then links, then says so.
+- **The place you name is the place on the card.** A list is kept to the place
+  or division you named (San Ysidro's border wait, the NHL's Metropolitan
+  Division); a national number isn't shown as your state's ("unemployment
+  rate in Ohio"); a state's earthquakes come from the state's own feed and
+  only that state's rows ("earthquakes in California", not a town named
+  California in Pennsylvania, and not Nevada); "Durham Bulls" isn't the
+  Chicago Bulls; and "LA" still means Los Angeles.
+- **An airport's status answers only for an airport.** "Amtrak Northeast
+  Regional delays" no longer shows the FAA's airport status; "delays at
+  O'Hare" and "delays at Orlando airport" find it.
+- **"rn" and "atm" mean now, and "moon phase" is a card.** A right-now ask is
+  read as one, and asks without a date no longer get sent to the countdown
+  builder.
+- **A page you paste is checked before it asks for your yes.** Its reading
+  must be on the page as you see it (not a hidden element, a menu, a heading,
+  a download label or the page's own title), carry its unit, match the day
+  you asked about, come from the outlet you named, and be current when you
+  asked for right now; a dataset published for another state isn't used.
+  Pages that state their character set only in the server's headers read
+  correctly, and a site is treated as a brand's official site only when it
+  really is.
+- **A source with nothing for your ask hands over to the next one,** and a
+  source that refuses SmartBrain or can't be fetched no longer ends the card.
+- **No more false "this card won't include…" notes** on cards built from a
+  Library source's answers; the card only says what the source really doesn't
+  report ("score" on a schedule).
+- **Small numbers keep their digits:** yen to dollar reads 0.00634, not 0.01.
+- **A list row the source left a field out of shows "—"** instead of failing
+  the whole card, and a day forecast over hourly data shows the whole day.
+- **Temperature asks go to the forecast** ("temp in Denver", "how hot is it in
+  Tucson"), while "water temp" and "ocean temperature" keep their water sources.
+- **A source is only offered for what it is about.** "Gold price per ounce" no
+  longer shows crude oil just because both are commodities.
+- **Tables that show a date show just the time beside it** ("Mon Sep 28 ·
+  7:56 AM · 7:36 PM").
+
 ## [0.24.1] - 2026-09-29
 
 ### Fixed

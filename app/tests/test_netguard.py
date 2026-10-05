@@ -385,3 +385,166 @@ def test_fetch_json_rejects_invalid_json(monkeypatch) -> None:
     _serve(monkeypatch, lambda r: httpx.Response(200, headers={"content-type": "application/json"}, text="not json"))
     with pytest.raises(FetchError):
         netguard.safe_fetch_json("http://api.test/thing")
+
+
+# --- the fetch contract (C12): JSON asks for JSON; a body decodes by what it says it is --------------
+
+_JSON_FIRST = "application/json, text/plain;q=0.5, */*;q=0.1"
+
+
+def _accept_seen(monkeypatch, body: str = '{"ok": true}', ctype: str = "application/json") -> dict:
+    import httpx
+
+    _resolve_to(monkeypatch, "93.184.216.34")
+    seen: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["accept"] = request.headers.get_list("accept")
+        return httpx.Response(200, headers={"content-type": ctype}, text=body)
+
+    _serve(monkeypatch, handler)
+    return seen
+
+
+def test_fetch_json_asks_for_json_not_a_web_page(monkeypatch) -> None:
+    # A content-negotiating API (Django REST Framework: Launch Library 2, jolpica, usaspending) serves
+    # its HTML page to a browser Accept. The JSON reader must ask for JSON first.
+    seen = _accept_seen(monkeypatch)
+    assert netguard.safe_fetch_json("http://api.test/launches") == {"ok": True}
+    assert seen["accept"] == [_JSON_FIRST]
+
+
+def test_fetch_json_keeps_a_callers_own_accept_and_never_sends_two(monkeypatch) -> None:
+    seen = _accept_seen(monkeypatch)
+    netguard.safe_fetch_json("http://api.test/x", headers={"accept": "application/geo+json"})
+    assert seen["accept"] == ["application/geo+json"]
+    netguard.safe_fetch_json("http://api.test/x", headers={"X-Api-Key": "k"})
+    assert seen["accept"] == [_JSON_FIRST]
+
+
+def test_post_json_asks_for_json(monkeypatch) -> None:
+    seen = _accept_seen(monkeypatch)
+    netguard.safe_post_json("http://api.test/search", {"q": "x"})
+    assert seen["accept"] == [_JSON_FIRST]
+
+
+def test_page_fetch_keeps_the_html_accept(monkeypatch) -> None:
+    seen = _accept_seen(monkeypatch, "<html>ok</html>", "text/html")
+    netguard.safe_fetch_page("http://example.test/page")
+    assert len(seen["accept"]) == 1 and seen["accept"][0].startswith("text/html")
+
+
+_TEXT = '{"name": "Café Zoë – 東京", "n": 1}'
+
+
+@pytest.mark.parametrize(("content", "ctype"), [
+    (_TEXT.encode("utf-8"), "application/json"),
+    (_TEXT.encode("utf-8"), "application/json; charset=utf-8"),
+    (b"\xef\xbb\xbf" + _TEXT.encode("utf-8"), "application/json"),                 # UTF-8 BOM
+    (b"\xff\xfe" + _TEXT.encode("utf-16-le"), "application/json"),                 # UTF-16 LE BOM, no charset
+    (b"\xfe\xff" + _TEXT.encode("utf-16-be"), "application/json"),                 # UTF-16 BE BOM, no charset
+    (b"\xff\xfe" + _TEXT.encode("utf-16-le"), "application/json; charset=utf-16"),
+    (_TEXT.encode("utf-16-le"), "application/json;charset=utf-16"),                # no BOM, generic utf-16
+    (_TEXT.encode("utf-16-be"), "application/json;charset=utf-16"),
+    (_TEXT.encode("utf-16-le"), "application/json; charset=UTF-16LE"),
+    (_TEXT.encode("utf-16-be"), 'application/json; charset="utf-16be"'),
+    (_TEXT.encode("utf-16-le"), "application/json"),                               # undeclared, no BOM
+    (_TEXT.encode("utf-8"), "application/json; charset=iso-8859-1"),               # UTF-8 under a wrong header
+    (_TEXT.encode("utf-8"), "application/json; charset=utf-16"),                   # UTF-8 under a wrong header
+], ids=["utf8", "utf8-declared", "utf8-bom", "utf16le-bom", "utf16be-bom", "utf16-bom-declared",
+        "utf16le-nobom", "utf16be-nobom", "utf16le-declared", "utf16be-declared-quoted", "utf16le-undeclared",
+        "utf8-says-latin1", "utf8-says-utf16"])
+def test_decode_body_reads_what_the_bytes_are(content, ctype) -> None:
+    assert netguard.decode_body(content, ctype) == _TEXT
+
+
+@pytest.mark.parametrize("charset", ["latin-1", "iso-8859-1", "ISO-8859-1", "windows-1252"])
+def test_decode_body_honours_an_eight_bit_charset(charset) -> None:
+    text = '{"city": "Zürich", "note": "déjà vu"}'
+    assert netguard.decode_body(text.encode("latin-1"), f"text/plain; charset={charset}") == text
+
+
+def test_decode_body_windows_1252_punctuation_and_the_utf8_fallback() -> None:
+    assert netguard.decode_body("“quoted” — €5".encode("cp1252"), "text/html; charset=windows-1252") \
+        == "“quoted” — €5"
+    assert netguard.decode_body(b"ok \xff", "text/plain") == "ok �"  # undeclared junk: utf-8, replaced
+    assert netguard.decode_body(b"", "application/json") == ""
+
+
+# F8 (review 2026-10-04): a stray NUL in the first 64 bytes used to flip the
+# undeclared decoder to UTF-16, mangling a UTF-8 JSON body. Guess UTF-16 only
+# when NULs sit at one parity in a ≥25% density of the head AND strict decode
+# is clean; else fall through to UTF-8.
+def test_decode_body_sparse_nul_is_not_utf16() -> None:
+    body = b'{"a":"x\x00","price":"42"}'
+    assert netguard.decode_body(body, "application/json") == body.decode("utf-8", "replace")
+    assert netguard.decode_body(b"ok\x00rest", "text/plain") == "ok\x00rest"
+
+
+# The AWS Health Dashboard's official feed (health.aws.amazon.com/public/currentevents), shape as
+# served 2026-09-28: 'application/json;charset=utf-16', a UTF-16 LE body with a BOM.
+_AWS_CURRENTEVENTS = [
+    {"date": "1727500000", "region_name": "Middle East (UAE)", "status": "1", "service": "ec2-me-central-1",
+     "service_name": "Amazon Elastic Compute Cloud", "summary": "[RESOLVED] Increased API Error Rates",
+     "event_log": [{"summary": "Increased API error rates", "message": "We are investigating…",
+                    "status": 1, "timestamp": 1727500000}]},
+    {"date": "1727400000", "region_name": "Middle East (Bahrain)", "status": "0", "service": "lambda-me-south-1",
+     "service_name": "AWS Lambda", "summary": "Informational message", "event_log": []},
+]
+
+
+@pytest.mark.parametrize("bom", [b"\xff\xfe", b""], ids=["bom", "no-bom"])
+def test_fetch_json_parses_a_utf16_feed(monkeypatch, bom) -> None:
+    import json
+
+    import httpx
+
+    _resolve_to(monkeypatch, "93.184.216.34")
+    body = bom + json.dumps(_AWS_CURRENTEVENTS, ensure_ascii=False).encode("utf-16-le")
+    _serve(monkeypatch, lambda r: httpx.Response(
+        200, headers={"content-type": "application/json;charset=utf-16"}, content=body))
+    out = netguard.safe_fetch_json("https://health.aws.test/public/currentevents")
+    assert out == _AWS_CURRENTEVENTS
+    assert out[0]["service"] == "ec2-me-central-1"
+
+
+def test_text_and_feed_readers_decode_by_charset(monkeypatch) -> None:
+    import httpx
+
+    _resolve_to(monkeypatch, "93.184.216.34")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/page":
+            return httpx.Response(200, headers={"content-type": "text/html; charset=utf-16"},
+                                  content="\ufeff<p>Zoë</p>".encode("utf-16-le"))
+        return httpx.Response(200, headers={"content-type": "application/rss+xml; charset=iso-8859-1"},
+                              content="<rss><title>Zürich</title></rss>".encode("latin-1"))
+
+    _serve(monkeypatch, handler)
+    assert "Zürich" in netguard.safe_fetch_feed("http://feeds.test/rss")["text"]
+    assert "Zürich" in netguard.safe_fetch_text("http://feeds.test/rss", "xml")["text"]
+    assert "Zoë" in netguard.safe_fetch("http://example.test/page")["text"]
+
+
+@pytest.mark.parametrize("ctype", ["application/geo+json", "application/ld+json; charset=utf-8",
+                                   "application/vnd.api+json", "application/problem+json"])
+def test_fetch_json_accepts_structured_json_types(monkeypatch, ctype) -> None:
+    # api.weather.gov serves every JSON document as application/geo+json whatever the Accept says
+    # (verified 2026-09-29): a +json type (RFC 6839) is JSON, never "not_json".
+    import httpx
+
+    _resolve_to(monkeypatch, "93.184.216.34")
+    _serve(monkeypatch, lambda r: httpx.Response(200, headers={"content-type": ctype},
+                                                 text='{"properties": {"gridId": "TSA"}}'))
+    assert netguard.safe_fetch_json("https://api.weather.test/points/36.1279,-95.9023") == \
+        {"properties": {"gridId": "TSA"}}
+
+
+def test_fetch_json_still_refuses_a_non_json_media_type(monkeypatch) -> None:
+    import httpx
+
+    _resolve_to(monkeypatch, "93.184.216.34")
+    _serve(monkeypatch, lambda r: httpx.Response(200, headers={"content-type": "application/pdf"}, content=b"%PDF"))
+    with pytest.raises(FetchError) as err:
+        netguard.safe_fetch_json("http://api.test/doc")
+    assert err.value.kind == "not_json"

@@ -1,0 +1,143 @@
+{
+ "kinds": {
+  "art_bls_cpi": "ok",
+  "art_cbs_noreaster_track": "ok",
+  "art_cdc_flu": "ok",
+  "art_mocoshow_redline": "ok",
+  "art_nasa_mars": "ok",
+  "art_npr_text": "ok",
+  "art_nps_old_faithful": "ok",
+  "art_nws_lightning": "ok",
+  "art_python_tutorial": "ok",
+  "art_technically_aws": "ok",
+  "art_usatoday_powerball": "ok",
+  "art_wiki_old_faithful": "ok",
+  "art_wiki_powerball": "ok",
+  "art_wiki_red_line": "ok",
+  "awsdown_status": "ok",
+  "bart_advisories": "ok",
+  "cbsnews_noreaster": "ok",
+  "cleatz_playoff_picture": "ok",
+  "dcmetromap_alerts": "shell",
+  "docs_aws_health_dashboard": "ok",
+  "espn_cfb_scoreboard": "ok",
+  "flight_status_aa100": "ok",
+  "flightaware_aal100": "modal",
+  "flightstats_aa100": "ok",
+  "gasbuddy_home": "ok",
+  "geysertimes_old_faithful": "ok",
+  "githubstatus": "ok",
+  "health_aws_status": "shell",
+  "heavens_above_iss": "ok",
+  "isitdown_slack": "ok",
+  "lagcheck_slack": "ok",
+  "ll2_browsable_api": "ok",
+  "lotteryusa_powerball": "ok",
+  "megamillions_home": "ok",
+  "mlb_standings_wc": "ok",
+  "nextmetro_alerts": "ok",
+  "nps_geyser_activity": "shell",
+  "nps_geyser_predictions": "shell",
+  "pollentracker_raleigh": "ok",
+  "powerball_checker": "ok",
+  "powerball_home": "ok",
+  "reddit_worldnews_new": "shell",
+  "redlite_worldnews": "shell",
+  "slack_status": "ok",
+  "snoflo_sierra_tahoe": "ok",
+  "spot_the_station": "ok",
+  "statusgator_aws_use1": "ok",
+  "wmata_red_status": "ok",
+  "wtpb_houston": "ok",
+  "x_sfbartalert": "ok"
+ },
+ "widgets": {
+  "powerball_home": [
+   "Estimated Jackpot",
+   "$409 Million",
+   "Cash Value",
+   "$170.2 Million",
+   "Wed, Sep 30, 2026"
+  ],
+  "lotteryusa_powerball": [
+   "$409 Million"
+  ],
+  "powerball_checker": [
+   "$409 Million"
+  ],
+  "slack_status": [
+   "No issues"
+  ],
+  "wmata_red_status": [
+   "No current alerts for this line"
+  ],
+  "flightstats_aa100": [
+   "On time",
+   "18:20",
+   "London Heathrow Airport"
+  ],
+  "geysertimes_old_faithful": [
+   "Predicted Next Eruption",
+   "Today at 0952"
+  ],
+  "mlb_standings_wc": [
+   "New York Yankees",
+   "Tampa Bay Rays",
+   "San Diego Padres"
+  ],
+  "espn_cfb_scoreboard": [
+   "Alabama",
+   "Mississippi State"
+  ],
+  "githubstatus": [
+   "All Systems Operational"
+  ],
+  "heavens_above_iss": [
+   "19:49:41",
+   "19:56:13"
+  ],
+  "x_sfbartalert": [
+   "10-minute delay"
+  ],
+  "bart_advisories": [
+   "Single Tracking Alert"
+  ],
+  "isitdown_slack": [
+   "No problems detected"
+  ],
+  "lagcheck_slack": [
+   "Slack is working normally"
+  ],
+  "art_bls_cpi": [
+   "3.4 percent"
+  ],
+  "ll2_browsable_api": [
+   "2026-10-01T15:10:06Z"
+  ],
+  "flight_status_aa100": [
+   "Scheduled On time"
+  ],
+  "awsdown_status": [
+   "degraded performance"
+  ],
+  "art_npr_text": [
+   "Turkey is ready to step in"
+  ]
+ },
+ "normal_articles": [
+  "art_bls_cpi",
+  "art_cbs_noreaster_track",
+  "art_cdc_flu",
+  "art_mocoshow_redline",
+  "art_nasa_mars",
+  "art_npr_text",
+  "art_nps_old_faithful",
+  "art_nws_lightning",
+  "art_python_tutorial",
+  "art_technically_aws",
+  "art_usatoday_powerball",
+  "art_wiki_old_faithful",
+  "art_wiki_powerball",
+  "art_wiki_red_line"
+ ]
+}

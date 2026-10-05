@@ -1,0 +1,3841 @@
+{
+ "bills": {
+  "source_id": "thesportsdb-team-next",
+  "url": "https://www.thesportsdb.com/api/v1/json/123/eventsnext.php?id=134918",
+  "params": {
+   "team": "134918"
+  },
+  "categories": [
+   "sports/schedules"
+  ],
+  "fetched": "2026-10-03T17:58:28Z",
+  "sample": {
+   "events": [
+    {
+     "idEvent": "2475424",
+     "idAPIfootball": "21563",
+     "strTimestamp": "2026-10-04T17:00:00",
+     "strEvent": "Buffalo Bills vs New England Patriots",
+     "strEventAlternate": "New England Patriots @ Buffalo Bills",
+     "strFilename": "NFL 2026-10-04 Buffalo Bills vs New England Patriots",
+     "strSport": "American Football",
+     "idLeague": "4391",
+     "strLeague": "NFL",
+     "strLeagueBadge": "https://r2.thesportsdb.com/images/media/league/badge/g85fqz1662057187.png",
+     "strSeason": "2026",
+     "strDescriptionEN": "",
+     "strHomeTeam": "Buffalo Bills",
+     "strAwayTeam": "New England Patriots",
+     "intHomeScore": null,
+     "intHomeScoreExtra": null,
+     "intAwayScoreExtra": null,
+     "intRound": "4",
+     "intAwayScore": null,
+     "intSpectators": null,
+     "strOfficial": "",
+     "strWeather": "",
+     "dateEvent": "2026-10-04",
+     "dateEventLocal": "2026-10-04",
+     "strTime": "17:00:00",
+     "strTimeLocal": "13:00:00",
+     "strGroup": "",
+     "idHomeTeam": "134918",
+     "strHomeTeamBadge": "https://r2.thesportsdb.com/images/media/team/badge/j4r1tn1784714823.png",
+     "idAwayTeam": "134920",
+     "strAwayTeamBadge": "https://r2.thesportsdb.com/images/media/team/badge/xtwxyt1421431860.png",
+     "intScore": null,
+     "intScoreVotes": null,
+     "strResult": " Buffalo Bills Quarter 1:<br>  <br>Quarter 2<br>  <br>Quarter 3<br>  <br>Quarter 4<br>  <br>Overtime<br> ",
+     "idVenue": "33904",
+     "strVenue": "Highmark Stadium",
+     "strCountry": "United States",
+     "strCity": "Orchard Park, NY",
+     "strPoster": "https://r2.thesportsdb.com/images/media/event/poster/j3nn6m1717017343.jpg",
+     "strSquare": "https://r2.thesportsdb.com/images/media/event/square/ugx1f61659872680.jpg",
+     "strFanart": null,
+     "strThumb": "https://r2.thesportsdb.com/images/media/event/thumb/9dn6fh1784759774.jpg",
+     "strBanner": "https://r2.thesportsdb.com/images/media/event/banner/dsgcmm1659875412.jpg",
+     "strMap": null,
+     "strTweet1": "",
+     "strVideo": "",
+     "strStatus": "NS",
+     "strPostponed": "no",
+     "strLocked": "unlocked"
+    }
+   ]
+  }
+ },
+ "packers": {
+  "source_id": "thesportsdb-team-next",
+  "url": "https://www.thesportsdb.com/api/v1/json/123/eventsnext.php?id=134940",
+  "params": {
+   "team": "134940"
+  },
+  "categories": [
+   "sports/schedules"
+  ],
+  "fetched": "2026-10-03T17:58:30Z",
+  "sample": {
+   "events": [
+    {
+     "idEvent": "2475429",
+     "idAPIfootball": "21568",
+     "strTimestamp": "2026-10-04T17:00:00",
+     "strEvent": "Tampa Bay Buccaneers vs Green Bay Packers",
+     "strEventAlternate": "Green Bay Packers @ Tampa Bay Buccaneers",
+     "strFilename": "NFL 2026-10-04 Tampa Bay Buccaneers vs Green Bay Packers",
+     "strSport": "American Football",
+     "idLeague": "4391",
+     "strLeague": "NFL",
+     "strLeagueBadge": "https://r2.thesportsdb.com/images/media/league/badge/g85fqz1662057187.png",
+     "strSeason": "2026",
+     "strDescriptionEN": "",
+     "strHomeTeam": "Tampa Bay Buccaneers",
+     "strAwayTeam": "Green Bay Packers",
+     "intHomeScore": null,
+     "intHomeScoreExtra": null,
+     "intAwayScoreExtra": null,
+     "intRound": "4",
+     "intAwayScore": null,
+     "intSpectators": null,
+     "strOfficial": "",
+     "strWeather": "",
+     "dateEvent": "2026-10-04",
+     "dateEventLocal": "2026-10-04",
+     "strTime": "17:00:00",
+     "strTimeLocal": "13:00:00",
+     "strGroup": "",
+     "idHomeTeam": "134945",
+     "strHomeTeamBadge": "https://r2.thesportsdb.com/images/media/team/badge/2dfpdl1537820969.png",
+     "idAwayTeam": "134940",
+     "strAwayTeamBadge": "https://r2.thesportsdb.com/images/media/team/badge/uwbfw01784719173.png",
+     "intScore": null,
+     "intScoreVotes": null,
+     "strResult": " Tampa Bay Buccaneers Quarter 1:<br>  <br>Quarter 2<br>  <br>Quarter 3<br>  <br>Quarter 4<br>  <br>Overtime<br> ",
+     "idVenue": "15874",
+     "strVenue": "Raymond James Stadium",
+     "strCountry": "United States",
+     "strCity": "Tampa, FL",
+     "strPoster": "https://r2.thesportsdb.com/images/media/event/poster/z4tpvy1717177999.jpg",
+     "strSquare": "https://r2.thesportsdb.com/images/media/event/square/0s7m9u1659872594.jpg",
+     "strFanart": null,
+     "strThumb": "https://r2.thesportsdb.com/images/media/event/thumb/k85avr1784759782.jpg",
+     "strBanner": "https://r2.thesportsdb.com/images/media/event/banner/9ii1z71659875339.jpg",
+     "strMap": null,
+     "strTweet1": "",
+     "strVideo": "",
+     "strStatus": "NS",
+     "strPostponed": "no",
+     "strLocked": "unlocked"
+    }
+   ]
+  }
+ },
+ "chiefs": {
+  "source_id": "thesportsdb-team-next",
+  "url": "https://www.thesportsdb.com/api/v1/json/123/eventsnext.php?id=134931",
+  "params": {
+   "team": "134931"
+  },
+  "categories": [
+   "sports/schedules"
+  ],
+  "fetched": "2026-10-03T17:58:31Z",
+  "sample": {
+   "events": [
+    {
+     "idEvent": "2475433",
+     "idAPIfootball": "21572",
+     "strTimestamp": "2026-10-04T20:25:00",
+     "strEvent": "Las Vegas Raiders vs Kansas City Chiefs",
+     "strEventAlternate": "Kansas City Chiefs @ Las Vegas Raiders",
+     "strFilename": "NFL 2026-10-04 Las Vegas Raiders vs Kansas City Chiefs",
+     "strSport": "American Football",
+     "idLeague": "4391",
+     "strLeague": "NFL",
+     "strLeagueBadge": "https://r2.thesportsdb.com/images/media/league/badge/g85fqz1662057187.png",
+     "strSeason": "2026",
+     "strDescriptionEN": "",
+     "strHomeTeam": "Las Vegas Raiders",
+     "strAwayTeam": "Kansas City Chiefs",
+     "intHomeScore": null,
+     "intHomeScoreExtra": null,
+     "intAwayScoreExtra": null,
+     "intRound": "4",
+     "intAwayScore": null,
+     "intSpectators": null,
+     "strOfficial": "",
+     "strWeather": "",
+     "dateEvent": "2026-10-04",
+     "dateEventLocal": "2026-10-04",
+     "strTime": "20:25:00",
+     "strTimeLocal": "13:25:00",
+     "strGroup": "",
+     "idHomeTeam": "134932",
+     "strHomeTeamBadge": "https://r2.thesportsdb.com/images/media/team/badge/4t8xtk1784721179.png",
+     "idAwayTeam": "134931",
+     "strAwayTeamBadge": "https://r2.thesportsdb.com/images/media/team/badge/n58gp51784720929.png",
+     "intScore": null,
+     "intScoreVotes": null,
+     "strResult": " Las Vegas Raiders Quarter 1:<br>  <br>Quarter 2<br>  <br>Quarter 3<br>  <br>Quarter 4<br>  <br>Overtime<br> ",
+     "idVenue": "21293",
+     "strVenue": "Allegiant Stadium",
+     "strCountry": "United States",
+     "strCity": "Las Vegas, NV",
+     "strPoster": "https://r2.thesportsdb.com/images/media/event/poster/g2r7u61716474814.jpg",
+     "strSquare": "https://r2.thesportsdb.com/images/media/event/square/x3shte1659872682.jpg",
+     "strFanart": null,
+     "strThumb": "https://r2.thesportsdb.com/images/media/event/thumb/m84ijb1784759789.jpg",
+     "strBanner": "https://r2.thesportsdb.com/images/media/event/banner/dxyz7e1659875414.jpg",
+     "strMap": null,
+     "strTweet1": "",
+     "strVideo": "",
+     "strStatus": "NS",
+     "strPostponed": "no",
+     "strLocked": "unlocked"
+    }
+   ]
+  }
+ },
+ "kp_forecast": {
+  "source_id": "swpc-kp-forecast",
+  "url": "https://services.swpc.noaa.gov/products/noaa-planetary-k-index-forecast.json",
+  "params": {},
+  "categories": [
+   "hazards/space_weather"
+  ],
+  "fetched": "2026-10-03T17:58:33Z",
+  "sample": [
+   {
+    "time_tag": "2026-09-26T00:00:00",
+    "kp": 3.33,
+    "observed": "observed",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-09-26T03:00:00",
+    "kp": 4.0,
+    "observed": "observed",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-09-26T06:00:00",
+    "kp": 2.67,
+    "observed": "observed",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-09-26T09:00:00",
+    "kp": 2.67,
+    "observed": "observed",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-09-26T12:00:00",
+    "kp": 1.67,
+    "observed": "observed",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-09-26T15:00:00",
+    "kp": 1.0,
+    "observed": "observed",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-09-26T18:00:00",
+    "kp": 2.33,
+    "observed": "observed",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-09-26T21:00:00",
+    "kp": 2.67,
+    "observed": "observed",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-09-27T00:00:00",
+    "kp": 4.0,
+    "observed": "observed",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-09-27T03:00:00",
+    "kp": 3.33,
+    "observed": "observed",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-09-27T06:00:00",
+    "kp": 2.0,
+    "observed": "observed",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-09-27T09:00:00",
+    "kp": 1.33,
+    "observed": "observed",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-09-27T12:00:00",
+    "kp": 1.33,
+    "observed": "observed",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-09-27T15:00:00",
+    "kp": 0.33,
+    "observed": "observed",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-09-27T18:00:00",
+    "kp": 0.33,
+    "observed": "observed",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-09-27T21:00:00",
+    "kp": 0.33,
+    "observed": "observed",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-09-28T00:00:00",
+    "kp": 0.67,
+    "observed": "observed",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-09-28T03:00:00",
+    "kp": 1.67,
+    "observed": "observed",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-09-28T06:00:00",
+    "kp": 1.0,
+    "observed": "observed",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-09-28T09:00:00",
+    "kp": 1.33,
+    "observed": "observed",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-09-28T12:00:00",
+    "kp": 1.33,
+    "observed": "observed",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-09-28T15:00:00",
+    "kp": 0.67,
+    "observed": "observed",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-09-28T18:00:00",
+    "kp": 1.0,
+    "observed": "observed",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-09-28T21:00:00",
+    "kp": 0.67,
+    "observed": "observed",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-09-29T00:00:00",
+    "kp": 2.0,
+    "observed": "observed",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-09-29T03:00:00",
+    "kp": 0.33,
+    "observed": "observed",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-09-29T06:00:00",
+    "kp": 0.67,
+    "observed": "observed",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-09-29T09:00:00",
+    "kp": 1.33,
+    "observed": "observed",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-09-29T12:00:00",
+    "kp": 0.67,
+    "observed": "observed",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-09-29T15:00:00",
+    "kp": 0.67,
+    "observed": "observed",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-09-29T18:00:00",
+    "kp": 1.0,
+    "observed": "observed",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-09-29T21:00:00",
+    "kp": 1.33,
+    "observed": "observed",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-09-30T00:00:00",
+    "kp": 1.0,
+    "observed": "observed",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-09-30T03:00:00",
+    "kp": 1.0,
+    "observed": "observed",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-09-30T06:00:00",
+    "kp": 0.33,
+    "observed": "observed",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-09-30T09:00:00",
+    "kp": 1.33,
+    "observed": "observed",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-09-30T12:00:00",
+    "kp": 1.0,
+    "observed": "observed",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-09-30T15:00:00",
+    "kp": 0.33,
+    "observed": "observed",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-09-30T18:00:00",
+    "kp": 0.67,
+    "observed": "observed",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-09-30T21:00:00",
+    "kp": 0.67,
+    "observed": "observed",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-10-01T00:00:00",
+    "kp": 0.33,
+    "observed": "observed",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-10-01T03:00:00",
+    "kp": 0.33,
+    "observed": "observed",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-10-01T06:00:00",
+    "kp": 0.67,
+    "observed": "observed",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-10-01T09:00:00",
+    "kp": 1.0,
+    "observed": "observed",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-10-01T12:00:00",
+    "kp": 1.0,
+    "observed": "observed",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-10-01T15:00:00",
+    "kp": 1.33,
+    "observed": "observed",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-10-01T18:00:00",
+    "kp": 1.33,
+    "observed": "observed",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-10-01T21:00:00",
+    "kp": 2.0,
+    "observed": "observed",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-10-02T00:00:00",
+    "kp": 1.0,
+    "observed": "observed",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-10-02T03:00:00",
+    "kp": 1.0,
+    "observed": "observed",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-10-02T06:00:00",
+    "kp": 0.33,
+    "observed": "observed",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-10-02T09:00:00",
+    "kp": 0.67,
+    "observed": "observed",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-10-02T12:00:00",
+    "kp": 0.67,
+    "observed": "observed",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-10-02T15:00:00",
+    "kp": 0.33,
+    "observed": "observed",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-10-02T18:00:00",
+    "kp": 0.67,
+    "observed": "observed",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-10-02T21:00:00",
+    "kp": 1.33,
+    "observed": "observed",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-10-03T00:00:00",
+    "kp": 2.33,
+    "observed": "observed",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-10-03T03:00:00",
+    "kp": 2.67,
+    "observed": "observed",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-10-03T06:00:00",
+    "kp": 2.67,
+    "observed": "observed",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-10-03T09:00:00",
+    "kp": 2.0,
+    "observed": "observed",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-10-03T12:00:00",
+    "kp": 1.67,
+    "observed": "observed",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-10-03T15:00:00",
+    "kp": 2.33,
+    "observed": "estimated",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-10-03T18:00:00",
+    "kp": 2.67,
+    "observed": "estimated",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-10-03T21:00:00",
+    "kp": 4.0,
+    "observed": "estimated",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-10-04T00:00:00",
+    "kp": 3.67,
+    "observed": "predicted",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-10-04T03:00:00",
+    "kp": 4.67,
+    "observed": "predicted",
+    "noaa_scale": "G1"
+   },
+   {
+    "time_tag": "2026-10-04T06:00:00",
+    "kp": 3.67,
+    "observed": "predicted",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-10-04T09:00:00",
+    "kp": 2.67,
+    "observed": "predicted",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-10-04T12:00:00",
+    "kp": 2.67,
+    "observed": "predicted",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-10-04T15:00:00",
+    "kp": 2.67,
+    "observed": "predicted",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-10-04T18:00:00",
+    "kp": 3.0,
+    "observed": "predicted",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-10-04T21:00:00",
+    "kp": 3.67,
+    "observed": "predicted",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-10-05T00:00:00",
+    "kp": 3.67,
+    "observed": "predicted",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-10-05T03:00:00",
+    "kp": 2.67,
+    "observed": "predicted",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-10-05T06:00:00",
+    "kp": 3.67,
+    "observed": "predicted",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-10-05T09:00:00",
+    "kp": 3.0,
+    "observed": "predicted",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-10-05T12:00:00",
+    "kp": 2.67,
+    "observed": "predicted",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-10-05T15:00:00",
+    "kp": 3.0,
+    "observed": "predicted",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-10-05T18:00:00",
+    "kp": 2.33,
+    "observed": "predicted",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-10-05T21:00:00",
+    "kp": 2.33,
+    "observed": "predicted",
+    "noaa_scale": null
+   },
+   {
+    "time_tag": "2026-10-06T00:00:00",
+    "kp": 3.67,
+    "observed": "predicted",
+    "noaa_scale": null
+   }
+  ]
+ },
+ "standings": {
+  "source_id": "mlb-standings",
+  "url": "https://statsapi.mlb.com/api/v1/standings?leagueId=103,104&standingsTypes=regularSeason",
+  "params": {},
+  "categories": [
+   "sports/standings"
+  ],
+  "fetched": "2026-10-03T17:58:34Z",
+  "sample": {
+   "records": [
+    {
+     "division": {
+      "id": 201,
+      "link": "/api/v1/divisions/201"
+     },
+     "teamRecords": [
+      {
+       "team": {
+        "id": 139,
+        "name": "Rays",
+        "link": "/api/v1/teams/139"
+       },
+       "wins": 98,
+       "losses": 64,
+       "gamesBack": "-",
+       "winningPercentage": ".605",
+       "divisionRank": "1"
+      },
+      {
+       "team": {
+        "id": 147,
+        "name": "Yankees",
+        "link": "/api/v1/teams/147"
+       },
+       "wins": 93,
+       "losses": 68,
+       "gamesBack": "4.5",
+       "winningPercentage": ".578",
+       "divisionRank": "2"
+      },
+      {
+       "team": {
+        "id": 111,
+        "name": "Red Sox",
+        "link": "/api/v1/teams/111"
+       },
+       "wins": 87,
+       "losses": 75,
+       "gamesBack": "11.0",
+       "winningPercentage": ".537",
+       "divisionRank": "3"
+      },
+      {
+       "team": {
+        "id": 110,
+        "name": "Orioles",
+        "link": "/api/v1/teams/110"
+       },
+       "wins": 79,
+       "losses": 82,
+       "gamesBack": "18.5",
+       "winningPercentage": ".491",
+       "divisionRank": "4"
+      },
+      {
+       "team": {
+        "id": 141,
+        "name": "Blue Jays",
+        "link": "/api/v1/teams/141"
+       },
+       "wins": 79,
+       "losses": 83,
+       "gamesBack": "19.0",
+       "winningPercentage": ".488",
+       "divisionRank": "5"
+      }
+     ]
+    },
+    {
+     "division": {
+      "id": 202,
+      "link": "/api/v1/divisions/202"
+     },
+     "teamRecords": [
+      {
+       "team": {
+        "id": 114,
+        "name": "Guardians",
+        "link": "/api/v1/teams/114"
+       },
+       "wins": 85,
+       "losses": 77,
+       "gamesBack": "-",
+       "winningPercentage": ".525",
+       "divisionRank": "1"
+      },
+      {
+       "team": {
+        "id": 145,
+        "name": "White Sox",
+        "link": "/api/v1/teams/145"
+       },
+       "wins": 84,
+       "losses": 78,
+       "gamesBack": "1.0",
+       "winningPercentage": ".519",
+       "divisionRank": "2"
+      },
+      {
+       "team": {
+        "id": 142,
+        "name": "Twins",
+        "link": "/api/v1/teams/142"
+       },
+       "wins": 77,
+       "losses": 85,
+       "gamesBack": "8.0",
+       "winningPercentage": ".475",
+       "divisionRank": "3"
+      },
+      {
+       "team": {
+        "id": 116,
+        "name": "Tigers",
+        "link": "/api/v1/teams/116"
+       },
+       "wins": 76,
+       "losses": 86,
+       "gamesBack": "9.0",
+       "winningPercentage": ".469",
+       "divisionRank": "4"
+      },
+      {
+       "team": {
+        "id": 118,
+        "name": "Royals",
+        "link": "/api/v1/teams/118"
+       },
+       "wins": 69,
+       "losses": 93,
+       "gamesBack": "16.0",
+       "winningPercentage": ".426",
+       "divisionRank": "5"
+      }
+     ]
+    },
+    {
+     "division": {
+      "id": 200,
+      "link": "/api/v1/divisions/200"
+     },
+     "teamRecords": [
+      {
+       "team": {
+        "id": 117,
+        "name": "Astros",
+        "link": "/api/v1/teams/117"
+       },
+       "wins": 81,
+       "losses": 81,
+       "gamesBack": "-",
+       "winningPercentage": ".500",
+       "divisionRank": "1"
+      },
+      {
+       "team": {
+        "id": 140,
+        "name": "Rangers",
+        "link": "/api/v1/teams/140"
+       },
+       "wins": 80,
+       "losses": 82,
+       "gamesBack": "1.0",
+       "winningPercentage": ".494",
+       "divisionRank": "2"
+      },
+      {
+       "team": {
+        "id": 136,
+        "name": "Mariners",
+        "link": "/api/v1/teams/136"
+       },
+       "wins": 76,
+       "losses": 86,
+       "gamesBack": "5.0",
+       "winningPercentage": ".469",
+       "divisionRank": "3"
+      },
+      {
+       "team": {
+        "id": 133,
+        "name": "Athletics",
+        "link": "/api/v1/teams/133"
+       },
+       "wins": 64,
+       "losses": 98,
+       "gamesBack": "17.0",
+       "winningPercentage": ".395",
+       "divisionRank": "4"
+      },
+      {
+       "team": {
+        "id": 108,
+        "name": "Angels",
+        "link": "/api/v1/teams/108"
+       },
+       "wins": 62,
+       "losses": 100,
+       "gamesBack": "19.0",
+       "winningPercentage": ".383",
+       "divisionRank": "5"
+      }
+     ]
+    },
+    {
+     "division": {
+      "id": 204,
+      "link": "/api/v1/divisions/204"
+     },
+     "teamRecords": [
+      {
+       "team": {
+        "id": 144,
+        "name": "Braves",
+        "link": "/api/v1/teams/144"
+       },
+       "wins": 94,
+       "losses": 68,
+       "gamesBack": "-",
+       "winningPercentage": ".580",
+       "divisionRank": "1"
+      },
+      {
+       "team": {
+        "id": 143,
+        "name": "Phillies",
+        "link": "/api/v1/teams/143"
+       },
+       "wins": 88,
+       "losses": 74,
+       "gamesBack": "6.0",
+       "winningPercentage": ".543",
+       "divisionRank": "2"
+      },
+      {
+       "team": {
+        "id": 146,
+        "name": "Marlins",
+        "link": "/api/v1/teams/146"
+       },
+       "wins": 80,
+       "losses": 82,
+       "gamesBack": "14.0",
+       "winningPercentage": ".494",
+       "divisionRank": "3"
+      },
+      {
+       "team": {
+        "id": 120,
+        "name": "Nationals",
+        "link": "/api/v1/teams/120"
+       },
+       "wins": 77,
+       "losses": 85,
+       "gamesBack": "17.0",
+       "winningPercentage": ".475",
+       "divisionRank": "4"
+      },
+      {
+       "team": {
+        "id": 121,
+        "name": "Mets",
+        "link": "/api/v1/teams/121"
+       },
+       "wins": 74,
+       "losses": 88,
+       "gamesBack": "20.0",
+       "winningPercentage": ".457",
+       "divisionRank": "5"
+      }
+     ]
+    },
+    {
+     "division": {
+      "id": 205,
+      "link": "/api/v1/divisions/205"
+     },
+     "teamRecords": [
+      {
+       "team": {
+        "id": 158,
+        "name": "Brewers",
+        "link": "/api/v1/teams/158"
+       },
+       "wins": 103,
+       "losses": 59,
+       "gamesBack": "-",
+       "winningPercentage": ".636",
+       "divisionRank": "1"
+      },
+      {
+       "team": {
+        "id": 112,
+        "name": "Cubs",
+        "link": "/api/v1/teams/112"
+       },
+       "wins": 89,
+       "losses": 73,
+       "gamesBack": "14.0",
+       "winningPercentage": ".549",
+       "divisionRank": "2"
+      },
+      {
+       "team": {
+        "id": 134,
+        "name": "Pirates",
+        "link": "/api/v1/teams/134"
+       },
+       "wins": 82,
+       "losses": 80,
+       "gamesBack": "21.0",
+       "winningPercentage": ".506",
+       "divisionRank": "3"
+      },
+      {
+       "team": {
+        "id": 138,
+        "name": "Cardinals",
+        "link": "/api/v1/teams/138"
+       },
+       "wins": 77,
+       "losses": 85,
+       "gamesBack": "26.0",
+       "winningPercentage": ".475",
+       "divisionRank": "4"
+      },
+      {
+       "team": {
+        "id": 113,
+        "name": "Reds",
+        "link": "/api/v1/teams/113"
+       },
+       "wins": 75,
+       "losses": 87,
+       "gamesBack": "28.0",
+       "winningPercentage": ".463",
+       "divisionRank": "5"
+      }
+     ]
+    },
+    {
+     "division": {
+      "id": 203,
+      "link": "/api/v1/divisions/203"
+     },
+     "teamRecords": [
+      {
+       "team": {
+        "id": 119,
+        "name": "Dodgers",
+        "link": "/api/v1/teams/119"
+       },
+       "wins": 100,
+       "losses": 62,
+       "gamesBack": "-",
+       "winningPercentage": ".617",
+       "divisionRank": "1"
+      },
+      {
+       "team": {
+        "id": 135,
+        "name": "Padres",
+        "link": "/api/v1/teams/135"
+       },
+       "wins": 91,
+       "losses": 71,
+       "gamesBack": "9.0",
+       "winningPercentage": ".562",
+       "divisionRank": "2"
+      },
+      {
+       "team": {
+        "id": 109,
+        "name": "D-backs",
+        "link": "/api/v1/teams/109"
+       },
+       "wins": 86,
+       "losses": 76,
+       "gamesBack": "14.0",
+       "winningPercentage": ".531",
+       "divisionRank": "3"
+      },
+      {
+       "team": {
+        "id": 137,
+        "name": "Giants",
+        "link": "/api/v1/teams/137"
+       },
+       "wins": 65,
+       "losses": 97,
+       "gamesBack": "35.0",
+       "winningPercentage": ".401",
+       "divisionRank": "4"
+      },
+      {
+       "team": {
+        "id": 115,
+        "name": "Rockies",
+        "link": "/api/v1/teams/115"
+       },
+       "wins": 58,
+       "losses": 104,
+       "gamesBack": "42.0",
+       "winningPercentage": ".358",
+       "divisionRank": "5"
+      }
+     ]
+    }
+   ]
+  }
+ },
+ "quakes_sf": {
+  "source_id": "usgs-quakes-near",
+  "url": "https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&latitude=37.727239&longitude=-123.032229&maxradiuskm=200&minmagnitude=2.5&starttime=2026-09-03&orderby=time",
+  "params": {
+   "lat": "37.727239",
+   "lon": "-123.032229",
+   "radius_km": "200",
+   "min_mag": "2.5",
+   "start": "2026-09-03"
+  },
+  "categories": [
+   "hazards/earthquakes"
+  ],
+  "fetched": "2026-10-03T17:58:36Z",
+  "sample": {
+   "type": "FeatureCollection",
+   "features": [
+    {
+     "properties": {
+      "mag": 2.99,
+      "place": "8 km ESE of Cloverdale, CA",
+      "time": 1790802439250
+     }
+    },
+    {
+     "properties": {
+      "mag": 2.63,
+      "place": "1 km SW of Anderson Springs, CA",
+      "time": 1790801294500
+     }
+    },
+    {
+     "properties": {
+      "mag": 2.58,
+      "place": "6 km W of Yountville, CA",
+      "time": 1790697997410
+     }
+    },
+    {
+     "properties": {
+      "mag": 2.63,
+      "place": "9 km NW of Redwood Valley, CA",
+      "time": 1790536236830
+     }
+    }
+   ],
+   "bbox": [
+    -123.48300170898,
+    36.860833333333,
+    -0.37999999523163,
+    -121.415,
+    39.323833465576,
+    16.920000076294
+   ]
+  }
+ },
+ "iss": {
+  "source_id": "wheretheiss-now",
+  "url": "https://api.wheretheiss.at/v1/satellites/25544",
+  "params": {},
+  "categories": [
+   "sky/iss"
+  ],
+  "fetched": "2026-10-03T17:58:37Z",
+  "sample": {
+   "name": "iss",
+   "id": 25544,
+   "latitude": -29.614975341624,
+   "longitude": 174.13325981402,
+   "altitude": 430.22434092608,
+   "velocity": 27550.274628342,
+   "visibility": "daylight",
+   "footprint": 4559.1187816293,
+   "timestamp": 1791050318,
+   "daynum": 2461317.2490509,
+   "solar_lat": -4.1715867903986,
+   "solar_lon": 267.57505649591,
+   "units": "kilometers"
+  }
+ },
+ "cpi": {
+  "source_id": "fred-cpiaucsl",
+  "url": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=CPIAUCSL",
+  "params": {},
+  "categories": [
+   "economy/inflation"
+  ],
+  "fetched": "2026-10-03T17:58:38Z",
+  "sample": {
+   "columns": [
+    "observation_date",
+    "CPIAUCSL"
+   ],
+   "rows": [
+    {
+     "observation_date": "2026-08-01",
+     "CPIAUCSL": "334.131"
+    },
+    {
+     "observation_date": "2026-07-01",
+     "CPIAUCSL": "332.813"
+    },
+    {
+     "observation_date": "2026-06-01",
+     "CPIAUCSL": "332.568"
+    },
+    {
+     "observation_date": "2026-05-01",
+     "CPIAUCSL": "333.979"
+    },
+    {
+     "observation_date": "2026-04-01",
+     "CPIAUCSL": "332.407"
+    },
+    {
+     "observation_date": "2026-03-01",
+     "CPIAUCSL": "330.293"
+    },
+    {
+     "observation_date": "2026-02-01",
+     "CPIAUCSL": "327.460"
+    },
+    {
+     "observation_date": "2026-01-01",
+     "CPIAUCSL": "326.588"
+    },
+    {
+     "observation_date": "2025-12-01",
+     "CPIAUCSL": "326.031"
+    },
+    {
+     "observation_date": "2025-11-01",
+     "CPIAUCSL": "325.063"
+    },
+    {
+     "observation_date": "2025-10-01",
+     "CPIAUCSL": ""
+    },
+    {
+     "observation_date": "2025-09-01",
+     "CPIAUCSL": "324.245"
+    }
+   ]
+  }
+ },
+ "open_meteo_charleston": {
+  "source_id": "open-meteo-forecast",
+  "url": "https://api.open-meteo.com/v1/forecast?latitude=32.7765&longitude=-79.9311&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m&hourly=temperature_2m,precipitation_probability,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,snowfall_sum,sunrise,sunset&temperature_unit=fahrenheit&wind_speed_unit=mph&precipitation_unit=inch&timezone=auto",
+  "params": {
+   "lat": "32.7765",
+   "lon": "-79.9311"
+  },
+  "categories": [
+   "weather/forecast",
+   "weather/current"
+  ],
+  "fetched": "2026-09-29T16:46:14Z",
+  "sample": {
+   "latitude": 32.751522,
+   "longitude": -79.93901,
+   "generationtime_ms": 1.1854171752929688,
+   "utc_offset_seconds": -14400,
+   "timezone": "America/New_York",
+   "timezone_abbreviation": "GMT-4",
+   "elevation": 12.0,
+   "current_units": {
+    "time": "iso8601",
+    "interval": "seconds",
+    "temperature_2m": "\u00b0F",
+    "apparent_temperature": "\u00b0F",
+    "relative_humidity_2m": "%",
+    "weather_code": "wmo code",
+    "wind_speed_10m": "mp/h"
+   },
+   "current": {
+    "time": "2026-09-29T12:45",
+    "interval": 900,
+    "temperature_2m": 83.6,
+    "apparent_temperature": 89.0,
+    "relative_humidity_2m": 53,
+    "weather_code": 0,
+    "wind_speed_10m": 6.4
+   },
+   "hourly_units": {
+    "time": "iso8601",
+    "temperature_2m": "\u00b0F",
+    "precipitation_probability": "%",
+    "weather_code": "wmo code"
+   },
+   "hourly": {
+    "time": [
+     "2026-09-29T00:00",
+     "2026-09-29T01:00",
+     "2026-09-29T02:00",
+     "2026-09-29T03:00",
+     "2026-09-29T04:00",
+     "2026-09-29T05:00",
+     "2026-09-29T06:00",
+     "2026-09-29T07:00",
+     "2026-09-29T08:00",
+     "2026-09-29T09:00",
+     "2026-09-29T10:00",
+     "2026-09-29T11:00",
+     "2026-09-29T12:00",
+     "2026-09-29T13:00",
+     "2026-09-29T14:00",
+     "2026-09-29T15:00",
+     "2026-09-29T16:00",
+     "2026-09-29T17:00",
+     "2026-09-29T18:00",
+     "2026-09-29T19:00",
+     "2026-09-29T20:00",
+     "2026-09-29T21:00",
+     "2026-09-29T22:00",
+     "2026-09-29T23:00",
+     "2026-09-30T00:00",
+     "2026-09-30T01:00",
+     "2026-09-30T02:00",
+     "2026-09-30T03:00",
+     "2026-09-30T04:00",
+     "2026-09-30T05:00",
+     "2026-09-30T06:00",
+     "2026-09-30T07:00",
+     "2026-09-30T08:00",
+     "2026-09-30T09:00",
+     "2026-09-30T10:00",
+     "2026-09-30T11:00",
+     "2026-09-30T12:00",
+     "2026-09-30T13:00",
+     "2026-09-30T14:00",
+     "2026-09-30T15:00",
+     "2026-09-30T16:00",
+     "2026-09-30T17:00",
+     "2026-09-30T18:00",
+     "2026-09-30T19:00",
+     "2026-09-30T20:00",
+     "2026-09-30T21:00",
+     "2026-09-30T22:00",
+     "2026-09-30T23:00",
+     "2026-10-01T00:00",
+     "2026-10-01T01:00",
+     "2026-10-01T02:00",
+     "2026-10-01T03:00",
+     "2026-10-01T04:00",
+     "2026-10-01T05:00",
+     "2026-10-01T06:00",
+     "2026-10-01T07:00",
+     "2026-10-01T08:00",
+     "2026-10-01T09:00",
+     "2026-10-01T10:00",
+     "2026-10-01T11:00",
+     "2026-10-01T12:00",
+     "2026-10-01T13:00",
+     "2026-10-01T14:00",
+     "2026-10-01T15:00",
+     "2026-10-01T16:00",
+     "2026-10-01T17:00",
+     "2026-10-01T18:00",
+     "2026-10-01T19:00",
+     "2026-10-01T20:00",
+     "2026-10-01T21:00",
+     "2026-10-01T22:00",
+     "2026-10-01T23:00",
+     "2026-10-02T00:00",
+     "2026-10-02T01:00",
+     "2026-10-02T02:00",
+     "2026-10-02T03:00",
+     "2026-10-02T04:00",
+     "2026-10-02T05:00",
+     "2026-10-02T06:00",
+     "2026-10-02T07:00",
+     "2026-10-02T08:00",
+     "2026-10-02T09:00",
+     "2026-10-02T10:00",
+     "2026-10-02T11:00",
+     "2026-10-02T12:00",
+     "2026-10-02T13:00",
+     "2026-10-02T14:00",
+     "2026-10-02T15:00",
+     "2026-10-02T16:00",
+     "2026-10-02T17:00",
+     "2026-10-02T18:00",
+     "2026-10-02T19:00",
+     "2026-10-02T20:00",
+     "2026-10-02T21:00",
+     "2026-10-02T22:00",
+     "2026-10-02T23:00",
+     "2026-10-03T00:00",
+     "2026-10-03T01:00",
+     "2026-10-03T02:00",
+     "2026-10-03T03:00",
+     "2026-10-03T04:00",
+     "2026-10-03T05:00",
+     "2026-10-03T06:00",
+     "2026-10-03T07:00",
+     "2026-10-03T08:00",
+     "2026-10-03T09:00",
+     "2026-10-03T10:00",
+     "2026-10-03T11:00",
+     "2026-10-03T12:00",
+     "2026-10-03T13:00",
+     "2026-10-03T14:00",
+     "2026-10-03T15:00",
+     "2026-10-03T16:00",
+     "2026-10-03T17:00",
+     "2026-10-03T18:00",
+     "2026-10-03T19:00",
+     "2026-10-03T20:00",
+     "2026-10-03T21:00",
+     "2026-10-03T22:00",
+     "2026-10-03T23:00",
+     "2026-10-04T00:00",
+     "2026-10-04T01:00",
+     "2026-10-04T02:00",
+     "2026-10-04T03:00",
+     "2026-10-04T04:00",
+     "2026-10-04T05:00",
+     "2026-10-04T06:00",
+     "2026-10-04T07:00",
+     "2026-10-04T08:00",
+     "2026-10-04T09:00",
+     "2026-10-04T10:00",
+     "2026-10-04T11:00",
+     "2026-10-04T12:00",
+     "2026-10-04T13:00",
+     "2026-10-04T14:00",
+     "2026-10-04T15:00",
+     "2026-10-04T16:00",
+     "2026-10-04T17:00",
+     "2026-10-04T18:00",
+     "2026-10-04T19:00",
+     "2026-10-04T20:00",
+     "2026-10-04T21:00",
+     "2026-10-04T22:00",
+     "2026-10-04T23:00",
+     "2026-10-05T00:00",
+     "2026-10-05T01:00",
+     "2026-10-05T02:00",
+     "2026-10-05T03:00",
+     "2026-10-05T04:00",
+     "2026-10-05T05:00",
+     "2026-10-05T06:00",
+     "2026-10-05T07:00",
+     "2026-10-05T08:00",
+     "2026-10-05T09:00",
+     "2026-10-05T10:00",
+     "2026-10-05T11:00",
+     "2026-10-05T12:00",
+     "2026-10-05T13:00",
+     "2026-10-05T14:00",
+     "2026-10-05T15:00",
+     "2026-10-05T16:00",
+     "2026-10-05T17:00",
+     "2026-10-05T18:00",
+     "2026-10-05T19:00",
+     "2026-10-05T20:00",
+     "2026-10-05T21:00",
+     "2026-10-05T22:00",
+     "2026-10-05T23:00"
+    ],
+    "temperature_2m": [
+     69.1,
+     68.0,
+     67.4,
+     66.5,
+     66.6,
+     65.7,
+     63.7,
+     65.6,
+     66.0,
+     70.8,
+     74.4,
+     79.2,
+     82.4,
+     83.8,
+     84.3,
+     83.5,
+     82.7,
+     81.5,
+     80.0,
+     77.3,
+     75.5,
+     74.7,
+     74.0,
+     73.5,
+     73.0,
+     72.4,
+     71.7,
+     71.3,
+     71.0,
+     70.1,
+     70.4,
+     69.8,
+     69.8,
+     75.4,
+     79.8,
+     81.9,
+     83.4,
+     84.0,
+     83.7,
+     83.4,
+     82.4,
+     81.1,
+     79.4,
+     77.0,
+     75.0,
+     74.2,
+     73.9,
+     73.4,
+     72.5,
+     71.8,
+     70.9,
+     70.0,
+     69.3,
+     68.2,
+     69.7,
+     71.3,
+     74.2,
+     78.1,
+     80.0,
+     81.7,
+     82.4,
+     83.1,
+     83.3,
+     82.9,
+     82.2,
+     81.1,
+     79.7,
+     77.7,
+     77.3,
+     75.9,
+     75.9,
+     76.1,
+     76.1,
+     76.3,
+     75.9,
+     75.7,
+     75.4,
+     75.2,
+     75.0,
+     74.6,
+     75.7,
+     78.2,
+     81.1,
+     83.1,
+     84.7,
+     84.0,
+     83.3,
+     83.8,
+     83.6,
+     83.1,
+     81.7,
+     78.6,
+     77.3,
+     77.2,
+     77.2,
+     77.0,
+     76.8,
+     76.1,
+     76.3,
+     76.1,
+     75.9,
+     75.9,
+     75.5,
+     75.0,
+     76.1,
+     79.1,
+     82.0,
+     83.8,
+     84.2,
+     84.0,
+     83.8,
+     83.8,
+     82.6,
+     81.7,
+     80.4,
+     78.4,
+     77.2,
+     77.5,
+     76.6,
+     76.4,
+     76.4,
+     75.7,
+     75.4,
+     75.4,
+     75.5,
+     75.5,
+     75.4,
+     75.2,
+     75.5,
+     76.9,
+     78.9,
+     80.6,
+     82.0,
+     83.2,
+     83.6,
+     83.0,
+     81.6,
+     80.0,
+     78.5,
+     77.0,
+     75.5,
+     74.4,
+     73.4,
+     72.7,
+     72.2,
+     72.0,
+     71.9,
+     71.8,
+     71.7,
+     71.6,
+     71.5,
+     71.5,
+     71.6,
+     72.2,
+     72.9,
+     73.2,
+     72.5,
+     71.3,
+     70.3,
+     69.7,
+     69.2,
+     69.1,
+     69.5,
+     70.3,
+     70.9,
+     70.9,
+     70.6,
+     70.3
+    ],
+    "precipitation_probability": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     0,
+     0,
+     1,
+     1,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     2,
+     2,
+     2,
+     2,
+     2,
+     2,
+     1,
+     1,
+     1,
+     1,
+     1,
+     1,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     1,
+     1,
+     1,
+     1,
+     1,
+     1,
+     4,
+     4,
+     4,
+     4,
+     4,
+     4,
+     7,
+     7,
+     7,
+     7,
+     7,
+     7,
+     2,
+     2,
+     2,
+     2,
+     2,
+     2,
+     3,
+     3,
+     3,
+     3,
+     3,
+     3,
+     8,
+     8,
+     8,
+     8,
+     8,
+     8,
+     19,
+     19,
+     19,
+     19,
+     19,
+     19,
+     11,
+     11,
+     11,
+     11,
+     11,
+     11,
+     27,
+     27,
+     27,
+     27,
+     27,
+     27,
+     33,
+     33,
+     33,
+     33,
+     33,
+     33,
+     50,
+     50,
+     50,
+     50,
+     50,
+     50,
+     53,
+     53,
+     53,
+     53,
+     53,
+     53,
+     53,
+     53,
+     53,
+     53,
+     53,
+     53,
+     50,
+     50,
+     50,
+     50,
+     50,
+     50,
+     54,
+     54,
+     54,
+     54,
+     54,
+     54,
+     35,
+     35,
+     35
+    ],
+    "weather_code": [
+     1,
+     1,
+     3,
+     2,
+     2,
+     1,
+     3,
+     0,
+     0,
+     3,
+     0,
+     0,
+     0,
+     0,
+     2,
+     3,
+     3,
+     0,
+     3,
+     3,
+     1,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     51,
+     51,
+     51,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     51,
+     0,
+     53,
+     51,
+     0,
+     0,
+     0,
+     51,
+     0,
+     0,
+     0,
+     0,
+     51,
+     0,
+     0,
+     0,
+     3,
+     51,
+     51,
+     53,
+     3,
+     3,
+     3,
+     3,
+     3,
+     2,
+     0,
+     1,
+     2,
+     3,
+     51,
+     51,
+     3,
+     3,
+     3,
+     3,
+     3,
+     3,
+     3,
+     3,
+     3,
+     3,
+     3,
+     3,
+     2,
+     3,
+     51,
+     3,
+     2,
+     51,
+     51,
+     51,
+     51,
+     3,
+     51,
+     53,
+     51,
+     51,
+     51,
+     53,
+     53,
+     53,
+     80,
+     80,
+     80,
+     51,
+     51,
+     51,
+     53,
+     53,
+     53,
+     55,
+     55,
+     55,
+     53,
+     53,
+     53,
+     53,
+     53,
+     53,
+     61,
+     61,
+     61,
+     51,
+     51,
+     51,
+     51,
+     51,
+     51,
+     51,
+     51,
+     51,
+     51,
+     51,
+     51,
+     51,
+     51,
+     51,
+     51,
+     51,
+     51
+    ]
+   },
+   "daily_units": {
+    "time": "iso8601",
+    "weather_code": "wmo code",
+    "temperature_2m_max": "\u00b0F",
+    "temperature_2m_min": "\u00b0F",
+    "precipitation_probability_max": "%",
+    "snowfall_sum": "inch",
+    "sunrise": "iso8601",
+    "sunset": "iso8601"
+   },
+   "daily": {
+    "time": [
+     "2026-09-29",
+     "2026-09-30",
+     "2026-10-01",
+     "2026-10-02",
+     "2026-10-03",
+     "2026-10-04",
+     "2026-10-05"
+    ],
+    "weather_code": [
+     3,
+     0,
+     53,
+     53,
+     51,
+     80,
+     61
+    ],
+    "temperature_2m_max": [
+     84.3,
+     84.0,
+     83.3,
+     84.7,
+     84.2,
+     83.6,
+     73.2
+    ],
+    "temperature_2m_min": [
+     63.7,
+     69.8,
+     68.2,
+     74.6,
+     75.0,
+     72.7,
+     69.1
+    ],
+    "precipitation_probability_max": [
+     0,
+     1,
+     2,
+     7,
+     19,
+     53,
+     54
+    ],
+    "snowfall_sum": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "sunrise": [
+     "2026-09-29T07:12",
+     "2026-09-30T07:13",
+     "2026-10-01T07:13",
+     "2026-10-02T07:14",
+     "2026-10-03T07:15",
+     "2026-10-04T07:15",
+     "2026-10-05T07:16"
+    ],
+    "sunset": [
+     "2026-09-29T19:06",
+     "2026-09-30T19:05",
+     "2026-10-01T19:04",
+     "2026-10-02T19:02",
+     "2026-10-03T19:01",
+     "2026-10-04T19:00",
+     "2026-10-05T18:58"
+    ]
+   }
+  }
+ },
+ "marine_charleston": {
+  "source_id": "open-meteo-marine",
+  "url": "https://marine-api.open-meteo.com/v1/marine?latitude=32.7765&longitude=-79.80&current=wave_height,wave_direction,wave_period,swell_wave_height,swell_wave_direction,swell_wave_period,sea_surface_temperature&hourly=wave_height&length_unit=imperial&temperature_unit=fahrenheit&timezone=auto",
+  "params": {
+   "lat": "32.7765",
+   "lon": "-79.80"
+  },
+  "categories": [
+   "water/surf_waves",
+   "water/water_temperature"
+  ],
+  "fetched": "2026-09-29T16:46:24Z",
+  "sample": {
+   "latitude": 32.708336,
+   "longitude": -79.79166,
+   "generationtime_ms": 0.16641616821289062,
+   "utc_offset_seconds": -14400,
+   "timezone": "America/New_York",
+   "timezone_abbreviation": "GMT-4",
+   "elevation": 0.0,
+   "current_units": {
+    "time": "iso8601",
+    "interval": "seconds",
+    "wave_height": "ft",
+    "wave_direction": "\u00b0",
+    "wave_period": "s",
+    "swell_wave_height": "ft",
+    "swell_wave_direction": "\u00b0",
+    "swell_wave_period": "s",
+    "sea_surface_temperature": "\u00b0F"
+   },
+   "current": {
+    "time": "2026-09-29T12:45",
+    "interval": 900,
+    "wave_height": 0.984,
+    "wave_direction": 125,
+    "wave_period": 8.05,
+    "swell_wave_height": 0.722,
+    "swell_wave_direction": 103,
+    "swell_wave_period": 8.95,
+    "sea_surface_temperature": 78.7
+   },
+   "hourly_units": {
+    "time": "iso8601",
+    "wave_height": "ft"
+   },
+   "hourly": {
+    "time": [
+     "2026-09-29T00:00",
+     "2026-09-29T01:00",
+     "2026-09-29T02:00",
+     "2026-09-29T03:00",
+     "2026-09-29T04:00",
+     "2026-09-29T05:00",
+     "2026-09-29T06:00",
+     "2026-09-29T07:00",
+     "2026-09-29T08:00",
+     "2026-09-29T09:00",
+     "2026-09-29T10:00",
+     "2026-09-29T11:00",
+     "2026-09-29T12:00",
+     "2026-09-29T13:00",
+     "2026-09-29T14:00",
+     "2026-09-29T15:00",
+     "2026-09-29T16:00",
+     "2026-09-29T17:00",
+     "2026-09-29T18:00",
+     "2026-09-29T19:00",
+     "2026-09-29T20:00",
+     "2026-09-29T21:00",
+     "2026-09-29T22:00",
+     "2026-09-29T23:00",
+     "2026-09-30T00:00",
+     "2026-09-30T01:00",
+     "2026-09-30T02:00",
+     "2026-09-30T03:00",
+     "2026-09-30T04:00",
+     "2026-09-30T05:00",
+     "2026-09-30T06:00",
+     "2026-09-30T07:00",
+     "2026-09-30T08:00",
+     "2026-09-30T09:00",
+     "2026-09-30T10:00",
+     "2026-09-30T11:00",
+     "2026-09-30T12:00",
+     "2026-09-30T13:00",
+     "2026-09-30T14:00",
+     "2026-09-30T15:00",
+     "2026-09-30T16:00",
+     "2026-09-30T17:00",
+     "2026-09-30T18:00",
+     "2026-09-30T19:00",
+     "2026-09-30T20:00",
+     "2026-09-30T21:00",
+     "2026-09-30T22:00",
+     "2026-09-30T23:00",
+     "2026-10-01T00:00",
+     "2026-10-01T01:00",
+     "2026-10-01T02:00",
+     "2026-10-01T03:00",
+     "2026-10-01T04:00",
+     "2026-10-01T05:00",
+     "2026-10-01T06:00",
+     "2026-10-01T07:00",
+     "2026-10-01T08:00",
+     "2026-10-01T09:00",
+     "2026-10-01T10:00",
+     "2026-10-01T11:00",
+     "2026-10-01T12:00",
+     "2026-10-01T13:00",
+     "2026-10-01T14:00",
+     "2026-10-01T15:00",
+     "2026-10-01T16:00",
+     "2026-10-01T17:00",
+     "2026-10-01T18:00",
+     "2026-10-01T19:00",
+     "2026-10-01T20:00",
+     "2026-10-01T21:00",
+     "2026-10-01T22:00",
+     "2026-10-01T23:00",
+     "2026-10-02T00:00",
+     "2026-10-02T01:00",
+     "2026-10-02T02:00",
+     "2026-10-02T03:00",
+     "2026-10-02T04:00",
+     "2026-10-02T05:00",
+     "2026-10-02T06:00",
+     "2026-10-02T07:00",
+     "2026-10-02T08:00",
+     "2026-10-02T09:00",
+     "2026-10-02T10:00",
+     "2026-10-02T11:00",
+     "2026-10-02T12:00",
+     "2026-10-02T13:00",
+     "2026-10-02T14:00",
+     "2026-10-02T15:00",
+     "2026-10-02T16:00",
+     "2026-10-02T17:00",
+     "2026-10-02T18:00",
+     "2026-10-02T19:00",
+     "2026-10-02T20:00",
+     "2026-10-02T21:00",
+     "2026-10-02T22:00",
+     "2026-10-02T23:00",
+     "2026-10-03T00:00",
+     "2026-10-03T01:00",
+     "2026-10-03T02:00",
+     "2026-10-03T03:00",
+     "2026-10-03T04:00",
+     "2026-10-03T05:00",
+     "2026-10-03T06:00",
+     "2026-10-03T07:00",
+     "2026-10-03T08:00",
+     "2026-10-03T09:00",
+     "2026-10-03T10:00",
+     "2026-10-03T11:00",
+     "2026-10-03T12:00",
+     "2026-10-03T13:00",
+     "2026-10-03T14:00",
+     "2026-10-03T15:00",
+     "2026-10-03T16:00",
+     "2026-10-03T17:00",
+     "2026-10-03T18:00",
+     "2026-10-03T19:00",
+     "2026-10-03T20:00",
+     "2026-10-03T21:00",
+     "2026-10-03T22:00",
+     "2026-10-03T23:00",
+     "2026-10-04T00:00",
+     "2026-10-04T01:00",
+     "2026-10-04T02:00",
+     "2026-10-04T03:00",
+     "2026-10-04T04:00",
+     "2026-10-04T05:00",
+     "2026-10-04T06:00",
+     "2026-10-04T07:00",
+     "2026-10-04T08:00",
+     "2026-10-04T09:00",
+     "2026-10-04T10:00",
+     "2026-10-04T11:00",
+     "2026-10-04T12:00",
+     "2026-10-04T13:00",
+     "2026-10-04T14:00",
+     "2026-10-04T15:00",
+     "2026-10-04T16:00",
+     "2026-10-04T17:00",
+     "2026-10-04T18:00",
+     "2026-10-04T19:00",
+     "2026-10-04T20:00",
+     "2026-10-04T21:00",
+     "2026-10-04T22:00",
+     "2026-10-04T23:00",
+     "2026-10-05T00:00",
+     "2026-10-05T01:00",
+     "2026-10-05T02:00",
+     "2026-10-05T03:00",
+     "2026-10-05T04:00",
+     "2026-10-05T05:00",
+     "2026-10-05T06:00",
+     "2026-10-05T07:00",
+     "2026-10-05T08:00",
+     "2026-10-05T09:00",
+     "2026-10-05T10:00",
+     "2026-10-05T11:00",
+     "2026-10-05T12:00",
+     "2026-10-05T13:00",
+     "2026-10-05T14:00",
+     "2026-10-05T15:00",
+     "2026-10-05T16:00",
+     "2026-10-05T17:00",
+     "2026-10-05T18:00",
+     "2026-10-05T19:00",
+     "2026-10-05T20:00",
+     "2026-10-05T21:00",
+     "2026-10-05T22:00",
+     "2026-10-05T23:00"
+    ],
+    "wave_height": [
+     1.115,
+     1.115,
+     1.115,
+     1.115,
+     1.05,
+     1.05,
+     1.05,
+     1.05,
+     1.05,
+     1.05,
+     0.984,
+     0.984,
+     0.984,
+     0.984,
+     0.984,
+     0.984,
+     0.984,
+     0.984,
+     0.984,
+     0.984,
+     0.984,
+     1.05,
+     1.05,
+     1.115,
+     1.115,
+     1.05,
+     1.05,
+     1.05,
+     0.984,
+     0.984,
+     0.984,
+     0.984,
+     0.984,
+     0.984,
+     1.05,
+     1.05,
+     1.115,
+     1.181,
+     1.247,
+     1.247,
+     1.181,
+     1.181,
+     1.181,
+     1.115,
+     1.115,
+     1.115,
+     1.05,
+     1.05,
+     1.05,
+     0.984,
+     0.984,
+     0.984,
+     0.919,
+     0.919,
+     0.919,
+     0.919,
+     0.919,
+     0.919,
+     0.919,
+     0.919,
+     0.919,
+     0.984,
+     0.984,
+     1.05,
+     1.05,
+     1.115,
+     1.115,
+     1.115,
+     1.115,
+     1.115,
+     1.115,
+     1.115,
+     1.05,
+     1.05,
+     0.984,
+     0.984,
+     0.984,
+     0.984,
+     0.984,
+     0.919,
+     0.919,
+     0.919,
+     0.919,
+     0.919,
+     0.919,
+     0.919,
+     0.919,
+     0.919,
+     0.919,
+     0.919,
+     0.919,
+     0.984,
+     0.984,
+     0.984,
+     0.984,
+     0.984,
+     1.05,
+     1.05,
+     1.115,
+     1.115,
+     1.115,
+     1.115,
+     1.115,
+     1.181,
+     1.181,
+     1.181,
+     1.181,
+     1.181,
+     1.181,
+     1.181,
+     1.181,
+     1.181,
+     1.181,
+     1.181,
+     1.247,
+     1.247,
+     1.312,
+     1.378,
+     1.509,
+     1.575,
+     1.575,
+     1.64,
+     1.64,
+     1.64,
+     1.706,
+     1.706,
+     1.706,
+     1.772,
+     1.772,
+     1.772,
+     1.837,
+     1.837,
+     1.837,
+     1.837,
+     1.837,
+     1.837,
+     1.837,
+     1.837,
+     1.837,
+     1.903,
+     1.903,
+     1.969,
+     1.969,
+     2.034,
+     2.034,
+     2.1,
+     2.1,
+     2.1,
+     2.034,
+     2.034,
+     1.969,
+     1.969,
+     1.903,
+     1.903,
+     1.837,
+     1.837,
+     1.837,
+     1.772,
+     1.772,
+     1.772,
+     1.706,
+     1.706,
+     1.706,
+     1.706,
+     1.706,
+     1.837,
+     1.969,
+     2.1
+    ]
+   }
+  }
+ },
+ "storms": {
+  "source_id": "nhc-current-storms",
+  "url": "https://www.nhc.noaa.gov/CurrentStorms.json",
+  "params": {},
+  "categories": [
+   "hazards/tropical_storms"
+  ],
+  "fetched": "2026-09-29T16:46:22Z",
+  "sample": {
+   "activeStorms": [
+    {
+     "id": "al062026",
+     "binNumber": "AT1",
+     "name": "Fay",
+     "classification": "TD",
+     "intensity": "30",
+     "pressure": "1010",
+     "latitude": "24.2N",
+     "longitude": "47.3W",
+     "latitudeNumeric": 24.2,
+     "longitudeNumeric": -47.3,
+     "movementDir": 225,
+     "movementSpeed": 12,
+     "lastUpdate": "2026-09-29T15:00:00.000Z",
+     "publicAdvisory": {
+      "advNum": "038",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:48:42.644Z",
+      "url": "https://www.nhc.noaa.gov/text/MIATCPAT1.shtml"
+     },
+     "forecastAdvisory": {
+      "advNum": "038",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:48:42.552Z",
+      "url": "https://www.nhc.noaa.gov/text/MIATCMAT1.shtml"
+     },
+     "windSpeedProbabilities": {
+      "advNum": "038",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:49:11.680Z",
+      "url": "https://www.nhc.noaa.gov/text/MIAPWSAT1.shtml"
+     },
+     "forecastDiscussion": {
+      "advNum": "038",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:49:39.711Z",
+      "url": "https://www.nhc.noaa.gov/text/MIATCDAT1.shtml"
+     },
+     "forecastGraphics": {
+      "advNum": "038",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:48:42.644Z",
+      "url": "https://www.nhc.noaa.gov/graphics_at1.shtml"
+     },
+     "forecastTrack": {
+      "advNum": "038",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:53:11.378Z",
+      "zipFile": "https://www.nhc.noaa.gov/gis/forecast/archive/al062026_5day_038.zip",
+      "kmzFile": "https://www.nhc.noaa.gov/storm_graphics/api/AL062026_038adv_TRACK.kmz"
+     },
+     "windWatchesWarnings": null,
+     "trackCone": {
+      "advNum": "038",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:53:04.941Z",
+      "zipFile": "https://www.nhc.noaa.gov/gis/forecast/archive/al062026_5day_038.zip",
+      "kmzFile": "https://www.nhc.noaa.gov/storm_graphics/api/AL062026_038adv_CONE.kmz"
+     },
+     "initialWindExtent": {
+      "advNum": "038",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:53:43.538Z",
+      "zipFile": "https://www.nhc.noaa.gov/gis/forecast/archive/al062026_fcst_038.zip",
+      "kmzFile": "https://www.nhc.noaa.gov/storm_graphics/api/AL062026_initialradii_038adv.kmz"
+     },
+     "forecastWindRadiiGIS": {
+      "advNum": "038",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:53:39.439Z",
+      "zipFile": "https://www.nhc.noaa.gov/gis/forecast/archive/al062026_fcst_038.zip",
+      "kmzFile": "https://www.nhc.noaa.gov/storm_graphics/api/AL062026_forecastradii_038adv.kmz"
+     },
+     "bestTrackGIS": {
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:53:21.320Z",
+      "zipFile": "https://www.nhc.noaa.gov/gis/best_track/al062026_best_track.zip",
+      "kmzFile": "https://www.nhc.noaa.gov/gis/best_track/al062026_best_track.kmz"
+     },
+     "earliestArrivalTimeTSWindsGIS": {
+      "advNum": "038",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:53:07.189Z",
+      "kmzFile": "https://www.nhc.noaa.gov/storm_graphics/api/AL062026_038adv_earliest_reasonable_toa_34.kmz"
+     },
+     "mostLikelyTimeTSWindsGIS": {
+      "advNum": "038",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:53:09.274Z",
+      "kmzFile": "https://www.nhc.noaa.gov/storm_graphics/api/AL062026_038adv_most_likely_toa_34.kmz"
+     },
+     "windSpeedProbabilitiesGIS": {
+      "issuance": "2026-09-29T12:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T15:23:22.097Z",
+      "zipFile5km": "https://www.nhc.noaa.gov/gis/forecast/archive/2026092912_wsp_120hr5km.zip",
+      "zipFile0p5deg": "https://www.nhc.noaa.gov/gis/forecast/archive/2026092912_wsp_120hrhalfDeg.zip",
+      "kmzFile34kt": "https://www.nhc.noaa.gov/gis/forecast/archive/2026092912_wsp34knt120hr_5km.kmz",
+      "kmzFile50kt": "https://www.nhc.noaa.gov/gis/forecast/archive/2026092912_wsp50knt120hr_5km.kmz",
+      "kmzFile64kt": "https://www.nhc.noaa.gov/gis/forecast/archive/2026092912_wsp64knt120hr_5km.kmz"
+     },
+     "stormSurgeWatchWarningGIS": null,
+     "potentialStormSurgeFloodingGIS": null,
+     "peakSurgeKML": null
+    },
+    {
+     "id": "al082026",
+     "binNumber": "AT3",
+     "name": "Hanna",
+     "classification": "TS",
+     "intensity": "35",
+     "pressure": "1004",
+     "latitude": "34.6N",
+     "longitude": "45.5W",
+     "latitudeNumeric": 34.6,
+     "longitudeNumeric": -45.5,
+     "movementDir": 125,
+     "movementSpeed": 12,
+     "lastUpdate": "2026-09-29T15:00:00.000Z",
+     "publicAdvisory": {
+      "advNum": "005",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:49:11.672Z",
+      "url": "https://www.nhc.noaa.gov/text/MIATCPAT3.shtml"
+     },
+     "forecastAdvisory": {
+      "advNum": "005",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T15:01:41.126Z",
+      "url": "https://www.nhc.noaa.gov/text/MIATCMAT3.shtml"
+     },
+     "windSpeedProbabilities": {
+      "advNum": "005",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:49:11.705Z",
+      "url": "https://www.nhc.noaa.gov/text/MIAPWSAT3.shtml"
+     },
+     "forecastDiscussion": {
+      "advNum": "005",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:49:39.708Z",
+      "url": "https://www.nhc.noaa.gov/text/MIATCDAT3.shtml"
+     },
+     "forecastGraphics": {
+      "advNum": "005",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:49:11.672Z",
+      "url": "https://www.nhc.noaa.gov/graphics_at3.shtml"
+     },
+     "forecastTrack": {
+      "advNum": "005",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:51:37.917Z",
+      "zipFile": "https://www.nhc.noaa.gov/gis/forecast/archive/al082026_5day_005.zip",
+      "kmzFile": "https://www.nhc.noaa.gov/storm_graphics/api/AL082026_005adv_TRACK.kmz"
+     },
+     "windWatchesWarnings": null,
+     "trackCone": {
+      "advNum": "005",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:51:28.705Z",
+      "zipFile": "https://www.nhc.noaa.gov/gis/forecast/archive/al082026_5day_005.zip",
+      "kmzFile": "https://www.nhc.noaa.gov/storm_graphics/api/AL082026_005adv_CONE.kmz"
+     },
+     "initialWindExtent": {
+      "advNum": "005",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:52:33.443Z",
+      "zipFile": "https://www.nhc.noaa.gov/gis/forecast/archive/al082026_fcst_005.zip",
+      "kmzFile": "https://www.nhc.noaa.gov/storm_graphics/api/AL082026_initialradii_005adv.kmz"
+     },
+     "forecastWindRadiiGIS": {
+      "advNum": "005",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:52:28.788Z",
+      "zipFile": "https://www.nhc.noaa.gov/gis/forecast/archive/al082026_fcst_005.zip",
+      "kmzFile": "https://www.nhc.noaa.gov/storm_graphics/api/AL082026_forecastradii_005adv.kmz"
+     },
+     "bestTrackGIS": {
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:51:58.675Z",
+      "zipFile": "https://www.nhc.noaa.gov/gis/best_track/al082026_best_track.zip",
+      "kmzFile": "https://www.nhc.noaa.gov/gis/best_track/al082026_best_track.kmz"
+     },
+     "earliestArrivalTimeTSWindsGIS": {
+      "advNum": "005",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:51:33.162Z",
+      "kmzFile": "https://www.nhc.noaa.gov/storm_graphics/api/AL082026_005adv_earliest_reasonable_toa_34.kmz"
+     },
+     "mostLikelyTimeTSWindsGIS": {
+      "advNum": "005",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:51:35.604Z",
+      "kmzFile": "https://www.nhc.noaa.gov/storm_graphics/api/AL082026_005adv_most_likely_toa_34.kmz"
+     },
+     "windSpeedProbabilitiesGIS": {
+      "issuance": "2026-09-29T12:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T15:23:22.097Z",
+      "zipFile5km": "https://www.nhc.noaa.gov/gis/forecast/archive/2026092912_wsp_120hr5km.zip",
+      "zipFile0p5deg": "https://www.nhc.noaa.gov/gis/forecast/archive/2026092912_wsp_120hrhalfDeg.zip",
+      "kmzFile34kt": "https://www.nhc.noaa.gov/gis/forecast/archive/2026092912_wsp34knt120hr_5km.kmz",
+      "kmzFile50kt": "https://www.nhc.noaa.gov/gis/forecast/archive/2026092912_wsp50knt120hr_5km.kmz",
+      "kmzFile64kt": "https://www.nhc.noaa.gov/gis/forecast/archive/2026092912_wsp64knt120hr_5km.kmz"
+     },
+     "stormSurgeWatchWarningGIS": null,
+     "potentialStormSurgeFloodingGIS": null,
+     "peakSurgeKML": null
+    },
+    {
+     "id": "ep172026",
+     "binNumber": "EP2",
+     "name": "Polo",
+     "classification": "HU",
+     "intensity": "65",
+     "pressure": "981",
+     "latitude": "27.8N",
+     "longitude": "110.9W",
+     "latitudeNumeric": 27.8,
+     "longitudeNumeric": -110.9,
+     "movementDir": 40,
+     "movementSpeed": 17,
+     "lastUpdate": "2026-09-29T15:00:00.000Z",
+     "publicAdvisory": {
+      "advNum": "036",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:46:28.211Z",
+      "url": "https://www.nhc.noaa.gov/text/MIATCPEP2.shtml"
+     },
+     "forecastAdvisory": {
+      "advNum": "036",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:46:28.213Z",
+      "url": "https://www.nhc.noaa.gov/text/MIATCMEP2.shtml"
+     },
+     "windSpeedProbabilities": {
+      "advNum": "036",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:43:39.301Z",
+      "url": "https://www.nhc.noaa.gov/text/MIAPWSEP2.shtml"
+     },
+     "forecastDiscussion": {
+      "advNum": "036",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:44:42.806Z",
+      "url": "https://www.nhc.noaa.gov/text/MIATCDEP2.shtml"
+     },
+     "forecastGraphics": {
+      "advNum": "036",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:46:28.211Z",
+      "url": "https://www.nhc.noaa.gov/graphics_ep2.shtml"
+     },
+     "forecastTrack": {
+      "advNum": "036",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:47:05.785Z",
+      "zipFile": "https://www.nhc.noaa.gov/gis/forecast/archive/ep172026_5day_036.zip",
+      "kmzFile": "https://www.nhc.noaa.gov/storm_graphics/api/EP172026_036adv_TRACK.kmz"
+     },
+     "windWatchesWarnings": {
+      "advNum": "036",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:47:08.034Z",
+      "zipFile": "https://www.nhc.noaa.gov/gis/forecast/archive/ep172026_5day_036.zip",
+      "kmzFile": "https://www.nhc.noaa.gov/storm_graphics/api/EP172026_036adv_WW.kmz"
+     },
+     "trackCone": {
+      "advNum": "036",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:46:56.713Z",
+      "zipFile": "https://www.nhc.noaa.gov/gis/forecast/archive/ep172026_5day_036.zip",
+      "kmzFile": "https://www.nhc.noaa.gov/storm_graphics/api/EP172026_036adv_CONE.kmz"
+     },
+     "initialWindExtent": {
+      "advNum": "036",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:47:44.035Z",
+      "zipFile": "https://www.nhc.noaa.gov/gis/forecast/archive/ep172026_fcst_036.zip",
+      "kmzFile": "https://www.nhc.noaa.gov/storm_graphics/api/EP172026_initialradii_036adv.kmz"
+     },
+     "forecastWindRadiiGIS": {
+      "advNum": "036",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:47:39.399Z",
+      "zipFile": "https://www.nhc.noaa.gov/gis/forecast/archive/ep172026_fcst_036.zip",
+      "kmzFile": "https://www.nhc.noaa.gov/storm_graphics/api/EP172026_forecastradii_036adv.kmz"
+     },
+     "bestTrackGIS": {
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:47:19.208Z",
+      "zipFile": "https://www.nhc.noaa.gov/gis/best_track/ep172026_best_track.zip",
+      "kmzFile": "https://www.nhc.noaa.gov/gis/best_track/ep172026_best_track.kmz"
+     },
+     "earliestArrivalTimeTSWindsGIS": {
+      "advNum": "036",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:47:01.249Z",
+      "kmzFile": "https://www.nhc.noaa.gov/storm_graphics/api/EP172026_036adv_earliest_reasonable_toa_34.kmz"
+     },
+     "mostLikelyTimeTSWindsGIS": {
+      "advNum": "036",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:47:03.500Z",
+      "kmzFile": "https://www.nhc.noaa.gov/storm_graphics/api/EP172026_036adv_most_likely_toa_34.kmz"
+     },
+     "windSpeedProbabilitiesGIS": {
+      "issuance": "2026-09-29T12:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T15:23:22.097Z",
+      "zipFile5km": "https://www.nhc.noaa.gov/gis/forecast/archive/2026092912_wsp_120hr5km.zip",
+      "zipFile0p5deg": "https://www.nhc.noaa.gov/gis/forecast/archive/2026092912_wsp_120hrhalfDeg.zip",
+      "kmzFile34kt": "https://www.nhc.noaa.gov/gis/forecast/archive/2026092912_wsp34knt120hr_5km.kmz",
+      "kmzFile50kt": "https://www.nhc.noaa.gov/gis/forecast/archive/2026092912_wsp50knt120hr_5km.kmz",
+      "kmzFile64kt": "https://www.nhc.noaa.gov/gis/forecast/archive/2026092912_wsp64knt120hr_5km.kmz"
+     },
+     "stormSurgeWatchWarningGIS": null,
+     "potentialStormSurgeFloodingGIS": null,
+     "peakSurgeKML": null
+    },
+    {
+     "id": "ep182026",
+     "binNumber": "EP3",
+     "name": "Rachel",
+     "classification": "TS",
+     "intensity": "55",
+     "pressure": "987",
+     "latitude": "15.3N",
+     "longitude": "105.0W",
+     "latitudeNumeric": 15.3,
+     "longitudeNumeric": -105,
+     "movementDir": 300,
+     "movementSpeed": 13,
+     "lastUpdate": "2026-09-29T15:00:00.000Z",
+     "publicAdvisory": {
+      "advNum": "010",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:50:11.799Z",
+      "url": "https://www.nhc.noaa.gov/text/MIATCPEP3.shtml"
+     },
+     "forecastAdvisory": {
+      "advNum": "010",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:49:39.718Z",
+      "url": "https://www.nhc.noaa.gov/text/MIATCMEP3.shtml"
+     },
+     "windSpeedProbabilities": {
+      "advNum": "010",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:50:42.304Z",
+      "url": "https://www.nhc.noaa.gov/text/MIAPWSEP3.shtml"
+     },
+     "forecastDiscussion": {
+      "advNum": "010",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:52:27.380Z",
+      "url": "https://www.nhc.noaa.gov/text/MIATCDEP3.shtml"
+     },
+     "forecastGraphics": {
+      "advNum": "010",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:50:11.799Z",
+      "url": "https://www.nhc.noaa.gov/graphics_ep3.shtml"
+     },
+     "forecastTrack": {
+      "advNum": "010",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:53:21.869Z",
+      "zipFile": "https://www.nhc.noaa.gov/gis/forecast/archive/ep182026_5day_010.zip",
+      "kmzFile": "https://www.nhc.noaa.gov/storm_graphics/api/EP182026_010adv_TRACK.kmz"
+     },
+     "windWatchesWarnings": {
+      "advNum": "010",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:53:23.955Z",
+      "zipFile": "https://www.nhc.noaa.gov/gis/forecast/archive/ep182026_5day_010.zip",
+      "kmzFile": "https://www.nhc.noaa.gov/storm_graphics/api/EP182026_010adv_WW.kmz"
+     },
+     "trackCone": {
+      "advNum": "010",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:53:15.794Z",
+      "zipFile": "https://www.nhc.noaa.gov/gis/forecast/archive/ep182026_5day_010.zip",
+      "kmzFile": "https://www.nhc.noaa.gov/storm_graphics/api/EP182026_010adv_CONE.kmz"
+     },
+     "initialWindExtent": {
+      "advNum": "010",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:53:55.911Z",
+      "zipFile": "https://www.nhc.noaa.gov/gis/forecast/archive/ep182026_fcst_010.zip",
+      "kmzFile": "https://www.nhc.noaa.gov/storm_graphics/api/EP182026_initialradii_010adv.kmz"
+     },
+     "forecastWindRadiiGIS": {
+      "advNum": "010",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:53:51.658Z",
+      "zipFile": "https://www.nhc.noaa.gov/gis/forecast/archive/ep182026_fcst_010.zip",
+      "kmzFile": "https://www.nhc.noaa.gov/storm_graphics/api/EP182026_forecastradii_010adv.kmz"
+     },
+     "bestTrackGIS": {
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:53:34.313Z",
+      "zipFile": "https://www.nhc.noaa.gov/gis/best_track/ep182026_best_track.zip",
+      "kmzFile": "https://www.nhc.noaa.gov/gis/best_track/ep182026_best_track.kmz"
+     },
+     "earliestArrivalTimeTSWindsGIS": {
+      "advNum": "010",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:53:17.840Z",
+      "kmzFile": "https://www.nhc.noaa.gov/storm_graphics/api/EP182026_010adv_earliest_reasonable_toa_34.kmz"
+     },
+     "mostLikelyTimeTSWindsGIS": {
+      "advNum": "010",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:53:19.817Z",
+      "kmzFile": "https://www.nhc.noaa.gov/storm_graphics/api/EP182026_010adv_most_likely_toa_34.kmz"
+     },
+     "windSpeedProbabilitiesGIS": {
+      "issuance": "2026-09-29T12:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T15:23:22.097Z",
+      "zipFile5km": "https://www.nhc.noaa.gov/gis/forecast/archive/2026092912_wsp_120hr5km.zip",
+      "zipFile0p5deg": "https://www.nhc.noaa.gov/gis/forecast/archive/2026092912_wsp_120hrhalfDeg.zip",
+      "kmzFile34kt": "https://www.nhc.noaa.gov/gis/forecast/archive/2026092912_wsp34knt120hr_5km.kmz",
+      "kmzFile50kt": "https://www.nhc.noaa.gov/gis/forecast/archive/2026092912_wsp50knt120hr_5km.kmz",
+      "kmzFile64kt": "https://www.nhc.noaa.gov/gis/forecast/archive/2026092912_wsp64knt120hr_5km.kmz"
+     },
+     "stormSurgeWatchWarningGIS": null,
+     "potentialStormSurgeFloodingGIS": null,
+     "peakSurgeKML": null
+    },
+    {
+     "id": "ep192026",
+     "binNumber": "EP4",
+     "name": "Nineteen-E",
+     "classification": "TD",
+     "intensity": "30",
+     "pressure": "1004",
+     "latitude": "14.4N",
+     "longitude": "131.6W",
+     "latitudeNumeric": 14.4,
+     "longitudeNumeric": -131.6,
+     "movementDir": 90,
+     "movementSpeed": 9,
+     "lastUpdate": "2026-09-29T15:00:00.000Z",
+     "publicAdvisory": {
+      "advNum": "001",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:49:11.713Z",
+      "url": "https://www.nhc.noaa.gov/text/MIATCPEP4.shtml"
+     },
+     "forecastAdvisory": {
+      "advNum": "001",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:48:42.600Z",
+      "url": "https://www.nhc.noaa.gov/text/MIATCMEP4.shtml"
+     },
+     "windSpeedProbabilities": {
+      "advNum": "001",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:49:11.709Z",
+      "url": "https://www.nhc.noaa.gov/text/MIAPWSEP4.shtml"
+     },
+     "forecastDiscussion": {
+      "advNum": "001",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:51:07.790Z",
+      "url": "https://www.nhc.noaa.gov/text/MIATCDEP4.shtml"
+     },
+     "forecastGraphics": {
+      "advNum": "001",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:49:11.713Z",
+      "url": "https://www.nhc.noaa.gov/graphics_ep4.shtml"
+     },
+     "forecastTrack": {
+      "advNum": "001",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:52:35.656Z",
+      "zipFile": "https://www.nhc.noaa.gov/gis/forecast/archive/ep192026_5day_001.zip",
+      "kmzFile": "https://www.nhc.noaa.gov/storm_graphics/api/EP192026_001adv_TRACK.kmz"
+     },
+     "windWatchesWarnings": null,
+     "trackCone": {
+      "advNum": "001",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:52:28.770Z",
+      "zipFile": "https://www.nhc.noaa.gov/gis/forecast/archive/ep192026_5day_001.zip",
+      "kmzFile": "https://www.nhc.noaa.gov/storm_graphics/api/EP192026_001adv_CONE.kmz"
+     },
+     "initialWindExtent": {
+      "advNum": "001",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:53:10.420Z",
+      "zipFile": "https://www.nhc.noaa.gov/gis/forecast/archive/ep192026_fcst_001.zip",
+      "kmzFile": "https://www.nhc.noaa.gov/storm_graphics/api/EP192026_initialradii_001adv.kmz"
+     },
+     "forecastWindRadiiGIS": {
+      "advNum": "001",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:53:05.972Z",
+      "zipFile": "https://www.nhc.noaa.gov/gis/forecast/archive/ep192026_fcst_001.zip",
+      "kmzFile": "https://www.nhc.noaa.gov/storm_graphics/api/EP192026_forecastradii_001adv.kmz"
+     },
+     "bestTrackGIS": {
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:52:46.848Z",
+      "zipFile": "https://www.nhc.noaa.gov/gis/best_track/ep192026_best_track.zip",
+      "kmzFile": "https://www.nhc.noaa.gov/gis/best_track/ep192026_best_track.kmz"
+     },
+     "earliestArrivalTimeTSWindsGIS": {
+      "advNum": "001",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:52:30.841Z",
+      "kmzFile": "https://www.nhc.noaa.gov/storm_graphics/api/EP192026_001adv_earliest_reasonable_toa_34.kmz"
+     },
+     "mostLikelyTimeTSWindsGIS": {
+      "advNum": "001",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:52:33.132Z",
+      "kmzFile": "https://www.nhc.noaa.gov/storm_graphics/api/EP192026_001adv_most_likely_toa_34.kmz"
+     },
+     "windSpeedProbabilitiesGIS": {
+      "issuance": "2026-09-29T12:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T15:23:22.097Z",
+      "zipFile5km": "https://www.nhc.noaa.gov/gis/forecast/archive/2026092912_wsp_120hr5km.zip",
+      "zipFile0p5deg": "https://www.nhc.noaa.gov/gis/forecast/archive/2026092912_wsp_120hrhalfDeg.zip",
+      "kmzFile34kt": "https://www.nhc.noaa.gov/gis/forecast/archive/2026092912_wsp34knt120hr_5km.kmz",
+      "kmzFile50kt": "https://www.nhc.noaa.gov/gis/forecast/archive/2026092912_wsp50knt120hr_5km.kmz",
+      "kmzFile64kt": "https://www.nhc.noaa.gov/gis/forecast/archive/2026092912_wsp64knt120hr_5km.kmz"
+     },
+     "stormSurgeWatchWarningGIS": null,
+     "potentialStormSurgeFloodingGIS": null,
+     "peakSurgeKML": null
+    },
+    {
+     "id": "ep152026",
+     "binNumber": "CP2",
+     "name": "Nolo",
+     "classification": "HU",
+     "intensity": "95",
+     "pressure": "964",
+     "latitude": "20.5N",
+     "longitude": "164.2W",
+     "latitudeNumeric": 20.5,
+     "longitudeNumeric": -164.2,
+     "movementDir": 355,
+     "movementSpeed": 9,
+     "lastUpdate": "2026-09-29T15:00:00.000Z",
+     "publicAdvisory": {
+      "advNum": "036",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:46:09.601Z",
+      "url": "https://www.nhc.noaa.gov/text/HFOTCPCP2.shtml"
+     },
+     "forecastAdvisory": {
+      "advNum": "036",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:45:38.929Z",
+      "url": "https://www.nhc.noaa.gov/text/HFOTCMCP2.shtml"
+     },
+     "windSpeedProbabilities": {
+      "advNum": "036",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:46:09.598Z",
+      "url": "https://www.nhc.noaa.gov/text/HFOPWSCP2.shtml"
+     },
+     "forecastDiscussion": {
+      "advNum": "036",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:46:43.525Z",
+      "url": "https://www.nhc.noaa.gov/text/HFOTCDCP2.shtml"
+     },
+     "forecastGraphics": {
+      "advNum": "036",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:46:09.601Z",
+      "url": "https://www.nhc.noaa.gov/graphics_cp2.shtml"
+     },
+     "forecastTrack": {
+      "advNum": "036",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:48:13.854Z",
+      "zipFile": "https://www.nhc.noaa.gov/gis/forecast/archive/ep152026_5day_036.zip",
+      "kmzFile": "https://www.nhc.noaa.gov/storm_graphics/api/EP152026_036adv_TRACK.kmz"
+     },
+     "windWatchesWarnings": {
+      "advNum": "036",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:48:16.049Z",
+      "zipFile": "https://www.nhc.noaa.gov/gis/forecast/archive/ep152026_5day_036.zip",
+      "kmzFile": "https://www.nhc.noaa.gov/storm_graphics/api/EP152026_036adv_WW.kmz"
+     },
+     "trackCone": {
+      "advNum": "036",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:48:07.287Z",
+      "zipFile": "https://www.nhc.noaa.gov/gis/forecast/archive/ep152026_5day_036.zip",
+      "kmzFile": "https://www.nhc.noaa.gov/storm_graphics/api/EP152026_036adv_CONE.kmz"
+     },
+     "initialWindExtent": {
+      "advNum": "036",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:48:47.600Z",
+      "zipFile": "https://www.nhc.noaa.gov/gis/forecast/archive/ep152026_fcst_036.zip",
+      "kmzFile": "https://www.nhc.noaa.gov/storm_graphics/api/EP152026_initialradii_036adv.kmz"
+     },
+     "forecastWindRadiiGIS": {
+      "advNum": "036",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:48:43.485Z",
+      "zipFile": "https://www.nhc.noaa.gov/gis/forecast/archive/ep152026_fcst_036.zip",
+      "kmzFile": "https://www.nhc.noaa.gov/storm_graphics/api/EP152026_forecastradii_036adv.kmz"
+     },
+     "bestTrackGIS": {
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:48:26.383Z",
+      "zipFile": "https://www.nhc.noaa.gov/gis/best_track/ep152026_best_track.zip",
+      "kmzFile": "https://www.nhc.noaa.gov/gis/best_track/ep152026_best_track.kmz"
+     },
+     "earliestArrivalTimeTSWindsGIS": {
+      "advNum": "036",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:48:09.420Z",
+      "kmzFile": "https://www.nhc.noaa.gov/storm_graphics/api/EP152026_036adv_earliest_reasonable_toa_34.kmz"
+     },
+     "mostLikelyTimeTSWindsGIS": {
+      "advNum": "036",
+      "issuance": "2026-09-29T15:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T14:48:11.719Z",
+      "kmzFile": "https://www.nhc.noaa.gov/storm_graphics/api/EP152026_036adv_most_likely_toa_34.kmz"
+     },
+     "windSpeedProbabilitiesGIS": {
+      "issuance": "2026-09-29T12:00:00.000Z",
+      "fileUpdateTime": "2026-09-29T15:23:22.097Z",
+      "zipFile5km": "https://www.nhc.noaa.gov/gis/forecast/archive/2026092912_wsp_120hr5km.zip",
+      "zipFile0p5deg": "https://www.nhc.noaa.gov/gis/forecast/archive/2026092912_wsp_120hrhalfDeg.zip",
+      "kmzFile34kt": "https://www.nhc.noaa.gov/gis/forecast/archive/2026092912_wsp34knt120hr_5km.kmz",
+      "kmzFile50kt": "https://www.nhc.noaa.gov/gis/forecast/archive/2026092912_wsp50knt120hr_5km.kmz",
+      "kmzFile64kt": "https://www.nhc.noaa.gov/gis/forecast/archive/2026092912_wsp64knt120hr_5km.kmz"
+     },
+     "stormSurgeWatchWarningGIS": null,
+     "potentialStormSurgeFloodingGIS": null,
+     "peakSurgeKML": null
+    }
+   ]
+  }
+ },
+ "mets_schedule": {
+  "source_id": "mlb-team-schedule",
+  "url": "https://statsapi.mlb.com/api/v1/schedule?sportId=1&teamId=144&startDate=2026-09-27&endDate=2026-10-10",
+  "params": {
+   "team": "144",
+   "start": "2026-09-27",
+   "end": "2026-10-10"
+  },
+  "categories": [
+   "sports/schedules"
+  ],
+  "fetched": "2026-09-29T16:46:26Z",
+  "sample": {
+   "copyright": "Copyright 2026 MLB Advanced Media, L.P.  Use of any content on this page acknowledges agreement to the terms posted here http://gdx.mlb.com/components/copyright.txt",
+   "totalItems": 4,
+   "totalEvents": 0,
+   "totalGames": 4,
+   "totalGamesInProgress": 0,
+   "dates": [
+    {
+     "date": "2026-09-27",
+     "totalItems": 1,
+     "totalEvents": 0,
+     "totalGames": 1,
+     "totalGamesInProgress": 0,
+     "games": [
+      {
+       "gamePk": 823814,
+       "gameGuid": "034db7fc-8d42-400a-ae79-583e2a58a664",
+       "link": "/api/v1.1/game/823814/feed/live",
+       "gameType": "R",
+       "season": "2026",
+       "gameDate": "2026-09-27T19:10:00Z",
+       "officialDate": "2026-09-27",
+       "status": {
+        "abstractGameState": "Final",
+        "codedGameState": "F",
+        "detailedState": "Final",
+        "statusCode": "F",
+        "startTimeTBD": false,
+        "abstractGameCode": "F"
+       },
+       "teams": {
+        "away": {
+         "team": {
+          "id": 144,
+          "name": "Atlanta Braves",
+          "link": "/api/v1/teams/144"
+         },
+         "leagueRecord": {
+          "wins": 94,
+          "losses": 68,
+          "ties": 0,
+          "pct": ".580"
+         },
+         "score": 3,
+         "isWinner": false,
+         "splitSquad": false,
+         "seriesNumber": 54
+        },
+        "home": {
+         "team": {
+          "id": 146,
+          "name": "Miami Marlins",
+          "link": "/api/v1/teams/146"
+         },
+         "leagueRecord": {
+          "wins": 80,
+          "losses": 82,
+          "ties": 0,
+          "pct": ".494"
+         },
+         "score": 5,
+         "isWinner": true,
+         "splitSquad": false,
+         "seriesNumber": 52
+        }
+       },
+       "venue": {
+        "id": 4169,
+        "name": "loanDepot park",
+        "link": "/api/v1/venues/4169"
+       },
+       "content": {
+        "link": "/api/v1/game/823814/content"
+       },
+       "isTie": false,
+       "gameNumber": 1,
+       "publicFacing": true,
+       "doubleHeader": "N",
+       "gamedayType": "P",
+       "tiebreaker": "N",
+       "calendarEventID": "14-823814-2026-09-27",
+       "seasonDisplay": "2026",
+       "dayNight": "day",
+       "scheduledInnings": 9,
+       "reverseHomeAwayStatus": false,
+       "inningBreakLength": 120,
+       "gamesInSeries": 3,
+       "seriesGameNumber": 3,
+       "seriesDescription": "Regular Season",
+       "recordSource": "S",
+       "ifNecessary": "N",
+       "ifNecessaryDescription": "Normal Game"
+      }
+     ],
+     "events": []
+    },
+    {
+     "date": "2026-09-29",
+     "totalItems": 1,
+     "totalEvents": 0,
+     "totalGames": 1,
+     "totalGamesInProgress": 0,
+     "games": [
+      {
+       "gamePk": 849845,
+       "gameGuid": "46fc41ce-8627-4b21-b7ff-00b74393bbac",
+       "link": "/api/v1.1/game/849845/feed/live",
+       "gameType": "F",
+       "season": "2026",
+       "gameDate": "2026-09-29T18:00:00Z",
+       "officialDate": "2026-09-29",
+       "status": {
+        "abstractGameState": "Preview",
+        "codedGameState": "P",
+        "detailedState": "Pre-Game",
+        "statusCode": "P",
+        "startTimeTBD": false,
+        "abstractGameCode": "P"
+       },
+       "teams": {
+        "away": {
+         "team": {
+          "id": 143,
+          "name": "Philadelphia Phillies",
+          "link": "/api/v1/teams/143"
+         },
+         "leagueRecord": {
+          "wins": 0,
+          "losses": 0,
+          "ties": 0,
+          "pct": ".000"
+         },
+         "score": 0,
+         "splitSquad": false,
+         "seriesNumber": 3
+        },
+        "home": {
+         "team": {
+          "id": 144,
+          "name": "Atlanta Braves",
+          "link": "/api/v1/teams/144"
+         },
+         "leagueRecord": {
+          "wins": 0,
+          "losses": 0,
+          "ties": 0,
+          "pct": ".000"
+         },
+         "score": 0,
+         "splitSquad": false,
+         "seriesNumber": 3
+        }
+       },
+       "venue": {
+        "id": 4705,
+        "name": "Truist Park",
+        "link": "/api/v1/venues/4705"
+       },
+       "content": {
+        "link": "/api/v1/game/849845/content"
+       },
+       "gameNumber": 1,
+       "publicFacing": true,
+       "doubleHeader": "N",
+       "gamedayType": "P",
+       "tiebreaker": "N",
+       "calendarEventID": "14-849845-2026-09-29",
+       "seasonDisplay": "2026",
+       "dayNight": "day",
+       "description": "NL Wild Card 'A' Game 1",
+       "scheduledInnings": 9,
+       "reverseHomeAwayStatus": false,
+       "inningBreakLength": 145,
+       "gamesInSeries": 3,
+       "seriesGameNumber": 1,
+       "seriesDescription": "NL Wild Card Series",
+       "recordSource": "S",
+       "ifNecessary": "N",
+       "ifNecessaryDescription": "Normal Game"
+      }
+     ],
+     "events": []
+    },
+    {
+     "date": "2026-09-30",
+     "totalItems": 1,
+     "totalEvents": 0,
+     "totalGames": 1,
+     "totalGamesInProgress": 0,
+     "games": [
+      {
+       "gamePk": 849841,
+       "gameGuid": "955de52a-92a3-4570-ada3-85f2a6deb463",
+       "link": "/api/v1.1/game/849841/feed/live",
+       "gameType": "F",
+       "season": "2026",
+       "gameDate": "2026-09-30T18:00:00Z",
+       "officialDate": "2026-09-30",
+       "status": {
+        "abstractGameState": "Preview",
+        "codedGameState": "S",
+        "detailedState": "Scheduled",
+        "statusCode": "S",
+        "startTimeTBD": false,
+        "abstractGameCode": "P"
+       },
+       "teams": {
+        "away": {
+         "team": {
+          "id": 143,
+          "name": "Philadelphia Phillies",
+          "link": "/api/v1/teams/143"
+         },
+         "leagueRecord": {
+          "wins": 0,
+          "losses": 0,
+          "ties": 0,
+          "pct": ".000"
+         },
+         "splitSquad": false,
+         "seriesNumber": 3
+        },
+        "home": {
+         "team": {
+          "id": 144,
+          "name": "Atlanta Braves",
+          "link": "/api/v1/teams/144"
+         },
+         "leagueRecord": {
+          "wins": 0,
+          "losses": 0,
+          "ties": 0,
+          "pct": ".000"
+         },
+         "splitSquad": false,
+         "seriesNumber": 3
+        }
+       },
+       "venue": {
+        "id": 4705,
+        "name": "Truist Park",
+        "link": "/api/v1/venues/4705"
+       },
+       "content": {
+        "link": "/api/v1/game/849841/content"
+       },
+       "gameNumber": 1,
+       "publicFacing": true,
+       "doubleHeader": "N",
+       "gamedayType": "P",
+       "tiebreaker": "N",
+       "calendarEventID": "14-849841-2026-09-30",
+       "seasonDisplay": "2026",
+       "dayNight": "day",
+       "description": "NL Wild Card 'A' Game 2",
+       "scheduledInnings": 9,
+       "reverseHomeAwayStatus": false,
+       "inningBreakLength": 145,
+       "gamesInSeries": 3,
+       "seriesGameNumber": 2,
+       "seriesDescription": "NL Wild Card Series",
+       "recordSource": "S",
+       "ifNecessary": "N",
+       "ifNecessaryDescription": "Normal Game"
+      }
+     ],
+     "events": []
+    },
+    {
+     "date": "2026-10-01",
+     "totalItems": 1,
+     "totalEvents": 0,
+     "totalGames": 1,
+     "totalGamesInProgress": 0,
+     "games": [
+      {
+       "gamePk": 849844,
+       "gameGuid": "daa19a6c-d458-411e-b92d-90ccf952f982",
+       "link": "/api/v1.1/game/849844/feed/live",
+       "gameType": "F",
+       "season": "2026",
+       "gameDate": "2026-10-01T18:00:00Z",
+       "officialDate": "2026-10-01",
+       "status": {
+        "abstractGameState": "Preview",
+        "codedGameState": "S",
+        "detailedState": "Scheduled",
+        "statusCode": "S",
+        "startTimeTBD": false,
+        "abstractGameCode": "P"
+       },
+       "teams": {
+        "away": {
+         "team": {
+          "id": 143,
+          "name": "Philadelphia Phillies",
+          "link": "/api/v1/teams/143"
+         },
+         "leagueRecord": {
+          "wins": 0,
+          "losses": 0,
+          "ties": 0,
+          "pct": ".000"
+         },
+         "splitSquad": false,
+         "seriesNumber": 3
+        },
+        "home": {
+         "team": {
+          "id": 144,
+          "name": "Atlanta Braves",
+          "link": "/api/v1/teams/144"
+         },
+         "leagueRecord": {
+          "wins": 0,
+          "losses": 0,
+          "ties": 0,
+          "pct": ".000"
+         },
+         "splitSquad": false,
+         "seriesNumber": 3
+        }
+       },
+       "venue": {
+        "id": 4705,
+        "name": "Truist Park",
+        "link": "/api/v1/venues/4705"
+       },
+       "content": {
+        "link": "/api/v1/game/849844/content"
+       },
+       "gameNumber": 1,
+       "publicFacing": true,
+       "doubleHeader": "N",
+       "gamedayType": "P",
+       "tiebreaker": "N",
+       "calendarEventID": "14-849844-2026-10-01",
+       "seasonDisplay": "2026",
+       "dayNight": "day",
+       "description": "NL Wild Card 'A' Game 3",
+       "scheduledInnings": 9,
+       "reverseHomeAwayStatus": false,
+       "inningBreakLength": 145,
+       "gamesInSeries": 3,
+       "seriesGameNumber": 3,
+       "seriesDescription": "NL Wild Card Series",
+       "recordSource": "S",
+       "ifNecessary": "Y",
+       "ifNecessaryDescription": "If Necessary Game"
+      }
+     ],
+     "events": []
+    }
+   ]
+  }
+ },
+ "nws_forecast_chs": {
+  "source_id": "nws-forecast",
+  "url": "https://api.weather.gov/gridpoints/CHS/87,77/forecast",
+  "params": {
+   "office": "CHS",
+   "grid_x": "87",
+   "grid_y": "77"
+  },
+  "categories": [
+   "weather/forecast"
+  ],
+  "fetched": "2026-09-29T16:46:16Z",
+  "sample": {
+   "@context": [
+    "https://geojson.org/geojson-ld/geojson-context.jsonld",
+    {
+     "@version": "1.1",
+     "wx": "https://api.weather.gov/ontology#",
+     "geo": "http://www.opengis.net/ont/geosparql#",
+     "unit": "http://codes.wmo.int/common/unit/",
+     "@vocab": "https://api.weather.gov/ontology#"
+    }
+   ],
+   "type": "Feature",
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -79.9139,
+       32.7748
+      ],
+      [
+       -79.9109,
+       32.7973
+      ],
+      [
+       -79.9377,
+       32.7998
+      ],
+      [
+       -79.9406,
+       32.7773
+      ],
+      [
+       -79.9139,
+       32.7748
+      ]
+     ]
+    ]
+   },
+   "properties": {
+    "units": "us",
+    "forecastGenerator": "BaselineForecastGenerator",
+    "generatedAt": "2026-09-29T12:45:05+00:00",
+    "updateTime": "2026-09-29T12:32:27+00:00",
+    "validTimes": "2026-09-29T06:00:00+00:00/P7DT19H",
+    "elevation": {
+     "unitCode": "wmoUnit:m",
+     "value": 0.9144
+    },
+    "periods": [
+     {
+      "number": 1,
+      "name": "Today",
+      "startTime": "2026-09-29T08:00:00-04:00",
+      "endTime": "2026-09-29T18:00:00-04:00",
+      "isDaytime": true,
+      "temperature": 83,
+      "temperatureUnit": "F",
+      "temperatureTrend": null,
+      "probabilityOfPrecipitation": {
+       "unitCode": "wmoUnit:percent",
+       "value": 1
+      },
+      "windSpeed": "2 to 8 mph",
+      "windDirection": "E",
+      "icon": "https://api.weather.gov/icons/land/day/few?size=medium",
+      "shortForecast": "Sunny",
+      "detailedForecast": "Sunny, with a high near 83. East wind 2 to 8 mph."
+     },
+     {
+      "number": 2,
+      "name": "Tonight",
+      "startTime": "2026-09-29T18:00:00-04:00",
+      "endTime": "2026-09-30T06:00:00-04:00",
+      "isDaytime": false,
+      "temperature": 71,
+      "temperatureUnit": "F",
+      "temperatureTrend": null,
+      "probabilityOfPrecipitation": {
+       "unitCode": "wmoUnit:percent",
+       "value": 2
+      },
+      "windSpeed": "1 to 7 mph",
+      "windDirection": "E",
+      "icon": "https://api.weather.gov/icons/land/night/sct?size=medium",
+      "shortForecast": "Partly Cloudy",
+      "detailedForecast": "Partly cloudy, with a low around 71. East wind 1 to 7 mph."
+     },
+     {
+      "number": 3,
+      "name": "Wednesday",
+      "startTime": "2026-09-30T06:00:00-04:00",
+      "endTime": "2026-09-30T18:00:00-04:00",
+      "isDaytime": true,
+      "temperature": 83,
+      "temperatureUnit": "F",
+      "temperatureTrend": null,
+      "probabilityOfPrecipitation": {
+       "unitCode": "wmoUnit:percent",
+       "value": 8
+      },
+      "windSpeed": "1 to 9 mph",
+      "windDirection": "NE",
+      "icon": "https://api.weather.gov/icons/land/day/few?size=medium",
+      "shortForecast": "Sunny",
+      "detailedForecast": "Sunny, with a high near 83. Northeast wind 1 to 9 mph."
+     },
+     {
+      "number": 4,
+      "name": "Wednesday Night",
+      "startTime": "2026-09-30T18:00:00-04:00",
+      "endTime": "2026-10-01T06:00:00-04:00",
+      "isDaytime": false,
+      "temperature": 72,
+      "temperatureUnit": "F",
+      "temperatureTrend": null,
+      "probabilityOfPrecipitation": {
+       "unitCode": "wmoUnit:percent",
+       "value": 1
+      },
+      "windSpeed": "2 to 8 mph",
+      "windDirection": "E",
+      "icon": "https://api.weather.gov/icons/land/night/few?size=medium",
+      "shortForecast": "Mostly Clear",
+      "detailedForecast": "Mostly clear, with a low around 72. East wind 2 to 8 mph."
+     },
+     {
+      "number": 5,
+      "name": "Thursday",
+      "startTime": "2026-10-01T06:00:00-04:00",
+      "endTime": "2026-10-01T18:00:00-04:00",
+      "isDaytime": true,
+      "temperature": 83,
+      "temperatureUnit": "F",
+      "temperatureTrend": null,
+      "probabilityOfPrecipitation": {
+       "unitCode": "wmoUnit:percent",
+       "value": 6
+      },
+      "windSpeed": "2 to 9 mph",
+      "windDirection": "E",
+      "icon": "https://api.weather.gov/icons/land/day/few?size=medium",
+      "shortForecast": "Sunny",
+      "detailedForecast": "Sunny, with a high near 83. East wind 2 to 9 mph."
+     },
+     {
+      "number": 6,
+      "name": "Thursday Night",
+      "startTime": "2026-10-01T18:00:00-04:00",
+      "endTime": "2026-10-02T06:00:00-04:00",
+      "isDaytime": false,
+      "temperature": 73,
+      "temperatureUnit": "F",
+      "temperatureTrend": null,
+      "probabilityOfPrecipitation": {
+       "unitCode": "wmoUnit:percent",
+       "value": 6
+      },
+      "windSpeed": "1 to 8 mph",
+      "windDirection": "SE",
+      "icon": "https://api.weather.gov/icons/land/night/few?size=medium",
+      "shortForecast": "Mostly Clear",
+      "detailedForecast": "Mostly clear, with a low around 73."
+     },
+     {
+      "number": 7,
+      "name": "Friday",
+      "startTime": "2026-10-02T06:00:00-04:00",
+      "endTime": "2026-10-02T18:00:00-04:00",
+      "isDaytime": true,
+      "temperature": 85,
+      "temperatureUnit": "F",
+      "temperatureTrend": null,
+      "probabilityOfPrecipitation": {
+       "unitCode": "wmoUnit:percent",
+       "value": 25
+      },
+      "windSpeed": "1 to 7 mph",
+      "windDirection": "E",
+      "icon": "https://api.weather.gov/icons/land/day/tsra_hi,20/tsra_hi,30?size=medium",
+      "shortForecast": "Slight Chance Showers And Thunderstorms",
+      "detailedForecast": "A slight chance of showers and thunderstorms between 8am and 2pm, then a chance of showers and thunderstorms. Mostly sunny, with a high near 85. Chance of precipitation is 30%."
+     },
+     {
+      "number": 8,
+      "name": "Friday Night",
+      "startTime": "2026-10-02T18:00:00-04:00",
+      "endTime": "2026-10-03T06:00:00-04:00",
+      "isDaytime": false,
+      "temperature": 74,
+      "temperatureUnit": "F",
+      "temperatureTrend": null,
+      "probabilityOfPrecipitation": {
+       "unitCode": "wmoUnit:percent",
+       "value": 25
+      },
+      "windSpeed": "1 to 6 mph",
+      "windDirection": "S",
+      "icon": "https://api.weather.gov/icons/land/night/tsra_hi,30/sct?size=medium",
+      "shortForecast": "Chance Showers And Thunderstorms then Partly Cloudy",
+      "detailedForecast": "A chance of showers and thunderstorms before 8pm. Partly cloudy, with a low around 74. Chance of precipitation is 30%."
+     },
+     {
+      "number": 9,
+      "name": "Saturday",
+      "startTime": "2026-10-03T06:00:00-04:00",
+      "endTime": "2026-10-03T18:00:00-04:00",
+      "isDaytime": true,
+      "temperature": 83,
+      "temperatureUnit": "F",
+      "temperatureTrend": null,
+      "probabilityOfPrecipitation": {
+       "unitCode": "wmoUnit:percent",
+       "value": 36
+      },
+      "windSpeed": "1 to 7 mph",
+      "windDirection": "SE",
+      "icon": "https://api.weather.gov/icons/land/day/tsra_hi,30/tsra_hi,40?size=medium",
+      "shortForecast": "Chance Showers And Thunderstorms",
+      "detailedForecast": "A chance of showers and thunderstorms between 8am and 2pm, then a chance of showers and thunderstorms. Partly sunny, with a high near 83. Chance of precipitation is 40%."
+     },
+     {
+      "number": 10,
+      "name": "Saturday Night",
+      "startTime": "2026-10-03T18:00:00-04:00",
+      "endTime": "2026-10-04T06:00:00-04:00",
+      "isDaytime": false,
+      "temperature": 73,
+      "temperatureUnit": "F",
+      "temperatureTrend": null,
+      "probabilityOfPrecipitation": {
+       "unitCode": "wmoUnit:percent",
+       "value": 36
+      },
+      "windSpeed": "2 to 7 mph",
+      "windDirection": "SE",
+      "icon": "https://api.weather.gov/icons/land/night/tsra_hi,40/tsra_hi,30?size=medium",
+      "shortForecast": "Chance Showers And Thunderstorms",
+      "detailedForecast": "A chance of showers and thunderstorms before 8pm, then a chance of showers and thunderstorms. Mostly cloudy, with a low around 73. Chance of precipitation is 40%."
+     },
+     {
+      "number": 11,
+      "name": "Sunday",
+      "startTime": "2026-10-04T06:00:00-04:00",
+      "endTime": "2026-10-04T18:00:00-04:00",
+      "isDaytime": true,
+      "temperature": 82,
+      "temperatureUnit": "F",
+      "temperatureTrend": null,
+      "probabilityOfPrecipitation": {
+       "unitCode": "wmoUnit:percent",
+       "value": 43
+      },
+      "windSpeed": "2 to 9 mph",
+      "windDirection": "S",
+      "icon": "https://api.weather.gov/icons/land/day/tsra_hi,40?size=medium",
+      "shortForecast": "Chance Showers And Thunderstorms",
+      "detailedForecast": "A chance of showers and thunderstorms before 2pm, then a chance of showers and thunderstorms. Partly sunny, with a high near 82. Chance of precipitation is 40%."
+     },
+     {
+      "number": 12,
+      "name": "Sunday Night",
+      "startTime": "2026-10-04T18:00:00-04:00",
+      "endTime": "2026-10-05T06:00:00-04:00",
+      "isDaytime": false,
+      "temperature": 71,
+      "temperatureUnit": "F",
+      "temperatureTrend": null,
+      "probabilityOfPrecipitation": {
+       "unitCode": "wmoUnit:percent",
+       "value": 45
+      },
+      "windSpeed": "3 to 8 mph",
+      "windDirection": "SW",
+      "icon": "https://api.weather.gov/icons/land/night/tsra_hi,50?size=medium",
+      "shortForecast": "Chance Showers And Thunderstorms",
+      "detailedForecast": "A chance of showers and thunderstorms before 8pm, then a chance of showers and thunderstorms. Mostly cloudy, with a low around 71. Chance of precipitation is 50%."
+     },
+     {
+      "number": 13,
+      "name": "Monday",
+      "startTime": "2026-10-05T06:00:00-04:00",
+      "endTime": "2026-10-05T18:00:00-04:00",
+      "isDaytime": true,
+      "temperature": 78,
+      "temperatureUnit": "F",
+      "temperatureTrend": null,
+      "probabilityOfPrecipitation": {
+       "unitCode": "wmoUnit:percent",
+       "value": 67
+      },
+      "windSpeed": "5 to 13 mph",
+      "windDirection": "N",
+      "icon": "https://api.weather.gov/icons/land/day/tsra_sct,50/tsra_sct,70?size=medium",
+      "shortForecast": "Showers And Thunderstorms Likely",
+      "detailedForecast": "Showers and thunderstorms likely. Partly sunny, with a high near 78. Chance of precipitation is 70%."
+     },
+     {
+      "number": 14,
+      "name": "Monday Night",
+      "startTime": "2026-10-05T18:00:00-04:00",
+      "endTime": "2026-10-06T06:00:00-04:00",
+      "isDaytime": false,
+      "temperature": 63,
+      "temperatureUnit": "F",
+      "temperatureTrend": null,
+      "probabilityOfPrecipitation": {
+       "unitCode": "wmoUnit:percent",
+       "value": 67
+      },
+      "windSpeed": "12 to 15 mph",
+      "windDirection": "NE",
+      "icon": "https://api.weather.gov/icons/land/night/tsra,70/tsra,50?size=medium",
+      "shortForecast": "Showers And Thunderstorms Likely",
+      "detailedForecast": "Showers and thunderstorms likely. Mostly cloudy, with a low around 63. Chance of precipitation is 70%."
+     }
+    ]
+   }
+  }
+ },
+ "tropical_alerts": {
+  "source_id": "nws-tropical-alerts-point",
+  "url": "https://api.weather.gov/alerts/active?point=27.9477,-82.4584&event=Hurricane%20Warning,Hurricane%20Watch,Tropical%20Storm%20Warning,Tropical%20Storm%20Watch,Storm%20Surge%20Warning,Storm%20Surge%20Watch,Extreme%20Wind%20Warning,Hurricane%20Local%20Statement",
+  "params": {
+   "lat": "27.9477",
+   "lon": "-82.4584"
+  },
+  "categories": [
+   "hazards/tropical_storms"
+  ],
+  "fetched": "2026-09-29T16:45:55Z",
+  "sample": {
+   "@context": {
+    "@version": "1.1"
+   },
+   "type": "FeatureCollection",
+   "features": [],
+   "title": "Current watches, warnings, and advisories for 27.9477 N, 82.4584 W",
+   "updated": "2026-09-29T16:45:00+00:00"
+  }
+ }
+}

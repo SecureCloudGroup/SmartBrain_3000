@@ -22,7 +22,7 @@ import uuid
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
-from . import auth, email_account, gateway, keyvault, stt_local
+from . import auth, db, email_account, gateway, keyvault, stt_local
 from .approvals import ApprovalStore
 from .audit import AuditLog
 from .feeds import FeedStore
@@ -92,6 +92,15 @@ def _set_unlocked(request: Request, master_key: bytes) -> None:
     request.app.state.vaults = VaultStore(_conn(request), master_key)
     request.app.state.feeds = FeedStore(_conn(request), master_key)
     request.app.state.ni = NIStore(_conn(request), master_key)
+    # F15 (2026-10-04): the NI engine's clock reads the user's IANA zone from meta — a Docker
+    # install has no TZ env, so without this seam every window and shown time rode the UTC calendar
+    # until the SPA's first health handshake. Loading here means the first run after unlock already
+    # has the zone the SPA last reported (handshake refreshes it on every probe).
+    try:
+        from . import ni as _ni_mod
+        _ni_mod.set_user_timezone(db.meta_get(_conn(request), "user:timezone"))
+    except Exception:  # best-effort — the handshake handler will set it either way
+        pass
     stt_local.prefetch(request.app)  # voice model: one-time background fetch, idempotent
     request.app.state.kb = KnowledgeBase(_conn(request), master_key)
     request.app.state.history = ChatHistory(_conn(request), master_key)

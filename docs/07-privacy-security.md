@@ -133,13 +133,14 @@ not. Being precise about the line matters more than claiming everything:
   refused. The email is sealed too and is sent only to sources with that rule, in
   the request's User-Agent header.
 - **Card creation, when the Library has nothing (a bounded search).** While you
-  are *creating* a card and the Library has no source for it, the build engine
+  are *creating* a card and no Library source answers it, the build engine
   searches **your own words** through the web-search engine below and reads up to
   four of the result pages — once, through the same network guard, with safe
-  search forced on — to show you candidates with evidence from each page. That
-  pre-read is part of the search; the address a card fetches *recurringly* is
-  still only the one you tap or paste. No search happens when the Library had a
-  source, when you pasted a URL, or after the card exists.
+  search forced on — to rank the pages that may help, which the card lists as
+  links. That pre-read is part of the search; the address a card fetches
+  *recurringly* is still only the Library source you tap or the link you paste.
+  No search happens when a Library source answers the ask, when you pasted a URL,
+  or after the card exists.
 - **The card template library (only if you connect one).** A connected library is
   checked at the URL you pinned about once a day (plus your manual "Check now").
   The check downloads the signed template pack; nothing about you or your cards is

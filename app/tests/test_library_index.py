@@ -34,12 +34,16 @@ def _param(name, kind, fill):
 
 
 _TIDE_URL = "https://api.tidesandcurrents.noaa.gov/api/prod/datagetter?station={station}&begin_date={begin}"
+_TIDE_ANSWER = {"name": "tides", "label": "Tides", "kind": "list", "primary": True, "words": ["tide", "tides"],
+                "path": "predictions", "row": [{"path": "t", "label": "Time", "type": "time"},
+                                               {"path": "type", "label": "Tide", "type": "text"}]}
 _SOURCES = [  # id, name, tier, status, prior, category, terms, kinds, access extras, extra record fields
     ("coops-tide-hilo", "NOAA tide predictions", "curated", "ok", 2.0, ("water", "tides"),
      {"tide": 3.0, "tides": 3.0, "noaa": 1.5, "predictions": 3.0}, ["next_event", "schedule"],
      {"url_template": _TIDE_URL, "params": [
          _param("station", "station", {"from": "resolver", "resolver": "tide_station", "field": "key"}),
-         _param("begin", "date", {"from": "clock", "format": "%Y%m%d", "offset_days": 0})]}, {}),
+         _param("begin", "date", {"from": "clock", "format": "%Y%m%d", "offset_days": 0})]},
+     {"answers": [_TIDE_ANSWER]}),  # declares its answers: a tap builds a card (ruling 2026-10-05)
     ("coingecko-price", "CoinGecko coin price", "curated", "ok", 1.8, ("markets", "crypto"),
      {"bitcoin": 2.5, "price": 3.0, "coin": 3.0}, ["current_value"],
      {"url_template": "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin", "params": []}, {}),
@@ -70,6 +74,10 @@ _RESOLVER_ENTRIES = [  # id, resolver, kind, key, name, lat, lon, state, attrs, 
      ["melbourne", "melbourne fl", "melbourne florida"]),
     ("place:4", "place", "place", "4", "Denver", 39.7, -104.9, "CO", {"pop": 716000}, 5.9, ["denver", "denver co"]),
     ("place:5", "place", "place", "5", "Denver", 42.67, -92.3, "IA", {"pop": 1900}, 3.3, ["denver", "denver ia"]),
+    ("place:7", "place", "place", "7", "Cape Canaveral", 28.4, -80.6, "FL", {"pop": 10000}, 2.0,
+     ["cape canaveral", "cape canaveral fl"]),
+    ("place:6", "place", "place", "6", "South Lake Tahoe", 38.9, -120.0, "CA", {"pop": 21225, "nicknames": ["tahoe"]},
+     3.0, ["south lake tahoe", "tahoe"]),
     ("tide_station:872", "tide_station", "station", "872", "Melbourne Causeway", 28.08, -80.60, "FL",
      {"water": "Indian River"}, 1.0, ["melbourne causeway"]),
     ("tide_station:873", "tide_station", "station", "873", "Eau Gallie", 28.16, -80.63, "FL",
@@ -106,7 +114,8 @@ def _build_pack(path: Path) -> None:
     for sid, name, tier, status, prior, (cat, sub), terms, kinds, access, extra in _SOURCES:
         acc = {"kind": "http_json", "auth": "none", "headers": {}, "params": [], **access}
         rec = {"id": sid, "name": name, "description": f"{name} description", "tier": tier,
-               "categories": [f"{cat}/{sub}"], "kinds": kinds, "access": acc, "examples": [],
+               "categories": [f"{cat}/{sub}"], "kinds": kinds, "access": acc,
+               "examples": [" ".join(terms)],  # a real record's examples feed its index terms
                "provider": {"id": "p", "name": "Provider", "authority": "official"}, **extra}
         con.execute("INSERT INTO library_sources VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (sid, name, f"{name} description", "p", "Provider", "official", tier, "US", "", "http_json",
@@ -434,6 +443,32 @@ def test_key_placement(access, want) -> None:
     assert library_resolve.key_placement(access, "key") == want
 
 
+# fix10 (blind-8, 2026-10-04): "Durham Bulls schedule" shipped the Chicago Bulls'
+# next matchup — the team resolver read "Bulls" and ignored "Durham". The place-state
+# helper tells a team entity's own city apart from the asked place's city.
+def test_place_state_of_reads_dominant_city_state() -> None:
+    """``_place_state_of`` returns the state the pack's place resolver reads from text."""
+    class _MockResolver:
+        def by_name(self, kind: str, text: str) -> dict:
+            if kind != "place":
+                return {"status": "none", "best": None, "candidates": []}
+            low = text.lower()
+            if "durham" in low:
+                return {"status": "resolved", "best": {"state": "NC"}, "candidates": []}
+            if "chicago" in low:
+                return {"status": "resolved", "best": {"state": "IL"}, "candidates": []}
+            if "new york" in low:
+                return {"status": "resolved", "best": {"state": "NY"}, "candidates": []}
+            return {"status": "none", "best": None, "candidates": []}
+
+    res = _MockResolver()
+    assert library_index._place_state_of(res, "Durham") == "NC"
+    assert library_index._place_state_of(res, "Chicago Bulls") == "IL"
+    assert library_index._place_state_of(res, "New York Rangers") == "NY"
+    assert library_index._place_state_of(res, "Texas Rangers") == ""  # resolver returns none
+    assert library_index._place_state_of(res, "") == ""
+
+
 def test_ambiguous_reading_expands_together_and_duplicates_are_refused() -> None:
     values = {"lat": [("45.5", "Portland (OR)"), ("43.6", "Portland (ME)")],
               "lon": [("-122.6", "Portland (OR)"), ("-70.2", "Portland (ME)")]}
@@ -553,3 +588,72 @@ def test_a_retired_catalog_confirm_pause_relands_as_a_library_pick(tmp_path, pac
     assert field["state"] == "source" and field["error"] == ni_flow.AWAITING_SOURCE_PICK
     assert field["suggestions"][0]["kind"] == "library"
     assert ni_flow._flow_read(store, item_id)["state"] == "source"
+
+
+def test_classify_the_longest_keyword_wins(tmp_path) -> None:
+    """Live 2026-09-29: with "temp" a weather word, "water temp Charleston" tied water with weather and
+    got the forecast. A keyword inside a longer matched keyword doesn't count on its own."""
+    idx = library_index.LibraryIndex(tmp_path)
+    idx._taxonomy_cache = [
+        {"id": "weather", "subcategories": [{"id": "forecast", "keywords": ["temp", "temperature"]}]},
+        {"id": "water", "subcategories": [{"id": "water_temp", "keywords": ["water temp", "ocean temperature"]}]},
+    ]
+    assert idx.classify("water temp Charleston") == ["water/water_temp"]
+    assert idx.classify("ocean temperature San Diego") == ["water/water_temp"]
+    assert idx.classify("temp in Denver") == ["weather/forecast"]
+
+
+def test_a_source_is_about_its_own_words_not_its_categorys(lib) -> None:
+    """Live 2026-09-29: "gold price per ounce" got WTI crude oil — "gold" is a commodities keyword, and
+    the relevance check counted the category's vocabulary as the source's own. Only the source's own
+    words (name, description, examples, declared answers) say what it is about."""
+    rows, _ = lib.candidates("crypto fear price")  # "crypto" is the category's word, never CoinGecko's own
+    assert "coingecko-price" not in [c["source_id"] for c in rows]
+    rows, _ = lib.candidates("bitcoin price")
+    assert rows and rows[0]["source_id"] == "coingecko-price"
+
+
+def test_a_reviewed_area_name_is_a_place_without_a_cue(lib) -> None:
+    """Blind 2026-09-29: "how much snow is Tahoe getting this week" had no place — South Lake Tahoe is
+    small, and "Tahoe" came without "in". A reviewed nickname is a place on its own; a plain small-town
+    name still needs its cue."""
+    from smartbrain_3000.library_resolve import Resolver
+    with lib._conn() as con:
+        res = Resolver(con)
+        assert lib._place_words(res, "Tahoe weather")[0] == {"tahoe"}
+        assert lib._place_words(res, "Melbourne weather")[0] == set()
+
+
+def test_a_small_places_full_multiword_name_is_a_place_without_a_cue(lib) -> None:
+    """Live 2026-10-03: "wave heights Cape Canaveral" lost its place (a 10k town, no "in"), so every marine
+    source was refused. A full name of two or more words is unmistakable; a one-word name still needs a cue."""
+    from smartbrain_3000.library_resolve import Resolver
+    with lib._conn() as con:
+        res = Resolver(con)
+        assert lib._place_words(res, "wave heights Cape Canaveral")[0] == {"cape", "canaveral"}
+        assert lib._place_words(res, "Melbourne weather")[0] == set()  # one word, small: still needs "in"
+
+
+def test_of_is_not_a_place_cue(lib) -> None:
+    """Live 2026-09-29: "price of silver" read "of silver" as Silver City. A small place is the ask's
+    place only after in / at / near / for / around."""
+    from smartbrain_3000.library_resolve import Resolver
+    with lib._conn() as con:
+        res = Resolver(con)
+        assert lib._place_words(res, "value of Melbourne")[0] == set()
+        assert "melbourne" in lib._place_words(res, "tides in Melbourne")[0]
+
+
+def test_a_formatted_resolver_fill(lib) -> None:
+    """Coinbase takes "BTC-USD": the Library's fill is the entry's symbol through "{UPPER}-USD". The app
+    only knew a bare "{UPPER}", so Coinbase was never offered (live 2026-09-29)."""
+    rec = {"id": "pair-src", "name": "Pair", "tier": "curated", "categories": ["markets/crypto"],
+           "access": {"kind": "http_json", "url_template": "https://x.example.org/p/{pair}", "params": [
+               {"name": "pair", "kind": "place", "required": True,
+                "fill": {"from": "resolver", "resolver": "place", "field": "state", "format": "{UPPER}-USD"}}]}}
+    with lib._conn() as con:
+        r = library_resolve.Resolver(con)
+        urls, why = library_resolve.candidate_urls(rec, "Denver CO", {}, r)
+        assert not why and urls[0]["url"] == "https://x.example.org/p/CO-USD"
+        rec["access"]["params"][0]["fill"]["format"] = "{LOWER}"  # still refused, honestly
+        assert library_resolve.candidate_urls(rec, "Denver CO", {}, r)[1].endswith("isn't supported yet")

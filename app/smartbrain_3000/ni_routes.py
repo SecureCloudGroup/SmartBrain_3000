@@ -93,13 +93,19 @@ def _secret_store(request: Request):
 
 
 def _pick_board_snapshot(store: ni.NIStore, item: dict) -> dict | None:
-    """Board-view snapshot: preview for draft, else latest-if-ok, else last_good (§10)."""
+    """Board-view snapshot: preview for draft, else latest-if-ok, else last_good (§10).
+
+    A card waiting for the user's YES (ruling 2026-10-04) never ran on cadence: it shows the
+    reading the flow found (``preview``) unless a manual run since wrote a fresher one."""
     assert store is not None and item, "store + item required"
     if item["state"] == "draft":
         return store.read_snapshot(item["id"], "preview")
     latest = store.read_snapshot(item["id"], "latest")
     if latest is not None and latest["ok"]:
         return {**latest, "slot": "latest"}
+    if ni.awaits_yes(item):
+        found = store.read_snapshot(item["id"], "preview")
+        return None if found is None else {**found, "slot": "preview"}
     fallback = store.read_snapshot(item["id"], "last_good")
     return None if fallback is None else {**fallback, "slot": "last_good"}
 
@@ -132,6 +138,7 @@ def _board_row(store: ni.NIStore, item: dict, *,
     assert store is not None and item, "store + item required"
     snap = _pick_board_snapshot(store, item)
     slot = "preview" if item["state"] == "draft" else (snap.get("slot") if snap else None)
+    built_from = item["spec"].get("_built_from") or {}
     source_type = (item["spec"].get("source") or {}).get("type")
     interpreted = source_type == "model" or ni._spec_has_llm_stage(item["spec"])
     update_flag, gone_flag = _template_update_flags(item, library_index, library_pack_id,
@@ -157,6 +164,14 @@ def _board_row(store: ni.NIStore, item: dict, *,
         # F2 (C2-feedback, 2026-09-15): the sealed _c2_ok attestation surfaces
         # so the card can stop asking "is it right?" after the user answered.
         "c2_ok": item["spec"].get("_c2_ok") is True,
+        # Ruling 2026-10-04 ("hold open paths for a YES"): a card built from a web page or a
+        # model-mapped dataset shows its reading and where it came from, and waits for the
+        # user's YES (POST /validate ok=true); NO (ok=false) re-lands the source pick without
+        # that source. None for every other card.
+        "awaiting_yes": ({"from": "page" if built_from.get("path") == "page" else "dataset",
+                          "host": str(built_from.get("host") or ""),
+                          "title": str(built_from.get("title") or "")}
+                         if ni.awaits_yes(item) else None),
         # W2: True while the flow has not replaced the placeholder spec — the
         # card hides Activate and says creation didn't finish.
         "shell": item["spec"].get("_shell") is True,
@@ -401,12 +416,28 @@ def validate_item(request: Request, item_id: str, body: ValidateIn) -> dict:
     a verdict against live/broken/draft has no C1 output to endorse.
     """
     store = _store(request)
-    if store.get_item(item_id) is None:
+    before = store.get_item(item_id)
+    if before is None:
         raise HTTPException(status_code=404, detail="item not found")
+    held = ni.awaits_yes(before)  # ruling 2026-10-04: an open-path card waiting for the YES
     try:
         store.record_validation(item_id, body.ok, body.note or "")
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from None
+    if not body.ok and held:
+        # NO to a web page / dataset reading: back to the source pick without that source —
+        # never a dead end (the declined address is never offered on this card again)
+        host = str((before["spec"].get("_built_from") or {}).get("host") or "the source")
+        note = (body.note or "").strip()
+        _journal_best_effort(store, item_id, "c2_wrong",
+                             f"user said no to the reading from {host}"
+                             + (f": {note}" if note else ""))
+        try:
+            moved = ni_flow.decline_reading(store, item_id)
+        except Exception as exc:  # the verdict is recorded; the card stays a draft the user can redo
+            log.warning("ni validate: re-pick after no failed: %s", type(exc).__name__)
+            moved = {"kind": "none"}
+        return {"ok": True, "state": store.get_item(item_id)["state"], "repick": moved["kind"]}
     if not body.ok:
         # §28: the user's verbatim note rides the journal so a later reader (a
         # model or the operator) sees the human authorship. Kind ``c2_wrong``
@@ -443,6 +474,10 @@ def validate_item(request: Request, item_id: str, body: ValidateIn) -> dict:
             log.warning("ni validate: C3 kick failed: %s", exc)
             run_result = {"status": "error", "kind": "internal"}
     final = store.get_item(item_id)
+    if held and final is not None and final["state"] == "commissioning":
+        # the YES came before any C1 run (a held card never ran on cadence): the kick captured the
+        # contract, so the C3 proof is due on the next tick, not a whole cadence away
+        store.clear_last_checked(item_id)
     return {"ok": True, "state": final["state"] if final else "unknown",
             "run": run_result.get("status") or "skipped"}
 
@@ -867,9 +902,11 @@ def retry_flow(request: Request, item_id: str) -> dict:
 
 
 class PickSourceIn(BaseModel):
-    """P3: the source-pick card's paste-a-URL — the universal generic path."""
+    """P3: the source-pick card's tap on a Library row, or its paste-a-URL (``pasted``)."""
 
     url: str = Field(min_length=8, max_length=2000)
+    # the user typed / pasted this link themselves (the card's paste form), not a tapped row
+    pasted: bool = False
 
 
 @router.post("/api/ni/items/{item_id}/flow/pick-source")
@@ -878,6 +915,10 @@ def pick_flow_source(request: Request, item_id: str, body: PickSourceIn) -> dict
     on the card — their paste is the consent (the same posture the chat
     resume tool carried); netguard guards the sampling fetch as always.
     Desktop-local, audited. 409 unless the flow is paused at ``source``.
+
+    Ruling 2026-10-05 ("Library cards; web as links"): a row the card offers only as a link (a web
+    page, a Library source without declared answers) is refused (409) — it never builds a card. The
+    same page PASTED by the user is theirs: it builds and waits for their YES (§33).
     """
     _require_desktop_local(request)
     store = _store(request)
@@ -897,18 +938,23 @@ def pick_flow_source(request: Request, item_id: str, body: PickSourceIn) -> dict
         ni._validate_http_json_url_shape(url)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=f"url: {exc}") from None
+    if ni_flow.link_row_for(record, url) is not None:
+        if not body.pasted:
+            raise HTTPException(
+                status_code=409,
+                detail="that page is offered as a link — SmartBrain can't keep a live card from it "
+                       "yet; open it, or paste a link to the data")
+        ni_flow.mark_pasted(store, item_id, url)
     # R6 + textual formats: a tap on a Library candidate is a Yes AND (when the row
     # named a non-JSON format) seals ``_format`` on the flow record so sampling +
     # every subsequent refresh parse the fetched body the same way — CSV / RSS /
-    # XML / text, not just JSON. Both writes happen BEFORE the worker starts so
+    # XML / text, not just JSON — plus the Library source it came from (its declared
+    # answers build the card). Both writes happen BEFORE the worker starts so
     # the sampling fetcher sees the sealed format on first read.
-    lib_row = next((r for r in (record.get("_ranked_library") or [])
-                    if isinstance(r, dict) and r.get("url") == url), None)
+    lib_row = next((r for r in ni_flow._buildable(record.get("_ranked_library"))
+                    if r.get("url") == url), None)
     if lib_row:
-        lib_fmt = str(lib_row.get("format") or "").strip().lower()
-        if lib_fmt in ni._HTTP_JSON_FORMATS and lib_fmt != "json":
-            live = ni_flow._flow_read(store, item_id) or record
-            ni_flow._flow_write(store, item_id, {**live, "_format": lib_fmt})
+        ni_flow.seal_library_pick(store, item_id, url, lib_row)
         try:
             source_id = str(lib_row.get("source_id") or "")
             library_index.LocalSources(store).record_yes(source_id)
@@ -1186,6 +1232,12 @@ def put_param(request: Request, item_id: str, body: ParamIn) -> dict:
         raise HTTPException(
             status_code=409,
             detail="secret params are filled via the credential PUT, never here")
+    if decl.get("kind") == "clock":
+        # R3-H (field 2026-10-04): a clock param walks forward from ``format`` + ``offset_days``;
+        # the user never fills it (the engine does, every tick).
+        raise HTTPException(
+            status_code=409,
+            detail="clock params are filled by the engine every refresh, never here")
     new_spec = json.loads(json.dumps(item["spec"]))
     new_spec["params"][body.name]["value"] = body.value
     store.update_spec(item_id, new_spec, origin="user")
@@ -1810,7 +1862,7 @@ def _build_export_template(store: ni.NIStore, item: dict, secrets_store) -> dict
 # so a template ships with none and the install path forces the safe default.
 _EXPORT_STRIP_KEYS = ("contract", "_c2_ok", "_l1_last_attempt", "_l1_trial",
                       "_l2_last_attempt", "_l2_proposal", "_template", "repair_policy",
-                      "_born", "_model_consent")
+                      "_born", "_model_consent", "_built_from")
 
 
 def _sanitize_spec_for_export(item: dict, secrets_store) -> dict:
@@ -1847,14 +1899,19 @@ def _sanitize_spec_for_export(item: dict, secrets_store) -> dict:
 
 def _empty_param_values(spec: dict) -> None:
     """Zero out param VALUES per §21 (labels + kinds kept). Secrets become the ni:self
-    placeholder so subscribers know they must enter a credential."""
+    placeholder so subscribers know they must enter a credential. R3-H (field 2026-10-04): a
+    clock-kind param carries ``format`` + ``offset_days`` and no user value — stamping ``value: ""``
+    on it would ship an invalid param decl (round-trip "unknown keys: ['value']")."""
     assert isinstance(spec, dict), "spec must be a dict"
     params = spec.get("params") or {}
+    assert isinstance(params, dict), "params must be a dict"
     for name, decl in params.items():  # bounded by ni._MAX_PARAMS
         if not isinstance(decl, dict):
             continue
         if decl.get("kind") == "secret":
             decl["value"] = f"{ni._NI_SELF_PLACEHOLDER}{name}"
+        elif decl.get("kind") == "clock":
+            continue  # a spec-level clock param has no user value to zero
         else:
             decl["value"] = ""
 

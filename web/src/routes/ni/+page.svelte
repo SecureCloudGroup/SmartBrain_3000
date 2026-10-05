@@ -10,6 +10,7 @@
   import { goto } from "$app/navigation";
   import Chip from "$lib/components/Chip.svelte";
   import EmptyState from "$lib/components/EmptyState.svelte";
+  import Icon from "$lib/components/Icon.svelte";
   import Modal from "$lib/components/Modal.svelte";
   import NiScene from "$lib/components/NiScene.svelte";
   import Spinner from "$lib/components/Spinner.svelte";
@@ -25,7 +26,7 @@
   import { confirmDialog } from "$lib/confirm.svelte";
   import { describeError } from "$lib/errors";
   import { friendlyErrorClass } from "$lib/ni/errors";
-  import { flowStageLabel, isFlowActive } from "$lib/ni/flow";
+  import { awaitingYesSource, flowStageLabel, isFlowActive, linkWhat, pickRows } from "$lib/ni/flow";
   import {
     filterTemplates,
     formatFingerprint,
@@ -172,14 +173,15 @@
 
   async function pickSource(item: NiBoardItem, urlOverride?: string): Promise<void> {
     console.assert(item.flow?.state === "source", "pickSource: pause required");
-    // S2: a web-candidate tap submits the sealed URL verbatim — the tap IS
-    // the consent, identical semantics to pasting that URL yourself.
+    // A Library-row tap submits the sealed URL verbatim — the tap IS the consent.
+    // No urlOverride = the paste form: the user's own link (it builds even when the
+    // card offered the same page as a link; that card then waits for their YES).
     const url = (urlOverride ?? pickUrlText).trim();
     if (url.length < 8) return;
     busyId = item.id;
     flowActionError = { ...flowActionError, [item.id]: "" };
     try {
-      const out = await api.niFlowPickSource(item.id, url);
+      const out = await api.niFlowPickSource(item.id, url, urlOverride === undefined);
       pickUrlText = "";
       toast(out.needs && out.needs.length > 0
         ? "This source needs one more thing — see the card."
@@ -986,6 +988,8 @@
     // Broken / Commissioning / Preview / Paused) — a mid-line lowercase pill (the old
     // "stale" / "live" / "failing") reads as unfinished next to the others.
     if (s === "draft") return { kind: "", label: "Preview" };
+    // Ruling 2026-10-04: a web-page / dataset card waits for the user's YES before it goes live.
+    if (s === "commissioning" && item.awaiting_yes) return { kind: "accent", label: "Needs your OK" };
     if (s === "commissioning") return { kind: "accent", label: "Commissioning" };
     if (s === "broken") return { kind: "danger", label: "Broken" };
     if (s === "failing") return { kind: "warn", label: "Failing" };
@@ -1092,6 +1096,26 @@
     }
   }
 
+  // Ruling 2026-10-04: NO to a web-page / dataset reading — the card goes back to the
+  // source pick without that source (the server never offers it on this card again).
+  async function declineReading(item: NiBoardItem) {
+    console.assert(item.state === "commissioning", "declineReading: only commissioning");
+    console.assert(!!item.awaiting_yes, "declineReading: only a card awaiting the user's YES");
+    busyId = item.id;
+    try {
+      const res = await api.niValidate(item.id, false);
+      toast(res.repick === "repick"
+        ? "Pick another source — that one won't be offered again."
+        : "Looking for another source…");
+      await load();
+    } catch (err) {
+      const msg = describeError(err);
+      if (msg) error = msg;
+    } finally {
+      busyId = null;
+    }
+  }
+
   function openWrongNote(item: NiBoardItem) {
     console.assert(item.state === "commissioning", "openWrongNote: only commissioning");
     console.assert(noteFor === null, "openWrongNote: no other note prompt open");
@@ -1177,7 +1201,7 @@
         {@const health = healthChip(item)}
         {@const wide = item.display.size === "wide"}
         {@const preview = item.state === "draft"}
-        <div class="card ni-card" class:wide class:preview>
+        <div class="card ni-card" class:wide class:preview={preview || !!item.awaiting_yes}>
           <div class="ni-head">
             <strong class="ni-title">{item.title}</strong>
             <span class="ni-chips">
@@ -1214,7 +1238,7 @@
             </span>
           </div>
 
-          {#if preview}
+          {#if preview && !item.flow}
             <div class="ni-preview-tag">
               <!-- P1 debt rider: flow/recipe-born previews hold data from the
                    REAL source (C1 sample or recorded probe) — only a
@@ -1325,65 +1349,59 @@
                   Finding a source for this…
                 </p>
               {:else if item.flow.state === "source"}
+                {@const pick = pickRows(item.flow.suggestions)}
                 <!-- The source-pick pause renders its OWN affordances — SmartBrain
-                     Library sources first (web results only when the Library has
-                     none), and a paste-a-URL field. The tap or paste is the
-                     consent; netguard guards the fetch. -->
+                     Library sources that declare their answers (a tap builds the card),
+                     pages that may help as plain links (ruling 2026-10-05: "Library
+                     cards; web as links" — they never build), and a paste-a-URL field.
+                     The tap or paste is the consent; netguard guards the fetch. -->
                 <div class="ni-commission">
-                  <p style="margin:0 0 var(--s-2); font-size:var(--f-label)">
-                    {item.flow.suggestions?.[0]?.kind === "library"
-                      ? "From the SmartBrain Library — tap the one that fits:"
-                      : item.flow.suggestions?.[0]?.kind === "web"
-                        ? "The Library has no source for this — found on the web:"
-                        : "No source found for this yet — paste a link to the data:"}
-                  </p>
-                  {#if item.flow.suggestions && item.flow.suggestions.length > 0}
+                  <p style="margin:0 0 var(--s-2); font-size:var(--f-label)">{pick.heading}</p>
+                  {#if pick.sources.length > 0}
                     <div class="ni-suggestions">
                       <!-- Rows key on url; a tap submits the sealed URL through the
-                           normal pick consent. Web evidence = values our jailed
-                           reader actually extracted from that page, shown pre-tap. -->
-                      {#each item.flow.suggestions as sug (sug.url)}
-                        {#if sug.kind === "library"}
-                          <!-- Library candidate (R8): a real Library source with its address already
-                               filled from your words; the line under it names the provider and, when
-                               your words fit several (two stations, two cities), which one this is.
-                               The tap is your Yes (R6) and the consent for this exact address. -->
-                          <div class="ni-web-sug">
-                            <button
-                              class="secondary"
-                              disabled={busyId === item.id}
-                              title={sug.url}
-                              onclick={() => pickSource(item, sug.url)}
-                            >{sug.title}</button>
-                            {#if sug.evidence && sug.evidence.length > 0}
-                              <p class="muted" style="margin:2px 0 0; font-size:var(--f-label)">
-                                {sug.evidence.join(" — ")}
-                              </p>
-                            {/if}
-                            {#if sug.needs?.includes("key")}
-                              <p class="ni-sug-needs">Needs your own free key — you'll paste it next</p>
-                            {/if}
-                            {#if sug.needs?.includes("contact")}
-                              <p class="ni-sug-needs">Asks for your contact email once</p>
-                            {/if}
-                          </div>
-                        {:else}
-                          <div class="ni-web-sug">
-                            <button
-                              class="secondary"
-                              disabled={busyId === item.id}
-                              title={sug.url}
-                              onclick={() => pickSource(item, sug.url)}
-                            >{sug.title} — {sug.host}</button>
-                            {#if sug.evidence && sug.evidence.length > 0}
-                              <p class="muted" style="margin:2px 0 0; font-size:var(--f-label)">
-                                On the page: {sug.evidence.join(" · ")}
-                              </p>
-                            {/if}
-                          </div>
-                        {/if}
+                           normal pick consent. -->
+                      {#each pick.sources as sug (sug.url)}
+                        <!-- Library candidate (R8): a real Library source with its address already
+                             filled from your words; the line under it names the provider and, when
+                             your words fit several (two stations, two cities), which one this is.
+                             The tap is your Yes (R6) and the consent for this exact address. -->
+                        <div class="ni-web-sug">
+                          <button
+                            class="secondary"
+                            disabled={busyId === item.id}
+                            title={sug.url}
+                            onclick={() => pickSource(item, sug.url)}
+                          >{sug.title}</button>
+                          {#if sug.evidence && sug.evidence.length > 0}
+                            <p class="muted" style="margin:2px 0 0; font-size:var(--f-label)">
+                              {sug.evidence.join(" — ")}
+                            </p>
+                          {/if}
+                          {#if sug.needs?.includes("key")}
+                            <p class="ni-sug-needs">Needs your own free key — you'll paste it next</p>
+                          {/if}
+                          {#if sug.needs?.includes("contact")}
+                            <p class="ni-sug-needs">Asks for your contact email once</p>
+                          {/if}
+                        </div>
                       {/each}
                     </div>
+                  {/if}
+                  {#if pick.links.length > 0}
+                    <!-- Links, not sources: a Library dataset without declared answers (its page)
+                         or a web page the search found. Named for what they are, nothing read off
+                         them; they open in a new tab and never build a card. -->
+                    <p class="muted ni-links-note">Pages that may help — SmartBrain can't keep a live card from these yet:</p>
+                    <ul class="ni-links">
+                      {#each pick.links as link (link.url)}
+                        <li>
+                          <a href={link.url} target="_blank" rel="noopener noreferrer"
+                          ><Icon name="link" size={14} /> {link.title || link.host}</a>
+                          <span class="muted ni-link-what">{linkWhat(link)}</span>
+                        </li>
+                      {/each}
+                    </ul>
                   {/if}
                   <form
                     class="ni-pick-url"
@@ -1392,7 +1410,9 @@
                     <input
                       type="url"
                       bind:value={pickUrlText}
-                      placeholder="Or paste any web page or API URL (https://…)"
+                      placeholder={pick.links.length > 0
+                        ? "Found the data? Paste its link (https://…)"
+                        : "Or paste any web page or API URL (https://…)"}
                       maxlength="2000"
                       disabled={busyId === item.id}
                       aria-label="Paste a source URL"
@@ -1542,7 +1562,7 @@
             <p class="muted" style="margin:0; font-size:var(--f-label)">
               Creation didn’t finish. Delete this card, or start again above.
             </p>
-          {:else if preview && !item.shell}
+          {:else if preview && !item.shell && !item.flow}
             <div class="ni-actions">
               <button
                 disabled={busyId === item.id}
@@ -1552,7 +1572,28 @@
             </div>
           {/if}
 
-          {#if item.state === "commissioning" && item.payload && item.payload_slot !== "preview"}
+          {#if item.awaiting_yes && item.payload && !item.flow}
+            <!-- Ruling 2026-10-04 ("hold open paths for a YES"): a card built from a web page
+                 or a model-mapped dataset shows the reading it found (the scene above) and
+                 where it came from, and goes live only on the user's YES. NO goes back to
+                 the source pick without that source — never a dead end. -->
+            <div class="ni-commission">
+              <p style="margin:0; font-size:var(--f-label); font-weight:600">Is this what you asked for?</p>
+              <p class="muted ni-yes-from">{awaitingYesSource(item.awaiting_yes)}</p>
+              <div class="ni-actions">
+                <button
+                  class="secondary"
+                  disabled={busyId === item.id}
+                  onclick={() => validateLooksRight(item)}
+                >{busyId === item.id ? "Checking…" : "Yes, that’s it"}</button>
+                <button
+                  class="ghost"
+                  disabled={busyId === item.id}
+                  onclick={() => declineReading(item)}
+                >No, try another source</button>
+              </div>
+            </div>
+          {:else if item.state === "commissioning" && item.payload && item.payload_slot !== "preview"}
             <!-- F2 (2026-09-15): after "Looks right" the verdict is recorded but the
                  card may briefly stay commissioning while the C3 run verifies — the
                  banner must acknowledge instead of re-asking (the field run logged a
@@ -1586,7 +1627,7 @@
                  two noisy lines in the field). Rarely-used verbs live in a
                  native details overflow: zero new state, keyboard accessible. -->
             <span class="muted ni-fresh">
-              every {item.interval_minutes}m
+              {#if item.awaiting_yes}not updating yet{:else}every {item.interval_minutes}m{/if}
               {#if !item.enabled}· paused{/if}
               · {footerFresh(item)}
             </span>
@@ -2234,6 +2275,11 @@
     background: var(--accent-tint);
     border-radius: var(--r-1);
   }
+  .ni-yes-from {
+    margin: 2px 0 var(--s-2);
+    font-size: var(--f-label);
+    overflow-wrap: anywhere; /* a long host or page title wraps inside the card */
+  }
   .ni-suggestions {
     display: flex;
     flex-wrap: wrap;
@@ -2251,6 +2297,28 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .ni-links-note {
+    margin: 0 0 var(--s-1);
+    font-size: var(--f-label);
+  }
+  .ni-links {
+    /* Pages that may help (ruling 2026-10-05): plain links, one per row; a long
+       title or host wraps inside the card, never past it. */
+    list-style: none;
+    margin: 0 0 var(--s-2);
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--s-2);
+  }
+  .ni-links li {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  .ni-link-what {
+    display: block;
+    font-size: var(--f-label);
   }
   .ni-sug-needs {
     margin: 2px 0 0;

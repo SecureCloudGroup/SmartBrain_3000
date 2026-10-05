@@ -3,17 +3,27 @@
 
 For every ask: the REAL flow (``ni_flow.run_flow``) on the real local model through the
 gateway, the real SmartBrain Library pack, real keyless web search, real network fetches.
-When the card pauses at the source pick, the harness taps the FIRST suggestion exactly as
-the pick route does (Library row → format + access sealed first). A built card then runs
+When the card pauses at the source pick, the harness taps the FIRST Library suggestion exactly as
+the pick route does (Library row → format + access sealed first). It never taps a link (a web page or a
+Library source without declared answers — ruling 2026-10-05: those are offered as links, never built). A built card then runs
 once through the real engine (``ni.run_item``) — the refresh every card lives on.
 
 Outcomes per ask: ``live`` (built AND its first engine run is ok), ``built-no-run``,
-``needs-key`` / ``needs-email`` (an honest pause the user answers), ``no-source``, ``failed``.
+``awaiting-yes`` (built from a web page or a model-mapped dataset: the card holds for the user's YES —
+its reading, host and page / dataset title print so a human judges whether the YES would be right;
+ruling 2026-10-04 — only a link the user pastes builds one now, so a harness run never reports it),
+``links`` (no Library source declares answers for the ask: the pause offers only links — each prints as
+host — title), ``needs-key`` / ``needs-email`` (an honest pause the user answers), ``no-source``, ``failed``.
 Previews are printed so a human judges whether the card shows what was asked — a green
 state with the wrong data is still a failure.
 
 Usage (operator's machine; uses the gateway at 127.0.0.1:38080 for model calls only):
-    PYTHONPATH=app python3 tools/ni-live-e2e.py --pack-dir <dir with library/> [--set dev|holdout] [--only N]
+    PYTHONPATH=app python3 tools/ni-live-e2e.py --pack-dir <dir with library/> [--set dev|holdout | --asks-file F] [--only N]
+        [--answers-dir <dir holding answers/<source_id>.json files>]
+
+``--answers-dir`` overlays authored answers files onto the installed pack's records at lookup time
+(a monkeypatch inside this harness process only) so a source's answers are live-tested before the
+Library pack is rebuilt. Each card prints the answers it was built from.
 """
 from __future__ import annotations
 
@@ -69,20 +79,38 @@ def _pack(pack_dir: pathlib.Path) -> library_index.LibraryIndex:
     return idx
 
 
-def _tap_first(store, item_id: str, secrets) -> tuple[str | None, str]:
-    """Tap the first suggestion the way ``pick_flow_source`` does. Returns (url, what)."""
+def _overlay_answers(answers_dir: pathlib.Path) -> None:
+    """Test-only seam: ``<dir>/<source_id>.json`` answers win over the pack's for that source."""
+    shipped = library_index.LibraryIndex.answers
+
+    def answers(self, source_id: str) -> list[dict]:
+        path = answers_dir / f"{source_id}.json"
+        if path.is_file():
+            return list(json.loads(path.read_text()).get("answers") or [])
+        return shipped(self, source_id)
+
+    library_index.LibraryIndex.answers = answers
+
+
+def _tap_first(store, item_id: str, secrets, tapped: list, links: list) -> tuple[str | None, str]:
+    """Tap the first Library suggestion the way ``pick_flow_source`` does. Returns (url, what); the tapped
+    reading (its label and filled params, which place / team it is) is appended to ``tapped``. A link row
+    is never tapped: when the pause offers only links they are copied to ``links`` and what is "links"."""
     field = ni_flow.board_flow_field(store, item_id) or {}
     sugs = field.get("suggestions") or []
-    if not sugs:
-        return None, "no suggestions"
-    first = sugs[0]
+    sources = [s for s in sugs if s.get("kind") == "library"]
+    if not sources:
+        links[:] = [{"host": s.get("host") or "", "title": s.get("title") or "", "url": s.get("url") or "",
+                     "found": s.get("found") or ""} for s in sugs if s.get("kind") == "link"]
+        return None, "links" if links else "no suggestions"
+    first = sources[0]
     url = first["url"]
     record = ni_flow._flow_read(store, item_id) or {}
     row = next((r for r in record.get("_ranked_library") or [] if r.get("url") == url), None)
+    tapped.append({"title": first.get("title"), "url": url, "label": (row or {}).get("label") or "",
+                   "params": (row or {}).get("params") or {}, "scope": (row or {}).get("scope")})
     if row:
-        fmt = str(row.get("format") or "")
-        if fmt in ni._HTTP_JSON_FORMATS and fmt != "json":
-            ni_flow._flow_write(store, item_id, {**(ni_flow._flow_read(store, item_id) or {}), "_format": fmt})
+        ni_flow.seal_library_pick(store, item_id, url, row)
         if ni_flow.seal_access(store, item_id, url, row) is not None:
             missing = ni_flow.missing_access(store, item_id, secrets)
             if missing:
@@ -99,7 +127,8 @@ def run_one(ask: str, idx, llm, model: str) -> dict:
     ni_flow.set_search_provider(lambda: search.SearchService())
     ni_flow.set_secrets_provider(lambda: secrets)
     bridge = lambda _m, prompt: llm(prompt, 600)  # noqa: E731
-    out: dict = {"ask": ask, "outcome": "", "source": "", "detail": "", "preview": None}
+    out: dict = {"ask": ask, "outcome": "", "source": "", "detail": "", "preview": None, "tapped": [],
+                 "links": [], "notes": []}
     started = time.time()
     try:
         item_id = ni_flow.create_shell_item(store, ask)
@@ -107,26 +136,39 @@ def run_one(ask: str, idx, llm, model: str) -> dict:
         for _tap in range(3):  # a source that refuses us re-lands the pick: tap the next one, like a person
             if rec.get("state") != "source":
                 break
-            url, what = _tap_first(store, item_id, secrets)
+            url, what = _tap_first(store, item_id, secrets, out["tapped"], out["links"])
             out["source"] = (out["source"] + " → " if out["source"] else "") + what
             if url is None:
-                out["outcome"] = what.split(" ")[0] if what.startswith("needs-") else "no-source"
+                out["outcome"] = what.split(" ")[0] if what.startswith(("needs-", "links")) else "no-source"
+                out["notes"] = [str(n) for n in rec.get("notes") or []]
                 return out
             rec = ni_flow.run_flow(store, item_id, gateway_call=bridge, ni_route_model=model, source_url=url)
         state = str(rec.get("state") or "")
         out["detail"] = str(rec.get("error") or "")[:160]
+        out["notes"] = [str(n) for n in rec.get("notes") or []]  # the flow's own account: frame, verify
         if state != "ready":
             out["outcome"] = "failed" if state in ("failed", "unsupported") else state
             return out
+        out["answers"] = next((str(n) for n in reversed(rec.get("notes") or [])
+                               if "declared answers" in str(n)), "")
         snap = store.read_snapshot(item_id, "preview_data")
         out["preview"] = snap["payload"] if snap else None
+        built = store.get_item(item_id)
+        if ni.awaits_yes(built):
+            # an open path: the card shows this reading and waits for the user's YES
+            found = store.read_snapshot(item_id, "preview")
+            origin = built["spec"].get("_built_from") or {}
+            out["reading"] = _texts(found["payload"] if found else None)
+            out["from"] = {"kind": "web page" if origin.get("path") == "page" else "dataset",
+                           "host": origin.get("host") or "", "title": origin.get("title") or ""}
         run = _eval._engine_first_run(store, conn, item_id, llm, model, ni, key)
-        out["outcome"] = "live" if run == "ok" else "built-no-run"
+        out["outcome"] = "awaiting-yes" if out.get("from") else "live" if run == "ok" else "built-no-run"
         if run != "ok":
             out["detail"] = run
         item = store.get_item(item_id)
         latest = store.read_snapshot(item_id, "latest")
         out["scene_text"] = _texts(latest["payload"] if latest else None)
+        out["pipeline"], out["latest"] = item["spec"].get("pipeline"), latest["payload"] if latest else None
         out["source"] = out["source"] or item["spec"]["source"].get("url", "")
     except Exception as exc:  # a crash is a failed ask, never a stopped run
         import traceback
@@ -139,11 +181,32 @@ def run_one(ask: str, idx, llm, model: str) -> dict:
     return out
 
 
+def _number_text(value: float, fmt: str, unit) -> str:
+    """What web/src/lib/ni/scene.ts formatNumber shows (en-US), so the printed card is the seen card."""
+    if fmt == "percent":
+        return f"{value * 100:,.1f}".rstrip("0").rstrip(".") + "%"
+    if fmt == "currency":
+        return f"${value:,.2f}"
+    if fmt == "compact" and abs(value) >= 1000:
+        for size, suffix in ((1e12, "T"), (1e9, "B"), (1e6, "M"), (1e3, "K")):
+            if abs(value) >= size:
+                base = f"{value / size:.1f}".rstrip("0").rstrip(".") + suffix
+                break
+    elif value and abs(value) < 1:  # 3 significant digits below 1, like the web
+        base = f"{value:.3g}"
+    else:
+        base = f"{value:,.2f}".rstrip("0").rstrip(".")
+    u = unit.strip() if isinstance(unit, str) else ""
+    return f"{base} {u}" if u else base
+
+
 def _texts(node, acc=None) -> list[str]:
     """The words a person would read on the rendered card."""
     acc = [] if acc is None else acc
-    if isinstance(node, dict):
-        if isinstance(node.get("value"), (str, int, float)) and node.get("type") in ("text", "number"):
+    if isinstance(node, dict) and not node.get("hidden"):
+        if node.get("type") == "number" and isinstance(node.get("value"), (int, float)):
+            acc.append(_number_text(node["value"], node.get("format", "plain"), node.get("unit")))
+        elif node.get("type") == "text" and isinstance(node.get("value"), (str, int, float)):
             acc.append(str(node["value"]))
         for child in node.get("children") or []:
             _texts(child, acc)
@@ -155,13 +218,20 @@ def main() -> int:
     ap.add_argument("--pack-dir", required=True, type=pathlib.Path)
     ap.add_argument("--set", default="dev", choices=sorted(SETS))
     ap.add_argument("--only", default="")
+    ap.add_argument("--asks-file", type=pathlib.Path,
+                    help="a JSON list of asks (strings or {ask: ...}) — a fresh blind set instead of --set")
     ap.add_argument("--model", default=_eval._DEFAULT_MODEL)
     ap.add_argument("--bifrost", default=_eval._DEFAULT_BIFROST)
     ap.add_argument("--out", type=pathlib.Path)
+    ap.add_argument("--answers-dir", type=pathlib.Path)
     args = ap.parse_args()
+    if args.answers_dir:
+        _overlay_answers(args.answers_dir)
     idx = _pack(args.pack_dir)
     llm = _eval._bifrost_llm(args.bifrost, args.model)
     asks = SETS[args.set]
+    if args.asks_file:
+        asks = [a if isinstance(a, str) else a["ask"] for a in json.loads(args.asks_file.read_text())]
     if args.only:
         asks = [a for a in asks if args.only.lower() in a.lower()]
     results = []
@@ -171,8 +241,17 @@ def main() -> int:
         print(f"[{r['outcome']:>12}] {ask:<36} {r['secs']:>5}s  {r['source'][:60]}", flush=True)
         if r["detail"]:
             print(f"{'':>15}detail: {r['detail']}", flush=True)
-        if r.get("scene_text"):
+        if r.get("answers"):
+            print(f"{'':>15}answers: {r['answers'][:200]}", flush=True)
+        if r.get("from"):
+            src = r["from"]
+            print(f"{'':>15}reading: {' | '.join(r.get('reading') or [])[:200]}", flush=True)
+            print(f"{'':>15}from:    {src['host']} — {src['title'] or '(no title)'} ({src['kind']})",
+                  flush=True)
+        elif r.get("scene_text"):
             print(f"{'':>15}card:   {' | '.join(r['scene_text'])[:200]}", flush=True)
+        for link in r.get("links") or []:  # offered as links, never built (ruling 2026-10-05)
+            print(f"{'':>15}link:   {link['host']} — {link['title'] or '(no title)'}", flush=True)
     counts: dict[str, int] = {}
     for r in results:
         counts[r["outcome"]] = counts.get(r["outcome"], 0) + 1
