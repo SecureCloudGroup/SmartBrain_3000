@@ -1913,6 +1913,88 @@ def test_source_contradicts_place_names_state_in_title_or_coverage(monkeypatch) 
     assert captured["ok"]
 
 
+# fix10 (blind-8, 2026-10-04): the dataset-place check extended to the publisher host
+# (data.ny.gov, data.pa.gov, data.texas.gov, data.cityofchicago.org) and to row cells
+# naming counties. "flu activity in texas" shipped health.data.ny.gov with NY counties.
+def test_source_contradicts_place_reads_publisher_host(monkeypatch) -> None:
+    """A dataset whose host names a US state refuses an ask for another state."""
+    monkeypatch.setattr(ni_flow, "_resolve_library", lambda: None)
+    assert ni_flow._source_host_states({
+        "coverage": {"entity": "health.data.ny.gov"}}) == {"NY"}
+    assert ni_flow._source_host_states({"coverage": {"entity": "data.pa.gov"}}) == {"PA"}
+    assert ni_flow._source_host_states({"coverage": {"entity": "data.texas.gov"}}) == {"TX"}
+    assert ni_flow._source_host_states({"coverage": {"entity": "data.cdc.gov"}}) == set()
+    # a Socrata dataset whose own NAME doesn't name a state but its host does -> refuse
+    source = {"name": "Influenza Laboratory-Confirmed Cases by County: Beginning 2009-10 Season",
+              "coverage": {"entity": "health.data.ny.gov", "geo": "US"}}
+    assert ni_flow._source_contradicts_place(source, "Texas",
+                                               "flu activity in texas") is True
+    # regression: an ask for the dataset's own state ships
+    assert ni_flow._source_contradicts_place(source, "New York",
+                                               "flu activity in new york") is False
+    # regression: a nationwide-host dataset never fires
+    cdc = {"name": "CDC Influenza Weekly", "coverage": {"entity": "data.cdc.gov", "geo": "US"}}
+    assert ni_flow._source_contradicts_place(cdc, "Texas",
+                                               "flu activity in texas") is False
+
+
+def test_rows_contradict_place_detects_county_cells(monkeypatch) -> None:
+    """fix10 (blind-8, 2026-10-04): rows that cell-name counties mapped via the
+    place resolver to a state other than the ask's refuse — "flu activity in
+    texas" shipped NY-county rows (OTSEGO, NIAGARA, ST LAWRENCE)."""
+    def _states(place: str, request: str) -> set[str]:
+        return {"NY"} if "otsego" in place.lower() or "niagara" in place.lower() \
+            or "lawrence" in place.lower() else set()
+    monkeypatch.setattr(ni_flow, "_place_states_via_resolver", _states)
+    rows = [{"county": "OTSEGO", "count": "0"},
+            {"county": "NIAGARA", "count": "1"},
+            {"county": "ST LAWRENCE", "count": "8"}]
+    assert ni_flow._rows_contradict_place({"rows": rows}, "Texas") is True
+    # the same rows for a NY ask: a resolver hit on the asked state keeps the check from firing
+    assert ni_flow._rows_contradict_place({"rows": rows}, "New York") is False
+    # a rowset with no county cells doesn't change behavior
+    forecast_rows = [{"time": "08:00", "temp": "68"}, {"time": "09:00", "temp": "70"}]
+    assert ni_flow._rows_contradict_place({"rows": forecast_rows}, "Texas") is False
+
+
+# fix10 (blind-8, 2026-10-04): "AWS us-east-1 status" shipped a statusgator page titled
+# "HashiCorp AWS-us-east-1 Status" — HashiCorp's own aggregator view of their AWS
+# integration. _page_wrong_brand reads the Library's official-site vocabulary against the
+# page's title and the ask's subject / names.
+def test_page_wrong_brand_refuses_other_brand_in_title(monkeypatch) -> None:
+    """A title brand with a different host-set than the ask's subject refuses."""
+    class _Lib:
+        def __init__(self, aliases: dict) -> None:
+            self._aliases = aliases
+
+        def official_hosts(self, text: str) -> dict:
+            low = " " + " ".join(re.findall(r"[a-z0-9]+", text.lower())) + " "
+            return {a: list(h) for a, h in self._aliases.items() if f" {a} " in low}
+
+    aliases = {"aws": ["aws.amazon.com", "health.aws.amazon.com"],
+                "amazon web services": ["aws.amazon.com", "health.aws.amazon.com"],
+                "hashicorp": ["status.hashicorp.com"]}
+    monkeypatch.setattr(ni_flow, "_resolve_library", lambda: _Lib(aliases))
+    graph = {"title": "HashiCorp AWS-us-east-1 Status. Check if HashiCorp AWS-us-east-1 is down. | StatusGator"}
+    assert ni_flow._page_wrong_brand(graph, "AWS us-east-1 status",
+                                       {"subject": "AWS us-east-1", "names": ["AWS"]}) == "hashicorp"
+    # regression: an AWS-only title doesn't refuse
+    graph_ok = {"title": "AWS Health Dashboard"}
+    assert ni_flow._page_wrong_brand(graph_ok, "AWS us-east-1 status",
+                                       {"subject": "AWS us-east-1", "names": ["AWS"]}) == ""
+    # regression: an ask that names BOTH brands keeps the hashicorp page shipping
+    assert ni_flow._page_wrong_brand(graph, "HashiCorp AWS status",
+                                       {"subject": "HashiCorp AWS", "names": ["HashiCorp", "AWS"]}) == ""
+    # regression: the Library synonym (Amazon Web Services) counts as the same brand
+    graph_syn = {"title": "Amazon Web Services us-east-1 Status"}
+    assert ni_flow._page_wrong_brand(graph_syn, "AWS us-east-1 status",
+                                       {"subject": "AWS us-east-1", "names": ["AWS"]}) == ""
+    # no library wired -> the check doesn't fire
+    monkeypatch.setattr(ni_flow, "_resolve_library", lambda: None)
+    assert ni_flow._page_wrong_brand(graph, "AWS us-east-1 status",
+                                       {"subject": "AWS us-east-1", "names": ["AWS"]}) == ""
+
+
 def test_mapping_path_refuses_when_rows_name_other_states_only(monkeypatch) -> None:
     """F6-C: a Socrata-shaped list whose extracted rows cell-name US states
     OTHER than the asked place (and never the asked one) must refuse at the

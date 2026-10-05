@@ -517,3 +517,61 @@ def test_day_window_mismatch_against_page_title_date_refuses() -> None:
     g_sat = _graph(text, title="Pollen Count on 2026-10-10 | Atlanta Allergy & Asthma")
     kw_wkd = {**kw, "window": "weekend"}
     assert _check(g_sat, {"pollen_count": "0/5"}, **kw_wkd) == []
+
+
+# fix10 (blind-8, 2026-10-04): "ISS pass over chicago tonight" held an interpreted
+# reading "Monday 12 October 06:19 GMT-5" — 8 days past tonight. The window-mismatch
+# check now also parses dates from the READING's own value, not only the page title.
+def test_day_window_mismatch_against_reading_date_refuses() -> None:
+    far_text = ("ISS passes over Chicago. The next visible pass is on Monday 12 October "
+                "06:19 GMT-5 for about four minutes above the horizon.")
+    g_far = _graph(far_text, title="ISS Over Chicago Tonight")
+    now = datetime.fromisoformat("2026-10-04T22:00:00-05:00")
+    kw = {"frame": "next_event", "wants": ["pass"],
+          "subject": "ISS over Chicago", "now": now, "window": "tonight"}
+    reasons = _check(g_far, {"pass": "Monday 12 October 06:19 GMT-5"}, **kw)
+    assert reasons and any("the reading shows" in r for r in reasons), reasons
+    # a reading within the asked day ships (page text grounds the time)
+    near_text = ("ISS passes over Chicago. The next visible pass is Today 11:30 PM "
+                 "GMT-5 for about four minutes above the horizon.")
+    g_near = _graph(near_text, title="ISS Over Chicago Tonight")
+    assert _check(g_near, {"pass": "Today 11:30 PM GMT-5"}, **kw) == []
+    # a reading with no date (bare time) doesn't fire the check
+    near_bare = ("ISS passes over Chicago. The next visible pass is at 11:30 PM for "
+                 "about four minutes above the horizon.")
+    g_bare = _graph(near_bare, title="ISS Over Chicago Tonight")
+    assert _check(g_bare, {"pass": "11:30 PM"}, **kw) == []
+
+
+# fix10 (blind-8, 2026-10-04): "lake tahoe water temp" shipped the interpreted
+# reading "9.5" with no °F / °C — a physical-unit want needs a unit on its value.
+# AQI / UV / Kp / pollen level / percentages stay unitless.
+def test_physical_unit_want_requires_unit_on_interpreted_reading() -> None:
+    text = "The water temperature of Lake Tahoe is 9.5 degrees today, measured mid-lake."
+    g = _graph(text, title="Lake Tahoe Water Temperature")
+    kw = {"frame": "current_value", "wants": ["water temp"],
+          "subject": "Lake Tahoe water"}
+    reasons = _check(g, {"water_temp": "9.5"}, **kw)
+    assert reasons and any("no unit" in r for r in reasons), reasons
+    # a value with its unit ships
+    g_f = _graph("The water temperature of Lake Tahoe is 9.5°F today.",
+                  title="Lake Tahoe Water Temperature")
+    assert _check(g_f, {"water_temp": "9.5°F"}, **kw) == []
+    # a value in feet / mph / psi passes
+    g_ft = _graph("Potomac river level is 2.84 ft at the gauge today.",
+                   title="Potomac River Level")
+    kw_lvl = {"frame": "current_value", "wants": ["river level"], "subject": "Potomac"}
+    assert _check(g_ft, {"river_level": "2.84 ft"}, **kw_lvl) == []
+    # unitless indexes keep shipping (AQI / UV / Kp / pollen / percent)
+    g_uv = _graph("UV index 3 today for Chicago, moderate exposure risk.",
+                   title="UV Index")
+    assert _check(g_uv, {"uv_index": "3"}, frame="current_value",
+                  wants=["uv index"], subject="UV Chicago") == []
+    g_aqi = _graph("AQI 42 today in Phoenix, air quality is good.",
+                    title="Phoenix AQI")
+    assert _check(g_aqi, {"aqi": "42"}, frame="current_value",
+                  wants=["aqi"], subject="Phoenix AQI") == []
+    # compiled tier doesn't fire the check (value is lifted verbatim from a column
+    # whose header carries the unit the user can see)
+    assert _check(g, {"water_temp": "9.5"}, **kw, tier="compiled") == [] \
+        or all("no unit" not in r for r in _check(g, {"water_temp": "9.5"}, **kw, tier="compiled"))

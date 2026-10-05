@@ -339,6 +339,20 @@ def _place_words_in(res, r: dict, low: str, ask: str, hinted: str) -> tuple[set[
     return words, passed
 
 
+def _place_state_of(res, text: str) -> str:
+    """The US state code the pack's place resolver reads from ``text`` (the dominant 'largest of its
+    name' reading, else the best candidate's state), or ''. Used by ``_context`` to tell a team
+    entity's own city apart from the asked place's city (fix10 blind-8 2026-10-04: 'Durham Bulls'
+    shipped the Chicago Bulls' schedule because the pack has no Durham Bulls)."""
+    assert isinstance(text, str), "text must be a string"
+    text = text.strip()
+    if not text:
+        return ""
+    r = res.by_name("place", text)
+    best = r.get("best") or ((r.get("candidates") or [None])[0])
+    return str((best or {}).get("state") or "").upper()
+
+
 def audiences(ask: str) -> list[str]:
     return [a for a, rx in AUDIENCE_CUES.items() if re.search(rx, (ask or "").lower())]
 
@@ -636,6 +650,25 @@ class LibraryIndex:
                     continue
                 found.pop(r)
                 said_by.pop(r)
+        # fix10 (blind-8, 2026-10-04): "Durham Bulls schedule" shipped the Chicago Bulls' next matchup
+        # — the ask names a place word next to a team nickname and the resolved team's own city doesn't
+        # contain it. A team entity whose name resolves (via the pack's place resolver) to a state
+        # different from the asked place's state is not the asked team. Keeps the asked city's team
+        # ("Chicago Bulls", "LA Lakers", "New York Rangers") because the entity's name itself holds the
+        # asked place-words; "Texas Rangers" vs "NY Rangers" disambiguation still fires on state.
+        if pwords and has_place:
+            from .library_resolve import norm as _norm_text
+            asked_state = _place_state_of(res, " ".join(pwords))
+            for r in list(found):
+                if not r.startswith("team_") or r in spelled:
+                    continue
+                name_words = set(_norm_text(found[r].get("name") or "").split())
+                if pwords & name_words:
+                    continue  # the team's own name holds the asked place
+                entity_state = _place_state_of(res, found[r].get("name") or "")
+                if asked_state and entity_state and asked_state != entity_state:
+                    found.pop(r)
+                    said_by.pop(r)
         if route is not None and not route["confident"]:
             # a weak route names no category, but it still rules out readings: one whose every subcategory trails
             # the top route by the confident gap or more is not the subject ("sunset in Denver" is not the Rockies,

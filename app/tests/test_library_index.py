@@ -439,6 +439,32 @@ def test_key_placement(access, want) -> None:
     assert library_resolve.key_placement(access, "key") == want
 
 
+# fix10 (blind-8, 2026-10-04): "Durham Bulls schedule" shipped the Chicago Bulls'
+# next matchup — the team resolver read "Bulls" and ignored "Durham". The place-state
+# helper tells a team entity's own city apart from the asked place's city.
+def test_place_state_of_reads_dominant_city_state() -> None:
+    """``_place_state_of`` returns the state the pack's place resolver reads from text."""
+    class _MockResolver:
+        def by_name(self, kind: str, text: str) -> dict:
+            if kind != "place":
+                return {"status": "none", "best": None, "candidates": []}
+            low = text.lower()
+            if "durham" in low:
+                return {"status": "resolved", "best": {"state": "NC"}, "candidates": []}
+            if "chicago" in low:
+                return {"status": "resolved", "best": {"state": "IL"}, "candidates": []}
+            if "new york" in low:
+                return {"status": "resolved", "best": {"state": "NY"}, "candidates": []}
+            return {"status": "none", "best": None, "candidates": []}
+
+    res = _MockResolver()
+    assert library_index._place_state_of(res, "Durham") == "NC"
+    assert library_index._place_state_of(res, "Chicago Bulls") == "IL"
+    assert library_index._place_state_of(res, "New York Rangers") == "NY"
+    assert library_index._place_state_of(res, "Texas Rangers") == ""  # resolver returns none
+    assert library_index._place_state_of(res, "") == ""
+
+
 def test_ambiguous_reading_expands_together_and_duplicates_are_refused() -> None:
     values = {"lat": [("45.5", "Portland (OR)"), ("43.6", "Portland (ME)")],
               "lon": [("-122.6", "Portland (OR)"), ("-70.2", "Portland (ME)")]}

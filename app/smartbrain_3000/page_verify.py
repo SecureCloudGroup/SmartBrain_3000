@@ -137,6 +137,23 @@ _CTA_LABEL_WORDS: frozenset[str] = frozenset({
 })
 _CLOCK_RE = re.compile(r"\d{1,2}:\d{2}|\b\d{1,2}\s*(?:am|pm|a\.m\.|p\.m\.)(?!\w)|\bnoon\b|\bmidnight\b",
                        re.IGNORECASE)
+# fix10 (blind-8, 2026-10-04): "lake tahoe water temp" shipped the interpreted reading "9.5" with
+# no °C / °F — a physical-unit want needs a unit on its value. The required-word set lists wants
+# that imply a unit (temperature, speed, height / level, pressure, distance, depth, snowfall);
+# the exempt set keeps unitless indexes shipping (AQI, UV, Kp, pollen level, percentages).
+_UNIT_REQUIRED_WORDS: frozenset[str] = frozenset({
+    "temp", "temperature", "temperatures", "speed", "wind", "winds", "gust", "gusts",
+    "height", "heights", "level", "levels", "depth", "depths", "pressure", "pressures",
+    "distance", "distances", "snowfall", "rainfall",
+})
+_UNIT_EXEMPT_WORDS: frozenset[str] = frozenset({
+    "aqi", "uv", "kp", "pollen", "index", "indexes", "indices", "percent", "percentage",
+    "percentages", "score", "scores", "count", "counts", "rate", "rates", "status",
+    "statuses", "ratio", "ratios",
+})
+_UNIT_LITERAL_RE = re.compile(
+    r"°\s*[CFcf]|%|\b(?:ft|feet|foot|in|inch|inches|cm|mm|m|meter|meters|km|mi|mile|miles|"
+    r"mph|kph|km/h|kmh|m/s|ms|kts|knots?|psi|bar|hpa|kpa|pa|hr|hour|hours)\b", re.IGNORECASE)
 _MONTHS = ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct",
            "nov", "dec")
 _MONTH_RE = r"(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?"
@@ -223,7 +240,8 @@ def verify_page_reading(graph: dict, preview: dict, *, frame_kind: str | None,
     # atlanta tomorrow" → "Pollen Count on 2026-10-04 | Atlanta Allergy &
     # Asthma", today's date). The title's own date is pure code to parse.
     if window and window not in ("now",):
-        reasons += _window_mismatch_reasons(graph, window, now, tz)
+        reasons += _window_mismatch_reasons(graph, window, now, tz, values)
+    reasons += _unit_reasons(values, wants, tier)
     return list(dict.fromkeys(reasons))
 
 
@@ -832,27 +850,70 @@ def _title_dates(graph: dict, now: datetime, tz: tzinfo) -> set:
 
 
 def _window_mismatch_reasons(graph: dict, window: str, now: datetime,
-                               tz: tzinfo) -> list[str]:
+                               tz: tzinfo, values: dict) -> list[str]:
     """A day-window ask against a page whose own TITLE names a specific date
     that doesn't match the window (fix8 blind-7, 2026-10-04: 'pollen count
     atlanta tomorrow' shipped from a page titled 'Pollen Count on 2026-10-04'
     — today's date, not tomorrow's). ``window`` is one of the day forms
     (today / tonight / tomorrow / weekend / dow:<day>); other windows don't
-    fire the check. Deterministic; no model."""
+    fire the check. fix10 (blind-8, 2026-10-04): the same check also fires on
+    the READING's own date — 'ISS pass over chicago tonight' held a reading
+    'Monday 12 October 06:19 GMT-5' past tonight's day. Deterministic; no model."""
     assert isinstance(window, str) and isinstance(graph, dict), "args required"
+    assert isinstance(values, dict), "values must be a dict"
     local_today = now.astimezone(tz).date()
     want_dates = _window_target_dates(window, local_today)
     if not want_dates:
         return []
+    label = _WINDOW_LABEL.get(window) or _DOW_FULL.get(window[4:], window) \
+        if window.startswith("dow:") or window in _WINDOW_LABEL else window
+    for value in values.values():  # bounded by preview fields
+        for text in _strings(value):  # bounded by scalars per field
+            got = _dates_in(text, now, tz)
+            if got and not (got & want_dates):
+                shown = min(got).isoformat()
+                return [f"the reading shows {shown}, not {label}"]
     page_dates = _title_dates(graph, now, tz)
     if not page_dates:
         return []
     if page_dates & want_dates:
         return []
     shown = min(page_dates).isoformat()
-    label = _WINDOW_LABEL.get(window) or _DOW_FULL.get(window[4:], window) \
-        if window.startswith("dow:") or window in _WINDOW_LABEL else window
     return [f"the page shows {shown}, not {label}"]
+
+
+def _unit_reasons(values: dict, wants: list[str], tier: str) -> list[str]:
+    """A reading for a physical-unit want must carry its unit on the value
+    (fix10 blind-8, 2026-10-04: 'lake tahoe water temp' → '9.5' shipped with
+    no °C / °F). Fires on the interpreted tier only — the compiled tier reads
+    the value verbatim from the page's own structure (its column header
+    carries the unit the user can see). Unitless indexes (AQI, UV, Kp, pollen
+    level, percentages) stay shipping via the exempt word set."""
+    assert isinstance(values, dict) and isinstance(wants, list), "args required"
+    assert tier in ("interpreted", "compiled"), "tier must be closed"
+    if tier != "interpreted":
+        return []
+    want_tokens: set[str] = set()
+    for want in wants[:16]:  # bounded by the intent's wants cap
+        if isinstance(want, str):
+            want_tokens |= set(_TOKEN_RE.findall(want.lower().replace("_", " ")))
+    key_tokens_by_key: dict[str, set[str]] = {}
+    for key in list(values)[:16]:  # bounded by the preview fields
+        key_tokens_by_key[key] = set(_TOKEN_RE.findall(str(key).lower().replace("_", " ")))
+    reasons: list[str] = []
+    for key, value in values.items():
+        if not isinstance(value, str):
+            continue  # a list / rows reading is checked by the many-rows rule, not here
+        text = value.strip()
+        if not text or not re.search(r"\d", text):
+            continue
+        tokens_here = (key_tokens_by_key.get(key) or set()) | want_tokens
+        if not (tokens_here & _UNIT_REQUIRED_WORDS) or (tokens_here & _UNIT_EXEMPT_WORDS):
+            continue
+        if _UNIT_LITERAL_RE.search(text):
+            continue
+        reasons.append(f"no unit on '{_quote(text)}'")
+    return reasons
 
 
 def _freshness_reasons(graph: dict, now: datetime) -> list[str]:

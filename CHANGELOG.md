@@ -13,6 +13,34 @@ to know when a release changes behavior.
 
 ### Changed
 
+- **A team you named by city or state keeps the right team on the card.**
+  When your ask names a place word next to a team nickname ("Durham Bulls",
+  "NY Rangers") and the resolved team's own city or state doesn't carry
+  that place, the card no longer picks that team — the SmartBrain Library
+  tries the next source, and if nothing fits, the card says so instead of
+  shipping another team's game.
+- **A held web-page reading won't ship a date outside the day you asked
+  for.** When a reading's own date falls outside the ask's window
+  ("tonight", "today", "tomorrow", "this weekend"), the card refuses it
+  and names the date it found ("the reading shows Oct 12, not tonight"),
+  the same way a page title's own date already refuses a mismatched
+  window.
+- **A status page whose title names a different company is about that
+  company, not what you asked for.** When a status or aggregator page's
+  title names a brand with a different official site than the one you
+  asked about ("HashiCorp AWS-us-east-1 Status" for "AWS us-east-1 status"),
+  the card refuses it and names the other brand so the next source gets a
+  chance.
+- **A dataset for a state you didn't ask about is no longer offered.** The
+  state-match check now reads the publisher's web address (``health.data.ny.gov``,
+  ``data.pa.gov``, ``data.texas.gov``, ``data.cityofchicago.org``) and the
+  rows' own county cells. A New York flu dataset no longer ships for an ask
+  about Texas; a Chicago dataset ships for Chicago.
+- **A reading for a temperature, speed, wind, pressure, river level or
+  distance now needs its unit.** When a web-page card's reading is a bare
+  number for a value that has a unit, the card refuses it ("no unit on
+  '9.5'") and the next source is tried. AQI, UV, Kp, pollen level and
+  percentages still ship unitless.
 - **A card read from a web page or an unlisted dataset waits for your yes.**
   When a card's values come from a web page, or from a data source the
   SmartBrain Library hasn't described, the card shows the reading it found

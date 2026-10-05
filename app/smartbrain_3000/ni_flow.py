@@ -2739,7 +2739,10 @@ _MAX_CHECKED_CELLS = 30
 
 def _rows_contradict_place(preview: object, place: str) -> bool:
     """True iff ``preview['rows']`` names US states OTHER than ``place`` and
-    never the asked one. Bounded, pure-code, no model."""
+    never the asked one. fix10 (blind-8, 2026-10-04): a ``county`` cell is a
+    state signal too — the NY flu dataset's rows name counties (OTSEGO,
+    NIAGARA, …) that the place resolver maps to NY, so a Texas ask refuses
+    even without a state cell. Bounded, pure-code, no model."""
     assert isinstance(place, str), "place must be a string"
     asked_code = _state_code_of(place)
     if asked_code is None:
@@ -2749,10 +2752,11 @@ def _rows_contradict_place(preview: object, place: str) -> bool:
         return False
     from .library_resolve import US_STATES  # local import: avoid a module cycle
     seen: set[str] = set()
+    county_cells: list[str] = []
     for row in rows[:_MAX_CHECKED_ROWS]:
         if not isinstance(row, dict):
             continue
-        for value in list(row.values())[:_MAX_CHECKED_CELLS]:
+        for key, value in list(row.items())[:_MAX_CHECKED_CELLS]:
             if not isinstance(value, str):
                 continue
             raw = value.strip()
@@ -2762,6 +2766,15 @@ def _rows_contradict_place(preview: object, place: str) -> bool:
             code = _state_code_of(raw)
             if code is not None:
                 seen.add(code)
+                continue
+            if isinstance(key, str) and "county" in key.lower() \
+                    and len(county_cells) < _MAX_CHECKED_CELLS and raw:
+                county_cells.append(raw)
+    if county_cells and asked_code not in seen:
+        for cell in county_cells:
+            seen |= _place_states_via_resolver(cell, "")
+            if asked_code in seen:
+                break
     return bool(seen) and asked_code not in seen
 
 
@@ -2814,19 +2827,57 @@ def _place_states_via_resolver(place: str, request: str) -> set[str]:
     return {s for s in found if s}
 
 
+def _source_host_states(source: dict) -> set[str]:
+    """The US states the picked source's publisher host names. Dot-split host
+    labels; a 2-char label whose uppercase is a USPS code (``data.ny.gov``,
+    ``data.pa.gov``) → the code; a lowercase label that is a full state name
+    (``data.texas.gov``, ``data.delaware.gov``) → its code; a ``cityof<city>``
+    label (``data.cityofchicago.org``) → the states the city resolves to via
+    the pack's place resolver. {} when no host or no state recognisable.
+    Bounded by the host's dot labels. (fix10 blind-8, 2026-10-04:
+    health.data.ny.gov shipped a 'flu activity in texas' card.)"""
+    assert isinstance(source, dict), "source must be a dict"
+    from .library_resolve import _STATE_BY_NAME, US_STATES  # local: avoid a cycle
+    host = str((source.get("coverage") or {}).get("entity") or "")
+    if "." not in host:
+        tmpl = str((source.get("access") or {}).get("url_template") or "")
+        try:
+            host = urlparse(tmpl).hostname or ""
+        except (ValueError, TypeError):
+            host = ""
+    if not host:
+        return set()
+    out: set[str] = set()
+    for label in host.lower().split(".")[:8]:  # bounded by dot labels
+        if len(label) == 2 and label.upper() in US_STATES:
+            out.add(label.upper())
+            continue
+        code = _STATE_BY_NAME.get(label)
+        if code:
+            out.add(code)
+            continue
+        m = re.match(r"cityof([a-z]+)$", label)
+        if m:
+            out |= _place_states_via_resolver(m.group(1), "")
+    return out
+
+
 def _source_contradicts_place(source: dict, place: str, request: str) -> bool:
-    """True iff the picked source's own name / coverage names a specific US
-    state and the ask's place can't land in it. The row-level fix6-map check
-    reads the preview; this reads the SOURCE record so a single-state dataset
-    with no state-keyed rows is still refused for a different-state ask.
-    Deterministic; no model."""
+    """True iff the picked source's own name / coverage / publisher host names
+    a specific US state and the ask's place can't land in it. The row-level
+    fix6-map check reads the preview; this reads the SOURCE record so a
+    single-state dataset with no state-keyed rows is still refused for a
+    different-state ask. fix10 (blind-8, 2026-10-04) adds the publisher-host
+    detection (health.data.ny.gov → NY, data.pa.gov → PA, data.texas.gov → TX,
+    data.cityofchicago.org → IL via the place resolver). Deterministic; no
+    model."""
     assert isinstance(source, dict) and isinstance(place, str), "args required"
     assert isinstance(request, str), "request must be a string"
     from .library_resolve import states_in  # local: avoid a cycle
     source_text = " ".join([str(source.get("name") or ""),
                              str((source.get("coverage") or {}).get("entity") or ""),
                              str((source.get("coverage") or {}).get("geo") or "")])
-    source_states = states_in(source_text)
+    source_states = states_in(source_text) | _source_host_states(source)
     if len(source_states) != 1:
         return False  # a nationwide / unknown-coverage source: this check doesn't fire
     if not place.strip():
@@ -4805,6 +4856,48 @@ def _named_outlets(request: str, intent: dict) -> list[str]:
     return outlets
 
 
+def _page_wrong_brand(graph: dict, request: str, intent: dict) -> str:
+    """The brand named by the page's title that the ask isn't about, or "". A
+    status / aggregator page whose title names another company (``official_site``
+    resolver aliases) alongside the ask's subject is about THAT brand's component
+    (fix10 blind-8, 2026-10-04: "AWS us-east-1 status" shipped a statusgator page
+    titled "HashiCorp AWS-us-east-1 Status" — HashiCorp's view of their AWS
+    integration). Returns the alias said; "" when the Library isn't wired, the
+    pack has no resolver, or every title brand shares a host with an ask brand."""
+    assert isinstance(graph, dict) and isinstance(intent, dict), "args required"
+    assert isinstance(request, str), "request must be a string"
+    title = str(graph.get("title") or "").strip()
+    if not title:
+        return ""
+    lib = _resolve_library()
+    getter = getattr(lib, "official_hosts", None) if lib is not None else None
+    if not callable(getter):
+        return ""
+    try:
+        title_hosts = getter(title)
+    except Exception:  # a broken Library: the title brand check doesn't fire
+        return ""
+    if not title_hosts:
+        return ""
+    ask_text_parts = [request, str(intent.get("subject") or "")]
+    for name in (intent.get("names") or [])[:_MAX_INTENT_NAMES]:
+        if isinstance(name, str) and name:
+            ask_text_parts.append(name)
+    try:
+        ask_hosts = getter(" ".join(ask_text_parts))
+    except Exception:
+        ask_hosts = {}
+    ask_sigs = {frozenset(hosts) for hosts in ask_hosts.values() if hosts}
+    for alias, hosts in title_hosts.items():  # bounded by the pack's aliases
+        sig = frozenset(hosts or [])
+        if not sig or sig in ask_sigs:
+            continue
+        if any(sig & other for other in ask_sigs):  # same entity (shared host): not a different brand
+            continue
+        return alias
+    return ""
+
+
 def _page_wrong_outlet(url: str, request: str, intent: dict) -> str:
     """The named outlet the page's host doesn't come from, or "". When the
     ask names one or more outlets (``_named_outlets``), the page's host
@@ -5631,6 +5724,15 @@ def _build_page_card(store: ni.NIStore, item_id: str, request: str,
     wrong = _page_wrong_outlet(url, request, intent)
     if wrong:
         return _page_refused(store, item_id, url, f"isn't {wrong}'s own site",
+                              request, intent, call_model, remap)
+    # fix10 (blind-8, 2026-10-04): "AWS us-east-1 status" shipped a statusgator page
+    # titled "HashiCorp AWS-us-east-1 Status" — a different brand's view of their AWS
+    # integration. A status / aggregator page whose title names a brand with a
+    # different host-set than the ask's subject is about that brand's component.
+    other_brand = _page_wrong_brand(graph, request, intent)
+    if other_brand:
+        return _page_refused(store, item_id, url,
+                              f"the page is about {other_brand}, not what you asked",
                               request, intent, call_model, remap)
     compiled = compile_page_program(graph, intent, request, call_model)
     if compiled is not None:
