@@ -1232,7 +1232,10 @@ def _validate_transform_op(op: object, i: int, j: int, outputs: set[str]) -> Non
         # time's ``unless``: the flag that says the time is a placeholder (MLB ``status.startTimeTBD``) —
         # a row key with ``key``, else a top-level output; when it is set the card shows the date +
         # "time TBD", never the sentinel clock
-        _closed_keys(node, {"fn", "field", "key", "utc", "clock", "unless"} if fn == "time"
+        # time's ``zone``: a top-level output holding the source's zone (Open-Meteo ``timezone`` /
+        # ``utc_offset_seconds``) — zoneless values are then anchored in it so a stale / next-event
+        # judgement reads the source's wall clock against the user's clock honestly (R5-zone)
+        _closed_keys(node, {"fn", "field", "key", "utc", "clock", "unless", "zone"} if fn == "time"
                      else {"fn", "field", "key"}, where)
         if node.get("key") is not None and not (isinstance(node["key"], str) and len(node["key"]) <= 120
                                                  and _ROW_KEY_RE.fullmatch(node["key"])):
@@ -1244,6 +1247,9 @@ def _validate_transform_op(op: object, i: int, j: int, outputs: set[str]) -> Non
         if unless is not None and not (isinstance(unless, str) and len(unless) <= 120 and (
                 _ROW_KEY_RE.fullmatch(unless) if node.get("key") is not None else _KEY_RE.match(unless))):
             raise ValueError(f"{where}.unless malformed")
+        zone = node.get("zone")
+        if zone is not None and not (isinstance(zone, str) and _KEY_RE.match(zone)):
+            raise ValueError(f"{where}.zone must name a top-level output")
         return
     if fn == "window":
         _validate_transform_window(node, where)
@@ -2072,7 +2078,11 @@ def _apply_transform_op(op: dict, payload: dict, *, history: dict) -> dict:
     if fn == "number":
         out[field] = _txf_number(payload[field], op.get("key"))
     elif fn == "time":
-        out[field] = _txf_time(payload, field, op)
+        zone = op.get("zone")
+        if zone is not None and zone not in payload:
+            raise NIError("transform_miss", f"field {zone!r}")
+        out[field] = _txf_time(payload, field, op,
+                                None if zone is None else _window_zone(payload[zone]))
     elif fn == "window":
         zone = op.get("zone")
         if zone is not None and zone not in payload:
@@ -2189,9 +2199,14 @@ def _clock() -> datetime:
     return datetime.now().astimezone()
 
 
-def _time_moment(value: object, *, naive_utc: bool = False) -> datetime:
-    """An ISO timestamp, an RFC 2822 date or an epoch (seconds or milliseconds) → an aware moment in
-    the user's zone. A zoneless ISO timestamp is the source's local time, taken as written."""
+def _time_moment(value: object, *, naive_utc: bool = False,
+                  zone: tzinfo | None = None) -> datetime:
+    """An ISO timestamp, an RFC 2822 date or an epoch (seconds or milliseconds) → an aware moment.
+    A zoneless ISO timestamp is the source's local time, taken as written: when ``zone`` is given
+    (the source names its zone at the top — Open-Meteo ``timezone`` / ``utc_offset_seconds``) the
+    moment is anchored in it, so a stale / next-event judgement reads the source's wall clock
+    against the user's clock honestly; else the user zone (``naive_utc`` overrides both — a source
+    that declares its zoneless times are UTC)."""
     if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 1e8:
         return datetime.fromtimestamp(value / 1000 if value > 1e11 else value, tz=UTC).astimezone()
     if isinstance(value, str) and _ISO_TIME_RE.fullmatch(value.strip()):
@@ -2199,7 +2214,9 @@ def _time_moment(value: object, *, naive_utc: bool = False) -> datetime:
         parsed = datetime.fromisoformat(text)
         if parsed.tzinfo is None and naive_utc:
             parsed = parsed.replace(tzinfo=UTC)
-        return parsed.astimezone() if parsed.tzinfo else parsed.replace(tzinfo=_clock().tzinfo)
+        if parsed.tzinfo is not None:
+            return parsed.astimezone()
+        return parsed.replace(tzinfo=zone if zone is not None else _clock().tzinfo)
     if isinstance(value, str) and _RFC2822_RE.fullmatch(value.strip()):
         try:
             parsed = parsedate_to_datetime(value.strip())
@@ -2286,18 +2303,21 @@ def _time_text(text: str, moment: datetime) -> _TimeText:
     return out
 
 
-def _txf_time(payload: dict, field: str, op: dict) -> object:
+def _txf_time(payload: dict, field: str, op: dict, zone: tzinfo | None = None) -> object:
     """``time``: timestamps → the user's local time. With ``unless``, a time whose flag is set (a row
     key with ``key``, else a top-level output) is a placeholder: the card shows its date + "time TBD"
-    (C15: MLB postseason games carry a sentinel start until the league sets one)."""
+    (C15: MLB postseason games carry a sentinel start until the league sets one). R5-zone (field
+    2026-10-04): ``zone`` (resolved from the op's named top-level output — Open-Meteo
+    ``timezone`` / ``utc_offset_seconds``) anchors zoneless times in the source's zone, so a
+    "sunset 18:36" declared in Denver reads at 20:13 EDT as 20:36 EDT, not a past 18:36 EDT."""
     utc, clock, key, unless = bool(op.get("utc")), bool(op.get("clock")), op.get("key"), op.get("unless")
 
     def shown(value: object) -> _TimeText:
-        moment = _time_moment(value, naive_utc=utc)
+        moment = _time_moment(value, naive_utc=utc, zone=zone)
         return _time_text(_moment_text(moment, clock), moment)
 
     def tbd(value: object) -> _TimeText:
-        return _tbd_text(value, naive_utc=utc, clock_only=clock)
+        return _tbd_text(value, naive_utc=utc, clock_only=clock, zone=zone)
 
     if unless is None:
         return _txf_rows(payload[field], key, shown)
@@ -2326,16 +2346,19 @@ def _flag_set(value: object) -> bool:
     return value is True
 
 
-def _tbd_text(value: object, *, naive_utc: bool, clock_only: bool) -> _TimeText:
+def _tbd_text(value: object, *, naive_utc: bool, clock_only: bool,
+              zone: tzinfo | None = None) -> _TimeText:
     """A placeholder start time → the date as the source wrote it (the sentinel clock could shift it a
-    day) + "time TBD"; its moment is the end of that day, so it stays the next event all day."""
+    day) + "time TBD"; its moment is the end of that day, so it stays the next event all day. ``zone``
+    anchors the end-of-day in the source's zone when it names one (R5-zone, 2026-10-04)."""
     if isinstance(value, str) and _DATE_RE.fullmatch(value.strip()):
         day_text = value.strip()[:10]
     else:
-        day_text = _time_moment(value, naive_utc=naive_utc).date().isoformat()
+        day_text = _time_moment(value, naive_utc=naive_utc, zone=zone).date().isoformat()
     shown = local_date(day_text)  # validates the date
     day = date.fromisoformat(day_text)
-    end = datetime(day.year, day.month, day.day, 23, 59, 59, tzinfo=_clock().tzinfo)
+    end = datetime(day.year, day.month, day.day, 23, 59, 59,
+                   tzinfo=zone if zone is not None else _clock().tzinfo)
     return _time_text("time TBD" if clock_only else f"{shown} · time TBD", end)
 
 

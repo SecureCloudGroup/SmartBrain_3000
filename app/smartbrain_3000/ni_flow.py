@@ -1730,6 +1730,15 @@ def _build_value_answers(chosen: list[dict], payload: dict, next_event: bool = F
                     # the source's own flag says the time is a placeholder: the card shows "time TBD"
                     paths[f"{name}_tbd"] = a["tbd_if"]["path"]
                     flags["unless"] = f"{name}_tbd"
+                # R5-zone (2026-10-04): a source that names its zone at the top (Open-Meteo
+                # ``timezone`` / ``utc_offset_seconds``) rides it onto the time op so zoneless
+                # cells are anchored in it — a "sunset 18:36" declared in Denver read at 20:13
+                # EDT is 20:36 EDT, not a past 18:36 EDT. ``date`` reads days as written.
+                if a["type"] == "time":
+                    zone_top = _source_zone_field(payload)
+                    if zone_top is not None:
+                        paths["zone"] = zone_top
+                        flags["zone"] = "zone"
                 ops.append({"fn": a["type"], "field": name, **flags})
                 fields[name] = "string"
             else:
@@ -1755,8 +1764,10 @@ def _build_value_answers(chosen: list[dict], payload: dict, next_event: bool = F
             "fields": fields, "klass": _DISPLAY_VALUE, "missing": missing}
 
 
-def _cell_ops(cell: dict, key: str, clock: bool = False) -> list[dict]:
-    """The per-row conversions one list / columns cell declares (``clock``: times as the clock only)."""
+def _cell_ops(cell: dict, key: str, clock: bool = False, zone: str | None = None) -> list[dict]:
+    """The per-row conversions one list / columns cell declares (``clock``: times as the clock only).
+    R5-zone (2026-10-04): ``zone`` names the top-level output holding the source's zone — rides
+    onto a time cell so zoneless row times are anchored in the source's zone (open-meteo-sun)."""
     if cell.get("codes"):
         return [{"fn": "label", "field": "rows", "table": cell["codes"], "key": key}]
     if cell["type"] == "number":
@@ -1764,7 +1775,8 @@ def _cell_ops(cell: dict, key: str, clock: bool = False) -> list[dict]:
     if cell["type"] in ("time", "date"):
         flags = {**({"utc": True} if cell.get("utc") else {}),
                  **({"clock": True} if clock and cell["type"] == "time" else {}),
-                 **({"unless": cell["tbd_if"]["path"]} if cell.get("tbd_if") else {})}
+                 **({"unless": cell["tbd_if"]["path"]} if cell.get("tbd_if") else {}),
+                 **({"zone": zone} if zone and cell["type"] == "time" else {})}
         return [{"fn": cell["type"], "field": "rows", "key": key, **flags}]
     return []
 
@@ -1854,8 +1866,16 @@ def _build_rows_answer(answer: dict, payload: dict, title: str, window: str | No
     # "today", "next_hours:N") shows times as the clock only — the window itself names the day
     dated = any(c["type"] == "date" for c in cells) or (
         bool(window) and axis is not None and axis.get("step") == "hour")
+    # R5-zone (2026-10-04): a source that names its zone at the top rides it onto the per-row time
+    # cell ops too — the window op already extracts "zone" when present (see _window_op); add the
+    # same extraction here so a no-window list ("sunrise times this week") still anchors cell
+    # moments in the source's zone, matching the value-answer path.
+    zone_top = _source_zone_field(payload)
+    if zone_top is not None:
+        stages[0]["paths"].setdefault("zone", zone_top)
+    cell_zone = "zone" if zone_top is not None else None
     for cell, key in zip(cells, keys, strict=True):  # bounded by _MAX_ANSWER_CELLS
-        ops.extend(_cell_ops(cell, key, clock=dated))
+        ops.extend(_cell_ops(cell, key, clock=dated, zone=cell_zone))
     if answer.get("may_be_empty"):  # "no delays right now" is an answer: count the rows each run
         ops.append({"fn": "count", "field": "rows", "as": "rows_count"})
     if ops:
@@ -1887,6 +1907,16 @@ def _build_rows_answer(answer: dict, payload: dict, title: str, window: str | No
 
 
 _FORWARD_WINDOWS = ("tonight", "tomorrow", "weekend", "upcoming", "dow:", "next_days:", "next_hours:")
+
+
+def _source_zone_field(payload: dict) -> str | None:
+    """R5-zone (2026-10-04): the top-level field a payload uses to name its own zone — Open-Meteo's
+    ``timezone`` (IANA name) or ``utc_offset_seconds`` (offset in seconds). None when the source
+    names none, so zoneless times fall back to the user's zone (the pre-fix behavior)."""
+    for top in ("timezone", "utc_offset_seconds"):  # bounded: two names
+        if isinstance(payload.get(top), (str, int)) and not isinstance(payload.get(top), bool):
+            return top
+    return None
 
 
 def _cuts(window: str, stages: list[dict], ops: list[dict], payload: dict, key: str) -> bool:
@@ -1921,11 +1951,10 @@ def _window_op(key: str, window: str, payload: dict, stages: list[dict], *,
     assert isinstance(key, str) and isinstance(window, str), "args required"
     assert isinstance(floor_hour, bool), "floor_hour must be a bool"
     op: dict = {"fn": "window", "field": "rows", "key": key, "window": window}
-    for top in ("timezone", "utc_offset_seconds"):  # bounded: two names
-        if isinstance(payload.get(top), (str, int)) and not isinstance(payload.get(top), bool):
-            stages[0]["paths"]["zone"] = top
-            op["zone"] = "zone"
-            break
+    top = _source_zone_field(payload)
+    if top is not None:
+        stages[0]["paths"]["zone"] = top
+        op["zone"] = "zone"
     if axis_cell is not None:
         if axis_cell.get("utc") is True:
             op["utc"] = True
@@ -4802,9 +4831,13 @@ def _pause_source_pick(store: ni.NIStore, item_id: str, request: str,
 
 
 def _pause_with_web(store: ni.NIStore, item_id: str, request: str, intent: dict,
-                    call_model: Callable[[str], str]) -> dict | None:
+                    call_model: Callable[[str], str], drop_why: str | None = None) -> dict | None:
     """S2: search the user's own words, read the result pages, seal ≤3 readable candidates. None
-    when search is unwired or finds nothing."""
+    when search is unwired or finds nothing.
+
+    fix9-zone (2026-10-04): ``drop_why`` names the reason the previously tapped Library row was
+    dropped — it rides into the pause note so a silent-drop ("the Library has no source for this")
+    never buries why we moved on. Every move-on must say why."""
     service = _resolve_search_service()
     if service is not None:
         web = _without_declined(store, item_id, _s2_search_candidates(service, request, intent))
@@ -4820,10 +4853,11 @@ def _pause_with_web(store: ni.NIStore, item_id: str, request: str, intent: dict,
                        "evidence": [str(e)[:90] for e in
                                     (r.get("evidence") or [])[:2]]}
                       for r in web[:_S2_SEAL_ROWS]]
+            prefix = f"the previous source {drop_why}; " if drop_why else ""
             _transition(store, item_id, "source",
                         error=AWAITING_SOURCE_PICK,
-                        note="paused: the Library has no source for this — "
-                             "web candidates are on the card",
+                        note=("paused: " + prefix + "the Library has no more sources for this — "
+                              "web candidates are on the card")[:_MAX_NOTE],
                         _ranked_search=sealed, _ranked_library=None)
             return _flow_read(store, item_id) or {}
     return None
@@ -6171,11 +6205,15 @@ def _move_on(store: ni.NIStore, item_id: str, url: str, why: str, request: str, 
              host_wide: bool = False) -> dict | None:
     """The tapped source can't serve this ask: back to the pick without it, with the honest reason;
     when no source is left, the web stage searches the user's words (``research``). None when the URL
-    wasn't a row of the pick (a pasted link) — the caller ends honestly instead."""
+    wasn't a row of the pick (a pasted link) — the caller ends honestly instead.
+
+    fix9-zone (2026-10-04): a Library source dropped by code and no other library rows left used to
+    land on a generic "the Library has no source for this" web pause — the honest why from the
+    repick disappeared. ``_pause_with_web`` now reads the why so every move-on says why."""
     moved = _repick_without(store, item_id, url, why=why, host_wide=host_wide)
     if moved is None or not research or moved.get("_ranked_library") or moved.get("_ranked_search"):
         return moved
-    web = _pause_with_web(store, item_id, request, intent, call_model)
+    web = _pause_with_web(store, item_id, request, intent, call_model, drop_why=why)
     return web if web is not None else moved
 
 
