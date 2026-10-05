@@ -13,71 +13,19 @@ to know when a release changes behavior.
 
 ### Changed
 
-- **Earthquakes for a US state no longer show rows from a neighbor.** When you
-  ask about earthquakes in a US state, the state's bounding box covers nearby
-  land in neighbors — western Nevada sits inside California's box, so the
-  live card used to lead with "22 km NNE of Yerington, Nevada". The card now
-  drops rows whose place reads name only another US state, and keeps rows
-  naming the asked state (or no state). When nothing happened in your state
-  today the card says so, instead of showing a neighbor. "Earthquakes in
-  California today" also cuts to today in your zone; a no-window ask keeps
-  the recent list.
-- **A US-national number is no longer shipped as if it were your state's.**
-  When you name a state (or a city in one) on an ask that only has a
-  national series — unemployment rate, GDP, CPI — the card refuses that
-  source and lets the next one try, instead of showing the national
-  figure with a quiet note that it isn't specific to your place.
-- **An airport-status card won't show up for a train or transit ask.** An
-  ask that names a rail or transit brand ("Amtrak Northeast Regional
-  delays", "WMATA red line delays") no longer gets an airport-status
-  reading on a cue word alone — the card only reads from the airport
-  source when the ask actually names an airport.
-- **Earthquakes for a state now come from the state's own feed.** When you
-  ask about earthquakes in a US state the card no longer picks a city of
-  the same name in a different state ("California, PA" for "earthquakes
-  in California"); the state-bounded USGS feed is the one offered, and
-  the same-named towns are not read. "California, PA" (two states named)
-  still reads the town, and earthquakes near a specific city or town
-  still read from the near-a-place feed.
-- **A team you named by city or state keeps the right team on the card.**
-  When your ask names a place word next to a team nickname ("Durham Bulls",
-  "NY Rangers") and the resolved team's own city or state doesn't carry
-  that place, the card no longer picks that team — the SmartBrain Library
-  tries the next source, and if nothing fits, the card says so instead of
-  shipping another team's game.
-- **A held web-page reading won't ship a date outside the day you asked
-  for.** When a reading's own date falls outside the ask's window
-  ("tonight", "today", "tomorrow", "this weekend"), the card refuses it
-  and names the date it found ("the reading shows Oct 12, not tonight"),
-  the same way a page title's own date already refuses a mismatched
-  window.
-- **A status page whose title names a different company is about that
-  company, not what you asked for.** When a status or aggregator page's
-  title names a brand with a different official site than the one you
-  asked about ("HashiCorp AWS-us-east-1 Status" for "AWS us-east-1 status"),
-  the card refuses it and names the other brand so the next source gets a
-  chance.
-- **A dataset for a state you didn't ask about is no longer offered.** The
-  state-match check now reads the publisher's web address (``health.data.ny.gov``,
-  ``data.pa.gov``, ``data.texas.gov``, ``data.cityofchicago.org``) and the
-  rows' own county cells. A New York flu dataset no longer ships for an ask
-  about Texas; a Chicago dataset ships for Chicago.
-- **A reading for a temperature, speed, wind, pressure, river level or
-  distance now needs its unit.** When a web-page card's reading is a bare
-  number for a value that has a unit, the card refuses it ("no unit on
-  '9.5'") and the next source is tried. AQI, UV, Kp, pollen level and
-  percentages still ship unitless.
 - **Cards come from SmartBrain Library sources that describe their answers;
   web pages are offered as links.** Readings pulled from web pages and from
-  datasets the Library hasn't described were too often wrong, so the card no
-  longer builds from them. When no Library source answers your ask yet, the
-  card says so and lists the pages that may help — web pages a search found
-  and datasets the Library knows about, each named with its site — as plain
+  datasets the Library hasn't described were too often wrong, so a card is no
+  longer built from them. When no Library source answers your ask yet, the
+  card says so and lists pages that may help, each named with its site, as
   links that open in a new tab. A link you paste yourself still builds a
   card: it shows the reading it found and where it came from, asks "Is this
   what you asked for?", and starts updating only after you tap **Yes, that's
-  it** (**No, try another source** takes it back to the source choice
-  without that link). Existing cards don't change.
+  it** (**No, try another source** takes it back to the source choice).
+  Existing cards don't change.
+- **Stock and company quotes are offered as links for now.** The Library's
+  quote sources don't describe their answers yet, so "TSLA" or "Microsoft
+  stock price" lists Alpha Vantage, Finnhub and quote pages as links.
 
 ### Added
 
@@ -94,63 +42,52 @@ to know when a release changes behavior.
   TV tonight", tides, asteroids) asks for the current date on every update.
   Since 0.24.0 such cards kept asking for the day they were made; existing
   cards are corrected on their next update.
-- **Card times follow your time zone, also in Docker,** and windows read
-  sources that send UTC times correctly: "kp index tonight" shows tonight's
-  hours, a game whose start is still to be decided doesn't show up as
-  tonight, "tonight" at 10 PM no longer starts with hours already past, and
-  a "next game" list never leads with a game already played.
+- **Card times follow your time zone, also in Docker,** and sources that send
+  UTC or local times are read in their own zone: "kp index tonight" shows
+  tonight's hours, Denver's sunset reads right from New York, a game whose
+  start is still to be decided doesn't show up as tonight, "tonight" at 10 PM
+  doesn't start with hours already past, and a "next game" list never leads
+  with a game already played. After today's sunset, "when is sunset" shows
+  tomorrow's.
 - **A card that can't answer what you asked isn't built.** "Latest news on
   Ukraine" no longer shows general headlines, "Inter Miami games today" no
-  longer shows MLB's games, "gas inventories" no longer shows gas prices,
-  and "any aurora tonight?" shows the night's forecast instead of earlier
-  readings. The card offers the next source, then the web, then says so.
-- **Web-page values must be on the page as you see it.** A value found only
-  in a hidden element, a filter menu or the page's metadata isn't used, and
-  a site is treated as a brand's official site only when it really is
-  (not "brand-giveaway.com" or a free hosting subdomain). Pages that state
-  their character set only in the server's headers read correctly.
-- **One refusing address no longer drops other sources on the same host,**
-  and a day forecast over hourly data shows the whole day.
-- **A web-page card never goes blank on an update.** An update that reads none
-  of the card's values counts as a failed update, and the last good values
-  stay on the card.
-- **A source with nothing for your ask hands over to the next one.** When a
-  source has no games listed, or its station doesn't measure what you asked
-  for, the card moves on to the other sources instead of failing or showing
-  something else.
+  longer shows MLB's games, "Fox News headlines" no longer shows ABC's,
+  "NFC East standings" no longer shows baseball, "gas inventories" no longer
+  shows gas prices, and "any aurora tonight?" shows the night's forecast. The
+  card offers the next source, then links, then says so.
+- **The place you name is the place on the card.** A list is kept to the place
+  or division you named (San Ysidro's border wait, the NHL's Metropolitan
+  Division); a national number isn't shown as your state's ("unemployment
+  rate in Ohio"); a state's earthquakes come from the state's own feed and
+  only that state's rows ("earthquakes in California", not a town named
+  California in Pennsylvania, and not Nevada); "Durham Bulls" isn't the
+  Chicago Bulls; and "LA" still means Los Angeles.
+- **An airport's status answers only for an airport.** "Amtrak Northeast
+  Regional delays" no longer shows the FAA's airport status; "delays at
+  O'Hare" and "delays at Orlando airport" find it.
+- **"rn" and "atm" mean now, and "moon phase" is a card.** A right-now ask is
+  read as one, and asks without a date no longer get sent to the countdown
+  builder.
+- **A page you paste is checked before it asks for your yes.** Its reading
+  must be on the page as you see it (not a hidden element, a menu, a heading,
+  a download label or the page's own title), carry its unit, match the day
+  you asked about, come from the outlet you named, and be current when you
+  asked for right now; a dataset published for another state isn't used.
+  Pages that state their character set only in the server's headers read
+  correctly, and a site is treated as a brand's official site only when it
+  really is.
+- **A source with nothing for your ask hands over to the next one,** and a
+  source that refuses SmartBrain or can't be fetched no longer ends the card.
 - **No more false "this card won't include…" notes** on cards built from a
   Library source's answers; the card only says what the source really doesn't
   report ("score" on a schedule).
-- **Small numbers keep their digits:** yen to dollar reads 0.00637, not 0.01.
-- **Game times from UTC sources show in your time zone** (a 7 PM Pacific
-  tip-off no longer reads 2:00 AM).
+- **Small numbers keep their digits:** yen to dollar reads 0.00634, not 0.01.
 - **A list row the source left a field out of shows "—"** instead of failing
-  the whole card.
-- **A card doesn't show a link label as its value.** A download label
-  ("2026 Schedule (PDF)", "Download", "View schedule", "Click here", "Learn
-  more") is a link to follow, not a reading, and the card asks another source.
-- **"rn" and "atm" count as "now".** A card asked for right now ("line at
-  Franklin Barbecue rn") no longer shows a page's typical / average value as
-  the current reading, and a page with no freshness signal moves on.
-- **A page dated another day doesn't answer a day-named ask.** A page titled
-  "Pollen Count on 2026-10-04" doesn't ship for an ask about tomorrow; the
-  card asks another source instead.
-- **A page card for a named outlet must be the outlet's own site.** An ask
-  that names an outlet ("Axios Denver latest", "Fox News headlines") only
-  ships from that outlet's own host; a page on another site that merely
-  mentions the outlet moves on.
-- **A state-named dataset doesn't ship for a different state's place.**
-  "covid wastewater levels king county" no longer shows a Delaware COVID
-  dataset; the card asks another source instead.
+  the whole card, and a day forecast over hourly data shows the whole day.
 - **Temperature asks go to the forecast** ("temp in Denver", "how hot is it in
   Tucson"), while "water temp" and "ocean temperature" keep their water sources.
 - **A source is only offered for what it is about.** "Gold price per ounce" no
-  longer shows crude oil just because both are commodities; when no source
-  covers what you asked, the card says so and searches the web.
-- **The place or team you name leads the card:** "delays at Newark airport"
-  shows Newark, not every delayed airport in the country.
-- **A web page has to show a number when you ask for one:** a gas-price card
-  never shows a sentence where the price should be.
+  longer shows crude oil just because both are commodities.
 - **Tables that show a date show just the time beside it** ("Mon Sep 28 ·
   7:56 AM · 7:36 PM").
 
