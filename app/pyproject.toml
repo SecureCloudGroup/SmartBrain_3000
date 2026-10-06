@@ -34,6 +34,11 @@ dependencies = [
     "trafilatura>=1.12",
     "aiortc>=1.14",
     "websockets>=12",
+    # NI card presentation: text measurement (hmtx advances + GSUB tnum). The proto used
+    # HarfBuzz; the port survey measured fontTools p95 1.37% wider, inside the existing
+    # 4% safety margin, so uharfbuzz is not a runtime dep.
+    "fonttools>=4.50",
+    "pillow>=10",
 ]
 
 [project.optional-dependencies]
@@ -49,7 +54,9 @@ include = ["smartbrain_3000*"]
 [tool.setuptools.package-data]
 # Recursive: the SvelteKit build nests hashed bundles under web/_app/** — a
 # non-recursive glob would omit them from the wheel (the app would 404 its JS).
-smartbrain_3000 = ["web/**/*"]
+# ni_forms/assets ships fonts (TTF), lexicons/few-shots/icons (JSON) and the world
+# outline; without them the layout cannot measure or paint.
+smartbrain_3000 = ["web/**/*", "ni_forms/assets/**/*", "ni_forms/tokens.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -105,3 +112,19 @@ ignore = [
     # by install.py, not run directly. The shebang is documentation.
     "EXE001",
 ]
+
+# ni_forms carries proto patterns the port kept verbatim (2026-10-06, Phase 1a-1):
+#  - RUF012 "mutable class default": every form subclasses BaseForm and overrides
+#    slots/params_space/REJECTS as class-level dicts; the pattern is intentional
+#    and uniform across all 18 catalog forms.
+#  - SIM102 "collapsible-if", RUF034 "useless if-else", SIM103 "needless-bool": a
+#    port is not a refactor; these come from the proto's layout rungs and are
+#    annotated there.
+#  - B023 "function uses loop variable": base.py builds a closure per field over
+#    the sampled rows (the loop variable is INTENDED, the closures run inside the
+#    same iteration).
+#  - DTZ001 "datetime without tz": fmt.format_time's fallback and paint/live's
+#    time formatter accept naive datetimes derived from the data's own zone;
+#    forcing UTC would show the wrong wall clock.
+[tool.ruff.lint.per-file-ignores]
+"smartbrain_3000/ni_forms/**/*.py" = ["RUF012", "SIM102", "SIM103", "RUF034", "B023", "DTZ001"]

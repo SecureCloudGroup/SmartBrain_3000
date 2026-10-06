@@ -1,0 +1,33 @@
+{
+ "_doc": "WMO present-weather code (the 'wmo code' unit) -> display word and icon (owner A). Display vocabulary only; forms read it through Field.unit == 'wmo'.",
+ "codes": {
+  "0": {"word": "Clear", "icon": "sun", "icon_night": "moon"},
+  "1": {"word": "Mainly clear", "icon": "cloud_sun", "icon_night": "cloud_moon"},
+  "2": {"word": "Partly cloudy", "icon": "cloud_sun", "icon_night": "cloud_moon"},
+  "3": {"word": "Overcast", "icon": "cloud", "icon_night": "cloud"},
+  "45": {"word": "Fog", "icon": "fog"},
+  "48": {"word": "Freezing fog", "icon": "fog"},
+  "51": {"word": "Light drizzle", "icon": "drizzle"},
+  "53": {"word": "Drizzle", "icon": "drizzle"},
+  "55": {"word": "Heavy drizzle", "icon": "drizzle"},
+  "56": {"word": "Freezing drizzle", "icon": "drizzle"},
+  "57": {"word": "Freezing drizzle", "icon": "drizzle"},
+  "61": {"word": "Light rain", "icon": "rain"},
+  "63": {"word": "Rain", "icon": "rain"},
+  "65": {"word": "Heavy rain", "icon": "rain"},
+  "66": {"word": "Freezing rain", "icon": "rain"},
+  "67": {"word": "Freezing rain", "icon": "rain"},
+  "71": {"word": "Light snow", "icon": "snow"},
+  "73": {"word": "Snow", "icon": "snow"},
+  "75": {"word": "Heavy snow", "icon": "snow"},
+  "77": {"word": "Snow grains", "icon": "snow"},
+  "80": {"word": "Light showers", "icon": "rain"},
+  "81": {"word": "Showers", "icon": "rain"},
+  "82": {"word": "Heavy showers", "icon": "rain"},
+  "85": {"word": "Snow showers", "icon": "snow"},
+  "86": {"word": "Heavy snow showers", "icon": "snow"},
+  "95": {"word": "Thunderstorm", "icon": "storm"},
+  "96": {"word": "Thunderstorm, hail", "icon": "storm"},
+  "99": {"word": "Thunderstorm, hail", "icon": "storm"}
+ }
+}
