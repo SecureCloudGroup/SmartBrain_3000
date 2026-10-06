@@ -1199,7 +1199,7 @@
     <div class="ni-grid2">
       {#each items as item (item.id)}
         {@const health = healthChip(item)}
-        {@const wide = item.display.size === "wide"}
+        {@const wide = item.display?.size === "wide" || item.display?.size === "large"}
         {@const preview = item.state === "draft"}
         <div class="card ni-card" class:wide class:preview={preview || !!item.awaiting_yes}>
           <div class="ni-head">

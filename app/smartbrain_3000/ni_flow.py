@@ -1680,6 +1680,7 @@ def _nonempty(value: object) -> bool:
     return value is not None and not (isinstance(value, str) and not value.strip())
 
 
+# mirrored by the Library's ``answers._SPARSE_TEXT`` (its all-rows check allows exactly these); keep in step
 _MISSING = frozenset({"", "mm", "n/a", "na", "-", "--", "—", "null", "none", "missing"})
 
 
@@ -3828,6 +3829,7 @@ def run_flow(store: ni.NIStore, item_id: str, *,
     sealed_fmt = str(record.get("_format") or "").strip().lower() or None
 
     def default_fetcher(url: str) -> object:
+        nonlocal sealed_fmt
         """Fetch a sample under the netguard SSRF/redirect discipline.
 
         A sealed ``_format`` on the flow record (stamped by ``pick_flow_source``
@@ -3847,7 +3849,11 @@ def run_flow(store: ni.NIStore, item_id: str, *,
             return _fetch_with_access(url, sealed_fmt or "json", current_access, item_id)
         if sealed_fmt and sealed_fmt in ni._HTTP_JSON_FORMATS and sealed_fmt != "json":
             return _fetch_textual_sample(url, sealed_fmt)
-        return _sniffed_fetch(url)
+        sample, fmt = _sniffed_fetch_with_format(url)
+        _seal_sniffed_format(store, item_id, fmt)
+        if fmt != "json" and fmt in ni._HTTP_JSON_FORMATS:
+            sealed_fmt = fmt  # a later fetch in this pass parses the sealed way, no second sniff
+        return sample
 
     call = gateway_call if gateway_call is not None else default_model
     do_fetch = fetcher if fetcher is not None else default_fetcher
@@ -3961,8 +3967,21 @@ def _resolve_flow_model(store: ni.NIStore) -> str | None:
 
 def _run_intent(store: ni.NIStore, item_id: str, request: str,
                 call_model: Callable[[str], str]) -> dict:
-    """Wrap stage_intent with flow-slot transitions on entry + success."""
+    """Wrap stage_intent with flow-slot transitions on entry + success.
+
+    Phase 0 (2026-10-05): the first pass seals the intent on the flow record; a worker that restarts
+    for the SAME words (the user's tap, a key supplied, a model consent given) reuses it instead of
+    asking the model again — one model call fewer per card, and the frame the pick was made under
+    is the frame the build runs under. A record without a sealed intent (the first pass, a retry
+    after an intent failure) or whose words changed runs the stage.
+    """
     assert store is not None and callable(call_model), "args required"
+    current = _flow_read(store, item_id) or {}
+    sealed = current.get("intent")
+    if isinstance(sealed, dict) and sealed.get("kind") in ("external_data", "computed_only") \
+            and current.get("request") == request:
+        _transition(store, item_id, "source", intent=sealed, request=request)
+        return dict(sealed)
     _transition(store, item_id, "intent", request=request)
     intent = stage_intent(request, call_model)
     _transition(store, item_id, "source", intent=intent, request=request)
@@ -4132,9 +4151,18 @@ def _sniffed_fetch(url: str) -> object:
     4xx) rides straight through — those are not "wrong format", they are the
     fetch failing outright.
     """
+    return _sniffed_fetch_with_format(url)[0]
+
+
+def _sniffed_fetch_with_format(url: str) -> tuple[object, str]:
+    """``_sniffed_fetch`` plus the format the body really was (``json`` | ``csv`` | ``feed`` | ``xml`` |
+    ``text``), so the flow can seal it on the record and the engine refreshes a pasted CSV or feed the
+    way sampling parsed it. Phase 0 (2026-10-05): before this the sealed spec of a pasted non-JSON link
+    carried no ``source.format`` and its first refresh failed as not-JSON (only a Library row's tap
+    stamped ``_format``)."""
     assert isinstance(url, str) and url, "url required"
     try:
-        return _netguard_mod.safe_fetch_json(url)
+        return _netguard_mod.safe_fetch_json(url), "json"
     except _netguard_mod.FetchError as exc:
         if getattr(exc, "kind", None) != "not_json":
             raise
@@ -4147,8 +4175,21 @@ def _sniffed_fetch(url: str) -> object:
         raise page from None
 
 
-def _sniffed_textual(url: str) -> object:
-    """Fetch as text and parse by what it really is; HTML is refused (the page door reads pages)."""
+def _seal_sniffed_format(store: ni.NIStore, item_id: str, fmt: str) -> None:
+    """Seal the format a pasted link's body sniffed as onto the flow record (``_format``, the slot
+    ``pick_flow_source`` fills for a Library row); ``_handoff`` copies it to ``source.format`` so every
+    refresh parses the body the way sampling did. JSON, the historical shape, seals nothing."""
+    assert store is not None and item_id and isinstance(fmt, str), "args required"
+    if fmt == "json" or fmt not in ni._HTTP_JSON_FORMATS:
+        return
+    record = _flow_read(store, item_id) or {}
+    if record.get("_format") != fmt:
+        _flow_write(store, item_id, {**record, "_format": fmt})
+
+
+def _sniffed_textual(url: str) -> tuple[object, str]:
+    """Fetch as text and parse by what it really is, returning ``(parsed, format)``; HTML is refused (the
+    page door reads pages)."""
     from . import formats as _formats
     got = _netguard_mod.safe_fetch_text(url, "text")
     text = got.get("text") if isinstance(got, dict) else ""
@@ -4165,11 +4206,11 @@ def _sniffed_textual(url: str) -> object:
         # Re-parse in-process — the netguard fetch has already run, so this
         # only decodes bytes we already hold.
         try:
-            return json.loads(text)
+            return json.loads(text), "json"
         except ValueError as exc:
             raise _netguard_mod.FetchError(f"upstream JSON reparse failed: {exc}",
                                             kind="not_json") from None
-    return _textual_parse(text, sniffed)
+    return _textual_parse(text, sniffed), sniffed
 
 
 def _textual_parse(text: str, fmt: str) -> object:
@@ -5756,8 +5797,9 @@ def _handoff(store: ni.NIStore, item_id: str, request: str, intent: dict, url: s
     if not keep_source and clock_params and url_template:
         source["url"] = url_template
     # Non-JSON textual formats (csv / feed / xml / text): the flow record's
-    # sealed ``_format`` (stamped by ``pick_flow_source`` or the paste-URL
-    # sniffer) rides onto the fresh source dict so the engine's dispatch parses
+    # sealed ``_format`` (stamped by ``pick_flow_source`` for a Library row, or by
+    # ``_seal_sniffed_format`` when a pasted link's body sniffed as one of them)
+    # rides onto the fresh source dict so the engine's dispatch parses
     # every future refresh the same way sampling did. ``keep_source`` already
     # carries its own frozen format (recipe / remap paths — never overwritten).
     if not keep_source:

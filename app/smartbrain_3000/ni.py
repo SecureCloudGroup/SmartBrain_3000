@@ -194,7 +194,9 @@ _CLOCK_FORMAT_CODES: frozenset[str] = frozenset(
     {"%Y", "%m", "%d", "%H", "%M", "%S", "%y", "%j", "%u", "%w",
      "%-m", "%-d", "%B", "%b", "%A", "%a"})
 _MAX_CLOCK_OFFSET_DAYS = 400  # enough for next-event / schedule look-ahead + history looks-back
-_DISPLAY_SIZES: frozenset[str] = frozenset({"small", "wide"})
+# "large" (Round 19, 2026-10-05) is reserved for the forms' L size; the board renders it as wide until the
+# fixed-rhythm grid lands. An absent display stays "small" (the historical default; the SPA mirrors it).
+_DISPLAY_SIZES: frozenset[str] = frozenset({"small", "wide", "large"})
 _STATES: frozenset[str] = frozenset(
     {"draft", "commissioning", "live", "degraded", "failing", "broken", "paused"}
 )

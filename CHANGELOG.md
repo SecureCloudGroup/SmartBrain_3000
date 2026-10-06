@@ -11,6 +11,24 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A pasted CSV, RSS, Atom, XML or text link now keeps working after its first
+  refresh.** Sampling already read those links by what they really were, but the
+  built card did not remember the format, so its first scheduled refresh tried to
+  read the link as JSON and failed. The format sampling found is now sealed with
+  the card, exactly as it is for a Library source.
+
+### Changed
+
+- **Building a card asks the model to read your words once, not twice.** The
+  understanding sealed before the source pick is reused when the build resumes
+  after your tap, a key you add, or a model you approve. The build runs under
+  the same reading the pick was made with.
+- Card size gains a reserved `large` value (the forms' L size, Round 19); it
+  renders like `wide` until the fixed-rhythm board lands. A card with no size
+  stays small, on the board and in the app.
+
 ## [0.25.0] - 2026-10-05
 
 ### Changed

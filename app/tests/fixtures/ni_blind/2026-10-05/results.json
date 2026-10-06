@@ -1,0 +1,6962 @@
+[
+ {
+  "ask": "how warm is it in Boise right now",
+  "outcome": "live",
+  "source": "library: Open-Meteo forecast \u2014 api.open-meteo.com",
+  "detail": "",
+  "preview": {
+   "temperature": 68.6,
+   "conditions": "Partly cloudy"
+  },
+  "tapped": [
+   {
+    "title": "Open-Meteo forecast",
+    "url": "https://api.open-meteo.com/v1/forecast?latitude=43.599335&longitude=-116.229817&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m&hourly=temperature_2m,precipitation_probability,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,snowfall_sum,sunrise,sunset&temperature_unit=fahrenheit&wind_speed_unit=mph&precipitation_unit=inch&timezone=auto",
+    "label": "Boise City (ID)",
+    "params": {
+     "lat": "43.599335",
+     "lon": "-116.229817"
+    },
+    "scope": "place"
+   }
+  ],
+  "links": [],
+  "notes": [
+   "shell item created",
+   "paused: sources from the SmartBrain Library are on the card",
+   "fetching consented source (api.open-meteo.com)",
+   "built from the Library's declared answers: Temperature, Conditions",
+   "built from the Library's declared answers: Temperature, Conditions"
+  ],
+  "answers": "built from the Library's declared answers: Temperature, Conditions",
+  "scene_text": [
+   "Temperature",
+   "68.6 \u00b0F",
+   "Conditions",
+   "Partly cloudy"
+  ],
+  "pipeline": [
+   {
+    "op": "extract",
+    "paths": {
+     "temperature": "current.temperature_2m",
+     "conditions": "current.weather_code"
+    }
+   },
+   {
+    "op": "transform",
+    "apply": [
+     {
+      "fn": "number",
+      "field": "temperature"
+     },
+     {
+      "fn": "label",
+      "field": "conditions",
+      "table": "wmo_weather"
+     }
+    ]
+   }
+  ],
+  "latest": {
+   "type": "stack",
+   "dir": "v",
+   "gap": "sm",
+   "children": [
+    {
+     "type": "text",
+     "value": "Temperature",
+     "role": "title",
+     "tone": "default",
+     "size": "md"
+    },
+    {
+     "type": "number",
+     "value": 68.6,
+     "format": "plain",
+     "unit": "\u00b0F",
+     "tone": "default",
+     "size": "lg"
+    },
+    {
+     "type": "text",
+     "value": "Conditions",
+     "role": "label",
+     "tone": "muted",
+     "size": "sm"
+    },
+    {
+     "type": "text",
+     "value": "Partly cloudy",
+     "role": "value",
+     "tone": "default",
+     "size": "sm"
+    }
+   ]
+  },
+  "secs": 5.5
+ },
+ {
+  "ask": "what is platinum trading at today",
+  "outcome": "links",
+  "source": "links",
+  "detail": "",
+  "preview": null,
+  "tapped": [],
+  "links": [
+   {
+    "host": "www.alphavantage.co",
+    "title": "Alpha Vantage global quote",
+    "url": "https://www.alphavantage.co",
+    "found": "dataset"
+   },
+   {
+    "host": "finnhub.io",
+    "title": "Finnhub quote",
+    "url": "https://finnhub.io",
+    "found": "dataset"
+   },
+   {
+    "host": "www.kitco.com",
+    "title": "Platinum Price Today | Price of Platinum Per Ounce | 24 Hour Spot Chart ...",
+    "url": "https://www.kitco.com/charts/platinum",
+    "found": "page"
+   },
+   {
+    "host": "findbullionprices.com",
+    "title": "Spot Platinum Price Today | Live Chart & Price History ...",
+    "url": "https://findbullionprices.com/spot-prices/platinum-price",
+    "found": "page"
+   },
+   {
+    "host": "www.apmex.com",
+    "title": "Live Platinum Price Charts | Platinum Price Per Ounce | APMEX",
+    "url": "https://www.apmex.com/platinum-price",
+    "found": "page"
+   }
+  ],
+  "notes": [
+   "shell item created",
+   "paused: no SmartBrain Library source answers this yet \u2014 pages that may help are on the card"
+  ],
+  "secs": 9.3
+ },
+ {
+  "ask": "water temperature at Virginia Beach",
+  "outcome": "live",
+  "source": "library: NOAA water temperature \u2014 api.tidesandcurrents.noaa.gov \u2192 library: NOAA water temperature \u2014 api.tidesandcurrents.noaa.gov",
+  "detail": "",
+  "preview": {
+   "water_temp": 73.2
+  },
+  "tapped": [
+   {
+    "title": "NOAA water temperature",
+    "url": "https://api.tidesandcurrents.noaa.gov/api/prod/datagetter?application=SmartBrain&station=8638863&time_zone=lst_ldt&units=english&format=json&product=water_temperature&date=latest",
+    "label": "CHESAPEAKE BAY BRIDGE TUNNEL",
+    "params": {
+     "station": "8638863"
+    },
+    "scope": "place"
+   },
+   {
+    "title": "NOAA water temperature",
+    "url": "https://api.tidesandcurrents.noaa.gov/api/prod/datagetter?application=SmartBrain&station=8639348&time_zone=lst_ldt&units=english&format=json&product=water_temperature&date=latest",
+    "label": "Money Point",
+    "params": {
+     "station": "8639348"
+    },
+    "scope": "place"
+   }
+  ],
+  "links": [],
+  "notes": [
+   "shell item created",
+   "paused: sources from the SmartBrain Library are on the card",
+   "fetching consented source (api.tidesandcurrents.noaa.gov)",
+   "NOAA Tides & Currents (CO-OPS) has nothing for this right now \u2014 pick another source",
+   "fetching consented source (api.tidesandcurrents.noaa.gov)",
+   "built from the Library's declared answers: Water temperature",
+   "built from the Library's declared answers: Water temperature"
+  ],
+  "answers": "built from the Library's declared answers: Water temperature",
+  "scene_text": [
+   "Water temperature",
+   "73.2 \u00b0F"
+  ],
+  "pipeline": [
+   {
+    "op": "extract",
+    "paths": {
+     "water_temp": "data[0].v"
+    }
+   },
+   {
+    "op": "transform",
+    "apply": [
+     {
+      "fn": "number",
+      "field": "water_temp"
+     }
+    ]
+   }
+  ],
+  "latest": {
+   "type": "stack",
+   "dir": "v",
+   "gap": "sm",
+   "children": [
+    {
+     "type": "text",
+     "value": "Water temperature",
+     "role": "title",
+     "tone": "default",
+     "size": "md"
+    },
+    {
+     "type": "number",
+     "value": 73.2,
+     "format": "plain",
+     "unit": "\u00b0F",
+     "tone": "default",
+     "size": "lg"
+    }
+   ]
+  },
+  "secs": 6.0
+ },
+ {
+  "ask": "rain chances in Nashville this week",
+  "outcome": "live",
+  "source": "library: Open-Meteo forecast \u2014 api.open-meteo.com",
+  "detail": "",
+  "preview": {
+   "day": [
+    "2026-10-05",
+    "2026-10-06",
+    "2026-10-07",
+    "2026-10-08",
+    "2026-10-09",
+    "2026-10-10",
+    "2026-10-11"
+   ],
+   "conditions": [
+    3,
+    0,
+    0,
+    0,
+    3,
+    63,
+    53
+   ],
+   "high": [
+    82.6,
+    83.8,
+    86.4,
+    87.4,
+    81.0,
+    69.4,
+    66.9
+   ],
+   "rain_chance": [
+    0,
+    1,
+    0,
+    0,
+    0,
+    35,
+    42
+   ],
+   "zone": "America/Chicago",
+   "rows": [
+    {
+     "day": "Mon Oct 5",
+     "conditions": "Overcast",
+     "high": 82.6,
+     "rain_chance": 0
+    },
+    {
+     "day": "Tue Oct 6",
+     "conditions": "Clear sky",
+     "high": 83.8,
+     "rain_chance": 1
+    },
+    {
+     "day": "Wed Oct 7",
+     "conditions": "Clear sky",
+     "high": 86.4,
+     "rain_chance": 0
+    },
+    {
+     "day": "Thu Oct 8",
+     "conditions": "Clear sky",
+     "high": 87.4,
+     "rain_chance": 0
+    },
+    {
+     "day": "Fri Oct 9",
+     "conditions": "Overcast",
+     "high": 81.0,
+     "rain_chance": 0
+    },
+    {
+     "day": "Sat Oct 10",
+     "conditions": "Rain",
+     "high": 69.4,
+     "rain_chance": 35
+    },
+    {
+     "day": "Sun Oct 11",
+     "conditions": "Drizzle",
+     "high": 66.9,
+     "rain_chance": 42
+    }
+   ]
+  },
+  "tapped": [
+   {
+    "title": "Open-Meteo forecast",
+    "url": "https://api.open-meteo.com/v1/forecast?latitude=36.1718&longitude=-86.785002&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m&hourly=temperature_2m,precipitation_probability,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,snowfall_sum,sunrise,sunset&temperature_unit=fahrenheit&wind_speed_unit=mph&precipitation_unit=inch&timezone=auto",
+    "label": "Nashville-Davidson metropolitan government (TN)",
+    "params": {
+     "lat": "36.1718",
+     "lon": "-86.785002"
+    },
+    "scope": "place"
+   }
+  ],
+  "links": [],
+  "notes": [
+   "shell item created",
+   "paused: sources from the SmartBrain Library are on the card",
+   "fetching consented source (api.open-meteo.com)",
+   "built from the Library's declared answers: Daily forecast",
+   "built from the Library's declared answers: Daily forecast"
+  ],
+  "answers": "built from the Library's declared answers: Daily forecast",
+  "scene_text": [
+   "rain chances",
+   "Mon Oct 5 \u00b7 Overcast \u00b7 82.6\u00b0F \u00b7 0%",
+   "Tue Oct 6 \u00b7 Clear sky \u00b7 83.8\u00b0F \u00b7 1%",
+   "Wed Oct 7 \u00b7 Clear sky \u00b7 86.4\u00b0F \u00b7 0%",
+   "Thu Oct 8 \u00b7 Clear sky \u00b7 87.4\u00b0F \u00b7 0%",
+   "Fri Oct 9 \u00b7 Overcast \u00b7 81.0\u00b0F \u00b7 0%",
+   "Sat Oct 10 \u00b7 Rain \u00b7 69.4\u00b0F \u00b7 35%",
+   "Sun Oct 11 \u00b7 Drizzle \u00b7 66.9\u00b0F \u00b7 42%"
+  ],
+  "pipeline": [
+   {
+    "op": "extract",
+    "paths": {
+     "day": "daily.time",
+     "conditions": "daily.weather_code",
+     "high": "daily.temperature_2m_max",
+     "rain_chance": "daily.precipitation_probability_max",
+     "zone": "timezone"
+    }
+   },
+   {
+    "op": "transform",
+    "apply": [
+     {
+      "fn": "zip",
+      "field": "day",
+      "with": [
+       "conditions",
+       "high",
+       "rain_chance"
+      ],
+      "as": "rows"
+     },
+     {
+      "fn": "window",
+      "field": "rows",
+      "key": "day",
+      "window": "next_days:7",
+      "zone": "zone",
+      "step": "day"
+     },
+     {
+      "fn": "date",
+      "field": "rows",
+      "key": "day"
+     },
+     {
+      "fn": "label",
+      "field": "rows",
+      "table": "wmo_weather",
+      "key": "conditions"
+     },
+     {
+      "fn": "number",
+      "field": "rows",
+      "key": "high"
+     },
+     {
+      "fn": "number",
+      "field": "rows",
+      "key": "rain_chance"
+     }
+    ]
+   }
+  ],
+  "latest": {
+   "type": "stack",
+   "dir": "v",
+   "gap": "sm",
+   "children": [
+    {
+     "type": "text",
+     "value": "rain chances",
+     "role": "title",
+     "tone": "default",
+     "size": "md"
+    },
+    {
+     "type": "stack",
+     "dir": "v",
+     "gap": "sm",
+     "children": [
+      {
+       "type": "text",
+       "value": "Mon Oct 5 \u00b7 Overcast \u00b7 82.6\u00b0F \u00b7 0%",
+       "role": "label",
+       "tone": "default",
+       "size": "sm"
+      },
+      {
+       "type": "text",
+       "value": "Tue Oct 6 \u00b7 Clear sky \u00b7 83.8\u00b0F \u00b7 1%",
+       "role": "label",
+       "tone": "default",
+       "size": "sm"
+      },
+      {
+       "type": "text",
+       "value": "Wed Oct 7 \u00b7 Clear sky \u00b7 86.4\u00b0F \u00b7 0%",
+       "role": "label",
+       "tone": "default",
+       "size": "sm"
+      },
+      {
+       "type": "text",
+       "value": "Thu Oct 8 \u00b7 Clear sky \u00b7 87.4\u00b0F \u00b7 0%",
+       "role": "label",
+       "tone": "default",
+       "size": "sm"
+      },
+      {
+       "type": "text",
+       "value": "Fri Oct 9 \u00b7 Overcast \u00b7 81.0\u00b0F \u00b7 0%",
+       "role": "label",
+       "tone": "default",
+       "size": "sm"
+      },
+      {
+       "type": "text",
+       "value": "Sat Oct 10 \u00b7 Rain \u00b7 69.4\u00b0F \u00b7 35%",
+       "role": "label",
+       "tone": "default",
+       "size": "sm"
+      },
+      {
+       "type": "text",
+       "value": "Sun Oct 11 \u00b7 Drizzle \u00b7 66.9\u00b0F \u00b7 42%",
+       "role": "label",
+       "tone": "default",
+       "size": "sm"
+      }
+     ]
+    }
+   ]
+  },
+  "secs": 4.5
+ },
+ {
+  "ask": "snow forecast for Tahoe this weekend",
+  "outcome": "live",
+  "source": "library: NWS 7-day forecast \u2014 api.weather.gov \u2192 library: Open-Meteo forecast \u2014 api.open-meteo.com",
+  "detail": "",
+  "preview": {
+   "day": [
+    "2026-10-05",
+    "2026-10-06",
+    "2026-10-07",
+    "2026-10-08",
+    "2026-10-09",
+    "2026-10-10",
+    "2026-10-11"
+   ],
+   "snowfall": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "low": [
+    49.0,
+    49.2,
+    50.8,
+    51.1,
+    51.1,
+    46.9,
+    32.5
+   ],
+   "conditions": [
+    3,
+    0,
+    0,
+    3,
+    3,
+    3,
+    0
+   ],
+   "zone": "America/Los_Angeles",
+   "rows": [
+    {
+     "day": "Sat Oct 10",
+     "snowfall": 0.0,
+     "low": 46.9,
+     "conditions": "Overcast"
+    },
+    {
+     "day": "Sun Oct 11",
+     "snowfall": 0.0,
+     "low": 32.5,
+     "conditions": "Clear sky"
+    }
+   ]
+  },
+  "tapped": [
+   {
+    "title": "NWS 7-day forecast",
+    "url": "https://api.weather.gov/gridpoints/{office}/{grid_x},{grid_y}/forecast",
+    "label": "South Lake Tahoe (CA)",
+    "params": {
+     "lat": "38.928218",
+     "lon": "-119.981"
+    },
+    "scope": "place"
+   },
+   {
+    "title": "Open-Meteo forecast",
+    "url": "https://api.open-meteo.com/v1/forecast?latitude=38.928218&longitude=-119.981&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m&hourly=temperature_2m,precipitation_probability,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,snowfall_sum,sunrise,sunset&temperature_unit=fahrenheit&wind_speed_unit=mph&precipitation_unit=inch&timezone=auto",
+    "label": "South Lake Tahoe (CA)",
+    "params": {
+     "lat": "38.928218",
+     "lon": "-119.981"
+    },
+    "scope": "place"
+   }
+  ],
+  "links": [],
+  "notes": [
+   "shell item created",
+   "paused: sources from the SmartBrain Library are on the card",
+   "fetching consented source (api.weather.gov)",
+   "National Weather Service (NOAA) doesn't report snow \u2014 pick another source",
+   "fetching consented source (api.open-meteo.com)",
+   "built from the Library's declared answers: Snow forecast",
+   "built from the Library's declared answers: Snow forecast"
+  ],
+  "answers": "built from the Library's declared answers: Snow forecast",
+  "scene_text": [
+   "snow forecast",
+   "Sat Oct 10 \u00b7 0.0 inch \u00b7 46.9\u00b0F \u00b7 Overcast",
+   "Sun Oct 11 \u00b7 0.0 inch \u00b7 32.5\u00b0F \u00b7 Clear sky"
+  ],
+  "pipeline": [
+   {
+    "op": "extract",
+    "paths": {
+     "day": "daily.time",
+     "snowfall": "daily.snowfall_sum",
+     "low": "daily.temperature_2m_min",
+     "conditions": "daily.weather_code",
+     "zone": "timezone"
+    }
+   },
+   {
+    "op": "transform",
+    "apply": [
+     {
+      "fn": "zip",
+      "field": "day",
+      "with": [
+       "snowfall",
+       "low",
+       "conditions"
+      ],
+      "as": "rows"
+     },
+     {
+      "fn": "window",
+      "field": "rows",
+      "key": "day",
+      "window": "weekend",
+      "zone": "zone",
+      "step": "day"
+     },
+     {
+      "fn": "date",
+      "field": "rows",
+      "key": "day"
+     },
+     {
+      "fn": "number",
+      "field": "rows",
+      "key": "snowfall"
+     },
+     {
+      "fn": "number",
+      "field": "rows",
+      "key": "low"
+     },
+     {
+      "fn": "label",
+      "field": "rows",
+      "table": "wmo_weather",
+      "key": "conditions"
+     }
+    ]
+   }
+  ],
+  "latest": {
+   "type": "stack",
+   "dir": "v",
+   "gap": "sm",
+   "children": [
+    {
+     "type": "text",
+     "value": "snow forecast",
+     "role": "title",
+     "tone": "default",
+     "size": "md"
+    },
+    {
+     "type": "stack",
+     "dir": "v",
+     "gap": "sm",
+     "children": [
+      {
+       "type": "text",
+       "value": "Sat Oct 10 \u00b7 0.0 inch \u00b7 46.9\u00b0F \u00b7 Overcast",
+       "role": "label",
+       "tone": "default",
+       "size": "sm"
+      },
+      {
+       "type": "text",
+       "value": "Sun Oct 11 \u00b7 0.0 inch \u00b7 32.5\u00b0F \u00b7 Clear sky",
+       "role": "label",
+       "tone": "default",
+       "size": "sm"
+      }
+     ]
+    }
+   ]
+  },
+  "secs": 8.8
+ },
+ {
+  "ask": "surf forecast Huntington Beach",
+  "outcome": "live",
+  "source": "library: Open-Meteo marine \u2014 marine-api.open-meteo.com",
+  "detail": "",
+  "preview": {
+   "time": [
+    "2026-10-05T00:00",
+    "2026-10-05T01:00",
+    "2026-10-05T02:00",
+    "2026-10-05T03:00",
+    "2026-10-05T04:00",
+    "2026-10-05T05:00",
+    "2026-10-05T06:00",
+    "2026-10-05T07:00",
+    "2026-10-05T08:00",
+    "2026-10-05T09:00",
+    "2026-10-05T10:00",
+    "2026-10-05T11:00",
+    "2026-10-05T12:00",
+    "2026-10-05T13:00",
+    "2026-10-05T14:00",
+    "2026-10-05T15:00",
+    "2026-10-05T16:00",
+    "2026-10-05T17:00",
+    "2026-10-05T18:00",
+    "2026-10-05T19:00",
+    "2026-10-05T20:00",
+    "2026-10-05T21:00",
+    "2026-10-05T22:00",
+    "2026-10-05T23:00",
+    "2026-10-06T00:00",
+    "2026-10-06T01:00",
+    "2026-10-06T02:00",
+    "2026-10-06T03:00",
+    "2026-10-06T04:00",
+    "2026-10-06T05:00",
+    "2026-10-06T06:00",
+    "2026-10-06T07:00",
+    "2026-10-06T08:00",
+    "2026-10-06T09:00",
+    "2026-10-06T10:00",
+    "2026-10-06T11:00",
+    "2026-10-06T12:00",
+    "2026-10-06T13:00",
+    "2026-10-06T14:00",
+    "2026-10-06T15:00",
+    "2026-10-06T16:00",
+    "2026-10-06T17:00",
+    "2026-10-06T18:00",
+    "2026-10-06T19:00",
+    "2026-10-06T20:00",
+    "2026-10-06T21:00",
+    "2026-10-06T22:00",
+    "2026-10-06T23:00",
+    "2026-10-07T00:00",
+    "2026-10-07T01:00",
+    "2026-10-07T02:00",
+    "2026-10-07T03:00",
+    "2026-10-07T04:00",
+    "2026-10-07T05:00",
+    "2026-10-07T06:00",
+    "2026-10-07T07:00",
+    "2026-10-07T08:00",
+    "2026-10-07T09:00",
+    "2026-10-07T10:00",
+    "2026-10-07T11:00",
+    "2026-10-07T12:00",
+    "2026-10-07T13:00",
+    "2026-10-07T14:00",
+    "2026-10-07T15:00",
+    "2026-10-07T16:00",
+    "2026-10-07T17:00",
+    "2026-10-07T18:00",
+    "2026-10-07T19:00",
+    "2026-10-07T20:00",
+    "2026-10-07T21:00",
+    "2026-10-07T22:00",
+    "2026-10-07T23:00",
+    "2026-10-08T00:00",
+    "2026-10-08T01:00",
+    "2026-10-08T02:00",
+    "2026-10-08T03:00",
+    "2026-10-08T04:00",
+    "2026-10-08T05:00",
+    "2026-10-08T06:00",
+    "2026-10-08T07:00",
+    "2026-10-08T08:00",
+    "2026-10-08T09:00",
+    "2026-10-08T10:00",
+    "2026-10-08T11:00",
+    "2026-10-08T12:00",
+    "2026-10-08T13:00",
+    "2026-10-08T14:00",
+    "2026-10-08T15:00",
+    "2026-10-08T16:00",
+    "2026-10-08T17:00",
+    "2026-10-08T18:00",
+    "2026-10-08T19:00",
+    "2026-10-08T20:00",
+    "2026-10-08T21:00",
+    "2026-10-08T22:00",
+    "2026-10-08T23:00",
+    "2026-10-09T00:00",
+    "2026-10-09T01:00",
+    "2026-10-09T02:00",
+    "2026-10-09T03:00",
+    "2026-10-09T04:00",
+    "2026-10-09T05:00",
+    "2026-10-09T06:00",
+    "2026-10-09T07:00",
+    "2026-10-09T08:00",
+    "2026-10-09T09:00",
+    "2026-10-09T10:00",
+    "2026-10-09T11:00",
+    "2026-10-09T12:00",
+    "2026-10-09T13:00",
+    "2026-10-09T14:00",
+    "2026-10-09T15:00",
+    "2026-10-09T16:00",
+    "2026-10-09T17:00",
+    "2026-10-09T18:00",
+    "2026-10-09T19:00",
+    "2026-10-09T20:00",
+    "2026-10-09T21:00",
+    "2026-10-09T22:00",
+    "2026-10-09T23:00",
+    "2026-10-10T00:00",
+    "2026-10-10T01:00",
+    "2026-10-10T02:00",
+    "2026-10-10T03:00",
+    "2026-10-10T04:00",
+    "2026-10-10T05:00",
+    "2026-10-10T06:00",
+    "2026-10-10T07:00",
+    "2026-10-10T08:00",
+    "2026-10-10T09:00",
+    "2026-10-10T10:00",
+    "2026-10-10T11:00",
+    "2026-10-10T12:00",
+    "2026-10-10T13:00",
+    "2026-10-10T14:00",
+    "2026-10-10T15:00",
+    "2026-10-10T16:00",
+    "2026-10-10T17:00",
+    "2026-10-10T18:00",
+    "2026-10-10T19:00",
+    "2026-10-10T20:00",
+    "2026-10-10T21:00",
+    "2026-10-10T22:00",
+    "2026-10-10T23:00",
+    "2026-10-11T00:00",
+    "2026-10-11T01:00",
+    "2026-10-11T02:00",
+    "2026-10-11T03:00",
+    "2026-10-11T04:00",
+    "2026-10-11T05:00",
+    "2026-10-11T06:00",
+    "2026-10-11T07:00",
+    "2026-10-11T08:00",
+    "2026-10-11T09:00",
+    "2026-10-11T10:00",
+    "2026-10-11T11:00",
+    "2026-10-11T12:00",
+    "2026-10-11T13:00",
+    "2026-10-11T14:00",
+    "2026-10-11T15:00",
+    "2026-10-11T16:00",
+    "2026-10-11T17:00",
+    "2026-10-11T18:00",
+    "2026-10-11T19:00",
+    "2026-10-11T20:00",
+    "2026-10-11T21:00",
+    "2026-10-11T22:00",
+    "2026-10-11T23:00"
+   ],
+   "wave_height": [
+    2.165,
+    2.1,
+    1.969,
+    2.034,
+    2.034,
+    2.1,
+    2.1,
+    2.1,
+    2.1,
+    2.1,
+    2.165,
+    2.165,
+    2.165,
+    2.231,
+    2.231,
+    2.297,
+    2.428,
+    2.493,
+    2.559,
+    2.69,
+    2.756,
+    2.756,
+    2.756,
+    2.756,
+    2.69,
+    2.69,
+    2.625,
+    2.625,
+    2.625,
+    2.625,
+    2.625,
+    2.625,
+    2.625,
+    2.625,
+    2.625,
+    2.625,
+    2.625,
+    2.625,
+    2.625,
+    2.69,
+    2.69,
+    2.756,
+    2.756,
+    2.822,
+    2.822,
+    2.822,
+    2.887,
+    2.887,
+    2.887,
+    2.953,
+    2.953,
+    2.953,
+    3.018,
+    3.018,
+    3.018,
+    3.084,
+    3.084,
+    3.084,
+    3.084,
+    3.084,
+    3.084,
+    3.15,
+    3.15,
+    3.15,
+    3.15,
+    3.15,
+    3.15,
+    3.15,
+    3.15,
+    3.15,
+    3.15,
+    3.15,
+    3.15,
+    3.084,
+    3.084,
+    3.15,
+    3.15,
+    3.215,
+    3.215,
+    3.281,
+    3.281,
+    3.281,
+    3.346,
+    3.346,
+    3.346,
+    3.412,
+    3.412,
+    3.478,
+    3.543,
+    3.609,
+    3.609,
+    3.675,
+    3.675,
+    3.675,
+    3.74,
+    3.74,
+    3.74,
+    3.675,
+    3.675,
+    3.675,
+    3.609,
+    3.609,
+    3.609,
+    3.609,
+    3.609,
+    3.609,
+    3.543,
+    3.543,
+    3.543,
+    3.478,
+    3.478,
+    3.543,
+    3.609,
+    3.675,
+    3.675,
+    3.675,
+    3.675,
+    3.675,
+    3.609,
+    3.609,
+    3.609,
+    3.609,
+    3.609,
+    3.543,
+    3.543,
+    3.478,
+    3.478,
+    3.412,
+    3.412,
+    3.412,
+    3.346,
+    3.346,
+    3.281,
+    3.281,
+    3.215,
+    3.215,
+    3.15,
+    3.15,
+    3.15,
+    3.084,
+    3.084,
+    3.084,
+    3.018,
+    3.018,
+    3.018,
+    2.953,
+    2.953,
+    2.953,
+    3.018,
+    3.018,
+    3.084,
+    3.15,
+    3.215,
+    3.281,
+    3.412,
+    3.478,
+    3.675,
+    3.937,
+    4.134,
+    4.528,
+    4.987,
+    5.381,
+    5.577,
+    5.84,
+    6.037,
+    5.971,
+    5.84,
+    5.774
+   ],
+   "zone": "America/Los_Angeles",
+   "rows": [
+    {
+     "time": "Mon 12:00 AM",
+     "wave_height": 2.165
+    },
+    {
+     "time": "Mon 1:00 AM",
+     "wave_height": 2.1
+    },
+    {
+     "time": "Mon 2:00 AM",
+     "wave_height": 1.969
+    },
+    {
+     "time": "Mon 3:00 AM",
+     "wave_height": 2.034
+    },
+    {
+     "time": "Mon 4:00 AM",
+     "wave_height": 2.034
+    },
+    {
+     "time": "Mon 5:00 AM",
+     "wave_height": 2.1
+    },
+    {
+     "time": "Mon 6:00 AM",
+     "wave_height": 2.1
+    },
+    {
+     "time": "Mon 7:00 AM",
+     "wave_height": 2.1
+    },
+    {
+     "time": "Mon 8:00 AM",
+     "wave_height": 2.1
+    },
+    {
+     "time": "Mon 9:00 AM",
+     "wave_height": 2.1
+    },
+    {
+     "time": "Mon 10:00 AM",
+     "wave_height": 2.165
+    },
+    {
+     "time": "Mon 11:00 AM",
+     "wave_height": 2.165
+    },
+    {
+     "time": "Mon 12:00 PM",
+     "wave_height": 2.165
+    },
+    {
+     "time": "Mon 1:00 PM",
+     "wave_height": 2.231
+    },
+    {
+     "time": "Mon 2:00 PM",
+     "wave_height": 2.231
+    },
+    {
+     "time": "Mon 3:00 PM",
+     "wave_height": 2.297
+    },
+    {
+     "time": "Mon 4:00 PM",
+     "wave_height": 2.428
+    },
+    {
+     "time": "Mon 5:00 PM",
+     "wave_height": 2.493
+    },
+    {
+     "time": "Mon 6:00 PM",
+     "wave_height": 2.559
+    },
+    {
+     "time": "Mon 7:00 PM",
+     "wave_height": 2.69
+    },
+    {
+     "time": "Mon 8:00 PM",
+     "wave_height": 2.756
+    },
+    {
+     "time": "Mon 9:00 PM",
+     "wave_height": 2.756
+    },
+    {
+     "time": "Mon 10:00 PM",
+     "wave_height": 2.756
+    },
+    {
+     "time": "Mon 11:00 PM",
+     "wave_height": 2.756
+    }
+   ]
+  },
+  "tapped": [
+   {
+    "title": "Open-Meteo marine",
+    "url": "https://marine-api.open-meteo.com/v1/marine?latitude=33.698007&longitude=-118.003834&current=wave_height,wave_direction,wave_period,swell_wave_height,swell_wave_direction,swell_wave_period,sea_surface_temperature&hourly=wave_height&length_unit=imperial&temperature_unit=fahrenheit&timezone=auto",
+    "label": "Huntington Beach (CA)",
+    "params": {
+     "lat": "33.698007",
+     "lon": "-118.003834"
+    },
+    "scope": "place"
+   }
+  ],
+  "links": [],
+  "notes": [
+   "shell item created",
+   "paused: sources from the SmartBrain Library are on the card",
+   "fetching consented source (marine-api.open-meteo.com)",
+   "built from the Library's declared answers: Wave height by hour; this source doesn't report: wind",
+   "built from the Library's declared answers: Wave height by hour; this source doesn't report: wind"
+  ],
+  "answers": "built from the Library's declared answers: Wave height by hour; this source doesn't report: wind",
+  "scene_text": [
+   "surf forecast",
+   "Mon 12:00 AM \u00b7 2.165 ft",
+   "Mon 1:00 AM \u00b7 2.1 ft",
+   "Mon 2:00 AM \u00b7 1.969 ft",
+   "Mon 3:00 AM \u00b7 2.034 ft",
+   "Mon 4:00 AM \u00b7 2.034 ft",
+   "Mon 5:00 AM \u00b7 2.1 ft",
+   "Mon 6:00 AM \u00b7 2.1 ft",
+   "Mon 7:00 AM \u00b7 2.1 ft",
+   "Mon 8:00 AM \u00b7 2.1 ft",
+   "Mon 9:00 AM \u00b7 2.1 ft",
+   "Mon 10:00 AM \u00b7 2.165 ft"
+  ],
+  "pipeline": [
+   {
+    "op": "extract",
+    "paths": {
+     "time": "hourly.time",
+     "wave_height": "hourly.wave_height",
+     "zone": "timezone"
+    }
+   },
+   {
+    "op": "transform",
+    "apply": [
+     {
+      "fn": "zip",
+      "field": "time",
+      "with": [
+       "wave_height"
+      ],
+      "as": "rows"
+     },
+     {
+      "fn": "top_n",
+      "field": "rows",
+      "n": 24
+     },
+     {
+      "fn": "time",
+      "field": "rows",
+      "key": "time",
+      "zone": "zone"
+     },
+     {
+      "fn": "number",
+      "field": "rows",
+      "key": "wave_height"
+     }
+    ]
+   }
+  ],
+  "latest": {
+   "type": "stack",
+   "dir": "v",
+   "gap": "sm",
+   "children": [
+    {
+     "type": "text",
+     "value": "surf forecast",
+     "role": "title",
+     "tone": "default",
+     "size": "md"
+    },
+    {
+     "type": "stack",
+     "dir": "v",
+     "gap": "sm",
+     "children": [
+      {
+       "type": "text",
+       "value": "Mon 12:00 AM \u00b7 2.165 ft",
+       "role": "label",
+       "tone": "default",
+       "size": "sm"
+      },
+      {
+       "type": "text",
+       "value": "Mon 1:00 AM \u00b7 2.1 ft",
+       "role": "label",
+       "tone": "default",
+       "size": "sm"
+      },
+      {
+       "type": "text",
+       "value": "Mon 2:00 AM \u00b7 1.969 ft",
+       "role": "label",
+       "tone": "default",
+       "size": "sm"
+      },
+      {
+       "type": "text",
+       "value": "Mon 3:00 AM \u00b7 2.034 ft",
+       "role": "label",
+       "tone": "default",
+       "size": "sm"
+      },
+      {
+       "type": "text",
+       "value": "Mon 4:00 AM \u00b7 2.034 ft",
+       "role": "label",
+       "tone": "default",
+       "size": "sm"
+      },
+      {
+       "type": "text",
+       "value": "Mon 5:00 AM \u00b7 2.1 ft",
+       "role": "label",
+       "tone": "default",
+       "size": "sm"
+      },
+      {
+       "type": "text",
+       "value": "Mon 6:00 AM \u00b7 2.1 ft",
+       "role": "label",
+       "tone": "default",
+       "size": "sm"
+      },
+      {
+       "type": "text",
+       "value": "Mon 7:00 AM \u00b7 2.1 ft",
+       "role": "label",
+       "tone": "default",
+       "size": "sm"
+      },
+      {
+       "type": "text",
+       "value": "Mon 8:00 AM \u00b7 2.1 ft",
+       "role": "label",
+       "tone": "default",
+       "size": "sm"
+      },
+      {
+       "type": "text",
+       "value": "Mon 9:00 AM \u00b7 2.1 ft",
+       "role": "label",
+       "tone": "default",
+       "size": "sm"
+      },
+      {
+       "type": "text",
+       "value": "Mon 10:00 AM \u00b7 2.165 ft",
+       "role": "label",
+       "tone": "default",
+       "size": "sm"
+      },
+      {
+       "type": "text",
+       "value": "Mon 11:00 AM \u00b7 2.165 ft",
+       "role": "label",
+       "tone": "default",
+       "size": "sm"
+      },
+      {
+       "type": "text",
+       "value": "Mon 12:00 PM \u00b7 2.165 ft",
+       "role": "label",
+       "tone": "default",
+       "size": "sm"
+      },
+      {
+       "type": "text",
+       "value": "Mon 1:00 PM \u00b7 2.231 ft",
+       "role": "label",
+       "tone": "default",
+       "size": "sm"
+      },
+      {
+       "type": "text",
+       "value": "Mon 2:00 PM \u00b7 2.231 ft",
+       "role": "label",
+       "tone": "default",
+       "size": "sm"
+      },
+      {
+       "type": "text",
+       "value": "Mon 3:00 PM \u00b7 2.297 ft",
+       "role": "label",
+       "tone": "default",
+       "size": "sm"
+      },
+      {
+       "type": "text",
+       "value": "Mon 4:00 PM \u00b7 2.428 ft",
+       "role": "label",
+       "tone": "default",
+       "size": "sm"
+      },
+      {
+       "type": "text",
+       "value": "Mon 5:00 PM \u00b7 2.493 ft",
+       "role": "label",
+       "tone": "default",
+       "size": "sm"
+      },
+      {
+       "type": "text",
+       "value": "Mon 6:00 PM \u00b7 2.559 ft",
+       "role": "label",
+       "tone": "default",
+       "size": "sm"
+      },
+      {
+       "type": "text",
+       "value": "Mon 7:00 PM \u00b7 2.69 ft",
+       "role": "label",
+       "tone": "default",
+       "size": "sm"
+      },
+      {
+       "type": "text",
+       "value": "Mon 8:00 PM \u00b7 2.756 ft",
+       "role": "label",
+       "tone": "default",
+       "size": "sm"
+      },
+      {
+       "type": "text",
+       "value": "Mon 9:00 PM \u00b7 2.756 ft",
+       "role": "label",
+       "tone": "default",
+       "size": "sm"
+      },
+      {
+       "type": "text",
+       "value": "Mon 10:00 PM \u00b7 2.756 ft",
+       "role": "label",
+       "tone": "default",
+       "size": "sm"
+      },
+      {
+       "type": "text",
+       "value": "Mon 11:00 PM \u00b7 2.756 ft",
+       "role": "label",
+       "tone": "default",
+       "size": "sm"
+      }
+     ]
+    }
+   ]
+  },
+  "secs": 5.2
+ },
+ {
+  "ask": "hourly temps in Minneapolis today",
+  "outcome": "live",
+  "source": "library: NWS hourly forecast \u2014 api.weather.gov",
+  "detail": "",
+  "preview": {
+   "rows": [
+    {
+     "number": 1,
+     "name": "",
+     "startTime": "3:00 AM",
+     "endTime": "2026-10-05T23:00:00-05:00",
+     "isDaytime": false,
+     "temperature": 60,
+     "temperatureUnit": "F",
+     "temperatureTrend": null,
+     "probabilityOfPrecipitation": {
+      "unitCode": "wmoUnit:percent",
+      "value": 0
+     },
+     "dewpoint": {
+      "unitCode": "wmoUnit:degC",
+      "value": 7.777777777777778
+     },
+     "relativeHumidity": {
+      "unitCode": "wmoUnit:percent",
+      "value": 60
+     },
+     "windSpeed": "5 mph",
+     "windDirection": "SSE",
+     "icon": "https://api.weather.gov/icons/land/night/few?size=small",
+     "shortForecast": "Mostly Clear",
+     "detailedForecast": ""
+    },
+    {
+     "number": 2,
+     "name": "",
+     "startTime": "4:00 AM",
+     "endTime": "2026-10-06T00:00:00-05:00",
+     "isDaytime": false,
+     "temperature": 60,
+     "temperatureUnit": "F",
+     "temperatureTrend": null,
+     "probabilityOfPrecipitation": {
+      "unitCode": "wmoUnit:percent",
+      "value": 0
+     },
+     "dewpoint": {
+      "unitCode": "wmoUnit:degC",
+      "value": 7.777777777777778
+     },
+     "relativeHumidity": {
+      "unitCode": "wmoUnit:percent",
+      "value": 60
+     },
+     "windSpeed": "5 mph",
+     "windDirection": "SSE",
+     "icon": "https://api.weather.gov/icons/land/night/few?size=small",
+     "shortForecast": "Mostly Clear",
+     "detailedForecast": ""
+    }
+   ]
+  },
+  "tapped": [
+   {
+    "title": "NWS hourly forecast",
+    "url": "https://api.weather.gov/gridpoints/{office}/{grid_x},{grid_y}/forecast/hourly",
+    "label": "Minneapolis (MN)",
+    "params": {
+     "lat": "44.963324",
+     "lon": "-93.26832"
+    },
+    "scope": "place"
+   }
+  ],
+  "links": [],
+  "notes": [
+   "shell item created",
+   "paused: sources from the SmartBrain Library are on the card",
+   "fetching consented source (api.weather.gov)",
+   "built from the Library's declared answers: Hourly forecast",
+   "built from the Library's declared answers: Hourly forecast"
+  ],
+  "answers": "built from the Library's declared answers: Hourly forecast",
+  "scene_text": [
+   "temperature",
+   "3:00 AM \u00b7 60\u00b0F \u00b7 0% \u00b7 Mostly Clear",
+   "4:00 AM \u00b7 60\u00b0F \u00b7 0% \u00b7 Mostly Clear"
+  ],
+  "pipeline": [
+   {
+    "op": "extract",
+    "paths": {
+     "rows": "properties.periods"
+    }
+   },
+   {
+    "op": "transform",
+    "apply": [
+     {
+      "fn": "window",
+      "field": "rows",
+      "key": "startTime",
+      "window": "today",
+      "step": "hour",
+      "floor": false
+     },
+     {
+      "fn": "time",
+      "field": "rows",
+      "key": "startTime",
+      "clock": true
+     },
+     {
+      "fn": "number",
+      "field": "rows",
+      "key": "temperature"
+     },
+     {
+      "fn": "number",
+      "field": "rows",
+      "key": "probabilityOfPrecipitation.value"
+     }
+    ]
+   }
+  ],
+  "latest": {
+   "type": "stack",
+   "dir": "v",
+   "gap": "sm",
+   "children": [
+    {
+     "type": "text",
+     "value": "temperature",
+     "role": "title",
+     "tone": "default",
+     "size": "md"
+    },
+    {
+     "type": "stack",
+     "dir": "v",
+     "gap": "sm",
+     "children": [
+      {
+       "type": "text",
+       "value": "3:00 AM \u00b7 60\u00b0F \u00b7 0% \u00b7 Mostly Clear",
+       "role": "label",
+       "tone": "default",
+       "size": "sm"
+      },
+      {
+       "type": "text",
+       "value": "4:00 AM \u00b7 60\u00b0F \u00b7 0% \u00b7 Mostly Clear",
+       "role": "label",
+       "tone": "default",
+       "size": "sm"
+      }
+     ]
+    }
+   ]
+  },
+  "secs": 7.2
+ },
+ {
+  "ask": "when does the next rocket launch from Vandenberg",
+  "outcome": "live",
+  "source": "library: Upcoming rocket launches (Launch Library 2) \u2014 ll.thespacedevs.com",
+  "detail": "",
+  "preview": {
+   "rows": [
+    {
+     "id": "da43dc2c-00af-4cc1-8ef1-90a60b2eb9e5",
+     "url": "https://ll.thespacedevs.com/2.3.0/launches/da43dc2c-00af-4cc1-8ef1-90a60b2eb9e5/",
+     "name": "Falcon 9 Block 5 | SDA Tranche 1 Transport Layer A",
+     "response_mode": "list",
+     "slug": "falcon-9-block-5-sda-tranche-1-transport-layer-a",
+     "launch_designator": null,
+     "status": {
+      "id": 1,
+      "name": "Go for Launch",
+      "abbrev": "Go",
+      "description": "Current T-0 confirmed by official or reliable sources."
+     },
+     "last_updated": "2026-10-06T00:44:43Z",
+     "net": "Thu 7:54 AM",
+     "net_precision": {
+      "id": 1,
+      "name": "Minute",
+      "abbrev": "MIN",
+      "description": "The T-0 is accurate to the minute."
+     },
+     "window_end": "2026-10-08T07:54:00Z",
+     "window_start": "2026-10-08T07:54:00Z",
+     "image": {
+      "id": 1736,
+      "name": "Falcon 9 liftoff from LC-39A",
+      "image_url": "https://thespacedevs-prod.nyc3.digitaloceanspaces.com/media/images/falcon_9_image_20230807133459.jpeg",
+      "thumbnail_url": "https://thespacedevs-prod.nyc3.digitaloceanspaces.com/media/images/255bauto255d__image_thumbnail_20240305193628.jpeg",
+      "credit": "SpaceX",
+      "license": {
+       "id": 5,
+       "name": "CC BY-NC 2.0",
+       "priority": 1,
+       "link": "https://creativecommons.org/licenses/by-nc/2.0/"
+      },
+      "single_use": false,
+      "variants": []
+     },
+     "infographic": null
+    },
+    {
+     "id": "97c6f5e1-299e-4652-b72d-9618ac047076",
+     "url": "https://ll.thespacedevs.com/2.3.0/launches/97c6f5e1-299e-4652-b72d-9618ac047076/",
+     "name": "Falcon 9 Block 5 | Starlink Group 15-25",
+     "response_mode": "list",
+     "slug": "falcon-9-block-5-starlink-group-15-25",
+     "launch_designator": null,
+     "status": {
+      "id": 1,
+      "name": "Go for Launch",
+      "abbrev": "Go",
+      "description": "Current T-0 confirmed by official or reliable sources."
+     },
+     "last_updated": "2026-09-30T23:22:54Z",
+     "net": "Sat 11:00 PM",
+     "net_precision": {
+      "id": 1,
+      "name": "Minute",
+      "abbrev": "MIN",
+      "description": "The T-0 is accurate to the minute."
+     },
+     "window_end": "2026-10-11T03:00:00Z",
+     "window_start": "2026-10-10T23:00:00Z",
+     "image": {
+      "id": 1296,
+      "name": "Starlink night fairing",
+      "image_url": "https://thespacedevs-prod.nyc3.digitaloceanspaces.com/media/images/falcon2520925_image_20221009234147.png",
+      "thumbnail_url": "https://thespacedevs-prod.nyc3.digitaloceanspaces.com/media/images/255bauto255d__image_thumbnail_20240305192320.png",
+      "credit": "SpaceX",
+      "license": {
+       "id": 5,
+       "name": "CC BY-NC 2.0",
+       "priority": 1,
+       "link": "https://creativecommons.org/licenses/by-nc/2.0/"
+      },
+      "single_use": false,
+      "variants": []
+     },
+     "infographic": null
+    },
+    {
+     "id": "df88cfbf-f504-4e11-8370-e33dd6280b5b",
+     "url": "https://ll.thespacedevs.com/2.3.0/launches/df88cfbf-f504-4e11-8370-e33dd6280b5b/",
+     "name": "Falcon 9 Block 5 | USSF-xxx (\"TH-2\")",
+     "response_mode": "list",
+     "slug": "falcon-9-block-5-ussf-xxx-th-2",
+     "launch_designator": null,
+     "status": {
+      "id": 8,
+      "name": "To Be Confirmed",
+      "abbrev": "TBC",
+      "description": "Awaiting official confirmation - current date is known with some certainty."
+     },
+     "last_updated": "2026-10-06T00:57:29Z",
+     "net": "Oct 15, 11:44 PM",
+     "net_precision": {
+      "id": 1,
+      "name": "Minute",
+      "abbrev": "MIN",
+      "description": "The T-0 is accurate to the minute."
+     },
+     "window_end": "2026-10-16T03:44:00Z",
+     "window_start": "2026-10-15T23:44:00Z",
+     "image": {
+      "id": 2797,
+      "name": "Falcon 9 liftoff from SLC-4E (USSF-366)",
+      "image_url": "https://thespacedevs-prod.nyc3.digitaloceanspaces.com/media/images/falcon_9_liftof_image_20260816171423.jpg",
+      "thumbnail_url": "https://thespacedevs-prod.nyc3.digitaloceanspaces.com/media/images/falcon_9_liftof_image_thumbnail_20260816171423.jpeg",
+      "credit": "SpaceX",
+      "license": {
+       "id": 1,
+       "name": "Unknown",
+       "priority": 9,
+       "link": null
+      },
+      "single_use": true,
+      "variants": []
+     },
+     "infographic": null
+    },
+    {
+     "id": "71ed4649-8d71-42e8-8548-d42ffa2c5a6e",
+     "url": "https://ll.thespacedevs.com/2.3.0/launches/71ed4649-8d71-42e8-8548-d42ffa2c5a6e/",
+     "name": "Falcon 9 Block 5 | SDA Tranche 2 Transport Layer E",
+     "response_mode": "list",
+     "slug": "falcon-9-block-5-sda-tranche-2-transport-layer-e",
+     "launch_designator": null,
+     "status": {
+      "id": 2,
+      "name": "To Be Determined",
+      "abbrev": "TBD",
+      "description": "Current date is a placeholder or rough estimation based on unreliable or interpreted sources."
+     },
+     "last_updated": "2025-04-10T05:42:02Z",
+     "net": "Dec 31, 12:00 AM",
+     "net_precision": {
+      "id": 7,
+      "name": "Month",
+      "abbrev": "M",
+      "description": "The T-0 is expected in the given month."
+     },
+     "window_end": "2026-12-31T00:00:00Z",
+     "window_start": "2026-12-31T00:00:00Z",
+     "image": {
+      "id": 1736,
+      "name": "Falcon 9 liftoff from LC-39A",
+      "image_url": "https://thespacedevs-prod.nyc3.digitaloceanspaces.com/media/images/falcon_9_image_20230807133459.jpeg",
+      "thumbnail_url": "https://thespacedevs-prod.nyc3.digitaloceanspaces.com/media/images/255bauto255d__image_thumbnail_20240305193628.jpeg",
+      "credit": "SpaceX",
+      "license": {
+       "id": 5,
+       "name": "CC BY-NC 2.0",
+       "priority": 1,
+       "link": "https://creativecommons.org/licenses/by-nc/2.0/"
+      },
+      "single_use": false,
+      "variants": []
+     },
+     "infographic": null
+    },
+    {
+     "id": "2d0472b9-463d-49c8-afb1-7925e49a3368",
+     "url": "https://ll.thespacedevs.com/2.3.0/launches/2d0472b9-463d-49c8-afb1-7925e49a3368/",
+     "name": "Falcon 9 Block 5 | SDA Tranche 1 Tracking Layer A",
+     "response_mode": "list",
+     "slug": "falcon-9-block-5-sda-tranche-1-tracking-layer-a",
+     "launch_designator": null,
+     "status": {
+      "id": 2,
+      "name": "To Be Determined",
+      "abbrev": "TBD",
+      "description": "Current date is a placeholder or rough estimation based on unreliable or interpreted sources."
+     },
+     "last_updated": "2026-08-27T15:58:58Z",
+     "net": "Dec 31, 12:00 AM",
+     "net_precision": {
+      "id": 11,
+      "name": "Quarter 4",
+      "abbrev": "Q4",
+      "description": "The T-0 is expected in the fourth quarter of the given year."
+     },
+     "window_end": "2026-12-31T00:00:00Z",
+     "window_start": "2026-12-31T00:00:00Z",
+     "image": {
+      "id": 1736,
+      "name": "Falcon 9 liftoff from LC-39A",
+      "image_url": "https://thespacedevs-prod.nyc3.digitaloceanspaces.com/media/images/falcon_9_image_20230807133459.jpeg",
+      "thumbnail_url": "https://thespacedevs-prod.nyc3.digitaloceanspaces.com/media/images/255bauto255d__image_thumbnail_20240305193628.jpeg",
+      "credit": "SpaceX",
+      "license": {
+       "id": 5,
+       "name": "CC BY-NC 2.0",
+       "priority": 1,
+       "link": "https://creativecommons.org/licenses/by-nc/2.0/"
+      },
+      "single_use": false,
+      "variants": []
+     },
+     "infographic": null
+    },
+    {
+     "id": "dca8749f-1552-485a-8061-f1ad79055b8d",
+     "url": "https://ll.thespacedevs.com/2.3.0/launches/dca8749f-1552-485a-8061-f1ad79055b8d/",
+     "name": "Falcon 9 Block 5 | SDA Tranche 1 Tracking Layer C",
+     "response_mode": "list",
+     "slug": "falcon-9-block-5-sda-tranche-1-tracking-layer-c",
+     "launch_designator": null,
+     "status": {
+      "id": 2,
+      "name": "To Be Determined",
+      "abbrev": "TBD",
+      "description": "Current date is a placeholder or rough estimation based on unreliable or interpreted sources."
+     },
+     "last_updated": "2026-08-27T16:02:56Z",
+     "net": "Dec 31, 12:00 AM",
+     "net_precision": {
+      "id": 11,
+      "name": "Quarter 4",
+      "abbrev": "Q4",
+      "description": "The T-0 is expected in the fourth quarter of the given year."
+     },
+     "window_end": "2026-12-31T00:00:00Z",
+     "window_start": "2026-12-31T00:00:00Z",
+     "image": {
+      "id": 1736,
+      "name": "Falcon 9 liftoff from LC-39A",
+      "image_url": "https://thespacedevs-prod.nyc3.digitaloceanspaces.com/media/images/falcon_9_image_20230807133459.jpeg",
+      "thumbnail_url": "https://thespacedevs-prod.nyc3.digitaloceanspaces.com/media/images/255bauto255d__image_thumbnail_20240305193628.jpeg",
+      "credit": "SpaceX",
+      "license": {
+       "id": 5,
+       "name": "CC BY-NC 2.0",
+       "priority": 1,
+       "link": "https://creativecommons.org/licenses/by-nc/2.0/"
+      },
+      "single_use": false,
+      "variants": []
+     },
+     "infographic": null
+    },
+    {
+     "id": "fcbc4550-e69e-4458-a9e6-4a5b6b6b15a5",
+     "url": "https://ll.thespacedevs.com/2.3.0/launches/fcbc4550-e69e-4458-a9e6-4a5b6b6b15a5/",
+     "name": "Falcon 9 Block 5 | SDA Tranche 1 Tracking Layer E",
+     "response_mode": "list",
+     "slug": "falcon-9-block-5-sda-tranche-1-tracking-layer-e",
+     "launch_designator": null,
+     "status": {
+      "id": 2,
+      "name": "To Be Determined",
+      "abbrev": "TBD",
+      "description": "Current date is a placeholder or rough estimation based on unreliable or interpreted sources."
+     },
+     "last_updated": "2026-08-27T16:03:29Z",
+     "net": "Dec 31, 12:00 AM",
+     "net_precision": {
+      "id": 11,
+      "name": "Quarter 4",
+      "abbrev": "Q4",
+      "description": "The T-0 is expected in the fourth quarter of the given year."
+     },
+     "window_end": "2026-12-31T00:00:00Z",
+     "window_start": "2026-12-31T00:00:00Z",
+     "image": {
+      "id": 1736,
+      "name": "Falcon 9 liftoff from LC-39A",
+      "image_url": "https://thespacedevs-prod.nyc3.digitaloceanspaces.com/media/images/falcon_9_image_20230807133459.jpeg",
+      "thumbnail_url": "https://thespacedevs-prod.nyc3.digitaloceanspaces.com/media/images/255bauto255d__image_thumbnail_20240305193628.jpeg",
+      "credit": "SpaceX",
+      "license": {
+       "id": 5,
+       "name": "CC BY-NC 2.0",
+       "priority": 1,
+       "link": "https://creativecommons.org/licenses/by-nc/2.0/"
+      },
+      "single_use": false,
+      "variants": []
+     },
+     "infographic": null
+    },
+    {
+     "id": "4541ce85-0e38-42ac-a9a0-20474bb5f2cd",
+     "url": "https://ll.thespacedevs.com/2.3.0/launches/4541ce85-0e38-42ac-a9a0-20474bb5f2cd/",
+     "name": "Falcon 9 Block 5 | SDA Tranche 1 Transport Layer D",
+     "response_mode": "list",
+     "slug": "falcon-9-block-5-sda-tranche-1-transport-layer-d",
+     "launch_designator": null,
+     "status": {
+      "id": 2,
+      "name": "To Be Determined",
+      "abbrev": "TBD",
+      "description": "Current date is a placeholder or rough estimation based on unreliable or interpreted sources."
+     },
+     "last_updated": "2026-08-27T16:00:47Z",
+     "net": "Dec 31, 12:00 AM",
+     "net_precision": {
+      "id": 11,
+      "name": "Quarter 4",
+      "abbrev": "Q4",
+      "description": "The T-0 is expected in the fourth quarter of the given year."
+     },
+     "window_end": "2026-12-31T00:00:00Z",
+     "window_start": "2026-12-31T00:00:00Z",
+     "image": {
+      "id": 1736,
+      "name": "Falcon 9 liftoff from LC-39A",
+      "image_url": "https://thespacedevs-prod.nyc3.digitaloceanspaces.com/media/images/falcon_9_image_20230807133459.jpeg",
+      "thumbnail_url": "https://thespacedevs-prod.nyc3.digitaloceanspaces.com/media/images/255bauto255d__image_thumbnail_20240305193628.jpeg",
+      "credit": "SpaceX",
+      "license": {
+       "id": 5,
+       "name": "CC BY-NC 2.0",
+       "priority": 1,
+       "link": "https://creativecommons.org/licenses/by-nc/2.0/"
+      },
+      "single_use": false,
+      "variants": []
+     },
+     "infographic": null
+    },
+    {
+     "id": "c5783e2b-d458-4b99-9936-4043c236190b",
+     "url": "https://ll.thespacedevs.com/2.3.0/launches/c5783e2b-d458-4b99-9936-4043c236190b/",
+     "name": "Falcon 9 Block 5 | SDA Tranche 1 Transport Layer F",
+     "response_mode": "list",
+     "slug": "falcon-9-block-5-sda-tranche-1-transport-layer-f",
+     "launch_designator": null,
+     "status": {
+      "id": 2,
+      "name": "To Be Determined",
+      "abbrev": "TBD",
+      "description": "Current date is a placeholder or rough estimation based on unreliable or interpreted sources."
+     },
+     "last_updated": "2026-08-27T16:01:25Z",
+     "net": "Dec 31, 12:00 AM",
+     "net_precision": {
+      "id": 11,
+      "name": "Quarter 4",
+      "abbrev": "Q4",
+      "description": "The T-0 is expected in the fourth quarter of the given year."
+     },
+     "window_end": "2026-12-31T00:00:00Z",
+     "window_start": "2026-12-31T00:00:00Z",
+     "image": {
+      "id": 1736,
+      "name": "Falcon 9 liftoff from LC-39A",
+      "image_url": "https://thespacedevs-prod.nyc3.digitaloceanspaces.com/media/images/falcon_9_image_20230807133459.jpeg",
+      "thumbnail_url": "https://thespacedevs-prod.nyc3.digitaloceanspaces.com/media/images/255bauto255d__image_thumbnail_20240305193628.jpeg",
+      "credit": "SpaceX",
+      "license": {
+       "id": 5,
+       "name": "CC BY-NC 2.0",
+       "priority": 1,
+       "link": "https://creativecommons.org/licenses/by-nc/2.0/"
+      },
+      "single_use": false,
+      "variants": []
+     },
+     "infographic": null
+    },
+    {
+     "id": "875ba957-be5f-42bd-8a6e-ed98254f572a",
+     "url": "https://ll.thespacedevs.com/2.3.0/launches/875ba957-be5f-42bd-8a6e-ed98254f572a/",
+     "name": "Firefly Alpha Block 2 | ConnectedCosmos Launch 1",
+     "response_mode": "list",
+     "slug": "firefly-alpha-block-2-connectedcosmos-launch-1",
+     "launch_designator": null,
+     "status": {
+      "id": 2,
+      "name": "To Be Determined",
+      "abbrev": "TBD",
+      "description": "Current date is a placeholder or rough estimation based on unreliable or interpreted sources."
+     },
+     "last_updated": "2026-08-11T22:32:15Z",
+     "net": "Dec 31, 12:00 AM",
+     "net_precision": {
+      "id": 11,
+      "name": "Quarter 4",
+      "abbrev": "Q4",
+      "description": "The T-0 is expected in the fourth quarter of the given year."
+     },
+     "window_end": "2026-12-31T00:00:00Z",
+     "window_start": "2026-12-31T00:00:00Z",
+     "image": {
+      "id": 1740,
+      "name": "Firefly Alpha liftoff (FLTA004)",
+      "image_url": "https://thespacedevs-prod.nyc3.digitaloceanspaces.com/media/images/firefly_alpha_l_image_20240605174156.jpeg",
+      "thumbnail_url": "https://thespacedevs-prod.nyc3.digitaloceanspaces.com/media/images/firefly_alpha_l_image_thumbnail_20240605174157.jpeg",
+      "credit": "Firefly Aerospace / Jack Beyer",
+      "license": {
+       "id": 1,
+       "name": "Unknown",
+       "priority": 9,
+       "link": null
+      },
+      "single_use": true,
+      "variants": []
+     },
+     "infographic": null
+    }
+   ],
+   "rows_count": 10
+  },
+  "tapped": [
+   {
+    "title": "Upcoming rocket launches (Launch Library 2)",
+    "url": "https://ll.thespacedevs.com/2.3.0/launches/upcoming/?limit=10&mode=list&hide_recent_previous=true&location__ids=11&lsp__id=",
+    "label": "Vandenberg (California)",
+    "params": {
+     "site": "11",
+     "provider": ""
+    },
+    "scope": "global"
+   }
+  ],
+  "links": [],
+  "notes": [
+   "shell item created",
+   "paused: sources from the SmartBrain Library are on the card",
+   "fetching consented source (ll.thespacedevs.com)",
+   "built from the Library's declared answers: Upcoming launches",
+   "built from the Library's declared answers: Upcoming launches"
+  ],
+  "answers": "built from the Library's declared answers: Upcoming launches",
+  "scene_text": [
+   "rocket launch",
+   "Falcon 9 Block 5 | SDA Tranche 1 Transport Layer A \u00b7 Thu 7:54 AM \u00b7 Go for Launch",
+   "Falcon 9 Block 5 | Starlink Group 15-25 \u00b7 Sat 11:00 PM \u00b7 Go for Launch",
+   "Falcon 9 Block 5 | USSF-xxx (\"TH-2\") \u00b7 Oct 15, 11:44 PM \u00b7 To Be Confirmed",
+   "Falcon 9 Block 5 | SDA Tranche 2 Transport Layer E \u00b7 Dec 31, 12:00 AM \u00b7 To Be Determined",
+   "Falcon 9 Block 5 | SDA Tranche 1 Tracking Layer A \u00b7 Dec 31, 12:00 AM \u00b7 To Be Determined"
+  ],
+  "pipeline": [
+   {
+    "op": "extract",
+    "paths": {
+     "rows": "results"
+    }
+   },
+   {
+    "op": "transform",
+    "apply": [
+     {
+      "fn": "window",
+      "field": "rows",
+      "key": "net",
+      "window": "upcoming",
+      "step": "day"
+     },
+     {
+      "fn": "time",
+      "field": "rows",
+      "key": "net"
+     },
+     {
+      "fn": "count",
+      "field": "rows",
+      "as": "rows_count"
+     }
+    ]
+   }
+  ],
+  "latest": {
+   "type": "stack",
+   "dir": "v",
+   "gap": "sm",
+   "children": [
+    {
+     "type": "text",
+     "value": "rocket launch",
+     "role": "title",
+     "tone": "default",
+     "size": "md"
+    },
+    {
+     "type": "stack",
+     "dir": "v",
+     "gap": "sm",
+     "children": [
+      {
+       "type": "text",
+       "value": "Falcon 9 Block 5 | SDA Tranche 1 Transport Layer A \u00b7 Thu 7:54 AM \u00b7 Go for Launch",
+       "role": "label",
+       "tone": "default",
+       "size": "sm"
+      },
+      {
+       "type": "text",
+       "value": "Falcon 9 Block 5 | Starlink Group 15-25 \u00b7 Sat 11:00 PM \u00b7 Go for Launch",
+       "role": "label",
+       "tone": "default",
+       "size": "sm"
+      },
+      {
+       "type": "text",
+       "value": "Falcon 9 Block 5 | USSF-xxx (\"TH-2\") \u00b7 Oct 15, 11:44 PM \u00b7 To Be Confirmed",
+       "role": "label",
+       "tone": "default",
+       "size": "sm"
+      },
+      {
+       "type": "text",
+       "value": "Falcon 9 Block 5 | SDA Tranche 2 Transport Layer E \u00b7 Dec 31, 12:00 AM \u00b7 To Be Determined",
+       "role": "label",
+       "tone": "default",
+       "size": "sm"
+      },
+      {
+       "type": "text",
+       "value": "Falcon 9 Block 5 | SDA Tranche 1 Tracking Layer A \u00b7 Dec 31, 12:00 AM \u00b7 To Be Determined",
+       "role": "label",
+       "tone": "default",
+       "size": "sm"
+      }
+     ]
+    }
+   ]
+  },
+  "secs": 4.8
+ },
+ {
+  "ask": "what day is the next new moon",
+  "outcome": "live",
+  "source": "library: USNO upcoming moon phases \u2014 aa.usno.navy.mil",
+  "detail": "",
+  "preview": {
+   "rows": [
+    {
+     "day": 10,
+     "month": 10,
+     "phase": "New Moon",
+     "time": "15:50",
+     "year": 2026
+    },
+    {
+     "day": 18,
+     "month": 10,
+     "phase": "First Quarter",
+     "time": "16:12",
+     "year": 2026
+    },
+    {
+     "day": 26,
+     "month": 10,
+     "phase": "Full Moon",
+     "time": "04:12",
+     "year": 2026
+    },
+    {
+     "day": 1,
+     "month": 11,
+     "phase": "Last Quarter",
+     "time": "20:28",
+     "year": 2026
+    }
+   ]
+  },
+  "tapped": [
+   {
+    "title": "USNO upcoming moon phases",
+    "url": "https://aa.usno.navy.mil/api/moon/phases/date?date=2026-10-06&nump=4",
+    "label": "",
+    "params": {
+     "date": "2026-10-06"
+    },
+    "scope": "global"
+   }
+  ],
+  "links": [],
+  "notes": [
+   "shell item created",
+   "paused: sources from the SmartBrain Library are on the card",
+   "fetching consented source (aa.usno.navy.mil)",
+   "built from the Library's declared answers: Upcoming moon phases",
+   "built from the Library's declared answers: Upcoming moon phases"
+  ],
+  "answers": "built from the Library's declared answers: Upcoming moon phases",
+  "scene_text": [
+   "new moon",
+   "New Moon \u00b7 10 \u00b7 10 \u00b7 15:50",
+   "First Quarter \u00b7 10 \u00b7 18 \u00b7 16:12",
+   "Full Moon \u00b7 10 \u00b7 26 \u00b7 04:12",
+   "Last Quarter \u00b7 11 \u00b7 1 \u00b7 20:28"
+  ],
+  "pipeline": [
+   {
+    "op": "extract",
+    "paths": {
+     "rows": "phasedata"
+    }
+   },
+   {
+    "op": "transform",
+    "apply": [
+     {
+      "fn": "number",
+      "field": "rows",
+      "key": "month"
+     },
+     {
+      "fn": "number",
+      "field": "rows",
+      "key": "day"
+     }
+    ]
+   }
+  ],
+  "latest": {
+   "type": "stack",
+   "dir": "v",
+   "gap": "sm",
+   "children": [
+    {
+     "type": "text",
+     "value": "new moon",
+     "role": "title",
+     "tone": "default",
+     "size": "md"
+    },
+    {
+     "type": "stack",
+     "dir": "v",
+     "gap": "sm",
+     "children": [
+      {
+       "type": "text",
+       "value": "New Moon \u00b7 10 \u00b7 10 \u00b7 15:50",
+       "role": "label",
+       "tone": "default",
+       "size": "sm"
+      },
+      {
+       "type": "text",
+       "value": "First Quarter \u00b7 10 \u00b7 18 \u00b7 16:12",
+       "role": "label",
+       "tone": "default",
+       "size": "sm"
+      },
+      {
+       "type": "text",
+       "value": "Full Moon \u00b7 10 \u00b7 26 \u00b7 04:12",
+       "role": "label",
+       "tone": "default",
+       "size": "sm"
+      },
+      {
+       "type": "text",
+       "value": "Last Quarter \u00b7 11 \u00b7 1 \u00b7 20:28",
+       "role": "label",
+       "tone": "default",
+       "size": "sm"
+      }
+     ]
+    }
+   ]
+  },
+  "secs": 4.6
+ },
+ {
+  "ask": "next Bears game",
+  "outcome": "live",
+  "source": "library: Team's next matchup (TheSportsDB) \u2014 www.thesportsdb.com",
+  "detail": "",
+  "preview": {
+   "next_game": "Green Bay Packers vs Chicago Bears",
+   "start": "Sun 8:25 PM",
+   "venue": "Lambeau Field"
+  },
+  "tapped": [
+   {
+    "title": "Team's next matchup (TheSportsDB)",
+    "url": "https://www.thesportsdb.com/api/v1/json/123/eventsnext.php?id=134938",
+    "label": "Chicago Bears (nfl)",
+    "params": {
+     "team": "134938"
+    },
+    "scope": "global"
+   }
+  ],
+  "links": [],
+  "notes": [
+   "shell item created",
+   "paused: sources from the SmartBrain Library are on the card",
+   "fetching consented source (www.thesportsdb.com)",
+   "built from the Library's declared answers: Next game, Start, Venue",
+   "built from the Library's declared answers: Next game, Start, Venue"
+  ],
+  "answers": "built from the Library's declared answers: Next game, Start, Venue",
+  "scene_text": [
+   "Next game",
+   "Green Bay Packers vs Chicago Bears",
+   "Start",
+   "Sun 8:25 PM",
+   "Venue",
+   "Lambeau Field"
+  ],
+  "pipeline": [
+   {
+    "op": "extract",
+    "paths": {
+     "next_game": "events[0].strEvent",
+     "start": "events[0].strTimestamp",
+     "venue": "events[0].strVenue"
+    }
+   },
+   {
+    "op": "transform",
+    "apply": [
+     {
+      "fn": "time",
+      "field": "start",
+      "utc": true
+     }
+    ]
+   }
+  ],
+  "latest": {
+   "type": "stack",
+   "dir": "v",
+   "gap": "sm",
+   "children": [
+    {
+     "type": "text",
+     "value": "Next game",
+     "role": "title",
+     "tone": "default",
+     "size": "md"
+    },
+    {
+     "type": "text",
+     "value": "Green Bay Packers vs Chicago Bears",
+     "role": "value",
+     "tone": "default",
+     "size": "lg"
+    },
+    {
+     "type": "text",
+     "value": "Start",
+     "role": "label",
+     "tone": "muted",
+     "size": "sm"
+    },
+    {
+     "type": "text",
+     "value": "Sun 8:25 PM",
+     "role": "value",
+     "tone": "default",
+     "size": "sm"
+    },
+    {
+     "type": "text",
+     "value": "Venue",
+     "role": "label",
+     "tone": "muted",
+     "size": "sm"
+    },
+    {
+     "type": "text",
+     "value": "Lambeau Field",
+     "role": "value",
+     "tone": "default",
+     "size": "sm"
+    }
+   ]
+  },
+  "secs": 4.4
+ },
+ {
+  "ask": "next Amtrak departure from Boston to New York",
+  "outcome": "links",
+  "source": "links",
+  "detail": "",
+  "preview": null,
+  "tapped": [],
+  "links": [
+   {
+    "host": "amtracker.net",
+    "title": "Boston Amtrak Station (BOS) \u2014 Departures & Arrivals | Amtracker",
+    "url": "https://amtracker.net/station/BOS",
+    "found": "page"
+   },
+   {
+    "host": "newyorkbostontrains.com",
+    "title": "New York to Boston Train \u2014 Schedules, Times & Fares",
+    "url": "https://newyorkbostontrains.com/",
+    "found": "page"
+   },
+   {
+    "host": "www.amtrak.com",
+    "title": "Train Schedules & Timetables | Amtrak",
+    "url": "https://www.amtrak.com/train-schedules-timetables",
+    "found": "page"
+   }
+  ],
+  "notes": [
+   "shell item created",
+   "paused: no SmartBrain Library source answers this yet \u2014 pages that may help are on the card"
+  ],
+  "secs": 10.5
+ },
+ {
+  "ask": "Cubs schedule this week",
+  "outcome": "source",
+  "source": "library: MLB team schedule \u2014 statsapi.mlb.com \u2192 library: MLB schedule and scores \u2014 statsapi.mlb.com \u2192 library: Team's next matchup (TheSportsDB) \u2014 www.thesportsdb.com",
+  "detail": "awaiting_pick",
+  "preview": null,
+  "tapped": [
+   {
+    "title": "MLB team schedule",
+    "url": "https://statsapi.mlb.com/api/v1/schedule?sportId=1&teamId=112&startDate=2026-10-06&endDate=2026-11-05",
+    "label": "Chicago Cubs (mlb)",
+    "params": {
+     "team": "112",
+     "start": "2026-10-06",
+     "end": "2026-11-05"
+    },
+    "scope": "global"
+   },
+   {
+    "title": "MLB schedule and scores",
+    "url": "https://statsapi.mlb.com/api/v1/schedule?sportId=1&date=2026-10-06&hydrate=linescore",
+    "label": "",
+    "params": {
+     "date": "2026-10-06"
+    },
+    "scope": "global"
+   },
+   {
+    "title": "Team's next matchup (TheSportsDB)",
+    "url": "https://www.thesportsdb.com/api/v1/json/123/eventsnext.php?id=135269",
+    "label": "Chicago Cubs (mlb)",
+    "params": {
+     "team": "135269"
+    },
+    "scope": "global"
+   }
+  ],
+  "links": [],
+  "notes": [
+   "shell item created",
+   "paused: sources from the SmartBrain Library are on the card",
+   "fetching consented source (statsapi.mlb.com)",
+   "MLB Stats API has nothing for this right now \u2014 pick another source",
+   "fetching consented source (statsapi.mlb.com)",
+   "MLB Stats API doesn't answer this (it isn't about Chicago Cubs) \u2014 pick another source",
+   "fetching consented source (www.thesportsdb.com)",
+   "TheSportsDB has nothing for this right now \u2014 paste a link to the data",
+   "paused: the previous source has nothing for this right now; no SmartBrain Library source answers this yet \u2014 pages that may help are on the card"
+  ],
+  "secs": 14.2
+ },
+ {
+  "ask": "NHL games tonight",
+  "outcome": "live",
+  "source": "library: TheSportsDB next league events \u2014 www.thesportsdb.com",
+  "detail": "",
+  "preview": {
+   "rows": [
+    {
+     "idEvent": "2591528",
+     "idAPIfootball": "444641",
+     "strTimestamp": "11:00 PM",
+     "strEvent": "Toronto Maple Leafs vs Nashville Predators",
+     "strEventAlternate": "Nashville Predators @ Toronto Maple Leafs",
+     "strFilename": "NHL 2026-10-06 Toronto Maple Leafs vs Nashville Predators",
+     "strSport": "Ice Hockey",
+     "idLeague": "4380",
+     "strLeague": "NHL",
+     "strLeagueBadge": "https://r2.thesportsdb.com/images/media/league/badge/4cem2k1619616539.png",
+     "strSeason": "2026-2027",
+     "strDescriptionEN": "",
+     "strHomeTeam": "Toronto Maple Leafs",
+     "strAwayTeam": "Nashville Predators",
+     "intHomeScore": null,
+     "intHomeScoreExtra": null,
+     "intAwayScoreExtra": null,
+     "intRound": "2",
+     "intAwayScore": null,
+     "intSpectators": null,
+     "strOfficial": "",
+     "strWeather": "",
+     "dateEvent": "2026-10-06",
+     "dateEventLocal": "2026-10-06",
+     "strTime": "23:00:00",
+     "strTimeLocal": "19:00:00",
+     "strGroup": "",
+     "idHomeTeam": "134837",
+     "strHomeTeamBadge": "https://r2.thesportsdb.com/images/media/team/badge/mxig4p1570129307.png",
+     "idAwayTeam": "134858",
+     "strAwayTeamBadge": "https://r2.thesportsdb.com/images/media/team/badge/twqyvy1422052908.png",
+     "intScore": null,
+     "intScoreVotes": null,
+     "strResult": "",
+     "idVenue": "24830",
+     "strVenue": "Scotiabank Arena",
+     "strCountry": "Canada",
+     "strCity": "",
+     "strPoster": "",
+     "strSquare": "",
+     "strFanart": null,
+     "strThumb": "https://r2.thesportsdb.com/images/media/event/thumb/v5ucsx1760899436.jpg",
+     "strBanner": "",
+     "strMap": null,
+     "strTweet1": "",
+     "strVideo": "",
+     "strStatus": "NS",
+     "strPostponed": "no",
+     "strLocked": "unlocked"
+    }
+   ]
+  },
+  "tapped": [
+   {
+    "title": "TheSportsDB next league events",
+    "url": "https://www.thesportsdb.com/api/v1/json/123/eventsnextleague.php?id=4380",
+    "label": "NHL (nhl)",
+    "params": {
+     "league_id": "4380"
+    },
+    "scope": "global"
+   }
+  ],
+  "links": [],
+  "notes": [
+   "shell item created",
+   "paused: sources from the SmartBrain Library are on the card",
+   "fetching consented source (www.thesportsdb.com)",
+   "built from the Library's declared answers: Upcoming games",
+   "built from the Library's declared answers: Upcoming games"
+  ],
+  "answers": "built from the Library's declared answers: Upcoming games",
+  "scene_text": [
+   "NHL games",
+   "Toronto Maple Leafs vs Nashville Predators \u00b7 11:00 PM \u00b7 Scotiabank Arena"
+  ],
+  "pipeline": [
+   {
+    "op": "extract",
+    "paths": {
+     "rows": "events"
+    }
+   },
+   {
+    "op": "transform",
+    "apply": [
+     {
+      "fn": "window",
+      "field": "rows",
+      "key": "strTimestamp",
+      "window": "today",
+      "utc": true,
+      "step": "day"
+     },
+     {
+      "fn": "time",
+      "field": "rows",
+      "key": "strTimestamp",
+      "utc": true
+     }
+    ]
+   }
+  ],
+  "latest": {
+   "type": "stack",
+   "dir": "v",
+   "gap": "sm",
+   "children": [
+    {
+     "type": "text",
+     "value": "NHL games",
+     "role": "title",
+     "tone": "default",
+     "size": "md"
+    },
+    {
+     "type": "stack",
+     "dir": "v",
+     "gap": "sm",
+     "children": [
+      {
+       "type": "text",
+       "value": "Toronto Maple Leafs vs Nashville Predators \u00b7 11:00 PM \u00b7 Scotiabank Arena",
+       "role": "label",
+       "tone": "default",
+       "size": "sm"
+      }
+     ]
+    }
+   ]
+  },
+  "secs": 4.2
+ },
+ {
+  "ask": "when are the next Federal Reserve meetings",
+  "outcome": "links",
+  "source": "links",
+  "detail": "",
+  "preview": null,
+  "tapped": [],
+  "links": [
+   {
+    "host": "fedratecalc.com",
+    "title": "Next Fed Meeting: Oct 27-28 | 2026 FOMC Schedule | FedRateCalc",
+    "url": "https://fedratecalc.com/fomc-meeting-schedule/",
+    "found": "page"
+   },
+   {
+    "host": "finance.yahoo.com",
+    "title": "When is the Fed's next meeting? See the full schedule for 2026.",
+    "url": "https://finance.yahoo.com/personal-finance/banking/article/when-is-the-next-fed-meeting-full-schedule-150709698.html",
+    "found": "page"
+   },
+   {
+    "host": "www.mnimarkets.com",
+    "title": "Federal Reserve Meeting Calendar | MNI",
+    "url": "https://www.mnimarkets.com/calendars/fomc-meeting-calendar",
+    "found": "page"
+   }
+  ],
+  "notes": [
+   "shell item created",
+   "paused: no SmartBrain Library source answers this yet \u2014 pages that may help are on the card"
+  ],
+  "secs": 9.4
+ },
+ {
+  "ask": "who won the Dolphins game",
+  "outcome": "links",
+  "source": "links",
+  "detail": "",
+  "preview": null,
+  "tapped": [],
+  "links": [
+   {
+    "host": "www.nfl.com",
+    "title": "Miami Dolphins News, Scores, Stats, Schedule | NFL.com",
+    "url": "https://www.nfl.com/teams/miami-dolphins/",
+    "found": "page"
+   },
+   {
+    "host": "sports.yahoo.com",
+    "title": "49ers Star Makes Feelings Clear on Brock Purdy After Dolphins Game",
+    "url": "https://sports.yahoo.com/articles/49ers-star-makes-feelings-clear-142349516.html",
+    "found": "page"
+   },
+   {
+    "host": "www.espn.com",
+    "title": "Miami Dolphins Scores, Stats and Highlights - ESPN",
+    "url": "https://www.espn.com/nfl/team/_/name/mia/miami-dolphins",
+    "found": "page"
+   }
+  ],
+  "notes": [
+   "shell item created",
+   "paused: no SmartBrain Library source answers this yet \u2014 pages that may help are on the card"
+  ],
+  "secs": 14.8
+ },
+ {
+  "ask": "Celtics final score last night",
+  "outcome": "links",
+  "source": "links",
+  "detail": "",
+  "preview": null,
+  "tapped": [],
+  "links": [
+   {
+    "host": "sports.yahoo.com",
+    "title": "Boston Celtics 108 - Philadelphia 76ers 100: Final score, results ...",
+    "url": "https://sports.yahoo.com/nba/boston-celtics-philadelphia-76ers-2026042420/",
+    "found": "page"
+   },
+   {
+    "host": "www.espn.com",
+    "title": "Boston Celtics Scores, Stats and Highlights - ESPN",
+    "url": "https://www.espn.com/nba/team/_/name/bos/boston-celtics",
+    "found": "page"
+   },
+   {
+    "host": "www.celticsblog.com",
+    "title": "Celtics lose 112-102 battle against soaring Hawks",
+    "url": "https://www.celticsblog.com/celtics-scores-results/137078/celtics-lose-112-102-battle-against-soaring-hawks",
+    "found": "page"
+   }
+  ],
+  "notes": [
+   "shell item created",
+   "paused: no SmartBrain Library source answers this yet \u2014 pages that may help are on the card"
+  ],
+  "secs": 10.7
+ },
+ {
+  "ask": "last night's Mariners result",
+  "outcome": "live",
+  "source": "library: MLB team recent results \u2014 statsapi.mlb.com",
+  "detail": "",
+  "preview": {
+   "rows": [],
+   "rows_count": 0
+  },
+  "tapped": [
+   {
+    "title": "MLB team recent results",
+    "url": "https://statsapi.mlb.com/api/v1/schedule?sportId=1&teamId=136&startDate=2026-09-29&endDate=2026-10-06",
+    "label": "Seattle Mariners (mlb)",
+    "params": {
+     "team": "136",
+     "since": "2026-09-29",
+     "until": "2026-10-06"
+    },
+    "scope": "global"
+   }
+  ],
+  "links": [],
+  "notes": [
+   "shell item created",
+   "paused: sources from the SmartBrain Library are on the card",
+   "fetching consented source (statsapi.mlb.com)",
+   "built from the Library's declared answers: Recent results",
+   "built from the Library's declared answers: Recent results"
+  ],
+  "answers": "built from the Library's declared answers: Recent results",
+  "scene_text": [
+   "Mariners",
+   "No recent results right now"
+  ],
+  "pipeline": [
+   {
+    "op": "extract",
+    "paths": {
+     "rows": "dates"
+    }
+   },
+   {
+    "op": "transform",
+    "apply": [
+     {
+      "fn": "where",
+      "field": "rows",
+      "key": "games[0].status.detailedState",
+      "op": "eq",
+      "value": "Final"
+     },
+     {
+      "fn": "reverse",
+      "field": "rows"
+     },
+     {
+      "fn": "number",
+      "field": "rows",
+      "key": "games[0].teams.away.score"
+     },
+     {
+      "fn": "number",
+      "field": "rows",
+      "key": "games[0].teams.home.score"
+     },
+     {
+      "fn": "count",
+      "field": "rows",
+      "as": "rows_count"
+     }
+    ]
+   }
+  ],
+  "latest": {
+   "type": "stack",
+   "dir": "v",
+   "gap": "sm",
+   "children": [
+    {
+     "type": "text",
+     "value": "Mariners",
+     "role": "title",
+     "tone": "default",
+     "size": "md"
+    },
+    {
+     "type": "stack",
+     "dir": "v",
+     "gap": "sm",
+     "children": []
+    },
+    {
+     "type": "text",
+     "value": "No recent results right now",
+     "role": "label",
+     "tone": "muted",
+     "size": "sm"
+    }
+   ]
+  },
+  "secs": 4.0
+ },
+ {
+  "ask": "latest NPR headlines",
+  "outcome": "live",
+  "source": "library: NPR News \u2014 feeds.npr.org",
+  "detail": "",
+  "preview": {
+   "rows": [
+    {
+     "guid": "https://www.npr.org/2026/10/05/g-s1-146052/arthur-read-tv-debut-30-anniversary",
+     "title": "The iconic Arthur Read made his TV debut 30 years ago",
+     "link": "https://www.npr.org/2026/10/05/g-s1-146052/arthur-read-tv-debut-30-anniversary",
+     "summary": "The animated series \"Arthur\" premiered on PBS Kids on Oct. 7, 1996.",
+     "published": "Mon 6:26 PM"
+    },
+    {
+     "guid": "https://www.npr.org/2026/10/05/g-s1-146452/dennis-hastert-republican-house-speaker-dies-obit",
+     "title": "Dennis Hastert, longtime Republican House speaker who went to prison, dies at age 84",
+     "link": "https://www.npr.org/2026/10/05/g-s1-146452/dennis-hastert-republican-house-speaker-dies-obit",
+     "summary": "ennis Hastert, whose political legacy as Congress' longest-serving Republican House speaker was later fouled by allegations that he had molested high school athletes during his prior career as a teacher and wrestling coach, has died, a coroner said Monday. He was 84.",
+     "published": "Mon 2:24 PM"
+    },
+    {
+     "guid": "https://www.npr.org/2026/10/05/nx-s1-5925803/drones-buzz-overhead-troops-hunker-underground-in-ukraines-hellish-kill-zone",
+     "title": "Drones buzz overhead, troops hunker underground in Ukraine's hellish kill zone",
+     "link": "https://www.npr.org/2026/10/05/nx-s1-5925803/drones-buzz-overhead-troops-hunker-underground-in-ukraines-hellish-kill-zone",
+     "summary": "The front line in the Russia-Ukraine war stretches more than 700 miles and has barely moved in four years. Yet straddling this line is the kill zone, dominated by constantly evolving drone technology.",
+     "published": "Mon 12:33 PM"
+    },
+    {
+     "guid": "https://www.npr.org/2026/10/05/g-s1-146410/fbi-arrests-a-woman-accused-of-spying-on-taiwan-leaders-family-for-china",
+     "title": "FBI arrests a woman accused of spying on Taiwan leader's family for China",
+     "link": "https://www.npr.org/2026/10/05/g-s1-146410/fbi-arrests-a-woman-accused-of-spying-on-taiwan-leaders-family-for-china",
+     "summary": "The FBI and U.S. prosecutors say Wanying Zhang, also know as Heather, surveilled the Taiwanese president's son and his family.",
+     "published": "Mon 11:47 AM"
+    },
+    {
+     "guid": "https://www.npr.org/2026/10/05/g-s1-146408/imran-khan-supporters-march-in-pakistan-to-demand-his-release-after-talks-failed",
+     "title": "Imran Khan supporters march in Pakistan to demand his release after talks failed",
+     "link": "https://www.npr.org/2026/10/05/g-s1-146408/imran-khan-supporters-march-in-pakistan-to-demand-his-release-after-talks-failed",
+     "summary": "Talks between Khan's party and the government failed two days ago. Besides Khan's release, protesters demand his transfer to a hospital and family visits.",
+     "published": "Mon 11:38 AM"
+    },
+    {
+     "guid": "https://www.npr.org/2026/10/05/g-s1-146406/up-first-newsletter-flydubai-investigation-colorado-suncor-exxon-brazil-presidential-elections",
+     "title": "SCOTUS hears major climate change case. And, Brazil's presidential race goes to runoff",
+     "link": "https://www.npr.org/2026/10/05/g-s1-146406/up-first-newsletter-flydubai-investigation-colorado-suncor-exxon-brazil-presidential-elections",
+     "summary": "The Supreme Court is set to hear a blockbuster climate change case that could affect more than just climate issues. And, Brazil's presidential race is too close to call.",
+     "published": "Mon 11:07 AM"
+    },
+    {
+     "guid": "https://www.npr.org/2026/10/05/nx-s1-5990802/midair-attack-flydubai",
+     "title": "FlyDubai attacker intended to crash plane into Tel Aviv airport, investigation finds",
+     "link": "https://www.npr.org/2026/10/05/nx-s1-5990802/midair-attack-flydubai",
+     "summary": "The ongoing investigation has found the attacker intended to crash the plane into Israel's Ben Gurion International Airport, a person familiar with the matter but not authorized to speak publicly told NPR.",
+     "published": "Mon 10:53 AM"
+    },
+    {
+     "guid": "https://www.npr.org/2026/10/05/g-s1-146400/nobel-medicine-prize",
+     "title": "Nobel medicine prize goes to 3 scientists for research into brain activity",
+     "link": "https://www.npr.org/2026/10/05/g-s1-146400/nobel-medicine-prize",
+     "summary": "The Nobel Prize in medicine was awarded Monday to three scientists working on the mechanisms the brain uses to switch on, or off, the activity of individual nerve cells.",
+     "published": "Mon 10:11 AM"
+    },
+    {
+     "guid": "https://www.npr.org/2026/10/05/g-s1-146396/former-prince-andrew-legal-action",
+     "title": "Former Prince Andrew files legal action to quash warrants that led to residence searches",
+     "link": "https://www.npr.org/2026/10/05/g-s1-146396/former-prince-andrew-legal-action",
+     "summary": "A judicial spokesperson confirmed that Andrew Mountbatten-Windsor had filed a claim with the High Court in London and a hearing would take place Thursday.",
+     "published": "Mon 10:01 AM"
+    },
+    {
+     "guid": "https://www.npr.org/2026/10/05/nx-s1-5991404/spain-snap-elections",
+     "title": "Spain's prime minister calls early elections as pressure mounts over housing crisis",
+     "link": "https://www.npr.org/2026/10/05/nx-s1-5991404/spain-snap-elections",
+     "summary": "Spanish Prime Minister Pedro S\u00e1nchez announced early elections Monday after his government suffered a bruising legislative defeat last week on emergency measures related to the country's housing crisis.",
+     "published": "Mon 9:15 AM"
+    }
+   ]
+  },
+  "tapped": [
+   {
+    "title": "NPR News",
+    "url": "https://feeds.npr.org/1001/rss.xml",
+    "label": "",
+    "params": {},
+    "scope": "global"
+   }
+  ],
+  "links": [],
+  "notes": [
+   "shell item created",
+   "paused: sources from the SmartBrain Library are on the card",
+   "fetching consented source (feeds.npr.org)",
+   "built from the Library's declared answers: Headlines",
+   "built from the Library's declared answers: Headlines"
+  ],
+  "answers": "built from the Library's declared answers: Headlines",
+  "scene_text": [
+   "NPR headlines",
+   "The iconic Arthur Read made his TV debut 30 years ago \u00b7 Mon 6:26 PM",
+   "Dennis Hastert, longtime Republican House speaker who went to prison, dies at age 84 \u00b7 Mon 2:24 PM",
+   "Drones buzz overhead, troops hunker underground in Ukraine's hellish kill zone \u00b7 Mon 12:33 PM",
+   "FBI arrests a woman accused of spying on Taiwan leader's family for China \u00b7 Mon 11:47 AM",
+   "Imran Khan supporters march in Pakistan to demand his release after talks failed \u00b7 Mon 11:38 AM"
+  ],
+  "pipeline": [
+   {
+    "op": "extract",
+    "paths": {
+     "rows": "items"
+    }
+   },
+   {
+    "op": "transform",
+    "apply": [
+     {
+      "fn": "time",
+      "field": "rows",
+      "key": "published"
+     }
+    ]
+   }
+  ],
+  "latest": {
+   "type": "stack",
+   "dir": "v",
+   "gap": "sm",
+   "children": [
+    {
+     "type": "text",
+     "value": "NPR headlines",
+     "role": "title",
+     "tone": "default",
+     "size": "md"
+    },
+    {
+     "type": "stack",
+     "dir": "v",
+     "gap": "sm",
+     "children": [
+      {
+       "type": "text",
+       "value": "The iconic Arthur Read made his TV debut 30 years ago \u00b7 Mon 6:26 PM",
+       "role": "label",
+       "tone": "default",
+       "size": "sm"
+      },
+      {
+       "type": "text",
+       "value": "Dennis Hastert, longtime Republican House speaker who went to prison, dies at age 84 \u00b7 Mon 2:24 PM",
+       "role": "label",
+       "tone": "default",
+       "size": "sm"
+      },
+      {
+       "type": "text",
+       "value": "Drones buzz overhead, troops hunker underground in Ukraine's hellish kill zone \u00b7 Mon 12:33 PM",
+       "role": "label",
+       "tone": "default",
+       "size": "sm"
+      },
+      {
+       "type": "text",
+       "value": "FBI arrests a woman accused of spying on Taiwan leader's family for China \u00b7 Mon 11:47 AM",
+       "role": "label",
+       "tone": "default",
+       "size": "sm"
+      },
+      {
+       "type": "text",
+       "value": "Imran Khan supporters march in Pakistan to demand his release after talks failed \u00b7 Mon 11:38 AM",
+       "role": "label",
+       "tone": "default",
+       "size": "sm"
+      }
+     ]
+    }
+   ]
+  },
+  "secs": 5.7
+ },
+ {
+  "ask": "new posts on r/homelab",
+  "outcome": "links",
+  "source": "links",
+  "detail": "",
+  "preview": null,
+  "tapped": [],
+  "links": [
+   {
+    "host": "www.subredditanalyzer.com",
+    "title": "r/homelab Best Time to Post and Subreddit Stats",
+    "url": "https://www.subredditanalyzer.com/subreddits/homelab",
+    "found": "page"
+   }
+  ],
+  "notes": [
+   "shell item created",
+   "paused: no SmartBrain Library source answers this yet \u2014 pages that may help are on the card"
+  ],
+  "secs": 8.2
+ },
+ {
+  "ask": "recent FDA recalls",
+  "outcome": "source",
+  "source": "library: FDA food recalls \u2014 api.fda.gov \u2192 library: FDA drug recalls \u2014 api.fda.gov \u2192 library: FDA device recalls \u2014 api.fda.gov",
+  "detail": "awaiting_pick",
+  "preview": null,
+  "tapped": [
+   {
+    "title": "FDA food recalls",
+    "url": "https://api.fda.gov/food/enforcement.json?sort=report_date:desc&limit=20",
+    "label": "",
+    "params": {},
+    "scope": "global"
+   },
+   {
+    "title": "FDA drug recalls",
+    "url": "https://api.fda.gov/drug/enforcement.json?sort=report_date:desc&limit=20",
+    "label": "",
+    "params": {},
+    "scope": "global"
+   },
+   {
+    "title": "FDA device recalls",
+    "url": "https://api.fda.gov/device/recall.json?sort=event_date_initiated:desc&limit=20",
+    "label": "",
+    "params": {},
+    "scope": "global"
+   }
+  ],
+  "links": [],
+  "notes": [
+   "shell item created",
+   "paused: sources from the SmartBrain Library are on the card",
+   "fetching consented source (api.fda.gov)",
+   "US Food and Drug Administration (openFDA) doesn't answer this (it doesn't report recent) \u2014 pick another source",
+   "fetching consented source (api.fda.gov)",
+   "US Food and Drug Administration (openFDA) doesn't answer this (it doesn't report recent) \u2014 pick another source",
+   "fetching consented source (api.fda.gov)",
+   "US Food and Drug Administration (openFDA) doesn't answer this (it doesn't report recent) \u2014 paste a link to the data",
+   "paused: the previous source doesn't answer this (it doesn't report recent); no SmartBrain Library source answers this yet \u2014 pages that may help are on the card"
+  ],
+  "secs": 15.5
+ },
+ {
+  "ask": "NFC West standings right now",
+  "outcome": "source",
+  "source": "library: MLB standings \u2014 statsapi.mlb.com \u2192 library: MLB wild card standings \u2014 statsapi.mlb.com \u2192 library: NHL standings \u2014 api-web.nhle.com",
+  "detail": "awaiting_pick",
+  "preview": null,
+  "tapped": [
+   {
+    "title": "MLB standings",
+    "url": "https://statsapi.mlb.com/api/v1/standings?leagueId=103,104&standingsTypes=regularSeason",
+    "label": "",
+    "params": {},
+    "scope": "global"
+   },
+   {
+    "title": "MLB wild card standings",
+    "url": "https://statsapi.mlb.com/api/v1/standings?leagueId=103,104&standingsTypes=wildCard",
+    "label": "",
+    "params": {},
+    "scope": "global"
+   },
+   {
+    "title": "NHL standings",
+    "url": "https://api-web.nhle.com/v1/standings/now",
+    "label": "",
+    "params": {},
+    "scope": "global"
+   }
+  ],
+  "links": [],
+  "notes": [
+   "shell item created",
+   "paused: sources from the SmartBrain Library are on the card",
+   "fetching consented source (statsapi.mlb.com)",
+   "MLB Stats API doesn't answer this (it isn't for NFC West) \u2014 pick another source",
+   "fetching consented source (statsapi.mlb.com)",
+   "MLB Stats API doesn't answer this (it isn't for NFC West) \u2014 pick another source",
+   "fetching consented source (api-web.nhle.com)",
+   "NHL doesn't answer this (it isn't for NFC West) \u2014 paste a link to the data",
+   "paused: the previous source doesn't answer this (it isn't for NFC West); no SmartBrain Library source answers this yet \u2014 pages that may help are on the card"
+  ],
+  "secs": 15.1
+ },
+ {
+  "ask": "top 10 cryptocurrencies by market cap",
+  "outcome": "live",
+  "source": "library: CoinGecko top coins \u2014 api.coingecko.com",
+  "detail": "",
+  "preview": {
+   "rows": [
+    {
+     "id": "bitcoin",
+     "symbol": "btc",
+     "name": "Bitcoin",
+     "image": "https://coin-images.coingecko.com/coins/images/1/large/bitcoin.png?1696501400",
+     "current_price": 85517,
+     "market_cap": 1718417124308,
+     "market_cap_rank": 1,
+     "fully_diluted_valuation": 1718422768558,
+     "total_volume": 29478241921,
+     "high_24h": 86662,
+     "low_24h": 85010,
+     "price_change_24h": -906.3409812581085,
+     "price_change_percentage_24h": -1.04872,
+     "market_cap_change_24h": -18141165452.62915,
+     "market_cap_change_percentage_24h": -1.04466,
+     "circulating_supply": 20093996.0,
+     "total_supply": 20094118.0,
+     "max_supply": 21000000.0,
+     "ath": 126080,
+     "ath_change_percentage": -32.17198,
+     "ath_date": "2025-10-06T10:57:42.000Z",
+     "atl": 67.81,
+     "atl_change_percentage": 126015.25054,
+     "atl_date": "2013-07-05T16:00:00.000Z",
+     "roi": null,
+     "last_updated": "2026-10-06T03:24:30.000Z"
+    },
+    {
+     "id": "ethereum",
+     "symbol": "eth",
+     "name": "Ethereum",
+     "image": "https://coin-images.coingecko.com/coins/images/279/large/ethereum.png?1696501628",
+     "current_price": 2699.71,
+     "market_cap": 329670097014,
+     "market_cap_rank": 2,
+     "fully_diluted_valuation": 329670097014,
+     "total_volume": 11656572269,
+     "high_24h": 2733.19,
+     "low_24h": 2680.92,
+     "price_change_24h": -25.728051161435815,
+     "price_change_percentage_24h": -0.944,
+     "market_cap_change_24h": -3126962636.3466797,
+     "market_cap_change_percentage_24h": -0.9396,
+     "circulating_supply": 122110434.69485405,
+     "total_supply": 122110434.694854,
+     "max_supply": null,
+     "ath": 4946.05,
+     "ath_change_percentage": -45.41671,
+     "ath_date": "2025-08-24T11:21:03.000Z",
+     "atl": 0.432979,
+     "atl_change_percentage": 623421.3862,
+     "atl_date": "2015-10-19T16:00:00.000Z",
+     "roi": {
+      "times": 41.471811859824236,
+      "currency": "btc",
+      "percentage": 4147.181185982424
+     },
+     "last_updated": "2026-10-06T03:24:30.000Z"
+    },
+    {
+     "id": "tether",
+     "symbol": "usdt",
+     "name": "Tether",
+     "image": "https://coin-images.coingecko.com/coins/images/325/large/Tether.png?1696501661",
+     "current_price": 0.999844,
+     "market_cap": 184059732572,
+     "market_cap_rank": 3,
+     "fully_diluted_valuation": 189525830722,
+     "total_volume": 57256471253,
+     "high_24h": 1.0,
+     "low_24h": 0.999709,
+     "price_change_24h": 4.75e-05,
+     "price_change_percentage_24h": 0.00475,
+     "market_cap_change_24h": 8873815,
+     "market_cap_change_percentage_24h": 0.00482,
+     "circulating_supply": 184088295340.26407,
+     "total_supply": 189555241729.7862,
+     "max_supply": null,
+     "ath": 1.32,
+     "ath_change_percentage": -24.43144,
+     "ath_date": "2018-07-23T16:00:00.000Z",
+     "atl": 0.572521,
+     "atl_change_percentage": 74.63886,
+     "atl_date": "2015-03-01T16:00:00.000Z",
+     "roi": null,
+     "last_updated": "2026-10-06T03:24:30.000Z"
+    },
+    {
+     "id": "binancecoin",
+     "symbol": "bnb",
+     "name": "BNB",
+     "image": "https://coin-images.coingecko.com/coins/images/825/large/bnb-icon2_2x.png?1696501970",
+     "current_price": 782.24,
+     "market_cap": 104158849560,
+     "market_cap_rank": 4,
+     "fully_diluted_valuation": 104158849560,
+     "total_volume": 802034408,
+     "high_24h": 795.4,
+     "low_24h": 780.2,
+     "price_change_24h": -14.222395274361475,
+     "price_change_percentage_24h": -1.7857,
+     "market_cap_change_24h": -1897103119.805725,
+     "market_cap_change_percentage_24h": -1.78878,
+     "circulating_supply": 133159004.45,
+     "total_supply": 133159001.55,
+     "max_supply": 200000000.0,
+     "ath": 1369.99,
+     "ath_change_percentage": -42.90198,
+     "ath_date": "2025-10-13T00:41:24.000Z",
+     "atl": 0.0398177,
+     "atl_change_percentage": 1964448.90113,
+     "atl_date": "2017-10-18T16:00:00.000Z",
+     "roi": null,
+     "last_updated": "2026-10-06T03:24:30.000Z"
+    },
+    {
+     "id": "ripple",
+     "symbol": "xrp",
+     "name": "XRP",
+     "image": "https://coin-images.coingecko.com/coins/images/44/large/xrp-symbol-white-128.png?1696501442",
+     "current_price": 1.5,
+     "market_cap": 94513311667,
+     "market_cap_rank": 5,
+     "fully_diluted_valuation": 149778501033,
+     "total_volume": 1760214125,
+     "high_24h": 1.53,
+     "low_24h": 1.49,
+     "price_change_24h": -0.017773130665422743,
+     "price_change_percentage_24h": -1.17257,
+     "market_cap_change_24h": -1119423275.6430206,
+     "market_cap_change_percentage_24h": -1.17054,
+     "circulating_supply": 63092975951.0,
+     "total_supply": 99985612577.0,
+     "max_supply": 100000000000.0,
+     "ath": 3.65,
+     "ath_change_percentage": -58.91896,
+     "ath_date": "2025-07-17T19:40:53.000Z",
+     "atl": 0.00268621,
+     "atl_change_percentage": 55665.24932,
+     "atl_date": "2014-05-21T16:00:00.000Z",
+     "roi": null,
+     "last_updated": "2026-10-06T03:24:30.000Z"
+    },
+    {
+     "id": "usd-coin",
+     "symbol": "usdc",
+     "name": "USDC",
+     "image": "https://coin-images.coingecko.com/coins/images/6319/large/USDC.png?1769615602",
+     "current_price": 0.999941,
+     "market_cap": 74238158678,
+     "market_cap_rank": 6,
+     "fully_diluted_valuation": 74254773603,
+     "total_volume": 18447404733,
+     "high_24h": 1.001,
+     "low_24h": 0.99972,
+     "price_change_24h": 5.175e-05,
+     "price_change_percentage_24h": 0.00518,
+     "market_cap_change_24h": 132010586,
+     "market_cap_change_percentage_24h": 0.17814,
+     "circulating_supply": 74242387266.79051,
+     "total_supply": 74285137355.2026,
+     "max_supply": null,
+     "ath": 1.043,
+     "ath_change_percentage": -4.17106,
+     "ath_date": "2018-11-14T16:00:00.000Z",
+     "atl": 0.877647,
+     "atl_change_percentage": 13.93436,
+     "atl_date": "2023-03-11T00:02:13.000Z",
+     "roi": null,
+     "last_updated": "2026-10-06T03:24:30.000Z"
+    },
+    {
+     "id": "solana",
+     "symbol": "sol",
+     "name": "Solana",
+     "image": "https://coin-images.coingecko.com/coins/images/4128/large/solana.png?1718769756",
+     "current_price": 120.22,
+     "market_cap": 70734830203,
+     "market_cap_rank": 7,
+     "fully_diluted_valuation": 76375426826,
+     "total_volume": 2525125831,
+     "high_24h": 122.01,
+     "low_24h": 118.97,
+     "price_change_24h": -0.7248284248897647,
+     "price_change_percentage_24h": -0.59931,
+     "market_cap_change_24h": -418114668.4045563,
+     "market_cap_change_percentage_24h": -0.58763,
+     "circulating_supply": 588385707.6164242,
+     "total_supply": 635305210.8439295,
+     "max_supply": null,
+     "ath": 293.31,
+     "ath_change_percentage": -59.01324,
+     "ath_date": "2025-01-19T03:15:27.000Z",
+     "atl": 0.500801,
+     "atl_change_percentage": 23905.34912,
+     "atl_date": "2020-05-11T11:35:23.000Z",
+     "roi": null,
+     "last_updated": "2026-10-06T03:24:30.000Z"
+    },
+    {
+     "id": "tron",
+     "symbol": "trx",
+     "name": "TRON",
+     "image": "https://coin-images.coingecko.com/coins/images/1094/large/photo_2026-04-13_09-59-16.png?1776048311",
+     "current_price": 0.33555,
+     "market_cap": 31876092771,
+     "market_cap_rank": 8,
+     "fully_diluted_valuation": 31876368825,
+     "total_volume": 318226477,
+     "high_24h": 0.336932,
+     "low_24h": 0.334871,
+     "price_change_24h": -0.000146872111761676,
+     "price_change_percentage_24h": -0.04375,
+     "market_cap_change_24h": -8327280.304916382,
+     "market_cap_change_percentage_24h": -0.02612,
+     "circulating_supply": 94983279066.75409,
+     "total_supply": 94984207211.99089,
+     "max_supply": null,
+     "ath": 0.431288,
+     "ath_change_percentage": -22.1983,
+     "ath_date": "2024-12-03T16:10:40.000Z",
+     "atl": 0.00180434,
+     "atl_change_percentage": 18496.79168,
+     "atl_date": "2017-11-11T16:00:00.000Z",
+     "roi": {
+      "times": 175.85388089843906,
+      "currency": "usd",
+      "percentage": 17585.388089843906
+     },
+     "last_updated": "2026-10-06T03:24:30.000Z"
+    },
+    {
+     "id": "figure-heloc",
+     "symbol": "figr_heloc",
+     "name": "Figure Heloc",
+     "image": "https://coin-images.coingecko.com/coins/images/68480/large/figure.png?1755863954",
+     "current_price": 1.033,
+     "market_cap": 24268460496,
+     "market_cap_rank": 9,
+     "fully_diluted_valuation": 24268460496,
+     "total_volume": 22365145,
+     "high_24h": 1.075,
+     "low_24h": 1.033,
+     "price_change_24h": null,
+     "price_change_percentage_24h": "\u2014",
+     "market_cap_change_24h": null,
+     "market_cap_change_percentage_24h": null,
+     "circulating_supply": 23490927107.778,
+     "total_supply": 23490927107.778,
+     "max_supply": null,
+     "ath": 1.075,
+     "ath_change_percentage": -3.92288,
+     "ath_date": "2026-10-05T13:59:20.000Z",
+     "atl": 0.155357,
+     "atl_change_percentage": 564.98682,
+     "atl_date": "2025-10-31T06:27:24.000Z",
+     "roi": null,
+     "last_updated": "2026-10-06T03:24:30.000Z"
+    },
+    {
+     "id": "zcash",
+     "symbol": "zec",
+     "name": "Zcash",
+     "image": "https://coin-images.coingecko.com/coins/images/486/large/Brandmark-Yellow_%281%29.png?1785810558",
+     "current_price": 1341.51,
+     "market_cap": 22759140186,
+     "market_cap_rank": 10,
+     "fully_diluted_valuation": 22764323434,
+     "total_volume": 871078492,
+     "high_24h": 1361.16,
+     "low_24h": 1281.4,
+     "price_change_24h": 7.69,
+     "price_change_percentage_24h": 0.57643,
+     "market_cap_change_24h": 128485710,
+     "market_cap_change_percentage_24h": 0.56775,
+     "circulating_supply": 16966725.1655448,
+     "total_supply": 16970665.7905448,
+     "max_supply": 21000000.0,
+     "ath": 3191.93,
+     "ath_change_percentage": -57.97169,
+     "ath_date": "2016-10-28T16:00:00.000Z",
+     "atl": 16.08,
+     "atl_change_percentage": 8242.68122,
+     "atl_date": "2024-07-04T20:22:29.000Z",
+     "roi": null,
+     "last_updated": "2026-10-06T03:24:30.000Z"
+    },
+    {
+     "id": "hyperliquid",
+     "symbol": "hype",
+     "name": "Hyperliquid",
+     "image": "https://coin-images.coingecko.com/coins/images/50882/large/hyperliquid.jpg?1729431300",
+     "current_price": 93.55,
+     "market_cap": 20809890937,
+     "market_cap_rank": 11,
+     "fully_diluted_valuation": 89369382623,
+     "total_volume": 1163696768,
+     "high_24h": 95.21,
+     "low_24h": 90.15,
+     "price_change_24h": 3.14,
+     "price_change_percentage_24h": 3.46857,
+     "market_cap_change_24h": 698377912,
+     "market_cap_change_percentage_24h": 3.47253,
+     "circulating_supply": 222445714.07414138,
+     "total_supply": 955307079.4341414,
+     "max_supply": 1000000000.0,
+     "ath": 97.96,
+     "ath_change_percentage": -4.50787,
+     "ath_date": "2026-09-23T05:16:50.000Z",
+     "atl": 3.81,
+     "atl_change_percentage": 2356.11044,
+     "atl_date": "2024-11-29T01:30:30.000Z",
+     "roi": null,
+     "last_updated": "2026-10-06T03:24:30.000Z"
+    },
+    {
+     "id": "dogecoin",
+     "symbol": "doge",
+     "name": "Dogecoin",
+     "image": "https://coin-images.coingecko.com/coins/images/5/large/dogecoin.png?1696501409",
+     "current_price": 0.094663,
+     "market_cap": 14787016999,
+     "market_cap_rank": 12,
+     "fully_diluted_valuation": 14787080424,
+     "total_volume": 620236668,
+     "high_24h": 0.097053,
+     "low_24h": 0.093941,
+     "price_change_24h": -0.001523144835068754,
+     "price_change_percentage_24h": -1.58354,
+     "market_cap_change_24h": -236213252.4406376,
+     "market_cap_change_percentage_24h": -1.57232,
+     "circulating_supply": 156204806383.7052,
+     "total_supply": 156206036383.7052,
+     "max_supply": null,
+     "ath": 0.731578,
+     "ath_change_percentage": -87.06045,
+     "ath_date": "2021-05-07T21:08:23.000Z",
+     "atl": 8.69e-05,
+     "atl_change_percentage": 108828.48548,
+     "atl_date": "2015-05-05T16:00:00.000Z",
+     "roi": null,
+     "last_updated": "2026-10-06T03:24:30.000Z"
+    },
+    {
+     "id": "monero",
+     "symbol": "xmr",
+     "name": "Monero",
+     "image": "https://coin-images.coingecko.com/coins/images/69/large/monero_logo.png?1696501460",
+     "current_price": 561.23,
+     "market_cap": 10557681201,
+     "market_cap_rank": 13,
+     "fully_diluted_valuation": 10557681201,
+     "total_volume": 141097951,
+     "high_24h": 562.62,
+     "low_24h": 535.22,
+     "price_change_24h": 14.22,
+     "price_change_percentage_24h": 2.59997,
+     "market_cap_change_24h": 266509515,
+     "market_cap_change_percentage_24h": 2.58969,
+     "circulating_supply": 18813859.829937555,
+     "total_supply": 18813882.0298842,
+     "max_supply": null,
+     "ath": 797.73,
+     "ath_change_percentage": -29.64649,
+     "ath_date": "2026-01-14T11:34:07.000Z",
+     "atl": 0.216177,
+     "atl_change_percentage": 259518.40148,
+     "atl_date": "2015-01-13T16:00:00.000Z",
+     "roi": null,
+     "last_updated": "2026-10-06T03:24:30.000Z"
+    },
+    {
+     "id": "chainlink",
+     "symbol": "link",
+     "name": "Chainlink",
+     "image": "https://coin-images.coingecko.com/coins/images/877/large/Chainlink_Logo_500.png?1760023405",
+     "current_price": 13.78,
+     "market_cap": 10308916965,
+     "market_cap_rank": 14,
+     "fully_diluted_valuation": 13780132833,
+     "total_volume": 290672617,
+     "high_24h": 14.27,
+     "low_24h": 13.71,
+     "price_change_24h": -0.35704607802040833,
+     "price_change_percentage_24h": -2.5256,
+     "market_cap_change_24h": -267036809.92419624,
+     "market_cap_change_percentage_24h": -2.52494,
+     "circulating_supply": 748099970.424884,
+     "total_supply": 1000000000.0,
+     "max_supply": 1000000000.0,
+     "ath": 52.7,
+     "ath_change_percentage": -73.85012,
+     "ath_date": "2021-05-09T16:13:57.000Z",
+     "atl": 0.148183,
+     "atl_change_percentage": 9199.36423,
+     "atl_date": "2017-11-28T16:00:00.000Z",
+     "roi": null,
+     "last_updated": "2026-10-06T03:24:30.000Z"
+    },
+    {
+     "id": "whitebit",
+     "symbol": "wbt",
+     "name": "WhiteBIT Coin",
+     "image": "https://coin-images.coingecko.com/coins/images/27045/large/wbt_token.png?1696526096",
+     "current_price": 85.46,
+     "market_cap": 10151569676,
+     "market_cap_rank": 15,
+     "fully_diluted_valuation": 25070372265,
+     "total_volume": 91873367,
+     "high_24h": 86.31,
+     "low_24h": 84.94,
+     "price_change_24h": -0.577522377618422,
+     "price_change_percentage_24h": -0.67124,
+     "market_cap_change_24h": -71440574.32379341,
+     "market_cap_change_percentage_24h": -0.69882,
+     "circulating_supply": 118786640.0,
+     "total_supply": 293356139.0,
+     "max_supply": 400000000.0,
+     "ath": 87.91,
+     "ath_change_percentage": -2.79,
+     "ath_date": "2026-09-21T20:29:10.000Z",
+     "atl": 3.06,
+     "atl_change_percentage": 2691.27879,
+     "atl_date": "2023-02-13T11:01:21.000Z",
+     "roi": null,
+     "last_updated": "2026-10-06T03:24:30.000Z"
+    },
+    {
+     "id": "usds",
+     "symbol": "usds",
+     "name": "USDS",
+     "image": "https://coin-images.coingecko.com/coins/images/39926/large/usds.webp?1726666683",
+     "current_price": 0.999765,
+     "market_cap": 10078201491,
+     "market_cap_rank": 16,
+     "fully_diluted_valuation": 10078201491,
+     "total_volume": 170661631,
+     "high_24h": 1.0,
+     "low_24h": 0.999618,
+     "price_change_24h": -8.9817425616423e-05,
+     "price_change_percentage_24h": -0.00898,
+     "market_cap_change_24h": 103481514,
+     "market_cap_change_percentage_24h": 1.03744,
+     "circulating_supply": 10080569288.353588,
+     "total_supply": 10127455705.79977,
+     "max_supply": null,
+     "ath": 1.057,
+     "ath_change_percentage": -5.44372,
+     "ath_date": "2024-10-28T21:40:51.000Z",
+     "atl": 0.948265,
+     "atl_change_percentage": 5.4309,
+     "atl_date": "2024-10-03T05:19:28.000Z",
+     "roi": null,
+     "last_updated": "2026-10-06T03:24:30.000Z"
+    },
+    {
+     "id": "cardano",
+     "symbol": "ada",
+     "name": "Cardano",
+     "image": "https://coin-images.coingecko.com/coins/images/975/large/cardano.png?1696502090",
+     "current_price": 0.267279,
+     "market_cap": 10034906997,
+     "market_cap_rank": 17,
+     "fully_diluted_valuation": 12028641467,
+     "total_volume": 853959814,
+     "high_24h": 0.276329,
+     "low_24h": 0.261873,
+     "price_change_24h": -0.002458471847177623,
+     "price_change_percentage_24h": -0.91143,
+     "market_cap_change_24h": -91395282.84686852,
+     "market_cap_change_percentage_24h": -0.90255,
+     "circulating_supply": 37541298084.960144,
+     "total_supply": 45000000000.0,
+     "max_supply": 45000000000.0,
+     "ath": 3.09,
+     "ath_change_percentage": -91.34153,
+     "ath_date": "2021-09-01T22:00:10.000Z",
+     "atl": 0.01925275,
+     "atl_change_percentage": 1288.26526,
+     "atl_date": "2020-03-12T18:22:55.000Z",
+     "roi": null,
+     "last_updated": "2026-10-06T03:24:30.000Z"
+    },
+    {
+     "id": "leo-token",
+     "symbol": "leo",
+     "name": "LEO Token",
+     "image": "https://coin-images.coingecko.com/coins/images/8418/large/leo-token.png?1696508607",
+     "current_price": 8.89,
+     "market_cap": 8181455170,
+     "market_cap_rank": 18,
+     "fully_diluted_valuation": 8762976603,
+     "total_volume": 219534,
+     "high_24h": 8.98,
+     "low_24h": 8.89,
+     "price_change_24h": -0.03350897597356983,
+     "price_change_percentage_24h": -0.37533,
+     "market_cap_change_24h": -30826751.65776825,
+     "market_cap_change_percentage_24h": -0.37537,
+     "circulating_supply": 919857851.9,
+     "total_supply": 985239504.0,
+     "max_supply": null,
+     "ath": 10.61,
+     "ath_change_percentage": -16.19624,
+     "ath_date": "2026-05-04T09:35:00.000Z",
+     "atl": 0.799859,
+     "atl_change_percentage": 1011.97872,
+     "atl_date": "2019-12-24T07:14:35.000Z",
+     "roi": null,
+     "last_updated": "2026-10-06T03:24:30.000Z"
+    },
+    {
+     "id": "rain",
+     "symbol": "rain",
+     "name": "Rain",
+     "image": "https://coin-images.coingecko.com/coins/images/69134/large/Rain_logo_1_.png?1762952191",
+     "current_price": 0.01141606,
+     "market_cap": 8098615759,
+     "market_cap_rank": 19,
+     "fully_diluted_valuation": 13044618247,
+     "total_volume": 12778239,
+     "high_24h": 0.01291487,
+     "low_24h": 0.01132089,
+     "price_change_24h": 4.101e-05,
+     "price_change_percentage_24h": 0.36055,
+     "market_cap_change_24h": 30834975,
+     "market_cap_change_percentage_24h": 0.3822,
+     "circulating_supply": 709252469163.1,
+     "total_supply": 1142408526965.963,
+     "max_supply": 1150000000000.0,
+     "ath": 0.01946402,
+     "ath_change_percentage": -41.34787,
+     "ath_date": "2026-08-25T19:53:00.000Z",
+     "atl": 0.00222126,
+     "atl_change_percentage": 413.94568,
+     "atl_date": "2025-09-14T00:56:57.000Z",
+     "roi": null,
+     "last_updated": "2026-10-06T03:24:30.000Z"
+    },
+    {
+     "id": "stellar",
+     "symbol": "xlm",
+     "name": "Stellar",
+     "image": "https://coin-images.coingecko.com/coins/images/100/large/fmpFRHHQ_400x400.jpg?1735231350",
+     "current_price": 0.214529,
+     "market_cap": 7520918950,
+     "market_cap_rank": 20,
+     "fully_diluted_valuation": 10727514256,
+     "total_volume": 208057538,
+     "high_24h": 0.224954,
+     "low_24h": 0.210971,
+     "price_change_24h": -0.008933032813752378,
+     "price_change_percentage_24h": -3.99756,
+     "market_cap_change_24h": -313149601.69782543,
+     "market_cap_change_percentage_24h": -3.99728,
+     "circulating_supply": 35055594165.709816,
+     "total_supply": 50001786839.69947,
+     "max_supply": null,
+     "ath": 0.875563,
+     "ath_change_percentage": -75.49816,
+     "ath_date": "2018-01-02T16:00:00.000Z",
+     "atl": 0.00047612,
+     "atl_change_percentage": 44957.43993,
+     "atl_date": "2015-03-04T16:00:00.000Z",
+     "roi": null,
+     "last_updated": "2026-10-06T03:24:30.000Z"
+    }
+   ]
+  },
+  "tapped": [
+   {
+    "title": "CoinGecko top coins",
+    "url": "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=20&page=1",
+    "label": "",
+    "params": {},
+    "scope": "global"
+   }
+  ],
+  "links": [],
+  "notes": [
+   "shell item created",
+   "paused: sources from the SmartBrain Library are on the card",
+   "fetching consented source (api.coingecko.com)",
+   "built from the Library's declared answers: Top coins by market cap",
+   "built from the Library's declared answers: Top coins by market cap"
+  ],
+  "answers": "built from the Library's declared answers: Top coins by market cap",
+  "scene_text": [
+   "cryptocurrencies",
+   "Bitcoin \u00b7 85517 USD \u00b7 -1.04872% \u00b7 1718417124308 USD",
+   "Ethereum \u00b7 2699.71 USD \u00b7 -0.944% \u00b7 329670097014 USD",
+   "Tether \u00b7 0.999844 USD \u00b7 0.00475% \u00b7 184059732572 USD",
+   "BNB \u00b7 782.24 USD \u00b7 -1.7857% \u00b7 104158849560 USD",
+   "XRP \u00b7 1.5 USD \u00b7 -1.17257% \u00b7 94513311667 USD"
+  ],
+  "pipeline": [
+   {
+    "op": "extract",
+    "paths": {
+     "rows": "items"
+    }
+   },
+   {
+    "op": "transform",
+    "apply": [
+     {
+      "fn": "number",
+      "field": "rows",
+      "key": "current_price"
+     },
+     {
+      "fn": "number",
+      "field": "rows",
+      "key": "price_change_percentage_24h"
+     },
+     {
+      "fn": "number",
+      "field": "rows",
+      "key": "market_cap"
+     }
+    ]
+   }
+  ],
+  "latest": {
+   "type": "stack",
+   "dir": "v",
+   "gap": "sm",
+   "children": [
+    {
+     "type": "text",
+     "value": "cryptocurrencies",
+     "role": "title",
+     "tone": "default",
+     "size": "md"
+    },
+    {
+     "type": "stack",
+     "dir": "v",
+     "gap": "sm",
+     "children": [
+      {
+       "type": "text",
+       "value": "Bitcoin \u00b7 85517 USD \u00b7 -1.04872% \u00b7 1718417124308 USD",
+       "role": "label",
+       "tone": "default",
+       "size": "sm"
+      },
+      {
+       "type": "text",
+       "value": "Ethereum \u00b7 2699.71 USD \u00b7 -0.944% \u00b7 329670097014 USD",
+       "role": "label",
+       "tone": "default",
+       "size": "sm"
+      },
+      {
+       "type": "text",
+       "value": "Tether \u00b7 0.999844 USD \u00b7 0.00475% \u00b7 184059732572 USD",
+       "role": "label",
+       "tone": "default",
+       "size": "sm"
+      },
+      {
+       "type": "text",
+       "value": "BNB \u00b7 782.24 USD \u00b7 -1.7857% \u00b7 104158849560 USD",
+       "role": "label",
+       "tone": "default",
+       "size": "sm"
+      },
+      {
+       "type": "text",
+       "value": "XRP \u00b7 1.5 USD \u00b7 -1.17257% \u00b7 94513311667 USD",
+       "role": "label",
+       "tone": "default",
+       "size": "sm"
+      }
+     ]
+    }
+   ]
+  },
+  "secs": 4.2
+ },
+ {
+  "ask": "most downloaded Python packages this week",
+  "outcome": "links",
+  "source": "links",
+  "detail": "",
+  "preview": null,
+  "tapped": [],
+  "links": [
+   {
+    "host": "www.pepy.tech",
+    "title": "pepy.tech \u2014 PyPI download stats",
+    "url": "https://www.pepy.tech/",
+    "found": "page"
+   },
+   {
+    "host": "pypistats.org",
+    "title": "PyPI Download Stats - PyPI Stats",
+    "url": "https://pypistats.org/top",
+    "found": "page"
+   },
+   {
+    "host": "pypistats.com",
+    "title": "Trending Python Packages \u2014 PyPI Stats",
+    "url": "https://pypistats.com/trending",
+    "found": "page"
+   }
+  ],
+  "notes": [
+   "shell item created",
+   "paused: no SmartBrain Library source answers this yet \u2014 pages that may help are on the card"
+  ],
+  "secs": 8.4
+ },
+ {
+  "ask": "US gas price trend this year",
+  "outcome": "live",
+  "source": "library: US regular gasoline price (FRED) \u2014 fred.stlouisfed.org",
+  "detail": "",
+  "preview": {
+   "latest": 4.465
+  },
+  "tapped": [
+   {
+    "title": "US regular gasoline price (FRED)",
+    "url": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=GASREGW",
+    "label": "",
+    "params": {},
+    "scope": "global"
+   }
+  ],
+  "links": [],
+  "notes": [
+   "shell item created",
+   "paused: sources from the SmartBrain Library are on the card",
+   "fetching consented source (fred.stlouisfed.org)",
+   "built from the Library's declared answers: Regular gas price (US average)",
+   "built from the Library's declared answers: Regular gas price (US average)"
+  ],
+  "answers": "built from the Library's declared answers: Regular gas price (US average)",
+  "scene_text": [
+   "Regular gas price (US average)",
+   "4.46 $/gal"
+  ],
+  "pipeline": [
+   {
+    "op": "extract",
+    "paths": {
+     "latest": "rows[0].GASREGW"
+    }
+   },
+   {
+    "op": "transform",
+    "apply": [
+     {
+      "fn": "number",
+      "field": "latest"
+     }
+    ]
+   }
+  ],
+  "latest": {
+   "type": "stack",
+   "dir": "v",
+   "gap": "sm",
+   "children": [
+    {
+     "type": "text",
+     "value": "Regular gas price (US average)",
+     "role": "title",
+     "tone": "default",
+     "size": "md"
+    },
+    {
+     "type": "number",
+     "value": 4.465,
+     "format": "plain",
+     "unit": "$/gal",
+     "tone": "default",
+     "size": "lg"
+    }
+   ]
+  },
+  "secs": 4.3
+ },
+ {
+  "ask": "30 year mortgage rate history",
+  "outcome": "live",
+  "source": "library: 30-year fixed mortgage rate (FRED) \u2014 fred.stlouisfed.org",
+  "detail": "",
+  "preview": {
+   "latest": 7.28
+  },
+  "tapped": [
+   {
+    "title": "30-year fixed mortgage rate (FRED)",
+    "url": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=MORTGAGE30US",
+    "label": "",
+    "params": {},
+    "scope": "global"
+   }
+  ],
+  "links": [],
+  "notes": [
+   "shell item created",
+   "paused: sources from the SmartBrain Library are on the card",
+   "fetching consented source (fred.stlouisfed.org)",
+   "built from the Library's declared answers: 30-year mortgage rate",
+   "built from the Library's declared answers: 30-year mortgage rate"
+  ],
+  "answers": "built from the Library's declared answers: 30-year mortgage rate",
+  "scene_text": [
+   "30-year mortgage rate",
+   "7.28 %"
+  ],
+  "pipeline": [
+   {
+    "op": "extract",
+    "paths": {
+     "latest": "rows[0].MORTGAGE30US"
+    }
+   },
+   {
+    "op": "transform",
+    "apply": [
+     {
+      "fn": "number",
+      "field": "latest"
+     }
+    ]
+   }
+  ],
+  "latest": {
+   "type": "stack",
+   "dir": "v",
+   "gap": "sm",
+   "children": [
+    {
+     "type": "text",
+     "value": "30-year mortgage rate",
+     "role": "title",
+     "tone": "default",
+     "size": "md"
+    },
+    {
+     "type": "number",
+     "value": 7.28,
+     "format": "plain",
+     "unit": "%",
+     "tone": "default",
+     "size": "lg"
+    }
+   ]
+  },
+  "secs": 4.0
+ },
+ {
+  "ask": "Bitcoin price over the last month",
+  "outcome": "links",
+  "source": "links",
+  "detail": "",
+  "preview": null,
+  "tapped": [],
+  "links": [
+   {
+    "host": "www.coingecko.com",
+    "title": "CoinGecko price history",
+    "url": "https://www.coingecko.com",
+    "found": "dataset"
+   },
+   {
+    "host": "www.statmuse.com",
+    "title": "Bitcoin Price In The Last Month | StatMuse Money",
+    "url": "https://www.statmuse.com/money/ask/bitcoin-price-in-the-last-month",
+    "found": "page"
+   },
+   {
+    "host": "finance.yahoo.com",
+    "title": "Bitcoin USD Price (BTC-USD) - Yahoo Finance",
+    "url": "https://finance.yahoo.com/quote/BTC-USD/history/",
+    "found": "page"
+   },
+   {
+    "host": "coinmarketcap.com",
+    "title": "Bitcoin Price History and Historical Data | CoinMarketCap",
+    "url": "https://coinmarketcap.com/currencies/bitcoin/historical-data/",
+    "found": "page"
+   }
+  ],
+  "notes": [
+   "shell item created",
+   "paused: no SmartBrain Library source answers this yet \u2014 pages that may help are on the card"
+  ],
+  "secs": 8.1
+ },
+ {
+  "ask": "is Cloudflare having issues",
+  "outcome": "links",
+  "source": "library: Slack status \u2014 slack-status.com \u2192 links",
+  "detail": "",
+  "preview": null,
+  "tapped": [
+   {
+    "title": "Slack status",
+    "url": "https://slack-status.com/api/v2.0.0/current",
+    "label": "",
+    "params": {},
+    "scope": "global"
+   }
+  ],
+  "links": [
+   {
+    "host": "www.cloudflarestatus.com",
+    "title": "Cloudflare System Status",
+    "url": "https://www.cloudflarestatus.com/",
+    "found": "page"
+   },
+   {
+    "host": "statusgator.com",
+    "title": "Cloudflare Status. Check if Cloudflare is down or having an outage ...",
+    "url": "https://statusgator.com/services/cloudflare",
+    "found": "page"
+   }
+  ],
+  "notes": [
+   "shell item created",
+   "paused: sources from the SmartBrain Library are on the card",
+   "fetching consented source (slack-status.com)",
+   "Slack doesn't answer this (it is about Slack; it isn't about cloudflare) \u2014 paste a link to the data",
+   "paused: the previous source doesn't answer this (it is about Slack; it isn't about cloudflare); no SmartBrain Library source answers this yet \u2014 pages that may help are on the card"
+  ],
+  "secs": 7.9
+ },
+ {
+  "ask": "Amtrak Northeast Corridor status",
+  "outcome": "links",
+  "source": "links",
+  "detail": "",
+  "preview": null,
+  "tapped": [],
+  "links": [
+   {
+    "host": "www.amtrak.com",
+    "title": "Service Alerts & Notices | Amtrak",
+    "url": "https://www.amtrak.com/service-alerts-and-notices",
+    "found": "page"
+   },
+   {
+    "host": "amtracker.net",
+    "title": "Amtracker \u2014 Live Amtrak Train Tracker & Map",
+    "url": "https://amtracker.net/",
+    "found": "page"
+   },
+   {
+    "host": "x.com",
+    "title": "Amtrak Northeast (@AmtrakNECAlerts) / X",
+    "url": "https://x.com/AmtrakNECAlerts",
+    "found": "page"
+   }
+  ],
+  "notes": [
+   "shell item created",
+   "paused: no SmartBrain Library source answers this yet \u2014 pages that may help are on the card"
+  ],
+  "secs": 20.6
+ },
+ {
+  "ask": "Discord status",
+  "outcome": "live",
+  "source": "library: Service status (Statuspage) \u2014 discordstatus.com",
+  "detail": "",
+  "preview": {
+   "overall_status": "All Systems Operational"
+  },
+  "tapped": [
+   {
+    "title": "Service status (Statuspage)",
+    "url": "https://discordstatus.com/api/v2/summary.json",
+    "label": "Discord",
+    "params": {
+     "status_host": "discordstatus.com"
+    },
+    "scope": "global"
+   }
+  ],
+  "links": [],
+  "notes": [
+   "shell item created",
+   "paused: sources from the SmartBrain Library are on the card",
+   "fetching consented source (discordstatus.com)",
+   "built from the Library's declared answers: Overall status",
+   "built from the Library's declared answers: Overall status"
+  ],
+  "answers": "built from the Library's declared answers: Overall status",
+  "scene_text": [
+   "Overall status",
+   "All Systems Operational"
+  ],
+  "pipeline": [
+   {
+    "op": "extract",
+    "paths": {
+     "overall_status": "status.description"
+    }
+   }
+  ],
+  "latest": {
+   "type": "stack",
+   "dir": "v",
+   "gap": "sm",
+   "children": [
+    {
+     "type": "text",
+     "value": "Overall status",
+     "role": "title",
+     "tone": "default",
+     "size": "md"
+    },
+    {
+     "type": "text",
+     "value": "All Systems Operational",
+     "role": "value",
+     "tone": "default",
+     "size": "lg"
+    }
+   ]
+  },
+  "secs": 4.8
+ },
+ {
+  "ask": "any flood warnings in Houston",
+  "outcome": "live",
+  "source": "library: NWS active alerts for a location \u2014 api.weather.gov",
+  "detail": "",
+  "preview": {
+   "rows": [],
+   "rows_count": 0
+  },
+  "tapped": [
+   {
+    "title": "NWS active alerts for a location",
+    "url": "https://api.weather.gov/alerts/active?point=29.785743,-95.388806",
+    "label": "Houston (TX)",
+    "params": {
+     "lat": "29.785743",
+     "lon": "-95.388806"
+    },
+    "scope": "place"
+   }
+  ],
+  "links": [],
+  "notes": [
+   "shell item created",
+   "paused: sources from the SmartBrain Library are on the card",
+   "fetching consented source (api.weather.gov)",
+   "built from the Library's declared answers: Active weather alerts",
+   "built from the Library's declared answers: Active weather alerts"
+  ],
+  "answers": "built from the Library's declared answers: Active weather alerts",
+  "scene_text": [
+   "flood warnings",
+   "No active weather alerts right now"
+  ],
+  "pipeline": [
+   {
+    "op": "extract",
+    "paths": {
+     "rows": "features"
+    }
+   },
+   {
+    "op": "transform",
+    "apply": [
+     {
+      "fn": "time",
+      "field": "rows",
+      "key": "properties.expires"
+     },
+     {
+      "fn": "count",
+      "field": "rows",
+      "as": "rows_count"
+     }
+    ]
+   }
+  ],
+  "latest": {
+   "type": "stack",
+   "dir": "v",
+   "gap": "sm",
+   "children": [
+    {
+     "type": "text",
+     "value": "flood warnings",
+     "role": "title",
+     "tone": "default",
+     "size": "md"
+    },
+    {
+     "type": "stack",
+     "dir": "v",
+     "gap": "sm",
+     "children": []
+    },
+    {
+     "type": "text",
+     "value": "No active weather alerts right now",
+     "role": "label",
+     "tone": "muted",
+     "size": "sm"
+    }
+   ]
+  },
+  "secs": 5.5
+ },
+ {
+  "ask": "tornado watches in Oklahoma right now",
+  "outcome": "live",
+  "source": "library: NWS active alerts by state \u2014 api.weather.gov",
+  "detail": "",
+  "preview": {
+   "rows": [],
+   "rows_count": 0
+  },
+  "tapped": [
+   {
+    "title": "NWS active alerts by state",
+    "url": "https://api.weather.gov/alerts/active?area=OK",
+    "label": "Oklahoma (OK)",
+    "params": {
+     "state": "OK"
+    },
+    "scope": "place"
+   }
+  ],
+  "links": [],
+  "notes": [
+   "shell item created",
+   "paused: sources from the SmartBrain Library are on the card",
+   "fetching consented source (api.weather.gov)",
+   "built from the Library's declared answers: Active weather alerts",
+   "built from the Library's declared answers: Active weather alerts"
+  ],
+  "answers": "built from the Library's declared answers: Active weather alerts",
+  "scene_text": [
+   "tornado watches",
+   "No active weather alerts right now"
+  ],
+  "pipeline": [
+   {
+    "op": "extract",
+    "paths": {
+     "rows": "features"
+    }
+   },
+   {
+    "op": "transform",
+    "apply": [
+     {
+      "fn": "window",
+      "field": "rows",
+      "key": "properties.expires",
+      "window": "now",
+      "step": "hour",
+      "floor": false
+     },
+     {
+      "fn": "time",
+      "field": "rows",
+      "key": "properties.expires",
+      "clock": true
+     },
+     {
+      "fn": "count",
+      "field": "rows",
+      "as": "rows_count"
+     }
+    ]
+   }
+  ],
+  "latest": {
+   "type": "stack",
+   "dir": "v",
+   "gap": "sm",
+   "children": [
+    {
+     "type": "text",
+     "value": "tornado watches",
+     "role": "title",
+     "tone": "default",
+     "size": "md"
+    },
+    {
+     "type": "stack",
+     "dir": "v",
+     "gap": "sm",
+     "children": []
+    },
+    {
+     "type": "text",
+     "value": "No active weather alerts right now",
+     "role": "label",
+     "tone": "muted",
+     "size": "sm"
+    }
+   ]
+  },
+  "secs": 5.4
+ },
+ {
+  "ask": "air quality alerts for Salt Lake City",
+  "outcome": "links",
+  "source": "library: NWS active alerts for a location \u2014 api.weather.gov \u2192 links",
+  "detail": "",
+  "preview": null,
+  "tapped": [
+   {
+    "title": "NWS active alerts for a location",
+    "url": "https://api.weather.gov/alerts/active?point=40.776928,-111.930991",
+    "label": "Salt Lake City (UT)",
+    "params": {
+     "lat": "40.776928",
+     "lon": "-111.930991"
+    },
+    "scope": "place"
+   }
+  ],
+  "links": [
+   {
+    "host": "air.utah.gov",
+    "title": "Utah DEQ: DAQ: Current Conditions: Salt Lake County",
+    "url": "https://air.utah.gov/",
+    "found": "page"
+   },
+   {
+    "host": "aqinow.org",
+    "title": "Salt Lake City Air Quality Index & Realtime Air Pollution",
+    "url": "https://aqinow.org/us/utah/salt-lake-county/salt-lake-city-aqi",
+    "found": "page"
+   },
+   {
+    "host": "dustytrails.live",
+    "title": "DustyTrails \u2014 Real-Time Air Quality Map for Salt Lake City",
+    "url": "https://dustytrails.live/",
+    "found": "page"
+   }
+  ],
+  "notes": [
+   "shell item created",
+   "paused: sources from the SmartBrain Library are on the card",
+   "fetching consented source (api.weather.gov)",
+   "National Weather Service (NOAA) doesn't report air quality \u2014 paste a link to the data",
+   "paused: the previous source doesn't report air quality; no SmartBrain Library source answers this yet \u2014 pages that may help are on the card"
+  ],
+  "secs": 13.2
+ },
+ {
+  "ask": "how many earthquakes above 4.0 today",
+  "outcome": "live",
+  "source": "library: USGS M2.5+ earthquakes, past day \u2014 earthquake.usgs.gov",
+  "detail": "",
+  "preview": {
+   "quake_count_items": [
+    {
+     "type": "Feature",
+     "properties": {
+      "mag": 2.57948839664459,
+      "place": "2 km SW of Ashford, Washington",
+      "time": 1791252129190,
+      "updated": 1791255427040,
+      "tz": null,
+      "url": "https://earthquake.usgs.gov/earthquakes/eventpage/uw714116641",
+      "detail": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/uw714116641.geojson",
+      "felt": 6,
+      "cdi": 2.7,
+      "mmi": null,
+      "alert": null,
+      "status": "automatic",
+      "tsunami": 0,
+      "sig": 104,
+      "net": "uw",
+      "code": "714116641",
+      "ids": ",uw714116641,us6000tzu3,",
+      "sources": ",uw,us,",
+      "types": ",dyfi,origin,phase-data,",
+      "nst": 76,
+      "dmin": 0.02284,
+      "rms": 0.119999997,
+      "gap": 46,
+      "magType": "ml",
+      "type": "earthquake",
+      "title": "M 2.6 - 2 km SW of Ashford, Washington"
+     },
+     "geometry": {
+      "type": "Point",
+      "coordinates": [
+       -122.053665161133,
+       46.7401657104492,
+       7.44000005722046
+      ]
+     },
+     "id": "uw714116641"
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "mag": 4.3,
+      "place": "42 km SW of Urakawa, Japan",
+      "time": 1791251303727,
+      "updated": 1791252229040,
+      "tz": null,
+      "url": "https://earthquake.usgs.gov/earthquakes/eventpage/us6000tzu2",
+      "detail": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/us6000tzu2.geojson",
+      "felt": null,
+      "cdi": null,
+      "mmi": null,
+      "alert": null,
+      "status": "reviewed",
+      "tsunami": 0,
+      "sig": 284,
+      "net": "us",
+      "code": "6000tzu2",
+      "ids": ",us6000tzu2,",
+      "sources": ",us,",
+      "types": ",origin,phase-data,",
+      "nst": 21,
+      "dmin": 0.602,
+      "rms": 0.48,
+      "gap": 137,
+      "magType": "mb",
+      "type": "earthquake",
+      "title": "M 4.3 - 42 km SW of Urakawa, Japan"
+     },
+     "geometry": {
+      "type": "Point",
+      "coordinates": [
+       142.3552,
+       41.9416,
+       70.998
+      ]
+     },
+     "id": "us6000tzu2"
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "mag": 4.4,
+      "place": "58 km SSE of Cami\u00f1a, Chile",
+      "time": 1791247288380,
+      "updated": 1791257051040,
+      "tz": null,
+      "url": "https://earthquake.usgs.gov/earthquakes/eventpage/us6000tztx",
+      "detail": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/us6000tztx.geojson",
+      "felt": null,
+      "cdi": null,
+      "mmi": null,
+      "alert": null,
+      "status": "reviewed",
+      "tsunami": 0,
+      "sig": 298,
+      "net": "us",
+      "code": "6000tztx",
+      "ids": ",us6000tztx,",
+      "sources": ",us,",
+      "types": ",origin,phase-data,",
+      "nst": 32,
+      "dmin": 0.138,
+      "rms": 0.73,
+      "gap": 82,
+      "magType": "mb",
+      "type": "earthquake",
+      "title": "M 4.4 - 58 km SSE of Cami\u00f1a, Chile"
+     },
+     "geometry": {
+      "type": "Point",
+      "coordinates": [
+       -69.2254,
+       -19.8042,
+       105.483
+      ]
+     },
+     "id": "us6000tztx"
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "mag": 4.6,
+      "place": "31 km S of Tezpur, India",
+      "time": 1791240822181,
+      "updated": 1791255504903,
+      "tz": null,
+      "url": "https://earthquake.usgs.gov/earthquakes/eventpage/us6000tzth",
+      "detail": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/us6000tzth.geojson",
+      "felt": 3,
+      "cdi": 3.4,
+      "mmi": null,
+      "alert": null,
+      "status": "reviewed",
+      "tsunami": 0,
+      "sig": 327,
+      "net": "us",
+      "code": "6000tzth",
+      "ids": ",us6000tzth,",
+      "sources": ",us,",
+      "types": ",dyfi,origin,phase-data,",
+      "nst": 51,
+      "dmin": 5.467,
+      "rms": 0.82,
+      "gap": 85,
+      "magType": "mb",
+      "type": "earthquake",
+      "title": "M 4.6 - 31 km S of Tezpur, India"
+     },
+     "geometry": {
+      "type": "Point",
+      "coordinates": [
+       92.8359,
+       26.3539,
+       10
+      ]
+     },
+     "id": "us6000tzth"
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "mag": 4.8,
+      "place": "146 km WNW of Panguna, Papua New Guinea",
+      "time": 1791240533669,
+      "updated": 1791254819040,
+      "tz": null,
+      "url": "https://earthquake.usgs.gov/earthquakes/eventpage/us6000tztg",
+      "detail": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/us6000tztg.geojson",
+      "felt": null,
+      "cdi": null,
+      "mmi": null,
+      "alert": null,
+      "status": "reviewed",
+      "tsunami": 0,
+      "sig": 354,
+      "net": "us",
+      "code": "6000tztg",
+      "ids": ",us6000tztg,",
+      "sources": ",us,",
+      "types": ",origin,phase-data,",
+      "nst": 36,
+      "dmin": 2.633,
+      "rms": 0.51,
+      "gap": 89,
+      "magType": "mb",
+      "type": "earthquake",
+      "title": "M 4.8 - 146 km WNW of Panguna, Papua New Guinea"
+     },
+     "geometry": {
+      "type": "Point",
+      "coordinates": [
+       154.2682,
+       -5.7949,
+       142.487
+      ]
+     },
+     "id": "us6000tztg"
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "mag": 4.3,
+      "place": "17 km WNW of Ashk\u0101sham, Afghanistan",
+      "time": 1791236313955,
+      "updated": 1791254347040,
+      "tz": null,
+      "url": "https://earthquake.usgs.gov/earthquakes/eventpage/us6000tzsr",
+      "detail": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/us6000tzsr.geojson",
+      "felt": null,
+      "cdi": null,
+      "mmi": null,
+      "alert": null,
+      "status": "reviewed",
+      "tsunami": 0,
+      "sig": 284,
+      "net": "us",
+      "code": "6000tzsr",
+      "ids": ",us6000tzsr,",
+      "sources": ",us,",
+      "types": ",origin,phase-data,",
+      "nst": 25,
+      "dmin": 1.83,
+      "rms": 0.68,
+      "gap": 136,
+      "magType": "mb",
+      "type": "earthquake",
+      "title": "M 4.3 - 17 km WNW of Ashk\u0101sham, Afghanistan"
+     },
+     "geometry": {
+      "type": "Point",
+      "coordinates": [
+       71.3436,
+       36.7206,
+       203.432
+      ]
+     },
+     "id": "us6000tzsr"
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "mag": 4.5,
+      "place": "39 km SW of Tambolaka, Indonesia",
+      "time": 1791236285713,
+      "updated": 1791253281040,
+      "tz": null,
+      "url": "https://earthquake.usgs.gov/earthquakes/eventpage/us6000tzss",
+      "detail": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/us6000tzss.geojson",
+      "felt": null,
+      "cdi": null,
+      "mmi": null,
+      "alert": null,
+      "status": "reviewed",
+      "tsunami": 0,
+      "sig": 312,
+      "net": "us",
+      "code": "6000tzss",
+      "ids": ",us6000tzss,",
+      "sources": ",us,",
+      "types": ",origin,phase-data,",
+      "nst": 34,
+      "dmin": 4.688,
+      "rms": 0.84,
+      "gap": 96,
+      "magType": "mb",
+      "type": "earthquake",
+      "title": "M 4.5 - 39 km SW of Tambolaka, Indonesia"
+     },
+     "geometry": {
+      "type": "Point",
+      "coordinates": [
+       118.9729,
+       -9.6687,
+       35
+      ]
+     },
+     "id": "us6000tzss"
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "mag": 2.81,
+      "place": "32 km SW of Dana Point, CA",
+      "time": 1791231821640,
+      "updated": 1791235483739,
+      "tz": null,
+      "url": "https://earthquake.usgs.gov/earthquakes/eventpage/ci41343775",
+      "detail": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/ci41343775.geojson",
+      "felt": 3,
+      "cdi": 2.2,
+      "mmi": null,
+      "alert": null,
+      "status": "reviewed",
+      "tsunami": 0,
+      "sig": 122,
+      "net": "ci",
+      "code": "41343775",
+      "ids": ",ci41343775,us6000tzsb,",
+      "sources": ",ci,us,",
+      "types": ",dyfi,nearby-cities,origin,phase-data,scitech-link,",
+      "nst": 49,
+      "dmin": 0.3149,
+      "rms": 0.2,
+      "gap": 125,
+      "magType": "ml",
+      "type": "earthquake",
+      "title": "M 2.8 - 32 km SW of Dana Point, CA"
+     },
+     "geometry": {
+      "type": "Point",
+      "coordinates": [
+       -117.938666666667,
+       33.265,
+       16.59
+      ]
+     },
+     "id": "ci41343775"
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "mag": 5,
+      "place": "south of the Fiji Islands",
+      "time": 1791231779243,
+      "updated": 1791233096040,
+      "tz": null,
+      "url": "https://earthquake.usgs.gov/earthquakes/eventpage/us6000tzsc",
+      "detail": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/us6000tzsc.geojson",
+      "felt": null,
+      "cdi": null,
+      "mmi": null,
+      "alert": null,
+      "status": "reviewed",
+      "tsunami": 0,
+      "sig": 385,
+      "net": "us",
+      "code": "6000tzsc",
+      "ids": ",us6000tzsc,",
+      "sources": ",us,",
+      "types": ",origin,phase-data,",
+      "nst": 61,
+      "dmin": 5.209,
+      "rms": 0.63,
+      "gap": 66,
+      "magType": "mb",
+      "type": "earthquake",
+      "title": "M 5.0 - south of the Fiji Islands"
+     },
+     "geometry": {
+      "type": "Point",
+      "coordinates": [
+       179.8108,
+       -24.4235,
+       518.638
+      ]
+     },
+     "id": "us6000tzsc"
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "mag": 3.48,
+      "place": "31 km SW of Dana Point, CA",
+      "time": 1791231750410,
+      "updated": 1791256938903,
+      "tz": null,
+      "url": "https://earthquake.usgs.gov/earthquakes/eventpage/ci41343767",
+      "detail": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/ci41343767.geojson",
+      "felt": 116,
+      "cdi": 2.7,
+      "mmi": 2.385,
+      "alert": null,
+      "status": "reviewed",
+      "tsunami": 0,
+      "sig": 218,
+      "net": "ci",
+      "code": "41343767",
+      "ids": ",ci41343767,us6000tzs9,",
+      "sources": ",ci,us,",
+      "types": ",dyfi,focal-mechanism,moment-tensor,nearby-cities,origin,phase-data,scitech-link,shakemap,",
+      "nst": 74,
+      "dmin": 0.3087,
+      "rms": 0.22,
+      "gap": 117,
+      "magType": "ml",
+      "type": "earthquake",
+      "title": "M 3.5 - 31 km SW of Dana Point, CA"
+     },
+     "geometry": {
+      "type": "Point",
+      "coordinates": [
+       -117.9315,
+       33.2676666666667,
+       11.27
+      ]
+     },
+     "id": "ci41343767"
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "mag": 4.6,
+      "place": "12 km ENE of Metah\u0101ra, Ethiopia",
+      "time": 1791229675779,
+      "updated": 1791230685040,
+      "tz": null,
+      "url": "https://earthquake.usgs.gov/earthquakes/eventpage/us6000tzry",
+      "detail": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/us6000tzry.geojson",
+      "felt": null,
+      "cdi": null,
+      "mmi": null,
+      "alert": null,
+      "status": "reviewed",
+      "tsunami": 0,
+      "sig": 326,
+      "net": "us",
+      "code": "6000tzry",
+      "ids": ",us6000tzry,",
+      "sources": ",us,",
+      "types": ",origin,phase-data,",
+      "nst": 45,
+      "dmin": 3.784,
+      "rms": 0.6,
+      "gap": 121,
+      "magType": "mb",
+      "type": "earthquake",
+      "title": "M 4.6 - 12 km ENE of Metah\u0101ra, Ethiopia"
+     },
+     "geometry": {
+      "type": "Point",
+      "coordinates": [
+       40.0091,
+       8.9608,
+       10
+      ]
+     },
+     "id": "us6000tzry"
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "mag": 4.4,
+      "place": "21 km E of Kimbe, Papua New Guinea",
+      "time": 1791224908162,
+      "updated": 1791226713040,
+      "tz": null,
+      "url": "https://earthquake.usgs.gov/earthquakes/eventpage/us6000tzpz",
+      "detail": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/us6000tzpz.geojson",
+      "felt": null,
+      "cdi": null,
+      "mmi": null,
+      "alert": null,
+      "status": "reviewed",
+      "tsunami": 0,
+      "sig": 298,
+      "net": "us",
+      "code": "6000tzpz",
+      "ids": ",us6000tzpz,",
+      "sources": ",us,",
+      "types": ",origin,phase-data,",
+      "nst": 22,
+      "dmin": 2.258,
+      "rms": 0.61,
+      "gap": 93,
+      "magType": "mb",
+      "type": "earthquake",
+      "title": "M 4.4 - 21 km E of Kimbe, Papua New Guinea"
+     },
+     "geometry": {
+      "type": "Point",
+      "coordinates": [
+       150.325,
+       -5.5191,
+       124.862
+      ]
+     },
+     "id": "us6000tzpz"
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "mag": 2.7,
+      "place": "81 km W of Karluk, Alaska",
+      "time": 1791223553049,
+      "updated": 1791226179036,
+      "tz": null,
+      "url": "https://earthquake.usgs.gov/earthquakes/eventpage/aka2026ttagyp",
+      "detail": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/aka2026ttagyp.geojson",
+      "felt": null,
+      "cdi": null,
+      "mmi": null,
+      "alert": null,
+      "status": "reviewed",
+      "tsunami": 0,
+      "sig": 112,
+      "net": "ak",
+      "code": "a2026ttagyp",
+      "ids": ",us6000tzpv,aka2026ttagyp,",
+      "sources": ",us,ak,",
+      "types": ",origin,phase-data,",
+      "nst": 47,
+      "dmin": 0.3,
+      "rms": 0.7,
+      "gap": 148,
+      "magType": "ml",
+      "type": "earthquake",
+      "title": "M 2.7 - 81 km W of Karluk, Alaska"
+     },
+     "geometry": {
+      "type": "Point",
+      "coordinates": [
+       -155.806,
+       57.638,
+       1
+      ]
+     },
+     "id": "aka2026ttagyp"
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "mag": 3.9,
+      "place": "247 km WNW of Port McNeill, Canada",
+      "time": 1791221440698,
+      "updated": 1791228883654,
+      "tz": null,
+      "url": "https://earthquake.usgs.gov/earthquakes/eventpage/us6000tzpp",
+      "detail": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/us6000tzpp.geojson",
+      "felt": null,
+      "cdi": null,
+      "mmi": 1.255,
+      "alert": null,
+      "status": "reviewed",
+      "tsunami": 0,
+      "sig": 234,
+      "net": "us",
+      "code": "6000tzpp",
+      "ids": ",us6000tzpp,",
+      "sources": ",us,",
+      "types": ",origin,phase-data,shakemap,",
+      "nst": 41,
+      "dmin": 1.06,
+      "rms": 0.8,
+      "gap": 178,
+      "magType": "mb",
+      "type": "earthquake",
+      "title": "M 3.9 - 247 km WNW of Port McNeill, Canada"
+     },
+     "geometry": {
+      "type": "Point",
+      "coordinates": [
+       -130.3859,
+       51.3621,
+       10
+      ]
+     },
+     "id": "us6000tzpp"
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "mag": 4.7,
+      "place": "105 km WNW of H\u00f6fn, Iceland",
+      "time": 1791221304530,
+      "updated": 1791222845040,
+      "tz": null,
+      "url": "https://earthquake.usgs.gov/earthquakes/eventpage/us6000tzpq",
+      "detail": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/us6000tzpq.geojson",
+      "felt": null,
+      "cdi": null,
+      "mmi": null,
+      "alert": null,
+      "status": "reviewed",
+      "tsunami": 0,
+      "sig": 340,
+      "net": "us",
+      "code": "6000tzpq",
+      "ids": ",us6000tzpq,",
+      "sources": ",us,",
+      "types": ",moment-tensor,origin,phase-data,",
+      "nst": 99,
+      "dmin": 1.746,
+      "rms": 0.8,
+      "gap": 68,
+      "magType": "mww",
+      "type": "earthquake",
+      "title": "M 4.7 - 105 km WNW of H\u00f6fn, Iceland"
+     },
+     "geometry": {
+      "type": "Point",
+      "coordinates": [
+       -17.3115,
+       64.5091,
+       10
+      ]
+     },
+     "id": "us6000tzpq"
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "mag": 2.6,
+      "place": "12 km ESE of Pearsall, Texas",
+      "time": 1791221046427,
+      "updated": 1791237068861,
+      "tz": null,
+      "url": "https://earthquake.usgs.gov/earthquakes/eventpage/tx2026tputog",
+      "detail": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/tx2026tputog.geojson",
+      "felt": null,
+      "cdi": null,
+      "mmi": null,
+      "alert": null,
+      "status": "reviewed",
+      "tsunami": 0,
+      "sig": 104,
+      "net": "tx",
+      "code": "2026tputog",
+      "ids": ",us6000tzpn,tx2026tputog,",
+      "sources": ",us,tx,",
+      "types": ",origin,phase-data,",
+      "nst": 31,
+      "dmin": 0.1,
+      "rms": 0.3,
+      "gap": 83,
+      "magType": "ml",
+      "type": "earthquake",
+      "title": "M 2.6 - 12 km ESE of Pearsall, Texas"
+     },
+     "geometry": {
+      "type": "Point",
+      "coordinates": [
+       -98.978,
+       28.853,
+       7.1851
+      ]
+     },
+     "id": "tx2026tputog"
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "mag": 3.4,
+      "place": "83 km W of Karluk, Alaska",
+      "time": 1791219319142,
+      "updated": 1791250122480,
+      "tz": null,
+      "url": "https://earthquake.usgs.gov/earthquakes/eventpage/aka2026tsxxtn",
+      "detail": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/aka2026tsxxtn.geojson",
+      "felt": null,
+      "cdi": null,
+      "mmi": 3.81,
+      "alert": null,
+      "status": "automatic",
+      "tsunami": 0,
+      "sig": 178,
+      "net": "ak",
+      "code": "a2026tsxxtn",
+      "ids": ",av94461396,us6000tzpj,aka2026tsxxtn,",
+      "sources": ",av,us,ak,",
+      "types": ",origin,phase-data,shakemap,",
+      "nst": 112,
+      "dmin": 0.2,
+      "rms": 1.2,
+      "gap": 123,
+      "magType": "ml",
+      "type": "earthquake",
+      "title": "M 3.4 - 83 km W of Karluk, Alaska"
+     },
+     "geometry": {
+      "type": "Point",
+      "coordinates": [
+       -155.849,
+       57.65,
+       5
+      ]
+     },
+     "id": "aka2026tsxxtn"
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "mag": 2.9,
+      "place": "45 km WNW of Beluga, Alaska",
+      "time": 1791216650126,
+      "updated": 1791230022040,
+      "tz": null,
+      "url": "https://earthquake.usgs.gov/earthquakes/eventpage/aka2026tswjcq",
+      "detail": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/aka2026tswjcq.geojson",
+      "felt": null,
+      "cdi": null,
+      "mmi": null,
+      "alert": null,
+      "status": "automatic",
+      "tsunami": 0,
+      "sig": 129,
+      "net": "ak",
+      "code": "a2026tswjcq",
+      "ids": ",us6000tzpc,aka2026tswjcq,",
+      "sources": ",us,ak,",
+      "types": ",origin,phase-data,",
+      "nst": 115,
+      "dmin": 0,
+      "rms": 0.7,
+      "gap": 22,
+      "magType": "ml",
+      "type": "earthquake",
+      "title": "M 2.9 - 45 km WNW of Beluga, Alaska"
+     },
+     "geometry": {
+      "type": "Point",
+      "coordinates": [
+       -151.817,
+       61.35,
+       92.9
+      ]
+     },
+     "id": "aka2026tswjcq"
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "mag": 2.81,
+      "place": "5 km NE of Hydesville, CA",
+      "time": 1791215796660,
+      "updated": 1791231305567,
+      "tz": null,
+      "url": "https://earthquake.usgs.gov/earthquakes/eventpage/nc75445011",
+      "detail": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/nc75445011.geojson",
+      "felt": 8,
+      "cdi": 2.7,
+      "mmi": null,
+      "alert": null,
+      "status": "automatic",
+      "tsunami": 0,
+      "sig": 124,
+      "net": "nc",
+      "code": "75445011",
+      "ids": ",nc75445011,",
+      "sources": ",nc,",
+      "types": ",dyfi,focal-mechanism,nearby-cities,origin,phase-data,scitech-link,",
+      "nst": 44,
+      "dmin": null,
+      "rms": 0.11,
+      "gap": 114,
+      "magType": "md",
+      "type": "earthquake",
+      "title": "M 2.8 - 5 km NE of Hydesville, CA"
+     },
+     "geometry": {
+      "type": "Point",
+      "coordinates": [
+       -124.048500061035,
+       40.5731658935547,
+       20.6399993896484
+      ]
+     },
+     "id": "nc75445011"
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "mag": 2.69,
+      "place": "7 km SE of Goleta, CA",
+      "time": 1791214840490,
+      "updated": 1791256442393,
+      "tz": null,
+      "url": "https://earthquake.usgs.gov/earthquakes/eventpage/ci41343551",
+      "detail": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/ci41343551.geojson",
+      "felt": 58,
+      "cdi": 3.8,
+      "mmi": null,
+      "alert": null,
+      "status": "reviewed",
+      "tsunami": 0,
+      "sig": 133,
+      "net": "ci",
+      "code": "41343551",
+      "ids": ",ci41343551,us6000tzp8,",
+      "sources": ",ci,us,",
+      "types": ",dyfi,focal-mechanism,nearby-cities,origin,phase-data,scitech-link,",
+      "nst": 50,
+      "dmin": 0.06114,
+      "rms": 0.2,
+      "gap": 50,
+      "magType": "ml",
+      "type": "earthquake",
+      "title": "M 2.7 - 7 km SE of Goleta, CA"
+     },
+     "geometry": {
+      "type": "Point",
+      "coordinates": [
+       -119.775833333333,
+       34.3868333333333,
+       9.27
+      ]
+     },
+     "id": "ci41343551"
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "mag": 4.3,
+      "place": "47 km SSW of Jurm, Afghanistan",
+      "time": 1791212870258,
+      "updated": 1791228648040,
+      "tz": null,
+      "url": "https://earthquake.usgs.gov/earthquakes/eventpage/us6000tzp4",
+      "detail": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/us6000tzp4.geojson",
+      "felt": null,
+      "cdi": null,
+      "mmi": null,
+      "alert": null,
+      "status": "reviewed",
+      "tsunami": 0,
+      "sig": 284,
+      "net": "us",
+      "code": "6000tzp4",
+      "ids": ",us6000tzp4,",
+      "sources": ",us,",
+      "types": ",origin,phase-data,",
+      "nst": 33,
+      "dmin": 2.315,
+      "rms": 0.96,
+      "gap": 84,
+      "magType": "mb",
+      "type": "earthquake",
+      "title": "M 4.3 - 47 km SSW of Jurm, Afghanistan"
+     },
+     "geometry": {
+      "type": "Point",
+      "coordinates": [
+       70.6952,
+       36.4528,
+       190.787
+      ]
+     },
+     "id": "us6000tzp4"
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "mag": 4.7,
+      "place": "75 km NNE of Yonakuni, Japan",
+      "time": 1791207045560,
+      "updated": 1791209516040,
+      "tz": null,
+      "url": "https://earthquake.usgs.gov/earthquakes/eventpage/us6000tznu",
+      "detail": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/us6000tznu.geojson",
+      "felt": null,
+      "cdi": null,
+      "mmi": null,
+      "alert": null,
+      "status": "reviewed",
+      "tsunami": 0,
+      "sig": 340,
+      "net": "us",
+      "code": "6000tznu",
+      "ids": ",us6000tznu,",
+      "sources": ",us,",
+      "types": ",origin,phase-data,",
+      "nst": 90,
+      "dmin": 0.676,
+      "rms": 0.76,
+      "gap": 71,
+      "magType": "mb",
+      "type": "earthquake",
+      "title": "M 4.7 - 75 km NNE of Yonakuni, Japan"
+     },
+     "geometry": {
+      "type": "Point",
+      "coordinates": [
+       123.2696,
+       25.1037,
+       156.219
+      ]
+     },
+     "id": "us6000tznu"
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "mag": 4.4,
+      "place": "53 km NNE of Ruteng, Indonesia",
+      "time": 1791205550276,
+      "updated": 1791210932040,
+      "tz": null,
+      "url": "https://earthquake.usgs.gov/earthquakes/eventpage/us6000tznr",
+      "detail": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/us6000tznr.geojson",
+      "felt": null,
+      "cdi": null,
+      "mmi": null,
+      "alert": null,
+      "status": "reviewed",
+      "tsunami": 0,
+      "sig": 298,
+      "net": "us",
+      "code": "6000tznr",
+      "ids": ",us6000tznr,",
+      "sources": ",us,",
+      "types": ",origin,phase-data,",
+      "nst": 20,
+      "dmin": 3.3,
+      "rms": 0.77,
+      "gap": 141,
+      "magType": "mb",
+      "type": "earthquake",
+      "title": "M 4.4 - 53 km NNE of Ruteng, Indonesia"
+     },
+     "geometry": {
+      "type": "Point",
+      "coordinates": [
+       120.7072,
+       -8.1959,
+       10
+      ]
+     },
+     "id": "us6000tznr"
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "mag": 3.59,
+      "place": "12 km SW of Volcano, Hawaii",
+      "time": 1791203503010,
+      "updated": 1791252307662,
+      "tz": null,
+      "url": "https://earthquake.usgs.gov/earthquakes/eventpage/hv75050162",
+      "detail": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/hv75050162.geojson",
+      "felt": 38,
+      "cdi": 3,
+      "mmi": 3.288,
+      "alert": null,
+      "status": "reviewed",
+      "tsunami": 0,
+      "sig": 210,
+      "net": "hv",
+      "code": "75050162",
+      "ids": ",hv75050162,us6000tznn,",
+      "sources": ",hv,us,",
+      "types": ",dyfi,origin,phase-data,shakemap,",
+      "nst": 61,
+      "dmin": 0.01722,
+      "rms": 0.13,
+      "gap": 70,
+      "magType": "ml",
+      "type": "earthquake",
+      "title": "M 3.6 - 12 km SW of Volcano, Hawaii"
+     },
+     "geometry": {
+      "type": "Point",
+      "coordinates": [
+       -155.300666666667,
+       19.3546666666667,
+       28.21
+      ]
+     },
+     "id": "hv75050162"
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "mag": 2.7,
+      "place": "21 km NNW of Midland, Texas",
+      "time": 1791203271538,
+      "updated": 1791210272483,
+      "tz": null,
+      "url": "https://earthquake.usgs.gov/earthquakes/eventpage/tx2026tpkyfx",
+      "detail": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/tx2026tpkyfx.geojson",
+      "felt": 1,
+      "cdi": 3.4,
+      "mmi": null,
+      "alert": null,
+      "status": "reviewed",
+      "tsunami": 0,
+      "sig": 112,
+      "net": "tx",
+      "code": "2026tpkyfx",
+      "ids": ",us6000tznl,tx2026tpkyfx,",
+      "sources": ",us,tx,",
+      "types": ",dyfi,origin,phase-data,",
+      "nst": 74,
+      "dmin": 0,
+      "rms": 0.1,
+      "gap": 56,
+      "magType": "ml",
+      "type": "earthquake",
+      "title": "M 2.7 - 21 km NNW of Midland, Texas"
+     },
+     "geometry": {
+      "type": "Point",
+      "coordinates": [
+       -102.171,
+       32.174,
+       10.6689
+      ]
+     },
+     "id": "tx2026tpkyfx"
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "mag": 4.4,
+      "place": "54 km WSW of Tambolaka, Indonesia",
+      "time": 1791202642875,
+      "updated": 1791207056040,
+      "tz": null,
+      "url": "https://earthquake.usgs.gov/earthquakes/eventpage/us6000tznk",
+      "detail": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/us6000tznk.geojson",
+      "felt": null,
+      "cdi": null,
+      "mmi": null,
+      "alert": null,
+      "status": "reviewed",
+      "tsunami": 0,
+      "sig": 298,
+      "net": "us",
+      "code": "6000tznk",
+      "ids": ",us6000tznk,",
+      "sources": ",us,",
+      "types": ",origin,phase-data,",
+      "nst": 36,
+      "dmin": 4.741,
+      "rms": 0.83,
+      "gap": 123,
+      "magType": "mb",
+      "type": "earthquake",
+      "title": "M 4.4 - 54 km WSW of Tambolaka, Indonesia"
+     },
+     "geometry": {
+      "type": "Point",
+      "coordinates": [
+       118.824,
+       -9.6952,
+       39.453
+      ]
+     },
+     "id": "us6000tznk"
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "mag": 2.6,
+      "place": "70 km WNW of Happy Valley, Alaska",
+      "time": 1791202211438,
+      "updated": 1791202588040,
+      "tz": null,
+      "url": "https://earthquake.usgs.gov/earthquakes/eventpage/aka2026tsoksi",
+      "detail": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/aka2026tsoksi.geojson",
+      "felt": null,
+      "cdi": null,
+      "mmi": null,
+      "alert": null,
+      "status": "automatic",
+      "tsunami": 0,
+      "sig": 104,
+      "net": "ak",
+      "code": "a2026tsoksi",
+      "ids": ",us6000tzni,aka2026tsoksi,",
+      "sources": ",us,ak,",
+      "types": ",origin,phase-data,",
+      "nst": 111,
+      "dmin": 0.1,
+      "rms": 0.7,
+      "gap": 75,
+      "magType": "ml",
+      "type": "earthquake",
+      "title": "M 2.6 - 70 km WNW of Happy Valley, Alaska"
+     },
+     "geometry": {
+      "type": "Point",
+      "coordinates": [
+       -152.939,
+       60.132,
+       125.3
+      ]
+     },
+     "id": "aka2026tsoksi"
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "mag": 4.6,
+      "place": "21 km S of Luganville, Vanuatu",
+      "time": 1791200827753,
+      "updated": 1791202362040,
+      "tz": null,
+      "url": "https://earthquake.usgs.gov/earthquakes/eventpage/us6000tznh",
+      "detail": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/us6000tznh.geojson",
+      "felt": null,
+      "cdi": null,
+      "mmi": null,
+      "alert": null,
+      "status": "reviewed",
+      "tsunami": 0,
+      "sig": 326,
+      "net": "us",
+      "code": "6000tznh",
+      "ids": ",us6000tznh,",
+      "sources": ",us,",
+      "types": ",origin,phase-data,",
+      "nst": 34,
+      "dmin": 5.525,
+      "rms": 0.65,
+      "gap": 130,
+      "magType": "mb",
+      "type": "earthquake",
+      "title": "M 4.6 - 21 km S of Luganville, Vanuatu"
+     },
+     "geometry": {
+      "type": "Point",
+      "coordinates": [
+       167.1484,
+       -15.7157,
+       35
+      ]
+     },
+     "id": "us6000tznh"
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "mag": 3,
+      "place": "50 km WNW of Ninilchik, Alaska",
+      "time": 1791198382798,
+      "updated": 1791199789040,
+      "tz": null,
+      "url": "https://earthquake.usgs.gov/earthquakes/eventpage/aka2026tsmher",
+      "detail": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/aka2026tsmher.geojson",
+      "felt": null,
+      "cdi": null,
+      "mmi": null,
+      "alert": null,
+      "status": "automatic",
+      "tsunami": 0,
+      "sig": 138,
+      "net": "ak",
+      "code": "a2026tsmher",
+      "ids": ",us6000tznd,aka2026tsmher,",
+      "sources": ",us,ak,",
+      "types": ",origin,phase-data,",
+      "nst": 160,
+      "dmin": 0.2,
+      "rms": 0.9,
+      "gap": 57,
+      "magType": "ml",
+      "type": "earthquake",
+      "title": "M 3.0 - 50 km WNW of Ninilchik, Alaska"
+     },
+     "geometry": {
+      "type": "Point",
+      "coordinates": [
+       -152.492,
+       60.241,
+       104.7
+      ]
+     },
+     "id": "aka2026tsmher"
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "mag": 5,
+      "place": "187 km ENE of Saipan, Northern Mariana Islands",
+      "time": 1791197529844,
+      "updated": 1791241335858,
+      "tz": null,
+      "url": "https://earthquake.usgs.gov/earthquakes/eventpage/us6000tzna",
+      "detail": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/us6000tzna.geojson",
+      "felt": null,
+      "cdi": null,
+      "mmi": null,
+      "alert": null,
+      "status": "reviewed",
+      "tsunami": 0,
+      "sig": 385,
+      "net": "us",
+      "code": "6000tzna",
+      "ids": ",us6000tzna,",
+      "sources": ",us,",
+      "types": ",event-sequence,oaf,origin,phase-data,",
+      "nst": 74,
+      "dmin": 1.646,
+      "rms": 0.71,
+      "gap": 80,
+      "magType": "mb",
+      "type": "earthquake",
+      "title": "M 5.0 - 187 km ENE of Saipan, Northern Mariana Islands"
+     },
+     "geometry": {
+      "type": "Point",
+      "coordinates": [
+       147.395,
+       15.8046,
+       10
+      ]
+     },
+     "id": "us6000tzna"
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "mag": 2.7,
+      "place": "70 km SE of Perryville, Alaska",
+      "time": 1791196683542,
+      "updated": 1791196860752,
+      "tz": null,
+      "url": "https://earthquake.usgs.gov/earthquakes/eventpage/aka2026tslhrt",
+      "detail": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/aka2026tslhrt.geojson",
+      "felt": null,
+      "cdi": null,
+      "mmi": null,
+      "alert": null,
+      "status": "automatic",
+      "tsunami": 0,
+      "sig": 112,
+      "net": "ak",
+      "code": "a2026tslhrt",
+      "ids": ",aka2026tslhrt,",
+      "sources": ",ak,",
+      "types": ",origin,phase-data,",
+      "nst": 32,
+      "dmin": 0.8,
+      "rms": 0.6,
+      "gap": 212,
+      "magType": "ml",
+      "type": "earthquake",
+      "title": "M 2.7 - 70 km SE of Perryville, Alaska"
+     },
+     "geometry": {
+      "type": "Point",
+      "coordinates": [
+       -158.484,
+       55.405,
+       14.3
+      ]
+     },
+     "id": "aka2026tslhrt"
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "mag": 2.9,
+      "place": "42 km NW of San Antonio, Puerto Rico",
+      "time": 1791187210420,
+      "updated": 1791188864930,
+      "tz": null,
+      "url": "https://earthquake.usgs.gov/earthquakes/eventpage/pr71535823",
+      "detail": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/pr71535823.geojson",
+      "felt": null,
+      "cdi": null,
+      "mmi": null,
+      "alert": null,
+      "status": "reviewed",
+      "tsunami": 0,
+      "sig": 129,
+      "net": "pr",
+      "code": "71535823",
+      "ids": ",pr71535823,",
+      "sources": ",pr,",
+      "types": ",origin,phase-data,",
+      "nst": 14,
+      "dmin": 0.4004,
+      "rms": 0.3,
+      "gap": 224,
+      "magType": "md",
+      "type": "earthquake",
+      "title": "M 2.9 - 42 km NW of San Antonio, Puerto Rico"
+     },
+     "geometry": {
+      "type": "Point",
+      "coordinates": [
+       -67.3246666666667,
+       18.8148333333333,
+       13.45
+      ]
+     },
+     "id": "pr71535823"
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "mag": 4.9,
+      "place": "Volcano Islands, Japan region",
+      "time": 1791184418006,
+      "updated": 1791186032040,
+      "tz": null,
+      "url": "https://earthquake.usgs.gov/earthquakes/eventpage/us6000tzmt",
+      "detail": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/us6000tzmt.geojson",
+      "felt": null,
+      "cdi": null,
+      "mmi": null,
+      "alert": null,
+      "status": "reviewed",
+      "tsunami": 0,
+      "sig": 369,
+      "net": "us",
+      "code": "6000tzmt",
+      "ids": ",us6000tzmt,",
+      "sources": ",us,",
+      "types": ",origin,phase-data,",
+      "nst": 99,
+      "dmin": 7.752,
+      "rms": 0.57,
+      "gap": 96,
+      "magType": "mb",
+      "type": "earthquake",
+      "title": "M 4.9 - Volcano Islands, Japan region"
+     },
+     "geometry": {
+      "type": "Point",
+      "coordinates": [
+       144.0442,
+       22.8488,
+       35
+      ]
+     },
+     "id": "us6000tzmt"
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "mag": 4.8,
+      "place": "191 km ESE of Sarangani, Philippines",
+      "time": 1791180855888,
+      "updated": 1791182440040,
+      "tz": null,
+      "url": "https://earthquake.usgs.gov/earthquakes/eventpage/us6000tzmk",
+      "detail": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/us6000tzmk.geojson",
+      "felt": null,
+      "cdi": null,
+      "mmi": null,
+      "alert": null,
+      "status": "reviewed",
+      "tsunami": 0,
+      "sig": 354,
+      "net": "us",
+      "code": "6000tzmk",
+      "ids": ",us6000tzmk,",
+      "sources": ",us,",
+      "types": ",origin,phase-data,",
+      "nst": 65,
+      "dmin": 2.891,
+      "rms": 0.66,
+      "gap": 85,
+      "magType": "mb",
+      "type": "earthquake",
+      "title": "M 4.8 - 191 km ESE of Sarangani, Philippines"
+     },
+     "geometry": {
+      "type": "Point",
+      "coordinates": [
+       126.9394,
+       4.4975,
+       51.291
+      ]
+     },
+     "id": "us6000tzmk"
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "mag": 2.46,
+      "place": "17 km NNE of Isabela, Puerto Rico",
+      "time": 1791180123830,
+      "updated": 1791181919240,
+      "tz": null,
+      "url": "https://earthquake.usgs.gov/earthquakes/eventpage/pr71535793",
+      "detail": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/pr71535793.geojson",
+      "felt": null,
+      "cdi": null,
+      "mmi": null,
+      "alert": null,
+      "status": "reviewed",
+      "tsunami": 0,
+      "sig": 93,
+      "net": "pr",
+      "code": "71535793",
+      "ids": ",pr71535793,",
+      "sources": ",pr,",
+      "types": ",origin,phase-data,",
+      "nst": 12,
+      "dmin": 0.1698,
+      "rms": 0.16,
+      "gap": 253,
+      "magType": "md",
+      "type": "earthquake",
+      "title": "M 2.5 - 17 km NNE of Isabela, Puerto Rico"
+     },
+     "geometry": {
+      "type": "Point",
+      "coordinates": [
+       -66.9353333333333,
+       18.6348333333333,
+       21.28
+      ]
+     },
+     "id": "pr71535793"
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "mag": 2.45,
+      "place": "55 km NE of Valmy, Nevada",
+      "time": 1791178928244,
+      "updated": 1791228348493,
+      "tz": null,
+      "url": "https://earthquake.usgs.gov/earthquakes/eventpage/nn00925296",
+      "detail": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/nn00925296.geojson",
+      "felt": null,
+      "cdi": null,
+      "mmi": null,
+      "alert": null,
+      "status": "reviewed",
+      "tsunami": 0,
+      "sig": 92,
+      "net": "nn",
+      "code": "00925296",
+      "ids": ",nn00925296,",
+      "sources": ",nn,",
+      "types": ",origin,phase-data,",
+      "nst": 4,
+      "dmin": 0.837,
+      "rms": 0.0935,
+      "gap": 262,
+      "magType": "ml",
+      "type": "earthquake",
+      "title": "M 2.5 - 55 km NE of Valmy, Nevada"
+     },
+     "geometry": {
+      "type": "Point",
+      "coordinates": [
+       -116.7,
+       41.1683,
+       11.3772
+      ]
+     },
+     "id": "nn00925296"
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "mag": 5,
+      "place": "71 km E of \u2018Ohonua, Tonga",
+      "time": 1791178004808,
+      "updated": 1791179210040,
+      "tz": null,
+      "url": "https://earthquake.usgs.gov/earthquakes/eventpage/us6000tzme",
+      "detail": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/us6000tzme.geojson",
+      "felt": null,
+      "cdi": null,
+      "mmi": null,
+      "alert": null,
+      "status": "reviewed",
+      "tsunami": 0,
+      "sig": 385,
+      "net": "us",
+      "code": "6000tzme",
+      "ids": ",us6000tzme,",
+      "sources": ",us,",
+      "types": ",origin,phase-data,",
+      "nst": 55,
+      "dmin": 21.03,
+      "rms": 0.54,
+      "gap": 69,
+      "magType": "mb",
+      "type": "earthquake",
+      "title": "M 5.0 - 71 km E of \u2018Ohonua, Tonga"
+     },
+     "geometry": {
+      "type": "Point",
+      "coordinates": [
+       -174.2679,
+       -21.4208,
+       10
+      ]
+     },
+     "id": "us6000tzme"
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "mag": 4.5,
+      "place": "Kuril Islands",
+      "time": 1791173783636,
+      "updated": 1791174967040,
+      "tz": null,
+      "url": "https://earthquake.usgs.gov/earthquakes/eventpage/us6000tzm7",
+      "detail": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/us6000tzm7.geojson",
+      "felt": null,
+      "cdi": null,
+      "mmi": null,
+      "alert": null,
+      "status": "reviewed",
+      "tsunami": 0,
+      "sig": 312,
+      "net": "us",
+      "code": "6000tzm7",
+      "ids": ",us6000tzm7,",
+      "sources": ",us,",
+      "types": ",origin,phase-data,",
+      "nst": 41,
+      "dmin": 6.373,
+      "rms": 0.94,
+      "gap": 136,
+      "magType": "mb",
+      "type": "earthquake",
+      "title": "M 4.5 - Kuril Islands"
+     },
+     "geometry": {
+      "type": "Point",
+      "coordinates": [
+       151.8684,
+       45.953,
+       35
+      ]
+     },
+     "id": "us6000tzm7"
+    }
+   ],
+   "quake_count": 38
+  },
+  "tapped": [
+   {
+    "title": "USGS M2.5+ earthquakes, past day",
+    "url": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_day.geojson",
+    "label": "",
+    "params": {},
+    "scope": "global"
+   }
+  ],
+  "links": [],
+  "notes": [
+   "shell item created",
+   "paused: sources from the SmartBrain Library are on the card",
+   "fetching consented source (earthquake.usgs.gov)",
+   "built from the Library's declared answers: Number of earthquakes",
+   "built from the Library's declared answers: Number of earthquakes; alert set: quake_count gt 4.0"
+  ],
+  "answers": "built from the Library's declared answers: Number of earthquakes; alert set: quake_count gt 4.0",
+  "scene_text": [
+   "Number of earthquakes",
+   "38"
+  ],
+  "pipeline": [
+   {
+    "op": "extract",
+    "paths": {
+     "quake_count_items": "features"
+    }
+   },
+   {
+    "op": "transform",
+    "apply": [
+     {
+      "fn": "count",
+      "field": "quake_count_items",
+      "as": "quake_count"
+     }
+    ]
+   }
+  ],
+  "latest": {
+   "type": "stack",
+   "dir": "v",
+   "gap": "sm",
+   "children": [
+    {
+     "type": "text",
+     "value": "Number of earthquakes",
+     "role": "title",
+     "tone": "default",
+     "size": "md"
+    },
+    {
+     "type": "number",
+     "value": 38,
+     "format": "plain",
+     "unit": "",
+     "tone": "default",
+     "size": "lg"
+    }
+   ]
+  },
+  "secs": 4.0
+ },
+ {
+  "ask": "how many active hurricanes in the Pacific",
+  "outcome": "live",
+  "source": "library: NWS hurricane and tropical storm alerts for a location \u2014 api.weather.gov",
+  "detail": "",
+  "preview": {
+   "rows": [],
+   "rows_count": 0
+  },
+  "tapped": [
+   {
+    "title": "NWS hurricane and tropical storm alerts for a location",
+    "url": "https://api.weather.gov/alerts/active?point=38.479724,-90.749453&event=Hurricane%20Warning,Hurricane%20Watch,Tropical%20Storm%20Warning,Tropical%20Storm%20Watch,Storm%20Surge%20Warning,Storm%20Surge%20Watch,Extreme%20Wind%20Warning,Hurricane%20Local%20Statement",
+    "label": "Pacific (MO)",
+    "params": {
+     "lat": "38.479724",
+     "lon": "-90.749453"
+    },
+    "scope": "place"
+   }
+  ],
+  "links": [],
+  "notes": [
+   "shell item created",
+   "paused: sources from the SmartBrain Library are on the card",
+   "fetching consented source (api.weather.gov)",
+   "built from the Library's declared answers: Tropical watches and warnings",
+   "built from the Library's declared answers: Tropical watches and warnings"
+  ],
+  "answers": "built from the Library's declared answers: Tropical watches and warnings",
+  "scene_text": [
+   "active hurricanes",
+   "No tropical watches and warnings right now"
+  ],
+  "pipeline": [
+   {
+    "op": "extract",
+    "paths": {
+     "rows": "features"
+    }
+   },
+   {
+    "op": "transform",
+    "apply": [
+     {
+      "fn": "time",
+      "field": "rows",
+      "key": "properties.expires"
+     },
+     {
+      "fn": "count",
+      "field": "rows",
+      "as": "rows_count"
+     }
+    ]
+   }
+  ],
+  "latest": {
+   "type": "stack",
+   "dir": "v",
+   "gap": "sm",
+   "children": [
+    {
+     "type": "text",
+     "value": "active hurricanes",
+     "role": "title",
+     "tone": "default",
+     "size": "md"
+    },
+    {
+     "type": "stack",
+     "dir": "v",
+     "gap": "sm",
+     "children": []
+    },
+    {
+     "type": "text",
+     "value": "No tropical watches and warnings right now",
+     "role": "label",
+     "tone": "muted",
+     "size": "sm"
+    }
+   ]
+  },
+  "secs": 5.3
+ },
+ {
+  "ask": "how many open issues on the kubernetes repo",
+  "outcome": "links",
+  "source": "links",
+  "detail": "",
+  "preview": null,
+  "tapped": [],
+  "links": [
+   {
+    "host": "github.com",
+    "title": "Issues \u00b7 kubernetes/kubernetes \u00b7 GitHub",
+    "url": "https://github.com/kubernetes/kubernetes/issues",
+    "found": "page"
+   },
+   {
+    "host": "insights.linuxfoundation.org",
+    "title": "Kubernetes Development Activity | LFX Insights",
+    "url": "https://insights.linuxfoundation.org/project/k8s/development",
+    "found": "page"
+   },
+   {
+    "host": "factory.ai",
+    "title": "By the numbers - Kubernetes wiki | Factory",
+    "url": "https://factory.ai/open-source-wikis/kubernetes?page=by-the-numbers.md",
+    "found": "page"
+   }
+  ],
+  "notes": [
+   "shell item created",
+   "paused: no SmartBrain Library source answers this yet \u2014 pages that may help are on the card"
+  ],
+  "secs": 7.7
+ },
+ {
+  "ask": "what time zone is Phoenix in",
+  "outcome": "links",
+  "source": "library: Current time in a time zone \u2014 timeapi.io \u2192 links",
+  "detail": "",
+  "preview": null,
+  "tapped": [
+   {
+    "title": "Current time in a time zone",
+    "url": "https://timeapi.io/api/time/current/zone?timeZone=Phoenix",
+    "label": "Phoenix (AZ)",
+    "params": {
+     "tz": "Phoenix"
+    },
+    "scope": "place"
+   }
+  ],
+  "links": [
+   {
+    "host": "24timezones.com",
+    "title": "Current time in Phoenix, United States",
+    "url": "https://24timezones.com/Phoenix/time",
+    "found": "page"
+   },
+   {
+    "host": "time.is",
+    "title": "Time in Phoenix, Arizona, United States now",
+    "url": "https://time.is/Phoenix",
+    "found": "page"
+   }
+  ],
+  "notes": [
+   "shell item created",
+   "paused: sources from the SmartBrain Library are on the card",
+   "fetching consented source (timeapi.io)",
+   "TimeAPI.io couldn't be fetched \u2014 paste a link to the data",
+   "paused: the previous source couldn't be fetched; no SmartBrain Library source answers this yet \u2014 pages that may help are on the card"
+  ],
+  "secs": 9.3
+ },
+ {
+  "ask": "population of Austin Texas",
+  "outcome": "links",
+  "source": "links",
+  "detail": "",
+  "preview": null,
+  "tapped": [],
+  "links": [
+   {
+    "host": "www.census.gov",
+    "title": "Census ACS population by state",
+    "url": "https://www.census.gov",
+    "found": "dataset"
+   },
+   {
+    "host": "www.texas-demographics.com",
+    "title": "Texas Cities by Population (2026)",
+    "url": "https://www.texas-demographics.com/cities_by_population",
+    "found": "page"
+   },
+   {
+    "host": "worldpopulationreview.com",
+    "title": "Austin, Texas Population 2026",
+    "url": "https://worldpopulationreview.com/us-cities/texas/austin",
+    "found": "page"
+   }
+  ],
+  "notes": [
+   "shell item created",
+   "paused: no SmartBrain Library source answers this yet \u2014 pages that may help are on the card"
+  ],
+  "secs": 8.4
+ },
+ {
+  "ask": "when is Thanksgiving this year",
+  "outcome": "live",
+  "source": "library: US public holidays \u2014 date.nager.at",
+  "detail": "",
+  "preview": {
+   "rows": [
+    {
+     "date": "Mon Oct 12",
+     "localName": "Columbus Day",
+     "name": "Columbus Day",
+     "countryCode": "US",
+     "fixed": false,
+     "global": false,
+     "counties": [
+      "US-AL",
+      "US-AZ",
+      "US-CO",
+      "US-CT",
+      "US-GA",
+      "US-ID",
+      "US-IL",
+      "US-IN",
+      "US-IA",
+      "US-KS",
+      "US-KY",
+      "US-LA",
+      "US-ME",
+      "US-MD",
+      "US-MA",
+      "US-MS",
+      "US-MO",
+      "US-MT",
+      "US-NE",
+      "US-NH",
+      "US-NJ",
+      "US-NM",
+      "US-NY",
+      "US-NC",
+      "US-OH",
+      "US-OK",
+      "US-PA",
+      "US-RI",
+      "US-SC",
+      "US-TN",
+      "US-UT",
+      "US-VA",
+      "US-WV"
+     ],
+     "launchYear": null,
+     "types": [
+      "Public"
+     ]
+    },
+    {
+     "date": "Mon Oct 12",
+     "localName": "Columbus Day",
+     "name": "Columbus Day",
+     "countryCode": "US",
+     "fixed": false,
+     "global": true,
+     "counties": null,
+     "launchYear": null,
+     "types": [
+      "Bank"
+     ]
+    },
+    {
+     "date": "Mon Oct 12",
+     "localName": "Indigenous Peoples' Day",
+     "name": "Indigenous Peoples' Day",
+     "countryCode": "US",
+     "fixed": false,
+     "global": false,
+     "counties": [
+      "US-AK",
+      "US-AL",
+      "US-CA",
+      "US-HI",
+      "US-IA",
+      "US-LA",
+      "US-ME",
+      "US-MI",
+      "US-MN",
+      "US-NC",
+      "US-NE",
+      "US-NM",
+      "US-OK",
+      "US-OR",
+      "US-SD",
+      "US-TX",
+      "US-VA",
+      "US-VT",
+      "US-WI"
+     ],
+     "launchYear": null,
+     "types": [
+      "Public"
+     ]
+    },
+    {
+     "date": "Nov 11",
+     "localName": "Veterans Day",
+     "name": "Veterans Day",
+     "countryCode": "US",
+     "fixed": false,
+     "global": true,
+     "counties": null,
+     "launchYear": null,
+     "types": [
+      "Public",
+      "Bank"
+     ]
+    },
+    {
+     "date": "Nov 26",
+     "localName": "Thanksgiving Day",
+     "name": "Thanksgiving Day",
+     "countryCode": "US",
+     "fixed": false,
+     "global": true,
+     "counties": null,
+     "launchYear": null,
+     "types": [
+      "Public",
+      "Bank"
+     ]
+    },
+    {
+     "date": "Dec 25",
+     "localName": "Christmas Day",
+     "name": "Christmas Day",
+     "countryCode": "US",
+     "fixed": false,
+     "global": true,
+     "counties": null,
+     "launchYear": null,
+     "types": [
+      "Public",
+      "Bank"
+     ]
+    }
+   ]
+  },
+  "tapped": [
+   {
+    "title": "US public holidays",
+    "url": "https://date.nager.at/api/v3/PublicHolidays/2026/US",
+    "label": "",
+    "params": {
+     "year": "2026"
+    },
+    "scope": "global"
+   }
+  ],
+  "links": [],
+  "notes": [
+   "shell item created",
+   "paused: sources from the SmartBrain Library are on the card",
+   "fetching consented source (date.nager.at)",
+   "built from the Library's declared answers: Public holidays",
+   "built from the Library's declared answers: Public holidays"
+  ],
+  "answers": "built from the Library's declared answers: Public holidays",
+  "scene_text": [
+   "Thanksgiving",
+   "Mon Oct 12 \u00b7 Columbus Day",
+   "Mon Oct 12 \u00b7 Columbus Day",
+   "Mon Oct 12 \u00b7 Indigenous Peoples' Day",
+   "Nov 11 \u00b7 Veterans Day",
+   "Nov 26 \u00b7 Thanksgiving Day"
+  ],
+  "pipeline": [
+   {
+    "op": "extract",
+    "paths": {
+     "rows": "items"
+    }
+   },
+   {
+    "op": "transform",
+    "apply": [
+     {
+      "fn": "window",
+      "field": "rows",
+      "key": "date",
+      "window": "upcoming",
+      "step": "day"
+     },
+     {
+      "fn": "date",
+      "field": "rows",
+      "key": "date"
+     }
+    ]
+   }
+  ],
+  "latest": {
+   "type": "stack",
+   "dir": "v",
+   "gap": "sm",
+   "children": [
+    {
+     "type": "text",
+     "value": "Thanksgiving",
+     "role": "title",
+     "tone": "default",
+     "size": "md"
+    },
+    {
+     "type": "stack",
+     "dir": "v",
+     "gap": "sm",
+     "children": [
+      {
+       "type": "text",
+       "value": "Mon Oct 12 \u00b7 Columbus Day",
+       "role": "label",
+       "tone": "default",
+       "size": "sm"
+      },
+      {
+       "type": "text",
+       "value": "Mon Oct 12 \u00b7 Columbus Day",
+       "role": "label",
+       "tone": "default",
+       "size": "sm"
+      },
+      {
+       "type": "text",
+       "value": "Mon Oct 12 \u00b7 Indigenous Peoples' Day",
+       "role": "label",
+       "tone": "default",
+       "size": "sm"
+      },
+      {
+       "type": "text",
+       "value": "Nov 11 \u00b7 Veterans Day",
+       "role": "label",
+       "tone": "default",
+       "size": "sm"
+      },
+      {
+       "type": "text",
+       "value": "Nov 26 \u00b7 Thanksgiving Day",
+       "role": "label",
+       "tone": "default",
+       "size": "sm"
+      }
+     ]
+    }
+   ]
+  },
+  "secs": 4.2
+ },
+ {
+  "ask": "map of wildfires in Oregon",
+  "outcome": "links",
+  "source": "library: NIFC current wildfire incidents \u2014 services3.arcgis.com \u2192 links",
+  "detail": "",
+  "preview": null,
+  "tapped": [
+   {
+    "title": "NIFC current wildfire incidents",
+    "url": "https://services3.arcgis.com/T4QMspbfLg3qTGWY/arcgis/rest/services/WFIGS_Incident_Locations_Current/FeatureServer/0/query?where=POOState%3D%27US-OR%27&outFields=IncidentName,IncidentSize,PercentContained,FireDiscoveryDateTime,POOCounty&orderByFields=IncidentSize+DESC&resultRecordCount=25&f=json",
+    "label": "Oregon (OR)",
+    "params": {
+     "state": "OR"
+    },
+    "scope": "place"
+   }
+  ],
+  "links": [
+   {
+    "host": "osfminfo.org",
+    "title": "Interactive Maps - OREGON STATE FIRE MARSHAL",
+    "url": "https://osfminfo.org/maps/",
+    "found": "page"
+   },
+   {
+    "host": "wfca.com",
+    "title": "Current Fires in Oregon | WFCA Fire Map",
+    "url": "https://wfca.com/fire-map/oregon",
+    "found": "page"
+   },
+   {
+    "host": "wildfiresmap.com",
+    "title": "Oregon Wildfires Today: Live Map & Tracker | 2026",
+    "url": "https://wildfiresmap.com/us/oregon",
+    "found": "page"
+   }
+  ],
+  "notes": [
+   "shell item created",
+   "paused: sources from the SmartBrain Library are on the card",
+   "fetching consented source (services3.arcgis.com)",
+   "National Interagency Fire Center doesn't answer this (it doesn't report map) \u2014 paste a link to the data",
+   "paused: the previous source doesn't answer this (it doesn't report map); no SmartBrain Library source answers this yet \u2014 pages that may help are on the card"
+  ],
+  "secs": 9.7
+ },
+ {
+  "ask": "where is the ISS right now on a map",
+  "outcome": "live",
+  "source": "library: ISS position now \u2014 api.wheretheiss.at",
+  "detail": "",
+  "preview": {
+   "latitude": 8.7427324920016,
+   "longitude": 50.740300078539,
+   "altitude": 424.14465582769
+  },
+  "tapped": [
+   {
+    "title": "ISS position now",
+    "url": "https://api.wheretheiss.at/v1/satellites/25544",
+    "label": "",
+    "params": {},
+    "scope": "global"
+   }
+  ],
+  "links": [],
+  "notes": [
+   "shell item created",
+   "paused: sources from the SmartBrain Library are on the card",
+   "fetching consented source (api.wheretheiss.at)",
+   "built from the Library's declared answers: Latitude, Longitude, Altitude",
+   "built from the Library's declared answers: Latitude, Longitude, Altitude"
+  ],
+  "answers": "built from the Library's declared answers: Latitude, Longitude, Altitude",
+  "scene_text": [
+   "Latitude",
+   "8.74 \u00b0",
+   "Longitude",
+   "50.74 \u00b0",
+   "Altitude",
+   "424.14 km"
+  ],
+  "pipeline": [
+   {
+    "op": "extract",
+    "paths": {
+     "latitude": "latitude",
+     "longitude": "longitude",
+     "altitude": "altitude"
+    }
+   },
+   {
+    "op": "transform",
+    "apply": [
+     {
+      "fn": "number",
+      "field": "latitude"
+     },
+     {
+      "fn": "number",
+      "field": "longitude"
+     },
+     {
+      "fn": "number",
+      "field": "altitude"
+     }
+    ]
+   }
+  ],
+  "latest": {
+   "type": "stack",
+   "dir": "v",
+   "gap": "sm",
+   "children": [
+    {
+     "type": "text",
+     "value": "Latitude",
+     "role": "title",
+     "tone": "default",
+     "size": "md"
+    },
+    {
+     "type": "number",
+     "value": 8.7427324920016,
+     "format": "plain",
+     "unit": "\u00b0",
+     "tone": "default",
+     "size": "lg"
+    },
+    {
+     "type": "text",
+     "value": "Longitude",
+     "role": "label",
+     "tone": "muted",
+     "size": "sm"
+    },
+    {
+     "type": "number",
+     "value": 50.740300078539,
+     "format": "plain",
+     "unit": "\u00b0",
+     "tone": "default",
+     "size": "sm"
+    },
+    {
+     "type": "text",
+     "value": "Altitude",
+     "role": "label",
+     "tone": "muted",
+     "size": "sm"
+    },
+    {
+     "type": "number",
+     "value": 424.14465582769,
+     "format": "plain",
+     "unit": "km",
+     "tone": "default",
+     "size": "sm"
+    }
+   ]
+  },
+  "secs": 4.3
+ },
+ {
+  "ask": "earthquakes near Los Angeles on a map",
+  "outcome": "links",
+  "source": "library: USGS earthquakes near a place \u2014 earthquake.usgs.gov \u2192 links",
+  "detail": "",
+  "preview": null,
+  "tapped": [
+   {
+    "title": "USGS earthquakes near a place",
+    "url": "https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&latitude=34.019394&longitude=-118.410825&maxradiuskm=200&minmagnitude=2.5&starttime=2026-09-06&orderby=time",
+    "label": "Los Angeles (CA)",
+    "params": {
+     "lat": "34.019394",
+     "lon": "-118.410825",
+     "radius_km": "200",
+     "min_mag": "2.5",
+     "start": "2026-09-06"
+    },
+    "scope": "place"
+   }
+  ],
+  "links": [
+   {
+    "host": "earthquakemap.live",
+    "title": "Los Angeles Earthquakes Today: Live Tracker - Real\u2011Time USGS Data",
+    "url": "https://earthquakemap.live/earthquakes/los-angeles",
+    "found": "page"
+   },
+   {
+    "host": "earthquaketoday.org",
+    "title": "Los Angeles, United States Earthquakes Today \u2014 Live Tracker & Map",
+    "url": "https://earthquaketoday.org/united-states/los-angeles",
+    "found": "page"
+   },
+   {
+    "host": "www.earthquaketracker.org",
+    "title": "Los Angeles Earthquakes 2026 \u2014 Live Map & Risk",
+    "url": "https://www.earthquaketracker.org/earthquakes/los-angeles",
+    "found": "page"
+   }
+  ],
+  "notes": [
+   "shell item created",
+   "paused: sources from the SmartBrain Library are on the card",
+   "fetching consented source (earthquake.usgs.gov)",
+   "US Geological Survey doesn't answer this (it doesn't report map) \u2014 paste a link to the data",
+   "paused: the previous source doesn't answer this (it doesn't report map); no SmartBrain Library source answers this yet \u2014 pages that may help are on the card"
+  ],
+  "secs": 17.1
+ },
+ {
+  "ask": "latest GOES satellite image of the Gulf",
+  "outcome": "links",
+  "source": "links",
+  "detail": "",
+  "preview": null,
+  "tapped": [],
+  "links": [
+   {
+    "host": "www.star.nesdis.noaa.gov",
+    "title": "Sector Images: Gulf of America - NOAA / NESDIS / STAR",
+    "url": "https://www.star.nesdis.noaa.gov/GOES/sector.php?sat=G16&sector=gm",
+    "found": "page"
+   },
+   {
+    "host": "www.goes.noaa.gov",
+    "title": "GOES Mesoscale Images - All Recent Views - NOAA / NESDIS / STAR",
+    "url": "https://www.goes.noaa.gov/meso_index.php",
+    "found": "page"
+   },
+   {
+    "host": "www.nhc.noaa.gov",
+    "title": "Latest Satellite Imagery - National Hurricane Center",
+    "url": "https://www.nhc.noaa.gov/satellite.php",
+    "found": "page"
+   }
+  ],
+  "notes": [
+   "shell item created",
+   "paused: no SmartBrain Library source answers this yet \u2014 pages that may help are on the card"
+  ],
+  "secs": 9.5
+ },
+ {
+  "ask": "today's picture from the Mars rover",
+  "outcome": "needs-key",
+  "source": "needs-key (NASA Astronomy Picture of the Day)",
+  "detail": "",
+  "preview": null,
+  "tapped": [
+   {
+    "title": "NASA Astronomy Picture of the Day",
+    "url": "https://api.nasa.gov/planetary/apod",
+    "label": "",
+    "params": {},
+    "scope": "global"
+   }
+  ],
+  "links": [],
+  "notes": [
+   "shell item created",
+   "paused: sources from the SmartBrain Library are on the card"
+  ],
+  "secs": 2.0
+ },
+ {
+  "ask": "radar for Atlanta",
+  "outcome": "links",
+  "source": "links",
+  "detail": "",
+  "preview": null,
+  "tapped": [],
+  "links": [
+   {
+    "host": "www.11alive.com",
+    "title": "Atlanta Metro Interactive Radar on WXIA in Atlanta | 11alive.com",
+    "url": "https://www.11alive.com/radar",
+    "found": "page"
+   },
+   {
+    "host": "www.foxweather.com",
+    "title": "Local Weather Radar - Atlanta, GA",
+    "url": "https://www.foxweather.com/local-weather/georgia/atlanta/radar",
+    "found": "page"
+   }
+  ],
+  "notes": [
+   "shell item created",
+   "paused: no SmartBrain Library source answers this yet \u2014 pages that may help are on the card"
+  ],
+  "secs": 7.2
+ },
+ {
+  "ask": "summarize today's top story from AP",
+  "outcome": "links",
+  "source": "links",
+  "detail": "",
+  "preview": null,
+  "tapped": [],
+  "links": [
+   {
+    "host": "www.ap.org",
+    "title": "News Highlights - The Associated Press",
+    "url": "https://www.ap.org/news-highlights/",
+    "found": "page"
+   },
+   {
+    "host": "www.newsbreak.com",
+    "title": "AP Top Stories Digest - NewsBreak",
+    "url": "https://www.newsbreak.com/baytobaynews-com-1733089/4821026493775-ap-top-stories-digest",
+    "found": "page"
+   }
+  ],
+  "notes": [
+   "shell item created",
+   "paused: no SmartBrain Library source answers this yet \u2014 pages that may help are on the card"
+  ],
+  "secs": 12.4
+ },
+ {
+  "ask": "today's word and its definition",
+  "outcome": "links",
+  "source": "library: Merriam-Webster word of the day \u2014 www.merriam-webster.com \u2192 links",
+  "detail": "",
+  "preview": null,
+  "tapped": [
+   {
+    "title": "Merriam-Webster word of the day",
+    "url": "https://www.merriam-webster.com/wotd/feed/rss2",
+    "label": "",
+    "params": {},
+    "scope": "global"
+   }
+  ],
+  "links": [
+   {
+    "host": "www.dictionary.com",
+    "title": "Word of the Day - Dictionary.com",
+    "url": "https://www.dictionary.com/word-of-the-day",
+    "found": "page"
+   },
+   {
+    "host": "wotd.site",
+    "title": "Today's Word of the Day:",
+    "url": "https://wotd.site/",
+    "found": "page"
+   },
+   {
+    "host": "www.wordhint.net",
+    "title": "Today's Wordle Hint & Answer \u2014 October 5 (#1934)",
+    "url": "https://www.wordhint.net/wordle/hint/today/",
+    "found": "page"
+   }
+  ],
+  "notes": [
+   "shell item created",
+   "paused: sources from the SmartBrain Library are on the card",
+   "fetching consented source (www.merriam-webster.com)",
+   "Merriam-Webster has nothing for this right now \u2014 paste a link to the data",
+   "paused: the previous source has nothing for this right now; no SmartBrain Library source answers this yet \u2014 pages that may help are on the card"
+  ],
+  "secs": 8.8
+ },
+ {
+  "ask": "today in history",
+  "outcome": "links",
+  "source": "links",
+  "detail": "",
+  "preview": null,
+  "tapped": [],
+  "links": [
+   {
+    "host": "www.onthisday.com",
+    "title": "On This Day - Today in History, Film, Music and Sport",
+    "url": "https://www.onthisday.com/",
+    "found": "page"
+   },
+   {
+    "host": "www.history.com",
+    "title": "What Happened on October 4 | HISTORY",
+    "url": "https://www.history.com/this-day-in-history",
+    "found": "page"
+   },
+   {
+    "host": "www.historynet.com",
+    "title": "Today in History: What Happened on This Day in History",
+    "url": "https://www.historynet.com/today-in-history/tdih_key/13766108/",
+    "found": "page"
+   }
+  ],
+  "notes": [
+   "shell item created",
+   "paused: no SmartBrain Library source answers this yet \u2014 pages that may help are on the card"
+  ],
+  "secs": 6.5
+ },
+ {
+  "ask": "compare Nvidia and AMD stock prices",
+  "outcome": "links",
+  "source": "links",
+  "detail": "",
+  "preview": null,
+  "tapped": [],
+  "links": [
+   {
+    "host": "www.alphavantage.co",
+    "title": "Alpha Vantage global quote",
+    "url": "https://www.alphavantage.co",
+    "found": "dataset"
+   },
+   {
+    "host": "finnhub.io",
+    "title": "Finnhub quote",
+    "url": "https://finnhub.io",
+    "found": "dataset"
+   },
+   {
+    "host": "www.investing.com",
+    "title": "Nvidia vs AMD: Stock Comparison - Investing.com",
+    "url": "https://www.investing.com/academy/stock-picks/nvidia-vs-amd/",
+    "found": "page"
+   },
+   {
+    "host": "finance.yahoo.com",
+    "title": "AMD vs. Nvidia: Which AI Stock Is the Better Buy?",
+    "url": "https://finance.yahoo.com/markets/stocks/articles/amd-vs-nvidia-ai-stock-035909345.html",
+    "found": "page"
+   }
+  ],
+  "notes": [
+   "shell item created",
+   "paused: no SmartBrain Library source answers this yet \u2014 pages that may help are on the card"
+  ],
+  "secs": 7.9
+ },
+ {
+  "ask": "weather in Denver vs Salt Lake City",
+  "outcome": "live",
+  "source": "library: Open-Meteo forecast \u2014 api.open-meteo.com",
+  "detail": "",
+  "preview": {
+   "temperature": 65.8,
+   "conditions": "Clear sky",
+   "high_today": 88.3,
+   "low_today": 51.2
+  },
+  "tapped": [
+   {
+    "title": "Open-Meteo forecast",
+    "url": "https://api.open-meteo.com/v1/forecast?latitude=39.76185&longitude=-104.881105&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m&hourly=temperature_2m,precipitation_probability,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,snowfall_sum,sunrise,sunset&temperature_unit=fahrenheit&wind_speed_unit=mph&precipitation_unit=inch&timezone=auto",
+    "label": "Denver (CO)",
+    "params": {
+     "lat": "39.76185",
+     "lon": "-104.881105"
+    },
+    "scope": "place"
+   }
+  ],
+  "links": [],
+  "notes": [
+   "shell item created",
+   "paused: sources from the SmartBrain Library are on the card",
+   "fetching consented source (api.open-meteo.com)",
+   "built from the Library's declared answers: Temperature, Conditions, High today, Low today",
+   "built from the Library's declared answers: Temperature, Conditions, High today, Low today"
+  ],
+  "answers": "built from the Library's declared answers: Temperature, Conditions, High today, Low today",
+  "scene_text": [
+   "Temperature",
+   "65.8 \u00b0F",
+   "Conditions",
+   "Clear sky",
+   "High today",
+   "88.3 \u00b0F",
+   "Low today",
+   "51.2 \u00b0F"
+  ],
+  "pipeline": [
+   {
+    "op": "extract",
+    "paths": {
+     "temperature": "current.temperature_2m",
+     "conditions": "current.weather_code",
+     "high_today": "daily.temperature_2m_max[0]",
+     "low_today": "daily.temperature_2m_min[0]"
+    }
+   },
+   {
+    "op": "transform",
+    "apply": [
+     {
+      "fn": "number",
+      "field": "temperature"
+     },
+     {
+      "fn": "label",
+      "field": "conditions",
+      "table": "wmo_weather"
+     },
+     {
+      "fn": "number",
+      "field": "high_today"
+     },
+     {
+      "fn": "number",
+      "field": "low_today"
+     }
+    ]
+   }
+  ],
+  "latest": {
+   "type": "stack",
+   "dir": "v",
+   "gap": "sm",
+   "children": [
+    {
+     "type": "text",
+     "value": "Temperature",
+     "role": "title",
+     "tone": "default",
+     "size": "md"
+    },
+    {
+     "type": "number",
+     "value": 65.8,
+     "format": "plain",
+     "unit": "\u00b0F",
+     "tone": "default",
+     "size": "lg"
+    },
+    {
+     "type": "text",
+     "value": "Conditions",
+     "role": "label",
+     "tone": "muted",
+     "size": "sm"
+    },
+    {
+     "type": "text",
+     "value": "Clear sky",
+     "role": "value",
+     "tone": "default",
+     "size": "sm"
+    },
+    {
+     "type": "text",
+     "value": "High today",
+     "role": "label",
+     "tone": "muted",
+     "size": "sm"
+    },
+    {
+     "type": "number",
+     "value": 88.3,
+     "format": "plain",
+     "unit": "\u00b0F",
+     "tone": "default",
+     "size": "sm"
+    },
+    {
+     "type": "text",
+     "value": "Low today",
+     "role": "label",
+     "tone": "muted",
+     "size": "sm"
+    },
+    {
+     "type": "number",
+     "value": 51.2,
+     "format": "plain",
+     "unit": "\u00b0F",
+     "tone": "default",
+     "size": "sm"
+    }
+   ]
+  },
+  "secs": 7.9
+ },
+ {
+  "ask": "compare Ethereum and Solana prices",
+  "outcome": "source",
+  "source": "library: Coinbase spot price \u2014 api.coinbase.com \u2192 library: Coinbase spot price \u2014 api.coinbase.com \u2192 library: CoinGecko coin price \u2014 api.coingecko.com",
+  "detail": "awaiting_pick",
+  "preview": null,
+  "tapped": [
+   {
+    "title": "Coinbase spot price",
+    "url": "https://api.coinbase.com/v2/prices/ETH-USD/spot",
+    "label": "Ethereum",
+    "params": {
+     "pair": "ETH-USD"
+    },
+    "scope": "global"
+   },
+   {
+    "title": "Coinbase spot price",
+    "url": "https://api.coinbase.com/v2/prices/SOL-USD/spot",
+    "label": "Solana",
+    "params": {
+     "pair": "SOL-USD"
+    },
+    "scope": "global"
+   },
+   {
+    "title": "CoinGecko coin price",
+    "url": "https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd&include_24hr_change=true&include_last_updated_at=true",
+    "label": "Ethereum",
+    "params": {
+     "coin": "ethereum"
+    },
+    "scope": "global"
+   }
+  ],
+  "links": [],
+  "notes": [
+   "shell item created",
+   "paused: sources from the SmartBrain Library are on the card",
+   "fetching consented source (api.coinbase.com)",
+   "Coinbase doesn't answer this (it isn't about Solana) \u2014 pick another source",
+   "fetching consented source (api.coinbase.com)",
+   "Coinbase doesn't answer this (it isn't about Ethereum) \u2014 pick another source",
+   "fetching consented source (api.coingecko.com)",
+   "CoinGecko doesn't answer this (it is about Ethereum, not compare) \u2014 paste a link to the data",
+   "paused: the previous source doesn't answer this (it is about Ethereum, not compare); no SmartBrain Library source answers this yet \u2014 pages that may help are on the card"
+  ],
+  "secs": 15.9
+ }
+]

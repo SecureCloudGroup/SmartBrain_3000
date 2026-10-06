@@ -390,3 +390,62 @@ def test_not_an_rss_date() -> None:
     with pytest.raises(ni.NIError):
         ni.local_time("Tue, 31 Feb 2026 01:00:00 GMT")
     assert not ni_flow._is_timestamp("sometime next week", "published")
+
+
+# --- Phase 0 (2026-10-05): a pasted non-JSON link keeps its sniffed format ---------------------------
+
+def _refuse_json(url, headers=None, allow_redirects=True):
+    raise netguard.FetchError("upstream returned invalid JSON", kind="not_json")
+
+
+def test_sniffed_fetch_with_format_names_the_sniffed_format(monkeypatch) -> None:
+    body = "<?xml version='1.0'?><rss><channel><title>PastedFeed</title></channel></rss>"
+
+    def fake_text(url, fmt, headers=None, allow_redirects=True):
+        return {"final_url": url, "status": 200, "content_type": "application/rss+xml", "text": body}
+
+    monkeypatch.setattr(netguard, "safe_fetch_json", _refuse_json)
+    monkeypatch.setattr(netguard, "safe_fetch_text", fake_text)
+    out, fmt = ni_flow._sniffed_fetch_with_format("https://ex.test/rss")
+    assert fmt == "feed" and out["title"] == "PastedFeed"
+    assert ni_flow._sniffed_fetch("https://ex.test/rss")["title"] == "PastedFeed"  # the old shape still works
+
+
+def test_seal_sniffed_format_stamps_the_record_and_never_for_json() -> None:
+    store, _ = _store()
+    item_id = ni_flow.create_shell_item(store, "pasted csv")
+    ni_flow._seal_sniffed_format(store, item_id, "json")
+    assert "_format" not in (ni_flow._flow_read(store, item_id) or {})
+    ni_flow._seal_sniffed_format(store, item_id, "csv")
+    assert (ni_flow._flow_read(store, item_id) or {})["_format"] == "csv"
+
+
+def test_pasted_csv_link_seals_its_format_on_the_built_spec(monkeypatch) -> None:
+    """The product path for a pasted CSV link: the default fetcher sniffs csv, seals ``_format``, and the
+    built spec carries ``source.format == "csv"`` so the engine's first refresh parses CSV, not JSON."""
+    import json
+    body = "state,births\nCA,1\nNY,2\n"
+
+    def fake_text(url, fmt, headers=None, allow_redirects=True):
+        return {"final_url": url, "status": 200, "content_type": "text/csv", "text": body}
+
+    monkeypatch.setattr(netguard, "safe_fetch_json", _refuse_json)
+    monkeypatch.setattr(netguard, "safe_fetch_text", fake_text)
+    store, _ = _store()
+    request = "birth rate by state"
+    item_id = ni_flow.create_shell_item(store, request)
+
+    def model(_model: str, prompt: str) -> str:
+        if "verifying a data card BEFORE it ships" in prompt:
+            return json.dumps({"serves": True, "gaps": [], "wrong": []})
+        if "Choose the best candidate path" in prompt:
+            return json.dumps({"state": "rows[0].state", "births": "rows[0].births"})
+        return json.dumps({"kind": "external_data", "subject": "births", "cadence_minutes": 60,
+                           "wants": ["state", "births"], "threshold": None, "display_hint": "list"})
+
+    result = ni_flow.run_flow(store, item_id, gateway_call=model, ni_route_model="local/test",
+                              source_url="https://ex.test/data.csv")
+    assert result["state"] == "ready", result.get("error")
+    item = store.get_item(item_id)
+    assert item is not None and item["spec"]["source"]["format"] == "csv"
+    assert (ni_flow._flow_read(store, item_id) or {}).get("_format") == "csv"

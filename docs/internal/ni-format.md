@@ -127,7 +127,7 @@ No foreign keys; `NIStore.delete` cascades in code (feeds precedent).
   has those segments stripped by `library_resolve._expand`, so a trailing `&token={key}` left in
   the template would otherwise fail the walk for keyed clock sources (nasa-neows-feed,
   finnhub-earnings-calendar, fec-candidates).
-- `display.size` ∈ `small | wide` (wide spans two grid columns).
+- `display.size` ∈ `small | wide | large` (wide spans two grid columns; large is reserved for the forms' L size and renders as wide until the fixed-rhythm grid lands — Round 19). An absent `display` means small.
 - `contract` is system-written at commissioning (§7); the agent may never set it.
 - `model` optionally overrides the `ni` route for `model` sources (schedules.model
   precedent).
