@@ -1,0 +1,202 @@
+[
+ {
+  "ask": "how warm is it in Boise right now",
+  "kind": "current_value"
+ },
+ {
+  "ask": "what is platinum trading at today",
+  "kind": "current_value"
+ },
+ {
+  "ask": "water temperature at Virginia Beach",
+  "kind": "current_value"
+ },
+ {
+  "ask": "rain chances in Nashville this week",
+  "kind": "forecast"
+ },
+ {
+  "ask": "snow forecast for Tahoe this weekend",
+  "kind": "forecast"
+ },
+ {
+  "ask": "surf forecast Huntington Beach",
+  "kind": "forecast"
+ },
+ {
+  "ask": "hourly temps in Minneapolis today",
+  "kind": "forecast"
+ },
+ {
+  "ask": "when does the next rocket launch from Vandenberg",
+  "kind": "next_event"
+ },
+ {
+  "ask": "what day is the next new moon",
+  "kind": "next_event"
+ },
+ {
+  "ask": "next Bears game",
+  "kind": "next_event"
+ },
+ {
+  "ask": "next Amtrak departure from Boston to New York",
+  "kind": "next_event"
+ },
+ {
+  "ask": "Cubs schedule this week",
+  "kind": "schedule"
+ },
+ {
+  "ask": "NHL games tonight",
+  "kind": "schedule"
+ },
+ {
+  "ask": "when are the next Federal Reserve meetings",
+  "kind": "schedule"
+ },
+ {
+  "ask": "who won the Dolphins game",
+  "kind": "result"
+ },
+ {
+  "ask": "Celtics final score last night",
+  "kind": "result"
+ },
+ {
+  "ask": "last night's Mariners result",
+  "kind": "result"
+ },
+ {
+  "ask": "latest NPR headlines",
+  "kind": "latest_items"
+ },
+ {
+  "ask": "new posts on r/homelab",
+  "kind": "latest_items"
+ },
+ {
+  "ask": "recent FDA recalls",
+  "kind": "latest_items"
+ },
+ {
+  "ask": "NFC West standings right now",
+  "kind": "ranking"
+ },
+ {
+  "ask": "top 10 cryptocurrencies by market cap",
+  "kind": "ranking"
+ },
+ {
+  "ask": "most downloaded Python packages this week",
+  "kind": "ranking"
+ },
+ {
+  "ask": "US gas price trend this year",
+  "kind": "trend"
+ },
+ {
+  "ask": "30 year mortgage rate history",
+  "kind": "trend"
+ },
+ {
+  "ask": "Bitcoin price over the last month",
+  "kind": "trend"
+ },
+ {
+  "ask": "is Cloudflare having issues",
+  "kind": "status"
+ },
+ {
+  "ask": "Amtrak Northeast Corridor status",
+  "kind": "status"
+ },
+ {
+  "ask": "Discord status",
+  "kind": "status"
+ },
+ {
+  "ask": "any flood warnings in Houston",
+  "kind": "alerts"
+ },
+ {
+  "ask": "tornado watches in Oklahoma right now",
+  "kind": "alerts"
+ },
+ {
+  "ask": "air quality alerts for Salt Lake City",
+  "kind": "alerts"
+ },
+ {
+  "ask": "how many earthquakes above 4.0 today",
+  "kind": "count"
+ },
+ {
+  "ask": "how many active hurricanes in the Pacific",
+  "kind": "count"
+ },
+ {
+  "ask": "how many open issues on the kubernetes repo",
+  "kind": "count"
+ },
+ {
+  "ask": "what time zone is Phoenix in",
+  "kind": "lookup"
+ },
+ {
+  "ask": "population of Austin Texas",
+  "kind": "lookup"
+ },
+ {
+  "ask": "when is Thanksgiving this year",
+  "kind": "lookup"
+ },
+ {
+  "ask": "map of wildfires in Oregon",
+  "kind": "map"
+ },
+ {
+  "ask": "where is the ISS right now on a map",
+  "kind": "map"
+ },
+ {
+  "ask": "earthquakes near Los Angeles on a map",
+  "kind": "map"
+ },
+ {
+  "ask": "latest GOES satellite image of the Gulf",
+  "kind": "image"
+ },
+ {
+  "ask": "today's picture from the Mars rover",
+  "kind": "image"
+ },
+ {
+  "ask": "radar for Atlanta",
+  "kind": "image"
+ },
+ {
+  "ask": "summarize today's top story from AP",
+  "kind": "text_brief"
+ },
+ {
+  "ask": "today's word and its definition",
+  "kind": "text_brief"
+ },
+ {
+  "ask": "today in history",
+  "kind": "text_brief"
+ },
+ {
+  "ask": "compare Nvidia and AMD stock prices",
+  "kind": "compare"
+ },
+ {
+  "ask": "weather in Denver vs Salt Lake City",
+  "kind": "compare"
+ },
+ {
+  "ask": "compare Ethereum and Solana prices",
+  "kind": "compare"
+ }
+]

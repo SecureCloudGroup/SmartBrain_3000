@@ -669,7 +669,7 @@ export type NiState =
   | "broken"
   | "paused";
 
-export interface NiDisplay { size: "small" | "wide" }
+export interface NiDisplay { size: "small" | "wide" | "large" }
 
 // Natural-Interface flow (creation/remap pipeline). Non-null on a board row while the
 // engine is actively assembling — or has ended abnormally — a card; null once the

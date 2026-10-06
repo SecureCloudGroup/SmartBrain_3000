@@ -237,6 +237,37 @@ def test_flow_end_to_end_aapl_value_card() -> None:
     assert isinstance(values.get("prev_close"), (int, float))
 
 
+def test_worker_restart_reuses_the_sealed_intent_without_a_model_call() -> None:
+    """Phase 0 (2026-10-05): the pass after the user's tap re-enters with the same words; the intent the
+    first pass sealed is reused. The second scripted model holds ONLY the mapping reply — were intent
+    asked again it would be fed that reply, fail validation, retry, and exhaust the script (the test
+    fails there); only a reused intent lets the pass reach ``ready``."""
+    store, _conn = _store()
+    fixture = _load("aapl")
+    request = "show me AAPL every 5 minutes"
+    item_id = ni_flow.create_shell_item(store, request)
+    intent_reply = json.dumps({
+        "kind": "external_data", "subject": "AAPL", "cadence_minutes": 5,
+        "wants": ["price", "prev_close"], "threshold": None, "display_hint": "value",
+    })
+    first = ni_flow.run_flow(store, item_id, gateway_call=_scripted_model([intent_reply]),
+                             fetcher=lambda url: fixture)
+    assert first["state"] == "source", first  # paused for a source; the intent is sealed on the record
+    sealed = (ni_flow._flow_read(store, item_id) or {}).get("intent")
+    assert isinstance(sealed, dict) and sealed["subject"] == "AAPL"
+    mapping_reply = json.dumps({
+        "price": "chart.result[0].meta.regularMarketPrice",
+        "prev_close": "chart.result[0].meta.fulldayPrice",
+    })
+    second = ni_flow.run_flow(
+        store, item_id, gateway_call=_scripted_model([mapping_reply]),
+        fetcher=lambda url: fixture,
+        source_url="https://query1.finance.yahoo.com/v8/finance/chart/AAPL",
+    )
+    assert second["state"] == "ready", f"got {second}"
+    assert (ni_flow._flow_read(store, item_id) or {}).get("intent", {}).get("subject") == "AAPL"
+
+
 def test_flow_paused_at_source_when_no_library_source_no_url() -> None:
     """No Library source + no user URL ⇒ flow pauses at ``source`` state."""
     store, _conn = _store()
