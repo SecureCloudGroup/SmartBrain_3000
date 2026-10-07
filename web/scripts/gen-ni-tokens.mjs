@@ -1,10 +1,12 @@
 // Codegen for the NI form painter: emits src/lib/ni/tokens.ts and src/lib/ni/icons.generated.ts
-// from the Python-owned ni_forms/tokens.json + assets/icons.json, and fills the three
+// from the Python-owned ni_forms/tokens.json + assets/icons.json, fills the three
 // `ni-tokens:*` marker regions in src/app.css with the `--ni-<name>` custom properties for
-// both themes. The CLIR carries token NAMES; only the painter resolves them to CSS vars.
-// Rerun after a tokens.json or icons.json change:  node scripts/gen-ni-tokens.mjs
+// both themes, and copies assets/world110m.json (the land outline the basemap prim draws)
+// to static/ni/ so the client fetches it same-origin at /ni/world110m.json.
+// The CLIR carries token NAMES; only the painter resolves them to CSS vars.
+// Rerun after a tokens.json, icons.json or world110m.json change:  node scripts/gen-ni-tokens.mjs
 
-import { readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -114,3 +116,11 @@ const iconsBody =
   `export const NI_ICONS: NiIconSet = ${JSON.stringify(iconsRaw)};\n`;
 writeFileSync(outIcons, iconsBody);
 console.log(`ni icons: ${Object.keys(iconsRaw.icons).length} outlines -> src/lib/ni/icons.generated.ts`);
+
+// Basemap: one source for the land outline. The Python painter reads assets/world110m.json
+// directly; the client (src/lib/ni/basemap.ts) fetches the same bytes from static/ni/.
+const worldJson = join(niDir, "assets", "world110m.json");
+const outWorldDir = join(here, "..", "static", "ni");
+mkdirSync(outWorldDir, { recursive: true });
+copyFileSync(worldJson, join(outWorldDir, "world110m.json"));
+console.log("ni basemap: assets/world110m.json -> static/ni/world110m.json");

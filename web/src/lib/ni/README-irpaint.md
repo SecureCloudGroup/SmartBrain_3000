@@ -42,7 +42,11 @@ and keeps the live bindings ticking.
 - Never emits `{@html}`; every run is a plain `{line}` interpolation.
 - Never loads image prims yet: no shipped form emits one, so the box paints as a
   placeholder until the image form lands with its loader. Basemap prims paint the
-  land box without coastlines until a map form ships the asset.
+  land box until the coastline rings arrive: `basemap.ts` fetches
+  `/ni/world110m.json` once per page (a failed fetch keeps the box and the next
+  basemap prim retries), and `mapPaths` projects the rings into the prim's box
+  exactly as the basemap branch of `paint/vector.py` does (same mapping, skip rule
+  and number format; `basemap.test.ts` pins it against Python-computed points).
 
 ## Live-binding parity rule
 
@@ -57,10 +61,12 @@ same). Any change to `paint/live.py` must land here in the same PR and vice vers
 
 ## Tokens and icons
 
-`tokens.ts`, `icons.generated.ts` and the three `ni-tokens:*` regions in
+`tokens.ts`, `icons.generated.ts`, the three `ni-tokens:*` regions in
 `src/app.css` (`:root`, `:root[data-theme="light"]`, the system-preference
-block) are written by one generator from the Python-owned
-`app/smartbrain_3000/ni_forms/tokens.json` and `assets/icons.json`:
+block) and `static/ni/world110m.json` (the land outline, served same-origin for
+`basemap.ts`) are written by one generator from the Python-owned
+`app/smartbrain_3000/ni_forms/tokens.json`, `assets/icons.json` and
+`assets/world110m.json`:
 
 ```
 node web/scripts/gen-ni-tokens.mjs
