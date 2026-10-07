@@ -123,7 +123,8 @@ def test_form_bind_runs_engine_and_returns_two_clirs() -> None:
     assert bound["clir"]["phone"]["form"] == "stat"
     assert "design_needs_attention" not in bound   # sealed candidate survived
     texts = [ln for p in bound["clir"]["desktop"]["prims"] if p["k"] == "text" for ln in p["lines"]]
-    assert "NVDA" in texts and "example.org" in texts and "$223.86" in texts   # host = registrable domain
+    assert "NVDA" in texts and "$223.86" in texts
+    assert texts.count("example.org") == 1   # host = the registrable domain, printed once by the shell
     assert all(p.get("src") in TEXT_SRC for p in bound["clir"]["desktop"]["prims"] if p["k"] == "text")
 
 
