@@ -1,0 +1,304 @@
+{
+"v": 1,
+"form": "stat",
+"variant": "x",
+"cand": "c0",
+"plan": "fixture",
+"span": "d1x2",
+"bucket": {
+"min_w": 188,
+"max_w": 224,
+"h": 336
+},
+"state": "ok",
+"prims": [
+{
+"k": "text",
+"x": [
+"l",
+0
+],
+"y": 14,
+"max_w": 180,
+"lines": [
+"NVDA"
+],
+"role": "title",
+"px": 14,
+"tok": "text",
+"anchor": "start",
+"dir": "ltr",
+"src": "title",
+"id": 0
+},
+{
+"k": "text",
+"x": [
+"l",
+0
+],
+"y": 58,
+"max_w": 180,
+"lines": [
+"$223.86"
+],
+"role": "hero",
+"px": 31,
+"tok": "text",
+"anchor": "start",
+"dir": "ltr",
+"src": "data",
+"id": 1
+},
+{
+"k": "tri",
+"x": [
+"l",
+5
+],
+"y": 77,
+"size": 9,
+"dir": "down",
+"tok": "viz-neg",
+"id": 2
+},
+{
+"k": "text",
+"x": [
+"l",
+14
+],
+"y": 82,
+"max_w": 110,
+"lines": [
+"1.65 (0.73%)"
+],
+"role": "delta",
+"px": 14,
+"tok": "viz-neg",
+"anchor": "start",
+"dir": "ltr",
+"src": "data",
+"id": 3
+},
+{
+"k": "text",
+"x": [
+"l",
+108
+],
+"y": 82,
+"max_w": 60,
+"lines": [
+"today"
+],
+"role": "sub",
+"px": 14,
+"tok": "muted",
+"anchor": "start",
+"dir": "ltr",
+"src": "code",
+"id": 4
+},
+{
+"k": "line",
+"x0": [
+"l",
+2
+],
+"y0": 110,
+"x1": [
+"r",
+2
+],
+"y1": 110,
+"tok": "viz-track",
+"w": 4,
+"id": 5
+},
+{
+"k": "line",
+"x0": [
+"f",
+0.05
+],
+"y0": 110,
+"x1": [
+"f",
+0.72
+],
+"y1": 110,
+"tok": "viz-line",
+"w": 4,
+"id": 6
+},
+{
+"k": "line",
+"x0": [
+"f",
+0.46
+],
+"y0": 103,
+"x1": [
+"f",
+0.46
+],
+"y1": 117,
+"tok": "muted",
+"w": 1.5,
+"id": 7
+},
+{
+"k": "line",
+"x0": [
+"f",
+0.98
+],
+"y0": 103,
+"x1": [
+"f",
+0.98
+],
+"y1": 117,
+"tok": "muted",
+"w": 1.5,
+"id": 8
+},
+{
+"k": "dot",
+"x": [
+"f",
+0.6
+],
+"y": 110,
+"r": 4.5,
+"tok": "viz-line",
+"ring": "viz-dot-ring",
+"ring_w": 2,
+"id": 9
+},
+{
+"k": "text",
+"x": [
+"f",
+0.05
+],
+"y": 132,
+"max_w": 60,
+"lines": [
+"221.09"
+],
+"role": "tick",
+"px": 11,
+"tok": "muted",
+"anchor": "start",
+"dir": "ltr",
+"src": "data",
+"id": 10
+},
+{
+"k": "text",
+"x": [
+"f",
+0.72
+],
+"y": 132,
+"max_w": 60,
+"lines": [
+"224.63"
+],
+"role": "tick",
+"px": 11,
+"tok": "muted",
+"anchor": "middle",
+"dir": "ltr",
+"src": "data",
+"id": 11
+},
+{
+"k": "text",
+"x": [
+"l",
+0
+],
+"y": 156,
+"max_w": 188,
+"lines": [
+"Open 223.22 \u00b7 prev close\u2026"
+],
+"role": "meta",
+"px": 12,
+"tok": "muted",
+"anchor": "start",
+"dir": "ltr",
+"src": "data",
+"id": 12
+},
+{
+"k": "icon",
+"x": [
+"r",
+10
+],
+"y": 10,
+"size": 16,
+"name": "up",
+"tok": "faint",
+"id": 13
+},
+{
+"k": "time",
+"x": [
+"l",
+0
+],
+"y": 333,
+"max_w": 56,
+"t": "2026-09-24T18:21:00Z",
+"fmt": "h:mm a",
+"tz": "card",
+"zone": "America/New_York",
+"role": "footer",
+"px": 12,
+"tok": "muted",
+"anchor": "start",
+"show_zone": false,
+"id": 14
+},
+{
+"k": "text",
+"x": [
+"l",
+52
+],
+"y": 333,
+"max_w": 136,
+"lines": [
+"\u00b7 finance.yahoo.com"
+],
+"role": "footer",
+"px": 12,
+"tok": "muted",
+"anchor": "start",
+"dir": "ltr",
+"src": "code",
+"id": 15
+}
+],
+"reading_order": [
+0,
+1,
+3,
+4,
+10,
+11,
+12,
+14,
+15
+],
+"summary": "NVDA 223.86, down 1.65",
+"live": [],
+"hitmap": [],
+"dropped": [],
+"ladder": []
+}

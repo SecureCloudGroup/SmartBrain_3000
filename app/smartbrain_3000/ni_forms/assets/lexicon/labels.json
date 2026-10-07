@@ -1,0 +1,2214 @@
+{
+ "_doc": "Label lexicon (owner A). Generic display vocabulary shared by every card: id, display text, suggested role, source-key aliases (matched against the humanised key: exact, then longest alias that ends the key), prio (lower = more primary among peers), money (the field carries the record currency when one is declared). NO card ids, hosts or titles. ignore = keys that never display.",
+ "labels": [
+  {
+   "id": "price",
+   "text": "Price",
+   "role": "measure",
+   "prio": 0,
+   "money": true,
+   "aliases": [
+    "price",
+    "current price",
+    "last price",
+    "market price",
+    "c",
+    "last",
+    "close price",
+    "spot price",
+    "precio",
+    "preis",
+    "prix",
+    "prezzo"
+   ]
+  },
+  {
+   "id": "value",
+   "text": "Value",
+   "role": "measure",
+   "prio": 1,
+   "aliases": [
+    "value",
+    "v",
+    "y",
+    "reading",
+    "val",
+    "current value",
+    "observed value"
+   ]
+  },
+  {
+   "id": "level",
+   "text": "Level",
+   "role": "measure",
+   "prio": 1,
+   "aliases": [
+    "level",
+    "gauge height",
+    "water level",
+    "height"
+   ]
+  },
+  {
+   "id": "temperature",
+   "text": "Temperature",
+   "role": "measure",
+   "prio": 0,
+   "aliases": [
+    "temperature",
+    "temp",
+    "t",
+    "air temperature",
+    "current temperature"
+   ]
+  },
+  {
+   "id": "water_temp",
+   "text": "Water",
+   "role": "measure",
+   "prio": 1,
+   "aliases": [
+    "water temperature",
+    "water temp",
+    "sea surface temperature"
+   ]
+  },
+  {
+   "id": "feels_like",
+   "text": "Feels like",
+   "role": "secondary",
+   "prio": 2,
+   "aliases": [
+    "apparent temperature",
+    "feels like",
+    "feelslike",
+    "heat index",
+    "wind chill"
+   ]
+  },
+  {
+   "id": "humidity",
+   "text": "Humidity",
+   "role": "secondary",
+   "prio": 4,
+   "aliases": [
+    "humidity",
+    "relative humidity",
+    "rh"
+   ]
+  },
+  {
+   "id": "dewpoint",
+   "text": "Dew point",
+   "role": "secondary",
+   "prio": 6,
+   "aliases": [
+    "dewpoint",
+    "dew point"
+   ]
+  },
+  {
+   "id": "wind",
+   "text": "Wind",
+   "role": "secondary",
+   "prio": 3,
+   "aliases": [
+    "wind",
+    "wind speed",
+    "windspeed",
+    "wind mph",
+    "wind kph"
+   ]
+  },
+  {
+   "id": "gusts",
+   "text": "Gusts",
+   "role": "secondary",
+   "prio": 4,
+   "aliases": [
+    "gusts",
+    "gust",
+    "wind gust",
+    "wind gusts"
+   ]
+  },
+  {
+   "id": "wind_dir",
+   "text": "Wind direction",
+   "role": "secondary",
+   "prio": 5,
+   "aliases": [
+    "wind direction",
+    "wind dir",
+    "winddirection"
+   ]
+  },
+  {
+   "id": "pressure",
+   "text": "Pressure",
+   "role": "secondary",
+   "prio": 6,
+   "aliases": [
+    "pressure",
+    "barometric pressure",
+    "sea level pressure",
+    "surface pressure"
+   ]
+  },
+  {
+   "id": "visibility",
+   "text": "Visibility",
+   "role": "secondary",
+   "prio": 7,
+   "aliases": [
+    "visibility"
+   ]
+  },
+  {
+   "id": "precip",
+   "text": "Precipitation",
+   "role": "secondary",
+   "prio": 3,
+   "aliases": [
+    "precipitation",
+    "precip",
+    "rain",
+    "rainfall",
+    "precip mm",
+    "precip in",
+    "qpf"
+   ]
+  },
+  {
+   "id": "precip_prob",
+   "text": "Chance of rain",
+   "role": "secondary",
+   "prio": 3,
+   "aliases": [
+    "precipitation probability",
+    "probability of precipitation",
+    "pop",
+    "chance of rain"
+   ]
+  },
+  {
+   "id": "snow_depth",
+   "text": "Snow depth",
+   "role": "measure",
+   "prio": 1,
+   "aliases": [
+    "snow depth",
+    "snowdepth"
+   ]
+  },
+  {
+   "id": "snowfall",
+   "text": "Snowfall",
+   "role": "secondary",
+   "prio": 2,
+   "aliases": [
+    "snowfall",
+    "new snow"
+   ]
+  },
+  {
+   "id": "uv",
+   "text": "UV index",
+   "role": "measure",
+   "prio": 1,
+   "aliases": [
+    "uv index",
+    "uv",
+    "uvi"
+   ]
+  },
+  {
+   "id": "cloud",
+   "text": "Cloud cover",
+   "role": "secondary",
+   "prio": 6,
+   "aliases": [
+    "cloud cover",
+    "cloudcover",
+    "clouds"
+   ]
+  },
+  {
+   "id": "condition",
+   "text": "Conditions",
+   "role": "status",
+   "prio": 2,
+   "aliases": [
+    "weather code",
+    "weathercode",
+    "condition",
+    "conditions",
+    "weather",
+    "short forecast",
+    "text description",
+    "summary weather",
+    "sky"
+   ]
+  },
+  {
+   "id": "high",
+   "text": "High",
+   "role": "range_hi",
+   "prio": 3,
+   "money": true,
+   "aliases": [
+    "high",
+    "h",
+    "max",
+    "maximum",
+    "day high",
+    "high 24h",
+    "temperature max",
+    "tmax",
+    "hi",
+    "daily high",
+    "peak"
+   ]
+  },
+  {
+   "id": "low",
+   "text": "Low",
+   "role": "range_lo",
+   "prio": 3,
+   "money": true,
+   "aliases": [
+    "low",
+    "l",
+    "min",
+    "minimum",
+    "day low",
+    "low 24h",
+    "temperature min",
+    "tmin",
+    "lo",
+    "daily low"
+   ]
+  },
+  {
+   "id": "high_52w",
+   "text": "52-week high",
+   "role": "secondary",
+   "prio": 6,
+   "money": true,
+   "aliases": [
+    "52 week high",
+    "year high",
+    "52w high"
+   ]
+  },
+  {
+   "id": "low_52w",
+   "text": "52-week low",
+   "role": "secondary",
+   "prio": 6,
+   "money": true,
+   "aliases": [
+    "52 week low",
+    "year low",
+    "52w low"
+   ]
+  },
+  {
+   "id": "open",
+   "text": "Open",
+   "role": "open",
+   "prio": 4,
+   "money": true,
+   "aliases": [
+    "open",
+    "o",
+    "opening price",
+    "day open"
+   ]
+  },
+  {
+   "id": "prev_close",
+   "text": "Prev close",
+   "role": "reference",
+   "prio": 2,
+   "money": true,
+   "aliases": [
+    "previous close",
+    "prev close",
+    "pc",
+    "prior close",
+    "previousclose",
+    "last close",
+    "close previous",
+    "yesterday close"
+   ]
+  },
+  {
+   "id": "typical",
+   "text": "Typical",
+   "role": "reference",
+   "prio": 2,
+   "aliases": [
+    "typical",
+    "usual",
+    "normal",
+    "baseline",
+    "average usual"
+   ]
+  },
+  {
+   "id": "forecast",
+   "text": "Forecast",
+   "role": "reference",
+   "prio": 2,
+   "aliases": [
+    "forecast",
+    "predicted",
+    "expected",
+    "estimate forecast"
+   ]
+  },
+  {
+   "id": "actual",
+   "text": "Actual",
+   "role": "measure",
+   "prio": 0,
+   "aliases": [
+    "actual",
+    "observed",
+    "measured"
+   ]
+  },
+  {
+   "id": "change",
+   "text": "Change",
+   "role": "delta",
+   "prio": 2,
+   "aliases": [
+    "change",
+    "d",
+    "diff",
+    "delta",
+    "net change",
+    "price change",
+    "price change 24h",
+    "change 24h",
+    "chg"
+   ]
+  },
+  {
+   "id": "change_pct",
+   "text": "Change",
+   "role": "delta_pct",
+   "prio": 2,
+   "aliases": [
+    "change percent",
+    "percent change",
+    "dp",
+    "change pct",
+    "pct change",
+    "changes percentage",
+    "price change percentage 24h",
+    "change percentage",
+    "percent chg",
+    "pct chg",
+    "24h change"
+   ]
+  },
+  {
+   "id": "volume",
+   "text": "Volume",
+   "role": "secondary",
+   "prio": 6,
+   "aliases": [
+    "volume",
+    "vol",
+    "total volume",
+    "24h vol",
+    "trading volume"
+   ]
+  },
+  {
+   "id": "market_cap",
+   "text": "Market cap",
+   "role": "secondary",
+   "prio": 5,
+   "money": true,
+   "aliases": [
+    "market cap",
+    "marketcap",
+    "market capitalization",
+    "mcap"
+   ]
+  },
+  {
+   "id": "fdv",
+   "text": "Fully diluted value",
+   "role": "secondary",
+   "prio": 8,
+   "money": true,
+   "aliases": [
+    "fully diluted valuation"
+   ]
+  },
+  {
+   "id": "supply",
+   "text": "Supply",
+   "role": "secondary",
+   "prio": 8,
+   "aliases": [
+    "circulating supply",
+    "total supply",
+    "max supply"
+   ]
+  },
+  {
+   "id": "ath",
+   "text": "All-time high",
+   "role": "secondary",
+   "prio": 7,
+   "money": true,
+   "aliases": [
+    "ath",
+    "all time high"
+   ]
+  },
+  {
+   "id": "atl",
+   "text": "All-time low",
+   "role": "secondary",
+   "prio": 8,
+   "money": true,
+   "aliases": [
+    "atl",
+    "all time low"
+   ]
+  },
+  {
+   "id": "goal",
+   "text": "Goal",
+   "role": "goal",
+   "prio": 2,
+   "aliases": [
+    "goal",
+    "budget",
+    "cap",
+    "limit",
+    "quota",
+    "setpoint",
+    "set point",
+    "target temperature",
+    "objective"
+   ]
+  },
+  {
+   "id": "spent",
+   "text": "Spent",
+   "role": "measure",
+   "prio": 1,
+   "money": true,
+   "aliases": [
+    "spent",
+    "spend",
+    "used",
+    "consumed",
+    "cost",
+    "expense"
+   ]
+  },
+  {
+   "id": "remaining",
+   "text": "Remaining",
+   "role": "secondary",
+   "prio": 3,
+   "aliases": [
+    "remaining",
+    "left",
+    "balance"
+   ]
+  },
+  {
+   "id": "progress",
+   "text": "Progress",
+   "role": "progress",
+   "prio": 1,
+   "aliases": [
+    "progress",
+    "percent complete",
+    "completion",
+    "completed percent",
+    "percent done"
+   ]
+  },
+  {
+   "id": "open_items",
+   "text": "Open",
+   "role": "secondary",
+   "prio": 3,
+   "aliases": [
+    "open issues",
+    "open items",
+    "open count",
+    "open tasks"
+   ]
+  },
+  {
+   "id": "closed_items",
+   "text": "Closed",
+   "role": "secondary",
+   "prio": 3,
+   "aliases": [
+    "closed issues",
+    "closed items",
+    "closed count",
+    "done count"
+   ]
+  },
+  {
+   "id": "steps",
+   "text": "Steps",
+   "role": "measure",
+   "prio": 0,
+   "aliases": [
+    "steps",
+    "step count"
+   ]
+  },
+  {
+   "id": "distance",
+   "text": "Distance",
+   "role": "secondary",
+   "prio": 4,
+   "aliases": [
+    "distance",
+    "dist"
+   ]
+  },
+  {
+   "id": "duration",
+   "text": "Duration",
+   "role": "measure",
+   "prio": 1,
+   "aliases": [
+    "duration",
+    "travel time",
+    "elapsed",
+    "runtime",
+    "length"
+   ]
+  },
+  {
+   "id": "asleep",
+   "text": "Asleep",
+   "role": "measure",
+   "prio": 0,
+   "aliases": [
+    "asleep",
+    "sleep",
+    "total sleep",
+    "sleep duration"
+   ]
+  },
+  {
+   "id": "heart_rate",
+   "text": "Heart rate",
+   "role": "secondary",
+   "prio": 3,
+   "aliases": [
+    "heart rate",
+    "hr",
+    "resting heart rate",
+    "bpm"
+   ]
+  },
+  {
+   "id": "weight",
+   "text": "Weight",
+   "role": "measure",
+   "prio": 0,
+   "aliases": [
+    "weight",
+    "body weight",
+    "mass"
+   ]
+  },
+  {
+   "id": "power",
+   "text": "Power",
+   "role": "measure",
+   "prio": 1,
+   "aliases": [
+    "power",
+    "load",
+    "demand",
+    "consumption",
+    "usage",
+    "home",
+    "house"
+   ]
+  },
+  {
+   "id": "solar",
+   "text": "Solar",
+   "role": "secondary",
+   "prio": 2,
+   "aliases": [
+    "solar",
+    "pv",
+    "production",
+    "generation"
+   ]
+  },
+  {
+   "id": "grid",
+   "text": "Grid",
+   "role": "secondary",
+   "prio": 3,
+   "aliases": [
+    "grid",
+    "import",
+    "export"
+   ]
+  },
+  {
+   "id": "battery",
+   "text": "Battery",
+   "role": "secondary",
+   "prio": 4,
+   "aliases": [
+    "battery",
+    "battery level",
+    "soc",
+    "charge"
+   ]
+  },
+  {
+   "id": "energy_today",
+   "text": "Today",
+   "role": "secondary",
+   "prio": 2,
+   "aliases": [
+    "energy today",
+    "today"
+   ]
+  },
+  {
+   "id": "peak",
+   "text": "Peak",
+   "role": "secondary",
+   "prio": 3,
+   "aliases": [
+    "peak",
+    "maximum power"
+   ]
+  },
+  {
+   "id": "mode",
+   "text": "Mode",
+   "role": "status",
+   "prio": 3,
+   "aliases": [
+    "mode",
+    "operating mode"
+   ]
+  },
+  {
+   "id": "action",
+   "text": "Action",
+   "role": "status",
+   "prio": 3,
+   "aliases": [
+    "action",
+    "activity"
+   ]
+  },
+  {
+   "id": "fan",
+   "text": "Fan",
+   "role": "meta",
+   "prio": 7,
+   "aliases": [
+    "fan",
+    "fan mode"
+   ]
+  },
+  {
+   "id": "aqi",
+   "text": "AQI",
+   "role": "measure",
+   "prio": 0,
+   "aliases": [
+    "aqi",
+    "air quality index"
+   ]
+  },
+  {
+   "id": "pm25",
+   "text": "PM2.5",
+   "role": "secondary",
+   "prio": 2,
+   "aliases": [
+    "pm25",
+    "pm2.5",
+    "pm 2 5"
+   ]
+  },
+  {
+   "id": "pm10",
+   "text": "PM10",
+   "role": "secondary",
+   "prio": 3,
+   "aliases": [
+    "pm10",
+    "pm 10"
+   ]
+  },
+  {
+   "id": "ozone",
+   "text": "Ozone",
+   "role": "secondary",
+   "prio": 4,
+   "aliases": [
+    "ozone",
+    "o3"
+   ]
+  },
+  {
+   "id": "no2",
+   "text": "NO₂",
+   "role": "secondary",
+   "prio": 5,
+   "aliases": [
+    "no2"
+   ]
+  },
+  {
+   "id": "so2",
+   "text": "SO₂",
+   "role": "secondary",
+   "prio": 6,
+   "aliases": [
+    "sulfur dioxide",
+    "so2"
+   ]
+  },
+  {
+   "id": "intensity",
+   "text": "Intensity",
+   "role": "measure",
+   "prio": 1,
+   "aliases": [
+    "intensity",
+    "carbon intensity",
+    "wind intensity",
+    "max wind"
+   ]
+  },
+  {
+   "id": "index",
+   "text": "Index",
+   "role": "status",
+   "prio": 3,
+   "aliases": [
+    "index",
+    "category index",
+    "intensity index",
+    "band"
+   ]
+  },
+  {
+   "id": "wave_height",
+   "text": "Waves",
+   "role": "measure",
+   "prio": 0,
+   "aliases": [
+    "significant wave height",
+    "waves"
+   ]
+  },
+  {
+   "id": "swell",
+   "text": "Swell",
+   "role": "secondary",
+   "prio": 2,
+   "aliases": [
+    "swell height",
+    "swell"
+   ]
+  },
+  {
+   "id": "wave_period",
+   "text": "Period",
+   "role": "secondary",
+   "prio": 3,
+   "aliases": [
+    "dominant period",
+    "average period"
+   ]
+  },
+  {
+   "id": "tide",
+   "text": "Tide",
+   "role": "secondary",
+   "prio": 5,
+   "aliases": [
+    "tide",
+    "water level tide"
+   ]
+  },
+  {
+   "id": "discharge",
+   "text": "Flow",
+   "role": "secondary",
+   "prio": 2,
+   "aliases": [
+    "discharge",
+    "streamflow",
+    "flow",
+    "flow rate"
+   ]
+  },
+  {
+   "id": "population",
+   "text": "Population",
+   "role": "measure",
+   "prio": 0,
+   "aliases": [
+    "population",
+    "pop",
+    "inhabitants"
+   ]
+  },
+  {
+   "id": "rate_per_s",
+   "text": "Rate",
+   "role": "secondary",
+   "prio": 5,
+   "aliases": [
+    "rate per second",
+    "growth rate"
+   ]
+  },
+  {
+   "id": "player_count",
+   "text": "Players",
+   "role": "measure",
+   "prio": 0,
+   "aliases": [
+    "player count",
+    "players",
+    "concurrent players",
+    "online"
+   ]
+  },
+  {
+   "id": "downloads",
+   "text": "Downloads",
+   "role": "value",
+   "prio": 1,
+   "aliases": [
+    "downloads",
+    "download count",
+    "installs"
+   ]
+  },
+  {
+   "id": "views",
+   "text": "Views",
+   "role": "value",
+   "prio": 1,
+   "aliases": [
+    "views",
+    "view count",
+    "pageviews",
+    "page views"
+   ]
+  },
+  {
+   "id": "points",
+   "text": "Points",
+   "role": "value",
+   "prio": 1,
+   "aliases": [
+    "points",
+    "pts",
+    "score points",
+    "reactions",
+    "likes",
+    "upvotes",
+    "ups"
+   ]
+  },
+  {
+   "id": "comments",
+   "text": "Comments",
+   "role": "secondary",
+   "prio": 3,
+   "aliases": [
+    "comments",
+    "comment count",
+    "replies",
+    "answers"
+   ]
+  },
+  {
+   "id": "score",
+   "text": "Score",
+   "role": "value",
+   "prio": 1,
+   "aliases": [
+    "score",
+    "result score"
+   ]
+  },
+  {
+   "id": "rating",
+   "text": "Rating",
+   "role": "value",
+   "prio": 1,
+   "aliases": [
+    "rating",
+    "elo",
+    "average rating",
+    "rating average",
+    "average"
+   ]
+  },
+  {
+   "id": "games",
+   "text": "Games",
+   "role": "secondary",
+   "prio": 4,
+   "aliases": [
+    "games",
+    "games played",
+    "played",
+    "matches",
+    "gp",
+    "played games"
+   ]
+  },
+  {
+   "id": "wins",
+   "text": "W",
+   "role": "secondary",
+   "prio": 3,
+   "aliases": [
+    "wins",
+    "won",
+    "w",
+    "win"
+   ]
+  },
+  {
+   "id": "losses",
+   "text": "L",
+   "role": "secondary",
+   "prio": 3,
+   "aliases": [
+    "losses",
+    "lost",
+    "loss",
+    "defeats"
+   ]
+  },
+  {
+   "id": "draws",
+   "text": "D",
+   "role": "secondary",
+   "prio": 4,
+   "aliases": [
+    "draws",
+    "draw",
+    "ties",
+    "ot"
+   ]
+  },
+  {
+   "id": "goals_for",
+   "text": "GF",
+   "role": "secondary",
+   "prio": 5,
+   "aliases": [
+    "goals",
+    "goals for",
+    "gf"
+   ]
+  },
+  {
+   "id": "goals_against",
+   "text": "GA",
+   "role": "secondary",
+   "prio": 5,
+   "aliases": [
+    "opponent goals",
+    "goals against",
+    "ga"
+   ]
+  },
+  {
+   "id": "goal_diff",
+   "text": "GD",
+   "role": "secondary",
+   "prio": 4,
+   "aliases": [
+    "goal diff",
+    "goal difference",
+    "gd",
+    "point differential",
+    "run differential"
+   ]
+  },
+  {
+   "id": "games_back",
+   "text": "GB",
+   "role": "secondary",
+   "prio": 3,
+   "aliases": [
+    "games back",
+    "gb",
+    "division games back"
+   ]
+  },
+  {
+   "id": "win_pct",
+   "text": "Pct",
+   "role": "secondary",
+   "prio": 3,
+   "aliases": [
+    "winning percentage",
+    "win pct",
+    "pct"
+   ]
+  },
+  {
+   "id": "streak",
+   "text": "Streak",
+   "role": "meta",
+   "prio": 6,
+   "aliases": [
+    "streak",
+    "streak code"
+   ]
+  },
+  {
+   "id": "rank",
+   "text": "Rank",
+   "role": "rank",
+   "prio": 0,
+   "aliases": [
+    "rank",
+    "position",
+    "pos",
+    "ranking",
+    "standing",
+    "place",
+    "division rank",
+    "league rank",
+    "sport rank",
+    "chart position"
+   ]
+  },
+  {
+   "id": "magnitude",
+   "text": "Magnitude",
+   "role": "value",
+   "prio": 0,
+   "aliases": [
+    "mag",
+    "magnitude",
+    "magnitude value"
+   ]
+  },
+  {
+   "id": "depth",
+   "text": "Depth",
+   "role": "secondary",
+   "prio": 4,
+   "aliases": [
+    "depth",
+    "depth km"
+   ]
+  },
+  {
+   "id": "felt",
+   "text": "Felt reports",
+   "role": "secondary",
+   "prio": 6,
+   "aliases": [
+    "felt"
+   ]
+  },
+  {
+   "id": "size",
+   "text": "Size",
+   "role": "value",
+   "prio": 1,
+   "aliases": [
+    "size",
+    "area",
+    "acres",
+    "full size",
+    "bytes"
+   ]
+  },
+  {
+   "id": "contained",
+   "text": "Contained",
+   "role": "secondary",
+   "prio": 2,
+   "aliases": [
+    "containment",
+    "contained"
+   ]
+  },
+  {
+   "id": "wait",
+   "text": "Wait",
+   "role": "value",
+   "prio": 0,
+   "aliases": [
+    "wait",
+    "wait minutes",
+    "queue time"
+   ]
+  },
+  {
+   "id": "delay",
+   "text": "Delay",
+   "role": "secondary",
+   "prio": 2,
+   "aliases": [
+    "delay",
+    "delay minutes",
+    "late",
+    "avg",
+    "average delay"
+   ]
+  },
+  {
+   "id": "max_delay",
+   "text": "Max delay",
+   "role": "secondary",
+   "prio": 3,
+   "aliases": [
+    "max delay"
+   ]
+  },
+  {
+   "id": "platform",
+   "text": "Platform",
+   "role": "meta",
+   "prio": 4,
+   "aliases": [
+    "platform",
+    "track",
+    "gate",
+    "stand"
+   ]
+  },
+  {
+   "id": "destination",
+   "text": "To",
+   "role": "meta",
+   "prio": 2,
+   "aliases": [
+    "to",
+    "destination",
+    "headsign",
+    "terminus"
+   ]
+  },
+  {
+   "id": "origin",
+   "text": "From",
+   "role": "meta",
+   "prio": 3,
+   "aliases": [
+    "from",
+    "origin"
+   ]
+  },
+  {
+   "id": "bikes",
+   "text": "Bikes",
+   "role": "value",
+   "prio": 0,
+   "aliases": [
+    "bikes available",
+    "bikes"
+   ]
+  },
+  {
+   "id": "ebikes",
+   "text": "E-bikes",
+   "role": "secondary",
+   "prio": 2,
+   "aliases": [
+    "ebikes"
+   ]
+  },
+  {
+   "id": "docks",
+   "text": "Docks",
+   "role": "secondary",
+   "prio": 1,
+   "aliases": [
+    "docks available",
+    "docks"
+   ]
+  },
+  {
+   "id": "altitude",
+   "text": "Altitude",
+   "role": "secondary",
+   "prio": 3,
+   "aliases": [
+    "altitude",
+    "alt",
+    "elevation"
+   ]
+  },
+  {
+   "id": "speed",
+   "text": "Speed",
+   "role": "secondary",
+   "prio": 3,
+   "aliases": [
+    "speed",
+    "velocity",
+    "gs",
+    "ground speed"
+   ]
+  },
+  {
+   "id": "heading",
+   "text": "Heading",
+   "role": "secondary",
+   "prio": 5,
+   "aliases": [
+    "heading",
+    "track",
+    "course",
+    "bearing",
+    "direction"
+   ]
+  },
+  {
+   "id": "share",
+   "text": "Share",
+   "role": "share",
+   "prio": 1,
+   "aliases": [
+    "share",
+    "perc",
+    "percentage of total",
+    "percent of total",
+    "fraction",
+    "proportion",
+    "portion"
+   ]
+  },
+  {
+   "id": "count",
+   "text": "Count",
+   "role": "count",
+   "prio": 2,
+   "aliases": [
+    "count",
+    "unread",
+    "total count",
+    "results count"
+   ]
+  },
+  {
+   "id": "interest_rate",
+   "text": "Rate",
+   "role": "value",
+   "prio": 0,
+   "aliases": [
+    "interest rate",
+    "yield",
+    "apr",
+    "apy",
+    "rate pct"
+   ]
+  },
+  {
+   "id": "outlay",
+   "text": "Outlays",
+   "role": "value",
+   "prio": 1,
+   "money": true,
+   "aliases": [
+    "outlay amount",
+    "outlays",
+    "spending"
+   ]
+  },
+  {
+   "id": "calories",
+   "text": "Energy",
+   "role": "measure",
+   "prio": 0,
+   "aliases": [
+    "energy kcal",
+    "calories",
+    "kcal"
+   ]
+  },
+  {
+   "id": "fat",
+   "text": "Fat",
+   "role": "secondary",
+   "prio": 2,
+   "aliases": [
+    "fat"
+   ]
+  },
+  {
+   "id": "sat_fat",
+   "text": "Saturated fat",
+   "role": "secondary",
+   "prio": 3,
+   "aliases": [
+    "saturated fat"
+   ]
+  },
+  {
+   "id": "carbs",
+   "text": "Carbohydrates",
+   "role": "secondary",
+   "prio": 2,
+   "aliases": [
+    "carbohydrates",
+    "carbs"
+   ]
+  },
+  {
+   "id": "sugars",
+   "text": "Sugars",
+   "role": "secondary",
+   "prio": 2,
+   "aliases": [
+    "sugars",
+    "sugar"
+   ]
+  },
+  {
+   "id": "protein",
+   "text": "Protein",
+   "role": "secondary",
+   "prio": 2,
+   "aliases": [
+    "proteins",
+    "protein"
+   ]
+  },
+  {
+   "id": "fiber",
+   "text": "Fiber",
+   "role": "secondary",
+   "prio": 4,
+   "aliases": [
+    "fiber",
+    "fibre"
+   ]
+  },
+  {
+   "id": "salt",
+   "text": "Salt",
+   "role": "secondary",
+   "prio": 3,
+   "aliases": [
+    "salt",
+    "sodium"
+   ]
+  },
+  {
+   "id": "moon_phase",
+   "text": "Moon phase",
+   "role": "secondary",
+   "prio": 2,
+   "aliases": [
+    "moonphase",
+    "moon phase",
+    "phase"
+   ]
+  },
+  {
+   "id": "illumination",
+   "text": "Illumination",
+   "role": "secondary",
+   "prio": 3,
+   "aliases": [
+    "illumination",
+    "fraction illuminated",
+    "illuminated"
+   ]
+  },
+  {
+   "id": "azimuth",
+   "text": "Azimuth",
+   "role": "meta",
+   "prio": 7,
+   "aliases": [
+    "azimuth"
+   ]
+  },
+  {
+   "id": "elevation_angle",
+   "text": "Elevation",
+   "role": "meta",
+   "prio": 7,
+   "aliases": [
+    "elevation angle",
+    "max elevation"
+   ]
+  },
+  {
+   "id": "daylight",
+   "text": "Daylight",
+   "role": "secondary",
+   "prio": 2,
+   "aliases": [
+    "day length",
+    "daylight duration",
+    "daylight",
+    "sunshine duration"
+   ]
+  },
+  {
+   "id": "brightness",
+   "text": "Brightness",
+   "role": "secondary",
+   "prio": 4,
+   "aliases": [
+    "mag",
+    "brightness"
+   ]
+  },
+  {
+   "id": "version",
+   "text": "Version",
+   "role": "measure",
+   "prio": 0,
+   "aliases": [
+    "version",
+    "latest version",
+    "release",
+    "tag"
+   ]
+  },
+  {
+   "id": "rows_count",
+   "text": "Items",
+   "role": "count",
+   "prio": 5,
+   "aliases": [
+    "open issues count",
+    "issue count"
+   ]
+  },
+  {
+   "id": "stars",
+   "text": "Stars",
+   "role": "secondary",
+   "prio": 3,
+   "aliases": [
+    "stars",
+    "stargazers"
+   ]
+  },
+  {
+   "id": "fee",
+   "text": "Fee",
+   "role": "value",
+   "prio": 1,
+   "aliases": [
+    "fee",
+    "fees"
+   ]
+  },
+  {
+   "id": "multiplier",
+   "text": "Multiplier",
+   "role": "secondary",
+   "prio": 3,
+   "aliases": [
+    "multiplier"
+   ]
+  },
+  {
+   "id": "time",
+   "text": "Time",
+   "role": "time",
+   "prio": 0,
+   "aliases": [
+    "time",
+    "t",
+    "datetime",
+    "date time",
+    "timestamp",
+    "start",
+    "start time",
+    "starts at",
+    "begin",
+    "start date",
+    "event time",
+    "when",
+    "at",
+    "x",
+    "timestamps",
+    "airstamp",
+    "net",
+    "departure",
+    "departure time",
+    "scheduled",
+    "arrival time",
+    "departure time",
+    "date",
+    "day",
+    "published",
+    "published at",
+    "pub date",
+    "pubdate",
+    "publication date",
+    "created",
+    "created at",
+    "creation date",
+    "sent",
+    "onset",
+    "effective",
+    "valid start",
+    "period start",
+    "not after",
+    "due",
+    "due on",
+    "due date",
+    "eta",
+    "release date",
+    "air date",
+    "airdate",
+    "issued",
+    "observed at",
+    "reading time",
+    "fecha",
+    "datum",
+    "hora",
+    "zeit",
+    "heure",
+    "data ora"
+   ]
+  },
+  {
+   "id": "time_end",
+   "text": "Ends",
+   "role": "time_end",
+   "prio": 1,
+   "aliases": [
+    "end",
+    "end time",
+    "ends",
+    "ends at",
+    "expires",
+    "until",
+    "stop",
+    "finish",
+    "resolved at",
+    "closes",
+    "window end",
+    "valid end",
+    "end date",
+    "period end",
+    "reopen",
+    "arrival",
+    "dtend"
+   ]
+  },
+  {
+   "id": "as_of",
+   "text": "Updated",
+   "role": "as_of",
+   "prio": 0,
+   "aliases": [
+    "updated",
+    "updated at",
+    "last updated",
+    "last update",
+    "as of",
+    "generated",
+    "generated at",
+    "last reported",
+    "update time",
+    "last modified",
+    "modified",
+    "updated readable",
+    "last updated at",
+    "observation time",
+    "fetched",
+    "update"
+   ]
+  },
+  {
+   "id": "name",
+   "text": "Name",
+   "role": "name",
+   "prio": 0,
+   "aliases": [
+    "name",
+    "title",
+    "headline",
+    "subject",
+    "label",
+    "display name",
+    "full name",
+    "short name",
+    "long name",
+    "team name",
+    "team",
+    "station",
+    "station name",
+    "line",
+    "route",
+    "long name route",
+    "item",
+    "event",
+    "summary",
+    "place",
+    "location name",
+    "city",
+    "country",
+    "region",
+    "area",
+    "airport",
+    "word",
+    "package",
+    "symbol",
+    "ticker",
+    "fuel",
+    "language",
+    "product name",
+    "meal",
+    "object name",
+    "artist name",
+    "show name",
+    "display title",
+    "normalized",
+    "canonical",
+    "tag",
+    "entity",
+    "person",
+    "room",
+    "category name",
+    "stage",
+    "local name",
+    "text",
+    "nombre",
+    "nom",
+    "nome",
+    "bezeichnung"
+   ]
+  },
+  {
+   "id": "kind",
+   "text": "Type",
+   "role": "kind",
+   "prio": 3,
+   "aliases": [
+    "type",
+    "kind",
+    "category",
+    "event type",
+    "class",
+    "classification",
+    "variant",
+    "genre",
+    "delay type",
+    "product",
+    "stage type",
+    "media type"
+   ]
+  },
+  {
+   "id": "status",
+   "text": "Status",
+   "role": "status",
+   "prio": 1,
+   "aliases": [
+    "status",
+    "state",
+    "status description",
+    "alert level",
+    "conclusion",
+    "is open",
+    "availability",
+    "result",
+    "trend",
+    "status text",
+    "short detail",
+    "detail",
+    "description status",
+    "status name",
+    "health",
+    "delay status",
+    "is renting",
+    "is installed",
+    "done",
+    "completed",
+    "is answered",
+    "canceled",
+    "cancelled",
+    "locked"
+   ]
+  },
+  {
+   "id": "severity",
+   "text": "Severity",
+   "role": "severity",
+   "prio": 1,
+   "aliases": [
+    "severity",
+    "impact",
+    "alert",
+    "priority",
+    "risk",
+    "urgency",
+    "certainty",
+    "significance"
+   ]
+  },
+  {
+   "id": "link",
+   "text": "Link",
+   "role": "link",
+   "prio": 0,
+   "aliases": [
+    "url",
+    "link",
+    "href",
+    "html url",
+    "permalink",
+    "web url",
+    "shortlink",
+    "story url",
+    "article url",
+    "html link",
+    "source url",
+    "official site",
+    "web link",
+    "html"
+   ]
+  },
+  {
+   "id": "link_thread",
+   "text": "Discussion",
+   "role": "link_secondary",
+   "prio": 1,
+   "aliases": [
+    "comments url",
+    "discussion url",
+    "thread url",
+    "comments link"
+   ]
+  },
+  {
+   "id": "author",
+   "text": "By",
+   "role": "meta",
+   "prio": 3,
+   "aliases": [
+    "author",
+    "by",
+    "creator",
+    "owner",
+    "user",
+    "from",
+    "posted by",
+    "artist",
+    "artist name",
+    "attribution"
+   ]
+  },
+  {
+   "id": "source",
+   "text": "Source",
+   "role": "meta",
+   "prio": 4,
+   "aliases": [
+    "source",
+    "host",
+    "domain",
+    "site",
+    "publisher",
+    "outlet",
+    "network",
+    "carrier",
+    "operator",
+    "provider",
+    "agency"
+   ]
+  },
+  {
+   "id": "venue",
+   "text": "Venue",
+   "role": "meta",
+   "prio": 4,
+   "aliases": [
+    "venue",
+    "location",
+    "loc",
+    "where",
+    "pad",
+    "circuit",
+    "stadium",
+    "place name",
+    "place",
+    "dirección",
+    "direccion",
+    "adresse",
+    "address",
+    "localidad",
+    "municipio",
+    "ort"
+   ]
+  },
+  {
+   "id": "tags",
+   "text": "Tags",
+   "role": "meta",
+   "prio": 6,
+   "aliases": [
+    "tags",
+    "labels",
+    "keywords",
+    "tag list",
+    "topics"
+   ]
+  },
+  {
+   "id": "body",
+   "text": "Summary",
+   "role": "text_body",
+   "prio": 1,
+   "aliases": [
+    "description",
+    "summary",
+    "abstract",
+    "body",
+    "extract",
+    "text",
+    "content",
+    "excerpt",
+    "excerpts",
+    "instructions",
+    "definition",
+    "detailed forecast",
+    "caption",
+    "quote",
+    "notes",
+    "overview",
+    "details",
+    "message",
+    "headline long",
+    "note"
+   ]
+  },
+  {
+   "id": "image",
+   "text": "Image",
+   "role": "image_url",
+   "prio": 0,
+   "aliases": [
+    "image",
+    "image url",
+    "thumbnail",
+    "thumb",
+    "thumbnail url",
+    "picture",
+    "photo",
+    "artwork url",
+    "icon url",
+    "original image",
+    "logo",
+    "poster",
+    "icon"
+   ]
+  },
+  {
+   "id": "lat",
+   "text": "Latitude",
+   "role": "lat",
+   "prio": 0,
+   "aliases": [
+    "lat",
+    "latitude",
+    "latitude numeric",
+    "lat numeric",
+    "y coord",
+    "location y",
+    "latitud"
+   ]
+  },
+  {
+   "id": "lon",
+   "text": "Longitude",
+   "role": "lon",
+   "prio": 0,
+   "aliases": [
+    "lon",
+    "lng",
+    "long",
+    "longitude",
+    "longitude numeric",
+    "lon numeric",
+    "x coord",
+    "location x",
+    "longitud"
+   ]
+  },
+  {
+   "id": "home_score",
+   "text": "Home",
+   "role": "score_a",
+   "prio": 1,
+   "aliases": [
+    "home score",
+    "home team score"
+   ]
+  },
+  {
+   "id": "away_score",
+   "text": "Away",
+   "role": "score_b",
+   "prio": 1,
+   "aliases": [
+    "away score",
+    "away team score",
+    "visitor score"
+   ]
+  },
+  {
+   "id": "phonetic",
+   "text": "Pronunciation",
+   "role": "meta",
+   "prio": 3,
+   "aliases": [
+    "phonetic",
+    "pronunciation",
+    "ipa"
+   ]
+  },
+  {
+   "id": "department",
+   "text": "Department",
+   "role": "meta",
+   "prio": 5,
+   "aliases": [
+    "department",
+    "division",
+    "section"
+   ]
+  },
+  {
+   "id": "date_display",
+   "text": "Date",
+   "role": "meta",
+   "prio": 4,
+   "aliases": [
+    "date display",
+    "date readable",
+    "readable"
+   ]
+  },
+  {
+   "id": "medium",
+   "text": "Medium",
+   "role": "meta",
+   "prio": 5,
+   "aliases": [
+    "medium",
+    "medium display",
+    "technique"
+   ]
+  },
+  {
+   "id": "reason",
+   "text": "Reason",
+   "role": "meta",
+   "prio": 2,
+   "aliases": [
+    "reason",
+    "cause",
+    "closed reason"
+   ]
+  },
+  {
+   "id": "movement",
+   "text": "Movement",
+   "role": "secondary",
+   "prio": 4,
+   "aliases": [
+    "movement",
+    "motion"
+   ]
+  },
+  {
+   "id": "pressure_storm",
+   "text": "Pressure",
+   "role": "secondary",
+   "prio": 5,
+   "aliases": [
+    "min pressure",
+    "central pressure"
+   ]
+  },
+  {
+   "id": "location_now",
+   "text": "Location",
+   "role": "meta",
+   "prio": 3,
+   "aliases": [
+    "place",
+    "location",
+    "where",
+    "current location"
+   ]
+  },
+  {
+   "id": "ago",
+   "text": "Updated",
+   "role": "meta",
+   "prio": 6,
+   "aliases": [
+    "minutes ago",
+    "age"
+   ]
+  },
+  {
+   "id": "timezone",
+   "text": "Zone",
+   "role": "meta",
+   "prio": 5,
+   "aliases": [
+    "timezone",
+    "time zone",
+    "tz",
+    "zone",
+    "zones"
+   ]
+  },
+  {
+   "id": "direction_text",
+   "text": "Direction",
+   "role": "meta",
+   "prio": 5,
+   "aliases": [
+    "dir",
+    "compass",
+    "direction text"
+   ]
+  }
+ ],
+ "ignore": [
+  "id",
+  "uid",
+  "guid",
+  "uuid",
+  "node id",
+  "gravatar id",
+  "object id",
+  "global id",
+  "generationtime ms",
+  "utc offset seconds",
+  "interval",
+  "processing time ms",
+  "server time ms",
+  "response time",
+  "page",
+  "pages",
+  "per page",
+  "total pages",
+  "total count",
+  "limit",
+  "offset",
+  "next",
+  "previous",
+  "next page url",
+  "prev page url",
+  "copyright",
+  "license",
+  "license info",
+  "license url",
+  "license text",
+  "xmlns",
+  "deprecated",
+  "quota max",
+  "quota remaining",
+  "has more",
+  "hits per page",
+  "query",
+  "params",
+  "ttl",
+  "sort order",
+  "position",
+  "schema",
+  "context",
+  "md5",
+  "sha256",
+  "sha1",
+  "digest",
+  "signature",
+  "etag",
+  "revision",
+  "namespace",
+  "gmtoffset",
+  "gmt offset",
+  "timezone abbreviation",
+  "unit code",
+  "units",
+  "unit",
+  "quality control",
+  "qualifiers",
+  "site admin",
+  "lang",
+  "dir",
+  "slug",
+  "path",
+  "sequence",
+  "dtstamp",
+  "draft",
+  "immutable",
+  "status code",
+  "result code",
+  "success",
+  "ok",
+  "msg",
+  "error",
+  "errors",
+  "code",
+  "api version",
+  "color",
+  "text color",
+  "accent color",
+  "bg color",
+  "detail",
+  "decimal",
+  "decimal places",
+  "version api",
+  "created ats",
+  "type url",
+  "tid",
+  "checksum",
+  "hash",
+  "bbox",
+  "nb hits",
+  "nb pages",
+  "processing timings ms",
+  "currency",
+  "currency symbol",
+  "currency code",
+  "exchange rate"
+ ],
+ "_frozen": "FROZEN 2026-09-25 after the P0 review: single-source aliases removed."
+}

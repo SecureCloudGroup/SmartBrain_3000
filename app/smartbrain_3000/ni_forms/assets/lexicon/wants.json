@@ -1,0 +1,239 @@
+{
+ "_doc": "Generic want vocabulary (owner A): want id -> phrases that signal it in the user's ask. Phrases are matched on word boundaries, case-insensitively (CJK/Arabic phrases as substrings). NO domain nouns (tests/banned_terms.txt).",
+ "wants": {
+  "extreme_high": [
+   "high",
+   "highs",
+   "highest",
+   "max",
+   "maximum",
+   "peak",
+   "most expensive",
+   "largest value",
+   "am höchsten",
+   "最高"
+  ],
+  "extreme_low": [
+   "low",
+   "lows",
+   "lowest",
+   "min",
+   "minimum",
+   "cheapest",
+   "least",
+   "最低"
+  ],
+  "times": [
+   "time",
+   "times",
+   "when",
+   "what time",
+   "schedule",
+   "hourly",
+   "timings",
+   "مواقيت",
+   "時間"
+  ],
+  "each_day": [
+   "each day",
+   "every day",
+   "daily",
+   "this week",
+   "next week",
+   "per day",
+   "day by day",
+   "7-day",
+   "7 day",
+   "week",
+   "days"
+  ],
+  "now": [
+   "now",
+   "current",
+   "currently",
+   "right now",
+   "live",
+   "today",
+   "at the moment",
+   "jetzt",
+   "ahora",
+   "今",
+   "الآن"
+  ],
+  "next": [
+   "next",
+   "upcoming",
+   "when is",
+   "when's",
+   "when do",
+   "when does",
+   "soonest",
+   "nächste",
+   "próximo",
+   "次"
+  ],
+  "trend": [
+   "over the last",
+   "over the past",
+   "history",
+   "historical",
+   "chart",
+   "trend",
+   "over time",
+   "past week",
+   "past month",
+   "last 30 days",
+   "this month",
+   "last 3 months",
+   "since"
+  ],
+  "compare": [
+   "compare",
+   "vs",
+   "versus",
+   "comparison",
+   "against",
+   "side by side",
+   "vergleich",
+   "comparar",
+   "比較"
+  ],
+  "rank": [
+   "top",
+   "best",
+   "largest",
+   "biggest",
+   "most",
+   "cheapest",
+   "leading",
+   "ranked",
+   "ranking",
+   "table",
+   "ranking",
+   "ランキング"
+  ],
+  "count": [
+   "how many",
+   "number of",
+   "count",
+   "how much of"
+  ],
+  "yesno": [
+   "is it",
+   "are my",
+   "will it",
+   "is there",
+   "are there",
+   "has it",
+   "did it",
+   "am i"
+  ],
+  "threshold": [
+   "below",
+   "above",
+   "over",
+   "under",
+   "drops",
+   "exceeds",
+   "alert",
+   "alert me",
+   "tell me if",
+   "notify",
+   "warn me"
+  ],
+  "where": [
+   "where",
+   "map",
+   "near",
+   "nearby",
+   "near me",
+   "location",
+   "where's",
+   "wo",
+   "dónde",
+   "どこ",
+   "أين"
+  ],
+  "read": [
+   "define",
+   "definition",
+   "summary",
+   "summarize",
+   "quote",
+   "article",
+   "read",
+   "explain",
+   "release notes",
+   "ملخص",
+   "要約"
+  ],
+  "height_value": [
+   "height",
+   "level",
+   "amount",
+   "value",
+   "how high",
+   "how deep",
+   "depth",
+   "size"
+  ],
+  "progress": [
+   "how close",
+   "progress",
+   "how far along",
+   "done",
+   "on track",
+   "goal",
+   "streak"
+  ],
+  "status": [
+   "status",
+   "down",
+   "passing",
+   "working",
+   "on time",
+   "delayed",
+   "locked",
+   "is it up",
+   "outage"
+  ],
+  "list": [
+   "list",
+   "every",
+   "latest",
+   "newest",
+   "recent",
+   "who",
+   "which",
+   "headlines"
+  ],
+  "share": [
+   "breakdown",
+   "mix",
+   "split",
+   "share",
+   "percent of",
+   "how much of"
+  ],
+  "countdown": [
+   "until",
+   "days until",
+   "how long until",
+   "countdown",
+   "days since",
+   "how long since",
+   "expire",
+   "expires",
+   "remaining"
+  ],
+  "interactive": [
+   "tick off",
+   "check off",
+   "cross off",
+   "add to",
+   "to-do",
+   "todo"
+  ]
+ },
+ "_frozen": "Vocabulary FROZEN 2026-09-25 after the P0 review: phrases copied from corpus asks were removed (see out/P0_RESULTS.md); nothing may be added before the fresh holdout is measured."
+}

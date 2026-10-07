@@ -1,0 +1,36 @@
+{
+ "events": [
+  {
+   "title": "Standup",
+   "start": "2026-09-24T09:00:00-04:00",
+   "end": "2026-09-24T09:15:00-04:00",
+   "location": "Zoom"
+  },
+  {
+   "title": "1:1 with Priya — quarterly planning, hiring pipeline and the vault rebuild follow-ups",
+   "start": "2026-09-24T10:30:00-04:00",
+   "end": "2026-09-24T11:00:00-04:00"
+  },
+  {
+   "title": "Lunch w/ Marco",
+   "start": "2026-09-24T12:00:00-04:00",
+   "end": "2026-09-24T13:00:00-04:00",
+   "location": "Husk, 76 Queen St"
+  },
+  {
+   "title": "Design review: NI cards",
+   "start": "2026-09-24T14:00:00-04:00",
+   "end": "2026-09-24T15:00:00-04:00"
+  },
+  {
+   "title": "Customer call (Tokyo)",
+   "start": "2026-09-24T20:00:00-04:00",
+   "end": "2026-09-24T20:30:00-04:00"
+  },
+  {
+   "title": "Rosh Hashanah",
+   "all_day": true,
+   "date": "2026-09-24"
+  }
+ ]
+}

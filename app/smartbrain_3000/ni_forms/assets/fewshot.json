@@ -1,0 +1,235 @@
+{
+ "_doc": "PRESENT few-shots (owner B). Corpus entries outside the 7 live cards; retrieved by signature overlap. The model reads them; nothing here is displayed or used by code to decide.",
+ "shots": [
+  {
+   "id": "wx_denver_7day",
+   "signatures": [
+    "dated_rows"
+   ],
+   "ask": "7 day forecast for Denver",
+   "options": [
+    {
+     "id": "a",
+     "form": "day_table",
+     "shows": "One row per day starting today, today highlighted",
+     "answers": [
+      "each_day",
+      "extreme_high",
+      "extreme_low"
+     ]
+    },
+    {
+     "id": "b",
+     "form": "table",
+     "shows": "Table with columns Day, High, Low, Forecast",
+     "answers": [
+      "compare",
+      "rank"
+     ]
+    }
+   ],
+   "pick": "a",
+   "why": "each day was asked; rows keyed by day with today first answer it directly"
+  },
+  {
+   "id": "gh_languages",
+   "signatures": [
+    "percent_of_whole",
+    "ranked_records"
+   ],
+   "ask": "what languages is this repo written in",
+   "options": [
+    {
+     "id": "a",
+     "form": "table",
+     "shows": "Table with columns Language, Bytes, Share",
+     "answers": [
+      "rank",
+      "compare"
+     ]
+    },
+    {
+     "id": "b",
+     "form": "bars",
+     "shows": "Bars of Share per item, as shares of the whole",
+     "answers": [
+      "rank",
+      "compare",
+      "count"
+     ]
+    }
+   ],
+   "pick": "b",
+   "why": "parts of one whole read best as shares"
+  },
+  {
+   "id": "stocks_1mo_compare",
+   "signatures": [
+    "multi_series",
+    "time_series_regular"
+   ],
+   "ask": "compare AAPL MSFT GOOG over the last month",
+   "options": [
+    {
+     "id": "a",
+     "form": "series_line",
+     "shows": "Close over time as a line chart with one line per series",
+     "answers": [
+      "trend",
+      "compare"
+     ]
+    },
+    {
+     "id": "b",
+     "form": "compare",
+     "shows": "Side-by-side Close for each item",
+     "answers": [
+      "compare",
+      "now"
+     ]
+    }
+   ],
+   "pick": "a",
+   "why": "over the last month asks for the trend of each item"
+  },
+  {
+   "id": "braves_next",
+   "signatures": [
+    "events_with_kind"
+   ],
+   "ask": "when do the Braves play next",
+   "options": [
+    {
+     "id": "a",
+     "form": "agenda",
+     "shows": "List in time order with a now line",
+     "answers": [
+      "now",
+      "next",
+      "times"
+     ]
+    },
+    {
+     "id": "b",
+     "form": "next_event",
+     "shows": "The next upcoming event with its time and a live countdown",
+     "answers": [
+      "next",
+      "times"
+     ]
+    }
+   ],
+   "pick": "b",
+   "why": "one question about the next event: show that event large"
+  },
+  {
+   "id": "tfl_status",
+   "signatures": [
+    "status_records"
+   ],
+   "ask": "is the tube running ok",
+   "options": [
+    {
+     "id": "a",
+     "form": "entity_list",
+     "shows": "Status list: the worst first, a calm line when all is fine",
+     "answers": [
+      "now",
+      "count",
+      "yesno"
+     ]
+    },
+    {
+     "id": "b",
+     "form": "table",
+     "shows": "Table with columns Line, Status",
+     "answers": [
+      "rank",
+      "compare"
+     ]
+    }
+   ],
+   "pick": "a",
+   "why": "a yes/no health question: problems first, healthy lines summarised"
+  },
+  {
+   "id": "quote_today",
+   "signatures": [
+    "text_passage"
+   ],
+   "ask": "quote of the day",
+   "options": [
+    {
+     "id": "a",
+     "form": "text_brief",
+     "shows": "The passage itself, clamped to the card",
+     "answers": [
+      "read"
+     ]
+    }
+   ],
+   "pick": "a",
+   "why": "the only option; it shows the text"
+  },
+  {
+   "id": "power_price_week_matrix",
+   "signatures": [
+    "matrix",
+    "time_series_regular"
+   ],
+   "ask": "cheapest hour to charge this week",
+   "options": [
+    {
+     "id": "a",
+     "form": "series_line",
+     "shows": "Price over time as a line chart",
+     "answers": [
+      "trend",
+      "extreme_low"
+     ]
+    },
+    {
+     "id": "b",
+     "form": "heatmap",
+     "shows": "A day by hour grid shaded from low to high, with the best hour named",
+     "answers": [
+      "extreme_low",
+      "times",
+      "each_day"
+     ]
+    }
+   ],
+   "pick": "b",
+   "why": "cheapest hour over a week: name the minimum and show every day's hours"
+  },
+  {
+   "id": "epl_table",
+   "signatures": [
+    "ranked_records"
+   ],
+   "ask": "Premier League table",
+   "options": [
+    {
+     "id": "a",
+     "form": "bars",
+     "shows": "Bars of Pts per item, largest first",
+     "answers": [
+      "rank"
+     ]
+    },
+    {
+     "id": "b",
+     "form": "table",
+     "shows": "Table with columns #, Team, P, W, D, L, Pts",
+     "answers": [
+      "rank",
+      "compare",
+      "count"
+     ]
+    }
+   ],
+   "pick": "b",
+   "why": "a league table is read by its columns"
+  }
+ ]
+}
