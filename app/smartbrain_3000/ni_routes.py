@@ -15,6 +15,7 @@ import re
 import time
 import uuid
 from datetime import UTC, datetime, timedelta
+from typing import Literal
 from urllib.parse import unquote, urlparse
 
 from fastapi import APIRouter, HTTPException, Request
@@ -50,10 +51,14 @@ _MAX_POSITION = 10_000  # position is a display sort key; verifiable upper bound
 
 
 class ValidateIn(BaseModel):
-    """C2 verdict body: user answers "Looks right" (ok=true) or "Something's wrong"."""
+    """C2 verdict body: user answers "Looks right" (ok=true) or "Something's wrong".
+    ``presentation_id`` (§34): which sealed design the YES is for — ``pick`` (the
+    card as shown) or ``second`` (the sealed runner-up; the card is re-sealed under it
+    before the YES is stamped). Absent = the pick."""
 
     ok: bool
     note: str | None = Field(default=None, max_length=_MAX_NOTE)
+    presentation_id: Literal["pick", "second"] | None = None
 
 
 class PatchIn(BaseModel):
@@ -420,8 +425,11 @@ def validate_item(request: Request, item_id: str, body: ValidateIn) -> dict:
     if before is None:
         raise HTTPException(status_code=404, detail="item not found")
     held = ni.awaits_yes(before)  # ruling 2026-10-04: an open-path card waiting for the YES
+    if body.ok and body.presentation_id == "second":
+        _reseal_second_presentation(store, before)
     try:
-        store.record_validation(item_id, body.ok, body.note or "")
+        store.record_validation(item_id, body.ok, body.note or "",
+                                presentation_id=body.presentation_id if body.ok else None)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from None
     if not body.ok and held:
@@ -480,6 +488,33 @@ def validate_item(request: Request, item_id: str, body: ValidateIn) -> dict:
         store.clear_last_checked(item_id)
     return {"ok": True, "state": final["state"] if final else "unknown",
             "run": run_result.get("status") or "skipped"}
+
+
+def _reseal_second_presentation(store: ni.NIStore, item: dict) -> None:
+    """§34 C2 ``presentation_id: "second"``: swap the sealed form node to its runner-up
+    (same record, no refetch, no re-enumeration — ``form_scene.swap_to_second``) and
+    reseal the spec with attestations preserved (a presentation swap changes no data
+    shape, so the C1 contract stays and the C3 kick that follows proves the new design).
+    409 when the item is not commissioning or the scene sealed no second."""
+    assert store is not None and isinstance(item, dict), "store + item required"
+    from smartbrain_3000.ni_forms.form_scene import swap_to_second
+    if item["state"] != "commissioning":
+        raise HTTPException(status_code=409,
+                            detail=f"presentation choice refused: state={item['state']!r}")
+    scene = item["spec"].get("scene")
+    if not isinstance(scene, dict) or scene.get("type") != "form":
+        raise HTTPException(status_code=409, detail="this card has no designed presentations")
+    try:
+        new_scene = swap_to_second(scene)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    spec = ni_library._deep_copy_json(item["spec"])
+    spec["scene"] = new_scene
+    spec["display"] = {"size": ni_flow._display_size_for(new_scene)}
+    try:
+        store.update_spec(item["id"], spec, origin="user", preserve_attestations=True)
+    except (ValueError, ni.NIError) as exc:
+        raise HTTPException(status_code=409, detail=f"presentation reseal failed: {exc}") from None
 
 
 @router.post("/api/ni/items/{item_id}/commission")
@@ -1488,7 +1523,8 @@ def _template_row(t: dict) -> dict:
     try:
         bound_preview = ni.bind_scene(scene, raw_preview,
                                       history=ni._seed_history(spec_template),
-                                      image_ref=image_ref)
+                                      image_ref=image_ref,
+                                      form_ctx=ni._form_bind_context(spec_template))
     except (ni.NIError, ValueError) as exc:  # defence-in-depth — never crash the listing
         log.warning("ni library: template %r preview bind failed: %s",
                     t.get("id"), exc)
@@ -1757,7 +1793,7 @@ def apply_template_update(request: Request, item_id: str) -> dict:
     try:
         bound = ni.bind_scene(new_spec["scene"], preview_payload,
                               history=ni._seed_history(new_spec),
-                              image_ref=image_ref)
+                              image_ref=image_ref, form_ctx=ni._form_bind_context(new_spec))
     except (ni.NIError, ValueError) as exc:
         raise HTTPException(status_code=500,
                             detail=f"template preview bind failed: {exc}") from None
@@ -1860,7 +1896,7 @@ def _build_export_template(store: ni.NIStore, item: dict, secrets_store) -> dict
 # Phase 4b D2c (audit 2026-09-11): export strips `_l2_*` state (proposal + attempt
 # marker) AND `repair_policy` — repair policy is always the installer's local choice,
 # so a template ships with none and the install path forces the safe default.
-_EXPORT_STRIP_KEYS = ("contract", "_c2_ok", "_l1_last_attempt", "_l1_trial",
+_EXPORT_STRIP_KEYS = ("contract", "_c2_ok", "_present_ok", "_l1_last_attempt", "_l1_trial",
                       "_l2_last_attempt", "_l2_proposal", "_template", "repair_policy",
                       "_born", "_model_consent", "_built_from")
 

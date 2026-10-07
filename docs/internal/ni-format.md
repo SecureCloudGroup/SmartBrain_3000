@@ -2483,3 +2483,120 @@ answers (§32); everything else is offered as a link, named honestly, with nothi
 - **Live harness.** `tools/ni-live-e2e.py` taps only `kind:"library"` rows; a pause that offers
   only links reports outcome `links` and prints each as `host — title`.
 
+
+## 34. Form scenes (Round 19, phase 1a-2 — the `ni_forms` engine designs the card)
+
+Every card the flow builds — a Library source's declared answers (§32), a pasted dataset on
+the mapping path, a page card (compiled or interpreted), the computed countdown — now seals
+ONE scene node of type `form`. The old template scenes (`value_scene` / `list_scene`, the
+display-class pick and the map/image → value degrade) are gone from the flow; hand-authored
+`stack` scenes (chat, templates) keep the §5 grammar. The engine lives in
+`smartbrain_3000/ni_forms` (Phase 1a-1); this section is the product contract around it.
+
+- **Sealed node (closed; `ni._validate_form`).** A `form` node is a LEAF (no children, no
+  `when`; a `repeat` whose template is a form is refused at validation):
+  `{type: "form", form, variant, params, record: {kind, fields: [{name, label, path, type,
+  role, unit?, currency?, scale?, precision?, wallclock?}], rows: str|null}, spans: {desktop,
+  phone}, design: {designer: "model"|"rules", pick, second: null | {id, form, variant,
+  params, spans}}}`. `form` ∈ `ni_forms.types.FORMS`; `type` / `role` ∈
+  `ni_forms.types.FIELD_TYPES` / `ROLES` (imported lazily — one source of truth); ≤8 fields;
+  `rows` names the pipeline output holding the list rows (`"rows"`), `null` for value answers;
+  spans are `ni_forms.spans` keys (`d1x1`, `p2x1`…). `design.second` is the runner-up sealed
+  whole, so it can be chosen later without a refetch.
+- **Build (design time, once).** `ni_flow._form_node` → `ni_forms.form_scene.form_scene(chosen,
+  outputs, title, ask, now, source_url, cadence_s, rows_output_name, call_model, viewer_tz)`:
+  `record.from_answers` turns the SAME answers the pipeline was built from (value answers under
+  their output names; a list / columns answer with each cell's row `key` — the cell path for a
+  list, the zipped slug for columns — and its unit resolved once) plus the sample outputs into a
+  `DataRecord` (value → `measure`, one row; list → `events` when a time cell sits on a declared
+  axis, else `records`; columns → `series` on an axis, else `records`). Types follow the
+  declaration (`number` + unit → `currency` / `percent` / `quantity` with the lexicon unit id,
+  `time` → `datetime`, `date`, `count` → number, `codes` → text; text with ≤12 distinct values
+  → `category`; a blank string is a missing cell), roles follow the shape (value: a
+  coordinate → `lat`/`lon` when the ask is about a place — where / location / position /
+  coordinates / map / track — else `ignore`; a text longer than a short phrase (>36 chars) →
+  `text_body`; the first other field a form can lead with, preferring one whose sample cell
+  is filled → `measure`; a later time that is the reading's own stamp (window `now`, or
+  named as_of / updated / timestamp) → `as_of`; the rest `secondary`. Rows: the first text
+  column whose values tell the rows apart → `name` (else the first text) — a
+  status/severity/state label → `status` — other texts → `kind` when a closed vocabulary, else
+  `meta`; first time → `time`/`date`, first number → `value`, later numbers `secondary`,
+  coordinates `lat`/`lon`). Labels
+  are the pack's / the user's words (`label_src: lexicon`, so they may be shown as facts). A
+  candidate with no lint-clean phone span seals the full-width phone span of its height (the
+  bind counts that lint). Then `profile → enumerate →
+  present`: PRESENT runs through the flow's own `call_model` (the ni route, the model-consent
+  gate, the 300 s timeout — `FormBuild.call_model`); with one candidate, no model, an invalid
+  reply or a transport error the rules floor picks. The pick's `(form, variant, params)` and its
+  default desktop + phone spans are sealed; `now` is the sample's fetch instant (`FormBuild.now`,
+  never the clock inside `ni_forms`). The mapping path builds a small answer-shaped `chosen`
+  from its mapped fields; page cards one text value answer per want (the user's words as
+  labels); the countdown one count. `display.size` = `display_size_for_span(spans.desktop)`:
+  1×1 small, 2×1 wide, anything larger `large`; the flow's shell stays small.
+- **Time cells.** The pipeline's `time` / `date` transforms still emit display text, and that
+  text now keeps its instant (`ni._TimeText.moment`; `local_date` anchors a day at local
+  midnight). The record stores the instant (ISO 8601 Z) or the calendar day (`YYYY-MM-DD`) and
+  the forms format it; a zoneless string with no instant attached is never guessed (empty
+  cell). `Context.card_tz` is the source's zone when the pipeline extracted an IANA `zone`
+  output (`card_tz_src: data`), else the user's zone (`ni.user_timezone_name()`, UTC until the
+  desktop / a remote device reports one); `Context.as_of` is the `as_of` field's value or None.
+- **Bind (every run, no model).** `bind_scene(scene, outputs, history=…, image_ref=…,
+  form_ctx=ni._form_bind_context(spec, fetched_at))` — the same seam the engine's run
+  (`run_item` stamps `fetched_at` after the fetch), the flow's preview bind (`_finalize`, at the
+  sample's fetch instant) and the C2 kick use. `form_ctx` = `{source_url, fetched_at,
+  viewer_tz, title, ask, cadence_s}` from the sealed spec, so the shell prints the same title /
+  host / cadence every time. `ni._bind_form`: `record.from_spec` re-reads the sealed field specs
+  by `path` (types and roles are never re-derived — a sealed `text` stays `text` whatever the
+  sample would suggest); the §11 history slot (`history.<name>_h`) becomes `parts["series"]`; a
+  sealed `rows` output that is not a list raises `bind_type` (the repeat bind's contract, kept); a
+  measure record whose `measure` cell is empty, or a sealed row field gone from EVERY row, raises
+  `extract_miss` (a sparse row or a blank secondary keeps its blank cell);
+  under `ni_forms.llm.no_model()` the engine re-profiles + re-enumerates and takes the candidate
+  matching the sealed `(form, variant, params)` — when the data drifted past it, the rules
+  floor with `design_needs_attention: true` on the bound node; the sealed desktop and phone
+  spans are laid out. Bound node (what the snapshot holds and the client paints):
+  `{type: "form", form, clir: {desktop, phone}, summary, hash, lint: {red, amber},
+  design_needs_attention?: true}` — `ni._enforce_form_shape` runs `check_clir` on both CLIRs;
+  `hash` is the desktop CLIR's canonical sha256 (monitor-hash / cache); `summary` is the form's
+  code template. Two binds of one run's outputs at one fetch instant hash the same.
+- **History (§11).** `_handoff` seals `history: {track: {<name>_h: <output path>}, max_points:
+  200}` for every numeric `measure` field (≤4) — the track name is the output's name with `_h`
+  (a track may not collide with a pipeline output), `record.history_key` names it on both sides.
+  Rows-shaped records track nothing. The stat's sparkline accrues from the card's own refreshes.
+- **C2 presentation (`presentation_id`).** `POST /api/ni/items/{id}/validate {ok, note?,
+  presentation_id?: "pick" | "second"}`. `second` re-seals the node under the sealed runner-up
+  (`form_scene.swap_to_second`: form / variant / params / spans swap, the former pick becomes the
+  new second, the record is byte-identical; `update_spec(preserve_attestations=True)` — a
+  presentation swap changes no data shape, so the C1 contract stays; the rev bumps) BEFORE the
+  YES is stamped; then `record_validation(…, presentation_id)` seals `_c2_ok` and `_present_ok`
+  (closed: `pick` | `second`; stripped on export and refused / stripped in template packs like
+  `_c2_ok`; `update_spec` strips it, `apply_repair` preserves it) and the C3 kick proves the
+  design the user chose. 409 when the card is not commissioning, is not a form, or sealed no
+  second; 422 for any other id.
+- **Glyph policy.** `glyph_missing` is AMBER (the browser paints the CLIR; measurement falls
+  back to the font's `.notdef` advance). Red returns with a server-side raster painter.
+- **Engine adjustments for the flow's shapes.** One count-state rule at build and at bind
+  (`layout_span`): a record form holding at most the designed "few" rows (≤3 — naturally, after a
+  refresh shrank it, or under a count override) lays out as its designed empty / one / few state
+  with hollow space amber, exactly as enumerate's forced-state check accepted the span; a card
+  sealed over 8 rows that refreshes with 1 binds state `one`, red 0 (and a one-item list, the
+  common filtered case, has a span at all). The stat's label under the hero is left out when it
+  only repeats the card title (`title_echo`), and a lone hero under its title is the designed calm
+  card. On the mapping path a column constant across rows is dropped unless that would leave the
+  row with no word or number (two home games at one stadium keep the venue — a list of bare
+  timestamps has no form), and mapped column headers are humanised (`teamName` → "team name").
+- **What the client paints.** The CLIR for its device (`clir.desktop` on the board,
+  `clir.phone` on a phone): v1 prims (`text`, `time`, `rect`, `line`, `tri`, `dot`, `path`,
+  `cells`, `icon`, …) in content-box px with `x` anchors, `reading_order`, `hitmap`, and the
+  `live` bindings (now marker, countdown, past-dim, age) it re-evaluates on its own clock. Every
+  `text` prim carries `src` ∈ `TEXT_SRC` (data / lexicon / ask / title / key / code — never a
+  model word); `time` prims carry the ISO instant + `fmt` + `zone`, formatted on the device.
+  `summary` is the accessible text; `lint.red == 0` on everything the server ships. The web
+  painter is the next phase: today `web/src/lib/ni/scene.ts` refuses `form` as an unknown node
+  type, so a form card is a server-complete payload the board cannot yet draw.
+- **What left with the templates.** The `may_be_empty` "No <label> right now" text node is the
+  form's own designed empty state; the `next: true` scene flag ("no current prediction" on a
+  passed next-event time) has no form equivalent — the countdown / next-event forms read the
+  instant and the client's clock. `tools/ni-live-e2e.py` prints a form card as `<form>:
+  <summary>`; `tools/ni-flow-eval.py --recorded` / `--chaos` use the eval's own minimal scenes
+  and are unchanged.

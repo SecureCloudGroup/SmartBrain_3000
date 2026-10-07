@@ -201,10 +201,13 @@ def _number_text(value: float, fmt: str, unit) -> str:
 
 
 def _texts(node, acc=None) -> list[str]:
-    """The words a person would read on the rendered card."""
+    """The words a person would read on the rendered card. A §34 form node prints its form
+    name and the engine's summary line (the CLIR is painted by the client, not printed)."""
     acc = [] if acc is None else acc
     if isinstance(node, dict) and not node.get("hidden"):
-        if node.get("type") == "number" and isinstance(node.get("value"), (int, float)):
+        if node.get("type") == "form":
+            acc.append(f"{node.get('form')}: {node.get('summary')}")
+        elif node.get("type") == "number" and isinstance(node.get("value"), (int, float)):
             acc.append(_number_text(node["value"], node.get("format", "plain"), node.get("unit")))
         elif node.get("type") == "text" and isinstance(node.get("value"), (str, int, float)):
             acc.append(str(node["value"]))

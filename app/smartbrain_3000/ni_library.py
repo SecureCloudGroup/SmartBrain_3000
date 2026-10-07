@@ -269,7 +269,7 @@ def _validate_template_spec_and_preview(template: dict, where: str) -> None:
     # every install (freeform update refuses source/pipeline edits on
     # "flow-born" cards). Install stamps its own marker; template packs must
     # never carry it.
-    forbidden = {"contract", "_c2_ok", "_l1_last_attempt", "_l1_trial", "_template",
+    forbidden = {"contract", "_c2_ok", "_present_ok", "_l1_last_attempt", "_l1_trial", "_template",
                  "_l2_last_attempt", "_l2_proposal", "repair_policy", "_born",
                  "_shell", "_model_consent", "_built_from"}
     present = sorted(forbidden.intersection(spec.keys()))
@@ -291,7 +291,7 @@ def _validate_template_spec_and_preview(template: dict, where: str) -> None:
     image_ref = ni._preview_image_ref(validated, str(template.get("id") or "template"))
     try:
         ni.bind_scene(validated["scene"], preview, history=ni._seed_history(validated),
-                      image_ref=image_ref)
+                      image_ref=image_ref, form_ctx=ni._form_bind_context(validated))
     except (ni.NIError, ValueError) as exc:
         raise LibraryError(f"{where}.preview_payload does not bind: {exc}") from None
 
@@ -737,7 +737,7 @@ def _pack_cache_put(created_at: str,
 # LOCAL repair-policy choice (Phase 4b D2c — a pack cannot silently opt items into
 # `l2_frontier: true`), and provenance itself (`_template` — the install path stamps
 # its own from the pack it read).
-_TEMPLATE_STRIP_KEYS = ("contract", "_c2_ok", "_l1_last_attempt", "_l1_trial",
+_TEMPLATE_STRIP_KEYS = ("contract", "_c2_ok", "_present_ok", "_l1_last_attempt", "_l1_trial",
                         "_l2_last_attempt", "_l2_proposal", "_template",
                         "repair_policy", "_born", "_shell", "_model_consent",
                         "_built_from")

@@ -16,7 +16,7 @@ import copy
 import gzip
 import json
 import re
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import ClassVar
 from zoneinfo import ZoneInfo
@@ -158,17 +158,15 @@ def _run(store, monkeypatch, key: str, ask: str, intent: dict, **kw) -> dict:
 
 
 def _shown(store, item_id: str) -> list[str]:
-    """The card's texts as it renders (the preview bound into the frozen scene)."""
+    """The card's texts as it renders: the words on the bound form's desktop CLIR, plus the
+    sealed field labels (the engine lays out what fits; the labels say what was built)."""
     spec = store.get_item(item_id)["spec"]
     preview = store.read_snapshot(item_id, "preview_data")["payload"]
-    bound = nimod.bind_scene(spec["scene"], preview)
-    out, stack = [], [bound]
-    while stack:
-        node = stack.pop(0)
-        if node.get("type") in ("text", "number"):
-            out.append(f"{node['value']}{node.get('unit') or ''}")
-        stack.extend(node.get("children") or [])
-    return out
+    bound = nimod.bind_scene(spec["scene"], preview,
+                             form_ctx=nimod._form_bind_context(spec, nimod._clock().astimezone(UTC)))
+    assert bound["type"] == "form"
+    out = [ln for p in bound["clir"]["desktop"]["prims"] if p["k"] == "text" for ln in p["lines"]]
+    return out + [f["label"] for f in spec["scene"]["record"]["fields"]]
 
 
 def _ops(store, item_id: str) -> list[dict]:
@@ -484,8 +482,10 @@ def test_a_next_event_time_is_marked_next_on_the_card(monkeypatch) -> None:
     out = _run(store, monkeypatch, "chiefs", ask, _intent(ask, "Kansas City Chiefs", ["next game"]))
     assert out["state"] == "ready"
     spec = store.get_item(out["_item"])["spec"]
-    nodes = [c for c in spec["scene"]["children"] if c.get("next")]
-    assert [n["value"]["$bind"] for n in nodes] == ["start"]
+    # the start is an event time on the sealed form record — the countdown's target when it leads,
+    # a fact beside the matchup otherwise — never the reading's own ``as_of`` stamp
+    starts = [(f["path"], f["role"]) for f in spec["scene"]["record"]["fields"] if f["type"] == "datetime"]
+    assert len(starts) == 1 and starts[0][0] == "start" and starts[0][1] in ("measure", "secondary"), starts
 
 
 # ---- the fetch contract (C12) and the sealed lookup (C13) ------------------------------------------------

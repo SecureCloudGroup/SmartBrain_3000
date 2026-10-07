@@ -486,8 +486,16 @@ def test_the_nws_lookup_chain_runs_from_locate_to_the_card(lib, monkeypatch) -> 
         assert url == "https://api.weather.gov/gridpoints/CHS/87,77/forecast", url
         return json.loads(json.dumps(_SAMPLES["nws_forecast_chs"]["sample"]))
 
-    out = ni_flow._sample_and_map(store, item_id, ask, intent, rows[0]["url"],
-                                  lambda _p: pytest.fail("no model call"), fetch)
+    prompts: list[str] = []
+
+    def model(prompt: str) -> str:
+        # a declared build makes no mapping / judge call; the §34 PRESENT menu (an enum-only
+        # pick among finished designs) is the one model turn, and an off reply takes the floor
+        prompts.append(prompt)
+        assert "You choose how a personal dashboard card presents" in prompt, "no model call"
+        return "{}"
+
+    out = ni_flow._sample_and_map(store, item_id, ask, intent, rows[0]["url"], model, fetch)
     assert fetched[-1] == "https://api.weather.gov/gridpoints/CHS/87,77/forecast", fetched
     assert out["state"] == "ready", out["notes"]
     assert store.get_item(item_id)["spec"]["source"]["url"] == "https://api.weather.gov/gridpoints/CHS/87,77/forecast"

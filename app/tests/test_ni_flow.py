@@ -338,14 +338,15 @@ def test_flow_hn_list_end_to_end() -> None:
     assert result["state"] == "ready"
     item = store.get_item(item_id)
     assert item is not None
-    # Scene has a repeat root over ``rows`` with template binding ``item.title``.
+    # The scene is a §34 form over the ``rows`` list (the engine designed a list form).
     scene = item["spec"]["scene"]
-    repeat = scene["children"][1]
-    assert repeat["type"] == "repeat"
+    assert scene["type"] == "form" and scene["record"]["rows"] == "rows"
+    assert scene["form"] in ("ranked_list", "table", "entity_list")
 
 
-def test_flow_iss_map_degrades_to_value_with_note() -> None:
-    """The ISS `map` display_hint is unsupported ⇒ value card + honest degradation note."""
+def test_flow_iss_map_hint_designs_from_the_data_without_a_degrade_note() -> None:
+    """The ISS `map` display_hint no longer degrades with a note: the §34 engine designs
+    the card from the data it has (two numbers → a value form)."""
     store, _conn = _store()
     fixture = _load("iss")
     request = "ISS location on a map"
@@ -364,9 +365,10 @@ def test_flow_iss_map_degrades_to_value_with_note() -> None:
     )
     assert result["state"] == "ready"
     record = ni_flow._flow_read(store, item_id)
-    # The degradation note rides on the flow record's notes list.
     notes = " ".join(record.get("notes") or [])
-    assert "map" in notes.lower() and "unsupported" in notes.lower()
+    assert "unsupported" not in notes.lower()
+    scene = store.get_item(item_id)["spec"]["scene"]
+    assert scene["type"] == "form" and scene["record"]["kind"] == "measure"
 
 
 def test_flow_computed_unsupported_or_supported() -> None:
@@ -1587,7 +1589,9 @@ def test_credential_reuse_fills_same_host_key(monkeypatch) -> None:
                        "url": "https://finnhub.io/api/v1/quote?symbol=MSFT",
                        "headers": {"X-Finnhub-Token": {"$secret": "ni:self:api_key"}}},
             "pipeline": [{"op": "extract", "paths": {"price": "c"}}],
-            "scene": ni_flow.value_scene(["price"]),
+            "scene": {"type": "stack", "dir": "v", "gap": "sm", "children": [
+                {"type": "number", "value": {"$bind": "price"}, "format": "plain", "unit": "",
+                 "tone": "default", "size": "lg"}]},
             "display": {"size": "small"}, "interval_minutes": 15,
         }
         result = ni_flow._finalize(store, item_id, spec, {"price": 1.0},
@@ -2440,20 +2444,20 @@ def test_s2_failures_always_fall_to_the_plain_pause(monkeypatch) -> None:
 # ---- P1 debt riders (2026-09-22): human labels + honest preview badge ------
 
 
-def test_value_scene_renders_human_labels_never_slugs() -> None:
-    """The card's visible text is the user's words (or at worst a de-slugged
-    name) — "tropical_storms" must never appear on screen. Bindings keep the
-    slugs. Multi-field cards label each secondary value."""
+def test_form_labels_are_human_never_slugs() -> None:
+    """The card's visible labels are the user's words (or at worst a de-slugged
+    name) — "tropical_storms" must never appear on screen. The sealed field paths
+    keep the slugs (they address the pipeline outputs)."""
     from smartbrain_3000 import ni as nimod
-    scene = ni_flow.value_scene(
-        ["tropical_storms", "hurricanes"],
-        labels={"tropical_storms": "tropical storms"})
-    nimod.validate_scene(scene)  # label nodes are grammar-legal
-    texts = [c["value"] for c in scene["children"] if c["type"] == "text"]
-    assert texts == ["tropical storms", "hurricanes"]  # de-slug fallback too
-    binds = [c["value"]["$bind"] for c in scene["children"]
-             if c["type"] == "number"]
-    assert binds == ["tropical_storms", "hurricanes"]  # bindings unchanged
+    built = ni_flow.assemble_from_mapping(
+        {"tropical_storms": "a", "hurricanes": "b"},
+        {"tropical_storms": "number", "hurricanes": "number"}, "value", {"a": 2, "b": 1},
+        title="storms")
+    scene = built["scene"]
+    nimod.validate_scene(scene)
+    fields = scene["record"]["fields"]
+    assert [f["label"] for f in fields] == ["tropical storms", "hurricanes"]  # de-slug fallback
+    assert [f["path"] for f in fields] == ["tropical_storms", "hurricanes"]  # bindings unchanged
 
 
 def test_page_card_scene_labels_are_the_users_words() -> None:
@@ -2481,10 +2485,9 @@ def test_page_card_scene_labels_are_the_users_words() -> None:
         ni_flow.ni._fetch_http_page = orig
     assert result["state"] == "ready", result
     item = store.get_item(item_id)
-    scene_texts = [c["value"] for c in item["spec"]["scene"]["children"]
-                   if c["type"] == "text"]
-    assert "tropical storms" in scene_texts
-    assert "tropical_storms" not in scene_texts
+    labels = [f["label"] for f in item["spec"]["scene"]["record"]["fields"]]
+    assert "tropical storms" in labels
+    assert "tropical_storms" not in labels
     assert nimod_fetch is orig  # restore sanity
 
 
@@ -2556,13 +2559,11 @@ def test_p2_compiles_a_model_free_program_from_page_structure(monkeypatch) -> No
                               "url": "https://tides.example.org/c"}
     snap = store.read_snapshot(item_id, "preview_data")
     assert snap["payload"] == {"high_tide_time": "7:12 AM"}
-    kids = spec["scene"]["children"]
-    assert [c["value"] for c in kids if c.get("role") in ("title", "label")] == [
-        "high tide time"]
-    # The reading binds into a TEXT value node (a string in a number node
-    # fails the engine's post-bind type check — see the engine-run matrix).
-    assert {"type": "text", "value": {"$bind": "high_tide_time"}, "role": "value",
-            "tone": "default", "size": "lg"} in kids
+    fields = spec["scene"]["record"]["fields"]
+    assert [f["label"] for f in fields] == ["high tide time"]
+    # The reading is a TEXT field of the sealed form (a word, never a number the
+    # engine would refuse — see the engine-run matrix).
+    assert fields[0]["type"] in ("category", "text") and fields[0]["path"] == "high_tide_time"
 
 
 def test_p2_engine_reruns_the_program_without_a_model(monkeypatch) -> None:
@@ -2785,9 +2786,9 @@ def test_engine_run_api_card_with_a_text_field(monkeypatch) -> None:
     out = _first_engine_run(store, conn, iid, monkeypatch, json_sample=sample)
     assert out["status"] == "ok", out
     snap = store.read_snapshot(iid, "latest")
-    leaves = [c for c in snap["payload"]["children"] if c["type"] in ("text", "number")]
-    assert any(c["type"] == "text" and c["value"] == "open" for c in leaves)
-    assert any(c["type"] == "number" and c["value"] == 18.4 for c in leaves)
+    assert snap["payload"]["type"] == "form"
+    texts = [ln for p in snap["payload"]["clir"]["desktop"]["prims"] if p["k"] == "text" for ln in p["lines"]]
+    assert "open" in texts and any("18.4" in t for t in texts)
 
 
 def test_engine_run_list_card(monkeypatch) -> None:
@@ -2832,7 +2833,8 @@ def test_engine_run_compiled_page_card(monkeypatch) -> None:
     out = _first_engine_run(store, conn, iid, monkeypatch, page=graph)
     assert out["status"] == "ok", out
     snap = store.read_snapshot(iid, "latest")
-    assert any(c.get("value") == "7:12 AM" for c in snap["payload"]["children"])
+    assert "7:12 AM" in [ln for p in snap["payload"]["clir"]["desktop"]["prims"]
+                         if p["k"] == "text" for ln in p["lines"]]
 
 
 def test_engine_run_interpreted_page_card(monkeypatch) -> None:
@@ -2983,11 +2985,11 @@ def test_fix_rebuilds_a_card_stuck_by_the_old_scene(monkeypatch) -> None:
     store, conn = _store()
     iid, graph = _flow_page_card(store, False, monkeypatch)
     old = store.get_item(iid)["spec"]
-    old["scene"]["children"] = [
-        c if c.get("role") != "value" else
-        {"type": "number", "value": c["value"], "format": "plain", "unit": "",
-         "tone": "default", "size": "lg"}
-        for c in old["scene"]["children"]]
+    # an earlier version's scene: the reading bound into a NUMBER node
+    old["scene"] = {"type": "stack", "dir": "v", "gap": "sm", "children": [
+        {"type": "text", "value": "high tide time", "role": "title", "tone": "default", "size": "md"},
+        {"type": "number", "value": {"$bind": "high_tide_time"}, "format": "plain", "unit": "",
+         "tone": "default", "size": "lg"}]}
     store.conn.execute("UPDATE ni_items SET nonce = ?, ciphertext = ? WHERE id = ?;",
                        [*store._seal_item(iid, old), iid])
     with pytest.raises(nimod.NIError) as exc:
@@ -3012,8 +3014,7 @@ def test_fix_rebuilds_a_card_stuck_by_the_old_scene(monkeypatch) -> None:
     rebuilt = store.get_item(iid)
     assert rebuilt["spec"]["source"] == old["source"]  # same consented URL
     assert rebuilt["spec"].get("_born") == old.get("_born")
-    assert any(c.get("type") == "text" and c.get("role") == "value"
-               for c in rebuilt["spec"]["scene"]["children"])
+    assert rebuilt["spec"]["scene"]["type"] == "form"   # rebuilt through the forms engine
     out = _first_engine_run(store, conn, iid, monkeypatch, page=graph,
                             llm_reply=json.dumps({"high_tide_time": "7:12 AM"}))
     assert out["status"] == "ok", out

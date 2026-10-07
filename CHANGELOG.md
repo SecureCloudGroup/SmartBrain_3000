@@ -11,6 +11,17 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Added
+
+- **Cards are now designed for the shape of their data.** A card built from a
+  Library source (or a pasted link) no longer renders one fixed layout. The app
+  reads what came back — one number, a reading with its change and its range, a
+  list of named items, a schedule, a day's tides, an hourly series — and lays out
+  the card that fits it: a stat with its delta and range, a status list, an
+  agenda or day table, a tide curve, a line over time. Cards take the size their
+  design needs (small, wide or large), and a single-number card keeps its own
+  history so a sparkline builds up from its refreshes.
+
 ### Fixed
 
 - **A pasted CSV, RSS, Atom, XML or text link now keeps working after its first
