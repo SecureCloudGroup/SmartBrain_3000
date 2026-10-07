@@ -187,7 +187,11 @@ def lint(clir: dict, rec, roles, prof, cand, inp, bucket: Bucket, *, times: list
                     add("bidi_clean", RED, p["id"])
                 cov = TX.coverage(ln, wt)
                 if cov["missing"]:
-                    add("glyph_missing", RED, p["id"], detail="".join(cov["missing"])[:10])
+                    # Hybrid Phase 1a-2: the browser paints this text, so an unknown
+                    # glyph is a warning, not a block (the measurer already uses a
+                    # tofu fallback advance; a future server-side PNG painter can
+                    # re-raise this to red). See docs/internal/ni-format.md §34.
+                    add("glyph_missing", AMBER, p["id"], detail="".join(cov["missing"])[:10])
                 elif cov["fallback"]:
                     add("glyph_fallback", AMBER, p["id"], detail=",".join(cov["fallback"]))
             trunc = any(ln.endswith("…") for ln in p["lines"])

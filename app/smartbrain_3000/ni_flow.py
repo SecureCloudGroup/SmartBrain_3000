@@ -26,6 +26,7 @@ import logging
 import re
 import threading
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import quote, urlparse
@@ -253,6 +254,54 @@ def _append_note(store: ni.NIStore, item_id: str, note: str) -> None:
 
 # ---- shell item + provenance helpers -------------------------------------
 
+_SHELL_SCENE: dict = {
+    "type": "stack", "dir": "v", "gap": "sm", "children": [
+        {"type": "text", "value": "Preparing card…", "role": "title",
+         "tone": "muted", "size": "md"},
+    ],
+}
+
+
+@dataclass(frozen=True)
+class FormBuild:
+    """What the §34 form designer needs beside the data: the fetch instant (the layout's
+    ``now``, never read from the clock inside ni_forms), the user's words (PRESENT's
+    wants), the source URL + cadence (the shell footer) and the flow's model seam —
+    ``call_model`` is the same consent-gated, routed, timed call every other model turn
+    of the build makes; None designs by the rules floor."""
+
+    now: datetime
+    ask: str
+    source_url: str | None = None
+    cadence_s: int = 0
+    call_model: Callable[[str], str] | None = None
+
+
+def _form_node(chosen: list[dict], outputs: dict, title: str,
+               rows_output_name: str | None, fb: FormBuild) -> dict:
+    """The sealed §34 form node for ``chosen`` answers + their sample outputs — the one
+    door from the flow into ``ni_forms.form_scene`` (imported lazily: ni_flow loads at
+    startup, the engine's fonts need not)."""
+    assert isinstance(chosen, list) and chosen, "chosen answers required"
+    assert isinstance(fb, FormBuild), "fb must be a FormBuild"
+    from .ni_forms.form_scene import form_scene
+    return form_scene(chosen, outputs, title=title, ask=fb.ask or title,
+                      now=fb.now.astimezone(UTC), source_url=fb.source_url,
+                      cadence_s=max(0, int(fb.cadence_s)), rows_output_name=rows_output_name,
+                      call_model=fb.call_model, viewer_tz=ni.user_timezone_name())
+
+
+def _display_size_for(scene: dict) -> str:
+    """``display.size`` follows the sealed form's desktop span (small / wide / large);
+    any other scene (the flow's shell, a hand-authored stack) stays small."""
+    assert isinstance(scene, dict), "scene must be a dict"
+    if scene.get("type") != "form":
+        return "small"
+    from .ni_forms.form_scene import display_size_for_span
+    span = str((scene.get("spans") or {}).get("desktop") or "d1x1")
+    return display_size_for_span(span)
+
+
 def _empty_shell_spec(request: str, cadence: int) -> dict:
     """Assemble the tiny sealed spec used for a flow's DRAFT shell item.
 
@@ -286,13 +335,8 @@ def _empty_shell_spec(request: str, cadence: int) -> dict:
         "_shell": True,
         "source": {"type": "model", "instruction": "flow shell placeholder"},
         "pipeline": [],
-        "scene": {
-            "type": "stack", "dir": "v", "gap": "sm", "children": [
-                {"type": "text", "value": "Preparing card…", "role": "title",
-                 "tone": "muted", "size": "md"},
-            ],
-        },
-        "display": {"size": "small"},
+        "scene": json.loads(json.dumps(_SHELL_SCENE)),   # a fresh tree: specs are edited in place
+        "display": {"size": _display_size_for(_SHELL_SCENE)},
         "contract": None,
         "repair_policy": {"l1": True, "l2_frontier": False},
         "model": None,
@@ -1014,62 +1058,6 @@ def _generalize_list_path(exemplar: str) -> tuple[str, str]:
     return match.group(1), "item." + match.group(2)
 
 
-def value_scene(fields: list[str], labels: dict[str, str] | None = None,
-                types: dict[str, str] | None = None,
-                units: dict[str, str] | None = None,
-                nexts: set[str] | None = None) -> dict:
-    """Value-class scene: title + one primary value + smaller siblings.
-
-    P1 debt rider (2026-09-22): visible text is HUMAN, never a slug — the
-    caller may pass ``labels`` (slug → the user's own words, e.g. the wants
-    an interpreted card was built from); without one, the slug is de-slugged
-    (underscores → spaces). Bindings stay the slugs. Multi-field cards label
-    each secondary value so siblings are tellable apart.
-
-    ``types`` (field → "number" | "string"; 2026-09-23 engine-run fix): a
-    STRING field binds into a text value node — the engine's post-bind type
-    check (``ni._enforce_bind_types``) rejects any string in a number node,
-    so the old all-number scene made every flow-built value card with a
-    text field ("status", "time", a page reading) fail its first engine run
-    and never go live. Absent types default to number (numeric cards are
-    unchanged).
-
-    ``units`` (field → unit text, e.g. "°F", "mph"): shown with that number (Library answers).
-
-    ``nexts``: text fields that hold a next-event time — marked ``next`` so a time that has passed
-    shows "no current prediction" instead of a confident stale time.
-    """
-    assert isinstance(fields, list) and fields, "fields required"
-    assert labels is None or isinstance(labels, dict), "labels must be a dict"
-    assert types is None or isinstance(types, dict), "types must be a dict"
-
-    def _label_of(field: str) -> str:
-        human = (labels or {}).get(field) or field.replace("_", " ")
-        return " ".join(str(human).split())[:200]
-
-    children: list[dict] = [
-        {"type": "text", "value": _label_of(fields[0]), "role": "title",
-         "tone": "default", "size": "md"},
-    ]
-    for i, field in enumerate(fields):  # bounded by _MAX_INTENT_FIELDS
-        if i > 0:
-            children.append({
-                "type": "text", "value": _label_of(field), "role": "label",
-                "tone": "muted", "size": "sm",
-            })
-        size = "lg" if i == 0 else "sm"
-        if (types or {}).get(field) == "string":
-            children.append({"type": "text", "value": {"$bind": field},
-                             "role": "value", "tone": "default", "size": size,
-                             **({"next": True} if field in (nexts or ()) else {})})
-        else:
-            children.append({
-                "type": "number", "value": {"$bind": field}, "format": "plain",
-                "unit": (units or {}).get(field, ""), "tone": "default", "size": size,
-            })
-    return {"type": "stack", "dir": "v", "gap": "sm", "children": children}
-
-
 _TIME_WORDS = ("time", "date", "updated", "published", "sunset", "sunrise", "start", "end", "at")
 
 
@@ -1093,26 +1081,6 @@ def _time_fn(values: list) -> str:
     shown = [v for v in values if v not in (None, "")]
     return "date" if shown and all(isinstance(v, str) and _MIDNIGHT_RE.fullmatch(v.strip()) for v in shown) \
         else "time"
-
-
-def list_scene(items_path: str, item_field: str | list[str], title: str | None = None,
-               suffixes: dict[str, str] | None = None, max_rows: int = 5) -> dict:
-    """List-class scene: repeat over a generalized list path (up to ``max_rows`` rows); each row shows
-    its item's fields ("09:48 · 6.904 · H"), under the card's own subject rather than a stock title.
-    ``suffixes`` (item field → text shown right after its value, e.g. "°F" or " mph") carries units."""
-    assert isinstance(items_path, str) and items_path, "items_path required"
-    item_fields = [item_field] if isinstance(item_field, str) else list(item_field)
-    assert item_fields and all(f.startswith("item.") for f in item_fields), "item fields required"
-    assert 1 <= max_rows <= ni._MAX_REPEAT_MAX, "max_rows in the repeat bound"
-    heading = " ".join(str(title or "Latest").replace("_", " ").split())[:200] or "Latest"
-    return {"type": "stack", "dir": "v", "gap": "sm", "children": [
-        {"type": "text", "value": heading, "role": "title",
-         "tone": "default", "size": "md"},
-        {"type": "repeat", "items": {"$bind": items_path}, "max": max_rows,
-         "template": {"type": "text", "value": " · ".join(f"{{{{{f}}}}}{(suffixes or {}).get(f, '')}"
-                                                          for f in item_fields),
-                      "role": "label", "tone": "default", "size": "sm"}},
-    ]}
 
 
 _MAX_ROW_FIELDS = 3
@@ -1148,7 +1116,10 @@ def _row_fields(items_path: str, item_field: str, mapping: dict, rows: object) -
     than three were picked — readable siblings from the picked field's OWN record (a quake's place
     and magnitude, a tide's time and height), in the source's order. Ids, codes, links and
     epoch-style numbers are never padding, nor a field with the same value in every row (every
-    quake is a "Feature"; a tide's H/L varies and stays)."""
+    quake is a "Feature"; a tide's H/L varies and stays). One exception: when dropping the
+    constants would leave the row with no text or number at all (a list of bare game times at one
+    stadium), the first constant text stays — a list of bare timestamps has no form, and the
+    repeated venue is what names those rows."""
     picked = [item_field]
     for path in mapping.values():  # bounded by _MAX_INTENT_FIELDS
         try:
@@ -1163,6 +1134,7 @@ def _row_fields(items_path: str, item_field: str, mapping: dict, rows: object) -
     for key in parent_path:  # bounded by the path depth
         parent = parent.get(key) if isinstance(parent, dict) else None
     siblings: list[str] = []
+    constant_text: str | None = None
     if isinstance(parent, dict):
         prefix = ".".join(["item", *parent_path])
         for key, value in parent.items():  # bounded by the record size
@@ -1170,32 +1142,58 @@ def _row_fields(items_path: str, item_field: str, mapping: dict, rows: object) -
             if name in picked or str(key).lower() in _ROW_SKIP_KEYS or str(key).lower().endswith("_id") \
                     or not ni._KEY_RE.match(str(key)):
                 continue
-            if isinstance(value, bool) or value is None or _constant_across(rows, parent_path, key):
-                continue
             short_number = isinstance(value, (int, float)) and abs(value) < 1e9
             short_text = isinstance(value, str) and 0 < len(value) <= 40 \
                 and not _ID_LIKE_RE.fullmatch(value) and not value.startswith("http")
+            if isinstance(value, bool) or value is None or _constant_across(rows, parent_path, key):
+                if short_text and constant_text is None and not _is_timestamp(value, key):
+                    constant_text = name
+                continue
             if short_number or short_text:
                 siblings.append(name)
+    wordy = any(_wordy(_dig(first, f[5:]), f) for f in picked + siblings)
+    if not wordy and constant_text is not None:
+        siblings.append(constant_text)
     fields = picked + siblings[:max(0, _MAX_ROW_FIELDS - len(picked))]
     if isinstance(parent, dict):  # the source's own order reads naturally: time, height, H/L
         order = {f"{'.'.join(['item', *parent_path])}.{k}": i for i, k in enumerate(parent)}
         fields.sort(key=lambda f: order.get(f, -1))
     return fields
 
+def _wordy(value: object, path: str) -> bool:
+    """A row cell that reads as a word or a number — not a timestamp, not empty."""
+    assert isinstance(path, str), "path must be a str"
+    if isinstance(value, bool) or value is None:
+        return False
+    if isinstance(value, (int, float)):
+        return not _is_timestamp(value, path.rsplit(".", 1)[-1])
+    return isinstance(value, str) and bool(value.strip()) and not _is_timestamp(value, path)
+
+
+def _column_label(path: str) -> str:
+    """A mapped column's header from its source key: ``teamName`` / ``points_total`` read as
+    "team name" / "points total" (the user never named these; a raw key is not a header)."""
+    assert isinstance(path, str) and path, "path required"
+    tail = path.rsplit(".", 1)[-1]
+    return " ".join(re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", tail).replace("_", " ").lower().split())
+
+
 def assemble_from_mapping(mapping: dict, fields: dict, klass: str,
-                          fresh_sample: object, title: str | None = None) -> dict:
+                          fresh_sample: object, title: str | None = None,
+                          form: FormBuild | None = None) -> dict:
     """Build the (pipeline, scene, preview_payload) triple + verify types.
 
-    Runs the pipeline against ``fresh_sample`` and binds the scene — the same
-    round-trip ``ni.validate_spec`` / ``bind_scene`` would run at handoff.
-    Returns ``{"pipeline", "scene", "preview_payload"}`` on success; raises
-    ValueError with a class-tagged message on typed-verification failure so
-    the flow record can honestly say what went wrong.
+    Runs the pipeline against ``fresh_sample`` and designs the §34 form node from
+    the mapped fields (a small answer-shaped ``chosen``: value class → value answers,
+    list class → one list answer over the row fields) — the same engine the
+    Library-answers path uses. Returns ``{"pipeline", "scene", "preview_payload"}``
+    on success; raises ValueError with a class-tagged message on typed-verification
+    failure (or when no form fits) so the flow record can honestly say what went wrong.
     """
     assert isinstance(mapping, dict) and isinstance(fields, dict), "args required"
     assert klass in (_DISPLAY_VALUE, _DISPLAY_LIST), "klass must be value or list"
     payload = fresh_sample if isinstance(fresh_sample, dict) else {"items": fresh_sample}
+    fb = form or FormBuild(now=ni._clock(), ask=str(title or ""))
     if klass == _DISPLAY_LIST:
         first_field = next(iter(fields))
         items_path, item_field = _generalize_list_path(mapping[first_field])
@@ -1213,10 +1211,15 @@ def assemble_from_mapping(mapping: dict, fields: dict, klass: str,
         shown = [_dig(r, f[5:]) for r in rows[:5] if isinstance(r, dict) for f in row_fields]
         if rows and not any(v not in (None, "") and str(v).strip() for v in shown):
             raise ValueError("mapping: the picked list's rows are empty in the sample")
-        scene = list_scene("rows", row_fields, title=title)
+        cells = [{"path": f[5:], "key": f[5:], "label": _column_label(f[5:]),
+                  "type": _time_fn([_dig(r, f[5:]) for r in rows[:50] if isinstance(r, dict)])
+                  if f[5:] in timed else _mapped_cell_type(_dig(first, f[5:]))}
+                 for f in row_fields]
+        chosen = [{"kind": "list", "label": str(title or "Latest")[:80], "path": items_path, "cells": cells}]
+        _typed_verify(preview, fields, klass)   # the data first; the design only over data that holds
+        scene = _form_node(chosen, preview, str(title or "Latest"), "rows", fb)
     else:
         stages = [{"op": "extract", "paths": dict(mapping)}]
-        scene = value_scene(list(fields), types=dict(fields))
         preview = ni.run_pipeline(stages, payload)
         counted = [n for n, t in fields.items() if t == "number" and isinstance(preview.get(n), list)]
         if counted:  # a number field picked a list: the card shows how many items it holds
@@ -1226,19 +1229,31 @@ def assemble_from_mapping(mapping: dict, fields: dict, klass: str,
                                                     for n in counted]}]
             preview = ni.run_pipeline(stages, payload)
         timed = [n for n in fields if _is_timestamp(preview.get(n), n)]
+        time_fns = {n: _time_fn([preview.get(n)]) for n in timed}
         if timed:  # a timestamp reads as the user's local time ("6:48 PM"), on every refresh
-            stages.append({"op": "transform", "apply": [{"fn": _time_fn([preview.get(n)]), "field": n}
-                                                        for n in timed]})
+            stages.append({"op": "transform", "apply": [{"fn": time_fns[n], "field": n} for n in timed]})
             fields = {**fields, **{n: "string" for n in timed}}
-            scene = value_scene(list(fields), types=dict(fields))
             preview = ni.run_pipeline(stages, payload)
         as_text = [n for n, t in fields.items() if t == "number" and isinstance(preview.get(n), str)
                    and _numeric_text(preview.get(n))]
         if as_text:  # the source sends these numbers as text: convert them on every refresh
             stages.append({"op": "transform", "apply": [{"fn": "number", "field": n} for n in as_text]})
             preview = ni.run_pipeline(stages, payload)
-    _typed_verify(preview, fields, klass)
+        chosen = [{"kind": "value", "name": n, "label": n.replace("_", " "), "path": n,
+                   "type": time_fns.get(n) or ("number" if t == "number" else "text")}
+                  for n, t in fields.items()]
+        _typed_verify(preview, fields, klass)   # the data first; the design only over data that holds
+        scene = _form_node(chosen, preview, str(title or next(iter(fields))), None, fb)
     return {"pipeline": stages, "scene": scene, "preview_payload": preview}
+
+
+def _mapped_cell_type(value: object) -> str:
+    """A mapped list cell's answer type from its sample: a number is ``number``, the
+    rest is ``text`` (timestamps are typed by the caller's ``_time_fn``)."""
+    assert value is None or isinstance(value, (str, int, float, bool, dict, list)), "sample cell"
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return "number"
+    return "text"
 
 
 def _typed_verify(preview: dict, fields: dict, klass: str) -> None:
@@ -1671,11 +1686,6 @@ def _resolve_or_none(node: object, path: str) -> object:
         return None
 
 
-def _unit_suffix(unit: str) -> str:
-    """How a unit follows a value in a row: symbols attach ("72°F", "40%"), words space ("12 mph")."""
-    return (" " + unit) if unit and unit[0].isalpha() else unit
-
-
 def _nonempty(value: object) -> bool:
     return value is not None and not (isinstance(value, str) and not value.strip())
 
@@ -1758,11 +1768,11 @@ def _build_value_answers(chosen: list[dict], payload: dict, next_event: bool = F
             raise ValueError(f"answers: {labels[name]!r} is not a number here")
         if ftype == "string" and not (isinstance(value, str) and value.strip()):
             raise ValueError(f"answers: {labels[name]!r} is empty here")
-    # a next-event time says so once it has passed ("no current prediction"), on every refresh (C9)
-    nexts = {n for n, a in zip(fields, chosen, strict=True) if next_event and a["type"] in ("time", "date")}
-    scene = value_scene(list(fields), labels=labels, types=fields, units=units, nexts=nexts)
-    return {"pipeline": stages, "scene": scene, "preview_payload": preview,
-            "fields": fields, "klass": _DISPLAY_VALUE, "missing": missing}
+    # the §34 form is designed from these: each answer under its OUTPUT name, its unit resolved
+    # (``build_from_answers`` seals the node)
+    answers_used = [{**a, "name": n, "unit": units.get(n)} for n, a in zip(fields, chosen, strict=True)]
+    return {"pipeline": stages, "preview_payload": preview, "answers_used": answers_used,
+            "rows_output_name": None, "fields": fields, "klass": _DISPLAY_VALUE, "missing": missing}
 
 
 def _cell_ops(cell: dict, key: str, clock: bool = False, zone: str | None = None) -> list[dict]:
@@ -1780,27 +1790,6 @@ def _cell_ops(cell: dict, key: str, clock: bool = False, zone: str | None = None
                  **({"zone": zone} if zone and cell["type"] == "time" else {})}
         return [{"fn": cell["type"], "field": "rows", "key": key, **flags}]
     return []
-
-
-_WINDOW_DAYS: dict[str, int] = {"today": 1, "tonight": 1, "tomorrow": 1, "weekend": 2, "now": 1}
-
-
-def _list_cap(window: str | None, step: str | None) -> int:
-    """F10 (2026-10-04): the scene cap for a list cut to a window. An hour / period step spans
-    many rows per day — size the cap to the asked span (clamped). A day step keeps the default 5
-    (the card shows ≤5 forecast days)."""
-    if window is None or step not in ("hour", "period"):
-        return 5
-    if window.startswith("next_hours:"):
-        hours = int(window.split(":")[1])
-    elif window.startswith("next_days:"):
-        hours = int(window.split(":")[1]) * 24
-    elif window.startswith("dow:"):
-        hours = 24
-    else:
-        hours = _WINDOW_DAYS.get(window, 1) * 24
-    per_row = 3 if step == "period" else 1
-    return max(5, min(hours // per_row, ni._MAX_REPEAT_MAX))
 
 
 def _inferred_axis(cells: list[dict], window: str | None) -> dict | None:
@@ -1871,9 +1860,6 @@ def _build_rows_answer(answer: dict, payload: dict, title: str, window: str | No
         if axis and _cuts(window or "upcoming", stages, ops, payload, axis["cell"]):
             ops.append(_window_op(axis["cell"], cut, payload, stages,
                                    axis_cell=axis_cell, step=step, floor_hour=floor_hour))
-        # F10 (2026-10-04): a list on an hour / period axis cut to a day or multi-day window needs
-        # a cap that spans the window — a 24h Saturday on hour rows was clipped to 12-4 AM at 5.
-        limit = _list_cap(window, step) if (axis and window) else 5
     else:
         keys = []
         for i, c in enumerate(cells):  # bounded by _MAX_ANSWER_CELLS
@@ -1923,18 +1909,13 @@ def _build_rows_answer(answer: dict, payload: dict, title: str, window: str | No
     if rows and not all(any(_nonempty(_dig(r, k)) for r in rows) for k in keys):
         raise ValueError("answers: a row field is missing here")
     first = next((r for r in rows if all(_nonempty(_dig(r, k)) for k in keys)), first)
-    item_fields = [f"item.{k}" for k in keys]
-    suffixes = {f"item.{k}": _unit_suffix(_answer_unit(c, payload, first))
-                for c, k in zip(cells, keys, strict=True)}
-    scene = list_scene("rows", item_fields, title=title, suffixes=suffixes,
-                       max_rows=min(limit, ni._MAX_REPEAT_MAX))
-    if answer.get("may_be_empty"):  # shown only while the list is empty, on every refresh
-        scene["children"].append({
-            "type": "text", "value": f"No {answer['label'].lower()} right now", "role": "label",
-            "tone": "muted", "size": "sm",
-            "when": [{"left": {"$bind": "rows_count"}, "op": "gt", "right": 0, "set": {"hidden": True}}]})
-    return {"pipeline": stages, "scene": scene, "preview_payload": preview,
-            "fields": {}, "klass": _DISPLAY_LIST}
+    # the §34 form is designed from this answer: each cell under the ROW KEY the pipeline wrote
+    # (the cell path for a list, the slug for zipped columns), its unit resolved once. An empty
+    # ``may_be_empty`` list is the form's own designed empty state ("Nothing active right now").
+    answers_used = [{**answer, "cells": [{**c, "key": k, "unit": _answer_unit(c, payload, first)}
+                                         for c, k in zip(cells, keys, strict=True)]}]
+    return {"pipeline": stages, "preview_payload": preview, "answers_used": answers_used,
+            "rows_output_name": "rows", "fields": {}, "klass": _DISPLAY_LIST}
 
 
 _FORWARD_WINDOWS = ("tonight", "tomorrow", "weekend", "upcoming", "dow:", "next_days:", "next_hours:")
@@ -2072,9 +2053,13 @@ def build_from_answers(chosen: list[dict], sample: object, title: str,
                        params: dict[str, str] | None = None, window: str | None = None,
                        next_event: bool = False,
                        clock_params: frozenset[str] = frozenset(),
-                       frame_kind: str | None = None) -> dict:
+                       frame_kind: str | None = None,
+                       form: FormBuild | None = None) -> dict:
     """Build ``{pipeline, scene, preview_payload, fields, klass}`` from the chosen declared answers,
     running the pipeline on ``sample`` and checking every shown value is there with its type.
+    ``scene`` is the sealed §34 form node the engine designed from the same answers + outputs
+    (``form``: the fetch instant, the user's words, source + cadence and the flow's model seam;
+    None designs by the rules at the current clock).
     ``params`` are the values the card's address was filled with (``{param}`` path segments);
     ``clock_params`` names those filled from the clock — their quoted-key paths ride through as
     ``["{{param:name}}"]`` slots after the build, so the sealed pipeline walks forward (R3-E).
@@ -2093,6 +2078,8 @@ def build_from_answers(chosen: list[dict], sample: object, title: str,
     else:
         built = _build_rows_answer(chosen[0], payload, title, window, next_event=next_event,
                                      frame_kind=frame_kind)
+    built["scene"] = _form_node(built["answers_used"], built["preview_payload"], title,
+                                built["rows_output_name"], form or FormBuild(now=ni._clock(), ask=title))
     if clock_params:
         built["pipeline"] = _reslot_clock_params_in_pipeline(built["pipeline"], params or {},
                                                                frozenset(clock_params))
@@ -2323,7 +2310,8 @@ _ANSWERS_NOTHING = ("none of the chosen answers is in this response", "the list 
 
 
 def _try_answers_build(store: ni.NIStore, item_id: str, request: str, intent: dict,
-                       url: str, sample: object) -> dict | None:
+                       url: str, sample: object, call_model: Callable[[str], str] | None = None,
+                       fetch_now: datetime | None = None) -> dict | None:
     """When the user tapped a Library source that declares answers (sealed ``_library_source`` for
     exactly this URL), build the card from them, inside the ask's frame (its window and kind of
     question). None → not a declared build (not a Library tap, no declared answers, or they don't fit
@@ -2377,11 +2365,14 @@ def _try_answers_build(store: ni.NIStore, item_id: str, request: str, intent: di
         if when is not None:
             chosen = [*chosen[:_MAX_VALUE_ANSWERS - 1], when]
     chosen = _swap_stale_next_event(chosen, answers, sample, window, next_event, ni._clock())
+    form = FormBuild(now=fetch_now or ni._clock(), ask=request, source_url=url,
+                     cadence_s=int(intent.get("cadence_minutes") or _DEFAULT_CADENCE) * 60,
+                     call_model=call_model)
     try:
         try:
             built = build_from_answers(chosen, sample, title, params=params, window=window,
                                        next_event=next_event, clock_params=clock_names,
-                                       frame_kind=kind)
+                                       frame_kind=kind, form=form)
         except ValueError as exc:
             if "the list is empty here" in str(exc) and chosen[0]["kind"] == "list":
                 # F3 retry (2026-10-04): a sibling list answer on the same source may have rows for
@@ -2393,7 +2384,8 @@ def _try_answers_build(store: ni.NIStore, item_id: str, request: str, intent: di
                     try:
                         built = build_from_answers([sibling], sample, title, params=params,
                                                      window=window, next_event=next_event,
-                                                     clock_params=clock_names, frame_kind=kind)
+                                                     clock_params=clock_names, frame_kind=kind,
+                                                     form=form)
                         chosen = [sibling]
                     except ValueError:
                         raise exc from None  # the first error is the better message
@@ -2410,14 +2402,17 @@ def _try_answers_build(store: ni.NIStore, item_id: str, request: str, intent: di
                     raise  # another source may have what was asked: the caller moves on to it
                 built = build_from_answers(fallback, sample, title, params=params, window=window,
                                            next_event=next_event, clock_params=clock_names,
-                                           frame_kind=kind)
+                                           frame_kind=kind, form=form)
                 built["missing"] = [a["label"] for a in chosen] + list(built.get("missing") or [])
                 chosen = fallback
             else:
                 raise
-        ni.validate_spec(build_final_spec(request, intent, {"type": "http_json", "url": url},
-                                          _DEFAULT_CADENCE, built["pipeline"], built["scene"]))
-        ni._enforce_bind_types(built["scene"], ni.bind_scene(built["scene"], built["preview_payload"]))
+        draft = build_final_spec(request, intent, {"type": "http_json", "url": url},
+                                 _DEFAULT_CADENCE, built["pipeline"], built["scene"])
+        ni.validate_spec(draft)
+        ni._enforce_bind_types(built["scene"], ni.bind_scene(
+            built["scene"], built["preview_payload"],
+            form_ctx=ni._form_bind_context(draft, form.now.astimezone(UTC))))
     except (ni.NIError, ValueError, KeyError, TypeError) as exc:
         if isinstance(exc, ValueError) and any(m in str(exc) for m in _ANSWERS_NOTHING):
             return {"nothing": True, "why": "has nothing for this right now"}
@@ -3676,15 +3671,6 @@ def _has_transform_fn(name: str) -> bool:
     return name in ni._TRANSFORM_FNS
 
 
-def _pick_display_class(intent: dict) -> str:
-    """Value / list decision. Map + image are DEGRADED to value (§29 policy)."""
-    assert isinstance(intent, dict), "intent required"
-    hint = str(intent.get("display_hint") or "").lower()
-    if hint == "list":
-        return _DISPLAY_LIST
-    return _DISPLAY_VALUE
-
-
 def build_final_spec(request: str, intent: dict, source: dict, cadence: int,
                      pipeline: list[dict], scene: dict) -> dict:
     """Assemble a §2-shaped spec ready for ``ni.validate_spec`` + store write."""
@@ -3701,7 +3687,7 @@ def build_final_spec(request: str, intent: dict, source: dict, cadence: int,
         "source": source,
         "pipeline": pipeline,
         "scene": scene,
-        "display": {"size": "small"},
+        "display": {"size": _display_size_for(scene)},
         "contract": None,
         "repair_policy": {"l1": True, "l2_frontier": False},
         "model": None,
@@ -4031,13 +4017,19 @@ def _handle_computed(store: ni.NIStore, item_id: str, request: str,
                        "prompt": "That date doesn't exist — add it as YYYY-MM-DD."})
     source = {"type": "computed", "compute": "days_until", "date": date_str}
     pipeline: list[dict] = []
-    scene = value_scene(["days"])
     cadence_raw = intent.get("cadence_minutes")
     cadence = int(cadence_raw) if isinstance(cadence_raw, int) else _DEFAULT_CADENCE
-    spec = build_final_spec(request, intent, source, cadence, pipeline, scene)
     preview = {"days": _days_until(date_str)}
+    now = ni._clock()
+    try:
+        scene = _form_node([{"kind": "value", "name": "days", "label": "days until", "path": "days",
+                             "type": "count"}], preview, str(intent.get("subject") or request)[:120],
+                           None, FormBuild(now=now, ask=request, cadence_s=cadence * 60))
+    except ValueError as exc:
+        return _fail(store, item_id, "assembly", f"form design failed: {exc}")
+    spec = build_final_spec(request, intent, source, cadence, pipeline, scene)
     return _finalize(store, item_id, spec, preview,
-                     note="computed source used", born="flow")
+                     note="computed source used", born="flow", fetched_at=now)
 
 
 def _days_until(date_str: str) -> int:
@@ -5400,7 +5392,8 @@ def _remap_intent_from_spec(spec: dict, request: str) -> dict:
     if not wants:
         wants = ["value"]
     scene = spec.get("scene") or {}
-    display_hint = _DISPLAY_LIST if _scene_has_repeat(scene) else _DISPLAY_VALUE
+    rows_form = scene.get("type") == "form" and bool((scene.get("record") or {}).get("rows"))
+    display_hint = _DISPLAY_LIST if rows_form or _scene_has_repeat(scene) else _DISPLAY_VALUE
     return {"kind": "external_data", "subject": subject,
             "cadence_minutes": max(_MIN_CADENCE, min(cadence, _MAX_CADENCE)),
             "wants": wants[:_MAX_INTENT_FIELDS], "threshold": None,
@@ -5583,7 +5576,8 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
     # path-guessing. Fresh builds only (a Fix re-derives). Ruling 2026-10-05 ("Library cards; web as
     # links"): a tapped Library row builds ONLY from its declared answers — a source without them, or
     # whose answers don't fit this response, moves on (next source, else the links); never the mapping.
-    answered = None if remap else _try_answers_build(store, item_id, request, intent, url, sample)
+    answered = None if remap else _try_answers_build(store, item_id, request, intent, url, sample,
+                                                      call_model, fetch_now)
     if answered is None and picked:
         why = ("didn't fit its declared answers" if _library_answers(str(live.get("_library_source") or ""))
                else "doesn't declare its answers")
@@ -5652,7 +5646,8 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
     mapping: dict = {}
     built: dict = {}
     converted: list = []
-    klass = _pick_display_class(intent)
+    hint = str(intent.get("display_hint") or "").lower()
+    klass = _DISPLAY_LIST if hint == "list" else _DISPLAY_VALUE
     degrade_note: str | None = None
     feedback: str | None = None
     for judged_attempt in range(2):  # fixed upper bound (P10 #2)
@@ -5671,11 +5666,8 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
                               "mapping needed another pass; re-picking")
                 continue
             return misfit("mapping", str(exc))
-        klass = _pick_display_class(intent)
-        hint = str(intent.get("display_hint") or "").lower()
+        klass = _DISPLAY_LIST if hint == "list" else _DISPLAY_VALUE
         degrade_note = None
-        if hint in ("map", "image") and klass == _DISPLAY_VALUE:
-            degrade_note = f"display_hint {hint!r} unsupported; proceeding with value card"
         # A9/A11 (case matrix, 2026-09-15): the data decides list-vs-value, not the
         # hint — no ``[N]`` step in the picked paths degrades to the value card.
         if klass == _DISPLAY_LIST and not all(
@@ -5696,8 +5688,11 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
         _transition(store, item_id, "assembling",
                     note=degrade_note or "assembling scene + pipeline")
         try:
-            built = assemble_from_mapping(mapping, fields, klass, sample,
-                                          title=str(intent.get("subject") or request)[:120])
+            built = assemble_from_mapping(
+                mapping, fields, klass, sample, title=str(intent.get("subject") or request)[:120],
+                form=FormBuild(now=fetch_now, ask=request, source_url=url,
+                               cadence_s=int(intent.get("cadence_minutes") or _DEFAULT_CADENCE) * 60,
+                               call_model=call_model))
         except ValueError as exc:
             return misfit("assembly", str(exc))
         # A12 (case matrix): deterministic °F conversion for temperature fields.
@@ -5808,6 +5803,13 @@ def _handoff(store: ni.NIStore, item_id: str, request: str, intent: dict, url: s
             source["format"] = pick_fmt
     spec = build_final_spec(request, intent, source, intent["cadence_minutes"],
                             built["pipeline"], built["scene"])
+    # §34 / §11: a form over a numeric measure tracks it, so the stat's sparkline accrues
+    # from the card's own refreshes (never a rows-shaped record — no per-field output)
+    if built["scene"].get("type") == "form":
+        from .ni_forms.form_scene import history_track_for
+        track = history_track_for(built["scene"]["record"]["fields"], built["scene"]["record"]["rows"])
+        if track is not None:
+            spec["history"] = track
     if keep_params:
         spec["params"] = json.loads(json.dumps(keep_params))
     if clock_params and not keep_params:
@@ -5881,7 +5883,7 @@ def _handoff(store: ni.NIStore, item_id: str, request: str, intent: dict, url: s
         handoff_note = handoff_note + "; " + "; ".join(extra_notes)
     return _finalize(store, item_id, spec, built["preview_payload"],
                      note=handoff_note, born=born,
-                     built_from=_built_from_of(store, item_id, path, url))
+                     built_from=_built_from_of(store, item_id, path, url), fetched_at=fetch_now)
 
 
 def _page_llm_stage(intent: dict) -> dict:
@@ -6012,6 +6014,7 @@ def _build_page_card(store: ni.NIStore, item_id: str, request: str,
         return _fail(store, item_id, "fetch",
                       f"page fetch failed: {type(exc).__name__}")
     born = None if remap else "flow"
+    fetched_at = ni._clock()   # one instant per build: the form's ``now`` and the preview bind
     cadence = (intent.get("cadence_minutes")
                if isinstance(intent.get("cadence_minutes"), int)
                else _DEFAULT_CADENCE)
@@ -6049,9 +6052,11 @@ def _build_page_card(store: ni.NIStore, item_id: str, request: str,
                          note="compiled page card — values read from the "
                               "page's own structure each update, no model")
             stage = {"op": "graph_extract", "fields": compiled["fields"]}
-            scene = value_scene(list(compiled["fields"]),
-                                labels=compiled["labels"],
-                                types={k: "string" for k in compiled["fields"]})
+            try:
+                scene = _page_form(compiled["fields"], compiled["labels"], preview, request, intent,
+                                   url, cadence, call_model, fetched_at)
+            except ValueError as exc:
+                return _fail(store, item_id, "assembly", f"form design failed: {exc}")
             spec = build_final_spec(request, intent,
                                      {"type": "http_page", "url": url},
                                      cadence, [stage], scene)
@@ -6064,7 +6069,8 @@ def _build_page_card(store: ni.NIStore, item_id: str, request: str,
             return _finalize(store, item_id, spec, preview,
                               note="; ".join(notes), born=born,
                               built_from=_built_from_of(store, item_id, "page", url,
-                                                        str(graph.get("title") or "")))
+                                                        str(graph.get("title") or "")),
+                              fetched_at=fetched_at)
         _append_note(store, item_id,
                      "compiled reading rejected by the check — "
                      "falling back to an interpreted card")
@@ -6111,8 +6117,10 @@ def _build_page_card(store: ni.NIStore, item_id: str, request: str,
             slug = _slugify_field_name(want)
             if slug in stage["output"] and slug not in labels:
                 labels[slug] = want
-    scene = value_scene(fields, labels=labels,
-                        types={k: "string" for k in fields})
+    try:
+        scene = _page_form(fields, labels, preview, request, intent, url, cadence, call_model, fetched_at)
+    except ValueError as exc:
+        return _fail(store, item_id, "assembly", f"form design failed: {exc}")
     spec = build_final_spec(request, intent,
                              {"type": "http_page", "url": url},
                              cadence, [stage], scene)
@@ -6125,7 +6133,23 @@ def _build_page_card(store: ni.NIStore, item_id: str, request: str,
     return _finalize(store, item_id, spec, preview,
                       note="; ".join(notes), born=born,
                       built_from=_built_from_of(store, item_id, "page", url,
-                                                str(graph.get("title") or "")))
+                                                str(graph.get("title") or "")),
+                      fetched_at=fetched_at)
+
+
+def _page_form(fields: list | dict, labels: dict, preview: dict, request: str, intent: dict,
+               url: str, cadence: int, call_model: Callable[[str], str], now: datetime) -> dict:
+    """The §34 form over a page card's readings: one text value answer per want, labelled
+    with the user's own words (P1 rule: never a slug on screen); ``now`` is the build's one
+    fetch instant. Raises ValueError when no form fits (the caller fails the build honestly)."""
+    assert isinstance(fields, (list, dict)) and fields, "fields required"
+    assert isinstance(labels, dict) and isinstance(preview, dict), "labels + preview required"
+    assert isinstance(now, datetime), "now must be a datetime"
+    chosen = [{"kind": "value", "name": k, "label": str(labels.get(k) or k.replace("_", " ")),
+               "path": k, "type": "text"} for k in list(fields)[:_MAX_INTENT_FIELDS]]
+    return _form_node(chosen, preview, str(intent.get("subject") or request)[:120], None,
+                      FormBuild(now=now, ask=request, source_url=url,
+                                cadence_s=int(cadence) * 60, call_model=call_model))
 
 
 def _built_from_of(store: ni.NIStore, item_id: str, path: str, url: str, title: str = "") -> dict:
@@ -6153,7 +6177,8 @@ def _built_from_of(store: ni.NIStore, item_id: str, path: str, url: str, title: 
 
 def _finalize(store: ni.NIStore, item_id: str, spec: dict, preview: dict,
               *, note: str, born: str | None = None,
-              built_from: dict | None = None) -> dict:
+              built_from: dict | None = None,
+              fetched_at: datetime | None = None) -> dict:
     """Rewrite the shell item's spec in place; write preview + preview_data; commission.
 
     Landing rule mirrors ``_initial_ni_state`` from tools.py: a spec declaring
@@ -6169,6 +6194,9 @@ def _finalize(store: ni.NIStore, item_id: str, spec: dict, preview: dict,
     ``built_from`` (ruling 2026-10-04): sealed as ``_built_from`` — a web-page or model-mapped
     card lands ``commissioning`` like every card but waits for the user's YES there
     (``ni.awaits_yes``: no cadence runs, the board asks). None (computed) seals nothing.
+
+    ``fetched_at`` (§34): the sample's fetch instant — the preview's form bind lays out
+    at the same ``now`` the design was sealed at; None reads the clock.
     """
     assert store is not None and item_id, "args required"
     assert born is None or born in BORN_MARKERS, "born marker must be closed"
@@ -6203,14 +6231,18 @@ def _finalize(store: ni.NIStore, item_id: str, spec: dict, preview: dict,
     try:
         bound = ni.bind_scene(spec["scene"], preview,
                               history=ni._seed_history(spec),
-                              image_ref=ni._preview_image_ref(spec, item_id))
+                              image_ref=ni._preview_image_ref(spec, item_id),
+                              form_ctx=ni._form_bind_context(
+                                  spec, (fetched_at or ni._clock()).astimezone(UTC)))
     except (ni.NIError, ValueError) as exc:
         return _fail(store, item_id, "assembly", f"preview bind failed: {exc}")
     assert isinstance(bound, dict), "bind_scene must return a dict"
     try:
         store.update_spec(item_id, spec, origin="agent")
         store.write_snapshot(item_id, "preview", bound, ok=True)
-        store.write_snapshot(item_id, "preview_data", preview, ok=True)
+        # the stored outputs keep their instants (a time text's moment) so a §34 form rebuilt
+        # from the JSON snapshot — export, a later preview bind — still reads its time cells
+        store.write_snapshot(item_id, "preview_data", ni.json_instants(preview), ok=True)
     except (ValueError, ni.NIError) as exc:
         return _fail(store, item_id, "assembly", f"store update failed: {exc}")
     landing = _landing_state(spec)

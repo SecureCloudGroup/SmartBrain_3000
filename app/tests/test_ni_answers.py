@@ -179,17 +179,27 @@ def test_a_forecast_ask_shows_the_columns_answer(weather) -> None:
 
 # --- pipelines, scenes, previews ---------------------------------------------------------------------
 
-def _bound_texts(built: dict) -> list[str]:
-    bound = nimod.bind_scene(built["scene"], built["preview_payload"])
+def _bound(built: dict, title: str = "card") -> dict:
+    """The §34 form bound over the build's own preview (what the engine's run binds), under
+    the card's title + host as the engine's run would see them."""
+    from datetime import UTC, datetime
+    ctx = nimod._form_bind_context({"title": title, "goal": title, "interval_minutes": 15,
+                                    "source": {"type": "http_json", "url": WEATHER_URL}},
+                                   datetime.now(UTC))
+    bound = nimod.bind_scene(built["scene"], built["preview_payload"], form_ctx=ctx)
     nimod._enforce_bind_types(built["scene"], bound)
-    out: list[str] = []
-    stack = [bound]
-    while stack:
-        node = stack.pop(0)
-        if node.get("type") in ("text", "number"):
-            out.append(f"{node['value']}{node.get('unit') or ''}")
-        stack.extend(node.get("children") or [])
-    return out
+    assert bound["type"] == "form" and bound["lint"]["red"] == 0, bound.get("lint")
+    return bound
+
+
+def _bound_texts(built: dict, title: str = "card") -> list[str]:
+    """The words on the desktop CLIR (times are time prims the client formats)."""
+    bound = _bound(built, title)
+    return [ln for p in bound["clir"]["desktop"]["prims"] if p["k"] == "text" for ln in p["lines"]]
+
+
+def _fields(built: dict) -> list[dict]:
+    return built["scene"]["record"]["fields"]
 
 
 def _valid(built: dict) -> None:
@@ -208,16 +218,25 @@ def test_value_answers_build_with_labels_units_and_words_for_codes(weather) -> N
         "high_today": "daily.temperature_2m_max[0]", "low_today": "daily.temperature_2m_min[0]"}}
     prev = built["preview_payload"]
     assert prev["temperature"] == 71.3 and prev["conditions"] == "Partly cloudy" and prev["low_today"] == 60.0
-    texts = _bound_texts(built)
-    assert texts[:2] == ["Temperature", "71.3°F"]  # the first answer is the headline
-    assert "Partly cloudy" in texts and "High today" in texts and "78.1°F" in texts and "60.0°F" in texts
+    # the form is designed from the answers: the first answer is the headline (measure), the
+    # others ride as facts under the pack's own labels; its unit is sealed as the lexicon id
+    fields = _fields(built)
+    assert [f["label"] for f in fields] == ["Temperature", "Conditions", "High today", "Low today"]
+    assert fields[0]["role"] == "measure" and fields[0]["unit"] == "degF"
+    assert [f["role"] for f in fields[1:]] == ["secondary"] * 3
+    texts = _bound_texts(built, "NYC weather")
+    assert "71.3°F" in texts and built["scene"]["form"] in ("stat", "conditions", "kv_grid")
+    # the secondaries are on the card: the first fact shows by value at the sealed span, every
+    # fact reads in the summary (a regression that drops the secondaries fails here)
+    assert any("Partly cloudy" in t for t in texts), texts
+    summary = _bound(built, "NYC weather")["summary"]
+    assert all(s in summary for s in ("71.3°F", "Partly cloudy", "High today", "78.1°F", "60.0°F")), summary
     assert built["klass"] == "value" and built["fields"]["conditions"] == "string"
 
 
 def test_the_unit_path_is_read_once_and_frozen(weather) -> None:
     built = ni_flow.build_from_answers(weather[:1], OPEN_METEO, "t")
-    number = built["scene"]["children"][1]
-    assert number["unit"] == "°F"  # a literal in the scene
+    assert _fields(built)[0]["unit"] == "degF"  # a literal in the sealed form record
     later = copy.deepcopy(OPEN_METEO)
     later["current"]["temperature_2m"] = "80.5"   # the next refresh, sent as text
     del later["current_units"]                    # the unit path is never read again
@@ -235,11 +254,22 @@ def test_a_columns_answer_zips_a_daily_forecast(weather) -> None:
     rows = built["preview_payload"]["rows"]
     assert len(rows) == 7 and rows[1]["conditions"] == "Light rain" and rows[4]["conditions"] == "Thunderstorm"
     assert "-" not in rows[0]["day"]  # a date, shown as a date
-    template = built["scene"]["children"][1]["template"]["value"]
-    assert template == "{{item.day}} · {{item.conditions}} · {{item.high}}°F · {{item.rain}}%"
-    assert built["scene"]["children"][1]["max"] == 7
-    texts = _bound_texts(built)
-    assert texts[0] == "Philly forecast" and texts[2].endswith("Light rain · 74.0°F · 80%")
+    fields = _fields(built)
+    assert [f["path"] for f in fields] == ["day", "conditions", "high", "rain"]  # the zipped row keys
+    assert [f["type"] for f in fields] == ["date", "category", "quantity", "percent"]
+    assert built["scene"]["record"]["rows"] == "rows"
+    assert built["scene"]["record"]["kind"] == "records"   # this pack declares no axis (v1.1)
+    bound = _bound(built, "Philly forecast")
+    prims = bound["clir"]["desktop"]["prims"]
+    texts = [ln for p in prims if p["k"] == "text" for ln in p["lines"]]
+    assert "Philly forecast" in texts and any("74.0°F" in t for t in texts)
+    # the zipped days are on the card: dates as time prims (the client formats them) or the
+    # words Today / Tomorrow, the conditions beside them (truncated to the column), the highs
+    # by value; the summary counts all seven
+    days = len([p for p in prims if p["k"] == "time" and len(p["t"]) == 10]) \
+        + len([t for t in texts if t in ("Today", "Tomorrow")])
+    assert days >= 6, (days, texts)
+    assert any(t.startswith("Ligh") for t in texts) and "7 entries" in bound["summary"]
 
 
 def test_a_list_answer_with_time_rows_newest_first(lib) -> None:
@@ -253,8 +283,8 @@ def test_a_list_answer_with_time_rows_newest_first(lib) -> None:
     first = built["preview_payload"]["rows"][0]["properties"]
     assert first["mag"] == 5.1 and first["place"] == "Off the coast of Oregon"  # newest first
     assert first["time"].endswith(("AM", "PM"))
-    assert built["scene"]["children"][1]["template"]["value"] == \
-        "{{item.properties.mag}} · {{item.properties.place}} · {{item.properties.time}}"
+    assert [f["path"] for f in _fields(built)] == ["properties.mag", "properties.place", "properties.time"]
+    assert [f["type"] for f in _fields(built)] == ["number", "text", "datetime"]
 
 
 def test_a_count_answer_shows_zero_for_an_empty_list(lib) -> None:
@@ -265,7 +295,7 @@ def test_a_count_answer_shows_zero_for_an_empty_list(lib) -> None:
                                  {"op": "transform", "apply": [
                                      {"fn": "count", "field": "storms_items", "as": "storms"}]}]
     assert built["preview_payload"]["storms"] == 0
-    assert _bound_texts(built)[:2] == ["Active storms", "0"]
+    assert _fields(built)[0]["type"] == "number" and "0" in _bound_texts(built)
 
 
 def test_param_segments_and_row_filters_take_the_filled_values(lib) -> None:
@@ -312,7 +342,8 @@ def test_a_neows_date_keyed_response_builds_through_a_quoted_key() -> None:
     _valid(built)
     assert built["pipeline"][0] == {"op": "extract", "paths": {"rows": 'near_earth_objects["2026-09-27"]'}}
     assert built["preview_payload"]["rows"][0]["name"] == "(2026 AB)"
-    assert _bound_texts(built)[1] == "(2026 AB) · 41.2 m"
+    texts = _bound_texts(built)
+    assert "(2026 AB)" in texts and any("41.2" in t for t in texts)
 
 
 @pytest.mark.parametrize(("path", "steps"), [
@@ -413,8 +444,8 @@ def test_the_engine_wraps_a_bare_list_response_like_the_flow(monkeypatch) -> Non
                          schedules_store=ScheduleStore(conn, key))
     assert out["status"] == "ok", out
     latest = store.read_snapshot(iid, "latest")["payload"]
-    stack = next(c for c in latest["children"] if c.get("type") == "stack")
-    assert [c["value"] for c in stack["children"]] == ["fresh"]
+    assert latest["type"] == "form"
+    assert "fresh" in [ln for p in latest["clir"]["desktop"]["prims"] if p["k"] == "text" for ln in p["lines"]]
 
 
 # --- the flow --------------------------------------------------------------------------------------
@@ -465,7 +496,11 @@ def test_the_flow_builds_from_answers_without_a_mapping_call(lib, monkeypatch) -
     out = ni_flow._sample_and_map(store, item_id, "NYC weather", _INTENT, WEATHER_URL, model,
                                   lambda _u: copy.deepcopy(OPEN_METEO))
     assert out["state"] == "ready"
-    assert prompts == []  # a deterministic build: no mapping call, no model judge
+    # a deterministic build: no mapping call, no model judge — the only model turn is the §34
+    # PRESENT menu (an enum-only pick among finished designs) and its one retry when the reply
+    # is off-schema, after which the rules floor picks
+    assert 1 <= len(prompts) <= 2, prompts
+    assert all("You choose how a personal dashboard card presents" in p for p in prompts), prompts
     notes = " | ".join(out["notes"])
     assert "built from the Library's declared answers: Temperature, Conditions, High today, Low today" in notes
     assert "verification" not in notes and "won't include" not in notes
@@ -618,18 +653,12 @@ def test_a_nested_row_filter_and_the_none_right_now_line() -> None:
     def shown(airport):
         built = ni_flow.build_from_answers([answer], sample, "delays", params={"airport": airport})
         bound = nimod.bind_scene(built["scene"], built["preview_payload"])
-        out = []
-
-        def walk(n):
-            if isinstance(n, dict):
-                if n.get("type") == "text" and not n.get("hidden"):
-                    out.append(n["value"])
-                for c in n.get("children") or []:
-                    walk(c)
-        walk(bound)
-        return out
-    assert shown("ORD")[-1] == "No ground delay program right now"
-    assert "wind" in shown("BOS") and "No ground delay program right now" not in shown("BOS")
+        return bound["clir"]["desktop"]["state"], [
+            ln for p in bound["clir"]["desktop"]["prims"] if p["k"] == "text" for ln in p["lines"]]
+    # an empty filtered list is the form's own designed empty state, never a blank card
+    assert shown("ORD")[0] == "empty"
+    state, texts = shown("BOS")
+    assert state != "empty" and "wind" in texts
 
 
 def test_unanswered_wants_are_only_what_the_user_said_and_no_answer_speaks_to() -> None:
@@ -657,11 +686,11 @@ def test_a_sparse_row_shows_a_dash_and_a_field_gone_from_every_row_fails() -> No
     scene = built["scene"]
 
     def rows(payload):
+        from smartbrain_3000.ni_forms.record import from_spec
         out = nimod.run_pipeline(built["pipeline"], payload)
-        bound = nimod.bind_scene(scene, out)
-        stack = next(c for c in bound["children"] if c.get("type") == "stack")
-        return [c["value"] for c in stack["children"]]
-    assert rows({"rows": [{"a": "first", "b": "x"}, {"a": "second"}]}) == ["first · x", "second · —"]
+        nimod.bind_scene(scene, out)
+        return from_spec(scene["record"], out, history=None, context={})[0].rows
+    assert rows({"rows": [{"a": "first", "b": "x"}, {"a": "second"}]}) == [["first", "x"], ["second", None]]
     with pytest.raises(nimod.NIError) as err:  # drift: the field is gone everywhere
         rows({"rows": [{"a": "first"}, {"a": "second"}]})
     assert err.value.kind == "extract_miss"
@@ -693,9 +722,10 @@ def test_a_row_missing_from_the_newest_game_still_builds_with_a_dash() -> None:
                                             {"path": "runs", "label": "Runs", "type": "number"}]})
     sample = {"rows": [{"team": "Yankees"}, {"team": "Orioles", "runs": 10}]}
     built = ni_flow.build_from_answers([answer], sample, "t")
-    bound = nimod.bind_scene(built["scene"], built["preview_payload"])
-    stack = next(c for c in bound["children"] if c.get("type") == "stack")
-    assert [c["value"] for c in stack["children"]] == ["Yankees · —", "Orioles · 10"]
+    from smartbrain_3000.ni_forms.record import from_spec
+    nimod.bind_scene(built["scene"], built["preview_payload"])
+    rec, _ = from_spec(built["scene"]["record"], built["preview_payload"], history=None, context={})
+    assert rec.rows == [["Yankees", None], ["Orioles", 10]]
 
 
 def test_a_row_filter_may_compare_with_a_fixed_status_word() -> None:

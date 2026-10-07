@@ -319,10 +319,22 @@ def test_f10_hour_axis_list_cut_to_a_day_window_renders_more_than_five_rows(monk
     monkeypatch.setattr(nimod, "_clock", lambda: now)
     periods = [{"startTime": f"2026-10-10T{h:02d}:00:00Z", "temperature": 40 + h} for h in range(24)]
     built = ni_flow._build_rows_answer(answer, {"periods": periods}, "Denver", window="dow:sat")
-    scene = built["scene"]
-    repeats = [c for c in scene["children"] if isinstance(c, dict) and c.get("type") == "repeat"]
-    assert repeats, scene
-    assert repeats[0].get("max", 0) > 5, repeats[0]
+    # the window keeps the whole asked day; the §34 form shows it (no scene cap)
+    assert len(built["preview_payload"]["rows"]) > 5
+    assert built["rows_output_name"] == "rows" and built["answers_used"][0]["cells"][0]["key"] == "startTime"
+    scene = ni_flow._form_node(built["answers_used"], built["preview_payload"], "Denver", "rows",
+                               ni_flow.FormBuild(now=now, ask="high in Denver on Saturday",
+                                                 source_url="https://api.weather.gov/x", cadence_s=3600))
+    spec = {"title": "Denver", "goal": "high in Denver on Saturday", "interval_minutes": 60,
+            "source": {"type": "http_json", "url": "https://api.weather.gov/x"}}
+    bound = nimod.bind_scene(scene, built["preview_payload"], form_ctx=nimod._form_bind_context(spec, now))
+    prims = bound["clir"]["desktop"]["prims"]
+    # the user sees the Saturday hours, not 12-4 AM: the series line carries every hour (24
+    # points); a row form would carry them as time prims
+    hours_shown = max([len(p["pts"]) for p in prims if p["k"] == "path"]
+                      + [len([p for p in prims if p["k"] == "time"]) - 1])
+    assert hours_shown > 5, (scene["form"], scene["spans"], hours_shown)
+    assert bound["lint"]["red"] == 0 and bound["clir"]["desktop"]["state"] == "ok"
 
 
 # ---- F12: when every want the user said is unanswered, refuse -----------------------------------

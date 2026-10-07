@@ -191,6 +191,80 @@ def test_validate_404_for_unknown(client: TestClient) -> None:
                        json={"ok": True}).status_code == 404
 
 
+def _form_item(client: TestClient) -> str:
+    """A commissioning item whose scene is a sealed §34 form with a runner-up design
+    (the engine's own seal over a three-column records list)."""
+    from datetime import UTC, datetime
+
+    from smartbrain_3000.ni_forms.form_scene import form_scene
+    rows = [{"name": "Fay", "intensity": 40, "classification": "TS"},
+            {"name": "Odalys", "intensity": 45, "classification": "TS"},
+            {"name": "Polo", "intensity": 75, "classification": "HU"}]
+    chosen = [{"kind": "list", "label": "Active storms", "path": "activeStorms",
+               "cells": [{"path": "name", "type": "text", "label": "Name"},
+                         {"path": "intensity", "type": "number", "label": "Wind", "unit": "kt"},
+                         {"path": "classification", "type": "text", "label": "Status"}]}]
+    node = form_scene(chosen, {"rows": rows}, title="Active storms", ask="active storms",
+                      now=datetime(2026, 10, 6, 18, 21, tzinfo=UTC), rows_output_name="rows")
+    assert node["design"]["second"] is not None, node["design"]
+    iid = _create_via_tool(client, title="storms form", scene=node,
+                           pipeline=[{"op": "extract", "paths": {"rows": "activeStorms"}}],
+                           preview_payload={"rows": rows})
+    client.app.state.ni.set_state(iid, "commissioning")
+    return iid
+
+
+def test_validate_presentation_pick_stamps_present_ok(client: TestClient, monkeypatch) -> None:
+    _unlock(client)
+    iid = _form_item(client)
+    from smartbrain_3000 import ni as nimod2
+    monkeypatch.setattr(nimod2, "run_item", lambda store, item_id, **kw: {"alerts": [], "repaired": []})
+    before = client.app.state.ni.get_item(iid)["spec"]["scene"]
+    r = client.post(f"/api/ni/items/{iid}/validate", json={"ok": True, "presentation_id": "pick"})
+    assert r.status_code == 200, r.text
+    spec = client.app.state.ni.get_item(iid)["spec"]
+    assert spec.get("_c2_ok") is True and spec.get("_present_ok") == "pick"
+    assert spec["scene"] == before   # the pick stays the pick
+
+
+def test_validate_presentation_second_reseals_before_the_yes(client: TestClient, monkeypatch) -> None:
+    """``second`` re-seals the node under the runner-up (same record, no refetch), keeps the
+    C1 attestations, then stamps the YES + ``_present_ok``; the C3 kick runs on the new design."""
+    _unlock(client)
+    iid = _form_item(client)
+    fired: dict = {}
+
+    def _fake_run(store, item_id, **kwargs):
+        fired["scene"] = store.get_item(item_id)["spec"]["scene"]["form"]
+        return {"alerts": [], "repaired": []}
+
+    from smartbrain_3000 import ni as nimod2
+    monkeypatch.setattr(nimod2, "run_item", _fake_run)
+    before = client.app.state.ni.get_item(iid)
+    second = before["spec"]["scene"]["design"]["second"]
+    r = client.post(f"/api/ni/items/{iid}/validate", json={"ok": True, "presentation_id": "second"})
+    assert r.status_code == 200, r.text
+    after = client.app.state.ni.get_item(iid)
+    scene = after["spec"]["scene"]
+    assert (scene["form"], scene["variant"], scene["spans"]) == (second["form"], second["variant"], second["spans"])
+    assert scene["record"] == before["spec"]["scene"]["record"]
+    assert scene["design"]["second"]["form"] == before["spec"]["scene"]["form"]
+    assert after["spec"].get("_c2_ok") is True and after["spec"].get("_present_ok") == "second"
+    assert after["spec_rev"] == before["spec_rev"] + 1
+    assert fired["scene"] == second["form"]   # the kick proved the resealed design
+
+
+def test_validate_presentation_second_refused_without_a_runner_up(client: TestClient) -> None:
+    _unlock(client)
+    iid = _create_via_tool(client)   # a plain stack scene seals no presentations
+    client.app.state.ni.set_state(iid, "commissioning")
+    r = client.post(f"/api/ni/items/{iid}/validate", json={"ok": True, "presentation_id": "second"})
+    assert r.status_code == 409
+    assert client.app.state.ni.get_item(iid)["spec"].get("_c2_ok") is None
+    assert client.post(f"/api/ni/items/{iid}/validate",
+                       json={"ok": True, "presentation_id": "third"}).status_code == 422
+
+
 # --- run: synchronous execution -----------------------------------------
 
 def test_run_route_executes_synchronously(client: TestClient, monkeypatch) -> None:

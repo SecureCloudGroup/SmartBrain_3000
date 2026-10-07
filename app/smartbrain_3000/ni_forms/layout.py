@@ -129,6 +129,12 @@ def layout_span(cand, rec, prof, inp, span: Span, now: datetime, *, state_overri
         meta = dict(draft.meta)
         meta["body"] = ctx.body
         meta["forced"] = state_override
+        if form.record_form and len(view.rows) <= 3:
+            # a record holding at most the designed "few" rows — naturally, after a refresh shrank
+            # it, or under a count override — IS its designed empty / one / few state, the same
+            # layout enumerate accepts as a forced state at build: hollow space reads amber, not
+            # red, at build and at bind alike (one rule, every span, every footer state)
+            meta["forced"] = count_state(len(view.rows), None)
         tl = time.perf_counter()
         lt = lint(clir, view, roles, prof, cand, inp, b, times=lint_times(clir, now), prov_map=pmap, meta=meta,
                   host=host)

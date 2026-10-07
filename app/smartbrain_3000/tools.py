@@ -1356,7 +1356,8 @@ def _validate_create_ni_args(args: dict) -> None:
     # H3 preview binding — seed history and pass a preview image_ref so a
     # scene with a history-bound spark or an image node renders on preview.
     ni.bind_scene(spec["scene"], preview, history=ni._seed_history(spec),
-                  image_ref=ni._preview_image_ref(spec, "preview"))
+                  image_ref=ni._preview_image_ref(spec, "preview"),
+                  form_ctx=ni._form_bind_context(spec))
 
 
 def _check_duplicate_title(store: object, title: str, allow_duplicate: bool) -> None:
@@ -1847,7 +1848,8 @@ def _update_ni_item(ctx: ToolContext, args: dict) -> dict:
         # H3: seed history so a history-bound spark in the new scene renders on preview.
         # §24: preview image_ref for a scene with an image node (item_id already known).
         bound = ni.bind_scene(spec["scene"], preview, history=ni._seed_history(spec),
-                              image_ref=ni._preview_image_ref(spec, args["item_id"]))
+                              image_ref=ni._preview_image_ref(spec, args["item_id"]),
+                              form_ctx=ni._form_bind_context(spec))
         ctx.ni.write_snapshot(args["item_id"], "preview", bound, ok=True)
         # L6 (audit 2026-09-12): refresh the RAW preview_data slot alongside the
         # bound preview — export-as-template (§21) reads preview_data to emit a

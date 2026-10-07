@@ -45,7 +45,10 @@ def _spec(source: dict) -> dict:
     return {"version": 1, "title": "t", "goal": "g",
             "params": {"api_key": {"label": "k", "kind": "secret", "value": "ni:x:api_key"}},
             "source": source, "pipeline": [{"op": "extract", "paths": {"v": "v"}}],
-            "scene": ni_flow.value_scene(["v"]), "display": {"size": "small"}, "interval_minutes": 15}
+            "scene": {"type": "stack", "dir": "v", "gap": "sm", "children": [
+                {"type": "number", "value": {"$bind": "v"}, "format": "plain", "unit": "",
+                 "tone": "default", "size": "lg"}]},
+            "display": {"size": "small"}, "interval_minutes": 15}
 
 
 def test_secret_query_and_contact_ua_validate_closed() -> None:

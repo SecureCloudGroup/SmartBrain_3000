@@ -236,10 +236,11 @@ _AGGREGATE_FNS: frozenset[str] = frozenset({"sum", "avg", "min", "max"})
 _SORT_DIRS: frozenset[str] = frozenset({"asc", "desc"})
 _SCENE_TYPES: frozenset[str] = frozenset(
     {"stack", "grid", "divider", "text", "number", "chip", "bar", "icon", "repeat",
-     "spark", "gauge", "image"}
+     "spark", "gauge", "image", "form"}
 )
 # Reserved for later phases — validators MUST reject so old apps refuse new scenes.
-# v2 promoted spark + gauge; v4c promoted image (§24 pixel channel) — on_tap stays reserved.
+# v2 promoted spark + gauge; v4c promoted image (§24 pixel channel); R19 phase 1a-2
+# promoted "form" (ni_forms engine) — on_tap stays reserved.
 _RESERVED_SCENE_TYPES: frozenset[str] = frozenset({"on_tap"})
 _STACK_DIRS: frozenset[str] = frozenset({"v", "h"})
 _STACK_GAPS: frozenset[str] = frozenset({"sm", "md"})
@@ -251,6 +252,19 @@ _TEXT_SIZES: frozenset[str] = frozenset({"sm", "md", "lg"})
 _NUM_FORMATS: frozenset[str] = frozenset({"plain", "compact", "percent", "currency"})
 _CHIP_KINDS: frozenset[str] = frozenset({"", "accent", "ok", "warn", "danger"})
 _SPARK_KINDS: frozenset[str] = frozenset({"line", "bars"})
+
+# §34 form scenes (R19 phase 1a-2). A ``form`` node is a LEAF — no children, no
+# repeat inside. Its shape is sealed at build time by ni_forms (record + candidate +
+# PRESENT); the bind path re-builds the record from the SEALED field specs by path
+# (never re-derived from a sample) and re-enumerates the forms on it, so an upstream
+# shape drift either keeps the sealed form (clean candidate) or falls to the rules
+# floor with ``design_needs_attention`` set on the bound node. Field type / role
+# enums are ``ni_forms.types.FIELD_TYPES`` / ``ROLES`` (imported lazily in the
+# validator, like ``FORMS``) — one source of truth.
+_FORM_DESIGNER_KINDS: frozenset[str] = frozenset({"model", "rules"})
+_MAX_PREVIEW_NODES = 500_000          # json_instants walk bound (dict / list / leaf nodes)
+_FORM_MAX_FIELDS = 8                  # bounded (POW10 #2); keeps CLIR small
+_FORM_MAX_STR = 80                    # label / name / unit / currency / variant / pick / scale
 
 # v2 caps + enums (§5 spark, §5 Conditions, §11 History, §12 Alerts).
 _MAX_SPARK_POINTS = 500          # bound on bound spark.points (list or history series)
@@ -526,10 +540,11 @@ def validate_spec(spec: object, *, allow_empty_params: bool = False) -> dict:
                "interval_minutes", "history", "alerts",
                "_l1_last_attempt", "_l1_trial", "_template",
                "_l2_last_attempt", "_l2_proposal", "_born", "_shell",
-               "_model_consent", "_built_from"}
+               "_model_consent", "_built_from", "_present_ok"}
     _closed_keys(body, allowed, "spec")
     _validate_born_marker(body.get("_born"))
     _validate_built_from(body.get("_built_from"))
+    _validate_present_ok(body.get("_present_ok"))
     _validate_model_consent(body.get("_model_consent"))
     # W2 (2026-09-15): ``_shell`` is the flow's not-yet-finalized marker —
     # boolean-true or absent, nothing else (the commission door reads it).
@@ -610,6 +625,19 @@ def _validate_built_from(value: object) -> None:
             and isinstance(value["host"], str) and len(value["host"]) <= _MAX_BUILT_FROM_HOST
             and isinstance(value["title"], str) and len(value["title"]) <= _MAX_BUILT_FROM_TITLE):
         raise ValueError("spec._built_from must be {path: declared|page|mapping, host, title} or absent")
+
+
+_PRESENTATION_IDS: frozenset[str] = frozenset({"pick", "second"})
+
+
+def _validate_present_ok(value: object) -> None:
+    """§34 C2: which sealed presentation the user said YES to — ``pick`` or ``second`` —
+    or absent. Written only by ``record_validation``; stripped on export / template
+    install like ``_c2_ok`` (an attestation, never shipped)."""
+    if value is None:
+        return
+    if value not in _PRESENTATION_IDS:
+        raise ValueError(f"spec._present_ok must be one of {sorted(_PRESENTATION_IDS)} or absent")
 
 
 def awaits_yes(item: dict) -> bool:
@@ -1698,7 +1726,7 @@ def _validate_scene_shape(node: dict) -> list[object]:
         "text": _validate_text, "number": _validate_number, "chip": _validate_chip,
         "bar": _validate_bar, "icon": _validate_icon, "repeat": _validate_repeat,
         "spark": _validate_spark, "gauge": _validate_gauge,
-        "image": _validate_image,
+        "image": _validate_image, "form": _validate_form,
     }
     fn = dispatch[node["type"]]
     return fn(node)
@@ -1905,6 +1933,150 @@ def _literal_number(value: object) -> float | None:
     return None
 
 
+def _validate_form(node: dict) -> list[object]:
+    """§34 form scene: a sealed ni_forms candidate (form, variant, params) + record
+    field specs + desktop/phone spans + the design pick. A form node is a LEAF.
+
+    Shape (closed): ``{type: "form", form, variant, params, record, spans, design}``.
+    See docs/internal/ni-format.md §34 for the semantics.
+    """
+    _closed_keys(node, {"type", "form", "variant", "params", "record", "spans", "design"},
+                 "scene form")
+    _validate_form_name(node.get("form"))
+    _validate_form_variant(node.get("variant"))
+    _validate_form_params(node.get("params"))
+    _validate_form_record(node.get("record"))
+    _validate_form_spans(node.get("spans"))
+    _validate_form_design(node.get("design"))
+    return []
+
+
+def _validate_form_name(name: object) -> None:
+    """`ni_forms.types.FORMS` names it; keep the enum closed here so a drift breaks
+    at validate time (imported lazily — ni.py loads before every service)."""
+    from .ni_forms.types import FORMS as _FORMS
+    if not isinstance(name, str) or name not in _FORMS:
+        raise ValueError(f"scene form.form unknown: {name!r}")
+
+
+def _validate_form_variant(variant: object) -> None:
+    """Variant id is form-declared — any non-empty short string. Shape only."""
+    if not isinstance(variant, str) or not variant or len(variant) > _FORM_MAX_STR:
+        raise ValueError(f"scene form.variant must be a 1..{_FORM_MAX_STR}-char string")
+
+
+def _validate_form_params(params: object) -> None:
+    """Form-declared closed params. Shape only — enum lives on the form class."""
+    if not isinstance(params, dict):
+        raise ValueError("scene form.params must be a dict")  # noqa: TRY004
+    if len(params) > _FORM_MAX_FIELDS:
+        raise ValueError(f"scene form.params exceeds {_FORM_MAX_FIELDS} entries")
+    for k, v in params.items():  # bounded by _FORM_MAX_FIELDS
+        if not isinstance(k, str) or not k or len(k) > _FORM_MAX_STR:
+            raise ValueError(f"scene form.params key {k!r} malformed")
+        if isinstance(v, (str, int, float, bool)) or v is None:
+            if isinstance(v, str) and len(v) > _FORM_MAX_STR:
+                raise ValueError(f"scene form.params[{k}] string exceeds {_FORM_MAX_STR}")
+            continue
+        raise ValueError(f"scene form.params[{k}] must be a scalar")
+
+
+def _validate_form_record(record: object) -> None:
+    """``{kind, fields: [{name,label,path,type,role, unit?, currency?, scale?,
+    precision?, wallclock?}], rows: str|None}``. Mirrors ni_forms Field but keeps
+    the shape self-contained so a drift lands here, not at bind."""
+    r = _require_dict(record, "scene form.record")
+    _closed_keys(r, {"kind", "fields", "rows"}, "scene form.record")
+    kind = r.get("kind")
+    if not isinstance(kind, str) or not kind or len(kind) > _FORM_MAX_STR:
+        raise ValueError("scene form.record.kind must be a short string")
+    fields = r.get("fields")
+    if not isinstance(fields, list) or not fields or len(fields) > _FORM_MAX_FIELDS:
+        raise ValueError(f"scene form.record.fields must be 1..{_FORM_MAX_FIELDS}")
+    seen: set[str] = set()
+    for i, f in enumerate(fields):  # bounded by _FORM_MAX_FIELDS
+        _validate_form_field(f, f"scene form.record.fields[{i}]", seen)
+    rows = r.get("rows")
+    if rows is not None and not (isinstance(rows, str) and 0 < len(rows) <= _FORM_MAX_STR):
+        raise ValueError("scene form.record.rows must be None or a short string")
+
+
+def _validate_form_field(f: object, where: str, seen: set[str]) -> None:
+    """One field spec; mirrors ni_forms Field core keys. Scalar leafs only."""
+    assert isinstance(seen, set), "seen must be a set"
+    d = _require_dict(f, where)
+    _closed_keys(d, {"name", "label", "path", "type", "role",
+                     "unit", "currency", "scale", "precision", "wallclock"}, where)
+    for key in ("name", "label", "path"):
+        v = d.get(key)
+        if not isinstance(v, str) or not v or len(v) > _FORM_MAX_STR:
+            raise ValueError(f"{where}.{key} must be a 1..{_FORM_MAX_STR}-char string")
+    if d["name"] in seen:
+        raise ValueError(f"{where}.name {d['name']!r} is a duplicate")
+    seen.add(d["name"])
+    from .ni_forms.types import FIELD_TYPES as _FIELD_TYPES
+    from .ni_forms.types import ROLES as _ROLES
+    if d.get("type") not in _FIELD_TYPES:
+        raise ValueError(f"{where}.type {d.get('type')!r} unknown")
+    if d.get("role") not in _ROLES:
+        raise ValueError(f"{where}.role {d.get('role')!r} unknown")
+    _check_form_optional_strs(d, where)
+    if "precision" in d and not (isinstance(d["precision"], int)
+                                 and not isinstance(d["precision"], bool)
+                                 and 0 <= d["precision"] <= 12):
+        raise ValueError(f"{where}.precision must be an int 0..12")
+    if "wallclock" in d and not isinstance(d["wallclock"], bool):
+        raise ValueError(f"{where}.wallclock must be a bool")
+
+
+def _check_form_optional_strs(d: dict, where: str) -> None:
+    """Shared check for the four optional short-string fields on a form.field spec."""
+    assert isinstance(d, dict), "d must be a dict"
+    for key in ("unit", "currency", "scale"):
+        if key in d and not (isinstance(d[key], str) and 0 < len(d[key]) <= _FORM_MAX_STR):
+            raise ValueError(f"{where}.{key} must be a 1..{_FORM_MAX_STR}-char string")
+
+
+def _validate_form_spans(spans: object) -> None:
+    """``{desktop: <span key>, phone: <span key>}``. Keys parsed by ni_forms.spans."""
+    from .ni_forms.spans import Span
+    s = _require_dict(spans, "scene form.spans")
+    _closed_keys(s, {"desktop", "phone"}, "scene form.spans")
+    for key in ("desktop", "phone"):
+        value = s.get(key)
+        if not isinstance(value, str):
+            raise ValueError(f"scene form.spans.{key} must be a string")  # noqa: TRY004
+        try:
+            Span.parse(value)
+        except (KeyError, ValueError) as exc:
+            raise ValueError(f"scene form.spans.{key}: bad span {value!r}: {exc}") from None
+
+
+def _validate_form_design(design: object) -> None:
+    """``{designer: "model"|"rules", pick: str, second: null | {id, form, variant, params,
+    spans}}`` — the runner-up is sealed whole so the C2 answer ``presentation_id:
+    "second"`` re-seals the card without a refetch (``ni_forms.form_scene.swap_to_second``)."""
+    d = _require_dict(design, "scene form.design")
+    _closed_keys(d, {"designer", "pick", "second"}, "scene form.design")
+    if d.get("designer") not in _FORM_DESIGNER_KINDS:
+        raise ValueError(f"scene form.design.designer must be one of "
+                         f"{sorted(_FORM_DESIGNER_KINDS)}")
+    pick = d.get("pick")
+    if not isinstance(pick, str) or not pick or len(pick) > _FORM_MAX_STR:
+        raise ValueError(f"scene form.design.pick must be a 1..{_FORM_MAX_STR}-char string")
+    second = d.get("second")
+    if second is None:
+        return
+    s = _require_dict(second, "scene form.design.second")
+    _closed_keys(s, {"id", "form", "variant", "params", "spans"}, "scene form.design.second")
+    if not isinstance(s.get("id"), str) or not s["id"] or len(s["id"]) > _FORM_MAX_STR:
+        raise ValueError(f"scene form.design.second.id must be a 1..{_FORM_MAX_STR}-char string")
+    _validate_form_name(s.get("form"))
+    _validate_form_variant(s.get("variant"))
+    _validate_form_params(s.get("params"))
+    _validate_form_spans(s.get("spans"))
+
+
 def _validate_when(node: dict, what: str) -> None:
     """§5 Conditions: content-node ``when`` list. Missing key = OK, empty list = OK too."""
     assert isinstance(what, str) and what, "what required"
@@ -1975,6 +2147,8 @@ def _validate_repeat(node: dict) -> list[object]:
     template = node.get("template")
     if not isinstance(template, dict):
         raise ValueError("scene repeat.template must be a node")  # noqa: TRY004
+    if template.get("type") == "form":
+        raise ValueError("scene repeat.template may not be a form (a form is a leaf, §34)")
     return [template]  # validated as a child; item. paths deferred to bind time
 
 
@@ -2221,6 +2395,15 @@ def set_user_timezone(name: str | None) -> None:
         _user_timezone = None
 
 
+def user_timezone_name() -> str:
+    """The user's IANA zone name for the §34 forms (viewer zone; the card zone when the
+    source names none) — ``UTC`` until the desktop / a remote device reports one (F15)."""
+    assert _user_timezone is None or isinstance(_user_timezone, ZoneInfo), "zone seam shape"
+    key = getattr(_user_timezone, "key", None)
+    assert key is None or isinstance(key, str), "ZoneInfo key is a str"
+    return key or "UTC"
+
+
 def _clock() -> datetime:
     """The user's clock, in the user's zone (one seam, so tests can freeze it).
 
@@ -2296,9 +2479,13 @@ def local_date(value: object) -> str:
         raise NIError("transform_type", "date needs a YYYY-MM-DD date")
     today = _clock().date()
     if abs((day - today).days) < 7:
-        return f"{day.strftime('%a %b')} {day.day}"
-    text = f"{day.strftime('%b')} {day.day}"
-    return text if day.year == today.year else f"{text}, {day.year}"
+        text = f"{day.strftime('%a %b')} {day.day}"
+    else:
+        text = f"{day.strftime('%b')} {day.day}"
+        text = text if day.year == today.year else f"{text}, {day.year}"
+    # the text still knows its day (midnight in the user's zone) so a §34 form record can
+    # read the calendar date back without re-parsing the words it shows
+    return _time_text(text, datetime(day.year, day.month, day.day, tzinfo=_clock().tzinfo))
 
 
 def _txf_rows(value: object, key: object, convert) -> object:
@@ -3147,7 +3334,7 @@ _NO_CURRENT_PREDICTION = "no current prediction"
 
 
 def bind_scene(scene: dict, data: dict, *, history: dict | None = None,
-               image_ref: dict | None = None) -> dict:
+               image_ref: dict | None = None, form_ctx: dict | None = None) -> dict:
     """Return the scene with $bind + {{path}} resolved and repeat nodes expanded.
 
     Enforces the post-expansion caps (nodes <= 100, depth <= 8, text <= 2000). Any
@@ -3164,6 +3351,11 @@ def bind_scene(scene: dict, data: dict, *, history: dict | None = None,
     the scene has no image node; a scene carrying an image node while ``image_ref``
     is None raises ``NIError('image_missing')`` — the run fails and last_good keeps
     rendering (last-good semantics for pixels).
+
+    ``form_ctx`` (§34): what a ``form`` node's bind needs beside the outputs — the
+    sealed source URL, this run's fetch time, the card's title / ask / cadence and the
+    viewer zone (``_form_bind_context``). None = derived from the clock with no title
+    (tests, template previews); the flow and the engine always pass it.
     """
     assert isinstance(scene, dict), "scene must be a dict"
     assert isinstance(data, dict), "data must be a dict"
@@ -3173,7 +3365,7 @@ def bind_scene(scene: dict, data: dict, *, history: dict | None = None,
         merged["history"] = history
     counter = _NodeCounter()
     bound = _bind_node(scene, merged, depth=1, item=None, counter=counter,
-                       image_ref=image_ref)
+                       image_ref=image_ref, form_ctx=form_ctx)
     if bound is None:
         raise NIError("bind_type", "scene root cannot be hidden by when")
     if counter.count > _MAX_SCENE_NODES:
@@ -3182,7 +3374,8 @@ def bind_scene(scene: dict, data: dict, *, history: dict | None = None,
 
 
 def _bind_node(node: object, data: dict, *, depth: int, item: Any,
-               counter: _NodeCounter, image_ref: dict | None = None) -> dict | None:
+               counter: _NodeCounter, image_ref: dict | None = None,
+               form_ctx: dict | None = None) -> dict | None:
     """Bind one scene node; returns None when a ``when`` rule set ``hidden: true``.
 
     Callers with a ``children`` list filter None entries so the hidden node is dropped
@@ -3209,7 +3402,11 @@ def _bind_node(node: object, data: dict, *, depth: int, item: Any,
     ntype = node.get("type")
     if ntype == "repeat":
         return _bind_repeat(node, data, depth=depth, counter=counter,
-                            image_ref=image_ref)
+                            image_ref=image_ref, form_ctx=form_ctx)
+    if ntype == "form":
+        # The form bind re-runs the ni_forms engine on the fetched outputs; it reads
+        # the §11 history slot (data["history"]) and never descends into child nodes.
+        return _bind_form(node, data, form_ctx)
     out: dict = {"type": ntype}
     for key, value in node.items():
         if key in ("type", "when", "next"):
@@ -3218,7 +3415,8 @@ def _bind_node(node: object, data: dict, *, depth: int, item: Any,
             child_nodes: list[dict] = []
             for c in (value or []):  # bounded by scene node cap
                 bound_child = _bind_node(c, data, depth=depth + 1, item=item,
-                                         counter=counter, image_ref=image_ref)
+                                         counter=counter, image_ref=image_ref,
+                                         form_ctx=form_ctx)
                 if bound_child is not None:
                     child_nodes.append(bound_child)
             out[key] = child_nodes
@@ -3231,6 +3429,170 @@ def _bind_node(node: object, data: dict, *, depth: int, item: Any,
     if tone_override is not None:
         out["tone"] = tone_override
     return out
+
+
+def json_instants(payload: object) -> object:
+    """A copy of a pipeline output tree with every time / date text replaced by its
+    instant (ISO 8601 with offset) — what the sealed ``preview_data`` snapshot keeps, so a
+    §34 form rebuilt from the JSON round trip (export, a later preview bind) still reads its
+    datetime / date cells. Plain values pass through. The walk is bounded at 500k nodes
+    (pipeline outputs are uncapped — ``_MAX_PAYLOAD_BYTES`` bounds the BOUND scene, not the
+    preview); a larger preview raises rather than snapshotting holes."""
+    assert payload is None or isinstance(payload, (dict, list, str, int, float, bool)), "json value"
+    pending: list[tuple[object, object, object]] = []
+    root: list = [None]
+    pending.append((root, 0, payload))
+    for _ in range(_MAX_PREVIEW_NODES):
+        if not pending:
+            break
+        parent, key, value = pending.pop()
+        moment = getattr(value, "moment", None)
+        if isinstance(value, str) and isinstance(moment, datetime):
+            out: object = moment.isoformat()
+        elif isinstance(value, dict):
+            out = {}
+            for k, v in value.items():
+                pending.append((out, k, v))
+        elif isinstance(value, list):
+            out = [None] * len(value)
+            for i, v in enumerate(value):
+                pending.append((out, i, v))
+        else:
+            out = value
+        parent[key] = out
+    if pending:
+        raise NIError("bind_type", "preview too large to snapshot")
+    return root[0]
+
+
+def _form_bind_context(spec: dict, fetched_at: datetime | None = None) -> dict:
+    """What a §34 form bind reads beside the outputs, all from the sealed spec + this
+    run's fetch instant: the source URL (host in the footer), title + ask (the shell /
+    PRESENT words), cadence (footer), the viewer zone, and ``fetched_at`` (the layout's
+    ``now`` and the record's ``Context.fetched_at``). One seam for the engine's run,
+    the flow's preview bind and the C2 kick, so every bind sees the same words."""
+    assert isinstance(spec, dict), "spec must be a dict"
+    if fetched_at is None:  # a preview bind with no run behind it (add_item, templates, tools)
+        fetched_at = datetime.now(UTC)
+    assert isinstance(fetched_at, datetime) and fetched_at.tzinfo is not None, "aware fetched_at"
+    source = spec.get("source") if isinstance(spec.get("source"), dict) else {}
+    url = source.get("url")
+    interval = spec.get("interval_minutes")
+    return {"source_url": url if isinstance(url, str) and url else None,
+            "fetched_at": fetched_at.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "viewer_tz": user_timezone_name(),
+            "title": str(spec.get("title") or ""), "ask": str(spec.get("goal") or ""),
+            "cadence_s": int(interval) * 60 if isinstance(interval, int) and interval > 0 else 0}
+
+
+def _bind_form(node: dict, data: dict, form_ctx: dict | None) -> dict:
+    """§34 form bind: rebuild the record from the SEALED field specs by path
+    (``ni_forms.record.from_spec`` — types and roles are never re-derived), re-run
+    profile → enumerate on it, take the candidate matching the sealed (form, variant,
+    params) when it survives, else the rules floor with ``design_needs_attention: true``
+    on the bound node. Then lay out the sealed desktop + phone spans.
+
+    Imports ni_forms lazily (ni.py loads before any service wires it). The bind
+    runs under ``ni_forms.llm.no_model()`` so a model call on a tick raises
+    ModelForbidden (refresh-path contract). ``form_ctx`` is ``_form_bind_context``'s
+    dict; None derives one from the clock (no title / host — tests, template previews).
+
+    Returns ``{type: "form", form, clir: {desktop, phone}, summary, hash, lint,
+    design_needs_attention?: true}``. The hash is the desktop CLIR hash — the client
+    reads both CLIRs; the hash is for cache / monitor-hash.
+    """
+    assert isinstance(node, dict), "form node must be a dict"
+    assert isinstance(data, dict), "data must be a dict"
+    from .ni_forms import llm as _llm
+    from .ni_forms import profile as _pf
+    from .ni_forms.enumerate import enumerate as _enumerate
+    from .ni_forms.layout import layout_span as _layout_span
+    from .ni_forms.record import from_spec as _from_spec
+    from .ni_forms.spans import Span as _Span
+    ctx = dict(form_ctx) if isinstance(form_ctx, dict) else _form_bind_context({})
+    history = data.get("history") if isinstance(data.get("history"), dict) else None
+    rows_name = node["record"].get("rows")
+    if rows_name and not isinstance(data.get(rows_name), list):
+        # the repeat bind's contract, kept: a rows output that is not a list is a bind failure,
+        # never the designed empty state
+        raise NIError("bind_type", f"{rows_name} must resolve to a list")
+    rec, inp = _from_spec(node["record"], data, history=history, context=ctx)
+    _refuse_form_column_drift(rec)
+    now = datetime.fromisoformat(ctx["fetched_at"])
+    sealed = {"form": node["form"], "variant": node["variant"],
+              "params": dict(node.get("params") or {})}
+    with _llm.no_model():
+        prof = _pf.profile(rec, inp, now)
+        cands = _enumerate(rec, prof, inp, now)
+        if not cands:
+            raise NIError("bind_type", "form: no candidate form fits this run's data")
+        chosen_cand, needs_attention = _pick_sealed_candidate(cands, sealed)
+        out_desktop = _layout_span(chosen_cand, rec, prof, inp,
+                                   _Span.parse(node["spans"]["desktop"]), now)
+        out_phone = _layout_span(chosen_cand, rec, prof, inp,
+                                 _Span.parse(node["spans"]["phone"]), now)
+    red = sum(1 for i in out_desktop.lint.issues if i.sev == "red") \
+        + sum(1 for i in out_phone.lint.issues if i.sev == "red")
+    amber = sum(1 for i in out_desktop.lint.issues if i.sev == "amber") \
+        + sum(1 for i in out_phone.lint.issues if i.sev == "amber")
+    summary = str(out_desktop.clir.get("summary") or node["form"])[:_MAX_TEXT_CHARS]
+    bound: dict = {"type": "form", "form": chosen_cand.form,
+                   "clir": {"desktop": out_desktop.clir, "phone": out_phone.clir},
+                   "summary": summary, "hash": out_desktop.hash,
+                   "lint": {"red": red, "amber": amber}}
+    if needs_attention:
+        bound["design_needs_attention"] = True
+    return bound
+
+
+def _refuse_form_column_drift(rec: object) -> None:
+    """``extract_miss`` when this run's data no longer holds what the sealed form leads with,
+    so the run fails, last_good keeps rendering and repair fires — the guarantee the old
+    ``$bind`` nodes gave: a measure record whose ``measure`` cell is empty (None, blank or a
+    non-number where a number was sealed; secondaries may stay sparse, a record with no
+    measure role — a map or a passage leads — is left alone), and a rows record with a sealed
+    field gone from EVERY row (a sparse row keeps its blank cell)."""
+    assert rec is not None, "record required"
+    rows = getattr(rec, "rows", None) or []
+    fields = getattr(rec, "fields", None) or []
+    assert isinstance(rows, list) and isinstance(fields, list), "record rows + fields"
+    if not rows:
+        return
+    if getattr(rec, "kind", "") == "measure":
+        for i, f in enumerate(fields[:_FORM_MAX_FIELDS]):
+            if f.role == "measure" and rows[0][i] is None:
+                raise NIError("extract_miss", f"{f.label} has no value")
+        return
+    for i, f in enumerate(fields[:_FORM_MAX_FIELDS]):
+        if all(row[i] is None for row in rows):
+            raise NIError("extract_miss", f"{f.label} is gone from every row")
+
+
+def _pick_sealed_candidate(cands: list, sealed: dict) -> tuple[object, bool]:
+    """The candidate matching sealed (form, variant, params) when it survives at
+    enumerate — else the first candidate (rules floor) with ``needs_attention=True``.
+
+    ``cands`` is non-empty by contract: the caller raises ``bind_type`` before this point
+    when enumerate found nothing, so the floor pick here is always a real candidate."""
+    assert isinstance(cands, list) and cands, "cands must be a non-empty list"
+    assert isinstance(sealed, dict), "sealed must be a dict"
+    for c in cands:  # bounded by MAX_CANDS (4)
+        if (c.form == sealed["form"] and c.variant == sealed["variant"]
+                and _params_match(c.params, sealed.get("params") or {})):
+            return c, False
+    return cands[0], True
+
+
+def _params_match(cand: dict, sealed: dict) -> bool:
+    """Shallow equality on form params (strings / numbers / bools / None only — the
+    validator refused anything else)."""
+    assert isinstance(cand, dict) and isinstance(sealed, dict), "dicts required"
+    if set(cand) != set(sealed):
+        return False
+    for k, value in cand.items():  # bounded by _FORM_MAX_FIELDS
+        if value != sealed[k]:
+            return False
+    return True
 
 
 def _bind_image_src(image_ref: dict | None) -> str:
@@ -3251,7 +3613,7 @@ def _bind_image_src(image_ref: dict | None) -> str:
 
 
 def _bind_repeat(node: dict, data: dict, *, depth: int, counter: _NodeCounter,
-                 image_ref: dict | None = None) -> dict:
+                 image_ref: dict | None = None, form_ctx: dict | None = None) -> dict:
     """Expand a repeat into a stack of template clones bound to each list element.
 
     A ``when`` rule that hides a template clone drops that clone from the expansion
@@ -3269,7 +3631,7 @@ def _bind_repeat(node: dict, data: dict, *, depth: int, counter: _NodeCounter,
     for entry in items[:max_n]:  # bounded by max_n <= _MAX_REPEAT_MAX
         try:
             bound_child = _bind_node(template, data, depth=depth + 1, item=entry,
-                                     counter=counter, image_ref=image_ref)
+                                     counter=counter, image_ref=image_ref, form_ctx=form_ctx)
         except NIError as exc:
             if exc.kind != "extract_miss":
                 raise
@@ -3277,7 +3639,7 @@ def _bind_repeat(node: dict, data: dict, *, depth: int, counter: _NodeCounter,
             # same miss on EVERY row is drift and fails the run below, so repair still fires
             sparse, first_miss = sparse + 1, first_miss or exc
             bound_child = _bind_node(template, data, depth=depth + 1, item=_SparseRow(entry),
-                                     counter=counter, image_ref=image_ref)
+                                     counter=counter, image_ref=image_ref, form_ctx=form_ctx)
         if bound_child is not None:
             children.append(bound_child)
     if first_miss is not None and sparse == len(items[:max_n]):
@@ -3644,7 +4006,8 @@ class NIStore:
         # binds to ``history.<name>`` can render the preview (mirrors C1 first-run seeding).
         bound = bind_scene(validated["scene"], preview_payload,
                            history=_seed_history(validated),
-                           image_ref=_preview_image_ref(validated, item_id))  # proves the preview renders
+                           image_ref=_preview_image_ref(validated, item_id),
+                           form_ctx=_form_bind_context(validated))  # proves the preview renders
         assert isinstance(bound, dict), "bind_scene must return a dict"
         interval = self._clamp_interval(validated)
         nonce, ciphertext = self._seal_item(item_id, validated)
@@ -3756,11 +4119,16 @@ class NIStore:
                     validated["_c2_ok"] = True
                 else:
                     validated.pop("_c2_ok", None)
+                if current["spec"].get("_present_ok") in _PRESENTATION_IDS:
+                    validated["_present_ok"] = current["spec"]["_present_ok"]
+                else:
+                    validated.pop("_present_ok", None)
                 validated["contract"] = current["spec"].get("contract")
                 streak_clause = ""
                 streak_params: list = []
             else:
                 validated.pop("_c2_ok", None)
+                validated.pop("_present_ok", None)
                 validated["contract"] = None  # keep the key present so validators stay happy
                 streak_clause = "consecutive_failures = 0, first_failure_at = NULL, "
                 streak_params = []
@@ -4121,13 +4489,15 @@ class NIStore:
         ).fetchone()
         return None if row is None or row[0] is None else _to_utc(row[0])
 
-    def record_validation(self, item_id: str, ok: bool, note: str = "") -> None:
+    def record_validation(self, item_id: str, ok: bool, note: str = "",
+                          presentation_id: str | None = None) -> None:
         """C2 verdict: user answers "Looks right" / "Something's wrong" on the C1 result.
 
         ok=True stamps ``_c2_ok=true`` inside the sealed spec (persisted across engine
         restarts) so the next real run can transition to ``live``; ok=False sends the
         item back to ``draft`` for the agent to redraft (the note is not persisted in v1
-        — the operator sees it in the UI at verdict time).
+        — the operator sees it in the UI at verdict time). ``presentation_id`` (§34,
+        ``pick`` | ``second``) is sealed as ``_present_ok`` beside the YES.
 
         Refuses (ValueError, mapped to 409 by the route) unless the item is currently
         ``commissioning`` (C1 integrity): a verdict against any other state — live,
@@ -4137,6 +4507,7 @@ class NIStore:
         assert item_id, "item id required"
         assert isinstance(ok, bool), "ok must be bool"
         assert isinstance(note, str), "note must be a string"
+        _validate_present_ok(presentation_id)
         with _SPEC_LOCK:
             current = self.get_item(item_id)
             if current is None:
@@ -4151,6 +4522,8 @@ class NIStore:
                 self.set_state(item_id, "draft")
                 return
             spec["_c2_ok"] = True
+            if presentation_id is not None:
+                spec["_present_ok"] = presentation_id
             nonce, ciphertext = self._seal_item(item_id, spec)
             self._conn.execute(
                 "UPDATE ni_items SET nonce = ?, ciphertext = ?, updated_at = now() WHERE id = ?;",
@@ -4196,6 +4569,8 @@ class NIStore:
             preserved["contract"] = current["spec"].get("contract")
             if current["spec"].get("_c2_ok") is True:
                 preserved["_c2_ok"] = True
+            if current["spec"].get("_present_ok") in _PRESENTATION_IDS:
+                preserved["_present_ok"] = current["spec"]["_present_ok"]
             preserved["_l1_last_attempt"] = datetime.now(UTC).isoformat()
             # Phase 4b cosmetic (audit 2026-09-11): stamp the trial with its own
             # ``origin`` so a later revert records the honest revision origin —
@@ -4790,6 +5165,7 @@ def run_item(store: NIStore, item_id: str, *, gateway_mod, secrets_store,
             llm_call = _make_llm_call(store, spec, gateway_mod)
         payload, image_blob = _fetch_source(spec, item_id, gateway_mod, secrets_store,
                                              schedules_store, store, kb)
+        fetched_at = datetime.now(UTC)  # §34: the form bind's ``now`` + Context.fetched_at
         if isinstance(payload, list):
             # a bare-list response: the card was built over it as {"items": [...]} (the flow's
             # sampling wrap, and Library answers paths) — no path can address a bare list root
@@ -4872,7 +5248,8 @@ def run_item(store: NIStore, item_id: str, *, gateway_mod, secrets_store,
     # ni_runs row entirely — audit finding G).
     try:
         return _finalize_run(store, item, spec, outputs, started, history=history,
-                             image_blob=image_blob, started_rev=started_rev)
+                             image_blob=image_blob, started_rev=started_rev,
+                             fetched_at=fetched_at)
     except NIError as exc:
         _seal_last_failure_snapshot(store, item["id"], exc, raw_excerpt)
         _maybe_repair_l1(store, item, gateway_mod, raw_excerpt, exc,
@@ -4929,7 +5306,8 @@ def _refuse_blank_page_run(spec: dict, outputs: dict, llm_fields: set[str]) -> N
 def _finalize_run(store: NIStore, item: dict, spec: dict, outputs: dict,
                   started: float, *, history: dict,
                   image_blob: dict | None = None,
-                  started_rev: int | None = None) -> dict:
+                  started_rev: int | None = None,
+                  fetched_at: datetime | None = None) -> dict:
     """Contract-check (if applicable), bind, append history, write snapshots, record
     run + transition, THEN evaluate alerts (order matters — see M1a below).
 
@@ -4954,6 +5332,9 @@ def _finalize_run(store: NIStore, item: dict, spec: dict, outputs: dict,
     AFTER transition so an alert-state edge on a run that just flipped
     degraded→live gets evaluated (the prior code passed the pre-transition
     ``item`` and skipped alerts on any non-live snapshot).
+
+    ``fetched_at`` (§34): the instant run_item fetched — the form bind's ``now`` and
+    the record's ``Context.fetched_at``; None (tests) reads the clock here.
     """
     assert isinstance(history, dict), "history required (pre-append)"
     # L1: freshness guard. Skip the entire finalize side-effect path when the
@@ -4987,7 +5368,8 @@ def _finalize_run(store: NIStore, item: dict, spec: dict, outputs: dict,
     try:
         image_ref = _resolve_image_ref(store, item["id"], image_blob)
         bound = bind_scene(spec["scene"], outputs, history=history,
-                            image_ref=image_ref)
+                            image_ref=image_ref,
+                            form_ctx=_form_bind_context(spec, fetched_at or datetime.now(UTC)))
         _enforce_bind_types(spec["scene"], bound)
         _enforce_payload_size(bound)
         _append_history_series(store, item, outputs, history)
@@ -5289,6 +5671,9 @@ def _enforce_bind_types(scene: dict, bound: dict) -> None:
             _enforce_gauge_bounds(node)
         elif ntype == "image":
             _enforce_image_shape(node)
+        elif ntype == "form":
+            _enforce_form_shape(node)
+            continue  # a form node is a leaf — never descend into its CLIR dicts
         pending.extend(node.get("children") or [])  # bounded by _MAX_SCENE_NODES
     raise NIError("bind_type", "bound tree exceeded traversal bound")
 
@@ -5331,6 +5716,35 @@ def _enforce_spark_points(node: dict) -> None:
                 raise NIError("bind_type", "spark.points.t must be a string when present")
             continue
         raise NIError("bind_type", "spark.points needs numbers or {t,v} with numeric v")
+
+
+def _enforce_form_shape(node: dict) -> None:
+    """Post-bind check for §34 form: ``clir.desktop`` + ``clir.phone`` are CLIR dicts
+    that pass ``ni_forms.types.check_clir``; ``hash`` and ``summary`` are strings;
+    ``lint`` carries non-negative counters. Mirror of the form validator for the
+    bound shape so a drift lands here (never at write_snapshot).
+    """
+    assert isinstance(node, dict), "node must be a dict"
+    from .ni_forms.types import ContractError, check_clir
+    for key in ("form", "summary", "hash"):
+        value = node.get(key)
+        if not isinstance(value, str) or not value or len(value) > _MAX_TEXT_CHARS:
+            raise NIError("bind_type", f"form.{key} must be a non-empty string")
+    clir = node.get("clir")
+    if not isinstance(clir, dict) or set(clir) != {"desktop", "phone"}:
+        raise NIError("bind_type", "form.clir must be {desktop, phone}")
+    for side in ("desktop", "phone"):
+        try:
+            check_clir(clir[side])
+        except ContractError as exc:
+            raise NIError("bind_type", f"form.clir.{side}: {exc}") from None
+    lint = node.get("lint")
+    if not isinstance(lint, dict) or set(lint) != {"red", "amber"}:
+        raise NIError("bind_type", "form.lint must be {red, amber}")
+    for key in ("red", "amber"):
+        value = lint[key]
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            raise NIError("bind_type", f"form.lint.{key} must be a non-negative int")
 
 
 def _enforce_image_shape(node: dict) -> None:

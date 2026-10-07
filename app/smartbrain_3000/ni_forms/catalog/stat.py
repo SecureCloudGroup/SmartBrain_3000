@@ -31,6 +31,14 @@ from ..types import Reject
 REF_ROLES = ("reference", "open", "range_lo", "range_hi")
 
 
+def _sub_label(cv: Canvas, ctx: LayoutCtx, y: float, rc: list, max_w: float):
+    """The label under the hero. A card titled by its one field's name would say it twice
+    (``title_echo``): the label is left out and the title carries the meaning."""
+    if cv.run(rc).strip().casefold() == str(ctx.inp.title or "").strip().casefold():
+        return None
+    return cv.text(["l", 0], y, rc, "sub", src="key", max_w=max_w)
+
+
 def _plan(w: str, r: int):
     if w == "W1":
         return {1: "hero", 2: "stack", 3: "spark"}[r]
@@ -218,7 +226,8 @@ class Stat(BaseForm):
             bottom = hb.bottom if hb else y0
             if cand.variant == "countdown":
                 bottom = self._countdown_bind(ctx, cv, hb)
-            cv.text(["l", 0], bottom + 2, sub_rc, "sub", src="key", max_w=W)
+            if _sub_label(cv, ctx, bottom + 2, sub_rc, W) is None and hb is not None:
+                cv.d.meta["calm"] = True   # one fact under its own title is the whole, designed card
             return
 
         # ------- a hero too wide for the split column takes the full width (same content, stacked)
@@ -243,7 +252,7 @@ class Stat(BaseForm):
             if db:
                 y = db.bottom + 2
         elif plan in ("hero", "stack", "split", "tri") and not dp:
-            sb = cv.text(["l", 0], y + 2, sub_rc, "sub", src="key", max_w=colw)
+            sb = _sub_label(cv, ctx, y + 2, sub_rc, colw)
             if sb:
                 y = sb.bottom + 2
 

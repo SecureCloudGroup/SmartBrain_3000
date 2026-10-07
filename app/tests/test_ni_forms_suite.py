@@ -308,13 +308,15 @@ def test_present_never_runs_under_no_model():
 
 def test_forms_code_has_no_clock_or_card_words():
     """Scope narrowed from the proto's `pipeline/forms` subtree to the equivalent
-    ni_forms modules (every .py except types/rec, which carry the `card_id` field
-    on `CardInput`). The proto never scanned those files either."""
+    ni_forms modules: every .py is scanned for clock reads; the card-word loop skips
+    types/rec/record, which construct the `CardInput` holding the `card_id` field (the
+    proto never scanned those files either)."""
     pkg = Path(__file__).resolve().parent.parent / "smartbrain_3000" / "ni_forms"
-    exclude = {"types.py", "rec.py", "__init__.py"}
-    paths = [p for p in pkg.rglob("*.py") if p.name not in exclude]
+    exclude = {"types.py", "rec.py", "record.py", "__init__.py"}
+    every = [p for p in pkg.rglob("*.py") if p.name != "__init__.py"]
+    assert all("datetime.now(" not in p.read_text() and "time.time(" not in p.read_text() for p in every)
+    paths = [p for p in every if p.name not in exclude]
     src = "\n".join(p.read_text() for p in paths)
-    assert "datetime.now(" not in src and "time.time(" not in src
     code = re.sub(r'""".*?"""', "", src, flags=re.DOTALL)
     code = re.sub(r"#.*", "", code)
     for w in ("card_id", "nvda", "bitcoin", "tide", "storm", "hurricane", "hacker",

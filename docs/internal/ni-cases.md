@@ -32,15 +32,15 @@ gates AND the pytest suite — see "Adding a case" at the bottom). Status:
 | A5 | "how many people are in space right now" | scalar count | SHIPPED (people-space, URL path only — open-notify has no TLS so it cannot join the https-only catalog; words land the pick pause) |
 | A6 | "EUR to USD exchange rate, update hourly" | fx, cadence word | SHIPPED (eur-usd-hourly) |
 | A7 | "top stories on Hacker News" | list-of-objects, repeat scene | SHIPPED (hn-frontpage; G3: resolves from words via hn-front-page recipe) |
-| A8 | "ISS location on a map, every minute" | display-hint degrade (map → value, honest note) | SHIPPED (iss-map) |
+| A8 | "ISS location on a map, every minute" | a `map` hint builds the §34 form the data supports (two numbers → a value form); the degrade note is gone with the template scenes | SHIPPED (iss-map; R19 phase 1a-2 forms) |
 | A9 | "track bitcoin and ethereum in USD" | multi-subject → multi-field value card | SHIPPED (crypto-pair; list-hint degrades to value when no path is list-shaped) |
 | A10 | "how many stars does <repo> have" | needle-in-haystack selection (~100-key response) | SHIPPED (github-stars; G3: github-repo-stars recipe, owner/name params) |
 | A11 | "sunrise and sunset times for today" | string-typed value fields (ISO times) | SHIPPED (sunrise-times; G3: sunrise-sunset recipe w/ geocode fills — resolves from words) |
 | A12 | "temperature in Fahrenheit" | unit conversion (scale + offset transforms, authored from the request) | SHIPPED (offset op + deterministic °F authoring) |
 | A13 | "alert me when bitcoin drops below 50000" | alert-carrying card (threshold + direction → §12 alert, edge-triggered) | SHIPPED (threshold+direction → §12 alert, value class only) |
-| A14 | "today's temperature forecast as a chart" | series → spark scene | ROADMAP(assembler cannot author spark/series scenes; stress-POC proved selection works) |
-| A15 | "the 5 biggest earthquakes today" | sort_by + top_n authored from intent | ROADMAP(assembler does not author sort/top-N pipelines) |
-| A16 | "how much did bitcoin move since yesterday" | delta_prev authored from intent | ROADMAP(assembler does not author delta pipelines) |
+| A14 | "today's temperature forecast as a chart" | a columns answer on a time axis → the `series_line` form; a single number's history → the stat's sparkline (§34, §11 track) | SHIPPED (R19 phase 1a-2 forms; engine-run matrix `columns` + `value` rows) |
+| A15 | "the 5 biggest earthquakes today" | sort_by + top_n authored from intent | ROADMAP(the §34 `ranked_list` / `table` forms present ranked rows, but no path authors a sort / top-N pipeline from the ask) |
+| A16 | "how much did bitcoin move since yesterday" | delta_prev authored from intent | ROADMAP(the §34 stat shows a delta only from a declared delta / reference field, and its sparkline from the §11 track; no path authors a delta pipeline from the ask) |
 | A17 | "stock quote with my Finnhub key" end-to-end | keyed recipe → awaiting_credential → key PUT → activate, LIVE | SHIPPED (L8 model-free; live keyed run stays operator-manual — needs a real key) |
 | A18 | "every morning" / "twice a day" / "weekly" | cadence phrasing → minutes mapping | SHIPPED (cadence_free_phrasings rows — kind/validity gated, cadence free) |
 | A19 | "every 10 seconds" | cadence floor clamp, honest copy | SHIPPED (cadence_free_phrasings row) |
@@ -61,7 +61,7 @@ gates AND the pytest suite — see "Adding a case" at the bottom). Status:
 | B10 | "weather" recipe slot code can't derive, lookup fails | draft + `awaiting_params` → card Fill affordance, never a guess | SHIPPED (#429) |
 | B11 | "show me <thing with no conceivable public API>" | model-level: honest "no source" conversation, flow never starts | BY-DESIGN (chat behavior; not machine-testable, guide-covered) |
 | B12 | http_page scrape ask ("price from this webpage") | G4b: paste the page URL on the pick card — the door builds an interpreted http_page card (jailed read + local llm each run) | SHIPPED (page-door tests + field regressions 11) |
-| B13 | image ask ("US weather radar") | recorded gate covers format; flow has NO image path — authored via create_ni_item | ROADMAP(decide: image class joins the flow, or stays documented exclusion) |
+| B13 | image ask ("US weather radar") | recorded gate covers format; flow has NO image path — authored via create_ni_item (the §34 `image` form is not wired to a pixel source) | ROADMAP(decide: image class joins the flow, or stays documented exclusion) |
 
 ## C. Lifecycle — the card exists; the user talks about it
 

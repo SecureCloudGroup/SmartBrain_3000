@@ -72,8 +72,8 @@ def test_a_list_card_shows_the_items_fields_in_the_sources_order_under_the_subje
     built = ni_flow.assemble_from_mapping({"tide_times": "predictions[0].v"}, {"tide_times": "string"},
                                           "list", NOAA_HILO, title="tides")
     scene = built["scene"]
-    assert scene["children"][0]["value"] == "tides"
-    assert scene["children"][1]["template"]["value"] == "{{item.t}} · {{item.v}} · {{item.type}}"
+    assert scene["type"] == "form" and scene["record"]["rows"] == "rows"
+    assert [f["path"] for f in scene["record"]["fields"]] == ["t", "v", "type"]
 
 
 def test_row_padding_never_shows_ids_codes_links_or_epochs() -> None:
@@ -232,6 +232,18 @@ def test_nested_row_timestamps_convert() -> None:
     built = ni_flow.assemble_from_mapping({"game": "dates[0].games.gameDate"}, {"game": "string"}, "list", sample)
     assert {"fn": "time", "field": "rows", "key": "games.gameDate"} in built["pipeline"][-1]["apply"]
     assert "2026-" not in built["preview_payload"]["rows"][0]["games"]["gameDate"]
+    # two home games at one stadium: the repeated venue still names the rows (a list of bare
+    # timestamps has no form), so the sealed record carries it
+    assert [f["path"] for f in built["scene"]["record"]["fields"]] == ["games.gameDate", "games.venue"]
+
+
+def test_mapped_list_headers_read_as_words_never_source_keys() -> None:
+    sample = {"standings": [{"teamName": "Dodgers", "pointsTotal": 98, "runs_scored": 812},
+                            {"teamName": "Giants", "pointsTotal": 91, "runs_scored": 777}]}
+    built = ni_flow.assemble_from_mapping({"team": "standings[0].teamName"}, {"team": "string"}, "list",
+                                          sample, title="standings")
+    labels = {f["path"]: f["label"] for f in built["scene"]["record"]["fields"]}
+    assert labels == {"teamName": "team name", "pointsTotal": "points total", "runs_scored": "runs scored"}
 
 
 def test_a_count_the_model_spells_out_for_a_list_in_the_sample_is_accepted() -> None:

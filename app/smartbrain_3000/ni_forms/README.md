@@ -53,6 +53,24 @@ Added in this port (2026-10-06, second pass):
 - `proof.py`: `python -m smartbrain_3000.ni_forms.proof OUT.html [--now=ISO]`
   renders the 7 live cards (desktop row then phone row, both themes) through
   the ported `vector.page()` so the port can be judged by eye.
+- Hybrid glyph policy (Phase 1a-2, 2026-10-06): the browser paints CLIR text,
+  so `glyph_missing` is AMBER (not red). `text.width()` already measures an
+  unknown codepoint with the font's .notdef advance (tofu fallback) and
+  `text.coverage()` reports which chars missed every face. Red can be
+  re-enabled when a server-side PNG painter rejoins the shipping path.
+- Product wiring (Phase 1a-2, 2026-10-06; docs/internal/ni-format.md §34):
+  `record.py` turns the flow's answers + pipeline outputs into a `DataRecord`
+  (`from_answers` at build, types/roles derived once; `from_spec` at every bind,
+  the sealed field specs re-read by path) and `form_scene.py` seals the §34 node
+  (`form_scene`, `swap_to_second`, `history_track_for`, `display_size_for_span`).
+  Three engine adjustments came with the real data shapes: `layout_span` treats
+  a record form holding ≤3 rows (naturally, after a refresh shrank it, or under
+  a count override) as its designed empty/one/few state (hollow amber, not red —
+  the same rule enumerate's forced-state check applies, so build and bind agree);
+  the stat's label under the hero is left out when it only repeats the card
+  title (`title_echo`), and a lone hero under its title counts as the designed
+  calm card; and the pipeline's time/date texts carry their instant
+  (`ni._TimeText.moment`, `local_date`) so the record keeps ISO cells.
 
 Investigation of the stat NVDA amber: there isn't one. The port survey had
 flagged "regressed one amber lint on the W2 bucket"; a direct probe at every
