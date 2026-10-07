@@ -25,8 +25,17 @@ import re
 from datetime import UTC, date, datetime
 from urllib.parse import urlsplit
 
+from . import asked as asked_mod
 from . import fmt
-from .types import CardInput, Context, DataRecord, Field, check_record
+from .types import (
+    MAX_WANT_CHARS,
+    MAX_WANTS,
+    CardInput,
+    Context,
+    DataRecord,
+    Field,
+    check_record,
+)
 
 # ISO 4217 three-letter alpha codes — the subset we see on Library answers (declared
 # ``$`` / ``USD`` / ``EUR`` / ``GBP`` lead; the rest ride in as currency). Closed set.
@@ -353,13 +362,15 @@ def _names_rows(samples: list) -> bool:
     return len(vals) <= 1 or len(set(vals)) == len(vals)
 
 
-def _apply_list_roles(fields: list, cells: list, columns: list) -> None:
+def _apply_list_roles(fields: list, cells: list, columns: list, asked: set | None = None) -> None:
     """Mutate ``fields`` in place with record-shaped roles (``columns`` = each field's
     sampled values): the first text cell whose values name their rows → ``name`` (else
     the first text cell; a status/severity/state label → ``status``); other texts →
     ``kind`` when they are a closed vocabulary (category), else ``meta``; the first
-    time/date → ``time`` / ``date``; the first number → ``value``, later numbers →
-    ``secondary``; coordinates → ``lat`` / ``lon``."""
+    time/date → ``time`` / ``date``; the number the ask names (``asked``, fix round
+    1a-5: "rain chances this week" leads with the rain column, not the high) else the
+    first number → ``value``, the other numbers → ``secondary``; coordinates →
+    ``lat`` / ``lon``."""
     assert isinstance(fields, list), "fields must be a list"
     assert isinstance(cells, list) and len(cells) == len(fields), "one cell per field"
     assert isinstance(columns, list) and len(columns) == len(fields), "one sample column per field"
@@ -367,7 +378,9 @@ def _apply_list_roles(fields: list, cells: list, columns: list) -> None:
              and str(cells[i].get("label") or "").strip().lower() not in _STATUS_LABEL_WORDS]
     naming = [i for i in texts if _names_rows(columns[i])]
     name_at = (naming or texts or [None])[0]
-    picked_time = picked_value = False
+    numbers = [i for i, f in enumerate(fields) if f.type in _NUMBER_TYPES and _geo_role(f) is None]
+    lead_num = next((i for i in numbers if fields[i].name in (asked or set())), (numbers or [None])[0])
+    picked_time = False
     for i, (f, c) in enumerate(zip(fields, cells, strict=True)):  # bounded: _FIELD_CAP
         label_lower = str(c.get("label") or "").strip().lower()
         if _geo_role(f) is not None:
@@ -381,10 +394,8 @@ def _apply_list_roles(fields: list, cells: list, columns: list) -> None:
                 f.role = "kind" if f.type == "category" else "meta"
         elif f.type in ("datetime", "date") and not picked_time:
             f.role, picked_time = ("time" if f.type == "datetime" else "date"), True
-        elif f.type in _NUMBER_TYPES and not picked_value:
-            f.role, picked_value = "value", True
         elif f.type in _NUMBER_TYPES:
-            f.role = "secondary"
+            f.role = "value" if i == lead_num else "secondary"
         else:
             f.role = "meta"
 
@@ -422,10 +433,12 @@ def _shape_values(chosen: list[dict], outputs: dict, ask: str) -> tuple[str, lis
     return "measure", fields, rows, long_text
 
 
-def _shape_rows(answer: dict, outputs: dict, rows_name: str) -> tuple[str, list, list, dict]:
+def _shape_rows(answer: dict, outputs: dict, rows_name: str, ask: str = "",
+                wants: list | None = None) -> tuple[str, list, list, dict]:
     """A list / columns answer → ``events`` (a time cell on a declared axis), ``series``
     (columns on an axis) or ``records``. Each cell's ``key`` (else its ``path``) is the
-    row key the pipeline wrote; the sample column decides category vs text."""
+    row key the pipeline wrote; the sample column decides category vs text; the ask's
+    words (+ the frame's wants) decide which number leads (``asked.asked_fields``)."""
     assert isinstance(answer, dict), "answer must be a dict"
     assert isinstance(rows_name, str) and rows_name, "rows_name required"
     cells = list(answer.get("cells") or [])[:_FIELD_CAP]
@@ -439,7 +452,7 @@ def _shape_rows(answer: dict, outputs: dict, rows_name: str) -> tuple[str, list,
         samples = [_dig(r, key) for r in rows_src[:_ROWS_CAP] if isinstance(r, dict)]
         fields.append(_field_from_answer(c, name, key, samples))
         columns.append(samples)
-    _apply_list_roles(fields, cells, columns)
+    _apply_list_roles(fields, cells, columns, set(asked_mod.asked_fields(fields, ask, wants)))
     rows, long_text = _rows_as_lists(rows_src, fields)
     has_axis = bool(answer.get("axis"))
     has_time = any(f.type in ("datetime", "date") for f in fields)
@@ -485,12 +498,16 @@ def _input_of(context: dict, ask: str, title: str, cadence_s: int) -> CardInput:
     assert isinstance(context, dict), "context must be a dict"
     assert isinstance(cadence_s, int) and cadence_s >= 0, "cadence_s must be a non-negative int"
     source_url = context.get("source_url")
+    kind = context.get("question_kind")
+    wants = context.get("wants") if isinstance(context.get("wants"), list) else []
     return CardInput(card_id="", ask=str(ask)[:400], title=str(title)[:200],
                      source_url=source_url if isinstance(source_url, str) else None,
                      source_kind="http_json", source_format="json", raw_path=None,
                      http_status=None, content_type=None,
                      fetched_at=str(context.get("fetched_at") or ""), cadence_s=cadence_s,
-                     viewer_tz=str(context.get("viewer_tz") or "UTC"))
+                     viewer_tz=str(context.get("viewer_tz") or "UTC"),
+                     question_kind=kind if isinstance(kind, str) and kind else None,
+                     wants=[str(w)[:MAX_WANT_CHARS] for w in wants[:MAX_WANTS] if isinstance(w, str) and w])
 
 
 def _series_part(history: dict | None, measure: str | None, as_of: str) -> dict:
@@ -551,23 +568,28 @@ def _assemble(kind: str, fields: list, rows: list, long_text: dict, outputs: dic
 
 def from_answers(chosen: list[dict], outputs: dict, *, history: dict | None,
                  context: dict, ask: str, title: str, cadence_s: int,
-                 rows_output_name: str | None = None) -> tuple[DataRecord, CardInput]:
+                 rows_output_name: str | None = None, question_kind: str | None = None,
+                 wants: list | None = None) -> tuple[DataRecord, CardInput]:
     """Build-time ``(DataRecord, CardInput)`` from the answers the pipeline was built from
     and the sample outputs it produced (types + roles derived here, then sealed).
 
     ``context`` carries ``source_url``, ``fetched_at`` (ISO Z), ``viewer_tz`` (IANA).
     ``rows_output_name`` names the outputs key holding the list rows (``rows`` on the
-    Library-answers path); None = value answers.
+    Library-answers path); None = value answers. ``question_kind`` / ``wants`` are the
+    ask's frame (fix round 1a-5): they ride on the CardInput so the floor prior and the
+    asked-field rule see them, and the asked number leads a rows record.
     """
     assert isinstance(chosen, list) and chosen, "chosen must be a non-empty list"
     assert isinstance(outputs, dict), "outputs must be a dict"
     assert isinstance(context, dict), "context must be a dict"
+    context = {**context, "question_kind": question_kind, "wants": list(wants or [])}
     first_kind = chosen[0].get("kind")
     if first_kind == "value":
         kind, fields, rows, long_text = _shape_values([a for a in chosen if a.get("kind") == "value"],
                                                       outputs, ask)
     elif first_kind in ("list", "columns"):
-        kind, fields, rows, long_text = _shape_rows(chosen[0], outputs, rows_output_name or "rows")
+        kind, fields, rows, long_text = _shape_rows(chosen[0], outputs, rows_output_name or "rows",
+                                                    ask=ask, wants=wants)
     else:
         raise ValueError(f"from_answers: unknown answer kind {first_kind!r}")
     return _assemble(kind, fields, rows, long_text, outputs, history=history, context=context,
@@ -582,7 +604,8 @@ def from_spec(record_spec: dict, outputs: dict, *, history: dict | None,
 
     ``context`` carries ``source_url``, ``fetched_at``, ``viewer_tz``, ``title``, ``ask``
     and ``cadence_s`` (the shell prints title, host and cadence, so the bind must see
-    the same words the build did).
+    the same words the build did) and, from the sealed node's ``frame``, ``question_kind``
+    + ``wants`` (so the bind re-enumerates under the same prior the design was made with).
     """
     assert isinstance(record_spec, dict), "record_spec must be a dict"
     assert isinstance(outputs, dict), "outputs must be a dict"

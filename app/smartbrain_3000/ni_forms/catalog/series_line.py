@@ -78,6 +78,8 @@ class SeriesLine(BaseForm):
     def match(self, rec, prof):
         if rec.kind not in ("series", "records", "events"):
             return []
+        if len(rec.rows) < 3:
+            return []                  # two readings are no line (fix round 1a-5, class B)
         R = RView(rec)
         tf = R.first("time", "date")
         vf = next((f for f in rec.fields if f.role in ("value", "measure") and is_numeric(f)), None)
@@ -127,9 +129,22 @@ class SeriesLine(BaseForm):
         pts = self._pts(R, cand)
         if not pts:
             return "No points"
-        (_t0, _v0, _), (_t1, _v1, r1) = pts[0], pts[-1]
         vf = cand.bindings["value"]
-        return f"{R.f[vf].label}: latest {R.text(r1, vf)}; {len(pts)} points"
+        cur, forecast = self._current(pts, now.timestamp())
+        word = "now" if forecast else "latest"
+        return f"{R.f[vf].label}: {R.text(cur[2], vf)} {word}; {len(pts)} points"
+
+    @staticmethod
+    def _current(pts: list, now_ts: float) -> tuple:
+        """(the point the card leads with, forecast?): the reading of the period holding now (the
+        last point not after now; the first point when all lie ahead). A series that mostly lies
+        ahead is a FORECAST: it leads with that reading and shows no change since its first point
+        (fix round 1a-5, class B: "3.084 ft / 0.000 (0.00%)" on a surf forecast)."""
+        assert pts, "pts must be non-empty"
+        assert isinstance(now_ts, (int, float)), "now_ts must be epoch seconds"
+        past = [p for p in pts if p[0] <= now_ts + 60]
+        cur = past[-1] if past else pts[0]
+        return cur, (len(pts) - len(past)) > len(past)
 
     def _bars(self, R, cand):
         return R.f[cand.bindings["value"]].agg in ("per_interval", "sum")
@@ -168,10 +183,9 @@ class SeriesLine(BaseForm):
         # with its far end (round 1: the headline is the current value)
         now_ts = ctx.now.timestamp()
         past = [p for p in pts if p[0] <= now_ts + 60]
-        if past and len(past) < len(pts):
-            last = past[-1]
-        elif not past:
-            last = pts[0]
+        cur, forecast = self._current(pts, now_ts)
+        if not past or len(past) < len(pts):
+            last = cur
         drop = ctx.rung.get("drop", 0)
         # round 3, the ask decides the headline:
         #  * 'when ... cheapest / highest': the extreme reading still ahead (or now) and its time;
@@ -190,7 +204,7 @@ class SeriesLine(BaseForm):
                                          "hi": ["d", "agg", [vf, "max"], {"field": vf}]}]
         dp = None
         few = ((R.rec.flags or {}).get("gap") or {}).get("kind") == "few"   # 2-3 readings are no trend (round 3)
-        if not bars and last is not first and ext_rc is None and range_rc is None and not few:
+        if not bars and last is not first and ext_rc is None and range_rc is None and not few and not forecast:
             dv = last[1] - first[1]
             dec = max(fmt.decimals(R.f[vf], last[1]), fmt.decimals(R.f[vf], first[1]))
             dp = {"d": dv, "sign": dv,
@@ -260,11 +274,13 @@ class SeriesLine(BaseForm):
                                            {"field": vf, "dec": _avg_dec(R.f[vf], ys)}], "data")][:ncol]
             yb = kv_cells(cv, [["f", i / ncol] for i in range(ncol)], yb + 12, items, col_w=W / ncol - 10, rows=1)
         if ctx.rows >= 2 and y1 - yb > 40 and drop < 1:
-            self._recent(ctx, cv, pts, vf, yb + 14, y1)
+            self._recent(ctx, cv, pts, vf, yb + 14, y1, forward=cur if forecast else None)
 
-    def _recent(self, ctx, cv, pts, vf, top, bottom):
-        """Height left after the capped plot and the stats buys the latest readings (time | value),
-        newest first: the next tier of content, never a stretched line."""
+    def _recent(self, ctx, cv, pts, vf, top, bottom, forward=None):
+        """Height left after the capped plot and the stats buys the readings (time | value): the latest
+        first for a history; for a forecast (``forward`` = the current point) the periods from now on in
+        time order (fix round 1a-5: the weekend's days read reversed). The next tier of content, never a
+        stretched line."""
         lh = line_h("sub") + 4
         step = sorted(b[0] - a[0] for a, b in itertools.pairwise(pts))
         daily = bool(step) and step[len(step) // 2] >= 20 * 3600
@@ -274,7 +290,8 @@ class SeriesLine(BaseForm):
             return
         cv.d.meta["slack"] = lh
         y = top
-        for t, v, i in list(reversed(pts))[:k]:
+        order = [p for p in pts if p[0] >= forward[0]] if forward is not None else list(reversed(pts))
+        for t, v, i in order[:k]:
             iso = fmt.iso(datetime.fromtimestamp(t, UTC))
             cv.time(["l", 0], y, iso, tf, "sub", tz="card", tok="muted")
             cv.text(["r", 0], y, ["cell", vf, i, {}], "sub", src="data", max_w=ctx.W * 0.5, anchor="end", tok="text")
@@ -365,10 +382,9 @@ class SeriesLine(BaseForm):
 
 
 def _avg_dec(f, ys) -> int:
-    """An average is shown at the column's display precision (magnitude rule when unknown; round 3)."""
-    if f.precision is not None and not getattr(f, "unrounded", False):
-        return f.precision
-    return fmt.decimals(f, sum(ys) / len(ys), derived=True)
+    """An average is shown at the column's own precision, at most one decimal more (fmt.stat_decimals;
+    fix round 1a-5, class G: never "0.0000 in" over a one-decimal column)."""
+    return fmt.stat_decimals(f, list(ys), sum(ys) / len(ys))
 
 
 FORM = SeriesLine()

@@ -1,0 +1,123 @@
+{
+ "id": "33-how-many-earthquakes-above-4-0-today",
+ "n": 33,
+ "ask": "how many earthquakes above 4.0 today",
+ "kind": "count",
+ "frame_kind": "count",
+ "subject": "earthquakes",
+ "title": "earthquakes",
+ "source_id": "usgs-quakes-25-day",
+ "source_url": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_day.geojson",
+ "fetched_at": "2026-10-07T12:06:30Z",
+ "viewer_tz": "UTC",
+ "answers_used": [
+  {
+   "name": "quake_count",
+   "label": "Number of earthquakes",
+   "words": [
+    "how many",
+    "count",
+    "number of earthquakes",
+    "total"
+   ],
+   "primary": false,
+   "kind": "value",
+   "path": "features",
+   "type": "count",
+   "window": "latest",
+   "unit": null
+  }
+ ],
+ "rows_output_name": null,
+ "outputs": {
+  "quake_count": 56,
+  "quake_count_items": [
+   {
+    "id": "aka2026twfueg",
+    "geometry": {
+     "coordinates": [
+      -156.866,
+      67.208,
+      20.9
+     ],
+     "type": "Point"
+    },
+    "properties": {
+     "title": "M 2.7 - 33 km N of Kobuk, Alaska",
+     "type": "earthquake",
+     "magType": "ml",
+     "gap": 42,
+     "rms": 0.8,
+     "dmin": 1.1,
+     "nst": 45,
+     "types": ",origin,phase-data,",
+     "sources": ",ak,",
+     "ids": ",aka2026twfueg,",
+     "code": "a2026twfueg",
+     "net": "ak",
+     "sig": 112,
+     "tsunami": 0,
+     "status": "automatic",
+     "alert": null,
+     "mmi": null,
+     "cdi": null,
+     "felt": null,
+     "detail": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/aka2026twfueg.geojson",
+     "url": "https://earthquake.usgs.gov/earthquakes/eventpage/aka2026twfueg",
+     "tz": null,
+     "updated": 1791373999959,
+     "time": 1791373802071,
+     "place": "33 km N of Kobuk, Alaska",
+     "mag": 2.7
+    },
+    "type": "Feature"
+   },
+   {
+    "id": "nn00925420",
+    "geometry": {
+     "coordinates": [
+      -115.2777,
+      38.9018,
+      5.1382
+     ],
+     "type": "Point"
+    },
+    "properties": {
+     "title": "M 2.7 - 18 km W of Preston, Nevada",
+     "type": "earthquake",
+     "magType": "ml",
+     "gap": 203,
+     "rms": 0.1506,
+     "dmin": 0.375,
+     "nst": 5,
+     "types": ",origin,phase-data,",
+     "sources": ",nn,",
+     "ids": ",nn00925420,",
+     "code": "00925420",
+     "net": "nn",
+     "sig": 109,
+     "tsunami": 0,
+     "status": "reviewed",
+     "alert": null,
+     "mmi": null,
+     "cdi": null,
+     "felt": null,
+     "detail": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/nn00925420.geojson",
+     "url": "https://earthquake.usgs.gov/earthquakes/eventpage/nn00925420",
+     "tz": null,
+     "updated": 1791374024769,
+     "time": 1791372705939,
+     "place": "18 km W of Preston, Nevada",
+     "mag": 2.66
+    },
+    "type": "Feature"
+   }
+  ]
+ },
+ "live_form": "stat",
+ "live_span": "d1x1",
+ "live_lint": {
+  "red": 0,
+  "amber": 2
+ }
+}

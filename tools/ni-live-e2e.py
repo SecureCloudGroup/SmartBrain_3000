@@ -169,6 +169,7 @@ def run_one(ask: str, idx, llm, model: str) -> dict:
         latest = store.read_snapshot(item_id, "latest")
         out["scene_text"] = _texts(latest["payload"] if latest else None)
         out["pipeline"], out["latest"] = item["spec"].get("pipeline"), latest["payload"] if latest else None
+        out["design"] = _design_line(item["spec"].get("scene") or {}, out["latest"])
         out["source"] = out["source"] or item["spec"]["source"].get("url", "")
     except Exception as exc:  # a crash is a failed ask, never a stopped run
         import traceback
@@ -198,6 +199,24 @@ def _number_text(value: float, fmt: str, unit) -> str:
         base = f"{value:,.2f}".rstrip("0").rstrip(".")
     u = unit.strip() if isinstance(unit, str) else ""
     return f"{base} {u}" if u else base
+
+
+def _design_line(scene: dict, payload) -> str:
+    """One line a reader diagnoses a form card by (fix round 1a-5): the form, both sealed spans, who
+    designed it (model / rules + the pick id), the lint counts with their codes, and the frame (question
+    kind + wants) the design was made under; "" for a legacy scene."""
+    if not isinstance(payload, dict) or payload.get("type") != "form":
+        return ""
+    clir = payload.get("clir") or {}
+    spans = "/".join(str((clir.get(side) or {}).get("span") or "?") for side in ("desktop", "phone"))
+    design = payload.get("design") or scene.get("design") or {}
+    lint = payload.get("lint") or {}
+    frame = scene.get("frame") or {}
+    flags = (" fallback" if (scene.get("design") or {}).get("fallback") else "") + \
+        (" design_needs_attention" if payload.get("design_needs_attention") else "")
+    return (f"{payload.get('form')} {spans} designer={design.get('designer', '?')}/{design.get('pick', '?')} "
+            f"lint red {lint.get('red', '?')} amber {lint.get('amber', '?')} {lint.get('codes') or []} "
+            f"frame={frame.get('kind')} wants={frame.get('wants') or []}{flags}")
 
 
 def _texts(node, acc=None) -> list[str]:
@@ -253,6 +272,8 @@ def main() -> int:
                   flush=True)
         elif r.get("scene_text"):
             print(f"{'':>15}card:   {' | '.join(r['scene_text'])[:200]}", flush=True)
+        if r.get("design"):
+            print(f"{'':>15}design: {r['design'][:240]}", flush=True)
         for link in r.get("links") or []:  # offered as links, never built (ruling 2026-10-05)
             print(f"{'':>15}link:   {link['host']} — {link['title'] or '(no title)'}", flush=True)
     counts: dict[str, int] = {}

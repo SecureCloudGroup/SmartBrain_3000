@@ -17,6 +17,7 @@ re-enumeration (``swap_to_second``) — the record stays byte-identical.
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from . import profile
@@ -25,7 +26,7 @@ from .layout import layout_span
 from .present import present
 from .record import from_answers, history_key
 from .spans import Span
-from .types import Candidate, DataRecord, PresentResult
+from .types import MAX_WANT_CHARS, MAX_WANTS, Candidate, DataRecord, PresentResult
 
 _MAX_TRACKS = 4        # ni._MAX_HISTORY_SERIES
 _HISTORY_POINTS = 200  # ni clamps max_points to 500; 200 keeps a sparkline week-deep at 15 min
@@ -125,38 +126,59 @@ def _candidate_seal(cand: Candidate) -> dict:
             "params": dict(cand.params or {}), "spans": {"desktop": cand.default_span, "phone": phone}}
 
 
-def form_scene(chosen: list[dict], outputs: dict, *, title: str, ask: str,
-               now: datetime, source_url: str | None = None, cadence_s: int = 0,
-               rows_output_name: str | None = None,
-               call_model: Callable[[str], str] | None = None,
-               viewer_tz: str = "UTC") -> dict:
-    """Return a sealed §34 form scene node from chosen Library answers + outputs.
+@dataclass
+class Design:
+    """What ``design`` decided, for the flow (``node``) and for tests that read the layout the
+    pick was judged by (``cand`` / ``cands`` / ``rec`` / ``prof`` / ``inp`` / ``present``)."""
 
-    The caller passes the SAME ``chosen`` the sealed pipeline consumed and the
-    SAME ``outputs`` the pipeline produced; the engine designs the card from them.
+    node: dict
+    cand: Candidate
+    cands: list
+    rec: DataRecord
+    prof: object
+    inp: object
+    present: PresentResult
 
-    ``now`` is injected (the flow stamps it when it fetched); forms code never
-    reads the clock itself. ``rows_output_name`` names the top-level outputs
-    key holding the list rows (``"rows"`` for the Library-answers path); None
-    = value-answer path. ``viewer_tz`` is the user's IANA zone (the card zone
-    when the source names none).
-    """
+
+def frame_of(question_kind: str | None, wants: list | None) -> dict | None:
+    """The sealed ``frame`` leaf (None = legacy node, nothing to seal): the closed kind and
+    at most MAX_WANTS user words of MAX_WANT_CHARS."""
+    assert question_kind is None or isinstance(question_kind, str), "question_kind must be a str or None"
+    assert wants is None or isinstance(wants, list), "wants must be a list or None"
+    clean = [str(w)[:MAX_WANT_CHARS] for w in (wants or [])[:MAX_WANTS] if isinstance(w, str) and w.strip()]
+    if not question_kind and not clean:
+        return None
+    return {"kind": question_kind or None, "wants": clean}
+
+
+def design(chosen: list[dict], outputs: dict, *, title: str, ask: str,
+           now: datetime, source_url: str | None = None, cadence_s: int = 0,
+           rows_output_name: str | None = None,
+           call_model: Callable[[str], str] | None = None,
+           viewer_tz: str = "UTC", question_kind: str | None = None,
+           wants: list | None = None) -> Design:
+    """Design the card: record → profile → enumerate → present → the sealed §34 node, plus the
+    engine objects behind it. ``question_kind`` / ``wants`` are the ask's frame (fix round 1a-5):
+    they ride on the CardInput (the floor prior, the asked-field rule, PRESENT's menu) and are
+    sealed as ``frame`` so the bind re-enumerates under the same prior."""
     assert isinstance(chosen, list) and chosen, "chosen required"
     assert isinstance(outputs, dict), "outputs required"
     assert isinstance(now, datetime) and now.tzinfo is not None, "now must be an aware datetime"
+    frame = frame_of(question_kind, wants)
     context = {"source_url": source_url, "viewer_tz": viewer_tz,
                "fetched_at": now.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")}
     rec, inp = from_answers(chosen, outputs, history=None, context=context, ask=ask,
-                            title=title, cadence_s=cadence_s, rows_output_name=rows_output_name)
+                            title=title, cadence_s=cadence_s, rows_output_name=rows_output_name,
+                            question_kind=frame["kind"] if frame else None,
+                            wants=frame["wants"] if frame else None)
     prof = profile.profile(rec, inp, now)
     cands = enumerate_cands(rec, prof, inp, now)
-    if not cands:
-        raise ValueError("form_scene: no candidate forms for this record")
+    assert cands, "enumerate always returns a candidate (the universal fallback)"
     res = present(cands, rec, prof, inp, call=_flow_model_adapter(call_model))
     chosen_cand, second_cand = _pick_candidate(res, cands)
     pick = _candidate_seal(chosen_cand)
     _layout_once(chosen_cand, rec, prof, inp, pick["spans"]["desktop"], now)  # lint fires at build
-    return {
+    node = {
         "type": "form",
         "form": pick["form"],
         "variant": pick["variant"],
@@ -173,6 +195,36 @@ def form_scene(chosen: list[dict], outputs: dict, *, title: str, ask: str,
             "second": _candidate_seal(second_cand) if second_cand is not None else None,
         },
     }
+    if chosen_cand.fallback:
+        node["design"]["fallback"] = True
+    if frame is not None:
+        node["frame"] = frame
+    return Design(node=node, cand=chosen_cand, cands=cands, rec=rec, prof=prof, inp=inp, present=res)
+
+
+def form_scene(chosen: list[dict], outputs: dict, *, title: str, ask: str,
+               now: datetime, source_url: str | None = None, cadence_s: int = 0,
+               rows_output_name: str | None = None,
+               call_model: Callable[[str], str] | None = None,
+               viewer_tz: str = "UTC", question_kind: str | None = None,
+               wants: list | None = None) -> dict:
+    """Return a sealed §34 form scene node from chosen Library answers + outputs.
+
+    The caller passes the SAME ``chosen`` the sealed pipeline consumed and the
+    SAME ``outputs`` the pipeline produced; the engine designs the card from them.
+
+    ``now`` is injected (the flow stamps it when it fetched); forms code never
+    reads the clock itself. ``rows_output_name`` names the top-level outputs
+    key holding the list rows (``"rows"`` for the Library-answers path); None
+    = value-answer path. ``viewer_tz`` is the user's IANA zone (the card zone
+    when the source names none). ``question_kind`` / ``wants``: the ask's frame
+    (absent = legacy: no prior beyond the data's shape).
+    """
+    assert isinstance(chosen, list) and chosen, "chosen required"
+    assert isinstance(outputs, dict), "outputs required"
+    return design(chosen, outputs, title=title, ask=ask, now=now, source_url=source_url, cadence_s=cadence_s,
+                  rows_output_name=rows_output_name, call_model=call_model, viewer_tz=viewer_tz,
+                  question_kind=question_kind, wants=wants).node
 
 
 def _layout_once(cand: Candidate, rec: DataRecord, prof, inp, span_key: str, now: datetime) -> None:
@@ -200,7 +252,7 @@ def swap_to_second(node: dict) -> dict:
     out["form"], out["variant"] = second["form"], second["variant"]
     out["params"], out["spans"] = dict(second.get("params") or {}), dict(second["spans"])
     out["design"] = {"designer": node["design"]["designer"], "pick": second["id"], "second": former}
-    return out
+    return out   # the sealed frame (when present) rides along: the same prior at every bind
 
 
 def history_track_for(record_fields: list[dict], rows_name: str | None) -> dict | None:

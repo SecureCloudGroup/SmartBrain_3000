@@ -64,8 +64,9 @@ class MapLite(BaseForm):
     def summary(self, cand, rec, now):
         R = RView(rec)
         b = cand.bindings
-        return f"{len(rec.rows)} places" + ("; " + "; ".join(R.text(i, b["name"]) for i in self._order(R, b)[:3])
-                                           if b.get("name") else "")
+        n = len(rec.rows)
+        return f"{n} place{'' if n == 1 else 's'}" + \
+            ("; " + "; ".join(R.text(i, b["name"]) for i in self._order(R, b)[:3]) if b.get("name") else "")
 
     def _order(self, R, b):
         idx = [i for i in range(len(R.rows)) if R.num(i, b["lat"]) is not None and R.num(i, b["lon"]) is not None]
@@ -82,7 +83,14 @@ class MapLite(BaseForm):
             return
         cv.d.meta["no_balance"] = True
         drop = ctx.rung.get("drop", 0)
-        if plan == "side":
+        # a list beside / under the map only when a row has something to say (a name or a value):
+        # one unnamed point takes the whole box, and nothing is counted as "more" (fix round 1a-5, E)
+        listable = bool(b.get("name") or b.get("value"))
+        if not listable:
+            fa, fb = 0.0, 1.0
+            mt, mb = y0, y1
+            lx, ly0, ly1 = 0.0, y1, y1
+        elif plan == "side":
             fa, fb = 0.0, 0.55
             mt, mb = y0, y1
             lx, ly0, ly1 = 0.58, y0, y1
@@ -139,9 +147,9 @@ class MapLite(BaseForm):
                 cv.text(["f", lx] if not vw else ["f", lx + (vw + 8) / W], y, ["raw", b["name"], i], "sub",
                         src="data", max_w=max(20, lw - vw - 8), tok="text")
             y += lh_
-        if len(idx) > k_:
+        if listable and len(idx) > k_:
             more_line(cv, ["f", lx], y + 2, len(idx) - k_, lw)
-        cv.d.state = "one" if len(idx) == 1 else ("many" if len(idx) > k_ else "few")
+        cv.d.state = "one" if len(idx) == 1 else ("many" if listable and len(idx) > k_ else "few")
 
 
 FORM = MapLite()

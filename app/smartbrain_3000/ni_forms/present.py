@@ -17,6 +17,7 @@ from pathlib import Path
 
 from . import llm
 from .canon import sha256
+from .enumerate import dropped_asked
 from .rec import R as RView
 from .rec import as_input, as_profile, as_record
 from .types import INTENTS, DesignChoice, PresentResult
@@ -63,7 +64,10 @@ def build_messages(cands, rec, prof, inp) -> tuple[list, list, dict]:
                        "days": prof.time.days, "covers_today": prof.time.covers_today} if prof.time else None}
     sample = [{f.name: _cell(r[i]) for i, f in enumerate(rec.fields[:12])} for r in rec.rows[:5]]
     shots = _fewshots(prof)
+    frame = {"kind": getattr(inp, "question_kind", None), "wants": list(getattr(inp, "wants", None) or []),
+             "asked_fields": list(getattr(prof, "asked", None) or [])}
     user = ("Ask: " + json.dumps(inp.ask) + "\nTitle: " + json.dumps(inp.title) +
+            "\nFrame: " + json.dumps(frame) +
             "\nProfile: " + json.dumps(prof_c) +
             "\nOptions: " + json.dumps(menu) +
             "\n<untrusted_data>" + json.dumps(sample, ensure_ascii=False) + "</untrusted_data>" +
@@ -97,14 +101,21 @@ def build_messages(cands, rec, prof, inp) -> tuple[list, list, dict]:
 
 
 def _gates(c, cands, prof) -> list[str]:
-    """Hard gates 2 and 3 for candidate c (empty = passes)."""
+    """Hard gates 2 and 3 for candidate c (empty = passes). L-ASK fires when another candidate covers
+    a want this one leaves uncovered, or keeps a field the ask names that this one's default span
+    drops (fix round 1a-5: the asked quantity is never in the drop list)."""
     out = []
     if not c.plans or not c.default_span:
         out.append(f"no_valid_span:{c.id}")
     wants = set(prof.wants or [])
     missing = wants - set(c.covers)
+    asked = set(getattr(prof, "asked", None) or [])
+    lost = dropped_asked(c, c.default_span, asked) if c.default_span else set()
     for o in cands:
-        if o.id != c.id and missing & set(o.covers):
+        if o.id == c.id:
+            continue
+        kept = lost - dropped_asked(o, o.default_span, asked) if (lost and o.default_span) else set()
+        if missing & set(o.covers) or kept:
             out.append(f"L-ASK:{c.id}")
             break
     return out

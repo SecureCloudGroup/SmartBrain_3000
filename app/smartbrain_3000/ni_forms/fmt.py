@@ -114,6 +114,32 @@ def decimals(field, v, *, derived: bool = False) -> int:
     return 3 if a >= 0.01 else 4
 
 
+def column_decimals(field, values: list) -> int | None:
+    """The precision a column publishes: ``Field.precision`` when the source stated it, else the
+    most decimals its values are written with (None for an empty / unrounded column)."""
+    assert isinstance(values, list), "values must be a list"
+    assert field is None or hasattr(field, "precision"), "field must be a Field or None"
+    if field is not None and field.precision is not None and not getattr(field, "unrounded", False):
+        return field.precision
+    if field is not None and getattr(field, "unrounded", False):
+        return None
+    obs = [_published_decimals(x) for x in values if is_num(x)]
+    return max(obs) if obs else None
+
+
+def stat_decimals(field, values: list, v: float) -> int:
+    """Decimals for a statistic DERIVED over a column (an average): the magnitude rule, clamped to
+    the column's own precision .. precision + 1 — never "0.0000 in" over a one-decimal column, never
+    fewer decimals than the column shows (fix round 1a-5, class G)."""
+    assert isinstance(values, list), "values must be a list"
+    assert is_num(v), "v must be a finite number"
+    mag = decimals(field, v, derived=True)
+    pub = column_decimals(field, values)
+    if pub is None:
+        return mag
+    return pub if mag <= pub else min(mag, pub + 1)
+
+
 def num(v: float, dec: int, *, sign: bool = False, grouping: bool = True) -> str:
     if v is None or (isinstance(v, float) and not math.isfinite(v)):
         return ""

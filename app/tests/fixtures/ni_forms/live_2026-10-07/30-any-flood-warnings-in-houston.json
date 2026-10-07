@@ -1,0 +1,82 @@
+{
+ "id": "30-any-flood-warnings-in-houston",
+ "n": 30,
+ "ask": "any flood warnings in Houston",
+ "kind": "alerts",
+ "frame_kind": "alerts",
+ "subject": "flood warnings",
+ "title": "flood warnings",
+ "source_id": "nws-alerts-point",
+ "source_url": "https://api.weather.gov/alerts/active?point=29.785743,-95.388806",
+ "fetched_at": "2026-10-07T12:05:54Z",
+ "viewer_tz": "UTC",
+ "answers_used": [
+  {
+   "name": "alerts",
+   "label": "Active weather alerts",
+   "words": [
+    "alerts",
+    "warnings",
+    "watches",
+    "advisories",
+    "severe weather",
+    "any warnings",
+    "near me",
+    "tornado warning",
+    "severe thunderstorm warning",
+    "flood warning",
+    "flash flood",
+    "winter storm warning",
+    "blizzard warning",
+    "heat advisory",
+    "red flag warning"
+   ],
+   "primary": true,
+   "kind": "list",
+   "path": "features",
+   "newest_first": false,
+   "may_be_empty": true,
+   "cells": [
+    {
+     "path": "properties.event",
+     "label": "Alert",
+     "type": "text",
+     "key": "properties.event",
+     "unit": null
+    },
+    {
+     "path": "properties.severity",
+     "label": "Severity",
+     "type": "text",
+     "key": "properties.severity",
+     "unit": null
+    },
+    {
+     "path": "properties.areaDesc",
+     "label": "Area",
+     "type": "text",
+     "key": "properties.areaDesc",
+     "unit": null
+    },
+    {
+     "path": "properties.expires",
+     "label": "Expires",
+     "type": "time",
+     "key": "properties.expires",
+     "unit": null
+    }
+   ]
+  }
+ ],
+ "rows_output_name": "rows",
+ "outputs": {
+  "rows_count": 0,
+  "rows": []
+ },
+ "live_form": "entity_list",
+ "live_span": "d1x1",
+ "live_lint": {
+  "red": 0,
+  "amber": 0
+ }
+}

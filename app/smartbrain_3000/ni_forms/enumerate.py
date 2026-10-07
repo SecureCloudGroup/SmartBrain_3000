@@ -4,7 +4,12 @@ designed 0/1-row states for record forms) to compute `plans` / `rejected_spans`,
 `covers`, `default_span`, `phone_span`; ranked by the rules floor; <= 6 kept.
 
 The floor is a code table of signature -> form preference plus want coverage plus a
-lint-clean default. No words, no per-card settings, never shown to the model.
+lint-clean default, then the FRAME prior (fix round 1a-5, plan contract B2: the ask's
+question kind -> forms, `KIND_FORMS`) and the asked-field rule (a span that drops the
+field the ask names ranks below one that keeps it). `next_event` is offered only for a
+next_event / schedule question or a `next` want. When nothing survives, `fallback`
+returns the honest plain card (table / kv_grid) so a record never leaves without a form.
+No words, no per-card settings, never shown to the model.
 """
 from __future__ import annotations
 
@@ -12,7 +17,7 @@ import builtins
 from datetime import datetime
 
 from .layout import layout_span
-from .rec import as_input, as_profile, as_record
+from .rec import as_input, as_profile, as_record, is_displayable
 from .registry import FORMS
 from .spans import ALL_SPANS, Span, phone_default
 from .types import Candidate, Reject
@@ -47,6 +52,35 @@ POS_W = (1.0, 0.72, 0.52, 0.38, 0.28)
 # Port manifest 2026-10-06: cap at 4 (proto was 6); PRESENT's model prompt fits ≤4 cleanly.
 MAX_CANDS = 4
 MAX_PER_FORM = 2
+# B2 question kind -> forms in preference order (fix round 1a-5). `measure` = a one-row value record;
+# rows records pick by their axis: `hour` (sub-daily grain), `day` (a dated axis), `timed` (any axis)
+# and `rows` (no axis / the rest). The prior outranks the signature table (FRAME_W >= its max).
+KIND_FORMS: dict[str, dict[str, list[str]]] = {
+    "current_value": {"measure": ["stat", "conditions", "kv_grid"], "rows": ["series_line", "table"]},
+    "forecast": {"measure": ["conditions", "stat"], "hour": ["series_line", "conditions", "day_table", "agenda"],
+                 "day": ["day_table", "series_line"], "rows": ["day_table", "table"]},
+    # event_curve leads the timed lists: its match() only accepts the alternating-extrema signature
+    # (tides), where the curve with the next-event headline is the designed card (plan B2)
+    "next_event": {"measure": ["next_event", "stat"], "timed": ["event_curve", "next_event", "agenda", "day_table"],
+                   "rows": ["table", "ranked_list", "kv_grid"]},
+    "schedule": {"measure": ["next_event", "stat"], "timed": ["event_curve", "agenda", "day_table", "next_event"],
+                 "rows": ["table", "ranked_list"]},
+    "result": {"measure": ["stat"], "rows": ["entity_list", "table", "ranked_list"]},
+    "latest_items": {"measure": ["stat"], "rows": ["ranked_list", "table"]},
+    "ranking": {"measure": ["stat"], "rows": ["table", "ranked_list", "bars"]},
+    "trend": {"measure": ["stat"], "rows": ["series_line", "table"]},
+    "status": {"measure": ["stat", "conditions"], "rows": ["entity_list", "table"]},
+    "alerts": {"measure": ["stat"], "rows": ["entity_list", "table"]},
+    "count": {"measure": ["stat"], "rows": ["entity_list", "table"]},
+    "lookup": {"measure": ["kv_grid", "stat"], "rows": ["table", "ranked_list", "kv_grid"]},
+    "compare": {"measure": ["kv_grid", "compare"], "rows": ["table", "compare", "bars"]},
+    "map": {"measure": ["map_lite"], "rows": ["map_lite", "table"]},
+    "image": {"measure": ["image"], "rows": ["image"]},
+    "text_brief": {"measure": ["text_brief"], "rows": ["text_brief"]},
+}
+FRAME_W = 1.0            # weight of the frame prior (the signature prior's maximum)
+ASKED_PENALTY = 0.6      # a default span that drops a field the ask names loses this much
+_SUB_DAILY = ("second", "minute", "quarter_hour", "hour")
 
 
 def _area(s: Span) -> tuple:
@@ -63,6 +97,53 @@ def floor_score(form: str, prof, covers_any: set, covers_default: set) -> float:
     if wants:
         sc += 0.35 * len(wants & covers_default) / len(wants) + 0.1 * len(wants & covers_any) / len(wants)
     return round(sc, 4)
+
+
+def frame_forms(kind: str | None, rec, prof) -> list[str]:
+    """The B2 forms for the ask's question kind and this record's shape ([] = no prior: the words
+    stated no kind). A rows record on a sub-daily axis is an `hour` series, on a dated axis a
+    `day` series; a next_event / schedule question over rows with no time axis is a lookup."""
+    assert kind is None or isinstance(kind, str), "kind must be a str or None"
+    assert prof is not None, "prof required"
+    entry = KIND_FORMS.get(kind or "")
+    if not entry:
+        return []
+    if rec is not None and rec.kind == "measure":
+        return entry["measure"]
+    tp = prof.time
+    timed = tp is not None and tp.field is not None
+    if kind == "forecast" and timed:
+        return entry["hour"] if tp.grain in _SUB_DAILY else entry["day"]
+    if kind in ("next_event", "schedule") and timed:
+        return entry["timed"]
+    return entry["rows"]
+
+
+def frame_bonus(form: str, forms: list[str]) -> float:
+    """FRAME_W scaled by the form's place in the kind's list; 0 when the frame names it nowhere."""
+    assert isinstance(form, str), "form must be a str"
+    assert isinstance(forms, list), "forms must be a list"
+    if form not in forms:
+        return 0.0
+    return FRAME_W * POS_W[min(forms.index(form), len(POS_W) - 1)]
+
+
+def next_event_eligible(inp, prof) -> bool:
+    """`next_event` answers a next_event / schedule question or a `next` want — never an hourly
+    forecast or a lookup list that happens to hold a future time (live 2026-10-07). A sealed form
+    is never withheld at bind: ``enumerate(keep=...)`` names it."""
+    assert prof is not None, "prof required"
+    kind = getattr(inp, "question_kind", None) if inp is not None else None
+    return kind in ("next_event", "schedule") or "next" in (prof.wants or [])
+
+
+def dropped_asked(cand: Candidate, span_key: str, asked: set) -> set:
+    """The asked fields a candidate's plan at `span_key` does not show."""
+    assert isinstance(cand, Candidate), "cand must be a Candidate"
+    assert isinstance(asked, set), "asked must be a set"
+    if not asked:
+        return set()
+    return asked - set((cand.shows.get(span_key) or {}).get("fields", []))
 
 
 def validate_spans(form, cand: Candidate, rec, prof, inp, now: datetime) -> tuple[dict, dict]:
@@ -131,7 +212,8 @@ def _smaller(ka: str, kb: str) -> bool:
 
 def pick_default(form, cand: Candidate, prof, n_rows: int = 0, rec_roles: dict | None = None
                  ) -> tuple[str | None, set, set]:
-    """The smallest desktop span that covers the reachable wants AND meets the density floor: an
+    """The smallest desktop span that keeps every field the ask names (fix round 1a-5: the asked
+    quantity is never in the drop list), covers the reachable wants AND meets the density floor: an
     untruncated title, and for a record form at least min(3, rows) data rows (review 3/4: the 1x1 HN
     card showed 2 of 30 headlines)."""
     desk = [Span.parse(k) for k in cand.plans if k.startswith("d")]
@@ -141,6 +223,10 @@ def pick_default(form, cand: Candidate, prof, n_rows: int = 0, rec_roles: dict |
     cov_by = {s.key: set(form.covers(cand, prof, s.sclass)) for s in desk}
     wants = set(prof.wants or [])
     reach = set().union(*cov_by.values()) & wants
+    asked = set(getattr(prof, "asked", None) or [])
+    # an asked field no span of this candidate shows is not held against any span (the floor's
+    # penalty and PRESENT's L-ASK gate judge the candidate as a whole)
+    asked &= set().union(*(set((cand.shows.get(s.key) or {}).get("fields", [])) for s in desk))
 
     b = cand.bindings or {}
     lead = b.get("value") or next((m for m in (b.get("metrics") or []) if m in rec_roles and rec_roles[m] == "value"),
@@ -156,10 +242,12 @@ def pick_default(form, cand: Candidate, prof, n_rows: int = 0, rec_roles: dict |
         if lead_somewhere and lead not in sh.get("fields", []):
             return False              # the default span shows the reading the card leads with (round 1)
         return True
-    for need_dense in (True, False):
-        for s in sorted(desk, key=_area):
-            if reach <= cov_by[s.key] and (dense(s) or not need_dense):
-                return s.key, reach, cov_by[s.key]
+    for keep_asked in (True, False):
+        for need_dense in (True, False):
+            for s in sorted(desk, key=_area):
+                if reach <= cov_by[s.key] and (dense(s) or not need_dense) and \
+                        (not dropped_asked(cand, s.key, asked) or not keep_asked):
+                    return s.key, reach, cov_by[s.key]
     s = min(desk, key=_area)
     return s.key, reach, cov_by[s.key]
 
@@ -175,11 +263,13 @@ def phone_pick(desk_key: str, valid: set, cand: Candidate):
     return phone_default(d, valid)
 
 
-def enumerate(rec, prof, inp, now: datetime) -> list[Candidate]:
+def enumerate(rec, prof, inp, now: datetime, keep: frozenset = frozenset()) -> list[Candidate]:
     rec, prof, inp = as_record(rec), as_profile(prof), as_input(inp)
     raw = []
     for name in sorted(FORMS):
         form = FORMS[name]
+        if name == "next_event" and name not in keep and not next_event_eligible(inp, prof):
+            continue   # ``keep``: the bind always offers the SEALED form (a legacy node has no frame)
         try:
             ms = form.match(rec, prof)
         except Exception:          # a form that cannot read this record simply does not match
@@ -189,7 +279,7 @@ def enumerate(rec, prof, inp, now: datetime) -> list[Candidate]:
     cands: list[Candidate] = []
     for name, m in raw:
         form = FORMS[name]
-        c = Candidate(id="c?", form=name, variant=m["variant"], bindings=m["bindings"], params=m["params"],
+        c = Candidate(id=f"m{len(cands)}", form=name, variant=m["variant"], bindings=m["bindings"], params=m["params"],
                       describes="", covers=[], intent=form.intent(m["variant"], m["params"]), plans={},
                       rejected_spans={}, default_span="", phone_span=None, floor_score=0.0)
         c.plans, c.rejected_spans = validate_spans(form, c, rec, prof, inp, now)
@@ -207,7 +297,7 @@ def enumerate(rec, prof, inp, now: datetime) -> list[Candidate]:
             cov_any |= set(form.covers(c, prof, Span.parse(k).sclass))
         c.floor_score = floor_score(name, prof, cov_any, cov_def)
         cands.append(c)
-    ranked = floor_rank(cands, prof)
+    ranked = floor_rank(cands, prof, inp=inp, rec=rec)
     out, per = [], {}
     for c in ranked:
         if per.get(c.form, 0) >= MAX_PER_FORM:
@@ -216,11 +306,75 @@ def enumerate(rec, prof, inp, now: datetime) -> list[Candidate]:
         out.append(c)
         if len(out) >= MAX_CANDS:
             break
+    if not out:
+        out = [fallback(rec, prof, inp, now)]
     for i, c in builtins.enumerate(out):
         c.id = f"c{i}"
     return out
 
 
-def floor_rank(cands: list[Candidate], prof) -> list[Candidate]:
-    """Signatures + want coverage only (stable: ties keep match order)."""
-    return sorted(cands, key=lambda c: -c.floor_score)
+def floor_rank(cands: list[Candidate], prof, inp=None, rec=None) -> list[Candidate]:
+    """The floor order (stable: ties keep match order), in tiers: (1) candidates whose default span
+    keeps every field the ask names, before any that drops one (the asked quantity is never in the
+    drop list); (2) the frame prior — the B2 forms for `inp.question_kind` in their order, before
+    forms the frame names nowhere; (3) signatures + want coverage (each candidate's `floor_score` on
+    entry). The numeric `floor_score` is finalized too (frame bonus, asked penalty) for the record
+    and PRESENT's second-option threshold — call once per enumeration."""
+    assert isinstance(cands, list), "cands must be a list"
+    assert prof is not None, "prof required"
+    forms = frame_forms(getattr(inp, "question_kind", None) if inp is not None else None, rec, prof)
+    asked = set(getattr(prof, "asked", None) or [])
+    lost = {c.id: bool(c.default_span and dropped_asked(c, c.default_span, asked)) for c in cands}
+    for c in cands:
+        c.floor_score = round(c.floor_score + frame_bonus(c.form, forms) - (ASKED_PENALTY if lost[c.id] else 0.0), 4)
+    rank = {c.id: forms.index(c.form) if c.form in forms else len(forms) for c in cands}
+    return sorted(cands, key=lambda c: (lost[c.id], rank[c.id], -c.floor_score))
+
+
+def _fallback_match(form_name: str, rec, prof) -> dict:
+    """The form's own match when it has one, else a binding over every displayable column
+    (a table with two columns, a measure with one field): the plain card always has one."""
+    assert form_name in ("table", "kv_grid"), "fallback forms are table / kv_grid"
+    assert rec is not None, "rec required"
+    ms = FORMS[form_name].match(rec, prof)
+    if ms:
+        return ms[0]
+    cols = [f.name for f in rec.fields if is_displayable(f) and f.type not in ("lat", "lon")] or \
+        [f.name for f in rec.fields]
+    if form_name == "kv_grid":
+        return {"variant": "fields", "bindings": {"fields": cols[:24]}, "params": {}}
+    name = next((f.name for f in rec.fields if f.name in cols and f.type in ("text", "category")), cols[0])
+    return {"variant": "plain", "bindings": {"columns": cols[:10], "name": name}, "params": {}}
+
+
+def fallback(rec, prof, inp, now: datetime) -> Candidate:
+    """The universal fallback (fix round 1a-5, class C): when no candidate survives, a `table`
+    (records / events / series) or a `kv_grid` (measure) over the record, at its smallest desktop
+    span whose lint is clean — else the smallest span the form accepts, its lint recorded by the
+    bind (`lint.codes`) rather than enforced. The card is honest and plain, never missing."""
+    assert rec is not None and prof is not None, "rec + prof required"
+    assert isinstance(now, datetime), "now must be a datetime"
+    form_name = "kv_grid" if rec.kind == "measure" else "table"
+    form = FORMS[form_name]
+    m = _fallback_match(form_name, rec, prof)
+    c = Candidate(id="c0", form=form_name, variant=m["variant"], bindings=m["bindings"], params=m["params"],
+                  describes="", covers=[], intent=form.intent(m["variant"], m["params"]), plans={},
+                  rejected_spans={}, default_span="", phone_span=None, floor_score=0.0, fallback=True)
+    clean: dict[str, bool] = {}
+    for sp in ALL_SPANS:
+        a = form.accepts(c, rec, prof, sp)
+        if isinstance(a, Reject):
+            c.rejected_spans[sp.key] = a.code
+            continue
+        lo = layout_span(c, rec, prof, inp, sp, now)
+        c.plans[sp.key] = a
+        c.shows[sp.key] = lo.content
+        clean[sp.key] = lo.lint.ok
+    desk = [k for k in c.plans if k.startswith("d")]
+    assert desk, "table / kv_grid accept a desktop span at every shape"
+    c.default_span = min([k for k in desk if clean[k]] or desk, key=lambda k: _area(Span.parse(k)))
+    ps = phone_pick(c.default_span, {Span.parse(k) for k in c.plans}, c)
+    c.phone_span = ps.key if ps else None
+    c.describes = form.describes(c, rec)
+    c.covers = sorted(form.covers(c, prof, Span.parse(c.default_span).sclass))
+    return c

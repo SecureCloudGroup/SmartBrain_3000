@@ -201,8 +201,13 @@ class DayTable(BaseForm):
         return "One row per day starting today, today highlighted"
 
     def summary(self, cand, rec, now):
-        RView(rec)
-        return f"{len(rec.rows)} entries by day"
+        R = RView(rec)
+        b = cand.bindings
+        lead = b.get("value") or b.get("hi") or b.get("name")
+        if not rec.rows or not lead:
+            return f"{len(rec.rows)} entries by day"
+        vals = "; ".join(R.text(i, lead) for i in range(min(5, len(rec.rows))))
+        return f"{len(rec.rows)} entries by day · {R.f[lead].label}: {vals}"
 
     def plan_body(self, ctx: LayoutCtx, cv: Canvas, plan: str):
         R, b = ctx.R, ctx.cand.bindings

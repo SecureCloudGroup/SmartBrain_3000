@@ -64,7 +64,9 @@ class NextEvent(BaseForm):
         if k is None:
             return "Nothing upcoming"
         e = evs[k]
-        return f"Next: {fmt.format_time(e.iso, 'MMM d, h:mm a', rec.context.card_tz) if not e.all_day else e.iso}"
+        when = fmt.format_time(e.iso, 'MMM d, h:mm a', rec.context.card_tz) if not e.all_day else e.iso
+        name = R.text(e.row, cand.bindings["name"]) if cand.bindings.get("name") else ""
+        return f"Next: {name} · {when}" if name else f"Next: {when}"
 
     def plan_body(self, ctx: LayoutCtx, cv: Canvas, plan: str):
         R, b, W = ctx.R, ctx.cand.bindings, ctx.W

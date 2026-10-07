@@ -1,0 +1,128 @@
+{
+ "id": "18-latest-npr-headlines",
+ "n": 18,
+ "ask": "latest NPR headlines",
+ "kind": "latest_items",
+ "frame_kind": "latest_items",
+ "subject": "NPR headlines",
+ "title": "NPR headlines",
+ "source_id": "npr-news",
+ "source_url": "https://feeds.npr.org/1001/rss.xml",
+ "fetched_at": "2026-10-07T12:01:32Z",
+ "viewer_tz": "UTC",
+ "answers_used": [
+  {
+   "name": "latest",
+   "label": "Headlines",
+   "words": [
+    "headlines",
+    "news",
+    "breaking",
+    "top stories",
+    "latest"
+   ],
+   "primary": true,
+   "kind": "list",
+   "path": "items",
+   "newest_first": false,
+   "may_be_empty": false,
+   "cells": [
+    {
+     "path": "title",
+     "label": "Title",
+     "type": "text",
+     "key": "title",
+     "unit": null
+    },
+    {
+     "path": "published",
+     "label": "Published",
+     "type": "time",
+     "key": "published",
+     "unit": null
+    }
+   ]
+  }
+ ],
+ "rows_output_name": "rows",
+ "outputs": {
+  "rows": [
+   {
+    "published": "2026-10-07T06:52:58-04:00",
+    "summary": "A possible Iranian threat led the U.S. to remove long-range bombers from a U.K. base. And, Israelis are learning that their prime minister may have been warned before the Oct. 7 attacks.",
+    "link": "https://www.npr.org/2026/10/07/g-s1-146853/up-first-newsletter-long-range-bombers-france-high-school-protest-germany-august-hanning-oct-7-memorial-day",
+    "title": "U.S. moves long-range bombers from U.K. And, Israel allegedly warned before Oct. 7",
+    "guid": "https://www.npr.org/2026/10/07/g-s1-146853/up-first-newsletter-long-range-bombers-france-high-school-protest-germany-august-hanning-oct-7-memorial-day"
+   },
+   {
+    "published": "2026-10-07T06:30:00-04:00",
+    "summary": "A thinly traded prediction market offers a starting point. We explore potential winners and the big ideas that could earn them economics' biggest prize.",
+    "link": "https://www.npr.org/sections/planet-money/2026/10/07/g-s1-146828/who-will-win-the-2026-nobel-prize-in-economics",
+    "title": "Who will win the 2026 Nobel Prize in economics?",
+    "guid": "https://www.npr.org/sections/planet-money/2026/10/07/g-s1-146828/who-will-win-the-2026-nobel-prize-in-economics"
+   },
+   {
+    "published": "2026-10-07T06:05:54-04:00",
+    "summary": "Henri B. Kagan and Kenso Soai won the Nobel Prize in chemistry Wednesday for their discovery of non-linear effects and autocatalysis in asymmetric organic synthesis.",
+    "link": "https://www.npr.org/2026/10/07/g-s1-146849/nobel-prize-chemistry",
+    "title": "Henri B. Kagan and Kenso Soai win Nobel Prize in chemistry",
+    "guid": "https://www.npr.org/2026/10/07/g-s1-146849/nobel-prize-chemistry"
+   },
+   {
+    "published": "2026-10-07T05:00:00-04:00",
+    "summary": "It's not just mortgages being at their highest level in almost three years — but the cost of loans for cars and higher education are among the borrowing costs affected, too.",
+    "link": "https://www.npr.org/2026/10/07/nx-s1-5991910/interest-rates-economy-inflation-bonds",
+    "title": "Here's the latest sticker shock: Borrowing for a mortgage -- or a car",
+    "guid": "https://www.npr.org/2026/10/07/nx-s1-5991910/interest-rates-economy-inflation-bonds"
+   },
+   {
+    "published": "2026-10-07T05:00:00-04:00",
+    "summary": "Researchers uncovered the graves of more than 1,000 children next to juvenile detention facilities in 29 states. At one Maryland gravesite, 230 Black boys are buried.",
+    "link": "https://www.npr.org/2026/10/07/nx-s1-5986124/over-1-000-children-are-buried-at-juvenile-detention-centers-nationwide",
+    "title": "Over 1,000 children are buried at juvenile detention centers nationwide",
+    "guid": "https://www.npr.org/2026/10/07/nx-s1-5986124/over-1-000-children-are-buried-at-juvenile-detention-centers-nationwide"
+   },
+   {
+    "published": "2026-10-07T05:00:00-04:00",
+    "summary": "Flu season typically starts in October or November. But it looks like the flu started to pick up in September this year.",
+    "link": "https://www.npr.org/2026/10/07/nx-s1-5992940/early-flu-season-vaccine",
+    "title": "An early flu season means it might be time to think about a flu shot",
+    "guid": "https://www.npr.org/2026/10/07/nx-s1-5992940/early-flu-season-vaccine"
+   },
+   {
+    "published": "2026-10-07T05:00:00-04:00",
+    "summary": "Midterm candidates are talking up Medicare for All, and in a poll 2 out of 3 Americans said they support it. The phrase speaks to a desire for radical change, though many don't really know what it is.",
+    "link": "https://www.npr.org/2026/10/07/nx-s1-5992772/medicare-for-all-midterm-voters-medical-bills-affordability",
+    "title": "'Medicare for All' message attracts midterm voters buckling under medical bills",
+    "guid": "https://www.npr.org/2026/10/07/nx-s1-5992772/medicare-for-all-midterm-voters-medical-bills-affordability"
+   },
+   {
+    "published": "2026-10-07T05:00:00-04:00",
+    "summary": "On the three-year mark since the Hamas-led deadly attack, Israelis are grappling with reports that Prime Minister Benjamin Netanyahu was repeatedly warned by regional allies ahead of time.",
+    "link": "https://www.npr.org/2026/10/07/g-s1-146776/israel-gaza-oct-7-attack-netanyahu-warning",
+    "title": "3 years on, Israelis grapple with reports Netanyahu was warned before Oct. 7 attacks",
+    "guid": "https://www.npr.org/2026/10/07/g-s1-146776/israel-gaza-oct-7-attack-netanyahu-warning"
+   },
+   {
+    "published": "2026-10-07T05:00:00-04:00",
+    "summary": "The Trump administration has been hostile to federal spending on bicycle and pedestrian infrastructure. But there's bipartisan support for a multiuse trail that would connect Ohio and West Virginia.",
+    "link": "https://www.npr.org/2026/10/07/nx-s1-5980349/rail-trail-bridge-ohio-river",
+    "title": "Deep in Appalachia, a rail-to-trail project builds bipartisan support for a bridge",
+    "guid": "https://www.npr.org/2026/10/07/nx-s1-5980349/rail-trail-bridge-ohio-river"
+   },
+   {
+    "published": "2026-10-07T05:00:00-04:00",
+    "summary": "Northern Nevada has a reliably red congressional seat, represented by a Republican since it was drawn in the early 1980s. A complicated candidate and a potential blue wave this year could change that.",
+    "link": "https://www.npr.org/2026/10/07/nx-s1-5984671/nevada-midterm-election-valor-carpetbagger-reno",
+    "title": "Carpetbagger allegation, misplaced valor make Nevada's safe red House seat competitive",
+    "guid": "https://www.npr.org/2026/10/07/nx-s1-5984671/nevada-midterm-election-valor-carpetbagger-reno"
+   }
+  ]
+ },
+ "live_form": "ranked_list",
+ "live_span": "d1x2",
+ "live_lint": {
+  "red": 0,
+  "amber": 2
+ }
+}

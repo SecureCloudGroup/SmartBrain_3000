@@ -62,7 +62,9 @@ class Table(BaseForm):
     def summary(self, cand, rec, now):
         R = RView(rec)
         c = cand.bindings["columns"]
-        return f"{len(rec.rows)} rows: " + "; ".join(" ".join(R.text(i, f) for f in c[:3]) for i in range(min(5, len(rec.rows))))
+        heads = ", ".join(R.f[f].label for f in c[:3])
+        return f"{len(rec.rows)} rows · {heads}: " + \
+            "; ".join(" ".join(R.text(i, f) for f in c[:3]) for i in range(min(5, len(rec.rows))))
 
     def plan_body(self, ctx: LayoutCtx, cv: Canvas, plan: str):
         R, W = ctx.R, ctx.W

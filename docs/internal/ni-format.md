@@ -2498,11 +2498,16 @@ display-class pick and the map/image → value degrade) are gone from the flow; 
   `{type: "form", form, variant, params, record: {kind, fields: [{name, label, path, type,
   role, unit?, currency?, scale?, precision?, wallclock?}], rows: str|null}, spans: {desktop,
   phone}, design: {designer: "model"|"rules", pick, second: null | {id, form, variant,
-  params, spans}}}`. `form` ∈ `ni_forms.types.FORMS`; `type` / `role` ∈
-  `ni_forms.types.FIELD_TYPES` / `ROLES` (imported lazily — one source of truth); ≤8 fields;
-  `rows` names the pipeline output holding the list rows (`"rows"`), `null` for value answers;
-  spans are `ni_forms.spans` keys (`d1x1`, `p2x1`…). `design.second` is the runner-up sealed
-  whole, so it can be chosen later without a refetch.
+  params, spans}, fallback?: true}, frame?: {kind, wants}}`. `form` ∈ `ni_forms.types.FORMS`;
+  `type` / `role` ∈ `ni_forms.types.FIELD_TYPES` / `ROLES` (imported lazily — one source of
+  truth); ≤8 fields; `rows` names the pipeline output holding the list rows (`"rows"`), `null`
+  for value answers; spans are `ni_forms.spans` keys (`d1x1`, `p2x1`…). `design.second` is the
+  runner-up sealed whole, so it can be chosen later without a refetch. `frame` (fix round 1a-5,
+  2026-10-07; optional — absent = legacy node) is the ask's frame the design was made under:
+  `kind` ∈ `ni_forms.types.QUESTION_KINDS` | null (the flow's `intent.frame_kind`, code-parsed)
+  and `wants` (≤8 of the intent's wants, ≤40 chars each); the bind re-enumerates under the same
+  prior. `design.fallback: true` marks the universal fallback (no form survived: a plain `table` /
+  `kv_grid`, see below).
 - **Build (design time, once).** `ni_flow._form_node` → `ni_forms.form_scene.form_scene(chosen,
   outputs, title, ask, now, source_url, cadence_s, rows_output_name, call_model, viewer_tz)`:
   `record.from_answers` turns the SAME answers the pipeline was built from (value answers under
@@ -2555,10 +2560,13 @@ display-class pick and the map/image → value degrade) are gone from the flow; 
   matching the sealed `(form, variant, params)` — when the data drifted past it, the rules
   floor with `design_needs_attention: true` on the bound node; the sealed desktop and phone
   spans are laid out. Bound node (what the snapshot holds and the client paints):
-  `{type: "form", form, clir: {desktop, phone}, summary, hash, lint: {red, amber},
-  design_needs_attention?: true}` — `ni._enforce_form_shape` runs `check_clir` on both CLIRs;
-  `hash` is the desktop CLIR's canonical sha256 (monitor-hash / cache); `summary` is the form's
-  code template. Two binds of one run's outputs at one fetch instant hash the same.
+  `{type: "form", form, clir: {desktop, phone}, summary, hash, lint: {red, amber, codes},
+  design: {designer, pick}, design_needs_attention?: true}` — `ni._enforce_form_shape` runs
+  `check_clir` on both CLIRs; `hash` is the desktop CLIR's canonical sha256 (monitor-hash /
+  cache); `summary` is the form's code template; `lint.codes` (≤12 distinct issue codes over
+  both spans) and `design` (the sealed designer + pick id) make a live read diagnosable without
+  probes (fix round 1a-5; both optional for payloads written before it). Two binds of one run's
+  outputs at one fetch instant hash the same.
 - **History (§11).** `_handoff` seals `history: {track: {<name>_h: <output path>}, max_points:
   200}` for every numeric `measure` field (≤4) — the track name is the output's name with `_h`
   (a track may not collide with a pipeline output), `record.history_key` names it on both sides.
@@ -2585,6 +2593,42 @@ display-class pick and the map/image → value degrade) are gone from the flow; 
   card. On the mapping path a column constant across rows is dropped unless that would leave the
   row with no word or number (two home games at one stadium keep the venue — a list of bare
   timestamps has no form), and mapped column headers are humanised (`teamName` → "team name").
+- **Frame-aware design (fix round 1a-5, 2026-10-07 — after the first live read).** The
+  engine sees the ask's frame: `FormBuild.frame_kind` / `wants` → `form_scene(question_kind,
+  wants)` → `CardInput.question_kind` / `wants`. Rules, all code: (A) `enumerate.floor_rank`
+  applies the plan contract's B2 table (`KIND_FORMS`: forecast on a sub-daily axis →
+  `series_line` / `conditions` / `day_table` / `agenda`, on a day axis → `day_table`; schedule →
+  `agenda` / `day_table`; next_event → `next_event` (a rows record with no time axis is a
+  lookup: `table` / `ranked_list` / `kv_grid`); lookup / ranking / latest_items → `table` /
+  `ranked_list` / `kv_grid`; status / alerts → `entity_list` / `stat`; trend → `series_line` /
+  `stat`) as a prior above the signature table; `next_event` is offered only for a next_event /
+  schedule question or a `next` want; the fields the ask names (`ni_forms.asked`: a content word
+  of the ask or of the wants matching the field's label / name / path tail, directly or through
+  the `field_words` synonym groups of `assets/lexicon/wants.json`) are never in a plan's drop
+  list — the asked number leads a rows record (`record._apply_list_roles`), `pick_default` takes
+  the smallest span that keeps every asked field, a candidate whose default span drops one ranks
+  below one that keeps it, and PRESENT's L-ASK hard gate rejects such a pick; PRESENT's menu
+  shows the frame (`Frame: {kind, wants, asked_fields}`). (B) `series_line` needs ≥3 points; a
+  series that mostly lies ahead is a forecast: the hero is the reading of the period holding now,
+  no delta, the per-period list runs forward in time order; the Min / Max / Avg strip follows the
+  column's precision (`fmt.stat_decimals`: a derived statistic shows the column's decimals, at
+  most one more). (C) `title_echo` compares the title against labels / headers (`src` key /
+  lexicon) only, never a data cell; a record whose rows ALL fit a span with room left is that
+  span's designed few state (hollow amber, every span); when no candidate survives, `enumerate`
+  returns the universal fallback — `table` (records / events / series) or `kv_grid` (measure) at
+  its smallest lint-clean desktop span, else its smallest accepted span — so a record never leaves
+  the flow with "no candidate forms" (`design.fallback: true`, lint recorded at bind). (D)
+  `ni_flow._scope_rows_to_subject`: on a lookup / next_event ask over a list answer, the intent's
+  subject words select the text cell + value that names them (fewest extra words) as a sealed row
+  filter (`where eq`, like the place filter) — "when is Thanksgiving" shows Thanksgiving Day, "the
+  next new moon" the New Moon row; a subject named in several cells over different rows (a team in
+  the home and the away columns of a schedule) is a participant, not a row: the list stays whole; a
+  subject no row names that is not the list's own name ends honestly ("the list has no row for …",
+  the nothing path). (E) `map_lite` lists only rows with a
+  name or a value (one unnamed point takes the whole box; nothing is "+N more"; "1 place"). (F)
+  `stat`: a worded hero wraps to two lines before it is ever cut; the hero plan lists every
+  secondary fact that fits. `tools/ni-live-e2e.py` prints per live card `design: <form>
+  <spans> designer=<model|rules>/<pick> lint red N amber N [codes] frame=<kind> wants=[…]`.
 - **What the client paints.** The CLIR for its device (`clir.desktop` on the board,
   `clir.phone` on a phone): v1 prims (`text`, `time`, `rect`, `line`, `tri`, `dot`, `path`,
   `cells`, `icon`, …) in content-box px with `x` anchors, `reading_order`, `hitmap`, and the

@@ -1,0 +1,82 @@
+{
+ "id": "34-how-many-active-hurricanes-in-the-pacifi",
+ "n": 34,
+ "ask": "how many active hurricanes in the Pacific",
+ "kind": "count",
+ "frame_kind": "count",
+ "subject": "active hurricanes",
+ "title": "active hurricanes",
+ "source_id": "nws-tropical-alerts-point",
+ "source_url": "https://api.weather.gov/alerts/active?point=38.479724,-90.749453&event=Hurricane%20Warning,Hurricane%20Watch,Tropical%20Storm%20Warning,Tropical%20Storm%20Watch,Storm%20Surge%20Warning,Storm%20Surge%20Watch,Extreme%20Wind%20Warning,Hurricane%20Local%20Statement",
+ "fetched_at": "2026-10-07T12:06:54Z",
+ "viewer_tz": "UTC",
+ "answers_used": [
+  {
+   "name": "warnings",
+   "label": "Tropical watches and warnings",
+   "words": [
+    "hurricane",
+    "hurricane warning",
+    "hurricane watch",
+    "tropical storm",
+    "tropical storm warning",
+    "storm surge",
+    "surge",
+    "headed for",
+    "coming toward",
+    "going to hit",
+    "landfall",
+    "threat",
+    "in the path",
+    "any hurricanes",
+    "evacuate"
+   ],
+   "primary": true,
+   "kind": "list",
+   "path": "features",
+   "newest_first": false,
+   "may_be_empty": true,
+   "cells": [
+    {
+     "path": "properties.event",
+     "label": "Alert",
+     "type": "text",
+     "key": "properties.event",
+     "unit": null
+    },
+    {
+     "path": "properties.areaDesc",
+     "label": "Area",
+     "type": "text",
+     "key": "properties.areaDesc",
+     "unit": null
+    },
+    {
+     "path": "properties.severity",
+     "label": "Severity",
+     "type": "text",
+     "key": "properties.severity",
+     "unit": null
+    },
+    {
+     "path": "properties.expires",
+     "label": "Until",
+     "type": "time",
+     "key": "properties.expires",
+     "unit": null
+    }
+   ]
+  }
+ ],
+ "rows_output_name": "rows",
+ "outputs": {
+  "rows_count": 0,
+  "rows": []
+ },
+ "live_form": "entity_list",
+ "live_span": "d1x1",
+ "live_lint": {
+  "red": 0,
+  "amber": 0
+ }
+}

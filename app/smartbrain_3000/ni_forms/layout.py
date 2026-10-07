@@ -129,11 +129,18 @@ def layout_span(cand, rec, prof, inp, span: Span, now: datetime, *, state_overri
         meta = dict(draft.meta)
         meta["body"] = ctx.body
         meta["forced"] = state_override
-        if form.record_form and len(view.rows) <= 3:
+        time_fields = [f.name for f in view.fields if f.role in ("time", "date")]
+        content = content_of(clir, pmap, time_src=draft.meta.get("time_src"), time_fields=time_fields)
+        # every row the form had to show is on the card: the form's own verdict (no overflow: state
+        # empty / one / few), or every record row referenced by the body
+        all_shown = draft.state in ("empty", "one", "few") or (bool(view.rows) and content["rows"] >= len(view.rows))
+        if form.record_form and (len(view.rows) <= 3 or all_shown):
             # a record holding at most the designed "few" rows — naturally, after a refresh shrank
-            # it, or under a count override — IS its designed empty / one / few state, the same
-            # layout enumerate accepts as a forced state at build: hollow space reads amber, not
-            # red, at build and at bind alike (one rule, every span, every footer state)
+            # it, or under a count override — or one whose rows ALL fit this span with room left
+            # (fix round 1a-5: the 4-row moon list had no span) IS its designed empty / one / few
+            # state, the same layout enumerate accepts as a forced state at build: hollow space
+            # reads amber, not red, at build and at bind alike (one rule, every span, every footer
+            # state); pick_default still takes the smallest span that fits
             meta["forced"] = count_state(len(view.rows), None)
         tl = time.perf_counter()
         lt = lint(clir, view, roles, prof, cand, inp, b, times=lint_times(clir, now), prov_map=pmap, meta=meta,
@@ -150,12 +157,14 @@ def layout_span(cand, rec, prof, inp, span: Span, now: datetime, *, state_overri
         lt.issues.append(LintIssue(code="clir_budget", sev="amber",
                                    detail=f"{len(blob)} bytes > 16384"))
     lo = LayoutOut(clir=clir, hash=canon.sha256(blob), lint=lt, ms_layout=total - ms_lint, ms_lint=ms_lint)
-    lo.content = content_of(clir, pmap)
+    lo.content = content
     return lo
 
 
-def content_of(clir: dict, pmap: dict) -> dict:
-    """What a layout SHOWS (for the resize checks): the data fields in body text, the distinct data rows,
+def content_of(clir: dict, pmap: dict, time_src: dict | None = None, time_fields: list | None = None) -> dict:
+    """What a layout SHOWS (for the resize checks and the asked-field rule): the data fields in body
+    text — plus the fields its body time prims stand for (``time_src``: prim id -> field; a body time
+    prim with no recipe shows the record's time axis, ``time_fields``) — the distinct data rows,
     whether it plots, and whether the title was cut."""
     from .lint import _fields_in
     fields, rows = set(), set()
@@ -164,6 +173,9 @@ def content_of(clir: dict, pmap: dict) -> dict:
     for p in clir["prims"]:
         if p["k"] == "path":
             plot = True
+        if p["k"] == "time" and p.get("role") not in ("title", "footer"):
+            fields.add((time_src or {}).get(p["id"]) or "")
+            fields.update(time_fields or [])
         if p["k"] != "text":
             continue
         if p["role"] == "title":
@@ -181,6 +193,7 @@ def content_of(clir: dict, pmap: dict) -> dict:
         for r in _rows_in(rc):
             if not pre:
                 rows.add(r)
+    fields.discard("")
     return {"fields": sorted(fields), "rows": len(rows), "plot": plot, "title_cut": title_cut}
 
 

@@ -275,6 +275,10 @@ class FormBuild:
     source_url: str | None = None
     cadence_s: int = 0
     call_model: Callable[[str], str] | None = None
+    # the ask's frame (fix round 1a-5): the question kind code parsed (``intent.frame_kind``) and the
+    # intent's wants — the engine's floor prior and asked-field rule read them; sealed as ``frame``
+    frame_kind: str | None = None
+    wants: tuple = ()
 
 
 def _form_node(chosen: list[dict], outputs: dict, title: str,
@@ -288,7 +292,16 @@ def _form_node(chosen: list[dict], outputs: dict, title: str,
     return form_scene(chosen, outputs, title=title, ask=fb.ask or title,
                       now=fb.now.astimezone(UTC), source_url=fb.source_url,
                       cadence_s=max(0, int(fb.cadence_s)), rows_output_name=rows_output_name,
-                      call_model=fb.call_model, viewer_tz=ni.user_timezone_name())
+                      call_model=fb.call_model, viewer_tz=ni.user_timezone_name(),
+                      question_kind=fb.frame_kind, wants=[str(w) for w in fb.wants[:_MAX_INTENT_FIELDS]])
+
+
+def _frame_wants(intent: dict) -> tuple:
+    """The intent's wants as the frame carries them (strings, bounded)."""
+    assert isinstance(intent, dict), "intent must be a dict"
+    out = tuple(str(w) for w in (intent.get("wants") or [])[:_MAX_INTENT_FIELDS] if isinstance(w, str) and w)
+    assert len(out) <= _MAX_INTENT_FIELDS, "wants bounded"
+    return out
 
 
 def _display_size_for(scene: dict) -> str:
@@ -2189,6 +2202,77 @@ def _scope_rows_to_place(answer: dict, sample: object, place: str) -> dict:
     return {**answer, "filter": {"path": hit[0], "equals": hit[1]}}
 
 
+# words of an ask's subject that never name a row ("the next new moon" names "new moon"; the day, the
+# date and the frame words are what is asked ABOUT it)
+_SUBJECT_STOP = frozenset({"next", "upcoming", "day", "date", "time", "year", "week", "month", "today",
+                           "tonight", "tomorrow", "when", "latest", "current", "now"})
+_MAX_SUBJECT_ROWS = 500
+
+
+def _subject_tokens(subject: str, place: str | None) -> set[str]:
+    """The content words of the intent's subject: fillers, frame words and the named place removed."""
+    assert isinstance(subject, str), "subject must be a str"
+    assert place is None or isinstance(place, str), "place must be a str or None"
+    return _answer_tokens(subject) - _SUBJECT_STOP - (_answer_tokens(place) if place else set())
+
+
+def _subject_hits(rows: list, cells: list, toks: set[str]) -> dict:
+    """Per text cell whose values name the subject: ``path -> (row indices, (extra words, value))``
+    — the value holding every subject word with the fewest extra words ("Thanksgiving Day" over
+    "Day after Thanksgiving")."""
+    assert isinstance(rows, list) and isinstance(cells, list), "rows + cells must be lists"
+    assert isinstance(toks, set) and toks, "subject words required"
+    hits: dict = {}
+    for cell in cells[:_MAX_ANSWER_CELLS]:
+        if cell.get("type") != "text":
+            continue
+        for i, row in enumerate(rows[:_MAX_SUBJECT_ROWS]):
+            value = _dig(row, cell["path"]) if isinstance(row, dict) else None
+            if not isinstance(value, str):
+                continue
+            words = _answer_tokens(value)
+            if toks <= words:
+                found, best = hits.get(cell["path"], (set(), None))
+                key = (len(words - toks), value)
+                hits[cell["path"]] = (found | {i}, key if best is None or key < best else best)
+    return hits
+
+
+def _scope_rows_to_subject(answer: dict, sample: object, subject: str, place: str | None) -> dict:
+    """fix round 1a-5 (class D): ``answer`` with a sealed ``filter`` selecting exactly the rows whose
+    text cell names the ask's subject ("Thanksgiving" → the Thanksgiving Day row of the holidays
+    list; "new moon" → the New Moon row of the phases) — the cell + value whose words hold every
+    subject word with the fewest extra words wins, so refreshes keep the same row. Unchanged when
+    there is nothing to match (no subject words, no list, an existing filter), when the subject is
+    the list itself (its words are the answer's own: "rocket launch" on the launches list), or
+    when it is a PARTICIPANT of the rows — named in several cells over different rows (a team in
+    the home and the away columns of a schedule): one cell cannot select "its" rows, the list stays
+    whole. Raises ``ValueError`` with the honest "the list has no row for <subject>" otherwise —
+    the flow's nothing path, never the first upcoming row presented as the answer."""
+    assert isinstance(answer, dict), "answer must be a dict"
+    assert isinstance(subject, str), "subject must be a str"
+    if answer.get("kind") != "list" or answer.get("filter"):
+        return answer
+    toks = _subject_tokens(subject, place)
+    if not toks:
+        return answer
+    payload = sample if isinstance(sample, dict) else {"items": sample}
+    rows = _dig(payload, answer["path"])
+    if not isinstance(rows, list):
+        return answer  # the list isn't a list here — the build itself will say so
+    hits = _subject_hits(rows, list(answer.get("cells") or []), toks)
+    if hits:
+        if len({frozenset(found) for found, _best in hits.values()}) > 1:
+            return answer
+        path, (_found, best) = min(hits.items(), key=lambda kv: (kv[1][1][0], kv[0]))
+        return {**answer, "filter": {"path": path, "equals": best[1]}}
+    own = _answer_tokens(" ".join([str(answer.get("label") or ""), str(answer.get("name") or "").replace("_", " "),
+                                   *[str(w) for w in answer.get("words") or []]]))
+    if toks & own:
+        return answer
+    raise ValueError(f"answers: the list has no row for {subject[:60]}")
+
+
 def _subdivision_in(place: str) -> tuple[str, str] | None:
     """When ``place`` names a subdivision ("metropolitan division", "eastern conference"): the
     (type_word, value) pair — ``type_word`` is the subdivision keyword, ``value`` is the rest of
@@ -2364,10 +2448,18 @@ def _try_answers_build(store: ni.NIStore, item_id: str, request: str, intent: di
         when = next((a for a in answers if a["kind"] == "value" and _event_time(a)), None)
         if when is not None:
             chosen = [*chosen[:_MAX_VALUE_ANSWERS - 1], when]
+    if kind in ("lookup", "next_event") and chosen[0]["kind"] == "list":
+        # fix round 1a-5 (class D): a lookup / next-event ask that NAMES a row ("when is Thanksgiving",
+        # "the next new moon") selects that row before the card is built — a sealed row filter, so
+        # every refresh keeps it; a subject no row names (and that is not the list itself) ends honestly
+        try:
+            chosen = [_scope_rows_to_subject(chosen[0], sample, str(intent.get("subject") or ""), place)]
+        except ValueError as exc:
+            return {"nothing": True, "why": str(exc).split("answers: ", 1)[-1]}
     chosen = _swap_stale_next_event(chosen, answers, sample, window, next_event, ni._clock())
     form = FormBuild(now=fetch_now or ni._clock(), ask=request, source_url=url,
                      cadence_s=int(intent.get("cadence_minutes") or _DEFAULT_CADENCE) * 60,
-                     call_model=call_model)
+                     call_model=call_model, frame_kind=kind, wants=_frame_wants(intent))
     try:
         try:
             built = build_from_answers(chosen, sample, title, params=params, window=window,
@@ -4024,7 +4116,8 @@ def _handle_computed(store: ni.NIStore, item_id: str, request: str,
     try:
         scene = _form_node([{"kind": "value", "name": "days", "label": "days until", "path": "days",
                              "type": "count"}], preview, str(intent.get("subject") or request)[:120],
-                           None, FormBuild(now=now, ask=request, cadence_s=cadence * 60))
+                           None, FormBuild(now=now, ask=request, cadence_s=cadence * 60,
+                                           frame_kind=intent.get("frame_kind"), wants=_frame_wants(intent)))
     except ValueError as exc:
         return _fail(store, item_id, "assembly", f"form design failed: {exc}")
     spec = build_final_spec(request, intent, source, cadence, pipeline, scene)
@@ -5692,7 +5785,8 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
                 mapping, fields, klass, sample, title=str(intent.get("subject") or request)[:120],
                 form=FormBuild(now=fetch_now, ask=request, source_url=url,
                                cadence_s=int(intent.get("cadence_minutes") or _DEFAULT_CADENCE) * 60,
-                               call_model=call_model))
+                               call_model=call_model, frame_kind=intent.get("frame_kind"),
+                               wants=_frame_wants(intent)))
         except ValueError as exc:
             return misfit("assembly", str(exc))
         # A12 (case matrix): deterministic °F conversion for temperature fields.
@@ -6149,7 +6243,8 @@ def _page_form(fields: list | dict, labels: dict, preview: dict, request: str, i
                "path": k, "type": "text"} for k in list(fields)[:_MAX_INTENT_FIELDS]]
     return _form_node(chosen, preview, str(intent.get("subject") or request)[:120], None,
                       FormBuild(now=now, ask=request, source_url=url,
-                                cadence_s=int(cadence) * 60, call_model=call_model))
+                                cadence_s=int(cadence) * 60, call_model=call_model,
+                                frame_kind=intent.get("frame_kind"), wants=_frame_wants(intent)))
 
 
 def _built_from_of(store: ni.NIStore, item_id: str, path: str, url: str, title: str = "") -> dict:
