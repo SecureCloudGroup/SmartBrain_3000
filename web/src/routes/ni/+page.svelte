@@ -12,6 +12,7 @@
   import EmptyState from "$lib/components/EmptyState.svelte";
   import Icon from "$lib/components/Icon.svelte";
   import Modal from "$lib/components/Modal.svelte";
+  import IrPaint from "$lib/components/IrPaint.svelte";
   import NiScene from "$lib/components/NiScene.svelte";
   import Spinner from "$lib/components/Spinner.svelte";
   import { account } from "$lib/account.svelte";
@@ -1142,6 +1143,37 @@
       sendingNote = false;
     }
   }
+
+  // Phase 1a-3: a form payload is `{ type: "form", clir: { desktop, phone } }`;
+  // the painter picks `clir.phone` on the same 560 px breakpoint that collapses
+  // span-2 cards to one column (see the `@media (max-width:560px)` CSS below).
+  let phoneLayout = $state(false);
+  const PHONE_MQ = typeof window !== "undefined" ? window.matchMedia("(max-width: 560px)") : null;
+  function syncPhoneLayout(): void {
+    phoneLayout = PHONE_MQ?.matches ?? false;
+  }
+  onMount(() => {
+    syncPhoneLayout();
+    PHONE_MQ?.addEventListener("change", syncPhoneLayout);
+    return () => PHONE_MQ?.removeEventListener("change", syncPhoneLayout);
+  });
+  // Browser timezone — the painter needs it for TimePrim `tz: "viewer"` and for
+  // the `show_zone` abbreviation when the card zone differs.
+  const VIEWER_TZ = (() => {
+    try { return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"; }
+    catch { return "UTC"; }
+  })();
+  // A frozen CLIR payload: `{ type: "form", clir: { desktop, phone } }`. Anything
+  // else is passed to NiScene unchanged.
+  function pickClir(payload: unknown): unknown {
+    console.assert(payload !== undefined, "pickClir: payload defined");
+    console.assert(typeof phoneLayout === "boolean", "pickClir: phoneLayout boolean");
+    if (!payload || typeof payload !== "object") return null;
+    const p = payload as { type?: unknown; clir?: unknown };
+    if (p.type !== "form" || !p.clir || typeof p.clir !== "object") return null;
+    const c = p.clir as { desktop?: unknown; phone?: unknown };
+    return phoneLayout ? (c.phone ?? c.desktop ?? null) : (c.desktop ?? c.phone ?? null);
+  }
 </script>
 
 <svelte:window onclick={closeMenusOnOutsideClick} />
@@ -1203,7 +1235,13 @@
         {@const preview = item.state === "draft"}
         <div class="card ni-card" class:wide class:preview={preview || !!item.awaiting_yes}>
           <div class="ni-head">
-            <strong class="ni-title">{item.title}</strong>
+            {#if pickClir(item.payload)}
+              <!-- A form card paints its own title inside the CLIR (one title per card);
+                   the empty span keeps the chips on the right. -->
+              <span class="ni-title" aria-hidden="true"></span>
+            {:else}
+              <strong class="ni-title">{item.title}</strong>
+            {/if}
             <span class="ni-chips">
               <Chip kind={health.kind}>{health.label}</Chip>
               {#if item.interpreted}
@@ -1483,7 +1521,12 @@
                 <p class="muted" style="margin:0; font-size:var(--f-label)">{flowStageLabel(item.flow)}</p>
               {/if}
             {:else if item.payload}
-              <NiScene node={item.payload} />
+              {@const formClir = pickClir(item.payload)}
+              {#if formClir}
+                <IrPaint clir={formClir} viewerTz={VIEWER_TZ} />
+              {:else}
+                <NiScene node={item.payload} />
+              {/if}
             {:else}
               {@const failure = firstRunFailure(item)}
               {#if failure.show}
@@ -2114,7 +2157,12 @@
 
         <div class="lib-preview">
           <p class="lib-section-label">Preview</p>
-          <NiScene node={t.preview_payload} />
+          {#if pickClir(t.preview_payload)}
+            {@const prevClir = pickClir(t.preview_payload)}
+            <IrPaint clir={prevClir} viewerTz={VIEWER_TZ} />
+          {:else}
+            <NiScene node={t.preview_payload} />
+          {/if}
         </div>
 
         {#if installError}<p class="error" style="margin:var(--s-3) 0 0">{installError}</p>{/if}
@@ -2193,7 +2241,12 @@
                 </ul>
                 {#if t.notes}<p class="muted lib-notes">{t.notes}</p>{/if}
                 <div class="lib-item-preview">
-                  <NiScene node={t.preview_payload} />
+                  {#if pickClir(t.preview_payload)}
+                    {@const itemClir = pickClir(t.preview_payload)}
+                    <IrPaint clir={itemClir} viewerTz={VIEWER_TZ} />
+                  {:else}
+                    <NiScene node={t.preview_payload} />
+                  {/if}
                 </div>
                 <div class="modal-actions" style="margin-top: var(--s-2)">
                   <button onclick={() => startInstall(t)}>Install…</button>
