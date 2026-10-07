@@ -230,7 +230,8 @@
 <p class="muted">
   Local models keep your prompts fully on your machine. Run <strong>Ollama</strong> (any OS) or
   <strong>MLX</strong> (Apple Silicon), then tell SmartBrain which port it&rsquo;s listening on. Most
-  people skip this and just add a cloud key under <a href="/settings/providers">Cloud providers</a>.
+  people run everything locally and add a cloud key under <a href="/settings/providers">Cloud providers</a>
+  only for the jobs a local model can&rsquo;t do.
 </p>
 
 <!-- Tiered onboarding suggestion: meet the user where they are. Only shown before any local
