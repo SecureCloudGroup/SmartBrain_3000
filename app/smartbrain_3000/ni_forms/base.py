@@ -128,9 +128,12 @@ def auto_balance(ctx: LayoutCtx, cv: Canvas, mark: int):
 
 # ============================================================================ blocks
 def hero(cv: Canvas, x: list, top: float, recipe, max_w: float, *, role: str = "hero", start: int = 0,
-         anchor: str = "start", src: str = "data", tok: str | None = None, s: str | None = None) -> Box | None:
+         anchor: str = "start", src: str = "data", tok: str | None = None, s: str | None = None,
+         max_lines: int = 1) -> Box | None:
     """Hero/headline with step-down: the largest ladder size that fits wins, before any
-    content is dropped (design standard 3)."""
+    content is dropped (design standard 3). ``max_lines`` > 1 lets a WORDED hero (a matchup,
+    a status sentence) wrap at the largest size whose lines all fit before it is ever cut
+    (fix round 1a-5: "Green Bay Packers vs…" was a red truncated hero on the phone)."""
     s = cv.run(recipe) if s is None else s
     if not s:
         return None
@@ -145,6 +148,12 @@ def hero(cv: Canvas, x: list, top: float, recipe, max_w: float, *, role: str = "
         s2 = cv.run(rc2)
         if s2 != s:
             return hero(cv, x, top, rc2, max_w, role=role, start=start, anchor=anchor, src=src, tok=tok, s=s2)
+    for px in (lad[start:] if max_lines > 1 else []):
+        _, wt, _, tn = ty(role, px)
+        lines, trunc = TX.break_lines(s, px, wt, max_w, max_lines, tn)
+        if not trunc and len(lines) <= max_lines:
+            return cv.text(x, top, recipe, role, src=src, max_w=max_w, max_lines=max_lines, px=px,
+                           anchor=anchor, tok=tok, s=s)
     return cv.text(x, top, recipe, role, src=src, max_w=max_w, px=lad[-1], anchor=anchor, tok=tok, s=s)
 
 

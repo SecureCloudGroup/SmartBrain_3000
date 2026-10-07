@@ -1,0 +1,44 @@
+{
+ "id": "03-water-temperature-at-virginia-beach",
+ "n": 3,
+ "ask": "water temperature at Virginia Beach",
+ "kind": "current_value",
+ "frame_kind": null,
+ "subject": "water temperature",
+ "title": "water temperature",
+ "source_id": "coops-water-temp",
+ "source_url": "https://api.tidesandcurrents.noaa.gov/api/prod/datagetter?application=SmartBrain&station=8639348&time_zone=lst_ldt&units=english&format=json&product=water_temperature&date=latest",
+ "fetched_at": "2026-10-07T11:58:05Z",
+ "viewer_tz": "UTC",
+ "answers_used": [
+  {
+   "name": "water_temp",
+   "label": "Water temperature",
+   "words": [
+    "water temperature",
+    "water temp",
+    "how warm is the water",
+    "sea temperature",
+    "ocean temperature",
+    "swim"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "data[0].v",
+   "type": "number",
+   "unit": "°F",
+   "window": "now",
+   "measure": "water_temp"
+  }
+ ],
+ "rows_output_name": null,
+ "outputs": {
+  "water_temp": 72.3
+ },
+ "live_form": "stat",
+ "live_span": "d1x1",
+ "live_lint": {
+  "red": 0,
+  "amber": 0
+ }
+}

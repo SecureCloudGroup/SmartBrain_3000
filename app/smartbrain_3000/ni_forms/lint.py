@@ -328,7 +328,9 @@ def lint(clir: dict, rec, roles, prof, cand, inp, bucket: Bucket, *, times: list
     R = RView(rec) if rec is not None else None
     title = fmt.one_line(inp.title).casefold() if inp is not None else ""
     for p in texts:
-        if p["k"] != "text" or p["id"] in title_ids:
+        # only a label / header can echo the title; a data cell that happens to equal it ("New Moon"
+        # under a card titled "new moon") IS the answer, never an echo (fix round 1a-5, class C)
+        if p["k"] != "text" or p["id"] in title_ids or p.get("src") not in ("key", "lexicon"):
             continue
         s = " ".join(p["lines"])
         if title and s.casefold() == title:

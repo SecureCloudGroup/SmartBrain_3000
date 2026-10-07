@@ -1,0 +1,81 @@
+{
+ "id": "17-last-night-s-mariners-result",
+ "n": 17,
+ "ask": "last night's Mariners result",
+ "kind": "result",
+ "frame_kind": "result",
+ "subject": "Mariners",
+ "title": "Mariners",
+ "source_id": "mlb-team-results",
+ "source_url": "https://statsapi.mlb.com/api/v1/schedule?sportId=1&teamId=136&startDate=2026-09-30&endDate=2026-10-07",
+ "fetched_at": "2026-10-07T12:01:18Z",
+ "viewer_tz": "UTC",
+ "answers_used": [
+  {
+   "name": "results",
+   "label": "Recent results",
+   "words": [
+    "score",
+    "scores",
+    "result",
+    "results",
+    "final",
+    "last game",
+    "did they win",
+    "won",
+    "lost",
+    "last night"
+   ],
+   "primary": true,
+   "kind": "list",
+   "path": "dates",
+   "newest_first": true,
+   "may_be_empty": true,
+   "filter": {
+    "path": "games[0].status.detailedState",
+    "equals": "Final"
+   },
+   "cells": [
+    {
+     "path": "games[0].teams.away.team.name",
+     "label": "Away",
+     "type": "text",
+     "key": "games[0].teams.away.team.name",
+     "unit": null
+    },
+    {
+     "path": "games[0].teams.away.score",
+     "label": "Away runs",
+     "type": "number",
+     "key": "games[0].teams.away.score",
+     "unit": null
+    },
+    {
+     "path": "games[0].teams.home.team.name",
+     "label": "Home",
+     "type": "text",
+     "key": "games[0].teams.home.team.name",
+     "unit": null
+    },
+    {
+     "path": "games[0].teams.home.score",
+     "label": "Home runs",
+     "type": "number",
+     "key": "games[0].teams.home.score",
+     "unit": null
+    }
+   ]
+  }
+ ],
+ "rows_output_name": "rows",
+ "outputs": {
+  "rows_count": 0,
+  "rows": []
+ },
+ "live_form": "ranked_list",
+ "live_span": "d1x1",
+ "live_lint": {
+  "red": 0,
+  "amber": 0
+ }
+}

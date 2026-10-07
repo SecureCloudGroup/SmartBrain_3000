@@ -24,6 +24,20 @@ to know when a release changes behavior.
 
 ### Fixed
 
+- **Cards now answer the question that was asked, not just the data's shape.** The
+  design step reads the kind of question (a forecast, a schedule, the next event, a
+  lookup, a ranking…) and the words you used: an hourly forecast is a line, not a
+  single "next period"; a week of rain chances keeps the rain column at every size;
+  "top 10 by market cap" shows the market cap; "NHL games tonight" is the evening's
+  list; "when is Thanksgiving" shows Thanksgiving Day rather than the first upcoming
+  holiday; a two-day forecast is a day table rather than a two-point line; a forecast
+  line leads with the reading for now (no change-since-midnight); averages keep the
+  source's decimals; a list whose rows all fit a card is never refused as "hollow", a
+  card title that matches a row's text no longer blocks it, and when no designed form
+  fits, the card falls back to a plain table instead of offering only a link. A card
+  with one named value and its details (the next game's start and venue) shows the
+  details that fit, and a long worded reading wraps instead of being cut. The map card
+  for a single position no longer says "+1 more".
 - **A pasted CSV, RSS, Atom, XML or text link now keeps working after its first
   refresh.** Sampling already read those links by what they really were, but the
   built card did not remember the format, so its first scheduled refresh tried to

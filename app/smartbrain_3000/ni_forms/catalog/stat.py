@@ -221,8 +221,9 @@ class Stat(BaseForm):
         ref_label = ["tpl", "vs", {"label": ["label", b["reference"]]}] if b.get("reference") else None
         ser = series_of(ctx.rec) if b.get("series") else None
 
+        lines = 2 if cand.variant == "word" else 1     # a worded reading wraps before it is cut
         if plan == "single":
-            hb = hero(cv, ["l", 0], y0, vrc, W)
+            hb = hero(cv, ["l", 0], y0, vrc, W, max_lines=lines)
             bottom = hb.bottom if hb else y0
             if cand.variant == "countdown":
                 bottom = self._countdown_bind(ctx, cv, hb)
@@ -241,7 +242,7 @@ class Stat(BaseForm):
             colw = W * 0.34 - 8
         else:
             colw = W
-        hb = hero(cv, ["l", 0], y0, vrc, colw)
+        hb = hero(cv, ["l", 0], y0, vrc, colw, max_lines=lines)
         y = hb.bottom if hb else y0
         if cand.variant == "countdown":
             y = self._countdown_bind(ctx, cv, hb)
@@ -262,9 +263,15 @@ class Stat(BaseForm):
             room = y1 - y
             if has_range and room >= 30 and drop < 2:
                 y = self.track(ctx, cv, 0.0, 1.0, y + 8, labels=True, refs_line=False)
-            elif fs and room >= 20 and not has_range and drop < 2:
-                it = fs[0]
-                cv.text(["l", 0], y + 4, ["join", " ", [it[0], it[1]]], "meta", src="data", max_w=W)
+            elif fs and not has_range and drop < 2:
+                # every secondary fact that fits, one per line (fix round 1a-5: the venue was dropped
+                # under a matchup with room to spare)
+                yy = y + 4
+                for it in fs[:4 - drop]:
+                    if yy + line_h("meta") > y1 + 0.5:
+                        break
+                    cv.text(["l", 0], yy, ["join", " ", [it[0], it[1]]], "meta", src="data", max_w=W)
+                    yy += line_h("meta")
             return
 
         if plan == "stack":        # phone half, 2 rows

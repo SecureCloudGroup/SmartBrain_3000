@@ -1,0 +1,74 @@
+{
+ "id": "31-tornado-watches-in-oklahoma-right-now",
+ "n": 31,
+ "ask": "tornado watches in Oklahoma right now",
+ "kind": "alerts",
+ "frame_kind": "alerts",
+ "subject": "tornado watches",
+ "title": "tornado watches",
+ "source_id": "nws-alerts-state",
+ "source_url": "https://api.weather.gov/alerts/active?area=OK",
+ "fetched_at": "2026-10-07T12:06:19Z",
+ "viewer_tz": "UTC",
+ "answers_used": [
+  {
+   "name": "alerts",
+   "label": "Active weather alerts",
+   "words": [
+    "alerts",
+    "warnings",
+    "watches",
+    "advisories",
+    "severe weather",
+    "weather alerts",
+    "statewide"
+   ],
+   "primary": true,
+   "kind": "list",
+   "path": "features",
+   "newest_first": false,
+   "may_be_empty": true,
+   "cells": [
+    {
+     "path": "properties.event",
+     "label": "Alert",
+     "type": "text",
+     "key": "properties.event",
+     "unit": null
+    },
+    {
+     "path": "properties.severity",
+     "label": "Severity",
+     "type": "text",
+     "key": "properties.severity",
+     "unit": null
+    },
+    {
+     "path": "properties.areaDesc",
+     "label": "Area",
+     "type": "text",
+     "key": "properties.areaDesc",
+     "unit": null
+    },
+    {
+     "path": "properties.expires",
+     "label": "Expires",
+     "type": "time",
+     "key": "properties.expires",
+     "unit": null
+    }
+   ]
+  }
+ ],
+ "rows_output_name": "rows",
+ "outputs": {
+  "rows_count": 0,
+  "rows": []
+ },
+ "live_form": "entity_list",
+ "live_span": "d1x1",
+ "live_lint": {
+  "red": 0,
+  "amber": 0
+ }
+}

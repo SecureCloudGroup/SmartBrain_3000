@@ -1,0 +1,45 @@
+{
+ "id": "24-us-gas-price-trend-this-year",
+ "n": 24,
+ "ask": "US gas price trend this year",
+ "kind": "trend",
+ "frame_kind": "trend",
+ "subject": "gas price",
+ "title": "gas price",
+ "source_id": "fred-gasregw",
+ "source_url": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=GASREGW",
+ "fetched_at": "2026-10-07T12:04:57Z",
+ "viewer_tz": "UTC",
+ "answers_used": [
+  {
+   "name": "latest",
+   "label": "Regular gas price (US average)",
+   "words": [
+    "us regular gasoline price",
+    "regular gas price (us average)",
+    "gas prices",
+    "national average gas price",
+    "latest",
+    "current",
+    "now",
+    "today"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "rows[0].GASREGW",
+   "type": "number",
+   "unit": "$/gal",
+   "window": "latest"
+  }
+ ],
+ "rows_output_name": null,
+ "outputs": {
+  "latest": 4.354
+ },
+ "live_form": "stat",
+ "live_span": "d1x1",
+ "live_lint": {
+  "red": 0,
+  "amber": 2
+ }
+}

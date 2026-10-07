@@ -175,6 +175,11 @@ def derived(op: str, args: list, opts: dict, R) -> str:
         return fmt.num(v, opts.get("dec", 1 if op == "ratio" else 2), sign=opts.get("sign", False)) + "%"
     if op == "agg" and opts.get("dec") is None and fld is not None and args[1] != "avg":
         return fmt.value_text(v, fld, sign=opts.get("sign", False), unit=opts.get("unit", True))
+    if op == "agg" and opts.get("dec") is None and fld is not None:
+        rows = args[2] if len(args) > 2 and args[2] is not None else range(len(R.rows))
+        col = [R.num(i, args[0]) for i in rows]
+        dec = fmt.stat_decimals(fld, [x for x in col if x is not None], v)
+        return fmt.value_text(v, fld, dec=dec, sign=opts.get("sign", False), unit=opts.get("unit", True))
     dec = opts.get("dec")
     if fld is not None:
         return fmt.value_text(v, fld, derived=dec is None, dec=dec, sign=opts.get("sign", False),

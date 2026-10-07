@@ -265,6 +265,7 @@ _FORM_DESIGNER_KINDS: frozenset[str] = frozenset({"model", "rules"})
 _MAX_PREVIEW_NODES = 500_000          # json_instants walk bound (dict / list / leaf nodes)
 _FORM_MAX_FIELDS = 8                  # bounded (POW10 #2); keeps CLIR small
 _FORM_MAX_STR = 80                    # label / name / unit / currency / variant / pick / scale
+_FORM_MAX_LINT_CODES = 12             # distinct lint issue codes a bound form node reports
 
 # v2 caps + enums (§5 spark, §5 Conditions, §11 History, §12 Alerts).
 _MAX_SPARK_POINTS = 500          # bound on bound spark.points (list or history series)
@@ -1937,10 +1938,11 @@ def _validate_form(node: dict) -> list[object]:
     """§34 form scene: a sealed ni_forms candidate (form, variant, params) + record
     field specs + desktop/phone spans + the design pick. A form node is a LEAF.
 
-    Shape (closed): ``{type: "form", form, variant, params, record, spans, design}``.
-    See docs/internal/ni-format.md §34 for the semantics.
+    Shape (closed): ``{type: "form", form, variant, params, record, spans, design,
+    frame?}`` — ``frame`` (fix round 1a-5) is the ask's question kind + wants the design
+    was made under; absent = legacy node. See docs/internal/ni-format.md §34.
     """
-    _closed_keys(node, {"type", "form", "variant", "params", "record", "spans", "design"},
+    _closed_keys(node, {"type", "form", "variant", "params", "record", "spans", "design", "frame"},
                  "scene form")
     _validate_form_name(node.get("form"))
     _validate_form_variant(node.get("variant"))
@@ -1948,7 +1950,26 @@ def _validate_form(node: dict) -> list[object]:
     _validate_form_record(node.get("record"))
     _validate_form_spans(node.get("spans"))
     _validate_form_design(node.get("design"))
+    if "frame" in node:
+        _validate_form_frame(node.get("frame"))
     return []
+
+
+def _validate_form_frame(frame: object) -> None:
+    """``{kind: QUESTION_KINDS | null, wants: [str <= MAX_WANT_CHARS] <= MAX_WANTS}`` — closed enums
+    imported lazily from ni_forms.types (one source of truth)."""
+    from .ni_forms.types import MAX_WANT_CHARS, MAX_WANTS, QUESTION_KINDS
+    d = _require_dict(frame, "scene form.frame")
+    _closed_keys(d, {"kind", "wants"}, "scene form.frame")
+    kind = d.get("kind")
+    if kind is not None and kind not in QUESTION_KINDS:
+        raise ValueError(f"scene form.frame.kind unknown: {kind!r}")
+    wants = d.get("wants")
+    if not isinstance(wants, list) or len(wants) > MAX_WANTS:
+        raise ValueError(f"scene form.frame.wants must be a list of <= {MAX_WANTS}")
+    for w in wants:  # bounded by MAX_WANTS
+        if not isinstance(w, str) or not w or len(w) > MAX_WANT_CHARS:
+            raise ValueError(f"scene form.frame.wants entries must be 1..{MAX_WANT_CHARS}-char strings")
 
 
 def _validate_form_name(name: object) -> None:
@@ -2057,10 +2078,12 @@ def _validate_form_design(design: object) -> None:
     spans}}`` — the runner-up is sealed whole so the C2 answer ``presentation_id:
     "second"`` re-seals the card without a refetch (``ni_forms.form_scene.swap_to_second``)."""
     d = _require_dict(design, "scene form.design")
-    _closed_keys(d, {"designer", "pick", "second"}, "scene form.design")
+    _closed_keys(d, {"designer", "pick", "second", "fallback"}, "scene form.design")
     if d.get("designer") not in _FORM_DESIGNER_KINDS:
         raise ValueError(f"scene form.design.designer must be one of "
                          f"{sorted(_FORM_DESIGNER_KINDS)}")
+    if "fallback" in d and d["fallback"] is not True:
+        raise ValueError("scene form.design.fallback is true when present (the universal fallback form)")
     pick = d.get("pick")
     if not isinstance(pick, str) or not pick or len(pick) > _FORM_MAX_STR:
         raise ValueError(f"scene form.design.pick must be a 1..{_FORM_MAX_STR}-char string")
@@ -3497,9 +3520,12 @@ def _bind_form(node: dict, data: dict, form_ctx: dict | None) -> dict:
     ModelForbidden (refresh-path contract). ``form_ctx`` is ``_form_bind_context``'s
     dict; None derives one from the clock (no title / host — tests, template previews).
 
-    Returns ``{type: "form", form, clir: {desktop, phone}, summary, hash, lint,
-    design_needs_attention?: true}``. The hash is the desktop CLIR hash — the client
-    reads both CLIRs; the hash is for cache / monitor-hash.
+    Returns ``{type: "form", form, clir: {desktop, phone}, summary, hash, lint: {red, amber,
+    codes}, design: {designer, pick}, design_needs_attention?: true}``. The hash is the desktop
+    CLIR hash — the client reads both CLIRs; the hash is for cache / monitor-hash. ``design`` and
+    ``lint.codes`` (fix round 1a-5, class F) say who chose the form and which lint fired, so a
+    live read is diagnosable without probes. The sealed ``frame`` (when present) rides into the
+    record context so the bind re-enumerates under the prior the design was made with.
     """
     assert isinstance(node, dict), "form node must be a dict"
     assert isinstance(data, dict), "data must be a dict"
@@ -3510,6 +3536,8 @@ def _bind_form(node: dict, data: dict, form_ctx: dict | None) -> dict:
     from .ni_forms.record import from_spec as _from_spec
     from .ni_forms.spans import Span as _Span
     ctx = dict(form_ctx) if isinstance(form_ctx, dict) else _form_bind_context({})
+    frame = node.get("frame") if isinstance(node.get("frame"), dict) else {}
+    ctx["question_kind"], ctx["wants"] = frame.get("kind"), list(frame.get("wants") or [])
     history = data.get("history") if isinstance(data.get("history"), dict) else None
     rows_name = node["record"].get("rows")
     if rows_name and not isinstance(data.get(rows_name), list):
@@ -3523,7 +3551,7 @@ def _bind_form(node: dict, data: dict, form_ctx: dict | None) -> dict:
               "params": dict(node.get("params") or {})}
     with _llm.no_model():
         prof = _pf.profile(rec, inp, now)
-        cands = _enumerate(rec, prof, inp, now)
+        cands = _enumerate(rec, prof, inp, now, keep=frozenset({str(node["form"])}))
         if not cands:
             raise NIError("bind_type", "form: no candidate form fits this run's data")
         chosen_cand, needs_attention = _pick_sealed_candidate(cands, sealed)
@@ -3531,15 +3559,18 @@ def _bind_form(node: dict, data: dict, form_ctx: dict | None) -> dict:
                                    _Span.parse(node["spans"]["desktop"]), now)
         out_phone = _layout_span(chosen_cand, rec, prof, inp,
                                  _Span.parse(node["spans"]["phone"]), now)
-    red = sum(1 for i in out_desktop.lint.issues if i.sev == "red") \
-        + sum(1 for i in out_phone.lint.issues if i.sev == "red")
-    amber = sum(1 for i in out_desktop.lint.issues if i.sev == "amber") \
-        + sum(1 for i in out_phone.lint.issues if i.sev == "amber")
+    issues = list(out_desktop.lint.issues) + list(out_phone.lint.issues)
+    red = sum(1 for i in issues if i.sev == "red")
+    amber = sum(1 for i in issues if i.sev == "amber")
+    codes = sorted({str(i.code)[:_FORM_MAX_STR] for i in issues})[:_FORM_MAX_LINT_CODES]
     summary = str(out_desktop.clir.get("summary") or node["form"])[:_MAX_TEXT_CHARS]
+    design = node.get("design") if isinstance(node.get("design"), dict) else {}
     bound: dict = {"type": "form", "form": chosen_cand.form,
                    "clir": {"desktop": out_desktop.clir, "phone": out_phone.clir},
                    "summary": summary, "hash": out_desktop.hash,
-                   "lint": {"red": red, "amber": amber}}
+                   "lint": {"red": red, "amber": amber, "codes": codes},
+                   "design": {"designer": str(design.get("designer") or "rules")[:_FORM_MAX_STR],
+                              "pick": str(design.get("pick") or chosen_cand.id)[:_FORM_MAX_STR]}}
     if needs_attention:
         bound["design_needs_attention"] = True
     return bound
@@ -5739,12 +5770,21 @@ def _enforce_form_shape(node: dict) -> None:
         except ContractError as exc:
             raise NIError("bind_type", f"form.clir.{side}: {exc}") from None
     lint = node.get("lint")
-    if not isinstance(lint, dict) or set(lint) != {"red", "amber"}:
-        raise NIError("bind_type", "form.lint must be {red, amber}")
+    if not isinstance(lint, dict) or not {"red", "amber"} <= set(lint) <= {"red", "amber", "codes"}:
+        raise NIError("bind_type", "form.lint must be {red, amber, codes?}")
     for key in ("red", "amber"):
         value = lint[key]
         if not isinstance(value, int) or isinstance(value, bool) or value < 0:
             raise NIError("bind_type", f"form.lint.{key} must be a non-negative int")
+    codes = lint.get("codes", [])
+    if not isinstance(codes, list) or len(codes) > _FORM_MAX_LINT_CODES or \
+            not all(isinstance(c, str) and 0 < len(c) <= _FORM_MAX_STR for c in codes):
+        raise NIError("bind_type", f"form.lint.codes must be <= {_FORM_MAX_LINT_CODES} short strings")
+    design = node.get("design")
+    if design is not None and (not isinstance(design, dict) or set(design) != {"designer", "pick"}
+                               or design["designer"] not in _FORM_DESIGNER_KINDS
+                               or not (isinstance(design["pick"], str) and 0 < len(design["pick"]) <= _FORM_MAX_STR)):
+        raise NIError("bind_type", "form.design must be {designer: model|rules, pick}")
 
 
 def _enforce_image_shape(node: dict) -> None:

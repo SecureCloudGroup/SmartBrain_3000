@@ -1,0 +1,99 @@
+{
+ "id": "09-what-day-is-the-next-new-moon",
+ "n": 9,
+ "ask": "what day is the next new moon",
+ "kind": "next_event",
+ "frame_kind": "next_event",
+ "subject": "new moon",
+ "title": "new moon",
+ "source_id": "usno-moon-phases",
+ "source_url": "https://aa.usno.navy.mil/api/moon/phases/date?date=2026-10-07&nump=4",
+ "fetched_at": "2026-10-07T12:00:00Z",
+ "viewer_tz": "UTC",
+ "answers_used": [
+  {
+   "name": "phases",
+   "label": "Upcoming moon phases",
+   "words": [
+    "moon phase",
+    "full moon",
+    "new moon",
+    "next full moon",
+    "quarter moon",
+    "when is the next full moon",
+    "lunar"
+   ],
+   "primary": true,
+   "kind": "list",
+   "path": "phasedata",
+   "newest_first": false,
+   "may_be_empty": false,
+   "cells": [
+    {
+     "path": "phase",
+     "label": "Phase",
+     "type": "text",
+     "key": "phase",
+     "unit": null
+    },
+    {
+     "path": "month",
+     "label": "Month",
+     "type": "number",
+     "key": "month",
+     "unit": null
+    },
+    {
+     "path": "day",
+     "label": "Day",
+     "type": "number",
+     "key": "day",
+     "unit": null
+    },
+    {
+     "path": "time",
+     "label": "Time (UT)",
+     "type": "text",
+     "key": "time",
+     "unit": null
+    }
+   ]
+  }
+ ],
+ "rows_output_name": "rows",
+ "outputs": {
+  "rows": [
+   {
+    "phase": "New Moon",
+    "year": 2026,
+    "month": 10,
+    "day": 10,
+    "time": "07:50"
+   },
+   {
+    "phase": "First Quarter",
+    "year": 2026,
+    "month": 10,
+    "day": 18,
+    "time": "16:13"
+   },
+   {
+    "phase": "Full Moon",
+    "year": 2026,
+    "month": 10,
+    "day": 26,
+    "time": "04:12"
+   },
+   {
+    "phase": "Last Quarter",
+    "year": 2026,
+    "month": 11,
+    "day": 1,
+    "time": "20:28"
+   }
+  ]
+ },
+ "live_form": null,
+ "live_span": null,
+ "live_lint": null
+}

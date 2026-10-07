@@ -1,0 +1,80 @@
+{
+ "id": "40-where-is-the-iss-right-now-on-a-map",
+ "n": 40,
+ "ask": "where is the ISS right now on a map",
+ "kind": "map",
+ "frame_kind": "current_value",
+ "subject": "ISS",
+ "title": "ISS",
+ "source_id": "wheretheiss-now",
+ "source_url": "https://api.wheretheiss.at/v1/satellites/25544",
+ "fetched_at": "2026-10-07T12:08:00Z",
+ "viewer_tz": "UTC",
+ "answers_used": [
+  {
+   "name": "latitude",
+   "label": "Latitude",
+   "words": [
+    "where is the iss",
+    "space station location",
+    "latitude",
+    "lat",
+    "position",
+    "where"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "latitude",
+   "type": "number",
+   "unit": "°",
+   "window": "now"
+  },
+  {
+   "name": "longitude",
+   "label": "Longitude",
+   "words": [
+    "where is the iss",
+    "space station location",
+    "longitude",
+    "lon",
+    "position",
+    "where"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "longitude",
+   "type": "number",
+   "unit": "°",
+   "window": "now"
+  },
+  {
+   "name": "altitude",
+   "label": "Altitude",
+   "words": [
+    "altitude",
+    "how high",
+    "height",
+    "orbit",
+    "above earth"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "altitude",
+   "type": "number",
+   "unit": "km",
+   "window": "now"
+  }
+ ],
+ "rows_output_name": null,
+ "outputs": {
+  "altitude": 426.35070945725,
+  "longitude": -67.086227346702,
+  "latitude": 29.811619302143
+ },
+ "live_form": "map_lite",
+ "live_span": "d2x1",
+ "live_lint": {
+  "red": 0,
+  "amber": 0
+ }
+}

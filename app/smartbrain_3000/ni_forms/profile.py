@@ -22,6 +22,7 @@ from functools import lru_cache
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from . import asked as asked_mod
 from . import canon
 from .types import CardInput, DataRecord, FieldProfile, Profile, TimeProfile
 
@@ -423,7 +424,8 @@ def profile(rec: DataRecord, inp: CardInput, now: datetime) -> Profile:
             if s in PART_SIGS and s not in sigs:
                 sigs.append(s)
     prof = Profile(sig="", n_rows=len(rec.rows), fields=_field_profiles(rec), signatures=sigs, time=tp,
-                   wants=wants, wants_coverage=wants_coverage(rec, wants, tp), history_points=0)
+                   wants=wants, wants_coverage=wants_coverage(rec, wants, tp), history_points=0,
+                   asked=asked_mod.asked_fields(rec.fields, inp.ask or "", list(getattr(inp, "wants", None) or [])))
     body = {"sigs": sigs, "types": [(f.type, f.role, f.unit) for f in rec.fields], "grain": tp.grain,
             "wants": wants}
     prof.sig = canon.sha256(canon.canonical(body))

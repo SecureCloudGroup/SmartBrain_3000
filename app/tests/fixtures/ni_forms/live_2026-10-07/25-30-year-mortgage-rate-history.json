@@ -1,0 +1,45 @@
+{
+ "id": "25-30-year-mortgage-rate-history",
+ "n": 25,
+ "ask": "30 year mortgage rate history",
+ "kind": "trend",
+ "frame_kind": "trend",
+ "subject": "mortgage rate history",
+ "title": "mortgage rate history",
+ "source_id": "fred-mortgage30us",
+ "source_url": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=MORTGAGE30US",
+ "fetched_at": "2026-10-07T12:04:59Z",
+ "viewer_tz": "UTC",
+ "answers_used": [
+  {
+   "name": "latest",
+   "label": "30-year mortgage rate",
+   "words": [
+    "30-year fixed mortgage rate",
+    "30-year mortgage rate",
+    "mortgage rates",
+    "30 year mortgage rate",
+    "latest",
+    "current",
+    "now",
+    "today"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "rows[0].MORTGAGE30US",
+   "type": "number",
+   "unit": "%",
+   "window": "latest"
+  }
+ ],
+ "rows_output_name": null,
+ "outputs": {
+  "latest": 7.28
+ },
+ "live_form": "stat",
+ "live_span": "d1x1",
+ "live_lint": {
+  "red": 0,
+  "amber": 2
+ }
+}

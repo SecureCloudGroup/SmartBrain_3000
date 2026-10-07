@@ -50,6 +50,13 @@ SIGNATURES = frozenset({
     "state_timeline", "geo_points", "text_passage", "image", "empty",
 })
 INTENTS = frozenset({"now", "today", "plan", "monitor", "compare", "read", "trend", "locate"})
+# the ask's question kind (the flow's frame, library_index.FRAME_KINDS plus the kinds the blind sets
+# label): the floor prior of enumerate.floor_rank reads it; None = the words stated no kind
+QUESTION_KINDS = frozenset({"current_value", "forecast", "next_event", "schedule", "result", "latest_items",
+                            "ranking", "trend", "status", "alerts", "count", "lookup", "map", "image",
+                            "text_brief", "compare"})
+MAX_WANTS = 8                    # frame wants carried into a card (each <= MAX_WANT_CHARS)
+MAX_WANT_CHARS = 40
 FORMS = frozenset({"stat", "conditions", "kv_grid", "compare", "bars", "series_line", "heatmap",
                    "event_curve", "next_event", "agenda", "day_table", "entity_list", "ranked_list",
                    "table", "text_brief", "image", "progress", "map_lite"})
@@ -105,6 +112,8 @@ class CardInput:
     cadence_s: int                   # 0 = clock-only / rule-only card
     viewer_tz: str = "America/New_York"
     c2_answers: dict = field(default_factory=dict)
+    question_kind: str | None = None          # QUESTION_KINDS; the flow's frame kind (None = legacy / open)
+    wants: list = field(default_factory=list)   # the frame's wants, the user's words (<= MAX_WANTS)
 
 
 # --------------------------------------------------------------------------- DataRecord v1
@@ -255,6 +264,7 @@ class Profile:
     wants: list                      # WantWord ids extracted from the ask by the generic want lexicon
     wants_coverage: dict             # want -> field name | None
     history_points: int              # card's own history (0 in P0)
+    asked: list = field(default_factory=list)   # field names the ask / frame wants name (asked.asked_fields)
 
 
 # --------------------------------------------------------------------------- ENUMERATE / PRESENT
@@ -274,6 +284,7 @@ class Candidate:
     phone_span: str | None        # phone span key (spans.phone_default)
     floor_score: float               # code rank score (never shown to the model)
     shows: dict = field(default_factory=dict)   # span key -> {fields, rows, plot, title_cut} (resize checks)
+    fallback: bool = False           # the universal fallback (enumerate.fallback): no form survived
 
 
 @dataclass

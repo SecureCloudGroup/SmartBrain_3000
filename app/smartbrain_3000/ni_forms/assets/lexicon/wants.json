@@ -235,5 +235,151 @@
    "todo"
   ]
  },
- "_frozen": "Vocabulary FROZEN 2026-09-25 after the P0 review: phrases copied from corpus asks were removed (see out/P0_RESULTS.md); nothing may be added before the fresh holdout is measured."
+ "_frozen": "Vocabulary FROZEN 2026-09-25 after the P0 review: phrases copied from corpus asks were removed (see out/P0_RESULTS.md); nothing may be added before the fresh holdout is measured.",
+ "_field_words_doc": "Fix round 1a-5 (2026-10-07): synonym groups that tie a word of the ask (or of the frame's wants) to a record field's own words (label / name / path tail) so the ASKED quantity is known to code (ni_forms.asked). Generic quantity words only, never a source's key; the `wants` vocabulary above is untouched (frozen).",
+ "field_words": {
+  "rain": [
+   "rain",
+   "rains",
+   "rainfall",
+   "precipitation",
+   "precip",
+   "showers",
+   "drizzle",
+   "pop"
+  ],
+  "snow": [
+   "snow",
+   "snowfall",
+   "flurries",
+   "snowpack"
+  ],
+  "temperature": [
+   "temperature",
+   "temperatures",
+   "temp",
+   "temps",
+   "degrees",
+   "warm",
+   "hot",
+   "cold"
+  ],
+  "wind": [
+   "wind",
+   "winds",
+   "gust",
+   "gusts",
+   "breeze"
+  ],
+  "humidity": [
+   "humidity",
+   "humid"
+  ],
+  "wave": [
+   "wave",
+   "waves",
+   "surf",
+   "swell",
+   "seas"
+  ],
+  "tide": [
+   "tide",
+   "tides"
+  ],
+  "price": [
+   "price",
+   "prices",
+   "cost",
+   "quote",
+   "trading"
+  ],
+  "market_cap": [
+   "cap",
+   "capitalization",
+   "capitalisation",
+   "valuation"
+  ],
+  "volume": [
+   "volume",
+   "volumes"
+  ],
+  "change": [
+   "change",
+   "changes",
+   "gain",
+   "gains",
+   "loss",
+   "losses",
+   "move"
+  ],
+  "score": [
+   "score",
+   "scores",
+   "runs",
+   "points",
+   "goals"
+  ],
+  "time": [
+   "time",
+   "times",
+   "when",
+   "start",
+   "starts",
+   "kickoff",
+   "tipoff",
+   "departure",
+   "arrival"
+  ],
+  "date": [
+   "date",
+   "dates",
+   "day",
+   "days",
+   "when"
+  ],
+  "magnitude": [
+   "magnitude",
+   "mag"
+  ],
+  "level": [
+   "level",
+   "levels",
+   "height",
+   "depth",
+   "stage"
+  ],
+  "speed": [
+   "speed",
+   "velocity",
+   "fast"
+  ],
+  "status": [
+   "status",
+   "state",
+   "condition",
+   "conditions",
+   "outage",
+   "down"
+  ],
+  "count": [
+   "count",
+   "number",
+   "total"
+  ],
+  "rank": [
+   "rank",
+   "ranking",
+   "position",
+   "standing",
+   "standings"
+  ],
+  "venue": [
+   "venue",
+   "stadium",
+   "arena",
+   "where",
+   "location",
+   "place"
+  ]
+ }
 }

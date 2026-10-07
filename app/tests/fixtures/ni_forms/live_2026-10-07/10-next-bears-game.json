@@ -1,0 +1,87 @@
+{
+ "id": "10-next-bears-game",
+ "n": 10,
+ "ask": "next Bears game",
+ "kind": "next_event",
+ "frame_kind": "next_event",
+ "subject": "Bears game",
+ "title": "Bears game",
+ "source_id": "thesportsdb-team-next",
+ "source_url": "https://www.thesportsdb.com/api/v1/json/123/eventsnext.php?id=134938",
+ "fetched_at": "2026-10-07T11:59:48Z",
+ "viewer_tz": "UTC",
+ "answers_used": [
+  {
+   "name": "next_game",
+   "label": "Next game",
+   "words": [
+    "next game",
+    "next match",
+    "who do they play",
+    "opponent",
+    "play next",
+    "matchup",
+    "next"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "events[0].strEvent",
+   "type": "text",
+   "window": "latest",
+   "unit": null
+  },
+  {
+   "name": "start",
+   "label": "Start",
+   "words": [
+    "when",
+    "what time",
+    "start time",
+    "kickoff",
+    "tip-off",
+    "date",
+    "game time",
+    "next game",
+    "play next"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "events[0].strTimestamp",
+   "type": "time",
+   "window": "latest",
+   "utc": true,
+   "unit": null
+  },
+  {
+   "name": "venue",
+   "label": "Venue",
+   "words": [
+    "where",
+    "venue",
+    "stadium",
+    "arena",
+    "field",
+    "next game",
+    "play next"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "events[0].strVenue",
+   "type": "text",
+   "window": "latest",
+   "unit": null
+  }
+ ],
+ "rows_output_name": null,
+ "outputs": {
+  "venue": "Lambeau Field",
+  "start": "2026-10-11T13:00:00-04:00",
+  "next_game": "Green Bay Packers vs Chicago Bears"
+ },
+ "live_form": "stat",
+ "live_span": "d2x1",
+ "live_lint": {
+  "red": 1,
+  "amber": 2
+ }
+}
