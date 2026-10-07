@@ -4,6 +4,7 @@ against the record (CONTRACTS.md 6.4 `provenance`). A recipe is JSON-like data:
   ["cell", field, row, opts]      formatted cell   opts: sign, unit, dec, derived
   ["raw", field, row]             text cell, one line
   ["label", field]                humanised source key / lexicon label
+  ["unit", field]                 the field's unit display text (fix round 1a-6, class I)
   ["title"] | ["ask"] | ["host"] | ["host_short"] | ["cadence"]
   ["tpl", id, {arg: recipe}]      a templates.py sentence
   ["join", sep, [recipe, ...]]    joined parts (empty parts skipped)
@@ -75,6 +76,9 @@ def run(rc, R, inp, host: str):
         return fmt.one_line(v)
     if k == "label":
         return R.f[rc[1]].label
+    if k == "unit":
+        f = R.f[rc[1]]
+        return fmt.unit_display(f.unit)[0] if f.unit else ""
     if k == "title":
         return fmt.one_line(inp.title)
     if k == "ask":

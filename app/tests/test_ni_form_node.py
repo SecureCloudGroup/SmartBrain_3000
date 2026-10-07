@@ -160,6 +160,28 @@ def test_form_bind_drift_sets_needs_attention() -> None:
     assert bound.get("design_needs_attention") is True
 
 
+def test_form_bind_measure_over_a_list_output_reads_row_zero() -> None:
+    """Fix round 1a-6, class H: a measure sealed over a list output (e.g. a one-row
+    day/sunrise/sunset answer) reads row 0 of that output on every bind."""
+    node = _good_node()
+    node["record"]["rows"] = "rows"
+    bound = ni.bind_scene(node, {"rows": [{"price": 223.86}]}, form_ctx=_ctx())
+    assert bound["type"] == "form" and "design_needs_attention" not in bound
+    assert "$223.86" in bound["summary"]
+
+
+def test_form_bind_measure_over_rows_drift_sets_needs_attention() -> None:
+    """A later refresh whose rows output no longer has exactly one row is the data
+    drifting past the one-row design (fix round 1a-6, class H): the floor + the
+    ``design_needs_attention`` flag, never a crash (a measure caps at 1 row)."""
+    node = _good_node()
+    node["record"]["rows"] = "rows"
+    two = ni.bind_scene(node, {"rows": [{"price": 1.0}, {"price": 2.0}]}, form_ctx=_ctx())
+    assert two.get("design_needs_attention") is True
+    empty = ni.bind_scene(node, {"rows": []}, form_ctx=_ctx())
+    assert empty.get("design_needs_attention") is True
+
+
 def test_form_bind_fails_when_a_sealed_row_field_is_gone_from_every_row() -> None:
     """A sparse row shows a blank cell; a cell gone from EVERY row is drift — the run
     fails (``extract_miss``) so last_good keeps rendering and repair fires, exactly as

@@ -2075,15 +2075,21 @@ def _validate_form_spans(spans: object) -> None:
 
 def _validate_form_design(design: object) -> None:
     """``{designer: "model"|"rules", pick: str, second: null | {id, form, variant, params,
-    spans}}`` — the runner-up is sealed whole so the C2 answer ``presentation_id:
-    "second"`` re-seals the card without a refetch (``ni_forms.form_scene.swap_to_second``)."""
+    spans}, fallback?: true, gates?: [str]}`` — the runner-up is sealed whole so the C2
+    answer ``presentation_id: "second"`` re-seals the card without a refetch
+    (``ni_forms.form_scene.swap_to_second``). ``gates`` (fix round 1a-6, class L) names the
+    candidates a red sealed-span layout skipped before this design was sealed clean."""
     d = _require_dict(design, "scene form.design")
-    _closed_keys(d, {"designer", "pick", "second", "fallback"}, "scene form.design")
+    _closed_keys(d, {"designer", "pick", "second", "fallback", "gates"}, "scene form.design")
     if d.get("designer") not in _FORM_DESIGNER_KINDS:
         raise ValueError(f"scene form.design.designer must be one of "
                          f"{sorted(_FORM_DESIGNER_KINDS)}")
     if "fallback" in d and d["fallback"] is not True:
         raise ValueError("scene form.design.fallback is true when present (the universal fallback form)")
+    gates = d.get("gates")
+    if gates is not None and (not isinstance(gates, list) or len(gates) > _FORM_MAX_LINT_CODES
+                              or not all(isinstance(g, str) and 0 < len(g) <= _FORM_MAX_STR for g in gates)):
+        raise ValueError(f"scene form.design.gates must be <= {_FORM_MAX_LINT_CODES} short strings")
     pick = d.get("pick")
     if not isinstance(pick, str) or not pick or len(pick) > _FORM_MAX_STR:
         raise ValueError(f"scene form.design.pick must be a 1..{_FORM_MAX_STR}-char string")
@@ -3555,6 +3561,10 @@ def _bind_form(node: dict, data: dict, form_ctx: dict | None) -> dict:
         if not cands:
             raise NIError("bind_type", "form: no candidate form fits this run's data")
         chosen_cand, needs_attention = _pick_sealed_candidate(cands, sealed)
+        if rows_name and node["record"].get("kind") == "measure" and len(data[rows_name]) != 1:
+            # fix round 1a-6, class H: a measure sealed over a one-row list output no longer has
+            # exactly one row at this run — the data drifted past the one-row design
+            chosen_cand, needs_attention = cands[0], True
         out_desktop = _layout_span(chosen_cand, rec, prof, inp,
                                    _Span.parse(node["spans"]["desktop"]), now)
         out_phone = _layout_span(chosen_cand, rec, prof, inp,

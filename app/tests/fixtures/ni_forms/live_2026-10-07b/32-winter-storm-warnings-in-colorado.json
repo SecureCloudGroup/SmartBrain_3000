@@ -1,0 +1,83 @@
+{
+ "id": "32-winter-storm-warnings-in-colorado",
+ "n": 32,
+ "ask": "winter storm warnings in Colorado",
+ "kind": "alerts",
+ "frame_kind": "alerts",
+ "subject": "winter storm warnings",
+ "title": "winter storm warnings",
+ "source_id": "nws-alerts-point",
+ "source_url": "https://api.weather.gov/alerts/active?point=45.822142,-91.013043",
+ "fetched_at": "2026-10-07T17:29:28Z",
+ "viewer_tz": "UTC",
+ "answers_used": [
+  {
+   "name": "alerts",
+   "label": "Active weather alerts",
+   "words": [
+    "alerts",
+    "warnings",
+    "watches",
+    "advisories",
+    "severe weather",
+    "any warnings",
+    "near me",
+    "tornado warning",
+    "severe thunderstorm warning",
+    "flood warning",
+    "flash flood",
+    "winter storm warning",
+    "blizzard warning",
+    "heat advisory",
+    "red flag warning"
+   ],
+   "primary": true,
+   "kind": "list",
+   "path": "features",
+   "newest_first": false,
+   "may_be_empty": true,
+   "cells": [
+    {
+     "path": "properties.event",
+     "label": "Alert",
+     "type": "text",
+     "key": "properties.event",
+     "unit": null
+    },
+    {
+     "path": "properties.severity",
+     "label": "Severity",
+     "type": "text",
+     "key": "properties.severity",
+     "unit": null
+    },
+    {
+     "path": "properties.areaDesc",
+     "label": "Area",
+     "type": "text",
+     "key": "properties.areaDesc",
+     "unit": null
+    },
+    {
+     "path": "properties.expires",
+     "label": "Expires",
+     "type": "time",
+     "key": "properties.expires",
+     "unit": null
+    }
+   ]
+  }
+ ],
+ "rows_output_name": "rows",
+ "outputs": {
+  "rows_count": 0,
+  "rows": []
+ },
+ "live_form": "entity_list",
+ "live_span": "d1x1",
+ "live_lint": {
+  "red": 0,
+  "amber": 0,
+  "codes": []
+ }
+}

@@ -1,0 +1,48 @@
+{
+ "id": "05-price-of-gold-today",
+ "n": 5,
+ "ask": "price of gold today",
+ "kind": "current_value",
+ "frame_kind": "current_value",
+ "subject": "gold",
+ "title": "gold",
+ "source_id": "goldapi-spot",
+ "source_url": "https://api.gold-api.com/price/XAU",
+ "fetched_at": "2026-10-07T17:20:58Z",
+ "viewer_tz": "UTC",
+ "answers_used": [
+  {
+   "name": "price",
+   "label": "Spot price",
+   "words": [
+    "price",
+    "spot price",
+    "per ounce",
+    "ounce",
+    "oz",
+    "gold price",
+    "silver price",
+    "how much",
+    "worth",
+    "cost"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "price",
+   "type": "number",
+   "unit": "USD/oz",
+   "window": "now"
+  }
+ ],
+ "rows_output_name": null,
+ "outputs": {
+  "price": 4121.299805
+ },
+ "live_form": "stat",
+ "live_span": "d2x1",
+ "live_lint": {
+  "red": 0,
+  "amber": 0,
+  "codes": []
+ }
+}

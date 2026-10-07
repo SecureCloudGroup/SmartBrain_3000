@@ -1,0 +1,43 @@
+{
+ "id": "49-today-s-weather-summary-for-austin",
+ "n": 49,
+ "ask": "today's weather summary for Austin",
+ "kind": "text_brief",
+ "frame_kind": null,
+ "subject": "weather",
+ "title": "weather",
+ "source_id": "nws-forecast",
+ "source_url": "https://api.weather.gov/gridpoints/{office}/{grid_x},{grid_y}/forecast",
+ "fetched_at": "2026-10-07T17:33:47Z",
+ "viewer_tz": "UTC",
+ "answers_used": [
+  {
+   "name": "next_detail",
+   "label": "Forecast details (next period)",
+   "words": [
+    "details",
+    "detailed forecast",
+    "summary",
+    "describe",
+    "full forecast"
+   ],
+   "primary": false,
+   "kind": "value",
+   "path": "properties.periods[0].detailedForecast",
+   "type": "text",
+   "window": "now",
+   "unit": null
+  }
+ ],
+ "rows_output_name": null,
+ "outputs": {
+  "next_detail": "Sunny, with a high near 88. Northeast wind around 5 mph."
+ },
+ "live_form": "text_brief",
+ "live_span": "d1x1",
+ "live_lint": {
+  "red": 0,
+  "amber": 0,
+  "codes": []
+ }
+}

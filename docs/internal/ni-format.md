@@ -2498,7 +2498,7 @@ display-class pick and the map/image → value degrade) are gone from the flow; 
   `{type: "form", form, variant, params, record: {kind, fields: [{name, label, path, type,
   role, unit?, currency?, scale?, precision?, wallclock?}], rows: str|null}, spans: {desktop,
   phone}, design: {designer: "model"|"rules", pick, second: null | {id, form, variant,
-  params, spans}, fallback?: true}, frame?: {kind, wants}}`. `form` ∈ `ni_forms.types.FORMS`;
+  params, spans}, fallback?: true, gates?: [str]}, frame?: {kind, wants}}`. `form` ∈ `ni_forms.types.FORMS`;
   `type` / `role` ∈ `ni_forms.types.FIELD_TYPES` / `ROLES` (imported lazily — one source of
   truth); ≤8 fields; `rows` names the pipeline output holding the list rows (`"rows"`), `null`
   for value answers; spans are `ni_forms.spans` keys (`d1x1`, `p2x1`…). `design.second` is the
@@ -2629,6 +2629,36 @@ display-class pick and the map/image → value degrade) are gone from the flow; 
   `stat`: a worded hero wraps to two lines before it is ever cut; the hero plan lists every
   secondary fact that fits. `tools/ni-live-e2e.py` prints per live card `design: <form>
   <spans> designer=<model|rules>/<pick> lint red N amber N [codes] frame=<kind> wants=[…]`.
+- **Second live read (fix round 1a-6, 2026-10-07).** (H) `record.from_answers`: a list /
+  columns answer whose rows (after the sealed filters, e.g. the subject row filter above)
+  number exactly one reads like a value answer's one row — kind `measure`, roles by
+  `_apply_value_roles` (the asked field, or the first displayable, leads; a long list cell
+  is row data, never a passage lead) — so "what time is sunrise tomorrow" leads with
+  sunrise, not the day column a table would have had to keep instead. The sealed node's
+  `record.rows` still names the pipeline output; `record.from_spec` reads row 0 of it on
+  every bind (never every row — a measure caps at one); a refresh whose list no longer
+  has exactly one row is the data drifting past the design — the rules floor seals with
+  `design_needs_attention: true`, the same flag an unmatched sealed candidate sets. (I)
+  `fmt.unit_rides_inline`: a unit over 6 characters, or carrying a space or `=`, never
+  joins a hero value inline; `stat` draws it as its own `sub`-role line instead
+  (`src: "lexicon"`, a `["unit", field]` provenance recipe) and the hero carries the
+  number alone — the summary (`Stat.summary`) still names the value with its unit, as
+  before. (J) `fmt.decimals`: a value with no declared `Field.precision` shows at most
+  the magnitude rule's decimals (≥ 1 → 2; < 1 → 3 or 4) — never the raw float's own
+  digits (`4,121.299805` → `4,121.30`); declared precision still wins. (L)
+  `form_scene.design` lays out the pick at BOTH its sealed spans before sealing it
+  (the former `_layout_once` smoke test discarded this result); a red span moves to the
+  next candidate in floor order, then the universal fallback at its smallest clean span
+  — a design seals only once both sealed spans are red-free. `design.gates` (optional,
+  ≤ 12 short strings, `_validate_form_design`) names what was skipped (`red:<cand>:<form>`
+  / `fallback:<cand>:<form>`); a non-empty `gates` also means `designer: "rules"` (a
+  model pick a lint gate overrode was never the model's design). (M) PRESENT
+  (`present.build_messages`) ends the user message with a literal JSON skeleton of the
+  required object, THIS menu's candidate ids filled in, and "Reply with ONLY that
+  JSON." (the intent stage's prompt validates on the local 9B this way; a schema
+  described only in words never did); `llm.chat_json`'s optional `skeleton` argument
+  repeats the same literal shape on the one retry instead of naming the schema error
+  alone.
 - **What the client paints.** The CLIR for its device (`clir.desktop` on the board,
   `clir.phone` on a phone): v1 prims (`text`, `time`, `rect`, `line`, `tri`, `dot`, `path`,
   `cells`, `icon`, …) in content-box px with `x` anchors, `reading_order`, `hitmap`, and the

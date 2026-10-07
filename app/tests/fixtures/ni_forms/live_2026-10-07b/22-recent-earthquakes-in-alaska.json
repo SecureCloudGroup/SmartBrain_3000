@@ -1,0 +1,874 @@
+{
+ "id": "22-recent-earthquakes-in-alaska",
+ "n": 22,
+ "ask": "recent earthquakes in Alaska",
+ "kind": "latest_items",
+ "frame_kind": null,
+ "subject": "earthquakes",
+ "title": "earthquakes",
+ "source_id": "usgs-quakes-state",
+ "source_url": "https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&minlatitude=51.179&maxlatitude=71.435&minlongitude=-187.651&maxlongitude=-129.974&minmagnitude=2.5&starttime=2026-09-07&orderby=time&limit=20",
+ "fetched_at": "2026-10-07T17:27:01Z",
+ "viewer_tz": "UTC",
+ "answers_used": [
+  {
+   "name": "quakes",
+   "label": "Earthquakes",
+   "words": [
+    "earthquakes",
+    "quakes",
+    "earthquake",
+    "magnitude",
+    "where",
+    "latest",
+    "recent",
+    "shaking",
+    "statewide",
+    "in the state"
+   ],
+   "primary": true,
+   "kind": "list",
+   "path": "features",
+   "newest_first": false,
+   "may_be_empty": true,
+   "cells": [
+    {
+     "path": "properties.mag",
+     "label": "Magnitude",
+     "type": "number",
+     "key": "properties.mag",
+     "unit": null
+    },
+    {
+     "path": "properties.place",
+     "label": "Place",
+     "type": "text",
+     "key": "properties.place",
+     "unit": null
+    },
+    {
+     "path": "properties.time",
+     "label": "Time",
+     "type": "time",
+     "key": "properties.time",
+     "unit": null
+    }
+   ]
+  }
+ ],
+ "rows_output_name": "rows",
+ "outputs": {
+  "rows_count": 20,
+  "rows": [
+   {
+    "id": "aka2026twfueg",
+    "geometry": {
+     "coordinates": [
+      -156.866,
+      67.208,
+      20.9
+     ],
+     "type": "Point"
+    },
+    "properties": {
+     "title": "M 2.7 - 33 km N of Kobuk, Alaska",
+     "type": "earthquake",
+     "magType": "ml",
+     "gap": 42,
+     "rms": 0.8,
+     "dmin": 1.1,
+     "nst": 45,
+     "types": ",origin,phase-data,",
+     "sources": ",us,ak,",
+     "ids": ",us6000u0r5,aka2026twfueg,",
+     "code": "a2026twfueg",
+     "net": "ak",
+     "sig": 112,
+     "tsunami": 0,
+     "status": "automatic",
+     "alert": null,
+     "mmi": null,
+     "cdi": null,
+     "felt": null,
+     "detail": "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=aka2026twfueg&format=geojson",
+     "url": "https://earthquake.usgs.gov/earthquakes/eventpage/aka2026twfueg",
+     "tz": null,
+     "updated": 1791380594040,
+     "time": "2026-10-07T07:50:02.071000-04:00",
+     "place": "33 km N of Kobuk, Alaska",
+     "mag": 2.7
+    },
+    "type": "Feature"
+   },
+   {
+    "id": "aka2026tvuggp",
+    "geometry": {
+     "coordinates": [
+      -155.901,
+      54.629,
+      5
+     ],
+     "type": "Point"
+    },
+    "properties": {
+     "title": "M 3.1 - 243 km SE of Chignik, Alaska",
+     "type": "earthquake",
+     "magType": "ml",
+     "gap": 247,
+     "rms": 0.7,
+     "dmin": 2.3,
+     "nst": 39,
+     "types": ",origin,phase-data,",
+     "sources": ",ak,",
+     "ids": ",aka2026tvuggp,",
+     "code": "a2026tvuggp",
+     "net": "ak",
+     "sig": 148,
+     "tsunami": 0,
+     "status": "automatic",
+     "alert": null,
+     "mmi": null,
+     "cdi": null,
+     "felt": null,
+     "detail": "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=aka2026tvuggp&format=geojson",
+     "url": "https://earthquake.usgs.gov/earthquakes/eventpage/aka2026tvuggp",
+     "tz": null,
+     "updated": 1791353221169,
+     "time": "2026-10-07T02:03:51.815000-04:00",
+     "place": "243 km SE of Chignik, Alaska",
+     "mag": 3.1
+    },
+    "type": "Feature"
+   },
+   {
+    "id": "aka2026tvmyss",
+    "geometry": {
+     "coordinates": [
+      -150.615,
+      60.543,
+      43.5
+     ],
+     "type": "Point"
+    },
+    "properties": {
+     "title": "M 2.5 - 8 km E of Sterling, Alaska",
+     "type": "earthquake",
+     "magType": "ml",
+     "gap": 58,
+     "rms": 0.8,
+     "dmin": 0.3,
+     "nst": 73,
+     "types": ",origin,phase-data,",
+     "sources": ",ak,",
+     "ids": ",aka2026tvmyss,",
+     "code": "a2026tvmyss",
+     "net": "ak",
+     "sig": 96,
+     "tsunami": 0,
+     "status": "automatic",
+     "alert": null,
+     "mmi": null,
+     "cdi": null,
+     "felt": null,
+     "detail": "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=aka2026tvmyss&format=geojson",
+     "url": "https://earthquake.usgs.gov/earthquakes/eventpage/aka2026tvmyss",
+     "tz": null,
+     "updated": 1791340190015,
+     "time": "2026-10-06T22:25:37.068000-04:00",
+     "place": "8 km E of Sterling, Alaska",
+     "mag": 2.5
+    },
+    "type": "Feature"
+   },
+   {
+    "id": "aka2026tvffdw",
+    "geometry": {
+     "coordinates": [
+      -156.013,
+      55.764,
+      40.4
+     ],
+     "type": "Point"
+    },
+    "properties": {
+     "title": "M 2.5 - 160 km ESE of Chignik, Alaska",
+     "type": "earthquake",
+     "magType": "ml",
+     "gap": 206,
+     "rms": 0.9,
+     "dmin": 0.2,
+     "nst": 28,
+     "types": ",origin,phase-data,",
+     "sources": ",ak,",
+     "ids": ",aka2026tvffdw,",
+     "code": "a2026tvffdw",
+     "net": "ak",
+     "sig": 96,
+     "tsunami": 0,
+     "status": "reviewed",
+     "alert": null,
+     "mmi": null,
+     "cdi": null,
+     "felt": null,
+     "detail": "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=aka2026tvffdw&format=geojson",
+     "url": "https://earthquake.usgs.gov/earthquakes/eventpage/aka2026tvffdw",
+     "tz": null,
+     "updated": 1791387160284,
+     "time": "2026-10-06T18:33:02.384000-04:00",
+     "place": "160 km ESE of Chignik, Alaska",
+     "mag": 2.5
+    },
+    "type": "Feature"
+   },
+   {
+    "id": "aka2026tvbicf",
+    "geometry": {
+     "coordinates": [
+      -150.368,
+      56.175,
+      5
+     ],
+     "type": "Point"
+    },
+    "properties": {
+     "title": "M 3.0 - 197 km SE of Chiniak, Alaska",
+     "type": "earthquake",
+     "magType": "ml",
+     "gap": 289,
+     "rms": 0.8,
+     "dmin": 2,
+     "nst": 29,
+     "types": ",origin,phase-data,",
+     "sources": ",ak,",
+     "ids": ",aka2026tvbicf,",
+     "code": "a2026tvbicf",
+     "net": "ak",
+     "sig": 138,
+     "tsunami": 0,
+     "status": "reviewed",
+     "alert": null,
+     "mmi": null,
+     "cdi": null,
+     "felt": null,
+     "detail": "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=aka2026tvbicf&format=geojson",
+     "url": "https://earthquake.usgs.gov/earthquakes/eventpage/aka2026tvbicf",
+     "tz": null,
+     "updated": 1791329143477,
+     "time": "2026-10-06T16:36:34.972000-04:00",
+     "place": "197 km SE of Chiniak, Alaska",
+     "mag": 3
+    },
+    "type": "Feature"
+   },
+   {
+    "id": "aka2026tvbgrt",
+    "geometry": {
+     "coordinates": [
+      -156.832,
+      54.711,
+      32.8
+     ],
+     "type": "Point"
+    },
+    "properties": {
+     "title": "M 3.5 - 198 km SE of Perryville, Alaska",
+     "type": "earthquake",
+     "magType": "ml",
+     "gap": 223,
+     "rms": 0.5,
+     "dmin": 1.9,
+     "nst": 65,
+     "types": ",origin,phase-data,shakemap,",
+     "sources": ",us,ak,",
+     "ids": ",us6000u0kq,aka2026tvbgrt,",
+     "code": "a2026tvbgrt",
+     "net": "ak",
+     "sig": 188,
+     "tsunami": 0,
+     "status": "reviewed",
+     "alert": null,
+     "mmi": 1,
+     "cdi": null,
+     "felt": null,
+     "detail": "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=aka2026tvbgrt&format=geojson",
+     "url": "https://earthquake.usgs.gov/earthquakes/eventpage/aka2026tvbgrt",
+     "tz": null,
+     "updated": 1791328953727,
+     "time": "2026-10-06T16:34:34.739000-04:00",
+     "place": "198 km SE of Perryville, Alaska",
+     "mag": 3.5
+    },
+    "type": "Feature"
+   },
+   {
+    "id": "aka2026tvbfeo",
+    "geometry": {
+     "coordinates": [
+      -170.353,
+      51.826,
+      22.7
+     ],
+     "type": "Point"
+    },
+    "properties": {
+     "title": "M 3.4 - 160 km SW of Nikolski, Alaska",
+     "type": "earthquake",
+     "magType": "ml",
+     "gap": 224,
+     "rms": 0.9,
+     "dmin": 1,
+     "nst": 29,
+     "types": ",origin,phase-data,",
+     "sources": ",ak,",
+     "ids": ",aka2026tvbfeo,",
+     "code": "a2026tvbfeo",
+     "net": "ak",
+     "sig": 178,
+     "tsunami": 0,
+     "status": "reviewed",
+     "alert": null,
+     "mmi": null,
+     "cdi": null,
+     "felt": null,
+     "detail": "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=aka2026tvbfeo&format=geojson",
+     "url": "https://earthquake.usgs.gov/earthquakes/eventpage/aka2026tvbfeo",
+     "tz": null,
+     "updated": 1791328464867,
+     "time": "2026-10-06T16:32:59.569000-04:00",
+     "place": "160 km SW of Nikolski, Alaska",
+     "mag": 3.4
+    },
+    "type": "Feature"
+   },
+   {
+    "id": "us6000u0k1",
+    "geometry": {
+     "coordinates": [
+      -133.6639,
+      65.0111,
+      10
+     ],
+     "type": "Point"
+    },
+    "properties": {
+     "title": "M 4.2 - 296 km ENE of Dawson City, Canada",
+     "type": "earthquake",
+     "magType": "mb",
+     "gap": 44,
+     "rms": 0.5,
+     "dmin": 1.99,
+     "nst": 69,
+     "types": ",losspager,origin,phase-data,shakemap,",
+     "sources": ",us,",
+     "ids": ",us6000u0k1,",
+     "code": "6000u0k1",
+     "net": "us",
+     "sig": 271,
+     "tsunami": 0,
+     "status": "reviewed",
+     "alert": "green",
+     "mmi": 3.966,
+     "cdi": null,
+     "felt": null,
+     "detail": "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=us6000u0k1&format=geojson",
+     "url": "https://earthquake.usgs.gov/earthquakes/eventpage/us6000u0k1",
+     "tz": null,
+     "updated": 1791321540856,
+     "time": "2026-10-06T15:08:40.492000-04:00",
+     "place": "296 km ENE of Dawson City, Canada",
+     "mag": 4.2
+    },
+    "type": "Feature"
+   },
+   {
+    "id": "aka2026tuxwsq",
+    "geometry": {
+     "coordinates": [
+      -168.257,
+      52.958,
+      73.7
+     ],
+     "type": "Point"
+    },
+    "properties": {
+     "title": "M 2.5 - 40 km E of Nikolski, Alaska",
+     "type": "earthquake",
+     "magType": "ml",
+     "gap": 214,
+     "rms": 0.3,
+     "dmin": 0.4,
+     "nst": 11,
+     "types": ",origin,phase-data,",
+     "sources": ",ak,",
+     "ids": ",aka2026tuxwsq,",
+     "code": "a2026tuxwsq",
+     "net": "ak",
+     "sig": 96,
+     "tsunami": 0,
+     "status": "reviewed",
+     "alert": null,
+     "mmi": null,
+     "cdi": null,
+     "felt": null,
+     "detail": "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=aka2026tuxwsq&format=geojson",
+     "url": "https://earthquake.usgs.gov/earthquakes/eventpage/aka2026tuxwsq",
+     "tz": null,
+     "updated": 1791315486529,
+     "time": "2026-10-06T14:53:23.676000-04:00",
+     "place": "40 km E of Nikolski, Alaska",
+     "mag": 2.5
+    },
+    "type": "Feature"
+   },
+   {
+    "id": "aka2026tuxgky",
+    "geometry": {
+     "coordinates": [
+      -153.609,
+      58.802,
+      87.6
+     ],
+     "type": "Point"
+    },
+    "properties": {
+     "title": "M 5.5 - 92 km NNW of Aleneva, Alaska",
+     "type": "earthquake",
+     "magType": "ml",
+     "gap": 67,
+     "rms": 0.5,
+     "dmin": 0.1,
+     "nst": 121,
+     "types": ",dyfi,event-sequence,losspager,moment-tensor,oaf,origin,phase-data,shakemap,",
+     "sources": ",ak,us,",
+     "ids": ",aka2026tuxgky,us6000u0ju,",
+     "code": "a2026tuxgky",
+     "net": "ak",
+     "sig": 622,
+     "tsunami": 0,
+     "status": "reviewed",
+     "alert": "green",
+     "mmi": 4.215,
+     "cdi": 4.6,
+     "felt": 341,
+     "detail": "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=aka2026tuxgky&format=geojson",
+     "url": "https://earthquake.usgs.gov/earthquakes/eventpage/aka2026tuxgky",
+     "tz": null,
+     "updated": 1791392292198,
+     "time": "2026-10-06T14:34:31.760000-04:00",
+     "place": "92 km NNW of Aleneva, Alaska",
+     "mag": 5.5
+    },
+    "type": "Feature"
+   },
+   {
+    "id": "aka2026tuvccy",
+    "geometry": {
+     "coordinates": [
+      -157.483,
+      56.065,
+      26.1
+     ],
+     "type": "Point"
+    },
+    "properties": {
+     "title": "M 2.5 - 62 km ESE of Chignik, Alaska",
+     "type": "earthquake",
+     "magType": "ml",
+     "gap": 249,
+     "rms": 0.5,
+     "dmin": 0.6,
+     "nst": 15,
+     "types": ",origin,phase-data,",
+     "sources": ",ak,",
+     "ids": ",aka2026tuvccy,",
+     "code": "a2026tuvccy",
+     "net": "ak",
+     "sig": 96,
+     "tsunami": 0,
+     "status": "automatic",
+     "alert": null,
+     "mmi": null,
+     "cdi": null,
+     "felt": null,
+     "detail": "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=aka2026tuvccy&format=geojson",
+     "url": "https://earthquake.usgs.gov/earthquakes/eventpage/aka2026tuvccy",
+     "tz": null,
+     "updated": 1791307846532,
+     "time": "2026-10-06T13:29:38.354000-04:00",
+     "place": "62 km ESE of Chignik, Alaska",
+     "mag": 2.5
+    },
+    "type": "Feature"
+   },
+   {
+    "id": "aka2026ttygip",
+    "geometry": {
+     "coordinates": [
+      -147.67,
+      63.857,
+      1.3
+     ],
+     "type": "Point"
+    },
+    "properties": {
+     "title": "M 3.1 - 62 km ENE of Denali Park, Alaska",
+     "type": "earthquake",
+     "magType": "ml",
+     "gap": 28,
+     "rms": 1.1,
+     "dmin": 0.6,
+     "nst": 90,
+     "types": ",origin,phase-data,",
+     "sources": ",us,ak,",
+     "ids": ",us6000tzv5,aka2026ttygip,",
+     "code": "a2026ttygip",
+     "net": "ak",
+     "sig": 148,
+     "tsunami": 0,
+     "status": "automatic",
+     "alert": null,
+     "mmi": null,
+     "cdi": null,
+     "felt": null,
+     "detail": "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=aka2026ttygip&format=geojson",
+     "url": "https://earthquake.usgs.gov/earthquakes/eventpage/aka2026ttygip",
+     "tz": null,
+     "updated": 1791267561040,
+     "time": "2026-10-06T02:04:50.916000-04:00",
+     "place": "62 km ENE of Denali Park, Alaska",
+     "mag": 3.1
+    },
+    "type": "Feature"
+   },
+   {
+    "id": "aka2026ttudjl",
+    "geometry": {
+     "coordinates": [
+      -149.903,
+      61.548,
+      32.8
+     ],
+     "type": "Point"
+    },
+    "properties": {
+     "title": "M 3.4 - 4 km NE of Big Lake, Alaska",
+     "type": "earthquake",
+     "magType": "ml",
+     "gap": 30,
+     "rms": 1,
+     "dmin": 0.4,
+     "nst": 172,
+     "types": ",dyfi,origin,phase-data,shakemap,",
+     "sources": ",ak,us,",
+     "ids": ",aka2026ttudjl,us6000tzum,",
+     "code": "a2026ttudjl",
+     "net": "ak",
+     "sig": 218,
+     "tsunami": 0,
+     "status": "automatic",
+     "alert": null,
+     "mmi": 3.268,
+     "cdi": 2.8,
+     "felt": 144,
+     "detail": "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=aka2026ttudjl&format=geojson",
+     "url": "https://earthquake.usgs.gov/earthquakes/eventpage/aka2026ttudjl",
+     "tz": null,
+     "updated": 1791345977505,
+     "time": "2026-10-06T00:01:29.033000-04:00",
+     "place": "4 km NE of Big Lake, Alaska",
+     "mag": 3.4
+    },
+    "type": "Feature"
+   },
+   {
+    "id": "us6000tzul",
+    "geometry": {
+     "coordinates": [
+      -145.1953,
+      69.6234,
+      10
+     ],
+     "type": "Point"
+    },
+    "properties": {
+     "title": "M 2.5 - 82 km SW of Kaktovik, Alaska",
+     "type": "earthquake",
+     "magType": "ml",
+     "gap": 99,
+     "rms": 0.82,
+     "dmin": 0.312,
+     "nst": 11,
+     "types": ",origin,phase-data,",
+     "sources": ",us,",
+     "ids": ",us6000tzul,",
+     "code": "6000tzul",
+     "net": "us",
+     "sig": 96,
+     "tsunami": 0,
+     "status": "reviewed",
+     "alert": null,
+     "mmi": null,
+     "cdi": null,
+     "felt": null,
+     "detail": "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=us6000tzul&format=geojson",
+     "url": "https://earthquake.usgs.gov/earthquakes/eventpage/us6000tzul",
+     "tz": null,
+     "updated": 1791260401040,
+     "time": "2026-10-05T23:58:19.461000-04:00",
+     "place": "82 km SW of Kaktovik, Alaska",
+     "mag": 2.5
+    },
+    "type": "Feature"
+   },
+   {
+    "id": "aka2026ttftim",
+    "geometry": {
+     "coordinates": [
+      -140.768,
+      64.728,
+      2.8
+     ],
+     "type": "Point"
+    },
+    "properties": {
+     "title": "M 3.2 - 17 km ESE of Eagle Village, Alaska",
+     "type": "earthquake",
+     "magType": "ml",
+     "gap": 147,
+     "rms": 0.9,
+     "dmin": 0.9,
+     "nst": 58,
+     "types": ",origin,phase-data,",
+     "sources": ",ak,",
+     "ids": ",aka2026ttftim,",
+     "code": "a2026ttftim",
+     "net": "ak",
+     "sig": 158,
+     "tsunami": 0,
+     "status": "reviewed",
+     "alert": null,
+     "mmi": null,
+     "cdi": null,
+     "felt": null,
+     "detail": "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=aka2026ttftim&format=geojson",
+     "url": "https://earthquake.usgs.gov/earthquakes/eventpage/aka2026ttftim",
+     "tz": null,
+     "updated": 1791261240225,
+     "time": "2026-10-05T16:50:08.260000-04:00",
+     "place": "17 km ESE of Eagle Village, Alaska",
+     "mag": 3.2
+    },
+    "type": "Feature"
+   },
+   {
+    "id": "aka2026ttagyp",
+    "geometry": {
+     "coordinates": [
+      -155.806,
+      57.638,
+      1
+     ],
+     "type": "Point"
+    },
+    "properties": {
+     "title": "M 2.7 - 81 km W of Karluk, Alaska",
+     "type": "earthquake",
+     "magType": "ml",
+     "gap": 148,
+     "rms": 0.7,
+     "dmin": 0.3,
+     "nst": 47,
+     "types": ",origin,phase-data,",
+     "sources": ",av,us,ak,",
+     "ids": ",av94461491,us6000tzpv,aka2026ttagyp,",
+     "code": "a2026ttagyp",
+     "net": "ak",
+     "sig": 112,
+     "tsunami": 0,
+     "status": "reviewed",
+     "alert": null,
+     "mmi": null,
+     "cdi": null,
+     "felt": null,
+     "detail": "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=aka2026ttagyp&format=geojson",
+     "url": "https://earthquake.usgs.gov/earthquakes/eventpage/aka2026ttagyp",
+     "tz": null,
+     "updated": 1791263122870,
+     "time": "2026-10-05T14:05:53.049000-04:00",
+     "place": "81 km W of Karluk, Alaska",
+     "mag": 2.7
+    },
+    "type": "Feature"
+   },
+   {
+    "id": "us6000tzpp",
+    "geometry": {
+     "coordinates": [
+      -130.3859,
+      51.3621,
+      10
+     ],
+     "type": "Point"
+    },
+    "properties": {
+     "title": "M 3.9 - 247 km WNW of Port McNeill, Canada",
+     "type": "earthquake",
+     "magType": "mb",
+     "gap": 178,
+     "rms": 0.8,
+     "dmin": 1.06,
+     "nst": 41,
+     "types": ",origin,phase-data,shakemap,",
+     "sources": ",us,",
+     "ids": ",us6000tzpp,",
+     "code": "6000tzpp",
+     "net": "us",
+     "sig": 234,
+     "tsunami": 0,
+     "status": "reviewed",
+     "alert": null,
+     "mmi": 1.255,
+     "cdi": null,
+     "felt": null,
+     "detail": "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=us6000tzpp&format=geojson",
+     "url": "https://earthquake.usgs.gov/earthquakes/eventpage/us6000tzpp",
+     "tz": null,
+     "updated": 1791308132740,
+     "time": "2026-10-05T13:30:40.698000-04:00",
+     "place": "247 km WNW of Port McNeill, Canada",
+     "mag": 3.9
+    },
+    "type": "Feature"
+   },
+   {
+    "id": "aka2026tsxxtn",
+    "geometry": {
+     "coordinates": [
+      -155.849,
+      57.65,
+      5
+     ],
+     "type": "Point"
+    },
+    "properties": {
+     "title": "M 3.4 - 83 km W of Karluk, Alaska",
+     "type": "earthquake",
+     "magType": "ml",
+     "gap": 123,
+     "rms": 1.2,
+     "dmin": 0.2,
+     "nst": 112,
+     "types": ",origin,phase-data,shakemap,",
+     "sources": ",av,us,ak,",
+     "ids": ",av94461396,us6000tzpj,aka2026tsxxtn,",
+     "code": "a2026tsxxtn",
+     "net": "ak",
+     "sig": 178,
+     "tsunami": 0,
+     "status": "automatic",
+     "alert": null,
+     "mmi": 3.81,
+     "cdi": null,
+     "felt": null,
+     "detail": "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=aka2026tsxxtn&format=geojson",
+     "url": "https://earthquake.usgs.gov/earthquakes/eventpage/aka2026tsxxtn",
+     "tz": null,
+     "updated": 1791250122480,
+     "time": "2026-10-05T12:55:19.142000-04:00",
+     "place": "83 km W of Karluk, Alaska",
+     "mag": 3.4
+    },
+    "type": "Feature"
+   },
+   {
+    "id": "aka2026tswjcq",
+    "geometry": {
+     "coordinates": [
+      -151.817,
+      61.35,
+      92.9
+     ],
+     "type": "Point"
+    },
+    "properties": {
+     "title": "M 2.9 - 45 km WNW of Beluga, Alaska",
+     "type": "earthquake",
+     "magType": "ml",
+     "gap": 22,
+     "rms": 0.7,
+     "dmin": 0,
+     "nst": 115,
+     "types": ",origin,phase-data,",
+     "sources": ",us,ak,",
+     "ids": ",us6000tzpc,aka2026tswjcq,",
+     "code": "a2026tswjcq",
+     "net": "ak",
+     "sig": 129,
+     "tsunami": 0,
+     "status": "automatic",
+     "alert": null,
+     "mmi": null,
+     "cdi": null,
+     "felt": null,
+     "detail": "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=aka2026tswjcq&format=geojson",
+     "url": "https://earthquake.usgs.gov/earthquakes/eventpage/aka2026tswjcq",
+     "tz": null,
+     "updated": 1791230022040,
+     "time": "2026-10-05T12:10:50.126000-04:00",
+     "place": "45 km WNW of Beluga, Alaska",
+     "mag": 2.9
+    },
+    "type": "Feature"
+   },
+   {
+    "id": "aka2026tsoksi",
+    "geometry": {
+     "coordinates": [
+      -152.939,
+      60.132,
+      125.3
+     ],
+     "type": "Point"
+    },
+    "properties": {
+     "title": "M 2.6 - 70 km WNW of Happy Valley, Alaska",
+     "type": "earthquake",
+     "magType": "ml",
+     "gap": 75,
+     "rms": 0.7,
+     "dmin": 0.1,
+     "nst": 111,
+     "types": ",origin,phase-data,",
+     "sources": ",us,ak,",
+     "ids": ",us6000tzni,aka2026tsoksi,",
+     "code": "a2026tsoksi",
+     "net": "ak",
+     "sig": 104,
+     "tsunami": 0,
+     "status": "automatic",
+     "alert": null,
+     "mmi": null,
+     "cdi": null,
+     "felt": null,
+     "detail": "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=aka2026tsoksi&format=geojson",
+     "url": "https://earthquake.usgs.gov/earthquakes/eventpage/aka2026tsoksi",
+     "tz": null,
+     "updated": 1791202588040,
+     "time": "2026-10-05T08:10:11.438000-04:00",
+     "place": "70 km WNW of Happy Valley, Alaska",
+     "mag": 2.6
+    },
+    "type": "Feature"
+   }
+  ]
+ },
+ "live_form": "ranked_list",
+ "live_span": "d1x2",
+ "live_lint": {
+  "red": 0,
+  "amber": 2,
+  "codes": [
+   "L-ASK"
+  ]
+ }
+}

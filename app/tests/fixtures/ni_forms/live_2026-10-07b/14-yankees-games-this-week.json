@@ -1,0 +1,340 @@
+{
+ "id": "14-yankees-games-this-week",
+ "n": 14,
+ "ask": "Yankees games this week",
+ "kind": "schedule",
+ "frame_kind": null,
+ "subject": "Yankees games",
+ "title": "Yankees games",
+ "source_id": "mlb-team-schedule",
+ "source_url": "https://statsapi.mlb.com/api/v1/schedule?sportId=1&teamId=147&startDate=2026-10-07&endDate=2026-11-06",
+ "fetched_at": "2026-10-07T17:23:06Z",
+ "viewer_tz": "UTC",
+ "answers_used": [
+  {
+   "name": "upcoming",
+   "label": "Next games",
+   "words": [
+    "next game",
+    "next games",
+    "next",
+    "schedule",
+    "upcoming",
+    "play next",
+    "games",
+    "fixtures",
+    "this week"
+   ],
+   "primary": true,
+   "kind": "list",
+   "path": "dates",
+   "newest_first": false,
+   "may_be_empty": false,
+   "cells": [
+    {
+     "path": "games[0].gameDate",
+     "label": "Start",
+     "type": "time",
+     "tbd_if": {
+      "path": "games[0].status.startTimeTBD",
+      "equals": true
+     },
+     "key": "games[0].gameDate",
+     "unit": null
+    },
+    {
+     "path": "games[0].teams.away.team.name",
+     "label": "Away",
+     "type": "text",
+     "key": "games[0].teams.away.team.name",
+     "unit": null
+    },
+    {
+     "path": "games[0].teams.home.team.name",
+     "label": "Home",
+     "type": "text",
+     "key": "games[0].teams.home.team.name",
+     "unit": null
+    },
+    {
+     "path": "games[0].venue.name",
+     "label": "Venue",
+     "type": "text",
+     "key": "games[0].venue.name",
+     "unit": null
+    }
+   ],
+   "axis": {
+    "cell": "games[0].gameDate",
+    "step": "hour"
+   }
+  }
+ ],
+ "rows_output_name": "rows",
+ "outputs": {
+  "rows": [
+   {
+    "events": [],
+    "games": [
+     {
+      "ifNecessaryDescription": "Normal Game",
+      "ifNecessary": "N",
+      "recordSource": "S",
+      "seriesDescription": "AL Division Series",
+      "seriesGameNumber": 3,
+      "gamesInSeries": 5,
+      "inningBreakLength": 175,
+      "reverseHomeAwayStatus": false,
+      "scheduledInnings": 9,
+      "description": "ALDS 'A' Game 3",
+      "dayNight": "night",
+      "seasonDisplay": "2026",
+      "calendarEventID": "14-849838-2026-10-07",
+      "tiebreaker": "N",
+      "gamedayType": "P",
+      "doubleHeader": "N",
+      "publicFacing": true,
+      "gameNumber": 1,
+      "content": {
+       "link": "/api/v1/game/849838/content"
+      },
+      "venue": {
+       "link": "/api/v1/venues/3313",
+       "name": "Yankee Stadium",
+       "id": 3313
+      },
+      "teams": {
+       "home": {
+        "seriesNumber": 1,
+        "splitSquad": false,
+        "leagueRecord": {
+         "pct": ".000",
+         "ties": 0,
+         "losses": 2,
+         "wins": 0
+        },
+        "team": {
+         "link": "/api/v1/teams/147",
+         "name": "New York Yankees",
+         "id": 147
+        }
+       },
+       "away": {
+        "seriesNumber": 1,
+        "splitSquad": false,
+        "leagueRecord": {
+         "pct": "1.000",
+         "ties": 0,
+         "losses": 0,
+         "wins": 2
+        },
+        "team": {
+         "link": "/api/v1/teams/139",
+         "name": "Tampa Bay Rays",
+         "id": 139
+        }
+       }
+      },
+      "status": {
+       "abstractGameCode": "P",
+       "startTimeTBD": false,
+       "statusCode": "S",
+       "detailedState": "Scheduled",
+       "codedGameState": "S",
+       "abstractGameState": "Preview"
+      },
+      "officialDate": "2026-10-07",
+      "gameDate": "2026-10-07T20:00:00-04:00",
+      "season": "2026",
+      "gameType": "D",
+      "link": "/api/v1.1/game/849838/feed/live",
+      "gameGuid": "bc8db0a8-94b5-4254-b4d4-b543a822267f",
+      "gamePk": 849838
+     }
+    ],
+    "totalGamesInProgress": 0,
+    "totalGames": 1,
+    "totalEvents": 0,
+    "totalItems": 1,
+    "date": "2026-10-07"
+   },
+   {
+    "events": [],
+    "games": [
+     {
+      "ifNecessaryDescription": "If Necessary Game",
+      "ifNecessary": "Y",
+      "recordSource": "S",
+      "seriesDescription": "AL Division Series",
+      "seriesGameNumber": 4,
+      "gamesInSeries": 5,
+      "inningBreakLength": 175,
+      "reverseHomeAwayStatus": false,
+      "scheduledInnings": 9,
+      "description": "ALDS 'A' Game 4",
+      "dayNight": "night",
+      "seasonDisplay": "2026",
+      "calendarEventID": "14-849837-2026-10-08",
+      "tiebreaker": "N",
+      "gamedayType": "P",
+      "doubleHeader": "N",
+      "publicFacing": true,
+      "gameNumber": 1,
+      "content": {
+       "link": "/api/v1/game/849837/content"
+      },
+      "venue": {
+       "link": "/api/v1/venues/3313",
+       "name": "Yankee Stadium",
+       "id": 3313
+      },
+      "teams": {
+       "home": {
+        "seriesNumber": 1,
+        "splitSquad": false,
+        "leagueRecord": {
+         "pct": ".000",
+         "ties": 0,
+         "losses": 2,
+         "wins": 0
+        },
+        "team": {
+         "link": "/api/v1/teams/147",
+         "name": "New York Yankees",
+         "id": 147
+        }
+       },
+       "away": {
+        "seriesNumber": 1,
+        "splitSquad": false,
+        "leagueRecord": {
+         "pct": "1.000",
+         "ties": 0,
+         "losses": 0,
+         "wins": 2
+        },
+        "team": {
+         "link": "/api/v1/teams/139",
+         "name": "Tampa Bay Rays",
+         "id": 139
+        }
+       }
+      },
+      "status": {
+       "abstractGameCode": "P",
+       "startTimeTBD": false,
+       "statusCode": "S",
+       "detailedState": "Scheduled",
+       "codedGameState": "S",
+       "abstractGameState": "Preview"
+      },
+      "officialDate": "2026-10-08",
+      "gameDate": "2026-10-08T20:00:00-04:00",
+      "season": "2026",
+      "gameType": "D",
+      "link": "/api/v1.1/game/849837/feed/live",
+      "gameGuid": "b49bde8e-c251-44a1-8d7d-d798bfd41f8c",
+      "gamePk": 849837
+     }
+    ],
+    "totalGamesInProgress": 0,
+    "totalGames": 1,
+    "totalEvents": 0,
+    "totalItems": 1,
+    "date": "2026-10-08"
+   },
+   {
+    "events": [],
+    "games": [
+     {
+      "ifNecessaryDescription": "If Necessary Game",
+      "ifNecessary": "Y",
+      "recordSource": "S",
+      "seriesDescription": "AL Division Series",
+      "seriesGameNumber": 5,
+      "gamesInSeries": 5,
+      "inningBreakLength": 175,
+      "reverseHomeAwayStatus": false,
+      "scheduledInnings": 9,
+      "description": "ALDS 'A' Game 5",
+      "dayNight": "night",
+      "seasonDisplay": "2026",
+      "calendarEventID": "14-849836-2026-10-10",
+      "tiebreaker": "N",
+      "gamedayType": "P",
+      "doubleHeader": "N",
+      "publicFacing": true,
+      "gameNumber": 1,
+      "content": {
+       "link": "/api/v1/game/849836/content"
+      },
+      "venue": {
+       "link": "/api/v1/venues/12",
+       "name": "Tropicana Field",
+       "id": 12
+      },
+      "teams": {
+       "home": {
+        "seriesNumber": 1,
+        "splitSquad": false,
+        "leagueRecord": {
+         "pct": "1.000",
+         "ties": 0,
+         "losses": 0,
+         "wins": 2
+        },
+        "team": {
+         "link": "/api/v1/teams/139",
+         "name": "Tampa Bay Rays",
+         "id": 139
+        }
+       },
+       "away": {
+        "seriesNumber": 1,
+        "splitSquad": false,
+        "leagueRecord": {
+         "pct": ".000",
+         "ties": 0,
+         "losses": 2,
+         "wins": 0
+        },
+        "team": {
+         "link": "/api/v1/teams/147",
+         "name": "New York Yankees",
+         "id": 147
+        }
+       }
+      },
+      "status": {
+       "abstractGameCode": "P",
+       "startTimeTBD": false,
+       "statusCode": "S",
+       "detailedState": "Scheduled",
+       "codedGameState": "S",
+       "abstractGameState": "Preview"
+      },
+      "officialDate": "2026-10-10",
+      "gameDate": "2026-10-10T20:00:00-04:00",
+      "season": "2026",
+      "gameType": "D",
+      "link": "/api/v1.1/game/849836/feed/live",
+      "gameGuid": "afb9aba1-becf-4725-8653-84bd79e8d741",
+      "gamePk": 849836
+     }
+    ],
+    "totalGamesInProgress": 0,
+    "totalGames": 1,
+    "totalEvents": 0,
+    "totalItems": 1,
+    "date": "2026-10-10"
+   }
+  ]
+ },
+ "live_form": "day_table",
+ "live_span": "d1x2",
+ "live_lint": {
+  "red": 0,
+  "amber": 0,
+  "codes": []
+ }
+}

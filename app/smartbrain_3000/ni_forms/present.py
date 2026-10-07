@@ -49,6 +49,31 @@ def _cell(v) -> str:
     return s[:60]
 
 
+def _skeleton(ids: list, rec) -> str:
+    """The literal JSON shape PRESENT must reply with, THIS menu's candidate ids (and the
+    record's field names) filled in (fix round 1a-6, class M): the intent stage's
+    literal-shape prompt validates on the local 9B; a schema described in words never did
+    (free-form replies like ``{"analysis": …}``). Mirrors ``build_messages``'s schema
+    exactly — ``second`` is an object or null, ``labels`` names its required keys — so the
+    model is never shown a shape it would then have to guess how to generalize."""
+    assert isinstance(ids, list) and ids, "ids must be a non-empty list"
+    assert rec is not None, "rec must be a DataRecord"
+    cid = "|".join(ids)
+    intents = "|".join(sorted(INTENTS))
+    fits = ", ".join(f'{{"cand": "{i}", "answers_ask": "yes|partly|no"}}' for i in ids)
+    fields = [f.name for f in rec.fields[:16]]
+    field_opts = "|".join(fields) if fields else "null"
+    labels = ", ".join(f'"{f}": "<key or ask>"' for f in fields[:6])
+    return ('{"intent": "<one of ' + intents + '>",\n'
+           ' "fits": [' + fits + '],\n'
+           ' "pick": "<one of ' + cid + '>",\n'
+           ' "second": {"cand": "<one of ' + cid + '>", "intent": "<one of ' + intents + '>"} or null,\n'
+           ' "primary_field": "<one of ' + field_opts + '>" or null,\n'
+           ' "labels": {' + labels + '},\n'
+           ' "uncovered_wants": [],\n'
+           ' "none_fits": false}')
+
+
 def build_messages(cands, rec, prof, inp) -> tuple[list, list, dict]:
     """(messages, shuffled candidate ids, schema)."""
     RView(rec)
@@ -74,7 +99,10 @@ def build_messages(cands, rec, prof, inp) -> tuple[list, list, dict]:
             ("\nExamples of good picks: " + json.dumps([{k: s[k] for k in ("ask", "options", "pick", "why")}
                                                      for s in shots]) if shots else "") +
             "\nFor every option say whether it answers the ask (yes/partly/no); pick one; name a second option "
-            "only if it serves a clearly different intent; list wants no option covers.")
+            "only if it serves a clearly different intent; list wants no option covers; for labels, say "
+            '"key" when a field\'s own name reads fine, "ask" when the user\'s own word should replace it.\n' +
+            "Reply with ONLY this JSON shape, with these ids:\n" + _skeleton(order, rec) +
+            "\nReply with ONLY that JSON.")
     ids = order
     labels_props = {f: {"type": "string", "enum": ["key", "ask"]} for f in fields[:6]}
     schema = {
@@ -155,7 +183,8 @@ def present(cands, rec, prof, inp, *, call=None) -> PresentResult:
                              gates=["single_candidate"] if len(cands) == 1 else ["model_off"])
     msgs, ids, schema = build_messages(cands, rec, prof, inp)
     try:
-        obj, meta = llm.chat_json("present", msgs, schema, call=call, max_tokens=500)
+        obj, meta = llm.chat_json("present", msgs, schema, call=call, max_tokens=500,
+                                  skeleton=_skeleton(ids, rec))
     except llm.ModelForbidden:
         raise
     except llm.ModelUnavailable as ex:

@@ -74,6 +74,35 @@ def test_retry_recovers_from_first_invalid():
     assert meta.retries == 1, "one retry recorded"
 
 
+def test_retry_message_repeats_the_skeleton_when_given():
+    """Fix round 1a-6, class M: the retry shows the literal JSON shape again, not just
+    the schema error (a schema described in words never validated on the local 9B)."""
+    bad = '{"analysis": "..."}'
+    good = '{"pick":"a","fits":[{"cand":"a"}],"second":null}'
+    seen: list = []
+
+    def call(messages):
+        seen.append(messages)
+        return bad if len(seen) == 1 else good
+    skeleton = '{"pick": "a|b", "fits": [...]}'
+    obj, meta = llm.chat_json("present", [], _SCHEMA, call=call, skeleton=skeleton)
+    assert obj["pick"] == "a" and meta.retries == 1
+    assert skeleton in seen[1][-1]["content"], "the retry must repeat the literal skeleton"
+
+
+def test_retry_message_falls_back_without_a_skeleton():
+    """No skeleton given: the retry keeps the schema-only instruction (unchanged)."""
+    bad = '{"analysis": "..."}'
+    seen: list = []
+
+    def call(messages):
+        seen.append(messages)
+        return bad
+    with pytest.raises(llm.ModelUnavailable):
+        llm.chat_json("present", [], _SCHEMA, call=call)
+    assert "schema" in seen[1][-1]["content"].lower()
+
+
 def test_no_model_guard_blocks_calls():
     """Inside no_model(), any call raises ModelForbidden (refresh-path contract)."""
     with llm.no_model(), pytest.raises(llm.ModelForbidden):

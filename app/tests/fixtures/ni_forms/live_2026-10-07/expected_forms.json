@@ -7,9 +7,9 @@
  "6": {"forms": ["series_line"], "required": ["wave_height"], "summary_words": ["Wave height"], "forbidden_texts": ["(0.00%)", "0.000 ("]},
  "7": {"forms": ["series_line", "day_table", "agenda"], "required": ["temperature"], "summary_words": ["Temperature"]},
  "8": {"forms": ["next_event", "agenda", "day_table"], "required": ["launch", "time"], "summary_words": []},
- "9": {"forms": ["next_event", "table", "ranked_list"], "required": ["phase"], "summary_words": ["New Moon"], "subject_filter": {"cell": "phase", "equals": "New Moon"}},
+ "9": {"forms": ["next_event", "table", "ranked_list", "stat", "kv_grid"], "required": ["day"], "summary_words": ["Day"], "subject_filter": {"cell": "phase", "equals": "New Moon"}},
  "10": {"forms": ["next_event", "stat"], "required": ["next_game", "start", "venue"], "summary_words": ["Green Bay Packers vs Chicago Bears"]},
- "13": {"forms": ["agenda", "day_table", "next_event"], "required": ["game"], "summary_words": ["Capitals"]},
+ "13": {"forms": ["agenda", "day_table", "next_event", "stat", "kv_grid"], "required": ["game"], "summary_words": ["Capitals"]},
  "17": {"forms": ["entity_list", "ranked_list", "table"], "required": [], "summary_words": []},
  "18": {"forms": ["ranked_list", "table"], "required": ["title"], "summary_words": [], "no_subject_filter": true},
  "22": {"forms": ["table", "ranked_list"], "required": ["market_cap"], "summary_words": ["Market cap"], "no_subject_filter": true},
@@ -20,7 +20,7 @@
  "31": {"forms": ["entity_list"], "required": [], "summary_words": []},
  "33": {"forms": ["stat"], "required": ["quake_count"], "summary_words": ["56"]},
  "34": {"forms": ["entity_list", "stat"], "required": [], "summary_words": []},
- "38": {"forms": ["next_event", "stat", "kv_grid"], "required": ["holiday"], "summary_words": ["Thanksgiving"], "subject_filter": {"cell": "name", "equals": "Thanksgiving Day"}},
+ "38": {"forms": ["next_event", "stat", "kv_grid"], "required": ["date"], "summary_words": ["Thanksgiving"], "subject_filter": {"cell": "name", "equals": "Thanksgiving Day"}},
  "40": {"forms": ["map_lite"], "required": [], "summary_words": ["1 place"], "forbidden_texts": ["+1 more", "1 places"]},
  "49": {"forms": ["kv_grid", "conditions", "stat"], "required": ["temperature"], "summary_words": ["Temperature"]}
 }

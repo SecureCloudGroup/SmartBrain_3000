@@ -1,18 +1,23 @@
-"""The forms oracle over the recorded live set (blind-50 on main after Phase 1a, 2026-10-07).
+"""The forms oracle, over two recorded live sets:
 
-``tests/fixtures/ni_forms/live_2026-10-07/`` holds one case per live card of that run (+ the
-new-moon case that went to links): the ask, the set's kind and the flow's frame kind, the
-Library source, the chosen answers rebuilt from the Library answers file, the preview outputs
-the pipeline produced, the title / fetch instant / viewer zone the card was laid out with.
-``expected_forms.json`` gives the acceptable designs per case from the plan contract (B2).
+``live_2026-10-07`` (blind-50 on main after Phase 1a, the 1a-5 regression set) and
+``live_2026-10-07b`` (the fresh blind-50b gate set for the 1a-6 fix round — never shown
+to a worker). Each holds one case per live card of its run (+ the first set's new-moon
+case that went to links): the ask, the set's kind and the flow's frame kind, the Library
+source, the chosen answers rebuilt from the Library answers file, the preview outputs
+the pipeline produced, the title / fetch instant / viewer zone the card was laid out
+with. Each set's ``expected_forms.json`` gives the acceptable designs per case from the
+plan contract (B2) and the by-eye read; a case marked ``excluded`` (class K: the data
+layer should have refused the ask) is documented but not scored.
 
-Every case is built through the real ``form_scene`` path (``design``) with the rules floor and
-the flow's frame kind, exactly as the flow would with no model; the lookup / next-event cases
-first pass the flow's subject row filter (``ni_flow._scope_rows_to_subject``). Asserted per case:
-the pick is in the acceptable set; the required (asked) fields are in the desktop plan; lint red
-== 0 at both sealed spans; the summary names the asked quantity; forbidden texts are absent.
-The pass rate prints with the test output (``-s`` / the failure message) — a regression set, not
-a tuning set: the release gate uses a fresh blind set.
+Every case is built through the real ``form_scene`` path (``design``) with the rules
+floor and the flow's frame kind, exactly as the flow would with no model; the lookup /
+next-event cases first pass the flow's subject row filter
+(``ni_flow._scope_rows_to_subject``). Asserted per case: the pick is in the acceptable
+set; the required (asked) fields are in the desktop plan; lint red == 0 at both sealed
+spans; the summary names the asked quantity; forbidden texts are absent. The pass rate
+per set prints with the test output (``-s`` / the failure message) — a regression set,
+not a tuning set: the release gate uses a fresh blind set.
 """
 from __future__ import annotations
 
@@ -27,15 +32,38 @@ from smartbrain_3000.ni_forms.form_scene import design
 from smartbrain_3000.ni_forms.layout import layout_span
 from smartbrain_3000.ni_forms.spans import Span
 
-FIX = pathlib.Path(__file__).resolve().parent / "fixtures" / "ni_forms" / "live_2026-10-07"
-EXPECT = json.loads((FIX / "expected_forms.json").read_text())
-CASES = sorted(p for p in FIX.glob("*.json") if p.name != "expected_forms.json")
-_RESULTS: dict[str, list[str]] = {}
+ROOT = pathlib.Path(__file__).resolve().parent / "fixtures" / "ni_forms"
+SETS = ("live_2026-10-07", "live_2026-10-07b")
+_EXPECTED_COUNTS = {"live_2026-10-07": 23, "live_2026-10-07b": 21}
+_RESULTS: dict[str, dict[str, list[str]]] = {name: {} for name in SETS}
 
 
-def _load(path: pathlib.Path) -> tuple[dict, dict]:
+def _expect(name: str) -> dict:
+    assert name in SETS, f"unknown fixture set {name!r}"
+    return json.loads((ROOT / name / "expected_forms.json").read_text())
+
+
+def _cases(name: str) -> list[pathlib.Path]:
+    """Every case file of one set, minus any case its expectation marks ``excluded``."""
+    assert name in SETS, f"unknown fixture set {name!r}"
+    expect = _expect(name)
+    out: list[pathlib.Path] = []
+    for path in sorted((ROOT / name).glob("*.json"))[:100]:   # bounded: a set holds < 30 cases
+        if path.name == "expected_forms.json":
+            continue
+        n = str(json.loads(path.read_text())["n"])
+        if expect.get(n, {}).get("excluded"):
+            continue
+        out.append(path)
+    return out
+
+
+CASES = [(name, path) for name in SETS for path in _cases(name)]
+
+
+def _load(name: str, path: pathlib.Path) -> tuple[dict, dict]:
     case = json.loads(path.read_text())
-    return case, EXPECT[str(case["n"])]
+    return case, _expect(name)[str(case["n"])]
 
 
 def _texts(clir: dict) -> list[str]:
@@ -43,8 +71,9 @@ def _texts(clir: dict) -> list[str]:
 
 
 def _filtered(case: dict, exp: dict) -> tuple[list[dict], dict]:
-    """The flow's subject row filter (class D) applied the way ``_try_answers_build`` applies it:
-    only a lookup / next_event ask over a list answer; the sealed ``filter`` selects the rows."""
+    """The flow's subject row filter (class D) applied the way ``_try_answers_build``
+    applies it: only a lookup / next_event ask over a list answer; the sealed ``filter``
+    selects the rows. A no-op for every other case (both sets' columns/value answers)."""
     answers, outputs = case["answers_used"], case["outputs"]
     answer = answers[0]
     if case["frame_kind"] not in ("lookup", "next_event") or answer.get("kind") != "list":
@@ -67,8 +96,8 @@ def _check(case: dict, exp: dict) -> list[str]:
     answers, outputs = _filtered(case, exp)
     now = datetime.fromisoformat(case["fetched_at"])
     d = design(answers, outputs, title=case["title"], ask=case["ask"], now=now, source_url=case["source_url"],
-               cadence_s=900, rows_output_name=case["rows_output_name"], call_model=None,
-               viewer_tz=case["viewer_tz"], question_kind=case["frame_kind"], wants=[])
+              cadence_s=900, rows_output_name=case["rows_output_name"], call_model=None,
+              viewer_tz=case["viewer_tz"], question_kind=case["frame_kind"], wants=[])
     node = d.node
     fails: list[str] = []
     if node["form"] not in exp["forms"]:
@@ -98,22 +127,29 @@ def _check(case: dict, exp: dict) -> list[str]:
     return fails
 
 
-@pytest.mark.parametrize("path", CASES, ids=[p.stem for p in CASES])
-def test_oracle_case(path: pathlib.Path) -> None:
-    case, exp = _load(path)
+@pytest.mark.parametrize("name,path", CASES, ids=[f"{n}-{p.stem}" for n, p in CASES])
+def test_oracle_case(name: str, path: pathlib.Path) -> None:
+    case, exp = _load(name, path)
     fails = _check(case, exp)
-    _RESULTS[case["id"]] = fails
-    assert not fails, f"{case['id']}: " + "; ".join(fails)
+    _RESULTS[name][case["id"]] = fails
+    assert not fails, f"{name} {case['id']}: " + "; ".join(fails)
 
 
 def test_oracle_pass_rate_is_reported_and_complete() -> None:
-    """Runs last (pytest keeps file order): prints the per-case verdicts and the rate, and holds
-    the whole set to 100 % — every recorded live case has an acceptable design."""
-    assert len(CASES) == 23, f"the 2026-10-07 live set holds 22 live cards + the new-moon case, got {len(CASES)}"
-    lines = [f"[{'PASS' if not f else 'FAIL'}] {cid}" + (": " + "; ".join(f) if f else "")
-             for cid, f in sorted(_RESULTS.items())]
-    passed = sum(1 for f in _RESULTS.values() if not f)
-    report = "\n".join(lines) + f"\nORACLE live_2026-10-07: {passed}/{len(_RESULTS)} pass"
+    """Runs last (pytest keeps file order): prints the per-set, per-case verdicts and
+    rate, and holds EVERY fixture set to 100% — every scored case has an acceptable
+    design. ``live_2026-10-07`` is the 1a-5 regression set; ``live_2026-10-07b`` is the
+    fresh 1a-6 gate set."""
+    reports: list[str] = []
+    bad_sets: list[str] = []
+    for name in SETS:
+        results = _RESULTS[name]
+        lines = [f"[{'PASS' if not f else 'FAIL'}] {cid}" + (": " + "; ".join(f) if f else "")
+                 for cid, f in sorted(results.items())]
+        passed = sum(1 for f in results.values() if not f)
+        reports.append(f"{name}:\n" + "\n".join(lines) + f"\nORACLE {name}: {passed}/{len(results)} pass")
+        if len(results) != _EXPECTED_COUNTS[name] or passed != len(results):
+            bad_sets.append(name)
+    report = "\n\n".join(reports)
     print("\n" + report)
-    assert len(_RESULTS) == len(CASES), "every case ran"
-    assert passed == len(CASES), report
+    assert not bad_sets, report

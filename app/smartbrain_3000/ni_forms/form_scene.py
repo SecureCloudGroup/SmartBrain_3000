@@ -22,6 +22,7 @@ from datetime import UTC, datetime
 
 from . import profile
 from .enumerate import enumerate as enumerate_cands
+from .enumerate import fallback as fallback_cand
 from .layout import layout_span
 from .present import present
 from .record import from_answers, history_key
@@ -176,8 +177,9 @@ def design(chosen: list[dict], outputs: dict, *, title: str, ask: str,
     assert cands, "enumerate always returns a candidate (the universal fallback)"
     res = present(cands, rec, prof, inp, call=_flow_model_adapter(call_model))
     chosen_cand, second_cand = _pick_candidate(res, cands)
-    pick = _candidate_seal(chosen_cand)
-    _layout_once(chosen_cand, rec, prof, inp, pick["spans"]["desktop"], now)  # lint fires at build
+    chosen_cand, pick, gates = _select_clean_design(cands, chosen_cand, rec, prof, inp, now)
+    if second_cand is not None and second_cand.id == chosen_cand.id:
+        second_cand = None   # the runner-up is never the same design as the pick
     node = {
         "type": "form",
         "form": pick["form"],
@@ -190,13 +192,15 @@ def design(chosen: list[dict], outputs: dict, *, title: str, ask: str,
         },
         "spans": pick["spans"],
         "design": {
-            "designer": "model" if res.designer == "model" else "rules",
+            "designer": "model" if (res.designer == "model" and not gates) else "rules",
             "pick": pick["id"],
             "second": _candidate_seal(second_cand) if second_cand is not None else None,
         },
     }
     if chosen_cand.fallback:
         node["design"]["fallback"] = True
+    if gates:
+        node["design"]["gates"] = gates
     if frame is not None:
         node["frame"] = frame
     return Design(node=node, cand=chosen_cand, cands=cands, rec=rec, prof=prof, inp=inp, present=res)
@@ -227,12 +231,36 @@ def form_scene(chosen: list[dict], outputs: dict, *, title: str, ask: str,
                   question_kind=question_kind, wants=wants).node
 
 
-def _layout_once(cand: Candidate, rec: DataRecord, prof, inp, span_key: str, now: datetime) -> None:
-    """Smoke-layout the pick at its default span so a surprise lint failure fires
-    at build time rather than first refresh. Discards the output."""
-    assert isinstance(span_key, str) and span_key, "span_key required"
-    assert isinstance(now, datetime), "now must be a datetime"
-    layout_span(cand, rec, prof, inp, Span.parse(span_key), now)
+def _spans_red_free(cand: Candidate, rec: DataRecord, prof, inp, spans: dict, now: datetime) -> bool:
+    """True when the pick's two sealed spans both lay out lint-clean (fix round 1a-6, class L):
+    the build-time smoke layout now gates the pick instead of discarding its result."""
+    assert isinstance(spans, dict) and {"desktop", "phone"} <= set(spans), "spans need desktop + phone"
+    assert isinstance(now, datetime) and now.tzinfo is not None, "now must be an aware datetime"
+    for key in ("desktop", "phone"):
+        if not layout_span(cand, rec, prof, inp, Span.parse(spans[key]), now).lint.ok:
+            return False
+    return True
+
+
+def _select_clean_design(cands: list, chosen_cand: Candidate, rec: DataRecord, prof, inp,
+                         now: datetime) -> tuple[Candidate, dict, list[str]]:
+    """The design PRESENT (or the floor) named, else the next candidate in floor order, else
+    the universal fallback at its smallest clean span (fix round 1a-6, class L): a design is
+    sealed only when BOTH its sealed spans are red-free at build. ``gates`` names what was
+    skipped, for ``design.gates`` (``ni._validate_form_design`` caps it at 12 short strings).
+    """
+    assert isinstance(cands, list) and cands, "cands must be a non-empty list"
+    assert isinstance(now, datetime) and now.tzinfo is not None, "now must be an aware datetime"
+    order = [chosen_cand] + [c for c in cands if c.id != chosen_cand.id]
+    gates: list[str] = []
+    for cand in order[:len(cands)]:   # bounded: cands is capped at enumerate.MAX_CANDS (4)
+        seal = _candidate_seal(cand)
+        if _spans_red_free(cand, rec, prof, inp, seal["spans"], now):
+            return cand, seal, gates
+        gates.append(f"red:{cand.id}:{cand.form}")
+    fb = fallback_cand(rec, prof, inp, now)
+    gates.append(f"fallback:{fb.id}:{fb.form}")
+    return fb, _candidate_seal(fb), gates
 
 
 def swap_to_second(node: dict) -> dict:

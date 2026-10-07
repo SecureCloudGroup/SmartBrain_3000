@@ -308,7 +308,8 @@ def _field_from_answer(answer: dict, name: str, path: str, samples: list) -> Fie
     return Field(name=name, label=label, path=path, type=_text_type(samples), label_src="lexicon")
 
 
-def _apply_value_roles(fields: list, answers: list, row: list, ask: str) -> None:
+def _apply_value_roles(fields: list, answers: list, row: list, ask: str,
+                       wants: list | None = None, allow_passage: bool = True) -> None:
     """Mutate ``fields`` in place for a one-row ``measure`` record (``row`` is the sample's
     cells, used only to prefer a headline that has a value):
 
@@ -317,9 +318,14 @@ def _apply_value_roles(fields: list, answers: list, row: list, ask: str) -> None
       reading beside its coordinates — "how high" — leads on its own, the coordinates stay
       context);
     - a sentence-long text → ``text_body`` (the card reads as a passage; it leads when no
-      shorter field has a value);
-    - the first other field a form can lead with, preferring one whose sample cell is
-      filled → ``measure`` (a number, a word, a time);
+      shorter field has a value) — only when ``allow_passage`` (fix round 1a-6, class H: a
+      one-row list's cells are row data, never a passage — "Washington Capitals vs
+      Pittsburgh Penguins" is a matchup name, not prose — so a list demoted to a measure
+      never treats a long cell as a passage lead);
+    - the field the ask names (a one-row list demoted to a measure leads with the field the
+      words were about, e.g. "sunrise" over "day"), else the first other field a form can
+      lead with, preferring one whose sample cell is filled → ``measure`` (a number, a
+      word, a time);
     - a later time that is the reading's own stamp (answer window ``now``, or named
       as_of / updated / timestamp) → ``as_of``; everything else → ``secondary`` (a fact).
     Roles stay inside ``types.ROLES``.
@@ -330,14 +336,16 @@ def _apply_value_roles(fields: list, answers: list, row: list, ask: str) -> None
     assert isinstance(ask, str), "ask must be a str"
     wants_map = bool(set(re.findall(r"[a-z]+", ask.lower())) & _MAP_ASK_WORDS)
     passage = [i for i, f in enumerate(fields)
-               if f.type == "text" and isinstance(row[i], str) and len(row[i]) > _TEXT_BODY_CHARS]
+               if allow_passage and f.type == "text" and isinstance(row[i], str)
+               and len(row[i]) > _TEXT_BODY_CHARS]
     leadable = [i for i, f in enumerate(fields) if f.type in _LEAD_TYPES and _geo_role(f) is None
                 and i not in passage]
     filled = [i for i in leadable if row[i] is not None]
+    asked = set(asked_mod.asked_fields(fields, ask, wants))
     if wants_map and any(_geo_role(f) is not None for f in fields):
         lead = None                                   # the map is the headline
     elif filled:
-        lead = filled[0]
+        lead = next((i for i in filled if fields[i].name in asked), filled[0])
     else:
         lead = None if passage else (leadable or [None])[0]
     for i, (f, a) in enumerate(zip(fields, answers, strict=True)):  # bounded: _FIELD_CAP
@@ -421,7 +429,8 @@ def _cell_names(cells: list) -> list[str]:
     return names
 
 
-def _shape_values(chosen: list[dict], outputs: dict, ask: str) -> tuple[str, list, list, dict]:
+def _shape_values(chosen: list[dict], outputs: dict, ask: str,
+                  wants: list | None = None) -> tuple[str, list, list, dict]:
     """Value answers → a one-row ``measure`` record. Each answer's ``name`` is the
     pipeline output it reads (the field path)."""
     assert isinstance(chosen, list) and chosen, "chosen required"
@@ -429,16 +438,19 @@ def _shape_values(chosen: list[dict], outputs: dict, ask: str) -> tuple[str, lis
     answers = chosen[:_FIELD_CAP]
     fields = [_field_from_answer(a, a["name"], a["name"], [outputs.get(a["name"])]) for a in answers]
     rows, long_text = _rows_as_lists([outputs], fields)
-    _apply_value_roles(fields, answers, rows[0] if rows else [None] * len(fields), ask)
+    _apply_value_roles(fields, answers, rows[0] if rows else [None] * len(fields), ask, wants=wants)
     return "measure", fields, rows, long_text
 
 
 def _shape_rows(answer: dict, outputs: dict, rows_name: str, ask: str = "",
                 wants: list | None = None) -> tuple[str, list, list, dict]:
     """A list / columns answer → ``events`` (a time cell on a declared axis), ``series``
-    (columns on an axis) or ``records``. Each cell's ``key`` (else its ``path``) is the
-    row key the pipeline wrote; the sample column decides category vs text; the ask's
-    words (+ the frame's wants) decide which number leads (``asked.asked_fields``)."""
+    (columns on an axis) or ``records`` — unless exactly one row survives (fix round 1a-6,
+    class H: "what time is sunrise tomorrow" filters to tomorrow's single row), which reads
+    like a value answer's one row (``measure``, roles by ``_apply_value_roles``) instead of a
+    table forced to drop two of three columns to fit. Each cell's ``key`` (else its ``path``)
+    is the row key the pipeline wrote; the sample column decides category vs text; the ask's
+    words (+ the frame's wants) decide which field leads (``asked.asked_fields``)."""
     assert isinstance(answer, dict), "answer must be a dict"
     assert isinstance(rows_name, str) and rows_name, "rows_name required"
     cells = list(answer.get("cells") or [])[:_FIELD_CAP]
@@ -452,8 +464,11 @@ def _shape_rows(answer: dict, outputs: dict, rows_name: str, ask: str = "",
         samples = [_dig(r, key) for r in rows_src[:_ROWS_CAP] if isinstance(r, dict)]
         fields.append(_field_from_answer(c, name, key, samples))
         columns.append(samples)
-    _apply_list_roles(fields, cells, columns, set(asked_mod.asked_fields(fields, ask, wants)))
     rows, long_text = _rows_as_lists(rows_src, fields)
+    if len(rows) == 1:
+        _apply_value_roles(fields, cells, rows[0], ask, wants=wants, allow_passage=False)
+        return "measure", fields, rows, long_text
+    _apply_list_roles(fields, cells, columns, set(asked_mod.asked_fields(fields, ask, wants)))
     has_axis = bool(answer.get("axis"))
     has_time = any(f.type in ("datetime", "date") for f in fields)
     if answer.get("kind") == "columns":
@@ -586,7 +601,7 @@ def from_answers(chosen: list[dict], outputs: dict, *, history: dict | None,
     first_kind = chosen[0].get("kind")
     if first_kind == "value":
         kind, fields, rows, long_text = _shape_values([a for a in chosen if a.get("kind") == "value"],
-                                                      outputs, ask)
+                                                      outputs, ask, wants=wants)
     elif first_kind in ("list", "columns"):
         kind, fields, rows, long_text = _shape_rows(chosen[0], outputs, rows_output_name or "rows",
                                                     ask=ask, wants=wants)
@@ -617,13 +632,18 @@ def from_spec(record_spec: dict, outputs: dict, *, history: dict | None,
                             scale=f.get("scale"), precision=f.get("precision"),
                             wallclock=bool(f.get("wallclock")), label_src="lexicon"))
     rows_name = record_spec.get("rows")
+    kind = str(record_spec["kind"])
     if rows_name:
         src = outputs.get(rows_name)
-        rows, long_text = _rows_as_lists(src if isinstance(src, list) else [], fields)
+        src = src if isinstance(src, list) else []
+        # fix round 1a-6, class H: a measure sealed over a list output reads row 0 of it (never
+        # every row — `check_record` caps a measure at 1 row); 0 or >1 rows at this run is the
+        # data drifting past the one-row design, caught by the bind's own candidate-match check
+        rows, long_text = _rows_as_lists(src[:1] if kind == "measure" else src, fields)
     else:
         rows, long_text = _rows_as_lists([outputs], fields)
     cadence = context.get("cadence_s")
-    return _assemble(str(record_spec["kind"]), fields, rows, long_text, outputs,
+    return _assemble(kind, fields, rows, long_text, outputs,
                      history=history, context=context, ask=str(context.get("ask") or ""),
                      title=str(context.get("title") or ""),
                      cadence_s=cadence if isinstance(cadence, int) and cadence >= 0 else 0)

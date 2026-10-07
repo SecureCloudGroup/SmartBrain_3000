@@ -1,0 +1,124 @@
+{
+ "id": "44-show-lightning-strikes-near-dallas-on-a-",
+ "n": 44,
+ "ask": "show lightning strikes near Dallas on a map",
+ "kind": "map",
+ "frame_kind": null,
+ "subject": "lightning strikes",
+ "title": "lightning strikes",
+ "source_id": "open-meteo-forecast",
+ "source_url": "https://api.open-meteo.com/v1/forecast?latitude=32.793333&longitude=-96.766513&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m&hourly=temperature_2m,precipitation_probability,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,snowfall_sum,sunrise,sunset&temperature_unit=fahrenheit&wind_speed_unit=mph&precipitation_unit=inch&timezone=auto",
+ "fetched_at": "2026-10-07T17:31:43Z",
+ "viewer_tz": "UTC",
+ "answers_used": [
+  {
+   "name": "temperature",
+   "label": "Temperature",
+   "words": [
+    "temperature",
+    "temp",
+    "degrees",
+    "hot",
+    "cold",
+    "warm",
+    "how hot",
+    "how cold",
+    "now",
+    "current"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "current.temperature_2m",
+   "type": "number",
+   "unit_path": "current_units.temperature_2m",
+   "window": "now",
+   "measure": "temperature",
+   "unit": "°F"
+  },
+  {
+   "name": "conditions",
+   "label": "Conditions",
+   "words": [
+    "conditions",
+    "sky",
+    "sunny",
+    "cloudy",
+    "clear",
+    "outside",
+    "what's it like",
+    "weather now",
+    "storm",
+    "thunderstorm",
+    "lightning",
+    "hail",
+    "fog",
+    "sleet",
+    "drizzle"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "current.weather_code",
+   "type": "number",
+   "codes": "wmo_weather",
+   "window": "now",
+   "measure": "conditions",
+   "unit": null
+  },
+  {
+   "name": "high_today",
+   "label": "High today",
+   "words": [
+    "high",
+    "high today",
+    "max",
+    "maximum",
+    "how hot today",
+    "warmest"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "daily.temperature_2m_max[0]",
+   "type": "number",
+   "unit_path": "daily_units.temperature_2m_max",
+   "window": "today",
+   "measure": "temperature",
+   "unit": "°F"
+  },
+  {
+   "name": "low_today",
+   "label": "Low today",
+   "words": [
+    "low",
+    "low today",
+    "min",
+    "minimum",
+    "coldest",
+    "overnight low"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "daily.temperature_2m_min[0]",
+   "type": "number",
+   "unit_path": "daily_units.temperature_2m_min",
+   "window": "today",
+   "measure": "temperature",
+   "unit": "°F"
+  }
+ ],
+ "rows_output_name": null,
+ "outputs": {
+  "low_today": 63.6,
+  "high_today": 85.4,
+  "conditions": "Clear sky",
+  "temperature": 81.7
+ },
+ "live_form": "conditions",
+ "live_span": "d1x1",
+ "live_lint": {
+  "red": 0,
+  "amber": 2,
+  "codes": [
+   "L-ASK"
+  ]
+ }
+}
