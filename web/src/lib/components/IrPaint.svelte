@@ -4,6 +4,7 @@
   // shape, resolves the live bindings at `now`, and paints positioned DOM text over
   // inline SVG. The live-binding math is $lib/ni/clir.ts, a port of paint/live.py.
   import { onDestroy } from "svelte";
+  import { loadWorld, mapPaths, type Rings } from "$lib/ni/basemap";
   import {
     renderModel,
     validateClir,
@@ -77,6 +78,22 @@
     const fonts = typeof document === "undefined" ? null : document.fonts;
     if (fonts && typeof fonts.ready?.then === "function") fonts.ready.then(check, check);
     else check();
+  });
+
+  // Coastlines: the land rings vector.py draws (world110m.json, served at /ni/) are fetched
+  // once per page when a card first shows a basemap prim. Until they arrive the land box
+  // paints as before, so nothing shifts; a failed load keeps the box.
+  const uid = $props.id();
+  let world = $state.raw<Rings | null>(null);
+  const hasBasemap = $derived(model !== null && model.ops.some((op) => svgPrim(op)?.k === "basemap"));
+  $effect(() => {
+    if (!hasBasemap) return;
+    let live = true;
+    loadWorld().then(
+      (rings) => { if (live) world = rings; },
+      () => { if (live) world = []; }, // loadWorld resolves [] on failure; this is the belt
+    );
+    return () => { live = false; };
   });
 
   function fmt(v: number): string {
@@ -270,15 +287,30 @@
                 {/each}
               </g>
             {:else if prim.k === "basemap"}
-              <!-- The land box only: the coastline asset (world110m.json) is not in the
-                   bundle until a map form ships. The surface is laid out either way. -->
               {@const bm = prim as BasemapPrim}
               {@const g = boxRect(bm.box, model.width)}
-              <rect x={fmt(g.x)} y={fmt(g.y)} width={fmt(g.w)} height={fmt(g.h)}
-                style:fill={tokVar(bm.land)}
-                style:stroke={tokVar(bm.stroke)}
-                style:stroke-width="0.75"
-                style:opacity={bm.alpha ?? 1} />
+              {#if world && world.length > 0}
+                <!-- The coastlines vector.py paints: the rings touching the bbox, projected
+                     into the box (mapPaths mirrors the Python projection) and clipped to it. -->
+                <g style:opacity={bm.alpha ?? 1}>
+                  <clipPath id="{uid}-map-{bm.id}">
+                    <rect x={fmt(g.x)} y={fmt(g.y)} width={fmt(g.w)} height={fmt(g.h)} />
+                  </clipPath>
+                  <path d={mapPaths(bm, model.width, world).join(" ")}
+                    clip-path="url(#{uid}-map-{bm.id})"
+                    style:fill={tokVar(bm.land)}
+                    style:stroke={tokVar(bm.stroke)}
+                    style:stroke-width="0.75"
+                    style:stroke-linejoin="round" />
+                </g>
+              {:else}
+                <!-- The land box, as before, until the rings arrive (or if they never do). -->
+                <rect x={fmt(g.x)} y={fmt(g.y)} width={fmt(g.w)} height={fmt(g.h)}
+                  style:fill={tokVar(bm.land)}
+                  style:stroke={tokVar(bm.stroke)}
+                  style:stroke-width="0.75"
+                  style:opacity={bm.alpha ?? 1} />
+              {/if}
             {:else if prim.k === "icon"}
               {@const ic = prim as IconPrim}
               {@const sc = iconScale(ic)}
