@@ -9,7 +9,7 @@ reseal (``swap_to_second``) and the ``_present_ok`` attestation on the spec.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -264,6 +264,57 @@ def test_form_bind_type_enforcement_accepts_bound_form() -> None:
     node = _good_node()
     bound = ni.bind_scene(node, {"price": 223.86}, form_ctx=_ctx())
     ni._enforce_bind_types(node, bound)   # must not raise
+
+
+# --- §34 Phase 1b: the bound node's `clock` key + `_form_bind_context`'s `now` --------
+
+def test_form_bind_carries_a_clock_key_from_the_stale_threshold() -> None:
+    """`_good_node()` has no time field at all, so the stale threshold (as_of + 2x
+    cadence) is the only candidate `next_boundary` can find; `_SPEC`'s 15-minute
+    interval makes that fetched_at + 30 min."""
+    bound = ni.bind_scene(_good_node(), {"price": 223.86}, form_ctx=_ctx())
+    assert bound["clock"] == {"next": "2026-10-06T18:51:00Z"}   # _NOW + 30 min
+
+
+def test_form_bind_context_now_defaults_to_fetched_at() -> None:
+    ctx = ni._form_bind_context(_SPEC, _NOW)
+    assert ctx["now"] == ctx["fetched_at"]
+
+
+def test_form_bind_context_now_drives_layout_while_fetched_at_stays_fixed() -> None:
+    """A clock pass passes a LATER `now` with the run's original `fetched_at` held
+    fixed: the stale threshold is computed from `fetched_at` (unmoved), so once `now`
+    itself is past that threshold, nothing is left in the future -- `clock.next` is
+    None, never re-based on the later `now`."""
+    ctx_same = ni._form_bind_context(_SPEC, _NOW)
+    at_fetch = ni.bind_scene(_good_node(), {"price": 223.86}, form_ctx=ctx_same)
+    assert at_fetch["clock"]["next"] is not None
+
+    ctx_later = ni._form_bind_context(_SPEC, _NOW, _NOW + timedelta(hours=1))
+    assert ctx_later["fetched_at"] == ctx_same["fetched_at"]   # unchanged
+    assert ctx_later["now"] != ctx_later["fetched_at"]
+    later = ni.bind_scene(_good_node(), {"price": 223.86}, form_ctx=ctx_later)
+    assert later["clock"]["next"] is None   # the 30-min stale threshold already passed
+
+
+def test_enforce_form_shape_accepts_absent_clock() -> None:
+    """Version-skew: a pre-1b bound payload has no `clock` key at all."""
+    bound = ni.bind_scene(_good_node(), {"price": 223.86}, form_ctx=_ctx())
+    del bound["clock"]
+    ni._enforce_form_shape(bound)   # must not raise
+
+
+def test_enforce_form_shape_accepts_a_null_next() -> None:
+    bound = ni.bind_scene(_good_node(), {"price": 223.86}, form_ctx=_ctx())
+    bound["clock"] = {"next": None}
+    ni._enforce_form_shape(bound)   # must not raise
+
+
+def test_enforce_form_shape_rejects_a_malformed_clock() -> None:
+    bound = ni.bind_scene(_good_node(), {"price": 223.86}, form_ctx=_ctx())
+    for bad in ({"next": "not-a-date"}, {"next": 123}, {"foo": None}, "soon"):
+        with pytest.raises(ni.NIError, match="clock"):
+            ni._enforce_form_shape({**bound, "clock": bad})
 
 
 def test_swap_to_second_reseals_the_runner_up_over_the_same_record() -> None:

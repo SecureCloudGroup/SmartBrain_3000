@@ -458,6 +458,14 @@ _MIGRATIONS: tuple[tuple[int, str | Callable[[], str]], ...] = (
         " item_id TEXT,"
         " status TEXT NOT NULL DEFAULT 'open');",
     ),
+    # NI §34 Phase 1b clock pass: the next instant (if any) at which a sealed form must be
+    # re-laid out with no fetch (ni_forms.clock.next_boundary) — card-tz midnight, a next-
+    # event instant, a DST change, a live-binding edge, the stale threshold. Plaintext, like
+    # last_checked: due_items() admits a clock-due item without decrypting its sealed spec.
+    (
+        42,
+        "ALTER TABLE ni_items ADD COLUMN IF NOT EXISTS next_clock TIMESTAMP;",
+    ),
 )
 
 

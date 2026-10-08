@@ -431,7 +431,7 @@ def test_migration_23_preserves_membership_rows(tmp_path) -> None:
         [vid, "doc-1"],
     )
 
-    assert dbmod.run_migrations(conn) == 19  # 23 + doc_summaries (24) + chat trash (25) + embed total (26) + selfimprove (27-35) + import traces (36) + UTC shift (37) + feeds (38) + usage cost (39) + ni (40) + ni_findings (41)
+    assert dbmod.run_migrations(conn) == 20  # 23 + doc_summaries (24) + chat trash (25) + embed total (26) + selfimprove (27-35) + import traces (36) + UTC shift (37) + feeds (38) + usage cost (39) + ni (40) + ni_findings (41) + ni next_clock (42)
     row = conn.execute(
         "SELECT doc_id, origin, nonce, ciphertext FROM vault_documents;").fetchone()
     assert str(row[0]) == "doc-1" and str(row[1]) == "owner"

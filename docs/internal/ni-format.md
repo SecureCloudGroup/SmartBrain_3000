@@ -127,7 +127,7 @@ No foreign keys; `NIStore.delete` cascades in code (feeds precedent).
   has those segments stripped by `library_resolve._expand`, so a trailing `&token={key}` left in
   the template would otherwise fail the walk for keyed clock sources (nasa-neows-feed,
   finnhub-earnings-calendar, fec-candidates).
-- `display.size` ∈ `small | wide | large | tall` = the desktop grid cell a design takes (1×1, 2×1, 2×2, 1×2), derived from the sealed desktop span by `display_size_for_span` (the engine still seals a 1×2 design as `large`; emitting `tall` is queued for the next engine PR — the client already reads it). The board (Phase 1a-4) is a fixed-rhythm grid — 2 columns on a phone, 3 from 780 px, 4 from 1040 px, 176 px rows — and sizes a form card from the span key on the CLIR face it is painting (`cardSpan` in `web/src/lib/ni/shell.ts`: the engine seals a phone span per candidate, often a different shape from the desktop one, e.g. a 1×1 stat with a full-width 2-row phone face), reading `display.size` only for a legacy scene or a payload without a span key; the card menu's Size entry reads `display.size`. An absent `display` means small.
+- `display.size` ∈ `small | wide | large | tall` = the desktop grid cell a design takes (1×1, 2×1, 2×2, 1×2), derived from the sealed desktop span by `display_size_for_span` (a 1×2 design seals as `tall` since #496; the client reads it). The board (Phase 1a-4) is a fixed-rhythm grid — 2 columns on a phone, 3 from 780 px, 4 from 1040 px, 176 px rows — and sizes a form card from the span key on the CLIR face it is painting (`cardSpan` in `web/src/lib/ni/shell.ts`: the engine seals a phone span per candidate, often a different shape from the desktop one, e.g. a 1×1 stat with a full-width 2-row phone face), reading `display.size` only for a legacy scene or a payload without a span key; the card menu's Size entry reads `display.size`. An absent `display` means small.
 - `contract` is system-written at commissioning (§7); the agent may never set it.
 - `model` optionally overrides the `ni` route for `model` sources (schedules.model
   precedent).
@@ -2722,11 +2722,39 @@ display-class pick and the map/image → value degrade) are gone from the flow; 
   `text` prim carries `src` ∈ `TEXT_SRC` (data / lexicon / ask / title / key / code — never a
   model word); `time` prims carry the ISO instant + `fmt` + `zone`, formatted on the device.
   `summary` is the accessible text; `lint.red == 0` on everything the server ships. The web
-  painter is the next phase: today `web/src/lib/ni/scene.ts` refuses `form` as an unknown node
-  type, so a form card is a server-complete payload the board cannot yet draw.
+  painter (`IrPaint.svelte`, Phase 1a-3) paints the CLIR as DOM text and inline SVG with the
+  same live bindings as `paint/live.py`; a client older than 1a-3 shows its unrenderable
+  placeholder for a `form` node (the version-skew rule).
 - **What left with the templates.** The `may_be_empty` "No <label> right now" text node is the
   form's own designed empty state; the `next: true` scene flag ("no current prediction" on a
   passed next-event time) has no form equivalent — the countdown / next-event forms read the
   instant and the client's clock. `tools/ni-live-e2e.py` prints a form card as `<form>:
   <summary>`; `tools/ni-flow-eval.py --recorded` / `--chaos` use the eval's own minimal scenes
   and are unchanged.
+- **Clock pass (Phase 1b).** A sealed card can go wrong with the CLOCK alone, no fetch
+  involved: "Today" turning into "Yesterday" past card-tz midnight, a daylight-saving
+  change moving every card-zone hour, a `live` binding's edge, or the as-of age passing
+  the stale threshold (`as_of` / `fetched_at` + 2× cadence). `ni_forms.clock.next_boundary`
+  (record, the bind's own laid-out CLIRs, `now`, `card_tz`, `cadence_s`) finds the earliest
+  such instant, or `None`. `_bind_form` computes it at every bind (build-time preview,
+  a run, a clock pass alike) and seals it on the bound node as `clock: {"next": "<ISO-8601
+  Z>" | null}` (optional — absent on a pre-1b payload, version-skew rule; `_enforce_form_shape`
+  checks it the same way as `design`). Every successful `run_item` ALSO writes a new snapshot
+  slot, `outputs` — the exact outputs dict the bind consumed, through the same `json_instants`
+  treatment as `preview_data` so a later bind can still read every time/date cell after the
+  JSON round trip — and sets the item's plaintext `next_clock` column (migration 42) from the
+  bound node's `clock.next`. `NIStore.due_items()` admits an item via `next_clock <= now()` the
+  same way it does via `last_checked` / `interval_minutes` (one SQL pre-filter, no decrypt to
+  learn an idle item is due). `tick` tells the two due-reasons apart with `_is_due`: a due item
+  that is NOT fetch-due takes the clock pass instead of `run_item` — no fetch, no model
+  (`ni_forms.llm.no_model()`), reads the `outputs` snapshot (and `history`, as a run does),
+  re-binds at the layout clock's current instant with the ORIGINAL run's `fetched_at` held
+  fixed (`_form_bind_context(spec, fetched_at, now)` — `now` defaults to `fetched_at` for every
+  other caller), and writes `latest` + `last_good` with the fresh bound payload. It never
+  touches `last_checked` / `consecutive_failures` / `last_status`, never evaluates alerts, and
+  never writes `llm_state` (the monitor hash) — nothing here runs `run_pipeline`, so the change
+  signal that gates it cannot fire. A missing `outputs` snapshot (a card last run before this
+  change) or any other failure declines the pass (clears `next_clock`) instead of failing the
+  card. `_bind_form` has no lint-colour-driven "needs update" state, so a clock re-layout whose
+  only red lint is `L-HOLLOW` (a day table thinning toward its last day) simply keeps the
+  designed card, matching the prototype's rule by construction rather than by a ported check.

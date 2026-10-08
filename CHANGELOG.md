@@ -31,6 +31,11 @@ to know when a release changes behavior.
   check, the board shows the designed card itself — on the phone or desktop face, in
   either theme, with the runner-up design when there is one — so "Use this" means the
   card you will actually see.
+- **Cards keep their day and time labels honest overnight.** A day table, agenda
+  or next-event card re-lays itself out at midnight in the card's own time zone,
+  at its next event time, and across a daylight-saving change — without
+  re-fetching. "Today" and "Tomorrow" move when the calendar day actually turns
+  over where the card's data lives, not when the server's clock happens to tick.
 
 ### Fixed
 
