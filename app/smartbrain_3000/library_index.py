@@ -229,7 +229,12 @@ def frame_kind_from_text(ask: str) -> str | None:
 
 
 def _fold(word: str) -> str:
-    """A simple plural folded to its singular (as the answer matcher folds it)."""
+    """A simple plural folded to its singular (as the answer matcher folds it): advisories → advisory,
+    warnings → warning. (Locate words round, 2026-10-07: "heat advisories in Arizona" classified to nothing
+    because "advisories" folded to "advisorie", never the keyword "advisory" — ni_flow._folded_words already
+    folds -ies.)"""
+    if len(word) > 4 and word.endswith("ies"):
+        return word[:-3] + "y"
     return word[:-1] if len(word) > 3 and word.endswith("s") and not word.endswith("ss") else word
 
 
@@ -549,6 +554,15 @@ class LibraryIndex:
         return text
 
     def classify(self, text: str, limit: int = 3) -> list[str]:
+        counts: dict[str, int] = {}
+        for _kw, cid in self._matched_keywords(text):  # bounded by the taxonomy's keywords
+            counts[cid] = counts.get(cid, 0) + 1
+        scored = sorted(counts.items(), key=lambda x: -x[1])
+        return [cid for cid, _ in scored[:limit]]
+
+    def _matched_keywords(self, text: str) -> list[tuple[str, str]]:
+        """The taxonomy keywords ``text`` says, as (keyword, category/subcategory) pairs, the longest match
+        winning: "temp" inside a matched "water temp" says nothing about weather."""
         low = " " + re.sub(r"[^a-z0-9.&+ ]+", " ", (text or "").lower()) + " "
         # "scores" says the keyword "score"; "raining" says "rain"
         folded = " ".join(w[:-3] if len(w) > 5 and w.endswith("ing") else _fold(w) for w in low.split())
@@ -558,14 +572,9 @@ class LibraryIndex:
             for s in c["subcategories"]:
                 matched += [(kw, f"{c['id']}/{s['id']}") for kw in s["keywords"]
                             if f" {kw} " in low or (len(kw) > 5 and kw in low)]
-        # the longest match wins: "temp" inside a matched "water temp" says nothing about weather
         said = {kw for kw, _ in matched}
-        counts: dict[str, int] = {}
-        for kw, cid in matched:  # bounded by the taxonomy's keywords
-            if not any(kw != longer and f" {kw} " in f" {longer} " for longer in said):
-                counts[cid] = counts.get(cid, 0) + 1
-        scored = sorted(counts.items(), key=lambda x: -x[1])
-        return [cid for cid, _ in scored[:limit]]
+        return [(kw, cid) for kw, cid in matched
+                if not any(kw != longer and f" {kw} " in f" {longer} " for longer in said)]
 
     def search(self, q: str = "", category: str = "", subcategory: str = "", tier: str = "", status: str = "",
                offset: int = 0, limit: int = 20, hint: dict | None = None) -> dict:
@@ -718,6 +727,13 @@ class LibraryIndex:
         return {"terms": terms, "cats": cats, "prefer": pol.get("prefer", []), "match": pol.get("match", ""),
                 "subject_resolvers": self._takes(con, cats[0]) if cats else set(), "entities": list(found),
                 "found": found, "said": said_by, "leagues": leagues, "explained": explained, "routed": route is not None,
+                # entities the ask names outright — spelled by code, or said by words beyond the ask's place
+                # words ("Dodgers"); an airport read off a city word ("Washington" -> DCA, cued by "delays")
+                # is not one (locate words round, 2026-10-07)
+                "genuine": {r for r in found if r in spelled
+                            or not {w for a in said_by.get(r) or [] for w in a.split()} <= pwords},
+                # the ask's own words that named the asked subcategories (a sibling source must explain them)
+                "asked_keywords": sorted({kw for kw, cid in self._matched_keywords(ask) if cid in cats}),
                 "geo": list(GEO_RESOLVERS) if has_place else [], "place_words": pwords, "has_place": has_place,
                 "place_status": place_status, "audiences": audiences(ask), "kinds": question_kinds(ask),
                 "frame": frame, "asked": norm(ask),
@@ -927,6 +943,15 @@ class LibraryIndex:
         subs.sort(key=lambda s: (frame is not None and not serves & set(s[1]),
                                  -len(said & {_fold(w) for kw in self._keywords(s[0]) for w in kw.split()})))
         return [sid for sid, _ in subs[:3]]
+
+    @staticmethod
+    def _says_any(asked: str, keywords: list[str]) -> bool:
+        """Does ``asked`` say any of ``keywords`` — matched the way ``classify`` matches a keyword (whole
+        phrase, plurals and -ing folded; a long keyword may sit inside a word)."""
+        low = " " + re.sub(r"[^a-z0-9.&+ ]+", " ", (asked or "").lower()) + " "
+        folded = " ".join(w[:-3] if len(w) > 5 and w.endswith("ing") else _fold(w) for w in low.split())
+        low += f" | {folded} "
+        return any(f" {kw} " in low or (len(kw) > 5 and kw in low) for kw in keywords)
 
     def _keywords(self, sub: str) -> list[str]:
         cat, _, subcat = sub.partition("/")
@@ -1233,6 +1258,26 @@ class LibraryIndex:
         cats = set(row["categories"])
         if not ctx["routed"] and ctx["cats"][0].split("/")[0] not in {c.split("/")[0] for c in cats}:
             return "a different kind of data", False
+        takes = {r for (r,) in con.execute("SELECT resolver FROM library_source_resolvers WHERE source_id = ?",
+                                           [row["id"]]).fetchall()}
+        if not ctx["routed"] and ctx["cats"] and not cats & set(ctx["cats"]) and not takes & ctx["genuine"] \
+                and ctx["asked_keywords"]:
+            # Locate words round (2026-10-07): a sibling under the asked TOP category is still a different
+            # kind of data when its own words do not explain every word that named the asked
+            # subcategories. "any delays on the Washington Metro right now" says "delays" and "metro"
+            # (travel/transit_alerts + travel/transit); FAA airport status (travel/airport_delays) says
+            # "delays" but never "metro", and its airport reading (DCA) came only off the city word — it was
+            # tapped for a Metro ask (SET C) and read as an honest empty. "how's the Nasdaq doing" keeps
+            # the Nasdaq Composite index (its name says the asked word); "delays at ORD" (a spelled
+            # airport) and "Dodgers score last night" (a named team) keep their sibling sources: the
+            # entity is the evidence.
+            own = " ".join([str(record.get("name") or ""), str(record.get("description") or ""),
+                            " ".join(str(e) for e in record.get("examples") or []),
+                            str((record.get("coverage") or {}).get("entity") or ""),
+                            " ".join(str(w) for a in record.get("answers") or [] if isinstance(a, dict)
+                                     for w in [a.get("label") or "", *(a.get("words") or [])])])
+            if not all(self._says_any(own, [kw]) for kw in ctx["asked_keywords"]):
+                return "a different kind of data", False
         kinds = set(row.get("kinds") or [])
         serves = self._serves(con, ctx["frame"]) if ctx["frame"] else set()
         if ctx["frame"] == "forecast" and re.search(r"\boutlooks?\b", ctx["asked"]):
@@ -1250,8 +1295,6 @@ class LibraryIndex:
         aud = (con.execute("SELECT audience FROM library_sources WHERE id = ?", [row["id"]]).fetchone() or [""])[0]
         if not ctx["routed"] and aud and aud not in set(ctx["audiences"]) and not cats & set(ctx["cats"]):
             return f"for {aud} users", False  # unless it is filed under what was asked (a buoy reports surf)
-        takes = {r for (r,) in con.execute("SELECT resolver FROM library_source_resolvers WHERE source_id = ?",
-                                           [row["id"]]).fetchall()}
         why, about = self._off_subject(con, record, takes, ctx)
         # L1: on a routed path, an "about" admission must not bypass relevance when the source is in a
         # different top category than the route's — the ask said what kind of data, which outranks the
