@@ -267,7 +267,7 @@ export const NI_CSS_LIGHT = `
   --ni-border-strong: #cfcfc9;
   --ni-danger: #b34237;
   --ni-elevated: #ffffff;
-  --ni-faint: #94949b;
+  --ni-faint: #909097;
   --ni-map-land: #f0f0ec;
   --ni-map-stroke: #cfcfc9;
   --ni-muted: #62626a;

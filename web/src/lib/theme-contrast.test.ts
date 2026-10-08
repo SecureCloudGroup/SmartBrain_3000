@@ -49,6 +49,19 @@ const PAIRS: Array<[string, string, number, string]> = [
   ["--ok", "--bg", 3.0, "success chips"],
   ["--warn", "--bg", 4.5, "warn is used at meta size — hold it to text contrast"],
   ["--accent", "--bg", 3.0, "links/focus ring (UI component contrast)"],
+  // Phase 1a-4: the NI form painter's own text tokens (IrPaint reads `--ni-*`, never
+  // `--text`/`--muted` directly). `--ni-viz-*` (spark/gauge/map marks) are decorative
+  // chart colour, not text, and are deliberately exempt from this text-contrast gate.
+  // `--ni-faint`'s light value was darkened from #94949b to #909097 (ni_forms/tokens.json
+  // `color.light.faint`, regenerated via gen-ni-tokens.mjs) specifically to clear 3:1
+  // against BOTH surfaces — the prior value measured 3.01:1 on panel but only 2.88:1 on
+  // bg, so it is gated the same as text/muted, against both.
+  ["--ni-text", "--ni-panel", 4.5, "NI card text on its panel"],
+  ["--ni-text", "--ni-bg", 4.5, "NI card text on the page background"],
+  ["--ni-muted", "--ni-panel", 4.5, "NI secondary text on its panel"],
+  ["--ni-muted", "--ni-bg", 4.5, "NI secondary text on the page background"],
+  ["--ni-faint", "--ni-panel", 3.0, "NI faint sub-label text on its panel"],
+  ["--ni-faint", "--ni-bg", 3.0, "NI faint sub-label text on the page background"],
 ];
 
 describe("theme contrast (WCAG AA)", () => {

@@ -127,7 +127,7 @@ No foreign keys; `NIStore.delete` cascades in code (feeds precedent).
   has those segments stripped by `library_resolve._expand`, so a trailing `&token={key}` left in
   the template would otherwise fail the walk for keyed clock sources (nasa-neows-feed,
   finnhub-earnings-calendar, fec-candidates).
-- `display.size` ∈ `small | wide | large` (wide spans two grid columns; large is reserved for the forms' L size and renders as wide until the fixed-rhythm grid lands — Round 19). An absent `display` means small.
+- `display.size` ∈ `small | wide | large | tall` = the desktop grid cell a design takes (1×1, 2×1, 2×2, 1×2), derived from the sealed desktop span by `display_size_for_span` (the engine still seals a 1×2 design as `large`; emitting `tall` is queued for the next engine PR — the client already reads it). The board (Phase 1a-4) is a fixed-rhythm grid — 2 columns on a phone, 3 from 780 px, 4 from 1040 px, 176 px rows — and sizes a form card from the span key on the CLIR face it is painting (`cardSpan` in `web/src/lib/ni/shell.ts`: the engine seals a phone span per candidate, often a different shape from the desktop one, e.g. a 1×1 stat with a full-width 2-row phone face), reading `display.size` only for a legacy scene or a payload without a span key; the card menu's Size entry reads `display.size`. An absent `display` means small.
 - `contract` is system-written at commissioning (§7); the agent may never set it.
 - `model` optionally overrides the `ni` route for `model` sources (schedules.model
   precedent).

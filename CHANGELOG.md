@@ -21,6 +21,16 @@ to know when a release changes behavior.
   agenda or day table, a tide curve, a line over time. Cards take the size their
   design needs (small, wide or large), and a single-number card keeps its own
   history so a sparkline builds up from its refreshes.
+- **The board has a fixed rhythm, and every card shares one frame.** Cards sit on a
+  grid of two columns on a phone, three on a tablet and four on a desktop, in rows of
+  one fixed height; a designed card takes exactly the box its design needs (one or two
+  columns, up to three rows on a phone), and nothing overlaps or clips when a neighbour
+  is taller. Every card shows its state the same way: a healthy card carries no badge, a
+  stale one says how old it is, a failing one keeps its last good reading dimmed with
+  the reason and a Fix button, and a paused one says so. When a new card is ready to
+  check, the board shows the designed card itself — on the phone or desktop face, in
+  either theme, with the runner-up design when there is one — so "Use this" means the
+  card you will actually see.
 
 ### Fixed
 

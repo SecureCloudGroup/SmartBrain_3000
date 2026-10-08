@@ -669,7 +669,9 @@ export type NiState =
   | "broken"
   | "paused";
 
-export interface NiDisplay { size: "small" | "wide" | "large" }
+// "tall" (1 column x 2 rows, Phase 1a-4): read-ready ahead of the engine change that
+// emits it for a 1x2 design — today a 1x2 design seals as "large" (2x2) instead.
+export interface NiDisplay { size: "small" | "wide" | "large" | "tall" }
 
 // Natural-Interface flow (creation/remap pipeline). Non-null on a board row while the
 // engine is actively assembling — or has ended abnormally — a card; null once the
@@ -1761,11 +1763,17 @@ export const api = {
   // kick's outcome ("ok" | "error" | "skipped" — verdict recorded regardless).
   // `repick` (NO on a card awaiting the user's YES): "repick" = the pick re-landed with the
   // other sources; "relocate" = looking again without the declined one.
-  niValidate: (id: string, ok: boolean, note?: string) =>
+  // `presentationId` (§34 C2 presentation_id): "second" re-seals the card under its sealed
+  // runner-up design before the YES is stamped; omitted (every non-form caller) keeps the pick.
+  niValidate: (id: string, ok: boolean, note?: string, presentationId?: "pick" | "second") =>
     req<{ ok: boolean; state: NiState; run?: string; repick?: string }>(
       `/api/ni/items/${encodeURIComponent(id)}/validate`, {
         method: "POST",
-        body: JSON.stringify(note ? { ok, note } : { ok }),
+        body: JSON.stringify({
+          ok,
+          ...(note ? { note } : {}),
+          ...(presentationId ? { presentation_id: presentationId } : {}),
+        }),
       }),
   // Run once now. `status` is the outcome ("ok" or "error"); `kind` is the host-free
   // error class when status is "error" (e.g. "http_5xx", "contract"). 409 = draft /
