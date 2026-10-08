@@ -2160,6 +2160,21 @@ the handoff, and a deterministic check stands where the judge was removed.
   embedder as a reorder only 76 / 2 / 1 — no gain for a ~4.8k-text build on
   the local model. It is wired again only when it measures better on a
   larger clean set.
+- **Plurals and siblings (locate words round, 2026-10-07/08; SET C's links and the Metro tap).**
+  The keyword fold handles `-ies` ("heat advisories in Arizona" classified to nothing because
+  "advisories" folded to "advisorie", never the keyword "advisory", and went to links; so did
+  "coastal flood advisories for Long Island"). A source filed under a SIBLING subcategory of the
+  asked top category is a different kind of data unless the ask gives evidence for it: its own
+  words (name, description, examples, entity, answer labels and words) explain every word that
+  named the asked subcategories, or it takes an entity the ask names outright (a spelled code —
+  "delays at ORD"; a named team — "Dodgers score last night"), as opposed to one read off a city
+  word ("Washington" → DCA, cued by "delays"). "any delays on the Washington Metro right now" says
+  "delays" and "metro"; FAA airport status says "delays" but never "metro", so it is no longer
+  tapped for a Metro ask (SET C: an honest-empty card from the wrong source); "how's the Nasdaq
+  doing" keeps the Nasdaq Composite index (its name says the asked word). Measured on the 148-row
+  labeled locate set against the pinned pack: unchanged (103/108 admitted, the same two
+  pre-existing place rows), and against the Library's words-round pack (sun rise, advisories /
+  watches, GDP naming and kinds): unchanged; the Library's own lookup eval stays 46/46.
 - **Named subjects (review round, 2026-10-03; `_other_subject`).** A source
   with a declared `coverage.entity` is about that subject: it serves the ask
   when the ask names it (the entity's capitalized / numbered words, its

@@ -180,6 +180,9 @@ _ENTRIES = [  # id, resolver, key, name, lat, lon, state, attrs, rank, aliases
      ["mesquite metro", "metro"]),
     ("airport:ORD", "airport", "ORD", "Chicago O'Hare International Airport", 41.97, -87.9, "IL", {}, 1.0,
      ["ord", "o hare", "o hare airport"]),
+    # locate words round (2026-10-07): an airport whose alias is a city word that also names a transit system
+    ("airport:DCA", "airport", "DCA", "Ronald Reagan Washington National Airport", 38.85, -77.04, "DC", {}, 1.0,
+     ["dca", "washington national", "washington"]),
     # fix13-state (2026-10-05): same-named small towns + their us_state entry — California (PA/MO/KY),
     # Florida (NY), Washington (WA, state-only). A big same-named New York place lets "weather in New
     # York" stay the city; the state entries answer the state-bounded source.
@@ -476,6 +479,24 @@ def test_a_team_must_agree_with_the_named_league(lib) -> None:
     assert rows and rows[0] == "mlb-standings" and "nhl-standings-now" not in rows
     wild = _ids(lib, "Minnesota Wild score")
     assert "nhl-score-now" in wild and not any(r.startswith("mlb") for r in wild)
+
+
+def test_a_plural_in_ies_folds_to_the_keyword() -> None:
+    """Locate words round (SET C, 2026-10-07): "heat advisories in Arizona" classified to nothing — the fold
+    turned "advisories" into "advisorie", never the keyword "advisory" — and went to links."""
+    assert library_index._fold("advisories") == "advisory"
+    assert library_index._fold("warnings") == "warning"
+    assert library_index._fold("emergencies") == "emergency"
+    assert library_index._fold("ies") == "ies" and library_index._fold("glass") == "glass"
+
+
+def test_a_sibling_source_must_explain_every_word_that_named_the_ask(lib) -> None:
+    """Locate words round (SET C, 2026-10-07): "any delays on the Washington Metro right now" tapped FAA
+    airport status — Washington read as its airport (cued by "delays"), the shared top category (travel)
+    let the airport sibling through, and "metro", the word that named travel/transit, was never explained
+    by FAA's own words. A spelled code the source takes is still evidence on its own."""
+    assert "faa-nas-status" not in _ids(lib, "any delays on the Washington Metro right now")
+    assert _ids(lib, "delays at DCA") == ["faa-nas-status"]
 
 
 def test_an_entity_the_category_does_not_take_is_not_the_subject(lib) -> None:

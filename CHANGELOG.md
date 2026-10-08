@@ -34,6 +34,16 @@ to know when a release changes behavior.
 
 ### Fixed
 
+- **Asks that say "advisories" or "watches" find the alerts sources, and a transit
+  ask no longer lands on airport status.** "Heat advisories in Arizona" and "coastal
+  flood advisories for Long Island" went to links because the plural never matched the
+  alerts route; they now build from the NWS alerts sources. "Any delays on the
+  Washington Metro" used to tap the FAA airport-status source through the city word and
+  show an empty card; a source filed under a neighbouring kind of data is offered only
+  when its own words cover what you asked for, or when you named something it takes
+  (an airport code, a team), so that ask now honestly offers links until a transit
+  source exists for it. With the Library's words round, "what time does the sun rise"
+  reaches the sunrise source and "US GDP growth" the growth-rate series.
 - **Cards now answer the question that was asked, not just the data's shape.** The
   design step reads the kind of question (a forecast, a schedule, the next event, a
   lookup, a ranking…) and the words you used: an hourly forecast is a line, not a
