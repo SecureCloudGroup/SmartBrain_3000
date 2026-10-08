@@ -438,7 +438,12 @@ def _shape_values(chosen: list[dict], outputs: dict, ask: str,
     answers = chosen[:_FIELD_CAP]
     fields = [_field_from_answer(a, a["name"], a["name"], [outputs.get(a["name"])]) for a in answers]
     rows, long_text = _rows_as_lists([outputs], fields)
-    _apply_value_roles(fields, answers, rows[0] if rows else [None] * len(fields), ask, wants=wants)
+    # fix round 1a-7 (class P1): a passage lead is for a LONE long text value (a text_brief
+    # ask); with siblings chosen alongside it (a next-matchup's start + venue) the long text
+    # is an identity ("Knicks vs Wizards"), never prose — the same reasoning _shape_rows
+    # already applies to a one-row list demoted to a measure.
+    _apply_value_roles(fields, answers, rows[0] if rows else [None] * len(fields), ask,
+                       wants=wants, allow_passage=len(answers) <= 1)
     return "measure", fields, rows, long_text
 
 

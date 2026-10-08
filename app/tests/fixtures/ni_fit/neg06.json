@@ -1,0 +1,46 @@
+{
+ "id": "neg06",
+ "ask": "when does the next rocket launch from Vandenberg",
+ "frame": {
+  "kind": "next_event",
+  "subject": "rocket launch"
+ },
+ "chosen": [
+  {
+   "name": "latest",
+   "label": "30-year mortgage rate",
+   "words": [
+    "30-year fixed mortgage rate",
+    "30-year mortgage rate",
+    "mortgage rates",
+    "30 year mortgage rate",
+    "latest",
+    "current",
+    "now",
+    "today"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "rows[0].MORTGAGE30US",
+   "type": "number",
+   "unit": "%",
+   "window": "latest"
+  }
+ ],
+ "rows_output_name": null,
+ "preview": {
+  "latest": 7.28
+ },
+ "missing_menu": [
+  "from",
+  "launch",
+  "rocket",
+  "vandenberg"
+ ],
+ "label": {
+  "answers_ask": "no",
+  "missing": [],
+  "wrong": [],
+  "source_ask": "30 year mortgage rate history"
+ }
+}

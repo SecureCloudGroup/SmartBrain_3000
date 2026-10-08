@@ -1,0 +1,63 @@
+{
+ "id": "neg50",
+ "ask": "how much snow is expected in Salt Lake City this week",
+ "frame": {
+  "kind": null,
+  "subject": "Snow forecast"
+ },
+ "chosen": [
+  {
+   "name": "overall_status",
+   "label": "Overall status",
+   "words": [
+    "status",
+    "down",
+    "is it down",
+    "outage",
+    "up",
+    "working",
+    "operational",
+    "problems"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "status.description",
+   "type": "text",
+   "window": "now",
+   "unit": null
+  },
+  {
+   "name": "service_name",
+   "label": "Service",
+   "words": [
+    "service",
+    "name",
+    "which service"
+   ],
+   "primary": false,
+   "kind": "value",
+   "path": "page.name",
+   "type": "text",
+   "window": "now",
+   "unit": null
+  }
+ ],
+ "rows_output_name": null,
+ "preview": {
+  "service_name": "Zoom",
+  "overall_status": "Partially Degraded Service"
+ },
+ "missing_menu": [
+  "city",
+  "expected",
+  "lake",
+  "salt",
+  "snow"
+ ],
+ "label": {
+  "answers_ask": "no",
+  "missing": [],
+  "wrong": [],
+  "source_ask": "Zoom service status"
+ }
+}

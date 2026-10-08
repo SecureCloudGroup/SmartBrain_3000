@@ -1,0 +1,44 @@
+{
+ "id": "neg07",
+ "ask": "next Bears game",
+ "frame": {
+  "kind": "next_event",
+  "subject": "Bears game"
+ },
+ "chosen": [
+  {
+   "name": "overall_status",
+   "label": "Overall status",
+   "words": [
+    "status",
+    "down",
+    "is it down",
+    "outage",
+    "up",
+    "working",
+    "operational",
+    "problems"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "status.description",
+   "type": "text",
+   "window": "now",
+   "unit": null
+  }
+ ],
+ "rows_output_name": null,
+ "preview": {
+  "overall_status": "All Systems Operational"
+ },
+ "missing_menu": [
+  "bears",
+  "game"
+ ],
+ "label": {
+  "answers_ask": "no",
+  "missing": [],
+  "wrong": [],
+  "source_ask": "Discord status"
+ }
+}

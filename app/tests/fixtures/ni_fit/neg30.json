@@ -1,0 +1,44 @@
+{
+ "id": "neg30",
+ "ask": "how did the Dodgers do last night",
+ "frame": {
+  "kind": "result",
+  "subject": "Dodgers"
+ },
+ "chosen": [
+  {
+   "name": "status",
+   "label": "Slack status",
+   "words": [
+    "status",
+    "down",
+    "is slack down",
+    "working",
+    "up",
+    "operational",
+    "problems",
+    "issues"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "status",
+   "type": "text",
+   "window": "now",
+   "unit": null
+  }
+ ],
+ "rows_output_name": null,
+ "preview": {
+  "status": "ok"
+ },
+ "missing_menu": [
+  "dodgers",
+  "night"
+ ],
+ "label": {
+  "answers_ask": "no",
+  "missing": [],
+  "wrong": [],
+  "source_ask": "Slack status right now"
+ }
+}

@@ -1,0 +1,80 @@
+{
+ "id": "neg08",
+ "ask": "NHL games tonight",
+ "frame": {
+  "kind": null,
+  "subject": "NHL games"
+ },
+ "chosen": [
+  {
+   "name": "alerts",
+   "label": "Active weather alerts",
+   "words": [
+    "alerts",
+    "warnings",
+    "watches",
+    "advisories",
+    "severe weather",
+    "any warnings",
+    "near me",
+    "tornado warning",
+    "severe thunderstorm warning",
+    "flood warning",
+    "flash flood",
+    "winter storm warning",
+    "blizzard warning",
+    "heat advisory",
+    "red flag warning"
+   ],
+   "primary": true,
+   "kind": "list",
+   "path": "features",
+   "newest_first": false,
+   "may_be_empty": true,
+   "cells": [
+    {
+     "path": "properties.event",
+     "label": "Alert",
+     "type": "text",
+     "key": "properties.event",
+     "unit": null
+    },
+    {
+     "path": "properties.severity",
+     "label": "Severity",
+     "type": "text",
+     "key": "properties.severity",
+     "unit": null
+    },
+    {
+     "path": "properties.areaDesc",
+     "label": "Area",
+     "type": "text",
+     "key": "properties.areaDesc",
+     "unit": null
+    },
+    {
+     "path": "properties.expires",
+     "label": "Expires",
+     "type": "time",
+     "key": "properties.expires",
+     "unit": null
+    }
+   ]
+  }
+ ],
+ "rows_output_name": "rows",
+ "preview": {
+  "rows_count": 0,
+  "rows": []
+ },
+ "missing_menu": [
+  "games"
+ ],
+ "label": {
+  "answers_ask": "no",
+  "missing": [],
+  "wrong": [],
+  "source_ask": "any flood warnings in Houston"
+ }
+}

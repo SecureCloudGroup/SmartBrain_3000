@@ -1,0 +1,48 @@
+{
+ "id": "06-how-windy-is-it-at-mount-washington",
+ "n": 6,
+ "ask": "how windy is it at Mount Washington",
+ "kind": "current_value",
+ "frame_kind": null,
+ "subject": "wind",
+ "title": "wind",
+ "source_id": "open-meteo-forecast",
+ "source_url": "https://api.open-meteo.com/v1/forecast?latitude=38.042622&longitude=-85.556024&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m&hourly=temperature_2m,precipitation_probability,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,snowfall_sum,sunrise,sunset&temperature_unit=fahrenheit&wind_speed_unit=mph&precipitation_unit=inch&timezone=auto",
+ "fetched_at": "2026-10-07T21:06:00Z",
+ "viewer_tz": "UTC",
+ "answers_used": [
+  {
+   "name": "wind",
+   "label": "Wind speed",
+   "words": [
+    "wind",
+    "windy",
+    "breeze",
+    "wind speed",
+    "gusts",
+    "gusty",
+    "how windy"
+   ],
+   "primary": false,
+   "kind": "value",
+   "path": "current.wind_speed_10m",
+   "type": "number",
+   "unit": "mph",
+   "window": "now",
+   "measure": "wind"
+  }
+ ],
+ "rows_output_name": null,
+ "outputs": {
+  "wind": 10.9
+ },
+ "live_form": "stat",
+ "live_span": "d1x1",
+ "live_lint": {
+  "red": 0,
+  "amber": 2,
+  "codes": [
+   "L-ASK"
+  ]
+ }
+}

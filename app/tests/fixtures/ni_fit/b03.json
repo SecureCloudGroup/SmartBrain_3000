@@ -1,0 +1,42 @@
+{
+ "id": "b03",
+ "ask": "what's the UV index in Miami now",
+ "frame": {
+  "kind": null,
+  "subject": "UV index"
+ },
+ "chosen": [
+  {
+   "name": "uv_now",
+   "label": "UV index right now",
+   "words": [
+    "uv now",
+    "uv index now",
+    "uv index",
+    "right now",
+    "current uv",
+    "at the moment"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "current.uv_index",
+   "type": "number",
+   "window": "now",
+   "measure": "uv",
+   "unit": null
+  }
+ ],
+ "rows_output_name": null,
+ "preview": {
+  "uv_now": 7.3
+ },
+ "missing_menu": [
+  "index",
+  "miami"
+ ],
+ "label": {
+  "answers_ask": "yes",
+  "missing": [],
+  "wrong": []
+ }
+}

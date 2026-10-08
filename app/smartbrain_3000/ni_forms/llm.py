@@ -22,7 +22,7 @@ import json
 import threading
 from dataclasses import dataclass
 
-PURPOSES = frozenset({"rolebind", "present", "critic", "probe"})
+PURPOSES = frozenset({"rolebind", "present", "critic", "probe", "fit"})
 
 _forbid = threading.local()
 

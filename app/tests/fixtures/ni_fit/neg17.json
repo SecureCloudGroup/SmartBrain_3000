@@ -1,0 +1,43 @@
+{
+ "id": "neg17",
+ "ask": "how many earthquakes above 4.0 today",
+ "frame": {
+  "kind": "count",
+  "subject": "earthquakes"
+ },
+ "chosen": [
+  {
+   "name": "uv_now",
+   "label": "UV index right now",
+   "words": [
+    "uv now",
+    "uv index now",
+    "uv index",
+    "right now",
+    "current uv",
+    "at the moment"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "current.uv_index",
+   "type": "number",
+   "window": "now",
+   "measure": "uv",
+   "unit": null
+  }
+ ],
+ "rows_output_name": null,
+ "preview": {
+  "uv_now": 7.3
+ },
+ "missing_menu": [
+  "above",
+  "earthquakes"
+ ],
+ "label": {
+  "answers_ask": "no",
+  "missing": [],
+  "wrong": [],
+  "source_ask": "what's the UV index in Miami now"
+ }
+}

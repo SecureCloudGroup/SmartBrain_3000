@@ -1,0 +1,164 @@
+{
+ "id": "b07",
+ "ask": "this week's high temperatures in Phoenix",
+ "frame": {
+  "kind": null,
+  "subject": "weather"
+ },
+ "chosen": [
+  {
+   "name": "daily_forecast",
+   "label": "Daily forecast",
+   "words": [
+    "forecast",
+    "this week",
+    "7 day",
+    "week",
+    "weekend",
+    "next few days",
+    "daily forecast",
+    "outlook",
+    "rain chance this weekend",
+    "storms this week",
+    "freeze",
+    "frost",
+    "freezing rain",
+    "ice"
+   ],
+   "primary": false,
+   "kind": "columns",
+   "limit": 7,
+   "cells": [
+    {
+     "path": "daily.time",
+     "label": "Day",
+     "type": "date",
+     "key": "day",
+     "unit": null
+    },
+    {
+     "path": "daily.weather_code",
+     "label": "Conditions",
+     "type": "number",
+     "codes": "wmo_weather",
+     "key": "conditions",
+     "unit": null
+    },
+    {
+     "path": "daily.temperature_2m_max",
+     "label": "High",
+     "type": "number",
+     "unit_path": "daily_units.temperature_2m_max",
+     "key": "high",
+     "unit": "°F"
+    },
+    {
+     "path": "daily.precipitation_probability_max",
+     "label": "Rain chance",
+     "type": "number",
+     "unit_path": "daily_units.precipitation_probability_max",
+     "key": "rain_chance",
+     "unit": "%"
+    }
+   ],
+   "axis": {
+    "cell": "daily.time",
+    "step": "day"
+   }
+  }
+ ],
+ "rows_output_name": "rows",
+ "preview": {
+  "rows": [
+   {
+    "rain_chance": 1,
+    "high": 100.1,
+    "conditions": "Clear sky",
+    "day": "2026-10-07T00:00:00-04:00"
+   },
+   {
+    "rain_chance": 1,
+    "high": 101.6,
+    "conditions": "Clear sky",
+    "day": "2026-10-08T00:00:00-04:00"
+   },
+   {
+    "rain_chance": 0,
+    "high": 99.1,
+    "conditions": "Overcast",
+    "day": "2026-10-09T00:00:00-04:00"
+   },
+   {
+    "rain_chance": 46,
+    "high": 92.0,
+    "conditions": "Heavy drizzle",
+    "day": "2026-10-10T00:00:00-04:00"
+   },
+   {
+    "rain_chance": 68,
+    "high": 84.8,
+    "conditions": "Rain showers",
+    "day": "2026-10-11T00:00:00-04:00"
+   },
+   {
+    "rain_chance": 64,
+    "high": 85.2,
+    "conditions": "Light drizzle",
+    "day": "2026-10-12T00:00:00-04:00"
+   },
+   {
+    "rain_chance": 51,
+    "high": 80.0,
+    "conditions": "Drizzle",
+    "day": "2026-10-13T00:00:00-04:00"
+   }
+  ],
+  "zone": "America/Phoenix",
+  "rain_chance": [
+   1,
+   1,
+   0,
+   46,
+   68,
+   64,
+   51
+  ],
+  "high": [
+   100.1,
+   101.6,
+   99.1,
+   92.0,
+   84.8,
+   85.2,
+   80.0
+  ],
+  "conditions": [
+   0,
+   0,
+   3,
+   55,
+   81,
+   51,
+   53
+  ],
+  "day": [
+   "2026-10-07",
+   "2026-10-08",
+   "2026-10-09",
+   "2026-10-10",
+   "2026-10-11",
+   "2026-10-12",
+   "2026-10-13"
+  ]
+ },
+ "missing_menu": [
+  "high",
+  "phoenix",
+  "temperatures"
+ ],
+ "label": {
+  "answers_ask": "yes",
+  "missing": [],
+  "wrong": []
+ }
+}

@@ -496,17 +496,40 @@ def test_the_flow_builds_from_answers_without_a_mapping_call(lib, monkeypatch) -
     out = ni_flow._sample_and_map(store, item_id, "NYC weather", _INTENT, WEATHER_URL, model,
                                   lambda _u: copy.deepcopy(OPEN_METEO))
     assert out["state"] == "ready"
-    # a deterministic build: no mapping call, no model judge — the only model turn is the §34
-    # PRESENT menu (an enum-only pick among finished designs) and its one retry when the reply
-    # is off-schema, after which the rules floor picks
-    assert 1 <= len(prompts) <= 2, prompts
-    assert all("You choose how a personal dashboard card presents" in p for p in prompts), prompts
+    # a deterministic build: no mapping call, no model judge — the model turns are the §34
+    # PRESENT menu (an enum-only pick among finished designs, plus its one retry when the
+    # reply is off-schema) and the advisory FIT verdict (plan B3, same retry rule) after it
+    assert 1 <= len(prompts) <= 4, prompts
+    assert all("You choose how a personal dashboard card presents" in p
+              or "whether the chosen answers actually answer" in p for p in prompts), prompts
     notes = " | ".join(out["notes"])
     assert "built from the Library's declared answers: Temperature, Conditions, High today, Low today" in notes
     assert "verification" not in notes and "won't include" not in notes
     spec = store.get_item(item_id)["spec"]
     assert spec["pipeline"][0]["paths"]["conditions"] == "current.weather_code"
     assert spec["source"] == {"type": "http_json", "url": WEATHER_URL}
+
+
+def test_a_valid_fit_reply_is_sealed_on_the_spec_and_logged(lib, monkeypatch) -> None:
+    """FIT (plan B3): a declared build whose model answers BOTH closed questions (the §34
+    PRESENT menu, then FIT) seals the advisory verdict as spec._fit and logs it — never a
+    reason to refuse or change the card (the build still reaches "ready")."""
+    store = _store()
+    item_id = _picked(store, lib, monkeypatch)
+
+    def model(prompt: str) -> str:
+        if "whether the chosen answers actually answer" in prompt:
+            return '{"answers_ask": "yes", "missing": [], "wrong": [], "evidence": []}'
+        return '{"intent": "now", "fits": [], "pick": "c0", "second": null, "primary_field": null, ' \
+               '"labels": {}, "uncovered_wants": [], "none_fits": false}'
+
+    out = ni_flow._sample_and_map(store, item_id, "NYC weather", _INTENT, WEATHER_URL, model,
+                                  lambda _u: copy.deepcopy(OPEN_METEO))
+    assert out["state"] == "ready"
+    assert "fit: yes (model)" in " | ".join(out["notes"])
+    spec = store.get_item(item_id)["spec"]
+    assert spec["_fit"] == {"answers_ask": "yes", "missing": [], "wrong": [], "evidence": []}
+    nimod.validate_spec(spec)   # the sealed _fit round-trips through the closed spec validator
     preview = store.read_snapshot(item_id, "preview_data")["payload"]
     assert preview["conditions"] == "Partly cloudy"
     journal = " | ".join(e["summary"] for e in store.read_journal(item_id))

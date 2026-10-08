@@ -1,0 +1,43 @@
+{
+ "id": "a29",
+ "ask": "Discord status",
+ "frame": {
+  "kind": "status",
+  "subject": null
+ },
+ "chosen": [
+  {
+   "name": "overall_status",
+   "label": "Overall status",
+   "words": [
+    "status",
+    "down",
+    "is it down",
+    "outage",
+    "up",
+    "working",
+    "operational",
+    "problems"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "status.description",
+   "type": "text",
+   "window": "now",
+   "unit": null
+  }
+ ],
+ "rows_output_name": null,
+ "preview": {
+  "overall_status": "All Systems Operational"
+ },
+ "missing_menu": [
+  "discord",
+  "status"
+ ],
+ "label": {
+  "answers_ask": "yes",
+  "missing": [],
+  "wrong": []
+ }
+}

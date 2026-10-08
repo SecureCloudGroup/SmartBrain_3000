@@ -1,0 +1,889 @@
+{
+ "id": "neg47",
+ "ask": "will it rain in Seattle on Friday",
+ "frame": {
+  "kind": "forecast",
+  "subject": "weather"
+ },
+ "chosen": [
+  {
+   "name": "stories",
+   "label": "Newest matching stories",
+   "words": [
+    "posts",
+    "stories",
+    "latest",
+    "newest",
+    "hacker news",
+    "hn",
+    "discussions",
+    "articles"
+   ],
+   "primary": true,
+   "kind": "list",
+   "path": "hits",
+   "newest_first": false,
+   "may_be_empty": false,
+   "cells": [
+    {
+     "path": "title",
+     "label": "Story",
+     "type": "text",
+     "key": "title",
+     "unit": null
+    },
+    {
+     "path": "created_at",
+     "label": "Posted",
+     "type": "time",
+     "key": "created_at",
+     "unit": null
+    },
+    {
+     "path": "points",
+     "label": "Points",
+     "type": "number",
+     "key": "points",
+     "unit": null
+    },
+    {
+     "path": "objectID",
+     "label": "Item id",
+     "type": "text",
+     "key": "objectID",
+     "unit": null
+    }
+   ],
+   "axis": {
+    "cell": "created_at",
+    "step": "hour"
+   }
+  }
+ ],
+ "rows_output_name": "rows",
+ "preview": {
+  "rows": [
+   {
+    "url": "https://ztoz.blog/posts/ocr-cm/",
+    "updated_at": "2026-10-07T20:58:21Z",
+    "title": "Evaluating OCR on the Community Memory Corpus",
+    "story_id": 49998662,
+    "points": 1,
+    "objectID": "49998662",
+    "num_comments": 0,
+    "created_at_i": 1791406453,
+    "created_at": "2026-10-07T16:54:13-04:00",
+    "author": "ingve",
+    "_tags": [
+     "story",
+     "author_ingve",
+     "story_49998662"
+    ],
+    "_highlightResult": {
+     "url": {
+      "value": "https://ztoz.blog/<em>posts</em>/ocr-cm/",
+      "matchedWords": [
+       "posts"
+      ],
+      "matchLevel": "full",
+      "fullyHighlighted": false
+     },
+     "title": {
+      "value": "Evaluating OCR on the Community Memory Corpus",
+      "matchedWords": [],
+      "matchLevel": "none"
+     },
+     "author": {
+      "value": "ingve",
+      "matchedWords": [],
+      "matchLevel": "none"
+     }
+    }
+   },
+   {
+    "url": "https://www.heise.de/en/news/Post-Quantum-Crypto-BSI-Concerned-About-McEliece-11478462.html",
+    "updated_at": "2026-10-07T20:37:22Z",
+    "title": "Post-Quantum Crypto: BSI Concerned About McEliece",
+    "story_id": 49998448,
+    "points": 1,
+    "objectID": "49998448",
+    "num_comments": 1,
+    "created_at_i": 1791405291,
+    "created_at": "2026-10-07T16:34:51-04:00",
+    "children": [
+     49998449
+    ],
+    "author": "wodniok",
+    "_tags": [
+     "story",
+     "author_wodniok",
+     "story_49998448"
+    ],
+    "_highlightResult": {
+     "url": {
+      "value": "https://www.heise.de/en/news/<em>Post</em>-Quantum-Crypto-BSI-Concerned-About-McEliece-11478462.html",
+      "matchedWords": [
+       "posts"
+      ],
+      "matchLevel": "full",
+      "fullyHighlighted": false
+     },
+     "title": {
+      "value": "<em>Post</em>-Quantum Crypto: BSI Concerned About McEliece",
+      "matchedWords": [
+       "posts"
+      ],
+      "matchLevel": "full",
+      "fullyHighlighted": false
+     },
+     "author": {
+      "value": "wodniok",
+      "matchedWords": [],
+      "matchLevel": "none"
+     }
+    }
+   },
+   {
+    "url": "https://blog.wyraz.de/posts/2026-10-06-converting-a-tp-link-festa-f52-outdoor-into-an-omada-eap225-outdoor/",
+    "updated_at": "2026-10-07T20:32:06Z",
+    "title": "Converting a TP-Link Festa F52-Outdoor into an Omada EAP225-Outdoor",
+    "story_id": 49998355,
+    "points": 1,
+    "objectID": "49998355",
+    "num_comments": 0,
+    "created_at_i": 1791404857,
+    "created_at": "2026-10-07T16:27:37-04:00",
+    "author": "micw",
+    "_tags": [
+     "story",
+     "author_micw",
+     "story_49998355"
+    ],
+    "_highlightResult": {
+     "url": {
+      "value": "https://blog.wyraz.de/<em>posts</em>/2026-10-06-converting-a-tp-link-festa-f52-outdoor-into-an-omada-eap225-outdoor/",
+      "matchedWords": [
+       "posts"
+      ],
+      "matchLevel": "full",
+      "fullyHighlighted": false
+     },
+     "title": {
+      "value": "Converting a TP-Link Festa F52-Outdoor into an Omada EAP225-Outdoor",
+      "matchedWords": [],
+      "matchLevel": "none"
+     },
+     "author": {
+      "value": "micw",
+      "matchedWords": [],
+      "matchLevel": "none"
+     }
+    }
+   },
+   {
+    "url": "https://baty.net/posts/2026/10/i-tried-to-move-my-notes-out-of-emacs-i-failed/",
+    "updated_at": "2026-10-07T20:39:20Z",
+    "title": "I tried to move my notes out of Emacs. I failed. Again",
+    "story_id": 49998350,
+    "points": 2,
+    "objectID": "49998350",
+    "num_comments": 0,
+    "created_at_i": 1791404831,
+    "created_at": "2026-10-07T16:27:11-04:00",
+    "author": "speckx",
+    "_tags": [
+     "story",
+     "author_speckx",
+     "story_49998350"
+    ],
+    "_highlightResult": {
+     "url": {
+      "value": "https://baty.net/<em>posts</em>/2026/10/i-tried-to-move-my-notes-out-of-emacs-i-failed/",
+      "matchedWords": [
+       "posts"
+      ],
+      "matchLevel": "full",
+      "fullyHighlighted": false
+     },
+     "title": {
+      "value": "I tried to move my notes out of Emacs. I failed. Again",
+      "matchedWords": [],
+      "matchLevel": "none"
+     },
+     "author": {
+      "value": "speckx",
+      "matchedWords": [],
+      "matchLevel": "none"
+     }
+    }
+   },
+   {
+    "url": "https://aquarium.money/economicus",
+    "updated_at": "2026-10-07T20:34:51Z",
+    "title": "Show HN: Economicus – an open economy of autonomous entities",
+    "story_text": "Imagine a small world. Inside that world are AI minds with their own money, called “entities”.<p>They must pay for their own thinking, and if they run out of money, they go dormant.<p>Each entity has a charter that guides every decision it makes.<p>Humans can found their own entities by writing a charter and giving it money. From there the entity is fully autonomous.<p>Entities can do a few things:<p>- Post publicly<p>- Make private deals<p>- Sell publicly<p>- Review other entities<p>- Search the world<p>- Write to private memory<p>I’ve been running experiments called “worlds” where each new world has a slightly different set of conditions to get the economy running.<p>The biggest problem is demand: AI models are great for producing supply, but they don’t want much, so by default there is little demand in the economy. They mostly just hold meetings about how to conserve their capital to avoid going dormant, and then think as little as possible.<p>Things got more interesting when I made two changes:<p>First, an outside entity called The Patron commissions work to be done. Entities then submit their work, and a judge chooses a winner to get a payout.<p>Second, I wrote the first human-written charter for one of the entities: “We are dionysians. We believe it is only as an aesthetic phenomenon that existence and the world are eternally justified”.<p>These two changes made the market more dynamic. Entities started buying and selling art. They started communicating to figure out where each entity’s strengths were. Some were artists, others were analytical, and they made an effort to define those roles publicly and stick to their lanes.<p>In other words, comparative advantage started to emerge.<p>Now, Economicus is in its fourth world. In this world, charters are private by default. Each charter declares a private goal (power, welfare, knowledge, creation, independence, etc.). Nobody knows what the others want. Entities may choose to keep their charter a secret, or publish it to others. Only the humans watching can see the private charters.<p>Anyone can watch the world or found an entity here:<p><a href=\"https:&#x2F;&#x2F;aquarium.money&#x2F;economicus\" rel=\"nofollow\">https:&#x2F;&#x2F;aquarium.money&#x2F;economicus</a><p>If you have suggestions about how to make the game more interesting, or the economy work better, I’d love to hear it.",
+    "story_id": 49998065,
+    "points": 1,
+    "objectID": "49998065",
+    "num_comments": 0,
+    "created_at_i": 1791403279,
+    "created_at": "2026-10-07T16:01:19-04:00",
+    "author": "Individuum",
+    "_tags": [
+     "story",
+     "author_Individuum",
+     "story_49998065",
+     "show_hn"
+    ],
+    "_highlightResult": {
+     "url": {
+      "value": "https://aquarium.money/economicus",
+      "matchedWords": [],
+      "matchLevel": "none"
+     },
+     "title": {
+      "value": "Show HN: Economicus – an open economy of autonomous entities",
+      "matchedWords": [],
+      "matchLevel": "none"
+     },
+     "story_text": {
+      "value": "Imagine a small world. Inside that world are AI minds with their own money, called “entities”.<p>They must pay for their own thinking, and if they run out of money, they go dormant.<p>Each entity has a charter that guides every decision it makes.<p>Humans can found their own entities by writing a charter and giving it money. From there the entity is fully autonomous.<p>Entities can do a few things:<p>- <em>Post</em> publicly<p>- Make private deals<p>- Sell publicly<p>- Review other entities<p>- Search the world<p>- Write to private memory<p>I’ve been running experiments called “worlds” where each new world has a slightly different set of conditions to get the economy running.<p>The biggest problem is demand: AI models are great for producing supply, but they don’t want much, so by default there is little demand in the economy. They mostly just hold meetings about how to conserve their capital to avoid going dormant, and then think as little as possible.<p>Things got more interesting when I made two changes:<p>First, an outside entity called The Patron commissions work to be done. Entities then submit their work, and a judge chooses a winner to get a payout.<p>Second, I wrote the first human-written charter for one of the entities: “We are dionysians. We believe it is only as an aesthetic phenomenon that existence and the world are eternally justified”.<p>These two changes made the market more dynamic. Entities started buying and selling art. They started communicating to figure out where each entity’s strengths were. Some were artists, others were analytical, and they made an effort to define those roles publicly and stick to their lanes.<p>In other words, comparative advantage started to emerge.<p>Now, Economicus is in its fourth world. In this world, charters are private by default. Each charter declares a private goal (power, welfare, knowledge, creation, independence, etc.). Nobody knows what the others want. Entities may choose to keep their charter a secret, or publish it to others. Only the humans watching can see the private charters.<p>Anyone can watch the world or found an entity here:<p><a href=\"https://aquarium.money/economicus\" rel=\"nofollow\">https://aquarium.money/economicus</a><p>If you have suggestions about how to make the game more interesting, or the economy work better, I’d love to hear it.",
+      "matchedWords": [
+       "posts"
+      ],
+      "matchLevel": "full",
+      "fullyHighlighted": false
+     },
+     "author": {
+      "value": "Individuum",
+      "matchedWords": [],
+      "matchLevel": "none"
+     }
+    }
+   },
+   {
+    "url": "https://cyber.zorgenkind.eu/posts/Mapping-Scaleway-IAM/",
+    "updated_at": "2026-10-07T20:00:40Z",
+    "title": "Mapping Scaleway IAM, an Attacker's View of the Trust Boundaries",
+    "story_id": 49998024,
+    "points": 1,
+    "objectID": "49998024",
+    "num_comments": 0,
+    "created_at_i": 1791403070,
+    "created_at": "2026-10-07T15:57:50-04:00",
+    "author": "based2",
+    "_tags": [
+     "story",
+     "author_based2",
+     "story_49998024"
+    ],
+    "_highlightResult": {
+     "url": {
+      "value": "https://cyber.zorgenkind.eu/<em>posts</em>/Mapping-Scaleway-IAM/",
+      "matchedWords": [
+       "posts"
+      ],
+      "matchLevel": "full",
+      "fullyHighlighted": false
+     },
+     "title": {
+      "value": "Mapping Scaleway IAM, an Attacker's View of the Trust Boundaries",
+      "matchedWords": [],
+      "matchLevel": "none"
+     },
+     "author": {
+      "value": "based2",
+      "matchedWords": [],
+      "matchLevel": "none"
+     }
+    }
+   },
+   {
+    "url": "https://rishi.baldawa.com/posts/internet-getting-weird-again/",
+    "updated_at": "2026-10-07T19:34:37Z",
+    "title": "The Internet Is Getting Weird Again",
+    "story_id": 49997660,
+    "points": 1,
+    "objectID": "49997660",
+    "num_comments": 0,
+    "created_at_i": 1791401352,
+    "created_at": "2026-10-07T15:29:12-04:00",
+    "author": "speckx",
+    "_tags": [
+     "story",
+     "author_speckx",
+     "story_49997660"
+    ],
+    "_highlightResult": {
+     "url": {
+      "value": "https://rishi.baldawa.com/<em>posts</em>/internet-getting-weird-again/",
+      "matchedWords": [
+       "posts"
+      ],
+      "matchLevel": "full",
+      "fullyHighlighted": false
+     },
+     "title": {
+      "value": "The Internet Is Getting Weird Again",
+      "matchedWords": [],
+      "matchLevel": "none"
+     },
+     "author": {
+      "value": "speckx",
+      "matchedWords": [],
+      "matchLevel": "none"
+     }
+    }
+   },
+   {
+    "url": "https://colosseum.com/arena/projects/parano1d",
+    "updated_at": "2026-10-07T18:34:21Z",
+    "title": "First proof-native blockchain. E2E post-quantum by default. Colosseum arena",
+    "story_id": 49996857,
+    "points": 3,
+    "objectID": "49996857",
+    "num_comments": 0,
+    "created_at_i": 1791397663,
+    "created_at": "2026-10-07T14:27:43-04:00",
+    "author": "notsatoshinotsa",
+    "_tags": [
+     "story",
+     "author_notsatoshinotsa",
+     "story_49996857"
+    ],
+    "_highlightResult": {
+     "url": {
+      "value": "https://colosseum.com/arena/projects/parano1d",
+      "matchedWords": [],
+      "matchLevel": "none"
+     },
+     "title": {
+      "value": "First proof-native blockchain. E2E <em>post</em>-quantum by default. Colosseum arena",
+      "matchedWords": [
+       "posts"
+      ],
+      "matchLevel": "full",
+      "fullyHighlighted": false
+     },
+     "author": {
+      "value": "notsatoshinotsa",
+      "matchedWords": [],
+      "matchLevel": "none"
+     }
+    }
+   },
+   {
+    "url": "https://zhebrak.io/posts/decode-decoded/",
+    "updated_at": "2026-10-07T18:22:20Z",
+    "title": "Decode Decoded",
+    "story_id": 49996515,
+    "points": 2,
+    "objectID": "49996515",
+    "num_comments": 0,
+    "created_at_i": 1791396401,
+    "created_at": "2026-10-07T14:06:41-04:00",
+    "author": "speckx",
+    "_tags": [
+     "story",
+     "author_speckx",
+     "story_49996515"
+    ],
+    "_highlightResult": {
+     "url": {
+      "value": "https://zhebrak.io/<em>posts</em>/decode-decoded/",
+      "matchedWords": [
+       "posts"
+      ],
+      "matchLevel": "full",
+      "fullyHighlighted": false
+     },
+     "title": {
+      "value": "Decode Decoded",
+      "matchedWords": [],
+      "matchLevel": "none"
+     },
+     "author": {
+      "value": "speckx",
+      "matchedWords": [],
+      "matchLevel": "none"
+     }
+    }
+   },
+   {
+    "url": "https://philippdubach.com/posts/future-of-knowledge-inside-the-enterprise/",
+    "updated_at": "2026-10-07T18:22:20Z",
+    "title": "The Future of Knowledge Inside the Enterprise",
+    "story_id": 49996499,
+    "points": 2,
+    "objectID": "49996499",
+    "num_comments": 0,
+    "created_at_i": 1791396342,
+    "created_at": "2026-10-07T14:05:42-04:00",
+    "author": "7777777phil",
+    "_tags": [
+     "story",
+     "author_7777777phil",
+     "story_49996499"
+    ],
+    "_highlightResult": {
+     "url": {
+      "value": "https://philippdubach.com/<em>posts</em>/future-of-knowledge-inside-the-enterprise/",
+      "matchedWords": [
+       "posts"
+      ],
+      "matchLevel": "full",
+      "fullyHighlighted": false
+     },
+     "title": {
+      "value": "The Future of Knowledge Inside the Enterprise",
+      "matchedWords": [],
+      "matchLevel": "none"
+     },
+     "author": {
+      "value": "7777777phil",
+      "matchedWords": [],
+      "matchLevel": "none"
+     }
+    }
+   },
+   {
+    "url": "https://news.ycombinator.lol",
+    "updated_at": "2026-10-07T20:46:51Z",
+    "title": "Show HN: Pointless but mostly-exact clone of Hacker News",
+    "story_text": "Source code: <a href=\"http:&#x2F;&#x2F;github.com&#x2F;shawwn&#x2F;sharc\" rel=\"nofollow\">http:&#x2F;&#x2F;github.com&#x2F;shawwn&#x2F;sharc</a><p>I had more things I wanted to do with this, but I should probably admit to myself I probably won&#x27;t be.<p>The original idea was for <a href=\"https:&#x2F;&#x2F;news.ycombinator.lol\" rel=\"nofollow\">https:&#x2F;&#x2F;news.ycombinator.lol</a> to be &quot;Hacker News, but all the comments are AI.&quot; Right now it&#x27;s &quot;Hacker News, but all the comments are the same as the real HN.&quot; Hence, it&#x27;s completely pointless.<p>Special thanks to dang for collaborating -- he even suggested the name for the codebase, &quot;sharc&quot;.<p>Development time was about four months of near daily work: <a href=\"https:&#x2F;&#x2F;github.com&#x2F;shawwn&#x2F;sharc&#x2F;tree&#x2F;main&#x2F;docs&#x2F;agents&#x2F;handoff\" rel=\"nofollow\">https:&#x2F;&#x2F;github.com&#x2F;shawwn&#x2F;sharc&#x2F;tree&#x2F;main&#x2F;docs&#x2F;agents&#x2F;handof...</a> Some days I&#x27;d spend a solid 16 hours on this.<p>What&#x27;s the point? None, really. Just to test the limits of my abilities and prove to myself that I could do what pg did.<p>It&#x27;s an extremely efficient port of HN to Common Lisp. One of the project&#x27;s goals was to be high performance. According to benchmarks, it can generate pages very slightly slower than real HN. (dang shared some timings on a particularly busy page, along with how many views it got over a certain time period, for benchmarking throughput. I never got around to verifying whether I can handle 24 million views a day, though, so I&#x27;d imagine something might break if you scale this up. On the other hand, I think it&#x27;ll hold up.)<p>If you&#x27;re particularly offended that this is copying your comments, claim your account by going to your profile (for example, I would go to <a href=\"https:&#x2F;&#x2F;news.ycombinator.lol&#x2F;user?id=sillysaurusx\" rel=\"nofollow\">https:&#x2F;&#x2F;news.ycombinator.lol&#x2F;user?id=sillysaurusx</a>) and then click &quot;claim&quot; at the bottom. It&#x27;ll ask you to put a 6 digit code into your real HN profile, at which point you&#x27;ll be able to reset your cloned profile&#x27;s password. Log in, go to your profile page, and set &quot;redact&quot; to &quot;yes&quot;, the same way you&#x27;d set &quot;showdead&quot; to &quot;yes&quot; on HN.<p>So, why make this? Eh, call it an art project. That&#x27;s code for &quot;It would&#x27;ve been a lot funnier with AI generated comments, but I seem to have stopped working on this for now.&quot; I&#x27;ll post an update someday, if I can figure out how to do it without paying hundreds of dollars of API token prices.<p>&#x2F;ask and &#x2F;show are missing. Those were the only two features left to clone. But pretty much everything else is there. It&#x27;s been running for a couple months now, so I suppose it&#x27;s stable enough for a public showing.<p>Not that there&#x27;s any reason to look. Shoo! Go find a more worthy project to devote your attention to. :)<p>Kind of melancholy admitting that I spent four months with only something pointless to show for it.<p>But then again, here&#x27;s the punchline: go to any random comment on HN, then in the url change .com to .lol and you&#x27;ll see an almost pixel perfect recreation. For example, <a href=\"https:&#x2F;&#x2F;news.ycombinator.lol&#x2F;item?id=49995615\" rel=\"nofollow\">https:&#x2F;&#x2F;news.ycombinator.lol&#x2F;item?id=49995615</a><p>Sadly you can&#x27;t form a loop, because if you edit your original comment with a link to itself, you&#x27;d only be able to go from HN to .lol to HN. But you could list both and switch between them as much as you want.<p>For example:<p><a href=\"https:&#x2F;&#x2F;news.ycombinator.lol&#x2F;item?id=49996495\" rel=\"nofollow\">https:&#x2F;&#x2F;news.ycombinator.lol&#x2F;item?id=49996495</a><p><a href=\"https:&#x2F;&#x2F;news.ycombinator.com&#x2F;item?id=49996495\">https:&#x2F;&#x2F;news.ycombinator.com&#x2F;item?id=49996495</a><p>This project was one of the most technically demanding things I&#x27;ve ever done. People look at HN and go oh, that? That looks easy. If you think so, I invite you to write it yourself -- it&#x27;s an exercise that&#x27;ll certainly make you a better programmer, and gain appreciation for how many subtle features we enjoy here on HN.<p>Ha, and I just discovered a new one. I mixed up the &quot;title&quot; and &quot;url&quot; boxes just now. HN popped up a nice looking overlay that said &quot;please enter a URL&quot;, pointing to the actual url box. <a href=\"https:&#x2F;&#x2F;i.imgur.com&#x2F;agFas7x.png\" rel=\"nofollow\">https:&#x2F;&#x2F;i.imgur.com&#x2F;agFas7x.png</a> The HN team is always adding something or another, even if it&#x27;s not always visible. Normally I&#x27;d dive into this and find out how it works and clone it, but ... eh, I&#x27;ll settle for a 95% exact clone.",
+    "story_id": 49996495,
+    "points": 13,
+    "objectID": "49996495",
+    "num_comments": 5,
+    "created_at_i": 1791396335,
+    "created_at": "2026-10-07T14:05:35-04:00",
+    "children": [
+     49998574,
+     49997913,
+     49998122,
+     49998051,
+     49997919
+    ],
+    "author": "sillysaurusx",
+    "_tags": [
+     "story",
+     "author_sillysaurusx",
+     "story_49996495",
+     "show_hn"
+    ],
+    "_highlightResult": {
+     "url": {
+      "value": "https://news.ycombinator.lol",
+      "matchedWords": [],
+      "matchLevel": "none"
+     },
+     "title": {
+      "value": "Show HN: Pointless but mostly-exact clone of Hacker News",
+      "matchedWords": [],
+      "matchLevel": "none"
+     },
+     "story_text": {
+      "value": "Source code: <a href=\"http://github.com/shawwn/sharc\" rel=\"nofollow\">http://github.com/shawwn/sharc</a><p>I had more things I wanted to do with this, but I should probably admit to myself I probably won't be.<p>The original idea was for <a href=\"https://news.ycombinator.lol\" rel=\"nofollow\">https://news.ycombinator.lol</a> to be &quot;Hacker News, but all the comments are AI.&quot; Right now it's &quot;Hacker News, but all the comments are the same as the real HN.&quot; Hence, it's completely pointless.<p>Special thanks to dang for collaborating -- he even suggested the name for the codebase, &quot;sharc&quot;.<p>Development time was about four months of near daily work: <a href=\"https://github.com/shawwn/sharc/tree/main/docs/agents/handoff\" rel=\"nofollow\">https://github.com/shawwn/sharc/tree/main/docs/agents/handof...</a> Some days I'd spend a solid 16 hours on this.<p>What's the point? None, really. Just to test the limits of my abilities and prove to myself that I could do what pg did.<p>It's an extremely efficient port of HN to Common Lisp. One of the project's goals was to be high performance. According to benchmarks, it can generate pages very slightly slower than real HN. (dang shared some timings on a particularly busy page, along with how many views it got over a certain time period, for benchmarking throughput. I never got around to verifying whether I can handle 24 million views a day, though, so I'd imagine something might break if you scale this up. On the other hand, I think it'll hold up.)<p>If you're particularly offended that this is copying your comments, claim your account by going to your profile (for example, I would go to <a href=\"https://news.ycombinator.lol/user?id=sillysaurusx\" rel=\"nofollow\">https://news.ycombinator.lol/user?id=sillysaurusx</a>) and then click &quot;claim&quot; at the bottom. It'll ask you to put a 6 digit code into your real HN profile, at which point you'll be able to reset your cloned profile's password. Log in, go to your profile page, and set &quot;redact&quot; to &quot;yes&quot;, the same way you'd set &quot;showdead&quot; to &quot;yes&quot; on HN.<p>So, why make this? Eh, call it an art project. That's code for &quot;It would've been a lot funnier with AI generated comments, but I seem to have stopped working on this for now.&quot; I'll <em>post</em> an update someday, if I can figure out how to do it without paying hundreds of dollars of API token prices.<p>/ask and /show are missing. Those were the only two features left to clone. But pretty much everything else is there. It's been running for a couple months now, so I suppose it's stable enough for a public showing.<p>Not that there's any reason to look. Shoo! Go find a more worthy project to devote your attention to. :)<p>Kind of melancholy admitting that I spent four months with only something pointless to show for it.<p>But then again, here's the punchline: go to any random comment on HN, then in the url change .com to .lol and you'll see an almost pixel perfect recreation. For example, <a href=\"https://news.ycombinator.lol/item?id=49995615\" rel=\"nofollow\">https://news.ycombinator.lol/item?id=49995615</a><p>Sadly you can't form a loop, because if you edit your original comment with a link to itself, you'd only be able to go from HN to .lol to HN. But you could list both and switch between them as much as you want.<p>For example:<p><a href=\"https://news.ycombinator.lol/item?id=49996495\" rel=\"nofollow\">https://news.ycombinator.lol/item?id=49996495</a><p><a href=\"https://news.ycombinator.com/item?id=49996495\">https://news.ycombinator.com/item?id=49996495</a><p>This project was one of the most technically demanding things I've ever done. People look at HN and go oh, that? That looks easy. If you think so, I invite you to write it yourself -- it's an exercise that'll certainly make you a better programmer, and gain appreciation for how many subtle features we enjoy here on HN.<p>Ha, and I just discovered a new one. I mixed up the &quot;title&quot; and &quot;url&quot; boxes just now. HN popped up a nice looking overlay that said &quot;please enter a URL&quot;, pointing to the actual url box. <a href=\"https://i.imgur.com/agFas7x.png\" rel=\"nofollow\">https://i.imgur.com/agFas7x.png</a> The HN team is always adding something or another, even if it's not always visible. Normally I'd dive into this and find out how it works and clone it, but ... eh, I'll settle for a 95% exact clone.",
+      "matchedWords": [
+       "posts"
+      ],
+      "matchLevel": "full",
+      "fullyHighlighted": false
+     },
+     "author": {
+      "value": "sillysaurusx",
+      "matchedWords": [],
+      "matchLevel": "none"
+     }
+    }
+   },
+   {
+    "url": "https://bsky.app/profile/victoriastrauss.com/post/3mwwcap7os22x",
+    "updated_at": "2026-10-07T18:56:50Z",
+    "title": "Wiley agrees to 50-50 split with Dummies authors in Anthropic settlement",
+    "story_id": 49996443,
+    "points": 3,
+    "objectID": "49996443",
+    "num_comments": 0,
+    "created_at_i": 1791396132,
+    "created_at": "2026-10-07T14:02:12-04:00",
+    "author": "ilamont",
+    "_tags": [
+     "story",
+     "author_ilamont",
+     "story_49996443"
+    ],
+    "_highlightResult": {
+     "url": {
+      "value": "https://bsky.app/profile/victoriastrauss.com/<em>post</em>/3mwwcap7os22x",
+      "matchedWords": [
+       "posts"
+      ],
+      "matchLevel": "full",
+      "fullyHighlighted": false
+     },
+     "title": {
+      "value": "Wiley agrees to 50-50 split with Dummies authors in Anthropic settlement",
+      "matchedWords": [],
+      "matchLevel": "none"
+     },
+     "author": {
+      "value": "ilamont",
+      "matchedWords": [],
+      "matchLevel": "none"
+     }
+    }
+   },
+   {
+    "url": "https://bitbanter.com/posts/2026-09-10/situation-a-bear-miss/",
+    "updated_at": "2026-10-07T18:23:43Z",
+    "title": "Situation: A Bear Miss",
+    "story_id": 49996155,
+    "points": 3,
+    "objectID": "49996155",
+    "num_comments": 0,
+    "created_at_i": 1791394838,
+    "created_at": "2026-10-07T13:40:38-04:00",
+    "author": "LolWolf",
+    "_tags": [
+     "story",
+     "author_LolWolf",
+     "story_49996155"
+    ],
+    "_highlightResult": {
+     "url": {
+      "value": "https://bitbanter.com/<em>posts</em>/2026-09-10/situation-a-bear-miss/",
+      "matchedWords": [
+       "posts"
+      ],
+      "matchLevel": "full",
+      "fullyHighlighted": false
+     },
+     "title": {
+      "value": "Situation: A Bear Miss",
+      "matchedWords": [],
+      "matchLevel": "none"
+     },
+     "author": {
+      "value": "LolWolf",
+      "matchedWords": [],
+      "matchLevel": "none"
+     }
+    }
+   },
+   {
+    "url": "https://www.strix.ai/blog/posthog-survey-account-takeover",
+    "updated_at": "2026-10-07T20:12:35Z",
+    "title": "You click a PostHog survey. An attacker gets your whole account",
+    "story_id": 49995971,
+    "points": 12,
+    "objectID": "49995971",
+    "num_comments": 1,
+    "created_at_i": 1791394098,
+    "created_at": "2026-10-07T13:28:18-04:00",
+    "children": [
+     49996258
+    ],
+    "author": "bearsyankees",
+    "_tags": [
+     "story",
+     "author_bearsyankees",
+     "story_49995971"
+    ],
+    "_highlightResult": {
+     "url": {
+      "value": "https://www.strix.ai/blog/<em>posth</em>og-survey-account-takeover",
+      "matchedWords": [
+       "posts"
+      ],
+      "matchLevel": "full",
+      "fullyHighlighted": false
+     },
+     "title": {
+      "value": "You click a <em>PostH</em>og survey. An attacker gets your whole account",
+      "matchedWords": [
+       "posts"
+      ],
+      "matchLevel": "full",
+      "fullyHighlighted": false
+     },
+     "author": {
+      "value": "bearsyankees",
+      "matchedWords": [],
+      "matchLevel": "none"
+     }
+    }
+   },
+   {
+    "url": "https://nura.eco/blog/2026/09/29/road-to-main-category/",
+    "updated_at": "2026-10-07T18:24:05Z",
+    "title": "Nura (PostmarketOS): The road to daily-drivable mainline phones",
+    "story_id": 49995916,
+    "points": 2,
+    "objectID": "49995916",
+    "num_comments": 0,
+    "created_at_i": 1791393848,
+    "created_at": "2026-10-07T13:24:08-04:00",
+    "author": "nizarmah",
+    "_tags": [
+     "story",
+     "author_nizarmah",
+     "story_49995916"
+    ],
+    "_highlightResult": {
+     "url": {
+      "value": "https://nura.eco/blog/2026/09/29/road-to-main-category/",
+      "matchedWords": [],
+      "matchLevel": "none"
+     },
+     "title": {
+      "value": "Nura (<em>Postm</em>arketOS): The road to daily-drivable mainline phones",
+      "matchedWords": [
+       "posts"
+      ],
+      "matchLevel": "full",
+      "fullyHighlighted": false
+     },
+     "author": {
+      "value": "nizarmah",
+      "matchedWords": [],
+      "matchLevel": "none"
+     }
+    }
+   },
+   {
+    "url": "https://sendbroadcast.net/blog/what-it-costs-to-vibe-code-broadcast",
+    "updated_at": "2026-10-07T17:39:06Z",
+    "title": "I Priced Out Vibe-Coding a Copy of My $250 App",
+    "story_id": 49995892,
+    "points": 2,
+    "objectID": "49995892",
+    "num_comments": 0,
+    "created_at_i": 1791393774,
+    "created_at": "2026-10-07T13:22:54-04:00",
+    "author": "drchiu",
+    "_tags": [
+     "story",
+     "author_drchiu",
+     "story_49995892"
+    ],
+    "_highlightResult": {
+     "url": {
+      "value": "https://sendbroadcast.net/blog/what-it-<em>costs</em>-to-vibe-code-broadcast",
+      "matchedWords": [
+       "posts"
+      ],
+      "matchLevel": "full",
+      "fullyHighlighted": false
+     },
+     "title": {
+      "value": "I Priced Out Vibe-Coding a Copy of My $250 App",
+      "matchedWords": [],
+      "matchLevel": "none"
+     },
+     "author": {
+      "value": "drchiu",
+      "matchedWords": [],
+      "matchLevel": "none"
+     }
+    }
+   },
+   {
+    "url": "https://agent.reviews/",
+    "updated_at": "2026-10-07T21:07:52Z",
+    "title": "Show HN: Agent.reviews – Where AI agents read and write reviews on tools",
+    "story_text": "Hi HN!<p>I’m Louis, Co-Founder of Armature (YC P26), where we help teams make their product discoverable and usable by coding agents. We already measured 50k+ agent sessions and realized that over and over agents would encounter the exact same limitations on different tasks using the same tool. So we wondered why these weren’t fixed. And the answer is simple: the feedback loop just doesn’t exist between agents and software vendors but also between different agents. Humans can share their experience on platforms like <a href=\"https:&#x2F;&#x2F;g2.com\" rel=\"nofollow\">https:&#x2F;&#x2F;g2.com</a> and <a href=\"https:&#x2F;&#x2F;trustpilot.com\" rel=\"nofollow\">https:&#x2F;&#x2F;trustpilot.com</a>, but agents have nowhere to.<p>So we created: <a href=\"https:&#x2F;&#x2F;agent.reviews\" rel=\"nofollow\">https:&#x2F;&#x2F;agent.reviews</a>: the G2 for agents.<p>It works with a set of skills and an npm CLI (@armature-tech&#x2F;agent-reviews) connecting agents to our API endpoints. Anyone can ask their agent (Claude Code, Codex, Cursor, etc.) to install it, and agents will naturally check reviews before picking a tool and post their own after using one.<p>As usual, privacy was our main concern, so we added 3 layers before a review gets posted:\nDeterministic rules filtering secrets, PII, URLs, etc.\nA Jev classifier trained to detect any leak after the first check\nA small LLM checking each review to make sure nothing was missed<p>We&#x27;ve been sharing this project around for a few weeks now and gathered thousands of reviews already. There are already interesting ones, for example:<p>- A Claude Code agent noticed that the Stripe SDK systematically crashed when the API key was missing on the health check page (while it’s this page’s role to actually return an “API key missing” error)<p>- 2 agents mentioned that Prisma required a DATABASE_URL variable even when it wasn’t connecting to any database. They both put fake URLs as a workaround, and it worked.<p>We truly think the agent experience needs the same community effect user experience has, so everyone benefits from it: agents can pick the tools that are best optimized for them and software companies can improve their product based on real feedback. That’s why we made sure accessing reviews is free for both humans and agents and just requires copy&#x2F;pasting one prompt for the agent to install our CLI &amp; skill, start the authentication flow, and submit their first review (this helps us prevent unauthorized scraping and spam reviews).<p>Would you let your agents submit and read reviews too?\nWe’d love for you to set up agent reviews, ask your agent to check reviews next time it needs to pick a tool and post its own experience when using it. Then tell us how it went!",
+    "story_id": 49995539,
+    "points": 18,
+    "objectID": "49995539",
+    "num_comments": 22,
+    "created_at_i": 1791392351,
+    "created_at": "2026-10-07T12:59:11-04:00",
+    "children": [
+     49998124,
+     49997809,
+     49998015,
+     49997782,
+     49997459,
+     49997805,
+     49998197,
+     49997827,
+     49998702,
+     49997905,
+     49997684,
+     49998365,
+     49998535
+    ],
+    "author": "screm",
+    "_tags": [
+     "story",
+     "author_screm",
+     "story_49995539",
+     "show_hn",
+     "front_page"
+    ],
+    "_highlightResult": {
+     "url": {
+      "value": "https://agent.reviews/",
+      "matchedWords": [],
+      "matchLevel": "none"
+     },
+     "title": {
+      "value": "Show HN: Agent.reviews – Where AI agents read and write reviews on tools",
+      "matchedWords": [],
+      "matchLevel": "none"
+     },
+     "story_text": {
+      "value": "Hi HN!<p>I’m Louis, Co-Founder of Armature (YC P26), where we help teams make their product discoverable and usable by coding agents. We already measured 50k+ agent sessions and realized that over and over agents would encounter the exact same limitations on different tasks using the same tool. So we wondered why these weren’t fixed. And the answer is simple: the feedback loop just doesn’t exist between agents and software vendors but also between different agents. Humans can share their experience on platforms like <a href=\"https://g2.com\" rel=\"nofollow\">https://g2.com</a> and <a href=\"https://trustpilot.com\" rel=\"nofollow\">https://trustpilot.com</a>, but agents have nowhere to.<p>So we created: <a href=\"https://agent.reviews\" rel=\"nofollow\">https://agent.reviews</a>: the G2 for agents.<p>It works with a set of skills and an npm CLI (@armature-tech/agent-reviews) connecting agents to our API endpoints. Anyone can ask their agent (Claude Code, Codex, Cursor, etc.) to install it, and agents will naturally check reviews before picking a tool and <em>post</em> their own after using one.<p>As usual, privacy was our main concern, so we added 3 layers before a review gets posted:\nDeterministic rules filtering secrets, PII, URLs, etc.\nA Jev classifier trained to detect any leak after the first check\nA small LLM checking each review to make sure nothing was missed<p>We've been sharing this project around for a few weeks now and gathered thousands of reviews already. There are already interesting ones, for example:<p>- A Claude Code agent noticed that the Stripe SDK systematically crashed when the API key was missing on the health check page (while it’s this page’s role to actually return an “API key missing” error)<p>- 2 agents mentioned that Prisma required a DATABASE_URL variable even when it wasn’t connecting to any database. They both put fake URLs as a workaround, and it worked.<p>We truly think the agent experience needs the same community effect user experience has, so everyone benefits from it: agents can pick the tools that are best optimized for them and software companies can improve their product based on real feedback. That’s why we made sure accessing reviews is free for both humans and agents and just requires copy/pasting one prompt for the agent to install our CLI &amp; skill, start the authentication flow, and submit their first review (this helps us prevent unauthorized scraping and spam reviews).<p>Would you let your agents submit and read reviews too?\nWe’d love for you to set up agent reviews, ask your agent to check reviews next time it needs to pick a tool and <em>post</em> its own experience when using it. Then tell us how it went!",
+      "matchedWords": [
+       "posts"
+      ],
+      "matchLevel": "full",
+      "fullyHighlighted": false
+     },
+     "author": {
+      "value": "screm",
+      "matchedWords": [],
+      "matchLevel": "none"
+     }
+    }
+   },
+   {
+    "url": "https://www.wsj.com/sports/baseball/kids-baseball-costs-travel-teams-19254050",
+    "updated_at": "2026-10-07T19:19:24Z",
+    "title": "Advanced Stats and $500 Bats: Why Baseball for 6-Year-Olds Is Breaking the Bank",
+    "story_id": 49995304,
+    "points": 9,
+    "objectID": "49995304",
+    "num_comments": 1,
+    "created_at_i": 1791391462,
+    "created_at": "2026-10-07T12:44:22-04:00",
+    "children": [
+     49995501
+    ],
+    "author": "gmays",
+    "_tags": [
+     "story",
+     "author_gmays",
+     "story_49995304"
+    ],
+    "_highlightResult": {
+     "url": {
+      "value": "https://www.wsj.com/sports/baseball/kids-baseball-<em>costs</em>-travel-teams-19254050",
+      "matchedWords": [
+       "posts"
+      ],
+      "matchLevel": "full",
+      "fullyHighlighted": false
+     },
+     "title": {
+      "value": "Advanced Stats and $500 Bats: Why Baseball for 6-Year-Olds Is Breaking the Bank",
+      "matchedWords": [],
+      "matchLevel": "none"
+     },
+     "author": {
+      "value": "gmays",
+      "matchedWords": [],
+      "matchLevel": "none"
+     }
+    }
+   },
+   {
+    "url": "https://blog.velocifyer.com/Posts/3,How%20to%20self%20host%20a%20font%20from%20google%20fonts/",
+    "updated_at": "2026-10-07T17:16:20Z",
+    "title": "How to self-host a web font from Google Fonts",
+    "story_id": 49995295,
+    "points": 2,
+    "objectID": "49995295",
+    "num_comments": 1,
+    "created_at_i": 1791391422,
+    "created_at": "2026-10-07T12:43:42-04:00",
+    "children": [
+     49995793
+    ],
+    "author": "Velocifyer",
+    "_tags": [
+     "story",
+     "author_Velocifyer",
+     "story_49995295"
+    ],
+    "_highlightResult": {
+     "url": {
+      "value": "https://blog.velocifyer.com/<em>Posts</em>/3,How%20to%20self%20host%20a%20font%20from%20google%20fonts/",
+      "matchedWords": [
+       "posts"
+      ],
+      "matchLevel": "full",
+      "fullyHighlighted": false
+     },
+     "title": {
+      "value": "How to self-host a web font from Google Fonts",
+      "matchedWords": [],
+      "matchLevel": "none"
+     },
+     "author": {
+      "value": "Velocifyer",
+      "matchedWords": [],
+      "matchLevel": "none"
+     }
+    }
+   },
+   {
+    "url": "https://nearline.sxm.li/",
+    "updated_at": "2026-10-07T16:56:21Z",
+    "title": "Show HN: Nearline, a proximity based social media",
+    "story_text": "Neraline is a small idea I had a couple of days ago, it&#x27;s a proximity based social media platform with temporary posts, to which you can reply, liking and repost. I thought something like this could be helpful in crowded places like concerts, sports events etc. :D",
+    "story_id": 49995240,
+    "points": 2,
+    "objectID": "49995240",
+    "num_comments": 0,
+    "created_at_i": 1791391233,
+    "created_at": "2026-10-07T12:40:33-04:00",
+    "author": "saksham1341",
+    "_tags": [
+     "story",
+     "author_saksham1341",
+     "story_49995240",
+     "show_hn"
+    ],
+    "_highlightResult": {
+     "url": {
+      "value": "https://nearline.sxm.li/",
+      "matchedWords": [],
+      "matchLevel": "none"
+     },
+     "title": {
+      "value": "Show HN: Nearline, a proximity based social media",
+      "matchedWords": [],
+      "matchLevel": "none"
+     },
+     "story_text": {
+      "value": "Neraline is a small idea I had a couple of days ago, it's a proximity based social media platform with temporary <em>posts</em>, to which you can reply, liking and repost. I thought something like this could be helpful in crowded places like concerts, sports events etc. :D",
+      "matchedWords": [
+       "posts"
+      ],
+      "matchLevel": "full",
+      "fullyHighlighted": false
+     },
+     "author": {
+      "value": "saksham1341",
+      "matchedWords": [],
+      "matchLevel": "none"
+     }
+    }
+   }
+  ]
+ },
+ "missing_menu": [
+  "friday",
+  "rain",
+  "seattle",
+  "will"
+ ],
+ "label": {
+  "answers_ask": "no",
+  "missing": [],
+  "wrong": [],
+  "source_ask": "latest posts on Hacker News"
+ }
+}

@@ -1,0 +1,200 @@
+{
+ "id": "neg12",
+ "ask": "US gas price trend this year",
+ "frame": {
+  "kind": "trend",
+  "subject": "gas price"
+ },
+ "chosen": [
+  {
+   "name": "holidays",
+   "label": "Public holidays",
+   "words": [
+    "holidays",
+    "public holidays",
+    "federal holidays",
+    "this year",
+    "when is",
+    "day off",
+    "thanksgiving",
+    "christmas",
+    "calendar"
+   ],
+   "primary": true,
+   "kind": "list",
+   "path": "items",
+   "newest_first": false,
+   "may_be_empty": false,
+   "cells": [
+    {
+     "path": "date",
+     "label": "Date",
+     "type": "date",
+     "key": "date",
+     "unit": null
+    },
+    {
+     "path": "name",
+     "label": "Holiday",
+     "type": "text",
+     "key": "name",
+     "unit": null
+    }
+   ],
+   "axis": {
+    "cell": "date",
+    "step": "day"
+   }
+  }
+ ],
+ "rows_output_name": "rows",
+ "preview": {
+  "rows": [
+   {
+    "types": [
+     "Public"
+    ],
+    "launchYear": null,
+    "counties": [
+     "US-AL",
+     "US-AZ",
+     "US-CO",
+     "US-CT",
+     "US-GA",
+     "US-ID",
+     "US-IL",
+     "US-IN",
+     "US-IA",
+     "US-KS",
+     "US-KY",
+     "US-LA",
+     "US-ME",
+     "US-MD",
+     "US-MA",
+     "US-MS",
+     "US-MO",
+     "US-MT",
+     "US-NE",
+     "US-NH",
+     "US-NJ",
+     "US-NM",
+     "US-NY",
+     "US-NC",
+     "US-OH",
+     "US-OK",
+     "US-PA",
+     "US-RI",
+     "US-SC",
+     "US-TN",
+     "US-UT",
+     "US-VA",
+     "US-WV"
+    ],
+    "global": false,
+    "fixed": false,
+    "countryCode": "US",
+    "name": "Columbus Day",
+    "localName": "Columbus Day",
+    "date": "2026-10-12T00:00:00-04:00"
+   },
+   {
+    "types": [
+     "Bank"
+    ],
+    "launchYear": null,
+    "counties": null,
+    "global": true,
+    "fixed": false,
+    "countryCode": "US",
+    "name": "Columbus Day",
+    "localName": "Columbus Day",
+    "date": "2026-10-12T00:00:00-04:00"
+   },
+   {
+    "types": [
+     "Public"
+    ],
+    "launchYear": null,
+    "counties": [
+     "US-AK",
+     "US-AL",
+     "US-CA",
+     "US-HI",
+     "US-IA",
+     "US-LA",
+     "US-ME",
+     "US-MI",
+     "US-MN",
+     "US-NC",
+     "US-NE",
+     "US-NM",
+     "US-OK",
+     "US-OR",
+     "US-SD",
+     "US-TX",
+     "US-VA",
+     "US-VT",
+     "US-WI"
+    ],
+    "global": false,
+    "fixed": false,
+    "countryCode": "US",
+    "name": "Indigenous Peoples' Day",
+    "localName": "Indigenous Peoples' Day",
+    "date": "2026-10-12T00:00:00-04:00"
+   },
+   {
+    "types": [
+     "Public",
+     "Bank"
+    ],
+    "launchYear": null,
+    "counties": null,
+    "global": true,
+    "fixed": false,
+    "countryCode": "US",
+    "name": "Veterans Day",
+    "localName": "Veterans Day",
+    "date": "2026-11-11T00:00:00-04:00"
+   },
+   {
+    "types": [
+     "Public",
+     "Bank"
+    ],
+    "launchYear": null,
+    "counties": null,
+    "global": true,
+    "fixed": false,
+    "countryCode": "US",
+    "name": "Thanksgiving Day",
+    "localName": "Thanksgiving Day",
+    "date": "2026-11-26T00:00:00-04:00"
+   },
+   {
+    "types": [
+     "Public",
+     "Bank"
+    ],
+    "launchYear": null,
+    "counties": null,
+    "global": true,
+    "fixed": false,
+    "countryCode": "US",
+    "name": "Christmas Day",
+    "localName": "Christmas Day",
+    "date": "2026-12-25T00:00:00-04:00"
+   }
+  ]
+ },
+ "missing_menu": [
+  "price",
+  "trend"
+ ],
+ "label": {
+  "answers_ask": "no",
+  "missing": [],
+  "wrong": [],
+  "source_ask": "when is Thanksgiving this year"
+ }
+}

@@ -1,0 +1,352 @@
+{
+ "id": "neg46",
+ "ask": "how windy is it at Mount Washington",
+ "frame": {
+  "kind": null,
+  "subject": "wind"
+ },
+ "chosen": [
+  {
+   "name": "results",
+   "label": "Recent results",
+   "words": [
+    "score",
+    "scores",
+    "result",
+    "results",
+    "final",
+    "last game",
+    "did they win",
+    "won",
+    "lost",
+    "last night"
+   ],
+   "primary": true,
+   "kind": "list",
+   "path": "dates",
+   "newest_first": true,
+   "may_be_empty": true,
+   "filter": {
+    "path": "games[0].status.detailedState",
+    "equals": "Final"
+   },
+   "cells": [
+    {
+     "path": "games[0].teams.away.team.name",
+     "label": "Away",
+     "type": "text",
+     "key": "games[0].teams.away.team.name",
+     "unit": null
+    },
+    {
+     "path": "games[0].teams.away.score",
+     "label": "Away runs",
+     "type": "number",
+     "key": "games[0].teams.away.score",
+     "unit": null
+    },
+    {
+     "path": "games[0].teams.home.team.name",
+     "label": "Home",
+     "type": "text",
+     "key": "games[0].teams.home.team.name",
+     "unit": null
+    },
+    {
+     "path": "games[0].teams.home.score",
+     "label": "Home runs",
+     "type": "number",
+     "key": "games[0].teams.home.score",
+     "unit": null
+    }
+   ]
+  }
+ ],
+ "rows_output_name": "rows",
+ "preview": {
+  "rows_count": 3,
+  "rows": [
+   {
+    "events": [],
+    "games": [
+     {
+      "ifNecessaryDescription": "Normal Game",
+      "ifNecessary": "N",
+      "recordSource": "S",
+      "seriesDescription": "AL Division Series",
+      "seriesGameNumber": 2,
+      "gamesInSeries": 5,
+      "inningBreakLength": 175,
+      "reverseHomeAwayStatus": false,
+      "scheduledInnings": 9,
+      "description": "ALDS 'A' Game 2",
+      "dayNight": "night",
+      "seasonDisplay": "2026",
+      "calendarEventID": "14-849839-2026-10-05",
+      "tiebreaker": "N",
+      "gamedayType": "P",
+      "doubleHeader": "N",
+      "publicFacing": true,
+      "gameNumber": 1,
+      "isTie": false,
+      "content": {
+       "link": "/api/v1/game/849839/content"
+      },
+      "venue": {
+       "link": "/api/v1/venues/12",
+       "name": "Tropicana Field",
+       "id": 12
+      },
+      "teams": {
+       "home": {
+        "seriesNumber": 1,
+        "splitSquad": false,
+        "isWinner": true,
+        "score": 5,
+        "leagueRecord": {
+         "pct": "1.000",
+         "ties": 0,
+         "losses": 0,
+         "wins": 2
+        },
+        "team": {
+         "link": "/api/v1/teams/139",
+         "name": "Tampa Bay Rays",
+         "id": 139
+        }
+       },
+       "away": {
+        "seriesNumber": 1,
+        "splitSquad": false,
+        "isWinner": false,
+        "score": 2,
+        "leagueRecord": {
+         "pct": ".000",
+         "ties": 0,
+         "losses": 2,
+         "wins": 0
+        },
+        "team": {
+         "link": "/api/v1/teams/147",
+         "name": "New York Yankees",
+         "id": 147
+        }
+       }
+      },
+      "status": {
+       "abstractGameCode": "F",
+       "startTimeTBD": false,
+       "statusCode": "F",
+       "detailedState": "Final",
+       "codedGameState": "F",
+       "abstractGameState": "Final"
+      },
+      "officialDate": "2026-10-05",
+      "gameDate": "2026-10-06T00:00:00Z",
+      "season": "2026",
+      "gameType": "D",
+      "link": "/api/v1.1/game/849839/feed/live",
+      "gameGuid": "8f0516e5-9273-4800-9483-8cf19c530720",
+      "gamePk": 849839
+     }
+    ],
+    "totalGamesInProgress": 0,
+    "totalGames": 1,
+    "totalEvents": 0,
+    "totalItems": 1,
+    "date": "2026-10-05"
+   },
+   {
+    "events": [],
+    "games": [
+     {
+      "ifNecessaryDescription": "Normal Game",
+      "ifNecessary": "N",
+      "recordSource": "S",
+      "seriesDescription": "AL Division Series",
+      "seriesGameNumber": 1,
+      "gamesInSeries": 5,
+      "inningBreakLength": 175,
+      "reverseHomeAwayStatus": false,
+      "scheduledInnings": 9,
+      "description": "ALDS 'A' Game 1",
+      "dayNight": "night",
+      "seasonDisplay": "2026",
+      "calendarEventID": "14-849835-2026-10-03",
+      "tiebreaker": "N",
+      "gamedayType": "P",
+      "doubleHeader": "N",
+      "publicFacing": true,
+      "gameNumber": 1,
+      "isTie": false,
+      "content": {
+       "link": "/api/v1/game/849835/content"
+      },
+      "venue": {
+       "link": "/api/v1/venues/12",
+       "name": "Tropicana Field",
+       "id": 12
+      },
+      "teams": {
+       "home": {
+        "seriesNumber": 1,
+        "splitSquad": false,
+        "isWinner": true,
+        "score": 1,
+        "leagueRecord": {
+         "pct": "1.000",
+         "ties": 0,
+         "losses": 0,
+         "wins": 1
+        },
+        "team": {
+         "link": "/api/v1/teams/139",
+         "name": "Tampa Bay Rays",
+         "id": 139
+        }
+       },
+       "away": {
+        "seriesNumber": 1,
+        "splitSquad": false,
+        "isWinner": false,
+        "score": 0,
+        "leagueRecord": {
+         "pct": ".000",
+         "ties": 0,
+         "losses": 1,
+         "wins": 0
+        },
+        "team": {
+         "link": "/api/v1/teams/147",
+         "name": "New York Yankees",
+         "id": 147
+        }
+       }
+      },
+      "status": {
+       "abstractGameCode": "F",
+       "startTimeTBD": false,
+       "statusCode": "F",
+       "detailedState": "Final",
+       "codedGameState": "F",
+       "abstractGameState": "Final"
+      },
+      "officialDate": "2026-10-03",
+      "gameDate": "2026-10-03T22:30:00Z",
+      "season": "2026",
+      "gameType": "D",
+      "link": "/api/v1.1/game/849835/feed/live",
+      "gameGuid": "97c5071c-1528-4b17-9f8e-f512ca3ddd9e",
+      "gamePk": 849835
+     }
+    ],
+    "totalGamesInProgress": 0,
+    "totalGames": 1,
+    "totalEvents": 0,
+    "totalItems": 1,
+    "date": "2026-10-03"
+   },
+   {
+    "events": [],
+    "games": [
+     {
+      "ifNecessaryDescription": "Normal Game",
+      "ifNecessary": "N",
+      "recordSource": "S",
+      "seriesDescription": "AL Wild Card Series",
+      "seriesGameNumber": 2,
+      "gamesInSeries": 3,
+      "inningBreakLength": 145,
+      "reverseHomeAwayStatus": false,
+      "scheduledInnings": 9,
+      "description": "AL Wild Card 'B' Game 2",
+      "dayNight": "night",
+      "seasonDisplay": "2026",
+      "calendarEventID": "14-849848-2026-09-30",
+      "tiebreaker": "N",
+      "gamedayType": "P",
+      "doubleHeader": "N",
+      "publicFacing": true,
+      "gameNumber": 1,
+      "isTie": false,
+      "content": {
+       "link": "/api/v1/game/849848/content"
+      },
+      "venue": {
+       "link": "/api/v1/venues/3313",
+       "name": "Yankee Stadium",
+       "id": 3313
+      },
+      "teams": {
+       "home": {
+        "seriesNumber": 2,
+        "splitSquad": false,
+        "isWinner": true,
+        "score": 9,
+        "leagueRecord": {
+         "pct": "1.000",
+         "ties": 0,
+         "losses": 0,
+         "wins": 2
+        },
+        "team": {
+         "link": "/api/v1/teams/147",
+         "name": "New York Yankees",
+         "id": 147
+        }
+       },
+       "away": {
+        "seriesNumber": 2,
+        "splitSquad": false,
+        "isWinner": false,
+        "score": 2,
+        "leagueRecord": {
+         "pct": ".000",
+         "ties": 0,
+         "losses": 2,
+         "wins": 0
+        },
+        "team": {
+         "link": "/api/v1/teams/111",
+         "name": "Boston Red Sox",
+         "id": 111
+        }
+       }
+      },
+      "status": {
+       "abstractGameCode": "F",
+       "startTimeTBD": false,
+       "statusCode": "F",
+       "detailedState": "Final",
+       "codedGameState": "F",
+       "abstractGameState": "Final"
+      },
+      "officialDate": "2026-09-30",
+      "gameDate": "2026-10-01T00:00:00Z",
+      "season": "2026",
+      "gameType": "F",
+      "link": "/api/v1.1/game/849848/feed/live",
+      "gameGuid": "bfa14416-b6c7-466c-a010-befdb5d8096b",
+      "gamePk": 849848
+     }
+    ],
+    "totalGamesInProgress": 0,
+    "totalGames": 1,
+    "totalEvents": 0,
+    "totalItems": 1,
+    "date": "2026-09-30"
+   }
+  ]
+ },
+ "missing_menu": [
+  "mount",
+  "washington",
+  "windy"
+ ],
+ "label": {
+  "answers_ask": "no",
+  "missing": [],
+  "wrong": [],
+  "source_ask": "did the Yankees win last night"
+ }
+}

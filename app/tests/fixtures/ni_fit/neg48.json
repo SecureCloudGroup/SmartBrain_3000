@@ -1,0 +1,47 @@
+{
+ "id": "neg48",
+ "ask": "swell forecast for Ocean Beach San Francisco",
+ "frame": {
+  "kind": "forecast",
+  "subject": "swell forecast"
+ },
+ "chosen": [
+  {
+   "name": "latest",
+   "label": "Regular gas price (US average)",
+   "words": [
+    "us regular gasoline price",
+    "regular gas price (us average)",
+    "gas prices",
+    "national average gas price",
+    "latest",
+    "current",
+    "now",
+    "today"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "rows[0].GASREGW",
+   "type": "number",
+   "unit": "$/gal",
+   "window": "latest"
+  }
+ ],
+ "rows_output_name": null,
+ "preview": {
+  "latest": 4.354
+ },
+ "missing_menu": [
+  "beach",
+  "forecast",
+  "francisco",
+  "ocean",
+  "swell"
+ ],
+ "label": {
+  "answers_ask": "no",
+  "missing": [],
+  "wrong": [],
+  "source_ask": "gasoline prices over the past month"
+ }
+}

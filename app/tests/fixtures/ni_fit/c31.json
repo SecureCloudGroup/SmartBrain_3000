@@ -1,0 +1,60 @@
+{
+ "id": "c31",
+ "ask": "Zoom service status",
+ "frame": {
+  "kind": "status",
+  "subject": null
+ },
+ "chosen": [
+  {
+   "name": "overall_status",
+   "label": "Overall status",
+   "words": [
+    "status",
+    "down",
+    "is it down",
+    "outage",
+    "up",
+    "working",
+    "operational",
+    "problems"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "status.description",
+   "type": "text",
+   "window": "now",
+   "unit": null
+  },
+  {
+   "name": "service_name",
+   "label": "Service",
+   "words": [
+    "service",
+    "name",
+    "which service"
+   ],
+   "primary": false,
+   "kind": "value",
+   "path": "page.name",
+   "type": "text",
+   "window": "now",
+   "unit": null
+  }
+ ],
+ "rows_output_name": null,
+ "preview": {
+  "service_name": "Zoom",
+  "overall_status": "Partially Degraded Service"
+ },
+ "missing_menu": [
+  "service",
+  "status",
+  "zoom"
+ ],
+ "label": {
+  "answers_ask": "yes",
+  "missing": [],
+  "wrong": []
+ }
+}

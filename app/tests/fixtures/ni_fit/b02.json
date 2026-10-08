@@ -1,0 +1,45 @@
+{
+ "id": "b02",
+ "ask": "current wind speed at Chicago O'Hare",
+ "frame": {
+  "kind": null,
+  "subject": "wind speed"
+ },
+ "chosen": [
+  {
+   "name": "wind",
+   "label": "Wind speed",
+   "words": [
+    "wind",
+    "windy",
+    "breeze",
+    "wind speed",
+    "gusts",
+    "gusty",
+    "how windy"
+   ],
+   "primary": false,
+   "kind": "value",
+   "path": "current.wind_speed_10m",
+   "type": "number",
+   "unit": "mph",
+   "window": "now",
+   "measure": "wind"
+  }
+ ],
+ "rows_output_name": null,
+ "preview": {
+  "wind": 6.3
+ },
+ "missing_menu": [
+  "chicago",
+  "hare",
+  "speed",
+  "wind"
+ ],
+ "label": {
+  "answers_ask": "yes",
+  "missing": [],
+  "wrong": []
+ }
+}

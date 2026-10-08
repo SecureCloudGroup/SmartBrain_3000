@@ -1,0 +1,22 @@
+{
+ "_doc": "Acceptable designs per blind-50 SET C live case (keyed by the set's case number), the THIRD fresh gate set (post 1a-6, PR #494) — never shown to a worker. Same shape as live_2026-10-07/expected_forms.json. `excluded`: a data-layer wrong (wrong source / wrong answer / unfiltered list) the oracle documents but does not score, same rule as live_2026-10-07b's case 44.",
+ "1": {"forms": ["stat", "conditions", "kv_grid"], "required": ["temperature"], "summary_words": ["Temperature"]},
+ "2": {"forms": ["stat"], "required": ["humidity"], "summary_words": ["Humidity"]},
+ "6": {"forms": ["stat"], "required": ["wind"], "summary_words": ["Wind"]},
+ "7": {"forms": ["stat", "conditions", "kv_grid"], "required": ["rain_chance"], "summary_words": ["Rain chance"]},
+ "9": {"forms": ["series_line"], "required": ["wave_height"], "summary_words": ["Wave height"]},
+ "10": {"forms": ["day_table"], "required": [], "summary_words": ["High"]},
+ "11": {"forms": ["day_table"], "required": ["snowfall"], "summary_words": ["Snowfall"]},
+ "15": {"forms": ["stat", "next_event"], "required": ["next_game", "start", "venue"], "summary_words": ["New York Knicks vs Washington Wizards"]},
+ "16": {"forms": ["stat", "next_event"], "required": [], "summary_words": []},
+ "18": {"forms": ["entity_list", "table", "ranked_list"], "required": ["away", "home"], "summary_words": []},
+ "21": {"forms": ["ranked_list", "table"], "required": ["story"], "summary_words": []},
+ "27": {"forms": ["stat"], "required": ["latest"], "summary_words": ["Regular gas price"]},
+ "28": {"excluded": true, "reason": "class D2/FIT (data layer): the chosen answer is the GDP LEVEL series, not the growth rate the ask names — no declared answer carries the asked quantity"},
+ "31": {"forms": ["stat"], "required": ["overall_status"], "summary_words": []},
+ "32": {"excluded": true, "reason": "data layer: FAA airport ground-delay program tapped for a Washington Metro (transit) ask — wrong source, reads as an honest empty"},
+ "34": {"forms": ["entity_list", "table", "ranked_list"], "required": [], "summary_words": [], "empty_subject_filter": true},
+ "38": {"forms": ["table", "entity_list", "ranked_list"], "required": [], "summary_words": []},
+ "45": {"forms": ["ranked_list", "table"], "required": ["fire"], "summary_words": []},
+ "50": {"forms": ["day_table", "text_brief", "agenda"], "required": [], "summary_words": []}
+}

@@ -1,0 +1,74 @@
+{
+ "id": "neg09",
+ "ask": "last night's Mariners result",
+ "frame": {
+  "kind": "result",
+  "subject": "Mariners"
+ },
+ "chosen": [
+  {
+   "name": "alerts",
+   "label": "Active weather alerts",
+   "words": [
+    "alerts",
+    "warnings",
+    "watches",
+    "advisories",
+    "severe weather",
+    "weather alerts",
+    "statewide"
+   ],
+   "primary": true,
+   "kind": "list",
+   "path": "features",
+   "newest_first": false,
+   "may_be_empty": true,
+   "cells": [
+    {
+     "path": "properties.event",
+     "label": "Alert",
+     "type": "text",
+     "key": "properties.event",
+     "unit": null
+    },
+    {
+     "path": "properties.severity",
+     "label": "Severity",
+     "type": "text",
+     "key": "properties.severity",
+     "unit": null
+    },
+    {
+     "path": "properties.areaDesc",
+     "label": "Area",
+     "type": "text",
+     "key": "properties.areaDesc",
+     "unit": null
+    },
+    {
+     "path": "properties.expires",
+     "label": "Expires",
+     "type": "time",
+     "key": "properties.expires",
+     "unit": null
+    }
+   ]
+  }
+ ],
+ "rows_output_name": "rows",
+ "preview": {
+  "rows_count": 0,
+  "rows": []
+ },
+ "missing_menu": [
+  "mariners",
+  "night",
+  "result"
+ ],
+ "label": {
+  "answers_ask": "no",
+  "missing": [],
+  "wrong": [],
+  "source_ask": "tornado watches in Oklahoma right now"
+ }
+}

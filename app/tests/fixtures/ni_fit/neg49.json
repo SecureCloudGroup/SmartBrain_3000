@@ -1,0 +1,45 @@
+{
+ "id": "neg49",
+ "ask": "heat index forecast for Houston this week",
+ "frame": {
+  "kind": "forecast",
+  "subject": "heat index forecast"
+ },
+ "chosen": [
+  {
+   "name": "latest",
+   "label": "GDP (annual rate)",
+   "words": [
+    "gross domestic product",
+    "gdp (annual rate)",
+    "us gdp",
+    "latest",
+    "current",
+    "now",
+    "today"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "rows[0].GDP",
+   "type": "number",
+   "unit": "billion USD",
+   "window": "latest"
+  }
+ ],
+ "rows_output_name": null,
+ "preview": {
+  "latest": 32563.03
+ },
+ "missing_menu": [
+  "forecast",
+  "heat",
+  "houston",
+  "index"
+ ],
+ "label": {
+  "answers_ask": "no",
+  "missing": [],
+  "wrong": [],
+  "source_ask": "US GDP growth trend"
+ }
+}

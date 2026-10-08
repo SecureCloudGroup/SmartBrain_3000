@@ -1,0 +1,41 @@
+{
+ "id": "b28",
+ "ask": "10 year treasury yield this year",
+ "frame": {
+  "kind": null,
+  "subject": "10 year treasury yield"
+ },
+ "chosen": [
+  {
+   "name": "latest",
+   "label": "10-year Treasury yield",
+   "words": [
+    "10-year treasury yield",
+    "10 year yield",
+    "latest",
+    "current",
+    "now",
+    "today"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "rows[0].DGS10",
+   "type": "number",
+   "unit": "%",
+   "window": "latest"
+  }
+ ],
+ "rows_output_name": null,
+ "preview": {
+  "latest": 5.31
+ },
+ "missing_menu": [
+  "treasury",
+  "yield"
+ ],
+ "label": {
+  "answers_ask": "partly",
+  "missing": [],
+  "wrong": []
+ }
+}

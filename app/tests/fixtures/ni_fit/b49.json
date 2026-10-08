@@ -1,0 +1,41 @@
+{
+ "id": "b49",
+ "ask": "today's weather summary for Austin",
+ "frame": {
+  "kind": null,
+  "subject": "weather"
+ },
+ "chosen": [
+  {
+   "name": "next_detail",
+   "label": "Forecast details (next period)",
+   "words": [
+    "details",
+    "detailed forecast",
+    "summary",
+    "describe",
+    "full forecast"
+   ],
+   "primary": false,
+   "kind": "value",
+   "path": "properties.periods[0].detailedForecast",
+   "type": "text",
+   "window": "now",
+   "unit": null
+  }
+ ],
+ "rows_output_name": null,
+ "preview": {
+  "next_detail": "Sunny, with a high near 88. Northeast wind around 5 mph."
+ },
+ "missing_menu": [
+  "austin",
+  "summary",
+  "weather"
+ ],
+ "label": {
+  "answers_ask": "yes",
+  "missing": [],
+  "wrong": []
+ }
+}

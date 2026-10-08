@@ -1,0 +1,45 @@
+{
+ "id": "b05",
+ "ask": "price of gold today",
+ "frame": {
+  "kind": "current_value",
+  "subject": "gold"
+ },
+ "chosen": [
+  {
+   "name": "price",
+   "label": "Spot price",
+   "words": [
+    "price",
+    "spot price",
+    "per ounce",
+    "ounce",
+    "oz",
+    "gold price",
+    "silver price",
+    "how much",
+    "worth",
+    "cost"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "price",
+   "type": "number",
+   "unit": "USD/oz",
+   "window": "now"
+  }
+ ],
+ "rows_output_name": null,
+ "preview": {
+  "price": 4121.299805
+ },
+ "missing_menu": [
+  "gold",
+  "price"
+ ],
+ "label": {
+  "answers_ask": "partly",
+  "missing": [],
+  "wrong": []
+ }
+}

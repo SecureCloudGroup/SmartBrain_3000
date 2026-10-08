@@ -1,0 +1,2431 @@
+{
+ "id": "neg52",
+ "ask": "when do the Eagles play next week",
+ "frame": {
+  "kind": "next_event",
+  "subject": "Eagles"
+ },
+ "chosen": [
+  {
+   "name": "alerts",
+   "label": "Active weather alerts",
+   "words": [
+    "alerts",
+    "warnings",
+    "watches",
+    "advisories",
+    "severe weather",
+    "weather alerts",
+    "statewide"
+   ],
+   "primary": true,
+   "kind": "list",
+   "path": "features",
+   "newest_first": false,
+   "may_be_empty": true,
+   "cells": [
+    {
+     "path": "properties.event",
+     "label": "Alert",
+     "type": "text",
+     "key": "properties.event",
+     "unit": null
+    },
+    {
+     "path": "properties.severity",
+     "label": "Severity",
+     "type": "text",
+     "key": "properties.severity",
+     "unit": null
+    },
+    {
+     "path": "properties.areaDesc",
+     "label": "Area",
+     "type": "text",
+     "key": "properties.areaDesc",
+     "unit": null
+    },
+    {
+     "path": "properties.expires",
+     "label": "Expires",
+     "type": "time",
+     "key": "properties.expires",
+     "unit": null
+    }
+   ]
+  }
+ ],
+ "rows_output_name": "rows",
+ "preview": {
+  "rows_count": 24,
+  "rows": [
+   {
+    "properties": {
+     "eventCode": {
+      "NationalWeatherService": [
+       "XHW"
+      ],
+      "SAME": [
+       "NWS"
+      ]
+     },
+     "web": "http://www.weather.gov",
+     "language": "en-US",
+     "code": "IPAWSv1.0",
+     "scope": "Public",
+     "parameters": {
+      "expiredReferences": [
+       "w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.de177a54d36b9f18361bbbd10c0dc9a42427ccc3.001.1,2026-10-06T15:02:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.5eaffe9a6e582cc04a2222a69fc7939e824493e1.001.1,2026-10-06T02:25:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.10b983dda1ad74791fc14e80ad1c856a377bd5e1.001.1,2026-10-05T15:32:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.500b19960aae41b82135af33fbd1e17b98ee8119.001.1,2026-10-05T02:46:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.929f476b21bdb929a0782c6baeec6bd264ec4445.001.1,2026-10-04T12:33:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.adae2a98718f4033f926a8ca68e6d87f6cc1d12f.001.1,2026-10-04T00:19:00-07:00"
+      ],
+      "eventEndingTime": [
+       "2026-10-09T20:00:00-07:00"
+      ],
+      "VTEC": [
+       "/O.CON.KVEF.XH.W.0007.000000T0000Z-261010T0300Z/"
+      ],
+      "BLOCKCHANNEL": [
+       "EAS",
+       "NWEM",
+       "CMAS"
+      ],
+      "NWSheadline": [
+       "EXTREME HEAT WARNING REMAINS IN EFFECT UNTIL 8 PM PDT FRIDAY"
+      ],
+      "WMOidentifier": [
+       "WWUS75 KVEF 072102"
+      ],
+      "AWIPSidentifier": [
+       "NPWVEF"
+      ]
+     },
+     "note": null,
+     "response": "Execute",
+     "instruction": "Drink plenty of fluids, stay in an air-conditioned room, stay out of\nthe sun, and check up on relatives and neighbors.\n\nDo not leave young children and pets in unattended vehicles. Car\ninteriors will reach lethal temperatures in a matter of minutes.\n\nTake extra precautions when outside. Wear lightweight and\nloose-fitting clothing. Try to limit strenuous activities to early\nmorning or evening. Take action when you see symptoms of heat\nexhaustion and heat stroke.\n\nTo reduce risk during outdoor work, the Occupational Safety and\nHealth Administration recommends scheduling frequent rest breaks in\nshaded or air conditioned environments. Anyone overcome by heat\nshould be moved to a cool and shaded location. Heat stroke is an\nemergency! Call 9 1 1.\n\nMonitor the latest forecasts and warnings for updates.",
+     "description": "* WHAT...Dangerously hot conditions with high temperatures near 110\ndegrees and overnight lows only getting down to around 85 degrees.\nThis will yield at least major Heat Risk, impacting anyone without\nadequate cooling and hydration.\n\n* WHERE...Elevations in Death Valley National Park below 2000 feet.\n\n* WHEN...Until 8 PM PDT Friday.\n\n* IMPACTS...Heat-related illnesses increase significantly during\nextreme heat events.",
+     "headline": "Extreme Heat Warning issued October 7 at 2:02PM PDT until October 9 at 8:00PM PDT by NWS Las Vegas NV",
+     "senderName": "NWS Las Vegas NV",
+     "sender": "w-nws.webmaster@noaa.gov",
+     "event": "Extreme Heat Warning",
+     "urgency": "Expected",
+     "certainty": "Likely",
+     "severity": "Severe",
+     "category": "Met",
+     "messageType": "Update",
+     "status": "Actual",
+     "ends": "2026-10-09T20:00:00-07:00",
+     "expires": "2026-10-08T08:00:00-04:00",
+     "onset": "2026-10-07T14:02:00-07:00",
+     "effective": "2026-10-07T14:02:00-07:00",
+     "sent": "2026-10-07T14:02:00-07:00",
+     "references": [
+      {
+       "sent": "2026-10-07T03:08:00-07:00",
+       "sender": "w-nws.webmaster@noaa.gov",
+       "identifier": "urn:oid:2.49.0.1.840.0.f0bba6cbe593ad2eabc7185227c4de033c15c100.001.1",
+       "@id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.f0bba6cbe593ad2eabc7185227c4de033c15c100.001.1"
+      }
+     ],
+     "affectedZones": [
+      "https://api.weather.gov/zones/forecast/CAZ522"
+     ],
+     "geocode": {
+      "UGC": [
+       "CAZ522"
+      ],
+      "SAME": [
+       "006027"
+      ]
+     },
+     "areaDesc": "Death Valley National Park",
+     "id": "urn:oid:2.49.0.1.840.0.db69a63db32eb74bcd6b406dc40a779270c4a348.001.1",
+     "@type": "wx:Alert",
+     "@id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.db69a63db32eb74bcd6b406dc40a779270c4a348.001.1"
+    },
+    "geometry": null,
+    "type": "Feature",
+    "id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.db69a63db32eb74bcd6b406dc40a779270c4a348.001.1"
+   },
+   {
+    "properties": {
+     "eventCode": {
+      "NationalWeatherService": [
+       "CFY"
+      ],
+      "SAME": [
+       "NWS"
+      ]
+     },
+     "web": "http://www.weather.gov",
+     "language": "en-US",
+     "code": "IPAWSv1.0",
+     "scope": "Public",
+     "parameters": {
+      "expiredReferences": [
+       "w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.7d4058538e124d90f14fea4c7e0e2e83cd9b3071.001.1,2026-10-06T18:57:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.f66359e3db7cd9d35888ecb0e48e685c866e7ff4.001.1,2026-10-06T12:58:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.c78421fdbf0078e1ff350952101836994f358c25.001.1,2026-10-06T01:27:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.e997cc891bd8ec7e69b3e4b8ea92f9203ed86a37.001.1,2026-10-05T18:39:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.27cf0385e3feb01c4b47c2cb5ac9edf8a0607be8.001.1,2026-10-05T13:33:00-07:00"
+      ],
+      "eventEndingTime": [
+       "2026-10-13T14:00:00-07:00"
+      ],
+      "VTEC": [
+       "/O.EXT.KSGX.CF.Y.0006.000000T0000Z-261013T2100Z/"
+      ],
+      "BLOCKCHANNEL": [
+       "EAS",
+       "NWEM",
+       "CMAS"
+      ],
+      "NWSheadline": [
+       "COASTAL FLOOD ADVISORY NOW IN EFFECT UNTIL 2 PM PDT TUESDAY... ...BEACH HAZARDS STATEMENT REMAINS IN EFFECT THROUGH FRIDAY EVENING"
+      ],
+      "WMOidentifier": [
+       "WHUS46 KSGX 072101"
+      ],
+      "AWIPSidentifier": [
+       "CFWSGX"
+      ]
+     },
+     "note": null,
+     "response": "Monitor",
+     "instruction": "If travel is required, allow extra time as some roads may be\nclosed. Do not drive around barricades or through water of\nunknown depth. Take the necessary actions to protect flood-prone\nproperty.\n\nRemain out of the water to avoid hazardous swimming conditions.",
+     "description": "* WHAT...For the Beach Hazards Statement, surf of 3 to 6 feet\nand dangerous rip currents expected. For the Coastal Flood\nAdvisory, minor coastal flooding around high tides expected.\n\n* WHERE...San Diego County Coastal Areas and Orange County\nCoastal Areas.\n\n* WHEN...For the Coastal Flood Advisory, until 2 PM PDT Tuesday.\nFor the Beach Hazards Statement, through Friday evening.\n\n* IMPACTS...Flooding of beach parking lots, boardwalks, and\nroads with only isolated road closures expected. Minor coastal\nerosion is also expected. Additionally, elevated surf will\nlead to strong rip currents.\n\n* ADDITIONAL DETAILS...High tides are expected to peak between\n6.5 and 7.0 feet during the mornings and evenings.",
+     "headline": "Coastal Flood Advisory issued October 7 at 2:01PM PDT until October 13 at 2:00PM PDT by NWS San Diego CA",
+     "senderName": "NWS San Diego CA",
+     "sender": "w-nws.webmaster@noaa.gov",
+     "event": "Coastal Flood Advisory",
+     "urgency": "Expected",
+     "certainty": "Likely",
+     "severity": "Minor",
+     "category": "Met",
+     "messageType": "Update",
+     "status": "Actual",
+     "ends": "2026-10-13T14:00:00-07:00",
+     "expires": "2026-10-08T09:00:00-04:00",
+     "onset": "2026-10-07T14:01:00-07:00",
+     "effective": "2026-10-07T14:01:00-07:00",
+     "sent": "2026-10-07T14:01:00-07:00",
+     "references": [
+      {
+       "sent": "2026-10-07T02:06:00-07:00",
+       "sender": "w-nws.webmaster@noaa.gov",
+       "identifier": "urn:oid:2.49.0.1.840.0.8ffea4e62d7773bf0e50f6f34d5180ff61280ef6.001.1",
+       "@id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.8ffea4e62d7773bf0e50f6f34d5180ff61280ef6.001.1"
+      }
+     ],
+     "affectedZones": [
+      "https://api.weather.gov/zones/forecast/CAZ043",
+      "https://api.weather.gov/zones/forecast/CAZ552"
+     ],
+     "geocode": {
+      "UGC": [
+       "CAZ043",
+       "CAZ552"
+      ],
+      "SAME": [
+       "006073",
+       "006059"
+      ]
+     },
+     "areaDesc": "San Diego County Coastal Areas; Orange County Coastal",
+     "id": "urn:oid:2.49.0.1.840.0.9c8d2107c940818a1681bed28fb5aca011b52477.001.1",
+     "@type": "wx:Alert",
+     "@id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.9c8d2107c940818a1681bed28fb5aca011b52477.001.1"
+    },
+    "geometry": null,
+    "type": "Feature",
+    "id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.9c8d2107c940818a1681bed28fb5aca011b52477.001.1"
+   },
+   {
+    "properties": {
+     "eventCode": {
+      "NationalWeatherService": [
+       "BHS"
+      ],
+      "SAME": [
+       "NWS"
+      ]
+     },
+     "web": "http://www.weather.gov",
+     "language": "en-US",
+     "code": "IPAWSv1.0",
+     "scope": "Public",
+     "parameters": {
+      "expiredReferences": [
+       "w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.7d4058538e124d90f14fea4c7e0e2e83cd9b3071.001.2,2026-10-06T18:57:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.f66359e3db7cd9d35888ecb0e48e685c866e7ff4.001.2,2026-10-06T12:58:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.c78421fdbf0078e1ff350952101836994f358c25.001.2,2026-10-06T01:27:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.e997cc891bd8ec7e69b3e4b8ea92f9203ed86a37.001.2,2026-10-05T18:39:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.27cf0385e3feb01c4b47c2cb5ac9edf8a0607be8.001.2,2026-10-05T13:33:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.578a5f6eb8f9dcbd3ca91c3966e6361849249711.001.1,2026-10-05T13:25:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.9fee152dc2037f45cd1f556544c1d4eacf87ebb1.001.1,2026-10-05T01:21:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.8c26bbe0874023652c9a62bbd8769842ef5703ae.001.1,2026-10-04T21:48:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.f47140f193145795756e53984445900d36729797.001.1,2026-10-04T12:04:00-07:00"
+      ],
+      "eventEndingTime": [
+       "2026-10-09T23:00:00-07:00"
+      ],
+      "VTEC": [
+       "/O.CON.KSGX.BH.S.0012.000000T0000Z-261010T0600Z/"
+      ],
+      "BLOCKCHANNEL": [
+       "EAS",
+       "NWEM",
+       "CMAS"
+      ],
+      "NWSheadline": [
+       "COASTAL FLOOD ADVISORY NOW IN EFFECT UNTIL 2 PM PDT TUESDAY... ...BEACH HAZARDS STATEMENT REMAINS IN EFFECT THROUGH FRIDAY EVENING"
+      ],
+      "WMOidentifier": [
+       "WHUS46 KSGX 072101"
+      ],
+      "AWIPSidentifier": [
+       "CFWSGX"
+      ]
+     },
+     "note": null,
+     "response": "Avoid",
+     "instruction": "If travel is required, allow extra time as some roads may be\nclosed. Do not drive around barricades or through water of\nunknown depth. Take the necessary actions to protect flood-prone\nproperty.\n\nRemain out of the water to avoid hazardous swimming conditions.",
+     "description": "* WHAT...For the Beach Hazards Statement, surf of 3 to 6 feet\nand dangerous rip currents expected. For the Coastal Flood\nAdvisory, minor coastal flooding around high tides expected.\n\n* WHERE...San Diego County Coastal Areas and Orange County\nCoastal Areas.\n\n* WHEN...For the Coastal Flood Advisory, until 2 PM PDT Tuesday.\nFor the Beach Hazards Statement, through Friday evening.\n\n* IMPACTS...Flooding of beach parking lots, boardwalks, and\nroads with only isolated road closures expected. Minor coastal\nerosion is also expected. Additionally, elevated surf will\nlead to strong rip currents.\n\n* ADDITIONAL DETAILS...High tides are expected to peak between\n6.5 and 7.0 feet during the mornings and evenings.",
+     "headline": "Beach Hazards Statement issued October 7 at 2:01PM PDT until October 9 at 11:00PM PDT by NWS San Diego CA",
+     "senderName": "NWS San Diego CA",
+     "sender": "w-nws.webmaster@noaa.gov",
+     "event": "Beach Hazards Statement",
+     "urgency": "Expected",
+     "certainty": "Likely",
+     "severity": "Moderate",
+     "category": "Met",
+     "messageType": "Update",
+     "status": "Actual",
+     "ends": "2026-10-09T23:00:00-07:00",
+     "expires": "2026-10-08T09:00:00-04:00",
+     "onset": "2026-10-07T14:01:00-07:00",
+     "effective": "2026-10-07T14:01:00-07:00",
+     "sent": "2026-10-07T14:01:00-07:00",
+     "references": [
+      {
+       "sent": "2026-10-07T02:06:00-07:00",
+       "sender": "w-nws.webmaster@noaa.gov",
+       "identifier": "urn:oid:2.49.0.1.840.0.8ffea4e62d7773bf0e50f6f34d5180ff61280ef6.001.2",
+       "@id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.8ffea4e62d7773bf0e50f6f34d5180ff61280ef6.001.2"
+      }
+     ],
+     "affectedZones": [
+      "https://api.weather.gov/zones/forecast/CAZ043",
+      "https://api.weather.gov/zones/forecast/CAZ552"
+     ],
+     "geocode": {
+      "UGC": [
+       "CAZ043",
+       "CAZ552"
+      ],
+      "SAME": [
+       "006073",
+       "006059"
+      ]
+     },
+     "areaDesc": "San Diego County Coastal Areas; Orange County Coastal",
+     "id": "urn:oid:2.49.0.1.840.0.9c8d2107c940818a1681bed28fb5aca011b52477.001.2",
+     "@type": "wx:Alert",
+     "@id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.9c8d2107c940818a1681bed28fb5aca011b52477.001.2"
+    },
+    "geometry": null,
+    "type": "Feature",
+    "id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.9c8d2107c940818a1681bed28fb5aca011b52477.001.2"
+   },
+   {
+    "properties": {
+     "eventCode": {
+      "NationalWeatherService": [
+       "CFY"
+      ],
+      "SAME": [
+       "NWS"
+      ]
+     },
+     "web": "http://www.weather.gov",
+     "language": "en-US",
+     "code": "IPAWSv1.0",
+     "scope": "Public",
+     "parameters": {
+      "expiredReferences": [
+       "w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.7f54e4154969a6586f0352751ee6bbc05a430814.001.1,2026-10-06T13:32:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.ac6915e78e3a196d85f5d2c682ef2199624538c7.001.1,2026-10-06T07:23:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.d118c08578c61e4db227af01c01b686506d243b4.001.1,2026-10-05T14:47:00-07:00"
+      ],
+      "eventEndingTime": [
+       "2026-10-09T23:00:00-07:00"
+      ],
+      "VTEC": [
+       "/O.EXT.KLOX.CF.Y.0008.000000T0000Z-261010T0600Z/"
+      ],
+      "BLOCKCHANNEL": [
+       "EAS",
+       "NWEM",
+       "CMAS"
+      ],
+      "NWSheadline": [
+       "COASTAL FLOOD ADVISORY NOW IN EFFECT UNTIL 11 PM PDT FRIDAY"
+      ],
+      "WMOidentifier": [
+       "WHUS46 KLOX 072040"
+      ],
+      "AWIPSidentifier": [
+       "CFWLOX"
+      ]
+     },
+     "note": null,
+     "response": "Monitor",
+     "instruction": "Take the necessary actions to protect flood-prone property. Do\nNOT drive around barricades or through water of unknown depth.\n\nRemain out of the water due to hazardous swimming conditions, or\nstay near occupied lifeguard towers. Rock jetties can be deadly\nin such conditions, stay off the rocks.",
+     "description": "* WHAT...Minor to locally moderate coastal flooding with\nelevated surf and dangerous rip currents expected.\n\n* WHERE...Catalina and Santa Barbara Islands, Ventura County\nBeaches, Malibu Coast and Los Angeles County Beaches.\n\n* WHEN...Until 11 PM PDT Friday.\n\n* IMPACTS...Moderate flooding of sea water is likely over some\nvulnerable low-lying coastal areas, especially around the time\nof high tide, including over beach parking lots, bike paths, and\nharbor walkways. Moderate to significant beach erosion is\nlikely. Isolated damage is possible in most vulnerable areas.\nThere is an increased risk of ocean drowning. Rip currents can\npull swimmers and surfers out to sea. Waves can wash people off\nbeaches and rocks, and capsize small boats nearshore.\n\n* ADDITIONAL DETAILS...The highest risk of coastal flooding is\nlikely Sunday especially during the morning high tide.",
+     "headline": "Coastal Flood Advisory issued October 7 at 1:40PM PDT until October 9 at 11:00PM PDT by NWS Los Angeles/Oxnard CA",
+     "senderName": "NWS Los Angeles/Oxnard CA",
+     "sender": "w-nws.webmaster@noaa.gov",
+     "event": "Coastal Flood Advisory",
+     "urgency": "Expected",
+     "certainty": "Likely",
+     "severity": "Minor",
+     "category": "Met",
+     "messageType": "Update",
+     "status": "Actual",
+     "ends": "2026-10-09T23:00:00-07:00",
+     "expires": "2026-10-08T00:45:00-04:00",
+     "onset": "2026-10-07T13:40:00-07:00",
+     "effective": "2026-10-07T13:40:00-07:00",
+     "sent": "2026-10-07T13:40:00-07:00",
+     "references": [
+      {
+       "sent": "2026-10-07T07:36:00-07:00",
+       "sender": "w-nws.webmaster@noaa.gov",
+       "identifier": "urn:oid:2.49.0.1.840.0.e907eb28061d051356beafa6354b641aa64bae84.001.1",
+       "@id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.e907eb28061d051356beafa6354b641aa64bae84.001.1"
+      },
+      {
+       "sent": "2026-10-07T13:29:00-07:00",
+       "sender": "w-nws.webmaster@noaa.gov",
+       "identifier": "urn:oid:2.49.0.1.840.0.98c91ddcdd111bf9a7d85efba96a7393c530083c.001.1",
+       "@id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.98c91ddcdd111bf9a7d85efba96a7393c530083c.001.1"
+      }
+     ],
+     "affectedZones": [
+      "https://api.weather.gov/zones/forecast/CAZ087",
+      "https://api.weather.gov/zones/forecast/CAZ354",
+      "https://api.weather.gov/zones/forecast/CAZ362",
+      "https://api.weather.gov/zones/forecast/CAZ366"
+     ],
+     "geocode": {
+      "UGC": [
+       "CAZ087",
+       "CAZ354",
+       "CAZ362",
+       "CAZ366"
+      ],
+      "SAME": [
+       "006037",
+       "006111"
+      ]
+     },
+     "areaDesc": "Catalina and Santa Barbara Islands; Ventura County Beaches; Malibu Coast; Los Angeles County Beaches",
+     "id": "urn:oid:2.49.0.1.840.0.89b3bb87139d5f810de3b6dcf5c77ea03543396b.001.1",
+     "@type": "wx:Alert",
+     "@id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.89b3bb87139d5f810de3b6dcf5c77ea03543396b.001.1"
+    },
+    "geometry": null,
+    "type": "Feature",
+    "id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.89b3bb87139d5f810de3b6dcf5c77ea03543396b.001.1"
+   },
+   {
+    "properties": {
+     "eventCode": {
+      "NationalWeatherService": [
+       "CFY"
+      ],
+      "SAME": [
+       "NWS"
+      ]
+     },
+     "web": "http://www.weather.gov",
+     "language": "en-US",
+     "code": "IPAWSv1.0",
+     "scope": "Public",
+     "parameters": {
+      "expiredReferences": [
+       "w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.2e99202f45ace853dfaaa9907574452c2fd759fd.001.1,2026-10-06T22:50:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.6ac28b6adc8263737fcf5282c8f698f817cdc79d.001.1,2026-10-05T23:54:00-07:00"
+      ],
+      "eventEndingTime": [
+       "2026-10-14T16:00:00-07:00"
+      ],
+      "VTEC": [
+       "/O.EXT.KMTR.CF.Y.0012.000000T0000Z-261014T2300Z/"
+      ],
+      "BLOCKCHANNEL": [
+       "EAS",
+       "NWEM",
+       "CMAS"
+      ],
+      "NWSheadline": [
+       "COASTAL FLOOD ADVISORY NOW IN EFFECT UNTIL 4 PM PDT WEDNESDAY"
+      ],
+      "WMOidentifier": [
+       "WHUS46 KMTR 071933"
+      ],
+      "AWIPSidentifier": [
+       "CFWMTR"
+      ]
+     },
+     "note": null,
+     "response": "Monitor",
+     "instruction": "If travel is required, allow extra time as some roads may be\nclosed. Do not drive around barricades or through water of\nunknown depth. Take the necessary actions to protect flood-prone\nproperty.",
+     "description": "* WHAT...Up to 1.2 ft of inundation above ground level is\npossible in low-lying areas near shorelines and tidal waterways.\n\n* WHERE...Bayshore locations along the San Pablo Bay.\n\n* WHEN...Until 4 PM PDT Wednesday.\n\n* IMPACTS...High tides will result in flooding of low-lying\ninfrastructure, isolated road closures, and coastal erosion.\nRising tides will bring water and waves farther up the beach\nthan normal, restricting escape from beaches and coastal areas.\n\n* ADDITIONAL DETAILS...At the San Francisco tidal gauge, high tide\nis expected to be 1.0 ft above normal (6.78 ft MLLW) at 10:51 AM\nThursday 10/8, 1.0 ft above normal (6.86 ft MLLW) at 11:22 AM\nFriday 10/9, 1.2 ft above normal (7.06 ft MLLW) at 11:50 AM\nSaturday 10/10, 1.2 ft above normal (7.08 ft MLLW) at 12:18 PM\nSunday 10/11, 1.2 ft above normal (7.03 ft MLLW) at 12:46 PM\nMonday 10/12, 1.1 ft above normal (6.90 ft MLLW) at 1:14 PM\nTuesday 10/13, and 0.9 ft above normal (6.72 ft MLLW) at 1:46\nPM Wednesday 10/14. These predictions include up to 0.9 ft of\nsurge that will enhance the astronomical tide and flooding\nthreat. High tide varies up to 90 minutes earlier or later along\nthe Pacific Coast and through the San Francisco Bay,\nrespectively.",
+     "headline": "Coastal Flood Advisory issued October 7 at 12:33PM PDT until October 14 at 4:00PM PDT by NWS San Francisco CA",
+     "senderName": "NWS San Francisco CA",
+     "sender": "w-nws.webmaster@noaa.gov",
+     "event": "Coastal Flood Advisory",
+     "urgency": "Expected",
+     "certainty": "Likely",
+     "severity": "Minor",
+     "category": "Met",
+     "messageType": "Alert",
+     "status": "Actual",
+     "ends": "2026-10-14T16:00:00-07:00",
+     "expires": "2026-10-08T16:00:00-04:00",
+     "onset": "2026-10-07T12:33:00-07:00",
+     "effective": "2026-10-07T12:33:00-07:00",
+     "sent": "2026-10-07T12:33:00-07:00",
+     "references": [],
+     "affectedZones": [
+      "https://api.weather.gov/zones/forecast/CAZ506"
+     ],
+     "geocode": {
+      "UGC": [
+       "CAZ506"
+      ],
+      "SAME": [
+       "006041",
+       "006055",
+       "006097"
+      ]
+     },
+     "areaDesc": "North Bay Interior Valleys",
+     "id": "urn:oid:2.49.0.1.840.0.3ae2ebe2f5bd5a06768ab277e7d14bff22d75e9f.002.1",
+     "@type": "wx:Alert",
+     "@id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.3ae2ebe2f5bd5a06768ab277e7d14bff22d75e9f.002.1"
+    },
+    "geometry": null,
+    "type": "Feature",
+    "id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.3ae2ebe2f5bd5a06768ab277e7d14bff22d75e9f.002.1"
+   },
+   {
+    "properties": {
+     "eventCode": {
+      "NationalWeatherService": [
+       "CFY"
+      ],
+      "SAME": [
+       "NWS"
+      ]
+     },
+     "web": "http://www.weather.gov",
+     "language": "en-US",
+     "code": "IPAWSv1.0",
+     "scope": "Public",
+     "parameters": {
+      "eventEndingTime": [
+       "2026-10-13T15:00:00-07:00"
+      ],
+      "VTEC": [
+       "/O.NEW.KMTR.CF.Y.0013.261009T1600Z-261013T2200Z/"
+      ],
+      "BLOCKCHANNEL": [
+       "EAS",
+       "NWEM",
+       "CMAS"
+      ],
+      "NWSheadline": [
+       "COASTAL FLOOD ADVISORY IN EFFECT FROM 9 AM FRIDAY TO 3 PM PDT TUESDAY"
+      ],
+      "WMOidentifier": [
+       "WHUS46 KMTR 071933"
+      ],
+      "AWIPSidentifier": [
+       "CFWMTR"
+      ]
+     },
+     "note": null,
+     "response": "Monitor",
+     "instruction": "If travel is required, allow extra time as some roads may be\nclosed. Do not drive around barricades or through water of\nunknown depth. Take the necessary actions to protect flood-prone\nproperty.",
+     "description": "* WHAT...Up to 1.2 ft of inundation above ground level is\npossible in low-lying areas near shorelines and tidal waterways.\n\n* WHERE...Bayshore locations along the San Francisco and Monterey\nBays.\n\n* WHEN...From 9 AM Friday to 3 PM PDT Tuesday.\n\n* IMPACTS...Flooding of lots, parks, and roads with only\nisolated road closures expected. High tides will result in\nflooding along coastal trails, cut off access to some low-\nlying beaches and coastal areas, and bring water and waves\nfarther up the beach than typical.\n\n* ADDITIONAL DETAILS...At the San Francisco tidal gauge, high tide\nis expected to be 1.0 ft above normal (6.86 ft MLLW) at 11:22\nAM Friday 10/9, 1.2 ft above normal (7.06 ft MLLW) at 11:50 AM\nSaturday 10/10, 1.2 ft above normal (7.08 ft MLLW) at 12:18 PM\nSunday 10/11, 1.2 ft above normal (7.03 ft MLLW) at 12:46 PM\nMonday 10/12, 1.1 ft above normal (6.90 ft MLLW) at 1:14 PM\nTuesday 10/13, and 0.9 ft above normal (6.72 ft MLLW) at 1:46 PM\nWednesday 10/14. These predictions include up to 1.0 ft of\nsurge that will enhance the astronomical tide and flooding\nthreat. High tide varies up to 90 minutes earlier or later along\nthe Pacific Coast and through the San Francisco Bay,\nrespectively.",
+     "headline": "Coastal Flood Advisory issued October 7 at 12:33PM PDT until October 13 at 3:00PM PDT by NWS San Francisco CA",
+     "senderName": "NWS San Francisco CA",
+     "sender": "w-nws.webmaster@noaa.gov",
+     "event": "Coastal Flood Advisory",
+     "urgency": "Expected",
+     "certainty": "Likely",
+     "severity": "Minor",
+     "category": "Met",
+     "messageType": "Alert",
+     "status": "Actual",
+     "ends": "2026-10-13T15:00:00-07:00",
+     "expires": "2026-10-08T16:00:00-04:00",
+     "onset": "2026-10-09T09:00:00-07:00",
+     "effective": "2026-10-07T12:33:00-07:00",
+     "sent": "2026-10-07T12:33:00-07:00",
+     "references": [],
+     "affectedZones": [
+      "https://api.weather.gov/zones/forecast/CAZ006",
+      "https://api.weather.gov/zones/forecast/CAZ508",
+      "https://api.weather.gov/zones/forecast/CAZ529",
+      "https://api.weather.gov/zones/forecast/CAZ530"
+     ],
+     "geocode": {
+      "UGC": [
+       "CAZ006",
+       "CAZ508",
+       "CAZ529",
+       "CAZ530"
+      ],
+      "SAME": [
+       "006075",
+       "006001",
+       "006013",
+       "006081",
+       "006085",
+       "006087",
+       "006053"
+      ]
+     },
+     "areaDesc": "San Francisco; San Francisco Bay Shoreline; Northern Monterey Bay; Southern Monterey Bay and Big Sur Coast",
+     "id": "urn:oid:2.49.0.1.840.0.3ae2ebe2f5bd5a06768ab277e7d14bff22d75e9f.001.1",
+     "@type": "wx:Alert",
+     "@id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.3ae2ebe2f5bd5a06768ab277e7d14bff22d75e9f.001.1"
+    },
+    "geometry": null,
+    "type": "Feature",
+    "id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.3ae2ebe2f5bd5a06768ab277e7d14bff22d75e9f.001.1"
+   },
+   {
+    "properties": {
+     "eventCode": {
+      "NationalWeatherService": [
+       "XHW"
+      ],
+      "SAME": [
+       "NWS"
+      ]
+     },
+     "web": "http://www.weather.gov",
+     "language": "en-US",
+     "code": "IPAWSv1.0",
+     "scope": "Public",
+     "parameters": {
+      "expiredReferences": [
+       "w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.181f7b32fc7899093fd8ea84ee69c7736b13c1ab.002.2,2026-10-06T09:47:00-07:00"
+      ],
+      "eventEndingTime": [
+       "2026-10-09T20:00:00-07:00"
+      ],
+      "VTEC": [
+       "/O.CON.KPSR.XH.W.0010.000000T0000Z-261010T0300Z/"
+      ],
+      "BLOCKCHANNEL": [
+       "EAS",
+       "NWEM",
+       "CMAS"
+      ],
+      "NWSheadline": [
+       "EXTREME HEAT WARNING REMAINS IN EFFECT UNTIL 8 PM PDT FRIDAY"
+      ],
+      "WMOidentifier": [
+       "WWUS75 KPSR 071911"
+      ],
+      "AWIPSidentifier": [
+       "NPWPSR"
+      ]
+     },
+     "note": null,
+     "response": "Execute",
+     "instruction": "An Extreme Heat Warning means that a period of very hot temperatures,\neven by local standards, will occur. Actions should be taken to\nlessen the impact of the extreme heat.\n\nTake extra precautions if you work or spend time outside. When\npossible, reschedule strenuous activities to early morning or\nevening. Know the signs and symptoms of heat exhaustion and heat\nstroke. Wear lightweight and loose-fitting clothing when possible and\ndrink plenty of water.\n\nTo reduce risk during outdoor work, the Occupational Safety and\nHealth Administration recommends scheduling frequent rest breaks in\nshaded or air conditioned environments. Anyone overcome by heat\nshould be moved to a cool and shaded location. Heat stroke is an\nemergency! Call 9 1 1.\n\nPublic cooling shelters are available in some areas. Consult county\nofficials for more details.",
+     "description": "* WHAT...Dangerously hot conditions possible. Afternoon temperatures\n104 to 109. Major Heat Risk.\n\n* WHERE...Portions of Imperial County, including the Imperial Valley.\n\n* WHEN...Until 8 PM PDT Friday.\n\n* IMPACTS...Heat related illnesses increase significantly during\nextreme heat events. Overexposure can cause heat cramps and heat\nexhaustion to develop and, without intervention, can lead to heat\nstroke.",
+     "headline": "Extreme Heat Warning issued October 7 at 12:11PM MST until October 9 at 8:00PM MST by NWS Phoenix AZ",
+     "senderName": "NWS Phoenix AZ",
+     "sender": "w-nws.webmaster@noaa.gov",
+     "event": "Extreme Heat Warning",
+     "urgency": "Expected",
+     "certainty": "Likely",
+     "severity": "Severe",
+     "category": "Met",
+     "messageType": "Update",
+     "status": "Actual",
+     "ends": "2026-10-09T20:00:00-07:00",
+     "expires": "2026-10-08T08:00:00-04:00",
+     "onset": "2026-10-07T12:11:00-07:00",
+     "effective": "2026-10-07T12:11:00-07:00",
+     "sent": "2026-10-07T12:11:00-07:00",
+     "references": [
+      {
+       "sent": "2026-10-07T00:14:00-07:00",
+       "sender": "w-nws.webmaster@noaa.gov",
+       "identifier": "urn:oid:2.49.0.1.840.0.e1828a36f9a1891a6c4290bcb1de8612e19c7493.002.1",
+       "@id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.e1828a36f9a1891a6c4290bcb1de8612e19c7493.002.1"
+      }
+     ],
+     "affectedZones": [
+      "https://api.weather.gov/zones/forecast/CAZ566",
+      "https://api.weather.gov/zones/forecast/CAZ567"
+     ],
+     "geocode": {
+      "UGC": [
+       "CAZ566",
+       "CAZ567"
+      ],
+      "SAME": [
+       "006025"
+      ]
+     },
+     "areaDesc": "Imperial County West; Imperial Valley",
+     "id": "urn:oid:2.49.0.1.840.0.4ed07d3f8810b4ad94c5b5c56c4fbafb1f162eaf.002.1",
+     "@type": "wx:Alert",
+     "@id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.4ed07d3f8810b4ad94c5b5c56c4fbafb1f162eaf.002.1"
+    },
+    "geometry": null,
+    "type": "Feature",
+    "id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.4ed07d3f8810b4ad94c5b5c56c4fbafb1f162eaf.002.1"
+   },
+   {
+    "properties": {
+     "eventCode": {
+      "NationalWeatherService": [
+       "XHW"
+      ],
+      "SAME": [
+       "NWS"
+      ]
+     },
+     "web": "http://www.weather.gov",
+     "language": "en-US",
+     "code": "IPAWSv1.0",
+     "scope": "Public",
+     "parameters": {
+      "expiredReferences": [
+       "w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.181f7b32fc7899093fd8ea84ee69c7736b13c1ab.003.2,2026-10-06T09:47:00-07:00"
+      ],
+      "eventEndingTime": [
+       "2026-10-08T20:00:00-07:00"
+      ],
+      "VTEC": [
+       "/O.CON.KPSR.XH.W.0010.261008T1700Z-261009T0300Z/"
+      ],
+      "BLOCKCHANNEL": [
+       "EAS",
+       "NWEM",
+       "CMAS"
+      ],
+      "NWSheadline": [
+       "EXTREME HEAT WARNING REMAINS IN EFFECT FROM 10 AM MST /10 AM PDT/ TO 8 PM MST /8 PM PDT/ THURSDAY"
+      ],
+      "WMOidentifier": [
+       "WWUS75 KPSR 071911"
+      ],
+      "AWIPSidentifier": [
+       "NPWPSR"
+      ]
+     },
+     "note": null,
+     "response": "Execute",
+     "instruction": "An Extreme Heat Warning means that a period of very hot temperatures,\neven by local standards, will occur. Actions should be taken to\nlessen the impact of the extreme heat.\n\nTake extra precautions if you work or spend time outside. When\npossible, reschedule strenuous activities to early morning or\nevening. Know the signs and symptoms of heat exhaustion and heat\nstroke. Wear lightweight and loose-fitting clothing when possible and\ndrink plenty of water.\n\nTo reduce risk during outdoor work, the Occupational Safety and\nHealth Administration recommends scheduling frequent rest breaks in\nshaded or air conditioned environments. Anyone overcome by heat\nshould be moved to a cool and shaded location. Heat stroke is an\nemergency! Call 9 1 1.\n\nPublic cooling shelters are available in some areas. Consult county\nofficials for more details.",
+     "description": "* WHAT...Dangerously hot conditions possible. Afternoon temperatures\n102 to 106. Major Heat Risk.\n\n* WHERE...In Arizona, Gila River Valley and Parker Valley. In\nCalifornia, Chuckwalla Valley and Palo Verde Valley.\n\n* WHEN...From 10 AM MST /10 AM PDT/ to 8 PM MST /8 PM PDT/ Thursday.\n\n* IMPACTS...Heat related illnesses increase significantly during\nextreme heat events. Overexposure can cause heat cramps and heat\nexhaustion to develop and, without intervention, can lead to heat\nstroke.",
+     "headline": "Extreme Heat Warning issued October 7 at 12:11PM MST until October 8 at 8:00PM MST by NWS Phoenix AZ",
+     "senderName": "NWS Phoenix AZ",
+     "sender": "w-nws.webmaster@noaa.gov",
+     "event": "Extreme Heat Warning",
+     "urgency": "Expected",
+     "certainty": "Likely",
+     "severity": "Severe",
+     "category": "Met",
+     "messageType": "Update",
+     "status": "Actual",
+     "ends": "2026-10-08T20:00:00-07:00",
+     "expires": "2026-10-08T08:00:00-04:00",
+     "onset": "2026-10-08T10:00:00-07:00",
+     "effective": "2026-10-07T12:11:00-07:00",
+     "sent": "2026-10-07T12:11:00-07:00",
+     "references": [
+      {
+       "sent": "2026-10-07T00:14:00-07:00",
+       "sender": "w-nws.webmaster@noaa.gov",
+       "identifier": "urn:oid:2.49.0.1.840.0.e1828a36f9a1891a6c4290bcb1de8612e19c7493.003.1",
+       "@id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.e1828a36f9a1891a6c4290bcb1de8612e19c7493.003.1"
+      }
+     ],
+     "affectedZones": [
+      "https://api.weather.gov/zones/forecast/AZZ530",
+      "https://api.weather.gov/zones/forecast/AZZ536",
+      "https://api.weather.gov/zones/forecast/CAZ569",
+      "https://api.weather.gov/zones/forecast/CAZ570"
+     ],
+     "geocode": {
+      "UGC": [
+       "AZZ530",
+       "AZZ536",
+       "CAZ569",
+       "CAZ570"
+      ],
+      "SAME": [
+       "004012",
+       "004027",
+       "006025",
+       "006065"
+      ]
+     },
+     "areaDesc": "Parker Valley; Gila River Valley; Palo Verde Valley; Chuckwalla Valley",
+     "id": "urn:oid:2.49.0.1.840.0.4ed07d3f8810b4ad94c5b5c56c4fbafb1f162eaf.003.1",
+     "@type": "wx:Alert",
+     "@id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.4ed07d3f8810b4ad94c5b5c56c4fbafb1f162eaf.003.1"
+    },
+    "geometry": null,
+    "type": "Feature",
+    "id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.4ed07d3f8810b4ad94c5b5c56c4fbafb1f162eaf.003.1"
+   },
+   {
+    "properties": {
+     "eventCode": {
+      "NationalWeatherService": [
+       "XHW"
+      ],
+      "SAME": [
+       "NWS"
+      ]
+     },
+     "web": "http://www.weather.gov",
+     "language": "en-US",
+     "code": "IPAWSv1.0",
+     "scope": "Public",
+     "parameters": {
+      "expiredReferences": [
+       "w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.c550cc9093ff7e115f4fffcb244cc92372160b23.006.1,2026-10-06T15:38:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.1bc087a432c441d48b4719b625567babeadea057.006.1,2026-10-06T02:20:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.7b1f28a5c4309b82c20594da27ba2d2d13a3d45e.006.1,2026-10-05T20:55:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.63072abaeb467559f279c06de5312e84be8f6c9e.006.1,2026-10-05T11:29:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.3cf20025db395088e16e03432daaeca461a1c117.006.1,2026-10-05T03:19:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.654a9458c757881338e8a81f0b05ceee59ba49ed.006.1,2026-10-04T21:10:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.8ee7883031911f0bd5fb7f6b864bd1e64ff402bd.006.1,2026-10-04T11:32:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.e5e46b2a7965a6d227484dc8775eb62f5eb8aab3.006.1,2026-10-04T04:28:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.80340bab5d8fd1d83c36ab1f229d5ec050106b3f.006.1,2026-10-03T21:40:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.51464c1cc509cecd89db277472a59416a1f88387.004.2,2026-10-03T18:05:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.9d8509fdbfd514c74c5c413067b74eb3235ff460.004.1,2026-10-03T12:03:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.63f1a957c37a406fbd2f055b32af3913569e5c21.004.1,2026-10-03T04:01:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.a6ae5808be5a668a1f14157735055bd556900108.004.1,2026-10-02T21:27:07-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.d1e2bd222531d3a52f5a90cb7f26df399637ed6e.004.1,2026-10-02T12:25:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.c448ad3ae77474de68331b3930821d54317b9128.004.2,2026-10-02T00:32:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.7a59eb2f91c3f262a42ff48e988507bb2c2e12f8.006.1,2026-10-01T20:59:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.65cddfa137738ea86e2c1a1f025333a0857cf6e7.006.1,2026-10-01T13:12:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.b0298ce8669ec993197e560fc10afa2f9b515d6e.006.2,2026-10-01T00:29:00-07:00"
+      ],
+      "eventEndingTime": [
+       "2026-10-08T20:00:00-07:00"
+      ],
+      "VTEC": [
+       "/O.CON.KSGX.XH.W.0010.000000T0000Z-261009T0300Z/"
+      ],
+      "BLOCKCHANNEL": [
+       "EAS",
+       "NWEM",
+       "CMAS"
+      ],
+      "NWSheadline": [
+       "EXTREME HEAT WARNING REMAINS IN EFFECT UNTIL 8 PM PDT THURSDAY"
+      ],
+      "WMOidentifier": [
+       "WWUS76 KSGX 071847"
+      ],
+      "AWIPSidentifier": [
+       "NPWSGX"
+      ]
+     },
+     "note": null,
+     "response": "Execute",
+     "instruction": "Drink plenty of fluids, stay in an air-conditioned room, stay out of\nthe sun, and check up on relatives and neighbors.\n\nDo not leave young children and pets in unattended vehicles. Car\ninteriors will reach lethal temperatures in a matter of minutes.",
+     "description": "* WHAT...Dangerously hot conditions with high temperatures in the mid\n90s to 100. Nights will be very warm with low temperatures in the\nlow 70s.\n\n* WHERE...Orange County Inland Areas.\n\n* WHEN...Until 8 PM PDT Thursday.\n\n* IMPACTS...Heat related illnesses increase significantly during\nextreme heat events.",
+     "headline": "Extreme Heat Warning issued October 7 at 11:47AM PDT until October 8 at 8:00PM PDT by NWS San Diego CA",
+     "senderName": "NWS San Diego CA",
+     "sender": "w-nws.webmaster@noaa.gov",
+     "event": "Extreme Heat Warning",
+     "urgency": "Expected",
+     "certainty": "Likely",
+     "severity": "Severe",
+     "category": "Met",
+     "messageType": "Update",
+     "status": "Actual",
+     "ends": "2026-10-08T20:00:00-07:00",
+     "expires": "2026-10-08T09:00:00-04:00",
+     "onset": "2026-10-07T11:47:00-07:00",
+     "effective": "2026-10-07T11:47:00-07:00",
+     "sent": "2026-10-07T11:47:00-07:00",
+     "references": [
+      {
+       "sent": "2026-10-06T12:33:00-07:00",
+       "sender": "w-nws.webmaster@noaa.gov",
+       "identifier": "urn:oid:2.49.0.1.840.0.267bf57ee24ec76e632b7f6d9a34330319090caa.007.1",
+       "@id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.267bf57ee24ec76e632b7f6d9a34330319090caa.007.1"
+      }
+     ],
+     "affectedZones": [
+      "https://api.weather.gov/zones/forecast/CAZ554"
+     ],
+     "geocode": {
+      "UGC": [
+       "CAZ554"
+      ],
+      "SAME": [
+       "006059"
+      ]
+     },
+     "areaDesc": "Orange County Inland",
+     "id": "urn:oid:2.49.0.1.840.0.9a0e67ff8f12acc8f53216f011b4279f7a10fb9d.007.1",
+     "@type": "wx:Alert",
+     "@id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.9a0e67ff8f12acc8f53216f011b4279f7a10fb9d.007.1"
+    },
+    "geometry": null,
+    "type": "Feature",
+    "id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.9a0e67ff8f12acc8f53216f011b4279f7a10fb9d.007.1"
+   },
+   {
+    "properties": {
+     "eventCode": {
+      "NationalWeatherService": [
+       "XHW"
+      ],
+      "SAME": [
+       "NWS"
+      ]
+     },
+     "web": "http://www.weather.gov",
+     "language": "en-US",
+     "code": "IPAWSv1.0",
+     "scope": "Public",
+     "parameters": {
+      "expiredReferences": [
+       "w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.c550cc9093ff7e115f4fffcb244cc92372160b23.007.1,2026-10-06T15:38:00-07:00"
+      ],
+      "eventEndingTime": [
+       "2026-10-09T20:00:00-07:00"
+      ],
+      "VTEC": [
+       "/O.CON.KSGX.XH.W.0010.000000T0000Z-261010T0300Z/"
+      ],
+      "BLOCKCHANNEL": [
+       "EAS",
+       "NWEM",
+       "CMAS"
+      ],
+      "NWSheadline": [
+       "EXTREME HEAT WARNING REMAINS IN EFFECT UNTIL 8 PM PDT FRIDAY"
+      ],
+      "WMOidentifier": [
+       "WWUS76 KSGX 071847"
+      ],
+      "AWIPSidentifier": [
+       "NPWSGX"
+      ]
+     },
+     "note": null,
+     "response": "Execute",
+     "instruction": "Drink plenty of fluids, stay in an air-conditioned room, stay out of\nthe sun, and check up on relatives and neighbors.\n\nTake extra precautions when outside. Wear lightweight and loose\nfitting clothing. Try to limit strenuous activities to early morning\nor evening. Take action when you see symptoms of heat exhaustion and\nheat stroke.",
+     "description": "* WHAT...Dangerously hot conditions with temperatures 105 to 108\nexpected. Low  temperatures in the upper 70s to low 80s.\n\n* WHERE...Coachella Valley, San Diego County Deserts, and San\nGorgonio Pass near Banning.\n\n* WHEN...Until 8 PM PDT Friday.\n\n* IMPACTS...Heat related illnesses increase significantly during\nextreme heat events.",
+     "headline": "Extreme Heat Warning issued October 7 at 11:47AM PDT until October 9 at 8:00PM PDT by NWS San Diego CA",
+     "senderName": "NWS San Diego CA",
+     "sender": "w-nws.webmaster@noaa.gov",
+     "event": "Extreme Heat Warning",
+     "urgency": "Expected",
+     "certainty": "Likely",
+     "severity": "Severe",
+     "category": "Met",
+     "messageType": "Update",
+     "status": "Actual",
+     "ends": "2026-10-09T20:00:00-07:00",
+     "expires": "2026-10-08T09:00:00-04:00",
+     "onset": "2026-10-07T11:47:00-07:00",
+     "effective": "2026-10-07T11:47:00-07:00",
+     "sent": "2026-10-07T11:47:00-07:00",
+     "references": [
+      {
+       "sent": "2026-10-06T12:33:00-07:00",
+       "sender": "w-nws.webmaster@noaa.gov",
+       "identifier": "urn:oid:2.49.0.1.840.0.267bf57ee24ec76e632b7f6d9a34330319090caa.001.2",
+       "@id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.267bf57ee24ec76e632b7f6d9a34330319090caa.001.2"
+      }
+     ],
+     "affectedZones": [
+      "https://api.weather.gov/zones/forecast/CAZ061",
+      "https://api.weather.gov/zones/forecast/CAZ062",
+      "https://api.weather.gov/zones/forecast/CAZ065"
+     ],
+     "geocode": {
+      "UGC": [
+       "CAZ061",
+       "CAZ062",
+       "CAZ065"
+      ],
+      "SAME": [
+       "006065",
+       "006073"
+      ]
+     },
+     "areaDesc": "Coachella Valley; San Diego County Deserts; San Gorgonio Pass Near Banning",
+     "id": "urn:oid:2.49.0.1.840.0.9a0e67ff8f12acc8f53216f011b4279f7a10fb9d.005.1",
+     "@type": "wx:Alert",
+     "@id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.9a0e67ff8f12acc8f53216f011b4279f7a10fb9d.005.1"
+    },
+    "geometry": null,
+    "type": "Feature",
+    "id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.9a0e67ff8f12acc8f53216f011b4279f7a10fb9d.005.1"
+   },
+   {
+    "properties": {
+     "eventCode": {
+      "NationalWeatherService": [
+       "XHW"
+      ],
+      "SAME": [
+       "NWS"
+      ]
+     },
+     "web": "http://www.weather.gov",
+     "language": "en-US",
+     "code": "IPAWSv1.0",
+     "scope": "Public",
+     "parameters": {
+      "expiredReferences": [
+       "w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.c550cc9093ff7e115f4fffcb244cc92372160b23.003.1,2026-10-06T15:38:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.1bc087a432c441d48b4719b625567babeadea057.003.1,2026-10-06T02:20:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.7b1f28a5c4309b82c20594da27ba2d2d13a3d45e.003.1,2026-10-05T20:55:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.63072abaeb467559f279c06de5312e84be8f6c9e.003.1,2026-10-05T11:29:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.3cf20025db395088e16e03432daaeca461a1c117.003.1,2026-10-05T03:19:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.654a9458c757881338e8a81f0b05ceee59ba49ed.003.1,2026-10-04T21:10:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.8ee7883031911f0bd5fb7f6b864bd1e64ff402bd.003.1,2026-10-04T11:32:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.e5e46b2a7965a6d227484dc8775eb62f5eb8aab3.003.1,2026-10-04T04:28:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.80340bab5d8fd1d83c36ab1f229d5ec050106b3f.003.1,2026-10-03T21:40:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.51464c1cc509cecd89db277472a59416a1f88387.002.2,2026-10-03T18:05:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.9d8509fdbfd514c74c5c413067b74eb3235ff460.002.1,2026-10-03T12:03:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.63f1a957c37a406fbd2f055b32af3913569e5c21.002.1,2026-10-03T04:01:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.a6ae5808be5a668a1f14157735055bd556900108.002.1,2026-10-02T21:27:07-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.d1e2bd222531d3a52f5a90cb7f26df399637ed6e.002.1,2026-10-02T12:25:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.c448ad3ae77474de68331b3930821d54317b9128.002.2,2026-10-02T00:32:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.7a59eb2f91c3f262a42ff48e988507bb2c2e12f8.003.1,2026-10-01T20:59:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.65cddfa137738ea86e2c1a1f025333a0857cf6e7.003.1,2026-10-01T13:12:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.b0298ce8669ec993197e560fc10afa2f9b515d6e.003.2,2026-10-01T00:29:00-07:00"
+      ],
+      "eventEndingTime": [
+       "2026-10-08T20:00:00-07:00"
+      ],
+      "VTEC": [
+       "/O.CON.KSGX.XH.W.0010.000000T0000Z-261009T0300Z/"
+      ],
+      "BLOCKCHANNEL": [
+       "EAS",
+       "NWEM",
+       "CMAS"
+      ],
+      "NWSheadline": [
+       "EXTREME HEAT WARNING REMAINS IN EFFECT UNTIL 8 PM PDT THURSDAY"
+      ],
+      "WMOidentifier": [
+       "WWUS76 KSGX 071847"
+      ],
+      "AWIPSidentifier": [
+       "NPWSGX"
+      ]
+     },
+     "note": null,
+     "response": "Execute",
+     "instruction": "Drink plenty of fluids, stay in an air-conditioned room, stay out of\nthe sun, and check up on relatives and neighbors.\n\nDo not leave young children and pets in unattended vehicles. Car\ninteriors will reach lethal temperatures in a matter of minutes.",
+     "description": "* WHAT...Dangerously hot conditions with high temperatures in the\nupper 90s to 105. Nights will be very warm with low temperatures in\nthe mid 60s to low 70s.\n\n* WHERE...San Diego County Valleys.\n\n* WHEN...Until 8 PM PDT Thursday.\n\n* IMPACTS...Heat related illnesses increase significantly during\nextreme heat events.",
+     "headline": "Extreme Heat Warning issued October 7 at 11:47AM PDT until October 8 at 8:00PM PDT by NWS San Diego CA",
+     "senderName": "NWS San Diego CA",
+     "sender": "w-nws.webmaster@noaa.gov",
+     "event": "Extreme Heat Warning",
+     "urgency": "Expected",
+     "certainty": "Likely",
+     "severity": "Severe",
+     "category": "Met",
+     "messageType": "Update",
+     "status": "Actual",
+     "ends": "2026-10-08T20:00:00-07:00",
+     "expires": "2026-10-08T09:00:00-04:00",
+     "onset": "2026-10-07T11:47:00-07:00",
+     "effective": "2026-10-07T11:47:00-07:00",
+     "sent": "2026-10-07T11:47:00-07:00",
+     "references": [
+      {
+       "sent": "2026-10-06T12:33:00-07:00",
+       "sender": "w-nws.webmaster@noaa.gov",
+       "identifier": "urn:oid:2.49.0.1.840.0.267bf57ee24ec76e632b7f6d9a34330319090caa.004.1",
+       "@id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.267bf57ee24ec76e632b7f6d9a34330319090caa.004.1"
+      }
+     ],
+     "affectedZones": [
+      "https://api.weather.gov/zones/forecast/CAZ050"
+     ],
+     "geocode": {
+      "UGC": [
+       "CAZ050"
+      ],
+      "SAME": [
+       "006073"
+      ]
+     },
+     "areaDesc": "San Diego County Inland Valleys",
+     "id": "urn:oid:2.49.0.1.840.0.9a0e67ff8f12acc8f53216f011b4279f7a10fb9d.003.1",
+     "@type": "wx:Alert",
+     "@id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.9a0e67ff8f12acc8f53216f011b4279f7a10fb9d.003.1"
+    },
+    "geometry": null,
+    "type": "Feature",
+    "id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.9a0e67ff8f12acc8f53216f011b4279f7a10fb9d.003.1"
+   },
+   {
+    "properties": {
+     "eventCode": {
+      "NationalWeatherService": [
+       "XHW"
+      ],
+      "SAME": [
+       "NWS"
+      ]
+     },
+     "web": "http://www.weather.gov",
+     "language": "en-US",
+     "code": "IPAWSv1.0",
+     "scope": "Public",
+     "parameters": {
+      "expiredReferences": [
+       "w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.c550cc9093ff7e115f4fffcb244cc92372160b23.002.1,2026-10-06T15:38:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.1bc087a432c441d48b4719b625567babeadea057.002.1,2026-10-06T02:20:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.7b1f28a5c4309b82c20594da27ba2d2d13a3d45e.002.1,2026-10-05T20:55:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.63072abaeb467559f279c06de5312e84be8f6c9e.002.1,2026-10-05T11:29:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.3cf20025db395088e16e03432daaeca461a1c117.002.1,2026-10-05T03:19:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.654a9458c757881338e8a81f0b05ceee59ba49ed.002.1,2026-10-04T21:10:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.8ee7883031911f0bd5fb7f6b864bd1e64ff402bd.002.1,2026-10-04T11:32:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.e5e46b2a7965a6d227484dc8775eb62f5eb8aab3.002.1,2026-10-04T04:28:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.80340bab5d8fd1d83c36ab1f229d5ec050106b3f.002.1,2026-10-03T21:40:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.51464c1cc509cecd89db277472a59416a1f88387.001.2,2026-10-03T18:05:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.9d8509fdbfd514c74c5c413067b74eb3235ff460.001.1,2026-10-03T12:03:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.63f1a957c37a406fbd2f055b32af3913569e5c21.001.1,2026-10-03T04:01:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.a6ae5808be5a668a1f14157735055bd556900108.001.1,2026-10-02T21:27:06-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.d1e2bd222531d3a52f5a90cb7f26df399637ed6e.001.1,2026-10-02T12:25:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.c448ad3ae77474de68331b3930821d54317b9128.001.2,2026-10-02T00:32:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.7a59eb2f91c3f262a42ff48e988507bb2c2e12f8.002.1,2026-10-01T20:59:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.65cddfa137738ea86e2c1a1f025333a0857cf6e7.002.1,2026-10-01T13:12:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.b0298ce8669ec993197e560fc10afa2f9b515d6e.002.2,2026-10-01T00:29:00-07:00"
+      ],
+      "eventEndingTime": [
+       "2026-10-08T20:00:00-07:00"
+      ],
+      "VTEC": [
+       "/O.CON.KSGX.XH.W.0010.000000T0000Z-261009T0300Z/"
+      ],
+      "BLOCKCHANNEL": [
+       "EAS",
+       "NWEM",
+       "CMAS"
+      ],
+      "NWSheadline": [
+       "EXTREME HEAT WARNING REMAINS IN EFFECT UNTIL 8 PM PDT THURSDAY"
+      ],
+      "WMOidentifier": [
+       "WWUS76 KSGX 071847"
+      ],
+      "AWIPSidentifier": [
+       "NPWSGX"
+      ]
+     },
+     "note": null,
+     "response": "Execute",
+     "instruction": "Drink plenty of fluids, stay in an air-conditioned room, stay out of\nthe sun, and check up on relatives and neighbors.\n\nDo not leave young children and pets in unattended vehicles. Car\ninteriors will reach lethal temperatures in a matter of minutes.",
+     "description": "* WHAT...Dangerously hot conditions with high temperatures in the\nupper 90s to 105. Nights will be very warm with low temperatures in\nthe upper 60s to low 70s.\n\n* WHERE...San Bernardino and Riverside County Valleys-The Inland\nEmpire.\n\n* WHEN...Until 8 PM PDT Thursday.\n\n* IMPACTS...Heat related illnesses increase significantly during\nextreme heat events.",
+     "headline": "Extreme Heat Warning issued October 7 at 11:47AM PDT until October 8 at 8:00PM PDT by NWS San Diego CA",
+     "senderName": "NWS San Diego CA",
+     "sender": "w-nws.webmaster@noaa.gov",
+     "event": "Extreme Heat Warning",
+     "urgency": "Expected",
+     "certainty": "Likely",
+     "severity": "Severe",
+     "category": "Met",
+     "messageType": "Update",
+     "status": "Actual",
+     "ends": "2026-10-08T20:00:00-07:00",
+     "expires": "2026-10-08T09:00:00-04:00",
+     "onset": "2026-10-07T11:47:00-07:00",
+     "effective": "2026-10-07T11:47:00-07:00",
+     "sent": "2026-10-07T11:47:00-07:00",
+     "references": [
+      {
+       "sent": "2026-10-06T12:33:00-07:00",
+       "sender": "w-nws.webmaster@noaa.gov",
+       "identifier": "urn:oid:2.49.0.1.840.0.267bf57ee24ec76e632b7f6d9a34330319090caa.003.1",
+       "@id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.267bf57ee24ec76e632b7f6d9a34330319090caa.003.1"
+      }
+     ],
+     "affectedZones": [
+      "https://api.weather.gov/zones/forecast/CAZ048"
+     ],
+     "geocode": {
+      "UGC": [
+       "CAZ048"
+      ],
+      "SAME": [
+       "006065",
+       "006071"
+      ]
+     },
+     "areaDesc": "San Bernardino and Riverside County Valleys-The Inland Empire",
+     "id": "urn:oid:2.49.0.1.840.0.9a0e67ff8f12acc8f53216f011b4279f7a10fb9d.002.1",
+     "@type": "wx:Alert",
+     "@id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.9a0e67ff8f12acc8f53216f011b4279f7a10fb9d.002.1"
+    },
+    "geometry": null,
+    "type": "Feature",
+    "id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.9a0e67ff8f12acc8f53216f011b4279f7a10fb9d.002.1"
+   },
+   {
+    "properties": {
+     "eventCode": {
+      "NationalWeatherService": [
+       "XHW"
+      ],
+      "SAME": [
+       "NWS"
+      ]
+     },
+     "web": "http://www.weather.gov",
+     "language": "en-US",
+     "code": "IPAWSv1.0",
+     "scope": "Public",
+     "parameters": {
+      "expiredReferences": [
+       "w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.c550cc9093ff7e115f4fffcb244cc92372160b23.001.1,2026-10-06T15:38:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.1bc087a432c441d48b4719b625567babeadea057.001.1,2026-10-06T02:20:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.7b1f28a5c4309b82c20594da27ba2d2d13a3d45e.001.1,2026-10-05T20:55:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.63072abaeb467559f279c06de5312e84be8f6c9e.001.1,2026-10-05T11:29:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.3cf20025db395088e16e03432daaeca461a1c117.001.1,2026-10-05T03:19:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.654a9458c757881338e8a81f0b05ceee59ba49ed.001.1,2026-10-04T21:10:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.8ee7883031911f0bd5fb7f6b864bd1e64ff402bd.001.1,2026-10-04T11:32:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.e5e46b2a7965a6d227484dc8775eb62f5eb8aab3.001.1,2026-10-04T04:28:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.80340bab5d8fd1d83c36ab1f229d5ec050106b3f.001.1,2026-10-03T21:40:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.51464c1cc509cecd89db277472a59416a1f88387.006.1,2026-10-03T18:05:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.9d8509fdbfd514c74c5c413067b74eb3235ff460.005.1,2026-10-03T12:03:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.63f1a957c37a406fbd2f055b32af3913569e5c21.005.1,2026-10-03T04:01:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.a6ae5808be5a668a1f14157735055bd556900108.005.1,2026-10-02T21:27:07-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.d1e2bd222531d3a52f5a90cb7f26df399637ed6e.005.1,2026-10-02T12:25:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.c448ad3ae77474de68331b3930821d54317b9128.005.1,2026-10-02T00:32:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.7a59eb2f91c3f262a42ff48e988507bb2c2e12f8.001.1,2026-10-01T20:59:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.65cddfa137738ea86e2c1a1f025333a0857cf6e7.001.1,2026-10-01T13:12:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.b0298ce8669ec993197e560fc10afa2f9b515d6e.001.2,2026-10-01T00:29:00-07:00"
+      ],
+      "eventEndingTime": [
+       "2026-10-08T20:00:00-07:00"
+      ],
+      "VTEC": [
+       "/O.CON.KSGX.XH.W.0010.000000T0000Z-261009T0300Z/"
+      ],
+      "BLOCKCHANNEL": [
+       "EAS",
+       "NWEM",
+       "CMAS"
+      ],
+      "NWSheadline": [
+       "EXTREME HEAT WARNING REMAINS IN EFFECT UNTIL 8 PM PDT THURSDAY"
+      ],
+      "WMOidentifier": [
+       "WWUS76 KSGX 071847"
+      ],
+      "AWIPSidentifier": [
+       "NPWSGX"
+      ]
+     },
+     "note": null,
+     "response": "Execute",
+     "instruction": "Drink plenty of fluids, stay in an air-conditioned room, stay out of\nthe sun, and check up on relatives and neighbors.\n\nDo not leave young children and pets in unattended vehicles. Car\ninteriors will reach lethal temperatures in a matter of minutes.",
+     "description": "* WHAT...Dangerously hot conditions with high temperatures ranging\nfrom the low 80s to low 90s at the beaches to the uppers 90s for\nthe mesas and other higher coastal terrain. Nights will be very\nwarm with low temperatures in the low 70s.\n\n* WHERE...San Diego County Coastal Areas.\n\n* WHEN...Until 8 PM PDT Thursday.\n\n* IMPACTS...Heat related illnesses increase significantly during\nextreme heat events.",
+     "headline": "Extreme Heat Warning issued October 7 at 11:47AM PDT until October 8 at 8:00PM PDT by NWS San Diego CA",
+     "senderName": "NWS San Diego CA",
+     "sender": "w-nws.webmaster@noaa.gov",
+     "event": "Extreme Heat Warning",
+     "urgency": "Expected",
+     "certainty": "Likely",
+     "severity": "Severe",
+     "category": "Met",
+     "messageType": "Update",
+     "status": "Actual",
+     "ends": "2026-10-08T20:00:00-07:00",
+     "expires": "2026-10-08T09:00:00-04:00",
+     "onset": "2026-10-07T11:47:00-07:00",
+     "effective": "2026-10-07T11:47:00-07:00",
+     "sent": "2026-10-07T11:47:00-07:00",
+     "references": [
+      {
+       "sent": "2026-10-06T12:33:00-07:00",
+       "sender": "w-nws.webmaster@noaa.gov",
+       "identifier": "urn:oid:2.49.0.1.840.0.267bf57ee24ec76e632b7f6d9a34330319090caa.002.1",
+       "@id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.267bf57ee24ec76e632b7f6d9a34330319090caa.002.1"
+      }
+     ],
+     "affectedZones": [
+      "https://api.weather.gov/zones/forecast/CAZ043"
+     ],
+     "geocode": {
+      "UGC": [
+       "CAZ043"
+      ],
+      "SAME": [
+       "006073"
+      ]
+     },
+     "areaDesc": "San Diego County Coastal Areas",
+     "id": "urn:oid:2.49.0.1.840.0.9a0e67ff8f12acc8f53216f011b4279f7a10fb9d.001.1",
+     "@type": "wx:Alert",
+     "@id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.9a0e67ff8f12acc8f53216f011b4279f7a10fb9d.001.1"
+    },
+    "geometry": null,
+    "type": "Feature",
+    "id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.9a0e67ff8f12acc8f53216f011b4279f7a10fb9d.001.1"
+   },
+   {
+    "properties": {
+     "eventCode": {
+      "NationalWeatherService": [
+       "XHW"
+      ],
+      "SAME": [
+       "NWS"
+      ]
+     },
+     "web": "http://www.weather.gov",
+     "language": "en-US",
+     "code": "IPAWSv1.0",
+     "scope": "Public",
+     "parameters": {
+      "expiredReferences": [
+       "w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.c550cc9093ff7e115f4fffcb244cc92372160b23.005.1,2026-10-06T15:38:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.1bc087a432c441d48b4719b625567babeadea057.005.1,2026-10-06T02:20:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.7b1f28a5c4309b82c20594da27ba2d2d13a3d45e.005.1,2026-10-05T20:55:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.63072abaeb467559f279c06de5312e84be8f6c9e.005.1,2026-10-05T11:29:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.3cf20025db395088e16e03432daaeca461a1c117.005.1,2026-10-05T03:19:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.654a9458c757881338e8a81f0b05ceee59ba49ed.005.1,2026-10-04T21:10:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.8ee7883031911f0bd5fb7f6b864bd1e64ff402bd.005.1,2026-10-04T11:32:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.e5e46b2a7965a6d227484dc8775eb62f5eb8aab3.005.1,2026-10-04T04:28:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.80340bab5d8fd1d83c36ab1f229d5ec050106b3f.005.1,2026-10-03T21:40:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.51464c1cc509cecd89db277472a59416a1f88387.007.1,2026-10-03T18:05:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.9d8509fdbfd514c74c5c413067b74eb3235ff460.006.1,2026-10-03T12:03:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.63f1a957c37a406fbd2f055b32af3913569e5c21.006.1,2026-10-03T04:01:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.a6ae5808be5a668a1f14157735055bd556900108.006.1,2026-10-02T21:27:07-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.d1e2bd222531d3a52f5a90cb7f26df399637ed6e.006.1,2026-10-02T12:25:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.c448ad3ae77474de68331b3930821d54317b9128.006.1,2026-10-02T00:32:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.7a59eb2f91c3f262a42ff48e988507bb2c2e12f8.005.1,2026-10-01T20:59:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.65cddfa137738ea86e2c1a1f025333a0857cf6e7.005.1,2026-10-01T13:12:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.b0298ce8669ec993197e560fc10afa2f9b515d6e.005.2,2026-10-01T00:29:00-07:00"
+      ],
+      "eventEndingTime": [
+       "2026-10-08T20:00:00-07:00"
+      ],
+      "VTEC": [
+       "/O.CON.KSGX.XH.W.0010.000000T0000Z-261009T0300Z/"
+      ],
+      "BLOCKCHANNEL": [
+       "EAS",
+       "NWEM",
+       "CMAS"
+      ],
+      "NWSheadline": [
+       "EXTREME HEAT WARNING REMAINS IN EFFECT UNTIL 8 PM PDT THURSDAY"
+      ],
+      "WMOidentifier": [
+       "WWUS76 KSGX 071847"
+      ],
+      "AWIPSidentifier": [
+       "NPWSGX"
+      ]
+     },
+     "note": null,
+     "response": "Execute",
+     "instruction": "Drink plenty of fluids, stay in an air-conditioned room, stay out of\nthe sun, and check up on relatives and neighbors.\n\nDo not leave young children and pets in unattended vehicles. Car\ninteriors will reach lethal temperatures in a matter of minutes.",
+     "description": "* WHAT...Dangerously hot conditions with high temperatures ranging\nfrom the mid 80s to mid 90s. Nights will be very warm with low\ntemperatures in the upper 60s to low 70s.\n\n* WHERE...Orange County Coastal Areas.\n\n* WHEN...Until 8 PM PDT Thursday.\n\n* IMPACTS...Heat related illnesses increase significantly during\nextreme heat events.",
+     "headline": "Extreme Heat Warning issued October 7 at 11:47AM PDT until October 8 at 8:00PM PDT by NWS San Diego CA",
+     "senderName": "NWS San Diego CA",
+     "sender": "w-nws.webmaster@noaa.gov",
+     "event": "Extreme Heat Warning",
+     "urgency": "Expected",
+     "certainty": "Likely",
+     "severity": "Severe",
+     "category": "Met",
+     "messageType": "Update",
+     "status": "Actual",
+     "ends": "2026-10-08T20:00:00-07:00",
+     "expires": "2026-10-08T09:00:00-04:00",
+     "onset": "2026-10-07T11:47:00-07:00",
+     "effective": "2026-10-07T11:47:00-07:00",
+     "sent": "2026-10-07T11:47:00-07:00",
+     "references": [
+      {
+       "sent": "2026-10-06T12:33:00-07:00",
+       "sender": "w-nws.webmaster@noaa.gov",
+       "identifier": "urn:oid:2.49.0.1.840.0.267bf57ee24ec76e632b7f6d9a34330319090caa.006.1",
+       "@id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.267bf57ee24ec76e632b7f6d9a34330319090caa.006.1"
+      }
+     ],
+     "affectedZones": [
+      "https://api.weather.gov/zones/forecast/CAZ552"
+     ],
+     "geocode": {
+      "UGC": [
+       "CAZ552"
+      ],
+      "SAME": [
+       "006059"
+      ]
+     },
+     "areaDesc": "Orange County Coastal",
+     "id": "urn:oid:2.49.0.1.840.0.9a0e67ff8f12acc8f53216f011b4279f7a10fb9d.006.1",
+     "@type": "wx:Alert",
+     "@id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.9a0e67ff8f12acc8f53216f011b4279f7a10fb9d.006.1"
+    },
+    "geometry": null,
+    "type": "Feature",
+    "id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.9a0e67ff8f12acc8f53216f011b4279f7a10fb9d.006.1"
+   },
+   {
+    "properties": {
+     "eventCode": {
+      "NationalWeatherService": [
+       "XHW"
+      ],
+      "SAME": [
+       "NWS"
+      ]
+     },
+     "web": "http://www.weather.gov",
+     "language": "en-US",
+     "code": "IPAWSv1.0",
+     "scope": "Public",
+     "parameters": {
+      "expiredReferences": [
+       "w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.c550cc9093ff7e115f4fffcb244cc92372160b23.004.1,2026-10-06T15:38:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.1bc087a432c441d48b4719b625567babeadea057.004.1,2026-10-06T02:20:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.7b1f28a5c4309b82c20594da27ba2d2d13a3d45e.004.1,2026-10-05T20:55:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.63072abaeb467559f279c06de5312e84be8f6c9e.004.1,2026-10-05T11:29:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.3cf20025db395088e16e03432daaeca461a1c117.004.1,2026-10-05T03:19:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.654a9458c757881338e8a81f0b05ceee59ba49ed.004.1,2026-10-04T21:10:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.8ee7883031911f0bd5fb7f6b864bd1e64ff402bd.004.1,2026-10-04T11:32:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.e5e46b2a7965a6d227484dc8775eb62f5eb8aab3.004.1,2026-10-04T04:28:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.80340bab5d8fd1d83c36ab1f229d5ec050106b3f.004.1,2026-10-03T21:40:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.51464c1cc509cecd89db277472a59416a1f88387.003.2,2026-10-03T18:05:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.9d8509fdbfd514c74c5c413067b74eb3235ff460.003.1,2026-10-03T12:03:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.63f1a957c37a406fbd2f055b32af3913569e5c21.003.1,2026-10-03T04:01:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.a6ae5808be5a668a1f14157735055bd556900108.003.1,2026-10-02T21:27:07-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.d1e2bd222531d3a52f5a90cb7f26df399637ed6e.003.1,2026-10-02T12:25:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.c448ad3ae77474de68331b3930821d54317b9128.003.2,2026-10-02T00:32:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.7a59eb2f91c3f262a42ff48e988507bb2c2e12f8.004.1,2026-10-01T20:59:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.65cddfa137738ea86e2c1a1f025333a0857cf6e7.004.1,2026-10-01T13:12:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.b0298ce8669ec993197e560fc10afa2f9b515d6e.004.2,2026-10-01T00:29:00-07:00"
+      ],
+      "eventEndingTime": [
+       "2026-10-08T20:00:00-07:00"
+      ],
+      "VTEC": [
+       "/O.CON.KSGX.XH.W.0010.000000T0000Z-261009T0300Z/"
+      ],
+      "BLOCKCHANNEL": [
+       "EAS",
+       "NWEM",
+       "CMAS"
+      ],
+      "NWSheadline": [
+       "EXTREME HEAT WARNING REMAINS IN EFFECT UNTIL 8 PM PDT THURSDAY"
+      ],
+      "WMOidentifier": [
+       "WWUS76 KSGX 071847"
+      ],
+      "AWIPSidentifier": [
+       "NPWSGX"
+      ]
+     },
+     "note": null,
+     "response": "Execute",
+     "instruction": "Drink plenty of fluids, stay in an air-conditioned room, stay out of\nthe sun, and check up on relatives and neighbors.\n\nDo not leave young children and pets in unattended vehicles. Car\ninteriors will reach lethal temperatures in a matter of minutes.",
+     "description": "* WHAT...Dangerously hot conditions with high temperatures in the\n90s. Nights will be very warm with low temperatures in the upper\n60s to mid 70s.\n\n* WHERE...Santa Ana Mountains and Foothills.\n\n* WHEN...Until 8 PM PDT Thursday.\n\n* IMPACTS...Heat related illnesses increase significantly during\nextreme heat events.",
+     "headline": "Extreme Heat Warning issued October 7 at 11:47AM PDT until October 8 at 8:00PM PDT by NWS San Diego CA",
+     "senderName": "NWS San Diego CA",
+     "sender": "w-nws.webmaster@noaa.gov",
+     "event": "Extreme Heat Warning",
+     "urgency": "Expected",
+     "certainty": "Likely",
+     "severity": "Severe",
+     "category": "Met",
+     "messageType": "Update",
+     "status": "Actual",
+     "ends": "2026-10-08T20:00:00-07:00",
+     "expires": "2026-10-08T09:00:00-04:00",
+     "onset": "2026-10-07T11:47:00-07:00",
+     "effective": "2026-10-07T11:47:00-07:00",
+     "sent": "2026-10-07T11:47:00-07:00",
+     "references": [
+      {
+       "sent": "2026-10-06T12:33:00-07:00",
+       "sender": "w-nws.webmaster@noaa.gov",
+       "identifier": "urn:oid:2.49.0.1.840.0.267bf57ee24ec76e632b7f6d9a34330319090caa.005.1",
+       "@id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.267bf57ee24ec76e632b7f6d9a34330319090caa.005.1"
+      }
+     ],
+     "affectedZones": [
+      "https://api.weather.gov/zones/forecast/CAZ057"
+     ],
+     "geocode": {
+      "UGC": [
+       "CAZ057"
+      ],
+      "SAME": [
+       "006059",
+       "006065",
+       "006073"
+      ]
+     },
+     "areaDesc": "Santa Ana Mountains and Foothills",
+     "id": "urn:oid:2.49.0.1.840.0.9a0e67ff8f12acc8f53216f011b4279f7a10fb9d.004.1",
+     "@type": "wx:Alert",
+     "@id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.9a0e67ff8f12acc8f53216f011b4279f7a10fb9d.004.1"
+    },
+    "geometry": null,
+    "type": "Feature",
+    "id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.9a0e67ff8f12acc8f53216f011b4279f7a10fb9d.004.1"
+   },
+   {
+    "properties": {
+     "eventCode": {
+      "NationalWeatherService": [
+       "FWA"
+      ],
+      "SAME": [
+       "NWS"
+      ]
+     },
+     "web": "http://www.weather.gov",
+     "language": "en-US",
+     "code": "IPAWSv1.0",
+     "scope": "Public",
+     "parameters": {
+      "eventEndingTime": [
+       "2026-10-09T21:00:00-07:00"
+      ],
+      "VTEC": [
+       "/O.NEW.KREV.FW.A.0012.261009T2000Z-261010T0400Z/"
+      ],
+      "BLOCKCHANNEL": [
+       "EAS",
+       "NWEM",
+       "CMAS"
+      ],
+      "NWSheadline": [
+       "FIRE WEATHER WATCH IN EFFECT FROM FRIDAY AFTERNOON THROUGH FRIDAY EVENING DUE TO WIND AND LOW RELATIVE HUMIDITY FOR SURPRISE VALLEY CALIFORNIA, EASTERN LASSEN COUNTY, AND NORTHERN WASHOE COUNTY"
+      ],
+      "WMOidentifier": [
+       "WWUS85 KREV 071648"
+      ],
+      "AWIPSidentifier": [
+       "RFWREV"
+      ]
+     },
+     "note": null,
+     "response": "Prepare",
+     "instruction": "Avoid outdoor activities that can cause a spark near dry vegetation,\nsuch as yard work, target shooting, or campfires. Follow local fire\nrestrictions. Check weather.gov/reno for updates and\nlivingwithfire.info for preparedness tips.",
+     "description": "The National Weather Service in Reno NV has issued a Fire Weather\nWatch.\n\n* AFFECTED AREA...Fire Weather Zones 270 Surprise Valley California,\n278 Eastern Lassen County, and 458 Northern Washoe County.\n\n* TIMING...From Friday afternoon through Friday evening.\n\n* WINDS...West winds 15 to 20 mph with gusts up to 35 mph.\n\n* RELATIVE HUMIDITY...Minimum humidity between 12 and 17 percent.\n\n* DURATION...2 to 5 hours.\n\n* IMPACTS...The combination of gusty winds and low humidity can cause\nfires to rapidly grow in size and intensity before first responders\ncan contain them.",
+     "headline": "Fire Weather Watch issued October 7 at 9:48AM PDT until October 9 at 9:00PM PDT by NWS Reno NV",
+     "senderName": "NWS Reno NV",
+     "sender": "w-nws.webmaster@noaa.gov",
+     "event": "Fire Weather Watch",
+     "urgency": "Future",
+     "certainty": "Possible",
+     "severity": "Severe",
+     "category": "Met",
+     "messageType": "Alert",
+     "status": "Actual",
+     "ends": "2026-10-09T21:00:00-07:00",
+     "expires": "2026-10-08T17:45:00-04:00",
+     "onset": "2026-10-09T13:00:00-07:00",
+     "effective": "2026-10-07T09:48:00-07:00",
+     "sent": "2026-10-07T09:48:00-07:00",
+     "references": [],
+     "affectedZones": [
+      "https://api.weather.gov/zones/fire/CAZ270",
+      "https://api.weather.gov/zones/fire/CAZ278",
+      "https://api.weather.gov/zones/fire/NVZ458"
+     ],
+     "geocode": {
+      "UGC": [
+       "CAZ270",
+       "CAZ278",
+       "NVZ458"
+      ],
+      "SAME": [
+       "006049",
+       "006035",
+       "032027",
+       "032031"
+      ]
+     },
+     "areaDesc": "Surprise Valley California; Eastern Lassen County; Northern Washoe County",
+     "id": "urn:oid:2.49.0.1.840.0.b63c891471f162468b6d72b175e365e092806af7.001.1",
+     "@type": "wx:Alert",
+     "@id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.b63c891471f162468b6d72b175e365e092806af7.001.1"
+    },
+    "geometry": null,
+    "type": "Feature",
+    "id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.b63c891471f162468b6d72b175e365e092806af7.001.1"
+   },
+   {
+    "properties": {
+     "eventCode": {
+      "NationalWeatherService": [
+       "HTY"
+      ],
+      "SAME": [
+       "NWS"
+      ]
+     },
+     "web": "http://www.weather.gov",
+     "language": "en-US",
+     "code": "IPAWSv1.0",
+     "scope": "Public",
+     "parameters": {
+      "expiredReferences": [
+       "w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.e743d6fcfba924b8a69ce968be357e950d588c80.004.1,2026-10-05T14:47:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.1f7b086a6ad56d044bb16dca148157a534b80015.003.1,2026-10-04T11:04:00-07:00"
+      ],
+      "eventEndingTime": [
+       "2026-10-08T20:00:00-07:00"
+      ],
+      "VTEC": [
+       "/O.CON.KLOX.HT.Y.0018.261007T1700Z-261009T0300Z/"
+      ],
+      "BLOCKCHANNEL": [
+       "EAS",
+       "NWEM",
+       "CMAS"
+      ],
+      "NWSheadline": [
+       "HEAT ADVISORY REMAINS IN EFFECT UNTIL 8 PM PDT THURSDAY"
+      ],
+      "WMOidentifier": [
+       "WWUS76 KLOX 071641"
+      ],
+      "AWIPSidentifier": [
+       "NPWLOX"
+      ]
+     },
+     "note": null,
+     "response": "Execute",
+     "instruction": "Drink plenty of fluids, stay in an air-conditioned room, stay out of\nthe sun, and check up on relatives and neighbors.",
+     "description": "* WHAT...Temperatures up to 90 expected.\n\n* WHERE...San Luis Obispo County Beaches and Santa Barbara County\nCentral Coast Beaches.\n\n* WHEN...Until 8 PM PDT Thursday.\n\n* IMPACTS...Hot temperatures may cause heat illnesses.",
+     "headline": "Heat Advisory issued October 7 at 9:41AM PDT until October 8 at 8:00PM PDT by NWS Los Angeles/Oxnard CA",
+     "senderName": "NWS Los Angeles/Oxnard CA",
+     "sender": "w-nws.webmaster@noaa.gov",
+     "event": "Heat Advisory",
+     "urgency": "Expected",
+     "certainty": "Likely",
+     "severity": "Moderate",
+     "category": "Met",
+     "messageType": "Update",
+     "status": "Actual",
+     "ends": "2026-10-08T20:00:00-07:00",
+     "expires": "2026-10-08T00:45:00-04:00",
+     "onset": "2026-10-07T10:00:00-07:00",
+     "effective": "2026-10-07T09:41:00-07:00",
+     "sent": "2026-10-07T09:41:00-07:00",
+     "references": [
+      {
+       "sent": "2026-10-06T02:56:00-07:00",
+       "sender": "w-nws.webmaster@noaa.gov",
+       "identifier": "urn:oid:2.49.0.1.840.0.59caa839a2e6cbc9c2581c4b34028672a2e4a2c4.004.1",
+       "@id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.59caa839a2e6cbc9c2581c4b34028672a2e4a2c4.004.1"
+      }
+     ],
+     "affectedZones": [
+      "https://api.weather.gov/zones/forecast/CAZ340",
+      "https://api.weather.gov/zones/forecast/CAZ346"
+     ],
+     "geocode": {
+      "UGC": [
+       "CAZ340",
+       "CAZ346"
+      ],
+      "SAME": [
+       "006079",
+       "006083"
+      ]
+     },
+     "areaDesc": "San Luis Obispo County Beaches; Santa Barbara County Central Coast Beaches",
+     "id": "urn:oid:2.49.0.1.840.0.a3cd823e6b24409eb1f063ecf66a93bc6e80f7c5.004.1",
+     "@type": "wx:Alert",
+     "@id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.a3cd823e6b24409eb1f063ecf66a93bc6e80f7c5.004.1"
+    },
+    "geometry": null,
+    "type": "Feature",
+    "id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.a3cd823e6b24409eb1f063ecf66a93bc6e80f7c5.004.1"
+   },
+   {
+    "properties": {
+     "eventCode": {
+      "NationalWeatherService": [
+       "HTY"
+      ],
+      "SAME": [
+       "NWS"
+      ]
+     },
+     "web": "http://www.weather.gov",
+     "language": "en-US",
+     "code": "IPAWSv1.0",
+     "scope": "Public",
+     "parameters": {
+      "expiredReferences": [
+       "w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.e743d6fcfba924b8a69ce968be357e950d588c80.003.1,2026-10-05T14:47:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.1f7b086a6ad56d044bb16dca148157a534b80015.004.1,2026-10-04T11:04:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.cc114be7184a7472776b632a007d978ec30ad034.003.1,2026-10-02T10:38:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.a83e130c2d84400d0abc57e184bd5fa32180bde1.003.1,2026-10-01T12:17:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.a98bbc0a1eaa81bcae163ab759e2a71eef120f8e.005.1,2026-10-02T05:38:00-07:00"
+      ],
+      "eventEndingTime": [
+       "2026-10-08T20:00:00-07:00"
+      ],
+      "VTEC": [
+       "/O.CON.KLOX.HT.Y.0018.000000T0000Z-261009T0300Z/"
+      ],
+      "BLOCKCHANNEL": [
+       "EAS",
+       "NWEM",
+       "CMAS"
+      ],
+      "NWSheadline": [
+       "HEAT ADVISORY REMAINS IN EFFECT UNTIL 8 PM PDT THURSDAY"
+      ],
+      "WMOidentifier": [
+       "WWUS76 KLOX 071641"
+      ],
+      "AWIPSidentifier": [
+       "NPWLOX"
+      ]
+     },
+     "note": null,
+     "response": "Execute",
+     "instruction": "Drink plenty of fluids, stay in an air-conditioned room, stay out of\nthe sun, and check up on relatives and neighbors.",
+     "description": "* WHAT...Temperatures up to 97.\n\n* WHERE...San Luis Obispo County Inland Central Coast, San Luis\nObispo County Interior Valleys, San Luis Obispo County Mountains,\nSanta Barbara County Inland Central Coast, Santa Lucia Mountains,\nSanta Ynez Valley, and Southern Salinas Valley.\n\n* WHEN...Until 8 PM PDT Thursday.\n\n* IMPACTS...Hot temperatures may cause heat illnesses.",
+     "headline": "Heat Advisory issued October 7 at 9:41AM PDT until October 8 at 8:00PM PDT by NWS Los Angeles/Oxnard CA",
+     "senderName": "NWS Los Angeles/Oxnard CA",
+     "sender": "w-nws.webmaster@noaa.gov",
+     "event": "Heat Advisory",
+     "urgency": "Expected",
+     "certainty": "Likely",
+     "severity": "Moderate",
+     "category": "Met",
+     "messageType": "Update",
+     "status": "Actual",
+     "ends": "2026-10-08T20:00:00-07:00",
+     "expires": "2026-10-08T00:45:00-04:00",
+     "onset": "2026-10-07T09:41:00-07:00",
+     "effective": "2026-10-07T09:41:00-07:00",
+     "sent": "2026-10-07T09:41:00-07:00",
+     "references": [
+      {
+       "sent": "2026-10-03T12:15:00-07:00",
+       "sender": "w-nws.webmaster@noaa.gov",
+       "identifier": "urn:oid:2.49.0.1.840.0.469a5488af3dceb8f4d0e41c09f4dbf04bb51c75.003.1",
+       "@id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.469a5488af3dceb8f4d0e41c09f4dbf04bb51c75.003.1"
+      },
+      {
+       "sent": "2026-10-06T02:56:00-07:00",
+       "sender": "w-nws.webmaster@noaa.gov",
+       "identifier": "urn:oid:2.49.0.1.840.0.59caa839a2e6cbc9c2581c4b34028672a2e4a2c4.003.1",
+       "@id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.59caa839a2e6cbc9c2581c4b34028672a2e4a2c4.003.1"
+      }
+     ],
+     "affectedZones": [
+      "https://api.weather.gov/zones/forecast/CAZ341",
+      "https://api.weather.gov/zones/forecast/CAZ342",
+      "https://api.weather.gov/zones/forecast/CAZ343",
+      "https://api.weather.gov/zones/forecast/CAZ344",
+      "https://api.weather.gov/zones/forecast/CAZ345",
+      "https://api.weather.gov/zones/forecast/CAZ347",
+      "https://api.weather.gov/zones/forecast/CAZ348"
+     ],
+     "geocode": {
+      "UGC": [
+       "CAZ341",
+       "CAZ342",
+       "CAZ343",
+       "CAZ344",
+       "CAZ345",
+       "CAZ347",
+       "CAZ348"
+      ],
+      "SAME": [
+       "006079",
+       "006083"
+      ]
+     },
+     "areaDesc": "San Luis Obispo County Inland Central Coast; Santa Lucia Mountains; Southern Salinas Valley; San Luis Obispo County Interior Valleys; San Luis Obispo County Mountains; Santa Barbara County Inland Central Coast; Santa Ynez Valley",
+     "id": "urn:oid:2.49.0.1.840.0.a3cd823e6b24409eb1f063ecf66a93bc6e80f7c5.003.1",
+     "@type": "wx:Alert",
+     "@id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.a3cd823e6b24409eb1f063ecf66a93bc6e80f7c5.003.1"
+    },
+    "geometry": null,
+    "type": "Feature",
+    "id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.a3cd823e6b24409eb1f063ecf66a93bc6e80f7c5.003.1"
+   },
+   {
+    "properties": {
+     "eventCode": {
+      "NationalWeatherService": [
+       "XHW"
+      ],
+      "SAME": [
+       "NWS"
+      ]
+     },
+     "web": "http://www.weather.gov",
+     "language": "en-US",
+     "code": "IPAWSv1.0",
+     "scope": "Public",
+     "parameters": {
+      "expiredReferences": [
+       "w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.e743d6fcfba924b8a69ce968be357e950d588c80.001.1,2026-10-05T14:47:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.1f7b086a6ad56d044bb16dca148157a534b80015.001.1,2026-10-04T11:04:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.cc114be7184a7472776b632a007d978ec30ad034.001.1,2026-10-02T10:38:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.a83e130c2d84400d0abc57e184bd5fa32180bde1.001.2,2026-10-01T12:17:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.a98bbc0a1eaa81bcae163ab759e2a71eef120f8e.002.1,2026-10-02T05:38:00-07:00"
+      ],
+      "eventEndingTime": [
+       "2026-10-08T20:00:00-07:00"
+      ],
+      "VTEC": [
+       "/O.CON.KLOX.XH.W.0008.000000T0000Z-261009T0300Z/"
+      ],
+      "BLOCKCHANNEL": [
+       "EAS",
+       "NWEM",
+       "CMAS"
+      ],
+      "NWSheadline": [
+       "EXTREME HEAT WARNING REMAINS IN EFFECT UNTIL 8 PM PDT THURSDAY"
+      ],
+      "WMOidentifier": [
+       "WWUS76 KLOX 071641"
+      ],
+      "AWIPSidentifier": [
+       "NPWLOX"
+      ]
+     },
+     "note": null,
+     "response": "Execute",
+     "instruction": "Drink plenty of fluids, stay in an air-conditioned room, stay out of\nthe sun, and check up on relatives and neighbors.",
+     "description": "* WHAT...Dangerously hot conditions with temperatures up to 95.\n\n* WHERE...Cuyama Valley, Santa Barbara County Interior Mountains,\nSanta Barbara County Southeastern Coast, Santa Barbara County\nSouthwestern Coast, Santa Cruz and Anacapa Islands, Santa Ynez\nMountains Eastern Range, and Santa Ynez Mountains Western Range.\n\n* WHEN...Until 8 PM PDT Thursday.\n\n* IMPACTS...Heat related illnesses increase significantly during\nextreme heat events.",
+     "headline": "Extreme Heat Warning issued October 7 at 9:41AM PDT until October 8 at 8:00PM PDT by NWS Los Angeles/Oxnard CA",
+     "senderName": "NWS Los Angeles/Oxnard CA",
+     "sender": "w-nws.webmaster@noaa.gov",
+     "event": "Extreme Heat Warning",
+     "urgency": "Expected",
+     "certainty": "Likely",
+     "severity": "Severe",
+     "category": "Met",
+     "messageType": "Update",
+     "status": "Actual",
+     "ends": "2026-10-08T20:00:00-07:00",
+     "expires": "2026-10-08T00:45:00-04:00",
+     "onset": "2026-10-07T09:41:00-07:00",
+     "effective": "2026-10-07T09:41:00-07:00",
+     "sent": "2026-10-07T09:41:00-07:00",
+     "references": [
+      {
+       "sent": "2026-10-03T12:15:00-07:00",
+       "sender": "w-nws.webmaster@noaa.gov",
+       "identifier": "urn:oid:2.49.0.1.840.0.469a5488af3dceb8f4d0e41c09f4dbf04bb51c75.001.1",
+       "@id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.469a5488af3dceb8f4d0e41c09f4dbf04bb51c75.001.1"
+      },
+      {
+       "sent": "2026-10-06T02:56:00-07:00",
+       "sender": "w-nws.webmaster@noaa.gov",
+       "identifier": "urn:oid:2.49.0.1.840.0.59caa839a2e6cbc9c2581c4b34028672a2e4a2c4.001.1",
+       "@id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.59caa839a2e6cbc9c2581c4b34028672a2e4a2c4.001.1"
+      }
+     ],
+     "affectedZones": [
+      "https://api.weather.gov/zones/forecast/CAZ038",
+      "https://api.weather.gov/zones/forecast/CAZ349",
+      "https://api.weather.gov/zones/forecast/CAZ350",
+      "https://api.weather.gov/zones/forecast/CAZ351",
+      "https://api.weather.gov/zones/forecast/CAZ352",
+      "https://api.weather.gov/zones/forecast/CAZ353",
+      "https://api.weather.gov/zones/forecast/CAZ550"
+     ],
+     "geocode": {
+      "UGC": [
+       "CAZ038",
+       "CAZ349",
+       "CAZ350",
+       "CAZ351",
+       "CAZ352",
+       "CAZ353",
+       "CAZ550"
+      ],
+      "SAME": [
+       "006083",
+       "006111"
+      ]
+     },
+     "areaDesc": "Cuyama Valley; Santa Barbara County Southwestern Coast; Santa Barbara County Southeastern Coast; Santa Ynez Mountains Western Range; Santa Ynez Mountains Eastern Range; Santa Barbara County Interior Mountains; Santa Cruz and Anacapa Islands",
+     "id": "urn:oid:2.49.0.1.840.0.a3cd823e6b24409eb1f063ecf66a93bc6e80f7c5.001.1",
+     "@type": "wx:Alert",
+     "@id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.a3cd823e6b24409eb1f063ecf66a93bc6e80f7c5.001.1"
+    },
+    "geometry": null,
+    "type": "Feature",
+    "id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.a3cd823e6b24409eb1f063ecf66a93bc6e80f7c5.001.1"
+   },
+   {
+    "properties": {
+     "eventCode": {
+      "NationalWeatherService": [
+       "XHW"
+      ],
+      "SAME": [
+       "NWS"
+      ]
+     },
+     "web": "http://www.weather.gov",
+     "language": "en-US",
+     "code": "IPAWSv1.0",
+     "scope": "Public",
+     "parameters": {
+      "expiredReferences": [
+       "w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.e743d6fcfba924b8a69ce968be357e950d588c80.002.1,2026-10-05T14:47:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.1f7b086a6ad56d044bb16dca148157a534b80015.002.1,2026-10-04T11:04:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.cc114be7184a7472776b632a007d978ec30ad034.002.1,2026-10-02T10:38:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.a83e130c2d84400d0abc57e184bd5fa32180bde1.002.2,2026-10-01T12:17:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.a98bbc0a1eaa81bcae163ab759e2a71eef120f8e.003.1,2026-10-02T05:38:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.a98bbc0a1eaa81bcae163ab759e2a71eef120f8e.001.2,2026-10-02T05:38:00-07:00"
+      ],
+      "eventEndingTime": [
+       "2026-10-08T20:00:00-07:00"
+      ],
+      "VTEC": [
+       "/O.CON.KLOX.XH.W.0008.000000T0000Z-261009T0300Z/"
+      ],
+      "BLOCKCHANNEL": [
+       "EAS",
+       "NWEM",
+       "CMAS"
+      ],
+      "NWSheadline": [
+       "EXTREME HEAT WARNING REMAINS IN EFFECT UNTIL 8 PM PDT THURSDAY"
+      ],
+      "WMOidentifier": [
+       "WWUS76 KLOX 071641"
+      ],
+      "AWIPSidentifier": [
+       "NPWLOX"
+      ]
+     },
+     "note": null,
+     "response": "Execute",
+     "instruction": "Drink plenty of fluids, stay in an air-conditioned room, stay out of\nthe sun, and check up on relatives and neighbors.",
+     "description": "* WHAT...Dangerously hot conditions with temperatures up to 99.\n\n* WHERE...A portion of southwest California.\n\n* WHEN...Until 8 PM PDT Thursday.\n\n* IMPACTS...Heat related illnesses increase significantly during\nextreme heat events.",
+     "headline": "Extreme Heat Warning issued October 7 at 9:41AM PDT until October 8 at 8:00PM PDT by NWS Los Angeles/Oxnard CA",
+     "senderName": "NWS Los Angeles/Oxnard CA",
+     "sender": "w-nws.webmaster@noaa.gov",
+     "event": "Extreme Heat Warning",
+     "urgency": "Expected",
+     "certainty": "Likely",
+     "severity": "Severe",
+     "category": "Met",
+     "messageType": "Update",
+     "status": "Actual",
+     "ends": "2026-10-08T20:00:00-07:00",
+     "expires": "2026-10-08T00:45:00-04:00",
+     "onset": "2026-10-07T09:41:00-07:00",
+     "effective": "2026-10-07T09:41:00-07:00",
+     "sent": "2026-10-07T09:41:00-07:00",
+     "references": [
+      {
+       "sent": "2026-10-03T12:15:00-07:00",
+       "sender": "w-nws.webmaster@noaa.gov",
+       "identifier": "urn:oid:2.49.0.1.840.0.469a5488af3dceb8f4d0e41c09f4dbf04bb51c75.002.1",
+       "@id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.469a5488af3dceb8f4d0e41c09f4dbf04bb51c75.002.1"
+      },
+      {
+       "sent": "2026-10-06T02:56:00-07:00",
+       "sender": "w-nws.webmaster@noaa.gov",
+       "identifier": "urn:oid:2.49.0.1.840.0.59caa839a2e6cbc9c2581c4b34028672a2e4a2c4.002.1",
+       "@id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.59caa839a2e6cbc9c2581c4b34028672a2e4a2c4.002.1"
+      }
+     ],
+     "affectedZones": [
+      "https://api.weather.gov/zones/forecast/CAZ087",
+      "https://api.weather.gov/zones/forecast/CAZ088",
+      "https://api.weather.gov/zones/forecast/CAZ354",
+      "https://api.weather.gov/zones/forecast/CAZ355",
+      "https://api.weather.gov/zones/forecast/CAZ356",
+      "https://api.weather.gov/zones/forecast/CAZ357",
+      "https://api.weather.gov/zones/forecast/CAZ358",
+      "https://api.weather.gov/zones/forecast/CAZ362",
+      "https://api.weather.gov/zones/forecast/CAZ366",
+      "https://api.weather.gov/zones/forecast/CAZ367",
+      "https://api.weather.gov/zones/forecast/CAZ368",
+      "https://api.weather.gov/zones/forecast/CAZ369",
+      "https://api.weather.gov/zones/forecast/CAZ370",
+      "https://api.weather.gov/zones/forecast/CAZ371",
+      "https://api.weather.gov/zones/forecast/CAZ372",
+      "https://api.weather.gov/zones/forecast/CAZ373",
+      "https://api.weather.gov/zones/forecast/CAZ374",
+      "https://api.weather.gov/zones/forecast/CAZ375",
+      "https://api.weather.gov/zones/forecast/CAZ548"
+     ],
+     "geocode": {
+      "UGC": [
+       "CAZ087",
+       "CAZ088",
+       "CAZ354",
+       "CAZ355",
+       "CAZ356",
+       "CAZ357",
+       "CAZ358",
+       "CAZ362",
+       "CAZ366",
+       "CAZ367",
+       "CAZ368",
+       "CAZ369",
+       "CAZ370",
+       "CAZ371",
+       "CAZ372",
+       "CAZ373",
+       "CAZ374",
+       "CAZ375",
+       "CAZ548"
+      ],
+      "SAME": [
+       "006037",
+       "006111"
+      ]
+     },
+     "areaDesc": "Catalina and Santa Barbara Islands; Santa Clarita Valley; Ventura County Beaches; Ventura County Inland Coast; Lake Casitas; Ojai Valley; Central Ventura County Valleys; Malibu Coast; Los Angeles County Beaches; Palos Verdes Hills; Los Angeles County Inland Coast including Downtown Los Angeles; Western Santa Monica Mountains Recreational Area; Eastern Santa Monica Mountains Recreational Area; Calabasas and Agoura Hills; Western San Fernando Valley; Eastern San Fernando Valley; Southeastern Ventura County Valleys; Santa Susana Mountains; Los Angeles County San Gabriel Valley",
+     "id": "urn:oid:2.49.0.1.840.0.a3cd823e6b24409eb1f063ecf66a93bc6e80f7c5.002.1",
+     "@type": "wx:Alert",
+     "@id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.a3cd823e6b24409eb1f063ecf66a93bc6e80f7c5.002.1"
+    },
+    "geometry": null,
+    "type": "Feature",
+    "id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.a3cd823e6b24409eb1f063ecf66a93bc6e80f7c5.002.1"
+   },
+   {
+    "properties": {
+     "eventCode": {
+      "NationalWeatherService": [
+       "HTY"
+      ],
+      "SAME": [
+       "NWS"
+      ]
+     },
+     "web": "http://www.weather.gov",
+     "language": "en-US",
+     "code": "IPAWSv1.0",
+     "scope": "Public",
+     "parameters": {
+      "expiredReferences": [
+       "w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.f8f5b776168ef83febbbd19a39c166743e753a1b.001.1,2026-10-05T09:42:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.f4c7891cdf5b66c0df176a08e87538b6729f1281.001.1,2026-10-04T13:16:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.d1f6bcb7dc5d9a00fdd8ed346802787cadaee4ae.001.1,2026-10-03T14:14:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.d339a277cb25885f5aeca56391b145d67f842c67.001.1,2026-10-03T10:18:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.ac066d5326fccb4cc6ad965c3ce88441c5c3dbad.002.1,2026-10-02T10:00:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.ac066d5326fccb4cc6ad965c3ce88441c5c3dbad.001.1,2026-10-02T10:00:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.458f61b36747d51aaf5a59ce3ec64e8d9dfe7d7e.001.1,2026-10-01T09:34:00-07:00"
+      ],
+      "eventEndingTime": [
+       "2026-10-08T22:00:00-07:00"
+      ],
+      "VTEC": [
+       "/O.EXT.KSTO.HT.Y.0006.000000T0000Z-261009T0500Z/"
+      ],
+      "BLOCKCHANNEL": [
+       "EAS",
+       "NWEM",
+       "CMAS"
+      ],
+      "NWSheadline": [
+       "HEAT ADVISORY NOW IN EFFECT UNTIL 10 PM PDT THURSDAY"
+      ],
+      "WMOidentifier": [
+       "WWUS76 KSTO 071551"
+      ],
+      "AWIPSidentifier": [
+       "NPWSTO"
+      ]
+     },
+     "note": null,
+     "response": "Execute",
+     "instruction": "Drink plenty of fluids, stay in an air-conditioned room, stay out of\nthe sun, and check up on relatives and neighbors.\n\nTake extra precautions when outside. Wear lightweight and loose\nfitting clothing. Try to limit strenuous activities to early morning\nor evening. Take action when you see symptoms of heat exhaustion and\nheat stroke.",
+     "description": "* WHAT...High temperatures of 92 to 101 degrees expected and\novernight low temperatures in the mid 60s to low 70s, with\nwidespread Moderate HeatRisk and areas of Major HeatRisk.\n\n* WHERE...The Sacramento and northern San Joaquin Valleys, Delta and\nCarquinez Strait, and foothills.\n\n* WHEN...Until 10 PM PDT Thursday.\n\n* IMPACTS...Hot temperatures may cause heat illnesses, especially to\nanyone without effective cooling and/or adequate hydration.\n\n* ADDITIONAL DETAILS...Hottest days expected Today and Thursday.\nTemperatures begin a cooling trend on Friday, with Moderate\nHeatRisk in the foothill thermal belts and in Sacramento; Minor\nHeatRisk elsewhere.",
+     "headline": "Heat Advisory issued October 7 at 8:51AM PDT until October 8 at 10:00PM PDT by NWS Sacramento CA",
+     "senderName": "NWS Sacramento CA",
+     "sender": "w-nws.webmaster@noaa.gov",
+     "event": "Heat Advisory",
+     "urgency": "Expected",
+     "certainty": "Likely",
+     "severity": "Moderate",
+     "category": "Met",
+     "messageType": "Update",
+     "status": "Actual",
+     "ends": "2026-10-08T22:00:00-07:00",
+     "expires": "2026-10-08T17:00:00-04:00",
+     "onset": "2026-10-07T08:51:00-07:00",
+     "effective": "2026-10-07T08:51:00-07:00",
+     "sent": "2026-10-07T08:51:00-07:00",
+     "references": [
+      {
+       "sent": "2026-10-06T11:32:00-07:00",
+       "sender": "w-nws.webmaster@noaa.gov",
+       "identifier": "urn:oid:2.49.0.1.840.0.ec7b6c524b8d9bdff4cbb4cb9039e2d20367a7a4.001.1",
+       "@id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.ec7b6c524b8d9bdff4cbb4cb9039e2d20367a7a4.001.1"
+      }
+     ],
+     "affectedZones": [
+      "https://api.weather.gov/zones/forecast/CAZ122",
+      "https://api.weather.gov/zones/forecast/CAZ124",
+      "https://api.weather.gov/zones/forecast/CAZ125",
+      "https://api.weather.gov/zones/forecast/CAZ129",
+      "https://api.weather.gov/zones/forecast/CAZ131",
+      "https://api.weather.gov/zones/forecast/CAZ134",
+      "https://api.weather.gov/zones/forecast/CAZ137",
+      "https://api.weather.gov/zones/forecast/CAZ141",
+      "https://api.weather.gov/zones/forecast/CAZ142",
+      "https://api.weather.gov/zones/forecast/CAZ144",
+      "https://api.weather.gov/zones/forecast/CAZ145",
+      "https://api.weather.gov/zones/forecast/CAZ146",
+      "https://api.weather.gov/zones/forecast/CAZ147",
+      "https://api.weather.gov/zones/forecast/CAZ148",
+      "https://api.weather.gov/zones/forecast/CAZ149",
+      "https://api.weather.gov/zones/forecast/CAZ150",
+      "https://api.weather.gov/zones/forecast/CAZ151",
+      "https://api.weather.gov/zones/forecast/CAZ152",
+      "https://api.weather.gov/zones/forecast/CAZ153",
+      "https://api.weather.gov/zones/forecast/CAZ154",
+      "https://api.weather.gov/zones/forecast/CAZ155",
+      "https://api.weather.gov/zones/forecast/CAZ156",
+      "https://api.weather.gov/zones/forecast/CAZ157",
+      "https://api.weather.gov/zones/forecast/CAZ158",
+      "https://api.weather.gov/zones/forecast/CAZ159",
+      "https://api.weather.gov/zones/forecast/CAZ160",
+      "https://api.weather.gov/zones/forecast/CAZ161",
+      "https://api.weather.gov/zones/forecast/CAZ162",
+      "https://api.weather.gov/zones/forecast/CAZ163",
+      "https://api.weather.gov/zones/forecast/CAZ164"
+     ],
+     "geocode": {
+      "UGC": [
+       "CAZ122",
+       "CAZ124",
+       "CAZ125",
+       "CAZ129",
+       "CAZ131",
+       "CAZ134",
+       "CAZ137",
+       "CAZ141",
+       "CAZ142",
+       "CAZ144",
+       "CAZ145",
+       "CAZ146",
+       "CAZ147",
+       "CAZ148",
+       "CAZ149",
+       "CAZ150",
+       "CAZ151",
+       "CAZ152",
+       "CAZ153",
+       "CAZ154",
+       "CAZ155",
+       "CAZ156",
+       "CAZ157",
+       "CAZ158",
+       "CAZ159",
+       "CAZ160",
+       "CAZ161",
+       "CAZ162",
+       "CAZ163",
+       "CAZ164"
+      ],
+      "SAME": [
+       "006089",
+       "006103",
+       "006063",
+       "006007",
+       "006115",
+       "006057",
+       "006061",
+       "006017",
+       "006005",
+       "006009",
+       "006109",
+       "006021",
+       "006011",
+       "006101",
+       "006113",
+       "006095",
+       "006067",
+       "006077",
+       "006099"
+      ]
+     },
+     "areaDesc": "Western Shasta County Foothills Between 1000-3000 ft; South-Central Shasta County Including Redding Metro; Eastern Shasta County Foothills Between 1000-3000 ft; Sierra Nevada of Tehama-Butte-Plumas Counties Between 1000-3000 ft; Northern Motherlode Between 1000-3000 ft; Central Motherlode Between 1000-3000 ft; Southern Motherlode Between 1000-3000 ft; Western Tehama County Foothills Between 1000-3000 ft; Northern Sacramento Valley in Tehama County; Central Glenn County Including Interstate 5; Eastern Glenn County; Butte County Below 1000 ft; Western Glenn and Colusa County Foothills Between 1000-3000 ft; Central Colusa County Including Interstate 5; Eastern Colusa County; Sutter and Yuba Counties Below 1000 ft; Capay Hills of Yolo County and Vaca Hills of Solano County; Western Yolo County Including Capay Valley and Interstate 505; Central Yolo and Northeast Solano Counties Including Woodland and Davis; Sacramento Metro and Western El Dorado and Amador Counties; Central Solano County Including Fairfield and Vacaville; Southwestern Solano County Including Vallejo; Sacramento County Delta; San Joaquin County Delta; Central San Joaquin County Including Stockton Metro; Tracy Triangle Below 1000 ft; Northeastern San Joaquin Valley Below 1000 ft; Eastern Diablo Range Above 1000 ft; Western Stanislaus County Below 1000 ft Including Interstate 5; Central Stanislaus County Including Modesto Metro",
+     "id": "urn:oid:2.49.0.1.840.0.d4891234b67a6ed9803b81c551a96b0fd375413c.001.1",
+     "@type": "wx:Alert",
+     "@id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.d4891234b67a6ed9803b81c551a96b0fd375413c.001.1"
+    },
+    "geometry": null,
+    "type": "Feature",
+    "id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.d4891234b67a6ed9803b81c551a96b0fd375413c.001.1"
+   },
+   {
+    "properties": {
+     "eventCode": {
+      "NationalWeatherService": [
+       "HTY"
+      ],
+      "SAME": [
+       "NWS"
+      ]
+     },
+     "web": "http://www.weather.gov",
+     "language": "en-US",
+     "code": "IPAWSv1.0",
+     "scope": "Public",
+     "parameters": {
+      "expiredReferences": [
+       "w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.f95688895160d4e6c7883257354a5e6dd4f21f62.001.1,2026-10-06T16:32:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.ba3bff8bad04f5c34f6750ed6b383b1c28cf9c27.001.1,2026-10-05T10:15:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.cb9d59ba262f7a52e4b8dbf98960f895ecf83327.001.1,2026-10-05T01:43:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.41147ff70170abcde45525a02c5848412e979e45.002.1,2026-10-04T17:41:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.c0724aab45b3845f8d5d6956875fb16167f3597b.001.1,2026-10-04T10:33:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.993a4cdbb0fb26e42924ed1de0ad6e19c3fc852c.002.1,2026-10-04T13:27:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.299b387c65578b554e754420b8c715a44bee8de5.001.1,2026-10-04T02:31:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.2f1dfa37f701beadfecb140481333a7770fbfe7e.001.1,2026-10-03T17:34:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.cf86ac61152940ec9d88eea4d842e7e79c86ef34.001.1,2026-10-03T09:40:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.3f559179aa648ced6a0d088f0fb416cdadcab40c.001.1,2026-10-03T01:44:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.785ac81074af5bffaef3ae3aa6f996461de85a5a.001.1,2026-10-02T17:33:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.b57303acf45ef065beb242069fb0e8aa02791588.001.1,2026-10-02T09:32:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.63573e3a65563d419e4cf985e879039daa48ea23.001.1,2026-10-02T09:31:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.b36bbfd116fe5cdb9ab644c41d3d37c7a3155ec2.001.1,2026-10-02T01:31:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.5926150f831564942dfe21e8e0dd20c0ab55cf14.001.1,2026-10-01T17:31:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.4e7faaccdd018ee17f2740e566956358df3b6ee6.001.1,2026-10-01T09:30:00-07:00"
+      ],
+      "eventEndingTime": [
+       "2026-10-08T22:00:00-07:00"
+      ],
+      "VTEC": [
+       "/O.EXT.KHNX.HT.Y.0007.000000T0000Z-261009T0500Z/"
+      ],
+      "BLOCKCHANNEL": [
+       "EAS",
+       "NWEM",
+       "CMAS"
+      ],
+      "NWSheadline": [
+       "HEAT ADVISORY NOW IN EFFECT UNTIL 10 PM PDT THURSDAY"
+      ],
+      "WMOidentifier": [
+       "WWUS76 KHNX 071544"
+      ],
+      "AWIPSidentifier": [
+       "NPWHNX"
+      ]
+     },
+     "note": null,
+     "response": "Execute",
+     "instruction": "Drink plenty of fluids, stay in an air-conditioned room, stay out of\nthe sun, and check up on relatives and neighbors.",
+     "description": "* WHAT...High temperatures up to 101 degrees expected. Overnight lows\nbetween 70 and 75 degrees expected in the Sierra and Coastal Range\nFoothills where the thermal belt is strongest\n\n* WHERE...San Joaquin Valley, Sierra Nevada foothills, and Coastal\nWest Hills.\n\n* WHEN...Until 10 PM PDT Thursday.\n\n* IMPACTS...Hot temperatures may cause heat illnesses.\n\n* ADDITIONAL DETAILS...Moderate to major risk of heat-related\nillnesses for much of the population, especially those without\neffective cooling or hydration.",
+     "headline": "Heat Advisory issued October 7 at 8:44AM PDT until October 8 at 10:00PM PDT by NWS Hanford CA",
+     "senderName": "NWS Hanford CA",
+     "sender": "w-nws.webmaster@noaa.gov",
+     "event": "Heat Advisory",
+     "urgency": "Expected",
+     "certainty": "Likely",
+     "severity": "Moderate",
+     "category": "Met",
+     "messageType": "Update",
+     "status": "Actual",
+     "ends": "2026-10-08T22:00:00-07:00",
+     "expires": "2026-10-07T20:00:00-04:00",
+     "onset": "2026-10-07T08:44:00-07:00",
+     "effective": "2026-10-07T08:44:00-07:00",
+     "sent": "2026-10-07T08:44:00-07:00",
+     "references": [
+      {
+       "sent": "2026-10-07T04:37:00-07:00",
+       "sender": "w-nws.webmaster@noaa.gov",
+       "identifier": "urn:oid:2.49.0.1.840.0.1245c2e3beaa35fc1bdddeb7d07a5cb30aeb93f6.001.1",
+       "@id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.1245c2e3beaa35fc1bdddeb7d07a5cb30aeb93f6.001.1"
+      }
+     ],
+     "affectedZones": [
+      "https://api.weather.gov/zones/forecast/CAZ300",
+      "https://api.weather.gov/zones/forecast/CAZ301",
+      "https://api.weather.gov/zones/forecast/CAZ302",
+      "https://api.weather.gov/zones/forecast/CAZ303",
+      "https://api.weather.gov/zones/forecast/CAZ304",
+      "https://api.weather.gov/zones/forecast/CAZ305",
+      "https://api.weather.gov/zones/forecast/CAZ306",
+      "https://api.weather.gov/zones/forecast/CAZ307",
+      "https://api.weather.gov/zones/forecast/CAZ308",
+      "https://api.weather.gov/zones/forecast/CAZ309",
+      "https://api.weather.gov/zones/forecast/CAZ310",
+      "https://api.weather.gov/zones/forecast/CAZ311",
+      "https://api.weather.gov/zones/forecast/CAZ312",
+      "https://api.weather.gov/zones/forecast/CAZ313",
+      "https://api.weather.gov/zones/forecast/CAZ314",
+      "https://api.weather.gov/zones/forecast/CAZ315",
+      "https://api.weather.gov/zones/forecast/CAZ316",
+      "https://api.weather.gov/zones/forecast/CAZ317",
+      "https://api.weather.gov/zones/forecast/CAZ318",
+      "https://api.weather.gov/zones/forecast/CAZ319",
+      "https://api.weather.gov/zones/forecast/CAZ320",
+      "https://api.weather.gov/zones/forecast/CAZ321",
+      "https://api.weather.gov/zones/forecast/CAZ322"
+     ],
+     "geocode": {
+      "UGC": [
+       "CAZ300",
+       "CAZ301",
+       "CAZ302",
+       "CAZ303",
+       "CAZ304",
+       "CAZ305",
+       "CAZ306",
+       "CAZ307",
+       "CAZ308",
+       "CAZ309",
+       "CAZ310",
+       "CAZ311",
+       "CAZ312",
+       "CAZ313",
+       "CAZ314",
+       "CAZ315",
+       "CAZ316",
+       "CAZ317",
+       "CAZ318",
+       "CAZ319",
+       "CAZ320",
+       "CAZ321",
+       "CAZ322"
+      ],
+      "SAME": [
+       "006019",
+       "006047",
+       "006039",
+       "006043",
+       "006031",
+       "006107",
+       "006029"
+      ]
+     },
+     "areaDesc": "West Side Mountains north of 198; Los Banos - Dos Palos; Merced - Madera - Mendota; Planada - Le Grand - Snelling; Coalinga - Avenal; West Side of Fresno and Kings Counties; Caruthers - San Joaquin - Selma; Fresno-Clovis; West Side Mountains South of 198; Buttonwillow - Lost Hills - I5; Delano-Wasco-Shafter; Hanford - Corcoran - Lemoore; Visalia - Porterville - Reedley; Buena Vista; Bakersfield; Southeast San Joaquin Valley; South End San Joaquin Valley; Mariposa Madera Foothills; Mariposa-Madera Lower Sierra; Fresno-Tulare Foothills; Fresno-Tulare Lower Sierra; South End Sierra Foothills; South End of the Lower Sierra",
+     "id": "urn:oid:2.49.0.1.840.0.520ccbb686679bb3289e82be57ff201023253698.001.1",
+     "@type": "wx:Alert",
+     "@id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.520ccbb686679bb3289e82be57ff201023253698.001.1"
+    },
+    "geometry": null,
+    "type": "Feature",
+    "id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.520ccbb686679bb3289e82be57ff201023253698.001.1"
+   },
+   {
+    "properties": {
+     "eventCode": {
+      "NationalWeatherService": [
+       "HTY"
+      ],
+      "SAME": [
+       "NWS"
+      ]
+     },
+     "web": "http://www.weather.gov",
+     "language": "en-US",
+     "code": "IPAWSv1.0",
+     "scope": "Public",
+     "parameters": {
+      "expiredReferences": [
+       "w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.f6121e681b24b892f2f795b1f47b994a173362f1.001.1,2026-10-06T01:09:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.fbf70702ef0c130cb680485e1114badea410d63f.002.1,2026-10-06T08:52:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.3a2c5ac51c6355c72bca6b419084566ecf248754.002.1,2026-10-06T02:26:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.d2d2a603160b11af223dd31d178a19a22957ec81.001.1,2026-10-05T09:29:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.88aff7678d95bf891f5ac2dd21ca25d6ddfd9c30.001.1,2026-10-04T23:01:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.7517e1a3cd82f6d60949eb0a82ce51d6c71ea53c.002.1,2026-10-04T21:34:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.bb08928e50c29e025b51bdcbf1f5ace5c9e39054.003.1,2026-10-03T19:48:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.dd0d22123955bdea6a8033355257a92d8fcf98ad.001.1,2026-10-03T12:00:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.b4069299898517bf050ff0b8b7cbadb209ca7ff0.004.1,2026-10-03T07:32:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.69ad6ad39038206f4d9c2025fd06de84b61bd2ec.002.1,2026-10-02T20:53:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.829cc7ace082237070906018bd31a042a505026c.001.1,2026-10-02T01:25:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.8c49d62f93996a96cb756c4569a6927363ae308c.004.1,2026-10-03T02:02:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.cdab22d11f488b40afa659616ceee611a23c94ea.002.1,2026-10-02T11:16:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.cdab22d11f488b40afa659616ceee611a23c94ea.001.1,2026-10-02T11:16:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.77b18b88150a2580e9de200a5988ec5ec6337309.001.1,2026-10-01T09:43:00-07:00"
+      ],
+      "eventEndingTime": [
+       "2026-10-08T22:00:00-07:00"
+      ],
+      "VTEC": [
+       "/O.CON.KMTR.HT.Y.0014.000000T0000Z-261009T0500Z/"
+      ],
+      "BLOCKCHANNEL": [
+       "EAS",
+       "NWEM",
+       "CMAS"
+      ],
+      "NWSheadline": [
+       "HEAT ADVISORY REMAINS IN EFFECT UNTIL 10 PM PDT THURSDAY"
+      ],
+      "WMOidentifier": [
+       "WWUS76 KMTR 071542"
+      ],
+      "AWIPSidentifier": [
+       "NPWMTR"
+      ]
+     },
+     "note": null,
+     "response": "Execute",
+     "instruction": "Hydration is a critical piece to surviving the heat. Drink water, and\nif possible, take water to those who are vulnerable.\n\nTake extra precautions when outside. Wear lightweight and loose\nfitting clothing. Try to limit strenuous activities to the early\nmorning or evening. Take action when you experience symptoms of heat\nexhaustion and/or heat stroke.\n\nBeat the heat and check the backseat! Do not leave young children or\npets in unattended vehicles. Car interiors will reach lethal\ntemperatures in a matter of minutes.",
+     "description": "* WHAT...Hot conditions with maximum temperatures in the mid-90s to\nnear 105. Mild minimum temperatures and weak onshore flow will\nlimit overnight relief.\n\n* WHERE...The East Bay and San Francisco Bay Shoreline, North Bay\nInterior Mountains and Valleys, The Santa Clara Valley and Eastern\nHills, The Santa Cruz Mountains, Interior Monterey County and the\nSanta Lucia Range, Most of San Benito County and the Cholame Hills\nin Southeast Monterey County, and Southern Salinas Valley/Arroyo\nSeco and Lake San Antonio.\n\n* WHEN...Until 10 PM PDT Thursday.\n\n* IMPACTS...This level of heat affects anyone without effective\ncooling and/or adequate hydration. Impacts likely in some health\nsystems, heat-sensitive industries and infrastructure.",
+     "headline": "Heat Advisory issued October 7 at 8:42AM PDT until October 8 at 10:00PM PDT by NWS San Francisco CA",
+     "senderName": "NWS San Francisco CA",
+     "sender": "w-nws.webmaster@noaa.gov",
+     "event": "Heat Advisory",
+     "urgency": "Expected",
+     "certainty": "Likely",
+     "severity": "Moderate",
+     "category": "Met",
+     "messageType": "Update",
+     "status": "Actual",
+     "ends": "2026-10-08T22:00:00-07:00",
+     "expires": "2026-10-08T05:00:00-04:00",
+     "onset": "2026-10-07T08:42:00-07:00",
+     "effective": "2026-10-07T08:42:00-07:00",
+     "sent": "2026-10-07T08:42:00-07:00",
+     "references": [
+      {
+       "sent": "2026-10-06T21:02:00-07:00",
+       "sender": "w-nws.webmaster@noaa.gov",
+       "identifier": "urn:oid:2.49.0.1.840.0.8350c1fcb736ef8a49053a42ce5d0ad67cd090f8.001.1",
+       "@id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.8350c1fcb736ef8a49053a42ce5d0ad67cd090f8.001.1"
+      },
+      {
+       "sent": "2026-10-07T01:59:00-07:00",
+       "sender": "w-nws.webmaster@noaa.gov",
+       "identifier": "urn:oid:2.49.0.1.840.0.11a2fdd2a7c5c033a6b1df2378f88df34b6f86dd.002.1",
+       "@id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.11a2fdd2a7c5c033a6b1df2378f88df34b6f86dd.002.1"
+      },
+      {
+       "sent": "2026-10-07T07:51:53-07:00",
+       "sender": "w-nws.webmaster@noaa.gov",
+       "identifier": "urn:oid:2.49.0.1.840.0.d00fb08a677f0ddf17413c49b878a16d9bd844a0.002.1",
+       "@id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.d00fb08a677f0ddf17413c49b878a16d9bd844a0.002.1"
+      }
+     ],
+     "affectedZones": [
+      "https://api.weather.gov/zones/forecast/CAZ503",
+      "https://api.weather.gov/zones/forecast/CAZ504",
+      "https://api.weather.gov/zones/forecast/CAZ506",
+      "https://api.weather.gov/zones/forecast/CAZ508",
+      "https://api.weather.gov/zones/forecast/CAZ510",
+      "https://api.weather.gov/zones/forecast/CAZ512",
+      "https://api.weather.gov/zones/forecast/CAZ513",
+      "https://api.weather.gov/zones/forecast/CAZ514",
+      "https://api.weather.gov/zones/forecast/CAZ515",
+      "https://api.weather.gov/zones/forecast/CAZ516",
+      "https://api.weather.gov/zones/forecast/CAZ517",
+      "https://api.weather.gov/zones/forecast/CAZ518"
+     ],
+     "geocode": {
+      "UGC": [
+       "CAZ503",
+       "CAZ504",
+       "CAZ506",
+       "CAZ508",
+       "CAZ510",
+       "CAZ512",
+       "CAZ513",
+       "CAZ514",
+       "CAZ515",
+       "CAZ516",
+       "CAZ517",
+       "CAZ518"
+      ],
+      "SAME": [
+       "006097",
+       "006055",
+       "006041",
+       "006001",
+       "006013",
+       "006081",
+       "006085",
+       "006087",
+       "006053",
+       "006069"
+      ]
+     },
+     "areaDesc": "Sonoma Coastal Range; North Bay Interior Mountains; North Bay Interior Valleys; San Francisco Bay Shoreline; East Bay Interior Valleys; Santa Cruz Mountains; Santa Clara Valley Including San Jose; Eastern Santa Clara Hills; East Bay Hills; Southern Salinas Valley/Arroyo Seco and Lake San Antonio; Santa Lucia Mountains and Los Padres National Forest; Mountains Of San Benito County And Interior Monterey County Including Pinnacles National Park",
+     "id": "urn:oid:2.49.0.1.840.0.483145bec025b7a499816477740186088a160049.002.1",
+     "@type": "wx:Alert",
+     "@id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.483145bec025b7a499816477740186088a160049.002.1"
+    },
+    "geometry": null,
+    "type": "Feature",
+    "id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.483145bec025b7a499816477740186088a160049.002.1"
+   },
+   {
+    "properties": {
+     "eventCode": {
+      "NationalWeatherService": [
+       "HTY"
+      ],
+      "SAME": [
+       "NWS"
+      ]
+     },
+     "web": "http://www.weather.gov",
+     "language": "en-US",
+     "code": "IPAWSv1.0",
+     "scope": "Public",
+     "parameters": {
+      "expiredReferences": [
+       "w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.65972a423a92c6623d86966cbe3b6cf211b9a7e5.001.1,2026-10-06T11:30:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.99d3bc84a2afd1f9ccaf0bae1e5101a11fa9effe.001.1,2026-10-05T21:11:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.4582eab9915f7ca6b5d70b639cac2e6fbe5a2bff.002.1,2026-10-06T04:46:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.4224a347a4622aac6e0c97513eb8d5641748ecb2.002.1,2026-10-06T00:49:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.00815b96af7d725ba96a6f12112147c25f7e3be9.001.1,2026-10-05T12:49:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.f00d5b7445e352f51d85194b8d1c1f294754b306.002.1,2026-10-04T21:04:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.f00d5b7445e352f51d85194b8d1c1f294754b306.001.1,2026-10-04T21:04:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.25d8c8a86543268e231a7a19d012cc256b3a2568.001.1,2026-10-04T13:15:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.0167356ae1b600d1ef5a4eed0f4005b75f887827.001.1,2026-10-04T10:47:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.85741a8655211dce91f65e19397fd341dc3d2872.001.1,2026-10-04T03:02:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.d4d60336361d3bc0588fe0a6a910329c6f01086b.001.1,2026-10-03T13:43:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.ff5f21396fb5e6fc768685af478449cae4a2b3ed.001.1,2026-10-03T08:16:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.0d076c04558a41275b9f89bdd21ddaf9cc9a3283.001.1,2026-10-02T11:47:00-07:00"
+      ],
+      "eventEndingTime": [
+       "2026-10-08T23:00:00-07:00"
+      ],
+      "VTEC": [
+       "/O.CON.KEKA.HT.Y.0006.000000T0000Z-261009T0600Z/"
+      ],
+      "BLOCKCHANNEL": [
+       "EAS",
+       "NWEM",
+       "CMAS"
+      ],
+      "NWSheadline": [
+       "HEAT ADVISORY REMAINS IN EFFECT UNTIL 11 PM PDT THURSDAY"
+      ],
+      "WMOidentifier": [
+       "WWUS76 KEKA 070414"
+      ],
+      "AWIPSidentifier": [
+       "NPWEKA"
+      ]
+     },
+     "note": null,
+     "response": "Execute",
+     "instruction": "Drink plenty of fluids, stay in an air-conditioned room, stay out of\nthe sun, and check up on relatives and neighbors.",
+     "description": "* WHAT...High temperatures of 95 to 102 with overnight temperatures in the high 50s and 60s. Moderate to localized Major HeatRisk.  * WHERE...Mendocino Interior, and Lake County.  * WHEN...Until 11 PM PDT Thursday.  * IMPACTS...Hot temperatures may cause heat illnesses.",
+     "headline": "Heat Advisory issued October 6 at 9:14PM PDT until October 8 at 11:00PM PDT by NWS Eureka CA",
+     "senderName": "NWS Eureka CA",
+     "sender": "w-nws.webmaster@noaa.gov",
+     "event": "Heat Advisory",
+     "urgency": "Expected",
+     "certainty": "Likely",
+     "severity": "Moderate",
+     "category": "Met",
+     "messageType": "Alert",
+     "status": "Actual",
+     "ends": "2026-10-08T23:00:00-07:00",
+     "expires": "2026-10-07T16:00:00-04:00",
+     "onset": "2026-10-06T21:14:00-07:00",
+     "effective": "2026-10-06T21:14:00-07:00",
+     "sent": "2026-10-06T21:14:00-07:00",
+     "references": [],
+     "affectedZones": [
+      "https://api.weather.gov/zones/forecast/CAZ110",
+      "https://api.weather.gov/zones/forecast/CAZ111",
+      "https://api.weather.gov/zones/forecast/CAZ112",
+      "https://api.weather.gov/zones/forecast/CAZ113",
+      "https://api.weather.gov/zones/forecast/CAZ114",
+      "https://api.weather.gov/zones/forecast/CAZ118",
+      "https://api.weather.gov/zones/forecast/CAZ119",
+      "https://api.weather.gov/zones/forecast/CAZ120"
+     ],
+     "geocode": {
+      "UGC": [
+       "CAZ110",
+       "CAZ111",
+       "CAZ112",
+       "CAZ113",
+       "CAZ114",
+       "CAZ118",
+       "CAZ119",
+       "CAZ120"
+      ],
+      "SAME": [
+       "006045",
+       "006033"
+      ]
+     },
+     "areaDesc": "Northwestern Interior Mendocino; Northeastern Interior Mendocino; Southwestern Interior Mendocino; Southeastern Interior Mendocino; Northern Lake; Western Lake; Southwestern Lake; Eastern Lake",
+     "id": "urn:oid:2.49.0.1.840.0.4187fbdbdc224733018d997ea9afdea536a09e93.001.1",
+     "@type": "wx:Alert",
+     "@id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.4187fbdbdc224733018d997ea9afdea536a09e93.001.1"
+    },
+    "geometry": null,
+    "type": "Feature",
+    "id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.4187fbdbdc224733018d997ea9afdea536a09e93.001.1"
+   }
+  ]
+ },
+ "missing_menu": [
+  "eagles",
+  "play"
+ ],
+ "label": {
+  "answers_ask": "no",
+  "missing": [],
+  "wrong": [],
+  "source_ask": "red flag warnings in California"
+ }
+}
