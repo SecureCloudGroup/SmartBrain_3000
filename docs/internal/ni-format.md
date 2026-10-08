@@ -2731,6 +2731,15 @@ display-class pick and the map/image → value degrade) are gone from the flow; 
   instant and the client's clock. `tools/ni-live-e2e.py` prints a form card as `<form>:
   <summary>`; `tools/ni-flow-eval.py --recorded` / `--chaos` use the eval's own minimal scenes
   and are unchanged.
+- **Data-layer round 2 (after the SET D read, 2026-10-08).** `select_answers`: among tied list / columns
+  answers the one whose own name or label says an ask word wins ("Snow forecast" over "Tonight, hour
+  by hour" on "snow"), else the declared order; a `trend` ask with a declared history list (an axis)
+  takes it over a tied latest value. `_scope_rows_to_subject` reaches `result` and `schedule` kinds (a
+  named team's row, or the honest nothing). A `count` ask always cuts its window and never demotes a
+  one-row list to a measure (zero rows is the honest "0"). The per-answer cell cap is 5 (the Library's
+  cap rose with it). Measured on all 86 recorded live cards: selection changes on the two snow asks
+  only. A title-fallback rule ("the card never claims a quantity it does not show") was built, measured
+  (it re-titled 27 right cards to generic labels) and NOT shipped.
 - **Clock pass (Phase 1b).** A sealed card can go wrong with the CLOCK alone, no fetch
   involved: "Today" turning into "Yesterday" past card-tz midnight, a daylight-saving
   change moving every card-zone hour, a `live` binding's edge, or the as-of age passing

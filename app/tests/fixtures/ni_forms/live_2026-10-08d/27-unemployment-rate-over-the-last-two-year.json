@@ -1,0 +1,113 @@
+{
+ "id": "27-unemployment-rate-over-the-last-two-year",
+ "n": 27,
+ "ask": "unemployment rate over the last two years",
+ "kind": "trend",
+ "frame_kind": "trend",
+ "subject": "unemployment rate",
+ "title": "unemployment rate",
+ "source_id": "fred-unrate",
+ "source_url": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=UNRATE",
+ "fetched_at": "2026-10-08T16:59:42Z",
+ "viewer_tz": "UTC",
+ "answers_used": [
+  {
+   "name": "recent",
+   "label": "Recent readings",
+   "words": [
+    "recent",
+    "history",
+    "trend",
+    "past",
+    "over time",
+    "chart",
+    "last few"
+   ],
+   "primary": false,
+   "kind": "list",
+   "path": "rows",
+   "newest_first": false,
+   "may_be_empty": false,
+   "cells": [
+    {
+     "path": "observation_date",
+     "label": "Date",
+     "type": "date",
+     "key": "observation_date",
+     "unit": ""
+    },
+    {
+     "path": "UNRATE",
+     "label": "Unemployment rate",
+     "type": "number",
+     "unit": "%",
+     "key": "UNRATE"
+    }
+   ],
+   "axis": {
+    "cell": "observation_date",
+    "step": "day"
+   }
+  }
+ ],
+ "rows_output_name": "rows",
+ "outputs": {
+  "rows": [
+   {
+    "UNRATE": 4.1,
+    "observation_date": "2024-10-01T00:00:00+00:00"
+   },
+   {
+    "UNRATE": 4.2,
+    "observation_date": "2024-11-01T00:00:00+00:00"
+   },
+   {
+    "UNRATE": 4.1,
+    "observation_date": "2024-12-01T00:00:00+00:00"
+   },
+   {
+    "UNRATE": 4.0,
+    "observation_date": "2025-01-01T00:00:00+00:00"
+   },
+   {
+    "UNRATE": 4.1,
+    "observation_date": "2025-02-01T00:00:00+00:00"
+   },
+   {
+    "UNRATE": 4.2,
+    "observation_date": "2025-03-01T00:00:00+00:00"
+   },
+   {
+    "UNRATE": 4.2,
+    "observation_date": "2025-04-01T00:00:00+00:00"
+   },
+   {
+    "UNRATE": 4.3,
+    "observation_date": "2025-05-01T00:00:00+00:00"
+   },
+   {
+    "UNRATE": 4.3,
+    "observation_date": "2025-06-01T00:00:00+00:00"
+   },
+   {
+    "UNRATE": 4.4,
+    "observation_date": "2025-07-01T00:00:00+00:00"
+   },
+   {
+    "UNRATE": 4.4,
+    "observation_date": "2025-08-01T00:00:00+00:00"
+   },
+   {
+    "UNRATE": 4.2,
+    "observation_date": "2025-09-01T00:00:00+00:00"
+   }
+  ]
+ },
+ "live_form": "series_line",
+ "live_span": "d3x1",
+ "live_lint": {
+  "red": 0,
+  "amber": 0,
+  "codes": []
+ }
+}

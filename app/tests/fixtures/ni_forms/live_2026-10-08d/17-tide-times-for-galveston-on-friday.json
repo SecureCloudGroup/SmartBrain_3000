@@ -1,0 +1,93 @@
+{
+ "id": "17-tide-times-for-galveston-on-friday",
+ "n": 17,
+ "ask": "tide times for Galveston on Friday",
+ "kind": "schedule",
+ "frame_kind": null,
+ "subject": "tide times",
+ "title": "tide times",
+ "source_id": "coops-tide-hilo",
+ "source_url": "https://api.tidesandcurrents.noaa.gov/api/prod/datagetter?application=SmartBrain&station=8771486&time_zone=lst_ldt&units=english&format=json&product=predictions&datum=MLLW&interval=hilo&begin_date=20261008&range=48",
+ "fetched_at": "2026-10-08T16:56:18Z",
+ "viewer_tz": "UTC",
+ "answers_used": [
+  {
+   "name": "tides",
+   "label": "High and low tides",
+   "words": [
+    "tides",
+    "tide",
+    "tide times",
+    "tide chart",
+    "tide table",
+    "tide schedule"
+   ],
+   "primary": true,
+   "kind": "list",
+   "path": "predictions",
+   "newest_first": false,
+   "may_be_empty": false,
+   "cells": [
+    {
+     "path": "t",
+     "label": "Time",
+     "type": "time",
+     "key": "t",
+     "unit": null
+    },
+    {
+     "path": "type",
+     "label": "High/Low",
+     "type": "text",
+     "key": "type",
+     "unit": null
+    },
+    {
+     "path": "v",
+     "label": "Height",
+     "type": "number",
+     "unit": "ft",
+     "key": "v"
+    }
+   ],
+   "axis": {
+    "cell": "t",
+    "step": "hour"
+   }
+  }
+ ],
+ "rows_output_name": "rows",
+ "outputs": {
+  "rows": [
+   {
+    "type": "H",
+    "v": 1.575,
+    "t": "2026-10-09T04:40:00+00:00"
+   },
+   {
+    "type": "L",
+    "v": 0.943,
+    "t": "2026-10-09T10:58:00+00:00"
+   },
+   {
+    "type": "H",
+    "v": 1.711,
+    "t": "2026-10-09T17:21:00+00:00"
+   },
+   {
+    "type": "L",
+    "v": 1.218,
+    "t": "2026-10-09T23:29:00+00:00"
+   }
+  ]
+ },
+ "live_form": "agenda",
+ "live_span": "d1x2",
+ "live_lint": {
+  "red": 0,
+  "amber": 4,
+  "codes": [
+   "L-HOLLOW"
+  ]
+ }
+}

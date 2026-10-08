@@ -1,0 +1,94 @@
+{
+ "id": "negd00",
+ "ask": "how humid is it in Savannah right now",
+ "frame": {
+  "kind": null,
+  "subject": "humidity"
+ },
+ "chosen": [
+  {
+   "name": "tides",
+   "label": "High and low tides",
+   "words": [
+    "tides",
+    "tide",
+    "tide times",
+    "tide chart",
+    "tide table",
+    "tide schedule"
+   ],
+   "primary": true,
+   "kind": "list",
+   "path": "predictions",
+   "newest_first": false,
+   "may_be_empty": false,
+   "cells": [
+    {
+     "path": "t",
+     "label": "Time",
+     "type": "time",
+     "key": "t",
+     "unit": null
+    },
+    {
+     "path": "type",
+     "label": "High/Low",
+     "type": "text",
+     "key": "type",
+     "unit": null
+    },
+    {
+     "path": "v",
+     "label": "Height",
+     "type": "number",
+     "unit": "ft",
+     "key": "v"
+    }
+   ],
+   "axis": {
+    "cell": "t",
+    "step": "hour"
+   }
+  }
+ ],
+ "rows_output_name": "rows",
+ "preview": {
+  "rows": [
+   {
+    "type": "H",
+    "v": 11.603,
+    "t": "2026-10-08T21:57:00+00:00"
+   },
+   {
+    "type": "L",
+    "v": -0.258,
+    "t": "2026-10-09T04:12:00+00:00"
+   },
+   {
+    "type": "H",
+    "v": 11.635,
+    "t": "2026-10-09T10:22:00+00:00"
+   },
+   {
+    "type": "L",
+    "v": -0.367,
+    "t": "2026-10-09T16:37:00+00:00"
+   },
+   {
+    "type": "H",
+    "v": 11.631,
+    "t": "2026-10-09T22:46:00+00:00"
+   }
+  ]
+ },
+ "missing_menu": [
+  "humid",
+  "savannah"
+ ],
+ "label": {
+  "answers_ask": "no",
+  "missing": [],
+  "wrong": [],
+  "source_ask": "when is the next low tide in Bar Harbor"
+ }
+}

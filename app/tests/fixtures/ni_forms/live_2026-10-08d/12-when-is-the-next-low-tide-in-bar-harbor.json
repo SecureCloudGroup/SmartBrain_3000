@@ -1,0 +1,82 @@
+{
+ "id": "12-when-is-the-next-low-tide-in-bar-harbor",
+ "n": 12,
+ "ask": "when is the next low tide in Bar Harbor",
+ "kind": "next_event",
+ "frame_kind": "next_event",
+ "subject": "low tide",
+ "title": "low tide",
+ "source_id": "coops-tide-hilo",
+ "source_url": "https://api.tidesandcurrents.noaa.gov/api/prod/datagetter?application=SmartBrain&station=8413320&time_zone=lst_ldt&units=english&format=json&product=predictions&datum=MLLW&interval=hilo&begin_date=20261008&range=48",
+ "fetched_at": "2026-10-08T16:54:33Z",
+ "viewer_tz": "UTC",
+ "answers_used": [
+  {
+   "name": "next_low",
+   "label": "Next low tide",
+   "words": [
+    "next low tide",
+    "low tide",
+    "when is low tide"
+   ],
+   "primary": false,
+   "kind": "list",
+   "path": "predictions",
+   "newest_first": false,
+   "may_be_empty": false,
+   "filter": {
+    "path": "type",
+    "equals": "L"
+   },
+   "cells": [
+    {
+     "path": "t",
+     "label": "Time",
+     "type": "time",
+     "key": "t",
+     "unit": ""
+    },
+    {
+     "path": "type",
+     "label": "High/Low",
+     "type": "text",
+     "key": "type",
+     "unit": ""
+    },
+    {
+     "path": "v",
+     "label": "Height",
+     "type": "number",
+     "unit": "ft",
+     "key": "v"
+    }
+   ],
+   "axis": {
+    "cell": "t",
+    "step": "hour"
+   }
+  }
+ ],
+ "rows_output_name": "rows",
+ "outputs": {
+  "rows": [
+   {
+    "v": -0.258,
+    "type": "L",
+    "t": "2026-10-09T04:12:00+00:00"
+   },
+   {
+    "v": -0.367,
+    "type": "L",
+    "t": "2026-10-09T16:37:00+00:00"
+   }
+  ]
+ },
+ "live_form": "day_table",
+ "live_span": "d1x1",
+ "live_lint": {
+  "red": 0,
+  "amber": 0,
+  "codes": []
+ }
+}

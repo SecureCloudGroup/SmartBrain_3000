@@ -1,0 +1,43 @@
+{
+ "id": "49-summary-of-today-s-nws-forecast-discussi",
+ "n": 49,
+ "ask": "summary of today's NWS forecast discussion for Seattle",
+ "kind": "text_brief",
+ "frame_kind": "forecast",
+ "subject": "NWS forecast discussion",
+ "title": "NWS forecast discussion",
+ "source_id": "nws-forecast",
+ "source_url": "https://api.weather.gov/gridpoints/{office}/{grid_x},{grid_y}/forecast",
+ "fetched_at": "2026-10-08T17:06:23Z",
+ "viewer_tz": "UTC",
+ "answers_used": [
+  {
+   "name": "next_detail",
+   "label": "Forecast details (next period)",
+   "words": [
+    "details",
+    "detailed forecast",
+    "summary",
+    "describe",
+    "full forecast"
+   ],
+   "primary": false,
+   "kind": "value",
+   "path": "properties.periods[0].detailedForecast",
+   "type": "text",
+   "window": "now",
+   "unit": null
+  }
+ ],
+ "rows_output_name": null,
+ "outputs": {
+  "next_detail": "Partly sunny, with a high near 68. North northwest wind around 2 mph."
+ },
+ "live_form": "text_brief",
+ "live_span": "d1x1",
+ "live_lint": {
+  "red": 0,
+  "amber": 0,
+  "codes": []
+ }
+}

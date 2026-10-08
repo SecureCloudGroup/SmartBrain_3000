@@ -1,0 +1,175 @@
+{
+ "id": "11-aurora-forecast-for-fairbanks-this-week",
+ "n": 11,
+ "ask": "aurora forecast for Fairbanks this week",
+ "kind": "forecast",
+ "frame_kind": "forecast",
+ "subject": "aurora forecast",
+ "title": "aurora forecast",
+ "source_id": "swpc-kp-forecast",
+ "source_url": "https://services.swpc.noaa.gov/products/noaa-planetary-k-index-forecast.json",
+ "fetched_at": "2026-10-08T16:54:00Z",
+ "viewer_tz": "UTC",
+ "answers_used": [
+  {
+   "name": "forecast",
+   "label": "Forecast Kp (3-hour windows)",
+   "words": [
+    "forecast",
+    "tonight",
+    "tomorrow",
+    "aurora",
+    "northern lights",
+    "kp forecast",
+    "kp",
+    "geomagnetic storm",
+    "will i see",
+    "next 3 days"
+   ],
+   "primary": true,
+   "kind": "list",
+   "path": "items",
+   "newest_first": false,
+   "may_be_empty": false,
+   "filter": {
+    "path": "observed",
+    "equals": "predicted"
+   },
+   "cells": [
+    {
+     "path": "time_tag",
+     "label": "Window starts",
+     "type": "time",
+     "utc": true,
+     "key": "time_tag",
+     "unit": null
+    },
+    {
+     "path": "kp",
+     "label": "Kp",
+     "type": "number",
+     "unit": "Kp",
+     "key": "kp"
+    }
+   ],
+   "axis": {
+    "cell": "time_tag",
+    "step": "hour"
+   }
+  }
+ ],
+ "rows_output_name": "rows",
+ "outputs": {
+  "rows": [
+   {
+    "noaa_scale": null,
+    "observed": "predicted",
+    "kp": 1.67,
+    "time_tag": "2026-10-09T00:00:00+00:00"
+   },
+   {
+    "noaa_scale": "G1",
+    "observed": "predicted",
+    "kp": 5.0,
+    "time_tag": "2026-10-09T03:00:00+00:00"
+   },
+   {
+    "noaa_scale": "G2",
+    "observed": "predicted",
+    "kp": 5.67,
+    "time_tag": "2026-10-09T06:00:00+00:00"
+   },
+   {
+    "noaa_scale": "G1",
+    "observed": "predicted",
+    "kp": 5.0,
+    "time_tag": "2026-10-09T09:00:00+00:00"
+   },
+   {
+    "noaa_scale": "G1",
+    "observed": "predicted",
+    "kp": 4.67,
+    "time_tag": "2026-10-09T12:00:00+00:00"
+   },
+   {
+    "noaa_scale": null,
+    "observed": "predicted",
+    "kp": 4.0,
+    "time_tag": "2026-10-09T15:00:00+00:00"
+   },
+   {
+    "noaa_scale": null,
+    "observed": "predicted",
+    "kp": 4.0,
+    "time_tag": "2026-10-09T18:00:00+00:00"
+   },
+   {
+    "noaa_scale": null,
+    "observed": "predicted",
+    "kp": 3.33,
+    "time_tag": "2026-10-09T21:00:00+00:00"
+   },
+   {
+    "noaa_scale": null,
+    "observed": "predicted",
+    "kp": 4.0,
+    "time_tag": "2026-10-10T00:00:00+00:00"
+   },
+   {
+    "noaa_scale": null,
+    "observed": "predicted",
+    "kp": 3.67,
+    "time_tag": "2026-10-10T03:00:00+00:00"
+   },
+   {
+    "noaa_scale": null,
+    "observed": "predicted",
+    "kp": 3.0,
+    "time_tag": "2026-10-10T06:00:00+00:00"
+   },
+   {
+    "noaa_scale": null,
+    "observed": "predicted",
+    "kp": 3.0,
+    "time_tag": "2026-10-10T09:00:00+00:00"
+   },
+   {
+    "noaa_scale": null,
+    "observed": "predicted",
+    "kp": 2.67,
+    "time_tag": "2026-10-10T12:00:00+00:00"
+   },
+   {
+    "noaa_scale": null,
+    "observed": "predicted",
+    "kp": 2.33,
+    "time_tag": "2026-10-10T15:00:00+00:00"
+   },
+   {
+    "noaa_scale": null,
+    "observed": "predicted",
+    "kp": 2.33,
+    "time_tag": "2026-10-10T18:00:00+00:00"
+   },
+   {
+    "noaa_scale": null,
+    "observed": "predicted",
+    "kp": 2.67,
+    "time_tag": "2026-10-10T21:00:00+00:00"
+   },
+   {
+    "noaa_scale": null,
+    "observed": "predicted",
+    "kp": 4.0,
+    "time_tag": "2026-10-11T00:00:00+00:00"
+   }
+  ]
+ },
+ "live_form": "day_table",
+ "live_span": "d2x1",
+ "live_lint": {
+  "red": 0,
+  "amber": 0,
+  "codes": []
+ }
+}

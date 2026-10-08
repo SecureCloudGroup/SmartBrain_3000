@@ -1,0 +1,45 @@
+{
+ "id": "negd16",
+ "ask": "unemployment rate over the last two years",
+ "frame": {
+  "kind": "trend",
+  "subject": "unemployment rate"
+ },
+ "chosen": [
+  {
+   "name": "humidity",
+   "label": "Humidity",
+   "words": [
+    "humidity",
+    "humid",
+    "muggy",
+    "sticky",
+    "damp"
+   ],
+   "primary": false,
+   "kind": "value",
+   "path": "current.relative_humidity_2m",
+   "type": "number",
+   "unit_path": "current_units.relative_humidity_2m",
+   "window": "now",
+   "measure": "humidity",
+   "unit": null
+  }
+ ],
+ "rows_output_name": null,
+ "preview": {
+  "humidity": 67
+ },
+ "missing_menu": [
+  "over",
+  "rate",
+  "unemployment",
+  "years"
+ ],
+ "label": {
+  "answers_ask": "no",
+  "missing": [],
+  "wrong": [],
+  "source_ask": "how humid is it in Savannah right now"
+ }
+}

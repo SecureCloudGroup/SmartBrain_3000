@@ -1,0 +1,70 @@
+{
+ "id": "03-how-strong-is-the-sun-s-uv-in-honolulu-a",
+ "n": 3,
+ "ask": "how strong is the sun's UV in Honolulu at noon",
+ "kind": "current_value",
+ "frame_kind": null,
+ "subject": "UV Index",
+ "title": "UV Index",
+ "source_id": "open-meteo-uv",
+ "source_url": "https://api.open-meteo.com/v1/forecast?latitude=21.324347&longitude=-157.84764&current=uv_index&daily=uv_index_max&timezone=auto",
+ "fetched_at": "2026-10-08T16:52:09Z",
+ "viewer_tz": "UTC",
+ "answers_used": [
+  {
+   "name": "uv_max_today",
+   "label": "UV index today (max)",
+   "words": [
+    "uv",
+    "uv index",
+    "uv today",
+    "uv index today",
+    "max uv",
+    "peak uv",
+    "sunscreen",
+    "do i need sunscreen",
+    "sunscreen today",
+    "sunburn",
+    "strongest sun"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "daily.uv_index_max[0]",
+   "type": "number",
+   "window": "today",
+   "measure": "uv",
+   "unit": null
+  },
+  {
+   "name": "uv_now",
+   "label": "UV index right now",
+   "words": [
+    "uv now",
+    "uv index now",
+    "uv index",
+    "right now",
+    "current uv",
+    "at the moment"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "current.uv_index",
+   "type": "number",
+   "window": "now",
+   "measure": "uv",
+   "unit": null
+  }
+ ],
+ "rows_output_name": null,
+ "outputs": {
+  "uv_now": 0.05,
+  "uv_max_today": 7.15
+ },
+ "live_form": "stat",
+ "live_span": "d1x1",
+ "live_lint": {
+  "red": 0,
+  "amber": 0,
+  "codes": []
+ }
+}

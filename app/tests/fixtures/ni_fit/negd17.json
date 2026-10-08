@@ -1,0 +1,45 @@
+{
+ "id": "negd17",
+ "ask": "is GitHub having an outage right now",
+ "frame": {
+  "kind": "status",
+  "subject": "GitHub outage"
+ },
+ "chosen": [
+  {
+   "name": "wind",
+   "label": "Wind speed",
+   "words": [
+    "wind",
+    "windy",
+    "breeze",
+    "wind speed",
+    "gusts",
+    "gusty",
+    "how windy"
+   ],
+   "primary": false,
+   "kind": "value",
+   "path": "current.wind_speed_10m",
+   "type": "number",
+   "unit": "mph",
+   "window": "now",
+   "measure": "wind"
+  }
+ ],
+ "rows_output_name": null,
+ "preview": {
+  "wind": 0.2
+ },
+ "missing_menu": [
+  "github",
+  "having",
+  "outage"
+ ],
+ "label": {
+  "answers_ask": "no",
+  "missing": [],
+  "wrong": [],
+  "source_ask": "wind speed at the Golden Gate at the moment"
+ }
+}

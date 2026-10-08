@@ -1,0 +1,85 @@
+{
+ "id": "d13",
+ "ask": "when do the Bruins play next",
+ "frame": {
+  "kind": "next_event",
+  "subject": "Bruins"
+ },
+ "chosen": [
+  {
+   "name": "next_game",
+   "label": "Next game",
+   "words": [
+    "next game",
+    "next match",
+    "who do they play",
+    "opponent",
+    "play next",
+    "matchup",
+    "next"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "events[0].strEvent",
+   "type": "text",
+   "window": "latest",
+   "unit": null
+  },
+  {
+   "name": "start",
+   "label": "Start",
+   "words": [
+    "when",
+    "what time",
+    "start time",
+    "kickoff",
+    "tip-off",
+    "date",
+    "game time",
+    "next game",
+    "play next"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "events[0].strTimestamp",
+   "type": "time",
+   "window": "latest",
+   "utc": true,
+   "unit": null
+  },
+  {
+   "name": "venue",
+   "label": "Venue",
+   "words": [
+    "where",
+    "venue",
+    "stadium",
+    "arena",
+    "field",
+    "next game",
+    "play next"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "events[0].strVenue",
+   "type": "text",
+   "window": "latest",
+   "unit": null
+  }
+ ],
+ "rows_output_name": null,
+ "preview": {
+  "venue": "TD Garden",
+  "start": "2026-10-08T23:00:00+00:00",
+  "next_game": "Boston Bruins vs Utah Mammoth"
+ },
+ "missing_menu": [
+  "bruins",
+  "play"
+ ],
+ "label": {
+  "answers_ask": "yes",
+  "missing": [],
+  "wrong": []
+ }
+}

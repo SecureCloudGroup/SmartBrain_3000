@@ -1,0 +1,72 @@
+{
+ "id": "37-how-many-earthquakes-hit-japan-this-week",
+ "n": 37,
+ "ask": "how many earthquakes hit Japan this week",
+ "kind": "count",
+ "frame_kind": "count",
+ "subject": "earthquakes",
+ "title": "earthquakes",
+ "source_id": "usgs-quakes-near",
+ "source_url": "https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&latitude=31.566074&longitude=-93.477234&maxradiuskm=200&minmagnitude=2.5&starttime=2026-09-08&orderby=time",
+ "fetched_at": "2026-10-08T17:03:30Z",
+ "viewer_tz": "UTC",
+ "answers_used": [
+  {
+   "name": "quakes",
+   "label": "Earthquakes",
+   "words": [
+    "earthquakes",
+    "quakes",
+    "earthquake",
+    "magnitude",
+    "where",
+    "latest",
+    "recent",
+    "shaking",
+    "near",
+    "nearby",
+    "within"
+   ],
+   "primary": true,
+   "kind": "list",
+   "path": "features",
+   "newest_first": false,
+   "may_be_empty": true,
+   "cells": [
+    {
+     "path": "properties.mag",
+     "label": "Magnitude",
+     "type": "number",
+     "key": "properties.mag",
+     "unit": ""
+    },
+    {
+     "path": "properties.place",
+     "label": "Place",
+     "type": "text",
+     "key": "properties.place",
+     "unit": ""
+    },
+    {
+     "path": "properties.time",
+     "label": "Time",
+     "type": "time",
+     "key": "properties.time",
+     "unit": ""
+    }
+   ]
+  }
+ ],
+ "rows_output_name": "rows",
+ "outputs": {
+  "rows_count": 0,
+  "rows": []
+ },
+ "live_form": "ranked_list",
+ "live_span": "d1x1",
+ "live_lint": {
+  "red": 0,
+  "amber": 0,
+  "codes": []
+ }
+}

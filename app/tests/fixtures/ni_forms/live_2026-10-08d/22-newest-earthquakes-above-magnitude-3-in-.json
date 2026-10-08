@@ -1,0 +1,675 @@
+{
+ "id": "22-newest-earthquakes-above-magnitude-3-in-",
+ "n": 22,
+ "ask": "newest earthquakes above magnitude 3 in Nevada",
+ "kind": "latest_items",
+ "frame_kind": null,
+ "subject": "earthquakes",
+ "title": "earthquakes",
+ "source_id": "usgs-quakes-state",
+ "source_url": "https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&minlatitude=35.002&maxlatitude=41.995&minlongitude=-120.001&maxlongitude=-114.041&minmagnitude=2.5&starttime=2026-09-08&orderby=time&limit=20",
+ "fetched_at": "2026-10-08T16:57:52Z",
+ "viewer_tz": "UTC",
+ "answers_used": [
+  {
+   "name": "quakes",
+   "label": "Earthquakes",
+   "words": [
+    "earthquakes",
+    "quakes",
+    "earthquake",
+    "magnitude",
+    "where",
+    "latest",
+    "recent",
+    "shaking",
+    "statewide",
+    "in the state"
+   ],
+   "primary": true,
+   "kind": "list",
+   "path": "features",
+   "newest_first": false,
+   "may_be_empty": true,
+   "cells": [
+    {
+     "path": "properties.mag",
+     "label": "Magnitude",
+     "type": "number",
+     "key": "properties.mag",
+     "unit": null
+    },
+    {
+     "path": "properties.place",
+     "label": "Place",
+     "type": "text",
+     "key": "properties.place",
+     "unit": null
+    },
+    {
+     "path": "properties.time",
+     "label": "Time",
+     "type": "time",
+     "key": "properties.time",
+     "unit": null
+    }
+   ]
+  }
+ ],
+ "rows_output_name": "rows",
+ "outputs": {
+  "rows_count": 15,
+  "rows": [
+   {
+    "id": "nn00925420",
+    "geometry": {
+     "coordinates": [
+      -115.2777,
+      38.9018,
+      5.1382
+     ],
+     "type": "Point"
+    },
+    "properties": {
+     "title": "M 2.7 - 18 km W of Preston, Nevada",
+     "type": "earthquake",
+     "magType": "ml",
+     "gap": 203,
+     "rms": 0.1506,
+     "dmin": 0.375,
+     "nst": 5,
+     "types": ",origin,phase-data,",
+     "sources": ",us,nn,",
+     "ids": ",us6000u0qy,nn00925420,",
+     "code": "00925420",
+     "net": "nn",
+     "sig": 109,
+     "tsunami": 0,
+     "status": "reviewed",
+     "alert": null,
+     "mmi": null,
+     "cdi": null,
+     "felt": null,
+     "detail": "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=nn00925420&format=geojson",
+     "url": "https://earthquake.usgs.gov/earthquakes/eventpage/nn00925420",
+     "tz": null,
+     "updated": 1791425144775,
+     "time": "2026-10-07T11:31:45.939000+00:00",
+     "place": "18 km W of Preston, Nevada",
+     "mag": 2.66
+    },
+    "type": "Feature"
+   },
+   {
+    "id": "nn00925389",
+    "geometry": {
+     "coordinates": [
+      -115.2807,
+      38.9003,
+      3.6175
+     ],
+     "type": "Point"
+    },
+    "properties": {
+     "title": "M 3.3 - 19 km W of Preston, Nevada",
+     "type": "earthquake",
+     "magType": "ml",
+     "gap": 194,
+     "rms": 0.1251,
+     "dmin": 0.378,
+     "nst": 5,
+     "types": ",origin,phase-data,shakemap,",
+     "sources": ",us,nn,",
+     "ids": ",us6000u0kl,nn00925389,",
+     "code": "00925389",
+     "net": "nn",
+     "sig": 168,
+     "tsunami": 0,
+     "status": "reviewed",
+     "alert": null,
+     "mmi": 3.24,
+     "cdi": null,
+     "felt": null,
+     "detail": "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=nn00925389&format=geojson",
+     "url": "https://earthquake.usgs.gov/earthquakes/eventpage/nn00925389",
+     "tz": null,
+     "updated": 1791404444222,
+     "time": "2026-10-06T20:16:51.387000+00:00",
+     "place": "19 km W of Preston, Nevada",
+     "mag": 3.3
+    },
+    "type": "Feature"
+   },
+   {
+    "id": "nn00925376",
+    "geometry": {
+     "coordinates": [
+      -115.2731,
+      38.9117,
+      8.4359
+     ],
+     "type": "Point"
+    },
+    "properties": {
+     "title": "M 2.8 - 18 km W of Preston, Nevada",
+     "type": "earthquake",
+     "magType": "ml",
+     "gap": 226,
+     "rms": 0.2136,
+     "dmin": 0.368,
+     "nst": 3,
+     "types": ",origin,phase-data,",
+     "sources": ",us,nn,",
+     "ids": ",us6000u0jd,nn00925376,",
+     "code": "00925376",
+     "net": "nn",
+     "sig": 121,
+     "tsunami": 0,
+     "status": "reviewed",
+     "alert": null,
+     "mmi": null,
+     "cdi": null,
+     "felt": null,
+     "detail": "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=nn00925376&format=geojson",
+     "url": "https://earthquake.usgs.gov/earthquakes/eventpage/nn00925376",
+     "tz": null,
+     "updated": 1791318505040,
+     "time": "2026-10-06T17:43:42.249000+00:00",
+     "place": "18 km W of Preston, Nevada",
+     "mag": 2.81
+    },
+    "type": "Feature"
+   },
+   {
+    "id": "nn00925363",
+    "geometry": {
+     "coordinates": [
+      -115.3385,
+      38.9946,
+      5
+     ],
+     "type": "Point"
+    },
+    "properties": {
+     "title": "M 3.5 - 25 km WNW of Preston, Nevada",
+     "type": "earthquake",
+     "magType": "mwr",
+     "gap": 214,
+     "rms": 0.1799,
+     "dmin": 0.398,
+     "nst": 7,
+     "types": ",moment-tensor,origin,phase-data,shakemap,",
+     "sources": ",us,nn,",
+     "ids": ",us6000u054,nn00925363,",
+     "code": "00925363",
+     "net": "nn",
+     "sig": 183,
+     "tsunami": 0,
+     "status": "reviewed",
+     "alert": null,
+     "mmi": 3.483,
+     "cdi": null,
+     "felt": null,
+     "detail": "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=nn00925363&format=geojson",
+     "url": "https://earthquake.usgs.gov/earthquakes/eventpage/nn00925363",
+     "tz": null,
+     "updated": 1791405363040,
+     "time": "2026-10-06T15:34:29.755000+00:00",
+     "place": "25 km WNW of Preston, Nevada",
+     "mag": 3.45
+    },
+    "type": "Feature"
+   },
+   {
+    "id": "nn00925282",
+    "geometry": {
+     "coordinates": [
+      -119.0434,
+      39.1649,
+      6.445
+     ],
+     "type": "Point"
+    },
+    "properties": {
+     "title": "M 2.8 - 22 km NNE of Yerington, Nevada",
+     "type": "earthquake",
+     "magType": "ml",
+     "gap": 70,
+     "rms": 0.1424,
+     "dmin": 0.087,
+     "nst": 29,
+     "types": ",dyfi,origin,phase-data,",
+     "sources": ",nn,us,",
+     "ids": ",nn00925282,us6000tzlu,",
+     "code": "00925282",
+     "net": "nn",
+     "sig": 121,
+     "tsunami": 0,
+     "status": "reviewed",
+     "alert": null,
+     "mmi": null,
+     "cdi": 2,
+     "felt": 1,
+     "detail": "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=nn00925282&format=geojson",
+     "url": "https://earthquake.usgs.gov/earthquakes/eventpage/nn00925282",
+     "tz": null,
+     "updated": 1791218770490,
+     "time": "2026-10-05T01:55:51.530000+00:00",
+     "place": "22 km NNE of Yerington, Nevada",
+     "mag": 2.8
+    },
+    "type": "Feature"
+   },
+   {
+    "id": "nn00925269",
+    "geometry": {
+     "coordinates": [
+      -117.8162,
+      38.1717,
+      7.7888
+     ],
+     "type": "Point"
+    },
+    "properties": {
+     "title": "M 2.6 - 35 km SE of Mina, Nevada",
+     "type": "earthquake",
+     "magType": "ml",
+     "gap": 48,
+     "rms": 0.1647,
+     "dmin": 0.283,
+     "nst": 22,
+     "types": ",origin,phase-data,",
+     "sources": ",us,nn,",
+     "ids": ",us6000tzjt,nn00925269,",
+     "code": "00925269",
+     "net": "nn",
+     "sig": 104,
+     "tsunami": 0,
+     "status": "reviewed",
+     "alert": null,
+     "mmi": null,
+     "cdi": null,
+     "felt": null,
+     "detail": "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=nn00925269&format=geojson",
+     "url": "https://earthquake.usgs.gov/earthquakes/eventpage/nn00925269",
+     "tz": null,
+     "updated": 1791243774916,
+     "time": "2026-10-04T16:47:27.196000+00:00",
+     "place": "35 km SE of Mina, Nevada",
+     "mag": 2.6
+    },
+    "type": "Feature"
+   },
+   {
+    "id": "nn00925220",
+    "geometry": {
+     "coordinates": [
+      -115.3439,
+      38.9375,
+      4
+     ],
+     "type": "Point"
+    },
+    "properties": {
+     "title": "M 3.3 - 24 km W of Preston, Nevada",
+     "type": "earthquake",
+     "magType": "mwr",
+     "gap": 205,
+     "rms": 0.1299,
+     "dmin": 0.413,
+     "nst": 7,
+     "types": ",moment-tensor,origin,phase-data,",
+     "sources": ",nn,uu,us,",
+     "ids": ",nn00925220,uu80158431,us6000tzcn,",
+     "code": "00925220",
+     "net": "nn",
+     "sig": 162,
+     "tsunami": 0,
+     "status": "reviewed",
+     "alert": null,
+     "mmi": null,
+     "cdi": null,
+     "felt": null,
+     "detail": "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=nn00925220&format=geojson",
+     "url": "https://earthquake.usgs.gov/earthquakes/eventpage/nn00925220",
+     "tz": null,
+     "updated": 1791298735101,
+     "time": "2026-10-03T13:58:13.534000+00:00",
+     "place": "24 km W of Preston, Nevada",
+     "mag": 3.25
+    },
+    "type": "Feature"
+   },
+   {
+    "id": "nn00925155",
+    "geometry": {
+     "coordinates": [
+      -115.2897,
+      38.9073,
+      3.4406
+     ],
+     "type": "Point"
+    },
+    "properties": {
+     "title": "M 3.0 - 19 km W of Preston, Nevada",
+     "type": "earthquake",
+     "magType": "ml",
+     "gap": 196,
+     "rms": 0.1629,
+     "dmin": 0.381,
+     "nst": 7,
+     "types": ",origin,phase-data,",
+     "sources": ",nn,us,",
+     "ids": ",nn00925155,us6000tz0a,",
+     "code": "00925155",
+     "net": "nn",
+     "sig": 136,
+     "tsunami": 0,
+     "status": "reviewed",
+     "alert": null,
+     "mmi": null,
+     "cdi": null,
+     "felt": null,
+     "detail": "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=nn00925155&format=geojson",
+     "url": "https://earthquake.usgs.gov/earthquakes/eventpage/nn00925155",
+     "tz": null,
+     "updated": 1790967531126,
+     "time": "2026-10-02T09:13:41.051000+00:00",
+     "place": "19 km W of Preston, Nevada",
+     "mag": 2.97
+    },
+    "type": "Feature"
+   },
+   {
+    "id": "nn00925017",
+    "geometry": {
+     "coordinates": [
+      -115.2879,
+      38.9214,
+      0
+     ],
+     "type": "Point"
+    },
+    "properties": {
+     "title": "M 3.1 - 19 km W of Preston, Nevada",
+     "type": "earthquake",
+     "magType": "ml",
+     "gap": 188,
+     "rms": 0.1433,
+     "dmin": 0.375,
+     "nst": 8,
+     "types": ",origin,phase-data,",
+     "sources": ",us,nn,",
+     "ids": ",us6000tybh,nn00925017,",
+     "code": "00925017",
+     "net": "nn",
+     "sig": 145,
+     "tsunami": 0,
+     "status": "reviewed",
+     "alert": null,
+     "mmi": null,
+     "cdi": null,
+     "felt": null,
+     "detail": "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=nn00925017&format=geojson",
+     "url": "https://earthquake.usgs.gov/earthquakes/eventpage/nn00925017",
+     "tz": null,
+     "updated": 1790753092040,
+     "time": "2026-09-29T09:50:11.265000+00:00",
+     "place": "19 km W of Preston, Nevada",
+     "mag": 3.07
+    },
+    "type": "Feature"
+   },
+   {
+    "id": "nn00924977",
+    "geometry": {
+     "coordinates": [
+      -115.2938,
+      38.896,
+      0
+     ],
+     "type": "Point"
+    },
+    "properties": {
+     "title": "M 3.3 - 20 km W of Preston, Nevada",
+     "type": "earthquake",
+     "magType": "ml",
+     "gap": 194,
+     "rms": 0.1453,
+     "dmin": 0.389,
+     "nst": 8,
+     "types": ",origin,phase-data,",
+     "sources": ",us,nn,",
+     "ids": ",us6000ty39,nn00924977,",
+     "code": "00924977",
+     "net": "nn",
+     "sig": 168,
+     "tsunami": 0,
+     "status": "reviewed",
+     "alert": null,
+     "mmi": null,
+     "cdi": null,
+     "felt": null,
+     "detail": "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=nn00924977&format=geojson",
+     "url": "https://earthquake.usgs.gov/earthquakes/eventpage/nn00924977",
+     "tz": null,
+     "updated": 1790661171040,
+     "time": "2026-09-28T05:53:11.730000+00:00",
+     "place": "20 km W of Preston, Nevada",
+     "mag": 3.3
+    },
+    "type": "Feature"
+   },
+   {
+    "id": "nn00924954",
+    "geometry": {
+     "coordinates": [
+      -115.2989,
+      38.9229,
+      6
+     ],
+     "type": "Point"
+    },
+    "properties": {
+     "title": "M 4.1 - 20 km W of Preston, Nevada",
+     "type": "earthquake",
+     "magType": "mwr",
+     "gap": 199,
+     "rms": 0.195,
+     "dmin": 0.383,
+     "nst": 6,
+     "types": ",dyfi,event-sequence,losspager,moment-tensor,oaf,origin,phase-data,shakemap,",
+     "sources": ",nn,us,",
+     "ids": ",nn00924954,us6000txxy,",
+     "code": "00924954",
+     "net": "nn",
+     "sig": 259,
+     "tsunami": 0,
+     "status": "reviewed",
+     "alert": "green",
+     "mmi": 3.93,
+     "cdi": 1,
+     "felt": 1,
+     "detail": "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=nn00924954&format=geojson",
+     "url": "https://earthquake.usgs.gov/earthquakes/eventpage/nn00924954",
+     "tz": null,
+     "updated": 1791450254430,
+     "time": "2026-09-27T08:54:07.495000+00:00",
+     "place": "20 km W of Preston, Nevada",
+     "mag": 4.1
+    },
+    "type": "Feature"
+   },
+   {
+    "id": "nn00924951",
+    "geometry": {
+     "coordinates": [
+      -115.3013,
+      38.9316,
+      4.233
+     ],
+     "type": "Point"
+    },
+    "properties": {
+     "title": "M 2.6 - 20 km W of Preston, Nevada",
+     "type": "earthquake",
+     "magType": "ml",
+     "gap": 201,
+     "rms": 0.1554,
+     "dmin": 0.382,
+     "nst": 6,
+     "types": ",origin,phase-data,",
+     "sources": ",us,nn,",
+     "ids": ",us6000txxs,nn00924951,",
+     "code": "00924951",
+     "net": "nn",
+     "sig": 101,
+     "tsunami": 0,
+     "status": "reviewed",
+     "alert": null,
+     "mmi": null,
+     "cdi": null,
+     "felt": null,
+     "detail": "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=nn00924951&format=geojson",
+     "url": "https://earthquake.usgs.gov/earthquakes/eventpage/nn00924951",
+     "tz": null,
+     "updated": 1790561094936,
+     "time": "2026-09-27T08:25:53.538000+00:00",
+     "place": "20 km W of Preston, Nevada",
+     "mag": 2.56
+    },
+    "type": "Feature"
+   },
+   {
+    "id": "nn00924939",
+    "geometry": {
+     "coordinates": [
+      -115.3111,
+      38.9253,
+      6
+     ],
+     "type": "Point"
+    },
+    "properties": {
+     "title": "M 3.3 - 21 km W of Preston, Nevada",
+     "type": "earthquake",
+     "magType": "mwr",
+     "gap": 201,
+     "rms": 0.1205,
+     "dmin": 0.391,
+     "nst": 7,
+     "types": ",moment-tensor,origin,phase-data,",
+     "sources": ",nn,us,",
+     "ids": ",nn00924939,us6000txxg,",
+     "code": "00924939",
+     "net": "nn",
+     "sig": 168,
+     "tsunami": 0,
+     "status": "reviewed",
+     "alert": null,
+     "mmi": null,
+     "cdi": null,
+     "felt": null,
+     "detail": "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=nn00924939&format=geojson",
+     "url": "https://earthquake.usgs.gov/earthquakes/eventpage/nn00924939",
+     "tz": null,
+     "updated": 1790609601997,
+     "time": "2026-09-27T07:18:53.582000+00:00",
+     "place": "21 km W of Preston, Nevada",
+     "mag": 3.3
+    },
+    "type": "Feature"
+   },
+   {
+    "id": "nn00924934",
+    "geometry": {
+     "coordinates": [
+      -115.3002,
+      38.9231,
+      3.5438
+     ],
+     "type": "Point"
+    },
+    "properties": {
+     "title": "M 3.0 - 20 km W of Preston, Nevada",
+     "type": "earthquake",
+     "magType": "ml",
+     "gap": 200,
+     "rms": 0.1688,
+     "dmin": 0.384,
+     "nst": 7,
+     "types": ",origin,phase-data,",
+     "sources": ",us,nn,",
+     "ids": ",us6000txxl,nn00924934,",
+     "code": "00924934",
+     "net": "nn",
+     "sig": 136,
+     "tsunami": 0,
+     "status": "reviewed",
+     "alert": null,
+     "mmi": null,
+     "cdi": null,
+     "felt": null,
+     "detail": "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=nn00924934&format=geojson",
+     "url": "https://earthquake.usgs.gov/earthquakes/eventpage/nn00924934",
+     "tz": null,
+     "updated": 1790561061526,
+     "time": "2026-09-27T07:12:58.421000+00:00",
+     "place": "20 km W of Preston, Nevada",
+     "mag": 2.97
+    },
+    "type": "Feature"
+   },
+   {
+    "id": "nn00924930",
+    "geometry": {
+     "coordinates": [
+      -115.3083,
+      38.9319,
+      6
+     ],
+     "type": "Point"
+    },
+    "properties": {
+     "title": "M 4.1 - 21 km W of Preston, Nevada",
+     "type": "earthquake",
+     "magType": "mwr",
+     "gap": 121,
+     "rms": 0.1758,
+     "dmin": 0.387,
+     "nst": 8,
+     "types": ",dyfi,losspager,moment-tensor,origin,phase-data,shakemap,",
+     "sources": ",us,nn,",
+     "ids": ",us6000txxb,nn00924930,",
+     "code": "00924930",
+     "net": "nn",
+     "sig": 258,
+     "tsunami": 0,
+     "status": "reviewed",
+     "alert": "green",
+     "mmi": 4.001,
+     "cdi": 4.3,
+     "felt": 7,
+     "detail": "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=nn00924930&format=geojson",
+     "url": "https://earthquake.usgs.gov/earthquakes/eventpage/nn00924930",
+     "tz": null,
+     "updated": 1790701268040,
+     "time": "2026-09-27T07:01:41.497000+00:00",
+     "place": "21 km W of Preston, Nevada",
+     "mag": 4.07
+    },
+    "type": "Feature"
+   }
+  ]
+ },
+ "live_form": "bars",
+ "live_span": "d1x2",
+ "live_lint": {
+  "red": 0,
+  "amber": 4,
+  "codes": [
+   "L-ASK",
+   "stretch"
+  ]
+ }
+}

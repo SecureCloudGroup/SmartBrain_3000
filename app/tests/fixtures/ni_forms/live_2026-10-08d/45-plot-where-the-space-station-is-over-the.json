@@ -1,0 +1,83 @@
+{
+ "id": "45-plot-where-the-space-station-is-over-the",
+ "n": 45,
+ "ask": "plot where the space station is over the Pacific right now",
+ "kind": "map",
+ "frame_kind": null,
+ "subject": "Space Station",
+ "title": "Space Station",
+ "source_id": "wheretheiss-now",
+ "source_url": "https://api.wheretheiss.at/v1/satellites/25544",
+ "fetched_at": "2026-10-08T17:05:27Z",
+ "viewer_tz": "UTC",
+ "answers_used": [
+  {
+   "name": "latitude",
+   "label": "Latitude",
+   "words": [
+    "where is the iss",
+    "space station location",
+    "latitude",
+    "lat",
+    "position",
+    "where"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "latitude",
+   "type": "number",
+   "unit": "°",
+   "window": "now"
+  },
+  {
+   "name": "longitude",
+   "label": "Longitude",
+   "words": [
+    "where is the iss",
+    "space station location",
+    "longitude",
+    "lon",
+    "position",
+    "where"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "longitude",
+   "type": "number",
+   "unit": "°",
+   "window": "now"
+  },
+  {
+   "name": "altitude",
+   "label": "Altitude",
+   "words": [
+    "altitude",
+    "how high",
+    "height",
+    "orbit",
+    "above earth"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "altitude",
+   "type": "number",
+   "unit": "km",
+   "window": "now"
+  }
+ ],
+ "rows_output_name": null,
+ "outputs": {
+  "altitude": 433.4707060169,
+  "longitude": 125.6603005306,
+  "latitude": -47.417591146437
+ },
+ "live_form": "map_lite",
+ "live_span": "d2x1",
+ "live_lint": {
+  "red": 0,
+  "amber": 2,
+  "codes": [
+   "L-ASK"
+  ]
+ }
+}

@@ -1,0 +1,70 @@
+{
+ "id": "negd18",
+ "ask": "any winter storm warnings for Minnesota",
+ "frame": {
+  "kind": "alerts",
+  "subject": "winter storm warnings"
+ },
+ "chosen": [
+  {
+   "name": "uv_max_today",
+   "label": "UV index today (max)",
+   "words": [
+    "uv",
+    "uv index",
+    "uv today",
+    "uv index today",
+    "max uv",
+    "peak uv",
+    "sunscreen",
+    "do i need sunscreen",
+    "sunscreen today",
+    "sunburn",
+    "strongest sun"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "daily.uv_index_max[0]",
+   "type": "number",
+   "window": "today",
+   "measure": "uv",
+   "unit": null
+  },
+  {
+   "name": "uv_now",
+   "label": "UV index right now",
+   "words": [
+    "uv now",
+    "uv index now",
+    "uv index",
+    "right now",
+    "current uv",
+    "at the moment"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "current.uv_index",
+   "type": "number",
+   "window": "now",
+   "measure": "uv",
+   "unit": null
+  }
+ ],
+ "rows_output_name": null,
+ "preview": {
+  "uv_now": 0.05,
+  "uv_max_today": 7.15
+ },
+ "missing_menu": [
+  "minnesota",
+  "storm",
+  "warnings",
+  "winter"
+ ],
+ "label": {
+  "answers_ask": "no",
+  "missing": [],
+  "wrong": [],
+  "source_ask": "how strong is the sun's UV in Honolulu at noon"
+ }
+}

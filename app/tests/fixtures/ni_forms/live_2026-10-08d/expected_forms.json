@@ -1,0 +1,246 @@
+{
+ "_doc": "Acceptable designs per blind-50 SET D live case (keyed by the set's case number), the FOURTH fresh gate set (post #495/#496/#497/#498) -- never shown to a worker. Same shape as live_2026-10-07c/expected_forms.json. Cases 7, 12, 18, 37 are the four WRONG classes this round fixed (W1/W2/W3/W4): their answers_used/outputs were rebuilt for real through the fixed code (datalayer-r2), not copied from the pre-fix recorded run, so `forms`/`required`/`summary_words` describe the CORRECTED card. Case 27 (a carried partial, the trend-prefers-history select_answers fix) is rebuilt the same way, over a hand-built 12-month sample (the pre-fix run never fetched the 'recent' list).",
+ "1": {
+  "forms": [
+   "stat"
+  ],
+  "required": [
+   "humidity"
+  ],
+  "summary_words": [
+   "Humidity"
+  ]
+ },
+ "2": {
+  "forms": [
+   "stat"
+  ],
+  "required": [
+   "wind"
+  ],
+  "summary_words": [
+   "Wind"
+  ]
+ },
+ "3": {
+  "forms": [
+   "conditions"
+  ],
+  "required": [
+   "uv_now"
+  ],
+  "summary_words": [
+   "UV"
+  ]
+ },
+ "7": {
+  "forms": [
+   "series_line",
+   "day_table"
+  ],
+  "required": [
+   "snowfall"
+  ],
+  "summary_words": [
+   "Snowfall"
+  ]
+ },
+ "8": {
+  "forms": [
+   "series_line"
+  ],
+  "required": [
+   "temperature"
+  ],
+  "summary_words": [
+   "Temperature"
+  ]
+ },
+ "10": {
+  "forms": [
+   "series_line"
+  ],
+  "required": [
+   "rain_chance"
+  ],
+  "summary_words": [
+   "Rain chance"
+  ]
+ },
+ "11": {
+  "forms": [
+   "day_table"
+  ],
+  "required": [
+   "kp"
+  ],
+  "summary_words": [
+   "Kp"
+  ]
+ },
+ "12": {
+  "forms": [
+   "day_table"
+  ],
+  "required": [
+   "height",
+   "time"
+  ],
+  "summary_words": [
+   "Height"
+  ],
+  "subject_filter": {
+   "cell": "type",
+   "equals": "L"
+  }
+ },
+ "13": {
+  "forms": [
+   "kv_grid"
+  ],
+  "required": [
+   "next_game",
+   "start",
+   "venue"
+  ],
+  "summary_words": [
+   "Bruins"
+  ]
+ },
+ "14": {
+  "forms": [
+   "next_event"
+  ],
+  "required": [
+   "launch",
+   "time"
+  ],
+  "summary_words": [
+   "Falcon"
+  ]
+ },
+ "17": {
+  "forms": [
+   "agenda"
+  ],
+  "required": [
+   "high_low",
+   "time"
+  ],
+  "summary_words": []
+ },
+ "18": {
+  "forms": [
+   "stat"
+  ],
+  "required": [
+   "away",
+   "home"
+  ],
+  "summary_words": [
+   "Sharks"
+  ],
+  "subject_filter": {
+   "cell": "awayTeam.name.default",
+   "equals": "Sharks"
+  }
+ },
+ "21": {
+  "forms": [
+   "ranked_list"
+  ],
+  "required": [
+   "title"
+  ],
+  "summary_words": []
+ },
+ "22": {
+  "forms": [
+   "table"
+  ],
+  "required": [
+   "magnitude",
+   "place"
+  ],
+  "summary_words": []
+ },
+ "24": {
+  "forms": [
+   "table"
+  ],
+  "required": [
+   "coin",
+   "market_cap"
+  ],
+  "summary_words": []
+ },
+ "25": {
+  "forms": [
+   "table"
+  ],
+  "required": [
+   "team",
+   "pts"
+  ],
+  "summary_words": []
+ },
+ "27": {
+  "forms": [
+   "series_line"
+  ],
+  "required": [
+   "unemployment_rate"
+  ],
+  "summary_words": [
+   "Unemployment"
+  ]
+ },
+ "30": {
+  "forms": [
+   "stat"
+  ],
+  "required": [
+   "overall_status"
+  ],
+  "summary_words": []
+ },
+ "33": {
+  "forms": [
+   "entity_list"
+  ],
+  "required": [],
+  "summary_words": []
+ },
+ "36": {
+  "forms": [
+   "table"
+  ],
+  "required": [
+   "fire"
+  ],
+  "summary_words": []
+ },
+ "37": {
+  "forms": [
+   "table"
+  ],
+  "required": [],
+  "summary_words": []
+ },
+ "45": {
+  "forms": [
+   "map_lite"
+  ],
+  "required": [],
+  "summary_words": []
+ },
+ "49": {
+  "forms": [
+   "text_brief"
+  ],
+  "required": [
+   "next_detail"
+  ],
+  "summary_words": []
+ }
+}

@@ -34,7 +34,7 @@ _FIX = _REPO / "app" / "tests" / "fixtures" / "ni_fit"
 _DEFAULT_ENDPOINT = "http://127.0.0.1:38080"
 _DEFAULT_MODEL = "mlx/Qwen3.5-9B-MLX-4bit"
 _TIMEOUT_S = 180
-_MAX_RECORDS = 200   # bounded: the labeled set holds 126 today
+_MAX_RECORDS = 200   # bounded: the labeled set holds 172 today (86 live + 86 negatives)
 
 
 def _gateway_call(endpoint: str, model: str) -> Callable[[str], str]:
@@ -61,22 +61,58 @@ def _records() -> list[dict]:
     return [json.loads(p.read_text()) for p in paths if p.name != "README.md"]
 
 
+def _instrumented(call: Callable[[str], str]) -> tuple[Callable[[str], str], list[dict]]:
+    """Wrap ``call`` so every raw attempt (transport exception, or the reply text) is
+    recorded — ``fit_verdict`` swallows the reason a verdict came back None (gateway
+    down, a timeout, or two invalid replies all read the same, a bare ``None``); this is
+    how ``_measure_one`` tells those apart for the ``no_verdict`` row without changing
+    ``ni_forms.verdict``/``llm`` production code."""
+    attempts: list[dict] = []
+
+    def wrapped(prompt: str) -> str:
+        try:
+            content = call(prompt)
+        except Exception as exc:  # noqa: BLE001 - recorded, then re-raised unchanged
+            attempts.append({"ok": False, "error": f"{type(exc).__name__}: {exc}"[:200]})
+            raise
+        attempts.append({"ok": True, "content": content[:300]})
+        return content
+
+    return wrapped, attempts
+
+
+def _no_verdict_reason(attempts: list[dict]) -> str:
+    """Why ``fit_verdict`` returned None, from the raw attempts ``_instrumented`` saw:
+    a transport exception on any try, else two replies that never matched the schema
+    (``SchemaInvalid``), else no attempt was made at all (``call_model`` was None)."""
+    if not attempts:
+        return "no_call_attempted"
+    failed = [a for a in attempts if not a["ok"]]
+    if failed:
+        return f"transport: {failed[0]['error']}"
+    return f"invalid_reply after {len(attempts)} attempt(s): {attempts[-1]['content'][:160]!r}"
+
+
 def _measure_one(rec: dict, call: Callable[[str], str]) -> dict:
     """One report row: the real ``fit_verdict`` call against the gateway, scored
-    against the record's label."""
+    against the record's label. ``outcome`` is ``valid`` (a verdict came back),
+    ``no_verdict`` (None — transport trouble or two invalid replies; ``detail`` says
+    which), or ``error`` (something ``fit_verdict`` itself does not catch)."""
     assert isinstance(rec, dict), "rec required"
     row = {"id": rec["id"], "truth": rec["label"]["answers_ask"]}
+    wrapped, attempts = _instrumented(call)
     t0 = time.time()
     try:
         verdict = fit_verdict(rec["ask"], rec["frame"], rec["chosen"], rec["preview"],
-                              rec["missing_menu"], call)
+                              rec["missing_menu"], wrapped)
     except (urllib.error.URLError, ni_llm.ModelUnavailable, TimeoutError) as exc:
         row["outcome"] = "error"
         row["detail"] = f"{type(exc).__name__}: {exc}"[:200]
         return row
     row["seconds"] = round(time.time() - t0, 1)
     if verdict is None:
-        row["outcome"] = "model_unavailable"
+        row["outcome"] = "no_verdict"
+        row["detail"] = _no_verdict_reason(attempts)
         return row
     row["outcome"] = "valid"
     row["pred"] = verdict.answers_ask
@@ -103,15 +139,35 @@ def _precision_recall(rows: list[dict], cls: str) -> tuple[float, float, int]:
 
 
 def _report(rows: list[dict]) -> str:
-    """The printed summary: validity rate, per-class precision/recall, overall accuracy."""
+    """The printed summary: validity rate, the no_verdict gap on its own, per-class
+    precision/recall, precision of "no" against the WRONG-labeled rows specifically,
+    overall accuracy."""
     valid = [r for r in rows if r["outcome"] == "valid"]
+    no_verdict = [r for r in rows if r["outcome"] == "no_verdict"]
+    errors = [r for r in rows if r["outcome"] == "error"]
     lines = [f"{r['id']}: {r['outcome']} truth={r['truth']} pred={r.get('pred')} "
-            f"correct={r.get('correct')}" for r in rows]
+            f"correct={r.get('correct')}" + (f" detail={r['detail']!r}" if r.get("detail") else "")
+            for r in rows]
     lines.append(f"\nFIT validity: {len(valid)}/{len(rows)} "
                  f"({100 * len(valid) / len(rows) if rows else 0:.0f}%)")
+    lines.append(f"  no_verdict: {len(no_verdict)}/{len(rows)} (the authority gap: a 'rules' note "
+                 "in production, no code check can close) -- by truth label: " +
+                 ", ".join(f"{t}={sum(1 for r in no_verdict if r['truth'] == t)}"
+                          for t in sorted(VERDICTS)))
+    if errors:
+        lines.append(f"  error (uncaught by fit_verdict): {len(errors)}/{len(rows)}")
     for cls in sorted(VERDICTS):
         p, r, n = _precision_recall(rows, cls)
         lines.append(f"  class {cls:<7} precision={p:.2f} recall={r:.2f} support={n}")
+    # precision of "no" against WRONG specifically, counting a no_verdict row on a WRONG
+    # truth as a MISS (the gap authority cannot close) rather than silently excluding it
+    wrong_total = sum(1 for r in rows if r["truth"] == "no")
+    no_tp = sum(1 for r in valid if r["pred"] == "no" and r["truth"] == "no")
+    no_fp = sum(1 for r in valid if r["pred"] == "no" and r["truth"] != "no")
+    no_missed_to_no_verdict = sum(1 for r in no_verdict if r["truth"] == "no")
+    precision_no = no_tp / (no_tp + no_fp) if (no_tp + no_fp) else 0.0
+    lines.append(f"precision('no') vs WRONG: {precision_no:.2f} (tp={no_tp} fp={no_fp}); "
+                 f"WRONG rows with no_verdict instead of a 'no': {no_missed_to_no_verdict}/{wrong_total}")
     acc = sum(1 for r in valid if r["correct"]) / len(valid) if valid else 0.0
     lines.append(f"overall accuracy (valid rows only): {acc:.2f}")
     return "\n".join(lines)
