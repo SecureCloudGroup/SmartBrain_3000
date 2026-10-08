@@ -400,6 +400,86 @@ def test_due_query_excludes_draft_paused_broken() -> None:
     assert [i["id"] for i in due] == [active]
 
 
+def test_write_snapshot_keeps_created_at_only_when_asked() -> None:
+    """§34 Phase 1b (lead review 2026-10-08): a clock pass rewrites a slot's payload but not
+    its created_at (the board's payload_at); an ordinary write still stamps now()."""
+    store, _, _ = _store()
+    item_id = store.add_item(_basic_spec(), _preview())
+    store.write_snapshot(item_id, "latest", {"v": 1}, ok=True)
+    first = store.read_snapshot(item_id, "latest")["created_at"]
+    store._conn.execute("UPDATE ni_snapshots SET created_at = created_at - INTERVAL 1 HOUR WHERE item_id = ? AND slot = 'latest'", [item_id])
+    aged = store.read_snapshot(item_id, "latest")["created_at"]
+    assert aged != first
+    store.write_snapshot(item_id, "latest", {"v": 2}, ok=True, keep_created_at=True)
+    kept = store.read_snapshot(item_id, "latest")
+    assert kept["payload"] == {"v": 2} and kept["created_at"] == aged
+    store.write_snapshot(item_id, "latest", {"v": 3}, ok=True)
+    assert store.read_snapshot(item_id, "latest")["created_at"] != aged
+
+
+def test_set_next_clock_round_trips_and_clears() -> None:
+    """§34 Phase 1b: the plaintext due-query column a clock pass is admitted by."""
+    from datetime import UTC, datetime  # local import: bounded scope for helper
+
+    store, _, _ = _store()
+    iid = store.add_item(_basic_spec(), _preview())
+    assert store.get_item(iid)["next_clock"] is None
+    when = datetime(2026, 10, 9, 0, 5, tzinfo=UTC)
+    store.set_next_clock(iid, when)
+    assert store.get_item(iid)["next_clock"] == when
+    store.set_next_clock(iid, None)
+    assert store.get_item(iid)["next_clock"] is None
+
+
+def test_due_items_admits_a_clock_due_item_that_is_not_fetch_due() -> None:
+    """next_clock <= now() admits an item even though last_checked is fresh (never
+    fetch-due by effective_interval_minutes)."""
+    from datetime import (  # local import: bounded scope for helper
+        UTC,
+        datetime,
+        timedelta,
+    )
+
+    store, _conn, _ = _store()
+    iid = store.add_item(_basic_spec(), _preview())
+    store.set_state(iid, "live")
+    store.mark_checked(iid, "ok")  # last_checked = now(): NOT fetch-due
+    store.set_next_clock(iid, datetime.now(UTC) - timedelta(seconds=1))
+    now = datetime.now(UTC)
+    assert [i["id"] for i in store.due_items()] == [iid]
+    assert not nimod._is_due(store.get_item(iid), now)
+    assert nimod._is_clock_due(store.get_item(iid), now)
+
+
+def test_due_items_excludes_an_item_with_neither_fetch_nor_clock_due() -> None:
+    from datetime import (  # local import: bounded scope for helper
+        UTC,
+        datetime,
+        timedelta,
+    )
+
+    store, _conn, _ = _store()
+    iid = store.add_item(_basic_spec(), _preview())
+    store.set_state(iid, "live")
+    store.mark_checked(iid, "ok")
+    store.set_next_clock(iid, datetime.now(UTC) + timedelta(days=1))  # clock-due, but in the future
+    assert store.due_items() == []
+
+
+def test_due_items_a_past_next_clock_does_not_resurrect_a_broken_item() -> None:
+    from datetime import (  # local import: bounded scope for helper
+        UTC,
+        datetime,
+        timedelta,
+    )
+
+    store, _conn, _ = _store()
+    iid = store.add_item(_basic_spec(), _preview())
+    store.set_state(iid, "broken")
+    store.set_next_clock(iid, datetime.now(UTC) - timedelta(seconds=1))
+    assert store.due_items() == []
+
+
 def test_effective_interval_doubles_on_failing_and_caps() -> None:
     # < threshold: base
     assert nimod.effective_interval_minutes(60, 0) == 60

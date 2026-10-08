@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import re
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 
 import duckdb
 import pytest
@@ -291,3 +292,228 @@ def test_history_track_absent_for_list_shape() -> None:
     assert history_track_for(fields, "rows") is None
     assert history_track_for([{"name": "price", "label": "Price", "path": "price", "type": "currency",
                                "role": "measure"}], None) == {"track": {"price_h": "price"}, "max_points": 200}
+
+
+# ============================================================================================
+# R19 Phase 1b: run_item's `outputs` snapshot + `next_clock`, and tick()'s clock pass.
+
+def _fake_app(conn, key: bytes):
+    """Minimal app.state shim for tick() (mirrors test_ni.py's)."""
+    return SimpleNamespace(state=SimpleNamespace(master_key=key, db=SimpleNamespace(cursor=conn.cursor)))
+
+
+def _form_choice(form_name: str):
+    """A fake PRESENT reply that picks the FIRST menu option named `form_name` when the
+    menu offers one, else the first option — a valid DesignChoice either way, so the
+    model-forcing itself never shows up on screen."""
+
+    def pick(prompt: str) -> str:
+        ids = re.findall(r'"id": "(c\d)"', prompt)
+        forms = re.findall(r'"form": "(\w+)"', prompt)
+        fields: list[str] = []
+        for block in re.findall(r"<untrusted_data>(\[.*?\])</untrusted_data>", prompt, re.DOTALL):
+            try:
+                rows = json.loads(block)
+            except ValueError:
+                continue
+            fields = list(rows[0].keys()) if rows else []
+        if not ids:
+            return "{}"
+        want = next((i for i, f in zip(ids, forms, strict=False) if f == form_name), ids[0])
+        return json.dumps({"intent": "now", "fits": [{"cand": i, "answers_ask": "yes"} for i in ids],
+                           "pick": want, "second": None, "primary_field": None,
+                           "labels": {f: "key" for f in fields[:6]}, "uncovered_wants": [],
+                           "none_fits": False})
+
+    return pick
+
+
+def _day_table_answers() -> tuple[list, dict, str, str]:
+    """A date-axis list spanning yesterday..+3 days, relative to REAL wall-clock `now`
+    (never the module's frozen `_NOW`): the clock-pass test needs its rows' calendar
+    days to agree with whatever instant `run_item`'s own `datetime.now(UTC)` fetches at."""
+    base = datetime.now(UTC).date()
+    chosen = [{"kind": "list", "name": "days", "label": "Days", "path": "days", "words": ["days"],
+               "primary": True, "axis": {"cell": "d", "step": "day"},
+               "cells": [{"path": "d", "type": "date", "label": "Date"},
+                         {"path": "name", "type": "text", "label": "Event"}]}]
+    days = [base + timedelta(days=i) for i in range(-1, 4)]
+    rows = [{"d": d.isoformat(), "name": f"Event {i}"} for i, d in enumerate(days)]
+    return chosen, {"days": rows}, "Daily events", "daily events this week"
+
+
+def _build_day_table_item(store, call_model):
+    """``build_from_answers`` -> ``_handoff`` on a REAL wall-clock `now` (see
+    ``_day_table_answers``) -- a local twin of ``_build`` for a shape that is not in
+    the shared ``_MATRIX`` (its rows must track real time, not the module's `_NOW`)."""
+    chosen, sample, title, ask = _day_table_answers()
+    real_now = datetime.now(UTC)
+    item_id = ni_flow.create_shell_item(store, ask)
+    intent = {"kind": "external_data", "subject": title, "cadence_minutes": 15, "wants": [],
+              "threshold": None, "display_hint": "value", "window": None}
+    ni_flow._transition(store, item_id, "intent", intent=intent)
+    fb = ni_flow.FormBuild(now=real_now, ask=ask, source_url=_URL, cadence_s=900, call_model=call_model)
+    built = ni_flow.build_from_answers(chosen, sample, title, window=None, next_event=False,
+                                       frame_kind="schedule", form=fb)
+    result = ni_flow._handoff(store, item_id, ask, intent, _URL, built, built["fields"], built["klass"],
+                              converted=[], judge=None, degrade_note=None, remap=False,
+                              keep_source=None, keep_params=None, fetch_now=real_now, path="declared")
+    assert result["state"] == "ready", result
+    return item_id, sample
+
+
+def test_run_item_writes_outputs_snapshot_and_sets_next_clock(monkeypatch) -> None:
+    """R19 Phase 1b step 4: every successful run seals the exact outputs the bind
+    consumed beside `latest`, and sets `next_clock` from the bound node's `clock.next`."""
+    store, conn, key = _store()
+    item_id, sample = _build(store, "records_list", None)
+    store.record_validation(item_id, True)
+    monkeypatch.setattr(nimod, "_fetch_http_json", lambda source, item_id, secrets: sample)
+    assert _run(store, conn, key, item_id)["status"] == "ok"
+    assert _run(store, conn, key, item_id)["status"] == "ok"
+    outputs_snap = store.read_snapshot(item_id, "outputs")
+    assert outputs_snap is not None and outputs_snap["ok"]
+    recomputed = nimod.run_pipeline(store.get_item(item_id)["spec"]["pipeline"], sample)
+    assert outputs_snap["payload"] == recomputed
+    # a plain records list carries no time field anywhere; the item's own stale
+    # threshold (fetched_at + 2x cadence) is still a real future instant.
+    assert store.get_item(item_id)["next_clock"] is not None
+
+
+def test_clock_pass_skipped_and_next_clock_cleared_without_outputs_snapshot() -> None:
+    """A card that never actually ran (no `outputs` snapshot -- e.g. one last run before
+    this change shipped) declines the clock pass instead of raising, and clears
+    `next_clock` so it stops being clock-due until a real run sets it again."""
+    store, conn, key = _store()
+    item_id, _sample = _build(store, "value", None)
+    store.mark_checked(item_id, "ok")  # last_checked = now(): NOT fetch-due
+    store.set_next_clock(item_id, datetime.now(UTC) - timedelta(seconds=1))  # clock-due
+    result = nimod.tick(_fake_app(conn, key))
+    assert result["checked"] == 1
+    assert result["alerts"] == [] and result["broken"] == []
+    assert store.get_item(item_id)["next_clock"] is None
+
+
+def _clock_pass_fixture(monkeypatch):
+    """A live day_table card after two real runs, with its clock frozen a day ahead and a
+    past next_clock, ready for tick() to run one clock pass."""
+    store, conn, key = _store()
+    item_id, sample = _build_day_table_item(store, _form_choice("day_table"))
+    store.record_validation(item_id, True)
+    monkeypatch.setattr(nimod, "_fetch_http_json", lambda source, item_id, secrets: sample)
+    assert _run(store, conn, key, item_id)["status"] == "ok"
+    assert _run(store, conn, key, item_id)["status"] == "ok"
+    tomorrow_0005 = datetime.combine(datetime.now(UTC).date() + timedelta(days=1),
+                                     datetime.min.time(), tzinfo=UTC) + timedelta(minutes=5)
+    monkeypatch.setattr(nimod, "_clock", lambda: tomorrow_0005)
+    store.set_next_clock(item_id, datetime.now(UTC) - timedelta(seconds=1))
+    return store, conn, key, item_id, tomorrow_0005
+
+
+def test_clock_pass_keeps_the_snapshot_instant_the_board_reads_as_payload_at(monkeypatch) -> None:
+    """Lead review 2026-10-08: the board's payload_at / as-of / stale clock is the `latest`
+    slot's created_at. A clock pass re-lays out the SAME data, so that instant must not
+    move — on the first pass, nor on a second one (which must still read the fetch
+    instant, not the first pass's write time)."""
+    store, conn, key, item_id, tomorrow_0005 = _clock_pass_fixture(monkeypatch)
+    fetch_instant = store.read_snapshot(item_id, "latest")["created_at"]
+    good_instant = store.read_snapshot(item_id, "last_good")["created_at"]   # its own write, ms later
+    assert nimod.tick(_fake_app(conn, key))["checked"] == 1
+    assert store.read_snapshot(item_id, "latest")["created_at"] == fetch_instant
+    assert store.read_snapshot(item_id, "last_good")["created_at"] == good_instant
+    # a second clock pass, another day on: still the fetch instant
+    day_after = tomorrow_0005 + timedelta(days=1)
+    monkeypatch.setattr(nimod, "_clock", lambda: day_after)
+    store.set_next_clock(item_id, datetime.now(UTC) - timedelta(seconds=1))
+    assert nimod.tick(_fake_app(conn, key))["checked"] == 1
+    assert store.read_snapshot(item_id, "latest")["created_at"] == fetch_instant
+    assert store.get_item(item_id)["next_clock"] > datetime.now(UTC)
+
+
+def test_clock_pass_never_overwrites_a_failure_marker(monkeypatch) -> None:
+    """Lead review 2026-10-08: a failing card keeps its G3 `latest` marker (ok=False, {});
+    the clock pass re-lays out only `last_good` — the slot the board shows for it."""
+    store, conn, key, item_id, _ = _clock_pass_fixture(monkeypatch)
+    before_good = store.read_snapshot(item_id, "last_good")
+    store.write_snapshot(item_id, "latest", {}, ok=False)   # what _handle_failure writes (G3)
+    assert nimod.tick(_fake_app(conn, key))["checked"] == 1
+    latest = store.read_snapshot(item_id, "latest")
+    assert latest["ok"] is False and latest["payload"] == {}
+    after_good = store.read_snapshot(item_id, "last_good")
+    assert after_good["payload"]["hash"] != before_good["payload"]["hash"]   # re-laid out
+    assert after_good["created_at"] == before_good["created_at"]            # same data instant
+
+
+def test_an_outputs_snapshot_failure_never_fails_the_run(monkeypatch) -> None:
+    """Lead review 2026-10-08: the outputs slot exists only for the optional clock pass. When
+    sealing it raises (an outputs tree past json_instants' node ceiling), the run is still
+    ok, an ok=False marker replaces any earlier outputs (a later clock pass must never re-lay
+    out STALE outputs under a fresh clock), and next_clock is cleared."""
+    store, conn, key = _store()
+    item_id, sample = _build(store, "records_list", None)
+    store.record_validation(item_id, True)
+    monkeypatch.setattr(nimod, "_fetch_http_json", lambda source, item_id, secrets: sample)
+    assert _run(store, conn, key, item_id)["status"] == "ok"
+    assert store.read_snapshot(item_id, "outputs")["ok"]
+
+    def boom(payload):
+        raise ValueError("too many nodes")
+    monkeypatch.setattr(nimod, "json_instants", boom)
+    assert _run(store, conn, key, item_id)["status"] == "ok"
+    marker = store.read_snapshot(item_id, "outputs")
+    assert marker["ok"] is False and marker["payload"] == {}
+    assert store.get_item(item_id)["next_clock"] is None
+    assert store.read_snapshot(item_id, "latest")["ok"]
+
+
+def test_clock_pass_through_tick_relayouts_with_no_fetch_no_model(monkeypatch) -> None:
+    """R19 Phase 1b end to end: build -> _finalize -> run_item (x2, a fetch stub) -> live;
+    freeze the app clock a day past the card-zone midnight; run tick() -> the latest
+    snapshot's CLIR changes (the Today label moves to the new day) with no fetch and no
+    model call, last_checked / alerts are untouched, and next_clock advances. A second
+    tick before the new boundary does nothing more to this item."""
+    store, conn, key = _store()
+    item_id, sample = _build_day_table_item(store, _form_choice("day_table"))
+    scene = store.get_item(item_id)["spec"]["scene"]
+    assert scene["form"] == "day_table", scene["form"]
+    store.record_validation(item_id, True)
+    monkeypatch.setattr(nimod, "_fetch_http_json", lambda source, item_id, secrets: sample)
+    assert _run(store, conn, key, item_id)["status"] == "ok"
+    assert _run(store, conn, key, item_id)["status"] == "ok"
+
+    item = store.get_item(item_id)
+    assert item["state"] == "live"
+    before_checked = item["last_checked"]
+    before_latest = store.read_snapshot(item_id, "latest")["payload"]
+    before_texts = [ln for p in before_latest["clir"]["desktop"]["prims"] if p["k"] == "text" for ln in p["lines"]]
+    assert "Today" in before_texts
+
+    # a day has passed, card-tz midnight included (card_tz is UTC: no `zone` output here)
+    tomorrow_0005 = datetime.combine(datetime.now(UTC).date() + timedelta(days=1),
+                                     datetime.min.time(), tzinfo=UTC) + timedelta(minutes=5)
+    monkeypatch.setattr(nimod, "_clock", lambda: tomorrow_0005)
+    forced_past = datetime.now(UTC) - timedelta(seconds=1)
+    store.set_next_clock(item_id, forced_past)
+
+    result = nimod.tick(_fake_app(conn, key))
+    assert result["checked"] == 1
+    assert result["alerts"] == [] and result["broken"] == [] and result["repaired"] == []
+
+    after_item = store.get_item(item_id)
+    assert after_item["last_checked"] == before_checked         # never touched by a clock pass
+    assert after_item["last_status"] == item["last_status"]
+    assert after_item["consecutive_failures"] == 0
+    assert after_item["next_clock"] is not None and after_item["next_clock"] > datetime.now(UTC)
+
+    after_latest = store.read_snapshot(item_id, "latest")["payload"]
+    after_texts = [ln for p in after_latest["clir"]["desktop"]["prims"] if p["k"] == "text" for ln in p["lines"]]
+    assert after_texts != before_texts
+    assert "Today" in after_texts
+    assert after_latest["hash"] != before_latest["hash"]
+    last_good = store.read_snapshot(item_id, "last_good")["payload"]
+    assert last_good["hash"] == after_latest["hash"]
+
+    # a second tick before the new boundary touches nothing more for this item
+    again = nimod.tick(_fake_app(conn, key))
+    assert again["checked"] == 0
+    assert store.read_snapshot(item_id, "latest")["payload"]["hash"] == after_latest["hash"]

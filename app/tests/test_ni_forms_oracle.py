@@ -155,6 +155,89 @@ def test_oracle_case(name: str, path: pathlib.Path) -> None:
     assert not fails, f"{name} {case['id']}: " + "; ".join(fails)
 
 
+# R19 Phase 1b: "wrong-month 0" -- a day-ish card-zone time prim is painted straight from
+# its own instant (`t`) in the card zone at paint time (`ni_forms.paint.live.time_prim_text`
+# -- the CLIR never stores pre-rendered text for a `time` prim). The off-by-one risk class
+# `ni_forms.clock` and the card-tz midnight property tests guard against is the prim's `t`
+# resolving, in the card zone, to a calendar day OUTSIDE the record's own row-date span: a
+# day_table walks every day between the earliest and latest row (day_rows / rows alike fill
+# the gap days, e.g. a game-free day between two scheduled games) but never a day before or
+# after the data it has -- a mismatch here can only mean the wrong zone was used somewhere.
+_DAY_FMTS = frozenset({"EEE", "EEE d", "MMM d", "EEE MMM d"})
+
+
+def _date_of(t_iso: str, zone) -> object:
+    """A prim's `t` -> its own calendar day. A bare ``YYYY-MM-DD`` (len 10) IS a floating
+    calendar day already -- never zone-shifted (``datetime.fromisoformat`` would parse it
+    naive and ``.astimezone`` would then assume the HOST's local zone, exactly the off-by-
+    one bug this check exists to catch; ``fmt.parse_t`` / ``ni_forms.clock`` avoid it the
+    same way). A full instant is converted to its calendar day in the card zone."""
+    from datetime import datetime as _dt
+
+    if len(t_iso) == 10:
+        from datetime import date as _date
+
+        return _date.fromisoformat(t_iso)
+    return _dt.fromisoformat(t_iso).astimezone(zone).date()
+
+
+def _row_date_span_in_card_tz(rec, card_tz: str) -> tuple:
+    """(earliest, latest) calendar day across every date/datetime cell of `rec` and its
+    parts, in the card zone -- or None when there is no such field anywhere."""
+    from zoneinfo import ZoneInfo
+
+    zone = ZoneInfo(card_tz)
+    days: list = []
+    for part in (rec, *rec.parts.values()):
+        idx = [i for i, f in enumerate(part.fields) if f.type in ("datetime", "date")]
+        if not idx:
+            continue
+        for row in part.rows:
+            for i in idx:
+                v = row[i]
+                if not isinstance(v, str):
+                    continue
+                try:
+                    days.append(_date_of(v, zone))
+                except ValueError:
+                    continue
+    return (min(days), max(days)) if days else None
+
+
+def _check_no_date_off_by_one(case: dict, exp: dict) -> list[str]:
+    from zoneinfo import ZoneInfo
+
+    answers, outputs = _filtered(case, exp)
+    now = datetime.fromisoformat(case["fetched_at"])
+    d = design(answers, outputs, title=case["title"], ask=case["ask"], now=now, source_url=case["source_url"],
+              cadence_s=900, rows_output_name=case["rows_output_name"], call_model=None,
+              viewer_tz=case["viewer_tz"], question_kind=case["frame_kind"], wants=[])
+    card_tz = d.rec.context.card_tz
+    span = _row_date_span_in_card_tz(d.rec, card_tz)
+    if span is None:
+        return []   # no date/datetime field anywhere -- nothing this check can say
+    lo, hi = span
+    zone = ZoneInfo(card_tz)
+    fails: list[str] = []
+    for side in ("desktop", "phone"):
+        clir = layout_span(d.cand, d.rec, d.prof, d.inp, Span.parse(d.node["spans"][side]), now).clir
+        for p in clir["prims"]:
+            if p.get("k") != "time" or p.get("tz") != "card" or p.get("fmt") not in _DAY_FMTS:
+                continue
+            shown = _date_of(p["t"], zone)
+            if not (lo <= shown <= hi):
+                fails.append(f"{side} prim {p['id']} ({p['fmt']}): card_tz {card_tz} day {shown} "
+                             f"is outside the record's own row-date span [{lo}, {hi}]")
+    return fails
+
+
+@pytest.mark.parametrize("name,path", CASES, ids=[f"{n}-{p.stem}" for n, p in CASES])
+def test_oracle_case_no_date_off_by_one(name: str, path: pathlib.Path) -> None:
+    case, exp = _load(name, path)
+    fails = _check_no_date_off_by_one(case, exp)
+    assert not fails, f"{name} {case['id']}: " + "; ".join(fails)
+
+
 def test_oracle_pass_rate_is_reported_and_complete() -> None:
     """Runs last (pytest keeps file order): prints the per-set, per-case verdicts and
     rate, and holds EVERY fixture set to 100% — every scored case has an acceptable

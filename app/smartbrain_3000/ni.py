@@ -202,7 +202,7 @@ _STATES: frozenset[str] = frozenset(
 )
 _SLOTS: frozenset[str] = frozenset(
     {"latest", "last_good", "preview", "preview_data", "history", "alert_state",
-     "last_failure", "image", "journal", "flow", "llm_state"}
+     "last_failure", "image", "journal", "flow", "llm_state", "outputs"}
 )
 # §28 item journal: closed set of entry kinds + prune ceiling. Journal entries are
 # built DETERMINISTICALLY by code (models never author one). The store trims to the
@@ -3538,21 +3538,30 @@ def json_instants(payload: object) -> object:
     return root[0]
 
 
-def _form_bind_context(spec: dict, fetched_at: datetime | None = None) -> dict:
+def _form_bind_context(spec: dict, fetched_at: datetime | None = None,
+                       now: datetime | None = None) -> dict:
     """What a §34 form bind reads beside the outputs, all from the sealed spec + this
-    run's fetch instant: the source URL (host in the footer), title + ask (the shell /
-    PRESENT words), cadence (footer), the viewer zone, and ``fetched_at`` (the layout's
-    ``now`` and the record's ``Context.fetched_at``). One seam for the engine's run,
-    the flow's preview bind and the C2 kick, so every bind sees the same words."""
+    bind's instants: the source URL (host in the footer), title + ask (the shell /
+    PRESENT words), cadence (footer), the viewer zone, ``fetched_at`` (the record's
+    ``Context.fetched_at`` — the as-of / age text, never moved by a clock pass) and
+    ``now`` (§34 Phase 1b: the LAYOUT clock — defaults to ``fetched_at`` so every
+    existing caller is unchanged; a clock pass is the one caller that passes a later
+    ``now`` with the run's original ``fetched_at`` held fixed). One seam for the
+    engine's run, the flow's preview bind, the C2 kick and the clock pass, so every
+    bind sees the same words."""
     assert isinstance(spec, dict), "spec must be a dict"
     if fetched_at is None:  # a preview bind with no run behind it (add_item, templates, tools)
         fetched_at = datetime.now(UTC)
     assert isinstance(fetched_at, datetime) and fetched_at.tzinfo is not None, "aware fetched_at"
+    if now is None:
+        now = fetched_at
+    assert isinstance(now, datetime) and now.tzinfo is not None, "aware now"
     source = spec.get("source") if isinstance(spec.get("source"), dict) else {}
     url = source.get("url")
     interval = spec.get("interval_minutes")
     return {"source_url": url if isinstance(url, str) and url else None,
             "fetched_at": fetched_at.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "now": now.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "viewer_tz": user_timezone_name(),
             "title": str(spec.get("title") or ""), "ask": str(spec.get("goal") or ""),
             "cadence_s": int(interval) * 60 if isinstance(interval, int) and interval > 0 else 0}
@@ -3571,12 +3580,18 @@ def _bind_form(node: dict, data: dict, form_ctx: dict | None, *, alternatives: b
     dict; None derives one from the clock (no title / host — tests, template previews).
 
     Returns ``{type: "form", form, clir: {desktop, phone}, summary, hash, lint: {red, amber,
-    codes}, design: {designer, pick}, design_needs_attention?: true, alternatives?: [...]}``.
-    The hash is the desktop CLIR hash — the client reads both CLIRs; the hash is for cache /
-    monitor-hash. ``design`` and ``lint.codes`` (fix round 1a-5, class F) say who chose the
-    form and which lint fired, so a live read is diagnosable without probes. The sealed
-    ``frame`` (when present) rides into the record context so the bind re-enumerates under
-    the prior the design was made with.
+    codes}, design: {designer, pick}, clock: {next}, design_needs_attention?: true,
+    alternatives?: [...]}``. The hash is the desktop CLIR hash — the client reads both
+    CLIRs; the hash is for cache / monitor-hash. ``design`` and ``lint.codes`` (fix round
+    1a-5, class F) say who chose the form and which lint fired, so a live read is
+    diagnosable without probes. The sealed ``frame`` (when present) rides into the record
+    context so the bind re-enumerates under the prior the design was made with.
+
+    ``clock`` (§34 Phase 1b): ``{"next": "<ISO-8601 Z>" | null}`` — ``ni_forms.clock.
+    next_boundary`` over this record + the two laid-out CLIRs at ``now`` (card-tz
+    midnight, a DST change, the next event instant, a live-binding edge, the stale
+    threshold); None when nothing here is clock-sensitive. The tick's clock pass reads
+    it to schedule the next no-fetch re-layout.
 
     ``alternatives`` (ALT, preview bind only): when True and the sealed ``design.second``
     survives re-enumeration, its own two sealed spans are laid out too and added as
@@ -3587,6 +3602,7 @@ def _bind_form(node: dict, data: dict, form_ctx: dict | None, *, alternatives: b
     assert isinstance(data, dict), "data must be a dict"
     from .ni_forms import llm as _llm
     from .ni_forms import profile as _pf
+    from .ni_forms.clock import next_boundary as _next_boundary
     from .ni_forms.enumerate import enumerate as _enumerate
     from .ni_forms.layout import layout_span as _layout_span
     from .ni_forms.record import from_spec as _from_spec
@@ -3602,7 +3618,10 @@ def _bind_form(node: dict, data: dict, form_ctx: dict | None, *, alternatives: b
         raise NIError("bind_type", f"{rows_name} must resolve to a list")
     rec, inp = _from_spec(node["record"], data, history=history, context=ctx)
     _refuse_form_column_drift(rec)
-    now = datetime.fromisoformat(ctx["fetched_at"])
+    # §34 Phase 1b: the LAYOUT clock (`ctx["now"]`) — a clock pass advances this past the
+    # record's own `fetched_at` (the as-of / age text, read from `rec.context` and never
+    # touched here) with no fetch behind it.
+    now = datetime.fromisoformat(ctx["now"])
     sealed = {"form": node["form"], "variant": node["variant"],
               "params": dict(node.get("params") or {})}
     design = node.get("design") if isinstance(node.get("design"), dict) else {}
@@ -3622,6 +3641,8 @@ def _bind_form(node: dict, data: dict, form_ctx: dict | None, *, alternatives: b
         out_phone = _layout_span(chosen_cand, rec, prof, inp,
                                  _Span.parse(node["spans"]["phone"]), now)
         alt = _layout_alternative(second_sealed, cands, rec, prof, inp, now)
+        next_clock = _next_boundary(rec, [out_desktop.clir, out_phone.clir], now=now,
+                                    card_tz=rec.context.card_tz, cadence_s=inp.cadence_s)
     issues = list(out_desktop.lint.issues) + list(out_phone.lint.issues)
     red = sum(1 for i in issues if i.sev == "red")
     amber = sum(1 for i in issues if i.sev == "amber")
@@ -3632,7 +3653,9 @@ def _bind_form(node: dict, data: dict, form_ctx: dict | None, *, alternatives: b
                    "summary": summary, "hash": out_desktop.hash,
                    "lint": {"red": red, "amber": amber, "codes": codes},
                    "design": {"designer": str(design.get("designer") or "rules")[:_FORM_MAX_STR],
-                              "pick": str(design.get("pick") or chosen_cand.id)[:_FORM_MAX_STR]}}
+                              "pick": str(design.get("pick") or chosen_cand.id)[:_FORM_MAX_STR]},
+                   "clock": {"next": None if next_clock is None else
+                             next_clock.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")}}
     if alt is not None:
         bound["alternatives"] = [alt]
     if needs_attention:
@@ -4179,7 +4202,7 @@ class NIStore:
         row = self._conn.execute(
             "SELECT id, enabled, state, interval_minutes, last_checked, last_status, "
             "consecutive_failures, first_failure_at, position, spec_rev, nonce, ciphertext, "
-            "created_at, updated_at FROM ni_items WHERE id = ?;",
+            "created_at, updated_at, next_clock FROM ni_items WHERE id = ?;",
             [item_id],
         ).fetchone()
         return None if row is None else self._row(row)
@@ -4188,7 +4211,7 @@ class NIStore:
         rows = self._conn.execute(
             "SELECT id, enabled, state, interval_minutes, last_checked, last_status, "
             "consecutive_failures, first_failure_at, position, spec_rev, nonce, ciphertext, "
-            "created_at, updated_at FROM ni_items ORDER BY position ASC, created_at ASC LIMIT ?;",
+            "created_at, updated_at, next_clock FROM ni_items ORDER BY position ASC, created_at ASC LIMIT ?;",
             [_MAX_ITEMS],
         ).fetchall()
         assert isinstance(rows, list), "fetchall must return a list"
@@ -4303,21 +4326,26 @@ class NIStore:
         self._conn.execute("DELETE FROM ni_runs WHERE item_id = ?;", [item_id])
         self._conn.execute("DELETE FROM ni_items WHERE id = ?;", [item_id])
 
-    def write_snapshot(self, item_id: str, slot: str, payload: dict, ok: bool) -> None:
+    def write_snapshot(self, item_id: str, slot: str, payload: dict, ok: bool,
+                       *, keep_created_at: bool = False) -> None:
         """Seal ``payload`` under (item_id, slot); upsert. ``ok`` is plaintext so the
-        board picks the right slot without decrypting."""
+        board picks the right slot without decrypting. ``keep_created_at`` (§34 Phase 1b):
+        a clock pass re-lays out the SAME data, so the slot's ``created_at`` — the board's
+        ``payload_at``, its as-of and its stale clock — must stay the fetch instant; a new
+        row still gets ``now()``."""
         assert item_id, "item id required"
         if slot not in _SLOTS:
             raise ValueError(f"slot must be one of {sorted(_SLOTS)}")
         assert isinstance(payload, dict), "payload must be a dict"
         assert isinstance(ok, bool), "ok must be bool"
+        assert isinstance(keep_created_at, bool), "keep_created_at must be bool"
         nonce, ciphertext = self._seal_snapshot(item_id, slot, payload)
         self._conn.execute(
             "INSERT INTO ni_snapshots (item_id, slot, nonce, ciphertext, ok) "
             "VALUES (?, ?, ?, ?, ?) ON CONFLICT (item_id, slot) DO UPDATE SET "
             "nonce = excluded.nonce, ciphertext = excluded.ciphertext, "
-            "ok = excluded.ok, created_at = now();",
-            [item_id, slot, nonce, ciphertext, ok],
+            "ok = excluded.ok, created_at = CASE WHEN ? THEN ni_snapshots.created_at ELSE now() END;",
+            [item_id, slot, nonce, ciphertext, ok, keep_created_at],
         )
 
     def read_snapshot(self, item_id: str, slot: str) -> dict | None:
@@ -4514,14 +4542,21 @@ class NIStore:
         double-per-failure math (``effective_interval_minutes``) uses the
         plaintext ``consecutive_failures`` column — the SQL floor is a superset
         of the strict due set, and the Python check tightens it.
+
+        §34 Phase 1b: ALSO admits an item whose plaintext ``next_clock`` has passed —
+        the clock pass's due query, same SQL pre-filter discipline (no decrypt to
+        learn a clock-due item is due), same ordering, same cap. A clock-due item
+        mixes into the SAME oldest-first ordering as a fetch-due one (both read
+        ``last_checked`` as a tiebreak) — the tick tells them apart with ``_is_due``.
         """
         rows = self._conn.execute(
             "SELECT id, enabled, state, interval_minutes, last_checked, last_status, "
             "consecutive_failures, first_failure_at, position, spec_rev, nonce, ciphertext, "
-            "created_at, updated_at FROM ni_items "
+            "created_at, updated_at, next_clock FROM ni_items "
             "WHERE enabled AND state NOT IN ('draft', 'paused', 'broken') "
-            "AND (last_checked IS NULL "
-            "     OR datediff('minute', last_checked, now()) >= interval_minutes) "
+            "AND ((last_checked IS NULL "
+            "      OR datediff('minute', last_checked, now()) >= interval_minutes) "
+            "     OR (next_clock IS NOT NULL AND next_clock <= now())) "
             "ORDER BY last_checked ASC NULLS FIRST LIMIT ?;",
             [_MAX_ITEMS],
         ).fetchall()
@@ -4530,7 +4565,8 @@ class NIStore:
         for r in rows:  # bounded by _MAX_ITEMS
             item = self._row(r)
             # ruling 2026-10-04: an open-path card waiting for the user's YES never refreshes on its own
-            if _is_due(item, now) and not awaits_yes(item):
+            due = _is_due(item, now) or _is_clock_due(item, now)
+            if due and not awaits_yes(item):
                 out.append(item)
             if len(out) >= _MAX_DUE_CANDIDATES:
                 break
@@ -4545,6 +4581,21 @@ class NIStore:
         assert item_id, "item id required"
         self._conn.execute(
             "UPDATE ni_items SET last_checked = NULL WHERE id = ?;", [item_id]
+        )
+
+    def set_next_clock(self, item_id: str, when: datetime | None) -> None:
+        """§34 Phase 1b: set (or clear) the plaintext due-query column a clock pass is
+        admitted by. ``run_item`` sets it from the bound form node's ``clock.next``
+        after every successful run; the clock pass itself sets it from the FRESH
+        bound node its own re-layout produces (``None`` when no boundary applies —
+        the card has nothing left that is clock-sensitive, or the clock pass
+        declined this round)."""
+        assert item_id, "item id required"
+        assert when is None or (isinstance(when, datetime) and when.tzinfo is not None), \
+            "when must be an aware datetime or None"
+        self._conn.execute(
+            "UPDATE ni_items SET next_clock = ? WHERE id = ?;",
+            [when.astimezone(UTC) if when is not None else None, item_id],
         )
 
     def mark_checked(self, item_id: str, status: str) -> None:
@@ -4919,6 +4970,7 @@ class NIStore:
             "position": int(row[8]),
             "spec_rev": int(row[9]), "spec": spec,
             "created_at": str(row[12]), "updated_at": str(row[13]),
+            "next_clock": None if row[14] is None else _to_utc(row[14]),
         }
 
 
@@ -4948,6 +5000,14 @@ def _is_due(item: dict, now: datetime) -> bool:
         return True
     elapsed = (now - _to_utc(last)).total_seconds()
     return elapsed >= interval * 60
+
+
+def _is_clock_due(item: dict, now: datetime) -> bool:
+    """§34 Phase 1b: true when the sealed ``next_clock`` boundary has passed — the clock
+    pass's own due test, independent of ``last_checked`` / ``interval_minutes``."""
+    assert isinstance(now, datetime) and now.tzinfo is not None, "now must be UTC-aware"
+    nxt = item.get("next_clock")
+    return nxt is not None and now >= nxt
 
 
 # --- engine ---------------------------------------------------------------
@@ -5032,6 +5092,7 @@ def tick(app, pass_budget_seconds: float = 20.0,
         secrets_store = SecretStore(cursor, key)
         schedules_store = ScheduleStore(cursor, key)
         started = time.monotonic()
+        now = datetime.now(UTC)  # §34 Phase 1b: shared instant, fetch-due vs clock-due (mirrors due_items())
         for item in store.due_items():  # bounded by _MAX_DUE_CANDIDATES
             # L3 (audit 2026-09-12): count only ATTEMPTED items against the
             # per-pass quota — a silently-skipped candidate (breaker-open model
@@ -5042,6 +5103,14 @@ def tick(app, pass_budget_seconds: float = 20.0,
                 break  # quota filled by real attempts; remainder stays due
             if time.monotonic() - started > pass_budget_seconds:
                 break  # the rest stay due; next tick continues
+            if not _is_due(item, now):
+                # §34 Phase 1b: due_items() admitted this item only via next_clock — a
+                # clock pass (no fetch, no model) counts as one attempt against the
+                # pass quota but never touches the model slot, the breaker or any
+                # fetch/llm bookkeeping below.
+                _run_clock_pass(store, item)
+                checked += 1
+                continue
             source_type = (item["spec"].get("source") or {}).get("type")
             has_llm_stage = _spec_has_llm_stage(item["spec"])
             touches_model = source_type == "model" or has_llm_stage
@@ -5085,6 +5154,97 @@ def tick(app, pass_budget_seconds: float = 20.0,
             pass
     return {"checked": checked, "alerts": fired, "broken": broken,
             "repaired": repaired, "l2_candidates": l2_candidates}
+
+
+def _collect_clock_nexts(bound: dict) -> list[str]:
+    """Every §34 form node's ``clock.next`` found anywhere in a bound scene tree — almost
+    always the single root form node a Library-built card seals; the walk is defensive
+    for a future scene that nests one. Mirrors ``_enforce_bind_types``'s traversal."""
+    assert isinstance(bound, dict), "bound must be a dict"
+    out: list[str] = []
+    pending: list[dict] = [bound]
+    for _ in range(2 * _MAX_SCENE_NODES):  # bounded (POW10 #2); mirrors _enforce_bind_types
+        if not pending:
+            break
+        node = pending.pop()
+        if not isinstance(node, dict):
+            continue
+        if node.get("type") == "form":
+            nxt = (node.get("clock") or {}).get("next")
+            if isinstance(nxt, str):
+                out.append(nxt)
+            continue  # a form node is a leaf — never descend into its CLIR dicts
+        pending.extend(node.get("children") or [])  # bounded by _MAX_SCENE_NODES
+    return out
+
+
+def _bound_next_clock(bound: dict) -> datetime | None:
+    """The earliest ``clock.next`` across every form node in a bound scene, or None when
+    none carries one (no form node, or nothing in it is clock-sensitive)."""
+    parsed: list[datetime] = []
+    for nxt in _collect_clock_nexts(bound):  # bounded: one form node almost always
+        try:
+            parsed.append(datetime.fromisoformat(nxt))
+        except ValueError:
+            continue
+    return min(parsed) if parsed else None
+
+
+def _run_clock_pass(store: NIStore, item: dict) -> None:
+    """§34 Phase 1b clock pass: re-lay out the sealed scene from the ``outputs`` snapshot
+    at the app clock's current instant — no fetch, no model (``ni_forms.llm.no_model()``).
+
+    ``tick`` calls this only for an item ``due_items()`` admitted through ``next_clock``
+    and that is NOT fetch-due, so this never touches ``last_checked`` / the record's own
+    ``payload_at`` / ``consecutive_failures`` / ``last_status``, never evaluates alerts
+    (§12), and never writes ``llm_state`` (the monitor hash) — nothing here runs
+    ``run_pipeline``, so the change signal that gates it cannot fire. On success, writes
+    ``latest`` + ``last_good`` with the fresh bound payload and advances ``next_clock``
+    from it (None when nothing in the card is clock-sensitive any more).
+
+    A missing / not-ok ``outputs`` snapshot (a card last run before this change existed)
+    or any other failure (a corrupt snapshot, a bind refusal on a since-changed spec)
+    DECLINES this round: clears ``next_clock`` and leaves the card exactly as it was. A
+    clock pass only ever succeeds (advances the boundary) or declines (clears it) — it
+    never fails the card the way a run does, because the data never changed, only the
+    clock did; the proto's rule that a clock re-layout's own lint never demotes the
+    designed card (L-HOLLOW alone is not a needs-attention state) already holds here,
+    since ``_bind_form`` never escalates on lint colour in the first place.
+    """
+    assert store is not None and isinstance(item, dict), "store + item required"
+    item_id = item["id"]
+    try:
+        spec = item["spec"]
+        outputs_snap = store.read_snapshot(item_id, "outputs")
+        if outputs_snap is None or not outputs_snap["ok"]:
+            store.set_next_clock(item_id, None)
+            log.debug("ni clock pass skipped (no outputs snapshot): item=%s", item_id)
+            return
+        outputs = outputs_snap["payload"]
+        # the data's own instant is when its OUTPUTS were sealed (a fetch run writes that slot
+        # only); never a snapshot a clock pass itself rewrote (lead review 2026-10-08: the
+        # second clock pass was reading the first one's write time as the as-of)
+        fetched_at = _to_utc(outputs_snap["created_at"])
+        latest = store.read_snapshot(item_id, "latest")
+        history = _load_history_series(store, item_id, spec)
+        now = _clock().astimezone(UTC)
+        form_ctx = _form_bind_context(spec, fetched_at, now)
+        from .ni_forms import llm as _llm
+        with _llm.no_model():
+            bound = bind_scene(spec["scene"], outputs, history=history, form_ctx=form_ctx)
+        _enforce_bind_types(spec["scene"], bound)
+        _enforce_payload_size(bound)
+        # `created_at` is the board's payload_at / as-of / stale clock: the data did not
+        # change, so it stays. A failing card's G3 marker (`latest` ok=False) is not a
+        # layout to refresh — only its last-good card (the slot the board shows) is.
+        if latest is not None and latest["ok"]:
+            store.write_snapshot(item_id, "latest", bound, ok=True, keep_created_at=True)
+        store.write_snapshot(item_id, "last_good", bound, ok=True, keep_created_at=True)
+        store.set_next_clock(item_id, _bound_next_clock(bound))
+        log.debug("ni clock pass: item=%s", item_id)
+    except Exception:
+        store.set_next_clock(item_id, None)
+        log.debug("ni clock pass declined: item=%s", item_id, exc_info=True)
 
 
 def _collect_broken_transition(store: NIStore, item_id: str, prior_state: str,
@@ -5520,6 +5680,21 @@ def _finalize_run(store: NIStore, item: dict, spec: dict, outputs: dict,
             log.warning("ni image seal skipped: item=%s", item["id"])
     store.write_snapshot(item["id"], "latest", bound, ok=True)
     store.write_snapshot(item["id"], "last_good", bound, ok=True)
+    # §34 Phase 1b: the outputs this bind consumed, kept so a later clock pass can
+    # re-bind with no fetch (``json_instants`` keeps every time/date cell's instant
+    # across the JSON round trip, same as the ``preview_data`` slot); and the next
+    # clock-sensitive boundary the fresh bind found, if any.
+    try:
+        store.write_snapshot(item["id"], "outputs", json_instants(outputs), ok=True)
+        store.set_next_clock(item["id"], _bound_next_clock(bound))
+    except Exception:
+        # the run succeeded; the clock pass is optional. An ok=False marker replaces any
+        # earlier outputs so a later clock pass can never re-lay out STALE outputs under a
+        # fresh clock (lead review 2026-10-08).
+        log.warning("ni outputs snapshot skipped (clock pass disabled until the next run): item=%s",
+                    item["id"], exc_info=True)
+        store.write_snapshot(item["id"], "outputs", {}, ok=False)
+        store.set_next_clock(item["id"], None)
     store.clear_failures(item["id"], "ok")
     # Phase 4b D5 (audit 2026-09-11): a successful run closes the streak, so the
     # stale ``last_failure`` snapshot is no longer valid L2 context. Cleared here
@@ -5855,6 +6030,8 @@ def _enforce_form_shape(node: dict) -> None:
     ``lint`` carries non-negative counters. Mirror of the form validator for the
     bound shape so a drift lands here (never at write_snapshot). ``alternatives``
     (ALT, optional — the preview bind only) is checked the same way, one entry deep.
+    ``clock`` (§34 Phase 1b, optional — absent payloads are pre-1b: version-skew rule)
+    is ``{"next": str | None}``, the string a parseable aware instant.
     """
     assert isinstance(node, dict), "node must be a dict"
     from .ni_forms.types import ContractError, check_clir
@@ -5886,6 +6063,20 @@ def _enforce_form_shape(node: dict) -> None:
                                or design["designer"] not in _FORM_DESIGNER_KINDS
                                or not (isinstance(design["pick"], str) and 0 < len(design["pick"]) <= _FORM_MAX_STR)):
         raise NIError("bind_type", "form.design must be {designer: model|rules, pick}")
+    clock = node.get("clock")
+    if clock is not None:
+        if not isinstance(clock, dict) or set(clock) != {"next"}:
+            raise NIError("bind_type", "form.clock must be {next}")
+        nxt = clock["next"]
+        if nxt is not None:
+            if not isinstance(nxt, str):
+                raise NIError("bind_type", "form.clock.next must be a string or null")
+            try:
+                parsed = datetime.fromisoformat(nxt)
+            except ValueError:
+                raise NIError("bind_type", "form.clock.next must parse as an ISO instant") from None
+            if parsed.tzinfo is None:
+                raise NIError("bind_type", "form.clock.next must be timezone-aware")
     alts = node.get("alternatives")
     if alts is not None:
         if not isinstance(alts, list) or len(alts) > 1:
