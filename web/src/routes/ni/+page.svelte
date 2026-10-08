@@ -8,6 +8,7 @@
   // wrong" strip — mirror ni-format §10 verbs exactly.
   import { onDestroy, onMount } from "svelte";
   import { goto } from "$app/navigation";
+  import CardShell from "$lib/components/CardShell.svelte";
   import Chip from "$lib/components/Chip.svelte";
   import EmptyState from "$lib/components/EmptyState.svelte";
   import Icon from "$lib/components/Icon.svelte";
@@ -15,6 +16,7 @@
   import IrPaint from "$lib/components/IrPaint.svelte";
   import NiScene from "$lib/components/NiScene.svelte";
   import Spinner from "$lib/components/Spinner.svelte";
+  import VerifyPanel from "$lib/components/VerifyPanel.svelte";
   import { account } from "$lib/account.svelte";
   import {
     api,
@@ -36,6 +38,7 @@
     validateParamForm,
   } from "$lib/ni/library";
   import { formatStageJson, stagesFromSpec } from "$lib/ni/proposal";
+  import { bodyShowsPanel, cardSpan, cardState, footerText, formBoxChrome } from "$lib/ni/shell";
   import { isStale, relTime } from "$lib/ni/time";
   import { runStatusLabel } from "$lib/runs";
   import { toast } from "$lib/toast.svelte";
@@ -773,18 +776,6 @@
     };
   }
 
-  // Card footer fresh line. When the item has a payload_at, keep the existing "Xm
-  // ago" — that's the moment the data on screen was fetched. Otherwise, if the
-  // engine tried at all (last_checked set), the amendments require "last tried
-  // <relTime>" so the footer stops rendering the "—" lie of "we haven't started yet".
-  function footerFresh(item: NiBoardItem): string {
-    console.assert(typeof item === "object" && item !== null, "footerFresh: item is object");
-    console.assert(item.last_checked === null || typeof item.last_checked === "string", "footerFresh: last_checked shape");
-    if (item.payload_at) return relTime(item.payload_at);
-    if (item.last_checked) return `last tried ${relTime(item.last_checked)}`;
-    return "—";
-  }
-
   async function openCredential(item: NiBoardItem, entry: { name: string; label: string }): Promise<void> {
     console.assert(typeof entry.name === "string", "openCredential: name is string");
     console.assert(credentialFor === null, "openCredential: no other credential modal open");
@@ -1078,12 +1069,14 @@
     }
   }
 
-  async function validateLooksRight(item: NiBoardItem) {
+  async function validateLooksRight(item: NiBoardItem, presentationId?: "pick" | "second") {
     console.assert(item.state === "commissioning", "validateLooksRight: only commissioning");
     console.assert(typeof item.id === "string", "validateLooksRight: id is string");
     busyId = item.id;
     try {
-      const res = await api.niValidate(item.id, true);
+      // §34 C2: presentationId is only ever sent for a bound form (VerifyPanel) —
+      // every other caller omits it, which the server reads as "keep the pick".
+      const res = await api.niValidate(item.id, true, undefined, presentationId);
       // F1: the verdict kicks the C3 proof run server-side — say what happened.
       toast(res.state === "live"
         ? "Confirmed — the card is live."
@@ -1144,9 +1137,10 @@
     }
   }
 
-  // Phase 1a-3: a form payload is `{ type: "form", clir: { desktop, phone } }`;
-  // the painter picks `clir.phone` on the same 560 px breakpoint that collapses
-  // span-2 cards to one column (see the `@media (max-width:560px)` CSS below).
+  // Phase 1a-3: a form payload is `{ type: "form", clir: { desktop, phone } }`; the
+  // painter picks `clir.phone` at this 560 px breakpoint, independent of the grid
+  // rhythm's own 780/1040 px column breakpoints below (Phase 1a-4) — which CLIR face
+  // paints inside a card is a different question from how many cards sit per row.
   let phoneLayout = $state(false);
   const PHONE_MQ = typeof window !== "undefined" ? window.matchMedia("(max-width: 560px)") : null;
   function syncPhoneLayout(): void {
@@ -1231,20 +1225,28 @@
     <div class="ni-grid2">
       {#each items as item (item.id)}
         {@const health = healthChip(item)}
-        {@const wide = item.display?.size === "wide" || item.display?.size === "large"}
         {@const preview = item.state === "draft"}
-        <div class="card ni-card" class:wide class:preview={preview || !!item.awaiting_yes}>
-          <div class="ni-head">
-            {#if pickClir(item.payload)}
-              <!-- A form card paints its own title inside the CLIR (one title per card);
-                   the empty span keeps the chips on the right. -->
-              <span class="ni-title" aria-hidden="true"></span>
-            {:else}
-              <strong class="ni-title">{item.title}</strong>
-            {/if}
-            <span class="ni-chips">
+        {@const formClir = pickClir(item.payload)}
+        {@const span = cardSpan(item.display?.size, formClir)}
+        {@const state = cardState(item)}
+        {@const reason = state === "failing"
+          ? `${friendlyErrorClass(item.last_status)} · last tried ${relTime(item.last_checked)}`
+          : ""}
+        <CardShell
+          title={item.title}
+          {state}
+          hasForm={!!formClir}
+          cols={span.cols}
+          rows={span.rows}
+          preview={preview || !!item.awaiting_yes}
+          footerText={footerText(item)}
+          {reason}
+        >
+          {#snippet chips()}
+            {#if state !== "fresh"}
               <Chip kind={health.kind}>{health.label}</Chip>
-              {#if item.interpreted}
+            {/if}
+            {#if item.interpreted}
                 <Chip
                   kind=""
                   title="This card includes a language model's reading of the data, not pure arithmetic."
@@ -1273,8 +1275,7 @@
                      until the user chooses to delete it — no auto-anything. -->
                 <Chip kind="" title="This card's template is no longer in the library">No longer in library</Chip>
               {/if}
-            </span>
-          </div>
+          {/snippet}
 
           {#if preview && !item.flow}
             <div class="ni-preview-tag">
@@ -1286,8 +1287,6 @@
                 : "Preview — sample data"}</Chip>
             </div>
           {/if}
-
-          <div class="ni-body">
             {#if item.flow}
               <!-- Creation/remap flow in progress or ended abnormally: the progress
                    line replaces the payload/first-run copy so the card tells one
@@ -1299,12 +1298,12 @@
                      terminal is never a dead end (retry / pick again / answer). -->
                 {@const friendly = friendlyErrorClass(item.flow.error ?? "")}
                 {@const consent = item.flow.question?.kind === "model_consent" ? item.flow.question : null}
-                <p class={consent ? "" : "ni-status-fail"} style="margin:0; font-size:var(--f-label); font-weight:600">
+                <p class={consent ? "ni-note-head" : "ni-status-fail ni-note-head"}>
                   {consent ? "Build with a model outside this computer?"
                     : item.flow.state === "unsupported" ? "Can’t build this card yet" : "Setup failed"}
                 </p>
                 {#if !consent}
-                  <p class="muted" style="margin:var(--s-1) 0 0; font-size:var(--f-label)">
+                  <p class="muted ni-note-sp">
                     {item.flow.reason ?? friendly ?? "Creation didn’t finish."}
                   </p>
                 {/if}
@@ -1312,9 +1311,9 @@
                   <!-- Ruling 2 (2026-09-24): building reads the request and samples of the
                        source, so a non-local model needs THIS card's consent. -->
                   {#if consent.prompt}
-                    <p class="muted" style="margin:var(--s-1) 0 0; font-size:var(--f-label)">{consent.prompt}</p>
+                    <p class="muted ni-note-sp">{consent.prompt}</p>
                   {/if}
-                  <div class="ni-actions" style="margin-top: var(--s-2)">
+                  <div class="ni-actions ni-actions-sp">
                     <button
                       class="secondary"
                       disabled={busyId === item.id}
@@ -1331,11 +1330,10 @@
                 {/if}
                 {#if item.flow.question?.kind === "supply_date"}
                   {#if item.flow.question.prompt}
-                    <p class="muted" style="margin:var(--s-1) 0 0; font-size:var(--f-label)">{item.flow.question.prompt}</p>
+                    <p class="muted ni-note-sp">{item.flow.question.prompt}</p>
                   {/if}
                   <form
-                    class="ni-pick-url"
-                    style="margin-top: var(--s-2)"
+                    class="ni-pick-url ni-actions-sp"
                     onsubmit={(e) => { e.preventDefault(); void answerDate(item); }}
                   >
                     <input
@@ -1350,7 +1348,7 @@
                   </form>
                 {/if}
                 {#if !consent}
-                <div class="ni-actions" style="margin-top: var(--s-2)">
+                <div class="ni-actions ni-actions-sp">
                   {#if !item.shell}
                     <button
                       class="secondary"
@@ -1380,10 +1378,10 @@
                 </div>
                 {/if}
                 {#if flowActionError[item.id]}
-                  <p class="error" style="margin:var(--s-1) 0 0; font-size:var(--f-label)">{flowActionError[item.id]}</p>
+                  <p class="error ni-note-sp">{flowActionError[item.id]}</p>
                 {/if}
               {:else if item.flow.state === "source" && item.flow.suggestions === undefined}
-                <p class="muted" style="margin:0; font-size:var(--f-label)">
+                <p class="muted ni-note">
                   Finding a source for this…
                 </p>
               {:else if item.flow.state === "source"}
@@ -1394,7 +1392,7 @@
                      cards; web as links" — they never build), and a paste-a-URL field.
                      The tap or paste is the consent; netguard guards the fetch. -->
                 <div class="ni-commission">
-                  <p style="margin:0 0 var(--s-2); font-size:var(--f-label)">{pick.heading}</p>
+                  <p class="ni-note-gap">{pick.heading}</p>
                   {#if pick.sources.length > 0}
                     <div class="ni-suggestions">
                       <!-- Rows key on url; a tap submits the sealed URL through the
@@ -1412,7 +1410,7 @@
                             onclick={() => pickSource(item, sug.url)}
                           >{sug.title}</button>
                           {#if sug.evidence && sug.evidence.length > 0}
-                            <p class="muted" style="margin:2px 0 0; font-size:var(--f-label)">
+                            <p class="muted ni-note-tight">
                               {sug.evidence.join(" — ")}
                             </p>
                           {/if}
@@ -1460,7 +1458,7 @@
                     >Use this URL</button>
                   </form>
                   {#if flowActionError[item.id]}
-                    <p class="error" style="margin:var(--s-1) 0 0; font-size:var(--f-label)">{flowActionError[item.id]}</p>
+                    <p class="error ni-note-sp">{flowActionError[item.id]}</p>
                   {/if}
                 </div>
               {:else if item.flow.state === "awaiting_access" && item.flow.access}
@@ -1473,7 +1471,7 @@
                   onsubmit={(e) => { e.preventDefault(); void giveAccess(item); }}
                 >
                   {#if access.key}
-                    <p style="margin:0; font-size:var(--f-label)">
+                    <p class="ni-note">
                       {access.provider || access.host} needs your own free key.
                       {#if access.key.docs_url}
                         <a href={access.key.docs_url} target="_blank" rel="noopener noreferrer">Get one here</a>,
@@ -1494,7 +1492,7 @@
                     />
                   {/if}
                   {#if access.contact}
-                    <p style="margin:0; font-size:var(--f-label)">
+                    <p class="ni-note">
                       {access.provider || access.host} asks automated requests for a contact
                       email. SmartBrain sends yours only to sources with this rule, and asks once.
                     </p>
@@ -1514,15 +1512,18 @@
                       || (access.contact && accessEmailText.trim().length < 6)}
                   >{busyId === item.id ? "Saving…" : "Continue"}</button>
                   {#if flowActionError[item.id]}
-                    <p class="error" style="margin:0; font-size:var(--f-label)">{flowActionError[item.id]}</p>
+                    <p class="error ni-note">{flowActionError[item.id]}</p>
                   {/if}
                 </form>
               {:else}
-                <p class="muted" style="margin:0; font-size:var(--f-label)">{flowStageLabel(item.flow)}</p>
+                <p class="muted ni-note">{flowStageLabel(item.flow)}</p>
               {/if}
             {:else if item.payload}
-              {@const formClir = pickClir(item.payload)}
-              {#if formClir}
+              {#if bodyShowsPanel(item, !!formClir)}
+                <!-- VerifyPanel (rendered in `below`, just underneath) already IS the
+                     card view on this screen — painting the same CLIR here too would
+                     just repeat the pick above its own preview. -->
+              {:else if formClir}
                 <IrPaint clir={formClir} viewerTz={VIEWER_TZ} />
               {:else}
                 <NiScene node={item.payload} />
@@ -1532,24 +1533,24 @@
               {#if failure.show}
                 <!-- Status truth (§ amendments): a real failure class + attempt count +
                      when it was tried — replaces the "Waiting for the first run…" lie. -->
-                <p class="ni-status-fail" style="margin:0; font-size:var(--f-label)">
+                <p class="ni-status-fail ni-note">
                   First run failed —
                   <span class="ni-status-class">{failure.friendly} ({failure.raw})</span>,
                   {failure.attempts} attempt{failure.attempts === 1 ? "" : "s"} · last tried {failure.tried}
                 </p>
               {:else}
-                <p class="muted" style="margin:0; font-size:var(--f-label)">Waiting for the first run…</p>
+                <p class="muted ni-note">Waiting for the first run…</p>
               {/if}
             {/if}
-          </div>
 
+          {#snippet below()}
           {#if !item.shell && !item.flow && (item.state === "failing" || item.state === "broken" || item.state === "degraded" || (item.state === "commissioning" && item.consecutive_failures > 0))}
             <!-- P3: the card's Fix — re-derives against the card's OWN frozen
                  source (never a new host). Generic across every http card.
                  2026-09-23: also on a COMMISSIONING card whose run failed — a
                  C1 failure stays commissioning (§6), so a card that never went
                  live had no Fix until the week-long broken rule tripped. -->
-            <div class="ni-actions" style="margin-top: var(--s-2)">
+            <div class="ni-actions ni-actions-sp">
               <button
                 class="secondary"
                 disabled={busyId === item.id}
@@ -1602,7 +1603,7 @@
                  (field: it rendered under the consent block and read as a
                  contradiction). Terminal-or-absent flows only; Retry lives on
                  the failure block above. -->
-            <p class="muted" style="margin:0; font-size:var(--f-label)">
+            <p class="muted ni-note">
               Creation didn’t finish. Delete this card, or start again above.
             </p>
           {:else if preview && !item.shell && !item.flow}
@@ -1621,7 +1622,7 @@
                  where it came from, and goes live only on the user's YES. NO goes back to
                  the source pick without that source — never a dead end. -->
             <div class="ni-commission">
-              <p style="margin:0; font-size:var(--f-label); font-weight:600">Is this what you asked for?</p>
+              <p class="ni-note-head">Is this what you asked for?</p>
               <p class="muted ni-yes-from">{awaitingYesSource(item.awaiting_yes)}</p>
               <div class="ni-actions">
                 <button
@@ -1643,11 +1644,19 @@
                  user tapping a "dead" button three times). -->
             {#if item.c2_ok}
               <div class="ni-commission">
-                <p style="margin:0; font-size:var(--f-label)">Confirmed — verifying, this card goes live after the next successful refresh.</p>
+                <p class="ni-note">Confirmed — verifying, this card goes live after the next successful refresh.</p>
               </div>
+            {:else if formClir}
+              <VerifyPanel
+                payload={item.payload}
+                viewerTz={VIEWER_TZ}
+                busy={busyId === item.id}
+                onUse={(id) => validateLooksRight(item, id)}
+                onWrong={() => openWrongNote(item)}
+              />
             {:else}
             <div class="ni-commission">
-              <p style="margin:0 0 var(--s-2); font-size:var(--f-label)">This is live data — is it right?</p>
+              <p class="ni-note-gap">This is live data — is it right?</p>
               <div class="ni-actions">
                 <button
                   class="secondary"
@@ -1663,33 +1672,42 @@
             </div>
             {/if}
           {/if}
+          {/snippet}
 
-          <div class="ni-foot">
-            <!-- W-G (2026-09-17): one calm meta line — cadence + freshness —
-                 and a condensed action row (the five-button spread wrapped to
-                 two noisy lines in the field). Rarely-used verbs live in a
-                 native details overflow: zero new state, keyboard accessible. -->
-            <span class="muted ni-fresh">
-              {#if item.awaiting_yes}not updating yet{:else}every {item.interval_minutes}m{/if}
-              {#if !item.enabled}· paused{/if}
-              · {footerFresh(item)}
-            </span>
+          {#snippet actions()}
             <span class="ni-actions">
-              <button
-                class="linklike ni-history"
-                disabled={busyId === item.id || historyFor !== null}
-                onclick={() => openHistory(item)}
-                title="Show recent runs"
-              >History</button>
-              <button
-                class="ghost"
-                disabled={busyId === item.id}
-                onclick={() => runNow(item)}
-                title="Run now"
-              >{busyId === item.id ? "Running…" : "Run now"}</button>
+              {#if !formBoxChrome(state, !!formClir)}
+                <button
+                  class="linklike ni-history"
+                  disabled={busyId === item.id || historyFor !== null}
+                  onclick={() => openHistory(item)}
+                  title="Show recent runs"
+                >History</button>
+                <button
+                  class="ghost"
+                  disabled={busyId === item.id}
+                  onclick={() => runNow(item)}
+                  title="Run now"
+                >{busyId === item.id ? "Running…" : "Run now"}</button>
+              {/if}
               <details class="ni-more">
                 <summary title="More actions" aria-label="More actions">⋯</summary>
                 <div class="ni-more-menu">
+                  {#if formBoxChrome(state, !!formClir)}
+                    <!-- The tight form-card chrome (CardShell "formBoxChrome") has no
+                         room for a visible History/Run now pair — they move into this
+                         menu instead of disappearing. -->
+                    <button
+                      class="ghost"
+                      disabled={busyId === item.id || historyFor !== null}
+                      onclick={() => openHistory(item)}
+                    >History</button>
+                    <button
+                      class="ghost"
+                      disabled={busyId === item.id}
+                      onclick={() => runNow(item)}
+                    >{busyId === item.id ? "Running…" : "Run now"}</button>
+                  {/if}
                   <button
                     class="ghost"
                     disabled={busyId === item.id}
@@ -1720,8 +1738,8 @@
                 </div>
               </details>
             </span>
-          </div>
-        </div>
+          {/snippet}
+        </CardShell>
       {/each}
     </div>
   {/if}
@@ -2267,62 +2285,47 @@
 {/if}
 
 <style>
-  /* Card grid lifted from settings/status .grid2 — auto-fit means the same page reflows
-     from three columns on a wide monitor to one on a phone with no breakpoints. */
+  /* Grid rhythm (Phase 1a-4): a fixed rhythm instead of auto-fit — 2 columns on a
+     phone, 3 from 780px, 4 from 1040px; order-preserving (grid-auto-flow: row, never
+     dense — DOM/focus/visual order all equal the user's order). Rows are
+     `minmax(176px, auto)`, not a bare `176px`: a bare length makes every implicit row
+     EXACTLY that tall, so any sibling taller than its span (a legacy card, a failing
+     card's reason line, a verifying card holding VerifyPanel) overflowed into the next
+     row instead of growing its own — minmax keeps a form card's span exact (its CLIR
+     is laid out to fill precisely 176px/368px, so content never asks for more) while
+     letting a taller neighbour grow the row it is actually in.
+     `.ni-card.cols-2`/`.rows-2`/`.rows-3` (CardShell) span columns/rows from the painted
+     CLIR's own span key (`$lib/ni/shell` cardSpan — the phone face may need a different
+     footprint from the desktop face; `display.size` only when no CLIR is painted), the
+     row span gated on CardShell's own `formBoxChrome` — never a legacy card, and never a
+     `verifying` card either (VerifyPanel is a transient surface taller than any
+     design, so it gets a content-sized span, same as a legacy card, even on a form
+     item). `--ni-row-gap` mirrors spans.py's GAP (12px phone / 16px desktop) at the
+     SAME 560px breakpoint IrPaint's `pickClir` already uses; CardShell reads it to
+     size a form card's 2- and 3-row min-height. */
   .ni-grid2 {
+    --ni-row-gap: 12px;
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
-    gap: var(--s-3);
+    grid-template-columns: repeat(2, 1fr);
+    grid-auto-rows: minmax(176px, auto);
+    grid-auto-flow: row;
+    gap: var(--ni-row-gap, 12px);
     margin: var(--s-4) 0;
     /* W-G (2026-09-17): cards size to their content instead of stretching to
        the row's tallest sibling — the field board showed short quote cards
        with huge empty middles. */
     align-items: start;
   }
-  .ni-card {
-    /* Card padding + border come from .card in app.css; we only add layout inside. */
-    display: flex;
-    flex-direction: column;
-    gap: var(--s-3);
-    margin: 0;
+  @media (min-width: 561px) {
+    .ni-grid2 { --ni-row-gap: 16px; }
   }
-  .ni-card.wide { grid-column: span 2; }
-  /* Wide cards collapse back to a single column on narrow viewports so a two-span
-     card never overflows the grid. Raised from 480px so a two-column layout with a
-     14rem minimum track (~448px + gutters ≈ 480–520px) doesn't try to render a
-     span-2 card into ~230px and clip the content. */
-  @media (max-width: 560px) {
-    .ni-card.wide { grid-column: auto; }
+  @media (min-width: 780px) {
+    .ni-grid2 { grid-template-columns: repeat(3, 1fr); }
   }
-  .ni-card.preview {
-    border-style: dashed;
-    border-color: var(--border-strong);
-  }
-  .ni-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--s-2);
-    flex-wrap: wrap;
-  }
-  .ni-chips {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--s-1);
-    flex-wrap: wrap;
-  }
-  .ni-title {
-    font-size: var(--f-label);
-    font-weight: 600;
-    /* An over-long title (a full URL a template inlined) truncates inside the card
-       instead of pushing the grid track wider. */
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    min-width: 0;
+  @media (min-width: 1040px) {
+    .ni-grid2 { grid-template-columns: repeat(4, 1fr); }
   }
   .ni-preview-tag { display: flex; }
-  .ni-body { min-width: 0; }
   .ni-commission {
     padding: var(--s-3);
     background: var(--accent-tint);
@@ -2423,17 +2426,6 @@
     min-width: 10rem;
   }
   .ni-more-menu button { text-align: left; }
-  .ni-foot {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--s-2);
-    margin-top: auto; /* keeps footers aligned across cards of different body heights */
-    padding-top: var(--s-2);
-    border-top: 1px solid var(--border);
-    flex-wrap: wrap;
-  }
-  .ni-fresh { font-size: var(--f-meta); }
   .ni-actions {
     display: inline-flex;
     gap: var(--s-1);
