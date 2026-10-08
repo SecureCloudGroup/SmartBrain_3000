@@ -1,0 +1,48 @@
+{
+ "id": "30-slack-status-right-now",
+ "n": 30,
+ "ask": "Slack status right now",
+ "kind": "status",
+ "frame_kind": "status",
+ "subject": "Slack status",
+ "title": "Slack status",
+ "source_id": "slack-status-current",
+ "source_url": "https://slack-status.com/api/v2.0.0/current",
+ "fetched_at": "2026-10-07T17:28:49Z",
+ "viewer_tz": "UTC",
+ "answers_used": [
+  {
+   "name": "status",
+   "label": "Slack status",
+   "words": [
+    "status",
+    "down",
+    "is slack down",
+    "working",
+    "up",
+    "operational",
+    "problems",
+    "issues"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "status",
+   "type": "text",
+   "window": "now",
+   "unit": null
+  }
+ ],
+ "rows_output_name": null,
+ "outputs": {
+  "status": "ok"
+ },
+ "live_form": "stat",
+ "live_span": "d1x1",
+ "live_lint": {
+  "red": 0,
+  "amber": 2,
+  "codes": [
+   "L-ASK"
+  ]
+ }
+}

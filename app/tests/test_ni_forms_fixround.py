@@ -204,7 +204,9 @@ def test_frame_forms_follow_the_b2_table() -> None:
                        {"path": "day", "key": "day", "label": "Day", "type": "number"}]}]
     rrec, rinp = from_answers(moon, {"rows": [{"phase": "New Moon", "day": 10}]}, history=None, context=CTX,
                               ask="next new moon", title="t", cadence_s=0, rows_output_name="rows")
-    assert frame_forms("next_event", rrec, pf.profile(rrec, rinp, NOW))[0] == "table"   # no time axis: a lookup
+    # fix round 1a-6, class H: one row reads like a value answer (measure), not a lookup list
+    assert rrec.kind == "measure"
+    assert frame_forms("next_event", rrec, pf.profile(rrec, rinp, NOW)) == ["next_event", "stat"]
 
 
 def test_present_menu_shows_the_frame_and_l_ask_gates_a_pick_that_drops_an_asked_field() -> None:

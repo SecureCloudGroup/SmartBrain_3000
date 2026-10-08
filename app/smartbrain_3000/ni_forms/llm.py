@@ -139,13 +139,15 @@ def _parse(content: str) -> tuple[object, str | None]:
         return None, f"not JSON: {ex}"
 
 
-def chat_json(purpose: str, messages: list, schema: dict, *, call, max_tokens: int = 500
-              ) -> tuple[object, LLMMeta]:
+def chat_json(purpose: str, messages: list, schema: dict, *, call, max_tokens: int = 500,
+              skeleton: str | None = None) -> tuple[object, LLMMeta]:
     """Validate the gateway reply against `schema`; one retry on an invalid response.
 
     `call(messages) -> str` is the injected transport (the product passes the SB
     gateway); `max_tokens` is accepted for symmetry with the proto's signature but
-    not forwarded, since the transport contract is `messages -> str` only.
+    not forwarded, since the transport contract is `messages -> str` only. `skeleton`
+    (fix round 1a-6, class M) is the literal JSON shape the caller's prompt already
+    showed; the retry repeats it instead of describing the schema error alone.
     """
     assert purpose in PURPOSES, f"purpose must be one of {sorted(PURPOSES)}"
     assert callable(call), "call must be a callable (messages) -> str"
@@ -171,7 +173,8 @@ def chat_json(purpose: str, messages: list, schema: dict, *, call, max_tokens: i
             last_err = parse_err
         if retries >= 1:
             break
+        retry_ask = f"Reply with ONLY this JSON shape:\n{skeleton}" if skeleton else \
+            "Reply with JSON matching the schema only."
         msgs = msgs + [{"role": "assistant", "content": content[:2000]},
-                       {"role": "user",
-                        "content": f"Invalid: {last_err[:300]}. Reply with JSON matching the schema only."}]
+                       {"role": "user", "content": f"Invalid: {last_err[:300]}. {retry_ask}"}]
     raise SchemaInvalid(f"invalid: {last_err}")

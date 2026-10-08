@@ -1,0 +1,355 @@
+{
+ "id": "18-how-did-the-dodgers-do-last-night",
+ "n": 18,
+ "ask": "how did the Dodgers do last night",
+ "kind": "result",
+ "frame_kind": "result",
+ "subject": "Dodgers",
+ "title": "Dodgers",
+ "source_id": "mlb-team-results",
+ "source_url": "https://statsapi.mlb.com/api/v1/schedule?sportId=1&teamId=119&startDate=2026-09-30&endDate=2026-10-07",
+ "fetched_at": "2026-10-07T17:24:59Z",
+ "viewer_tz": "UTC",
+ "answers_used": [
+  {
+   "name": "results",
+   "label": "Recent results",
+   "words": [
+    "score",
+    "scores",
+    "result",
+    "results",
+    "final",
+    "last game",
+    "did they win",
+    "won",
+    "lost",
+    "last night"
+   ],
+   "primary": true,
+   "kind": "list",
+   "path": "dates",
+   "newest_first": true,
+   "may_be_empty": true,
+   "filter": {
+    "path": "games[0].status.detailedState",
+    "equals": "Final"
+   },
+   "cells": [
+    {
+     "path": "games[0].teams.away.team.name",
+     "label": "Away",
+     "type": "text",
+     "key": "games[0].teams.away.team.name",
+     "unit": null
+    },
+    {
+     "path": "games[0].teams.away.score",
+     "label": "Away runs",
+     "type": "number",
+     "key": "games[0].teams.away.score",
+     "unit": null
+    },
+    {
+     "path": "games[0].teams.home.team.name",
+     "label": "Home",
+     "type": "text",
+     "key": "games[0].teams.home.team.name",
+     "unit": null
+    },
+    {
+     "path": "games[0].teams.home.score",
+     "label": "Home runs",
+     "type": "number",
+     "key": "games[0].teams.home.score",
+     "unit": null
+    }
+   ]
+  }
+ ],
+ "rows_output_name": "rows",
+ "outputs": {
+  "rows_count": 3,
+  "rows": [
+   {
+    "events": [],
+    "games": [
+     {
+      "ifNecessaryDescription": "Normal Game",
+      "ifNecessary": "N",
+      "recordSource": "S",
+      "seriesDescription": "NL Division Series",
+      "seriesGameNumber": 3,
+      "gamesInSeries": 5,
+      "inningBreakLength": 175,
+      "reverseHomeAwayStatus": false,
+      "scheduledInnings": 9,
+      "description": "NLDS 'B' Game 3",
+      "dayNight": "night",
+      "seasonDisplay": "2026",
+      "calendarEventID": "14-849819-2026-10-06",
+      "tiebreaker": "N",
+      "gamedayType": "P",
+      "doubleHeader": "N",
+      "publicFacing": true,
+      "gameNumber": 1,
+      "isTie": false,
+      "content": {
+       "link": "/api/v1/game/849819/content"
+      },
+      "venue": {
+       "link": "/api/v1/venues/4705",
+       "name": "Truist Park",
+       "id": 4705
+      },
+      "teams": {
+       "home": {
+        "seriesNumber": 4,
+        "splitSquad": false,
+        "isWinner": false,
+        "score": 1,
+        "leagueRecord": {
+         "pct": ".333",
+         "ties": 0,
+         "losses": 2,
+         "wins": 1
+        },
+        "team": {
+         "link": "/api/v1/teams/144",
+         "name": "Atlanta Braves",
+         "id": 144
+        }
+       },
+       "away": {
+        "seriesNumber": 4,
+        "splitSquad": false,
+        "isWinner": true,
+        "score": 3,
+        "leagueRecord": {
+         "pct": ".667",
+         "ties": 0,
+         "losses": 1,
+         "wins": 2
+        },
+        "team": {
+         "link": "/api/v1/teams/119",
+         "name": "Los Angeles Dodgers",
+         "id": 119
+        }
+       }
+      },
+      "status": {
+       "abstractGameCode": "F",
+       "startTimeTBD": false,
+       "statusCode": "F",
+       "detailedState": "Final",
+       "codedGameState": "F",
+       "abstractGameState": "Final"
+      },
+      "officialDate": "2026-10-06",
+      "gameDate": "2026-10-06T22:00:00Z",
+      "season": "2026",
+      "gameType": "D",
+      "link": "/api/v1.1/game/849819/feed/live",
+      "gameGuid": "9f205230-c929-4cd8-a790-8b2c4ded3571",
+      "gamePk": 849819
+     }
+    ],
+    "totalGamesInProgress": 0,
+    "totalGames": 1,
+    "totalEvents": 0,
+    "totalItems": 1,
+    "date": "2026-10-06"
+   },
+   {
+    "events": [],
+    "games": [
+     {
+      "ifNecessaryDescription": "Normal Game",
+      "ifNecessary": "N",
+      "recordSource": "S",
+      "seriesDescription": "NL Division Series",
+      "seriesGameNumber": 2,
+      "gamesInSeries": 5,
+      "inningBreakLength": 175,
+      "reverseHomeAwayStatus": false,
+      "scheduledInnings": 9,
+      "description": "NLDS 'B' Game 2",
+      "dayNight": "day",
+      "seasonDisplay": "2026",
+      "calendarEventID": "14-849823-2026-10-04",
+      "tiebreaker": "N",
+      "gamedayType": "P",
+      "doubleHeader": "N",
+      "publicFacing": true,
+      "gameNumber": 1,
+      "isTie": false,
+      "content": {
+       "link": "/api/v1/game/849823/content"
+      },
+      "venue": {
+       "link": "/api/v1/venues/22",
+       "name": "UNIQLO Field at Dodger Stadium",
+       "id": 22
+      },
+      "teams": {
+       "home": {
+        "seriesNumber": 4,
+        "splitSquad": false,
+        "isWinner": false,
+        "score": 2,
+        "leagueRecord": {
+         "pct": ".500",
+         "ties": 0,
+         "losses": 1,
+         "wins": 1
+        },
+        "team": {
+         "link": "/api/v1/teams/119",
+         "name": "Los Angeles Dodgers",
+         "id": 119
+        }
+       },
+       "away": {
+        "seriesNumber": 4,
+        "splitSquad": false,
+        "isWinner": true,
+        "score": 3,
+        "leagueRecord": {
+         "pct": ".500",
+         "ties": 0,
+         "losses": 1,
+         "wins": 1
+        },
+        "team": {
+         "link": "/api/v1/teams/144",
+         "name": "Atlanta Braves",
+         "id": 144
+        }
+       }
+      },
+      "status": {
+       "abstractGameCode": "F",
+       "startTimeTBD": false,
+       "statusCode": "F",
+       "detailedState": "Final",
+       "codedGameState": "F",
+       "abstractGameState": "Final"
+      },
+      "officialDate": "2026-10-04",
+      "gameDate": "2026-10-05T00:00:00Z",
+      "season": "2026",
+      "gameType": "D",
+      "link": "/api/v1.1/game/849823/feed/live",
+      "gameGuid": "6be3ffa8-37cf-431d-b2d9-b6569d989b90",
+      "gamePk": 849823
+     }
+    ],
+    "totalGamesInProgress": 0,
+    "totalGames": 1,
+    "totalEvents": 0,
+    "totalItems": 1,
+    "date": "2026-10-04"
+   },
+   {
+    "events": [],
+    "games": [
+     {
+      "ifNecessaryDescription": "Normal Game",
+      "ifNecessary": "N",
+      "recordSource": "S",
+      "seriesDescription": "NL Division Series",
+      "seriesGameNumber": 1,
+      "gamesInSeries": 5,
+      "inningBreakLength": 175,
+      "reverseHomeAwayStatus": false,
+      "scheduledInnings": 9,
+      "description": "NLDS 'B' Game 1",
+      "dayNight": "day",
+      "seasonDisplay": "2026",
+      "calendarEventID": "14-849828-2026-10-03",
+      "tiebreaker": "N",
+      "gamedayType": "P",
+      "doubleHeader": "N",
+      "publicFacing": true,
+      "gameNumber": 1,
+      "isTie": false,
+      "content": {
+       "link": "/api/v1/game/849828/content"
+      },
+      "venue": {
+       "link": "/api/v1/venues/22",
+       "name": "UNIQLO Field at Dodger Stadium",
+       "id": 22
+      },
+      "teams": {
+       "home": {
+        "seriesNumber": 4,
+        "splitSquad": false,
+        "isWinner": true,
+        "score": 5,
+        "leagueRecord": {
+         "pct": "1.000",
+         "ties": 0,
+         "losses": 0,
+         "wins": 1
+        },
+        "team": {
+         "link": "/api/v1/teams/119",
+         "name": "Los Angeles Dodgers",
+         "id": 119
+        }
+       },
+       "away": {
+        "seriesNumber": 4,
+        "splitSquad": false,
+        "isWinner": false,
+        "score": 3,
+        "leagueRecord": {
+         "pct": ".000",
+         "ties": 0,
+         "losses": 1,
+         "wins": 0
+        },
+        "team": {
+         "link": "/api/v1/teams/144",
+         "name": "Atlanta Braves",
+         "id": 144
+        }
+       }
+      },
+      "status": {
+       "abstractGameCode": "F",
+       "startTimeTBD": false,
+       "statusCode": "F",
+       "detailedState": "Final",
+       "codedGameState": "F",
+       "abstractGameState": "Final"
+      },
+      "officialDate": "2026-10-03",
+      "gameDate": "2026-10-03T20:00:00Z",
+      "season": "2026",
+      "gameType": "D",
+      "link": "/api/v1.1/game/849828/feed/live",
+      "gameGuid": "621a974a-b250-4410-992f-37cb6c829743",
+      "gamePk": 849828
+     }
+    ],
+    "totalGamesInProgress": 0,
+    "totalGames": 1,
+    "totalEvents": 0,
+    "totalItems": 1,
+    "date": "2026-10-03"
+   }
+  ]
+ },
+ "live_form": "entity_list",
+ "live_span": "d2x2",
+ "live_lint": {
+  "red": 0,
+  "amber": 4,
+  "codes": [
+   "L-HOLLOW"
+  ]
+ }
+}

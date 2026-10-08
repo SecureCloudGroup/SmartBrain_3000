@@ -75,6 +75,20 @@ def unit_display(unit: str | None) -> tuple[str, str]:
     return _UNIT_FALLBACK.get(unit, (unit, "space"))
 
 
+LONG_UNIT_CHARS = 6   # a unit past this width, or with a space or '=', is never a hero's problem
+
+
+def unit_rides_inline(field) -> bool:
+    """False when a unit must ride as the stat's sub label instead of inline with the hero
+    value (fix round 1a-6, class I): longer than a short symbol, or carrying a space or '='
+    ("index 1982-84=100" rides below the hero; "mph" / "°F" / "USD/oz" stay inline)."""
+    assert field is None or hasattr(field, "unit"), "field must be a Field or None"
+    if field is None or not field.unit:
+        return True
+    disp, _join = unit_display(field.unit)
+    return not disp or (len(disp) <= LONG_UNIT_CHARS and " " not in disp and "=" not in disp)
+
+
 # ----------------------------------------------------------------------------- numbers
 def _published_decimals(v) -> int:
     if isinstance(v, (bool, int)):
@@ -87,9 +101,19 @@ def _published_decimals(v) -> int:
     return 0
 
 
+def _raw_magnitude_cap(v) -> int:
+    """Fix round 1a-6, class J: the most decimals an UNDECLARED-precision raw value ever
+    shows — never the float's own repr (4121.299805 USD/oz). >= 1 shows <= 2 (a price, an
+    index); < 1 follows the derived rule's small-number tiers (3, then 4)."""
+    a = abs(float(v))
+    if a >= 1:
+        return 2
+    return 3 if a >= 0.01 else 4
+
+
 def decimals(field, v, *, derived: bool = False) -> int:
-    """Decimals to show. Published: Field.precision (or the value's own repr). Derived:
-    magnitude rules (the only place they apply)."""
+    """Decimals to show. Published: Field.precision (or the value's own repr, capped at the
+    magnitude rule when no precision was declared). Derived: magnitude rules."""
     if not derived and field is not None and getattr(field, "unrounded", False):
         derived = True        # an unrounded float column: the source stated no precision (G3 rule)
     if not derived:
@@ -100,8 +124,8 @@ def decimals(field, v, *, derived: bool = False) -> int:
             return max(p, 0)
         d = _published_decimals(v)
         if field is not None and field.type == "percent" and field.scale == "0..1":
-            d = max(d - 2, 0)
-        return d
+            return max(d - 2, 0)
+        return min(d, _raw_magnitude_cap(v)) if is_num(v) else d
     a = abs(float(v))
     if field is not None and (field.type == "currency" or field.currency):
         return 0 if a >= 1000 else 2

@@ -1,0 +1,45 @@
+{
+ "id": "06-chance-of-rain-in-portland-tomorrow",
+ "n": 6,
+ "ask": "chance of rain in Portland tomorrow",
+ "kind": "forecast",
+ "frame_kind": "forecast",
+ "subject": "weather",
+ "title": "weather",
+ "source_id": "open-meteo-forecast",
+ "source_url": "https://api.open-meteo.com/v1/forecast?latitude=45.536951&longitude=-122.649971&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m&hourly=temperature_2m,precipitation_probability,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,snowfall_sum,sunrise,sunset&temperature_unit=fahrenheit&wind_speed_unit=mph&precipitation_unit=inch&timezone=auto",
+ "fetched_at": "2026-10-07T17:21:01Z",
+ "viewer_tz": "UTC",
+ "answers_used": [
+  {
+   "name": "rain_tomorrow",
+   "label": "Rain chance tomorrow",
+   "words": [
+    "tomorrow",
+    "rain tomorrow",
+    "chance of rain tomorrow",
+    "will it rain tomorrow",
+    "umbrella tomorrow"
+   ],
+   "primary": false,
+   "kind": "value",
+   "path": "daily.precipitation_probability_max[1]",
+   "type": "number",
+   "unit_path": "daily_units.precipitation_probability_max",
+   "window": "tomorrow",
+   "measure": "precip_chance",
+   "unit": "%"
+  }
+ ],
+ "rows_output_name": null,
+ "outputs": {
+  "rain_tomorrow": 0
+ },
+ "live_form": "stat",
+ "live_span": "d1x1",
+ "live_lint": {
+  "red": 0,
+  "amber": 0,
+  "codes": []
+ }
+}

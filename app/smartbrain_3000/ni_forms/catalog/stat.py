@@ -39,6 +39,15 @@ def _sub_label(cv: Canvas, ctx: LayoutCtx, y: float, rc: list, max_w: float):
     return cv.text(["l", 0], y, rc, "sub", src="key", max_w=max_w)
 
 
+def _unit_note(cv: Canvas, ctx: LayoutCtx, y: float, field_name: str, max_w: float):
+    """The unit as its own line under the hero (fix round 1a-6, class I): drawn only when
+    the field's unit is too long to ride inline with the hero value."""
+    f = ctx.R.f.get(field_name)
+    if f is None or fmt.unit_rides_inline(f):
+        return None
+    return cv.text(["l", 0], y, ["unit", field_name], "sub", src="lexicon", max_w=max_w)
+
+
 def _plan(w: str, r: int):
     if w == "W1":
         return {1: "hero", 2: "stack", 3: "spark"}[r]
@@ -227,7 +236,9 @@ class Stat(BaseForm):
             bottom = hb.bottom if hb else y0
             if cand.variant == "countdown":
                 bottom = self._countdown_bind(ctx, cv, hb)
-            if _sub_label(cv, ctx, bottom + 2, sub_rc, W) is None and hb is not None:
+            sb = _sub_label(cv, ctx, bottom + 2, sub_rc, W)
+            ub = _unit_note(cv, ctx, (sb.bottom if sb else bottom) + 2, b["value"], W)
+            if sb is None and ub is None and hb is not None:
                 cv.d.meta["calm"] = True   # one fact under its own title is the whole, designed card
             return
 
@@ -256,6 +267,9 @@ class Stat(BaseForm):
             sb = _sub_label(cv, ctx, y + 2, sub_rc, colw)
             if sb:
                 y = sb.bottom + 2
+            ub = _unit_note(cv, ctx, y, b["value"], colw)
+            if ub:
+                y = ub.bottom + 2
 
         has_range = b.get("range_lo") and b.get("range_hi") and R.num(0, b["range_lo"]) is not None \
             and R.num(0, b["range_hi"]) is not None
@@ -346,7 +360,9 @@ class Stat(BaseForm):
         if ctx.cand.variant == "countdown":
             t = ctx.R.cell(0, v)
             return ["d", "countdown", [fmt.iso(ctx.now), t]] if t else ["raw", v, 0]
-        return ["cell", v, 0, {}]
+        # fix round 1a-6, class I: a unit too long to ride inline rides under the hero instead
+        opts = {} if fmt.unit_rides_inline(ctx.R.f.get(v)) else {"unit": False}
+        return ["cell", v, 0, opts]
 
     def _countdown_bind(self, ctx, cv, hb):
         if hb is None:

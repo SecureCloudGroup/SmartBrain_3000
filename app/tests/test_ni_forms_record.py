@@ -170,6 +170,64 @@ def test_list_records_without_axis_or_time() -> None:
     assert roles == {"name": "name", "points": "value", "status": "status", "note": "kind"}
 
 
+def test_single_row_list_becomes_a_measure_leading_with_the_asked_field() -> None:
+    """Fix round 1a-6, class H: a day/sunrise/sunset columns answer cut to tomorrow's one
+    row reads like a value answer (measure) — the asked field leads, never the day."""
+    answer = {"kind": "columns", "label": "Sunrise and sunset by day",
+              "cells": [{"path": "daily.time", "key": "day", "type": "date", "label": "Day"},
+                        {"path": "daily.sunrise", "key": "sunrise", "type": "time", "label": "Sunrise"},
+                        {"path": "daily.sunset", "key": "sunset", "type": "time", "label": "Sunset"}],
+              "axis": {"cell": "daily.time", "step": "day"}}
+    outputs = {"rows": [{"day": _shown("Thu Oct 8", datetime(2026, 10, 8, tzinfo=UTC)),
+                        "sunrise": _shown("6:49 am", datetime(2026, 10, 8, 10, 49, tzinfo=UTC)),
+                        "sunset": _shown("6:13 pm", datetime(2026, 10, 8, 22, 13, tzinfo=UTC))}]}
+    rec, _ = from_answers([answer], outputs, history=None, context=_CTX,
+                          ask="what time is sunrise in Boston tomorrow", title="sunrise",
+                          cadence_s=900, rows_output_name="rows")
+    assert rec.kind == "measure" and len(rec.rows) == 1
+    roles = {f.name: f.role for f in rec.fields}
+    assert roles == {"day": "secondary", "sunrise": "measure", "sunset": "secondary"}
+
+
+def test_single_row_list_with_no_asked_field_leads_with_the_first_displayable() -> None:
+    """No field matches the ask's words: the first displayable field leads (unchanged
+    from the value-answer rule)."""
+    answer = _list(cells=[{"path": "a", "type": "text", "label": "Alpha"},
+                           {"path": "b", "type": "number", "label": "Beta"}])
+    rec, _ = from_answers([answer], {"rows": [{"a": "x", "b": 5}]}, history=None, context=_CTX,
+                          ask="status", title="t", cadence_s=0, rows_output_name="rows")
+    assert rec.kind == "measure"
+    assert next(f.role for f in rec.fields if f.name == "alpha") == "measure"
+
+
+def test_single_row_list_never_treats_a_long_cell_as_a_passage() -> None:
+    """Fix round 1a-6, class H: a matchup name over 36 chars is row data, never a passage
+    ('Washington Capitals vs Pittsburgh Penguins' misfired as text_brief) — the asked
+    field (the ask said 'game') still leads."""
+    answer = _list(cells=[{"path": "g", "type": "text", "label": "Game"},
+                          {"path": "v", "type": "text", "label": "Venue"}])
+    outputs = {"rows": [{"g": "Washington Capitals vs Pittsburgh Penguins", "v": "Capital One Arena"}]}
+    rec, _ = from_answers([answer], outputs, history=None, context=_CTX,
+                          ask="NHL games tonight", title="t", cadence_s=0, rows_output_name="rows")
+    assert rec.kind == "measure"
+    roles = {f.name: f.role for f in rec.fields}
+    assert roles == {"game": "measure", "venue": "secondary"}
+
+
+def test_from_spec_measure_over_rows_reads_only_row_zero() -> None:
+    """``record.rows`` names the pipeline output; ``from_spec`` reads row 0 of it, never
+    every row (a measure caps at 1 row)."""
+    spec = {"kind": "measure", "rows": "rows",
+            "fields": [{"name": "sunrise", "label": "Sunrise", "path": "sunrise", "type": "datetime",
+                        "role": "measure"}]}
+    one = from_spec(spec, {"rows": [{"sunrise": "2026-10-08T10:49:00Z"}]}, history=None, context=_SPEC_CTX)[0]
+    assert one.rows == [["2026-10-08T10:49:00Z"]]
+    two = from_spec(spec, {"rows": [{"sunrise": "a"}, {"sunrise": "b"}]}, history=None, context=_SPEC_CTX)[0]
+    assert len(two.rows) == 1   # never 2 — check_record caps a measure at 1 row
+    empty = from_spec(spec, {"rows": []}, history=None, context=_SPEC_CTX)[0]
+    assert empty.rows == []
+
+
 def test_columns_records_without_axis() -> None:
     answer = {"kind": "columns", "label": "Rates",
               "cells": [{"path": "cur", "type": "text", "label": "Currency"},

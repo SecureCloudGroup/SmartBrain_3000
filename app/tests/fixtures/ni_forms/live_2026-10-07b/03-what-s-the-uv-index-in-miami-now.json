@@ -1,0 +1,45 @@
+{
+ "id": "03-what-s-the-uv-index-in-miami-now",
+ "n": 3,
+ "ask": "what's the UV index in Miami now",
+ "kind": "current_value",
+ "frame_kind": null,
+ "subject": "UV index",
+ "title": "UV index",
+ "source_id": "open-meteo-uv",
+ "source_url": "https://api.open-meteo.com/v1/forecast?latitude=25.775163&longitude=-80.208615&current=uv_index&daily=uv_index_max&timezone=auto",
+ "fetched_at": "2026-10-07T17:20:41Z",
+ "viewer_tz": "UTC",
+ "answers_used": [
+  {
+   "name": "uv_now",
+   "label": "UV index right now",
+   "words": [
+    "uv now",
+    "uv index now",
+    "uv index",
+    "right now",
+    "current uv",
+    "at the moment"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "current.uv_index",
+   "type": "number",
+   "window": "now",
+   "measure": "uv",
+   "unit": null
+  }
+ ],
+ "rows_output_name": null,
+ "outputs": {
+  "uv_now": 7.3
+ },
+ "live_form": "stat",
+ "live_span": "d1x1",
+ "live_lint": {
+  "red": 0,
+  "amber": 0,
+  "codes": []
+ }
+}

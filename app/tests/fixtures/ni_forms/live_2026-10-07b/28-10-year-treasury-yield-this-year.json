@@ -1,0 +1,44 @@
+{
+ "id": "28-10-year-treasury-yield-this-year",
+ "n": 28,
+ "ask": "10 year treasury yield this year",
+ "kind": "trend",
+ "frame_kind": null,
+ "subject": "10 year treasury yield",
+ "title": "10 year treasury yield",
+ "source_id": "fred-dgs10",
+ "source_url": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DGS10",
+ "fetched_at": "2026-10-07T17:28:42Z",
+ "viewer_tz": "UTC",
+ "answers_used": [
+  {
+   "name": "latest",
+   "label": "10-year Treasury yield",
+   "words": [
+    "10-year treasury yield",
+    "10 year yield",
+    "latest",
+    "current",
+    "now",
+    "today"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "rows[0].DGS10",
+   "type": "number",
+   "unit": "%",
+   "window": "latest"
+  }
+ ],
+ "rows_output_name": null,
+ "outputs": {
+  "latest": 5.31
+ },
+ "live_form": "stat",
+ "live_span": "d1x1",
+ "live_lint": {
+  "red": 0,
+  "amber": 0,
+  "codes": []
+ }
+}

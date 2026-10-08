@@ -38,6 +38,15 @@ to know when a release changes behavior.
   with one named value and its details (the next game's start and venue) shows the
   details that fit, and a long worded reading wraps instead of being cut. The map card
   for a single position no longer says "+1 more".
+- **A list that comes back as a single row now reads like a reading, not a cramped
+  table.** "What time is sunrise tomorrow" used to build a table that had to drop the
+  sunrise time to fit; a one-row list now shows that row's own facts, led by the one
+  the words were about. A unit written out in full (an index's base period, for
+  example) no longer crowds the big number — it moves to its own line below, and a
+  reading with no declared precision shows a sensible number of decimals instead of
+  the source float's raw digits. A card's design is now checked for a clean layout
+  before it ships; if the first choice would crowd or overflow, the next best design
+  is used instead, so a card never ships looking broken.
 - **A pasted CSV, RSS, Atom, XML or text link now keeps working after its first
   refresh.** Sampling already read those links by what they really were, but the
   built card did not remember the format, so its first scheduled refresh tried to

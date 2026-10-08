@@ -1,0 +1,46 @@
+{
+ "id": "26-unemployment-rate-over-the-last-year",
+ "n": 26,
+ "ask": "unemployment rate over the last year",
+ "kind": "trend",
+ "frame_kind": "trend",
+ "subject": "unemployment rate",
+ "title": "unemployment rate",
+ "source_id": "fred-unrate",
+ "source_url": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=UNRATE",
+ "fetched_at": "2026-10-07T17:28:34Z",
+ "viewer_tz": "UTC",
+ "answers_used": [
+  {
+   "name": "latest",
+   "label": "Unemployment rate",
+   "words": [
+    "unemployment rate",
+    "jobless rate",
+    "latest",
+    "current",
+    "now",
+    "today"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "rows[0].UNRATE",
+   "type": "number",
+   "unit": "%",
+   "window": "latest"
+  }
+ ],
+ "rows_output_name": null,
+ "outputs": {
+  "latest": 4.2
+ },
+ "live_form": "stat",
+ "live_span": "d1x1",
+ "live_lint": {
+  "red": 0,
+  "amber": 2,
+  "codes": [
+   "L-ASK"
+  ]
+ }
+}

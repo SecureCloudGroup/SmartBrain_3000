@@ -1,0 +1,49 @@
+{
+ "id": "27-consumer-price-index-over-the-past-12-mo",
+ "n": 27,
+ "ask": "consumer price index over the past 12 months",
+ "kind": "trend",
+ "frame_kind": "trend",
+ "subject": "consumer price index",
+ "title": "consumer price index",
+ "source_id": "fred-cpiaucsl",
+ "source_url": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=CPIAUCSL",
+ "fetched_at": "2026-10-07T17:28:37Z",
+ "viewer_tz": "UTC",
+ "answers_used": [
+  {
+   "name": "latest",
+   "label": "Consumer Price Index (all items)",
+   "words": [
+    "consumer price index (all items)",
+    "consumer price index",
+    "cpi this month",
+    "cpi index level",
+    "latest",
+    "current",
+    "now",
+    "today"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "rows[0].CPIAUCSL",
+   "type": "number",
+   "unit": "index 1982-84=100",
+   "window": "latest"
+  }
+ ],
+ "rows_output_name": null,
+ "outputs": {
+  "latest": 334.131
+ },
+ "live_form": "stat",
+ "live_span": "d2x1",
+ "live_lint": {
+  "red": 1,
+  "amber": 2,
+  "codes": [
+   "L-ASK",
+   "truncated_hero"
+  ]
+ }
+}
