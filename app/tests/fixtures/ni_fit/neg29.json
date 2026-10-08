@@ -1,0 +1,44 @@
+{
+ "id": "neg29",
+ "ask": "Yankees games this week",
+ "frame": {
+  "kind": null,
+  "subject": "Yankees games"
+ },
+ "chosen": [
+  {
+   "name": "overall_status",
+   "label": "Overall status",
+   "words": [
+    "status",
+    "down",
+    "is it down",
+    "outage",
+    "up",
+    "working",
+    "operational",
+    "problems"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "status.description",
+   "type": "text",
+   "window": "now",
+   "unit": null
+  }
+ ],
+ "rows_output_name": null,
+ "preview": {
+  "overall_status": "All Systems Operational"
+ },
+ "missing_menu": [
+  "games",
+  "yankees"
+ ],
+ "label": {
+  "answers_ask": "no",
+  "missing": [],
+  "wrong": [],
+  "source_ask": "is GitHub down"
+ }
+}

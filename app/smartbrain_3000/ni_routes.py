@@ -1896,7 +1896,7 @@ def _build_export_template(store: ni.NIStore, item: dict, secrets_store) -> dict
 # Phase 4b D2c (audit 2026-09-11): export strips `_l2_*` state (proposal + attempt
 # marker) AND `repair_policy` — repair policy is always the installer's local choice,
 # so a template ships with none and the install path forces the safe default.
-_EXPORT_STRIP_KEYS = ("contract", "_c2_ok", "_present_ok", "_l1_last_attempt", "_l1_trial",
+_EXPORT_STRIP_KEYS = ("contract", "_c2_ok", "_present_ok", "_fit", "_l1_last_attempt", "_l1_trial",
                       "_l2_last_attempt", "_l2_proposal", "_template", "repair_policy",
                       "_born", "_model_consent", "_built_from")
 

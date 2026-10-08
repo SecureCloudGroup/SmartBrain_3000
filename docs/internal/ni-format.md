@@ -2659,6 +2659,47 @@ display-class pick and the map/image → value degrade) are gone from the flow; 
   described only in words never did); `llm.chat_json`'s optional `skeleton` argument
   repeats the same literal shape on the one retry instead of naming the schema error
   alone.
+- **Third live read (fix round 1a-7, 2026-10-07 — SET C).** (D2) `ni_flow._scope_rows_to_subject`
+  reaches alerts / latest_items / status kinds too (not just lookup / next_event): the own-check
+  that recognizes "the subject is the list itself" now needs either an overlap with the list's
+  own label / name, or the WHOLE subject explained by its generic words — one shared word is
+  never enough ("red flag warnings" shares only the generic suffix "warning" with "Active
+  weather alerts"'s own words, so it still falls through to the row search); a row hit also
+  needs its value's extra words to not outnumber the subject's own (a common word like "post"
+  matching an unrelated news headline by coincidence is rejected). When nothing names the
+  subject AND it is not the list itself, `ni_flow._empty_subject_filter` seals a filter on the
+  first text cell anyway (the subject's words, title-cased, the way a hazard name is spelled) —
+  the card's `may_be_empty` design reads an honest "no red flag warnings right now" instead of
+  the whole list, and a later refresh that DOES report it lights up. (P1)
+  `record._apply_value_roles`'s passage rule (">36 chars is a passage lead") now fires only with
+  exactly one chosen value answer — a "next matchup" build's three answers (name / start /
+  venue) never lets "the identity text is long" demote it off the card; a plan's secondary-facts
+  loop then keeps identity ahead of venue / meta by field order. (P2) `day_table.plan_body`
+  walks from the first day its (possibly window-cut) rows actually hold, not always "today" — a
+  weekend-only build never synthesizes the empty weekday rows between today and the window.
+- **FitVerdict (Phase 3a, plan §B3 — advisory, build time only).** After `_verify_frame` accepts
+  a declared build, `ni_flow._fit_check` asks ONE closed local question: does the chosen data
+  answer the ask? `ni_forms.verdict.fit_verdict` builds a per-call menu (code-owned:
+  `_verify_frame`'s already-computed `unanswered` components plus the ask's own want words) and
+  a literal JSON skeleton (the class-M pattern), validates `{answers_ask: yes|partly|no,
+  missing: [ComponentId] ≤6, wrong: [AnswerName] ≤4, evidence: [{answer, value}] ≤4}`, and
+  strips any `evidence.value` that is not a verbatim substring of the fenced preview rows. The
+  verdict is LOGGED ONLY — `fit: yes|partly|no (model)` or `fit: rules` in the flow notes — and
+  sealed as the spec's optional `_fit` (stripped on export / template install like `_c2_ok`); it
+  never blocks the build, never changes the card, is never painted. `call_model=None` (no
+  consent) or any model trouble returns `None`. Authority stays off (Phase 3b) until a labeled
+  set someone else writes shows precision("no") ≥0.90.
+- **`tall` display size (2026-10-07).** `display_size_for_span` maps a 1×2 desktop design (`d1x2`) to
+  `tall` (it read `large` before); `_DISPLAY_SIZES` accepts it. The board sizes a form card from the
+  painted CLIR's own span key (web `cardSpan`, app PR #495 — absent/unknown size reads as small), so
+  `display.size` only drives the card menu's Size entry and the version-skew fallback.
+- **Runner-up in the preview (ALT).** When a form node's sealed `design.second` survives
+  re-enumeration at bind time, `bind_scene(…, alternatives=True)` lays out its own two sealed
+  spans too and adds them as the bound node's `alternatives: [{id, form, clir: {desktop,
+  phone}, summary}]` (≤1 entry, optional). Only `ni_flow._finalize` (the preview bind the C2
+  VerifyPanel reads) passes `alternatives=True`; the engine's run (`run_item`) and every other
+  caller leave it False, so a run's `latest` never carries it. `ni._enforce_form_shape` checks
+  it the same way as `clir` / `design` when present.
 - **What the client paints.** The CLIR for its device (`clir.desktop` on the board,
   `clir.phone` on a phone): v1 prims (`text`, `time`, `rect`, `line`, `tri`, `dot`, `path`,
   `cells`, `icon`, …) in content-box px with `x` anchors, `reading_order`, `hitmap`, and the

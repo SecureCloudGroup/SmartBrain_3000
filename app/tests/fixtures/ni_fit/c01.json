@@ -1,0 +1,77 @@
+{
+ "id": "c01",
+ "ask": "how cold is it in Anchorage right now",
+ "frame": {
+  "kind": null,
+  "subject": "temperature"
+ },
+ "chosen": [
+  {
+   "name": "temperature",
+   "label": "Temperature",
+   "words": [
+    "temperature",
+    "temp",
+    "degrees",
+    "hot",
+    "cold",
+    "warm",
+    "how hot",
+    "how cold",
+    "now",
+    "current"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "current.temperature_2m",
+   "type": "number",
+   "unit_path": "current_units.temperature_2m",
+   "window": "now",
+   "measure": "temperature",
+   "unit": "°F"
+  },
+  {
+   "name": "conditions",
+   "label": "Conditions",
+   "words": [
+    "conditions",
+    "sky",
+    "sunny",
+    "cloudy",
+    "clear",
+    "outside",
+    "what's it like",
+    "weather now",
+    "storm",
+    "thunderstorm",
+    "lightning",
+    "hail",
+    "fog",
+    "sleet",
+    "drizzle"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "current.weather_code",
+   "type": "number",
+   "codes": "wmo_weather",
+   "window": "now",
+   "measure": "conditions",
+   "unit": null
+  }
+ ],
+ "rows_output_name": null,
+ "preview": {
+  "conditions": "Overcast",
+  "temperature": 29.8
+ },
+ "missing_menu": [
+  "anchorage",
+  "cold"
+ ],
+ "label": {
+  "answers_ask": "yes",
+  "missing": [],
+  "wrong": []
+ }
+}

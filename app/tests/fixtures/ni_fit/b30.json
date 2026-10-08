@@ -1,0 +1,43 @@
+{
+ "id": "b30",
+ "ask": "Slack status right now",
+ "frame": {
+  "kind": "status",
+  "subject": "Slack status"
+ },
+ "chosen": [
+  {
+   "name": "status",
+   "label": "Slack status",
+   "words": [
+    "status",
+    "down",
+    "is slack down",
+    "working",
+    "up",
+    "operational",
+    "problems",
+    "issues"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "status",
+   "type": "text",
+   "window": "now",
+   "unit": null
+  }
+ ],
+ "rows_output_name": null,
+ "preview": {
+  "status": "ok"
+ },
+ "missing_menu": [
+  "slack",
+  "status"
+ ],
+ "label": {
+  "answers_ask": "yes",
+  "missing": [],
+  "wrong": []
+ }
+}

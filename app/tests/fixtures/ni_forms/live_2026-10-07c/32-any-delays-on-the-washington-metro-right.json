@@ -1,0 +1,80 @@
+{
+ "id": "32-any-delays-on-the-washington-metro-right",
+ "n": 32,
+ "ask": "any delays on the Washington Metro right now",
+ "kind": "status",
+ "frame_kind": "status",
+ "subject": "Washington Metro",
+ "title": "Washington Metro",
+ "source_id": "faa-nas-status",
+ "source_url": "https://nasstatus.faa.gov/api/airport-events",
+ "fetched_at": "2026-10-07T21:10:42Z",
+ "viewer_tz": "UTC",
+ "answers_used": [
+  {
+   "name": "ground_delay",
+   "label": "Ground delay program",
+   "words": [
+    "delays",
+    "delay",
+    "flight delays",
+    "ground delay",
+    "delayed",
+    "how late",
+    "average delay",
+    "gdp"
+   ],
+   "primary": true,
+   "kind": "list",
+   "path": "items",
+   "newest_first": false,
+   "may_be_empty": true,
+   "filter": {
+    "path": "groundDelay.airportId",
+    "equals": "{airport}"
+   },
+   "cells": [
+    {
+     "path": "groundDelay.impactingCondition",
+     "label": "Reason",
+     "type": "text",
+     "key": "groundDelay.impactingCondition",
+     "unit": null
+    },
+    {
+     "path": "groundDelay.avgDelay",
+     "label": "Average delay",
+     "type": "number",
+     "unit": "min",
+     "key": "groundDelay.avgDelay"
+    },
+    {
+     "path": "groundDelay.maxDelay",
+     "label": "Max delay",
+     "type": "number",
+     "unit": "min",
+     "key": "groundDelay.maxDelay"
+    },
+    {
+     "path": "groundDelay.endTime",
+     "label": "Until",
+     "type": "time",
+     "key": "groundDelay.endTime",
+     "unit": null
+    }
+   ]
+  }
+ ],
+ "rows_output_name": "rows",
+ "outputs": {
+  "rows_count": 0,
+  "rows": []
+ },
+ "live_form": "ranked_list",
+ "live_span": "d1x1",
+ "live_lint": {
+  "red": 0,
+  "amber": 0,
+  "codes": []
+ }
+}

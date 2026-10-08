@@ -1,0 +1,164 @@
+{
+ "id": "neg42",
+ "ask": "earthquakes near San Francisco on a map",
+ "frame": {
+  "kind": null,
+  "subject": "earthquakes"
+ },
+ "chosen": [
+  {
+   "name": "daily_forecast",
+   "label": "Daily forecast",
+   "words": [
+    "forecast",
+    "this week",
+    "7 day",
+    "week",
+    "weekend",
+    "next few days",
+    "daily forecast",
+    "outlook",
+    "rain chance this weekend",
+    "storms this week",
+    "freeze",
+    "frost",
+    "freezing rain",
+    "ice"
+   ],
+   "primary": false,
+   "kind": "columns",
+   "limit": 7,
+   "cells": [
+    {
+     "path": "daily.time",
+     "label": "Day",
+     "type": "date",
+     "key": "day",
+     "unit": null
+    },
+    {
+     "path": "daily.weather_code",
+     "label": "Conditions",
+     "type": "number",
+     "codes": "wmo_weather",
+     "key": "conditions",
+     "unit": null
+    },
+    {
+     "path": "daily.temperature_2m_max",
+     "label": "High",
+     "type": "number",
+     "unit_path": "daily_units.temperature_2m_max",
+     "key": "high",
+     "unit": "°F"
+    },
+    {
+     "path": "daily.precipitation_probability_max",
+     "label": "Rain chance",
+     "type": "number",
+     "unit_path": "daily_units.precipitation_probability_max",
+     "key": "rain_chance",
+     "unit": "%"
+    }
+   ],
+   "axis": {
+    "cell": "daily.time",
+    "step": "day"
+   }
+  }
+ ],
+ "rows_output_name": "rows",
+ "preview": {
+  "rows": [
+   {
+    "rain_chance": 1,
+    "high": 90.7,
+    "conditions": "Overcast",
+    "day": "2026-10-07T00:00:00-04:00"
+   },
+   {
+    "rain_chance": 2,
+    "high": 91.9,
+    "conditions": "Overcast",
+    "day": "2026-10-08T00:00:00-04:00"
+   },
+   {
+    "rain_chance": 9,
+    "high": 91.5,
+    "conditions": "Overcast",
+    "day": "2026-10-09T00:00:00-04:00"
+   },
+   {
+    "rain_chance": 4,
+    "high": 90.6,
+    "conditions": "Partly cloudy",
+    "day": "2026-10-10T00:00:00-04:00"
+   },
+   {
+    "rain_chance": 1,
+    "high": 88.3,
+    "conditions": "Overcast",
+    "day": "2026-10-11T00:00:00-04:00"
+   },
+   {
+    "rain_chance": 22,
+    "high": 88.1,
+    "conditions": "Light drizzle",
+    "day": "2026-10-12T00:00:00-04:00"
+   },
+   {
+    "rain_chance": 19,
+    "high": 93.2,
+    "conditions": "Overcast",
+    "day": "2026-10-13T00:00:00-04:00"
+   }
+  ],
+  "zone": "America/Chicago",
+  "rain_chance": [
+   1,
+   2,
+   9,
+   4,
+   1,
+   22,
+   19
+  ],
+  "high": [
+   90.7,
+   91.9,
+   91.5,
+   90.6,
+   88.3,
+   88.1,
+   93.2
+  ],
+  "conditions": [
+   3,
+   3,
+   3,
+   2,
+   3,
+   51,
+   3
+  ],
+  "day": [
+   "2026-10-07",
+   "2026-10-08",
+   "2026-10-09",
+   "2026-10-10",
+   "2026-10-11",
+   "2026-10-12",
+   "2026-10-13"
+  ]
+ },
+ "missing_menu": [
+  "earthquakes",
+  "francisco"
+ ],
+ "label": {
+  "answers_ask": "no",
+  "missing": [],
+  "wrong": [],
+  "source_ask": "heat index forecast for Houston this week"
+ }
+}

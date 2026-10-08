@@ -1,0 +1,45 @@
+{
+ "id": "neg16",
+ "ask": "tornado watches in Oklahoma right now",
+ "frame": {
+  "kind": "alerts",
+  "subject": "tornado watches"
+ },
+ "chosen": [
+  {
+   "name": "wind",
+   "label": "Wind speed",
+   "words": [
+    "wind",
+    "windy",
+    "breeze",
+    "wind speed",
+    "gusts",
+    "gusty",
+    "how windy"
+   ],
+   "primary": false,
+   "kind": "value",
+   "path": "current.wind_speed_10m",
+   "type": "number",
+   "unit": "mph",
+   "window": "now",
+   "measure": "wind"
+  }
+ ],
+ "rows_output_name": null,
+ "preview": {
+  "wind": 6.3
+ },
+ "missing_menu": [
+  "oklahoma",
+  "tornado",
+  "watches"
+ ],
+ "label": {
+  "answers_ask": "no",
+  "missing": [],
+  "wrong": [],
+  "source_ask": "current wind speed at Chicago O'Hare"
+ }
+}

@@ -1,0 +1,44 @@
+{
+ "id": "c06",
+ "ask": "how windy is it at Mount Washington",
+ "frame": {
+  "kind": null,
+  "subject": "wind"
+ },
+ "chosen": [
+  {
+   "name": "wind",
+   "label": "Wind speed",
+   "words": [
+    "wind",
+    "windy",
+    "breeze",
+    "wind speed",
+    "gusts",
+    "gusty",
+    "how windy"
+   ],
+   "primary": false,
+   "kind": "value",
+   "path": "current.wind_speed_10m",
+   "type": "number",
+   "unit": "mph",
+   "window": "now",
+   "measure": "wind"
+  }
+ ],
+ "rows_output_name": null,
+ "preview": {
+  "wind": 10.9
+ },
+ "missing_menu": [
+  "mount",
+  "washington",
+  "windy"
+ ],
+ "label": {
+  "answers_ask": "yes",
+  "missing": [],
+  "wrong": []
+ }
+}

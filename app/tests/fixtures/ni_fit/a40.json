@@ -1,0 +1,75 @@
+{
+ "id": "a40",
+ "ask": "where is the ISS right now on a map",
+ "frame": {
+  "kind": "current_value",
+  "subject": "ISS"
+ },
+ "chosen": [
+  {
+   "name": "latitude",
+   "label": "Latitude",
+   "words": [
+    "where is the iss",
+    "space station location",
+    "latitude",
+    "lat",
+    "position",
+    "where"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "latitude",
+   "type": "number",
+   "unit": "°",
+   "window": "now"
+  },
+  {
+   "name": "longitude",
+   "label": "Longitude",
+   "words": [
+    "where is the iss",
+    "space station location",
+    "longitude",
+    "lon",
+    "position",
+    "where"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "longitude",
+   "type": "number",
+   "unit": "°",
+   "window": "now"
+  },
+  {
+   "name": "altitude",
+   "label": "Altitude",
+   "words": [
+    "altitude",
+    "how high",
+    "height",
+    "orbit",
+    "above earth"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "altitude",
+   "type": "number",
+   "unit": "km",
+   "window": "now"
+  }
+ ],
+ "rows_output_name": null,
+ "preview": {
+  "altitude": 426.35070945725,
+  "longitude": -67.086227346702,
+  "latitude": 29.811619302143
+ },
+ "missing_menu": [],
+ "label": {
+  "answers_ask": "yes",
+  "missing": [],
+  "wrong": []
+ }
+}

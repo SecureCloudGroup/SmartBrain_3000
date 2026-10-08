@@ -1,0 +1,123 @@
+{
+ "id": "neg01",
+ "ask": "water temperature at Virginia Beach",
+ "frame": {
+  "kind": null,
+  "subject": "water temperature"
+ },
+ "chosen": [
+  {
+   "name": "upcoming",
+   "label": "Upcoming games",
+   "words": [
+    "schedule",
+    "upcoming games",
+    "upcoming",
+    "next games",
+    "fixtures",
+    "this week"
+   ],
+   "primary": false,
+   "kind": "list",
+   "path": "events",
+   "newest_first": false,
+   "may_be_empty": false,
+   "cells": [
+    {
+     "path": "strEvent",
+     "label": "Game",
+     "type": "text",
+     "key": "strEvent",
+     "unit": null
+    },
+    {
+     "path": "strTimestamp",
+     "label": "Start",
+     "type": "time",
+     "utc": true,
+     "key": "strTimestamp",
+     "unit": null
+    },
+    {
+     "path": "strVenue",
+     "label": "Venue",
+     "type": "text",
+     "key": "strVenue",
+     "unit": null
+    }
+   ],
+   "axis": {
+    "cell": "strTimestamp",
+    "step": "day"
+   }
+  }
+ ],
+ "rows_output_name": "rows",
+ "preview": {
+  "rows": [
+   {
+    "strLocked": "unlocked",
+    "strPostponed": "no",
+    "strStatus": "NS",
+    "strVideo": "",
+    "strTweet1": "",
+    "strMap": null,
+    "strBanner": "",
+    "strThumb": "https://r2.thesportsdb.com/images/media/event/thumb/i3a4jd1760901701.jpg",
+    "strFanart": null,
+    "strSquare": "",
+    "strPoster": "",
+    "strCity": "",
+    "strCountry": "United States",
+    "strVenue": "Capital One Arena",
+    "idVenue": "19331",
+    "strResult": "",
+    "intScoreVotes": null,
+    "intScore": null,
+    "strAwayTeamBadge": "https://r2.thesportsdb.com/images/media/team/badge/dsj3on1546192477.png",
+    "idAwayTeam": "134844",
+    "strHomeTeamBadge": "https://r2.thesportsdb.com/images/media/team/badge/99ca9a1638974052.png",
+    "idHomeTeam": "134845",
+    "strGroup": "",
+    "strTimeLocal": "19:30:00",
+    "strTime": "23:30:00",
+    "dateEventLocal": "2026-10-07",
+    "dateEvent": "2026-10-07",
+    "strWeather": "",
+    "strOfficial": "",
+    "intSpectators": null,
+    "intAwayScore": null,
+    "intRound": "2",
+    "intAwayScoreExtra": null,
+    "intHomeScoreExtra": null,
+    "intHomeScore": null,
+    "strAwayTeam": "Pittsburgh Penguins",
+    "strHomeTeam": "Washington Capitals",
+    "strDescriptionEN": "",
+    "strSeason": "2026-2027",
+    "strLeagueBadge": "https://r2.thesportsdb.com/images/media/league/badge/4cem2k1619616539.png",
+    "strLeague": "NHL",
+    "idLeague": "4380",
+    "strSport": "Ice Hockey",
+    "strFilename": "NHL 2026-10-07 Washington Capitals vs Pittsburgh Penguins",
+    "strEventAlternate": "Pittsburgh Penguins @ Washington Capitals",
+    "strEvent": "Washington Capitals vs Pittsburgh Penguins",
+    "strTimestamp": "2026-10-07T19:30:00-04:00",
+    "idAPIfootball": "444650",
+    "idEvent": "2591537"
+   }
+  ]
+ },
+ "missing_menu": [
+  "beach",
+  "temperature",
+  "virginia",
+  "water"
+ ],
+ "label": {
+  "answers_ask": "no",
+  "missing": [],
+  "wrong": [],
+  "source_ask": "NHL games tonight"
+ }
+}

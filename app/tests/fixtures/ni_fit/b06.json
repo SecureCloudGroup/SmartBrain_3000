@@ -1,0 +1,43 @@
+{
+ "id": "b06",
+ "ask": "chance of rain in Portland tomorrow",
+ "frame": {
+  "kind": "forecast",
+  "subject": "weather"
+ },
+ "chosen": [
+  {
+   "name": "rain_tomorrow",
+   "label": "Rain chance tomorrow",
+   "words": [
+    "tomorrow",
+    "rain tomorrow",
+    "chance of rain tomorrow",
+    "will it rain tomorrow",
+    "umbrella tomorrow"
+   ],
+   "primary": false,
+   "kind": "value",
+   "path": "daily.precipitation_probability_max[1]",
+   "type": "number",
+   "unit_path": "daily_units.precipitation_probability_max",
+   "window": "tomorrow",
+   "measure": "precip_chance",
+   "unit": "%"
+  }
+ ],
+ "rows_output_name": null,
+ "preview": {
+  "rain_tomorrow": 0
+ },
+ "missing_menu": [
+  "chance",
+  "portland",
+  "rain"
+ ],
+ "label": {
+  "answers_ask": "yes",
+  "missing": [],
+  "wrong": []
+ }
+}

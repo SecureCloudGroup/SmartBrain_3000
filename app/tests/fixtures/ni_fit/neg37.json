@@ -1,0 +1,78 @@
+{
+ "id": "neg37",
+ "ask": "Slack status right now",
+ "frame": {
+  "kind": "status",
+  "subject": "Slack status"
+ },
+ "chosen": [
+  {
+   "name": "temperature",
+   "label": "Temperature",
+   "words": [
+    "temperature",
+    "temp",
+    "degrees",
+    "hot",
+    "cold",
+    "warm",
+    "how hot",
+    "how cold",
+    "now",
+    "current"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "current.temperature_2m",
+   "type": "number",
+   "unit_path": "current_units.temperature_2m",
+   "window": "now",
+   "measure": "temperature",
+   "unit": "°F"
+  },
+  {
+   "name": "conditions",
+   "label": "Conditions",
+   "words": [
+    "conditions",
+    "sky",
+    "sunny",
+    "cloudy",
+    "clear",
+    "outside",
+    "what's it like",
+    "weather now",
+    "storm",
+    "thunderstorm",
+    "lightning",
+    "hail",
+    "fog",
+    "sleet",
+    "drizzle"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "current.weather_code",
+   "type": "number",
+   "codes": "wmo_weather",
+   "window": "now",
+   "measure": "conditions",
+   "unit": null
+  }
+ ],
+ "rows_output_name": null,
+ "preview": {
+  "conditions": "Overcast",
+  "temperature": 29.8
+ },
+ "missing_menu": [
+  "slack",
+  "status"
+ ],
+ "label": {
+  "answers_ask": "no",
+  "missing": [],
+  "wrong": [],
+  "source_ask": "how cold is it in Anchorage right now"
+ }
+}

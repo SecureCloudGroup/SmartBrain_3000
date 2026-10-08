@@ -1,0 +1,473 @@
+{
+ "id": "a08",
+ "ask": "when does the next rocket launch from Vandenberg",
+ "frame": {
+  "kind": "next_event",
+  "subject": "rocket launch"
+ },
+ "chosen": [
+  {
+   "name": "launches",
+   "label": "Upcoming launches",
+   "words": [
+    "upcoming launches",
+    "next launch",
+    "rocket launches",
+    "launches this week",
+    "spacex",
+    "schedule",
+    "when is the next launch",
+    "launch"
+   ],
+   "primary": true,
+   "kind": "list",
+   "path": "results",
+   "newest_first": false,
+   "may_be_empty": true,
+   "cells": [
+    {
+     "path": "name",
+     "label": "Launch",
+     "type": "text",
+     "key": "name",
+     "unit": null
+    },
+    {
+     "path": "net",
+     "label": "Time",
+     "type": "time",
+     "key": "net",
+     "unit": null
+    },
+    {
+     "path": "status.name",
+     "label": "Status",
+     "type": "text",
+     "key": "status.name",
+     "unit": null
+    }
+   ],
+   "axis": {
+    "cell": "net",
+    "step": "day"
+   }
+  }
+ ],
+ "rows_output_name": "rows",
+ "preview": {
+  "rows_count": 10,
+  "rows": [
+   {
+    "infographic": null,
+    "image": {
+     "variants": [],
+     "single_use": false,
+     "license": {
+      "link": "https://creativecommons.org/licenses/by-nc/2.0/",
+      "priority": 1,
+      "name": "CC BY-NC 2.0",
+      "id": 5
+     },
+     "credit": "SpaceX",
+     "thumbnail_url": "https://thespacedevs-prod.nyc3.digitaloceanspaces.com/media/images/255bauto255d__image_thumbnail_20240305193628.jpeg",
+     "image_url": "https://thespacedevs-prod.nyc3.digitaloceanspaces.com/media/images/falcon_9_image_20230807133459.jpeg",
+     "name": "Falcon 9 liftoff from LC-39A",
+     "id": 1736
+    },
+    "window_start": "2026-10-08T07:54:00Z",
+    "window_end": "2026-10-08T07:54:00Z",
+    "net_precision": {
+     "description": "The T-0 is accurate to the minute.",
+     "abbrev": "MIN",
+     "name": "Minute",
+     "id": 1
+    },
+    "net": "2026-10-08T03:54:00-04:00",
+    "last_updated": "2026-10-06T00:44:43Z",
+    "status": {
+     "description": "Current T-0 confirmed by official or reliable sources.",
+     "abbrev": "Go",
+     "name": "Go for Launch",
+     "id": 1
+    },
+    "launch_designator": null,
+    "slug": "falcon-9-block-5-sda-tranche-1-transport-layer-a",
+    "response_mode": "list",
+    "name": "Falcon 9 Block 5 | SDA Tranche 1 Transport Layer A",
+    "url": "https://ll.thespacedevs.com/2.3.0/launches/da43dc2c-00af-4cc1-8ef1-90a60b2eb9e5/",
+    "id": "da43dc2c-00af-4cc1-8ef1-90a60b2eb9e5"
+   },
+   {
+    "infographic": null,
+    "image": {
+     "variants": [],
+     "single_use": false,
+     "license": {
+      "link": "https://creativecommons.org/licenses/by-nc/2.0/",
+      "priority": 1,
+      "name": "CC BY-NC 2.0",
+      "id": 5
+     },
+     "credit": "SpaceX",
+     "thumbnail_url": "https://thespacedevs-prod.nyc3.digitaloceanspaces.com/media/images/255bauto255d__image_thumbnail_20240305192320.png",
+     "image_url": "https://thespacedevs-prod.nyc3.digitaloceanspaces.com/media/images/falcon2520925_image_20221009234147.png",
+     "name": "Starlink night fairing",
+     "id": 1296
+    },
+    "window_start": "2026-10-10T23:00:00Z",
+    "window_end": "2026-10-11T03:00:00Z",
+    "net_precision": {
+     "description": "The T-0 is accurate to the minute.",
+     "abbrev": "MIN",
+     "name": "Minute",
+     "id": 1
+    },
+    "net": "2026-10-10T19:00:00-04:00",
+    "last_updated": "2026-09-30T23:22:54Z",
+    "status": {
+     "description": "Current T-0 confirmed by official or reliable sources.",
+     "abbrev": "Go",
+     "name": "Go for Launch",
+     "id": 1
+    },
+    "launch_designator": null,
+    "slug": "falcon-9-block-5-starlink-group-15-25",
+    "response_mode": "list",
+    "name": "Falcon 9 Block 5 | Starlink Group 15-25",
+    "url": "https://ll.thespacedevs.com/2.3.0/launches/97c6f5e1-299e-4652-b72d-9618ac047076/",
+    "id": "97c6f5e1-299e-4652-b72d-9618ac047076"
+   },
+   {
+    "infographic": null,
+    "image": {
+     "variants": [],
+     "single_use": true,
+     "license": {
+      "link": null,
+      "priority": 9,
+      "name": "Unknown",
+      "id": 1
+     },
+     "credit": "SpaceX",
+     "thumbnail_url": "https://thespacedevs-prod.nyc3.digitaloceanspaces.com/media/images/falcon_9_liftof_image_thumbnail_20260816171423.jpeg",
+     "image_url": "https://thespacedevs-prod.nyc3.digitaloceanspaces.com/media/images/falcon_9_liftof_image_20260816171423.jpg",
+     "name": "Falcon 9 liftoff from SLC-4E (USSF-366)",
+     "id": 2797
+    },
+    "window_start": "2026-10-15T23:44:00Z",
+    "window_end": "2026-10-16T03:44:00Z",
+    "net_precision": {
+     "description": "The T-0 is accurate to the minute.",
+     "abbrev": "MIN",
+     "name": "Minute",
+     "id": 1
+    },
+    "net": "2026-10-15T19:44:00-04:00",
+    "last_updated": "2026-10-06T00:57:29Z",
+    "status": {
+     "description": "Awaiting official confirmation - current date is known with some certainty.",
+     "abbrev": "TBC",
+     "name": "To Be Confirmed",
+     "id": 8
+    },
+    "launch_designator": null,
+    "slug": "falcon-9-block-5-ussf-xxx-th-2",
+    "response_mode": "list",
+    "name": "Falcon 9 Block 5 | USSF-xxx (\"TH-2\")",
+    "url": "https://ll.thespacedevs.com/2.3.0/launches/df88cfbf-f504-4e11-8370-e33dd6280b5b/",
+    "id": "df88cfbf-f504-4e11-8370-e33dd6280b5b"
+   },
+   {
+    "infographic": null,
+    "image": {
+     "variants": [],
+     "single_use": false,
+     "license": {
+      "link": "https://creativecommons.org/licenses/by-nc/2.0/",
+      "priority": 1,
+      "name": "CC BY-NC 2.0",
+      "id": 5
+     },
+     "credit": "SpaceX",
+     "thumbnail_url": "https://thespacedevs-prod.nyc3.digitaloceanspaces.com/media/images/255bauto255d__image_thumbnail_20240305193628.jpeg",
+     "image_url": "https://thespacedevs-prod.nyc3.digitaloceanspaces.com/media/images/falcon_9_image_20230807133459.jpeg",
+     "name": "Falcon 9 liftoff from LC-39A",
+     "id": 1736
+    },
+    "window_start": "2026-12-31T00:00:00Z",
+    "window_end": "2026-12-31T00:00:00Z",
+    "net_precision": {
+     "description": "The T-0 is expected in the given month.",
+     "abbrev": "M",
+     "name": "Month",
+     "id": 7
+    },
+    "net": "2026-12-30T19:00:00-05:00",
+    "last_updated": "2025-04-10T05:42:02Z",
+    "status": {
+     "description": "Current date is a placeholder or rough estimation based on unreliable or interpreted sources.",
+     "abbrev": "TBD",
+     "name": "To Be Determined",
+     "id": 2
+    },
+    "launch_designator": null,
+    "slug": "falcon-9-block-5-sda-tranche-2-transport-layer-e",
+    "response_mode": "list",
+    "name": "Falcon 9 Block 5 | SDA Tranche 2 Transport Layer E",
+    "url": "https://ll.thespacedevs.com/2.3.0/launches/71ed4649-8d71-42e8-8548-d42ffa2c5a6e/",
+    "id": "71ed4649-8d71-42e8-8548-d42ffa2c5a6e"
+   },
+   {
+    "infographic": null,
+    "image": {
+     "variants": [],
+     "single_use": false,
+     "license": {
+      "link": "https://creativecommons.org/licenses/by-nc/2.0/",
+      "priority": 1,
+      "name": "CC BY-NC 2.0",
+      "id": 5
+     },
+     "credit": "SpaceX",
+     "thumbnail_url": "https://thespacedevs-prod.nyc3.digitaloceanspaces.com/media/images/255bauto255d__image_thumbnail_20240305193628.jpeg",
+     "image_url": "https://thespacedevs-prod.nyc3.digitaloceanspaces.com/media/images/falcon_9_image_20230807133459.jpeg",
+     "name": "Falcon 9 liftoff from LC-39A",
+     "id": 1736
+    },
+    "window_start": "2026-12-31T00:00:00Z",
+    "window_end": "2026-12-31T00:00:00Z",
+    "net_precision": {
+     "description": "The T-0 is expected in the fourth quarter of the given year.",
+     "abbrev": "Q4",
+     "name": "Quarter 4",
+     "id": 11
+    },
+    "net": "2026-12-30T19:00:00-05:00",
+    "last_updated": "2026-08-27T15:58:58Z",
+    "status": {
+     "description": "Current date is a placeholder or rough estimation based on unreliable or interpreted sources.",
+     "abbrev": "TBD",
+     "name": "To Be Determined",
+     "id": 2
+    },
+    "launch_designator": null,
+    "slug": "falcon-9-block-5-sda-tranche-1-tracking-layer-a",
+    "response_mode": "list",
+    "name": "Falcon 9 Block 5 | SDA Tranche 1 Tracking Layer A",
+    "url": "https://ll.thespacedevs.com/2.3.0/launches/2d0472b9-463d-49c8-afb1-7925e49a3368/",
+    "id": "2d0472b9-463d-49c8-afb1-7925e49a3368"
+   },
+   {
+    "infographic": null,
+    "image": {
+     "variants": [],
+     "single_use": false,
+     "license": {
+      "link": "https://creativecommons.org/licenses/by-nc/2.0/",
+      "priority": 1,
+      "name": "CC BY-NC 2.0",
+      "id": 5
+     },
+     "credit": "SpaceX",
+     "thumbnail_url": "https://thespacedevs-prod.nyc3.digitaloceanspaces.com/media/images/255bauto255d__image_thumbnail_20240305193628.jpeg",
+     "image_url": "https://thespacedevs-prod.nyc3.digitaloceanspaces.com/media/images/falcon_9_image_20230807133459.jpeg",
+     "name": "Falcon 9 liftoff from LC-39A",
+     "id": 1736
+    },
+    "window_start": "2026-12-31T00:00:00Z",
+    "window_end": "2026-12-31T00:00:00Z",
+    "net_precision": {
+     "description": "The T-0 is expected in the fourth quarter of the given year.",
+     "abbrev": "Q4",
+     "name": "Quarter 4",
+     "id": 11
+    },
+    "net": "2026-12-30T19:00:00-05:00",
+    "last_updated": "2026-08-27T16:02:56Z",
+    "status": {
+     "description": "Current date is a placeholder or rough estimation based on unreliable or interpreted sources.",
+     "abbrev": "TBD",
+     "name": "To Be Determined",
+     "id": 2
+    },
+    "launch_designator": null,
+    "slug": "falcon-9-block-5-sda-tranche-1-tracking-layer-c",
+    "response_mode": "list",
+    "name": "Falcon 9 Block 5 | SDA Tranche 1 Tracking Layer C",
+    "url": "https://ll.thespacedevs.com/2.3.0/launches/dca8749f-1552-485a-8061-f1ad79055b8d/",
+    "id": "dca8749f-1552-485a-8061-f1ad79055b8d"
+   },
+   {
+    "infographic": null,
+    "image": {
+     "variants": [],
+     "single_use": false,
+     "license": {
+      "link": "https://creativecommons.org/licenses/by-nc/2.0/",
+      "priority": 1,
+      "name": "CC BY-NC 2.0",
+      "id": 5
+     },
+     "credit": "SpaceX",
+     "thumbnail_url": "https://thespacedevs-prod.nyc3.digitaloceanspaces.com/media/images/255bauto255d__image_thumbnail_20240305193628.jpeg",
+     "image_url": "https://thespacedevs-prod.nyc3.digitaloceanspaces.com/media/images/falcon_9_image_20230807133459.jpeg",
+     "name": "Falcon 9 liftoff from LC-39A",
+     "id": 1736
+    },
+    "window_start": "2026-12-31T00:00:00Z",
+    "window_end": "2026-12-31T00:00:00Z",
+    "net_precision": {
+     "description": "The T-0 is expected in the fourth quarter of the given year.",
+     "abbrev": "Q4",
+     "name": "Quarter 4",
+     "id": 11
+    },
+    "net": "2026-12-30T19:00:00-05:00",
+    "last_updated": "2026-08-27T16:03:29Z",
+    "status": {
+     "description": "Current date is a placeholder or rough estimation based on unreliable or interpreted sources.",
+     "abbrev": "TBD",
+     "name": "To Be Determined",
+     "id": 2
+    },
+    "launch_designator": null,
+    "slug": "falcon-9-block-5-sda-tranche-1-tracking-layer-e",
+    "response_mode": "list",
+    "name": "Falcon 9 Block 5 | SDA Tranche 1 Tracking Layer E",
+    "url": "https://ll.thespacedevs.com/2.3.0/launches/fcbc4550-e69e-4458-a9e6-4a5b6b6b15a5/",
+    "id": "fcbc4550-e69e-4458-a9e6-4a5b6b6b15a5"
+   },
+   {
+    "infographic": null,
+    "image": {
+     "variants": [],
+     "single_use": false,
+     "license": {
+      "link": "https://creativecommons.org/licenses/by-nc/2.0/",
+      "priority": 1,
+      "name": "CC BY-NC 2.0",
+      "id": 5
+     },
+     "credit": "SpaceX",
+     "thumbnail_url": "https://thespacedevs-prod.nyc3.digitaloceanspaces.com/media/images/255bauto255d__image_thumbnail_20240305193628.jpeg",
+     "image_url": "https://thespacedevs-prod.nyc3.digitaloceanspaces.com/media/images/falcon_9_image_20230807133459.jpeg",
+     "name": "Falcon 9 liftoff from LC-39A",
+     "id": 1736
+    },
+    "window_start": "2026-12-31T00:00:00Z",
+    "window_end": "2026-12-31T00:00:00Z",
+    "net_precision": {
+     "description": "The T-0 is expected in the fourth quarter of the given year.",
+     "abbrev": "Q4",
+     "name": "Quarter 4",
+     "id": 11
+    },
+    "net": "2026-12-30T19:00:00-05:00",
+    "last_updated": "2026-08-27T16:00:47Z",
+    "status": {
+     "description": "Current date is a placeholder or rough estimation based on unreliable or interpreted sources.",
+     "abbrev": "TBD",
+     "name": "To Be Determined",
+     "id": 2
+    },
+    "launch_designator": null,
+    "slug": "falcon-9-block-5-sda-tranche-1-transport-layer-d",
+    "response_mode": "list",
+    "name": "Falcon 9 Block 5 | SDA Tranche 1 Transport Layer D",
+    "url": "https://ll.thespacedevs.com/2.3.0/launches/4541ce85-0e38-42ac-a9a0-20474bb5f2cd/",
+    "id": "4541ce85-0e38-42ac-a9a0-20474bb5f2cd"
+   },
+   {
+    "infographic": null,
+    "image": {
+     "variants": [],
+     "single_use": false,
+     "license": {
+      "link": "https://creativecommons.org/licenses/by-nc/2.0/",
+      "priority": 1,
+      "name": "CC BY-NC 2.0",
+      "id": 5
+     },
+     "credit": "SpaceX",
+     "thumbnail_url": "https://thespacedevs-prod.nyc3.digitaloceanspaces.com/media/images/255bauto255d__image_thumbnail_20240305193628.jpeg",
+     "image_url": "https://thespacedevs-prod.nyc3.digitaloceanspaces.com/media/images/falcon_9_image_20230807133459.jpeg",
+     "name": "Falcon 9 liftoff from LC-39A",
+     "id": 1736
+    },
+    "window_start": "2026-12-31T00:00:00Z",
+    "window_end": "2026-12-31T00:00:00Z",
+    "net_precision": {
+     "description": "The T-0 is expected in the fourth quarter of the given year.",
+     "abbrev": "Q4",
+     "name": "Quarter 4",
+     "id": 11
+    },
+    "net": "2026-12-30T19:00:00-05:00",
+    "last_updated": "2026-08-27T16:01:25Z",
+    "status": {
+     "description": "Current date is a placeholder or rough estimation based on unreliable or interpreted sources.",
+     "abbrev": "TBD",
+     "name": "To Be Determined",
+     "id": 2
+    },
+    "launch_designator": null,
+    "slug": "falcon-9-block-5-sda-tranche-1-transport-layer-f",
+    "response_mode": "list",
+    "name": "Falcon 9 Block 5 | SDA Tranche 1 Transport Layer F",
+    "url": "https://ll.thespacedevs.com/2.3.0/launches/c5783e2b-d458-4b99-9936-4043c236190b/",
+    "id": "c5783e2b-d458-4b99-9936-4043c236190b"
+   },
+   {
+    "infographic": null,
+    "image": {
+     "variants": [],
+     "single_use": true,
+     "license": {
+      "link": null,
+      "priority": 9,
+      "name": "Unknown",
+      "id": 1
+     },
+     "credit": "Firefly Aerospace / Jack Beyer",
+     "thumbnail_url": "https://thespacedevs-prod.nyc3.digitaloceanspaces.com/media/images/firefly_alpha_l_image_thumbnail_20240605174157.jpeg",
+     "image_url": "https://thespacedevs-prod.nyc3.digitaloceanspaces.com/media/images/firefly_alpha_l_image_20240605174156.jpeg",
+     "name": "Firefly Alpha liftoff (FLTA004)",
+     "id": 1740
+    },
+    "window_start": "2026-12-31T00:00:00Z",
+    "window_end": "2026-12-31T00:00:00Z",
+    "net_precision": {
+     "description": "The T-0 is expected in the fourth quarter of the given year.",
+     "abbrev": "Q4",
+     "name": "Quarter 4",
+     "id": 11
+    },
+    "net": "2026-12-30T19:00:00-05:00",
+    "last_updated": "2026-08-11T22:32:15Z",
+    "status": {
+     "description": "Current date is a placeholder or rough estimation based on unreliable or interpreted sources.",
+     "abbrev": "TBD",
+     "name": "To Be Determined",
+     "id": 2
+    },
+    "launch_designator": null,
+    "slug": "firefly-alpha-block-2-connectedcosmos-launch-1",
+    "response_mode": "list",
+    "name": "Firefly Alpha Block 2 | ConnectedCosmos Launch 1",
+    "url": "https://ll.thespacedevs.com/2.3.0/launches/875ba957-be5f-42bd-8a6e-ed98254f572a/",
+    "id": "875ba957-be5f-42bd-8a6e-ed98254f572a"
+   }
+  ]
+ },
+ "missing_menu": [
+  "from",
+  "launch",
+  "rocket",
+  "vandenberg"
+ ],
+ "label": {
+  "answers_ask": "partly",
+  "missing": [],
+  "wrong": []
+ }
+}

@@ -278,6 +278,7 @@ def test_display_size_derivation() -> None:
     """§34 display size: 1×1 → small, 2×1 → wide, 2×2 → large; phone → small."""
     assert display_size_for_span("d1x1") == "small"
     assert display_size_for_span("d2x1") == "wide"
+    assert display_size_for_span("d1x2") == "tall"
     assert display_size_for_span("d2x2") == "large"
     assert display_size_for_span("d4x3") == "large"
     assert display_size_for_span("p2x1") == "small"

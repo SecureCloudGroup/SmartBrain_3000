@@ -1,0 +1,43 @@
+{
+ "id": "c02",
+ "ask": "humidity in New Orleans at the moment",
+ "frame": {
+  "kind": null,
+  "subject": "humidity"
+ },
+ "chosen": [
+  {
+   "name": "humidity",
+   "label": "Humidity",
+   "words": [
+    "humidity",
+    "humid",
+    "muggy",
+    "sticky",
+    "damp"
+   ],
+   "primary": false,
+   "kind": "value",
+   "path": "current.relative_humidity_2m",
+   "type": "number",
+   "unit_path": "current_units.relative_humidity_2m",
+   "window": "now",
+   "measure": "humidity",
+   "unit": "%"
+  }
+ ],
+ "rows_output_name": null,
+ "preview": {
+  "humidity": 58
+ },
+ "missing_menu": [
+  "humidity",
+  "moment",
+  "orleans"
+ ],
+ "label": {
+  "answers_ask": "yes",
+  "missing": [],
+  "wrong": []
+ }
+}

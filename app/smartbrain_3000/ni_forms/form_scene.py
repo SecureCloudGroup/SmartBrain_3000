@@ -34,9 +34,11 @@ _HISTORY_POINTS = 200  # ni clamps max_points to 500; 200 keeps a sparkline week
 
 
 def display_size_for_span(span_key: str) -> str:
-    """Map a desktop span key (``d1x1``, ``d2x1``, ``d2x2``...) to the three
-    sizes the client knows: ``small`` (1×1), ``wide`` (2×1 or 1×2),
-    ``large`` (anything bigger). Phone keys fall back to ``small``.
+    """Map a desktop span key (``d1x1``, ``d2x1``, ``d1x2``, ``d2x2``...) to the four
+    sizes the client knows: ``small`` (1×1), ``wide`` (2×1), ``tall`` (1×2),
+    ``large`` (anything bigger). Phone keys fall back to ``small``. The board sizes a
+    form card from the painted CLIR's own span key (web `cardSpan`); this size drives the
+    card menu's Size entry and the version-skew fallback.
     """
     assert isinstance(span_key, str) and span_key, "span_key required"
     try:
@@ -49,12 +51,14 @@ def display_size_for_span(span_key: str) -> str:
 
 
 def _size_from_shape(cols: int, rows: int) -> str:
-    """One lookup — small for 1×1, wide for 2×1, large for everything else."""
+    """One lookup — small for 1×1, wide for 2×1, tall for 1×2, large for everything else."""
     assert isinstance(cols, int) and isinstance(rows, int), "cols/rows must be ints"
     if cols == 1 and rows == 1:
         return "small"
     if cols == 2 and rows == 1:
         return "wide"
+    if cols == 1 and rows == 2:
+        return "tall"
     return "large"
 
 

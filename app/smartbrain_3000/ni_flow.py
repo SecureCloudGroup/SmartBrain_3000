@@ -2216,24 +2216,38 @@ def _subject_tokens(subject: str, place: str | None) -> set[str]:
     return _answer_tokens(subject) - _SUBJECT_STOP - (_answer_tokens(place) if place else set())
 
 
+_NAME_EXTRA_WORDS = 3   # the most words a NAME adds beyond the subject's own (see _subject_hits)
+_NAME_CELL_WORDS = 6    # a cell whose LONGEST value runs this long or shorter holds NAMES, not prose
+
+
 def _subject_hits(rows: list, cells: list, toks: set[str]) -> dict:
     """Per text cell whose values name the subject: ``path -> (row indices, (extra words, value))``
     — the value holding every subject word with the fewest extra words ("Thanksgiving Day" over
-    "Day after Thanksgiving")."""
+    "Day after Thanksgiving"). fix round 1a-7 (class D2): a value's EXTRA words are bounded, by
+    what the CELL holds — a NAME cell (no value longer than _NAME_CELL_WORDS words: teams,
+    stations, holidays, hazard products) may add up to max(subject words, _NAME_EXTRA_WORDS)
+    beyond the subject's own ("New York Knicks" for "Knicks", "Charleston, Cooper River Entrance"
+    for "Charleston"); a PROSE cell (headlines) at most the subject's own count, so "posts" is
+    never a free-text title like "Post-Quantum Crypto: BSI Concerned About McEliece" that happens
+    to start with "Post" (6 extra words, no real match)."""
     assert isinstance(rows, list) and isinstance(cells, list), "rows + cells must be lists"
     assert isinstance(toks, set) and toks, "subject words required"
     hits: dict = {}
     for cell in cells[:_MAX_ANSWER_CELLS]:
         if cell.get("type") != "text":
             continue
-        for i, row in enumerate(rows[:_MAX_SUBJECT_ROWS]):
-            value = _dig(row, cell["path"]) if isinstance(row, dict) else None
+        values = [_dig(row, cell["path"]) if isinstance(row, dict) else None for row in rows[:_MAX_SUBJECT_ROWS]]
+        lengths = [len(_folded_words(v)) for v in values if isinstance(v, str)]
+        name_cell = bool(lengths) and max(lengths) <= _NAME_CELL_WORDS
+        bound = max(len(toks), _NAME_EXTRA_WORDS) if name_cell else len(toks)
+        for i, value in enumerate(values):
             if not isinstance(value, str):
                 continue
             words = _answer_tokens(value)
-            if toks <= words:
+            extra = words - toks
+            if toks <= words and len(extra) <= bound:
                 found, best = hits.get(cell["path"], (set(), None))
-                key = (len(words - toks), value)
+                key = (len(extra), value)
                 hits[cell["path"]] = (found | {i}, key if best is None or key < best else best)
     return hits
 
@@ -2266,11 +2280,66 @@ def _scope_rows_to_subject(answer: dict, sample: object, subject: str, place: st
             return answer
         path, (_found, best) = min(hits.items(), key=lambda kv: (kv[1][1][0], kv[0]))
         return {**answer, "filter": {"path": path, "equals": best[1]}}
-    own = _answer_tokens(" ".join([str(answer.get("label") or ""), str(answer.get("name") or "").replace("_", " "),
-                                   *[str(w) for w in answer.get("words") or []]]))
-    if toks & own:
+    # fix round 1a-7 (class D2): the list's OWN NAME (label/name — "Headlines") is a strong
+    # signal on any overlap; its generic synonym WORDS ("warnings", "watches" — aliases for
+    # "give me the whole list") are a weak one, an alert-tier SUFFIX every specific alert
+    # name also ends with ("Red Flag Warning"), so they only count when they explain the
+    # WHOLE subject, never a single shared word beside an unexplained one ("red", "flag").
+    # (After the row search, not before: a list's words may name its own rows — the holidays
+    # list says "thanksgiving" — and a named row still wins.)
+    own_core = _answer_tokens(" ".join([str(answer.get("label") or ""), str(answer.get("name") or "").replace("_", " ")]))
+    own_syn = _answer_tokens(" ".join(str(w) for w in answer.get("words") or []))
+    if (toks & own_core) or toks <= (own_core | own_syn):
         return answer
     raise ValueError(f"answers: the list has no row for {subject[:60]}")
+
+
+# fix round 1a-7 (class D2): alerts/latest_items/status reach this only when no row names the
+# subject AND the subject is not a generic word for the list itself — a hazard TYPE the feed
+# does not currently report (no "Red Flag Warning" row in today's California alerts) is not
+# an error the way a nonexistent holiday is; the honest `may_be_empty` state needs a sealed
+# filter too, or the card would show the whole list instead of "no red flag warnings right now".
+def _subject_phrase(subject: str, place: str | None) -> str:
+    """``subject``'s content words, in order, title-cased the way a hazard/alert product name
+    is conventionally spelled ("red flag warnings" -> "Red Flag Warning"). Empty when nothing
+    is left once place and frame words are removed."""
+    assert isinstance(subject, str), "subject must be a str"
+    assert place is None or isinstance(place, str), "place must be a str or None"
+    drop = _SUBJECT_STOP | (_answer_tokens(place) if place else set())
+    raw = re.findall(r"[a-z0-9]+", subject.lower())  # bounded by the subject
+    words = [w for w in raw if _folded_words(w)[0] not in drop]
+    return " ".join(_singular(w).capitalize() for w in words)
+
+
+def _singular(word: str) -> str:
+    """A product-name word in the singular, spelled the way the product is: warnings →
+    warning, watches → watch, advisories → advisory, statements → statement; a word that is
+    no plural (status, analysis, news, a short word) is returned as is. Unlike the matching
+    fold in ``_answer_tokens`` (which only has to agree with itself), this string is sealed
+    into an ``equals`` filter and must be the real name ("Tornado Watch", never "Tornado
+    Watche")."""
+    assert isinstance(word, str), "word must be a str"
+    if len(word) > 4 and word.endswith("ies"):
+        return word[:-3] + "y"
+    if len(word) > 4 and word.endswith(("ches", "shes", "sses", "xes")):
+        return word[:-2]
+    if len(word) > 3 and word.endswith("s") and not word.endswith(("ss", "us", "is", "ws")):
+        return word[:-1]
+    return word
+
+
+def _empty_subject_filter(answer: dict, subject: str, place: str | None) -> dict:
+    """``answer`` with a filter sealed on its first text cell for ``_subject_phrase`` even
+    though no row matches it today — the sealed ``may_be_empty`` design reads an honest
+    "nothing right now" from a zero-row filtered list, and a later refresh that DOES report
+    the subject lights the card up, instead of every unrelated row from the first build on."""
+    assert isinstance(answer, dict), "answer must be a dict"
+    assert isinstance(subject, str), "subject must be a str"
+    cell = next((c for c in answer.get("cells") or [] if c.get("type") == "text"), None)
+    phrase = _subject_phrase(subject, place)
+    if cell is None or not phrase:
+        return answer
+    return {**answer, "filter": {"path": cell["path"], "equals": phrase}}
 
 
 def _subdivision_in(place: str) -> tuple[str, str] | None:
@@ -2456,6 +2525,17 @@ def _try_answers_build(store: ni.NIStore, item_id: str, request: str, intent: di
             chosen = [_scope_rows_to_subject(chosen[0], sample, str(intent.get("subject") or ""), place)]
         except ValueError as exc:
             return {"nothing": True, "why": str(exc).split("answers: ", 1)[-1]}
+    elif kind in ("alerts", "latest_items", "status") and chosen[0]["kind"] == "list":
+        # fix round 1a-7 (class D2): the same row filter, extended to alert-style lists ("red
+        # flag warnings in California" named an alert TYPE the statewide feed also carries
+        # unfiltered). A hazard type the feed does not report today is not an error the way a
+        # nonexistent holiday is — the filter is sealed anyway so the honest `may_be_empty`
+        # design shows "no red flag warnings right now" rather than the whole list.
+        subject = str(intent.get("subject") or "")
+        try:
+            chosen = [_scope_rows_to_subject(chosen[0], sample, subject, place)]
+        except ValueError:
+            chosen = [_empty_subject_filter(chosen[0], subject, place)]
     chosen = _swap_stale_next_event(chosen, answers, sample, window, next_event, ni._clock())
     form = FormBuild(now=fetch_now or ni._clock(), ask=request, source_url=url,
                      cadence_s=int(intent.get("cadence_minutes") or _DEFAULT_CADENCE) * 60,
@@ -2989,6 +3069,33 @@ def _verify_frame(frame: dict, source: dict, params: dict, built: dict, request:
         lacks = [x for x in _lacks(list(info.get("expects") or []), answers) if x not in built["unanswered"]]
         built["unanswered"] = list(built["unanswered"]) + lacks
     return reasons, notes
+
+
+def _fit_check(answered: dict, frame: dict, intent: dict, request: str,
+               call_model: Callable[[str], str] | None) -> object | None:
+    """FIT (Phase 3a, plan B3): one advisory FitVerdict call on a build that already passed
+    every code check above (``_verify_frame``'s ``reasons`` was empty) — never blocks, never
+    changes the card; the caller only logs it and seals it on the spec for a later authority
+    decision (Phase 3b). The missing-component menu is code-built per call: what
+    ``_verify_frame`` already named unanswered, plus the ask's own want words — never a
+    fresh Library round-trip. None on any model trouble (the caller's note reads
+    ``fit: rules``); ``ModelForbidden`` propagates (a refresh-tick call would be a bug, not
+    an advisory miss — this path only ever runs at build time)."""
+    assert isinstance(answered, dict) and isinstance(frame, dict), "answered + frame required"
+    assert isinstance(request, str) and request, "request required"
+    from .ni_forms import llm as _ni_llm
+    from .ni_forms.verdict import fit_verdict
+    menu = list(dict.fromkeys([*(answered.get("unanswered") or []),
+                               *(str(w) for w in intent.get("wants") or [])]))
+    frame_brief = {"kind": frame.get("kind"), "window": frame.get("window"), "place": frame.get("place")}
+    try:
+        return fit_verdict(request, frame_brief, answered["chosen"], answered["preview_payload"],
+                           menu, call_model)
+    except _ni_llm.ModelForbidden:
+        raise
+    except Exception as exc:  # advisory only — a bad call never blocks the build
+        log.warning("ni_flow: fit verdict failed: %s", type(exc).__name__)
+        return None
 
 
 def _said_wants(request: str, wants: list, filled: list[str]) -> list[str]:
@@ -5687,7 +5794,8 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
         return moved if moved is not None else _terminate_unsupported(
             store, item_id, f"{live.get('_library_provider') or 'the source'} {why}")
     if answered is not None:
-        reasons, frame_notes = _verify_frame(_frame_of(request, intent), _picked_source(live),
+        frame = _frame_of(request, intent)
+        reasons, frame_notes = _verify_frame(frame, _picked_source(live),
                                              _clean_params(live.get("_library_params")), answered, request,
                                              intent, ni._clock())
         if reasons:
@@ -5703,6 +5811,10 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
             note += "; this source doesn't report: " + ", ".join(answered["unanswered"])
         for extra in frame_notes:  # bounded: one per check
             note += "; " + extra
+        # FIT (Phase 3a, plan B3): one advisory closed local verdict on a build that already
+        # passed every code check above — logged only, never a reason to move on or refuse.
+        fit = _fit_check(answered, frame, intent, request, call_model)
+        note += "; fit: " + (f"{fit.answers_ask} (model)" if fit is not None else "rules")
         _transition(store, item_id, "assembling", source_url=url, note=note)
         _try_journal(store, item_id, "updated", note)
         # no model judge on a deterministic build: its gap guesses were wrong on cards that showed
@@ -5710,7 +5822,7 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
         return _handoff(store, item_id, request, intent, url, answered, answered["fields"],
                         answered["klass"], converted=[], judge=None, degrade_note=note,
                         remap=remap, keep_source=keep_source, keep_params=keep_params,
-                        fetch_now=fetch_now, path="declared")
+                        fetch_now=fetch_now, path="declared", fit=fit)
     # The model mapping path below now serves only a link the user pasted (held for their YES, §33)
     # and a Fix / remap of an existing card — a tapped Library row never reaches it (above).
     def misfit(stage: str, message: str) -> dict:
@@ -5861,7 +5973,7 @@ def _handoff(store: ni.NIStore, item_id: str, request: str, intent: dict, url: s
              built: dict, fields: dict, klass: str, *, converted: list, judge: dict | None,
              degrade_note: str | None, remap: bool, keep_source: dict | None,
              keep_params: dict | None, fetch_now: datetime | None = None,
-             path: str = "mapping") -> dict:
+             path: str = "mapping", fit: object | None = None) -> dict:
     """The built pipeline + scene → the sealed spec (source, format, access, alert, notes) →
     ``_finalize``. Shared by the model mapping path and the Library-answers path.
 
@@ -5871,7 +5983,11 @@ def _handoff(store: ni.NIStore, item_id: str, request: str, intent: dict, url: s
 
     ``fetch_now`` (R4-2, 2026-10-04): the frozen clock the sampler used to render the fetch URL;
     the C2 verify reads the sealed spec at this SAME moment so a build that crosses midnight
-    between fetch and handoff never crashes the assert on a stale ``_clock()`` advance."""
+    between fetch and handoff never crashes the assert on a stale ``_clock()`` advance.
+
+    ``fit`` (Phase 3a, plan B3): the advisory FitVerdict ``_sample_and_map`` already logged
+    into ``degrade_note``, sealed onto the spec as ``_fit`` — optional, stripped on export /
+    template install like ``_c2_ok``; None (the default, every other caller) seals nothing."""
     # R1/R2 (2026-09-15): a remap of a recipe-born card must PRESERVE the
     # sealed source object (url template + $secret headers) and params —
     # rebuilding a bare {type, url} used to strip the credential header and
@@ -5904,6 +6020,9 @@ def _handoff(store: ni.NIStore, item_id: str, request: str, intent: dict, url: s
         track = history_track_for(built["scene"]["record"]["fields"], built["scene"]["record"]["rows"])
         if track is not None:
             spec["history"] = track
+    if fit is not None:
+        spec["_fit"] = {"answers_ask": fit.answers_ask, "missing": list(fit.missing),
+                        "wrong": list(fit.wrong), "evidence": list(fit.evidence)}
     if keep_params:
         spec["params"] = json.loads(json.dumps(keep_params))
     if clock_params and not keep_params:
@@ -6328,7 +6447,8 @@ def _finalize(store: ni.NIStore, item_id: str, spec: dict, preview: dict,
                               history=ni._seed_history(spec),
                               image_ref=ni._preview_image_ref(spec, item_id),
                               form_ctx=ni._form_bind_context(
-                                  spec, (fetched_at or ni._clock()).astimezone(UTC)))
+                                  spec, (fetched_at or ni._clock()).astimezone(UTC)),
+                              alternatives=True)
     except (ni.NIError, ValueError) as exc:
         return _fail(store, item_id, "assembly", f"preview bind failed: {exc}")
     assert isinstance(bound, dict), "bind_scene must return a dict"

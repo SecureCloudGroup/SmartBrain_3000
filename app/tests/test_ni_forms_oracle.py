@@ -1,23 +1,27 @@
-"""The forms oracle, over two recorded live sets:
+"""The forms oracle, over three recorded live sets:
 
-``live_2026-10-07`` (blind-50 on main after Phase 1a, the 1a-5 regression set) and
-``live_2026-10-07b`` (the fresh blind-50b gate set for the 1a-6 fix round — never shown
-to a worker). Each holds one case per live card of its run (+ the first set's new-moon
-case that went to links): the ask, the set's kind and the flow's frame kind, the Library
-source, the chosen answers rebuilt from the Library answers file, the preview outputs
-the pipeline produced, the title / fetch instant / viewer zone the card was laid out
-with. Each set's ``expected_forms.json`` gives the acceptable designs per case from the
-plan contract (B2) and the by-eye read; a case marked ``excluded`` (class K: the data
-layer should have refused the ask) is documented but not scored.
+``live_2026-10-07`` (blind-50 on main after Phase 1a, the 1a-5 regression set),
+``live_2026-10-07b`` (the 1a-6 fix-round gate set) and ``live_2026-10-07c`` (the SET C
+gate after 1a-6, PR #494 — never shown to a worker). Each holds one case per live card
+of its run (+ the first set's new-moon case that went to links): the ask, the set's
+kind and the flow's frame kind, the Library source, the chosen answers rebuilt from the
+Library answers file, the preview outputs the pipeline produced, the title / fetch
+instant / viewer zone the card was laid out with. Each set's ``expected_forms.json``
+gives the acceptable designs per case from the plan contract (B2) and the by-eye read;
+a case marked ``excluded`` (a data-layer wrong: class K, or an answer-selection / wrong-
+source miss untouched by this round) is documented but not scored.
 
 Every case is built through the real ``form_scene`` path (``design``) with the rules
-floor and the flow's frame kind, exactly as the flow would with no model; the lookup /
-next-event cases first pass the flow's subject row filter
-(``ni_flow._scope_rows_to_subject``). Asserted per case: the pick is in the acceptable
-set; the required (asked) fields are in the desktop plan; lint red == 0 at both sealed
-spans; the summary names the asked quantity; forbidden texts are absent. The pass rate
-per set prints with the test output (``-s`` / the failure message) — a regression set,
-not a tuning set: the release gate uses a fresh blind set.
+floor and the flow's frame kind, exactly as the flow would with no model; a lookup /
+next_event / alerts / latest_items / status case over a list answer first passes the
+flow's subject row filter (``ni_flow._scope_rows_to_subject``, D2 extends it past
+lookup/next_event); a subject naming a hazard the current sample does not report seals
+``_empty_subject_filter``'s honest empty state instead of raising. Asserted per case:
+the pick is in the acceptable set; the required (asked) fields are in the desktop plan;
+lint red == 0 at both sealed spans; the summary names the asked quantity; forbidden
+texts are absent. The pass rate per set prints with the test output (``-s`` / the
+failure message) — a regression set, not a tuning set: the release gate uses a fresh
+blind set.
 """
 from __future__ import annotations
 
@@ -33,8 +37,11 @@ from smartbrain_3000.ni_forms.layout import layout_span
 from smartbrain_3000.ni_forms.spans import Span
 
 ROOT = pathlib.Path(__file__).resolve().parent / "fixtures" / "ni_forms"
-SETS = ("live_2026-10-07", "live_2026-10-07b")
-_EXPECTED_COUNTS = {"live_2026-10-07": 23, "live_2026-10-07b": 21}
+SETS = ("live_2026-10-07", "live_2026-10-07b", "live_2026-10-07c")
+_EXPECTED_COUNTS = {"live_2026-10-07": 23, "live_2026-10-07b": 21, "live_2026-10-07c": 17}
+# D2: lookup/next_event always did; alerts/latest_items/status reach the same filter now.
+_SUBJECT_FILTER_KINDS = ("lookup", "next_event", "alerts", "latest_items", "status")
+_EMPTY_FALLBACK_KINDS = ("alerts", "latest_items", "status")
 _RESULTS: dict[str, dict[str, list[str]]] = {name: {} for name in SETS}
 
 
@@ -71,23 +78,36 @@ def _texts(clir: dict) -> list[str]:
 
 
 def _filtered(case: dict, exp: dict) -> tuple[list[dict], dict]:
-    """The flow's subject row filter (class D) applied the way ``_try_answers_build``
-    applies it: only a lookup / next_event ask over a list answer; the sealed ``filter``
-    selects the rows. A no-op for every other case (both sets' columns/value answers)."""
+    """The flow's subject row filter (class D, extended by D2) applied the way
+    ``_try_answers_build`` applies it: lookup / next_event / alerts / latest_items /
+    status over a list answer; the sealed ``filter`` selects the rows. A no-op for
+    every other case (both sets' columns/value answers)."""
     answers, outputs = case["answers_used"], case["outputs"]
     answer = answers[0]
-    if case["frame_kind"] not in ("lookup", "next_event") or answer.get("kind") != "list":
+    kind = case["frame_kind"]
+    if kind not in _SUBJECT_FILTER_KINDS or answer.get("kind") != "list":
         return answers, outputs
     sample = {answer["path"]: outputs.get(case["rows_output_name"]) or []}
-    scoped = ni_flow._scope_rows_to_subject(answer, sample, case["subject"] or "", None)
+    subject = case["subject"] or ""
+    try:
+        scoped = ni_flow._scope_rows_to_subject(answer, sample, subject, None)
+    except ValueError:
+        assert kind in _EMPTY_FALLBACK_KINDS and exp.get("empty_subject_filter"), \
+            f"{case['id']}: unexpected 'nothing matches' for frame kind {kind}"
+        scoped = ni_flow._empty_subject_filter(answer, subject, None)
+    flt = scoped.get("filter")
+    rows_name = case["rows_output_name"]
+    if exp.get("empty_subject_filter"):
+        rows = [r for r in outputs[rows_name] if ni_flow._dig(r, flt["path"]) == flt["equals"]]
+        assert flt is not None and rows == [], (flt, rows)
+        return [scoped], {**outputs, rows_name: rows}
     if exp.get("no_subject_filter") or not exp.get("subject_filter"):
-        assert "filter" not in scoped, scoped.get("filter")
+        assert flt is None, flt
         return answers, outputs
-    flt = scoped["filter"]
     assert flt == {"path": exp["subject_filter"]["cell"], "equals": exp["subject_filter"]["equals"]}, flt
-    rows = [r for r in outputs[case["rows_output_name"]] if ni_flow._dig(r, flt["path"]) == flt["equals"]]
+    rows = [r for r in outputs[rows_name] if ni_flow._dig(r, flt["path"]) == flt["equals"]]
     assert rows, "the subject filter selects at least one row"
-    return [scoped], {**outputs, case["rows_output_name"]: rows}
+    return [scoped], {**outputs, rows_name: rows}
 
 
 def _check(case: dict, exp: dict) -> list[str]:

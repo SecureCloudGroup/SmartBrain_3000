@@ -1,0 +1,367 @@
+{
+ "id": "b36",
+ "ask": "how many active wildfires in California right now",
+ "frame": {
+  "kind": "count",
+  "subject": "wildfires"
+ },
+ "chosen": [
+  {
+   "name": "fire_count",
+   "label": "Fires listed (up to 25)",
+   "words": [
+    "how many fires",
+    "count",
+    "number of fires"
+   ],
+   "primary": false,
+   "kind": "value",
+   "path": "features",
+   "type": "count",
+   "window": "now",
+   "unit": null
+  }
+ ],
+ "rows_output_name": null,
+ "preview": {
+  "fire_count": 25,
+  "fire_count_items": [
+   {
+    "geometry": {
+     "y": 35.905667,
+     "x": -121.4125
+    },
+    "attributes": {
+     "POOCounty": "Monterey",
+     "FireDiscoveryDateTime": 1787761560000,
+     "PercentContained": 100,
+     "IncidentSize": 29993,
+     "IncidentName": "Plaskett"
+    }
+   },
+   {
+    "geometry": {
+     "y": 36.215894,
+     "x": -121.717508
+    },
+    "attributes": {
+     "POOCounty": "Monterey",
+     "FireDiscoveryDateTime": 1786246500000,
+     "PercentContained": 90,
+     "IncidentSize": 25350,
+     "IncidentName": "Timber"
+    }
+   },
+   {
+    "geometry": {
+     "y": 37.5662,
+     "x": -119.616167
+    },
+    "attributes": {
+     "POOCounty": "Mariposa",
+     "FireDiscoveryDateTime": 1789486080000,
+     "PercentContained": 41,
+     "IncidentSize": 6803,
+     "IncidentName": "DOME"
+    }
+   },
+   {
+    "geometry": {
+     "y": 34.561835,
+     "x": -118.40183
+    },
+    "attributes": {
+     "POOCounty": "Los Angeles",
+     "FireDiscoveryDateTime": 1791062160000,
+     "PercentContained": 71,
+     "IncidentSize": 1048,
+     "IncidentName": "BOUQUET"
+    }
+   },
+   {
+    "geometry": {
+     "y": 36.601661,
+     "x": -118.9721
+    },
+    "attributes": {
+     "POOCounty": "Tulare",
+     "FireDiscoveryDateTime": 1769018597000,
+     "PercentContained": null,
+     "IncidentSize": 690,
+     "IncidentName": "CRAWFORD CORRAL RX"
+    }
+   },
+   {
+    "geometry": {
+     "y": 38.2130556,
+     "x": -122.8122222
+    },
+    "attributes": {
+     "POOCounty": "Marin",
+     "FireDiscoveryDateTime": 1789947600000,
+     "PercentContained": 100,
+     "IncidentSize": 341,
+     "IncidentName": "CHILENO"
+    }
+   },
+   {
+    "geometry": {
+     "y": 40.408606,
+     "x": -122.521453
+    },
+    "attributes": {
+     "POOCounty": "Shasta",
+     "FireDiscoveryDateTime": 1790722582000,
+     "PercentContained": null,
+     "IncidentSize": 254,
+     "IncidentName": "LOWER GAS POINT VMP RX"
+    }
+   },
+   {
+    "geometry": {
+     "y": 34.649867,
+     "x": -117.23995
+    },
+    "attributes": {
+     "POOCounty": "San Bernardino",
+     "FireDiscoveryDateTime": 1791137880000,
+     "PercentContained": null,
+     "IncidentSize": 59.4,
+     "IncidentName": "POWERLINE 2"
+    }
+   },
+   {
+    "geometry": {
+     "y": 40.759934,
+     "x": -122.604784
+    },
+    "attributes": {
+     "POOCounty": "Shasta",
+     "FireDiscoveryDateTime": 1791231436000,
+     "PercentContained": null,
+     "IncidentSize": 57,
+     "IncidentName": "FORK"
+    }
+   },
+   {
+    "geometry": {
+     "y": 33.812343,
+     "x": -117.341161
+    },
+    "attributes": {
+     "POOCounty": "Riverside",
+     "FireDiscoveryDateTime": 1791147136000,
+     "PercentContained": null,
+     "IncidentSize": 54,
+     "IncidentName": "HARFORD"
+    }
+   },
+   {
+    "geometry": {
+     "y": 38.16215,
+     "x": -119.809167
+    },
+    "attributes": {
+     "POOCounty": "Tuolumne",
+     "FireDiscoveryDateTime": 1790785128000,
+     "PercentContained": null,
+     "IncidentSize": 47,
+     "IncidentName": "PIUTE"
+    }
+   },
+   {
+    "geometry": {
+     "y": 33.448169,
+     "x": -117.227152
+    },
+    "attributes": {
+     "POOCounty": "Riverside",
+     "FireDiscoveryDateTime": 1791334928000,
+     "PercentContained": null,
+     "IncidentSize": 35,
+     "IncidentName": "CARANCHO"
+    }
+   },
+   {
+    "geometry": {
+     "y": 34.006644,
+     "x": -117.06459
+    },
+    "attributes": {
+     "POOCounty": "San Bernardino",
+     "FireDiscoveryDateTime": 1790982772000,
+     "PercentContained": null,
+     "IncidentSize": 10,
+     "IncidentName": "MUSTANG"
+    }
+   },
+   {
+    "geometry": {
+     "y": 38.24545,
+     "x": -122.502385
+    },
+    "attributes": {
+     "POOCounty": "Sonoma",
+     "FireDiscoveryDateTime": 1791325197000,
+     "PercentContained": null,
+     "IncidentSize": 1.25,
+     "IncidentName": "GULCH"
+    }
+   },
+   {
+    "geometry": {
+     "y": 32.838344,
+     "x": -116.664306
+    },
+    "attributes": {
+     "POOCounty": "San Diego",
+     "FireDiscoveryDateTime": 1790532888000,
+     "PercentContained": null,
+     "IncidentSize": 1,
+     "IncidentName": "WILLOW"
+    }
+   },
+   {
+    "geometry": {
+     "y": 35.6274,
+     "x": -118.5068
+    },
+    "attributes": {
+     "POOCounty": "Kern",
+     "FireDiscoveryDateTime": 1791328200000,
+     "PercentContained": null,
+     "IncidentSize": 0.91,
+     "IncidentName": "HOGYE"
+    }
+   },
+   {
+    "geometry": {
+     "y": 35.630086,
+     "x": -117.866006
+    },
+    "attributes": {
+     "POOCounty": "Kern",
+     "FireDiscoveryDateTime": 1777490591000,
+     "PercentContained": null,
+     "IncidentSize": 0.1,
+     "IncidentName": "MTZ/KRN/44A"
+    }
+   },
+   {
+    "geometry": {
+     "y": 35.633016,
+     "x": -117.773471
+    },
+    "attributes": {
+     "POOCounty": "Kern",
+     "FireDiscoveryDateTime": 1778531589000,
+     "PercentContained": null,
+     "IncidentSize": 0.1,
+     "IncidentName": "MTZ/KRN/FELSPAR"
+    }
+   },
+   {
+    "geometry": {
+     "y": 35.648222,
+     "x": -117.697833
+    },
+    "attributes": {
+     "POOCounty": "Kern",
+     "FireDiscoveryDateTime": 1779567304000,
+     "PercentContained": null,
+     "IncidentSize": 0.1,
+     "IncidentName": "MTZ/VEG/44A"
+    }
+   },
+   {
+    "geometry": {
+     "y": 34.1587,
+     "x": -117.90293
+    },
+    "attributes": {
+     "POOCounty": "Los Angeles",
+     "FireDiscoveryDateTime": 1783994900000,
+     "PercentContained": null,
+     "IncidentSize": 0.1,
+     "IncidentName": "ZEBRA"
+    }
+   },
+   {
+    "geometry": {
+     "y": 34.18175,
+     "x": -117.88145
+    },
+    "attributes": {
+     "POOCounty": "Los Angeles",
+     "FireDiscoveryDateTime": 1789521648000,
+     "PercentContained": null,
+     "IncidentSize": 0.1,
+     "IncidentName": "MORRIS"
+    }
+   },
+   {
+    "geometry": {
+     "y": 33.540808,
+     "x": -115.918395
+    },
+    "attributes": {
+     "POOCounty": "Riverside",
+     "FireDiscoveryDateTime": 1791135666000,
+     "PercentContained": null,
+     "IncidentSize": 0.1,
+     "IncidentName": "MTZ/RVC/61A"
+    }
+   },
+   {
+    "geometry": {
+     "y": 33.354814,
+     "x": -117.393331
+    },
+    "attributes": {
+     "POOCounty": "San Diego",
+     "FireDiscoveryDateTime": 1791323220000,
+     "PercentContained": null,
+     "IncidentSize": 0.1,
+     "IncidentName": "HAWK"
+    }
+   },
+   {
+    "geometry": {
+     "y": 35.761843,
+     "x": -117.373751
+    },
+    "attributes": {
+     "POOCounty": "San Bernardino",
+     "FireDiscoveryDateTime": 1780963407000,
+     "PercentContained": null,
+     "IncidentSize": 0.01,
+     "IncidentName": "MTZ/BDC/45A"
+    }
+   },
+   {
+    "geometry": {
+     "y": 35.937009,
+     "x": -117.905763
+    },
+    "attributes": {
+     "POOCounty": "Inyo",
+     "FireDiscoveryDateTime": 1784471880000,
+     "PercentContained": null,
+     "IncidentSize": 0.01,
+     "IncidentName": "MTZ/BDU/LITTLE"
+    }
+   }
+  ]
+ },
+ "missing_menu": [
+  "california",
+  "wildfires"
+ ],
+ "label": {
+  "answers_ask": "partly",
+  "missing": [],
+  "wrong": [
+   "fire_count"
+  ]
+ }
+}

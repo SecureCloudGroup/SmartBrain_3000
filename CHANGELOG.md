@@ -62,6 +62,15 @@ to know when a release changes behavior.
   built card did not remember the format, so its first scheduled refresh tried to
   read the link as JSON and failed. The format sampling found is now sealed with
   the card, exactly as it is for a Library source.
+- **A list of alerts or latest items now answers what you named, not everything on
+  the list.** "Red flag warnings in California" used to show every active
+  California alert; a card built from an alerts, latest-items, or status list now
+  narrows to the row that names what you asked, and shows an honest "nothing right
+  now" when today's list has none of it — never the whole list standing in for an
+  answer. A reading built from a team's or an event's own fields (a next game's
+  matchup, start and venue) always keeps the matchup name on the card, even when
+  room is tight; a day-by-day forecast cut to a weekend or a named window now
+  starts on the first day it actually has, instead of padding in empty days first.
 
 ### Changed
 

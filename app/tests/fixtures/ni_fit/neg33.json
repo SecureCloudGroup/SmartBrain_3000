@@ -1,0 +1,102 @@
+{
+ "id": "neg33",
+ "ask": "unemployment rate over the last year",
+ "frame": {
+  "kind": "trend",
+  "subject": "unemployment rate"
+ },
+ "chosen": [
+  {
+   "name": "sun_week",
+   "label": "Sunrise and sunset by day",
+   "words": [
+    "this week",
+    "week",
+    "next few days",
+    "7 day",
+    "daily",
+    "by day",
+    "sun times"
+   ],
+   "primary": false,
+   "kind": "columns",
+   "limit": 7,
+   "cells": [
+    {
+     "path": "daily.time",
+     "label": "Day",
+     "type": "date",
+     "key": "day",
+     "unit": null
+    },
+    {
+     "path": "daily.sunrise",
+     "label": "Sunrise",
+     "type": "time",
+     "key": "sunrise",
+     "unit": null
+    },
+    {
+     "path": "daily.sunset",
+     "label": "Sunset",
+     "type": "time",
+     "key": "sunset",
+     "unit": null
+    }
+   ],
+   "axis": {
+    "cell": "daily.time",
+    "step": "day"
+   }
+  }
+ ],
+ "rows_output_name": "rows",
+ "preview": {
+  "rows": [
+   {
+    "sunset": "2026-10-08T18:13:00-04:00",
+    "sunrise": "2026-10-08T06:49:00-04:00",
+    "day": "2026-10-08T00:00:00-04:00"
+   }
+  ],
+  "zone": "America/New_York",
+  "sunset": [
+   "2026-10-07T18:15",
+   "2026-10-08T18:13",
+   "2026-10-09T18:11",
+   "2026-10-10T18:10",
+   "2026-10-11T18:08",
+   "2026-10-12T18:06",
+   "2026-10-13T18:05"
+  ],
+  "sunrise": [
+   "2026-10-07T06:47",
+   "2026-10-08T06:49",
+   "2026-10-09T06:50",
+   "2026-10-10T06:51",
+   "2026-10-11T06:52",
+   "2026-10-12T06:53",
+   "2026-10-13T06:54"
+  ],
+  "day": [
+   "2026-10-07",
+   "2026-10-08",
+   "2026-10-09",
+   "2026-10-10",
+   "2026-10-11",
+   "2026-10-12",
+   "2026-10-13"
+  ]
+ },
+ "missing_menu": [
+  "over",
+  "rate",
+  "unemployment"
+ ],
+ "label": {
+  "answers_ask": "no",
+  "missing": [],
+  "wrong": [],
+  "source_ask": "what time is sunrise in Boston tomorrow"
+ }
+}

@@ -217,19 +217,23 @@ class DayTable(BaseForm):
         drop = ctx.rung.get("drop", 0)
         days = max(1, {1: 3, 2: 7, 3: 14}[ctx.rows] - drop)
         evs = [e for e in allev if e.day >= d0]
-        start = None
+        is_history = False
         if not evs and allev:
             # history only: the most recent days, oldest first, ending at the last published day
             recent = sorted({e.day for e in allev})[-days:]
             evs = [e for e in allev if e.day >= recent[0]]
-            start = recent[0]
+            is_history = True
         if not evs:
             calm(ctx, cv, [["tpl", "no_rows", {}]])
             return
+        # fix round 1a-7 (class P2): a window cut ("this weekend") can already leave evs
+        # starting after d0 — walk day_rows from the first day that HAS data, never
+        # synthesizing the empty days between today and the window the ask named.
+        start = min(e.day for e in evs)
         if ctx.cand.variant == "events":
             day_rows(ctx, cv, evs, y0 + 4, y1, days=days, name_f=b.get("name"), start=start)
         else:
-            self.rows(ctx, cv, evs, y0 + 4, y1, days, history=start is not None)
+            self.rows(ctx, cv, evs, y0 + 4, y1, days, history=is_history)
         cv.d.state = "many"
 
     def rows(self, ctx, cv, evs, top, bottom, days, history=False):

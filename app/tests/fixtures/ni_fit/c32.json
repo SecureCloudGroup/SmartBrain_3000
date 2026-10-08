@@ -1,0 +1,78 @@
+{
+ "id": "c32",
+ "ask": "any delays on the Washington Metro right now",
+ "frame": {
+  "kind": "status",
+  "subject": "Washington Metro"
+ },
+ "chosen": [
+  {
+   "name": "ground_delay",
+   "label": "Ground delay program",
+   "words": [
+    "delays",
+    "delay",
+    "flight delays",
+    "ground delay",
+    "delayed",
+    "how late",
+    "average delay",
+    "gdp"
+   ],
+   "primary": true,
+   "kind": "list",
+   "path": "items",
+   "newest_first": false,
+   "may_be_empty": true,
+   "filter": {
+    "path": "groundDelay.airportId",
+    "equals": "{airport}"
+   },
+   "cells": [
+    {
+     "path": "groundDelay.impactingCondition",
+     "label": "Reason",
+     "type": "text",
+     "key": "groundDelay.impactingCondition",
+     "unit": null
+    },
+    {
+     "path": "groundDelay.avgDelay",
+     "label": "Average delay",
+     "type": "number",
+     "unit": "min",
+     "key": "groundDelay.avgDelay"
+    },
+    {
+     "path": "groundDelay.maxDelay",
+     "label": "Max delay",
+     "type": "number",
+     "unit": "min",
+     "key": "groundDelay.maxDelay"
+    },
+    {
+     "path": "groundDelay.endTime",
+     "label": "Until",
+     "type": "time",
+     "key": "groundDelay.endTime",
+     "unit": null
+    }
+   ]
+  }
+ ],
+ "rows_output_name": "rows",
+ "preview": {
+  "rows_count": 0,
+  "rows": []
+ },
+ "missing_menu": [
+  "delays",
+  "metro",
+  "washington"
+ ],
+ "label": {
+  "answers_ask": "no",
+  "missing": [],
+  "wrong": []
+ }
+}

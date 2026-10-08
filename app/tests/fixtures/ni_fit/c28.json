@@ -1,0 +1,42 @@
+{
+ "id": "c28",
+ "ask": "US GDP growth trend",
+ "frame": {
+  "kind": "trend",
+  "subject": null
+ },
+ "chosen": [
+  {
+   "name": "latest",
+   "label": "GDP (annual rate)",
+   "words": [
+    "gross domestic product",
+    "gdp (annual rate)",
+    "us gdp",
+    "latest",
+    "current",
+    "now",
+    "today"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "rows[0].GDP",
+   "type": "number",
+   "unit": "billion USD",
+   "window": "latest"
+  }
+ ],
+ "rows_output_name": null,
+ "preview": {
+  "latest": 32563.03
+ },
+ "missing_menu": [
+  "growth",
+  "trend"
+ ],
+ "label": {
+  "answers_ask": "no",
+  "missing": [],
+  "wrong": []
+ }
+}

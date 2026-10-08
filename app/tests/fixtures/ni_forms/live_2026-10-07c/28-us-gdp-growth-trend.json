@@ -1,0 +1,47 @@
+{
+ "id": "28-us-gdp-growth-trend",
+ "n": 28,
+ "ask": "US GDP growth trend",
+ "kind": "trend",
+ "frame_kind": "trend",
+ "subject": null,
+ "title": "US GDP growth trend",
+ "source_id": "fred-gdp",
+ "source_url": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=GDP",
+ "fetched_at": "2026-10-07T21:09:58Z",
+ "viewer_tz": "UTC",
+ "answers_used": [
+  {
+   "name": "latest",
+   "label": "GDP (annual rate)",
+   "words": [
+    "gross domestic product",
+    "gdp (annual rate)",
+    "us gdp",
+    "latest",
+    "current",
+    "now",
+    "today"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "rows[0].GDP",
+   "type": "number",
+   "unit": "billion USD",
+   "window": "latest"
+  }
+ ],
+ "rows_output_name": null,
+ "outputs": {
+  "latest": 32563.03
+ },
+ "live_form": "stat",
+ "live_span": "d1x1",
+ "live_lint": {
+  "red": 0,
+  "amber": 2,
+  "codes": [
+   "L-ASK"
+  ]
+ }
+}

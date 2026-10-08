@@ -1,0 +1,45 @@
+{
+ "id": "neg05",
+ "ask": "hourly temps in Minneapolis today",
+ "frame": {
+  "kind": null,
+  "subject": "temperature"
+ },
+ "chosen": [
+  {
+   "name": "latest",
+   "label": "Regular gas price (US average)",
+   "words": [
+    "us regular gasoline price",
+    "regular gas price (us average)",
+    "gas prices",
+    "national average gas price",
+    "latest",
+    "current",
+    "now",
+    "today"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "rows[0].GASREGW",
+   "type": "number",
+   "unit": "$/gal",
+   "window": "latest"
+  }
+ ],
+ "rows_output_name": null,
+ "preview": {
+  "latest": 4.354
+ },
+ "missing_menu": [
+  "hourly",
+  "minneapolis",
+  "temps"
+ ],
+ "label": {
+  "answers_ask": "no",
+  "missing": [],
+  "wrong": [],
+  "source_ask": "US gas price trend this year"
+ }
+}

@@ -1,0 +1,80 @@
+{
+ "id": "neg13",
+ "ask": "30 year mortgage rate history",
+ "frame": {
+  "kind": "trend",
+  "subject": "mortgage rate history"
+ },
+ "chosen": [
+  {
+   "name": "latitude",
+   "label": "Latitude",
+   "words": [
+    "where is the iss",
+    "space station location",
+    "latitude",
+    "lat",
+    "position",
+    "where"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "latitude",
+   "type": "number",
+   "unit": "°",
+   "window": "now"
+  },
+  {
+   "name": "longitude",
+   "label": "Longitude",
+   "words": [
+    "where is the iss",
+    "space station location",
+    "longitude",
+    "lon",
+    "position",
+    "where"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "longitude",
+   "type": "number",
+   "unit": "°",
+   "window": "now"
+  },
+  {
+   "name": "altitude",
+   "label": "Altitude",
+   "words": [
+    "altitude",
+    "how high",
+    "height",
+    "orbit",
+    "above earth"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "altitude",
+   "type": "number",
+   "unit": "km",
+   "window": "now"
+  }
+ ],
+ "rows_output_name": null,
+ "preview": {
+  "altitude": 426.35070945725,
+  "longitude": -67.086227346702,
+  "latitude": 29.811619302143
+ },
+ "missing_menu": [
+  "history",
+  "mortgage",
+  "rate"
+ ],
+ "label": {
+  "answers_ask": "no",
+  "missing": [],
+  "wrong": [],
+  "source_ask": "where is the ISS right now on a map"
+ }
+}

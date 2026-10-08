@@ -1,0 +1,46 @@
+{
+ "id": "neg18",
+ "ask": "how many active hurricanes in the Pacific",
+ "frame": {
+  "kind": "count",
+  "subject": "active hurricanes"
+ },
+ "chosen": [
+  {
+   "name": "price",
+   "label": "Spot price",
+   "words": [
+    "price",
+    "spot price",
+    "per ounce",
+    "ounce",
+    "oz",
+    "gold price",
+    "silver price",
+    "how much",
+    "worth",
+    "cost"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "price",
+   "type": "number",
+   "unit": "USD/oz",
+   "window": "now"
+  }
+ ],
+ "rows_output_name": null,
+ "preview": {
+  "price": 4121.299805
+ },
+ "missing_menu": [
+  "hurricanes",
+  "pacific"
+ ],
+ "label": {
+  "answers_ask": "no",
+  "missing": [],
+  "wrong": [],
+  "source_ask": "price of gold today"
+ }
+}

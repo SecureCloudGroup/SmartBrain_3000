@@ -1,0 +1,80 @@
+{
+ "id": "a17",
+ "ask": "last night's Mariners result",
+ "frame": {
+  "kind": "result",
+  "subject": "Mariners"
+ },
+ "chosen": [
+  {
+   "name": "results",
+   "label": "Recent results",
+   "words": [
+    "score",
+    "scores",
+    "result",
+    "results",
+    "final",
+    "last game",
+    "did they win",
+    "won",
+    "lost",
+    "last night"
+   ],
+   "primary": true,
+   "kind": "list",
+   "path": "dates",
+   "newest_first": true,
+   "may_be_empty": true,
+   "filter": {
+    "path": "games[0].status.detailedState",
+    "equals": "Final"
+   },
+   "cells": [
+    {
+     "path": "games[0].teams.away.team.name",
+     "label": "Away",
+     "type": "text",
+     "key": "games[0].teams.away.team.name",
+     "unit": null
+    },
+    {
+     "path": "games[0].teams.away.score",
+     "label": "Away runs",
+     "type": "number",
+     "key": "games[0].teams.away.score",
+     "unit": null
+    },
+    {
+     "path": "games[0].teams.home.team.name",
+     "label": "Home",
+     "type": "text",
+     "key": "games[0].teams.home.team.name",
+     "unit": null
+    },
+    {
+     "path": "games[0].teams.home.score",
+     "label": "Home runs",
+     "type": "number",
+     "key": "games[0].teams.home.score",
+     "unit": null
+    }
+   ]
+  }
+ ],
+ "rows_output_name": "rows",
+ "preview": {
+  "rows_count": 0,
+  "rows": []
+ },
+ "missing_menu": [
+  "mariners",
+  "night",
+  "result"
+ ],
+ "label": {
+  "answers_ask": "yes",
+  "missing": [],
+  "wrong": []
+ }
+}

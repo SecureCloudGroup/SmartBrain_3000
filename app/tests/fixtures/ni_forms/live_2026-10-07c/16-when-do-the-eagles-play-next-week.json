@@ -1,0 +1,90 @@
+{
+ "id": "16-when-do-the-eagles-play-next-week",
+ "n": 16,
+ "ask": "when do the Eagles play next week",
+ "kind": "schedule",
+ "frame_kind": "next_event",
+ "subject": "Eagles",
+ "title": "Eagles",
+ "source_id": "thesportsdb-team-next",
+ "source_url": "https://www.thesportsdb.com/api/v1/json/123/eventsnext.php?id=134936",
+ "fetched_at": "2026-10-07T21:07:35Z",
+ "viewer_tz": "UTC",
+ "answers_used": [
+  {
+   "name": "next_game",
+   "label": "Next game",
+   "words": [
+    "next game",
+    "next match",
+    "who do they play",
+    "opponent",
+    "play next",
+    "matchup",
+    "next"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "events[0].strEvent",
+   "type": "text",
+   "window": "latest",
+   "unit": null
+  },
+  {
+   "name": "start",
+   "label": "Start",
+   "words": [
+    "when",
+    "what time",
+    "start time",
+    "kickoff",
+    "tip-off",
+    "date",
+    "game time",
+    "next game",
+    "play next"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "events[0].strTimestamp",
+   "type": "time",
+   "window": "latest",
+   "utc": true,
+   "unit": null
+  },
+  {
+   "name": "venue",
+   "label": "Venue",
+   "words": [
+    "where",
+    "venue",
+    "stadium",
+    "arena",
+    "field",
+    "next game",
+    "play next"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "events[0].strVenue",
+   "type": "text",
+   "window": "latest",
+   "unit": null
+  }
+ ],
+ "rows_output_name": null,
+ "outputs": {
+  "venue": "Tottenham Hotspur Stadium",
+  "start": "2026-10-11T09:30:00-04:00",
+  "next_game": "Jacksonville Jaguars vs Philadelphia Eagles"
+ },
+ "live_form": "stat",
+ "live_span": "d1x1",
+ "live_lint": {
+  "red": 0,
+  "amber": 2,
+  "codes": [
+   "L-ASK"
+  ]
+ }
+}

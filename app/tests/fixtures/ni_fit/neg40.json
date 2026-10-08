@@ -1,0 +1,129 @@
+{
+ "id": "neg40",
+ "ask": "what time is sunrise in Boston tomorrow",
+ "frame": {
+  "kind": "next_event",
+  "subject": "sunrise"
+ },
+ "chosen": [
+  {
+   "name": "daily_forecast",
+   "label": "Daily forecast",
+   "words": [
+    "forecast",
+    "this week",
+    "7 day",
+    "week",
+    "weekend",
+    "next few days",
+    "daily forecast",
+    "outlook",
+    "rain chance this weekend",
+    "storms this week",
+    "freeze",
+    "frost",
+    "freezing rain",
+    "ice"
+   ],
+   "primary": false,
+   "kind": "columns",
+   "limit": 7,
+   "cells": [
+    {
+     "path": "daily.time",
+     "label": "Day",
+     "type": "date",
+     "key": "day",
+     "unit": null
+    },
+    {
+     "path": "daily.weather_code",
+     "label": "Conditions",
+     "type": "number",
+     "codes": "wmo_weather",
+     "key": "conditions",
+     "unit": null
+    },
+    {
+     "path": "daily.temperature_2m_max",
+     "label": "High",
+     "type": "number",
+     "unit_path": "daily_units.temperature_2m_max",
+     "key": "high",
+     "unit": "°F"
+    },
+    {
+     "path": "daily.precipitation_probability_max",
+     "label": "Rain chance",
+     "type": "number",
+     "unit_path": "daily_units.precipitation_probability_max",
+     "key": "rain_chance",
+     "unit": "%"
+    }
+   ],
+   "axis": {
+    "cell": "daily.time",
+    "step": "day"
+   }
+  }
+ ],
+ "rows_output_name": "rows",
+ "preview": {
+  "rows": [
+   {
+    "rain_chance": 74,
+    "high": 55.3,
+    "conditions": "Drizzle",
+    "day": "2026-10-09T00:00:00-04:00"
+   }
+  ],
+  "zone": "America/Los_Angeles",
+  "rain_chance": [
+   1,
+   1,
+   74,
+   16,
+   0,
+   1,
+   24
+  ],
+  "high": [
+   62.5,
+   67.6,
+   55.3,
+   58.3,
+   58.9,
+   64.4,
+   53.8
+  ],
+  "conditions": [
+   45,
+   3,
+   53,
+   51,
+   0,
+   3,
+   61
+  ],
+  "day": [
+   "2026-10-07",
+   "2026-10-08",
+   "2026-10-09",
+   "2026-10-10",
+   "2026-10-11",
+   "2026-10-12",
+   "2026-10-13"
+  ]
+ },
+ "missing_menu": [
+  "boston",
+  "sunrise",
+  "time"
+ ],
+ "label": {
+  "answers_ask": "no",
+  "missing": [],
+  "wrong": [],
+  "source_ask": "will it rain in Seattle on Friday"
+ }
+}

@@ -1,0 +1,323 @@
+{
+ "id": "neg54",
+ "ask": "latest posts on Hacker News",
+ "frame": {
+  "kind": "latest_items",
+  "subject": "posts"
+ },
+ "chosen": [
+  {
+   "name": "fires",
+   "label": "Current wildfires",
+   "words": [
+    "wildfires",
+    "fires",
+    "burning",
+    "biggest fires",
+    "acres",
+    "containment",
+    "contained",
+    "fire size"
+   ],
+   "primary": true,
+   "kind": "list",
+   "path": "features",
+   "newest_first": false,
+   "may_be_empty": true,
+   "cells": [
+    {
+     "path": "attributes.IncidentName",
+     "label": "Fire",
+     "type": "text",
+     "key": "attributes.IncidentName",
+     "unit": null
+    },
+    {
+     "path": "attributes.IncidentSize",
+     "label": "Size",
+     "type": "number",
+     "unit": "acres",
+     "key": "attributes.IncidentSize"
+    },
+    {
+     "path": "attributes.PercentContained",
+     "label": "Contained",
+     "type": "number",
+     "unit": "%",
+     "key": "attributes.PercentContained"
+    },
+    {
+     "path": "attributes.FireDiscoveryDateTime",
+     "label": "Discovered",
+     "type": "time",
+     "key": "attributes.FireDiscoveryDateTime",
+     "unit": null
+    }
+   ]
+  }
+ ],
+ "rows_output_name": "rows",
+ "preview": {
+  "rows_count": 19,
+  "rows": [
+   {
+    "geometry": {
+     "y": 38.019315,
+     "x": -105.071268
+    },
+    "attributes": {
+     "POOCounty": "Custer",
+     "FireDiscoveryDateTime": "2026-06-29T08:04:46-04:00",
+     "PercentContained": 82,
+     "IncidentSize": 102007,
+     "IncidentName": "Aspen Acres"
+    }
+   },
+   {
+    "geometry": {
+     "y": 38.051567,
+     "x": -107.682124
+    },
+    "attributes": {
+     "POOCounty": "Ouray",
+     "FireDiscoveryDateTime": "2026-06-27T19:33:00-04:00",
+     "PercentContained": 92,
+     "IncidentSize": 39747,
+     "IncidentName": "Gold Mountain"
+    }
+   },
+   {
+    "geometry": {
+     "y": 39.23358,
+     "x": -106.44032
+    },
+    "attributes": {
+     "POOCounty": "Lake",
+     "FireDiscoveryDateTime": "2026-06-28T17:27:00-04:00",
+     "PercentContained": 80,
+     "IncidentSize": 7359,
+     "IncidentName": "Willow"
+    }
+   },
+   {
+    "geometry": {
+     "y": 38.124188,
+     "x": -107.354823
+    },
+    "attributes": {
+     "POOCounty": "Hinsdale",
+     "FireDiscoveryDateTime": "2026-07-09T11:46:12-04:00",
+     "PercentContained": 90,
+     "IncidentSize": 7257,
+     "IncidentName": "Elk"
+    }
+   },
+   {
+    "geometry": {
+     "y": 37.081944,
+     "x": -104.421389
+    },
+    "attributes": {
+     "POOCounty": "Las Animas",
+     "FireDiscoveryDateTime": "2026-08-11T20:55:00-04:00",
+     "PercentContained": 90,
+     "IncidentSize": 4335,
+     "IncidentName": "Post"
+    }
+   },
+   {
+    "geometry": {
+     "y": 40.220533,
+     "x": -108.178133
+    },
+    "attributes": {
+     "POOCounty": "Rio Blanco",
+     "FireDiscoveryDateTime": "2026-07-21T13:22:00-04:00",
+     "PercentContained": 100,
+     "IncidentSize": 3042,
+     "IncidentName": "Keystone"
+    }
+   },
+   {
+    "geometry": {
+     "y": 39.87355,
+     "x": -108.22355
+    },
+    "attributes": {
+     "POOCounty": "Rio Blanco",
+     "FireDiscoveryDateTime": "2026-07-13T14:36:00-04:00",
+     "PercentContained": 100,
+     "IncidentSize": 1580,
+     "IncidentName": "P-L Gulch"
+    }
+   },
+   {
+    "geometry": {
+     "y": 37.38545,
+     "x": -106.786583
+    },
+    "attributes": {
+     "POOCounty": "Archuleta",
+     "FireDiscoveryDateTime": "2026-08-20T10:33:00-04:00",
+     "PercentContained": 100,
+     "IncidentSize": 777,
+     "IncidentName": "Swiss Roll"
+    }
+   },
+   {
+    "geometry": {
+     "y": 39.522835,
+     "x": -105.495229
+    },
+    "attributes": {
+     "POOCounty": "Park",
+     "FireDiscoveryDateTime": "2026-09-25T09:42:29-04:00",
+     "PercentContained": "—",
+     "IncidentSize": 278,
+     "IncidentName": "Harris Park Broadcast RX"
+    }
+   },
+   {
+    "geometry": {
+     "y": 39.05754,
+     "x": -105.004835
+    },
+    "attributes": {
+     "POOCounty": "El Paso",
+     "FireDiscoveryDateTime": "2026-01-14T11:22:45-05:00",
+     "PercentContained": "—",
+     "IncidentSize": 16.1,
+     "IncidentName": "Silver Trident Piles RX"
+    }
+   },
+   {
+    "geometry": {
+     "y": 40.191333,
+     "x": -105.4075
+    },
+    "attributes": {
+     "POOCounty": "Boulder",
+     "FireDiscoveryDateTime": "2026-10-06T10:03:00-04:00",
+     "PercentContained": "—",
+     "IncidentSize": 6,
+     "IncidentName": "Dry Creek"
+    }
+   },
+   {
+    "geometry": {
+     "y": 38.979946,
+     "x": -104.99048
+    },
+    "attributes": {
+     "POOCounty": "El Paso",
+     "FireDiscoveryDateTime": "2026-05-11T12:14:59-04:00",
+     "PercentContained": "—",
+     "IncidentSize": 2,
+     "IncidentName": "Rainbow Gulch RX"
+    }
+   },
+   {
+    "geometry": {
+     "y": 39.79535,
+     "x": -105.47884
+    },
+    "attributes": {
+     "POOCounty": "Gilpin",
+     "FireDiscoveryDateTime": "2026-10-06T11:56:17-04:00",
+     "PercentContained": "—",
+     "IncidentSize": 0.1,
+     "IncidentName": "Horseshoe"
+    }
+   },
+   {
+    "geometry": {
+     "y": 39.978217,
+     "x": -105.28955
+    },
+    "attributes": {
+     "POOCounty": "Boulder",
+     "FireDiscoveryDateTime": "2026-10-07T08:55:02-04:00",
+     "PercentContained": "—",
+     "IncidentSize": 0.1,
+     "IncidentName": "Skunk Canyon"
+    }
+   },
+   {
+    "geometry": {
+     "y": 39.034146,
+     "x": -105.205079
+    },
+    "attributes": {
+     "POOCounty": "Teller",
+     "FireDiscoveryDateTime": "2026-10-02T19:41:42-04:00",
+     "PercentContained": "—",
+     "IncidentSize": "—",
+     "IncidentName": "Phantom Creek RX"
+    }
+   },
+   {
+    "geometry": {
+     "y": 40.409917,
+     "x": -106.364833
+    },
+    "attributes": {
+     "POOCounty": "Jackson",
+     "FireDiscoveryDateTime": "2026-10-05T15:26:18-04:00",
+     "PercentContained": "—",
+     "IncidentSize": "—",
+     "IncidentName": "Slackweiss Rx"
+    }
+   },
+   {
+    "geometry": {
+     "y": 38.984058,
+     "x": -105.393651
+    },
+    "attributes": {
+     "POOCounty": "Park",
+     "FireDiscoveryDateTime": "2026-10-04T16:57:56-04:00",
+     "PercentContained": "—",
+     "IncidentSize": "—",
+     "IncidentName": "O'Brien 2 Broadcast RX"
+    }
+   },
+   {
+    "geometry": {
+     "y": 38.468133,
+     "x": -108.368633
+    },
+    "attributes": {
+     "POOCounty": "Montrose",
+     "FireDiscoveryDateTime": "2026-10-06T11:59:14-04:00",
+     "PercentContained": "—",
+     "IncidentSize": "—",
+     "IncidentName": "25 Mesa Rx Unit"
+    }
+   },
+   {
+    "geometry": {
+     "y": 38.860243,
+     "x": -106.063192
+    },
+    "attributes": {
+     "POOCounty": "Chaffee",
+     "FireDiscoveryDateTime": "2026-10-06T17:55:04-04:00",
+     "PercentContained": "—",
+     "IncidentSize": "—",
+     "IncidentName": "North Trout Creek RX"
+    }
+   }
+  ]
+ },
+ "missing_menu": [
+  "hacker",
+  "news",
+  "posts"
+ ],
+ "label": {
+  "answers_ask": "no",
+  "missing": [],
+  "wrong": [],
+  "source_ask": "show active wildfires in Colorado on a map"
+ }
+}

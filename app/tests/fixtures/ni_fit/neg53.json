@@ -1,0 +1,78 @@
+{
+ "id": "neg53",
+ "ask": "did the Yankees win last night",
+ "frame": {
+  "kind": "result",
+  "subject": "Yankees"
+ },
+ "chosen": [
+  {
+   "name": "ground_delay",
+   "label": "Ground delay program",
+   "words": [
+    "delays",
+    "delay",
+    "flight delays",
+    "ground delay",
+    "delayed",
+    "how late",
+    "average delay",
+    "gdp"
+   ],
+   "primary": true,
+   "kind": "list",
+   "path": "items",
+   "newest_first": false,
+   "may_be_empty": true,
+   "filter": {
+    "path": "groundDelay.airportId",
+    "equals": "{airport}"
+   },
+   "cells": [
+    {
+     "path": "groundDelay.impactingCondition",
+     "label": "Reason",
+     "type": "text",
+     "key": "groundDelay.impactingCondition",
+     "unit": null
+    },
+    {
+     "path": "groundDelay.avgDelay",
+     "label": "Average delay",
+     "type": "number",
+     "unit": "min",
+     "key": "groundDelay.avgDelay"
+    },
+    {
+     "path": "groundDelay.maxDelay",
+     "label": "Max delay",
+     "type": "number",
+     "unit": "min",
+     "key": "groundDelay.maxDelay"
+    },
+    {
+     "path": "groundDelay.endTime",
+     "label": "Until",
+     "type": "time",
+     "key": "groundDelay.endTime",
+     "unit": null
+    }
+   ]
+  }
+ ],
+ "rows_output_name": "rows",
+ "preview": {
+  "rows_count": 0,
+  "rows": []
+ },
+ "missing_menu": [
+  "night",
+  "yankees"
+ ],
+ "label": {
+  "answers_ask": "no",
+  "missing": [],
+  "wrong": [],
+  "source_ask": "number of flights delayed at JFK right now"
+ }
+}

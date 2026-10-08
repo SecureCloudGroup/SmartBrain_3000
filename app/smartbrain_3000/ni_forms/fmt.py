@@ -113,7 +113,18 @@ def _raw_magnitude_cap(v) -> int:
 
 def decimals(field, v, *, derived: bool = False) -> int:
     """Decimals to show. Published: Field.precision (or the value's own repr, capped at the
-    magnitude rule when no precision was declared). Derived: magnitude rules."""
+    magnitude rule when no precision was declared). Derived: magnitude rules. A percent with
+    no PUBLISHED precision shows at most 2 decimals ("-0.73%", never the raw "-0.7317%" a
+    board read found 2026-10-07) unless it is tiny — a basis-point change keeps 4."""
+    d = _decimals_uncapped(field, v, derived=derived)
+    if field is not None and field.type == "percent" and is_num(v) \
+            and (derived or field.precision is None or getattr(field, "unrounded", False)):
+        shown = abs(float(v)) * (100 if field.scale == "0..1" else 1)
+        return min(d, 2 if shown >= 0.01 else 4)
+    return d
+
+
+def _decimals_uncapped(field, v, *, derived: bool = False) -> int:
     if not derived and field is not None and getattr(field, "unrounded", False):
         derived = True        # an unrounded float column: the source stated no precision (G3 rule)
     if not derived:

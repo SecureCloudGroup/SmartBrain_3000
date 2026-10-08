@@ -1,0 +1,44 @@
+{
+ "id": "neg57",
+ "ask": "Zoom service status",
+ "frame": {
+  "kind": "status",
+  "subject": null
+ },
+ "chosen": [
+  {
+   "name": "water_temp",
+   "label": "Water temperature",
+   "words": [
+    "water temperature",
+    "water temp",
+    "how warm is the water",
+    "sea temperature",
+    "ocean temperature",
+    "swim"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "data[0].v",
+   "type": "number",
+   "unit": "°F",
+   "window": "now",
+   "measure": "water_temp"
+  }
+ ],
+ "rows_output_name": null,
+ "preview": {
+  "water_temp": 72.3
+ },
+ "missing_menu": [
+  "service",
+  "status",
+  "zoom"
+ ],
+ "label": {
+  "answers_ask": "no",
+  "missing": [],
+  "wrong": [],
+  "source_ask": "water temperature at Virginia Beach"
+ }
+}

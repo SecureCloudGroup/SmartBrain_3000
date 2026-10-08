@@ -1,0 +1,86 @@
+{
+ "id": "neg44",
+ "ask": "how cold is it in Anchorage right now",
+ "frame": {
+  "kind": null,
+  "subject": "temperature"
+ },
+ "chosen": [
+  {
+   "name": "next_game",
+   "label": "Next game",
+   "words": [
+    "next game",
+    "next match",
+    "who do they play",
+    "opponent",
+    "play next",
+    "matchup",
+    "next"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "events[0].strEvent",
+   "type": "text",
+   "window": "latest",
+   "unit": null
+  },
+  {
+   "name": "start",
+   "label": "Start",
+   "words": [
+    "when",
+    "what time",
+    "start time",
+    "kickoff",
+    "tip-off",
+    "date",
+    "game time",
+    "next game",
+    "play next"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "events[0].strTimestamp",
+   "type": "time",
+   "window": "latest",
+   "utc": true,
+   "unit": null
+  },
+  {
+   "name": "venue",
+   "label": "Venue",
+   "words": [
+    "where",
+    "venue",
+    "stadium",
+    "arena",
+    "field",
+    "next game",
+    "play next"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "events[0].strVenue",
+   "type": "text",
+   "window": "latest",
+   "unit": null
+  }
+ ],
+ "rows_output_name": null,
+ "preview": {
+  "venue": "Madison Square Garden",
+  "start": "2026-10-08T19:30:00-04:00",
+  "next_game": "New York Knicks vs Washington Wizards"
+ },
+ "missing_menu": [
+  "anchorage",
+  "cold"
+ ],
+ "label": {
+  "answers_ask": "no",
+  "missing": [],
+  "wrong": [],
+  "source_ask": "Knicks schedule this month"
+ }
+}

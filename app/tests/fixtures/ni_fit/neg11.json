@@ -1,0 +1,81 @@
+{
+ "id": "neg11",
+ "ask": "top 10 cryptocurrencies by market cap",
+ "frame": {
+  "kind": "ranking",
+  "subject": "cryptocurrencies"
+ },
+ "chosen": [
+  {
+   "name": "warnings",
+   "label": "Tropical watches and warnings",
+   "words": [
+    "hurricane",
+    "hurricane warning",
+    "hurricane watch",
+    "tropical storm",
+    "tropical storm warning",
+    "storm surge",
+    "surge",
+    "headed for",
+    "coming toward",
+    "going to hit",
+    "landfall",
+    "threat",
+    "in the path",
+    "any hurricanes",
+    "evacuate"
+   ],
+   "primary": true,
+   "kind": "list",
+   "path": "features",
+   "newest_first": false,
+   "may_be_empty": true,
+   "cells": [
+    {
+     "path": "properties.event",
+     "label": "Alert",
+     "type": "text",
+     "key": "properties.event",
+     "unit": null
+    },
+    {
+     "path": "properties.areaDesc",
+     "label": "Area",
+     "type": "text",
+     "key": "properties.areaDesc",
+     "unit": null
+    },
+    {
+     "path": "properties.severity",
+     "label": "Severity",
+     "type": "text",
+     "key": "properties.severity",
+     "unit": null
+    },
+    {
+     "path": "properties.expires",
+     "label": "Until",
+     "type": "time",
+     "key": "properties.expires",
+     "unit": null
+    }
+   ]
+  }
+ ],
+ "rows_output_name": "rows",
+ "preview": {
+  "rows_count": 0,
+  "rows": []
+ },
+ "missing_menu": [
+  "cryptocurrencies",
+  "market"
+ ],
+ "label": {
+  "answers_ask": "no",
+  "missing": [],
+  "wrong": [],
+  "source_ask": "how many active hurricanes in the Pacific"
+ }
+}

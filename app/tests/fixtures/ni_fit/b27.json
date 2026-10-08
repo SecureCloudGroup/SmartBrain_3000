@@ -1,0 +1,47 @@
+{
+ "id": "b27",
+ "ask": "consumer price index over the past 12 months",
+ "frame": {
+  "kind": "trend",
+  "subject": "consumer price index"
+ },
+ "chosen": [
+  {
+   "name": "latest",
+   "label": "Consumer Price Index (all items)",
+   "words": [
+    "consumer price index (all items)",
+    "consumer price index",
+    "cpi this month",
+    "cpi index level",
+    "latest",
+    "current",
+    "now",
+    "today"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "rows[0].CPIAUCSL",
+   "type": "number",
+   "unit": "index 1982-84=100",
+   "window": "latest"
+  }
+ ],
+ "rows_output_name": null,
+ "preview": {
+  "latest": 334.131
+ },
+ "missing_menu": [
+  "consumer",
+  "index",
+  "months",
+  "over",
+  "past",
+  "price"
+ ],
+ "label": {
+  "answers_ask": "no",
+  "missing": [],
+  "wrong": []
+ }
+}

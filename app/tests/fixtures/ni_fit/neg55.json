@@ -1,0 +1,160 @@
+{
+ "id": "neg55",
+ "ask": "gasoline prices over the past month",
+ "frame": {
+  "kind": "trend",
+  "subject": "gasoline prices"
+ },
+ "chosen": [
+  {
+   "name": "periods",
+   "label": "Forecast periods",
+   "words": [
+    "forecast",
+    "this week",
+    "7 day",
+    "week",
+    "weekend",
+    "next few days",
+    "daily forecast",
+    "outlook",
+    "will it rain tomorrow",
+    "tomorrow",
+    "snow this week",
+    "storms this weekend"
+   ],
+   "primary": true,
+   "kind": "list",
+   "path": "properties.periods",
+   "newest_first": false,
+   "may_be_empty": false,
+   "cells": [
+    {
+     "path": "startTime",
+     "label": "Period",
+     "type": "time",
+     "key": "startTime",
+     "unit": null
+    },
+    {
+     "path": "temperature",
+     "label": "Temperature",
+     "type": "number",
+     "unit": "°F",
+     "key": "temperature"
+    },
+    {
+     "path": "shortForecast",
+     "label": "Conditions",
+     "type": "text",
+     "key": "shortForecast",
+     "unit": null
+    },
+    {
+     "path": "probabilityOfPrecipitation.value",
+     "label": "Rain chance",
+     "type": "number",
+     "unit": "%",
+     "key": "probabilityOfPrecipitation.value"
+    }
+   ],
+   "axis": {
+    "cell": "startTime",
+    "step": "period"
+   }
+  }
+ ],
+ "rows_output_name": "rows",
+ "preview": {
+  "rows": [
+   {
+    "detailedForecast": "Sunny, with a high near 83.",
+    "shortForecast": "Sunny",
+    "icon": "https://api.weather.gov/icons/land/day/few?size=medium",
+    "windDirection": "SW",
+    "windSpeed": "6 to 12 mph",
+    "probabilityOfPrecipitation": {
+     "value": 1,
+     "unitCode": "wmoUnit:percent"
+    },
+    "temperatureTrend": null,
+    "temperatureUnit": "F",
+    "temperature": 83,
+    "isDaytime": true,
+    "endTime": "2026-10-10T18:00:00-06:00",
+    "startTime": "2026-10-10T08:00:00-04:00",
+    "name": "Saturday",
+    "number": 7
+   },
+   {
+    "detailedForecast": "Partly cloudy, with a low around 59.",
+    "shortForecast": "Partly Cloudy",
+    "icon": "https://api.weather.gov/icons/land/night/sct?size=medium",
+    "windDirection": "SW",
+    "windSpeed": "10 mph",
+    "probabilityOfPrecipitation": {
+     "value": 0,
+     "unitCode": "wmoUnit:percent"
+    },
+    "temperatureTrend": null,
+    "temperatureUnit": "F",
+    "temperature": 59,
+    "isDaytime": false,
+    "endTime": "2026-10-11T06:00:00-06:00",
+    "startTime": "2026-10-10T20:00:00-04:00",
+    "name": "Saturday Night",
+    "number": 8
+   },
+   {
+    "detailedForecast": "Partly sunny, with a high near 79.",
+    "shortForecast": "Partly Sunny",
+    "icon": "https://api.weather.gov/icons/land/day/bkn?size=medium",
+    "windDirection": "SE",
+    "windSpeed": "6 to 9 mph",
+    "probabilityOfPrecipitation": {
+     "value": 2,
+     "unitCode": "wmoUnit:percent"
+    },
+    "temperatureTrend": null,
+    "temperatureUnit": "F",
+    "temperature": 79,
+    "isDaytime": true,
+    "endTime": "2026-10-11T18:00:00-06:00",
+    "startTime": "2026-10-11T08:00:00-04:00",
+    "name": "Sunday",
+    "number": 9
+   },
+   {
+    "detailedForecast": "Partly cloudy, with a low around 55.",
+    "shortForecast": "Partly Cloudy",
+    "icon": "https://api.weather.gov/icons/land/night/sct?size=medium",
+    "windDirection": "WNW",
+    "windSpeed": "5 to 9 mph",
+    "probabilityOfPrecipitation": {
+     "value": 13,
+     "unitCode": "wmoUnit:percent"
+    },
+    "temperatureTrend": null,
+    "temperatureUnit": "F",
+    "temperature": 55,
+    "isDaytime": false,
+    "endTime": "2026-10-12T06:00:00-06:00",
+    "startTime": "2026-10-11T20:00:00-04:00",
+    "name": "Sunday Night",
+    "number": 10
+   }
+  ]
+ },
+ "missing_menu": [
+  "gasoline",
+  "over",
+  "past",
+  "prices"
+ ],
+ "label": {
+  "answers_ask": "no",
+  "missing": [],
+  "wrong": [],
+  "source_ask": "weather summary for Denver this weekend"
+ }
+}

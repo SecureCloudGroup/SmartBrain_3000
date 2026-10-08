@@ -1,0 +1,44 @@
+{
+ "id": "a25",
+ "ask": "30 year mortgage rate history",
+ "frame": {
+  "kind": "trend",
+  "subject": "mortgage rate history"
+ },
+ "chosen": [
+  {
+   "name": "latest",
+   "label": "30-year mortgage rate",
+   "words": [
+    "30-year fixed mortgage rate",
+    "30-year mortgage rate",
+    "mortgage rates",
+    "30 year mortgage rate",
+    "latest",
+    "current",
+    "now",
+    "today"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "rows[0].MORTGAGE30US",
+   "type": "number",
+   "unit": "%",
+   "window": "latest"
+  }
+ ],
+ "rows_output_name": null,
+ "preview": {
+  "latest": 7.28
+ },
+ "missing_menu": [
+  "history",
+  "mortgage",
+  "rate"
+ ],
+ "label": {
+  "answers_ask": "partly",
+  "missing": [],
+  "wrong": []
+ }
+}

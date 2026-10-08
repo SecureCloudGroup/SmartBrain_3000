@@ -1,0 +1,831 @@
+{
+ "id": "neg35",
+ "ask": "10 year treasury yield this year",
+ "frame": {
+  "kind": null,
+  "subject": "10 year treasury yield"
+ },
+ "chosen": [
+  {
+   "name": "quakes",
+   "label": "Earthquakes",
+   "words": [
+    "earthquakes",
+    "quakes",
+    "earthquake",
+    "magnitude",
+    "where",
+    "latest",
+    "recent",
+    "shaking",
+    "near",
+    "nearby",
+    "within"
+   ],
+   "primary": true,
+   "kind": "list",
+   "path": "features",
+   "newest_first": false,
+   "may_be_empty": true,
+   "cells": [
+    {
+     "path": "properties.mag",
+     "label": "Magnitude",
+     "type": "number",
+     "key": "properties.mag",
+     "unit": null
+    },
+    {
+     "path": "properties.place",
+     "label": "Place",
+     "type": "text",
+     "key": "properties.place",
+     "unit": null
+    },
+    {
+     "path": "properties.time",
+     "label": "Time",
+     "type": "time",
+     "key": "properties.time",
+     "unit": null
+    }
+   ]
+  }
+ ],
+ "rows_output_name": "rows",
+ "preview": {
+  "rows_count": 19,
+  "rows": [
+   {
+    "id": "nc75441996",
+    "geometry": {
+     "coordinates": [
+      -122.933166503906,
+      38.7781677246094,
+      4.03000020980835
+     ],
+     "type": "Point"
+    },
+    "properties": {
+     "title": "M 3.0 - 8 km ESE of Cloverdale, CA",
+     "type": "earthquake",
+     "magType": "md",
+     "gap": 36,
+     "rms": 0.09,
+     "dmin": 0.06751,
+     "nst": 82,
+     "types": ",dyfi,focal-mechanism,nearby-cities,origin,phase-data,scitech-link,",
+     "sources": ",nc,us,",
+     "ids": ",nc75441996,us6000tym5,",
+     "code": "75441996",
+     "net": "nc",
+     "sig": 142,
+     "tsunami": 0,
+     "status": "automatic",
+     "alert": null,
+     "mmi": null,
+     "cdi": 3.1,
+     "felt": 15,
+     "detail": "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=nc75441996&format=geojson",
+     "url": "https://earthquake.usgs.gov/earthquakes/eventpage/nc75441996",
+     "tz": null,
+     "updated": 1790903769070,
+     "time": "2026-09-30T17:07:19.250000-04:00",
+     "place": "8 km ESE of Cloverdale, CA",
+     "mag": 2.99
+    },
+    "type": "Feature"
+   },
+   {
+    "id": "nc75441981",
+    "geometry": {
+     "coordinates": [
+      -122.700668334961,
+      38.7664985656738,
+      1.78999996185303
+     ],
+     "type": "Point"
+    },
+    "properties": {
+     "title": "M 2.6 - 1 km SW of Anderson Springs, CA",
+     "type": "earthquake",
+     "magType": "md",
+     "gap": 27,
+     "rms": 0.09,
+     "dmin": 0.001997,
+     "nst": 68,
+     "types": ",dyfi,focal-mechanism,nearby-cities,origin,phase-data,scitech-link,",
+     "sources": ",nc,",
+     "ids": ",nc75441981,",
+     "code": "75441981",
+     "net": "nc",
+     "sig": 109,
+     "tsunami": 0,
+     "status": "automatic",
+     "alert": null,
+     "mmi": null,
+     "cdi": 3.6,
+     "felt": 6,
+     "detail": "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=nc75441981&format=geojson",
+     "url": "https://earthquake.usgs.gov/earthquakes/eventpage/nc75441981",
+     "tz": null,
+     "updated": 1790813162379,
+     "time": "2026-09-30T16:48:14.500000-04:00",
+     "place": "1 km SW of Anderson Springs, CA",
+     "mag": 2.63
+    },
+    "type": "Feature"
+   },
+   {
+    "id": "nc75444432",
+    "geometry": {
+     "coordinates": [
+      -122.424003601074,
+      38.3988342285156,
+      8.30000019073486
+     ],
+     "type": "Point"
+    },
+    "properties": {
+     "title": "M 2.6 - 6 km W of Yountville, CA",
+     "type": "earthquake",
+     "magType": "md",
+     "gap": 32,
+     "rms": 0.15,
+     "dmin": 0.0509,
+     "nst": 81,
+     "types": ",dyfi,focal-mechanism,nearby-cities,origin,phase-data,scitech-link,",
+     "sources": ",nc,",
+     "ids": ",nc75444432,",
+     "code": "75444432",
+     "net": "nc",
+     "sig": 118,
+     "tsunami": 0,
+     "status": "automatic",
+     "alert": null,
+     "mmi": null,
+     "cdi": 3,
+     "felt": 51,
+     "detail": "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=nc75444432&format=geojson",
+     "url": "https://earthquake.usgs.gov/earthquakes/eventpage/nc75444432",
+     "tz": null,
+     "updated": 1790833028369,
+     "time": "2026-09-29T12:06:37.410000-04:00",
+     "place": "6 km W of Yountville, CA",
+     "mag": 2.58
+    },
+    "type": "Feature"
+   },
+   {
+    "id": "nc75443252",
+    "geometry": {
+     "coordinates": [
+      -123.270164489746,
+      39.3238334655762,
+      -0.379999995231628
+     ],
+     "type": "Point"
+    },
+    "properties": {
+     "title": "M 2.6 - 9 km NW of Redwood Valley, CA",
+     "type": "earthquake",
+     "magType": "md",
+     "gap": 49,
+     "rms": 0.11,
+     "dmin": 0.05951,
+     "nst": 36,
+     "types": ",dyfi,focal-mechanism,nearby-cities,origin,phase-data,scitech-link,",
+     "sources": ",nc,",
+     "ids": ",nc75443252,",
+     "code": "75443252",
+     "net": "nc",
+     "sig": 108,
+     "tsunami": 0,
+     "status": "automatic",
+     "alert": null,
+     "mmi": null,
+     "cdi": 2.7,
+     "felt": 7,
+     "detail": "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=nc75443252&format=geojson",
+     "url": "https://earthquake.usgs.gov/earthquakes/eventpage/nc75443252",
+     "tz": null,
+     "updated": 1790565991758,
+     "time": "2026-09-27T15:10:36.830000-04:00",
+     "place": "9 km NW of Redwood Valley, CA",
+     "mag": 2.63
+    },
+    "type": "Feature"
+   },
+   {
+    "id": "nc75443112",
+    "geometry": {
+     "coordinates": [
+      -121.45532989502,
+      37.4211654663086,
+      2.70000004768372
+     ],
+     "type": "Point"
+    },
+    "properties": {
+     "title": "M 2.6 - 26 km WSW of Westley, CA",
+     "type": "earthquake",
+     "magType": "md",
+     "gap": 77,
+     "rms": 0.12,
+     "dmin": 0.04655,
+     "nst": 59,
+     "types": ",dyfi,focal-mechanism,nearby-cities,origin,phase-data,scitech-link,",
+     "sources": ",nc,",
+     "ids": ",nc75443112,",
+     "code": "75443112",
+     "net": "nc",
+     "sig": 106,
+     "tsunami": 0,
+     "status": "automatic",
+     "alert": null,
+     "mmi": null,
+     "cdi": 1,
+     "felt": 0,
+     "detail": "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=nc75443112&format=geojson",
+     "url": "https://earthquake.usgs.gov/earthquakes/eventpage/nc75443112",
+     "tz": null,
+     "updated": 1790526141718,
+     "time": "2026-09-27T10:40:46.580000-04:00",
+     "place": "26 km WSW of Westley, CA",
+     "mag": 2.63
+    },
+    "type": "Feature"
+   },
+   {
+    "id": "nc75443097",
+    "geometry": {
+     "coordinates": [
+      -121.452666666667,
+      37.4158333333333,
+      3.37
+     ],
+     "type": "Point"
+    },
+    "properties": {
+     "title": "M 3.3 - 27 km WSW of Westley, CA",
+     "type": "earthquake",
+     "magType": "mw",
+     "gap": 29,
+     "rms": 0.16,
+     "dmin": 0.05195,
+     "nst": 163,
+     "types": ",dyfi,focal-mechanism,moment-tensor,nearby-cities,origin,phase-data,scitech-link,shakemap,",
+     "sources": ",nc,us,",
+     "ids": ",nc75443097,us6000txz3,",
+     "code": "75443097",
+     "net": "nc",
+     "sig": 173,
+     "tsunami": 0,
+     "status": "reviewed",
+     "alert": null,
+     "mmi": 3.499,
+     "cdi": 2,
+     "felt": 15,
+     "detail": "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=nc75443097&format=geojson",
+     "url": "https://earthquake.usgs.gov/earthquakes/eventpage/nc75443097",
+     "tz": null,
+     "updated": 1790608373793,
+     "time": "2026-09-27T10:21:50.360000-04:00",
+     "place": "27 km WSW of Westley, CA",
+     "mag": 3.32
+    },
+    "type": "Feature"
+   },
+   {
+    "id": "nc75442217",
+    "geometry": {
+     "coordinates": [
+      -123.483001708984,
+      39.013500213623,
+      3.46000003814697
+     ],
+     "type": "Point"
+    },
+    "properties": {
+     "title": "M 2.7 - 10 km W of Boonville, CA",
+     "type": "earthquake",
+     "magType": "md",
+     "gap": 63,
+     "rms": 0.09,
+     "dmin": 0.1079,
+     "nst": 29,
+     "types": ",dyfi,focal-mechanism,nearby-cities,origin,phase-data,scitech-link,",
+     "sources": ",nc,",
+     "ids": ",nc75442217,",
+     "code": "75442217",
+     "net": "nc",
+     "sig": 121,
+     "tsunami": 0,
+     "status": "automatic",
+     "alert": null,
+     "mmi": null,
+     "cdi": 3.4,
+     "felt": 17,
+     "detail": "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=nc75442217&format=geojson",
+     "url": "https://earthquake.usgs.gov/earthquakes/eventpage/nc75442217",
+     "tz": null,
+     "updated": 1790421792404,
+     "time": "2026-09-26T00:02:07.440000-04:00",
+     "place": "10 km W of Boonville, CA",
+     "mag": 2.74
+    },
+    "type": "Feature"
+   },
+   {
+    "id": "nc75442207",
+    "geometry": {
+     "coordinates": [
+      -123.477333333333,
+      39.0145,
+      4.78
+     ],
+     "type": "Point"
+    },
+    "properties": {
+     "title": "M 3.7 - 10 km W of Boonville, CA",
+     "type": "earthquake",
+     "magType": "mw",
+     "gap": 62,
+     "rms": 0.1,
+     "dmin": 0.1039,
+     "nst": 80,
+     "types": ",dyfi,focal-mechanism,moment-tensor,nearby-cities,origin,phase-data,scitech-link,shake-alert,shakemap,",
+     "sources": ",ew,nc,us,",
+     "ids": ",ew1790394170,nc75442207,us6000txr6,",
+     "code": "75442207",
+     "net": "nc",
+     "sig": 274,
+     "tsunami": 0,
+     "status": "reviewed",
+     "alert": null,
+     "mmi": 4.229,
+     "cdi": 4.3,
+     "felt": 136,
+     "detail": "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=nc75442207&format=geojson",
+     "url": "https://earthquake.usgs.gov/earthquakes/eventpage/nc75442207",
+     "tz": null,
+     "updated": 1790774325812,
+     "time": "2026-09-25T23:42:49.670000-04:00",
+     "place": "10 km W of Boonville, CA",
+     "mag": 3.74
+    },
+    "type": "Feature"
+   },
+   {
+    "id": "nc75440387",
+    "geometry": {
+     "coordinates": [
+      -121.415,
+      36.8608333333333,
+      7.36
+     ],
+     "type": "Point"
+    },
+    "properties": {
+     "title": "M 2.6 - 2 km NW of Hollister, CA",
+     "type": "earthquake",
+     "magType": "md",
+     "gap": 33,
+     "rms": 0.11,
+     "dmin": 0.01347,
+     "nst": 86,
+     "types": ",dyfi,focal-mechanism,nearby-cities,origin,phase-data,scitech-link,",
+     "sources": ",nc,us,",
+     "ids": ",nc75440387,us6000tx41,",
+     "code": "75440387",
+     "net": "nc",
+     "sig": 110,
+     "tsunami": 0,
+     "status": "reviewed",
+     "alert": null,
+     "mmi": null,
+     "cdi": 3.8,
+     "felt": 24,
+     "detail": "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=nc75440387&format=geojson",
+     "url": "https://earthquake.usgs.gov/earthquakes/eventpage/nc75440387",
+     "tz": null,
+     "updated": 1791228300040,
+     "time": "2026-09-23T12:00:10.550000-04:00",
+     "place": "2 km NW of Hollister, CA",
+     "mag": 2.56
+    },
+    "type": "Feature"
+   },
+   {
+    "id": "nc75438287",
+    "geometry": {
+     "coordinates": [
+      -121.8025,
+      37.4665,
+      3.17
+     ],
+     "type": "Point"
+    },
+    "properties": {
+     "title": "M 2.5 - 10 km ENE of Milpitas, CA",
+     "type": "earthquake",
+     "magType": "md",
+     "gap": 36,
+     "rms": 0.11,
+     "dmin": 0.01621,
+     "nst": 88,
+     "types": ",dyfi,focal-mechanism,nearby-cities,origin,phase-data,scitech-link,",
+     "sources": ",nc,us,",
+     "ids": ",nc75438287,us7000tij3,",
+     "code": "75438287",
+     "net": "nc",
+     "sig": 100,
+     "tsunami": 0,
+     "status": "reviewed",
+     "alert": null,
+     "mmi": null,
+     "cdi": 2.9,
+     "felt": 9,
+     "detail": "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=nc75438287&format=geojson",
+     "url": "https://earthquake.usgs.gov/earthquakes/eventpage/nc75438287",
+     "tz": null,
+     "updated": 1790835005040,
+     "time": "2026-09-19T06:52:05.200000-04:00",
+     "place": "10 km ENE of Milpitas, CA",
+     "mag": 2.51
+    },
+    "type": "Feature"
+   },
+   {
+    "id": "nc75437317",
+    "geometry": {
+     "coordinates": [
+      -121.619666666667,
+      36.8923333333333,
+      -0.12
+     ],
+     "type": "Point"
+    },
+    "properties": {
+     "title": "M 2.5 Quarry Blast - 2 km ENE of Aromas, CA",
+     "type": "quarry blast",
+     "magType": "md",
+     "gap": 70,
+     "rms": 0.17,
+     "dmin": 0.02356,
+     "nst": 28,
+     "types": ",nearby-cities,origin,phase-data,scitech-link,",
+     "sources": ",nc,us,",
+     "ids": ",nc75437317,us7000ti54,",
+     "code": "75437317",
+     "net": "nc",
+     "sig": 98,
+     "tsunami": 0,
+     "status": "reviewed",
+     "alert": null,
+     "mmi": null,
+     "cdi": null,
+     "felt": null,
+     "detail": "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=nc75437317&format=geojson",
+     "url": "https://earthquake.usgs.gov/earthquakes/eventpage/nc75437317",
+     "tz": null,
+     "updated": 1790776814040,
+     "time": "2026-09-17T14:14:22.970000-04:00",
+     "place": "2 km ENE of Aromas, CA",
+     "mag": 2.53
+    },
+    "type": "Feature"
+   },
+   {
+    "id": "nc75437042",
+    "geometry": {
+     "coordinates": [
+      -121.5945,
+      37.3346666666667,
+      6.55
+     ],
+     "type": "Point"
+    },
+    "properties": {
+     "title": "M 2.6 - 21 km E of Alum Rock, CA",
+     "type": "earthquake",
+     "magType": "md",
+     "gap": 50,
+     "rms": 0.09,
+     "dmin": 0.03894,
+     "nst": 107,
+     "types": ",dyfi,focal-mechanism,nearby-cities,origin,phase-data,scitech-link,",
+     "sources": ",nc,us,",
+     "ids": ",nc75437042,us7000thyw,",
+     "code": "75437042",
+     "net": "nc",
+     "sig": 102,
+     "tsunami": 0,
+     "status": "reviewed",
+     "alert": null,
+     "mmi": null,
+     "cdi": 2.2,
+     "felt": 6,
+     "detail": "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=nc75437042&format=geojson",
+     "url": "https://earthquake.usgs.gov/earthquakes/eventpage/nc75437042",
+     "tz": null,
+     "updated": 1791339395040,
+     "time": "2026-09-16T23:07:43.050000-04:00",
+     "place": "21 km E of Alum Rock, CA",
+     "mag": 2.56
+    },
+    "type": "Feature"
+   },
+   {
+    "id": "nc75436337",
+    "geometry": {
+     "coordinates": [
+      -122.669833333333,
+      38.436,
+      10.2
+     ],
+     "type": "Point"
+    },
+    "properties": {
+     "title": "M 2.6 - 3 km ESE of Santa Rosa, CA",
+     "type": "earthquake",
+     "magType": "md",
+     "gap": 18,
+     "rms": 0.13,
+     "dmin": 0.02767,
+     "nst": 128,
+     "types": ",dyfi,focal-mechanism,nearby-cities,origin,phase-data,scitech-link,",
+     "sources": ",nc,us,",
+     "ids": ",nc75436337,us7000thrn,",
+     "code": "75436337",
+     "net": "nc",
+     "sig": 150,
+     "tsunami": 0,
+     "status": "reviewed",
+     "alert": null,
+     "mmi": null,
+     "cdi": 2.7,
+     "felt": 171,
+     "detail": "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=nc75436337&format=geojson",
+     "url": "https://earthquake.usgs.gov/earthquakes/eventpage/nc75436337",
+     "tz": null,
+     "updated": 1790823633040,
+     "time": "2026-09-15T21:40:30.560000-04:00",
+     "place": "3 km ESE of Santa Rosa, CA",
+     "mag": 2.6
+    },
+    "type": "Feature"
+   },
+   {
+    "id": "nc75435557",
+    "geometry": {
+     "coordinates": [
+      -121.809829711914,
+      37.8748321533203,
+      16.9200000762939
+     ],
+     "type": "Point"
+    },
+    "properties": {
+     "title": "M 3.0 - 9 km SW of Brentwood, CA",
+     "type": "earthquake",
+     "magType": "ml",
+     "gap": 54,
+     "rms": 0.14,
+     "dmin": 0.04998,
+     "nst": 94,
+     "types": ",dyfi,focal-mechanism,nearby-cities,origin,phase-data,scitech-link,",
+     "sources": ",nc,us,",
+     "ids": ",nc75435557,us7000thdh,",
+     "code": "75435557",
+     "net": "nc",
+     "sig": 152,
+     "tsunami": 0,
+     "status": "automatic",
+     "alert": null,
+     "mmi": null,
+     "cdi": 2.7,
+     "felt": 52,
+     "detail": "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=nc75435557&format=geojson",
+     "url": "https://earthquake.usgs.gov/earthquakes/eventpage/nc75435557",
+     "tz": null,
+     "updated": 1790525775040,
+     "time": "2026-09-14T09:47:28.320000-04:00",
+     "place": "9 km SW of Brentwood, CA",
+     "mag": 2.99
+    },
+    "type": "Feature"
+   },
+   {
+    "id": "nc75434347",
+    "geometry": {
+     "coordinates": [
+      -122.7645,
+      38.8195,
+      1.44
+     ],
+     "type": "Point"
+    },
+    "properties": {
+     "title": "M 2.8 - 4 km W of Cobb, CA",
+     "type": "earthquake",
+     "magType": "md",
+     "gap": 34,
+     "rms": 0.1,
+     "dmin": 0.01174,
+     "nst": 106,
+     "types": ",dyfi,focal-mechanism,nearby-cities,origin,phase-data,scitech-link,",
+     "sources": ",nc,us,",
+     "ids": ",nc75434347,us7000th1e,",
+     "code": "75434347",
+     "net": "nc",
+     "sig": 122,
+     "tsunami": 0,
+     "status": "reviewed",
+     "alert": null,
+     "mmi": null,
+     "cdi": 3.4,
+     "felt": 3,
+     "detail": "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=nc75434347&format=geojson",
+     "url": "https://earthquake.usgs.gov/earthquakes/eventpage/nc75434347",
+     "tz": null,
+     "updated": 1790267724040,
+     "time": "2026-09-12T14:39:21.810000-04:00",
+     "place": "4 km W of Cobb, CA",
+     "mag": 2.81
+    },
+    "type": "Feature"
+   },
+   {
+    "id": "nc75434122",
+    "geometry": {
+     "coordinates": [
+      -121.820833333333,
+      37.8628333333333,
+      15.9
+     ],
+     "type": "Point"
+    },
+    "properties": {
+     "title": "M 3.1 - 9 km ENE of Blackhawk, CA",
+     "type": "earthquake",
+     "magType": "ml",
+     "gap": 25,
+     "rms": 0.19,
+     "dmin": 0.05419,
+     "nst": 193,
+     "types": ",dyfi,focal-mechanism,nearby-cities,origin,phase-data,scitech-link,",
+     "sources": ",nc,us,",
+     "ids": ",nc75434122,us7000tgxq,",
+     "code": "75434122",
+     "net": "nc",
+     "sig": 237,
+     "tsunami": 0,
+     "status": "reviewed",
+     "alert": null,
+     "mmi": null,
+     "cdi": 3.4,
+     "felt": 257,
+     "detail": "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=nc75434122&format=geojson",
+     "url": "https://earthquake.usgs.gov/earthquakes/eventpage/nc75434122",
+     "tz": null,
+     "updated": 1791306639040,
+     "time": "2026-09-12T03:25:55.810000-04:00",
+     "place": "9 km ENE of Blackhawk, CA",
+     "mag": 3.12
+    },
+    "type": "Feature"
+   },
+   {
+    "id": "nc75433297",
+    "geometry": {
+     "coordinates": [
+      -122.829,
+      38.8608333333333,
+      0.9
+     ],
+     "type": "Point"
+    },
+    "properties": {
+     "title": "M 3.0 - 10 km WNW of Cobb, CA",
+     "type": "earthquake",
+     "magType": "md",
+     "gap": 46,
+     "rms": 0.05,
+     "dmin": 0.007581,
+     "nst": 72,
+     "types": ",dyfi,focal-mechanism,nearby-cities,origin,phase-data,scitech-link,",
+     "sources": ",nc,us,",
+     "ids": ",nc75433297,us7000tgg1,",
+     "code": "75433297",
+     "net": "nc",
+     "sig": 139,
+     "tsunami": 0,
+     "status": "reviewed",
+     "alert": null,
+     "mmi": null,
+     "cdi": 4.1,
+     "felt": 3,
+     "detail": "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=nc75433297&format=geojson",
+     "url": "https://earthquake.usgs.gov/earthquakes/eventpage/nc75433297",
+     "tz": null,
+     "updated": 1790074054192,
+     "time": "2026-09-10T16:36:38.560000-04:00",
+     "place": "10 km WNW of Cobb, CA",
+     "mag": 2.99
+    },
+    "type": "Feature"
+   },
+   {
+    "id": "nc75433302",
+    "geometry": {
+     "coordinates": [
+      -122.830333333333,
+      38.8575,
+      1.56
+     ],
+     "type": "Point"
+    },
+    "properties": {
+     "title": "M 2.8 - 10 km WNW of Cobb, CA",
+     "type": "earthquake",
+     "magType": "md",
+     "gap": 29,
+     "rms": 0.09,
+     "dmin": 0.006147,
+     "nst": 89,
+     "types": ",dyfi,focal-mechanism,nearby-cities,origin,phase-data,scitech-link,",
+     "sources": ",nc,us,",
+     "ids": ",nc75433302,us7000tgg2,",
+     "code": "75433302",
+     "net": "nc",
+     "sig": 124,
+     "tsunami": 0,
+     "status": "reviewed",
+     "alert": null,
+     "mmi": null,
+     "cdi": 2,
+     "felt": 1,
+     "detail": "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=nc75433302&format=geojson",
+     "url": "https://earthquake.usgs.gov/earthquakes/eventpage/nc75433302",
+     "tz": null,
+     "updated": 1790069843697,
+     "time": "2026-09-10T16:36:17.200000-04:00",
+     "place": "10 km WNW of Cobb, CA",
+     "mag": 2.84
+    },
+    "type": "Feature"
+   },
+   {
+    "id": "nc75432677",
+    "geometry": {
+     "coordinates": [
+      -122.849833333333,
+      38.8563333333333,
+      2.15
+     ],
+     "type": "Point"
+    },
+    "properties": {
+     "title": "M 2.6 - 12 km WNW of Cobb, CA",
+     "type": "earthquake",
+     "magType": "md",
+     "gap": 29,
+     "rms": 0.07,
+     "dmin": 0.0203,
+     "nst": 86,
+     "types": ",focal-mechanism,nearby-cities,origin,phase-data,scitech-link,",
+     "sources": ",nc,",
+     "ids": ",nc75432677,",
+     "code": "75432677",
+     "net": "nc",
+     "sig": 101,
+     "tsunami": 0,
+     "status": "reviewed",
+     "alert": null,
+     "mmi": null,
+     "cdi": null,
+     "felt": null,
+     "detail": "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=nc75432677&format=geojson",
+     "url": "https://earthquake.usgs.gov/earthquakes/eventpage/nc75432677",
+     "tz": null,
+     "updated": 1789980444578,
+     "time": "2026-09-09T15:12:04.440000-04:00",
+     "place": "12 km WNW of Cobb, CA",
+     "mag": 2.56
+    },
+    "type": "Feature"
+   }
+  ]
+ },
+ "missing_menu": [
+  "treasury",
+  "yield"
+ ],
+ "label": {
+  "answers_ask": "no",
+  "missing": [],
+  "wrong": [],
+  "source_ask": "earthquakes near San Francisco on a map"
+ }
+}

@@ -1,0 +1,45 @@
+{
+ "id": "c27",
+ "ask": "gasoline prices over the past month",
+ "frame": {
+  "kind": "trend",
+  "subject": "gasoline prices"
+ },
+ "chosen": [
+  {
+   "name": "latest",
+   "label": "Regular gas price (US average)",
+   "words": [
+    "us regular gasoline price",
+    "regular gas price (us average)",
+    "gas prices",
+    "national average gas price",
+    "latest",
+    "current",
+    "now",
+    "today"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "rows[0].GASREGW",
+   "type": "number",
+   "unit": "$/gal",
+   "window": "latest"
+  }
+ ],
+ "rows_output_name": null,
+ "preview": {
+  "latest": 4.354
+ },
+ "missing_menu": [
+  "gasoline",
+  "over",
+  "past",
+  "prices"
+ ],
+ "label": {
+  "answers_ask": "partly",
+  "missing": [],
+  "wrong": []
+ }
+}
