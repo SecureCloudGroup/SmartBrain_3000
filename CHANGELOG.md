@@ -36,6 +36,17 @@ to know when a release changes behavior.
   at its next event time, and across a daylight-saving change — without
   re-fetching. "Today" and "Tomorrow" move when the calendar day actually turns
   over where the card's data lives, not when the server's clock happens to tick.
+- **A query layer that reads what an ask actually asks for (not switched on yet).** For a
+  Library source, an ask can now be turned into one small, checked query over the source's
+  declared data: which of its answers to show, which rows ("earthquakes above magnitude 4",
+  "flash flood watches"), which stretch of time ("this weekend", "the past 12 months",
+  "Thanksgiving in 2027") and in what order. The local model proposes the query once; code
+  checks every part against what the source declares, drops what the ask never said, decides
+  the columns, limits and counts itself, and reads dates and numbers from the ask with two
+  pinned language libraries rather than from the model. Each query also comes with a plain
+  line saying how it was read ("Earthquakes · Magnitude > 4 · past 7 days · count") and a
+  note when part of the ask could not be carried. This release ships the layer with its
+  measurement tool and test data; cards keep their current behaviour until it is wired in.
 
 ### Fixed
 
