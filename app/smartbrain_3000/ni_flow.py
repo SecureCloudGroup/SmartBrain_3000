@@ -702,7 +702,7 @@ def downsample(node: object, list_keep: int = _DOWNSAMPLE_LIST_KEEP) -> object:
     """POC-parity: shrink a sample by keeping the first `list_keep` items of every list.
 
     Non-recursive: a fixed for-loop over an explicit work stack (P10 #2). The
-    walk is bounded by the JSON size the fetcher already capped at 2 MB via
+    walk is bounded by the JSON size the fetcher already capped at 8 MB via
     netguard — well below a pathological deep tree.
     """
     assert isinstance(list_keep, int) and list_keep >= 1, "list_keep >= 1"

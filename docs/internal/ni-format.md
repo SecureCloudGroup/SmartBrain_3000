@@ -176,13 +176,13 @@ The full closed set (`_SOURCE_TYPES`; validators refuse anything else):
   `allow_redirects=False` through `safe_fetch_json` / `_guarded_get`, so a 3xx
   raises `FetchError("redirect refused")` before the header re-sends to a
   rewritten host. Header-free requests keep the default redirect behavior.
-- Response caps: 2 MB, `application/json`/`text/` content types, 8s per-read
+- Response caps: 8 MB, `application/json`/`text/` content types, 8s per-read
   timeout (netguard defaults).
 - **`format`** (optional; default `json`): names how the response body parses
   for the pipeline. Closed set: `json`, `csv`, `feed` (RSS + Atom), `xml`,
   `text`. Existing specs (no `format` key) run through
   `netguard.safe_fetch_json` unchanged. Every non-JSON format flows through
-  `netguard.safe_fetch_text(url, fmt)` (same SSRF guard, same 2 MB cap, same
+  `netguard.safe_fetch_text(url, fmt)` (same SSRF guard, same 8 MB cap, same
   redirect discipline; content-type allowlist scoped per format) and parses
   through `smartbrain_3000.formats` into the walker-shaped dict the pipeline
   grammar already consumes:
@@ -748,7 +748,7 @@ L0's domain (backoff) or the user's (credentials).
 - URL/param/header/credential/redirect rules are IDENTICAL to `http_json` (§3
   — frozen scheme+authority, percent-encoded params, host-bound https-only
   secrets, `allow_redirects=False` whenever any header rides).
-- Fetch via netguard with text/HTML content types, 2 MB cap. The body is then
+- Fetch via netguard with text/HTML content types, 8 MB cap. The body is then
   **extracted in a subprocess jail** (§16) — HTML parsers are historically
   vulnerable and this is the one place we parse hostile markup. Pipeline
   payload: `{"text": str, "title": str}` (text ≤ 200 KB post-extraction).
