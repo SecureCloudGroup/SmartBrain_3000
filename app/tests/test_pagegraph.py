@@ -338,7 +338,7 @@ def test_w1_graph_overflow_trims_tables_never_the_text() -> None:
     page = (b"<html><head><title>Huge</title></head><body><h1>Huge</h1>"
             + tables + b"<p>The real prose of this enormous page must still "
             b"come through the jail intact after the trim.</p></body></html>")
-    assert len(page) < 2 * 1024 * 1024  # under the parent's input cap
+    assert len(page) < 8 * 1024 * 1024  # under the parent's input cap
     g = _graph_of(page)
     assert g["title"] and isinstance(g["tables"], list)
     total_rows = sum(len(t["rows"]) for t in g["tables"])

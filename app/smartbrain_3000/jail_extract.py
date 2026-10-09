@@ -45,7 +45,7 @@ from html.parser import HTMLParser
 
 _MAX_TEXT_CHARS = 200_000        # §15 http_page payload text cap
 _MAX_TITLE_CHARS = 500           # bound on the extracted title (short human line)
-_MAX_INPUT_BYTES = 4 * 1024 * 1024  # hard stdin cap (parent already caps at 2 MB)
+_MAX_INPUT_BYTES = 16 * 1024 * 1024  # hard stdin cap (parent already caps at 8 MB)
 _RLIMIT_CPU_SECONDS = 15         # CPU seconds inside the child (wall-clock is watchdog)
 _RLIMIT_AS_BYTES = 768 * 1024 * 1024  # 768 MB address-space cap
 # The rest of the page's visible text, appended after the article text.
@@ -120,7 +120,7 @@ _MAX_ENTITY_FIELDS = 24
 _MAX_FIELD_CHARS = 300
 _MAX_TABLES = 8
 _MAX_TABLE_ROWS = 500   # list pages (rankings, schedules) run long
-# The parent reads at most 1 MB of stdout and fails the WHOLE extraction
+# The parent reads at most 4 MB of stdout and fails the WHOLE extraction
 # on overflow — graph layers must never cost the text path, so main()
 # trims them under this soft budget before writing.
 _SOFT_OUTPUT_BYTES = 900_000
