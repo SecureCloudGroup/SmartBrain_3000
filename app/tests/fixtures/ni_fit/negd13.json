@@ -1,0 +1,114 @@
+{
+ "id": "negd13",
+ "ask": "newest earthquakes above magnitude 3 in Nevada",
+ "frame": {
+  "kind": null,
+  "subject": "earthquakes"
+ },
+ "chosen": [
+  {
+   "name": "quakes",
+   "label": "Earthquakes",
+   "words": [
+    "earthquakes",
+    "quakes",
+    "earthquake",
+    "magnitude",
+    "where",
+    "latest",
+    "recent",
+    "shaking",
+    "near",
+    "nearby",
+    "within"
+   ],
+   "primary": true,
+   "kind": "list",
+   "path": "features",
+   "newest_first": false,
+   "may_be_empty": true,
+   "cells": [
+    {
+     "path": "properties.mag",
+     "label": "Magnitude",
+     "type": "number",
+     "key": "properties.mag",
+     "unit": null
+    },
+    {
+     "path": "properties.place",
+     "label": "Place",
+     "type": "text",
+     "key": "properties.place",
+     "unit": null
+    },
+    {
+     "path": "properties.time",
+     "label": "Time",
+     "type": "time",
+     "key": "properties.time",
+     "unit": null
+    }
+   ]
+  }
+ ],
+ "rows_output_name": "rows",
+ "preview": {
+  "rows_count": 1,
+  "rows": [
+   {
+    "id": "us6000txp3",
+    "geometry": {
+     "coordinates": [
+      -93.4352,
+      31.8713,
+      6.098
+     ],
+     "type": "Point"
+    },
+    "properties": {
+     "title": "M 2.7 - 9 km NE of Pleasant Hill, Louisiana",
+     "type": "earthquake",
+     "magType": "mb_lg",
+     "gap": 67,
+     "rms": 1.04,
+     "dmin": 0.142,
+     "nst": 27,
+     "types": ",dyfi,origin,phase-data,",
+     "sources": ",us,",
+     "ids": ",us6000txp3,",
+     "code": "6000txp3",
+     "net": "us",
+     "sig": 113,
+     "tsunami": 0,
+     "status": "reviewed",
+     "alert": null,
+     "mmi": null,
+     "cdi": 2.7,
+     "felt": 2,
+     "detail": "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=us6000txp3&format=geojson",
+     "url": "https://earthquake.usgs.gov/earthquakes/eventpage/us6000txp3",
+     "tz": null,
+     "updated": 1790425317516,
+     "time": "2026-09-25T20:26:11.335000+00:00",
+     "place": "9 km NE of Pleasant Hill, Louisiana",
+     "mag": 2.7
+    },
+    "type": "Feature"
+   }
+  ]
+ },
+ "missing_menu": [
+  "above",
+  "earthquakes",
+  "magnitude",
+  "nevada",
+  "newest"
+ ],
+ "label": {
+  "answers_ask": "no",
+  "missing": [],
+  "wrong": [],
+  "source_ask": "how many earthquakes hit Japan this week"
+ }
+}

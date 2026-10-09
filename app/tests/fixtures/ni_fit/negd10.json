@@ -1,0 +1,46 @@
+{
+ "id": "negd10",
+ "ask": "tide times for Galveston on Friday",
+ "frame": {
+  "kind": null,
+  "subject": "tide times"
+ },
+ "chosen": [
+  {
+   "name": "overall_status",
+   "label": "Overall status",
+   "words": [
+    "status",
+    "down",
+    "is it down",
+    "outage",
+    "up",
+    "working",
+    "operational",
+    "problems"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "status.description",
+   "type": "text",
+   "window": "now",
+   "unit": null
+  }
+ ],
+ "rows_output_name": null,
+ "preview": {
+  "overall_status": "All Systems Operational"
+ },
+ "missing_menu": [
+  "friday",
+  "galveston",
+  "tide",
+  "times"
+ ],
+ "label": {
+  "answers_ask": "no",
+  "missing": [],
+  "wrong": [],
+  "source_ask": "is GitHub having an outage right now"
+ }
+}

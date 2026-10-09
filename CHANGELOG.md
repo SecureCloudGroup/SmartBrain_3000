@@ -86,6 +86,19 @@ to know when a release changes behavior.
   matchup, start and venue) always keeps the matchup name on the card, even when
   room is tight; a day-by-day forecast cut to a weekend or a named window now
   starts on the first day it actually has, instead of padding in empty days first.
+- **A snow ask gets the snow forecast, a tide card answers the tide you asked for, a
+  team's result card is about that team, a count is the count, and a trend shows its
+  history.** "Any snow expected" used to chart the hourly temperature under the title
+  "snow" because a generic hourly answer tied with the source's own snow forecast and
+  came first; when answers tie, the one whose own name says what you asked now wins
+  (the hourly reading also gained a real snowfall field). "When is the next low tide"
+  led with the next high; the tide source now declares separate next-high and
+  next-low answers. "Result of the latest Sharks game" showed the whole league
+  scoreboard; a named team now narrows the card to its own game, or the card says
+  honestly that there is none. "How many earthquakes this week" showed one old
+  reading; a count always keeps to its window and reports the count, down to zero.
+  "Unemployment rate over the last two years" showed only the latest value; a trend
+  ask now takes the source's declared history.
 
 ### Changed
 

@@ -1,0 +1,312 @@
+{
+ "id": "18-result-of-the-latest-sharks-game",
+ "n": 18,
+ "ask": "result of the latest Sharks game",
+ "kind": "result",
+ "frame_kind": "result",
+ "subject": "Sharks",
+ "title": "Sharks",
+ "source_id": "nhl-score-now",
+ "source_url": "https://api-web.nhle.com/v1/score/now",
+ "fetched_at": "2026-10-08T16:56:50Z",
+ "viewer_tz": "UTC",
+ "answers_used": [
+  {
+   "name": "games",
+   "label": "Games",
+   "words": [
+    "hockey scores",
+    "games tonight",
+    "games",
+    "scores",
+    "tonight",
+    "today",
+    "nhl games",
+    "who plays"
+   ],
+   "primary": true,
+   "kind": "list",
+   "path": "games",
+   "newest_first": false,
+   "may_be_empty": true,
+   "cells": [
+    {
+     "path": "awayTeam.name.default",
+     "label": "Away",
+     "type": "text",
+     "key": "awayTeam.name.default",
+     "unit": ""
+    },
+    {
+     "path": "homeTeam.name.default",
+     "label": "Home",
+     "type": "text",
+     "key": "homeTeam.name.default",
+     "unit": ""
+    },
+    {
+     "path": "startTimeUTC",
+     "label": "Start",
+     "type": "time",
+     "key": "startTimeUTC",
+     "unit": ""
+    },
+    {
+     "path": "gameState",
+     "label": "State",
+     "type": "text",
+     "key": "gameState",
+     "unit": ""
+    }
+   ],
+   "axis": {
+    "cell": "startTimeUTC",
+    "step": "hour"
+   },
+   "filter": {
+    "path": "awayTeam.name.default",
+    "equals": "Sharks"
+   }
+  }
+ ],
+ "rows_output_name": "rows",
+ "outputs": {
+  "rows_count": 1,
+  "rows": [
+   {
+    "id": 2026020063,
+    "season": 20262027,
+    "gameType": 2,
+    "gameDate": "2026-10-08",
+    "venue": {
+     "default": "Enterprise Center"
+    },
+    "startTimeUTC": "2026-10-09T00:00:00+00:00",
+    "easternUTCOffset": "-04:00",
+    "venueUTCOffset": "-05:00",
+    "tvBroadcasts": [
+     {
+      "id": 329,
+      "market": "N",
+      "countryCode": "US",
+      "network": "ESPN+",
+      "sequenceNumber": 16,
+      "logoUrls": {
+       "light": "https://assets.nhle.com/logos/broadcast/329-light.svg",
+       "dark": "https://assets.nhle.com/logos/broadcast/329-dark.svg"
+      }
+     },
+     {
+      "id": 391,
+      "market": "N",
+      "countryCode": "US",
+      "network": "HULU",
+      "sequenceNumber": 17,
+      "logoUrls": {
+       "light": "https://assets.nhle.com/logos/broadcast/391-light.svg",
+       "dark": "https://assets.nhle.com/logos/broadcast/391-dark.svg"
+      }
+     },
+     {
+      "id": 574,
+      "market": "N",
+      "countryCode": "US",
+      "network": "Disney+",
+      "sequenceNumber": 21,
+      "logoUrls": {
+       "light": "https://assets.nhle.com/logos/broadcast/574-light.svg",
+       "dark": "https://assets.nhle.com/logos/broadcast/574-dark.svg"
+      }
+     },
+     {
+      "id": 549,
+      "market": "N",
+      "countryCode": "CA",
+      "network": "SN+",
+      "sequenceNumber": 117,
+      "logoUrls": {
+       "light": "https://assets.nhle.com/logos/broadcast/549-light.svg",
+       "dark": "https://assets.nhle.com/logos/broadcast/549-dark.svg"
+      }
+     }
+    ],
+    "gameState": "FUT",
+    "gameScheduleState": "OK",
+    "awayTeam": {
+     "id": 28,
+     "name": {
+      "default": "Sharks"
+     },
+     "abbrev": "SJS",
+     "record": "2-1-0",
+     "logo": "https://assets.nhle.com/logos/nhl/svg/SJS_light.svg",
+     "odds": [
+      {
+       "providerId": 9,
+       "value": "+120"
+      },
+      {
+       "providerId": 3,
+       "value": "2.28"
+      },
+      {
+       "providerId": 7,
+       "value": "+120"
+      },
+      {
+       "providerId": 8,
+       "value": "+124"
+      },
+      {
+       "providerId": 6,
+       "value": "1.62"
+      },
+      {
+       "providerId": 10,
+       "value": "3.00"
+      }
+     ]
+    },
+    "homeTeam": {
+     "id": 19,
+     "name": {
+      "default": "Blues"
+     },
+     "abbrev": "STL",
+     "record": "1-2-0",
+     "logo": "https://assets.nhle.com/logos/nhl/svg/STL_light.svg",
+     "odds": [
+      {
+       "providerId": 9,
+       "value": "-142"
+      },
+      {
+       "providerId": 3,
+       "value": "1.65"
+      },
+      {
+       "providerId": 7,
+       "value": "-144"
+      },
+      {
+       "providerId": 8,
+       "value": "-152"
+      },
+      {
+       "providerId": 6,
+       "value": "2.28"
+      },
+      {
+       "providerId": 10,
+       "value": "2.13"
+      }
+     ]
+    },
+    "gameCenterLink": "/gamecenter/sjs-vs-stl/2026/10/08/2026020063",
+    "neutralSite": false,
+    "venueTimezone": "US/Central",
+    "ticketsLink": "https://www.ticketmaster.com/event/060064EECDE41AE7?brand=nhl&wt.mc_id=NHL_LEAGUE_STL_SCORES_PG_GM1&utm_source=NHL.com&utm_medium=client&utm_campaign=NHL_LEAGUE_STL&utm_content=SCORES_PG_GM1",
+    "ticketsLinkFr": "https://www.ticketmaster.com/event/060064EECDE41AE7?brand=nhl&wt.mc_id=NHL_LEAGUE_STL_SCORES_PG_GM1&utm_source=NHL.com&utm_medium=client&utm_campaign=NHL_LEAGUE_STL&utm_content=SCORES_PG_GM1",
+    "teamLeaders": [
+     {
+      "id": 8484227,
+      "firstName": {
+       "default": "Will"
+      },
+      "lastName": {
+       "default": "Smith"
+      },
+      "headshot": "https://assets.nhle.com/mugs/nhl/20262027/SJS/8484227.png",
+      "teamAbbrev": "SJS",
+      "sweaterNumber": 2,
+      "position": "C",
+      "category": "goals",
+      "value": 2
+     },
+     {
+      "id": 8482745,
+      "firstName": {
+       "default": "Mason"
+      },
+      "lastName": {
+       "default": "McTavish"
+      },
+      "headshot": "https://assets.nhle.com/mugs/nhl/20262027/STL/8482745.png",
+      "teamAbbrev": "STL",
+      "sweaterNumber": 83,
+      "position": "C",
+      "category": "goals",
+      "value": 2
+     },
+     {
+      "id": 8484801,
+      "firstName": {
+       "default": "Macklin"
+      },
+      "lastName": {
+       "default": "Celebrini"
+      },
+      "headshot": "https://assets.nhle.com/mugs/nhl/20262027/SJS/8484801.png",
+      "teamAbbrev": "SJS",
+      "sweaterNumber": 71,
+      "position": "C",
+      "category": "assists",
+      "value": 5
+     },
+     {
+      "id": 8481580,
+      "firstName": {
+       "default": "Connor"
+      },
+      "lastName": {
+       "default": "McMichael"
+      },
+      "headshot": "https://assets.nhle.com/mugs/nhl/20262027/STL/8481580.png",
+      "teamAbbrev": "STL",
+      "sweaterNumber": 77,
+      "position": "L",
+      "category": "assists",
+      "value": 2
+     },
+     {
+      "id": 8482137,
+      "firstName": {
+       "default": "Yaroslav"
+      },
+      "lastName": {
+       "default": "Askarov"
+      },
+      "headshot": "https://assets.nhle.com/mugs/nhl/20262027/SJS/8482137.png",
+      "teamAbbrev": "SJS",
+      "sweaterNumber": 30,
+      "position": "G",
+      "category": "wins",
+      "value": 2
+     },
+     {
+      "id": 8480981,
+      "firstName": {
+       "default": "Joel"
+      },
+      "lastName": {
+       "default": "Hofer"
+      },
+      "headshot": "https://assets.nhle.com/mugs/nhl/20262027/STL/8480981.png",
+      "teamAbbrev": "STL",
+      "sweaterNumber": 30,
+      "position": "G",
+      "category": "wins",
+      "value": 1
+     }
+    ]
+   }
+  ]
+ },
+ "live_form": "stat",
+ "live_span": "d1x1",
+ "live_lint": {
+  "red": 0,
+  "amber": 0,
+  "codes": []
+ }
+}

@@ -37,10 +37,13 @@ from smartbrain_3000.ni_forms.layout import layout_span
 from smartbrain_3000.ni_forms.spans import Span
 
 ROOT = pathlib.Path(__file__).resolve().parent / "fixtures" / "ni_forms"
-SETS = ("live_2026-10-07", "live_2026-10-07b", "live_2026-10-07c")
-_EXPECTED_COUNTS = {"live_2026-10-07": 23, "live_2026-10-07b": 21, "live_2026-10-07c": 17}
+SETS = ("live_2026-10-07", "live_2026-10-07b", "live_2026-10-07c", "live_2026-10-08d")
+_EXPECTED_COUNTS = {"live_2026-10-07": 23, "live_2026-10-07b": 21, "live_2026-10-07c": 17,
+                    "live_2026-10-08d": 23}
 # D2: lookup/next_event always did; alerts/latest_items/status reach the same filter now.
-_SUBJECT_FILTER_KINDS = ("lookup", "next_event", "alerts", "latest_items", "status")
+# fix round datalayer-r2 (class W3): result/schedule reach it too -- a named team absent from
+# every row is the honest NOTHING path (not the empty_subject_filter calm-state fallback below).
+_SUBJECT_FILTER_KINDS = ("lookup", "next_event", "alerts", "latest_items", "status", "result", "schedule")
 _EMPTY_FALLBACK_KINDS = ("alerts", "latest_items", "status")
 _RESULTS: dict[str, dict[str, list[str]]] = {name: {} for name in SETS}
 
@@ -106,7 +109,11 @@ def _filtered(case: dict, exp: dict) -> tuple[list[dict], dict]:
         return answers, outputs
     assert flt == {"path": exp["subject_filter"]["cell"], "equals": exp["subject_filter"]["equals"]}, flt
     rows = [r for r in outputs[rows_name] if ni_flow._dig(r, flt["path"]) == flt["equals"]]
-    assert rows, "the subject filter selects at least one row"
+    # fix round datalayer-r2 (class W3): an already-filtered answer short-circuits in
+    # _scope_rows_to_subject before it ever searches rows (mlb-team-results' own "Final games"
+    # filter) -- a may_be_empty result source with NO Final game at all (the Mariners case) was
+    # already empty before this filter is even considered, same as before this class existed.
+    assert rows or not outputs[rows_name], "the subject filter selects at least one row"
     return [scoped], {**outputs, rows_name: rows}
 
 

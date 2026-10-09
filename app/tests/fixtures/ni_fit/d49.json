@@ -1,0 +1,42 @@
+{
+ "id": "d49",
+ "ask": "summary of today's NWS forecast discussion for Seattle",
+ "frame": {
+  "kind": "forecast",
+  "subject": "NWS forecast discussion"
+ },
+ "chosen": [
+  {
+   "name": "next_detail",
+   "label": "Forecast details (next period)",
+   "words": [
+    "details",
+    "detailed forecast",
+    "summary",
+    "describe",
+    "full forecast"
+   ],
+   "primary": false,
+   "kind": "value",
+   "path": "properties.periods[0].detailedForecast",
+   "type": "text",
+   "window": "now",
+   "unit": null
+  }
+ ],
+ "rows_output_name": null,
+ "preview": {
+  "next_detail": "Partly sunny, with a high near 68. North northwest wind around 2 mph."
+ },
+ "missing_menu": [
+  "discussion",
+  "forecast",
+  "seattle",
+  "summary"
+ ],
+ "label": {
+  "answers_ask": "partly",
+  "missing": [],
+  "wrong": []
+ }
+}

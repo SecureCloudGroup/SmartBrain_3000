@@ -1,0 +1,82 @@
+{
+ "id": "negd14",
+ "ask": "biggest ten coins ranked by trading volume",
+ "frame": {
+  "kind": "ranking",
+  "subject": "coins"
+ },
+ "chosen": [
+  {
+   "name": "latitude",
+   "label": "Latitude",
+   "words": [
+    "where is the iss",
+    "space station location",
+    "latitude",
+    "lat",
+    "position",
+    "where"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "latitude",
+   "type": "number",
+   "unit": "°",
+   "window": "now"
+  },
+  {
+   "name": "longitude",
+   "label": "Longitude",
+   "words": [
+    "where is the iss",
+    "space station location",
+    "longitude",
+    "lon",
+    "position",
+    "where"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "longitude",
+   "type": "number",
+   "unit": "°",
+   "window": "now"
+  },
+  {
+   "name": "altitude",
+   "label": "Altitude",
+   "words": [
+    "altitude",
+    "how high",
+    "height",
+    "orbit",
+    "above earth"
+   ],
+   "primary": true,
+   "kind": "value",
+   "path": "altitude",
+   "type": "number",
+   "unit": "km",
+   "window": "now"
+  }
+ ],
+ "rows_output_name": null,
+ "preview": {
+  "altitude": 433.4707060169,
+  "longitude": 125.6603005306,
+  "latitude": -47.417591146437
+ },
+ "missing_menu": [
+  "biggest",
+  "coins",
+  "ranked",
+  "trading",
+  "volume"
+ ],
+ "label": {
+  "answers_ask": "no",
+  "missing": [],
+  "wrong": [],
+  "source_ask": "plot where the space station is over the Pacific right now"
+ }
+}

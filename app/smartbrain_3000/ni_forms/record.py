@@ -448,14 +448,19 @@ def _shape_values(chosen: list[dict], outputs: dict, ask: str,
 
 
 def _shape_rows(answer: dict, outputs: dict, rows_name: str, ask: str = "",
-                wants: list | None = None) -> tuple[str, list, list, dict]:
+                wants: list | None = None, question_kind: str | None = None) -> tuple[str, list, list, dict]:
     """A list / columns answer → ``events`` (a time cell on a declared axis), ``series``
     (columns on an axis) or ``records`` — unless exactly one row survives (fix round 1a-6,
     class H: "what time is sunrise tomorrow" filters to tomorrow's single row), which reads
     like a value answer's one row (``measure``, roles by ``_apply_value_roles``) instead of a
     table forced to drop two of three columns to fit. Each cell's ``key`` (else its ``path``)
     is the row key the pipeline wrote; the sample column decides category vs text; the ask's
-    words (+ the frame's wants) decide which field leads (``asked.asked_fields``)."""
+    words (+ the frame's wants) decide which field leads (``asked.asked_fields``).
+
+    fix round datalayer-r2 (class W4): the one-row demotion never fires for a ``count`` ask
+    (B2: count -> stat count + entity_list) — a single surviving row is still the TALLY's
+    one entity, not a stand-in measure ("2.7" read as the count), and zero rows is the honest
+    count, not a table forced empty."""
     assert isinstance(answer, dict), "answer must be a dict"
     assert isinstance(rows_name, str) and rows_name, "rows_name required"
     cells = list(answer.get("cells") or [])[:_FIELD_CAP]
@@ -470,7 +475,7 @@ def _shape_rows(answer: dict, outputs: dict, rows_name: str, ask: str = "",
         fields.append(_field_from_answer(c, name, key, samples))
         columns.append(samples)
     rows, long_text = _rows_as_lists(rows_src, fields)
-    if len(rows) == 1:
+    if len(rows) == 1 and question_kind != "count":
         _apply_value_roles(fields, cells, rows[0], ask, wants=wants, allow_passage=False)
         return "measure", fields, rows, long_text
     _apply_list_roles(fields, cells, columns, set(asked_mod.asked_fields(fields, ask, wants)))
@@ -609,7 +614,7 @@ def from_answers(chosen: list[dict], outputs: dict, *, history: dict | None,
                                                       outputs, ask, wants=wants)
     elif first_kind in ("list", "columns"):
         kind, fields, rows, long_text = _shape_rows(chosen[0], outputs, rows_output_name or "rows",
-                                                    ask=ask, wants=wants)
+                                                    ask=ask, wants=wants, question_kind=question_kind)
     else:
         raise ValueError(f"from_answers: unknown answer kind {first_kind!r}")
     return _assemble(kind, fields, rows, long_text, outputs, history=history, context=context,

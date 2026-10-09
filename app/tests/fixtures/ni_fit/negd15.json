@@ -1,0 +1,42 @@
+{
+ "id": "negd15",
+ "ask": "NHL standings in the Pacific division",
+ "frame": {
+  "kind": "ranking",
+  "subject": "NHL standings"
+ },
+ "chosen": [
+  {
+   "name": "next_detail",
+   "label": "Forecast details (next period)",
+   "words": [
+    "details",
+    "detailed forecast",
+    "summary",
+    "describe",
+    "full forecast"
+   ],
+   "primary": false,
+   "kind": "value",
+   "path": "properties.periods[0].detailedForecast",
+   "type": "text",
+   "window": "now",
+   "unit": null
+  }
+ ],
+ "rows_output_name": null,
+ "preview": {
+  "next_detail": "Partly sunny, with a high near 68. North northwest wind around 2 mph."
+ },
+ "missing_menu": [
+  "division",
+  "pacific",
+  "standings"
+ ],
+ "label": {
+  "answers_ask": "no",
+  "missing": [],
+  "wrong": [],
+  "source_ask": "summary of today's NWS forecast discussion for Seattle"
+ }
+}

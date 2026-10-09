@@ -1321,7 +1321,7 @@ _ANSWER_CELL_TYPES = ("number", "text", "time", "date")
 _PARAM_SEGMENT_RE = re.compile(r"(?:^|\.)\{([a-z_][a-z0-9_]*)\}(?=$|\.|\[)")  # the dot goes too
 _MAX_ANSWERS = 20
 _MAX_VALUE_ANSWERS = 4
-_MAX_ANSWER_CELLS = 4
+_MAX_ANSWER_CELLS = 5   # fix round datalayer-r2: Open-Meteo's hourly tonight answer carries conditions, temperature, rain chance and snowfall beside its time (the Library's own cap rose with it)
 _ANSWER_STOP = frozenset({
     "a", "an", "the", "of", "in", "on", "at", "for", "to", "and", "or", "is", "are", "was", "be", "by",
     "with", "from", "as", "it", "its", "this", "that", "what", "whats", "how", "when", "where", "who",
@@ -1631,6 +1631,18 @@ def select_answers(answers: list[dict], request: str, wants: list, window: str |
         named = _measures_named(request)
         if named and not any(_covers_measure(a, m) for a in answers for m in named):
             return []
+    if frame_kind == "trend":
+        # fix round datalayer-r2 (class #27): a trend ask ("unemployment rate over the last
+        # two years") is answered by the declared HISTORY, not a tied-or-higher-scoring single
+        # reading — "Unemployment rate" (window=latest, the phrase "unemployment rate" scores
+        # a bonus) otherwise outscores "Recent readings" (generic words) though only the list
+        # is a trend. Only among answers that actually declare history (a list/columns with an
+        # axis) and only when one scores on the ask's own words (never a history nobody asked for).
+        history = [a for a in answers if a["kind"] != "value" and a.get("axis")]
+        scored_h = [(_answer_score(a, ask), a) for a in history]
+        best_h = max((s for s, _ in scored_h), default=0)
+        if best_h > 0:
+            return [next(a for s, a in scored_h if s == best_h)]
     if frame_kind != "count" and not _COUNT_ASK_RE.search(request or ""):
         answers = [a for a in answers if a.get("type") != "count"] or answers
     if _EXISTS_ASK_RE.search(request or ""):
@@ -1652,7 +1664,15 @@ def select_answers(answers: list[dict], request: str, wants: list, window: str |
         top = [a for s, a in scored if s == best]
         top.sort(key=lambda a: not (many and a["kind"] != "value"))  # stable: declared order within
         if top[0]["kind"] != "value":
-            return [top[0]]
+            # fix round datalayer-r2 (class W1, lead): among tied list / columns answers the one whose
+            # own NAME or label says an ask word wins — "any snow expected in Duluth midweek" scored the
+            # one word "snow" on both "Snow forecast" and "Tonight, hour by hour" (its words say "snow
+            # tonight"), and the declared order shipped the hourly temperature under the title "snow".
+            # Else the declared order, as before.
+            named_lists = [a for a in top if a["kind"] != "value" and any(
+                n.startswith(t) for n in _answer_tokens(f"{a['name'].replace('_', ' ')} {a['label']}")
+                for t in ask if len(t) >= 3)]
+            return [named_lists[0] if named_lists else top[0]]
         values = [a for a in top if a["kind"] == "value"]
         named = any(n.startswith(t) for a in values
                     for n in _answer_tokens(f"{a['name'].replace('_', ' ')} {a['label']}")
@@ -1870,7 +1890,7 @@ def _build_rows_answer(answer: dict, payload: dict, title: str, window: str | No
                         "value": state["code"]})
         if answer.get("newest_first"):
             ops.append({"fn": "reverse", "field": "rows"})
-        if axis and _cuts(window or "upcoming", stages, ops, payload, axis["cell"]):
+        if axis and _cuts(window or "upcoming", stages, ops, payload, axis["cell"], frame_kind=frame_kind):
             ops.append(_window_op(axis["cell"], cut, payload, stages,
                                    axis_cell=axis_cell, step=step, floor_hour=floor_hour))
     else:
@@ -1887,7 +1907,7 @@ def _build_rows_answer(answer: dict, payload: dict, title: str, window: str | No
         limit = answer.get("limit") or (12 if hourly else 7)
         ops.append({"fn": "zip", "field": keys[0], "with": keys[1:], "as": "rows"})
         key = next((k for c, k in zip(cells, keys, strict=True) if axis and c["path"] == axis["cell"]), None)
-        if key is not None and _cuts(window or "upcoming", stages, ops, payload, key):
+        if key is not None and _cuts(window or "upcoming", stages, ops, payload, key, frame_kind=frame_kind):
             ops.append(_window_op(key, cut, payload, stages, axis_cell=axis_cell, step=step,
                                    floor_hour=floor_hour))
         else:
@@ -1944,10 +1964,15 @@ def _source_zone_field(payload: dict) -> str | None:
     return None
 
 
-def _cuts(window: str, stages: list[dict], ops: list[dict], payload: dict, key: str) -> bool:
+def _cuts(window: str, stages: list[dict], ops: list[dict], payload: dict, key: str,
+         frame_kind: str | None = None) -> bool:
     """Does the window cut these rows? Not a stretch ahead over rows that all lie in the past (an
     observation-date series: "gas prices this week" on FRED's recent weeks) — the card shows the latest
-    rows instead of nothing."""
+    rows instead of nothing. fix round datalayer-r2 (class W4): a `count` ask always cuts — the card
+    is a TALLY for the asked stretch, so a row the window doesn't cover must not silently survive
+    into it (a Sep 25 earthquake read as "this week" on Oct 8); zero rows left is the honest count."""
+    if frame_kind == "count":
+        return True
     if not window.startswith(_FORWARD_WINDOWS):
         return True
     try:
@@ -2462,6 +2487,11 @@ def _other_sources_left(record: dict, url: str) -> bool:
 _ANSWERS_NOTHING = ("none of the chosen answers is in this response", "the list is empty here")
 
 
+# fix round datalayer-r2 (class W1): a card never claims a quantity it does not show. The
+# TRUTHFUL words of a chosen answer are its own ``label`` and its cells' ``label``s — never
+# the ``words`` lexicon (bait that matches an ask to a source, not a promise of what a cell
+# holds: Open-Meteo's hourly answer lists "thunderstorms tonight" to catch that ask, with no
+# cell that reports one).
 def _try_answers_build(store: ni.NIStore, item_id: str, request: str, intent: dict,
                        url: str, sample: object, call_model: Callable[[str], str] | None = None,
                        fetch_now: datetime | None = None) -> dict | None:
@@ -2517,10 +2547,17 @@ def _try_answers_build(store: ni.NIStore, item_id: str, request: str, intent: di
         when = next((a for a in answers if a["kind"] == "value" and _event_time(a)), None)
         if when is not None:
             chosen = [*chosen[:_MAX_VALUE_ANSWERS - 1], when]
-    if kind in ("lookup", "next_event") and chosen[0]["kind"] == "list":
+    if kind in ("lookup", "next_event", "result", "schedule") and chosen[0]["kind"] == "list":
         # fix round 1a-5 (class D): a lookup / next-event ask that NAMES a row ("when is Thanksgiving",
         # "the next new moon") selects that row before the card is built — a sealed row filter, so
-        # every refresh keeps it; a subject no row names (and that is not the list itself) ends honestly
+        # every refresh keeps it; a subject no row names (and that is not the list itself) ends honestly.
+        # fix round datalayer-r2 (class W3): extended to result / schedule — a named team absent from
+        # every row (home or away) is the same honest nothing ("no Sharks game in today's scores"),
+        # never another team's games; a team naming several rows across BOTH home and away stays the
+        # existing participant case (_subject_hits: one cell can't select "its" rows, the list stays
+        # whole). An already-filtered answer (mlb-team-results' "Final games" filter) short-circuits
+        # in _scope_rows_to_subject itself — an empty may_be_empty result (no Final game at all, the
+        # Mariners case) rides through unchanged, exactly as it did before this class existed.
         try:
             chosen = [_scope_rows_to_subject(chosen[0], sample, str(intent.get("subject") or ""), place)]
         except ValueError as exc:
@@ -5811,6 +5848,9 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
             note += "; this source doesn't report: " + ", ".join(answered["unanswered"])
         for extra in frame_notes:  # bounded: one per check
             note += "; " + extra
+        # fix round datalayer-r2 (class W1): lowest priority of the honest-degradation notes —
+        # _MAX_NOTE truncates from the end, and the frame-level disclosures above (wrong place,
+        # wrong window) matter more than naming which cell led the card.
         # FIT (Phase 3a, plan B3): one advisory closed local verdict on a build that already
         # passed every code check above — logged only, never a reason to move on or refuse.
         fit = _fit_check(answered, frame, intent, request, call_model)

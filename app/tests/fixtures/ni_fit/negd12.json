@@ -1,0 +1,402 @@
+{
+ "id": "negd12",
+ "ask": "latest tech news from Ars Technica",
+ "frame": {
+  "kind": "latest_items",
+  "subject": "tech news"
+ },
+ "chosen": [
+  {
+   "name": "fires",
+   "label": "Current wildfires",
+   "words": [
+    "wildfires",
+    "fires",
+    "burning",
+    "biggest fires",
+    "acres",
+    "containment",
+    "contained",
+    "fire size"
+   ],
+   "primary": true,
+   "kind": "list",
+   "path": "features",
+   "newest_first": false,
+   "may_be_empty": true,
+   "cells": [
+    {
+     "path": "attributes.IncidentName",
+     "label": "Fire",
+     "type": "text",
+     "key": "attributes.IncidentName",
+     "unit": null
+    },
+    {
+     "path": "attributes.IncidentSize",
+     "label": "Size",
+     "type": "number",
+     "unit": "acres",
+     "key": "attributes.IncidentSize"
+    },
+    {
+     "path": "attributes.PercentContained",
+     "label": "Contained",
+     "type": "number",
+     "unit": "%",
+     "key": "attributes.PercentContained"
+    },
+    {
+     "path": "attributes.FireDiscoveryDateTime",
+     "label": "Discovered",
+     "type": "time",
+     "key": "attributes.FireDiscoveryDateTime",
+     "unit": null
+    }
+   ]
+  }
+ ],
+ "rows_output_name": "rows",
+ "preview": {
+  "rows_count": 25,
+  "rows": [
+   {
+    "geometry": {
+     "y": 44.810126,
+     "x": -120.316732
+    },
+    "attributes": {
+     "POOCounty": "Wheeler",
+     "FireDiscoveryDateTime": "2026-07-15T23:20:00+00:00",
+     "PercentContained": 100,
+     "IncidentSize": 373928.6,
+     "IncidentName": "ROWE CREEK COMPLEX"
+    }
+   },
+   {
+    "geometry": {
+     "y": 44.803333,
+     "x": -120.199167
+    },
+    "attributes": {
+     "POOCounty": "Wheeler",
+     "FireDiscoveryDateTime": "2026-07-16T00:51:54+00:00",
+     "PercentContained": 100,
+     "IncidentSize": 342923,
+     "IncidentName": "0445 CROSSWHITE"
+    }
+   },
+   {
+    "geometry": {
+     "y": 43.608667,
+     "x": -119.439167
+    },
+    "attributes": {
+     "POOCounty": "Harney",
+     "FireDiscoveryDateTime": "2026-07-24T22:53:00+00:00",
+     "PercentContained": 99,
+     "IncidentSize": 105854,
+     "IncidentName": "Second Flat"
+    }
+   },
+   {
+    "geometry": {
+     "y": 45.252967,
+     "x": -121.510133
+    },
+    "attributes": {
+     "POOCounty": "Wasco",
+     "FireDiscoveryDateTime": "2026-07-24T02:41:00+00:00",
+     "PercentContained": 98,
+     "IncidentSize": 93972,
+     "IncidentName": "GRASSHOPPER"
+    }
+   },
+   {
+    "geometry": {
+     "y": 44.588568,
+     "x": -120.907094
+    },
+    "attributes": {
+     "POOCounty": "Jefferson",
+     "FireDiscoveryDateTime": "2026-07-15T23:29:00+00:00",
+     "PercentContained": 100,
+     "IncidentSize": 70821,
+     "IncidentName": "0433 BREWER"
+    }
+   },
+   {
+    "geometry": {
+     "y": 45.707,
+     "x": -118.269
+    },
+    "attributes": {
+     "POOCounty": "Umatilla",
+     "FireDiscoveryDateTime": "2026-07-16T23:20:00+00:00",
+     "PercentContained": 99,
+     "IncidentSize": 61380,
+     "IncidentName": "Hagen"
+    }
+   },
+   {
+    "geometry": {
+     "y": 42.4695,
+     "x": -121.728667
+    },
+    "attributes": {
+     "POOCounty": "Klamath",
+     "FireDiscoveryDateTime": "2026-08-05T21:56:00+00:00",
+     "PercentContained": 100,
+     "IncidentSize": 55134,
+     "IncidentName": "Wrights Spring"
+    }
+   },
+   {
+    "geometry": {
+     "y": 43.045,
+     "x": -118.955667
+    },
+    "attributes": {
+     "POOCounty": "Harney",
+     "FireDiscoveryDateTime": "2026-07-25T00:31:00+00:00",
+     "PercentContained": 92,
+     "IncidentSize": 24724,
+     "IncidentName": "Jackass Butte"
+    }
+   },
+   {
+    "geometry": {
+     "y": 44.635333,
+     "x": -120.4985
+    },
+    "attributes": {
+     "POOCounty": "Jefferson",
+     "FireDiscoveryDateTime": "2026-07-17T22:00:00+00:00",
+     "PercentContained": 100,
+     "IncidentSize": 21432,
+     "IncidentName": "0512 BOX SPRINGS"
+    }
+   },
+   {
+    "geometry": {
+     "y": 43.18,
+     "x": -118.92
+    },
+    "attributes": {
+     "POOCounty": "Harney",
+     "FireDiscoveryDateTime": "2026-07-23T18:54:00+00:00",
+     "PercentContained": 93,
+     "IncidentSize": 15673,
+     "IncidentName": "Stubble"
+    }
+   },
+   {
+    "geometry": {
+     "y": 44.827902,
+     "x": -118.280776
+    },
+    "attributes": {
+     "POOCounty": "Baker",
+     "FireDiscoveryDateTime": "2026-08-22T21:28:00+00:00",
+     "PercentContained": 91,
+     "IncidentSize": 13604,
+     "IncidentName": "McCully"
+    }
+   },
+   {
+    "geometry": {
+     "y": 45.025216,
+     "x": -121.944872
+    },
+    "attributes": {
+     "POOCounty": "Clackamas",
+     "FireDiscoveryDateTime": "2026-08-09T17:12:59+00:00",
+     "PercentContained": 98,
+     "IncidentSize": 12888,
+     "IncidentName": "AUSTIN"
+    }
+   },
+   {
+    "geometry": {
+     "y": 45.998139,
+     "x": -117.974282
+    },
+    "attributes": {
+     "POOCounty": "Wallowa",
+     "FireDiscoveryDateTime": "2026-07-16T19:38:00+00:00",
+     "PercentContained": 86,
+     "IncidentSize": 9656,
+     "IncidentName": "Paradise"
+    }
+   },
+   {
+    "geometry": {
+     "y": 44.8645,
+     "x": -120.836
+    },
+    "attributes": {
+     "POOCounty": "Wasco",
+     "FireDiscoveryDateTime": "2026-07-16T19:11:00+00:00",
+     "PercentContained": 100,
+     "IncidentSize": 9170,
+     "IncidentName": "0485 DEEP CANYON"
+    }
+   },
+   {
+    "geometry": {
+     "y": 44.942899,
+     "x": -120.346403
+    },
+    "attributes": {
+     "POOCounty": "Wheeler",
+     "FireDiscoveryDateTime": "2026-07-16T01:08:00+00:00",
+     "PercentContained": 100,
+     "IncidentSize": 7208,
+     "IncidentName": "0450 COVE CREEK"
+    }
+   },
+   {
+    "geometry": {
+     "y": 44.761667,
+     "x": -120.052
+    },
+    "attributes": {
+     "POOCounty": "Wheeler",
+     "FireDiscoveryDateTime": "2026-07-16T00:53:00+00:00",
+     "PercentContained": 100,
+     "IncidentSize": 6789,
+     "IncidentName": "0446 CAMEL HUMP"
+    }
+   },
+   {
+    "geometry": {
+     "y": 45.683083,
+     "x": -118.480617
+    },
+    "attributes": {
+     "POOCounty": "Umatilla",
+     "FireDiscoveryDateTime": "2026-07-04T22:01:00+00:00",
+     "PercentContained": 97,
+     "IncidentSize": 4887,
+     "IncidentName": "North Cayuse"
+    }
+   },
+   {
+    "geometry": {
+     "y": 44.991867,
+     "x": -118.200333
+    },
+    "attributes": {
+     "POOCounty": "Baker",
+     "FireDiscoveryDateTime": "2026-07-08T18:14:00+00:00",
+     "PercentContained": 100,
+     "IncidentSize": 2584,
+     "IncidentName": "Anthony"
+    }
+   },
+   {
+    "geometry": {
+     "y": 45.000137,
+     "x": -120.759188
+    },
+    "attributes": {
+     "POOCounty": "Wasco",
+     "FireDiscoveryDateTime": "2026-07-15T23:20:07+00:00",
+     "PercentContained": 100,
+     "IncidentSize": 2183,
+     "IncidentName": "0432"
+    }
+   },
+   {
+    "geometry": {
+     "y": 44.441967,
+     "x": -120.691883
+    },
+    "attributes": {
+     "POOCounty": "Crook",
+     "FireDiscoveryDateTime": "2026-07-24T15:46:23+00:00",
+     "PercentContained": 100,
+     "IncidentSize": 2136,
+     "IncidentName": "0611 GREEN MOUNTAIN"
+    }
+   },
+   {
+    "geometry": {
+     "y": 44.829331,
+     "x": -120.297013
+    },
+    "attributes": {
+     "POOCounty": "Wheeler",
+     "FireDiscoveryDateTime": "2026-07-17T00:58:21+00:00",
+     "PercentContained": 100,
+     "IncidentSize": 1816,
+     "IncidentName": "0502"
+    }
+   },
+   {
+    "geometry": {
+     "y": 44.1182,
+     "x": -118.7167
+    },
+    "attributes": {
+     "POOCounty": "Grant",
+     "FireDiscoveryDateTime": "2026-09-24T18:36:50+00:00",
+     "PercentContained": "—",
+     "IncidentSize": 1620,
+     "IncidentName": "Wolf A RX"
+    }
+   },
+   {
+    "geometry": {
+     "y": 44.717021,
+     "x": -118.510204
+    },
+    "attributes": {
+     "POOCounty": "Grant",
+     "FireDiscoveryDateTime": "2026-07-08T07:16:00+00:00",
+     "PercentContained": 100,
+     "IncidentSize": 1433,
+     "IncidentName": "Salmon"
+    }
+   },
+   {
+    "geometry": {
+     "y": 44.72533,
+     "x": -120.33328
+    },
+    "attributes": {
+     "POOCounty": "Wheeler",
+     "FireDiscoveryDateTime": "2026-07-16T23:27:15+00:00",
+     "PercentContained": 100,
+     "IncidentSize": 772,
+     "IncidentName": "0501 PAT'S CABIN"
+    }
+   },
+   {
+    "geometry": {
+     "y": 45.701354,
+     "x": -117.251676
+    },
+    "attributes": {
+     "POOCounty": "Wallowa",
+     "FireDiscoveryDateTime": "2026-09-30T19:52:16+00:00",
+     "PercentContained": "—",
+     "IncidentSize": 719,
+     "IncidentName": "Starvation 11A Rx"
+    }
+   }
+  ]
+ },
+ "missing_menu": [
+  "from",
+  "news",
+  "tech",
+  "technica"
+ ],
+ "label": {
+  "answers_ask": "no",
+  "missing": [],
+  "wrong": [],
+  "source_ask": "how many active wildfires are burning in Oregon"
+ }
+}

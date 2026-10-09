@@ -1,0 +1,90 @@
+{
+ "id": "d17",
+ "ask": "tide times for Galveston on Friday",
+ "frame": {
+  "kind": null,
+  "subject": "tide times"
+ },
+ "chosen": [
+  {
+   "name": "tides",
+   "label": "High and low tides",
+   "words": [
+    "tides",
+    "tide",
+    "tide times",
+    "tide chart",
+    "tide table",
+    "tide schedule"
+   ],
+   "primary": true,
+   "kind": "list",
+   "path": "predictions",
+   "newest_first": false,
+   "may_be_empty": false,
+   "cells": [
+    {
+     "path": "t",
+     "label": "Time",
+     "type": "time",
+     "key": "t",
+     "unit": null
+    },
+    {
+     "path": "type",
+     "label": "High/Low",
+     "type": "text",
+     "key": "type",
+     "unit": null
+    },
+    {
+     "path": "v",
+     "label": "Height",
+     "type": "number",
+     "unit": "ft",
+     "key": "v"
+    }
+   ],
+   "axis": {
+    "cell": "t",
+    "step": "hour"
+   }
+  }
+ ],
+ "rows_output_name": "rows",
+ "preview": {
+  "rows": [
+   {
+    "type": "H",
+    "v": 1.575,
+    "t": "2026-10-09T04:40:00+00:00"
+   },
+   {
+    "type": "L",
+    "v": 0.943,
+    "t": "2026-10-09T10:58:00+00:00"
+   },
+   {
+    "type": "H",
+    "v": 1.711,
+    "t": "2026-10-09T17:21:00+00:00"
+   },
+   {
+    "type": "L",
+    "v": 1.218,
+    "t": "2026-10-09T23:29:00+00:00"
+   }
+  ]
+ },
+ "missing_menu": [
+  "friday",
+  "galveston",
+  "tide",
+  "times"
+ ],
+ "label": {
+  "answers_ask": "yes",
+  "missing": [],
+  "wrong": []
+ }
+}

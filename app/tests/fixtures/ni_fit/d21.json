@@ -1,0 +1,208 @@
+{
+ "id": "d21",
+ "ask": "latest tech news from Ars Technica",
+ "frame": {
+  "kind": "latest_items",
+  "subject": "tech news"
+ },
+ "chosen": [
+  {
+   "name": "latest",
+   "label": "Headlines",
+   "words": [
+    "business news",
+    "entertainment news",
+    "health news",
+    "latest on",
+    "news about",
+    "politics",
+    "politics news",
+    "science news",
+    "sports news",
+    "tech news",
+    "technology news",
+    "world news",
+    "headlines",
+    "news",
+    "latest"
+   ],
+   "primary": true,
+   "kind": "list",
+   "path": "items",
+   "newest_first": false,
+   "may_be_empty": false,
+   "cells": [
+    {
+     "path": "title",
+     "label": "Title",
+     "type": "text",
+     "key": "title",
+     "unit": null
+    },
+    {
+     "path": "published",
+     "label": "Published",
+     "type": "time",
+     "key": "published",
+     "unit": null
+    }
+   ]
+  }
+ ],
+ "rows_output_name": "rows",
+ "preview": {
+  "rows": [
+   {
+    "published": "2026-10-08T14:04:42+00:00",
+    "summary": "Court filings reveal new details about Exxon's decades of internal climate deliberations.",
+    "link": "https://arstechnica.com/tech-policy/2026/10/exxonmobils-own-scientists-doubted-climate-fixes-the-company-hyped/",
+    "title": "Internal files add to evidence of an ExxonMobil climate deception campaign",
+    "guid": "https://arstechnica.com/tech-policy/2026/10/exxonmobils-own-scientists-doubted-climate-fixes-the-company-hyped/"
+   },
+   {
+    "published": "2026-10-08T11:15:33+00:00",
+    "summary": "Full-stack safety solution for physical AI is being used by robotics companies.",
+    "link": "https://arstechnica.com/ai/2026/10/nvidias-big-bet-on-physical-ai-aims-for-safer-robotaxis-humanoid-robots/",
+    "title": "Nvidia's big bet on physical AI aims for safer robotaxis, humanoid robots",
+    "guid": "https://arstechnica.com/ai/2026/10/nvidias-big-bet-on-physical-ai-aims-for-safer-robotaxis-humanoid-robots/"
+   },
+   {
+    "published": "2026-10-08T11:00:14+00:00",
+    "summary": "Sen. Blanche Lincoln wrote law that let US ban sports-event contracts. She lobbies for the other side now.",
+    "link": "https://arstechnica.com/tech-policy/2026/10/a-senator-tried-to-ban-gambling-on-prediction-markets-now-shes-a-kalshi-lobbyist/",
+    "title": "A senator tried to ban gambling on prediction markets—now she's a Kalshi lobbyist",
+    "guid": "https://arstechnica.com/tech-policy/2026/10/a-senator-tried-to-ban-gambling-on-prediction-markets-now-shes-a-kalshi-lobbyist/"
+   },
+   {
+    "published": "2026-10-08T00:00:24+00:00",
+    "summary": "Get ready for more AI in your Windows and more AI on the desktop.",
+    "link": "https://arstechnica.com/gadgets/2026/10/microsoft-event-debuts-new-ai-friendly-hardware-and-windows-changes/",
+    "title": "Microsoft event debuts new AI-friendly hardware and Windows changes",
+    "guid": "https://arstechnica.com/gadgets/2026/10/microsoft-event-debuts-new-ai-friendly-hardware-and-windows-changes/"
+   },
+   {
+    "published": "2026-10-07T21:56:42+00:00",
+    "summary": "Opus-built Creative Cloud alternatives are ambitious, free, and nowhere near finished.",
+    "link": "https://arstechnica.com/ai/2026/10/software-is-over-bold-ai-developer-takes-aim-at-adobe-with-open-source-clones/",
+    "title": "“Software is over”: Bold AI developer takes aim at Adobe with open source clones",
+    "guid": "https://arstechnica.com/ai/2026/10/software-is-over-bold-ai-developer-takes-aim-at-adobe-with-open-source-clones/"
+   },
+   {
+    "published": "2026-10-07T20:01:14+00:00",
+    "summary": "Pennsylvania reported 1,066 outbreak-linked cases on Wednesday.",
+    "link": "https://arstechnica.com/health/2026/10/pa-measles-outbreak-tops-1000-cases-largest-since-disease-was-eliminated/",
+    "title": "PA measles outbreak tops 1,000 cases, largest since disease was eliminated",
+    "guid": "https://arstechnica.com/health/2026/10/pa-measles-outbreak-tops-1000-cases-largest-since-disease-was-eliminated/"
+   },
+   {
+    "published": "2026-10-07T19:53:42+00:00",
+    "summary": "TP-Link can't sell latest routers in US, still needs exemption from FCC ban.",
+    "link": "https://arstechnica.com/tech-policy/2026/10/florida-sues-tp-link-claiming-it-hides-router-security-risks-and-links-to-china/",
+    "title": "TP-Link problems in US grow amid FCC router ban and four state lawsuits",
+    "guid": "https://arstechnica.com/tech-policy/2026/10/florida-sues-tp-link-claiming-it-hides-router-security-risks-and-links-to-china/"
+   },
+   {
+    "published": "2026-10-07T18:48:18+00:00",
+    "summary": "Altering molecular handedness has implications for the origins of life.",
+    "link": "https://arstechnica.com/science/2026/10/chemistry-nobel-goes-to-reactions-like-those-that-gave-life-a-hand/",
+    "title": "Chemistry Nobel goes to reactions like those that gave life a hand",
+    "guid": "https://arstechnica.com/science/2026/10/chemistry-nobel-goes-to-reactions-like-those-that-gave-life-a-hand/"
+   },
+   {
+    "published": "2026-10-07T18:24:39+00:00",
+    "summary": "In renewed policy, pediatricians review the benefits of heating milk to kill germs.",
+    "link": "https://arstechnica.com/health/2026/10/pediatricians-renew-call-to-ban-raw-milk-as-anti-science-rhetoric-reigns/",
+    "title": "Pediatricians renew call to ban raw milk as anti-science rhetoric reigns",
+    "guid": "https://arstechnica.com/health/2026/10/pediatricians-renew-call-to-ban-raw-milk-as-anti-science-rhetoric-reigns/"
+   },
+   {
+    "published": "2026-10-07T17:57:39+00:00",
+    "summary": "Man gets 18 months for AI scheme stealing $8M in music streaming royalties.",
+    "link": "https://arstechnica.com/tech-policy/2026/10/outstreaming-taylor-swift-is-easy-with-10k-bots-and-ai-songs-fraudster-admits/",
+    "title": "Fraudster jailed for using 10K bots and AI songs to outstream Taylor Swift",
+    "guid": "https://arstechnica.com/tech-policy/2026/10/outstreaming-taylor-swift-is-easy-with-10k-bots-and-ai-songs-fraudster-admits/"
+   },
+   {
+    "published": "2026-10-07T15:48:01+00:00",
+    "summary": "Car design sure riles people up on the Internet these days. Goes double for EVs.",
+    "link": "https://arstechnica.com/cars/2026/10/jaguar-makes-its-controversial-all-ev-return-with-the-type-01/",
+    "title": "Jaguar Type 01 debuts; now, no one remembers the electric Ferrari",
+    "guid": "https://arstechnica.com/cars/2026/10/jaguar-makes-its-controversial-all-ev-return-with-the-type-01/"
+   },
+   {
+    "published": "2026-10-07T15:19:05+00:00",
+    "summary": "Trump's aggressive reshoring push could cost tech firms $230 billion, CTA estimates.",
+    "link": "https://arstechnica.com/tech-policy/2026/10/trade-group-crunches-numbers-on-trumps-impossible-push-for-100-us-made-tech/",
+    "title": "Trade group crunches numbers on Trump’s impossible push for 100% US-made tech",
+    "guid": "https://arstechnica.com/tech-policy/2026/10/trade-group-crunches-numbers-on-trumps-impossible-push-for-100-us-made-tech/"
+   },
+   {
+    "published": "2026-10-07T14:12:37+00:00",
+    "summary": "Mistral says Le Chonk can rival top closed models while remaining open-weight.",
+    "link": "https://arstechnica.com/ai/2026/10/mistral-says-le-chonk-can-challenge-the-best-ai-models/",
+    "title": "Mistral says \"Le Chonk\" can challenge the best AI models",
+    "guid": "https://arstechnica.com/ai/2026/10/mistral-says-le-chonk-can-challenge-the-best-ai-models/"
+   },
+   {
+    "published": "2026-10-07T14:00:08+00:00",
+    "summary": "The new SynthID website can now identify AI content from Google, OpenAI, and more.",
+    "link": "https://arstechnica.com/ai/2026/10/google-rolls-out-improved-synthid-ai-content-detector-now-available-globally/",
+    "title": "Google rolls out improved SynthID AI content detector, now available globally",
+    "guid": "https://arstechnica.com/ai/2026/10/google-rolls-out-improved-synthid-ai-content-detector-now-available-globally/"
+   },
+   {
+    "published": "2026-10-07T13:56:38+00:00",
+    "summary": "More than just a sponsor: OpenAI has been helping Ganassi with setups.",
+    "link": "https://arstechnica.com/cars/2026/10/ai-ml-setups-became-a-tool-in-indycar-champion-alex-palous-toolbox/",
+    "title": "AI/ML is becoming a performance factor in motorsport",
+    "guid": "https://arstechnica.com/cars/2026/10/ai-ml-setups-became-a-tool-in-indycar-champion-alex-palous-toolbox/"
+   },
+   {
+    "published": "2026-10-07T13:01:28+00:00",
+    "summary": "Its excesses may try one’s patience at times, but the film sticks the landing with a savagely moving finale.",
+    "link": "https://arstechnica.com/culture/2026/10/review-digger-is-both-frustrating-and-brilliant-by-design/",
+    "title": "Review: Fine, let's talk about Digger",
+    "guid": "https://arstechnica.com/culture/2026/10/review-digger-is-both-frustrating-and-brilliant-by-design/"
+   },
+   {
+    "published": "2026-10-07T11:00:40+00:00",
+    "summary": "\"We are in the era of people interested in having good deals, and LISA is a very good deal for the US.\"",
+    "link": "https://arstechnica.com/space/2026/10/nasa-is-keen-on-pursuing-at-least-one-joint-science-mission-with-europe/",
+    "title": "If you're looking, here's a \"good deal\" for NASA and the European Space Agency",
+    "guid": "https://arstechnica.com/space/2026/10/nasa-is-keen-on-pursuing-at-least-one-joint-science-mission-with-europe/"
+   },
+   {
+    "published": "2026-10-06T21:31:10+00:00",
+    "summary": "Two cargo ships have sunk, one ship was afire, and sailors are dead or missing.",
+    "link": "https://arstechnica.com/gadgets/2026/10/drone-strikes-likely-russian-sink-ships-in-nato-countries-economic-zones/",
+    "title": "Drones sink ships near NATO countries in “unacceptable” attacks, EU says",
+    "guid": "https://arstechnica.com/gadgets/2026/10/drone-strikes-likely-russian-sink-ships-in-nato-countries-economic-zones/"
+   },
+   {
+    "published": "2026-10-06T20:50:32+00:00",
+    "summary": "Like other solutions, it is not especially reliable, and it's easy to circumvent.",
+    "link": "https://arstechnica.com/ai/2026/10/openai-will-watermark-chatgpt-outputs-by-default-but-only-in-the-eu/",
+    "title": "OpenAI will watermark ChatGPT outputs by default—but only in the EU",
+    "guid": "https://arstechnica.com/ai/2026/10/openai-will-watermark-chatgpt-outputs-by-default-but-only-in-the-eu/"
+   },
+   {
+    "published": "2026-10-06T20:32:12+00:00",
+    "summary": "A combined service could lead to higher prices.",
+    "link": "https://arstechnica.com/gadgets/2026/10/hbo-max-paramount-and-discovery-will-unify-into-a-single-service/",
+    "title": "HBO Max, Paramount+, and Discovery+ \"will unify into a single service”",
+    "guid": "https://arstechnica.com/gadgets/2026/10/hbo-max-paramount-and-discovery-will-unify-into-a-single-service/"
+   }
+  ]
+ },
+ "missing_menu": [
+  "from",
+  "news",
+  "tech",
+  "technica"
+ ],
+ "label": {
+  "answers_ask": "yes",
+  "missing": [],
+  "wrong": []
+ }
+}
