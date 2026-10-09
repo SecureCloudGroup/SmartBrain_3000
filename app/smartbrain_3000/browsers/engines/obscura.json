@@ -1,0 +1,131 @@
+{
+  "name": "obscura",
+  "version": "0.2.4",
+  "released": "2026-10-04",
+  "source_url_template": "https://github.com/h4ckf0r0day/obscura/releases/download/v{version}/{asset}",
+  "platforms": {
+    "darwin-arm64": {
+      "asset": "obscura-aarch64-macos.tar.gz",
+      "sha256": "456210fe48e77324a064477fe450452a58709940a50e71678ae6638a3e5095ec",
+      "size": 66840143,
+      "members": {
+        "obscura": {
+          "sha256": "04c02e6b826cb96de2136ad3c6931c6ec3cf87b6912b3d50191a5d00dbecda13",
+          "size": 72411536
+        }
+      }
+    },
+    "linux-x86_64": {
+      "asset": "obscura-x86_64-linux.tar.gz",
+      "sha256": "757e7b597ba5cdd53af9fc701e0a9b80f0a8d788f545d4f82ec9ad32db77f000",
+      "size": 71241984,
+      "members": {
+        "obscura": {
+          "sha256": "bce11fcf3bcb83251c76e60bb61600697691690bfb8945f9ad9e20b634560ed0",
+          "size": 80542808
+        }
+      }
+    },
+    "linux-aarch64": {
+      "asset": "obscura-aarch64-linux.tar.gz",
+      "sha256": "d9ba3719c2442a227567d7664b5505b38ab68236f3f5388884eee2e27f55db28",
+      "size": 69167573,
+      "members": {
+        "obscura": {
+          "sha256": "1896c07e46c18033a7a6f75a152e11557b910ad9ea5ef59c79d9c63e69103e5b",
+          "size": 77925352
+        }
+      }
+    }
+  },
+  "files": [
+    {
+      "name": "obscura",
+      "mode": "0755",
+      "install": true
+    },
+    {
+      "name": "obscura-worker",
+      "mode": "0644",
+      "install": false
+    }
+  ],
+  "executable": "obscura",
+  "capabilities": [
+    "render",
+    "js",
+    "assets"
+  ],
+  "argv": {
+    "fetch": [
+      "--v8-flags",
+      "--max-old-space-size={heap_mb}",
+      "--proxy",
+      "http://127.0.0.1:{proxy_port}",
+      "--storage-dir",
+      "{run_dir}/storage",
+      "fetch",
+      "{url}",
+      "--timeout",
+      "{timeout_s}",
+      "--wait-until",
+      "load",
+      "--dump",
+      "html",
+      "--output",
+      "{output_path}"
+    ],
+    "assets": [
+      "--v8-flags",
+      "--max-old-space-size={heap_mb}",
+      "--proxy",
+      "http://127.0.0.1:{proxy_port}",
+      "--storage-dir",
+      "{run_dir}/storage",
+      "fetch",
+      "{url}",
+      "--timeout",
+      "{timeout_s}",
+      "--wait-until",
+      "load",
+      "--dump",
+      "assets",
+      "--output",
+      "{output_path}"
+    ],
+    "honest": [
+      "--user-agent",
+      "{user_agent}"
+    ]
+  },
+  "forbidden_flags": [
+    "--allow-private-network",
+    "--host",
+    "--port",
+    "-p",
+    "--eval",
+    "-e",
+    "--file",
+    "--screenshot",
+    "-s",
+    "--quiet",
+    "-q",
+    "serve",
+    "mcp",
+    "scrape",
+    "--stealth"
+  ],
+  "limits": {
+    "timeout_s": 20,
+    "script_deadline_ms": 15000,
+    "heap_mb": 512,
+    "rss_mb": 1536,
+    "rlimit_data_mb": 0,
+    "html_cap_bytes": 8000000
+  },
+  "identity": {
+    "mode": "mimic",
+    "pool_size": 8
+  },
+  "min_glibc": "2.35"
+}

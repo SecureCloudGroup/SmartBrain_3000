@@ -36,6 +36,16 @@ to know when a release changes behavior.
   at its next event time, and across a daylight-saving change — without
   re-fetching. "Today" and "Tomorrow" move when the calendar day actually turns
   over where the card's data lives, not when the server's clock happens to tick.
+- **A page browser component, built but not switched on yet.** SmartBrain can now carry a
+  pinned headless browser (Obscura 0.2.4) for pages that only show their data once their
+  scripts run. It is downloaded only from the exact GitHub release this version pins, checked
+  byte for byte before it is unpacked and again before every use, and it can reach the
+  network only through SmartBrain's own guard, which refuses your computer, your local
+  network and any site outside what the page is allowed to load. Nothing is rendered with
+  it yet: the operating-system confinement it requires comes in a following release, and
+  until then Settings → Status lists the engine as unavailable and the doctor reports
+  leftover download pieces or stray engine processes. `SMARTBRAIN_NO_BROWSER=1` switches
+  the component off entirely.
 
 ### Fixed
 
