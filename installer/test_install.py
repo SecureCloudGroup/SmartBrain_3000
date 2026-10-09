@@ -9,6 +9,8 @@ invoked. Run on the host (installer/ is not in the app image):
 from __future__ import annotations
 
 import importlib.util
+import os
+import re
 import sys
 from pathlib import Path
 
@@ -890,3 +892,59 @@ def test_request_install_speaks_to_the_running_app_old_or_new(tmp_path, monkeypa
     (m.launcher_dir / "local-api.token").write_text("L" * 43 + "\n")
     doctor._request_install(m)
     assert sent[-1] == {"x-sb-local": "1", "Authorization": "Bearer " + "L" * 43}
+
+
+# --- page-browser engines (app ni-format §35) ----------------------------------------
+
+
+def _browsers(m) -> Path:
+    root = m.db_path.parent / doctor.BROWSERS_DIR
+    (root / "obscura" / "0.2.4").mkdir(parents=True)
+    (root / "obscura" / "0.2.4" / doctor.BROWSER_INSTALLED).write_text("{}")
+    (root / "obscura" / "0.2.4" / "obscura").write_bytes(b"x" * 2048)
+    return root
+
+
+def test_installed_page_browser_engines_are_listed(tmp_path, world):
+    m = _healthy(tmp_path, world)
+    _browsers(m)
+    sections, _ = doctor.diagnose(m)
+    assert "Page browser obscura 0.2.4 is installed" in _titles(sections)
+    assert not _levels(sections, doctor.FAIL)
+
+
+def test_no_browser_folder_means_no_browser_findings(tmp_path, world):
+    m = _healthy(tmp_path, world)
+    sections, _ = doctor.diagnose(m)
+    assert not [t for t in _titles(sections) if "browser" in t.lower() and "cache" not in t.lower()]
+
+
+def test_interrupted_page_browser_downloads_are_offered_for_removal(tmp_path, world):
+    m = _healthy(tmp_path, world)
+    root = _browsers(m)
+    part = root / "obscura" / "0.2.5.tar.gz.part"
+    part.write_bytes(b"half")
+    partial = root / "obscura" / "0.2.5.partial"
+    partial.mkdir()
+    sections, _ = doctor.diagnose(m)
+    finding = next(f for f in _levels(sections, doctor.WARN) if "page-browser download" in f.title)
+    assert str(part) in finding.fix.explain and str(partial) in finding.fix.explain
+    finding.fix.run()
+    assert not part.exists() and not partial.exists()
+    assert (root / "obscura" / "0.2.4" / "obscura").exists()  # the installed engine stays
+
+
+def test_engine_processes_are_found_by_path_and_never_killed(tmp_path, world):
+    m = _healthy(tmp_path, world)
+    root = _browsers(m)
+    marker = re.sub(r"([.^$*+?()\[\]{}|\\])", r"\\\1", str(root) + os.sep)
+    world.matches[marker] = [4242]
+    sections, _ = doctor.diagnose(m)
+    finding = next(f for f in sections[-1].findings if "page" in f.title.lower() and "4242" in f.detail)
+    assert finding.level == doctor.NOTE and finding.fix is None  # the app is up: a render in flight
+    world.http = {}  # the app is down: the same process is a stray
+    sections, _ = doctor.diagnose(m)
+    finding = next(f for f in sections[-1].findings if "4242" in f.detail)
+    assert finding.level == doctor.WARN and finding.fix is None
+    assert "without SmartBrain" in finding.title
+    assert not [c for c in world.commands if c and c[0] in ("kill", "pkill")]
