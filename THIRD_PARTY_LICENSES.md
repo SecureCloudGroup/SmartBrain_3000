@@ -7,7 +7,7 @@ is a summary — the authoritative license text ships with each package.
 
 ## Runtime (Python — shipped in the Docker image; pinned in `app/requirements.lock`)
 
-The complete runtime set (82 packages) is exact-version pinned in [`app/requirements.lock`](app/requirements.lock). All are permissive (MIT / BSD / Apache-2.0 / ISC / PSF) **except** the weak/file-level-copyleft components called out below; their notices ship unmodified inside each package.
+The complete runtime set (94 packages) is exact-version pinned in [`app/requirements.lock`](app/requirements.lock). All are permissive (MIT / BSD / Apache-2.0 / ISC / PSF) **except** the weak/file-level-copyleft components called out below; their notices ship unmodified inside each package.
 
 | Component | Purpose | License |
 |-----------|---------|---------|
@@ -28,9 +28,11 @@ The complete runtime set (82 packages) is exact-version pinned in [`app/requirem
 | courlan | transitive dependency | Apache-2.0 |
 | cryptography | AES-GCM at rest | Apache-2.0 OR BSD-3-Clause |
 | ctranslate2 | Voice: Whisper inference engine | MIT |
+| datedelta | transitive dependency (ms-recognizers-text-date-time) | BSD-3-Clause |
 | dateparser | transitive dependency | BSD-3-Clause |
 | dnspython | transitive dependency | ISC |
 | duckdb | Embedded DB | MIT |
+| emoji | transitive dependency (ms-recognizers-text) | BSD-3-Clause |
 | et_xmlfile | transitive dependency (openpyxl) | MIT |
 | fastapi | HTTP framework | MIT |
 | faster-whisper | Voice: local Whisper runtime | MIT |
@@ -38,6 +40,7 @@ The complete runtime set (82 packages) is exact-version pinned in [`app/requirem
 | flatbuffers | transitive dependency (onnxruntime) | Apache-2.0 |
 | fsspec | transitive dependency (huggingface_hub) | BSD-3-Clause |
 | google-crc32c | transitive dependency | Apache-2.0 |
+| grapheme | transitive dependency (ms-recognizers-text-choice) | MIT |
 | h11 | transitive dependency | MIT |
 | hf-xet | transitive dependency (huggingface_hub) | Apache-2.0 |
 | htmldate | transitive dependency | Apache-2.0 |
@@ -54,12 +57,21 @@ The complete runtime set (82 packages) is exact-version pinned in [`app/requirem
 | lxml | transitive dependency | BSD-3-Clause |
 | lxml_html_clean | transitive dependency | BSD-3-Clause |
 | mcp | Model Context Protocol server | MIT |
+| ms-recognizers-text | transitive dependency (ms-recognizers-text-suite) | MIT |
+| ms-recognizers-text-choice | transitive dependency (ms-recognizers-text-suite) | MIT |
+| ms-recognizers-text-date-time | transitive dependency (ms-recognizers-text-suite) | MIT |
+| ms-recognizers-text-number | transitive dependency (ms-recognizers-text-suite) | MIT |
+| ms-recognizers-text-number-with-unit | transitive dependency (ms-recognizers-text-suite) | MIT |
+| ms-recognizers-text-sequence | transitive dependency (ms-recognizers-text-suite) | MIT |
+| ms-recognizers-text-suite | NI query layer: date/time, number, unit and ordinal recognizers (community fork of Microsoft Recognizers-Text) | MIT |
+| multipledispatch | transitive dependency (ms-recognizers-text) | BSD-3-Clause |
 | numpy | Vector math (semantic search; voice audio) | BSD-3-Clause |
 | onnxruntime | transitive dependency (faster-whisper VAD) | MIT |
 | openpyxl | Excel (.xlsx) ingestion | MIT |
 | packaging | transitive dependency | Apache-2.0 OR BSD-2-Clause |
 | Pillow | transitive dependency (python-pptx image handling) | HPND (Pillow license) |
 | protobuf | transitive dependency (onnxruntime) | BSD-3-Clause |
+| puckling | NI query layer: time, holiday and duration recognizer (a Python port of Duckling) | Apache-2.0 |
 | pycparser | transitive dependency | BSD-2-Clause |
 | pydantic | Request validation | MIT |
 | pydantic_core | transitive dependency | MIT |

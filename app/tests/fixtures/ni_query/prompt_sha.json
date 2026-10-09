@@ -1,0 +1,803 @@
+{
+"A1": {
+"zero": "f6a633d4cd90",
+"few": "3f1bdc2fd8df",
+"examples": [
+"B1",
+"A3",
+"D3"
+]
+},
+"A3": {
+"zero": "303550268d41"
+},
+"A4": {
+"zero": "96d65e1eb927"
+},
+"A5": {
+"zero": "fc859748210f",
+"few": "0084fec2b813",
+"examples": [
+"A6",
+"E8",
+"A4"
+]
+},
+"A6": {
+"zero": "0c32c58fe898"
+},
+"A7": {
+"zero": "c5f08b82e3b3",
+"few": "82c38bad0655",
+"examples": [
+"A4",
+"A6",
+"B6"
+]
+},
+"A8": {
+"zero": "891136a02cc0",
+"few": "5bb2ada6051a",
+"examples": [
+"D12",
+"E14",
+"A18"
+]
+},
+"A10": {
+"zero": "db0f26f14d06",
+"few": "dfe609d3e6e3",
+"examples": [
+"D12",
+"E14",
+"A18"
+]
+},
+"A13": {
+"zero": "70ea71889979",
+"few": "a91e91d6d801",
+"examples": [
+"A18",
+"A25",
+"A3"
+]
+},
+"A17": {
+"zero": "0f3246dc71ba",
+"few": "7b4bb5fc0bad",
+"examples": [
+"E18",
+"A18",
+"A25"
+]
+},
+"A18": {
+"zero": "095cf0b2a89b"
+},
+"A22": {
+"zero": "e19c87dbfc76",
+"few": "84a7e160925e",
+"examples": [
+"B24",
+"B28",
+"A18"
+]
+},
+"A24": {
+"zero": "183bdad23dc2",
+"few": "a42c317df0f0",
+"examples": [
+"B28",
+"A25",
+"A18"
+]
+},
+"A25": {
+"zero": "93970d9619b8"
+},
+"A29": {
+"zero": "018e422cd198",
+"few": "313a073e2ecf",
+"examples": [
+"B29",
+"E31",
+"A18"
+]
+},
+"A30": {
+"zero": "9c62b908f382"
+},
+"A31": {
+"zero": "ccbbd14411e7",
+"few": "6961138a99ac",
+"examples": [
+"A30",
+"B1",
+"A18"
+]
+},
+"A33": {
+"zero": "e263fd8813c4",
+"few": "f06cb4945ee2",
+"examples": [
+"D36",
+"B24",
+"E22"
+]
+},
+"A34": {
+"zero": "c15b6d0cbef3",
+"few": "e72f418583f4",
+"examples": [
+"D36",
+"A18",
+"A25"
+]
+},
+"A38": {
+"zero": "d80306344488",
+"few": "5606d6e781a6",
+"examples": [
+"B40",
+"B28",
+"A25"
+]
+},
+"A40": {
+"zero": "9125e50f41e7",
+"few": "79ef9535fc6d",
+"examples": [
+"B1",
+"A18",
+"A25"
+]
+},
+"A49": {
+"zero": "9b2c4eb36d47",
+"few": "11011cb2ffcd",
+"examples": [
+"C50",
+"E8",
+"A18"
+]
+},
+"B1": {
+"zero": "08ceed88e1d3"
+},
+"B2": {
+"zero": "27810a6ebf88",
+"few": "f032f50db964",
+"examples": [
+"E3",
+"A3",
+"B1"
+]
+},
+"B3": {
+"zero": "6a4c2f84c38b",
+"few": "2dd55fb587c1",
+"examples": [
+"B1",
+"D3",
+"A3"
+]
+},
+"B5": {
+"zero": "eecde7c13dc9",
+"few": "bac890d14e28",
+"examples": [
+"A3",
+"B1",
+"D3"
+]
+},
+"B6": {
+"zero": "5c1e11658a8d"
+},
+"B7": {
+"zero": "250bd999b3c4",
+"few": "c9b9def4a833",
+"examples": [
+"A4",
+"A6",
+"B6"
+]
+},
+"B9": {
+"zero": "78b629ede924",
+"few": "a23095b9dc4f",
+"examples": [
+"E8",
+"A4",
+"A6"
+]
+},
+"B14": {
+"zero": "cdf0b1b0ea5f",
+"few": "d97c5ebf96e6",
+"examples": [
+"A4",
+"A18",
+"A25"
+]
+},
+"B18": {
+"zero": "7573d503d1b1",
+"few": "3c5db12314ad",
+"examples": [
+"E18",
+"A18",
+"A25"
+]
+},
+"B22": {
+"zero": "f4f3ed9e5886",
+"few": "c12342b91c28",
+"examples": [
+"E22",
+"A18",
+"A25"
+]
+},
+"B24": {
+"zero": "d54f368f26d6"
+},
+"B26": {
+"zero": "84298212628a",
+"few": "6ab478f1e829",
+"examples": [
+"A25",
+"B28",
+"E18"
+]
+},
+"B27": {
+"zero": "cde73e99f6cb",
+"few": "7ad0cff33541",
+"examples": [
+"A25",
+"B28",
+"A18"
+]
+},
+"B28": {
+"zero": "638e1a68fef3"
+},
+"B29": {
+"zero": "9ec4b40964b5"
+},
+"B30": {
+"zero": "5d82cf340293",
+"few": "b9667c9d166e",
+"examples": [
+"B29",
+"E31",
+"B1"
+]
+},
+"B32": {
+"zero": "49dc05ecc969"
+},
+"B36": {
+"zero": "52e10dec304f",
+"few": "37bc2c123690",
+"examples": [
+"D36",
+"B1",
+"A18"
+]
+},
+"B40": {
+"zero": "640ebbbc41cb"
+},
+"B44": {
+"zero": "f8ba6cb7606b",
+"few": "07fa35ac5458",
+"examples": [
+"A18",
+"A25",
+"A3"
+]
+},
+"B45": {
+"zero": "f002bb28e51c"
+},
+"C1": {
+"zero": "912962d6174d",
+"few": "1da050fcd1e2",
+"examples": [
+"B1",
+"A3",
+"D3"
+]
+},
+"C2": {
+"zero": "0ee9549735b4",
+"few": "ffbd6eb0d2e0",
+"examples": [
+"A3",
+"B1",
+"D3"
+]
+},
+"C6": {
+"zero": "83cd9c99cc3e",
+"few": "a41a59e86bda",
+"examples": [
+"A3",
+"B1",
+"D3"
+]
+},
+"C7": {
+"zero": "e5690deb9cca",
+"few": "57d5df52d005",
+"examples": [
+"A4",
+"B6",
+"A6"
+]
+},
+"C9": {
+"zero": "e360e0a03269",
+"few": "7e3e171435ca",
+"examples": [
+"A6",
+"E8",
+"A4"
+]
+},
+"C10": {
+"zero": "5ef9afbd11bd"
+},
+"C11": {
+"zero": "19234cc9be1d",
+"few": "07b312d6fc9e",
+"examples": [
+"A4",
+"E8",
+"A6"
+]
+},
+"C15": {
+"zero": "2e757768e948"
+},
+"C16": {
+"zero": "ad64e714c305",
+"few": "5a51ccf8b705",
+"examples": [
+"A4",
+"D12",
+"A18"
+]
+},
+"C18": {
+"zero": "a7c3b200b3aa",
+"few": "f2811aa289e4",
+"examples": [
+"E18",
+"A18",
+"A25"
+]
+},
+"C21": {
+"zero": "f136dbe7bfea",
+"few": "862c5ca41ede",
+"examples": [
+"A18",
+"E22",
+"A25"
+]
+},
+"C27": {
+"zero": "1608d652260d",
+"few": "e68c55be3c2b",
+"examples": [
+"A25",
+"B28",
+"E14"
+]
+},
+"C31": {
+"zero": "9b464bd1d79f",
+"few": "c2941b23a914",
+"examples": [
+"B29",
+"E31",
+"A18"
+]
+},
+"C32": {
+"zero": "df35d2d206aa",
+"few": "437c8a949680",
+"examples": [
+"B29",
+"E31",
+"B1"
+]
+},
+"C34": {
+"zero": "e25a4d961dd7",
+"few": "7d26c3233cd9",
+"examples": [
+"A30",
+"A18",
+"A25"
+]
+},
+"C38": {
+"zero": "77278465725a",
+"few": "9210801c60f0",
+"examples": [
+"D36",
+"B1",
+"A18"
+]
+},
+"C45": {
+"zero": "17db589796ca",
+"few": "679976589a05",
+"examples": [
+"D36",
+"A18",
+"A25"
+]
+},
+"C50": {
+"zero": "e4e3acae94de"
+},
+"D1": {
+"zero": "3d23b20bd1ea",
+"few": "9a5e9ef861d1",
+"examples": [
+"B1",
+"A3",
+"D3"
+]
+},
+"D2": {
+"zero": "b79ce6deeb61",
+"few": "8c965564d832",
+"examples": [
+"A3",
+"B1",
+"D3"
+]
+},
+"D3": {
+"zero": "541885a1e33f"
+},
+"D7": {
+"zero": "d474b9645441",
+"few": "9faf2d191108",
+"examples": [
+"A4",
+"A6",
+"B6"
+]
+},
+"D8": {
+"zero": "33bd6bc1a614",
+"few": "2dce5de510e3",
+"examples": [
+"B6",
+"A4",
+"A6"
+]
+},
+"D10": {
+"zero": "4f50a71c6571",
+"few": "1b4a04002c3c",
+"examples": [
+"B6",
+"A4",
+"A6"
+]
+},
+"D11": {
+"zero": "b9110d0510f8",
+"few": "4abe72e396a7",
+"examples": [
+"A4",
+"A6",
+"B6"
+]
+},
+"D12": {
+"zero": "0fed5848d52e"
+},
+"D13": {
+"zero": "b86cb79c625c",
+"few": "c987e9b7d348",
+"examples": [
+"D12",
+"E14",
+"A18"
+]
+},
+"D14": {
+"zero": "3ed239b77fea",
+"few": "a457022ce675",
+"examples": [
+"D12",
+"E14",
+"A18"
+]
+},
+"D17": {
+"zero": "a9bdf2fac8a4",
+"few": "ab90aacd96ef",
+"examples": [
+"D12",
+"A18",
+"A25"
+]
+},
+"D18": {
+"zero": "b4caec77d27b",
+"few": "fda1319d9d8b",
+"examples": [
+"E18",
+"A18",
+"A25"
+]
+},
+"D21": {
+"zero": "448f45053eac",
+"few": "68d05a88521a",
+"examples": [
+"A18",
+"E22",
+"A25"
+]
+},
+"D22": {
+"zero": "25779f13ad29",
+"few": "5c5ab9304cbc",
+"examples": [
+"E22",
+"A18",
+"A25"
+]
+},
+"D24": {
+"zero": "36397a9f431e",
+"few": "62064fe3b135",
+"examples": [
+"B24",
+"A18",
+"A25"
+]
+},
+"D25": {
+"zero": "3b52a62103ef"
+},
+"D27": {
+"zero": "e65f34123765",
+"few": "9ed64b1c1645",
+"examples": [
+"A25",
+"B28",
+"E18"
+]
+},
+"D30": {
+"zero": "c3bc913d2504",
+"few": "7e2c7061cc7d",
+"examples": [
+"B29",
+"E31",
+"B1"
+]
+},
+"D33": {
+"zero": "266dfec87271",
+"few": "aa95479d3381",
+"examples": [
+"A30",
+"A18",
+"A25"
+]
+},
+"D36": {
+"zero": "40b669ed7efb"
+},
+"D37": {
+"zero": "4e4370a954a0"
+},
+"D45": {
+"zero": "3425b6848ebb",
+"few": "015787a47183",
+"examples": [
+"B1",
+"A18",
+"A25"
+]
+},
+"D49": {
+"zero": "6a3ad7a3c9e2",
+"few": "55c0482d401b",
+"examples": [
+"C50",
+"A6",
+"B24"
+]
+},
+"E2": {
+"zero": "f23b1c6703a9",
+"few": "9b78e19b1c55",
+"examples": [
+"B1",
+"A3",
+"D3"
+]
+},
+"E3": {
+"zero": "2aa15810ec7b"
+},
+"E5": {
+"zero": "ba8d17a84790",
+"few": "538b3ecdfe6c",
+"examples": [
+"B1",
+"A3",
+"D3"
+]
+},
+"E7": {
+"zero": "7561dec357a7",
+"few": "c9a36abe0316",
+"examples": [
+"B6",
+"A4",
+"A6"
+]
+},
+"E8": {
+"zero": "afa779f741ff"
+},
+"E10": {
+"zero": "ac8d1c06e50c",
+"few": "ffcf49a3522e",
+"examples": [
+"B6",
+"A4",
+"A6"
+]
+},
+"E12": {
+"zero": "108d51337725",
+"few": "9109f73df094",
+"examples": [
+"D12",
+"E14",
+"A18"
+]
+},
+"E13": {
+"zero": "4daecead8d42",
+"few": "86302532345b",
+"examples": [
+"D12",
+"E14",
+"B40"
+]
+},
+"E14": {
+"zero": "a4c97e25ef56"
+},
+"E18": {
+"zero": "8ae25d0da5b1"
+},
+"E22": {
+"zero": "0c80681d7912"
+},
+"E24": {
+"zero": "1afea398251f",
+"few": "f386fd0964ed",
+"examples": [
+"B24",
+"B1",
+"A18"
+]
+},
+"E26": {
+"zero": "065a9549a81f",
+"few": "5659a5185788",
+"examples": [
+"B24",
+"D36",
+"A18"
+]
+},
+"E27": {
+"zero": "ea71ce17f040",
+"few": "33e64c7cc6a9",
+"examples": [
+"B28",
+"A25",
+"E18"
+]
+},
+"E31": {
+"zero": "04a00811f2be"
+},
+"E32": {
+"zero": "726a8e3ef26c",
+"few": "5d9f33a26072",
+"examples": [
+"B29",
+"E31",
+"B1"
+]
+},
+"E33": {
+"zero": "fb6b8149f0cc",
+"few": "6e5e4e64c1dc",
+"examples": [
+"A30",
+"A18",
+"A25"
+]
+},
+"E34": {
+"zero": "5c7ad6b71db1",
+"few": "8ecc88ba8048",
+"examples": [
+"A30",
+"B1",
+"A18"
+]
+},
+"E36": {
+"zero": "3dca9bab2586",
+"few": "91a4fc7f1bdb",
+"examples": [
+"D36",
+"B1",
+"A18"
+]
+},
+"E37": {
+"zero": "ba53c70c6325",
+"few": "b985807b9edc",
+"examples": [
+"D36",
+"A4",
+"E22"
+]
+},
+"E38": {
+"zero": "1bd0380c4986",
+"few": "015adb6c25bc",
+"examples": [
+"D36",
+"A18",
+"A25"
+]
+},
+"E39": {
+"zero": "f4580afaaf5a",
+"few": "7186a303a4fa",
+"examples": [
+"B40",
+"A18",
+"A25"
+]
+},
+"E44": {
+"zero": "1a3e67b237d7"
+},
+"E45": {
+"zero": "632862d89b8b"
+},
+"E49": {
+"zero": "6184b80db9af",
+"few": "724776f7fe64",
+"examples": [
+"C50",
+"A6",
+"B24"
+]
+}
+}

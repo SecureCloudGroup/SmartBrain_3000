@@ -1,0 +1,545 @@
+{
+ "A1": {
+  "source_id": "open-meteo-forecast",
+  "file": "open-meteo-forecast__89f5b804.json",
+  "fetched_at": "2026-10-09T11:27:23Z"
+ },
+ "A3": {
+  "source_id": "coops-water-temp",
+  "file": "coops-water-temp__0378b6f4.json",
+  "fetched_at": "2026-10-09T11:27:25Z"
+ },
+ "A4": {
+  "source_id": "open-meteo-forecast",
+  "file": "open-meteo-forecast__019a7d34.json",
+  "fetched_at": "2026-10-09T11:27:26Z"
+ },
+ "A5": {
+  "source_id": "nws-forecast",
+  "file": "nws-forecast__f45c9d7f.json",
+  "fetched_at": "2026-10-09T11:27:30Z"
+ },
+ "A6": {
+  "source_id": "open-meteo-marine",
+  "file": "open-meteo-marine__0f6055de.json",
+  "fetched_at": "2026-10-09T11:27:32Z"
+ },
+ "A7": {
+  "source_id": "nws-forecast-hourly",
+  "file": "nws-forecast-hourly__33699ff1.json",
+  "fetched_at": "2026-10-09T11:27:36Z"
+ },
+ "A8": {
+  "source_id": "ll2-upcoming-launches",
+  "file": "ll2-upcoming-launches__65edc9b7.json",
+  "fetched_at": "2026-10-09T11:27:39Z"
+ },
+ "A10": {
+  "source_id": "thesportsdb-team-next",
+  "file": "thesportsdb-team-next__731b4191.json",
+  "fetched_at": "2026-10-09T11:27:40Z"
+ },
+ "A13": {
+  "source_id": "thesportsdb-next-league",
+  "file": "thesportsdb-next-league__0b54fa7a.json",
+  "fetched_at": "2026-10-09T11:27:41Z"
+ },
+ "A17": {
+  "source_id": "mlb-team-results",
+  "file": "mlb-team-results__f782a9f4.json",
+  "fetched_at": "2026-10-09T11:27:43Z"
+ },
+ "A18": {
+  "source_id": "npr-news",
+  "file": "npr-news__04a13555.json",
+  "fetched_at": "2026-10-09T11:27:44Z"
+ },
+ "A22": {
+  "source_id": "coingecko-markets",
+  "file": "coingecko-markets__f519bbc1.json",
+  "fetched_at": "2026-10-09T11:27:46Z"
+ },
+ "A24": {
+  "source_id": "fred-gasregw",
+  "file": "fred-gasregw__db4cba2c.json",
+  "fetched_at": "2026-10-09T11:27:47Z"
+ },
+ "A25": {
+  "source_id": "fred-mortgage30us",
+  "file": "fred-mortgage30us__0ad8111c.json",
+  "fetched_at": "2026-10-09T11:27:49Z"
+ },
+ "A29": {
+  "source_id": "statuspage-summary",
+  "file": "statuspage-summary__9d061111.json",
+  "fetched_at": "2026-10-09T11:27:50Z"
+ },
+ "A30": {
+  "source_id": "nws-alerts-point",
+  "file": "nws-alerts-point__9181481d.json",
+  "fetched_at": "2026-10-09T11:27:51Z"
+ },
+ "A31": {
+  "source_id": "nws-alerts-state",
+  "file": "nws-alerts-state__2be78fd8.json",
+  "fetched_at": "2026-10-09T11:27:53Z"
+ },
+ "A33": {
+  "source_id": "usgs-quakes-25-day",
+  "file": "usgs-quakes-25-day__5b685bb8.json",
+  "fetched_at": "2026-10-09T11:27:54Z"
+ },
+ "A34": {
+  "source_id": "nws-tropical-alerts-point",
+  "file": "nws-tropical-alerts-point__639a439d.json",
+  "fetched_at": "2026-10-09T11:27:56Z"
+ },
+ "A38": {
+  "source_id": "nager-holidays-year",
+  "file": "nager-holidays-year__0973c7f8.json",
+  "fetched_at": "2026-10-09T11:27:57Z"
+ },
+ "A40": {
+  "source_id": "wheretheiss-now",
+  "file": "wheretheiss-now__a62157f2.json",
+  "fetched_at": "2026-10-09T11:27:59Z"
+ },
+ "A49": {
+  "source_id": "open-meteo-forecast",
+  "file": "open-meteo-forecast__b177f68b.json",
+  "fetched_at": "2026-10-09T11:28:00Z"
+ },
+ "B1": {
+  "source_id": "open-meteo-forecast",
+  "file": "open-meteo-forecast__7f20f823.json",
+  "fetched_at": "2026-10-09T11:28:02Z"
+ },
+ "B2": {
+  "source_id": "open-meteo-forecast",
+  "file": "open-meteo-forecast__b1a83ea4.json",
+  "fetched_at": "2026-10-09T11:28:03Z"
+ },
+ "B3": {
+  "source_id": "open-meteo-uv",
+  "file": "open-meteo-uv__21816efa.json",
+  "fetched_at": "2026-10-09T11:28:05Z"
+ },
+ "B5": {
+  "source_id": "goldapi-spot",
+  "file": "goldapi-spot__395e439b.json",
+  "fetched_at": "2026-10-09T11:28:07Z"
+ },
+ "B6": {
+  "source_id": "open-meteo-forecast",
+  "file": "open-meteo-forecast__4b9761e6.json",
+  "fetched_at": "2026-10-09T11:28:09Z"
+ },
+ "B7": {
+  "source_id": "open-meteo-forecast",
+  "file": "open-meteo-forecast__9dcc3efd.json",
+  "fetched_at": "2026-10-09T11:28:10Z"
+ },
+ "B9": {
+  "source_id": "open-meteo-forecast",
+  "file": "open-meteo-forecast__871fbe63.json",
+  "fetched_at": "2026-10-09T11:28:12Z"
+ },
+ "B14": {
+  "source_id": "mlb-team-schedule",
+  "file": "mlb-team-schedule__b88ded8b.json",
+  "fetched_at": "2026-10-09T11:28:14Z"
+ },
+ "B18": {
+  "source_id": "mlb-team-results",
+  "file": "mlb-team-results__3a5e7fba.json",
+  "fetched_at": "2026-10-09T11:28:15Z"
+ },
+ "B22": {
+  "source_id": "usgs-quakes-state",
+  "file": "usgs-quakes-state__e48b6a97.json",
+  "fetched_at": "2026-10-09T11:28:16Z"
+ },
+ "B24": {
+  "source_id": "coingecko-markets",
+  "file": "coingecko-markets__f519bbc1.json",
+  "fetched_at": "2026-10-09T11:27:46Z"
+ },
+ "B26": {
+  "source_id": "fred-unrate",
+  "file": "fred-unrate__acce113b.json",
+  "fetched_at": "2026-10-09T11:28:18Z"
+ },
+ "B27": {
+  "source_id": "fred-cpiaucsl",
+  "file": "fred-cpiaucsl__8932d32b.json",
+  "fetched_at": "2026-10-09T11:28:19Z"
+ },
+ "B28": {
+  "source_id": "fred-dgs10",
+  "file": "fred-dgs10__fecd6fed.json",
+  "fetched_at": "2026-10-09T11:28:20Z"
+ },
+ "B29": {
+  "source_id": "statuspage-summary",
+  "file": "statuspage-summary__8c21a403.json",
+  "fetched_at": "2026-10-09T11:28:22Z"
+ },
+ "B30": {
+  "source_id": "slack-status-current",
+  "file": "slack-status-current__7dd8a777.json",
+  "fetched_at": "2026-10-09T11:28:23Z"
+ },
+ "B32": {
+  "source_id": "nws-alerts-point",
+  "file": "nws-alerts-point__50f6d95b.json",
+  "fetched_at": "2026-10-09T11:28:24Z"
+ },
+ "B36": {
+  "source_id": "nifc-current-fires",
+  "file": "nifc-current-fires__a4c68d23.json",
+  "fetched_at": "2026-10-09T11:28:26Z"
+ },
+ "B40": {
+  "source_id": "open-meteo-sun",
+  "file": "open-meteo-sun__0e5b4849.json",
+  "fetched_at": "2026-10-09T11:28:27Z"
+ },
+ "B44": {
+  "source_id": "open-meteo-forecast",
+  "file": "open-meteo-forecast__470393be.json",
+  "fetched_at": "2026-10-09T11:28:29Z"
+ },
+ "B45": {
+  "source_id": "usgs-quakes-near",
+  "file": "usgs-quakes-near__15425a29.json",
+  "fetched_at": "2026-10-09T11:28:31Z"
+ },
+ "C1": {
+  "source_id": "open-meteo-forecast",
+  "file": "open-meteo-forecast__008789dd.json",
+  "fetched_at": "2026-10-09T11:28:32Z"
+ },
+ "C2": {
+  "source_id": "open-meteo-forecast",
+  "file": "open-meteo-forecast__90d5fdce.json",
+  "fetched_at": "2026-10-09T11:28:34Z"
+ },
+ "C6": {
+  "source_id": "open-meteo-forecast",
+  "file": "open-meteo-forecast__940c6b6d.json",
+  "fetched_at": "2026-10-09T11:28:36Z"
+ },
+ "C7": {
+  "source_id": "open-meteo-forecast",
+  "file": "open-meteo-forecast__d998bb17.json",
+  "fetched_at": "2026-10-09T11:28:37Z"
+ },
+ "C9": {
+  "source_id": "open-meteo-marine",
+  "file": "open-meteo-marine__c32e47e4.json",
+  "fetched_at": "2026-10-09T11:28:39Z"
+ },
+ "C10": {
+  "source_id": "nws-forecast",
+  "file": "nws-forecast__827a2b76.json",
+  "fetched_at": "2026-10-09T11:28:43Z"
+ },
+ "C11": {
+  "source_id": "nws-forecast",
+  "file": "nws-forecast__03fe65eb.json",
+  "fetched_at": "2026-10-09T11:28:46Z"
+ },
+ "C15": {
+  "source_id": "thesportsdb-team-next",
+  "file": "thesportsdb-team-next__9562b475.json",
+  "fetched_at": "2026-10-09T11:28:48Z"
+ },
+ "C16": {
+  "source_id": "thesportsdb-team-next",
+  "file": "thesportsdb-team-next__7cd1a0ba.json",
+  "fetched_at": "2026-10-09T11:28:49Z"
+ },
+ "C18": {
+  "source_id": "mlb-team-results",
+  "file": "mlb-team-results__d217ce0a.json",
+  "fetched_at": "2026-10-09T11:28:50Z"
+ },
+ "C21": {
+  "source_id": "hn-search",
+  "file": "hn-search__8bea5213.json",
+  "fetched_at": "2026-10-09T11:28:52Z"
+ },
+ "C27": {
+  "source_id": "fred-gasregw",
+  "file": "fred-gasregw__db4cba2c.json",
+  "fetched_at": "2026-10-09T11:27:47Z"
+ },
+ "C31": {
+  "source_id": "statuspage-summary",
+  "file": "statuspage-summary__0e49b22f.json",
+  "fetched_at": "2026-10-09T11:28:53Z"
+ },
+ "C32": {
+  "source_id": "faa-nas-status",
+  "file": "faa-nas-status__9979e39b.json",
+  "fetched_at": "2026-10-09T11:28:55Z"
+ },
+ "C34": {
+  "source_id": "nws-alerts-state",
+  "file": "nws-alerts-state__6578e8aa.json",
+  "fetched_at": "2026-10-09T11:28:56Z"
+ },
+ "C38": {
+  "source_id": "faa-nas-status",
+  "file": "faa-nas-status__9979e39b.json",
+  "fetched_at": "2026-10-09T11:28:55Z"
+ },
+ "C45": {
+  "source_id": "nifc-current-fires",
+  "file": "nifc-current-fires__c494cd83.json",
+  "fetched_at": "2026-10-09T11:28:58Z"
+ },
+ "C50": {
+  "source_id": "open-meteo-forecast",
+  "file": "open-meteo-forecast__b177f68b.json",
+  "fetched_at": "2026-10-09T11:28:00Z"
+ },
+ "D1": {
+  "source_id": "open-meteo-forecast",
+  "file": "open-meteo-forecast__b271fc19.json",
+  "fetched_at": "2026-10-09T11:29:00Z"
+ },
+ "D2": {
+  "source_id": "open-meteo-forecast",
+  "file": "open-meteo-forecast__41eebd42.json",
+  "fetched_at": "2026-10-09T11:29:01Z"
+ },
+ "D3": {
+  "source_id": "open-meteo-uv",
+  "file": "open-meteo-uv__376857b7.json",
+  "fetched_at": "2026-10-09T11:29:03Z"
+ },
+ "D7": {
+  "source_id": "open-meteo-forecast",
+  "file": "open-meteo-forecast__c6ed4f6d.json",
+  "fetched_at": "2026-10-09T11:29:05Z"
+ },
+ "D8": {
+  "source_id": "nws-forecast-hourly",
+  "file": "nws-forecast-hourly__27dc41f0.json",
+  "fetched_at": "2026-10-09T11:29:10Z"
+ },
+ "D10": {
+  "source_id": "open-meteo-forecast",
+  "file": "open-meteo-forecast__f09b3d8a.json",
+  "fetched_at": "2026-10-09T11:29:12Z"
+ },
+ "D11": {
+  "source_id": "swpc-kp-forecast",
+  "file": "swpc-kp-forecast__133fd1d0.json",
+  "fetched_at": "2026-10-09T11:29:13Z"
+ },
+ "D12": {
+  "source_id": "coops-tide-hilo",
+  "file": "coops-tide-hilo__0bf2cb24.json",
+  "fetched_at": "2026-10-09T11:29:15Z"
+ },
+ "D13": {
+  "source_id": "nhl-club-schedule",
+  "file": "nhl-club-schedule__32c28786.json",
+  "fetched_at": "2026-10-09T11:29:16Z"
+ },
+ "D14": {
+  "source_id": "ll2-upcoming-launches",
+  "file": "ll2-upcoming-launches__3c620b88.json",
+  "fetched_at": "2026-10-09T11:29:18Z"
+ },
+ "D17": {
+  "source_id": "coops-tide-hilo",
+  "file": "coops-tide-hilo__c8ecad48.json",
+  "fetched_at": "2026-10-09T11:29:19Z"
+ },
+ "D18": {
+  "source_id": "nhl-score-now",
+  "file": "nhl-score-now__541120ff.json",
+  "fetched_at": "2026-10-09T11:29:20Z"
+ },
+ "D21": {
+  "source_id": "ars-technica",
+  "file": "ars-technica__7170fc47.json",
+  "fetched_at": "2026-10-09T11:29:22Z"
+ },
+ "D22": {
+  "source_id": "usgs-quakes-state",
+  "file": "usgs-quakes-state__58653675.json",
+  "fetched_at": "2026-10-09T11:29:23Z"
+ },
+ "D24": {
+  "source_id": "coingecko-markets",
+  "file": "coingecko-markets__f519bbc1.json",
+  "fetched_at": "2026-10-09T11:27:46Z"
+ },
+ "D25": {
+  "source_id": "nhl-standings-now",
+  "file": "nhl-standings-now__6b5bf397.json",
+  "fetched_at": "2026-10-09T11:29:25Z"
+ },
+ "D27": {
+  "source_id": "fred-unrate",
+  "file": "fred-unrate__acce113b.json",
+  "fetched_at": "2026-10-09T11:28:18Z"
+ },
+ "D30": {
+  "source_id": "statuspage-summary",
+  "file": "statuspage-summary__8c21a403.json",
+  "fetched_at": "2026-10-09T11:28:22Z"
+ },
+ "D33": {
+  "source_id": "nws-alerts-point",
+  "file": "nws-alerts-point__50f6d95b.json",
+  "fetched_at": "2026-10-09T11:28:24Z"
+ },
+ "D36": {
+  "source_id": "nifc-current-fires",
+  "file": "nifc-current-fires__6d4242a9.json",
+  "fetched_at": "2026-10-09T11:29:26Z"
+ },
+ "D37": {
+  "source_id": "usgs-quakes-near",
+  "file": "usgs-quakes-near__18758a68.json",
+  "fetched_at": "2026-10-09T11:29:28Z"
+ },
+ "D45": {
+  "source_id": "people-in-space",
+  "file": "people-in-space__cf92b220.json",
+  "fetched_at": "2026-10-09T11:29:29Z"
+ },
+ "D49": {
+  "source_id": "nws-forecast",
+  "file": "nws-forecast__8dab676c.json",
+  "fetched_at": "2026-10-09T11:29:33Z"
+ },
+ "E2": {
+  "source_id": "open-meteo-forecast",
+  "file": "open-meteo-forecast__46bd2ccb.json",
+  "fetched_at": "2026-10-09T11:29:35Z"
+ },
+ "E3": {
+  "source_id": "coops-water-temp",
+  "file": "coops-water-temp__88cd11c5.json",
+  "fetched_at": "2026-10-09T11:29:37Z"
+ },
+ "E5": {
+  "source_id": "goldapi-spot",
+  "file": "goldapi-spot__8ada3bfa.json",
+  "fetched_at": "2026-10-09T11:29:38Z"
+ },
+ "E7": {
+  "source_id": "open-meteo-forecast",
+  "file": "open-meteo-forecast__e497a7ec.json",
+  "fetched_at": "2026-10-09T11:29:40Z"
+ },
+ "E8": {
+  "source_id": "open-meteo-marine",
+  "file": "open-meteo-marine__1cf5f41a.json",
+  "fetched_at": "2026-10-09T11:29:41Z"
+ },
+ "E10": {
+  "source_id": "open-meteo-forecast",
+  "file": "open-meteo-forecast__216846c2.json",
+  "fetched_at": "2026-10-09T11:29:43Z"
+ },
+ "E12": {
+  "source_id": "coops-tide-hilo",
+  "file": "coops-tide-hilo__126d36be.json",
+  "fetched_at": "2026-10-09T11:29:45Z"
+ },
+ "E13": {
+  "source_id": "thesportsdb-team-next",
+  "file": "thesportsdb-team-next__6e71113d.json",
+  "fetched_at": "2026-10-09T11:29:46Z"
+ },
+ "E14": {
+  "source_id": "usno-moon-phases",
+  "skip": "fetch failed: URLError: <urlopen error [Errno -3] Temporary failure in name resolution>"
+ },
+ "E18": {
+  "source_id": "mlb-team-results",
+  "file": "mlb-team-results__fc8871f1.json",
+  "fetched_at": "2026-10-09T11:30:03Z"
+ },
+ "E22": {
+  "source_id": "usgs-quakes-state",
+  "file": "usgs-quakes-state__962045ce.json",
+  "fetched_at": "2026-10-09T11:30:05Z"
+ },
+ "E24": {
+  "source_id": "coingecko-markets",
+  "file": "coingecko-markets__f519bbc1.json",
+  "fetched_at": "2026-10-09T11:27:46Z"
+ },
+ "E26": {
+  "source_id": "nifc-current-fires",
+  "file": "nifc-current-fires__a4c68d23.json",
+  "fetched_at": "2026-10-09T11:28:26Z"
+ },
+ "E27": {
+  "source_id": "fred-cpiaucsl",
+  "file": "fred-cpiaucsl__8932d32b.json",
+  "fetched_at": "2026-10-09T11:28:19Z"
+ },
+ "E31": {
+  "source_id": "cta-alerts",
+  "file": "cta-alerts__66b950ae.json",
+  "fetched_at": "2026-10-09T11:30:06Z"
+ },
+ "E32": {
+  "source_id": "faa-nas-status",
+  "file": "faa-nas-status__9979e39b.json",
+  "fetched_at": "2026-10-09T11:28:55Z"
+ },
+ "E33": {
+  "source_id": "nws-alerts-point",
+  "file": "nws-alerts-point__48cef656.json",
+  "fetched_at": "2026-10-09T11:30:08Z"
+ },
+ "E34": {
+  "source_id": "nws-alerts-point",
+  "file": "nws-alerts-point__03377a7e.json",
+  "fetched_at": "2026-10-09T11:30:10Z"
+ },
+ "E36": {
+  "source_id": "nws-tropical-alerts-point",
+  "file": "nws-tropical-alerts-point__7d89dfac.json",
+  "fetched_at": "2026-10-09T11:30:12Z"
+ },
+ "E37": {
+  "source_id": "usgs-quakes-state",
+  "file": "usgs-quakes-state__2ebe0488.json",
+  "fetched_at": "2026-10-09T11:30:14Z"
+ },
+ "E38": {
+  "source_id": "nws-alerts-state",
+  "skip": "dropped from the fixture: nws-alerts-state__6106a727.json is 889893 bytes (> 300 KB cap)"
+ },
+ "E39": {
+  "source_id": "nager-holidays-year",
+  "file": "nager-holidays-year__0973c7f8.json",
+  "fetched_at": "2026-10-09T11:27:57Z"
+ },
+ "E44": {
+  "source_id": "fred-mortgage30us",
+  "file": "fred-mortgage30us__0ad8111c.json",
+  "fetched_at": "2026-10-09T11:27:49Z"
+ },
+ "E45": {
+  "source_id": "wheretheiss-now",
+  "file": "wheretheiss-now__a62157f2.json",
+  "fetched_at": "2026-10-09T11:27:59Z"
+ },
+ "E49": {
+  "source_id": "nws-forecast",
+  "file": "nws-forecast__a3c2070e.json",
+  "fetched_at": "2026-10-09T11:30:20Z"
+ }
+}
