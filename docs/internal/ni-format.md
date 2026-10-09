@@ -2767,3 +2767,113 @@ display-class pick and the map/image → value degrade) are gone from the flow; 
   card. `_bind_form` has no lint-colour-driven "needs update" state, so a clock re-layout whose
   only red lint is `L-HOLLOW` (a day table thinning toward its last day) simply keeps the
   designed card, matching the prototype's rule by construction rather than by a ported check.
+
+## 36. Query layer (Round 20, Q3a — `ni_query`; built and measured, not wired yet)
+
+- **What it is.** An information ask becomes a closed **Query IR** over ONE declared Library
+  answer (§32): `{answer, params, select, where: [{col, op, value}], time: {from, to} | null,
+  order: [{col, dir}], limit, agg}` — ops `= != < <= > >= in contains names` (`names`: the row
+  names this entity, `col` "*" = any text cell); time tokens `now today tonight tomorrow yesterday
+  weekend this_week next_week this_month next_days:N past_days:N next_hours:N past_hours:N
+  dow:mon..sun date:YYYY-MM-DD month:YYYY-MM year:YYYY`; `agg` `none | count`. Entry points:
+  `plan_query(ask, *, kind, wants, source, answers, params, consumed, now, zone, call_model, pool)
+  -> QueryPlan{ir, model_ir, coverage, interpretation, notes, model_meta}`, `apply_query(ir,
+  payload, answer, *, now, zone, direction) -> {rows, indices, count}`, `recognize(ask, *, now,
+  zone, masked)`, `say(ir, answers)`. Package: `recognize.py`, `prompt.py`, `normalize.py`,
+  `clauses.py`, `plan.py`, `apply.py`, `say.py`, `decl.py` (answers in the Library's `row` /
+  `columns` shape or `_clean_answer`'s `cells`).
+- **Ownership.** *Model* (one local call): `answer`, `time`, `where`, `order`. *Code*: `select`,
+  `limit`, `agg`; `params` is `{}` in this step. *Recognizers*: validators of the model's clauses,
+  never substitutes. The Q2 measurement showed the 9B over-generating exactly the code-owned
+  clauses (every cell selected, places put into params, the declared count picked over list +
+  count).
+- **The call.** Prompt design v2 of the Q2 measurement, verbatim (system: role, compact rules,
+  closed ops and tokens, the literal default object with THIS call's answer names and cell paths
+  by role; user: the reference instant with weekday and zone, k = 3 examples retrieved from the
+  pool by same kind then shared ask words, the ask, the answer menu with cells as
+  `path:type:label:unit[codes]`, the parameter menu). `llm.chat_json` (purpose `query`) validates
+  the reply against the IR schema in its subset (no answer / cell enums — the validator quotes
+  enums) and runs the structural check through its new `check` hook; ONE retry, on a schema or a
+  structural slip, whose message states the violated RULE and repeats a skeleton naming no
+  answer (`RETRY_SKELETON`). The Q2 retry listed the companion answers and the model took one —
+  7 right answers turned wrong. `call_model(messages) -> str` is `chat_json`'s transport.
+- **Normalizations (the v1 contract the lead re-scored the Q2 replies under).** An explicit time
+  phrase decides `time` (below); otherwise the model's token stands, and null ≡ `{now, now}` ≡
+  `{now, null}` when compared. `where`: never on the axis or a time / date cell; numeric ops only
+  on number cells with numbers; `contains` / `names` only on a text cell or "*", with a value that
+  is a substring of the ask, not a parameter-consumed entity (`consumed`) and not a word of the
+  source's own name; `names` ≡ `contains` over "*" when compared. `order`: an order on the axis is
+  implicit (dropped); a non-axis order survives only for kind `ranking`. A declared count value ≡
+  its list + count when nothing narrows.
+- **Recognizer validators.** `recognize` merges ms-recognizers-text-suite 1.0.1 (DateTime, Number,
+  NumberWithUnit, Ordinal; en-us) and puckling 0.5.0 (time, duration, holidays with the asked year)
+  into one closed shape `{time, numbers, ordinals, comparators}`, under the bake-off's rules:
+  spans end on word boundaries (one that starts inside a word is cut at the next word — puckling
+  reads "Boston tomorrow" as "on tomorrow"); masked ranges drop spans; a time span needs BOTH
+  libraries (puckling alone read "the sun's" as Sunday; ms alone read "Cape May", model years and
+  "the first quarter" moon), except a holiday named in the built-in US table; seasons and places
+  puckling calls holidays are dropped; ms's rolling range wins ("past 12 months" → `past_days:365`,
+  backward); "4 in Alaska" keeps the 4 and drops the inch; comparators come from one adjacency
+  table (above / over / more than / greater than / stronger / bigger / larger / higher than → `>`,
+  at least → `>=`, below / under / less / fewer / smaller / lower / weaker than → `<`, at most and
+  within → `<=`; at most one word between the phrase and the number). `explicit_time` reads the
+  span's token by the question kind's direction ("this week": forecast → today..next_days:7,
+  schedule / next event → today..this_week, past events → past_days:7..today); a holiday beside
+  another phrase is the subject, not the stretch ("Thanksgiving in 2027" → year:2027).
+  `stated_numbers`: a numeric `where` survives only with a number the ask states (recognized or
+  literal) — "IncidentSize > 0", weather-code lists and "> 0" rain filters are dropped.
+- **Code-owned clauses.** `select` = the quantity cells (numbers, or text a measured value answer
+  describes; never a time / date cell or the declared filter's cell) the ask's words name through
+  the Library's own lexicon — the cell's label and path words plus the label and words of the
+  source's measured value answers whose label holds the cell's label ("Conditions" ⊂ "Conditions
+  (next period)", whose words say snow, fog, thunderstorm); only when the answer carries ≥ 2
+  quantities; nothing for a ranking; on a value answer, the companion value answers named by words
+  the chosen one leaves unexplained. `limit` = a number right after top / first / last / biggest /
+  largest, else 1 with the axis order (next → ascending from now, latest / last → descending) for
+  next_event / result / schedule lists. `agg` = count iff the kind is `count`; a declared count
+  value under a narrowing filter or time is swapped for the list it counts.
+- **The rules floor.** Model off, unavailable, or invalid after the retry → the serving answer whose
+  words best match the ask and the intent's wants, else the first declared primary that serves the
+  kind; time = the explicit phrase or null; where `[]`; notes `query_rules` + why.
+- **Coverage and notes.** `coverage[clause]` ∈ `bound | unbound | approximated | rules` — `unbound`
+  (a time phrase no token carries, a comparator the final where lacks) wins over `rules`;
+  `approximated` = a part of a day read as the day ("last night" → yesterday). Notes are closed
+  codes: `query_rules model_off model_unavailable schema_invalid time_explicit where_dropped
+  numbers_unstated order_dropped params_dropped count_list`.
+- **The interpretation line.** `say` renders the final IR by code: `<answer label>[ (<selected
+  labels>)] · <where> · <time> · <order / limit> · count`, cell labels never paths, tokens in plain
+  words — "Earthquakes · Magnitude > 2 · past 7 days · count", "Daily forecast (Rain chance) · next
+  7 days". When the model dropped the asked comparator the line omits it and coverage says
+  `unbound` — visible, never silent. Q3b seals it as `spec.interpretation` (TEXT_SRC code) for the
+  C2 VerifyPanel and the card footer.
+- **Execution semantics.** `apply_query` is the Q2 harness's `apply_ir`, pure Python: the answer's
+  rows (list / zipped columns / one pseudo-row; a count value reads the rows it counts), the
+  declared filter (filled by the caller) and `newest_first`, the where ops, the time cut on the
+  axis (else the first time / date cell) with the caller's `direction` placing `dow:` and
+  `weekend` (forward = upcoming, backward = the latest past), order, limit, agg.
+- **Measured (2026-10-09, `tools/ni-query-eval.py`, fixtures `app/tests/fixtures/ni_query/`).**
+  Replaying the recorded Q2 replies: v1 contract 50/60 few-shot TEST and 54/82 zero-shot ALL (the
+  lead's re-score, same misses); full contract (+ the number validator, the count swap) 51/60 and
+  58/82; with the floor for the never-valid replies 53/60 and 65/82. Our messages hash equal to
+  the Q2 prompts on 109/109 zero-shot and 79/79 few-shot rows. `apply_query` reproduces the
+  harness's gold rows on 107/107 samples; execution agreement of the final IR 46/59 few-shot
+  (raw replies 39/59). Code-owned clauses equal gold on select 103/109, limit 106/109 (the "when is
+  …" lookups A38 / E14 / E39 want 1), agg 108/109 (noted C38).
+  Recognizer: every explicit gold phrase yields the gold time except "over the last year" (B26,
+  E27) and "over the past month" (C27) — both libraries read the calendar year / month where the
+  label is rolling — and three noted rows.
+  Live (`mlx/Qwen3.5-9B-MLX-4bit`, few-shot TEST, prompts byte-identical 79/79): v1 contract
+  51/60, full contract 52/60, 53/60 with the floor; valid on the first try 68/79, after the
+  rule-only retry 9, never 2; B5 and E13 (lost to the old retry) right. With identical prompts 22
+  of 79 replies differ from the recorded ones — serving-side variance (prefix-cache hits), not the
+  prompt.
+- **What Q3b removes and wires.** Replaced one per measured delta (plan §E): `select_answers` and
+  its word scoring (`ni_flow.py` 1597–1699, `_answer_score` 1471, the count rule 1646 with
+  `_COUNT_ASK_RE` 1506); `_window_from_text` and the window regex table (532–602, its use in
+  `stage_intent` 625); `_scope_rows_to_subject` / `_subject_hits` / `_empty_subject_filter`
+  (2237–2369) and their calls in `_try_answers_build` (2546–2575, incl. the W3 result / schedule
+  filter). Kept: the intent call, `_cadence_from_text`, the A13 threshold alert author,
+  `_verify_frame`. Wiring: `time` → `_cuts` / `_window_op` (1967–2020) with the answer's direction,
+  clock params (start / since / end / until / date / year) take the window's bounds; `where` → the
+  engine's row filter plus push-down into declared `param_bounds`; the flow's prompt-string model
+  seam needs a messages adapter (measure it flattened before switching).

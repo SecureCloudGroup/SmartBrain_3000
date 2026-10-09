@@ -22,7 +22,7 @@ import json
 import threading
 from dataclasses import dataclass
 
-PURPOSES = frozenset({"rolebind", "present", "critic", "probe", "fit"})
+PURPOSES = frozenset({"rolebind", "present", "critic", "probe", "fit", "query"})
 
 _forbid = threading.local()
 
@@ -140,7 +140,7 @@ def _parse(content: str) -> tuple[object, str | None]:
 
 
 def chat_json(purpose: str, messages: list, schema: dict, *, call, max_tokens: int = 500,
-              skeleton: str | None = None) -> tuple[object, LLMMeta]:
+              skeleton: str | None = None, check=None) -> tuple[object, LLMMeta]:
     """Validate the gateway reply against `schema`; one retry on an invalid response.
 
     `call(messages) -> str` is the injected transport (the product passes the SB
@@ -148,6 +148,9 @@ def chat_json(purpose: str, messages: list, schema: dict, *, call, max_tokens: i
     not forwarded, since the transport contract is `messages -> str` only. `skeleton`
     (fix round 1a-6, class M) is the literal JSON shape the caller's prompt already
     showed; the retry repeats it instead of describing the schema error alone.
+    ``check(obj) -> [str]`` (Round 20, the query layer) states rules the schema subset cannot
+    — an id from this call's menu — after the schema passed; its messages reach the retry the
+    same way, so they state the violated rule and never list the menu.
     """
     assert purpose in PURPOSES, f"purpose must be one of {sorted(PURPOSES)}"
     assert callable(call), "call must be a callable (messages) -> str"
@@ -166,6 +169,8 @@ def chat_json(purpose: str, messages: list, schema: dict, *, call, max_tokens: i
         obj, parse_err = _parse(content)
         if parse_err is None:
             errs = _validate(obj, schema, "$")
+            if not errs and check is not None:
+                errs = list(check(obj))[:4]
             if not errs:
                 return obj, LLMMeta(purpose=purpose, ok=True, retries=retries)
             last_err = "; ".join(errs[:4])

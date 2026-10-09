@@ -1,0 +1,1102 @@
+{
+"A1": {
+"n": 1,
+"count": null,
+"ids": [
+"value:current.temperature_2m"
+]
+},
+"A3": {
+"n": 1,
+"count": null,
+"ids": [
+"value:data[0].v"
+]
+},
+"A4": {
+"n": 7,
+"count": null,
+"ids": [
+"daily#0",
+"daily#1",
+"daily#2",
+"daily#3",
+"daily#4",
+"daily#5",
+"daily#6"
+]
+},
+"A5": {
+"n": 4,
+"count": null,
+"ids": [
+"properties.periods#3",
+"properties.periods#4",
+"properties.periods#5",
+"properties.periods#6"
+]
+},
+"A6": {
+"n": 168,
+"count": null,
+"ids": [
+"hourly#0",
+"hourly#1",
+"hourly#2",
+"hourly#3",
+"hourly#4",
+"hourly#5",
+"hourly#6",
+"hourly#7",
+"hourly#8",
+"hourly#9",
+"hourly#10",
+"hourly#11"
+]
+},
+"A7": {
+"n": 17,
+"count": null,
+"ids": [
+"properties.periods#0",
+"properties.periods#1",
+"properties.periods#2",
+"properties.periods#3",
+"properties.periods#4",
+"properties.periods#5",
+"properties.periods#6",
+"properties.periods#7",
+"properties.periods#8",
+"properties.periods#9",
+"properties.periods#10",
+"properties.periods#11"
+]
+},
+"A8": {
+"n": 1,
+"count": null,
+"ids": [
+"results#0"
+]
+},
+"A10": {
+"n": 1,
+"count": null,
+"ids": [
+"value:events[0].strEvent"
+]
+},
+"A13": {
+"n": 1,
+"count": null,
+"ids": [
+"events#0"
+]
+},
+"A17": {
+"n": 0,
+"count": null,
+"ids": []
+},
+"A18": {
+"n": 10,
+"count": null,
+"ids": [
+"items#0",
+"items#1",
+"items#2",
+"items#3",
+"items#4",
+"items#5",
+"items#6",
+"items#7",
+"items#8",
+"items#9"
+]
+},
+"A22": {
+"n": 10,
+"count": null,
+"ids": [
+"items#0",
+"items#1",
+"items#2",
+"items#3",
+"items#4",
+"items#5",
+"items#6",
+"items#7",
+"items#8",
+"items#9"
+]
+},
+"A24": {
+"n": 40,
+"count": null,
+"ids": [
+"rows#0",
+"rows#1",
+"rows#2",
+"rows#3",
+"rows#4",
+"rows#5",
+"rows#6",
+"rows#7",
+"rows#8",
+"rows#9",
+"rows#10",
+"rows#11"
+]
+},
+"A25": {
+"n": 2898,
+"count": null,
+"ids": [
+"rows#0",
+"rows#1",
+"rows#2",
+"rows#3",
+"rows#4",
+"rows#5",
+"rows#6",
+"rows#7",
+"rows#8",
+"rows#9",
+"rows#10",
+"rows#11"
+]
+},
+"A29": {
+"n": 1,
+"count": null,
+"ids": [
+"value:status.description"
+]
+},
+"A30": {
+"n": 0,
+"count": null,
+"ids": []
+},
+"A31": {
+"n": 0,
+"count": null,
+"ids": []
+},
+"A33": {
+"n": 8,
+"count": 8,
+"ids": [
+"features#2",
+"features#3",
+"features#4",
+"features#5",
+"features#7",
+"features#8",
+"features#11",
+"features#12"
+]
+},
+"A34": {
+"n": 0,
+"count": 0,
+"ids": []
+},
+"A38": {
+"n": 1,
+"count": null,
+"ids": [
+"items#15"
+]
+},
+"A40": {
+"n": 1,
+"count": null,
+"ids": [
+"value:latitude"
+]
+},
+"A49": {
+"n": 1,
+"count": null,
+"ids": [
+"value:current.temperature_2m"
+]
+},
+"B1": {
+"n": 1,
+"count": null,
+"ids": [
+"value:current.temperature_2m"
+]
+},
+"B2": {
+"n": 1,
+"count": null,
+"ids": [
+"value:current.wind_speed_10m"
+]
+},
+"B3": {
+"n": 1,
+"count": null,
+"ids": [
+"value:current.uv_index"
+]
+},
+"B5": {
+"n": 1,
+"count": null,
+"ids": [
+"value:price"
+]
+},
+"B6": {
+"n": 1,
+"count": null,
+"ids": [
+"value:daily.precipitation_probability_max[1]"
+]
+},
+"B7": {
+"n": 7,
+"count": null,
+"ids": [
+"daily#0",
+"daily#1",
+"daily#2",
+"daily#3",
+"daily#4",
+"daily#5",
+"daily#6"
+]
+},
+"B9": {
+"n": 2,
+"count": null,
+"ids": [
+"daily#1",
+"daily#2"
+]
+},
+"B14": {
+"n": 0,
+"count": null,
+"ids": []
+},
+"B18": {
+"n": 1,
+"count": null,
+"ids": [
+"dates#3"
+]
+},
+"B22": {
+"n": 20,
+"count": null,
+"ids": [
+"features#0",
+"features#1",
+"features#2",
+"features#3",
+"features#4",
+"features#5",
+"features#6",
+"features#7",
+"features#8",
+"features#9",
+"features#10",
+"features#11"
+]
+},
+"B24": {
+"n": 20,
+"count": null,
+"ids": [
+"items#9",
+"items#12",
+"items#0",
+"items#5",
+"items#17",
+"items#2",
+"items#10",
+"items#7",
+"items#4",
+"items#14",
+"items#1",
+"items#15"
+]
+},
+"B26": {
+"n": 11,
+"count": null,
+"ids": [
+"rows#0",
+"rows#1",
+"rows#2",
+"rows#3",
+"rows#4",
+"rows#5",
+"rows#6",
+"rows#7",
+"rows#8",
+"rows#9",
+"rows#10"
+]
+},
+"B27": {
+"n": 10,
+"count": null,
+"ids": [
+"rows#0",
+"rows#1",
+"rows#2",
+"rows#3",
+"rows#4",
+"rows#5",
+"rows#6",
+"rows#7",
+"rows#8",
+"rows#9"
+]
+},
+"B28": {
+"n": 200,
+"count": null,
+"ids": [
+"rows#0",
+"rows#1",
+"rows#2",
+"rows#3",
+"rows#4",
+"rows#5",
+"rows#6",
+"rows#7",
+"rows#8",
+"rows#9",
+"rows#10",
+"rows#11"
+]
+},
+"B29": {
+"n": 1,
+"count": null,
+"ids": [
+"value:status.description"
+]
+},
+"B30": {
+"n": 1,
+"count": null,
+"ids": [
+"value:status"
+]
+},
+"B32": {
+"n": 0,
+"count": null,
+"ids": []
+},
+"B36": {
+"n": 25,
+"count": 25,
+"ids": [
+"features#0",
+"features#1",
+"features#2",
+"features#3",
+"features#4",
+"features#5",
+"features#6",
+"features#7",
+"features#8",
+"features#9",
+"features#10",
+"features#11"
+]
+},
+"B40": {
+"n": 1,
+"count": null,
+"ids": [
+"value:daily.sunrise[1]"
+]
+},
+"B44": {
+"n": 0,
+"count": null,
+"ids": []
+},
+"B45": {
+"n": 18,
+"count": null,
+"ids": [
+"features#0",
+"features#1",
+"features#2",
+"features#3",
+"features#4",
+"features#5",
+"features#6",
+"features#7",
+"features#8",
+"features#9",
+"features#10",
+"features#11"
+]
+},
+"C1": {
+"n": 1,
+"count": null,
+"ids": [
+"value:current.temperature_2m"
+]
+},
+"C2": {
+"n": 1,
+"count": null,
+"ids": [
+"value:current.relative_humidity_2m"
+]
+},
+"C6": {
+"n": 1,
+"count": null,
+"ids": [
+"value:current.wind_speed_10m"
+]
+},
+"C7": {
+"n": 1,
+"count": null,
+"ids": [
+"daily#0"
+]
+},
+"C9": {
+"n": 1,
+"count": null,
+"ids": [
+"value:current.swell_wave_height"
+]
+},
+"C10": {
+"n": 14,
+"count": null,
+"ids": [
+"properties.periods#0",
+"properties.periods#1",
+"properties.periods#2",
+"properties.periods#3",
+"properties.periods#4",
+"properties.periods#5",
+"properties.periods#6",
+"properties.periods#7",
+"properties.periods#8",
+"properties.periods#9",
+"properties.periods#10",
+"properties.periods#11"
+]
+},
+"C11": {
+"n": 14,
+"count": null,
+"ids": [
+"properties.periods#0",
+"properties.periods#1",
+"properties.periods#2",
+"properties.periods#3",
+"properties.periods#4",
+"properties.periods#5",
+"properties.periods#6",
+"properties.periods#7",
+"properties.periods#8",
+"properties.periods#9",
+"properties.periods#10",
+"properties.periods#11"
+]
+},
+"C15": {
+"n": 1,
+"count": null,
+"ids": [
+"value:events[0].strEvent"
+]
+},
+"C16": {
+"n": 1,
+"count": null,
+"ids": [
+"value:events[0].strEvent"
+]
+},
+"C18": {
+"n": 1,
+"count": null,
+"ids": [
+"dates#3"
+]
+},
+"C21": {
+"n": 20,
+"count": null,
+"ids": [
+"hits#0",
+"hits#1",
+"hits#2",
+"hits#3",
+"hits#4",
+"hits#5",
+"hits#6",
+"hits#7",
+"hits#8",
+"hits#9",
+"hits#10",
+"hits#11"
+]
+},
+"C27": {
+"n": 4,
+"count": null,
+"ids": [
+"rows#0",
+"rows#1",
+"rows#2",
+"rows#3"
+]
+},
+"C31": {
+"n": 1,
+"count": null,
+"ids": [
+"value:status.description"
+]
+},
+"C32": {
+"n": 0,
+"count": null,
+"ids": []
+},
+"C34": {
+"n": 2,
+"count": null,
+"ids": [
+"features#1",
+"features#19"
+]
+},
+"C38": {
+"n": 0,
+"count": null,
+"ids": []
+},
+"C45": {
+"n": 16,
+"count": null,
+"ids": [
+"features#0",
+"features#1",
+"features#2",
+"features#3",
+"features#4",
+"features#5",
+"features#6",
+"features#7",
+"features#8",
+"features#9",
+"features#10",
+"features#11"
+]
+},
+"C50": {
+"n": 2,
+"count": null,
+"ids": [
+"daily#1",
+"daily#2"
+]
+},
+"D1": {
+"n": 1,
+"count": null,
+"ids": [
+"value:current.relative_humidity_2m"
+]
+},
+"D2": {
+"n": 1,
+"count": null,
+"ids": [
+"value:current.wind_speed_10m"
+]
+},
+"D3": {
+"n": 1,
+"count": null,
+"ids": [
+"value:daily.uv_index_max[0]"
+]
+},
+"D7": {
+"n": 1,
+"count": null,
+"ids": [
+"daily#5"
+]
+},
+"D8": {
+"n": 24,
+"count": null,
+"ids": [
+"properties.periods#17",
+"properties.periods#18",
+"properties.periods#19",
+"properties.periods#20",
+"properties.periods#21",
+"properties.periods#22",
+"properties.periods#23",
+"properties.periods#24",
+"properties.periods#25",
+"properties.periods#26",
+"properties.periods#27",
+"properties.periods#28"
+]
+},
+"D10": {
+"n": 12,
+"count": null,
+"ids": [
+"hourly#18",
+"hourly#19",
+"hourly#20",
+"hourly#21",
+"hourly#22",
+"hourly#23",
+"hourly#24",
+"hourly#25",
+"hourly#26",
+"hourly#27",
+"hourly#28",
+"hourly#29"
+]
+},
+"D11": {
+"n": 17,
+"count": null,
+"ids": [
+"items#64",
+"items#65",
+"items#66",
+"items#67",
+"items#68",
+"items#69",
+"items#70",
+"items#71",
+"items#72",
+"items#73",
+"items#74",
+"items#75"
+]
+},
+"D12": {
+"n": 1,
+"count": null,
+"ids": [
+"predictions#6"
+]
+},
+"D13": {
+"n": 1,
+"count": null,
+"ids": [
+"games#1"
+]
+},
+"D14": {
+"n": 1,
+"count": null,
+"ids": [
+"results#0"
+]
+},
+"D17": {
+"n": 4,
+"count": null,
+"ids": [
+"predictions#4",
+"predictions#5",
+"predictions#6",
+"predictions#7"
+]
+},
+"D18": {
+"n": 1,
+"count": null,
+"ids": [
+"games#7"
+]
+},
+"D21": {
+"n": 20,
+"count": null,
+"ids": [
+"items#0",
+"items#1",
+"items#2",
+"items#3",
+"items#4",
+"items#5",
+"items#6",
+"items#7",
+"items#8",
+"items#9",
+"items#10",
+"items#11"
+]
+},
+"D22": {
+"n": 9,
+"count": null,
+"ids": [
+"features#2",
+"features#4",
+"features#5",
+"features#8",
+"features#11",
+"features#12",
+"features#13",
+"features#15",
+"features#17"
+]
+},
+"D24": {
+"n": 10,
+"count": null,
+"ids": [
+"items#2",
+"items#0",
+"items#5",
+"items#1",
+"items#6",
+"items#4",
+"items#9",
+"items#3",
+"items#10",
+"items#11"
+]
+},
+"D25": {
+"n": 32,
+"count": null,
+"ids": [
+"standings#0",
+"standings#1",
+"standings#2",
+"standings#3",
+"standings#4",
+"standings#5",
+"standings#6",
+"standings#7",
+"standings#8",
+"standings#9",
+"standings#10",
+"standings#11"
+]
+},
+"D27": {
+"n": 23,
+"count": null,
+"ids": [
+"rows#0",
+"rows#1",
+"rows#2",
+"rows#3",
+"rows#4",
+"rows#5",
+"rows#6",
+"rows#7",
+"rows#8",
+"rows#9",
+"rows#10",
+"rows#11"
+]
+},
+"D30": {
+"n": 1,
+"count": null,
+"ids": [
+"value:status.description"
+]
+},
+"D33": {
+"n": 0,
+"count": null,
+"ids": []
+},
+"D36": {
+"n": 25,
+"count": 25,
+"ids": [
+"features#0",
+"features#1",
+"features#2",
+"features#3",
+"features#4",
+"features#5",
+"features#6",
+"features#7",
+"features#8",
+"features#9",
+"features#10",
+"features#11"
+]
+},
+"D37": {
+"n": 0,
+"count": 0,
+"ids": []
+},
+"D45": {
+"n": 10,
+"count": null,
+"ids": [
+"people#0",
+"people#1",
+"people#2",
+"people#3",
+"people#4",
+"people#5",
+"people#6",
+"people#7",
+"people#8",
+"people#9"
+]
+},
+"D49": {
+"n": 1,
+"count": null,
+"ids": [
+"value:properties.periods[0].detailedForecast"
+]
+},
+"E2": {
+"n": 1,
+"count": null,
+"ids": [
+"value:current.wind_speed_10m"
+]
+},
+"E3": {
+"n": 1,
+"count": null,
+"ids": [
+"value:data[0].v"
+]
+},
+"E5": {
+"n": 1,
+"count": null,
+"ids": [
+"value:price"
+]
+},
+"E7": {
+"n": 1,
+"count": null,
+"ids": [
+"daily#2"
+]
+},
+"E8": {
+"n": 48,
+"count": null,
+"ids": [
+"hourly#24",
+"hourly#25",
+"hourly#26",
+"hourly#27",
+"hourly#28",
+"hourly#29",
+"hourly#30",
+"hourly#31",
+"hourly#32",
+"hourly#33",
+"hourly#34",
+"hourly#35"
+]
+},
+"E10": {
+"n": 24,
+"count": null,
+"ids": [
+"hourly#21",
+"hourly#22",
+"hourly#23",
+"hourly#24",
+"hourly#25",
+"hourly#26",
+"hourly#27",
+"hourly#28",
+"hourly#29",
+"hourly#30",
+"hourly#31",
+"hourly#32"
+]
+},
+"E12": {
+"n": 1,
+"count": null,
+"ids": [
+"predictions#1"
+]
+},
+"E13": {
+"n": 1,
+"count": null,
+"ids": [
+"value:events[0].strEvent"
+]
+},
+"E18": {
+"n": 0,
+"count": null,
+"ids": []
+},
+"E22": {
+"n": 0,
+"count": null,
+"ids": []
+},
+"E24": {
+"n": 5,
+"count": null,
+"ids": [
+"items#0",
+"items#1",
+"items#9",
+"items#3",
+"items#13"
+]
+},
+"E26": {
+"n": 25,
+"count": null,
+"ids": [
+"features#0",
+"features#1",
+"features#2",
+"features#3",
+"features#4",
+"features#5",
+"features#6",
+"features#7",
+"features#8",
+"features#9",
+"features#10",
+"features#11"
+]
+},
+"E27": {
+"n": 10,
+"count": null,
+"ids": [
+"rows#0",
+"rows#1",
+"rows#2",
+"rows#3",
+"rows#4",
+"rows#5",
+"rows#6",
+"rows#7",
+"rows#8",
+"rows#9"
+]
+},
+"E31": {
+"n": 1,
+"count": null,
+"ids": [
+"CTAAlerts.Alert#2"
+]
+},
+"E32": {
+"n": 0,
+"count": null,
+"ids": []
+},
+"E33": {
+"n": 0,
+"count": null,
+"ids": []
+},
+"E34": {
+"n": 0,
+"count": null,
+"ids": []
+},
+"E36": {
+"n": 0,
+"count": 0,
+"ids": []
+},
+"E37": {
+"n": 0,
+"count": 0,
+"ids": []
+},
+"E38": {
+"n": 80,
+"count": 80,
+"ids": [
+"features#0",
+"features#1",
+"features#2",
+"features#3",
+"features#4",
+"features#5",
+"features#6",
+"features#7",
+"features#8",
+"features#9",
+"features#10",
+"features#11"
+]
+},
+"E39": {
+"n": 0,
+"count": null,
+"ids": []
+},
+"E44": {
+"n": 53,
+"count": null,
+"ids": [
+"rows#0",
+"rows#1",
+"rows#2",
+"rows#3",
+"rows#4",
+"rows#5",
+"rows#6",
+"rows#7",
+"rows#8",
+"rows#9",
+"rows#10",
+"rows#11"
+]
+},
+"E45": {
+"n": 1,
+"count": null,
+"ids": [
+"value:latitude"
+]
+},
+"E49": {
+"n": 1,
+"count": null,
+"ids": [
+"value:properties.periods[0].detailedForecast"
+]
+}
+}
