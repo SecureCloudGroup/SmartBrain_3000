@@ -6,19 +6,28 @@
   // mounts this when `item.payload` is already known to be a bound form (its own
   // CLIR pick always exists then), so `pick` below is never null in practice.
   import { onDestroy, onMount } from "svelte";
+  import Chip from "$lib/components/Chip.svelte";
   import IrPaint from "$lib/components/IrPaint.svelte";
-  import { optionMaxWidth, verifyOptions, type VerifyOption } from "$lib/ni/verify";
+  import type { NiCoverage } from "$lib/api";
+  import { coverageChips, optionMaxWidth, verifyOptions, type VerifyOption } from "$lib/ni/verify";
 
   let {
     payload,
     viewerTz,
     busy = false,
+    interpretation = "",
+    coverage = undefined,
     onUse,
     onWrong,
   }: {
     payload: unknown;
     viewerTz: string;
     busy?: boolean;
+    // How the ask was read (ni-format §36): the card's code-authored interpretation line
+    // and its per-clause coverage. "" / undefined on a card built before Round 20 — the
+    // panel then shows exactly what it showed before.
+    interpretation?: string;
+    coverage?: Record<string, NiCoverage>;
     onUse: (id: "pick" | "second") => void;
     onWrong: () => void;
   } = $props();
@@ -26,6 +35,7 @@
   const options = $derived(verifyOptions(payload));
   const pick = $derived(options.find((o) => o.id === "pick") ?? null);
   const second = $derived(options.find((o) => o.id === "second") ?? null);
+  const chips = $derived(coverageChips(coverage));
 
   // --- Phone/desktop face toggle — local to this preview, never the automatic
   // (max-width: 560px) breakpoint IrPaint's caller otherwise uses. -------------------
@@ -117,6 +127,21 @@
     </div>
   {/if}
 
+  <!-- The interpretation line is code-authored (§36), so it is shown as plain text —
+       never {@html}; a muted chip names each clause the query approximated or could
+       not carry. -->
+  {#if interpretation}
+    <p class="ni-note verify-reads">
+      <span class="verify-reads-label">Reads as</span>
+      <span class="verify-reads-text">{interpretation}</span>
+      {#if chips.length > 0}
+        <span class="verify-reads-chips">
+          {#each chips as chip (chip)}<Chip>{chip}</Chip>{/each}
+        </span>
+      {/if}
+    </p>
+  {/if}
+
   {#if pick}
     <div class="ni-actions">
       <button class="secondary" disabled={busy} onclick={() => onUse("pick")}>
@@ -152,6 +177,13 @@
   .verify-why {
     margin: 0 0 var(--s-2);
     font-size: var(--f-label);
+  }
+  .verify-reads-label { font-weight: 600; }
+  .verify-reads-chips {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: var(--s-1);
+    vertical-align: middle;
   }
   /* Same shape as +page.svelte's `.ni-actions` (that rule is scoped to the page and
      does not reach this component's own markup); duplicated here rather than shared,

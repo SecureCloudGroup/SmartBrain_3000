@@ -64,6 +64,18 @@ export function footerText(item: NiBoardItem): string {
   return [asOf, host, cadence].filter((part) => part.length > 0).join(" · ");
 }
 
+/** The board row's interpretation line (ni-format §36 — code-authored, so it may be shown
+ *  as text), verbatim, or "" when the row carries none: absent (a card built before Round
+ *  20, an older server), not a string, or blank. Never trimmed or cut here — CardShell's
+ *  footer truncates it visually to one line and VerifyPanel shows it whole. */
+export function interpretationOf(item: NiBoardItem): string {
+  console.assert(typeof item.id === "string", "interpretationOf: a board row");
+  const raw: unknown = item.interpretation;
+  const text = typeof raw === "string" && raw.trim().length > 0 ? raw : "";
+  console.assert(text === "" || text === raw, "interpretationOf: verbatim or empty");
+  return text;
+}
+
 /** One card -> its grid footprint `{cols, rows}`. The painted CLIR's own span key
  *  (`d1x2`, `p2x3`, … — spans.py stamps one on every CLIR) wins when present: the engine
  *  picks a phone span per candidate (`phone_default`: a 1-column desktop design may seal

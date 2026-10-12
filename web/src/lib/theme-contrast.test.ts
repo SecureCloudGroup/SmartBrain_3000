@@ -105,6 +105,13 @@ describe("theme contrast (WCAG AA)", () => {
           expect(r, `${tok} ${vars[tok]} on tint ${tint} = ${r.toFixed(2)}`).toBeGreaterThanOrEqual(4.5);
         });
       }
+      // VerifyPanel sits on --accent-tint (the accent at 10%/7%) over its card's --panel,
+      // and its body line — the Round 20 "Reads as" interpretation line — is --text.
+      it("--text on the accent tint >= 4.5 (VerifyPanel's Reads as line)", () => {
+        const tint = mix(vars["--accent"], vars["--panel"], name === "dark" ? 0.1 : 0.07);
+        const r = ratio(vars["--text"], tint);
+        expect(r, `--text ${vars["--text"]} on tint ${tint} = ${r.toFixed(2)}`).toBeGreaterThanOrEqual(4.5);
+      });
     });
   }
 

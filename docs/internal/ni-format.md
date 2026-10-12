@@ -3397,3 +3397,19 @@ reason and the runner starts nothing (fail closed). The first engine is Obscura
   does not bind a value declared `today` / `tomorrow` (an honest stop, never a wrong card). Refine and
   Fix take the remap path, which never rebuilds from answers and refetches; no raw sample is sealed,
   so a re-plan without a refetch has nothing to run on.
+
+### Client
+
+Both web surfaces read the board row's optional `interpretation` and `query.coverage`
+(`NiBoardItem`; `ni_routes._board_row` carries them from the sealed `spec.interpretation` /
+`spec.query.coverage`). Absent, the card renders as before (version-skew rule); present, the
+line is always plain text, never `{@html}`. **VerifyPanel (C2):** directly above the Use this
+controls, one `.ni-note` line — "Reads as" and the whole line (it wraps, never cut) — then one
+muted chip per clause whose coverage is `approximated` or `unbound`, named through the closed
+table `CLAUSE_WORDS` in `$lib/ni/verify.ts` (answer, select → quantity, where → filter, time,
+order, limit, agg → count: "time approximated", "quantity not found"), in the line's order.
+**CardShell footer:** where CardShell paints the footer (a non-form card), the line is its
+first segment — one line with an ellipsis, the whole line in its `title` — before as-of · host
+· cadence, which wrap to their own line when both do not fit, at any width. A bound form
+card's footer is its CLIR's (`ni_forms/shell.py`, laid out per face) and CardShell adds no
+second one, so a live form card shows the line in its footer only once that shell lays it out.

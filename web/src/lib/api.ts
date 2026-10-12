@@ -745,6 +745,11 @@ export interface NiFinding {
   status: string;
 }
 
+// How one clause of the ask's query was carried (ni-format §36 "Coverage and notes"):
+// "unbound" = the ask said something the query does not carry, "approximated" = carried
+// coarser (a part of a day read as the day), "rules" = decided by the rules floor.
+export type NiCoverage = "bound" | "unbound" | "approximated" | "rules";
+
 export interface NiAwaitingYes {
   from: "page" | "dataset";
   host: string;
@@ -812,6 +817,13 @@ export interface NiBoardItem {
   // awaiting_credential / unsupported / failed. Null once the item is settled and
   // the card should render its bound payload (or Waiting/first-run copy).
   flow?: NiItemFlow | null;
+  // Round 20 interpretation line (ni-format §36): the code-authored sentence saying how
+  // the ask was read ("Earthquakes · Magnitude > 4 · past 7 days · count", ≤200 chars)
+  // and the per-clause coverage, as sealed on the spec (spec.interpretation,
+  // spec.query.coverage). Absent on a card built before Round 20 or served by an older
+  // server — the card then renders exactly as before (version-skew rule).
+  interpretation?: string;
+  query?: { coverage?: Record<string, NiCoverage> };
 }
 
 // ni library (ni-format §19/§20) — the Global Library subscription: one hosted

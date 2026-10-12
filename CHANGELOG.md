@@ -75,6 +75,11 @@ to know when a release changes behavior.
   line saying how it was read ("Earthquakes · Magnitude > 4 · past 7 days · count") and a
   note when part of the ask could not be carried. The layer ships with its measurement tool
   and test data.
+- **A new card says how it read your ask.** When you check a card built from a Library
+  source, it shows the line your ask was read as ("Earthquakes · Magnitude > 4 · past 7
+  days · count"), with a small note when part of the ask was approximated or could not be
+  found.
+
 
 ### Fixed
 
