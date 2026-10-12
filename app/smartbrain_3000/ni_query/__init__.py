@@ -2,7 +2,8 @@
 Library answer. ``recognize`` (two pinned recognizer libraries as validators), ``plan_query``
 (one local model call + the v1 normalization + code-owned clauses + the rules floor),
 ``apply_query`` (the IR over a fetched payload, pure Python) and ``say`` (the interpretation
-line). Not wired into the flow yet — docs/internal/ni-format.md §36."""
+line). Wired into the flow's declared build in Q3b (``ni_flow._try_answers_build``) —
+docs/internal/ni-format.md §36."""
 from .apply import apply_query
 from .plan import QueryPlan, plan_query
 from .recognize import recognize

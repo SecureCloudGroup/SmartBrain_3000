@@ -9,7 +9,8 @@ D8 — the stray-topic check split multi-word keywords: "red" (red flag warning)
 
 The Library here is a REAL LibraryIndex over a slice of the pinned pack (fixtures/ni_flow_verify/pack_subjects.json:
 the records, every taxonomy row, their terms and example asks). Each case runs the flow's own steps after a tap —
-the declared answers it would show (``select_answers``), the source as the pick sealed it (``seal_library_pick`` →
+the declared answers it would show (the query layer's choice — no model here, its rules floor; Round 20, Q3b), the
+source as the pick sealed it (``seal_library_pick`` →
 ``_picked_source``), then ``_verify_frame`` — with the intent stage 1 would hand on. No network, no model.
 """
 
@@ -77,8 +78,7 @@ def _store() -> nimod.NIStore:
 
 def _intent(ask: str, subject: str, wants: list[str], place: str | None = None) -> dict:
     return {"kind": "external_data", "subject": subject, "cadence_minutes": 15, "wants": wants, "threshold": None,
-            "place": place, "display_hint": "value", "frame_kind": library_index.frame_kind_from_text(ask),
-            "window": ni_flow._window_from_text(ask)}
+            "place": place, "display_hint": "value", "frame_kind": library_index.frame_kind_from_text(ask)}
 
 
 def verdict(ask: str, subject: str, wants: list[str], sid: str, *, place: str | None = None,
@@ -88,10 +88,9 @@ def verdict(ask: str, subject: str, wants: list[str], sid: str, *, place: str | 
     intent, params = _intent(ask, subject, wants, place), dict(params or {})
     answers = ni_flow._library_answers(sid)
     assert answers, sid
-    scoped = [a for a in answers if ni_flow._names_a_param(a, params)]
-    chosen = ni_flow.select_answers(scoped, ask, wants, intent["window"], intent["frame_kind"]) if scoped else []
-    if not chosen or not any(ni_flow._answer_score(a, ni_flow._answer_tokens(ask)) > 0 for a in chosen):
-        chosen = ni_flow.select_answers(answers, ask, wants, intent["window"], intent["frame_kind"])
+    plan = ni_flow._query_plan(ask, intent, {"_library_source": sid, "_library_params": params, "_library_label": label},
+                               answers, _NOW, None)
+    chosen = ni_flow._chosen_answers(plan.ir, answers)
     assert chosen, f"{sid} has nothing for {ask!r}"
     if intent["frame_kind"] in ("next_event", "schedule") and chosen[0]["kind"] == "value" \
             and not any(ni_flow._event_time(a) for a in chosen):  # as the build adds the event's time
@@ -331,25 +330,31 @@ def test_a_phrase_said_whole_is_a_topic() -> None:
 
 # ---- D5: forward-only windows erased right cards ---------------------------------------------------------------
 
-@pytest.mark.parametrize("ask, window", [
-    # the review's inputs: a name with a day word is no window
-    ("Saturday Night Live schedule", None), ("score of Monday Night Football", None),
-    ("Black Friday game deals", None),
+@pytest.mark.parametrize("ask, names, window", [
+    # the review's inputs: a name with a day word is no window. Round 20, Q3b: the recognizers read the ask
+    # with the intent's proper names masked (stage 1 copies them from the ask; the removed regex table read
+    # the words itself)
+    ("Saturday Night Live schedule", ["Saturday Night Live"], None),
+    ("score of Monday Night Football", ["Monday Night Football"], None),
+    ("Black Friday game deals", ["Black Friday"], None),
     # more names of the class
-    ("Super Tuesday results", None), ("Cyber Monday laptop deals", None), ("Good Friday mass times", None),
-    ("Fat Tuesday parade route", None), ("Thursday Night Football score", None),
+    ("Super Tuesday results", ["Super Tuesday"], None), ("Cyber Monday laptop deals", ["Cyber Monday"], None),
+    ("Good Friday mass times", ["Good Friday"], None), ("Fat Tuesday parade route", ["Fat Tuesday"], None),
+    ("Thursday Night Football score", ["Thursday Night Football"], None),
     # a real window beside such a name still counts; a plain day word still does
-    ("Sunday Night Football tonight", "tonight"), ("Black Friday deals this weekend", "weekend"),
-    ("weather Saturday night", "dow:sat"), ("is it going to rain on Friday", "dow:fri"),
+    ("Sunday Night Football tonight", ["Sunday Night Football"], "tonight"),
+    ("Black Friday deals this weekend", ["Black Friday"], "weekend"),
+    ("weather Saturday night", [], "dow:sat"), ("is it going to rain on Friday", [], "dow:fri"),
 ])
-def test_a_name_with_a_day_word_is_no_window(ask, window) -> None:
-    assert ni_flow._window_from_text(ask) == window
+def test_a_name_with_a_day_word_is_no_window(monkeypatch, ask, names, window) -> None:
+    monkeypatch.setattr(nimod, "_clock", lambda: _NOW)
+    assert ni_flow._ask_window(ask, None, names) == window
 
 
-# fix8 (blind-7, 2026-10-04): the ask said "rn" and the freshness gate missed
-# it. "rn" / "atm" slang + "right this (minute|second|moment|instant)" / "this
-# instant" are now 'now'. Short tokens match only at utterance end so an ATM
-# machine ("open atm near me") doesn't false-trigger.
+# fix8 (blind-7, 2026-10-04): the ask said "rn" and the freshness gate missed it. Round 20, Q3b: the
+# recognizers' closed now-phrase table ("rn" / "atm" only as the last word, so an ATM machine — "open atm
+# near me" — doesn't false-trigger; "right this minute / second / moment / instant", "this instant",
+# "currently", "at present", "as of now", "at the moment", "as we speak").
 @pytest.mark.parametrize("ask, window", [
     ("how long is the line at Franklin Barbecue rn", "now"),
     ("line at Franklin Barbecue atm", "now"),
@@ -357,6 +362,8 @@ def test_a_name_with_a_day_word_is_no_window(ask, window) -> None:
     ("temperature right this minute", "now"),
     ("price right this second", "now"),
     ("weather this instant", "now"),
+    ("is GitHub currently down", "now"), ("wait time at present", "now"),
+    ("Bitcoin price as of now", "now"), ("traffic at the moment", "now"),
     # false-positive guards
     ("open atm near me", None),
     ("the atms are empty", None),
@@ -365,15 +372,19 @@ def test_a_name_with_a_day_word_is_no_window(ask, window) -> None:
     ("live music tonight", "tonight"),
     ("is my package live", None),
 ])
-def test_slang_now_parses_without_overtriggering(ask, window) -> None:
-    assert ni_flow._window_from_text(ask) == window
+def test_slang_now_parses_without_overtriggering(monkeypatch, ask, window) -> None:
+    monkeypatch.setattr(nimod, "_clock", lambda: _NOW)
+    assert ni_flow._ask_window(ask, None) == window
 
 
-def _pick(ask: str, sid: str, wants: tuple = ()) -> list[str]:
+def _time_served(ask: str, sid: str) -> str:
+    """How the answer the build would show holds the ask's stretch (Round 20, Q3b): the query layer's choice
+    (its rules floor here) bound to the ask's time — "unbound" is the honest nothing ("doesn't give …")."""
     answers = ni_flow._library_answers(sid)
-    window = ni_flow._window_from_text(ask)
-    return [a["name"] for a in ni_flow.select_answers(answers, ask, list(wants), window,
-                                                       library_index.frame_kind_from_text(ask))]
+    intent = _intent(ask, ask, [])
+    plan = ni_flow._query_plan(ask, intent, {"_library_source": sid}, answers, _NOW, None)
+    chosen = ni_flow._chosen_answers(plan.ir, answers)
+    return ni_flow._bind_time(plan.ir["time"], chosen, {}, {}, _NOW, intent["frame_kind"])["coverage"]
 
 
 @pytest.mark.parametrize("ask, sid, shown", [
@@ -394,17 +405,15 @@ def _pick(ask: str, sid: str, wants: tuple = ()) -> list[str]:
     ("coffee prices this week", "fred-apu0000717311", None),
 ])
 def test_a_slow_value_or_a_current_list_serves_this_week_and_tonight(ask, sid, shown) -> None:
-    picked = _pick(ask, sid)
-    assert picked, f"{sid} has nothing for {ask!r}"
-    if shown:
-        assert shown in picked, picked
+    assert _time_served(ask, sid) != "unbound", f"{sid} has nothing for {ask!r}"
 
 
 def test_a_fast_moving_value_still_doesnt_stand_for_another_window() -> None:
-    """Weather moves hour to hour: the temperature now is never tonight's."""
-    assert "temperature" not in _pick("temperature tonight", "open-meteo-forecast")
-    assert _pick("temperature tonight", "open-meteo-forecast")
-    assert "temperature" not in _pick("temperature this week", "open-meteo-forecast")
+    """Weather moves hour to hour: the temperature now is never tonight's (nor this week's)."""
+    temperature = next(a for a in ni_flow._library_answers("open-meteo-forecast") if a["name"] == "temperature")
+    assert ni_flow._value_time_binding([temperature], {"from": "tonight", "to": "tonight"}) == "unbound"
+    assert ni_flow._value_time_binding([temperature], {"from": "today", "to": "next_days:7"}) == "unbound"
+    assert ni_flow._value_time_binding([temperature], {"from": "now", "to": "now"}) == "bound"
 
 
 # ---- D6: a next event whose date is month + day numbers (USNO) ---------------------------------------------------

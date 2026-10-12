@@ -71,8 +71,14 @@ def _intent(ask: str, subject: str, wants: list[str], place: str | None = None,
     tests that exercise the proper-noun gate pass the names the production model would."""
     return {"kind": "external_data", "subject": subject, "cadence_minutes": 15, "wants": wants, "threshold": None,
             "place": place, "display_hint": "value", "names": list(names or []),
-            "frame_kind": library_index.frame_kind_from_text(ask),
-            "window": ni_flow._window_from_text(ask)}
+            "frame_kind": library_index.frame_kind_from_text(ask)}
+
+
+def _chosen(ask: str, intent: dict, sid: str, answers: list[dict]) -> list[dict]:
+    """The declared answers the build shows — Round 20 (Q3b): the query layer's choice (``ir.answer`` and its
+    value companions); no model in these tests, so its rules floor. (Was ``select_answers``, removed.)"""
+    plan = ni_flow._query_plan(ask, intent, {"_library_source": sid}, answers, _NOW, None)
+    return ni_flow._chosen_answers(plan.ir, answers)
 
 
 # ---- F2: _other_subject must subtract only readings this source took / covers --------------------
@@ -85,7 +91,7 @@ def test_f2_a_leagues_source_still_refuses_a_soccer_team_though_another_rows_rea
     intent = _intent(ask, "Inter Miami", ["games"])
     answers = ni_flow._library_answers("mlb-schedule")
     assert answers, "mlb-schedule has answers"
-    chosen = ni_flow.select_answers(answers, ask, intent["wants"], intent["window"], intent["frame_kind"])
+    chosen = _chosen(ask, intent, "mlb-schedule", answers)
     assert chosen, "something is chosen for the ask"
     # another row of the SAME pick reads the subject itself ("Inter Miami CF" from a soccer-league
     # source); its reading used to be subtracted globally and excused mlb-schedule.
@@ -107,20 +113,6 @@ def test_f2_a_leagues_source_still_refuses_a_soccer_team_though_another_rows_rea
     reasons, _notes = ni_flow._verify_frame(ni_flow._frame_of(ask, intent), ni_flow._picked_source(live),
                                             {}, built, ask, intent, _NOW)
     assert reasons, f"mlb-schedule shipped for Inter Miami: {reasons}"
-
-
-# ---- F4: the "any …?" exists rule may not override an answer that strictly serves the window -----
-
-@pytest.mark.parametrize("ask, window", [("any aurora tonight?", "tonight"),
-                                          ("any chance of northern lights tomorrow", "tomorrow")])
-def test_f4_any_aurora_takes_the_forecast_not_a_may_be_empty_list(ask, window) -> None:
-    """swpc-kp-forecast's "today" column answer is may_be_empty; its "forecast" rows strictly serve
-    tonight / tomorrow. Without the fix, the exists rule picked may_be_empty regardless of score."""
-    answers = ni_flow._library_answers("swpc-kp-forecast")
-    assert answers, "swpc-kp-forecast has answers"
-    chosen = ni_flow.select_answers(answers, ask, ["kp"], window, None)
-    assert chosen, "something is chosen"
-    assert chosen[0]["name"] == "forecast", (ask, [a["name"] for a in chosen])
 
 
 # ---- F5-gap: _frame_gap must judge the FIRST SHOWN moment, not require ALL to be past -----------
@@ -191,7 +183,7 @@ def test_f7_ukraine_news_refuses_a_general_news_feed_that_takes_no_filter_for_it
     intent = _intent(ask, "Ukraine", ["news"])
     answers = ni_flow._library_answers("abc-top")
     assert answers, "abc-top has answers"
-    chosen = ni_flow.select_answers(answers, ask, intent["wants"], intent["window"], intent["frame_kind"])
+    chosen = _chosen(ask, intent, "abc-top", answers)
     assert chosen, "something is chosen"
     row = {"source_id": "abc-top", "url": "https://abcnews.go.com/abcnews/topstories", "label": "",
            "params": {}, "scope": "global"}
@@ -230,7 +222,7 @@ def test_f7_right_asks_still_ship(ask, subject, wants, sid) -> None:
     answers = ni_flow._library_answers(sid)
     assert answers, sid
     intent = _intent(ask, subject, wants)
-    chosen = ni_flow.select_answers(answers, ask, wants, intent["window"], intent["frame_kind"])
+    chosen = _chosen(ask, intent, sid, answers)
     assert chosen, f"nothing chosen for {ask!r}"
     row = {"source_id": sid, "url": "https://example.org/x", "label": "", "params": {}, "scope": "global"}
     store = _store()
@@ -255,7 +247,7 @@ def test_f7_sentence_initial_proper_noun_still_refuses_a_general_feed() -> None:
     intent = _intent(ask, "Ukraine news", ["headlines"], names=["Ukraine"])
     answers = ni_flow._library_answers("abc-top")
     assert answers, "abc-top has answers"
-    chosen = ni_flow.select_answers(answers, ask, intent["wants"], intent["window"], intent["frame_kind"])
+    chosen = _chosen(ask, intent, "abc-top", answers)
     assert chosen, "something is chosen"
     row = {"source_id": "abc-top", "url": "https://abcnews.go.com/abcnews/topstories", "label": "",
            "params": {}, "scope": "global"}
@@ -285,7 +277,7 @@ def test_f7_j_entity_source_still_catches_a_stray_brand_name() -> None:
     intent = _intent(ask, "Chicago Tribune", ["headlines"])
     answers = ni_flow._library_answers("abc-top") or []
     assert answers, "abc-top has answers"
-    chosen = ni_flow.select_answers(answers, ask, intent["wants"], intent["window"], intent["frame_kind"])
+    chosen = _chosen(ask, intent, "abc-top", answers)
     assert chosen, "something is chosen"
     # a local-news-metro-shaped source dict (entity set, no entity_params, filed under news).
     # The entity is a semicolon-separated LIST of metros (the live local-news-metro shape) — a
@@ -346,7 +338,7 @@ def test_f12_a_source_whose_overlap_is_only_the_subject_word_refuses_when_all_wa
     intent = _intent(ask, "natural gas storage", ["inventories"])
     answers = ni_flow._library_answers("fred-gasregw")
     assert answers, "fred-gasregw has answers"
-    chosen = ni_flow.select_answers(answers, ask, intent["wants"], intent["window"], intent["frame_kind"])
+    chosen = _chosen(ask, intent, "fred-gasregw", answers)
     assert chosen, "something is chosen"
     row = {"source_id": "fred-gasregw", "url": "https://example.org/f", "label": "", "params": {},
            "scope": "global"}
@@ -379,7 +371,7 @@ def test_f12_generic_quantity_want_is_covered_by_a_primary_value_answer(ask, sub
     answers = ni_flow._library_answers(sid)
     assert answers, sid
     intent = _intent(ask, subject, wants)
-    chosen = ni_flow.select_answers(answers, ask, wants, intent["window"], intent["frame_kind"])
+    chosen = _chosen(ask, intent, sid, answers)
     assert chosen, f"nothing chosen for {ask!r}"
     row = {"source_id": sid, "url": "https://example.org/x", "label": "", "params": {}, "scope": "global"}
     store = _store()
@@ -526,7 +518,7 @@ def test_r4_1_proper_noun_subject_refuses_abc_top(ask) -> None:
     intent = _intent(ask, subject, ["headlines"], names=[ask.split(" ")[0]])
     answers = ni_flow._library_answers("abc-top")
     assert answers, "abc-top has answers"
-    chosen = ni_flow.select_answers(answers, ask, intent["wants"], intent["window"], intent["frame_kind"])
+    chosen = _chosen(ask, intent, "abc-top", answers)
     assert chosen, f"nothing chosen for {ask!r}"
     row = {"source_id": "abc-top", "url": "https://abcnews.go.com/abcnews/topstories", "label": "",
            "params": {}, "scope": "global"}

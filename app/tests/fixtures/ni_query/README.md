@@ -9,7 +9,7 @@ Frozen inputs for `tools/ni-query-eval.py` and `tests/test_ni_query_*.py` — th
 | `replies_fewshot.jsonl` | the local 9B's recorded replies (Q2, prompt design v2, few-shot k = 3) on the 79 TEST rows: `id, parsed` (the valid object after at most one retry, or null), `reply_raw` (first try). |
 | `replies_zero.jsonl` | the same, zero-shot, all 109 rows. |
 | `split.json` | DEV (30) / TEST (79), stratified by kind, seed 20261009; the reference date of each set (the prompt's "Reference instant") and the zone. |
-| `pool.jsonl` | the few-shot pool: the 22 clean DEV rows (`id, kind, ask, ref, menu, ir`), `menu` = the abbreviated answer menu of the row's source. |
+| `pool.jsonl` | MOVED (Q3b) to `smartbrain_3000/ni_query/pool.jsonl` — it ships with the app as the flow's few-shot pool: the 22 clean DEV rows (`id, kind, ask, ref, menu, ir`), `menu` = the abbreviated answer menu of the row's source. The tool and the tests read it there. |
 | `library.json` | the declared answers, parameters and name of the 42 Library sources the gold rows use (SmartBrain_Library as of 2026-10-07). |
 | `samples/` | the payloads fetched from the rows' tapped URLs on 2026-10-09 (`index.json`: row → file, fetch instant). Capped at 300 KB each: E38's Florida statewide alerts (`nws-alerts-state__6106a727.json`, 889,893 bytes) was dropped; E14's moon-phase fetch failed at the time. |
 | `exec_gold.json` | the Q2 harness's own execution of each gold IR on its sample (row ids, first 12; row count; count) — the port check for `apply_query`. |

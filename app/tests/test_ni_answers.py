@@ -153,28 +153,7 @@ def test_a_malformed_answer_is_skipped_not_fatal() -> None:
     assert ni_flow._clean_answer({**QUAKE_ANSWERS[0], "row": []}) is None
 
 
-# --- selection -----------------------------------------------------------------------------------------
-
-def test_a_general_ask_shows_the_primary_answers(weather) -> None:
-    assert _names(ni_flow.select_answers(weather, "NYC weather", [])) == \
-        ["temperature", "conditions", "high_today", "low_today"]
-    # the model's wants lead, then the primaries fill in
-    assert _names(ni_flow.select_answers(weather, "NYC weather", ["humidity"])) == \
-        ["humidity", "temperature", "conditions", "high_today"]
-
-
-def test_the_users_words_pick_the_answer(weather) -> None:
-    assert _names(ni_flow.select_answers(weather, "will it rain tomorrow in Seattle", [])) == ["rain_tomorrow"]
-    assert _names(ni_flow.select_answers(weather, "rain today in Boston", [])) == ["rain_today"]
-    assert _names(ni_flow.select_answers(weather, "temps in Charleston SC", [])) == ["temperature"]
-    assert _names(ni_flow.select_answers(weather, "how humid is Miami", ["temperature"])) == ["humidity"]
-
-
-def test_a_forecast_ask_shows_the_columns_answer(weather) -> None:
-    assert _names(ni_flow.select_answers(weather, "Philly forecast", [])) == ["daily_forecast"]
-    assert _names(ni_flow.select_answers(weather, "weather this weekend in Austin", [])) == ["daily_forecast"]
-    # an ask for many things that names no answer still takes the table
-    assert _names(ni_flow.select_answers(weather, "Denver next few days", [])) == ["daily_forecast"]
+# --- selection (Round 20, Q3b: the query layer's ``ir.answer`` — tests/test_ni_query_flow.py) -----------------
 
 
 # --- pipelines, scenes, previews ---------------------------------------------------------------------
@@ -210,7 +189,7 @@ def _valid(built: dict) -> None:
 
 
 def test_value_answers_build_with_labels_units_and_words_for_codes(weather) -> None:
-    chosen = ni_flow.select_answers(weather, "NYC weather", [])
+    chosen = [a for a in weather if a["name"] in ("temperature", "conditions", "high_today", "low_today")]
     built = ni_flow.build_from_answers(chosen, OPEN_METEO, "NYC weather")
     _valid(built)
     assert built["pipeline"][0] == {"op": "extract", "paths": {
@@ -245,7 +224,7 @@ def test_the_unit_path_is_read_once_and_frozen(weather) -> None:
 
 
 def test_a_columns_answer_zips_a_daily_forecast(weather) -> None:
-    chosen = ni_flow.select_answers(weather, "Philly forecast", [])
+    chosen = [a for a in weather if a["name"] == "daily_forecast"]
     built = ni_flow.build_from_answers(chosen, OPEN_METEO, "Philly forecast")
     _valid(built)
     apply = built["pipeline"][1]["apply"]
@@ -458,6 +437,14 @@ def _store() -> nimod.NIStore:
 
 _INTENT = {"kind": "external_data", "subject": "NYC weather", "cadence_minutes": 15, "wants": [],
            "threshold": None, "display_hint": "value"}
+# Round 20 (Q3b): the declared build reads the ask through the query layer — one model turn whose prompt
+# starts with the query rules; a test's model answers it with the Query IR it stands for
+_QUERY_MARK = "You turn a person's ask into one query object"
+
+
+def _ir_reply(answer: str, **kw) -> str:
+    return json.dumps({"answer": answer, "params": {}, "select": [], "where": [], "time": None, "order": [],
+                       "limit": None, "agg": "none", **kw})
 
 
 def _picked(store, lib, monkeypatch, request="NYC weather", source="open-meteo-forecast", params=None) -> str:
@@ -485,29 +472,35 @@ def test_filled_params_ride_the_candidate_rows() -> None:
 
 def test_the_flow_builds_from_answers_without_a_mapping_call(lib, monkeypatch) -> None:
     store = _store()
-    item_id = _picked(store, lib, monkeypatch)
+    item_id = _picked(store, lib, monkeypatch, request="NYC temperature and conditions")
     prompts: list[str] = []
 
     def model(prompt: str) -> str:
         prompts.append(prompt)
         assert "Choose the best candidate path" not in prompt, "no model path-picking"
+        if _QUERY_MARK in prompt:
+            return _ir_reply("temperature")
         return '{"serves": false, "gaps": [], "wrong": ["temperature: looks odd"]}'
 
-    out = ni_flow._sample_and_map(store, item_id, "NYC weather", _INTENT, WEATHER_URL, model,
+    out = ni_flow._sample_and_map(store, item_id, "NYC temperature and conditions", _INTENT, WEATHER_URL, model,
                                   lambda _u: copy.deepcopy(OPEN_METEO))
     assert out["state"] == "ready"
-    # a deterministic build: no mapping call, no model judge — the model turns are the §34
-    # PRESENT menu (an enum-only pick among finished designs, plus its one retry when the
-    # reply is off-schema) and the advisory FIT verdict (plan B3, same retry rule) after it
-    assert 1 <= len(prompts) <= 4, prompts
-    assert all("You choose how a personal dashboard card presents" in p
-              or "whether the chosen answers actually answer" in p for p in prompts), prompts
+    # a deterministic build: no mapping call, no model judge — the model turns are the query layer's one
+    # reading of the ask (§36), the §34 PRESENT menu (an enum-only pick among finished designs, plus its one
+    # retry when the reply is off-schema) and the advisory FIT verdict (plan B3, same retry rule) after it
+    queries = [p for p in prompts if _QUERY_MARK in p]
+    assert len(queries) == 1 and 2 <= len(prompts) <= 5, prompts
+    assert all(_QUERY_MARK in p or "You choose how a personal dashboard card presents" in p
+               or "whether the chosen answers actually answer" in p for p in prompts), prompts
     notes = " | ".join(out["notes"])
-    assert "built from the Library's declared answers: Temperature, Conditions, High today, Low today" in notes
+    # the model read temperature; the ask's other quantity word names the conditions answer (code's select)
+    assert "built from the Library's declared answers: Temperature, Conditions" in notes
     assert "verification" not in notes and "won't include" not in notes
     spec = store.get_item(item_id)["spec"]
     assert spec["pipeline"][0]["paths"]["conditions"] == "current.weather_code"
     assert spec["source"] == {"type": "http_json", "url": WEATHER_URL}
+    assert spec["query"]["ir"]["answer"] == "temperature" and spec["query"]["ir"]["select"] == ["conditions"]
+    assert spec["interpretation"] == "Temperature (Conditions)"
 
 
 def test_a_valid_fit_reply_is_sealed_on_the_spec_and_logged(lib, monkeypatch) -> None:
@@ -520,6 +513,8 @@ def test_a_valid_fit_reply_is_sealed_on_the_spec_and_logged(lib, monkeypatch) ->
     def model(prompt: str) -> str:
         if "whether the chosen answers actually answer" in prompt:
             return '{"answers_ask": "yes", "missing": [], "wrong": [], "evidence": []}'
+        if _QUERY_MARK in prompt:
+            return _ir_reply("conditions")
         return '{"intent": "now", "fits": [], "pick": "c0", "second": null, "primary_field": null, ' \
                '"labels": {}, "uncovered_wants": [], "none_fits": false}'
 
@@ -536,23 +531,25 @@ def test_a_valid_fit_reply_is_sealed_on_the_spec_and_logged(lib, monkeypatch) ->
     assert "declared answers" in journal
 
 
-def _mapping_model(prompts: list[str]):
+def _mapping_model(prompts: list[str], query: str = "{}"):
     def model(prompt: str) -> str:
         prompts.append(prompt)
         if "Choose the best candidate path" in prompt:
             return '{"temperature": "current.temperature_2m"}'
-        return "{}"
+        return query if _QUERY_MARK in prompt else "{}"
     return model
 
 
 def test_a_path_missing_from_the_live_response_is_left_off_and_named(lib, monkeypatch) -> None:
     store = _store()
-    item_id = _picked(store, lib, monkeypatch)
+    item_id = _picked(store, lib, monkeypatch, request="NYC temperature and conditions")
     sample = copy.deepcopy(OPEN_METEO)
     del sample["current"]["weather_code"]  # the declared "Conditions" path isn't in this response
     prompts: list[str] = []
-    out = ni_flow._sample_and_map(store, item_id, "NYC weather", {**_INTENT, "wants": ["temperature"]},
-                                  WEATHER_URL, _mapping_model(prompts), lambda _u: sample)
+    out = ni_flow._sample_and_map(store, item_id, "NYC temperature and conditions",
+                                  {**_INTENT, "wants": ["temperature"]},
+                                  WEATHER_URL, _mapping_model(prompts, query=_ir_reply("temperature")),
+                                  lambda _u: sample)
     assert out["state"] == "ready"
     assert not any("Choose the best candidate path" in p for p in prompts)  # no model path-guessing
     assert any("not reported by this source right now: Conditions" in n for n in out["notes"])
@@ -582,8 +579,9 @@ def test_answers_build_only_for_the_sealed_url(lib, monkeypatch) -> None:
 
 def test_a_remap_keeps_the_frozen_spec_path_and_never_rebuilds_from_answers(lib, monkeypatch) -> None:
     store = _store()
-    item_id = _picked(store, lib, monkeypatch)
-    ni_flow._sample_and_map(store, item_id, "NYC weather", _INTENT, WEATHER_URL, lambda _p: "{}",
+    item_id = _picked(store, lib, monkeypatch, request="NYC temperature and conditions")
+    ni_flow._sample_and_map(store, item_id, "NYC temperature and conditions", _INTENT, WEATHER_URL,
+                            _mapping_model([], query=_ir_reply("temperature")),
                             lambda _u: copy.deepcopy(OPEN_METEO))
     frozen = store.get_item(item_id)["spec"]
     # the card refreshes on its frozen pipeline: same labels, units and code words
@@ -610,22 +608,6 @@ def test_no_library_or_no_answers_changes_nothing(lib, monkeypatch) -> None:
     assert ni_flow._try_answers_build(store, item_id, "NYC weather", _INTENT, WEATHER_URL, OPEN_METEO) is None
     monkeypatch.setattr(ni_flow, "_LIBRARY_PROVIDER", None)
     assert ni_flow._library_answers("open-meteo-forecast") == []
-
-
-def test_a_general_ask_that_reaches_one_headline_answer_shows_them_all() -> None:
-    answers = [
-        {"kind": "value", "name": "temperature", "label": "Temperature", "path": "t", "type": "number",
-         "words": ["temperature", "temp", "hot", "cold"], "primary": True},
-        {"kind": "value", "name": "conditions", "label": "Conditions", "path": "c", "type": "text",
-         "words": ["conditions", "weather", "sky"], "primary": True},
-        {"kind": "value", "name": "rain_tomorrow", "label": "Rain chance tomorrow", "path": "r", "type": "number",
-         "words": ["rain tomorrow", "tomorrow", "rain"], "primary": False}]
-    for a in answers:
-        a.setdefault("unit", None)
-    picked = ni_flow.select_answers(answers, "NYC weather", ["weather"])
-    assert [a["name"] for a in picked] == ["temperature", "conditions"]
-    picked = ni_flow.select_answers(answers, "will it rain tomorrow in Seattle", ["rain"])
-    assert [a["name"] for a in picked] == ["rain_tomorrow"]
 
 
 def test_a_value_the_source_is_not_reporting_is_left_off_and_named() -> None:
@@ -778,26 +760,10 @@ def test_a_time_declared_utc_is_shown_in_local_time() -> None:
                                   {"op": "transform", "apply": [{"fn": "date", "field": "t", "utc": True}]}])
 
 
-def test_answers_scoped_to_what_the_user_named_come_first() -> None:
-    """Live 2026-09-29: "delays at Newark airport" showed the nationwide "Airports with FAA delays" list
-    (its words "airport delays" matched best). With the airport named, the airport's own answers lead."""
-    def a(name, label, words, flt=None):
-        raw = {"kind": "list", "name": name, "label": label, "words": words, "path": "items",
-               "row": [{"path": "x", "label": "X", "type": "text"}]}
-        if flt:
-            raw["filter"] = flt
-        return ni_flow._clean_answer(raw)
-    answers = [a("ground_delay", "Ground delay program", ["delays", "ground delay"],
-                 {"path": "airportId", "equals": "{airport}"}),
-               a("airports", "Airports with FAA delays", ["airport delays", "which airports"])]
-    params = {"airport": "EWR"}
-    scoped = [x for x in answers if ni_flow._names_a_param(x, params)]
-    assert [x["name"] for x in scoped] == ["ground_delay"]
-    assert ni_flow._names_a_param(answers[1], params) is False
-    assert ni_flow._names_a_param(answers[0], {}) is False  # nothing named: nothing is scoped
-
-
 def test_the_build_for_a_named_airport_uses_its_own_answer(lib, monkeypatch) -> None:
+    """Live 2026-09-29: "delays at Newark airport" showed the nationwide "Airports with FAA delays" list. Round 20
+    (Q3b): the query layer reads the airport's own answer (its filter names the filled {airport}); the build fills
+    the filter from the address, so the card holds Newark's rows only."""
     store = _store()
     item_id = _picked(store, lib, monkeypatch, request="delays at Newark airport", params={"airport": "EWR"})
     raws = [{"kind": "list", "name": "ground_delay", "label": "Ground delay program", "words": ["delays"],
@@ -808,7 +774,8 @@ def test_the_build_for_a_named_airport_uses_its_own_answer(lib, monkeypatch) -> 
              "row": [{"path": "airportId", "label": "Airport", "type": "text"}]}]
     monkeypatch.setattr(ni_flow, "_library_answers", lambda _sid: [ni_flow._clean_answer(r) for r in raws])
     sample = {"items": [{"airportId": "EWR", "reason": "wind"}, {"airportId": "LAX", "reason": "fog"}]}
-    built = ni_flow._try_answers_build(store, item_id, "delays at Newark airport", _INTENT, WEATHER_URL, sample)
+    built = ni_flow._try_answers_build(store, item_id, "delays at Newark airport", _INTENT, WEATHER_URL, sample,
+                                       lambda p: _ir_reply("ground_delay") if _QUERY_MARK in p else "{}")
     assert built["labels"] == ["Ground delay program"]
     assert [r["reason"] for r in built["preview_payload"]["rows"]] == ["wind"]
 

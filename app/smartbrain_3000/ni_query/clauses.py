@@ -17,10 +17,24 @@ every cell selected, params filled with places, the declared count chosen over l
   result or schedule on a list — with the order on the axis cell ("next" ascending from now,
   "latest" / "last" descending).
 - agg: "count" iff the kind is ``count``.
-- floor (``floor_answer``): the serving answer whose own words best match the ask's words and
-  the intent's wants, else the first declared primary that serves the question kind, else the
-  first serving answer — "serving": list / columns for kinds that show rows, a value for
-  current_value / status / text_brief.
+- comparators (``bind_comparators``, Round 20 Q3b): an explicit comparator the recognizers read is an
+  anchor like an explicit time. Its quantity word (between the phrase and the number, else before
+  the phrase) names ONE number cell of the chosen answer — by the cell's label or path tail, else by
+  the answer's declared ``words`` when the answer has one number cell — and the IR carries it: added
+  when the model's where has no comparator on that cell (note ``comparator_added``), its number
+  replacing a different one the model wrote (``comparator_corrected``). A word naming no number cell
+  or several adds nothing (coverage ``where: unbound``, as before). The unit never picks the cell
+  ("4 in Alaska" is no inch).
+- floor (``floor_answer``): among the answers that serve the question kind (list / columns for
+  kinds that show rows, a value for current_value / status / text_brief), ranked by (Round 20,
+  Q3b): (1) an explicit asked stretch the answer's declared window or axis step serves
+  (``serves_time``: now → a value declared now / latest; today / tonight / tomorrow → a value declared
+  for it or rows on a time axis, day rows only approximately for tonight; next hours → an hour /
+  period axis; any other stretch — a weekday, a date, a weekend, N days, a month — a day / period
+  axis, hour rows approximately; a stretch behind us — yesterday, past N days — prefers none, as the
+  removed window rule read it); (2) ask words (time phrase, comparator, stop and consumed words out)
+  and wants that are whole words of the answer's own name or label; (3) those that are its declared
+  ``words``; (4) the declared primary; (5) the declared order.
 """
 from __future__ import annotations
 
@@ -36,6 +50,9 @@ _SELECT_STOP = frozenset({
     "time", "weather"})   # "what time is …" and "weather" name no one quantity
 _LIMIT_WORDS = frozenset({"top", "first", "last", "biggest", "largest"})
 _ONE_KINDS = frozenset({"next_event", "result", "schedule"})
+_ONE_DAY = frozenset({"today", "tonight", "tomorrow"})
+_NUM_CMP = frozenset({"<", "<=", ">", ">=", "=", "!="})
+_MAX_COMPARATORS = 6
 _VALUE_KINDS = frozenset({"current_value", "status", "text_brief"})
 _MAX_LEX = 200
 
@@ -171,6 +188,60 @@ def limit_for(ask: str, kind: str | None, answer: dict, spans: dict) -> tuple[in
     return 1, ([{"col": axis, "dir": "asc" if ahead else "desc"}] if axis else []), ahead
 
 
+def comparator_cell(comparator: dict, answer: dict | None) -> str | None:
+    """The one number cell an explicit comparator names (module docstring), or None."""
+    assert isinstance(comparator, dict), "a recognized comparator"
+    assert answer is None or isinstance(answer, dict), "answer must be a dict or None"
+    numbers = [c for c in cells_of(answer) if c.get("type") == "number"]
+    declared = _lex(*[str(w) for w in ((answer or {}).get("words") or [])[:20]])
+    for word in list(comparator.get("quantity") or [])[:2]:  # bounded: nearest first
+        w = fold(str(word))
+        hits = [c["path"] for c in numbers if w in _lex(str(c.get("label") or "")) | _path_lex(c["path"])]
+        if not hits and w in declared:
+            hits = [c["path"] for c in numbers]
+        if hits:
+            return hits[0] if len(hits) == 1 else None
+    return None
+
+
+def bind_comparators(where: list[dict], answer: dict | None, comparators: list[dict]) -> tuple[list[dict], list[str]]:
+    """(the where with every explicit comparator bound to its cell, notes) — module docstring. A model clause
+    on the cell with the recognized number stands as written; a recognized comparator left over corrects a
+    model clause on its cell with another number, else it is added."""
+    assert isinstance(where, list) and isinstance(comparators, list), "where + comparators required"
+    assert answer is None or isinstance(answer, dict), "answer must be a dict or None"
+    out, notes, held = [dict(w) for w in where], [], set()
+    named = [(c, comparator_cell(c, answer)) for c in comparators[:_MAX_COMPARATORS]]  # bounded
+    left = []
+    for c, col in named:  # first: the model's clauses that already carry a recognized comparator
+        same = next((i for i, w in enumerate(out) if i not in held and w.get("col") == col
+                     and w.get("op") in _NUM_CMP and _same_number(w.get("value"), c["value"])), None)
+        if col is not None and same is None:
+            left.append((c, col))
+        elif same is not None:
+            held.add(same)
+    for c, col in left:  # then: correct a clause on the cell with another number, else add one
+        clause = {"col": col, "op": c["op"], "value": c["value"]}
+        mine = [i for i, w in enumerate(out) if i not in held and w.get("col") == col and w.get("op") in _NUM_CMP]
+        if mine:
+            out[mine[0]] = clause
+            notes.append("comparator_corrected")
+        else:
+            out.append(clause)
+            notes.append("comparator_added")
+        held.add(mine[0] if mine else len(out) - 1)
+    return out, notes
+
+
+def _same_number(a: object, b: object) -> bool:
+    assert not isinstance(a, bytes) and not isinstance(b, bytes), "decoded values only"
+    assert b is not None, "a recognized number"
+    try:
+        return float(a) == float(b)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return False
+
+
 def serves(answer: dict, kind: str | None) -> bool:
     """Does the answer's shape serve the question kind (a value vs rows)?"""
     assert isinstance(answer, dict), "answer must be a dict"
@@ -180,16 +251,41 @@ def serves(answer: dict, kind: str | None) -> bool:
     return kind is None or answer.get("kind") != "value"
 
 
-def floor_answer(answers: list[dict], kind: str | None, ask: str, wants: list) -> dict:
-    """The rules floor's answer (module docstring)."""
+def serves_time(answer: dict, time: dict | None) -> int:
+    """How well the answer's declared window or axis step serves the explicit asked stretch (module
+    docstring, the floor's first key — the removed ``select_answers`` window rule): 2 = cut exactly,
+    1 = approximately (day rows for tonight, hour rows for a day-grain stretch), 0 = not, or no stretch."""
+    assert isinstance(answer, dict), "answer must be a dict"
+    assert time is None or isinstance(time, dict), "time must be a dict or None"
+    lo, hi = (time or {}).get("from"), (time or {}).get("to")
+    if not time or any(t == "yesterday" or str(t).startswith("past_") for t in (lo, hi)):
+        return 0  # no stretch, or one behind us (the removed rule had no window for those: "last night")
+    axis = answer.get("axis")
+    step = axis.get("step") if isinstance(axis, dict) else None
+    if lo == "now" and hi in ("now", None):
+        return 2 if answer.get("kind") == "value" and answer.get("window") in ("now", "latest") else 0
+    if lo == hi and lo in _ONE_DAY:
+        exact = answer.get("window") == lo or step in ("hour", "period") or (step == "day" and lo != "tonight")
+        return 2 if exact else (1 if step == "day" else 0)
+    if any(str(t).startswith("next_hours:") for t in (lo, hi)):
+        return 2 if step in ("hour", "period") else 0
+    return 2 if step in ("day", "period") else (1 if step == "hour" else 0)
+
+
+def floor_answer(answers: list[dict], kind: str | None, ask: str, wants: list, *, spans: dict | None = None,
+                 consumed_words: frozenset[str] = frozenset(), time: dict | None = None) -> dict:
+    """The rules floor's answer (module docstring): the best key of (serves the stretch, name / label
+    hits, ``words`` hits, primary, declared order) among the answers that serve the question kind."""
     assert isinstance(answers, list) and answers, "answers required"
     assert isinstance(wants, list), "wants must be a list"
     serving = [a for a in answers if serves(a, kind)] or list(answers)
-    said = {fold(w) for w, _, _ in words(" ".join([ask, *[str(w) for w in wants[:4]]]))[:400]
-            if w not in _SELECT_STOP}
-    scored = [(len(said & _lex(str(a.get("name") or ""), str(a.get("label") or ""),
-                                *[str(w) for w in (a.get("words") or [])[:20]])), i, a) for i, a in enumerate(serving)]
-    best = max(scored, key=lambda s: (s[0], -s[1]))
-    if best[0] > 0:
-        return best[2]
-    return next((a for a in serving if a.get("primary")), serving[0])
+    said = set(asked_words(ask, spans or {}, consumed_words))
+    said |= {fold(w) for w, _, _ in words(" ".join(str(w) for w in wants[:4]))[:40] if w not in _SELECT_STOP}
+    scored = []
+    for i, a in enumerate(serving[:_MAX_LEX]):  # bounded by the declared answers
+        own = _lex(str(a.get("name") or ""), str(a.get("label") or ""))
+        told = _lex(*[str(w) for w in (a.get("words") or [])[:20]])
+        scored.append((serves_time(a, time), len(said & own), len(said & told), bool(a.get("primary")), -i))
+    best = serving[-max(scored)[-1]]
+    assert best in serving, "the floor picks a serving answer"
+    return best

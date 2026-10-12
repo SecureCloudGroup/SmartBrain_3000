@@ -321,7 +321,7 @@ def test_universal_fallback_when_no_form_survives() -> None:
     assert "design_needs_attention" not in bound   # the fallback re-enumerates to the same plain card
 
 
-# ---------------------------------------------------------------------------- D: the subject row filter
+# ---------------------------------------------------------------------------- D: a lookup's named row (Round 20: the query layer's where)
 _HOLIDAYS = {"kind": "list", "name": "holidays", "label": "Public holidays", "path": "items",
              "words": ["holidays", "thanksgiving", "christmas"], "primary": True,
              "cells": [{"path": "date", "key": "date", "label": "Date", "type": "date"},
@@ -332,67 +332,18 @@ _HOLIDAY_ROWS = [{"date": "2026-10-12", "name": "Columbus Day"}, {"date": "2026-
                  {"date": "2026-12-25", "name": "Christmas Day"}]
 
 
-def test_subject_filter_selects_exactly_the_rows_that_name_the_subject() -> None:
-    scoped = ni_flow._scope_rows_to_subject(_HOLIDAYS, {"items": _HOLIDAY_ROWS}, "Thanksgiving", None)
-    assert scoped["filter"] == {"path": "name", "equals": "Thanksgiving Day"}   # fewest extra words wins
-    moon, rows = _moon_case()
-    scoped = ni_flow._scope_rows_to_subject(moon[0], {"phasedata": rows["rows"]}, "new moon", None)
-    assert scoped["filter"] == {"path": "phase", "equals": "New Moon"}
-    assert ni_flow._scope_rows_to_subject({**_HOLIDAYS, "filter": {"path": "name", "equals": "x"}},
-                                          {"items": _HOLIDAY_ROWS}, "Thanksgiving", None)["filter"]["equals"] == "x"
-
-
-def test_subject_filter_leaves_a_list_named_by_its_own_subject_alone() -> None:
-    npr = {"kind": "list", "name": "latest", "label": "Headlines", "path": "items", "words": ["headlines", "news"],
-           "cells": [{"path": "title", "key": "title", "label": "Title", "type": "text"}]}
-    rows = [{"title": "A story"}, {"title": "Another story"}]
-    assert ni_flow._scope_rows_to_subject(npr, {"items": rows}, "NPR headlines", None) is npr
-    coins = {"kind": "list", "name": "top_coins", "label": "Top coins by market cap", "path": "items",
-             "words": ["top cryptocurrencies", "market cap"],
-             "cells": [{"path": "name", "key": "name", "label": "Coin", "type": "text"}]}
-    assert ni_flow._scope_rows_to_subject(coins, {"items": [{"name": "Bitcoin"}]}, "cryptocurrencies", None) is coins
-    launches = {"kind": "list", "name": "launches", "label": "Upcoming launches", "path": "results",
-                "words": ["rocket launches", "next launch"],
-                "cells": [{"path": "name", "key": "name", "label": "Launch", "type": "text"}]}
-    sample = {"results": [{"name": "Falcon 9 Block 5 | Starlink Group 17-10"}]}
-    assert ni_flow._scope_rows_to_subject(launches, sample, "rocket launch", None) is launches
-    assert ni_flow._scope_rows_to_subject(launches, sample, "Vandenberg rocket launch", "Vandenberg") is launches
-    assert ni_flow._scope_rows_to_subject(launches, sample, "", None) is launches
-
-
-def test_subject_filter_leaves_a_participant_named_in_several_cells_alone() -> None:
-    """A team sits in the away column of a past game and the home column of the next ones: one cell
-    cannot select "the Braves games", so the schedule stays whole (the verify table's Mets cases)."""
-    sched = {"kind": "list", "name": "upcoming", "label": "Upcoming games", "path": "dates", "words": ["schedule"],
-             "cells": [{"path": "games[0].gameDate", "key": "games[0].gameDate", "label": "Start", "type": "time"},
-                       {"path": "games[0].teams.away.team.name", "key": "a", "label": "Away", "type": "text"},
-                       {"path": "games[0].teams.home.team.name", "key": "h", "label": "Home", "type": "text"}]}
-    rows = [{"games": [{"gameDate": "2026-09-27T19:10:00Z", "teams": {"away": {"team": {"name": "Atlanta Braves"}},
-                                                                     "home": {"team": {"name": "Miami Marlins"}}}}]},
-            {"games": [{"gameDate": "2026-09-29T18:00:00Z", "teams": {"away": {"team": {"name": "Philadelphia Phillies"}},
-                                                                     "home": {"team": {"name": "Atlanta Braves"}}}}]}]
-    assert ni_flow._scope_rows_to_subject(sched, {"dates": rows}, "Atlanta Braves", None) is sched
-    twin = {**_HOLIDAYS, "cells": [*_HOLIDAYS["cells"],
-                                   {"path": "localName", "key": "localName", "label": "Local name", "type": "text"}]}
-    rows2 = [{**r, "localName": r["name"]} for r in _HOLIDAY_ROWS]
-    scoped = ni_flow._scope_rows_to_subject(twin, {"items": rows2}, "Thanksgiving", None)
-    assert scoped["filter"] == {"path": "localName", "equals": "Thanksgiving Day"}   # same rows: still one row
-
-
-def test_subject_filter_refuses_honestly_when_no_row_names_the_subject() -> None:
-    with pytest.raises(ValueError, match="the list has no row for Diwali"):
-        ni_flow._scope_rows_to_subject(_HOLIDAYS, {"items": _HOLIDAY_ROWS}, "Diwali", None)
-
-
 def test_a_filtered_lookup_row_builds_the_card_over_that_row_only() -> None:
-    scoped = ni_flow._scope_rows_to_subject(_HOLIDAYS, {"items": _HOLIDAY_ROWS}, "Thanksgiving", None)
+    """Round 20 (Q3b): the query layer's where (the holiday's name contains the asked words) is sealed as an
+    engine op; the lookup card leads with the first row that names it."""
+    where = [{"col": "name", "op": "contains", "value": "Thanksgiving"}]
     fb = ni_flow.FormBuild(now=NOW, ask="when is Thanksgiving this year", source_url=URL, cadence_s=900,
                            frame_kind="next_event", wants=("Thanksgiving date",))
-    built = ni_flow.build_from_answers([scoped], {"items": _HOLIDAY_ROWS}, "Thanksgiving", next_event=True,
-                                       frame_kind="next_event", form=fb)
+    built = ni_flow.build_from_answers([_HOLIDAYS], {"items": _HOLIDAY_ROWS}, "Thanksgiving", next_event=True,
+                                       frame_kind="next_event", form=fb, where=where)
     rows = built["preview_payload"]["rows"]
-    assert [r["name"] for r in rows] == ["Thanksgiving Day"]
-    assert any(op.get("fn") == "where" and op.get("value") == "Thanksgiving Day"
+    assert rows[0]["name"] == "Thanksgiving Day"
+    assert all("Thanksgiving" in r["name"] for r in rows)
+    assert any(op.get("fn") == "where" and op.get("op") == "contains" and op.get("value") == "Thanksgiving"
                for st in built["pipeline"] for op in st.get("apply") or [])
     scene = built["scene"]
     assert scene["frame"] == {"kind": "next_event", "wants": ["Thanksgiving date"]}

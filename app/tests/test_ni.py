@@ -4487,13 +4487,14 @@ def test_transform_where_non_list_field_is_stage_failure() -> None:
 
 
 def test_transform_where_validation_refuses_bad_op_and_bad_key() -> None:
-    """§29 where: op enum + the row-key grammar (dotted nested keys allowed, malformed refused)."""
+    """§29 where: op enum + the row-key grammar (dotted nested keys allowed, malformed refused).
+    Round 20 (Q3b): ``in`` / ``contains`` joined the enum (test_ni_query_engine) — an op outside it still refuses."""
     with pytest.raises(ValueError, match="op"):
         nimod.validate_spec(_basic_spec(pipeline=[
             {"op": "extract", "paths": {"rows": "rows"}},
             {"op": "transform", "apply": [
                 {"fn": "where", "field": "rows", "key": "mag",
-                 "op": "in", "value": 5},  # not in _WHEN_OPS
+                 "op": "like", "value": 5},  # not in _WHERE_OPS
             ]},
         ]))
     with pytest.raises(ValueError, match="key"):

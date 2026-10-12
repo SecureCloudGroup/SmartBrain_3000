@@ -59,6 +59,8 @@ def time_words(time: dict | None) -> str:
         return token_words(hi)
     if str(lo).startswith("past_") and hi in ("now", "today"):
         return token_words(lo)
+    if str(lo).startswith("dow:") and str(hi).startswith("dow:"):
+        return f"{_DAYS.get(lo[4:], lo)} to {_DAYS.get(hi[4:], hi)}"   # "Monday to Friday", never "on … to on …"
     return f"{token_words(lo)} to {token_words(hi)}"
 
 

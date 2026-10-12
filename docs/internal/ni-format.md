@@ -2050,13 +2050,17 @@ the handoff, and a deterministic check stands where the judge was removed.
   model's fallback guess "latest_items" for a bare "gas prices" gated locate,
   verify and the page shape check, shipping Colorado's natural-gas dataset;
   across the dev + holdout asks with no stated kind, no guessed kind ever
-  improved the first Library row.) `intent.window` is code-only
-  (`ni_flow._window_from_text`): the engine's closed `window` enum (`now |
+  improved the first Library row.) The intent carries no window since
+  Round 20 (Q3b): the asked stretch is the query layer's `time` (§36), bound
+  at the declared build with the answer's direction (a stretch behind us
+  included); the page path reads the recognizers' explicit phrase
+  (`ni_flow._ask_window`) as the engine's closed legacy `window` (`now |
   today | tonight | tomorrow | weekend | dow:<mon..sun> | next_days:N |
-  next_hours:N`, counts clamped to 16 days / 168 hours) or null; a stretch
-  already behind us ("last weekend", "past 24 hours") is no window.
+  next_hours:N`) for its freshness and day checks. (Until Round 20 a
+  code-only regex parse, `_window_from_text`, set `intent.window`.)
 - **Locate gets the frame.** `_library_candidates(request, intent)` passes
-  `hint={subject, wants, place, frame_kind, window}` to
+  `hint={subject, wants, place, frame_kind}` (no window since Round 20 —
+  locate never read it) to
   `LibraryIndex.candidates` from the pick pause and from
   `reenter_source_pick` (a Library that fails, a `TypeError` inside it
   included, offers nothing — it is never retried without the hint). When
@@ -2196,16 +2200,22 @@ the handoff, and a deterministic check stands where the judge was removed.
   "Inter Miami" → refused; an acronym of the reading counts: "epl").
 - **Windows that hold (review round, D5).** A name with a day word is no
   window ("Saturday Night Live", "Monday Night Football", "Black Friday",
-  "Super Tuesday", "Cyber Monday", "Good Friday", "Fat Tuesday", …). When
-  no answer serves the window as declared, `select_answers` takes what
-  holds for it: a slow-moving value (no weather-like `measure`: a moon
-  phase, a weekly price, a jackpot) declared `today` / `latest` for
-  tonight, `latest` for this week (next_days ≤ 7); a list with no axis for
-  this week (a chart, the recent quakes); day rows for tonight (cut as
-  today) — rows that cut to the window ahead of values. A window ahead
-  (tonight, tomorrow, the weekend, a weekday, next days / hours) never cuts
-  rows that all lie in the past (`ni.rows_all_past`: FRED's observation
-  dates) — the card shows the latest rows instead of nothing.
+  "Super Tuesday", "Cyber Monday", "Good Friday", "Fat Tuesday", …) — since
+  Round 20 (Q3b) the recognizers read the ask with the intent's proper names
+  masked (`recognize.name_masks`, §36; the removed window parse masked a
+  fixed list of them).
+  Since Round 20 (Q3b) the query layer picks the answer, and what holds for
+  the asked stretch is the build's time binding (§36): a slow-moving value
+  (no weather-like `measure`: a moon phase, a weekly price, a jackpot)
+  declared `today` / `latest` stands for tonight, `latest` for this week
+  (next_days ≤ 7); a list with no time cell for now / today / tonight /
+  this week (all `approximated`); day rows answer tonight with today's row.
+  A stretch only ever ahead (tomorrow, next days / hours, upcoming) never
+  cuts rows that all lie in the past (`ni.rows_all_past`: FRED's
+  observation dates) — the card shows the latest rows instead of nothing;
+  today, tonight, a weekday or the weekend over past rows is cut as a span
+  read back (a weekday or weekend is the latest past one), and a count
+  always cuts.
 - **Page path (C9–C11).** `_s2_evaluate` drops pages `pagegraph.readability`
   can't read (challenge, JS shell, modal, binary), marks the subject's own
   site official (`pagegraph.first_party` over the subject and the user's own
@@ -2317,23 +2327,21 @@ and the `recipe` born marker stays readable.
   `ni_flow.seal_library_pick`) seals `_library_source`, `_library_url` and
   `_library_params` (the values the URL was filled with — candidate rows now carry
   `params`, never the key slot) next to `_format`.
-- **Pick by the frame (C7).** For a source that declares v1.2 keys, `select_answers(…,
-  window, frame_kind)` first narrows to what can show the asked window: a value declared
-  for it (`now` also takes `latest`; `today` takes `now` and `latest`), rows whose axis step
-  can cut it (day rows never cut hours), a list with no axis only for now / today /
-  tonight; the best-fitting rows lead, and the window's own words leave the scoring. A
-  measure the ask names ("wind") that no answer reports, or no answer for the window, is
-  nothing — the next source, "<provider> doesn't give <the weekend>" / "doesn't report
-  wind", never the headline answers instead. A `count` answer only serves "how many /
-  number of"; "any …?" takes the list that may be empty. A general ask for a stretch of
-  time takes the best-fitting rows. Older records keep word-only selection.
+- **Pick by the frame (C7).** Since Round 20 (Q3b) the query layer picks (§36): the plan's
+  `ir.answer` is the answer (value companions from `ir.select`, ≤4), and the build binds the
+  IR's `time` to it — a value declared for the asked stretch (`now` also takes `latest`;
+  `today` takes `now` and `latest`), rows whose axis can cut it, a list with no time cell for
+  now / today / tonight / this week. A measure the ask names ("wind") that no declared answer
+  reports, or a stretch the chosen answer cannot show, is nothing — the next source,
+  "<provider> doesn't give <the weekend>" / "doesn't report wind", never the headline answers
+  instead. A count is the IR's code-owned `agg`. (Until Round 20, `select_answers` scored the
+  answers by the ask's words under window / count / existence rules.)
 - **Build.** `_sample_and_map` on a fresh build (never a remap) whose fetched URL equals
-  `_library_url` builds from the answers before any derive / mapping call:
-  `select_answers` (the user's words first; ties → declared order; a list/columns
-  answer alone when it wins or the ask is for many things; otherwise wants-named then
-  `primary` value answers, ≤4), `{param}` segments filled, then extract + typed
+  `_library_url` builds from the answers before any derive / mapping call: the query
+  layer's choice (above), `{param}` segments filled, then extract + typed
   transforms (`number`, `time`, `date`, `count`, `label`, `zip` + `top_n` (7 daily /
-  12 hourly), `reverse`, `where` eq for a filter). `unit_path` is read once and frozen
+  12 hourly), `reverse`, `where` eq for a filter, the IR's row filters as `where` ops —
+  §36). `unit_path` is read once and frozen
   as a literal (number node `unit`; a row suffix in list scenes). The pipeline runs on
   the sample, every shown value is typed-checked, and the draft spec validates and
   binds. A list fits when every cell is present in SOME row; a row missing a cell shows
@@ -2633,7 +2641,8 @@ display-class pick and the map/image → value degrade) are gone from the flow; 
   returns the universal fallback — `table` (records / events / series) or `kv_grid` (measure) at
   its smallest lint-clean desktop span, else its smallest accepted span — so a record never leaves
   the flow with "no candidate forms" (`design.fallback: true`, lint recorded at bind). (D)
-  `ni_flow._scope_rows_to_subject`: on a lookup / next_event ask over a list answer, the intent's
+  `ni_flow._scope_rows_to_subject` (removed in Round 20, Q3b — the query layer's `where`, §36):
+  on a lookup / next_event ask over a list answer, the intent's
   subject words select the text cell + value that names them (fewest extra words) as a sealed row
   filter (`where eq`, like the place filter) — "when is Thanksgiving" shows Thanksgiving Day, "the
   next new moon" the New Moon row; a subject named in several cells over different rows (a team in
@@ -2675,7 +2684,8 @@ display-class pick and the map/image → value degrade) are gone from the flow; 
   repeats the same literal shape on the one retry instead of naming the schema error
   alone.
 - **Third live read (fix round 1a-7, 2026-10-07 — SET C).** (D2) `ni_flow._scope_rows_to_subject`
-  reaches alerts / latest_items / status kinds too (not just lookup / next_event): the own-check
+  (removed with `_empty_subject_filter` in Round 20, Q3b — §36) reaches alerts / latest_items /
+  status kinds too (not just lookup / next_event): the own-check
   that recognizes "the subject is the list itself" now needs either an overlap with the list's
   own label / name, or the WHOLE subject explained by its generic words — one shared word is
   never enough ("red flag warnings" shares only the generic suffix "warning" with "Active
@@ -2731,7 +2741,8 @@ display-class pick and the map/image → value degrade) are gone from the flow; 
   instant and the client's clock. `tools/ni-live-e2e.py` prints a form card as `<form>:
   <summary>`; `tools/ni-flow-eval.py --recorded` / `--chaos` use the eval's own minimal scenes
   and are unchanged.
-- **Data-layer round 2 (after the SET D read, 2026-10-08).** `select_answers`: among tied list / columns
+- **Data-layer round 2 (after the SET D read, 2026-10-08; `select_answers` and `_scope_rows_to_subject`
+  were removed in Round 20, Q3b — §36).** `select_answers`: among tied list / columns
   answers the one whose own name or label says an ask word wins ("Snow forecast" over "Tonight, hour
   by hour" on "snow"), else the declared order; a `trend` ask with a declared history list (an axis)
   takes it over a tied latest value. `_scope_rows_to_subject` reaches `result` and `schedule` kinds (a
@@ -3065,7 +3076,7 @@ reason and the runner starts nothing (fail closed). The first engine is Obscura
   XHR promotion from `--dump assets`, the Status card, and the launcher starting the
   `render` profile when the app reports that a renderer is wanted.
 
-## 36. Query layer (Round 20, Q3a — `ni_query`; built and measured, not wired yet)
+## 36. Query layer (Round 20 — `ni_query`: built and measured in Q3a, wired into the flow in Q3b)
 
 - **What it is.** An information ask becomes a closed **Query IR** over ONE declared Library
   answer (§32): `{answer, params, select, where: [{col, op, value}], time: {from, to} | null,
@@ -3073,14 +3084,15 @@ reason and the runner starts nothing (fail closed). The first engine is Obscura
   names this entity, `col` "*" = any text cell); time tokens `now today tonight tomorrow yesterday
   weekend this_week next_week this_month next_days:N past_days:N next_hours:N past_hours:N
   dow:mon..sun date:YYYY-MM-DD month:YYYY-MM year:YYYY`; `agg` `none | count`. Entry points:
-  `plan_query(ask, *, kind, wants, source, answers, params, consumed, now, zone, call_model, pool)
+  `plan_query(ask, *, kind, wants, source, answers, params, consumed, now, zone, call_model, pool, masked)
   -> QueryPlan{ir, model_ir, coverage, interpretation, notes, model_meta}`, `apply_query(ir,
   payload, answer, *, now, zone, direction) -> {rows, indices, count}`, `recognize(ask, *, now,
   zone, masked)`, `say(ir, answers)`. Package: `recognize.py`, `prompt.py`, `normalize.py`,
   `clauses.py`, `plan.py`, `apply.py`, `say.py`, `decl.py` (answers in the Library's `row` /
   `columns` shape or `_clean_answer`'s `cells`).
 - **Ownership.** *Model* (one local call): `answer`, `time`, `where`, `order`. *Code*: `select`,
-  `limit`, `agg`; `params` is `{}` in this step. *Recognizers*: validators of the model's clauses,
+  `limit`, `agg`; `params` stays `{}` (the address's parameters are the resolver's and, for
+  clock-filled dates, the time binding's — below). *Recognizers*: validators of the model's clauses,
   never substitutes. The Q2 measurement showed the 9B over-generating exactly the code-owned
   clauses (every cell selected, places put into params, the declared count picked over list +
   count).
@@ -3093,15 +3105,26 @@ reason and the runner starts nothing (fail closed). The first engine is Obscura
   enums) and runs the structural check through its new `check` hook; ONE retry, on a schema or a
   structural slip, whose message states the violated RULE and repeats a skeleton naming no
   answer (`RETRY_SKELETON`). The Q2 retry listed the companion answers and the model took one —
-  7 right answers turned wrong. `call_model(messages) -> str` is `chat_json`'s transport.
+  7 right answers turned wrong. `call_model(messages) -> str` is `chat_json`'s transport; in the
+  flow it is the flow model's messages call (*Transport*, below).
 - **Normalizations (the v1 contract the lead re-scored the Q2 replies under).** An explicit time
   phrase decides `time` (below); otherwise the model's token stands, and null ≡ `{now, now}` ≡
   `{now, null}` when compared. `where`: never on the axis or a time / date cell; numeric ops only
-  on number cells with numbers; `contains` / `names` only on a text cell or "*", with a value that
-  is a substring of the ask, not a parameter-consumed entity (`consumed`) and not a word of the
+  on number cells with numbers; `contains` / `names` only on a text cell or "*", with a value whose
+  words are a run of WHOLE ask words (`said_whole`; the ask's last word may add a plural s / es —
+  "Tornado Watch" in "tornado watches"; Q3b fix round: "quakes" inside "earthquakes" and "OR" inside
+  "Oregon" never filter), not a parameter-consumed entity (`consumed`) and not a word of the
   source's own name; `names` ≡ `contains` over "*" when compared. `order`: an order on the axis is
   implicit (dropped); a non-axis order survives only for kind `ranking`. A declared count value ≡
   its list + count when nothing narrows.
+- **Time ruling (Q3b, the lead).** The recognizers stay authoritative for explicit anchors
+  ("tomorrow", "Saturday", "Thanksgiving in 2027", any written year). A COUNTED range the model
+  read (`past_` / `next_` days / hours) stands against the recognizers' CALENDAR reading
+  (`this_week`, `next_week`, `this_month`, `month:`, `year:`) of a relative phrase with no written
+  4-digit year (`plan.model_range_stands`): note `time_range_kept`, coverage time `approximated`
+  ("over the last year" → `past_days:365`, not the calendar year). The eval's gold side
+  (`gold_final`) applies the same rule, so the replay scores below are unchanged; the final IR's
+  execution agreement rises to 49/59 few-shot and 58/80 zero-shot (B26, C27, E27).
 - **Recognizer validators.** `recognize` reads the ask with ms-recognizers-text-suite 1.0.1
   (DateTime, Number, NumberWithUnit, Ordinal; en-us) and dates its holidays with holidays 0.106
   (MIT; the US calendar) into one closed shape `{time, numbers, ordinals, comparators}`, under the
@@ -3120,13 +3143,9 @@ reason and the runner starts nothing (fail closed). The first engine is Obscura
   bake-off's 4,737 asks change their explicit time: "today" beside a zip is read (6), and phrases
   agreement had dropped are read ("the day" in "word of the day", written years in "2020 toyota
   camry" or "election day 2026", "year over year"); "at the moment", which ms leaves unresolved,
-  is read by a closed now-phrase table (rule 10, the window parser's now words: currently, at
-  present, as of now, at the moment, as we speak, right this minute / second / moment / instant,
-  this instant; "rn" / "atm" only as the ask's last word) that reads `now` over any overlapping ms
-  span and newly reads 19 more asks ("rn", "currently"); the replay scores are unchanged. ms's
-  rolling range wins ("past 12 months" → `past_days:365`, backward; a quarter of no year — "the
-  first quarter" — is no stretch); "4 in Alaska" keeps the 4 and drops the inch; comparators come
-  from one adjacency
+  is read by the now-phrase table below; the replay scores are unchanged. ms's rolling range wins
+  ("past 12 months" → `past_days:365`, backward; a quarter of no year — "the first quarter" — is
+  no stretch); "4 in Alaska" keeps the 4 and drops the inch; comparators come from one adjacency
   table (above / over / more than / greater than / stronger / bigger / larger / higher than → `>`,
   at least → `>=`, below / under / less / fewer / smaller / lower / weaker than → `<`, at most and
   within → `<=`; at most one word between the phrase and the number). `explicit_time` reads the
@@ -3134,7 +3153,12 @@ reason and the runner starts nothing (fail closed). The first engine is Obscura
   schedule / next event → today..this_week, past events → past_days:7..today); a holiday beside
   another phrase is the subject, not the stretch ("Thanksgiving in 2027" → year:2027).
   `stated_numbers`: a numeric `where` survives only with a number the ask states (recognized or
-  literal) — "IncidentSize > 0", weather-code lists and "> 0" rain filters are dropped.
+  literal) — "IncidentSize > 0", weather-code lists and "> 0" rain filters are dropped. Q3b fix
+  round: a closed now-phrase table (rule 10: currently, at present, as of now, at the moment, as we
+  speak, right this minute / second / moment / instant, this instant; "rn" / "atm" only as the
+  ask's last word) reads `now` with no library partner; `name_masks` masks the intent's proper names
+  (`plan_query(masked=…)`, the page path's `_ask_window(…, names)`) so "Saturday Night Live" or
+  "Black Friday" is no day — a name the holiday table names stays a date ("when is Thanksgiving").
 - **Code-owned clauses.** `select` = the quantity cells (numbers, or text a measured value answer
   describes; never a time / date cell or the declared filter's cell) the ask's words name through
   the Library's own lexicon — the cell's label and path words plus the label and words of the
@@ -3144,30 +3168,57 @@ reason and the runner starts nothing (fail closed). The first engine is Obscura
   the chosen one leaves unexplained. `limit` = a number right after top / first / last / biggest /
   largest, else 1 with the axis order (next → ascending from now, latest / last → descending) for
   next_event / result / schedule lists. `agg` = count iff the kind is `count`; a declared count
-  value under a narrowing filter or time is swapped for the list it counts.
-- **The rules floor.** Model off, unavailable, or invalid after the retry → the serving answer whose
-  words best match the ask and the intent's wants, else the first declared primary that serves the
-  kind; time = the explicit phrase or null; where `[]`; notes `query_rules` + why.
-- **Coverage and notes.** `coverage[clause]` ∈ `bound | unbound | approximated | rules` — `unbound`
-  (a time phrase no token carries, a comparator the final where lacks) wins over `rules`;
-  `approximated` = a part of a day read as the day ("last night" → yesterday). Notes are closed
-  codes: `query_rules model_off model_unavailable schema_invalid time_explicit where_dropped
-  numbers_unstated order_dropped params_dropped count_list`.
+  value under a narrowing filter or time is swapped for the list it counts. Explicit comparators
+  (Q3b, `clauses.bind_comparators`, on the list a count value counts): a comparator the recognizers
+  read is an anchor like an explicit time — its quantity word (between the phrase and the number,
+  "above magnitude 3", else before the phrase, "earthquakes above 4.0") names ONE number cell of the
+  answer by the cell's label or path tail, else by the answer's declared `words` when it has one
+  number cell; the IR then carries `{col, op, value}` from the recognizer: added when the model's
+  where has no comparator on that cell (`comparator_added`), replacing another number the model
+  wrote there (`comparator_corrected`; a number the ask never states is dropped first,
+  `numbers_unstated`). Coverage where `recognizer`. A word naming no number cell or several adds
+  nothing (where stays `unbound`); the unit never picks a cell ("magnitude 4 in Alaska" is no inch).
+- **The rules floor.** Model off, unavailable, or invalid after the retry → among the answers that
+  serve the question kind, the best of (Q3b fix round, `clauses.serves_time` + `floor_answer`): how
+  well its declared window or axis step serves the explicit stretch (2 exact / 1 approximate / 0 —
+  now → a value declared now / latest; today / tonight / tomorrow → a value declared for it or rows
+  on a time axis, day rows only approximately for tonight; next hours → hour / period rows; a
+  weekday, date, weekend or N days → day / period rows, hour rows approximately; a stretch behind us
+  prefers none), then ask words (time phrase, comparator, stop and consumed words out) and wants
+  that are whole words of the answer's own name or label, then its declared `words`, then the
+  primary, then the declared order; time = the explicit phrase or null; where = only the explicit
+  comparators code binds (above); notes `query_rules` + why. Floor alone on every clean gold row: 39 → 46 / 60 few-shot TEST, 52 → 60 / 82
+  (answers 59 / 60 and 78 / 82); its remaining misses are the kind filter's (forecast and lookup
+  kinds take rows only, so "chance of rain tomorrow" cannot take the declared rain_tomorrow value).
+- **Coverage and notes.** `coverage[clause]` ∈ `bound | unbound | approximated | rules | recognizer`
+  — `unbound` (a time phrase no token carries, a comparator the final where lacks) wins over `rules`;
+  `approximated` = a part of a day read as the day ("last night" → yesterday); `recognizer` = a
+  comparator the recognizers read, carried by code (order: bound < recognizer < rules < approximated
+  < unbound). Notes are closed codes: `query_rules model_off model_unavailable schema_invalid
+  time_explicit where_dropped numbers_unstated order_dropped params_dropped count_list
+  time_range_kept comparator_added comparator_corrected`; the flow adds `quantity_unbound
+  names_unbound bound_pushed clock_bound refetched` (below).
 - **The interpretation line.** `say` renders the final IR by code: `<answer label>[ (<selected
   labels>)] · <where> · <time> · <order / limit> · count`, cell labels never paths, tokens in plain
   words — "Earthquakes · Magnitude > 2 · past 7 days · count", "Daily forecast (Rain chance) · next
   7 days". When the model dropped the asked comparator the line omits it and coverage says
-  `unbound` — visible, never silent. Q3b seals it as `spec.interpretation` (TEXT_SRC code) for the
-  C2 VerifyPanel and the card footer.
+  `unbound` — visible, never silent. Two weekdays read "Monday to Friday" (Q3b fix round; it read
+  "on Monday to on Friday"). Sealed as `spec.interpretation` (TEXT_SRC code); the board row carries it
+  for the C2 VerifyPanel and the form footer leads with it (below).
 - **Execution semantics.** `apply_query` is the Q2 harness's `apply_ir`, pure Python: the answer's
   rows (list / zipped columns / one pseudo-row; a count value reads the rows it counts), the
   declared filter (filled by the caller) and `newest_first`, the where ops, the time cut on the
   axis (else the first time / date cell) with the caller's `direction` placing `dow:` and
   `weekend` (forward = upcoming, backward = the latest past), order, limit, agg.
-- **Measured (2026-10-09, `tools/ni-query-eval.py`, fixtures `app/tests/fixtures/ni_query/`).**
+- **Measured (2026-10-09, `tools/ni-query-eval.py`, fixtures `app/tests/fixtures/ni_query/`; the
+  few-shot pool ships in the package since Q3b, `smartbrain_3000/ni_query/pool.jsonl` — measured =
+  served).**
   Replaying the recorded Q2 replies: v1 contract 50/60 few-shot TEST and 54/82 zero-shot ALL (the
   lead's re-score, same misses); full contract (+ the number validator, the count swap) 51/60 and
-  58/82; with the floor for the never-valid replies 53/60 and 65/82. Our messages hash equal to
+  58/82; with the floor for the never-valid replies 53/60 and 65/82. Since the Q3b fix round: full
+  52/60 (the few-shot E37 reply dropped "above magnitude 2"; code binds it back) and 58/82; with the
+  floor 55/60 (E13 through the window-aware floor, E37) and 66/82 (E37); v1 unchanged; the whole-word
+  rule changes one recorded reply, the noted C38. Our messages hash equal to
   the Q2 prompts on 109/109 zero-shot and 79/79 few-shot rows. `apply_query` reproduces the
   harness's gold rows on 107/107 samples; execution agreement of the final IR 46/59 few-shot
   (raw replies 39/59). Code-owned clauses equal gold on select 103/109, limit 106/109 (the "when is
@@ -3180,13 +3231,169 @@ reason and the runner starts nothing (fail closed). The first engine is Obscura
   rule-only retry 9, never 2; B5 and E13 (lost to the old retry) right. With identical prompts 22
   of 79 replies differ from the recorded ones — serving-side variance (prefix-cache hits), not the
   prompt.
-- **What Q3b removes and wires.** Replaced one per measured delta (plan §E): `select_answers` and
-  its word scoring (`ni_flow.py` 1597–1699, `_answer_score` 1471, the count rule 1646 with
-  `_COUNT_ASK_RE` 1506); `_window_from_text` and the window regex table (532–602, its use in
-  `stage_intent` 625); `_scope_rows_to_subject` / `_subject_hits` / `_empty_subject_filter`
-  (2237–2369) and their calls in `_try_answers_build` (2546–2575, incl. the W3 result / schedule
-  filter). Kept: the intent call, `_cadence_from_text`, the A13 threshold alert author,
-  `_verify_frame`. Wiring: `time` → `_cuts` / `_window_op` (1967–2020) with the answer's direction,
-  clock params (start / since / end / until / date / year) take the window's bounds; `where` → the
-  engine's row filter plus push-down into declared `param_bounds`; the flow's prompt-string model
-  seam needs a messages adapter (measure it flattened before switching).
+- **Wiring (Q3b, `ni_flow._try_answers_build`).** A declared build (a Library tap whose sealed
+  `_library_url` is the fetched URL, with declared answers) runs `_query_plan` after the sample
+  fetch: `plan_query` over the source's declared answers, with the Library record's source id /
+  name and `access.params` menu, the packaged few-shot pool, `consumed` = the runs of ask words
+  the address already took (`_consumed_spans` over the frame's place, the pick's reading
+  `_library_label` without its "(XX)" code and word-valued filled params; filler words never), and
+  `masked` = the intent's proper names (`recognize.name_masks`, recognizers only). A
+  planner fault falls to the rules floor; None only when both fail (the misfit note, the mapping
+  path). Then, in order: the unbound-quantity stop; the answers (`_chosen_answers`: `ir.answer`
+  plus value companions from `ir.select`, ≤4); the time binding; the row filters; the clock and
+  push-down rebind; place scoping, the next-event companion and the stale-event swap (kept);
+  `build_from_answers(…, span, where, agg, order, row_limit)`; the F3 sibling list only when the IR
+  has no row filter (an emptied filter is the answer, never another list); the not-reported
+  fallback only to values declared now / latest / undeclared and only when no particular stretch
+  was asked; and `_ir_as_built` (a sibling or fallback is code's choice: coverage answer `rules`).
+- **Time binding.** `_rows_direction`: a readable row time after now → forward; all at or before
+  now → backward; unread → the kind's direction. Lists (`_list_time_binding`): `{now, now}` → `now`
+  on an hour / period axis, `today` on a day axis, no cut on an instant list; `{now, null}` →
+  `upcoming` forward, no cut backward; today / tonight / tomorrow / weekend / a weekday /
+  today..next_days:N / now..next_hours:N → the legacy window on forward rows (N clamped to 16 / 168,
+  `approximated`); a stretch only ever ahead (tomorrow, next days / hours) over past rows is not cut
+  (`approximated`, the D5 latest-rows rule) unless the ask counts (W4); everything else → a SPAN op
+  (`back` on past rows). "this week" for a kind with no direction reads the next 7 days on forward
+  rows; over dated past rows the D5 rule holds (no cut, `approximated`, the line keeps "this week":
+  "consumer price index this week" on a monthly series shows the latest readings — Q3b fix round,
+  where the window-aware floor first took those day rows) unless the ask counts (the past 7 days).
+  A list with no time cell stands for now / today / tonight /
+  this week and a stretch behind us (`approximated`), never for a day ahead. Values
+  (`_value_time_binding`, they cannot be cut): `bound` when declared for the asked stretch (now /
+  today take the newest reading; tonight / tomorrow their own); a slow value (no `measure`) for
+  tonight or this week, or the newest reading for a stretch behind us, `approximated`. Unbound → the
+  source's honest nothing, "<provider> doesn't give <time words>" (`say.time_words`), next source.
+- **Clock parameters.** `_clock_rebind`: start / since / begin / date ← the stretch's first day,
+  end / until ← its last day, year ← an absolute year; relative stretches as day offsets (calendar
+  ones covering every weekday they can fall on); an absolute day / month / year is a FIXED value
+  sealed as a string spec param (`_clock_spec_params`); now and from-now stretches keep the
+  defaults. `_rebind_fetch` renders the sealed template at the build's `now`; a different address →
+  one refetch of the same consented source through the flow's own fetcher, and the record's
+  `_library_url`, `_library_clock_params`, `_library_params`, `_library_url_template` and
+  `_access.url` follow it (notes `clock_bound`, `refetched`). The C2 assert in `_handoff` (the
+  sealed spec reproduces the fetched URL) holds — "last night's result" asks since = until =
+  yesterday, "Thanksgiving in 2027" fetches the 2027 table.
+- **Row filters.** `_where_ops`: on a number cell a `number` op, then the comparator (`lt le gt ge
+  eq ne in`; `in` matched element-wise as `eq`); on a text cell `= != in` as written; `contains` /
+  `names` → `contains` (case-folded substring), `names` over "*" → `contains` with `or_keys` over
+  the answer's text cells (a team in the home OR the away column); columns answers map paths to
+  their row keys. Placed after the declared filter / `state_scope` / `reverse` (list) or the zip
+  (columns), before the window. A clause the answer cannot carry (a value answer, no such cell) is
+  dropped: coverage where `unbound`, note `where_dropped`; a name the intent says that neither the
+  address, the source's own name nor a filter value takes → coverage where `unbound`, note
+  `names_unbound`. Push-down (`_bound_overrides` over answers spec v1.4 `param_bounds`): `>` / `>=`
+  → the cell's `min` parameter, `<` / `<=` → `max`, `=` both; the address is re-templated by
+  position on the Library's `url_template` (`_templatize_url_by_position(overrides=…)`, quoted as
+  the Library fills it), refetched (note `bound_pushed`), and the row filter stays
+  (`minmagnitude=4` and `> 4`).
+- **Count, order and limit.** `agg: count` → the engine's count op (`rows_count`, as for
+  `may_be_empty` lists), and the window always cuts (W4, `_cuts(count=True)`). `order` / `limit`
+  (`_rank_ops`) → `sort_by` ops with `missing: "last"` (stable, the last key first, on the raw
+  cell before its display conversion) and a `top_n`, after the window and before a columns
+  answer's default cap — "the next one" keeps one row, "top 10 by market cap" the ten largest. A
+  limit above the engine's cap (50) is sealed at 50 with coverage limit `approximated`; a sibling
+  or fallback answer (code's choice) carries no order or limit.
+- **Honesty surface.** `_verify_frame` keeps its wants check. A primary asked quantity that is
+  unbound — every measure the ask names by its closed Library measure name (wind, humidity, water
+  temperature, …) reported by no declared answer (declared `measure`, the label cue
+  `_covers_measure`, or the measure's words in the answer's own lexicon; consumed words never name a
+  measure: "Wind River") — is the existing honest stop "doesn't report <measure>" (`_move_on`, the
+  next source), with note `quantity_unbound` and coverage select `unbound` in the returned query; a
+  secondary one builds the rest under the same coverage and note. Every unbound or approximated
+  clause is in `spec.query.coverage`.
+- **Sealed fields.** `_handoff` seals `spec.query = {ir, coverage, notes, model: {attempts,
+  used_fewshot}}` (the final IR the card executes; closed coverage keys and values; notes ⊆ the
+  ni_query NOTES ∪ the flow's codes) and `spec.interpretation = say(ir, answers)` (one line, ≤300
+  chars). `ni.validate_spec` validates both closed; they are stripped on export
+  (`ni_routes._EXPORT_STRIP_KEYS`) and template install (`ni_library._TEMPLATE_STRIP_KEYS`) and
+  refused in template packs, like `_fit`.
+- **Engine grammar (`ni.py`).** `where` ops gain `contains` (non-empty text ≤200) and `in` (1–12
+  scalars), and an optional `or_keys` (1–7 row keys, `contains` only: any cell matches). `window`
+  gains the SPAN form: a start token plus `to` (the end token) and `back` (a weekday or weekend
+  placed on the latest past one) — tokens `now today tonight tomorrow yesterday weekend this_week
+  next_week this_month open dow:<d> next_days:1..16 next_hours:1..168 past_days:1..999
+  past_hours:1..999 date: month: year:`; rows overlapping [start, end) on the source's wall clock
+  (day rows by date, timed rows as instants); a weekday / weekend span whose end falls before its
+  start reads to the next one ("Monday to Friday" on a Saturday); `floor` is refused on a span; the
+  legacy single forward tokens keep their exact semantics. `sort_by` gains `missing: "last"`
+  (required for a dotted key): numbers numerically, text case-folded, missing rows last, stable.
+- **Transport.** `run_flow`'s model is a `FlowModel(prompt, chat)`: the prompt stages (intent,
+  mapping, PRESENT, FIT) call it with a string; the query call goes through `chat` —
+  `gateway.chat(messages, model, timeout 300, temperature 0; None for claudecode)`, system + user
+  turns end to end. A caller's prompt-only seam (tests) is flattened as `ni_forms.verdict` does.
+  Measured live once (`mlx/Qwen3.5-9B-MLX-4bit`, few-shot TEST 79, one request at a time,
+  `ni-query-eval --gateway [--flat]`): flattened v1 48/60, full 49/60, with the floor 51/60 (valid
+  first try 64, after the retry 11, never 4; first call median 6.5 s); the messages form in the same
+  session v1 51/60, full 52/60, floor 53/60 (68 / 9 / 2; median 2.4 s), final IRs identical to
+  Q3a's live run on 79/79. The flattened prompt lost 3 rows (more than 2): messages end to end.
+- **Library key (answers spec v1.4).** Optional `param_bounds` on list / columns answers:
+  `{<cell path>: {min | max: <param>}}`, 1–4 cells, each a number cell of the answer; each side
+  names a parameter of the source (a numeric example); a parameter bounds one side only. Authored
+  for `usgs-quakes-state` and `usgs-quakes-near` (`properties.mag` min `min_mag`); the app's answers
+  reader keeps it closed (`_clean_param_bounds`). Q3b fix round: the two upcoming calendars whose clock
+  window ended today (`mlb-team-schedule`, whose `next_*` values read `dates[0]`, and
+  `finnhub-earnings-calendar`) ask from today to +30 days (`sourcetool/fills.py` provider rules, so a
+  `fills` run keeps it) — the −30..0 window put a game a month old under "next Braves game".
+- **Board row and footer.** `GET /api/ni/board` rows carry `interpretation` (only when the spec's
+  is a string) and `query: {coverage}` (only when the coverage is a dict — never the whole query),
+  omitted otherwise. Form cards: `ni_forms/shell.py` lays the line out as the first segment of the
+  left footer group on both faces, in the footer's muted style (`CardInput.interpretation` ←
+  `_form_bind_context`; recipe `["interpretation"]`, TEXT_SRC code), ellipsized by the engine's own
+  rule to the room the rest leaves; the rest follows as "· markers · host · cadence". When the whole
+  line does not fit beside the fullest rest, the rest drops the cadence, then the host (the
+  footer's own drop order), and the line never gets under 40 px. A card with no line lays out
+  byte-identically.
+- **Removed, one per measured delta.** Each step measured on the 86-card BUILD snapshot (the
+  recorded Q2 replies replayed through `_try_answers_build` at each sample's fetch instant, zone
+  America/New_York); `ni-query-eval --replies` stayed 50/60 + 54/82 after every step.
+  (a) `select_answers` with `_measures_named`, `_this_week`, `_serves_window`, `_window_fit`,
+  `_WINDOW_DIRECT`, `_names_a_param`, `_nothing_why` → `ir.answer`: 23 of 86 changed — right 8
+  (a01 / b01 / c01 temperature alone; b28 the year's history; c11 the NWS periods that say snow,
+  was "doesn't report snow"; c38 departure delay; d24 volume; a33 the quakes and a count), neutral
+  10, and 5 misses already in the recorded replies, now executed (a40 the ISS position → latitude
+  only, c09 swell → swell + water temperature, d03 UV at noon → now, d30 outage → incidents, a05
+  snow this weekend → a partial card). (b) `_window_from_text` with `_WINDOW_PATTERNS`,
+  `_NUM_WORDS`, `_COUNT`, `_PAST_RE`, `_count`, `_FORWARD_WINDOWS` (the intent carries no window)
+  → `ir.time`: 19 changed — right 12 (a17 / b18 / c18 last night's result asks exactly yesterday;
+  a24 / b28 this year → 2026; b26 / c27 the ruling's rolling ranges; b27 / d27 past 365 / 730
+  days; d37 "earthquakes in Japan this week" the past 7 days, was 0; a31 / d30 the always-empty
+  `now` cut gone), neutral 4, misses 3 (a06 surf → today, a25 mortgage history → past 30 days, b22
+  recent Alaska quakes → past 7 days and the address narrowed). The removed parse's own labeled
+  tables, read by its replacement (`_ask_window`): 162/198. (c) `_scope_rows_to_subject` with
+  `_subject_hits`, `_subject_tokens`, `_subject_phrase`, `_singular`, `_empty_subject_filter`,
+  `_SUBJECT_STOP`, `_MAX_SUBJECT_ROWS`, `_NAME_EXTRA_WORDS`, `_NAME_CELL_WORDS` and both call blocks
+  → `ir.where` as engine ops: 16 changed — right 7 (d18 the Sharks game, was the league
+  scoreboard; a33 / d22 magnitude > 4 / > 3, d22 pushed to `minmagnitude=3`; a30 flood warnings;
+  b32 / d33 winter storm warnings; d30 a nonsense filter gone), neutral 5, misses 4 (the recorded
+  replies' question-as-filter class: c11 / c10 / d21 emptied by `contains "Snow"` / `"Heat"` /
+  `"tech"`, a05 4 → 2 periods). (d) `_COUNT_ASK_RE`, `_EXISTS_ASK_RE`, `_ANSWER_MANY_RE` and the
+  count branch of `_cuts` → `ir.agg`: 0 changed. The order / limit wiring: 11 changed, all 11
+  cards whose line already said "the next one" / "the latest one" / "top 10" / "highest … first"
+  and showed every row (a08 / d14 the next launch 10 → 1, a22 / d24 top 10 of 20, b18 / c18 last
+  night's result 4 → 1, d13 the next game 2 → 1; a17 / d12 / d18 / d25 same rows, sealed sorted).
+  Base → final: 54 of 86 changed. Kept: `_answer_score`, `_covers_measure` / `_MEASURE_CUES`, `_v12`,
+  `_folded_words`, `_scope_rows_to_place`, `_scope_rows_to_state_bbox`, `_cadence_from_text`, the
+  A13 threshold alert author, `_run_intent`, `_verify_frame`.
+- **Fix round (after the Q3b review).** (1) The window-aware rules floor (above): the verify table
+  without a model is all green ("high in Denver on Saturday" takes the day rows); `--replies` floor
+  rows 53 → 54 / 60. (2) The whole-word where rule (above): live "how many active wildfires are
+  burning in Oregon" counts 25 again (was 1 under "mentions OR"); one recorded reply changes (C38).
+  (3) Name masks and the now-phrase table (above); the two subject-file window tests are restored as
+  tests of the new path. (4) The Library's upcoming calendars ask from today forward (above): live,
+  today..+30 puts the next game first (Dodgers 2026-10-11) or nothing in the off-season; the C8
+  Braves asks on the live model path, refused on the fixture's old-window sample, are accepted on the
+  same rows from the fetch day on. (5) "Monday to Friday". (6) Explicit comparators as anchors
+  (Code-owned clauses, above): the live "how many earthquakes above 4.0 today", whose reply dropped
+  the comparator, reads "Earthquakes · Magnitude > 4 · today · count" = 8 (coverage `recognizer`).
+  On the 86 cards the round changes C38 only (rows) and D07's line.
+- **Open (measured, not fixed).** The floor's kind filter (forecast / lookup kinds take rows only;
+  text_brief values only) keeps B6, B40, C9 and C50 wrong with the model off. The client's coverage
+  words need one for `recognizer` (the board row sends the value as sealed). The now table leaves
+  out "current" (a describing word) and "this second". Mixed ranges
+  keep their words ("today to on Friday", "from on Monday"). `ni_query.apply` reads an inverted
+  weekday pair as empty where the engine reads to the next one. "this year" seals an absolute year
+  (no rolling token). A covering weekday binding cannot move a fixed-range API (tides `range=48h`).
+  `contains` also keeps near names ("Day after Thanksgiving"). A weekday that is today or tomorrow
+  does not bind a value declared `today` / `tomorrow` (an honest stop, never a wrong card). Refine and
+  Fix take the remap path, which never rebuilds from answers and refetches; no raw sample is sealed,
+  so a re-plan without a refetch has nothing to run on.

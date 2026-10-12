@@ -114,6 +114,7 @@ class CardInput:
     c2_answers: dict = field(default_factory=dict)
     question_kind: str | None = None          # QUESTION_KINDS; the flow's frame kind (None = legacy / open)
     wants: list = field(default_factory=list)   # the frame's wants, the user's words (<= MAX_WANTS)
+    interpretation: str = ""                    # spec.interpretation: the query layer's code-made line (§36)
 
 
 # --------------------------------------------------------------------------- DataRecord v1

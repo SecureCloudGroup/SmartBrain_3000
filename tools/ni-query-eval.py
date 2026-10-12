@@ -13,6 +13,9 @@ hand-labeled gold IRs of the blind sets A-E (``app/tests/fixtures/ni_query/``).
   --gateway URL --model ID [--zero] [--out FILE]   live: plan_query on the 79 TEST rows (few-shot
               from the 22 clean DEV rows; --zero: zero-shot on all 109), one request at a time,
               temperature 0, max_tokens 600; per-clause, per-kind, validity and latency tables.
+  --flat      with --gateway: the FLOW's transport (Q3b) — ``ni_flow._query_transport`` flattens the
+              messages into one user turn exactly as the shipped card build does, sent as the flow's
+              gateway.chat sends it (temperature 0, no max_tokens).
 
 Run inside smartbrain_3000:dev with PYTHONPATH=/app (the scratch driver), or natively from the repo.
 "Clean" rows have an empty note; noted rows are never scored against the model.
@@ -49,7 +52,12 @@ from smartbrain_3000.ni_query.normalize import (
     v1_where,
     where_key,
 )
-from smartbrain_3000.ni_query.plan import finalize, floor_plan, make_ctx
+from smartbrain_3000.ni_query.plan import (
+    finalize,
+    floor_plan,
+    make_ctx,
+    model_range_stands,
+)
 from smartbrain_3000.ni_query.prompt import (
     build_messages,
     prompt_sha,
@@ -57,6 +65,7 @@ from smartbrain_3000.ni_query.prompt import (
 )
 
 FIX = _REPO / "app" / "tests" / "fixtures" / "ni_query"
+POOL = _REPO / "app" / "smartbrain_3000" / "ni_query" / "pool.jsonl"   # shipped with the app (the flow's pool)
 CLAUSES = ("answer", "select", "where", "time", "order", "limit", "agg")
 _TIMEOUT_S = 90
 _MAX_ROWS = 200
@@ -71,7 +80,7 @@ def load(fix: pathlib.Path = FIX) -> dict:
     assert fix.is_dir(), f"fixtures missing: {fix}"
     split = json.loads((fix / "split.json").read_text())
     return {"gold": {g["id"]: g for g in jl(fix / "gold.jsonl")}, "split": split,
-            "library": json.loads((fix / "library.json").read_text()), "pool": jl(fix / "pool.jsonl"),
+            "library": json.loads((fix / "library.json").read_text()), "pool": jl(POOL),
             "few": {r["id"]: r for r in jl(fix / "replies_fewshot.jsonl")},
             "zero": {r["id"]: r for r in jl(fix / "replies_zero.jsonl")},
             "index": json.loads((fix / "samples" / "index.json").read_text()),
@@ -112,9 +121,12 @@ def v1_score(g: dict, m: dict | None, ctx) -> dict:
 
 
 def gold_final(g: dict, ctx) -> dict:
-    """The gold IR under the full contract's model-owned rules (the comparison side)."""
+    """The gold IR under the full contract's model-owned rules (the comparison side) — the lead's Q3b time
+    ruling included: a counted range in the gold stands against a calendar reading of a relative phrase."""
     ir, ga = g["ir"], answer_named(ctx.answers, g["ir"]["answer"])
     exp = explicit_time(ctx.spans, g["kind"])
+    if model_range_stands(exp, ir["time"], ctx.spans):
+        exp = None
     where = stated_numbers(v1_where(ir["where"], ga, ctx.ask, ctx.consumed_words, ctx.src_words), ctx.spans, ctx.ask)
     return {**ir, "where": where, "time": exp if exp is not None else ir["time"]}
 
@@ -366,11 +378,44 @@ def gateway(url: str, model: str, calls: list) -> object:
     return call
 
 
-def live_row(data: dict, g: dict, url: str, model: str, few: bool) -> dict:
+def flat_gateway(url: str, model: str, calls: list) -> object:
+    """The flow's transport (Q3b): the shipped ``ni_flow._query_transport`` adapter over a prompt-string call
+    posted as the flow's ``gateway.chat`` posts it (one user message, temperature 0, no max_tokens). The
+    messages' sha is recorded before flattening, so prompt parity reads as in the messages mode."""
+    from smartbrain_3000.ni_flow import _query_transport
+    endpoint = url.rstrip("/") + "/v1/chat/completions"
+
+    def prompt_call(prompt: str) -> str:
+        body = json.dumps({"model": model, "temperature": 0.0,
+                           "messages": [{"role": "user", "content": prompt}]}).encode()
+        req = urllib.request.Request(endpoint, data=body, headers={"Content-Type": "application/json"})
+        t0, rec = time.time(), calls[-1]
+        try:
+            with urllib.request.urlopen(req, timeout=_TIMEOUT_S) as resp:
+                payload = json.load(resp)
+            choice = payload["choices"][0]
+            content = choice["message"].get("content") or ""
+            rec.update(ms=round((time.time() - t0) * 1000), finish=choice.get("finish_reason"), reply=content[:800],
+                       cached=((payload.get("usage") or {}).get("prompt_tokens_details") or {}).get("cached_tokens"))
+            return content
+        except (OSError, KeyError, IndexError, ValueError) as ex:
+            rec.update(ms=round((time.time() - t0) * 1000), error=f"{type(ex).__name__}: {ex}"[:200])
+            raise
+
+    adapted = _query_transport(prompt_call)
+
+    def call(messages: list) -> str:
+        calls.append({"sha": prompt_sha(messages) if not calls else None, "flat": True})
+        return adapted(messages)
+    return call
+
+
+def live_row(data: dict, g: dict, url: str, model: str, few: bool, flat: bool = False) -> dict:
     src, calls = data["library"][g["source_id"]], []
+    transport = flat_gateway(url, model, calls) if flat else gateway(url, model, calls)
     plan = plan_query(g["ask"], kind=g["kind"], wants=[], source={"id": g["source_id"], "name": src["name"]},
                       answers=src["answers"], params=src["params"], consumed=consumed_proxy(g["ask"]),
-                      now=ref_now(data, g), zone=data["split"]["zone"], call_model=gateway(url, model, calls),
+                      now=ref_now(data, g), zone=data["split"]["zone"], call_model=transport,
                       pool=data["pool"] if few else [])
     want = data["shas"][g["id"]].get("few" if few else "zero")
     return {"id": g["id"], "kind": g["kind"], "note": g["note"], "ask": g["ask"], "model_ir": plan.model_ir,
@@ -410,12 +455,12 @@ def live_report(data: dict, recs: list[dict]) -> None:
           f"per row median {statistics.median(tot) if tot else 0} ms / p95 {_q(tot, 0.95)} ms")
 
 
-def live_mode(data: dict, url: str, model: str, zero: bool, out: str | None) -> int:
+def live_mode(data: dict, url: str, model: str, zero: bool, out: str | None, flat: bool = False) -> int:
     ids = sorted(data["gold"], key=lambda i: (i[0], int(i[1:]))) if zero else list(data["split"]["test"])
     done = {r["id"]: r for r in jl(pathlib.Path(out))} if out and pathlib.Path(out).exists() else {}
     recs, fails = [done[i] for i in ids if i in done], 0
     for n, rid in enumerate([i for i in ids if i not in done][:_MAX_ROWS], 1):
-        rec = live_row(data, data["gold"][rid], url, model, few=not zero)
+        rec = live_row(data, data["gold"][rid], url, model, few=not zero, flat=flat)
         recs.append(rec)
         if out:
             with open(out, "a") as fh:
@@ -437,12 +482,13 @@ def main() -> int:
     ap.add_argument("--gateway")
     ap.add_argument("--model", default="mlx/Qwen3.5-9B-MLX-4bit")
     ap.add_argument("--zero", action="store_true")
+    ap.add_argument("--flat", action="store_true")
     ap.add_argument("--out")
     ap.add_argument("--fixtures", default=str(FIX))
     args = ap.parse_args()
     data = load(pathlib.Path(args.fixtures))
     if args.gateway:
-        return live_mode(data, args.gateway, args.model, args.zero, args.out)
+        return live_mode(data, args.gateway, args.model, args.zero, args.out, flat=args.flat)
     rc = replies_mode(data) if args.replies or not args.exec else 0
     return rc | (exec_mode(data) if args.exec else 0)
 

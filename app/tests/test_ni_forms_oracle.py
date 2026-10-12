@@ -13,10 +13,12 @@ source miss untouched by this round) is documented but not scored.
 
 Every case is built through the real ``form_scene`` path (``design``) with the rules
 floor and the flow's frame kind, exactly as the flow would with no model; a lookup /
-next_event / alerts / latest_items / status case over a list answer first passes the
-flow's subject row filter (``ni_flow._scope_rows_to_subject``, D2 extends it past
-lookup/next_event); a subject naming a hazard the current sample does not report seals
-``_empty_subject_filter``'s honest empty state instead of raising. Asserted per case:
+next_event / alerts / latest_items / status / result / schedule case over a list answer
+first gets its rows filtered the way the flow now filters them (Round 20, Q3b — the subject
+row filter is gone): the query layer's ``where`` read for the ask — the labeled gold IR of
+that live card (``fixtures/ni_query/gold.jsonl``; sets A–D are development data), else the
+expectation's filter as a ``contains`` clause — sealed by ``ni_flow._where_ops`` and run by
+the engine; a hazard the current sample does not report leaves the honest empty state. Asserted per case:
 the pick is in the acceptable set; the required (asked) fields are in the desktop plan;
 lint red == 0 at both sealed spans; the summary names the asked quantity; forbidden
 texts are absent. The pass rate per set prints with the test output (``-s`` / the
@@ -31,10 +33,12 @@ from datetime import datetime
 
 import pytest
 
+from smartbrain_3000 import ni as nimod
 from smartbrain_3000 import ni_flow
 from smartbrain_3000.ni_forms.form_scene import design
 from smartbrain_3000.ni_forms.layout import layout_span
 from smartbrain_3000.ni_forms.spans import Span
+from smartbrain_3000.ni_query.normalize import v1_where
 
 ROOT = pathlib.Path(__file__).resolve().parent / "fixtures" / "ni_forms"
 SETS = ("live_2026-10-07", "live_2026-10-07b", "live_2026-10-07c", "live_2026-10-08d")
@@ -44,8 +48,10 @@ _EXPECTED_COUNTS = {"live_2026-10-07": 23, "live_2026-10-07b": 21, "live_2026-10
 # fix round datalayer-r2 (class W3): result/schedule reach it too -- a named team absent from
 # every row is the honest NOTHING path (not the empty_subject_filter calm-state fallback below).
 _SUBJECT_FILTER_KINDS = ("lookup", "next_event", "alerts", "latest_items", "status", "result", "schedule")
-_EMPTY_FALLBACK_KINDS = ("alerts", "latest_items", "status")
 _RESULTS: dict[str, dict[str, list[str]]] = {name: {} for name in SETS}
+_GOLD_SET = {"live_2026-10-07": "A", "live_2026-10-07b": "B", "live_2026-10-07c": "C", "live_2026-10-08d": "D"}
+_GOLD = {g["id"]: g["ir"] for g in (json.loads(line) for line in (ROOT.parent / "ni_query" / "gold.jsonl")
+                                     .read_text().splitlines() if line.strip())}
 
 
 def _expect(name: str) -> dict:
@@ -81,40 +87,42 @@ def _texts(clir: dict) -> list[str]:
 
 
 def _filtered(case: dict, exp: dict) -> tuple[list[dict], dict]:
-    """The flow's subject row filter (class D, extended by D2) applied the way
-    ``_try_answers_build`` applies it: lookup / next_event / alerts / latest_items /
-    status over a list answer; the sealed ``filter`` selects the rows. A no-op for
-    every other case (both sets' columns/value answers)."""
+    """The rows the flow's card shows for a lookup / next_event / alerts / latest_items / status / result /
+    schedule case over a list answer (Round 20, Q3b): the query layer's ``where`` (the case's gold IR, else
+    the expectation's filter read as ``contains``) as the flow's sealed engine ops over the outputs; the
+    answer's own declared filter rides as before. A no-op for every other case."""
     answers, outputs = case["answers_used"], case["outputs"]
     answer = answers[0]
     kind = case["frame_kind"]
     if kind not in _SUBJECT_FILTER_KINDS or answer.get("kind") != "list":
         return answers, outputs
-    sample = {answer["path"]: outputs.get(case["rows_output_name"]) or []}
-    subject = case["subject"] or ""
-    try:
-        scoped = ni_flow._scope_rows_to_subject(answer, sample, subject, None)
-    except ValueError:
-        assert kind in _EMPTY_FALLBACK_KINDS and exp.get("empty_subject_filter"), \
-            f"{case['id']}: unexpected 'nothing matches' for frame kind {kind}"
-        scoped = ni_flow._empty_subject_filter(answer, subject, None)
-    flt = scoped.get("filter")
     rows_name = case["rows_output_name"]
+    gold = _GOLD.get(f"{_GOLD_SET[_set_of(case)]}{case['n']}")
+    expected = exp.get("subject_filter")
+    # the gold where as the flow carries it (the query layer's v1 rules: no text code list on a text cell)
+    where = v1_where(list(gold["where"]), answer, case["ask"], frozenset(), frozenset()) if gold is not None else (
+        [{"col": expected["cell"], "op": "contains", "value": expected["equals"]}] if expected else [])
+    ops, _dropped = ni_flow._where_ops(where, answer, {c["path"]: c["path"] for c in answer["cells"]})
+    flt = answer.get("filter")
+    if flt:  # the answer's own declared filter (the airport's rows, the "Final" games) as the build seals it
+        ops.insert(0, {"fn": "where", "field": "rows", "key": flt["path"], "op": "eq", "value": flt["equals"]})
+    rows = nimod.run_pipeline([{"op": "extract", "paths": {"rows": "rows"}},
+                               {"op": "transform", "apply": ops}], {"rows": outputs[rows_name]})["rows"] \
+        if ops else outputs[rows_name]
     if exp.get("empty_subject_filter"):
-        rows = [r for r in outputs[rows_name] if ni_flow._dig(r, flt["path"]) == flt["equals"]]
-        assert flt is not None and rows == [], (flt, rows)
-        return [scoped], {**outputs, rows_name: rows}
-    if exp.get("no_subject_filter") or not exp.get("subject_filter"):
-        assert flt is None, flt
-        return answers, outputs
-    assert flt == {"path": exp["subject_filter"]["cell"], "equals": exp["subject_filter"]["equals"]}, flt
-    rows = [r for r in outputs[rows_name] if ni_flow._dig(r, flt["path"]) == flt["equals"]]
-    # fix round datalayer-r2 (class W3): an already-filtered answer short-circuits in
-    # _scope_rows_to_subject before it ever searches rows (mlb-team-results' own "Final games"
-    # filter) -- a may_be_empty result source with NO Final game at all (the Mariners case) was
-    # already empty before this filter is even considered, same as before this class existed.
-    assert rows or not outputs[rows_name], "the subject filter selects at least one row"
-    return [scoped], {**outputs, rows_name: rows}
+        assert ops and rows == [], (where, rows)
+    elif exp.get("no_subject_filter"):
+        assert not where, where
+    elif expected:
+        assert rows or not outputs[rows_name], "the filter selects at least one row"
+        got = {str(ni_flow._dig(r, expected["cell"])).casefold() for r in rows}
+        assert all(expected["equals"].casefold() in v for v in got), (expected, got)
+    return answers, {**outputs, rows_name: rows}
+
+
+def _set_of(case: dict) -> str:
+    """The fixture set a case file belongs to (its id carries no set name)."""
+    return next(name for name in SETS if (ROOT / name / f"{case['id']}.json").exists())
 
 
 def _check(case: dict, exp: dict) -> list[str]:

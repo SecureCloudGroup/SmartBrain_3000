@@ -5,7 +5,7 @@ against the record (CONTRACTS.md 6.4 `provenance`). A recipe is JSON-like data:
   ["raw", field, row]             text cell, one line
   ["label", field]                humanised source key / lexicon label
   ["unit", field]                 the field's unit display text (fix round 1a-6, class I)
-  ["title"] | ["ask"] | ["host"] | ["host_short"] | ["cadence"]
+  ["title"] | ["ask"] | ["host"] | ["host_short"] | ["cadence"] | ["interpretation"] (§36, code-made)
   ["tpl", id, {arg: recipe}]      a templates.py sentence
   ["join", sep, [recipe, ...]]    joined parts (empty parts skipped)
   ["d", op, args, opts]           a value derived by code from cells:
@@ -89,6 +89,8 @@ def run(rc, R, inp, host: str):
         return fmt.host_short(host)
     if k == "cadence":
         return fmt.cadence(inp.cadence_s)
+    if k == "interpretation":
+        return fmt.one_line(getattr(inp, "interpretation", "") or "")
     if k == "tpl":
         return render(rc[1], **{a: run(v, R, inp, host) if isinstance(v, list) else v for a, v in rc[2].items()})
     if k == "join":

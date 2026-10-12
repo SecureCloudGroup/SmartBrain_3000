@@ -39,19 +39,25 @@ Rules — each measured in the Q0 bake-off over 4,737 asks (scratch bakeoff/out/
    Alaska") drops the unit and keeps the number.
 8. Comparators. No library reads them: a number preceded by a ``_CMP`` phrase with at most one
    word between ("above magnitude 3", "stronger than magnitude 4") — the one ask parser here
-   beside the word-boundary check.
+   beside the word-boundary check. ``quantity`` (Round 20, Q3b): the words that may name what is
+   compared, nearest first — the word between the phrase and the number ("magnitude"), then the
+   word before the phrase ("earthquakes above 4.0"); ``clauses.comparator_cell`` reads them.
 9. A number or ordinal inside a kept time span belongs to the time phrase ("past 12 months",
    "every 30 minutes", "July 4th") and is dropped.
-10. Now phrases (Round 20 — the now words of the window parser, ``ni_flow._WINDOW_PATTERNS``): a
-   closed word table (``_NOW_PHRASES``: currently, at present, as of now, at the moment, as we
-   speak, right this minute / second / moment / instant, this instant; "rn" / "atm" only as the
-   ask's last word — "open atm near me" is a cash machine) is a point span with token ``now`` that
-   needs no library partner and wins over an overlapping library span ("this minute" alone is
-   tokenless).
+10. Now phrases (Round 20, Q3b — the removed window parser's table): a closed word table
+   (``_NOW_PHRASES``: currently, at present, as of now, at the moment, as we speak, right this
+   minute / second / moment / instant, this instant; "rn" / "atm" only as the ask's last word —
+   "open atm near me" is a cash machine) is a point span with token ``now`` that needs no library
+   partner and wins over an overlapping library span ("this minute" alone is tokenless).
+
+Names (Round 20, Q3b): ``name_masks`` turns the proper names the intent copied from the ask into
+masked ranges, so a name is never a time phrase or a stated number ("Saturday Night Live" is no
+Saturday, "Black Friday" no Friday, "Area 51" no 51) — except a name the holiday table names
+("when is Thanksgiving" keeps the holiday's date).
 
 Output (closed): ``{"time": [{text, start, end, kind, from, to, grain, lib, token}],
 "numbers": [{text, start, end, value, unit, lib}], "ordinals": [{text, start, end, value, lib}],
-"comparators": [{text, start, end, op, value, unit}]}`` — offsets into the ask, ``end``
+"comparators": [{text, start, end, op, value, unit, quantity}]}`` — offsets into the ask, ``end``
 exclusive; ``kind`` ∈ point | range | holiday | duration; ``lib`` ∈ ms | holidays | table (rule
 10); ``from``/``to`` ISO-8601 in
 ``zone`` (None for a duration); ``token`` = the Query IR token the span implies, or None when
@@ -99,6 +105,7 @@ _NOW_PHRASES: tuple[tuple[str, ...], ...] = (
     ("right", "this", "instant"), ("as", "of", "now"), ("at", "the", "moment"), ("as", "we", "speak"),
     ("at", "present"), ("this", "instant"), ("currently",), ("rn",), ("atm",))
 _LAST_WORD_ONLY = frozenset({("rn",), ("atm",)})
+_MAX_NAMES = 8
 _NIGHT_PARTS = frozenset({"EV", "NI"})     # ms part-of-day timex suffixes read as "tonight"
 _DAY_GRAINS = ("second", "minute", "hour", "day")
 
@@ -519,17 +526,20 @@ def _comparators(ask: str, numbers: list[dict]) -> list[dict]:
     ws = words(ask)[:_MAX_WORDS]
     out = []
     for n in numbers:  # bounded by _MAX_SPANS
-        before = [w for w in ws if w[2] <= n["start"]][-4:]
+        prior = [w for w in ws if w[2] <= n["start"]]
+        before = prior[-4:]
         hit = None
         for gap in (0, 1):
             stop = len(before) - gap
             for size in (2, 1):
                 phrase = " ".join(w[0] for w in before[stop - size:stop]) if stop - size >= 0 else ""
                 if hit is None and phrase in table:
-                    hit = (table[phrase], before[stop - size][1])
+                    lead = len(prior) - len(before) + stop - size   # the phrase's first word, in `prior`
+                    quantity = [before[-1][0]] if gap else []
+                    hit = (table[phrase], before[stop - size][1], quantity + [w[0] for w in prior[lead - 1:lead]])
         if hit is not None:
             out.append({"text": ask[hit[1]:n["end"]], "start": hit[1], "end": n["end"], "op": hit[0],
-                        "value": n["value"], "unit": n["unit"]})
+                        "value": n["value"], "unit": n["unit"], "quantity": hit[2]})
     return out
 
 
@@ -553,10 +563,29 @@ def _now_phrases(ask: str, now: dt.datetime, masked: tuple) -> list[dict]:
     return out
 
 
+def name_masks(ask: str, names: list | tuple) -> list[tuple[int, int]]:
+    """The ask's character ranges of the proper names the intent copied from it (module docstring,
+    Names): every whole-word occurrence, case-insensitive; a name the holiday table names is left
+    readable."""
+    assert isinstance(ask, str), "ask must be a str"
+    assert isinstance(names, (list, tuple)), "names must be a list"
+    ws = words(ask[:_MAX_ASK])[:_MAX_WORDS]
+    out: list[tuple[int, int]] = []
+    for name in list(names)[:_MAX_NAMES]:  # bounded
+        nw = [w for w, _, _ in words(str(name)[:200])][:12]
+        if not nw or _holiday_named(str(name)):
+            continue
+        n = len(nw)
+        out += [(ws[i][1], ws[i + n - 1][2]) for i in range(len(ws) - n + 1)  # bounded by the ask's words
+                if [w for w, _, _ in ws[i:i + n]] == nw]
+    return out[:_MAX_SPANS]
+
+
 def recognize(ask: str, *, now: dt.datetime, zone: str, masked: list[tuple[int, int]] | tuple = ()) -> dict:
     """The ask's spans in the closed shape the module docstring states. ``now`` is the
     reference instant (aware); ``zone`` the card's IANA zone; ``masked`` the char ranges of
-    parameter-consumed entities (a place, a team, a zip) whose spans are dropped."""
+    parameter-consumed entities (a place, a team, a zip) and of the intent's proper names
+    (``name_masks``) whose spans are dropped."""
     assert isinstance(ask, str) and ask.strip(), "ask required"
     assert isinstance(now, dt.datetime) and now.tzinfo is not None, "now must be an aware datetime"
     text = ask[:_MAX_ASK]

@@ -229,6 +229,14 @@ _WINDOW_RE = re.compile(r"(now|today|tonight|tomorrow|weekend|upcoming|dow:(mon|
                         r"|next_days:([1-9]\d?)|next_hours:([1-9]\d{0,2}))")
 _MAX_WINDOW_DAYS = 16
 _MAX_WINDOW_HOURS = 168
+# Round 20 (Q3b): a window may be a SPAN of the query layer's time tokens (§36) — ``window`` = its start
+# token, ``to`` = its end token (default: the same token), ``back`` = weekday / weekend tokens fall on the
+# latest past one (dated past rows). Kept: rows overlapping [start(window), end(to)) on the source's wall
+# clock. The legacy single forward tokens above keep their own semantics (hour floor, dawn rule, now slot).
+_SPAN_RE = re.compile(r"(now|today|tonight|tomorrow|yesterday|weekend|this_week|next_week|this_month|open"
+                      r"|dow:(mon|tue|wed|thu|fri|sat|sun)|next_days:([1-9]\d?)|next_hours:([1-9]\d{0,2})"
+                      r"|past_days:[1-9]\d{0,2}|past_hours:[1-9]\d{0,2}"
+                      r"|date:\d{4}-\d{2}-\d{2}|month:\d{4}-(?:0[1-9]|1[0-2])|year:\d{4})")
 _DOW_NAMES = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 _NOW_SLOT = timedelta(hours=12)  # a row that started longer ago than this isn't "now"
 # v2 aggregate fns that fail with "empty_aggregate" on an empty input list (count does not).
@@ -281,7 +289,13 @@ _ORDER_OPS: frozenset[str] = frozenset({"lt", "le", "gt", "ge"})
 # source whose rows carry a place-text column (USGS state feed, "22 km NNE of Yerington,
 # Nevada") drops rows naming ONLY other US states so a California card never ships Nevada
 # rows. Scene conditions keep ``_WHEN_OPS`` (the client evaluates those too).
-_WHERE_OPS: frozenset[str] = _WHEN_OPS | {"starts_with", "state_scope"}
+_WHERE_OPS: frozenset[str] = _WHEN_OPS | {"starts_with", "state_scope", "contains", "in"}
+# Round 20 (Q3b): the query layer's row filters (§36) — ``contains`` (case-folded substring of a text
+# cell; ``or_keys`` adds more cells, kept when ANY of them holds it: "names Sharks" over the home and the
+# away team cells) and ``in`` (one of up to _MAX_WHERE_IN scalars, each compared as ``eq``).
+_MAX_WHERE_IN = 12
+_MAX_WHERE_OR_KEYS = 7
+_MAX_WHERE_TEXT = 200
 # fix14-bbox (2026-10-05): the US-state table the ``state_scope`` op reads — hardcoded in
 # the engine so the row test is self-contained (no cross-module import at pipeline time).
 # Codes include the 50 states + DC + US territories (same set as library_resolve.US_STATES).
@@ -541,13 +555,15 @@ def validate_spec(spec: object, *, allow_empty_params: bool = False) -> dict:
                "interval_minutes", "history", "alerts",
                "_l1_last_attempt", "_l1_trial", "_template",
                "_l2_last_attempt", "_l2_proposal", "_born", "_shell",
-               "_model_consent", "_built_from", "_present_ok", "_fit"}
+               "_model_consent", "_built_from", "_present_ok", "_fit", "query", "interpretation"}
     _closed_keys(body, allowed, "spec")
     _validate_born_marker(body.get("_born"))
     _validate_built_from(body.get("_built_from"))
     _validate_present_ok(body.get("_present_ok"))
     _validate_model_consent(body.get("_model_consent"))
     _validate_fit(body.get("_fit"))
+    _validate_query(body.get("query"))
+    _validate_interpretation(body.get("interpretation"))
     # W2 (2026-09-15): ``_shell`` is the flow's not-yet-finalized marker —
     # boolean-true or absent, nothing else (the commission door reads it).
     if "_shell" in body and body["_shell"] is not True:
@@ -675,6 +691,108 @@ def _validate_fit(value: object) -> None:
                 and isinstance(e["answer"], str) and 0 < len(e["answer"]) <= _FIT_MAX_STR
                 and isinstance(e["value"], str) and 0 < len(e["value"]) <= _FIT_MAX_STR):
             raise ValueError("spec._fit.evidence entries must be {answer, value}")
+
+
+# Round 20 (Q3b, §36): how the declared build read the ask — sealed beside the card by ``ni_flow._handoff``
+# only, stripped on export / template install like ``_fit``. The closed sets mirror ``ni_query`` (a test pins
+# them equal): kept here so the engine's validator stays self-contained.
+_QUERY_KEYS = frozenset({"ir", "coverage", "notes", "model"})
+_QUERY_IR_KEYS = frozenset({"answer", "params", "select", "where", "time", "order", "limit", "agg"})
+_QUERY_OPS = frozenset({"=", "!=", "<", "<=", ">", ">=", "in", "contains", "names"})
+_QUERY_COVERAGE_KEYS = frozenset({"answer", "time", "where", "order", "select", "limit", "agg"})
+_QUERY_COVERAGE_VALUES = frozenset({"bound", "unbound", "approximated", "rules", "recognizer"})
+_QUERY_NOTES = frozenset({"query_rules", "model_off", "model_unavailable", "schema_invalid", "time_explicit",
+                          "where_dropped", "numbers_unstated", "order_dropped", "params_dropped", "count_list",
+                          "names_unbound", "bound_pushed", "clock_bound", "refetched",
+                          "quantity_unbound", "time_range_kept", "comparator_added", "comparator_corrected"})
+_MAX_INTERPRETATION = 300
+_MAX_QUERY_LIST = 6
+
+
+def _query_scalar(value: object) -> bool:
+    """A JSON scalar of a query value (bool / number / text up to 200 characters)."""
+    assert not isinstance(value, bytes), "decoded values only"
+    ok = isinstance(value, (bool, int, float)) or (isinstance(value, str) and len(value) <= 200)
+    verdict = ok and not (isinstance(value, float) and not math.isfinite(value))
+    assert isinstance(verdict, bool), "a verdict"
+    return verdict
+
+
+def _validate_query_ir(ir: object) -> None:
+    """The sealed final Query IR: closed keys, the closed ops and dirs, bounded lists and scalars."""
+    assert "answer" in _QUERY_IR_KEYS and "contains" in _QUERY_OPS, "the closed IR sets"
+    d = _require_dict(ir, "spec.query.ir")
+    assert isinstance(d, dict), "a dict past _require_dict"
+    if set(d) != _QUERY_IR_KEYS:
+        raise ValueError(f"spec.query.ir must hold exactly {sorted(_QUERY_IR_KEYS)}")
+    _require_str(d.get("answer"), "spec.query.ir.answer", max_len=40)
+    params, select = d.get("params"), d.get("select")
+    if not isinstance(params, dict) or len(params) > _MAX_QUERY_LIST or not all(
+            isinstance(k, str) and _query_scalar(v) for k, v in params.items()):
+        raise ValueError("spec.query.ir.params must be <= 6 scalar values")
+    if not isinstance(select, list) or len(select) > _MAX_QUERY_LIST or not all(
+            isinstance(x, str) and 0 < len(x) <= 200 for x in select):
+        raise ValueError("spec.query.ir.select must be <= 6 names")
+    where = d.get("where")
+    if not isinstance(where, list) or len(where) > _MAX_QUERY_LIST or not all(
+            isinstance(w, dict) and set(w) == {"col", "op", "value"} and isinstance(w["col"], str)
+            and len(w["col"]) <= 200 and w["op"] in _QUERY_OPS
+            and (_query_scalar(w["value"]) or (isinstance(w["value"], list) and len(w["value"]) <= 12
+                                               and all(_query_scalar(v) for v in w["value"]))) for w in where):
+        raise ValueError("spec.query.ir.where must be <= 6 {col, op, value} filters")
+    time = d.get("time")
+    if time is not None and not (isinstance(time, dict) and set(time) == {"from", "to"} and all(
+            t is None or (isinstance(t, str) and 0 < len(t) <= 20) for t in time.values())):
+        raise ValueError("spec.query.ir.time must be null or {from, to} tokens")
+    order = d.get("order")
+    if not isinstance(order, list) or len(order) > 3 or not all(
+            isinstance(o, dict) and set(o) == {"col", "dir"} and isinstance(o["col"], str) and len(o["col"]) <= 200
+            and o["dir"] in _SORT_DIRS for o in order):
+        raise ValueError("spec.query.ir.order must be <= 3 {col, dir}")
+    limit = d.get("limit")
+    if limit is not None and not (isinstance(limit, int) and not isinstance(limit, bool) and 1 <= limit <= 100):
+        raise ValueError("spec.query.ir.limit must be null or 1..100")
+    if d.get("agg") not in ("none", "count"):
+        raise ValueError("spec.query.ir.agg must be none or count")
+
+
+def _validate_query(value: object) -> None:
+    """Round 20 (Q3b, §36): ``{ir, coverage, notes, model: {attempts, used_fewshot}}`` or absent — the
+    final Query IR the card executes, its per-clause coverage, closed note codes and the call's shape.
+    Written only by ``ni_flow._handoff``; stripped on export / template install like ``_fit``."""
+    assert "coverage" in _QUERY_KEYS and "query_rules" in _QUERY_NOTES, "the closed query sets"
+    if value is None:
+        return
+    d = _require_dict(value, "spec.query")
+    assert isinstance(d, dict), "a dict past _require_dict"
+    _closed_keys(d, set(_QUERY_KEYS), "spec.query")
+    if set(d) != _QUERY_KEYS:
+        raise ValueError(f"spec.query must hold exactly {sorted(_QUERY_KEYS)}")
+    _validate_query_ir(d["ir"])
+    cov = d["coverage"]
+    if not (isinstance(cov, dict) and set(cov) == _QUERY_COVERAGE_KEYS
+            and all(v in _QUERY_COVERAGE_VALUES for v in cov.values())):
+        raise ValueError("spec.query.coverage must map every clause to bound|unbound|approximated|rules|recognizer")
+    notes = d["notes"]
+    if not (isinstance(notes, list) and len(notes) <= len(_QUERY_NOTES) and all(n in _QUERY_NOTES for n in notes)):
+        raise ValueError("spec.query.notes must be closed note codes")
+    model = d["model"]
+    if not (isinstance(model, dict) and set(model) == {"attempts", "used_fewshot"}
+            and isinstance(model["attempts"], int) and not isinstance(model["attempts"], bool)
+            and 0 <= model["attempts"] <= 2 and isinstance(model["used_fewshot"], bool)):
+        raise ValueError("spec.query.model must be {attempts: 0..2, used_fewshot: bool}")
+
+
+def _validate_interpretation(value: object) -> None:
+    """Round 20 (Q3b, §36): the interpretation line — ``ni_query.say`` over the sealed IR, code-authored
+    (TEXT_SRC ``code``, never a model's words): one line, 1..300 characters, or absent."""
+    assert _MAX_INTERPRETATION > 0, "a positive bound"
+    if value is None:
+        return
+    if not isinstance(value, str) or not value.strip() or len(value) > _MAX_INTERPRETATION \
+            or any(ord(ch) < 32 for ch in value):
+        raise ValueError(f"spec.interpretation must be one line of 1..{_MAX_INTERPRETATION} characters")
+    assert 0 < len(value) <= _MAX_INTERPRETATION, "one bounded line"
 
 
 def awaits_yes(item: dict) -> bool:
@@ -1401,9 +1519,18 @@ def _validate_transform_op(op: object, i: int, j: int, outputs: set[str]) -> Non
                 isinstance(k, str) and _KEY_RE.match(k) for k in keys):
             raise ValueError(f"{where}.keys must be a non-empty key list")
     elif fn == "sort_by":
-        _closed_keys(node, {"fn", "field", "key", "dir"}, where)
-        if "key" in node and not (isinstance(node["key"], str) and _KEY_RE.match(node["key"])):
+        # Round 20 (Q3b): ``missing: "last"`` — the query layer's order (§36): a dotted row key, numbers
+        # numerically, text case-folded, a row without the value last (never a failed sort)
+        _closed_keys(node, {"fn", "field", "key", "dir", "missing"}, where)
+        robust = node.get("missing") == "last"
+        if "missing" in node and not robust:
+            raise ValueError(f"{where}.missing must be 'last'")
+        if "key" in node and not (isinstance(node["key"], str) and (
+                _KEY_RE.match(node["key"]) or (robust and len(node["key"]) <= 120
+                                                and _ROW_KEY_RE.fullmatch(node["key"])))):
             raise ValueError(f"{where}.key malformed")
+        if robust and "key" not in node:
+            raise ValueError(f"{where}.missing needs a key")
         if node.get("dir") not in _SORT_DIRS:
             raise ValueError(f"{where}.dir must be 'asc' or 'desc'")
     elif fn == "top_n":
@@ -1473,6 +1600,29 @@ def _spec_has_llm_stage(spec: dict) -> bool:
     return False
 
 
+def _validate_where_query_ops(node: dict, where: str) -> bool:
+    """Round 20 (Q3b): the query layer's ``contains`` / ``in`` shapes and ``or_keys`` (§36). True when
+    ``node`` is one of them and valid; False for every other op (the caller's scalar rules apply)."""
+    assert isinstance(node, dict), "node must be a dict"
+    assert isinstance(where, str) and where, "where required"
+    op, value, or_keys = node.get("op"), node.get("value"), node.get("or_keys")
+    if or_keys is not None and (op != "contains" or not isinstance(or_keys, list)
+                                or not 1 <= len(or_keys) <= _MAX_WHERE_OR_KEYS
+                                or not all(isinstance(k, str) and len(k) <= 120 and _ROW_KEY_RE.fullmatch(k)
+                                           for k in or_keys)):
+        raise ValueError(f"{where}.or_keys must be 1..{_MAX_WHERE_OR_KEYS} row keys, with op contains only")
+    if op == "contains":
+        if not (isinstance(value, str) and value.strip() and len(value) <= _MAX_WHERE_TEXT):
+            raise ValueError(f"{where}.value must be a non-empty string for contains")
+        return True
+    if op == "in":
+        if not (isinstance(value, list) and 1 <= len(value) <= _MAX_WHERE_IN
+                and all(isinstance(v, (str, int, float, bool)) for v in value)):
+            raise ValueError(f"{where}.value must be a list of 1..{_MAX_WHERE_IN} JSON scalars for in")
+        return True
+    return False
+
+
 def _validate_transform_where(node: dict, where: str) -> None:
     """§29 ``where`` transform: filter a list-of-objects in place by an item key + op.
 
@@ -1483,13 +1633,15 @@ def _validate_transform_where(node: dict, where: str) -> None:
     """
     assert isinstance(node, dict), "node must be a dict"
     assert isinstance(where, str) and where, "where required"
-    _closed_keys(node, {"fn", "field", "key", "op", "value"}, where)
+    _closed_keys(node, {"fn", "field", "key", "op", "value", "or_keys"}, where)
     key = node.get("key")
     # a row key, dotted for nested rows ("groundDelay.airportId", as number/time steps take)
     if not isinstance(key, str) or len(key) > 120 or not _ROW_KEY_RE.fullmatch(key):
         raise ValueError(f"{where}.key malformed")
     if node.get("op") not in _WHERE_OPS:
         raise ValueError(f"{where}.op must be one of {sorted(_WHERE_OPS)}")
+    if _validate_where_query_ops(node, where):
+        return
     value = node.get("value")
     if node.get("op") == "starts_with" and not (isinstance(value, str) and value):
         raise ValueError(f"{where}.value must be a non-empty string for starts_with")
@@ -1512,17 +1664,20 @@ def _validate_transform_window(node: dict, where: str) -> None:
     UTC. ``unless`` (F9/C15): a row key whose flag says the start is a placeholder — the row is
     windowed as a day row on its written date. ``step``: the axis step (``hour`` default, ``day``,
     ``period``) — day-step rows keep the whole date even with a clock. No new output name — the list
-    stays under ``field``."""
+    stays under ``field``. Round 20 (Q3b): or the SPAN form — ``to`` / ``back`` and the query layer's
+    tokens (``_SPAN_RE``, ``_validate_window_span``)."""
     assert isinstance(node, dict), "node must be a dict"
     assert isinstance(where, str) and where, "where required"
-    _closed_keys(node, {"fn", "field", "key", "window", "zone", "utc", "unless", "step", "floor"},
+    _closed_keys(node, {"fn", "field", "key", "window", "zone", "utc", "unless", "step", "floor", "to", "back"},
                  where)
     key = node.get("key")
     if not isinstance(key, str) or len(key) > 120 or not _ROW_KEY_RE.fullmatch(key):
         raise ValueError(f"{where}.key malformed")
     window = node.get("window")
     match = _WINDOW_RE.fullmatch(window) if isinstance(window, str) else None
-    if match is None or int(match.group(3) or 1) > _MAX_WINDOW_DAYS \
+    if _window_is_span(node):
+        _validate_window_span(node, where)
+    elif match is None or int(match.group(3) or 1) > _MAX_WINDOW_DAYS \
             or int(match.group(4) or 1) > _MAX_WINDOW_HOURS:
         raise ValueError(f"{where}.window must be now|today|tonight|tomorrow|weekend|upcoming"
                          f"|dow:<mon..sun>|next_days:1..{_MAX_WINDOW_DAYS}"
@@ -1543,6 +1698,44 @@ def _validate_transform_window(node: dict, where: str) -> None:
     floor = node.get("floor")
     if floor is not None and not isinstance(floor, bool):
         raise ValueError(f"{where}.floor must be a bool")
+
+
+def _window_is_span(node: dict) -> bool:
+    """A window op in the span form (Round 20, Q3b): it carries ``to`` / ``back``, or its token is no
+    legacy forward window ("past_days:7", "this_week", "year:2027")."""
+    assert isinstance(node, dict), "node must be a dict"
+    window = node.get("window")
+    assert window is None or isinstance(window, (str, int, float, bool, list, dict)), "a JSON value"
+    return "to" in node or "back" in node or (isinstance(window, str) and not _WINDOW_RE.fullmatch(window))
+
+
+def _span_token_ok(token: object) -> bool:
+    """One span token: the closed grammar, bounded counts (next_days 1..16, next_hours 1..168), real dates."""
+    assert token is None or isinstance(token, (str, int, float, bool, list, dict)), "a JSON value"
+    assert _MAX_WINDOW_DAYS > 0 and _MAX_WINDOW_HOURS > 0, "positive window caps"
+    match = _SPAN_RE.fullmatch(token) if isinstance(token, str) else None
+    if match is None or int(match.group(3) or 1) > _MAX_WINDOW_DAYS or int(match.group(4) or 1) > _MAX_WINDOW_HOURS:
+        return False
+    if token.startswith("date:"):
+        try:
+            date.fromisoformat(token[5:])
+        except ValueError:
+            return False
+    return True
+
+
+def _validate_window_span(node: dict, where: str) -> None:
+    """The span form's ``window`` / ``to`` tokens and ``back`` flag; ``floor`` is a legacy-form flag."""
+    assert isinstance(node, dict), "node must be a dict"
+    assert isinstance(where, str) and where, "where required"
+    if not _span_token_ok(node.get("window")) or ("to" in node and not _span_token_ok(node.get("to"))):
+        raise ValueError(f"{where}.window/to must be span tokens (now|today|tonight|tomorrow|yesterday|weekend"
+                         "|this_week|next_week|this_month|open|dow:<mon..sun>|next_days:1..16|next_hours:1..168"
+                         "|past_days:1..999|past_hours:1..999|date:YYYY-MM-DD|month:YYYY-MM|year:YYYY)")
+    if "back" in node and not isinstance(node["back"], bool):
+        raise ValueError(f"{where}.back must be a bool")
+    if "floor" in node:
+        raise ValueError(f"{where}.floor is a legacy-window flag, not a span's")
 
 
 def _validate_transform_as(name: object, where: str, outputs: set[str]) -> None:
@@ -2364,7 +2557,9 @@ def _apply_transform_op(op: dict, payload: dict, *, history: dict) -> dict:
                                  None if zone is None else payload[zone],
                                  utc=bool(op.get("utc")), unless=op.get("unless"),
                                  step=str(op.get("step") or "hour"),
-                                 floor=bool(op.get("floor", True)))
+                                 floor=bool(op.get("floor", True)),
+                                 span=(str(op.get("to") or op["window"]), bool(op.get("back")))
+                                 if _window_is_span(op) else None)
     elif fn == "date":
         out[field] = _txf_rows(payload[field], op.get("key"), local_date)
     elif fn == "zip":
@@ -2387,11 +2582,12 @@ def _apply_transform_op(op: dict, payload: dict, *, history: dict) -> dict:
     elif fn == "pick":
         out[field] = _txf_pick(payload[field], op["keys"])
     elif fn == "sort_by":
-        out[field] = _txf_sort(payload[field], op.get("key"), op["dir"])
+        out[field] = _txf_sort_missing_last(payload[field], op["key"], op["dir"]) \
+            if op.get("missing") == "last" else _txf_sort(payload[field], op.get("key"), op["dir"])
     elif fn == "top_n":
         out[field] = _txf_top_n(payload[field], op["n"])
     elif fn == "where":
-        out[field] = _txf_where(payload[field], op["key"], op["op"], op["value"])
+        out[field] = _txf_where(payload[field], op["key"], op["op"], op["value"], op.get("or_keys"))
     elif fn == "count":
         out[op["as"]] = _txf_count(payload[field])
     elif fn in _AGGREGATE_FNS:
@@ -2680,7 +2876,7 @@ def next_event_stale(value: object, now: datetime, grace_minutes: int = 15) -> b
 
 def _txf_window(value: object, key: str, window: str, zone: object, *,
                 utc: bool = False, unless: str | None = None,
-                step: str = "hour", floor: bool = True) -> list:
+                step: str = "hour", floor: bool = True, span: tuple[str, bool] | None = None) -> list:
     """C7 window(field, key, window, zone, utc?, unless?, step?, floor?): keep the rows whose own
     local date / time falls in the asked window, judged against the clock on every run.
 
@@ -2697,7 +2893,7 @@ def _txf_window(value: object, key: str, window: str, zone: object, *,
     ("tonight" at 01:30 is now..06:00, never the next evening)."""
     if not isinstance(value, list):
         raise NIError("transform_type", "window needs a list")
-    assert _WINDOW_RE.fullmatch(window), "window already validated"
+    assert span is not None or _WINDOW_RE.fullmatch(window), "window already validated"
     now = _clock()
     tz = _window_zone(zone)
     parts = _key_parts(key)
@@ -2705,12 +2901,83 @@ def _txf_window(value: object, key: str, window: str, zone: object, *,
     stamps = [_row_stamp(row, parts, tz, tz or now.tzinfo, naive_utc=utc,
                           as_day=_row_is_tbd(row, flag_parts)) for row in value]
     local_now = now.astimezone(tz or _nearest_offset(stamps, now) or now.tzinfo)
-    if window == "now":
+    if span is not None:  # Round 20 (Q3b): [start(window), end(to)) on the source's wall clock
+        test = _span_test(window, span[0], local_now, step=step, back=span[1])
+        keep = [st is not None and test(st) for st in stamps]
+    elif window == "now":
         keep = _now_slot(stamps, local_now)
     else:
         test = _window_test(window, local_now, step=step, floor=floor)
         keep = [st is not None and test(st) for st in stamps]
     return [row for row, kept in zip(value, keep, strict=True) if kept]
+
+
+def _span_day(token: str, day: datetime, back: bool) -> datetime:
+    """A ``dow:`` / ``weekend`` span token's first day: the coming one (today included; on Sat / Sun the
+    weekend under way), or with ``back`` the latest past one (today included)."""
+    assert token == "weekend" or token.startswith("dow:"), "a weekday or weekend token"
+    assert isinstance(day, datetime) and isinstance(back, bool), "day + back required"
+    wd = day.weekday()
+    if token == "weekend":
+        if wd >= 5:
+            return day - timedelta(days=wd - 5)
+        return day - timedelta(days=wd + 2) if back else day + timedelta(days=5 - wd)
+    target = _DOW_NAMES.index(token[4:])
+    return day - timedelta(days=(wd - target) % 7) if back else day + timedelta(days=(target - wd) % 7)
+
+
+def _span_bounds(token: str, local_now: datetime, back: bool) -> tuple[datetime | None, datetime | None]:
+    """One span token as [start, end) on the source's wall clock at ``local_now`` (naive; None = open)."""
+    assert _SPAN_RE.fullmatch(token), "token already validated"
+    assert isinstance(local_now, datetime), "local_now must be a datetime"
+    now = local_now.replace(tzinfo=None, microsecond=0)
+    day, one = datetime.combine(now.date(), datetime.min.time()), timedelta(days=1)
+    fixed = {"open": (None, None), "now": (now, now), "today": (day, day + one), "tomorrow": (day + one, day + 2 * one),
+             "yesterday": (day - one, day), "tonight": (day + timedelta(hours=18), day + timedelta(hours=30))}
+    if token in fixed:
+        return fixed[token]
+    if token in ("this_week", "next_week"):
+        monday = day - timedelta(days=now.weekday()) + (7 * one if token == "next_week" else timedelta(0))
+        return monday, monday + 7 * one
+    if token == "weekend" or token.startswith("dow:"):
+        start = _span_day(token, day, back)
+        return start, start + (2 * one if token == "weekend" else one)
+    head, _, arg = token.partition(":")
+    if head in ("next_days", "past_days"):
+        return (now, day + int(arg) * one) if head == "next_days" else (day - int(arg) * one, now)
+    if head in ("next_hours", "past_hours"):
+        hours = timedelta(hours=int(arg))
+        return (now, now + hours) if head == "next_hours" else (now - hours, now)
+    midnight = datetime.min.time()
+    if token == "this_month" or head == "month":
+        first = day.replace(day=1) if token == "this_month" else \
+            datetime.combine(date(int(arg[:4]), int(arg[5:7]), 1), midnight)
+        return first, (first + 32 * one).replace(day=1)
+    if head == "date":
+        start = datetime.combine(date.fromisoformat(arg), midnight)
+        return start, start + one
+    return datetime.combine(date(int(arg), 1, 1), midnight), datetime.combine(date(int(arg) + 1, 1, 1), midnight)
+
+
+def _span_test(start_token: str, end_token: str, local_now: datetime, *, step: str, back: bool):
+    """The row test of a span window: a day row (no clock, or a day-step axis) is kept when its date
+    overlaps [start, end); a timed row when start <= its wall-clock time < end."""
+    assert isinstance(start_token, str) and isinstance(end_token, str), "tokens required"
+    assert isinstance(local_now, datetime), "local_now must be a datetime"
+    lo, hi = _span_bounds(start_token, local_now, back)[0], _span_bounds(end_token, local_now, back)[1]
+    by_day, one = step == "day", timedelta(days=1)
+    if lo is not None and hi is not None and hi <= lo and (end_token == "weekend" or end_token.startswith("dow:")):
+        # "Monday to Friday" read on a Saturday: the end is the Friday after the start, never before it
+        lo, hi = (lo - 7 * one, hi) if back else (lo, hi + 7 * one)
+
+    def keep(st: _Stamp) -> bool:
+        assert isinstance(st[0], datetime), "a stamp's wall-clock time"
+        assert isinstance(st[2], bool), "a stamp's has-clock flag"
+        if not st[2] or by_day:
+            first = datetime.combine(st[0].date(), datetime.min.time())
+            return (hi is None or first < hi) and (lo is None or first + one > lo)
+        return (lo is None or st[0] >= lo) and (hi is None or st[0] < hi)
+    return keep
 
 
 def _row_is_tbd(row: object, flag_parts: list[str] | None) -> bool:
@@ -2961,6 +3228,36 @@ def _txf_sort(value: object, key: str | None, direction: str) -> list:
         raise NIError("transform_type", f"sort failed: {exc.__class__.__name__}") from None
 
 
+def _sort_value(raw: object) -> tuple:
+    """A row value as a sort key: (0, number) for a finite number or a number written as text, (1, text)
+    case-folded otherwise; None for a missing / empty / "—" value (those rows go last)."""
+    assert not isinstance(raw, bytes), "decoded values only"
+    if raw is None or isinstance(raw, (dict, list)) or (isinstance(raw, str) and raw.strip() in ("", "—")):
+        return None
+    if _is_finite_number(raw):
+        return (0, float(raw))
+    text = str(raw).strip()
+    if _NUMBER_TEXT_RE.fullmatch(text):
+        return (0, float(text))
+    assert isinstance(text, str), "text key"
+    return (1, text.casefold())
+
+
+def _txf_sort_missing_last(value: object, key: str, direction: str) -> list:
+    """sort_by with ``missing: "last"`` (Round 20, Q3b): a stable sort by ``key`` (dotted row key);
+    rows without a value keep their order after the sorted ones, whatever the direction."""
+    if not isinstance(value, list):
+        raise NIError("transform_type", "sort_by needs a list")
+    assert direction in _SORT_DIRS and isinstance(key, str), "key + direction already validated"
+    parts = _key_parts(key)
+    keyed = [(_sort_value(_row_lookup(row, parts)[1]), i, row) for i, row in enumerate(value)]
+    present = [k for k in keyed if k[0] is not None]
+    present.sort(key=lambda k: k[0], reverse=direction == "desc")
+    out = [row for _, _, row in present] + [row for k, _, row in keyed if k is None]
+    assert len(out) == len(value), "every row kept"
+    return out
+
+
 def _txf_top_n(value: object, n: int) -> list:
     if not isinstance(value, list):
         raise NIError("transform_type", "top_n needs a list")
@@ -2968,7 +3265,7 @@ def _txf_top_n(value: object, n: int) -> list:
     return value[:n]
 
 
-def _txf_where(value: object, key: str, op: str, right: object) -> list:
+def _txf_where(value: object, key: str, op: str, right: object, or_keys: list | None = None) -> list:
     """§29 where(field, key, op, value): filter a list-of-objects in place.
 
     Filtering-is-selection (not validation) — the ONLY failure is a non-list
@@ -2982,12 +3279,16 @@ def _txf_where(value: object, key: str, op: str, right: object) -> list:
         raise NIError("transform_type", "where needs a list")
     assert isinstance(key, str) and key, "key already validated"
     assert op in _WHERE_OPS, "op already validated"
-    parts = re.findall(r"[^.\[\]]+|\[\d+\]", key)
+    keys = [re.findall(r"[^.\[\]]+|\[\d+\]", k) for k in [key, *(or_keys or [])]]
     out: list = []
     for entry in value:  # bounded by input length
-        found, got = _row_lookup(entry, parts)
-        if found and _where_match(got, op, right):
-            out.append(entry)
+        for parts in keys:  # bounded: 1 + _MAX_WHERE_OR_KEYS
+            found, got = _row_lookup(entry, parts)
+            hit = found and (any(_where_match(got, "eq", r) for r in right[:_MAX_WHERE_IN]) if op == "in"
+                             else _where_match(got, op, right))
+            if hit:
+                out.append(entry)
+                break
     return out
 
 
@@ -3012,6 +3313,9 @@ def _where_match(left: object, op: str, right: object) -> bool:
     assert op in _WHERE_OPS, "op already validated"
     if op == "starts_with":
         return isinstance(left, str) and isinstance(right, str) and left.startswith(right)
+    assert op != "in", "in is matched element by element as eq (_txf_where)"
+    if op == "contains":  # Round 20 (Q3b): a case-folded substring of a text cell
+        return isinstance(left, str) and isinstance(right, str) and right.casefold() in left.casefold()
     if op == "state_scope":
         return isinstance(left, str) and isinstance(right, str) and _state_scope_keeps(left, right)
     if op in _ORDER_OPS:
@@ -3564,7 +3868,9 @@ def _form_bind_context(spec: dict, fetched_at: datetime | None = None,
             "now": now.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "viewer_tz": user_timezone_name(),
             "title": str(spec.get("title") or ""), "ask": str(spec.get("goal") or ""),
-            "cadence_s": int(interval) * 60 if isinstance(interval, int) and interval > 0 else 0}
+            "cadence_s": int(interval) * 60 if isinstance(interval, int) and interval > 0 else 0,
+            # Round 20 (Q3b, §36): the query layer's code-made line leads the form's footer
+            "interpretation": spec["interpretation"] if isinstance(spec.get("interpretation"), str) else ""}
 
 
 def _bind_form(node: dict, data: dict, form_ctx: dict | None, *, alternatives: bool = False) -> dict:

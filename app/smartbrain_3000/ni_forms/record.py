@@ -532,7 +532,8 @@ def _input_of(context: dict, ask: str, title: str, cadence_s: int) -> CardInput:
                      fetched_at=str(context.get("fetched_at") or ""), cadence_s=cadence_s,
                      viewer_tz=str(context.get("viewer_tz") or "UTC"),
                      question_kind=kind if isinstance(kind, str) and kind else None,
-                     wants=[str(w)[:MAX_WANT_CHARS] for w in wants[:MAX_WANTS] if isinstance(w, str) and w])
+                     wants=[str(w)[:MAX_WANT_CHARS] for w in wants[:MAX_WANTS] if isinstance(w, str) and w],
+                     interpretation=str(context.get("interpretation") or "")[:300])
 
 
 def _series_part(history: dict | None, measure: str | None, as_of: str) -> dict:

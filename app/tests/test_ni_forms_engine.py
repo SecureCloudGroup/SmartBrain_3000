@@ -216,6 +216,45 @@ def test_engine_matrix_builds_runs_and_goes_live(monkeypatch, shape: str, design
         assert [p["v"] for p in points] == [223.86, 223.86]
 
 
+_LINE = "Earthquakes · Magnitude > 4 · past 90 days · count"
+
+
+def _footer(clir: dict) -> list[dict]:
+    """The footer's left-group text prims, in reading order (the time prim is the right group)."""
+    return [p for p in clir["prims"] if p.get("role") == "footer" and p["k"] == "text" and p["x"][0] == "l"]
+
+
+@pytest.mark.parametrize("shape", sorted(_MATRIX))
+def test_engine_matrix_lays_out_the_interpretation_line_in_the_footer(shape: str) -> None:
+    """Round 20 (Q3b, §36): a card whose spec carries the query layer's ``interpretation`` leads its footer's
+    left group with it on BOTH faces — a muted, code-sourced footer prim, ellipsized to the width the footer
+    leaves (lint red 0 holds at both bucket ends: no overflow, no overlap with the as-of time); the rest of the
+    group reads "· host…". A card without the line lays out exactly as before."""
+    store, _conn, _key = _store()
+    item_id, sample = _build(store, shape, None)
+    spec = store.get_item(item_id)["spec"]
+    outputs = nimod.run_pipeline(spec["pipeline"], sample)
+    plain = nimod.bind_scene(spec["scene"], outputs, history={}, form_ctx=nimod._form_bind_context(spec, _NOW))
+    blank = nimod.bind_scene(spec["scene"], outputs, history={},
+                             form_ctx=nimod._form_bind_context({**spec, "interpretation": ""}, _NOW))
+    lined = nimod.bind_scene(spec["scene"], outputs, history={},
+                             form_ctx=nimod._form_bind_context({**spec, "interpretation": _LINE}, _NOW))
+    assert plain["clir"] == blank["clir"] and plain["lint"]["red"] == lined["lint"]["red"] == 0
+    for side in ("desktop", "phone"):
+        before, after = plain["clir"][side], lined["clir"][side]
+        assert not any(ln.startswith("Earthq") for p in _footer(before) for ln in p["lines"])
+        first = _footer(after)[0]
+        text = first["lines"][0]
+        assert len(first["lines"]) == 1 and (text == _LINE or (text.endswith("…") and _LINE.startswith(text[:-1])))
+        assert first["tok"] == "muted" and first["src"] == "code" and first["px"] == _footer(before)[0]["px"]
+        rest = _footer(after)[1:]
+        assert all(p["lines"][0].startswith("· ") for p in rest)
+        # at both bucket ends the line stays inside its own width budget, left of the as-of time
+        for width in (after["bucket"]["min_w"], after["bucket"]["max_w"]):
+            assert first["max_w"] <= width
+        assert after["bucket"] == before["bucket"] and after["form"] == before["form"]
+
+
 def test_engine_matrix_hash_is_deterministic_for_one_runs_outputs() -> None:
     """Two binds of one run's outputs at one fetch instant hash the same (the monitor-
     hash / cache key); the run-to-run hash moves only when the data or the history does."""

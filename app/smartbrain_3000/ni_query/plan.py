@@ -8,18 +8,26 @@ Ownership (plan §E):
   time, where, order; then checked (``normalize.structural_errors``) and cut down (the v1
   rules + the recognizer validator, ``normalize``);
 - code-owned (``clauses``): select, limit, agg; params = {} in this step;
-- recognizers (``recognize``): an explicit time phrase decides time; where numbers are stated.
+- recognizers (``recognize``): an explicit time phrase decides time — except a counted range the model
+  read against the recognizers' calendar reading of a relative phrase ("over the last year": the model's
+  past_days:365 stands over the year 2025, coverage ``approximated``; the lead's Q3b ruling,
+  ``model_range_stands``); where numbers are stated; an explicit comparator whose quantity word names
+  one number cell is carried like a time anchor (``clauses.bind_comparators``: added when the model
+  dropped it, its number winning over another the model wrote; coverage ``where: recognizer``).
 
 Flow: recognize → ``prompt.build_messages`` → ``llm.chat_json`` (purpose "query"; the IR schema
 in the validator's subset; ``check`` = the structural rules, so the one retry also fires on a
 structural slip and states the rule only) → normalize → code-owned clauses → ``say``. Model
 off (``call_model`` None), unavailable, or invalid after the retry → the rules floor:
-``clauses.floor_answer``, time = the explicit phrase or null, where [], notes "query_rules".
+``clauses.floor_answer`` (window-aware: the answer that serves the explicit stretch first, then name /
+label words over declared ``words``, then the primary), time = the explicit phrase or null, where [],
+notes "query_rules".
 
 ``call_model(messages) -> str`` is ``chat_json``'s transport (system + user, as measured); the
 flow's prompt-string seam needs an adapter in Q3b. ``consumed`` holds the parameter-consumed
 entities: strings (where values naming them are dropped) and (start, end) spans of the ask
-(dropped from where AND masked for the recognizers).
+(dropped from where AND masked for the recognizers); ``masked`` holds spans masked for the
+recognizers only (Q3b: the intent's proper names — "Saturday Night Live" is no Saturday).
 """
 from __future__ import annotations
 
@@ -28,7 +36,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from ..ni_forms import llm
-from .clauses import floor_answer, limit_for, select_for
+from .clauses import bind_comparators, floor_answer, limit_for, select_for
 from .decl import answer_named, counted_list
 from .normalize import (
     explicit_time,
@@ -44,9 +52,12 @@ from .recognize import recognize, words
 from .say import say
 
 COVERAGE_KEYS = ("answer", "time", "where", "order", "select", "limit", "agg")
-COVERAGE_VALUES = frozenset({"bound", "unbound", "approximated", "rules"})
+COVERAGE_VALUES = frozenset({"bound", "unbound", "approximated", "rules", "recognizer"})
 NOTES = frozenset({"query_rules", "model_off", "model_unavailable", "schema_invalid", "time_explicit",
-                   "where_dropped", "numbers_unstated", "order_dropped", "params_dropped", "count_list"})
+                   "where_dropped", "numbers_unstated", "order_dropped", "params_dropped", "count_list",
+                   "time_range_kept", "comparator_added", "comparator_corrected"})
+_COUNTED_HEADS = ("past_days:", "next_days:", "past_hours:", "next_hours:")
+_CALENDAR_TOKENS = ("this_week", "next_week", "this_month")
 _DAY_TOKENS = ("today", "tomorrow", "yesterday", "dow:", "date:")
 _MAX_CONSUMED = 32
 
@@ -121,11 +132,15 @@ def _ask_model(messages: list[dict], answers: list[dict],
 
 
 def _code_clauses(ir: dict, ctx: Ctx, notes: list[str]) -> dict:
-    """select / limit / agg from code; a filtered count reads the list the count value counts."""
+    """Explicit comparators (``clauses.bind_comparators`` — on the list a count value counts), then select /
+    limit / agg from code; a filtered count reads the list the count value counts."""
     assert isinstance(ir, dict) and isinstance(notes, list), "ir + notes required"
     assert isinstance(ctx, Ctx), "ctx must be a Ctx"
     answer = answer_named(ctx.answers, ir["answer"])
-    lst = counted_list(ctx.answers, answer) if ctx.kind == "count" and narrows(ir) else None
+    counted = counted_list(ctx.answers, answer) if ctx.kind == "count" else None
+    ir["where"], recognized = bind_comparators(ir["where"], counted or answer, list(ctx.spans["comparators"]))
+    notes += list(dict.fromkeys(recognized))
+    lst = counted if counted is not None and narrows(ir) else None
     if lst is not None:
         ir["answer"], answer = lst["name"], lst
         notes.append("count_list")
@@ -140,6 +155,22 @@ def _code_clauses(ir: dict, ctx: Ctx, notes: list[str]) -> dict:
     return ir
 
 
+def model_range_stands(explicit: dict | None, model_time: dict | None, spans: dict) -> bool:
+    """The lead's time ruling (Round 20, Q3b): a COUNTED range the model read ("over the last year" →
+    past_days:365) stands against the recognizers' CALENDAR reading of a relative phrase (the year 2025,
+    September) — the line then shows the model's reading and coverage says ``approximated``. An explicit
+    anchor stays the recognizers' (a phrase with a written year: "in 2027", "Thanksgiving 2027")."""
+    assert isinstance(spans, dict) and "time" in spans, "recognized spans required"
+    assert explicit is None or isinstance(explicit, dict), "explicit must be a dict or None"
+    if not explicit or not isinstance(model_time, dict):
+        return False
+    counted = any(str(t or "").startswith(_COUNTED_HEADS) for t in (model_time.get("from"), model_time.get("to")))
+    calendar = all(str(t or "") in _CALENDAR_TOKENS or str(t or "").startswith(("month:", "year:"))
+                   for t in (explicit.get("from"), explicit.get("to")))
+    written_year = any(w.isdigit() and len(w) == 4 for s in spans["time"] for w, _, _ in words(str(s["text"])))
+    return counted and calendar and not written_year
+
+
 def finalize(model_ir: dict, ctx: Ctx) -> tuple[dict, list[str]]:
     """A structurally valid model IR → (the final IR, notes)."""
     assert isinstance(model_ir, dict) and not structural_errors(model_ir, ctx.answers), "a valid model IR"
@@ -147,7 +178,10 @@ def finalize(model_ir: dict, ctx: Ctx) -> tuple[dict, list[str]]:
     answer = answer_named(ctx.answers, model_ir["answer"])
     notes: list[str] = []
     explicit = explicit_time(ctx.spans, ctx.kind)
-    if explicit is not None and time_key(explicit) != time_key(model_ir["time"]):
+    if model_range_stands(explicit, model_ir["time"], ctx.spans):
+        explicit = None
+        notes.append("time_range_kept")
+    elif explicit is not None and time_key(explicit) != time_key(model_ir["time"]):
         notes.append("time_explicit")
     where = v1_where(model_ir["where"], answer, ctx.ask, ctx.consumed_words, ctx.src_words)
     stated = stated_numbers(where, ctx.spans, ctx.ask)
@@ -164,14 +198,16 @@ def finalize(model_ir: dict, ctx: Ctx) -> tuple[dict, list[str]]:
     return _code_clauses(ir, ctx, notes), notes
 
 
-def floor_plan(ctx: Ctx, wants: list) -> dict:
-    """The rules floor's IR."""
+def floor_plan(ctx: Ctx, wants: list, notes: list | None = None) -> dict:
+    """The rules floor's IR (``notes`` gains the code clauses' notes — a recognized comparator)."""
     assert isinstance(ctx, Ctx), "ctx must be a Ctx"
     assert isinstance(wants, list), "wants must be a list"
-    answer = floor_answer(ctx.answers, ctx.kind, ctx.ask, wants)
+    time = explicit_time(ctx.spans, ctx.kind)
+    answer = floor_answer(ctx.answers, ctx.kind, ctx.ask, wants, spans=ctx.spans,
+                          consumed_words=ctx.consumed_words, time=time)
     ir = {"answer": answer["name"], "params": {}, "select": [], "where": [],
-          "time": explicit_time(ctx.spans, ctx.kind), "order": [], "limit": None, "agg": "none"}
-    return _code_clauses(ir, ctx, [])
+          "time": time, "order": [], "limit": None, "agg": "none"}
+    return _code_clauses(ir, ctx, notes if notes is not None else [])
 
 
 def coverage_of(ir: dict, ctx: Ctx, floor: bool) -> dict:
@@ -197,23 +233,30 @@ def coverage_of(ir: dict, ctx: Ctx, floor: bool) -> dict:
 
 def plan_query(ask: str, *, kind: str | None, wants: list, source: dict, answers: list[dict], params: list[dict],
                consumed: list, now: dt.datetime, zone: str, call_model: Callable[[list], str] | None,
-               pool: list[dict]) -> QueryPlan:
-    """The ask → QueryPlan (module docstring)."""
+               pool: list[dict], masked: list | tuple = ()) -> QueryPlan:
+    """The ask → QueryPlan (module docstring). ``masked``: char ranges masked for the recognizers only
+    (the intent's proper names, ``recognize.name_masks``) — unlike ``consumed`` they never drop a where."""
     assert isinstance(ask, str) and ask.strip(), "ask required"
     assert isinstance(answers, list) and answers and isinstance(source, dict), "answers + source required"
-    masked = [c for c in consumed[:_MAX_CONSUMED] if isinstance(c, tuple)]
-    spans = recognize(ask, now=now, zone=zone, masked=masked)
+    spans = recognize(ask, now=now, zone=zone, masked=[*[c for c in consumed[:_MAX_CONSUMED] if isinstance(c, tuple)],
+                                                       *list(masked)[:_MAX_CONSUMED]])
     ctx = make_ctx(ask, kind, answers, spans, list(consumed[:_MAX_CONSUMED]), str(source.get("name") or ""))
     examples = retrieve_examples(ask, kind or "", pool) if pool else []
     messages = build_messages(ask, source=source, answers=answers, params=params, now=now, zone=zone,
                               examples=examples)
     model_ir, meta = _ask_model(messages, answers, call_model)
     if model_ir is None:
-        ir, notes = floor_plan(ctx, list(wants or [])), ["query_rules", meta["why"]]
+        notes = ["query_rules", meta["why"]]
+        ir = floor_plan(ctx, list(wants or []), notes)
     else:
         ir, notes = finalize(model_ir, ctx)
     assert set(notes) <= NOTES, "closed notes"
-    return QueryPlan(ir=ir, model_ir=model_ir, coverage=coverage_of(ir, ctx, model_ir is None),
+    coverage = coverage_of(ir, ctx, model_ir is None)
+    if "time_range_kept" in notes and coverage["time"] in ("bound", "rules"):
+        coverage["time"] = "approximated"  # the lead's ruling: the model's range, visibly not the calendar one
+    if {"comparator_added", "comparator_corrected"} & set(notes) and coverage["where"] in ("bound", "rules"):
+        coverage["where"] = "recognizer"   # an explicit comparator the recognizers read, carried by code
+    return QueryPlan(ir=ir, model_ir=model_ir, coverage=coverage,
                      interpretation=say(ir, answers), notes=notes,
                      model_meta={"attempts": meta["attempts"], "valid_first_try": meta["valid_first_try"],
                                  "used_fewshot": bool(examples)})

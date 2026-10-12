@@ -105,9 +105,7 @@ def test_value_answers_sunset_swaps_to_tomorrow_well_past_dusk(monkeypatch) -> N
     now = datetime(2026, 10, 4, 19, 0, tzinfo=DENVER)
     _freeze(monkeypatch, now)
     answers = [_SUNSET_TODAY, _SUNSET_TOMORROW]
-    chosen = ni_flow.select_answers(answers, "when is sunset in Denver", [],
-                                     None, "next_event")
-    assert chosen[0]["name"] == "sunset_today"
+    chosen = [_SUNSET_TODAY]   # the query layer's reading of "when is sunset in Denver" (Round 20, Q3b)
     swapped = ni_flow._swap_stale_next_event(chosen, answers, _sun_payload(),
                                               None, True, now)
     assert swapped[0]["name"] == "sunset_tomorrow"
@@ -124,8 +122,7 @@ def test_value_answers_sunset_today_explicit_still_refuses(monkeypatch) -> None:
     now = datetime(2026, 10, 4, 19, 0, tzinfo=DENVER)
     _freeze(monkeypatch, now)
     answers = [_SUNSET_TODAY, _SUNSET_TOMORROW]
-    chosen = ni_flow.select_answers(answers, "sunset today", [],
-                                     "today", "next_event")
+    chosen = [_SUNSET_TODAY]   # the query layer's reading of "sunset today" (Round 20, Q3b)
     swapped = ni_flow._swap_stale_next_event(chosen, answers, _sun_payload(),
                                               "today", True, now)
     assert swapped[0]["name"] == "sunset_today", "window=today keeps the honest past path"

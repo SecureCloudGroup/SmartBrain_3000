@@ -64,7 +64,7 @@ to know when a release changes behavior.
   restriction on user namespaces, Docker without the renderer), the engine is listed as
   unavailable with the reason and nothing runs.
 
-- **A query layer that reads what an ask actually asks for (not switched on yet).** For a
+- **A query layer that reads what an ask actually asks for.** For a
   Library source, an ask can now be turned into one small, checked query over the source's
   declared data: which of its answers to show, which rows ("earthquakes above magnitude 4",
   "flash flood watches"), which stretch of time ("this weekend", "the past 12 months",
@@ -73,8 +73,8 @@ to know when a release changes behavior.
   the columns, limits and counts itself, and reads dates and numbers from the ask with two
   pinned libraries rather than from the model. Each query also comes with a plain
   line saying how it was read ("Earthquakes · Magnitude > 4 · past 7 days · count") and a
-  note when part of the ask could not be carried. This release ships the layer with its
-  measurement tool and test data; cards keep their current behaviour until it is wired in.
+  note when part of the ask could not be carried. The layer ships with its measurement tool
+  and test data.
 
 ### Fixed
 
@@ -145,6 +145,25 @@ to know when a release changes behavior.
   understanding sealed before the source pick is reused when the build resumes
   after your tap, a key you add, or a model you approve. The build runs under
   the same reading the pick was made with.
+- **Cards from a Library source now show what the ask asked for, read once.** Which of the
+  source's answers a card shows, the stretch of time it keeps, the rows it keeps, their
+  order and how many ("the top 10", "the next one"), and whether it counts them now all come
+  from the query layer's one checked reading of the ask; the older word-matching and pattern
+  rules that made these choices separately are gone. A card keeps exactly the asked stretch,
+  looking back for past data ("last night's result", "the past 12 months") and ahead for
+  forecasts and schedules, and when that stretch changes the dates a source is asked for,
+  the card asks the source for exactly those dates. A filter in the ask ("above magnitude
+  4", "the Sharks game", "flood warnings") becomes a row filter that runs on every refresh,
+  and the source's own setting for it is used when it has one. When a source can't show the
+  asked quantity or time, the card says so and the next source is tried; when only part of
+  the ask can't be carried, the card is built and its record says which part. A comparison
+  the ask states ("above magnitude 4") is kept even when the model leaves it out, and the
+  number the ask says wins over another one. A filter is always made of whole words of the
+  ask (a part of a word, like "OR" inside "Oregon", never filters), names that hold a day
+  ("Saturday Night Live", "Black Friday") are never read as that day, "rn", "atm" and
+  "currently" read as right now, and without a model the card still takes the answer that
+  covers the asked day ("high on Saturday" shows the daily forecast). The plain line saying
+  how the ask was read is kept with the card and leads its footer.
 - Card size gains a reserved `large` value (the forms' L size, Round 19); it
   renders like `wide` until the fixed-rhythm board lands. A card with no size
   stays small, on the board and in the app.
