@@ -230,7 +230,7 @@ def test_a_page_that_loads_other_sites_lands_as_a_draft_listing_them(monkeypatch
     assert "waiting for your OK to also load: tidecdn.net, zz-fonts.com" in _notes(store, item_id)
     fields = ni_routes._render_fields(item)
     assert fields["draft"] == {"reason": "render_sites", "sites": ["example.org", "tidecdn.net", "zz-fonts.com"]}
-    assert fields["preview"]["feed_candidates"][0]["url"].startswith("https://api.tidecdn.net")
+    assert fields["preview"]["feed_candidates"][0]["url"] == "https://api.tidecdn.net/v1/tides.json?station=1"
 
 
 def test_no_render_while_the_browser_is_ineligible_links_as_today(monkeypatch) -> None:
