@@ -1347,6 +1347,7 @@ def _validate_create_ni_args(args: dict) -> None:
             "the user's request (and source_url if they named one); the flow "
             "samples the real response and builds the card deterministically"
         )
+    _refuse_render_seal(source)
     spec = _assemble_spec(args)
     ni.validate_spec(spec)              # closed schema + enums + pipeline shape
     ni.validate_scene(spec["scene"])    # pre-expansion scene caps
@@ -1358,6 +1359,18 @@ def _validate_create_ni_args(args: dict) -> None:
     ni.bind_scene(spec["scene"], preview, history=ni._seed_history(spec),
                   image_ref=ni._preview_image_ref(spec, "preview"),
                   form_ctx=ni._form_bind_context(spec))
+
+
+def _refuse_render_seal(source: object) -> None:
+    """Round 20 (B3a): ``source.render`` / ``source.sites`` are sealed by the card flow
+    alone, after a real page-browser visit and the user's consent — never by a tool, a
+    model or a chat turn."""
+    assert source is None or isinstance(source, (dict, list, str, int, float, bool)), "JSON value"
+    sealed = {"render", "sites"}
+    assert len(sealed) == 2, "the two sealed source keys"
+    if isinstance(source, dict) and sealed & set(source):
+        raise ValueError("source.render / source.sites are sealed by the card flow only — "
+                         "a tool never writes them")
 
 
 def _check_duplicate_title(store: object, title: str, allow_duplicate: bool) -> None:
@@ -1762,6 +1775,7 @@ def _validate_update_ni_patch(args: dict) -> None:
     if "params" in args:
         ni._validate_params(args["params"] or {})
     if "source" in args:
+        _refuse_render_seal(args["source"])
         ni._validate_source(args["source"])
     if "preview_payload" in args:
         preview = args["preview_payload"]
@@ -1822,6 +1836,8 @@ def _update_ni_item(ctx: ToolContext, args: dict) -> dict:
     # (fmtArgs) so the operator sees + consents to the flag flip before it lands. The
     # UI toggle at /repair-policy is the desktop-local equivalent; both share the
     # spec's closed `{l1: bool, l2_frontier: bool}` shape (see _validate_repair_policy).
+    if "source" in args:
+        _refuse_render_seal(args["source"])
     for key in ("title", "goal", "params", "source", "pipeline", "scene",
                 "display", "model", "interval_minutes", "history", "alerts",
                 "repair_policy"):

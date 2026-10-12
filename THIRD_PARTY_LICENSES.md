@@ -140,6 +140,7 @@ The complete runtime set (94 packages) is exact-version pinned in [`app/requirem
 | [Inter](https://rsms.me/inter/) | UI typeface (self-hosted subset, `web/static/fonts/`; license ships beside the file) | OFL-1.1 |
 | [Lucide](https://lucide.dev) | UI icon set (vendored path data, `web/src/lib/icons.ts`) | ISC |
 | [Whisper / faster-whisper](https://github.com/SYSTRAN/faster-whisper) | On-device speech-to-text runtime (`app/smartbrain_3000/stt_local.py`); model weights fetched hash-pinned at first use | MIT |
+| [Obscura](https://github.com/h4ckf0r0day/obscura) | Page browser component (`app/smartbrain_3000/browsers/`): a headless browser engine pinned at 0.2.4, downloaded from its GitHub release on first need and checked against this release's SHA-256 — not vendored or bundled in any image | Apache-2.0 |
 
 If you believe an attribution here is inaccurate or incomplete, please open an
 issue or email **info@securecloudgroup.com**.

@@ -8,17 +8,24 @@ returns ``tier_disabled``).
 
 Need signals, computed by code from the static result:
 
-- ``js_shell`` — the extracted text is under 400 characters while the HTML carries ≥ 3
-  ``<script>`` tags or a ``<noscript>`` enable-JavaScript notice;
+- ``js_shell`` — the extracted text is under 400 characters, no structured layer carries
+  data (``pagegraph.data_bearing``: an entity, a table with rows, a JSON document of 10+
+  leaves — B3a), and the page carries ≥ 3 ``<script>`` tags or a ``<noscript>``
+  enable-JavaScript notice (from the raw HTML, or the jail's ``signals`` layer when the
+  caller read the page itself);
 - ``blocked`` — the static fetch got 403/429, or the page reads as a bot challenge;
 - ``want_miss`` — supplied by the caller (its program found nothing it wanted).
 
 Escalation happens only with ``allow_render`` AND a signal, and never on a refusal R8
-forbids retrying: a 429 or a challenge page is recorded as ``blocked`` and left alone;
-only a plain 403 (often a non-browser filter) may be rendered. Every result carries
-``{engine, version, identity, timings, census}``. A small in-memory circuit breaker per
-engine opens after 3 consecutive ``engine_error``/``timeout`` results and stays open for
-10 minutes (``engine_unhealthy``); ``busy`` and every policy outcome leave it alone.
+forbids retrying: a 429 or a challenge (a challenge page, or a refusal netguard names
+``challenge`` — B3a) is recorded as ``blocked`` and left alone; only a plain 403 (often a
+non-browser filter) may be rendered. A caller that already read the page passes its own
+outcome (``static_evidence`` → ``browse(static=…)``) and the router still judges it. Every
+result carries ``{engine, version, identity, timings, census}`` (and the render's ``assets``
+when asked). ``render_sealed`` is the tick's tier: a sealed card's sites, no static read,
+no escalation. A small in-memory circuit breaker per engine opens after 3 consecutive
+``engine_error``/``timeout`` results and stays open for 10 minutes (``engine_unhealthy``);
+``busy`` and every policy outcome leave it alone.
 """
 
 from __future__ import annotations
@@ -69,6 +76,7 @@ class BrowseResult:
     timings: dict
     census: list[dict]
     escalation: dict | None = field(default=None)
+    assets: list[str] | None = field(default=None)  # the render's ``--dump assets`` (B3a, R12)
 
 
 class _Breaker:
@@ -158,41 +166,79 @@ def _static(url: str) -> tuple[BrowseResult, tuple[str, ...]]:
         captured.update(got if isinstance(got, dict) else {})
         return got
 
-    graph, status, reason, signals = None, "ok", "", ()
+    graph, failure = None, None
     try:
         graph = pagegraph.fetch_page_graph(url, fetcher=fetcher)
     except netguard.FetchError as exc:
-        status, reason = "fetch_failed", f"http_{exc.status}" if exc.status else (exc.kind or "fetch")
-        if exc.status in (403, 429):
-            status, signals = "blocked", ("blocked",)
+        failure = exc
     except jailrun.JailError as exc:
-        status, reason = "extract_failed", exc.reason
+        failure = exc
     html = captured.get("content") if isinstance(captured.get("content"), bytes) else None
+    result = static_evidence(url, graph=graph, html=html, failure=failure,
+                             final_url=captured.get("final_url"),
+                             static_ms=int((_monotonic() - started) * 1000))
+    assert result.tier == "static", "tier 1 answers as static"
+    return result, result.signals
+
+
+def static_evidence(url: str, *, graph: dict | None = None, html: bytes | None = None,
+                    failure: Exception | None = None, final_url: str | None = None,
+                    static_ms: int = 0) -> BrowseResult:
+    """A static read's outcome as the tier-1 ``BrowseResult``: the router's own read uses
+    it, and so does a caller that read the page itself (the NI page door) — the facts go in,
+    the signals come out of code here. ``failure`` is the read's ``FetchError`` /
+    ``JailError``: 403/429 are ``blocked`` (reason ``http_<status>``), a refusal netguard
+    names ``challenge`` is ``blocked`` with reason ``challenge`` and never renders."""
+    assert isinstance(url, str) and url, "url required"
+    assert graph is None or failure is None, "a read either produced a graph or failed"
+    status, reason, signals = "ok", "", ()
+    if isinstance(failure, netguard.FetchError):
+        status, reason = "fetch_failed", f"http_{failure.status}" if failure.status else (failure.kind or "fetch")
+        if failure.kind == "challenge":
+            status, reason, signals = "blocked", "challenge", ("blocked",)
+        elif failure.status in (403, 429):
+            status, signals = "blocked", ("blocked",)
+    elif isinstance(failure, jailrun.JailError):
+        status, reason = "extract_failed", failure.reason
+    elif graph is None:
+        status, reason = "fetch_failed", "fetch"
     if graph is not None:
         signals = need_signals(graph, html)
-    timings = {"static_ms": int((_monotonic() - started) * 1000)}
-    result = BrowseResult(
+    return BrowseResult(
         ok=status == "ok", tier="static", status=status, reason=reason, signals=signals,
-        html=html if status == "ok" else None, graph=graph, final_url=captured.get("final_url"),
+        html=html if status == "ok" else None, graph=graph, final_url=final_url,
         engine="static", version=__version__, identity=_static_identity(),
-        timings={**timings, "total_ms": timings["static_ms"]}, census=[])
-    assert result.tier == "static", "tier 1 answers as static"
-    return result, signals
+        timings={"static_ms": static_ms, "total_ms": static_ms}, census=[])
 
 
 def need_signals(graph: dict, html: bytes | None) -> tuple[str, ...]:
-    """``js_shell`` / ``blocked`` from a static page graph and its raw HTML (pure code)."""
+    """``js_shell`` / ``blocked`` from a static page graph and its raw HTML — or, when the
+    caller has no raw HTML, the jail's ``signals`` layer (pure code)."""
     assert isinstance(graph, dict), "graph required"
     out: list[str] = []
     article, extra = pagegraph.split_text(str(graph.get("text") or ""))
     visible = len(article.strip()) + len(extra.strip())
-    if html is not None and visible < _JS_SHELL_TEXT and (
-            len(_SCRIPT_RE.findall(html)) >= _MIN_SCRIPTS or _noscript_notice(html)):
+    scripts, notice = _script_evidence(graph, html)
+    if visible < _JS_SHELL_TEXT and not pagegraph.data_bearing(graph) and (
+            scripts >= _MIN_SCRIPTS or notice):
         out.append("js_shell")
     if (graph.get("readability") or {}).get("kind") == "challenge":
         out.append("blocked")
     assert set(out) <= set(SIGNALS), "signals are closed"
     return tuple(out)
+
+
+def _script_evidence(graph: dict, html: bytes | None) -> tuple[int, bool]:
+    """(``<script>`` count, a noscript enable-JavaScript notice): from the raw HTML when the
+    router read it, else from the extractor jail's closed ``signals`` layer (B3a)."""
+    assert isinstance(graph, dict), "graph required"
+    if html is not None:
+        return len(_SCRIPT_RE.findall(html)), _noscript_notice(html)
+    sig = graph.get("signals") if isinstance(graph.get("signals"), dict) else {}
+    count = sig.get("script_count")
+    count = count if isinstance(count, int) and not isinstance(count, bool) and count >= 0 else 0
+    assert count >= 0, "a count"
+    return count, sig.get("noscript_js") is True
 
 
 def _noscript_notice(html: bytes) -> bool:
@@ -218,29 +264,60 @@ def _escalates(signals: tuple[str, ...], static: BrowseResult | None) -> bool:
     return "js_shell" in signals or "want_miss" in signals
 
 
+def would_render(*, static: BrowseResult | None = None, signal: str | None = None) -> bool:
+    """B3a: would ``browse(..., allow_render=True)`` escalate this static read (or a caller's
+    signal) to a render? The same rule ``browse`` applies — the flow marks a render WANTED
+    with it before it knows whether this machine can render."""
+    assert static is None or static.tier == "static", "only a static result is judged here"
+    assert signal is None or signal in SIGNALS, "closed signals"
+    signals = static.signals if static is not None else ((signal,) if signal else ())
+    return _escalates(signals, static)
+
+
 def browse(url: str, *, need_signal_from_static: str | None = None, allow_render: bool = False,
            site_policy: dict, identity: dict, engine: str = "obscura",
-           timezone: str = "UTC") -> BrowseResult:
+           timezone: str = "UTC", static: BrowseResult | None = None,
+           want_assets: bool = False) -> BrowseResult:
     """Static tier, then (only with ``allow_render`` and an escalating signal) a render.
     ``need_signal_from_static`` lets a caller that already read the page statically pass
-    its signal (``want_miss`` included) and skip tier 1."""
+    its signal (``want_miss`` included) and skip tier 1; ``static`` lets it pass its whole
+    read (``static_evidence``) so a plain 403 is judged here without a second fetch.
+    ``want_assets`` (creation only) adds the render's ``--dump assets`` run."""
     assert need_signal_from_static is None or need_signal_from_static in SIGNALS, "closed signals"
     assert isinstance(url, str) and url, "url required"
+    assert static is None or (static.tier == "static" and need_signal_from_static is None), \
+        "a static read or a signal, never both"
     if engine not in TIERS[1:]:
         raise ValueError("unknown render tier")
-    static: BrowseResult | None = None
-    if need_signal_from_static is None:
+    if static is not None:
+        signals = static.signals
+    elif need_signal_from_static is None:
         static, signals = _static(url)
     else:
         signals = (need_signal_from_static,)
     if not allow_render or not _escalates(signals, static):
         return static if static is not None else _no_content(url, signals, None)
-    attempt = _render_tier(url, engine, site_policy, identity, timezone, signals)
+    attempt = _render_tier(url, engine, site_policy, identity, timezone, signals,
+                           want_assets=bool(want_assets))
     if attempt.ok:
         return attempt
     escalation = {"tier": engine, "status": attempt.status, "reason": attempt.reason}
     base = static if static is not None else _no_content(url, signals, None)
     return BrowseResult(**{**base.__dict__, "escalation": escalation})
+
+
+def render_sealed(url: str, *, sites: list[str], identity: dict, timezone: str = "UTC",
+                  engine: str = "obscura") -> BrowseResult:
+    """The tick's tier (B3a): render a sealed card's URL under its sealed sites — no static
+    read, no escalation, no assets. Busy, unavailable and every refusal are statuses."""
+    assert isinstance(url, str) and url, "url required"
+    assert isinstance(sites, list) and sites, "a sealed card names its sites"
+    if engine not in TIERS[1:]:
+        raise ValueError("unknown render tier")
+    got = _render_tier(url, engine, {"mode": "sealed", "sites": list(sites)}, identity,
+                       timezone, (), want_assets=False)
+    assert got.tier == engine, "the render answers as its tier"
+    return got
 
 
 def _no_content(url: str, signals: tuple[str, ...], escalation: dict | None) -> BrowseResult:
@@ -254,7 +331,7 @@ def _no_content(url: str, signals: tuple[str, ...], escalation: dict | None) -> 
 
 
 def _render_tier(url: str, engine: str, site_policy: dict, identity: dict, timezone: str,
-                 signals: tuple[str, ...]) -> BrowseResult:
+                 signals: tuple[str, ...], want_assets: bool = False) -> BrowseResult:
     """Tier 2/3 through the runner, guarded by the tier switch and the breaker."""
     assert engine in TIERS[1:], "render tiers only"
     assert isinstance(signals, tuple), "signals required"
@@ -262,13 +339,15 @@ def _render_tier(url: str, engine: str, site_policy: dict, identity: dict, timez
         return _render_refusal(engine, "tier_disabled", "tier_disabled", signals)
     if not BREAKER.allow(engine):
         return _render_refusal(engine, "engine_unhealthy", "breaker_open", signals)
+    extra = {"want_assets": True} if want_assets else {}
     got = runner.render(url, engine=engine, site_policy=site_policy, identity=identity,
-                        timezone=timezone)
+                        timezone=timezone, **extra)
     BREAKER.record(engine, got.status)
     return BrowseResult(ok=got.ok, tier=engine, status=got.status, reason=got.reason,
                         signals=signals, html=got.html, graph=None, final_url=got.final_url,
                         engine=got.engine, version=got.version, identity=dict(got.identity),
-                        timings=dict(got.timings), census=list(got.census))
+                        timings=dict(got.timings), census=list(got.census),
+                        assets=list(got.assets) if got.assets is not None else None)
 
 
 def _render_refusal(engine: str, status: str, reason: str, signals: tuple[str, ...]) -> BrowseResult:

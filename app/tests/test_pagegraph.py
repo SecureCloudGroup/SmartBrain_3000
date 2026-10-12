@@ -138,7 +138,7 @@ def test_fetch_page_graph_contract_shape() -> None:
     g = _graph_of(RECORDED_EVENT_PAGE)
     assert set(g) == {"url", "fetched_at", "render_mode", "text", "title",
                       "entities", "tables", "feeds", "meta", "outline",
-                      "readability"}
+                      "data", "signals", "readability"}  # B3a: +data (static DATA layer), +signals
     assert g["readability"] == {"readable": True, "kind": "ok"}
     assert g["url"] == "https://example.org/page"
 

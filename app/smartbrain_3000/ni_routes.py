@@ -20,7 +20,7 @@ from urllib.parse import unquote, urlparse
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
-from starlette.responses import Response
+from starlette.responses import JSONResponse, Response
 
 from . import (
     gateway,
@@ -36,6 +36,7 @@ from . import (
     vault_format,
 )
 from .account import _require_desktop_local
+from .browsers import runner as browser_runner
 from .data_routes import _reauthorize
 from .scheduler import _NI_FEED_ID, ScheduleStore, post_ni_carrier_notices
 
@@ -202,7 +203,35 @@ def _board_row(store: ni.NIStore, item: dict, *,
     query = item["spec"].get("query")
     if isinstance(query, dict) and isinstance(query.get("coverage"), dict):
         row["query"] = {"coverage": query["coverage"]}
+    if ni.spec_renders(item["spec"]):  # Round 20 (B3a): ride only on a page-browser card
+        row.update(_render_fields(item))
     return row
+
+
+def _render_fields(item: dict) -> dict:
+    """Round 20 (B3a, §35): the page-browser facts of one board row, closed keys, from the
+    sealed spec and the plaintext status only (no extra decrypt) — added to the rows of
+    cards that read their page in the page browser, absent on every other row:
+    ``rendered`` (bool); ``render`` {sites, unavailable} or None; ``draft`` {reason:
+    "render_sites", sites} while the card waits for its Activate, else None; ``preview``
+    {feed_candidates: [{url, site}]} when the creation render found the site's data feed."""
+    assert isinstance(item, dict), "item required"
+    spec = item["spec"]
+    rendered = ni.spec_renders(spec)
+    sites = list((spec.get("source") or {}).get("sites") or []) if rendered else []
+    feeds = [{"url": str(c.get("url") or ""), "site": str(c.get("site") or "")}
+             for c in spec.get("_feed_candidates") or [] if isinstance(c, dict)][:ni.MAX_FEED_CANDIDATES]
+    out = {
+        "rendered": rendered,
+        "render": ({"sites": sites,
+                    "unavailable": str(item.get("last_status") or "").startswith("render_unavailable")}
+                   if rendered else None),
+        "draft": ({"reason": "render_sites", "sites": sites}
+                  if item["state"] == "draft" and ni.render_needs_consent(spec) else None),
+        "preview": {"feed_candidates": feeds} if feeds else None,
+    }
+    assert set(out) == {"rendered", "render", "draft", "preview"}, "closed keys"
+    return out
 
 
 def _needs_credentials(item: dict, secrets_store) -> list[dict]:
@@ -495,8 +524,11 @@ def validate_item(request: Request, item_id: str, body: ValidateIn) -> dict:
         # the YES came before any C1 run (a held card never ran on cadence): the kick captured the
         # contract, so the C3 proof is due on the next tick, not a whole cadence away
         store.clear_last_checked(item_id)
-    return {"ok": True, "state": final["state"] if final else "unknown",
-            "run": run_result.get("status") or "skipped"}
+    out = {"ok": True, "state": final["state"] if final else "unknown",
+           "run": run_result.get("status") or "skipped"}
+    if run_result.get("code") in ni.CAPACITY_KINDS:  # B3a: render_busy / render_unavailable
+        out["code"] = run_result["code"]
+    return out
 
 
 def _reseal_second_presentation(store: ni.NIStore, item: dict) -> None:
@@ -561,6 +593,11 @@ def commission_item(request: Request, item_id: str) -> dict:
             detail=("commission refused: this card's creation flow never "
                     "finished — ask in chat to retry it, or delete the card"),
         )
+    if ni.render_needs_consent(item["spec"]):
+        # B3a (R6): the sites this page loads need their own consent — the Activate panel lists them
+        raise HTTPException(
+            status_code=409,
+            detail="commission refused: this card also loads other sites — allow them with Activate")
     secrets = getattr(request.app.state, "secret_store", None)
     params = item["spec"].get("params") or {}
     for name, param in params.items():  # bounded by _MAX_PARAMS
@@ -620,6 +657,66 @@ def commission_item(request: Request, item_id: str) -> dict:
     return {"state": "commissioning"}
 
 
+@router.post("/api/ni/items/{item_id}/activate")
+def activate_item(request: Request, item_id: str) -> dict:
+    """Round 20 (B3a, R6): the Activate panel of a card whose page loads other sites — the
+    user saw the sealed site list and allows every future update to load them. Seals the
+    ``_render_ok`` attestation (kept like ``_c2_ok``; any rebuild asks again) and commissions
+    the card; it then waits for its YES like every page card. Desktop-local (a consent for
+    new egress, like the pick), audited. 404 / 409 when the card isn't waiting for its sites."""
+    assert request is not None and item_id, "request + item id required"
+    _require_desktop_local(request)
+    store = _store(request)
+    if store.get_item(item_id) is None:
+        raise HTTPException(status_code=404, detail="item not found")
+    try:
+        sites = store.record_render_consent(item_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    assert sites, "a consented card names its sites"
+    _journal_best_effort(store, item_id, "commissioned",
+                         "user allowed this card's page to also load: " + ", ".join(sites[1:]))
+    ni_flow.clear_flow_slot(store, item_id)
+    request.app.state.audit.append(
+        "user", "ni_activate_render", "reviewed", "executed", True,
+        args_summary=tools.summarize({"item_id": item_id, "sites": len(sites)}),
+        result_summary=tools.summarize({"state": "commissioning"}),
+    )
+    return {"state": "commissioning", "sites": sites}
+
+
+class SwitchFeedIn(BaseModel):
+    """B3a (R12): one of the card's sealed feed candidates, exactly as the card showed it."""
+
+    url: str = Field(min_length=8, max_length=2000)
+
+
+@router.post("/api/ni/items/{item_id}/switch-feed")
+def switch_item_feed(request: Request, item_id: str, body: SwitchFeedIn) -> dict:
+    """Round 20 (B3a, R12): build this card from the site's data feed the page browser saw
+    (one of its sealed ``_feed_candidates`` — nothing else is accepted, nothing was fetched
+    before this tap). Re-enters the flow at the tap with that URL as a pasted link (the
+    existing door; the card waits for its YES). Desktop-local, audited; 409 otherwise."""
+    assert request is not None and item_id, "request + item id required"
+    assert isinstance(body.url, str), "the body carries a URL"
+    _require_desktop_local(request)
+    store = _store(request)
+    item = store.get_item(item_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="item not found")
+    url = body.url.strip()
+    try:
+        started = ni_flow.begin_switch_feed(store, item, url)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    request.app.state.audit.append(
+        "user", "ni_switch_feed", "reviewed", "executed", True,
+        args_summary=tools.summarize({"item_id": item_id, "url": url}),
+        result_summary=tools.summarize({"started": bool(started)}),
+    )
+    return {"ok": True, "started": bool(started)}
+
+
 def _journal_best_effort(store: ni.NIStore, item_id: str, kind: str,
                           summary: str) -> None:
     """§28 route-side journal writer. Never raises past the route boundary:
@@ -659,7 +756,25 @@ def run_item(request: Request, item_id: str) -> dict:
                             detail=f"run refused: state={item['state']!r}")
     if not item["enabled"]:
         raise HTTPException(status_code=409, detail="run refused: item paused")
-    return _execute_manual_run(request, store, item)
+    if ni.spec_renders(item["spec"]) and browser_runner.slot_busy():
+        return _render_busy_conflict()
+    result = _execute_manual_run(request, store, item)
+    if result.get("status") == "busy":  # B3a: the render found the slot taken — no run, no failure
+        return _render_busy_conflict()
+    return result
+
+
+_RENDER_BUSY_DETAIL = "the local page browser is busy — try again in a moment"
+
+
+def _render_busy_conflict() -> JSONResponse:
+    """B3a: the page browser's single slot is taken — a 409 whose body carries the closed
+    ``code: "render_busy"`` beside the sentence (the client's ApiError matches the code; the
+    ``no_session`` precedent in auth.py). A route declared ``-> dict`` returns it as is."""
+    body = {"detail": _RENDER_BUSY_DETAIL, "code": "render_busy"}
+    assert body["code"] in ni.CAPACITY_KINDS, "a closed capacity code"
+    assert set(body) == {"detail", "code"}, "closed keys"
+    return JSONResponse(body, status_code=409)
 
 
 def _execute_manual_run(request: Request, store: ni.NIStore, item: dict) -> dict:
@@ -688,11 +803,17 @@ def _execute_manual_run(request: Request, store: ni.NIStore, item: dict) -> dict
                              secrets_store=secrets, schedules_store=schedules,
                              kb=getattr(state, "kb", None))
     except ni.NIError as exc:
+        if exc.kind == "render_busy":  # B3a: capacity, never a failure — the card stays as it was
+            return {"status": "busy", "kind": exc.kind, "code": exc.kind,
+                    "duration_ms": int((time.monotonic() - started) * 1000)}
         store.mark_checked(item_id, exc.kind[:200])
         _post_carrier_after_run(schedules, store, item_id, prior_state, item,
                                 alerts=[], repaired=[])
-        return {"status": "error", "kind": exc.kind,
-                "duration_ms": int((time.monotonic() - started) * 1000)}
+        out = {"status": "error", "kind": exc.kind,
+               "duration_ms": int((time.monotonic() - started) * 1000)}
+        if exc.kind in ni.CAPACITY_KINDS:  # B3a: render_unavailable — the client matches the code
+            out["code"] = exc.kind
+        return out
     _post_carrier_after_run(schedules, store, item_id, prior_state, item,
                             alerts=result.get("alerts") or [],
                             repaired=result.get("repaired") or [])
@@ -1907,7 +2028,10 @@ def _build_export_template(store: ni.NIStore, item: dict, secrets_store) -> dict
 # so a template ships with none and the install path forces the safe default.
 _EXPORT_STRIP_KEYS = ("contract", "_c2_ok", "_present_ok", "_fit", "_l1_last_attempt", "_l1_trial",
                       "_l2_last_attempt", "_l2_proposal", "_template", "repair_policy",
-                      "_born", "_model_consent", "_built_from", "query", "interpretation")
+                      "_born", "_model_consent", "_built_from", "query", "interpretation",
+                      "_render_ok", "_feed_candidates")
+# B3a: the page-browser seal lives INSIDE the source — an exported template is a plain page card
+_EXPORT_STRIP_SOURCE_KEYS = ("render", "sites")
 
 
 def _sanitize_spec_for_export(item: dict, secrets_store) -> dict:
@@ -1919,6 +2043,9 @@ def _sanitize_spec_for_export(item: dict, secrets_store) -> dict:
     spec = ni_library._deep_copy_json(item["spec"])
     for key in _EXPORT_STRIP_KEYS:
         spec.pop(key, None)
+    for key in _EXPORT_STRIP_SOURCE_KEYS:  # bounded: two keys
+        if isinstance(spec.get("source"), dict):
+            spec["source"].pop(key, None)
     source = spec.get("source") or {}
     stype = source.get("type")
     if stype == "internal.schedule":

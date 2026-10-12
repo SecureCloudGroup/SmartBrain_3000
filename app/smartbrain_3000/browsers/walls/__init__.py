@@ -28,7 +28,7 @@ import os
 import sys
 from pathlib import Path
 
-from ... import runtime
+from ... import __version__, runtime
 from .. import manifest as mf
 from . import darwin, docker, linux, null
 from .base import (
@@ -45,7 +45,7 @@ from .null import NullWall
 
 __all__ = ["FAKE_ENGINE_MARKER", "KINDS", "NULLWALL_ENV", "REASONS", "NullWall", "Unavailable",
            "Wall", "available_kind", "check", "endpoint_kind", "host_platform", "is_fake_engine",
-           "prepare", "remote", "remote_engine_ready", "run_parent", "self_test"]
+           "prepare", "remote", "remote_engine_ready", "run_parent", "self_test", "sidecar_state"]
 
 _KIND = {"darwin": "seatbelt", "linux": "userns", "docker": "sidecar"}
 _ENDPOINT_KIND = {"darwin": "tcp", "linux": "unix", "docker": "unix", "windows": "tcp",
@@ -64,6 +64,18 @@ def host_platform() -> str:
     family = "linux" if sys.platform.startswith("linux") else "other"
     assert family in _ENDPOINT_KIND, "platform family is closed"
     return family
+
+
+def sidecar_state() -> str:
+    """``n/a`` outside Docker; in Docker the renderer sidecar's READY facts against this app's
+    build: ``missing`` | ``ready`` | ``stale`` (B3a — the launcher's start / rebuild signal)."""
+    family = host_platform()
+    assert family in _ENDPOINT_KIND, "a platform family"
+    if family != "docker":
+        return "n/a"
+    state = docker.sidecar_state(__version__)
+    assert state in docker.SIDECAR_STATES, "a closed sidecar state"
+    return state
 
 
 def remote(platform: str) -> bool:

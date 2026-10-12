@@ -79,6 +79,17 @@ to know when a release changes behavior.
   source, it shows the line your ask was read as ("Earthquakes · Magnitude > 4 · past 7
   days · count"), with a small note when part of the ask was approximated or could not be
   found.
+- **Pages that show their data only once their scripts run can become cards.** When you paste
+  a link to such a page, or press Fix on a page card that stopped reading, SmartBrain first reads
+  the data the page already carries in its own data blocks and tables, and only when that is not
+  enough opens it once in its own local, locked-down page browser; a site that refuses automated
+  readers or answers with a bot check is never opened that way. If the page also loads other
+  sites, the card waits as a draft that names them, and Activate is your OK for every update to
+  load exactly those sites; a page that loads only its own site is held for your Yes like any
+  page card. These cards refresh in the background one at a time, never holding up the others,
+  and a busy or switched-off page browser never counts as a failure. When the page's own data
+  feed shows up, the card can offer its exact address to switch to. At startup SmartBrain also
+  ends any page-browser process an earlier run left behind.
 
 
 ### Fixed

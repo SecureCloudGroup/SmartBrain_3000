@@ -39,6 +39,7 @@ from . import (
 )
 from .account import router as account_router
 from .agent_routes import router as agent_router
+from .browsers import proc as browser_proc
 from .chat_routes import router as chat_router
 from .data_routes import router as data_router
 from .devices_routes import router as devices_router
@@ -334,6 +335,10 @@ def _make_lifespan(mcp):
         applied = db.run_migrations(conn)
         assert applied >= 0, "migration count must be non-negative"
         _init_app_state(application, conn)
+        try:  # B3a: a page-browser engine an earlier run left behind (macOS has no PDEATHSIG)
+            browser_proc.sweep_strays(str(db_path.parent / "browsers"))
+        except Exception as exc:  # best-effort housekeeping, never a boot failure
+            log.warning("page-browser stray sweep skipped: %s", exc.__class__.__name__)
         # R14 local API credential: the launcher's token (env) or this install's own
         # 0600 file beside the DB; browser sessions last this app run (auth.py).
         application.state.local_token = auth.load_local_token(db_path)

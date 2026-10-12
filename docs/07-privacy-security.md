@@ -111,6 +111,18 @@ not. Being precise about the line matters more than claiming everything:
   image; cards built on your schedules, your knowledge, or other cards fetch nothing
   at all. A card with a credential sends it only to the host it was entered for,
   only over HTTPS, and never follows a redirect while carrying it.
+- **The page browser (only for a page you pasted, and only when it needs one).** Some pages
+  show their data only after their scripts run. For a page you pasted, or a page card you press
+  Fix on, SmartBrain may open it once in its own local, locked-down page browser (Obscura,
+  downloaded the first time it is needed from the exact GitHub release this version pins and
+  checked byte for byte). That one visit may also load the other sites the page depends on (at
+  most 12): then the card waits as a draft that names every one of them, and nothing is loaded
+  again until you press Activate, which is your OK for each update to load exactly those sites; a
+  page that loads only its own site is held for your Yes like any page card. Each update loads
+  only the sites on the card and refuses any other. Unlike SmartBrain's other fetches, the page
+  browser presents itself as an ordinary browser, so every listed site sees your IP address and a
+  browser fingerprint on each update. Sites that refuse automated readers or answer with a bot
+  check are never opened this way.
 - **The SmartBrain Library (a one-time download, then looked up on your
   machine).** The first time a card needs a source, the app downloads the
   Library's data file (about 18 MB) from its GitHub release and refuses it unless
@@ -188,7 +200,7 @@ not. Being precise about the line matters more than claiming everything:
 **What sites see when SmartBrain fetches.** Every fetch SmartBrain makes for you — card
 sources, feeds, vault updates, the assistant's web search and page reads — comes from your
 own IP address and identifies itself honestly as `SmartBrain/<version>` with a link to this
-project; it does not pretend to be a web browser. So a site you point it at can tell that a
+project; it does not pretend to be a web browser (the page browser above is the one exception). So a site you point it at can tell that a
 SmartBrain user, and which version, fetched it. Nothing else about you or your data is sent.
 
 Two things that sound like they'd leave and don't:

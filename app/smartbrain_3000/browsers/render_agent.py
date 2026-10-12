@@ -37,6 +37,7 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
+from .. import __version__
 from . import cmdline, install, proc
 from . import manifest as mf
 from .walls import docker as dw
@@ -123,7 +124,8 @@ def boot_facts(m: mf.Manifest, platform: str | None) -> dict:
              "readonly_root": _readonly_root(),
              "engine": {"name": m.name, "version": m.version, "platform": platform or "",
                         "sha256": m.platforms[platform].sha256 if platform in m.platforms else "",
-                        "verified": bool(verified)}, "ok": False}
+                        "verified": bool(verified)}, "ok": False,
+             "build": __version__[:dw._MAX_BUILD]}  # B3a: the app build this image was built with
     facts["ok"] = dw.valid_ready({**facts, "ok": True})
     assert set(facts) == dw.READY_KEYS, "closed READY keys"
     return facts

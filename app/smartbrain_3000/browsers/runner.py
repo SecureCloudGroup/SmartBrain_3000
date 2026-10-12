@@ -145,6 +145,17 @@ def _result(req: _Request, status: str, reason: str, started: float, *,
         census=list(census or []))
 
 
+def slot_busy() -> bool:
+    """True while a render holds the single engine slot — a peek that never waits (the
+    manual-run 409 and the Status ``worker`` read it; B3a)."""
+    assert isinstance(_LIVE_RENDERS, threading.Semaphore), "the single render slot"
+    free = _LIVE_RENDERS.acquire(blocking=False)
+    if free:
+        _LIVE_RENDERS.release()
+    assert isinstance(free, bool), "acquire answers a flag"
+    return not free
+
+
 def render(url: str, *, engine: str = "obscura", site_policy: dict, identity: dict,
            timezone: str, timeout_s: int | None = None,
            want_assets: bool = False) -> RenderResult:

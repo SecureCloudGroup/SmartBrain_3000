@@ -18,6 +18,10 @@
   64 marker lines (``Page loaded:``, ``Failed to navigate``, ``V8 heap limit reached``,
   ``V8 watchdog fired``, ``hard timeout exceeded``) with ANSI colour stripped. The text is
   used to classify a run; it is never shown to a user and never logged.
+- ``sweep_strays`` (B3a, at app start): SIGKILL every process of this user whose
+  EXECUTABLE lies under the app's ``browsers/`` dir — an engine an earlier app run left
+  behind (macOS has no PDEATHSIG). Matched by the executable's real path, never by a
+  command line; the log names only the count.
 """
 
 from __future__ import annotations
@@ -277,3 +281,59 @@ def read_capped_file(path: str, cap: int) -> tuple[bytes | None, bool]:
             return None, True
         data = fh.read(cap + 1)
     return (None, True) if len(data) > cap else (data, False)
+
+
+def _exe_paths() -> list[tuple[int, str]]:
+    """``(pid, executable path)`` for every process this user can see (bounded): Linux reads
+    ``/proc/<pid>/exe``; elsewhere ``ps -A -o pid=,comm=`` (macOS prints the full path)."""
+    out: list[tuple[int, str]] = []
+    assert _MAX_PROC_ENTRIES > 0, "the scan is bounded"
+    if os.path.isdir("/proc/self"):
+        for name in os.listdir("/proc")[:_MAX_PROC_ENTRIES]:  # bounded
+            if not name.isdigit():
+                continue
+            try:
+                out.append((int(name), os.path.realpath(os.readlink(f"/proc/{name}/exe"))))
+            except OSError:
+                continue
+        return out
+    try:
+        res = subprocess.run(["ps", "-A", "-o", "pid=,comm="], capture_output=True,
+                             timeout=5, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    for line in res.stdout.decode("utf-8", "replace").splitlines()[:_MAX_PROC_ENTRIES]:
+        pid, _, exe = line.strip().partition(" ")
+        if pid.isdigit() and exe.strip():
+            out.append((int(pid), exe.strip()))
+    assert all(pid > 0 for pid, _ in out), "pids are positive"
+    return out
+
+
+def stray_engines(root: str) -> list[int]:
+    """Pids (not this process, not its parent) whose executable lies under ``root``."""
+    assert os.path.isabs(root), "an absolute browsers dir"
+    prefix = os.path.realpath(root).rstrip(os.sep) + os.sep
+    assert len(prefix) > 1, "never the filesystem root"
+    mine = {os.getpid(), os.getppid()}
+    return [pid for pid, exe in _exe_paths() if exe.startswith(prefix) and pid not in mine]
+
+
+def sweep_strays(root: str) -> int:
+    """SIGKILL every stray engine under ``root``; return how many were signalled. POSIX
+    only (no engine runs on Windows); a process that is gone or not ours is skipped."""
+    assert isinstance(root, str) and root, "root required"
+    root = os.path.abspath(root)
+    if os.name != "posix" or not os.path.isdir(root):
+        return 0
+    ended = 0
+    for pid in stray_engines(root)[:256]:  # bounded
+        try:
+            os.kill(pid, signal.SIGKILL)
+            ended += 1
+        except (ProcessLookupError, PermissionError):
+            continue
+    if ended:
+        log.warning("browsers: ended %d stray page-browser process(es) left by an earlier run", ended)
+    assert ended >= 0, "a count"
+    return ended

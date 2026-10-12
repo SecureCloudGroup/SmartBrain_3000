@@ -58,6 +58,12 @@ log = logging.getLogger("smartbrain.ni")
 # a per-instance lock would not serialize them. Held only across the encrypt+UPDATE (never
 # across a fetch, model call, or the whole run pipeline), so contention stays negligible.
 _SPEC_LOCK = threading.Lock()
+# B3a: set while a thread runs ``tick`` — a page-browser render refuses to run there (the
+# tick hands rendered cards to the single-flight render worker instead).
+_TICK_THREAD = threading.local()
+# B3a: one render worker thread at a time (the L2 precedent); the engine slot itself is
+# ``browsers.runner._LIVE_RENDERS``, so a creation render and the worker never overlap.
+_RENDER_WORKER_LOCK = threading.Lock()
 
 _NONCE_BYTES = 12
 _MAX_ITEMS = 200                 # bound on ni_items rows (per-key decrypt scan)
@@ -69,6 +75,7 @@ _MAX_ITEMS_PER_PASS = 3          # engine tick fires at most this many due items
 # decrypt cost bounded (well below _MAX_ITEMS) while covering the realistic
 # case of a handful of model items ahead of a due http_json.
 _MAX_DUE_CANDIDATES = 50
+_MAX_RENDER_CANDIDATES = 3       # B3a: the page-browser cards' own due window (one handoff a pass)
 _MAX_REVISIONS = 10              # per-item revision history kept in ni_revisions
 _MAX_RUNS = 50                   # per-item ni_runs telemetry retained (pruned in code)
 _MAX_TITLE = 300
@@ -202,8 +209,27 @@ _STATES: frozenset[str] = frozenset(
 )
 _SLOTS: frozenset[str] = frozenset(
     {"latest", "last_good", "preview", "preview_data", "history", "alert_state",
-     "last_failure", "image", "journal", "flow", "llm_state", "outputs"}
+     "last_failure", "image", "journal", "flow", "llm_state", "outputs", "render"}
 )
+# Round 20 (B3a, ni-format §35): a card that reads its page in the page browser. The flow
+# builder alone seals ``source.render = "browser"`` + ``source.sites`` (registrable domains,
+# its own first, ≤ 12); ``_render_ok`` is the Activate consent for other sites (an
+# attestation like ``_c2_ok``); ``_feed_candidates`` the creation render's JSON-looking
+# requests on those sites (≤ 5 exact URLs, offered, never fetched before the user picks).
+RENDER_BROWSER = "browser"
+MAX_RENDER_SITES = 12
+MAX_FEED_CANDIDATES = 5
+_RENDER_INTERVAL_FLOOR = 15  # minutes: about two renders a minute serve ~30 cards
+# A capacity status is never a failure: no run row, no latest / last_failure write, no
+# streak, no L1 hook (busy: the item stays due; unavailable: marked, no streak).
+CAPACITY_KINDS: frozenset[str] = frozenset({"render_busy", "render_unavailable"})
+# Render outcomes that ARE failures (the runner's statuses, renamed host-free).
+_RENDER_FAILURES: dict[str, str] = {
+    "refused": "render_refused", "timeout": "render_timeout", "blocked": "render_blocked",
+    "offsite": "render_offsite", "confinement": "render_confinement",
+    "oversize": "render_oversize", "engine_error": "render_engine",
+}
+_SITE_RE = re.compile(r"(?=.{1,253}\Z)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,62}\Z")
 # §28 item journal: closed set of entry kinds + prune ceiling. Journal entries are
 # built DETERMINISTICALLY by code (models never author one). The store trims to the
 # newest _MAX_JOURNAL_ENTRIES per item; cascade-on-delete rides the wildcard in
@@ -555,7 +581,8 @@ def validate_spec(spec: object, *, allow_empty_params: bool = False) -> dict:
                "interval_minutes", "history", "alerts",
                "_l1_last_attempt", "_l1_trial", "_template",
                "_l2_last_attempt", "_l2_proposal", "_born", "_shell",
-               "_model_consent", "_built_from", "_present_ok", "_fit", "query", "interpretation"}
+               "_model_consent", "_built_from", "_present_ok", "_fit", "query", "interpretation",
+               "_render_ok", "_feed_candidates"}
     _closed_keys(body, allowed, "spec")
     _validate_born_marker(body.get("_born"))
     _validate_built_from(body.get("_built_from"))
@@ -574,6 +601,8 @@ def validate_spec(spec: object, *, allow_empty_params: bool = False) -> dict:
     _require_str(body.get("goal"), "spec.goal", max_len=_MAX_GOAL)
     _validate_params(body.get("params") or {}, allow_empty=allow_empty_params)
     _validate_source(body.get("source"))
+    _validate_render_ok(body.get("_render_ok"), body.get("source"))
+    _validate_feed_candidates(body.get("_feed_candidates"), body.get("source"))
     outputs = _validate_pipeline(body.get("pipeline") or [])
     if (_spec_has_graph_extract(body)
             and (body.get("source") or {}).get("type") != "http_page"):
@@ -1082,8 +1111,110 @@ def _validate_http_page_source(s: dict) -> None:
     to http_json (§3 — frozen scheme+authority, percent-encoded params, host-bound
     https-only secrets, auth-shaped header refusal). The body is fetched as html bytes and
     parsed inside the §16 subprocess jail; the pipeline payload is {"text", "title"}.
+    Round 20 (B3a): ``render`` + ``sites`` mark a card read in the page browser (below).
     """
-    _validate_http_source_shape(s, "http_page")
+    _validate_http_source_shape(s, "http_page", extra_keys=frozenset({"render", "sites"}))
+    _validate_render_fields(s)
+
+
+def _validate_render_fields(s: dict) -> None:
+    """B3a: ``render: "browser"`` and ``sites`` come together or not at all. ``render`` needs
+    a literal https URL (no ``{{param:``), a host with a registrable domain and no headers;
+    ``sites`` is 1..12 unique lowercase registrable domains, the URL's own site first."""
+    from . import pagegraph  # lazy: keep the fetch stack off ni's import edges
+
+    assert isinstance(s, dict), "source must be a dict"
+    assert MAX_RENDER_SITES > 0, "the site list is capped"
+    if "render" not in s and "sites" not in s:
+        return
+    if "render" not in s or "sites" not in s:
+        raise ValueError("spec.source.render and spec.source.sites go together")
+    if s.get("render") != RENDER_BROWSER:
+        raise ValueError(f"spec.source.render must be {RENDER_BROWSER!r}")
+    if s.get("headers"):
+        raise ValueError("spec.source.render refuses headers (a page browser sends none)")
+    url = str(s.get("url") or "")
+    host = (urlparse(url).hostname or "").lower() if url.lower().startswith("https://") else ""
+    own = pagegraph.registrable_domain(host)
+    if "{{param:" in url or not host or not _SITE_RE.match(own):
+        raise ValueError("spec.source.render needs a literal https:// url on a named site")
+    sites = s.get("sites")
+    if not isinstance(sites, list) or not 1 <= len(sites) <= MAX_RENDER_SITES \
+            or len(set(map(str, sites))) != len(sites):
+        raise ValueError(f"spec.source.sites must hold 1..{MAX_RENDER_SITES} unique sites")
+    for site in sites:  # bounded by MAX_RENDER_SITES
+        if not isinstance(site, str) or not _SITE_RE.match(site) \
+                or pagegraph.registrable_domain(site) != site:
+            raise ValueError("spec.source.sites must be lowercase registrable domains")
+    if sites[0] != own:
+        raise ValueError("spec.source.sites[0] must be the url's own site")
+
+
+def spec_renders(spec: dict) -> bool:
+    """True when the card reads its page in the page browser (B3a)."""
+    assert isinstance(spec, dict), "spec must be a dict"
+    source = spec.get("source") if isinstance(spec.get("source"), dict) else {}
+    renders = source.get("type") == "http_page" and source.get("render") == RENDER_BROWSER
+    assert isinstance(renders, bool), "a verdict"
+    return renders
+
+
+def render_needs_consent(spec: dict) -> bool:
+    """A rendered card that loads any site beyond its own and has no Activate consent."""
+    assert isinstance(spec, dict), "spec must be a dict"
+    if not spec_renders(spec):
+        return False
+    sites = (spec.get("source") or {}).get("sites") or []
+    assert isinstance(sites, list), "a rendered source lists its sites"
+    return len(sites) > 1 and spec.get("_render_ok") is not True
+
+
+def _render_consent_kept(current: dict, new: dict) -> bool:
+    """B3a: the Activate consent (``_render_ok``) belongs to one page and one site list — it
+    survives a spec write only when the sealed spec already had it AND the source (URL,
+    ``render``, ``sites``) is unchanged; a changed or wider site set asks again. A caller
+    can never introduce it through a write (only ``record_render_consent`` does)."""
+    assert isinstance(current, dict) and isinstance(new, dict), "specs required"
+    kept = (current.get("_render_ok") is True and spec_renders(new)
+            and new.get("source") == current.get("source"))
+    assert isinstance(kept, bool), "a verdict"
+    return kept
+
+
+def _validate_render_ok(value: object, source: object) -> None:
+    """``_render_ok``: absent, or ``true`` on a rendered source (the Activate consent;
+    written only by ``NIStore.record_render_consent``; stripped on export / install)."""
+    assert source is None or isinstance(source, dict), "a source dict"
+    assert RENDER_BROWSER == "browser", "the one render value"
+    if value is None:
+        return
+    if value is not True:
+        raise ValueError("spec._render_ok must be true or absent")
+    if not (isinstance(source, dict) and source.get("render") == RENDER_BROWSER):
+        raise ValueError("spec._render_ok needs a rendered source")
+
+
+def _validate_feed_candidates(value: object, source: object) -> None:
+    """``_feed_candidates``: absent, or ≤ 5 ``{url, site}`` — exact https URLs on the
+    rendered source's sealed sites (written only by the flow builder)."""
+    from . import pagegraph  # lazy: keep the fetch stack off ni's import edges
+
+    assert source is None or isinstance(source, dict), "a source dict"
+    assert MAX_FEED_CANDIDATES > 0, "candidates are capped"
+    if value is None:
+        return
+    sites = source.get("sites") if isinstance(source, dict) and source.get("render") == RENDER_BROWSER \
+        else None
+    if not isinstance(sites, list) or not isinstance(value, list) or len(value) > MAX_FEED_CANDIDATES:
+        raise ValueError(f"spec._feed_candidates must be <= {MAX_FEED_CANDIDATES} entries on a rendered source")
+    for cand in value:  # bounded above
+        url = cand.get("url") if isinstance(cand, dict) else None
+        if not (isinstance(cand, dict) and set(cand) == {"url", "site"} and isinstance(url, str)
+                and url.startswith("https://") and len(url) <= _MAX_URL
+                and not any(ch.isspace() or ord(ch) < 32 for ch in url)
+                and cand["site"] in sites
+                and pagegraph.registrable_domain(urlparse(url).hostname or "") == cand["site"]):
+            raise ValueError("spec._feed_candidates entries must be {url, site} on the sealed sites")
 
 
 def _validate_http_image_source(s: dict) -> None:
@@ -4499,6 +4630,8 @@ class NIStore:
         assert isinstance(spec, dict), "spec must be a dict"
         raw = spec.get("interval_minutes")
         floor = _LLM_INTERVAL_FLOOR if _spec_has_llm_stage(spec) else _INTERVAL_FLOOR
+        if spec_renders(spec):  # B3a: a page-browser card has its own floor (max with the LLM's)
+            floor = max(floor, _RENDER_INTERVAL_FLOOR)
         if not isinstance(raw, int) or isinstance(raw, bool):
             return max(floor, 60)
         return max(floor, int(raw))
@@ -4592,6 +4725,10 @@ class NIStore:
                 validated["contract"] = None  # keep the key present so validators stay happy
                 streak_clause = "consecutive_failures = 0, first_failure_at = NULL, "
                 streak_params = []
+            if _render_consent_kept(current["spec"], validated):
+                validated["_render_ok"] = True
+            else:
+                validated.pop("_render_ok", None)
             new_rev = int(current["spec_rev"]) + 1
             interval = self._clamp_interval(validated)
             nonce, ciphertext = self._seal_item(item_id, validated)
@@ -4868,15 +5005,23 @@ class NIStore:
         ).fetchall()
         now = datetime.now(UTC)
         out: list[dict] = []
+        rendered: list[dict] = []
         for r in rows:  # bounded by _MAX_ITEMS
             item = self._row(r)
             # ruling 2026-10-04: an open-path card waiting for the user's YES never refreshes on its own
             due = _is_due(item, now) or _is_clock_due(item, now)
-            if due and not awaits_yes(item):
+            if not due or awaits_yes(item):
+                continue
+            # B3a: page-browser cards keep their own window (≤ _MAX_RENDER_CANDIDATES, listed
+            # FIRST) so a render backlog can never fill the window every other card needs
+            if spec_renders(item["spec"]) and _is_due(item, now):
+                if len(rendered) < _MAX_RENDER_CANDIDATES:
+                    rendered.append(item)
+            elif len(out) < _MAX_DUE_CANDIDATES:
                 out.append(item)
-            if len(out) >= _MAX_DUE_CANDIDATES:
+            if len(out) >= _MAX_DUE_CANDIDATES and len(rendered) >= _MAX_RENDER_CANDIDATES:
                 break
-        return out
+        return rendered + out
 
     def clear_last_checked(self, item_id: str) -> None:
         """Reset ``last_checked`` to NULL so ``due_items`` picks the item up on the next tick.
@@ -5018,6 +5163,33 @@ class NIStore:
                 [nonce, ciphertext, item_id],
             )
 
+    def record_render_consent(self, item_id: str) -> list[str]:
+        """B3a Activate: the user allowed a rendered draft's sites — ``_render_ok`` is sealed
+        (no rev bump, like the C2 verdict) and the card commissions. Returns the sites.
+        Refuses (ValueError → 409) unless the item is a ``draft`` whose page loads other
+        sites and has no consent yet."""
+        assert item_id, "item id required"
+        with _SPEC_LOCK:
+            current = self.get_item(item_id)
+            if current is None:
+                raise ValueError("item not found")
+            spec = current["spec"]
+            assert isinstance(spec, dict), "spec must decrypt to a dict"
+            if current["state"] != "draft" or not render_needs_consent(spec) \
+                    or spec.get("_shell") is True:
+                raise ValueError("activate refused: this card is not waiting for its sites")
+            spec["_render_ok"] = True
+            nonce, ciphertext = self._seal_item(item_id, spec)
+            self._conn.execute(
+                "UPDATE ni_items SET nonce = ?, ciphertext = ?, state = 'commissioning', "
+                "consecutive_failures = 0, first_failure_at = NULL, updated_at = now() "
+                "WHERE id = ?;",
+                [nonce, ciphertext, item_id],
+            )
+            sites = list((spec.get("source") or {}).get("sites") or [])
+        assert sites, "a rendered card names its sites"
+        return sites
+
     def apply_repair(self, item_id: str, new_spec: dict, *,
                       origin: str = "repair_l1",
                       expected_rev: int | None = None) -> int | None:
@@ -5059,6 +5231,10 @@ class NIStore:
                 preserved["_c2_ok"] = True
             if current["spec"].get("_present_ok") in _PRESENTATION_IDS:
                 preserved["_present_ok"] = current["spec"]["_present_ok"]
+            if _render_consent_kept(current["spec"], preserved):
+                preserved["_render_ok"] = True  # B3a: a repair never touches the sealed sites
+            else:
+                preserved.pop("_render_ok", None)
             preserved["_l1_last_attempt"] = datetime.now(UTC).isoformat()
             # Phase 4b cosmetic (audit 2026-09-11): stamp the trial with its own
             # ``origin`` so a later revert records the honest revision origin —
@@ -5393,13 +5569,22 @@ def tick(app, pass_budget_seconds: float = 20.0,
     # run_item (getattr so a locked / route-only context surfaces as ``kb_unavailable``
     # from the source dispatch, matching feeds' getattr(app.state, 'feeds', None) style).
     kb = getattr(app.state, "kb", None)
+    handed_off = False  # B3a: at most one rendered card goes to the render worker per pass
+    _TICK_THREAD.active = True
     try:
         store = NIStore(cursor, key)
         secrets_store = SecretStore(cursor, key)
         schedules_store = ScheduleStore(cursor, key)
         started = time.monotonic()
         now = datetime.now(UTC)  # §34 Phase 1b: shared instant, fetch-due vs clock-due (mirrors due_items())
-        for item in store.due_items():  # bounded by _MAX_DUE_CANDIDATES
+        for item in store.due_items():  # bounded by _MAX_DUE_CANDIDATES + _MAX_RENDER_CANDIDATES
+            if spec_renders(item["spec"]) and _is_due(item, now):
+                # B3a: never rendered here; no quota cost, the render worker runs it off the tick
+                try:
+                    handed_off = handed_off or _hand_off_render(app, store, item, breaker_open)
+                except Exception:  # one bad item must not stop the pass
+                    log.warning("ni render handoff failed: item=%s", item["id"])
+                continue
             # L3 (audit 2026-09-12): count only ATTEMPTED items against the
             # per-pass quota — a silently-skipped candidate (breaker-open model
             # source, busy llm slot, no local model for an llm-stage item) must
@@ -5454,12 +5639,168 @@ def tick(app, pass_budget_seconds: float = 20.0,
             _collect_l2_candidate(store, item["id"], l2_candidates)
             checked += 1
     finally:
+        _TICK_THREAD.active = False
         try:
             cursor.close()
         except Exception:
             pass
     return {"checked": checked, "alerts": fired, "broken": broken,
             "repaired": repaired, "l2_candidates": l2_candidates}
+
+
+# --- B3a: the render worker (page-browser cards refresh off the tick) ------
+
+def _hand_off_render(app, store: NIStore, item: dict, breaker_open=None) -> bool:
+    """One due page-browser card: never rendered on the tick. An engine that can't render
+    marks the card ``render_unavailable`` (no streak; a preparable engine starts preparing
+    and the card stays due); otherwise the single-flight worker takes it. True only when a
+    worker started (the pass's one handoff)."""
+    from . import browsers  # lazy: keep the browser stack off ni's import edges
+
+    assert store is not None and isinstance(item, dict), "store + item required"
+    assert spec_renders(item["spec"]), "only page-browser cards are handed off"
+    browsers.note_wanted()  # a rendered card is due: the launcher's cue, whatever the engine's state
+    avail = browsers.available()
+    if not avail["eligible"]:
+        if avail["reason"] in browsers.PREPARABLE:
+            browsers.prepare()  # first need; the card stays due until the engine is ready
+            return False
+        store.mark_checked(item["id"], "render_unavailable")
+        return False
+    if render_needs_consent(item["spec"]):
+        store.mark_checked(item["id"], "render_unavailable")  # defensive: drafts never reach here
+        return False
+    return spawn_render_worker(app, item["id"], breaker_open=breaker_open)
+
+
+def render_worker_busy() -> bool:
+    """True while the render worker thread runs or any render holds the engine slot (the
+    Status surface's ``worker``)."""
+    from .browsers import (
+        runner as browser_runner,  # lazy: keep the browser stack off ni's edges
+    )
+
+    assert isinstance(_RENDER_WORKER_LOCK, type(threading.Lock())), "the worker lock"
+    busy = _RENDER_WORKER_LOCK.locked() or browser_runner.slot_busy()
+    assert isinstance(busy, bool), "a flag"
+    return busy
+
+
+def spawn_render_worker(app, item_id: str, *, breaker_open=None) -> bool:
+    """Run one due page-browser card on a daemon thread, single-flight (L2 precedent): a
+    second call while one runs is dropped — the card stays due and the next pass offers it
+    again. Returns True when this call started the worker."""
+    assert app is not None and item_id, "app + item id required"
+    assert breaker_open is None or callable(breaker_open), "breaker check must be callable"
+    if not _RENDER_WORKER_LOCK.acquire(blocking=False):
+        return False
+
+    def _run() -> None:
+        assert _RENDER_WORKER_LOCK.locked(), "the worker holds its claim"
+        try:
+            _run_render_worker(app, item_id, breaker_open)
+        except Exception as exc:  # last-resort net: a worker error must not wedge the app
+            log.warning("ni render worker failed: %s", exc.__class__.__name__)
+        finally:
+            _RENDER_WORKER_LOCK.release()
+
+    try:
+        threading.Thread(target=_run, name="ni-render-worker", daemon=True).start()
+    except Exception as exc:  # the OS refused a thread: release so the next pass retries
+        _RENDER_WORKER_LOCK.release()
+        log.warning("ni render worker spawn refused: %s", exc.__class__.__name__)
+        return False
+    return True
+
+
+def _run_render_worker(app, item_id: str, breaker_open=None) -> None:
+    """The worker's one run: a fresh cursor and stores, the item re-checked (still due, not
+    a draft, not held for its YES, a model free for an interpreted card), then ``run_item``
+    — whose page fetch is the sealed render — and the tick's post-run duties. Busy writes
+    nothing (the card stays due); unavailable marks ``render_unavailable`` with no streak."""
+    assert app is not None and item_id, "app + item id required"
+    assert breaker_open is None or callable(breaker_open), "breaker check must be callable"
+    key = getattr(app.state, "master_key", None)
+    if key is None:
+        return  # locked between the tick and the worker: abandon; the next pass offers it again
+    from . import (
+        gateway as gateway_mod,  # lazy: keep gateway off ni's import graph edges
+    )
+    from .scheduler import ScheduleStore, post_ni_carrier_notices
+    from .secrets import SecretStore
+
+    cursor = app.state.db.cursor()
+    try:
+        store = NIStore(cursor, key)
+        item = store.get_item(item_id)
+        if not _render_run_ok(item, breaker_open, gateway_mod):
+            return
+        schedules = ScheduleStore(cursor, key)
+        result = _render_run(store, item, gateway_mod, SecretStore(cursor, key), schedules,
+                             breaker_open, getattr(app.state, "kb", None))
+        broken: list[dict] = []
+        l2_candidates: list[str] = []
+        _collect_broken_transition(store, item_id, item["state"], item, broken)
+        _collect_l2_candidate(store, item_id, l2_candidates)
+        alerts, repaired = list(result.get("alerts") or []), list(result.get("repaired") or [])
+        if alerts or broken or repaired:
+            try:
+                post_ni_carrier_notices(schedules, alerts, broken, repaired=repaired)
+            except Exception as exc:  # posting is bookkeeping, never a worker failure
+                log.warning("ni render worker carrier post failed: %s", exc.__class__.__name__)
+        if l2_candidates:
+            spawn_l2_worker(app, l2_candidates)
+    finally:
+        try:
+            cursor.close()
+        except Exception:
+            pass
+
+
+def _render_run_ok(item: dict | None, breaker_open, gateway_mod) -> bool:
+    """Still the worker's to run: present, enabled, rendered, due, not a draft / paused /
+    broken, not held for its YES, its sites consented, and — for an interpreted card — the
+    gateway breaker closed and the local model slot free (else it stays due)."""
+    assert gateway_mod is not None, "gateway required"
+    assert item is None or isinstance(item, dict), "an item or nothing"
+    if item is None or not item["enabled"] or not spec_renders(item["spec"]):
+        return False
+    if item["state"] in ("draft", "paused", "broken") or awaits_yes(item):
+        return False
+    if render_needs_consent(item["spec"]) or not _is_due(item, datetime.now(UTC)):
+        return False
+    model_blocked = (breaker_open is not None and breaker_open()) or not gateway_mod.local_available()
+    return not (_spec_has_llm_stage(item["spec"]) and model_blocked)
+
+
+def _render_run(store: NIStore, item: dict, gateway_mod, secrets_store, schedules_store,
+                breaker_open, kb) -> dict:
+    """``run_item`` for one rendered card; capacity statuses write nothing more than the
+    unavailable mark, failures mirror the tick's ``mark_checked``. Returns run_item's dict
+    (empty on any outcome that isn't a completed run)."""
+    assert store is not None and isinstance(item, dict), "store + item required"
+    assert spec_renders(item["spec"]), "a page-browser card"
+    fired: list[bool] = []
+
+    def reserve_repair() -> bool:  # one repair attempt per worker run, breaker closed
+        assert len(fired) <= 1, "at most one repair per run"
+        if fired or (breaker_open is not None and breaker_open()):
+            return False
+        fired.append(True)
+        assert fired == [True], "the one repair is reserved"
+        return True
+
+    extra: dict = {"kb": kb} if kb is not None else {}
+    try:
+        result = run_item(store, item["id"], gateway_mod=gateway_mod, secrets_store=secrets_store,
+                          schedules_store=schedules_store, reserve_repair=reserve_repair, **extra)
+    except NIError as exc:
+        if exc.kind == "render_unavailable":
+            store.mark_checked(item["id"], "render_unavailable")
+        elif exc.kind != "render_busy":
+            store.mark_checked(item["id"], exc.kind[:_MAX_STATUS])
+        return {}
+    return result if isinstance(result, dict) else {}
 
 
 def _collect_clock_nexts(bound: dict) -> list[str]:
@@ -5828,6 +6169,8 @@ def run_item(store: NIStore, item_id: str, *, gateway_mod, secrets_store,
                 "values": {name: outputs.get(name) for name in llm_fields},
             }, ok=True)
     except NIError as exc:
+        if exc.kind in CAPACITY_KINDS:
+            raise  # B3a: busy / unavailable is never a failure — no run row, latest, streak or L1
         _handle_failure(store, item, exc, started, started_rev=started_rev)
         _seal_last_failure_snapshot(store, item["id"], exc, raw_excerpt)
         _maybe_repair_l1(store, item, gateway_mod, raw_excerpt, exc,
@@ -7488,6 +7831,9 @@ def _fetch_source(spec: dict, item_id: str, gateway_mod, secrets_store,
     stype = source.get("type")
     if stype == "http_json":
         return _fetch_http_json(source, item_id, secrets_store), None
+    if stype == "http_page" and source.get("render") == RENDER_BROWSER:
+        return _fetch_http_page_rendered(spec, item_id, store,
+                                         full=_spec_has_graph_extract(spec)), None
     if stype == "http_page":
         return _fetch_http_page(source, item_id, secrets_store,
                                 full=_spec_has_graph_extract(spec)), None
@@ -7685,6 +8031,77 @@ def _fetch_http_page(source: dict, item_id: str, secrets_store, *,
     if full:
         return dict(extracted)
     return {"text": extracted.get("text", ""), "title": extracted.get("title", "")}
+
+
+def _fetch_http_page_rendered(spec: dict, item_id: str, store: NIStore, *,
+                              full: bool) -> dict:
+    """B3a: a page-browser card's run — the SEALED tier only (its own sites; no static read,
+    no escalation), on the render worker or a manual run, never on the tick thread. The
+    rendered HTML goes through the same extractor jail as a static page. ``render_busy`` /
+    ``render_unavailable`` are capacity statuses (``CAPACITY_KINDS``), every other render
+    outcome a host-free failure class; the run notes land in the sealed ``render`` slot."""
+    from . import (  # lazy: keep the browser stack off ni's import edges
+        browsers,
+        jailrun,
+    )
+    from .browsers import router as browser_router
+
+    source = spec.get("source") or {}
+    assert source.get("render") == RENDER_BROWSER, "a rendered source"
+    assert store is not None and item_id, "store + id required"
+    if getattr(_TICK_THREAD, "active", False):
+        raise NIError("render_busy", "tick")  # never on the tick thread: the item stays due
+    browsers.note_wanted()  # a rendered card runs (the worker, a manual run, the C2 kick)
+    if render_needs_consent(spec):
+        raise NIError("render_unavailable", "consent")
+    avail = browsers.available()
+    if not avail["eligible"]:
+        if avail["reason"] in browsers.PREPARABLE:
+            browsers.prepare()  # first need (a restore, a removed engine): fetch in the background
+        raise NIError("render_unavailable", avail["reason"])
+    got = browser_router.render_sealed(str(source["url"]), sites=list(source["sites"]),
+                                       identity={"card": item_id}, timezone=user_timezone_name())
+    if got.status == "busy":
+        raise NIError("render_busy")
+    if got.status in ("unavailable", "tier_disabled", "engine_unhealthy"):
+        raise NIError("render_unavailable", str(got.reason or got.status)[:40])
+    _write_render_notes(store, item_id, got)
+    if not got.ok or got.html is None:
+        raise NIError(_RENDER_FAILURES.get(got.status, "render_engine"), str(got.reason)[:40])
+    try:
+        extracted = jailrun.run_extractor(got.html, url_hint=str(source["url"]))
+    except jailrun.JailError as exc:
+        if exc.reason == "jail_busy":
+            raise NIError("render_busy", "jail_busy") from None
+        raise NIError("extract_jail", exc.reason) from None
+    if full:
+        return dict(extracted)
+    return {"text": extracted.get("text", ""), "title": extracted.get("title", "")}
+
+
+_RENDER_NOTE_IDENTITY = ("mode", "profile", "consistent")
+_MAX_NOTE_SITES = 64
+
+
+def _write_render_notes(store: NIStore, item_id: str, got: object) -> None:
+    """The run notes of one render (closed keys) in the sealed ``render`` slot — engine,
+    version, identity, status, timing and the egress census (sites only: never in
+    ``ni_runs``, ``last_status`` or a log). Best-effort: a write failure never fails a run."""
+    assert store is not None and item_id, "store + id required"
+    identity = getattr(got, "identity", {}) or {}
+    census = [{"site": str(r.get("site") or "")[:253], "tunnels": int(r.get("tunnels") or 0),
+               "verdict": str(r.get("verdict") or "")[:20]}
+              for r in list(getattr(got, "census", []) or [])[:_MAX_NOTE_SITES] if isinstance(r, dict)]
+    notes = {"engine": str(getattr(got, "engine", ""))[:32], "version": str(getattr(got, "version", ""))[:16],
+             "identity": {k: identity.get(k) for k in _RENDER_NOTE_IDENTITY},
+             "status": str(getattr(got, "status", ""))[:20],
+             "total_ms": int((getattr(got, "timings", {}) or {}).get("total_ms") or 0),
+             "census": census}
+    assert set(notes) == {"engine", "version", "identity", "status", "total_ms", "census"}, "closed keys"
+    try:
+        store.write_snapshot(item_id, "render", notes, ok=bool(getattr(got, "ok", False)))
+    except Exception:  # bookkeeping never fails a run
+        log.warning("ni render notes skipped: item=%s", item_id)
 
 
 def _fetch_http_image(source: dict, item_id: str,
