@@ -49,10 +49,20 @@ to know when a release changes behavior.
   byte for byte before it is unpacked and again before every use, and it can reach the
   network only through SmartBrain's own guard, which refuses your computer, your local
   network and any site outside what the page is allowed to load. Nothing is rendered with
-  it yet: the operating-system confinement it requires comes in a following release, and
-  until then Settings → Status lists the engine as unavailable and the doctor reports
-  leftover download pieces or stray engine processes. `SMARTBRAIN_NO_BROWSER=1` switches
-  the component off entirely.
+  it yet, and the doctor reports leftover download pieces or stray engine processes.
+  `SMARTBRAIN_NO_BROWSER=1` switches the component off entirely.
+- **The page browser runs only inside an operating-system wall.** On a Mac it runs under a
+  deny-everything sandbox profile that lets it reach nothing but SmartBrain's own network
+  guard and touch no file outside its one-use folder; on Linux it runs in its own user,
+  network, process and file-system namespaces with your home and data folders hidden; in
+  Docker it runs in a separate renderer container with no network at all (the `render`
+  compose profile), which reaches SmartBrain's guard only through a shared in-memory
+  volume. Before the engine counts as usable, SmartBrain checks the wall on this computer —
+  your local network, this machine's own services, the cloud metadata address, DNS and your
+  files must all be out of reach, and the guard must answer — and Settings → Status shows
+  the wall and when it last passed. Where no wall can be built (Windows, Ubuntu's default
+  restriction on user namespaces, Docker without the renderer), the engine is listed as
+  unavailable with the reason and nothing runs.
 
 - **A query layer that reads what an ask actually asks for (not switched on yet).** For a
   Library source, an ask can now be turned into one small, checked query over the source's

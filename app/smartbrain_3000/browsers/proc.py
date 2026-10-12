@@ -9,8 +9,9 @@
   measured), and PR_SET_PDEATHSIG on Linux. Everything the pre-exec step needs is imported
   and computed in the parent; the child only calls ``setrlimit``/``prctl``.
 - ``watch``: every 250 ms — exit, the deadline, the tree's RSS against ``rss_mb``, a child
-  process (no wall expects one: the engine spawns nothing for ``fetch``), and
-  ``Wall.verify`` on the live PID tree.
+  process (no wall expects one: the engine spawns nothing for ``fetch``; a wall's own
+  helper processes — ``Wall.helpers`` — are not children), and ``Wall.verify`` on the live
+  PID tree.
 - ``kill_tree``: SIGKILL the group, reap, and prove no live member is left (orphans
   included; zombies awaiting another reaper do not count).
 - ``StderrTap``: the only reader of the engine's stderr. It keeps the first 4 KB and up to
@@ -192,7 +193,7 @@ def watch(proc: subprocess.Popen, wall: walls.Wall, rss_mb: int, deadline_s: flo
         else:  # the engine is reaped: any member left in its group is a child it spawned
             return "children" if group_members(proc.pid) and not wall.expects_children else "exited"
         tree = group_members(proc.pid)
-        if len(tree) > 1 and not wall.expects_children:
+        if len(tree) > 1 + wall.helpers and not wall.expects_children:
             return "children"
         if tree and not wall.verify([pid for pid, _ in tree]):
             return "wall"

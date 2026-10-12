@@ -64,9 +64,10 @@ include = ["smartbrain_3000*"]
 # non-recursive glob would omit them from the wheel (the app would 404 its JS).
 # ni_forms/assets ships fonts (TTF), lexicons/few-shots/icons (JSON) and the world
 # outline; without them the layout cannot measure or paint. browsers/engines holds the
-# browser-component manifests (§35) — without them no engine can be installed or verified.
+# browser-component manifests (§35) — without them no engine can be installed or verified;
+# browsers/walls/obscura.sb is the macOS wall's measured Seatbelt profile (hash-pinned).
 smartbrain_3000 = ["web/**/*", "ni_forms/assets/**/*", "ni_forms/tokens.json",
-                   "browsers/engines/*.json"]
+                   "browsers/engines/*.json", "browsers/walls/obscura.sb"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -1,0 +1,16 @@
+(version 1)
+(deny default)
+;; Parameters (sandbox-exec -D): ENGINE_DIR, RUN_DIR (fresh 0700 dir per run), PROXY_PORT (egress stub on loopback)
+(define engine-dir (param "ENGINE_DIR"))
+(define run-dir (param "RUN_DIR"))
+(define proxy-port (param "PROXY_PORT"))
+;; 1. exec the engine binary (sandbox-exec applies the profile, then execs it). No process-fork: the engine may not spawn anything.
+(allow process-exec (literal (string-append engine-dir "/obscura")))
+;; 2. Rust std reads the page size (hw.pagesize_compat) to place the main-thread stack guard page; denied -> panic, exit 134.
+(allow sysctl-read (sysctl-name "hw.pagesize_compat"))
+;; 3. libignition (dyld) opens "/" as its openat() root to locate the OS cryptex / shared cache; denied -> dyld abort, exit 134.
+(allow file-read-data (literal "/"))
+;; 4. per-run scratch dir: --output, --storage-dir (cookies.json), HOME, TMPDIR, cwd; denied -> "Failed to write ... out.txt".
+(allow file-read* file-write* (subpath run-dir))
+;; 5. the only network: TCP to the egress stub on loopback:PROXY_PORT; denied -> "error sending request".
+(allow network-outbound (remote tcp (string-append "localhost:" proxy-port)))

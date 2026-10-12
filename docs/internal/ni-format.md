@@ -2768,15 +2768,16 @@ display-class pick and the map/image → value degrade) are gone from the flow; 
   only red lint is `L-HOLLOW` (a day table thinning toward its last day) simply keeps the
   designed card, matching the prototype's rule by construction rather than by a ported check.
 
-## 35. Browser components (Round 20, step B1 — the component core)
+## 35. Browser components (Round 20, steps B1–B2 — the component core and the walls)
 
 A browser component is a standalone, replaceable, hash-pinned headless browser the app can
 load to read a page the way a browser does (scripts run, the DOM settles). It lives in
-`smartbrain_3000/browsers/`. Nothing in the flow, the tick or the UI calls it yet (B3), and
-**nothing renders in production in this step**: no OS wall exists yet, every platform
-reports `unavailable`, and the runner refuses to start an engine without a wall (fail
-closed). The first engine is Obscura (h4ckf0r0day/obscura, Rust, Apache-2.0) v0.2.4, run as
-a one-shot `fetch` subprocess — never `serve`, `mcp` or `scrape`, no CDP port, no `--eval`.
+`smartbrain_3000/browsers/`. Nothing in the flow, the tick or the UI calls it yet (B3). The
+engine only ever runs inside an OS wall (B2: macOS Seatbelt, Linux namespaces, the Docker
+renderer sidecar); where no wall can be built the platform reports `unavailable` with a
+reason and the runner starts nothing (fail closed). The first engine is Obscura
+(h4ckf0r0day/obscura, Rust, Apache-2.0) v0.2.4, run as a one-shot `fetch` subprocess — never
+`serve`, `mcp` or `scrape`, no CDP port, no `--eval`.
 
 - **Manifest** (`browsers/engines/<name>.json`, package data, loaded and validated on every
   use; `manifest.py`, the command-line builder in `cmdline.py`). Closed keys: `name, version, released, source_url_template,
@@ -2831,8 +2832,14 @@ a one-shot `fetch` subprocess — never `serve`, `mcp` or `scrape`, no CDP port,
   downloading(pct) · verifying · unpacking · self-testing · ready · unavailable · error ·
   stale · disabled`. `SMARTBRAIN_NO_BROWSER=1` = `disabled`, nothing downloads (the test
   conftest sets it). Errors are fixed sentences that name github.com and never echo an
-  exception, a path or a URL. The self-test (injected; default: `<engine> --version` under
-  the wall, no network) records `ok`, `skipped(wall_unavailable)` or `failed:<class>`.
+  exception, a path or a URL. The self-test (injected; default: the wall's canary program
+  and the engine's `--version` under the wall, see Walls) runs after an install and once
+  per boot (`ensure` runs it when the engine is in place and none has passed in this
+  process); it records `ok`, `skipped(wall_unavailable)` or `failed:<row>`, and a pass
+  stamps `verified_at` with the wall kind it passed under. In Docker the app container
+  never downloads an engine (`walls.remote`): the sidecar image holds it, and the row is
+  `ready` when the sidecar's `READY.json` names this manifest's exact build (name, version,
+  platform asset sha256).
 - **Egress child** (`jail_egress.py` + `egress.py`; P3 design §2). The engine's only network
   route. Spawned with `jailrun._jail_env()` (no `SMARTBRAIN_*`, no proxy variable), its own
   session, RLIMIT_CPU + RLIMIT_CORE, stderr to devnull. Protocol: one closed-key config line
@@ -2852,28 +2859,112 @@ a one-shot `fetch` subprocess — never `serve`, `mcp` or `scrape`, no CDP port,
   cap_concurrent cap_sites resolve resolve_timeout unsafe connect cap_up cap_down`) go to the
   parent on exit and nowhere else — the child writes no log. Listening: 127.0.0.1 ephemeral
   port where the wall consumes a port (macOS, the test wall), a 0600 Unix socket in the run
-  dir where it bind-mounts one (Linux/Docker; the in-namespace relay is B2). Measured: with
+  dir where the wall relays to one (Linux: the namespace init's relay; Docker: the sidecar
+  agent's relay, the socket opened to the shared group 0660). Measured: with
   `--proxy` the engine forwards hostnames unresolved, and its own SSRF guard catches literal
   private IPs and `localhost`/`*.localhost` but NOT aliases such as `ip6-localhost`,
   `localhost.localdomain` or the container's hostname — the egress child stops those.
-- **Walls** (`walls.py`). `prepare(platform, run_dir, engine_dir, egress_endpoint) -> Wall |
-  Unavailable(reason)` runs after the egress child is up (the endpoint carries the live port
-  or socket path); `Wall.wrap(argv, env)` may prepend a wrapper; `Wall.verify(pid_tree)` runs
-  on every watchdog poll; `Wall.teardown()`; `expects_children = False` (the engine spawns no
-  process for `fetch`). `check(platform, engine_dir)` is the spawn-free pre-check. Reasons in
-  this step: darwin `sandbox_pending`, linux `userns_pending`, docker `docker_no_sidecar`,
-  windows `platform` (also `apparmor_userns`, `missing_libs`, `sandbox` reserved). `NullWall`
-  exists for the test suite only: built ONLY when `SMARTBRAIN_BROWSER_TEST_NULLWALL=1` AND
-  every executable in the engine dir is the fake engine fixture (a `#!` script carrying the
-  marker `# smartbrain-test-fake-engine`) — both checked and asserted.
+- **Walls** (`walls/`; P3 design §2). `check(platform, engine_dir) -> Unavailable | None`
+  (the pre-check for the runner and the Status surface; the macOS/Linux probes spawn once
+  per process and are cached), `prepare(platform, run_dir, engine_dir, egress_endpoint) ->
+  Wall | Unavailable` after the egress child is up, `Wall.proxy_port(endpoint)` (the egress
+  port, or the wall's relay port for a Unix endpoint), `Wall.wrap(argv, env)`,
+  `Wall.verify(pids)` on every watchdog poll (one unconfined PID = `confinement/wall_verify`),
+  `Wall.run(...)` for a `remote` wall, `Wall.teardown()`, `helpers` (the wall's own
+  processes in the engine's group, not engine children), `expects_children = False`
+  everywhere, `self_test(platform, m, engine_dir, home)` = the wall's canary program.
+  Reasons (closed): `platform` (Windows, other), `sandbox` (the wall cannot be built or
+  verified here), `userns_blocked` (unshare refused: disabled by sysctl or filtered by
+  seccomp — Docker Desktop's default), `apparmor_userns` (Ubuntu's AppArmor restriction on
+  unprivileged user namespaces), `docker_no_sidecar`, `missing_libs`. The fake engine
+  fixture never runs under a local real wall; a real engine never runs under the NullWall.
+  - **macOS — Seatbelt** (`walls/darwin.py` + `walls/obscura.sb`). The B0 spike's five
+    measured rules, byte for byte (sha256 pinned in code; a changed file = `sandbox`): exec
+    of `ENGINE_DIR/obscura` only (no fork), `sysctl-read hw.pagesize_compat`,
+    `file-read-data` of the literal `/`, `file-read* file-write*` under `RUN_DIR`,
+    `network-outbound` TCP to `localhost:PROXY_PORT`. `wrap` prepends `sandbox-exec -f
+    <profile> -D ENGINE_DIR=… -D RUN_DIR=… -D PROXY_PORT=…` and execs the canonical engine
+    path; parameters are canonical paths from a closed character set (letters, digits,
+    `/._-+@~,` and space) and a live port (0 refused). Under deny-default even traversing
+    a symlink is denied (`/var` → `/private/var`, measured), so run dirs are created
+    canonical (`make_run_dir` returns the realpath). `verify` = `sandbox_check(pid, NULL,
+    SANDBOX_CHECK_NO_REPORT)` (ctypes, libsystem_sandbox): 1 for every PID, the
+    sandbox-exec wrapper before its exec tolerated. `check`: sandbox-exec present, the
+    profile hash, a dry run with real parameters (exec of `/usr/bin/true` must be refused,
+    exit 71) and a canary read (exact profile + one exec rule for `/bin/cat`: the run dir
+    is readable, a file beside it is not). Self-test rows (exact profile + one exec rule per
+    probe binary): `nc` to 127.0.0.1, ::1, the LAN address and 169.254.169.254 refused with
+    EPERM, UDP to a loopback listener delivers nothing, `localhost` does not resolve (no
+    resolver under the profile), a CONNECT to an IP literal through the proxy gets THIS
+    egress child's 403 (census `ip_literal`), a canary file in the data dir is unreadable,
+    the run dir is readable, `sandbox_check` = 1 for a live confined process and 0 for the
+    app, the engine's `--version` under the exact profile, 0 hits on the canary listeners.
+    RLIMITs stay in the spawn's pre-exec step (B1). macOS has no PDEATHSIG: after an app
+    crash a confined engine runs until its own script deadline (measured 15.1 s).
+  - **Linux — namespaces** (`walls/linux.py` + `walls/userns_boot.py`, run by path with
+    `python -I -S`, stdlib only, every import before the masks). The bootstrap unshares
+    USER|NS|NET|PID, maps only the app's uid/gid (setgroups denied; running as root =
+    `sandbox`), forks the namespace init (PID 1), which makes mounts private, masks `/home
+    /root /run /tmp /var/tmp /dev/shm /mnt /media` and the data dir with 64 MB tmpfs, binds
+    the engine dir back read-only (its remount repeats the source's locked atime/nosuid/
+    nodev/noexec flags — a differing remount is EPERM in a user namespace) and the run dir
+    read-write, mounts a fresh /proc, brings `lo` up, relays 127.0.0.1:3128 to the egress
+    socket, sets NO_NEW_PRIVS and runs the engine (a non-root uid in its namespace, so exec
+    leaves it no capability). The init reports the engine's exit to the bootstrap, which
+    mirrors it (a signal is re-raised); a setup failure exits 125 without exec'ing the
+    engine. `helpers = 2`. `verify`: every PID in a user AND network namespace other than
+    the app's, with a `Seccomp` field (the lone bootstrap before unshare tolerated).
+    `check` runs the bootstrap's probe mode; self-test = canary mode (capabilities dropped
+    with capset, then: loopback/LAN/metadata connects fail, UDP stays in the namespace,
+    DNS fails, the data-dir canary is invisible, the run dir is readable, the relay reaches
+    THIS egress child, different namespaces + fresh /proc) + a live `verify` + the engine's
+    `--version` inside + the census + 0 host-side hits. Not measurable on Docker Desktop
+    (seccomp blocks unshare: `userns_blocked`, measured); the CI legs are the proof.
+  - **Docker — the renderer sidecar** (`walls/docker.py` app side, `render_agent.py`
+    sidecar side, `compose/render/Dockerfile`, compose profile `render`). The app
+    container never runs an engine. The sidecar image (FROM the app's base image + the app
+    package) installs the pinned Linux engine at build time through the same installer and
+    fails the build unless it re-hashes clean; it runs as 65532 with the app's gid,
+    `network_mode: none`, read-only, `cap_drop: [ALL]`, no-new-privileges, init,
+    `pids_limit: 128`, `mem_limit: 1g`, tmpfs /tmp and NO app data volume. The only shared
+    thing is `smartbrain_render`: a local tmpfs volume (uid/gid 10001, mode 1770, 256 MB)
+    at `/render` in both containers. A render's run dir is created on it (so every path in
+    the argv means the same file on both sides) and opened to the group (1770, socket
+    0660); the app writes `job.json` (closed keys: v, kind, run_id, argv, env, out,
+    deadline_s, rss_mb, cpu_s, data_mb, relay_port — the argv/env rendered by the app's
+    own `cmdline`) and waits for `result.json` (closed keys: v, run_id, spawned, rc,
+    verdict, signals, refused, rows) with the render's deadline + 15 s pickup; results and
+    the output are read with `O_NOFOLLOW` at every path component (the sidecar is
+    untrusted). The agent (no listener; it polls the volume) re-walks the argv with the
+    manifest grammar and substitutes its own verified engine path, requires the relay as
+    the proxy and every path inside the run dir, re-hashes the engine per job, starts the
+    relay 127.0.0.1:3128 → the egress socket, runs the engine with the app's
+    `proc.spawn/watch/kill_tree` (`verify`: every PID shares the agent's canary-proven
+    network namespace), kills every other process in the container, removes the engine's
+    state (home/tmp/storage) and answers; a bad job is refused, never fatal. Once per boot
+    it writes `READY.json`: TCP to 1.1.1.1, the Docker gateways and 169.254.169.254, UDP to
+    a public resolver and a DNS lookup must all fail, only `lo` may be UP (a network-none
+    namespace still lists the kernel's down fallback tunnel devices — measured), the root
+    is read-only, the uid is not 0, the engine re-hashes clean; then a heartbeat every 2 s.
+    `check` = a valid `ok` READY and a heartbeat from the same boot within 10 s, else
+    `docker_no_sidecar`. Self-test = the READY facts + a `selftest` job (the relay reaches
+    THIS egress child, no app data in the sidecar, DNS fails, the engine starts) + the
+    census. The launcher does not start the profile yet (B3).
+  - **NullWall** (`walls/null.py`): for the test suite only, built ONLY when
+    `SMARTBRAIN_BROWSER_TEST_NULLWALL=1` AND every executable in the engine dir is the fake
+    engine fixture (a `#!` script carrying `# smartbrain-test-fake-engine`) — both checked
+    and asserted; its self-test is the fake engine's `--version`.
 - **Runner** (`runner.py`, `proc.py`). `render(url, *, engine="obscura", site_policy,
   identity, timezone, timeout_s=None, want_assets=False) -> RenderResult{ok, status, reason,
   html, final_url, assets, engine, version, identity, timings{egress_ms, render_ms,
   total_ms}, census}`. Flow: validate (refusals are results) → re-hash → wall pre-check (no
   wall: `unavailable`, nothing spawned) → the single slot `_LIVE_RENDERS = Semaphore(1)`
-  (`busy`, never a failure) → fresh 0700 run dir (HOME, TMPDIR, XDG, cwd, `--storage-dir`,
-  the output file; it holds the engine's cookie file and is removed on every path) → egress
-  child → `walls.prepare` → argv/env from the manifest → spawn in its own session, stdin and
+  (`busy`, never a failure) → fresh 0700 canonical run dir (HOME, TMPDIR, XDG, cwd,
+  `--storage-dir`, the output file; it holds the engine's cookie file and is removed on
+  every path; on the shared volume for the sidecar) → egress child → `walls.prepare` →
+  argv/env from the manifest (the proxy port from the wall) → a remote wall runs the job
+  (`Wall.run`, the same argv/env; the app-side re-hash is the sidecar's per job) or the
+  engine is spawned in its own session, stdin and
   stdout to devnull, stderr drained by a capped tap; on POSIX RLIMIT_CPU, RLIMIT_CORE=0,
   RLIMIT_NOFILE, RLIMIT_NPROC (headroom over the user's count) and RLIMIT_DATA only when
   `limits.rlimit_data_mb` > 0 (V8 reserves ~450 GB of address space — off by default), plus
@@ -2894,7 +2985,7 @@ a one-shot `fetch` subprocess — never `serve`, `mcp` or `scrape`, no CDP port,
   | status | reason | when |
   |---|---|---|
   | `refused` | `bad_url` `ip_literal` `bad_policy` `bad_identity` `identity_unavailable` `bad_timezone` `bad_timeout` `tier_disabled` | the request, before anything runs |
-  | `unavailable` | `disabled` `platform` `missing_libs` `absent` `stale` `extra_files` `modified` a wall reason `relay_pending` `egress_spawn` `egress_start` | nothing spawned (or only the egress child) |
+  | `unavailable` | `disabled` `platform` `missing_libs` `absent` `stale` `extra_files` `modified` a wall reason `egress_spawn` `egress_start` | nothing spawned (or only the egress child) |
   | `busy` | `render_busy` | the slot is taken |
   | `confinement` | `child_spawned` `wall_verify` `no_main_connect` `egress_census` | a child process; an unconfined PID; no established tunnel to the main document's site in the census (the engine got the page some other way, or not at all); an unreadable census |
   | `oversize` | `rss` `heap` `html_cap` | the RSS watchdog; `V8 heap limit reached` on stderr (exit 0); output over the cap |
@@ -2919,8 +3010,11 @@ a one-shot `fetch` subprocess — never `serve`, `mcp` or `scrape`, no CDP port,
   reason}`. `browse_both` runs both tiers at once and returns both (no comparison yet). Every
   result carries `engine, version, identity, timings, census`.
 - **Status, doctor, backups.** `/api/status/overview.browsers[]` = `{name, phase, pct,
-  version, age_days, eligible, reason, sandbox, last_self_test, error, health}` per shipped
-  manifest, readable while locked, no hashing or probes; `storage.browser_bytes` sums
+  version, age_days, eligible, reason, sandbox{kind, verified_at}, last_self_test, error,
+  health}` per shipped manifest, readable while locked, no hashing (the wall pre-check
+  probes at most once per process); `eligible` only when there is no reason, the phase is
+  `ready` and a self-test passed in this process under the wall kind in use
+  (`verified_at` is that pass); `storage.browser_bytes` sums
   `<data>/browsers`. `installer/doctor.py` lists installed engines, offers to delete leftover
   `.part`/`.partial` (nothing else), and reports engine processes found by their path (a
   NOTE while the app runs, a WARN without it; never killed). An encrypted backup is the
@@ -2928,23 +3022,48 @@ a one-shot `fetch` subprocess — never `serve`, `mcp` or `scrape`, no CDP port,
 - **Tests** never touch the network or the real binary: a fake engine
   (`tests/fixtures/browsers/fake_obscura.py`, the only executable fixture) is packed into a
   real tarball, served by a local release server, installed by the real installer, and run
-  under the NullWall through the real egress server. `SMARTBRAIN_BROWSER_REAL_ENGINE=<path>`
-  enables the real-binary rows (offline canaries: a loopback alias refused by the egress,
-  private literals refused before any CONNECT, `about:blank` makes no CONNECT, a plain http
-  page reaches the egress only as a refused GET); they fail if any row did not run.
+  under the NullWall through the real egress server; the sidecar path runs the agent's own
+  `process()` in a thread over a temp volume. Pure parts of every wall are tested on any
+  host; the real Seatbelt rows skip off macOS, the real bootstrap is asserted to fail
+  closed where unshare is blocked. `SMARTBRAIN_BROWSER_REAL_ENGINE=<path>` enables the
+  real-binary rows (offline canaries: a loopback alias refused by the egress, private
+  literals refused before any CONNECT, `about:blank` makes no CONNECT, a plain http page
+  reaches the egress only as a refused GET); they fail if any row did not run.
+- **SG gate** (`tools/browsers-sg.py` + `tools/browsers_sg_lib.py`, CI
+  `.github/workflows/browsers-sg.yml`). The real pinned engine under the real wall, through
+  the app's own wall/process code; only the command line is test-only — the canary page is
+  a `file://` page in the run dir (the engine validates TLS, so a loopback https fixture
+  cannot serve it — measured) and one run omits `--proxy`. Rows: `probe`, `self_test`
+  (+ `ensure` → eligible), `broken_config` (a tampered profile / a failing bootstrap /
+  an empty or stale sidecar volume refuses to render; `verify` rejects an unconfined
+  process), `canary_proxy` and `canary_noproxy` (fetch/img/WebSocket/beacon at 127.0.0.1,
+  ::1, localhost, localhost.localdomain, the hostname, ::ffff:127.0.0.1, 2130706433,
+  0.0.0.0, the LAN address, 169.254.169.254, the app port, 38080, a model port and a
+  rebinding name through the egress resolver seam — 0 hits both ways; a DOM marker and an
+  https control CONNECT prove the attempts ran), `no_state`, `about_blank` (no CONNECT),
+  `no_listener`, `kill_child`, `kill_parent`, `caps_memory`, `caps_cpu`, `render_https`
+  (`--net`); the sidecar mode adds `round_trip`; `--expect <reason>` checks the reason, a
+  render refused without an egress child, and the status row. A run fails on any failed
+  row or when the executed set is not exactly the mode's (zero rows = failure). Legs:
+  macos-latest, ubuntu with user namespaces enabled by sysctl, ubuntu with the AppArmor
+  default (`apparmor_userns`), the Docker app container (`docker_no_sidecar`), the compose
+  `render` sidecar; `SG gate` aggregates them (a required check is a branch-protection
+  setting).
 - **Residual, by design for this step**: the hash check and the exec are not the same inode
   (an attacker who can write the data dir between them already owns the account); WebSocket
   and `navigator.sendBeacon` report success without sending anything (measured); http://
-  subresources of an https page reach the egress as plain GETs and are refused.
-- **B2 adds** the walls from the B0 measurements (macOS: a 5-rule deny-default Seatbelt
-  profile via `sandbox-exec -D ENGINE_DIR -D RUN_DIR -D PROXY_PORT`, verified with
-  `sandbox_check` per PID; Docker: a `network_mode: none` sidecar whose only exit is a
-  loopback relay into the egress Unix socket on a named volume; Linux userns + relay), the
-  SG canary legs in CI, and `eligible: true`. **B3 adds** the flow wiring: need signals from
-  the static data layer, sealing `{type: http_page, render: "browser", sites}`, R6/R7
-  consent and the draft Activate panel, the single-flight render worker on the tick, Fix
-  escalation, XHR promotion from `--dump assets`, the Status card and the launcher `render`
-  profile.
+  subresources of an https page reach the egress as plain GETs and are refused. The sidecar
+  is one trust zone (the agent and the engine share its uid): a compromised engine could
+  rewrite its own result or `READY.json`, but it cannot give the container a network, and
+  everything the app reads from the volume is closed-key, capped and `O_NOFOLLOW` (the page
+  is untrusted content for the extractor jail anyway; the census comes from the app's own
+  egress child). A Linux wall setup failure in the middle of a render reads as
+  `engine_error/exit` (exit 125, nothing ran); `check` probes the same setup once per process.
+- **B3 adds** the flow wiring: need signals from the static data layer, sealing `{type:
+  http_page, render: "browser", sites}`, R6/R7 consent and the draft Activate panel, the
+  single-flight render worker on the tick (only on an `eligible` engine), Fix escalation,
+  XHR promotion from `--dump assets`, the Status card, and the launcher starting the
+  `render` profile when the app reports that a renderer is wanted.
 
 ## 36. Query layer (Round 20, Q3a — `ni_query`; built and measured, not wired yet)
 

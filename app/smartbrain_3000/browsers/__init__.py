@@ -16,8 +16,9 @@ Modules:
 - ``install``    — lifecycle: phases, commit/prune, self-test, ``verify_installed`` on
   every launch, Status rows.
 - ``jail_egress``/``egress`` — the CONNECT-only egress child and its parent-side handle.
-- ``walls``      — the confinement interface; B1 has no real wall (every platform
-  reports ``Unavailable``), a test-only ``NullWall`` exists for the fake engine.
+- ``walls``      — the confinement walls: macOS Seatbelt (the measured five-rule profile),
+  Linux user/mount/network/PID namespaces with a relay, the Docker renderer sidecar
+  (``render_agent`` runs inside it), and the test-only ``NullWall`` for the fake engine.
 - ``proc``       — engine process hygiene: spawn, watchdogs, group kill, stderr tap.
 - ``runner``     — one render: verify → wall → egress → engine → tripwires → cleanup.
 - ``router``     — static tier (netguard) → render tier, need signals, circuit breaker.

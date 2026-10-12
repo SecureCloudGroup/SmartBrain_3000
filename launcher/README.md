@@ -20,7 +20,9 @@ older ones; on a Linux desktop the launcher relaunches itself after one.
 
 **Docker is the fallback** for platforms with no pinned runtime — Intel Macs and arm Linux. There the
 launcher writes **one** file, the release `docker-compose.release.yml`, into a per-user folder and
-shells out to `docker compose` exactly as you would by hand.
+shells out to `docker compose` exactly as you would by hand. That file also declares the page
+browser's renderer sidecar as the `render` profile; the launcher does not start it yet (open: start it
+with `--profile render` once the app reports that a renderer is wanted, and publish its image).
 
 `resolveNativeMode` (`main.go`) picks between them: native where supported, Docker otherwise.
 `SMARTBRAIN_NATIVE=1` / `=0` forces it, which is for development rather than for users — which stack
