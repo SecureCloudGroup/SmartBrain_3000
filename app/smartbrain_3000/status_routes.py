@@ -16,6 +16,7 @@ from pathlib import Path
 from fastapi import APIRouter, Request
 
 from . import __version__, db, devices, gateway, stt_local, voice
+from .browsers import router as browser_router
 
 router = APIRouter()
 
@@ -34,6 +35,7 @@ def app_status(request: Request) -> dict:
         "version": __version__,
         "unlocked": unlocked,
         "voice_local": stt_local.status(),  # phase/pct/error — needs no key
+        "browsers": _browser_status(),  # page-browser engines (§35) — needs no key either
         "storage": _storage_status(),  # sizes only, no key needed (field request:
         "memory": _memory_status(),    # "show how much disk/memory SmartBrain uses")
     }
@@ -86,11 +88,23 @@ def _storage_status() -> dict:
         data_dir = db_path.parent
         db_bytes = db_path.stat().st_size if db_path.exists() else 0
         models_bytes = _dir_bytes(data_dir / "models")
+        browser_bytes = _dir_bytes(data_dir / "browsers")
         total_bytes = _dir_bytes(data_dir)
         return {"data_dir": str(data_dir), "db_bytes": db_bytes,
-                "models_bytes": models_bytes, "total_bytes": total_bytes}
+                "models_bytes": models_bytes, "browser_bytes": browser_bytes,
+                "total_bytes": total_bytes}
     except Exception:
-        return {"data_dir": "", "db_bytes": 0, "models_bytes": 0, "total_bytes": 0}
+        return {"data_dir": "", "db_bytes": 0, "models_bytes": 0, "browser_bytes": 0,
+                "total_bytes": 0}
+
+
+def _browser_status() -> list[dict]:
+    """One row per shipped page-browser engine: {name, phase, pct, version, age_days,
+    eligible, reason, sandbox, last_self_test, error, health}. No probes, no hashing."""
+    try:
+        return browser_router.status()
+    except Exception:
+        return []
 
 
 def _memory_status() -> dict:

@@ -67,6 +67,11 @@ LOCAL_PROVIDERS = ("ollama", "mlx", "mlxe")
 EMBED_MODEL_TAG = "nomic-embed-text:v1.5"
 # launcher/update: a self-update stages the replacement here before swapping it in.
 APPLICATIONS_DIR = Path("/Applications")
+# app/smartbrain_3000/browsers/install.py: page-browser engines live in
+# <data>/browsers/<engine>/<version>/ (committed by INSTALLED.json); a download in flight is
+# <version>.tar.gz.part and an unpack in flight <version>.partial/.
+BROWSERS_DIR = "browsers"
+BROWSER_INSTALLED = "INSTALLED.json"
 # app/smartbrain_3000/gateway.py: the privacy flags the gateway data dir must carry.
 GATEWAY_PRIVACY_CONFIG = (
     '{"logs_store":{"enabled":false},'
@@ -999,7 +1004,62 @@ def _check_embedding_model(url: str) -> list[Finding]:
 def check_housekeeping(m: Machine, s: Snapshot) -> list[Finding]:
     return (_check_disk(m) + _check_old_versions(m, s) + _check_launcher_staging(m)
             + _check_gateway_privacy(m, s) + _check_log_sizes(m, s)
-            + _check_log_for_known_trouble(m, s) + _check_stale_browser_cache(m, s))
+            + _check_log_for_known_trouble(m, s) + _check_stale_browser_cache(m, s)
+            + _check_browser_engines(m, s))
+
+
+def _check_browser_engines(m: Machine, s: Snapshot) -> list[Finding]:
+    """Page-browser engines: what is installed, what an interrupted install left behind, and
+    any engine process still running out of that folder (found by path, never killed)."""
+    root = m.db_path.parent / BROWSERS_DIR
+    assert root.name == BROWSERS_DIR, "engines live beside the database"
+    assert isinstance(s, Snapshot), "one snapshot per report"
+    if not root.is_dir():
+        return []
+    out: list[Finding] = []
+    leftovers: list[Path] = []
+    for engine in _listdir(root)[:16]:
+        for entry in _listdir(root / engine)[:64]:
+            path = root / engine / entry
+            if entry.endswith((".part", ".partial")):
+                leftovers.append(path)
+            elif (path / BROWSER_INSTALLED).is_file():
+                out.append(Finding(OK, f"Page browser {engine} {entry} is installed",
+                                   f"{_human_bytes(_dir_size(path))} in {path}"))
+    if leftovers:
+        out.append(Finding(
+            WARN, "Leftover pieces from an interrupted page-browser download",
+            ", ".join(p.name for p in leftovers),
+            fix=Fix(
+                "Delete the interrupted page-browser downloads",
+                "Removes only these unfinished download and unpack leftovers:\n"
+                + "\n".join(f"  {p}" for p in leftovers)
+                + "\nNothing runs from them; the next time a page needs the browser it is\n"
+                "downloaded again from scratch.",
+                lambda: _delete_all(leftovers),
+            ),
+        ))
+    out.extend(_browser_processes(m, s, root))
+    return out
+
+
+def _browser_processes(m: Machine, s: Snapshot, root: Path) -> list[Finding]:
+    """Engine processes found by their executable's path under ``root``."""
+    assert root.name == BROWSERS_DIR, "only the browsers folder is searched"
+    marker = re.sub(r"([.^$*+?()\[\]{}|\\])", r"\\\1", str(root) + os.sep)
+    assert marker, "a non-empty search marker"
+    pids = matching_pids(marker, m.system) or []
+    if not pids:
+        return []
+    listed = ", ".join(str(p) for p in pids[:10])
+    if s.app_ok:
+        return [Finding(NOTE, "A page is being read by the page browser", f"pid {listed}",
+                        ("It ends by itself within half a minute.",))]
+    return [Finding(
+        WARN, "Page-browser processes are running without SmartBrain", f"pid {listed}",
+        ("They belong to no running app and nothing will end them by itself.",
+         "Ending them is safe: use Activity Monitor / Task Manager, or `kill " + listed.replace(",", "") + "`."),
+    )]
 
 
 def _check_disk(m: Machine) -> list[Finding]:

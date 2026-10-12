@@ -55,8 +55,10 @@ include = ["smartbrain_3000*"]
 # Recursive: the SvelteKit build nests hashed bundles under web/_app/** — a
 # non-recursive glob would omit them from the wheel (the app would 404 its JS).
 # ni_forms/assets ships fonts (TTF), lexicons/few-shots/icons (JSON) and the world
-# outline; without them the layout cannot measure or paint.
-smartbrain_3000 = ["web/**/*", "ni_forms/assets/**/*", "ni_forms/tokens.json"]
+# outline; without them the layout cannot measure or paint. browsers/engines holds the
+# browser-component manifests (§35) — without them no engine can be installed or verified.
+smartbrain_3000 = ["web/**/*", "ni_forms/assets/**/*", "ni_forms/tokens.json",
+                   "browsers/engines/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

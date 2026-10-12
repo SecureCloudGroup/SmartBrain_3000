@@ -15,6 +15,9 @@ os.environ.setdefault("SMARTBRAIN_ALLOWED_HOSTS", "testserver,localhost,127.0.0.
 # caught it) — the explicit opt-out keeps every TestClient hermetic. engine tests
 # drive the state machine directly.
 os.environ.setdefault("SMARTBRAIN_NO_VOICE_PREFETCH", "1")
+# Browser components (§35) never download or render on a test's behalf; the browser tests
+# unset this explicitly and serve their own fake engine from a local server.
+os.environ.setdefault("SMARTBRAIN_NO_BROWSER", "1")
 # Tests must NEVER reach the hosted signaling node. An absent URL defaults to
 # wss://rtc.securecloudgroup.com, and any test that pairs a device or enables remote
 # access would then register a fresh routing id there — every CI run left 4 dead

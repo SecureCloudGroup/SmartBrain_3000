@@ -2767,3 +2767,181 @@ display-class pick and the map/image → value degrade) are gone from the flow; 
   card. `_bind_form` has no lint-colour-driven "needs update" state, so a clock re-layout whose
   only red lint is `L-HOLLOW` (a day table thinning toward its last day) simply keeps the
   designed card, matching the prototype's rule by construction rather than by a ported check.
+
+## 35. Browser components (Round 20, step B1 — the component core)
+
+A browser component is a standalone, replaceable, hash-pinned headless browser the app can
+load to read a page the way a browser does (scripts run, the DOM settles). It lives in
+`smartbrain_3000/browsers/`. Nothing in the flow, the tick or the UI calls it yet (B3), and
+**nothing renders in production in this step**: no OS wall exists yet, every platform
+reports `unavailable`, and the runner refuses to start an engine without a wall (fail
+closed). The first engine is Obscura (h4ckf0r0day/obscura, Rust, Apache-2.0) v0.2.4, run as
+a one-shot `fetch` subprocess — never `serve`, `mcp` or `scrape`, no CDP port, no `--eval`.
+
+- **Manifest** (`browsers/engines/<name>.json`, package data, loaded and validated on every
+  use; `manifest.py`, the command-line builder in `cmdline.py`). Closed keys: `name, version, released, source_url_template,
+  platforms{darwin-arm64|linux-x86_64|linux-aarch64: {asset, sha256, size, members{<file>:
+  {sha256, size}}}}, files[{name, mode, install}], executable, capabilities, argv{fetch,
+  assets, honest}, forbidden_flags, limits{timeout_s, script_deadline_ms, heap_mb, rss_mb,
+  rlimit_data_mb, html_cap_bytes}, identity{mode, pool_size}, min_glibc`. An unknown key,
+  a placeholder outside `{url, run_dir, proxy_port, timeout_s, heap_mb, output_path,
+  user_agent}`, a flag outside the template allowlist (`--proxy --storage-dir --timeout
+  --dump --output --wait-until --v8-flags --user-agent --stealth`), a forbidden token, a
+  `--v8-flags` value other than `--max-old-space-size={heap_mb}` or placed after `fetch`
+  (it is global-only; without it the heap is unbounded — measured 3.85 GB in 1.5 s), or an
+  `html_cap_bytes` above `netguard._MAX_BYTES` is a `ValueError`. The source URL must be
+  `https://github.com/…`. `members` pins the sha256 of every file the installer writes, so a
+  launch re-hashes against the manifest, not against anything on disk. `obscura-worker` is
+  listed but `install: false` (it serves `scrape`, which is never run). `released` gives
+  `age_days`. `SELECTABLE = {obscura}`: the `obscura-stealth` manifest ships (installable,
+  hashed, shown) but is not selectable in this step.
+- **Forbidden, always** (golden-tested, union of the code floor and the manifest list):
+  `--allow-private-network`, `--host`, `--port`/`-p`, `--eval`/`-e`, `--file` (batch reads
+  a local file), `--screenshot`/`-s`, `--quiet`/`-q` (heap-limit and watchdog kills exit 0
+  and announce themselves only on stderr — measured), the subcommands `serve`/`mcp`/
+  `scrape`, `--stealth` unless the manifest declares the capability, and the env key
+  `OBSCURA_ALLOW_PRIVATE_NETWORK`. The builder validates every value first (an https URL
+  normalised to lowercase IDNA ASCII with no whitespace, control characters or userinfo and
+  never an IP literal — the engine reads local files when handed `file://`; a printable-ASCII
+  UA ≤ 200 chars not starting with `-`; absolute paths; bounded ints), inserts it verbatim
+  (single-pass placeholder fill, never re-scanned), then re-walks the rendered argv token by
+  token — a forbidden token anywhere, even as a value, is refused. The engine env is a closed
+  set: minimal PATH, `LANG`/`LC_ALL`, HOME/TMPDIR/XDG_* inside the run dir,
+  `OBSCURA_TIMEZONE` (validated with zoneinfo first — a bogus zone silently becomes GMT,
+  and the default is Europe/Berlin), `OBSCURA_SCRIPT_DEADLINE_MS`, `OBSCURA_PROFILE`; no
+  proxy variable is ever passed.
+- **Installer** (`install.py`, the download and unpack in `release.py`). Layout `<data>/browsers/<name>/<version>/` (outside
+  `models/`). The exact pinned URL is fetched through netguard's address validation + IP
+  pin, `follow_redirects=False`, with exactly ONE redirect allowed whose target is https on
+  `{github.com, objects.githubusercontent.com, release-assets.githubusercontent.com}`
+  (default port, no userinfo); the serving host is logged. The body streams to
+  `<version>.tar.gz.part`, hashed as it arrives; the download aborts as soon as more than the
+  pinned size has arrived and has a wall-clock deadline; the sha256 is checked BEFORE
+  unpacking. The untar is by hand: top-level regular files only, each named in `files`;
+  absolute paths, `..`, links (also for members never written), devices, FIFOs, directories,
+  duplicates and strangers are refused; member count and total size are capped; installed
+  members must match their pinned size and sha256 and get exactly the manifest's mode (exec
+  bit only on the executable), written O_EXCL|O_NOFOLLOW. Then `<version>.partial/` →
+  `INSTALLED.json {name, version, sha256, installed_at, platform}` → one atomic rename →
+  prune every other entry under `<name>/` → self-test. `verify_installed(name)` re-hashes
+  every member against the manifest, refuses extra files, links, group/other-writable files
+  or a missing exec bit — on EVERY launch, nothing cached. `ensure(name)` installs only when
+  that check fails, never on an unsupported platform or below `min_glibc`, single-flight per
+  engine; transient failures retry at most 3 times, a refusal never. Phases: `absent ·
+  downloading(pct) · verifying · unpacking · self-testing · ready · unavailable · error ·
+  stale · disabled`. `SMARTBRAIN_NO_BROWSER=1` = `disabled`, nothing downloads (the test
+  conftest sets it). Errors are fixed sentences that name github.com and never echo an
+  exception, a path or a URL. The self-test (injected; default: `<engine> --version` under
+  the wall, no network) records `ok`, `skipped(wall_unavailable)` or `failed:<class>`.
+- **Egress child** (`jail_egress.py` + `egress.py`; P3 design §2). The engine's only network
+  route. Spawned with `jailrun._jail_env()` (no `SMARTBRAIN_*`, no proxy variable), its own
+  session, RLIMIT_CPU + RLIMIT_CORE, stderr to devnull. Protocol: one closed-key config line
+  on stdin → `{"endpoint": {kind: tcp, port} | {kind: unix, path}}` on stdout → serve until
+  stdin EOF or `max_life_s` → `{"census": [...], "dropped": n}` → exit. Rules: CONNECT
+  only (a plain `GET http://…` is `method` — the engine sends exactly that for an http page
+  and then exits 0 with an empty document, so http is refused up front too); request head
+  ≤ 8 KB; hostnames only (IP literals and all-numeric/`0x` last labels are `ip_literal`);
+  port 443 or the render URL's explicit port for that exact host; site policy by registrable
+  domain (`pagegraph.registrable_domain`, the app's conservative suffix table — TODO: a full
+  public-suffix list) checked BEFORE any DNS (`own` = the URL's site, `sealed` = the listed
+  sites, `open` = any public site); one bounded resolution per host per run (3 s), refused if
+  ANY answer fails the unchanged `netguard._is_unsafe`; the dial goes to a validated address.
+  Caps per run: 24 concurrent tunnels, 150 tunnels, 24 sites, 16 MB down, 1 MB up, 15 s idle
+  (a config may only tighten them). Census rows `{site, tunnels, up, down, verdict}` (≤ 64;
+  verdicts `ok method bad_request bad_host ip_literal port offsite cap_tunnels
+  cap_concurrent cap_sites resolve resolve_timeout unsafe connect cap_up cap_down`) go to the
+  parent on exit and nowhere else — the child writes no log. Listening: 127.0.0.1 ephemeral
+  port where the wall consumes a port (macOS, the test wall), a 0600 Unix socket in the run
+  dir where it bind-mounts one (Linux/Docker; the in-namespace relay is B2). Measured: with
+  `--proxy` the engine forwards hostnames unresolved, and its own SSRF guard catches literal
+  private IPs and `localhost`/`*.localhost` but NOT aliases such as `ip6-localhost`,
+  `localhost.localdomain` or the container's hostname — the egress child stops those.
+- **Walls** (`walls.py`). `prepare(platform, run_dir, engine_dir, egress_endpoint) -> Wall |
+  Unavailable(reason)` runs after the egress child is up (the endpoint carries the live port
+  or socket path); `Wall.wrap(argv, env)` may prepend a wrapper; `Wall.verify(pid_tree)` runs
+  on every watchdog poll; `Wall.teardown()`; `expects_children = False` (the engine spawns no
+  process for `fetch`). `check(platform, engine_dir)` is the spawn-free pre-check. Reasons in
+  this step: darwin `sandbox_pending`, linux `userns_pending`, docker `docker_no_sidecar`,
+  windows `platform` (also `apparmor_userns`, `missing_libs`, `sandbox` reserved). `NullWall`
+  exists for the test suite only: built ONLY when `SMARTBRAIN_BROWSER_TEST_NULLWALL=1` AND
+  every executable in the engine dir is the fake engine fixture (a `#!` script carrying the
+  marker `# smartbrain-test-fake-engine`) — both checked and asserted.
+- **Runner** (`runner.py`, `proc.py`). `render(url, *, engine="obscura", site_policy,
+  identity, timezone, timeout_s=None, want_assets=False) -> RenderResult{ok, status, reason,
+  html, final_url, assets, engine, version, identity, timings{egress_ms, render_ms,
+  total_ms}, census}`. Flow: validate (refusals are results) → re-hash → wall pre-check (no
+  wall: `unavailable`, nothing spawned) → the single slot `_LIVE_RENDERS = Semaphore(1)`
+  (`busy`, never a failure) → fresh 0700 run dir (HOME, TMPDIR, XDG, cwd, `--storage-dir`,
+  the output file; it holds the engine's cookie file and is removed on every path) → egress
+  child → `walls.prepare` → argv/env from the manifest → spawn in its own session, stdin and
+  stdout to devnull, stderr drained by a capped tap; on POSIX RLIMIT_CPU, RLIMIT_CORE=0,
+  RLIMIT_NOFILE, RLIMIT_NPROC (headroom over the user's count) and RLIMIT_DATA only when
+  `limits.rlimit_data_mb` > 0 (V8 reserves ~450 GB of address space — off by default), plus
+  PR_SET_PDEATHSIG on Linux → watchdog every 250 ms: timeout_s + 5 s grace, tree RSS above
+  `limits.rss_mb`, a child process, `Wall.verify` → output read under `html_cap_bytes`
+  (O_NOFOLLOW) → kill the whole group and prove no live member is left → stop the egress
+  child (the census is complete only then). `want_assets` runs the engine a second time with
+  `--dump assets` and keeps https URLs only, deduped, ≤ 500. Identity: `mimic` (the manifest
+  default) pins one of the 8 built-in profiles (0–3 Windows Chrome 143–146, 4–7 Mac Chrome
+  143–146; an index outside 0–7 silently means 0, so both manifest and runner refuse it) —
+  given directly or as `card` → sha256(card id) mod 8; `rotate` draws one per run; `honest`
+  sends SmartBrain's UA via `--user-agent` while the engine's JS surface still claims Chrome,
+  so the result records `consistent: false`. Per-run randomised fields (hardwareConcurrency,
+  deviceMemory, screen) are the engine's; nothing here pins them.
+- **Statuses and tripwires** (in this order; stderr is classified with every URL removed,
+  never shown, never logged):
+
+  | status | reason | when |
+  |---|---|---|
+  | `refused` | `bad_url` `ip_literal` `bad_policy` `bad_identity` `identity_unavailable` `bad_timezone` `bad_timeout` `tier_disabled` | the request, before anything runs |
+  | `unavailable` | `disabled` `platform` `missing_libs` `absent` `stale` `extra_files` `modified` a wall reason `relay_pending` `egress_spawn` `egress_start` | nothing spawned (or only the egress child) |
+  | `busy` | `render_busy` | the slot is taken |
+  | `confinement` | `child_spawned` `wall_verify` `no_main_connect` `egress_census` | a child process; an unconfined PID; no established tunnel to the main document's site in the census (the engine got the page some other way, or not at all); an unreadable census |
+  | `oversize` | `rss` `heap` `html_cap` | the RSS watchdog; `V8 heap limit reached` on stderr (exit 0); output over the cap |
+  | `timeout` | `deadline` `script_watchdog` | our watchdog or the engine's exit 124; `V8 watchdog fired` on stderr (exit 0) |
+  | `blocked` | `refused` | `Failed to navigate` naming 403/429/forbidden/a challenge |
+  | `offsite` | `redirect` `final_url` | a failed navigation after the main site was reached and an off-policy site refused; the `Page loaded: <url>` the engine announces is not https or not on the policy's own site |
+  | `engine_error` | `spawn` `crash` `navigate` `exit` `no_output` | everything else that is the engine's fault |
+  | `ok` | — | |
+
+- **Router** (`router.py`). `browse(url, *, need_signal_from_static=None,
+  allow_render=False, site_policy, identity, engine="obscura", timezone="UTC")`: tier 1 is
+  the existing page door (`pagegraph.fetch_page_graph` over `netguard.safe_fetch_page` + the
+  extractor jail); need signals by code — `js_shell` (extracted text < 400 chars and ≥ 3
+  `<script>` tags or a `<noscript>` enable-JavaScript notice), `blocked` (static 403/429 or a
+  challenge page), `want_miss` (the caller's; passing a signal skips tier 1). A render runs
+  only with `allow_render` AND an escalating signal; a refusal outranks every other signal
+  and only a plain 403 may render — a 429 or a challenge never does (R8: never retry a
+  refusal, never solve a challenge). The stealth tier answers `tier_disabled`. A per-engine
+  breaker opens after 3 consecutive `engine_error`/`timeout` for 10 minutes
+  (`engine_unhealthy`, then one half-open attempt); capacity and policy outcomes never trip
+  it. A failed render keeps the static result and records `escalation {tier, status,
+  reason}`. `browse_both` runs both tiers at once and returns both (no comparison yet). Every
+  result carries `engine, version, identity, timings, census`.
+- **Status, doctor, backups.** `/api/status/overview.browsers[]` = `{name, phase, pct,
+  version, age_days, eligible, reason, sandbox, last_self_test, error, health}` per shipped
+  manifest, readable while locked, no hashing or probes; `storage.browser_bytes` sums
+  `<data>/browsers`. `installer/doctor.py` lists installed engines, offers to delete leftover
+  `.part`/`.partial` (nothing else), and reports engine processes found by their path (a
+  NOTE while the app runs, a WARN without it; never killed). An encrypted backup is the
+  database alone (`COPY FROM DATABASE`), so engines never ride along (tested).
+- **Tests** never touch the network or the real binary: a fake engine
+  (`tests/fixtures/browsers/fake_obscura.py`, the only executable fixture) is packed into a
+  real tarball, served by a local release server, installed by the real installer, and run
+  under the NullWall through the real egress server. `SMARTBRAIN_BROWSER_REAL_ENGINE=<path>`
+  enables the real-binary rows (offline canaries: a loopback alias refused by the egress,
+  private literals refused before any CONNECT, `about:blank` makes no CONNECT, a plain http
+  page reaches the egress only as a refused GET); they fail if any row did not run.
+- **Residual, by design for this step**: the hash check and the exec are not the same inode
+  (an attacker who can write the data dir between them already owns the account); WebSocket
+  and `navigator.sendBeacon` report success without sending anything (measured); http://
+  subresources of an https page reach the egress as plain GETs and are refused.
+- **B2 adds** the walls from the B0 measurements (macOS: a 5-rule deny-default Seatbelt
+  profile via `sandbox-exec -D ENGINE_DIR -D RUN_DIR -D PROXY_PORT`, verified with
+  `sandbox_check` per PID; Docker: a `network_mode: none` sidecar whose only exit is a
+  loopback relay into the egress Unix socket on a named volume; Linux userns + relay), the
+  SG canary legs in CI, and `eligible: true`. **B3 adds** the flow wiring: need signals from
+  the static data layer, sealing `{type: http_page, render: "browser", sites}`, R6/R7
+  consent and the draft Activate panel, the single-flight render worker on the tick, Fix
+  escalation, XHR promotion from `--dump assets`, the Status card and the launcher `render`
+  profile.
