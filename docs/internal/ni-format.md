@@ -3303,12 +3303,13 @@ the only server strings shown are the sealed sites and feed addresses (plain tex
   names this entity, `col` "*" = any text cell); time tokens `now today tonight tomorrow yesterday
   weekend this_week next_week this_month next_days:N past_days:N next_hours:N past_hours:N
   dow:mon..sun date:YYYY-MM-DD month:YYYY-MM year:YYYY`; `agg` `none | count`. Entry points:
-  `plan_query(ask, *, kind, wants, source, answers, params, consumed, now, zone, call_model, pool, masked)
-  -> QueryPlan{ir, model_ir, coverage, interpretation, notes, model_meta}`, `apply_query(ir,
+  `plan_query(ask, *, kind, wants, source, answers, params, consumed, now, zone, call_model, pool, masked,
+  grounds)  -> QueryPlan{ir, model_ir, coverage, interpretation, notes, model_meta}`, `apply_query(ir,
   payload, answer, *, now, zone, direction) -> {rows, indices, count}`, `recognize(ask, *, now,
   zone, masked)`, `say(ir, answers)`. Package: `recognize.py`, `prompt.py`, `normalize.py`,
-  `clauses.py`, `plan.py`, `apply.py`, `say.py`, `decl.py` (answers in the Library's `row` /
-  `columns` shape or `_clean_answer`'s `cells`).
+  `clauses.py`, `ground.py` (Q3c: the evidence a filter value stands on, the carried entities),
+  `plan.py`, `apply.py`, `say.py`, `decl.py` (answers in the Library's `row` / `columns` shape or
+  `_clean_answer`'s `cells`).
 - **Ownership.** *Model* (one local call): `answer`, `time`, `where`, `order`. *Code*: `select`,
   `limit`, `agg`; `params` stays `{}` (the address's parameters are the resolver's and, for
   clock-filled dates, the time binding's — below). *Recognizers*: validators of the model's clauses,
@@ -3384,9 +3385,10 @@ the only server strings shown are the sealed sites and feed addresses (plain tex
   source's measured value answers whose label holds the cell's label ("Conditions" ⊂ "Conditions
   (next period)", whose words say snow, fog, thunderstorm); only when the answer carries ≥ 2
   quantities; nothing for a ranking; on a value answer, the companion value answers named by words
-  the chosen one leaves unexplained. `limit` = a number right after top / first / last / biggest /
-  largest, else 1 with the axis order (next → ascending from now, latest / last → descending) for
-  next_event / result / schedule lists. `agg` = count iff the kind is `count`; a declared count
+  the chosen one leaves unexplained. `limit` = a number right before or right after a word of the
+  closed ranking table (Q3c: top, biggest, largest, smallest, highest, lowest, most, least, best,
+  worst, first, last — "top 5", "ten biggest", "biggest ten"), else 1 with the axis order (next →
+  ascending from now, latest / last → descending) for next_event / result / schedule lists. `agg` = count iff the kind is `count`; a declared count
   value under a narrowing filter or time is swapped for the list it counts. Explicit comparators
   (Q3b, `clauses.bind_comparators`, on the list a count value counts): a comparator the recognizers
   read is an anchor like an explicit time — its quantity word (between the phrase and the number,
@@ -3411,11 +3413,14 @@ the only server strings shown are the sealed sites and feed addresses (plain tex
   kinds take rows only, so "chance of rain tomorrow" cannot take the declared rain_tomorrow value).
 - **Coverage and notes.** `coverage[clause]` ∈ `bound | unbound | approximated | rules | recognizer`
   — `unbound` (a time phrase no token carries, a comparator the final where lacks) wins over `rules`;
-  `approximated` = a part of a day read as the day ("last night" → yesterday); `recognizer` = a
-  comparator the recognizers read, carried by code (order: bound < recognizer < rules < approximated
-  < unbound). Notes are closed codes: `query_rules model_off model_unavailable schema_invalid
-  time_explicit where_dropped numbers_unstated order_dropped params_dropped count_list
-  time_range_kept comparator_added comparator_corrected`; the flow adds `quantity_unbound
+  `approximated` = a part of a day read as the day ("last night" → yesterday), or (Q3c) a filter
+  value no evidence grounds, dropped; `recognizer` = a comparator the recognizers read, or (Q3c) an
+  entity of the ask, carried by code; `rules` on `order` (Q3c) = a ranking ordered by code (order:
+  bound < recognizer < rules < approximated < unbound). Notes are closed codes: `query_rules
+  model_off model_unavailable schema_invalid time_explicit where_dropped numbers_unstated
+  order_dropped params_dropped count_list time_range_kept comparator_added comparator_corrected
+  order_default`, and two that carry their value (Q3c; ≤60 printable characters after the colon):
+  `filter_ungrounded:<value>`, `entity_added:<phrase>`; the flow adds `quantity_unbound
   names_unbound bound_pushed clock_bound refetched` (below).
 - **The interpretation line.** `say` renders the final IR by code: `<answer label>[ (<selected
   labels>)] · <where> · <time> · <order / limit> · count`, cell labels never paths, tokens in plain
@@ -3605,6 +3610,65 @@ the only server strings shown are the sealed sites and feed addresses (plain tex
   (Code-owned clauses, above): the live "how many earthquakes above 4.0 today", whose reply dropped
   the comparator, reads "Earthquakes · Magnitude > 4 · today · count" = 8 (coverage `recognizer`).
   On the 86 cards the round changes C38 only (rows) and D07's line.
+- **Fix round Q3c (the set F read, 2026-10-12).** Set F (50 fresh asks, main 2e9f301f, pack = Library main + #12)
+  read by eye: live 31 · links 15 · awaiting a pick 2 · failed 2; right 17 · partial 9 · WRONG 5 — F19 (silent: the
+  league scoreboard for "the latest Canucks game"), F21 (presentation: stories named by objectID), F22 and F26
+  (flagged by the line: `contains "anywhere in the world"` / `contains "active"` emptied real rows), F24 (silent: 20
+  coins in market-cap order for "ten biggest by trading volume"). Four classes, each a rule (`ni_query/ground.py`,
+  `clauses.py`, `plan.py`, `ni_forms/record.py`):
+  (A) *Grounded filter values* (`ground.grounded_by`, run in `plan._code_clauses` on the model's where after the v1
+  rules): a `contains` / `names` value stands only on positive evidence — (1) a proper-noun phrase of the ask
+  (capitalized words never at a sentence start — the ask's first word or one after "?" / "!" — never "I", never a
+  word of the source's own name or a time / holiday word; a title-cased or all-caps ask has none; as evidence the
+  run keeps a word a parameter consumed — "Washington Metro" when the pick's label took "Washington" — since
+  `v1_where` already drops a value made only of consumed words), (2) a holiday span of the recognizers, (3) a cell label of the answer or a label of a code table it
+  declares, (4) a taxonomy keyword of the asked subcategories (plurals folded) — or a kind of a keyword of two words
+  or more: the value's words END with it ("Flash Flood Watch" ends with "flood watch"; a one-word keyword is a topic,
+  never a kind: "active wildfires" is no "wildfire") — (5) the sample's rows hold it as whole words in the text cells
+  the filter reads (its column, or every text cell for "*"). The answer's `words` lexicon is no evidence. Otherwise
+  the value is dropped (note `filter_ungrounded:<value>`, coverage where `approximated`) and the line no longer
+  claims it. The flow hands the evidence to `plan_query(grounds=ground.Grounds(keywords, sample))`: the taxonomy
+  keywords of `_frame_of`'s categories (`ni_flow._asked_keywords`) and the fetched sample. The kind clause of rule 4
+  is this round's one addition to the ruled list: without it the gold E33 value ("Flash Flood Watch"; the taxonomy
+  holds "flood watch" and "flash flood warning") is dropped whenever no such watch is active — set E's right honest
+  empty would turn into every Louisville alert, and the recorded few-shot E33 reply would turn wrong. Gold check
+  (every `contains` / `names` value of `gold.jsonl` + `gold_f.jsonl`, 19 rows, clean and noted): all grounded —
+  keyword A30 A31 A34 B32 C34 D33 E33 (kind) E34 E36 F33 F35 F37, holiday A38 E39, proper D18 E31 F19 F25, observed
+  E14 (the moon-phase rows; E14 had no sample until this round). (B) *Carried entities* (`ground.carry_entities`):
+  on a league-wide or network-wide list — an address that takes no parameter from a resolver (the Library
+  `fill.from: resolver`) — every proper-noun phrase of the ask (as in A.1, less the words a parameter consumed) that
+  no filter value holds is added as `{col: "*", op: "names", value: <phrase>}` (note `entity_added:<phrase>`,
+  coverage where `recognizer`) — on rows with a text cell only (a value answer or a date + number series names
+  nothing; the where stays ≤ 6), never for a phrase the chosen answer's own name or label holds ("AL East
+  standings" → "East"); an empty result is the build's honest empty ("Games · mentions Canucks · the latest one",
+  no row). On a resolver-filled address the ask's names are what the resolver read, in spellings the consumed
+  words do not show — probed: the verify table's intents carry "San Francisco" for "SF" and "Kansas City" for "KC",
+  the picks' labels are canonical, and a carried "SF" counted 0 quakes near San Francisco — so code adds nothing
+  there (the model's own filter still passes the A rules). Lowercase names stay the intent's `names_unbound` flag. (C) *Ranking defaults*: `limit` is the number right before or right after a word of the closed ranking
+  table ("ten biggest", "biggest ten", "top 5", "5 most recent"); kind `ranking` with no order from the model →
+  `clauses.rank_order`: the number cell the ask's quantity words name (the select lexicon: "by trading volume" →
+  `total_volume`), else the one the answer's own label names ("Top coins by market cap" → `market_cap`), else the
+  answer's first number cell — descending, ascending when the ask says smallest / lowest / least; note
+  `order_default`, coverage order `rules`; the line says it ("24h trading volume · today · top 10 by 24h volume").
+  (D) *The rows' name role*: `record._names_rows` — free text (field type `text`: more than 12 distinct values, or
+  all distinct and long) names its rows even when one value repeats; the F run's 20 Hacker News rows held one title
+  three times, so the all-distinct rule handed the name to the "Item id" column (the same rows give the same card on
+  the pre-Q3b tree: not a Q3b defect). A closed vocabulary that repeats still never names the rows.
+  Measured (`ni-query-eval`, fixtures + `gold_f.jsonl`, `library_f.json`, `samples_f/`, `runs_f.json`,
+  `asked_subcategories.json`): `--replies` v1 50/60 + 54/82 (unchanged), full 52 → 53 / 60 (D21: "tech" grounds
+  nothing) and 58 / 82, with the floor 55 → 56 / 60 and 66 / 82, parity 109/109 + 79/79; set F with the model off
+  (24 clean rows) 16 → 18 (F24, F26), per clause order 19 → 21, limit 23 → 24; `--exec` final IR 49 → 50 / 59
+  (D21), 59 / 81 (E14 executable in both), the five F samples' floor rows all agree with gold (F19, F24 differed).
+  Live, set F few-shot (`--gateway --gold-f --few`, one run): 20 / 24 clean rows; the same replies through the base
+  code 19 / 24 (F22's `names "world"` dropped; F24 limit 10). The five F cards through `_try_answers_build` on the
+  recorded samples with the live IRs: F19 0 rows under "Games · mentions Canucks · the latest one" (was the Panthers
+  game), F21 titles, F22 3 quakes (was 0), F24 the ten largest by volume (was 20 unsorted), F26 25 fires by size
+  (was 0). 86-card replay snapshot: 5 of 86 changed — right d21 (the "tech" filter had emptied the feed: 20
+  headlines), d45 (noted: people in space for "where is the ISS over the Pacific" → nothing → the next source),
+  neutral c10 (noted heat index: the "Heat" filter's accidental empty → the week's periods, `approximated`), a30
+  regression risk (the zero-shot reply's "flood" — gold "Flood Warning" — grounds nothing: the same 0 rows on the
+  sample, the line drops it, where `approximated`; on a day with other Houston alerts they would show), d25 a
+  snapshot artifact (its intent has no place; with the live intent's "Pacific division" the card is unchanged).
 - **Open (measured, not fixed).** The floor's kind filter (forecast / lookup kinds take rows only;
   text_brief values only) keeps B6, B40, C9 and C50 wrong with the model off. The client's coverage
   words need one for `recognizer` (the board row sends the value as sealed). The now table leaves
@@ -3615,7 +3679,14 @@ the only server strings shown are the sealed sites and feed addresses (plain tex
   `contains` also keeps near names ("Day after Thanksgiving"). A weekday that is today or tomorrow
   does not bind a value declared `today` / `tomorrow` (an honest stop, never a wrong card). Refine and
   Fix take the remap path, which never rebuilds from answers and refetches; no raw sample is sealed,
-  so a re-plan without a refetch has nothing to run on.
+  so a re-plan without a refetch has nothing to run on. Q3c: the Library's weather/alerts keywords lack
+  many NWS event names (a bare "flood", "coastal flood advisory", "rip current statement", "small craft
+  advisory") — such a filter stands only when the day's rows hold it, else the card shows every alert
+  under an `approximated` filter; a lowercase or sentence-initial team name ("canucks", "Canucks score
+  tonight") is carried by no rule (the intent's `names_unbound` flag only), nor is a second entity on a
+  resolver-filled address ("the Bruins' next game against the Canucks"); a list of ≤ 12 rows whose long
+  titles repeat is still typed `category`, so its id column would still name it; the F21 address took
+  "posts rust" as its topic (a fill, not the query layer).
 
 ### Client
 

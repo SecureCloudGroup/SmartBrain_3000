@@ -153,6 +153,21 @@ def test_list_name_is_the_column_that_tells_rows_apart() -> None:
     assert roles == {"match_level": "kind", "title": "name"}
 
 
+def test_list_free_text_that_repeats_still_names_the_rows() -> None:
+    """Round 20 Q3c (set F #21): free text (titles, more than 12 distinct values) names the rows even when one
+    title repeats (a repost); the distinct opaque id after it never takes the role. A closed vocabulary that
+    repeats still never names them (the test above)."""
+    answer = _list(cells=[{"path": "title", "type": "text", "label": "Story"},
+                          {"path": "id", "type": "text", "label": "Item id"}])
+    titles = [f"Show HN: tool number {i}" for i in range(14)]
+    titles[5] = titles[1]                                   # one repost: 13 distinct of 14
+    outputs = {"rows": [{"title": t, "id": str(50062217 - i)} for i, t in enumerate(titles)]}
+    rec, _ = from_answers([answer], outputs, history=None, context=_CTX,
+                          ask="hn posts", title="HN", cadence_s=900, rows_output_name="rows")
+    roles = {f.name: f.role for f in rec.fields}
+    assert roles == {"story": "name", "item_id": "meta"}
+
+
 def test_list_records_without_axis_or_time() -> None:
     answer = _list(cells=[{"path": "name", "type": "text", "label": "Name"},
                            {"path": "pts", "type": "number", "label": "Points"},

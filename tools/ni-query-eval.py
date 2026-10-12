@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Query layer measurement (Round 20, Q3a): the Query IR an ask becomes, scored against the 109
-hand-labeled gold IRs of the blind sets A-E (``app/tests/fixtures/ni_query/``).
+hand-labeled gold IRs of the blind sets A-E (``app/tests/fixtures/ni_query/``) — and, Round 20 Q3c, the 31
+gold IRs of set F's live rows (``gold_f.jsonl`` over ``library_f.json``: the rules floor in --replies, the
+recorded samples in --exec, the model with --gateway --gold-f).
 
   --replies   offline, deterministic: the RECORDED Q2 replies (few-shot TEST 79, zero-shot ALL
               109) through the module's normalization. Prints the v1-contract score (the lead's
@@ -16,6 +18,13 @@ hand-labeled gold IRs of the blind sets A-E (``app/tests/fixtures/ni_query/``).
   --flat      with --gateway: the FLOW's transport (Q3b) — ``ni_flow._query_transport`` flattens the
               messages into one user turn exactly as the shipped card build does, sent as the flow's
               gateway.chat sends it (temperature 0, no max_tokens).
+  --gold-f    with --gateway: the 31 set F rows instead (zero-shot unless --few; the floor where the reply
+              is invalid), scored per clause like the A-E rows.
+
+Evidence (Round 20, Q3c): every row's plan reads what the flow hands ``plan_query`` — the taxonomy keywords of
+the subcategories the Library files the ask under (``asked_subcategories.json``) and the row's recorded sample
+(``samples/`` / ``samples_f/``) — for the grounded filter values; set F rows read the texts their run's address
+consumed (``runs_f.json``) where the A-E rows keep the re-score's title-case proxy.
 
 Run inside smartbrain_3000:dev with PYTHONPATH=/app (the scratch driver), or natively from the repo.
 "Clean" rows have an empty note; noted rows are never scored against the model.
@@ -41,6 +50,7 @@ sys.path.insert(0, str(_REPO / "app"))
 from smartbrain_3000.ni_query import plan_query, recognize
 from smartbrain_3000.ni_query.apply import apply_query, dig
 from smartbrain_3000.ni_query.decl import answer_named, axis_of, cells_of
+from smartbrain_3000.ni_query.ground import Grounds
 from smartbrain_3000.ni_query.normalize import (
     DIRECTIONS,
     count_equiv,
@@ -76,23 +86,30 @@ def jl(path: pathlib.Path) -> list[dict]:
 
 
 def load(fix: pathlib.Path = FIX) -> dict:
-    """Every fixture, keyed for the scorers."""
+    """Every fixture, keyed for the scorers (set F's when present)."""
     assert fix.is_dir(), f"fixtures missing: {fix}"
     split = json.loads((fix / "split.json").read_text())
+    has_f = (fix / "gold_f.jsonl").is_file()
     return {"gold": {g["id"]: g for g in jl(fix / "gold.jsonl")}, "split": split,
             "library": json.loads((fix / "library.json").read_text()), "pool": jl(POOL),
             "few": {r["id"]: r for r in jl(fix / "replies_fewshot.jsonl")},
             "zero": {r["id"]: r for r in jl(fix / "replies_zero.jsonl")},
             "index": json.loads((fix / "samples" / "index.json").read_text()),
             "exec_gold": json.loads((fix / "exec_gold.json").read_text()),
-            "shas": json.loads((fix / "prompt_sha.json").read_text()), "fix": fix}
+            "shas": json.loads((fix / "prompt_sha.json").read_text()), "fix": fix,
+            "asked": json.loads((fix / "asked_subcategories.json").read_text())
+            if (fix / "asked_subcategories.json").is_file() else {"asked": {}, "keywords": {}},
+            "gold_f": {g["id"]: g for g in jl(fix / "gold_f.jsonl")} if has_f else {},
+            "library_f": json.loads((fix / "library_f.json").read_text()) if has_f else {},
+            "index_f": json.loads((fix / "samples_f" / "index.json").read_text()) if has_f else {},
+            "runs_f": json.loads((fix / "runs_f.json").read_text()) if has_f else {}}
 
 
 def ref_now(data: dict, g: dict) -> dt.datetime:
     """The row's reference instant: its set's date at the split's reference time, in the zone."""
     s = data["split"]
-    return dt.datetime.fromisoformat(f"{s['ref_dates'][g['set']]}T{s['ref_time']}:00").replace(
-        tzinfo=ZoneInfo(s["zone"]))
+    day = data["runs_f"]["ref_date"] if g["set"] == "F" else s["ref_dates"][g["set"]]
+    return dt.datetime.fromisoformat(f"{day}T{s['ref_time']}:00").replace(tzinfo=ZoneInfo(s["zone"]))
 
 
 def consumed_proxy(ask: str) -> list[str]:
@@ -100,10 +117,41 @@ def consumed_proxy(ask: str) -> list[str]:
     return [t for t in ask.split() if t[:1].isupper() and t[1:] == t[1:].lower()]
 
 
+def source_of(data: dict, g: dict) -> dict:
+    """The row's declared source: Library #12's for set F, the Q1 snapshot's for A-E."""
+    return (data["library_f"] if g["set"] == "F" else data["library"])[g["source_id"]]
+
+
+def consumed_of(data: dict, g: dict) -> list[str]:
+    """Set F: what the run's address consumed; A-E: the re-score's proxy."""
+    return list(data["runs_f"]["consumed"][g["id"]]) if g["set"] == "F" else consumed_proxy(g["ask"])
+
+
+def sample_of(data: dict, g: dict) -> tuple[object, dict]:
+    """(the row's recorded payload or None, its index entry)."""
+    index, folder = (data["index_f"], "samples_f") if g["set"] == "F" else (data["index"], "samples")
+    e = index.get(g["id"]) or {}
+    if not e.get("file"):
+        return None, e
+    return payload_of(json.loads((data["fix"] / folder / e["file"]).read_text())), e
+
+
+def grounds_of(data: dict, g: dict) -> Grounds:
+    """The evidence the flow hands plan_query: the asked subcategories' keywords, the recorded sample."""
+    cats = data["asked"]["asked"].get(g["id"]) or []
+    keywords = frozenset(str(k).casefold() for c in cats for k in data["asked"]["keywords"].get(c) or [])
+    try:
+        sample = sample_of(data, g)[0]
+    except (ValueError, ET.ParseError):  # a recorded body the product would not read either
+        sample = None
+    return Grounds(keywords=keywords, sample=sample)
+
+
 def row_ctx(data: dict, g: dict):
-    src = data["library"][g["source_id"]]
+    src = source_of(data, g)
     spans = recognize(g["ask"], now=ref_now(data, g), zone=data["split"]["zone"])
-    return make_ctx(g["ask"], g["kind"], src["answers"], spans, consumed_proxy(g["ask"]), src["name"])
+    return make_ctx(g["ask"], g["kind"], src["answers"], spans, consumed_of(data, g), src["name"],
+                    grounds_of(data, g), src["params"])
 
 
 def v1_score(g: dict, m: dict | None, ctx) -> dict:
@@ -207,8 +255,23 @@ def replies_mode(data: dict) -> int:
               + ", ".join(f"{c} {v}" for c, v in code.items()))
         rc |= 0 if (key, sum(fully(s) for _, s in v1_rows), len(v1_rows)) in (("few", 50, 60), ("zero", 54, 82)) else 1
     rc |= prompt_parity(data)
+    if data["gold_f"]:   # set F has no recorded replies: the rules floor (the model off) is its offline reading
+        floors = {rid: floor_plan(row_ctx(data, g), []) for rid, g in data["gold_f"].items()}
+        set_f_report(data, floors, "rules floor (model off)")
     print("REPLIES rc =", rc)
     return rc
+
+
+def set_f_report(data: dict, finals: dict, title: str) -> None:
+    """Set F (``gold_f.jsonl``): the full contract and the per-clause exact match of ``finals`` (row id → final
+    IR or None) on the clean rows, then the clauses each noted row misses (scored apart, as for A-E)."""
+    clean = [g for g in data["gold_f"].values() if not g["note"]]
+    report_scores(f"{title}, set F (clean)", [(g, full_score(g, finals[g["id"]], row_ctx(data, g))) for g in clean])
+    ex = [clause_exact(finals[g["id"]], g["ir"]) for g in clean]
+    print("   per clause exact vs gold: " + ", ".join(f"{c} {sum(e[c] for e in ex)}/{len(ex)}" for c in CLAUSES))
+    noted = [(g["id"], [c for c, ok in clause_exact(finals[g["id"]], g["ir"]).items() if not ok])
+             for g in data["gold_f"].values() if g["note"]]
+    print(f"   noted rows, clauses not equal to gold: {noted}")
 
 
 def prompt_parity(data: dict) -> int:
@@ -301,13 +364,12 @@ def _ids(answer: dict, res: dict, payload: object) -> list[str]:
 
 
 def execute(data: dict, g: dict, ir: dict, cache: dict) -> dict | None:
-    e = data["index"].get(g["id"]) or {}
-    if not e.get("file"):
+    if g["id"] not in cache:
+        cache[g["id"]] = sample_of(data, g)
+    payload, e = cache[g["id"]]
+    if payload is None:
         return None
-    if e["file"] not in cache:
-        cache[e["file"]] = payload_of(json.loads((data["fix"] / "samples" / e["file"]).read_text()))
-    payload = cache[e["file"]]
-    answer = _filled(answer_named(data["library"][g["source_id"]]["answers"], ir["answer"]), g["params_used"])
+    answer = _filled(answer_named(source_of(data, g)["answers"], ir["answer"]), g["params_used"])
     now = dt.datetime.fromisoformat(e["fetched_at"])
     direction = "backward" if DIRECTIONS.get(g["kind"]) == "back" else "forward"
     res = apply_query(ir, payload, answer, now=now, zone=data["split"]["zone"], direction=direction)
@@ -338,7 +400,7 @@ def exec_mode(data: dict) -> int:
             n += 1
             gold_res = execute(data, g, g["ir"], cache)
             m = rep["parsed"]
-            ok_raw = isinstance(m, dict) and not structural_errors(m, data["library"][g["source_id"]]["answers"]) \
+            ok_raw = isinstance(m, dict) and not structural_errors(m, source_of(data, g)["answers"]) \
                 and agree(execute(data, g, m, cache), gold_res)
             final, _ = finalize_reply(m, row_ctx(data, g))
             ok_fin = final is not None and agree(execute(data, g, final, cache), gold_res)
@@ -346,6 +408,11 @@ def exec_mode(data: dict) -> int:
             empty += ok_fin and not gold_res["ids"]
         print(f"== execution agreement, {label} (clean rows with a sample): raw model IR {_pct(raw, n)}, "
               f"final IR {_pct(fin, n)} (both empty {empty})")
+    rows_f = [g for g in data["gold_f"].values() if (data["index_f"].get(g["id"]) or {}).get("file")]
+    for g in rows_f:  # set F: the rules floor's rows against the gold IR's on the recorded samples
+        gold_res, floor_res = execute(data, g, g["ir"], cache), execute(data, g, floor_plan(row_ctx(data, g), []), cache)
+        print(f"== set F {g['id']} ({len(gold_res['ids'])} gold rows): rules floor "
+              f"{'agrees' if agree(floor_res, gold_res) else 'differs'} ({len(floor_res['ids'])} rows)")
     rc = 0 if port[0] == port[1] else 1
     print("EXEC rc =", rc)
     return rc
@@ -411,13 +478,13 @@ def flat_gateway(url: str, model: str, calls: list) -> object:
 
 
 def live_row(data: dict, g: dict, url: str, model: str, few: bool, flat: bool = False) -> dict:
-    src, calls = data["library"][g["source_id"]], []
+    src, calls = source_of(data, g), []
     transport = flat_gateway(url, model, calls) if flat else gateway(url, model, calls)
     plan = plan_query(g["ask"], kind=g["kind"], wants=[], source={"id": g["source_id"], "name": src["name"]},
-                      answers=src["answers"], params=src["params"], consumed=consumed_proxy(g["ask"]),
+                      answers=src["answers"], params=src["params"], consumed=consumed_of(data, g),
                       now=ref_now(data, g), zone=data["split"]["zone"], call_model=transport,
-                      pool=data["pool"] if few else [])
-    want = data["shas"][g["id"]].get("few" if few else "zero")
+                      pool=data["pool"] if few else [], grounds=grounds_of(data, g))
+    want = (data["shas"].get(g["id"]) or {}).get("few" if few else "zero")
     return {"id": g["id"], "kind": g["kind"], "note": g["note"], "ask": g["ask"], "model_ir": plan.model_ir,
             "ir": plan.ir, "notes": plan.notes, "coverage": plan.coverage, "interpretation": plan.interpretation,
             "model_meta": plan.model_meta, "calls": calls, "prompt_same": bool(calls) and calls[0]["sha"] == want}
@@ -430,9 +497,9 @@ def _q(values: list[int], p: float) -> int:
     return s[min(len(s) - 1, round(p * (len(s) - 1)))]
 
 
-def live_report(data: dict, recs: list[dict]) -> None:
+def live_report(data: dict, recs: list[dict], gold: dict | None = None) -> None:
     clean = [r for r in recs if not r["note"]]
-    gold = data["gold"]
+    gold = data["gold"] if gold is None else gold
     ctxs = {r["id"]: row_ctx(data, gold[r["id"]]) for r in clean}
     v1 = [(gold[r["id"]], v1_score(gold[r["id"]], r["model_ir"], ctxs[r["id"]])) for r in clean]
     fm = [(gold[r["id"]], full_score(gold[r["id"]], r["ir"] if r["model_ir"] else None, ctxs[r["id"]])) for r in clean]
@@ -455,12 +522,14 @@ def live_report(data: dict, recs: list[dict]) -> None:
           f"per row median {statistics.median(tot) if tot else 0} ms / p95 {_q(tot, 0.95)} ms")
 
 
-def live_mode(data: dict, url: str, model: str, zero: bool, out: str | None, flat: bool = False) -> int:
-    ids = sorted(data["gold"], key=lambda i: (i[0], int(i[1:]))) if zero else list(data["split"]["test"])
+def live_mode(data: dict, url: str, model: str, zero: bool, out: str | None, flat: bool = False,
+              gold_f: bool = False) -> int:
+    gold = data["gold_f"] if gold_f else data["gold"]
+    ids = sorted(gold, key=lambda i: (i[0], int(i[1:]))) if zero or gold_f else list(data["split"]["test"])
     done = {r["id"]: r for r in jl(pathlib.Path(out))} if out and pathlib.Path(out).exists() else {}
     recs, fails = [done[i] for i in ids if i in done], 0
     for n, rid in enumerate([i for i in ids if i not in done][:_MAX_ROWS], 1):
-        rec = live_row(data, data["gold"][rid], url, model, few=not zero, flat=flat)
+        rec = live_row(data, gold[rid], url, model, few=not zero, flat=flat)
         recs.append(rec)
         if out:
             with open(out, "a") as fh:
@@ -471,7 +540,7 @@ def live_mode(data: dict, url: str, model: str, zero: bool, out: str | None, fla
         if fails >= 3:
             print("ABORT: three consecutive rows could not reach the model")
             return 2
-    live_report(data, recs)
+    live_report(data, recs, gold)
     return 0
 
 
@@ -483,12 +552,15 @@ def main() -> int:
     ap.add_argument("--model", default="mlx/Qwen3.5-9B-MLX-4bit")
     ap.add_argument("--zero", action="store_true")
     ap.add_argument("--flat", action="store_true")
+    ap.add_argument("--gold-f", action="store_true")
+    ap.add_argument("--few", action="store_true")
     ap.add_argument("--out")
     ap.add_argument("--fixtures", default=str(FIX))
     args = ap.parse_args()
     data = load(pathlib.Path(args.fixtures))
     if args.gateway:
-        return live_mode(data, args.gateway, args.model, args.zero, args.out, flat=args.flat)
+        return live_mode(data, args.gateway, args.model, args.zero or (args.gold_f and not args.few), args.out,
+                         flat=args.flat, gold_f=args.gold_f)
     rc = replies_mode(data) if args.replies or not args.exec else 0
     return rc | (exec_mode(data) if args.exec else 0)
 

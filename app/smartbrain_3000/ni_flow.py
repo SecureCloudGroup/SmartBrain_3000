@@ -2269,13 +2269,32 @@ def _source_name(live: dict) -> str:
     return name
 
 
+def _asked_keywords(request: str, intent: dict) -> frozenset[str]:
+    """The taxonomy keywords of the subcategories the ask is filed under (``_frame_of``: the Library's classify of
+    the ask and of the intent's subject + wants), casefolded — the query layer's evidence for a filter value that
+    names a kind of row ("flood warning", "red flag warning"; Round 20 Q3c, §36). Empty without a Library."""
+    assert isinstance(request, str) and isinstance(intent, dict), "request + intent required"
+    frame = _frame_of(request, intent)
+    lib, cats = frame["lib"], set(frame["categories"])
+    try:
+        taxonomy = lib.taxonomy() if lib is not None and cats else []
+    except Exception as exc:  # an older or broken Library: no keyword evidence
+        log.warning("ni_flow: library taxonomy unreadable: %s", type(exc).__name__)
+        return frozenset()
+    out = frozenset(str(kw).casefold() for cat in taxonomy for sub in cat.get("subcategories") or []
+                    if f"{cat.get('id')}/{sub.get('id')}" in cats for kw in (sub.get("keywords") or [])[:200])
+    assert all(isinstance(k, str) for k in out), "keywords are words"
+    return out
+
+
 def _query_plan(request: str, intent: dict, live: dict, answers: list[dict], now: datetime,
-                call_model: Callable[[str], str] | None) -> ni_query.QueryPlan | None:
+                call_model: Callable[[str], str] | None, sample: object = None) -> ni_query.QueryPlan | None:
     """``ni_query.plan_query`` over the picked source's declared answers (the module docstring of
     ``ni_query.plan``): the Library record names the source and its parameter menu; the consumed spans
     are the ask words the address already took; the intent's proper names are masked for the recognizers
-    ("Saturday Night Live" is no Saturday). A planner fault falls to the rules floor; None only when even
-    that fails (the build then reports the misfit)."""
+    ("Saturday Night Live" is no Saturday); the asked subcategories' taxonomy keywords and the fetched
+    ``sample`` are the evidence a filter value stands on (Round 20, Q3c). A planner fault falls to the rules
+    floor; None only when even that fails (the build then reports the misfit)."""
     assert isinstance(answers, list) and answers, "answers required"
     assert isinstance(now, datetime) and now.tzinfo is not None, "an aware now"
     sid = str(live.get("_library_source") or "")
@@ -2293,7 +2312,8 @@ def _query_plan(request: str, intent: dict, live: dict, answers: list[dict], now
     args = {"kind": intent.get("frame_kind"), "wants": list(intent.get("wants") or [])[:_MAX_INTENT_FIELDS],
             "source": source, "answers": answers, "params": params, "consumed": consumed, "now": now,
             "zone": ni.user_timezone_name(), "pool": list(_query_pool()),
-            "masked": name_masks(request, list(intent.get("names") or [])[:_MAX_INTENT_NAMES])}
+            "masked": name_masks(request, list(intent.get("names") or [])[:_MAX_INTENT_NAMES]),
+            "grounds": ni_query.ground.Grounds(keywords=_asked_keywords(request, intent), sample=sample)}
     for transport in (_query_transport(call_model), None):  # bounded: the model, then the rules floor
         try:
             return ni_query.plan_query(request, call_model=transport, **args)
@@ -2780,7 +2800,7 @@ def _try_answers_build(store: ni.NIStore, item_id: str, request: str, intent: di
     wants, kind = list(intent.get("wants") or []), intent.get("frame_kind")
     next_event = kind in ("next_event", "schedule")
     now = fetch_now or ni._clock()
-    plan = _query_plan(request, intent, live, answers, now, call_model)
+    plan = _query_plan(request, intent, live, answers, now, call_model, sample)
     if plan is None:
         _append_note(store, item_id, "the Library's declared answers didn't fit this response (the ask could "
                                      "not be read)")

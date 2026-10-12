@@ -14,6 +14,7 @@ from smartbrain_3000.ni_forms import llm
 from smartbrain_3000.ni_query import plan_query, recognize, say
 from smartbrain_3000.ni_query.clauses import select_for, serves_time
 from smartbrain_3000.ni_query.decl import answer_named
+from smartbrain_3000.ni_query.ground import Grounds
 from smartbrain_3000.ni_query.normalize import (
     count_equiv,
     explicit_time,
@@ -44,6 +45,8 @@ _POOL = [json.loads(line) for line in (pathlib.Path(__file__).parents[1] / "smar
                                        / "pool.jsonl").read_text().splitlines() if line.strip()]
 _FEW = {r["id"]: r for r in _jl("replies_fewshot.jsonl")}
 _THU_9 = dt.datetime(2026, 10, 8, 9, 0, tzinfo=ZoneInfo(_ZONE))
+_ASKED = json.loads((_FIX / "asked_subcategories.json").read_text())
+_INDEX = json.loads((_FIX / "samples" / "index.json").read_text())
 
 
 def _now(row: dict) -> dt.datetime:
@@ -56,11 +59,23 @@ def _consumed(ask: str) -> list[str]:
     return [t for t in ask.split() if t[:1].isupper() and t[1:] == t[1:].lower()]
 
 
+def _grounds(row: dict) -> Grounds:
+    """The evidence the flow hands plan_query (Round 20, Q3c): the taxonomy keywords of the subcategories the
+    Library files the ask under, and the row's recorded sample (a JSON body; None for a feed or none)."""
+    cats = _ASKED["asked"].get(row["id"]) or []
+    keywords = frozenset(str(k).casefold() for c in cats for k in _ASKED["keywords"].get(c) or [])
+    entry = _INDEX.get(row["id"]) or {}
+    body = json.loads((_FIX / "samples" / entry["file"]).read_text())["body"] if entry.get("file") else ""
+    sample = json.loads(body) if body.lstrip()[:1] in ("{", "[") else None
+    return Grounds(keywords=keywords, sample={"items": sample} if isinstance(sample, list) else sample)
+
+
 def _plan(row: dict, call_model, pool: list | None = None):
     src = _LIB[row["source_id"]]
     return plan_query(row["ask"], kind=row["kind"], wants=[], source={"id": row["source_id"], "name": src["name"]},
                       answers=src["answers"], params=src["params"], consumed=_consumed(row["ask"]), now=_now(row),
-                      zone=_ZONE, call_model=call_model, pool=_POOL if pool is None else pool)
+                      zone=_ZONE, call_model=call_model, pool=_POOL if pool is None else pool,
+                      grounds=_grounds(row))
 
 
 def _scripted(replies: list[str]):
@@ -92,9 +107,10 @@ def _full_right(row: dict, ir: dict) -> bool:
 
 def test_replayed_replies_end_to_end():
     """The recorded first reply, then the recorded valid object: the module's validator agrees with
-    the Q2 harness's on every few-shot TEST row, and the final IRs score 52/60 (55/60 with the floor
+    the Q2 harness's on every few-shot TEST row, and the final IRs score 53/60 (56/60 with the floor
     for the three never-valid rows) under the full contract — Round 20, Q3b: the window-aware floor reads
-    E13's "next game", and the recognized comparator E37's reply dropped is bound back (was 51 / 53)."""
+    E13's "next game", and the recognized comparator E37's reply dropped is bound back (was 51 / 53); Q3c:
+    D21's "tech" filter on Ars Technica's titles stands on no evidence and is dropped (was 52 / 55)."""
     right = floor_right = 0
     test = [_GOLD[i] for i in _SPLIT["test"]]
     for row in test:
@@ -109,7 +125,7 @@ def test_replayed_replies_end_to_end():
         if not row["note"]:
             right += plan.model_ir is not None and _full_right(row, plan.ir)
             floor_right += _full_right(row, plan.ir)
-    assert (right, floor_right) == (52, 55), (right, floor_right)
+    assert (right, floor_right) == (53, 56), (right, floor_right)
 
 
 def test_retry_states_the_rule_only():

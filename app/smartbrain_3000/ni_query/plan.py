@@ -14,6 +14,13 @@ Ownership (plan §E):
   ``model_range_stands``); where numbers are stated; an explicit comparator whose quantity word names
   one number cell is carried like a time anchor (``clauses.bind_comparators``: added when the model
   dropped it, its number winning over another the model wrote; coverage ``where: recognizer``).
+- evidence (Round 20, Q3c — ``ground``): a ``contains`` / ``names`` value stands only on positive evidence
+  (a proper-noun phrase, a holiday, a declared label, a taxonomy keyword of the asked subcategories, the
+  sample's rows: ``grounds``), else it is dropped (note ``filter_ungrounded:<value>``, coverage ``where:
+  approximated``); on an address no resolver filled, every proper-noun phrase of the ask is carried by a
+  ``names`` filter (note ``entity_added:<phrase>``, coverage ``where: recognizer``); a ranking the model left
+  unordered is ordered by the ranked number cell (``clauses.rank_order``: note ``order_default``, coverage
+  ``order: rules``).
 
 Flow: recognize → ``prompt.build_messages`` → ``llm.chat_json`` (purpose "query"; the IR schema
 in the validator's subset; ``check`` = the structural rules, so the one retry also fires on a
@@ -36,8 +43,9 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from ..ni_forms import llm
-from .clauses import bind_comparators, floor_answer, limit_for, select_for
+from .clauses import bind_comparators, floor_answer, limit_for, rank_order, select_for
 from .decl import answer_named, counted_list
+from .ground import Grounds, carry_entities, ground_where, proper_phrases
 from .normalize import (
     explicit_time,
     narrows,
@@ -55,7 +63,11 @@ COVERAGE_KEYS = ("answer", "time", "where", "order", "select", "limit", "agg")
 COVERAGE_VALUES = frozenset({"bound", "unbound", "approximated", "rules", "recognizer"})
 NOTES = frozenset({"query_rules", "model_off", "model_unavailable", "schema_invalid", "time_explicit",
                    "where_dropped", "numbers_unstated", "order_dropped", "params_dropped", "count_list",
-                   "time_range_kept", "comparator_added", "comparator_corrected"})
+                   "time_range_kept", "comparator_added", "comparator_corrected", "order_default"})
+# Round 20 (Q3c): note codes that carry their value — "filter_ungrounded:anywhere in the world",
+# "entity_added:Canucks" (``note_ok``)
+VALUE_NOTES = frozenset({"filter_ungrounded", "entity_added"})
+_MAX_NOTE_VALUE = 60
 _COUNTED_HEADS = ("past_days:", "next_days:", "past_hours:", "next_hours:")
 _CALENDAR_TOKENS = ("this_week", "next_week", "this_month")
 _DAY_TOKENS = ("today", "tomorrow", "yesterday", "dow:", "date:")
@@ -84,6 +96,20 @@ class Ctx:
     spans: dict
     consumed_words: frozenset
     src_words: frozenset
+    phrases: tuple = ()           # the ask's proper-noun phrases the address did not take (B: carried entities)
+    names: tuple = ()             # the ask's proper-noun phrases, consumed words kept (A: a value's evidence)
+    resolved: bool = False        # the address takes a parameter from a resolver (no carried entities)
+    grounds: Grounds = field(default_factory=Grounds)  # the caller's evidence (taxonomy keywords, the sample)
+
+
+def note_ok(note: object) -> bool:
+    """A closed note code, or a value-carrying one ("entity_added:Canucks") with a short one-line value."""
+    assert note is None or isinstance(note, (str, int, float, list, dict, bool)), "a JSON value"
+    head, sep, value = str(note).partition(":")
+    ok = isinstance(note, str) and (note in NOTES or (
+        bool(sep) and head in VALUE_NOTES and 0 < len(value) <= _MAX_NOTE_VALUE and value.isprintable()))
+    assert isinstance(ok, bool), "a verdict"
+    return ok
 
 
 def consumed_words(ask: str, consumed: list) -> frozenset[str]:
@@ -98,11 +124,18 @@ def consumed_words(ask: str, consumed: list) -> frozenset[str]:
 
 
 def make_ctx(ask: str, kind: str | None, answers: list[dict], spans: dict, consumed: list,
-             source_name: str) -> Ctx:
+             source_name: str, grounds: Grounds | None = None, params: list | None = None) -> Ctx:
+    """``params``: the source's parameter menu — one filled by a resolver scopes the rows to what it resolved."""
     assert isinstance(answers, list) and answers, "answers required"
     assert isinstance(source_name, str), "source_name must be a str"
-    return Ctx(ask=ask, kind=kind, answers=answers, spans=spans, consumed_words=consumed_words(ask, consumed),
-               src_words=frozenset(source_name.casefold().split()))
+    taken = consumed_words(ask, consumed)
+    own = frozenset(w for w, _, _ in words(source_name.casefold()))
+    resolved = any(isinstance(p, dict) and (p.get("fill") or {}).get("from") == "resolver" for p in (params or [])[:40])
+    return Ctx(ask=ask, kind=kind, answers=answers, spans=spans, consumed_words=taken,
+               src_words=frozenset(source_name.casefold().split()),
+               phrases=tuple(proper_phrases(ask, spans, taken, own)),
+               names=tuple(proper_phrases(ask, spans, frozenset(), own)), resolved=resolved,
+               grounds=grounds or Grounds())
 
 
 def _ask_model(messages: list[dict], answers: list[dict],
@@ -132,14 +165,20 @@ def _ask_model(messages: list[dict], answers: list[dict],
 
 
 def _code_clauses(ir: dict, ctx: Ctx, notes: list[str]) -> dict:
-    """Explicit comparators (``clauses.bind_comparators`` — on the list a count value counts), then select /
-    limit / agg from code; a filtered count reads the list the count value counts."""
+    """Explicit comparators (``clauses.bind_comparators`` — on the list a count value counts), the evidence for
+    filter values and the carried entities (``ground``), then select / limit / agg from code and a ranking's
+    default order (``clauses.rank_order``); a filtered count reads the list the count value counts."""
     assert isinstance(ir, dict) and isinstance(notes, list), "ir + notes required"
     assert isinstance(ctx, Ctx), "ctx must be a Ctx"
     answer = answer_named(ctx.answers, ir["answer"])
     counted = counted_list(ctx.answers, answer) if ctx.kind == "count" else None
-    ir["where"], recognized = bind_comparators(ir["where"], counted or answer, list(ctx.spans["comparators"]))
+    rows = counted or answer
+    ir["where"], recognized = bind_comparators(ir["where"], rows, list(ctx.spans["comparators"]))
     notes += list(dict.fromkeys(recognized))
+    ir["where"], ungrounded = ground_where(ir["where"], rows, phrases=list(ctx.names), spans=ctx.spans,
+                                           grounds=ctx.grounds)
+    ir["where"], added = carry_entities(ir["where"], rows, [] if ctx.resolved else list(ctx.phrases))
+    notes += [f"filter_ungrounded:{v}" for v in ungrounded] + [f"entity_added:{p[:_MAX_NOTE_VALUE]}" for p in added]
     lst = counted if counted is not None and narrows(ir) else None
     if lst is not None:
         ir["answer"], answer = lst["name"], lst
@@ -151,6 +190,9 @@ def _code_clauses(ir: dict, ctx: Ctx, notes: list[str]) -> dict:
         ir["order"] = axis_order + [o for o in ir["order"] if o not in axis_order]
     if ahead and ir["time"] is None:
         ir["time"] = {"from": "now", "to": None}
+    if not ir["order"]:
+        ir["order"] = rank_order(ctx.ask, ctx.kind, answer, ctx.answers, ctx.spans, ctx.consumed_words)
+        notes += ["order_default"] if ir["order"] else []
     ir["agg"] = "count" if ctx.kind == "count" else "none"
     return ir
 
@@ -233,14 +275,17 @@ def coverage_of(ir: dict, ctx: Ctx, floor: bool) -> dict:
 
 def plan_query(ask: str, *, kind: str | None, wants: list, source: dict, answers: list[dict], params: list[dict],
                consumed: list, now: dt.datetime, zone: str, call_model: Callable[[list], str] | None,
-               pool: list[dict], masked: list | tuple = ()) -> QueryPlan:
+               pool: list[dict], masked: list | tuple = (), grounds: Grounds | None = None) -> QueryPlan:
     """The ask → QueryPlan (module docstring). ``masked``: char ranges masked for the recognizers only
-    (the intent's proper names, ``recognize.name_masks``) — unlike ``consumed`` they never drop a where."""
+    (the intent's proper names, ``recognize.name_masks``) — unlike ``consumed`` they never drop a where.
+    ``grounds``: the evidence the caller holds for filter values (``ground.Grounds``: the taxonomy keywords of
+    the asked subcategories, the fetched sample); None = the ask and the answer alone."""
     assert isinstance(ask, str) and ask.strip(), "ask required"
     assert isinstance(answers, list) and answers and isinstance(source, dict), "answers + source required"
     spans = recognize(ask, now=now, zone=zone, masked=[*[c for c in consumed[:_MAX_CONSUMED] if isinstance(c, tuple)],
                                                        *list(masked)[:_MAX_CONSUMED]])
-    ctx = make_ctx(ask, kind, answers, spans, list(consumed[:_MAX_CONSUMED]), str(source.get("name") or ""))
+    ctx = make_ctx(ask, kind, answers, spans, list(consumed[:_MAX_CONSUMED]), str(source.get("name") or ""), grounds,
+                   params)
     examples = retrieve_examples(ask, kind or "", pool) if pool else []
     messages = build_messages(ask, source=source, answers=answers, params=params, now=now, zone=zone,
                               examples=examples)
@@ -250,12 +295,18 @@ def plan_query(ask: str, *, kind: str | None, wants: list, source: dict, answers
         ir = floor_plan(ctx, list(wants or []), notes)
     else:
         ir, notes = finalize(model_ir, ctx)
-    assert set(notes) <= NOTES, "closed notes"
+    assert all(note_ok(n) for n in notes), "closed notes"
     coverage = coverage_of(ir, ctx, model_ir is None)
     if "time_range_kept" in notes and coverage["time"] in ("bound", "rules"):
         coverage["time"] = "approximated"  # the lead's ruling: the model's range, visibly not the calendar one
-    if {"comparator_added", "comparator_corrected"} & set(notes) and coverage["where"] in ("bound", "rules"):
-        coverage["where"] = "recognizer"   # an explicit comparator the recognizers read, carried by code
+    carried = {"comparator_added", "comparator_corrected"} & set(notes) or any(n.startswith("entity_added:")
+                                                                                for n in notes)
+    if carried and coverage["where"] in ("bound", "rules"):
+        coverage["where"] = "recognizer"   # an explicit comparator / a named entity of the ask, carried by code
+    if any(n.startswith("filter_ungrounded:") for n in notes) and coverage["where"] != "unbound":
+        coverage["where"] = "approximated"  # a filter the ask asked for in words no evidence grounds: dropped
+    if "order_default" in notes and coverage["order"] == "bound":
+        coverage["order"] = "rules"        # a ranking the model left unordered: the ranked cell, by code
     return QueryPlan(ir=ir, model_ir=model_ir, coverage=coverage,
                      interpretation=say(ir, answers), notes=notes,
                      model_meta={"attempts": meta["attempts"], "valid_first_try": meta["valid_first_try"],

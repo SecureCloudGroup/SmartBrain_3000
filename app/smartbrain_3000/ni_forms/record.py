@@ -362,12 +362,16 @@ def _apply_value_roles(fields: list, answers: list, row: list, ask: str,
             f.role = "secondary"
 
 
-def _names_rows(samples: list) -> bool:
+def _names_rows(samples: list, free_text: bool = False) -> bool:
     """A text column names its rows when its values are distinct across the sample (an
-    identity), never when one word repeats down the list (a state)."""
+    identity), never when one word repeats down the list (a state). Free text (the field
+    type ``text``: titles, names, places — no closed vocabulary) names them even with a
+    repeat: one Hacker News title posted three times (Round 20 Q3c, set F #21) left the
+    opaque "Item id" column naming every story."""
     assert isinstance(samples, list), "samples must be a list"
+    assert isinstance(free_text, bool), "free_text must be a bool"
     vals = [v for v in samples[:_ROWS_CAP] if isinstance(v, str) and v.strip()]
-    return len(vals) <= 1 or len(set(vals)) == len(vals)
+    return free_text or len(vals) <= 1 or len(set(vals)) == len(vals)
 
 
 def _apply_list_roles(fields: list, cells: list, columns: list, asked: set | None = None) -> None:
@@ -384,7 +388,7 @@ def _apply_list_roles(fields: list, cells: list, columns: list, asked: set | Non
     assert isinstance(columns, list) and len(columns) == len(fields), "one sample column per field"
     texts = [i for i, f in enumerate(fields) if f.type in ("text", "category") and _geo_role(f) is None
              and str(cells[i].get("label") or "").strip().lower() not in _STATUS_LABEL_WORDS]
-    naming = [i for i in texts if _names_rows(columns[i])]
+    naming = [i for i in texts if _names_rows(columns[i], fields[i].type == "text")]
     name_at = (naming or texts or [None])[0]
     numbers = [i for i, f in enumerate(fields) if f.type in _NUMBER_TYPES and _geo_role(f) is None]
     lead_num = next((i for i in numbers if fields[i].name in (asked or set())), (numbers or [None])[0])

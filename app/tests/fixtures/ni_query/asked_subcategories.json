@@ -1,0 +1,1176 @@
+{
+"pack": "SmartBrain_Library main + #12 (round20/param-bounds), built 2026-10-12",
+"asked": {
+"A1": [
+"weather/current"
+],
+"A3": [
+"water/water_temperature"
+],
+"A4": [
+"weather/forecast"
+],
+"A5": [
+"weather/forecast"
+],
+"A6": [
+"water/surf_waves"
+],
+"A7": [
+"weather/forecast"
+],
+"A8": [
+"sky/launches"
+],
+"A10": [
+"sports/schedules"
+],
+"A13": [
+"sports/schedules"
+],
+"A17": [
+"sports/results"
+],
+"A18": [
+"news/headlines"
+],
+"A22": [
+"markets/stocks",
+"markets/crypto",
+"markets/fx"
+],
+"A24": [
+"economy/fuel_prices"
+],
+"A25": [
+"markets/rates_bonds"
+],
+"A29": [
+"tech/service_status"
+],
+"A30": [
+"weather/alerts"
+],
+"A31": [
+"weather/alerts"
+],
+"A33": [
+"hazards/earthquakes"
+],
+"A34": [
+"hazards/tropical_storms"
+],
+"A38": [
+"time/holidays"
+],
+"A40": [
+"sky/iss"
+],
+"A49": [
+"weather/forecast",
+"sports/scores"
+],
+"B1": [
+"weather/current"
+],
+"B2": [
+"weather/current"
+],
+"B3": [
+"weather/uv"
+],
+"B5": [
+"markets/commodities",
+"shopping/product_prices"
+],
+"B6": [
+"weather/forecast"
+],
+"B7": [
+"weather/forecast"
+],
+"B9": [
+"weather/forecast"
+],
+"B14": [
+"sports/schedules"
+],
+"B18": [
+"sports/results"
+],
+"B22": [
+"hazards/earthquakes"
+],
+"B24": [
+"markets/crypto"
+],
+"B26": [
+"economy/jobs"
+],
+"B27": [
+"economy/inflation"
+],
+"B28": [
+"markets/rates_bonds"
+],
+"B29": [
+"tech/service_status",
+"tech/repos_releases"
+],
+"B30": [
+"tech/service_status"
+],
+"B32": [
+"weather/alerts"
+],
+"B36": [
+"hazards/wildfires"
+],
+"B40": [
+"sky/sun_moon",
+"time/time_zones"
+],
+"B44": [
+"weather/forecast"
+],
+"B45": [
+"hazards/earthquakes"
+],
+"C1": [
+"weather/current"
+],
+"C2": [
+"weather/current"
+],
+"C6": [
+"weather/forecast"
+],
+"C7": [
+"weather/forecast"
+],
+"C9": [
+"water/surf_waves"
+],
+"C10": [
+"weather/forecast"
+],
+"C11": [
+"weather/forecast"
+],
+"C15": [
+"sports/schedules"
+],
+"C16": [
+"sports/schedules"
+],
+"C18": [
+"sports/results"
+],
+"C21": [
+"tech/tech_news"
+],
+"C27": [
+"economy/fuel_prices"
+],
+"C31": [
+"tech/service_status"
+],
+"C32": [
+"travel/transit_alerts",
+"travel/transit"
+],
+"C34": [
+"weather/alerts"
+],
+"C38": [
+"travel/flights"
+],
+"C45": [
+"hazards/wildfires"
+],
+"C50": [
+"weather/forecast"
+],
+"D1": [
+"weather/forecast"
+],
+"D2": [
+"weather/current"
+],
+"D3": [
+"weather/uv"
+],
+"D7": [
+"weather/forecast"
+],
+"D8": [
+"weather/forecast"
+],
+"D10": [
+"weather/forecast"
+],
+"D11": [
+"hazards/space_weather"
+],
+"D12": [
+"water/tides"
+],
+"D13": [
+"sports/schedules"
+],
+"D14": [
+"sky/launches"
+],
+"D17": [
+"water/tides"
+],
+"D18": [
+"sports/schedules",
+"sports/results"
+],
+"D21": [
+"news/topic_news",
+"tech/tech_news"
+],
+"D22": [
+"hazards/earthquakes"
+],
+"D24": [
+"markets/crypto"
+],
+"D25": [
+"sports/standings"
+],
+"D27": [
+"economy/jobs"
+],
+"D30": [
+"tech/service_status",
+"tech/repos_releases"
+],
+"D33": [
+"weather/alerts"
+],
+"D36": [
+"hazards/wildfires"
+],
+"D37": [
+"hazards/earthquakes"
+],
+"D45": [
+"sky/iss"
+],
+"D49": [
+"weather/forecast"
+],
+"E2": [
+"weather/forecast"
+],
+"E3": [
+"water/water_temperature"
+],
+"E5": [
+"markets/commodities",
+"shopping/product_prices"
+],
+"E7": [
+"weather/forecast"
+],
+"E8": [
+"water/surf_waves"
+],
+"E10": [
+"weather/forecast"
+],
+"E12": [
+"water/tides"
+],
+"E13": [
+"sports/schedules"
+],
+"E14": [
+"sky/sun_moon"
+],
+"E18": [
+"sports/results"
+],
+"E22": [
+"hazards/earthquakes"
+],
+"E24": [
+"markets/crypto",
+"markets/fx"
+],
+"E26": [
+"hazards/wildfires"
+],
+"E27": [
+"economy/inflation"
+],
+"E31": [
+"travel/transit_alerts"
+],
+"E32": [
+"travel/airport_delays"
+],
+"E33": [
+"weather/alerts"
+],
+"E34": [
+"weather/alerts"
+],
+"E36": [
+"hazards/tropical_storms",
+"weather/forecast"
+],
+"E37": [
+"hazards/earthquakes"
+],
+"E38": [
+"weather/alerts",
+"weather/current"
+],
+"E39": [
+"time/holidays"
+],
+"E44": [
+"markets/rates_bonds"
+],
+"E45": [
+"sky/iss"
+],
+"E49": [
+"weather/forecast"
+],
+"F1": [],
+"F4": [
+"markets/commodities",
+"shopping/product_prices"
+],
+"F5": [
+"weather/air_quality",
+"markets/indices"
+],
+"F6": [
+"weather/forecast"
+],
+"F7": [
+"weather/forecast"
+],
+"F11": [
+"weather/forecast"
+],
+"F14": [
+"sports/schedules"
+],
+"F16": [
+"sky/sun_moon",
+"time/time_zones"
+],
+"F17": [
+"sky/launches"
+],
+"F18": [
+"sports/results"
+],
+"F19": [
+"sports/schedules",
+"sports/results"
+],
+"F21": [
+"news/topic_news",
+"tech/tech_news"
+],
+"F22": [
+"hazards/earthquakes"
+],
+"F24": [
+"markets/crypto",
+"markets/fx"
+],
+"F25": [
+"sports/standings",
+"hazards/tropical_storms"
+],
+"F26": [
+"hazards/wildfires"
+],
+"F27": [
+"economy/jobs"
+],
+"F28": [
+"economy/fuel_prices",
+"shopping/product_prices"
+],
+"F29": [
+"markets/rates_bonds"
+],
+"F30": [
+"tech/service_status"
+],
+"F31": [
+"travel/transit_alerts",
+"travel/airport_delays"
+],
+"F32": [
+"travel/transit_alerts"
+],
+"F33": [
+"weather/alerts"
+],
+"F35": [
+"weather/alerts"
+],
+"F36": [
+"hazards/earthquakes"
+],
+"F37": [
+"weather/alerts"
+],
+"F38": [
+"hazards/wildfires",
+"weather/current"
+],
+"F45": [
+"hazards/earthquakes"
+],
+"F46": [
+"hazards/wildfires"
+],
+"F49": [
+"weather/forecast"
+],
+"F50": [
+"weather/forecast"
+]
+},
+"keywords": {
+"economy/fuel_prices": [
+"gas price",
+"gasoline",
+"diesel",
+"fuel price",
+"gas",
+"cheapest gas",
+"gas prices",
+"price of gas",
+"average gas",
+"gallon",
+"fuel"
+],
+"economy/inflation": [
+"inflation",
+"cpi",
+"consumer price",
+"pce",
+"consumer price index",
+"price index",
+"ppi",
+"producer price",
+"producer prices",
+"cost of living"
+],
+"economy/jobs": [
+"unemployment",
+"jobs report",
+"payrolls",
+"jobless claims",
+"labor"
+],
+"hazards/earthquakes": [
+"earthquake",
+"quake",
+"seismic",
+"magnitude",
+"tremor",
+"quakes",
+"shaking",
+"aftershock",
+"aftershocks",
+"temblor",
+"richter"
+],
+"hazards/space_weather": [
+"aurora",
+"northern lights",
+"aurora forecast",
+"northern lights forecast",
+"geomagnetic",
+"kp index",
+"solar flare",
+"space weather",
+"space weather forecast",
+"geomagnetic storm",
+"solar storm",
+"solar storms",
+"kp",
+"cme",
+"coronal mass ejection",
+"x class flare",
+"flare",
+"flares",
+"aurora borealis",
+"sunspot",
+"sunspots",
+"solar wind",
+"radio blackout",
+"space weather alert",
+"solar activity",
+"space weather alerts"
+],
+"hazards/tropical_storms": [
+"hurricane",
+"tropical storm",
+"cyclone",
+"nhc",
+"hurricane watch",
+"hurricane warning",
+"tropical storm watch",
+"tropical storm warning",
+"tropical depression",
+"tropics",
+"tropical",
+"named storm",
+"hurricane season",
+"in the atlantic",
+"in the gulf",
+"typhoon",
+"storm track",
+"spaghetti models",
+"landfall",
+"hurricane center"
+],
+"hazards/wildfires": [
+"wildfire",
+"containment",
+"burn",
+"smoke",
+"fires",
+"fire near",
+"fires near",
+"forest fire",
+"brush fire",
+"fire danger",
+"evacuation",
+"evacuations",
+"blaze",
+"acres burned",
+"fire map",
+"burning"
+],
+"markets/commodities": [
+"gold",
+"silver",
+"oil price",
+"crude",
+"natural gas",
+"commodity",
+"wheat",
+"corn",
+"copper",
+"wti",
+"brent",
+"oil prices",
+"crude oil",
+"platinum",
+"palladium",
+"soybeans",
+"lumber",
+"barrel",
+"per ounce",
+"bullion"
+],
+"markets/crypto": [
+"bitcoin",
+"ethereum",
+"crypto",
+"coin",
+"token",
+"btc",
+"eth",
+"solana",
+"xrp",
+"dogecoin",
+"doge",
+"cardano",
+"litecoin",
+"tether",
+"stablecoin",
+"crypto market",
+"altcoins",
+"memecoin",
+"coins",
+"tokens"
+],
+"markets/fx": [
+"exchange rate",
+"currency",
+"forex",
+"fx",
+"usd",
+"euro"
+],
+"markets/indices": [
+"s&p 500",
+"dow",
+"nasdaq composite",
+"index",
+"russell",
+"nasdaq",
+"dow jones",
+"the dow",
+"stock market",
+"the market",
+"market today",
+"s&p",
+"sp500",
+"russell 2000",
+"futures",
+"indexes",
+"indices",
+"small caps",
+"wall street",
+"vix",
+"volatility index"
+],
+"markets/rates_bonds": [
+"treasury yield",
+"interest rate",
+"bond",
+"mortgage rate",
+"fed funds",
+"10 year",
+"bonds"
+],
+"markets/stocks": [
+"stock",
+"share price",
+"ticker",
+"quote",
+"nyse",
+"stocks",
+"shares",
+"trading at",
+"stock price",
+"premarket",
+"after hours",
+"market cap",
+"stock quote",
+"share",
+"share of"
+],
+"news/headlines": [
+"headlines",
+"news",
+"breaking",
+"top stories",
+"current events",
+"whats happening",
+"happening today",
+"big news",
+"what happened"
+],
+"news/topic_news": [
+"business news",
+"entertainment news",
+"health news",
+"latest on",
+"news about",
+"politics",
+"politics news",
+"science news",
+"sports news",
+"tech news",
+"technology news",
+"world news"
+],
+"shopping/product_prices": [
+"price of",
+"price drop",
+"cheapest",
+"deal"
+],
+"sky/iss": [
+"iss",
+"space station",
+"astronauts",
+"people in space",
+"pass over"
+],
+"sky/launches": [
+"launch",
+"spacex",
+"nasa launch",
+"liftoff",
+"rocket launch",
+"blue origin",
+"rocket lab",
+"starship",
+"falcon 9",
+"artemis",
+"cape canaveral",
+"vandenberg",
+"launches"
+],
+"sky/sun_moon": [
+"sunrise",
+"sunset",
+"moon phase",
+"moonrise",
+"daylight",
+"day length",
+"sundown",
+"moon",
+"get dark",
+"gets dark",
+"twilight",
+"golden hour",
+"dusk",
+"dawn",
+"full moon",
+"new moon",
+"sun come up",
+"sun go down",
+"sun set",
+"sun rise",
+"sun rises",
+"sun up",
+"sunup"
+],
+"sports/results": [
+"results",
+"who won",
+"final score",
+"win",
+"won",
+"lose",
+"lost",
+"beat",
+"result",
+"how did",
+"win loss record"
+],
+"sports/schedules": [
+"schedule",
+"fixtures",
+"next game",
+"kickoff",
+"game",
+"games",
+"game time",
+"next match",
+"upcoming matches",
+"upcoming games",
+"play next",
+"playing",
+"play tonight",
+"who plays",
+"home games",
+"first pitch",
+"puck drop",
+"mnf",
+"monday night football",
+"thursday night football",
+"sunday night football",
+"matchup",
+"tip off",
+"play today",
+"play",
+"plays"
+],
+"sports/scores": [
+"score",
+"live score",
+"final",
+"scores",
+"whos winning",
+"who s winning",
+"winning",
+"up or down",
+"vs",
+"box score",
+"halftime",
+"live scores",
+"game over"
+],
+"sports/standings": [
+"standings",
+"table",
+"rankings",
+"playoff picture",
+"magic number",
+"division",
+"wild card",
+"wildcard",
+"who leads",
+"first place",
+"games back",
+"playoff race",
+"seeding",
+"clinched",
+"elimination number",
+"top 25"
+],
+"tech/repos_releases": [
+"github",
+"release",
+"stars",
+"commits",
+"issues",
+"pull requests",
+"latest version",
+"newest version",
+"lts",
+"latest release",
+"ios",
+"macos",
+"android",
+"kernel",
+"software update",
+"release notes",
+"changelog",
+"current version",
+"what version",
+"version number"
+],
+"tech/service_status": [
+"status page",
+"outage",
+"is down",
+"incident",
+"degraded",
+"down",
+"outage right now",
+"not working",
+"status",
+"down right now",
+"having issues",
+"not loading",
+"servers down",
+"servers",
+"server status",
+"servers up"
+],
+"tech/tech_news": [
+"hacker news",
+"product hunt",
+"reddit",
+"tech headlines",
+"tech news",
+"trending"
+],
+"time/holidays": [
+"holiday",
+"federal holiday",
+"day off",
+"thanksgiving",
+"christmas",
+"memorial day",
+"labor day",
+"banks closed",
+"bank holiday",
+"post office closed",
+"mail delivery",
+"election day",
+"new years",
+"federal holidays",
+"halloween",
+"valentines day",
+"fourth of july",
+"july 4th",
+"independence day",
+"veterans day",
+"mlk day",
+"presidents day",
+"juneteenth",
+"columbus day",
+"st patricks day",
+"mothers day",
+"fathers day",
+"hanukkah",
+"new years day"
+],
+"time/time_zones": [
+"time in",
+"time zone",
+"what time"
+],
+"travel/airport_delays": [
+"airport delay",
+"ground stop",
+"faa delays",
+"tsa wait",
+"airport",
+"airport status",
+"flight delays",
+"ground delay",
+"fog delays",
+"security line",
+"security wait"
+],
+"travel/flights": [
+"flight status",
+"flight",
+"arrival",
+"departure",
+"delayed",
+"landed",
+"departed",
+"took off"
+],
+"travel/transit": [
+"bus",
+"train",
+"subway",
+"next arrival",
+"transit",
+"metro",
+"light rail"
+],
+"travel/transit_alerts": [
+"service alert",
+"delay",
+"disruption",
+"planned work",
+"line running",
+"delays",
+"alerts",
+"service alerts",
+"line delays",
+"bart",
+"mta",
+"septa",
+"muni",
+"cta",
+"mbta",
+"wmata",
+"marta",
+"lirr",
+"nj transit",
+"metra",
+"caltrain",
+"dc metro",
+"subway delays",
+"train delayed",
+"trains delayed",
+"train running",
+"trains running",
+"running late"
+],
+"water/surf_waves": [
+"surf",
+"wave height",
+"swell",
+"buoy",
+"waves",
+"wave",
+"surfing",
+"surf report",
+"surf forecast",
+"swell forecast",
+"surf conditions",
+"breakers",
+"wave period",
+"glassy",
+"blown out",
+"head high",
+"waist high",
+"knee high",
+"surfable",
+"rideable",
+"surf check",
+"flat",
+"big wave",
+"wave forecast"
+],
+"water/tides": [
+"tide",
+"tides",
+"high tide",
+"low tide",
+"tide table",
+"tide chart",
+"tide times"
+],
+"water/water_temperature": [
+"water temperature",
+"sea temperature",
+"water temp",
+"ocean temperature",
+"sea surface temperature",
+"ocean temp",
+"sea temp",
+"lake temp",
+"lake temperature",
+"water cold",
+"water warm",
+"swimming temperature",
+"warm is the water",
+"cold is the water",
+"warm enough to swim",
+"warm is the ocean",
+"warm is the lake",
+"cold to swim",
+"too cold to swim"
+],
+"weather/air_quality": [
+"air quality",
+"aqi",
+"pm2.5",
+"ozone",
+"smoke",
+"pollution",
+"air quality forecast",
+"smoky",
+"haze",
+"aqi forecast",
+"wildfire smoke",
+"air pollution",
+"smog",
+"particulates",
+"pm 2.5",
+"pm25"
+],
+"weather/alerts": [
+"alert",
+"warning",
+"advisory",
+"severe",
+"tornado",
+"flood warning",
+"heat advisory",
+"alerts",
+"warnings",
+"weather alert",
+"weather alerts",
+"nws alerts",
+"wind advisory",
+"winter weather advisory",
+"winter storm warning",
+"winter storm watch",
+"freeze warning",
+"frost advisory",
+"blizzard",
+"tornado warning",
+"tornado watch",
+"tornadoes",
+"severe thunderstorm warning",
+"severe thunderstorm watch",
+"severe weather",
+"flash flood warning",
+"flood watch",
+"red flag warning",
+"dense fog advisory",
+"excessive heat warning",
+"heat warning",
+"watches and warnings",
+"advisories",
+"watches",
+"ice storm warning",
+"high wind warning",
+"high wind watch",
+"special weather statement",
+"tornado sirens"
+],
+"weather/current": [
+"current weather",
+"conditions",
+"observation",
+"temperature now",
+"humidity",
+"dew point",
+"metar",
+"snowing",
+"wind speed",
+"feels like",
+"currently",
+"is it raining",
+"is it snowing",
+"outside",
+"current temp",
+"current temperature",
+"temp now",
+"barometric pressure",
+"visibility",
+"how hot is it",
+"how cold is it",
+"how warm is it"
+],
+"weather/forecast": [
+"forecast",
+"weather",
+"temperature",
+"rain",
+"precipitation",
+"snow",
+"hourly",
+"wind",
+"temp",
+"hot",
+"cold",
+"degrees",
+"warm",
+"storm",
+"storms",
+"thunderstorm",
+"tstorms",
+"hail",
+"fog",
+"foggy",
+"frost",
+"freeze",
+"sleet",
+"freezing rain",
+"gusts",
+"gusty",
+"windy",
+"lightning strikes",
+"lightning near",
+"lightning expected",
+"any lightning",
+"chance of rain",
+"rain chance",
+"humid",
+"muggy",
+"high today",
+"low tonight",
+"rainy",
+"showers",
+"drizzle",
+"snowfall",
+"snowstorm",
+"highs",
+"lows",
+"high temp",
+"low temp",
+"heat wave",
+"cold front",
+"freezing",
+"below freezing",
+"umbrella",
+"jacket",
+"sunny",
+"cloudy",
+"overcast",
+"clear skies",
+"heat index",
+"wind chill",
+"precip",
+"wx",
+"t storm",
+"t storms"
+],
+"weather/uv": [
+"uv index",
+"sunburn",
+"ultraviolet",
+"uv",
+"uv level",
+"uv forecast",
+"sunscreen",
+"sun strength",
+"strong is the sun",
+"spf"
+]
+}
+}

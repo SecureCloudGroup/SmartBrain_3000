@@ -1,0 +1,2742 @@
+{
+"bart-advisories": {
+"name": "BART service advisories",
+"params": [],
+"answers": [
+{
+"name": "advisory",
+"label": "BART advisory",
+"kind": "value",
+"primary": true,
+"words": [
+"delays",
+"delay",
+"advisory",
+"advisories",
+"service alert",
+"alerts",
+"running",
+"disruption",
+"status",
+"is it running",
+"bart"
+],
+"path": "root.bsa[0].description[\"#cdata-section\"]",
+"type": "text",
+"window": "now"
+},
+{
+"name": "type",
+"label": "Type",
+"kind": "value",
+"primary": true,
+"words": [
+"type",
+"kind",
+"delay or emergency"
+],
+"path": "root.bsa[0].type",
+"type": "text",
+"window": "now"
+},
+{
+"name": "posted",
+"label": "Posted",
+"kind": "value",
+"primary": true,
+"words": [
+"posted",
+"when",
+"since",
+"as of",
+"updated"
+],
+"path": "root.bsa[0].posted",
+"type": "text",
+"window": "now"
+},
+{
+"name": "advisory_count",
+"label": "Advisories now",
+"kind": "value",
+"words": [
+"how many advisories",
+"how many alerts",
+"number of advisories"
+],
+"path": "root.bsa",
+"type": "count",
+"window": "now"
+}
+]
+},
+"coingecko-markets": {
+"name": "CoinGecko top coins",
+"params": [],
+"answers": [
+{
+"name": "top_coins",
+"label": "Top coins by market cap",
+"words": [
+"top coins",
+"top cryptocurrencies",
+"crypto market",
+"biggest coins",
+"market cap",
+"ranking",
+"top 10",
+"crypto prices",
+"price",
+"change"
+],
+"primary": true,
+"kind": "list",
+"path": "items",
+"row": [
+{
+"path": "name",
+"label": "Coin",
+"type": "text"
+},
+{
+"path": "current_price",
+"label": "Price",
+"type": "number",
+"unit": "USD"
+},
+{
+"path": "price_change_percentage_24h",
+"label": "24h change",
+"type": "number",
+"unit": "%"
+},
+{
+"path": "market_cap",
+"label": "Market cap",
+"type": "number",
+"unit": "USD"
+}
+]
+},
+{
+"name": "volume",
+"label": "24h trading volume",
+"words": [
+"volume",
+"trading volume",
+"most traded",
+"24h volume",
+"liquidity"
+],
+"primary": false,
+"kind": "list",
+"path": "items",
+"row": [
+{
+"path": "name",
+"label": "Coin",
+"type": "text"
+},
+{
+"path": "total_volume",
+"label": "24h volume",
+"type": "number",
+"unit": "USD"
+}
+]
+}
+]
+},
+"faa-nas-status": {
+"name": "FAA airport status (NAS)",
+"params": [
+{
+"example": "LAS",
+"fill": {
+"field": "key",
+"from": "resolver",
+"resolver": "airport"
+},
+"kind": "airport",
+"name": "airport",
+"required": true
+}
+],
+"answers": [
+{
+"name": "ground_delay",
+"label": "Ground delay program",
+"words": [
+"delays",
+"delay",
+"flight delays",
+"ground delay",
+"delayed",
+"how late",
+"average delay",
+"gdp"
+],
+"primary": true,
+"kind": "list",
+"path": "items",
+"row": [
+{
+"path": "groundDelay.impactingCondition",
+"label": "Reason",
+"type": "text"
+},
+{
+"path": "groundDelay.avgDelay",
+"label": "Average delay",
+"type": "number",
+"unit": "min"
+},
+{
+"path": "groundDelay.maxDelay",
+"label": "Max delay",
+"type": "number",
+"unit": "min"
+},
+{
+"path": "groundDelay.endTime",
+"label": "Until",
+"type": "time"
+}
+],
+"filter": {
+"path": "groundDelay.airportId",
+"equals": "{airport}"
+},
+"may_be_empty": true
+},
+{
+"name": "departure_delay",
+"label": "Departure delays",
+"words": [
+"departure delay",
+"departures",
+"departing",
+"leaving",
+"takeoff",
+"delays",
+"flight delays",
+"late"
+],
+"primary": false,
+"kind": "list",
+"path": "items",
+"row": [
+{
+"path": "departureDelay.reason",
+"label": "Reason",
+"type": "text"
+},
+{
+"path": "departureDelay.averageDelay",
+"label": "Average delay",
+"type": "number",
+"unit": "min"
+},
+{
+"path": "departureDelay.trend",
+"label": "Trend",
+"type": "text"
+}
+],
+"filter": {
+"path": "departureDelay.airportId",
+"equals": "{airport}"
+},
+"may_be_empty": true
+},
+{
+"name": "airports_affected",
+"label": "Airports with FAA delays",
+"words": [
+"airport delays",
+"which airports",
+"delays nationwide",
+"all airports",
+"national airspace",
+"faa status"
+],
+"primary": false,
+"kind": "list",
+"path": "items",
+"row": [
+{
+"path": "airportId",
+"label": "Airport",
+"type": "text"
+},
+{
+"path": "airportLongName",
+"label": "Name",
+"type": "text"
+}
+],
+"may_be_empty": true
+}
+]
+},
+"fred-gasregw": {
+"name": "US regular gasoline price (FRED)",
+"params": [],
+"answers": [
+{
+"name": "latest",
+"label": "Regular gas price (US average)",
+"kind": "value",
+"primary": true,
+"words": [
+"us regular gasoline price",
+"regular gas price (us average)",
+"gas prices",
+"national average gas price",
+"latest",
+"current",
+"now",
+"today"
+],
+"path": "rows[0].GASREGW",
+"type": "number",
+"unit": "$/gal",
+"window": "latest"
+},
+{
+"name": "as_of",
+"label": "As of",
+"kind": "value",
+"words": [
+"as of",
+"when",
+"date",
+"last updated",
+"updated"
+],
+"path": "rows[0].observation_date",
+"type": "date",
+"window": "latest"
+},
+{
+"name": "recent",
+"label": "Recent readings",
+"kind": "list",
+"words": [
+"recent",
+"history",
+"trend",
+"past",
+"over time",
+"chart",
+"last few"
+],
+"path": "rows",
+"row": [
+{
+"path": "observation_date",
+"label": "Date",
+"type": "date"
+},
+{
+"path": "GASREGW",
+"label": "Regular gas price (US average)",
+"type": "number",
+"unit": "$/gal"
+}
+],
+"axis": {
+"cell": "observation_date",
+"step": "day"
+}
+}
+]
+},
+"fred-mortgage30us": {
+"name": "30-year fixed mortgage rate (FRED)",
+"params": [],
+"answers": [
+{
+"name": "latest",
+"label": "30-year mortgage rate",
+"kind": "value",
+"primary": true,
+"words": [
+"30-year fixed mortgage rate",
+"30-year mortgage rate",
+"mortgage rates",
+"30 year mortgage rate",
+"latest",
+"current",
+"now",
+"today"
+],
+"path": "rows[0].MORTGAGE30US",
+"type": "number",
+"unit": "%",
+"window": "latest"
+},
+{
+"name": "as_of",
+"label": "As of",
+"kind": "value",
+"words": [
+"as of",
+"when",
+"date",
+"last updated",
+"updated"
+],
+"path": "rows[0].observation_date",
+"type": "date",
+"window": "latest"
+},
+{
+"name": "recent",
+"label": "Recent readings",
+"kind": "list",
+"words": [
+"recent",
+"history",
+"trend",
+"past",
+"over time",
+"chart",
+"last few"
+],
+"path": "rows",
+"row": [
+{
+"path": "observation_date",
+"label": "Date",
+"type": "date"
+},
+{
+"path": "MORTGAGE30US",
+"label": "30-year mortgage rate",
+"type": "number",
+"unit": "%"
+}
+],
+"axis": {
+"cell": "observation_date",
+"step": "day"
+}
+}
+]
+},
+"fred-unrate": {
+"name": "Unemployment rate (FRED)",
+"params": [],
+"answers": [
+{
+"name": "latest",
+"label": "Unemployment rate",
+"kind": "value",
+"primary": true,
+"words": [
+"unemployment rate",
+"jobless rate",
+"latest",
+"current",
+"now",
+"today"
+],
+"path": "rows[0].UNRATE",
+"type": "number",
+"unit": "%",
+"window": "latest"
+},
+{
+"name": "as_of",
+"label": "As of",
+"kind": "value",
+"words": [
+"as of",
+"when",
+"date",
+"last updated",
+"updated"
+],
+"path": "rows[0].observation_date",
+"type": "date",
+"window": "latest"
+},
+{
+"name": "recent",
+"label": "Recent readings",
+"kind": "list",
+"words": [
+"recent",
+"history",
+"trend",
+"past",
+"over time",
+"chart",
+"last few"
+],
+"path": "rows",
+"row": [
+{
+"path": "observation_date",
+"label": "Date",
+"type": "date"
+},
+{
+"path": "UNRATE",
+"label": "Unemployment rate",
+"type": "number",
+"unit": "%"
+}
+],
+"axis": {
+"cell": "observation_date",
+"step": "day"
+}
+}
+]
+},
+"goldapi-spot": {
+"name": "Gold, silver and platinum spot price per ounce (Gold API)",
+"params": [
+{
+"example": "XAU",
+"fill": {
+"field": "key",
+"from": "resolver",
+"resolver": "metal"
+},
+"kind": "commodity",
+"name": "metal",
+"required": true
+}
+],
+"answers": [
+{
+"name": "price",
+"label": "Spot price",
+"words": [
+"price",
+"spot price",
+"per ounce",
+"ounce",
+"oz",
+"gold price",
+"silver price",
+"how much",
+"worth",
+"cost"
+],
+"primary": true,
+"kind": "value",
+"path": "price",
+"type": "number",
+"unit": "USD/oz",
+"window": "now"
+},
+{
+"name": "metal",
+"label": "Metal",
+"words": [
+"metal",
+"which metal",
+"gold",
+"silver",
+"platinum"
+],
+"primary": true,
+"kind": "value",
+"path": "name",
+"type": "text",
+"window": "now"
+},
+{
+"name": "updated",
+"label": "Updated",
+"words": [
+"updated",
+"as of",
+"when",
+"last updated",
+"time"
+],
+"primary": true,
+"kind": "value",
+"path": "updatedAt",
+"type": "time",
+"window": "now"
+}
+]
+},
+"hn-search": {
+"name": "Hacker News search",
+"params": [
+{
+"example": "rust",
+"fill": {
+"from": "text"
+},
+"kind": "topic",
+"name": "topic",
+"required": true
+}
+],
+"answers": [
+{
+"name": "stories",
+"label": "Newest matching stories",
+"words": [
+"posts",
+"stories",
+"latest",
+"newest",
+"hacker news",
+"hn",
+"discussions",
+"articles"
+],
+"primary": true,
+"kind": "list",
+"path": "hits",
+"row": [
+{
+"path": "title",
+"label": "Story",
+"type": "text"
+},
+{
+"path": "created_at",
+"label": "Posted",
+"type": "time"
+},
+{
+"path": "points",
+"label": "Points",
+"type": "number"
+},
+{
+"path": "objectID",
+"label": "Item id",
+"type": "text"
+}
+],
+"axis": {
+"cell": "created_at",
+"step": "hour"
+}
+},
+{
+"name": "match_count",
+"label": "Matching stories",
+"words": [
+"how many",
+"count",
+"number of posts",
+"total"
+],
+"primary": false,
+"kind": "value",
+"path": "nbHits",
+"type": "number",
+"window": "latest"
+}
+]
+},
+"ll2-upcoming-launches": {
+"name": "Upcoming rocket launches (Launch Library 2)",
+"params": [
+{
+"example": "12,27",
+"fill": {
+"fallback": {
+"from": "default",
+"value": ""
+},
+"field": "key",
+"from": "resolver",
+"resolver": "launch_site"
+},
+"kind": "station",
+"name": "site",
+"required": false
+},
+{
+"example": "121",
+"fill": {
+"fallback": {
+"from": "default",
+"value": ""
+},
+"field": "key",
+"from": "resolver",
+"resolver": "launch_provider"
+},
+"kind": "organization",
+"name": "provider",
+"required": false
+}
+],
+"answers": [
+{
+"name": "launches",
+"label": "Upcoming launches",
+"words": [
+"upcoming launches",
+"next launch",
+"rocket launches",
+"launches this week",
+"spacex",
+"schedule",
+"when is the next launch",
+"launch"
+],
+"primary": true,
+"kind": "list",
+"path": "results",
+"row": [
+{
+"path": "name",
+"label": "Launch",
+"type": "text"
+},
+{
+"path": "net",
+"label": "Time",
+"type": "time"
+},
+{
+"path": "status.name",
+"label": "Status",
+"type": "text"
+}
+],
+"may_be_empty": true,
+"axis": {
+"cell": "net",
+"step": "day"
+}
+},
+{
+"name": "total",
+"label": "Upcoming launches listed",
+"words": [
+"how many",
+"count",
+"total",
+"number of launches"
+],
+"primary": false,
+"kind": "value",
+"path": "count",
+"type": "number",
+"window": "latest"
+}
+]
+},
+"mlb-team-results": {
+"name": "MLB team recent results",
+"params": [
+{
+"example": "147",
+"fill": {
+"field": "key",
+"from": "resolver",
+"resolver": "team_mlb"
+},
+"kind": "team",
+"name": "team",
+"required": true
+},
+{
+"example": "2026-09-21",
+"fill": {
+"format": "%Y-%m-%d",
+"from": "clock",
+"offset_days": -7
+},
+"kind": "date",
+"name": "since",
+"required": true
+},
+{
+"example": "2026-09-28",
+"fill": {
+"format": "%Y-%m-%d",
+"from": "clock",
+"offset_days": 0
+},
+"kind": "date",
+"name": "until",
+"required": true
+}
+],
+"answers": [
+{
+"name": "results",
+"label": "Recent results",
+"words": [
+"score",
+"scores",
+"result",
+"results",
+"final",
+"last game",
+"did they win",
+"won",
+"lost",
+"last night"
+],
+"primary": true,
+"kind": "list",
+"path": "dates",
+"row": [
+{
+"path": "games[0].teams.away.team.name",
+"label": "Away",
+"type": "text"
+},
+{
+"path": "games[0].teams.away.score",
+"label": "Away runs",
+"type": "number"
+},
+{
+"path": "games[0].teams.home.team.name",
+"label": "Home",
+"type": "text"
+},
+{
+"path": "games[0].teams.home.score",
+"label": "Home runs",
+"type": "number"
+}
+],
+"newest_first": true,
+"filter": {
+"path": "games[0].status.detailedState",
+"equals": "Final"
+},
+"may_be_empty": true
+},
+{
+"name": "recent_games",
+"label": "Recent games",
+"words": [
+"when",
+"date",
+"which day",
+"last week",
+"status",
+"postponed",
+"cancelled",
+"rained out"
+],
+"kind": "list",
+"path": "dates",
+"row": [
+{
+"path": "date",
+"label": "Date",
+"type": "date"
+},
+{
+"path": "games[0].teams.away.team.name",
+"label": "Away",
+"type": "text"
+},
+{
+"path": "games[0].teams.home.team.name",
+"label": "Home",
+"type": "text"
+},
+{
+"path": "games[0].status.detailedState",
+"label": "Status",
+"type": "text"
+}
+],
+"newest_first": true,
+"may_be_empty": true,
+"axis": {
+"cell": "date",
+"step": "day"
+}
+}
+]
+},
+"nhl-score-now": {
+"name": "NHL scores today",
+"params": [],
+"answers": [
+{
+"name": "games",
+"label": "Games",
+"words": [
+"hockey scores",
+"games tonight",
+"games",
+"scores",
+"tonight",
+"today",
+"nhl games",
+"who plays"
+],
+"primary": true,
+"kind": "list",
+"path": "games",
+"row": [
+{
+"path": "awayTeam.name.default",
+"label": "Away",
+"type": "text"
+},
+{
+"path": "homeTeam.name.default",
+"label": "Home",
+"type": "text"
+},
+{
+"path": "startTimeUTC",
+"label": "Start",
+"type": "time"
+},
+{
+"path": "gameState",
+"label": "State",
+"type": "text"
+}
+],
+"may_be_empty": true,
+"axis": {
+"cell": "startTimeUTC",
+"step": "hour"
+}
+},
+{
+"name": "current_date",
+"label": "Date",
+"words": [
+"date",
+"day",
+"which day"
+],
+"primary": false,
+"kind": "value",
+"path": "currentDate",
+"type": "date",
+"window": "today"
+}
+]
+},
+"nhl-standings-now": {
+"name": "NHL standings",
+"params": [],
+"answers": [
+{
+"name": "standings",
+"label": "League standings",
+"words": [
+"standings",
+"nhl standings",
+"table",
+"points",
+"ranking",
+"who leads",
+"first place"
+],
+"primary": true,
+"kind": "list",
+"path": "standings",
+"row": [
+{
+"path": "teamName.default",
+"label": "Team",
+"type": "text"
+},
+{
+"path": "points",
+"label": "Pts",
+"type": "number"
+},
+{
+"path": "wins",
+"label": "W",
+"type": "number"
+},
+{
+"path": "losses",
+"label": "L",
+"type": "number"
+}
+]
+},
+{
+"name": "as_of",
+"label": "As of",
+"words": [
+"as of",
+"updated",
+"when"
+],
+"primary": false,
+"kind": "value",
+"path": "standingsDateTimeUtc",
+"type": "time",
+"window": "latest"
+}
+]
+},
+"nifc-current-fires": {
+"name": "NIFC current wildfire incidents",
+"params": [
+{
+"example": "CA",
+"fill": {
+"field": "key",
+"from": "resolver",
+"resolver": "us_state"
+},
+"kind": "us_state",
+"name": "state",
+"required": true
+}
+],
+"answers": [
+{
+"name": "fires",
+"label": "Current wildfires",
+"words": [
+"wildfires",
+"fires",
+"burning",
+"biggest fires",
+"acres",
+"containment",
+"contained",
+"fire size"
+],
+"primary": true,
+"kind": "list",
+"path": "features",
+"row": [
+{
+"path": "attributes.IncidentName",
+"label": "Fire",
+"type": "text"
+},
+{
+"path": "attributes.IncidentSize",
+"label": "Size",
+"type": "number",
+"unit": "acres"
+},
+{
+"path": "attributes.PercentContained",
+"label": "Contained",
+"type": "number",
+"unit": "%"
+},
+{
+"path": "attributes.FireDiscoveryDateTime",
+"label": "Discovered",
+"type": "time"
+}
+],
+"may_be_empty": true
+},
+{
+"name": "fire_count",
+"label": "Fires listed (up to 25)",
+"words": [
+"how many fires",
+"count",
+"number of fires"
+],
+"primary": false,
+"kind": "value",
+"path": "features",
+"type": "count",
+"window": "now"
+}
+]
+},
+"nws-alerts-point": {
+"name": "NWS active alerts for a location",
+"params": [
+{
+"example": "32.7765",
+"fill": {
+"field": "lat",
+"from": "resolver",
+"resolver": "place"
+},
+"kind": "place",
+"name": "lat",
+"required": true
+},
+{
+"example": "-79.9311",
+"fill": {
+"field": "lon",
+"from": "resolver",
+"resolver": "place"
+},
+"kind": "place",
+"name": "lon",
+"required": true
+}
+],
+"answers": [
+{
+"name": "alerts",
+"label": "Active weather alerts",
+"words": [
+"alerts",
+"warnings",
+"watches",
+"advisories",
+"severe weather",
+"any warnings",
+"near me",
+"tornado warning",
+"severe thunderstorm warning",
+"flood warning",
+"flash flood",
+"winter storm warning",
+"blizzard warning",
+"heat advisory",
+"red flag warning"
+],
+"primary": true,
+"kind": "list",
+"path": "features",
+"row": [
+{
+"path": "properties.event",
+"label": "Alert",
+"type": "text"
+},
+{
+"path": "properties.severity",
+"label": "Severity",
+"type": "text"
+},
+{
+"path": "properties.areaDesc",
+"label": "Area",
+"type": "text"
+},
+{
+"path": "properties.expires",
+"label": "Expires",
+"type": "time"
+}
+],
+"may_be_empty": true
+},
+{
+"name": "alert_count",
+"label": "Active alerts",
+"words": [
+"how many",
+"count",
+"number of alerts",
+"how many warnings",
+"how many alerts"
+],
+"primary": false,
+"kind": "value",
+"path": "features",
+"type": "count",
+"window": "now",
+"measure": "alerts"
+}
+]
+},
+"nws-alerts-state": {
+"name": "NWS active alerts by state",
+"params": [
+{
+"example": "SC",
+"fill": {
+"field": "key",
+"from": "resolver",
+"resolver": "us_state"
+},
+"kind": "us_state",
+"name": "state",
+"required": true
+}
+],
+"answers": [
+{
+"name": "alerts",
+"label": "Active weather alerts",
+"words": [
+"alerts",
+"warnings",
+"watches",
+"advisories",
+"severe weather",
+"weather alerts",
+"statewide"
+],
+"primary": true,
+"kind": "list",
+"path": "features",
+"row": [
+{
+"path": "properties.event",
+"label": "Alert",
+"type": "text"
+},
+{
+"path": "properties.severity",
+"label": "Severity",
+"type": "text"
+},
+{
+"path": "properties.areaDesc",
+"label": "Area",
+"type": "text"
+},
+{
+"path": "properties.expires",
+"label": "Expires",
+"type": "time"
+}
+],
+"may_be_empty": true
+},
+{
+"name": "alert_count",
+"label": "Active alerts",
+"words": [
+"how many",
+"count",
+"number of alerts",
+"how many warnings",
+"right now"
+],
+"primary": false,
+"kind": "value",
+"path": "features",
+"type": "count",
+"window": "now",
+"measure": "alerts"
+}
+]
+},
+"nws-forecast": {
+"name": "NWS 7-day forecast",
+"params": [
+{
+"example": "CHS",
+"fill": {
+"from": "source",
+"path": "properties.gridId",
+"source": "nws-points"
+},
+"kind": "place",
+"name": "office",
+"required": true
+},
+{
+"example": "87",
+"fill": {
+"from": "source",
+"path": "properties.gridX",
+"source": "nws-points"
+},
+"kind": "place",
+"name": "grid_x",
+"required": true
+},
+{
+"example": "77",
+"fill": {
+"from": "source",
+"path": "properties.gridY",
+"source": "nws-points"
+},
+"kind": "place",
+"name": "grid_y",
+"required": true
+}
+],
+"answers": [
+{
+"name": "periods",
+"label": "Forecast periods",
+"words": [
+"forecast",
+"this week",
+"7 day",
+"week",
+"weekend",
+"next few days",
+"daily forecast",
+"outlook",
+"will it rain tomorrow",
+"tomorrow",
+"snow this week",
+"storms this weekend"
+],
+"primary": true,
+"kind": "list",
+"path": "properties.periods",
+"row": [
+{
+"path": "startTime",
+"label": "Period",
+"type": "time"
+},
+{
+"path": "temperature",
+"label": "Temperature",
+"type": "number",
+"unit": "°F"
+},
+{
+"path": "shortForecast",
+"label": "Conditions",
+"type": "text"
+},
+{
+"path": "probabilityOfPrecipitation.value",
+"label": "Rain chance",
+"type": "number",
+"unit": "%"
+}
+],
+"axis": {
+"cell": "startTime",
+"step": "period"
+}
+},
+{
+"name": "tonight",
+"label": "Tonight",
+"words": [
+"tonight",
+"overnight",
+"this evening",
+"later tonight",
+"tonight's forecast",
+"low tonight",
+"storm tonight",
+"thunderstorms tonight",
+"rain tonight",
+"frost tonight",
+"freeze tonight",
+"fog tonight",
+"snow tonight"
+],
+"primary": false,
+"kind": "list",
+"path": "properties.periods",
+"row": [
+{
+"path": "startTime",
+"label": "Starts",
+"type": "time"
+},
+{
+"path": "temperature",
+"label": "Low",
+"type": "number",
+"unit": "°F"
+},
+{
+"path": "shortForecast",
+"label": "Conditions",
+"type": "text"
+},
+{
+"path": "probabilityOfPrecipitation.value",
+"label": "Rain chance",
+"type": "number",
+"unit": "%"
+}
+],
+"filter": {
+"path": "name",
+"equals": "Tonight"
+},
+"may_be_empty": true,
+"axis": {
+"cell": "startTime",
+"step": "period"
+}
+},
+{
+"name": "today",
+"label": "Today",
+"words": [
+"today",
+"this afternoon",
+"later today",
+"today's forecast",
+"high today",
+"rain today",
+"storms today",
+"this morning",
+"thunderstorms today",
+"snow today",
+"fog this morning"
+],
+"primary": false,
+"kind": "list",
+"path": "properties.periods",
+"row": [
+{
+"path": "startTime",
+"label": "Period",
+"type": "time"
+},
+{
+"path": "temperature",
+"label": "Temperature",
+"type": "number",
+"unit": "°F"
+},
+{
+"path": "shortForecast",
+"label": "Conditions",
+"type": "text"
+},
+{
+"path": "probabilityOfPrecipitation.value",
+"label": "Rain chance",
+"type": "number",
+"unit": "%"
+}
+],
+"axis": {
+"cell": "startTime",
+"step": "period"
+}
+},
+{
+"name": "next_period",
+"label": "Next forecast period",
+"words": [
+"now",
+"next",
+"today",
+"tonight",
+"this afternoon"
+],
+"primary": false,
+"kind": "value",
+"path": "properties.periods[0].name",
+"type": "text",
+"window": "now"
+},
+{
+"name": "next_temp",
+"label": "Temperature (next period)",
+"words": [
+"temperature",
+"temp",
+"degrees",
+"hot",
+"cold",
+"warm",
+"how hot",
+"how cold"
+],
+"primary": false,
+"kind": "value",
+"path": "properties.periods[0].temperature",
+"type": "number",
+"unit": "°F",
+"window": "now",
+"measure": "temperature"
+},
+{
+"name": "next_conditions",
+"label": "Conditions (next period)",
+"words": [
+"conditions",
+"sky",
+"sunny",
+"cloudy",
+"clear",
+"outside",
+"what's it like",
+"thunderstorm",
+"hail",
+"fog",
+"frost",
+"sleet",
+"freezing rain",
+"snow",
+"storm"
+],
+"primary": false,
+"kind": "value",
+"path": "properties.periods[0].shortForecast",
+"type": "text",
+"window": "now",
+"measure": "conditions"
+},
+{
+"name": "next_rain",
+"label": "Rain chance (next period)",
+"words": [
+"rain",
+"rain chance",
+"chance of rain",
+"precipitation",
+"umbrella",
+"showers",
+"rain today"
+],
+"primary": false,
+"kind": "value",
+"path": "properties.periods[0].probabilityOfPrecipitation.value",
+"type": "number",
+"unit": "%",
+"window": "now",
+"measure": "precip_chance"
+},
+{
+"name": "next_wind",
+"label": "Wind (next period)",
+"words": [
+"wind",
+"windy",
+"breeze",
+"wind speed",
+"gusts",
+"gusty"
+],
+"primary": false,
+"kind": "value",
+"path": "properties.periods[0].windSpeed",
+"type": "text",
+"window": "now",
+"measure": "wind"
+},
+{
+"name": "next_detail",
+"label": "Forecast details (next period)",
+"words": [
+"details",
+"detailed forecast",
+"summary",
+"describe",
+"full forecast"
+],
+"primary": false,
+"kind": "value",
+"path": "properties.periods[0].detailedForecast",
+"type": "text",
+"window": "now"
+}
+]
+},
+"open-meteo-air-quality": {
+"name": "Open-Meteo air quality",
+"params": [
+{
+"example": "32.7765",
+"fill": {
+"field": "lat",
+"from": "resolver",
+"resolver": "place"
+},
+"kind": "place",
+"name": "lat",
+"required": true
+},
+{
+"example": "-79.9311",
+"fill": {
+"field": "lon",
+"from": "resolver",
+"resolver": "place"
+},
+"kind": "place",
+"name": "lon",
+"required": true
+}
+],
+"answers": [
+{
+"name": "us_aqi",
+"label": "Air quality (US AQI)",
+"words": [
+"air quality",
+"aqi",
+"air",
+"is the air safe",
+"pollution",
+"smog",
+"air index"
+],
+"primary": true,
+"kind": "value",
+"path": "current.us_aqi",
+"type": "number",
+"window": "now",
+"measure": "air_quality"
+},
+{
+"name": "pm2_5",
+"label": "PM2.5",
+"words": [
+"pm2.5",
+"pm 2.5",
+"smoke",
+"smoke levels",
+"fine particles",
+"particulates",
+"haze"
+],
+"primary": true,
+"kind": "value",
+"path": "current.pm2_5",
+"type": "number",
+"unit_path": "current_units.pm2_5",
+"window": "now"
+},
+{
+"name": "pm10",
+"label": "PM10",
+"words": [
+"pm10",
+"pm 10",
+"dust",
+"coarse particles",
+"pollen dust"
+],
+"primary": false,
+"kind": "value",
+"path": "current.pm10",
+"type": "number",
+"unit_path": "current_units.pm10",
+"window": "now"
+},
+{
+"name": "ozone",
+"label": "Ozone",
+"words": [
+"ozone",
+"o3",
+"smog",
+"ground level ozone"
+],
+"primary": true,
+"kind": "value",
+"path": "current.ozone",
+"type": "number",
+"unit_path": "current_units.ozone",
+"window": "now"
+},
+{
+"name": "aqi_hourly",
+"label": "Air quality by hour",
+"words": [
+"by hour",
+"hourly",
+"later today",
+"tomorrow",
+"forecast",
+"air quality forecast",
+"tonight"
+],
+"primary": false,
+"kind": "columns",
+"columns": [
+{
+"path": "hourly.time",
+"label": "Time",
+"type": "time"
+},
+{
+"path": "hourly.us_aqi",
+"label": "US AQI",
+"type": "number"
+}
+],
+"limit": 24,
+"axis": {
+"cell": "hourly.time",
+"step": "hour"
+}
+}
+]
+},
+"open-meteo-forecast": {
+"name": "Open-Meteo forecast",
+"params": [
+{
+"example": "32.7765",
+"fill": {
+"field": "lat",
+"from": "resolver",
+"resolver": "place"
+},
+"kind": "place",
+"name": "lat",
+"required": true
+},
+{
+"example": "-79.9311",
+"fill": {
+"field": "lon",
+"from": "resolver",
+"resolver": "place"
+},
+"kind": "place",
+"name": "lon",
+"required": true
+}
+],
+"answers": [
+{
+"name": "temperature",
+"label": "Temperature",
+"words": [
+"temperature",
+"temp",
+"degrees",
+"hot",
+"cold",
+"warm",
+"how hot",
+"how cold",
+"now",
+"current"
+],
+"primary": true,
+"kind": "value",
+"path": "current.temperature_2m",
+"type": "number",
+"unit_path": "current_units.temperature_2m",
+"window": "now",
+"measure": "temperature"
+},
+{
+"name": "feels_like",
+"label": "Feels like",
+"words": [
+"feels like",
+"feel like",
+"real feel",
+"apparent temperature",
+"heat index",
+"wind chill"
+],
+"primary": false,
+"kind": "value",
+"path": "current.apparent_temperature",
+"type": "number",
+"unit_path": "current_units.apparent_temperature",
+"window": "now",
+"measure": "feels_like"
+},
+{
+"name": "conditions",
+"label": "Conditions",
+"words": [
+"conditions",
+"sky",
+"sunny",
+"cloudy",
+"clear",
+"outside",
+"what's it like",
+"weather now",
+"storm",
+"thunderstorm",
+"hail",
+"fog",
+"sleet",
+"drizzle"
+],
+"primary": true,
+"kind": "value",
+"path": "current.weather_code",
+"type": "number",
+"codes": "wmo_weather",
+"window": "now",
+"measure": "conditions"
+},
+{
+"name": "high_today",
+"label": "High today",
+"words": [
+"high",
+"high today",
+"max",
+"maximum",
+"how hot today",
+"warmest"
+],
+"primary": true,
+"kind": "value",
+"path": "daily.temperature_2m_max[0]",
+"type": "number",
+"unit_path": "daily_units.temperature_2m_max",
+"window": "today",
+"measure": "temperature"
+},
+{
+"name": "low_today",
+"label": "Low today",
+"words": [
+"low",
+"low today",
+"min",
+"minimum",
+"coldest",
+"overnight low"
+],
+"primary": true,
+"kind": "value",
+"path": "daily.temperature_2m_min[0]",
+"type": "number",
+"unit_path": "daily_units.temperature_2m_min",
+"window": "today",
+"measure": "temperature"
+},
+{
+"name": "humidity",
+"label": "Humidity",
+"words": [
+"humidity",
+"humid",
+"muggy",
+"sticky",
+"damp"
+],
+"primary": false,
+"kind": "value",
+"path": "current.relative_humidity_2m",
+"type": "number",
+"unit_path": "current_units.relative_humidity_2m",
+"window": "now",
+"measure": "humidity"
+},
+{
+"name": "wind",
+"label": "Wind speed",
+"words": [
+"wind",
+"windy",
+"breeze",
+"wind speed",
+"gusts",
+"gusty",
+"how windy"
+],
+"primary": false,
+"kind": "value",
+"path": "current.wind_speed_10m",
+"type": "number",
+"unit": "mph",
+"window": "now",
+"measure": "wind"
+},
+{
+"name": "rain_today",
+"label": "Rain chance today",
+"words": [
+"rain",
+"rain chance",
+"chance of rain",
+"precipitation",
+"umbrella",
+"showers",
+"rain today"
+],
+"primary": false,
+"kind": "value",
+"path": "daily.precipitation_probability_max[0]",
+"type": "number",
+"unit_path": "daily_units.precipitation_probability_max",
+"window": "today",
+"measure": "precip_chance"
+},
+{
+"name": "rain_tomorrow",
+"label": "Rain chance tomorrow",
+"words": [
+"tomorrow",
+"rain tomorrow",
+"chance of rain tomorrow",
+"will it rain tomorrow",
+"umbrella tomorrow"
+],
+"primary": false,
+"kind": "value",
+"path": "daily.precipitation_probability_max[1]",
+"type": "number",
+"unit_path": "daily_units.precipitation_probability_max",
+"window": "tomorrow",
+"measure": "precip_chance"
+},
+{
+"name": "tonight",
+"label": "Tonight, hour by hour",
+"words": [
+"tonight",
+"overnight",
+"this evening",
+"later tonight",
+"tonight's forecast",
+"storm tonight",
+"thunderstorms tonight",
+"rain tonight",
+"frost tonight",
+"fog tonight",
+"snow tonight",
+"hourly",
+"by hour",
+"hour by hour",
+"next few hours"
+],
+"primary": false,
+"kind": "columns",
+"columns": [
+{
+"path": "hourly.time",
+"label": "Time",
+"type": "time"
+},
+{
+"path": "hourly.weather_code",
+"label": "Conditions",
+"type": "number",
+"codes": "wmo_weather"
+},
+{
+"path": "hourly.temperature_2m",
+"label": "Temperature",
+"type": "number",
+"unit_path": "hourly_units.temperature_2m"
+},
+{
+"path": "hourly.precipitation_probability",
+"label": "Rain chance",
+"type": "number",
+"unit_path": "hourly_units.precipitation_probability"
+},
+{
+"path": "hourly.snowfall",
+"label": "Snowfall",
+"type": "number",
+"unit_path": "hourly_units.snowfall"
+}
+],
+"limit": 24,
+"axis": {
+"cell": "hourly.time",
+"step": "hour"
+}
+},
+{
+"name": "daily_forecast",
+"label": "Daily forecast",
+"words": [
+"forecast",
+"this week",
+"7 day",
+"week",
+"weekend",
+"next few days",
+"daily forecast",
+"outlook",
+"rain chance this weekend",
+"storms this week",
+"freeze",
+"frost",
+"freezing rain",
+"ice"
+],
+"primary": false,
+"kind": "columns",
+"columns": [
+{
+"path": "daily.time",
+"label": "Day",
+"type": "date"
+},
+{
+"path": "daily.weather_code",
+"label": "Conditions",
+"type": "number",
+"codes": "wmo_weather"
+},
+{
+"path": "daily.temperature_2m_max",
+"label": "High",
+"type": "number",
+"unit_path": "daily_units.temperature_2m_max"
+},
+{
+"path": "daily.precipitation_probability_max",
+"label": "Rain chance",
+"type": "number",
+"unit_path": "daily_units.precipitation_probability_max"
+}
+],
+"limit": 7,
+"axis": {
+"cell": "daily.time",
+"step": "day"
+}
+},
+{
+"name": "snow_forecast",
+"label": "Snow forecast",
+"words": [
+"snow",
+"snowfall",
+"snow forecast",
+"flurries",
+"how much snow",
+"will it snow",
+"snow accumulation",
+"inches of snow",
+"blizzard"
+],
+"primary": false,
+"kind": "columns",
+"columns": [
+{
+"path": "daily.time",
+"label": "Day",
+"type": "date"
+},
+{
+"path": "daily.snowfall_sum",
+"label": "Snowfall",
+"type": "number",
+"unit_path": "daily_units.snowfall_sum"
+},
+{
+"path": "daily.temperature_2m_min",
+"label": "Low",
+"type": "number",
+"unit_path": "daily_units.temperature_2m_min"
+},
+{
+"path": "daily.weather_code",
+"label": "Conditions",
+"type": "number",
+"codes": "wmo_weather"
+}
+],
+"limit": 7,
+"axis": {
+"cell": "daily.time",
+"step": "day"
+}
+}
+]
+},
+"open-meteo-sun": {
+"name": "Open-Meteo sunrise & sunset",
+"params": [
+{
+"example": "32.7765",
+"fill": {
+"field": "lat",
+"from": "resolver",
+"resolver": "place"
+},
+"kind": "place",
+"name": "lat",
+"required": true
+},
+{
+"example": "-79.9311",
+"fill": {
+"field": "lon",
+"from": "resolver",
+"resolver": "place"
+},
+"kind": "place",
+"name": "lon",
+"required": true
+}
+],
+"answers": [
+{
+"name": "sunrise_today",
+"label": "Sunrise today",
+"words": [
+"sunrise",
+"sunrise today",
+"sun rise",
+"sun up",
+"sunup",
+"dawn",
+"what time is sunrise",
+"when is sunrise",
+"morning"
+],
+"primary": true,
+"kind": "value",
+"path": "daily.sunrise[0]",
+"type": "time",
+"window": "today",
+"measure": "sunrise"
+},
+{
+"name": "sunset_today",
+"label": "Sunset today",
+"words": [
+"sunset",
+"sunset today",
+"sundown",
+"dusk",
+"what time is sunset",
+"when is sunset",
+"evening"
+],
+"primary": true,
+"kind": "value",
+"path": "daily.sunset[0]",
+"type": "time",
+"window": "today",
+"measure": "sunset"
+},
+{
+"name": "sunrise_tomorrow",
+"label": "Sunrise tomorrow",
+"words": [
+"tomorrow",
+"sunrise tomorrow",
+"dawn tomorrow",
+"sun up tomorrow",
+"sun rise tomorrow"
+],
+"primary": false,
+"kind": "value",
+"path": "daily.sunrise[1]",
+"type": "time",
+"window": "tomorrow",
+"measure": "sunrise"
+},
+{
+"name": "sunset_tomorrow",
+"label": "Sunset tomorrow",
+"words": [
+"tomorrow",
+"sunset tomorrow",
+"sundown tomorrow",
+"dusk tomorrow"
+],
+"primary": false,
+"kind": "value",
+"path": "daily.sunset[1]",
+"type": "time",
+"window": "tomorrow",
+"measure": "sunset"
+},
+{
+"name": "sun_week",
+"label": "Sunrise and sunset by day",
+"words": [
+"this week",
+"week",
+"next few days",
+"7 day",
+"daily",
+"by day",
+"sun times"
+],
+"primary": false,
+"kind": "columns",
+"columns": [
+{
+"path": "daily.time",
+"label": "Day",
+"type": "date"
+},
+{
+"path": "daily.sunrise",
+"label": "Sunrise",
+"type": "time"
+},
+{
+"path": "daily.sunset",
+"label": "Sunset",
+"type": "time"
+}
+],
+"limit": 7,
+"axis": {
+"cell": "daily.time",
+"step": "day"
+}
+}
+]
+},
+"statuspage-summary": {
+"name": "Service status (Statuspage)",
+"params": [
+{
+"example": "www.githubstatus.com",
+"fill": {
+"field": "key",
+"from": "resolver",
+"resolver": "statuspage"
+},
+"kind": "service",
+"name": "status_host",
+"required": true
+}
+],
+"answers": [
+{
+"name": "overall_status",
+"label": "Overall status",
+"words": [
+"status",
+"down",
+"is it down",
+"outage",
+"up",
+"working",
+"operational",
+"problems"
+],
+"primary": true,
+"kind": "value",
+"path": "status.description",
+"type": "text",
+"window": "now"
+},
+{
+"name": "service_name",
+"label": "Service",
+"words": [
+"service",
+"name",
+"which service"
+],
+"primary": false,
+"kind": "value",
+"path": "page.name",
+"type": "text",
+"window": "now"
+},
+{
+"name": "components",
+"label": "Components",
+"words": [
+"components",
+"services",
+"parts",
+"which parts",
+"features",
+"systems"
+],
+"primary": false,
+"kind": "list",
+"path": "components",
+"row": [
+{
+"path": "name",
+"label": "Component",
+"type": "text"
+},
+{
+"path": "status",
+"label": "Status",
+"type": "text"
+}
+]
+},
+{
+"name": "incidents",
+"label": "Open incidents",
+"words": [
+"incident",
+"incidents",
+"outage",
+"outages",
+"issues",
+"what is wrong",
+"problem"
+],
+"primary": false,
+"kind": "list",
+"path": "incidents",
+"row": [
+{
+"path": "name",
+"label": "Incident",
+"type": "text"
+},
+{
+"path": "status",
+"label": "Status",
+"type": "text"
+},
+{
+"path": "impact",
+"label": "Impact",
+"type": "text"
+},
+{
+"path": "updated_at",
+"label": "Updated",
+"type": "time"
+}
+],
+"may_be_empty": true
+},
+{
+"name": "maintenance",
+"label": "Scheduled maintenance",
+"words": [
+"maintenance",
+"scheduled",
+"planned",
+"downtime window"
+],
+"primary": false,
+"kind": "list",
+"path": "scheduled_maintenances",
+"row": [
+{
+"path": "name",
+"label": "Maintenance",
+"type": "text"
+},
+{
+"path": "status",
+"label": "Status",
+"type": "text"
+},
+{
+"path": "scheduled_for",
+"label": "Starts",
+"type": "time"
+}
+],
+"may_be_empty": true,
+"axis": {
+"cell": "scheduled_for",
+"step": "hour"
+}
+}
+]
+},
+"thesportsdb-team-next": {
+"name": "Team's next matchup (TheSportsDB)",
+"params": [
+{
+"example": "134949",
+"fill": {
+"field": "attrs.tsdb_id",
+"from": "resolver",
+"resolver": "team_espn"
+},
+"kind": "team",
+"name": "team",
+"required": true
+}
+],
+"answers": [
+{
+"name": "next_game",
+"label": "Next game",
+"words": [
+"next game",
+"next match",
+"who do they play",
+"opponent",
+"play next",
+"matchup",
+"next"
+],
+"primary": true,
+"kind": "value",
+"path": "events[0].strEvent",
+"type": "text",
+"window": "latest"
+},
+{
+"name": "start",
+"label": "Start",
+"words": [
+"when",
+"what time",
+"start time",
+"kickoff",
+"tip-off",
+"date",
+"game time",
+"next game",
+"play next"
+],
+"primary": true,
+"kind": "value",
+"path": "events[0].strTimestamp",
+"type": "time",
+"utc": true,
+"window": "latest"
+},
+{
+"name": "venue",
+"label": "Venue",
+"words": [
+"where",
+"venue",
+"stadium",
+"arena",
+"field",
+"next game",
+"play next"
+],
+"primary": true,
+"kind": "value",
+"path": "events[0].strVenue",
+"type": "text",
+"window": "latest"
+},
+{
+"name": "home",
+"label": "Home team",
+"words": [
+"home",
+"home team",
+"home game",
+"at home"
+],
+"kind": "value",
+"path": "events[0].strHomeTeam",
+"type": "text",
+"window": "latest"
+},
+{
+"name": "away",
+"label": "Away team",
+"words": [
+"away",
+"away team",
+"away game",
+"on the road",
+"visitors"
+],
+"kind": "value",
+"path": "events[0].strAwayTeam",
+"type": "text",
+"window": "latest"
+}
+]
+},
+"usgs-quakes-25-day": {
+"name": "USGS M2.5+ earthquakes, past day",
+"params": [],
+"answers": [
+{
+"name": "quakes",
+"label": "Earthquakes",
+"words": [
+"earthquakes",
+"quakes",
+"earthquake",
+"magnitude",
+"where",
+"latest",
+"recent",
+"shaking",
+"today",
+"past day"
+],
+"primary": true,
+"kind": "list",
+"path": "features",
+"row": [
+{
+"path": "properties.mag",
+"label": "Magnitude",
+"type": "number"
+},
+{
+"path": "properties.place",
+"label": "Place",
+"type": "text"
+},
+{
+"path": "properties.time",
+"label": "Time",
+"type": "time"
+}
+],
+"may_be_empty": true
+},
+{
+"name": "quake_count",
+"label": "Number of earthquakes",
+"words": [
+"how many",
+"count",
+"number of earthquakes",
+"total"
+],
+"primary": false,
+"kind": "value",
+"path": "features",
+"type": "count",
+"window": "latest"
+}
+]
+},
+"usgs-quakes-near": {
+"name": "USGS earthquakes near a place",
+"params": [
+{
+"example": "37.77",
+"fill": {
+"field": "lat",
+"from": "resolver",
+"resolver": "place"
+},
+"kind": "place",
+"name": "lat",
+"required": true
+},
+{
+"example": "-122.42",
+"fill": {
+"field": "lon",
+"from": "resolver",
+"resolver": "place"
+},
+"kind": "place",
+"name": "lon",
+"required": true
+},
+{
+"example": "200",
+"fill": {
+"from": "default",
+"value": "200"
+},
+"kind": "none",
+"name": "radius_km",
+"required": true
+},
+{
+"example": "2.5",
+"fill": {
+"from": "default",
+"value": "2.5"
+},
+"kind": "none",
+"name": "min_mag",
+"required": true
+},
+{
+"example": "2026-09-01",
+"fill": {
+"format": "%Y-%m-%d",
+"from": "clock",
+"offset_days": -30
+},
+"kind": "date",
+"name": "start",
+"required": true
+}
+],
+"answers": [
+{
+"name": "quakes",
+"label": "Earthquakes",
+"words": [
+"earthquakes",
+"quakes",
+"earthquake",
+"magnitude",
+"where",
+"latest",
+"recent",
+"shaking",
+"near",
+"nearby",
+"within"
+],
+"primary": true,
+"kind": "list",
+"path": "features",
+"row": [
+{
+"path": "properties.mag",
+"label": "Magnitude",
+"type": "number"
+},
+{
+"path": "properties.place",
+"label": "Place",
+"type": "text"
+},
+{
+"path": "properties.time",
+"label": "Time",
+"type": "time"
+}
+],
+"may_be_empty": true,
+"param_bounds": {
+"properties.mag": {
+"min": "min_mag"
+}
+}
+},
+{
+"name": "quake_count",
+"label": "Number of earthquakes",
+"words": [
+"how many",
+"count",
+"number of earthquakes",
+"total"
+],
+"primary": false,
+"kind": "value",
+"path": "features",
+"type": "count",
+"window": "now"
+}
+]
+},
+"usgs-quakes-state": {
+"name": "USGS earthquakes in a state",
+"params": [
+{
+"example": "51.179",
+"fill": {
+"field": "attrs.min_lat",
+"from": "resolver",
+"resolver": "us_state"
+},
+"kind": "us_state",
+"name": "min_lat",
+"required": true
+},
+{
+"example": "71.435",
+"fill": {
+"field": "attrs.max_lat",
+"from": "resolver",
+"resolver": "us_state"
+},
+"kind": "us_state",
+"name": "max_lat",
+"required": true
+},
+{
+"example": "-187.651",
+"fill": {
+"field": "attrs.min_lon",
+"from": "resolver",
+"resolver": "us_state"
+},
+"kind": "us_state",
+"name": "min_lon",
+"required": true
+},
+{
+"example": "-129.974",
+"fill": {
+"field": "attrs.max_lon",
+"from": "resolver",
+"resolver": "us_state"
+},
+"kind": "us_state",
+"name": "max_lon",
+"required": true
+},
+{
+"example": "2.5",
+"fill": {
+"from": "default",
+"value": "2.5"
+},
+"kind": "none",
+"name": "min_mag",
+"required": true
+},
+{
+"example": "2026-09-01",
+"fill": {
+"format": "%Y-%m-%d",
+"from": "clock",
+"offset_days": -30
+},
+"kind": "date",
+"name": "start",
+"required": true
+}
+],
+"answers": [
+{
+"name": "quakes",
+"label": "Earthquakes",
+"words": [
+"earthquakes",
+"quakes",
+"earthquake",
+"magnitude",
+"where",
+"latest",
+"recent",
+"shaking",
+"statewide",
+"in the state"
+],
+"primary": true,
+"kind": "list",
+"path": "features",
+"row": [
+{
+"path": "properties.mag",
+"label": "Magnitude",
+"type": "number"
+},
+{
+"path": "properties.place",
+"label": "Place",
+"type": "text"
+},
+{
+"path": "properties.time",
+"label": "Time",
+"type": "time"
+}
+],
+"may_be_empty": true,
+"param_bounds": {
+"properties.mag": {
+"min": "min_mag"
+}
+}
+},
+{
+"name": "quake_count",
+"label": "Number of earthquakes",
+"words": [
+"how many",
+"count",
+"number of earthquakes",
+"total"
+],
+"primary": false,
+"kind": "value",
+"path": "features",
+"type": "count",
+"window": "now"
+}
+]
+}
+}

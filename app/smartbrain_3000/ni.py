@@ -733,7 +733,11 @@ _QUERY_COVERAGE_VALUES = frozenset({"bound", "unbound", "approximated", "rules",
 _QUERY_NOTES = frozenset({"query_rules", "model_off", "model_unavailable", "schema_invalid", "time_explicit",
                           "where_dropped", "numbers_unstated", "order_dropped", "params_dropped", "count_list",
                           "names_unbound", "bound_pushed", "clock_bound", "refetched",
-                          "quantity_unbound", "time_range_kept", "comparator_added", "comparator_corrected"})
+                          "quantity_unbound", "time_range_kept", "comparator_added", "comparator_corrected",
+                          "order_default"})
+# Round 20 (Q3c): note codes that carry their value ("filter_ungrounded:anywhere in the world", "entity_added:Canucks")
+_QUERY_VALUE_NOTES = frozenset({"filter_ungrounded", "entity_added"})
+_MAX_QUERY_NOTE_VALUE = 60
 _MAX_INTERPRETATION = 300
 _MAX_QUERY_LIST = 6
 
@@ -745,6 +749,16 @@ def _query_scalar(value: object) -> bool:
     verdict = ok and not (isinstance(value, float) and not math.isfinite(value))
     assert isinstance(verdict, bool), "a verdict"
     return verdict
+
+
+def _query_note_ok(note: object) -> bool:
+    """A closed note code, or a value-carrying one ("entity_added:Canucks": a short one-line value)."""
+    assert _MAX_QUERY_NOTE_VALUE > 0, "a positive bound"
+    head, sep, value = str(note).partition(":")
+    ok = isinstance(note, str) and (note in _QUERY_NOTES or (
+        bool(sep) and head in _QUERY_VALUE_NOTES and 0 < len(value) <= _MAX_QUERY_NOTE_VALUE and value.isprintable()))
+    assert isinstance(ok, bool), "a verdict"
+    return ok
 
 
 def _validate_query_ir(ir: object) -> None:
@@ -803,7 +817,8 @@ def _validate_query(value: object) -> None:
             and all(v in _QUERY_COVERAGE_VALUES for v in cov.values())):
         raise ValueError("spec.query.coverage must map every clause to bound|unbound|approximated|rules|recognizer")
     notes = d["notes"]
-    if not (isinstance(notes, list) and len(notes) <= len(_QUERY_NOTES) and all(n in _QUERY_NOTES for n in notes)):
+    if not (isinstance(notes, list) and len(notes) <= len(_QUERY_NOTES) + 2 * _MAX_QUERY_LIST
+            and all(_query_note_ok(n) for n in notes)):
         raise ValueError("spec.query.notes must be closed note codes")
     model = d["model"]
     if not (isinstance(model, dict) and set(model) == {"attempts", "used_fewshot"}

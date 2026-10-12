@@ -12,10 +12,16 @@ every cell selected, params filled with places, the declared count chosen over l
   date cell or the declared filter's cell); a ranking selects nothing (its ranked cell is the
   order). A value answer's companions match words its own lexicon leaves unexplained, never
   share its measure and are no plain text label (a name, a station). [] when nothing matches.
-- limit (``limit_for``): a recognized number right after top / first / last / biggest / largest
-  ("top 5" → 5); else 1 when the ask says next / latest / last and the kind is next_event,
-  result or schedule on a list — with the order on the axis cell ("next" ascending from now,
-  "latest" / "last" descending).
+- limit (``limit_for``): a recognized number right before or right after a word of the closed ranking
+  table (``RANK_WORDS``: top, biggest, largest, smallest, highest, lowest, most, least, best, worst,
+  first, last — "top 5", "ten biggest", "biggest ten" → the number; Round 20, Q3c: either order); else 1
+  when the ask says next / latest / last and the kind is next_event, result or schedule on a list — with
+  the order on the axis cell ("next" ascending from now, "latest" / "last" descending).
+- ranking order (``rank_order``, Round 20, Q3c): a ``ranking`` ask the model left without an order is
+  ordered by its ranked number cell — the number cell the ask's quantity words name (the select lexicon:
+  "by trading volume" → the 24h volume cell), else the one the answer's own label names ("Top coins by
+  market cap"), else the answer's first number cell — descending, ascending when the ask's ranking word
+  is smallest / lowest / least.
 - agg: "count" iff the kind is ``count``.
 - comparators (``bind_comparators``, Round 20 Q3b): an explicit comparator the recognizers read is an
   anchor like an explicit time. Its quantity word (between the phrase and the number, else before
@@ -48,7 +54,10 @@ _SELECT_STOP = frozenset({
     "current", "currently", "latest", "newest", "recent", "next", "last", "first", "top", "forecast", "expected",
     "much", "many", "map", "plot", "list", "trend", "history", "near", "around", "off", "per", "vs", "versus",
     "time", "weather"})   # "what time is …" and "weather" name no one quantity
-_LIMIT_WORDS = frozenset({"top", "first", "last", "biggest", "largest"})
+# the closed ranking-word table (Round 20, Q3c): a word that ranks rows → the direction it ranks them
+RANK_WORDS: dict[str, str] = {"top": "desc", "biggest": "desc", "largest": "desc", "smallest": "asc",
+                              "highest": "desc", "lowest": "asc", "most": "desc", "least": "asc", "best": "desc",
+                              "worst": "desc", "first": "desc", "last": "desc"}
 _ONE_KINDS = frozenset({"next_event", "result", "schedule"})
 _ONE_DAY = frozenset({"today", "tonight", "tomorrow"})
 _NUM_CMP = frozenset({"<", "<=", ">", ">=", "=", "!="})
@@ -178,14 +187,33 @@ def limit_for(ask: str, kind: str | None, answer: dict, spans: dict) -> tuple[in
     assert isinstance(spans, dict), "spans required"
     ws = words(ask)[:400]
     for n in spans.get("numbers") or []:  # bounded by the recognizer
-        before = [w for w, _, end in ws if end <= n["start"]]
-        if before and before[-1] in _LIMIT_WORDS and isinstance(n["value"], int) and 1 <= n["value"] <= 100:
+        before = [w for w, _, end in ws if end <= n["start"]][-1:]
+        after = [w for w, start, _ in ws if start >= n["end"]][:1]
+        if set(before + after) & RANK_WORDS.keys() and isinstance(n["value"], int) and 1 <= n["value"] <= 100:
             return n["value"], [], False
     said = {w for w, _, _ in ws}
     if kind not in _ONE_KINDS or answer.get("kind") == "value" or not said & {"next", "latest", "last"}:
         return None, [], False
     axis, ahead = axis_of(answer), "next" in said
     return 1, ([{"col": axis, "dir": "asc" if ahead else "desc"}] if axis else []), ahead
+
+
+def rank_order(ask: str, kind: str | None, answer: dict | None, answers: list[dict], spans: dict,
+               consumed_words: frozenset[str]) -> list[dict]:
+    """The ranking ask's default order (module docstring): [{col, dir}] on the ranked number cell, or []."""
+    assert isinstance(ask, str) and isinstance(answers, list), "ask + answers required"
+    assert answer is None or isinstance(answer, dict), "answer must be a dict or None"
+    numbers = [c["path"] for c in cells_of(answer) if c.get("type") == "number"]
+    if kind != "ranking" or not numbers:
+        return []
+    lexicons = [(path, lex) for path, lex in _cell_lexicons(answer or {}, answers) if path in numbers]
+    asked = asked_words(ask, spans, consumed_words)
+    named = next((path for w in asked for path, lex in lexicons if _hits(w, lex)), None)
+    own = _lex(str((answer or {}).get("label") or ""))
+    labels = [(c["path"], _lex(str(c.get("label") or ""))) for c in cells_of(answer) if c["path"] in numbers]
+    labelled = next((path for path, lex in labels if lex and lex <= own), None)
+    low = any(RANK_WORDS.get(w) == "asc" for w, _, _ in words(ask)[:400])   # "top 5 lowest" ranks up
+    return [{"col": named or labelled or numbers[0], "dir": "asc" if low else "desc"}]
 
 
 def comparator_cell(comparator: dict, answer: dict | None) -> str | None:

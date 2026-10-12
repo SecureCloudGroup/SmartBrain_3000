@@ -461,7 +461,8 @@
  },
  "E14": {
   "source_id": "usno-moon-phases",
-  "skip": "fetch failed: URLError: <urlopen error [Errno -3] Temporary failure in name resolution>"
+  "file": "usno-moon-phases__a569cc2f.json",
+  "fetched_at": "2026-10-09T00:50:00Z"
  },
  "E18": {
   "source_id": "mlb-team-results",

@@ -447,12 +447,14 @@ def _ir_reply(answer: str, **kw) -> str:
                        "limit": None, "agg": "none", **kw})
 
 
-def _picked(store, lib, monkeypatch, request="NYC weather", source="open-meteo-forecast", params=None) -> str:
+def _picked(store, lib, monkeypatch, request="NYC weather", source="open-meteo-forecast", params=None,
+            label: str = "") -> str:
     monkeypatch.setattr(ni_flow, "_LIBRARY_PROVIDER", lambda: lib)
     item_id = ni_flow.create_shell_item(store, request)
     ni_flow._flow_write(store, item_id, ni_flow._make_record(request, "source"))
     ni_flow.seal_library_pick(store, item_id, WEATHER_URL,
-                              {"source_id": source, "url": WEATHER_URL, "format": "json", "params": params or {}})
+                              {"source_id": source, "url": WEATHER_URL, "format": "json", "params": params or {},
+                               "label": label})
     return item_id
 
 
@@ -765,7 +767,10 @@ def test_the_build_for_a_named_airport_uses_its_own_answer(lib, monkeypatch) -> 
     (Q3b): the query layer reads the airport's own answer (its filter names the filled {airport}); the build fills
     the filter from the address, so the card holds Newark's rows only."""
     store = _store()
-    item_id = _picked(store, lib, monkeypatch, request="delays at Newark airport", params={"airport": "EWR"})
+    # the pick as the Library offers it: the airport resolver's reading is the row's label (Round 20 Q3c: the
+    # words the address took are never a carried entity — "Newark" here)
+    item_id = _picked(store, lib, monkeypatch, request="delays at Newark airport", params={"airport": "EWR"},
+                      label="Newark Liberty International Airport (NJ)")
     raws = [{"kind": "list", "name": "ground_delay", "label": "Ground delay program", "words": ["delays"],
              "path": "items", "filter": {"path": "airportId", "equals": "{airport}"},
              "row": [{"path": "reason", "label": "Reason", "type": "text"}]},
