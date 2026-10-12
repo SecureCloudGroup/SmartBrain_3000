@@ -38,7 +38,7 @@
     validateParamForm,
   } from "$lib/ni/library";
   import { formatStageJson, stagesFromSpec } from "$lib/ni/proposal";
-  import { bodyShowsPanel, cardSpan, cardState, footerText, formBoxChrome } from "$lib/ni/shell";
+  import { bodyShowsPanel, cardSpan, cardState, footerText, formBoxChrome, interpretationOf } from "$lib/ni/shell";
   import { isStale, relTime } from "$lib/ni/time";
   import { runStatusLabel } from "$lib/runs";
   import { toast } from "$lib/toast.svelte";
@@ -1240,6 +1240,7 @@
           rows={span.rows}
           preview={preview || !!item.awaiting_yes}
           footerText={footerText(item)}
+          interpretation={interpretationOf(item)}
           {reason}
         >
           {#snippet chips()}
@@ -1651,6 +1652,8 @@
                 payload={item.payload}
                 viewerTz={VIEWER_TZ}
                 busy={busyId === item.id}
+                interpretation={interpretationOf(item)}
+                coverage={item.query?.coverage}
                 onUse={(id) => validateLooksRight(item, id)}
                 onWrong={() => openWrongNote(item)}
               />

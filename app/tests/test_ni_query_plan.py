@@ -12,19 +12,20 @@ import pytest
 
 from smartbrain_3000.ni_forms import llm
 from smartbrain_3000.ni_query import plan_query, recognize, say
-from smartbrain_3000.ni_query.clauses import select_for
+from smartbrain_3000.ni_query.clauses import select_for, serves_time
 from smartbrain_3000.ni_query.decl import answer_named
 from smartbrain_3000.ni_query.normalize import (
     count_equiv,
     explicit_time,
     order_key,
+    said_whole,
     stated_numbers,
     structural_errors,
     time_key,
     v1_where,
     where_key,
 )
-from smartbrain_3000.ni_query.plan import make_ctx
+from smartbrain_3000.ni_query.plan import make_ctx, model_range_stands
 from smartbrain_3000.ni_query.prompt import RETRY_SKELETON
 
 _FIX = pathlib.Path(__file__).parent / "fixtures" / "ni_query"
@@ -38,8 +39,11 @@ def _jl(name: str) -> list[dict]:
 _GOLD = {g["id"]: g for g in _jl("gold.jsonl")}
 _LIB = json.loads((_FIX / "library.json").read_text())
 _SPLIT = json.loads((_FIX / "split.json").read_text())
-_POOL = _jl("pool.jsonl")
+# the few-shot pool ships with the app (the flow's query call reads it): one copy, measured and served
+_POOL = [json.loads(line) for line in (pathlib.Path(__file__).parents[1] / "smartbrain_3000" / "ni_query"
+                                       / "pool.jsonl").read_text().splitlines() if line.strip()]
 _FEW = {r["id"]: r for r in _jl("replies_fewshot.jsonl")}
+_THU_9 = dt.datetime(2026, 10, 8, 9, 0, tzinfo=ZoneInfo(_ZONE))
 
 
 def _now(row: dict) -> dt.datetime:
@@ -76,6 +80,8 @@ def _full_right(row: dict, ir: dict) -> bool:
     ctx = make_ctx(row["ask"], row["kind"], src["answers"], spans, _consumed(row["ask"]), src["name"])
     gold, ga = row["ir"], answer_named(src["answers"], row["ir"]["answer"])
     exp = explicit_time(spans, row["kind"])
+    if model_range_stands(exp, gold["time"], spans):  # the lead's Q3b time ruling, on the gold side too
+        exp = None
     gw = stated_numbers(v1_where(gold["where"], ga, row["ask"], ctx.consumed_words, ctx.src_words), spans, row["ask"])
     return ((ir["answer"] == gold["answer"] or count_equiv(ir["answer"], gold, src["answers"]))
             and time_key(ir["time"]) == time_key(exp if exp is not None else gold["time"])
@@ -86,8 +92,9 @@ def _full_right(row: dict, ir: dict) -> bool:
 
 def test_replayed_replies_end_to_end():
     """The recorded first reply, then the recorded valid object: the module's validator agrees with
-    the Q2 harness's on every few-shot TEST row, and the final IRs score 51/60 (53/60 with the floor
-    for the three never-valid rows) under the full contract."""
+    the Q2 harness's on every few-shot TEST row, and the final IRs score 52/60 (55/60 with the floor
+    for the three never-valid rows) under the full contract — Round 20, Q3b: the window-aware floor reads
+    E13's "next game", and the recognized comparator E37's reply dropped is bound back (was 51 / 53)."""
     right = floor_right = 0
     test = [_GOLD[i] for i in _SPLIT["test"]]
     for row in test:
@@ -102,7 +109,7 @@ def test_replayed_replies_end_to_end():
         if not row["note"]:
             right += plan.model_ir is not None and _full_right(row, plan.ir)
             floor_right += _full_right(row, plan.ir)
-    assert (right, floor_right) == (51, 53), (right, floor_right)
+    assert (right, floor_right) == (52, 55), (right, floor_right)
 
 
 def test_retry_states_the_rule_only():
@@ -143,18 +150,74 @@ def test_structural_rules_reach_the_retry(reply, rule):
 def test_rules_floor_when_the_model_is_off_or_down():
     row = _GOLD["E37"]   # how many earthquakes above magnitude 2 hit Oklahoma this week
     off = _plan(row, None)
-    assert off.notes == ["query_rules", "model_off"] and off.model_meta["attempts"] == 0
-    assert off.ir == {"answer": "quakes", "params": {}, "select": [], "where": [],
+    assert off.notes == ["query_rules", "model_off", "comparator_added"] and off.model_meta["attempts"] == 0
+    assert off.ir == {"answer": "quakes", "params": {}, "select": [],
+                      "where": [{"col": "properties.mag", "op": ">", "value": 2}],
                       "time": {"from": "past_days:7", "to": "today"}, "order": [], "limit": None, "agg": "count"}
     assert off.coverage["answer"] == "rules" and off.coverage["order"] == "rules"
-    assert off.coverage["where"] == "unbound", "the floor's where carries no comparator: flagged, not hidden"
-    assert off.interpretation == "Earthquakes · past 7 days · count"
+    # Round 20, Q3b: the floor carries the explicit comparator like the explicit time (it read: where [], unbound)
+    assert off.coverage["where"] == "recognizer"
+    assert off.interpretation == "Earthquakes · Magnitude > 2 · past 7 days · count"
 
     def down(_messages):
         raise ConnectionError("gateway down")
     plan = _plan(row, down)
-    assert plan.notes == ["query_rules", "model_unavailable"] and plan.ir == off.ir
+    assert plan.notes == ["query_rules", "model_unavailable", "comparator_added"] and plan.ir == off.ir
     assert plan.model_meta["attempts"] == 1
+
+
+@pytest.mark.parametrize(("time", "grades"), [
+    ({"from": "dow:sat", "to": "dow:sat"}, {"daily_forecast": 2, "tonight": 1, "high_today": 0}),
+    ({"from": "weekend", "to": "weekend"}, {"snow_forecast": 2, "tonight": 1, "temperature": 0}),
+    ({"from": "tonight", "to": "tonight"}, {"tonight": 2, "daily_forecast": 1, "temperature": 0}),
+    ({"from": "tomorrow", "to": "tomorrow"}, {"rain_tomorrow": 2, "daily_forecast": 2, "rain_today": 0}),
+    ({"from": "now", "to": "now"}, {"temperature": 2, "high_today": 0, "tonight": 0}),
+    ({"from": "now", "to": "next_hours:6"}, {"tonight": 2, "daily_forecast": 0}),
+    ({"from": "past_days:7", "to": "today"}, {"daily_forecast": 0, "tonight": 0}),   # behind us: no preference
+    (None, {"daily_forecast": 0, "temperature": 0}),
+])
+def test_serves_time_grades_the_declared_window_and_axis(time, grades):
+    """Round 20, Q3b — the floor's first key, the removed select_answers window rule: a value declared for
+    the stretch or rows whose axis cuts it exactly (2), approximately (1: day rows for tonight, hour rows
+    for a weekday), or not (0)."""
+    answers = {a["name"]: a for a in _LIB["open-meteo-forecast"]["answers"]}
+    assert {name: serves_time(answers[name], time) for name in grades} == grades
+
+
+@pytest.mark.parametrize(("rid", "answer"), [
+    ("C7", "daily_forecast"),      # "on Friday": the day rows, never tonight's hours (was: tonight)
+    ("E7", "daily_forecast"),      # "on Sunday"
+    ("B9", "snow_forecast"),       # the weekend's day rows; "snow" names it (its own name, not just words)
+    ("D12", "next_low"),           # "the next low tide": the answer whose own label says it (was: tides)
+    ("E12", "next_high"),
+    ("E2", "wind"),                # "right now": a value declared now that the ask names
+    ("A17", "results"),            # "last night": a stretch behind us prefers no axis — its own name decides
+])
+def test_the_rules_floor_is_window_aware_then_prefers_its_own_name(rid, answer):
+    """Round 20, Q3b: with the model off, the floor ranks (serves the explicit stretch, name / label words,
+    declared words, primary, declared order) — measured on the gold set: floor alone 39 → 46 of 60 few-shot
+    TEST rows right, 52 → 60 of 82."""
+    plan = _plan(_GOLD[rid], None)
+    assert plan.notes == ["query_rules", "model_off"] and plan.ir["answer"] == answer, plan.ir
+
+
+@pytest.mark.parametrize(("value", "ask", "said"), [
+    ("quakes", "how many earthquakes above 4.0 today", False),           # inside "earthquakes" (live A33)
+    ("OR", "how many active wildfires are burning in Oregon", False),    # inside "Oregon" (live D36)
+    ("delay", "number of flights delayed at JFK right now", False),      # "delayed" is no plural (C38)
+    ("ISS", "plot where the space station is over the Pacific", False),  # "is" + s is no "ISS"
+    ("Tornado Watch", "any tornado watches in Kansas", True),            # the ask's last word adds -es
+    ("Winter Storm Warning", "winter storm warnings in Colorado", True),
+    ("Sharks", "result of the latest Sharks game", True),
+    ("Chicago O'Hare", "delays at Chicago O'Hare right now", True),
+])
+def test_a_filter_value_is_a_run_of_whole_ask_words(value, ask, said):
+    """Round 20, Q3b — the v1 where rule: a contains / names value must be whole words of the ask (the
+    ask's last word may add a plural s / es); part of a word never filters ("mentions quakes" counted 0)."""
+    assert said_whole(value, ask) is said
+    answer = {"name": "rows", "kind": "list", "path": "items", "row": [{"path": "name", "type": "text"}]}
+    kept = v1_where([{"col": "*", "op": "names", "value": value}], answer, ask, frozenset(), frozenset())
+    assert bool(kept) is said
 
 
 def test_no_model_guard_passes_through():
@@ -163,14 +226,60 @@ def test_no_model_guard_passes_through():
         _plan(_GOLD["C1"], call)
 
 
-def test_unstated_comparator_is_flagged_unbound():
-    """The model dropped 'above magnitude 2': the final where is empty and coverage says so."""
-    row = _GOLD["E37"]
-    reply = json.dumps({**row["ir"], "where": []})
-    plan = _plan(row, _scripted([reply])[0])
-    assert plan.coverage["where"] == "unbound" and plan.coverage["time"] == "bound"
+@pytest.mark.parametrize("rid", ["A33", "E22", "E37", "D22"])
+def test_a_dropped_comparator_is_bound_back_by_code(rid):
+    """Round 20, Q3b: an explicit comparator is an anchor like an explicit time. The gold reply with its
+    comparator stripped binds it back from the recognizer (coverage ``recognizer``, note
+    ``comparator_added``); the reply that carries it stays ``bound`` with no note. (This test read: the
+    dropped comparator leaves the where empty and coverage ``unbound``.)"""
+    row = _GOLD[rid]
+    stripped = _plan(row, _scripted([json.dumps({**row["ir"], "where": []})])[0])
+    assert stripped.ir["where"] == row["ir"]["where"], stripped.ir["where"]
+    assert stripped.coverage["where"] == "recognizer" and "comparator_added" in stripped.notes
     kept = _plan(row, _scripted([json.dumps(row["ir"])])[0])
-    assert kept.coverage["where"] == "bound" and kept.interpretation == "Earthquakes · Magnitude > 2 · past 7 days · count"
+    assert kept.ir["where"] == row["ir"]["where"] and kept.coverage["where"] == "bound"
+    assert "comparator_added" not in kept.notes and "comparator_corrected" not in kept.notes
+
+
+def test_the_recognized_number_wins_over_the_models():
+    """A model comparator on the cell with another number takes the recognized one (note it); a number the ask
+    never states is dropped first and the recognized comparator added."""
+    row = _GOLD["D22"]   # newest earthquakes above magnitude 3 in Nevada
+    src = _LIB[row["source_id"]]
+    ask = "the 5 newest earthquakes above magnitude 3 in Nevada"
+    reply = json.dumps({**row["ir"], "where": [{"col": "properties.mag", "op": ">", "value": 5}]})
+    plan = plan_query(ask, kind=row["kind"], wants=[], source={"id": row["source_id"], "name": src["name"]},
+                      answers=src["answers"], params=src["params"], consumed=_consumed(ask), now=_now(row),
+                      zone=_ZONE, call_model=_scripted([reply])[0], pool=_POOL)
+    assert plan.ir["where"] == [{"col": "properties.mag", "op": ">", "value": 3}]
+    assert "comparator_corrected" in plan.notes and plan.coverage["where"] == "recognizer"
+    unstated = _plan(row, _scripted([json.dumps({**row["ir"], "where": [
+        {"col": "properties.mag", "op": ">", "value": 7}]})])[0])
+    assert unstated.ir["where"] == row["ir"]["where"]
+    assert {"numbers_unstated", "comparator_added"} <= set(unstated.notes)
+
+
+def test_a_comparator_binds_by_its_quantity_word_never_by_its_unit():
+    """"magnitude 4 in Alaska" is magnitude > 4 — the unit never picks a cell, so it never becomes an inches
+    filter; a quantity word naming two number cells, or none, adds nothing (coverage ``unbound``)."""
+    from smartbrain_3000.ni_query.clauses import bind_comparators
+    quakes = answer_named(_LIB["usgs-quakes-state"]["answers"], "quakes")
+    for ask in ("recent quakes stronger than magnitude 4 in Alaska", "earthquakes above 4 in alaska"):
+        comparators = recognize(ask, now=_THU_9, zone=_ZONE)["comparators"]
+        assert bind_comparators([], quakes, comparators) == (
+            [{"col": "properties.mag", "op": ">", "value": 4}], ["comparator_added"]), ask
+    snow = {"name": "snow", "kind": "list", "path": "days", "words": ["snow", "snowfall"],
+            "row": [{"path": "date", "type": "date", "label": "Day"},
+                    {"path": "snowfall", "type": "number", "label": "Snowfall", "unit": "in"}]}
+    comparators = recognize("recent quakes stronger than magnitude 4 in Alaska", now=_THU_9, zone=_ZONE)["comparators"]
+    assert bind_comparators([], snow, comparators) == ([], []), "no inches filter from '4 in Alaska'"
+    wind = {"name": "wind", "kind": "list", "path": "hours", "words": ["wind"],
+            "row": [{"path": "wind_speed", "type": "number", "label": "Wind speed"},
+                    {"path": "wind_gust", "type": "number", "label": "Wind gust"}]}
+    comparators = recognize("hours with wind above 30 mph", now=_THU_9, zone=_ZONE)["comparators"]
+    assert comparators and bind_comparators([], wind, comparators) == ([], []), "two cells named: nothing added"
+    gusts = recognize("hours with gusts above 30 mph", now=_THU_9, zone=_ZONE)["comparators"]
+    assert bind_comparators([], wind, gusts)[0] == [{"col": "wind_gust", "op": ">", "value": 30}]
 
 
 def test_unstated_numbers_are_dropped():
@@ -222,6 +331,15 @@ SAY_CASES = {
 def test_say_golden(rid):
     row = _GOLD[rid]
     assert say(row["ir"], _LIB[row["source_id"]]["answers"]) == SAY_CASES[rid]
+
+
+def test_a_weekday_range_reads_monday_to_friday():
+    """Round 20, Q3b fix round: a span between two weekdays reads "Monday to Friday" (it read "on Monday to on
+    Friday"); a single weekday keeps "on Friday", other ranges keep their words."""
+    from smartbrain_3000.ni_query.say import time_words
+    assert time_words({"from": "dow:mon", "to": "dow:fri"}) == "Monday to Friday"
+    assert time_words({"from": "dow:fri", "to": "dow:fri"}) == "on Friday"
+    assert time_words({"from": "today", "to": "next_days:7"}) == "next 7 days"
 
 
 def test_every_gold_ir_and_recorded_reply_is_structurally_valid():

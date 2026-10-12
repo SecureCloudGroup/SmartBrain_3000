@@ -95,15 +95,43 @@ def test_routes_require_unlock(client: TestClient) -> None:
 
 # --- board view: draft → preview slot, live → latest, degraded → last_good --
 
+_BOARD_ROW_KEYS = {"id", "title", "state", "enabled", "interval_minutes", "last_checked", "last_status",
+                   "consecutive_failures", "position", "display", "interpreted", "template_update",
+                   "template_gone", "needs_credentials", "needs_params", "l2_proposal", "c2_ok", "awaiting_yes",
+                   "shell", "born", "flow", "payload_slot", "payload_at", "payload_ok", "payload"}
+
+
 def test_board_shape_and_slot_selection(client: TestClient) -> None:
     _unlock(client)
     iid = _create_via_tool(client)  # fresh item lives in draft
     items = client.get("/api/ni/board").json()["items"]
     row = next(i for i in items if i["id"] == iid)
+    # the row's key set; Round 20 (Q3b): "interpretation" / "query" ride only on a card whose spec carries them
+    assert set(row) == _BOARD_ROW_KEYS
     assert row["state"] == "draft" and row["payload_slot"] == "preview"
     assert row["payload"] == {"type": "stack", "dir": "v", "gap": "sm", "children": [
         {"type": "text", "value": "preview", "role": "title", "tone": "default", "size": "md"},
     ]}
+
+
+def test_board_row_carries_the_interpretation_and_only_the_coverage(client: TestClient) -> None:
+    """Round 20 (Q3b, §36): a declared card's code-made interpretation line and its per-clause coverage reach
+    the board (the C2 panel / footer reader) — never the whole sealed query; absent on a card without them."""
+    _unlock(client)
+    iid = _create_via_tool(client)
+    store = client.app.state.ni
+    spec = dict(store.get_item(iid)["spec"])
+    coverage = {k: "bound" for k in ("answer", "time", "where", "order", "select", "limit", "agg")}
+    coverage["time"] = "approximated"
+    spec["query"] = {"ir": {"answer": "temperature", "params": {}, "select": [], "where": [],
+                            "time": {"from": "now", "to": "now"}, "order": [], "limit": None, "agg": "none"},
+                     "coverage": coverage, "notes": ["time_explicit"], "model": {"attempts": 1, "used_fewshot": True}}
+    spec["interpretation"] = "Temperature · now"
+    store.update_spec(iid, spec, origin="agent")
+    row = next(i for i in client.get("/api/ni/board").json()["items"] if i["id"] == iid)
+    assert set(row) == _BOARD_ROW_KEYS | {"interpretation", "query"}
+    assert row["interpretation"] == "Temperature · now"
+    assert row["query"] == {"coverage": coverage}
 
 
 def test_board_prefers_latest_when_live_ok(client: TestClient) -> None:

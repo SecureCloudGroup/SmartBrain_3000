@@ -1,11 +1,18 @@
 """CardShell (CONTRACTS.md 6.1): header title + mandatory footer at every span.
 
-Footer: left  = [state marker] · [dates inferred] · host · cadence   (12/400 muted)
+Footer: left  = [interpretation] [state marker] · [dates inferred] · host · cadence   (12/400 muted)
         right = [age when stale] as-of time prim (never dropped; width reserved for the
                 widest value of its format)
 Drop order when the left part does not fit: cadence, then host -> registrable
 domain, then host. Markers (sample, failing, dates inferred) never drop; at narrow
 widths they take a second footer line instead.
+
+Interpretation (Round 20, Q3b — §36): a card whose spec carries the query layer's line
+(``spec.interpretation``, code-made: TEXT_SRC ``code``) leads the left group with it — its own
+muted footer prim, ellipsized by the engine's rule to the width the rest leaves (the rest then
+reads "· host · cadence"; the cadence drops before the line is cut, the host only when the line
+could not show at all, the markers never). Too little room (< ``_INTERP_MIN_W``) and that face
+shows no line; the board row carries the full text. A card without it lays out exactly as before.
 """
 from __future__ import annotations
 
@@ -14,6 +21,8 @@ from . import text as TX
 from .ctx import SP, Canvas, LayoutCtx, ty
 
 TITLE_LINES = {1: 1, 2: 2, 3: 2}
+_INTERP_MIN_W = 40.0     # px: below this a footer line says nothing ("Ear…")
+_INTERP_SEP = 4.0        # px between the line and the rest of the left group
 
 
 def as_of(ctx: LayoutCtx) -> str | None:
@@ -97,6 +106,31 @@ def _short(marks):
     return [(["tpl", "sample_short", m[0][2]], m[1]) if m[0][:2] == ["tpl", "sample"] else m for m in marks]
 
 
+def _interpretation(ctx: LayoutCtx, cv: Canvas, mark_rc: list, tails: list, width: float) -> tuple | None:
+    """(the rest of the left group as a recipe — "· markers · host · cadence", or None —, the width the line
+    gets) for ``spec.interpretation``: the fullest tail beside which the whole line fits; else the line,
+    ellipsized, keeps the host and drops the cadence; else it drops the host too (the footer's own drop
+    order) — never below ``_INTERP_MIN_W``, markers never drop. None: no line on this face."""
+    assert isinstance(mark_rc, list) and isinstance(tails, list), "markers + tails required"
+    assert width >= 0, "a width"
+    line = fmt.one_line(getattr(ctx.inp, "interpretation", "") or "")
+    if not line:
+        return None
+    fpx, fwt, _flh, ftn = ty("footer")
+    full = TX.width(line, fpx, fwt, ftn) * (1 + TX.MARGIN)
+    options = []
+    for t in tails:  # bounded: at most three tails, fullest first
+        parts = mark_rc + t
+        rest = ["join", " ", [["lit", "·"], ["join", " · ", parts]]] if parts else None
+        room = width - (TX.width(cv.run(rest), fpx, fwt, ftn) * (1 + TX.MARGIN) + _INTERP_SEP if rest else 0.0)
+        if room >= full:
+            return rest, room
+        options.append((["host_short"] in t, rest, room))
+    hosted = [o for o in options if o[0] and o[2] >= _INTERP_MIN_W]
+    fit = hosted[-1] if hosted else next((o for o in reversed(options) if o[2] >= _INTERP_MIN_W), None)
+    return (fit[1], fit[2]) if fit else None
+
+
 def shell(ctx: LayoutCtx, cv: Canvas) -> dict:
     """Draw header + footer into `cv`. Returns the body box."""
     W, H = ctx.W, ctx.bucket.h
@@ -161,10 +195,16 @@ def shell(ctx: LayoutCtx, cv: Canvas) -> dict:
                 chosen = rc
                 break
     ftop = H - flh * (2 if two_line else 1)
+    lx, lw = (upper_x, W - upper_x) if two_line else (0.0, avail)
+    interp = _interpretation(ctx, cv, mark_rc, tails, lw)
+    if interp is not None:   # the query layer's line leads the left group (module docstring)
+        ib = cv.text(["l", lx], ftop, ["interpretation"], "footer", src="code", max_w=interp[1], tok="muted")
+        if ib is not None:
+            lw, lx = lw - (ib.x1 - lx) - _INTERP_SEP, ib.x1 + _INTERP_SEP
+            chosen = interp[0]
     if chosen is not None:
         tok = "warn" if marks and marks[0][1] == "warn" else "muted"
-        b = cv.text(["l", upper_x if two_line else 0], ftop, chosen, "footer", src="code",
-                    max_w=(W - upper_x) if two_line else avail, tok=tok)
+        b = cv.text(["l", lx], ftop, chosen, "footer", src="code", max_w=lw, tok=tok)
         if b is not None and ctx.state == "error_last_good":
             cv.hit(b.id, "Fix")
     if a:

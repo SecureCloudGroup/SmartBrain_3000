@@ -21,6 +21,7 @@ surface (§29): fixes re-enter the flow at Sampling via ``remap_ni_item``.
 
 from __future__ import annotations
 
+import functools
 import json
 import logging
 import re
@@ -28,16 +29,20 @@ import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from importlib import resources as _resources
 from typing import Any
 from urllib.parse import quote, urlparse
+from zoneinfo import ZoneInfo
 
 from . import claudecli as _claudecli_mod
 from . import gateway as _gateway_mod
 from . import netguard as _netguard_mod
-from . import ni, ni_master, page_verify, pagegraph
+from . import ni, ni_master, ni_query, page_verify, pagegraph
 from .library_index import GEO_RESOLVERS, frame_kind_from_text
 from .library_resolve import ENGLISH as LIBRARY_ENGLISH
 from .library_resolve import resolve_lookup
+from .ni_forms import llm as _ni_llm
+from .ni_query.say import time_words as _time_words
 
 log = logging.getLogger("smartbrain.ni.flow")
 
@@ -260,6 +265,22 @@ _SHELL_SCENE: dict = {
          "tone": "muted", "size": "md"},
     ],
 }
+
+
+@dataclass(frozen=True)
+class FlowModel:
+    """The flow's consented, routed model (``run_flow``): the prompt-string stages (intent, mapping, PRESENT,
+    FIT) call it with a prompt; ``chat`` takes role/content messages as the query layer measured them
+    (Round 20, Q3b: its call goes through ``chat`` end to end — one user turn of the flattened prompt lost 3
+    of 60 rows live and ran 2.7x slower, §36). ``chat`` None: the prompt seam only (a caller's own model)."""
+
+    prompt: Callable[[str], str]
+    chat: Callable[[list], str] | None = None
+
+    def __call__(self, prompt: str) -> str:
+        assert isinstance(prompt, str), "prompt required"
+        assert callable(self.prompt), "a prompt transport"
+        return self.prompt(prompt)
 
 
 @dataclass(frozen=True)
@@ -525,79 +546,15 @@ def _cadence_from_text(request: str) -> int | None:
     return None
 
 
-# The window (C7, the frame's "when"): which stretch of time the ask is about — the engine's closed
-# ``window`` enum (now | today | tonight | tomorrow | weekend | dow:<day> | next_days:N | next_hours:N),
-# parsed by code like the cadence, never by a model. Ordered: the first that matches wins; a stretch
-# that is past ("last weekend", "past 24 hours") is no window (a result or a trend, not a forecast).
-_NUM_WORDS = {"a": 1, "an": 1, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7,
-              "eight": 8, "nine": 9, "ten": 10, "twelve": 12, "fourteen": 14, "couple": 2, "couple of": 2,
-              "few": 3, "several": 3}
-_COUNT = r"(\d{1,3}|a|an|one|two|three|four|five|six|seven|eight|nine|ten|twelve|fourteen|couple(?: of)?|few|several)"
+# day names → the engine's weekday tokens (``_window_words`` says a window back in the user's words)
 _DAY_NAMES = {"monday": "mon", "tuesday": "tue", "wednesday": "wed", "thursday": "thu", "friday": "fri",
               "saturday": "sat", "sunday": "sun"}
-_PAST_RE = re.compile(r"\b(last|past|previous|yesterday|ago)\b\W*(\w+\W+){0,2}$")
-_WINDOW_PATTERNS: tuple[tuple[re.Pattern, Callable[[re.Match], str]], ...] = (
-    (re.compile(rf"\b(?:next|coming|upcoming|in(?: the next)?|over the next|for the next)\s+(?:{_COUNT}\s+)?"
-                r"(?:hours?|hrs?)\b"),
-     lambda m: f"next_hours:{_count(m.group(1))}"),
-    (re.compile(r"\b(\d{1,3})[- ]?(?:hours?|hrs?|hr)\b"), lambda m: f"next_hours:{_count(m.group(1))}"),
-    (re.compile(rf"\b(?:next|coming|upcoming|over the next|for the next)\s+{_COUNT}\s+days\b"),
-     lambda m: f"next_days:{_count(m.group(1))}"),
-    (re.compile(r"\b(\d{1,2})[- ]?days?\b"), lambda m: f"next_days:{_count(m.group(1))}"),
-    (re.compile(r"\b(?:two|2) weeks\b"), lambda m: "next_days:14"),
-    (re.compile(r"\btoday and tomorrow\b"), lambda m: "next_days:2"),
-    (re.compile(r"\bweekend\b|\bsat(?:urday)? and sun(?:day)?\b"), lambda m: "weekend"),
-    (re.compile(r"\b(?:this|next|coming|upcoming|the) (?:coming )?week\b|\bweek ahead\b"),
-     lambda m: "next_days:7"),
-    (re.compile(r"\b(?:tomorrow|tomorow|tommorow|tmrw|tmr)\b"), lambda m: "tomorrow"),
-    (re.compile(r"\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)s?\b"),
-     lambda m: f"dow:{_DAY_NAMES[m.group(1)]}"),
-    (re.compile(r"\b(?:tonight|tonite|this evening|this eve|overnight)\b"), lambda m: "tonight"),
-    (re.compile(r"\b(?:today|todays|this morning|this afternoon|later today)\b"), lambda m: "today"),
-    # fix8 (blind-7, 2026-10-04): "rn" / "atm" / "right this (minute|second|moment|instant)" / "this instant"
-    # name a 'now' window the field used to miss ("line at Franklin Barbecue rn" shipped a guide's typical
-    # 3-to-5-hour average because the freshness check keyed on window=now). 'live' alone stays out: "live
-    # oak weather", "live music tonight", "is my package live" would overtrigger. Short tokens ("rn", "atm")
-    # match only at the end of the ask so an ATM-machine ask ("open atm near me") doesn't trigger.
-    (re.compile(r"\b(?:right now|now|currently|at the moment|at present|as we speak|current"
-                r"|right this (?:second|minute|moment|instant)|this (?:second|instant))\b(?!s)"),
-     lambda m: "now"),
-    (re.compile(r"\b(?:rn|atm)\s*$"), lambda m: "now"),
-)
-
-
-# names that hold a day word and are no window ("Saturday Night Live" is a show, "Black Friday" a sale)
+# names that hold a day word and are no window ("Saturday Night Live" is a show, "Black Friday" a sale): the
+# verify step reads their words as a name (``_other_subject``)
 _DAY_NAME_RE = re.compile(
     r"\b(?:saturday night live|(?:monday|thursday|sunday|friday) night (?:football|baseball|hockey|lights|raw|"
     r"smackdown)|black friday|cyber monday|super tuesday|good friday|fat tuesday|giving tuesday|ash wednesday|"
     r"holy (?:thursday|saturday)|small business saturday|super bowl sunday|taco tuesday)\b")
-
-
-def _count(word: str | None) -> int:
-    """A number said as digits or words ("3", "three", "a few"); none said is one."""
-    if not word:
-        return 1
-    return int(word) if word.isdigit() else _NUM_WORDS.get(word, 1)
-
-
-def _window_from_text(request: str) -> str | None:
-    """The asked window, one of the engine's closed values; None when the ask names none. Counts are
-    clamped to what the window transform takes (16 days, 168 hours)."""
-    assert isinstance(request, str), "request required"
-    low = " ".join(re.sub(r"[^a-z0-9' -]+", " ", request.lower().replace("’", "'")).split())
-    low = re.sub(r"'s\b", "", low)
-    low = " ".join(_DAY_NAME_RE.sub(" ", low).split())
-    for pattern, to_window in _WINDOW_PATTERNS:  # bounded tuple
-        for match in pattern.finditer(low):  # bounded by the ask
-            if _PAST_RE.search(low[:match.start()]):
-                continue  # "past 24 hours", "last weekend": behind us, not a window to show
-            window = to_window(match)
-            if window.startswith("next_days:"):
-                return f"next_days:{max(1, min(16, int(window[10:])))}"
-            if window.startswith("next_hours:"):
-                return f"next_hours:{max(1, min(168, int(window[11:])))}"
-            return window
-    return None
 
 
 def stage_intent(request: str, model_call: Callable[[str], str]) -> dict:
@@ -617,12 +574,13 @@ def stage_intent(request: str, model_call: Callable[[str], str]) -> dict:
             parsed = _cadence_from_text(request)
             if parsed is not None:
                 intent["cadence_minutes"] = parsed
-            # the frame (§29 stage 1): the kind of question and the window are textual facts code
-            # parses. Words that state no kind leave it open — a model's guess is never the frame: it
-            # gated locate, verify and the page shape check on a kind the user never asked for (live
-            # 2026-10-04: "gas prices" guessed as latest items shipped Colorado's natural-gas dataset)
+            # the frame (§29 stage 1): the kind of question is a textual fact code parses. Words that
+            # state no kind leave it open — a model's guess is never the frame: it gated locate, verify
+            # and the page shape check on a kind the user never asked for (live 2026-10-04: "gas prices"
+            # guessed as latest items shipped Colorado's natural-gas dataset). The asked stretch of time
+            # is the query layer's (Round 20, Q3b — §36): the declared build binds its ``time``, a page
+            # reads the recognizers' explicit phrase (``_ask_window``).
             intent["frame_kind"] = frame_kind_from_text(request)
-            intent["window"] = _window_from_text(request)
             return intent
         except (ValueError, TypeError) as exc:
             if attempt == 1:
@@ -1303,8 +1261,9 @@ _ANSWER_KEYS: dict[str, frozenset[str]] = {
     "value": frozenset({"name", "label", "words", "primary", "kind", "path", "type", "unit",
                         "unit_path", "codes", "utc", "window", "measure", "tbd_if"}),
     "list": frozenset({"name", "label", "words", "primary", "kind", "path", "row", "newest_first",
-                       "may_be_empty", "filter", "axis"}),
-    "columns": frozenset({"name", "label", "words", "primary", "kind", "columns", "limit", "axis"}),
+                       "may_be_empty", "filter", "axis", "param_bounds"}),
+    "columns": frozenset({"name", "label", "words", "primary", "kind", "columns", "limit", "axis",
+                          "param_bounds"}),
 }
 _ANSWER_CELL_KEYS = frozenset({"path", "label", "type", "unit", "unit_path", "codes", "utc", "tbd_if"})
 # Library answers spec v1.2 (C7): what an answer DELIVERS, not only the words it matches — the stretch
@@ -1327,10 +1286,6 @@ _ANSWER_STOP = frozenset({
     "with", "from", "as", "it", "its", "this", "that", "what", "whats", "how", "when", "where", "who",
     "which", "my", "me", "i", "show", "get", "give", "tell", "will", "do", "does", "there", "please", "s",
 })
-# an ask for several things over time or a set of items: a list/columns answer serves it
-_ANSWER_MANY_RE = re.compile(
-    r"\b(forecast|forecasts|weekend|week|daily|hourly|days|hours|latest|recent|upcoming|schedule|list)\b",
-    re.IGNORECASE)
 
 
 def _utc_ok(decl: dict) -> bool:
@@ -1411,7 +1366,32 @@ def _clean_answer(raw: object) -> dict | None:
                 and any(c["path"] == axis["cell"] and c["type"] in ("time", "date") for c in clean_cells)):
             return None
         out["axis"] = {"cell": axis["cell"], "step": axis["step"]}
+    bounds = _clean_param_bounds(raw.get("param_bounds"), clean_cells)
+    if bounds is False:
+        return None
+    if bounds:
+        out["param_bounds"] = bounds
     return out
+
+
+_MAX_PARAM_BOUNDS = 4
+
+
+def _clean_param_bounds(raw: object, cells: list[dict]) -> dict | bool | None:
+    """Library spec v1.4 ``param_bounds`` ({number cell path: {min?/max?: parameter name}}): the cleaned map,
+    None when absent, False when it breaks the closed shape (the answer is then skipped, like any misfit
+    key). The Library's own check already proved the cell is a number field and the parameter numeric."""
+    assert isinstance(cells, list), "cells must be a list"
+    if raw is None:
+        return None
+    numbers = {c["path"] for c in cells if c.get("type") == "number"}
+    if not (isinstance(raw, dict) and 1 <= len(raw) <= _MAX_PARAM_BOUNDS) or not all(
+            path in numbers and isinstance(sides, dict) and sides and set(sides) <= {"min", "max"}
+            and all(isinstance(n, str) and re.fullmatch(r"[a-z_][a-z0-9_]*", n) for n in sides.values())
+            for path, sides in raw.items()):
+        return False
+    assert all(isinstance(p, str) for p in raw), "cell paths are strings"
+    return {path: dict(sides) for path, sides in raw.items()}
 
 
 def _tbd_ok(decl: dict, *, row: bool) -> bool:
@@ -1503,14 +1483,6 @@ _MEASURE_CUES: dict[str, re.Pattern] = {m: re.compile(rx, re.IGNORECASE) for m, 
     ("sunrise", r"\bsunrise\b"),
     ("sunset", r"\bsunset\b"),
 )}
-_COUNT_ASK_RE = re.compile(r"\b(how many|number of|count of)\b", re.IGNORECASE)
-_EXISTS_ASK_RE = re.compile(r"\b(any|is there|are there)\b", re.IGNORECASE)
-
-
-def _measures_named(request: str) -> list[str]:
-    """The closed measures the ask's words name ("water temp" is the water's, not the air's)."""
-    named = [m for m, rx in _MEASURE_CUES.items() if rx.search(request or "")]
-    return [m for m in named if not (m == "temperature" and "water_temp" in named)]
 
 
 def _covers_measure(a: dict, measure: str) -> bool:
@@ -1525,176 +1497,10 @@ def _covers_measure(a: dict, measure: str) -> bool:
     return any(_MEASURE_CUES[measure].search(t) for t in labels)
 
 
-def _this_week(window: str) -> bool:
-    """"this week" and shorter stretches of days ahead (next_days:N, N ≤ 7)."""
-    return window.startswith("next_days:") and int(window.split(":")[1]) <= 7
-
-
-def _serves_window(a: dict, window: str, loose: bool = True) -> bool:
-    """Can this answer show ``window``? A value declared for it ("now" also takes the latest reading,
-    "today" what holds now); rows indexed by a step that can cut it (day rows can't cut hours); a list
-    with no axis holds what is current — it answers now, today and tonight, never another day.
-    ``loose`` (when nothing serves the window strictly) also lets a slow-moving value — one with no
-    weather-like ``measure``: a moon phase, a weekly price, a jackpot — stand for tonight (today's / the
-    latest) and this week (the latest), day rows show "tonight" as their today, and a list with no axis
-    answer for this week (a chart, the recent quakes)."""
-    if a["kind"] == "value":
-        declared = a.get("window") or "latest"
-        if window == "now":
-            return declared in ("now", "latest")
-        if window == "today":
-            return declared in ("now", "today", "latest")
-        if loose and a.get("measure") is None and (
-                (window == "tonight" and declared in ("today", "latest"))
-                or (_this_week(window) and declared == "latest")):
-            return True
-        return declared == window
-    axis = a.get("axis")
-    if axis is None:
-        return window in ("now", "today", "tonight") or (loose and _this_week(window))
-    if axis["step"] == "day":
-        return window not in ("now", "tonight") and not window.startswith("next_hours:") \
-            or (loose and window == "tonight")
-    return True
-
-
-def _window_fit(a: dict, window: str) -> int:
-    """Among answers that serve the window, the one whose rows fit it best leads: day rows for days,
-    hour / period rows for hours. F3 (2026-10-04): among same-step siblings an answer whose declared
-    words directly name the asked window (``"now"`` / ``"current"`` for ``window=now``, ``"today"``
-    for ``window=today``) leads — the author's intent for that stretch of time, not declared order.
-    (Ties below that keep the source's declared order.)"""
-    if a["kind"] == "value":
-        return 0
-    step = (a.get("axis") or {}).get("step")
-    hours = window in ("now", "tonight", "today") or window.startswith("next_hours:")
-    order = ("hour", "period", "day") if hours else ("day", "period", "hour")
-    step_rank = 1 + (order.index(step) if step in order else len(order))
-    own_words = {w for word in a.get("words") or [] for w in _answer_tokens(str(word))}
-    own_words |= _answer_tokens(a.get("label") or "")
-    # the author's own vocabulary names the asked window → this answer leads its step tier
-    direct = _WINDOW_DIRECT.get(window, frozenset())
-    return (step_rank * 2) - (1 if direct & own_words else 0)
-
-
-# per-window words an answer may declare to name itself for that stretch of time: "now" / "current"
-# for `window=now`; "today" for `window=today`; "tonight" for `window=tonight`. Closed set, same
-# vocabulary the engine uses for window / cadence talk.
-_WINDOW_DIRECT: dict[str, frozenset[str]] = {
-    "now": frozenset({"now", "current", "latest", "right"}),
-    "today": frozenset({"today", "todays"}),
-    "tonight": frozenset({"tonight", "overnight"}),
-    "tomorrow": frozenset({"tomorrow", "tmrw"}),
-}
-
-
 def _v12(answers: list[dict]) -> bool:
-    """Does this source declare what its answers deliver (spec v1.2)? An older record keeps word-only
-    selection — its answers can't say which window they hold."""
+    """Does this source declare what its answers deliver (spec v1.2)? An older record's answers can't say
+    which window they hold — ``_legacy_window_gap`` reads their labels instead."""
     return any(a.get("window") or a.get("axis") or a.get("measure") for a in answers)
-
-
-def select_answers(answers: list[dict], request: str, wants: list, window: str | None = None,
-                   frame_kind: str | None = None) -> list[dict]:
-    """Which declared answers the card shows — deterministic, no model. [] = this source has nothing for
-    the ask (the caller moves on to the next source, never a headline fallback). First the frame (C7):
-
-    0. With a ``window`` asked, only answers that can show it are eligible (``_serves_window``), the
-       best-fitting rows first, and the window's own words leave the scoring. A measure the ask names
-       ("wind") that no answer reports → []. A count answers only "how many"; "any …?" takes the list
-       that may be empty. (A source whose answers declare none of this keeps word-only selection.)
-
-    Then:
-
-    1. The user's own words decide. Each answer scores by the words it shares with the request
-       (``_answer_score``); the answers tied at the best score win. When the first of them is a
-       list / columns answer (a list goes first on a tie when the ask asks for many things —
-       "forecast", "this weekend", "latest") the card shows that one answer; otherwise the
-       tied value answers (≤4, in the source's declared order).
-    2. The request names none of them: an ask for many things takes the first list / columns
-       answer (a primary one first).
-    3. Otherwise the value answers the model's ``wants`` name, then the source's ``primary``
-       answers, ≤4 ("NYC weather" → current temperature, conditions, high / low today). With no
-       value answer there, the primary list / columns answer (else the first answer).
-    """
-    assert isinstance(answers, list) and answers, "answers required"
-    many = bool(_ANSWER_MANY_RE.search(request or ""))
-    ask = _answer_tokens(request or "")
-    if _v12(answers):
-        if window:
-            # what serves the window as declared; else what holds for it (a slow value, a current list)
-            strict = any(_serves_window(a, window, loose=False) for a in answers)
-            # (held loosely, rows that cut to the window lead a value that only holds for it)
-            answers = sorted((a for a in answers if _serves_window(a, window, loose=not strict)),
-                             key=lambda a: (not strict and a["kind"] == "value", _window_fit(a, window)))
-            ask -= _WINDOW_WORDS
-        named = _measures_named(request)
-        if named and not any(_covers_measure(a, m) for a in answers for m in named):
-            return []
-    if frame_kind == "trend":
-        # fix round datalayer-r2 (class #27): a trend ask ("unemployment rate over the last
-        # two years") is answered by the declared HISTORY, not a tied-or-higher-scoring single
-        # reading — "Unemployment rate" (window=latest, the phrase "unemployment rate" scores
-        # a bonus) otherwise outscores "Recent readings" (generic words) though only the list
-        # is a trend. Only among answers that actually declare history (a list/columns with an
-        # axis) and only when one scores on the ask's own words (never a history nobody asked for).
-        history = [a for a in answers if a["kind"] != "value" and a.get("axis")]
-        scored_h = [(_answer_score(a, ask), a) for a in history]
-        best_h = max((s for s, _ in scored_h), default=0)
-        if best_h > 0:
-            return [next(a for s, a in scored_h if s == best_h)]
-    if frame_kind != "count" and not _COUNT_ASK_RE.search(request or ""):
-        answers = [a for a in answers if a.get("type") != "count"] or answers
-    if _EXISTS_ASK_RE.search(request or ""):
-        # F4 (2026-10-04): existence preference ONLY among best-scoring answers — a may_be_empty list
-        # may not override the answer that strictly serves the window ("any aurora tonight?" scored
-        # the forecast 1 and the today-estimate 0; the old rule picked the empty list regardless).
-        scored = [(_answer_score(a, ask), a) for a in answers]
-        best = max(s for s, _ in scored) if scored else 0
-        top = [a for s, a in scored if s == best]
-        maybe = [a for a in top if a["kind"] == "list" and a.get("may_be_empty")]
-        if maybe:
-            return [max(maybe, key=lambda a: _answer_score(a, ask))]
-    if not answers:
-        return []
-    listy = [a for a in answers if a["kind"] != "value"]
-    scored = [(_answer_score(a, ask), a) for a in answers]
-    best = max(s for s, _ in scored)
-    if best > 0:
-        top = [a for s, a in scored if s == best]
-        top.sort(key=lambda a: not (many and a["kind"] != "value"))  # stable: declared order within
-        if top[0]["kind"] != "value":
-            # fix round datalayer-r2 (class W1, lead): among tied list / columns answers the one whose
-            # own NAME or label says an ask word wins — "any snow expected in Duluth midweek" scored the
-            # one word "snow" on both "Snow forecast" and "Tonight, hour by hour" (its words say "snow
-            # tonight"), and the declared order shipped the hourly temperature under the title "snow".
-            # Else the declared order, as before.
-            named_lists = [a for a in top if a["kind"] != "value" and any(
-                n.startswith(t) for n in _answer_tokens(f"{a['name'].replace('_', ' ')} {a['label']}")
-                for t in ask if len(t) >= 3)]
-            return [named_lists[0] if named_lists else top[0]]
-        values = [a for a in top if a["kind"] == "value"]
-        named = any(n.startswith(t) for a in values
-                    for n in _answer_tokens(f"{a['name'].replace('_', ' ')} {a['label']}")
-                    for t in ask if len(t) >= 3)  # "temp" names Temperature; "weather" names nothing
-        if not named and all(a["primary"] for a in values):
-            # the ask reached headline answers only through a general word ("NYC weather" matched
-            # "Conditions" by "weather"): a general ask shows every headline answer, source's order
-            return [a for a in answers if a["kind"] == "value" and a["primary"]][:_MAX_VALUE_ANSWERS]
-        return values[:_MAX_VALUE_ANSWERS]
-    if many and listy:
-        return [next((a for a in listy if a["primary"]), listy[0])]
-    want_words: set[str] = set()
-    for w in (wants or [])[:_MAX_INTENT_FIELDS]:
-        want_words |= _answer_tokens(str(w))
-    values = [a for a in answers if a["kind"] == "value"]
-    chosen = [a for a in values if want_words and _answer_score(a, want_words) > 0]
-    chosen += [a for a in values if a["primary"] and a not in chosen]
-    if chosen:
-        return chosen[:_MAX_VALUE_ANSWERS]
-    if window and listy:  # a general ask for a stretch of time: the rows that show it, best fit first
-        return [listy[0]]
-    return [next((a for a in listy if a["primary"]), answers[0])]
 
 
 def _answer_unit(decl: dict, payload: object, first_row: object = None) -> str:
@@ -1841,7 +1647,9 @@ def _inferred_axis(cells: list[dict], window: str | None) -> dict | None:
 
 
 def _build_rows_answer(answer: dict, payload: dict, title: str, window: str | None = None,
-                        next_event: bool = False, frame_kind: str | None = None) -> dict:
+                        next_event: bool = False, frame_kind: str | None = None,
+                        span: dict | None = None, where: list | None = None, agg: str = "none",
+                        order: list | None = None, row_limit: int | None = None) -> dict:
     """A list answer (rows at ``path``, cell paths relative to one item) or a columns answer
     (parallel arrays zipped into rows) → rows pipeline + the list scene, cells in declared order.
     With an asked ``window`` and rows indexed by time (``axis``), the engine's ``window`` transform
@@ -1853,14 +1661,22 @@ def _build_rows_answer(answer: dict, payload: dict, title: str, window: str | No
     fix14-bbox (2026-10-05): a list that holds exactly one time / date cell but declares no axis
     still cuts to an asked window — the first time cell rides as an inferred ``hour`` axis so a
     "today" ask on an event list (USGS state earthquakes) keeps today's rows only. The
-    forward-only ``_cuts`` guard still protects a past-events list from a forward window."""
+    forward-only ``_cuts`` guard still protects a past-events list from a forward window.
+
+    ``span`` (Round 20, Q3b — §36): the query layer's time bound as a SPAN window ({to, back, forward}:
+    ``window`` is its start token) — a stretch behind us, a calendar span, a weekday on dated past rows;
+    None keeps ``window`` a legacy forward token. ``where``: the query layer's row filters, sealed as engine
+    ops after the declared filter and before the window (``_where_ops``). ``agg`` "count": the rows are a
+    tally — the window always cuts (W4) and the engine's ``count`` op counts them every run. ``order`` /
+    ``row_limit``: the query layer's order and limit, sealed after the window (``_rank_ops``)."""
     cells = answer["cells"]
     ops: list[dict] = []
     answer_axis = answer.get("axis") or _inferred_axis(cells, window)
     forward = next_event and answer_axis is not None and not window
     axis = answer_axis if (window or forward) else None
     # day rows can't cut hours: tonight is today's row
-    cut = "today" if axis and axis["step"] == "day" and window == "tonight" else (window or "upcoming")
+    cut = "today" if axis and axis["step"] == "day" and window == "tonight" and not span else (window or "upcoming")
+    ahead = span["forward"] if span else (window or "upcoming") not in ("now", "today")
     axis_cell = next((c for c in cells if axis and c["path"] == axis["cell"]), None) if axis else None
     step = axis["step"] if axis else None
     # R4-6 (2026-10-04): the current-hour floor on ``today`` / ``tonight`` is a FORECAST rule — an
@@ -1890,9 +1706,11 @@ def _build_rows_answer(answer: dict, payload: dict, title: str, window: str | No
                         "value": state["code"]})
         if answer.get("newest_first"):
             ops.append({"fn": "reverse", "field": "rows"})
-        if axis and _cuts(window or "upcoming", stages, ops, payload, axis["cell"], frame_kind=frame_kind):
+        ops += _where_ops(list(where or []), answer, {c["path"]: c["path"] for c in cells})[0]
+        if axis and _cuts(cut, stages, ops, payload, axis["cell"], count=agg == "count", forward=ahead):
             ops.append(_window_op(axis["cell"], cut, payload, stages,
-                                   axis_cell=axis_cell, step=step, floor_hour=floor_hour))
+                                   axis_cell=axis_cell, step=step, floor_hour=floor_hour, span=span))
+        ops += _rank_ops(order, row_limit, {c["path"]: c["path"] for c in cells})
     else:
         keys = []
         for i, c in enumerate(cells):  # bounded by _MAX_ANSWER_CELLS
@@ -1906,12 +1724,15 @@ def _build_rows_answer(answer: dict, payload: dict, title: str, window: str | No
         hourly = any("hourly" in c["path"] for c in cells)
         limit = answer.get("limit") or (12 if hourly else 7)
         ops.append({"fn": "zip", "field": keys[0], "with": keys[1:], "as": "rows"})
+        ops += _where_ops(list(where or []), answer, {c["path"]: k for c, k in zip(cells, keys, strict=True)})[0]
         key = next((k for c, k in zip(cells, keys, strict=True) if axis and c["path"] == axis["cell"]), None)
-        if key is not None and _cuts(window or "upcoming", stages, ops, payload, key, frame_kind=frame_kind):
+        rank = _rank_ops(order, row_limit, {c["path"]: k for c, k in zip(cells, keys, strict=True)})
+        if key is not None and _cuts(cut, stages, ops, payload, key, count=agg == "count", forward=ahead):
             ops.append(_window_op(key, cut, payload, stages, axis_cell=axis_cell, step=step,
-                                   floor_hour=floor_hour))
+                                   floor_hour=floor_hour, span=span))
+            ops += rank
         else:
-            ops.append({"fn": "top_n", "field": "rows", "n": limit})
+            ops += [*rank, {"fn": "top_n", "field": "rows", "n": limit}]
     # a row that shows its date (own cell) or sits inside a tight hour-step window ("tonight",
     # "today", "next_hours:N") shows times as the clock only — the window itself names the day
     dated = any(c["type"] == "date" for c in cells) or (
@@ -1926,7 +1747,7 @@ def _build_rows_answer(answer: dict, payload: dict, title: str, window: str | No
     cell_zone = "zone" if zone_top is not None else None
     for cell, key in zip(cells, keys, strict=True):  # bounded by _MAX_ANSWER_CELLS
         ops.extend(_cell_ops(cell, key, clock=dated, zone=cell_zone))
-    if answer.get("may_be_empty"):  # "no delays right now" is an answer: count the rows each run
+    if answer.get("may_be_empty") or agg == "count":  # "no delays right now" / a tally: count the rows each run
         ops.append({"fn": "count", "field": "rows", "as": "rows_count"})
     if ops:
         stages.append({"op": "transform", "apply": ops})
@@ -1951,9 +1772,6 @@ def _build_rows_answer(answer: dict, payload: dict, title: str, window: str | No
             "rows_output_name": "rows", "fields": {}, "klass": _DISPLAY_LIST}
 
 
-_FORWARD_WINDOWS = ("tonight", "tomorrow", "weekend", "upcoming", "dow:", "next_days:", "next_hours:")
-
-
 def _source_zone_field(payload: dict) -> str | None:
     """R5-zone (2026-10-04): the top-level field a payload uses to name its own zone — Open-Meteo's
     ``timezone`` (IANA name) or ``utc_offset_seconds`` (offset in seconds). None when the source
@@ -1965,15 +1783,18 @@ def _source_zone_field(payload: dict) -> str | None:
 
 
 def _cuts(window: str, stages: list[dict], ops: list[dict], payload: dict, key: str,
-         frame_kind: str | None = None) -> bool:
+         count: bool = False, forward: bool | None = None) -> bool:
     """Does the window cut these rows? Not a stretch ahead over rows that all lie in the past (an
     observation-date series: "gas prices this week" on FRED's recent weeks) — the card shows the latest
     rows instead of nothing. fix round datalayer-r2 (class W4): a `count` ask always cuts — the card
     is a TALLY for the asked stretch, so a row the window doesn't cover must not silently survive
-    into it (a Sep 25 earthquake read as "this week" on Oct 8); zero rows left is the honest count."""
-    if frame_kind == "count":
+    into it (a Sep 25 earthquake read as "this week" on Oct 8); zero rows left is the honest count.
+    ``forward`` (Round 20, Q3b): whether the window looks ahead — the query layer's binding says so; a
+    caller's own legacy token looks ahead unless it is ``now`` / ``today`` (the closed legacy enum).
+    ``count`` (Round 20, Q3b): the query layer's ``agg`` is ``count``."""
+    if count:
         return True
-    if not window.startswith(_FORWARD_WINDOWS):
+    if not (forward if forward is not None else window not in ("now", "today")):
         return True
     try:
         rows = ni.run_pipeline([*stages, {"op": "transform", "apply": list(ops)}] if ops else stages,
@@ -1985,7 +1806,7 @@ def _cuts(window: str, stages: list[dict], ops: list[dict], payload: dict, key: 
 
 def _window_op(key: str, window: str, payload: dict, stages: list[dict], *,
                 axis_cell: dict | None = None, step: str | None = None,
-                floor_hour: bool = True) -> dict:
+                floor_hour: bool = True, span: dict | None = None) -> dict:
     """The engine's ``window`` transform over ``rows`` by the row's own time at ``key``. A source that
     names its time zone at the top (Open-Meteo ``timezone``, else ``utc_offset_seconds``) has it
     extracted as ``zone``, so "today" is the place's today, not the reader's.
@@ -1997,10 +1818,17 @@ def _window_op(key: str, window: str, payload: dict, stages: list[dict], *,
     / ``tonight`` on hour axes at the current hour (forecast series); False keeps the whole asked
     period (event / schedule / result list) — R5-4 (2026-10-04): rides as a separate ``floor: false``
     flag so the hour step keeps its dawn rule ("tonight" at 01:30 = now..06:00) while only the floor
-    itself is disabled; the previous hour→period rewrite silently dropped that rule."""
+    itself is disabled; the previous hour→period rewrite silently dropped that rule.
+
+    ``span`` (Round 20, Q3b): the SPAN form — ``to`` (the end token, always written so the engine reads
+    a span) and ``back`` ride on the op; the legacy-only ``floor`` flag does not."""
     assert isinstance(key, str) and isinstance(window, str), "args required"
     assert isinstance(floor_hour, bool), "floor_hour must be a bool"
     op: dict = {"fn": "window", "field": "rows", "key": key, "window": window}
+    if span is not None:
+        op["to"] = span["to"]
+        if span.get("back"):
+            op["back"] = True
     top = _source_zone_field(payload)
     if top is not None:
         stages[0]["paths"]["zone"] = top
@@ -2013,7 +1841,7 @@ def _window_op(key: str, window: str, payload: dict, stages: list[dict], *,
             op["unless"] = tbd["path"]
     if step in ("day", "hour", "period"):
         op["step"] = step
-    if step == "hour" and not floor_hour:
+    if step == "hour" and not floor_hour and span is None:
         op["floor"] = False
     return op
 
@@ -2092,7 +1920,9 @@ def build_from_answers(chosen: list[dict], sample: object, title: str,
                        next_event: bool = False,
                        clock_params: frozenset[str] = frozenset(),
                        frame_kind: str | None = None,
-                       form: FormBuild | None = None) -> dict:
+                       form: FormBuild | None = None, span: dict | None = None,
+                       where: list | None = None, agg: str = "none", order: list | None = None,
+                       row_limit: int | None = None) -> dict:
     """Build ``{pipeline, scene, preview_payload, fields, klass}`` from the chosen declared answers,
     running the pipeline on ``sample`` and checking every shown value is there with its type.
     ``scene`` is the sealed §34 form node the engine designed from the same answers + outputs
@@ -2106,7 +1936,9 @@ def build_from_answers(chosen: list[dict], sample: object, title: str,
     fit the declaration. ``window``: the asked stretch of time (rows indexed by time are cut to it);
     ``next_event``: the ask is for the next event (its time says so once it has passed);
     ``frame_kind``: the ask's frame kind — a next_event list still floors to upcoming on today /
-    tonight (R5-1, 2026-10-04), while a schedule list keeps the whole period."""
+    tonight (R5-1, 2026-10-04), while a schedule list keeps the whole period. ``span`` / ``where`` / ``agg`` /
+    ``order`` / ``row_limit``: the query layer's time as a span window, its row filters, its count, its order
+    and its limit (``_build_rows_answer``)."""
     assert isinstance(chosen, list) and chosen, "chosen answers required"
     assert isinstance(clock_params, (set, frozenset)), "clock_params must be a set"
     chosen = [_fill_answer(a, params or {}) for a in chosen]
@@ -2115,22 +1947,14 @@ def build_from_answers(chosen: list[dict], sample: object, title: str,
         built = _build_value_answers([a for a in chosen if a["kind"] == "value"], payload, next_event)
     else:
         built = _build_rows_answer(chosen[0], payload, title, window, next_event=next_event,
-                                     frame_kind=frame_kind)
+                                     frame_kind=frame_kind, span=span, where=where, agg=agg,
+                                     order=order, row_limit=row_limit)
     built["scene"] = _form_node(built["answers_used"], built["preview_payload"], title,
                                 built["rows_output_name"], form or FormBuild(now=ni._clock(), ask=title))
     if clock_params:
         built["pipeline"] = _reslot_clock_params_in_pipeline(built["pipeline"], params or {},
                                                                frozenset(clock_params))
     return built
-
-
-def _names_a_param(answer: dict, params: dict) -> bool:
-    """True when the answer is scoped to a value the address was filled with: its filter or a path
-    names one of those ``{param}``s (the airport's rows, ``rates.{quote}``)."""
-    texts = [answer.get("path") or "", str((answer.get("filter") or {}).get("path", "")),
-             str((answer.get("filter") or {}).get("equals", ""))]
-    texts += [c.get("path", "") for c in answer.get("cells") or []]
-    return any("{" + name + "}" in t for name in params for t in texts)  # bounded: few params x few texts
 
 
 # a row cell whose label names a place (its value is the row's place): "Port", "Station", "City",
@@ -2195,7 +2019,7 @@ def _scope_rows_to_place(answer: dict, sample: object, place: str) -> dict:
     nothing-signal when no row names the place. Returns ``answer`` unchanged when there is no place
     cell (the answer doesn't scope by place) or when the answer already filters its rows.
 
-    Extends the §32 entity-scoped mechanism (``_names_a_param``, the airport-rows ``filter``): a
+    Extends the §32 entity-scoped mechanism (the airport-rows ``filter`` filled from a ``{param}``): a
     list whose rows declare a place column (Port, Station, City, State) is scoped by code the same
     way an entity-filled answer is scoped by its ``{param}`` — the row filter rides the sealed
     pipeline, so every refresh keeps only the named place's rows. CBP border waits + "San Ysidro"
@@ -2225,146 +2049,6 @@ def _scope_rows_to_place(answer: dict, sample: object, place: str) -> dict:
     if hit is None:
         raise ValueError(f"answers: has nothing for {place[:60]}")
     return {**answer, "filter": {"path": hit[0], "equals": hit[1]}}
-
-
-# words of an ask's subject that never name a row ("the next new moon" names "new moon"; the day, the
-# date and the frame words are what is asked ABOUT it)
-_SUBJECT_STOP = frozenset({"next", "upcoming", "day", "date", "time", "year", "week", "month", "today",
-                           "tonight", "tomorrow", "when", "latest", "current", "now"})
-_MAX_SUBJECT_ROWS = 500
-
-
-def _subject_tokens(subject: str, place: str | None) -> set[str]:
-    """The content words of the intent's subject: fillers, frame words and the named place removed."""
-    assert isinstance(subject, str), "subject must be a str"
-    assert place is None or isinstance(place, str), "place must be a str or None"
-    return _answer_tokens(subject) - _SUBJECT_STOP - (_answer_tokens(place) if place else set())
-
-
-_NAME_EXTRA_WORDS = 3   # the most words a NAME adds beyond the subject's own (see _subject_hits)
-_NAME_CELL_WORDS = 6    # a cell whose LONGEST value runs this long or shorter holds NAMES, not prose
-
-
-def _subject_hits(rows: list, cells: list, toks: set[str]) -> dict:
-    """Per text cell whose values name the subject: ``path -> (row indices, (extra words, value))``
-    — the value holding every subject word with the fewest extra words ("Thanksgiving Day" over
-    "Day after Thanksgiving"). fix round 1a-7 (class D2): a value's EXTRA words are bounded, by
-    what the CELL holds — a NAME cell (no value longer than _NAME_CELL_WORDS words: teams,
-    stations, holidays, hazard products) may add up to max(subject words, _NAME_EXTRA_WORDS)
-    beyond the subject's own ("New York Knicks" for "Knicks", "Charleston, Cooper River Entrance"
-    for "Charleston"); a PROSE cell (headlines) at most the subject's own count, so "posts" is
-    never a free-text title like "Post-Quantum Crypto: BSI Concerned About McEliece" that happens
-    to start with "Post" (6 extra words, no real match)."""
-    assert isinstance(rows, list) and isinstance(cells, list), "rows + cells must be lists"
-    assert isinstance(toks, set) and toks, "subject words required"
-    hits: dict = {}
-    for cell in cells[:_MAX_ANSWER_CELLS]:
-        if cell.get("type") != "text":
-            continue
-        values = [_dig(row, cell["path"]) if isinstance(row, dict) else None for row in rows[:_MAX_SUBJECT_ROWS]]
-        lengths = [len(_folded_words(v)) for v in values if isinstance(v, str)]
-        name_cell = bool(lengths) and max(lengths) <= _NAME_CELL_WORDS
-        bound = max(len(toks), _NAME_EXTRA_WORDS) if name_cell else len(toks)
-        for i, value in enumerate(values):
-            if not isinstance(value, str):
-                continue
-            words = _answer_tokens(value)
-            extra = words - toks
-            if toks <= words and len(extra) <= bound:
-                found, best = hits.get(cell["path"], (set(), None))
-                key = (len(extra), value)
-                hits[cell["path"]] = (found | {i}, key if best is None or key < best else best)
-    return hits
-
-
-def _scope_rows_to_subject(answer: dict, sample: object, subject: str, place: str | None) -> dict:
-    """fix round 1a-5 (class D): ``answer`` with a sealed ``filter`` selecting exactly the rows whose
-    text cell names the ask's subject ("Thanksgiving" → the Thanksgiving Day row of the holidays
-    list; "new moon" → the New Moon row of the phases) — the cell + value whose words hold every
-    subject word with the fewest extra words wins, so refreshes keep the same row. Unchanged when
-    there is nothing to match (no subject words, no list, an existing filter), when the subject is
-    the list itself (its words are the answer's own: "rocket launch" on the launches list), or
-    when it is a PARTICIPANT of the rows — named in several cells over different rows (a team in
-    the home and the away columns of a schedule): one cell cannot select "its" rows, the list stays
-    whole. Raises ``ValueError`` with the honest "the list has no row for <subject>" otherwise —
-    the flow's nothing path, never the first upcoming row presented as the answer."""
-    assert isinstance(answer, dict), "answer must be a dict"
-    assert isinstance(subject, str), "subject must be a str"
-    if answer.get("kind") != "list" or answer.get("filter"):
-        return answer
-    toks = _subject_tokens(subject, place)
-    if not toks:
-        return answer
-    payload = sample if isinstance(sample, dict) else {"items": sample}
-    rows = _dig(payload, answer["path"])
-    if not isinstance(rows, list):
-        return answer  # the list isn't a list here — the build itself will say so
-    hits = _subject_hits(rows, list(answer.get("cells") or []), toks)
-    if hits:
-        if len({frozenset(found) for found, _best in hits.values()}) > 1:
-            return answer
-        path, (_found, best) = min(hits.items(), key=lambda kv: (kv[1][1][0], kv[0]))
-        return {**answer, "filter": {"path": path, "equals": best[1]}}
-    # fix round 1a-7 (class D2): the list's OWN NAME (label/name — "Headlines") is a strong
-    # signal on any overlap; its generic synonym WORDS ("warnings", "watches" — aliases for
-    # "give me the whole list") are a weak one, an alert-tier SUFFIX every specific alert
-    # name also ends with ("Red Flag Warning"), so they only count when they explain the
-    # WHOLE subject, never a single shared word beside an unexplained one ("red", "flag").
-    # (After the row search, not before: a list's words may name its own rows — the holidays
-    # list says "thanksgiving" — and a named row still wins.)
-    own_core = _answer_tokens(" ".join([str(answer.get("label") or ""), str(answer.get("name") or "").replace("_", " ")]))
-    own_syn = _answer_tokens(" ".join(str(w) for w in answer.get("words") or []))
-    if (toks & own_core) or toks <= (own_core | own_syn):
-        return answer
-    raise ValueError(f"answers: the list has no row for {subject[:60]}")
-
-
-# fix round 1a-7 (class D2): alerts/latest_items/status reach this only when no row names the
-# subject AND the subject is not a generic word for the list itself — a hazard TYPE the feed
-# does not currently report (no "Red Flag Warning" row in today's California alerts) is not
-# an error the way a nonexistent holiday is; the honest `may_be_empty` state needs a sealed
-# filter too, or the card would show the whole list instead of "no red flag warnings right now".
-def _subject_phrase(subject: str, place: str | None) -> str:
-    """``subject``'s content words, in order, title-cased the way a hazard/alert product name
-    is conventionally spelled ("red flag warnings" -> "Red Flag Warning"). Empty when nothing
-    is left once place and frame words are removed."""
-    assert isinstance(subject, str), "subject must be a str"
-    assert place is None or isinstance(place, str), "place must be a str or None"
-    drop = _SUBJECT_STOP | (_answer_tokens(place) if place else set())
-    raw = re.findall(r"[a-z0-9]+", subject.lower())  # bounded by the subject
-    words = [w for w in raw if _folded_words(w)[0] not in drop]
-    return " ".join(_singular(w).capitalize() for w in words)
-
-
-def _singular(word: str) -> str:
-    """A product-name word in the singular, spelled the way the product is: warnings →
-    warning, watches → watch, advisories → advisory, statements → statement; a word that is
-    no plural (status, analysis, news, a short word) is returned as is. Unlike the matching
-    fold in ``_answer_tokens`` (which only has to agree with itself), this string is sealed
-    into an ``equals`` filter and must be the real name ("Tornado Watch", never "Tornado
-    Watche")."""
-    assert isinstance(word, str), "word must be a str"
-    if len(word) > 4 and word.endswith("ies"):
-        return word[:-3] + "y"
-    if len(word) > 4 and word.endswith(("ches", "shes", "sses", "xes")):
-        return word[:-2]
-    if len(word) > 3 and word.endswith("s") and not word.endswith(("ss", "us", "is", "ws")):
-        return word[:-1]
-    return word
-
-
-def _empty_subject_filter(answer: dict, subject: str, place: str | None) -> dict:
-    """``answer`` with a filter sealed on its first text cell for ``_subject_phrase`` even
-    though no row matches it today — the sealed ``may_be_empty`` design reads an honest
-    "nothing right now" from a zero-row filtered list, and a later refresh that DOES report
-    the subject lights the card up, instead of every unrelated row from the first build on."""
-    assert isinstance(answer, dict), "answer must be a dict"
-    assert isinstance(subject, str), "subject must be a str"
-    cell = next((c for c in answer.get("cells") or [] if c.get("type") == "text"), None)
-    phrase = _subject_phrase(subject, place)
-    if cell is None or not phrase:
-        return answer
-    return {**answer, "filter": {"path": cell["path"], "equals": phrase}}
 
 
 def _subdivision_in(place: str) -> tuple[str, str] | None:
@@ -2487,6 +2171,582 @@ def _other_sources_left(record: dict, url: str) -> bool:
 _ANSWERS_NOTHING = ("none of the chosen answers is in this response", "the list is empty here")
 
 
+# ---- the query layer in the flow (Round 20, Q3b — §36) ------------------------------------------------
+#
+# A declared build reads the ask through ``ni_query.plan_query``: one local model call (few-shot from the
+# shipped pool) for answer / time / where / order, code for select / limit / agg, the recognizers as
+# validators, the rules floor without a model. The plan's final IR drives the build and is sealed on the
+# spec (``query`` + the code-rendered ``interpretation`` line).
+
+_MAX_POOL_ROWS = 400
+_MAX_CONSUMED_SPANS = 32
+_MAX_CONSUMED_WORDS = 400
+
+
+@functools.lru_cache(maxsize=1)
+def _query_pool() -> tuple[dict, ...]:
+    """The shipped few-shot pool (``ni_query/pool.jsonl``: the 22 clean DEV rows the Q2 / Q3a measurement
+    retrieved its examples from); () when it is missing — the call then runs zero-shot."""
+    assert _MAX_POOL_ROWS > 0, "a bounded pool"
+    try:
+        text = (_resources.files("smartbrain_3000.ni_query") / "pool.jsonl").read_text(encoding="utf-8")
+    except (OSError, ModuleNotFoundError) as exc:
+        log.warning("ni_flow: query pool unreadable: %s", type(exc).__name__)
+        return ()
+    rows = tuple(json.loads(line) for line in text.splitlines()[:_MAX_POOL_ROWS] if line.strip())
+    assert all(isinstance(r, dict) for r in rows), "pool rows are objects"
+    return rows
+
+
+def _query_transport(call_model: Callable[[str], str] | None) -> Callable[[list], str] | None:
+    """``chat_json``'s messages transport for the query call: the flow model's own ``chat`` (system + user
+    turns end to end, as measured — ``FlowModel``); for a prompt-only seam, the messages flattened exactly
+    as the FIT verdict adapts them (``ni_forms.verdict``: role-labelled, joined by blank lines, one user
+    turn — measured 3 of 60 rows worse, kept only for seams that have no messages path). None stays None
+    (no model: the rules floor)."""
+    assert call_model is None or callable(call_model), "call_model must be callable or None"
+    if call_model is None:
+        return None
+    chat = getattr(call_model, "chat", None)
+    if callable(chat):
+        return chat
+
+    def call(messages: list) -> str:
+        assert isinstance(messages, list) and messages, "messages required"
+        assert all(isinstance(m, dict) for m in messages), "messages are role/content objects"
+        return call_model("\n\n".join(f"{m['role']}:\n{m['content']}" for m in messages[:4]))
+    return call
+
+
+def _consumed_texts(request: str, intent: dict, live: dict) -> list[str]:
+    """What the address already took from the ask: the place the user named, the pick's reading (the
+    resolver's own words for the team / station / place it filled, "(XX)" codes off) and the filled
+    parameter values that are words (never numbers or dates)."""
+    assert isinstance(request, str) and isinstance(live, dict), "request + live record required"
+    assert isinstance(intent, dict), "intent must be a dict"
+    texts = [str(_frame_place(request, intent) or "")]
+    texts += [part.rsplit(" (", 1)[0] for part in str(live.get("_library_label") or "").split(" · ")]
+    texts += [v for v in _clean_params(live.get("_library_params")).values() if any(ch.isalpha() for ch in v)]
+    return [t for t in texts if t.strip()][:12]
+
+
+def _consumed_spans(request: str, texts: list[str]) -> list[tuple[int, int]]:
+    """The ask's character spans whose words ``texts`` hold — runs of consecutive such words ("Chicago
+    O'Hare"), filler words never: the query layer drops a ``where`` that repeats them and masks them
+    for the recognizers ("Cape May" is no month)."""
+    assert isinstance(request, str) and isinstance(texts, list), "request + texts required"
+    from .ni_query.recognize import words
+    taken = {w for t in texts[:12] for w, _, _ in words(str(t).casefold())}
+    out: list[tuple[int, int]] = []
+    run: tuple[int, int] | None = None
+    for w, start, end in words(request)[:_MAX_CONSUMED_WORDS]:  # bounded
+        if w in taken and w not in _ANSWER_STOP:
+            run = (run[0], end) if run is not None else (start, end)
+        elif run is not None:
+            out.append(run)
+            run = None
+    if run is not None:
+        out.append(run)
+    assert all(a < b for a, b in out), "spans are non-empty"
+    return out[:_MAX_CONSUMED_SPANS]
+
+
+def _source_name(live: dict) -> str:
+    """The picked Library source's own name ("" without a Library): its words are never a row filter."""
+    assert isinstance(live, dict), "live record required"
+    lib = _resolve_library()
+    try:
+        record = (lib.get(str(live.get("_library_source") or "")) if lib is not None else None) or {}
+    except Exception as exc:  # a broken Library names nothing
+        log.warning("ni_flow: library record unreadable: %s", type(exc).__name__)
+        record = {}
+    name = str(record.get("name") or live.get("_library_provider") or "")
+    assert isinstance(name, str), "a name"
+    return name
+
+
+def _query_plan(request: str, intent: dict, live: dict, answers: list[dict], now: datetime,
+                call_model: Callable[[str], str] | None) -> ni_query.QueryPlan | None:
+    """``ni_query.plan_query`` over the picked source's declared answers (the module docstring of
+    ``ni_query.plan``): the Library record names the source and its parameter menu; the consumed spans
+    are the ask words the address already took; the intent's proper names are masked for the recognizers
+    ("Saturday Night Live" is no Saturday). A planner fault falls to the rules floor; None only when even
+    that fails (the build then reports the misfit)."""
+    assert isinstance(answers, list) and answers, "answers required"
+    assert isinstance(now, datetime) and now.tzinfo is not None, "an aware now"
+    sid = str(live.get("_library_source") or "")
+    lib = _resolve_library()
+    try:
+        record = (lib.get(sid) if lib is not None else None) or {}
+    except Exception as exc:  # a broken Library names nothing: the plan still runs on the answers
+        log.warning("ni_flow: library record unreadable: %s", type(exc).__name__)
+        record = {}
+    source = {"id": sid, "name": str(record.get("name") or live.get("_library_provider") or sid)}
+    params = [p for p in ((record.get("access") or {}).get("params") or [])[:20]
+              if isinstance(p, dict) and p.get("name")]
+    consumed = _consumed_spans(request, _consumed_texts(request, intent, live))
+    from .ni_query.recognize import name_masks
+    args = {"kind": intent.get("frame_kind"), "wants": list(intent.get("wants") or [])[:_MAX_INTENT_FIELDS],
+            "source": source, "answers": answers, "params": params, "consumed": consumed, "now": now,
+            "zone": ni.user_timezone_name(), "pool": list(_query_pool()),
+            "masked": name_masks(request, list(intent.get("names") or [])[:_MAX_INTENT_NAMES])}
+    for transport in (_query_transport(call_model), None):  # bounded: the model, then the rules floor
+        try:
+            return ni_query.plan_query(request, call_model=transport, **args)
+        except _ni_llm.ModelForbidden:
+            raise
+        except Exception as exc:  # a planner fault never kills the build: the floor, then the misfit
+            log.warning("ni_flow: query plan failed: %s", type(exc).__name__)
+    return None
+
+
+def _sealed_query(plan: ni_query.QueryPlan, ir: dict, answers: list[dict], coverage: dict,
+                  notes: list[str]) -> dict:
+    """What ``_handoff`` seals: ``query`` = {the final IR the card executes, its coverage, closed notes, the
+    call's shape} and ``interpretation`` = ``say`` over that same IR (code-authored, TEXT_SRC code)."""
+    assert isinstance(ir, dict) and isinstance(coverage, dict), "ir + coverage required"
+    assert isinstance(notes, list), "notes must be a list"
+    return {"query": {"ir": json.loads(json.dumps(ir)), "coverage": dict(coverage),
+                      "notes": list(dict.fromkeys(notes)),
+                      "model": {"attempts": int(plan.model_meta.get("attempts") or 0),
+                                "used_fewshot": bool(plan.model_meta.get("used_fewshot"))}},
+            "interpretation": ni_query.say(ir, answers)}
+
+
+def _chosen_answers(ir: dict, answers: list[dict]) -> list[dict]:
+    """The declared answers the card shows: ``ir.answer``, and on a value answer the companion value
+    answers ``ir.select`` names (code-owned: the ask's quantity words through the Library's lexicon), ≤4."""
+    assert isinstance(ir, dict) and isinstance(answers, list), "ir + answers required"
+    answer = ni_query.decl.answer_named(answers, ir.get("answer"))
+    assert answer is not None, "the plan's answer is declared"
+    if answer["kind"] != "value":
+        return [answer]
+    companions = [a for a in (ni_query.decl.answer_named(answers, n) for n in ir.get("select") or [])
+                  if a is not None and a["kind"] == "value" and a is not answer]
+    return [answer, *companions][:_MAX_VALUE_ANSWERS]
+
+
+def _ir_as_built(ir: dict, chosen: list[dict], coverage: dict) -> dict:
+    """The IR the card executes: the plan's, unless code shows another answer (a list sibling with rows,
+    the source's other headline values) — then that answer, without the plan's order and limit (they name
+    the planned answer's cells), and ``coverage.answer`` says ``rules``."""
+    assert isinstance(ir, dict) and chosen, "ir + chosen required"
+    assert isinstance(coverage, dict), "coverage must be a dict"
+    if chosen[0]["name"] == ir.get("answer"):
+        return ir
+    coverage["answer"] = "rules"
+    select = [a["name"] for a in chosen[1:]] if chosen[0]["kind"] == "value" else []
+    return {**ir, "answer": chosen[0]["name"], "select": select, "where": [] if select else ir["where"],
+            "order": [], "limit": None}
+
+
+# ---- time: the IR's ``time`` bound to the rows with the answer's direction (Round 20, Q3b — §36) ---------
+#
+# A forecast axis reads forward ("this weekend" = the coming Sat + Sun), dated past rows read backward ("on
+# Tuesday" = the latest Tuesday), calendar tokens as calendar. The engine's legacy forward windows keep their
+# exact semantics (hour floor, dawn rule, the now slot, upcoming); everything else is a SPAN window op.
+_LEGACY_FORWARD = ("tonight", "tomorrow", "weekend")
+_NOW_VALUE_WINDOWS = (None, "now", "latest")
+
+
+def _rows_direction(answer: dict, payload: object, now: datetime, kind: str | None) -> str:
+    """"forward" when a readable row time lies after ``now`` (a forecast axis, a schedule), "backward" when
+    every one lies at or before it (dated past rows); unread rows → the question kind's direction."""
+    assert isinstance(answer, dict) and isinstance(now, datetime), "answer + now required"
+    from .ni_query import apply as q_apply
+    tz = now.tzinfo if isinstance(now.tzinfo, ZoneInfo) else ZoneInfo(ni.user_timezone_name())
+    try:
+        rows, _ = q_apply.rows_of(answer, payload if isinstance(payload, dict) else {"items": payload})
+        cell = q_apply.time_cell(answer)
+    except (TypeError, ValueError, KeyError, AttributeError):
+        rows, cell = [], None
+    future = past = 0
+    for _, row in rows[:_MAX_SCAN_ROWS] if cell is not None else []:  # bounded
+        pt = q_apply.parse_time(q_apply.cell_value(row, cell["path"]), cell, payload, tz)
+        if pt is not None:
+            later = pt[1] > now.astimezone(tz).date() if pt[0] == "date" else pt[1] > now
+            future, past = future + later, past + (not later)
+    assert future + past <= _MAX_SCAN_ROWS, "a bounded scan"
+    if future or past:
+        return "forward" if future else "backward"
+    lean = ni_query.normalize.direction_of(kind)
+    return "backward" if lean == "back" else "forward"
+
+
+def _span(window: str, to: str | None, back: bool) -> dict:
+    """A span window binding (``to`` always set, so the engine reads it as a span)."""
+    assert isinstance(window, str) and window, "a start token"
+    assert to is None or isinstance(to, str), "an end token or None"
+    return {"window": window, "span": {"to": to or "open", "back": back, "forward": False}}
+
+
+def _list_time_binding(time: dict | None, answer: dict, direction: str,
+                       count: bool = False) -> tuple[dict | None, str]:
+    """(the window op binding or None, the time coverage) for a list / columns answer (module notes above):
+    legacy forward tokens on forward rows, spans for the rest; a stretch ahead over past rows is not cut (the
+    latest rows show — ``approximated``) unless the ask counts (a tally is always of the asked stretch, W4);
+    a list with no time cell stands for now / today / tonight / this week and a stretch behind us
+    (``approximated``), never for a day ahead (``unbound``)."""
+    assert time is None or isinstance(time, dict), "time must be a dict or None"
+    assert direction in ("forward", "backward"), "a closed direction"
+    if not time:
+        return None, "bound"
+    lo, hi = time.get("from"), time.get("to")
+    step = (answer.get("axis") or {}).get("step")
+    timed = bool(answer.get("axis")) or len([c for c in answer["cells"] if c["type"] in ("time", "date")]) == 1
+    if lo == "now" and hi in ("now", None):
+        if hi is None and direction == "forward" and timed:
+            return {"window": "upcoming", "span": None, "forward": True}, "bound"
+        return ({"window": "today" if step == "day" else "now", "span": None, "forward": False}
+                if answer.get("axis") and hi == "now" else None), "bound"
+    ahead = _forward_token(lo, hi)
+    if not timed:  # nothing to cut
+        current = ahead is None or ahead["window"] in ("today", "tonight") or (
+            ahead["window"].startswith("next_days:") and int(ahead["window"][10:]) <= 7)
+        return None, ("approximated" if current else "unbound")
+    if ahead is not None and (direction == "forward" or count):
+        return ahead, ("approximated" if ahead.pop("clamped", False) else "bound")
+    if ahead is not None and (ahead["window"] == "tomorrow" or ahead["window"].startswith("next_")):
+        return None, "approximated"  # only ever ahead, over past rows: the latest rows show (D5)
+    return _span(lo or "open", hi, direction == "backward"), "bound"   # today / tonight / a weekday read back
+
+
+def _forward_token(lo: object, hi: object) -> dict | None:
+    """The legacy forward window an IR (from, to) pair is, or None: today / tonight / tomorrow / weekend /
+    a weekday on both ends, today..next_days:N (N clamped to 16), now..next_hours:N (clamped to 168)."""
+    assert lo is None or isinstance(lo, str), "a token or None"
+    assert hi is None or isinstance(hi, str), "a token or None"
+    if lo == hi and isinstance(lo, str) and (lo in ("today", *_LEGACY_FORWARD) or lo.startswith("dow:")):
+        return {"window": lo, "span": None, "forward": lo != "today"}
+    for head, start, cap in (("next_days:", "today", ni._MAX_WINDOW_DAYS), ("next_hours:", "now", ni._MAX_WINDOW_HOURS)):
+        if isinstance(hi, str) and hi.startswith(head) and lo in (start, "now", "today"):
+            n = int(hi[len(head):])
+            return {"window": f"{head}{min(n, cap)}", "span": None, "forward": True, "clamped": n > cap}
+    if lo == "today" and hi == "tomorrow":
+        return {"window": "next_days:2", "span": None, "forward": True}
+    return None
+
+
+def _value_time_binding(chosen: list[dict], time: dict | None) -> str:
+    """The time coverage of value answers (they cannot be cut): ``bound`` when the headline value is declared
+    for the asked stretch (now / today take the newest reading; tonight / tomorrow their own); a slow value
+    (no ``measure``) standing for tonight or this week, or the newest reading for a stretch behind us,
+    ``approximated``; a stretch ahead it is not about, ``unbound``."""
+    assert isinstance(chosen, list) and chosen, "chosen answers required"
+    assert time is None or isinstance(time, dict), "time must be a dict or None"
+    if not time or chosen[0]["kind"] != "value":
+        return "bound"
+    lo, hi, declared, slow = time.get("from"), time.get("to"), chosen[0].get("window"), not chosen[0].get("measure")
+    if lo == "now" and hi in ("now", None):
+        return "bound" if declared in _NOW_VALUE_WINDOWS else "unbound"
+    if lo == hi == "today":
+        return "bound" if declared in (*_NOW_VALUE_WINDOWS, "today") else "unbound"
+    if lo == hi and lo in ("tonight", "tomorrow"):
+        if declared == lo:
+            return "bound"
+        return "approximated" if lo == "tonight" and slow and declared in ("today", "latest") else "unbound"
+    ahead = _forward_token(lo, hi)
+    if ahead is not None:
+        week = ahead["window"].startswith("next_days:") and int(ahead["window"][10:]) <= 7
+        return "approximated" if week and slow and declared == "latest" else "unbound"
+    return "approximated" if declared in (None, "latest") else "unbound"
+
+
+# ---- where: the IR's row filters as sealed engine ops (Round 20, Q3b — §36) -----------------------------
+_WHERE_NUM_OPS = {"<": "lt", "<=": "le", ">": "gt", ">=": "ge", "=": "eq", "!=": "ne", "in": "in"}
+_MAX_WHERE = 6
+
+
+def _where_ops(where: list[dict], answer: dict, keys: dict[str, str]) -> tuple[list[dict], list[dict]]:
+    """The IR's ``where`` over a list / columns answer as engine ops on ``rows`` (``keys``: cell path → row key):
+    a numeric comparator reads the cell as a number first (the cell ops repeat it, harmlessly), then compares;
+    ``contains`` / ``names`` keep rows whose text cell holds the value — ``names`` over "*" any text cell of the
+    answer (the home OR the away team: ``or_keys``). (ops, the clauses this answer cannot carry)."""
+    assert isinstance(where, list) and isinstance(answer, dict), "where + answer required"
+    assert isinstance(keys, dict), "keys must be a dict"
+    types = {c["path"]: c.get("type") for c in answer.get("cells") or []}
+    texts = [keys[p] for p, t in types.items() if t == "text" and p in keys]
+    ops: list[dict] = []
+    dropped: list[dict] = []
+    for w in where[:_MAX_WHERE]:  # bounded
+        col, op, value = w.get("col"), w.get("op"), w.get("value")
+        if op in _WHERE_NUM_OPS and col in keys and (types.get(col) == "number" or op in ("=", "!=", "in")):
+            # a number cell is read as a number first; a text cell compares its codes as written ("FINAL")
+            ops += [{"fn": "number", "field": "rows", "key": keys[col]}] if types.get(col) == "number" else []
+            ops.append({"fn": "where", "field": "rows", "key": keys[col], "op": _WHERE_NUM_OPS[op], "value": value})
+            continue
+        targets = (texts if col == "*" else [keys[col]] if col in keys else []) if op in ("contains", "names") else []
+        if not targets or not isinstance(value, str) or not value.strip():
+            dropped.append(w)
+            continue
+        op_ = {"fn": "where", "field": "rows", "key": targets[0], "op": "contains", "value": value.strip()[:200]}
+        if targets[1:]:
+            op_["or_keys"] = targets[1:1 + ni._MAX_WHERE_OR_KEYS]
+        ops.append(op_)
+    return ops, dropped
+
+
+def _rank_ops(order: list | None, row_limit: int | None, keys: dict[str, str]) -> list[dict]:
+    """The IR's ``order`` and ``limit`` as sealed engine ops on ``rows`` (``apply_query``'s order step):
+    stable sorts, the last key first, a row without the value last (``sort_by`` with ``missing: "last"``),
+    then the first ``row_limit`` rows (``top_n``). ``keys``: cell path → row key; an order on a cell the
+    answer lacks is left out (the plan's structural check already refused one)."""
+    assert order is None or isinstance(order, list), "order must be a list or None"
+    assert row_limit is None or (isinstance(row_limit, int) and row_limit >= 1), "a positive limit or None"
+    ops = [{"fn": "sort_by", "field": "rows", "key": keys[o["col"]], "dir": o["dir"], "missing": "last"}
+           for o in reversed((order or [])[:3]) if isinstance(o, dict) and o.get("col") in keys
+           and o.get("dir") in ("asc", "desc")]
+    if row_limit is not None:
+        ops.append({"fn": "top_n", "field": "rows", "n": min(row_limit, ni._MAX_TOP_N)})
+    return ops
+
+
+def _bound_overrides(where: list[dict], answer: dict) -> dict[str, str]:
+    """Library spec v1.4 ``param_bounds``: the asked comparators pushed into the address ("above magnitude 4"
+    → min_mag=4), so the source returns the rows the card keeps; the row filter stays. > / >= fill the cell's
+    min parameter, < / <= its max, = both."""
+    assert isinstance(where, list) and isinstance(answer, dict), "where + answer required"
+    bounds = answer.get("param_bounds") or {}
+    assert isinstance(bounds, dict), "param_bounds must be a dict"
+    out: dict[str, str] = {}
+    sides = {">": ("min",), ">=": ("min",), "<": ("max",), "<=": ("max",), "=": ("min", "max")}
+    for w in where[:_MAX_WHERE]:  # bounded
+        value = w.get("value")
+        if w.get("col") not in bounds or w.get("op") not in sides or isinstance(value, bool) \
+                or not isinstance(value, (int, float)):
+            continue
+        for side in sides[w["op"]]:  # bounded: two sides
+            name = bounds[w["col"]].get(side)
+            if name:
+                out[name] = str(int(value)) if float(value).is_integer() else str(value)
+    return out
+
+
+def _names_unbound(intent: dict, request: str, consumed: frozenset[str], source_name: str,
+                   where: list[dict]) -> list[str]:
+    """The proper names the ask says (``intent.names``) that the address did not take (the place, the team a
+    resolver filled), that are no word of the source's own name, and that no ``where`` value carries ("the
+    latest Sharks game" on the league scoreboard with no Sharks filter): the card would not be about them."""
+    assert isinstance(intent, dict) and isinstance(request, str), "intent + request required"
+    assert isinstance(consumed, frozenset) and isinstance(where, list), "consumed + where required"
+    from .ni_query.recognize import words
+    own = {w for w, _, _ in words(source_name.casefold())}
+    carried = [str(w.get("value")).casefold().strip() for w in where if isinstance(w.get("value"), str)]
+    out = []
+    for name in list(intent.get("names") or [])[:_MAX_INTENT_NAMES]:  # bounded
+        parts, folded = [w for w, _, _ in words(str(name).casefold())], str(name).casefold().strip()
+        if not parts or all(ni_query.clauses.fold(p) in consumed or p in consumed or p in own for p in parts):
+            continue
+        if any(v and (v in folded or folded in v) for v in carried):
+            continue
+        out.append(str(name))
+    return out
+
+
+_COVERAGE_ORDER = ("bound", "recognizer", "rules", "approximated", "unbound")
+
+
+def _worse(a: str, b: str) -> str:
+    """The less bound of two coverage values (bound < recognizer < rules < approximated < unbound)."""
+    assert a in _COVERAGE_ORDER and b in _COVERAGE_ORDER, "closed coverage values"
+    assert len(_COVERAGE_ORDER) == 5, "five values"
+    return max(a, b, key=_COVERAGE_ORDER.index)
+
+
+def _bind_time(time: dict | None, chosen: list[dict], params: dict, sample: object, now: datetime,
+               kind: str | None, count: bool = False) -> dict:
+    """The IR's time for the chosen answers: {window (the engine's legacy token, or a span's start), span
+    (None for a legacy window), back (the rows read backward), coverage}. A value answer is never cut: its
+    window only marks an explicit asked day (the next-occurrence swap stays off)."""
+    assert isinstance(chosen, list) and chosen, "chosen answers required"
+    assert time is None or isinstance(time, dict), "time must be a dict or None"
+    if chosen[0]["kind"] == "value":
+        legacy = _forward_token(time.get("from"), time.get("to")) if time else None
+        return {"window": legacy["window"] if legacy else None, "span": None, "back": False,
+                "coverage": _value_time_binding(chosen, time), "time": time}
+    try:
+        answer = _fill_answer(chosen[0], params)
+    except ValueError:
+        answer = chosen[0]
+    direction = _rows_direction(answer, sample, now, kind)
+    if time == {"from": "this_week", "to": "this_week"} and ni_query.normalize.direction_of(kind) is None:
+        # the kind gave "this week" no direction (the calendar week); the rows do: a forecast axis reads the
+        # next 7 days; over dated past rows the D5 rule holds ("consumer price index this week" on a monthly
+        # series: the latest rows show, approximated, the line keeps "this week") — a tally cuts the last 7
+        if direction == "forward" or count:
+            time = {"from": "today", "to": "next_days:7"} if direction == "forward" else \
+                {"from": "past_days:7", "to": "today"}
+        else:
+            return {"window": None, "span": None, "back": True, "coverage": "approximated", "time": time}
+    binding, coverage = _list_time_binding(time, chosen[0], direction, count=count)
+    return {"window": binding["window"] if binding else None, "span": binding["span"] if binding else None,
+            "back": direction == "backward", "coverage": coverage, "time": time}
+
+
+# the clock-filled date parameters an asked stretch binds (plan §E): its first day, its last day, its year
+_CLOCK_ROLES = {"start": "lo", "since": "lo", "begin": "lo", "date": "lo", "end": "hi", "until": "hi", "year": "year"}
+# a token's day offsets from today (first, last) — calendar stretches COVER every day they can fall on (this
+# week's Monday is 0..6 days back): the address fetches enough, the sealed window op cuts exactly
+_TOKEN_DAYS = {"now": (0, 0), "today": (0, 0), "tonight": (0, 1), "tomorrow": (1, 1), "yesterday": (-1, -1),
+               "this_week": (-6, 6), "next_week": (1, 13), "this_month": (-30, 30)}
+
+
+def _token_days(token: str, back: bool) -> tuple[int, int] | None:
+    """A relative IR token's (first, last) day offsets from today; None for an absolute token."""
+    assert isinstance(token, str) and token, "a token"
+    assert isinstance(back, bool), "back must be a bool"
+    if token in _TOKEN_DAYS:
+        return _TOKEN_DAYS[token]
+    if token == "weekend" or token.startswith("dow:"):
+        return ((-6, 1) if token == "weekend" else (-6, 0)) if back else ((-1, 6) if token == "weekend" else (0, 6))
+    head, _, arg = token.partition(":")
+    if head in ("next_days", "past_days"):
+        return (0, int(arg) - 1) if head == "next_days" else (-int(arg), 0)
+    if head in ("next_hours", "past_hours"):
+        days = -(-int(arg) // 24)
+        return (0, days) if head == "next_hours" else (-days, 0)
+    return None
+
+
+def _absolute_days(token: str) -> tuple[datetime, datetime]:
+    """An absolute IR token's first and last day (date / month / year)."""
+    assert token.startswith(("date:", "month:", "year:")), "an absolute token"
+    head, _, arg = token.partition(":")
+    assert arg, "a value"
+    if head == "date":
+        first = datetime.fromisoformat(arg)
+        return first, first
+    if head == "month":
+        first = datetime(int(arg[:4]), int(arg[5:7]), 1)  # noqa: DTZ001 — a calendar day, rendered as a date
+        return first, (first + timedelta(days=32)).replace(day=1) - timedelta(days=1)
+    return datetime(int(arg), 1, 1), datetime(int(arg), 12, 31)  # noqa: DTZ001 — calendar days
+
+
+def _clock_rebind(clock: dict, time: dict | None, back: bool, now: datetime) -> dict:
+    """The pick's clock parameters bound to the asked stretch: start / since / begin / date take its first
+    day, end / until its last day, year its year — an offset from today for a relative stretch (rolling on
+    every tick), a fixed value for an absolute day / month / year. A side the stretch leaves open keeps the
+    source's own default (``{now, null}``: the end stays)."""
+    assert isinstance(clock, dict) and isinstance(now, datetime), "clock params + now required"
+    assert time is None or isinstance(time, dict), "time must be a dict or None"
+    out = {name: dict(cp) for name, cp in clock.items()}
+    if not time or time.get("from") == "now" and time.get("to") in ("now", None):
+        return out  # now / from now on: the source's own default stretch holds it
+    sides = {"lo": time.get("from"), "hi": time.get("to"), "year": time.get("from")}
+    for name, cp in out.items():  # bounded: a few clock params
+        role, token = _CLOCK_ROLES.get(name), None
+        token = sides.get(role) if role else None
+        if not token or token == "now" and role == "hi":
+            continue
+        rel = _token_days(token, back)
+        if rel is None:  # an absolute stretch: its own day / year, as a fixed value
+            first, last = _absolute_days(token)
+            cp["value"] = (last if role == "hi" else first).strftime(
+                cp["format"].replace("%-m", str((last if role == "hi" else first).month))
+                .replace("%-d", str((last if role == "hi" else first).day)))
+        elif role != "year":
+            cp.pop("value", None)
+            cp["offset_days"] = max(-ni._MAX_CLOCK_OFFSET_DAYS, min(ni._MAX_CLOCK_OFFSET_DAYS,
+                                                                  rel[1] if role == "hi" else rel[0]))
+    assert set(out) == set(clock), "the same params"
+    return out
+
+
+def _template_with(live: dict, url: str, overrides: dict[str, str]) -> str:
+    """The pick's address template with ``overrides`` written in (clock parameters stay slots), aligned by
+    position on the Library record's own template; "" when the record or the alignment is missing."""
+    assert isinstance(live, dict) and isinstance(overrides, dict), "live record + overrides required"
+    assert isinstance(url, str) and url, "url required"
+    lib = _resolve_library()
+    try:
+        record = (lib.get(str(live.get("_library_source") or "")) if lib is not None else None) or {}
+    except Exception as exc:  # a broken Library: the comparator stays a row filter only
+        log.warning("ni_flow: library record unreadable: %s", type(exc).__name__)
+        return ""
+    access = record.get("access") or {}
+    lib_template = _strip_vault_key_segments(str(access.get("url_template") or ""), list(access.get("params") or []))
+    if not lib_template:
+        return ""
+    return _templatize_url_by_position(url, lib_template, _clean_clock_params(live.get("_library_clock_params")),
+                                       _clean_params(live.get("_library_params")), overrides)
+
+
+def _rebind_fetch(store: ni.NIStore, item_id: str, live: dict, url: str, sample: object, clock: dict,
+                  now: datetime, do_fetch: Callable[[str], object] | None,
+                  overrides: dict[str, str] | None = None) -> tuple[str, object, bool]:
+    """The address with the rebound clock parameters and the pushed-down bounds (``overrides``): when it
+    differs from the one fetched, fetch it (the same consented source — other dates, a tighter bound) and seal
+    it on the record for the handoff. (url, sample, refetched); unchanged when nothing moved, there is no
+    fetcher, or the fetch fails (the sample fetched stands, the row filter and the cut still apply)."""
+    assert isinstance(live, dict) and isinstance(clock, dict), "live record + clock params required"
+    assert isinstance(url, str) and url, "url required"
+    template = str(live.get("_library_url_template") or "")
+    moved = bool(clock) and clock != _clean_clock_params(live.get("_library_clock_params"))
+    if overrides:
+        template, moved = (_template_with(live, url, overrides) or template), True
+    if not template or not moved or do_fetch is None:
+        return url, sample, False
+    rebuilt = _f1_render_url_at({"params": _clock_spec_params(clock), "source": {"url": template}}, now)
+    if not rebuilt or rebuilt == url:
+        return url, sample, False
+    try:
+        fresh = do_fetch(rebuilt)
+    except Exception as exc:  # the asked dates are out of reach: the sample fetched stands, the cut still applies
+        log.warning("ni_flow: rebound fetch failed: %s", type(exc).__name__)
+        return url, sample, False
+    live.update(_library_url=rebuilt, _library_clock_params=clock,
+                _library_params={**_clean_params(live.get("_library_params")), **(overrides or {})})
+    if clock and "{{param:" in template:
+        live["_library_url_template"] = template
+    access = live.get("_access")
+    if isinstance(access, dict) and access.get("url") == url:
+        access["url"] = rebuilt
+    _flow_write(store, item_id, live)
+    return rebuilt, fresh, True
+
+
+# the Library's closed ``measure`` names (spec v1.2) as the words an ask names them by ("wind", "humidity",
+# "water temp", "air quality"): the honest-stop lexicon — a measure the ask names that no declared answer
+# reports is the source's nothing (Round 20, Q3b; it replaces the removed ask regexes of ``_measures_named``)
+_MEASURE_NAME_WORDS: dict[str, frozenset[str]] = {
+    m: frozenset(ni_query.clauses.fold(w) for w in m.split("_")) for m in _ANSWER_MEASURES}
+
+
+def _consumed_words(request: str, intent: dict, live: dict) -> frozenset[str]:
+    """The folded words of what the address already took (``_consumed_texts``): a place named "Wind River"
+    names no measure."""
+    assert isinstance(request, str) and isinstance(live, dict), "request + live record required"
+    from .ni_query.recognize import words
+    out = frozenset(ni_query.clauses.fold(w) for t in _consumed_texts(request, intent, live)
+                    for w, _, _ in words(t.casefold()))
+    assert all(isinstance(w, str) for w in out), "words"
+    return out
+
+
+def _reports_measure(a: dict, measure: str) -> bool:
+    """Does declared answer ``a`` report ``measure``: its declared measure, its label cue (``_covers_measure``:
+    a weather-code table reports snow and thunderstorms), or every word of the measure's name in its own
+    lexicon (name, label, words, cell labels)."""
+    assert isinstance(a, dict) and measure in _MEASURE_NAME_WORDS, "an answer + a closed measure"
+    from .ni_query.recognize import words
+    if a.get("measure") == measure or (measure in _MEASURE_CUES and _covers_measure(a, measure)):
+        return True
+    texts = [a["name"].replace("_", " "), a["label"], *a["words"], *[c.get("label", "") for c in a.get("cells") or []]]
+    own = {ni_query.clauses.fold(w) for t in texts[:40] for w, _, _ in words(str(t).casefold())}
+    assert _MEASURE_NAME_WORDS[measure], "a measure has name words (an empty set would match every answer)"
+    return _MEASURE_NAME_WORDS[measure] <= own
+
+
+def _unbound_measures(request: str, answers: list[dict], consumed: frozenset[str]) -> tuple[list[str], list[str]]:
+    """(the measures the ask names by their closed names, those no declared answer of this source reports)."""
+    assert isinstance(request, str) and isinstance(answers, list), "request + answers required"
+    assert isinstance(consumed, frozenset), "consumed must be a frozenset"
+    from .ni_query.recognize import words
+    said = {ni_query.clauses.fold(w) for w, _, _ in words(request.casefold())[:_MAX_CONSUMED_WORDS]} - consumed
+    named = [m for m in _ANSWER_MEASURES if _MEASURE_NAME_WORDS[m] <= said]
+    return named, [m for m in named if not any(_reports_measure(a, m) for a in answers)]
+
+
 # fix round datalayer-r2 (class W1): a card never claims a quantity it does not show. The
 # TRUTHFUL words of a chosen answer are its own ``label`` and its cells' ``label``s — never
 # the ``words`` lexicon (bait that matches an ask to a source, not a promise of what a cell
@@ -2494,12 +2754,17 @@ _ANSWERS_NOTHING = ("none of the chosen answers is in this response", "the list 
 # cell that reports one).
 def _try_answers_build(store: ni.NIStore, item_id: str, request: str, intent: dict,
                        url: str, sample: object, call_model: Callable[[str], str] | None = None,
-                       fetch_now: datetime | None = None) -> dict | None:
+                       fetch_now: datetime | None = None,
+                       do_fetch: Callable[[str], object] | None = None) -> dict | None:
     """When the user tapped a Library source that declares answers (sealed ``_library_source`` for
     exactly this URL), build the card from them, inside the ask's frame (its window and kind of
     question). None → not a declared build (not a Library tap, no declared answers, or they don't fit
     this response: a tapped row moves on, ruling 2026-10-05). ``{"nothing": True, "why": …}`` → this
-    source has nothing for the ask (the caller moves on to the next source)."""
+    source has nothing for the ask (the caller moves on to the next source).
+
+    Round 20 (Q3b, §36): the query layer reads the ask (``plan_query``); its answer, time, where and count
+    drive the build, and ``do_fetch`` refetches the same consented source when the asked stretch moves its
+    clock-filled date parameters (the built dict's ``url`` is the address the card is sealed with)."""
     live = _flow_read(store, item_id) or {}
     source_id = str(live.get("_library_source") or "")
     if not source_id or live.get("_library_url") != url:
@@ -2508,20 +2773,60 @@ def _try_answers_build(store: ni.NIStore, item_id: str, request: str, intent: di
     if not answers:
         return None
     title, params = str(intent.get("subject") or request)[:120], _clean_params(live.get("_library_params"))
-    wants, window, kind = list(intent.get("wants") or []), intent.get("window"), intent.get("frame_kind")
+    wants, kind = list(intent.get("wants") or []), intent.get("frame_kind")
     next_event = kind in ("next_event", "schedule")
+    now = fetch_now or ni._clock()
+    plan = _query_plan(request, intent, live, answers, now, call_model)
+    if plan is None:
+        _append_note(store, item_id, "the Library's declared answers didn't fit this response (the ask could "
+                                     "not be read)")
+        return None
     # R3-E (2026-10-04): names of clock-filled params ride through so an answer path indexed by a
     # date (``near_earth_objects.{date}``) stays a slot in the sealed pipeline — the engine refills
     # every tick, so day 2 reads day 2's slice instead of extract-missing on the frozen day-1 key.
     clock_names = frozenset(_clean_clock_params(live.get("_library_clock_params")))
-    # the answers about what the user NAMED (the airport, the team) come first: "delays at Newark airport"
-    # is Newark's delays, not the nationwide list (live 2026-09-29)
-    scoped = [a for a in answers if _names_a_param(a, params)]
-    chosen = select_answers(scoped, request, wants, window, kind) if scoped else []
-    if not chosen or not any(_answer_score(a, _answer_tokens(request)) > 0 for a in chosen):
-        chosen = select_answers(answers, request, wants, window, kind)
-    if not chosen:  # nothing here serves the asked window / measure: the next source, never a headline
-        return {"nothing": True, "why": _nothing_why(answers, request, window)}
+    # Round 20 (Q3b): the query layer chose the answer (``ir.answer``, its value companions in ``ir.select``);
+    # a measure the ask names that no declared answer reports is this source's honest nothing, never another
+    # quantity under the asked one's name ("wind" on a wave buoy) — the next source runs
+    coverage, notes = dict(plan.coverage), list(plan.notes)
+    named, unreported = _unbound_measures(request, answers, _consumed_words(request, intent, live))
+    if named and len(unreported) == len(named):
+        return {"nothing": True, "why": "doesn't report " + " or ".join(m.replace("_", " ") for m in unreported),
+                "query": _sealed_query(plan, plan.ir, answers, {**coverage, "select": "unbound"},
+                                       [*notes, "quantity_unbound"])}
+    if unreported:  # one of several asked quantities: the card shows the others, the record says so
+        coverage["select"] = "unbound"
+        notes.append("quantity_unbound")
+    chosen = _chosen_answers(plan.ir, answers)
+    # the asked stretch: bound to the rows with the answer's direction (and to the address's clock-filled
+    # dates); a stretch ahead the answer cannot show is the source's honest nothing, never another day's value
+    bound = _bind_time(plan.ir.get("time"), chosen, params, sample, now, kind, plan.ir.get("agg") == "count")
+    coverage["time"] = _worse(coverage["time"], bound["coverage"])
+    if bound["coverage"] == "unbound":
+        return {"nothing": True, "why": f"doesn't give {_time_words(plan.ir.get('time')) or 'that time'}",
+                "query": _sealed_query(plan, plan.ir, answers, coverage, notes)}
+    window, span = bound["window"], bound["span"]
+    ir = {**plan.ir, "time": bound["time"]}
+    if isinstance(ir["limit"], int) and ir["limit"] > ni._MAX_TOP_N:  # the engine's row cap ("top 100")
+        ir["limit"], coverage["limit"] = ni._MAX_TOP_N, _worse(coverage["limit"], "approximated")
+    # the row filters the chosen answer carries (sealed as engine ops); one it cannot carry, or a name the ask
+    # says that neither the address nor a filter takes, leaves the card not about it — coverage says so
+    dropped = list(ir["where"]) if chosen[0]["kind"] == "value" else \
+        _where_ops(list(ir["where"]), chosen[0], {c["path"]: c["path"] for c in chosen[0]["cells"]})[1]
+    ir["where"] = [w for w in ir["where"] if w not in dropped]
+    if dropped:
+        coverage["where"] = "unbound"
+        notes.append("where_dropped")
+    if _names_unbound(intent, request, _consumed_words(request, intent, live), _source_name(live), ir["where"]):
+        coverage["where"] = "unbound"
+        notes.append("names_unbound")
+    clock = _clock_rebind(_clean_clock_params(live.get("_library_clock_params")), bound["time"],
+                          bound["back"], now)
+    overrides = _bound_overrides(ir["where"], chosen[0]) if chosen[0]["kind"] != "value" else {}
+    moved = clock != _clean_clock_params(live.get("_library_clock_params"))
+    url, sample, refetched = _rebind_fetch(store, item_id, live, url, sample, clock, now, do_fetch, overrides)
+    if refetched:
+        notes += [*(["clock_bound"] if moved else []), *(["bound_pushed"] if overrides else []), "refetched"]
     # fix6-rows (2026-10-04): a list whose rows declare a place column (CBP ports, state-coded CDC
     # tables) is scoped to the ask's named place like an entity-filled answer is scoped to its
     # `{param}`. No row names the place → the source has nothing for it, the next source runs. A
@@ -2547,32 +2852,6 @@ def _try_answers_build(store: ni.NIStore, item_id: str, request: str, intent: di
         when = next((a for a in answers if a["kind"] == "value" and _event_time(a)), None)
         if when is not None:
             chosen = [*chosen[:_MAX_VALUE_ANSWERS - 1], when]
-    if kind in ("lookup", "next_event", "result", "schedule") and chosen[0]["kind"] == "list":
-        # fix round 1a-5 (class D): a lookup / next-event ask that NAMES a row ("when is Thanksgiving",
-        # "the next new moon") selects that row before the card is built — a sealed row filter, so
-        # every refresh keeps it; a subject no row names (and that is not the list itself) ends honestly.
-        # fix round datalayer-r2 (class W3): extended to result / schedule — a named team absent from
-        # every row (home or away) is the same honest nothing ("no Sharks game in today's scores"),
-        # never another team's games; a team naming several rows across BOTH home and away stays the
-        # existing participant case (_subject_hits: one cell can't select "its" rows, the list stays
-        # whole). An already-filtered answer (mlb-team-results' "Final games" filter) short-circuits
-        # in _scope_rows_to_subject itself — an empty may_be_empty result (no Final game at all, the
-        # Mariners case) rides through unchanged, exactly as it did before this class existed.
-        try:
-            chosen = [_scope_rows_to_subject(chosen[0], sample, str(intent.get("subject") or ""), place)]
-        except ValueError as exc:
-            return {"nothing": True, "why": str(exc).split("answers: ", 1)[-1]}
-    elif kind in ("alerts", "latest_items", "status") and chosen[0]["kind"] == "list":
-        # fix round 1a-7 (class D2): the same row filter, extended to alert-style lists ("red
-        # flag warnings in California" named an alert TYPE the statewide feed also carries
-        # unfiltered). A hazard type the feed does not report today is not an error the way a
-        # nonexistent holiday is — the filter is sealed anyway so the honest `may_be_empty`
-        # design shows "no red flag warnings right now" rather than the whole list.
-        subject = str(intent.get("subject") or "")
-        try:
-            chosen = [_scope_rows_to_subject(chosen[0], sample, subject, place)]
-        except ValueError:
-            chosen = [_empty_subject_filter(chosen[0], subject, place)]
     chosen = _swap_stale_next_event(chosen, answers, sample, window, next_event, ni._clock())
     form = FormBuild(now=fetch_now or ni._clock(), ask=request, source_url=url,
                      cadence_s=int(intent.get("cadence_minutes") or _DEFAULT_CADENCE) * 60,
@@ -2581,20 +2860,22 @@ def _try_answers_build(store: ni.NIStore, item_id: str, request: str, intent: di
         try:
             built = build_from_answers(chosen, sample, title, params=params, window=window,
                                        next_event=next_event, clock_params=clock_names,
-                                       frame_kind=kind, form=form)
+                                       frame_kind=kind, form=form, span=span, where=ir["where"], agg=ir["agg"],
+                                       order=ir["order"], row_limit=ir["limit"])
         except ValueError as exc:
-            if "the list is empty here" in str(exc) and chosen[0]["kind"] == "list":
+            if "the list is empty here" in str(exc) and chosen[0]["kind"] == "list" and not ir["where"]:
                 # F3 retry (2026-10-04): a sibling list answer on the same source may have rows for
                 # the asked window — "current kp" picked the predicted forecast (all future from
                 # 13:30 EDT) but the estimated-today filter holds the 11 AM slot the ask wants.
-                sibling = next((a for a in answers if a["kind"] == "list" and a not in chosen
-                                 and (not window or _serves_window(a, window))), None)
+                # Round 20 (Q3b): never when the ask's own filter emptied the list — another list is
+                # no answer to "no period mentions snow".
+                sibling = next((a for a in answers if a["kind"] == "list" and a not in chosen), None)
                 if sibling is not None:
                     try:
                         built = build_from_answers([sibling], sample, title, params=params,
                                                      window=window, next_event=next_event,
                                                      clock_params=clock_names, frame_kind=kind,
-                                                     form=form)
+                                                     form=form, span=span, where=ir["where"], agg=ir["agg"])
                         chosen = [sibling]
                     except ValueError:
                         raise exc from None  # the first error is the better message
@@ -2605,13 +2886,13 @@ def _try_answers_build(store: ni.NIStore, item_id: str, request: str, intent: di
                 # source's other headline answers, with the asked ones named — never a model guess
                 # at a different field, and never one for another window
                 fallback = [a for a in answers if a["kind"] == "value" and a["primary"]
-                            and a not in chosen
-                            and not (window and _v12(answers) and not _serves_window(a, window))]
+                            and a not in chosen and a.get("window") in (None, "now", "latest")
+                            and window in (None, "now")]
                 if not fallback or _other_sources_left(live, url):
                     raise  # another source may have what was asked: the caller moves on to it
                 built = build_from_answers(fallback, sample, title, params=params, window=window,
                                            next_event=next_event, clock_params=clock_names,
-                                           frame_kind=kind, form=form)
+                                           frame_kind=kind, form=form, span=span)
                 built["missing"] = [a["label"] for a in chosen] + list(built.get("missing") or [])
                 chosen = fallback
             else:
@@ -2631,6 +2912,9 @@ def _try_answers_build(store: ni.NIStore, item_id: str, request: str, intent: di
     missing = set(built.get("missing") or [])
     built["labels"] = [a["label"] for a in chosen if a["label"] not in missing]
     built["chosen"], built["answers"] = chosen, answers
+    ir = _ir_as_built(ir, chosen, coverage)
+    built["query"] = _sealed_query(plan, ir, answers, coverage, notes)
+    built["url"], built["window"] = url, (None if span else window)
     # C5: "filled" is what the address really carries — a place the URL never took is not answered.
     # R4-12 (2026-10-04): the intent's place rides as filled too so the quantity-want shortcut's
     # "every other content word is covered by the source" check doesn't trip on the place name a
@@ -2685,7 +2969,7 @@ def _swap_stale_next_event(chosen: list[dict], answers: list[dict], sample: obje
                          and s.get("window") == "tomorrow"), None)
         if sibling is None:
             continue
-        # when select_answers already tied the sibling in beside the stale "today" (both answers
+        # when the chosen answers already hold the sibling beside the stale "today" (both answers
         # share the measure's words), just drop the stale answer; else replace it in place so the
         # headline stays its slot.
         idx = swapped.index(a)
@@ -2704,16 +2988,6 @@ def _window_words(window: str) -> str:
         unit, n = window.split(":")
         return f"the next {n} {unit[5:]}"
     return {"now": "right now", "weekend": "the weekend"}.get(window, window)
-
-
-def _nothing_why(answers: list[dict], request: str, window: str | None) -> str:
-    """Why a source has nothing for the ask: the window it can't show, the measure it doesn't report."""
-    if window and _v12(answers) and not any(_serves_window(a, window) for a in answers):
-        return f"doesn't give {_window_words(window)}"
-    named = _measures_named(request)
-    if named and _v12(answers):
-        return "doesn't report " + " or ".join(m.replace("_", " ") for m in named)
-    return f"doesn't give {_window_words(window)}" if window else "has nothing for this right now"
 
 
 _WANT_SYNONYMS: dict[str, frozenset[str]] = {
@@ -2835,10 +3109,11 @@ _NOT_A_PLACE = frozenset({"us", "usa", "u.s.", "united states", "america", "nati
 
 
 def _frame_of(request: str, intent: dict) -> dict:
-    """The ask's frame as code reads it: the kind of question and the window (stage 1), the place the
-    user named, and the asked categories — the Library's classify of the ask AND of the intent's subject
-    and wants ("Bills next opponent": the word "bills" alone files it under Congress)."""
-    frame = {"kind": intent.get("frame_kind"), "window": intent.get("window"),
+    """The ask's frame as code reads it: the kind of question (stage 1), the place the user named, and the
+    asked categories — the Library's classify of the ask AND of the intent's subject and wants ("Bills next
+    opponent": the word "bills" alone files it under Congress). ``window``: None here — a declared build
+    sets the window its query bound (Round 20, Q3b)."""
+    frame = {"kind": intent.get("frame_kind"), "window": None,  # the build's bound window (§36) replaces it
              "place": _frame_place(request, intent), "categories": [], "ask_categories": [],
              "about_categories": [], "lib": None}
     lib = _resolve_library()
@@ -2975,8 +3250,8 @@ def _legacy_window_gap(window: str | None, chosen: list[dict], answers: list[dic
     if not window or _v12(answers):
         return None
     for a in chosen:  # bounded by _MAX_VALUE_ANSWERS
-        said = {w for w in ("today", "tonight", "tomorrow") if w in a["label"].lower()}
-        if a["kind"] == "value" and said and not _serves_window({**a, "window": said.pop()}, window, loose=False):
+        said = [w for w in ("today", "tonight", "tomorrow") if w in a["label"].lower()]
+        if a["kind"] == "value" and said and said[0] != window:  # a day-labeled value holds that day only
             return f"it shows {a['label']}, not {_window_words(window)}"
     return None
 
@@ -4091,9 +4366,21 @@ def run_flow(store: ni.NIStore, item_id: str, *,
         elif _model_consent_of(store, item_id, record) != resolved_model:
             return _ask_model_consent(store, item_id, resolved_model, local)
 
-    def call_model(prompt: str) -> str:
+    def call_prompt(prompt: str) -> str:
         assert isinstance(prompt, str), "prompt required"
+        assert isinstance(resolved_model, str) and resolved_model, "a resolved model"
         return call(resolved_model, prompt)
+
+    def default_chat(messages: list) -> str:
+        """The query layer's turn as measured: system + user messages through the gateway (§36)."""
+        assert isinstance(messages, list) and messages, "messages required"
+        assert isinstance(resolved_model, str) and resolved_model, "a resolved model"
+        temp = None if _claudecli_mod.is_claudecode(resolved_model) else 0.0
+        data = _gateway_mod.chat(list(messages), resolved_model, timeout=_FLOW_MODEL_TIMEOUT_S, temperature=temp)
+        return _gateway_mod.completion_text(data)
+
+    # a caller's own prompt seam (``gateway_call``) has no messages transport: the query layer then flattens
+    call_model = FlowModel(prompt=call_prompt, chat=default_chat if gateway_call is None else None)
 
     # H2 (audit 2026-09-13): a remap flow enters at ``sampling`` and re-uses the
     # item's own frozen source — never re-enter intent/source, never re-locate
@@ -4501,10 +4788,10 @@ def _resolve_library() -> object | None:
 
 
 def _library_hint(intent: dict | None) -> dict:
-    """The intent's frame as locate takes it: what the ask is about, where, and which kind / window."""
+    """The intent's frame as locate takes it: what the ask is about, where, and which kind."""
     intent = intent or {}
     return {"subject": intent.get("subject"), "wants": list(intent.get("wants") or []),
-            "place": intent.get("place"), "frame_kind": intent.get("frame_kind"), "window": intent.get("window")}
+            "place": intent.get("place"), "frame_kind": intent.get("frame_kind")}
 
 
 def _library_candidates(request: str, intent: dict | None = None) -> list[dict]:
@@ -4606,7 +4893,21 @@ def _clean_clock_params(cp: object) -> dict[str, dict]:
             continue
         out[str(k)[:40]] = {"format": v["format"][:40], "offset_days": int(v["offset_days"]),
                              "label": str(v.get("label") or k)[:200]}
+        if isinstance(v.get("value"), str) and 0 < len(v["value"]) <= 40:  # Q3b: an absolute asked day / year
+            out[str(k)[:40]]["value"] = v["value"]
     return out
+
+
+def _clock_spec_params(clock_params: dict) -> dict[str, dict]:
+    """The sealed spec params of a pick's clock parameters: a ``clock`` param the engine refills from the
+    current clock every tick, or — the query layer bound it to an absolute asked day / month / year (Round
+    20, Q3b) — a ``string`` param holding that value."""
+    assert isinstance(clock_params, dict), "clock params must be a dict"
+    assert len(clock_params) <= 10, "a few clock params"
+    return {name: ({"label": cp.get("label") or name, "kind": "string", "value": cp["value"]} if cp.get("value")
+                   else {"label": cp.get("label") or name, "kind": "clock", "format": cp["format"],
+                         "offset_days": int(cp["offset_days"])})
+            for name, cp in clock_params.items()}
 
 
 def _clean_lookup(lookup: object, url: str) -> list[dict] | None:
@@ -4724,11 +5025,13 @@ def _derive_clock_template(source_id: str, url: str, filled_params: dict[str, st
 
 
 def _templatize_url_by_position(url: str, lib_template: str, clock_meta: dict[str, dict],
-                                  filled_params: dict[str, str]) -> str:
+                                  filled_params: dict[str, str], overrides: dict[str, str] | None = None) -> str:
     """Build the sealed URL template by aligning ``lib_template``'s ``{name}`` placeholders against
     ``url`` by POSITION — a clock placeholder emits ``{{param:name}}``, a non-clock placeholder
     emits the value as the record filled it. Returns ``""`` when the two templates can't be aligned
-    (a non-literal chunk fails to match ``url``) so the caller leaves the URL untouched."""
+    (a non-literal chunk fails to match ``url``) so the caller leaves the URL untouched. ``overrides`` (Round 20,
+    Q3b): non-clock parameters written with a new value (a pushed-down comparator: ``min_mag``), quoted as the
+    Library fills a value."""
     assert isinstance(url, str) and isinstance(lib_template, str), "args required"
     assert isinstance(clock_meta, dict) and isinstance(filled_params, dict), "metas required"
     pattern = re.compile(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}")
@@ -4753,6 +5056,8 @@ def _templatize_url_by_position(url: str, lib_template: str, clock_meta: dict[st
             return ""
         if name in clock_meta:
             out.append("{{param:" + name + "}}")
+        elif overrides and name in overrides:
+            out.append(quote(overrides[name], safe=",.-_:~"))
         else:
             out.append(url[cursor:end])  # non-clock value stays as the record filled it
         cursor = end
@@ -5032,10 +5337,7 @@ def _realign_url_to_now(store: ni.NIStore, item_id: str, live: dict, url: str,
     template = str(live.get("_library_url_template") or "")
     if not template or not isinstance(clock_params, dict) or not clock_params:
         return url
-    probe = {"params": {name: {"label": cp.get("label") or name, "kind": "clock",
-                                "format": cp["format"], "offset_days": int(cp["offset_days"])}
-                         for name, cp in clock_params.items()},
-             "source": {"url": template}}
+    probe = {"params": _clock_spec_params(clock_params), "source": {"url": template}}
     rebuilt = _f1_render_url_at(probe, now)
     if not rebuilt or rebuilt == url:
         return url
@@ -5814,7 +6116,7 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
     # links"): a tapped Library row builds ONLY from its declared answers — a source without them, or
     # whose answers don't fit this response, moves on (next source, else the links); never the mapping.
     answered = None if remap else _try_answers_build(store, item_id, request, intent, url, sample,
-                                                      call_model, fetch_now)
+                                                      call_model, fetch_now, do_fetch)
     if answered is None and picked:
         why = ("didn't fit its declared answers" if _library_answers(str(live.get("_library_source") or ""))
                else "doesn't declare its answers")
@@ -5831,7 +6133,8 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
         return moved if moved is not None else _terminate_unsupported(
             store, item_id, f"{live.get('_library_provider') or 'the source'} {why}")
     if answered is not None:
-        frame = _frame_of(request, intent)
+        url = str(answered.get("url") or url)  # Round 20 (Q3b): the address the asked stretch rebound
+        frame = {**_frame_of(request, intent), "window": answered.get("window")}
         reasons, frame_notes = _verify_frame(frame, _picked_source(live),
                                              _clean_params(live.get("_library_params")), answered, request,
                                              intent, ni._clock())
@@ -5862,7 +6165,7 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
         return _handoff(store, item_id, request, intent, url, answered, answered["fields"],
                         answered["klass"], converted=[], judge=None, degrade_note=note,
                         remap=remap, keep_source=keep_source, keep_params=keep_params,
-                        fetch_now=fetch_now, path="declared", fit=fit)
+                        fetch_now=fetch_now, path="declared", fit=fit, query=answered.get("query"))
     # The model mapping path below now serves only a link the user pasted (held for their YES, §33)
     # and a Fix / remap of an existing card — a tapped Library row never reaches it (above).
     def misfit(stage: str, message: str) -> dict:
@@ -6013,7 +6316,7 @@ def _handoff(store: ni.NIStore, item_id: str, request: str, intent: dict, url: s
              built: dict, fields: dict, klass: str, *, converted: list, judge: dict | None,
              degrade_note: str | None, remap: bool, keep_source: dict | None,
              keep_params: dict | None, fetch_now: datetime | None = None,
-             path: str = "mapping", fit: object | None = None) -> dict:
+             path: str = "mapping", fit: object | None = None, query: dict | None = None) -> dict:
     """The built pipeline + scene → the sealed spec (source, format, access, alert, notes) →
     ``_finalize``. Shared by the model mapping path and the Library-answers path.
 
@@ -6027,7 +6330,11 @@ def _handoff(store: ni.NIStore, item_id: str, request: str, intent: dict, url: s
 
     ``fit`` (Phase 3a, plan B3): the advisory FitVerdict ``_sample_and_map`` already logged
     into ``degrade_note``, sealed onto the spec as ``_fit`` — optional, stripped on export /
-    template install like ``_c2_ok``; None (the default, every other caller) seals nothing."""
+    template install like ``_c2_ok``; None (the default, every other caller) seals nothing.
+
+    ``query`` (Round 20, Q3b — §36): ``{query, interpretation}`` from ``_sealed_query`` — the final Query IR
+    the declared build executes and its code-rendered line, sealed as ``spec.query`` / ``spec.interpretation``
+    (stripped on export / template install like ``_fit``); None seals nothing (every other path)."""
     # R1/R2 (2026-09-15): a remap of a recipe-born card must PRESERVE the
     # sealed source object (url template + $secret headers) and params —
     # rebuilding a bare {type, url} used to strip the credential header and
@@ -6063,12 +6370,12 @@ def _handoff(store: ni.NIStore, item_id: str, request: str, intent: dict, url: s
     if fit is not None:
         spec["_fit"] = {"answers_ask": fit.answers_ask, "missing": list(fit.missing),
                         "wrong": list(fit.wrong), "evidence": list(fit.evidence)}
+    if query is not None:
+        spec["query"], spec["interpretation"] = query["query"], query["interpretation"]
     if keep_params:
         spec["params"] = json.loads(json.dumps(keep_params))
     if clock_params and not keep_params:
-        spec["params"] = {name: {"label": cp.get("label") or name, "kind": "clock",
-                                  "format": cp["format"], "offset_days": int(cp["offset_days"])}
-                          for name, cp in clock_params.items()}
+        spec["params"] = _clock_spec_params(clock_params)
     access = None if keep_source else (_flow_read(store, item_id) or {}).get("_access")
     if isinstance(access, dict) and access.get("url") == url:
         # the key / contact email the user gave on the card rides every refresh — as refs
@@ -6192,15 +6499,46 @@ def _many_ask(intent: dict) -> bool:
         _MANY_WANT_RE.search(str(w)) for w in intent.get("wants") or [])
 
 
+def _ask_window(request: str, kind: str | None, names: list | tuple = ()) -> str | None:
+    """The forward window an ask states, read by the query layer's recognizers (Round 20, Q3b — they
+    replaced the window regex table): the engine's legacy token (now, today, tonight, tomorrow, weekend, a
+    weekday, the next N days / hours) or None (no explicit phrase, or a stretch behind us). ``names``: the
+    intent's proper names, masked ("Saturday Night Live" is no window); the recognizers' now-phrase table
+    keeps "rn" / "atm" / "currently" / "right this minute" a now window."""
+    assert isinstance(request, str), "request must be a str"
+    assert isinstance(names, (list, tuple)), "names must be a list"
+    if not request.strip():
+        return None
+    from .ni_query.recognize import name_masks
+    try:
+        spans = ni_query.recognize(request, now=ni._clock(), zone=ni.user_timezone_name(),
+                                   masked=name_masks(request, list(names)[:_MAX_INTENT_NAMES]))
+    except Exception as exc:  # the recognizers never block a page: no window read
+        log.warning("ni_flow: recognizers failed: %s", type(exc).__name__)
+        return None
+    time = ni_query.normalize.explicit_time(spans, kind)
+    if not time:
+        return None
+    lo, hi = time.get("from"), time.get("to")
+    if lo == "now" and hi in ("now", None):
+        return "now"
+    if lo == hi and lo in ("this_week", "next_week"):
+        return "next_days:7"   # a week read ahead, as a forward window holds it
+    if (lo, hi) == ("dow:sat", "dow:sun"):
+        return "weekend"
+    legacy = _forward_token(lo, hi)
+    assert legacy is None or isinstance(legacy.get("window"), str), "a legacy window token"
+    return legacy["window"] if legacy else None
+
+
 def _page_reasons(graph: dict, preview: dict, intent: dict,
-                   *, tier: str = "interpreted") -> list[str]:
+                   *, tier: str = "interpreted", window: str | None = None) -> list[str]:
     """The page verify gate (C9, page_verify): why this reading can't ship ([] = it can).
     ``tier`` is ``"compiled"`` for a P2 selector-program reading (which legitimately
     lifts from entities / meta / tables) or ``"interpreted"`` for the llm-stage
     reading (grounded only against what the model was shown — body text + tables).
-    The ``intent.window`` ride-through (fix7-page 2026-10-04) lets a 'right now' ask
+    ``window`` (fix7-page 2026-10-04; Round 20: ``_ask_window``) lets a 'right now' ask
     refuse a static guide page that carries no freshness signal."""
-    window = intent.get("window") if isinstance(intent.get("window"), str) else None
     return page_verify.verify_page_reading(
         graph, preview, frame_kind=intent.get("frame_kind"),
         wants=[str(w) for w in intent.get("wants") or [] if isinstance(w, str)],
@@ -6242,6 +6580,7 @@ def _build_page_card(store: ni.NIStore, item_id: str, request: str,
     model reply that won't parse) moves on to the next page of the pick.
     """
     assert isinstance(url, str) and url, "url required"
+    window = _ask_window(request, intent.get("frame_kind"), list(intent.get("names") or []))
     _transition(store, item_id, "sampling", source_url=url,
                  note=f"page source — jailed read of {_host_hint(url)}")
     try:
@@ -6298,7 +6637,7 @@ def _build_page_card(store: ni.NIStore, item_id: str, request: str,
     compiled = compile_page_program(graph, intent, request, call_model)
     if compiled is not None:
         preview = dict(compiled["values"])
-        reasons = _page_reasons(graph, preview, intent, tier="compiled")
+        reasons = _page_reasons(graph, preview, intent, tier="compiled", window=window)
         judge = None if reasons else _judge_build(request, intent, preview, call_model)
         if not reasons and (judge is None or (judge["serves"] and not judge["wrong"])):
             _transition(store, item_id, "assembling",
@@ -6353,7 +6692,7 @@ def _build_page_card(store: ni.NIStore, item_id: str, request: str,
         # the page holds nothing the ask wants: say so, never "build" a blank card (field 2026-09-28)
         return _page_refused(store, item_id, url, "the page holds nothing you asked for", request, intent,
                              call_model, remap)
-    reasons = _page_reasons(graph, preview, intent)
+    reasons = _page_reasons(graph, preview, intent, window=window)
     if reasons:
         return _page_refused(store, item_id, url, "; ".join(reasons), request, intent, call_model, remap)
     judge = _judge_build(request, intent, preview, call_model)

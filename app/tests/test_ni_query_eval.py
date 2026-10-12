@@ -62,9 +62,10 @@ def test_v1_contract_reproduces_the_rescore(ev, data):
 
 def test_full_contract_adds_the_number_validator(ev, data):
     """The stated-number validator turns the unstated numeric filters right (E26 few-shot; B24, D10,
-    E7, E26 zero-shot) and nothing wrong."""
+    E7, E26 zero-shot) and nothing wrong; Round 20 (Q3b): the recognized comparator the few-shot E37 reply
+    dropped ("above magnitude 2") is bound back by code (52, was 51)."""
     few, zero = _scores(ev, data, "few", "full"), _scores(ev, data, "zero", "full")
-    assert sum(map(ev.fully, few.values())) == 51 and sum(map(ev.fully, zero.values())) == 58
+    assert sum(map(ev.fully, few.values())) == 52 and sum(map(ev.fully, zero.values())) == 58
     assert {i for i, s in few.items() if ev.fully(s)} >= {i for i in few if i not in V1_FEW_MISSES}, "none turns wrong"
     assert {i for i, s in zero.items() if ev.fully(s)} >= {i for i in zero if i not in V1_ZERO_MISSES}
 

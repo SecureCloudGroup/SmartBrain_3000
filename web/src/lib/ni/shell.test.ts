@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bodyShowsPanel, cardSpan, cardState, footerText, formBoxChrome } from "./shell";
+import { bodyShowsPanel, cardSpan, cardState, footerText, formBoxChrome, interpretationOf } from "./shell";
 import type { NiBoardItem } from "$lib/api";
 
 // A valid board row with every field a real /board response always sends; each test
@@ -113,6 +113,27 @@ describe("footerText", () => {
 
   it("clamps a non-positive cadence to 1m (defensive; the server already clamps)", () => {
     expect(footerText(item({ payload_at: null, interval_minutes: 0 }))).toBe("as of — · every 1m");
+  });
+});
+
+describe("interpretationOf", () => {
+  it("returns the board row's line verbatim — symbols, separators and spacing untouched", () => {
+    const line = "Earthquakes · Magnitude > 4 · past 7 days · count";
+    expect(interpretationOf(item({ interpretation: line }))).toBe(line);
+    expect(interpretationOf(item({ interpretation: " Tides  ·  today " }))).toBe(" Tides  ·  today ");
+  });
+
+  it("never cuts a long line (the footer truncates it visually, the panel shows it whole)", () => {
+    const long = "x".repeat(300);
+    expect(interpretationOf(item({ interpretation: long }))).toBe(long);
+  });
+
+  it("reads absent, blank and non-string values as no line (version skew, malformed rows)", () => {
+    expect(interpretationOf(item({}))).toBe("");
+    expect(interpretationOf(item({ interpretation: "   " }))).toBe("");
+    expect(interpretationOf(item({ interpretation: null as never }))).toBe("");
+    expect(interpretationOf(item({ interpretation: 42 as never }))).toBe("");
+    expect(interpretationOf(item({ interpretation: { text: "x" } as never }))).toBe("");
   });
 });
 

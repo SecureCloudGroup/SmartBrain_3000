@@ -6,8 +6,8 @@ resolver param that doesn't appear in the url_template rides in ``params`` only 
 Deterministic replay: no network, no model. Builds the declared-answers path with inline samples
 and asserts the sealed pipeline carries the row filter (defect A) or the ask refuses (defect B);
 asserts ``library_index.frame_kind_from_text("hurricane tracker") == "status"`` (defect D);
-asserts ``select_answers`` picks the conditions cell (which decodes WMO 96 / 99 as hail) on an
-"hail risk" ask against the Open-Meteo forecast's declared answers (defect C); and asserts
+asserts the conditions answer (which decodes WMO 96 / 99 as hail) speaks to the "hail risk" ask's
+want against the Open-Meteo forecast's declared answers (defect C); and asserts
 ``library_resolve._expand`` keeps a single URL when a resolver param only lives in ``params``
 (defect E — the FAA airport-events source now ships for "delays at Orlando airport").
 """

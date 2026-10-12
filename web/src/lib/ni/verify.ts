@@ -61,6 +61,37 @@ export function verifyOptions(payload: unknown): VerifyOption[] {
   ];
 }
 
+// Clause → the plain word its chip says (ni-format §36 coverage keys), in the order the
+// interpretation line reads them: answer (quantity) · filter · time · order / limit · count.
+// Closed: a clause outside this table never becomes a chip.
+const CLAUSE_WORDS: ReadonlyArray<readonly [clause: string, word: string]> = [
+  ["answer", "answer"],
+  ["select", "quantity"],
+  ["where", "filter"],
+  ["time", "time"],
+  ["order", "order"],
+  ["limit", "limit"],
+  ["agg", "count"],
+];
+
+/** `coverage` is the board row's `query.coverage` (unknown — untrusted JSON). One muted
+ *  chip text per clause the query approximated ("time approximated") or could not carry
+ *  ("quantity not found"); "bound", "rules", other clauses and other values add none. */
+export function coverageChips(coverage: unknown): string[] {
+  console.assert(CLAUSE_WORDS.length > 0, "coverageChips: the closed clause table");
+  console.assert(!Array.isArray(coverage), "coverageChips: coverage is a clause map, not a list");
+  if (!coverage || typeof coverage !== "object") return [];
+  const map = coverage as Record<string, unknown>;
+  const out: string[] = [];
+  for (const [clause, word] of CLAUSE_WORDS) {
+    const value = map[clause];
+    if (value === "approximated") out.push(`${word} approximated`);
+    else if (value === "unbound") out.push(`${word} not found`);
+  }
+  console.assert(out.length <= CLAUSE_WORDS.length, "coverageChips: at most one chip per clause");
+  return out;
+}
+
 /** The CSS max-width a VerifyPanel option box gets, so a face previews at the width the
  *  card will actually have on the board instead of stretching across the panel: a
  *  1-column desktop face takes half the panel (the panel sits inside a 2-column

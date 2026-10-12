@@ -32,7 +32,7 @@ EXCEPTIONS = {
     "E36": "noted row (source_wrong: a point alert feed) — gold leaves time null despite 'right now'",
     "E44": "noted row (compare: 'now versus a year ago' is two points; out of IR scope)",
 }
-# asks with no explicit time phrase: no token, the model's reading stands (Round 20: E38 left the list —
+# asks with no explicit time phrase: no token, the model's reading stands (Round 20, Q3b: E38 left the list —
 # "currently" is a now phrase of the recognizers' closed table, rule 10, and reads the gold's {now, now})
 NO_PHRASE = frozenset({
     "A3", "A6", "A8", "A10", "A18", "A22", "A25", "A29", "A30", "A34", "A49", "B2", "B22", "B29", "B32", "B44", "B45",
@@ -217,6 +217,17 @@ def test_comparator_table():
 def test_words_tokenizer():
     assert [w for w, _, _ in words("O'Hare's 4.5+ temps")] == ["o", "hare", "s", "4", "5", "temps"]
     assert words("") == [], "empty text has no words"
+
+
+def test_name_masks_cover_every_occurrence_and_leave_holidays_readable():
+    """Round 20, Q3b fix round: the intent's proper names as masked ranges (case-insensitive whole words); a
+    name the holiday table names stays readable ("when is Thanksgiving" keeps the holiday's date)."""
+    from smartbrain_3000.ni_query.recognize import name_masks
+    ask = "Saturday Night Live tonight vs saturday night live last week"
+    assert name_masks(ask, ["Saturday Night Live"]) == [(0, 19), (31, 50)]
+    assert name_masks("Area 51 weather", ["Area 51"]) == [(0, 7)]
+    assert name_masks("when is Thanksgiving", ["Thanksgiving"]) == []
+    assert name_masks("Black Friday deals", ["Cyber Monday"]) == []
 
 
 def test_the_now_phrase_table_reads_now_without_a_library_partner():

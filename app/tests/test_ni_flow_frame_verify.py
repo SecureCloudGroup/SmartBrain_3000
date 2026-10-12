@@ -114,10 +114,11 @@ def _freeze(monkeypatch, iso: str) -> datetime:
 
 def _intent(ask: str, subject: str, wants: list[str], place: str | None = None,
             frame_kind: str | None = None) -> dict:
-    """What stage 1 hands on: the model's blanks plus code's own parse of the kind and the window."""
+    """What stage 1 hands on: the model's blanks plus code's own parse of the kind (the asked stretch of time is
+    the query layer's — Round 20, Q3b)."""
     return {"kind": "external_data", "subject": subject, "cadence_minutes": 15, "wants": wants,
             "threshold": None, "place": place, "display_hint": "value",
-            "frame_kind": frame_kind_from_text(ask) or frame_kind, "window": ni_flow._window_from_text(ask)}
+            "frame_kind": frame_kind_from_text(ask) or frame_kind}
 
 
 def _row(key: str) -> dict:
@@ -145,13 +146,28 @@ def _pick(store, monkeypatch, key: str, ask: str, intent: dict, rest: tuple = ()
 
 
 def _no_model(prompt: str) -> str:
-    raise AssertionError("a declared-answers build makes no model call")
+    """No model: the declared build's query layer falls to its rules floor (Round 20, Q3b), PRESENT and FIT
+    to the rules."""
+    raise AssertionError("a declared-answers build here has no model")
 
 
-def _run(store, monkeypatch, key: str, ask: str, intent: dict, **kw) -> dict:
+_QUERY_MARK = "You turn a person's ask into one query object"
+
+
+def _ir_model(answer: str, time: dict | None = None):
+    """A model that reads the ask as the Query IR ``answer`` + ``time`` (and answers nothing else)."""
+    def model(prompt: str) -> str:
+        if _QUERY_MARK not in prompt:
+            raise AssertionError("only the query turn is answered here")
+        return json.dumps({"answer": answer, "params": {}, "select": [], "where": [], "time": time, "order": [],
+                           "limit": None, "agg": "none"})
+    return model
+
+
+def _run(store, monkeypatch, key: str, ask: str, intent: dict, model=None, **kw) -> dict:
     _freeze(monkeypatch, SAMPLES[key]["fetched"])
     item_id, url = _pick(store, monkeypatch, key, ask, intent, **kw)
-    out = ni_flow._sample_and_map(store, item_id, ask, intent, url, _no_model,
+    out = ni_flow._sample_and_map(store, item_id, ask, intent, url, model or _no_model,
                                   lambda _u: copy.deepcopy(SAMPLES[key]["sample"]))
     out["_item"] = item_id
     return out
@@ -176,31 +192,6 @@ def _ops(store, item_id: str) -> list[dict]:
 
 # ---- stage 1: the frame ------------------------------------------------------------------------------
 
-def _window_rate(rows: list) -> tuple[float, list]:
-    misses = [(ask, want, ni_flow._window_from_text(ask)) for ask, want in rows
-              if ni_flow._window_from_text(ask) != want]
-    return 1 - len(misses) / len(rows), misses
-
-
-def test_the_window_parse_on_the_dev_set() -> None:
-    rows = json.loads((_DIR / "windows_dev.json").read_text())
-    rate, misses = _window_rate(rows)
-    assert len(rows) >= 100 and rate >= 0.98, misses
-
-
-def test_the_window_parse_on_the_holdout_set() -> None:
-    """Written with the dev set, never used to shape the parse."""
-    rows = json.loads((_DIR / "windows_holdout.json").read_text())
-    rate, misses = _window_rate(rows)
-    assert len(rows) >= 60 and rate >= 0.95, misses
-
-
-def test_the_window_is_a_closed_enum() -> None:
-    for ask, _ in json.loads((_DIR / "windows_dev.json").read_text()):
-        w = ni_flow._window_from_text(ask)
-        assert w is None or nimod._WINDOW_RE.fullmatch(w), (ask, w)
-
-
 def test_code_owns_the_frame_kind_and_the_window() -> None:
     def model(reply: dict):
         return lambda _p: json.dumps(reply)
@@ -208,14 +199,14 @@ def test_code_owns_the_frame_kind_and_the_window() -> None:
             "threshold": None, "place": None, "display_hint": "value"}
     # the model says current_value; the words say a result: code wins (as with the cadence)
     intent = ni_flow.stage_intent("Bills score", model({**base, "frame_kind": "current_value"}))
-    assert intent["frame_kind"] == "result" and intent["window"] is None
+    assert intent["frame_kind"] == "result" and "window" not in intent   # the stretch is the query layer's
     # no cue in the words: the kind is open — a model's guess is never the frame (live 2026-10-04)
     intent = ni_flow.stage_intent("Buffalo Bills", model({**base, "frame_kind": "next_event"}))
     assert intent["frame_kind"] is None
     intent = ni_flow.stage_intent("Buffalo Bills", model({**base, "frame_kind": "a vibe"}))
     assert intent["frame_kind"] is None
     intent = ni_flow.stage_intent("weather this weekend in Austin", model({**base, "frame_kind": None}))
-    assert intent["window"] == "weekend"
+    assert "window" not in intent and ni_flow._ask_window("weather this weekend in Austin", None) == "weekend"
     assert "frame_kind" not in ni_flow._INTENT_PROMPT
 
 
@@ -230,8 +221,7 @@ def test_locate_gets_the_intents_frame_at_every_call_site(monkeypatch) -> None:
     out = ni_flow._pause_source_pick(store, item_id, "high in Denver on Saturday", intent, _no_model)
     assert out["_ranked_library"][0]["scope"] == "place"
     ni_flow.reenter_source_pick(store, item_id, "pick again")
-    want = {"subject": "weather", "wants": ["high temperature"], "place": "Denver", "frame_kind": None,
-            "window": "dow:sat"}
+    want = {"subject": "weather", "wants": ["high temperature"], "place": "Denver", "frame_kind": None}
     assert lib.hints == [want, want]
 
 
@@ -273,57 +263,33 @@ def test_v12_answers_are_clean_with_their_window_axis_measure_and_tbd() -> None:
     assert ni_flow._clean_answer({**daily, "axis": {"cell": "daily.time", "step": "week"}}) is None
 
 
-@pytest.mark.parametrize(("ask", "window", "picked"), [
-    ("weather this weekend in Austin", "weekend", ["daily_forecast"]),
-    ("high in Denver on Saturday", "dow:sat", ["daily_forecast"]),
-    ("weather in Denver tomorrow", "tomorrow", ["daily_forecast"]),
-    ("will it rain tomorrow in Seattle", "tomorrow", ["rain_tomorrow"]),
-    ("is it gonna storm in Tulsa tonight", "tonight", ["tonight"]),
-    ("frost tonight in Boise", "tonight", ["tonight"]),
-    ("snow this weekend in Tahoe", "weekend", ["snow_forecast"]),
-    ("NYC weather", None, ["temperature", "conditions", "high_today", "low_today"]),
-    ("Houston weather today", "today", ["temperature", "conditions", "high_today", "low_today"]),
-])
-def test_the_pick_serves_the_asked_window(ask, window, picked) -> None:
-    assert ni_flow._window_from_text(ask) == window
-    chosen = ni_flow.select_answers(_answers("open-meteo-forecast"), ask, [], window=window)
-    assert [a["name"] for a in chosen] == picked
-    assert "high_today" not in [a["name"] for a in chosen] or window in (None, "today")
-
-
 def test_no_answer_for_the_window_or_the_named_measure_is_nothing() -> None:
+    """Round 20 (Q3b): the honest stops of the query layer's build — a measure the ask names that no declared
+    answer reports, and a day ahead the chosen answer is not about — and a list that cuts the asked days."""
     marine = _answers("open-meteo-marine")
-    assert ni_flow.select_answers(marine, "wind at Virginia Beach", ["wind speed"]) == []
-    assert ni_flow.select_answers(marine, "surf this weekend at Virginia Beach", [], window="weekend") \
-        == [next(a for a in marine if a["name"] == "waves_hourly")]
+    assert ni_flow._unbound_measures("wind at Virginia Beach", marine, frozenset()) == (["wind"], ["wind"])
+    waves = next(a for a in marine if a["name"] == "waves_hourly")
+    weekend = {"from": "weekend", "to": "weekend"}
+    assert ni_flow._list_time_binding(weekend, waves, "forward") == (
+        {"window": "weekend", "span": None, "forward": True}, "bound")
     iss = _answers("wheretheiss-now")
-    assert ni_flow.select_answers(iss, "ISS position tomorrow", [], window="tomorrow") == []
+    assert ni_flow._value_time_binding(iss[:1], {"from": "tomorrow", "to": "tomorrow"}) == "unbound"
 
 
-def test_existence_takes_the_list_and_only_how_many_takes_the_count() -> None:
-    storms = _answers("nhc-current-storms")
-    assert [a["name"] for a in ni_flow.select_answers(storms, "any hurricanes headed for Tampa?", [])] == ["storms"]
-    assert [a["name"] for a in ni_flow.select_answers(storms, "any hurricanes", ["hurricanes"])] == ["storms"]
-    assert [a["name"] for a in ni_flow.select_answers(storms, "how many hurricanes are active", [])] \
-        == ["storm_count"]
-    quakes = _answers("usgs-quakes-near")
-    assert [a["name"] for a in ni_flow.select_answers(quakes, "any earthquakes near LA today", [],
-                                                      window="today")] == ["quakes"]
-
-
-@pytest.mark.parametrize(("ask", "days"), [
-    ("weather this weekend in Austin", ["2026-10-03", "2026-10-04"]),
-    ("high in Denver on Saturday", ["2026-10-03"]),
-    ("weather in Denver tomorrow", ["2026-09-30"]),
+@pytest.mark.parametrize(("ask", "token", "days"), [
+    ("weather this weekend in Austin", "weekend", ["2026-10-03", "2026-10-04"]),
+    ("high in Denver on Saturday", "dow:sat", ["2026-10-03"]),
+    ("weather in Denver tomorrow", "tomorrow", ["2026-09-30"]),
 ])
-def test_a_windowed_build_keeps_only_the_asked_days_on_every_run(monkeypatch, ask, days) -> None:
+def test_a_windowed_build_keeps_only_the_asked_days_on_every_run(monkeypatch, ask, token, days) -> None:
     store = _store()
-    out = _run(store, monkeypatch, "open_meteo_charleston", ask, _intent(ask, "weather", ["forecast"], "Austin"))
+    out = _run(store, monkeypatch, "open_meteo_charleston", ask, _intent(ask, "weather", ["forecast"], "Austin"),
+               model=_ir_model("daily_forecast", {"from": token, "to": token}))
     assert out["state"] == "ready", out["notes"]
     ops = _ops(store, out["_item"])
     assert {"fn": "top_n", "field": "rows", "n": 7} not in ops
     win = next(op for op in ops if op["fn"] == "window")
-    assert win["window"] == ni_flow._window_from_text(ask) and win["zone"] == "zone"
+    assert win["window"] == token and win["zone"] == "zone"
     raw = nimod.run_pipeline(store.get_item(out["_item"])["spec"]["pipeline"][:1] + [
         {"op": "transform", "apply": [op for op in ops if op["fn"] in ("zip", "window")]}],
         copy.deepcopy(SAMPLES["open_meteo_charleston"]["sample"]))

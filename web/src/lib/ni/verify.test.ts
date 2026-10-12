@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { optionMaxWidth, verifyOptions } from "./verify";
+import { coverageChips, optionMaxWidth, verifyOptions } from "./verify";
 
 const CLIR = { v: 1 }; // opaque to this module — IrPaint validates it, not verify.ts
 
@@ -62,6 +62,44 @@ describe("verifyOptions", () => {
     const opts = verifyOptions(payload);
     expect(opts).toHaveLength(2);
     expect(opts[1].summary).toBe("a");
+  });
+});
+
+describe("coverageChips", () => {
+  it("returns [] without a clause map (absent, null, not an object, a list)", () => {
+    expect(coverageChips(undefined)).toEqual([]);
+    expect(coverageChips(null)).toEqual([]);
+    expect(coverageChips("unbound")).toEqual([]);
+    expect(coverageChips(["unbound"])).toEqual([]);
+  });
+
+  it("adds nothing for bound or rules clauses", () => {
+    expect(coverageChips({
+      answer: "rules", time: "rules", where: "rules", order: "rules",
+      select: "bound", limit: "bound", agg: "bound",
+    })).toEqual([]);
+  });
+
+  it("names an approximated clause and an unbound one in plain words", () => {
+    expect(coverageChips({ time: "approximated" })).toEqual(["time approximated"]);
+    expect(coverageChips({ select: "unbound" })).toEqual(["quantity not found"]);
+    expect(coverageChips({ where: "unbound" })).toEqual(["filter not found"]);
+  });
+
+  it("maps every clause through the closed table, in the order the line reads", () => {
+    // Key order in the payload is irrelevant: the table decides the order.
+    expect(coverageChips({
+      agg: "unbound", limit: "unbound", order: "unbound", time: "unbound",
+      where: "unbound", select: "unbound", answer: "unbound",
+    })).toEqual([
+      "answer not found", "quantity not found", "filter not found", "time not found",
+      "order not found", "limit not found", "count not found",
+    ]);
+  });
+
+  it("ignores clauses outside the table and values outside the closed set", () => {
+    expect(coverageChips({ params: "unbound", toString: "unbound", constructor: "approximated" })).toEqual([]);
+    expect(coverageChips({ time: "APPROXIMATED", where: "missing", select: 1, agg: null })).toEqual([]);
   });
 });
 

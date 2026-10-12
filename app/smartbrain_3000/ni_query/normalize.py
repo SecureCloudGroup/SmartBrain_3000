@@ -16,9 +16,11 @@ v1 rules:
   stands. Compared, null ≡ {now, now} ≡ {now, null} (``time_key``).
 - where (``v1_where``): never on the axis or a time / date cell (time travels in ``time``);
   numeric ops only on number cells with a number or a list of numbers; contains / names only
-  on a text cell or "*" with a value that is a substring of the ask, is not a parameter-
-  consumed entity and is not a word of the source's own name. Compared, names ≡ contains over
-  "*" (``where_key``). Every other filter is dropped.
+  on a text cell or "*" with a value whose words are a run of WHOLE ask words (``said_whole`` —
+  the ask's last word may add a plural s / es: "Tornado Watch" in "tornado watches"; Round 20, Q3b:
+  "quakes" inside "earthquakes" and "OR" inside "Oregon" are not words of the ask), that is not a
+  parameter-consumed entity and not a word of the source's own name. Compared, names ≡ contains
+  over "*" (``where_key``). Every other filter is dropped.
 - order (``v1_order``): an order on the axis cell is implicit (dropped); a non-axis order is
   kept only for kind ``ranking``.
 - answer: a declared count value ≡ its list + count when nothing narrows (``count_equiv``).
@@ -32,6 +34,7 @@ import datetime as dt
 import math
 
 from .decl import answer_named, axis_of, cell_types, cells_of
+from .recognize import words
 
 NUM_OPS = frozenset({"<", "<=", ">", ">=", "=", "!=", "in"})
 TEXT_OPS = frozenset({"contains", "names"})
@@ -199,9 +202,32 @@ def v1_where(where: list[dict], answer: dict | None, ask: str, consumed_words: f
             continue
         if op in TEXT_OPS and isinstance(val, str) and (col == "*" or types.get(col) == "text"):
             v = val.casefold().strip()
-            if v and v in askc and not consumed_value(v, consumed_words) and v not in src_words:
+            if v and said_whole(v, askc) and not consumed_value(v, consumed_words) and v not in src_words:
                 out.append(dict(w))
     return out
+
+
+def _plural_of(said: str, value: str) -> bool:
+    """The ask's word ``said`` is the value's word, or it plus a plural s / es ("watches" for "Watch") —
+    never the other way round ("is" is no "iss")."""
+    assert isinstance(said, str) and isinstance(value, str), "two words"
+    assert len(said) <= 200 and len(value) <= 200, "words, not texts"
+    return said in (value, value + "s", value + "es")
+
+
+def said_whole(value: str, ask: str) -> bool:
+    """Are ``value``'s words a run of whole words of ``ask`` (the ask's last one may add a plural s / es)?
+    "quakes" is no word of "how many earthquakes …", "OR" none of "… in Oregon"."""
+    assert isinstance(value, str) and isinstance(ask, str), "value + ask required"
+    assert len(value) <= 400, "a filter value, not a text"
+    vw = [w for w, _, _ in words(value.casefold())][:_MAX_CLAUSE]
+    aw = [w for w, _, _ in words(ask.casefold())][:400]
+    if not vw:
+        return False
+    for i in range(len(aw) - len(vw) + 1):  # bounded by the ask's words
+        if aw[i:i + len(vw) - 1] == vw[:-1] and _plural_of(aw[i + len(vw) - 1], vw[-1]):
+            return True
+    return False
 
 
 def literal_numbers(ask: str) -> frozenset[float]:

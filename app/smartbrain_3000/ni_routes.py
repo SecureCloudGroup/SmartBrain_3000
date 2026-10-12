@@ -148,7 +148,7 @@ def _board_row(store: ni.NIStore, item: dict, *,
     interpreted = source_type == "model" or ni._spec_has_llm_stage(item["spec"])
     update_flag, gone_flag = _template_update_flags(item, library_index, library_pack_id,
                                                     spec_hashes)
-    return {
+    row = {
         "id": item["id"], "title": item["spec"].get("title", ""),
         "state": item["state"], "enabled": item["enabled"],
         "interval_minutes": item["interval_minutes"],
@@ -194,6 +194,15 @@ def _board_row(store: ni.NIStore, item: dict, *,
         "payload_ok": snap["ok"] if snap else None,
         "payload": snap["payload"] if snap else None,
     }
+    # Round 20 (Q3b, §36): the query layer's reading of the ask, named like the spec keys and omitted when
+    # absent — the code-made line for the C2 panel, and the per-clause coverage only (never the whole query)
+    interpretation = item["spec"].get("interpretation")
+    if isinstance(interpretation, str):
+        row["interpretation"] = interpretation
+    query = item["spec"].get("query")
+    if isinstance(query, dict) and isinstance(query.get("coverage"), dict):
+        row["query"] = {"coverage": query["coverage"]}
+    return row
 
 
 def _needs_credentials(item: dict, secrets_store) -> list[dict]:
@@ -1898,7 +1907,7 @@ def _build_export_template(store: ni.NIStore, item: dict, secrets_store) -> dict
 # so a template ships with none and the install path forces the safe default.
 _EXPORT_STRIP_KEYS = ("contract", "_c2_ok", "_present_ok", "_fit", "_l1_last_attempt", "_l1_trial",
                       "_l2_last_attempt", "_l2_proposal", "_template", "repair_policy",
-                      "_born", "_model_consent", "_built_from")
+                      "_born", "_model_consent", "_built_from", "query", "interpretation")
 
 
 def _sanitize_spec_for_export(item: dict, secrets_store) -> dict:

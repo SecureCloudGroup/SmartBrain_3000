@@ -16,6 +16,7 @@
     rows = 1,
     preview = false,
     footerText = "",
+    interpretation = "",
     reason = "",
     chips,
     children,
@@ -34,6 +35,9 @@
     rows?: 1 | 2 | 3;
     preview?: boolean;
     footerText?: string;
+    // The card's interpretation line (ni-format §36, code-authored — $lib/ni/shell
+    // interpretationOf): when set it leads the non-form footer; "" keeps today's footer.
+    interpretation?: string;
     // The failing-state explanation line, shown above the dimmed body at full opacity.
     reason?: string;
     chips?: Snippet;
@@ -80,7 +84,16 @@
 
   <div class="ni-foot">
     {#if !hasForm && footerText}
-      <span class="muted ni-fresh">{footerText}</span>
+      {#if interpretation}
+        <!-- Plain text, never {@html}: one line cut with an ellipsis, the whole line in
+             the title, then the usual as-of · host · cadence segments. -->
+        <span class="muted ni-fresh ni-foot-text">
+          <span class="ni-interp" title={interpretation}>{interpretation}</span>
+          <span>· {footerText}</span>
+        </span>
+      {:else}
+        <span class="muted ni-fresh">{footerText}</span>
+      {/if}
     {/if}
     {@render actions?.()}
   </div>
@@ -196,6 +209,23 @@
     flex-wrap: wrap;
   }
   .ni-fresh { font-size: var(--f-meta); }
+  /* The interpretation segment keeps to one line (ellipsis); when it and the as-of ·
+     host · cadence segments do not fit side by side, those wrap onto their own line
+     with their full text — the same rule on a phone-width card. */
+  .ni-foot-text {
+    display: flex;
+    flex-wrap: wrap;
+    column-gap: var(--s-1);
+    min-width: 0;
+    max-width: 100%;
+  }
+  .ni-interp {
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 
   /* Inline-style migration (Phase 1a-4): the card's flow/commission branches repeated
      the same `style="…"` attribute ~23 times across +page.svelte. The markup itself
