@@ -2,14 +2,17 @@
 under an OS wall, with the egress child as its only network route.
 
 Flow: validate the request (https URL normalised to IDNA ASCII, site policy, identity,
-zone, timeout) → re-hash the installed engine (``install.verify_installed``, every launch)
+zone, timeout) → re-hash the installed engine (``install.verify_installed``, every launch;
+a remote wall — the Docker sidecar — re-hashes its own copy per job instead)
 → ``walls.check`` (no wall = ``unavailable``, nothing spawned) → the single render slot
 (``busy`` is a capacity status, never a failure) → a fresh 0700 run dir (HOME, TMPDIR,
 XDG, cwd, ``--storage-dir`` and the output file all inside it; it holds the engine's
 cookie file, so it is removed on every path) → the egress child → ``walls.prepare`` with
 the egress endpoint → the manifest's argv/env → ``proc.spawn`` → ``proc.watch`` (timeout +
 5 s grace, tree RSS, child processes, ``Wall.verify``) → read the output under the cap →
-tripwires → ``proc.kill_tree`` (no live member left) → stop the egress child.
+tripwires → ``proc.kill_tree`` (no live member left) → stop the egress child. A remote wall
+gets the same argv/env and runs the engine itself (``Wall.run``); its run dir sits on the
+volume it shares with the app.
 
 Tripwires, in order (fail closed): a child process is ``confinement``; a heap-limit or
 script-watchdog kill (exit 0, announced only on stderr — measured) is ``oversize`` /
@@ -265,9 +268,10 @@ def _render_locked(req: _Request, want_assets: bool, started: float) -> RenderRe
     """Under the render slot: hash check, wall pre-check, then one guarded run."""
     assert isinstance(req, _Request), "a validated request"
     assert started > 0, "a monotonic start"
-    ok, why = install.verify_installed(req.m.name, manifest_obj=req.m, platform=req.platform)
-    if not ok:
-        return _result(req, "unavailable", why, started)
+    if not walls.remote(req.wall_platform):  # a remote wall re-hashes its own copy per job
+        ok, why = install.verify_installed(req.m.name, manifest_obj=req.m, platform=req.platform)
+        if not ok:
+            return _result(req, "unavailable", why, started)
     edir = install.engine_dir(req.m.name, req.m.version)
     blocked = walls.check(req.wall_platform, edir)
     if blocked is not None:
@@ -296,8 +300,6 @@ def _execute(req: _Request, edir: Path, run_dir: str, want_assets: bool,
         wall = walls.prepare(req.wall_platform, run_dir, str(edir), handle.endpoint)
         if isinstance(wall, walls.Unavailable):
             return _result(req, "unavailable", wall.reason, started, egress_ms=egress_ms)
-        if handle.endpoint["kind"] != "tcp":  # the in-namespace relay arrives with the walls
-            return _result(req, "unavailable", "relay_pending", started, egress_ms=egress_ms)
         t1 = time.monotonic()
         outcome = _run_engine(req, wall, handle.endpoint, run_dir, edir, want_assets=False)
         assets = _assets(req, wall, handle.endpoint, run_dir, edir) \
@@ -323,7 +325,8 @@ def _execute(req: _Request, edir: Path, run_dir: str, want_assets: bool,
 
 def make_run_dir() -> str:
     """A fresh 0700 run dir with home/ tmp/ storage/ out/ inside it."""
-    run_dir = tempfile.mkdtemp(prefix="smartbrain-render-", dir=_RUN_PARENT)
+    run_dir = os.path.realpath(tempfile.mkdtemp(  # canonical: Seatbelt checks resolved paths
+        prefix="smartbrain-render-", dir=_RUN_PARENT or walls.run_parent(walls.host_platform())))
     os.chmod(run_dir, 0o700)
     for sub in ("home", "tmp", "storage", "out"):  # fixed set
         os.mkdir(os.path.join(run_dir, sub), 0o700)
@@ -335,16 +338,23 @@ def make_run_dir() -> str:
 def _run_engine(req: _Request, wall: walls.Wall, endpoint: dict, run_dir: str, edir: Path, *,
                 want_assets: bool) -> _Outcome:
     """One engine process from spawn to a dead group; never raises for engine behaviour."""
-    assert endpoint["kind"] == "tcp", "the engine dials a loopback port"
+    port = wall.proxy_port(endpoint)  # the egress port, or the wall's relay to its socket
+    assert 1 <= port <= 65535, "the engine dials a loopback port"
     assert isinstance(want_assets, bool), "want_assets is a flag"
     out_path = os.path.join(run_dir, "out", "assets.ndjson" if want_assets else "page.html")
     argv = cmdline.render_argv(req.m, engine_path=str(edir / req.m.executable), url=req.url,
-                               run_dir=run_dir, proxy_port=int(endpoint["port"]),
+                               run_dir=run_dir, proxy_port=port,
                                timeout_s=req.timeout_s, output_path=out_path,
                                user_agent=req.identity["user_agent"], want_assets=want_assets)
     env = cmdline.render_env(req.m, run_dir=run_dir, timezone=req.timezone,
                              profile=req.identity["profile"])
     argv, env = wall.wrap(argv, env)
+    cap = _ASSETS_FILE_CAP if want_assets else req.m.limits.html_cap_bytes
+    if wall.remote:  # the Docker sidecar runs the engine; this process never spawns it
+        return _Outcome(**wall.run(argv, env, out_path=out_path, cap=cap,
+                                   deadline_s=req.timeout_s + _GRACE_S, rss_mb=req.m.limits.rss_mb,
+                                   cpu_s=int(4 * (req.timeout_s + _GRACE_S)),
+                                   data_mb=req.m.limits.rlimit_data_mb))
     outcome = _Outcome()
     try:
         child = proc.spawn(argv, env, run_dir, cpu_s=int(4 * (req.timeout_s + _GRACE_S)),
@@ -362,7 +372,6 @@ def _run_engine(req: _Request, wall: walls.Wall, endpoint: dict, run_dir: str, e
     outcome.rc = child.returncode
     outcome.signals = tap.signals()
     if outcome.rc == 0 and outcome.verdict == "exited":
-        cap = _ASSETS_FILE_CAP if want_assets else req.m.limits.html_cap_bytes
         outcome.output, outcome.oversize = proc.read_capped_file(out_path, cap)
     return outcome
 

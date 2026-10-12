@@ -1,0 +1,220 @@
+# Browser walls — SG security gate (ni-format §35; P3 design §8). Every leg runs the REAL pinned
+# engine (downloaded through the app's own installer: pinned GitHub URL, size cap, sha256 before
+# unpacking) under the REAL wall of that platform via tools/browsers-sg.py, or proves that the
+# platform reports the expected reason and refuses to render. The harness exits non-zero on any
+# failed row AND when the executed row set is not exactly the mode's set — zero rows is a failure.
+#
+# Legs: macOS Seatbelt (macos-latest, arm64) · Linux user namespaces enabled by sysctl · Linux with
+# Ubuntu's default AppArmor userns restriction (must report apparmor_userns) · the Docker app
+# container with default seccomp and no sidecar (must report docker_no_sidecar) · the Docker
+# renderer sidecar from the compose `render` profile.
+#
+# REQUIRED CHECK: the `SG gate` job below aggregates every engine-launching leg. Making it a
+# required status check is a branch-protection setting (operator step). GitHub keeps a required
+# check from a path-filtered workflow pending when the workflow is skipped, so when `SG gate` is
+# made required, drop the `paths:` filters below (or the gate blocks every unrelated PR).
+name: Browser walls SG
+
+on:
+  pull_request:
+    paths:
+      - "app/smartbrain_3000/browsers/**"
+      - "app/smartbrain_3000/netguard.py"
+      - "app/requirements.lock"
+      - "compose/**"
+      - "Dockerfile"
+      - "tools/browsers-sg.py"
+      - "tools/browsers_sg_lib.py"
+      - ".github/workflows/browsers-sg.yml"
+  push:
+    branches: [main]
+    paths:
+      - "app/smartbrain_3000/browsers/**"
+      - "compose/**"
+      - "tools/browsers-sg.py"
+      - "tools/browsers_sg_lib.py"
+      - ".github/workflows/browsers-sg.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: browsers-sg-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  macos:
+    name: SG macOS Seatbelt
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install what the browsers package imports, at the app's pinned versions
+        # netguard → cryptography (vault_format), install → duckdb (db), the downloader → httpx;
+        # the harness imports nothing else (the same set the native measurement used).
+        run: pip install -c app/requirements.lock httpx cryptography duckdb
+      - name: SG canaries under the Seatbelt wall
+        env:
+          PYTHONPATH: app
+        run: python tools/browsers-sg.py --net --json sg-macos.json
+      - name: Fail on zero executed rows
+        run: python -c "import json,sys; s=json.load(open('sg-macos.json'))['summary']; print(s); sys.exit(0 if s['rows'] > 0 and s['complete'] and not s['failed'] else 1)"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: sg-macos
+          path: sg-macos.json
+
+  ubuntu-userns:
+    name: SG Linux user namespaces
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Allow unprivileged user namespaces (lift Ubuntu's AppArmor restriction)
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+          sudo sysctl -w kernel.unprivileged_userns_clone=1 || true
+          sysctl kernel.apparmor_restrict_unprivileged_userns user.max_user_namespaces || true
+      - name: Install what the browsers package imports, at the app's pinned versions
+        # netguard → cryptography (vault_format), install → duckdb (db), the downloader → httpx;
+        # the harness imports nothing else (the same set the native measurement used).
+        run: pip install -c app/requirements.lock httpx cryptography duckdb
+      - name: SG canaries under the namespace wall
+        env:
+          PYTHONPATH: app
+        run: python tools/browsers-sg.py --net --json sg-userns.json
+      - name: Fail on zero executed rows
+        run: python -c "import json,sys; s=json.load(open('sg-userns.json'))['summary']; print(s); sys.exit(0 if s['rows'] > 0 and s['complete'] and not s['failed'] else 1)"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: sg-userns
+          path: sg-userns.json
+
+  ubuntu-apparmor:
+    name: SG Linux AppArmor default (apparmor_userns)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: The runner image must restrict unprivileged user namespaces (else this leg is vacuous)
+        run: test "$(sysctl -n kernel.apparmor_restrict_unprivileged_userns)" = "1"
+      - name: Install what the browsers package imports, at the app's pinned versions
+        # netguard → cryptography (vault_format), install → duckdb (db), the downloader → httpx;
+        # the harness imports nothing else (the same set the native measurement used).
+        run: pip install -c app/requirements.lock httpx cryptography duckdb
+      - name: The wall reports apparmor_userns and nothing renders
+        env:
+          PYTHONPATH: app
+        run: python tools/browsers-sg.py --expect apparmor_userns --json sg-apparmor.json
+      - name: Fail on zero executed rows
+        run: python -c "import json,sys; s=json.load(open('sg-apparmor.json'))['summary']; print(s); sys.exit(0 if s['rows'] > 0 and s['complete'] and not s['failed'] else 1)"
+
+  docker-app:
+    name: SG Docker app container (docker_no_sidecar)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build the release app image
+        run: docker build -t smartbrain_3000:ci .
+      - name: The app container (default seccomp, no sidecar) reports docker_no_sidecar
+        run: |
+          mkdir -p "$RUNNER_TEMP/sg" && chmod 777 "$RUNNER_TEMP/sg"
+          docker run --rm -v "$PWD/tools:/tools:ro" -v "$RUNNER_TEMP/sg:/out" -e PYTHONPATH=/app \
+            -e SMARTBRAIN_LLM_GATEWAY_URL=http://127.0.0.1:9 smartbrain_3000:ci \
+            python /tools/browsers-sg.py --expect docker_no_sidecar --json /out/sg-docker-app.json
+      - name: Fail on zero executed rows
+        run: python3 -c "import json,sys; s=json.load(open('$RUNNER_TEMP/sg/sg-docker-app.json'))['summary']; print(s); sys.exit(0 if s['rows'] > 0 and s['complete'] and not s['failed'] else 1)"
+
+  docker-sidecar:
+    name: SG Docker renderer sidecar (compose profile render)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build the release app image
+        run: docker build -t smartbrain_3000:ci .
+      - name: Start the sidecar from the compose render profile (builds it; installs + verifies the engine)
+        working-directory: compose
+        run: docker compose -p sbsg -f docker-compose.yml --profile render up -d --build --no-deps render
+      - name: The sidecar is hardened as declared
+        run: |
+          docker inspect smartbrain_render --format '{{json .HostConfig}}' > hostcfg.json
+          python3 - <<'PY'
+          import json
+          h = json.load(open("hostcfg.json"))
+          assert h["NetworkMode"] == "none", h["NetworkMode"]
+          assert h["ReadonlyRootfs"] is True
+          assert h["CapDrop"] == ["ALL"] and not h["CapAdd"]
+          assert "no-new-privileges:true" in h["SecurityOpt"]
+          assert h["Init"] is True and h["PidsLimit"] == 128 and h["Memory"] == 1 << 30
+          print("hardening ok")
+          PY
+          docker inspect smartbrain_render --format '{{range .Mounts}}{{.Type}}:{{.Destination}} {{end}}' | tee mounts.txt
+          test "$(tr -d ' \n' < mounts.txt)" = "volume:/render"
+      - name: Wait for the sidecar's READY (its own boot canary)
+        run: |
+          for i in $(seq 1 60); do
+            docker run --rm -v sbsg_smartbrain_render:/render smartbrain_3000:ci \
+              python -c "import json,sys; d=json.load(open('/render/READY.json')); print(d['ok'], d['canaries']); sys.exit(0 if d['ok'] else 1)" && exit 0
+            sleep 2
+          done
+          docker logs smartbrain_render; exit 1
+      - name: SG through the sidecar (probe, self-test, broken config, real render, round trip)
+        run: |
+          mkdir -p "$RUNNER_TEMP/sg" && chmod 777 "$RUNNER_TEMP/sg"
+          docker run --rm -v sbsg_smartbrain_render:/render -v "$PWD/tools:/tools:ro" -v "$RUNNER_TEMP/sg:/out" \
+            -e PYTHONPATH=/app -e SMARTBRAIN_LLM_GATEWAY_URL=http://127.0.0.1:9 smartbrain_3000:ci \
+            python /tools/browsers-sg.py --net --json /out/sg-sidecar.json
+      - name: Fail on zero executed rows
+        run: python3 -c "import json,sys; s=json.load(open('$RUNNER_TEMP/sg/sg-sidecar.json'))['summary']; print(s); sys.exit(0 if s['rows'] > 0 and s['complete'] and not s['failed'] else 1)"
+      - name: No network and no listener inside the sidecar after the jobs
+        run: |
+          docker exec smartbrain_render python -c "
+          import os, socket
+          for host, port in (('1.1.1.1', 443), ('172.17.0.1', 80), ('169.254.169.254', 80)):
+              s = socket.socket(); s.settimeout(2)
+              try:
+                  s.connect((host, port)); raise SystemExit(f'connected to {host}:{port}')
+              except OSError as e:
+                  print(host, port, e)
+          rows = [l.split() for l in open('/proc/net/tcp').read().splitlines()[1:]]
+          assert not [r for r in rows if r[3] == '0A'], 'a listener in the sidecar'
+          procs = sorted(int(p) for p in os.listdir('/proc') if p.isdigit())
+          print('processes', procs)
+          "
+      - name: Sidecar logs
+        if: always()
+        run: docker logs smartbrain_render || true
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: sg-sidecar
+          path: ${{ runner.temp }}/sg/sg-sidecar.json
+
+  sg-gate:
+    name: SG gate
+    if: always()
+    needs: [macos, ubuntu-userns, ubuntu-apparmor, docker-app, docker-sidecar]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every SG leg passed
+        run: |
+          echo '${{ toJSON(needs) }}'
+          test "${{ needs.macos.result }}" = "success"
+          test "${{ needs.ubuntu-userns.result }}" = "success"
+          test "${{ needs.ubuntu-apparmor.result }}" = "success"
+          test "${{ needs.docker-app.result }}" = "success"
+          test "${{ needs.docker-sidecar.result }}" = "success"

@@ -45,7 +45,7 @@ def test_enabled_rows_fail_closed_without_a_wall(client: TestClient, monkeypatch
     monkeypatch.delenv(walls.NULLWALL_ENV, raising=False)
     rows = {r["name"]: r for r in client.get("/api/status/overview").json()["browsers"]}
     for row in rows.values():
-        assert row["eligible"] is False and row["sandbox"] == "none"
+        assert row["eligible"] is False and row["sandbox"] == {"kind": "none", "verified_at": None}
         assert row["phase"] in ("unavailable",) and row["reason"] in walls.REASONS
 
 

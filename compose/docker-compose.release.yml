@@ -41,6 +41,8 @@ services:
       SMARTBRAIN_EMBED_MODEL: ${SMARTBRAIN_EMBED_MODEL:-ollama/nomic-embed-text:v1.5}
     volumes:
       - smartbrain_data:/app/data
+      # Shared with the `render` sidecar only: render jobs and the egress socket.
+      - smartbrain_render:/render
     # Probe host-run local model servers (Ollama / Apple MLX) for the Local Models panel.
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -87,6 +89,36 @@ services:
       retries: 5
       start_period: 15s
 
+  render:
+    # Page-browser sidecar: the only container that runs a browser engine. No network at all —
+    # its one exit is a loopback relay into the app's egress socket on the shared volume.
+    # Read-only, no capabilities, no app data. Started only with `--profile render`.
+    profiles: ["render"]
+    image: ghcr.io/securecloudgroup/smartbrain_3000-render:${SMARTBRAIN_VERSION:-latest}
+    pull_policy: always
+    container_name: smartbrain_render
+    restart: unless-stopped
+    user: "65532:10001"
+    network_mode: none
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    init: true
+    pids_limit: 128
+    mem_limit: 1g
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=256m
+    volumes:
+      - smartbrain_render:/render
+
 volumes:
   smartbrain_data:
   bifrost_data:
+  # RAM-backed and owned by the app's uid/gid (sticky, group-shared with the sidecar): nothing a
+  # render leaves behind survives the containers, and ownership never depends on start order.
+  smartbrain_render:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: "size=256m,uid=10001,gid=10001,mode=1770"

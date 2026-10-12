@@ -100,7 +100,8 @@ def _storage_status() -> dict:
 
 def _browser_status() -> list[dict]:
     """One row per shipped page-browser engine: {name, phase, pct, version, age_days,
-    eligible, reason, sandbox, last_self_test, error, health}. No probes, no hashing."""
+    eligible, reason, sandbox{kind, verified_at}, last_self_test, error, health}. No hashing;
+    the wall pre-check probes at most once per process."""
     try:
         return browser_router.status()
     except Exception:

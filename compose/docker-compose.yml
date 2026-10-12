@@ -3,6 +3,7 @@
 # Services:
 #   smartbrain — FastAPI app + embedded DuckDB + (later) SvelteKit UI
 #   bifrost    — LLM gateway (OpenAI-compatible) the app routes all models through
+#   render     — page-browser sidecar, profile `render` only (`docker compose --profile render up`)
 #
 # Build context is the repo root (one level up from this file). All host data
 # lives under the repo-root ./data directory, which is git-ignored.
@@ -37,6 +38,8 @@ services:
       SMARTBRAIN_EMBED_MODEL: ${SMARTBRAIN_EMBED_MODEL:-ollama/nomic-embed-text:v1.5}
     volumes:
       - ../data:/app/data
+      # Shared with the `render` sidecar only: render jobs and the egress socket (§35).
+      - smartbrain_render:/render
     # The app probes host-run local model servers (Ollama/MLX) at
     # host.docker.internal for the Local Models status panel.
     extra_hosts:
@@ -86,3 +89,37 @@ services:
       timeout: 5s
       retries: 5
       start_period: 15s
+
+  render:
+    # Page-browser sidecar (ni-format §35): the only container that runs a browser engine. No
+    # network at all — its one exit is a loopback relay into the app's egress socket on the
+    # shared volume. Read-only, no capabilities, no app data. Started only with `--profile render`.
+    profiles: ["render"]
+    build:
+      context: ..
+      dockerfile: compose/render/Dockerfile
+    image: smartbrain_3000-render:dev
+    container_name: smartbrain_render
+    restart: unless-stopped
+    user: "65532:10001"
+    network_mode: none
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    init: true
+    pids_limit: 128
+    mem_limit: 1g
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=256m
+    volumes:
+      - smartbrain_render:/render
+
+volumes:
+  # RAM-backed and owned by the app's uid/gid (sticky, group-shared with the sidecar): nothing
+  # a render leaves behind survives the containers, and ownership never depends on start order.
+  smartbrain_render:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: "size=256m,uid=10001,gid=10001,mode=1770"

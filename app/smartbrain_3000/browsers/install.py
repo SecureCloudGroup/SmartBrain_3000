@@ -6,11 +6,16 @@ the lifecycle around them:
   engine, phases ``absent · downloading(pct) · verifying · unpacking · self-testing · ready ·
   unavailable · error · stale · disabled``;
 - ``<version>.partial/`` → ``INSTALLED.json`` → one atomic rename → prune every other
-  version → self-test (injected; by default ``<engine> --version`` under the wall when one
-  is available, else ``skipped(wall_unavailable)``);
+  version → self-test (injected; by default the wall's canary program and the engine's
+  ``--version`` under the wall when one is available, else ``skipped(wall_unavailable)``),
+  and again once per boot (``ensure``) while the engine is enabled;
 - ``verify_installed`` re-hashes the installed files against the manifest on EVERY launch;
   nothing is cached;
-- ``status_row`` for the Status API: cheap (no hashing, no network), readable while locked.
+- ``status_row`` for the Status API: cheap (no hashing, no network), readable while locked;
+  ``eligible`` only after a self-test passed in this process under the wall in use
+  (``sandbox: {kind, verified_at}``);
+- Docker: the renderer sidecar holds the engine (``walls.remote``) — the app container never
+  downloads one; its row is ``ready`` when the sidecar reports this exact pinned build.
 
 ``SMARTBRAIN_NO_BROWSER=1`` turns the whole component off (phase ``disabled``, nothing
 downloads); the test suite sets it. An engine that cannot run here (no build for this
@@ -66,8 +71,10 @@ _SENTENCES = {
 }
 
 _state_lock = threading.Lock()
-_state: dict[str, dict] = {}   # engine -> {phase, pct, error, last_self_test} (transient/error only)
+_state: dict[str, dict] = {}   # engine -> {phase, pct, error, last_self_test, verified_at, sandbox_kind}
 _inflight: set[str] = set()
+_EMPTY_STATE = {"phase": "", "pct": 0, "error": "", "last_self_test": "never", "verified_at": None,
+                "sandbox_kind": "none"}
 _rename = os.rename            # module attribute so a test can fail the commit step
 
 SelfTest = Callable[[mf.Manifest, Path], str]
@@ -139,8 +146,7 @@ def _set(name: str, **fields: object) -> None:
     assert name, "engine name required"
     assert fields, "nothing to set"
     with _state_lock:
-        entry = _state.setdefault(name, {"phase": "", "pct": 0, "error": "",
-                                         "last_self_test": "never"})
+        entry = _state.setdefault(name, dict(_EMPTY_STATE))
         assert set(fields) <= set(entry), "state keys are closed"
         entry.update(fields)
 
@@ -148,8 +154,7 @@ def _set(name: str, **fields: object) -> None:
 def _snapshot(name: str) -> dict:
     assert name, "engine name required"
     with _state_lock:
-        entry = dict(_state.get(name) or {"phase": "", "pct": 0, "error": "",
-                                          "last_self_test": "never"})
+        entry = dict(_state.get(name) or _EMPTY_STATE)
     assert "phase" in entry, "state carries a phase"
     return entry
 
@@ -182,11 +187,31 @@ def ensure(name: str, *, transport: release.Transport | None = None,
     plat = platform_key()
     if disabled() or install_blocker(m, plat):
         return status_row(m)
+    if walls.remote(walls.host_platform()):  # the sidecar holds the engine; never download here
+        _self_test_once(m, self_test)
+        return status_row(m)
     if verify_installed(name, manifest_obj=m, platform=plat)[0]:
+        _self_test_once(m, self_test)
         return status_row(m)
     assert plat is not None, "an unblocked platform is known"
     install(m, plat, transport=transport, self_test=self_test)
     return status_row(m)
+
+
+def _self_test_once(m: mf.Manifest, self_test: SelfTest | None) -> None:
+    """Once per boot: the self-test for an engine that is already in place (single-flight
+    with installs; a passing result is kept until the process ends)."""
+    assert isinstance(m, mf.Manifest), "manifest required"
+    if _snapshot(m.name)["last_self_test"] == "ok" or not _claim(m.name):
+        return
+    try:
+        _run_self_test(m, self_test)
+    except Exception as exc:  # a bug must still end in a fixed sentence, never a traceback
+        _set(m.name, phase="error", pct=0, error=_SENTENCES["internal"])
+        log.warning("browsers: %s self-test failed (%s)", m.name, exc.__class__.__name__)
+    finally:
+        _release(m.name)
+    assert m.name not in _inflight, "the claim is released"
 
 
 def install(m: mf.Manifest, platform: str, *, transport: release.Transport | None = None,
@@ -236,24 +261,25 @@ def _run_self_test(m: mf.Manifest, self_test: SelfTest | None) -> str:
     exe = engine_dir(m.name, m.version) / m.executable
     result = (self_test or _default_self_test)(m, exe)
     assert isinstance(result, str) and result, "self-test returns a result string"
+    kind = walls.available_kind(walls.host_platform(), exe.parent)
     if result in SELF_TEST_RESULTS:
-        _set(m.name, phase="", pct=0, error="", last_self_test=result)
+        stamp = _dt.datetime.now(_dt.UTC).strftime("%Y-%m-%dT%H:%M:%SZ") if result == "ok" else None
+        _set(m.name, phase="", pct=0, error="", last_self_test=result, verified_at=stamp,
+             sandbox_kind=kind if result == "ok" else "none")
         return result
-    _set(m.name, phase="error", pct=0, error=_SENTENCES["self_test"], last_self_test=result)
+    _set(m.name, phase="error", pct=0, error=_SENTENCES["self_test"], last_self_test=result,
+         verified_at=None, sandbox_kind="none")
     log.warning("browsers: %s self-test %s", m.name, result)
     return result
 
 
 def _default_self_test(m: mf.Manifest, exe: Path) -> str:
-    """Run the engine under the walls when one is available; otherwise record the skip."""
+    """The wall's canary program and the engine's ``--version`` under the wall when one is
+    available (``walls.self_test``); otherwise record the skip."""
     assert exe.name == m.executable, "self-test runs the manifest's executable"
     assert exe.parent.name == m.version, "self-test runs the committed version"
-    blocked = walls.check(walls.host_platform(), exe.parent)
-    if blocked is not None:
-        return "skipped(wall_unavailable)"
-    from . import runner  # lazy: runner imports this module
-
-    return runner.probe_version(m, exe.parent)
+    result, _rows = walls.self_test(walls.host_platform(), m, exe.parent, browsers_root())
+    return result
 
 
 def _commit(m: mf.Manifest, platform: str, partial: Path, final: Path) -> None:
@@ -392,7 +418,8 @@ def _other_version_installed(m: mf.Manifest) -> bool:
 
 def status_row(m: mf.Manifest) -> dict:
     """One engine's Status row: {name, phase, pct, version, age_days, eligible, reason,
-    sandbox, last_self_test, error}. Cheap: no hashing, no network, readable while locked."""
+    sandbox{kind, verified_at}, last_self_test, error}. Cheap: no hashing, no network
+    (the wall pre-check probes once per process, then it is cached), readable while locked."""
     assert isinstance(m, mf.Manifest), "manifest required"
     plat = platform_key()
     snap = _snapshot(m.name)
@@ -400,14 +427,16 @@ def status_row(m: mf.Manifest) -> dict:
     directory = engine_dir(m.name, m.version)
     wall = None if blocker else walls.check(walls.host_platform(), directory)
     reason = blocker or (wall.reason if wall is not None else "")
-    sandbox = "none" if reason else walls.available_kind(walls.host_platform(), directory)
+    kind = "none" if reason else walls.available_kind(walls.host_platform(), directory)
     if not reason and m.name not in mf.SELECTABLE:
         reason = "tier_disabled"
     phase, pct, error = _phase(m, plat, snap, reason)
     age = max(0, (_dt.date.today() - m.released).days)
+    passed = snap["last_self_test"] == "ok" and snap["sandbox_kind"] == kind != "none"
     assert phase in PHASES, "phase must come from the closed set"
     return {"name": m.name, "phase": phase, "pct": pct, "version": m.version, "age_days": age,
-            "eligible": not reason, "reason": reason, "sandbox": sandbox,
+            "eligible": not reason and passed and phase == "ready", "reason": reason,
+            "sandbox": {"kind": kind, "verified_at": snap["verified_at"] if passed else None},
             "last_self_test": snap["last_self_test"], "error": error}
 
 
@@ -422,6 +451,8 @@ def _phase(m: mf.Manifest, plat: str | None, snap: dict, reason: str) -> tuple[s
         return "error", 0, str(snap["error"])
     if reason and reason != "tier_disabled":
         return "unavailable", 0, ""
+    if walls.remote(walls.host_platform()):
+        return ("ready", 100, "") if walls.remote_engine_ready(m, plat) else ("absent", 0, "")
     if installed_meta(m, plat) is not None:
         return "ready", 100, ""
     if _other_version_installed(m):

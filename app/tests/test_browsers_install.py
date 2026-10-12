@@ -260,7 +260,7 @@ def test_ensure_replaces_a_modified_install(rig) -> None:
     row = install.ensure("obscura", transport=hb.transport_for(server))
     assert server.requests == [PINNED, CDN]
     assert install.verify_installed("obscura") == (True, "")
-    assert row["phase"] == "ready" and row["sandbox"] == "null"
+    assert row["phase"] == "ready" and row["sandbox"]["kind"] == "null"
     server.requests.clear()
     install.ensure("obscura", transport=hb.transport_for(server))
     assert server.requests == []  # a clean install is never fetched again
@@ -297,7 +297,8 @@ def test_self_test_runs_under_the_wall_or_records_the_skip(rig, monkeypatch) -> 
     assert _install(server, m)["self_test"] == "skipped(wall_unavailable)"
     row = install.status_row(m)
     assert row["phase"] == "unavailable" and row["reason"] in walls.REASONS
-    assert row["last_self_test"] == "skipped(wall_unavailable)" and row["sandbox"] == "none"
+    assert row["last_self_test"] == "skipped(wall_unavailable)"
+    assert row["sandbox"] == {"kind": "none", "verified_at": None}
 
 
 def test_a_failed_self_test_is_an_error_with_a_fixed_sentence(rig) -> None:
