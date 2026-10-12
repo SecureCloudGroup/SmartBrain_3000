@@ -31,7 +31,7 @@ from . import __version__, vault_format
 
 _SCHEMES = ("http", "https")
 _MAX_REDIRECTS = 3
-_MAX_BYTES = 2_000_000
+_MAX_BYTES = 8_000_000
 _TIMEOUT = 8.0
 # _TIMEOUT is a PER-CHUNK read timeout only: a host that drips one byte every <8s keeps the read
 # alive until the size cap (512 MiB for a vault) — effectively forever, and on a vault fetch that

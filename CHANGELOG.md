@@ -9,6 +9,13 @@ date and start a fresh `## [Unreleased]`. Call out **breaking changes** and any 
 step explicitly — SmartBrain runs forward-only, data-safe migrations, but users still need
 to know when a release changes behavior.
 
+### Changed
+
+- **Bigger pages fit.** The page fetch and the extractor jail now accept pages up to
+  8 MB (the jail's hard stdin cap is 16 MB and its output cap 4 MB), up from 2 MB, so
+  long schedules, rankings and script-heavy pages are no longer refused as too large.
+
+
 ## [Unreleased]
 
 ### Added

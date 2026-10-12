@@ -39,8 +39,8 @@ import threading
 
 log = logging.getLogger("smartbrain.jail")
 
-_MAX_OUTPUT_BYTES = 1 * 1024 * 1024   # capped read on the child's stdout (1 MB)
-_MAX_INPUT_BYTES = 2 * 1024 * 1024    # cap on bytes we ever write to the child
+_MAX_OUTPUT_BYTES = 4 * 1024 * 1024   # capped read on the child's stdout (4 MB)
+_MAX_INPUT_BYTES = 8 * 1024 * 1024    # cap on bytes we ever write to the child
 _DEFAULT_TIMEOUT_S = 20.0             # wall-clock ceiling per extraction
 _REAP_TIMEOUT_S = 5.0                 # bounded wait for the child to exit after kill
 # R2 (audit 2026-09-12): bound concurrent jailed extractions across the whole
