@@ -39,6 +39,14 @@ dependencies = [
     # 4% safety margin, so uharfbuzz is not a runtime dep.
     "fonttools>=4.50",
     "pillow>=10",
+    # NI query layer (Round 20): the ask's time / number / comparator spans that validate the
+    # local model's Query IR. Pinned: the Q0 bake-off measured exactly these releases over
+    # 4,737 asks. ms-recognizers-text-suite is the community fork of Microsoft
+    # Recognizers-Text (MIT; imports as ms_recognizers_*). Both are lazily imported by
+    # ni_query.recognize.
+    "ms-recognizers-text-suite==1.0.1",
+    # US holiday dates for the asked year (MIT, pure Python, needs only python-dateutil); puckling has no 3.12 release.
+    "holidays==0.106",
 ]
 
 [project.optional-dependencies]
