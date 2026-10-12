@@ -15,7 +15,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Request
 
-from . import __version__, db, devices, gateway, stt_local, voice
+from . import __version__, browsers, db, devices, gateway, ni, stt_local, voice
 from .browsers import router as browser_router
 
 router = APIRouter()
@@ -36,6 +36,7 @@ def app_status(request: Request) -> dict:
         "unlocked": unlocked,
         "voice_local": stt_local.status(),  # phase/pct/error — needs no key
         "browsers": _browser_status(),  # page-browser engines (§35) — needs no key either
+        "renderer": browsers.renderer_status(),  # B3a: the launcher's sidecar signal — no key
         "storage": _storage_status(),  # sizes only, no key needed (field request:
         "memory": _memory_status(),    # "show how much disk/memory SmartBrain uses")
     }
@@ -61,6 +62,7 @@ def app_status(request: Request) -> dict:
     out["schedules"] = _schedule_status(conn)
     out["feeds"] = _feed_status(state)
     out["ni"] = _ni_status(conn)
+    out["browsers_flow"] = _browsers_flow_status(state)
     out["devices"] = _device_status(store)
     return out
 
@@ -190,6 +192,24 @@ def _ni_status(conn) -> dict:
         return {"total": total, "by_state": by_state}
     except Exception:
         return {"total": 0, "by_state": {}}
+
+
+def _browsers_flow_status(state) -> dict:
+    """Round 20 (B3a): the page browser in the card flow — ``{rendered_cards, drafts,
+    worker: idle|busy}``: cards that read their page in the page browser, those still
+    waiting for their Activate (sites), and whether a render runs now. Unlocked only (the
+    counts read sealed specs); zeros when the store can't be read."""
+    assert state is not None, "app state required"
+    worker = "busy" if ni.render_worker_busy() else "idle"
+    try:
+        items = state.ni.list_items()  # bounded by ni._MAX_ITEMS
+    except Exception:
+        return {"rendered_cards": 0, "drafts": 0, "worker": worker}
+    rendered = [i for i in items if ni.spec_renders(i["spec"])]
+    drafts = sum(1 for i in rendered if i["state"] == "draft" and ni.render_needs_consent(i["spec"]))
+    out = {"rendered_cards": len(rendered), "drafts": drafts, "worker": worker}
+    assert set(out) == {"rendered_cards", "drafts", "worker"}, "closed keys"
+    return out
 
 
 def _device_status(store) -> dict:

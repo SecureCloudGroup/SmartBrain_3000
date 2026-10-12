@@ -1959,6 +1959,11 @@ platform's differentiator: a page card no longer needs a model every tick.
   no `llm` stage → no Interpreted chip; values verbatim from the page) →
   tier 2 interpreted (the G4b llm card, unchanged) when the compiler returns
   None or the judge rejects the compiled reading (noted on the record).
+  Round 20 (B3a, §35): between the read and the tiers the page-browser ladder
+  may spend ONE visit — a JS shell in the static read, a plain 403 handed
+  over by the sampling door, or a compile miss on a script-heavy page
+  (`want_miss`, adopted only when the rendered page compiles); the rendered
+  graph then feeds both tiers and the card seals `render` + `sites`.
 - **Engine**: `graph_extract` is a new pipeline op — first stage only,
   `http_page` source only (validate_spec coupling). `_fetch_source` passes
   `full=True` only for graph_extract pipelines, so interpreted cards keep the
@@ -2146,7 +2151,10 @@ the handoff, and a deterministic check stands where the judge was removed.
   be a plain host (no credentials, port, fragment or IP literal; a feed path
   keeps its query); a value a same-host lookup pulls is a bounded id
   (`[A-Za-z0-9,._:-]{1,64}`, never `.`/`..`). A plain 401/403 drops that
-  address only; a challenge or 429 drops the host. A non-401/403/429 fetch
+  address only; a challenge or 429 drops the host (B3a: a plain 403 on a
+  pasted link or a page card's Fix — no challenge, not a JSON refusal —
+  reaches the page door's one page-browser visit instead of failing; a 429
+  or a challenge never does). A non-401/403/429 fetch
   failure (404, 5xx, timeout) on a picked Library row and a page-fetch
   failure in `_build_page_card` hand over to the next row of the pick —
   "couldn't be fetched — pick another source" — with a web search only when
@@ -2415,6 +2423,9 @@ and the `recipe` born marker stays readable.
   scoping (its rows describe where each row lives relative to its city — "4 km W of Yountville,
   CA" is not what the ask filters on). "San Ysidro border wait" ships only San Ysidro's rows;
   "flu levels in Texas" ships only Texas rows on the model-mapping path (handled in parallel).
+- **No page browser for a declared build (Round 20, B3a).** A tapped Library row never renders:
+  a row that answers with a page moves on (C12) and a refusing row moves on as before. The page
+  browser (§35 B3a) serves only a pasted page link and a page card's Fix.
 
 ## 33. Open paths wait for the user's YES (operator ruling 2026-10-04)
 
@@ -2783,8 +2794,8 @@ display-class pick and the map/image → value degrade) are gone from the flow; 
 
 A browser component is a standalone, replaceable, hash-pinned headless browser the app can
 load to read a page the way a browser does (scripts run, the DOM settles). It lives in
-`smartbrain_3000/browsers/`. Nothing in the flow, the tick or the UI calls it yet (B3). The
-engine only ever runs inside an OS wall (B2: macOS Seatbelt, Linux namespaces, the Docker
+`smartbrain_3000/browsers/`. The card flow and the tick call it since B3a (below); the web
+surfaces are B3b. The engine only ever runs inside an OS wall (B2: macOS Seatbelt, Linux namespaces, the Docker
 renderer sidecar); where no wall can be built the platform reports `unavailable` with a
 reason and the runner starts nothing (fail closed). The first engine is Obscura
 (h4ckf0r0day/obscura, Rust, Apache-2.0) v0.2.4, run as a one-shot `fetch` subprocess — never
@@ -3070,11 +3081,152 @@ reason and the runner starts nothing (fail closed). The first engine is Obscura
   is untrusted content for the extractor jail anyway; the census comes from the app's own
   egress child). A Linux wall setup failure in the middle of a render reads as
   `engine_error/exit` (exit 125, nothing ran); `check` probes the same setup once per process.
-- **B3 adds** the flow wiring: need signals from the static data layer, sealing `{type:
-  http_page, render: "browser", sites}`, R6/R7 consent and the draft Activate panel, the
-  single-flight render worker on the tick (only on an `eligible` engine), Fix escalation,
-  XHR promotion from `--dump assets`, the Status card, and the launcher starting the
-  `render` profile when the app reports that a renderer is wanted.
+- **B3 adds** the flow wiring (B3a, below: python) and the web and launcher pieces (B3b: the
+  draft Activate panel, the feed offer, the Status card, the launcher starting the `render`
+  profile when the app reports that a renderer is wanted).
+
+### B3a — the page browser in the card flow (Round 20, step B3a)
+
+- **Eligibility gate** (`browsers.available(engine="obscura") -> {eligible, engine, version,
+  reason}`): the ONE answer every caller consults before a render, from the Status row
+  (`eligible` only after a self-test passed in this process under the wall in use;
+  `SMARTBRAIN_NO_BROWSER=1` → `disabled`). Closed reasons: `disabled manifest platform
+  missing_libs sandbox userns_blocked apparmor_userns docker_no_sidecar tier_disabled absent stale
+  preparing error self_test`. `PREPARABLE = {absent, stale, self_test}`: `browsers.prepare()`
+  starts `install.ensure` on a daemon thread (single-flight) on FIRST NEED — a creation or Fix
+  that wants a render, or a due rendered card (after a restore, a removal) — never at boot;
+  `browsers.progress()` is the `{phase, pct}` a waiting flow shows.
+- **Static DATA layer first** (the extractor jail, P3 design §3/§5): plain `<script
+  type="application/json">` elements (Next.js `__NEXT_DATA__`, SvelteKit / Angular state, settings
+  blobs — parsed with `json.loads`, never evaluated; a `window.__INITIAL_STATE__ = …` inside a
+  script is code and is never read) become `data: [{id, leaves: [[path, scalar]]}]` — ≤ 8
+  documents of ≤ 1 MB, ≤ 200 leaves each and 600 in all, depth ≤ 16, the first 100 keys / 25
+  items of each object / array, iterative walk with a work budget; a document that won't parse or
+  nests past Python's limit loses only itself. Leaf paths are in the §4.1 grammar (plain keys,
+  `["quoted"]` keys, `[N]`, ≤ 200 chars, at most 8 subscripts in a row; `__proto__` /
+  `constructor` / `prototype`, quotes and control characters drop their subtree; a bare-list root
+  reads as `items`). The id is the element's `id` when it is `[A-Za-z0-9_.:-]{1,64}`, else
+  `json<N>`; a repeated id keeps the first. ARIA grids (`role=table|grid|treegrid` on a non-table
+  element, `row`, `cell|gridcell|rowheader`, `columnheader` rows as headers) join `tables` under
+  the same caps (a native `<table role=table>` is never counted twice). `signals: {script_count,
+  script_bytes, noscript_js}` is the script evidence. `jailrun` validates both layers down to every
+  sub-key (a smuggled key, a non-finite number or an over-long leaf fails the extraction).
+  PageGraph gains `data` and `signals`; a JSON document of ≥ 10 leaves counts as data-bearing
+  (`pagegraph.data_bearing`, readability's shell rule, `has_evidence`, the compiled grounding
+  text). A new selector `{kind: "data_leaf", doc, path}` reads one leaf (numbers and booleans as
+  JSON writes them); `enumerate_menu` offers want-matching leaves first, ≤ 20 per document and 30
+  in all; a gone leaf is `GraphDrift`. Measured on the 50 recorded pages
+  (`tests/fixtures/pages`): 5 documents on 4 pages, 32 leaves (one document of ≥ 10 leaves, a
+  site config), 0 ARIA grids; the jail's `signals` reproduce the router's raw-HTML need signal on
+  50/50 (`js_shell`: health.aws only).
+- **Need signals → the ladder** (creation and Fix are the only escalation points). The page
+  door's static read stays `ni._fetch_http_page`; `router.static_evidence(url, graph=…|failure=…)`
+  turns it into the tier-1 result and `router.browse(url, static=…, allow_render=True,
+  site_policy={mode: open}, identity={card: <item id>}, timezone=<user zone>, want_assets=<creation>)`
+  judges it — no second static fetch. `js_shell` = < 400 visible chars, no data-bearing layer, ≥ 3
+  scripts or a noscript enable-JavaScript notice. `blocked` = a plain 403 (the sampling door hands
+  it over for a pasted link or a page card's Fix when `FetchError.kind` is not `challenge` and its
+  `content_type` is not JSON). `want_miss` = the static compile found nothing, `graph_fitness` < 5
+  and ≥ 20 KB of script — adopted only when the rendered page compiles AND passes the page verify
+  gate. ONE visit per build (a failed shell render spends it). A 429 or a challenge never
+  escalates: netguard now names `FetchError(kind="challenge")` from a closed vendor header table
+  (`cf-mitigated`, `x-vercel-mitigated`, `x-amzn-waf-action` — on ANY status, so AWS WAF's 202
+  interstitial is refused, never read) and, on an HTML error response, a closed marker table in
+  the first 16 KB (challenge-platform, captcha-delivery, px-captcha, Incapsula, Kasada, AWS WAF,
+  SiteGround, Sucuri, "verify you are human", "just a moment"…); `FetchError.content_type` keeps
+  the refusing response's media type. The router reports a challenge as `blocked/challenge`. The
+  rendered HTML goes through the SAME extractor jail (`jailrun.run_extractor`, 8 MB) — nothing
+  else parses it — and `graph_from_extract(…, render_mode="rendered")`. Closed notes on the flow
+  record: `render_skipped:<available reason | router reason>`, `render_failed:<status |
+  extract_<jail reason> | too_many_sites | no_structure>`; without a render the static read
+  stands (links as today).
+- **Sealing.** Only `ni_flow._page_source` writes `source: {type: "http_page", url, render:
+  "browser", sites}` — `sites` = the census's registrable domains with ≥ 1 tunnel, the URL's own
+  site first, the rest sorted, ≤ 12 (more is an honest stop). `ni._validate_render_fields`: both
+  keys or neither; `render == "browser"`; a literal `https://` URL (no `{{param:`), a named site
+  (no IP literal), no headers; `sites` 1–12 unique lowercase registrable domains, `sites[0]` the
+  URL's own. A legacy `{type, url}` page spec is untouched. Spec keys `_render_ok` (true or
+  absent; only on a rendered source) and `_feed_candidates` (≤ 5 `{url, site}`, https, on the
+  sealed sites). Packs refuse all four (`source.render`/`source.sites` nested, beside the
+  top-level set), template install and export strip them, `tools` create/update refuse a source
+  carrying `render`/`sites` (`_refuse_render_seal`) and `_assemble_spec` never copies the
+  top-level keys — nothing a model wrote reaches them. Rendered cards have a 15-minute interval
+  floor (max with the LLM floor).
+- **Consent (R6/R7).** No render before the tap: S2 and the pick never render; the pick pause's
+  flow field carries `tap: {render_notice, site_cap: 12}` (`render_notice` true when a pasted page
+  MAY render here — eligible or preparable) and the paste's consent text says the one visit may
+  also load the sites the page depends on. After the build: every census site the page's own →
+  the card commissions under the tap (as every page card, then waits for its YES, §33); any other
+  site → state `draft`, flow `ready`, note "waiting for your OK to also load: …", board row
+  `draft: {reason: "render_sites", sites}`. `POST /api/ni/items/{id}/activate` (desktop-local,
+  audited `ni_activate_render`, journal `commissioned`) → `NIStore.record_render_consent`: seals
+  `_render_ok` without a rev bump and commissions (409 unless a draft waits for its sites);
+  `POST …/commission` refuses such a draft (409). `_render_ok` lasts only while the source (URL,
+  `render`, `sites`) is unchanged: `update_spec` (both paths), `apply_repair` and a Fix's
+  `_finalize` keep it then and drop it otherwise (a wider set asks again); no write can introduce
+  it. The tick never runs a draft (the due query excludes drafts), and the run allows only the
+  sealed sites (egress policy `sealed`).
+- **The render worker.** `tick` never renders (`_TICK_THREAD` marks the tick's thread; a render
+  there is refused as `render_busy`). Rendered items have their own due window
+  (`_MAX_RENDER_CANDIDATES = 3`, listed FIRST, not counted in `_MAX_DUE_CANDIDATES` — a render
+  backlog never starves other cards; the scan is still bounded by `_MAX_ITEMS`). Per pass at most
+  one handoff, no quota cost: not eligible → a preparable engine starts preparing and the card
+  stays due, else `mark_checked("render_unavailable")` (no streak); otherwise
+  `spawn_render_worker` (one thread at a time, `_RENDER_WORKER_LOCK`; the engine slot is
+  `runner._LIVE_RENDERS`). The worker re-checks the item (enabled, due, not draft / paused /
+  broken / held for its YES, consented; an interpreted card needs the breaker closed and the local
+  slot free) and calls `run_item`, whose `http_page` + `render` fetch is
+  `router.render_sealed(url, sites, identity={card: id}, timezone)` (no static read, no
+  escalation) then the extractor jail, then the tick's post-run duties (broken transition, L2
+  candidate, carrier notices). `CAPACITY_KINDS = {render_busy, render_unavailable}` are never
+  failures: `run_item` re-raises them before any bookkeeping (no run row, `latest`,
+  `last_failure`, streak, L1 hook or trial revert); busy writes nothing (the card stays due),
+  unavailable writes only `last_status = render_unavailable` (board `render.unavailable`). A
+  busy extractor slot after a render (`jail_busy`) is `render_busy` too. Every other outcome is a
+  host-free failure class: `render_refused render_timeout render_blocked render_offsite
+  render_confinement render_oversize render_engine`. Run notes (closed keys) go to the sealed
+  `render` slot: `{engine, version, identity{mode, profile, consistent}, status, total_ms, census[{site,
+  tunnels, verdict}]}` — never `ni_runs`, `last_status` or a log. A manual run waits for nothing:
+  an engine slot already taken is 409 `{"detail": "the local page browser is busy — try again in a
+  moment", "code": "render_busy"}` before anything is written (`runner.slot_busy()`; a render that
+  finds the slot taken mid-run is the same 409, after the run's usual `manual` mark); an unavailable
+  engine keeps the 200 `{status: "error", kind: "render_unavailable", duration_ms}` and adds
+  `code: "render_unavailable"`; the C2 YES (`/validate`) reply adds `code` beside `run: "busy"` /
+  `run: "error"` for the same two cases. The code sits at the top level of the body, the shape
+  auth.py uses for `no_session` (the client's `ApiError` reads it); `/commission` and `/activate`
+  never touch the engine.
+- **Feed candidates (R12, creation only).** The creation visit's second engine run (`--dump
+  assets`, https only, ≤ 500) is filtered to URLs on the sealed sites whose path or query says
+  `json`, whose host starts `api.` or whose path is `/api` or holds `/api/` (no userinfo, ≤ 2000
+  chars) → `_feed_candidates` ≤ 5, exact URLs, board row `preview: {feed_candidates: [{url,
+  site}]}`. Nothing is fetched until the user picks one: `POST /api/ni/items/{id}/switch-feed
+  {url}` (desktop-local, audited `ni_switch_feed`; 409 unless `url` is a sealed candidate or while
+  the card builds) → `ni_flow.begin_switch_feed` re-seeds the flow at the tap with that URL as a
+  pasted link (`_pasted`) — the existing door and consent; a JSON link builds through the mapping
+  path and waits for its YES.
+- **Board row and Status.** Rows of page-browser cards (only those) add `rendered: true`,
+  `render: {sites, unavailable}`, `draft` and `preview` (above); every other row is unchanged.
+  `/api/status/overview.browsers_flow` (unlocked): `{rendered_cards, drafts, worker:
+  idle|busy}` (busy while the worker thread runs or any render holds the engine slot). While a
+  creation / Fix waits for a first install (≤ 180 s, polled each second) the flow field carries
+  `browser: {phase, pct}` ("Preparing the page browser (43%)…").
+- **Renderer signal for the launcher.** `/api/status/overview.renderer` (readable while locked):
+  `{wanted, sidecar: missing|ready|stale|n/a}`. `wanted` (`browsers.note_wanted()`, sticky until the
+  process ends) turns true the first time since boot the ladder WOULD render — the router's own rule
+  (`router.would_render`: a JS shell, a plain 403, a `want_miss` at creation or Fix; never a 429 or
+  a challenge, which the flow notes as `render_skipped:<reason>` before any availability check) — or
+  a rendered card is due on the tick or runs, whether or not this machine can render (so a
+  `render_skipped:docker_no_sidecar` build sets it). `sidecar` = `walls.sidecar_state()`: `n/a`
+  outside Docker; in Docker from the READY facts on the shared volume — `missing` (no valid READY
+  with a fresh heartbeat answers), `ready` (READY's `build` names this app's `__version__`),
+  `stale` (another build, or a B2 READY without `build`). The agent now writes `build` (its image's
+  `SMARTBRAIN_VERSION`) in READY (`READY_KEYS`; `LEGACY_READY_KEYS` still reads, and eligibility is
+  unchanged by the field). The launcher starts the `render` profile when `wanted` and `missing`, and
+  rebuilds / pulls the matching image when `stale`.
+- **Startup sweep.** At app start (`main.py` lifespan), `browsers.proc.sweep_strays(<data>/browsers)`
+  SIGKILLs every process of this user whose EXECUTABLE (Linux `/proc/<pid>/exe`, else `ps -o
+  comm`) lies under the browsers dir — an engine an earlier run left behind (macOS has no
+  PDEATHSIG); never by command line; the log names only the count.
 
 ## 36. Query layer (Round 20 — `ni_query`: built and measured in Q3a, wired into the flow in Q3b)
 

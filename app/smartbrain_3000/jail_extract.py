@@ -6,13 +6,21 @@ stdin, decodes them (byte-order mark, then the page's declared ``<meta>`` charse
 then UTF-8), extracts main-article text + title with trafilatura (mirroring
 ``ingest._extract_html``), and prints ONE JSON object to stdout:
 
-``{"text", "title", "entities", "tables", "feeds", "meta", "outline"}``
+``{"text", "title", "entities", "tables", "feeds", "meta", "outline", "data", "signals"}``
 
 The extra keys are the PAGE GRAPH layers (search platform P1): schema.org
 JSON-LD entities, ``<table>`` grids, feed autodiscovery links, OpenGraph/meta
 pairs, and an h1-h3 outline — all parsed HERE, inside the jail, because HTML
 is hostile input. Every layer is bounded; legacy callers keep reading only
 ``text``/``title``.
+
+Round 20 (B3a, the static DATA layer): ``data`` holds the page's plain
+``<script type="application/json">`` documents (Next.js ``__NEXT_DATA__``,
+SvelteKit / Angular state, settings blobs — parsed as JSON, never run) flattened
+to ``[path, scalar]`` leaves whose paths are in the NI path grammar; ARIA grids
+(``role=table|grid|treegrid`` with ``row`` / ``cell`` roles) join ``tables``;
+``signals`` = ``{script_count, script_bytes, noscript_js}``, the evidence the
+page-browser need signal reads (a script-built page).
 
 ``text`` is the article text, then — after ``PAGE_EXTRA_MARK`` — the page's other
 visible text (script/style/SVG never count) that the article extractor dropped,
@@ -37,7 +45,9 @@ launcher lesson). Windows subprocesses rely on the parent's watchdog Timer alone
 
 from __future__ import annotations
 
+import itertools
 import json
+import math
 import os
 import re
 import sys
@@ -130,6 +140,29 @@ _MAX_FEEDS = 6
 _MAX_META = 30
 _MAX_OUTLINE = 30
 _MAX_JSONLD_BYTES = 200_000
+# The static DATA layer (Round 20, B3a): plain JSON documents only, never script code.
+DATA_SCRIPT_TYPE = "application/json"
+MAX_DATA_DOCS = 8                # public: the parent's validator shares every data bound
+MAX_DATA_LEAVES = 200            # per document
+MAX_DATA_PATH = 200
+MAX_DATA_VALUE = 120
+DATA_ID_RE = re.compile(r"[A-Za-z0-9_.:-]{1,64}")
+_MAX_DATA_BLOB_BYTES = 1_000_000  # one document's raw text
+_MAX_DATA_TOTAL_LEAVES = 600
+_MAX_DATA_DEPTH = 16
+_MAX_DATA_LIST = 25              # leading items of each array
+_MAX_DATA_KEYS = 100             # leading keys of each object
+_MAX_DATA_STEPS = 20_000         # work budget per document
+_MAX_DATA_SUBSCRIPTS = 8         # consecutive [i] steps the plain path grammar accepts
+_DATA_KEY_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_-]*")
+_DATA_DENIED_KEYS = frozenset({"__proto__", "constructor", "prototype"})
+_ARIA_TABLE_ROLES = frozenset({"table", "grid", "treegrid"})
+_ARIA_CELL_ROLES = frozenset({"cell", "gridcell", "columnheader", "rowheader"})
+_NATIVE_TABLE_TAGS = frozenset({"table", "thead", "tbody", "tfoot", "tr", "td", "th"})
+_MAX_NOSCRIPT_CHARS = 2_000
+_NOSCRIPT_JS_RE = re.compile(
+    r"(?:enable|turn on|requires?|disabled|not available)[^\n]{0,80}?javascript"
+    r"|javascript[^\n]{0,80}?(?:enable|turn on|required|disabled|not available)", re.IGNORECASE)
 
 
 def _apply_rlimits() -> None:
@@ -293,6 +326,19 @@ class _GraphParser(HTMLParser):
         # (field 2026-10-04: 300 unclosed <span> uncovered <script>SECRET,
         # <style>CSS, and <div hidden>text, all read as visible body).
         self._overflow_hidden: dict[str, int] = {}
+        # B3a: the static DATA layer and the script evidence (see the module docstring)
+        self.data_blobs: list[tuple[str, str]] = []
+        self._in_data = False
+        self._data_buf: list[str] = []
+        self._data_size = 0
+        self._data_id = ""
+        self.script_count = 0
+        self.script_bytes = 0
+        self._in_script = False
+        self._noscript_depth = 0
+        self.noscript_text: list[str] = []
+        self._noscript_size = 0
+        self._aria: dict | None = None      # the open ARIA grid {table, row, cell, *_depth}
 
     def _body_break(self, sep: str = "\n") -> None:
         if not self.body:
@@ -309,6 +355,8 @@ class _GraphParser(HTMLParser):
         _, was_hidden = self._open.pop()
         if was_hidden:
             self._hidden -= 1
+        if self._aria is not None:
+            self._aria_closed()
         return was_hidden
 
     def _implicit_close_before(self, tag: str) -> None:
@@ -342,14 +390,20 @@ class _GraphParser(HTMLParser):
         a = dict(attrs)
         self._implicit_close_before(tag)
         is_hidden = tag in _INVISIBLE_TAGS or _is_invisible_attrs(a)
+        pushed = False
         if tag not in _VOID_TAGS:
             if len(self._open) < _MAX_OPEN_STACK:
                 self._open.append((tag, is_hidden))
+                pushed = True
                 if is_hidden:
                     self._hidden += 1
             elif is_hidden:
                 self._overflow_hidden[tag] = self._overflow_hidden.get(tag, 0) + 1
                 self._hidden += 1
+        self._evidence_start(tag, a)
+        role = (a.get("role") or "").strip().lower()
+        if role and pushed and tag not in _NATIVE_TABLE_TAGS:
+            self._aria_start(role, len(self._open))
         if not is_hidden:
             if tag in _BLOCK_TAGS:
                 self._body_break()
@@ -398,6 +452,7 @@ class _GraphParser(HTMLParser):
             self._head_buf.append(data)
         if self._cell is not None:
             self._cell.append(data)
+        self._evidence_data(data)
 
     def handle_endtag(self, tag: str) -> None:
         # Pop down to the matching ancestor on the full open-element stack —
@@ -423,6 +478,7 @@ class _GraphParser(HTMLParser):
             hidden_self_popped = True
         if tag in _BLOCK_TAGS and not hidden_self_popped:
             self._body_break()
+        self._evidence_end(tag)
         if tag == "script" and self._in_jsonld:
             blob = "".join(self._jsonld_buf)
             if 0 < len(blob) <= _MAX_JSONLD_BYTES:
@@ -449,6 +505,209 @@ class _GraphParser(HTMLParser):
             if self._table["headers"] or self._table["rows"]:
                 self.tables.append(self._table)
             self._table = None
+
+
+    # --- B3a: script evidence + the static DATA layer ------------------------
+
+    def _evidence_start(self, tag: str, a: dict) -> None:
+        """Count scripts; open a plain JSON document or a <noscript> notice."""
+        assert isinstance(tag, str) and isinstance(a, dict), "tag + attrs required"
+        if tag == "noscript":
+            self._noscript_depth += 1
+        if tag != "script":
+            return
+        self.script_count += 1
+        self._in_script = True
+        kind = (a.get("type") or "").strip().lower()
+        if kind == DATA_SCRIPT_TYPE and len(self.data_blobs) < MAX_DATA_DOCS:
+            self._in_data, self._data_buf, self._data_size = True, [], 0
+            raw_id = (a.get("id") or "").strip()
+            self._data_id = raw_id if DATA_ID_RE.fullmatch(raw_id) else ""
+        assert self.script_count >= 1, "a script was counted"
+
+    def _evidence_data(self, data: str) -> None:
+        """Script bytes, the JSON document's text (bounded) and the noscript notice."""
+        assert isinstance(data, str), "data must be a string"
+        assert self._noscript_size <= _MAX_NOSCRIPT_CHARS, "the notice buffer is bounded"
+        if self._in_script:
+            self.script_bytes += len(data)
+        if self._in_data and self._data_size <= _MAX_DATA_BLOB_BYTES:
+            self._data_buf.append(data)
+            self._data_size += len(data)
+        if self._noscript_depth > 0 and self._noscript_size < _MAX_NOSCRIPT_CHARS:
+            chunk = data[:_MAX_NOSCRIPT_CHARS - self._noscript_size]
+            self.noscript_text.append(chunk)
+            self._noscript_size += len(chunk)
+        if self._aria is not None and self._aria["cell"] is not None \
+                and self._aria["cell_size"] < 4 * _MAX_CELL_CHARS:
+            self._aria["cell"].append(data)
+            self._aria["cell_size"] += len(data)
+
+    def _evidence_end(self, tag: str) -> None:
+        assert isinstance(tag, str), "tag required"
+        assert self._noscript_depth >= 0, "noscript depth is non-negative"
+        if tag == "noscript" and self._noscript_depth > 0:
+            self._noscript_depth -= 1
+        if tag != "script":
+            return
+        self._in_script = False
+        if self._in_data:
+            blob = "".join(self._data_buf)
+            if 0 < len(blob) <= _MAX_DATA_BLOB_BYTES:
+                self.data_blobs.append((self._data_id, blob))
+            self._in_data, self._data_buf = False, []
+
+    def _aria_start(self, role: str, depth: int) -> None:
+        """An ARIA grid, row or cell opened at open-stack ``depth``."""
+        assert isinstance(role, str) and depth >= 1, "role + depth required"
+        assert depth <= _MAX_OPEN_STACK, "depth is an open-stack position"
+        aria = self._aria
+        if role in _ARIA_TABLE_ROLES:
+            if aria is None and len(self.tables) < _MAX_TABLES:
+                self._aria = {"table": {"caption": "", "headers": [], "rows": []}, "depth": depth,
+                              "row": None, "row_depth": 0, "header": False,
+                              "cell": None, "cell_depth": 0, "cell_size": 0}
+            return
+        if aria is None:
+            return
+        if role == "row" and aria["row"] is None:
+            aria.update(row=[], row_depth=depth, header=False)
+        elif role in _ARIA_CELL_ROLES and aria["row"] is not None and aria["cell"] is None \
+                and len(aria["row"]) < _MAX_TABLE_COLS:
+            aria.update(cell=[], cell_depth=depth, cell_size=0)
+            if role == "columnheader":
+                aria["header"] = True
+
+    def _aria_closed(self) -> None:
+        """After a pop: close the ARIA cell / row / grid whose element just ended."""
+        aria = self._aria
+        assert aria is not None, "an open grid"
+        depth = len(self._open)
+        assert depth <= _MAX_OPEN_STACK, "the open stack is bounded"
+        if aria["cell"] is not None and depth < aria["cell_depth"]:
+            aria["row"].append(" ".join("".join(aria["cell"]).split())[:_MAX_CELL_CHARS])
+            aria["cell"] = None
+        if aria["row"] is not None and depth < aria["row_depth"]:
+            row, table = aria["row"], aria["table"]
+            if any(row):
+                if aria["header"] and not table["headers"]:
+                    table["headers"] = row[:_MAX_TABLE_COLS]
+                elif len(table["rows"]) < _MAX_TABLE_ROWS:
+                    table["rows"].append(row[:_MAX_TABLE_COLS])
+            aria["row"] = None
+        if depth < aria["depth"]:
+            self.flush_aria()
+
+    def flush_aria(self) -> None:
+        """Keep an open ARIA grid that holds anything (also at the end of the document)."""
+        aria = self._aria
+        assert len(self.tables) <= _MAX_TABLES, "tables are capped"
+        if aria is None:
+            return
+        table = aria["table"]
+        if (table["headers"] or table["rows"]) and len(self.tables) < _MAX_TABLES:
+            self.tables.append(table)
+        self._aria = None
+        assert self._aria is None, "the grid is closed"
+
+    def signals(self) -> dict:
+        """The closed script-evidence layer the page-browser need signal reads."""
+        assert self._noscript_size <= _MAX_NOSCRIPT_CHARS, "the notice text is bounded"
+        notice = bool(_NOSCRIPT_JS_RE.search(" ".join("".join(self.noscript_text).split())))
+        out = {"script_count": int(self.script_count), "script_bytes": int(self.script_bytes),
+               "noscript_js": notice}
+        assert out["script_count"] >= 0 and out["script_bytes"] >= 0, "counts are non-negative"
+        return out
+
+
+def _data_key(key: object, first: bool) -> str | None:
+    """One object key as a path step in the NI grammar: ``name`` / ``.name`` for a plain
+    key, ``["key"]`` for any other quotable key; None for a key no path may name."""
+    assert isinstance(first, bool), "first is a flag"
+    if not isinstance(key, str) or not key or key in _DATA_DENIED_KEYS:
+        return None
+    if _DATA_KEY_RE.fullmatch(key):
+        return key if first else "." + key
+    if len(key) > 200 or '"' in key or any(ord(ch) < 32 or ord(ch) == 127 for ch in key):
+        return None
+    step = f'["{key}"]'
+    assert step.startswith('["') and step.endswith('"]'), "a quoted step"
+    return step
+
+
+def _data_value(node: object) -> object | None:
+    """A leaf value: text (non-empty, capped), a finite number or a bool; else None."""
+    assert MAX_DATA_VALUE > 0, "text leaves are capped"
+    assert not isinstance(node, (bytes, bytearray)), "parsed JSON values only"
+    if isinstance(node, bool):
+        return node
+    if isinstance(node, int):
+        return node if abs(node) < 10**15 else None
+    if isinstance(node, float):
+        return node if math.isfinite(node) else None
+    if isinstance(node, str) and node.strip():
+        return node[:MAX_DATA_VALUE]
+    return None
+
+
+def _flatten_data(node: object) -> list[list]:
+    """One parsed JSON document → ``[path, scalar]`` leaves in document order. Iterative
+    (no recursion), bounded by depth, keys, items, steps and leaves; keys outside the path
+    grammar (``__proto__``, quotes, control characters) drop their subtree."""
+    leaves: list[list] = []
+    stack: list[tuple[str, object, int, int]] = [("", node, 0, 0)]
+    assert _MAX_DATA_STEPS > 0 and MAX_DATA_LEAVES > 0, "the walk is budgeted"
+    for _ in range(_MAX_DATA_STEPS):  # fixed work budget
+        if not stack or len(leaves) >= MAX_DATA_LEAVES:
+            break
+        path, value, depth, run = stack.pop()
+        if isinstance(value, dict):
+            if depth >= _MAX_DATA_DEPTH:
+                continue
+            steps = []
+            for key, child in itertools.islice(value.items(), _MAX_DATA_KEYS):
+                seg = _data_key(key, first=not path)
+                if seg is not None and len(path) + len(seg) <= MAX_DATA_PATH:
+                    steps.append((path + seg, child, depth + 1, 0))
+            stack.extend(reversed(steps))
+        elif isinstance(value, list):
+            if depth >= _MAX_DATA_DEPTH or run >= _MAX_DATA_SUBSCRIPTS:
+                continue
+            base = path or "items"  # a bare list root reads as ``items`` (the engine's wrap)
+            steps = [(f"{base}[{i}]", value[i], depth + 1, run + 1)
+                     for i in range(min(len(value), _MAX_DATA_LIST))]
+            stack.extend(reversed([st for st in steps if len(st[0]) <= MAX_DATA_PATH]))
+        else:
+            leaf = _data_value(value)
+            if leaf is not None:
+                leaves.append([path or "value", leaf])
+    assert len(leaves) <= MAX_DATA_LEAVES, "leaves are capped"
+    return leaves
+
+
+def _data_docs(blobs: list[tuple[str, str]]) -> list[dict]:
+    """Plain JSON documents → ``[{id, leaves}]``: parsed, never evaluated; a malformed or
+    pathologically nested document (RecursionError) loses only itself; ids unique (a
+    document without a valid ``id`` is ``json<N>``; a repeated id keeps the first)."""
+    assert isinstance(blobs, list), "blobs must be a list"
+    docs: list[dict] = []
+    seen: set[str] = set()
+    total = 0
+    for index, (raw_id, blob) in enumerate(blobs[:MAX_DATA_DOCS]):
+        doc_id = raw_id or f"json{index}"
+        if doc_id in seen or total >= _MAX_DATA_TOTAL_LEAVES:
+            continue
+        try:
+            parsed = json.loads(blob)
+        except (ValueError, TypeError, RecursionError):
+            continue
+        leaves = _flatten_data(parsed)[:_MAX_DATA_TOTAL_LEAVES - total]
+        if leaves:
+            seen.add(doc_id)
+            total += len(leaves)
+            docs.append({"id": doc_id, "leaves": leaves})
+    assert total <= _MAX_DATA_TOTAL_LEAVES, "total leaves are capped"
+    return docs
 
 
 def _entities_from_jsonld(blobs: list[str]) -> list[dict]:
@@ -513,10 +772,12 @@ def _page_graph_layers(html: str) -> tuple[dict, str]:
     any layer degrades to empty layers and whatever body text was read."""
     assert isinstance(html, str), "html must be a string"
     parser = _GraphParser()
-    empty = {"entities": [], "tables": [], "feeds": [], "meta": {}, "outline": []}
+    empty = {"entities": [], "tables": [], "feeds": [], "meta": {}, "outline": [], "data": [],
+             "signals": {"script_count": 0, "script_bytes": 0, "noscript_js": False}}
     try:
         parser.feed(html)
         parser.close()
+        parser.flush_aria()  # an ARIA grid still open at the end of the document
         # Entity flattening runs INSIDE the guard too: a hostile JSON-LD blob
         # failing here must lose the graph layers only — never text/title
         # (the pre-existing page-door path rides the same child process).
@@ -526,6 +787,8 @@ def _page_graph_layers(html: str) -> tuple[dict, str]:
             "feeds": parser.feeds[:_MAX_FEEDS],
             "meta": parser.meta,
             "outline": parser.outline[:_MAX_OUTLINE],
+            "data": _data_docs(parser.data_blobs),
+            "signals": parser.signals(),
         }, "".join(parser.body)
     except Exception:  # hostile markup must never kill the text path
         return empty, "".join(parser.body)
@@ -559,10 +822,13 @@ def _fit_output(payload: dict) -> str:
         if len(out.encode("utf-8")) <= _SOFT_OUTPUT_BYTES:
             return out
         tables = payload.get("tables") or []
-        if not any(t.get("rows") for t in tables):
+        docs = payload.get("data") or []
+        if not any(t.get("rows") for t in tables) and not any(d.get("leaves") for d in docs):
             break
         for t in tables:
             t["rows"] = t["rows"][: len(t["rows"]) // 2]
+        for d in docs:  # the data layer halves with the tables (B3a)
+            d["leaves"] = d["leaves"][: len(d["leaves"]) // 2]
         out = json.dumps(payload, ensure_ascii=False)
     if len(out.encode("utf-8")) <= _SOFT_OUTPUT_BYTES:
         return out

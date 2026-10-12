@@ -26,6 +26,7 @@ import json
 import logging
 import re
 import threading
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -34,10 +35,13 @@ from typing import Any
 from urllib.parse import quote, urlparse
 from zoneinfo import ZoneInfo
 
+from . import browsers as _browsers_mod
 from . import claudecli as _claudecli_mod
 from . import gateway as _gateway_mod
+from . import jailrun as _jailrun_mod
 from . import netguard as _netguard_mod
 from . import ni, ni_master, ni_query, page_verify, pagegraph
+from .browsers import router as _browser_router
 from .library_index import GEO_RESOLVERS, frame_kind_from_text
 from .library_resolve import ENGLISH as LIBRARY_ENGLISH
 from .library_resolve import resolve_lookup
@@ -6101,6 +6105,12 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
                                call_model, host_wide=host_wide)
             if refused is not None:
                 return refused
+        if _plain_page_403(exc) and not picked and (not remap or own_page):
+            # Round 20 (B3a): a plain 403 on a page (no bot challenge, not an API's JSON refusal) —
+            # a pasted link no pick row took, or a Fix of a page card — may be read once in the page
+            # browser; a 429 or a challenge never is (R8). Same consented URL, no second static fetch.
+            return _build_page_card(store, item_id, request, intent, url, call_model, remap=remap,
+                                    blocked=True)
         # R5-12 (2026-10-04, diag-live): a non-401/403/429 fetch failure on a picked Library row
         # (404, 5xx, timeout, resolve_fail) used to end the card instead of handing over to the next
         # row — move on like a refusal does, web search only when the dropped row was a Library row.
@@ -6558,10 +6568,243 @@ def _page_refused(store: ni.NIStore, item_id: str, url: str, reason: str, reques
     return _fail(store, item_id, "assembly", f"the page {why} — pick another source")
 
 
+# ---- Round 20 (B3a): the page-browser ladder at creation and Fix --------------------------
+
+_PREPARE_WAIT_S = 180          # creation / Fix waits this long for a first install (with progress)
+_WANT_MISS_FITNESS = 5         # a static page this unfit for the wants …
+_WANT_MISS_SCRIPT_BYTES = 20_000  # … that carries this much script is worth one render
+_MAX_ASSET_SCAN = 500
+_sleep = time.sleep            # module attribute so a test drives the wait without sleeping
+
+
+def _plain_page_403(exc: BaseException) -> bool:
+    """A 403 that is neither a bot challenge (``kind`` challenge) nor an API's JSON refusal —
+    the one refusal the page browser may read once (R8: a 429 or a challenge never)."""
+    assert isinstance(exc, BaseException), "an exception"
+    status, kind = getattr(exc, "status", None), getattr(exc, "kind", None)
+    media = str(getattr(exc, "content_type", "") or "")
+    assert isinstance(media, str), "media type is text"
+    return status == 403 and kind is None and "json" not in media
+
+
+def _page_read(store: ni.NIStore, item_id: str, request: str, intent: dict, url: str,
+               call_model: Callable[[str], str], *, remap: bool,
+               blocked: bool) -> tuple[dict | None, dict | None, dict | None, bool]:
+    """The page door's read: ``(graph, render, None, escalated)`` or ``(None, None, the honest
+    stop, escalated)``. A plain 403 goes straight to one page-browser visit (no second static
+    fetch); otherwise the static jailed read, then one visit when code finds a JS shell in it.
+    ``escalated``: this build already spent its one page-browser visit."""
+    assert isinstance(url, str) and url, "url required"
+    assert store is not None and item_id, "store + id required"
+    if blocked:
+        refused = _netguard_mod.FetchError("upstream returned HTTP 403", status=403)
+        render = _escalate_page(store, item_id, url,
+                                _browser_router.static_evidence(url, failure=refused), remap=remap)
+        if render is None:
+            return None, None, _fail(store, item_id, "fetch",
+                                     "page fetch failed: the site refused SmartBrain's request"), True
+        return render["graph"], render, None, True
+    try:
+        graph = pagegraph.graph_from_extract(url, ni._fetch_http_page(
+            {"type": "http_page", "url": url}, item_id, None, full=True))
+    except Exception as exc:
+        # R5-12 (2026-10-04): a page fetch failure hands over to the next row of the pick,
+        # same posture as _sample_and_map's non-401/403/429 branch; a pasted link / Fix /
+        # remap still fails honestly (``_move_on`` returns None for them).
+        moved = None if remap else _move_on(store, item_id, url, "couldn't be fetched",
+                                            request, intent, call_model)
+        why = exc.kind if isinstance(exc, ni.NIError) else type(exc).__name__
+        return None, None, (moved if moved is not None else
+                            _fail(store, item_id, "fetch", f"page fetch failed: {why}")), False
+    static = _browser_router.static_evidence(url, graph=graph)
+    if "js_shell" not in static.signals:
+        return graph, None, None, False
+    render = _escalate_page(store, item_id, url, static, remap=remap)
+    return (render["graph"], render, None, True) if render is not None else (graph, None, None, True)
+
+
+def _escalate_page(store: ni.NIStore, item_id: str, url: str, static: object | None, *,
+                   remap: bool, signal: str | None = None) -> dict | None:
+    """ONE page-browser visit of the consented URL (creation or Fix — the tap/paste covers it,
+    the card's consent text said so): eligibility first, then the router judges the static
+    outcome and renders under the ``open`` discovery policy (its egress census names every
+    site the page loaded); the HTML goes through the extractor jail. ``{graph, sites, feeds,
+    engine, version}`` or None with a closed ``render_skipped:`` / ``render_failed:`` note."""
+    assert isinstance(url, str) and url, "url required"
+    assert static is not None or signal is not None, "a static read or a caller's signal"
+    if not _browser_router.would_render(static=static, signal=signal):  # R8: a 429 / challenge
+        _append_note(store, item_id, f"render_skipped:{_declined_reason(static)}"[:_MAX_NOTE])
+        return None
+    _browsers_mod.note_wanted()  # the launcher's cue — even when this machine can't render yet
+    if not _await_browser(store, item_id):
+        return None
+    _append_note(store, item_id, f"reading {_host_hint(url)} once in the page browser "
+                                 "(it may also load the sites the page depends on)")
+    got = _browser_router.browse(url, static=static, need_signal_from_static=signal,
+                                 allow_render=True, site_policy={"mode": "open"},
+                                 identity={"card": item_id}, timezone=ni.user_timezone_name(),
+                                 want_assets=not remap)
+    if got.tier not in _browser_router.TIERS[1:] or not got.ok or got.html is None:
+        if got.escalation is None and got.tier == "static":  # the router declined (R8)
+            _append_note(store, item_id, f"render_skipped:{_declined_reason(got)}"[:_MAX_NOTE])
+        else:
+            _append_note(store, item_id, f"render_failed:{(got.escalation or {}).get('status') or got.status}")
+        return None
+    try:
+        extracted = _jailrun_mod.run_extractor(got.html, url_hint=url)
+    except _jailrun_mod.JailError as exc:
+        _append_note(store, item_id, f"render_failed:extract_{exc.reason}"[:_MAX_NOTE])
+        return None
+    sites = _census_sites(got.census, url)
+    if len(sites) > ni.MAX_RENDER_SITES:
+        _append_note(store, item_id, "render_failed:too_many_sites")
+        return None
+    return {"graph": pagegraph.graph_from_extract(url, extracted, render_mode="rendered"),
+            "sites": sites, "feeds": [] if remap else _feed_candidates_of(got.assets or [], sites),
+            "engine": got.engine, "version": got.version}
+
+
+def _declined_reason(result: object | None) -> str:
+    """Why the router won't render a read (closed): its own reason (``challenge``,
+    ``http_429``…), ``challenge`` for a page that reads as one, else ``no_signal``."""
+    if result is None:
+        return "no_signal"
+    reason = str(getattr(result, "reason", "") or "")
+    signals = getattr(result, "signals", ()) or ()
+    assert isinstance(signals, tuple), "signals are a tuple"
+    why = reason or ("challenge" if "blocked" in signals else "no_signal")
+    assert why and len(why) <= 64, "a short closed code"
+    return why
+
+
+def _await_browser(store: ni.NIStore, item_id: str) -> bool:
+    """True when the page browser can render now. A preparable engine (absent, stale, or
+    waiting for its once-per-boot self-test) is prepared on this first need and waited for —
+    at most ``_PREPARE_WAIT_S`` — with ``{phase, pct}`` on the card ("Preparing the page
+    browser (43%)…"); any other reason is a closed ``render_skipped:<reason>`` note."""
+    assert store is not None and item_id, "store + id required"
+    assert _PREPARE_WAIT_S > 0, "the wait is bounded"
+    waitable = _browsers_mod.PREPARABLE | {"preparing"}
+    avail = _browsers_mod.available()
+    if not avail["eligible"] and avail["reason"] in waitable:
+        _browsers_mod.prepare()
+        for _ in range(_PREPARE_WAIT_S):  # bounded: one look a second
+            _set_browser_progress(store, item_id, _browsers_mod.progress())
+            _sleep(1.0)
+            avail = _browsers_mod.available()
+            if avail["eligible"] or avail["reason"] not in waitable:
+                break
+        _set_browser_progress(store, item_id, None)
+    if not avail["eligible"]:
+        _append_note(store, item_id, f"render_skipped:{avail['reason'] or 'preparing'}")
+    return bool(avail["eligible"])
+
+
+def _set_browser_progress(store: ni.NIStore, item_id: str, progress: dict | None) -> None:
+    """Seal (or clear) the closed ``_browser {phase, pct}`` the board shows while a flow waits."""
+    assert progress is None or set(progress) == {"phase", "pct"}, "closed progress keys"
+    assert store is not None and item_id, "store + id required"
+    record = _flow_read(store, item_id) or {}
+    if record.get("_browser") == progress:
+        return
+    _flow_write(store, item_id, {**record, "_browser": progress})
+
+
+def _census_sites(census: list, url: str) -> list[str]:
+    """The registrable domains the visit loaded (≥ 1 tunnel), the URL's own site first, the
+    rest sorted — what the card seals as ``sites`` (the tick allows only these)."""
+    assert isinstance(census, list) and isinstance(url, str), "census + url required"
+    own = pagegraph.registrable_domain(urlparse(url).hostname or "")
+    seen = {str(r.get("site") or "") for r in census[:64] if isinstance(r, dict)
+            and isinstance(r.get("tunnels"), int) and r["tunnels"] >= 1}
+    others = sorted(site for site in seen if site and site != own and ni._SITE_RE.match(site)
+                    and pagegraph.registrable_domain(site) == site)
+    assert own not in others, "the own site leads once"
+    return [own, *others]
+
+
+def _feed_candidates_of(assets: list, sites: list[str]) -> list[dict]:
+    """R12 (creation only): the render's sub-resource URLs that look like the page's data
+    feed — https, on a sealed site, the path or query says ``json`` or the host / path is an
+    ``api`` — as ≤ 5 exact ``{url, site}``. Nothing is fetched until the user picks one."""
+    assert isinstance(assets, list) and isinstance(sites, list), "assets + sites required"
+    out: list[dict] = []
+    for url in assets[:_MAX_ASSET_SCAN]:  # bounded: the runner keeps ≤ 500
+        if not isinstance(url, str) or not url.startswith("https://") or len(url) > ni._MAX_URL \
+                or any(ch.isspace() or ord(ch) < 32 for ch in url):
+            continue
+        parts = urlparse(url)
+        host = (parts.hostname or "").lower()
+        site = pagegraph.registrable_domain(host)
+        path, query = parts.path.lower(), parts.query.lower()
+        looks_json = "json" in path or "json" in query or host.startswith("api.") \
+            or "/api/" in path or path == "/api"
+        if parts.username or parts.password or site not in sites or not looks_json \
+                or any(c["url"] == url for c in out):
+            continue
+        out.append({"url": url, "site": site})
+        if len(out) >= ni.MAX_FEED_CANDIDATES:
+            break
+    assert len(out) <= ni.MAX_FEED_CANDIDATES, "candidates are capped"
+    return out
+
+
+def _want_miss(graph: dict, wants: list[str]) -> bool:
+    """``want_miss`` (code): the static compile found nothing, the page barely serves the wants
+    (``graph_fitness`` < 5) and it carries ≥ 20 KB of script — one render may hold the data."""
+    assert isinstance(graph, dict) and isinstance(wants, list), "graph + wants required"
+    signals = graph.get("signals") if isinstance(graph.get("signals"), dict) else {}
+    script_bytes = signals.get("script_bytes") if isinstance(signals.get("script_bytes"), int) else 0
+    assert script_bytes >= 0 or not isinstance(script_bytes, int), "a byte count"
+    return script_bytes >= _WANT_MISS_SCRIPT_BYTES and \
+        pagegraph.graph_fitness(graph, wants)[0] < _WANT_MISS_FITNESS
+
+
+def _want_miss_render(store: ni.NIStore, item_id: str, url: str, intent: dict, request: str,
+                      call_model: Callable[[str], str], window: str | None, *,
+                      remap: bool) -> tuple[dict, dict, dict] | None:
+    """A want_miss visit is adopted only when it adds structure that compiles AND passes the
+    page verify gate: ``(graph, render, compiled)``; else None (the static read stands)."""
+    assert isinstance(url, str) and url, "url required"
+    assert isinstance(intent, dict) and callable(call_model), "intent + model required"
+    render = _escalate_page(store, item_id, url, None, remap=remap, signal="want_miss")
+    if render is None:
+        return None
+    compiled = compile_page_program(render["graph"], intent, request, call_model)
+    if compiled is None or _page_reasons(render["graph"], dict(compiled["values"]), intent,
+                                         tier="compiled", window=window):
+        _append_note(store, item_id, "render_failed:no_structure")
+        return None
+    return render["graph"], render, compiled
+
+
+def _page_source(url: str, render: dict | None) -> dict:
+    """The sealed ``http_page`` source: the exact consented URL, plus ``render`` + ``sites``
+    when the page browser read it (the flow builder is the only writer of those two keys)."""
+    assert isinstance(url, str) and url, "url required"
+    if render is None:
+        return {"type": "http_page", "url": url}
+    sites = list(render["sites"])
+    assert sites and len(sites) <= ni.MAX_RENDER_SITES, "a rendered card names 1..12 sites"
+    return {"type": "http_page", "url": url, "render": ni.RENDER_BROWSER, "sites": sites}
+
+
+def _render_notes(render: dict | None) -> list[str]:
+    """The build note a rendered card adds (code-written, host names only)."""
+    assert render is None or isinstance(render, dict), "a render or nothing"
+    if render is None:
+        return []
+    sites = list(render["sites"])
+    assert sites, "a rendered card names its sites"
+    others = sites[1:]
+    tail = f"; it also loads: {', '.join(others)}" if others else "; this site only"
+    return [f"reads this page in SmartBrain's local, locked-down page browser{tail}"]
+
+
 def _build_page_card(store: ni.NIStore, item_id: str, request: str,
                       intent: dict, url: str,
                       call_model: Callable[[str], str],
-                      *, remap: bool = False) -> dict:
+                      *, remap: bool = False, blocked: bool = False) -> dict:
     """G4b + P2: build a page card from a consented page URL.
 
     One jailed read yields the page graph. Tier 1 (P2, compiled): the
@@ -6578,33 +6821,25 @@ def _build_page_card(store: ni.NIStore, item_id: str, request: str,
     every reading — both tiers — goes through the deterministic page verify
     gate and the P8 judge, whose "doesn't serve" binds. Any refusal (and a
     model reply that won't parse) moves on to the next page of the pick.
+
+    Round 20 (B3a): the page-browser ladder — creation and Fix are its only
+    escalation points. A JS shell (code-computed from the static read), a plain
+    403 (``blocked``, from the sampling door) or a compile miss on a
+    script-heavy page (``want_miss``) earns ONE visit in the page browser when
+    ``browsers.available()`` says it can render; the rendered HTML goes through
+    the same extractor jail and the card seals ``render: "browser"`` + the
+    sites the visit loaded. Otherwise the static read stands (links as today)
+    with the closed reason in the notes.
     """
     assert isinstance(url, str) and url, "url required"
     window = _ask_window(request, intent.get("frame_kind"), list(intent.get("names") or []))
     _transition(store, item_id, "sampling", source_url=url,
                  note=f"page source — jailed read of {_host_hint(url)}")
-    try:
-        graph = pagegraph.graph_from_extract(url, ni._fetch_http_page(
-            {"type": "http_page", "url": url}, item_id, None, full=True))
-    except ni.NIError as exc:
-        # R5-12 (2026-10-04): a page fetch failure hands over to the next row of the pick,
-        # same posture as _sample_and_map's non-401/403/429 branch; a pasted link / Fix /
-        # remap still fails honestly (``_move_on`` returns None for them).
-        if not remap:
-            moved = _move_on(store, item_id, url, "couldn't be fetched",
-                             request, intent, call_model)
-            if moved is not None:
-                return moved
-        return _fail(store, item_id, "fetch",
-                      f"page fetch failed: {exc.kind}")
-    except Exception as exc:
-        if not remap:
-            moved = _move_on(store, item_id, url, "couldn't be fetched",
-                             request, intent, call_model)
-            if moved is not None:
-                return moved
-        return _fail(store, item_id, "fetch",
-                      f"page fetch failed: {type(exc).__name__}")
+    graph, render, stopped, escalated = _page_read(store, item_id, request, intent, url, call_model,
+                                                   remap=remap, blocked=blocked)
+    if stopped is not None:
+        return stopped
+    assert graph is not None, "a read produced a graph"
     born = None if remap else "flow"
     fetched_at = ni._clock()   # one instant per build: the form's ``now`` and the preview bind
     cadence = (intent.get("cadence_minutes")
@@ -6635,6 +6870,11 @@ def _build_page_card(store: ni.NIStore, item_id: str, request: str,
                               f"the page is about {other_brand}, not what you asked",
                               request, intent, call_model, remap)
     compiled = compile_page_program(graph, intent, request, call_model)
+    if compiled is None and not escalated and _want_miss(graph, wants):
+        adopted = _want_miss_render(store, item_id, url, intent, request, call_model, window,
+                                    remap=remap)
+        if adopted is not None:  # the rendered page compiles where the static one could not
+            graph, render, compiled = adopted
     if compiled is not None:
         preview = dict(compiled["values"])
         reasons = _page_reasons(graph, preview, intent, tier="compiled", window=window)
@@ -6649,11 +6889,10 @@ def _build_page_card(store: ni.NIStore, item_id: str, request: str,
                                    url, cadence, call_model, fetched_at)
             except ValueError as exc:
                 return _fail(store, item_id, "assembly", f"form design failed: {exc}")
-            spec = build_final_spec(request, intent,
-                                     {"type": "http_page", "url": url},
+            spec = build_final_spec(request, intent, _page_source(url, render),
                                      cadence, [stage], scene)
             notes = ["compiled page card: values are read verbatim from the "
-                     "page's structure each update (no model at run time)"]
+                     "page's structure each update (no model at run time)"] + _render_notes(render)
             if judge is not None and judge["gaps"]:
                 gap_note = "this card won't include: " + ", ".join(judge["gaps"])
                 notes.append(gap_note)
@@ -6662,7 +6901,7 @@ def _build_page_card(store: ni.NIStore, item_id: str, request: str,
                               note="; ".join(notes), born=born,
                               built_from=_built_from_of(store, item_id, "page", url,
                                                         str(graph.get("title") or "")),
-                              fetched_at=fetched_at)
+                              fetched_at=fetched_at, render=render)
         _append_note(store, item_id,
                      "compiled reading rejected by the check — "
                      "falling back to an interpreted card")
@@ -6713,11 +6952,10 @@ def _build_page_card(store: ni.NIStore, item_id: str, request: str,
         scene = _page_form(fields, labels, preview, request, intent, url, cadence, call_model, fetched_at)
     except ValueError as exc:
         return _fail(store, item_id, "assembly", f"form design failed: {exc}")
-    spec = build_final_spec(request, intent,
-                             {"type": "http_page", "url": url},
+    spec = build_final_spec(request, intent, _page_source(url, render),
                              cadence, [stage], scene)
     notes = ["interpreted page card: a local model reads this page each "
-             "update (values are its reading, not raw data)"]
+             "update (values are its reading, not raw data)"] + _render_notes(render)
     if judge is not None and judge["gaps"]:
         gap_note = "this card won't include: " + ", ".join(judge["gaps"])
         notes.append(gap_note)
@@ -6726,7 +6964,7 @@ def _build_page_card(store: ni.NIStore, item_id: str, request: str,
                       note="; ".join(notes), born=born,
                       built_from=_built_from_of(store, item_id, "page", url,
                                                 str(graph.get("title") or "")),
-                      fetched_at=fetched_at)
+                      fetched_at=fetched_at, render=render)
 
 
 def _page_form(fields: list | dict, labels: dict, preview: dict, request: str, intent: dict,
@@ -6771,7 +7009,8 @@ def _built_from_of(store: ni.NIStore, item_id: str, path: str, url: str, title: 
 def _finalize(store: ni.NIStore, item_id: str, spec: dict, preview: dict,
               *, note: str, born: str | None = None,
               built_from: dict | None = None,
-              fetched_at: datetime | None = None) -> dict:
+              fetched_at: datetime | None = None,
+              render: dict | None = None) -> dict:
     """Rewrite the shell item's spec in place; write preview + preview_data; commission.
 
     Landing rule mirrors ``_initial_ni_state`` from tools.py: a spec declaring
@@ -6790,11 +7029,18 @@ def _finalize(store: ni.NIStore, item_id: str, spec: dict, preview: dict,
 
     ``fetched_at`` (§34): the sample's fetch instant — the preview's form bind lays out
     at the same ``now`` the design was sealed at; None reads the clock.
+
+    ``render`` (Round 20, B3a): the page-browser visit the reading came from. Its feed
+    candidates seal as ``_feed_candidates``; a page that loaded ANY other site lands as a
+    DRAFT listing its sites (R6 — ``POST …/activate`` is the consent for every update), a
+    first-party-only page commissions under the tap like every page card.
     """
     assert store is not None and item_id, "args required"
     assert born is None or born in BORN_MARKERS, "born marker must be closed"
     if built_from is not None:
         spec["_built_from"] = built_from
+    if render is not None and render.get("feeds"):
+        spec["_feed_candidates"] = [dict(c) for c in render["feeds"]][:ni.MAX_FEED_CANDIDATES]
     prior = store.get_item(item_id)
     prior_state = str(prior["state"]) if prior else "draft"
     if born is not None:
@@ -6805,6 +7051,8 @@ def _finalize(store: ni.NIStore, item_id: str, spec: dict, preview: dict,
         # dropped it (found 2026-09-23 by the stuck-card remedy test) and the
         # §29 door fell back to the prunable journal M1 exists to avoid.
         spec[_BORN_KEY] = prior["spec"][_BORN_KEY]
+    if prior is not None and ni._render_consent_kept(prior["spec"], spec):
+        spec["_render_ok"] = True  # B3a: a Fix that loads the same page and sites keeps the consent
     record = _flow_read(store, item_id) or {}
     consent = record.get("_model_consent") or (prior["spec"].get("_model_consent")
                                                 if prior is not None else None)
@@ -6840,6 +7088,16 @@ def _finalize(store: ni.NIStore, item_id: str, spec: dict, preview: dict,
     except (ValueError, ni.NIError) as exc:
         return _fail(store, item_id, "assembly", f"store update failed: {exc}")
     landing = _landing_state(spec)
+    if ni.render_needs_consent(spec):
+        # B3a (R6): the page loads other sites — a draft listing them until the user Activates
+        try:
+            store.set_state(item_id, "draft")
+        except Exception as exc:  # the state write is what holds the card; record and fail honestly
+            return _fail(store, item_id, "assembly", f"draft landing failed: {type(exc).__name__}")
+        sites = ", ".join((spec.get("source") or {}).get("sites", [])[1:])
+        # the consent clause leads: notes are cut at _MAX_NOTE characters
+        _transition(store, item_id, "ready", note=f"waiting for your OK to also load: {sites}; {note}")
+        return _flow_read(store, item_id) or {}
     # R2 (field 2026-09-15): a REMAP (born=None) of a card already past draft
     # keeps its credential gate — the key lives in the store untouched, so
     # demoting to awaiting_credential/draft would ask the user for a key they
@@ -7148,6 +7406,11 @@ def board_flow_field(store: ni.NIStore, item_id: str) -> dict | None:
         except Exception as exc:  # suggestions are best-effort display data
             log.warning("ni_flow: suggestions failed for %s: %s", item_id, exc)
             out["suggestions"] = []
+        out["tap"] = tap_notice()  # B3a (R6): what the paste's consent covers when a page renders
+    progress = record.get("_browser")
+    if isinstance(progress, dict) and set(progress) == {"phase", "pct"}:
+        # B3a: the flow is waiting for the page browser — "Preparing the page browser (43%)…"
+        out["browser"] = {"phase": str(progress["phase"]), "pct": int(progress["pct"])}
     access = record.get("_access")
     if state == "awaiting_access" and isinstance(access, dict):
         # what the card asks for, from the sealed record only (never a value)
@@ -7157,6 +7420,43 @@ def board_flow_field(store: ni.NIStore, item_id: str) -> dict | None:
                          "key": {"docs_url": str(key.get("docs_url") or "")} if key else None,
                          "contact": bool(access.get("contact"))}
     return out
+
+
+def tap_notice() -> dict:
+    """B3a (R6): ``{render_notice, site_cap}`` for the pick pause's paste. ``render_notice`` is
+    True when a pasted page MAY be read in the page browser on this machine (eligible, or
+    preparable on first need): the consent text then says the one visit may also load the
+    sites the page depends on (at most ``site_cap``). Code-made, closed keys."""
+    reason = _browsers_mod.available()["reason"]
+    assert isinstance(reason, str), "a closed reason"
+    notice = reason == "" or reason in _browsers_mod.PREPARABLE or reason == "preparing"
+    out = {"render_notice": bool(notice), "site_cap": ni.MAX_RENDER_SITES}
+    assert set(out) == {"render_notice", "site_cap"}, "closed keys"
+    return out
+
+
+def begin_switch_feed(store: ni.NIStore, item: dict, url: str) -> bool:
+    """B3a (R12): the user chose one of the card's sealed feed candidates — the flow re-enters
+    at the tap with that EXACT URL as a pasted link (the existing door and consent: a JSON
+    link builds through the mapping path and waits for the YES). Raises ValueError (→ 409)
+    for an address that is not a sealed candidate or while the card is building."""
+    assert store is not None and isinstance(item, dict), "store + item required"
+    assert isinstance(url, str), "url must be a string"
+    offered = [c.get("url") for c in item["spec"].get("_feed_candidates") or [] if isinstance(c, dict)]
+    if url not in offered:
+        raise ValueError("that address is not one of this card's data feeds")
+    live = _flow_read(store, item["id"])
+    state = str((live or {}).get("state") or "")
+    if live is not None and state not in _TERMINAL_STATES and state != "ready":
+        raise ValueError("this card is busy building — wait for it to settle, then switch")
+    request = str(item["spec"].get("goal") or item["spec"].get("title") or "")
+    record = _make_record(request, "intent", source_url=url,
+                          notes=["switching to the site's data feed you picked"])
+    record["_pasted"] = url
+    _flow_write(store, item["id"], record)
+    _try_journal(store, item["id"], "source_changed",
+                 f"switched to the data feed on {_host_hint(url)} you picked")
+    return start_flow_worker(store, item["id"], source_url=url)
 
 
 def _item_has_renderable_payload(store: ni.NIStore, item_id: str) -> bool:

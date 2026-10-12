@@ -23,6 +23,12 @@ its own canary (connects to a public IP, the Docker gateways and the metadata ad
 fail; only ``lo`` is up; the root is read-only; it runs as non-root; its engine re-hashes
 clean) — must be valid and ``ok``, and ``HEARTBEAT.json`` from the same boot must be fresh.
 Otherwise ``docker_no_sidecar``.
+
+B3a: READY also names the app ``build`` the sidecar image was built with (its
+``SMARTBRAIN_VERSION``); a READY written before the field existed still reads (B2 shape).
+``sidecar_state(build)`` turns the facts into the launcher's signal: ``missing`` (no valid
+READY with a fresh heartbeat answers), ``ready`` (it names ``build``), ``stale`` (another
+build, or no build field).
 """
 
 from __future__ import annotations
@@ -50,7 +56,10 @@ PICKUP_S = 15.0
 POLL_S = 0.05
 SHARED_DIR_MODE, SHARED_SOCKET_MODE = 0o1770, 0o660
 READY_KEYS = frozenset({"v", "boot", "at", "uid", "gid", "interfaces", "canaries", "netns",
-                        "readonly_root", "engine", "ok"})
+                        "readonly_root", "engine", "ok", "build"})
+LEGACY_READY_KEYS = READY_KEYS - {"build"}  # a READY a B2 agent wrote: read, always ``stale``
+SIDECAR_STATES = ("missing", "ready", "stale")
+_MAX_BUILD = 64
 ENGINE_KEYS = frozenset({"name", "version", "platform", "sha256", "verified"})
 CANARY_KEYS = frozenset({"target", "outcome"})
 HEARTBEAT_KEYS = frozenset({"v", "boot", "ts"})
@@ -138,10 +147,20 @@ def write_json(directory: str | Path, name: str, obj: dict) -> None:
         os.close(dfd)
 
 
+def read_ready() -> dict | None:
+    """READY.json in the current shape (with ``build``) or the B2 shape without it; else None."""
+    assert isinstance(RENDER_ROOT, Path), "the volume root is a path"
+    ready = read_json(RENDER_ROOT, READY_NAME, READY_KEYS)
+    if ready is None:
+        ready = read_json(RENDER_ROOT, READY_NAME, LEGACY_READY_KEYS)
+    assert ready is None or set(ready) in (READY_KEYS, LEGACY_READY_KEYS), "a closed READY shape"
+    return ready
+
+
 def ready_facts() -> dict | None:
     """READY.json + a fresh HEARTBEAT.json from the same boot, both valid; else None."""
     assert isinstance(RENDER_ROOT, Path), "the volume root is a path"
-    ready = read_json(RENDER_ROOT, READY_NAME, READY_KEYS)
+    ready = read_ready()
     beat = read_json(RENDER_ROOT, HEARTBEAT_NAME, HEARTBEAT_KEYS)
     if ready is None or beat is None or not valid_ready(ready):
         return None
@@ -154,11 +173,15 @@ def ready_facts() -> dict | None:
 
 def valid_ready(ready: dict) -> bool:
     """The agent's boot facts prove the wall: no route out, only ``lo`` up, read-only root,
-    non-root, a verified engine — and it says ``ok``."""
-    assert set(ready) == READY_KEYS, "closed READY keys"
+    non-root, a verified engine — and it says ``ok``. ``build`` (absent in a B2 READY) is a
+    short version string."""
+    assert set(ready) in (READY_KEYS, LEGACY_READY_KEYS), "closed READY keys"
     canaries = ready["canaries"]
     engine = ready["engine"]
     if ready["v"] != 1 or ready["ok"] is not True or not isinstance(canaries, list):
+        return False
+    build = ready.get("build", "")
+    if not isinstance(build, str) or len(build) > _MAX_BUILD or ("build" in ready and not build):
         return False
     if not isinstance(engine, dict) or set(engine) != ENGINE_KEYS or engine["verified"] is not True:
         return False
@@ -170,6 +193,17 @@ def valid_ready(ready: dict) -> bool:
     assert isinstance(canaries, list) and isinstance(engine, dict), "shapes checked above"
     return (ready["interfaces"] == ["lo"] and ready["readonly_root"] is True
             and isinstance(uid, int) and not isinstance(uid, bool) and uid > 0)
+
+
+def sidecar_state(build: str) -> str:
+    """The launcher's signal (B3a): ``missing`` when no valid READY with a fresh heartbeat
+    answers on the volume, ``ready`` when it names this app ``build``, ``stale`` when it names
+    another build or predates the field (an image to rebuild / pull, not to start again)."""
+    assert isinstance(build, str) and build, "this app's build"
+    facts = ready_facts() if root_ready() else None
+    state = "missing" if facts is None else ("ready" if facts.get("build") == build else "stale")
+    assert state in SIDECAR_STATES, "a closed sidecar state"
+    return state
 
 
 def check() -> Unavailable | None:

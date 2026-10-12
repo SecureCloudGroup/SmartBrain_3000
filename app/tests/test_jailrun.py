@@ -34,7 +34,7 @@ def test_run_extractor_happy_path() -> None:
     # text/title — closed key set, typed (validator-enforced).
     assert {"text", "title"} <= set(out), out
     assert set(out) <= {"text", "title", "entities", "tables", "feeds",
-                         "meta", "outline"}, out
+                         "meta", "outline", "data", "signals"}, out  # B3a: +data, +signals
     assert isinstance(out["entities"], list) and isinstance(out["tables"], list)
     assert isinstance(out["meta"], dict)
     assert out["title"] == "Sample Title"

@@ -5,10 +5,12 @@ fetch + one jailed parse yields a deterministic PageGraph:
 
     {url, fetched_at, render_mode, text, title,
      entities[],   # schema.org JSON-LD, flattened scalar fields
-     tables[],     # {caption, headers[], rows[][]} typed grids
+     tables[],     # {caption, headers[], rows[][]} typed grids (ARIA grids too)
      feeds[],      # RSS/Atom autodiscovery hrefs
      meta{},       # OpenGraph/description pairs
      outline[],    # h1-h3 headings
+     data[],       # {id, leaves[[path, scalar]]}: plain <script type=application/json> docs
+     signals{},    # {script_count, script_bytes, noscript_js}: script evidence
      readability}  # {readable, kind}: ok | challenge | shell | modal | binary
 
 Consumers: the NI flow's search-evaluate step (rank candidates by what their
@@ -16,7 +18,8 @@ pages actually CONTAIN, with evidence previews), the P2 compiler (selector
 programs over graph paths), chat research tools, future ingestion. All layers
 are parsed INSIDE the subprocess jail (hostile HTML never parses in-process);
 this module only fetches under netguard and validates the jail's bounded
-output. ``render_mode`` is "static" until the P3 browser ladder lands.
+output. ``render_mode`` is "static", or "rendered" when the page browser
+(Round 20, ni-format §35) produced the HTML — the same jail parses both.
 
 ``graph_fitness`` is the deterministic scorer the evaluate step uses: how
 well a page's STRUCTURED content serves a set of wants, with grounded
@@ -38,10 +41,11 @@ from datetime import UTC, datetime
 from urllib.parse import urlparse
 
 from . import jailrun, netguard
-from .jail_extract import PAGE_EXTRA_MARK
+from .jail_extract import DATA_ID_RE, MAX_DATA_PATH, PAGE_EXTRA_MARK
 
 _FETCH_DEADLINE_S = 15.0
 _MAX_WANT_TOKENS = 24
+_MAX_DATA_FITNESS_HITS = 3
 _MAX_EVIDENCE = 2
 _MAX_EVIDENCE_CHARS = 90
 
@@ -81,13 +85,15 @@ def fetch_page_graph(url: str, *, fetcher=None) -> dict:
     return graph_from_extract(url, extracted)
 
 
-def graph_from_extract(url: str, extracted: dict) -> dict:
-    """A jail payload → the PageGraph, with its readability verdict."""
+def graph_from_extract(url: str, extracted: dict, render_mode: str = "static") -> dict:
+    """A jail payload → the PageGraph, with its readability verdict. ``render_mode`` is
+    ``rendered`` when the page browser produced the HTML (B3a)."""
     assert isinstance(url, str) and isinstance(extracted, dict), "url + payload required"
+    assert render_mode in ("static", "rendered"), "render mode is closed"
     graph = {
         "url": url,
         "fetched_at": datetime.now(UTC).isoformat(timespec="seconds"),
-        "render_mode": "static",
+        "render_mode": render_mode,
         "text": str(extracted.get("text") or ""),
         "title": str(extracted.get("title") or ""),
         "entities": list(extracted.get("entities") or []),
@@ -95,9 +101,44 @@ def graph_from_extract(url: str, extracted: dict) -> dict:
         "feeds": list(extracted.get("feeds") or []),
         "meta": dict(extracted.get("meta") or {}),
         "outline": list(extracted.get("outline") or []),
+        "data": list(extracted.get("data") or []),
+        "signals": dict(extracted.get("signals") or {}),
     }
     graph["readability"] = readability(graph)
     return graph
+
+
+# A plain JSON document with at least this many leaves is a data-bearing layer (B3a): a
+# chunk list or a CSRF token is page plumbing, not the page's data.
+DATA_BEARING_LEAVES = 10
+
+
+def data_leaves(graph: dict) -> list[tuple[str, str, object]]:
+    """Every ``(doc id, path, value)`` of the graph's static DATA layer, in page order
+    (jail-capped: ≤ 8 documents × 200 leaves)."""
+    assert isinstance(graph, dict), "graph required"
+    out: list[tuple[str, str, object]] = []
+    for doc in graph.get("data") or []:  # jail-capped
+        if not isinstance(doc, dict):
+            continue
+        for leaf in doc.get("leaves") or []:
+            if isinstance(leaf, (list, tuple)) and len(leaf) == 2:
+                out.append((str(doc.get("id") or ""), str(leaf[0]), leaf[1]))
+    assert all(len(row) == 3 for row in out), "rows are (doc, path, value)"
+    return out
+
+
+def data_bearing(graph: dict) -> bool:
+    """A structured layer carries data: an evidence-bearing entity, a table with rows, or
+    a plain JSON document of ``DATA_BEARING_LEAVES``+ leaves (B3a, the need signal)."""
+    assert isinstance(graph, dict), "graph required"
+    assert DATA_BEARING_LEAVES > 0, "a positive threshold"
+    if any(isinstance(e, dict) and _evidence_fields(e) for e in graph.get("entities") or []):
+        return True
+    if any(isinstance(t, dict) and t.get("rows") for t in graph.get("tables") or []):
+        return True
+    return any(isinstance(d, dict) and len(d.get("leaves") or []) >= DATA_BEARING_LEAVES
+               for d in graph.get("data") or [])
 
 
 def split_text(text: str) -> tuple[str, str]:
@@ -214,6 +255,15 @@ def graph_fitness(graph: dict, wants: list[str]) -> tuple[int, list[str]]:
                 cell = first[col] if col < len(first) else ""
                 if cell and len(evidence) < _MAX_EVIDENCE:
                     evidence.append(_evidence_line(headers[col], cell))
+    data_hits = 0
+    for _doc, path, value in data_leaves(graph):  # jail-capped (B3a)
+        if data_hits >= _MAX_DATA_FITNESS_HITS:
+            break
+        if _hit(path) or _hit(value):
+            data_hits += 1
+            score += 3
+            if len(evidence) < _MAX_EVIDENCE:
+                evidence.append(_evidence_line(path.rsplit(".", 1)[-1], str(value)))
     if _hit(graph.get("title") or ""):
         score += 3
     for value in (graph.get("meta") or {}).values():
@@ -325,7 +375,9 @@ def readability(graph: dict) -> dict:
             len(readable_article) < _SHORT_ARTICLE and _SHELL_MARKER_RE.search(text)):
         return {"readable": False, "kind": "shell"}
     has_rows = any(isinstance(t, dict) and t.get("rows") for t in graph.get("tables") or [])
-    if len(_readable_lines(text)) < _MIN_READABLE and not has_rows:
+    has_data = any(isinstance(d, dict) and len(d.get("leaves") or []) >= DATA_BEARING_LEAVES
+                   for d in graph.get("data") or [])  # B3a: hydration state is the page's data
+    if len(_readable_lines(text)) < _MIN_READABLE and not has_rows and not has_data:
         return {"readable": False, "kind": "shell"}
     return {"readable": True, "kind": "ok"}
 
@@ -534,12 +586,22 @@ def refreshability(graph: dict, url: str) -> float:
 # ---------------------------------------------------------------------------
 
 SELECTOR_KINDS: frozenset[str] = frozenset(
-    {"title", "meta", "entity", "outline", "table_cell", "table_lookup"})
+    {"title", "meta", "entity", "outline", "table_cell", "table_lookup", "data_leaf"})
 MAX_PROGRAM_FIELDS = 8  # public: ni's graph_extract validator shares it
 _MAX_MENU = 80
 _MAX_MENU_VALUE_CHARS = 120
 _MAX_LOOKUP_VALUES_PER_COL = 6
 _MAX_MENU_PER_TABLE = 20
+_MAX_MENU_PER_DOC = 20   # data_leaf entries per JSON document (B3a)
+_MAX_MENU_DATA = 30      # data_leaf entries in all
+# ``data_leaf.path``: the NI path grammar (ni.parse_path) restated here so pagegraph stays
+# NI-independent — plain keys, ``[N]`` subscripts, ``["quoted key"]``; denied names refused.
+_LEAF_KEY = r"[A-Za-z_][A-Za-z0-9_-]*"
+_LEAF_QUOTED = r'\["[^"\x00-\x1f\x7f]{1,200}"\]'
+_LEAF_PATH_RE = re.compile(rf"(?:{_LEAF_KEY}|{_LEAF_QUOTED})(?:\.{_LEAF_KEY}|\[\d{{1,6}}\]|{_LEAF_QUOTED})*")
+_LEAF_NAMES_RE = re.compile(rf'(?:^|\.)({_LEAF_KEY})|\["([^"]*)"\]')
+_DENIED_LEAF_KEYS = frozenset({"__proto__", "constructor", "prototype"})
+_LONG_SUBSCRIPT_RUN_RE = re.compile(r"(?:\[\d{1,6}\]){9}")
 
 
 class GraphDrift(LookupError):
@@ -555,6 +617,8 @@ def validate_selector(sel: object, where: str = "selector") -> dict:
     kind = sel.get("kind")
     if kind not in SELECTOR_KINDS:
         raise ValueError(f"{where}.kind must be one of {sorted(SELECTOR_KINDS)}")
+    if kind == "data_leaf":
+        return _validate_data_leaf(sel, where)
     shapes: dict[str, dict[str, type]] = {
         "title": {},
         "meta": {"key": str},
@@ -576,6 +640,36 @@ def validate_selector(sel: object, where: str = "selector") -> dict:
         if typ is int and not (0 <= val <= 64):
             raise ValueError(f"{where}.{name} out of range")
     return sel
+
+
+def _validate_data_leaf(sel: dict, where: str) -> dict:
+    """``{kind: data_leaf, doc, path}`` (B3a): ``doc`` a document id the jail can emit,
+    ``path`` a leaf path in the NI grammar (≤ 200 chars, no denied key, ≤ 8 subscripts in
+    a row unless quoted)."""
+    assert sel.get("kind") == "data_leaf", "a data_leaf selector"
+    assert isinstance(where, str) and where, "a place for the message"
+    extra = set(sel) - {"kind", "doc", "path"}
+    if extra:
+        raise ValueError(f"{where} has unknown keys {sorted(extra)}")
+    doc, path = sel.get("doc"), sel.get("path")
+    if not isinstance(doc, str) or not DATA_ID_RE.fullmatch(doc):
+        raise ValueError(f"{where}.doc must be a document id")
+    if not isinstance(path, str) or not 0 < len(path) <= MAX_DATA_PATH \
+            or not _LEAF_PATH_RE.fullmatch(path):
+        raise ValueError(f"{where}.path must be a data path")
+    names = [a or b for a, b in _LEAF_NAMES_RE.findall(path)]
+    if any(name in _DENIED_LEAF_KEYS for name in names) \
+            or ('"' not in path and _LONG_SUBSCRIPT_RUN_RE.search(path)):
+        raise ValueError(f"{where}.path must be a data path")
+    return sel
+
+
+def _leaf_text(value: object) -> str:
+    """A data leaf as card text: text verbatim; numbers and booleans as JSON writes them."""
+    assert not isinstance(value, (dict, list)), "leaves are scalars"
+    text = value if isinstance(value, str) else json.dumps(value)
+    assert isinstance(text, str), "a string"
+    return text
 
 
 def run_selector(graph: dict, sel: dict) -> str:
@@ -602,6 +696,14 @@ def run_selector(graph: dict, sel: dict) -> str:
                     return value
                 break
         raise GraphDrift(f"entity {sel['etype']}.{sel['field']} gone")
+    if kind == "data_leaf":
+        for doc in graph.get("data") or []:  # jail-capped
+            if isinstance(doc, dict) and doc.get("id") == sel["doc"]:
+                for leaf in doc.get("leaves") or []:
+                    if isinstance(leaf, (list, tuple)) and len(leaf) == 2 and leaf[0] == sel["path"]:
+                        return _leaf_text(leaf[1])
+                break
+        raise GraphDrift(f"data leaf {sel['doc']}:{sel['path'][:60]} gone")
     if kind == "outline":
         outline = graph.get("outline") or []
         idx = sel["index"]
@@ -702,6 +804,7 @@ def enumerate_menu(graph: dict, wants: list[str] | None = None) -> list[dict]:
             _add({"kind": "meta", "key": str(key)}, f"meta {key}", value)
     if graph.get("title"):
         _add({"kind": "title"}, "page title", str(graph["title"]))
+    _menu_data_leaves(graph, _add, _relevant)
     for t_i, table in enumerate(graph.get("tables") or []):  # jail-capped ≤8
         if not isinstance(table, dict):
             continue
@@ -744,6 +847,27 @@ def enumerate_menu(graph: dict, wants: list[str] | None = None) -> list[dict]:
         _add({"kind": "outline", "index": o_i}, "heading",
              re.sub(r"^h\d:\s*", "", str(line)))
     return out
+
+
+def _menu_data_leaves(graph: dict, add, relevant) -> None:
+    """B3a: offer the static DATA layer's leaves — want-matching leaves (by path or value)
+    first, then each document's leading leaves; ≤ 20 per document, ≤ 30 in all."""
+    assert callable(add) and callable(relevant), "menu callbacks required"
+    rows = data_leaves(graph)
+    ordered = [r for r in rows if relevant(r[1]) or relevant(_leaf_text(r[2]))]
+    ordered += [r for r in rows if r not in ordered]
+    per_doc: dict[str, int] = {}
+    added = 0
+    for doc, path, value in ordered:  # jail-capped (≤ 600 leaves)
+        if added >= _MAX_MENU_DATA:
+            break
+        if per_doc.get(doc, 0) >= _MAX_MENU_PER_DOC:
+            continue
+        if add({"kind": "data_leaf", "doc": doc, "path": path}, f"data {doc} {path}",
+               _leaf_text(value)):
+            per_doc[doc] = per_doc.get(doc, 0) + 1
+            added += 1
+    assert added <= _MAX_MENU_DATA, "data entries are capped"
 
 
 # ---------------------------------------------------------------------------

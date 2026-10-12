@@ -164,6 +164,68 @@ def decode_body(content: bytes, content_type: str = "") -> str:
     return content.decode("utf-8", "replace")
 
 
+# Round 20 (B3a): bot challenges. A challenge is a refusal R8 never retries and the page
+# browser never "solves": the static fetch names it (``FetchError.kind == "challenge"``) so
+# the NI ladder never escalates it. Header markers (closed vendor table) mark any status;
+# body markers are read only from a bounded head of an HTML error response.
+_CHALLENGE_HEADERS: dict[str, tuple[str, ...]] = {
+    "cf-mitigated": ("challenge",),                        # Cloudflare
+    "x-vercel-mitigated": ("challenge",),                  # Vercel
+    "x-amzn-waf-action": ("challenge", "captcha"),         # AWS WAF (a 202 interstitial)
+}
+_CHALLENGE_BODY_MARKERS: tuple[bytes, ...] = (
+    b"challenge-platform", b"cf-chl", b"cf_chl", b"captcha-delivery.com", b"px-captcha",
+    b"_incapsula_resource", b"kpsdk", b"awswaf", b"sgcaptcha", b"sucuri_cloudproxy",
+    b"verify you are human", b"checking your browser", b"checking if the site connection",
+    b"just a moment", b"are you a robot", b"complete the security check",
+)
+_CHALLENGE_HEAD_BYTES = 16_384
+_CHALLENGE_HEAD_DEADLINE_S = 5.0  # a drip error page never stalls a fetch
+_MAX_MEDIA = 100
+
+
+def _media_type(response: httpx.Response) -> str:
+    """The response's media type, lowercase and without parameters (bounded)."""
+    assert response is not None, "a response"
+    raw = str(response.headers.get("content-type", "") or "")
+    media = raw.split(";", 1)[0].strip().lower()[:_MAX_MEDIA]
+    assert len(media) <= _MAX_MEDIA, "media type is bounded"
+    return media
+
+
+def _challenge_header(response: httpx.Response) -> bool:
+    """A closed vendor header says this response is a bot challenge."""
+    assert _CHALLENGE_HEADERS, "the vendor table is closed and non-empty"
+    assert response is not None, "a response"
+    for name, values in _CHALLENGE_HEADERS.items():  # bounded: 3 vendors
+        value = str(response.headers.get(name, "") or "").lower()
+        if value and any(v in value for v in values):
+            return True
+    return False
+
+
+def _is_challenge(response: httpx.Response) -> bool:
+    """A refusing response that is a bot check: a vendor header, or (HTML only) a vendor
+    marker in the first 16 KB of the body. Never raises; an unreadable body is no marker."""
+    assert response.status_code >= 400, "only refusals are judged here"
+    assert _CHALLENGE_HEAD_BYTES > 0, "the body head is bounded"
+    if _challenge_header(response):
+        return True
+    if "html" not in _media_type(response):
+        return False
+    head = b""
+    start = _monotonic()
+    try:
+        for chunk in response.iter_bytes():  # bounded: the head cap and an overall deadline
+            head += chunk
+            if len(head) >= _CHALLENGE_HEAD_BYTES or _monotonic() - start > _CHALLENGE_HEAD_DEADLINE_S:
+                break
+    except (httpx.HTTPError, OSError):
+        return False
+    low = head[:_CHALLENGE_HEAD_BYTES].lower()
+    return any(marker in low for marker in _CHALLENGE_BODY_MARKERS)
+
+
 # RFC 6052 NAT64 well-known prefix — an IPv6 in this /96 wraps an IPv4 in its
 # low 32 bits (e.g. 64:ff9b::7f00:1 -> 127.0.0.1, a real loopback bypass).
 _NAT64_WK = ipaddress.IPv6Network("64:ff9b::/96")
@@ -178,7 +240,7 @@ class FetchError(Exception):
     """
 
     def __init__(self, message: str, *, status: int | None = None,
-                 kind: str | None = None) -> None:
+                 kind: str | None = None, content_type: str = "") -> None:
         assert message, "message required"
         assert status is None or (100 <= status <= 599), "status must be an HTTP code"
         super().__init__(message)
@@ -188,7 +250,12 @@ class FetchError(Exception):
         # because this guard wraps everything). "not_json" = the URL is alive
         # and serving real content that simply isn't a JSON API — the one
         # class a caller may legitimately retry through the page pipeline.
+        # "challenge" (Round 20, B3a) = the site answered with a bot check: never
+        # retried, never handed to the page browser (R8).
         self.kind = kind
+        # the refusing response's media type (lowercase, no parameters), "" when
+        # unknown — lets a caller tell an API's JSON refusal from a page's
+        self.content_type = content_type[:_MAX_MEDIA]
 
 
 def _unwrap(addr: ipaddress._BaseAddress) -> ipaddress._BaseAddress:
@@ -376,7 +443,11 @@ def _guarded_get(url: str, allowed_ct: tuple[str, ...], max_bytes: int,
                     continue
                 if response.status_code >= 400:  # an error page is not content
                     raise FetchError(f"upstream returned HTTP {response.status_code}",
-                                     status=response.status_code)
+                                     status=response.status_code,
+                                     kind="challenge" if _is_challenge(response) else None,
+                                     content_type=_media_type(response))
+                if _challenge_header(response):  # a 2xx bot check (AWS WAF answers 202)
+                    raise FetchError("upstream answered with a bot challenge", kind="challenge")
                 ctype = response.headers.get("content-type", "")
                 ct_ok = ctype.startswith(allowed_ct) or ("application/json" in allowed_ct and _is_json_type(ctype))
                 if not ct_ok and not accept_zip_magic:

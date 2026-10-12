@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import re
 import shutil
@@ -36,6 +37,8 @@ import subprocess
 import sys
 import tempfile
 import threading
+
+from . import jail_extract  # the child's own layer bounds (stdlib-only module)
 
 log = logging.getLogger("smartbrain.jail")
 
@@ -210,9 +213,54 @@ def _spawn(cwd: str, env: dict[str, str], url_hint: str,
 _GRAPH_KEYS: dict[str, type] = {
     # Page-graph layers (search platform P1) — optional, typed; the key set
     # stays CLOSED so a compromised child cannot smuggle arbitrary fields.
+    # Round 20 (B3a): ``data`` (plain JSON documents as [path, scalar] leaves) and
+    # ``signals`` (script evidence) are validated down to every sub-key below.
     "entities": list, "tables": list, "feeds": list, "meta": dict,
-    "outline": list,
+    "outline": list, "data": list, "signals": dict,
 }
+_SIGNAL_KEYS = frozenset({"script_count", "script_bytes", "noscript_js"})
+_MAX_SIGNAL_COUNT = 1 << 31
+
+
+def _leaf_ok(leaf: object) -> bool:
+    """One data leaf: ``[path, scalar]`` with a bounded path and a bounded scalar."""
+    assert jail_extract.MAX_DATA_PATH > 0, "paths are bounded"
+    assert jail_extract.MAX_DATA_VALUE > 0, "text values are bounded"
+    if not (isinstance(leaf, list) and len(leaf) == 2 and isinstance(leaf[0], str)
+            and 0 < len(leaf[0]) <= jail_extract.MAX_DATA_PATH):
+        return False
+    value = leaf[1]
+    if isinstance(value, str):
+        return 0 < len(value) <= jail_extract.MAX_DATA_VALUE
+    if isinstance(value, float):
+        return math.isfinite(value)
+    return isinstance(value, (bool, int))
+
+
+def _validate_data_layer(docs: list) -> None:
+    """``data``: ≤ 8 ``{id, leaves}`` documents, closed keys, every leaf bounded."""
+    assert isinstance(docs, list), "docs must be a list"
+    assert jail_extract.MAX_DATA_DOCS > 0, "documents are capped"
+    if len(docs) > jail_extract.MAX_DATA_DOCS:
+        raise JailError("bad_field_type", "data")
+    for doc in docs:  # bounded above
+        if not (isinstance(doc, dict) and set(doc) == {"id", "leaves"}
+                and isinstance(doc["id"], str) and jail_extract.DATA_ID_RE.fullmatch(doc["id"])
+                and isinstance(doc["leaves"], list)
+                and len(doc["leaves"]) <= jail_extract.MAX_DATA_LEAVES
+                and all(_leaf_ok(leaf) for leaf in doc["leaves"])):
+            raise JailError("bad_field_type", "data")
+
+
+def _validate_signals(signals: dict) -> None:
+    """``signals``: exactly {script_count, script_bytes, noscript_js}, typed and bounded."""
+    assert isinstance(signals, dict), "signals must be a dict"
+    assert len(_SIGNAL_KEYS) == 3, "the signals layer is closed"
+    counts = [signals.get("script_count"), signals.get("script_bytes")]
+    if (set(signals) != _SIGNAL_KEYS or not isinstance(signals.get("noscript_js"), bool)
+            or not all(isinstance(c, int) and not isinstance(c, bool)
+                       and 0 <= c < _MAX_SIGNAL_COUNT for c in counts)):
+        raise JailError("bad_field_type", "signals")
 
 
 def _validate_payload(text: str) -> dict:
@@ -236,6 +284,10 @@ def _validate_payload(text: str) -> dict:
     for name, expected in _GRAPH_KEYS.items():
         if name in parsed and not isinstance(parsed[name], expected):
             raise JailError("bad_field_type", name)
+    if "data" in parsed:
+        _validate_data_layer(parsed["data"])
+    if "signals" in parsed:
+        _validate_signals(parsed["signals"])
     return parsed
 
 

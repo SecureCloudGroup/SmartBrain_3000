@@ -258,7 +258,7 @@ def has_evidence(graph: dict, wants: list[str], subject: str) -> bool:
     tokens = pagegraph._want_tokens(wants) + _subject_tokens(subject)
     if not tokens:
         return True
-    body = "\n".join([str(graph.get("text") or ""), _table_text(graph)]).lower()
+    body = "\n".join([str(graph.get("text") or ""), _table_text(graph), _data_text(graph)]).lower()
     return any(_word_in(tok, body) for tok in tokens)
 
 
@@ -324,11 +324,21 @@ def _table_text(graph: dict) -> str:
     return "\n".join(lines)
 
 
+def _data_text(graph: dict) -> str:
+    """The static DATA layer (B3a) as ``path: value`` lines — the page's own hydration
+    state, which a compiled ``data_leaf`` reading lifts verbatim."""
+    assert isinstance(graph, dict), "graph required"
+    lines = [f"{path}: {pagegraph._leaf_text(value)}"
+             for _doc, path, value in pagegraph.data_leaves(graph)]  # jail-capped
+    assert all(isinstance(line, str) for line in lines), "lines are text"
+    return "\n".join(lines)
+
+
 def _page_text(graph: dict) -> str:
     """Everything the page itself shows: text, table cells, structured values,
     title and headings (a compiled reading is lifted from these verbatim)."""
     parts = [str(graph.get("title") or ""), str(graph.get("text") or ""),
-             _table_text(graph)]
+             _table_text(graph), _data_text(graph)]
     parts += [str(line) for line in graph.get("outline") or []]
     parts += [str(v) for v in (graph.get("meta") or {}).values()]
     for ent in graph.get("entities") or []:
